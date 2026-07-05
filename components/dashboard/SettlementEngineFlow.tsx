@@ -20,6 +20,7 @@ export type FlowNode = {
   sublabel?: string;
   /** Logo path under /public. Falls back to `flag` or initials when absent. */
   src?: string;
+  logoClass?: string;
   /** Emoji flag for corridor nodes. */
   flag?: string;
 };
@@ -37,7 +38,7 @@ const CORE: Record<Variant, CoreCopy> = {
 const DEFAULT_SOURCES: Record<Variant, FlowNode[]> = {
   settlement: [
     { label: 'Stripe', sublabel: 'USD collection', src: '/stripe-logo.svg' },
-    { label: 'Airwallex', sublabel: 'Bank rails', src: '/airwallex-logo.png' },
+    { label: 'Airwallex', sublabel: 'Bank rails', src: '/airwallex-mark.svg', logoClass: 'dash-flow-airwallex-logo' },
   ],
   treasury: [
     { label: 'Idle USDC', sublabel: 'Available balance' },
@@ -82,7 +83,14 @@ function NodeChip({ node }: { node: FlowNode }) {
     <div className="dash-flow-node">
       <span className="dash-flow-node-mark" aria-hidden="true">
         {node.src ? (
-          <Image src={node.src} alt="" width={48} height={28} className="dash-flow-node-logo" style={{ width: 'auto', height: 'auto' }} />
+          <Image
+            src={node.src}
+            alt=""
+            width={48}
+            height={28}
+            className={`dash-flow-node-logo ${node.logoClass ?? ''}`.trim()}
+            style={{ width: 'auto', height: 'auto' }}
+          />
         ) : node.flag ? (
           <span className="dash-flow-node-flag">{node.flag}</span>
         ) : (

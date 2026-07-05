@@ -838,20 +838,47 @@ body {
 .iso-partner-rail {
   position: relative;
   border-bottom: 1px solid var(--iso-line);
-  background: rgba(255, 252, 247, .82);
+  padding-block: 26px 34px;
+  background:
+    linear-gradient(rgba(12, 62, 72, .035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(12, 62, 72, .035) 1px, transparent 1px),
+    rgba(255, 252, 247, .82);
+  background-size: 68px 68px;
 }
 
 .iso-partner-rail > .iso-shell {
+  position: relative;
   display: grid;
-  grid-template-columns: .55fr 1.45fr;
+  grid-template-columns: minmax(220px, .38fr) minmax(0, 1fr);
   align-items: center;
-  gap: 34px;
-  padding-block: 30px;
+  gap: 46px;
+  overflow: hidden;
+  border: 1px solid rgba(12, 62, 72, .22);
+  border-radius: 12px;
+  padding: 34px;
+  background: rgba(255, 251, 245, .62);
+  box-shadow:
+    8px 9px 0 rgba(12, 62, 72, .12),
+    0 26px 50px rgba(8, 54, 64, .08);
+}
+
+.iso-partner-rail > .iso-shell::before {
+  position: absolute;
+  inset: 0;
+  content: "";
+  pointer-events: none;
+  background: linear-gradient(135deg, rgba(159, 207, 199, .18), transparent 42%);
+}
+
+.iso-partner-intro,
+.iso-partner-grid {
+  position: relative;
+  z-index: 2;
 }
 
 .iso-partner-intro {
   display: grid;
-  gap: 5px;
+  gap: 8px;
 }
 
 .iso-partner-intro span {
@@ -865,14 +892,16 @@ body {
 
 .iso-partner-intro p {
   color: rgba(12, 62, 72, .58);
-  font-size: 11px;
+  max-width: 250px;
+  font-size: 13px;
   font-weight: 650;
+  line-height: 1.45;
 }
 
 .iso-partner-grid {
   display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
 }
 
 .iso-deepbook-logo {
@@ -886,40 +915,56 @@ body {
 
 .iso-partner-item {
   display: grid;
-  min-height: 100px;
-  grid-template-columns: 58px 1fr;
+  min-height: 116px;
+  grid-template-columns: 70px minmax(0, 1fr);
   align-items: center;
-  gap: 8px;
+  gap: 12px;
   overflow: hidden;
-  border-left: 1px solid var(--iso-line);
-  padding: 8px 8px 8px 14px;
+  border: 1px solid rgba(12, 62, 72, .16);
+  border-radius: 8px;
+  padding: 14px;
+  background: rgba(255, 255, 255, .4);
+  box-shadow: 3px 3px 0 rgba(12, 62, 72, .06);
+  transition: transform .25s ease, border-color .25s ease, box-shadow .25s ease;
+}
+
+.iso-partner-item:hover {
+  transform: translateY(-3px);
+  border-color: rgba(12, 62, 72, .26);
+  box-shadow: 6px 7px 0 rgba(12, 62, 72, .08);
 }
 
 .iso-partner-item img {
-  width: 58px;
-  height: 40px;
+  width: 70px;
+  height: 50px;
   object-fit: contain;
   object-position: center;
   background: transparent;
 }
 
+.iso-partner-item img.iso-airwallex-logo {
+  transform: scale(2.18);
+}
+
 .iso-partner-item span {
   display: grid;
   min-width: 0;
-  gap: 2px;
+  gap: 5px;
 }
 
 .iso-partner-item strong {
-  font-size: 10px;
+  color: var(--iso-ink);
+  font-size: 13px;
   font-weight: 900;
+  line-height: 1.1;
 }
 
 .iso-partner-item small {
   color: rgba(12, 62, 72, .5);
   font-family: var(--font-mono), monospace;
-  font-size: 6px;
+  font-size: 8px;
   font-weight: 750;
-  line-height: 1.4;
+  line-height: 1.45;
   text-transform: uppercase;
 }
 
@@ -2902,7 +2947,7 @@ body {
   }
 
   .iso-partner-grid {
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .iso-progress-grid {
@@ -3202,20 +3247,24 @@ body {
   }
 
   .iso-partner-rail > .iso-shell {
-    padding-block: 24px;
+    gap: 22px;
+    padding: 24px 18px;
   }
 
   .iso-partner-grid {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
   }
 
   .iso-partner-item {
-    grid-template-columns: 46px 1fr;
-    padding-left: 10px;
+    min-height: 104px;
+    grid-template-columns: 56px minmax(0, 1fr);
+    gap: 10px;
+    padding: 12px;
   }
 
   .iso-partner-item img {
-    width: 46px;
+    width: 56px;
     height: 46px;
   }
 
@@ -4611,6 +4660,7 @@ body {
 }
 
 .dash-flow-node-logo { max-width: 30px; max-height: 22px; object-fit: contain; }
+.dash-flow-node-logo.dash-flow-airwallex-logo { transform: scale(1.45); }
 .dash-flow-node-flag { font-size: 18px; line-height: 1; }
 .dash-flow-node-initial { color: var(--fintech-teal); font-weight: 900; }
 
@@ -6412,6 +6462,10 @@ button.iso-product-row {
 @media (max-width: 420px) {
   .iso-hero-stage {
     min-height: 285px;
+  }
+
+  .iso-partner-grid {
+    grid-template-columns: 1fr;
   }
 
   .iso-floating-note {

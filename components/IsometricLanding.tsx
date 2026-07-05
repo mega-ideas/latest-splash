@@ -133,7 +133,7 @@ const clientProofPoints = [
 
 const partnerRail: Array<{ src: string; name: string; role: string; logoClass?: string }> = [
   { src: '/stripe-logo.svg', name: 'Stripe', role: 'USD collection' },
-  { src: '/airwallex-mark.png', name: 'Airwallex', role: 'bank rails', logoClass: 'iso-airwallex-logo' },
+  { src: '/airwallex-mark.svg', name: 'Airwallex', role: 'bank rails', logoClass: 'iso-airwallex-logo' },
   { src: '/pyth-logo.png', name: 'Pyth', role: 'FX and peg data' },
   { src: '/deepbook-mark.png', name: 'DeepBook', role: 'amount-sized liquidity', logoClass: 'iso-deepbook-logo' },
   { src: '/sumsub-logo.png', name: 'Sumsub', role: 'KYB and KYC' },
