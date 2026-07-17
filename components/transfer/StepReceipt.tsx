@@ -6,7 +6,7 @@ import { ExternalLink } from 'lucide-react';
 
 import Receipt from '@/components/Receipt';
 import SettlementProofDrawer from '@/components/SettlementProofDrawer';
-import type { TransferState } from '@/app/dashboard/transfer/page';
+import type { TransferState } from '@/app/dashboard/payments/new/page';
 
 export default function StepReceipt({ state, reset }: { state: TransferState; reset: () => void }) {
   const ref = useRef<HTMLDivElement>(null);

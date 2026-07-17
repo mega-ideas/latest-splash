@@ -6,17 +6,13 @@ import FloatingCopilot from '@/components/FloatingCopilot';
 import DashboardHeader from '@/components/DashboardHeader';
 import type { CustomerSession } from '@/lib/auth/customer-session';
 import {
-  Bot,
   FileText,
-  History,
-  Layers,
   LayoutDashboard,
   LogOut,
   Menu,
   Phone,
   Send,
   Settings,
-  Timer,
   TrendingUp,
   UserCircle,
   X,
@@ -26,36 +22,32 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 
 // ─── Nav structure ────────────────────────────────────────────────────────────
+// Suppliers-first IA: the primary noun is the supplier, payments hang off
+// relationships, and the Action Queue is home. 0xWal has no nav item — it is
+// the omnipresent FloatingCopilot dock (plus the /dashboard/copilot deep link).
 
 type NavItem = { label: string; href: string; icon: LucideIcon; badge?: string };
 type NavGroup = { title: string; items: NavItem[] };
 
 const navGroups: NavGroup[] = [
   {
-    title: 'Payments',
+    title: 'Workspace',
     items: [
-      { label: '0xWal',        href: '/dashboard',          icon: Bot, badge: 'AI' },
-      { label: 'Transfer',     href: '/dashboard/transfer', icon: Send },
-      { label: 'Rate holds',   href: '/dashboard/transfers', icon: Timer },
-      { label: 'Batch Payout', href: '/dashboard/batch',    icon: Layers },
-    ],
-  },
-  {
-    title: 'Finance',
-    items: [
-      { label: 'Overview', href: '/dashboard/overview', icon: LayoutDashboard },
-      { label: 'Treasury', href: '/dashboard/treasury', icon: TrendingUp },
-      { label: 'Invoices', href: '/dashboard/invoices', icon: FileText },
-    ],
-  },
-  {
-    title: 'Contacts',
-    items: [
-      { label: 'Recipients', href: '/dashboard/recipients', icon: UserCircle },
-      { label: 'History',    href: '/dashboard/history',    icon: History },
+      { label: 'Home',      href: '/dashboard',                    icon: LayoutDashboard },
+      { label: 'Suppliers', href: '/dashboard/suppliers',          icon: UserCircle },
+      { label: 'Invoices',  href: '/dashboard/invoices?view=loop', icon: FileText },
+      { label: 'Payments',  href: '/dashboard/payments',           icon: Send },
+      { label: 'Treasury',  href: '/dashboard/treasury',           icon: TrendingUp },
     ],
   },
 ];
+
+/** Active when the pathname is the item's route or nested under it; Home only on exact match. */
+function isNavActive(pathname: string, href: string) {
+  const base = href.split('?')[0];
+  if (base === '/dashboard') return pathname === base;
+  return pathname === base || pathname.startsWith(`${base}/`);
+}
 
 // ─── Layout ───────────────────────────────────────────────────────────────────
 
@@ -127,7 +119,7 @@ export default function DashboardShell({ children, session }: DashboardShellProp
               )}
               <div className="space-y-0.5">
                 {group.items.map(({ label, href, icon: Icon, badge }) => {
-                  const active = pathname === href;
+                  const active = isNavActive(pathname, href);
                   return (
                     <Link
                       key={href}
@@ -257,7 +249,7 @@ export default function DashboardShell({ children, session }: DashboardShellProp
                   onClick={() => setMobileOpen(false)}
                   href={href}
                   className={`flex items-center gap-3 rounded-xl px-4 py-3 text-white transition-colors hover:bg-white/10 ${
-                    pathname === href ? 'bg-white/15 text-[#5C9EAD]' : ''
+                    isNavActive(pathname, href) ? 'bg-white/15 text-[#5C9EAD]' : ''
                   }`}
                 >
                   <Icon size={20} />

@@ -70,7 +70,7 @@ test('ActionCard model exposes full proposal anatomy and trust treatment', () =>
   assert.equal(model.primaryActionLabel, 'Sign & approve');
 });
 
-test('default dashboard is the streaming 0xWal surface and avoids browser money storage', async () => {
+test('dashboard home is the approval queue (suppliers-first IA) and avoids browser money storage', async () => {
   const page = await readFile(new URL('../app/dashboard/page.tsx', import.meta.url), 'utf8');
   const layout = await readFile(new URL('../app/dashboard/layout.tsx', import.meta.url), 'utf8');
   const queue = await readFile(new URL('../app/queue/page.tsx', import.meta.url), 'utf8');
@@ -78,20 +78,24 @@ test('default dashboard is the streaming 0xWal surface and avoids browser money 
   const forgotPassword = await readFile(new URL('../app/forgot-password/page.tsx', import.meta.url), 'utf8');
   const shell = await readFile(new URL('../components/dashboard/DashboardShell.tsx', import.meta.url), 'utf8');
 
-  assert.match(page, /fetch\('\/api\/oxwal'/);
-  assert.match(page, /response\.body\.getReader\(\)/);
-  assert.match(page, /<ActionCard key=\{proposal\.id\} proposal=\{proposal\}/);
-  assert.match(page, /OxWalComposer/);
-  assert.match(page, /What's on the agenda today\?/);
-  assert.match(page, /href="\/queue"/);
+  // Home mounts the Action Queue inside the shell: demo lanes + live 0xWal
+  // proposal-store merge, serialized for the client board.
+  assert.match(page, /export const dynamic = 'force-dynamic'/);
+  assert.match(page, /buildApprovalQueue/);
+  assert.match(page, /getOxwalProposalStore/);
+  assert.match(page, /<ApprovalQueueBoard pending=\{pending\} otherLanes=\{otherLanes\} \/>/);
   assert.doesNotMatch(page, /localStorage|sessionStorage/);
   assert.match(layout, /export const dynamic = 'force-dynamic'/);
   assert.match(layout, /<DashboardShell session=\{session\}>\{children\}<\/DashboardShell>/);
-  assert.match(shell, /label: '0xWal',\s+href: '\/dashboard'/);
-  assert.match(shell, /href: '\/dashboard\/overview'/);
-  assert.match(queue, /export const dynamic = 'force-dynamic'/);
-  assert.match(queue, /getCustomerSession/);
-  assert.match(queue, /redirect\('\/login'\)/);
+  // Suppliers-first nav: Home / Suppliers / Invoices / Payments / Treasury —
+  // 0xWal is the FloatingCopilot dock, not a nav destination.
+  assert.match(shell, /label: 'Home',\s+href: '\/dashboard'/);
+  assert.match(shell, /href: '\/dashboard\/suppliers'/);
+  assert.match(shell, /href: '\/dashboard\/payments'/);
+  assert.doesNotMatch(shell, /label: '0xWal'/);
+  assert.doesNotMatch(shell, /\/dashboard\/overview/);
+  // Legacy /queue deep links land on the new home.
+  assert.match(queue, /redirectPreservingQuery\('\/dashboard'/);
   assert.match(kybSettings, /export const dynamic = "force-dynamic"/);
   assert.match(kybSettings, /getCustomerSession/);
   assert.match(kybSettings, /redirect\("\/login"\)/);

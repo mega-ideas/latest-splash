@@ -2,7 +2,7 @@
 
 import { Building2, Check, Landmark, Lock, Zap } from 'lucide-react';
 
-import type { TransferState } from '@/app/dashboard/transfer/page';
+import type { TransferState } from '@/app/dashboard/payments/new/page';
 import { getCorridorFeeBps } from '@/lib/fx/corridors';
 import type { RecipientTier } from '@/lib/server/operations';
 

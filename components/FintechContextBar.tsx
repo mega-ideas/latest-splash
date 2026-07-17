@@ -12,13 +12,13 @@ type ContextMeta = {
 };
 
 const dashboardMeta: Array<[string, ContextMeta]> = [
-  ['/dashboard/transfer', { eyebrow: 'Payment intent', title: 'Move money with certainty', copy: 'Quote, authorize, settle, and verify in one operating flow.', icon: '/isometric/arrow-icon.svg', signal: 'Atomic settlement' }],
-  ['/dashboard/batch', { eyebrow: 'Batch operations', title: 'Orchestrate payout windows', copy: 'Screen every row, authorize once, and monitor the complete batch.', icon: '/isometric/blocks-icon.svg', signal: 'Compliance pre-check' }],
+  ['/dashboard/payments/new', { eyebrow: 'Payment intent', title: 'Move money with certainty', copy: 'Quote, authorize, settle, and verify in one operating flow.', icon: '/isometric/arrow-icon.svg', signal: 'Atomic settlement' }],
+  ['/dashboard/payments/runs', { eyebrow: 'Batch operations', title: 'Orchestrate payout windows', copy: 'Screen every row, authorize once, and monitor the complete batch.', icon: '/isometric/blocks-icon.svg', signal: 'Compliance pre-check' }],
+  ['/dashboard/payments/history', { eyebrow: 'Settlement history', title: 'Trace every money movement', copy: 'Follow authorization, settlement, delivery, and audit evidence.', icon: '/isometric/checklist-icon.svg', signal: 'Audit ready' }],
   ['/dashboard/treasury', { eyebrow: 'Smart treasury', title: 'Keep operating cash productive', copy: 'Manage liquidity, yield, and settlement availability from one view.', icon: '/isometric/stats-icon.svg', signal: 'Treasury active' }],
   ['/dashboard/invoices', { eyebrow: 'Invoice vault', title: 'Receipts that remain verifiable', copy: 'Seal financial records on Walrus while keeping audit access ready.', icon: '/isometric/checklist-icon.svg', signal: 'Walrus retained' }],
   ['/dashboard/copilot', { eyebrow: 'AI Copilot', title: 'Decisions with operating memory', copy: 'Surface patterns, explain movement, and prepare the next action.', icon: '/isometric/star-icon.svg', signal: 'MemWal online' }],
-  ['/dashboard/recipients', { eyebrow: 'Global directory', title: 'Know every destination', copy: 'Manage verified beneficiaries across approved settlement corridors.', icon: '/isometric/global-icon.svg', signal: 'Live corridor + modeled routes' }],
-  ['/dashboard/history', { eyebrow: 'Settlement history', title: 'Trace every money movement', copy: 'Follow authorization, settlement, delivery, and audit evidence.', icon: '/isometric/checklist-icon.svg', signal: 'Audit ready' }],
+  ['/dashboard/suppliers', { eyebrow: 'Global directory', title: 'Know every destination', copy: 'Manage verified beneficiaries across approved settlement corridors.', icon: '/isometric/global-icon.svg', signal: 'Live corridor + modeled routes' }],
   ['/dashboard/settings', { eyebrow: 'Controls', title: 'Policy before payment', copy: 'Manage access, limits, verification, and security posture.', icon: '/isometric/secure-icon.svg', signal: 'Controls enforced' }],
   ['/dashboard/customer-service', { eyebrow: 'Operations support', title: 'Keep every issue moving', copy: 'Create, track, and resolve service cases with full context.', icon: '/isometric/fast-icon.svg', signal: 'Systems operational' }],
   ['/dashboard', { eyebrow: 'Operating desk', title: 'Global Settlement Engine', copy: 'One view for money movement, treasury, compliance, and permanent records.', icon: '/isometric/stats-icon.svg', signal: 'All systems live' }],

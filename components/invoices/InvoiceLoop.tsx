@@ -65,7 +65,7 @@ export default function InvoiceLoop() {
   const selectedAmount = selected ? `${formatUsd(selected.amountUsd)} -> ${selected.targetCurrency}` : 'No invoice selected';
   const selectedCounterparty = selected?.payerOrgName ?? selected?.payerOrgEmail ?? 'No counterparty selected';
   const confidenceLabel = suggestion ? `${Math.round(suggestion.confidence * 100)}%` : extraction ? `${Math.round(extraction.confidence * 100)}%` : 'Pending';
-  const transferHref = selected ? `/dashboard/transfer?invoiceId=${selected.id}` : '/dashboard/transfer';
+  const transferHref = selected ? `/dashboard/payments/new?invoiceId=${selected.id}` : '/dashboard/payments/new';
 
   const releaseStages = useMemo<GateStage[]>(() => [
     {
@@ -311,7 +311,7 @@ export default function InvoiceLoop() {
                 onChange={setPrompt}
                 onSubmit={() => runPrompt()}
                 onChipSubmit={runPrompt}
-                onFilePrepared={(batch) => { stashBatchDraft(batch); router.push('/dashboard/batch?draft=1'); }}
+                onFilePrepared={(batch) => { stashBatchDraft(batch); router.push('/dashboard/payments/runs?draft=1'); }}
                 chips={invoicePromptChips}
                 disabled={uploading || extracting}
                 placeholder="Ask 0xWal, or attach a payout sheet"

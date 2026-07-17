@@ -3,7 +3,7 @@
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 
-/** A normalized batch row in the shape the batch desk (`/dashboard/batch`)
+/** A normalized batch row in the shape the batch desk (`/dashboard/payments/runs`)
  *  already understands. Parsing happens entirely in the browser — recipient
  *  data never rides a URL or a network hop from here. */
 export type ParsedBatchRow = {

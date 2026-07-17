@@ -308,21 +308,21 @@ const INITIAL_SUGGESTIONS: SuggestionCard[] = [
     id: 'sug_001',
     title: 'Friday PHP payroll batch ready',
     body: 'Rate 56.42 within 0.3% of 30d best. 52 recipients ready. Fee: 0.80%. Lock window: Thursday 08:45 MYT.',
-    corridor: 'USD→PHP', action: 'Pre-stage batch', href: '/dashboard/batch',
+    corridor: 'USD→PHP', action: 'Pre-stage batch', href: '/dashboard/payments/runs',
     confidence: 94, urgency: 'high',
   },
   {
     id: 'sug_002',
     title: 'MYR lock before BNM meeting',
     body: 'Bank Negara policy Thursday may move MYR. Current 4.71 near 30d high. Fee: 0.85%. Consider early lock.',
-    corridor: 'USD→MYR', action: 'New transfer', href: '/dashboard/transfer',
+    corridor: 'USD→MYR', action: 'New transfer', href: '/dashboard/payments/new',
     confidence: 78, urgency: 'medium',
   },
   {
     id: 'sug_003',
     title: 'EUR weekly batch opportunity',
     body: 'EUR volume up 34% this month. Consolidating into a weekly EUR batch saves ~$48/month in spread. Fee: 1.10%.',
-    corridor: 'USD→EUR', action: 'Create batch', href: '/dashboard/batch',
+    corridor: 'USD→EUR', action: 'Create batch', href: '/dashboard/payments/runs',
     confidence: 71, urgency: 'low',
   },
 ];
@@ -333,7 +333,7 @@ function mapSuggestion(s: ApiSuggestion): SuggestionCard {
   const conf = Math.round((s.confidence ?? 0.6) * 100);
   const urgency: SuggestionCard['urgency'] = conf >= 80 ? 'high' : conf >= 65 ? 'medium' : 'low';
   const batchCurrency = s.suggestedAction?.startsWith('batch:') ? s.suggestedAction.split(':')[1] : null;
-  const href = s.type === 'treasury' ? '/dashboard/treasury' : s.type === 'batch' ? `/dashboard/batch${batchCurrency ? `?corridor=${batchCurrency}` : ''}` : s.type === 'invoice' ? '/dashboard/invoices' : '/dashboard';
+  const href = s.type === 'treasury' ? '/dashboard/treasury' : s.type === 'batch' ? `/dashboard/payments/runs${batchCurrency ? `?corridor=${batchCurrency}` : ''}` : s.type === 'invoice' ? '/dashboard/invoices' : '/dashboard';
   const action = s.type === 'treasury' ? 'Open Treasury' : s.type === 'batch' ? 'Draft batch' : s.type === 'invoice' ? 'Open invoices' : 'View';
   const corridor = s.type === 'timing' ? 'FX timing' : s.type.charAt(0).toUpperCase() + s.type.slice(1);
   return { id: s.suggestionId, title: s.title, body: s.description, corridor, action, href, confidence: conf, urgency };
@@ -863,7 +863,7 @@ export default function CopilotPage() {
           {/* Quick links */}
           <div className="space-y-2">
             {[
-              { label: 'New batch from suggestion', href: '/dashboard/batch',    icon: Layers    },
+              { label: 'New batch from suggestion', href: '/dashboard/payments/runs',    icon: Layers    },
               { label: 'View treasury yield',       href: '/dashboard/treasury', icon: TrendingUp },
               { label: 'Live corridor rates',        href: '/dashboard',          icon: Globe     },
             ].map(({ label, href, icon: Icon }) => (

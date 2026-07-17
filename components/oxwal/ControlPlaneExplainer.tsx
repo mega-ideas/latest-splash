@@ -65,7 +65,7 @@ export default function ControlPlaneExplainer() {
           <strong>0xWal prepares, you approve.</strong> 0xWal never moves money — deterministic
           policy and your approval do. This pipeline is shipped code, not a roadmap.
         </p>
-        <Link href="/queue" className="iso-button iso-button-small">
+        <Link href="/dashboard" className="iso-button iso-button-small">
           Open the Action Queue
           <ArrowRight aria-hidden="true" />
         </Link>

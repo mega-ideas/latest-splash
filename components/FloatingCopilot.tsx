@@ -146,9 +146,9 @@ export default function FloatingCopilot() {
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [pending, setPending] = useState<OxwalPendingSnapshot>({ count: 0, label: null, updatedAt: 0 });
 
-  // The 0xWal desk records unsigned proposals; remind the operator about them
-  // whenever they are anywhere else in the app.
-  const awayFromDesk = pathname !== '/dashboard' && pathname !== '/queue';
+  // 0xWal records unsigned proposals; remind the operator about them whenever
+  // they are away from the Action Queue home, where approvals happen.
+  const awayFromDesk = pathname !== '/dashboard';
   const hasReminder = pending.count > 0 && awayFromDesk;
 
   useEffect(() => {
@@ -178,7 +178,7 @@ export default function FloatingCopilot() {
   function handleBatchPrepared(batch: ParsedBatch) {
     stashBatchDraft(batch);
     setOpen(false);
-    router.push('/dashboard/batch?draft=1');
+    router.push('/dashboard/payments/runs?draft=1');
   }
 
   // Populate the first message on the client to keep the timestamp hydration-safe.
@@ -382,7 +382,7 @@ export default function FloatingCopilot() {
         {/* Pending-approval reminder — 0xWal prepared work that needs a human */}
         {pending.count > 0 && (
           <Link
-            href="/queue"
+            href="/dashboard"
             onClick={() => setOpen(false)}
             className="flex shrink-0 items-center gap-2.5 border-b border-[#efc46f]/50 bg-[#efc46f]/15 px-4 py-2.5 transition-colors hover:bg-[#efc46f]/25"
           >

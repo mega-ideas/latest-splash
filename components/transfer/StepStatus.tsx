@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Banknote, CheckCircle2, Globe2, Loader2, Network, XCircle } from 'lucide-react';
 
-import type { TransferState } from '@/app/dashboard/transfer/page';
+import type { TransferState } from '@/app/dashboard/payments/new/page';
 
 export default function StepStatus({ state, set, next }: { state: TransferState; set: (patch: Partial<TransferState>) => void; next: () => void }) {
   const [chainState, setChainState] = useState<'AUTHORIZED' | 'QUEUED' | 'SETTLING' | 'SETTLED' | 'SWEEPING' | 'DISBURSED' | 'CREDITED' | 'FAILED'>('AUTHORIZED');

@@ -14,7 +14,7 @@ import {
   Users,
 } from 'lucide-react';
 
-import type { TransferState } from '@/app/dashboard/transfer/page';
+import type { TransferState } from '@/app/dashboard/payments/new/page';
 import type { RecipientRecord } from '@/lib/server/operations';
 
 type TransferPatch = (patch: Partial<TransferState>) => void;
