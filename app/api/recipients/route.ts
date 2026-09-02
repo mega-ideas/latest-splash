@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { readJsonBody } from '@/lib/server/http';
+import { emitEvent } from '@/lib/server/events';
 import { createRecipient, listRecipients, type RecipientRecord, type RecipientTier } from '@/lib/server/operations';
 
 export async function GET(request: Request) {
@@ -34,6 +35,17 @@ export async function POST(request: Request) {
     orgEmail: typeof body.orgEmail === 'string' ? body.orgEmail : undefined,
     createdVia: body.createdVia as RecipientRecord['createdVia'] | undefined,
     sweepConfig: body.sweepConfig as RecipientRecord['sweepConfig'] | undefined,
+  });
+  void emitEvent({
+    name: 'recipient_added',
+    orgId: auth.session.orgId ?? auth.session.email,
+    actorId: auth.session.email,
+    subjectId: record.id,
+    props: {
+      country: String(body.country ?? 'PH'),
+      tier: typeof body.tier === 'string' ? body.tier : null,
+      createdVia: typeof body.createdVia === 'string' ? body.createdVia : null,
+    },
   });
 
   return NextResponse.json(record, { status: 201 });

@@ -9,6 +9,7 @@ import { ensureProposalStoreHydrated } from '@/lib/queue/proposal-persistence';
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { requireActiveOrg } from '@/lib/server/kyb-gate';
 import { readJsonBody } from '@/lib/server/http';
+import { emitEvent } from '@/lib/server/events';
 import { authorizeProposalSubmission } from '@/lib/safety/submit-guard';
 
 /**
@@ -75,6 +76,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
   if (parsed.data.decision === 'REJECT') {
     const rejected = store.transition(id, { type: 'REJECT', reason: `rejected by ${ctx.userId}` });
+    void emitEvent({
+      name: 'approval_rejected',
+      orgId: ctx.orgId,
+      actorId: ctx.userId,
+      subjectId: id,
+      corridor: proposal.corridor,
+      amountMinor: proposal.explain.financialImpact.amountIn ?? null,
+      currency: proposal.explain.financialImpact.currencyIn,
+      props: { kind: proposal.kind, tier: proposal.tier, role: ctx.role },
+    });
     await store.flush();
     return json({ proposal: rejected });
   }
@@ -109,6 +120,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       current = store.transition(id, { type: 'POLICY_EVALUATED', requiredApprovers: approvers });
       if (approvers === 0) {
         current = store.transition(id, { type: 'MARK_APPROVED' });
+        void emitEvent({
+          name: 'approval_granted',
+          orgId: ctx.orgId,
+          actorId: ctx.userId,
+          subjectId: id,
+          corridor: proposal.corridor,
+          amountMinor: proposal.explain.financialImpact.amountIn ?? null,
+          currency: proposal.explain.financialImpact.currencyIn,
+          props: { kind: proposal.kind, tier: proposal.tier, role: ctx.role, auto: true, complete: true },
+        });
       } else {
         current = store.transition(id, { type: 'QUEUE_FOR_APPROVAL' });
       }
@@ -118,6 +139,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       current = store.transition(id, {
         type: 'APPROVE',
         approval: { userId: ctx.userId, role: ctx.role, signedAt },
+      });
+      void emitEvent({
+        name: 'approval_granted',
+        orgId: ctx.orgId,
+        actorId: ctx.userId,
+        subjectId: id,
+        corridor: proposal.corridor,
+        amountMinor: proposal.explain.financialImpact.amountIn ?? null,
+        currency: proposal.explain.financialImpact.currencyIn,
+        props: { kind: proposal.kind, tier: proposal.tier, role: ctx.role, auto: false, complete: current.status !== 'PENDING_APPROVAL' },
       });
       if (current.status === 'PENDING_APPROVAL') {
         // Dual-control: this signature is recorded; a distinct co-approver

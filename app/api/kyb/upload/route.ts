@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'crypto';
 import { NextResponse } from 'next/server';
 
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
+import { emitEvent } from '@/lib/server/events';
 import { recordKybSubmission, type KybDocumentRecord } from '@/lib/server/kyb';
 
 export const dynamic = 'force-dynamic';
@@ -57,6 +58,13 @@ export async function POST(request: Request) {
     }),
   );
   const kybCase = recordKybSubmission({ caseId: kybCaseId, businessName: legalName, registrationNumber, documents });
+  void emitEvent({
+    name: 'kyb_submitted',
+    orgId: auth.session.orgId ?? auth.session.email,
+    actorId: auth.session.email,
+    subjectId: kybCaseId,
+    props: { documents: documents.length, state: kybCase.state },
+  });
 
   return NextResponse.json({
     kybCaseId,
