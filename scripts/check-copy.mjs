@@ -160,7 +160,7 @@ const legacyHexAllowances = {
   'app/dashboard/customer-service/page.tsx': ['#264e5b', '#326273', '#e39774', '#f6f0ed'],
   'app/dashboard/history/page.tsx': ['#264e5b', '#326273', '#e39774', '#f6f0ed'],
   'app/dashboard/overview/page.tsx': ['#0c3e48', '#1f4452', '#326273', '#4a8a99', '#9a6f15', '#d9a441', '#e39774', '#ede8e4', '#f6f0ed'],
-  'app/dashboard/page.tsx': ['#0c3e48', '#0d6370', '#1f4452', '#326273', '#9a4a2d', '#cfe8e0', '#e39774', '#eaf6f1', '#efc46f', '#f6f0ed'],
+  'app/dashboard/oxwal/page.tsx': ['#0c3e48', '#0d6370', '#1f4452', '#326273', '#9a4a2d', '#cfe8e0', '#e39774', '#eaf6f1', '#efc46f', '#f6f0ed'],
   'app/dashboard/profile/page.tsx': ['#0d6370', '#1f4452', '#264e5b', '#326273', '#9b4e32', '#e39774', '#f6f0ed'],
   'app/dashboard/recipients/page.tsx': ['#264e5b', '#326273', '#e39774', '#f6f0ed'],
   'app/dashboard/settings/page.tsx': ['#022b33', '#073d49', '#326273', '#f6f0ed'],

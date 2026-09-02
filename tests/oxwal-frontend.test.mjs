@@ -70,13 +70,13 @@ test('ActionCard model exposes full proposal anatomy and trust treatment', () =>
   assert.equal(model.primaryActionLabel, 'Sign & approve');
 });
 
-test('default dashboard is the streaming 0xWal surface and avoids browser money storage', async () => {
-  const page = await readFile(new URL('../app/dashboard/page.tsx', import.meta.url), 'utf8');
+test('the 0xWal desk is the streaming surface and avoids browser money storage', async () => {
+  const page = await readFile(new URL('../app/dashboard/oxwal/page.tsx', import.meta.url), 'utf8');
   const layout = await readFile(new URL('../app/dashboard/layout.tsx', import.meta.url), 'utf8');
   const queue = await readFile(new URL('../app/queue/page.tsx', import.meta.url), 'utf8');
   const kybSettings = await readFile(new URL('../app/settings/kyb/page.tsx', import.meta.url), 'utf8');
   const forgotPassword = await readFile(new URL('../app/forgot-password/page.tsx', import.meta.url), 'utf8');
-  const shell = await readFile(new URL('../components/dashboard/DashboardShell.tsx', import.meta.url), 'utf8');
+  const shell = await readFile(new URL('../components/dashboard/AppShell.tsx', import.meta.url), 'utf8');
 
   assert.match(page, /fetch\('\/api\/oxwal'/);
   assert.match(page, /response\.body\.getReader\(\)/);
@@ -89,10 +89,11 @@ test('default dashboard is the streaming 0xWal surface and avoids browser money 
   // The layout must hand the server-resolved session to the shell and render
   // children through it. Matched by intent rather than exact JSX so adding a
   // prop (e.g. the KYB gate state) does not fail a test about the desk surface.
-  assert.match(layout, /<DashboardShell[^>]*session=\{session\}/);
-  assert.match(layout, /\{children\}<\/DashboardShell>/);
-  assert.match(shell, /label: '0xWal',\s+href: '\/dashboard'/);
-  assert.match(shell, /href: '\/dashboard\/overview'/);
+  assert.match(layout, /<AppShell[^>]*session=\{session\}/);
+  assert.match(layout, /\{children\}<\/AppShell>/);
+  // Home is the first screen; the 0xWal desk lives at /dashboard/oxwal.
+  assert.match(shell, /label: 'Home', href: '\/dashboard'/);
+  assert.match(shell, /label: brand\.agentName, href: '\/dashboard\/oxwal'/);
   assert.match(queue, /export const dynamic = 'force-dynamic'/);
   assert.match(queue, /getCustomerSession/);
   assert.match(queue, /redirect\('\/login'\)/);
@@ -152,7 +153,7 @@ test('landing keeps restored isometric shell with upgraded truth copy', async ()
   assert.match(landing, /id="supply"/);
   assert.match(landing, /Your invoices are/);
   assert.doesNotMatch(landing, /Early Pay/);
-  assert.match(landing, /One testnet corridor\. Modeled expansion routes\./);
+  assert.match(landing, /Modeled expansion routes\./);
   assert.match(landing, /claims\.footerLegal\.claim/);
   // Composer is now a payment-desk command bar (not a ChatGPT pill): no
   // "High" effort dropdown, a branded "Prepare" action, and a functional

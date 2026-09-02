@@ -9,6 +9,7 @@ import {
   text,
   timestamp,
   uniqueIndex,
+  uuid,
 } from 'drizzle-orm/pg-core';
 
 /**
@@ -353,4 +354,34 @@ export const ledgerPostings = pgTable('ledger_postings', {
 }, (table) => [
   index('postings_journal_idx').on(table.journalId),
   index('postings_account_idx').on(table.account, table.currency),
+]);
+
+/* ── D8 retention instrumentation ────────────────────────────────────────
+   Product analytics events (activation funnel, NVR cohorts, five-lock
+   adoption). Named `product_events` so it never collides with the money
+   tables `funding_events` / `webhook_events`.
+
+   Privacy contract (lib/server/events.ts is the only writer):
+   - org_hash / actor_hash / subject_hash are sha256 of the ids — a raw
+     orgId / userId / intent id never lands in this table.
+   - props is a small, PII-free jsonb bag; keys that look like PII are
+     stripped before the write.
+   - amount_minor follows the repo money rule: BIGINT minor units + currency
+     (USD_MICRO when the emitting code already holds micro-USD). */
+
+export const productEvents = pgTable('product_events', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  name: text('name').notNull(),
+  orgHash: text('org_hash').notNull(),
+  actorHash: text('actor_hash'),
+  subjectHash: text('subject_hash'),
+  corridor: text('corridor'),
+  amountMinor: bigint('amount_minor', { mode: 'bigint' }),
+  currency: text('currency'),
+  props: jsonb('props').notNull().default({}),
+  occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull().defaultNow(),
+  ...timestamps,
+}, (table) => [
+  index('product_events_name_occurred_idx').on(table.name, table.occurredAt),
+  index('product_events_org_occurred_idx').on(table.orgHash, table.occurredAt),
 ]);
