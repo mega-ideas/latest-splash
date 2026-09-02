@@ -14,6 +14,9 @@ import {
   type OxwalPendingSnapshot,
 } from '../lib/oxwal-notify';
 import OxWalComposer, { type OxWalComposerChip } from './oxwal/OxWalComposer';
+import { getNetworkProfile } from '../lib/network';
+
+const deskNetwork = getNetworkProfile();
 
 // ─── Compact AI responses ─────────────────────────────────────────────────────
 
@@ -400,9 +403,9 @@ export default function FloatingCopilot() {
         {/* Live desk ticker — signals a fintech terminal, not a generic chat */}
         <div className="grid shrink-0 grid-cols-3 divide-x divide-[#0c3e48]/10 border-b border-[#0c3e48]/10 bg-[#f4efe4]">
           {[
-            { k: 'Corridor', v: 'USD→PHP', s: 'Testnet' },
-            { k: 'Edge fee', v: '0.80%', s: 'From' },
-            { k: 'Treasury', v: 'USDY', s: 'Variable' },
+            { k: 'Corridor', v: 'USD→PHP · IDR', s: deskNetwork.badges.network },
+            { k: 'Edge fee', v: '0.80%', s: 'Illustrative' },
+            { k: 'Treasury', v: 'USDY', s: 'Roadmap' },
           ].map((cell) => (
             <div key={cell.k} className="px-3 py-2">
               <div className="font-mono text-[8px] font-semibold uppercase tracking-[0.14em] text-[#0d6370]">

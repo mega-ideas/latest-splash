@@ -1,21 +1,22 @@
 import IsometricLanding from "@/components/IsometricLanding";
+import { brand } from "@/lib/brand";
 
-const SITE_URL = "https://splash.finance";
+const SITE_URL = brand.siteUrl;
 
 // Organization schema: contactPoint only — deliberately no founder Person.
 const organizationJsonLd = {
   "@context": "https://schema.org",
   "@type": "Organization",
-  name: "Splash",
-  legalName: "Splash Financial Labuan Ltd.",
+  name: brand.name,
+  legalName: brand.legalEntity,
   url: SITE_URL,
-  logo: `${SITE_URL}/splash-main-icon.png`,
+  logo: `${SITE_URL}${brand.assets.icon}`,
   description:
     "Compliance-gated B2B account network for cross-border payments in Southeast Asia: collect USD, pay out locally, with human approval on every AI-prepared action.",
   contactPoint: {
     "@type": "ContactPoint",
     contactType: "customer support",
-    email: "support@splash.finance",
+    email: brand.supportEmail,
   },
 };
 

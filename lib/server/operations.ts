@@ -1,5 +1,6 @@
 import { getContractConfig } from '@/lib/server/contract-config';
 import { analyzeAndRemember } from '@/lib/server/memwal';
+import { explorerLinksFor } from '@/lib/network';
 import type { StoredSettlementEvidence } from '@/lib/evidence/settlement';
 import type {
   CctpSourceChain,
@@ -275,10 +276,7 @@ export function createPayLinkSlug() {
 }
 
 function explorerLinks(digest: string | null) {
-  return {
-    suiVisionTxUrl: digest ? `https://testnet.suivision.xyz/txblock/${digest}` : null,
-    suiScanTxUrl: digest ? `https://suiscan.xyz/testnet/tx/${digest}` : null,
-  };
+  return explorerLinksFor(digest);
 }
 
 export function createTransferIntent(input: {

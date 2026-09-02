@@ -52,8 +52,43 @@ test('receipt step ships the accountant PDF and supplier share actions', async (
 });
 
 test('network line flips to mainnet from the runtime profile', async () => {
-  const helper = await readFile(new URL('../lib/network-label.ts', import.meta.url), 'utf8');
+  const helper = await readFile(new URL('../lib/network.ts', import.meta.url), 'utf8');
   assert.match(helper, /SUI_NETWORK === 'mainnet'/);
   assert.match(helper, /Sui mainnet/);
   assert.match(helper, /Sui · sandbox, no customer funds/);
+  // The legacy import path stays a re-export of the single source of truth.
+  const legacy = await readFile(new URL('../lib/network-label.ts', import.meta.url), 'utf8');
+  assert.match(legacy, /export \{ receiptNetworkLine \} from '@\/lib\/network'/);
+});
+
+test('network profile: sandbox ribbon on testnet, live badge only on mainnet with a real package id', async () => {
+  const { getNetworkProfile, explorerTxUrl } = await import('../lib/network.ts');
+  const saved = { ...process.env };
+  try {
+    delete process.env.NEXT_PUBLIC_SUI_NETWORK;
+    process.env.SUI_NETWORK = 'testnet';
+    process.env.NEXT_PUBLIC_CORRIDOR_STATUS = 'PH=live,ID=planned';
+    let profile = getNetworkProfile();
+    assert.equal(profile.network, 'testnet');
+    assert.equal(profile.badges.ribbon, 'Sandbox — Sui testnet — no customer funds');
+    assert.equal(profile.badges.live, null);
+    assert.equal(profile.corridors.find((c) => c.code === 'PH').status, 'sandbox', 'nothing is live on testnet');
+    assert.equal(explorerTxUrl('abc', 'suiscan'), 'https://suiscan.xyz/testnet/tx/abc');
+
+    process.env.NEXT_PUBLIC_SUI_NETWORK = 'mainnet';
+    process.env.NEXT_PUBLIC_SPLASH_CORE_PACKAGE_ID = '0x0';
+    profile = getNetworkProfile();
+    assert.equal(profile.badges.ribbon, null);
+    assert.equal(profile.badges.live, null, 'a placeholder package id is not live');
+
+    process.env.NEXT_PUBLIC_SPLASH_CORE_PACKAGE_ID = '0xec3b063e9f0b0c3a9c6d2f4b1a7e8d9c0f1e2d3c4b5a69788796a5b4c3d2e1f0';
+    profile = getNetworkProfile();
+    assert.equal(profile.badges.live, 'Live on Sui mainnet');
+    assert.equal(profile.corridors.find((c) => c.code === 'PH').status, 'live');
+    assert.equal(explorerTxUrl('abc'), 'https://suivision.xyz/txblock/abc');
+    assert.equal(profile.badges.receiptLine, 'Sui mainnet');
+  } finally {
+    for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key];
+    Object.assign(process.env, saved);
+  }
 });

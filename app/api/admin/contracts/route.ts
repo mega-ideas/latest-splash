@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { getAdminSession } from '@/lib/server/admin-auth';
+import { resolveNetwork } from '@/lib/network';
 import {
   CONTRACT_CONFIG_FIELDS,
   type ContractConfig,
@@ -54,7 +55,7 @@ export async function GET() {
     env: envOnlyView(),
     envKeys: Object.fromEntries(CONTRACT_CONFIG_FIELDS.map((f) => [f, getEnvKeyFor(f)])),
     meta: getContractConfigMeta(),
-    network: process.env.SUI_NETWORK ?? 'testnet',
+    network: resolveNetwork(),
   });
 }
 

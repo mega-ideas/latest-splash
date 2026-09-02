@@ -8070,3 +8070,101 @@ button.iso-product-row {
   .fintech-dashboard-shell .dash-block-interactive,
   .fintech-dashboard-shell .dash-block-interactive:hover { transition: none; transform: none; }
 }
+
+/* ─── Brand chrome (lib/brand.ts · lib/network.ts) ──────────────────────── */
+.brand-sandbox-ribbon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--warn-bg);
+  color: var(--warn);
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-align: center;
+}
+.brand-sandbox-ribbon-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: currentColor;
+}
+.brand-network-badge {
+  display: inline-grid;
+  gap: 1px;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--slate);
+  line-height: 1.1;
+  text-align: left;
+}
+.brand-network-badge small {
+  font-family: var(--font-mono), monospace;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  opacity: .7;
+}
+.brand-network-badge strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.brand-network-badge-detail {
+  font-size: 11px;
+  opacity: .75;
+}
+.brand-network-badge.is-live {
+  border-color: var(--ok);
+  background: var(--ok-bg);
+}
+.brand-network-badge.is-live strong { color: var(--ok); }
+.brand-posture {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.brand-posture-line { margin: 0; }
+.brand-posture-link {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.brand-posture-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 0;
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  letter-spacing: .04em;
+  opacity: .75;
+}
+.brand-wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: inherit;
+  text-decoration: none;
+}
+.brand-wordmark-icon { height: auto; }
+.brand-wordmark-text {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -.01em;
+}
+.brand-wordmark-text span { color: var(--teal); }
+.cin-footer-posture,
+.wc-footer-posture {
+  padding: 12px 0 20px;
+  color: rgba(255, 255, 255, .72);
+}
+.wc-footer-posture { color: inherit; }
+.cin-footer-posture .brand-posture-link,
+.wc-footer-posture .brand-posture-link { color: inherit; }

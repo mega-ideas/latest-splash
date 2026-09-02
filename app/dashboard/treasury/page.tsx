@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../../../lib/utils';
 import MoneyPathPanel from '@/components/compliance/MoneyPathPanel';
+import { getNetworkProfile } from '@/lib/network';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -829,7 +830,7 @@ export default function TreasuryPage() {
           <div className="space-y-2">
             {[
               { label: 'Ondo USDY overview', icon: Info, href: 'https://ondo.finance/usdy' },
-              { label: 'View on Sui Explorer', icon: Landmark, href: 'https://suiscan.xyz/testnet' },
+              { label: 'View on Sui Explorer', icon: Landmark, href: getNetworkProfile().explorerBase.suiscan },
             ].map(({ label, icon: Icon, href }) => (
               <a key={label} href={href} target="_blank" rel="noopener noreferrer" className="flex w-full items-center justify-between rounded-lg border border-[#326273]/10 bg-white px-3 py-2.5 text-[13px] font-medium text-[#326273] transition-colors hover:border-[#5C9EAD]/40 hover:text-[var(--info)]">
                 <div className="flex items-center gap-2"><Icon size={13} />{label}</div>

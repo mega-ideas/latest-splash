@@ -3,7 +3,10 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { ArrowLeft, ArrowRight } from 'lucide-react';
 
+import PostureFooter from '@/components/brand/PostureFooter';
+import SandboxRibbon from '@/components/brand/SandboxRibbon';
 import TrustCompliance from '@/components/compliance/TrustCompliance';
+import { brand } from '@/lib/brand';
 
 const legalApproved = process.env.LEGAL_APPROVED === 'true';
 
@@ -20,6 +23,7 @@ export default function TrustPage() {
 
   return (
     <main className="wc-page trust-page">
+      <SandboxRibbon />
       {showDraftWatermark ? (
         <div className="trust-watermark" aria-hidden="true">DRAFT — PENDING COUNSEL REVIEW</div>
       ) : null}
@@ -65,8 +69,11 @@ export default function TrustPage() {
 
       <footer className="wc-footer">
         <div className="iso-shell wc-footer-inner">
-          <span>© 2026 Splash Financial Labuan Ltd.</span>
+          <span>{brand.copyright}</span>
           <span>Records: Seal-encrypted · Walrus-stored · Sui-anchored</span>
+        </div>
+        <div className="iso-shell wc-footer-posture">
+          <PostureFooter />
         </div>
       </footer>
     </main>

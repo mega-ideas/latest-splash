@@ -1,8 +1,12 @@
 import { SuiGrpcClient } from '@mysten/sui/grpc';
 
-export type SuiNetwork = 'testnet' | 'mainnet';
+import { resolveNetwork, type SuiNetwork } from '@/lib/network';
 
-export const SUI_NETWORK: SuiNetwork = process.env.SUI_NETWORK === 'mainnet' ? 'mainnet' : 'testnet';
+export type { SuiNetwork };
+
+// One source of truth for the network (lib/network.ts); the RPC client and
+// every label derive from the same answer.
+export const SUI_NETWORK: SuiNetwork = resolveNetwork();
 // gRPC and the retired JSON-RPC share the same fullnode URLs, so an existing
 // SUI_RPC_URL override keeps working as the gRPC base URL.
 export const SUI_RPC_URL = process.env.SUI_RPC_URL ?? `https://fullnode.${SUI_NETWORK}.sui.io:443`;

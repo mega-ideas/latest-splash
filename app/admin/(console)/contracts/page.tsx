@@ -6,6 +6,7 @@ import {
   getContractConfigMeta,
   getEnvKeyFor,
 } from '@/lib/server/contract-config';
+import { resolveNetwork } from '@/lib/network';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,7 +17,7 @@ export default function ContractsPage() {
     env[field] = (process.env[getEnvKeyFor(field)] ?? '').trim();
   }
   const meta = getContractConfigMeta();
-  const network = process.env.SUI_NETWORK ?? 'testnet';
+  const network = resolveNetwork();
 
   return (
     <div className="mx-auto max-w-6xl">

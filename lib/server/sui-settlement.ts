@@ -21,6 +21,7 @@ import {
 import { getContractConfig, type ContractConfigField } from '@/lib/server/contract-config';
 import { resolvePegAttestation } from '@/lib/server/peg-attestation';
 import { suiClient } from '@/lib/sui';
+import { resolveNetwork } from '@/lib/network';
 
 const execFileAsync = promisify(execFile);
 
@@ -624,7 +625,9 @@ function resolvePayoutRecipient(inputRecipient: string | undefined, label: strin
   const configured = (getContractConfig().testRecipientAddress ?? '').trim();
   if (!configured) return inputRecipient ?? '';
 
-  if ((process.env.SUI_NETWORK ?? '').trim().toLowerCase() === 'mainnet') {
+  // Reads the same source of truth as every label (lib/network.ts), so a
+  // profile that says mainnet anywhere trips this guard.
+  if (resolveNetwork() === 'mainnet') {
     throw new Error(
       'SPLASH_TEST_RECIPIENT_ADDRESS is set while SUI_NETWORK=mainnet. That override redirects every real ' +
         'payout to one address. Clear it before settling on mainnet.',

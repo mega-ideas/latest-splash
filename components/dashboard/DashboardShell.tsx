@@ -5,6 +5,8 @@ import { useState, type ReactNode } from 'react';
 import FloatingCopilot from '@/components/FloatingCopilot';
 import DashboardHeader from '@/components/DashboardHeader';
 import type { CustomerSession } from '@/lib/auth/customer-session';
+import SandboxRibbon from '@/components/brand/SandboxRibbon';
+import { getNetworkProfile } from '@/lib/network';
 import {
   Bot,
   FileText,
@@ -72,6 +74,8 @@ export default function DashboardShell({ children, session, kyb }: DashboardShel
   const [mobileOpen, setMobileOpen] = useState(false);
   const router   = useRouter();
   const pathname = usePathname();
+  const networkBadges = getNetworkProfile().badges;
+  const railLabel = networkBadges.live ?? `${networkBadges.network} · sandbox`;
 
   async function logout() {
     await fetch('/api/auth/logout', { method: 'POST' });
@@ -178,7 +182,7 @@ export default function DashboardShell({ children, session, kyb }: DashboardShel
             <Image src="/isometric/sui-logo-clean.svg" alt="" width={32} height={42} />
             <span>
               <small>Settlement rail</small>
-              <strong><i /> Sui testnet ready</strong>
+              <strong><i /> {railLabel}</strong>
             </span>
           </div>
         )}
@@ -287,6 +291,9 @@ export default function DashboardShell({ children, session, kyb }: DashboardShel
           collapsed ? 'md:ml-20' : 'md:ml-60'
         }`}
       >
+        <div className="mb-4 overflow-hidden rounded-lg">
+          <SandboxRibbon />
+        </div>
         {kyb?.blocked ? (
           <div
             role="status"

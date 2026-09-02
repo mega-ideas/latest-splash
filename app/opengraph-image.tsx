@@ -1,6 +1,14 @@
 import { ImageResponse } from 'next/og';
 
-export const alt = 'Splash working-capital network for Southeast Asia payouts';
+import { brand } from '@/lib/brand';
+import { getNetworkProfile } from '@/lib/network';
+
+export const alt = brand.assets.ogAlt;
+
+const ogProfile = getNetworkProfile();
+const ogChips = ogProfile.live
+  ? [ogProfile.badges.live as string, 'Atomic settlement', 'Regulator-ready by design']
+  : ['Sandbox', ogProfile.badges.network, 'No customer funds'];
 export const size = {
   width: 1200,
   height: 630,
@@ -195,7 +203,7 @@ export default function OpenGraphImage() {
             <div style={{ display: 'flex', color: colors.teal }}>in minutes.</div>
           </div>
           <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
-            {['Sandbox', 'Sui testnet', 'No customer funds'].map((item) => (
+            {ogChips.map((item) => (
               <div
                 key={item}
                 style={{
