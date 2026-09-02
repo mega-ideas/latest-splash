@@ -1,29 +1,69 @@
+/* ─── Splash design tokens ──────────────────────────────────────────────────
+   Palette v2 (docs/design-system.md §1.1) is the source of truth for every
+   UI surface. The v1 names below it (--bg/--ink/--slate/--teal/--coral/--gold)
+   remain ONLY so legacy surfaces keep rendering while they migrate; the
+   check-copy whitelist shrinks with each migration PR. New code uses v2. */
+
 :root {
-  --bg: #F6F0ED;
+  /* ── Palette v2 · light (default) ─────────────────────────────────────── */
+  --ink-900: #0B2A33;
+  --ink-700: #163F4A;
+  --teal-600: #1F7A8C;   /* primary interactive: buttons, links, focus */
+  --teal-500: #2E96A8;   /* hover / active */
+  --teal-300: #5C9EAD;   /* brand tint: illustrations, chart lines, tints only */
+  --teal-100: #DCEEF1;
+  --paper: #F7F8F7;
+  --surface: #FFFFFF;
+  --surface-2: #EEF3F4;
+  --text: #0B2A33;
+  --text-2: #4A5C64;
+  --text-muted: #6B7A83;
+  --border: #DCE3E6;
+  --divider: #E8EDEF;
+  --green-600: #1E8F6E;  /* settled / positive */
+  --green-100: #DDF3EA;
+  --amber-600: #B9770E;  /* pending / legacy-rail contrast */
+  --amber-100: #FBEFD9;
+  --red-600: #B93A32;    /* returned / rejected */
+  --red-100: #FAE3E1;
+  --gradient-hero: linear-gradient(135deg, #0B2A33 0%, #1F7A8C 100%);
+  --focus-ring: 2px solid var(--teal-500);
+  --focus-offset: 2px;
+
+  /* Semantic aliases used by components */
+  --bg: var(--paper);
+  --accent: var(--teal-600);
+  --accent-hover: var(--teal-500);
+  --ok: var(--green-600);
+  --ok-bg: var(--green-100);
+  --warn: var(--amber-600);
+  --warn-bg: var(--amber-100);
+  --error: var(--red-600);
+  --error-bg: var(--red-100);
+  --info: var(--teal-600);
+  --info-bg: var(--teal-100);
+  --pending: var(--text-muted);
+  --pending-bg: var(--surface-2);
+  --line: #DCE3E6;
+  --line-strong: #C9D3D7;
+
+  /* ── Legacy v1 names (illustration-only in v2; kept for unmigrated surfaces) */
   --ink: #1F4452;
   --slate: #326273;
   --teal: #5C9EAD;
   --coral: #E39774;
   --gold: #D9A441;
 
-  --surface: #FFFFFF;
-  --surface-2: #FBF7F5;
-  --line: #E5DCD6;
-  --line-strong: #C9BDB5;
-
-  --ok: #2E7D6B;
-  --ok-bg: #E4F1ED;
-  --warn: #B4690E;
-  --warn-bg: #FBEFDD;
-  --error: #B3402F;
-  --error-bg: #F9E7E3;
-  --info: #326273;
-  --info-bg: #E7EEF1;
-  --pending: #6B7C85;
-  --pending-bg: #EDEFF0;
-
+  /* ── Typography ──────────────────────────────────────────────────────── */
   --font-sans: 'Geist', system-ui, sans-serif;
   --font-mono: 'Geist Mono', ui-monospace, monospace;
+  --text-display: clamp(2.25rem, 6vw, 3.5rem);
+  --text-h1: clamp(1.875rem, 5vw, 2.5rem);
+  --text-h2: clamp(1.5rem, 4vw, 1.75rem);
+  --text-h3: 1.25rem;
+  --text-body: 1rem;
+  --text-body-sm: 0.9375rem;
+  --text-caption: 0.8125rem;
   --text-xs: .75rem;
   --text-sm: .875rem;
   --text-base: 1rem;
@@ -31,12 +71,13 @@
   --text-xl: 1.375rem;
   --text-2xl: 1.75rem;
   --text-3xl: 2.25rem;
-  --text-display: clamp(2.5rem, 5vw, 4rem);
-  --leading-tight: 1.15;
+  --leading-tight: 1.1;
   --leading-normal: 1.55;
   --tracking-display: -0.02em;
   --tracking-caps: 0.08em;
+  --tracking-caption: 0.01em;
 
+  /* ── Spacing (4-pt) · section rhythm 96 / 64 ─────────────────────────── */
   --s1: 4px;
   --s2: 8px;
   --s3: 12px;
@@ -46,19 +87,109 @@
   --s7: 48px;
   --s8: 64px;
   --s9: 96px;
-  --r-sm: 6px;
-  --r-md: 10px;
-  --r-lg: 16px;
-  --r-pill: 999px;
-  --shadow-1: 0 1px 2px rgb(31 68 82 / .06);
-  --shadow-2: 0 4px 12px rgb(31 68 82 / .08);
-  --shadow-3: 0 12px 32px rgb(31 68 82 / .12);
+  --section-y: 96px;
+  --section-y-sm: 64px;
 
+  /* ── Radii ───────────────────────────────────────────────────────────── */
+  --r-sm: 12px;
+  --r-md: 16px;
+  --r-lg: 20px;
+  --r-pill: 999px;
+
+  /* ── Elevation ───────────────────────────────────────────────────────── */
+  --shadow-rest: 0 1px 2px rgba(11, 42, 51, .05);
+  --shadow-elevated: 0 8px 24px rgba(11, 42, 51, .10);
+  --shadow-1: var(--shadow-rest);
+  --shadow-2: 0 4px 12px rgba(11, 42, 51, .08);
+  --shadow-3: var(--shadow-elevated);
+
+  /* ── Motion · 220 UI / 320 flows / 400 reveals ───────────────────────── */
+  --dur-ui: 220ms;
+  --dur-flow: 320ms;
+  --dur-reveal: 400ms;
+  --ease-out: cubic-bezier(.22, 1, .36, 1);
   --dur-fast: 120ms;
-  --dur-base: 200ms;
-  --dur-slow: 320ms;
+  --dur-base: var(--dur-ui);
+  --dur-slow: var(--dur-flow);
   --dur-scene: 600ms;
-  --ease-standard: cubic-bezier(.2, 0, 0, 1);
+  --ease-standard: var(--ease-out);
   --ease-decel: cubic-bezier(0, 0, 0, 1);
   --ease-accel: cubic-bezier(.3, 0, 1, 1);
+
+  color-scheme: light;
+}
+
+/* ─── Dark mode ────────────────────────────────────────────────────────────
+   Follows the system unless the viewer chose a theme (data-theme on <html>,
+   set by components/system/ThemeToggle). Brand teal stays recognisable;
+   text meets AA on every surface. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #071C22;
+    --bg: #071C22;
+    --surface: #0F2C35;
+    --surface-2: #153845;
+    --text: #E6EEF0;
+    --text-2: #B7C6CB;
+    --text-muted: #9BB0B7;
+    --border: #244852;
+    --divider: #1C3B45;
+    --line: #244852;
+    --line-strong: #2F5661;
+    --accent: #7FCBD9;
+    --accent-hover: #9BD9E4;
+    --teal-600: #7FCBD9;
+    --teal-500: #9BD9E4;
+    --teal-100: #153845;
+    --ok: #5FD3A8;
+    --ok-bg: #123B31;
+    --green-100: #123B31;
+    --warn: #E8B04B;
+    --warn-bg: #3A2C0E;
+    --amber-100: #3A2C0E;
+    --error: #F08A82;
+    --error-bg: #3E1B18;
+    --red-100: #3E1B18;
+    --info: #7FCBD9;
+    --info-bg: #153845;
+    --pending-bg: #153845;
+    --shadow-rest: 0 1px 2px rgba(0, 0, 0, .35);
+    --shadow-elevated: 0 8px 24px rgba(0, 0, 0, .45);
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"],
+[data-theme="dark"] {
+  --paper: #071C22;
+  --bg: #071C22;
+  --surface: #0F2C35;
+  --surface-2: #153845;
+  --text: #E6EEF0;
+  --text-2: #B7C6CB;
+  --text-muted: #9BB0B7;
+  --border: #244852;
+  --divider: #1C3B45;
+  --line: #244852;
+  --line-strong: #2F5661;
+  --accent: #7FCBD9;
+  --accent-hover: #9BD9E4;
+  --teal-600: #7FCBD9;
+  --teal-500: #9BD9E4;
+  --teal-100: #153845;
+  --ok: #5FD3A8;
+  --ok-bg: #123B31;
+  --green-100: #123B31;
+  --warn: #E8B04B;
+  --warn-bg: #3A2C0E;
+  --amber-100: #3A2C0E;
+  --error: #F08A82;
+  --error-bg: #3E1B18;
+  --red-100: #3E1B18;
+  --info: #7FCBD9;
+  --info-bg: #153845;
+  --pending-bg: #153845;
+  --shadow-rest: 0 1px 2px rgba(0, 0, 0, .35);
+  --shadow-elevated: 0 8px 24px rgba(0, 0, 0, .45);
+  color-scheme: dark;
 }
