@@ -21,7 +21,7 @@ const COMPACT_RESPONSES: { keywords: string[]; reply: string }[] = [
   {
     keywords: ['php', 'philippines', 'peso', 'payroll', 'friday'],
     reply:
-      'USD to PHP is the current testnet corridor. Starting edge fee is 0.80%; local delivery timing depends on the payout rail.\n\n0xWal can prepare a Friday batch, label the quote evidence, and leave approval with your team.',
+      'USD to PHP is a first corridor, alongside USD to IDR. The illustrative starting edge fee is 0.80%; local delivery timing depends on the payout rail.\n\n0xWal can prepare a Friday batch, label the quote evidence, and leave approval with your team.',
   },
   {
     keywords: ['myr', 'malaysia', 'ringgit', 'bnm'],
@@ -36,7 +36,7 @@ const COMPACT_RESPONSES: { keywords: string[]; reply: string }[] = [
   {
     keywords: ['treasury', 'yield', 'apy', 'earn', 'deposit', 'compound'],
     reply:
-      'Smart Treasury earns a variable Ondo USDY (T-bill) yield.\n\nYour Available balance (USD) stays 0% but instant. Withdrawals from Smart Treasury take 1–3 business days. Want me to prepare a projection?',
+      'Smart Treasury is a roadmap capability: once the e-money licence is granted, idle USD can follow a variable, T-bill-backed Ondo USDY posture. Today it is a projection only.\n\nYour Available balance (USD) stays at 0% with no notice period. Withdrawals from Smart Treasury take 1–3 business days. Want me to prepare a projection?',
   },
   {
     keywords: ['cheapest', 'corridor', 'rate', 'compare', 'best'],
@@ -116,7 +116,7 @@ type Message = { id: number; role: 'user' | 'assistant'; text: string; time: str
 const QUICK_CHIPS: OxWalComposerChip[] = [
   { label: 'PHP rate', prompt: 'PHP rate today?', icon: 'search' },
   { label: 'Draft batch', prompt: 'Draft Friday batch', icon: 'write' },
-  { label: 'Treasury yield', prompt: 'My treasury yield', icon: 'file' },
+  { label: 'Treasury posture', prompt: 'My treasury projection', icon: 'file' },
   { label: 'Compliance', prompt: 'Compliance status', icon: 'search' },
 ];
 

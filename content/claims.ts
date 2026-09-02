@@ -12,7 +12,9 @@ export const lockedCopy = {
   feeFootnote: 'Starting fee; varies by corridor and volume.',
   speed: '~400ms Sui settlement finality',
   speedFootnote: 'Local delivery varies by rail.',
-  yield: 'Variable APY - T-bill-backed',
+  // Treasury posture is a roadmap capability: projected, variable, never a live
+  // offer and never a fixed figure. Goes live only when the e-money licence is granted.
+  yield: 'Projected T-bill posture · roadmap',
   agent: '0xWal prepares. You approve.',
 } as const;
 
@@ -54,7 +56,7 @@ export const claims = {
   },
   treasuryYield: {
     claim: lockedCopy.yield,
-    evidence: 'Treasury screen uses floating USDY source and labels projected/modelled values.',
+    evidence: 'Treasury screen models a floating USDY posture; execution is gated until the e-money licence is granted.',
     status: 'modeled',
   },
   receivable: {

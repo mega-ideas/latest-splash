@@ -228,7 +228,7 @@ export function buildFundingSources(input: {
       id: 'SPLASH_BALANCE',
       type: 'held',
       label: 'Splash balance',
-      description: 'Use held native USDC balance instantly.',
+      description: 'Use held native USDC balance with no deposit step.',
       feeTier: 'DISCOUNT',
       instant: true,
       enabled: balanceIsEnough,

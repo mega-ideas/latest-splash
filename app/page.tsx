@@ -28,7 +28,7 @@ const faqJsonLd = {
       name: "What is Splash?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "Splash is a compliance-gated B2B account network for cross-border money in Southeast Asia. Businesses collect USD and pay out locally — starting with the USD to PHP corridor on testnet — with human approval on every AI-prepared action.",
+        text: "Splash is a compliance-gated B2B account network for cross-border money in Southeast Asia. Businesses send USD and pay out locally — starting with the Philippines and Indonesia — with human approval on every AI-prepared action. No customer funds are held until MFCA activation.",
       },
     },
     {
@@ -52,7 +52,7 @@ const faqJsonLd = {
       name: "What does a payout cost?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "Corridor fees start from a 0.80% edge fee. Simple USD payouts ride Sui's zero-fee rail and programmable settlement is gas-sponsored — you never hold SUI.",
+        text: "Corridor fees are illustrative and start from a 0.80% edge fee; the exact fee varies by corridor and volume. Programmable settlement is gas-sponsored — you never hold SUI.",
       },
     },
     {
@@ -65,10 +65,10 @@ const faqJsonLd = {
     },
     {
       "@type": "Question",
-      name: "Is the treasury yield fixed?",
+      name: "Does Splash pay a treasury rate today?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "No. Treasury posture is a projection with a variable rate — never a fixed figure — and every treasury action requires explicit business approval.",
+        text: "No. Smart Treasury is a roadmap capability shown as a projection with a variable rate, never a fixed figure. It goes live only when the e-money licence is granted, and every treasury action requires explicit business approval.",
       },
     },
   ],

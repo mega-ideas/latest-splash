@@ -56,7 +56,7 @@ const DEFAULT_DESTS: Record<Variant, FlowNode[]> = {
     { label: 'SGD', sublabel: 'Implemented in code', flag: '🇸🇬' },
   ],
   treasury: [
-    { label: 'USDY yield', sublabel: 'variable · T-bill' },
+    { label: 'USDY posture', sublabel: 'projected · T-bill · roadmap' },
     { label: 'Withdraw', sublabel: 'T+1–T+3 to Available' },
   ],
   batch: [

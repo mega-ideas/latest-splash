@@ -74,14 +74,14 @@ const activityLabels: Record<string, string> = {
   getRate: 'Fetching FX rate',
   getCounterparty: 'Verifying counterparty',
   getInvoice: 'Reading invoice',
-  getNettingOpportunities: 'Scanning netting opportunities',
+  getNettingOpportunities: 'Scanning offset opportunities (modeled)',
   getComplianceStatus: 'Checking compliance',
   proposePayment: 'Preparing payment proposal',
   proposeInternalTransfer: 'Preparing internal transfer',
   proposeFxConvert: 'Preparing FX conversion',
   proposeTreasuryAllocation: 'Preparing treasury allocation',
   proposeTreasuryRedeem: 'Preparing treasury redemption',
-  proposeNettingSettlement: 'Preparing netting settlement',
+  proposeNettingSettlement: 'Preparing offset settlement (roadmap simulation)',
   proposeBatchPayout: 'Preparing batch payout',
 };
 

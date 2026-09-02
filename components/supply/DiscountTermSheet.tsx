@@ -16,8 +16,6 @@ const DISCOUNT_PCT = 1.2;
 const DISCOUNT = Math.round((FACE * DISCOUNT_PCT) / 100); // 1,200
 const EARLY = FACE - DISCOUNT; // 98,800
 const TENOR_DAYS = 90;
-// Buyer's return for fronting their own approved cash ~90 days early.
-const ANNUALIZED = ((DISCOUNT / EARLY) * (365 / TENOR_DAYS) * 100).toFixed(1); // ~4.9
 
 const usd = (n: number) =>
   n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
@@ -44,7 +42,7 @@ const OUTCOMES: Record<
     settles: 'Today · same rail',
     receives: usd(EARLY),
     discount: `${DISCOUNT_PCT}% · ${usd(DISCOUNT)}`,
-    highlight: `Buyer earns ${usd(DISCOUNT)} on idle USD held ~${TENOR_DAYS} days — ≈ ${ANNUALIZED}% p.a.`,
+    highlight: `Buyer keeps ${usd(DISCOUNT)} for paying ~${TENOR_DAYS} days early — an illustrative worked example, not an offer.`,
     note: "The buyer's own approved USD, released early over Splash. No factoring house, no credit line, no lender between you.",
   },
 };

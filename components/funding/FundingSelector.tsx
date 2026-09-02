@@ -229,7 +229,7 @@ export default function FundingSelector({
           icon="USDC"
           label="USDC"
           title="Pay with USDC"
-          detail={canUseUsdcBalance ? `Use ${options.heldBalanceUsdc} USDC balance instantly` : 'Deposit USDC with a QR address'}
+          detail={canUseUsdcBalance ? `Use ${options.heldBalanceUsdc} USDC balance — no deposit step` : 'Deposit USDC with a QR address'}
           meta={!canUseUsdc ? usdcSource?.unavailableReason ?? 'USDC unavailable' : 'DISCOUNT fee'}
           onClick={() => selectPrimary('USDC')}
         />

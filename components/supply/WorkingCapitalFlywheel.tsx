@@ -55,11 +55,11 @@ const LOOPS: Loop[] = [
   {
     id: 'save',
     icon: Sprout,
-    status: 'live',
+    status: 'roadmap',
     name: 'Save',
     role: 'Balance hygiene',
-    copy: 'Idle USD follows a projected, variable treasury posture. Your business approves every move.',
-    meta: 'Projected · variable · human-approved',
+    copy: 'Idle USD would follow a projected, variable treasury posture once the e-money licence is granted. Your business approves every move.',
+    meta: 'Projected · variable · roadmap',
   },
 ];
 

@@ -659,8 +659,9 @@ function corePackageIdOrThrow(): string {
 /**
  * Resolve the CUSTODY package, or explain why it does not exist.
  *
- * Under the Labuan MFCA licence Splash cannot hold client funds, so
- * splash_custody — every struct that holds a `Balance<T>` — is NOT PUBLISHED.
+ * No customer funds until Labuan MFCA activation: Splash cannot hold client
+ * funds today, so splash_custody — every struct that holds a `Balance<T>` — is
+ * NOT PUBLISHED.
  * This is not a feature flag: the bytecode is absent, so there is nothing to
  * flip and nothing to bypass. The error names the licence rather than reporting
  * a missing environment variable, because "not configured" would read as a
@@ -702,7 +703,7 @@ function settlementCoinType(): string {
   if (!configured || configured === SUI_COIN_TYPE) return SUI_COIN_TYPE;
   throw new Error(
     `SPLASH_SETTLEMENT_COIN_TYPE is set to ${configured}, but the settlement PTBs still fund the ` +
-      'payment with tx.splitCoins(tx.gas, …), which yields SUI. Wire a coin-object selector for that ' +
+      'payment with tx.splitCoins(tx.gas, …), which produces SUI. Wire a coin-object selector for that ' +
       'type before switching, or the intent will be opened in one asset and paid in another (abort 414).',
   );
 }

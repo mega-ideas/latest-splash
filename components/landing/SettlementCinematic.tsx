@@ -53,7 +53,7 @@ const telemetry = [
     id: 'treasury',
     className: 'cin-callout-c',
     enter: 0.35,
-    tag: 'Treasury · Approval-gated',
+    tag: 'Treasury · Roadmap',
     value: 'USDY posture',
     meta: lockedCopy.yield,
   },
@@ -207,11 +207,12 @@ function HeroCopy({ animated, onEnterEngine }: { animated: boolean; onEnterEngin
         <span>Settle everything.</span>
       </motion.p>
       <motion.h1 variants={animated ? rise : undefined} className="cin-hero-h1">
-        Send USD across Southeast Asia in minutes — starting with the Philippines
+        Send USD across Southeast Asia in minutes —{' '}
+        <span className="cin-hero-h1-corridor">starting with the Philippines and Indonesia.</span>
       </motion.h1>
       <motion.p variants={animated ? rise : undefined} className="iso-hero-description">
-        A compliance-gated B2B account network for cross-border money. Between the invoice and the
-        settlement, Splash nets, yields, discounts, and escrows — with human approval on every action.
+        Cross-border USD, settled atomically on Sui, batched, proven on-chain and guarded by spend
+        limits. A human approves every action.
       </motion.p>
       <motion.div variants={animated ? rise : undefined} className="iso-hero-actions">
         <Link href="/signup" className="iso-button">
@@ -237,6 +238,15 @@ function HeroCopy({ animated, onEnterEngine }: { animated: boolean; onEnterEngin
   );
 }
 
+/* Vision pillars name what ships today and the Move module that implements it.
+   Live verbs only: nothing here is a roadmap capability. */
+const visionPillars = [
+  { title: 'Atomic settlement', module: 'payment_intent' },
+  { title: 'Batch payouts', module: 'PTB batch' },
+  { title: 'On-chain proof', module: 'audit_anchor + receipt_v2' },
+  { title: 'Spend guardrails', module: 'spend_meter + guardian' },
+];
+
 function VisionCopy() {
   return (
     <>
@@ -248,21 +258,23 @@ function VisionCopy() {
         className="cin-vision-mark"
         loading="eager"
       />
-      <span className="cin-vision-chip">The product</span>
-      <h2 className="cin-vision-title">
+      <p className="cin-vision-kicker">The product</p>
+      <h2 className="cin-vision-title cin-vision-title-v2">
         Payments are the feature.
         <span>Treasury is the product.</span>
       </h2>
       <p className="cin-vision-lede">
-        Stripe and Airwallex move money. Splash runs everything between the invoice and the
-        settlement — netting it, yielding it, discounting it, escrowing it.
+        Splash runs everything between the invoice and the settlement: settling it atomically,
+        batching it, proving it, guarding it.
       </p>
-      <div className="cin-vision-pillars" aria-hidden="true">
-        <span>Netting</span>
-        <span>Yield</span>
-        <span>Discounting</span>
-        <span>Escrow</span>
-      </div>
+      <ul className="cin-vision-pillars cin-vision-pillars-v2" aria-label="What ships today">
+        {visionPillars.map((pillar) => (
+          <li key={pillar.title}>
+            <strong>{pillar.title}</strong>
+            <code>{pillar.module}</code>
+          </li>
+        ))}
+      </ul>
       <div className="cin-vision-actions">
         <Link href="/signup" className="iso-button iso-button-gold">
           Open payment desk

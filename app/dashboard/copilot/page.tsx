@@ -100,8 +100,8 @@ const CONTEXT_RESPONSES: { keywords: string[]; reply: string }[] = [
     reply: [
       '**Smart Treasury — Ondo USDY**',
       '• Instrument: Ondo USDY — T-bill backed, variable rate (not fixed)',
-      '• Available balance (USD): 0% but instant — operating cash',
-      '• Smart Treasury: earns the floating USDY net rate',
+      '• Available balance (USD): 0%, no notice period — operating cash',
+      '• Smart Treasury: models the floating USDY net rate (roadmap, not live)',
       '• Withdrawals Smart Treasury → Available: 1–3 business days (USDY→USD conversion)',
       '',
       'Available cash is modeled at 0%. Smart Treasury can model a variable T-bill-backed return pending approval.',
@@ -231,11 +231,11 @@ const FALLBACK_REPLIES: string[] = [
   ].join('\n'),
   [
     '**Smart Treasury — Ondo USDY**',
-    '• T-bill backed yield via Ondo USDY — variable, never fixed',
-    '• Available balance (USD): 0%, instant',
+    '• T-bill-backed Ondo USDY posture — projected, variable, never fixed; a roadmap capability, not live today',
+    '• Available balance (USD): 0%, no notice period',
     '• Withdrawals from Smart Treasury: 1–3 business days',
     '',
-    'I can prepare a Smart Treasury projection, or keep Available USD ready for instant payments.',
+    'I can prepare a Smart Treasury projection, or keep Available USD ready to fund upcoming payouts.',
     '',
     'Want me to prepare a projection for approval?',
   ].join('\n'),
@@ -864,7 +864,7 @@ export default function CopilotPage() {
           <div className="space-y-2">
             {[
               { label: 'New batch from suggestion', href: '/dashboard/batch',    icon: Layers    },
-              { label: 'View treasury yield',       href: '/dashboard/treasury', icon: TrendingUp },
+              { label: 'View treasury projection',  href: '/dashboard/treasury', icon: TrendingUp },
               { label: 'Live corridor rates',        href: '/dashboard',          icon: Globe     },
             ].map(({ label, href, icon: Icon }) => (
               <Link

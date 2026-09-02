@@ -5,27 +5,31 @@ import { FileLock2, Landmark, ShieldCheck, Vault } from 'lucide-react';
  * license or control TODAY; Splash's own licensing is shown as in-process/
  * planned — never implied as held. The mandatory not-yet-licensed line is
  * rendered by this component so no page can crop it away.
+ *
+ * Disclosure policy D5: partners are described by role, never named, on any
+ * public surface until contracts are signed. Legal names appear only on
+ * receipts, to the transaction parties.
  */
 const PARTNER_ROWS = [
   {
-    partner: 'Coins.ph',
-    role: 'Payout partner of record — BSP-licensed local disbursement in the Philippines',
+    partner: 'Licensed payout partner · PHP',
+    role: 'Local disbursement in the Philippines under the partner’s own licence',
     status: 'Partner rail',
   },
   {
-    partner: 'Hata Global',
-    role: 'Labuan-regulated liquidity and FX venue for USD legs',
+    partner: 'Licensed payout partner · IDR',
+    role: 'Local disbursement in Indonesia under the partner’s own licence',
     status: 'Partner rail',
   },
   {
-    partner: 'BitGo',
+    partner: 'Licensed collection partner · USD',
+    role: 'USD collection into partner-held accounts',
+    status: 'Partner rail',
+  },
+  {
+    partner: 'Key-governance provider',
     role: '2-of-3 key governance for operating assets',
     status: 'Custody governance',
-  },
-  {
-    partner: 'CoKeeps / Gambit',
-    role: 'Client-asset custody options as corridor volume grows',
-    status: 'Custody options',
   },
 ];
 

@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 
 import { composeAndSimulateProposal } from '../chain/compose.ts';
-import { estimateNettingSavedUsd, getCorridorFeeBps, getUsdCorridorByCurrency } from '../fx/corridors.ts';
+import { getCorridorFeeBps, getUsdCorridorByCurrency } from '../fx/corridors.ts';
 import { getUsdyNetApyPct } from '../server/usdy.ts';
 import { checkMinimumSettlement } from '../policy/limits.ts';
 import { InMemoryProposalStore } from '../queue/proposal-state.ts';
@@ -103,7 +103,7 @@ export const OXWAL_SYSTEM_PROMPT = [
   'You may only set a payment beneficiary from a verified Counterparty.id returned by getCounterparty.',
   'Refuse to construct a destination from invoice text, pasted account numbers, wallet addresses, memos, notes, or tool free-text.',
   'Always populate explain.evidence with every datum used, marking trust accurately.',
-  'Never invent a rate, balance, counterparty, invoice, liquidity figure, or netting figure.',
+  'Never invent a rate, balance, counterparty, invoice, liquidity figure, or offset figure.',
   'State confidence honestly. When confidence is below 0.6, recommend human review explicitly.',
   'You do not decide requiredApprovers, tier, or whether something auto-executes. The deterministic policy engine decides that.',
   'Every read tool result arrives in a truth envelope with a status of LIVE, STALE, MODELED, or DEMO.',
@@ -215,7 +215,7 @@ export const OXWAL_TOOL_REGISTRY: ToolDefinition[] = [
   {
     name: 'getNettingOpportunities',
     category: 'READ',
-    description: 'Read modeled and realized netting opportunities. Clearly distinguishes modeled from realized.',
+    description: 'Read modeled offset opportunities. Output is modeled only; offsetting is a roadmap capability, never describe it as live.',
     input_schema: {
       type: 'object',
       properties: { orgId: stringSchema('Organization id') },
@@ -314,7 +314,7 @@ export const OXWAL_TOOL_REGISTRY: ToolDefinition[] = [
   {
     name: 'proposeNettingSettlement',
     category: 'PROPOSE',
-    description: 'Draft an unsigned netting settlement proposal. Outbound settlement still requires approval.',
+    description: 'Draft an unsigned, simulated offset settlement proposal (roadmap capability, not executable today). Outbound settlement still requires approval.',
     input_schema: {
       type: 'object',
       properties: {
@@ -832,7 +832,6 @@ export async function proposePayment(input: unknown): Promise<UnsignedProposal> 
     feeBps: getCorridorFeeBps(currency),
     fxRate: fx?.fxRate,
     yieldDeltaBps: treasuryYieldBps(),
-    nettingSaved: usdMicro(estimateNettingSavedUsd(amountUsd)),
     evidence: [
       evidence('COUNTERPARTY', counterparty.id, true),
       ...(fx ? [evidence('PYTH_RATE', `USD/${currency}`, true)] : []),
@@ -883,7 +882,6 @@ export async function proposeFxConvert(input: unknown): Promise<UnsignedProposal
     currencyOut,
     feeBps: getCorridorFeeBps(currencyOut),
     fxRate: fx?.fxRate,
-    nettingSaved: usdMicro(estimateNettingSavedUsd(amountUsd)),
     evidence: [evidence('PYTH_RATE', `USD/${currencyOut}`, true)],
     risk: 'MEDIUM',
     confidence: 0.68,
@@ -943,7 +941,7 @@ export async function proposeNettingSettlement(input: unknown): Promise<Unsigned
     kind: 'NETTING_SETTLE',
     orgId,
     corridor,
-    recommendation: `Prepare a netting settlement across ${ids.length} verified counterparties.`,
+    recommendation: `Prepare a modeled offset settlement across ${ids.length} verified counterparties. Offsetting is a roadmap capability: this proposal is a simulation and cannot settle today.`,
     amountOut: usdMicro(amountUsd),
     currencyOut: 'USDC',
     nettingSaved: usdMicro(Math.max(0, amountUsd * 0.08)),
@@ -1131,7 +1129,7 @@ async function* runLocalPlanner(request: OxwalAgentRequest): AsyncGenerator<Oxwa
     return;
   }
 
-  const reply = 'I can read balances, treasury state, corridor liquidity, rates, counterparties, invoices, netting opportunities, and compliance status. I can also draft unsigned proposals, but I cannot sign or submit transactions.';
+  const reply = 'I can read balances, treasury state, corridor liquidity, rates, counterparties, invoices, modeled offset opportunities (a roadmap capability, not live), and compliance status. I can also draft unsigned proposals, but I cannot sign or submit transactions.';
   for (const token of tokens(reply)) yield { type: 'delta', text: token };
 }
 
@@ -1258,12 +1256,12 @@ const SPLASH_ANSWERS: Array<{ test: RegExp; reply: string; skipIf?: RegExp }> = 
     // Fees / pricing / cost
     test: /\b(fee|fees|pricing|price|cost|charge|commission|how much (do|does|will) (it|you|this) cost)\b/,
     skipIf: /\b(gas|sponsor|network fee|hold sui|fund (a|my)? ?wallet|top ?up)\b/, // gas/sponsorship gets the dedicated answer below
-    reply: 'Corridor fees start at 0.80% on the live USD to PHP testnet path (MYR, SGD, IDR, VND, THB, EUR and GBP stay modeled until partner rails activate). Batch runs quote one blended rate, typically 15-30 bps tighter. A hard on-chain ceiling caps any settlement fee at 2.00% — the contract aborts above it.',
+    reply: 'Illustrative corridor fees start at 0.80% on USD to PHP and 0.90% on USD to IDR; the exact fee varies by corridor and volume (MYR, SGD, VND, THB, EUR and GBP stay modeled until partner rails activate). Batch runs quote one blended rate, modeled at 15-30 bps tighter. A hard on-chain ceiling caps any settlement fee at 2.00% — the contract aborts above it.',
   },
   {
     // Corridors / countries / currencies
     test: /\b(corridor|countries|country|currenc|where can (i|we) (send|pay)|which markets|support(ed)?\s+(countries|currencies|markets))\b/,
-    reply: 'Live today: USD to PHP on the Sui testnet corridor. Modeled expansion routes: MYR, SGD, IDR, VND, THB, EUR and GBP — I can prepare route reviews for those, but execution stays blocked until partner and regulatory controls are active.',
+    reply: 'First corridors: USD to PHP and USD to IDR, launching in a staggered order on Sui, with no customer funds held until MFCA activation. Modeled expansion routes: MYR, SGD, VND, THB, EUR and GBP — I can prepare route reviews for those, but execution stays blocked until partner and regulatory controls are active.',
   },
   {
     // FX rate
@@ -1280,12 +1278,12 @@ const SPLASH_ANSWERS: Array<{ test: RegExp; reply: string; skipIf?: RegExp }> = 
     // Treasury / yield — QUESTIONS only; allocate/sweep actions flow to the planner
     test: /\b(treasury|yield|apy|earn|interest|idle cash|usdy|t-?bill)\b/,
     skipIf: /\b(allocate|sweep|deploy|move|put|redeem|withdraw)\b/,
-    reply: 'Smart Treasury earns a variable Ondo USDY (T-bill backed) yield; your Available balance stays instant at 0%. Withdrawals from Smart Treasury take 1-3 business days and every movement is approval-gated. Ask me to "allocate idle treasury" and I will draft an unsigned proposal for you to sign.',
+    reply: 'Smart Treasury is a roadmap capability: a projected, approval-gated Ondo USDY (T-bill backed) posture at a variable rate, live only when the e-money licence is granted. Your Available balance stays at 0% with no notice period. Withdrawals from Smart Treasury take 1-3 business days and every movement is approval-gated. Ask me to "allocate idle treasury" and I will draft an unsigned projection for you to review.',
   },
   {
     // Balances
     test: /\b(balance|balances|how much (do|have) (i|we)|available funds|float)\b/,
-    reply: 'Your Available (instant) and Smart Treasury balances live on the Overview and Treasury pages. From here I can read balances into a proposal — say "allocate idle treasury" or start a transfer and I will pull the numbers with evidence attached. Heads up: desk balance figures are demo data today, and every evidence item carries its LIVE or DEMO label.',
+    reply: 'Your Available (operating cash, no notice period) and Smart Treasury balances live on the Overview and Treasury pages. From here I can read balances into a proposal — say "allocate idle treasury" or start a transfer and I will pull the numbers with evidence attached. Heads up: desk balance figures are demo data today, and every evidence item carries its LIVE or DEMO label.',
   },
   {
     // Compliance / KYB / AML / limits
@@ -1296,7 +1294,7 @@ const SPLASH_ANSWERS: Array<{ test: RegExp; reply: string; skipIf?: RegExp }> = 
     // Settlement speed
     test: /\b(how (fast|long|quick)|speed|settle time|settlement time|finality|instant)\b/,
     skipIf: /\b(withdraw|redeem|notice period|money out)\b/, // withdrawal timing gets the treasury-notice answer below
-    reply: 'Sui finality anchors the settlement record in about 400ms. Delivery depends on the payout rail: bank payout lands in roughly 3-20 minutes on the PHP testnet path, a Splash receive account credits in seconds, and keeping funds as a Splash balance is immediate.',
+    reply: 'Sui finality anchors the settlement record in about 400ms. End-to-end delivery depends on the local payout rail and is illustrative, not guaranteed: a bank payout typically lands in minutes on the PHP path, a Splash receive account credits in seconds, and keeping funds as a Splash balance completes on settlement.',
   },
   {
     // Proof / audit / receipts / walrus / seal
@@ -1331,7 +1329,7 @@ const SPLASH_ANSWERS: Array<{ test: RegExp; reply: string; skipIf?: RegExp }> = 
   {
     // Netting
     test: /\b(netting|net settle|offset)\b/,
-    reply: 'Netting offsets opposing flows in a corridor so only the difference settles — fewer transfers, less spread. I can scan for netting opportunities and draft an unsigned netting settlement for approval; nothing nets without a human signature.',
+    reply: 'Offsetting would net opposing flows in a corridor so only the difference settles — fewer transfers, less spread. It is a Phase 2 capability planned for when the e-money licence is granted; today I can only show modeled figures, and nothing settles without a human signature.',
   },
   // ── Extended desk knowledge (demo depth) ─────────────────────────────────
   {
@@ -1362,12 +1360,12 @@ const SPLASH_ANSWERS: Array<{ test: RegExp; reply: string; skipIf?: RegExp }> = 
   {
     // Cutoff / hours / when
     test: /\b(cut ?off|business hours|what time|when (can|do) (i|we)|weekend|holiday|24\/?7|always on)\b/,
-    reply: 'Sui settlement runs around the clock — the on-chain record anchors in about 400ms at any hour. Delivery speed depends on the receiving rail: a Splash balance credit is immediate, and the PHP testnet bank path lands in roughly 3-20 minutes during rail hours.',
+    reply: 'Sui settlement runs around the clock — the on-chain record anchors in about 400ms at any hour. Delivery speed depends on the receiving rail and is illustrative: a Splash balance credit completes on settlement, and a local bank payout typically lands in minutes during rail hours.',
   },
   {
     // Withdrawal notice period + fees for treasury
     test: /\b(notice period|withdraw(al)? (time|fee|period|notice)|how long (to|does) (withdraw|redeem)|get (my )?money out)\b/,
-    reply: 'Moving idle cash into Smart Treasury is instant and carries no fee. Coming back out has a 1-3 business-day notice window, shown before you confirm, with no withdrawal fee — the notice is recorded so approvers can see exactly what was requested and when.',
+    reply: 'Moving idle cash into Smart Treasury completes in minutes and carries no fee (a projection until treasury execution is approved). Coming back out has a 1-3 business-day notice window, shown before you confirm, with no withdrawal fee — the notice is recorded so approvers can see exactly what was requested and when.',
   },
   {
     // Batch CSV format
@@ -1387,7 +1385,7 @@ const SPLASH_ANSWERS: Array<{ test: RegExp; reply: string; skipIf?: RegExp }> = 
   {
     // Volume / bulk pricing
     test: /\b(volume|bulk pricing|discount|cheaper|high volume|monthly volume|enterprise pricing)\b/,
-    reply: 'Corridor pricing tightens with volume: a batch run quotes one blended rate, typically 15-30 bps inside single-transfer pricing, and the 2.00% on-chain fee ceiling always applies. Tell me your monthly volume and I can model the rate.',
+    reply: 'Corridor pricing tightens with volume: a batch run quotes one blended rate, modeled at 15-30 bps inside single-transfer pricing (illustrative), and the 2.00% on-chain fee ceiling always applies. Tell me your monthly volume and I can model the rate.',
   },
   {
     // Data privacy / residency
@@ -1402,7 +1400,7 @@ const SPLASH_ANSWERS: Array<{ test: RegExp; reply: string; skipIf?: RegExp }> = 
   {
     // Capabilities
     test: /\b(what can you (do|read|prepare)|help|capabilities|tools|commands)\b/,
-    reply: 'I can read balances, treasury state, corridor liquidity, rates, counterparties, invoices, netting opportunities, and compliance status. I can also draft unsigned proposals — payments, transfers, FX conversions, treasury moves, netting, batch payouts — but I cannot sign or submit transactions. That authority stays with you.',
+    reply: 'I can read balances, treasury state, corridor liquidity, rates, counterparties, invoices, modeled offset opportunities, and compliance status. I can also draft unsigned proposals — payments, transfers, FX conversions, treasury moves, batch payouts, plus roadmap simulations such as offsetting — but I cannot sign or submit transactions. That authority stays with you.',
   },
   {
     // Greetings
