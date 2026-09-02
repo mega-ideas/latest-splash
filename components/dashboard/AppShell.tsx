@@ -27,7 +27,7 @@ import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } fro
 import NetworkBadge from '@/components/brand/NetworkBadge';
 import SandboxRibbon from '@/components/brand/SandboxRibbon';
 import Wordmark from '@/components/brand/Wordmark';
-import FloatingCopilot from '@/components/FloatingCopilot';
+import FloatingIndicator from '@/components/oxwal/FloatingIndicator';
 import type { CustomerSession } from '@/lib/auth/customer-session';
 import { brand } from '@/lib/brand';
 import { readPendingProposals, subscribePendingProposals } from '@/lib/oxwal-notify';
@@ -274,6 +274,9 @@ export default function AppShell({
                   {pending}
                 </span>
               ) : null}
+              {href === '/dashboard/oxwal' && pending > 0 ? (
+                <span className="absolute right-[24%] top-2.5 size-2 rounded-full bg-[var(--teal-500)]" aria-hidden="true" />
+              ) : null}
             </Link>
           );
         })}
@@ -316,7 +319,7 @@ export default function AppShell({
         </div>
       ) : null}
 
-      <FloatingCopilot />
+      <FloatingIndicator />
     </div>
   );
 }
