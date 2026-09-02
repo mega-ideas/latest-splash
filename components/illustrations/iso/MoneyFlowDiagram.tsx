@@ -1,3 +1,5 @@
+'use client';
+
 /**
  * MoneyFlowDiagram — BusinessBlock → SplashNode → SuiSettlementStack →
  * PartnerTowers (one per corridor) → BankBlock, joined by RouteConnectors

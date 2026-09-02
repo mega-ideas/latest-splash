@@ -1,3 +1,5 @@
+'use client';
+
 /**
  * LoadingScene — the settlement stack assembling on a loop, for SplashLoading.
  * Reduced motion renders the stack static. Motion lives in

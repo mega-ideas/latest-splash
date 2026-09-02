@@ -1,3 +1,5 @@
+'use client';
+
 /**
  * NotFoundScene — a lone ReceiptToken beside an open ApprovalGate, with a
  * mono status-code plane ("404" by default) above the gate.

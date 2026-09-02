@@ -43,7 +43,7 @@ test('receipt business face keeps chain vocabulary inside the verify section onl
 });
 
 test('receipt step ships the accountant PDF and supplier share actions', async () => {
-  const step = await readFile(new URL('../components/transfer/StepReceipt.tsx', import.meta.url), 'utf8');
+  const step = await readFile(new URL('../components/send/ReceiptStep.tsx', import.meta.url), 'utf8');
   assert.match(step, /PDF for your accountant/);
   assert.match(step, /Share with supplier/);
   assert.match(step, /fetch\('\/api\/receipts\/share'/);

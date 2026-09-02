@@ -1,3 +1,5 @@
+'use client';
+
 /**
  * CorridorMap — origin (MY) → partner corridors (PH / ID …) on one iso plane,
  * joined by settled routes. Corridor slots run north-east, then south-east,

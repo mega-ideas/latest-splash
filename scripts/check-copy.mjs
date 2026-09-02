@@ -155,7 +155,6 @@ const legacyHexAllowances = {
   'app/admin/(console)/page.tsx': ['#1f4350', '#326273', '#4a8b9a', '#e39774', '#f6f0ed'],
   'app/admin/(console)/transactions/page.tsx': ['#1f4350', '#326273', '#9b4e32', '#e39774', '#f6f0ed'],
   'app/api/funding/sessions/route.ts': ['#0c3e48', '#f6f0ed'],
-  'app/dashboard/batch/page.tsx': ['#1f4452', '#264e5b', '#326273', '#9a6f15', '#cd825f', '#e39774', '#f6f0ed'],
   'app/dashboard/copilot/page.tsx': ['#0c3e48', '#0d6370', '#1f4452', '#264e5b', '#326273', '#c97a56', '#e39774', '#efc46f', '#f6f0ed'],
   'app/dashboard/customer-service/page.tsx': ['#264e5b', '#326273', '#e39774', '#f6f0ed'],
   'app/dashboard/history/page.tsx': ['#264e5b', '#326273', '#e39774', '#f6f0ed'],
@@ -164,7 +163,6 @@ const legacyHexAllowances = {
   'app/dashboard/profile/page.tsx': ['#0d6370', '#1f4452', '#264e5b', '#326273', '#9b4e32', '#e39774', '#f6f0ed'],
   'app/dashboard/recipients/page.tsx': ['#264e5b', '#326273', '#e39774', '#f6f0ed'],
   'app/dashboard/settings/page.tsx': ['#022b33', '#073d49', '#326273', '#f6f0ed'],
-  'app/dashboard/transfer/page.tsx': ['#0c3e48', '#326273', '#8fd7c7', '#d9fff6', '#e39774'],
   'app/dashboard/transfers/page.tsx': ['#326273', '#cd825f', '#e39774'],
   'app/dashboard/treasury/page.tsx': ['#0c3e48', '#1f4452', '#326273', '#4a8a99', '#4f9c88', '#6fb4a0', '#9a6f15', '#b3881f', '#b65f3f', '#c97a56', '#c99a2e', '#d9a441', '#e0b05a', '#e39774', '#f6f0ed'],
   'app/layout.tsx': ['#326273'],
@@ -196,10 +194,6 @@ const legacyHexAllowances = {
   'components/invoices/InvoiceLoop.tsx': ['#0c3e48', '#145d6a', '#1f4452', '#326273', '#6fb4a0', '#8b6418', '#9f5839', '#bfe6ee', '#cd825f', '#d8fff4', '#d9a441', '#e39774', '#f6f0ed', '#f8fcfd', '#ffe6a4'],
   'components/oxwal/ActionCard.tsx': ['#1f4452', '#326273', '#f6f0ed'],
   'components/queue/ApprovalQueueBoard.tsx': ['#1f4452', '#326273'],
-  'components/transfer/StepBeneficiary.tsx': ['#0c3e48', '#0d6370', '#264e5b', '#326273', '#8fd7c7', '#9b4e32', '#e39774', '#f4f8fa', '#f6f0ed', '#f8fcfd'],
-  'components/transfer/StepQuote.tsx': ['#0c3e48', '#145d6a', '#1f4452', '#237284', '#326273', '#e39774', '#eaf7f8', '#f6f0ed'],
-  'components/transfer/StepReceipt.tsx': ['#264e5b', '#326273'],
-  'components/transfer/StepStatus.tsx': ['#0c3e48', '#326273', '#e39774', '#f6f0ed'],
 };
 
 const hexPattern = /#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{4}|[0-9a-fA-F]{3})(?![0-9a-fA-F])/g;

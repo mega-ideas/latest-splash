@@ -1,0 +1,69 @@
+'use client';
+
+import { useCallback, useEffect, useState } from 'react';
+
+import AmountStep from '@/components/send/AmountStep';
+import ProcessingStep from '@/components/send/ProcessingStep';
+import ReceiptStep from '@/components/send/ReceiptStep';
+import RecipientStep from '@/components/send/RecipientStep';
+import ReviewStep from '@/components/send/ReviewStep';
+import { Card, StepStrip } from '@/components/system';
+import { initialTransferState, type TransferState } from '@/lib/send/state';
+
+const STEPS = [{ label: 'Recipient' }, { label: 'Amount' }, { label: 'Review' }, { label: 'Processing' }, { label: 'Receipt' }];
+
+/**
+ * Send: recipient → amount → review → processing → receipt. The state is one
+ * object held in memory; deep links (?invoiceId, ?holdId) prefill it.
+ */
+export default function SendPage() {
+  const [state, setState] = useState<TransferState>(initialTransferState);
+  const set = useCallback((patch: Partial<TransferState>) => setState((previous) => ({ ...previous, ...patch })), []);
+  const go = useCallback((step: TransferState['step']) => set({ step }), [set]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const invoiceId = params.get('invoiceId');
+    const holdId = params.get('holdId');
+    if (invoiceId) {
+      void fetch(`/api/invoices/${invoiceId}`)
+        .then((response) => response.json())
+        .then((invoice: { payerOrgName?: string; amountUsd?: string; targetCurrency?: TransferState['amount']['targetCurrency']; id?: string }) => {
+          if (!invoice.id) return;
+          setState((current) => ({
+            ...current,
+            step: 2,
+            invoiceId: invoice.id,
+            recipient: { ...current.recipient, name: invoice.payerOrgName ?? current.recipient.name, country: 'PH' },
+            amount: { ...current.amount, value: invoice.amountUsd ?? current.amount.value, targetCurrency: invoice.targetCurrency ?? current.amount.targetCurrency },
+            deliveryTier: invoice.targetCurrency === 'PHP' ? 'SWEEP_ACCOUNT' : 'PAYOUT_ONLY',
+          }));
+        });
+    }
+    if (holdId) {
+      void fetch(`/api/rate-holds?id=${encodeURIComponent(holdId)}`)
+        .then((response) => response.json())
+        .then((hold: TransferState['rateHold']) => {
+          if (!hold?.id || hold.state !== 'ACTIVE') return;
+          setState((current) => ({ ...current, rateHold: hold, amount: { ...current.amount, targetCurrency: hold.corridorCurrency as TransferState['amount']['targetCurrency'] } }));
+        });
+    }
+  }, []);
+
+  return (
+    <div className="mx-auto grid w-full max-w-[880px] gap-6">
+      <header>
+        <h1 className="text-[var(--text-h1)] font-semibold leading-[1.1] tracking-[-0.02em]">Send USD</h1>
+        <p className="mt-1 text-[14px] text-[var(--text-2)]">One payment, settled atomically on Sui and delivered by a licensed payout partner.</p>
+      </header>
+      <StepStrip steps={STEPS} current={state.step - 1} />
+      <Card padding="lg">
+        {state.step === 1 ? <RecipientStep state={state} set={set} next={() => go(2)} /> : null}
+        {state.step === 2 ? <AmountStep state={state} set={set} prev={() => go(1)} next={() => go(3)} /> : null}
+        {state.step === 3 ? <ReviewStep state={state} set={set} prev={() => go(2)} next={() => go(4)} /> : null}
+        {state.step === 4 ? <ProcessingStep state={state} set={set} next={() => go(5)} retry={() => setState({ ...initialTransferState, recipient: state.recipient, amount: state.amount })} /> : null}
+        {state.step === 5 ? <ReceiptStep state={state} reset={() => setState(initialTransferState)} /> : null}
+      </Card>
+    </div>
+  );
+}

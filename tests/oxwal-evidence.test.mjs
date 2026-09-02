@@ -50,7 +50,7 @@ test('audit receipt persists evidence and audit route verifies it', async () => 
 
 test('receipt exposes a collapsed independent settlement proof drawer', async () => {
   const drawer = await source('components/SettlementProofDrawer.tsx');
-  const receiptStep = await source('components/transfer/StepReceipt.tsx');
+  const receiptStep = await source('components/send/ReceiptStep.tsx');
 
   assert.match(drawer, /View independent settlement proof/);
   assert.match(drawer, /\/api\/audit\/\$\{transferIntentId\}/);
