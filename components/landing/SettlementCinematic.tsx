@@ -310,15 +310,15 @@ function StaticCinematic() {
   );
 }
 
-export default function SettlementCinematic({ isPhone = false }: { isPhone?: boolean }) {
+export default function SettlementCinematic() {
   const containerRef = useRef<HTMLElement>(null);
   const reducedMotion = useReducedMotion();
   const [compact, setCompact] = useState(false);
   const [artLoaded, setArtLoaded] = useState(false);
-  // Phones (and narrow viewports) get the non-pinned static hero: same art,
-  // copy, telemetry and vision, but no scroll-jacking — robust and readable
-  // on a thumb. Seeded from the server UA flag so SSR matches on real phones.
-  const [phoneLayout, setPhoneLayout] = useState(isPhone);
+  // Narrow viewports get the non-pinned static hero: same art, copy,
+  // telemetry and vision, but no scroll-jacking. Decided by viewport width
+  // after mount so server and client render the same tree.
+  const [phoneLayout, setPhoneLayout] = useState(false);
 
   /* Section-scoped scroll progress, driven manually so it never falls back
      to page-level measurement. */

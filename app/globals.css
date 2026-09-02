@@ -3,7 +3,6 @@
 @import "shadcn/tailwind.css";
 @import "../styles/tokens.css";
 @import "../styles/cinematic.css";
-@import "../styles/mobile-landing.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -805,11 +804,6 @@ body {
   color: rgba(255, 250, 241, .82);
 }
 
-.mob-waitlist-slot {
-  display: flex;
-  justify-content: center;
-  margin-top: 12px;
-}
 
 .iso-proof-line {
   display: flex;

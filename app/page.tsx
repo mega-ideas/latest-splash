@@ -1,7 +1,4 @@
-import { headers } from "next/headers";
-
 import IsometricLanding from "@/components/IsometricLanding";
-import { isPhoneUserAgent } from "@/lib/device";
 
 const SITE_URL = "https://splash.finance";
 
@@ -77,15 +74,9 @@ const faqJsonLd = {
   ],
 };
 
-export default async function Home() {
-  // Every device gets the isometric cinematic — the desktop identity — but
-  // phones get it "shrunk to fit": a reflowed single column with readable
-  // type, and the non-pinned static hero instead of the scroll-jacked one.
-  // Phone is decided server-side from the UA so the right hero arrives on
-  // the first byte (no flash), and CSS width queries handle the reflow.
-  const headerStore = await headers();
-  const isPhone = isPhoneUserAgent(headerStore.get("user-agent"));
-
+export default function Home() {
+  // One responsive tree for every device: viewport width queries decide the
+  // reflow and the non-pinned hero, never the user agent.
   return (
     <>
       <script
@@ -96,7 +87,7 @@ export default async function Home() {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd).replace(/</g, "\\u003c") }}
       />
-      <IsometricLanding isPhone={isPhone} />
+      <IsometricLanding />
     </>
   );
 }
