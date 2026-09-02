@@ -7,6 +7,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const OPEN_STATUSES = new Set(['SIMULATED', 'POLICY_EVALUATED', 'PENDING_APPROVAL']);
+const HISTORY_STATUSES = new Set(['APPROVED', 'SIGNED', 'SUBMITTED', 'EXECUTED', 'ANCHORED', 'REJECTED', 'FAILED', 'EXPIRED', 'REVERSED']);
 
 function amountLabel(value: bigint | number | undefined, currency: string | undefined): string | null {
   if (value === undefined || value === null) return null;
@@ -29,15 +30,20 @@ export async function GET(request: Request) {
   const store = getOxwalProposalStore();
   await ensureProposalStoreHydrated(store);
 
+  const scope = new URL(request.url).searchParams.get('scope') === 'history' ? HISTORY_STATUSES : OPEN_STATUSES;
   const items = store
     .list()
-    .filter((proposal) => OPEN_STATUSES.has(proposal.status) && proposal.orgId === ctx.orgId)
+    .filter((proposal) => scope.has(proposal.status) && proposal.orgId === ctx.orgId)
+    .sort((a, b) => (b.createdAt > a.createdAt ? 1 : -1))
     .map((proposal) => ({
       id: proposal.id,
       kind: proposal.kind,
       status: proposal.status,
       corridor: proposal.corridor ?? null,
       recommendation: proposal.explain.recommendation,
+      createdBy: proposal.createdBy,
+      approvalHash: proposal.approvalHash ?? null,
+      evidenceQuality: proposal.explain.evidence.every((item) => item.trusted) ? 'trusted' : 'untrusted',
       amountLabel: amountLabel(
         proposal.explain.financialImpact.amountOut ?? proposal.explain.financialImpact.amountIn,
         proposal.explain.financialImpact.currencyOut ?? proposal.explain.financialImpact.currencyIn,

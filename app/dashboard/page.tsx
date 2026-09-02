@@ -112,7 +112,7 @@ export default function HomePage() {
             sub={transfers ? `${transfers.filter((t) => PENDING_STATES.has(t.state)).length} in flight` : undefined}
           />
         </Card>
-        <Link href="/queue" className="group rounded-[var(--r-md)] outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--teal-500)]">
+        <Link href="/dashboard/approvals" className="group rounded-[var(--r-md)] outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--teal-500)]">
           <Card tone="dark" className="h-full transition-transform duration-[var(--dur-ui)] group-hover:-translate-y-px">
             {proposals ? (
               <>
@@ -183,7 +183,7 @@ export default function HomePage() {
                     <p className="truncate text-[14px] font-medium">{proposal.recommendation}</p>
                     <p className="font-mono text-[12px] text-[var(--text-muted)]">{proposal.amountLabel ?? '—'} · {proposal.id}</p>
                   </div>
-                  <Button href="/queue" variant="ghost" size="sm">
+                  <Button href="/dashboard/approvals" variant="ghost" size="sm">
                     Review
                   </Button>
                 </Card>

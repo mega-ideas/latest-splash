@@ -40,7 +40,7 @@ const NAV: NavItem[] = [
   { label: 'Home', href: '/dashboard', icon: Home },
   { label: 'Send', href: '/dashboard/transfer', icon: Send },
   { label: 'Batch', href: '/dashboard/batch', icon: Layers },
-  { label: 'Approvals', href: '/queue', icon: CheckSquare, badge: 'approvals' },
+  { label: 'Approvals', href: '/dashboard/approvals', icon: CheckSquare, badge: 'approvals' },
   { label: 'Recipients', href: '/dashboard/recipients', icon: Users },
   { label: 'Treasury', href: '/dashboard/treasury', icon: TrendingUp },
   { label: 'Receipts', href: '/dashboard/receipts', icon: FileCheck2 },
@@ -49,7 +49,7 @@ const NAV: NavItem[] = [
 ];
 
 /* Mobile bottom tabs: the four money moments plus More. */
-const TABS = ['/dashboard', '/dashboard/transfer', '/queue', '/dashboard/oxwal'];
+const TABS = ['/dashboard', '/dashboard/transfer', '/dashboard/approvals', '/dashboard/oxwal'];
 
 function initialsFor(session: CustomerSession) {
   const source = session.name || session.organization || session.email;

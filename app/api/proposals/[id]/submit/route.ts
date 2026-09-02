@@ -23,6 +23,8 @@ const submitSchema = z.object({
   decision: z.enum(['APPROVE', 'REJECT']).default('APPROVE'),
   /** Optional binding commitment: the canonical hash the approver reviewed. */
   approvalHash: z.string().trim().optional(),
+  /** Optional human reason, recorded with the decision event (no PII). */
+  reason: z.string().trim().max(280).optional(),
 });
 
 function json(data: unknown, status = 200) {
