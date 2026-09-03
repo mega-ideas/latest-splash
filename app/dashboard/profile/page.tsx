@@ -191,7 +191,7 @@ export default function ProfilePage() {
                 <span className="font-medium text-[#326273]/60 line-through decoration-[#E39774]/60">
                   {fieldValue(field, (pending.before as Record<string, unknown>)[field])}
                 </span>
-                <span aria-hidden="true" className="hidden text-[var(--info-text)] sm:block">→</span>
+                <span aria-hidden="true" className="hidden text-[var(--info)] sm:block">→</span>
                 <span className="font-bold text-[#326273]">{fieldValue(field, next)}</span>
               </div>
             ))}
@@ -227,7 +227,7 @@ export default function ProfilePage() {
           </div>
 
           <div className="mt-5 inline-flex items-center gap-2 rounded-lg bg-[#5C9EAD]/12 px-3 py-2 text-[13px] font-bold text-[#326273]">
-            <ShieldCheck className="h-4 w-4 text-[var(--info-text)]" />
+            <ShieldCheck className="h-4 w-4 text-[var(--info)]" />
             {tierName(profile.tier)}
           </div>
 
@@ -239,7 +239,7 @@ export default function ProfilePage() {
           </dl>
 
           <p className="mt-5 border-t border-[#326273]/10 pt-4 text-[13px] leading-5 text-[#326273]/50">
-            <BadgeCheck className="mr-1 inline h-3.5 w-3.5 text-[var(--info-text)]" />
+            <BadgeCheck className="mr-1 inline h-3.5 w-3.5 text-[var(--info)]" />
             This is your profile of record — the version our admin team has approved.
             {profile.updatedAt && new Date(profile.updatedAt).getTime() > 0
               ? ` Last approved change ${new Date(profile.updatedAt).toLocaleDateString()}.`
@@ -253,7 +253,7 @@ export default function ProfilePage() {
           onSubmit={(event) => { event.preventDefault(); void submitForReview(); }}
         >
           <div className="flex items-center gap-3">
-            <UserRound className="text-[var(--info-text)]" />
+            <UserRound className="text-[var(--info)]" />
             <div>
               <h2 className="text-xl font-bold text-[#326273]">Edit details</h2>
               <p className="text-[13px] text-[#326273]/55">
@@ -384,7 +384,7 @@ export default function ProfilePage() {
 function RecordRow({ icon: Icon, label, value }: { icon: typeof Mail; label: string; value: string }) {
   return (
     <div className="flex items-start gap-3">
-      <Icon className="mt-0.5 h-4 w-4 shrink-0 text-[var(--info-text)]" />
+      <Icon className="mt-0.5 h-4 w-4 shrink-0 text-[var(--info)]" />
       <div className="min-w-0">
         <dt className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#326273]/45">{label}</dt>
         <dd className="truncate text-sm font-medium text-[#326273]">{value}</dd>

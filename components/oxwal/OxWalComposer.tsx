@@ -16,10 +16,6 @@ import {
 
 import { parseBatchFile, type ParsedBatch } from '@/lib/batch-parse';
 import { cn } from '@/lib/utils';
-import { getNetworkProfile } from '@/lib/network';
-
-// Desk tag follows the network profile: corridor pair plus the network label.
-const DEFAULT_DESK_TAG = `USD→PHP · IDR · ${getNetworkProfile().badges.network}`;
 
 export type OxWalComposerChip = {
   label: string;
@@ -63,7 +59,7 @@ export default function OxWalComposer({
   disabled = false,
   title,
   placeholder = 'Ask 0xWal, or attach an invoice or payout sheet',
-  deskTag = DEFAULT_DESK_TAG,
+  deskTag = 'USD→PHP · testnet',
   compact = false,
   className,
   inputRef,
@@ -163,7 +159,7 @@ export default function OxWalComposer({
               </div>
             )}
             {parseError && !parsing && (
-              <div className="rounded-[var(--r-md)] border border-[var(--error)]/40 bg-[var(--error-bg)] px-3 py-1.5 text-[13px] font-medium text-[var(--error-text)]">
+              <div className="rounded-[var(--r-md)] border border-[var(--error)]/40 bg-[var(--error-bg)] px-3 py-1.5 text-[13px] font-medium text-[var(--error)]">
                 {parseError}
               </div>
             )}

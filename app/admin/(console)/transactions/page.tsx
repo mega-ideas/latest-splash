@@ -5,7 +5,6 @@ import ComplianceControlForm from '@/components/admin/ComplianceControlForm';
 import { Activity, CheckCircle2, Circle, ExternalLink, Loader2, ReceiptText, XCircle } from 'lucide-react';
 import { listFundingSessions } from '@/lib/server/funding-sessions';
 import { describeFundingSelection } from '@/lib/funding/registry';
-import { explorerTxUrl } from '@/lib/network';
 
 export const dynamic = 'force-dynamic';
 
@@ -141,11 +140,11 @@ export default async function AdminTransactionsPage() {
                     <td>
                       {transfer.verificationReference && (
                         <div className="flex gap-1">
-                          <a href={explorerTxUrl(transfer.verificationReference, 'suivision')} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded bg-[#5C9EAD]/10 px-2 py-1 text-xs font-semibold text-[#5C9EAD] hover:bg-[#5C9EAD]/20">
+                          <a href={`https://testnet.suivision.xyz/txblock/${transfer.verificationReference}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded bg-[#5C9EAD]/10 px-2 py-1 text-xs font-semibold text-[#5C9EAD] hover:bg-[#5C9EAD]/20">
                             <ExternalLink size={10} />
                             SuiVision
                           </a>
-                          <a href={explorerTxUrl(transfer.verificationReference, 'suiscan')} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded bg-[#5C9EAD]/10 px-2 py-1 text-xs font-semibold text-[#5C9EAD] hover:bg-[#5C9EAD]/20">
+                          <a href={`https://suiscan.xyz/testnet/tx/${transfer.verificationReference}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded bg-[#5C9EAD]/10 px-2 py-1 text-xs font-semibold text-[#5C9EAD] hover:bg-[#5C9EAD]/20">
                             <ExternalLink size={10} />
                             SuiScan
                           </a>

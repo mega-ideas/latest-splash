@@ -3,8 +3,6 @@
 import { useEffect, useState } from 'react';
 import { CheckCircle2, ChevronDown, Database, ExternalLink, FileKey2, Lock, ShieldCheck, XCircle } from 'lucide-react';
 
-import { explorerTxUrl } from '@/lib/network';
-
 type SettlementProofResponse = {
   proof?: {
     receipt: {
@@ -66,15 +64,15 @@ export default function SettlementProofDrawer({ transferIntentId, fallback }: Se
   const checking = Boolean(transferIntentId && !proof);
 
   return (
-    <details className="group rounded-[var(--r-lg)] border border-[var(--line)] bg-[var(--surface)]">
+    <details className="group rounded-lg border border-[#326273]/15 bg-white/75">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-4 py-3">
-        <span className="inline-flex items-center gap-2 text-sm font-bold text-[var(--text-2)]">
-          <ShieldCheck className="h-4 w-4 text-[var(--teal-600)]" />
+        <span className="inline-flex items-center gap-2 text-sm font-bold text-[#326273]">
+          <ShieldCheck className="h-4 w-4 text-[var(--info)]" />
           View independent settlement proof
         </span>
-        <ChevronDown className="h-4 w-4 text-[var(--text-muted)] transition-transform group-open:rotate-180" />
+        <ChevronDown className="h-4 w-4 text-[#326273]/55 transition-transform group-open:rotate-180" />
       </summary>
-      <div className="border-t border-[var(--divider)] px-4 py-4">
+      <div className="border-t border-[#326273]/10 px-4 py-4">
         {proof?.receipt && (
           <div className="grid gap-2 text-sm md:grid-cols-2">
             <ProofRow label="Recipient" value={proof.receipt.recipient} />
@@ -92,7 +90,7 @@ export default function SettlementProofDrawer({ transferIntentId, fallback }: Se
           <CheckTile label="Hash match" ok={independent?.walrusHashVerified ?? false} icon={FileKey2} detail={independent?.ciphertextHash?.slice(0, 16) ?? 'Pending'} />
         </div>
 
-        <div className="mt-4 rounded-md bg-[var(--surface-2)] p-3 text-[13px] text-[var(--text-muted)]">
+        <div className="mt-4 rounded-md bg-[#F6F0ED] p-3 text-[13px] text-[#326273]/70">
           <div className="flex flex-wrap items-center gap-2">
             <StatusPill ok={independent?.verified ?? false} label={independent?.verified ? 'Verified' : checking ? 'Checking' : 'Needs review'} />
             {independent?.anchorRecorded && <StatusPill ok label="Sui anchor recorded" />}
@@ -103,12 +101,12 @@ export default function SettlementProofDrawer({ transferIntentId, fallback }: Se
             <ProofRow label="Expected hash" value={independent?.expectedCiphertextHash ?? 'Pending'} mono />
           </div>
           {digest && (
-            <a href={explorerTxUrl(digest)} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-1 font-bold text-[var(--teal-600)]">
+            <a href={`https://testnet.suivision.xyz/txblock/${digest}`} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-1 font-bold text-[var(--info)]">
               Open Sui proof
               <ExternalLink className="h-3.5 w-3.5" />
             </a>
           )}
-          {independent?.error && <div className="mt-3 font-semibold text-[var(--red-600)]">{independent.error}</div>}
+          {independent?.error && <div className="mt-3 font-semibold text-[#9A4A2D]">{independent.error}</div>}
         </div>
       </div>
     </details>
@@ -118,28 +116,28 @@ export default function SettlementProofDrawer({ transferIntentId, fallback }: Se
 function ProofRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="flex min-w-0 justify-between gap-3">
-      <span className="shrink-0 font-semibold text-[var(--text-muted)]">{label}</span>
-      <span className={`min-w-0 break-all text-right font-medium text-[var(--text-2)] ${mono ? 'font-mono text-[13px]' : ''}`}>{value}</span>
+      <span className="shrink-0 font-semibold text-[#326273]/55">{label}</span>
+      <span className={`min-w-0 break-all text-right font-medium text-[#326273] ${mono ? 'font-mono text-[13px]' : ''}`}>{value}</span>
     </div>
   );
 }
 
 function CheckTile({ label, ok, icon: Icon, detail }: { label: string; ok: boolean; icon: typeof ShieldCheck; detail: string }) {
   return (
-    <div className={`rounded-md border p-3 ${ok ? 'border-[var(--teal-300)] bg-[var(--teal-100)]' : 'border-[var(--red-600)] bg-[var(--red-100)]'}`}>
+    <div className={`rounded-md border p-3 ${ok ? 'border-[#5C9EAD]/35 bg-[#5C9EAD]/10' : 'border-[#E39774]/40 bg-[#E39774]/10'}`}>
       <div className="flex items-center justify-between gap-2">
-        <Icon className={`h-4 w-4 ${ok ? 'text-[var(--teal-600)]' : 'text-[var(--red-600)]'}`} />
-        {ok ? <CheckCircle2 className="h-4 w-4 text-[var(--teal-600)]" /> : <XCircle className="h-4 w-4 text-[var(--red-600)]" />}
+        <Icon className={`h-4 w-4 ${ok ? 'text-[var(--info)]' : 'text-[#E39774]'}`} />
+        {ok ? <CheckCircle2 className="h-4 w-4 text-[var(--info)]" /> : <XCircle className="h-4 w-4 text-[#E39774]" />}
       </div>
-      <div className="mt-2 text-sm font-bold text-[var(--text-2)]">{label}</div>
-      <div className="mt-1 break-all font-mono text-[13px] text-[var(--text-muted)]">{detail}</div>
+      <div className="mt-2 text-sm font-bold text-[#326273]">{label}</div>
+      <div className="mt-1 break-all font-mono text-[13px] text-[#326273]/55">{detail}</div>
     </div>
   );
 }
 
 function StatusPill({ ok, label }: { ok: boolean; label: string }) {
   return (
-    <span className={`rounded-full px-2.5 py-1 text-[13px] font-bold ${ok ? 'bg-[var(--teal-100)] text-[var(--text-2)]' : 'bg-[var(--red-100)] text-[var(--red-600)]'}`}>
+    <span className={`rounded-full px-2.5 py-1 text-[13px] font-bold ${ok ? 'bg-[#5C9EAD]/15 text-[#326273]' : 'bg-[#E39774]/15 text-[#9A4A2D]'}`}>
       {label}
     </span>
   );

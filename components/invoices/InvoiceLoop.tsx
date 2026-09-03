@@ -391,7 +391,7 @@ function SectionTitle({
         <Icon className="h-5 w-5" />
       </span>
       <div className="min-w-0">
-        <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--info-text)]">{eyebrow}</div>
+        <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--info)]">{eyebrow}</div>
         <h2 className="mt-1 text-lg font-bold text-[#1F4452]">{title}</h2>
         <p className="mt-1 text-[13px] font-medium leading-5 text-[#326273]/60">{body}</p>
       </div>
@@ -691,9 +691,9 @@ function IntentPanel({ selected, suggestion, href }: { selected: InvoiceRecord |
 }
 
 function AccessIcon({ checking, granted }: { checking: boolean; granted?: boolean }) {
-  if (checking) return <Loader2 className="h-5 w-5 shrink-0 animate-spin text-[var(--info-text)]" />;
-  if (granted === true) return <CheckCircle2 className="h-5 w-5 shrink-0 text-[var(--info-text)]" />;
-  if (granted === false) return <XCircle className="h-5 w-5 shrink-0 text-[var(--error-text)]" />;
+  if (checking) return <Loader2 className="h-5 w-5 shrink-0 animate-spin text-[var(--info)]" />;
+  if (granted === true) return <CheckCircle2 className="h-5 w-5 shrink-0 text-[var(--info)]" />;
+  if (granted === false) return <XCircle className="h-5 w-5 shrink-0 text-[var(--error)]" />;
   return <ShieldCheck className="h-5 w-5 shrink-0 text-[#326273]/30" />;
 }
 
@@ -718,7 +718,7 @@ function EmptyState({ title, body }: { title: string; body: ReactNode }) {
 function gateTone(state: GateState) {
   if (state === 'complete') return 'border-[#6FB4A0]/35 bg-[#6FB4A0]/18 text-[#D8FFF4]';
   if (state === 'active') return 'border-[#D9A441]/45 bg-[#D9A441]/18 text-[#FFE6A4]';
-  if (state === 'warning') return 'border-[var(--warn)] bg-[var(--warn-bg)] text-[var(--warn-text)]';
+  if (state === 'warning') return 'border-[var(--warn)] bg-[var(--warn-bg)] text-[var(--warn)]';
   return 'border-white/12 bg-white/8 text-white/38';
 }
 

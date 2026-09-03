@@ -42,17 +42,17 @@ type ResolvedItem = QueueItem & { resolution: Resolution; approvalsFinal: number
 /* Lane tones + risk pills use semantic state tokens (W9.0 coral rule) —
    coral stays a brand accent, never a risk/error signal. */
 const laneMeta: Record<QueueLaneKey, { label: string; icon: LucideIcon; tone: string }> = {
-  PENDING_APPROVALS: { label: 'Pending approvals', icon: ShieldCheck, tone: 'text-[var(--info-text)]' },
-  COMPLIANCE_HOLDS: { label: 'Compliance holds', icon: ShieldAlert, tone: 'text-[var(--warn-text)]' },
+  PENDING_APPROVALS: { label: 'Pending approvals', icon: ShieldCheck, tone: 'text-[var(--info)]' },
+  COMPLIANCE_HOLDS: { label: 'Compliance holds', icon: ShieldAlert, tone: 'text-[var(--warn)]' },
   EXPIRING_QUOTES: { label: 'Expiring quotes', icon: Clock3, tone: 'text-[var(--pending)]' },
-  FAILED_SETTLEMENTS: { label: 'Failed settlements', icon: XCircle, tone: 'text-[var(--error-text)]' },
-  ANOMALY_HALTS: { label: 'Anomaly halts', icon: AlertTriangle, tone: 'text-[var(--error-text)]' },
+  FAILED_SETTLEMENTS: { label: 'Failed settlements', icon: XCircle, tone: 'text-[var(--error)]' },
+  ANOMALY_HALTS: { label: 'Anomaly halts', icon: AlertTriangle, tone: 'text-[var(--error)]' },
 };
 
 function riskClass(risk: QueueItem['risk']) {
-  if (risk === 'HIGH') return 'border-[var(--error)] bg-[var(--error-bg)] text-[var(--error-text)]';
-  if (risk === 'MEDIUM') return 'border-[var(--warn)] bg-[var(--warn-bg)] text-[var(--warn-text)]';
-  return 'border-[var(--ok)] bg-[var(--ok-bg)] text-[var(--ok-text)]';
+  if (risk === 'HIGH') return 'border-[var(--error)] bg-[var(--error-bg)] text-[var(--error)]';
+  if (risk === 'MEDIUM') return 'border-[var(--warn)] bg-[var(--warn-bg)] text-[var(--warn)]';
+  return 'border-[var(--ok)] bg-[var(--ok-bg)] text-[var(--ok)]';
 }
 
 export default function ApprovalQueueBoard({
@@ -142,7 +142,7 @@ export default function ApprovalQueueBoard({
         <div className="divide-y divide-[#326273]/10">
           {openItems.length === 0 && (
             <div className="px-4 py-10 text-center">
-              <ShieldCheck className="mx-auto h-7 w-7 text-[var(--info-text)]" />
+              <ShieldCheck className="mx-auto h-7 w-7 text-[var(--info)]" />
               <p className="mt-2 text-sm font-bold text-[#1F4452]">No proposals waiting for approval</p>
               <p className="mt-1 text-[13px] font-medium text-[#326273]/60">Cleared items move to settlement; rejected items return to the maker.</p>
             </div>
@@ -173,7 +173,7 @@ export default function ApprovalQueueBoard({
                   type="button"
                   onClick={() => reject(item)}
                   aria-label={`Reject ${item.recommendation}`}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-[var(--error)] text-[var(--error-text)] transition hover:bg-[var(--error-bg)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--error)]/25"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-[var(--error)] text-[var(--error)] transition hover:bg-[var(--error-bg)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--error)]/25"
                 >
                   <XCircle className="h-4 w-4" />
                 </button>
@@ -196,12 +196,12 @@ export default function ApprovalQueueBoard({
                   <p className="mt-0.5 truncate text-[13px] font-medium text-[#326273]/60">{item.id} · {item.amountLabel}</p>
                 </div>
                 {item.resolution === 'approved' ? (
-                  <span className="inline-flex items-center gap-1.5 rounded-md border border-[var(--ok)] bg-[var(--ok-bg)] px-2.5 py-1 text-[13px] font-medium text-[var(--ok-text)]">
+                  <span className="inline-flex items-center gap-1.5 rounded-md border border-[var(--ok)] bg-[var(--ok-bg)] px-2.5 py-1 text-[13px] font-medium text-[var(--ok)]">
                     <CheckCircle2 className="h-3.5 w-3.5" />
                     Approved {item.approvalsFinal}/{item.requiredApprovers} · queued for settlement
                   </span>
                 ) : (
-                  <span className="inline-flex items-center gap-1.5 rounded-md border border-[var(--error)] bg-[var(--error-bg)] px-2.5 py-1 text-[13px] font-medium text-[var(--error-text)]">
+                  <span className="inline-flex items-center gap-1.5 rounded-md border border-[var(--error)] bg-[var(--error-bg)] px-2.5 py-1 text-[13px] font-medium text-[var(--error)]">
                     <XCircle className="h-3.5 w-3.5" />
                     Rejected · returned to maker
                   </span>

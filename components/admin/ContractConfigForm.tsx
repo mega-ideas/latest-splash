@@ -3,8 +3,6 @@
 import { useState, useTransition } from 'react';
 import { Check, Copy, ExternalLink, RotateCcw } from 'lucide-react';
 
-import { explorerBaseFor } from '@/lib/network';
-
 type Field = {
   key: string;
   label: string;
@@ -177,7 +175,7 @@ export default function ContractConfigForm({ initialConfig, initialEnv, initialM
                 )}
                 {current && /^0x[a-fA-F0-9]{64}$/.test(current) && (
                   <a
-                    href={`${explorerBaseFor(network === 'mainnet' ? 'mainnet' : 'testnet').suivision}/object/${current}`}
+                    href={`https://${network}.suivision.xyz/object/${current}`}
                     target="_blank"
                     rel="noreferrer"
                     className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#5C9EAD] hover:underline"

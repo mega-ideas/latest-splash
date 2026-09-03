@@ -1,133 +1,29 @@
-/* ─── Splash design tokens ──────────────────────────────────────────────────
-   Palette v3 "Clear Air" (docs/design-system.md §9) is the source of truth.
-   Roles: luminous cool neutrals (air), a deep night foundation, ONE signal
-   colour (beacon cobalt) for actions, routes and selection, functional
-   colours for state, and a single warm ember reserved for the wordmark and
-   marketing eyebrows — never a state, never a control. The v2 names
-   (--ink-N, --teal-N, --paper) stay as aliases so every surface re-skins;
-   new code uses the semantic names below. */
-
 :root {
-  /* ── Palette v3 · light (default) ─────────────────────────────────────── */
-  --night-900: #0E1526;  /* foundation: navigation, hero, dark regions */
-  --night-700: #1A2440;  /* navigation active */
-  --beacon-700: #1E42D8; /* signal as text on light surfaces (7.4:1 on white) */
-  --beacon-600: #2D5BFF; /* signal: primary action, links, focus (5.2:1 with white text) */
-  --beacon-500: #4A72FF; /* hover / active */
-  --beacon-300: #8FA8FF; /* data lines, illustration tint, labels on night */
-  --beacon-100: #E4EAFF; /* selected row, info tint */
-  --ember-500: #FF6A3D;  /* brand only: wordmark full stop, marketing eyebrows */
-  --air-50: #F5F7FA;     /* canvas */
-  --air-100: #EAEEF4;    /* subtle surface */
-  --white: #FFFFFF;      /* raised surface */
-
-  /* v2 alias names → v3 values (migrate to semantic names; do not add uses) */
-  --ink-900: var(--night-900);
-  --ink-700: var(--night-700);
-  --teal-600: var(--beacon-600);
-  --teal-500: var(--beacon-500);
-  --teal-300: var(--beacon-300);
-  --teal-100: var(--beacon-100);
-  --paper: var(--air-50);
-  --surface: var(--white);
-  --surface-2: var(--air-100);
-  --text: #0E1526;
-  --text-2: #4B5568;
-  --text-muted: #5D6779; /* 5.7:1 on white, 4.8:1 on air-100 */
-  --border: #DCE1EA;
-  --divider: #E7EBF1;
-  --green-600: #1E8F6E;  /* settled / positive */
-  --green-100: #DDF3EA;
-  --amber-600: #B9770E;  /* pending / legacy-rail contrast */
-  --amber-100: #FBEFD9;
-  --red-600: #B93A32;    /* returned / rejected */
-  --red-100: #FAE3E1;
-  --gradient-hero: linear-gradient(135deg, #0E1526 0%, #2D5BFF 100%);
-  --focus-ring: 2px solid var(--beacon-500);
-  --focus-offset: 2px;
-
-  /* Semantic aliases used by components */
-  --bg: var(--paper);
-  --accent: var(--teal-600);
-  --accent-hover: var(--teal-500);
-  /* 700 text shades: the only way 12-13px status text passes AA on the 100 tints and on white. */
-  --teal-700: var(--beacon-700);
-  --green-700: #157056;
-  --amber-700: #8A5809;
-  --ok: var(--green-600);
-  --ok-bg: var(--green-100);
-  --warn: var(--amber-600);
-  --warn-bg: var(--amber-100);
-  --error: var(--red-600);
-  --error-bg: var(--red-100);
-  --info: var(--teal-600);
-  --info-bg: var(--teal-100);
-  --ok-text: var(--green-700);
-  --warn-text: var(--amber-700);
-  --error-text: var(--red-600);
-  --info-text: var(--teal-700);
-  --pending: var(--text-muted);
-  --pending-bg: var(--surface-2);
-  --line: #DCE1EA;
-
-  /* ── Clearance semantic layer (docs/clearance-signal-plan.md) ──────────
-     One signal colour for routes, selection and the primary action;
-     functional colours for state; mono for evidence. Ember is brand
-     chrome only. */
-  --surface-canvas: var(--paper);
-  --surface-raised: var(--surface);
-  --surface-subtle: var(--surface-2);
-  --surface-navigation: var(--ink-900);
-  --surface-navigation-active: var(--ink-700);
-  --surface-selected: var(--teal-100);
-  --surface-verified: var(--green-100);
-  --surface-attention: var(--amber-100);
-  --surface-exception: var(--red-100);
-  --signal: var(--teal-600);
-  --signal-hover: var(--teal-500);
-  --signal-contrast: #FFFFFF; /* text on a signal fill; night in dark mode where beacon lifts */
-  --state-data: var(--teal-300);
-  --state-verified: var(--green-700);
-  --state-attention: var(--amber-700);
-  --state-exception: var(--red-600);
-  --text-on-dark: #E9EDF5;
-  --brand-ember: var(--ember-500);
-  --border-default: var(--line);
-  --border-strong: #C6CDD9;
-  --focus-ring: var(--teal-500);
-  --font-interface: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
-  --font-evidence: var(--font-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
-  --tracking-label: 0.055em;
-  --r-control: 8px;
-  --sidebar-width: 11.5rem;
-  --sidebar-collapsed-width: 4rem;
-  --topbar-height: 3rem;
-  --inspector-width: 25rem;
-  --control-height: 2.5rem;
-  --control-height-compact: 2rem;
-  --row-height: 2.75rem;
-  --row-height-compact: 2.25rem;
-  --dur-fast: 120ms;
-  --dur-ui: 160ms;
-  --line-strong: #C6CDD9;
-
-  /* ── Legacy v1 names (illustration-only in v2; kept for unmigrated surfaces) */
+  --bg: #F6F0ED;
   --ink: #1F4452;
   --slate: #326273;
   --teal: #5C9EAD;
   --coral: #E39774;
   --gold: #D9A441;
 
-  /* ── Typography ──────────────────────────────────────────────────────── */
+  --surface: #FFFFFF;
+  --surface-2: #FBF7F5;
+  --line: #E5DCD6;
+  --line-strong: #C9BDB5;
+
+  --ok: #2E7D6B;
+  --ok-bg: #E4F1ED;
+  --warn: #B4690E;
+  --warn-bg: #FBEFDD;
+  --error: #B3402F;
+  --error-bg: #F9E7E3;
+  --info: #326273;
+  --info-bg: #E7EEF1;
+  --pending: #6B7C85;
+  --pending-bg: #EDEFF0;
+
   --font-sans: 'Geist', system-ui, sans-serif;
   --font-mono: 'Geist Mono', ui-monospace, monospace;
-  --text-display: clamp(2.25rem, 6vw, 3.5rem);
-  --text-h1: clamp(1.875rem, 5vw, 2.5rem);
-  --text-h2: clamp(1.5rem, 4vw, 1.75rem);
-  --text-h3: 1.25rem;
-  --text-body: 1rem;
-  --text-body-sm: 0.9375rem;
-  --text-caption: 0.8125rem;
   --text-xs: .75rem;
   --text-sm: .875rem;
   --text-base: 1rem;
@@ -135,13 +31,12 @@
   --text-xl: 1.375rem;
   --text-2xl: 1.75rem;
   --text-3xl: 2.25rem;
-  --leading-tight: 1.1;
+  --text-display: clamp(2.5rem, 5vw, 4rem);
+  --leading-tight: 1.15;
   --leading-normal: 1.55;
   --tracking-display: -0.02em;
   --tracking-caps: 0.08em;
-  --tracking-caption: 0.01em;
 
-  /* ── Spacing (4-pt) · section rhythm 96 / 64 ─────────────────────────── */
   --s1: 4px;
   --s2: 8px;
   --s3: 12px;
@@ -151,165 +46,19 @@
   --s7: 48px;
   --s8: 64px;
   --s9: 96px;
-  --section-y: 96px;
-  --section-y-sm: 64px;
-
-  /* ── Radii ───────────────────────────────────────────────────────────── */
-  --r-sm: 12px;
-  --r-md: 16px;
-  --r-lg: 20px;
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 16px;
   --r-pill: 999px;
+  --shadow-1: 0 1px 2px rgb(31 68 82 / .06);
+  --shadow-2: 0 4px 12px rgb(31 68 82 / .08);
+  --shadow-3: 0 12px 32px rgb(31 68 82 / .12);
 
-  /* ── Elevation ───────────────────────────────────────────────────────── */
-  --shadow-rest: 0 1px 2px rgba(14, 21, 38, .05);
-  --shadow-elevated: 0 8px 24px rgba(14, 21, 38, .10);
-  --shadow-1: var(--shadow-rest);
-  --shadow-2: 0 4px 12px rgba(14, 21, 38, .08);
-  --shadow-3: var(--shadow-elevated);
-
-  /* ── Motion · 220 UI / 320 flows / 400 reveals ───────────────────────── */
-  --dur-ui: 220ms;
-  --dur-flow: 320ms;
-  --dur-reveal: 400ms;
-  --ease-out: cubic-bezier(.22, 1, .36, 1);
   --dur-fast: 120ms;
-  --dur-base: var(--dur-ui);
-  --dur-slow: var(--dur-flow);
+  --dur-base: 200ms;
+  --dur-slow: 320ms;
   --dur-scene: 600ms;
-  --ease-standard: var(--ease-out);
+  --ease-standard: cubic-bezier(.2, 0, 0, 1);
   --ease-decel: cubic-bezier(0, 0, 0, 1);
   --ease-accel: cubic-bezier(.3, 0, 1, 1);
-
-  color-scheme: light;
-}
-
-/* ─── Dark mode ────────────────────────────────────────────────────────────
-   Follows the system unless the viewer chose a theme (data-theme on <html>,
-   set by components/system/ThemeToggle). Beacon lifts to its 300 tint for
-   text and links; text meets AA on every surface. */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --paper: #0B1020;
-    --bg: #0B1020;
-    --surface: #121A2E;
-    --surface-2: #1A2340;
-    --text: #E9EDF5;
-    --text-2: #B9C2D3;
-    --text-muted: #99A3B8;
-    --border: #26304A;
-    --divider: #1E2740;
-    --line: #26304A;
-    --line-strong: #33405E;
-    --accent: #8FA8FF;
-    --accent-hover: #A9BCFF;
-    --teal-600: #8FA8FF;
-    --teal-500: #A9BCFF;
-    --teal-100: #1E2A52;
-    --signal-contrast: #0B1020;
-    --ok: #5FD3A8;
-    --ok-bg: #123B31;
-    --green-100: #123B31;
-    --warn: #E8B04B;
-    --warn-bg: #3A2C0E;
-    --amber-100: #3A2C0E;
-    --error: #F08A82;
-    --error-bg: #3E1B18;
-    --red-100: #3E1B18;
-    --info: #8FA8FF;
-    --info-bg: #1E2A52;
-    --ok-text: #5FD3A8;
-    --warn-text: #E8B04B;
-    --error-text: #F08A82;
-    --info-text: #8FA8FF;
-    --teal-700: #8FA8FF;
-    --green-700: #5FD3A8;
-    --amber-700: #E8B04B;
-    --pending-bg: #1A2340;
-
-    /* Clearance semantic layer, restated. A custom property that references
-       another resolves where it is declared, so aliases set on :root keep the
-       light values inside a scoped [data-theme="dark"] region (the gallery,
-       a dark preview panel). Restating them here is what makes scoped dark
-       actually dark. */
-    --surface-canvas: var(--paper);
-    --surface-raised: var(--surface);
-    --surface-subtle: var(--surface-2);
-    --surface-selected: var(--teal-100);
-    --surface-verified: var(--green-100);
-    --surface-attention: var(--amber-100);
-    --surface-exception: var(--red-100);
-    --signal: var(--teal-600);
-    --signal-hover: var(--teal-500);
-    --state-verified: var(--green-700);
-    --state-attention: var(--amber-700);
-    --state-exception: var(--red-600);
-    --border-default: var(--line);
-    --border-strong: var(--line-strong);
-    --shadow-rest: 0 1px 2px rgba(0, 0, 0, .35);
-    --shadow-elevated: 0 8px 24px rgba(0, 0, 0, .45);
-    color-scheme: dark;
-  }
-}
-
-:root[data-theme="dark"],
-[data-theme="dark"] {
-  --paper: #0B1020;
-  --bg: #0B1020;
-  --surface: #121A2E;
-  --surface-2: #1A2340;
-  --text: #E9EDF5;
-  --text-2: #B9C2D3;
-  --text-muted: #99A3B8;
-  --border: #26304A;
-  --divider: #1E2740;
-  --line: #26304A;
-  --line-strong: #33405E;
-  --accent: #8FA8FF;
-  --accent-hover: #A9BCFF;
-  --teal-600: #8FA8FF;
-  --teal-500: #A9BCFF;
-  --teal-100: #1E2A52;
-  --signal-contrast: #0B1020;
-  --ok: #5FD3A8;
-  --ok-bg: #123B31;
-  --green-100: #123B31;
-  --warn: #E8B04B;
-  --warn-bg: #3A2C0E;
-  --amber-100: #3A2C0E;
-  --error: #F08A82;
-  --error-bg: #3E1B18;
-  --red-100: #3E1B18;
-  --info: #8FA8FF;
-  --info-bg: #1E2A52;
-  --ok-text: #5FD3A8;
-  --warn-text: #E8B04B;
-  --error-text: #F08A82;
-  --info-text: #8FA8FF;
-  --teal-700: #8FA8FF;
-  --green-700: #5FD3A8;
-  --amber-700: #E8B04B;
-  --pending-bg: #1A2340;
-
-  /* Clearance semantic layer, restated. A custom property that references
-     another resolves where it is declared, so aliases set on :root keep the
-     light values inside a scoped [data-theme="dark"] region (the gallery,
-     a dark preview panel). Restating them here is what makes scoped dark
-     actually dark. */
-  --surface-canvas: var(--paper);
-  --surface-raised: var(--surface);
-  --surface-subtle: var(--surface-2);
-  --surface-selected: var(--teal-100);
-  --surface-verified: var(--green-100);
-  --surface-attention: var(--amber-100);
-  --surface-exception: var(--red-100);
-  --signal: var(--teal-600);
-  --signal-hover: var(--teal-500);
-  --state-verified: var(--green-700);
-  --state-attention: var(--amber-700);
-  --state-exception: var(--red-600);
-  --border-default: var(--line);
-  --border-strong: var(--line-strong);
-  --shadow-rest: 0 1px 2px rgba(0, 0, 0, .35);
-  --shadow-elevated: 0 8px 24px rgba(0, 0, 0, .45);
-  color-scheme: dark;
 }

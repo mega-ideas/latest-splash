@@ -7,10 +7,6 @@ import { ArrowLeft, ArrowRight } from 'lucide-react';
 import RoadmapChip from '@/components/supply/RoadmapChip';
 import DiscountTermSheet from '@/components/supply/DiscountTermSheet';
 import WorkingCapitalFlywheel from '@/components/supply/WorkingCapitalFlywheel';
-import PostureFooter from '@/components/brand/PostureFooter';
-import SandboxRibbon from '@/components/brand/SandboxRibbon';
-import { brand } from '@/lib/brand';
-import { getNetworkProfile } from '@/lib/network';
 
 export const metadata: Metadata = {
   title: 'Dynamic discounting for Southeast Asia — early invoice payment on Splash (roadmap)',
@@ -138,7 +134,6 @@ function FlowCards({ items }: { items: typeof receivableFacts }) {
 export default function WorkingCapitalPage() {
   return (
     <main className="wc-page">
-      <SandboxRibbon />
       <header className="wc-topbar">
         <div className="iso-shell wc-topbar-inner">
           <Link href="/" className="iso-brand" aria-label="Splash Finance home">
@@ -280,11 +275,8 @@ export default function WorkingCapitalPage() {
 
       <footer className="wc-footer">
         <div className="iso-shell wc-footer-inner">
-          <span>{brand.copyright}</span>
-          <span>Supply loop: roadmap · Settle loop: {getNetworkProfile().badges.live ?? `${getNetworkProfile().badges.network} sandbox`}</span>
-        </div>
-        <div className="iso-shell wc-footer-posture">
-          <PostureFooter />
+          <span>© 2026 Splash Financial Labuan Ltd.</span>
+          <span>Supply loop: roadmap · Settle loop: live on testnet</span>
         </div>
       </footer>
     </main>

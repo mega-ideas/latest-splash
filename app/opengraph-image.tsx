@@ -1,14 +1,6 @@
 import { ImageResponse } from 'next/og';
 
-import { brand } from '@/lib/brand';
-import { getNetworkProfile } from '@/lib/network';
-
-export const alt = brand.assets.ogAlt;
-
-const ogProfile = getNetworkProfile();
-const ogChips = ogProfile.live
-  ? [ogProfile.badges.live as string, 'Atomic settlement', 'Regulator-ready by design']
-  : ['Sandbox', ogProfile.badges.network, 'No customer funds'];
+export const alt = 'Splash working-capital network for Southeast Asia payouts';
 export const size = {
   width: 1200,
   height: 630,
@@ -198,12 +190,15 @@ export default function OpenGraphImage() {
               letterSpacing: '-2px',
             }}
           >
-            <div style={{ display: 'flex' }}>Send USD across</div>
-            <div style={{ display: 'flex' }}>Southeast Asia</div>
-            <div style={{ display: 'flex', color: colors.teal }}>in minutes.</div>
+            <div style={{ display: 'flex' }}>Collect USD.</div>
+            <div style={{ display: 'flex' }}>Pay Southeast Asia.</div>
+            <div style={{ display: 'flex' }}>
+              <div style={{ display: 'flex', width: 390, whiteSpace: 'nowrap' }}>Keep cash</div>
+              <div style={{ display: 'flex', color: colors.teal, fontStyle: 'italic' }}>working.</div>
+            </div>
           </div>
           <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
-            {ogChips.map((item) => (
+            {['Sandbox', 'Sui testnet', 'No customer funds'].map((item) => (
               <div
                 key={item}
                 style={{

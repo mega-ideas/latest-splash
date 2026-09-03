@@ -218,7 +218,7 @@ export default async function QueuePage() {
           <div className="flex items-center gap-3">
             <Image src="/splash-main-icon.png" alt="Splash" width={40} height={39} className="h-10 w-10 object-contain" />
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--info-text)]">0xWal control room</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--info)]">0xWal control room</p>
               <h1 className="text-3xl font-bold tracking-normal text-[#1F4452]">Approval queue</h1>
             </div>
           </div>

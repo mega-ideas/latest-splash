@@ -1,22 +1,24 @@
-import Web3Landing from "@/components/landing-w3/Web3Landing";
-import { brand } from "@/lib/brand";
+import { headers } from "next/headers";
 
-const SITE_URL = brand.siteUrl;
+import IsometricLanding from "@/components/IsometricLanding";
+import { isPhoneUserAgent } from "@/lib/device";
+
+const SITE_URL = "https://splash.finance";
 
 // Organization schema: contactPoint only — deliberately no founder Person.
 const organizationJsonLd = {
   "@context": "https://schema.org",
   "@type": "Organization",
-  name: brand.name,
-  legalName: brand.legalEntity,
+  name: "Splash",
+  legalName: "Splash Financial Labuan Ltd.",
   url: SITE_URL,
-  logo: `${SITE_URL}${brand.assets.icon}`,
+  logo: `${SITE_URL}/splash-main-icon.png`,
   description:
     "Compliance-gated B2B account network for cross-border payments in Southeast Asia: collect USD, pay out locally, with human approval on every AI-prepared action.",
   contactPoint: {
     "@type": "ContactPoint",
     contactType: "customer support",
-    email: brand.supportEmail,
+    email: "support@splash.finance",
   },
 };
 
@@ -29,7 +31,7 @@ const faqJsonLd = {
       name: "What is Splash?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "Splash is a compliance-gated B2B account network for cross-border money in Southeast Asia. Businesses send USD and pay out locally — starting with the Philippines and Indonesia — with human approval on every AI-prepared action. No customer funds are held until MFCA activation.",
+        text: "Splash is a compliance-gated B2B account network for cross-border money in Southeast Asia. Businesses collect USD and pay out locally — starting with the USD to PHP corridor on testnet — with human approval on every AI-prepared action.",
       },
     },
     {
@@ -53,7 +55,7 @@ const faqJsonLd = {
       name: "What does a payout cost?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "Corridor fees are illustrative and start from a 0.80% edge fee; the exact fee varies by corridor and volume. Programmable settlement is gas-sponsored — you never hold SUI.",
+        text: "Corridor fees start from a 0.80% edge fee. Simple USD payouts ride Sui's zero-fee rail and programmable settlement is gas-sponsored — you never hold SUI.",
       },
     },
     {
@@ -66,18 +68,24 @@ const faqJsonLd = {
     },
     {
       "@type": "Question",
-      name: "Does Splash pay a treasury rate today?",
+      name: "Is the treasury yield fixed?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "No. Smart Treasury is a roadmap capability shown as a projection with a variable rate, never a fixed figure. It goes live only when the e-money licence is granted, and every treasury action requires explicit business approval.",
+        text: "No. Treasury posture is a projection with a variable rate — never a fixed figure — and every treasury action requires explicit business approval.",
       },
     },
   ],
 };
 
-export default function Home() {
-  // One responsive tree for every device: viewport width queries decide the
-  // reflow and the non-pinned hero, never the user agent.
+export default async function Home() {
+  // Every device gets the isometric cinematic — the desktop identity — but
+  // phones get it "shrunk to fit": a reflowed single column with readable
+  // type, and the non-pinned static hero instead of the scroll-jacked one.
+  // Phone is decided server-side from the UA so the right hero arrives on
+  // the first byte (no flash), and CSS width queries handle the reflow.
+  const headerStore = await headers();
+  const isPhone = isPhoneUserAgent(headerStore.get("user-agent"));
+
   return (
     <>
       <script
@@ -88,7 +96,7 @@ export default function Home() {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd).replace(/</g, "\\u003c") }}
       />
-      <Web3Landing />
+      <IsometricLanding isPhone={isPhone} />
     </>
   );
 }

@@ -45,14 +45,14 @@ export type ReceiptProps = {
   networkLine?: string;
 };
 
-const INK = 'var(--text)';
-const SLATE = 'var(--text-2)';
-const TEAL = 'var(--teal-500)';
-const OK = 'var(--green-600)';
-const OK_BG = 'var(--green-100)';
-const LINE = 'var(--line)';
-const MUTE = 'var(--text-muted)';
-const MUTE_BG = 'var(--surface-2)';
+const INK = '#1F4452';
+const SLATE = '#326273';
+const TEAL = '#5C9EAD';
+const OK = '#2E7D6B';
+const OK_BG = '#E4F1ED';
+const LINE = '#E5DCD6';
+const MUTE = '#6B7C85';
+const MUTE_BG = '#EDEFF0';
 
 function toNumber(value: string | number | undefined): number | null {
   if (value === undefined) return null;
@@ -96,7 +96,7 @@ const SettlementReceipt = forwardRef<HTMLDivElement, ReceiptProps>(function Sett
   return (
     <div
       ref={ref}
-      className="relative mx-auto max-w-xl overflow-hidden rounded-2xl bg-[var(--surface)] font-sans text-[var(--text)] shadow-[0_12px_32px_rgb(31_68_82_/.12)] [print-color-adjust:exact] [-webkit-print-color-adjust:exact]"
+      className="relative mx-auto max-w-xl overflow-hidden rounded-2xl bg-white font-sans text-[#1F4452] shadow-[0_12px_32px_rgb(31_68_82_/.12)] [print-color-adjust:exact] [-webkit-print-color-adjust:exact]"
       style={{ fontVariantNumeric: 'tabular-nums' }}
     >
       <div className="h-1.5 w-full" style={{ background: `linear-gradient(90deg, ${SLATE} 0%, ${TEAL} 100%)` }} />
@@ -137,8 +137,8 @@ const SettlementReceipt = forwardRef<HTMLDivElement, ReceiptProps>(function Sett
         {/* Perforation */}
         <div className="relative my-6" aria-hidden>
           <div className="border-t border-dashed" style={{ borderColor: LINE }} />
-          <span className="absolute -left-10 top-1/2 h-5 w-5 -translate-y-1/2 rounded-full bg-[var(--surface-2)]" />
-          <span className="absolute -right-10 top-1/2 h-5 w-5 -translate-y-1/2 rounded-full bg-[var(--surface-2)]" />
+          <span className="absolute -left-10 top-1/2 h-5 w-5 -translate-y-1/2 rounded-full bg-[#F6F0ED]" />
+          <span className="absolute -right-10 top-1/2 h-5 w-5 -translate-y-1/2 rounded-full bg-[#F6F0ED]" />
         </div>
 
         {/* Business detail grid */}
@@ -182,7 +182,7 @@ const SettlementReceipt = forwardRef<HTMLDivElement, ReceiptProps>(function Sett
         </dl>
 
         {/* Delivery strip */}
-        <div className="mt-6 flex items-center justify-between rounded-xl px-4 py-3" style={{ background: 'var(--surface-2)' }}>
+        <div className="mt-6 flex items-center justify-between rounded-xl px-4 py-3" style={{ background: '#E7EEF1' }}>
           <TimelineStep label="Approved" done />
           <TimelineArrow />
           <TimelineStep label="Sent" done={delivered} />
@@ -256,7 +256,7 @@ function TimelineStep({ label, done }: { label: string; done?: boolean }) {
     <div className="flex flex-1 flex-col items-center gap-1 text-center">
       <span
         className="flex h-6 w-6 items-center justify-center rounded-full"
-        style={done ? { background: OK, color: 'var(--surface)' } : { background: MUTE_BG, color: MUTE }}
+        style={done ? { background: OK, color: '#FFFFFF' } : { background: MUTE_BG, color: MUTE }}
       >
         {done ? <Check className="h-3.5 w-3.5" /> : <Clock className="h-3 w-3" />}
       </span>

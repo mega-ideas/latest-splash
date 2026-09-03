@@ -5,7 +5,6 @@ import { ClipboardCheck, Copy, Database, ExternalLink, FileText, Lock, ShieldChe
 import { toast } from 'sonner';
 
 import type { AuditReceipt, InvoiceRecord, SweepJob, TransferIntentRecord } from '@/lib/server/operations';
-import { explorerTxUrl } from '@/lib/network';
 import type { SealPolicy } from '@/lib/server/seal';
 
 type AuditView = { transfer: TransferIntentRecord; receipt: AuditReceipt; invoice: InvoiceRecord | null; sweepJob: SweepJob | null; policy: SealPolicy | null };
@@ -54,7 +53,7 @@ export default function AuditPage({ params }: { params: Promise<{ intentId: stri
         <pre className="mt-4 overflow-x-auto rounded-xl bg-muted/60 p-4 text-[13px] font-semibold text-foreground/70">{JSON.stringify(view.receipt.extractionSnapshot ?? { status: 'No extraction snapshot linked' }, null, 2)}</pre>
       </section>
       <section className="dash-surface p-6"><h2 className="text-lg font-bold">Status history</h2><div className="mt-5 space-y-4">{view.receipt.statusHistory.map((event, index) => <div key={`${event.state}-${event.at}`} className="grid grid-cols-[auto_1fr_auto] items-center gap-3"><span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary text-[13px] font-bold text-card">{index + 1}</span><strong>{event.state}</strong><time className="text-[13px] text-foreground/45">{new Date(event.at).toLocaleString()}</time></div>)}</div></section>
-      {view.receipt.suiTxDigest && <a href={explorerTxUrl(view.receipt.suiTxDigest)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-sm font-bold text-primary">Open Sui proof <ExternalLink className="h-4 w-4" /></a>}
+      {view.receipt.suiTxDigest && <a href={`https://testnet.suivision.xyz/txblock/${view.receipt.suiTxDigest}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-sm font-bold text-primary">Open Sui proof <ExternalLink className="h-4 w-4" /></a>}
       {view.receipt.suiTxDigest && <button onClick={() => { void navigator.clipboard.writeText(view.receipt.suiTxDigest!); toast.success('Sui digest copied'); }} className="ml-3 inline-flex items-center gap-2 text-sm font-bold text-primary"><Copy className="h-4 w-4" /> Copy Sui digest</button>}
       <button onClick={() => { void navigator.clipboard.writeText(intentId); toast.success('Intent ID copied'); }} className="ml-3 inline-flex items-center gap-2 text-sm font-bold text-primary"><Copy className="h-4 w-4" /> Copy intent ID</button>
     </div>

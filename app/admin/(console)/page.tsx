@@ -6,7 +6,6 @@ import { adminConsolePath } from '@/lib/admin-routing';
 import { listKybCases } from '@/lib/server/kyb';
 import { listSupportTickets } from '@/lib/server/support';
 import { getOperatorWalletInfo } from '@/lib/server/sui-settlement';
-import { explorerAccountUrl, resolveNetwork } from '@/lib/network';
 
 export const dynamic = 'force-dynamic';
 
@@ -99,14 +98,14 @@ export default async function AdminOverviewPage() {
           </div>
           <div className="mt-3 flex flex-wrap gap-3 text-xs">
             <a
-              href={explorerAccountUrl(wallet.address)}
+              href={`https://${process.env.SUI_NETWORK ?? 'testnet'}.suivision.xyz/account/${wallet.address}`}
               target="_blank"
               rel="noopener noreferrer"
               className="rounded-lg border border-[#5C9EAD]/40 px-3 py-1.5 font-semibold text-[#326273] hover:border-[#5C9EAD]"
             >
               View on Sui Explorer
             </a>
-            {resolveNetwork() === 'testnet' && (
+            {(process.env.SUI_NETWORK ?? 'testnet') === 'testnet' && (
               <a
                 href={`https://faucet.testnet.sui.io/?address=${wallet.address}`}
                 target="_blank"

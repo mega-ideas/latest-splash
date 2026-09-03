@@ -31,7 +31,7 @@ export default function MoneyPathPanel({ compact = false }: { compact?: boolean 
     >
       <summary className="flex cursor-pointer flex-wrap items-center justify-between gap-2 bg-[#F6F0ED]/70 px-4 py-3 [&::-webkit-details-marker]:hidden">
         <span className="flex items-center gap-2 text-sm font-semibold text-[#1F4452]">
-          <ShieldCheck size={15} className="shrink-0 text-[var(--info-text)]" aria-hidden="true" />
+          <ShieldCheck size={15} className="shrink-0 text-[var(--info)]" aria-hidden="true" />
           {MONEY_PATH_HEADER}
         </span>
         <ChevronDown size={15} aria-hidden="true" className="shrink-0 text-[#326273]/45 transition-transform group-open:rotate-180" />
@@ -39,7 +39,7 @@ export default function MoneyPathPanel({ compact = false }: { compact?: boolean 
       <div className="flex justify-end border-t border-[#326273]/10 px-4 pt-2">
         <Link
           href="/trust"
-          className="text-[13px] font-medium text-[var(--info-text)] underline-offset-4 hover:underline"
+          className="text-[13px] font-medium text-[var(--info)] underline-offset-4 hover:underline"
         >
           Trust &amp; compliance
         </Link>
@@ -54,7 +54,7 @@ export default function MoneyPathPanel({ compact = false }: { compact?: boolean 
               <span
                 aria-hidden="true"
                 className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
-                  isSplashStep ? 'bg-[#1F4452] text-white' : 'bg-[var(--info-bg)] text-[var(--info-text)]'
+                  isSplashStep ? 'bg-[#1F4452] text-white' : 'bg-[var(--info-bg)] text-[var(--info)]'
                 }`}
               >
                 <Icon size={15} />

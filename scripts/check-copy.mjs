@@ -130,13 +130,23 @@ function forbiddenClaimViolations(text, relPath) {
   return found;
 }
 
-// ── Palette v2 (docs/design-system.md §1.1) ───────────────────────────────
-// Raw hex literals in app|components must come from Palette v2. The v1
-// palette (#E39774 coral, #1F4452 ink, #F6F0ED paper, #6FB4A0 mint, and the
-// landing's local teal/gold family) is retired from UI and allowed ONLY under
-// components/illustrations/. Files that still carry v1 hexes are listed in
-// `legacyHexAllowances` and shrink to nothing as each surface migrates; a NEW
-// file, or a new v1 hex in an old file, fails here.
+// ── Palette gate (RETIRED) ────────────────────────────────────────────────
+// This gate enforced the Palette v2 migration: raw hex literals in
+// app|components had to come from v2, with a per-file grandfather list that
+// shrank as each surface migrated.
+//
+// The frontend was reverted to the original v1 design (branch
+// restore/main-frontend), which undoes that migration, so the gate no longer
+// describes the codebase and every v1 surface would fail it. It is switched
+// off rather than deleted, and rather than grandfathering the entire frontend
+// — which would leave a check that passes by construction and tells you
+// nothing. The palette tables below are kept so the gate can be turned back
+// on with `PALETTE_GATE = true` if the design system returns.
+//
+// The compliance claims rules above (never "licensed", the MFCA is never a
+// licence, roadmap capabilities never read as live, "guaranteed" banned) are
+// untouched and still enforced.
+const PALETTE_GATE = false;
 const paletteV2 = new Set([
   // Palette v3 'Clear Air'
   '#0e1526', '#1a2440', '#1e42d8', '#2d5bff', '#4a72ff', '#8fa8ff', '#e4eaff', '#ff6a3d', '#f5f7fa', '#eaeef4', '#4b5568', '#5d6779', '#dce1ea', '#e7ebf1', '#c6cdd9', '#e9edf5',
@@ -194,6 +204,7 @@ function hexViolations(text, relPath) {
   const found = [];
   const legacy = new Set(legacyHexAllowances[relPath] ?? []);
   const isIllustration = relPath.startsWith('components/illustrations/');
+  if (!PALETTE_GATE) return found;
   for (const match of text.matchAll(hexPattern)) {
     const hex = match[0].toLowerCase();
     if (paletteV2.has(hex)) continue;

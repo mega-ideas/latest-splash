@@ -1,9 +1,7 @@
 import { redirect } from 'next/navigation';
 import type { ReactNode } from 'react';
 
-import '@/styles/legacy.css';
-import { Providers } from '@/app/providers';
-import AppShell from '@/components/dashboard/AppShell';
+import DashboardShell from '@/components/dashboard/DashboardShell';
 import { getCustomerSession } from '@/lib/server/customer-auth';
 import { readKybGateState } from '@/lib/server/kyb-gate';
 
@@ -23,9 +21,5 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   // (lib/server/kyb-gate.ts), because /queue lives outside this layout.
   const kyb = await readKybGateState(session);
 
-  return (
-    <Providers>
-      <AppShell session={session} kyb={kyb}>{children}</AppShell>
-    </Providers>
-  );
+  return <DashboardShell session={session} kyb={kyb}>{children}</DashboardShell>;
 }

@@ -1,0 +1,1899 @@
+/* ═══════════════════════════════════════════════════════════════════
+   Settlement Cinematic  (.cin-*)
+   Scroll-pinned hero → telemetry scan → push-through → product vision,
+   on the bright brand stage: paper cream, teal ink, gold. The main
+   object is the enhanced isometric SEA network artwork; satellites are
+   isometric currency tokens (USD · MYR · Sui). Type and buttons reuse
+   the landing's own iso-* classes. Layers (z): backdrop 0 · object 2 ·
+   tokens 3 · edge glow 4 · telemetry 5 · copy 6 · flash 7 · vision 8.
+   Only transform/opacity animate.
+   ═══════════════════════════════════════════════════════════════════ */
+
+.cin-section {
+  --cin-paper: #fffaf4;
+  --cin-paper-deep: #f8f0e5;
+  --cin-ink: #0c3e48;
+  --cin-teal: #0d6370;
+  --cin-teal-dark: #083640;
+  --cin-mint: #9fcfc7;
+  --cin-gold: #efc46f;
+  --cin-line: rgba(12, 62, 72, .16);
+  position: relative;
+  order: 1; /* .iso-landing lays sections out with flex order */
+  height: 520vh;
+  color: var(--cin-ink);
+  background: linear-gradient(180deg, #fffdf8 0%, var(--cin-paper) 30%, #fbf3e7 70%, var(--cin-paper-deep) 100%);
+}
+
+.cin-sticky {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  height: 100svh;
+  overflow: hidden;
+}
+
+/* ── Backdrop: soft brand orbs + isometric grid ───────────────────── */
+
+.cin-orb {
+  position: absolute;
+  z-index: 0;
+  border-radius: 50%;
+  pointer-events: none;
+  filter: blur(70px);
+}
+
+.cin-orb-gold {
+  top: -14%;
+  right: -10%;
+  width: 48vw;
+  height: 48vw;
+  background: radial-gradient(circle, rgba(239, 196, 111, .42), transparent 70%);
+}
+
+.cin-orb-mint {
+  bottom: -16%;
+  left: -12%;
+  width: 42vw;
+  height: 42vw;
+  background: radial-gradient(circle, rgba(159, 207, 199, .5), transparent 70%);
+}
+
+.cin-grid {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background-image:
+    linear-gradient(rgba(12, 62, 72, .06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(12, 62, 72, .06) 1px, transparent 1px);
+  background-size: 68px 68px;
+  -webkit-mask-image: radial-gradient(ellipse 90% 75% at 55% 45%, rgba(0, 0, 0, .9), transparent 78%);
+  mask-image: radial-gradient(ellipse 90% 75% at 55% 45%, rgba(0, 0, 0, .9), transparent 78%);
+}
+
+.cin-vignette {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(255, 253, 248, .85) 0%, transparent 13%),
+    radial-gradient(ellipse 120% 95% at 50% 46%, transparent 56%, rgba(226, 206, 180, .32) 100%);
+}
+
+/* ── The network artwork + floating currency tokens ───────────────── */
+
+.cin-object-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
+.cin-object {
+  position: relative;
+  width: min(62vw, 940px);
+}
+
+.cin-object img {
+  width: 100%;
+  height: auto;
+  filter: drop-shadow(0 42px 60px rgba(12, 62, 72, .2));
+}
+
+.cin-object-glow {
+  position: absolute;
+  inset: -14%;
+  z-index: -1;
+  background:
+    radial-gradient(circle at 52% 46%, rgba(239, 196, 111, .22), transparent 55%),
+    radial-gradient(circle at 44% 62%, rgba(159, 207, 199, .18), transparent 60%);
+  filter: blur(8px);
+}
+
+.cin-float {
+  animation: cin-float 9s ease-in-out infinite;
+  will-change: transform;
+}
+
+.cin-float-slow {
+  animation-duration: 13s;
+  animation-delay: -4s;
+}
+
+.cin-float-drift {
+  animation-duration: 11s;
+  animation-delay: -7s;
+}
+
+@keyframes cin-float {
+  0%, 100% { transform: translate3d(0, 0, 0) rotate(0deg); }
+  50% { transform: translate3d(0, -14px, 0) rotate(.5deg); }
+}
+
+.cin-tokens {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.cin-token {
+  position: absolute;
+  width: var(--token-size, 160px);
+}
+
+.cin-token img {
+  width: 100%;
+  height: auto;
+  filter: drop-shadow(0 22px 30px rgba(12, 62, 72, .24));
+}
+
+.cin-token-usd { top: 12%; right: 26%; --token-size: 170px; }
+.cin-token-myr { bottom: 7%; left: 34%; --token-size: 140px; transform: rotate(-8deg); }
+.cin-token-sui { bottom: 13%; right: 4%; --token-size: 200px; transform: rotate(7deg); }
+
+.cin-token-button {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: transform .2s ease;
+}
+
+.cin-token-button:hover {
+  transform: translateY(-4px);
+}
+
+.cin-token-button:focus-visible {
+  outline: 2px solid var(--cin-teal);
+  outline-offset: 6px;
+  border-radius: 50%;
+}
+
+.cin-token-button.is-spinning {
+  animation: cin-spin 2.4s cubic-bezier(.25, .6, .3, 1);
+}
+
+.cin-token-inner {
+  display: block;
+}
+
+@keyframes cin-spin {
+  from { transform: perspective(600px) rotateY(0deg); }
+  to { transform: perspective(600px) rotateY(1800deg); }
+}
+
+/* Loading state: soft shimmer until the artwork decodes. */
+.cin-object-poster {
+  position: absolute;
+  inset: 16% 8%;
+  border-radius: 26px;
+  background:
+    radial-gradient(circle at 50% 45%, rgba(239, 196, 111, .25), transparent 55%),
+    radial-gradient(circle at 48% 62%, rgba(159, 207, 199, .22), transparent 60%);
+  animation: cin-breathe 2.4s ease-in-out infinite;
+}
+
+@keyframes cin-breathe {
+  0%, 100% { opacity: .45; transform: scale(.97); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+/* ── Act I · hero copy (type + buttons come from iso-*) ───────────── */
+
+.cin-copy-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+}
+
+.cin-copy {
+  width: 100%;
+  padding-top: 60px;
+}
+
+/* Height-aware sizing: the hero must fit one viewport on short laptops,
+   so type and rhythm scale with vh as well as vw. */
+.cin-copy .iso-display {
+  max-width: 640px;
+  margin-top: clamp(10px, 2vh, 22px);
+  font-size: clamp(44px, min(7.2vw, 11vh), 120px);
+}
+
+.cin-copy .iso-hero-description {
+  max-width: 500px;
+  margin-top: clamp(14px, 2.6vh, 32px);
+  font-size: clamp(13.5px, 1.9vh, 16px);
+}
+
+.cin-copy .iso-hero-actions {
+  margin-top: clamp(14px, 2.8vh, 28px);
+}
+
+.cin-copy .iso-proof-line {
+  margin-top: clamp(14px, 3vh, 30px);
+}
+
+@media (max-height: 760px) {
+  .cin-copy {
+    padding-top: 72px;
+  }
+
+  .cin-object {
+    width: min(56vw, 720px);
+  }
+
+  .cin-token-usd { --token-size: 130px; }
+  .cin-token-myr { --token-size: 110px; }
+  .cin-token-sui { --token-size: 150px; }
+}
+
+/* ── Act II · telemetry callouts + scan frame ─────────────────────── */
+
+/* Telemetry chips: ticket-style readouts with a gold seam, corner
+   brackets, and a live pinging tag dot. */
+.cin-callout {
+  position: relative;
+  position: absolute;
+  z-index: 5;
+  display: grid;
+  gap: 6px;
+  max-width: 270px;
+  border: 1px solid rgba(12, 62, 72, .18);
+  border-radius: 6px;
+  padding: 15px 18px 13px;
+  background: linear-gradient(180deg, #fffefb 0%, #fdf6ea 100%);
+  box-shadow:
+    6px 6px 0 rgba(8, 54, 64, .88),
+    0 26px 46px rgba(8, 54, 64, .14);
+}
+
+.cin-callout::before {
+  position: absolute;
+  top: -1px;
+  right: 14px;
+  left: 14px;
+  height: 3px;
+  content: "";
+  border-radius: 0 0 3px 3px;
+  background: linear-gradient(90deg, var(--cin-gold), rgba(239, 196, 111, .25));
+}
+
+.cin-callout i {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--cin-teal);
+  font-family: var(--font-mono), monospace;
+  font-style: normal;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+}
+
+.cin-callout i::before {
+  content: "";
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--cin-gold);
+  box-shadow: 0 0 0 0 rgba(242, 185, 75, .65);
+  animation: cin-ping 2.2s cubic-bezier(.3, .7, .4, 1) infinite;
+}
+
+.cin-callout strong {
+  color: var(--cin-ink);
+  font-size: 16px;
+  font-weight: 900;
+  letter-spacing: -.015em;
+}
+
+.cin-callout small {
+  color: rgba(12, 62, 72, .74);
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  border-top: 1px dashed rgba(12, 62, 72, .18);
+  padding-top: 7px;
+  margin-top: 2px;
+}
+
+/* Corner brackets, like a viewfinder locking on. */
+.cin-callout > b {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border: 0 solid var(--cin-teal-dark);
+  pointer-events: none;
+}
+
+.cin-callout > b:nth-of-type(1) { top: 4px; left: 4px; border-top-width: 2px; border-left-width: 2px; }
+.cin-callout > b:nth-of-type(2) { top: 4px; right: 4px; border-top-width: 2px; border-right-width: 2px; }
+.cin-callout > b:nth-of-type(3) { bottom: 4px; left: 4px; border-bottom-width: 2px; border-left-width: 2px; }
+.cin-callout > b:nth-of-type(4) { right: 4px; bottom: 4px; border-bottom-width: 2px; border-right-width: 2px; }
+
+@keyframes cin-ping {
+  0% { box-shadow: 0 0 0 0 rgba(242, 185, 75, .65); }
+  70% { box-shadow: 0 0 0 14px rgba(242, 185, 75, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(242, 185, 75, 0); }
+}
+
+.cin-callout-a { top: 19%; left: 9%; }
+.cin-callout-b { top: 23%; right: 7%; }
+.cin-callout-c { bottom: 25%; left: 11%; }
+.cin-callout-d { bottom: 20%; right: 9%; }
+
+/* Leader wire tying each callout back toward the scan frame — an anchor
+   node on the label, a fading hairline, and a gold node reaching the frame. */
+.cin-callout-wire {
+  position: absolute;
+  top: 50%;
+  height: 2px;
+  width: clamp(60px, 9vw, 150px);
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.cin-callout-a .cin-callout-wire,
+.cin-callout-c .cin-callout-wire {
+  left: 100%;
+  background: linear-gradient(90deg, var(--cin-teal-dark), rgba(13, 99, 112, 0));
+}
+
+.cin-callout-b .cin-callout-wire,
+.cin-callout-d .cin-callout-wire {
+  right: 100%;
+  background: linear-gradient(270deg, var(--cin-teal-dark), rgba(13, 99, 112, 0));
+}
+
+.cin-callout-wire::before {
+  position: absolute;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  content: "";
+  border-radius: 50%;
+  background: var(--cin-teal-dark);
+  transform: translateY(-50%);
+}
+
+.cin-callout-a .cin-callout-wire::before,
+.cin-callout-c .cin-callout-wire::before { left: -3px; }
+
+.cin-callout-b .cin-callout-wire::before,
+.cin-callout-d .cin-callout-wire::before { right: -3px; }
+
+.cin-callout-wire::after {
+  position: absolute;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  content: "";
+  border-radius: 50%;
+  background: var(--cin-gold);
+  box-shadow: 0 0 0 4px rgba(239, 196, 111, .22);
+  transform: translateY(-50%);
+}
+
+.cin-callout-a .cin-callout-wire::after,
+.cin-callout-c .cin-callout-wire::after { right: 0; }
+
+.cin-callout-b .cin-callout-wire::after,
+.cin-callout-d .cin-callout-wire::after { left: 0; }
+
+.cin-scan {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  width: min(66vmin, 680px);
+  height: min(44vmin, 440px);
+  margin: auto;
+  pointer-events: none;
+  border: 1px dashed rgba(12, 62, 72, .38);
+}
+
+.cin-scan-corner {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  border: 0 solid var(--cin-teal-dark);
+}
+
+.cin-scan-corner.is-tl { top: -2px; left: -2px; border-top-width: 2px; border-left-width: 2px; }
+.cin-scan-corner.is-tr { top: -2px; right: -2px; border-top-width: 2px; border-right-width: 2px; }
+.cin-scan-corner.is-bl { bottom: -2px; left: -2px; border-bottom-width: 2px; border-left-width: 2px; }
+.cin-scan-corner.is-br { bottom: -2px; right: -2px; border-bottom-width: 2px; border-right-width: 2px; }
+
+.cin-callout-badge {
+  position: absolute;
+  top: -30px;
+  right: -22px;
+  width: 64px;
+  pointer-events: none;
+}
+
+.cin-callout-badge img {
+  width: 100%;
+  height: auto;
+  filter: drop-shadow(0 10px 14px rgba(12, 62, 72, .25));
+  animation: cin-float 7s ease-in-out infinite;
+}
+
+.cin-status {
+  position: absolute;
+  right: 0;
+  bottom: 26px;
+  left: 0;
+  z-index: 5;
+  color: rgba(12, 62, 72, .64);
+  font-family: var(--font-mono), monospace;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: .16em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+/* ── Act III · gold light burst + product vision ──────────────────── */
+
+.cin-flash {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  pointer-events: none;
+  background: radial-gradient(circle at 50% 50%, rgba(239, 196, 111, .6), rgba(255, 250, 244, .42) 38%, transparent 68%);
+}
+
+.cin-vision {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  display: grid;
+  place-content: center;
+  padding: 0 24px;
+  pointer-events: none;
+  text-align: center;
+}
+
+.cin-vision-chip {
+  justify-self: center;
+  padding: 6px 14px;
+  color: var(--cin-ink);
+  background: var(--cin-gold);
+  box-shadow: 3px 3px 0 var(--cin-teal-dark);
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+}
+
+.cin-vision-title {
+  margin-top: 30px;
+  color: #fffaf1;
+  font-size: clamp(42px, 6vw, 100px);
+  font-weight: 950;
+  letter-spacing: -.06em;
+  line-height: .94;
+  -webkit-text-stroke: 2px var(--cin-teal-dark);
+  text-shadow:
+    2px 2px 0 var(--cin-teal),
+    4px 4px 0 var(--cin-teal),
+    6px 6px 0 var(--cin-teal),
+    8px 8px 0 var(--cin-teal-dark),
+    14px 18px 28px rgba(8, 54, 64, .22);
+}
+
+.cin-vision-title span {
+  display: block;
+  margin-top: .12em;
+  color: var(--cin-gold);
+  -webkit-text-stroke: 1.5px var(--cin-teal-dark);
+  text-shadow:
+    2px 2px 0 #c49646,
+    4px 4px 0 #c49646,
+    6px 6px 0 var(--cin-teal-dark),
+    12px 16px 24px rgba(8, 54, 64, .16);
+}
+
+.cin-vision-lede {
+  max-width: 660px;
+  margin: 30px auto 0;
+  color: rgba(12, 62, 72, .76);
+  font-size: 17px;
+  font-weight: 540;
+  line-height: 1.75;
+}
+
+.cin-vision-mark {
+  width: 62px;
+  height: auto;
+  justify-self: center;
+  margin-bottom: 16px;
+  filter: drop-shadow(0 14px 20px rgba(12, 62, 72, .22));
+  animation: cin-float 8s ease-in-out infinite;
+}
+
+.cin-vision-pillars {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: center;
+  margin-top: 34px;
+}
+
+.cin-vision-pillars span {
+  padding: 7px 13px;
+  color: var(--cin-teal-dark);
+  background: var(--cin-gold);
+  box-shadow: 3px 3px 0 var(--cin-teal-dark);
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+}
+
+.cin-vision-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  justify-content: center;
+  margin-top: 34px;
+  pointer-events: auto;
+}
+
+/* ── Scroll hint ──────────────────────────────────────────────────── */
+
+.cin-hint {
+  position: absolute;
+  right: 30px;
+  bottom: 26px;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: rgba(12, 62, 72, .72);
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+}
+
+.cin-hint-wheel {
+  position: relative;
+  width: 17px;
+  height: 27px;
+  border: 1px solid rgba(12, 62, 72, .4);
+  border-radius: 10px;
+}
+
+.cin-hint-wheel::before {
+  position: absolute;
+  top: 5px;
+  left: 50%;
+  width: 3px;
+  height: 6px;
+  margin-left: -1.5px;
+  content: "";
+  border-radius: 2px;
+  background: var(--cin-teal);
+  animation: cin-wheel 1.8s ease-in-out infinite;
+}
+
+@keyframes cin-wheel {
+  0%, 100% { transform: translateY(0); opacity: 1; }
+  60% { transform: translateY(9px); opacity: .2; }
+  61% { opacity: 0; }
+}
+
+/* ── Tokens dropped into other sections ───────────────────────────── */
+
+.cin-drop {
+  position: absolute;
+  z-index: 6;
+}
+
+.iso-flow,
+.iso-comparison,
+.iso-corridors,
+.iso-operating,
+.iso-readiness {
+  position: relative;
+}
+
+/* The metrics marquee doubles as the bridge band into the next section. */
+.iso-marquee.is-static {
+  position: static;
+  order: 1; /* directly after .cin-section, before .iso-partner-rail (2) */
+}
+
+/* ── Scroll reveals (transform-only; class added by JS, so no-JS users
+      see everything immediately) ──────────────────────────────────── */
+
+.cin-reveal {
+  transform: translateY(30px);
+  transition: transform .85s cubic-bezier(.16, 1, .3, 1);
+  will-change: transform;
+}
+
+.cin-reveal.is-inview {
+  transform: none;
+  will-change: auto;
+}
+
+/* Per-card stagger inside the revealed shell (transform-only, so a card can
+   never freeze invisible). The section reveal lifts the block; these lift
+   each card in sequence as it settles. Honors reduced-motion below. */
+.cin-reveal :is(.iso-loops-grid, .iso-supply-grid, .iso-ctrl-grid, .iso-layer-grid, .iso-trust-grid) > * {
+  transform: translateY(16px);
+  transition: transform .6s cubic-bezier(.16, 1, .3, 1);
+}
+.cin-reveal.is-inview :is(.iso-loops-grid, .iso-supply-grid, .iso-ctrl-grid, .iso-layer-grid, .iso-trust-grid) > * {
+  transform: none;
+}
+.cin-reveal.is-inview :is(.iso-loops-grid, .iso-supply-grid, .iso-ctrl-grid, .iso-layer-grid, .iso-trust-grid) > *:nth-child(1) { transition-delay: .06s; }
+.cin-reveal.is-inview :is(.iso-loops-grid, .iso-supply-grid, .iso-ctrl-grid, .iso-layer-grid, .iso-trust-grid) > *:nth-child(2) { transition-delay: .14s; }
+.cin-reveal.is-inview :is(.iso-loops-grid, .iso-supply-grid, .iso-ctrl-grid, .iso-layer-grid, .iso-trust-grid) > *:nth-child(3) { transition-delay: .22s; }
+.cin-reveal.is-inview :is(.iso-loops-grid, .iso-supply-grid, .iso-ctrl-grid, .iso-layer-grid, .iso-trust-grid) > *:nth-child(4) { transition-delay: .30s; }
+.cin-reveal.is-inview :is(.iso-loops-grid, .iso-supply-grid, .iso-ctrl-grid, .iso-layer-grid, .iso-trust-grid) > *:nth-child(5) { transition-delay: .38s; }
+
+@media (prefers-reduced-motion: reduce) {
+  .cin-reveal :is(.iso-loops-grid, .iso-supply-grid, .iso-ctrl-grid, .iso-layer-grid, .iso-trust-grid) > * {
+    transform: none;
+    transition: none;
+  }
+}
+
+/* ── Comparison table: Splash column gets the gold isometric chip ──── */
+
+.iso-comparison-table thead th.is-splash {
+  color: var(--iso-teal-dark);
+  background: var(--iso-gold);
+  box-shadow: 3px 3px 0 var(--iso-teal-dark);
+}
+
+/* ── Header brand slot ────────────────────────────────────────────── */
+
+.iso-header-brand-icon {
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+  filter: drop-shadow(0 4px 8px rgba(12, 62, 72, .18));
+}
+
+/* ── Fintech footer ───────────────────────────────────────────────── */
+
+.iso-footer.cin-footer {
+  padding-block: 72px 0;
+}
+
+.cin-footer-grid {
+  display: grid;
+  grid-template-columns: 1.4fr .7fr .7fr 1.1fr;
+  align-items: start;
+  gap: 46px;
+  border-top: 2px solid var(--iso-teal-dark);
+  padding-top: 44px;
+  padding-bottom: 54px;
+}
+
+.cin-footer-brand p {
+  max-width: 300px;
+  margin-top: 16px;
+  color: rgba(12, 62, 72, .72);
+  font-size: 12px;
+  font-weight: 560;
+  line-height: 1.65;
+}
+
+.cin-footer-status {
+  display: grid;
+  gap: 9px;
+  margin-top: 20px;
+  color: var(--iso-teal);
+  font-family: var(--font-mono), monospace;
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.cin-footer-status span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cin-footer-status i {
+  width: 8px;
+  height: 8px;
+  background: var(--iso-gold);
+  box-shadow: 2px 2px 0 var(--iso-teal-dark);
+}
+
+.cin-footer-col {
+  display: grid;
+  justify-items: start;
+  gap: 11px;
+}
+
+.cin-footer-col strong {
+  margin-bottom: 7px;
+  color: var(--iso-teal);
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+}
+
+.cin-footer-col a {
+  color: rgba(12, 62, 72, .75);
+  font-size: 13px;
+  font-weight: 720;
+  transition: color .2s ease, transform .2s ease;
+}
+
+.cin-footer-col a:hover {
+  color: var(--iso-teal);
+  transform: translateX(3px);
+}
+
+.cin-footer-compliance small {
+  max-width: 340px;
+  color: rgba(12, 62, 72, .68);
+  font-size: 10.5px;
+  line-height: 1.7;
+}
+
+.cin-footer-bar {
+  border-top: 1px solid rgba(244, 236, 223, .16);
+  background: var(--iso-teal-dark);
+}
+
+.cin-footer-bar-inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 24px;
+  padding-block: 16px;
+  color: rgba(255, 250, 241, .78);
+  font-family: var(--font-mono), monospace;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.cin-footer-tick {
+  color: var(--iso-gold);
+}
+
+@media (max-width: 980px) {
+  .cin-footer-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 36px;
+  }
+}
+
+@media (max-width: 560px) {
+  .cin-footer-grid {
+    grid-template-columns: 1fr;
+    gap: 30px;
+  }
+
+  .cin-footer-bar-inner {
+    justify-content: flex-start;
+  }
+}
+
+/* ── Reduced-motion static variant ────────────────────────────────── */
+
+.cin-section-static {
+  height: auto;
+}
+
+.cin-static-hero {
+  position: relative;
+  display: flex;
+  min-height: 92vh;
+  align-items: center;
+  overflow: hidden;
+  padding: 150px 0 90px;
+}
+
+.cin-static-stage {
+  position: absolute;
+  inset: 0;
+  opacity: .5;
+}
+
+.cin-copy-static {
+  position: relative;
+  z-index: 2;
+}
+
+.cin-static-telemetry {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+  padding-block: 24px 56px;
+}
+
+.cin-callout-static {
+  position: static;
+}
+
+.cin-callout-static::after {
+  content: none;
+}
+
+.cin-callout-static .cin-callout-wire {
+  display: none;
+}
+
+.cin-vision-static {
+  position: static;
+  display: block;
+  padding: 80px 24px 150px;
+  pointer-events: auto;
+}
+
+/* ── Infrastructure & Partners: cards + balloon-pop ───────────────── */
+
+.cin-partner {
+  display: block;
+  width: 100%;
+  border: 1px solid rgba(12, 62, 72, .12);
+  border-radius: 14px;
+  padding: 18px 14px 15px;
+  background: #fffdf9;
+  font: inherit;
+  color: inherit;
+  text-align: center;
+  cursor: pointer;
+  transition: transform .25s ease, box-shadow .25s ease, border-color .25s ease;
+}
+
+.cin-partner:hover {
+  transform: translateY(-4px);
+  border-color: var(--iso-teal-dark);
+  box-shadow: 5px 5px 0 var(--iso-teal-dark);
+}
+
+.cin-partner:focus-visible {
+  outline: 2px solid var(--iso-teal);
+  outline-offset: 3px;
+}
+
+.cin-partner-logo {
+  display: grid;
+  place-items: center;
+  height: 54px;
+  margin-bottom: 10px;
+}
+
+.cin-partner-logo img {
+  max-width: 84%;
+  max-height: 44px;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+}
+
+.cin-partner-logo.is-popping {
+  animation: cin-balloon 2.3s cubic-bezier(.4, .9, .5, 1) both;
+}
+
+@keyframes cin-balloon {
+  0% { transform: scale(1); opacity: 1; }
+  42% { transform: scale(1.22); opacity: 1; }
+  56% { transform: scale(1.48); opacity: 1; }
+  59% { transform: scale(1.75); opacity: 0; }
+  60% { transform: translateY(46px) scale(.5); opacity: 0; }
+  76% { opacity: 1; }
+  100% { transform: translateY(0) scale(1); opacity: 1; }
+}
+
+/* ── Responsive ───────────────────────────────────────────────────── */
+
+@media (max-width: 1180px) {
+  .cin-callout { max-width: 246px; }
+  .cin-callout-a { left: 4%; }
+  .cin-callout-b { right: 5%; }
+  .cin-callout-c { left: 5%; }
+  .cin-callout-d { right: 5%; }
+  .cin-token-usd { right: 6%; }
+}
+
+@media (max-width: 880px) {
+  .cin-section {
+    height: 430vh;
+  }
+
+  .cin-copy {
+    padding-top: 88px;
+  }
+
+  .cin-object {
+    width: 96vw;
+    opacity: .5;
+  }
+
+  .cin-token-usd { top: 11%; right: 4%; --token-size: 110px; }
+  .cin-token-myr { bottom: 6%; left: 3%; --token-size: 96px; }
+  .cin-token-sui { bottom: 9%; right: 3%; --token-size: 130px; }
+
+  .cin-callout {
+    max-width: 190px;
+    padding: 10px 12px;
+  }
+
+  .cin-callout strong { font-size: 12.5px; }
+  .cin-callout small { font-size: 9.5px; }
+  .cin-callout-wire { display: none; }
+
+  .cin-callout-a { top: 13%; left: 5%; }
+  .cin-callout-b { top: 13%; right: 4%; }
+  .cin-callout-c { bottom: 17%; left: 5%; }
+  .cin-callout-d { bottom: 11%; right: 4%; }
+
+  .cin-scan {
+    width: min(88vw, 400px);
+    height: min(58vw, 270px);
+  }
+
+  .cin-scan-caption { font-size: 8.5px; }
+  .cin-status { display: none; }
+  .cin-hint { right: 20px; bottom: 20px; }
+  .cin-vision-lede { font-size: 15px; }
+  .cin-vision-strip { letter-spacing: .2em; }
+}
+
+@media (max-width: 880px) {
+  .cin-callout-badge {
+    top: -22px;
+    right: -12px;
+    width: 46px;
+  }
+
+  .cin-token-usd { top: 10%; right: 5%; }
+  .cin-token-myr { bottom: 6%; left: 4%; }
+
+  .cin-drop {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cin-hint-wheel::before,
+  .cin-float,
+  .cin-object-poster,
+  .cin-callout-badge img,
+  .cin-token-button.is-spinning,
+  .cin-vision-mark,
+  .cin-partner-logo.is-popping {
+    animation: none;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Later-round additions kept through the hero revert
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── Partners: logo-first cards, dead-centred; hover reveals text ────
+      Scoped under .iso-partner-rail so it beats globals.css
+      .iso-partner-item (a 58px|1fr two-column grid that shoves the logo
+      into a narrow left column). Single centred column here. ───────── */
+
+.iso-partner-rail .cin-partner {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr;
+  place-items: center;
+  min-height: 0;
+  gap: 0;
+  border: 1px solid rgba(12, 62, 72, .12);
+  border-radius: 14px;
+  padding: 26px 14px;
+  background: #fffdf9;
+}
+
+.iso-partner-rail .cin-partner-logo {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 60px;
+  margin: 0;
+  transition: opacity .3s ease, transform .3s ease, filter .3s ease;
+}
+
+.iso-partner-rail .cin-partner-logo img {
+  display: block;
+  margin: 0 auto;
+  max-width: 76%;
+  max-height: 52px;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  object-position: center;
+}
+
+.iso-partner-rail .cin-partner:hover .cin-partner-logo,
+.iso-partner-rail .cin-partner:focus-visible .cin-partner-logo {
+  opacity: .07;
+  transform: scale(.9);
+  filter: blur(1px);
+}
+
+.iso-partner-rail .cin-partner-reveal {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  gap: 4px;
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity .3s ease, transform .3s cubic-bezier(.16, 1, .3, 1);
+  pointer-events: none;
+  text-align: center;
+}
+
+.iso-partner-rail .cin-partner-reveal strong {
+  color: var(--iso-teal-dark);
+  font-size: 15px;
+  font-weight: 900;
+  letter-spacing: -.01em;
+}
+
+.iso-partner-rail .cin-partner-reveal small {
+  color: var(--iso-teal);
+  font-family: var(--font-mono), monospace;
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+
+.iso-partner-rail .cin-partner:hover .cin-partner-reveal,
+.iso-partner-rail .cin-partner:focus-visible .cin-partner-reveal {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ── Walrus section: calmer scale + isometric wordmark art ─────────── */
+
+.iso-walrus .iso-section-title {
+  font-size: clamp(30px, 3.4vw, 52px);
+}
+
+.iso-walrus.iso-section {
+  padding-block: clamp(72px, 10vh, 110px);
+}
+
+.iso-walrus-brandmark {
+  width: 54px;
+  height: auto;
+  filter: drop-shadow(0 6px 10px rgba(0, 0, 0, .3));
+}
+
+/* Carousel: all three slides stay mounted and eager-loaded (lazy
+   remounts left 01/02 blank), crossfading between tabs. The wrapper
+   KEEPS its globals.css box (position:absolute; inset:18px 18px 120px
+   inside the 650px carousel) — do NOT switch it to relative, that
+   collapses it to 0 height and the slides vanish. Each slide is layered
+   absolutely inside that box and fades on .is-active. */
+.iso-walrus .iso-walrus-slide-art img {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  padding: 30px 30px 0;
+  object-fit: contain;
+  opacity: 0;
+  transition: opacity .55s ease;
+  animation: none;
+}
+
+.iso-walrus .iso-walrus-slide-art img.is-active {
+  opacity: 1;
+}
+
+/* ── How it works: image + caption are ONE cream card ───────────────
+      Scoped under .iso-flow to beat globals.css (imported early, so its
+      own later rules win ties). The whole visual becomes a single cream
+      card lifting off the dark section: the artwork fills the top at its
+      native 1200x896 ratio (object-fit cover on a matching box → it only
+      ever downscales, so no blow-up / quality loss), the stat floats on
+      it, and the caption is the card's joined footer. Card cream is
+      sampled from the art's own backdrop (#f4e7d5) so it reads seamless
+      on every screen size. ─────────────────────────────────────────── */
+
+.iso-flow .iso-flow-visual {
+  display: flex;
+  flex-direction: column;
+  align-self: start;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid rgba(8, 54, 64, .22);
+  border-radius: 20px;
+  padding: 0;
+  background: #f4e7d5;
+  box-shadow:
+    0 30px 60px rgba(0, 0, 0, .34),
+    0 6px 0 rgba(0, 0, 0, .14);
+}
+
+.iso-flow .iso-flow-visual::after {
+  content: none;
+}
+
+.iso-flow .iso-flow-image {
+  position: relative;
+  z-index: 1;
+  display: block;
+  aspect-ratio: 1200 / 896;
+  width: 100%;
+  min-height: 0;
+  padding: 0;
+  border-radius: 0;
+  background: #f4e7d5;
+}
+
+.iso-flow .iso-flow-image img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  object-fit: cover;
+  object-position: center;
+  /* Tame the baked-in sunlight/bloom in the artwork so structure edges
+     stay readable: pull highlights down, restore edge contrast. */
+  filter: brightness(.93) contrast(1.09) saturate(1.04);
+  animation: iso-reveal .35s ease both;
+}
+
+/* Checkpoint chip floats on the artwork, top-right of the card. */
+.iso-flow .iso-flow-stat {
+  z-index: 4;
+  top: 16px;
+  right: 16px;
+  border: 0;
+  border-radius: 10px;
+  color: #083640;
+  background: #efc46f;
+  box-shadow: 3px 3px 0 rgba(8, 54, 64, .9);
+}
+
+.iso-flow .iso-flow-stat small {
+  color: rgba(8, 54, 64, .7);
+}
+
+.iso-flow .iso-flow-stat strong {
+  color: #083640;
+}
+
+/* Caption = the card's footer strip, same cream, hairline seam. */
+.iso-flow .iso-flow-caption {
+  position: static;
+  z-index: 1;
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  width: auto;
+  margin: 0;
+  border: 0;
+  border-top: 1px dashed rgba(8, 54, 64, .28);
+  border-radius: 0;
+  padding: 18px 20px 20px;
+  background: #f4e7d5;
+  box-shadow: none;
+}
+
+.iso-flow .iso-flow-caption > span {
+  display: grid;
+  place-items: center;
+  min-width: 40px;
+  height: 40px;
+  border-radius: 11px;
+  color: var(--iso-teal-dark, #083640);
+  background: #efc46f;
+  box-shadow: 2px 2px 0 rgba(8, 54, 64, .9);
+  font-family: var(--font-mono), monospace;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.iso-flow .iso-flow-caption strong {
+  display: block;
+  color: #0c3e48;
+  font-size: 16px;
+  font-weight: 850;
+  letter-spacing: -.01em;
+}
+
+.iso-flow .iso-flow-caption p {
+  margin: 5px 0 0;
+  color: rgba(12, 62, 72, .72);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+/* ── User feedback: the settlement-receipt testimonial ────────────── */
+
+.cin-feedback {
+  position: relative;
+  overflow: hidden;
+}
+
+.cin-feedback-watermark {
+  position: absolute;
+  top: -60px;
+  right: 2%;
+  z-index: 0;
+  color: rgba(13, 99, 112, .07);
+  font-size: clamp(280px, 34vw, 520px);
+  font-weight: 950;
+  line-height: 1;
+  pointer-events: none;
+  user-select: none;
+}
+
+.cin-feedback-layout {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 1.05fr 1fr;
+  gap: 46px;
+  align-items: start;
+  margin-top: 44px;
+}
+
+.cin-feedback-receipt {
+  position: relative;
+  margin: 0;
+  border: 2px solid var(--iso-teal-dark);
+  border-radius: 18px;
+  padding: 0 30px 28px;
+  background: #fffdf9;
+  box-shadow: 10px 10px 0 rgba(8, 54, 64, .9);
+}
+
+.cin-feedback-receipt header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 -30px 24px;
+  border-bottom: 2px dashed rgba(12, 62, 72, .25);
+  padding: 14px 30px;
+  color: var(--iso-teal);
+  font-family: var(--font-mono), monospace;
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+}
+
+.cin-feedback-receipt blockquote {
+  margin: 0;
+  color: var(--iso-teal-dark);
+  font-size: clamp(21px, 2.1vw, 29px);
+  font-weight: 850;
+  letter-spacing: -.015em;
+  line-height: 1.38;
+}
+
+.cin-feedback-receipt figcaption {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 26px;
+  border-top: 2px dashed rgba(12, 62, 72, .25);
+  padding-top: 20px;
+}
+
+.cin-feedback-avatar {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  color: var(--iso-teal-dark);
+  background: var(--cin-gold, #efc46f);
+  box-shadow: 3px 3px 0 var(--iso-teal-dark);
+  font-family: var(--font-mono), monospace;
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: .04em;
+}
+
+.cin-feedback-receipt figcaption strong {
+  display: block;
+  color: var(--iso-teal-dark);
+  font-size: 14.5px;
+  font-weight: 850;
+}
+
+.cin-feedback-receipt figcaption small {
+  color: rgba(12, 62, 72, .72);
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+.cin-feedback-stamp {
+  position: absolute;
+  top: -16px;
+  right: 26px;
+  padding: 8px 16px;
+  color: var(--iso-teal-dark);
+  background: var(--cin-gold, #efc46f);
+  box-shadow: 3px 3px 0 var(--iso-teal-dark);
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  transform: rotate(-6deg);
+}
+
+.cin-feedback-points {
+  display: grid;
+  gap: 16px;
+}
+
+.cin-feedback-point {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 16px;
+  align-items: start;
+  border: 1px solid rgba(12, 62, 72, .14);
+  border-radius: 14px;
+  padding: 20px 56px 20px 20px;
+  background: #fffdf9;
+  transition: transform .3s cubic-bezier(.16, 1, .3, 1), box-shadow .3s ease, border-color .3s ease;
+}
+
+.cin-feedback-point:hover {
+  transform: translateX(8px);
+  border-color: var(--iso-teal-dark);
+  box-shadow: 6px 6px 0 var(--iso-teal-dark);
+}
+
+.cin-feedback-point-icon {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 12px;
+  color: var(--iso-teal-dark);
+  background: rgba(239, 196, 111, .35);
+}
+
+.cin-feedback-point-icon svg {
+  width: 22px;
+  height: 22px;
+}
+
+.cin-feedback-point h3 {
+  margin: 0;
+  color: var(--iso-teal-dark);
+  font-size: 16.5px;
+  font-weight: 850;
+  letter-spacing: -.01em;
+}
+
+.cin-feedback-point p {
+  margin: 8px 0 0;
+  color: rgba(12, 62, 72, .68);
+  font-size: 13.5px;
+  line-height: 1.65;
+}
+
+.cin-feedback-point > span {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  color: rgba(13, 99, 112, .18);
+  font-family: var(--font-mono), monospace;
+  font-size: 26px;
+  font-weight: 900;
+}
+
+@media (max-width: 980px) {
+  .cin-feedback-layout {
+    grid-template-columns: 1fr;
+    gap: 30px;
+  }
+}
+
+/* ── Brand slots: splash-main-icon everywhere, no tagline ──────────── */
+
+.iso-header-brand-icon {
+  width: 42px;
+  height: 42px;
+  object-fit: contain;
+}
+
+.iso-header-wordmark strong {
+  font-size: 19px;
+}
+
+.cin-footer-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.cin-footer-logo img {
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
+}
+
+.cin-footer-logo strong {
+  color: var(--iso-teal-dark);
+  font-size: 25px;
+  font-weight: 900;
+  letter-spacing: -.025em;
+}
+
+/* ── Route loading state ──────────────────────────────────────────── */
+
+.cin-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  min-height: 100vh;
+  min-height: 100svh;
+  background: linear-gradient(180deg, #fffdf8 0%, #fffaf4 55%, #f8f0e5 100%);
+  color: #0c3e48;
+}
+
+.cin-loading-stage {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 132px;
+  height: 132px;
+}
+
+.cin-loading-mark {
+  width: 68px;
+  height: 68px;
+  object-fit: contain;
+  animation: cin-loading-bob 2.2s ease-in-out infinite;
+  filter: drop-shadow(0 12px 18px rgba(12, 62, 72, .22));
+}
+
+.cin-loading-ring {
+  position: absolute;
+  inset: 0;
+  border: 2px solid rgba(13, 99, 112, .35);
+  border-radius: 50%;
+  animation: cin-loading-ripple 2.2s cubic-bezier(.16, 1, .3, 1) infinite;
+}
+
+.cin-loading-ring.is-late {
+  animation-delay: 1.1s;
+}
+
+@keyframes cin-loading-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-9px); }
+}
+
+@keyframes cin-loading-ripple {
+  0% { transform: scale(.42); opacity: 0; }
+  30% { opacity: .8; }
+  100% { transform: scale(1.06); opacity: 0; }
+}
+
+.cin-loading-word {
+  font-size: 26px;
+  font-weight: 900;
+  letter-spacing: -.03em;
+}
+
+.cin-loading-bar {
+  position: relative;
+  width: 168px;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: rgba(12, 62, 72, .12);
+}
+
+.cin-loading-bar i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 44%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #0d6370, #efc46f);
+  animation: cin-loading-sweep 1.5s cubic-bezier(.45, 0, .3, 1) infinite;
+}
+
+@keyframes cin-loading-sweep {
+  0% { transform: translateX(-110%); }
+  100% { transform: translateX(400%); }
+}
+
+.cin-loading-line {
+  color: rgba(12, 62, 72, .68);
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cin-loading-mark,
+  .cin-loading-ring,
+  .cin-loading-bar i,
+  .cin-partner-logo.is-popping,
+  .cin-callout i::before {
+    animation: none;
+  }
+}
+
+/* ── 0xWal copilot launcher (dashboard floating chat) ─────────────── */
+
+@keyframes copilot-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
+@keyframes copilot-nudge {
+  from { opacity: 0; transform: translateY(6px) scale(.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [class*="copilot-bob"],
+  [class*="copilot-nudge"] {
+    animation: none !important;
+  }
+}
+
+/* ── Type scale: section titles from Comparison down, −10px ────────── */
+
+.iso-section .iso-section-title {
+  font-size: clamp(46px, 6vw, 86px);
+}
+
+.iso-final-copy .iso-section-title {
+  font-size: clamp(38px, 5.3vw, 72px);
+}
+
+.iso-walrus .iso-section-title {
+  font-size: clamp(30px, 3.4vw, 52px);
+}
+
+/* Tabs step up to fill the removed intro line's rhythm. */
+.iso-flow .iso-flow-tabs {
+  margin-top: 30px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Hero SEO headline (§4.A) — the real <h1>. The big display line above
+   it is presentational; this carries the corridor/wedge keywords in the
+   hero description slot's visual weight.
+   ═══════════════════════════════════════════════════════════════════ */
+.cin-hero-h1 {
+  margin-top: 14px;
+  max-width: 560px;
+  color: var(--cin-teal-dark, #083640);
+  font-size: 17px;
+  font-weight: 850;
+  letter-spacing: -.01em;
+  line-height: 1.4;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   #loops — the three-loop reframe band (§4.B), directly after the
+   marquee. Mirrors the #operating-layer card grammar (iso-layer-card:
+   meta → art → copy, hard-offset shadow, mono meta) at band scale.
+   Supply (card 3) is the weighted coral moat.
+   ═══════════════════════════════════════════════════════════════════ */
+.iso-loops-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1.16fr;
+  gap: 20px;
+}
+
+.iso-loops-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--ink) 22%, transparent);
+  border-radius: 12px;
+  padding: 20px;
+  background: color-mix(in srgb, var(--surface) 56%, transparent);
+  box-shadow: 8px 9px 0 color-mix(in srgb, var(--ink) 12%, transparent);
+  transition: transform var(--dur-slow) var(--ease-standard), box-shadow var(--dur-slow) var(--ease-standard);
+}
+.iso-loops-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 10px 12px 0 color-mix(in srgb, var(--ink) 14%, transparent);
+}
+.iso-loops-card-3 {
+  border-color: color-mix(in srgb, var(--coral) 60%, transparent);
+  background:
+    linear-gradient(160deg, color-mix(in srgb, var(--coral) 10%, transparent), transparent 46%),
+    color-mix(in srgb, var(--surface) 72%, transparent);
+  box-shadow: 8px 9px 0 color-mix(in srgb, var(--coral) 34%, transparent);
+}
+
+.iso-loops-meta {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: color-mix(in srgb, var(--ink) 64%, transparent);
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+.iso-loops-meta span {
+  display: grid;
+  width: 33px;
+  height: 33px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  color: var(--surface);
+  background: var(--teal);
+  box-shadow: 3px 3px 0 var(--ink);
+}
+.iso-loops-card-3 .iso-loops-meta span {
+  background: var(--coral);
+  box-shadow: 3px 3px 0 color-mix(in srgb, var(--coral) 55%, var(--ink));
+}
+.iso-loops-meta p { flex: 1; }
+.iso-loops-meta .iso-roadmap-chip { letter-spacing: .08em; }
+
+.iso-loops-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ok);
+  font-size: 10px;
+  font-style: normal;
+}
+.iso-loops-live i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ok);
+  box-shadow: 0 0 0 3px var(--ok-bg);
+}
+
+.iso-loops-art {
+  position: relative;
+  height: 190px;
+  margin-inline: -6px;
+  margin-top: var(--s3);
+}
+.iso-loops-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  filter: drop-shadow(0 18px 16px color-mix(in srgb, var(--ink) 14%, transparent));
+  transition: transform var(--dur-slow) var(--ease-standard), filter var(--dur-slow) var(--ease-standard);
+}
+/* Hover the illustration itself → it pops out 1.1x above the card. */
+.iso-loops-art:hover img {
+  transform: translateY(-8px) scale(1.1);
+  filter: drop-shadow(0 28px 24px color-mix(in srgb, var(--ink) 24%, transparent));
+}
+
+.iso-loops-copy {
+  position: relative;
+  z-index: 2;
+  border-top: 1px solid var(--line);
+  margin-top: var(--s4);
+  padding-top: var(--s4);
+}
+.iso-loops-copy h3 {
+  color: var(--ink);
+  font-size: 22px;
+  font-weight: 900;
+  letter-spacing: -.04em;
+}
+.iso-loops-card-3 .iso-loops-copy h3 { font-size: 24px; }
+.iso-loops-copy p {
+  margin-top: var(--s2);
+  color: color-mix(in srgb, var(--ink) 74%, transparent);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.iso-loops-copy small {
+  display: block;
+  margin-top: var(--s3);
+  color: color-mix(in srgb, var(--ink) 64%, transparent);
+  font-family: var(--font-mono), monospace;
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+@media (max-width: 960px) {
+  .iso-loops-grid { grid-template-columns: 1fr; }
+  .iso-loops-art { height: 170px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .iso-loops-card,
+  .iso-loops-art img { transition: none; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   #supply — the promoted moat (§4.D), between #operating-layer and
+   #copilot. Compact landscape step cards (deliberately smaller scale
+   than the operating layer's portrait cards to vary the rhythm) +
+   the iso-wheel flywheel + roadmap CTA bar. Roadmap-labeled: there is
+   no receivable.move yet.
+   ═══════════════════════════════════════════════════════════════════ */
+.iso-supply {
+  border-bottom: 1px solid color-mix(in srgb, var(--ink) 16%, transparent);
+  background:
+    radial-gradient(circle at 90% 4%, color-mix(in srgb, var(--coral) 14%, transparent), transparent 30%),
+    linear-gradient(color-mix(in srgb, var(--ink) 4%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--ink) 4%, transparent) 1px, transparent 1px),
+    var(--surface-2);
+  background-size: auto, 64px 64px, 64px 64px, auto;
+}
+
+.iso-supply-chip { margin-top: 14px; }
+
+.iso-supply-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 18px;
+}
+
+.iso-supply-card {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid color-mix(in srgb, var(--coral) 46%, transparent);
+  border-radius: 12px;
+  padding: 18px;
+  background:
+    linear-gradient(155deg, color-mix(in srgb, var(--coral) 8%, transparent), transparent 44%),
+    color-mix(in srgb, var(--surface) 78%, transparent);
+  box-shadow: 7px 8px 0 color-mix(in srgb, var(--coral) 26%, transparent);
+  transition: transform var(--dur-slow) var(--ease-standard), box-shadow var(--dur-slow) var(--ease-standard);
+}
+.iso-supply-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 9px 11px 0 color-mix(in srgb, var(--coral) 32%, transparent);
+}
+
+.iso-supply-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: color-mix(in srgb, var(--ink) 64%, transparent);
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+.iso-supply-meta span {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  color: var(--surface);
+  background: var(--coral);
+  box-shadow: 3px 3px 0 color-mix(in srgb, var(--coral) 55%, var(--ink));
+}
+
+.iso-supply-art {
+  position: relative;
+  height: 150px;
+  margin-top: var(--s3);
+}
+.iso-supply-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  filter: drop-shadow(0 14px 12px color-mix(in srgb, var(--ink) 12%, transparent));
+  transition: transform var(--dur-slow) var(--ease-standard), filter var(--dur-slow) var(--ease-standard);
+}
+/* Hover the illustration itself → it pops out 1.1x above the card. */
+.iso-supply-art:hover img {
+  transform: translateY(-8px) scale(1.1);
+  filter: drop-shadow(0 26px 22px color-mix(in srgb, var(--ink) 22%, transparent));
+}
+
+.iso-supply-copy {
+  border-top: 1px solid var(--line);
+  margin-top: var(--s3);
+  padding-top: var(--s3);
+}
+.iso-supply-copy h3 {
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 900;
+  letter-spacing: -.03em;
+}
+.iso-supply-copy p {
+  margin-top: var(--s2);
+  color: color-mix(in srgb, var(--ink) 74%, transparent);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+.iso-supply-copy small {
+  display: block;
+  margin-top: var(--s2);
+  color: color-mix(in srgb, var(--ink) 64%, transparent);
+  font-family: var(--font-mono), monospace;
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.iso-supply .iso-wheel { margin-top: var(--s6); }
+.iso-supply-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+
+@media (max-width: 960px) {
+  .iso-supply-grid { grid-template-columns: 1fr; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .iso-supply-card,
+  .iso-supply-art img { transition: none; }
+}

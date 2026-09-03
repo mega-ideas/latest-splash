@@ -76,7 +76,7 @@ export default function DashStat({
         <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#326273]/55">{label}</span>
         {Icon && (
           <span className={cn('rounded-lg p-1.5', iconWrapClassName ?? 'bg-[#5C9EAD]/10')}>
-            <Icon size={14} className={iconClassName ?? 'text-[var(--info-text)]'} />
+            <Icon size={14} className={iconClassName ?? 'text-[var(--info)]'} />
           </span>
         )}
       </div>

@@ -8,7 +8,6 @@ import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { useGSAP } from '@gsap/react';
 
 import RoadmapChip from '@/components/supply/RoadmapChip';
-import { getNetworkProfile } from '@/lib/network';
 
 gsap.registerPlugin(ScrollTrigger, useGSAP);
 
@@ -42,7 +41,7 @@ const LOOPS: Loop[] = [
     name: 'Settle',
     role: 'The feeding wedge',
     copy: 'Collect USD, pay Southeast Asia. Every approved payout builds verified counterparties and settlement history.',
-    meta: `USD → PHP · IDR · ${getNetworkProfile().badges.network}`,
+    meta: 'USD → PHP · live on testnet',
   },
   {
     id: 'supply',
@@ -56,11 +55,11 @@ const LOOPS: Loop[] = [
   {
     id: 'save',
     icon: Sprout,
-    status: 'roadmap',
+    status: 'live',
     name: 'Save',
     role: 'Balance hygiene',
-    copy: 'Idle USD would follow a projected, variable treasury posture once the e-money licence is granted. Your business approves every move.',
-    meta: 'Projected · variable · roadmap',
+    copy: 'Idle USD follows a projected, variable treasury posture. Your business approves every move.',
+    meta: 'Projected · variable · human-approved',
   },
 ];
 

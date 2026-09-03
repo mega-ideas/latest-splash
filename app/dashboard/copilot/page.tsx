@@ -100,8 +100,8 @@ const CONTEXT_RESPONSES: { keywords: string[]; reply: string }[] = [
     reply: [
       '**Smart Treasury — Ondo USDY**',
       '• Instrument: Ondo USDY — T-bill backed, variable rate (not fixed)',
-      '• Available balance (USD): 0%, no notice period — operating cash',
-      '• Smart Treasury: models the floating USDY net rate (roadmap, not live)',
+      '• Available balance (USD): 0% but instant — operating cash',
+      '• Smart Treasury: earns the floating USDY net rate',
       '• Withdrawals Smart Treasury → Available: 1–3 business days (USDY→USD conversion)',
       '',
       'Available cash is modeled at 0%. Smart Treasury can model a variable T-bill-backed return pending approval.',
@@ -231,11 +231,11 @@ const FALLBACK_REPLIES: string[] = [
   ].join('\n'),
   [
     '**Smart Treasury — Ondo USDY**',
-    '• T-bill-backed Ondo USDY posture — projected, variable, never fixed; a roadmap capability, not live today',
-    '• Available balance (USD): 0%, no notice period',
+    '• T-bill backed yield via Ondo USDY — variable, never fixed',
+    '• Available balance (USD): 0%, instant',
     '• Withdrawals from Smart Treasury: 1–3 business days',
     '',
-    'I can prepare a Smart Treasury projection, or keep Available USD ready to fund upcoming payouts.',
+    'I can prepare a Smart Treasury projection, or keep Available USD ready for instant payments.',
     '',
     'Want me to prepare a projection for approval?',
   ].join('\n'),
@@ -534,7 +534,7 @@ export default function CopilotPage() {
           </p>
         </div>
         <div className="flex items-center gap-2 rounded-lg border border-[#326273]/10 bg-white px-3 py-2 text-[13px] text-[#326273]/50">
-          <Lock size={12} className="text-[var(--info-text)]" />
+          <Lock size={12} className="text-[var(--info)]" />
           <span>Behavioral patterns only · no financial records stored</span>
         </div>
       </header>
@@ -735,14 +735,14 @@ export default function CopilotPage() {
           <div className="dash-block p-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Brain size={15} className="text-[var(--info-text)]" />
+                <Brain size={15} className="text-[var(--info)]" />
                 <h2 className="text-sm font-semibold text-[#1F4452]">MemWal Memory</h2>
               </div>
               <button
                 type="button"
                 onClick={handleSync}
                 disabled={syncing}
-                className="flex items-center gap-1 text-[13px] font-medium text-[var(--info-text)] transition-opacity hover:text-[#326273] disabled:opacity-60"
+                className="flex items-center gap-1 text-[13px] font-medium text-[var(--info)] transition-opacity hover:text-[#326273] disabled:opacity-60"
               >
                 <RefreshCw size={10} className={syncing ? 'animate-spin' : ''} />
                 {syncing ? 'Syncing…' : 'Sync'}
@@ -755,7 +755,7 @@ export default function CopilotPage() {
               {MEMORY_PATTERNS.map(({ label, value, sub, icon: Icon, bar }) => (
                 <div key={label}>
                   <div className="flex items-start gap-2">
-                    <Icon size={12} className="mt-0.5 shrink-0 text-[var(--info-text)]" />
+                    <Icon size={12} className="mt-0.5 shrink-0 text-[var(--info)]" />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center justify-between gap-1">
                         <span className="text-[13px] text-[#326273]/50">{label}</span>
@@ -837,7 +837,7 @@ export default function CopilotPage() {
           {/* What MemWal stores */}
           <div className="dash-block p-4">
             <div className="flex items-center gap-2">
-              <Lock size={14} className="text-[var(--info-text)]" />
+              <Lock size={14} className="text-[var(--info)]" />
               <h2 className="text-sm font-semibold text-[#1F4452]">What MemWal Stores</h2>
             </div>
             <div className="mt-3 space-y-2">
@@ -864,13 +864,13 @@ export default function CopilotPage() {
           <div className="space-y-2">
             {[
               { label: 'New batch from suggestion', href: '/dashboard/batch',    icon: Layers    },
-              { label: 'View treasury projection',  href: '/dashboard/treasury', icon: TrendingUp },
+              { label: 'View treasury yield',       href: '/dashboard/treasury', icon: TrendingUp },
               { label: 'Live corridor rates',        href: '/dashboard',          icon: Globe     },
             ].map(({ label, href, icon: Icon }) => (
               <Link
                 key={href}
                 href={href}
-                className="flex w-full items-center justify-between rounded-lg border border-[#326273]/10 bg-white px-3 py-2.5 text-[13px] font-medium text-[#326273] transition-colors hover:border-[#5C9EAD]/40 hover:text-[var(--info-text)]"
+                className="flex w-full items-center justify-between rounded-lg border border-[#326273]/10 bg-white px-3 py-2.5 text-[13px] font-medium text-[#326273] transition-colors hover:border-[#5C9EAD]/40 hover:text-[var(--info)]"
               >
                 <div className="flex items-center gap-2"><Icon size={13} /> {label}</div>
                 <ChevronRight size={13} className="text-[#326273]/30" />
