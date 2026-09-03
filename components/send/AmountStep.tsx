@@ -206,7 +206,7 @@ export default function AmountStep({ state, set, prev, next }: { state: Transfer
             Back
           </Button>
           <Button size="lg" onClick={next} disabled={!canContinue || stale}>
-            Review payment
+            Compare routes
           </Button>
         </div>
       </div>
