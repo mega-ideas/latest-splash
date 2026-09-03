@@ -72,3 +72,6 @@ next-env.d.ts
 
 # stray dev-server logs
 .dev-*.log
+
+# design-exploration previews (served by the dev server, not shipped)
+public/_previews/
