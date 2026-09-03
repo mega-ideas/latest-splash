@@ -8,7 +8,7 @@ import ReceiptStep from '@/components/send/ReceiptStep';
 import RecipientStep from '@/components/send/RecipientStep';
 import ReviewStep from '@/components/send/ReviewStep';
 import { Card, StepStrip } from '@/components/system';
-import { initialTransferState, type TransferState } from '@/lib/send/state';
+import { COUNTRY_TO_CURRENCY, initialTransferState, type TransferState } from '@/lib/send/state';
 
 const STEPS = [{ label: 'Recipient' }, { label: 'Amount' }, { label: 'Review' }, { label: 'Processing' }, { label: 'Receipt' }];
 
@@ -25,6 +25,23 @@ export default function SendPage() {
     const params = new URLSearchParams(window.location.search);
     const invoiceId = params.get('invoiceId');
     const holdId = params.get('holdId');
+    const recipientId = params.get('recipient');
+    if (recipientId) {
+      void fetch('/api/recipients', { cache: 'no-store' })
+        .then((response) => (response.ok ? response.json() : []))
+        .then((records: Array<{ id: string; name: string; country: string; swift: string; account: string; tier: TransferState['deliveryTier'] }>) => {
+          const record = records.find((entry) => entry.id === recipientId);
+          if (!record) return;
+          const country = (['MY', 'PH', 'ID', 'SG', 'VN', 'TH', 'EU', 'GB'].includes(record.country.toUpperCase()) ? record.country.toUpperCase() : 'PH') as TransferState['recipient']['country'];
+          setState((current) => ({
+            ...current,
+            step: 2,
+            recipient: { ...current.recipient, name: record.name, country, rail: 'bank', bank: { swift: record.swift ?? '', account: record.account ?? '' } },
+            amount: { ...current.amount, targetCurrency: COUNTRY_TO_CURRENCY[country] },
+            deliveryTier: record.tier,
+          }));
+        });
+    }
     if (invoiceId) {
       void fetch(`/api/invoices/${invoiceId}`)
         .then((response) => response.json())
