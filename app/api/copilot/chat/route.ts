@@ -48,13 +48,13 @@ const DOMAIN_RESPONSES: { keywords: string[]; reply: string }[] = [
   { keywords: ['sgd', 'singapore'],
     reply: 'USD→SGD: 1.345 · fee 0.85% · ~6.1 min modeled rail. Stable this week — no urgent rate action needed.' },
   { keywords: ['who are you', 'your name', '0xwal', 'what are you'],
-    reply: "I'm 0xWal — your Splash copilot. I watch corridors, FX timing, batch payouts, treasury yield, and compliance, and I remember your patterns via MemWal so my suggestions get sharper over time." },
+    reply: "I'm 0xWal — your Splash copilot. I watch corridors, FX timing, batch payouts, treasury projections, and compliance, and I remember your patterns via MemWal so my suggestions get sharper over time." },
 ];
 
 const FALLBACKS = [
   "I'm 0xWal — monitoring the live PHP testnet corridor and modeled expansion routes. What would you like to focus on?",
   'Your blended fee this month is 0.89%, saving ~41% vs. traditional wires. Anything to optimise?',
-  'Smart Treasury earns variable Ondo USDY (T-bill) yield; your Available balance stays instant at 0%. Want to move idle USDC in?',
+  'Smart Treasury is a roadmap capability: a projected Ondo USDY (T-bill) posture, variable and approval-gated, live only when the e-money licence is granted. Your Available balance stays at 0% with no notice period. Want a projection for moving idle USDC in?',
   'All clear — no AML flags, no compliance issues. What can I help with?',
 ];
 
@@ -107,9 +107,9 @@ async function groundedReply(message: string, memories: RecalledMemory[]): Promi
     const ledger = getLedger();
     const suggestion = await suggestTreasuryAction(ledger.availableMicro / 1_000_000, 0);
     base =
-      `Smart Treasury earns from Ondo USDY (T-bill backed): ${rate.label}` +
-      `${rate.introductory ? ' — introductory promo rate' : ''}.\n` +
-      'Your Available balance (USDC) stays 0% but instant; withdrawals back to Available take 1–3 business days.\n\n' +
+      `Smart Treasury models an Ondo USDY (T-bill backed) posture: ${rate.label}` +
+      `${rate.introductory ? ' — introductory promo rate' : ''}. It is a roadmap capability, live only when the e-money licence is granted.\n` +
+      'Your Available balance (USDC) stays at 0% with no notice period; withdrawals back to Available take 1–3 business days.\n\n' +
       `${suggestion.title}. ${suggestion.description}`;
   } else {
     for (const { keywords, reply } of DOMAIN_RESPONSES) {
@@ -137,10 +137,11 @@ function buildSystemPrompt(memories: RecalledMemory[]): string {
     'Introduce yourself as 0xWal if asked your name. ' +
     'You help with corridors (PHP, MYR, IDR, SGD, VND, THB, EUR, GBP), FX timing, batch payouts, ' +
     'Smart Treasury, and compliance (KYB/AML/KYT). ' +
-    `Smart Treasury earns yield from Ondo USDY (T-bill backed) at ${rate.label} — this rate is VARIABLE, never fixed` +
-    `${rate.introductory ? ', currently an introductory promo' : ''}. ` +
-    'The Available balance is USDC at 0% but instant; withdrawals from Smart Treasury take T+1–T+3 business days. ' +
-    'Never describe the yield as fixed, and never call DeFi-lending yield "Treasury yield" (it is genuine T-bill yield via USDY). ' +
+    `Smart Treasury is a ROADMAP capability, not live: describe it only as a projected, approval-gated Ondo USDY (T-bill backed) posture at ${rate.label} — a VARIABLE projection, never fixed` +
+    `${rate.introductory ? ', currently an introductory promo' : ''}, live only when the e-money licence is granted. ` +
+    'The Available balance is USDC at 0% with no notice period; withdrawals from Smart Treasury take T+1–T+3 business days. ' +
+    'Never say Smart Treasury earns yield today, never state an APY as an offer, never describe anything as "instant" or "guaranteed", and never call DeFi-lending yield "Treasury yield". ' +
+    'Corridor fee and speed figures are illustrative; say so. Splash holds no customer funds until MFCA activation and is not a licensed money-services business. ' +
     'Be concise, concrete, and action-oriented. You only suggest — the user must authorize any execution. ' +
     'Never invent account numbers or PII.\n\n' +
     'CONVERSATION STYLE — be a warm, personable desk assistant, not a rigid FAQ. ' +

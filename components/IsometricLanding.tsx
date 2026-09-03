@@ -115,9 +115,9 @@ const marqueeItems = [
   ['Stored proof', 'Walrus + Sui audit'],
 ];
 
+/* Infrastructure only. Collection and payout partners are never named on the
+   public landing until contracts are signed (disclosure policy D5). */
 const partnerRail: Array<{ src: string; name: string; role: string; logoClass?: string }> = [
-  { src: '/stripe-logo.svg', name: 'Stripe', role: 'USD collection' },
-  { src: '/partners/airwallex.png', name: 'Airwallex', role: 'bank rails', logoClass: 'iso-airwallex-logo' },
   { src: '/partners/pyth.png', name: 'Pyth', role: 'FX and peg data' },
   { src: '/deepbook-mark.png', name: 'DeepBook', role: 'amount-sized liquidity', logoClass: 'iso-deepbook-logo' },
   { src: '/sumsub-logo.png', name: 'Sumsub', role: 'KYB and KYC' },
@@ -200,14 +200,7 @@ const comparisonRows = [
     bank: 'Manual factoring',
     broker: 'No',
     wise: 'No',
-    splash: 'Buyer-approved discount offer',
-  },
-  {
-    feature: 'Bilateral netting',
-    bank: 'Manual',
-    broker: 'No',
-    wise: 'No',
-    splash: 'Modeled in account loop',
+    splash: 'Buyer-funded early payment (roadmap)',
   },
   {
     feature: 'Permanent audit trail',
@@ -269,7 +262,7 @@ const copilotLayers = [
   {
     icon: TrendingUp,
     title: 'Treasury advisor',
-    copy: 'Model payout liquidity and projected yield, then wait for explicit business approval.',
+    copy: 'Model payout liquidity and a projected treasury posture (roadmap), then wait for explicit business approval.',
   },
 ];
 
@@ -388,9 +381,9 @@ const loopCards = [
     title: 'Grow it while it waits.',
     copy: 'Idle USD follows a projected, variable treasury posture. Your business approves every move.',
     image: '/isometric/loop-save-v3.png',
-    imageAlt: 'Isometric treasury tiers of idle USD growing along a yield curve, gated by an approve control',
-    meta: 'Projected · variable · human-approved',
-    roadmap: false,
+    imageAlt: 'Isometric treasury tiers of idle USD in a projected, approval-gated posture',
+    meta: 'Projected · variable · roadmap',
+    roadmap: true,
   },
   {
     number: '03',
@@ -472,11 +465,11 @@ export default function IsometricLanding() {
   const liveComparisonRows = [
     ...comparisonRows,
     {
-      feature: 'Yield on idle USD',
+      feature: 'Idle USD posture (roadmap)',
       bank: `${formatPercent(yieldBenchmarks.bank)} APY`,
       broker: `${formatPercent(yieldBenchmarks.broker)} APY`,
       wise: `${formatPercent(yieldBenchmarks.wise)} APY`,
-      splash: `${formatPercent(yieldBenchmarks.splash)} projected variable APY`,
+      splash: 'Projected, variable — not a live offer',
     },
   ];
 
@@ -584,7 +577,7 @@ export default function IsometricLanding() {
         <div className="iso-shell">
           <div className="iso-partner-intro">
             <span>Infrastructure &amp; Partners</span>
-            <p>Licensed-partner rails outside. Sui-native settlement inside.</p>
+            <p>Licensed payout partners at the far end of every corridor. Sui-native settlement inside.</p>
           </div>
           <div className="iso-partner-grid">
             {partnerRail.map((partner) => (
@@ -625,8 +618,8 @@ export default function IsometricLanding() {
               })}
             </div>
             <div className="iso-flow-branch">
-              <strong>Working-capital branch</strong>
-              <span>Accepted invoice to supplier discount offer to buyer approval to settlement proof.</span>
+              <strong>Working-capital branch · roadmap</strong>
+              <span>Accepted invoice to buyer-funded early payment to approval to settlement proof. Subject to licensing.</span>
             </div>
           </div>
 
@@ -748,11 +741,11 @@ export default function IsometricLanding() {
             </table>
             <div className="iso-yield-live is-demoted">
               <i aria-hidden="true" />
-              <strong>Reference yield benchmark</strong>
+              <strong>Reference rate benchmark</strong>
               <span>
-                FDIC national savings - IBKR Pro cash - Wise USD Interest - Splash treasury projection
+                FDIC national savings - IBKR Pro cash - Wise USD Interest - third-party reference rates
                 {yieldBenchmarks.asOf ? ` - refreshed ${new Date(yieldBenchmarks.asOf).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
-                {' '}· Yield is hygiene, not the headline — the working-capital loop is.
+                {' '}· Splash treasury posture is a roadmap projection, not the headline.
               </span>
             </div>
           </div>

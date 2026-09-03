@@ -9,7 +9,7 @@ import type { RecipientTier } from '@/lib/server/operations';
 const options: Array<{ tier: RecipientTier; icon: typeof Building2; title: string; body: (currency: string) => string; eta: string }> = [
   { tier: 'PAYOUT_ONLY', icon: Building2, title: 'Bank payout', body: (currency) => `Recipient gets ${currency} in their own bank. No account needed.`, eta: '3–20 min' },
   { tier: 'SWEEP_ACCOUNT', icon: Zap, title: 'Splash receive account (auto-sweep)', body: () => 'Account experience; funds sweep to their bank in seconds.', eta: '≈5 s receive + sweep' },
-  { tier: 'STORED_BALANCE', icon: Landmark, title: 'Splash balance', body: () => 'Funds stay as USD. Instant. Re-spendable in-network.', eta: 'Instant' },
+  { tier: 'STORED_BALANCE', icon: Landmark, title: 'Splash balance', body: () => 'Funds stay as USD, available on settlement. Re-spendable in-network.', eta: 'On settlement' },
 ];
 
 export default function StepDelivery({ state, set, prev, next }: { state: TransferState; set: (patch: Partial<TransferState>) => void; prev: () => void; next: () => void }) {
@@ -19,7 +19,7 @@ export default function StepDelivery({ state, set, prev, next }: { state: Transf
 
   return (
     <div className="space-y-5">
-      <div><h2 className="text-xl font-bold">How should they receive it?</h2><p className="mt-1 text-sm text-foreground/60">Same payment, three delivery depths. You remain in control of the final route.</p></div>
+      <div><h2 className="text-xl font-bold">How should they receive it?</h2><p className="mt-1 text-sm text-foreground/60">Same payment, three delivery depths. You remain in control of the final route. Delivery times are illustrative; local rails vary.</p></div>
       <div className="grid gap-3">
         {options.map((option) => {
           const selected = state.deliveryTier === option.tier;

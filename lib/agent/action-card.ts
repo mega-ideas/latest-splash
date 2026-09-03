@@ -101,9 +101,12 @@ export function buildActionCardModel(proposal: ActionCardProposal): ActionCardMo
   const confidencePercent = Math.max(0, Math.min(100, Math.round(proposal.explain.confidence * 100)));
   const evidenceRows = proposal.explain.evidence.map((item) => {
     const statusLabel: DataStatus = item.status ?? 'DEMO';
+    // The NETTING source is a modeled roadmap figure; never surface the raw
+    // enum as if it named a live capability.
+    const sourceLabel = item.source === 'NETTING' ? 'OFFSET_MODEL' : item.source;
     return {
       ...item,
-      label: `${item.source}:${item.ref}`,
+      label: `${sourceLabel}:${item.ref}`,
       trustLabel: item.trusted ? 'Trusted' as const : 'Untrusted' as const,
       tone: item.trusted ? 'trusted' as const : 'untrusted' as const,
       statusLabel,
@@ -122,8 +125,8 @@ export function buildActionCardModel(proposal: ActionCardProposal): ActionCardMo
       row('Amount out', money(impact.amountOut, impact.currencyOut)),
       row('Fee', bps(impact.feeBps)),
       row('FX', impact.fxRate ? `${impact.fxRate.value} via Pyth` : '-'),
-      row('Yield delta', bps(impact.yieldDeltaBps)),
-      row('Netting saved', money(impact.nettingSaved, impact.currencyIn ?? impact.currencyOut ?? 'USD')),
+      row('Projected treasury delta', bps(impact.yieldDeltaBps)),
+      row('Modeled offset saving (roadmap)', money(impact.nettingSaved, impact.currencyIn ?? impact.currencyOut ?? 'USD')),
     ],
     simulationRows: proposal.simulation
       ? [

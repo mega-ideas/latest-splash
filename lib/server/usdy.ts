@@ -27,7 +27,7 @@ export type TreasuryRate = {
   /** True while the time-boxed introductory subsidy is active. */
   introductory: boolean;
   promoUntil: string | null;
-  /** Display string, e.g. "≈{rate}% APY · variable" (always variable, never a fixed figure). */
+  /** Display string, e.g. "≈{rate}% projected · variable" — a projection, never an APY offer. */
   label: string;
   asOf: string;
 };
@@ -64,7 +64,7 @@ export function getTreasuryRate(): TreasuryRate {
     variable: true,
     introductory,
     promoUntil,
-    label: `≈${rate.toFixed(2)}% APY · variable${introductory ? ' (introductory)' : ''}`,
+    label: `≈${rate.toFixed(2)}% projected · variable${introductory ? ' (introductory)' : ''}`,
     asOf: new Date().toISOString(),
   };
 }

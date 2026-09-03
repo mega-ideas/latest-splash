@@ -60,10 +60,10 @@ type TreasuryRateView = { apy: number; label: string; introductory: boolean };
 // ─── Seed data ──────────────────────────────────────────────────────────────
 
 const SEED_HISTORY: HistoryEntry[] = [
-  { id: 'tx_t001', type: 'yield',    desc: 'USDY yield accrual',              amount: '+$3.28',     amountNum:  3.28, date: 'Today, 00:01', status: 'confirmed' },
-  { id: 'tx_t002', type: 'yield',    desc: 'USDY yield accrual',              amount: '+$3.25',     amountNum:  3.25, date: 'Yesterday',    status: 'confirmed' },
+  { id: 'tx_t001', type: 'yield',    desc: 'USDY accrual · simulated',          amount: '+$3.28',     amountNum:  3.28, date: 'Today, 00:01', status: 'confirmed' },
+  { id: 'tx_t002', type: 'yield',    desc: 'USDY accrual · simulated',          amount: '+$3.25',     amountNum:  3.25, date: 'Yesterday',    status: 'confirmed' },
   { id: 'tx_t003', type: 'deposit',  desc: 'Available → Smart Treasury',      amount: '+$5,000.00', amountNum:  5000, date: '26 May 2026',  status: 'confirmed' },
-  { id: 'tx_t004', type: 'yield',    desc: 'USDY yield accrual',              amount: '+$3.22',     amountNum:  3.22, date: '25 May 2026',  status: 'confirmed' },
+  { id: 'tx_t004', type: 'yield',    desc: 'USDY accrual · simulated',          amount: '+$3.22',     amountNum:  3.22, date: '25 May 2026',  status: 'confirmed' },
   { id: 'tx_t006', type: 'withdraw', desc: 'Smart Treasury → Available',      amount: '-$2,000.00', amountNum: -2000, date: '23 May 2026',  status: 'confirmed' },
   { id: 'tx_t007', type: 'deposit',  desc: 'Available → Smart Treasury',      amount: '+$8,000.00', amountNum:  8000, date: '20 May 2026',  status: 'confirmed' },
 ];
@@ -131,7 +131,7 @@ function HistIcon({ type }: { type: TxType }) {
 // ─── Page ────────────────────────────────────────────────────────────────────
 
 export default function TreasuryPage() {
-  const [available, setAvailable]     = useState(11140.0); // USD · 0% · instant
+  const [available, setAvailable]     = useState(11140.0); // USD · 0% · no notice period
   const [balance, setBalance]         = useState(24500.0); // USDY · Smart Treasury
   const [yield30d, setYield30d]       = useState(98.72);
   const [rate, setRate]               = useState<TreasuryRateView>({ apy: 0, label: 'Variable rate loading...', introductory: false });
@@ -299,7 +299,7 @@ export default function TreasuryPage() {
           <span className="dash-kicker">Working capital</span>
           <h1 className="dash-title mt-2">Smart Treasury</h1>
           <p className="mt-1 text-[13px] font-medium text-[#326273]/60">
-            Operating cash stays instant. Idle balance earns a floating T-bill rate through Ondo USDY.
+            Operating cash stays ready to spend with no notice period. Idle balance is projected to follow a floating T-bill posture through Ondo USDY once treasury execution is approved.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -337,7 +337,7 @@ export default function TreasuryPage() {
           </div>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] font-medium text-[#326273]/60">
             <span>Total position <span className="dash-num font-semibold text-[#0c3e48]">${fmtUsd(totalPosition)}</span></span>
-            <span className="text-[#4F9C88]">+${fmtUsd(yield30d)} yield accrued</span>
+            <span className="text-[#4F9C88]">+${fmtUsd(yield30d)} accrued (simulated)</span>
             <span className="hidden sm:inline">{treasuryShare}% allocated to treasury</span>
           </div>
         </div>
@@ -366,7 +366,7 @@ export default function TreasuryPage() {
             <div className="dash-num mt-2 text-3xl font-semibold text-[#0c3e48]">${fmtUsd(available)}</div>
             <div className="mt-1 flex items-center gap-2 text-[13px] font-medium">
               <span className="rounded-full bg-[#326273]/8 px-2 py-0.5 text-[#326273]/70">USD</span>
-              <span className="text-[#326273]/55">Instant · funds every payout · 0%</span>
+              <span className="text-[#326273]/55">No notice period · funds every payout · 0%</span>
             </div>
             <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[#326273]/8">
               <div className="h-full rounded-full bg-[#5C9EAD]/70 transition-all" style={{ width: `${100 - treasuryShare}%` }} />
@@ -505,7 +505,7 @@ export default function TreasuryPage() {
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <div className="flex items-center gap-2">
-                  <h2 className="text-sm font-semibold text-[#1F4452]">USDY daily yield</h2>
+                  <h2 className="text-sm font-semibold text-[#1F4452]">USDY daily accrual · simulated</h2>
                   <span className="inline-flex items-center gap-1 rounded-full bg-[#D9A441]/15 px-1.5 py-0.5 text-[13px] font-semibold text-[#9a6f15]">
                     variable
                   </span>
@@ -513,7 +513,7 @@ export default function TreasuryPage() {
                 <p className="mt-0.5 text-[13px] text-[#326273]/50">
                   {focusBar
                     ? <>Hovering <span className="font-medium text-[#1F4452]">{focusBar.label}</span></>
-                    : 'Accrues daily via USDY redemption price · floating, not fixed'}
+                    : 'Modeled from the USDY redemption price · floating, not fixed'}
                 </p>
               </div>
               <div className="flex flex-col items-end gap-2">
@@ -550,7 +550,7 @@ export default function TreasuryPage() {
                 setHoveredBar(Math.max(0, Math.min(bars.length - 1, idx)));
               }}
             >
-              <svg viewBox={`0 0 ${CH.W} ${CH.H}`} preserveAspectRatio="none" className="h-40 w-full" role="img" aria-label={`Daily USDY yield, ${chartRange}: low $${minBar.toFixed(2)}, high $${maxBar.toFixed(2)}, average $${avgBar.toFixed(2)} per day`}>
+              <svg viewBox={`0 0 ${CH.W} ${CH.H}`} preserveAspectRatio="none" className="h-40 w-full" role="img" aria-label={`Simulated daily USDY accrual, ${chartRange}: low $${minBar.toFixed(2)}, high $${maxBar.toFixed(2)}, average $${avgBar.toFixed(2)} per day`}>
                 <defs>
                   <linearGradient id="usdyFill" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stopColor="#D9A441" stopOpacity="0.34" />
@@ -607,7 +607,7 @@ export default function TreasuryPage() {
 
             <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
               <div className="rounded-lg border border-[#D9A441]/20 bg-[#D9A441]/8 p-3">
-                <div className="flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-[#9a6f15]"><Sparkles size={10} /> Daily yield</div>
+                <div className="flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-[#9a6f15]"><Sparkles size={10} /> Daily accrual (sim)</div>
                 <div className="dash-num mt-1 font-mono text-sm font-semibold text-[#9a6f15]">+${dailyYield.toFixed(3)}</div>
               </div>
               <div className="rounded-lg bg-[#F6F0ED] p-3">
@@ -632,11 +632,11 @@ export default function TreasuryPage() {
                 <span className="dash-kicker">Loop economics simulator</span>
                 <h2 className="mt-2 text-xl font-semibold text-[#0c3e48]">Sweep vs hold</h2>
                 <p className="mt-2 max-w-xl text-[13px] leading-5 text-[#326273]/60">
-                  On a $5,000 payment, internal netting removes repeated payout work. The remainder is relocated to the point where funds eventually leave the Splash loop.
+                  On a $5,000 payment, keeping funds inside the Splash loop avoids repeated payout work. The remainder is relocated to the point where funds eventually leave the loop. Internal offsetting is a planned capability, subject to licensing.
                 </p>
                 <label className="mt-6 block">
                   <span className="flex items-center justify-between text-[13px] font-semibold text-[#326273]">
-                    <span>Netting ratio</span>
+                    <span>Sweep-to-hold ratio</span>
                     <span className="font-mono text-[#E39774]">{nettingRatio}%</span>
                   </span>
                   <input
@@ -655,7 +655,7 @@ export default function TreasuryPage() {
                   <div className="rounded-2xl border border-[#5C9EAD]/20 bg-white p-4">
                     <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--info)]">Fees deleted</div>
                     <div className="dash-num mt-2 text-2xl font-semibold text-[#0c3e48]">${feesDeleted.toFixed(2)}</div>
-                    <p className="mt-1 text-[13px] leading-4 text-[#326273]/55">Avoided while value stays netted inside the operating loop.</p>
+                    <p className="mt-1 text-[13px] leading-4 text-[#326273]/55">Avoided while value stays inside the operating loop.</p>
                   </div>
                   <div className="rounded-2xl border border-[#E39774]/20 bg-white p-4">
                     <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#E39774]">Fees relocated</div>
@@ -668,7 +668,7 @@ export default function TreasuryPage() {
                 </div>
                 <div className="mt-3 flex items-start gap-2 rounded-xl bg-white p-3 text-[13px] leading-4 text-[#326273]/60">
                   <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--info)]" />
-                  Simulation only. Netting reduces repeated payout costs; it does not remove the cost of the final external payout.
+                  Illustration only. Holding balances inside the loop reduces repeated payout costs; the final external payout still carries its own cost.
                 </div>
               </div>
             </div>
@@ -704,14 +704,14 @@ export default function TreasuryPage() {
                 <Sprout size={14} className="text-[#4F9C88]" />
                 <h2 className="text-sm font-semibold text-[#1F4452]">How the treasury works</h2>
               </div>
-              <span className="rounded-full bg-[#D9A441]/12 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#9a6f15]">T-bill yield</span>
+              <span className="rounded-full bg-[#D9A441]/12 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#9a6f15]">T-bill posture · roadmap</span>
             </div>
             <div className="relative grid gap-0 sm:grid-cols-4">
               <div className="pointer-events-none absolute left-5 right-5 top-[3.25rem] hidden h-px bg-gradient-to-r from-[#5C9EAD]/0 via-[#D9A441] to-[#E39774]/40 sm:block" />
               {[
                 { step: '01', title: 'Prepare recommendation', desc: '0xWal models an allocation from Operating cash. Your business must approve it.', icon: CreditCard, accent: '#5C9EAD', bg: 'bg-[#5C9EAD]/10', tag: 'Human approval' },
-                { step: '02', title: 'Ondo USDY (T-bills)', desc: 'USDY is backed by short-dated US Treasuries — real, off-chain yield.', icon: Landmark, accent: '#C99A2E', bg: 'bg-[#D9A441]/15', tag: 'T-bill backed' },
-                { step: '03', title: 'Yield accrues', desc: 'USDY redemption price rises daily. Floating net rate — never fixed.', icon: Sprout, accent: '#4F9C88', bg: 'bg-[#6FB4A0]/18', tag: rate.label.replace(' · variable', '') },
+                { step: '02', title: 'Ondo USDY (T-bills)', desc: 'USDY is backed by short-dated US Treasuries, the instrument behind the projected posture.', icon: Landmark, accent: '#C99A2E', bg: 'bg-[#D9A441]/15', tag: 'T-bill backed' },
+                { step: '03', title: 'Accrual (projected)', desc: 'USDY redemption price moves daily. Floating, never fixed; figures are projections until the licence is granted.', icon: Sprout, accent: '#4F9C88', bg: 'bg-[#6FB4A0]/18', tag: rate.label.replace(' · variable', '') },
                 { step: '04', title: 'Withdraw on notice', desc: `Request a withdrawal; USDY converts back to USD and lands in Operating in ${windowLabel}.`, icon: PiggyBank, accent: '#E39774', bg: 'bg-[#E39774]/10', tag: 'Notice required' },
               ].map(({ step, title, desc, icon: Icon, accent, bg, tag }, i, arr) => (
                 <div key={step} className={cn('relative px-5 py-4', i < arr.length - 1 && 'border-[#326273]/8 sm:border-r')}>
@@ -820,7 +820,7 @@ export default function TreasuryPage() {
             <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2.5">
               <AlertCircle size={13} className="mt-0.5 shrink-0 text-amber-600" />
               <p className="text-[13px] leading-4 text-amber-700">
-                Yield is variable and not guaranteed. USDY is T-bill backed; rates move with US Treasury yields.
+                Treasury figures are projections, not a live offer and not a promise of return. Rates are variable and move with US Treasury rates; nothing is guaranteed.
               </p>
             </div>
           </div>

@@ -58,8 +58,8 @@ test('ActionCard model exposes full proposal anatomy and trust treatment', () =>
     'Amount out',
     'Fee',
     'FX',
-    'Yield delta',
-    'Netting saved',
+    'Projected treasury delta',
+    'Modeled offset saving (roadmap)',
   ]);
   assert.equal(model.simulationRows.some((row) => row.label === 'Dry-run' && row.value === 'Matched'), true);
   assert.equal(model.simulationRows.some((row) => row.label.includes('org_treasury')), true);

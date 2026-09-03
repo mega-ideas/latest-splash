@@ -21,7 +21,7 @@ import { getTreasuryRate, getUsdyRedemptionPrice, navIsDecidable, quoteSwap } fr
 
 export type UserTreasuryLedger = {
   userId: string;
-  availableMicro: number; // USDC, 0%, instant
+  availableMicro: number; // USDC, 0%, no notice period
   treasuryPrincipalMicro: number; // USDC-equivalent moved into USDY
   treasuryYieldMicro: number; // accrued, unredeemed yield
   updatedAt: string;

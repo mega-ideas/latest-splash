@@ -1897,3 +1897,85 @@
   .iso-supply-card,
   .iso-supply-art img { transition: none; }
 }
+
+/* ─── Vision copy v2 (claims pass) ──────────────────────────────────────────
+   Extruded display type is retired from the vision block: Geist, flat,
+   two-tone (line one ink, line two slate). The product pillars name what
+   ships today and the module that implements it, in mono. */
+.cin-vision-kicker {
+  justify-self: center;
+  margin: 0;
+  color: rgba(12, 62, 72, .62);
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+}
+
+.cin-vision-title.cin-vision-title-v2 {
+  margin-top: 18px;
+  color: var(--cin-ink);
+  font-size: clamp(34px, 4.6vw, 62px);
+  font-weight: 600;
+  letter-spacing: -.02em;
+  line-height: 1.06;
+  -webkit-text-stroke: 0;
+  text-shadow: none;
+  text-transform: none;
+}
+
+.cin-vision-title.cin-vision-title-v2 span {
+  display: block;
+  margin-top: .06em;
+  color: rgba(50, 98, 115, .92);
+  -webkit-text-stroke: 0;
+  text-shadow: none;
+}
+
+.cin-vision-pillars.cin-vision-pillars-v2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  width: min(720px, 100%);
+  margin: 30px auto 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cin-vision-pillars.cin-vision-pillars-v2 li {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 16px;
+  border: 1px solid rgba(50, 98, 115, .16);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, .78);
+  text-align: left;
+}
+
+.cin-vision-pillars.cin-vision-pillars-v2 strong {
+  color: var(--cin-ink);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -.01em;
+}
+
+.cin-vision-pillars.cin-vision-pillars-v2 code {
+  color: rgba(50, 98, 115, .85);
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  letter-spacing: .02em;
+}
+
+/* Hero H1: the corridor clause renders as its own line. */
+.cin-hero-h1-corridor {
+  display: block;
+  margin-top: .15em;
+  color: var(--cin-teal);
+}
+
+@media (max-width: 640px) {
+  .cin-vision-title.cin-vision-title-v2 { font-size: clamp(28px, 8vw, 34px); }
+  .cin-vision-pillars.cin-vision-pillars-v2 { grid-template-columns: 1fr 1fr; }
+}

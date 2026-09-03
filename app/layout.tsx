@@ -17,15 +17,16 @@ const fontMono = Geist_Mono({
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"),
   title: "Splash - Working-capital network for SEA payouts",
-  description: "Collect USD, pay Southeast Asia, and keep cash working in a labeled sandbox environment.",
+  description:
+    "Send USD across Southeast Asia in minutes, starting with the Philippines and Indonesia. Atomic settlement on Sui, human approval on every action. No customer funds until MFCA activation.",
   openGraph: {
     title: "Splash - Working-capital network for SEA payouts",
-    description: "Collect USD. Pay Southeast Asia. Keep cash working.",
+    description: "Send USD across Southeast Asia in minutes. Settled atomically on Sui, proven on-chain.",
   },
   twitter: {
     card: "summary_large_image",
     title: "Splash - Working-capital network for SEA payouts",
-    description: "Collect USD. Pay Southeast Asia. Keep cash working.",
+    description: "Send USD across Southeast Asia in minutes. Settled atomically on Sui, proven on-chain.",
   },
 };
 
