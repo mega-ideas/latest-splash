@@ -6758,7 +6758,7 @@ button.iso-product-row {
   outline: none;
   border-color: rgba(13, 99, 112, .65);
   background: #fffdf9;
-  box-shadow: 0 0 0 3px rgba(111, 205, 190, .3);
+  box-shadow: 0 0 0 2px var(--iso-paper), 0 0 0 4px var(--iso-teal);
 }
 
 .fintech-dashboard-main thead th {
@@ -8045,7 +8045,7 @@ button.iso-product-row {
 .fintech-dashboard-shell [role="button"]:focus-visible,
 .fintech-dashboard-shell summary:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px rgba(92, 158, 173, .38);
+  box-shadow: 0 0 0 2px var(--iso-paper), 0 0 0 4px var(--iso-teal);
   border-radius: var(--r-sm);
 }
 
@@ -8076,4 +8076,52 @@ button.iso-product-row {
 @media (prefers-reduced-motion: reduce) {
   .fintech-dashboard-shell .dash-block-interactive,
   .fintech-dashboard-shell .dash-block-interactive:hover { transition: none; transform: none; }
+}
+
+
+/* ─── Keyboard focus ───────────────────────────────────────────────────────
+   Before this, the landing and the auth pages painted nothing on keyboard
+   focus: the two inputs that set `outline: none` never replaced it, and the
+   only :focus-visible rules in the file were scoped to the dashboard shell.
+   Verified by tabbing: a focused sign-in field reported outline-style none
+   and no ring.
+
+   Paints on :focus-visible only, so pointer users see nothing new, and the
+   existing hover/active treatments are untouched. --focus-ring is
+   ground-aware because the interactive teal reads 6.66 on the paper grounds
+   but 1.69 on ink; the mint reads 6.80 there. Both clear the 3:1 that WCAG
+   2.2 asks of a focus indicator.
+
+   Rules that define their own ring (the dashboard shell, at higher
+   specificity) keep it. This is the floor, not an override. */
+:root { --focus-ring: var(--iso-teal); }
+
+/* Containers with a dark ground: a child's ring lands on ink, not paper. */
+.iso-flow,
+.iso-trust,
+.iso-walrus,
+.iso-final-panel,
+.iso-auth-visual,
+.admin-login-story { --focus-ring: var(--iso-mint); }
+
+a:focus-visible,
+button:focus-visible,
+summary:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[role="button"]:focus-visible,
+[tabindex]:not([tabindex="-1"]):focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* The two fields that killed the outline outright. Same specificity as the
+   base rule that set `outline: none`, declared later, so focus wins while
+   the resting style is untouched. */
+.iso-waitlist-field input:focus-visible,
+.iso-auth-field input:focus-visible,
+.iso-auth-field select:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
 }
