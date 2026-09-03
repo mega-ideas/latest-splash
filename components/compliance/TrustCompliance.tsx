@@ -6,26 +6,21 @@ import { FileLock2, Landmark, ShieldCheck, Vault } from 'lucide-react';
  * planned — never implied as held. The mandatory not-yet-licensed line is
  * rendered by this component so no page can crop it away.
  */
-const PARTNER_ROWS = [
+const ROLE_ROWS = [
   {
-    partner: 'Coins.ph',
-    role: 'Payout partner of record — BSP-licensed local disbursement in the Philippines',
+    role: 'Payout of record — Philippines',
+    holder: 'A BSP-licensed local disbursement partner',
     status: 'Partner rail',
   },
   {
-    partner: 'Hata Global',
-    role: 'Labuan-regulated liquidity and FX venue for USD legs',
+    role: 'USD collection',
+    holder: 'A licensed collection partner holding the client account',
     status: 'Partner rail',
   },
   {
-    partner: 'BitGo',
-    role: '2-of-3 key governance for operating assets',
-    status: 'Custody governance',
-  },
-  {
-    partner: 'CoKeeps / Gambit',
-    role: 'Client-asset custody options as corridor volume grows',
-    status: 'Custody options',
+    role: 'Software and settlement layer',
+    holder: 'Splash',
+    status: 'Not a licence holder',
   },
 ];
 
@@ -39,7 +34,7 @@ const LICENSE_PATH = [
 const CONTROLS = [
   { label: 'Human approval', body: 'Every payment is prepared by 0xWal and released only by a human on the Action Queue — maker-checker, with dual approval above your threshold.' },
   { label: 'Corridor gating', body: 'Corridors arm and pause under explicit controls; settlement halts on a peg deviation or compliance flag before any value moves.' },
-  { label: 'Partner custody', body: 'Licensed partners are the system of record for client funds, with 2-of-3 key governance on Splash-side controls.' },
+  { label: 'Partner custody', body: 'Licensed partners are the system of record for client funds; Splash never takes custody. Splash-side operator keys are single-signer today — the multisig and KMS split described in the key policy is a mainnet gate, not a control already in force.' },
 ];
 
 export default function TrustCompliance() {
@@ -58,22 +53,27 @@ export default function TrustCompliance() {
         <h2><Landmark aria-hidden="true" /> Rent the license, then own it</h2>
         <p>
           The honest sequence for a new corridor: run on partners who already hold the licenses,
-          prove volume and controls, then bring the licenses in-house. Who does what today:
+          prove volume and controls, then bring the licenses in-house. Which role holds which
+          authority today:
         </p>
         <div className="trust-table-wrap">
           <table className="trust-table">
+            <caption className="trust-table-caption">
+              Authority by role. A counterparty is named here only once an agreement is
+              signed — none is named today.
+            </caption>
             <thead>
               <tr>
-                <th>Partner</th>
                 <th>Role of record</th>
+                <th>Held by</th>
                 <th>Relationship</th>
               </tr>
             </thead>
             <tbody>
-              {PARTNER_ROWS.map((row) => (
-                <tr key={row.partner}>
-                  <th scope="row">{row.partner}</th>
-                  <td>{row.role}</td>
+              {ROLE_ROWS.map((row) => (
+                <tr key={row.role}>
+                  <th scope="row">{row.role}</th>
+                  <td>{row.holder}</td>
                   <td><span className="trust-chip">{row.status}</span></td>
                 </tr>
               ))}

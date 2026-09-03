@@ -1,7 +1,7 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { extname, join, relative } from 'node:path';
 
-const roots = ['app', 'components', 'lib'];
+const roots = ['app', 'components', 'lib', 'content'];
 const allowedExtensions = new Set(['.js', '.jsx', '.mjs', '.ts', '.tsx']);
 const banned = [
   /we don't hold user money/i,
@@ -110,6 +110,26 @@ function coralRiskViolations(text) {
   return found;
 }
 
+// ── Unsigned-counterparty guard (A-23) ────────────────────────────────────
+// Canon: no partner is named on a customer-facing surface before signature.
+// Deliberately PATH-SCOPED to customer-facing roots, because the same strings
+// are legitimate elsewhere: `'HATA'` is a live provider union member in
+// lib/server/operations.ts, `venue:hata:clearing` is an arbitrary ledger
+// account string in tests, and SECURITY.md/STATUS.md record the original
+// audit finding on purpose. Scrubbing those would destroy real history.
+const claimRoots = ['app', 'components', 'content'];
+const unsignedCounterparties = [
+  /\bBitGo\b/i,
+  /CoKeeps/i,
+  /\bGambit\b/i,
+  /Hata\s+Global/i,
+  /Coins[.]ph/i,
+];
+// The 2-of-3 governance claim: docs/KEY-POLICY.md lists it as a TARGET and its
+// own Gap Log says AdminCap is still a single capability. Asserting it as a
+// control in force is a claims defect wherever a customer can read it.
+const unearnedGovernance = /\b2[- ]?of[- ]?3\b/i;
+
 const violations = [];
 
 // W9.4 money-path guard: the trust panel's locked sentences must stay in
@@ -143,6 +163,16 @@ for (const root of roots) {
     }
     for (const apy of apyViolations(text)) {
       violations.push(`${relative('.', file)}: fixed APY figure "${apy}" — yield copy must be prefixed with "Variable"`);
+    }
+    if (claimRoots.includes(root)) {
+      for (const pattern of unsignedCounterparties) {
+        if (pattern.test(text)) {
+          violations.push(`${relative('.', file)}: names an unsigned counterparty (${pattern.source}) — canon is partners unnamed until signed`);
+        }
+      }
+      if (unearnedGovernance.test(text)) {
+        violations.push(`${relative('.', file)}: claims 2-of-3 key governance — docs/KEY-POLICY.md lists this as a target, and its Gap Log says AdminCap is still a single capability`);
+      }
     }
     if (root === 'app' || root === 'components') {
       for (const hex of hexViolations(text)) {

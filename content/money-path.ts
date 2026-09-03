@@ -37,11 +37,12 @@ export type MoneyPathStep = {
   splashIsParty: boolean;
 };
 
-/** PHP payout rails — render the ACTIVE one. When the Coins.ph rail goes
- *  live, flip `active` here and every mount updates. */
+/** PHP payout rails — render the ACTIVE one. Per this file's own rule above,
+ *  a rail is listed only once it is a partner of record. An inactive entry is
+ *  still a published name the moment someone flips the boolean, so unsigned
+ *  rails do not sit here waiting. Add the next rail when it signs. */
 export const PH_PAYOUT_RAILS = [
   { name: 'PDAX · via GCash', active: true },
-  { name: 'Coins.ph', active: false },
 ] as const;
 
 const activePhRail = PH_PAYOUT_RAILS.find((rail) => rail.active) ?? PH_PAYOUT_RAILS[0];

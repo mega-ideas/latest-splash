@@ -5,14 +5,15 @@
       "name": "splash-dev",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
-      "port": 3000,
+      "port": 3010,
       "autoPort": true,
       "env": {
-        "TEMP": "D:\\latest-splash\\.tmp",
-        "TMP": "D:\\latest-splash\\.tmp",
-        "TMPDIR": "D:\\latest-splash\\.tmp",
+        "TEMP": "D:/splash-base/.tmp",
+        "TMP": "D:/splash-base/.tmp",
+        "TMPDIR": "D:/splash-base/.tmp",
         "NEXT_TELEMETRY_DISABLED": "1",
-        "NODE_OPTIONS": "--use-system-ca"
+        "NODE_OPTIONS": "--use-system-ca",
+        "PORT": "3010"
       }
     }
   ]

@@ -69,3 +69,6 @@ next-env.d.ts
 
 # Machine-local skill symlinks (npx skills creates them per-machine)
 /.claude/skills/
+
+# stray dev-server logs
+.dev-*.log

@@ -2253,6 +2253,16 @@ body {
 
 .trust-table-wrap { margin-top: 18px; overflow-x: auto; }
 .trust-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+/* Caption carries the canon rule the table used to break: no counterparty is
+   named before signature. Sentence case, sans — not a tracked-out label. */
+.trust-table-caption {
+  caption-side: top;
+  text-align: left;
+  padding: 0 0 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--iso-text-secondary);
+}
 .trust-table th, .trust-table td {
   border-bottom: 1px solid var(--iso-line);
   padding: 12px 14px;

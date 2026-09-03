@@ -68,7 +68,7 @@ type TxStatus = 'settled' | 'pending' | 'failed';
 const ACTIVITIES: Array<{
   id: string; desc: string; corridor: string; usd: string; local: string; status: TxStatus; time: string;
 }> = [
-  { id: 'ti_m8q4_9b21fa',      desc: 'Vendor payout · Coins.ph',         corridor: 'USD→PHP', usd: '$748.00',    local: 'PHP 42,180',  status: 'settled', time: '14:32' },
+  { id: 'ti_m8q4_9b21fa',      desc: 'Vendor payout · Manila supplier',         corridor: 'USD→PHP', usd: '$748.00',    local: 'PHP 42,180',  status: 'settled', time: '14:32' },
   { id: 'batch_m8q2_12ac08',   desc: 'BPO payroll batch · 12 recipients', corridor: 'USD→PHP', usd: '$6,670.00',  local: 'PHP 376,377', status: 'pending', time: '13:51' },
   { id: 'dep_m8pr_77a932',     desc: 'Stripe deposit received',            corridor: '—',        usd: '$3,820.00',  local: '—',           status: 'settled', time: '12:04' },
   { id: 'ti_m8pa_3c44f1',      desc: 'Textile supplier · Jakarta',         corridor: 'USD→IDR', usd: '$1,200.00',  local: 'IDR 19.5M',  status: 'settled', time: '11:20' },
