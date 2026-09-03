@@ -7,7 +7,7 @@ import { toast } from 'sonner';
 
 import Receipt from '@/components/Receipt';
 import SettlementProofDrawer from '@/components/SettlementProofDrawer';
-import { receiptNetworkLine } from '@/lib/network-label';
+import { explorerTxUrl, receiptNetworkLine } from '@/lib/network';
 import type { TransferState } from '@/app/dashboard/transfer/page';
 
 export default function StepReceipt({ state, reset }: { state: TransferState; reset: () => void }) {
@@ -45,7 +45,7 @@ export default function StepReceipt({ state, reset }: { state: TransferState; re
   });
 
   const digest = state.txDigest ?? null;
-  const explorerUrl = digest ? `https://testnet.suivision.xyz/txblock/${digest}` : null;
+  const explorerUrl = digest ? explorerTxUrl(digest) : null;
 
   async function shareWithSupplier() {
     if (!state.transferIntentId) {

@@ -17,6 +17,9 @@ import {
 import type { TransferState } from '@/app/dashboard/transfer/page';
 import type { RecipientRecord } from '@/lib/server/operations';
 import { checkMinimumSettlement, minSettlementUsd, formatUsd } from '@/lib/policy/limits';
+import { getNetworkProfile } from '@/lib/network';
+
+const corridorNetworkLabel = getNetworkProfile().badges.live ? 'live' : `${getNetworkProfile().badges.network} sandbox`;
 
 type TransferPatch = (patch: Partial<TransferState>) => void;
 type RecipientCountry = TransferState['recipient']['country'];
@@ -292,7 +295,7 @@ export default function StepBeneficiary({ state, set, next }: { state: TransferS
                         <span className="block truncate text-[13px] font-bold">{country.name}</span>
                         <span className={`block font-mono text-[13px] font-semibold ${active ? 'text-[#8FD7C7]' : 'text-[#326273]/45'}`}>
                           {COUNTRY_TO_CURRENCY[country.code]}
-                          {country.live ? ' · testnet live' : ''}
+                          {country.live ? ` · ${corridorNetworkLabel}` : ''}
                         </span>
                       </span>
                     </button>

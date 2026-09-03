@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { explorerTxUrl } from '@/lib/network';
 import {
   ArrowUpRight,
   CheckCircle2,
@@ -404,7 +405,7 @@ export default function HistoryPage() {
                 <div className="flex gap-2">
                   <StatusBadge status={batch.walrusMode} />
                   <StatusBadge status={batch.sealMode} />
-                  <a href={`https://testnet.suivision.xyz/txblock/${batch.anchorDigest}`} target="_blank" rel="noreferrer" className="rounded-lg bg-white px-3 py-2 text-[13px] font-bold text-[#326273]">
+                  <a href={explorerTxUrl(batch.anchorDigest)} target="_blank" rel="noreferrer" className="rounded-lg bg-white px-3 py-2 text-[13px] font-bold text-[#326273]">
                     Anchor tx
                   </a>
                 </div>

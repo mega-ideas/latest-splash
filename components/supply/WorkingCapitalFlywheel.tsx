@@ -8,6 +8,7 @@ import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { useGSAP } from '@gsap/react';
 
 import RoadmapChip from '@/components/supply/RoadmapChip';
+import { getNetworkProfile } from '@/lib/network';
 
 gsap.registerPlugin(ScrollTrigger, useGSAP);
 
@@ -41,7 +42,7 @@ const LOOPS: Loop[] = [
     name: 'Settle',
     role: 'The feeding wedge',
     copy: 'Collect USD, pay Southeast Asia. Every approved payout builds verified counterparties and settlement history.',
-    meta: 'USD → PHP · live on testnet',
+    meta: `USD → PHP · IDR · ${getNetworkProfile().badges.network}`,
   },
   {
     id: 'supply',

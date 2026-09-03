@@ -20,12 +20,17 @@ import {
   Zap,
 } from 'lucide-react';
 
+import NetworkBadge from '@/components/brand/NetworkBadge';
+import PostureFooter from '@/components/brand/PostureFooter';
+import SandboxRibbon from '@/components/brand/SandboxRibbon';
 import FloatingToken from '@/components/landing/FloatingToken';
 import SettlementCinematic from '@/components/landing/SettlementCinematic';
 import WaitlistCta from '@/components/landing/WaitlistCta';
 import ControlPlaneExplainer from '@/components/oxwal/ControlPlaneExplainer';
 import RoadmapChip from '@/components/supply/RoadmapChip';
 import { claims, lockedCopy } from '@/content/claims';
+import { brand } from '@/lib/brand';
+import { getNetworkProfile } from '@/lib/network';
 
 const operatingLayers = [
   {
@@ -106,8 +111,10 @@ const flowSteps = [
 ];
 
 /* Metrics ticker: the moving bridge band at the bottom of the hero. */
+const networkProfile = getNetworkProfile();
+
 const marqueeItems = [
-  ['1 live testnet', 'MY to PH corridor'],
+  [`${networkProfile.corridors.length} corridors`, `${networkProfile.corridors.map((c) => c.currency).join(' · ')} · staggered launch`],
   ['Modeled routes', 'expand with controls'],
   ['~400ms', 'Sui settlement finality'],
   ['From 0.80%', 'starting edge fee'],
@@ -329,7 +336,7 @@ const headerNavItems = [
   { href: '#how-it-works', label: 'How it works', detail: '5 steps' },
   { href: '#platform', label: 'Platform', detail: 'Pay + treasury' },
   { href: '#supply', label: 'Working capital', detail: 'Supply loop' },
-  { href: '#corridors', label: 'Routes', detail: 'MY-PH testnet' },
+  { href: '#corridors', label: 'Routes', detail: networkProfile.corridors.map((c) => c.code).join(' · ') },
   { href: '#comparison', label: 'Compare', detail: 'Fees + speed' },
   { href: '#copilot', label: '0xWal', detail: 'Prepare + approve' },
 ];
@@ -372,7 +379,7 @@ const loopCards = [
     copy: 'Collect USD, pay Southeast Asia. Every approved payout builds verified counterparties and settlement history.',
     image: '/isometric/loop-settle-v3.png',
     imageAlt: 'Isometric settlement: a USD coin crossing an approved rail in minutes to arrive as a PHP coin',
-    meta: 'USD → PHP · live on testnet',
+    meta: `USD → PHP · IDR · ${networkProfile.badges.network}`,
     roadmap: false,
   },
   {
@@ -475,6 +482,7 @@ export default function IsometricLanding() {
 
   return (
     <main className="iso-landing">
+      <SandboxRibbon />
       <header className={`iso-header ${showBackToTop ? 'is-scrolled' : ''}`}>
         <div className="iso-shell iso-header-inner">
           <Link href="/" className="iso-brand" aria-label="Splash Finance home">
@@ -494,10 +502,7 @@ export default function IsometricLanding() {
           </nav>
 
           <div className="iso-header-actions">
-            <span className="iso-header-status">
-              <small>Sandbox</small>
-              <strong>MY-PH testnet</strong>
-            </span>
+            <NetworkBadge className="iso-header-status" />
             <Link href="/signup" className="iso-button iso-button-small">
               Start sending
               <ArrowDownRight aria-hidden="true" />
@@ -1005,7 +1010,7 @@ export default function IsometricLanding() {
             </span>
             <p>USD-first settlement infrastructure for Southeast Asian finance teams.</p>
             <div className="cin-footer-status" aria-label="Network status">
-              <span><i aria-hidden="true" /> Sandbox · MY-PH testnet</span>
+              <span><i aria-hidden="true" /> {networkProfile.badges.live ?? `${networkProfile.badges.network} · no customer funds`}</span>
               <span><i aria-hidden="true" /> {lockedCopy.speed}</span>
               <span><i aria-hidden="true" /> {lockedCopy.agent}</span>
             </div>
@@ -1036,10 +1041,13 @@ export default function IsometricLanding() {
 
         <div className="cin-footer-bar">
           <div className="iso-shell cin-footer-bar-inner">
-            <span>© 2026 Splash Financial Labuan Ltd.</span>
+            <span>{brand.copyright}</span>
             <span className="cin-footer-tick">
-              USD → PHP · {lockedCopy.speed} · {lockedCopy.fee} · zero-fee USD rail on Sui, gas-sponsored settlement — you never hold SUI
+              USD → PHP · IDR · {lockedCopy.speed} · {lockedCopy.fee} (illustrative) · gas-sponsored settlement — you never hold SUI
             </span>
+          </div>
+          <div className="iso-shell cin-footer-posture">
+            <PostureFooter />
           </div>
         </div>
       </footer>

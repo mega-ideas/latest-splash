@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 
 import { getAdminSession } from '@/lib/server/admin-auth';
 import { getOperatorWalletInfo } from '@/lib/server/sui-settlement';
+import { explorerAccountUrl, resolveNetwork } from '@/lib/network';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,7 +15,7 @@ export async function GET() {
 
   try {
     const wallet = await getOperatorWalletInfo();
-    const network = process.env.SUI_NETWORK ?? 'testnet';
+    const network = resolveNetwork();
     const faucetUrl =
       network === 'testnet'
         ? `https://faucet.testnet.sui.io/?address=${wallet.address}`
@@ -27,7 +28,7 @@ export async function GET() {
       coinCount: wallet.coinCount,
       network,
       faucetUrl,
-      suiVisionUrl: `https://${network}.suivision.xyz/account/${wallet.address}`,
+      suiVisionUrl: explorerAccountUrl(wallet.address),
     });
   } catch (error) {
     return NextResponse.json(

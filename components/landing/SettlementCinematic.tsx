@@ -15,8 +15,14 @@ import {
 
 import WaitlistCta from '@/components/landing/WaitlistCta';
 import { lockedCopy } from '@/content/claims';
+import { getNetworkProfile } from '@/lib/network';
 
 const HERO_IMG = '/cinematic/hero-district-v5.png';
+
+const { badges: networkBadges } = getNetworkProfile();
+const networkStatusLine = networkBadges.live
+  ? `${networkBadges.live} · simulated view`
+  : `${networkBadges.network} · sandbox · no customer funds`;
 
 const EASE_OUT_EXPO = [0.16, 1, 0.3, 1] as const;
 
@@ -35,7 +41,7 @@ const telemetry = [
     id: 'corridor',
     className: 'cin-callout-a',
     enter: 0.27,
-    tag: 'Corridor · Testnet',
+    tag: `Corridor · ${networkBadges.network}`,
     value: 'USD → PHP',
     meta: lockedCopy.speed,
     badge: '/cinematic/token-php.png',
@@ -503,7 +509,7 @@ export default function SettlementCinematic() {
         ))}
 
         <motion.p className="cin-status" style={{ opacity: statusOpacity }}>
-          Network telemetry · Sandbox environment · No real money moves
+          Network telemetry · {networkStatusLine}
         </motion.p>
 
         {/* Act I — hero copy. */}

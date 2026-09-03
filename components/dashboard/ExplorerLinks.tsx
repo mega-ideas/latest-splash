@@ -1,12 +1,13 @@
 import { ExternalLink } from 'lucide-react';
 
+import { explorerTxUrl } from '@/lib/network';
 import { cn } from '@/lib/utils';
 
-/** Paired SuiScan / SuiVision links for a transaction digest. */
+/** Paired SuiScan / SuiVision links for a transaction digest, on the deployment's network. */
 export default function ExplorerLinks({ digest, className }: { digest: string; className?: string }) {
   const links = [
-    { label: 'SuiScan', href: `https://suiscan.xyz/testnet/tx/${digest}` },
-    { label: 'SuiVision', href: `https://testnet.suivision.xyz/txblock/${digest}` },
+    { label: 'SuiScan', href: explorerTxUrl(digest, 'suiscan') },
+    { label: 'SuiVision', href: explorerTxUrl(digest, 'suivision') },
   ];
 
   return (

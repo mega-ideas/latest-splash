@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import { CheckCircle2, ChevronDown, Database, ExternalLink, FileKey2, Lock, ShieldCheck, XCircle } from 'lucide-react';
 
+import { explorerTxUrl } from '@/lib/network';
+
 type SettlementProofResponse = {
   proof?: {
     receipt: {
@@ -101,7 +103,7 @@ export default function SettlementProofDrawer({ transferIntentId, fallback }: Se
             <ProofRow label="Expected hash" value={independent?.expectedCiphertextHash ?? 'Pending'} mono />
           </div>
           {digest && (
-            <a href={`https://testnet.suivision.xyz/txblock/${digest}`} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-1 font-bold text-[var(--info)]">
+            <a href={explorerTxUrl(digest)} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-1 font-bold text-[var(--info)]">
               Open Sui proof
               <ExternalLink className="h-3.5 w-3.5" />
             </a>
