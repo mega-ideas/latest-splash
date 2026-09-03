@@ -404,7 +404,7 @@ const loopCards = [
   },
 ];
 
-export default function IsometricLanding({ isPhone = false }: { isPhone?: boolean }) {
+export default function IsometricLanding() {
   const [activeFlow, setActiveFlow] = useState(flowSteps[0]);
   const [yieldBenchmarks, setYieldBenchmarks] = useState(fallbackYieldBenchmarks);
   const [showBackToTop, setShowBackToTop] = useState(false);
@@ -481,7 +481,7 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
   ];
 
   return (
-    <main className={`iso-landing${isPhone ? ' is-phone' : ''}`}>
+    <main className="iso-landing">
       <header className={`iso-header ${showBackToTop ? 'is-scrolled' : ''}`}>
         <div className="iso-shell iso-header-inner">
           <Link href="/" className="iso-brand" aria-label="Splash Finance home">
@@ -513,7 +513,7 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
         </div>
       </header>
 
-      <SettlementCinematic isPhone={isPhone} />
+      <SettlementCinematic />
 
       <div className="iso-marquee is-static" aria-label="Platform metrics">
         <div className="iso-marquee-track">

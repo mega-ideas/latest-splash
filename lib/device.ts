@@ -1,13 +1,11 @@
 /**
- * Phone detection from the User-Agent, decided server-side so the right
- * layout renders on the first byte (no client-side flash or CLS).
+ * Phone detection from the User-Agent.
  *
- * Deliberate segmentation: PHONES get the dedicated mobile landing;
- * tablets (iPad et al.) keep the desktop/isometric design, which is built
- * for desktop, laptop and iPad viewports.
+ * NON-VISUAL USE ONLY. Layout is decided by viewport width queries in one
+ * responsive tree; never branch rendering on this helper. It remains for
+ * server-side concerns such as analytics tagging or rate-limit heuristics.
  *
- * Note: iPadOS 13+ reports a Macintosh UA, which lands it on the desktop
- * design — exactly the segmentation we want.
+ * Note: iPadOS 13+ reports a Macintosh UA and therefore reads as desktop.
  */
 export function isPhoneUserAgent(userAgent: string | null | undefined): boolean {
   if (!userAgent) return false;

@@ -14,25 +14,20 @@ import { ArrowRight, BadgeCheck, Mail } from 'lucide-react';
  *
  * - `tone`: 'light' for the cream hero surface (dark-ink ghost), 'dark' for the
  *   deep final-CTA panel (light ghost). Matches whichever siblings sit beside it.
- * - `variant`: 'iso' (default) or 'mob' for the phone button system.
  */
 type Tone = 'light' | 'dark';
 
 export default function WaitlistCta({
-  variant = 'iso',
   tone = 'light',
 }: {
-  variant?: 'iso' | 'mob';
   tone?: Tone;
 }) {
   const [phase, setPhase] = useState<'idle' | 'open' | 'submitting' | 'done'>('idle');
   const [email, setEmail] = useState('');
   const [error, setError] = useState('');
 
-  const triggerClass = variant === 'mob'
-    ? 'mob-btn mob-btn-ghost'
-    : `iso-button ${tone === 'dark' ? 'iso-button-dark-ghost' : 'iso-button-ghost'}`;
-  const submitClass = variant === 'mob' ? 'mob-btn mob-btn-primary' : 'iso-button';
+  const triggerClass = `iso-button ${tone === 'dark' ? 'iso-button-dark-ghost' : 'iso-button-ghost'}`;
+  const submitClass = 'iso-button';
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -43,7 +38,7 @@ export default function WaitlistCta({
       const response = await fetch('/api/waitlist', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, source: `landing-${variant}` }),
+        body: JSON.stringify({ email, source: 'landing-iso' }),
       });
       const body = (await response.json().catch(() => ({}))) as { error?: string };
       if (!response.ok) throw new Error(body.error ?? 'Something went sideways — try again.');
