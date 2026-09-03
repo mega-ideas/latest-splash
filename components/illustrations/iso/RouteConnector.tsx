@@ -1,11 +1,12 @@
-'use client';
 /**
  * RouteConnector — a dotted isometric route between two world points with
  * three travelling dots (2.5s loop, staggered). Routes follow the iso axes:
- * along x first, then y. Static under reduced motion.
+ * along x first, then y.
+ *
+ * Motion is native SVG (`animateMotion`), so the module ships no animation
+ * library and renders on the server. Under `prefers-reduced-motion` the CSS
+ * in globals.css hides the moving group and shows static dots at thirds.
  */
-import { useEffect, useMemo } from 'react';
-import { animate, motion, useMotionValue, useReducedMotion, useTransform, type MotionValue } from 'framer-motion';
 import { boundsOf, IsoPalette, isoPoint, isoVec, type Bounds, type IsoTone, type IsoVec, type Pt } from './iso';
 import { IsoSvg, type IsoModuleProps } from './primitives';
 
@@ -44,35 +45,30 @@ function pointAt(pts: readonly Pt[], t: number): Pt {
   return pts[pts.length - 1];
 }
 
-function Dot({ t, phase, pts, color }: { t: MotionValue<number>; phase: number; pts: readonly Pt[]; color: string }) {
-  const local = useTransform(t, (v) => (v + phase) % 1);
-  const cx = useTransform(local, (v) => pointAt(pts, v)[0]);
-  const cy = useTransform(local, (v) => pointAt(pts, v)[1]);
-  const opacity = useTransform(local, [0, 0.1, 0.9, 1], [0, 1, 1, 0]);
-  return <motion.circle r={2.5} cx={cx} cy={cy} opacity={opacity} fill={color} />;
-}
-
 export function RouteConnectorGlyph({ from, to, tone = 'entry', dots = 3, duration = ROUTE_DURATION }: RouteConnectorGlyphProps) {
-  const reduce = useReducedMotion() ?? false;
-  const t = useMotionValue(0);
-  const pts = useMemo(() => routePoints(from, to), [from, to]);
-  useEffect(() => {
-    if (reduce) return;
-    const controls = animate(t, [0, 1], { duration, ease: 'linear', repeat: Infinity, repeatType: 'loop' });
-    return () => controls.stop();
-  }, [reduce, duration, t]);
+  const pts = routePoints(from, to);
   const color = tone === 'settled' ? IsoPalette.settledInk : IsoPalette.text2;
   const track = pts.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x} ${y}`).join(' ');
   return (
     <g>
       <path d={track} fill="none" stroke={IsoPalette.line200} strokeWidth={1.5} strokeDasharray="1.5 4.5" strokeLinecap="round" strokeLinejoin="round" />
-      {Array.from({ length: dots }, (_, i) => {
-        if (reduce) {
+      <g className="iso-motion">
+        {Array.from({ length: dots }, (_, i) => {
+          const begin = `${-(i / dots) * duration}s`;
+          return (
+            <circle key={i} r={2.5} fill={color}>
+              <animateMotion dur={`${duration}s`} repeatCount="indefinite" begin={begin} path={track} />
+              <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.1;0.9;1" dur={`${duration}s`} repeatCount="indefinite" begin={begin} />
+            </circle>
+          );
+        })}
+      </g>
+      <g className="iso-motion-static">
+        {Array.from({ length: dots }, (_, i) => {
           const [cx, cy] = pointAt(pts, (i + 0.5) / dots);
           return <circle key={i} r={2.5} cx={cx} cy={cy} fill={color} />;
-        }
-        return <Dot key={i} t={t} phase={i / dots} pts={pts} color={color} />;
-      })}
+        })}
+      </g>
     </g>
   );
 }

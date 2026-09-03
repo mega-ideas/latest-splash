@@ -515,3 +515,21 @@ body {
   .lv2-reveal { transform: none; transition: opacity 200ms linear; }
   .lv2-fade { animation: none; }
 }
+
+/* Isometric v2 motion without a library (RouteConnector, ApprovalGate, SuiSettlementStack). */
+.iso-motion-static { display: none; }
+.iso-gate { transition: transform 600ms cubic-bezier(.34, 1.56, .64, 1); transform-box: view-box; }
+@keyframes iso-slab-drop { from { opacity: 0; transform: translateY(calc(var(--iso-drop, 24px) * -1)); } to { opacity: 1; transform: none; } }
+@keyframes iso-slab-loop { 0% { opacity: 0; transform: translateY(calc(var(--iso-drop, 24px) * -1)); } 22% { opacity: 1; transform: none; } 86% { opacity: 1; transform: none; } 100% { opacity: 0; transform: none; } }
+.iso-slab-in { animation: iso-slab-drop 600ms cubic-bezier(.16, 1, .3, 1) both; transform-box: view-box; }
+.iso-slab-loop { animation: iso-slab-loop 2.4s cubic-bezier(.16, 1, .3, 1) infinite; transform-box: view-box; }
+@media (prefers-reduced-motion: reduce) {
+  .iso-motion { display: none; }
+  .iso-motion-static { display: initial; }
+  .iso-gate { transition: none; }
+  .iso-slab-in, .iso-slab-loop { animation: none; opacity: 1; }
+}
+
+@keyframes splash-loading-pulse { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
+.splash-loading-pulse { animation: splash-loading-pulse 1.6s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .splash-loading-pulse { animation: none; } }

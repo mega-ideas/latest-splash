@@ -1,11 +1,13 @@
-'use client';
 /**
  * SuiSettlementStack — three stacked slabs (pay / allocate / prove). The top
  * slab takes the green-100 settled material when `settled` is true.
- * `assembling` drops the slabs in with framer-motion (reduced-motion aware);
- * `loop` repeats the assembly for loading surfaces.
+ * `assembling` drops the slabs in (CSS keyframes `.iso-slab-in`, staggered
+ * per slab); `loop` repeats the assembly for loading surfaces
+ * (`.iso-slab-loop`). Both are static under reduced motion (globals.css),
+ * and the module ships no animation library.
  */
-import { motion, useReducedMotion } from 'framer-motion';
+import type { CSSProperties } from 'react';
+
 import { boxBounds, GRID, IsoPalette, isoPoint, labelWidth, ORIGIN, STROKE, STROKE_FOCAL, type Bounds, type Vec3 } from './iso';
 import { Box, Caption, IsoSvg, LabelPlane, type IsoModuleProps } from './primitives';
 
@@ -13,7 +15,6 @@ export const STACK = { w: 8 * GRID, d: 6 * GRID, slab: 1.5 * GRID, gap: GRID / 2
 export const STACK_HEIGHT = STACK.count * (STACK.slab + STACK.gap) - STACK.gap;
 const DEFAULT_LABELS: readonly [string, string, string] = ['pay', 'allocate', 'prove'];
 const DROP = 3 * GRID;
-const EASE = [0.16, 1, 0.3, 1] as const;
 
 export interface SuiSettlementStackGlyphProps {
   at?: Vec3;
@@ -46,8 +47,6 @@ export function SuiSettlementStackGlyph({
   focal = false,
   label,
 }: SuiSettlementStackGlyphProps) {
-  const reduce = useReducedMotion() ?? false;
-  const animateIn = assembling && !reduce;
   const { w, d, slab, gap } = STACK;
   const sw = focal ? STROKE_FOCAL : STROKE;
   return (
@@ -63,15 +62,12 @@ export function SuiSettlementStackGlyph({
             <Caption at={[tip[0] + 11, tip[1]]} text={labels[i]} fill={isSettled ? IsoPalette.settledInk : IsoPalette.text2} />
           </>
         );
-        if (!animateIn) return <g key={i}>{body}</g>;
-        const transition = loop
-          ? { duration: 2.4, times: [0, 0.22, 0.86, 1], ease: EASE, delay: i * 0.2, repeat: Infinity, repeatType: 'loop' as const }
-          : { duration: 0.6, ease: EASE, delay: i * 0.18 };
-        const keyframes = loop ? { opacity: [0, 1, 1, 0], y: [-DROP, 0, 0, 0] } : { opacity: [0, 1], y: [-DROP, 0] };
+        if (!assembling) return <g key={i}>{body}</g>;
+        const style = { '--iso-drop': `${DROP}px`, animationDelay: `${i * (loop ? 0.2 : 0.18)}s` } as CSSProperties;
         return (
-          <motion.g key={i} initial={{ opacity: 0, y: -DROP }} animate={keyframes} transition={transition}>
+          <g key={i} className={loop ? 'iso-slab-loop' : 'iso-slab-in'} style={style}>
             {body}
-          </motion.g>
+          </g>
         );
       })}
       {label && <LabelPlane anchor={isoPoint(at.x + w / 2, at.y + d / 2, at.z + STACK_HEIGHT)} text={label} />}

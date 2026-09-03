@@ -1,11 +1,12 @@
-'use client';
 /**
  * ApprovalGate — two posts and a barrier that spans world +y. Closed by
- * default; `open` swings the barrier up around the hinge post (spring,
- * reduced-motion aware).
+ * default; `open` swings the barrier up around the hinge post. The swing is
+ * a CSS transform transition (`.iso-gate` in globals.css, no transition
+ * under reduced motion), so the module ships no animation library and
+ * renders on the server.
  */
-import { useEffect, useRef } from 'react';
-import { animate, useMotionValue, useReducedMotion } from 'framer-motion';
+import type { CSSProperties } from 'react';
+
 import { boundsOf, boxBounds, GRID, isoPoint, labelRoom, ORIGIN, unionBounds, type Bounds, type Vec3 } from './iso';
 import { Box, IsoSvg, LabelPlane, type IsoModuleProps } from './primitives';
 
@@ -31,36 +32,16 @@ export function gateBounds(at: Vec3 = ORIGIN, label?: string): Bounds {
 }
 
 export function ApprovalGateGlyph({ at = ORIGIN, open = false, label }: ApprovalGateGlyphProps) {
-  const reduce = useReducedMotion() ?? false;
   const { post, span, height, bar } = GATE;
   const { x, y, z } = at;
   const target = open ? OPEN_ANGLE : 0;
-  const hinge = isoPoint(x + post / 2, y + post, z + height - bar / 2);
-  const angle = useMotionValue(target);
-  const barRef = useRef<SVGGElement>(null);
-  const [hx, hy] = hinge;
-
-  useEffect(() => {
-    const el = barRef.current;
-    if (!el) return;
-    const apply = (a: number) => el.setAttribute('transform', `rotate(${a} ${hx} ${hy})`);
-    if (reduce) {
-      angle.jump(target);
-      apply(target);
-      return;
-    }
-    const unsubscribe = angle.on('change', apply);
-    const controls = animate(angle, target, { type: 'spring', stiffness: 110, damping: 16, mass: 0.8 });
-    return () => {
-      unsubscribe();
-      controls.stop();
-    };
-  }, [angle, target, reduce, hx, hy]);
+  const [hx, hy] = isoPoint(x + post / 2, y + post, z + height - bar / 2);
+  const barStyle: CSSProperties = { transform: `rotate(${target}deg)`, transformOrigin: `${hx}px ${hy}px`, transformBox: 'view-box' };
 
   return (
     <g>
       <Box x={x} y={y} z={z} w={post} d={post} h={height} />
-      <g ref={barRef} transform={`rotate(${target} ${hx} ${hy})`}>
+      <g className="iso-gate" style={barStyle}>
         <Box x={x + post / 4} y={y + post} z={z + height - bar} w={post / 2} d={span - post} h={bar} shadow={false} />
       </g>
       <Box x={x} y={y + span} z={z} w={post} d={post} h={height} />
