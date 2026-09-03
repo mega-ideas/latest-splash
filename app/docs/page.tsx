@@ -52,7 +52,7 @@ const ENDPOINTS: Array<{ group: string; items: Array<{ method: 'GET' | 'POST' | 
 
 const METHOD_TONE: Record<string, string> = {
   GET: 'text-[var(--green-700)] bg-[var(--green-100)]',
-  POST: 'text-[var(--teal-600)] bg-[var(--teal-100)]',
+  POST: 'text-[var(--teal-700)] bg-[var(--teal-100)]',
   PUT: 'text-[var(--amber-700)] bg-[var(--amber-100)]',
   DELETE: 'text-[var(--red-600)] bg-[var(--red-100)]',
 };

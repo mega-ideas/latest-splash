@@ -490,7 +490,7 @@ function ThreadRow({ item, onRetry }: { item: ThreadItem; onRetry: (prompt: stri
 
 function BotAvatar({ className }: { className?: string }) {
   return (
-    <span className={cn('mt-0.5 grid size-6 shrink-0 place-items-center rounded-full bg-[var(--teal-100)] font-mono text-[10px] font-semibold text-[var(--teal-600)]', className)} aria-hidden="true">
+    <span className={cn('mt-0.5 grid size-6 shrink-0 place-items-center rounded-full bg-[var(--teal-100)] font-mono text-[10px] font-semibold text-[var(--teal-700)]', className)} aria-hidden="true">
       0x
     </span>
   );

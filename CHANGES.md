@@ -11,6 +11,13 @@
 ## Phase 6 — Landing v2
 - `components/landing-v2/*` replaces `IsometricLanding` + cinematic hero; money-flow section per `docs/money-flow-spec.md`; hero shows live renders of the real product.
 
+## Gates — accessibility and performance
+- axe (WCAG 2.x A/AA) clean on Send, Batch, Approvals, 0xWal, Receipts, Login, the landing and Pricing; Lighthouse accessibility 100 on `/` and `/login`.
+- Contrast amendment: `--text-muted` #59686F; 700 text shades for status text on tints (`--info-text / --ok-text / --warn-text`); ghost placeholders use dashed borders, never 40% opacity on text.
+- Performance: legacy CSS split into `styles/legacy.css` (loaded only by app routes), providers scoped to app layouts, framer-motion removed from the landing, cinematic stylesheet retired, brand icon 616KB → 26KB, app icon 168KB → 22KB, root loading image 841px → 256px.
+- `/metrics` answers a real 404 via `proxy.ts` unless `NEXT_PUBLIC_METRICS_LIVE=true`.
+- `.github/workflows/ci.yml`: check:core + check-copy + eslint, tsc, test suites, Move packages untouched.
+
 ## Phase 7 — Public pages
 - `/pricing` (illustrative ladder), `/rates` (Pyth mid vs executed; sandbox rows labelled until mainnet volume), `/trust` (restyled; required licensing sentence kept), `/roadmap` (two milestones, no volume promises), `/docs` (customer API surfaced; admin OpenAPI at `/api/openapi`), `/sandbox` (demo credentials flow), `/metrics` (404 unless `NEXT_PUBLIC_METRICS_LIVE=true`), `/login` (system auth shell; zkLogin providers disabled unless enabled), `/receipt/[token]` (tokens, statement-descriptor explainer, never indexed).
 - New env flags: `NEXT_PUBLIC_METRICS_LIVE`, `RATES_HAVE_VOLUME`.

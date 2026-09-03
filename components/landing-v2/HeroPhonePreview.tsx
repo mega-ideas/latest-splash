@@ -14,7 +14,7 @@ export default function HeroPhonePreview({ className = '' }: { className?: strin
         <span>●●●</span>
       </div>
       <div className="flex items-center gap-2 border-b border-[var(--divider)] px-3 pb-2">
-        <span className="grid size-6 place-items-center rounded-full bg-[var(--teal-100)] font-mono text-[9px] font-semibold text-[var(--teal-600)]">0x</span>
+        <span className="grid size-6 place-items-center rounded-full bg-[var(--teal-100)] font-mono text-[9px] font-semibold text-[var(--teal-700)]">0x</span>
         <span className="text-[12px] font-semibold">{brand.agentName}</span>
         <span className="ml-auto rounded-[999px] border border-[var(--green-100)] bg-[var(--green-100)] px-1.5 py-0.5 font-mono text-[8px] uppercase tracking-[0.08em] text-[var(--green-700)]">Online</span>
       </div>
@@ -23,7 +23,7 @@ export default function HeroPhonePreview({ className = '' }: { className?: strin
         <div className="flex flex-wrap gap-1 pl-1">
           <span className="rounded-[999px] border border-[var(--line)] bg-[var(--surface)] px-1.5 py-0.5 font-mono text-[8.5px] text-[var(--text-2)]">Verifying counterparty</span>
           <span className="rounded-[999px] border border-[var(--line)] bg-[var(--surface)] px-1.5 py-0.5 font-mono text-[8.5px] text-[var(--text-2)]">Fetching FX rate</span>
-          <span className="rounded-[999px] border border-[var(--teal-100)] bg-[var(--teal-100)] px-1.5 py-0.5 font-mono text-[8.5px] text-[var(--teal-600)]">Preparing payment proposal</span>
+          <span className="rounded-[999px] border border-[var(--teal-100)] bg-[var(--teal-100)] px-1.5 py-0.5 font-mono text-[8.5px] text-[var(--teal-700)]">Preparing payment proposal</span>
         </div>
         <div className="rounded-[12px] border border-[var(--line)] bg-[var(--surface)] p-2.5">
           <div className="flex items-center justify-between">

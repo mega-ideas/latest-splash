@@ -109,3 +109,10 @@ Two-tone headline: line one `--text`, line two `--text-2` (see the gallery). Tab
 - `--text-muted` is `#59686F` (the brief's `#6B7A83` measured 4.43:1 on white at 11-13px).
 - 700 text shades exist for status text on the 100 tints and on white: `--teal-700 #16606E`, `--green-700 #157056`, `--amber-700 #8A5809`, exposed as `--info-text / --ok-text / --warn-text` (`--error-text` = red-600, which already passes). The 600 shades remain for fills, borders, large figures and links on paper.
 - Ghost placeholders use a dashed border and muted text, never 40% opacity on text.
+
+### Stylesheet architecture (performance)
+- `app/globals.css` (≈520 lines): Tailwind v4, `@theme`, `styles/tokens.css`, base + body, the public `/trust` rules, `.money`, brand chrome, landing-v2 motion (`.lv2-*`). This is everything a public page needs.
+- `styles/legacy.css` (≈8,700 lines): dashboard, admin, queue, pay, the old auth shell, working-capital and the retired isometric/cinematic landings. Imported only by the route layouts that still use those classes (`app/dashboard`, `app/admin`, `app/queue`, `app/pay`, `app/settings`, `app/signup`, `app/forgot-password`, `app/working-capital`, `app/receipt`, `app/help`, `app/design`). A public page never downloads it.
+- `styles/loading.css`: the seven rules the root loading screen uses (extracted from the retired cinematic stylesheet).
+- Providers (react-query + sonner) mount in those same app layouts, not in the root layout; the landing and public pages ship no toast or query runtime. Landing motion is CSS (`Reveal` toggles a class on intersection; the money-flow toggle crossfades on remount); framer-motion is not in the landing bundle.
+- Brand icon assets are 256px (`public/brand/splash-icon.png`, `public/splash-main-icon.png`; the 841px original is `splash-icon@full.png`); `app/icon.png` is 256px.

@@ -4,7 +4,6 @@ import { Eye, EyeOff } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState, type FormEvent } from 'react';
-import { toast } from 'sonner';
 
 import SplashLoading from '@/components/SplashLoading';
 import RoadmapChip from '@/components/supply/RoadmapChip';
@@ -70,7 +69,6 @@ export default function LoginForm({ zkLogin, demo }: { zkLogin: boolean; demo: {
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : 'Unable to sign in. Check your email and password and try again.';
       setError(message);
-      toast.error(message);
     } finally {
       setSubmitting(false);
     }
