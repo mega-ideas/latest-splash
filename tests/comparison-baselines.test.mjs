@@ -23,8 +23,7 @@ test('comparison baselines: category cost math is pct-of-amount plus flat', () =
 });
 
 test('quote step derives all figures from the live quote and reads real settings', async () => {
-  const source = await readFile(new URL('../components/send/AmountStep.tsx', import.meta.url), 'utf8');
-  const review = await readFile(new URL('../components/send/ReviewStep.tsx', import.meta.url), 'utf8');
+  const source = await readFile(new URL('../components/transfer/StepQuote.tsx', import.meta.url), 'utf8');
 
   // Fee % derives from the quote object — no duplicated fee math in the card.
   assert.match(source, /quoteFeeUsd \/ sendAmountUsd/);
@@ -33,8 +32,8 @@ test('quote step derives all figures from the live quote and reads real settings
   assert.match(source, /state\.rateHold\.holdUntil/);
   assert.doesNotMatch(source, /locked 10 min/i);
   // Maker-checker note reads operating settings server-side values.
-  assert.match(review, /fetch\('\/api\/settings'\)/);
-  assert.match(review, /approvalThresholdUsd/);
+  assert.match(source, /fetch\('\/api\/settings'\)/);
+  assert.match(source, /approvalThresholdUsd/);
   // Comparison strip: generic categories only, labeled, and gated on a
   // reviewed baseline (hidden when getComparisonBaseline returns null).
   assert.match(source, /getComparisonBaseline/);
