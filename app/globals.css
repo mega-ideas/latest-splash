@@ -2377,26 +2377,13 @@ body {
   z-index: 2;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  color: rgba(12, 62, 72, .64);
-  font-family: var(--font-mono), monospace;
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: .14em;
-  text-transform: uppercase;
+  color: rgba(12, 62, 72, .72);
+  font-family: var(--font-sans), system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0;
 }
 
-.iso-layer-meta span {
-  display: grid;
-  width: 33px;
-  height: 33px;
-  place-items: center;
-  border: 1px solid var(--iso-line);
-  border-radius: 6px;
-  color: var(--iso-paper);
-  background: var(--iso-teal);
-  box-shadow: 3px 3px 0 var(--iso-teal-dark);
-}
 
 .iso-layer-art {
   position: relative;

@@ -27,33 +27,37 @@ import ControlPlaneExplainer from '@/components/oxwal/ControlPlaneExplainer';
 import RoadmapChip from '@/components/supply/RoadmapChip';
 import { claims, lockedCopy } from '@/content/claims';
 
+/* These used to be Liquidity / Settlement / Treasury — the same product areas
+   the three loops above already cover, which made this section read as a
+   restatement rather than an argument. They are cut on a different axis now:
+   not what the money does, but what holds true of every payment whichever loop
+   it is in. Deliberately unnumbered — the loops are numbered because a reader
+   walks them in order; these three are simultaneous, and numbering them would
+   assert a sequence that does not exist. */
 const operatingLayers = [
   {
-    number: '01',
-    label: 'Liquidity',
-    title: 'Keep USD productive.',
-    copy: 'Keep payout inventory ready while treasury projections model how excess USD could remain productive.',
-    image: '/cinematic/liquidity-pools.png',
-    imageAlt: 'Tiered isometric liquidity pools with gold coin reserves flowing between basins',
-    meta: 'Available cash - projected treasury',
-  },
-  {
-    number: '02',
-    label: 'Settlement',
+    label: 'Settlement is atomic',
     title: 'Funds cannot get stuck.',
-    copy: 'Every payment intent settles or reverts atomically in one programmable Sui transaction.',
+    copy: 'A payment intent settles or reverts inside one Sui transaction. There is no half-sent state to chase, because there is no moment when only half of it has happened.',
     image: '/cinematic/settlement-machine.png',
     imageAlt: 'Isometric settlement machine turning US dollar coins into local currency through a checkpoint',
     meta: lockedCopy.speed,
   },
   {
-    number: '03',
-    label: 'Treasury',
-    title: 'Make cash work harder.',
-    copy: '0xWal recommends a treasury posture. Your business approves every action; execution remains gated.',
+    label: 'A corridor that cannot settle does not quote',
+    title: 'Nothing is promised before it can be funded.',
+    copy: 'Payout inventory is checked before a quote exists. Corridors arm and pause under explicit controls, and settlement halts on a peg deviation or a compliance flag before any value moves.',
+    image: '/cinematic/liquidity-pools.png',
+    imageAlt: 'Tiered isometric liquidity pools with gold coin reserves flowing between basins',
+    meta: 'Corridor-gated · halts before value moves',
+  },
+  {
+    label: 'A person releases it',
+    title: 'Nothing leaves on a model’s say-so.',
+    copy: '0xWal prepares and proposes; it cannot sign. A named approver releases the payment, and Splash never takes custody of the funds it moves.',
     image: '/cinematic/treasury-island.png',
     imageAlt: 'Isometric floating treasury island with an open vault of reserves and orbiting coins',
-    meta: 'Simulation - human approval',
+    meta: 'Maker-checker · approval-gated',
   },
 ];
 
@@ -332,12 +336,16 @@ const trustGates = [
   },
 ];
 
+/* Follows the order the sections actually appear in, so the header is a map of
+   the page rather than a second, contradicting one. #trust sits between
+   Compare and Routes on the page but stays out of the nav, as before — it has
+   its own route at /trust and the in-page section is a summary of it. */
 const headerNavItems = [
   { href: '#how-it-works', label: 'How it works', detail: '5 steps' },
-  { href: '#platform', label: 'Platform', detail: 'Pay + treasury' },
-  { href: '#supply', label: 'Working capital', detail: 'Supply loop' },
-  { href: '#corridors', label: 'Routes', detail: 'MY-PH testnet' },
   { href: '#comparison', label: 'Compare', detail: 'Fees + speed' },
+  { href: '#corridors', label: 'Routes', detail: 'MY-PH testnet' },
+  { href: '#platform', label: 'Guarantees', detail: 'Every payment' },
+  { href: '#supply', label: 'Working capital', detail: 'Supply loop' },
   { href: '#copilot', label: '0xWal', detail: 'Prepare + approve' },
 ];
 
@@ -656,54 +664,6 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
         </div>
       </section>
 
-      <section id="corridors" className="iso-section iso-corridors">
-        <div className="cin-drop" style={{ bottom: 40, right: '6%' }} aria-hidden="true">
-          <FloatingToken src="/cinematic/token-php.png" alt="Philippine peso token" size={120} />
-        </div>
-        <div className="iso-shell iso-corridor-layout">
-          <div className="iso-corridor-copy">
-            <p className="iso-kicker">One testnet corridor. Modeled expansion routes.</p>
-            <h2 className="iso-section-title">
-              USD in.
-              <span>Local out.</span>
-            </h2>
-            <p>
-              The MY-to-PH corridor is the proving ground. Additional routes stay modeled until partner, liquidity,
-              and regulatory controls are ready market by market.
-            </p>
-            <div className="iso-route-list">
-              <span className="is-live">PHP testnet</span><span>MYR</span><span>IDR</span><span>VND</span>
-              <span>THB</span><span>SGD</span><span>EUR</span><span>GBP</span>
-            </div>
-            <div className="iso-recipient-ladder">
-              {recipientLadder.map((step) => (
-                <article key={step.number}>
-                  <span>{step.number}</span>
-                  <div>
-                    <small>{step.status}</small>
-                    <strong>{step.title}</strong>
-                    <p>{step.copy}</p>
-                  </div>
-                </article>
-              ))}
-            </div>
-            <Link href="/signup" className="iso-inline-link">
-              Open the payout desk
-              <ArrowRight aria-hidden="true" />
-            </Link>
-          </div>
-
-          <div className="iso-corridor-stage">
-            <Image
-              src="/cinematic/corridor-bridge-v3.png"
-              alt="Two isometric city platforms, Kuala Lumpur and Manila, connected by a golden bridge of flowing coins"
-              width={2752}
-              height={1536}
-            />
-          </div>
-        </div>
-      </section>
-
       <section id="comparison" className="iso-section iso-comparison">
         <div className="cin-drop" style={{ top: 26, right: '4%' }} aria-hidden="true">
           <FloatingToken src="/cinematic/token-thb.png" alt="Thai baht token" size={104} float="cin-float-slow" />
@@ -805,6 +765,54 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
         </div>
       </section>
 
+      <section id="corridors" className="iso-section iso-corridors">
+        <div className="cin-drop" style={{ bottom: 40, right: '6%' }} aria-hidden="true">
+          <FloatingToken src="/cinematic/token-php.png" alt="Philippine peso token" size={120} />
+        </div>
+        <div className="iso-shell iso-corridor-layout">
+          <div className="iso-corridor-copy">
+            <p className="iso-kicker">One testnet corridor. Modeled expansion routes.</p>
+            <h2 className="iso-section-title">
+              USD in.
+              <span>Local out.</span>
+            </h2>
+            <p>
+              The MY-to-PH corridor is the proving ground. Additional routes stay modeled until partner, liquidity,
+              and regulatory controls are ready market by market.
+            </p>
+            <div className="iso-route-list">
+              <span className="is-live">PHP testnet</span><span>MYR</span><span>IDR</span><span>VND</span>
+              <span>THB</span><span>SGD</span><span>EUR</span><span>GBP</span>
+            </div>
+            <div className="iso-recipient-ladder">
+              {recipientLadder.map((step) => (
+                <article key={step.number}>
+                  <span>{step.number}</span>
+                  <div>
+                    <small>{step.status}</small>
+                    <strong>{step.title}</strong>
+                    <p>{step.copy}</p>
+                  </div>
+                </article>
+              ))}
+            </div>
+            <Link href="/signup" className="iso-inline-link">
+              Open the payout desk
+              <ArrowRight aria-hidden="true" />
+            </Link>
+          </div>
+
+          <div className="iso-corridor-stage">
+            <Image
+              src="/cinematic/corridor-bridge-v3.png"
+              alt="Two isometric city platforms, Kuala Lumpur and Manila, connected by a golden bridge of flowing coins"
+              width={2752}
+              height={1536}
+            />
+          </div>
+        </div>
+      </section>
+
       <section id="platform" className="iso-section iso-operating">
         <div className="cin-drop" style={{ top: 30, right: '5%' }} aria-hidden="true">
           <FloatingToken src="/cinematic/token-idr-v1.png" alt="Indonesian rupiah token" size={108} float="cin-float-slow" />
@@ -812,23 +820,23 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
         <div className="iso-shell">
           <div className="iso-section-heading iso-heading-split">
             <div>
-              <p className="iso-kicker">The platform</p>
+              <p className="iso-kicker">The guarantees</p>
               <h2 className="iso-section-title">
-                Everything between invoice
-                <span>and settlement.</span>
+                True of every
+                <span>payment.</span>
               </h2>
             </div>
             <p>
-              One approval-gated desk for liquidity, settlement, and treasury. Funding, payout,
-              receivables, and treasury actions stay sandboxed until licensed rails are active.
+              The loops above are what your money does. These three hold whichever loop it is in —
+              and they hold in the sandbox, before a licensed rail is active, because they are
+              properties of how a payment is built rather than promises about how it is run.
             </p>
           </div>
 
           <div className="iso-layer-grid">
             {operatingLayers.map((layer, index) => (
-              <article className={`iso-layer-card iso-layer-card-${index + 1}`} key={layer.number}>
+              <article className={`iso-layer-card iso-layer-card-${index + 1}`} key={layer.label}>
                 <div className="iso-layer-meta">
-                  <span>{layer.number}</span>
                   <p>{layer.label}</p>
                 </div>
                 <div className="iso-layer-art">
