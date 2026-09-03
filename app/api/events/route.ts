@@ -3,7 +3,7 @@ import { z } from 'zod';
 
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { readJsonBody } from '@/lib/server/http';
-import { CLIENT_EVENT_NAMES, emitEvent } from '@/lib/server/events';
+import { CLIENT_EVENT_NAMES, emitEvent, hashId, listEvents, type EventName } from '@/lib/server/events';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -46,4 +46,42 @@ export async function POST(request: Request) {
   });
 
   return NextResponse.json({ ok: true }, { status: 202, headers: { 'Cache-Control': 'no-store' } });
+}
+
+const MAX_DAYS = 90;
+const MAX_ROWS = 500;
+
+/**
+ * Audit log read: the caller's own organisation's events, newest first.
+ * Identifiers are already hashed at write time; nothing here can be edited.
+ * `?days=` (default 30, max 90) and `?name=` narrow the window.
+ */
+export async function GET(request: Request) {
+  const auth = await requireCustomerRequest(request);
+  if (auth.response) return auth.response;
+
+  const url = new URL(request.url);
+  const days = Math.min(MAX_DAYS, Math.max(1, Number.parseInt(url.searchParams.get('days') ?? '30', 10) || 30));
+  const name = url.searchParams.get('name') as EventName | null;
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  const orgHash = hashId(auth.session.orgId ?? auth.session.email);
+
+  const events = await listEvents({ since, name: name ?? undefined });
+  const items = events
+    .filter((event) => event.orgHash === orgHash)
+    .sort((a, b) => b.occurredAt.getTime() - a.occurredAt.getTime())
+    .slice(0, MAX_ROWS)
+    .map((event) => ({
+      id: event.id,
+      name: event.name,
+      actorHash: event.actorHash,
+      subjectHash: event.subjectHash,
+      corridor: event.corridor,
+      amountMinor: event.amountMinor,
+      currency: event.currency,
+      props: event.props,
+      occurredAt: event.occurredAt.toISOString(),
+    }));
+
+  return NextResponse.json({ items, since: since.toISOString(), days }, { headers: { 'Cache-Control': 'no-store' } });
 }
