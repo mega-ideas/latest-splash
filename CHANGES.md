@@ -1,3 +1,11 @@
+# v8 control layer (branch feat/v8-controls)
+
+- `styles/controls.css` + `components/system/Field.tsx`: one definition for every text control, replacing seven per-page `field` strings. Input, Textarea, Select, Checkbox, Radio, Switch, FieldGroup, Field.
+- Every field carries a visible bound label, help and error linked with `aria-describedby`, `aria-invalid` with a red border and an icon message, a focus ring, a real disabled surface and 44px targets on touch.
+- `Button`: `loading` with `aria-busy` and a spinner, `loadingLabel`, `iconOnly` typed to require an accessible name, real disabled state, coarse-pointer sizing.
+- Fixed a token bug: the Clearance semantic aliases resolved once on `:root`, so scoped `[data-theme="dark"]` regions kept light surfaces under light text. Both dark scopes now restate them. `PillToggle` active state no longer uses the light foundation colour in dark.
+- Gates: tsc, eslint, check-copy clean; axe WCAG 2.1 AA clean on /login, Beneficiaries, Payments, New payment, Settings and the gallery in both light and dark. See `docs/design-system.md` section 11.
+
 # v7 web3 landing, light (branch feat/v7-web3-light)
 
 - `components/landing-w3` + `styles/landing-w3.css`: new public landing in a light web3 language (bone canvas, near-black ink, one acid signal, Archivo / Inter / JetBrains Mono), covering the three products by name: cross-border payments, treasury and invoices.

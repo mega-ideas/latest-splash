@@ -33,7 +33,7 @@ function rowTone(status: BatchRowStatus): BadgeTone {
 
 const ROW_LABEL: Record<BatchRowStatus, string> = { ready: 'Cleared', review: 'Needs review', blocked: 'Blocked', queued: 'Queued', settled: 'Settled', failed: 'Failed' };
 
-const fieldClass = 'h-10 w-full rounded-[8px] border border-[var(--line)] bg-[var(--surface)] px-2 text-[14px] text-[var(--text)] outline-none focus:border-[var(--teal-600)]';
+const fieldClass = 'control';
 
 /**
  * Batch payout: upload → validate (row chips, inline fixes) → review

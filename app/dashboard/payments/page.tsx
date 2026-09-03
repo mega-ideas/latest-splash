@@ -18,7 +18,7 @@ import { cn } from '@/lib/utils';
 
 const STATES = ['Awaiting checker', 'Proposal ready', 'Executing', 'In transit', 'Credited', 'Reconciled', 'Exception', 'Returned'] as const;
 
-const field = 'h-8 rounded-[var(--r-control)] border border-[var(--border-strong)] bg-[var(--surface-raised)] px-2 text-[12.5px] text-[var(--text)] focus:border-[var(--signal)] focus:outline-none';
+const field = 'control control--compact';
 
 /**
  * Payments: search and trace every instruction from draft to final

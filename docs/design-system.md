@@ -182,3 +182,28 @@ Type: **Archivo** 700 for display (clamp 2.75–5.75rem, tracking −0.042em, le
 - Nothing is gated behind an animation; every observer unobserves after one fire.
 
 Verified at 1440 and 375: axe (WCAG 2.1 AA) clean, no page errors, focus rings on every control, no unclipped horizontal overflow, touch targets ≥44px on coarse pointers (footer word-links are 48px tall and as wide as their word).
+
+## 11. Control layer (branch `feat/v8-controls`)
+
+Before this, seven pages each declared their own `field` string — four different heights, three radii, two focus treatments — and one page still carried v1 hexes. `styles/controls.css` (imported into the `components` layer, so Tailwind utilities still win) is now the single definition, and `components/system/Field.tsx` is the React surface over it.
+
+**Classes**: `.control` (with `--compact`, `--lg`, `--mono`), `.control-group` + `__affix` + `__field` for a unit-prefixed input, `.field` + `__label` / `__req` / `__opt` / `__help` / `__error`, `.choice` + `__box` for checkbox and radio, `.switch`.
+
+**Components**: `Input`, `Textarea`, `Select`, `Checkbox`, `Radio`, `Switch`, `FieldGroup`, and a bare `Field` for wrapping a custom control.
+
+**Rules the layer enforces**
+- A visible `<label>` bound to the control. A placeholder is an example, never the label.
+- Help and error text linked with `aria-describedby`; an invalid field carries `aria-invalid`, a red border **and** a message with an icon. Never colour alone.
+- Errors sit under the field they belong to, not in a summary at the top.
+- Focus is a border change plus a 3px ring, not a border-colour swap on its own.
+- Disabled is a real muted surface with `not-allowed`, not the live control at half opacity. Read-only reads as text.
+- Money, rates and identifiers get `--mono`: the evidence face with tabular figures, so columns stop shifting.
+- Coarse pointers get 44px controls; the switch is for a setting that applies immediately, a checkbox for a value you save.
+
+**Button**: added `loading` (spinner, `aria-busy`, blocks repeat submits) and `loadingLabel`, `iconOnly` typed to require an `aria-label`, a real disabled surface, and a 44px minimum on coarse pointers.
+
+### Token bug fixed here
+
+A custom property that references another resolves **where it is declared**. The Clearance semantic aliases (`--surface-raised: var(--surface)` and friends) were declared only on `:root`, so inside a scoped `[data-theme="dark"]` region they kept their light values — light text on a white control. Document-level dark was fine because `:root` is the element the dark block targets. Both dark scopes in `styles/tokens.css` now restate the semantic layer. axe is clean on `/login`, Beneficiaries, Payments, New payment and Settings in **both** themes, and on the gallery.
+
+`PillToggle`'s active state used `--ink-900`, the light-mode foundation, which lands on the page colour in dark; it now uses the signal.

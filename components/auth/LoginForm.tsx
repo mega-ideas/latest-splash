@@ -11,8 +11,7 @@ import { Button } from '@/components/system';
 import { brand } from '@/lib/brand';
 import { cn } from '@/lib/utils';
 
-const field =
-  'h-12 w-full rounded-[var(--r-sm)] border border-[var(--line)] bg-[var(--surface)] px-3 text-[16px] text-[var(--text)] outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--teal-600)] focus:ring-4 focus:ring-[var(--teal-100)]';
+const field = 'control control--lg';
 
 type Provider = { id: 'google' | 'microsoft'; label: string };
 const PROVIDERS: Provider[] = [

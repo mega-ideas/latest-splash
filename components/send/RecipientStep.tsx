@@ -9,8 +9,7 @@ import { COUNTRIES, COUNTRY_TO_CURRENCY, type RecipientCountry, type TransferSta
 import type { RecipientRecord } from '@/lib/server/operations';
 import { cn } from '@/lib/utils';
 
-const fieldClass =
-  'h-12 w-full rounded-[var(--r-sm)] border border-[var(--line)] bg-[var(--surface)] px-4 text-[16px] text-[var(--text)] outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--teal-600)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--teal-500)]';
+const fieldClass = 'control control--lg';
 
 function normalizeCountry(value: string): RecipientCountry {
   const code = value.toUpperCase();

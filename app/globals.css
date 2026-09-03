@@ -3,7 +3,9 @@
 @import "shadcn/tailwind.css";
 @import "../styles/tokens.css";
 @import "../styles/loading.css";
+@import "../styles/controls.css";
 
+@custom-variant coarse (@media (pointer: coarse));
 @custom-variant dark (&:where(.dark, .dark *, [data-theme="dark"], [data-theme="dark"] *));
 
 @theme inline {

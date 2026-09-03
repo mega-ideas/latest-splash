@@ -15,7 +15,7 @@ import { destinationFor, fromTransfer, routeAlternatives } from '@/lib/payments/
 import type { TransferIntentRecord } from '@/lib/server/operations';
 import { cn } from '@/lib/utils';
 
-const field = 'h-10 w-full rounded-[var(--r-control)] border border-[var(--border-strong)] bg-[var(--surface-raised)] px-3 text-[14px] text-[var(--text)] focus:border-[var(--signal)] focus:outline-none';
+const field = 'control';
 
 /**
  * Route intelligence: every eligible settlement path for a corridor and

@@ -46,7 +46,7 @@ export default function PillToggle<T extends string>({
             className={cn(
               'min-h-[36px] rounded-[var(--r-pill)] px-4 text-[14px] font-semibold transition-colors duration-[var(--dur-ui)] ease-[var(--ease-out)]',
               'outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--teal-500)]',
-              active ? 'bg-[var(--ink-900)] text-white' : 'text-[var(--text-2)] hover:text-[var(--text)]',
+              active ? 'bg-[var(--signal)] text-[var(--signal-contrast)]' : 'text-[var(--text-2)] hover:bg-[var(--surface-subtle)] hover:text-[var(--text)]',
             )}
           >
             {option.label}

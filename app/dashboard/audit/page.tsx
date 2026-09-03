@@ -23,7 +23,7 @@ type AuditEvent = {
   occurredAt: string;
 };
 
-const field = 'h-8 rounded-[var(--r-control)] border border-[var(--border-strong)] bg-[var(--surface-raised)] px-2 text-[12.5px] text-[var(--text)] focus:border-[var(--signal)] focus:outline-none';
+const field = 'control control--compact';
 
 function label(name: string) {
   return name.replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase());

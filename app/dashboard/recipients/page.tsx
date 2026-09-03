@@ -15,7 +15,7 @@ import { COUNTRIES, COUNTRY_TO_CURRENCY, type RecipientCountry } from '@/lib/sen
 import type { RecipientRecord, TransferIntentRecord } from '@/lib/server/operations';
 import { cn } from '@/lib/utils';
 
-const field = 'h-10 w-full rounded-[var(--r-control)] border border-[var(--border-strong)] bg-[var(--surface-raised)] px-3 text-[14px] text-[var(--text)] outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--signal)]';
+const field = 'control';
 
 const KYB: Record<RecipientRecord['kybStatus'], { label: string; tone: 'verified' | 'attention' | 'neutral' }> = {
   full: { label: 'Verified', tone: 'verified' },

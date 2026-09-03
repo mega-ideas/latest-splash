@@ -1,5 +1,6 @@
 'use client';
 
+import { RefreshCw } from 'lucide-react';
 import { useState } from 'react';
 
 import Wordmark from '@/components/brand/Wordmark';
@@ -11,17 +12,24 @@ import {
   Button,
   Card,
   ChatComposer,
+  Checkbox,
   Chip,
   EmptyState,
+  FieldGroup,
+  Input,
   PillToggle,
   PolicyCard,
   ProofDrawer,
   ProofRow,
+  Radio,
+  Select,
   SettlementTimeline,
   Skeleton,
   Stat,
   StepStrip,
+  Switch,
   Table,
+  Textarea,
   ThemeToggle,
 } from '@/components/system';
 
@@ -55,14 +63,17 @@ function Pane({ theme, children }: { theme: 'light' | 'dark'; children: React.Re
 function Both({ children }: { children: React.ReactNode }) {
   return (
     <div className="grid gap-4 lg:grid-cols-2">
-      <Pane theme="light">{children}</Pane>
-      <Pane theme="dark">{children}</Pane>
+      {/* Each pane owns a form so a radio group in a specimen does not pair
+          with its twin in the other theme. */}
+      <Pane theme="light"><form onSubmit={(event) => event.preventDefault()} className="grid gap-4">{children}</form></Pane>
+      <Pane theme="dark"><form onSubmit={(event) => event.preventDefault()} className="grid gap-4">{children}</form></Pane>
     </div>
   );
 }
 
 export default function DesignGallery() {
   const [mode, setMode] = useState<'send' | 'batch'>('send');
+  const [sweep, setSweep] = useState(true);
   const [amount, setAmount] = useState('1250');
 
   return (
@@ -91,6 +102,34 @@ export default function DesignGallery() {
         </Both>
       </Section>
 
+      <Section title="Form controls" note="Visible label, help below, error under the field it belongs to. Focus is an offset ring; disabled is a muted surface, not the live one at half strength.">
+        <Both>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Input label="Business name" placeholder="Supplier legal name" help="The legal name on the bank account." required />
+            <Input label="Amount" prefix="USD" mono inputMode="decimal" placeholder="0.00" defaultValue="5,000.00" />
+            <Input label="SWIFT / BIC" placeholder="BOPIPHMM" optional mono />
+            <Input label="Account number" defaultValue="1234-5678" error="This account failed verification with the partner bank." mono />
+            <Select label="Corridor" help="Only corridors with active partner controls can execute.">
+              <option>USD → PHP · sandbox</option>
+              <option>USD → IDR · staged</option>
+            </Select>
+            <Input label="Reference" defaultValue="INV-77122" readOnly help="Set when the invoice was issued." />
+            <Input label="Payout rail" defaultValue="Partner rail" disabled help="Chosen by policy for this corridor." />
+            <Textarea label="Note for the checker" placeholder="Optional · recorded with the decision" rows={3} />
+          </div>
+          <FieldGroup legend="Approval" help="Applies to every payment above the threshold.">
+            <Checkbox label="Require a second approver" help="Maker and checker must be different people." defaultChecked />
+            <Checkbox label="Require TOTP on approval" />
+            <Checkbox label="Block high-risk corridors" disabled help="Locked by your compliance policy." />
+          </FieldGroup>
+          <FieldGroup legend="Funding source">
+            <Radio name="gallery-funding" label="Held balance" help="Settles immediately, discounted fee." defaultChecked />
+            <Radio name="gallery-funding" label="Bank USD" help="Waits for the deposit to clear." />
+          </FieldGroup>
+          <Switch checked={sweep} onCheckedChange={setSweep} label="Sweep idle balance nightly" help="Applies as soon as you turn it on." />
+        </Both>
+      </Section>
+
       <Section title="Buttons and toggles" note="One primary per screen. Ghost for secondary, destructive as text. 44px targets.">
         <Both>
           <div className="flex flex-wrap items-center gap-3">
@@ -100,6 +139,10 @@ export default function DesignGallery() {
             <Button size="sm">Small</Button>
             <Button size="lg">Large</Button>
             <Button disabled>Disabled</Button>
+            <Button loading loadingLabel="Creating proposal…">Create proposal</Button>
+            <Button variant="secondary" iconOnly aria-label="Refresh quote">
+              <RefreshCw aria-hidden="true" />
+            </Button>
           </div>
           <PillToggle
             label="Flow"
