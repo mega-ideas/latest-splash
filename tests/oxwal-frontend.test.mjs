@@ -137,36 +137,51 @@ test('ActionCard component names release-gate sections and warning accent', asyn
   assert.doesNotMatch(source, /#E39774/);
 });
 
-test('landing keeps restored isometric shell with upgraded truth copy', async () => {
-  const landing = await readFile(new URL('../components/IsometricLanding.tsx', import.meta.url), 'utf8');
-  const cinematic = await readFile(new URL('../components/landing/SettlementCinematic.tsx', import.meta.url), 'utf8');
-  const claims = await readFile(new URL('../content/claims.ts', import.meta.url), 'utf8');
-  const copyCheck = await readFile(new URL('../scripts/check-copy.mjs', import.meta.url), 'utf8');
-  const ogImage = await readFile(new URL('../app/opengraph-image.tsx', import.meta.url), 'utf8');
-  const composer = await readFile(new URL('../components/oxwal/OxWalComposer.tsx', import.meta.url), 'utf8');
-  const floating = await readFile(new URL('../components/oxwal/FloatingIndicator.tsx', import.meta.url), 'utf8');
-  // The invoice loop lives inside the Invoices page now (Inspection loop tab).
-  const invoiceLoop = await readFile(new URL('../components/invoices/InvoiceLoop.tsx', import.meta.url), 'utf8');
+test('landing v2 renders the locked hero, one dark money-flow node, and truthful copy', async () => {
+  const read = (path) => readFile(new URL(path, import.meta.url), 'utf8');
+  const hero = await read('../components/landing-v2/Hero.tsx');
+  const moneyFlow = await read('../components/landing-v2/MoneyFlow.tsx');
+  const trust = await read('../components/landing-v2/Trust.tsx');
+  const roadmap = await read('../components/landing-v2/RoadmapTeaser.tsx');
+  const corridors = await read('../components/landing-v2/Corridors.tsx');
+  const landing = await read('../components/landing-v2/LandingV2.tsx');
+  const page = await read('../app/page.tsx');
+  const claims = await read('../content/claims.ts');
+  const copyCheck = await read('../scripts/check-copy.mjs');
+  const ogImage = await read('../app/opengraph-image.tsx');
+  const composer = await read('../components/oxwal/OxWalComposer.tsx');
+  const floating = await read('../components/oxwal/FloatingIndicator.tsx');
+  const invoiceLoop = await read('../components/invoices/InvoiceLoop.tsx');
 
+  // The home route renders landing v2; the isometric shell is retired.
+  assert.match(page, /LandingV2/);
+  assert.doesNotMatch(page, /IsometricLanding/);
+  // Locked H1 (brief A3): corridor clause rendered as line two.
+  assert.match(hero, /Send USD across Southeast Asia in minutes/);
+  assert.match(hero, /starting with the Philippines and Indonesia/);
+  assert.match(hero, /Open payment desk/);
+  // Money-flow: exactly one dark card (the settlement node), the footnote, generic partners.
+  assert.equal((moneyFlow.match(/bg-\[var\(--ink-900\)\]/g) ?? []).length, 1);
+  assert.match(moneyFlow, /\*On-chain settlement ~400ms; total delivery time depends on local payout rails\. Illustrative — see pricing\./);
+  assert.match(moneyFlow, /Legacy rails: 2–3 days/);
+  assert.match(moneyFlow, /Splash: minutes, end to end\*/);
+  assert.match(moneyFlow, /partnerLabel/);
+  // Roadmap teaser always carries both milestones.
+  assert.match(roadmap, /Mainnet publish/);
+  assert.match(roadmap, /First live corridor operations/);
+  assert.match(roadmap, /following MFCA activation/);
+  // Trust: design claim, never a licence claim.
+  assert.match(trust, /Regulator-ready by design/);
+  assert.match(trust, /npm run check:core/);
+  assert.doesNotMatch(trust, /Splash is licensed|fully licensed/);
+  // Corridors: generic partner labels from the network profile, modeled expansion.
+  assert.match(corridors, /Modeled expansion routes\./);
+  assert.match(corridors, /getNetworkProfile/);
+  // Section order and one responsive tree.
+  assert.match(landing, /<Hero \/>[\s\S]*<MoneyFlow \/>[\s\S]*<Trust \/>[\s\S]*<RoadmapTeaser \/>/);
   assert.match(claims, /headline: 'Collect USD\. Pay Southeast Asia\. Keep cash working\.'/);
-  // Hero H1 lives in the cinematic hero (visually uppercased by .iso-display).
-  assert.match(cinematic, /Move money\./);
-  assert.match(cinematic, /Settle everything\./);
-  // Hero art is the versioned district raster; bump the version, not the name.
-  assert.match(cinematic, /hero-district-v\d+\.png/);
-  assert.match(landing, /SettlementCinematic/);
-  assert.match(landing, /Five steps\./);
-  assert.match(landing, /Working-capital branch/);
-  // Early Pay was promoted out of the #operations tool grid into the
-  // dedicated roadmap-labeled #supply section (§4.D).
-  assert.match(landing, /id="supply"/);
-  assert.match(landing, /Your invoices are/);
-  assert.doesNotMatch(landing, /Early Pay/);
-  assert.match(landing, /Modeled expansion routes\./);
-  assert.match(landing, /claims\.footerLegal\.claim/);
-  // Composer is now a payment-desk command bar (not a ChatGPT pill): no
-  // "High" effort dropdown, a branded "Prepare" action, and a functional
-  // file-attach that prepares a batch for human approval.
+  assert.match(claims, /footerLegal/);
+  // Composer is a payment-desk command bar with a functional file-attach.
   assert.match(composer, /Prepare batch/);
   assert.match(composer, /onFilePrepared/);
   assert.doesNotMatch(composer, /priorityLabel|bg-black/);
@@ -175,11 +190,9 @@ test('landing keeps restored isometric shell with upgraded truth copy', async ()
   assert.match(floating, /\/dashboard\/oxwal\?prompt=/);
   assert.match(floating, /role="dialog"/);
   assert.match(invoiceLoop, /What should 0xWal inspect\?/);
-  assert.match(claims, /footerLegal/);
   assert.match(copyCheck, /8 corridors/);
   assert.match(copyCheck, /Sui network live/);
   assert.match(ogImage, /ImageResponse/);
   assert.match(ogImage, /Kuala Lumpur/);
   assert.match(ogImage, /No customer funds/);
-  assert.doesNotMatch(landing, /8 corridors|Reach every corridor|Sui network live|toFixed\(/);
 });
