@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 
 import { Badge, Button, EmptyState, Table } from '@/components/system';
 import type { BadgeTone } from '@/components/system';
+import { EmptyState as IsoEmptyState } from '@/components/illustrations/iso';
 import type { TransferIntentRecord } from '@/lib/server/operations';
 
 const money = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -72,7 +73,7 @@ export default function ReceiptsPage() {
         exportName="receipts"
         rows={rows ?? []}
         loading={rows === null}
-        emptyState={<EmptyState title="No receipts yet" body="Receipts appear here as soon as a payout is authorised." action={<Button size="sm" href="/dashboard/transfer">Send USD</Button>} />}
+        emptyState={<EmptyState art={<IsoEmptyState kind="receipts" decorative />} title="No receipts yet" body="Receipts appear here as soon as a payout is authorised." action={<Button size="sm" href="/dashboard/transfer">Send USD</Button>} />}
         columns={[
           { key: 'createdAt', header: 'When', mono: true, secondary: true, value: (row) => row.createdAt, render: (row) => row.createdAt.slice(0, 16).replace('T', ' ') },
           { key: 'recipientName', header: 'Recipient', value: (row) => row.recipientName },

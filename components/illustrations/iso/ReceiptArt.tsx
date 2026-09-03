@@ -1,3 +1,5 @@
+'use client';
+
 /**
  * ReceiptArt — a ReceiptToken floating over a small settled slab, for receipt
  * headers. The slab carries the green-100 settled material.

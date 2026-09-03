@@ -1,645 +1,456 @@
-"use client";
+'use client';
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, CheckCircle2, Clock, Download, FileWarning, Layers, Loader2, PercentCircle, ShieldCheck, Upload, Wallet, XCircle, type LucideIcon } from "lucide-react";
-import Papa from "papaparse";
-import { toast } from "sonner";
+import { Download, Upload } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { toast } from 'sonner';
 
-import HoverPopup from "@/components/HoverPopup";
-import StatusBadge from "@/components/StatusBadge";
-import DashPageHeader from "@/components/dashboard/DashPageHeader";
-import DashStat from "@/components/dashboard/DashStat";
-import ExplorerLinks from "@/components/dashboard/ExplorerLinks";
-import SettlementEngineFlow from "@/components/dashboard/SettlementEngineFlow";
-import { takeBatchDraft } from "@/lib/batch-parse";
-import { checkMinimumSettlement, minSettlementUsd, formatUsd } from '@/lib/policy/limits';
+import ExplorerLinks from '@/components/dashboard/ExplorerLinks';
+import { EmptyState as IsoEmptyState, SuiSettlementStack } from '@/components/illustrations/iso';
+import { Badge, Button, Card, Chip, EmptyState, ProofRow, Stat, StepStrip, Table } from '@/components/system';
+import type { BadgeTone } from '@/components/system';
+import { CSV_HEADER, SAMPLE_ROWS, SUPPORTED_COUNTRIES, buildSampleCsv, rescreen, screenRows, type BatchRow, type BatchRowStatus } from '@/lib/batch/screen';
+import { parseBatchFile, takeBatchDraft } from '@/lib/batch-parse';
+import { getCorridorFeeBps } from '@/lib/fx/corridors';
+import { getNetworkProfile } from '@/lib/network';
+import { MAX_BATCH_ROWS } from '@/lib/policy/batch-limits';
+import { checkMinimumSettlement, formatUsd, minSettlementUsd } from '@/lib/policy/limits';
+import { cn } from '@/lib/utils';
 
-type ComplianceResult = "PASS" | "REVIEW" | "BLOCK";
+type Phase = 'upload' | 'validate' | 'review' | 'settle' | 'receipt';
+type BatchStatus = { id: string; state: string; rowCount: number; acceptedRows: number; totalAmount: string; digest: string | null; demo?: boolean };
 
-type ComplianceCheck = {
-  label: string;
-  result: ComplianceResult;
-  detail: string;
-};
+const STEPS = [{ label: 'Upload' }, { label: 'Validate' }, { label: 'Review' }, { label: 'Settle' }, { label: 'Receipt' }];
+const PHASES: Phase[] = ['upload', 'validate', 'review', 'settle', 'receipt'];
 
-type BatchRow = {
-  name: string;
-  address: string;
-  country: string;
-  purpose: string;
-  amount: string;
-  status: "ready" | "review" | "blocked" | "queued" | "failed";
-  checks: ComplianceCheck[];
-};
+const usd = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-type BatchStatus = {
-  id: string;
-  state: string;
-  rowCount: number;
-  acceptedRows: number;
-  totalAmount: string;
-  digest: string | null;
-  explorer: { suiVisionTxUrl: string | null; suiScanTxUrl: string | null };
-  demo?: boolean;
-};
-
-type CsvRow = {
-  name?: string;
-  address?: string;
-  country?: string;
-  purpose?: string;
-  amount?: string | number;
-};
-
-const supportedCountries = new Set(["MY", "PH", "ID", "SG", "VN", "TH", "EU", "GB"]);
-const sentinelNames = ["sanction", "blocked", "pep hit", "watchlist"];
-
-const sampleCsvRows: Array<{ name: string; address: string; country: string; purpose: string; amount: string }> = [
-  { name: "Acme Philippines Corp", address: "PH1234567890", country: "PH", purpose: "Vendor invoice", amount: "12000.00" },
-  { name: "Jakarta Supplies PT", address: "ID9988776655", country: "ID", purpose: "Vendor invoice", amount: "8500.00" },
-  { name: "Global IT Solutions Pte", address: "SG5544332211", country: "SG", purpose: "Service fee", amount: "3200.00" },
-  { name: "Manila BPO Services", address: "PH4567891234", country: "PH", purpose: "Payroll", amount: "15000.00" },
-];
-
-const csvHeader = "name,address,country,purpose,amount";
-
-function buildSampleCsv() {
-  const rows = sampleCsvRows.map((row) => [row.name, row.address, row.country, row.purpose, row.amount].join(","));
-  return [csvHeader, ...rows].join("\n");
+function rowTone(status: BatchRowStatus): BadgeTone {
+  if (status === 'ready' || status === 'settled') return 'green';
+  if (status === 'queued') return 'teal';
+  if (status === 'review') return 'amber';
+  return 'red';
 }
 
-const batchBenefits = [
-  {
-    icon: PercentCircle,
-    title: "15–30 bps cheaper FX",
-    body: "Batched rows are netted against treasury inventory, so we quote one tighter rate instead of paying spread on every transfer.",
-  },
-  {
-    icon: ShieldCheck,
-    title: "One signed authorization",
-    body: "Approve the whole payroll with a single TOTP. No re-keying per beneficiary, and an immutable approver trail on Sui.",
-  },
-  {
-    icon: CheckCircle2,
-    title: "Atomic compliance",
-    body: "AML, KYT, structuring and corridor checks run before any value moves. Bad rows are isolated; cleared rows still ship.",
-  },
-  {
-    icon: Wallet,
-    title: "One reconciliation entry",
-    body: "Operating account sees a single debit and a merkle-rooted receipt — your accountants stop reconciling 50 line items.",
-  },
-  {
-    icon: Layers,
-    title: "Off-peak window pricing",
-    body: "Batches can target the next settlement window where corridor fees drop further, saving on cross-border partner costs.",
-  },
-];
+const ROW_LABEL: Record<BatchRowStatus, string> = { ready: 'Cleared', review: 'Needs review', blocked: 'Blocked', queued: 'Queued', settled: 'Settled', failed: 'Failed' };
 
-function strongestResult(checks: ComplianceCheck[]): ComplianceResult {
-  if (checks.some((check) => check.result === "BLOCK")) return "BLOCK";
-  if (checks.some((check) => check.result === "REVIEW")) return "REVIEW";
-  return "PASS";
-}
+const fieldClass = 'h-10 w-full rounded-[8px] border border-[var(--line)] bg-[var(--surface)] px-2 text-[14px] text-[var(--text)] outline-none focus:border-[var(--teal-600)]';
 
-// Screening results are STATES — semantic tokens only (W9.0 coral rule).
-function badgeClass(result: ComplianceResult) {
-  if (result === "PASS") return "border-[var(--ok)] bg-[var(--ok-bg)] text-[var(--ok)]";
-  if (result === "REVIEW") return "border-[var(--warn)] bg-[var(--warn-bg)] text-[var(--warn)]";
-  return "border-[var(--error)] bg-[var(--error-bg)] text-[var(--error)]";
-}
-
-function rowStatus(result: ComplianceResult): BatchRow["status"] {
-  if (result === "PASS") return "ready";
-  if (result === "REVIEW") return "review";
-  return "blocked";
-}
-
-function evaluateRow(row: Omit<BatchRow, "status" | "checks">, duplicateCount: number): ComplianceCheck[] {
-  const amount = Number.parseFloat(row.amount || "0");
-  const lowerName = String(row.name ?? '').toLowerCase();
-  const checks: ComplianceCheck[] = [
-    {
-      label: "AML sanctions / PEP",
-      result: sentinelNames.some((term) => lowerName.includes(term)) ? "BLOCK" : "PASS",
-      detail: sentinelNames.some((term) => lowerName.includes(term)) ? "Potential sanctions or PEP hit" : "No list match in dev screen",
-    },
-    {
-      label: "KYT amount rule",
-      result: amount > 5000 ? "REVIEW" : amount > 0 ? "PASS" : "BLOCK",
-      detail: amount > 5000 ? "Above Tier 1 single-transfer review threshold" : amount > 0 ? "Within Tier 1 single-transfer threshold" : "Amount must be greater than zero",
-    },
-    {
-      label: "KYT structuring",
-      result: duplicateCount >= 4 ? "REVIEW" : "PASS",
-      detail: duplicateCount >= 4 ? "Repeated beneficiary appears multiple times in this batch" : "No structuring pattern detected",
-    },
-    {
-      label: "Corridor allowlist",
-      result: supportedCountries.has(row.country) ? "PASS" : "BLOCK",
-      detail: supportedCountries.has(row.country) ? `${row.country} corridor is enabled` : `${row.country || "Unknown"} corridor is not enabled`,
-    },
-    {
-      label: "Purpose code",
-      result: row.purpose ? "PASS" : "REVIEW",
-      detail: row.purpose ? row.purpose : "Purpose code required before release",
-    },
-  ];
-
-  return checks;
-}
-
-function screenRows(rows: Array<Omit<BatchRow, "status" | "checks">>): BatchRow[] {
-  const duplicateCounts = rows.reduce<Record<string, number>>((counts, row) => {
-    const key = row.address || row.name;
-    counts[key] = (counts[key] ?? 0) + 1;
-    return counts;
-  }, {});
-
-  return rows.map((row) => {
-    const checks = evaluateRow(row, duplicateCounts[row.address || row.name] ?? 1);
-    return { ...row, checks, status: rowStatus(strongestResult(checks)) };
-  });
-}
-
+/**
+ * Batch payout: upload → validate (row chips, inline fixes) → review
+ * (corridor split, chunk preview) → settle (one authorisation, one digest
+ * per chunk) → receipt with per-row states. Screening here is a preview;
+ * the server re-runs every check before anything moves.
+ */
 export default function BatchPage() {
+  const [phase, setPhase] = useState<Phase>('upload');
   const [rows, setRows] = useState<BatchRow[]>([]);
+  const [fileName, setFileName] = useState<string | null>(null);
+  const [totp, setTotp] = useState('');
   const [busy, setBusy] = useState(false);
-  const [totp, setTotp] = useState("");
   const [batchId, setBatchId] = useState<string | null>(null);
-  const [batchStatus, setBatchStatus] = useState<BatchStatus | null>(null);
+  const [status, setStatus] = useState<BatchStatus | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const corridors = getNetworkProfile().corridors;
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-
-    // Draft handed over from the 0xWal composer's file upload (prepared, not
-    // executed) — hydrate the review table so the operator can authorize.
-    if (params.get("draft") === "1") {
+    if (params.get('draft') === '1') {
       const draft = takeBatchDraft();
       if (draft && draft.rows.length > 0) {
-        const timeout = setTimeout(() => {
+        const timer = window.setTimeout(() => {
           setRows(screenRows(draft.rows));
-          toast.success(`Prepared ${draft.rows.length} rows from ${draft.fileName} — review and authorize`);
+          setFileName(draft.fileName);
+          setPhase('validate');
+          toast.success(`Prepared ${draft.rows.length} rows from ${draft.fileName}`);
         }, 0);
-        return () => clearTimeout(timeout);
+        return () => window.clearTimeout(timer);
       }
     }
-
-    const corridor = params.get("corridor")?.toUpperCase();
-    if (!corridor) return;
-    const matchingRows = sampleCsvRows.filter((row) => row.country === corridor || (corridor === "PHP" && row.country === "PH"));
-    const timeout = setTimeout(() => setRows(screenRows(matchingRows)), 0);
-    return () => clearTimeout(timeout);
   }, []);
 
   const pollBatch = useCallback(async (id: string) => {
     try {
-      const res = await fetch(`/api/batches/${id}`);
-      if (res.ok) {
-        const data = (await res.json()) as BatchStatus;
-        setBatchStatus(data);
-        return data.state;
-      }
+      const response = await fetch(`/api/batches/${id}`, { cache: 'no-store' });
+      if (!response.ok) return null;
+      const data = (await response.json()) as BatchStatus;
+      setStatus(data);
+      return data.state;
     } catch {
-      // silently ignore poll errors
+      return null;
     }
-    return null;
   }, []);
 
   useEffect(() => {
     if (!batchId) return;
-    const timeout = setTimeout(() => void pollBatch(batchId), 0);
-    const interval = setInterval(async () => {
+    const first = window.setTimeout(() => void pollBatch(batchId), 0);
+    const interval = window.setInterval(async () => {
       const state = await pollBatch(batchId);
       if (state === 'SETTLED' || state === 'FAILED' || state === 'REFUNDED') {
-        clearInterval(interval);
+        window.clearInterval(interval);
+        setRows((current) => current.map((row) => (row.status === 'queued' ? { ...row, status: state === 'SETTLED' ? 'settled' : 'failed' } : row)));
+        setPhase('receipt');
       }
     }, 2000);
     return () => {
-      clearTimeout(timeout);
-      clearInterval(interval);
+      window.clearTimeout(first);
+      window.clearInterval(interval);
     };
   }, [batchId, pollBatch]);
 
-  const acceptedRows = useMemo(() => rows.filter((row) => row.status === "ready" || row.status === "queued"), [rows]);
-  const reviewRows = useMemo(() => rows.filter((row) => row.status === "review"), [rows]);
-  const blockedRows = useMemo(() => rows.filter((row) => row.status === "blocked" || row.status === "failed"), [rows]);
-  const total = useMemo(() => rows.reduce((sum, row) => sum + (Number.parseFloat(row.amount) || 0), 0), [rows]);
-  const acceptedTotal = useMemo(() => acceptedRows.reduce((sum, row) => sum + (Number.parseFloat(row.amount) || 0), 0), [acceptedRows]);
-  const estimatedFees = acceptedTotal > 0 ? acceptedTotal * 0.014 + 4.5 : 0;
+  const accepted = useMemo(() => rows.filter((row) => row.status === 'ready' || row.status === 'queued' || row.status === 'settled'), [rows]);
+  const review = useMemo(() => rows.filter((row) => row.status === 'review'), [rows]);
+  const blocked = useMemo(() => rows.filter((row) => row.status === 'blocked' || row.status === 'failed'), [rows]);
+  const acceptedTotal = useMemo(() => accepted.reduce((sum, row) => sum + (Number.parseFloat(row.amount) || 0), 0), [accepted]);
+  const corridorSplit = useMemo(() => {
+    const map = new Map<string, { count: number; total: number }>();
+    for (const row of accepted) {
+      const entry = map.get(row.country) ?? { count: 0, total: 0 };
+      entry.count += 1;
+      entry.total += Number.parseFloat(row.amount) || 0;
+      map.set(row.country, entry);
+    }
+    return [...map.entries()].sort((a, b) => b[1].total - a[1].total);
+  }, [accepted]);
+  const chunkCount = Math.max(1, Math.ceil(accepted.length / MAX_BATCH_ROWS));
+  const estimatedFee = accepted.reduce((sum, row) => sum + ((Number.parseFloat(row.amount) || 0) * getCorridorFeeBps(row.country === 'PH' ? 'PHP' : row.country === 'ID' ? 'IDR' : 'PHP')) / 10_000, 0);
+  const minimum = checkMinimumSettlement(acceptedTotal, 'batch');
 
-  function onFile(file: File) {
-    Papa.parse<CsvRow>(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: ({ data }) => {
-        const normalized = data
-          .filter((row) => row.address || row.name || row.amount)
-          .map((row) => ({
-            name: String(row.name ?? "").trim(),
-            address: String(row.address ?? "").trim(),
-            country: String(row.country ?? "PH").trim().toUpperCase(),
-            purpose: String(row.purpose ?? "").trim(),
-            amount: String(row.amount ?? "0").trim(),
-          }));
-        const screened = screenRows(normalized);
-
-        setRows(screened);
-        setBatchId(null);
-        toast.success(`${screened.length} rows screened`);
-      },
-      error: (error) => toast.error(error.message),
-    });
+  async function onFile(file: File) {
+    try {
+      const parsed = await parseBatchFile(file);
+      if (parsed.rows.length === 0) throw new Error('No payable rows found in that file');
+      setRows(screenRows(parsed.rows));
+      setFileName(parsed.fileName);
+      setBatchId(null);
+      setStatus(null);
+      setPhase('validate');
+      toast.success(`${parsed.rows.length} rows screened`);
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : 'Could not read that file');
+    }
   }
 
-  function downloadSampleCsv() {
-    const csv = buildSampleCsv();
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  function loadSample() {
+    setRows(screenRows(SAMPLE_ROWS));
+    setFileName('splash-batch-sample.csv');
+    setPhase('validate');
+  }
+
+  function downloadSample() {
+    const blob = new Blob([buildSampleCsv()], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "splash-batch-sample.csv";
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = 'splash-batch-sample.csv';
+    anchor.click();
     URL.revokeObjectURL(url);
-    toast.success("Sample CSV downloaded");
   }
 
-  async function submitBatch() {
+  function editRow(id: string, patch: Partial<Pick<BatchRow, 'purpose' | 'country' | 'amount'>>) {
+    setRows((current) => rescreen(current.map((row) => (row.id === id ? { ...row, ...patch } : row))));
+  }
+
+  async function authorize() {
     if (!/^\d{6}$/.test(totp)) {
-      toast.error("Enter your 6-digit authorization code");
+      toast.error('Enter your 6-digit authorisation code');
       return;
     }
-
-    if (acceptedRows.length === 0) {
-      toast.error("No rows are cleared for authorization");
+    if (accepted.length === 0) {
+      toast.error('No rows are cleared for authorisation');
       return;
     }
-
-    // Minimum settlement size — same rule the server and the contract enforce.
-    // Checked here only so the operator finds out before spending a TOTP.
-    const minimum = checkMinimumSettlement(acceptedTotal, "batch");
     if (!minimum.ok) {
       toast.error(minimum.message);
       return;
     }
-
+    if (accepted.length > MAX_BATCH_ROWS) {
+      toast.error(`A single settlement carries at most ${MAX_BATCH_ROWS} rows. Split the file and authorise each chunk.`);
+      return;
+    }
     setBusy(true);
-
     try {
-      const response = await fetch("/api/batches/authorize", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows: acceptedRows, totp }),
+      const response = await fetch('/api/batches/authorize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rows: accepted.map(({ name, address, country, purpose, amount }) => ({ name, address, country, purpose, amount })), totp }),
       });
-
       if (!response.ok) {
         const body = (await response.json()) as { error?: string };
-        throw new Error(body.error ?? "Batch authorization failed");
+        throw new Error(body.error ?? 'Batch authorisation failed');
       }
-
       const body = (await response.json()) as { id: string; blockedRows: number };
       setBatchId(body.id);
-      setRows((current) => current.map((row) => (row.status === "ready" ? { ...row, status: "queued" } : row)));
-      toast.success(body.blockedRows > 0 ? "Cleared rows queued with exceptions" : "Batch queued");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Batch failed";
-      toast.error(message);
-      setRows((current) => current.map((row) => (row.status === "ready" ? { ...row, status: "failed" } : row)));
+      setRows((current) => current.map((row) => (row.status === 'ready' ? { ...row, status: 'queued' } : row)));
+      setPhase('settle');
+      toast.success(body.blockedRows > 0 ? 'Cleared rows queued with exceptions' : 'Batch queued for settlement');
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : 'Batch authorisation failed');
+      setRows((current) => current.map((row) => (row.status === 'ready' ? { ...row, status: 'failed' } : row)));
     } finally {
       setBusy(false);
+      setTotp('');
     }
   }
 
+  const settled = status?.state === 'SETTLED';
+  const failed = status?.state === 'FAILED' || status?.state === 'REFUNDED';
+  const simulated = Boolean(status?.demo) || Boolean(status?.digest?.startsWith('SIM_'));
+
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-5">
-      <DashPageHeader
-        kicker="Batch operations"
-        title="Upload, screen, authorize"
-        description={
-          <>
-            Upload a CSV with columns <code className="font-mono">name,address,amount,country,purpose</code>. Splash preflights AML, KYT, limits, corridor &amp; purpose-code checks before TOTP authorization.
-          </>
-        }
-        actions={
-          <div className="rounded-xl border border-[#326273]/10 bg-white px-3 py-2 text-[13px] font-medium text-[#326273]">
-            Tier 1 limits · RM 20k / transfer
-          </div>
-        }
-      />
-
-      <SettlementEngineFlow variant="batch" className="dash-reveal" />
-
-      <section className="grid gap-4 dash-reveal-stagger md:grid-cols-4">
-        <HoverPopup title="Rows cleared" content="Beneficiaries that passed all AML, KYT, corridor, and purpose-code checks. These rows will be included in the batch authorization.">
-          <SummaryCard icon={ShieldCheck} label="Rows cleared" value={String(acceptedRows.length)} tone="text-[var(--info)]" />
-        </HoverPopup>
-        <HoverPopup title="Manual review" content="Rows requiring manual attention. Usually missing purpose codes or above Tier 1 limits. These will not be included until resolved.">
-          <SummaryCard icon={AlertTriangle} label="Manual review" value={String(reviewRows.length)} tone="text-[var(--warn)]" />
-        </HoverPopup>
-        <HoverPopup title="Blocked" content="Rows that failed compliance checks. Common reasons: sanctions/PEP hits, unsupported corridors, or invalid amounts.">
-          <SummaryCard icon={XCircle} label="Blocked" value={String(blockedRows.length)} tone="text-red-600" />
-        </HoverPopup>
-        <HoverPopup title="Cleared amount" content="Total USD value of cleared rows. This is the amount that will be authorized and queued for settlement.">
-          <SummaryCard icon={CheckCircle2} label="Cleared amount" value={`$${acceptedTotal.toFixed(2)}`} tone="text-[var(--info)]" />
-        </HoverPopup>
-      </section>
-
-      <label className="flex cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-[#5C9EAD]/40 bg-white/50 p-8 text-center transition-colors hover:border-[#5C9EAD] hover:bg-[#5C9EAD]/5 md:p-10">
-        <Upload className="text-[var(--info)]" />
-        <span className="font-medium text-[#326273]">{rows.length ? `${rows.length} rows loaded — upload another CSV to replace` : "Click to upload CSV"}</span>
-        <span className="text-[13px] text-[#326273]/50">Supported corridors: MY, PH, ID, SG, VN, TH, EU, GB · Amounts in USD</span>
-        <input type="file" accept=".csv" className="hidden" onChange={(event) => event.target.files?.[0] && onFile(event.target.files[0])} />
-      </label>
-
-      <section className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
-        <div className="dash-surface overflow-hidden">
-          <div className="flex flex-col gap-3 border-b border-[#326273]/10 p-5 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h2 className="text-lg font-semibold text-[#326273]">CSV format example</h2>
-              <p className="mt-1 text-[13px] text-[#326273]/60">
-                Columns are <code className="font-mono text-[13px]">name,address,country,purpose,amount</code>. Amounts in USD, country is ISO-2.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={downloadSampleCsv}
-              className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#5C9EAD] px-3 py-2 text-[13px] font-semibold text-white hover:bg-[#264e5b]"
-            >
-              <Download className="h-3.5 w-3.5" />
-              Download sample
-            </button>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] text-[13px]">
-              <thead className="bg-[#326273]/5">
-                <tr className="text-left text-[#326273]/65">
-                  <th className="p-3 font-semibold uppercase tracking-wide">name</th>
-                  <th className="p-3 font-semibold uppercase tracking-wide">address</th>
-                  <th className="p-3 font-semibold uppercase tracking-wide">country</th>
-                  <th className="p-3 font-semibold uppercase tracking-wide">purpose</th>
-                  <th className="p-3 text-right font-semibold uppercase tracking-wide">amount</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sampleCsvRows.map((row) => (
-                  <tr key={row.address} className="border-t border-[#326273]/5">
-                    <td className="p-3 font-medium text-[#326273]">{row.name}</td>
-                    <td className="p-3 font-mono text-[13px] text-[#326273]/70">{row.address}</td>
-                    <td className="p-3 font-medium text-[#326273]">{row.country}</td>
-                    <td className="p-3 text-[#326273]/70">{row.purpose}</td>
-                    <td className="p-3 text-right font-mono text-[#326273]">$ {row.amount}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="border-t border-[#326273]/10 bg-[#F6F0ED]/60 p-4">
-            <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#326273]/55">Raw CSV</div>
-            <pre className="mt-2 overflow-x-auto rounded-lg bg-[#1F4452] p-3 font-mono text-[13px] leading-5 text-[#F6F0ED]">{`${csvHeader}
-${sampleCsvRows.map((row) => `${row.name},${row.address},${row.country},${row.purpose},${row.amount}`).join("\n")}`}</pre>
-          </div>
+    <div className="mx-auto grid w-full max-w-[1040px] gap-6">
+      <header className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-[var(--text-h1)] font-semibold leading-[1.1] tracking-[-0.02em]">Batch payout</h1>
+          <p className="mt-1 text-[14px] text-[var(--text-2)]">Fifty suppliers, two countries, one file. Every row is screened before one authorisation settles the chunk.</p>
         </div>
+        {fileName ? <Chip>{fileName}</Chip> : null}
+      </header>
 
-        <div className="dash-surface p-5">
-          <div className="mb-4">
-            <h2 className="text-lg font-semibold text-[#326273]">Why batch payout wins</h2>
-            <p className="mt-1 text-[13px] text-[#326273]/60">Concrete reasons treasury teams move payroll and vendor runs through Splash batches.</p>
+      <StepStrip steps={STEPS} current={PHASES.indexOf(phase)} />
+
+      {phase === 'upload' ? (
+        <Card padding="lg" className="grid gap-5">
+          <input ref={fileInput} type="file" accept=".csv,.xlsx,.xls,text/csv" className="sr-only" onChange={(event) => event.target.files?.[0] && void onFile(event.target.files[0])} />
+          <button
+            type="button"
+            onClick={() => fileInput.current?.click()}
+            className="grid min-h-[200px] place-items-center gap-3 rounded-[var(--r-md)] border-2 border-dashed border-[var(--line)] bg-[var(--surface-2)] p-8 text-center outline-none transition-colors hover:border-[var(--teal-600)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--teal-500)]"
+          >
+            <span className="w-full max-w-[200px]">
+              <IsoEmptyState kind="invoices" decorative />
+            </span>
+            <span className="text-[15px] font-semibold text-[var(--text)]">
+              <Upload className="mr-2 inline size-4" aria-hidden="true" /> Choose a CSV or spreadsheet
+            </span>
+            <span className="text-[13px] text-[var(--text-2)]">
+              Columns <code className="font-mono">{CSV_HEADER}</code> · amounts in USD · country as ISO-2. On a phone, share the file to Splash or pick it from Files.
+            </span>
+          </button>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="ghost" onClick={downloadSample}>
+              <Download aria-hidden="true" /> Download sample
+            </Button>
+            <Button variant="ghost" onClick={loadSample}>
+              Try the sample file
+            </Button>
           </div>
-          <div className="space-y-3">
-            {batchBenefits.map(({ icon: Icon, title, body }) => (
-              <div key={title} className="flex items-start gap-3 rounded-xl bg-[#F6F0ED] p-3 transition-colors hover:bg-[#5C9EAD]/10">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white text-[var(--info)]">
-                  <Icon className="h-4 w-4" />
-                </div>
-                <div className="min-w-0">
-                  <div className="text-sm font-semibold text-[#326273]">{title}</div>
-                  <p className="mt-0.5 text-[13px] leading-5 text-[#326273]/65">{body}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
+          <p className="text-[12px] text-[var(--text-muted)]">
+            Supported corridors now: {corridors.map((corridor) => `${corridor.country} (${corridor.currency})`).join(', ')} · staggered launch. Other ISO-2 countries stay modeled and are blocked in preflight.
+          </p>
+        </Card>
+      ) : null}
 
-      {rows.length > 0 && (
-        <>
-          <section className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
-            <div className="dash-surface overflow-hidden">
-              <div className="border-b border-[#326273]/10 p-5">
-                <h2 className="text-xl font-semibold text-[#326273]">Preflight results</h2>
-                <p className="mt-1 text-sm text-[#326273]/60">Only rows marked cleared are included in this authorization request.</p>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[860px] text-sm">
-                  <thead className="bg-[#326273]/5">
-                    <tr className="text-left text-[#326273]/70">
-                      <th className="p-3">Beneficiary</th>
-                      <th>Corridor</th>
-                      <th>Purpose</th>
-                      <th className="text-right">Amount</th>
-                      <th>AML / KYT</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.map((row) => {
-                      const result = strongestResult(row.checks);
-
-                      return (
-                        <tr key={`${row.address}-${row.amount}-${row.name}`} className="border-t border-[#326273]/5">
-                          <td className="p-3">
-                            <div className="font-medium text-[#326273]">{row.name || "Unnamed beneficiary"}</div>
-                            <div className="mt-1 font-mono text-[13px] text-[#326273]/50">{row.address || "Missing reference"}</div>
-                          </td>
-                          <td className="font-medium text-[#326273]">USD → {row.country || "—"}</td>
-                          <td className="text-[#326273]/70">{row.purpose || "Needs purpose code"}</td>
-                          <td className="text-right font-mono text-[#326273]">$ {Number.parseFloat(row.amount || "0").toFixed(2)}</td>
-                          <td>
-                            <div className={`inline-flex rounded-full border px-3 py-1 text-[13px] font-semibold ${badgeClass(result)}`}>{result}</div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <div className="dash-surface p-5">
-                <h2 className="text-xl font-semibold text-[#326273]">Authorization summary</h2>
-                <div className="mt-4 space-y-3 text-sm">
-                  <Row label="Uploaded total" value={`$${total.toFixed(2)}`} />
-                  <Row label="Cleared total" value={`$${acceptedTotal.toFixed(2)}`} />
-                  <Row label="Estimated fees" value={`$${estimatedFees.toFixed(2)}`} />
-                  <Row label="Rows excluded" value={`${reviewRows.length + blockedRows.length}`} />
-                  <Row label="Minimum batch total" value={formatUsd(minSettlementUsd())} />
-                </div>
-                {acceptedTotal > 0 && acceptedTotal < minSettlementUsd() ? (
-                  <p className="mt-3 rounded-lg border border-[var(--warn)] bg-[var(--warn-bg)] px-3 py-2 text-[13px] font-semibold text-[var(--warn)]">
-                    Cleared total is below the {formatUsd(minSettlementUsd())} minimum — add rows or increase the amounts before authorizing.
-                  </p>
-                ) : null}
-                <form
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    void submitBatch();
-                  }}
-                  className="mt-5 flex items-center gap-3"
-                >
-                  <input
-                    inputMode="numeric"
-                    maxLength={6}
-                    value={totp}
-                    onChange={(event) => setTotp(event.target.value.replace(/\D/g, "").slice(0, 6))}
-                    className="w-32 rounded-lg border border-[#326273]/20 bg-[#F6F0ED] px-3 py-3 text-center font-mono tracking-[0.25em] text-[#326273] focus:border-[#5C9EAD] focus:outline-none"
-                    placeholder="000000"
-                  />
-                  <button type="submit" disabled={busy || acceptedRows.length === 0 || totp.length !== 6} className="flex-1 rounded-lg bg-[#E39774] px-6 py-3 font-semibold text-white hover:bg-[#cd825f] disabled:opacity-50">
-                    {busy ? <span className="inline-flex items-center gap-2"><Loader2 className="animate-spin" size={16} /> Queueing…</span> : "Authorize cleared rows"}
-                  </button>
-                </form>
-                {batchStatus && <BatchStatusPanel status={batchStatus} />}
-              </div>
-
-              <div className="dash-surface p-5">
-                <h2 className="text-xl font-semibold text-[#326273]">AML / KYT controls</h2>
-                <div className="mt-4 space-y-3">
-                  <Control label="Sanctions / PEP" detail="Screens every beneficiary before authorization." />
-                  <Control label="KYT amount threshold" detail="Flags transfers above Tier 1 review limits." />
-                  <Control label="Structuring detection" detail="Flags repeated beneficiary patterns in one file." />
-                  <Control label="Purpose-code capture" detail="Required for release to settlement queue." />
-                </div>
-              </div>
-            </div>
+      {phase === 'validate' ? (
+        <div className="grid gap-4">
+          <section className="grid gap-3 sm:grid-cols-3" aria-label="Screening summary">
+            <Card padding="sm">
+              <Stat label="Cleared" value={String(accepted.length)} tone="positive" sub={`${usd.format(acceptedTotal)} USD`} />
+            </Card>
+            <Card padding="sm">
+              <Stat label="Needs review" value={String(review.length)} tone={review.length ? 'pending' : 'default'} sub="Fix inline to clear" />
+            </Card>
+            <Card padding="sm">
+              <Stat label="Blocked" value={String(blocked.length)} tone={blocked.length ? 'negative' : 'default'} sub="Excluded from this run" />
+            </Card>
           </section>
 
-          {(reviewRows.length > 0 || blockedRows.length > 0) && (
-            <section className="rounded-2xl border border-[var(--warn)] bg-[var(--warn-bg)] p-5">
-              <div className="flex gap-3">
-                <FileWarning className="mt-0.5 text-[var(--warn)]" />
-                <div>
-                  <h2 className="font-semibold text-[#326273]">Exceptions require review</h2>
-                  <p className="mt-1 text-sm text-[#326273]/70">Rows marked REVIEW need a purpose-code, limit, or KYT review. Rows marked BLOCK are excluded until compliance clears the beneficiary or corridor.</p>
-                </div>
-              </div>
-            </section>
-          )}
-        </>
-      )}
-    </div>
-  );
-}
+          <Table
+            caption="Rows"
+            exportName="batch-preflight"
+            rows={rows}
+            emptyState={<EmptyState title="No rows" body="Upload a file to screen it." />}
+            columns={[
+              { key: 'name', header: 'Beneficiary', value: (row) => row.name, render: (row) => (
+                <span className="grid">
+                  <span className="font-medium">{row.name || 'Unnamed beneficiary'}</span>
+                  <span className="font-mono text-[12px] text-[var(--text-muted)]">{row.address || 'Missing reference'}</span>
+                </span>
+              ) },
+              { key: 'country', header: 'Country', value: (row) => row.country, render: (row) => (
+                row.status === 'blocked' || row.status === 'review' ? (
+                  <select aria-label={`Country for ${row.name}`} value={row.country} onChange={(event) => editRow(row.id, { country: event.target.value })} className={fieldClass}>
+                    {[...SUPPORTED_COUNTRIES].map((code) => <option key={code} value={code}>{code}</option>)}
+                    {!SUPPORTED_COUNTRIES.has(row.country) ? <option value={row.country}>{row.country || '—'}</option> : null}
+                  </select>
+                ) : row.country
+              ) },
+              { key: 'purpose', header: 'Purpose', value: (row) => row.purpose, render: (row) => (
+                row.status === 'review' || row.status === 'blocked' ? (
+                  <input aria-label={`Purpose code for ${row.name}`} value={row.purpose} placeholder="Purpose code" onChange={(event) => editRow(row.id, { purpose: event.target.value })} className={fieldClass} />
+                ) : row.purpose
+              ) },
+              { key: 'amount', header: 'Amount (USD)', align: 'right', mono: true, value: (row) => row.amount, render: (row) => (
+                row.status === 'blocked' || row.status === 'review' ? (
+                  <input aria-label={`Amount for ${row.name}`} inputMode="decimal" value={row.amount} onChange={(event) => editRow(row.id, { amount: event.target.value.replace(/[^0-9.]/g, '') })} className={cn(fieldClass, 'text-right font-mono')} />
+                ) : usd.format(Number.parseFloat(row.amount) || 0)
+              ) },
+              { key: 'status', header: 'Screening', value: (row) => ROW_LABEL[row.status], render: (row) => (
+                <span className="grid gap-1">
+                  <Badge tone={rowTone(row.status)}>{ROW_LABEL[row.status]}</Badge>
+                  {row.status !== 'ready' ? <span className="text-[12px] text-[var(--text-muted)]">{row.checks.filter((check) => check.result !== 'PASS').map((check) => check.detail).join(' · ')}</span> : null}
+                </span>
+              ) },
+            ]}
+          />
 
-const BATCH_STEPS = ['QUEUED', 'SETTLING', 'SETTLED'];
-
-function BatchStatusPanel({ status }: { status: BatchStatus }) {
-  const isDone = status.state === 'SETTLED';
-  const isFailed = status.state === 'FAILED' || status.state === 'REFUNDED' || status.state === 'REFUNDING';
-  const currentStep = BATCH_STEPS.indexOf(status.state);
-
-  return (
-    <div className="mt-4 rounded-xl border border-[#326273]/10 bg-[#F6F0ED] p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-semibold uppercase tracking-wide text-[#326273]/60">Batch status</span>
-        {isDone ? (
-          <span className="inline-flex items-center gap-1 rounded-full bg-[#5C9EAD]/10 px-2.5 py-0.5 text-[13px] font-semibold text-[var(--info)]">
-            <CheckCircle2 size={11} /> SETTLED
-          </span>
-        ) : isFailed ? (
-          <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2.5 py-0.5 text-[13px] font-semibold text-red-600">
-            <XCircle size={11} /> {status.state}
-          </span>
-        ) : (
-          <span className="inline-flex items-center gap-1 rounded-full bg-[#326273]/10 px-2.5 py-0.5 text-[13px] font-semibold text-[#326273]/70">
-            <Loader2 size={11} className="animate-spin" /> {status.state}
-          </span>
-        )}
-      </div>
-
-      {!isFailed && (
-        <div className="flex items-center gap-1">
-          {BATCH_STEPS.map((step, i) => {
-            const done = currentStep === -1 ? isDone : i < currentStep;
-            const active = i === currentStep;
-            return (
-              <div key={step} className="flex shrink-0 items-center gap-1">
-                <div className={`flex h-5 items-center justify-center rounded-full px-2 text-[13px] font-semibold transition-colors
-                    ${done ? 'bg-[#5C9EAD] text-white' : active ? 'border-2 border-[#5C9EAD] bg-white text-[var(--info)]' : 'bg-[#326273]/10 text-[#326273]/40'}`}>
-                  {done ? '✓' : step}
-                </div>
-                {i < BATCH_STEPS.length - 1 && (
-                  <div className={`h-0.5 w-4 rounded-full ${done ? 'bg-[#5C9EAD]' : 'bg-[#326273]/10'}`} />
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      <div className="font-mono text-[13px] text-[#326273]/50 break-all">ID: {status.id}</div>
-
-      {status.digest && (() => {
-        const isSimulated = status.demo === true || status.digest.startsWith("SIM_");
-        return (
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="min-w-0 flex-1 break-all rounded-lg bg-white px-3 py-1.5 font-mono text-[13px] text-[#326273]/60">
-              {status.digest}
-            </div>
-            {isSimulated ? (
-              <span className="inline-flex items-center gap-2">
-                <StatusBadge status="demo" />
-                <span className="text-[13px] font-medium text-[#9a6f15]">Simulated batch — no on-chain transaction</span>
-              </span>
-            ) : (
-              <ExplorerLinks digest={status.digest} />
-            )}
+          <div className="flex flex-wrap justify-between gap-2">
+            <Button variant="ghost" onClick={() => setPhase('upload')}>
+              Upload a different file
+            </Button>
+            <Button size="lg" onClick={() => setPhase('review')} disabled={accepted.length === 0}>
+              Review {accepted.length} cleared rows
+            </Button>
           </div>
-        );
-      })()}
-
-      <div className="flex items-center gap-3 text-[13px] text-[#326273]/50">
-        <Clock size={11} />
-        <span>{status.acceptedRows} rows · $ {status.totalAmount}</span>
-        {!isDone && !isFailed && <Loader2 size={11} className="animate-spin ml-auto" />}
-      </div>
-    </div>
-  );
-}
-
-function SummaryCard({ icon: Icon, label, value, tone }: { icon: LucideIcon; label: string; value: string; tone: string }) {
-  return (
-    <DashStat
-      className="cursor-pointer p-5"
-      label={label}
-      value={value}
-      icon={Icon}
-      iconClassName={tone}
-      iconWrapClassName="bg-transparent p-0"
-    />
-  );
-}
-
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex justify-between gap-4">
-      <span className="text-[#326273]/60">{label}</span>
-      <span className="font-medium text-[#326273]">{value}</span>
-    </div>
-  );
-}
-
-function Control({ label, detail }: { label: string; detail: string }) {
-  return (
-    <HoverPopup title={label} content={detail}>
-      <div className="cursor-pointer rounded-xl bg-[#F6F0ED] p-4 transition-all hover:shadow-md hover:shadow-[#5C9EAD]/10">
-        <div className="flex items-center gap-2 font-medium text-[#326273]">
-          <CheckCircle2 className="text-[var(--info)]" size={16} />
-          {label}
         </div>
-        <div className="mt-1 text-[13px] text-[#326273]/60">{detail}</div>
-      </div>
-    </HoverPopup>
+      ) : null}
+
+      {phase === 'review' ? (
+        <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+          <div className="grid gap-4">
+            <Card className="grid gap-3">
+              <h2 className="text-[15px] font-semibold">Corridor split</h2>
+              <ul className="grid gap-2">
+                {corridorSplit.map(([country, entry]) => {
+                  const corridor = corridors.find((item) => item.code === country);
+                  return (
+                    <li key={country} className="flex flex-wrap items-center justify-between gap-2 rounded-[var(--r-sm)] bg-[var(--surface-2)] px-3 py-2">
+                      <span className="flex items-center gap-2 text-[14px] font-medium">
+                        USD → {corridor?.currency ?? country}
+                        <Chip tone="teal">{corridor?.partnerLabel ?? `Corridor ${country}`}</Chip>
+                      </span>
+                      <span className="font-mono text-[13px] tabular-nums">
+                        {entry.count} rows · {usd.format(entry.total)} USD
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </Card>
+            <Card className="grid gap-3">
+              <h2 className="text-[15px] font-semibold">Chunk preview</h2>
+              <p className="text-[13px] text-[var(--text-2)]">
+                A single settlement carries at most {MAX_BATCH_ROWS} rows; everyone in a chunk gets paid, or nobody does. This run is {chunkCount === 1 ? 'one chunk' : `${chunkCount} chunks`} of {accepted.length} rows.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {Array.from({ length: chunkCount }).map((_, index) => (
+                  <Chip key={index} tone={index === 0 ? 'green' : 'default'} ghost={index > 0}>
+                    chunk {index + 1} · {Math.min(MAX_BATCH_ROWS, accepted.length - index * MAX_BATCH_ROWS)} rows
+                  </Chip>
+                ))}
+              </div>
+              {chunkCount > 1 ? <p className="text-[13px] text-[var(--warn)]">Only the first chunk can be authorised in this run. Split the file and authorise each chunk separately.</p> : null}
+            </Card>
+          </div>
+          <div className="grid gap-4">
+            <Card className="grid gap-3">
+              <h2 className="text-[15px] font-semibold">Authorisation</h2>
+              <dl>
+                <ProofRow label="Cleared total" value={<span className="font-mono tabular-nums">{usd.format(acceptedTotal)} USD</span>} />
+                <ProofRow label="Fee (illustrative)" value={<span className="font-mono tabular-nums">{usd.format(estimatedFee)} USD</span>} />
+                <ProofRow label="Excluded" value={`${review.length + blocked.length} rows`} />
+                <ProofRow label="Minimum" value={formatUsd(minSettlementUsd())} />
+              </dl>
+              {!minimum.ok && acceptedTotal > 0 ? <p className="text-[13px] text-[var(--warn)]">{minimum.message}</p> : null}
+              <form
+                className="grid gap-2"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void authorize();
+                }}
+              >
+                <label htmlFor="batch-totp" className="text-[14px] font-semibold">
+                  6-digit authorisation code
+                </label>
+                <input
+                  id="batch-totp"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  maxLength={6}
+                  value={totp}
+                  onChange={(event) => setTotp(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                  placeholder="000000"
+                  className="h-12 rounded-[var(--r-sm)] border border-[var(--line)] bg-[var(--surface)] px-4 text-center font-mono text-[18px] tracking-[0.3em] text-[var(--text)] outline-none focus:border-[var(--teal-600)]"
+                />
+                <Button type="submit" size="lg" fullWidth disabled={busy || accepted.length === 0 || totp.length !== 6 || !minimum.ok}>
+                  {busy ? 'Queueing…' : `Authorise ${Math.min(accepted.length, MAX_BATCH_ROWS)} rows`}
+                </Button>
+                <p className="text-[12px] text-[var(--text-muted)]">One signed authorisation. The server re-screens every row, then one atomic transaction per chunk settles on Sui.</p>
+              </form>
+              <Button variant="ghost" onClick={() => setPhase('validate')}>
+                Back to rows
+              </Button>
+            </Card>
+          </div>
+        </div>
+      ) : null}
+
+      {phase === 'settle' ? (
+        <Card tone={settled ? 'dark' : 'default'} className="grid gap-4 md:grid-cols-[220px_1fr] md:items-center" aria-live="polite">
+          <div className="mx-auto w-full max-w-[220px]">
+            <SuiSettlementStack settled={settled} assembling={!settled && !failed} decorative />
+          </div>
+          <div className={cn('grid gap-2', settled && 'text-white')}>
+            <h2 className="text-[var(--text-h3)] font-semibold">{settled ? 'Chunk settled on Sui' : failed ? 'Chunk did not settle' : 'Settling chunk 1'}</h2>
+            <p className={cn('text-[14px]', settled ? 'text-white/70' : 'text-[var(--text-2)]')}>
+              {status ? `${status.acceptedRows} rows · ${status.totalAmount} USD · ${status.state}` : 'Queued. This screen updates on its own.'}
+            </p>
+            {status?.digest ? (
+              simulated ? (
+                <Badge tone="amber">Simulated batch · no on-chain transaction</Badge>
+              ) : (
+                <ExplorerLinks digest={status.digest} />
+              )
+            ) : null}
+            {status ? <p className={cn('font-mono text-[12px]', settled ? 'text-white/60' : 'text-[var(--text-muted)]')}>Batch {status.id}</p> : null}
+          </div>
+        </Card>
+      ) : null}
+
+      {phase === 'receipt' ? (
+        <div className="grid gap-4">
+          <Card tone={settled ? 'dark' : 'tint'} className={cn('grid gap-2', settled && 'text-white')}>
+            <h2 className="text-[var(--text-h3)] font-semibold">{settled ? 'Batch receipt' : 'Batch returned'}</h2>
+            <p className={cn('text-[14px]', settled ? 'text-white/70' : 'text-[var(--text-2)]')}>
+              {status?.acceptedRows ?? accepted.length} rows · {status?.totalAmount ?? usd.format(acceptedTotal)} USD · {status?.state ?? '—'}
+            </p>
+            {status?.digest ? (simulated ? <Badge tone="amber">Simulated · no on-chain transaction</Badge> : <ExplorerLinks digest={status.digest} />) : null}
+          </Card>
+          <Table
+            caption="Rows in this run"
+            exportName="batch-receipt"
+            rows={rows}
+            columns={[
+              { key: 'name', header: 'Beneficiary', value: (row) => row.name },
+              { key: 'country', header: 'Corridor', value: (row) => `USD → ${row.country}`, render: (row) => `USD → ${row.country}` },
+              { key: 'amount', header: 'Amount (USD)', align: 'right', mono: true, value: (row) => row.amount, render: (row) => usd.format(Number.parseFloat(row.amount) || 0) },
+              { key: 'status', header: 'State', value: (row) => ROW_LABEL[row.status], render: (row) => <Badge tone={rowTone(row.status)}>{ROW_LABEL[row.status]}</Badge> },
+              { key: 'digest', header: 'Digest', mono: true, secondary: true, value: () => status?.digest ?? '', render: (row) => (row.status === 'settled' && status?.digest && !simulated ? `${status.digest.slice(0, 10)}…` : '—') },
+            ]}
+          />
+          <div className="flex flex-wrap gap-2">
+            <Button href="/dashboard/receipts">Open receipts</Button>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setRows([]);
+                setFileName(null);
+                setBatchId(null);
+                setStatus(null);
+                setPhase('upload');
+              }}
+            >
+              New batch
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
+      {phase !== 'upload' && review.length + blocked.length > 0 && phase !== 'receipt' ? (
+        <p className="text-[13px] text-[var(--text-2)]">
+          {review.length} row{review.length === 1 ? '' : 's'} need a fix and {blocked.length} {blocked.length === 1 ? 'is' : 'are'} blocked. Cleared rows still ship; the rest stay on this screen until you resolve them.
+        </p>
+      ) : null}
+      <p className="text-[12px] text-[var(--text-muted)]">Screening here is a preflight preview; the server is the gate and re-runs every check before value moves.</p>
+    </div>
   );
 }

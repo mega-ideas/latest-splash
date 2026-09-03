@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import ExplorerLinks from '@/components/dashboard/ExplorerLinks';
 import { Badge, Button, Card, EmptyState, Skeleton, Stat, Table } from '@/components/system';
 import type { BadgeTone } from '@/components/system';
+import { EmptyState as IsoEmptyState } from '@/components/illustrations/iso';
 import { brand } from '@/lib/brand';
 import type { TransferIntentRecord } from '@/lib/server/operations';
 
@@ -133,6 +134,7 @@ export default function HomePage() {
         loading={transfers === null}
         emptyState={
           <EmptyState
+            art={<IsoEmptyState kind="settlements" decorative />}
             title="No settlements yet"
             body="Send your first USD payout. It settles atomically on Sui and lands here with its proof."
             action={<Button size="sm" href="/dashboard/transfer">Send USD</Button>}

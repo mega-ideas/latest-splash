@@ -1,3 +1,5 @@
+'use client';
+
 /**
  * EmptyState — one focal object on an 8px grid plane, ~240px wide, for empty
  * table slots. The object is chosen by `kind`; copy comes from `label`.
