@@ -1,4 +1,4 @@
-import ClearanceLanding from "@/components/landing-v3/ClearanceLanding";
+import MarketingLanding from "@/components/landing-v4/MarketingLanding";
 import { brand } from "@/lib/brand";
 
 const SITE_URL = brand.siteUrl;
@@ -88,7 +88,7 @@ export default function Home() {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd).replace(/</g, "\\u003c") }}
       />
-      <ClearanceLanding />
+      <MarketingLanding />
     </>
   );
 }

@@ -163,3 +163,7 @@ The design handoff (`Splash-Clearance-Signal-Design-Handoff`) ships example copy
 | "Signal Orange", "Iris" accents | Brand palette is ours | Palette v2 unchanged; teal-600 is the only signal colour |
 
 `scripts/check-copy.mjs` passes on the branch (W2 float-math debt unchanged).
+
+## v6 landing — handoff mockup ported verbatim (user direction, 2026-09-03)
+
+The user directed that the landing follow the handoff mockup exactly, including its colour and content. `components/landing-v4` is that port. Its figures (14 regulated corridors, 6 evidence layers, 99.98% auto-reconciled, 24/7, the LON → KUL GBP/MYR example, corridor availability table, clearance record, reconciliation rows, API sample) are the mockup's sample data and are not measurements of Splash. Two items were not carried over because they would be false regulatory statements: "authorised and regulated in the United Kingdom" with an FCA reference and company number. The footer's Regulated jurisdictions block carries the canon posture line and the Labuan status instead, and the copyright uses the real legal entity. Before this page is public, the sample figures need either real data behind them or an "illustrative" marker.
