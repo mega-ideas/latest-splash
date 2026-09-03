@@ -8209,3 +8209,43 @@ button.iso-product-row {
 @media (max-width: 880px) {
   .brand-network-badge.iso-header-status { display: none; }
 }
+
+/* ── Landing v2 money-flow connectors (docs/money-flow-spec.md) ──────────
+   Dotted track with three traveling dots per segment; vertical below md.
+   Reduced motion: dots sit still at thirds. */
+.lv2-connector { min-height: 2.5rem; }
+.lv2-track {
+  position: absolute;
+  inset: 50% auto auto 0;
+  width: 100%;
+  border-top: 2px dotted color-mix(in srgb, var(--ink-700) 35%, transparent);
+  transform: translateY(-50%);
+}
+.lv2-dot {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  border-radius: 999px;
+  background: var(--teal-600);
+  animation: lv2-dot-x 2.5s linear infinite;
+}
+@keyframes lv2-dot-x { from { left: 0; opacity: 0; } 10% { opacity: 1; } 90% { opacity: 1; } to { left: 100%; opacity: 0; } }
+@keyframes lv2-dot-y { from { top: 0; opacity: 0; } 10% { opacity: 1; } 90% { opacity: 1; } to { top: 100%; opacity: 0; } }
+@media (max-width: 767px) {
+  .lv2-track { inset: 0 auto auto 50%; width: 0; height: 100%; border-top: 0; border-left: 2px dotted color-mix(in srgb, var(--ink-700) 35%, transparent); transform: translateX(-50%); }
+  .lv2-dot { left: 50%; top: 0; animation-name: lv2-dot-y; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lv2-dot { animation: none; }
+  .lv2-dot:nth-of-type(2) { left: 25%; }
+  .lv2-dot:nth-of-type(3) { left: 50%; }
+  .lv2-dot:nth-of-type(4) { left: 75%; }
+  @media (max-width: 767px) {
+    .lv2-dot:nth-of-type(2) { left: 50%; top: 25%; }
+    .lv2-dot:nth-of-type(3) { left: 50%; top: 50%; }
+    .lv2-dot:nth-of-type(4) { left: 50%; top: 75%; }
+  }
+}
