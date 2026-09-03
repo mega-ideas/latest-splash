@@ -143,6 +143,7 @@ test('landing v2 renders the locked hero, one dark money-flow node, and truthful
   const moneyFlow = await read('../components/landing-v2/MoneyFlow.tsx');
   const trust = await read('../components/landing-v2/Trust.tsx');
   const roadmap = await read('../components/landing-v2/RoadmapTeaser.tsx');
+  const milestones = await read('../lib/site/roadmap.ts');
   const corridors = await read('../components/landing-v2/Corridors.tsx');
   const landing = await read('../components/landing-v2/LandingV2.tsx');
   const page = await read('../app/page.tsx');
@@ -166,10 +167,10 @@ test('landing v2 renders the locked hero, one dark money-flow node, and truthful
   assert.match(moneyFlow, /Legacy rails: 2–3 days/);
   assert.match(moneyFlow, /Splash: minutes, end to end\*/);
   assert.match(moneyFlow, /partnerLabel/);
-  // Roadmap teaser always carries both milestones.
-  assert.match(roadmap, /Mainnet publish/);
-  assert.match(roadmap, /First live corridor operations/);
-  assert.match(roadmap, /following MFCA activation/);
+  // Roadmap teaser renders the one shared milestone source, which always carries both.
+  assert.match(roadmap, /lib\/site\/roadmap/);
+  assert.match(milestones, /Mainnet publish · September 2026 \(protocol live, no customer funds\)/);
+  assert.match(milestones, /First live corridor operations · October 2026, following MFCA activation/);
   // Trust: design claim, never a licence claim.
   assert.match(trust, /Regulator-ready by design/);
   assert.match(trust, /npm run check:core/);

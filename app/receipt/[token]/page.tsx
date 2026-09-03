@@ -1,19 +1,30 @@
+import type { Metadata } from 'next';
+import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
 import PostureFooter from '@/components/brand/PostureFooter';
 import Wordmark from '@/components/brand/Wordmark';
 import Receipt from '@/components/Receipt';
+import { Badge } from '@/components/system';
+import { brand } from '@/lib/brand';
 import { explorerTxUrl, receiptNetworkLine } from '@/lib/network';
 import { findReceiptShare } from '@/lib/server/receipt-share';
 
 export const dynamic = 'force-dynamic';
 
+export const metadata: Metadata = {
+  title: `Receipt — ${brand.name}`,
+  robots: { index: false, follow: false },
+};
+
 /**
- * W9.2 — public, read-only receipt (the "Share with supplier" link).
+ * Public, read-only receipt (the "Share with supplier" link).
  *
- * Reuses the app/pay/[slug] pattern: an unguessable token resolves one
- * record and the page renders the SAME Receipt component the operator sees,
- * without login. Anything the token does not name stays invisible.
+ * An unguessable token resolves one record and the page renders the SAME
+ * Receipt component the operator sees, without login. Detail is
+ * parties-only: anything the token does not name stays invisible, and the
+ * page is never indexed. The statement-descriptor explainer tells the payee
+ * why their bank shows the payout partner's name.
  */
 export default async function SharedReceiptPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
@@ -30,22 +41,22 @@ export default async function SharedReceiptPage({ params }: { params: Promise<{ 
     ?? (settled ? intent.updatedAt : undefined);
 
   return (
-    <main className="min-h-screen bg-[#F6F0ED] px-4 py-10">
-      <div className="mx-auto max-w-xl space-y-5">
-        <header className="flex items-center justify-between gap-3 text-[#1F4452]">
-          <Wordmark />
-          <span className="text-[13px] font-medium text-[#326273]/60">Read-only receipt</span>
+    <main className="min-h-dvh bg-[var(--paper)] px-4 py-8 text-[var(--text)] md:py-12">
+      <div className="mx-auto grid w-full max-w-xl gap-5">
+        <header className="flex items-center justify-between gap-3">
+          <Wordmark size={28} />
+          <Badge tone="slate">Read-only receipt</Badge>
         </header>
 
         <Receipt
           txDigest={intent.suiTxDigest ?? intent.receiptObjectId ?? 'Pending'}
-          sender="Splash operator"
+          sender={`${brand.name} operator`}
           recipient={intent.recipientName}
           recipientName={intent.recipientName}
           amount={intent.sourceAmountUsd}
           currency="USD"
           fee={display.fee ?? '—'}
-          fundingSource={intent.fundingMethod === 'BANK_USD' ? 'Bank USD' : intent.fundingMethod === 'HELD_BALANCE' ? 'Splash balance' : undefined}
+          fundingSource={intent.fundingMethod === 'BANK_USD' ? 'Bank USD' : intent.fundingMethod === 'HELD_BALANCE' ? `${brand.name} balance` : undefined}
           status={settled ? 'Settled' : 'Pending'}
           timestamp={display.issuedAt ?? intent.createdAt}
           reference={display.reference ?? intent.verificationReference ?? undefined}
@@ -63,10 +74,18 @@ export default async function SharedReceiptPage({ params }: { params: Promise<{ 
           networkLine={receiptNetworkLine()}
         />
 
-        <p className="text-center text-[13px] font-medium text-[#326273]/55">
-          Shared by the payer. This link shows this receipt only.
-        </p>
-        <PostureFooter className="text-center text-[#326273]/70" />
+        <section className="rounded-[16px] border border-[var(--line)] bg-[var(--surface)] p-4 text-[13px] leading-[1.55] text-[var(--text-2)]">
+          <h2 className="text-[14px] font-semibold text-[var(--text)]">On your bank statement</h2>
+          <p className="mt-1">
+            The payout arrives through a licensed payout partner, so the statement shows the partner&apos;s legal name rather than {brand.name} or the payer.{' '}
+            <Link href="/help/statement-descriptor" className="text-[var(--teal-600)] underline-offset-4 hover:underline">
+              Why the partner&apos;s name appears
+            </Link>
+          </p>
+        </section>
+
+        <p className="text-center text-[12px] text-[var(--text-muted)]">Shared by the payer. This link shows this receipt only and is not indexed.</p>
+        <PostureFooter className="text-center text-[12px] text-[var(--text-muted)]" />
       </div>
     </main>
   );
