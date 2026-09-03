@@ -211,7 +211,7 @@ function HeroCopy({ animated, onEnterEngine }: { animated: boolean; onEnterEngin
       </motion.h1>
       <motion.p variants={animated ? rise : undefined} className="iso-hero-description">
         A compliance-gated B2B account network for cross-border money. Between the invoice and the
-        settlement, Splash nets, yields, discounts, and escrows — with human approval on every action.
+        settlement, Splash runs the treasury and the evidence — with human approval on every action.
       </motion.p>
       <motion.div variants={animated ? rise : undefined} className="iso-hero-actions">
         <Link href="/signup" className="iso-button">
@@ -237,42 +237,87 @@ function HeroCopy({ animated, onEnterEngine }: { animated: boolean; onEnterEngin
   );
 }
 
+/* What the account actually does, and how far along each part is.
+   Every status here is taken from something already asserted elsewhere in the
+   repo rather than written fresh: the first two from `loopCards` meta on the
+   landing, netting verbatim from the comparison table row, early payment from
+   `loopCards[2].roadmap === true`. Escrow used to be listed here and is not:
+   it has zero occurrences in lib/ and move/, so claiming it is the same defect
+   as naming a partner who has not signed. */
+const VISION_CAPABILITIES = [
+  {
+    name: 'Payouts',
+    body: 'Collect USD, pay out on a local rail. USD to PHP is the corridor that runs today.',
+    status: 'Live on testnet',
+    tone: 'live',
+  },
+  {
+    name: 'Treasury',
+    body: 'Idle USD follows a posture your business approves, move by move.',
+    status: 'Projected · variable',
+    tone: 'modeled',
+  },
+  {
+    name: 'Netting',
+    body: 'Offset what two counterparties owe each other before anything settles.',
+    status: 'Modeled in the account loop',
+    tone: 'modeled',
+  },
+  {
+    name: 'Early payment',
+    body: 'A buyer funds an invoice early against a receivable both sides can verify.',
+    status: 'Roadmap · subject to licensing',
+    tone: 'roadmap',
+  },
+] as const;
+
 function VisionCopy() {
   return (
-    <>
-      <Image
-        src="/cinematic/brand-mark.png"
-        alt=""
-        width={256}
-        height={256}
-        className="cin-vision-mark"
-        loading="eager"
-      />
-      <span className="cin-vision-chip">The product</span>
-      <h2 className="cin-vision-title">
-        Payments are the feature.
-        <span>Treasury is the product.</span>
-      </h2>
-      <p className="cin-vision-lede">
-        Stripe and Airwallex move money. Splash runs everything between the invoice and the
-        settlement — netting it, yielding it, discounting it, escrowing it.
-      </p>
-      <div className="cin-vision-pillars" aria-hidden="true">
-        <span>Netting</span>
-        <span>Yield</span>
-        <span>Discounting</span>
-        <span>Escrow</span>
+    <div className="cin-vision-inner">
+      <div className="cin-vision-copy">
+        <Image
+          src="/cinematic/brand-mark.png"
+          alt=""
+          width={256}
+          height={256}
+          className="cin-vision-mark"
+          loading="eager"
+        />
+        <p className="cin-vision-chip">The product</p>
+        <h2 className="cin-vision-title">
+          Payments are the feature.
+          <span>Treasury is the product.</span>
+        </h2>
+        <p className="cin-vision-lede">
+          Stripe and Airwallex move money. Splash runs the treasury around the settlement — what
+          the cash does before it leaves, and what it can prove after it lands.
+        </p>
+        <div className="cin-vision-actions">
+          <Link href="/signup" className="iso-button iso-button-gold">
+            Open payment desk
+            <ArrowRight aria-hidden="true" />
+          </Link>
+          <Link href="/login" className="iso-button iso-button-ghost">
+            Log in
+          </Link>
+        </div>
       </div>
-      <div className="cin-vision-actions">
-        <Link href="/signup" className="iso-button iso-button-gold">
-          Open payment desk
-          <ArrowRight aria-hidden="true" />
-        </Link>
-        <Link href="/login" className="iso-button iso-button-ghost">
-          Log in
-        </Link>
-      </div>
-    </>
+
+      {/* Was four bare nouns in gold pills, aria-hidden, carrying no
+          information and styled identically to the section label above them.
+          Now a real definition list: what each one is, and how far along. */}
+      <dl className="cin-vision-caps">
+        {VISION_CAPABILITIES.map((cap) => (
+          <div key={cap.name} className="cin-vision-cap" data-tone={cap.tone}>
+            <dt>
+              {cap.name}
+              <span className="cin-vision-cap-status">{cap.status}</span>
+            </dt>
+            <dd>{cap.body}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
   );
 }
 

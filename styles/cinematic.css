@@ -458,23 +458,48 @@
   inset: 0;
   z-index: 8;
   display: grid;
-  place-content: center;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: center;
+  justify-items: center;
   padding: 0 24px;
   pointer-events: none;
-  text-align: center;
+  text-align: left;
+}
+
+.cin-vision-inner {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.8fr);
+  align-items: center;
+  gap: clamp(28px, 4vw, 72px);
+  width: 100%;
+  max-width: 1180px;
+}
+
+.cin-vision-copy > * { pointer-events: auto; }
+
+@media (width < 1040px) {
+  .cin-vision-inner {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 28px;
+  }
 }
 
 .cin-vision-chip {
-  justify-self: center;
-  padding: 6px 14px;
-  color: var(--cin-ink);
-  background: var(--cin-gold);
-  box-shadow: 3px 3px 0 var(--cin-teal-dark);
-  font-family: var(--font-mono), monospace;
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: .22em;
-  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  color: var(--cin-teal);
+  font-family: var(--font-sans), system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.cin-vision-chip::before {
+  width: 24px;
+  height: 2px;
+  background: var(--cin-teal);
+  content: "";
 }
 
 .cin-vision-title {
@@ -506,49 +531,82 @@
 }
 
 .cin-vision-lede {
-  max-width: 660px;
-  margin: 30px auto 0;
-  color: rgba(12, 62, 72, .76);
+  max-width: 52ch;
+  margin: 22px 0 0;
+  color: rgba(12, 62, 72, .82);
   font-size: 17px;
   font-weight: 540;
-  line-height: 1.75;
+  line-height: 1.7;
 }
 
 .cin-vision-mark {
-  width: 62px;
+  width: 54px;
   height: auto;
-  justify-self: center;
-  margin-bottom: 16px;
+  margin-bottom: 14px;
   filter: drop-shadow(0 14px 20px rgba(12, 62, 72, .22));
-  animation: cin-float 8s ease-in-out infinite;
 }
 
-.cin-vision-pillars {
+/* The four capabilities. Each status is quoted from something already
+   asserted elsewhere in the repo, not written fresh — see the comment on
+   VISION_CAPABILITIES. The tone attribute drives the dot colour only; the
+   status is always spelled out in words as well, so colour is never the
+   only carrier. */
+.cin-vision-caps {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  pointer-events: auto;
+}
+
+.cin-vision-cap {
+  padding: 13px 0 13px 16px;
+  border-left: 2px solid var(--cin-line);
+}
+
+.cin-vision-cap dt {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
-  justify-content: center;
-  margin-top: 34px;
+  align-items: baseline;
+  gap: 6px 10px;
+  color: var(--cin-ink);
+  font-size: 15px;
+  font-weight: 750;
 }
 
-.cin-vision-pillars span {
-  padding: 7px 13px;
-  color: var(--cin-teal-dark);
-  background: var(--cin-gold);
-  box-shadow: 3px 3px 0 var(--cin-teal-dark);
-  font-family: var(--font-mono), monospace;
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: .18em;
-  text-transform: uppercase;
+.cin-vision-cap dd {
+  margin: 4px 0 0;
+  max-width: 44ch;
+  color: rgba(12, 62, 72, .8);
+  font-size: 13.5px;
+  line-height: 1.55;
 }
+
+.cin-vision-cap-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: rgba(12, 62, 72, .82);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.cin-vision-cap-status::before {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  content: "";
+}
+
+.cin-vision-cap[data-tone="live"] { border-left-color: var(--cin-teal); }
+.cin-vision-cap[data-tone="live"] .cin-vision-cap-status { color: var(--cin-teal); }
+.cin-vision-cap[data-tone="roadmap"] .cin-vision-cap-status { color: rgba(12, 62, 72, .6); }
 
 .cin-vision-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 14px;
-  justify-content: center;
-  margin-top: 34px;
+  gap: 12px;
+  margin-top: 28px;
   pointer-events: auto;
 }
 
