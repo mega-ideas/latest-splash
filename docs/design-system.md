@@ -95,3 +95,24 @@ Two-tone headline: line one `--text`, line two `--text-2` (see the gallery). Tab
 - **Do** use `Badge` words for state; **don't** rely on colour alone.
 - **Do** use the extruded look in illustrations; **don't** extrude type or chrome.
 - **Do** import names from `lib/brand.ts`; **don't** hardcode "Splash" in new code.
+
+## 7. Public site (`components/landing-v2`, `components/site`, `components/auth`)
+
+- **Landing v2** (`components/landing-v2/LandingV2.tsx`): nav → hero → proof strip → bento → money-flow → five steps → treasury vision → rates teaser → onboard → trust → corridors → roadmap teaser → footer. One responsive tree; sections use `Section` (96/64 rhythm), `TwoTone` (two-tone headline utility), `Lede`, `Mono` (module chips) from `ui.tsx`. `Reveal` is the only scroll motion (400ms, 12px, once; opacity-only under reduced motion).
+- **Money-flow** is specified in `docs/money-flow-spec.md`. Exactly one dark card in the section (the settlement node). Connector dots are CSS (`.lv2-connector` in `globals.css`), static at thirds under reduced motion.
+- **Hero visuals** are live renders (`HeroDeskPreview`, `HeroPhonePreview`) of real system components with sandbox sample data, fixed boxes (zero CLS), `aria-hidden`.
+- **Public pages** (`/pricing /rates /trust /roadmap /docs /sandbox /metrics`) use `SiteShell` + `PageHeader` + `PageBody` from `components/site/SiteShell.tsx` and `DataTable` (server-renderable; row cards below `md`, or sticky first column + horizontal scroll with `scroll`). Milestone strings live once in `lib/site/roadmap.ts`.
+- **Auth** (`/login`) uses `AuthShell` (form left, iso scene + posture right, hidden below `lg`) and `LoginForm` on system inputs (16px text, 44px targets, visible labels, inline error with `role="alert"`).
+- **Eyebrow budget:** at most one mono kicker per three sections on the landing; today two ("How it settles", trust caption).
+
+### Contrast amendment (axe, WCAG AA at rendered sizes)
+- `--text-muted` is `#59686F` (the brief's `#6B7A83` measured 4.43:1 on white at 11-13px).
+- 700 text shades exist for status text on the 100 tints and on white: `--teal-700 #16606E`, `--green-700 #157056`, `--amber-700 #8A5809`, exposed as `--info-text / --ok-text / --warn-text` (`--error-text` = red-600, which already passes). The 600 shades remain for fills, borders, large figures and links on paper.
+- Ghost placeholders use a dashed border and muted text, never 40% opacity on text.
+
+### Stylesheet architecture (performance)
+- `app/globals.css` (≈520 lines): Tailwind v4, `@theme`, `styles/tokens.css`, base + body, the public `/trust` rules, `.money`, brand chrome, landing-v2 motion (`.lv2-*`). This is everything a public page needs.
+- `styles/legacy.css` (≈8,700 lines): dashboard, admin, queue, pay, the old auth shell, working-capital and the retired isometric/cinematic landings. Imported only by the route layouts that still use those classes (`app/dashboard`, `app/admin`, `app/queue`, `app/pay`, `app/settings`, `app/signup`, `app/forgot-password`, `app/working-capital`, `app/receipt`, `app/help`, `app/design`). A public page never downloads it.
+- `styles/loading.css`: the seven rules the root loading screen uses (extracted from the retired cinematic stylesheet).
+- Providers (react-query + sonner) mount in those same app layouts, not in the root layout; the landing and public pages ship no toast or query runtime. Landing motion is CSS (`Reveal` toggles a class on intersection; the money-flow toggle crossfades on remount); framer-motion is not in the landing bundle.
+- Brand icon assets are 256px (`public/brand/splash-icon.png`, `public/splash-main-icon.png`; the 841px original is `splash-icon@full.png`); `app/icon.png` is 256px.

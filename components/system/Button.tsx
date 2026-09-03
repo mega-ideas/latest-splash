@@ -15,7 +15,7 @@ const base =
 const variants: Record<Variant, string> = {
   primary: 'bg-[var(--teal-600)] text-white hover:bg-[var(--teal-500)]',
   ghost: 'border border-[var(--line)] bg-transparent text-[var(--text)] hover:bg-[var(--surface-2)]',
-  'destructive-text': 'bg-transparent text-[var(--error)] hover:bg-[var(--error-bg)]',
+  'destructive-text': 'bg-transparent text-[var(--error-text)] hover:bg-[var(--error-bg)]',
 };
 
 /* 44px targets on touch; md is the default control height. */

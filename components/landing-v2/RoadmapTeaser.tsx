@@ -1,15 +1,10 @@
 import { ArrowRight } from 'lucide-react';
 
 import { Button } from '@/components/system';
+import { MILESTONES } from '@/lib/site/roadmap';
 
 import Reveal from './Reveal';
 import { Section, TwoTone } from './ui';
-
-/** The two milestones, always both, exact strings (§0). */
-export const MILESTONES = [
-  { title: 'Mainnet publish', when: 'September 2026', note: 'protocol live, no customer funds' },
-  { title: 'First live corridor operations', when: 'October 2026', note: 'following MFCA activation' },
-];
 
 export default function RoadmapTeaser() {
   return (

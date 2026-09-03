@@ -173,7 +173,7 @@ export default function RecipientStep({ state, set, next }: { state: TransferSta
             className={fieldClass}
             aria-invalid={touched && !nameOk}
           />
-          {touched && !nameOk ? <p className="text-[13px] text-[var(--error)]">Enter the recipient&apos;s business name.</p> : null}
+          {touched && !nameOk ? <p className="text-[13px] text-[var(--error-text)]">Enter the recipient&apos;s business name.</p> : null}
         </div>
 
         <fieldset className="grid gap-2">
@@ -220,7 +220,7 @@ export default function RecipientStep({ state, set, next }: { state: TransferSta
               className={cn(fieldClass, 'font-mono')}
               aria-invalid={touched && !accountOk}
             />
-            {touched && !accountOk ? <p className="text-[13px] text-[var(--error)]">A bank account or reference is required.</p> : null}
+            {touched && !accountOk ? <p className="text-[13px] text-[var(--error-text)]">A bank account or reference is required.</p> : null}
           </div>
           <div className="grid gap-2">
             <label htmlFor="recipient-swift" className="text-[14px] font-semibold">

@@ -15,7 +15,7 @@ export function Section({ id, children, className, tone = 'paper', labelledBy }:
 
 /** Two-tone headline: line one in --text, line two in --text-2 (§1.2). */
 export function TwoTone({ id, as: Tag = 'h2', line1, line2, size = 'h2', className }: { id?: string; as?: 'h1' | 'h2'; line1: string; line2?: string; size?: 'display' | 'h2'; className?: string }) {
-  const scale = size === 'display' ? 'text-[clamp(2.25rem,6vw,3.5rem)] leading-[1.05]' : 'text-[clamp(1.5rem,4vw,1.75rem)] leading-[1.15]';
+  const scale = size === 'display' ? 'text-[clamp(2.25rem,4.6vw,3.25rem)] leading-[1.06]' : 'text-[clamp(1.5rem,4vw,1.75rem)] leading-[1.15]';
   return (
     <Tag id={id} className={cn('font-semibold tracking-[-0.02em] text-[var(--text)]', scale, className)}>
       {line1}

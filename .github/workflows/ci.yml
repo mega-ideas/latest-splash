@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, feat/v3-mainnet-redesign]
+
+jobs:
+  gates:
+    name: check:core · check-copy · lint · typecheck · tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # check:core (no Balance<T> in splash_core) + check-copy (claims + Palette v2) + eslint
+      - run: npm run lint
+      - run: npx tsc --noEmit
+      - run: npm run test:oxwal
+      - run: npm run test:db
+        if: ${{ hashFiles('tests/*db*.test.mjs') != '' }}
+      # Move packages are untouched in this workstream: fail if a diff appears.
+      - name: Move packages untouched
+        run: |
+          git fetch origin main --depth=1 || true
+          if git rev-parse --verify origin/main >/dev/null 2>&1; then
+            git diff --quiet origin/main -- move/ || { echo "move/ changed"; exit 1; }
+          fi

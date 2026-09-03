@@ -1,6 +1,5 @@
 'use client';
 
-import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { useState, type ReactNode } from 'react';
 
 import { PillToggle } from '@/components/system';
@@ -43,7 +42,7 @@ const FOOTNOTE = '*On-chain settlement ~400ms; total delivery time depends on lo
 function Node({ title, children, className }: { title: string; children: ReactNode; className?: string }) {
   return (
     <div className={cn('flex min-w-0 flex-1 flex-col gap-2 rounded-[16px] border border-[var(--line)] bg-[var(--surface)] p-4', className)}>
-      <h4 className="text-[15px] font-semibold">{title}</h4>
+      <h3 className="text-[15px] font-semibold">{title}</h3>
       {children}
     </div>
   );
@@ -62,15 +61,14 @@ function Connector({ badge }: { badge?: ReactNode }) {
 }
 
 function AmberBadge() {
-  return <span className="inline-flex h-7 items-center rounded-[999px] border border-[var(--amber-100)] bg-[var(--amber-100)] px-2.5 font-mono text-[12px] text-[var(--amber-600)]">Legacy rails: 2–3 days</span>;
+  return <span className="inline-flex h-7 items-center rounded-[999px] border border-[var(--amber-100)] bg-[var(--amber-100)] px-2.5 font-mono text-[12px] text-[var(--amber-700)]">Legacy rails: 2–3 days</span>;
 }
 function GreenBadge() {
-  return <span className="inline-flex h-7 items-center rounded-[999px] border border-[var(--green-100)] bg-[var(--green-100)] px-2.5 font-mono text-[12px] text-[var(--green-600)]">Splash: minutes, end to end*</span>;
+  return <span className="inline-flex h-7 items-center rounded-[999px] border border-[var(--green-100)] bg-[var(--green-100)] px-2.5 font-mono text-[12px] text-[var(--green-700)]">Splash: minutes, end to end*</span>;
 }
 
 export default function MoneyFlow() {
   const [mode, setMode] = useState<Mode>('send');
-  const reduced = useReducedMotion();
   const corridors = getNetworkProfile().corridors;
 
   return (
@@ -94,7 +92,7 @@ export default function MoneyFlow() {
       </div>
 
       {/* Node row */}
-      <div className="mt-10 flex flex-col md:flex-row md:items-stretch" role="list" aria-label="Money flow">
+      <div className="mt-10 flex flex-col md:flex-row md:items-stretch" role="group" aria-label="Money flow">
         <Node title="Your business" className="md:flex-[1]">
           <div className="flex flex-wrap gap-1">
             {['USD wire', 'ACH', 'FPX'].map((rail) => (
@@ -106,12 +104,12 @@ export default function MoneyFlow() {
         <Connector badge={<AmberBadge />} />
         <Node title="Splash orchestration" className="md:flex-[1]">
           <p className="font-mono text-[12px] text-[var(--text-2)]">KYB · screening · FX</p>
-          <Mono className="self-start text-[var(--teal-600)]">Live FX via Pyth</Mono>
+          <Mono className="self-start text-[var(--teal-700)]">Live FX via Pyth</Mono>
         </Node>
         <Connector />
         {/* HERO NODE — the only dark card in this section */}
         <div className="flex min-w-0 flex-col gap-2 rounded-[16px] bg-[var(--ink-900)] p-5 text-white ring-4 ring-[var(--teal-600)]/20 md:flex-[1.2] md:scale-[1.03]">
-          <h4 className="text-[16px] font-semibold">One atomic transaction</h4>
+          <h3 className="text-[16px] font-semibold">One atomic transaction</h3>
           <ul className="grid gap-1 font-mono text-[13px] text-[var(--green-100)]">
             <li>pay</li>
             <li>allocate</li>
@@ -128,7 +126,7 @@ export default function MoneyFlow() {
                 <span className="block text-[11px] text-[var(--text-2)]">{corridor.partnerLabel}</span>
               </li>
             ))}
-            <li className="rounded-[10px] border border-dashed border-[var(--line)] px-2.5 py-1.5 text-[12px] text-[var(--text-muted)] opacity-40">More corridors</li>
+            <li className="rounded-[10px] border border-dashed border-[var(--line)] px-2.5 py-1.5 text-[12px] text-[var(--text-muted)]">More corridors</li>
           </ul>
         </Node>
         <Connector />
@@ -136,9 +134,9 @@ export default function MoneyFlow() {
           <div className="flex flex-wrap gap-1">
             <Mono>₱ PHP</Mono>
             <Mono>Rp IDR</Mono>
-            <Mono className="opacity-40">$ SGD</Mono>
-            <Mono className="opacity-40">₫ VND</Mono>
-            <Mono className="opacity-40">฿ THB</Mono>
+            <Mono className="border-dashed bg-transparent text-[var(--text-muted)]">$ SGD</Mono>
+            <Mono className="border-dashed bg-transparent text-[var(--text-muted)]">₫ VND</Mono>
+            <Mono className="border-dashed bg-transparent text-[var(--text-muted)]">฿ THB</Mono>
           </div>
           <p className="text-[13px] text-[var(--text-2)]">Local bank transfer. They never touch crypto.</p>
         </Node>
@@ -156,26 +154,20 @@ export default function MoneyFlow() {
       </div>
       <p className="mt-2 text-[11px] text-[var(--text-muted)]">{FOOTNOTE}</p>
 
-      {/* Step cards 01–05 */}
-      <AnimatePresence mode="wait" initial={false}>
-        <motion.ol
-          key={mode}
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: reduced ? 0 : 0.25 }}
-          className="-mx-5 mt-10 flex snap-x snap-mandatory gap-4 overflow-x-auto px-5 pb-2 md:mx-0 md:grid md:grid-cols-5 md:overflow-visible md:px-0"
-          aria-label={mode === 'send' ? 'Send steps' : 'Batch payout steps'}
-        >
-          {STEPS[mode].map((step, index) => (
-            <li key={step.title} className="min-w-[85%] snap-start rounded-[16px] border border-[var(--line)] bg-[var(--paper)] p-4 md:min-w-0">
-              <div className="font-mono text-[12px] font-semibold text-[var(--teal-600)]">0{index + 1}</div>
-              <h4 className="mt-2 text-[17px] font-semibold leading-tight">{step.title}</h4>
-              <p className="mt-2 text-[14px] leading-[1.5] text-[var(--text-2)]">{step.body}</p>
-            </li>
-          ))}
-        </motion.ol>
-      </AnimatePresence>
+      {/* Step cards 01–05: remounted per mode; `.lv2-fade` is a 250ms CSS crossfade */}
+      <ol
+        key={mode}
+        className="lv2-fade -mx-5 mt-10 flex snap-x snap-mandatory gap-4 overflow-x-auto px-5 pb-2 md:mx-0 md:grid md:grid-cols-5 md:overflow-visible md:px-0"
+        aria-label={mode === 'send' ? 'Send steps' : 'Batch payout steps'}
+      >
+        {STEPS[mode].map((step, index) => (
+          <li key={step.title} className="min-w-[85%] snap-start rounded-[16px] border border-[var(--line)] bg-[var(--paper)] p-4 md:min-w-0">
+            <div className="font-mono text-[12px] font-semibold text-[var(--teal-600)]">0{index + 1}</div>
+            <h3 className="mt-2 text-[17px] font-semibold leading-tight">{step.title}</h3>
+            <p className="mt-2 text-[14px] leading-[1.5] text-[var(--text-2)]">{step.body}</p>
+          </li>
+        ))}
+      </ol>
     </Section>
   );
 }

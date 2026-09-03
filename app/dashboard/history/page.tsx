@@ -68,7 +68,7 @@ function stateIndex(state: TransferIntentState) {
 
 function StateIcon({ state }: { state: TransferIntentState }) {
   if (state === 'SETTLED' || state === 'DISBURSED' || state === 'CREDITED') {
-    return <CheckCircle2 className="text-[var(--info)]" size={18} />;
+    return <CheckCircle2 className="text-[var(--info-text)]" size={18} />;
   }
   if (state === 'FAILED' || state === 'REFUNDED') {
     return <XCircle className="text-red-500" size={18} />;
@@ -82,7 +82,7 @@ function StateIcon({ state }: { state: TransferIntentState }) {
 function StateBadge({ state }: { state: TransferIntentState }) {
   if (state === 'SETTLED' || state === 'DISBURSED' || state === 'CREDITED') {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-[#5C9EAD]/10 px-2.5 py-0.5 text-[13px] font-medium text-[var(--info)]">
+      <span className="inline-flex items-center gap-1 rounded-full bg-[#5C9EAD]/10 px-2.5 py-0.5 text-[13px] font-medium text-[var(--info-text)]">
         <CheckCircle2 size={11} /> {state}
       </span>
     );
@@ -122,7 +122,7 @@ function ProgressSteps({ state }: { state: TransferIntentState }) {
           <div key={label} className="flex shrink-0 items-center gap-0.5">
             <div
               className={`flex h-5 w-5 items-center justify-center rounded-full text-[13px] font-semibold transition-colors
-                ${done ? 'bg-[#5C9EAD] text-white' : active ? 'border-2 border-[#5C9EAD] bg-white text-[var(--info)]' : 'bg-[#326273]/10 text-[#326273]/40'}`}
+                ${done ? 'bg-[#5C9EAD] text-white' : active ? 'border-2 border-[#5C9EAD] bg-white text-[var(--info-text)]' : 'bg-[#326273]/10 text-[#326273]/40'}`}
               title={label}
             >
               {done ? '✓' : index + 1}
@@ -344,7 +344,7 @@ export default function HistoryPage() {
       <div className="grid grid-cols-2 gap-3 dash-reveal-stagger md:grid-cols-4">
         <DashStat label="Total" value={String(data?.total ?? 0)} valueClassName="text-[#326273]" />
         <DashStat label="Pending" value={String(counts.pending)} valueClassName="text-[#E39774]" />
-        <DashStat label="Settled" value={String(counts.successful)} valueClassName="text-[var(--info)]" />
+        <DashStat label="Settled" value={String(counts.successful)} valueClassName="text-[var(--info-text)]" />
         <DashStat label="Failed" value={String(counts.failed)} valueClassName="text-red-500" />
       </div>
 
@@ -379,7 +379,7 @@ export default function HistoryPage() {
         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div>
             <div className="flex items-center gap-2 text-sm font-bold text-[#326273]">
-              <Database size={17} className="text-[var(--info)]" />
+              <Database size={17} className="text-[var(--info-text)]" />
               Daily audit batches
             </div>
             <p className="mt-1 text-[13px] text-[#326273]/60">
@@ -429,11 +429,11 @@ export default function HistoryPage() {
       {/* List */}
       {loading ? (
         <div className="flex items-center justify-center py-20">
-          <Loader2 className="animate-spin text-[var(--info)]" size={28} />
+          <Loader2 className="animate-spin text-[var(--info-text)]" size={28} />
         </div>
       ) : !data?.items.length ? (
         <div className="dash-surface p-16 text-center">
-          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-[#5C9EAD]/10 text-[var(--info)]">
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-[#5C9EAD]/10 text-[var(--info-text)]">
             <History size={24} />
           </div>
           <div className="font-semibold text-[#326273]">No transfers yet</div>

@@ -85,7 +85,7 @@ export default function HomePage() {
 
       {error ? (
         <Card tone="tint" padding="sm">
-          <p className="text-[14px] text-[var(--error)]">{error}</p>
+          <p className="text-[14px] text-[var(--error-text)]">{error}</p>
           <Button variant="ghost" size="sm" className="mt-2" onClick={() => window.location.reload()}>
             Retry
           </Button>

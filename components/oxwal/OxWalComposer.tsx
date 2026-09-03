@@ -163,7 +163,7 @@ export default function OxWalComposer({
               </div>
             )}
             {parseError && !parsing && (
-              <div className="rounded-[var(--r-md)] border border-[var(--error)]/40 bg-[var(--error-bg)] px-3 py-1.5 text-[13px] font-medium text-[var(--error)]">
+              <div className="rounded-[var(--r-md)] border border-[var(--error)]/40 bg-[var(--error-bg)] px-3 py-1.5 text-[13px] font-medium text-[var(--error-text)]">
                 {parseError}
               </div>
             )}

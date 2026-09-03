@@ -1,23 +1,40 @@
 'use client';
 
-import { motion, useReducedMotion } from 'framer-motion';
-import type { ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
+
+import { cn } from '@/lib/utils';
 
 /**
- * Scroll reveal: 400ms, 12px lift, once. Reduced motion collapses to a plain
- * opacity fade so nothing on the page depends on movement (§1.3).
+ * Scroll reveal without a motion library: an IntersectionObserver adds one
+ * class, CSS does the 400ms / 12px lift once (`.lv2-reveal` in globals.css),
+ * and `prefers-reduced-motion` collapses it to an opacity fade. Before
+ * hydration the content is visible, so nothing depends on JavaScript.
  */
 export default function Reveal({ children, delay = 0, className }: { children: ReactNode; delay?: number; className?: string }) {
-  const reduced = useReducedMotion();
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const node = ref.current;
+    if (!node || typeof IntersectionObserver === 'undefined') return;
+    node.classList.add('lv2-reveal');
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            node.classList.add('is-in');
+            observer.disconnect();
+          }
+        }
+      },
+      { rootMargin: '-10% 0px' },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
   return (
-    <motion.div
-      className={className}
-      initial={{ opacity: 0, y: reduced ? 0 : 12 }}
-      whileInView={{ opacity: 1, y: 0 }}
-      viewport={{ once: true, margin: '-10% 0px' }}
-      transition={{ duration: 0.4, delay, ease: [0.22, 1, 0.36, 1] }}
-    >
+    <div ref={ref} className={cn(className)} style={delay ? { transitionDelay: `${delay}s` } : undefined}>
       {children}
-    </motion.div>
+    </div>
   );
 }

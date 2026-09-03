@@ -343,7 +343,7 @@ export default function OxwalDeskPage() {
             </div>
 
             {link?.phase === 'reconnecting' ? (
-              <div role="status" className="flex items-center gap-2 border-t border-[var(--amber-100)] bg-[var(--amber-100)] px-4 py-2 text-[13px] text-[var(--amber-600)]">
+              <div role="status" className="flex items-center gap-2 border-t border-[var(--amber-100)] bg-[var(--amber-100)] px-4 py-2 text-[13px] text-[var(--amber-700)]">
                 <WifiOff className="size-4 shrink-0" aria-hidden="true" />
                 Reconnecting… attempt {link.attempt}. The answer continues on the server; nothing is signed without you.
               </div>
@@ -416,7 +416,7 @@ function ThreadRow({ item, onRetry }: { item: ThreadItem; onRetry: (prompt: stri
   if (item.kind === 'notice') {
     return (
       <div className="flex flex-wrap items-center gap-2 pl-8">
-        <span className="inline-flex items-start gap-1.5 rounded-[var(--r-sm)] border border-[var(--amber-100)] bg-[var(--amber-100)] px-2.5 py-1.5 text-[13px] leading-5 text-[var(--amber-600)]">
+        <span className="inline-flex items-start gap-1.5 rounded-[var(--r-sm)] border border-[var(--amber-100)] bg-[var(--amber-100)] px-2.5 py-1.5 text-[13px] leading-5 text-[var(--amber-700)]">
           <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
           {item.text}
         </span>
@@ -437,7 +437,7 @@ function ThreadRow({ item, onRetry }: { item: ThreadItem; onRetry: (prompt: stri
   if (item.kind === 'session-expired') {
     return (
       <div className="flex flex-wrap items-center gap-2 pl-8">
-        <span className="inline-flex items-center gap-1.5 rounded-[var(--r-sm)] border border-[var(--amber-100)] bg-[var(--amber-100)] px-2.5 py-1.5 text-[13px] leading-5 text-[var(--amber-600)]">
+        <span className="inline-flex items-center gap-1.5 rounded-[var(--r-sm)] border border-[var(--amber-100)] bg-[var(--amber-100)] px-2.5 py-1.5 text-[13px] leading-5 text-[var(--amber-700)]">
           <AlertTriangle className="size-3.5 shrink-0" aria-hidden="true" />
           Your session ended, so {brand.agentName} paused. Sign in again to pick up where you left off.
         </span>
@@ -490,7 +490,7 @@ function ThreadRow({ item, onRetry }: { item: ThreadItem; onRetry: (prompt: stri
 
 function BotAvatar({ className }: { className?: string }) {
   return (
-    <span className={cn('mt-0.5 grid size-6 shrink-0 place-items-center rounded-full bg-[var(--teal-100)] font-mono text-[10px] font-semibold text-[var(--teal-600)]', className)} aria-hidden="true">
+    <span className={cn('mt-0.5 grid size-6 shrink-0 place-items-center rounded-full bg-[var(--teal-100)] font-mono text-[10px] font-semibold text-[var(--teal-700)]', className)} aria-hidden="true">
       0x
     </span>
   );

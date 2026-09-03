@@ -72,7 +72,7 @@ export default function Bento() {
             <ul className="grid gap-1.5 text-[12px]">
               {['48 rows validated', '2 corridors · PHP, IDR', '1 chunk · 1 digest'].map((line) => (
                 <li key={line} className="flex items-center gap-2">
-                  <Check className="size-3.5 text-[var(--green-600)]" aria-hidden="true" />
+                  <Check className="size-3.5 text-[var(--green-700)]" aria-hidden="true" />
                   <span className="font-mono">{line}</span>
                 </li>
               ))}

@@ -32,7 +32,7 @@ export default function Corridors() {
                   <p className="mt-2 font-mono text-[11px] text-[var(--text-muted)]">Local bank rails · statement descriptor explained on every receipt</p>
                 </li>
               ))}
-              <li className="rounded-[16px] border border-dashed border-[var(--line)] p-4 opacity-40">
+              <li className="rounded-[16px] border border-dashed border-[var(--line)] p-4 border-dashed">
                 <h3 className="text-[17px] font-semibold">More corridors</h3>
                 <p className="mt-1 text-[14px] text-[var(--text-2)]">Modeled until partner, liquidity and controls are ready.</p>
               </li>

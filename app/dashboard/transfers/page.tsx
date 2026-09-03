@@ -52,14 +52,14 @@ export default function RateHoldsPage() {
 
       <section className="dash-surface p-5 md:p-7">
         <div className="flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#5C9EAD]/10 text-[var(--info)]"><Clock3 className="h-5 w-5" /></div>
+          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#5C9EAD]/10 text-[var(--info-text)]"><Clock3 className="h-5 w-5" /></div>
           <div><h2 className="font-semibold text-[#326273]">Active rate holds</h2><p className="text-[13px] text-[#326273]/55">{active.length} ready to use</p></div>
         </div>
         <div className="mt-5 grid gap-4 md:grid-cols-2">
           {active.map((hold) => (
             <article key={hold.id} className="rounded-2xl border border-[#5C9EAD]/30 bg-[#5C9EAD]/10 p-5 shadow-[5px_6px_0_rgba(50,98,115,0.12)]">
               <div className="flex items-start justify-between gap-3">
-                <div><span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--info)]">Rate hold {hold.demo ? '· DEMO' : ''}</span><h3 className="mt-1 text-xl font-semibold text-[#326273]">USD → {hold.corridorCurrency}</h3></div>
+                <div><span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--info-text)]">Rate hold {hold.demo ? '· DEMO' : ''}</span><h3 className="mt-1 text-xl font-semibold text-[#326273]">USD → {hold.corridorCurrency}</h3></div>
                 <span className="rounded-full bg-white px-2.5 py-1 text-[13px] font-bold text-[#326273]">ACTIVE</span>
               </div>
               <div className="mt-5 grid grid-cols-2 gap-3 text-sm">

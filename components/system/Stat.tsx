@@ -30,9 +30,9 @@ export default function Stat({
 }) {
   const toneClass = {
     default: 'text-[var(--text)]',
-    positive: 'text-[var(--ok)]',
-    pending: 'text-[var(--warn)]',
-    negative: 'text-[var(--error)]',
+    positive: 'text-[var(--ok-text)]',
+    pending: 'text-[var(--warn-text)]',
+    negative: 'text-[var(--error-text)]',
   }[tone];
 
   return (

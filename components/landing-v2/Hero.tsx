@@ -12,7 +12,7 @@ import { container, TwoTone } from './ui';
 export default function Hero() {
   return (
     <section aria-labelledby="hero-title" className={`${container} grid items-center gap-10 pb-16 pt-10 md:pb-24 md:pt-16 lg:grid-cols-12`}>
-      <div className="lg:col-span-5">
+      <div className="lg:col-span-6">
         <TwoTone as="h1" id="hero-title" size="display" line1="Send USD across Southeast Asia in minutes" line2="— starting with the Philippines and Indonesia." />
         <p className="mt-5 max-w-[46ch] text-[17px] leading-[1.55] text-[var(--text-2)]">One operating account for invoices, FX, payouts and proof. Settled atomically on Sui; a human approves every action.</p>
         <div className="mt-8 flex flex-col gap-2 sm:flex-row">
@@ -25,7 +25,7 @@ export default function Hero() {
         </div>
       </div>
 
-      <div className="lg:col-span-7">
+      <div className="lg:col-span-6">
         <div className="relative rounded-[20px] p-4 md:p-6 lg:pr-24" style={{ background: 'linear-gradient(135deg, var(--ink-900) 0%, var(--teal-600) 100%)' }}>
           <div className="hidden md:block">
             <HeroDeskPreview />

@@ -22,7 +22,7 @@ export default function ProofDrawer({
     <details className={cn('group rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--surface)]', className)} open={defaultOpen}>
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-[14px] font-semibold text-[var(--text)] outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--teal-500)] [&::-webkit-details-marker]:hidden">
         <span className="inline-flex items-center gap-2">
-          <ShieldCheck className="size-4 text-[var(--ok)]" aria-hidden="true" />
+          <ShieldCheck className="size-4 text-[var(--ok-text)]" aria-hidden="true" />
           {summary}
         </span>
         <ChevronDown className="size-4 text-[var(--text-muted)] transition-transform duration-[var(--dur-ui)] group-open:rotate-180" aria-hidden="true" />

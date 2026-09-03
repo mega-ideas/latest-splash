@@ -32,12 +32,12 @@ export default function SettlementTimeline({
               <span
                 className={cn(
                   'flex size-7 shrink-0 items-center justify-center rounded-full border',
-                  node.status === 'done' && 'border-[var(--ok)] bg-[var(--ok-bg)] text-[var(--ok)]',
+                  node.status === 'done' && 'border-[var(--ok)] bg-[var(--ok-bg)] text-[var(--ok-text)]',
                   node.status === 'current' && 'border-[var(--teal-600)] bg-[var(--teal-600)] text-white',
                   node.status === 'todo' && 'border-[var(--line)] bg-[var(--surface)] text-[var(--text-muted)]',
                   node.status === 'branch' && (node.state === 'RETURNED'
-                    ? 'border-[var(--error)] bg-[var(--error-bg)] text-[var(--error)]'
-                    : 'border-[var(--warn)] bg-[var(--warn-bg)] text-[var(--warn)]'),
+                    ? 'border-[var(--error)] bg-[var(--error-bg)] text-[var(--error-text)]'
+                    : 'border-[var(--warn)] bg-[var(--warn-bg)] text-[var(--warn-text)]'),
                 )}
                 aria-hidden="true"
               >

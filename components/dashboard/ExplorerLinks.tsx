@@ -18,7 +18,7 @@ export default function ExplorerLinks({ digest, className }: { digest: string; c
           href={href}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 rounded-lg bg-[#5C9EAD]/10 px-2.5 py-1.5 text-[13px] font-medium text-[var(--info)] transition-colors hover:bg-[#5C9EAD]/20"
+          className="inline-flex items-center gap-1 rounded-lg bg-[#5C9EAD]/10 px-2.5 py-1.5 text-[13px] font-medium text-[var(--info-text)] transition-colors hover:bg-[#5C9EAD]/20"
         >
           <ExternalLink size={11} /> {label}
         </a>

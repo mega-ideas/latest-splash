@@ -139,14 +139,14 @@ function forbiddenClaimViolations(text, relPath) {
 // file, or a new v1 hex in an old file, fails here.
 const paletteV2 = new Set([
   '#0b2a33', '#163f4a', '#1f7a8c', '#2e96a8', '#5c9ead', '#dceef1',
-  '#f7f8f7', '#ffffff', '#eef3f4', '#4a5c64', '#6b7a83', '#dce3e6', '#e8edef',
+  '#f7f8f7', '#ffffff', '#eef3f4', '#4a5c64', '#59686f', '#16606e', '#157056', '#8a5809', '#dce3e6', '#e8edef',
   '#1e8f6e', '#ddf3ea', '#b9770e', '#fbefd9', '#b93a32', '#fae3e1',
   // dark mode
   '#071c22', '#0f2c35', '#153845', '#e6eef0', '#9bb0b7', '#7fcbd9', '#5fd3a8', '#e8b04b', '#f08a82',
 ]);
 
 const illustrationPalette = new Set([
-  '#e39774', '#1f4452', '#f6f0ed', '#6fb4a0', '#326273', '#d9a441',
+  '#e39774', '#1f4452', '#f6f0ed', '#6fb4a0', '#326273', '#d9a441', '#6b7a83',
   '#0c3e48', '#0d6370', '#083640', '#9fcfc7', '#efc46f', '#c49646', '#fffaf4', '#f8f0e5',
 ]);
 
@@ -165,13 +165,11 @@ const legacyHexAllowances = {
   'app/opengraph-image.tsx': ['#1f4452', '#326273', '#d9a441', '#e5dcd6', '#f6f0ed', '#fbf7f5'],
   'app/providers.tsx': ['#326273', '#f6f0ed'],
   'app/queue/page.tsx': ['#1f4452', '#326273', '#f6f0ed'],
-  'app/receipt/[token]/page.tsx': ['#1f4452', '#326273', '#f6f0ed'],
   'app/settings/kyb/page.tsx': ['#326273'],
   'components/DashboardHeader.tsx': ['#1f4452', '#326273', '#e39774', '#f6f0ed'],
   'components/HoverPopup.tsx': ['#326273'],
   'components/KybSettings.tsx': ['#326273', '#cd825f', '#e39774', '#f6f0ed'],
   'components/LiveExchangeTicker.tsx': ['#326273', '#e39774'],
-  'components/Receipt.tsx': ['#1f4452', '#2e7d6b', '#326273', '#6b7c85', '#e4f1ed', '#e5dcd6', '#e7eef1', '#edeff0', '#f6f0ed'],
   'components/StatusBadge.tsx': ['#9a6f15', '#d9a441', '#e39774'],
   'components/admin/AdminKybConsole.tsx': ['#1f4350', '#254e5c', '#326273', '#4a8b99', '#9d5f43', '#e39774', '#f6f0ed'],
   'components/admin/AdminLogoutButton.tsx': ['#326273', '#e39774'],

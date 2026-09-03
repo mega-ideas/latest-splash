@@ -534,7 +534,7 @@ export default function CopilotPage() {
           </p>
         </div>
         <div className="flex items-center gap-2 rounded-lg border border-[#326273]/10 bg-white px-3 py-2 text-[13px] text-[#326273]/50">
-          <Lock size={12} className="text-[var(--info)]" />
+          <Lock size={12} className="text-[var(--info-text)]" />
           <span>Behavioral patterns only · no financial records stored</span>
         </div>
       </header>
@@ -735,14 +735,14 @@ export default function CopilotPage() {
           <div className="dash-block p-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Brain size={15} className="text-[var(--info)]" />
+                <Brain size={15} className="text-[var(--info-text)]" />
                 <h2 className="text-sm font-semibold text-[#1F4452]">MemWal Memory</h2>
               </div>
               <button
                 type="button"
                 onClick={handleSync}
                 disabled={syncing}
-                className="flex items-center gap-1 text-[13px] font-medium text-[var(--info)] transition-opacity hover:text-[#326273] disabled:opacity-60"
+                className="flex items-center gap-1 text-[13px] font-medium text-[var(--info-text)] transition-opacity hover:text-[#326273] disabled:opacity-60"
               >
                 <RefreshCw size={10} className={syncing ? 'animate-spin' : ''} />
                 {syncing ? 'Syncing…' : 'Sync'}
@@ -755,7 +755,7 @@ export default function CopilotPage() {
               {MEMORY_PATTERNS.map(({ label, value, sub, icon: Icon, bar }) => (
                 <div key={label}>
                   <div className="flex items-start gap-2">
-                    <Icon size={12} className="mt-0.5 shrink-0 text-[var(--info)]" />
+                    <Icon size={12} className="mt-0.5 shrink-0 text-[var(--info-text)]" />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center justify-between gap-1">
                         <span className="text-[13px] text-[#326273]/50">{label}</span>
@@ -837,7 +837,7 @@ export default function CopilotPage() {
           {/* What MemWal stores */}
           <div className="dash-block p-4">
             <div className="flex items-center gap-2">
-              <Lock size={14} className="text-[var(--info)]" />
+              <Lock size={14} className="text-[var(--info-text)]" />
               <h2 className="text-sm font-semibold text-[#1F4452]">What MemWal Stores</h2>
             </div>
             <div className="mt-3 space-y-2">
@@ -870,7 +870,7 @@ export default function CopilotPage() {
               <Link
                 key={href}
                 href={href}
-                className="flex w-full items-center justify-between rounded-lg border border-[#326273]/10 bg-white px-3 py-2.5 text-[13px] font-medium text-[#326273] transition-colors hover:border-[#5C9EAD]/40 hover:text-[var(--info)]"
+                className="flex w-full items-center justify-between rounded-lg border border-[#326273]/10 bg-white px-3 py-2.5 text-[13px] font-medium text-[#326273] transition-colors hover:border-[#5C9EAD]/40 hover:text-[var(--info-text)]"
               >
                 <div className="flex items-center gap-2"><Icon size={13} /> {label}</div>
                 <ChevronRight size={13} className="text-[#326273]/30" />

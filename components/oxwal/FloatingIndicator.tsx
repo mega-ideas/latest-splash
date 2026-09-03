@@ -136,7 +136,7 @@ export default function FloatingIndicator() {
           open && 'ring-2 ring-[var(--teal-500)]',
         )}
       >
-        <span className="grid size-8 place-items-center rounded-full bg-[var(--teal-100)] text-[var(--teal-600)]">
+        <span className="grid size-8 place-items-center rounded-full bg-[var(--teal-100)] text-[var(--teal-700)]">
           <Bot className="size-4" aria-hidden="true" />
         </span>
         {brand.agentName}
