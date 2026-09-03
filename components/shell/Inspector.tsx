@@ -9,8 +9,10 @@ import { cn } from '@/lib/utils';
  * The right inspector rail — the product's core detail pattern. It keeps the
  * list in view on desktop, names the selected record at the top, orders
  * information decision → money → route → evidence → action, and becomes a
- * full-screen sheet below lg (the row list stays behind it). Escape closes;
- * focus moves to the title on open and back to the opener on close.
+ * full-screen sheet below lg when it can be closed (the row list stays
+ * behind it). An always-open inspector (no onClose) stacks under the list
+ * instead, so nothing is trapped. Escape closes; focus moves to the title on
+ * open and back to the opener on close.
  */
 export default function Inspector({
   kicker = 'Clearance record',
@@ -33,6 +35,7 @@ export default function Inspector({
   const openerRef = useRef<Element | null>(null);
 
   useEffect(() => {
+    if (!onClose) return undefined;
     openerRef.current = document.activeElement;
     const timer = window.setTimeout(() => titleRef.current?.focus(), 30);
     function onKey(event: KeyboardEvent) {
@@ -51,7 +54,8 @@ export default function Inspector({
     <aside
       aria-labelledby="inspector-title"
       className={cn(
-        'fixed inset-0 z-40 grid grid-rows-[auto_minmax(0,1fr)_auto] bg-[var(--surface-subtle)] lg:static lg:z-auto lg:min-w-0 lg:border-l lg:border-[var(--border-default)]',
+        'grid grid-rows-[auto_minmax(0,1fr)_auto] bg-[var(--surface-subtle)] lg:static lg:z-auto lg:min-w-0 lg:border-l lg:border-t-0 lg:border-[var(--border-default)]',
+        onClose ? 'fixed inset-0 z-40' : 'border-t border-[var(--border-default)]',
         className,
       )}
     >

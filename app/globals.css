@@ -533,3 +533,12 @@ body {
 @keyframes splash-loading-pulse { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
 .splash-loading-pulse { animation: splash-loading-pulse 1.6s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .splash-loading-pulse { animation: none; } }
+
+/* Clearance landing: the strip's checkpoints and route path arrive in sequence; still under reduced motion. */
+.clearance-strip .checkpoint { animation: strip-arrive var(--dur-ui, 160ms) ease-out both; }
+.clearance-strip .route-line { stroke-dashoffset: 0; animation: route-draw 900ms ease-out both; }
+@keyframes strip-arrive { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes route-draw { from { stroke-dasharray: 4 4; stroke-dashoffset: 240; } to { stroke-dashoffset: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .clearance-strip .checkpoint, .clearance-strip .route-line { animation: none; }
+}
