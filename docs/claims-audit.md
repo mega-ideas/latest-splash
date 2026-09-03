@@ -147,3 +147,19 @@ Every violation below has a replacement applied in this PR. Identifiers, enums, 
 - Hardcoded "testnet" / "MY-PH" / "Sandbox" strings across the landing, dashboard shell and composer become env-driven in **PR D** (`lib/network.ts`), not claims edits.
 - The extruded hero display type ("Move money. Settle everything.") and the remaining landing sections are retired in **PR 6** (landing v2); this PR only restyles the vision block it rewrote.
 - Corridor cards, partner-label copy in the money-flow section and the receipt statement-descriptor explainer land with their sections (PR 6, PR 7).
+
+## v4 Clearance Signal — handoff claims rejected
+
+The design handoff (`Splash-Clearance-Signal-Design-Handoff`) ships example copy that is not true for Splash. None of it was adopted:
+
+| Handoff copy | Why rejected | What shipped |
+| --- | --- | --- |
+| "Authorised and regulated in the United Kingdom", FCA reference | Splash is not authorised or regulated in the UK; no FCA relationship | `brand.postureLine` (technology platform, not a bank); "Labuan FSA licensing in process · BNM MSB and BSP planned" (already canon on /trust) |
+| "14 corridors", corridor atlas across "major financial centres" | Two corridors exist (USD → PHP sandbox, USD → IDR staged); the rest are modelled | Atlas lists two corridors first and marks the remainder "Modelled · not executable" |
+| "99.98%" reliability | No measured figure to cite | No uptime figure anywhere; route confidence is shown as an illustrative comparison metric only |
+| LON → KUL, GBP 44,820.00 → MYR 263,482.00 | Not a Splash corridor | KUL → MNL, USD 5,000.00 → PHP, computed from the same `routeAlternatives` the product uses, captioned illustrative and sandbox |
+| Partner legal names in marketing | Legal names appear only on receipts to transaction parties | "Regulated partner rail" / "licensed payout partner" |
+| "Clear a payment" implying funds move | Creation does not move funds | Send flow states "Creation does not move funds. Checker approval is required." next to the primary action; Approvals states execution cannot be recalled after the partner accepts |
+| "Signal Orange", "Iris" accents | Brand palette is ours | Palette v2 unchanged; teal-600 is the only signal colour |
+
+`scripts/check-copy.mjs` passes on the branch (W2 float-math debt unchanged).

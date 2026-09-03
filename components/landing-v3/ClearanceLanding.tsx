@@ -132,7 +132,7 @@ export default function ClearanceLanding() {
             <table className="w-full min-w-[640px] text-[13px]">
               <caption className="sr-only">Route comparison for USD 5,000.00 to PHP</caption>
               <thead>
-                <tr className="font-mono text-[10.5px] uppercase tracking-[var(--tracking-label)] text-[var(--text-on-dark)]/60">
+                <tr className="font-mono text-[10.5px] uppercase tracking-[var(--tracking-label)] text-[var(--text-on-dark)]/78">
                   <th scope="col" className="h-11 px-4 text-left font-medium">Route</th>
                   <th scope="col" className="h-11 px-4 text-right font-medium">They receive</th>
                   <th scope="col" className="h-11 px-4 text-right font-medium">All-in cost</th>
@@ -147,20 +147,20 @@ export default function ClearanceLanding() {
                     <td className="px-4">
                       <span className="grid">
                         <span className="font-medium">{row.route}</span>
-                        <span className="font-mono text-[10.5px] uppercase tracking-[var(--tracking-label)] text-[var(--text-on-dark)]/55">{row.recommended ? 'Recommended · executable' : 'Reviewed baseline'}</span>
+                        <span className="font-mono text-[10.5px] uppercase tracking-[var(--tracking-label)] text-[var(--text-on-dark)]/78">{row.recommended ? 'Recommended · executable' : 'Reviewed baseline'}</span>
                       </span>
                     </td>
-                    <td className={cn('px-4 text-right font-mono tabular-nums', row.recommended && 'text-[var(--teal-300)]')}>{formatAmount('PHP', row.delivered)}</td>
-                    <td className="px-4 text-right font-mono tabular-nums">{formatMoney('USD', row.feeUsd)} <span className="text-[var(--text-on-dark)]/55">({row.feePct.toFixed(2)}%)</span></td>
+                    <td className={cn('px-4 text-right font-mono tabular-nums', row.recommended && 'font-semibold')}>{formatAmount('PHP', row.delivered)}</td>
+                    <td className="px-4 text-right font-mono tabular-nums">{formatMoney('USD', row.feeUsd)} <span className="text-[var(--text-on-dark)]/78">({row.feePct.toFixed(2)}%)</span></td>
                     <td className="px-4 text-right font-mono">{row.eta}</td>
                     <td className="px-4 text-right font-mono tabular-nums">{row.confidence}%</td>
-                    <td className="px-4 font-mono text-[11px] uppercase tracking-[var(--tracking-label)] text-[var(--teal-300)]">Passed</td>
+                    <td className="px-4 font-mono text-[11px] uppercase tracking-[var(--tracking-label)] text-[var(--text-on-dark)]/85"><span className="mr-1.5 inline-block size-1.5 rounded-full bg-[var(--teal-300)] align-middle" aria-hidden="true" />Passed</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          <p className="mt-3 font-mono text-[10.5px] uppercase tracking-[var(--tracking-label)] text-[var(--text-on-dark)]/55">Illustrative · sandbox pricing · bank and MTO rows are reviewed category baselines</p>
+          <p className="mt-3 font-mono text-[10.5px] uppercase tracking-[var(--tracking-label)] text-[var(--text-on-dark)]/78">Illustrative · sandbox pricing · bank and MTO rows are reviewed category baselines</p>
         </Region>
 
         {/* 5. Corridor atlas */}
@@ -194,15 +194,15 @@ export default function ClearanceLanding() {
             </ul>
             <dl className="grid content-start gap-4 text-[14px] leading-[1.55] text-[var(--text-on-dark)]/80">
               <div>
-                <dt className="font-mono text-[11px] uppercase tracking-[var(--tracking-label)] text-[var(--text-on-dark)]/55">Maker-checker</dt>
+                <dt className="font-mono text-[11px] uppercase tracking-[var(--tracking-label)] text-[var(--text-on-dark)]/78">Maker-checker</dt>
                 <dd>Every material movement needs a checker distinct from the maker. Approval is a decision; execution is a separate step bound to the approval hash the checker saw.</dd>
               </div>
               <div>
-                <dt className="font-mono text-[11px] uppercase tracking-[var(--tracking-label)] text-[var(--text-on-dark)]/55">Evidence, not assurances</dt>
+                <dt className="font-mono text-[11px] uppercase tracking-[var(--tracking-label)] text-[var(--text-on-dark)]/78">Evidence, not assurances</dt>
                 <dd>Beneficiary verification, FX lock, policy outcome, approval, execution and proof each leave a timestamped entry that travels with the record.</dd>
               </div>
               <div>
-                <dt className="font-mono text-[11px] uppercase tracking-[var(--tracking-label)] text-[var(--text-on-dark)]/55">Posture</dt>
+                <dt className="font-mono text-[11px] uppercase tracking-[var(--tracking-label)] text-[var(--text-on-dark)]/78">Posture</dt>
                 <dd>{brand.postureLine} Licensed partners are the system of record for regulated activity today. <Link href="/trust" className="text-[var(--teal-300)] underline underline-offset-4">Trust and compliance</Link>.</dd>
               </div>
             </dl>
@@ -232,7 +232,7 @@ export default function ClearanceLanding() {
         {/* 8. Developer integration */}
         <Region id="developers" dark eyebrow="Developers" title="Built for developers." lede="A REST API with signed requests, idempotency keys, verifiable webhooks and realistic sandbox scenarios. The same clearance record your operators see is the one your systems receive.">
           <div className="grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
-            <pre className="overflow-x-auto border border-white/12 bg-black/25 p-5 font-mono text-[12.5px] leading-[1.6] text-[var(--text-on-dark)]/90" aria-label="Example request">
+            <pre tabIndex={0} className="overflow-x-auto border border-white/12 bg-black/25 p-5 font-mono text-[12.5px] leading-[1.6] text-[var(--text-on-dark)]/90" aria-label="Example request">
 {`POST /api/transfers/authorize
 Idempotency-Key: 8f0b4e2a-…
 

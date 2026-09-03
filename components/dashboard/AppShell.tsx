@@ -231,13 +231,13 @@ export default function AppShell({ children, session, kyb }: { children: ReactNo
         <nav className="flex-1 overflow-y-auto py-2">
           {GROUPS.map((group) => (
             <div key={group.label} className="mb-2">
-              <p className="hidden px-3 pb-1 pt-3 font-mono text-[10px] uppercase tracking-[var(--tracking-label)] text-[var(--text-on-dark)]/45 xl:block">{group.label}</p>
+              <p className="hidden px-3 pb-1 pt-3 font-mono text-[10px] uppercase tracking-[var(--tracking-label)] text-[var(--text-on-dark)]/72 xl:block">{group.label}</p>
               {group.items.map(navLink)}
             </div>
           ))}
         </nav>
         <div className="border-t border-white/10 p-3 xl:px-4">
-          <p className="hidden font-mono text-[10px] uppercase tracking-[var(--tracking-label)] text-[var(--text-on-dark)]/45 xl:block">Organisation</p>
+          <p className="hidden font-mono text-[10px] uppercase tracking-[var(--tracking-label)] text-[var(--text-on-dark)]/72 xl:block">Organisation</p>
           <p className="hidden truncate text-[13px] font-medium text-white xl:block">{session.organization}</p>
           <div className="mt-1 md:flex md:justify-center xl:block">
             <StatusLabel compact tone={live ? 'verified' : 'attention'}>{live ? 'Live' : 'Sandbox'}</StatusLabel>

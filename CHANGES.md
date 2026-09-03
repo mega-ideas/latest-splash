@@ -1,3 +1,25 @@
+# v4 Clearance Signal (branch feat/v4-clearance-signal)
+
+Adopts the "Global Payment Clearance" design handoff with our own branding (Palette v2, Geist, truthful copy). Plan and interpretation: `docs/clearance-signal-plan.md`; rejected handoff claims: `docs/claims-audit.md`.
+
+## Foundation
+- Semantic token layer in `styles/tokens.css` (surfaces, signal, state, borders, shell dimensions, durations) over the unchanged Palette v2.
+- Shell primitives in `components/shell`: StatusLabel, ClearanceProgress (B · FX · POL · APP · EXE · PRO), EvidenceList, DataTable, Inspector, PageHeader/Workspace/SummaryStrip/GroupHeading. `components/system` primitives restyled flat (12px radius, 1px dividers, mono labels).
+- Clearance view model `lib/payments/clearance.ts`; code-first money formatting `lib/money.ts`.
+- `/dashboard/*` is the app root; `/app/*` redirects (`next.config.ts`). Sidebar regrouped Operate / Govern / Build.
+
+## Pages
+- Clearance board (`/dashboard`), Payments (URL-param filters, CSV, inspector), Beneficiaries, Liquidity (no rate figure; execution gated), Routes, Reconciliation (three-way match), Approvals (real submit path kept; why-required, maker/checker, quote expiry, immutable ids, confirmation note), Policy (IF/THEN from settings), Compliance, Audit log, Developers, Integrations.
+- Receipt detail is the full-page clearance record (checkpoints, evidence timeline, settlement timeline, proof drawer; share/print/export kept).
+- New payment: Beneficiary · Amount · Route · Review · Processing · Receipt. Route step compares the partner rail with reviewed baselines; only the partner rail executes. "Creation does not move funds. Checker approval is required." next to the primary action.
+- Events API `GET /api/events` (org-scoped, `?days=`, `?name=`).
+
+## Landing
+- `components/landing-v3`: dark nav, hero with a real HTML clearance strip (KUL → MNL, USD 5,000.00 → PHP, checkpoints, effective FX, cost, delivery, freshness, live state), proof band, operating model, route comparison, corridor atlas, governance, three-way reconciliation, developers, final CTA. Motion held still under `prefers-reduced-motion`.
+
+## Gates
+- `tsc`, `eslint`, `check-copy`, `test:oxwal` green. axe (WCAG 2.1 AA) clean on `/`, Beneficiaries, Approvals, Liquidity, New payment, Payments after contrast fixes. Keyboard: register row → Enter opens the inspector, focus lands on its title, Escape closes and restores focus to the row. No horizontal overflow at 375.
+
 # v3 mainnet redesign (branch feat/v3-mainnet-redesign)
 
 ## Phase 4 — Approvals · Recipients · Treasury

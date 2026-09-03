@@ -116,3 +116,19 @@ Two-tone headline: line one `--text`, line two `--text-2` (see the gallery). Tab
 - `styles/loading.css`: the seven rules the root loading screen uses (extracted from the retired cinematic stylesheet).
 - Providers (react-query + sonner) mount in those same app layouts, not in the root layout; the landing and public pages ship no toast or query runtime. Landing motion is CSS (`Reveal` toggles a class on intersection; the money-flow toggle crossfades on remount); framer-motion is not in the landing bundle.
 - Brand icon assets are 256px (`public/brand/splash-icon.png`, `public/splash-main-icon.png`; the 841px original is `splash-icon@full.png`); `app/icon.png` is 256px.
+
+## 8. Clearance Signal layer (v4, `feat/v4-clearance-signal`)
+
+Adopted from the "Global Payment Clearance" handoff (`docs/clearance-signal-plan.md`) with our own branding: Palette v2 stays (ink-900 foundation, paper canvas, teal-600 as the single signal/action colour, green/amber/red for verified/attention/exception; no orange, no iris), Geist + Geist Mono stay, copy stays truthful.
+
+**Semantic tokens** (`styles/tokens.css`, after the primitives): `--surface-canvas/raised/subtle/navigation/navigation-active/selected/verified/attention/exception`, `--signal`, `--signal-hover`, `--state-data/verified/attention/exception`, `--text-on-dark`, `--border-default/strong`, `--focus-ring`, `--r-control` (8px), `--sidebar-width` 11.5rem, `--sidebar-collapsed-width` 4rem, `--topbar-height` 3rem, `--inspector-width` 25rem, `--row-height` 2.75rem, `--dur-fast` 120ms, `--dur-ui` 160ms, `--tracking-label` 0.055em.
+
+**Shell primitives** (`components/shell`): `StatusLabel` (exact status vocabulary → tone; never colour alone), `ClearanceProgress` (six checkpoints B · FX · POL · APP · EXE · PRO; complete/active/attention/exception/pending), `EvidenceList`, `DataTable` (semantic table, 44px rows, 1px dividers, selected row = teal-100 + 2px signal edge, list blocks below md), `Inspector` (right rail at lg; full-screen sheet below lg only when it can be closed, otherwise it stacks under the list; Escape closes, focus moves to the title and back to the opener), `PageHeader`, `Workspace`, `SummaryStrip`, `GroupHeading`.
+
+**View model** (`lib/payments/clearance.ts`): `fromTransfer`, `fromProposal`, `groupRecords` (needs clearance / in flight / attention / cleared), `routeAlternatives` (partner rail vs reviewed Bank SWIFT and Digital MTO baselines, always labelled illustrative), `destinationFor`, `shortTime`. Money formatting is code-first with tabular numerals (`lib/money.ts`).
+
+**Information order everywhere**: decision → money → route → checkpoints → evidence → identifiers → action. One primary action per view. Approval is separate from execution; creation never moves funds.
+
+**Landing** (`components/landing-v3`): dark nav (Platform / Network / Security / Developers / Company), hero with a real HTML clearance strip (KUL → MNL, six checkpoints, effective FX, all-in cost, delivery, quote freshness, live state), proof band, operating model, route comparison, corridor atlas, governance, three-way reconciliation, developers, final CTA, footer. Regions alternate ink and paper; the signal colour traces one route through the page. Motion: checkpoints and route path arrive in sequence, still under `prefers-reduced-motion`. No gradients, no floating mockups.
+
+**Contrast**: text on the ink foundation uses `--text-on-dark` at ≥ 72% opacity for 10–11px labels (axe WCAG AA at rendered size).
