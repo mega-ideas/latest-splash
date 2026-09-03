@@ -41,6 +41,15 @@ export default function RootLayout({
       suppressHydrationWarning
       className={`${fontSans.variable} ${fontMono.variable} h-full font-sans antialiased`}
     >
+      <head>
+        {/* Apply a stored theme choice before first paint; no choice = system. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              "try{var t=localStorage.getItem('splash-theme');if(t==='dark'||t==='light'){document.documentElement.setAttribute('data-theme',t)}}catch(e){}",
+          }}
+        />
+      </head>
       <body suppressHydrationWarning className="min-h-full splash-page-bg text-[#326273]">
         <Providers>{children}</Providers>
       </body>
