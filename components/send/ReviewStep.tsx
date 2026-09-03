@@ -215,6 +215,7 @@ export default function ReviewStep({ state, set, prev, next }: { state: Transfer
       </label>
 
       <div className="flex flex-wrap justify-between gap-2">
+        <p className="w-full border border-[var(--border-default)] bg-[var(--surface-subtle)] px-3 py-2 text-[12.5px] text-[var(--text-2)]">Creation does not move funds. Checker approval is required.</p>
         <Button variant="ghost" onClick={prev} disabled={busy !== 'idle'}>
           Back
         </Button>

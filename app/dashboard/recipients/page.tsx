@@ -1,41 +1,45 @@
 'use client';
 
-import { Search, Trash2, UserRoundPlus } from 'lucide-react';
+import { Search, Trash2, Upload, UserRoundPlus } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
-import { EmptyState as IsoEmptyState } from '@/components/illustrations/iso';
-import { Badge, Button, Card, Chip, EmptyState, Stat, Table } from '@/components/system';
-import type { BadgeTone } from '@/components/system';
+import DataTable from '@/components/shell/DataTable';
+import Inspector, { InspectorField, InspectorSection } from '@/components/shell/Inspector';
+import { PageHeader, SummaryStrip, Workspace } from '@/components/shell/PageHeader';
+import StatusLabel from '@/components/shell/StatusLabel';
+import { Button } from '@/components/system';
+import { formatMoney } from '@/lib/money';
 import { getNetworkProfile } from '@/lib/network';
 import { COUNTRIES, COUNTRY_TO_CURRENCY, type RecipientCountry } from '@/lib/send/state';
 import type { RecipientRecord, TransferIntentRecord } from '@/lib/server/operations';
 import { cn } from '@/lib/utils';
 
-const fieldClass =
-  'h-11 w-full rounded-[var(--r-sm)] border border-[var(--line)] bg-[var(--surface)] px-3 text-[16px] text-[var(--text)] outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--teal-600)]';
+const field = 'h-10 w-full rounded-[var(--r-control)] border border-[var(--border-strong)] bg-[var(--surface-raised)] px-3 text-[14px] text-[var(--text)] outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--signal)]';
 
-const KYB_LABEL: Record<RecipientRecord['kybStatus'], { label: string; tone: BadgeTone }> = {
-  full: { label: 'Verified', tone: 'green' },
-  lite: { label: 'Partially verified', tone: 'amber' },
-  none: { label: 'Unverified', tone: 'slate' },
+const KYB: Record<RecipientRecord['kybStatus'], { label: string; tone: 'verified' | 'attention' | 'neutral' }> = {
+  full: { label: 'Verified', tone: 'verified' },
+  lite: { label: 'Beneficiary review', tone: 'attention' },
+  none: { label: 'Review required', tone: 'attention' },
 };
 
 type Draft = { name: string; country: RecipientCountry; bank: string; swift: string; account: string };
 const emptyDraft: Draft = { name: '', country: 'PH', bank: '', swift: '', account: '' };
 
 /**
- * Recipients: verified counterparties, their verification state, how often
- * they have been paid, and which corridors reach them. Payouts only go to
- * records on this list.
+ * Beneficiaries: verified payout identities, distinct from contacts. Legal
+ * identity, account verification, KYB evidence, screening state, allowed
+ * corridors and payment history live in the inspector. "Verified" is never
+ * set from a client-side toggle — it is the server's KYB state.
  */
-export default function RecipientsPage() {
+export default function BeneficiariesPage() {
   const [recipients, setRecipients] = useState<RecipientRecord[] | null>(null);
   const [transfers, setTransfers] = useState<TransferIntentRecord[]>([]);
   const [query, setQuery] = useState('');
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState<Draft>(emptyDraft);
   const [busy, setBusy] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const corridors = getNetworkProfile().corridors;
 
   async function load() {
@@ -49,165 +53,203 @@ export default function RecipientsPage() {
     return () => window.clearTimeout(timer);
   }, []);
 
-  const reuse = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const transfer of transfers) counts.set(transfer.recipientName, (counts.get(transfer.recipientName) ?? 0) + 1);
-    return counts;
+  const history = useMemo(() => {
+    const map = new Map<string, TransferIntentRecord[]>();
+    for (const t of transfers) map.set(t.recipientName, [...(map.get(t.recipientName) ?? []), t]);
+    return map;
   }, [transfers]);
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
     const list = recipients ?? [];
     if (!needle) return list;
-    return list.filter((record) => [record.name, record.country, record.bank, record.account].some((field) => field?.toLowerCase().includes(needle)));
+    return list.filter((record) => [record.name, record.country, record.bank, record.account].some((v) => v?.toLowerCase().includes(needle)));
   }, [query, recipients]);
 
-  const verified = (recipients ?? []).filter((record) => record.kybStatus === 'full').length;
-  const coverage = new Set((recipients ?? []).map((record) => record.country.toUpperCase()).filter((code) => corridors.some((corridor) => corridor.code === code))).size;
+  const selected = (recipients ?? []).find((r) => r.id === selectedId) ?? null;
+  const verified = (recipients ?? []).filter((r) => r.kybStatus === 'full').length;
+  const coverage = new Set((recipients ?? []).map((r) => r.country.toUpperCase()).filter((code) => corridors.some((c) => c.code === code))).size;
 
   async function add() {
     if (!draft.name.trim() || !draft.account.trim()) {
-      toast.error('Name and account number are required');
+      toast.error('Legal name and account number are required');
       return;
     }
     setBusy(true);
     try {
-      const response = await fetch('/api/recipients', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...draft, tier: 'PAYOUT_ONLY', createdVia: 'manual' }),
-      });
-      if (!response.ok) {
-        const body = (await response.json()) as { error?: string };
-        throw new Error(body.error ?? 'Could not save the recipient');
-      }
-      toast.success('Recipient added');
+      const response = await fetch('/api/recipients', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...draft, tier: 'PAYOUT_ONLY', createdVia: 'manual' }) });
+      if (!response.ok) throw new Error(((await response.json()) as { error?: string }).error ?? 'Could not save the beneficiary');
+      toast.success('Beneficiary added · KYB review opened');
       setDraft(emptyDraft);
       setAdding(false);
       await load();
     } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : 'Could not save the recipient');
+      toast.error(cause instanceof Error ? cause.message : 'Could not save the beneficiary');
     } finally {
       setBusy(false);
     }
   }
 
   async function remove(record: RecipientRecord) {
-    if (!window.confirm(`Remove ${record.name} from recipients? Past receipts keep their record.`)) return;
+    if (!window.confirm(`Remove ${record.name}? Past receipts keep their record.`)) return;
     const response = await fetch(`/api/recipients/${record.id}`, { method: 'DELETE' });
     if (!response.ok) {
-      toast.error('Could not remove the recipient');
+      toast.error('Could not remove the beneficiary');
       return;
     }
-    toast.success('Recipient removed');
+    toast.success('Beneficiary removed');
+    setSelectedId(null);
     await load();
   }
 
   return (
-    <div className="grid gap-6">
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-[var(--text-h1)] font-semibold leading-[1.1] tracking-[-0.02em]">Recipients</h1>
-          <p className="mt-1 text-[14px] text-[var(--text-2)]">Verified counterparties. A payout can only go to a record on this list.</p>
-        </div>
-        <Button onClick={() => setAdding((value) => !value)} aria-expanded={adding}>
-          <UserRoundPlus aria-hidden="true" /> Add recipient
-        </Button>
-      </header>
+    <>
+      <PageHeader
+        title="Beneficiaries"
+        supporting="Verify once. Pay with confidence."
+        actions={
+          <>
+            <Button variant="secondary" href="/dashboard/batch">
+              <Upload aria-hidden="true" /> Import
+            </Button>
+            <Button onClick={() => setAdding((v) => !v)} aria-expanded={adding}>
+              <UserRoundPlus aria-hidden="true" /> Add beneficiary
+            </Button>
+          </>
+        }
+      />
 
-      <section className="grid gap-4 sm:grid-cols-3" aria-label="Recipient summary">
-        <Card padding="sm">
-          <Stat label="Recipients" value={recipients ? String(recipients.length) : null} loading={recipients === null} />
-        </Card>
-        <Card padding="sm">
-          <Stat label="Verified" value={recipients ? String(verified) : null} tone="positive" loading={recipients === null} sub="KYB complete" />
-        </Card>
-        <Card padding="sm">
-          <Stat label="Corridor coverage" value={recipients ? `${coverage} / ${corridors.length}` : null} loading={recipients === null} sub={corridors.map((corridor) => corridor.currency).join(' · ')} />
-        </Card>
-      </section>
+      <SummaryStrip
+        items={[
+          { label: 'Beneficiaries', value: recipients ? String(recipients.length) : '—' },
+          { label: 'Verified', value: recipients ? String(verified) : '—', tone: 'verified', hint: 'KYB complete' },
+          { label: 'Review required', value: recipients ? String(recipients.length - verified) : '—', tone: recipients && recipients.length - verified > 0 ? 'attention' : 'default' },
+          { label: 'Corridor coverage', value: recipients ? `${coverage} / ${corridors.length}` : '—', hint: corridors.map((c) => c.currency).join(' · ') },
+        ]}
+      />
 
       {adding ? (
-        <Card className="grid gap-4">
-          <h2 className="text-[15px] font-semibold">New recipient</h2>
+        <form className="mb-4 grid gap-3 border border-[var(--border-default)] bg-[var(--surface-raised)] p-4" onSubmit={(event) => { event.preventDefault(); void add(); }}>
+          <h2 className="font-mono text-[10.5px] uppercase tracking-[var(--tracking-label)] text-[var(--text-2)]">New beneficiary</h2>
           <div className="grid gap-3 md:grid-cols-2">
-            <label className="grid gap-1 text-[14px] font-semibold">
-              Business name
-              <input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} className={fieldClass} placeholder="Supplier legal name" />
+            <label className="grid gap-1 text-[12px] font-medium text-[var(--text-2)]">
+              Legal name
+              <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} className={field} placeholder="Registered business name" />
             </label>
-            <label className="grid gap-1 text-[14px] font-semibold">
+            <label className="grid gap-1 text-[12px] font-medium text-[var(--text-2)]">
               Country
-              <select value={draft.country} onChange={(event) => setDraft({ ...draft, country: event.target.value as RecipientCountry })} className={fieldClass}>
-                {COUNTRIES.map((country) => (
-                  <option key={country.code} value={country.code}>
-                    {country.name} ({COUNTRY_TO_CURRENCY[country.code]})
-                  </option>
+              <select value={draft.country} onChange={(e) => setDraft({ ...draft, country: e.target.value as RecipientCountry })} className={field}>
+                {COUNTRIES.map((c) => (
+                  <option key={c.code} value={c.code}>{c.name} ({COUNTRY_TO_CURRENCY[c.code]})</option>
                 ))}
               </select>
             </label>
-            <label className="grid gap-1 text-[14px] font-semibold">
+            <label className="grid gap-1 text-[12px] font-medium text-[var(--text-2)]">
               Bank
-              <input value={draft.bank} onChange={(event) => setDraft({ ...draft, bank: event.target.value })} className={fieldClass} placeholder="Bank name" />
+              <input value={draft.bank} onChange={(e) => setDraft({ ...draft, bank: e.target.value })} className={field} placeholder="Bank name" />
             </label>
-            <label className="grid gap-1 text-[14px] font-semibold">
+            <label className="grid gap-1 text-[12px] font-medium text-[var(--text-2)]">
               SWIFT / BIC
-              <input value={draft.swift} onChange={(event) => setDraft({ ...draft, swift: event.target.value.toUpperCase() })} className={cn(fieldClass, 'font-mono uppercase')} placeholder="Optional" />
+              <input value={draft.swift} onChange={(e) => setDraft({ ...draft, swift: e.target.value.toUpperCase() })} className={cn(field, 'font-mono uppercase')} placeholder="Optional" />
             </label>
-            <label className="grid gap-1 text-[14px] font-semibold md:col-span-2">
+            <label className="grid gap-1 text-[12px] font-medium text-[var(--text-2)] md:col-span-2">
               Account number
-              <input value={draft.account} onChange={(event) => setDraft({ ...draft, account: event.target.value })} className={cn(fieldClass, 'font-mono')} placeholder="Account or reference" />
+              <input value={draft.account} onChange={(e) => setDraft({ ...draft, account: e.target.value })} className={cn(field, 'font-mono')} placeholder="Account or reference" />
             </label>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Button onClick={() => void add()} disabled={busy}>
-              {busy ? 'Saving…' : 'Save recipient'}
-            </Button>
-            <Button variant="ghost" onClick={() => setAdding(false)}>
-              Cancel
-            </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="submit" disabled={busy}>{busy ? 'Saving…' : 'Save beneficiary'}</Button>
+            <Button variant="quiet" onClick={() => setAdding(false)}>Cancel</Button>
+            <span className="text-[12px] text-[var(--text-muted)]">New beneficiaries start in review. KYB completes before a first payout clears screening.</span>
           </div>
-          <p className="text-[12px] text-[var(--text-muted)]">New recipients start unverified. KYB on the counterparty completes before a first payout clears screening.</p>
-        </Card>
+        </form>
       ) : null}
 
-      <label className="relative block max-w-md">
-        <span className="sr-only">Search recipients</span>
-        <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[var(--text-muted)]" aria-hidden="true" />
-        <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search by name, country or bank" className={cn(fieldClass, 'pl-10')} />
-      </label>
+      <div className="mb-3 flex items-center gap-2">
+        <label className="relative block w-full max-w-md">
+          <span className="sr-only">Search beneficiaries</span>
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[var(--text-muted)]" aria-hidden="true" />
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search by name, country, bank or account" className={cn(field, 'h-9 pl-9 text-[13px]')} />
+        </label>
+        <span className="ml-auto font-mono text-[11px] text-[var(--text-muted)]">{recipients ? `${filtered.length} of ${recipients.length}` : '—'}</span>
+      </div>
 
-      <Table
-        caption="Counterparties"
-        exportName="recipients"
-        rows={filtered}
-        loading={recipients === null}
-        emptyState={<EmptyState art={<IsoEmptyState kind="recipients" decorative />} title="No recipients yet" body="Add a verified counterparty to send your first payout." action={<Button size="sm" onClick={() => setAdding(true)}>Add recipient</Button>} />}
-        columns={[
-          { key: 'name', header: 'Recipient', value: (row) => row.name, render: (row) => (
-            <span className="grid">
-              <span className="font-medium">{row.name}</span>
-              <span className="font-mono text-[12px] text-[var(--text-muted)]">{row.bank} · {row.account}</span>
-            </span>
-          ) },
-          { key: 'kyb', header: 'Verification', value: (row) => KYB_LABEL[row.kybStatus].label, render: (row) => <Badge tone={KYB_LABEL[row.kybStatus].tone}>{KYB_LABEL[row.kybStatus].label}</Badge> },
-          { key: 'corridor', header: 'Corridor', value: (row) => row.country, render: (row) => {
-            const corridor = corridors.find((entry) => entry.code === row.country.toUpperCase());
-            return corridor ? <Chip tone="teal">{corridor.partnerLabel}</Chip> : <Chip ghost>{row.country} · modeled</Chip>;
-          } },
-          { key: 'reuse', header: 'Paid', align: 'right', mono: true, value: (row) => reuse.get(row.name) ?? 0, render: (row) => `${reuse.get(row.name) ?? 0}×` },
-          { key: 'tier', header: 'Delivery', secondary: true, value: (row) => row.tier, render: (row) => (row.tier === 'PAYOUT_ONLY' ? 'Bank payout' : row.tier === 'SWEEP_ACCOUNT' ? 'Receive account' : 'Splash balance') },
-        ]}
-        rowAction={(row) => (
-          <div className="flex justify-end gap-1">
-            <Button href={`/dashboard/send?recipient=${encodeURIComponent(row.id)}`} variant="ghost" size="sm">
-              Pay
-            </Button>
-            <Button variant="destructive-text" size="sm" onClick={() => void remove(row)} aria-label={`Remove ${row.name}`}>
-              <Trash2 aria-hidden="true" />
-            </Button>
-          </div>
-        )}
-      />
-    </div>
+      <Workspace
+        inspector={selected ? (
+          <Inspector kicker="Beneficiary" title={selected.name} subtitle={<StatusLabel compact tone={KYB[selected.kybStatus].tone}>{KYB[selected.kybStatus].label}</StatusLabel>} onClose={() => setSelectedId(null)} actions={<><Button href={`/dashboard/send?recipient=${encodeURIComponent(selected.id)}`} disabled={selected.kybStatus !== 'full'}>Clear a payment</Button><Button variant="destructive" onClick={() => void remove(selected)}><Trash2 aria-hidden="true" /> Remove</Button></>}>
+            <InspectorSection title="Legal identity">
+              <div className="grid grid-cols-2 gap-2">
+                <InspectorField label="Registered name">{selected.name}</InspectorField>
+                <InspectorField label="Country">{COUNTRIES.find((c) => c.code === selected.country)?.name ?? selected.country}</InspectorField>
+                <InspectorField label="Record" mono>{selected.id}</InspectorField>
+                <InspectorField label="Created" mono>{selected.createdAt.slice(0, 10)} · {selected.createdVia === 'invoice_link' ? 'via invoice link' : 'manual'}</InspectorField>
+              </div>
+            </InspectorSection>
+            <InspectorSection title="Account verification">
+              <div className="grid grid-cols-2 gap-2">
+                <InspectorField label="Bank">{selected.bank || '—'}</InspectorField>
+                <InspectorField label="SWIFT / BIC" mono>{selected.swift || '—'}</InspectorField>
+                <InspectorField label="Account" mono>{selected.account ? `••••${selected.account.slice(-4)}` : '—'}</InspectorField>
+                <InspectorField label="Delivery">{selected.tier === 'PAYOUT_ONLY' ? 'Bank payout' : selected.tier === 'SWEEP_ACCOUNT' ? 'Receive account' : 'Held balance'}</InspectorField>
+              </div>
+            </InspectorSection>
+            <InspectorSection title="KYB evidence">
+              <ul className="grid gap-1.5 text-[12.5px]">
+                {[
+                  ['Business registration', selected.kybStatus === 'full' ? 'complete' : selected.kybStatus === 'lite' ? 'received' : 'missing'],
+                  ['Owners and controllers', selected.kybStatus === 'full' ? 'complete' : 'pending'],
+                  ['Sanctions screening', selected.kybStatus === 'none' ? 'not run' : 'clear'],
+                  ['KYB invite', selected.kybInviteSent ? 'sent' : 'not sent'],
+                ].map(([label, value]) => (
+                  <li key={label} className="flex items-center justify-between gap-2 border-b border-[var(--border-default)] py-1">
+                    <span className="text-[var(--text-2)]">{label}</span>
+                    <StatusLabel compact tone={/complete|clear|sent$/.test(value) && value !== 'not sent' ? 'verified' : /missing|not/.test(value) ? 'exception' : 'attention'}>{value}</StatusLabel>
+                  </li>
+                ))}
+              </ul>
+            </InspectorSection>
+            <InspectorSection title="Allowed corridors">
+              <div className="flex flex-wrap gap-1.5">
+                {corridors.filter((c) => c.code === selected.country.toUpperCase()).map((c) => (
+                  <StatusLabel key={c.code} compact tone="signal">{c.partnerLabel}</StatusLabel>
+                ))}
+                {!corridors.some((c) => c.code === selected.country.toUpperCase()) ? <StatusLabel compact tone="neutral">No live corridor · modeled</StatusLabel> : null}
+              </div>
+            </InspectorSection>
+            <InspectorSection title="Payment history">
+              {(history.get(selected.name) ?? []).length === 0 ? (
+                <p className="text-[12.5px] text-[var(--text-2)]">No payments yet.</p>
+              ) : (
+                <ul className="grid gap-1 text-[12px]">
+                  {(history.get(selected.name) ?? []).slice(0, 6).map((t) => (
+                    <li key={t.id} className="flex items-center justify-between gap-2 border-b border-[var(--border-default)] py-1">
+                      <span className="font-mono text-[11px] text-[var(--signal)]">{t.id.slice(0, 14)}</span>
+                      <span className="font-mono tabular-nums">{formatMoney('USD', t.sourceAmountUsd)}</span>
+                      <span className="text-[var(--text-muted)]">{t.createdAt.slice(0, 10)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </InspectorSection>
+          </Inspector>
+        ) : undefined}
+      >
+        <DataTable
+          caption="Beneficiaries"
+          rows={filtered}
+          loading={recipients === null}
+          selectedId={selectedId}
+          onSelect={(row) => setSelectedId(row.id)}
+          emptyState={<div className="text-[13px] text-[var(--text-2)]">No beneficiaries yet. Add a verified counterparty to clear your first payment.</div>}
+          columns={[
+            { key: 'name', header: 'Beneficiary', render: (r) => <span className="grid"><span className="truncate font-medium">{r.name}</span><span className="truncate font-mono text-[11px] text-[var(--text-muted)]">{r.bank} · ••••{r.account.slice(-4)}</span></span> },
+            { key: 'kyb', header: 'Verification', render: (r) => <StatusLabel compact tone={KYB[r.kybStatus].tone}>{KYB[r.kybStatus].label}</StatusLabel> },
+            { key: 'corridor', header: 'Corridor', secondary: true, render: (r) => { const c = corridors.find((x) => x.code === r.country.toUpperCase()); return <span className="text-[12px] text-[var(--text-2)]">{c ? c.partnerLabel : `${r.country} · modeled`}</span>; } },
+            { key: 'paid', header: 'Payments', numeric: true, align: 'right', render: (r) => String((history.get(r.name) ?? []).length) },
+            { key: 'tier', header: 'Delivery', secondary: true, render: (r) => (r.tier === 'PAYOUT_ONLY' ? 'Bank payout' : r.tier === 'SWEEP_ACCOUNT' ? 'Receive account' : 'Held balance') },
+          ]}
+        />
+      </Workspace>
+    </>
   );
 }

@@ -7,10 +7,11 @@ import ProcessingStep from '@/components/send/ProcessingStep';
 import ReceiptStep from '@/components/send/ReceiptStep';
 import RecipientStep from '@/components/send/RecipientStep';
 import ReviewStep from '@/components/send/ReviewStep';
+import RouteStep from '@/components/send/RouteStep';
 import { Card, StepStrip } from '@/components/system';
 import { COUNTRY_TO_CURRENCY, initialTransferState, type TransferState } from '@/lib/send/state';
 
-const STEPS = [{ label: 'Recipient' }, { label: 'Amount' }, { label: 'Review' }, { label: 'Processing' }, { label: 'Receipt' }];
+const STEPS = [{ label: 'Beneficiary' }, { label: 'Amount' }, { label: 'Route' }, { label: 'Review' }, { label: 'Processing' }, { label: 'Receipt' }];
 
 /**
  * Send: recipient → amount → review → processing → receipt. The state is one
@@ -70,16 +71,17 @@ export default function SendPage() {
   return (
     <div className="mx-auto grid w-full max-w-[880px] gap-6">
       <header>
-        <h1 className="text-[var(--text-h1)] font-semibold leading-[1.1] tracking-[-0.02em]">Send USD</h1>
-        <p className="mt-1 text-[14px] text-[var(--text-2)]">One payment, settled atomically on Sui and delivered by a licensed payout partner.</p>
+        <h1 className="text-[28px] font-semibold leading-[1.1] tracking-[-0.02em] md:text-[32px]">New cross-border payment</h1>
+        <p className="mt-1 text-[14px] text-[var(--text-2)]">Build an evidence-backed instruction before funds move. Creation does not move funds; checker approval is required.</p>
       </header>
       <StepStrip steps={STEPS} current={state.step - 1} />
       <Card padding="lg">
         {state.step === 1 ? <RecipientStep state={state} set={set} next={() => go(2)} /> : null}
         {state.step === 2 ? <AmountStep state={state} set={set} prev={() => go(1)} next={() => go(3)} /> : null}
-        {state.step === 3 ? <ReviewStep state={state} set={set} prev={() => go(2)} next={() => go(4)} /> : null}
-        {state.step === 4 ? <ProcessingStep state={state} set={set} next={() => go(5)} retry={() => setState({ ...initialTransferState, recipient: state.recipient, amount: state.amount })} /> : null}
-        {state.step === 5 ? <ReceiptStep state={state} reset={() => setState(initialTransferState)} /> : null}
+        {state.step === 3 ? <RouteStep state={state} prev={() => go(2)} next={() => go(4)} /> : null}
+        {state.step === 4 ? <ReviewStep state={state} set={set} prev={() => go(3)} next={() => go(5)} /> : null}
+        {state.step === 5 ? <ProcessingStep state={state} set={set} next={() => go(6)} retry={() => setState({ ...initialTransferState, recipient: state.recipient, amount: state.amount })} /> : null}
+        {state.step === 6 ? <ReceiptStep state={state} reset={() => setState(initialTransferState)} /> : null}
       </Card>
     </div>
   );

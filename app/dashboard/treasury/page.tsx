@@ -1,14 +1,19 @@
 'use client';
 
 import { ArrowDownToLine, ArrowUpFromLine, Bot } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
 import MoneyPathPanel from '@/components/compliance/MoneyPathPanel';
+import DataTable from '@/components/shell/DataTable';
+import { PageHeader, SummaryStrip } from '@/components/shell/PageHeader';
+import StatusLabel from '@/components/shell/StatusLabel';
 import RoadmapChip from '@/components/supply/RoadmapChip';
-import { AmountInput, Badge, Button, Card, Chip, PillToggle, ProofRow, Skeleton, Stat, Table } from '@/components/system';
+import { Button, ProofRow } from '@/components/system';
 import { brand } from '@/lib/brand';
+import { formatMoney } from '@/lib/money';
 import type { TransferIntentRecord } from '@/lib/server/operations';
+import { cn } from '@/lib/utils';
 
 type Snapshot = {
   available: number;
@@ -21,31 +26,44 @@ type Snapshot = {
   notices: Array<{ id: string; amount: number; availableAt: string; state: string }>;
 };
 
-const usd = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+type Settings = { perTransferLimitUsd: number; dailyLimitUsd: number };
+
 const PENDING = new Set(['AUTHORIZED', 'DEPOSIT_CONFIRMED', 'EXCHANGING', 'EXCHANGED', 'QUEUED', 'SETTLING', 'SWEEPING']);
 
 /**
- * Treasury: balances by asset with truthful labels, scheduled outflows, the
- * client-owned treasury position (variable, projected, roadmap-gated), and
- * the sweep recommendation card — 0xWal proposes, a human approves.
+ * Liquidity: what is actually available before committing a payment.
+ * Available, reserved (in flight), pending (returning notices), the minimum
+ * buffer the policy implies, upcoming obligations, the forecast gap and a
+ * funding proposal. No rate, no APY, no speculative return on this page;
+ * the projected treasury position is roadmap-chipped below the fold.
  */
-export default function TreasuryPage() {
+export default function LiquidityPage() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [transfers, setTransfers] = useState<TransferIntentRecord[]>([]);
+  const [settings, setSettings] = useState<Settings | null>(null);
   const [direction, setDirection] = useState<'move' | 'withdraw'>('move');
   const [amount, setAmount] = useState('');
   const [busy, setBusy] = useState(false);
 
   async function load() {
-    const [treasuryRes, transfersRes] = await Promise.all([fetch('/api/treasury', { cache: 'no-store' }), fetch('/api/transfers?filter=pending', { cache: 'no-store' })]);
+    const [treasuryRes, transfersRes, settingsRes] = await Promise.all([fetch('/api/treasury', { cache: 'no-store' }), fetch('/api/transfers?filter=pending', { cache: 'no-store' }), fetch('/api/settings', { cache: 'no-store' })]);
     if (treasuryRes.ok) setSnapshot((await treasuryRes.json()) as Snapshot);
     if (transfersRes.ok) setTransfers(((await transfersRes.json()) as { items: TransferIntentRecord[] }).items);
+    if (settingsRes.ok) setSettings((await settingsRes.json()) as Settings);
   }
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0);
     return () => window.clearTimeout(timer);
   }, []);
+
+  const obligations = useMemo(() => transfers.filter((t) => PENDING.has(t.state)).map((t) => ({ id: t.id, beneficiary: t.recipientName, amount: Number.parseFloat(t.sourceAmountUsd || '0'), currency: t.targetCurrency, state: t.state, due: t.updatedAt })), [transfers]);
+  const reserved = obligations.reduce((s, o) => s + o.amount, 0);
+  const pending = (snapshot?.notices ?? []).reduce((s, n) => s + n.amount, 0);
+  const buffer = settings ? settings.perTransferLimitUsd * 0.1 : 0;
+  const available = snapshot?.available ?? 0;
+  const gap = available - reserved - buffer;
+  const executionEnabled = Boolean(snapshot?.executionEnabled);
 
   async function submit() {
     const value = Number.parseFloat(amount || '0');
@@ -57,145 +75,131 @@ export default function TreasuryPage() {
     try {
       const response = await fetch('/api/treasury', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: direction, amountUsd: value }) });
       const body = (await response.json()) as { error?: string };
-      if (!response.ok) throw new Error(body.error ?? 'Treasury move failed');
-      toast.success(direction === 'move' ? 'Moved to the treasury position' : `Withdrawal requested · ${snapshot?.withdrawalWindowLabel ?? 'notice window applies'}`);
+      if (!response.ok) throw new Error(body.error ?? 'Liquidity move failed');
+      toast.success(direction === 'move' ? 'Proposal created · awaiting checker' : `Withdrawal requested · ${snapshot?.withdrawalWindowLabel ?? 'notice window applies'}`);
       setAmount('');
       await load();
     } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : 'Treasury move failed');
+      toast.error(cause instanceof Error ? cause.message : 'Liquidity move failed');
     } finally {
       setBusy(false);
     }
   }
 
-  async function cancelNotice(id: string) {
-    const response = await fetch('/api/treasury', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'cancel', noticeId: id }) });
-    if (!response.ok) {
-      toast.error('Could not cancel the withdrawal');
-      return;
-    }
-    toast.success('Withdrawal cancelled');
-    await load();
-  }
-
-  const pendingOutflow = transfers.filter((t) => PENDING.has(t.state)).reduce((sum, t) => sum + Number.parseFloat(t.sourceAmountUsd || '0'), 0);
-  const position = snapshot ? snapshot.treasuryPrincipal + snapshot.treasuryYield : 0;
-  const executionEnabled = Boolean(snapshot?.executionEnabled);
-
   return (
-    <div className="grid gap-6">
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-[var(--text-h1)] font-semibold leading-[1.1] tracking-[-0.02em]">Treasury</h1>
-          <p className="mt-1 text-[14px] text-[var(--text-2)]">Balances by asset, what is scheduled to leave, and a projected position that stays approval-gated.</p>
-        </div>
-        {snapshot ? <Badge tone={executionEnabled ? 'green' : 'amber'}>{executionEnabled ? 'Execution enabled · sandbox' : 'Projection only · execution gated'}</Badge> : null}
-      </header>
+    <>
+      <PageHeader
+        title="Liquidity"
+        supporting="Know what is available before committing a payment."
+        actions={
+          <>
+            <Button variant="secondary" href="/dashboard/send">
+              Move liquidity
+            </Button>
+            <Button href="/dashboard/oxwal?prompt=Create%20a%20funding%20proposal%20for%20the%20next%207%20days&send=1">
+              <Bot aria-hidden="true" /> Create funding proposal
+            </Button>
+          </>
+        }
+      />
 
-      <section className="grid gap-4 md:grid-cols-3" aria-label="Balances by asset">
-        <Card>
-          <Stat label="Available" value={snapshot ? usd.format(snapshot.available) : null} currency="USDC" loading={!snapshot} sub="Operating cash · no notice period" />
-        </Card>
-        <Card tone="tint">
-          <Stat label="Scheduled outflows" value={usd.format(pendingOutflow)} currency="USD claim" tone="pending" sub={`${transfers.filter((t) => PENDING.has(t.state)).length} payouts in flight`} />
-        </Card>
-        <Card tone="dark">
-          <div className="text-white">
-            <Stat label="Treasury position" value={snapshot ? usd.format(position) : null} currency="USDY" loading={!snapshot} className="[&_span]:text-white" />
-            <p className="mt-2 text-[12px] text-white/70">{snapshot ? `${snapshot.rate.label} · client-owned · never a fixed rate` : ''}</p>
-          </div>
-        </Card>
-      </section>
+      <SummaryStrip
+        items={[
+          { label: 'Available', value: snapshot ? formatMoney('USDC', available) : '—', hint: 'Operating cash · no notice period' },
+          { label: 'Reserved', value: formatMoney('USD', reserved), hint: `${obligations.length} payouts in flight`, tone: reserved > 0 ? 'attention' : 'default' },
+          { label: 'Pending', value: snapshot ? formatMoney('USDY', pending) : '—', hint: 'Withdrawal notices returning' },
+          { label: 'Minimum buffer', value: settings ? formatMoney('USD', buffer) : '—', hint: '10% of per-transfer limit' },
+          { label: 'Forecast gap', value: snapshot && settings ? formatMoney('USD', gap) : '—', tone: gap < 0 ? 'exception' : 'verified', hint: gap < 0 ? 'Fund before clearing more' : 'Covered' },
+        ]}
+      />
 
-      <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-        <Card className="grid gap-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 className="text-[15px] font-semibold">Move between Available and Treasury</h2>
-            <PillToggle
-              label="Direction"
-              value={direction}
-              onChange={setDirection}
-              options={[
-                { value: 'move', label: 'Move in' },
-                { value: 'withdraw', label: 'Withdraw' },
-              ]}
-            />
-          </div>
-          <AmountInput
-            label={direction === 'move' ? 'Amount to move to Treasury' : 'Amount to withdraw to Available'}
-            value={amount}
-            onChange={setAmount}
-            currency={direction === 'move' ? 'USDC' : 'USDY'}
-            helper={direction === 'move' ? 'Completes in minutes once approved. Every move is approval-gated.' : `Withdrawals follow the ${snapshot?.withdrawalWindowLabel ?? 'notice'} window and are recorded for approvers.`}
-            disabled={!executionEnabled}
+      <div className="grid gap-4 lg:grid-cols-[1.3fr_1fr]">
+        <section aria-labelledby="obligations" className="border border-[var(--border-default)] bg-[var(--surface-raised)]">
+          <h2 id="obligations" className="border-b border-[var(--border-default)] px-4 py-3 font-mono text-[10.5px] uppercase tracking-[var(--tracking-label)] text-[var(--text-2)]">Upcoming obligations</h2>
+          <DataTable
+            caption="Upcoming obligations"
+            rows={obligations}
+            emptyState={<div className="text-[13px] text-[var(--text-2)]">Nothing is committed right now. Payments in flight appear here until they are paid out.</div>}
+            columns={[
+              { key: 'id', header: 'Payment', width: '140px', render: (o) => <span className="font-mono text-[12px] text-[var(--signal)]">{o.id.slice(0, 14)}</span> },
+              { key: 'beneficiary', header: 'Beneficiary', render: (o) => <span className="font-medium">{o.beneficiary}</span> },
+              { key: 'amount', header: 'Amount', numeric: true, align: 'right', render: (o) => formatMoney('USD', o.amount) },
+              { key: 'corridor', header: 'Corridor', secondary: true, render: (o) => <span className="font-mono text-[12px]">USD → {o.currency}</span> },
+              { key: 'state', header: 'State', render: (o) => <StatusLabel compact>{o.state === 'SWEEPING' ? 'In transit' : 'Executing'}</StatusLabel> },
+            ]}
           />
-          <div className="flex flex-wrap items-center gap-2">
-            <Button onClick={() => void submit()} disabled={busy || !executionEnabled}>
-              {direction === 'move' ? <ArrowDownToLine aria-hidden="true" /> : <ArrowUpFromLine aria-hidden="true" />}
-              {busy ? 'Working…' : direction === 'move' ? 'Move to Treasury' : 'Request withdrawal'}
-            </Button>
-            {!executionEnabled ? <span className="text-[13px] text-[var(--text-muted)]">Projection only until treasury execution is approved; licensed partners are the system of record for customer funds.</span> : null}
-          </div>
           {snapshot && snapshot.notices.length > 0 ? (
-            <Table
-              caption="Pending withdrawals"
-              rows={snapshot.notices}
-              columns={[
-                { key: 'amount', header: 'Amount', align: 'right', mono: true, value: (row) => row.amount, render: (row) => `${usd.format(row.amount)} USDY` },
-                { key: 'availableAt', header: 'Available', mono: true, value: (row) => row.availableAt, render: (row) => row.availableAt.slice(0, 10) },
-                { key: 'state', header: 'State', value: (row) => row.state, render: (row) => <Badge tone="amber">{row.state}</Badge> },
-              ]}
-              rowAction={(row) => (
-                <Button variant="destructive-text" size="sm" onClick={() => void cancelNotice(row.id)}>
-                  Cancel
-                </Button>
-              )}
-            />
+            <>
+              <h3 className="border-y border-[var(--border-default)] px-4 py-2.5 font-mono text-[10.5px] uppercase tracking-[var(--tracking-label)] text-[var(--text-2)]">Pending withdrawals</h3>
+              <DataTable
+                caption="Pending withdrawals"
+                rows={snapshot.notices}
+                columns={[
+                  { key: 'amount', header: 'Amount', numeric: true, align: 'right', render: (n) => formatMoney('USDY', n.amount) },
+                  { key: 'availableAt', header: 'Available', render: (n) => <span className="font-mono text-[12px]">{n.availableAt.slice(0, 10)}</span> },
+                  { key: 'state', header: 'State', render: (n) => <StatusLabel compact tone="attention">{n.state}</StatusLabel> },
+                ]}
+              />
+            </>
           ) : null}
-        </Card>
+        </section>
 
-        <div className="grid gap-4">
-          <Card tone="tint" className="grid gap-3">
+        <div className="grid content-start gap-4">
+          <section aria-labelledby="move" className="border border-[var(--border-default)] bg-[var(--surface-raised)] p-4">
             <div className="flex items-center justify-between gap-2">
-              <h2 className="text-[15px] font-semibold">Projected position</h2>
-              <RoadmapChip detail="live when the e-money licence is granted" />
+              <h2 id="move" className="font-mono text-[10.5px] uppercase tracking-[var(--tracking-label)] text-[var(--text-2)]">Move between Available and Treasury</h2>
+              <div role="group" aria-label="Direction" className="flex rounded-[var(--r-control)] border border-[var(--border-strong)] p-0.5">
+                {(['move', 'withdraw'] as const).map((d) => (
+                  <button key={d} type="button" onClick={() => setDirection(d)} aria-pressed={direction === d} className={cn('h-7 rounded-[6px] px-2.5 text-[12px] font-medium', direction === d ? 'bg-[var(--ink-900)] text-white' : 'text-[var(--text-2)]')}>
+                    {d === 'move' ? 'Move in' : 'Withdraw'}
+                  </button>
+                ))}
+              </div>
             </div>
-            {snapshot ? (
-              <dl>
-                <ProofRow label="Principal" value={<span className="font-mono tabular-nums">{usd.format(snapshot.treasuryPrincipal)} USDY</span>} />
-                <ProofRow label="Accrued (simulated)" value={<span className="font-mono tabular-nums">{usd.format(snapshot.treasuryYield)} USDY</span>} />
-                <ProofRow label="Rate" value={`${snapshot.rate.label}${snapshot.rate.introductory ? ' · introductory' : ''}`} />
-                <ProofRow label="Instrument" value="Ondo USDY · T-bill backed · variable" />
-              </dl>
-            ) : (
-              <Skeleton variant="text" lines={4} />
-            )}
-            <p className="text-[12px] text-[var(--text-muted)]">Figures are projections, not a live offer and not a promise of return. Rates move with US Treasury rates; nothing is guaranteed.</p>
-          </Card>
+            <label className="mt-3 grid gap-1 text-[12px] font-medium text-[var(--text-2)]">
+              {direction === 'move' ? 'Amount to move to Treasury' : 'Amount to withdraw to Available'}
+              <span className="grid h-12 grid-cols-[auto_1fr] items-center rounded-[var(--r-control)] border border-[var(--border-strong)] bg-[var(--surface-raised)]">
+                <span className="border-r border-[var(--border-default)] px-3 font-mono text-[12px] text-[var(--text-2)]">{direction === 'move' ? 'USDC' : 'USDY'}</span>
+                <input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^\d.]/g, ''))} disabled={!executionEnabled} placeholder="0.00" className="h-full w-full bg-transparent px-3 text-right font-mono text-[16px] tabular-nums outline-none disabled:text-[var(--text-muted)]" />
+              </span>
+            </label>
+            <p className="mt-2 text-[12px] text-[var(--text-muted)]">{direction === 'move' ? 'Every move becomes a proposal for a checker. Nothing executes from this form.' : `Withdrawals follow the ${snapshot?.withdrawalWindowLabel ?? 'notice'} window and are recorded for approvers.`}</p>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <Button onClick={() => void submit()} disabled={busy || !executionEnabled}>
+                {direction === 'move' ? <ArrowDownToLine aria-hidden="true" /> : <ArrowUpFromLine aria-hidden="true" />}
+                {busy ? 'Working…' : direction === 'move' ? 'Propose move to Treasury' : 'Request withdrawal'}
+              </Button>
+              {!executionEnabled ? <StatusLabel compact tone="attention">Execution gated</StatusLabel> : null}
+            </div>
+          </section>
 
-          <Card className="grid gap-3">
-            <div className="flex items-center gap-2">
-              <Bot className="size-4 text-[var(--teal-600)]" aria-hidden="true" />
-              <h2 className="text-[15px] font-semibold">Sweep recommendation</h2>
+          <section aria-labelledby="position" className="border border-[var(--border-default)] bg-[var(--surface-subtle)] p-4">
+            <div className="flex items-center justify-between gap-2">
+              <h2 id="position" className="font-mono text-[10.5px] uppercase tracking-[var(--tracking-label)] text-[var(--text-2)]">Treasury position</h2>
+              <RoadmapChip detail="executes when the e-money licence is granted" />
             </div>
-            <p className="text-[14px] text-[var(--text-2)]">
-              {snapshot && snapshot.available > pendingOutflow
-                ? `${brand.agentName} can model moving idle Available balance above your scheduled outflows into the treasury position. It drafts an unsigned proposal; you approve or reject it.`
-                : `${brand.agentName} recommends a sweep only when Available exceeds scheduled outflows. Nothing is idle right now.`}
+            <dl className="mt-2">
+              <ProofRow label="Position" value={<span className="font-mono tabular-nums">{snapshot ? formatMoney('USDY', snapshot.treasuryPrincipal + snapshot.treasuryYield) : '—'}</span>} />
+              <ProofRow label="Principal" value={<span className="font-mono tabular-nums">{snapshot ? formatMoney('USDY', snapshot.treasuryPrincipal) : '—'}</span>} />
+              <ProofRow label="Instrument" value="Ondo USDY · T-bill backed · variable" />
+            </dl>
+            <p className="mt-2 text-[11.5px] text-[var(--text-muted)]">A projection, not a live offer and not a promise of return. Rate detail lives in Settings; it is never shown as a figure on this page.</p>
+          </section>
+
+          <section aria-labelledby="funding" className="border border-[var(--border-default)] bg-[var(--surface-raised)] p-4">
+            <h2 id="funding" className="font-mono text-[10.5px] uppercase tracking-[var(--tracking-label)] text-[var(--text-2)]">Funding proposal</h2>
+            <p className="mt-2 text-[13px] text-[var(--text-2)]">
+              {gap < 0
+                ? `${brand.agentName} can prepare a funding proposal for ${formatMoney('USD', Math.abs(gap))} to restore the buffer before the next payout clears. You approve it in Approvals.`
+                : `Available covers reserved outflows and the minimum buffer. ${brand.agentName} proposes a sweep only when idle balance exceeds obligations.`}
             </p>
-            <div className="flex flex-wrap gap-1.5">
-              <Chip>proposes</Chip>
-              <Chip tone="teal">human approves</Chip>
-              <Chip tone="green">deterministic execution</Chip>
-            </div>
-            <Button variant="ghost" href="/dashboard/oxwal?prompt=allocate%20idle%20treasury" className="justify-self-start">
-              Ask {brand.agentName} to prepare a sweep
-            </Button>
-          </Card>
+          </section>
         </div>
       </div>
 
-      <MoneyPathPanel />
-    </div>
+      <div className="mt-4">
+        <MoneyPathPanel />
+      </div>
+    </>
   );
 }
