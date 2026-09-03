@@ -338,7 +338,7 @@ export default function BatchPage() {
                   </Chip>
                 ))}
               </div>
-              {chunkCount > 1 ? <p className="text-[13px] text-[var(--warn)]">Only the first chunk can be authorised in this run. Split the file and authorise each chunk separately.</p> : null}
+              {chunkCount > 1 ? <p className="text-[13px] text-[var(--warn-text)]">Only the first chunk can be authorised in this run. Split the file and authorise each chunk separately.</p> : null}
             </Card>
           </div>
           <div className="grid gap-4">
@@ -350,7 +350,7 @@ export default function BatchPage() {
                 <ProofRow label="Excluded" value={`${review.length + blocked.length} rows`} />
                 <ProofRow label="Minimum" value={formatUsd(minSettlementUsd())} />
               </dl>
-              {!minimum.ok && acceptedTotal > 0 ? <p className="text-[13px] text-[var(--warn)]">{minimum.message}</p> : null}
+              {!minimum.ok && acceptedTotal > 0 ? <p className="text-[13px] text-[var(--warn-text)]">{minimum.message}</p> : null}
               <form
                 className="grid gap-2"
                 onSubmit={(event) => {

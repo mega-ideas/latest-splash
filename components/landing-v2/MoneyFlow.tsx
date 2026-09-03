@@ -62,10 +62,10 @@ function Connector({ badge }: { badge?: ReactNode }) {
 }
 
 function AmberBadge() {
-  return <span className="inline-flex h-7 items-center rounded-[999px] border border-[var(--amber-100)] bg-[var(--amber-100)] px-2.5 font-mono text-[12px] text-[var(--amber-600)]">Legacy rails: 2–3 days</span>;
+  return <span className="inline-flex h-7 items-center rounded-[999px] border border-[var(--amber-100)] bg-[var(--amber-100)] px-2.5 font-mono text-[12px] text-[var(--amber-700)]">Legacy rails: 2–3 days</span>;
 }
 function GreenBadge() {
-  return <span className="inline-flex h-7 items-center rounded-[999px] border border-[var(--green-100)] bg-[var(--green-100)] px-2.5 font-mono text-[12px] text-[var(--green-600)]">Splash: minutes, end to end*</span>;
+  return <span className="inline-flex h-7 items-center rounded-[999px] border border-[var(--green-100)] bg-[var(--green-100)] px-2.5 font-mono text-[12px] text-[var(--green-700)]">Splash: minutes, end to end*</span>;
 }
 
 export default function MoneyFlow() {
@@ -128,7 +128,7 @@ export default function MoneyFlow() {
                 <span className="block text-[11px] text-[var(--text-2)]">{corridor.partnerLabel}</span>
               </li>
             ))}
-            <li className="rounded-[10px] border border-dashed border-[var(--line)] px-2.5 py-1.5 text-[12px] text-[var(--text-muted)] opacity-40">More corridors</li>
+            <li className="rounded-[10px] border border-dashed border-[var(--line)] px-2.5 py-1.5 text-[12px] text-[var(--text-muted)]">More corridors</li>
           </ul>
         </Node>
         <Connector />
@@ -136,9 +136,9 @@ export default function MoneyFlow() {
           <div className="flex flex-wrap gap-1">
             <Mono>₱ PHP</Mono>
             <Mono>Rp IDR</Mono>
-            <Mono className="opacity-40">$ SGD</Mono>
-            <Mono className="opacity-40">₫ VND</Mono>
-            <Mono className="opacity-40">฿ THB</Mono>
+            <Mono className="border-dashed bg-transparent text-[var(--text-muted)]">$ SGD</Mono>
+            <Mono className="border-dashed bg-transparent text-[var(--text-muted)]">₫ VND</Mono>
+            <Mono className="border-dashed bg-transparent text-[var(--text-muted)]">฿ THB</Mono>
           </div>
           <p className="text-[13px] text-[var(--text-2)]">Local bank transfer. They never touch crypto.</p>
         </Node>

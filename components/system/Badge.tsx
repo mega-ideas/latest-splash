@@ -5,11 +5,11 @@ import { cn } from '@/lib/utils';
 export type BadgeTone = 'amber' | 'green' | 'slate' | 'red' | 'teal';
 
 const tones: Record<BadgeTone, string> = {
-  amber: 'border-[var(--warn)] bg-[var(--warn-bg)] text-[var(--warn)]',
-  green: 'border-[var(--ok)] bg-[var(--ok-bg)] text-[var(--ok)]',
+  amber: 'border-[var(--warn)] bg-[var(--warn-bg)] text-[var(--warn-text)]',
+  green: 'border-[var(--ok)] bg-[var(--ok-bg)] text-[var(--ok-text)]',
   slate: 'border-[var(--line)] bg-[var(--surface-2)] text-[var(--text-2)]',
-  red: 'border-[var(--error)] bg-[var(--error-bg)] text-[var(--error)]',
-  teal: 'border-[var(--info)] bg-[var(--info-bg)] text-[var(--info)]',
+  red: 'border-[var(--error)] bg-[var(--error-bg)] text-[var(--error-text)]',
+  teal: 'border-[var(--info)] bg-[var(--info-bg)] text-[var(--info-text)]',
 };
 
 /**

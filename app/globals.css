@@ -8249,3 +8249,9 @@ button.iso-product-row {
     .lv2-dot:nth-of-type(4) { left: 50%; top: 75%; }
   }
 }
+
+/* Brand chrome contrast (axe): legacy opacity-based greys replaced by tokens. */
+.brand-sandbox-ribbon { color: var(--warn-text); }
+.brand-network-badge small { font-size: 10px; opacity: 1; color: var(--text-muted); }
+.brand-network-badge-detail { opacity: 1; color: var(--text-muted); }
+.brand-posture-meta { opacity: 1; color: var(--text-muted); }

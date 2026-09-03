@@ -139,14 +139,14 @@ function forbiddenClaimViolations(text, relPath) {
 // file, or a new v1 hex in an old file, fails here.
 const paletteV2 = new Set([
   '#0b2a33', '#163f4a', '#1f7a8c', '#2e96a8', '#5c9ead', '#dceef1',
-  '#f7f8f7', '#ffffff', '#eef3f4', '#4a5c64', '#6b7a83', '#dce3e6', '#e8edef',
+  '#f7f8f7', '#ffffff', '#eef3f4', '#4a5c64', '#59686f', '#16606e', '#157056', '#8a5809', '#dce3e6', '#e8edef',
   '#1e8f6e', '#ddf3ea', '#b9770e', '#fbefd9', '#b93a32', '#fae3e1',
   // dark mode
   '#071c22', '#0f2c35', '#153845', '#e6eef0', '#9bb0b7', '#7fcbd9', '#5fd3a8', '#e8b04b', '#f08a82',
 ]);
 
 const illustrationPalette = new Set([
-  '#e39774', '#1f4452', '#f6f0ed', '#6fb4a0', '#326273', '#d9a441',
+  '#e39774', '#1f4452', '#f6f0ed', '#6fb4a0', '#326273', '#d9a441', '#6b7a83',
   '#0c3e48', '#0d6370', '#083640', '#9fcfc7', '#efc46f', '#c49646', '#fffaf4', '#f8f0e5',
 ]);
 

@@ -18,7 +18,7 @@ export default function HeroDeskPreview() {
     <div aria-hidden="true" className="w-full overflow-hidden rounded-[16px] border border-white/15 bg-[var(--paper)] text-[var(--text)] shadow-[0_24px_60px_-30px_rgba(11,42,51,.6)]" style={{ aspectRatio: '16 / 10' }}>
       <div className="flex h-9 items-center justify-between border-b border-[var(--divider)] bg-[var(--surface)] px-3">
         <span className="text-[11px] font-semibold">{brand.name} Demo Ltd</span>
-        <span className="rounded-[999px] border border-[var(--amber-100)] bg-[var(--amber-100)] px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.08em] text-[var(--amber-600)]">Sandbox · no customer funds</span>
+        <span className="rounded-[999px] border border-[var(--amber-100)] bg-[var(--amber-100)] px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.08em] text-[var(--amber-700)]">Sandbox · no customer funds</span>
       </div>
       <div className="grid gap-3 p-3">
         <div className="grid grid-cols-3 gap-2">
@@ -28,7 +28,7 @@ export default function HeroDeskPreview() {
             <div className="mt-1 text-[10px] text-[var(--text-2)]">Available</div>
           </div>
           <div className="rounded-[12px] bg-[var(--surface-2)] p-2.5">
-            <div className="font-mono text-[15px] font-semibold tabular-nums text-[var(--amber-600)]">4,730.00</div>
+            <div className="font-mono text-[15px] font-semibold tabular-nums text-[var(--amber-700)]">4,730.00</div>
             <div className="font-mono text-[9px] uppercase tracking-[0.08em] text-[var(--text-muted)]">USD claim</div>
             <div className="mt-1 text-[10px] text-[var(--text-2)]">Scheduled outflows</div>
           </div>

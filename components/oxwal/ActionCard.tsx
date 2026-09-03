@@ -13,9 +13,9 @@ const actionLabels = {
 /* Risk states use semantic tokens (W9.0 coral rule): coral is brand accent
    only — never a risk/error signal. high=error, medium=warn, low=ok. */
 function riskClass(tone: ReturnType<typeof buildActionCardModel>['riskTone']) {
-  if (tone === 'high') return 'border-[var(--error)] bg-[var(--error-bg)] text-[var(--error)]';
-  if (tone === 'medium') return 'border-[var(--warn)] bg-[var(--warn-bg)] text-[var(--warn)]';
-  return 'border-[var(--ok)] bg-[var(--ok-bg)] text-[var(--ok)]';
+  if (tone === 'high') return 'border-[var(--error)] bg-[var(--error-bg)] text-[var(--error-text)]';
+  if (tone === 'medium') return 'border-[var(--warn)] bg-[var(--warn-bg)] text-[var(--warn-text)]';
+  return 'border-[var(--ok)] bg-[var(--ok-bg)] text-[var(--ok-text)]';
 }
 
 function confidenceColor(tone: ReturnType<typeof buildActionCardModel>['riskTone'], hasUntrustedEvidence: boolean) {
@@ -45,14 +45,14 @@ export default function ActionCard({ proposal, readOnly = false }: ActionCardPro
               {proposal.explain.risk} risk
             </span>
             {model.hasUntrustedEvidence && (
-              <span className="inline-flex items-center gap-1 rounded-md border border-[var(--warn)] bg-[var(--warn-bg)] px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--warn)]">
+              <span className="inline-flex items-center gap-1 rounded-md border border-[var(--warn)] bg-[var(--warn-bg)] px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--warn-text)]">
                 <AlertTriangle className="h-3.5 w-3.5" />
                 Untrusted data
               </span>
             )}
             {/* WS2 truth chip — evidence built on DEMO/MODELED sources says so. */}
             {model.containsDemoData && (
-              <span className="inline-flex items-center gap-1 rounded-md border border-[var(--warn)] bg-[var(--warn-bg)] px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--warn)]">
+              <span className="inline-flex items-center gap-1 rounded-md border border-[var(--warn)] bg-[var(--warn-bg)] px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--warn-text)]">
                 <AlertTriangle className="h-3.5 w-3.5" />
                 Contains demo data
               </span>
@@ -112,7 +112,7 @@ export default function ActionCard({ proposal, readOnly = false }: ActionCardPro
             {model.simulationRows.map((item) => (
               <div key={`${item.label}-${item.value}`} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 px-3 py-2 text-sm">
                 <span className="min-w-0 truncate font-medium text-[var(--text-muted)]">{item.label}</span>
-                <span className={item.status === 'warning' ? 'money font-bold text-[var(--warn)]' : 'money font-bold text-[var(--text)]'}>
+                <span className={item.status === 'warning' ? 'money font-bold text-[var(--warn-text)]' : 'money font-bold text-[var(--text)]'}>
                   {item.value}
                 </span>
               </div>
@@ -128,16 +128,16 @@ export default function ActionCard({ proposal, readOnly = false }: ActionCardPro
             <span
               key={`${item.source}-${item.ref}`}
               className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[13px] font-bold ${item.tone === 'untrusted'
-                ? 'border-[var(--warn)] bg-[var(--warn-bg)] text-[var(--warn)]'
-                : 'border-[var(--ok)] bg-[var(--ok-bg)] text-[var(--ok)]'}`}
+                ? 'border-[var(--warn)] bg-[var(--warn-bg)] text-[var(--warn-text)]'
+                : 'border-[var(--ok)] bg-[var(--ok-bg)] text-[var(--ok-text)]'}`}
             >
               {item.source} - {item.trustLabel}
               {/* WS2 provenance chip: LIVE keeps default styling; anything else
                   is clearly marked with the existing caution accent. */}
               <span
                 className={item.statusTone === 'live'
-                  ? 'rounded border border-[var(--ok)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ok)]'
-                  : 'rounded border border-[var(--warn)] bg-[var(--warn-bg)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--warn)]'}
+                  ? 'rounded border border-[var(--ok)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ok-text)]'
+                  : 'rounded border border-[var(--warn)] bg-[var(--warn-bg)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--warn-text)]'}
               >
                 {item.statusLabel}
               </span>
@@ -181,7 +181,7 @@ export default function ActionCard({ proposal, readOnly = false }: ActionCardPro
             </button>
             <button
               type="button"
-              className="inline-flex items-center gap-2 rounded-md border border-[var(--error)] bg-[var(--error-bg)] px-3 py-2 text-sm font-bold text-[var(--error)]"
+              className="inline-flex items-center gap-2 rounded-md border border-[var(--error)] bg-[var(--error-bg)] px-3 py-2 text-sm font-bold text-[var(--error-text)]"
             >
               <XCircle className="h-4 w-4" />
               {actionLabels.reject}

@@ -100,7 +100,7 @@ function useOutsideClose(open: boolean, close: () => void) {
 function CountBadge({ count }: { count: number }) {
   if (count <= 0) return null;
   return (
-    <span className="ml-auto inline-flex min-w-5 items-center justify-center rounded-full bg-[var(--warn-bg)] px-1.5 font-mono text-[11px] font-semibold text-[var(--warn)]" aria-label={`${count} awaiting approval`}>
+    <span className="ml-auto inline-flex min-w-5 items-center justify-center rounded-full bg-[var(--warn-bg)] px-1.5 font-mono text-[11px] font-semibold text-[var(--warn-text)]" aria-label={`${count} awaiting approval`}>
       {count}
     </span>
   );
@@ -243,9 +243,9 @@ export default function AppShell({
         </div>
         {kyb?.blocked ? (
           <div role="status" className="mb-5 flex flex-wrap items-center gap-3 rounded-[var(--r-md)] border border-[var(--warn)] bg-[var(--warn-bg)] px-4 py-3">
-            <ShieldAlert aria-hidden="true" className="size-4 shrink-0 text-[var(--warn)]" />
+            <ShieldAlert aria-hidden="true" className="size-4 shrink-0 text-[var(--warn-text)]" />
             <div className="min-w-0 flex-1">
-              <p className="text-[13px] font-semibold text-[var(--warn)]">Read-only workspace</p>
+              <p className="text-[13px] font-semibold text-[var(--warn-text)]">Read-only workspace</p>
               <p className="mt-0.5 text-[13px] text-[var(--text-2)]">{kyb.reason}</p>
             </div>
             <Link href="/settings/kyb" className="rounded-[var(--r-sm)] bg-[var(--ink-900)] px-3 py-2 text-[13px] font-semibold text-white">

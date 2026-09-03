@@ -155,7 +155,7 @@ export default function AmountStep({ state, set, prev, next }: { state: Transfer
             <span className="font-mono text-[18px] font-semibold tabular-nums text-[var(--text)]">{state.quote ? `${state.quote.netReceived} ${currency}` : '—'}</span>
           </div>
         </div>
-        {error ? <p className="text-[13px] text-[var(--error)]">{error}</p> : null}
+        {error ? <p className="text-[13px] text-[var(--error-text)]">{error}</p> : null}
         {stale ? (
           <Button size="sm" variant="ghost" onClick={() => setRefreshKey((key) => key + 1)} className="justify-self-start">
             Refresh quote

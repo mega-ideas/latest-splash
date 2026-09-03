@@ -63,7 +63,7 @@ export default function AmountInput({
         />
       </div>
       {error ? (
-        <p id={errorId} role="alert" className="text-[13px] font-medium text-[var(--error)]">
+        <p id={errorId} role="alert" className="text-[13px] font-medium text-[var(--error-text)]">
           {error}
         </p>
       ) : helper ? (

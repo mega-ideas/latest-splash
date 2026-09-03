@@ -104,3 +104,8 @@ Two-tone headline: line one `--text`, line two `--text-2` (see the gallery). Tab
 - **Public pages** (`/pricing /rates /trust /roadmap /docs /sandbox /metrics`) use `SiteShell` + `PageHeader` + `PageBody` from `components/site/SiteShell.tsx` and `DataTable` (server-renderable; row cards below `md`, or sticky first column + horizontal scroll with `scroll`). Milestone strings live once in `lib/site/roadmap.ts`.
 - **Auth** (`/login`) uses `AuthShell` (form left, iso scene + posture right, hidden below `lg`) and `LoginForm` on system inputs (16px text, 44px targets, visible labels, inline error with `role="alert"`).
 - **Eyebrow budget:** at most one mono kicker per three sections on the landing; today two ("How it settles", trust caption).
+
+### Contrast amendment (axe, WCAG AA at rendered sizes)
+- `--text-muted` is `#59686F` (the brief's `#6B7A83` measured 4.43:1 on white at 11-13px).
+- 700 text shades exist for status text on the 100 tints and on white: `--teal-700 #16606E`, `--green-700 #157056`, `--amber-700 #8A5809`, exposed as `--info-text / --ok-text / --warn-text` (`--error-text` = red-600, which already passes). The 600 shades remain for fills, borders, large figures and links on paper.
+- Ghost placeholders use a dashed border and muted text, never 40% opacity on text.

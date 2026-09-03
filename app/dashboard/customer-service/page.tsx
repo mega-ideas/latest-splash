@@ -159,7 +159,7 @@ export default function CustomerServicePage() {
             <div className="space-y-4 rounded-2xl border border-[#5C9EAD]/20 bg-[#5C9EAD]/5 p-6">
               <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                 <div className="flex gap-4">
-                  <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-[#5C9EAD]/10 text-[var(--info)]">
+                  <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-[#5C9EAD]/10 text-[var(--info-text)]">
                     <Send className="h-7 w-7" />
                   </div>
                   <div>
@@ -175,7 +175,7 @@ export default function CustomerServicePage() {
                 <div className="dash-surface p-4 text-left">
                   <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                     <div>
-                      <div className="text-xs font-semibold uppercase tracking-wide text-[var(--info)]">{ticket.type} · {ticket.priority}</div>
+                      <div className="text-xs font-semibold uppercase tracking-wide text-[var(--info-text)]">{ticket.type} · {ticket.priority}</div>
                       <h3 className="mt-1 font-semibold text-[#326273]">{ticket.subject}</h3>
                     </div>
                     <button type="button" onClick={() => void refreshTicket()} className="rounded-lg border border-[#5C9EAD]/30 px-3 py-2 text-[13px] font-semibold text-[#326273] hover:border-[#5C9EAD]">
@@ -225,7 +225,7 @@ export default function CustomerServicePage() {
                         : 'border-[#326273]/10 bg-white hover:border-[#5C9EAD]/30'
                     }`}
                   >
-                    <Icon className={`h-5 w-5 ${type === id ? 'text-[var(--info)]' : 'text-[#326273]/50'}`} />
+                    <Icon className={`h-5 w-5 ${type === id ? 'text-[var(--info-text)]' : 'text-[#326273]/50'}`} />
                     <div className={`mt-1.5 text-[13px] font-semibold ${type === id ? 'text-[#326273]' : 'text-[#326273]/70'}`}>{label}</div>
                     <div className="mt-0.5 text-[13px] text-[#326273]/50 leading-tight">{desc}</div>
                   </button>
@@ -281,12 +281,12 @@ export default function CustomerServicePage() {
                 <h2 className="text-sm font-semibold text-[#326273]">Get in touch</h2>
                 <p className="mt-0.5 text-[13px] text-[#326273]/60">Direct channels to reach Splash support.</p>
               </div>
-              <Headphones className="text-[var(--info)]" size={16} />
+              <Headphones className="text-[var(--info-text)]" size={16} />
             </div>
             <div className="mt-3 space-y-2">
               {channels.map(({ icon: Icon, label, detail }) => (
                 <div key={label} className="flex items-start gap-3 rounded-lg bg-[#F6F0ED] p-3">
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#5C9EAD]/10 text-[var(--info)]">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#5C9EAD]/10 text-[var(--info-text)]">
                     <Icon className="h-4 w-4" />
                   </div>
                   <div className="min-w-0">
@@ -304,7 +304,7 @@ export default function CustomerServicePage() {
                 <h2 className="text-sm font-semibold text-[#326273]">Common questions</h2>
                 <p className="mt-0.5 text-[13px] text-[#326273]/60">Quick answers before you raise a ticket.</p>
               </div>
-              <BookOpen className="text-[var(--info)]" size={16} />
+              <BookOpen className="text-[var(--info-text)]" size={16} />
             </div>
             <div className="mt-3 space-y-2">
               {faqs.map((item) => (

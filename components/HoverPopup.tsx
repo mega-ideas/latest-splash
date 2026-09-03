@@ -30,7 +30,7 @@ export default function HoverPopup({ children, title, content, position = 'top' 
       {isVisible && (
         <div className={`absolute z-50 w-64 rounded-xl border border-[#326273]/10 bg-white p-4 shadow-xl transition-opacity ${positionClasses[position]}`}>
           <div className="flex items-start gap-2">
-            <Info className="mt-0.5 h-4 w-4 shrink-0 text-[var(--info)]" />
+            <Info className="mt-0.5 h-4 w-4 shrink-0 text-[var(--info-text)]" />
             <div>
               <div className="text-sm font-semibold text-[#326273]">{title}</div>
               <div className="mt-1 text-[13px] text-[#326273]/70">{content}</div>
