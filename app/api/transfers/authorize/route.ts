@@ -35,6 +35,7 @@ import { readComplianceControls } from '@/lib/server/sui-settlement';
 import { isForeignAccountId, resolveSessionAccount } from '@/lib/server/session-account';
 import { listLedgerEntries } from '@/lib/server/operations';
 import { readJsonBody } from '@/lib/server/http';
+import { emitEvent } from '@/lib/server/events';
 
 export const maxDuration = 60;
 
@@ -275,6 +276,16 @@ export async function POST(request: Request) {
     fundingEffectiveSlippageBps: fundingSession?.effectiveSlippageBps,
   });
   if (fundingSession) updateFundingSession(fundingSession.id, { transferIntentId: intent.id });
+  void emitEvent({
+    name: 'intent_created',
+    orgId: auth.session.orgId ?? auth.session.email,
+    actorId: auth.session.email,
+    subjectId: intent.id,
+    corridor: `USD_${intent.targetCurrency}`,
+    amountMinor: sourceAmountMicro,
+    currency: 'USD_MICRO',
+    props: { fundingSource: fundingSelection.source, deliveryTier: body.deliveryTier, feeTier },
+  });
 
   // Debit the PAYER for every funding source, not only `held`.
   //
@@ -360,6 +371,16 @@ export async function POST(request: Request) {
         auditAnchorId: result.auditAnchorObjectId ?? undefined,
         smartTreasuryId: result.smartTreasuryId ?? undefined,
         composedActions: result.composedActions,
+      });
+      void emitEvent({
+        name: 'intent_settled',
+        orgId: auth.session.orgId ?? auth.session.email,
+        actorId: auth.session.email,
+        subjectId: intent.id,
+        corridor: `USD_${intent.targetCurrency}`,
+        amountMinor: sourceAmountMicro,
+        currency: 'USD_MICRO',
+        props: { fundingSource: fundingSelection.source, deliveryTier: body.deliveryTier },
       });
       updateAuditReceipt(intent.id, {
         suiTxDigest: result.digest,

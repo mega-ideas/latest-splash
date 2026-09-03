@@ -660,17 +660,17 @@ export default function IsometricLanding() {
         </div>
         <div className="iso-shell iso-corridor-layout">
           <div className="iso-corridor-copy">
-            <p className="iso-kicker">One testnet corridor. Modeled expansion routes.</p>
+            <p className="iso-kicker">{networkProfile.corridors.length} corridors, staggered. Modeled expansion routes.</p>
             <h2 className="iso-section-title">
               USD in.
               <span>Local out.</span>
             </h2>
             <p>
-              The MY-to-PH corridor is the proving ground. Additional routes stay modeled until partner, liquidity,
+              USD to PHP and USD to IDR launch first, in a staggered order. Additional routes stay modeled until partner, liquidity,
               and regulatory controls are ready market by market.
             </p>
             <div className="iso-route-list">
-              <span className="is-live">PHP testnet</span><span>MYR</span><span>IDR</span><span>VND</span>
+              <span className="is-live">PHP</span><span className="is-live">IDR</span><span>MYR</span><span>VND</span>
               <span>THB</span><span>SGD</span><span>EUR</span><span>GBP</span>
             </div>
             <div className="iso-recipient-ladder">

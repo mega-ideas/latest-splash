@@ -16,6 +16,7 @@ import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { assertCleanBody, ProvenanceViolationError, provenanceViolationResponse } from '@/lib/auth/provenance-guard';
 import { requireActiveOrg } from '@/lib/server/kyb-gate';
 import { readJsonBody } from '@/lib/server/http';
+import { emitEvent } from '@/lib/server/events';
 import { resolveSessionAccount } from '@/lib/server/session-account';
 import {
   cancelTreasuryWithdrawal,
@@ -109,6 +110,15 @@ export async function POST(request: Request) {
   try {
     if (body.action === 'move') {
       await moveToTreasury(ledger.userId, amountMicro);
+      void emitEvent({
+        name: 'sweep_approved',
+        orgId: auth.session.orgId ?? auth.session.email,
+        actorId: auth.session.email,
+        subjectId: accountId,
+        amountMinor: amountMicro,
+        currency: 'USD_MICRO',
+        props: { action: 'move', destination: 'SMART_TREASURY' },
+      });
     } else if (body.action === 'withdraw') {
       requestTreasuryWithdrawal(ledger.userId, amountMicro);
     } else {

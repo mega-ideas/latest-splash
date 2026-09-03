@@ -3,6 +3,7 @@ import { z } from 'zod';
 
 import { createSignupSession, setCustomerSessionCookie } from '@/lib/server/customer-auth';
 import { readJsonBody } from '@/lib/server/http';
+import { emitEvent } from '@/lib/server/events';
 
 const signupSchema = z.object({
   company: z.string().trim().min(2).max(120),
@@ -37,6 +38,12 @@ export async function POST(request: Request) {
     organization: parsed.data.company,
   });
   const refreshedSession = await setCustomerSessionCookie(session, { remember: true });
+  void emitEvent({
+    name: 'account_created',
+    orgId: refreshedSession.orgId ?? refreshedSession.email,
+    actorId: refreshedSession.email,
+    props: { region: parsed.data.region, selfSignup: true },
+  });
 
   return NextResponse.json(
     {

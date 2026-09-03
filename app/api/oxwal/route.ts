@@ -3,6 +3,7 @@ import { resolveAuthorityForSession } from '@/lib/auth/authority';
 import { assertCleanBody, ProvenanceViolationError, provenanceViolationResponse } from '@/lib/auth/provenance-guard';
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { readJsonBody } from '@/lib/server/http';
+import { emitEvent } from '@/lib/server/events';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -33,6 +34,12 @@ export async function POST(request: Request) {
   if (!message) {
     return new Response(JSON.stringify({ error: 'message is required' }), { status: 400 });
   }
+  void emitEvent({
+    name: 'session_started',
+    orgId: ctx.orgId,
+    actorId: ctx.userId,
+    props: { historyLength: Array.isArray(body.history) ? body.history.length : 0 },
+  });
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
@@ -47,6 +54,18 @@ export async function POST(request: Request) {
         actorId: ctx.userId,
         history: Array.isArray(body.history) ? body.history.slice(-12) : [],
       })) {
+        if (event.type === 'proposal') {
+          void emitEvent({
+            name: 'action_proposed',
+            orgId: ctx.orgId,
+            actorId: ctx.userId,
+            subjectId: event.proposal.id,
+            corridor: event.proposal.corridor,
+            amountMinor: event.proposal.explain.financialImpact.amountIn ?? null,
+            currency: event.proposal.explain.financialImpact.currencyIn,
+            props: { kind: event.proposal.kind, tier: event.proposal.tier },
+          });
+        }
         send(event);
       }
       controller.close();

@@ -29,6 +29,13 @@
       "when": 1786302897534,
       "tag": "0003_wallet_identities",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1788356728645,
+      "tag": "0004_product_events",
+      "breakpoints": true
     }
   ]
 }

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { readJsonBody } from '@/lib/server/http';
+import { emitEvent } from '@/lib/server/events';
 import { createSupportTicket, type SupportTicketType } from '@/lib/server/support';
 
 export const dynamic = 'force-dynamic';
@@ -27,6 +28,13 @@ export async function POST(request: Request) {
   }
 
   const ticket = createSupportTicket({ type, subject, message, email });
+  void emitEvent({
+    name: 'support_ticket_opened',
+    orgId: auth.session.orgId ?? auth.session.email,
+    actorId: auth.session.email,
+    subjectId: ticket.id,
+    props: { type, priority: ticket.priority },
+  });
 
   return NextResponse.json({ ticket }, { status: 201 });
 }
