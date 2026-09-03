@@ -1705,33 +1705,20 @@
   box-shadow: 8px 9px 0 color-mix(in srgb, var(--coral) 34%, transparent);
 }
 
+/* Matches .iso-layer-meta in the guarantees section: sans, sentence case,
+   no tracking. The numbered chip that used to anchor this row is gone, and
+   64% ink measured 4.0 against the card — under the 4.5 floor. */
 .iso-loops-meta {
   position: relative;
   z-index: 2;
   display: flex;
   align-items: center;
   gap: 10px;
-  color: color-mix(in srgb, var(--ink) 64%, transparent);
-  font-family: var(--font-mono), monospace;
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: .14em;
-  text-transform: uppercase;
-}
-.iso-loops-meta span {
-  display: grid;
-  width: 33px;
-  height: 33px;
-  place-items: center;
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
-  color: var(--surface);
-  background: var(--teal);
-  box-shadow: 3px 3px 0 var(--ink);
-}
-.iso-loops-card-3 .iso-loops-meta span {
-  background: var(--coral);
-  box-shadow: 3px 3px 0 color-mix(in srgb, var(--coral) 55%, var(--ink));
+  color: color-mix(in srgb, var(--ink) 78%, transparent);
+  font-family: var(--font-sans), system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0;
 }
 .iso-loops-meta p { flex: 1; }
 .iso-loops-meta .iso-roadmap-chip { letter-spacing: .08em; }

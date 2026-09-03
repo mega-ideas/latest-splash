@@ -379,9 +379,12 @@ const supplySteps = [
   },
 ];
 
+/* Unnumbered. The three loops run concurrently — an account is settling, saving
+   and (eventually) financing at the same time — so 01/02/03 asserted a reading
+   order that does not exist. The five steps in "How it works" keep their
+   numbers, because there the order is the information. */
 const loopCards = [
   {
-    number: '01',
     label: 'Settle',
     title: 'Move it in minutes.',
     copy: 'Collect USD, pay Southeast Asia. Every approved payout builds verified counterparties and settlement history.',
@@ -391,7 +394,6 @@ const loopCards = [
     roadmap: false,
   },
   {
-    number: '02',
     label: 'Save',
     title: 'Grow it while it waits.',
     copy: 'Idle USD follows a projected, variable treasury posture. Your business approves every move.',
@@ -401,7 +403,6 @@ const loopCards = [
     roadmap: false,
   },
   {
-    number: '03',
     label: 'Supply',
     title: 'Finance it — the moat.',
     copy: 'Invoices would become working capital: your buyer funds early payment against a receivable both sides can verify.',
@@ -557,10 +558,8 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
 
           <div className="iso-loops-grid">
             {loopCards.map((loop, index) => (
-              <article className={`iso-loops-card iso-loops-card-${index + 1}`} key={loop.number}>
-                <div className="iso-loops-meta">
-                  <span>{loop.number}</span>
-                  <p>{loop.label}</p>
+              <article className={`iso-loops-card iso-loops-card-${index + 1}`} key={loop.label}>
+                <div className="iso-loops-meta">                  <p>{loop.label}</p>
                   {loop.roadmap ? <RoadmapChip /> : <em className="iso-loops-live"><i aria-hidden="true" /> Live</em>}
                 </div>
                 <div className="iso-loops-art">
