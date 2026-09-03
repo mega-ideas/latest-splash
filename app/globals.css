@@ -11,7 +11,7 @@
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-mono: var(--font-mono);
   --font-heading: var(--font-sans);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
@@ -52,6 +52,25 @@
 }
 
 :root {
+  /* ── Isometric palette — SINGLE declaration site ──────────────────────
+     Was declared three times (.iso-landing, .wc-page, .iso-auth) and had
+     already drifted: .wc-page carried --iso-coral and .iso-landing did
+     not; .iso-auth omitted --iso-line and the three text tokens, so any
+     shared .iso-* rule referencing them dropped on the auth pages.
+     .iso-auth now overrides only its ground. */
+  --iso-paper: #fffaf4;
+  --iso-paper-deep: #f8f0e5;
+  --iso-ink: #0c3e48;
+  --iso-teal: #0d6370;
+  --iso-teal-dark: #083640;
+  --iso-mint: #9fcfc7;
+  --iso-gold: #efc46f;
+  --iso-coral: #e39774;
+  --iso-line: rgba(12, 62, 72, .16);
+  --iso-text-secondary: rgba(12, 62, 72, .82);
+  --iso-text-muted: rgba(12, 62, 72, .77);
+  --iso-text-label: rgba(12, 62, 72, .72);
+
   /* App-shell canvas — deliberately warmer/deeper than the marketing --bg
      (#F6F0ED in styles/tokens.css) so product surfaces pop. Single source
      for the dashboard background; do not reintroduce raw #ece3de inline. */
@@ -325,21 +344,10 @@ body {
 }
 
 .iso-landing {
-  --iso-paper: #fffaf4;
-  --iso-paper-deep: #f8f0e5;
-  --iso-ink: #0c3e48;
-  --iso-teal: #0d6370;
-  --iso-teal-dark: #083640;
-  --iso-mint: #9fcfc7;
-  --iso-gold: #efc46f;
-  --iso-line: rgba(12, 62, 72, .16);
   /* Text brand — "the numbers are the brand".
      Display headlines stay loud; everything below them obeys these floors:
      - no text smaller than 10px (micro-labels), data values >= 12px, body >= 13px
      - ink never drops below 66% alpha for text; alphas under .3 are for borders/decoration only */
-  --iso-text-secondary: rgba(12, 62, 72, .78);
-  --iso-text-muted: rgba(12, 62, 72, .7);
-  --iso-text-label: rgba(12, 62, 72, .66);
   min-height: 100svh;
   /* clip (not hidden): hidden makes this the scroll container and breaks
      position: sticky inside the cinematic hero. */
@@ -1613,18 +1621,6 @@ body {
   /* Mirror the .iso-landing palette so the shared .iso-* classes (kicker,
      section title, buttons, loops, roadmap chip) resolve outside the landing
      root — an undefined var() inside a shorthand drops the whole declaration. */
-  --iso-paper: #fffaf4;
-  --iso-paper-deep: #f8f0e5;
-  --iso-ink: #0c3e48;
-  --iso-teal: #0d6370;
-  --iso-teal-dark: #083640;
-  --iso-mint: #9fcfc7;
-  --iso-gold: #efc46f;
-  --iso-coral: #e39774;
-  --iso-line: rgba(12, 62, 72, .16);
-  --iso-text-secondary: rgba(12, 62, 72, .78);
-  --iso-text-muted: rgba(12, 62, 72, .7);
-  --iso-text-label: rgba(12, 62, 72, .66);
   min-height: 100dvh;
   background: var(--iso-paper);
   color: var(--iso-ink);
@@ -4733,11 +4729,6 @@ body {
 /* Isometric authentication */
 .iso-auth {
   --iso-paper: #f4ecdf;
-  --iso-ink: #0c3e48;
-  --iso-teal: #0d6370;
-  --iso-teal-dark: #083640;
-  --iso-mint: #9fcfc7;
-  --iso-gold: #efc46f;
   position: relative;
   min-height: 100svh;
   overflow: hidden;
