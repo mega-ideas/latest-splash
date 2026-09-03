@@ -281,8 +281,6 @@ function StaticCinematic() {
   return (
     <section id="cinematic" className="cin-section cin-section-static" aria-label="Splash settlement network">
       <div className="cin-static-hero">
-        <div className="cin-orb cin-orb-gold" aria-hidden="true" />
-        <div className="cin-orb cin-orb-mint" aria-hidden="true" />
         <div className="cin-grid" aria-hidden="true" />
         <div className="cin-static-stage" aria-hidden="true">
           <div className="cin-object-layer">
@@ -422,8 +420,6 @@ export default function SettlementCinematic({ isPhone = false }: { isPhone?: boo
   return (
     <section id="cinematic" ref={containerRef} className="cin-section" aria-label="Splash settlement network">
       <div className="cin-sticky" onPointerMove={trackPointer}>
-        <div className="cin-orb cin-orb-gold" aria-hidden="true" />
-        <div className="cin-orb cin-orb-mint" aria-hidden="true" />
         <div className="cin-grid" aria-hidden="true" />
 
         {/* The isometric network artwork with its ambient life. */}

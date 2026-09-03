@@ -1,13 +1,8 @@
 'use client';
 
-import { useRef } from 'react';
-import gsap from 'gsap';
-import { useGSAP } from '@gsap/react';
 import type { LucideIcon } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
-
-gsap.registerPlugin(useGSAP);
 
 type DashStatProps = {
   label: string;
@@ -23,10 +18,10 @@ type DashStatProps = {
 };
 
 /**
- * Shared stat tile (dash-block) used across dashboard pages. The first number
- * inside `value` counts up on mount / change; prefix, suffix, grouping and
- * decimals are preserved. Text mutation only — never opacity — so a hidden
- * mount still ends with the correct final value.
+ * Shared stat tile (dash-block) used across dashboard pages. The value renders
+ * as itself — no count-up. Tweening a balance means the screen spends most of a
+ * second displaying an amount that is not true, which is the wrong trade on a
+ * page whose purpose is that the figures can be checked.
  */
 export default function DashStat({
   label,
@@ -40,35 +35,10 @@ export default function DashStat({
   interactive = true,
   className,
 }: DashStatProps) {
-  const valueRef = useRef<HTMLDivElement>(null);
-  const lastValueRef = useRef(0);
 
-  useGSAP(() => {
-    const el = valueRef.current;
-    if (!el) return;
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    const match = value.match(/-?[\d,]+(?:\.(\d+))?/);
-    if (!match) return;
-    const target = Number.parseFloat(match[0].replace(/,/g, ''));
-    if (!Number.isFinite(target)) return;
-    const decimals = match[1]?.length ?? 0;
-    const state = { v: lastValueRef.current };
-    gsap.to(state, {
-      v: target,
-      duration: 0.8,
-      ease: 'power2.out',
-      onUpdate: () => {
-        el.textContent = value.replace(
-          match[0],
-          state.v.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals }),
-        );
-      },
-      onComplete: () => {
-        lastValueRef.current = target;
-        el.textContent = value;
-      },
-    });
-  }, [value]);
+  // No count-up. A tween over 800ms means the screen spends most of a second
+  // showing a number that is not the balance — on a page whose whole job is
+  // that the figures are checkable. The value renders as itself.
 
   return (
     <div className={cn('dash-block p-4', interactive && 'dash-block-interactive', className)}>
@@ -80,7 +50,7 @@ export default function DashStat({
           </span>
         )}
       </div>
-      <div ref={valueRef} className={cn('dash-num mt-2 text-2xl font-semibold text-[#0c3e48]', valueClassName)}>
+      <div className={cn('dash-num mt-2 text-2xl font-semibold text-[#0c3e48]', valueClassName)}>
         {value}
       </div>
       {delta && <div className={cn('mt-0.5 text-[13px] font-medium', deltaClassName ?? 'text-[#326273]/55')}>{delta}</div>}

@@ -636,11 +636,11 @@ body {
   align-items: center;
   gap: 10px;
   color: var(--iso-teal);
-  font-family: var(--font-mono), monospace;
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: .18em;
-  text-transform: uppercase;
+  font-family: var(--font-sans), system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .iso-kicker::before {
@@ -8124,4 +8124,21 @@ textarea:focus-visible,
 .iso-auth-field select:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
+}
+
+
+/* ─── Figures, references and digests ──────────────────────────────────────
+   Applied by role, not per component. slashed-zero is a correctness feature
+   here rather than a stylistic one: an auditor transcribing a Sui object id
+   or a digest has to be able to tell 0 from O, and the page's whole claim is
+   that they can check it themselves. tabular-nums keeps columns of amounts
+   aligned digit-for-digit. font-feature-settings is the Safari < 16.4 path. */
+.money,
+.dash-num,
+.font-mono,
+.cin-vision-chip,
+[data-numeric],
+code, kbd, samp {
+  font-variant-numeric: tabular-nums slashed-zero;
+  font-feature-settings: "tnum" 1, "zero" 1;
 }

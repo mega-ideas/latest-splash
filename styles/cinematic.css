@@ -35,29 +35,8 @@
 
 /* ── Backdrop: soft brand orbs + isometric grid ───────────────────── */
 
-.cin-orb {
-  position: absolute;
-  z-index: 0;
-  border-radius: 50%;
-  pointer-events: none;
-  filter: blur(70px);
-}
 
-.cin-orb-gold {
-  top: -14%;
-  right: -10%;
-  width: 48vw;
-  height: 48vw;
-  background: radial-gradient(circle, rgba(239, 196, 111, .42), transparent 70%);
-}
 
-.cin-orb-mint {
-  bottom: -16%;
-  left: -12%;
-  width: 42vw;
-  height: 42vw;
-  background: radial-gradient(circle, rgba(159, 207, 199, .5), transparent 70%);
-}
 
 .cin-grid {
   position: absolute;
