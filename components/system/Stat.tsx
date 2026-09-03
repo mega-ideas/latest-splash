@@ -41,17 +41,17 @@ export default function Stat({
         {loading || value == null ? (
           <Skeleton variant="money" />
         ) : (
-          <span className={cn('whitespace-nowrap font-sans text-[24px] font-semibold leading-none tabular-nums tracking-[-0.02em] md:text-[28px]', toneClass)}>{value}</span>
+          <span className={cn('whitespace-nowrap font-mono text-[22px] font-medium leading-none tabular-nums md:text-[24px]', toneClass)}>{value}</span>
         )}
         {currency ? (
-          <span className="whitespace-nowrap font-mono text-[12px] font-medium uppercase tracking-[0.04em] text-[var(--text-muted)]">{currency}</span>
+          <span className="whitespace-nowrap font-mono text-[11px] font-medium uppercase tracking-[var(--tracking-label)] text-[var(--text-muted)]">{currency}</span>
         ) : null}
       </div>
       <div className="flex items-center justify-between gap-3">
-        <span className="text-[13px] font-medium tracking-[0.01em] text-[var(--text-2)]">{label}</span>
+        <span className="font-mono text-[10.5px] font-medium uppercase tracking-[var(--tracking-label)] text-[var(--text-2)]">{label}</span>
         {action}
       </div>
-      {sub ? <div className="text-[13px] text-[var(--text-muted)]">{sub}</div> : null}
+      {sub ? <div className="text-[12px] text-[var(--text-muted)]">{sub}</div> : null}
     </div>
   );
 }

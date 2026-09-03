@@ -154,7 +154,7 @@ export default function RoutesPage() {
               <tr className="font-mono text-[10px] uppercase tracking-[var(--tracking-label)] text-[var(--text-muted)]">
                 <th scope="col" className="h-10 px-3 text-left font-medium">Route</th>
                 <th scope="col" className="h-10 px-3 text-right font-medium">Recipient amount ({currency})</th>
-                <th scope="col" className="h-10 px-3 text-right font-medium">Effective FX</th>
+                <th scope="col" className="h-10 px-3 text-right font-medium">Effective FX (per USD sent)</th>
                 <th scope="col" className="h-10 px-3 text-right font-medium">All-in fee</th>
                 <th scope="col" className="h-10 px-3 text-right font-medium">ETA</th>
                 <th scope="col" className="h-10 px-3 text-right font-medium">Confidence</th>
@@ -165,7 +165,7 @@ export default function RoutesPage() {
             <tbody>
               {comparison.rows.map((row) => {
                 const active = row.id === selected.id;
-                const effective = sendUsd > 0 ? row.delivered / (sendUsd - row.feeUsd || 1) : 0;
+                const effective = sendUsd > 0 ? row.delivered / sendUsd : 0;
                 return (
                   <tr
                     key={row.id}

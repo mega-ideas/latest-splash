@@ -74,7 +74,7 @@ export default function Table<Row extends { id: string }>({
   return (
     <div className={cn('grid gap-3', className)}>
       <div className="flex items-center justify-between gap-3">
-        <h3 className="text-[15px] font-semibold text-[var(--text)]">{caption}</h3>
+        <h3 className="font-mono text-[10.5px] uppercase tracking-[var(--tracking-label)] text-[var(--text-2)]">{caption}</h3>
         {showExport ? (
           <Button
             variant="ghost"
@@ -91,27 +91,27 @@ export default function Table<Row extends { id: string }>({
       ) : (
         <>
           {/* Desktop: table */}
-          <div className="hidden overflow-hidden rounded-[var(--r-md)] border border-[var(--line)] md:block">
-            <table className="w-full border-collapse text-[14px]">
+          <div className="hidden overflow-hidden border border-[var(--border-default)] md:block">
+            <table className="w-full border-collapse text-[12.5px]">
               <caption className="sr-only">{caption}</caption>
-              <thead className="bg-[var(--surface-2)] text-[12px] uppercase tracking-[0.06em] text-[var(--text-muted)]">
+              <thead className="bg-[var(--surface-raised)] font-mono text-[10.5px] uppercase tracking-[var(--tracking-label)] text-[var(--text-muted)]">
                 <tr>
                   {columns.map((column) => (
-                    <th key={column.key} scope="col" className={cn('px-4 py-2.5 font-semibold', column.align === 'right' ? 'text-right' : 'text-left')}>
+                    <th key={column.key} scope="col" className={cn('h-10 border-b border-[var(--border-default)] px-3 font-medium', column.align === 'right' ? 'text-right' : 'text-left')}>
                       {column.header}
                     </th>
                   ))}
-                  {rowAction ? <th scope="col" className="px-4 py-2.5 text-right font-semibold">Actions</th> : null}
+                  {rowAction ? <th scope="col" className="h-10 border-b border-[var(--border-default)] px-3 text-right font-medium">Actions</th> : null}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-[var(--divider)] bg-[var(--surface)]">
+              <tbody className="divide-y divide-[var(--border-default)] bg-[var(--surface-raised)]">
                 {rows.map((row) => (
-                  <tr key={row.id} className="transition-colors hover:bg-[var(--surface-2)]">
+                  <tr key={row.id} className="h-11 transition-colors duration-[var(--dur-fast)] hover:bg-[var(--surface-subtle)]">
                     {columns.map((column) => (
                       <td
                         key={column.key}
                         className={cn(
-                          'px-4 py-3 align-middle text-[var(--text)]',
+                          'px-3 py-2 align-middle text-[var(--text)]',
                           column.align === 'right' && 'text-right tabular-nums',
                           column.mono && 'font-mono text-[13px]',
                         )}
@@ -119,7 +119,7 @@ export default function Table<Row extends { id: string }>({
                         {column.render ? column.render(row) : String((row as Record<string, unknown>)[column.key] ?? '')}
                       </td>
                     ))}
-                    {rowAction ? <td className="px-4 py-3 text-right">{rowAction(row)}</td> : null}
+                    {rowAction ? <td className="px-3 py-1.5 text-right">{rowAction(row)}</td> : null}
                   </tr>
                 ))}
               </tbody>
@@ -129,14 +129,14 @@ export default function Table<Row extends { id: string }>({
           {/* Mobile: row cards */}
           <ul className="grid gap-2 md:hidden">
             {rows.map((row) => (
-              <li key={row.id} className="rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--surface)] p-4">
+              <li key={row.id} className="border border-[var(--border-default)] bg-[var(--surface-raised)] p-3">
                 <dl className="grid gap-1.5">
                   {columns
                     .filter((column) => !column.secondary)
                     .map((column) => (
                       <div key={column.key} className="flex items-baseline justify-between gap-3">
-                        <dt className="text-[12px] uppercase tracking-[0.06em] text-[var(--text-muted)]">{column.header}</dt>
-                        <dd className={cn('text-right text-[15px] text-[var(--text)]', column.align === 'right' && 'tabular-nums', column.mono && 'font-mono text-[13px]')}>
+                        <dt className="font-mono text-[9.5px] uppercase tracking-[var(--tracking-label)] text-[var(--text-muted)]">{column.header}</dt>
+                        <dd className={cn('text-right text-[13px] text-[var(--text)]', column.align === 'right' && 'tabular-nums', column.mono && 'font-mono text-[13px]')}>
                           {column.render ? column.render(row) : String((row as Record<string, unknown>)[column.key] ?? '')}
                         </dd>
                       </div>

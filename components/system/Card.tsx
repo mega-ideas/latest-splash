@@ -5,8 +5,8 @@ import { cn } from '@/lib/utils';
 type Tone = 'default' | 'tint' | 'dark';
 
 const tones: Record<Tone, string> = {
-  default: 'border border-[var(--line)] bg-[var(--surface)] text-[var(--text)] shadow-[var(--shadow-rest)]',
-  tint: 'border border-transparent bg-[var(--surface-2)] text-[var(--text)]',
+  default: 'border border-[var(--border-default)] bg-[var(--surface-raised)] text-[var(--text)]',
+  tint: 'border border-[var(--border-default)] bg-[var(--surface-subtle)] text-[var(--text)]',
   dark: 'border border-transparent bg-[var(--ink-900)] text-white',
 };
 
@@ -17,13 +17,13 @@ export type CardProps = HTMLAttributes<HTMLDivElement> & {
   children: ReactNode;
 };
 
-const paddings = { none: '', sm: 'p-4', md: 'p-5 md:p-6', lg: 'p-6 md:p-8' };
+const paddings = { none: '', sm: 'p-4', md: 'p-5', lg: 'p-6' };
 
-/** Surface primitive. Use cards only where elevation communicates hierarchy. */
+/** Surface primitive: flat, opaque, one-pixel border (Clearance Signal). Elevation only on overlays. */
 export default function Card({ tone = 'default', padding = 'md', elevated, className, children, ...rest }: CardProps) {
   return (
     <div
-      className={cn('rounded-[var(--r-md)]', tones[tone], paddings[padding], elevated && 'shadow-[var(--shadow-elevated)]', className)}
+      className={cn('rounded-[12px]', tones[tone], paddings[padding], elevated && 'shadow-[var(--shadow-elevated)]', className)}
       {...rest}
     >
       {children}

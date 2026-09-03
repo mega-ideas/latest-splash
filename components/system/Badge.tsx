@@ -32,7 +32,7 @@ export default function Badge({
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1.5 rounded-[var(--r-pill)] border px-2.5 py-1 text-[12px] font-semibold leading-none tracking-[0.01em]',
+        'inline-flex h-6 items-center gap-1.5 rounded-[var(--r-pill)] border px-2 text-[11px] font-medium leading-none',
         tones[tone],
         outline && 'bg-transparent',
         className,
