@@ -157,3 +157,28 @@ Dark mode: canvas `#0B1020`, raised `#121A2E`, subtle `#1A2340`, selected `#1E2A
 The v2 names (`--ink-900`, `--teal-600`, `--paper`, …) remain as aliases to the v3 values so every surface re-skins at once; the clearance semantic layer (`--signal`, `--surface-navigation`, …) is the API for new code. Brand icons were recoloured toward beacon (hue +38°, saturation ×1.35) from the teal originals.
 
 Why this and not the obvious defaults: cream-plus-terracotta and near-black-plus-acid-green are the two most common generated looks right now, and every payments incumbent is teal or navy. Cobalt on luminous air reads as sky and clearance; the ember is the one warm point, spent in exactly two places.
+
+## 10. Web3 landing (branch `feat/v7-web3-light`, `components/landing-w3`)
+
+A light, motion-led public landing in the language of the current web3 fintech leaders (nullmask.io, spade.com were the named references): warm bone canvas, near-black ink, ONE acid signal, mono labels, oversized tight display type, dark bands for rhythm. Scoped to `.w3` in `styles/landing-w3.css`, so the product keeps its own palette.
+
+| Token | Hex | Role |
+| --- | --- | --- |
+| `--bone` / `--paper` / `--shell` | `#EFEEE7` / `#FFFFFF` / `#E5E3DA` | Canvas / raised / band |
+| `--pool` / `--pool-2` | `#0B1310` / `#14201C` | Dark bands, footer |
+| `--ink` / `--ink-2` / `--ink-3` | `#0B1310` / `#414D48` / `#515E59` | Body, secondary, labels (AA on bone and shell) |
+| `--aqua` | `#00E5C0` | The signal, used as a **fill** with ink text on it |
+| `--aqua-600` / `--aqua-700` | `#00B396` / `#00705E` | Strokes and focus / the only aqua allowed as small text |
+| `--aqua-pool` | `#45F2D2` | Signal on the dark bands |
+| `--line` / `--line-strong` | `#D8D6CC` / `#BFBCAF` | Hairlines |
+
+Type: **Archivo** 700 for display (clamp 2.75–5.75rem, tracking −0.042em, leading 0.94), **Inter** for UI, **JetBrains Mono** for labels and evidence. Radius 4–8px.
+
+**Motion tokens**: `--d1` 130ms feedback, `--d2` 240ms state, `--d3` 460ms entrance, `--d4` 820ms choreography, ease `cubic-bezier(.2,.7,.2,1)`, 90ms stagger. Choreography: hero lines rise from a clipped mask, the signal swipe draws under the last line, the route path draws and its checkpoints pop in sequence, the corridor marquee loops and pauses on hover, sections rise 18px on entry, the flow spine fills and its stage dots flip to signal, proof figures count up once.
+
+**Motion safety rules, enforced in the stylesheet**
+- Content is authored in its final state. The offset for a revealed element applies only while `.w3[data-motion="ready"]` is set by a client effect, so with no JavaScript nothing is hidden. Verified: 71,353 characters render with JS disabled.
+- `prefers-reduced-motion: reduce` never sets that flag, collapses all durations to 1ms, stops the marquee, and lands every drawn path, swipe and counter at its end state.
+- Nothing is gated behind an animation; every observer unobserves after one fire.
+
+Verified at 1440 and 375: axe (WCAG 2.1 AA) clean, no page errors, focus rings on every control, no unclipped horizontal overflow, touch targets ≥44px on coarse pointers (footer word-links are 48px tall and as wide as their word).

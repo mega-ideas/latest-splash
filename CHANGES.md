@@ -1,3 +1,10 @@
+# v7 web3 landing, light (branch feat/v7-web3-light)
+
+- `components/landing-w3` + `styles/landing-w3.css`: new public landing in a light web3 language (bone canvas, near-black ink, one acid signal, Archivo / Inter / JetBrains Mono), covering the three products by name: cross-border payments, treasury and invoices.
+- Sections: hero with a live clearance instrument, corridor marquee, three product pillars, Observe/Clear/Prove flow, route comparison, on-chain proof receipt, developers, CTA, footer.
+- Motion system with tokens and a safety contract: no content is hidden without JavaScript, and `prefers-reduced-motion` lands every animation at its end state. See `docs/design-system.md` section 10.
+- Gates: tsc, eslint, check-copy clean; axe WCAG 2.1 AA clean at 1440 and 375; no page errors; touch targets >= 44px on coarse pointers.
+
 # v5 Clear Air palette (branch feat/v5-clear-air)
 
 - Palette v3 "Clear Air" in `styles/tokens.css`: night foundation, air neutrals, beacon cobalt as the single signal colour, ember reserved for the wordmark full stop and two marketing eyebrows; v2 names kept as aliases so every surface re-skins. Dark mode retuned. See `docs/design-system.md` §9.
