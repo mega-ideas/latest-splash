@@ -1,64 +1,44 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import Image from 'next/image';
-import Link from 'next/link';
+import { AlertTriangle, CheckCircle2, Clock3, RotateCcw, ShieldCheck, Trash2, WifiOff } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import {
-  AlertTriangle,
-  CheckCircle2,
-  Clock3,
-  RotateCcw,
-  ShieldCheck,
-  type LucideIcon,
-} from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import MemWalBehaviorCard from '@/components/MemWalBehaviorCard';
 import ActionCard from '@/components/oxwal/ActionCard';
 import OxWalComposer, { type OxWalComposerChip } from '@/components/oxwal/OxWalComposer';
-import MemWalBehaviorCard from '@/components/MemWalBehaviorCard';
-import { stashBatchDraft } from '@/lib/batch-parse';
-import { recordPendingProposals } from '@/lib/oxwal-notify';
+import { Badge, Button, Card, Chip, ProofRow, Stat } from '@/components/system';
 import type { ActionCardProposal } from '@/lib/agent/action-card';
+import { stashBatchDraft } from '@/lib/batch-parse';
+import { brand } from '@/lib/brand';
+import { recordPendingProposals } from '@/lib/oxwal-notify';
+import { openOxwalStream, type OxwalStreamStatus } from '@/lib/oxwal/stream-client';
+import { clearThread, readThread, writeThread, type PersistedThreadItem } from '@/lib/oxwal/thread-store';
+import { cn } from '@/lib/utils';
 
 /**
  * 0xWal desk — a Claude-style expanding chat.
  *
- * Fresh desk: a centered composer ("What's on the agenda today?").
- * First message: the surface becomes a conversation — the thread grows
- * downward and the composer docks at the bottom, exactly like starting a chat.
- *
- * Everything the agent does surfaces INSIDE the thread, in operator language:
+ * Fresh desk: a centred composer. First message: the surface becomes a
+ * conversation that grows downward with the composer docked underneath.
+ * Everything the agent does surfaces in the thread in operator language:
  * reads become quiet activity lines, warnings become amber notes, and every
- * prepared proposal appears as an unsigned action card the operator can read
- * but not act on here — approval always happens in the queue.
+ * prepared proposal renders as a read-only action card. Approval happens in
+ * Approvals, through the one real path — never here.
+ *
+ * The stream is resumable: a dropped connection re-attaches to the same
+ * server-side run with backoff, so an answer is never a dead panel and a
+ * proposal is never prepared twice.
  */
 
 type ThreadItem =
   | { kind: 'user'; id: string; text: string }
   | { kind: 'assistant'; id: string; text: string }
   | { kind: 'activity'; id: string; label: string; tone: 'read' | 'propose' }
-  | { kind: 'notice'; id: string; text: string; retryPrompt?: string }
+  | { kind: 'notice'; id: string; text: string; retryPrompt?: string; approvalsLink?: boolean }
   | { kind: 'session-expired'; id: string }
-  | { kind: 'proposal'; id: string; proposal: ActionCardProposal };
-
-/** In-chat approval window per proposal. `waiting` counts down from 2 minutes;
- *  an unapproved proposal then falls back to the maker-checker queue (it
- *  already lives there server-side — the chat window is a convenience). */
-type ChatApproval = {
-  state: 'waiting' | 'approving' | 'approved' | 'expired' | 'blocked';
-  expiresAt: number;
-  note?: string;
-};
-
-const CHAT_APPROVAL_WINDOW_MS = 120_000;
-
-type OxwalStreamEvent =
-  | { type: 'meta'; source: 'claude' | 'local'; readTools: string[]; proposeTools: string[] }
-  | { type: 'delta'; text: string }
-  | { type: 'tool'; name: string; category: 'READ' | 'PROPOSE' }
-  | { type: 'warning'; warning: { code: string; message: string; ref?: string } }
-  | { type: 'proposal'; proposal: ActionCardProposal }
-  | { type: 'done' };
+  | { kind: 'proposal'; id: string; proposal: ActionCardProposal }
+  | { kind: 'proposal-ref'; id: string; proposalId: string; proposalKind: string; corridor: string | null; recommendation: string };
 
 const quickPrompts: OxWalComposerChip[] = [
   { label: 'Review invoice', prompt: 'Pay invoice inv_demo_acme_5000 to cp_acme_ph', icon: 'file' },
@@ -85,116 +65,77 @@ const activityLabels: Record<string, string> = {
   proposeBatchPayout: 'Preparing batch payout',
 };
 
-const WELCOME =
-  '0xWal is standing by. Every money movement becomes an unsigned proposal for human approval.';
+const WELCOME = `${brand.agentName} is standing by. Every money movement becomes an unsigned proposal for human approval.`;
 
 function newId(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
+/** Thread → persisted form: proposal bodies are replaced by references. */
+function toPersisted(items: ThreadItem[]): PersistedThreadItem[] {
+  return items.flatMap((item): PersistedThreadItem[] => {
+    if (item.kind === 'session-expired' || item.id === 'assistant_welcome') return [];
+    if (item.kind === 'proposal') {
+      return [{
+        kind: 'proposal-ref' as const,
+        id: item.id,
+        proposalId: item.proposal.id,
+        proposalKind: item.proposal.kind,
+        corridor: item.proposal.corridor ?? null,
+        recommendation: item.proposal.explain.recommendation,
+      }];
+    }
+    if (item.kind === 'notice') return [{ kind: 'notice' as const, id: item.id, text: item.text }];
+    return [item];
+  });
+}
+
 export default function OxwalDeskPage() {
   const router = useRouter();
   const [input, setInput] = useState('');
-  const [thread, setThread] = useState<ThreadItem[]>([
-    { kind: 'assistant', id: 'assistant_welcome', text: WELCOME },
-  ]);
+  const [thread, setThread] = useState<ThreadItem[]>([{ kind: 'assistant', id: 'assistant_welcome', text: WELCOME }]);
   const [streamingText, setStreamingText] = useState('');
   const [isSending, setIsSending] = useState(false);
-  const [chatApprovals, setChatApprovals] = useState<Record<string, ChatApproval>>({});
-  const [clockMs, setClockMs] = useState(() => Date.now());
+  const [link, setLink] = useState<OxwalStreamStatus | null>(null);
+  const [organization, setOrganization] = useState<string | null>(null);
   const threadRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const restoredRef = useRef(false);
 
-  const hasStarted = thread.some((item) => item.kind === 'user');
+  const hasStarted = thread.some((item) => item.kind !== 'assistant' || item.id !== 'assistant_welcome');
 
-  const proposals = useMemo(
-    () => thread.flatMap((item) => (item.kind === 'proposal' ? [item.proposal] : [])),
-    [thread],
-  );
+  const proposals = useMemo(() => thread.flatMap((item) => (item.kind === 'proposal' ? [item.proposal] : [])), [thread]);
+  const deskStats = useMemo(() => ({
+    proposals: thread.filter((item) => item.kind === 'proposal' || item.kind === 'proposal-ref').length,
+    notices: thread.filter((item) => item.kind === 'notice').length,
+  }), [thread]);
 
-  // Tick once a second while any in-chat approval window is open, and expire
-  // windows that ran out — expired proposals wait in the maker-checker queue.
-  const hasOpenWindow = Object.values(chatApprovals).some((entry) => entry.state === 'waiting');
+  // Restore the persisted conversation for this organisation, then honour a
+  // deep link (?prompt=… from Treasury or the floating indicator; &send=1
+  // submits it).
   useEffect(() => {
-    if (!hasOpenWindow) return;
-    const interval = window.setInterval(() => {
-      const now = Date.now();
-      setClockMs(now);
-      setChatApprovals((current) => {
-        let changed = false;
-        const next: Record<string, ChatApproval> = {};
-        for (const [id, entry] of Object.entries(current)) {
-          if (entry.state === 'waiting' && now >= entry.expiresAt) {
-            next[id] = { ...entry, state: 'expired' };
-            changed = true;
-          } else {
-            next[id] = entry;
-          }
+    let cancelled = false;
+    void fetch('/api/auth/session', { cache: 'no-store' })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((session: { organization?: string } | null) => {
+        if (cancelled || !session?.organization) return;
+        const org = session.organization;
+        setOrganization(org);
+        const restored = readThread(org);
+        if (restored.length > 0 && !restoredRef.current) {
+          restoredRef.current = true;
+          setThread((current) => [...current, ...(restored as ThreadItem[])]);
         }
-        return changed ? next : current;
       });
-    }, 1000);
-    return () => window.clearInterval(interval);
-  }, [hasOpenWindow]);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  async function approveInChat(proposal: ActionCardProposal) {
-    setChatApprovals((current) => ({
-      ...current,
-      [proposal.id]: { ...current[proposal.id], state: 'approving', expiresAt: current[proposal.id]?.expiresAt ?? 0 },
-    }));
-    try {
-      const response = await fetch(`/api/proposals/${encodeURIComponent(proposal.id)}/submit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        // The server derives who is approving from the session; the client
-        // sends only its signature ref and the hash of what it reviewed.
-        body: JSON.stringify({
-          signatureRef: `sig_chat_${proposal.id}`,
-          approvalHash: proposal.approvalHash,
-        }),
-      });
-      if (response.ok) {
-        setChatApprovals((current) => ({
-          ...current,
-          [proposal.id]: { state: 'approved', expiresAt: 0 },
-        }));
-        return;
-      }
-      const body = (await response.json().catch(() => null)) as { error?: string } | null;
-      setChatApprovals((current) => ({
-        ...current,
-        [proposal.id]: {
-          state: 'blocked',
-          expiresAt: 0,
-          note: body?.error ?? 'Policy requires this one to go through the approval queue.',
-        },
-      }));
-    } catch {
-      setChatApprovals((current) => ({
-        ...current,
-        [proposal.id]: { state: 'blocked', expiresAt: 0, note: 'Connection dropped — approve it from the queue instead.' },
-      }));
-    }
-  }
-
-  const deskStats = useMemo(() => {
-    const needsApproval = proposals.filter(
-      (proposal) => proposal.explain.requiredApprovers > proposal.approvals.length,
-    ).length;
-    const warnings = thread.filter((item) => item.kind === 'notice').length;
-    return { total: proposals.length, needsApproval, warnings };
-  }, [proposals, thread]);
-
-  // Let the floating 0xWal remind the operator elsewhere in the app. A
-  // proposal stays "pending" until it is approved (in chat or in the queue).
   useEffect(() => {
-    const unresolved = proposals.filter((proposal) => chatApprovals[proposal.id]?.state !== 'approved');
-    if (proposals.length > 0) {
-      recordPendingProposals({
-        count: unresolved.length,
-        label: unresolved[unresolved.length - 1]?.explain.recommendation ?? null,
-      });
-    }
-  }, [proposals, chatApprovals]);
+    if (!organization) return;
+    writeThread(organization, toPersisted(thread));
+  }, [thread, organization]);
 
   // Keep the newest turn in view while the conversation grows or streams.
   useEffect(() => {
@@ -202,140 +143,114 @@ export default function OxwalDeskPage() {
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
   }, [thread, streamingText]);
 
-  async function submitPrompt(rawPrompt: string) {
+  const refreshPending = useCallback(async () => {
+    try {
+      const response = await fetch('/api/proposals', { cache: 'no-store' });
+      if (!response.ok) return;
+      const body = (await response.json()) as { items: Array<{ recommendation: string }>; total: number };
+      recordPendingProposals({ count: body.total, label: body.items[0]?.recommendation ?? null });
+    } catch {
+      /* the badge simply keeps its last value */
+    }
+  }, []);
+
+  const submitPrompt = useCallback(async (rawPrompt: string) => {
     const prompt = rawPrompt.trim();
     if (!prompt || isSending) return;
 
     const history = thread
-      .flatMap((item) =>
-        item.kind === 'user' || item.kind === 'assistant'
-          ? [{ role: item.kind, content: item.text }]
-          : [],
-      )
+      .flatMap((item) => (item.kind === 'user' || item.kind === 'assistant' ? [{ role: item.kind, content: item.text }] : []))
       .slice(-8);
 
     setInput('');
     setStreamingText('');
     setIsSending(true);
+    setLink(null);
     setThread((current) => [...current, { kind: 'user', id: newId('user'), text: prompt }]);
 
     let assistantText = '';
-    try {
-      const response = await fetch('/api/oxwal', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        // Track A §1.1: identity and org are server-derived from the session;
-        // sending authority-shaped fields is a provenance violation (400).
-        body: JSON.stringify({
-          message: prompt,
-          history,
-        }),
-      });
+    let sawProposal = false;
+    const flushAssistant = () => {
+      const text = assistantText.trim();
+      if (text) setThread((current) => [...current, { kind: 'assistant', id: newId('assistant'), text }]);
+      assistantText = '';
+      setStreamingText('');
+    };
 
-      if (response.status === 401) {
-        setThread((current) => [...current, { kind: 'session-expired', id: newId('expired') }]);
-        return;
-      }
-      if (!response.ok || !response.body) {
+    const result = await openOxwalStream({
+      message: prompt,
+      history,
+      onStatus: (status) => {
+        setLink(status);
+        if (status.phase !== 'failed') return;
+        flushAssistant();
+        if (status.reason === 'unauthorized') {
+          setThread((current) => [...current, { kind: 'session-expired', id: newId('expired') }]);
+          return;
+        }
         setThread((current) => [
           ...current,
-          {
-            kind: 'notice',
-            id: newId('notice'),
-            text: '0xWal could not open a secure line just now. Nothing was prepared — try again.',
-            retryPrompt: prompt,
-          },
+          { kind: 'notice', id: newId('notice'), text: status.message, retryPrompt: status.started ? undefined : prompt, approvalsLink: status.started },
         ]);
-        return;
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      const flushAssistant = () => {
-        const text = assistantText.trim();
-        if (text) {
-          setThread((current) => [...current, { kind: 'assistant', id: newId('assistant'), text }]);
+      },
+      onEvent: (event) => {
+        if (event.type === 'tool') {
+          // A tool call ends the current text turn — commit it so the activity
+          // line lands between turns, in order.
+          flushAssistant();
+          setThread((current) => [
+            ...current,
+            { kind: 'activity', id: newId('tool'), label: activityLabels[event.name] ?? 'Working', tone: event.category === 'PROPOSE' ? 'propose' : 'read' },
+          ]);
+        } else if (event.type === 'warning') {
+          flushAssistant();
+          setThread((current) => [...current, { kind: 'notice', id: newId('notice'), text: event.warning.message }]);
+        } else if (event.type === 'error') {
+          flushAssistant();
+          setThread((current) => [...current, { kind: 'notice', id: newId('notice'), text: `${brand.agentName} stopped before finishing: ${event.message}. Nothing was signed.` }]);
+        } else if (event.type === 'proposal') {
+          flushAssistant();
+          sawProposal = true;
+          setThread((current) => [...current, { kind: 'proposal', id: newId('proposal'), proposal: event.proposal }]);
+        } else if (event.type === 'delta') {
+          assistantText += event.text;
+          setStreamingText(assistantText);
         }
-        assistantText = '';
-        setStreamingText('');
-      };
+      },
+    });
 
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const frames = buffer.split('\n\n');
-        buffer = frames.pop() ?? '';
+    flushAssistant();
+    setStreamingText('');
+    setIsSending(false);
+    if (result === 'done') setLink(null);
+    if (sawProposal) void refreshPending();
+    window.setTimeout(() => inputRef.current?.focus(), 0);
+  }, [isSending, thread, refreshPending]);
 
-        for (const frame of frames) {
-          const line = frame.split('\n').find((item) => item.startsWith('data: '));
-          if (!line) continue;
-          const event = JSON.parse(line.slice(6)) as OxwalStreamEvent;
+  // Deep link: prefill (and optionally send) a prompt handed over by another surface.
+  const deepLinkRef = useRef<{ prompt: string; send: boolean } | null>(null);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const prompt = params.get('prompt')?.trim();
+    if (!prompt) return;
+    deepLinkRef.current = { prompt, send: params.get('send') === '1' };
+    window.history.replaceState(null, '', window.location.pathname);
+    const timer = window.setTimeout(() => {
+      const pending = deepLinkRef.current;
+      deepLinkRef.current = null;
+      if (!pending) return;
+      if (pending.send) void submitPrompt(pending.prompt);
+      else setInput(pending.prompt);
+    }, 0);
+    return () => window.clearTimeout(timer);
+    // The submit callback is stable enough for a one-shot deep link.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-          if (event.type === 'tool') {
-            // A tool call means the current text turn ended — commit it so the
-            // activity line lands between turns, in order.
-            flushAssistant();
-            setThread((current) => [
-              ...current,
-              {
-                kind: 'activity',
-                id: newId('tool'),
-                label: activityLabels[event.name] ?? 'Working',
-                tone: event.category === 'PROPOSE' ? 'propose' : 'read',
-              },
-            ]);
-          }
-
-          if (event.type === 'warning') {
-            flushAssistant();
-            setThread((current) => [
-              ...current,
-              { kind: 'notice', id: newId('notice'), text: event.warning.message },
-            ]);
-          }
-
-          if (event.type === 'proposal') {
-            flushAssistant();
-            const proposalId = event.proposal.id;
-            setChatApprovals((current) => ({
-              ...current,
-              [proposalId]: { state: 'waiting', expiresAt: Date.now() + CHAT_APPROVAL_WINDOW_MS },
-            }));
-            setThread((current) => [
-              ...current,
-              { kind: 'proposal', id: newId('proposal'), proposal: event.proposal },
-            ]);
-          }
-
-          if (event.type === 'delta') {
-            assistantText += event.text;
-            setStreamingText(assistantText);
-          }
-        }
-      }
-
-      flushAssistant();
-    } catch {
-      setThread((current) => [
-        ...current,
-        {
-          kind: 'notice',
-          id: newId('notice'),
-          text: 'The connection dropped mid-answer. Nothing was prepared without you — try again.',
-          retryPrompt: prompt,
-        },
-      ]);
-    } finally {
-      setStreamingText('');
-      setIsSending(false);
-    }
-  }
-
-  function handleSubmit() {
-    void submitPrompt(input);
+  function resetConversation() {
+    clearThread();
+    setThread([{ kind: 'assistant', id: 'assistant_welcome', text: WELCOME }]);
+    setLink(null);
   }
 
   const composer = (
@@ -344,7 +259,7 @@ export default function OxwalDeskPage() {
       title={hasStarted ? undefined : "What's on the agenda today?"}
       value={input}
       onChange={setInput}
-      onSubmit={handleSubmit}
+      onSubmit={() => void submitPrompt(input)}
       onChipSubmit={(prompt) => void submitPrompt(prompt)}
       onFilePrepared={(batch) => {
         stashBatchDraft(batch);
@@ -352,187 +267,148 @@ export default function OxwalDeskPage() {
       }}
       chips={hasStarted ? [] : quickPrompts}
       disabled={isSending}
-      placeholder="Ask 0xWal to read, prepare, or explain — or attach a payout sheet"
+      inputRef={inputRef}
+      placeholder={`Ask ${brand.agentName} to read, prepare, or explain — or attach a payout sheet`}
     />
   );
 
+  const online = link?.phase !== 'reconnecting' && link?.phase !== 'failed';
+
   return (
-    <div className="mx-auto grid w-full max-w-7xl gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
-      <main className="min-w-0 space-y-4">
-        <header className="dash-block dash-block-accent dash-reveal p-5">
-          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="dash-kicker">Operating desk · AI</span>
-                <span className="inline-flex items-center gap-2 rounded-md bg-[#0c3e48] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-white">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" aria-hidden="true" />
-                  0xWal online
-                </span>
-              </div>
-              <h1 className="dash-title mt-3 text-3xl md:text-4xl">Finance command desk</h1>
-              <p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-[#326273]/62">
-                Read financial state, prepare unsigned proposals, and route approvals from one operating surface.
-              </p>
+    <div className="mx-auto grid w-full max-w-7xl gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+      <main className="min-w-0 grid content-start gap-4">
+        <header className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-[var(--text-h1)] font-semibold leading-[1.1] tracking-[-0.02em]">{brand.agentName}</h1>
+              <Badge tone={online ? 'green' : 'amber'}>
+                {online ? 'Online' : link?.phase === 'reconnecting' ? 'Reconnecting' : 'Offline'}
+              </Badge>
             </div>
-            <div className="grid w-full grid-cols-3 overflow-hidden rounded-lg border border-[#326273]/14 bg-white text-center md:w-auto md:min-w-[300px]">
-              <DeskStat label="Proposals" value={deskStats.total} />
-              <DeskStat label="Approval" value={deskStats.needsApproval} caution={deskStats.needsApproval > 0} />
-              <DeskStat label="Notices" value={deskStats.warnings} caution={deskStats.warnings > 0} />
-            </div>
+            <p className="mt-1 text-[14px] text-[var(--text-2)]">Reads state, prepares unsigned proposals, explains its reasoning. You approve in Approvals.</p>
+          </div>
+          <div className="flex items-center gap-4" aria-label="Session summary">
+            <Stat label="Proposals" value={String(deskStats.proposals)} />
+            <Stat label="Notices" value={String(deskStats.notices)} tone={deskStats.notices > 0 ? 'pending' : 'default'} />
           </div>
         </header>
 
-        {/* The chat surface. Starts as a centered composer; the first message
-            expands it into a full conversation with the composer docked below. */}
         {!hasStarted ? (
-          <section className="dash-surface dash-reveal px-4 py-10 md:px-8 md:py-14">
+          <Card padding="lg" className="px-4 py-10 md:px-8 md:py-14">
             {composer}
-          </section>
+          </Card>
         ) : (
-          <section className="dash-surface dash-reveal flex flex-col overflow-hidden">
-            <div className="flex items-center justify-between gap-3 border-b border-[#326273]/10 px-4 py-3">
+          <Card padding="none" className="flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between gap-3 border-b border-[var(--divider)] px-4 py-3">
               <div className="flex items-center gap-2">
-                <BotAvatar size={24} />
-                <h2 className="text-sm font-bold text-[#1F4452]">0xWal</h2>
-                <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-[#326273]/45">
-                  prepares · you approve
-                </span>
+                <BotAvatar />
+                <h2 className="text-[14px] font-semibold">{brand.agentName}</h2>
+                <span className="hidden font-mono text-[11px] uppercase tracking-[0.12em] text-[var(--text-muted)] sm:inline">prepares · you approve</span>
               </div>
-              <Link href="/queue" className="text-[13px] font-bold text-[#326273] underline-offset-4 hover:underline">
-                Approval queue
-              </Link>
+              <div className="flex items-center gap-1">
+                <Button variant="ghost" size="sm" onClick={resetConversation} aria-label="Clear conversation">
+                  <Trash2 aria-hidden="true" /> <span className="hidden sm:inline">Clear</span>
+                </Button>
+                <Button variant="ghost" size="sm" href="/dashboard/approvals">
+                  Approvals
+                </Button>
+              </div>
             </div>
 
-            <div
-              ref={threadRef}
-              className="max-h-[62vh] min-h-[380px] space-y-3 overflow-y-auto p-4"
-              aria-live="polite"
-            >
+            <div ref={threadRef} role="log" aria-live="polite" aria-label={`${brand.agentName} conversation`} className="max-h-[62vh] min-h-[380px] space-y-3 overflow-y-auto p-4">
               {thread.map((item) => (
-                <ThreadRow
-                  key={item.id}
-                  item={item}
-                  onRetry={(prompt) => void submitPrompt(prompt)}
-                  chatApprovals={chatApprovals}
-                  clockMs={clockMs}
-                  onApprove={(proposal) => void approveInChat(proposal)}
-                />
+                <ThreadRow key={item.id} item={item} onRetry={(prompt) => void submitPrompt(prompt)} />
               ))}
 
-              {streamingText && (
+              {streamingText ? (
                 <div className="flex gap-2">
                   <BotAvatar />
-                  <div className="max-w-[88%] rounded-lg rounded-tl-sm border border-[#5C9EAD]/30 bg-[#5C9EAD]/10 px-3 py-2 text-sm font-medium leading-6 text-[#326273]">
+                  <div className="max-w-[88%] rounded-[var(--r-md)] rounded-tl-sm border border-[var(--teal-100)] bg-[var(--teal-100)]/50 px-3 py-2 text-[14px] leading-6">
                     <span className="whitespace-pre-wrap">{streamingText}</span>
-                    <span className="ml-0.5 inline-block h-3 w-0.5 animate-pulse bg-[#0d6370]/60" aria-hidden="true" />
+                    <span className="ml-0.5 inline-block h-3 w-0.5 animate-pulse bg-[var(--teal-600)]" aria-hidden="true" />
                   </div>
                 </div>
-              )}
+              ) : null}
 
-              {isSending && !streamingText && (
-                <div className="flex gap-2">
+              {isSending && !streamingText && link?.phase !== 'reconnecting' ? (
+                <div className="flex gap-2" aria-label={`${brand.agentName} is working`}>
                   <BotAvatar />
-                  <div className="flex items-center gap-1.5 rounded-lg rounded-tl-sm border border-[#326273]/10 bg-[#F6F0ED] px-3 py-2.5">
-                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#0d6370]/50 [animation-delay:0ms]" />
-                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#0d6370]/50 [animation-delay:150ms]" />
-                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#0d6370]/50 [animation-delay:300ms]" />
+                  <div className="flex items-center gap-1.5 rounded-[var(--r-md)] rounded-tl-sm border border-[var(--divider)] bg-[var(--surface-2)] px-3 py-2.5">
+                    <span className="size-1.5 animate-bounce rounded-full bg-[var(--teal-600)] [animation-delay:0ms]" />
+                    <span className="size-1.5 animate-bounce rounded-full bg-[var(--teal-600)] [animation-delay:150ms]" />
+                    <span className="size-1.5 animate-bounce rounded-full bg-[var(--teal-600)] [animation-delay:300ms]" />
                   </div>
                 </div>
-              )}
+              ) : null}
             </div>
 
-            <div className="border-t border-[#326273]/10 bg-white/60 p-3">{composer}</div>
-          </section>
+            {link?.phase === 'reconnecting' ? (
+              <div role="status" className="flex items-center gap-2 border-t border-[var(--amber-100)] bg-[var(--amber-100)] px-4 py-2 text-[13px] text-[var(--amber-600)]">
+                <WifiOff className="size-4 shrink-0" aria-hidden="true" />
+                Reconnecting… attempt {link.attempt}. The answer continues on the server; nothing is signed without you.
+              </div>
+            ) : null}
+
+            <div className="border-t border-[var(--divider)] bg-[var(--surface)] p-3">{composer}</div>
+          </Card>
         )}
       </main>
 
-      <aside className="space-y-4 dash-reveal-stagger">
+      <aside className="grid content-start gap-4">
         <MemWalBehaviorCard compact />
-        <div className="dash-block p-4">
+        <Card className="grid gap-3">
           <div className="flex items-center gap-2">
-            <ShieldCheck className="h-4 w-4 text-[var(--info)]" />
-            <h2 className="text-sm font-bold text-[#1F4452]">Control state</h2>
+            <ShieldCheck className="size-4 text-[var(--teal-600)]" aria-hidden="true" />
+            <h2 className="text-[14px] font-semibold">Control state</h2>
           </div>
-          <div className="mt-3 divide-y divide-[#326273]/10 text-sm">
-            <ControlRow icon={CheckCircle2} label="Tool boundary" value="Read + propose" />
-            <ControlRow icon={Clock3} label="Submit guard" value="Policy re-check" />
-            <ControlRow icon={AlertTriangle} label="Circuit breaker" value="Armed" />
+          <dl>
+            <ProofRow label="Tool boundary" value="Read + propose" />
+            <ProofRow label="Submit guard" value="Policy re-check" />
+            <ProofRow label="Circuit breaker" value="Armed" />
+          </dl>
+          <div className="flex flex-wrap gap-1.5">
+            <Chip>proposes</Chip>
+            <Chip tone="teal">human approves</Chip>
+            <Chip tone="green">deterministic execution</Chip>
           </div>
-        </div>
-        <div className="rounded-2xl border border-[#0c3e48] bg-[#0c3e48] p-4 text-white shadow-[6px_7px_0_rgba(12,62,72,0.18)]">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#efc46f]/80">Approval surface</p>
-          <div className="mt-2 text-2xl font-bold">Maker-checker</div>
-          {deskStats.needsApproval > 0 ? (
-            <p className="mt-2 text-[13px] font-medium leading-5 text-white/78">
-              {deskStats.needsApproval} unsigned {deskStats.needsApproval === 1 ? 'proposal is' : 'proposals are'} waiting
-              for your approval.
-            </p>
-          ) : (
-            <p className="mt-2 text-[13px] font-medium leading-5 text-white/62">
-              Pending proposals, compliance holds, expiring quotes, failed settlements, and anomaly halts live in the queue.
-            </p>
-          )}
-          <Link href="/queue" className="dash-btn dash-btn-gold mt-4">
-            Open queue
-          </Link>
-        </div>
+        </Card>
+        <Card tone="dark" className="grid gap-3 text-white">
+          <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-white/70">Approval surface</p>
+          <div className="text-[20px] font-semibold">Maker-checker</div>
+          <p className="text-[13px] leading-5 text-white/75">
+            {proposals.length > 0
+              ? `${proposals.length} unsigned ${proposals.length === 1 ? 'proposal from this session is' : 'proposals from this session are'} waiting for a human decision.`
+              : 'Pending proposals, compliance holds, expiring quotes and failed settlements wait in Approvals.'}
+          </p>
+          <Button href="/dashboard/approvals" variant="primary" className="justify-self-start">
+            Open Approvals
+          </Button>
+        </Card>
       </aside>
     </div>
   );
 }
 
-function formatCountdown(ms: number) {
-  const total = Math.max(0, Math.ceil(ms / 1000));
-  const minutes = Math.floor(total / 60);
-  const seconds = total % 60;
-  return `${minutes}:${String(seconds).padStart(2, '0')}`;
-}
-
-function ThreadRow({
-  item,
-  onRetry,
-  chatApprovals,
-  clockMs,
-  onApprove,
-}: {
-  item: ThreadItem;
-  onRetry: (prompt: string) => void;
-  chatApprovals: Record<string, ChatApproval>;
-  clockMs: number;
-  onApprove: (proposal: ActionCardProposal) => void;
-}) {
+function ThreadRow({ item, onRetry }: { item: ThreadItem; onRetry: (prompt: string) => void }) {
   if (item.kind === 'user') {
-    return (
-      <div className="ml-auto max-w-[86%] rounded-lg rounded-tr-sm bg-[#1F4452] px-3 py-2 text-sm font-medium leading-6 text-white">
-        {item.text}
-      </div>
-    );
+    return <div className="ml-auto max-w-[86%] rounded-[var(--r-md)] rounded-tr-sm bg-[var(--ink-900)] px-3 py-2 text-[14px] leading-6 text-white">{item.text}</div>;
   }
 
   if (item.kind === 'assistant') {
     return (
       <div className="flex gap-2">
         <BotAvatar />
-        <div className="max-w-[88%] whitespace-pre-wrap rounded-lg rounded-tl-sm border border-[#326273]/12 bg-[#F6F0ED] px-3 py-2 text-sm font-medium leading-6 text-[#326273]">
-          {item.text}
-        </div>
+        <div className="max-w-[88%] whitespace-pre-wrap rounded-[var(--r-md)] rounded-tl-sm border border-[var(--divider)] bg-[var(--surface-2)] px-3 py-2 text-[14px] leading-6">{item.text}</div>
       </div>
     );
   }
 
   if (item.kind === 'activity') {
     return (
-      <div className="flex items-center gap-2 pl-8">
-        <span
-          className={
-            item.tone === 'propose'
-              ? 'inline-flex items-center gap-1.5 rounded-md border border-[#5C9EAD]/35 bg-[#5C9EAD]/10 px-2 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-[#326273]'
-              : 'inline-flex items-center gap-1.5 rounded-md border border-[#326273]/14 bg-white px-2 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-[#326273]/70'
-          }
-        >
-          <span className="h-1 w-1 rounded-full bg-current" aria-hidden="true" />
+      <div className="pl-8">
+        <Chip tone={item.tone === 'propose' ? 'teal' : 'default'} ghost={item.tone !== 'propose'}>
           {item.label}
-        </span>
+        </Chip>
       </div>
     );
   }
@@ -540,20 +416,20 @@ function ThreadRow({
   if (item.kind === 'notice') {
     return (
       <div className="flex flex-wrap items-center gap-2 pl-8">
-        <span className="inline-flex items-center gap-1.5 rounded-md border border-[#E39774]/55 bg-[#E39774]/15 px-2.5 py-1.5 text-[13px] font-semibold leading-5 text-[#9A4A2D]">
-          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+        <span className="inline-flex items-start gap-1.5 rounded-[var(--r-sm)] border border-[var(--amber-100)] bg-[var(--amber-100)] px-2.5 py-1.5 text-[13px] leading-5 text-[var(--amber-600)]">
+          <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
           {item.text}
         </span>
-        {item.retryPrompt && (
-          <button
-            type="button"
-            onClick={() => onRetry(item.retryPrompt!)}
-            className="inline-flex items-center gap-1.5 rounded-md border border-[#326273]/20 bg-white px-2.5 py-1.5 text-[13px] font-bold text-[#326273] transition hover:border-[#5C9EAD]"
-          >
-            <RotateCcw className="h-3.5 w-3.5" />
-            Try again
-          </button>
-        )}
+        {item.retryPrompt ? (
+          <Button variant="ghost" size="sm" onClick={() => onRetry(item.retryPrompt!)}>
+            <RotateCcw aria-hidden="true" /> Try again
+          </Button>
+        ) : null}
+        {item.approvalsLink ? (
+          <Button variant="ghost" size="sm" href="/dashboard/approvals">
+            Open Approvals
+          </Button>
+        ) : null}
       </div>
     );
   }
@@ -561,137 +437,61 @@ function ThreadRow({
   if (item.kind === 'session-expired') {
     return (
       <div className="flex flex-wrap items-center gap-2 pl-8">
-        <span className="inline-flex items-center gap-1.5 rounded-md border border-[#E39774]/55 bg-[#E39774]/15 px-2.5 py-1.5 text-[13px] font-semibold leading-5 text-[#9A4A2D]">
-          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-          Your session ended, so 0xWal paused. Sign in again to pick up where you left off.
+        <span className="inline-flex items-center gap-1.5 rounded-[var(--r-sm)] border border-[var(--amber-100)] bg-[var(--amber-100)] px-2.5 py-1.5 text-[13px] leading-5 text-[var(--amber-600)]">
+          <AlertTriangle className="size-3.5 shrink-0" aria-hidden="true" />
+          Your session ended, so {brand.agentName} paused. Sign in again to pick up where you left off.
         </span>
-        <Link
-          href="/login"
-          className="rounded-md bg-[#1F4452] px-2.5 py-1.5 text-[13px] font-bold text-white transition hover:bg-[#326273]"
-        >
+        <Button size="sm" href="/login">
           Sign in again
-        </Link>
+        </Button>
       </div>
     );
   }
 
-  // Unsigned proposal — approvable in the thread for 2 minutes, then it
-  // waits in the maker-checker queue like any other proposal.
-  const proposal = item.proposal;
-  const approval = chatApprovals[proposal.id];
-  const remainingMs = approval ? approval.expiresAt - clockMs : 0;
+  if (item.kind === 'proposal-ref') {
+    return (
+      <div className="grid gap-1.5">
+        <div className="pl-8">
+          <Chip tone="teal">Earlier proposal</Chip>
+        </div>
+        <div className="flex flex-wrap items-center gap-3 rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--surface)] px-3 py-2.5">
+          <div className="min-w-0 flex-1">
+            <div className="text-[14px] font-medium">{item.recommendation}</div>
+            <div className="font-mono text-[12px] text-[var(--text-muted)]">
+              {item.proposalKind} · {item.corridor ?? 'no corridor'} · {item.proposalId}
+            </div>
+          </div>
+          <Button variant="ghost" size="sm" href="/dashboard/approvals">
+            Review in Approvals
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
+  // Unsigned proposal: readable here, decided in Approvals.
+  const proposal = item.proposal;
   return (
-    <div className="space-y-1.5">
-      <div className="flex items-center gap-2 pl-8">
-        <span className="inline-flex items-center gap-1.5 rounded-md border border-[#efc46f]/60 bg-[#efc46f]/15 px-2 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-[#9A4A2D]">
-          {approval?.state === 'approved' ? 'Signed · queued for settlement' : 'Unsigned proposal'}
-        </span>
+    <div className="grid gap-1.5">
+      <div className="pl-8">
+        <Chip tone="teal">Unsigned proposal</Chip>
       </div>
       <ActionCard key={proposal.id} proposal={proposal} readOnly />
-
-      {(!approval || approval.state === 'waiting') && (
-        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[#326273]/14 bg-white px-3 py-2.5">
-          <Clock3 className="h-4 w-4 shrink-0 text-[var(--info)]" />
-          <span className="text-[13px] font-semibold leading-5 text-[#326273]">
-            Approve here for the next{' '}
-            <span className="font-mono font-bold tabular-nums text-[#1F4452]">{formatCountdown(remainingMs)}</span>
-            {' '}— after that it waits in the approval queue.
-          </span>
-          <div className="ml-auto flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => onApprove(proposal)}
-              className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#1F4452] px-3.5 text-[13px] font-bold text-white transition hover:bg-[#326273] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#5C9EAD]/30"
-            >
-              <CheckCircle2 className="h-4 w-4" />
-              Approve now
-            </button>
-            <Link
-              href="/queue"
-              className="rounded-md border border-[#326273]/20 px-3 py-2 text-[13px] font-bold text-[#326273] transition hover:border-[#5C9EAD]"
-            >
-              Review in queue
-            </Link>
-          </div>
-        </div>
-      )}
-
-      {approval?.state === 'approving' && (
-        <div className="flex items-center gap-2 rounded-lg border border-[#326273]/14 bg-white px-3 py-2.5 text-[13px] font-semibold text-[#326273]">
-          <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-[#5C9EAD] border-t-transparent" aria-hidden="true" />
-          Recording your signature…
-        </div>
-      )}
-
-      {approval?.state === 'approved' && (
-        <div className="flex items-center gap-2 rounded-lg border border-[#5C9EAD]/40 bg-[#5C9EAD]/10 px-3 py-2.5 text-[13px] font-bold text-[#326273]">
-          <CheckCircle2 className="h-4 w-4 shrink-0 text-[var(--info)]" />
-          Approved — signed and submitted for settlement. The receipt lands in History.
-        </div>
-      )}
-
-      {approval?.state === 'expired' && (
-        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[#326273]/14 bg-[#F6F0ED] px-3 py-2.5 text-[13px] font-semibold text-[#326273]">
-          <Clock3 className="h-4 w-4 shrink-0 text-[#326273]/50" />
-          The in-chat window passed — this proposal now waits in the maker-checker queue.
-          <Link href="/queue" className="ml-auto rounded-md bg-[#1F4452] px-3 py-1.5 text-[13px] font-bold text-white">
-            Open queue
-          </Link>
-        </div>
-      )}
-
-      {approval?.state === 'blocked' && (
-        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[#E39774]/55 bg-[#E39774]/12 px-3 py-2.5 text-[13px] font-semibold text-[#9A4A2D]">
-          <AlertTriangle className="h-4 w-4 shrink-0" />
-          {approval.note ?? 'Policy requires this one to go through the approval queue.'}
-          <Link href="/queue" className="ml-auto rounded-md bg-[#1F4452] px-3 py-1.5 text-[13px] font-bold text-white">
-            Open queue
-          </Link>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function BotAvatar({ size = 24 }: { size?: number }) {
-  return (
-    <div
-      className="mt-0.5 grid shrink-0 place-items-center overflow-hidden rounded-full bg-[radial-gradient(circle_at_50%_35%,#eaf6f1,#cfe8e0)] ring-1 ring-[#0d6370]/25"
-      style={{ height: size, width: size }}
-    >
-      {/* Intrinsic size tracks the rendered avatar (~2x for retina). Passing the
-          full 512px source made Next request a 640px variant for a ~16px avatar. */}
-      <Image
-        src="/cinematic/agent-bot-cut.png"
-        alt=""
-        width={Math.round(size * 2)}
-        height={Math.round(size * 2)}
-        style={{ height: size * 0.66, width: 'auto' }}
-      />
-    </div>
-  );
-}
-
-function DeskStat({ label, value, caution = false }: { label: string; value: number; caution?: boolean }) {
-  return (
-    <div className="min-w-0 border-r border-[#326273]/10 px-3 py-2 last:border-r-0">
-      <div className={caution ? 'text-2xl font-bold text-[#E39774]' : 'text-2xl font-bold text-[#1F4452]'}>
-        {value}
+      <div className="flex flex-wrap items-center gap-2 rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--surface)] px-3 py-2.5">
+        <Clock3 className="size-4 shrink-0 text-[var(--teal-600)]" aria-hidden="true" />
+        <span className="text-[13px] leading-5 text-[var(--text-2)]">Waiting in Approvals. Nothing moves until a human signs it there.</span>
+        <Button size="sm" href="/dashboard/approvals" className="ml-auto">
+          <CheckCircle2 aria-hidden="true" /> Review in Approvals
+        </Button>
       </div>
-      <div className="mt-0.5 text-[10px] font-semibold uppercase tracking-normal text-[#326273]/50">{label}</div>
     </div>
   );
 }
 
-function ControlRow({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {
+function BotAvatar({ className }: { className?: string }) {
   return (
-    <div className="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0">
-      <div className="flex items-center gap-2">
-        <Icon className="h-4 w-4 text-[var(--info)]" />
-        <span className="font-bold text-[#326273]">{label}</span>
-      </div>
-      <span className="font-mono text-[13px] font-bold text-[#1F4452]">{value}</span>
-    </div>
+    <span className={cn('mt-0.5 grid size-6 shrink-0 place-items-center rounded-full bg-[var(--teal-100)] font-mono text-[10px] font-semibold text-[var(--teal-600)]', className)} aria-hidden="true">
+      0x
+    </span>
   );
 }

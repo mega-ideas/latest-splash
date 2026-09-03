@@ -78,12 +78,21 @@ test('the 0xWal desk is the streaming surface and avoids browser money storage',
   const forgotPassword = await readFile(new URL('../app/forgot-password/page.tsx', import.meta.url), 'utf8');
   const shell = await readFile(new URL('../components/dashboard/AppShell.tsx', import.meta.url), 'utf8');
 
-  assert.match(page, /fetch\('\/api\/oxwal'/);
-  assert.match(page, /response\.body\.getReader\(\)/);
+  const client = await readFile(new URL('../lib/oxwal/stream-client.ts', import.meta.url), 'utf8');
+  // The desk streams through the resumable client: POST starts a run, a
+  // dropped read re-attaches by sequence number, and the page never talks
+  // to the API directly.
+  assert.match(page, /openOxwalStream/);
+  assert.match(client, /'\/api\/oxwal'/);
+  assert.match(client, /response\.body\.getReader\(\)/);
+  assert.match(client, /\?after=\$\{lastSeq\}/);
   assert.match(page, /<ActionCard key=\{proposal\.id\} proposal=\{proposal\}/);
   assert.match(page, /OxWalComposer/);
   assert.match(page, /What's on the agenda today\?/);
-  assert.match(page, /href="\/queue"/);
+  assert.match(page, /href="\/dashboard\/approvals"/);
+  // Read-only in the thread: approval happens in Approvals through the one
+  // real path, never from the chat.
+  assert.doesNotMatch(page, /\/submit'/);
   assert.doesNotMatch(page, /localStorage|sessionStorage/);
   assert.match(layout, /export const dynamic = 'force-dynamic'/);
   // The layout must hand the server-resolved session to the shell and render
@@ -135,7 +144,7 @@ test('landing keeps restored isometric shell with upgraded truth copy', async ()
   const copyCheck = await readFile(new URL('../scripts/check-copy.mjs', import.meta.url), 'utf8');
   const ogImage = await readFile(new URL('../app/opengraph-image.tsx', import.meta.url), 'utf8');
   const composer = await readFile(new URL('../components/oxwal/OxWalComposer.tsx', import.meta.url), 'utf8');
-  const floating = await readFile(new URL('../components/FloatingCopilot.tsx', import.meta.url), 'utf8');
+  const floating = await readFile(new URL('../components/oxwal/FloatingIndicator.tsx', import.meta.url), 'utf8');
   // The invoice loop lives inside the Invoices page now (Inspection loop tab).
   const invoiceLoop = await readFile(new URL('../components/invoices/InvoiceLoop.tsx', import.meta.url), 'utf8');
 
@@ -161,7 +170,10 @@ test('landing keeps restored isometric shell with upgraded truth copy', async ()
   assert.match(composer, /Prepare batch/);
   assert.match(composer, /onFilePrepared/);
   assert.doesNotMatch(composer, /priorityLabel|bg-black/);
-  assert.match(floating, /OxWalComposer/);
+  // The floating indicator is a shortcut to the desk, not a second chat.
+  assert.match(floating, /ChatComposer/);
+  assert.match(floating, /\/dashboard\/oxwal\?prompt=/);
+  assert.match(floating, /role="dialog"/);
   assert.match(invoiceLoop, /What should 0xWal inspect\?/);
   assert.match(claims, /footerLegal/);
   assert.match(copyCheck, /8 corridors/);
