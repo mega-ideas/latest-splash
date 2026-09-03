@@ -138,6 +138,9 @@ function forbiddenClaimViolations(text, relPath) {
 // `legacyHexAllowances` and shrink to nothing as each surface migrates; a NEW
 // file, or a new v1 hex in an old file, fails here.
 const paletteV2 = new Set([
+  // Palette v3 'Clear Air'
+  '#0e1526', '#1a2440', '#1e42d8', '#2d5bff', '#4a72ff', '#8fa8ff', '#e4eaff', '#ff6a3d', '#f5f7fa', '#eaeef4', '#4b5568', '#5d6779', '#dce1ea', '#e7ebf1', '#c6cdd9', '#e9edf5',
+  '#0b1020', '#121a2e', '#1a2340', '#1e2a52', '#b9c2d3', '#99a3b8', '#26304a', '#1e2740', '#33405e', '#a9bcff',
   '#0b2a33', '#163f4a', '#1f7a8c', '#2e96a8', '#5c9ead', '#dceef1',
   '#f7f8f7', '#ffffff', '#eef3f4', '#4a5c64', '#59686f', '#16606e', '#157056', '#8a5809', '#dce3e6', '#e8edef',
   '#1e8f6e', '#ddf3ea', '#b9770e', '#fbefd9', '#b93a32', '#fae3e1',

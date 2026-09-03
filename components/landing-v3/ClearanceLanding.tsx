@@ -83,7 +83,7 @@ export default function ClearanceLanding() {
         {/* 1. Hero and clearance strip: the record lands from the ink region into the paper region. */}
         <section aria-labelledby="hero-title" className="bg-[var(--surface-navigation)] text-[var(--text-on-dark)]">
           <div className={cn(container, 'pb-0 pt-16 md:pt-24')}>
-            <p className="font-mono text-[11px] uppercase tracking-[var(--tracking-label)] text-[var(--teal-300)]">Global payment clearance · USD to Southeast Asia</p>
+            <p className="flex items-center gap-3 font-mono text-[11px] uppercase tracking-[var(--tracking-label)] text-[var(--beacon-300)]"><span className="h-px w-8 bg-[var(--brand-ember)]" aria-hidden="true" />Global payment clearance · USD to Southeast Asia</p>
             <h1 id="hero-title" className="mt-4 max-w-[14ch] text-[40px] font-semibold leading-[1.02] tracking-[-0.03em] sm:text-[56px] md:text-[68px]">
               Global payments, cleared for landing.
             </h1>
@@ -258,6 +258,7 @@ Idempotency-Key: 8f0b4e2a-…
         <section aria-labelledby="cta-title" className="border-t border-[var(--border-default)] bg-[var(--surface-canvas)]">
           <div className={cn(container, 'grid gap-6 py-16 md:grid-cols-[minmax(0,1fr)_auto] md:items-end md:py-24')}>
             <div>
+              <p className="mb-4 flex items-center gap-3 font-mono text-[11px] uppercase tracking-[var(--tracking-label)] text-[var(--text-2)]"><span className="h-px w-8 bg-[var(--brand-ember)]" aria-hidden="true" />Sandbox open</p>
               <h2 id="cta-title" className="text-[32px] font-semibold leading-[1.05] tracking-[-0.025em] md:text-[44px]">Clear your first corridor.</h2>
               <p className="mt-3 max-w-[48ch] text-[16px] text-[var(--text-2)]">See real routes, sandbox pricing and real evidence in minutes. No customer funds move until MFCA activation.</p>
             </div>

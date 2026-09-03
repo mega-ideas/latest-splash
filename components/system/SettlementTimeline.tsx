@@ -33,7 +33,7 @@ export default function SettlementTimeline({
                 className={cn(
                   'flex size-7 shrink-0 items-center justify-center rounded-full border',
                   node.status === 'done' && 'border-[var(--ok)] bg-[var(--ok-bg)] text-[var(--ok-text)]',
-                  node.status === 'current' && 'border-[var(--teal-600)] bg-[var(--teal-600)] text-white',
+                  node.status === 'current' && 'border-[var(--teal-600)] bg-[var(--teal-600)] text-[var(--signal-contrast)]',
                   node.status === 'todo' && 'border-[var(--line)] bg-[var(--surface)] text-[var(--text-muted)]',
                   node.status === 'branch' && (node.state === 'RETURNED'
                     ? 'border-[var(--error)] bg-[var(--error-bg)] text-[var(--error-text)]'

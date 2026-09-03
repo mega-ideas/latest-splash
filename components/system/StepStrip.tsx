@@ -33,7 +33,7 @@ export default function StepStrip({
                   className={cn(
                     'flex size-7 shrink-0 items-center justify-center rounded-full border font-mono text-[12px] font-semibold',
                     state === 'done' && 'border-[var(--ok)] bg-[var(--ok-bg)] text-[var(--ok-text)]',
-                    state === 'current' && 'border-[var(--teal-600)] bg-[var(--teal-600)] text-white',
+                    state === 'current' && 'border-[var(--teal-600)] bg-[var(--teal-600)] text-[var(--signal-contrast)]',
                     state === 'todo' && 'border-[var(--line)] text-[var(--text-muted)]',
                   )}
                 >

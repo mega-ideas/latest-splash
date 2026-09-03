@@ -1,3 +1,9 @@
+# v5 Clear Air palette (branch feat/v5-clear-air)
+
+- Palette v3 "Clear Air" in `styles/tokens.css`: night foundation, air neutrals, beacon cobalt as the single signal colour, ember reserved for the wordmark full stop and two marketing eyebrows; v2 names kept as aliases so every surface re-skins. Dark mode retuned. See `docs/design-system.md` §9.
+- Brand icons recoloured toward beacon (originals in git history).
+- `scripts/check-copy.mjs` whitelist extended with the v3 hexes.
+
 # v4 Clearance Signal (branch feat/v4-clearance-signal)
 
 Adopts the "Global Payment Clearance" design handoff with our own branding (Palette v2, Geist, truthful copy). Plan and interpretation: `docs/clearance-signal-plan.md`; rejected handoff claims: `docs/claims-audit.md`.

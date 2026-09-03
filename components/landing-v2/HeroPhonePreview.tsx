@@ -40,7 +40,7 @@ export default function HeroPhonePreview({ className = '' }: { className?: strin
           </div>
         </div>
         <div className="rounded-[12px] border border-[var(--line)] bg-[var(--surface)] px-2.5 py-2 text-[10px] text-[var(--text-2)]">Waiting in Approvals. Nothing moves until a human signs it.</div>
-        <div className="grid h-10 place-items-center rounded-[10px] bg-[var(--teal-600)] text-[12px] font-semibold text-white">Review in Approvals</div>
+        <div className="grid h-10 place-items-center rounded-[10px] bg-[var(--teal-600)] text-[12px] font-semibold text-[var(--signal-contrast)]">Review in Approvals</div>
       </div>
     </div>
   );

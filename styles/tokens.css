@@ -1,33 +1,49 @@
 /* ─── Splash design tokens ──────────────────────────────────────────────────
-   Palette v2 (docs/design-system.md §1.1) is the source of truth for every
-   UI surface. The v1 names below it (--bg/--ink/--slate/--teal/--coral/--gold)
-   remain ONLY so legacy surfaces keep rendering while they migrate; the
-   check-copy whitelist shrinks with each migration PR. New code uses v2. */
+   Palette v3 "Clear Air" (docs/design-system.md §9) is the source of truth.
+   Roles: luminous cool neutrals (air), a deep night foundation, ONE signal
+   colour (beacon cobalt) for actions, routes and selection, functional
+   colours for state, and a single warm ember reserved for the wordmark and
+   marketing eyebrows — never a state, never a control. The v2 names
+   (--ink-N, --teal-N, --paper) stay as aliases so every surface re-skins;
+   new code uses the semantic names below. */
 
 :root {
-  /* ── Palette v2 · light (default) ─────────────────────────────────────── */
-  --ink-900: #0B2A33;
-  --ink-700: #163F4A;
-  --teal-600: #1F7A8C;   /* primary interactive: buttons, links, focus */
-  --teal-500: #2E96A8;   /* hover / active */
-  --teal-300: #5C9EAD;   /* brand tint: illustrations, chart lines, tints only */
-  --teal-100: #DCEEF1;
-  --paper: #F7F8F7;
-  --surface: #FFFFFF;
-  --surface-2: #EEF3F4;
-  --text: #0B2A33;
-  --text-2: #4A5C64;
-  --text-muted: #59686F; /* darkened from #6B7A83: 4.43:1 on white failed AA at 11-13px; now 5.8:1 (white) / 4.6:1 (surface-2) */
-  --border: #DCE3E6;
-  --divider: #E8EDEF;
+  /* ── Palette v3 · light (default) ─────────────────────────────────────── */
+  --night-900: #0E1526;  /* foundation: navigation, hero, dark regions */
+  --night-700: #1A2440;  /* navigation active */
+  --beacon-700: #1E42D8; /* signal as text on light surfaces (7.4:1 on white) */
+  --beacon-600: #2D5BFF; /* signal: primary action, links, focus (5.2:1 with white text) */
+  --beacon-500: #4A72FF; /* hover / active */
+  --beacon-300: #8FA8FF; /* data lines, illustration tint, labels on night */
+  --beacon-100: #E4EAFF; /* selected row, info tint */
+  --ember-500: #FF6A3D;  /* brand only: wordmark full stop, marketing eyebrows */
+  --air-50: #F5F7FA;     /* canvas */
+  --air-100: #EAEEF4;    /* subtle surface */
+  --white: #FFFFFF;      /* raised surface */
+
+  /* v2 alias names → v3 values (migrate to semantic names; do not add uses) */
+  --ink-900: var(--night-900);
+  --ink-700: var(--night-700);
+  --teal-600: var(--beacon-600);
+  --teal-500: var(--beacon-500);
+  --teal-300: var(--beacon-300);
+  --teal-100: var(--beacon-100);
+  --paper: var(--air-50);
+  --surface: var(--white);
+  --surface-2: var(--air-100);
+  --text: #0E1526;
+  --text-2: #4B5568;
+  --text-muted: #5D6779; /* 5.7:1 on white, 4.8:1 on air-100 */
+  --border: #DCE1EA;
+  --divider: #E7EBF1;
   --green-600: #1E8F6E;  /* settled / positive */
   --green-100: #DDF3EA;
   --amber-600: #B9770E;  /* pending / legacy-rail contrast */
   --amber-100: #FBEFD9;
   --red-600: #B93A32;    /* returned / rejected */
   --red-100: #FAE3E1;
-  --gradient-hero: linear-gradient(135deg, #0B2A33 0%, #1F7A8C 100%);
-  --focus-ring: 2px solid var(--teal-500);
+  --gradient-hero: linear-gradient(135deg, #0E1526 0%, #2D5BFF 100%);
+  --focus-ring: 2px solid var(--beacon-500);
   --focus-offset: 2px;
 
   /* Semantic aliases used by components */
@@ -35,7 +51,7 @@
   --accent: var(--teal-600);
   --accent-hover: var(--teal-500);
   /* 700 text shades: the only way 12-13px status text passes AA on the 100 tints and on white. */
-  --teal-700: #16606E;
+  --teal-700: var(--beacon-700);
   --green-700: #157056;
   --amber-700: #8A5809;
   --ok: var(--green-600);
@@ -52,12 +68,12 @@
   --info-text: var(--teal-700);
   --pending: var(--text-muted);
   --pending-bg: var(--surface-2);
-  --line: #DCE3E6;
+  --line: #DCE1EA;
 
   /* ── Clearance semantic layer (docs/clearance-signal-plan.md) ──────────
-     The handoff's roles mapped onto Palette v2. One signal colour for
-     routes, selection and the primary action; functional colours for
-     state; mono for evidence. No orange, no iris. */
+     One signal colour for routes, selection and the primary action;
+     functional colours for state; mono for evidence. Ember is brand
+     chrome only. */
   --surface-canvas: var(--paper);
   --surface-raised: var(--surface);
   --surface-subtle: var(--surface-2);
@@ -69,13 +85,15 @@
   --surface-exception: var(--red-100);
   --signal: var(--teal-600);
   --signal-hover: var(--teal-500);
+  --signal-contrast: #FFFFFF; /* text on a signal fill; night in dark mode where beacon lifts */
   --state-data: var(--teal-300);
   --state-verified: var(--green-700);
   --state-attention: var(--amber-700);
   --state-exception: var(--red-600);
-  --text-on-dark: #E6EEF0;
+  --text-on-dark: #E9EDF5;
+  --brand-ember: var(--ember-500);
   --border-default: var(--line);
-  --border-strong: #C7D1D5;
+  --border-strong: #C6CDD9;
   --focus-ring: var(--teal-500);
   --font-interface: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
   --font-evidence: var(--font-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -91,7 +109,7 @@
   --row-height-compact: 2.25rem;
   --dur-fast: 120ms;
   --dur-ui: 160ms;
-  --line-strong: #C9D3D7;
+  --line-strong: #C6CDD9;
 
   /* ── Legacy v1 names (illustration-only in v2; kept for unmigrated surfaces) */
   --ink: #1F4452;
@@ -143,10 +161,10 @@
   --r-pill: 999px;
 
   /* ── Elevation ───────────────────────────────────────────────────────── */
-  --shadow-rest: 0 1px 2px rgba(11, 42, 51, .05);
-  --shadow-elevated: 0 8px 24px rgba(11, 42, 51, .10);
+  --shadow-rest: 0 1px 2px rgba(14, 21, 38, .05);
+  --shadow-elevated: 0 8px 24px rgba(14, 21, 38, .10);
   --shadow-1: var(--shadow-rest);
-  --shadow-2: 0 4px 12px rgba(11, 42, 51, .08);
+  --shadow-2: 0 4px 12px rgba(14, 21, 38, .08);
   --shadow-3: var(--shadow-elevated);
 
   /* ── Motion · 220 UI / 320 flows / 400 reveals ───────────────────────── */
@@ -167,26 +185,27 @@
 
 /* ─── Dark mode ────────────────────────────────────────────────────────────
    Follows the system unless the viewer chose a theme (data-theme on <html>,
-   set by components/system/ThemeToggle). Brand teal stays recognisable;
-   text meets AA on every surface. */
+   set by components/system/ThemeToggle). Beacon lifts to its 300 tint for
+   text and links; text meets AA on every surface. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --paper: #071C22;
-    --bg: #071C22;
-    --surface: #0F2C35;
-    --surface-2: #153845;
-    --text: #E6EEF0;
-    --text-2: #B7C6CB;
-    --text-muted: #9BB0B7;
-    --border: #244852;
-    --divider: #1C3B45;
-    --line: #244852;
-    --line-strong: #2F5661;
-    --accent: #7FCBD9;
-    --accent-hover: #9BD9E4;
-    --teal-600: #7FCBD9;
-    --teal-500: #9BD9E4;
-    --teal-100: #153845;
+    --paper: #0B1020;
+    --bg: #0B1020;
+    --surface: #121A2E;
+    --surface-2: #1A2340;
+    --text: #E9EDF5;
+    --text-2: #B9C2D3;
+    --text-muted: #99A3B8;
+    --border: #26304A;
+    --divider: #1E2740;
+    --line: #26304A;
+    --line-strong: #33405E;
+    --accent: #8FA8FF;
+    --accent-hover: #A9BCFF;
+    --teal-600: #8FA8FF;
+    --teal-500: #A9BCFF;
+    --teal-100: #1E2A52;
+    --signal-contrast: #0B1020;
     --ok: #5FD3A8;
     --ok-bg: #123B31;
     --green-100: #123B31;
@@ -196,16 +215,16 @@
     --error: #F08A82;
     --error-bg: #3E1B18;
     --red-100: #3E1B18;
-    --info: #7FCBD9;
-    --info-bg: #153845;
+    --info: #8FA8FF;
+    --info-bg: #1E2A52;
     --ok-text: #5FD3A8;
     --warn-text: #E8B04B;
     --error-text: #F08A82;
-    --info-text: #7FCBD9;
-    --teal-700: #7FCBD9;
+    --info-text: #8FA8FF;
+    --teal-700: #8FA8FF;
     --green-700: #5FD3A8;
     --amber-700: #E8B04B;
-    --pending-bg: #153845;
+    --pending-bg: #1A2340;
     --shadow-rest: 0 1px 2px rgba(0, 0, 0, .35);
     --shadow-elevated: 0 8px 24px rgba(0, 0, 0, .45);
     color-scheme: dark;
@@ -214,22 +233,23 @@
 
 :root[data-theme="dark"],
 [data-theme="dark"] {
-  --paper: #071C22;
-  --bg: #071C22;
-  --surface: #0F2C35;
-  --surface-2: #153845;
-  --text: #E6EEF0;
-  --text-2: #B7C6CB;
-  --text-muted: #9BB0B7;
-  --border: #244852;
-  --divider: #1C3B45;
-  --line: #244852;
-  --line-strong: #2F5661;
-  --accent: #7FCBD9;
-  --accent-hover: #9BD9E4;
-  --teal-600: #7FCBD9;
-  --teal-500: #9BD9E4;
-  --teal-100: #153845;
+  --paper: #0B1020;
+  --bg: #0B1020;
+  --surface: #121A2E;
+  --surface-2: #1A2340;
+  --text: #E9EDF5;
+  --text-2: #B9C2D3;
+  --text-muted: #99A3B8;
+  --border: #26304A;
+  --divider: #1E2740;
+  --line: #26304A;
+  --line-strong: #33405E;
+  --accent: #8FA8FF;
+  --accent-hover: #A9BCFF;
+  --teal-600: #8FA8FF;
+  --teal-500: #A9BCFF;
+  --teal-100: #1E2A52;
+  --signal-contrast: #0B1020;
   --ok: #5FD3A8;
   --ok-bg: #123B31;
   --green-100: #123B31;
@@ -239,16 +259,16 @@
   --error: #F08A82;
   --error-bg: #3E1B18;
   --red-100: #3E1B18;
-  --info: #7FCBD9;
-  --info-bg: #153845;
+  --info: #8FA8FF;
+  --info-bg: #1E2A52;
   --ok-text: #5FD3A8;
   --warn-text: #E8B04B;
   --error-text: #F08A82;
-  --info-text: #7FCBD9;
-  --teal-700: #7FCBD9;
+  --info-text: #8FA8FF;
+  --teal-700: #8FA8FF;
   --green-700: #5FD3A8;
   --amber-700: #E8B04B;
-  --pending-bg: #153845;
+  --pending-bg: #1A2340;
   --shadow-rest: 0 1px 2px rgba(0, 0, 0, .35);
   --shadow-elevated: 0 8px 24px rgba(0, 0, 0, .45);
   color-scheme: dark;

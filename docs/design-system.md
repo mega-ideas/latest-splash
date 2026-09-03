@@ -132,3 +132,28 @@ Adopted from the "Global Payment Clearance" handoff (`docs/clearance-signal-plan
 **Landing** (`components/landing-v3`): dark nav (Platform / Network / Security / Developers / Company), hero with a real HTML clearance strip (KUL → MNL, six checkpoints, effective FX, all-in cost, delivery, quote freshness, live state), proof band, operating model, route comparison, corridor atlas, governance, three-way reconciliation, developers, final CTA, footer. Regions alternate ink and paper; the signal colour traces one route through the page. Motion: checkpoints and route path arrive in sequence, still under `prefers-reduced-motion`. No gradients, no floating mockups.
 
 **Contrast**: text on the ink foundation uses `--text-on-dark` at ≥ 72% opacity for 10–11px labels (axe WCAG AA at rendered size).
+
+## 9. Palette v3 "Clear Air" (branch `feat/v5-clear-air`)
+
+A new breath over the v2 teal: luminous cool neutrals, a deep night foundation, one cobalt signal, and a single warm ember reserved for brand chrome. Type stays Geist + Geist Mono. The method follows a compact brand system (neutrals with defined roles, a small accent set with one job each); the hexes are Splash's own.
+
+| Token | Hex | Role |
+| --- | --- | --- |
+| `--night-900` | `#0E1526` | Foundation: navigation, hero, dark landing regions, primary text |
+| `--night-700` | `#1A2440` | Navigation active |
+| `--beacon-600` | `#2D5BFF` | The signal: primary action, links, focus, selection edge (5.2:1 with white text) |
+| `--beacon-500` | `#4A72FF` | Hover / active |
+| `--beacon-700` | `#1E42D8` | Signal as text on light surfaces (7.4:1 on white) |
+| `--beacon-300` | `#8FA8FF` | Data lines, illustration tint, labels on night (8:1) |
+| `--beacon-100` | `#E4EAFF` | Selected row, info tint |
+| `--ember-500` | `#FF6A3D` | Brand only: the wordmark's full stop and marketing eyebrow rules. Never a state, never a control |
+| `--air-50` / `--air-100` / `--white` | `#F5F7FA` / `#EAEEF4` / `#FFFFFF` | Canvas / subtle / raised |
+| `--text` / `--text-2` / `--text-muted` | `#0E1526` / `#4B5568` / `#5D6779` | Body, secondary, captions (AA at 11–13px on white and air-100) |
+| `--border` / `--divider` / `--border-strong` | `#DCE1EA` / `#E7EBF1` / `#C6CDD9` | 1px dividers, strong edges |
+| green / amber / red | unchanged from v2 | Verified / attention / exception |
+
+Dark mode: canvas `#0B1020`, raised `#121A2E`, subtle `#1A2340`, selected `#1E2A52`, text `#E9EDF5`, beacon lifts to `#8FA8FF` (hover `#A9BCFF`).
+
+The v2 names (`--ink-900`, `--teal-600`, `--paper`, …) remain as aliases to the v3 values so every surface re-skins at once; the clearance semantic layer (`--signal`, `--surface-navigation`, …) is the API for new code. Brand icons were recoloured toward beacon (hue +38°, saturation ×1.35) from the teal originals.
+
+Why this and not the obvious defaults: cream-plus-terracotta and near-black-plus-acid-green are the two most common generated looks right now, and every payments incumbent is teal or navy. Cobalt on luminous air reads as sky and clearance; the ember is the one warm point, spent in exactly two places.

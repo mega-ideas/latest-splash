@@ -93,7 +93,7 @@ export default function ClearanceStrip({ data }: { data: StripData }) {
             {CHECKPOINTS.map((c, index) => (
               <li key={c.code} className={cn('checkpoint grid gap-1 border-t-2 pt-2', c.state === 'complete' && 'border-[var(--state-verified)]', c.state === 'active' && 'border-[var(--signal)]', c.state === 'pending' && 'border-[var(--border-strong)]')} style={{ animationDelay: `${index * 140}ms` }}>
                 <span className="flex items-center gap-1.5 font-mono text-[11px] font-semibold">
-                  <span className={cn('grid size-4 place-items-center rounded-full text-[9px]', c.state === 'complete' && 'bg-[var(--state-verified)] text-white', c.state === 'active' && 'bg-[var(--signal)] text-white', c.state === 'pending' && 'border border-[var(--border-strong)] text-[var(--text-muted)]')} aria-hidden="true">{c.state === 'complete' ? '✓' : index + 1}</span>
+                  <span className={cn('grid size-4 place-items-center rounded-full text-[9px]', c.state === 'complete' && 'bg-[var(--state-verified)] text-white', c.state === 'active' && 'bg-[var(--signal)] text-[var(--signal-contrast)]', c.state === 'pending' && 'border border-[var(--border-strong)] text-[var(--text-muted)]')} aria-hidden="true">{c.state === 'complete' ? '✓' : index + 1}</span>
                   {c.code}
                 </span>
                 <span className="text-[11px] leading-tight text-[var(--text-2)]">{c.note}</span>

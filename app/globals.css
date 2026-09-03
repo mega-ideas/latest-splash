@@ -445,7 +445,7 @@ body {
   font-weight: 600;
   letter-spacing: -.01em;
 }
-.brand-wordmark-text span { color: var(--teal); }
+.brand-wordmark-text span { color: var(--brand-ember); }
 .cin-footer-posture,
 .wc-footer-posture {
   padding: 12px 0 20px;
@@ -542,3 +542,4 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .clearance-strip .checkpoint, .clearance-strip .route-line { animation: none; }
 }
+

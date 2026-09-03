@@ -114,7 +114,7 @@ export default function ProcessingStep({ state, set, next, retry }: { state: Tra
                   className={cn(
                     'mt-0.5 flex size-6 items-center justify-center rounded-full border font-mono text-[11px]',
                     done && (settled ? 'border-[var(--ok)] bg-[var(--ok)] text-[var(--ink-900)]' : 'border-[var(--ok)] bg-[var(--ok-bg)] text-[var(--ok-text)]'),
-                    active && 'border-[var(--teal-600)] bg-[var(--teal-600)] text-white motion-safe:animate-pulse',
+                    active && 'border-[var(--teal-600)] bg-[var(--teal-600)] text-[var(--signal-contrast)] motion-safe:animate-pulse',
                     !done && !active && (settled ? 'border-white/30 text-white/60' : 'border-[var(--line)] text-[var(--text-muted)]'),
                   )}
                   aria-hidden="true"

@@ -13,7 +13,7 @@ const base =
   'active:translate-y-px disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0';
 
 const variants: Record<Variant, string> = {
-  primary: 'bg-[var(--teal-600)] text-white hover:bg-[var(--teal-500)]',
+  primary: 'bg-[var(--teal-600)] text-[var(--signal-contrast)] hover:bg-[var(--teal-500)]',
   secondary: 'border border-[var(--border-strong)] bg-[var(--surface-raised)] text-[var(--text)] hover:bg-[var(--surface-subtle)]',
   ghost: 'border border-[var(--line)] bg-transparent text-[var(--text)] hover:bg-[var(--surface-2)]',
   quiet: 'bg-transparent text-[var(--text-2)] hover:bg-[var(--surface-subtle)] hover:text-[var(--text)]',

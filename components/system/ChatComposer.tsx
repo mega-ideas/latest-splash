@@ -95,7 +95,7 @@ const ChatComposer = forwardRef<ChatComposerHandle, {
         <button
           type="submit"
           disabled={disabled || value.trim().length === 0}
-          className="inline-flex h-11 items-center gap-2 rounded-[var(--r-sm)] bg-[var(--teal-600)] px-4 text-[14px] font-semibold text-white outline-none transition-colors hover:bg-[var(--teal-500)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--teal-500)] disabled:opacity-50"
+          className="inline-flex h-11 items-center gap-2 rounded-[var(--r-sm)] bg-[var(--teal-600)] px-4 text-[14px] font-semibold text-[var(--signal-contrast)] outline-none transition-colors hover:bg-[var(--teal-500)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--teal-500)] disabled:opacity-50"
         >
           {submitLabel}
           <SendHorizontal className="size-4" aria-hidden="true" />
