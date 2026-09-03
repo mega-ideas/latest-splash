@@ -28,7 +28,7 @@ export const COUNTRIES: Array<{ code: RecipientCountry; name: string }> = [
 ];
 
 export type TransferState = {
-  step: 1 | 2 | 3 | 4 | 5;
+  step: 1 | 2 | 3 | 4 | 5 | 6;
   invoiceId?: string;
   recipient: {
     name: string;

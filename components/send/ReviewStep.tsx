@@ -126,7 +126,7 @@ export default function ReviewStep({ state, set, prev, next }: { state: Transfer
   return (
     <div className="grid gap-6">
       <div>
-        <h2 className="text-[var(--text-h2)] font-semibold leading-[1.15] tracking-[-0.02em]">Review and send</h2>
+        <h2 className="text-[var(--text-h2)] font-semibold leading-[1.15] tracking-[-0.02em]">Review</h2>
         <p className="mt-1 text-[14px] text-[var(--text-2)]">Check every line. Nothing moves until you confirm, and policy may ask a second approver to sign.</p>
       </div>
 
@@ -215,11 +215,12 @@ export default function ReviewStep({ state, set, prev, next }: { state: Transfer
       </label>
 
       <div className="flex flex-wrap justify-between gap-2">
+        <p className="w-full border border-[var(--border-default)] bg-[var(--surface-subtle)] px-3 py-2 text-[12.5px] text-[var(--text-2)]">{overThreshold ? 'Authorizing creates the instruction. It waits for a distinct checker before any funds move.' : 'Authorizing creates the instruction. Under your threshold it settles without a second checker; in sandbox no customer funds move.'}</p>
         <Button variant="ghost" onClick={prev} disabled={busy !== 'idle'}>
           Back
         </Button>
         <Button size="lg" onClick={() => void send()} disabled={!agree || !state.quote || busy !== 'idle'}>
-          {busy === 'session' ? 'Preparing funding…' : busy === 'sending' ? 'Creating intent…' : `Send ${usd.format(amountUsd)} USD`}
+          {busy === 'session' ? 'Preparing funding…' : busy === 'sending' ? 'Creating intent…' : `Authorize USD ${usd.format(amountUsd)}`}
         </Button>
       </div>
 

@@ -3,18 +3,21 @@ import type { ButtonHTMLAttributes, ReactNode } from 'react';
 
 import { cn } from '@/lib/utils';
 
-type Variant = 'primary' | 'ghost' | 'destructive-text';
+type Variant = 'primary' | 'secondary' | 'ghost' | 'quiet' | 'destructive' | 'destructive-text';
 type Size = 'sm' | 'md' | 'lg';
 
 const base =
-  'inline-flex items-center justify-center gap-2 rounded-[var(--r-sm)] font-sans font-semibold whitespace-nowrap select-none ' +
+  'inline-flex items-center justify-center gap-2 rounded-[var(--r-control)] font-sans font-medium whitespace-nowrap select-none ' +
   'transition-[background-color,color,border-color,transform] duration-[var(--dur-ui)] ease-[var(--ease-out)] ' +
   'outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--teal-500)] ' +
   'active:translate-y-px disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0';
 
 const variants: Record<Variant, string> = {
   primary: 'bg-[var(--teal-600)] text-white hover:bg-[var(--teal-500)]',
+  secondary: 'border border-[var(--border-strong)] bg-[var(--surface-raised)] text-[var(--text)] hover:bg-[var(--surface-subtle)]',
   ghost: 'border border-[var(--line)] bg-transparent text-[var(--text)] hover:bg-[var(--surface-2)]',
+  quiet: 'bg-transparent text-[var(--text-2)] hover:bg-[var(--surface-subtle)] hover:text-[var(--text)]',
+  destructive: 'border border-[var(--state-exception)] bg-transparent text-[var(--state-exception)] hover:bg-[var(--state-exception)] hover:text-white',
   'destructive-text': 'bg-transparent text-[var(--error-text)] hover:bg-[var(--error-bg)]',
 };
 
