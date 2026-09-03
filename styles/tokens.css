@@ -53,6 +53,44 @@
   --pending: var(--text-muted);
   --pending-bg: var(--surface-2);
   --line: #DCE3E6;
+
+  /* ── Clearance semantic layer (docs/clearance-signal-plan.md) ──────────
+     The handoff's roles mapped onto Palette v2. One signal colour for
+     routes, selection and the primary action; functional colours for
+     state; mono for evidence. No orange, no iris. */
+  --surface-canvas: var(--paper);
+  --surface-raised: var(--surface);
+  --surface-subtle: var(--surface-2);
+  --surface-navigation: var(--ink-900);
+  --surface-navigation-active: var(--ink-700);
+  --surface-selected: var(--teal-100);
+  --surface-verified: var(--green-100);
+  --surface-attention: var(--amber-100);
+  --surface-exception: var(--red-100);
+  --signal: var(--teal-600);
+  --signal-hover: var(--teal-500);
+  --state-data: var(--teal-300);
+  --state-verified: var(--green-700);
+  --state-attention: var(--amber-700);
+  --state-exception: var(--red-600);
+  --text-on-dark: #E6EEF0;
+  --border-default: var(--line);
+  --border-strong: #C7D1D5;
+  --focus-ring: var(--teal-500);
+  --font-interface: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-evidence: var(--font-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  --tracking-label: 0.055em;
+  --r-control: 8px;
+  --sidebar-width: 11.5rem;
+  --sidebar-collapsed-width: 4rem;
+  --topbar-height: 3rem;
+  --inspector-width: 25rem;
+  --control-height: 2.5rem;
+  --control-height-compact: 2rem;
+  --row-height: 2.75rem;
+  --row-height-compact: 2.25rem;
+  --dur-fast: 120ms;
+  --dur-ui: 160ms;
   --line-strong: #C9D3D7;
 
   /* ── Legacy v1 names (illustration-only in v2; kept for unmigrated surfaces) */

@@ -1,20 +1,25 @@
 'use client';
 
 import {
+  Bell,
   Bot,
-  Building2,
   CheckSquare,
   ChevronDown,
-  FileCheck2,
-  Home,
-  Layers,
+  Code2,
+  Droplets,
+  FileClock,
+  GitBranch,
+  LayoutList,
+  Landmark,
   LogOut,
   MoreHorizontal,
   Phone,
-  Send,
+  Plug,
+  Scale,
+  Scan,
+  Search,
   Settings,
-  ShieldAlert,
-  TrendingUp,
+  ShieldCheck,
   UserRound,
   Users,
   X,
@@ -24,43 +29,92 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 
-import NetworkBadge from '@/components/brand/NetworkBadge';
-import SandboxRibbon from '@/components/brand/SandboxRibbon';
 import Wordmark from '@/components/brand/Wordmark';
 import FloatingIndicator from '@/components/oxwal/FloatingIndicator';
+import StatusLabel from '@/components/shell/StatusLabel';
 import type { CustomerSession } from '@/lib/auth/customer-session';
 import { brand } from '@/lib/brand';
+import { getNetworkProfile } from '@/lib/network';
 import { readPendingProposals, subscribePendingProposals } from '@/lib/oxwal-notify';
 import { cn } from '@/lib/utils';
 
-type NavItem = { label: string; href: string; icon: LucideIcon; badge?: 'approvals' };
+/**
+ * Application shell (Clearance Signal): a dark navigation foundation on the
+ * left and top, a calm canvas for the work. Navigation is grouped by what
+ * the operator is doing — Operate, Govern, Build — in the order the
+ * clearance loop runs. 184px at xl, icons only from md to xl, a compact
+ * header plus bottom navigation below md (five destinations, never more).
+ */
+type NavItem = { label: string; href: string; icon: LucideIcon; badge?: 'approvals' | 'dot' };
+type NavGroup = { label: string; items: NavItem[] };
 
-/* Left nav order is the product's order of operations. */
-const NAV: NavItem[] = [
-  { label: 'Home', href: '/dashboard', icon: Home },
-  { label: 'Send', href: '/dashboard/transfer', icon: Send },
-  { label: 'Batch', href: '/dashboard/batch', icon: Layers },
-  { label: 'Approvals', href: '/dashboard/approvals', icon: CheckSquare, badge: 'approvals' },
-  { label: 'Recipients', href: '/dashboard/recipients', icon: Users },
-  { label: 'Treasury', href: '/dashboard/treasury', icon: TrendingUp },
-  { label: 'Receipts', href: '/dashboard/receipts', icon: FileCheck2 },
-  { label: brand.agentName, href: '/dashboard/oxwal', icon: Bot, badge: 'approvals' },
-  { label: 'Settings', href: '/dashboard/settings', icon: Settings },
+const GROUPS: NavGroup[] = [
+  {
+    label: 'Operate',
+    items: [
+      { label: 'Clearance board', href: '/dashboard', icon: LayoutList },
+      { label: 'Payments', href: '/dashboard/payments', icon: Scan },
+      { label: 'Beneficiaries', href: '/dashboard/recipients', icon: Users },
+      { label: 'Liquidity', href: '/dashboard/treasury', icon: Droplets },
+      { label: 'Routes', href: '/dashboard/routes', icon: GitBranch },
+      { label: 'Reconciliation', href: '/dashboard/reconciliation', icon: Scale },
+      { label: brand.agentName, href: '/dashboard/oxwal', icon: Bot, badge: 'dot' },
+    ],
+  },
+  {
+    label: 'Govern',
+    items: [
+      { label: 'Approvals', href: '/dashboard/approvals', icon: CheckSquare, badge: 'approvals' },
+      { label: 'Policy', href: '/dashboard/policy', icon: ShieldCheck },
+      { label: 'Compliance', href: '/dashboard/compliance', icon: Landmark },
+      { label: 'Audit log', href: '/dashboard/audit', icon: FileClock },
+    ],
+  },
+  {
+    label: 'Build',
+    items: [
+      { label: 'Developers', href: '/dashboard/developers', icon: Code2 },
+      { label: 'Integrations', href: '/dashboard/integrations', icon: Plug },
+    ],
+  },
 ];
 
-/* Mobile bottom tabs: the four money moments plus More. */
-const TABS = ['/dashboard', '/dashboard/transfer', '/dashboard/approvals', '/dashboard/oxwal'];
+const NAV = GROUPS.flatMap((group) => group.items);
+
+/* Mobile bottom navigation: approval, exceptions, status, urgent action. */
+const TABS = ['/dashboard', '/dashboard/payments', '/dashboard/approvals', '/dashboard/oxwal'];
+
+const CRUMBS: Record<string, string> = {
+  '/dashboard': 'Operations / Clearance board',
+  '/dashboard/payments': 'Operations / Payments',
+  '/dashboard/send': 'Operations / New payment',
+  '/dashboard/batch': 'Operations / Batch payout',
+  '/dashboard/recipients': 'Operations / Beneficiaries',
+  '/dashboard/treasury': 'Operations / Liquidity',
+  '/dashboard/routes': 'Operations / Routes',
+  '/dashboard/reconciliation': 'Operations / Reconciliation',
+  '/dashboard/oxwal': `Operations / ${brand.agentName}`,
+  '/dashboard/receipts': 'Operations / Clearance record',
+  '/dashboard/approvals': 'Governance / Approvals',
+  '/dashboard/policy': 'Governance / Policy',
+  '/dashboard/compliance': 'Governance / Compliance',
+  '/dashboard/audit': 'Governance / Audit log',
+  '/dashboard/developers': 'Build / Developers',
+  '/dashboard/integrations': 'Build / Integrations',
+  '/dashboard/settings': 'Workspace / Settings',
+  '/dashboard/profile': 'Workspace / Profile',
+};
+
+function crumbFor(pathname: string) {
+  const match = Object.keys(CRUMBS)
+    .filter((key) => pathname === key || pathname.startsWith(`${key}/`))
+    .sort((a, b) => b.length - a.length)[0];
+  return match ? CRUMBS[match] : 'Operations';
+}
 
 function initialsFor(session: CustomerSession) {
   const source = session.name || session.organization || session.email;
-  return (
-    source
-      .split(/\s+/)
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((part) => part[0]?.toUpperCase())
-      .join('') || 'S'
-  );
+  return source.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'S';
 }
 
 function isActive(pathname: string, href: string) {
@@ -72,7 +126,6 @@ function subscribePending(onChange: () => void) {
   return subscribePendingProposals(() => onChange());
 }
 
-/** Pending-approval count from the cross-page notifier; 0 on the server. */
 function usePendingCount() {
   return useSyncExternalStore(subscribePending, () => readPendingProposals().count, () => 0);
 }
@@ -97,32 +150,34 @@ function useOutsideClose(open: boolean, close: () => void) {
   return ref;
 }
 
-function CountBadge({ count }: { count: number }) {
-  if (count <= 0) return null;
+/** UTC clock; aria-hidden so the tick is never announced. */
+function UtcClock() {
+  const [now, setNow] = useState<string | null>(null);
+  useEffect(() => {
+    const tick = () => setNow(new Date().toISOString().slice(11, 19));
+    const timer = window.setTimeout(tick, 0);
+    const interval = window.setInterval(tick, 1000);
+    return () => {
+      window.clearTimeout(timer);
+      window.clearInterval(interval);
+    };
+  }, []);
   return (
-    <span className="ml-auto inline-flex min-w-5 items-center justify-center rounded-full bg-[var(--warn-bg)] px-1.5 font-mono text-[11px] font-semibold text-[var(--warn-text)]" aria-label={`${count} awaiting approval`}>
-      {count}
+    <span className="hidden font-mono text-[12px] tabular-nums text-[var(--text-on-dark)]/80 lg:inline" aria-hidden="true">
+      {now ? `${now} UTC` : ''}
     </span>
   );
 }
 
-export default function AppShell({
-  children,
-  session,
-  kyb,
-}: {
-  children: ReactNode;
-  session: CustomerSession;
-  kyb?: { state: string; blocked: boolean; reason: string };
-}) {
+export default function AppShell({ children, session, kyb }: { children: ReactNode; session: CustomerSession; kyb?: { state: string; blocked: boolean; reason: string } }) {
   const router = useRouter();
   const pathname = usePathname();
   const pending = usePendingCount();
   const [menuOpen, setMenuOpen] = useState(false);
-  const [orgOpen, setOrgOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const menuRef = useOutsideClose(menuOpen, () => setMenuOpen(false));
-  const orgRef = useOutsideClose(orgOpen, () => setOrgOpen(false));
+  const profile = getNetworkProfile();
+  const live = profile.live;
 
   async function logout() {
     await fetch('/api/auth/logout', { method: 'POST' });
@@ -133,186 +188,191 @@ export default function AppShell({
   const tabItems = NAV.filter((item) => TABS.includes(item.href));
   const moreItems = NAV.filter((item) => !TABS.includes(item.href));
 
+  const navLink = (item: NavItem) => {
+    const active = isActive(pathname, item.href);
+    const Icon = item.icon;
+    return (
+      <Link
+        key={item.href}
+        href={item.href}
+        aria-current={active ? 'page' : undefined}
+        title={item.label}
+        className={cn(
+          'relative flex h-9 items-center gap-2.5 px-3 text-[13px] font-medium text-[var(--text-on-dark)]/72 transition-colors duration-[var(--dur-fast)]',
+          'outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)]',
+          active ? 'bg-[var(--surface-navigation-active)] text-white shadow-[inset_2px_0_0_var(--signal-hover)]' : 'hover:bg-[var(--surface-navigation-active)]/60 hover:text-white',
+          'md:justify-center xl:justify-start',
+        )}
+      >
+        <Icon className={cn('size-4 shrink-0', active ? 'text-[var(--teal-300)]' : '')} strokeWidth={1.5} aria-hidden="true" />
+        <span className="md:sr-only xl:not-sr-only">{item.label}</span>
+        {item.badge === 'approvals' && pending > 0 ? (
+          <span className="ml-auto rounded-full bg-[var(--amber-600)] px-1.5 font-mono text-[10px] font-semibold text-white md:absolute md:right-2 md:top-1.5 md:ml-0 xl:static" aria-label={`${pending} awaiting checker`}>
+            {pending}
+          </span>
+        ) : null}
+        {item.badge === 'dot' && pending > 0 ? <span className="ml-auto size-1.5 rounded-full bg-[var(--teal-300)] md:absolute md:right-2 md:top-2 md:ml-0 xl:static" aria-hidden="true" /> : null}
+      </Link>
+    );
+  };
+
   return (
-    <div className="app-shell flex min-h-screen bg-[var(--paper)] text-[var(--text)]">
-      {/* ── Left nav (≥md) ─────────────────────────────────────── */}
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col border-r border-[var(--divider)] bg-[var(--surface)] px-3 py-4 md:flex" aria-label="Primary">
-        <div className="px-2 pb-4">
-          <Wordmark size={30} />
+    <div className="app-shell grid min-h-dvh bg-[var(--surface-canvas)] text-[var(--text)] md:grid-cols-[var(--sidebar-collapsed-width)_minmax(0,1fr)] xl:grid-cols-[var(--sidebar-width)_minmax(0,1fr)]">
+      {/* ── Sidebar (≥md; icons only below xl) ───────────────────── */}
+      <aside className="hidden min-w-0 flex-col bg-[var(--surface-navigation)] text-[var(--text-on-dark)] md:flex" aria-label="Primary">
+        <div className="flex h-12 items-center border-b border-white/10 px-3 md:justify-center xl:justify-start xl:px-4">
+          <span className="xl:hidden">
+            <Wordmark size={24} showText={false} />
+          </span>
+          <span className="hidden xl:inline [&_.brand-wordmark-text]:text-white">
+            <Wordmark size={24} />
+          </span>
         </div>
-        <nav className="flex-1 space-y-0.5 overflow-y-auto">
-          {NAV.map(({ label, href, icon: Icon, badge }) => {
-            const active = isActive(pathname, href);
-            return (
-              <Link
-                key={href}
-                href={href}
-                aria-current={active ? 'page' : undefined}
-                className={cn(
-                  'flex min-h-11 items-center gap-3 rounded-[var(--r-sm)] px-3 text-[14px] font-medium transition-colors duration-[var(--dur-ui)]',
-                  'outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--teal-500)]',
-                  active ? 'bg-[var(--teal-100)] text-[var(--ink-900)]' : 'text-[var(--text-2)] hover:bg-[var(--surface-2)] hover:text-[var(--text)]',
-                )}
-              >
-                <Icon className={cn('size-[18px] shrink-0', active ? 'text-[var(--teal-600)]' : 'text-[var(--text-muted)]')} aria-hidden="true" />
-                <span>{label}</span>
-                {badge === 'approvals' ? <CountBadge count={pending} /> : null}
-              </Link>
-            );
-          })}
+        <nav className="flex-1 overflow-y-auto py-2">
+          {GROUPS.map((group) => (
+            <div key={group.label} className="mb-2">
+              <p className="hidden px-3 pb-1 pt-3 font-mono text-[10px] uppercase tracking-[var(--tracking-label)] text-[var(--text-on-dark)]/45 xl:block">{group.label}</p>
+              {group.items.map(navLink)}
+            </div>
+          ))}
         </nav>
-        <div className="space-y-0.5 border-t border-[var(--divider)] pt-3">
-          <Link href="/dashboard/customer-service" className="flex min-h-11 items-center gap-3 rounded-[var(--r-sm)] px-3 text-[14px] font-medium text-[var(--text-2)] hover:bg-[var(--surface-2)]">
-            <Phone className="size-[18px] text-[var(--text-muted)]" aria-hidden="true" /> Support
+        <div className="border-t border-white/10 p-3 xl:px-4">
+          <p className="hidden font-mono text-[10px] uppercase tracking-[var(--tracking-label)] text-[var(--text-on-dark)]/45 xl:block">Organisation</p>
+          <p className="hidden truncate text-[13px] font-medium text-white xl:block">{session.organization}</p>
+          <div className="mt-1 md:flex md:justify-center xl:block">
+            <StatusLabel compact tone={live ? 'verified' : 'attention'}>{live ? 'Live' : 'Sandbox'}</StatusLabel>
+          </div>
+          <Link href="/dashboard/customer-service" className="mt-2 flex h-8 items-center gap-2 text-[12px] text-[var(--text-on-dark)]/60 hover:text-white md:justify-center xl:justify-start">
+            <Phone className="size-3.5" strokeWidth={1.5} aria-hidden="true" /> <span className="md:sr-only xl:not-sr-only">Support</span>
           </Link>
-          <button type="button" onClick={logout} className="flex min-h-11 w-full items-center gap-3 rounded-[var(--r-sm)] px-3 text-left text-[14px] font-medium text-[var(--text-2)] hover:bg-[var(--surface-2)]">
-            <LogOut className="size-[18px] text-[var(--text-muted)]" aria-hidden="true" /> Log out
-          </button>
         </div>
       </aside>
 
-      {/* ── Top bar ────────────────────────────────────────────── */}
-      <header className="fixed left-0 right-0 top-0 z-20 flex h-14 items-center justify-between gap-3 border-b border-[var(--divider)] bg-[var(--surface)] px-4 md:left-60 md:px-6">
-        <div className="flex min-w-0 items-center gap-3">
+      <div className="min-w-0">
+        {/* ── Top bar ────────────────────────────────────────────── */}
+        <header className="sticky top-0 z-30 flex h-12 items-center gap-3 border-b border-white/10 bg-[var(--surface-navigation)] px-4 text-[var(--text-on-dark)] md:px-5">
           <span className="md:hidden">
-            <Wordmark size={26} showText={false} />
+            <Wordmark size={24} showText={false} />
           </span>
-          <div ref={orgRef} className="relative">
-            <button
-              type="button"
-              onClick={() => setOrgOpen((value) => !value)}
-              aria-haspopup="menu"
-              aria-expanded={orgOpen}
-              className="flex min-h-11 max-w-[220px] items-center gap-2 rounded-[var(--r-sm)] px-2 text-[14px] font-semibold text-[var(--text)] hover:bg-[var(--surface-2)]"
-            >
-              <Building2 className="size-4 shrink-0 text-[var(--text-muted)]" aria-hidden="true" />
-              <span className="truncate">{session.organization}</span>
-              <ChevronDown className="size-4 shrink-0 text-[var(--text-muted)]" aria-hidden="true" />
-            </button>
-            {orgOpen ? (
-              <div role="menu" className="absolute left-0 top-full mt-1 w-64 rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--surface)] p-2 shadow-[var(--shadow-elevated)]">
-                <div className="rounded-[var(--r-sm)] bg-[var(--teal-100)] px-3 py-2">
-                  <div className="text-[13px] font-semibold text-[var(--ink-900)]">{session.organization}</div>
-                  <div className="text-[12px] text-[var(--text-2)]">Current workspace</div>
-                </div>
-                <p className="px-3 pb-1 pt-2 text-[12px] text-[var(--text-muted)]">One workspace per sign-in today. Additional organisations arrive with org &amp; signer settings.</p>
-              </div>
-            ) : null}
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="hidden sm:inline-flex">
-            <NetworkBadge />
+          <span className="hidden truncate text-[12.5px] text-[var(--text-on-dark)]/70 md:inline">{crumbFor(pathname)}</span>
+          <form
+            role="search"
+            className="ml-auto hidden min-w-0 items-center md:flex"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const q = new FormData(event.currentTarget).get('q');
+              router.push(`/dashboard/payments?q=${encodeURIComponent(String(q ?? ''))}`);
+            }}
+          >
+            <label htmlFor="global-command" className="sr-only">
+              Search payments or run a command
+            </label>
+            <span className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-[var(--text-on-dark)]/50" aria-hidden="true" />
+              <input id="global-command" name="q" type="search" placeholder="Search payments, IDs, beneficiaries" className="h-8 w-[220px] rounded-[var(--r-control)] border border-white/10 bg-[var(--surface-navigation-active)] pl-8 pr-2 text-[12.5px] text-white placeholder:text-[var(--text-on-dark)]/45 focus:border-[var(--teal-300)] focus:outline-none lg:w-[300px]" />
+            </span>
+          </form>
+          <UtcClock />
+          <span className="ml-auto md:ml-0">
+            <StatusLabel compact tone={live ? 'verified' : 'attention'}>{live ? 'Live' : 'Sandbox · no customer funds'}</StatusLabel>
           </span>
+          <Link href="/dashboard/approvals" aria-label={pending > 0 ? `${pending} awaiting checker` : 'Notifications'} className="relative grid size-9 place-items-center rounded-[var(--r-control)] hover:bg-[var(--surface-navigation-active)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]">
+            <Bell className="size-4" strokeWidth={1.5} aria-hidden="true" />
+            {pending > 0 ? <span className="absolute right-1 top-1 min-w-4 rounded-full bg-[var(--amber-600)] px-1 text-center font-mono text-[9.5px] font-semibold text-white" aria-hidden="true">{pending}</span> : null}
+          </Link>
           <div ref={menuRef} className="relative">
-            <button
-              type="button"
-              onClick={() => setMenuOpen((value) => !value)}
-              aria-haspopup="menu"
-              aria-expanded={menuOpen}
-              aria-label="Account menu"
-              className="flex size-11 items-center justify-center rounded-full border border-[var(--line)] bg-[var(--surface-2)] text-[13px] font-semibold text-[var(--ink-900)] hover:bg-[var(--teal-100)]"
-            >
-              {initialsFor(session)}
+            <button type="button" onClick={() => setMenuOpen((value) => !value)} aria-haspopup="menu" aria-expanded={menuOpen} aria-label="Account menu" className="flex h-9 items-center gap-2 rounded-[var(--r-control)] px-1.5 hover:bg-[var(--surface-navigation-active)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]">
+              <span className="grid size-7 place-items-center rounded-full bg-[var(--surface-navigation-active)] text-[11px] font-semibold text-white ring-1 ring-white/15">{initialsFor(session)}</span>
+              <span className="hidden max-w-[140px] truncate text-[12.5px] lg:inline">{session.name}</span>
+              <ChevronDown className="hidden size-3.5 lg:inline" aria-hidden="true" />
             </button>
             {menuOpen ? (
-              <div role="menu" className="absolute right-0 top-full mt-1 w-60 rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--surface)] p-2 shadow-[var(--shadow-elevated)]">
+              <div role="menu" className="absolute right-0 top-full mt-1 w-60 rounded-[var(--r-control)] border border-[var(--border-default)] bg-[var(--surface-raised)] p-1.5 text-[var(--text)] shadow-[var(--shadow-elevated)]">
                 <div className="px-3 py-2">
-                  <div className="truncate text-[13px] font-semibold text-[var(--text)]">{session.name}</div>
-                  <div className="truncate text-[12px] text-[var(--text-muted)]">{session.email}</div>
+                  <div className="truncate text-[13px] font-medium">{session.name}</div>
+                  <div className="truncate font-mono text-[11px] text-[var(--text-muted)]">{session.email}</div>
+                  <div className="mt-1 truncate text-[12px] text-[var(--text-2)]">{session.organization}</div>
                 </div>
-                <Link role="menuitem" href="/dashboard/profile" className="flex min-h-11 items-center gap-2 rounded-[var(--r-sm)] px-3 text-[14px] hover:bg-[var(--surface-2)]" onClick={() => setMenuOpen(false)}>
-                  <UserRound className="size-4 text-[var(--text-muted)]" aria-hidden="true" /> Profile
+                <Link role="menuitem" href="/dashboard/profile" className="flex h-9 items-center gap-2 rounded-[var(--r-control)] px-3 text-[13px] hover:bg-[var(--surface-subtle)]" onClick={() => setMenuOpen(false)}>
+                  <UserRound className="size-4 text-[var(--text-muted)]" strokeWidth={1.5} aria-hidden="true" /> Profile
                 </Link>
-                <Link role="menuitem" href="/dashboard/settings" className="flex min-h-11 items-center gap-2 rounded-[var(--r-sm)] px-3 text-[14px] hover:bg-[var(--surface-2)]" onClick={() => setMenuOpen(false)}>
-                  <Settings className="size-4 text-[var(--text-muted)]" aria-hidden="true" /> Settings
+                <Link role="menuitem" href="/dashboard/settings" className="flex h-9 items-center gap-2 rounded-[var(--r-control)] px-3 text-[13px] hover:bg-[var(--surface-subtle)]" onClick={() => setMenuOpen(false)}>
+                  <Settings className="size-4 text-[var(--text-muted)]" strokeWidth={1.5} aria-hidden="true" /> Settings
                 </Link>
-                <button role="menuitem" type="button" onClick={logout} className="flex min-h-11 w-full items-center gap-2 rounded-[var(--r-sm)] px-3 text-left text-[14px] hover:bg-[var(--surface-2)]">
-                  <LogOut className="size-4 text-[var(--text-muted)]" aria-hidden="true" /> Log out
+                <button role="menuitem" type="button" onClick={logout} className="flex h-9 w-full items-center gap-2 rounded-[var(--r-control)] px-3 text-left text-[13px] hover:bg-[var(--surface-subtle)]">
+                  <LogOut className="size-4 text-[var(--text-muted)]" strokeWidth={1.5} aria-hidden="true" /> Log out
                 </button>
               </div>
             ) : null}
           </div>
-        </div>
-      </header>
+        </header>
 
-      {/* ── Main ───────────────────────────────────────────────── */}
-      <main className="relative z-0 min-w-0 flex-1 px-4 pb-[calc(5.5rem+env(safe-area-inset-bottom))] pt-[4.5rem] md:ml-60 md:px-8 md:pb-10">
-        <div className="mb-4 overflow-hidden rounded-[var(--r-sm)]">
-          <SandboxRibbon />
-        </div>
-        {kyb?.blocked ? (
-          <div role="status" className="mb-5 flex flex-wrap items-center gap-3 rounded-[var(--r-md)] border border-[var(--warn)] bg-[var(--warn-bg)] px-4 py-3">
-            <ShieldAlert aria-hidden="true" className="size-4 shrink-0 text-[var(--warn-text)]" />
-            <div className="min-w-0 flex-1">
-              <p className="text-[13px] font-semibold text-[var(--warn-text)]">Read-only workspace</p>
-              <p className="mt-0.5 text-[13px] text-[var(--text-2)]">{kyb.reason}</p>
+        {/* ── Page ───────────────────────────────────────────────── */}
+        <main id="main-content" className="min-w-0 p-4 pb-[calc(5rem+env(safe-area-inset-bottom))] md:p-5 md:pb-8 xl:p-6">
+          {kyb?.blocked ? (
+            <div role="status" className="mb-5 flex flex-wrap items-center gap-3 border border-[var(--state-attention)] bg-[var(--surface-attention)] px-4 py-3">
+              <ShieldCheck aria-hidden="true" className="size-4 shrink-0 text-[var(--state-attention)]" strokeWidth={1.5} />
+              <div className="min-w-0 flex-1">
+                <p className="text-[13px] font-medium text-[var(--state-attention)]">Read-only workspace</p>
+                <p className="mt-0.5 text-[13px] text-[var(--text-2)]">{kyb.reason}</p>
+              </div>
+              <Link href="/settings/kyb" className="h-8 rounded-[var(--r-control)] bg-[var(--ink-900)] px-3 text-[13px] font-medium leading-8 text-white">
+                Verification
+              </Link>
             </div>
-            <Link href="/settings/kyb" className="rounded-[var(--r-sm)] bg-[var(--ink-900)] px-3 py-2 text-[13px] font-semibold text-white">
-              Verification
-            </Link>
-          </div>
-        ) : null}
-        {children}
-      </main>
+          ) : null}
+          {children}
+        </main>
+      </div>
 
-      {/* ── Mobile bottom tabs ─────────────────────────────────── */}
-      <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-[var(--divider)] bg-[var(--surface)] pb-[env(safe-area-inset-bottom)] md:hidden" aria-label="Primary">
+      {/* ── Mobile bottom navigation ───────────────────────────── */}
+      <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-white/10 bg-[var(--surface-navigation)] pb-[env(safe-area-inset-bottom)] text-[var(--text-on-dark)] md:hidden" aria-label="Primary">
         {tabItems.map(({ label, href, icon: Icon, badge }) => {
           const active = isActive(pathname, href);
           return (
-            <Link
-              key={href}
-              href={href}
-              aria-current={active ? 'page' : undefined}
-              className={cn('relative flex min-h-14 flex-col items-center justify-center gap-1 text-[11px] font-medium', active ? 'text-[var(--teal-600)]' : 'text-[var(--text-muted)]')}
-            >
-              <Icon className="size-5" aria-hidden="true" />
-              {label}
-              {badge === 'approvals' && pending > 0 ? (
-                <span className="absolute right-[18%] top-2 inline-flex min-w-4 items-center justify-center rounded-full bg-[var(--warn)] px-1 font-mono text-[10px] font-semibold text-white" aria-hidden="true">
-                  {pending}
-                </span>
-              ) : null}
-              {href === '/dashboard/oxwal' && pending > 0 ? (
-                <span className="absolute right-[24%] top-2.5 size-2 rounded-full bg-[var(--teal-500)]" aria-hidden="true" />
-              ) : null}
+            <Link key={href} href={href} aria-current={active ? 'page' : undefined} className={cn('relative flex min-h-14 flex-col items-center justify-center gap-1 text-[10.5px] font-medium', active ? 'text-white' : 'text-[var(--text-on-dark)]/60')}>
+              <Icon className={cn('size-5', active && 'text-[var(--teal-300)]')} strokeWidth={1.5} aria-hidden="true" />
+              {label === 'Clearance board' ? 'Board' : label}
+              {badge === 'approvals' && pending > 0 ? <span className="absolute right-[18%] top-2 min-w-4 rounded-full bg-[var(--amber-600)] px-1 text-center font-mono text-[10px] font-semibold text-white" aria-hidden="true">{pending}</span> : null}
+              {badge === 'dot' && pending > 0 ? <span className="absolute right-[24%] top-2.5 size-2 rounded-full bg-[var(--teal-300)]" aria-hidden="true" /> : null}
             </Link>
           );
         })}
-        <button
-          type="button"
-          onClick={() => setMoreOpen(true)}
-          aria-haspopup="dialog"
-          aria-expanded={moreOpen}
-          className="flex min-h-14 flex-col items-center justify-center gap-1 text-[11px] font-medium text-[var(--text-muted)]"
-        >
-          <MoreHorizontal className="size-5" aria-hidden="true" />
+        <button type="button" onClick={() => setMoreOpen(true)} aria-haspopup="dialog" aria-expanded={moreOpen} className="flex min-h-14 flex-col items-center justify-center gap-1 text-[10.5px] font-medium text-[var(--text-on-dark)]/60">
+          <MoreHorizontal className="size-5" strokeWidth={1.5} aria-hidden="true" />
           More
         </button>
       </nav>
 
       {moreOpen ? (
         <div className="fixed inset-0 z-40 md:hidden" role="dialog" aria-modal="true" aria-label="More">
-          <button type="button" className="absolute inset-0 bg-[rgba(11,42,51,.45)]" aria-label="Close" onClick={() => setMoreOpen(false)} />
-          <div className="absolute inset-x-0 bottom-0 rounded-t-[var(--r-lg)] bg-[var(--surface)] p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-[var(--shadow-elevated)]">
+          <button type="button" className="absolute inset-0 bg-[rgba(11,42,51,.5)]" aria-label="Close" onClick={() => setMoreOpen(false)} />
+          <div className="absolute inset-x-0 bottom-0 max-h-[80dvh] overflow-y-auto rounded-t-[12px] bg-[var(--surface-raised)] p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
             <div className="mb-2 flex items-center justify-between">
-              <span className="text-[15px] font-semibold">More</span>
-              <button type="button" onClick={() => setMoreOpen(false)} aria-label="Close" className="flex size-11 items-center justify-center rounded-full hover:bg-[var(--surface-2)]">
+              <span className="text-[15px] font-medium">More</span>
+              <button type="button" onClick={() => setMoreOpen(false)} aria-label="Close" className="grid size-10 place-items-center rounded-[var(--r-control)] hover:bg-[var(--surface-subtle)]">
                 <X className="size-5" aria-hidden="true" />
               </button>
             </div>
-            <div className="grid gap-1">
-              {moreItems.map(({ label, href, icon: Icon }) => (
-                <Link key={href} href={href} onClick={() => setMoreOpen(false)} className="flex min-h-12 items-center gap-3 rounded-[var(--r-sm)] px-3 text-[15px] font-medium hover:bg-[var(--surface-2)]">
-                  <Icon className="size-5 text-[var(--text-muted)]" aria-hidden="true" /> {label}
-                </Link>
-              ))}
-              <Link href="/dashboard/customer-service" onClick={() => setMoreOpen(false)} className="flex min-h-12 items-center gap-3 rounded-[var(--r-sm)] px-3 text-[15px] font-medium hover:bg-[var(--surface-2)]">
-                <Phone className="size-5 text-[var(--text-muted)]" aria-hidden="true" /> Support
+            {GROUPS.map((group) => (
+              <div key={group.label} className="mb-2">
+                <p className="px-3 pb-1 pt-2 font-mono text-[10px] uppercase tracking-[var(--tracking-label)] text-[var(--text-muted)]">{group.label}</p>
+                {group.items.filter((item) => moreItems.includes(item)).map(({ label, href, icon: Icon }) => (
+                  <Link key={href} href={href} onClick={() => setMoreOpen(false)} className="flex min-h-11 items-center gap-3 rounded-[var(--r-control)] px-3 text-[14px] hover:bg-[var(--surface-subtle)]">
+                    <Icon className="size-4 text-[var(--text-muted)]" strokeWidth={1.5} aria-hidden="true" /> {label}
+                  </Link>
+                ))}
+              </div>
+            ))}
+            <div className="border-t border-[var(--border-default)] pt-2">
+              <Link href="/dashboard/settings" onClick={() => setMoreOpen(false)} className="flex min-h-11 items-center gap-3 rounded-[var(--r-control)] px-3 text-[14px] hover:bg-[var(--surface-subtle)]">
+                <Settings className="size-4 text-[var(--text-muted)]" strokeWidth={1.5} aria-hidden="true" /> Settings
               </Link>
-              <button type="button" onClick={logout} className="flex min-h-12 items-center gap-3 rounded-[var(--r-sm)] px-3 text-left text-[15px] font-medium hover:bg-[var(--surface-2)]">
-                <LogOut className="size-5 text-[var(--text-muted)]" aria-hidden="true" /> Log out
+              <Link href="/dashboard/customer-service" onClick={() => setMoreOpen(false)} className="flex min-h-11 items-center gap-3 rounded-[var(--r-control)] px-3 text-[14px] hover:bg-[var(--surface-subtle)]">
+                <Phone className="size-4 text-[var(--text-muted)]" strokeWidth={1.5} aria-hidden="true" /> Support
+              </Link>
+              <button type="button" onClick={logout} className="flex min-h-11 w-full items-center gap-3 rounded-[var(--r-control)] px-3 text-left text-[14px] hover:bg-[var(--surface-subtle)]">
+                <LogOut className="size-4 text-[var(--text-muted)]" strokeWidth={1.5} aria-hidden="true" /> Log out
               </button>
             </div>
           </div>

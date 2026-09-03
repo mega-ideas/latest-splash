@@ -100,8 +100,8 @@ test('the 0xWal desk is the streaming surface and avoids browser money storage',
   // prop (e.g. the KYB gate state) does not fail a test about the desk surface.
   assert.match(layout, /<AppShell[^>]*session=\{session\}/);
   assert.match(layout, /\{children\}<\/AppShell>/);
-  // Home is the first screen; the 0xWal desk lives at /dashboard/oxwal.
-  assert.match(shell, /label: 'Home', href: '\/dashboard'/);
+  // The clearance board is the first screen; the 0xWal desk lives at /dashboard/oxwal.
+  assert.match(shell, /label: 'Clearance board', href: '\/dashboard'/);
   assert.match(shell, /label: brand\.agentName, href: '\/dashboard\/oxwal'/);
   assert.match(queue, /export const dynamic = 'force-dynamic'/);
   assert.match(queue, /getCustomerSession/);
