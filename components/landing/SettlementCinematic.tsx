@@ -446,6 +446,26 @@ export default function SettlementCinematic({ isPhone = false }: { isPhone?: boo
   const visionY = useTransform(scrollYProgress, [0.74, 0.86], [44, 0]);
   const visionPointerEvents = useTransform(scrollYProgress, (value) => (value > 0.78 ? 'auto' : 'none'));
 
+  /* The panel used to arrive as one block: everything faded up together and
+     then sat there. It assembles in a deliberate order now — the claim, then
+     the evidence for it, then the actions — driven by a class rather than by
+     more scroll transforms, so the sequence completes and settles instead of
+     being scrubbable into a half-drawn state.
+
+     `settled` also carries the accessibility fix. pointerEvents gated the
+     mouse but never the keyboard: both CTAs were focusable at opacity 0, so a
+     keyboard user could land a focus ring on an invisible link to /signup.
+     `inert` removes the whole panel from the tab order until it is actually
+     on screen, which is what the opacity always implied. */
+  const [visionSettled, setVisionSettled] = useState(false);
+
+  useEffect(() => {
+    const unsubscribe = scrollYProgress.on('change', (value) => {
+      setVisionSettled((current) => (current === value > 0.78 ? current : value > 0.78));
+    });
+    return unsubscribe;
+  }, [scrollYProgress]);
+
   if (reducedMotion || phoneLayout) {
     return <StaticCinematic />;
   }
@@ -548,8 +568,9 @@ export default function SettlementCinematic({ isPhone = false }: { isPhone?: boo
         {/* Act III — gold light burst + vision. */}
         <motion.div className="cin-flash" style={{ opacity: flashOpacity }} aria-hidden="true" />
         <motion.div
-          className="cin-vision"
+          className={`cin-vision${visionSettled ? ' is-settled' : ''}`}
           style={{ opacity: visionOpacity, scale: visionScale, y: visionY, pointerEvents: visionPointerEvents }}
+          inert={!visionSettled}
         >
           <VisionCopy />
         </motion.div>

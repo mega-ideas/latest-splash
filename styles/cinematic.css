@@ -1824,3 +1824,88 @@
 
 @media (prefers-reduced-motion: reduce) {
 }
+
+
+/* ─── The product panel assembles ────────────────────────────────────────
+   It used to fade up as one block and then sit there. It arrives in the
+   order the argument runs: the mark, the claim, the sentence that supports
+   the claim, then the capabilities that evidence it, and only then the two
+   actions. Status disclosure lands before the button that asks you to act
+   on it.
+
+   Driven by .is-settled rather than by more scroll transforms, so the
+   sequence completes and settles instead of being scrubbable into a
+   half-drawn state. transform and opacity only — the title carries a
+   stroke and a layered extrude, and animating that shadow would repaint
+   the glyph bounds every frame. */
+.cin-vision-mark,
+.cin-vision-chip,
+.cin-vision-title,
+.cin-vision-lede,
+.cin-vision-cap,
+.cin-vision-actions {
+  opacity: 0;
+  transform: translateY(14px);
+}
+
+.cin-vision.is-settled .cin-vision-mark,
+.cin-vision.is-settled .cin-vision-chip,
+.cin-vision.is-settled .cin-vision-title,
+.cin-vision.is-settled .cin-vision-lede,
+.cin-vision.is-settled .cin-vision-cap,
+.cin-vision.is-settled .cin-vision-actions {
+  animation: cin-vision-arrive 620ms cubic-bezier(.2, 0, 0, 1) both;
+}
+
+.cin-vision.is-settled .cin-vision-mark    { animation-delay: 0ms; }
+.cin-vision.is-settled .cin-vision-chip    { animation-delay: 90ms; }
+.cin-vision.is-settled .cin-vision-title   { animation-delay: 170ms; }
+.cin-vision.is-settled .cin-vision-lede    { animation-delay: 300ms; }
+
+/* The capabilities confirm one after another rather than appearing as a
+   block, because their live/roadmap tone is real information and reading
+   them in turn is what makes the difference register. */
+.cin-vision.is-settled .cin-vision-cap:nth-child(1) { animation-delay: 430ms; }
+.cin-vision.is-settled .cin-vision-cap:nth-child(2) { animation-delay: 530ms; }
+.cin-vision.is-settled .cin-vision-cap:nth-child(3) { animation-delay: 630ms; }
+.cin-vision.is-settled .cin-vision-cap:nth-child(4) { animation-delay: 730ms; }
+
+/* Last, and only once everything it depends on is on screen. */
+.cin-vision.is-settled .cin-vision-actions { animation-delay: 880ms; }
+
+@keyframes cin-vision-arrive {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* No sequence, nothing hidden, nothing depending on a class that only a
+   scroll can add. */
+@media (prefers-reduced-motion: reduce) {
+  .cin-vision-mark,
+  .cin-vision-chip,
+  .cin-vision-title,
+  .cin-vision-lede,
+  .cin-vision-cap,
+  .cin-vision-actions {
+    opacity: 1;
+    transform: none;
+    animation: none !important;
+  }
+}
+
+
+/* The static path renders the same VisionCopy but never receives
+   .is-settled — it is the phone layout and the reduced-motion layout, and
+   neither has a scroll sequence to settle. Without this the entire product
+   panel would sit at opacity 0 for every phone visitor. The hidden-by-
+   default rule above is for the animated path only. */
+.cin-vision-static .cin-vision-mark,
+.cin-vision-static .cin-vision-chip,
+.cin-vision-static .cin-vision-title,
+.cin-vision-static .cin-vision-lede,
+.cin-vision-static .cin-vision-cap,
+.cin-vision-static .cin-vision-actions {
+  opacity: 1;
+  transform: none;
+  animation: none;
+}
