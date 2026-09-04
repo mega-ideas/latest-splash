@@ -429,7 +429,7 @@ const supplySteps = [
     number: '01',
     label: 'Receivable',
     title: 'A buyer-accepted invoice.',
-    copy: 'Issued between two KYB-verified businesses and anchored to the same audit spine as every payout — an invoice that carries its own settlement history.',
+    copy: 'It would be issued between two KYB-verified businesses and anchored to the same audit spine as every payout — an invoice carrying its own settlement history.',
     image: '/isometric/supply-receivable.png',
     imageAlt: 'Isometric receivable: an invoice with docked quote, approval, and receipt proofs',
     meta: 'Verified counterparties',
@@ -438,7 +438,7 @@ const supplySteps = [
     number: '02',
     label: 'Early offer',
     title: 'Buyer funds early payment.',
-    copy: 'Your buyer offers to pay the 90-day invoice now. You choose per invoice: the full amount on the due date, or a small discount today.',
+    copy: 'Your buyer would offer to pay the 90-day invoice now, and you would choose per invoice: the full amount on the due date, or a small discount today.',
     image: '/isometric/supply-early-offer.png',
     imageAlt: 'Isometric early offer: a buyer offering early payment at a discount',
     meta: 'Buyer-funded · no third-party lender',
@@ -1030,8 +1030,14 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
           <div className="iso-section-heading iso-heading-split">
             <div>
               <p className="iso-kicker">Supply · The moat</p>
+              {/* "Your invoices ARE working capital" asserted a capability that
+                  does not exist. Row 03 was already written in the conditional
+                  ("would settle") and rows 01 and 02 were not, so the section
+                  argued against itself. One voice throughout now, heading
+                  included — the chip below states it, and the copy no longer
+                  contradicts the chip. */}
               <h2 className="iso-section-title">
-                Your invoices are{' '}
+                Your invoices could be{' '}
                 <span>working capital.</span>
               </h2>
               <div className="iso-supply-chip"><RoadmapChip detail="coming capability, subject to licensing" /></div>
@@ -1053,6 +1059,17 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
           <ol className="iso-supply-ledger">
             {supplySteps.map((step) => (
               <li key={step.number}>
+                {/* The art returns, but at row scale rather than card scale.
+                    Big illustrated cards made unbuilt work look as shipped as
+                    the sections that run, which is why they were removed. At
+                    120px the top face, both side faces and the extrude edge
+                    still resolve, so it reads as a drawing rather than a
+                    smudge — and it stays subordinate to the ruled row it sits
+                    in. These three files were dead data until now: the fields
+                    existed and nothing rendered them. */}
+                <div className="iso-supply-ledger-art">
+                  <Image src={step.image} alt={step.imageAlt} width={480} height={360} sizes="120px" />
+                </div>
                 <div className="iso-supply-ledger-stage">
                   <span className="iso-supply-ledger-num">{step.number}</span>
                   <strong>{step.label}</strong>

@@ -8319,8 +8319,9 @@ code, kbd, samp {
 
 .iso-supply-ledger li {
   display: grid;
-  grid-template-columns: 140px minmax(0, 1fr) 260px;
+  grid-template-columns: 120px 132px minmax(0, 1fr) 240px;
   gap: 24px;
+  align-items: start;
   padding-block: 24px;
   border-bottom: 1px solid var(--iso-line);
 }
@@ -8358,7 +8359,9 @@ code, kbd, samp {
 
 .iso-supply-ledger-basis {
   align-self: start;
-  color: var(--iso-text-label);
+  padding-top: 8px;
+  border-top: 1px dashed rgba(12, 62, 72, .38);
+  color: var(--iso-text-muted);
   font-family: var(--font-mono), monospace;
   font-size: 12px;
   font-variant-numeric: tabular-nums slashed-zero;
@@ -8648,4 +8651,44 @@ code, kbd, samp {
 
 @media (prefers-reduced-motion: reduce) {
   .iso-route-table-wrap.is-arrived .iso-flap { animation: none; }
+}
+
+
+/* Row-scale art for the Supply ledger. Deliberately small: this is the only
+   section on the page that is entirely unbuilt, and illustrating it at card
+   scale made it look as shipped as the sections that run. 120px is the floor
+   at which an isometric solid still reads as a drawing — top face, both side
+   faces and the extrude edge all resolve — rather than as a smudge. */
+.iso-supply-ledger-art {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.iso-supply-ledger-art img {
+  width: 120px;
+  height: auto;
+  object-fit: contain;
+  /* the plates are drawn for a warm ground and composite onto it directly */
+  mix-blend-mode: multiply;
+}
+
+@media (max-width: 1100px) {
+  .iso-supply-ledger li {
+    grid-template-columns: 96px 120px minmax(0, 1fr);
+  }
+  .iso-supply-ledger-art img { width: 96px; }
+  .iso-supply-ledger-basis {
+    grid-column: 2 / -1;
+    padding-top: 8px;
+    text-align: left;
+  }
+}
+
+@media (max-width: 720px) {
+  .iso-supply-ledger li { grid-template-columns: 88px minmax(0, 1fr); }
+  .iso-supply-ledger-art img { width: 88px; }
+  .iso-supply-ledger-stage { grid-column: 2; }
+  .iso-supply-ledger-body,
+  .iso-supply-ledger-basis { grid-column: 1 / -1; }
 }
