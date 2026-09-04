@@ -469,19 +469,42 @@
 .cin-vision-inner {
   display: grid;
   grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.8fr);
-  align-items: center;
-  gap: clamp(28px, 4vw, 72px);
+  grid-template-rows: auto auto;
+  grid-template-areas:
+    "copy    caps"
+    "actions caps";
+  align-content: center;
+  column-gap: clamp(28px, 4vw, 72px);
+  row-gap: 0;
   width: 100%;
   max-width: 1180px;
 }
 
+.cin-vision-copy { grid-area: copy; }
+.cin-vision-caps { grid-area: caps; align-self: center; }
+.cin-vision-actions { grid-area: actions; }
+
 .cin-vision-copy > * { pointer-events: auto; }
 
 @media (width < 1040px) {
+  /* Single column. The actions stay after the capabilities here too — the
+     disclosure-before-the-button order is the point of the change, and
+     having it hold on desktop but not on a phone would be the wrong half of
+     it. The margin goes because the gap supplies that spacing now. */
   .cin-vision-inner {
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto auto;
+    grid-template-areas:
+      "copy"
+      "caps"
+      "actions";
     gap: 28px;
   }
+
+  /* Scoped to beat the unconditional margin-top:28px declared later in the
+     file — same specificity would lose on source order, and the margin plus
+     the 28px grid gap was stacking to 56. */
+  .cin-vision-inner .cin-vision-actions { margin-top: 0; }
 }
 
 .cin-vision-chip {

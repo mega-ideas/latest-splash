@@ -292,15 +292,6 @@ function VisionCopy() {
           Stripe and Airwallex move money. Splash runs the treasury around the settlement — what
           the cash does before it leaves, and what it can prove after it lands.
         </p>
-        <div className="cin-vision-actions">
-          <Link href="/signup" className="iso-button iso-button-gold">
-            Open payment desk
-            <ArrowRight aria-hidden="true" />
-          </Link>
-          <Link href="/login" className="iso-button iso-button-ghost">
-            Log in
-          </Link>
-        </div>
       </div>
 
       {/* Was four bare nouns in gold pills, aria-hidden, carrying no
@@ -317,6 +308,22 @@ function VisionCopy() {
           </div>
         ))}
       </dl>
+
+      {/* Deliberately a sibling of the capability list rather than the last
+          child of the copy column, so it comes after that list in the DOM.
+          Two of these four capabilities are labelled roadmap or projected, and
+          a screen reader used to reach "Open payment desk" before hearing any
+          of that. The grid puts it back under the copy visually — see
+          grid-template-areas in cinematic.css. */}
+      <div className="cin-vision-actions">
+        <Link href="/signup" className="iso-button iso-button-gold">
+          Open payment desk
+          <ArrowRight aria-hidden="true" />
+        </Link>
+        <Link href="/login" className="iso-button iso-button-ghost">
+          Log in
+        </Link>
+      </div>
     </div>
   );
 }
