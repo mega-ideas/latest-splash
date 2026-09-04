@@ -1207,6 +1207,17 @@ body {
     6px 6px 0 var(--iso-teal-dark);
 }
 
+/* The nine unpromoted titles paint their second clause in --iso-teal, which
+   is fine on a flat heading. This one is not flat: its extrude is six steps,
+   the first four of them --iso-teal — the exact colour the span was painted.
+   So four of six steps were invisible on the second line, leaving it a thin
+   dark rim where the first line had a solid side, and it read flat and washed
+   out beside it. One ink colour across both lines, one extrude behind them.
+   It also takes the text from 6.66:1 to 11.25:1 on paper. */
+.iso-section-title-band span {
+  color: var(--iso-ink);
+}
+
 .iso-progress {
   border-bottom: 1px solid var(--iso-line);
   background:
@@ -1331,7 +1342,7 @@ body {
 
 .iso-comparison-table {
   width: 100%;
-  min-width: 860px;
+  min-width: 820px;
   border-collapse: separate;
   border-spacing: 0;
   color: var(--iso-ink);
@@ -1339,27 +1350,39 @@ body {
 
 .iso-comparison-table th,
 .iso-comparison-table td {
-  border-right: 1px solid rgba(12, 62, 72, .11);
-  border-bottom: 1px solid rgba(12, 62, 72, .11);
-  padding: 18px 20px;
+  border-bottom: 1px solid rgba(12, 62, 72, .085);
+  padding: 13px 16px;
   text-align: left;
 }
 
-.iso-comparison-table tr > :last-child {
-  border-right: 0;
+/* Banding, and hover behind a hover query so a touch device does not leave a
+   row stuck highlighted after a tap. Both skip the Splash column: it carries
+   its own ground, and tinting over it would muddy the one column a reader came
+   for. Hover follows banding in source order — equal specificity, so order is
+   what decides it. */
+.iso-comparison-table tbody tr:nth-child(even) > *:not(.is-splash) {
+  background: rgba(12, 62, 72, .022);
+}
+
+@media (hover: hover) {
+  .iso-comparison-table tbody tr:hover > *:not(.is-splash) {
+    background: rgba(13, 99, 112, .055);
+  }
 }
 
 .iso-comparison-table tbody tr:last-child > * {
   border-bottom: 0;
 }
 
+/* Darker than the .7 it carried at 11px: the label is 10.5px now, and 4.63:1
+   left no headroom for a size that small. .76 puts it back over 5. */
 .iso-comparison-table thead th {
-  color: rgba(12, 62, 72, .7);
-  background: rgba(12, 62, 72, .045);
+  color: rgba(12, 62, 72, .76);
+  background: rgba(12, 62, 72, .035);
   font-family: var(--font-mono), monospace;
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 900;
-  letter-spacing: .13em;
+  letter-spacing: .11em;
   text-transform: uppercase;
 }
 
@@ -1369,7 +1392,7 @@ body {
 
 .iso-comparison-table tbody th {
   color: var(--iso-ink);
-  font-size: 14.5px;
+  font-size: 13.5px;
   font-weight: 800;
   letter-spacing: -.01em;
 }
@@ -1377,7 +1400,7 @@ body {
 .iso-comparison-table tbody td {
   color: rgba(12, 62, 72, .78);
   font-family: var(--font-mono), monospace;
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 650;
 }
 
@@ -1388,7 +1411,7 @@ body {
   z-index: 2;
   color: #fffaf1;
   background: var(--iso-teal);
-  box-shadow: -10px 0 18px rgba(8, 54, 64, .16);
+  box-shadow: -8px 0 16px rgba(8, 54, 64, .12);
 }
 
 .iso-comparison-table tbody .is-splash {
@@ -4310,12 +4333,12 @@ body {
   }
 
   .iso-comparison-table {
-    min-width: 760px;
+    min-width: 740px;
   }
 
   .iso-comparison-table th,
   .iso-comparison-table td {
-    padding: 14px 15px;
+    padding: 11px 13px;
   }
 
   .iso-progress-grid article {
@@ -7975,17 +7998,16 @@ code, kbd, samp {
   max-width: 78ch;
   /* matches .iso-comparison-table th/td padding so the caption lines up with
      the first column rather than touching the wrap's border */
-  padding: 18px 20px 16px;
+  padding: 14px 16px 12px;
   color: var(--iso-text-muted);
-  font-size: 13px;
+  font-size: 12.5px;
   line-height: 1.55;
   text-align: left;
 }
 
 .iso-comparison-foot td {
-  padding: 14px 20px;
+  padding: 12px 16px;
   border-top: 1.5px solid var(--iso-line);
-  border-right: 0;
   background: rgba(12, 62, 72, .028);
 }
 
@@ -8497,8 +8519,8 @@ code, kbd, samp {
 .iso-guarantee {
   /* 952 * 0.75. One lever: the stage is min(100%, this) at a fixed ratio and
      the frames are inset:0 object-fit:contain, so every plate scales with it,
-     and .iso-guarantee-controls reads the same token so the dwell rail and the
-     jump buttons stay the width of the picture they belong to. */
+     and .iso-guarantee-controls reads the same token so the dwell rail and
+     the jump buttons stay the width of the picture they belong to. */
   --iso-plate-w: 714px;
   --iso-dwell: 10s;
   --iso-cross: 820ms;
