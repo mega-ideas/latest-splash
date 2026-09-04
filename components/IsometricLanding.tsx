@@ -2,8 +2,7 @@
 
 import Image from 'next/image';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import {
   Anchor,
   ArrowDownRight,
@@ -21,6 +20,7 @@ import {
   Zap,
 } from 'lucide-react';
 
+import GuaranteeSequence from '@/components/landing/GuaranteeSequence';
 import SettlementCinematic from '@/components/landing/SettlementCinematic';
 import WaitlistCta from '@/components/landing/WaitlistCta';
 import ControlPlaneExplainer from '@/components/oxwal/ControlPlaneExplainer';
@@ -33,31 +33,54 @@ import { claims, lockedCopy } from '@/content/claims';
    not what the money does, but what holds true of every payment whichever loop
    it is in. Deliberately unnumbered — the loops are numbered because a reader
    walks them in order; these three are simultaneous, and numbering them would
-   assert a sequence that does not exist.
+   assert a sequence that does not exist. */
 
-   No per-item art any more either: these are captions under one figure drawn at
-   asset scale, rather than three cards each cropping a 2752px illustration into
-   a 245px thumbnail. liquidity-pools.png and treasury-island.png are therefore
-   unused on this page — they remain in public/ and are candidates for the Save
-   card and the comparison band, which is a separate decision from this one. */
+/* Each guarantee now carries the plate that illustrates it, and a `fit` that
+   makes all three draw at the same ink width. The fits are measured, not
+   guessed: the assets fill 64.6% / 83.8% / 68.9% of their own frames, so at
+   equal frame size they draw 615 / 597 / 489px of actual ink. Without the
+   correction the third plate reads as an unintended zoom-out mid-crossfade.
+
+   Note which plate illustrates the third guarantee. treasury-island.png — an
+   open vault of gold — was the obvious pick and is the wrong one: it would sit
+   directly beside "Splash never takes custody of the funds it moves", which is
+   a contradiction a compliance reader is exactly the person to catch.
+   ctrl-approve.png draws the approval gesture instead, which is what the
+   sentence is actually about. It is also 0.53MB against 5.5MB, and it leaves
+   the vault to the close panel where the heading is "your global treasury". */
+/* The query string cannot change without a navigation, so there is nothing
+   to subscribe to. Declared once at module scope because a new function
+   identity on every render would make useSyncExternalStore resubscribe. */
+const NEVER_CHANGES = () => () => {};
+
 const operatingLayers = [
   {
     label: 'Settlement is atomic',
     title: 'Funds cannot get stuck.',
     copy: 'A payment intent settles or reverts inside one Sui transaction. There is no half-sent state to chase, because there is no moment when only half of it has happened.',
     meta: lockedCopy.speed,
+    plate: '/cinematic/settlement-machine.png',
+    plateAlt:
+      'Isometric settlement machine: a US dollar coin entering a checkpoint gate and leaving as local currency',
+    fit: 1,
   },
   {
     label: 'A corridor that cannot settle does not quote',
     title: 'Nothing is promised before it can be funded.',
     copy: 'Payout inventory is checked before a quote exists. Corridors arm and pause under explicit controls, and settlement halts on a peg deviation or a compliance flag before any value moves.',
     meta: 'Corridor-gated · halts before value moves',
+    plate: '/cinematic/liquidity-pools.png',
+    plateAlt: 'Tiered isometric liquidity pools with gold coin reserves flowing between basins',
+    fit: 1.03,
   },
   {
     label: 'A person releases it',
     title: 'Nothing leaves on a model’s say-so.',
     copy: '0xWal prepares and proposes; it cannot sign. A named approver releases the payment, and Splash never takes custody of the funds it moves.',
     meta: 'Maker-checker · approval-gated',
+    plate: '/isometric/ctrl-approve.png',
+    plateAlt: 'Isometric approval control: a prepared payment held at a gate until a person releases it',
+    fit: 1.258,
   },
 ];
 
@@ -468,14 +491,21 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
   const [activeFlow, setActiveFlow] = useState(flowSteps[0]);
   const [yieldBenchmarks, setYieldBenchmarks] = useState(fallbackYieldBenchmarks);
   const [showBackToTop, setShowBackToTop] = useState(false);
-  const searchParams = useSearchParams();
-
   /* Dev-only crosshair overlay for re-fitting the corridor pins after an art
      change. Double-gated: the build must not be production AND ?pins must be
-     present, so there is no path by which this reaches a visitor. Read through
-     useSearchParams rather than an effect, so server and client agree on the
-     first render and no state is set during commit. */
-  const showPinGrid = process.env.NODE_ENV !== 'production' && searchParams.has('pins');
+     present, so there is no path by which this reaches a visitor.
+
+     Reads the query through useSyncExternalStore rather than useSearchParams.
+     Both work — the route has a loading.tsx, so the boundary useSearchParams
+     needs does exist — but this version does not suspend at all, and it states
+     the server snapshot (false) explicitly rather than relying on the hook to
+     agree across the boundary. The subscribe function is a module-level no-op
+     because a query string cannot change without a navigation. */
+  const showPinGrid = useSyncExternalStore(
+    NEVER_CHANGES,
+    () => process.env.NODE_ENV !== 'production' && new URLSearchParams(window.location.search).has('pins'),
+    () => false, // server snapshot: the overlay never exists there
+  );
 
   useEffect(() => {
     let active = true;
@@ -1007,30 +1037,7 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
               — anchoring to Walrus and Sui — has no referent drawn in this
               asset at all. The corridor plate below is where pins are honest,
               because there position is a true statement. */}
-          <figure className="iso-guarantee-figure">
-            <Image
-              src="/cinematic/settlement-machine.png"
-              alt="Isometric settlement machine: a US dollar coin entering a checkpoint gate and leaving as local currency"
-              width={2752}
-              height={1536}
-              sizes="(max-width: 1100px) 100vw, 1360px"
-            />
-          </figure>
-
-          <hr className="iso-guarantee-rule" />
-
-          <dl className="iso-guarantee-captions">
-            {operatingLayers.map((layer) => (
-              <div className="iso-guarantee-caption" key={layer.label}>
-                <dt>{layer.label}</dt>
-                <dd>
-                  <strong>{layer.title}</strong>
-                  <p>{layer.copy}</p>
-                  <small>{layer.meta}</small>
-                </dd>
-              </div>
-            ))}
-          </dl>
+          <GuaranteeSequence items={operatingLayers} />
         </div>
       </section>
 

@@ -7958,19 +7958,7 @@ code, kbd, samp {
    Replaces .iso-layer-* — three cards that cropped three 2752px illustrations
    into 245px thumbnails and repeated, for the third time on this page, the
    same numbered-card grid used by #loops and #supply. */
-.iso-guarantee-figure {
-  margin: 56px 0 0;
-}
 
-.iso-guarantee-figure img {
-  display: block;
-  width: 100%;
-  height: auto;
-  /* The asset's true ratio. It has a neutral matte, so it composites on the
-     warm ground without a seam and needs no frame, border or shadow box. */
-  aspect-ratio: 2752 / 1536;
-  object-fit: contain;
-}
 
 .iso-guarantee-rule {
   margin: 36px 0 28px;
@@ -8409,4 +8397,175 @@ code, kbd, samp {
 @media (max-width: 700px) {
   .iso-comparison-figure { flex-direction: column; align-items: flex-start; gap: 16px; }
   .iso-comparison-figure img { width: 160px; }
+}
+
+/* ─── The guarantees, as a timed sequence ─────────────────────────────────
+   One plate holds for ten seconds, then the next enters from the left as the
+   outgoing one leaves to the right. The caption for the plate on screen is
+   emphasised; the other two stay fully legible, because recession is carried
+   by weight and by the teal label, never by opacity — a reader who wants to
+   read guarantee three while guarantee one is showing can, and any single
+   frame is a complete screenshot.
+
+   The stage is 952px: 30% down from the 1360 shell it used to fill.
+   Every animated property is transform or opacity. */
+.iso-guarantee {
+  --iso-plate-w: 952px;
+  --iso-dwell: 10s;
+  --iso-cross: 820ms;
+  --iso-plate-fit: 1;
+  margin-top: 44px;
+}
+
+.iso-guarantee-stage {
+  position: relative;
+  width: min(100%, var(--iso-plate-w));
+  /* the widest plate's ratio, so nothing is cropped */
+  aspect-ratio: 2752 / 1536;
+  margin-inline: auto;
+}
+
+.iso-guarantee-frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  opacity: 0;
+  /* fit equalises DRAWN INK across plates that fill their frames very
+     differently — see the measurement in IsometricLanding.tsx */
+  transform: translateX(-7%) scale(var(--iso-plate-fit));
+  transition:
+    opacity var(--iso-cross) cubic-bezier(.2, 0, 0, 1),
+    transform var(--iso-cross) cubic-bezier(.2, 0, 0, 1);
+  pointer-events: none;
+}
+
+.iso-guarantee-frame.is-current {
+  opacity: 1;
+  transform: translateX(0) scale(var(--iso-plate-fit));
+}
+
+/* outgoing leaves to the right */
+.iso-guarantee-frame:not(.is-current) {
+  transform: translateX(7%) scale(var(--iso-plate-fit));
+}
+
+/* The dwell clock. The rail the reader watches IS the timer the code obeys,
+   so they cannot disagree — including when it pauses. */
+.iso-guarantee-dwell {
+  position: absolute;
+  right: 0;
+  bottom: -14px;
+  left: 0;
+  height: 2px;
+  background: var(--iso-line);
+  overflow: hidden;
+}
+
+.iso-guarantee-dwell i {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--iso-teal);
+  transform: scaleX(0);
+  transform-origin: left center;
+  animation: iso-guarantee-dwell var(--iso-dwell) linear forwards;
+}
+
+.iso-guarantee.is-held .iso-guarantee-dwell i { animation-play-state: paused; }
+
+@keyframes iso-guarantee-dwell {
+  from { transform: scaleX(0); }
+  to   { transform: scaleX(1); }
+}
+
+.iso-guarantee-controls {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: min(100%, var(--iso-plate-w));
+  margin: 30px auto 0;
+  flex-wrap: wrap;
+}
+
+.iso-guarantee-status {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  color: var(--iso-text-muted);
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+}
+
+.iso-guarantee-jumps { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.iso-guarantee-jump {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--iso-line);
+  border-radius: 999px;
+  padding: 5px 12px;
+  background: transparent;
+  color: var(--iso-text-muted);
+  font-family: var(--font-sans), system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 550;
+  cursor: pointer;
+}
+
+/* current differs by weight, ink and a filled mark — not by colour alone */
+.iso-guarantee-jump.is-current {
+  border-color: rgba(12, 62, 72, .54);
+  color: var(--iso-ink);
+  font-weight: 750;
+}
+
+.iso-guarantee-pause {
+  border: 1px solid rgba(12, 62, 72, .54);
+  border-radius: 999px;
+  padding: 5px 14px;
+  background: transparent;
+  color: var(--iso-ink);
+  font-family: var(--font-sans), system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.iso-guarantee-caption {
+  transition: opacity 260ms ease, color 260ms ease;
+}
+
+/* the active caption is marked by its label and weight, never by hiding the
+   others — every caption stays at the .72 ink floor that clears 4.5:1 */
+.iso-guarantee-caption.is-current dt { color: var(--iso-teal); font-weight: 750; }
+.iso-guarantee-caption.is-current dd strong { color: var(--iso-ink); }
+
+/* tails align across columns even when a label wraps to two lines */
+.iso-guarantee-caption dd { display: flex; flex-direction: column; height: 100%; }
+.iso-guarantee-caption dd small { margin-top: auto; padding-top: 10px; }
+.iso-guarantee-caption dt { min-height: 2.9em; }
+
+/* the static row: every plate at once, every caption equally weighted */
+.iso-guarantee-static {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px;
+  align-items: end;
+}
+
+.iso-guarantee-static .iso-guarantee-plate { margin: 0; }
+.iso-guarantee-static img { width: 100%; height: auto; object-fit: contain; }
+
+@media (max-width: 860px) {
+  .iso-guarantee-static { grid-template-columns: 1fr; }
+  .iso-guarantee-controls { gap: 12px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .iso-guarantee-frame { transition: none; }
+  .iso-guarantee-dwell i { animation: none; transform: scaleX(1); }
+  .iso-guarantee-caption { transition: none; }
 }
