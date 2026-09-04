@@ -3723,9 +3723,9 @@ body {
 .iso-final-panel {
   position: relative;
   display: grid;
-  min-height: 530px;
+  min-height: 620px;
   overflow: hidden;
-  grid-template-columns: 1.05fr .95fr;
+  grid-template-columns: 1.08fr .92fr;
   align-items: center;
   border: 1px solid rgba(255, 250, 241, .15);
   border-radius: 14px;
@@ -3791,19 +3791,46 @@ body {
 .iso-final-art {
   position: relative;
   z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
   height: 100%;
+  margin: 0;
+  padding: 28px 24px;
 }
 
+/* The width is stated here rather than left to the `sizes` attribute. With
+   width:auto a srcset image takes its layout width from `sizes`, which is a
+   hint for picking a file, not a layout instruction — so the card was being
+   sized by a number that lives in the TSX and that a browser is free to
+   resolve differently.
+
+   Width alone governs, and there is deliberately no max-height. A height cap
+   binds before the width clamp does on a stacked panel, which leaves the
+   element box off the card’s 0.541 ratio and letterboxes the drawing inside
+   its own box. Nothing needs the cap: the page scrolls.
+
+   No rotate either. The plate is drawn on its own isometric axis, and a CSS
+   tilt would put two projections on one object. */
 .iso-final-art img {
-  position: absolute;
-  top: -5%;
-  right: -14%;
-  width: 120%;
-  max-width: none;
-  height: 110%;
+  width: clamp(180px, 26vw, 300px);
+  max-width: 100%;
+  height: auto;
   object-fit: contain;
-  filter: drop-shadow(0 30px 25px rgba(0, 0, 0, .28));
-  transform: rotate(-4deg);
+  filter: drop-shadow(0 24px 30px rgba(4, 30, 36, .4));
+}
+
+/* 6.3:1 on --iso-teal-dark — this is a disclosure, so it clears AA for body
+   text rather than the 3.0 floor for incidental marks. */
+.iso-final-art figcaption {
+  max-width: 320px;
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+  text-wrap: balance;
+  color: rgba(255, 250, 241, .66);
 }
 
 .iso-footer {
@@ -3979,17 +4006,19 @@ body {
 
   .iso-final-panel {
     grid-template-columns: 1fr;
+    min-height: auto;
   }
 
   .iso-final-art {
-    min-height: 390px;
+    padding: 0 24px 46px;
   }
 
+  /* The panel is one column from here down, so the card has the whole width
+     to itself and should read larger, not smaller. The desktop 26vw is sized
+     against a 0.92fr column; applied to a full-width row it shrinks the card
+     exactly where it just gained room. */
   .iso-final-art img {
-    top: -20%;
-    right: -10%;
-    width: 90%;
-    height: 135%;
+    width: clamp(200px, 34vw, 330px);
   }
 
   .iso-product-copy {
@@ -4460,13 +4489,7 @@ body {
   }
 
   .iso-final-art {
-    min-height: 350px;
-  }
-
-  .iso-final-art img {
-    top: -18%;
-    right: -34%;
-    width: 135%;
+    padding: 0 18px 36px;
   }
 
   .iso-footer {

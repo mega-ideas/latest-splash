@@ -1190,23 +1190,37 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
             </div>
           </div>
 
-          {/* The close says "your global treasury", so it gets the treasury.
-              This replaces payments.svg, which was 512KB, carried a C2PA
-              generative manifest, and held exactly one base64 raster and one
-              <path> — an SVG extension on a bitmap, which is a trap for whoever
-              reaches for it next expecting it to scale. treasury-island.png has
-              a neutral matte, so it composites on this dark panel without a
-              seam, and it is drawn at its real 2752x1536 rather than the
-              1448x1086 the old declaration claimed. */}
-          <div className="iso-final-art">
+          {/* The panel argues "prove the MY-to-PH path", so it shows that
+              path completing rather than a treasury sitting still. It
+              replaces treasury-island.png, which is still in the tree and
+              now unreferenced.
+
+              Trimmed to its drawn bounds before it got here. The source was
+              a 2896x2172 landscape canvas carrying a 1040x1921 portrait
+              card, so 64% of the file was empty pixels and every width in
+              the stylesheet would have been describing the canvas instead of
+              the art. It is drawn at its real 860x1589, and it is not
+              rotated: the card already carries its own isometric projection
+              and a CSS tilt would fight the drawn axis.
+
+              The caption is not decoration. This card has "2 min 34 sec"
+              baked into its pixels, and scripts/check-copy.mjs bans that
+              exact timing figure outright — but that guard reads source text,
+              so an image walks straight past it. The corridor is testnet, and
+              the sentence beside this picture says the path still has to be
+              proven. Labelling the plate is what keeps the two agreeing. */}
+          <figure className="iso-final-art">
             <Image
-              src="/cinematic/treasury-island.png"
-              alt="Isometric floating treasury island with an open vault of reserves and orbiting coins"
-              width={2752}
-              height={1536}
-              sizes="(max-width: 1100px) 60vw, 620px"
+              src="/cinematic/corridor-receipt.png"
+              alt="Isometric receipt card. 1,000.00 USD sent from Malaysia; recipient in the Philippines gets PHP 56,120.00; marked delivered in 2 minutes 34 seconds at a 0.8% fee."
+              width={860}
+              height={1589}
+              sizes="(max-width: 600px) 200px, (max-width: 1100px) 34vw, 300px"
             />
-          </div>
+            <figcaption>
+              Illustrative example · MY-PH testnet. Amounts, timing and rate shown are not a quote.
+            </figcaption>
+          </figure>
         </div>
       </section>
 
