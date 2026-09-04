@@ -1443,7 +1443,7 @@ body {
   white-space: nowrap;
 }
 .iso-roadmap-chip svg { width: 11px; height: 11px; }
-.iso-roadmap-chip small { font-size: 9px; font-weight: 700; letter-spacing: .04em; text-transform: none; }
+.iso-roadmap-chip small { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: none; }
 
 .iso-wheel { position: relative; margin-top: 34px; }
 
@@ -2162,7 +2162,14 @@ body {
   letter-spacing: -.03em;
 }
 .iso-supply-cta-copy > p { margin-top: 10px; color: var(--iso-text-secondary); font-size: 14px; line-height: 1.6; }
-.iso-supply-cta-legal { color: var(--iso-text-muted); font-size: 12px; line-height: 1.55; }
+.iso-supply-cta-copy > p.iso-supply-cta-legal {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--iso-line);
+  color: var(--iso-text-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
 .iso-supply-cta-actions { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
 
 @media (max-width: 820px) {
@@ -7676,7 +7683,7 @@ button.iso-product-row {
 
   /* Roadmap pills, evidence code paths and inline module names. */
   .iso-landing .iso-roadmap-chip strong { font-size: 11px; }
-  .iso-landing .iso-roadmap-chip small { font-size: 10.5px; }
+  /* the base rule is 11px now; this breakpoint override is redundant */
   .iso-landing .iso-ctrl-module { font-size: 11px; }
   .iso-landing .iso-ctrl-states code { font-size: 11px; }
 
