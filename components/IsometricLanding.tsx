@@ -989,6 +989,32 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
                 </li>
               ))}
             </ol>
+
+            {/* The region the board then itemises. Deliberately unpinned:
+                this plate runs edge to edge, so a 244px pin card floating
+                above its node covers the landmark it names — Petronas
+                behind card one, Marina Bay Sands behind card two. The pins
+                stay on the bridge plate, which has sky to put them in and
+                actually draws the live KL-to-Manila path.
+
+                The caption is load-bearing. The markets drawn here and the
+                rows in the board are not the same list: Cambodia is drawn
+                and is not a route, while PHP, VND, EUR and GBP are routes
+                and are not drawn. Nothing should let a reader read a route
+                list off the artwork. */}
+            <figure className="iso-corridor-region">
+              <Image
+                src="/cinematic/corridor-district-v1.png"
+                alt="Isometric platform carrying Southeast Asian landmarks — the Petronas Towers, Marina Bay Sands, Angkor Wat, Borobudur and Wat Arun — with dashed lines running out to partner banks, delivery vehicles and phones."
+                width={984}
+                height={668}
+                sizes="(max-width: 1100px) 92vw, 830px"
+              />
+              <figcaption>
+                One platform, many local rails. Which of them are live is the board&apos;s
+                business, not the drawing&apos;s.
+              </figcaption>
+            </figure>
           </div>
         </div>
       </section>

@@ -3366,6 +3366,33 @@ body {
   margin-top: 24px;
 }
 
+/* Sits under the plate it gives context to, and stays narrower than it. The
+   pinned plate carries the argument — this one is the region that argument
+   happens in, and context that renders larger than its subject inverts the
+   hierarchy. 660px also draws the 984px source at 1.5x, so it stays crisp.
+   The caption takes the mono face under a hairline, which is how every other
+   disclosure on this page is set. */
+.iso-corridor-region {
+  max-width: 660px;
+  margin: 34px auto 0;
+}
+
+.iso-corridor-region img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.iso-corridor-region figcaption {
+  margin-top: 12px;
+  border-top: 1px solid var(--iso-line);
+  padding-top: 10px;
+  color: var(--iso-text-muted);
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
 .iso-recipient-ladder {
   display: grid;
   gap: 9px;
