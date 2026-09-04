@@ -8495,7 +8495,11 @@ code, kbd, samp {
    The stage is 952px: 30% down from the 1360 shell it used to fill.
    Every animated property is transform or opacity. */
 .iso-guarantee {
-  --iso-plate-w: 952px;
+  /* 952 * 0.75. One lever: the stage is min(100%, this) at a fixed ratio and
+     the frames are inset:0 object-fit:contain, so every plate scales with it,
+     and .iso-guarantee-controls reads the same token so the dwell rail and the
+     jump buttons stay the width of the picture they belong to. */
+  --iso-plate-w: 714px;
   --iso-dwell: 10s;
   --iso-cross: 820ms;
   --iso-plate-fit: 1;
