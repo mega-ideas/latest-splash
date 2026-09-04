@@ -3347,6 +3347,20 @@ body {
   gap: 70px;
 }
 
+/* A grid item defaults to min-width:auto, which refuses to shrink below its
+   content’s min-content width. The route table measures 460px there, so under
+   about 490px of viewport this column stayed 460 wide inside a 347px shell and
+   the entire section — lede, board, ladder, plate, legend — was clipped off the
+   right edge with no scrollbar to reveal it.
+
+   .iso-route-table-wrap already carries overflow-x:auto, so the board was
+   always meant to scroll rather than push. It never got the chance. Releasing
+   the floor lets the column take the shell width and hands the overflow to the
+   element built to hold it. */
+.iso-corridor-layout > * {
+  min-width: 0;
+}
+
 .iso-corridor-copy > p {
   max-width: 430px;
   margin-top: 24px;
