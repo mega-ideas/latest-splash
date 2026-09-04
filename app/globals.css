@@ -1148,20 +1148,49 @@ body {
   line-height: 1.7;
 }
 
+/* Section titles are deliberately scarce now. Nine of the ten on the landing
+   sit at this size; only #comparison is promoted, via .iso-section-title-band
+   below, because it is the one section carrying live data and the extrude is
+   what a promotion is spent on.
+
+   The size lives here and nowhere else. It previously did not: a 0-2-0 rule in
+   cinematic.css (.iso-section .iso-section-title) was overriding this one, and
+   because media queries add no specificity, every breakpoint override written
+   against the bare class was inert. Those are removed; this clamp covers the
+   whole range on its own. */
 .iso-section-title {
   margin-top: 14px;
   color: var(--iso-ink);
-  font-size: clamp(56px, 6vw, 96px);
+  font-size: clamp(34px, 3.2vw, 44px);
   font-weight: 950;
-  letter-spacing: -.075em;
-  line-height: .84;
+  letter-spacing: -.06em;
+  line-height: .92;
   text-transform: uppercase;
+  text-wrap: balance;
 }
 
+/* Inline, not block. At 44px the second clause reads as part of one sentence
+   rather than a second deck, and the fake 3px offset that stood in for the
+   hero's real extrude reads as a printing error at this size. */
 .iso-section-title span {
-  display: block;
+  display: inline;
   color: var(--iso-teal);
-  text-shadow: 3px 4px 0 rgba(12, 62, 72, .17);
+}
+
+/* The one promoted heading. This is the real extrude — a stroke and four hard
+   offsets — not the flat shadow the others used to carry. Applied to
+   #comparison alone; putting it on a 31px cap height would make it 27% heavier
+   than the hero it is quoting. */
+.iso-section-title-band {
+  font-size: clamp(56px, 6vw, 96px);
+  letter-spacing: -.075em;
+  line-height: .84;
+  -webkit-text-stroke: 2px #083640;
+  text-shadow:
+    2px 2px 0 #0d6370,
+    4px 4px 0 #0d6370,
+    6px 6px 0 #0d6370,
+    8px 8px 0 #083640;
 }
 
 .iso-progress {
@@ -1366,40 +1395,7 @@ body {
   gap: 7px;
 }
 
-.iso-yield-live {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 11px 18px;
-  color: rgba(12, 62, 72, .7);
-  background: rgba(159, 207, 199, .13);
-  font-family: var(--font-mono), monospace;
-  font-size: 11px;
-  font-weight: 750;
-}
-
-.iso-yield-live i {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #34a874;
-  box-shadow: 0 0 0 4px rgba(52, 168, 116, .14);
-  animation: iso-live-pulse 1.7s ease-in-out infinite;
-}
-
-.iso-yield-live strong {
-  color: var(--iso-teal-dark);
-  text-transform: uppercase;
-}
-
 /* Demoted yield strip — reference data, deliberately quieter than the table. */
-.iso-yield-live.is-demoted {
-  background: rgba(12, 62, 72, .05);
-  color: rgba(12, 62, 72, .58);
-  font-weight: 650;
-}
-.iso-yield-live.is-demoted i { background: rgba(12, 62, 72, .35); box-shadow: none; animation: none; }
-.iso-yield-live.is-demoted strong { color: rgba(12, 62, 72, .6); }
 
 /* ─── Working-capital flywheel (Settle → Supply → Save) ───────────────────
    Landing band + /working-capital diagram. Supply is the weighted coral
@@ -2323,133 +2319,14 @@ body {
   background-size: 68px 68px;
 }
 
-.iso-layer-grid {
-  display: grid;
-  grid-template-columns: repeat(12, 1fr);
-  gap: 20px;
-}
-
-.iso-layer-card {
-  position: relative;
-  min-height: 520px;
-  overflow: hidden;
-  border: 1px solid rgba(12, 62, 72, .22);
-  border-radius: 12px;
-  padding: 22px;
-  background: rgba(255, 251, 245, .56);
-  box-shadow:
-    8px 9px 0 rgba(12, 62, 72, .12),
-    0 26px 50px rgba(8, 54, 64, .08);
-  transition: transform .3s ease, box-shadow .3s ease;
-}
-
-.iso-layer-card:hover {
-  transform: translateY(-8px);
-  box-shadow:
-    13px 16px 0 rgba(12, 62, 72, .14),
-    0 34px 60px rgba(8, 54, 64, .12);
-}
-
-.iso-layer-card-1,
-.iso-layer-card-3 {
-  grid-column: span 4;
-}
-
-.iso-layer-card-2 {
-  grid-column: span 4;
-  transform: translateY(38px);
-}
-
-.iso-layer-card-2:hover {
-  transform: translateY(30px);
-}
-
-.iso-layer-card::before {
-  position: absolute;
-  inset: 0;
-  content: "";
-  pointer-events: none;
-  background: linear-gradient(135deg, rgba(159, 207, 199, .18), transparent 42%);
-}
-
-.iso-layer-meta {
-  position: relative;
-  z-index: 2;
-  display: flex;
-  align-items: center;
-  color: rgba(12, 62, 72, .72);
-  font-family: var(--font-sans), system-ui, sans-serif;
-  font-size: 13px;
-  font-weight: 650;
-  letter-spacing: 0;
-}
-
-
-.iso-layer-art {
-  position: relative;
-  height: 245px;
-  margin-inline: -14px;
-}
-
-.iso-layer-art img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  filter: drop-shadow(0 22px 20px rgba(8, 54, 64, .14));
-  transition: transform .35s ease, filter .35s ease;
-}
 
 /* Hover the illustration itself → it pops out 1.1x above the card. */
-.iso-layer-art:hover img {
-  transform: translateY(-8px) scale(1.1);
-  filter: drop-shadow(0 30px 26px rgba(8, 54, 64, .24));
-}
 
 /* Give the popped illustration room to float above adjacent cards. */
 .iso-loops-card,
-.iso-supply-card,
-.iso-layer-card { position: relative; }
+.iso-supply-card { position: relative; }
 .iso-loops-card:hover,
-.iso-supply-card:hover,
-.iso-layer-card:hover { z-index: 3; }
-
-@media (prefers-reduced-motion: reduce) {
-  .iso-layer-art img { transition: none; }
-}
-
-.iso-layer-copy {
-  position: relative;
-  z-index: 2;
-  border-top: 1px solid var(--iso-line);
-  padding-top: 19px;
-}
-
-.iso-layer-copy h3 {
-  color: var(--iso-ink);
-  font-size: 25px;
-  font-weight: 900;
-  letter-spacing: -.045em;
-}
-
-.iso-layer-copy p {
-  margin-top: 10px;
-  color: rgba(12, 62, 72, .74);
-  font-size: 12px;
-  line-height: 1.65;
-}
-
-.iso-layer-copy small {
-  display: inline-flex;
-  margin-top: 16px;
-  border-left: 3px solid var(--iso-gold);
-  padding-left: 9px;
-  color: var(--iso-teal);
-  font-family: var(--font-mono), monospace;
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-}
+.iso-supply-card:hover { z-index: 3; }
 
 .iso-flow {
   overflow: hidden;
@@ -2493,7 +2370,6 @@ body {
 
 .iso-section-title-light span {
   color: var(--iso-gold);
-  text-shadow: 4px 5px 0 rgba(0, 0, 0, .3);
 }
 
 .iso-flow-intro {
@@ -3444,31 +3320,6 @@ body {
   margin-top: 24px;
 }
 
-.iso-route-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-  margin-top: 28px;
-}
-
-.iso-route-list span {
-  border: 1px solid rgba(12, 62, 72, .2);
-  border-radius: 5px;
-  padding: 7px 10px;
-  color: var(--iso-teal);
-  background: rgba(255, 251, 245, .55);
-  box-shadow: 2px 3px 0 rgba(12, 62, 72, .11);
-  font-family: var(--font-mono), monospace;
-  font-size: 12px;
-  font-weight: 900;
-}
-
-.iso-route-list span.is-live {
-  color: #fffaf1;
-  background: var(--iso-teal);
-  box-shadow: 2px 3px 0 var(--iso-teal-dark);
-}
-
 .iso-recipient-ladder {
   display: grid;
   gap: 9px;
@@ -3538,35 +3389,6 @@ body {
 
 .iso-inline-link svg {
   width: 15px;
-}
-
-.iso-corridor-stage {
-  position: relative;
-  min-height: 600px;
-}
-
-.iso-corridor-stage::after {
-  position: absolute;
-  right: 10%;
-  bottom: 11%;
-  left: 12%;
-  height: 12%;
-  border-radius: 50%;
-  filter: blur(22px);
-  content: "";
-  background: rgba(8, 54, 64, .16);
-}
-
-.iso-corridor-stage img {
-  position: relative;
-  z-index: 2;
-  width: 112%;
-  max-width: none;
-  height: 600px;
-  margin-left: -7%;
-  object-fit: contain;
-  filter: drop-shadow(0 26px 20px rgba(8, 54, 64, .15));
-  animation: iso-float 8s ease-in-out infinite;
 }
 
 .iso-corridor-number {
@@ -3902,9 +3724,6 @@ body {
   padding: 60px;
 }
 
-.iso-final-copy .iso-section-title {
-  font-size: clamp(48px, 5.3vw, 82px);
-}
 
 .iso-final-copy > p {
   max-width: 560px;
@@ -4080,42 +3899,6 @@ body {
     max-width: 620px;
   }
 
-  .iso-layer-card-1,
-  .iso-layer-card-2,
-  .iso-layer-card-3 {
-    grid-column: span 12;
-    min-height: 350px;
-    transform: none;
-  }
-
-  .iso-layer-card-2:hover {
-    transform: translateY(-8px);
-  }
-
-  .iso-layer-card {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    align-items: center;
-  }
-
-  .iso-layer-meta {
-    position: absolute;
-    top: 22px;
-    right: 22px;
-    left: 22px;
-  }
-
-  .iso-layer-art {
-    height: 290px;
-    margin: 0;
-  }
-
-  .iso-layer-copy {
-    border-top: 0;
-    border-left: 1px solid var(--iso-line);
-    padding: 20px 0 20px 28px;
-  }
-
   .iso-flow-layout {
     gap: 50px;
   }
@@ -4146,14 +3929,6 @@ body {
 
   .iso-corridor-layout {
     gap: 20px;
-  }
-
-  .iso-corridor-stage {
-    min-height: 520px;
-  }
-
-  .iso-corridor-stage img {
-    height: 540px;
   }
 
   .iso-copilot-layout,
@@ -4367,10 +4142,6 @@ body {
     padding-block: 80px;
   }
 
-  .iso-section-title {
-    font-size: clamp(48px, 15vw, 68px);
-  }
-
   .iso-client-proof-layout {
     gap: 28px;
   }
@@ -4452,28 +4223,6 @@ body {
 
   .iso-progress-art {
     height: 180px;
-  }
-
-  .iso-layer-card {
-    display: block;
-    min-height: auto;
-    padding: 18px;
-  }
-
-  .iso-layer-meta {
-    position: relative;
-    inset: auto;
-  }
-
-  .iso-layer-art {
-    height: 230px;
-    margin-top: 8px;
-  }
-
-  .iso-layer-copy {
-    border-top: 1px solid var(--iso-line);
-    border-left: 0;
-    padding: 18px 0 0;
   }
 
   .iso-flow-tabs {
@@ -4593,16 +4342,6 @@ body {
     font-size: 10px;
   }
 
-  .iso-corridor-stage {
-    min-height: 390px;
-  }
-
-  .iso-corridor-stage img {
-    width: 130%;
-    height: 410px;
-    margin-left: -15%;
-  }
-
   .iso-corridor-number {
     font-size: 190px;
   }
@@ -4686,7 +4425,6 @@ body {
     max-width: 100%;
     word-break: break-word;
     overflow-wrap: anywhere;
-    font-size: 38px;
   }
 
   .iso-final-art {
@@ -5536,7 +5274,7 @@ body {
     0 30px 56px rgba(8, 54, 64, .10);
 }
 
-/* Highlighted variant — gold/mint inner sheen like .iso-layer-card::before. */
+/* Highlighted variant — gold/mint inner sheen. */
 .dash-block-accent::before {
   position: absolute;
   inset: 0;
@@ -6081,7 +5819,7 @@ th.money { text-align: right; }
 @media (prefers-reduced-motion: reduce) {
   .iso-hero-main-art,
   .iso-floating-transfer,
-  .iso-corridor-stage img,
+  .iso-pin.is-live .iso-pin-node,
   .iso-marquee-track {
     animation: none;
   }
@@ -8129,3 +7867,370 @@ code, kbd, samp {
   font-variant-numeric: tabular-nums slashed-zero;
   font-feature-settings: "tnum" 1, "zero" 1;
 }
+
+
+/* ─── Comparison: caption and table foot ──────────────────────────────────
+   The caption names what the table is measuring and where the figures come
+   from; the foot carries the sources and the as-of stamp for the yield row
+   directly above it. Both were previously absent — the table had bare <th>
+   with no scope, no caption, and its provenance floated outside the border at
+   3.30:1. Inside the border, at ink .78, it is part of the evidence. */
+.iso-comparison-caption {
+  caption-side: top;
+  max-width: 78ch;
+  padding: 0 0 16px;
+  color: var(--iso-text-muted);
+  font-size: 13px;
+  line-height: 1.55;
+  text-align: left;
+}
+
+.iso-comparison-foot td {
+  padding: 14px 20px;
+  border-top: 1.5px solid var(--iso-line);
+  border-right: 0;
+  background: rgba(12, 62, 72, .028);
+}
+
+.iso-comparison-foot .iso-foot-sources,
+.iso-comparison-foot .iso-foot-note,
+.iso-comparison-foot .iso-foot-stamp {
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums slashed-zero;
+  color: var(--iso-text-label);
+}
+
+.iso-comparison-foot .iso-foot-sources { display: block; }
+
+.iso-comparison-foot .iso-foot-note {
+  display: block;
+  margin-top: 6px;
+  color: var(--iso-text-muted);
+}
+
+.iso-comparison-foot .iso-foot-stamp {
+  display: block;
+  margin-top: 6px;
+  text-align: right;
+  color: var(--iso-teal);
+}
+
+/* The wrap is a scroll container and now keyboard-reachable; keep its ring
+   inside the rounded corner rather than square across it. */
+.iso-comparison-wrap:focus-visible { outline-offset: -2px; }
+
+
+/* ─── The guarantees: one figure, three captions ──────────────────────────
+   Replaces .iso-layer-* — three cards that cropped three 2752px illustrations
+   into 245px thumbnails and repeated, for the third time on this page, the
+   same numbered-card grid used by #loops and #supply. */
+.iso-guarantee-figure {
+  margin: 56px 0 0;
+}
+
+.iso-guarantee-figure img {
+  display: block;
+  width: 100%;
+  height: auto;
+  /* The asset's true ratio. It has a neutral matte, so it composites on the
+     warm ground without a seam and needs no frame, border or shadow box. */
+  aspect-ratio: 2752 / 1536;
+  object-fit: contain;
+}
+
+.iso-guarantee-rule {
+  margin: 36px 0 28px;
+  border: 0;
+  border-top: 1px solid var(--iso-line);
+}
+
+.iso-guarantee-captions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 40px;
+  margin: 0;
+}
+
+.iso-guarantee-caption dt {
+  color: var(--iso-teal);
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.iso-guarantee-caption dd {
+  margin: 10px 0 0;
+}
+
+.iso-guarantee-caption strong {
+  display: block;
+  color: rgba(12, 62, 72, .92);
+  font-size: 20px;
+  font-weight: 850;
+  letter-spacing: -.01em;
+  line-height: 1.2;
+}
+
+.iso-guarantee-caption p {
+  margin: 10px 0 16px;
+  color: var(--iso-text-muted);
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+
+.iso-guarantee-caption small {
+  display: block;
+  padding-top: 14px;
+  border-top: 1px dashed rgba(12, 62, 72, .28);
+  color: var(--iso-text-label);
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums slashed-zero;
+}
+
+@media (max-width: 1100px) {
+  .iso-guarantee-captions { grid-template-columns: minmax(0, 1fr); gap: 28px; }
+  .iso-guarantee-figure { margin-top: 40px; }
+}
+
+
+/* ─── Corridors: the annotated plate ──────────────────────────────────────
+   The plate locks to the asset's real 1376x768 with no crop, because the pin
+   coordinates in CORRIDOR_PINS are percentages of the drawn art. Do not add
+   object-fit, a width overshoot, or a fixed height here — any of the three
+   breaks every pin silently. */
+.iso-plate {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1376 / 768;
+  margin: 0;
+}
+
+.iso-plate img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.iso-pin {
+  position: absolute;
+  left: var(--x);
+  top: var(--y);
+  z-index: 3;
+  transform: translate(-50%, -50%);
+}
+
+.iso-pin-node {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 5px;
+  height: 5px;
+  margin: -2.5px 0 0 -2.5px;
+  border-radius: 50%;
+  background: var(--iso-teal);
+  /* A paper halo so the node reads against the illustration's own colours. */
+  box-shadow: 0 0 0 3px rgba(255, 250, 244, .92);
+}
+
+.iso-pin.is-live .iso-pin-node {
+  animation: iso-pin-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes iso-pin-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(255, 250, 244, .92), 0 0 0 3px rgba(13, 99, 112, .40); }
+  50%      { box-shadow: 0 0 0 3px rgba(255, 250, 244, .92), 0 0 0 9px rgba(13, 99, 112, 0); }
+}
+
+.iso-pin-badge {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid rgba(12, 62, 72, .42);
+  border-radius: 50%;
+  background: var(--iso-paper);
+  color: var(--iso-teal-dark);
+  font-family: var(--font-mono), monospace;
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.iso-plate .iso-pin-badge {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  margin: -20px 0 0 7px;
+}
+
+/* 1.5px at .42 alpha clears the 3:1 that WCAG 1.4.11 asks of a graphical
+   object required to understand a figure. --iso-line would not: it is
+   rgba(12,62,72,.16), about 1.2:1 on this ground. */
+.iso-pin-leader {
+  position: absolute;
+  bottom: 50%;
+  left: 50%;
+  width: 1.5px;
+  height: 30px;
+  background: rgba(12, 62, 72, .42);
+  transform: translateX(-50%);
+}
+
+.iso-pin-card {
+  position: absolute;
+  bottom: calc(50% + 30px);
+  left: 50%;
+  display: grid;
+  gap: 4px;
+  width: 250px;
+  max-width: 270px;
+  border: 1px solid rgba(12, 62, 72, .42);
+  border-radius: 6px;
+  padding: 12px 14px;
+  background: var(--iso-paper);
+  box-shadow: 4px 5px 0 rgba(8, 54, 64, .16);
+  transform: translateX(-50%);
+}
+
+.iso-pin-label {
+  color: var(--iso-teal);
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+}
+
+.iso-pin-title {
+  color: rgba(12, 62, 72, .88);
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.3;
+}
+
+.iso-pin-meta {
+  margin-top: 2px;
+  padding-top: 6px;
+  border-top: 1px dashed rgba(12, 62, 72, .30);
+  color: var(--iso-text-muted);
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums slashed-zero;
+}
+
+/* Dev-only re-fitting overlay, drawn at 5% intervals. Gated in the component
+   on NODE_ENV and ?pins, so this never renders for a visitor. */
+.iso-plate.is-fitting .iso-pin-grid {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  background-image:
+    repeating-linear-gradient(to right, rgba(227, 151, 116, .55) 0 1px, transparent 1px 5%),
+    repeating-linear-gradient(to bottom, rgba(227, 151, 116, .55) 0 1px, transparent 1px 5%);
+}
+
+/* The legend is the desktop pins' accessible twin and the mobile substitute.
+   Hidden on wide screens, where the plate itself carries the argument. */
+.iso-pin-legend {
+  display: none;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+  gap: 10px;
+}
+
+.iso-pin-legend li {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  border: 1px solid var(--iso-line);
+  border-radius: 9px;
+  padding: 12px 14px;
+  background: rgba(255, 250, 244, .6);
+}
+
+.iso-pin-legend strong {
+  display: block;
+  margin-top: 2px;
+  color: rgba(12, 62, 72, .88);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.iso-pin-legend small {
+  display: block;
+  margin-top: 4px;
+  color: var(--iso-text-muted);
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums slashed-zero;
+}
+
+@media (max-width: 900px) {
+  .iso-plate .iso-pin { display: none; }
+  .iso-pin-legend { display: grid; }
+}
+
+/* ─── Corridors: the route table ──────────────────────────────────────────
+   Replaces eight equal-weight chips, which gave a modelled route the same
+   visual weight as the one that actually runs. The last column names the
+   specific blocker instead of a roadmap pill. */
+.iso-route-table-wrap {
+  margin-top: 28px;
+  overflow-x: auto;
+}
+
+.iso-route-table {
+  width: 100%;
+  min-width: 460px;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums slashed-zero;
+}
+
+.iso-route-table caption {
+  caption-side: top;
+  padding: 0 0 12px;
+  color: var(--iso-text-muted);
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: left;
+}
+
+.iso-route-table th,
+.iso-route-table td {
+  padding: 9px 14px 9px 0;
+  text-align: left;
+  border-bottom: 1px solid rgba(12, 62, 72, .10);
+}
+
+.iso-route-table thead th {
+  border-bottom: 1.5px solid var(--iso-line);
+  color: var(--iso-text-label);
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.iso-route-table tbody th {
+  color: var(--iso-ink);
+  font-family: var(--font-mono), monospace;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.iso-route-table tbody td {
+  color: var(--iso-text-muted);
+  font-family: var(--font-mono), monospace;
+  font-size: 12.5px;
+}
+
+/* The one live route is marked by weight and colour, and by the word "testnet
+   live" in its own cell — never by colour alone. */
+.iso-route-table tr.is-live th,
+.iso-route-table tr.is-live td {
+  color: var(--iso-teal);
+  font-weight: 700;
+}
+
+.iso-cell-dash { color: var(--iso-text-label); }

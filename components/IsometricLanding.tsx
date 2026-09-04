@@ -2,6 +2,7 @@
 
 import Image from 'next/image';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import {
   Anchor,
@@ -33,30 +34,30 @@ import { claims, lockedCopy } from '@/content/claims';
    not what the money does, but what holds true of every payment whichever loop
    it is in. Deliberately unnumbered — the loops are numbered because a reader
    walks them in order; these three are simultaneous, and numbering them would
-   assert a sequence that does not exist. */
+   assert a sequence that does not exist.
+
+   No per-item art any more either: these are captions under one figure drawn at
+   asset scale, rather than three cards each cropping a 2752px illustration into
+   a 245px thumbnail. liquidity-pools.png and treasury-island.png are therefore
+   unused on this page — they remain in public/ and are candidates for the Save
+   card and the comparison band, which is a separate decision from this one. */
 const operatingLayers = [
   {
     label: 'Settlement is atomic',
     title: 'Funds cannot get stuck.',
     copy: 'A payment intent settles or reverts inside one Sui transaction. There is no half-sent state to chase, because there is no moment when only half of it has happened.',
-    image: '/cinematic/settlement-machine.png',
-    imageAlt: 'Isometric settlement machine turning US dollar coins into local currency through a checkpoint',
     meta: lockedCopy.speed,
   },
   {
     label: 'A corridor that cannot settle does not quote',
     title: 'Nothing is promised before it can be funded.',
     copy: 'Payout inventory is checked before a quote exists. Corridors arm and pause under explicit controls, and settlement halts on a peg deviation or a compliance flag before any value moves.',
-    image: '/cinematic/liquidity-pools.png',
-    imageAlt: 'Tiered isometric liquidity pools with gold coin reserves flowing between basins',
     meta: 'Corridor-gated · halts before value moves',
   },
   {
     label: 'A person releases it',
     title: 'Nothing leaves on a model’s say-so.',
     copy: '0xWal prepares and proposes; it cannot sign. A named approver releases the payment, and Splash never takes custody of the funds it moves.',
-    image: '/cinematic/treasury-island.png',
-    imageAlt: 'Isometric floating treasury island with an open vault of reserves and orbiting coins',
     meta: 'Maker-checker · approval-gated',
   },
 ];
@@ -277,6 +278,57 @@ const copilotLayers = [
   },
 ];
 
+/**
+ * Pin coordinates for the corridor plate.
+ *
+ * THESE ARE HAND-FIT TO ONE EXACT ASSET: /cinematic/corridor-bridge-v3.png,
+ * 1376x768. They are percentages of the drawn art, which only works because
+ * .iso-plate locks the container to that same 1376/768 ratio with no crop and
+ * no overshoot. If that asset is regenerated — and the filenames in this repo
+ * say art does get regenerated (-v3, -v4, -v5, token-idr-v1, agent-bot-cut) —
+ * every pin below still renders, still passes lint, still passes the contrast
+ * check, and now points at empty sky. Nothing throws.
+ *
+ * To re-fit after an art change: run the dev server and append ?pins to the
+ * landing URL. That draws a 5% crosshair grid over the plate. Read the new
+ * coordinates off it and edit them here.
+ *
+ * `meta` is deliberately non-optional. Every pin ends in a source line, which
+ * is what makes this an audited schematic rather than a pitch deck, and every
+ * one of those lines quotes a claim that already exists elsewhere in the repo —
+ * no pin asserts anything new.
+ */
+type CorridorPin = {
+  x: string;
+  y: string;
+  label: string;
+  title: string;
+  meta: string;
+  live?: boolean;
+};
+
+const CORRIDOR_PINS: CorridorPin[] = [
+  { x: '18%', y: '66%', label: 'Collect', title: 'USD in · KL platform', meta: lockedCopy.fee },
+  { x: '50%', y: '32%', label: 'Checkpoint', title: 'KYB and peg guard · bridge head', meta: 'Sumsub KYB · wired' },
+  { x: '82%', y: '66%', label: 'Deliver', title: 'Local rail · Manila platform', meta: lockedCopy.speed, live: true },
+];
+
+/* One live route and seven modelled ones. The last column names the specific
+   thing each modelled route is waiting on, rather than a bare "roadmap" pill —
+   a named blocker is checkable, a pill is not. Airwallex already appears in the
+   infrastructure rail on this page; naming it as the live route's rail adds no
+   new claim. */
+const CORRIDOR_ROUTES = [
+  { route: 'USD → PHP', status: 'testnet live', rail: 'Airwallex', missing: null, live: true },
+  { route: 'USD → MYR', status: 'modelled', rail: null, missing: 'local payout partner' },
+  { route: 'USD → IDR', status: 'modelled', rail: null, missing: 'local payout partner' },
+  { route: 'USD → VND', status: 'modelled', rail: null, missing: 'inbound licence step' },
+  { route: 'USD → THB', status: 'modelled', rail: null, missing: 'local payout partner' },
+  { route: 'USD → SGD', status: 'modelled', rail: null, missing: 'corridor controls' },
+  { route: 'USD → EUR', status: 'modelled', rail: null, missing: 'corridor controls' },
+  { route: 'USD → GBP', status: 'modelled', rail: null, missing: 'corridor controls' },
+];
+
 const recipientLadder = [
   {
     number: '01',
@@ -417,6 +469,14 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
   const [activeFlow, setActiveFlow] = useState(flowSteps[0]);
   const [yieldBenchmarks, setYieldBenchmarks] = useState(fallbackYieldBenchmarks);
   const [showBackToTop, setShowBackToTop] = useState(false);
+  const searchParams = useSearchParams();
+
+  /* Dev-only crosshair overlay for re-fitting the corridor pins after an art
+     change. Double-gated: the build must not be production AND ?pins must be
+     present, so there is no path by which this reaches a visitor. Read through
+     useSearchParams rather than an effect, so server and client agree on the
+     first render and no state is set during commit. */
+  const showPinGrid = process.env.NODE_ENV !== 'production' && searchParams.has('pins');
 
   useEffect(() => {
     let active = true;
@@ -559,7 +619,8 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
           <div className="iso-loops-grid">
             {loopCards.map((loop, index) => (
               <article className={`iso-loops-card iso-loops-card-${index + 1}`} key={loop.label}>
-                <div className="iso-loops-meta">                  <p>{loop.label}</p>
+                <div className="iso-loops-meta">
+                  <p>{loop.label}</p>
                   {loop.roadmap ? <RoadmapChip /> : <em className="iso-loops-live"><i aria-hidden="true" /> Live</em>}
                 </div>
                 <div className="iso-loops-art">
@@ -671,7 +732,11 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
           <div className="iso-section-heading iso-heading-split">
             <div>
               <p className="iso-kicker">Comparison</p>
-              <h2 className="iso-section-title">
+              {/* The one promoted heading on the page. It is spent here because
+                  this is the only section carrying live data, and the extrude is
+                  paired with the provenance in the table foot below — a heading
+                  is a claim, and the as-of stamp is what discharges it. */}
+              <h2 className="iso-section-title iso-section-title-band">
                 Built for business.
                 <span>Designed to move.</span>
               </h2>
@@ -682,15 +747,23 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
             </p>
           </div>
 
-          <div className="iso-comparison-wrap">
+          {/* tabIndex makes the horizontal scroll reachable by keyboard. The
+              wrap is already a scroll container, so browsers focus it anyway —
+              this just makes it announced, and the focus floor paints the ring. */}
+          <div className="iso-comparison-wrap" tabIndex={0} role="group" aria-labelledby="comparison-caption">
             <table className="iso-comparison-table">
+              <caption id="comparison-caption" className="iso-comparison-caption">
+                How one cross-border payout compares. Splash figures are for the live
+                USD-to-PHP testnet corridor; the yield row is a reference benchmark,
+                sourced and stamped in the table foot.
+              </caption>
               <thead>
                 <tr>
-                  <th>Feature</th>
-                  <th>Bank</th>
-                  <th>Broker</th>
-                  <th>Wise</th>
-                  <th className="is-splash">Splash</th>
+                  <th scope="col">Feature</th>
+                  <th scope="col">Bank</th>
+                  <th scope="col">Broker</th>
+                  <th scope="col">Wise</th>
+                  <th scope="col" className="is-splash">Splash</th>
                 </tr>
               </thead>
               <tbody>
@@ -704,16 +777,30 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
                   </tr>
                 ))}
               </tbody>
+              {/* Provenance belongs inside the table border, not floating under
+                  it: these are the sources for the row directly above. The asOf
+                  guard suppresses a bogus stamp on the offline fallback, and the
+                  timestamp is formatted client-side only, so there is no
+                  hydration mismatch. */}
+              <tfoot className="iso-comparison-foot">
+                <tr>
+                  <td colSpan={5}>
+                    <span className="iso-foot-sources">
+                      Reference yield benchmark — FDIC national savings · IBKR Pro cash ·
+                      Wise USD Interest · Splash treasury projection
+                    </span>
+                    <span className="iso-foot-note">
+                      Yield is hygiene, not the headline — the working-capital loop is.
+                    </span>
+                    {yieldBenchmarks.asOf ? (
+                      <span className="iso-foot-stamp">
+                        refreshed {new Date(yieldBenchmarks.asOf).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    ) : null}
+                  </td>
+                </tr>
+              </tfoot>
             </table>
-            <div className="iso-yield-live is-demoted">
-              <i aria-hidden="true" />
-              <strong>Reference yield benchmark</strong>
-              <span>
-                FDIC national savings - IBKR Pro cash - Wise USD Interest - Splash treasury projection
-                {yieldBenchmarks.asOf ? ` - refreshed ${new Date(yieldBenchmarks.asOf).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
-                {' '}· Yield is hygiene, not the headline — the working-capital loop is.
-              </span>
-            </div>
           </div>
         </div>
       </section>
@@ -764,10 +851,10 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
         </div>
       </section>
 
+      {/* No floating coin on this band. Once the plate carries informational
+          pins, a second decoratively-pinned object stops "pinned" meaning
+          anything. */}
       <section id="corridors" className="iso-section iso-corridors">
-        <div className="cin-drop" style={{ bottom: 40, right: '6%' }} aria-hidden="true">
-          <FloatingToken src="/cinematic/token-php.png" alt="Philippine peso token" size={120} />
-        </div>
         <div className="iso-shell iso-corridor-layout">
           <div className="iso-corridor-copy">
             <p className="iso-kicker">One testnet corridor. Modeled expansion routes.</p>
@@ -779,9 +866,30 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
               The MY-to-PH corridor is the proving ground. Additional routes stay modeled until partner, liquidity,
               and regulatory controls are ready market by market.
             </p>
-            <div className="iso-route-list">
-              <span className="is-live">PHP testnet</span><span>MYR</span><span>IDR</span><span>VND</span>
-              <span>THB</span><span>SGD</span><span>EUR</span><span>GBP</span>
+            <div className="iso-route-table-wrap">
+              <table className="iso-route-table">
+                <caption>
+                  Every corridor, and what each one that is not live is waiting on.
+                </caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Route</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Rail</th>
+                    <th scope="col">What&rsquo;s missing</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {CORRIDOR_ROUTES.map((row) => (
+                    <tr key={row.route} className={row.live ? 'is-live' : undefined}>
+                      <th scope="row">{row.route}</th>
+                      <td>{row.status}</td>
+                      <td>{row.rail ?? <span className="iso-cell-dash">&mdash;</span>}</td>
+                      <td>{row.missing ?? <span className="iso-cell-dash">&mdash;</span>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
             <div className="iso-recipient-ladder">
               {recipientLadder.map((step) => (
@@ -802,20 +910,64 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
           </div>
 
           <div className="iso-corridor-stage">
-            <Image
-              src="/cinematic/corridor-bridge-v3.png"
-              alt="Two isometric city platforms, Kuala Lumpur and Manila, connected by a golden bridge of flowing coins"
-              width={2752}
-              height={1536}
-            />
+            {/* The plate locks to the asset's true 1376x768 with no crop and no
+                overshoot, because the pins are percentages of the drawn art. The
+                old rule ran width:112%; margin-left:-7%; object-fit:contain,
+                which letterboxed it — under that, a percentage of the container
+                was not a percentage of the art and every coordinate would have
+                been a lie. */}
+            <figure className={`iso-plate${showPinGrid ? ' is-fitting' : ''}`}>
+              <Image
+                src="/cinematic/corridor-bridge-v3.png"
+                alt="Two isometric city platforms, Kuala Lumpur and Manila, connected by a golden bridge of flowing coins"
+                width={1376}
+                height={768}
+                sizes="(max-width: 1100px) 100vw, 780px"
+              />
+
+              {CORRIDOR_PINS.map((pin, index) => (
+                <div
+                  className={`iso-pin${pin.live ? ' is-live' : ''}`}
+                  key={pin.title}
+                  style={{ '--x': pin.x, '--y': pin.y } as React.CSSProperties}
+                  aria-hidden="true"
+                >
+                  <span className="iso-pin-node" />
+                  <span className="iso-pin-badge">{index + 1}</span>
+                  <span className="iso-pin-leader" />
+                  <div className="iso-pin-card">
+                    <span className="iso-pin-label">{pin.label}</span>
+                    <span className="iso-pin-title">{pin.title}</span>
+                    <span className="iso-pin-meta">{pin.meta}</span>
+                  </div>
+                </div>
+              ))}
+
+              {showPinGrid ? <div className="iso-pin-grid" aria-hidden="true" /> : null}
+            </figure>
+
+            {/* Below 900px the pins become a legend. Call it that, because that
+                is what it is — the spatial argument is a desktop argument, and
+                a stacked list is a different reading of the same three facts.
+                This is also the accessible copy: the pins above are aria-hidden
+                so the same content is not announced twice. */}
+            <ol className="iso-pin-legend">
+              {CORRIDOR_PINS.map((pin, index) => (
+                <li key={pin.title}>
+                  <span className="iso-pin-badge">{index + 1}</span>
+                  <div>
+                    <span className="iso-pin-label">{pin.label}</span>
+                    <strong>{pin.title}</strong>
+                    <small>{pin.meta}</small>
+                  </div>
+                </li>
+              ))}
+            </ol>
           </div>
         </div>
       </section>
 
       <section id="platform" className="iso-section iso-operating">
-        <div className="cin-drop" style={{ top: 30, right: '5%' }} aria-hidden="true">
-          <FloatingToken src="/cinematic/token-idr-v1.png" alt="Indonesian rupiah token" size={108} float="cin-float-slow" />
-        </div>
         <div className="iso-shell">
           <div className="iso-section-heading iso-heading-split">
             <div>
@@ -832,23 +984,41 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
             </p>
           </div>
 
-          <div className="iso-layer-grid">
-            {operatingLayers.map((layer, index) => (
-              <article className={`iso-layer-card iso-layer-card-${index + 1}`} key={layer.label}>
-                <div className="iso-layer-meta">
-                  <p>{layer.label}</p>
-                </div>
-                <div className="iso-layer-art">
-                  <Image src={layer.image} alt={layer.imageAlt} width={1448} height={1086} />
-                </div>
-                <div className="iso-layer-copy">
-                  <h3>{layer.title}</h3>
+          {/* One figure at asset scale, and nothing on top of it. This is the
+              first place on the page a 2752px illustration is drawn at the size
+              it was made for, instead of cropped into a 245px card thumbnail
+              three times over.
+
+              Nothing is annotated here on purpose: a 1px leader measures about
+              1.2:1 on this ground and would fail 1.4.11 as a graphical object
+              required to understand the figure, and one of the three guarantees
+              — anchoring to Walrus and Sui — has no referent drawn in this
+              asset at all. The corridor plate below is where pins are honest,
+              because there position is a true statement. */}
+          <figure className="iso-guarantee-figure">
+            <Image
+              src="/cinematic/settlement-machine.png"
+              alt="Isometric settlement machine: a US dollar coin entering a checkpoint gate and leaving as local currency"
+              width={2752}
+              height={1536}
+              sizes="(max-width: 1100px) 100vw, 1360px"
+            />
+          </figure>
+
+          <hr className="iso-guarantee-rule" />
+
+          <dl className="iso-guarantee-captions">
+            {operatingLayers.map((layer) => (
+              <div className="iso-guarantee-caption" key={layer.label}>
+                <dt>{layer.label}</dt>
+                <dd>
+                  <strong>{layer.title}</strong>
                   <p>{layer.copy}</p>
                   <small>{layer.meta}</small>
-                </div>
-              </article>
+                </dd>
+              </div>
             ))}
-          </div>
+          </dl>
         </div>
       </section>
 

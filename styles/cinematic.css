@@ -693,21 +693,21 @@
 /* Per-card stagger inside the revealed shell (transform-only, so a card can
    never freeze invisible). The section reveal lifts the block; these lift
    each card in sequence as it settles. Honors reduced-motion below. */
-.cin-reveal :is(.iso-loops-grid, .iso-supply-grid, .iso-ctrl-grid, .iso-layer-grid, .iso-trust-grid) > * {
+.cin-reveal :is(.iso-loops-grid, .iso-supply-grid, .iso-ctrl-grid, .iso-trust-grid) > * {
   transform: translateY(16px);
   transition: transform .6s cubic-bezier(.16, 1, .3, 1);
 }
-.cin-reveal.is-inview :is(.iso-loops-grid, .iso-supply-grid, .iso-ctrl-grid, .iso-layer-grid, .iso-trust-grid) > * {
+.cin-reveal.is-inview :is(.iso-loops-grid, .iso-supply-grid, .iso-ctrl-grid, .iso-trust-grid) > * {
   transform: none;
 }
-.cin-reveal.is-inview :is(.iso-loops-grid, .iso-supply-grid, .iso-ctrl-grid, .iso-layer-grid, .iso-trust-grid) > *:nth-child(1) { transition-delay: .06s; }
-.cin-reveal.is-inview :is(.iso-loops-grid, .iso-supply-grid, .iso-ctrl-grid, .iso-layer-grid, .iso-trust-grid) > *:nth-child(2) { transition-delay: .14s; }
-.cin-reveal.is-inview :is(.iso-loops-grid, .iso-supply-grid, .iso-ctrl-grid, .iso-layer-grid, .iso-trust-grid) > *:nth-child(3) { transition-delay: .22s; }
-.cin-reveal.is-inview :is(.iso-loops-grid, .iso-supply-grid, .iso-ctrl-grid, .iso-layer-grid, .iso-trust-grid) > *:nth-child(4) { transition-delay: .30s; }
-.cin-reveal.is-inview :is(.iso-loops-grid, .iso-supply-grid, .iso-ctrl-grid, .iso-layer-grid, .iso-trust-grid) > *:nth-child(5) { transition-delay: .38s; }
+.cin-reveal.is-inview :is(.iso-loops-grid, .iso-supply-grid, .iso-ctrl-grid, .iso-trust-grid) > *:nth-child(1) { transition-delay: .06s; }
+.cin-reveal.is-inview :is(.iso-loops-grid, .iso-supply-grid, .iso-ctrl-grid, .iso-trust-grid) > *:nth-child(2) { transition-delay: .14s; }
+.cin-reveal.is-inview :is(.iso-loops-grid, .iso-supply-grid, .iso-ctrl-grid, .iso-trust-grid) > *:nth-child(3) { transition-delay: .22s; }
+.cin-reveal.is-inview :is(.iso-loops-grid, .iso-supply-grid, .iso-ctrl-grid, .iso-trust-grid) > *:nth-child(4) { transition-delay: .30s; }
+.cin-reveal.is-inview :is(.iso-loops-grid, .iso-supply-grid, .iso-ctrl-grid, .iso-trust-grid) > *:nth-child(5) { transition-delay: .38s; }
 
 @media (prefers-reduced-motion: reduce) {
-  .cin-reveal :is(.iso-loops-grid, .iso-supply-grid, .iso-ctrl-grid, .iso-layer-grid, .iso-trust-grid) > * {
+  .cin-reveal :is(.iso-loops-grid, .iso-supply-grid, .iso-ctrl-grid, .iso-trust-grid) > * {
     transform: none;
     transition: none;
   }
@@ -1635,15 +1635,14 @@
   }
 }
 
-/* ── Type scale: section titles from Comparison down, −10px ────────── */
+/* The two rules that used to live here — `.iso-section .iso-section-title` and
+   `.iso-final-copy .iso-section-title` — set a second, competing type scale at
+   specificity 0-2-0. Because they beat the bare class in globals.css, that file
+   held the size everyone read and this file held the size that rendered, and
+   five breakpoint overrides written against the bare class were dead. The size
+   now lives once, in globals.css. Do not reintroduce a scale here.
 
-.iso-section .iso-section-title {
-  font-size: clamp(46px, 6vw, 86px);
-}
-
-.iso-final-copy .iso-section-title {
-  font-size: clamp(38px, 5.3vw, 72px);
-}
+   .iso-walrus keeps its own size: it does not render on the landing page. */
 
 .iso-walrus .iso-section-title {
   font-size: clamp(30px, 3.4vw, 52px);
@@ -1671,7 +1670,7 @@
 
 /* ═══════════════════════════════════════════════════════════════════
    #loops — the three-loop reframe band (§4.B), directly after the
-   marquee. Mirrors the #operating-layer card grammar (iso-layer-card:
+   marquee. Was mirrored on the #operating card grammar, which is now one
    meta → art → copy, hard-offset shadow, mono meta) at band scale.
    Supply (card 3) is the weighted coral moat.
    ═══════════════════════════════════════════════════════════════════ */
@@ -1705,7 +1704,7 @@
   box-shadow: 8px 9px 0 color-mix(in srgb, var(--coral) 34%, transparent);
 }
 
-/* Matches .iso-layer-meta in the guarantees section: sans, sentence case,
+/* Matches the guarantee caption labels: sans, sentence case,
    no tracking. The numbered chip that used to anchor this row is gone, and
    64% ink measured 4.0 against the card — under the 4.5 floor. */
 .iso-loops-meta {
