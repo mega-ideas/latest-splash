@@ -8337,3 +8337,50 @@ code, kbd, samp {
   .iso-supply-ledger li { grid-template-columns: minmax(0, 1fr); gap: 10px; }
   .iso-supply-ledger-basis { text-align: left; }
 }
+
+
+/* ─── Comparison: what the yield row is measuring ─────────────────────────
+   A small explanatory figure beside the table foot, not a decorative band.
+   It sits on the light comparison ground, so it inherits the teal focus
+   ring and the standard ink ramp. */
+.iso-comparison-figure {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  margin: 26px 0 0;
+  padding: 18px 20px;
+  border: 1px solid var(--iso-line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, .5);
+}
+
+.iso-comparison-figure img {
+  flex: none;
+  width: 200px;
+  height: auto;
+  /* the asset's true ratio, so it is not squeezed */
+  aspect-ratio: 1200 / 896;
+  object-fit: contain;
+}
+
+.iso-comparison-figure figcaption strong {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--iso-ink);
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -.01em;
+}
+
+.iso-comparison-figure figcaption p {
+  max-width: 58ch;
+  margin: 0;
+  color: var(--iso-text-muted);
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+
+@media (max-width: 700px) {
+  .iso-comparison-figure { flex-direction: column; align-items: flex-start; gap: 16px; }
+  .iso-comparison-figure img { width: 160px; }
+}

@@ -796,6 +796,27 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
               </tfoot>
             </table>
           </div>
+
+          {/* Beside the yield row, not decorating the table. The tiers are the
+              point: the row above compares four rates, and this is what a rate
+              is a rate on. Kept small and quiet — the table is the argument. */}
+          <figure className="iso-comparison-figure">
+            <Image
+              src="/cinematic/liquidity-pools.png"
+              alt="Tiered isometric liquidity pools with gold coin reserves flowing between basins"
+              width={1200}
+              height={896}
+              sizes="200px"
+            />
+            <figcaption>
+              <strong>What the yield row is measuring.</strong>
+              <p>
+                Idle USD sits in tiers, not one pot. The benchmark above compares what each
+                tier earns elsewhere against the treasury posture your business approves —
+                projected and variable, never a fixed figure.
+              </p>
+            </figcaption>
+          </figure>
         </div>
       </section>
 
@@ -1161,12 +1182,21 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
             </div>
           </div>
 
+          {/* The close says "your global treasury", so it gets the treasury.
+              This replaces payments.svg, which was 512KB, carried a C2PA
+              generative manifest, and held exactly one base64 raster and one
+              <path> — an SVG extension on a bitmap, which is a trap for whoever
+              reaches for it next expecting it to scale. treasury-island.png has
+              a neutral matte, so it composites on this dark panel without a
+              seam, and it is drawn at its real 2752x1536 rather than the
+              1448x1086 the old declaration claimed. */}
           <div className="iso-final-art">
             <Image
-              src="/isometric/payments.svg"
-              alt="Isometric local currency payment receipt"
-              width={1448}
-              height={1086}
+              src="/cinematic/treasury-island.png"
+              alt="Isometric floating treasury island with an open vault of reserves and orbiting coins"
+              width={2752}
+              height={1536}
+              sizes="(max-width: 1100px) 60vw, 620px"
             />
           </div>
         </div>
