@@ -1181,7 +1181,7 @@ body {
    rather than a second deck, and the fake 3px offset that stood in for the
    hero's real extrude reads as a printing error at this size. */
 .iso-section-title span {
-  display: inline;
+  display: block;
   color: var(--iso-teal);
 }
 
@@ -1189,16 +1189,22 @@ body {
    offsets — not the flat shadow the others used to carry. Applied to
    #comparison alone; putting it on a 31px cap height would make it 27% heavier
    than the hero it is quoting. */
+/* The one promoted heading on the page. It was four hard shadows at 2px
+   steps plus a 2px stroke: at 96px those read as four visible bands with a
+   sawtooth edge, not as an extrude, and the stroke thickened every copy so
+   the steps compounded. Six 1px steps make one solid side; weight 950
+   already supplies the mass the stroke was adding. */
 .iso-section-title-band {
-  font-size: clamp(56px, 6vw, 96px);
-  letter-spacing: -.075em;
-  line-height: .84;
-  -webkit-text-stroke: 2px #083640;
+  font-size: clamp(52px, 5.4vw, 84px);
+  letter-spacing: -.055em;
+  line-height: .88;
   text-shadow:
-    2px 2px 0 #0d6370,
-    4px 4px 0 #0d6370,
-    6px 6px 0 #0d6370,
-    8px 8px 0 #083640;
+    1px 1px 0 var(--iso-teal),
+    2px 2px 0 var(--iso-teal),
+    3px 3px 0 var(--iso-teal),
+    4px 4px 0 var(--iso-teal),
+    5px 5px 0 var(--iso-teal-dark),
+    6px 6px 0 var(--iso-teal-dark);
 }
 
 .iso-progress {
@@ -1420,16 +1426,19 @@ body {
 .iso-roadmap-chip {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  border: 1px solid rgba(227, 151, 116, .55);
+  gap: 6px;
+  /* .54 is the floor that clears 3:1 on both the paper and paper-deep
+     grounds, so the chip stays identifiable as a bounded status token.
+     The coral border it replaced sat near 1.6. */
+  border: 1px solid rgba(12, 62, 72, .54);
   border-radius: 999px;
-  padding: 3px 10px;
-  background: rgba(227, 151, 116, .14);
-  color: #9b4e32;
+  padding: 4px 11px;
+  background: rgba(12, 62, 72, .05);
+  color: var(--iso-text-muted);
   font-family: var(--font-mono), monospace;
-  font-size: 9.5px;
-  font-weight: 800;
-  letter-spacing: .08em;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .06em;
   text-transform: uppercase;
   white-space: nowrap;
 }
@@ -2124,17 +2133,25 @@ body {
 @media (prefers-reduced-motion: reduce) { .iso-ctrl-card { transition: none; } }
 
 /* #supply → /working-capital CTA panel (replaces the redundant flywheel). */
+/* Was coral: a 5px coral spine, a coral border and a coral gradient wash —
+   the only red on the page, which is why this section read as belonging to a
+   different site. Coral is the brand and 0xWal accent, not a status colour.
+   The spine is now the page's one interactive accent. The roadmap disclosure
+   is carried where it belongs: the chip under the heading and the legal line
+   inside this panel, neither of which is weakened here. */
 .iso-supply-cta {
   display: grid;
   grid-template-columns: 1.5fr 1fr;
   align-items: center;
   gap: 24px;
   margin-top: var(--s6);
-  border: 1px solid color-mix(in srgb, var(--coral) 50%, transparent);
-  border-left: 5px solid var(--coral);
+  border: 1px solid var(--iso-line);
+  border-left: 5px solid var(--iso-teal);
   border-radius: 14px;
   padding: 26px 28px;
-  background: linear-gradient(150deg, color-mix(in srgb, var(--coral) 12%, transparent), transparent 52%), color-mix(in srgb, var(--surface) 86%, transparent);
+  background:
+    linear-gradient(150deg, rgba(13, 99, 112, .07), transparent 52%),
+    rgba(255, 255, 255, .86);
   box-shadow: var(--iso-lift-2);
 }
 .iso-supply-cta-copy h3 {
@@ -7885,7 +7902,9 @@ code, kbd, samp {
 .iso-comparison-caption {
   caption-side: top;
   max-width: 78ch;
-  padding: 0 0 16px;
+  /* matches .iso-comparison-table th/td padding so the caption lines up with
+     the first column rather than touching the wrap's border */
+  padding: 18px 20px 16px;
   color: var(--iso-text-muted);
   font-size: 13px;
   line-height: 1.55;

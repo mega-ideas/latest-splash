@@ -605,7 +605,7 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
             <div>
               <p className="iso-kicker">The three loops</p>
               <h2 className="iso-section-title">
-                Move it. Grow it.
+                Move it. Grow it.{' '}
                 <span>Finance it.</span>
               </h2>
             </div>
@@ -667,7 +667,7 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
           <div className="iso-flow-copy">
             <p className="iso-kicker">How it works</p>
             <h2 className="iso-section-title iso-section-title-light">
-              Five steps.
+              Five steps.{' '}
               <span>No limbo.</span>
             </h2>
             <div className="iso-flow-tabs" role="tablist" aria-label="Settlement flow">
@@ -731,7 +731,7 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
                   paired with the provenance in the table foot below — a heading
                   is a claim, and the as-of stamp is what discharges it. */}
               <h2 className="iso-section-title iso-section-title-band">
-                Built for business.
+                Built for business.{' '}
                 <span>Designed to move.</span>
               </h2>
             </div>
@@ -826,7 +826,7 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
             <div>
               <p className="iso-kicker">Trust · Four gates</p>
               <h2 className="iso-section-title iso-section-title-light">
-                Every payout
+                Every payout{' '}
                 <span>proves itself.</span>
               </h2>
             </div>
@@ -871,7 +871,7 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
           <div className="iso-corridor-copy">
             <p className="iso-kicker">One testnet corridor. Modeled expansion routes.</p>
             <h2 className="iso-section-title">
-              USD in.
+              USD in.{' '}
               <span>Local out.</span>
             </h2>
             <p>
@@ -985,7 +985,7 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
             <div>
               <p className="iso-kicker">The guarantees</p>
               <h2 className="iso-section-title">
-                True of every
+                True of every{' '}
                 <span>payment.</span>
               </h2>
             </div>
@@ -1040,7 +1040,7 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
             <div>
               <p className="iso-kicker">Supply · The moat</p>
               <h2 className="iso-section-title">
-                Your invoices are
+                Your invoices are{' '}
                 <span>working capital.</span>
               </h2>
               <div className="iso-supply-chip"><RoadmapChip detail="coming capability, subject to licensing" /></div>
@@ -1122,7 +1122,7 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
           <div className="iso-copilot-copy">
             <p className="iso-kicker">AI Copilot</p>
             <h2 className="iso-section-title">
-              Context that gets
+              Context that gets{' '}
               <span>more useful.</span>
             </h2>
             <p>
@@ -1148,7 +1148,7 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
             <div>
               <p className="iso-kicker">The control plane</p>
               <h2 className="iso-section-title">
-                Shipped, not
+                Shipped, not{' '}
                 <span>promised.</span>
               </h2>
             </div>
@@ -1166,7 +1166,7 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
           <div className="iso-final-copy">
             <p className="iso-kicker">Move money better</p>
             <h2 className="iso-section-title iso-section-title-light">
-              Your global treasury,
+              Your global treasury,{' '}
               <span>finally programmable.</span>
             </h2>
             <p>
