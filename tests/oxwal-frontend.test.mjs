@@ -150,9 +150,24 @@ test('landing keeps restored isometric shell with upgraded truth copy', async ()
   // Early Pay was promoted out of the #operations tool grid into the
   // dedicated roadmap-labeled #supply section (§4.D).
   assert.match(landing, /id="supply"/);
-  assert.match(landing, /Your invoices are/);
   assert.doesNotMatch(landing, /Early Pay/);
-  assert.match(landing, /One testnet corridor\. Modeled expansion routes\./);
+
+  // #supply is entirely roadmap, so what is worth guarding is the disclosure
+  // and the conditional voice — not the exact headline. This used to pin
+  // "Your invoices are", which asserted a capability that does not exist; the
+  // section now reads "could be" and every row is conditional to match. The
+  // negative assertion is the real guard: it stops the live-voice version
+  // coming back.
+  assert.match(landing, /coming capability, subject to licensing/);
+  assert.match(landing, /Your invoices could be/);
+  assert.doesNotMatch(landing, /Your invoices are working capital/);
+
+  // The corridor kicker counts the waiting routes from CORRIDOR_ROUTES rather
+  // than stating a number in prose, so it cannot drift from the board. Assert
+  // the shape and the derivation, not a sentence that is no longer written by
+  // hand.
+  assert.match(landing, /One live\./);
+  assert.match(landing, /CORRIDOR_ROUTES\.filter\(\(r\) => !r\.live\)\.length/);
   assert.match(landing, /claims\.footerLegal\.claim/);
   // Composer is now a payment-desk command bar (not a ChatGPT pill): no
   // "High" effort dropdown, a branded "Prepare" action, and a functional
