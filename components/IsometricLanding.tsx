@@ -20,6 +20,7 @@ import {
   Zap,
 } from 'lucide-react';
 
+import CorridorBoard from '@/components/landing/CorridorBoard';
 import GuaranteeSequence from '@/components/landing/GuaranteeSequence';
 import SettlementCinematic from '@/components/landing/SettlementCinematic';
 import WaitlistCta from '@/components/landing/WaitlistCta';
@@ -899,7 +900,14 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
       <section id="corridors" className="iso-section iso-corridors">
         <div className="iso-shell iso-corridor-layout">
           <div className="iso-corridor-copy">
-            <p className="iso-kicker">One testnet corridor. Modeled expansion routes.</p>
+            {/* Counted from the data rather than typed, so the kicker cannot
+                drift from the board underneath it the day a route changes
+                state. The old kicker — "One testnet corridor. Modeled
+                expansion routes." — described the same facts without saying
+                anything; this one states the tension the board then answers. */}
+            <p className="iso-kicker">
+              One live. {CORRIDOR_ROUTES.filter((r) => !r.live).length} waiting.
+            </p>
             <h2 className="iso-section-title">
               USD in.{' '}
               <span>Local out.</span>
@@ -908,31 +916,7 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
               The MY-to-PH corridor is the proving ground. Additional routes stay modeled until partner, liquidity,
               and regulatory controls are ready market by market.
             </p>
-            <div className="iso-route-table-wrap">
-              <table className="iso-route-table">
-                <caption>
-                  Every corridor, and what each one that is not live is waiting on.
-                </caption>
-                <thead>
-                  <tr>
-                    <th scope="col">Route</th>
-                    <th scope="col">Status</th>
-                    <th scope="col">Rail</th>
-                    <th scope="col">What&rsquo;s missing</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {CORRIDOR_ROUTES.map((row) => (
-                    <tr key={row.route} className={row.live ? 'is-live' : undefined}>
-                      <th scope="row">{row.route}</th>
-                      <td>{row.status}</td>
-                      <td>{row.rail ?? <span className="iso-cell-dash">&mdash;</span>}</td>
-                      <td>{row.missing ?? <span className="iso-cell-dash">&mdash;</span>}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <CorridorBoard routes={CORRIDOR_ROUTES} />
             <div className="iso-recipient-ladder">
               {recipientLadder.map((step) => (
                 <article key={step.number}>

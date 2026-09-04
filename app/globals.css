@@ -8104,14 +8104,13 @@ code, kbd, samp {
   bottom: calc(50% + 30px);
   left: 50%;
   display: grid;
-  gap: 4px;
-  width: 250px;
-  max-width: 270px;
-  border: 1px solid rgba(12, 62, 72, .42);
-  border-radius: 6px;
-  padding: 12px 14px;
+  gap: 3px;
+  width: 244px;
+  border: 1px solid rgba(12, 62, 72, .48);
+  border-radius: 7px;
+  padding: 11px 13px 10px;
   background: var(--iso-paper);
-  box-shadow: 4px 5px 0 rgba(8, 54, 64, .16);
+  box-shadow: var(--iso-lift-1);
   transform: translateX(-50%);
 }
 
@@ -8153,11 +8152,15 @@ code, kbd, samp {
 /* The legend is the desktop pins' accessible twin and the mobile substitute.
    Hidden on wide screens, where the plate itself carries the argument. */
 .iso-pin-legend {
-  display: none;
-  margin: 16px 0 0;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
   padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
   list-style: none;
-  gap: 10px;
 }
 
 .iso-pin-legend li {
@@ -8188,8 +8191,23 @@ code, kbd, samp {
 }
 
 @media (max-width: 900px) {
-  .iso-plate .iso-pin { display: none; }
-  .iso-pin-legend { display: grid; }
+  /* Hide the CARDS, not the pins. The legend below numbers 1-2-3 against
+     the plate, so the numbered nodes have to stay or the legend keys a
+     diagram with no keys in it. */
+  .iso-plate .iso-pin-card,
+  .iso-plate .iso-pin-leader { display: none; }
+  /* Below 900px the pins become a visible legend, so every visually-hidden
+     property has to be undone — display alone would leave it clipped to 1px. */
+  .iso-pin-legend {
+    position: static;
+    display: grid;
+    width: auto;
+    height: auto;
+    margin: 16px 0 0;
+    overflow: visible;
+    clip-path: none;
+    white-space: normal;
+  }
 }
 
 /* ─── Corridors: the route table ──────────────────────────────────────────
@@ -8568,4 +8586,66 @@ code, kbd, samp {
   .iso-guarantee-frame { transition: none; }
   .iso-guarantee-dwell i { animation: none; transform: scaleX(1); }
   .iso-guarantee-caption { transition: none; }
+}
+
+
+/* ─── The corridor board ──────────────────────────────────────────────────
+   A departure board: the cells flip to their values when the board comes into
+   view, then hold. The flip animates ONE wrapper per cell. The value inside is
+   ordinary text — never split into per-character spans, which is how this is
+   usually faked and which breaks selecting, copying and find-in-page. The
+   people this table is for paste it into spreadsheets.
+
+   Nothing rolls through a status it does not have. A modelled route never
+   shows "testnet live" on its way to settling, not even for 200ms. */
+.iso-route-table-wrap {
+  margin-top: 28px;
+  overflow-x: auto;
+  perspective: 620px;
+}
+
+.iso-route-table-wrap:focus-visible {
+  outline: 2px solid var(--iso-teal);
+  outline-offset: 3px;
+}
+
+.iso-flap {
+  display: inline-block;
+  transform-origin: center top;
+  backface-visibility: hidden;
+}
+
+/* Only animate once the board is actually on screen; the stagger is the
+   cascade a real board has. Capped so the last row is not left waiting. */
+.iso-route-table-wrap.is-arrived .iso-flap {
+  animation: iso-flap 380ms cubic-bezier(.2, 0, 0, 1) both;
+  animation-delay: calc(min(var(--row, 0), 8) * 55ms);
+}
+
+@keyframes iso-flap {
+  0%   { transform: rotateX(-88deg); opacity: 0; }
+  62%  { transform: rotateX(9deg);   opacity: 1; }
+  100% { transform: rotateX(0);      opacity: 1; }
+}
+
+/* The live row is marked four ways, none of them colour alone: a filled node,
+   heavier ink, the word "live" in the status, and the named rail beside it. */
+.iso-route-live-mark {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 7px;
+  border-radius: 50%;
+  background: var(--iso-teal);
+  vertical-align: baseline;
+}
+
+.iso-route-table tr.is-live th,
+.iso-route-table tr.is-live td {
+  color: var(--iso-ink);
+  font-weight: 650;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .iso-route-table-wrap.is-arrived .iso-flap { animation: none; }
 }
