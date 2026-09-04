@@ -8565,7 +8565,13 @@ code, kbd, samp {
 .iso-guarantee-caption.is-current dd strong { color: var(--iso-ink); }
 
 /* tails align across columns even when a label wraps to two lines */
-.iso-guarantee-caption dd { display: flex; flex-direction: column; height: 100%; }
+/* The tails align across the three columns by letting the dd absorb the
+   leftover height, NOT by giving it height:100%. That matched the dd to the
+   caption box while it sits below the dt, so it overflowed by the label height
+   and bled 17px into the next caption. flex:1 fills the same space without
+   escaping the box. */
+.iso-guarantee-caption { display: flex; flex-direction: column; }
+.iso-guarantee-caption dd { display: flex; flex-direction: column; flex: 1; }
 .iso-guarantee-caption dd small { margin-top: auto; padding-top: 10px; }
 .iso-guarantee-caption dt { min-height: 2.9em; }
 
