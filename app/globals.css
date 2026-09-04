@@ -1003,7 +1003,8 @@ body {
 .iso-marquee-track {
   display: flex;
   width: max-content;
-  animation: iso-marquee 32s linear infinite;
+  /* No animation: the track holds one set of six cells now, and translating
+     it -50% would slide half of them out of the band. */
 }
 
 .iso-marquee-item {
@@ -1025,12 +1026,6 @@ body {
   font-size: 13px;
 }
 
-.iso-marquee-item i {
-  margin-left: auto;
-  color: var(--iso-mint);
-  font-style: normal;
-  font-size: 10px;
-}
 
 .iso-partner-rail {
   position: relative;
@@ -1913,7 +1908,7 @@ body {
   background-size: 64px 64px;
 }
 
-/* ── Sequence cards (premium override of shared .iso-supply-card) ───────── */
+/* ── Sequence cards ─────────────────────────────────────────────────────── */
 .wc-flow { margin: 30px 0 0; padding: 0; list-style: none; }
 .wc-flow-card {
   position: relative;
@@ -2022,7 +2017,7 @@ body {
 .iso-ctrl-claim p { max-width: 640px; color: var(--iso-text-secondary); font-size: 14px; line-height: 1.55; }
 .iso-ctrl-claim strong { color: var(--iso-teal-dark); font-weight: 850; }
 
-/* Control-plane cards in the §S iso-supply-card grammar (meta / art / copy). */
+/* Control-plane cards: meta / art / copy. */
 .iso-ctrl-grid {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
@@ -2322,11 +2317,11 @@ body {
 
 /* Hover the illustration itself → it pops out 1.1x above the card. */
 
-/* Give the popped illustration room to float above adjacent cards. */
-.iso-loops-card,
-.iso-supply-card { position: relative; }
-.iso-loops-card:hover,
-.iso-supply-card:hover { z-index: 3; }
+/* Give the popped illustration room to float above adjacent cards. Only the
+   loops still use cards — the guarantees are one figure and supply is a
+   ledger, so both dropped out of this rule. */
+.iso-loops-card { position: relative; }
+.iso-loops-card:hover { z-index: 3; }
 
 .iso-flow {
   overflow: hidden;
@@ -7660,7 +7655,6 @@ button.iso-product-row {
   .iso-landing .iso-loops-live,
   .iso-landing .iso-loops-copy small,
   .iso-landing .iso-loops-meta small,
-  .iso-landing .iso-supply-copy small,
   .iso-landing .iso-trust-card small,
   .iso-landing .iso-trust-foot,
   .iso-landing .iso-copilot-memory small,
@@ -8234,3 +8228,99 @@ code, kbd, samp {
 }
 
 .iso-cell-dash { color: var(--iso-text-label); }
+
+/* ─── Marquee at rest ─────────────────────────────────────────────────────
+   Six cells across the band, divided by hairlines rather than by a floating
+   diamond. The band still reserves the same height, so the hero above it is
+   unchanged. */
+.iso-marquee-track {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  width: min(calc(100% - 48px), 1360px);
+  margin-inline: auto;
+}
+
+.iso-marquee-item {
+  min-width: 0;
+  justify-content: flex-start;
+  border-left: 1px solid rgba(244, 236, 223, .16);
+}
+
+.iso-marquee-item:first-child {
+  border-left: 0;
+}
+
+@media (max-width: 900px) {
+  .iso-marquee-track { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .iso-marquee-item:nth-child(4) { border-left: 0; }
+}
+
+@media (max-width: 560px) {
+  .iso-marquee-track { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .iso-marquee-item:nth-child(odd) { border-left: 0; }
+}
+
+/* ─── Supply: a ledger, not a third card grid ─────────────────────────────
+   This section is entirely roadmap. Illustrating it at the same scale as the
+   parts that actually run overstated it; ruled rows state the sequence
+   without dressing it as shipped product. Numbered, because an invoice is
+   issued, then offered against, then settled — the order is the information. */
+.iso-supply-ledger {
+  margin: 40px 0 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--iso-line);
+}
+
+.iso-supply-ledger li {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr) 260px;
+  gap: 24px;
+  padding-block: 24px;
+  border-bottom: 1px solid var(--iso-line);
+}
+
+.iso-supply-ledger-num {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--iso-teal);
+  font-family: var(--font-mono), monospace;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums slashed-zero;
+}
+
+.iso-supply-ledger-stage strong {
+  color: var(--iso-ink);
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -.01em;
+}
+
+.iso-supply-ledger-body strong {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--iso-ink);
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.iso-supply-ledger-body p {
+  margin: 0;
+  color: var(--iso-text-muted);
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+
+.iso-supply-ledger-basis {
+  align-self: start;
+  color: var(--iso-text-label);
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums slashed-zero;
+  text-align: right;
+}
+
+@media (max-width: 900px) {
+  .iso-supply-ledger li { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .iso-supply-ledger-basis { text-align: left; }
+}

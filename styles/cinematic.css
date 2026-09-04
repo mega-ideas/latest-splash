@@ -693,21 +693,21 @@
 /* Per-card stagger inside the revealed shell (transform-only, so a card can
    never freeze invisible). The section reveal lifts the block; these lift
    each card in sequence as it settles. Honors reduced-motion below. */
-.cin-reveal :is(.iso-loops-grid, .iso-supply-grid, .iso-ctrl-grid, .iso-trust-grid) > * {
+.cin-reveal :is(.iso-loops-grid, .iso-ctrl-grid, .iso-trust-grid) > * {
   transform: translateY(16px);
   transition: transform .6s cubic-bezier(.16, 1, .3, 1);
 }
-.cin-reveal.is-inview :is(.iso-loops-grid, .iso-supply-grid, .iso-ctrl-grid, .iso-trust-grid) > * {
+.cin-reveal.is-inview :is(.iso-loops-grid, .iso-ctrl-grid, .iso-trust-grid) > * {
   transform: none;
 }
-.cin-reveal.is-inview :is(.iso-loops-grid, .iso-supply-grid, .iso-ctrl-grid, .iso-trust-grid) > *:nth-child(1) { transition-delay: .06s; }
-.cin-reveal.is-inview :is(.iso-loops-grid, .iso-supply-grid, .iso-ctrl-grid, .iso-trust-grid) > *:nth-child(2) { transition-delay: .14s; }
-.cin-reveal.is-inview :is(.iso-loops-grid, .iso-supply-grid, .iso-ctrl-grid, .iso-trust-grid) > *:nth-child(3) { transition-delay: .22s; }
-.cin-reveal.is-inview :is(.iso-loops-grid, .iso-supply-grid, .iso-ctrl-grid, .iso-trust-grid) > *:nth-child(4) { transition-delay: .30s; }
-.cin-reveal.is-inview :is(.iso-loops-grid, .iso-supply-grid, .iso-ctrl-grid, .iso-trust-grid) > *:nth-child(5) { transition-delay: .38s; }
+.cin-reveal.is-inview :is(.iso-loops-grid, .iso-ctrl-grid, .iso-trust-grid) > *:nth-child(1) { transition-delay: .06s; }
+.cin-reveal.is-inview :is(.iso-loops-grid, .iso-ctrl-grid, .iso-trust-grid) > *:nth-child(2) { transition-delay: .14s; }
+.cin-reveal.is-inview :is(.iso-loops-grid, .iso-ctrl-grid, .iso-trust-grid) > *:nth-child(3) { transition-delay: .22s; }
+.cin-reveal.is-inview :is(.iso-loops-grid, .iso-ctrl-grid, .iso-trust-grid) > *:nth-child(4) { transition-delay: .30s; }
+.cin-reveal.is-inview :is(.iso-loops-grid, .iso-ctrl-grid, .iso-trust-grid) > *:nth-child(5) { transition-delay: .38s; }
 
 @media (prefers-reduced-motion: reduce) {
-  .cin-reveal :is(.iso-loops-grid, .iso-supply-grid, .iso-ctrl-grid, .iso-trust-grid) > * {
+  .cin-reveal :is(.iso-loops-grid, .iso-ctrl-grid, .iso-trust-grid) > * {
     transform: none;
     transition: none;
   }
@@ -1816,107 +1816,11 @@
 }
 
 .iso-supply-chip { margin-top: 14px; }
-
-.iso-supply-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 18px;
-}
-
-.iso-supply-card {
-  display: flex;
-  flex-direction: column;
-  border: 1px solid color-mix(in srgb, var(--coral) 46%, transparent);
-  border-radius: 12px;
-  padding: 18px;
-  background:
-    linear-gradient(155deg, color-mix(in srgb, var(--coral) 8%, transparent), transparent 44%),
-    color-mix(in srgb, var(--surface) 78%, transparent);
-  box-shadow: 7px 8px 0 color-mix(in srgb, var(--coral) 26%, transparent);
-  transition: transform var(--dur-slow) var(--ease-standard), box-shadow var(--dur-slow) var(--ease-standard);
-}
-.iso-supply-card:hover {
-  transform: translateY(-4px);
-  box-shadow: 9px 11px 0 color-mix(in srgb, var(--coral) 32%, transparent);
-}
-
-.iso-supply-meta {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: color-mix(in srgb, var(--ink) 64%, transparent);
-  font-family: var(--font-mono), monospace;
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: .14em;
-  text-transform: uppercase;
-}
-.iso-supply-meta span {
-  display: grid;
-  width: 30px;
-  height: 30px;
-  place-items: center;
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
-  color: var(--surface);
-  background: var(--coral);
-  box-shadow: 3px 3px 0 color-mix(in srgb, var(--coral) 55%, var(--ink));
-}
-
-.iso-supply-art {
-  position: relative;
-  height: 150px;
-  margin-top: var(--s3);
-}
-.iso-supply-art img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  filter: drop-shadow(0 14px 12px color-mix(in srgb, var(--ink) 12%, transparent));
-  transition: transform var(--dur-slow) var(--ease-standard), filter var(--dur-slow) var(--ease-standard);
-}
 /* Hover the illustration itself → it pops out 1.1x above the card. */
-.iso-supply-art:hover img {
-  transform: translateY(-8px) scale(1.1);
-  filter: drop-shadow(0 26px 22px color-mix(in srgb, var(--ink) 22%, transparent));
-}
-
-.iso-supply-copy {
-  border-top: 1px solid var(--line);
-  margin-top: var(--s3);
-  padding-top: var(--s3);
-}
-.iso-supply-copy h3 {
-  color: var(--ink);
-  font-size: 18px;
-  font-weight: 900;
-  letter-spacing: -.03em;
-}
-.iso-supply-copy p {
-  margin-top: var(--s2);
-  color: color-mix(in srgb, var(--ink) 74%, transparent);
-  font-size: 12.5px;
-  line-height: 1.6;
-}
-.iso-supply-copy small {
-  display: block;
-  margin-top: var(--s2);
-  color: color-mix(in srgb, var(--ink) 64%, transparent);
-  font-family: var(--font-mono), monospace;
-  font-size: 10px;
-  font-weight: 750;
-  letter-spacing: .06em;
-  text-transform: uppercase;
-}
-
-.iso-supply .iso-wheel { margin-top: var(--s6); }
 .iso-supply-actions { display: flex; flex-wrap: wrap; gap: 10px; }
 
 @media (max-width: 960px) {
-  .iso-supply-grid { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .iso-supply-card,
-  .iso-supply-art img { transition: none; }
 }

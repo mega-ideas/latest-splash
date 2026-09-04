@@ -21,7 +21,6 @@ import {
   Zap,
 } from 'lucide-react';
 
-import FloatingToken from '@/components/landing/FloatingToken';
 import SettlementCinematic from '@/components/landing/SettlementCinematic';
 import WaitlistCta from '@/components/landing/WaitlistCta';
 import ControlPlaneExplainer from '@/components/oxwal/ControlPlaneExplainer';
@@ -584,22 +583,23 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
 
       <SettlementCinematic isPhone={isPhone} />
 
+      {/* Six static cells, not a scroller. The doubling was load-bearing for
+          the animation — the keyframe translated the track 0 to -50%, so exactly
+          2x duplication made the loop seam — and it goes with it. A moving strip
+          of six facts asks to be watched rather than read, and the diamond
+          separators were decoration between figures that already have labels. */}
       <div className="iso-marquee is-static" aria-label="Platform metrics">
         <div className="iso-marquee-track">
-          {[...marqueeItems, ...marqueeItems].map(([value, label], index) => (
-            <div className="iso-marquee-item" key={`${value}-${index}`}>
+          {marqueeItems.map(([value, label]) => (
+            <div className="iso-marquee-item" key={value}>
               <strong>{value}</strong>
               <span>{label}</span>
-              <i aria-hidden="true">◆</i>
             </div>
           ))}
         </div>
       </div>
 
       <section id="loops" className="iso-section iso-loops">
-        <div className="cin-drop" style={{ top: 28, right: '4%' }} aria-hidden="true">
-          <FloatingToken src="/cinematic/token-usd.png" alt="US dollar token" size={104} float="cin-float-slow" />
-        </div>
         <div className="iso-shell">
           <div className="iso-section-heading iso-heading-split">
             <div>
@@ -663,9 +663,6 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
       </section>
 
       <section id="how-it-works" className="iso-section iso-flow">
-        <div className="cin-drop" style={{ top: 34, right: '5%' }} aria-hidden="true">
-          <FloatingToken src="/cinematic/token-sgd.png" alt="Singapore dollar token" size={112} float="cin-float-drift" />
-        </div>
         <div className="iso-shell iso-flow-layout">
           <div className="iso-flow-copy">
             <p className="iso-kicker">How it works</p>
@@ -725,9 +722,6 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
       </section>
 
       <section id="comparison" className="iso-section iso-comparison">
-        <div className="cin-drop" style={{ top: 26, right: '4%' }} aria-hidden="true">
-          <FloatingToken src="/cinematic/token-thb.png" alt="Thai baht token" size={104} float="cin-float-slow" />
-        </div>
         <div className="iso-shell">
           <div className="iso-section-heading iso-heading-split">
             <div>
@@ -806,9 +800,6 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
       </section>
 
       <section id="trust" className="iso-section iso-trust">
-        <div className="cin-drop" style={{ top: 30, right: '5%' }} aria-hidden="true">
-          <FloatingToken src="/cinematic/token-sui.png" alt="Sui token" size={104} float="cin-float-slow" />
-        </div>
         <div className="iso-shell">
           <div className="iso-section-heading iso-heading-split">
             <div>
@@ -1023,9 +1014,6 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
       </section>
 
       <section id="supply" className="iso-section iso-supply">
-        <div className="cin-drop" style={{ top: 32, right: '4%' }} aria-hidden="true">
-          <FloatingToken src="/cinematic/token-php.png" alt="Philippine peso token" size={106} float="cin-float-drift" />
-        </div>
         <div className="iso-shell">
           <div className="iso-section-heading iso-heading-split">
             <div>
@@ -1043,24 +1031,28 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
             </p>
           </div>
 
-          <div className="iso-supply-grid">
-            {supplySteps.map((step, index) => (
-              <article className={`iso-supply-card iso-supply-card-${index + 1}`} key={step.number}>
-                <div className="iso-supply-meta">
-                  <span>{step.number}</span>
-                  <p>{step.label}</p>
+          {/* A ledger, not a third card grid. This is the page's only content
+              that is entirely roadmap, and illustrating it at the same scale as
+              the parts that actually run overstated it — the audit called that
+              a compliance problem wearing a layout problem's clothes. Ruled
+              rows state the sequence without dressing it as shipped product.
+              It keeps 01/02/03 because this one genuinely is a sequence: an
+              invoice is issued, then offered against, then settled. */}
+          <ol className="iso-supply-ledger">
+            {supplySteps.map((step) => (
+              <li key={step.number}>
+                <div className="iso-supply-ledger-stage">
+                  <span className="iso-supply-ledger-num">{step.number}</span>
+                  <strong>{step.label}</strong>
                 </div>
-                <div className="iso-supply-art">
-                  <Image src={step.image} alt={step.imageAlt} width={640} height={480} />
-                </div>
-                <div className="iso-supply-copy">
-                  <h3>{step.title}</h3>
+                <div className="iso-supply-ledger-body">
+                  <strong>{step.title}</strong>
                   <p>{step.copy}</p>
-                  <small>{step.meta}</small>
                 </div>
-              </article>
+                <div className="iso-supply-ledger-basis">{step.meta}</div>
+              </li>
             ))}
-          </div>
+          </ol>
 
           <div className="iso-supply-cta">
             <div className="iso-supply-cta-copy">
