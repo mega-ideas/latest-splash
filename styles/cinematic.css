@@ -251,7 +251,7 @@
   padding: 15px 18px 13px;
   background: linear-gradient(180deg, #fffefb 0%, #fdf6ea 100%);
   box-shadow:
-    6px 6px 0 rgba(8, 54, 64, .88),
+    var(--iso-lift-2),
     0 26px 46px rgba(8, 54, 64, .14);
 }
 
@@ -718,7 +718,7 @@
 .iso-comparison-table thead th.is-splash {
   color: var(--iso-teal-dark);
   background: var(--iso-gold);
-  box-shadow: 3px 3px 0 var(--iso-teal-dark);
+  box-shadow: var(--iso-lift-1);
 }
 
 /* ── Header brand slot ────────────────────────────────────────────── */
@@ -777,7 +777,7 @@
   width: 8px;
   height: 8px;
   background: var(--iso-gold);
-  box-shadow: 2px 2px 0 var(--iso-teal-dark);
+  box-shadow: var(--iso-lift-1);
 }
 
 .cin-footer-col {
@@ -928,7 +928,7 @@
 .cin-partner:hover {
   transform: translateY(-4px);
   border-color: var(--iso-teal-dark);
-  box-shadow: 5px 5px 0 var(--iso-teal-dark);
+  box-shadow: var(--iso-lift-1);
 }
 
 .cin-partner:focus-visible {
@@ -1233,7 +1233,7 @@
   border-radius: 10px;
   color: #083640;
   background: #efc46f;
-  box-shadow: 3px 3px 0 rgba(8, 54, 64, .9);
+  box-shadow: var(--iso-lift-1);
 }
 
 .iso-flow .iso-flow-stat small {
@@ -1689,19 +1689,19 @@
   border-radius: 12px;
   padding: 20px;
   background: color-mix(in srgb, var(--surface) 56%, transparent);
-  box-shadow: 8px 9px 0 color-mix(in srgb, var(--ink) 12%, transparent);
+  box-shadow: var(--iso-lift-2);
   transition: transform var(--dur-slow) var(--ease-standard), box-shadow var(--dur-slow) var(--ease-standard);
 }
 .iso-loops-card:hover {
   transform: translateY(-4px);
-  box-shadow: 10px 12px 0 color-mix(in srgb, var(--ink) 14%, transparent);
+  box-shadow: var(--iso-lift-2);
 }
 .iso-loops-card-3 {
   border-color: color-mix(in srgb, var(--coral) 60%, transparent);
   background:
     linear-gradient(160deg, color-mix(in srgb, var(--coral) 10%, transparent), transparent 46%),
     color-mix(in srgb, var(--surface) 72%, transparent);
-  box-shadow: 8px 9px 0 color-mix(in srgb, var(--coral) 34%, transparent);
+  box-shadow: var(--iso-lift-2);
 }
 
 /* Matches the guarantee caption labels: sans, sentence case,

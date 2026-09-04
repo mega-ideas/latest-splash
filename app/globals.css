@@ -71,6 +71,19 @@
   --iso-text-muted: rgba(12, 62, 72, .77);
   --iso-text-label: rgba(12, 62, 72, .72);
 
+  /* Two depth steps, not eleven. This page rendered hard-offset shadows at
+     2/2, 3/3, 3/4, 4/5, 5/6, 6/6, 6/7, 7/8, 8/9, 12/14 and 14/16 — no scale,
+     just accumulation, and part of why several genuinely different sections
+     read as one object. Repeated objects now take one of these two: lift-1 for
+     things you could pick up, lift-2 for things you can't. One light source;
+     the isometric world already has one.
+
+     Deliberately not collapsed: the hero extrude on .iso-display, and the two
+     one-off focal panels (.iso-final-panel, .iso-copilot-stage), which carry
+     their own weight on purpose rather than by accident. */
+  --iso-lift-1: 4px 5px 0 rgba(8, 54, 64, .16);
+  --iso-lift-2: 8px 9px 0 rgba(8, 54, 64, .20);
+
   /* App-shell canvas — deliberately warmer/deeper than the marketing --bg
      (#F6F0ED in styles/tokens.css) so product surfaces pop. Single source
      for the dashboard background; do not reintroduce raw #ece3de inline. */
@@ -648,7 +661,7 @@ body {
   height: 2px;
   content: "";
   background: var(--iso-gold);
-  box-shadow: 5px 4px 0 rgba(12, 62, 72, .2);
+  box-shadow: var(--iso-lift-1);
 }
 
 .iso-display {
@@ -739,7 +752,7 @@ body {
   color: var(--iso-ink);
   outline: none;
   background: rgba(255, 255, 255, .72);
-  box-shadow: 3px 4px 0 rgba(12, 62, 72, .1);
+  box-shadow: var(--iso-lift-1);
   font-size: 14px;
   font-weight: 700;
   transition: border-color .2s ease, box-shadow .2s ease;
@@ -1306,7 +1319,7 @@ body {
   border-radius: 14px;
   background: rgba(255, 255, 255, .72);
   box-shadow:
-    10px 12px 0 rgba(12, 62, 72, .11),
+    var(--iso-lift-2),
     0 30px 55px rgba(8, 54, 64, .08);
 }
 
@@ -2012,7 +2025,7 @@ body {
   border-radius: 12px;
   padding: 16px 20px;
   background: rgba(255, 251, 245, .85);
-  box-shadow: 6px 7px 0 rgba(12, 62, 72, .1);
+  box-shadow: var(--iso-lift-2);
 }
 .iso-ctrl-claim p { max-width: 640px; color: var(--iso-text-secondary); font-size: 14px; line-height: 1.55; }
 .iso-ctrl-claim strong { color: var(--iso-teal-dark); font-weight: 850; }
@@ -2033,12 +2046,12 @@ body {
   border-radius: 12px;
   padding: 16px;
   background: color-mix(in srgb, var(--surface) 74%, transparent);
-  box-shadow: 6px 7px 0 color-mix(in srgb, var(--ink) 9%, transparent);
+  box-shadow: var(--iso-lift-2);
   transition: transform var(--dur-slow) var(--ease-standard), box-shadow var(--dur-slow) var(--ease-standard);
 }
 .iso-ctrl-card:hover {
   transform: translateY(-4px);
-  box-shadow: 8px 10px 0 color-mix(in srgb, var(--ink) 11%, transparent);
+  box-shadow: var(--iso-lift-2);
 }
 /* Step 04 (human approval) is the focal gate — coral, like supply card 3. */
 .iso-ctrl-card:nth-child(4) {
@@ -2066,7 +2079,7 @@ body {
   border-radius: var(--r-sm);
   color: var(--surface);
   background: var(--teal);
-  box-shadow: 3px 3px 0 var(--ink);
+  box-shadow: var(--iso-lift-1);
 }
 .iso-ctrl-card:nth-child(4) .iso-ctrl-meta span {
   background: var(--coral);
@@ -2122,7 +2135,7 @@ body {
   border-radius: 14px;
   padding: 26px 28px;
   background: linear-gradient(150deg, color-mix(in srgb, var(--coral) 12%, transparent), transparent 52%), color-mix(in srgb, var(--surface) 86%, transparent);
-  box-shadow: 8px 9px 0 color-mix(in srgb, var(--coral) 22%, transparent);
+  box-shadow: var(--iso-lift-2);
 }
 .iso-supply-cta-copy h3 {
   margin-top: 8px;
@@ -2409,7 +2422,7 @@ body {
   border-radius: 5px;
   color: var(--iso-teal-dark);
   background: var(--iso-gold);
-  box-shadow: 3px 3px 0 rgba(0, 0, 0, .28);
+  box-shadow: var(--iso-lift-1);
   font-family: var(--font-mono), monospace;
   font-size: 12px;
   font-weight: 900;
@@ -2432,7 +2445,7 @@ body {
   border-radius: 8px;
   padding: 14px 16px;
   background: rgba(255, 250, 241, .065);
-  box-shadow: 5px 6px 0 rgba(0, 0, 0, .14);
+  box-shadow: var(--iso-lift-1);
 }
 
 .iso-flow-branch strong {
@@ -2483,7 +2496,7 @@ body {
   border-radius: 7px;
   padding: 10px 13px;
   background: rgba(4, 31, 37, .7);
-  box-shadow: 4px 5px 0 rgba(0, 0, 0, .2);
+  box-shadow: var(--iso-lift-1);
 }
 
 .iso-flow-stat strong {
@@ -2662,7 +2675,7 @@ body {
   border-radius: 12px;
   color: #fffaf1;
   background: var(--iso-teal-dark);
-  box-shadow: 5px 6px 0 rgba(159, 207, 199, .45);
+  box-shadow: var(--iso-lift-1);
   opacity: 0;
   pointer-events: none;
   transform: translateY(18px);
@@ -2699,7 +2712,7 @@ body {
   border-radius: 9px;
   padding: 14px;
   background: rgba(255, 253, 249, .86);
-  box-shadow: 5px 6px 0 rgba(12, 62, 72, .13);
+  box-shadow: var(--iso-lift-1);
   backdrop-filter: blur(14px);
 }
 
@@ -2766,7 +2779,7 @@ body {
   padding: 9px;
   color: #fffaf1;
   background: var(--iso-teal);
-  box-shadow: 3px 4px 0 var(--iso-teal-dark);
+  box-shadow: var(--iso-lift-1);
 }
 
 .iso-copilot-list strong,
@@ -3329,7 +3342,7 @@ body {
   border-radius: 9px;
   padding: 11px 12px;
   background: rgba(255, 251, 245, .66);
-  box-shadow: 3px 4px 0 rgba(12, 62, 72, .1);
+  box-shadow: var(--iso-lift-1);
 }
 
 .iso-recipient-ladder article > span {
@@ -3343,7 +3356,7 @@ body {
   font-family: var(--font-mono), monospace;
   font-size: 12px;
   font-weight: 950;
-  box-shadow: 3px 3px 0 var(--iso-teal-dark);
+  box-shadow: var(--iso-lift-1);
 }
 
 .iso-recipient-ladder div {
@@ -3516,7 +3529,7 @@ body {
   border-radius: 7px;
   color: #fffaf1;
   background: var(--iso-teal);
-  box-shadow: 4px 5px 0 var(--iso-teal-dark);
+  box-shadow: var(--iso-lift-1);
 }
 
 .iso-product-icon svg {
@@ -5934,7 +5947,7 @@ th.money { text-align: right; }
   border-radius: 6px;
   color: #083640;
   background: var(--iso-gold);
-  box-shadow: 3px 3px 0 rgba(0, 0, 0, .35);
+  box-shadow: var(--iso-lift-1);
   font-size: 12px;
 }
 
