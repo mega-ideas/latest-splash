@@ -31,6 +31,20 @@ const banned = [
   // banned — licensed partners are the system of record for customer funds.
   /segregated custody/i,
   /never commingled/i,
+  // Canned compliance VERDICTS. Two responders shipped a determination —
+  // "KYB Tier 1 approved, AML clear, no sanctions flags" and "Compliance: all
+  // clear" — asserted to every caller, including organisations with no KYB
+  // case. Both ran on the path taken exactly when the real system was
+  // unreachable, so the fabrication was the fallback.
+  //
+  // These match the VERDICT, not the subject: describing how screening works
+  // is fine and still passes. Claiming an outcome the code did not read is
+  // what is banned.
+  /KYB Tier 1 approved/i,
+  /AML[:\s]+(?:no flags|clear)/i,
+  /no sanctions flags/i,
+  /compliance:?\s*all clear/i,
+  /no AML flags, no compliance issues/i,
 ];
 
 // Reader-facing surfaces only: app/, components/, content/.

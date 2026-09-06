@@ -32,30 +32,40 @@ type ChatRequest = { message?: string; history?: ChatTurn[] };
 
 // ─── Grounded domain knowledge (used when Claude is not configured) ────────────
 
+// These replies run when ANTHROPIC_API_KEY is unset — which is exactly when
+// the real system is unreachable. So they must never state a figure or a
+// compliance standing as fact: this path used to answer "what is the PHP rate"
+// with a hard-coded exchange rate, and "is my compliance ok" with a clean
+// screening verdict, in the same bubble and tone as a real quote, to accounts
+// that had no KYB case at all. scripts/check-copy.mjs now bans those verdicts
+// outright, which is why they are described here rather than quoted.
+//
+// The rule for anything on this path: describe what the desk CAN do, and point
+// at the screen that holds the real number. Never quote one from here.
 const DOMAIN_RESPONSES: { keywords: string[]; reply: string }[] = [
   { keywords: ['php', 'philippines', 'peso', 'payroll', 'manila', 'friday'],
-    reply: 'USD→PHP: 56.42 · fee 0.80% · ~4.2 min settle (99.8% success).\nRate is within 0.3% of your 30-day best. Optimal lock: Thursday 08:45 MYT, before the pre-open liquidity window closes.\nWant me to draft the Friday PHP batch?' },
+    reply: 'I cannot quote you a live USD→PHP rate from here — the pricing service is not reachable in this session, and a number I made up would look exactly like a real quote. Start a transfer and the rate you see there is the one that will be held and settled. PHP is the corridor running on the testnet path today.' },
   { keywords: ['myr', 'malaysia', 'ringgit', 'bnm'],
-    reply: 'USD→MYR: 4.71 · fee 0.85%. Bank Negara policy meeting Thursday — MYR historically moves ±0.8% around announcements.\nRecommendation: lock before Wednesday close to avoid ~$42 extra cost on a $5,000 transfer.' },
+    reply: 'I am not able to read a live USD→MYR rate in this session, so I will not put a figure in front of you. Open a transfer for the corridor and the quote there is the real one, with its own expiry.' },
   { keywords: ['idr', 'indonesia', 'rupiah', 'jakarta'],
-    reply: 'USD→IDR: 16,284 · fee 0.90% · fastest corridor at ~3.0 min.\nYour IDR volume is up 18% over 6 weeks — a weekly Wednesday batch would save ~$32/month. Want me to set that up?' },
+    reply: 'No live USD→IDR pricing is reachable from this session, so I will not quote one. The transfer screen shows the rate that would actually be held.' },
   { keywords: ['cheapest', 'corridor', 'rate', 'compare', 'best'],
-    reply: 'This week by Splash fee:\n• PHP 0.80% · MYR/SGD 0.85% · IDR 0.90%\n• VND/THB 0.95% · EUR/GBP 1.10%\nPHP is your lowest-cost corridor. Batching beats single-payment spreads on every corridor.' },
+    reply: 'I cannot compare live corridor pricing from here — that needs the pricing service, which is not reachable in this session. The corridor table on the overview shows modelled figures and is labelled as such; live quotes only appear inside a transfer.' },
   { keywords: ['compliance', 'kyb', 'aml', 'limit', 'flag', 'risk'],
-    reply: 'Compliance: all clear ✓\n• KYB Tier 1 approved · AML: no flags\n• Daily limit: 43% used ($12,100 remaining)\n• Walrus audit: active, 7-year retention\nNo action needed.' },
+    reply: 'I will not state your compliance standing from here — I cannot read it in this session, and this is not something to guess at. Your verification state is on the KYB screen, and the money routes enforce it themselves regardless of what any screen or assistant says. What I can tell you is the shape of the control: batch rows are screened against AML lists, amount rules, structuring patterns, a corridor allowlist and purpose codes before value moves, and the audit trail is anchored.' },
   { keywords: ['batch', 'payout', 'bulk'],
-    reply: 'Batch tip: your optimal window is Friday 09:00 MYT (~52 recipients, $11,800 avg).\nLocking Thursday 08:45 MYT saves ~$18 vs. Friday open on the current PHP rate.' },
+    reply: 'Batching several payouts into one settlement is supported, and it is generally cheaper than sending each separately. I cannot compute your optimal window from here — that needs your real volume history, which I cannot read in this session.' },
   { keywords: ['sgd', 'singapore'],
-    reply: 'USD→SGD: 1.345 · fee 0.85% · ~6.1 min modeled rail. Stable this week — no urgent rate action needed.' },
+    reply: 'I cannot read a live USD→SGD rate in this session, so I will not quote one. Open a transfer to see the real quote.' },
   { keywords: ['who are you', 'your name', '0xwal', 'what are you'],
-    reply: "I'm 0xWal — your Splash copilot. I watch corridors, FX timing, batch payouts, treasury yield, and compliance, and I remember your patterns via MemWal so my suggestions get sharper over time." },
+    reply: "I'm 0xWal — your Splash copilot. I help with corridors, FX timing, batch payouts and treasury. Right now I am running without a connection to the reasoning service, so I will answer from what I know about how Splash works and will not quote live figures." },
 ];
 
 const FALLBACKS = [
-  "I'm 0xWal — monitoring the live PHP testnet corridor and modeled expansion routes. What would you like to focus on?",
-  'Your blended fee this month is 0.89%, saving ~41% vs. traditional wires. Anything to optimise?',
-  'Smart Treasury earns variable Ondo USDY (T-bill) yield; your Available balance stays instant at 0%. Want to move idle USDC in?',
-  'All clear — no AML flags, no compliance issues. What can I help with?',
+  "I'm 0xWal, your Splash desk copilot. I am running without a connection to the reasoning service right now, so I will stick to how things work rather than quoting live numbers. What would you like to look at?",
+  'I cannot read your live figures in this session. The overview and treasury screens hold the real ones — what would you like help with?',
+  'Smart Treasury earns a variable Ondo USDY (T-bill) yield; an Available balance stays instant. I cannot read your balances from here.',
+  'I am not able to check your compliance standing from this session — the KYB screen shows it, and the money routes enforce it independently. Anything else I can help with?',
 ];
 
 const TREASURY_KEYWORDS = ['treasury', 'yield', 'apy', 'earn', 'deposit', 'compound', 'interest'];

@@ -45,13 +45,19 @@ const COMPACT_RESPONSES: { keywords: string[]; reply: string }[] = [
   },
   {
     keywords: ['compliance', 'kyb', 'aml', 'limit', 'flag'],
+    // States the control, never a verdict. This previously answered with a
+    // clean screening summary — an approved KYB tier, no adverse findings, and
+    // a daily-limit usage percentage — none of which this widget can read. It
+    // rendered to any caller, including one with no KYB case, and the usage
+    // figure is not computed anywhere in the product. scripts/check-copy.mjs
+    // now bans that verdict, so it is described here rather than quoted.
     reply:
-      'Compliance: All clear ✓\n• KYB Tier 1 approved\n• AML: No flags\n• Daily limit: 43% used ($12,100 remaining)\n• Walrus audit: Active 7-yr retention\n\nNo action needed.',
+      'I cannot read your compliance standing from here, so I will not state one. Your verification state is on the KYB screen, and the money routes enforce it themselves regardless of what any screen says.\n\nHow the control works: rows are screened against AML lists, amount rules, structuring patterns, a corridor allowlist and purpose codes before value moves, and the audit trail is anchored.',
   },
   {
     keywords: ['batch', 'payout', 'bulk'],
     reply:
-      'Batch payout tip: your optimal window is Friday 09:00 MYT with ~52 recipients and $11,800 avg batch size.\n\nLocking Thursday 08:45 MYT saves ~$18 vs. Friday open on the current PHP rate.',
+      'Batching several payouts into one settlement is supported and is generally cheaper than sending each separately.\n\nI cannot work out your optimal window from here — that needs your real volume history, which I cannot read in this session.',
   },
   {
     keywords: ['sgd', 'singapore'],
@@ -62,9 +68,9 @@ const COMPACT_RESPONSES: { keywords: string[]; reply: string }[] = [
 
 const FALLBACK_REPLIES = [
   "I'm monitoring the live PHP testnet corridor and modeled expansion routes. What would you like to focus on?",
-  'Your blended fee this month is 0.89%, saving you 41% vs. traditional wires. Anything to optimise?',
+  'I cannot read your live figures from here — the overview and treasury screens hold the real ones. What would you like help with?',
   'Smart Treasury models a variable Ondo USDY return; execution stays approval-gated. Want a projection?',
-  'All systems clear — no AML flags, no compliance issues. What can I help with?',
+  'I am not able to check your compliance standing from this session — the KYB screen shows it. Anything else I can help with?',
 ];
 
 // Warm small talk — 0xWal is a personable desk assistant, not a rigid FAQ.
