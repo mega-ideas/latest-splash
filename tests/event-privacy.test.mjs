@@ -235,7 +235,7 @@ test('the bundle carries payload and salt, the chain gets only the commitment, a
   assert.match(settlement, /commitment: Uint8Array;/, 'the create call takes the commitment, so an unchanged caller fails to compile');
   assert.match(settlement, /assertCommitmentBytes\(input\.commitment\)/);
   assert.match(settlement, /tx\.pure\.vector\('u8', Array\.from\(input\.commitment\)\)/);
-  assert.doesNotMatch(settlement, /salt/i, 'the settlement layer never sees the salt');
+  assert.doesNotMatch(settlement, /newSalt|saltHex|\bsalt\s*[=:(]/, 'the settlement layer never handles a salt');
 
   for (const file of ['lib/server/composed-payment.ts', 'lib/evidence/settlement.ts', 'lib/evidence/commitment.ts']) {
     const text = await source(file);

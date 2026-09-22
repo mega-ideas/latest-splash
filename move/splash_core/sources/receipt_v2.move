@@ -27,6 +27,8 @@ const E_EMPTY_RECEIPT_ID:  u64 = 800;
 const E_EMPTY_TX_DIGEST:   u64 = 801;
 const E_ZERO_AMOUNT:       u64 = 802;
 const E_INVALID_RECIPIENT: u64 = 803;
+/// WS5. See payment_intent::E_BAD_COMMITMENT: a commitment is 32 bytes.
+const E_BAD_COMMITMENT:    u64 = 804;
 
 public struct ReceiptV2 has key {
     id: UID,
@@ -38,6 +40,8 @@ public struct ReceiptV2 has key {
     target_amount: u64,
     /// USD→local FX rate scaled by 1e6.
     fx_rate_usd_local: u64,
+    /// WS5. The 32-byte commitment the ReceiptIssued event carries.
+    commitment: vector<u8>,
     settled_at: u64,
     tx_digest: String,
     audit_anchor_id: Option<String>,
@@ -50,14 +54,11 @@ public struct ReceiptV2 has key {
 
 // ─── Events ────────────────────────────────────────────────────────────────
 
+/// WS5: the receipt's commitment where the counterparties and amounts were.
 public struct ReceiptIssued has copy, drop {
     receipt_object: address,
     receipt_id: String,
-    sender: address,
-    recipient: address,
-    amount_usd: u64,
-    target_currency: String,
-    target_amount: u64,
+    commitment: vector<u8>,
     settled_at: u64,
     tx_digest: String,
     business_account_id: address,
@@ -93,6 +94,7 @@ public fun create_receipt(
     target_currency: String,
     target_amount: u64,
     fx_rate_usd_local: u64,
+    commitment: vector<u8>,
     tx_digest: String,
     audit_anchor_id: Option<String>,
     business_account_id: address,
@@ -105,6 +107,7 @@ public fun create_receipt(
     assert!(std::string::length(&tx_digest)  > 0, E_EMPTY_TX_DIGEST);
     assert!(amount_usd > 0,                       E_ZERO_AMOUNT);
     assert!(recipient != @0x0,                    E_INVALID_RECIPIENT);
+    assert!(commitment.length() == 32,            E_BAD_COMMITMENT);
 
     let minter = tx_context::sender(ctx);
     let receipt = ReceiptV2 {
@@ -116,6 +119,7 @@ public fun create_receipt(
         target_currency,
         target_amount,
         fx_rate_usd_local,
+        commitment,
         settled_at: clock::timestamp_ms(clock),
         tx_digest,
         audit_anchor_id,
@@ -126,11 +130,7 @@ public fun create_receipt(
     event::emit(ReceiptIssued {
         receipt_object: object::uid_to_address(&receipt.id),
         receipt_id: receipt.receipt_id,
-        sender,
-        recipient,
-        amount_usd,
-        target_currency: receipt.target_currency,
-        target_amount,
+        commitment: receipt.commitment,
         settled_at: receipt.settled_at,
         tx_digest: receipt.tx_digest,
         business_account_id,
@@ -158,6 +158,14 @@ public fun verify_receipt(
     });
 
     matched
+}
+
+#[test_only]
+public fun unpack_receipt_issued_for_testing(
+    e: ReceiptIssued,
+): (address, String, vector<u8>, u64, String, address, address) {
+    let ReceiptIssued { receipt_object, receipt_id, commitment, settled_at, tx_digest, business_account_id, minter } = e;
+    (receipt_object, receipt_id, commitment, settled_at, tx_digest, business_account_id, minter)
 }
 
 // ─── Views ─────────────────────────────────────────────────────────────────

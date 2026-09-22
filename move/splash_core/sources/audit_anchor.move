@@ -73,20 +73,17 @@ public struct VerificationChecked has copy, drop {
 // ─── Entry / public functions ──────────────────────────────────────────────
 
 /// Settlement receipt anchor event emitted by the hot-potato anchor path.
+///
+/// WS5: the intent, its commitment, the status it is in and the clock, plus
+/// the two pointers that bind the settlement to its evidence — a ciphertext
+/// hash and a Walrus blob id. Nothing about the payment itself.
 public struct SettlementAnchored has copy, drop {
     intent_id: ID,
-    sender: address,
-    recipient: address,
-    beneficiary_ref: vector<u8>,
-    amount: u64,
-    currency: vector<u8>,
-    corridor: vector<u8>,
+    commitment: vector<u8>,
+    status: u8,
+    timestamp_ms: u64,
     content_hash: vector<u8>,
     walrus_blob_id: vector<u8>,
-    created_epoch: u64,
-    settled_at: u64,
-    anchored_at: u64,
-    anchorer: address,
 }
 
 /// Anchor an audit hash. AnchorCap-gated (M-01 fix; cap split S-10).
@@ -163,38 +160,30 @@ public fun anchor(
     content_hash: vector<u8>,
     walrus_blob_id: vector<u8>,
     clock: &Clock,
-    ctx: &mut TxContext,
+    _ctx: &mut TxContext,
 ) {
     assert!(content_hash.length() > 0, E_EMPTY_HASH);
     assert!(walrus_blob_id.length() > 0, E_EMPTY_BLOB);
 
-    let (
-        intent_id,
-        sender,
-        recipient,
-        beneficiary_ref,
-        amount,
-        currency,
-        corridor,
-        created_epoch,
-        settled_at,
-    ) = payment_intent::unpack_settle_receipt(AnchorWitness {}, receipt);
+    let (intent_id, commitment, _settled_at) =
+        payment_intent::unpack_settle_receipt(AnchorWitness {}, receipt);
 
     event::emit(SettlementAnchored {
         intent_id,
-        sender,
-        recipient,
-        beneficiary_ref,
-        amount,
-        currency,
-        corridor,
+        commitment,
+        status: payment_intent::status_confirmed(),
+        timestamp_ms: clock::timestamp_ms(clock),
         content_hash,
         walrus_blob_id,
-        created_epoch,
-        settled_at,
-        anchored_at: clock::timestamp_ms(clock),
-        anchorer: tx_context::sender(ctx),
     });
+}
+
+#[test_only]
+public fun unpack_settlement_anchored_for_testing(
+    e: SettlementAnchored,
+): (ID, vector<u8>, u8, u64, vector<u8>, vector<u8>) {
+    let SettlementAnchored { intent_id, commitment, status, timestamp_ms, content_hash, walrus_blob_id } = e;
+    (intent_id, commitment, status, timestamp_ms, content_hash, walrus_blob_id)
 }
 
 // ─── Views ─────────────────────────────────────────────────────────────────

@@ -35,7 +35,8 @@
     "test:oxwal": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/oxwal-state-machine.test.mjs tests/oxwal-agent.test.mjs tests/oxwal-policy.test.mjs tests/oxwal-compose.test.mjs tests/oxwal-approval-queue.test.mjs tests/oxwal-evidence.test.mjs tests/oxwal-safety.test.mjs tests/oxwal-frontend.test.mjs tests/oxwal-e2e.test.mjs tests/oxwal-authority.test.mjs tests/comparison-baselines.test.mjs tests/money-path.test.mjs tests/deepbook-liquidity-guard.test.mjs tests/deepbook-pool-whitelist.test.mjs tests/payout-authorization.test.mjs tests/core-invariant-check.test.mjs tests/treasury-nav.test.mjs tests/settlement-minimum.test.mjs tests/receipt-share.test.mjs",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "test:db": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/ledger-invariant.test.mjs tests/proposal-persistence.test.mjs tests/wallet-identity-db.test.mjs"
+    "test:db": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/ledger-invariant.test.mjs tests/proposal-persistence.test.mjs tests/wallet-identity-db.test.mjs",
+    "test:privacy": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --import ./scripts/alias-hook.mjs --test tests/event-privacy.test.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.99.0",
@@ -46,6 +47,7 @@
     "@mysten/deepbook-v3": "^1.3.6",
     "@mysten/seal": "^1.1.3",
     "@mysten/sui": "^2.16.2",
+    "@noble/hashes": "^2.2.0",
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.6.1",
     "@shinami/clients": "^0.10.0",
