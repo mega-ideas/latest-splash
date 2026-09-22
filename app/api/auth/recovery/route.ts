@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
+import { BRAND } from '@/content/brand';
 import { readJsonBody } from '@/lib/server/http';
 
 const recoverySchema = z.object({
@@ -10,8 +11,7 @@ const recoverySchema = z.object({
 function recoveryContact() {
   return (
     process.env.CUSTOMER_RECOVERY_EMAIL ||
-    process.env.NEXT_PUBLIC_SUPPORT_EMAIL ||
-    'support@splash.finance'
+    BRAND.supportEmail
   ).trim();
 }
 

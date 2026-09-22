@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { BRAND } from '@/content/brand';
 import { Headphones, Loader2, Mail, MessageSquareReply, Send } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -61,7 +62,7 @@ export default function AdminSupportConsole({ initialTickets }: Props) {
       const response = await fetch(`/api/admin/support/${selected.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status, replyMessage, assignedTo: 'support@splash.finance' }),
+        body: JSON.stringify({ status, replyMessage, assignedTo: BRAND.supportEmail }),
       });
       const body = await response.json() as { ticket?: SupportTicketRecord; error?: string };
 

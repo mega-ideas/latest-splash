@@ -4,13 +4,14 @@ import Link from 'next/link';
 import { ArrowLeft, ArrowRight } from 'lucide-react';
 
 import TrustCompliance from '@/components/compliance/TrustCompliance';
+import { BRAND } from '@/content/brand';
 
 const legalApproved = process.env.LEGAL_APPROVED === 'true';
 
 export const metadata: Metadata = {
   title: 'Trust & compliance — Splash',
   description:
-    'How Splash handles licensing, custody governance, and audit evidence: licensed partners of record today, an explicit licensing path, and Seal-encrypted, Walrus-anchored records.',
+    'How Splash handles licensing, custody governance, and audit evidence: partners of record today, an explicit licensing path, and encrypted, permanent storage-anchored records.',
   // Draft until counsel signs off — keep the page out of indexes.
   robots: legalApproved ? undefined : { index: false, follow: false },
 };
@@ -46,8 +47,8 @@ export default function TrustPage() {
         <div className="iso-shell">
           <p className="iso-kicker">Trust &amp; compliance</p>
           <h1 className="iso-section-title wc-hero-title">
-            Licensed partners today.
-            <span>Our own licenses next.</span>
+            Partners of record today.
+            <span>Our own licences next.</span>
           </h1>
           <p className="wc-hero-desc">
             Trust in payments is earned in a specific order: controls first, partners of record
@@ -65,8 +66,8 @@ export default function TrustPage() {
 
       <footer className="wc-footer">
         <div className="iso-shell wc-footer-inner">
-          <span>© 2026 Splash Financial Labuan Ltd.</span>
-          <span>Records: Seal-encrypted · Walrus-stored · Sui-anchored</span>
+          <span>{BRAND.copyright()}</span>
+          <span>Records: encrypted, stored permanently, anchored on Sui</span>
         </div>
       </footer>
     </main>

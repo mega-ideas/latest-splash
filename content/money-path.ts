@@ -63,7 +63,7 @@ export const MONEY_PATH_STEPS: MoneyPathStep[] = [
   {
     partner: activePhRail.name,
     role: 'PHP payout',
-    detail: 'Licensed local rail delivers to your supplier.',
+    detail: 'The local rail of record delivers to your supplier.',
     splashIsParty: false,
   },
   {

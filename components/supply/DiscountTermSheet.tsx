@@ -44,7 +44,7 @@ const OUTCOMES: Record<
     settles: 'Today · same rail',
     receives: usd(EARLY),
     discount: `${DISCOUNT_PCT}% · ${usd(DISCOUNT)}`,
-    highlight: `Buyer earns ${usd(DISCOUNT)} on idle USD held ~${TENOR_DAYS} days — ≈ ${ANNUALIZED}% p.a.`,
+    highlight: `Buyer saves (illustrative) ${usd(DISCOUNT)} on idle USD held ~${TENOR_DAYS} days — ≈ ${ANNUALIZED}% p.a.`,
     note: "The buyer's own approved USD, released early over Splash. No factoring house, no credit line, no lender between you.",
   },
 };
