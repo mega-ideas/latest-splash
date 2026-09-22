@@ -127,9 +127,9 @@ test('ActionCard component names release-gate sections and warning accent', asyn
   assert.doesNotMatch(source, /#E39774/);
 });
 
-test('landing keeps restored isometric shell with upgraded truth copy', async () => {
-  const landing = await readFile(new URL('../components/IsometricLanding.tsx', import.meta.url), 'utf8');
-  const cinematic = await readFile(new URL('../components/landing/SettlementCinematic.tsx', import.meta.url), 'utf8');
+test('landing is the WS9 page: the record, the one-leg price, three steps, sourced numbers', async () => {
+  const landing = await readFile(new URL('../components/landing/Landing.tsx', import.meta.url), 'utf8');
+  const page = await readFile(new URL('../app/page.tsx', import.meta.url), 'utf8');
   const claims = await readFile(new URL('../content/claims.ts', import.meta.url), 'utf8');
   const copyCheck = await readFile(new URL('../scripts/check-copy.mjs', import.meta.url), 'utf8');
   const ogImage = await readFile(new URL('../app/opengraph-image.tsx', import.meta.url), 'utf8');
@@ -139,21 +139,16 @@ test('landing keeps restored isometric shell with upgraded truth copy', async ()
   const invoiceLoop = await readFile(new URL('../components/invoices/InvoiceLoop.tsx', import.meta.url), 'utf8');
 
   assert.match(claims, /headline: 'Collect USD\. Pay Southeast Asia\. Keep cash working\.'/);
-  // Hero H1 lives in the cinematic hero (visually uppercased by .iso-display).
-  assert.match(cinematic, /Move money\./);
-  assert.match(cinematic, /Settle everything\./);
-  // Hero art is the versioned district raster; bump the version, not the name.
-  assert.match(cinematic, /hero-district-v\d+\.png/);
-  assert.match(landing, /SettlementCinematic/);
-  assert.match(landing, /Five steps\./);
-  assert.match(landing, /Working-capital branch/);
-  // Early Pay was promoted out of the #operations tool grid into the
-  // dedicated roadmap-labeled #supply section (§4.D).
-  assert.match(landing, /id="supply"/);
-  assert.match(landing, /Your invoices are/);
-  assert.doesNotMatch(landing, /Early Pay/);
-  assert.match(landing, /One testnet corridor\. Modeled expansion routes\./);
-  assert.match(landing, /claims\.footerLegal\.claim/);
+  // WS9 (Master Prompt v3): hero, the record, calculator, three steps,
+  // numbers, pricing, FAQ, footer. Supply and treasury left the landing;
+  // the hero art is still the versioned district raster.
+  assert.match(landing, /hero-district-v\d+\.png/);
+  assert.match(landing, /id="record"/);
+  assert.match(landing, /Three steps/);
+  assert.match(landing, /FeeCalculator/);
+  assert.doesNotMatch(landing, /Early Pay|Five steps|id="supply"|Wise/);
+  assert.match(page, /<Landing/);
+  assert.match(page, /LANDING_FAQ/, 'the FAQ JSON-LD is generated from the page copy, not duplicated');
   // Composer is now a payment-desk command bar (not a ChatGPT pill): no
   // "High" effort dropdown, a branded "Prepare" action, and a functional
   // file-attach that prepares a batch for human approval.

@@ -74,7 +74,7 @@ test('the calculator prices the one leg Splash prices, in minor units, and fails
   const calc = await source('lib/fx/calculator.ts');
   assert.doesNotMatch(calc, /MYR/);
   assert.doesNotMatch(calc, /\bWise\b/);
-  assert.doesNotMatch(calc, /parseFloat|Number\(|\* 0\./, 'money is bigint minor units, never float');
+  assert.doesNotMatch(calc, /parseFloat\(|\* 0\.\d|\/ 100\b|\.toFixed\(/, 'money is bigint minor units, never float');
   const component = await source('components/landing/FeeCalculator.tsx');
   assert.doesNotMatch(component, /\bWise\b/i);
   assert.match(component, /Illustrative/);
@@ -106,10 +106,10 @@ test('baselines name a dataset and do their arithmetic in minor units', async ()
   assert.equal(typeof cost, 'bigint');
   assert.equal(cost, php.bankWire.flatUsdMinor + (250_000n * BigInt(php.bankWire.marginBps)) / 10_000n);
 
-  const module = await source('lib/fx/comparison-baselines.ts');
-  assert.doesNotMatch(module, /commonly 1[–-]3%/, 'the vague review comment is replaced by the dataset reference');
-  assert.doesNotMatch(module, /amountUsd \*|\/ 100\)/, 'no float math on money');
-  assert.match(module, /from '\.\.\/money\.ts'/);
+  const baselinesSource = await source('lib/fx/comparison-baselines.ts');
+  assert.doesNotMatch(baselinesSource, /commonly 1[–-]3%/, 'the vague review comment is replaced by the dataset reference');
+  assert.doesNotMatch(baselinesSource, /amountUsd \*|\/ 100\)/, 'no float math on money');
+  assert.match(baselinesSource, /from '\.\.\/money\.ts'/);
 });
 
 /* ── Numbers ───────────────────────────────────────────────────────────── */
@@ -152,8 +152,8 @@ test('the build fails on an unsourced number: the guard exists and runs under li
   assert.match(pkg.scripts.lint, /check:numbers/);
   assert.match(pkg.scripts['check:numbers'] ?? '', /check-numbers\.mjs/);
   // And the module itself refuses to load in production with a bad entry.
-  const module = await source('content/sea-numbers.ts');
-  assert.match(module, /NODE_ENV === 'production'[\s\S]{0,200}throw|throw[\s\S]{0,200}NODE_ENV === 'production'/);
+  const numbersSource = await source('content/sea-numbers.ts');
+  assert.match(numbersSource, /NODE_ENV === 'production'[\s\S]{0,200}throw|throw[\s\S]{0,200}NODE_ENV === 'production'/);
 });
 
 /* ── Brand as configuration ────────────────────────────────────────────── */
@@ -233,7 +233,7 @@ test('the copy lint gives a reason for every rule, fails on a planted "licensed 
   }
 
   const planted = copyViolations('app/page.tsx', 'We work with licensed partners across the region.');
-  assert.ok(planted.some((v) => /licensed[- ]partner/i.test(String(v.pattern))), 'licensed partner is caught on a customer route');
+  assert.ok(planted.some((v) => /licensed partners/i.test(v.excerpt) && /partners of record/i.test(v.reason)), 'licensed partner is caught on a customer route, with its reason');
   assert.ok(planted.every((v) => v.reason.length > 10));
 
   assert.deepEqual(

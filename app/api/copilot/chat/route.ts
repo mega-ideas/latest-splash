@@ -113,7 +113,7 @@ async function groundedReply(message: string, memories: RecalledMemory[]): Promi
       const ledger = getLedger();
       const suggestion = await suggestTreasuryAction(ledger.availableMicro / 1_000_000, 0);
       base =
-        `Smart Treasury earns from Ondo USDY (T-bill backed): ${rate.label}` +
+        `Smart Treasury is projected to earn from Ondo USDY (T-bill backed): ${rate.label}` +
         `${rate.introductory ? ' — introductory promo rate' : ''}.\n` +
         'Your Available balance (USDC) stays 0% but instant; withdrawals back to Available take 1–3 business days.\n\n' +
         `${suggestion.title}. ${suggestion.description}`;

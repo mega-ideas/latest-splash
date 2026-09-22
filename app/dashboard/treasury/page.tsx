@@ -349,14 +349,14 @@ export default function TreasuryPage() {
         <div className="dash-block flex flex-wrap items-center gap-x-3 gap-y-1 border-[#6FB4A0]/30 bg-[#6FB4A0]/8 p-4 text-sm font-semibold text-[#1F4452]">
           <span className="inline-flex items-center gap-1.5"><CheckCircle2 size={14} className="text-[#4F9C88]" /> Treasury execution enabled · sandbox</span>
           <span className="text-[13px] font-medium text-[#326273]/65">
-            Moves settle against the Splash sandbox ledger · every action is approval-gated · withdrawals follow the notice window. Licensed partners are the system of record for customer funds.
+            Moves settle against the Splash sandbox ledger · every action is approval-gated · withdrawals follow the notice window. Partners of record hold customer funds.
           </span>
         </div>
       ) : (
         <div className="dash-block border-accent/30 bg-accent/10 p-4 text-sm font-semibold text-foreground">
           Projection only — execution disabled pending regulatory approval.
           <span className="mt-1 block text-[13px] font-medium text-foreground/65">
-            Licensed partners are the system of record for customer funds; treasury figures stay projected until controls are live.
+            Partners of record hold customer funds; treasury figures stay projected until controls are live.
           </span>
         </div>
       )}

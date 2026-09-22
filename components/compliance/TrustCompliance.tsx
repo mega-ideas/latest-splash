@@ -25,12 +25,12 @@ import { FileLock2, Landmark, ShieldCheck, Vault } from 'lucide-react';
 const ROLE_ROWS = [
   {
     role: "Payout of record",
-    body: "A locally licensed disbursement partner holds the licence and the client relationship in the destination market. Splash instructs; the partner pays out.",
+    body: "A local disbursement partner of record holds the licence and the client relationship in the destination market. Splash instructs; the partner pays out.",
     status: "Not yet signed",
   },
   {
     role: "Collection of record",
-    body: "A licensed provider holds incoming USD. This is the one role with a named provider anywhere on this page, because it is the one that is live.",
+    body: "A provider of record holds incoming USD. This is the one role with a named provider anywhere on this page, because it is the one that is live.",
     status: "Airwallex · live on the testnet corridor",
   },
   {
@@ -40,14 +40,14 @@ const ROLE_ROWS = [
   },
   {
     role: "Client-asset custody",
-    body: "Client funds sit with a licensed custodian, never with Splash. splash_core structurally cannot hold a value-bearing field, and CI enforces that on every push.",
+    body: "Client funds sit with a custodian of record, never with Splash. splash_core structurally cannot hold a value-bearing field, and CI enforces that on every push.",
     status: "Not yet signed",
   },
 ];
 
 const LICENSE_PATH = [
-  { stage: 'In process', body: 'Labuan FSA — money-broking application under preparation with counsel.' },
-  { stage: 'Planned', body: 'BNM Money Services Business (Malaysia) and BSP registration (Philippines), sequenced by corridor demand.' },
+  { stage: 'In preparation', body: 'Labuan FSA — money-broking application under preparation with counsel.' },
+  { stage: 'Planned', body: 'Further licences are sequenced by corridor demand, and none is named until an application is filed.' },
 ];
 
 // Folded in from the landing's former "readiness" strip: the controls that
@@ -55,7 +55,7 @@ const LICENSE_PATH = [
 const CONTROLS = [
   { label: 'Human approval', body: 'Every payment is prepared by 0xWal and released only by a human on the Action Queue — maker-checker, with dual approval above your threshold.' },
   { label: 'Corridor gating', body: 'Corridors arm and pause under explicit controls; settlement halts on a peg deviation or compliance flag before any value moves.' },
-  { label: "Partner custody", body: "Licensed partners are the system of record for client funds. Splash-side control is maker-checker — 0xWal prepares, a named human releases — and splash_core holds no client value, which is a property CI enforces rather than a key policy asserted in prose." },
+  { label: "Partner custody", body: "Partners of record hold client funds. Splash-side control is maker-checker — 0xWal prepares, a named human releases — and splash_core holds no client value, which is a property CI enforces rather than a key policy asserted in prose." },
 ];
 
 export default function TrustCompliance() {
@@ -64,8 +64,8 @@ export default function TrustCompliance() {
       <div className="trust-mandatory" role="note">
         <ShieldCheck aria-hidden="true" />
         <p>
-          <strong>Splash is not yet a licensed money-services business.</strong> Today, licensed
-          partners are the system of record for regulated activities; Splash operates the software
+          <strong>Splash is not yet a licensed money-services business.</strong> Today, partners of record
+          carry out the regulated activities; Splash operates the software
           and settlement layer between them.
         </p>
       </div>
@@ -114,7 +114,7 @@ export default function TrustCompliance() {
       <section className="trust-block">
         <h2><FileLock2 aria-hidden="true" /> Audit trail by construction</h2>
         <p>
-          Every settlement produces a tamper-proof, Seal-encrypted audit record stored on Walrus and
+          Every settlement produces a tamper-proof, encrypted audit record stored permanently and
           anchored on Sui, retained for seven years. Records are private by default; regulators and
           auditors can be granted visibility on authorization — decryption is a permissioned act, not
           a data request. This aligns with Sui&apos;s regulator-visible confidential-transfer

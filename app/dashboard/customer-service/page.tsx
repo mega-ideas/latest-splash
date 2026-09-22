@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { BRAND } from '@/content/brand';
 import { Headphones, Send, Bug, MessageSquareWarning, MessageSquare, Mail, Phone, Clock3, BookOpen } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -37,7 +38,7 @@ const faqs = [
 ];
 
 const channels = [
-  { icon: Mail, label: 'support@splash.finance', detail: 'Email · 24h response SLA' },
+  { icon: Mail, label: BRAND.supportEmail, detail: 'Email · 24h response SLA' },
   { icon: Phone, label: '+60 3-1234 5678', detail: 'Mon–Fri · 9am–6pm MYT' },
   { icon: Clock3, label: 'Status: Operational', detail: 'All systems green' },
 ];

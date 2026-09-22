@@ -1,6 +1,8 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { extname, join, relative } from 'node:path';
 
+import { copyViolations } from './copy-rules.mjs';
+
 const roots = ['app', 'components', 'content', 'lib'];
 const allowedExtensions = new Set(['.js', '.jsx', '.mjs', '.ts', '.tsx']);
 const banned = [
@@ -171,6 +173,11 @@ for (const root of roots) {
     }
     for (const pattern of banned) {
       if (pattern.test(text)) violations.push(`${relative('.', file)}: ${pattern.source}`);
+    }
+    // WS9: the reasoned rules. Every match names the surface, the line and
+    // the reason, so the fix is obvious from the failure.
+    for (const found of copyViolations(relative('.', file), text)) {
+      violations.push(`${found.file}:${found.line}: "${found.excerpt}" — ${found.reason}`);
     }
     for (const apy of apyViolations(text)) {
       violations.push(`${relative('.', file)}: fixed APY figure "${apy}" — yield copy must be prefixed with "Variable"`);

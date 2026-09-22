@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { BRAND } from '@/content/brand';
 import type { ReactNode } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
@@ -44,7 +45,7 @@ const receivableFacts = [
     copy: 'Quotes, approvals, receipts, and settlement proof would anchor to the invoice itself — an invoice that shows how reliably it gets paid.',
     image: '/isometric/wc-receivable-2.png',
     imageAlt: 'Isometric invoice accumulating stacked settlement-history evidence',
-    meta: 'Audit spine attached',
+    meta: 'Record attached',
   },
   {
     number: '03',
@@ -275,7 +276,7 @@ export default function WorkingCapitalPage() {
 
       <footer className="wc-footer">
         <div className="iso-shell wc-footer-inner">
-          <span>© 2026 Splash Financial Labuan Ltd.</span>
+          <span>{BRAND.copyright()}</span>
           <span>Supply loop: roadmap · Settle loop: live on testnet</span>
         </div>
       </footer>

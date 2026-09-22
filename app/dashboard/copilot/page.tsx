@@ -101,7 +101,7 @@ const CONTEXT_RESPONSES: { keywords: string[]; reply: string }[] = [
       '**Smart Treasury — Ondo USDY**',
       '• Instrument: Ondo USDY — T-bill backed, variable rate (not fixed)',
       '• Available balance (USD): 0% but instant — operating cash',
-      '• Smart Treasury: earns the floating USDY net rate',
+      '• Smart Treasury: a projected, variable USDY net rate',
       '• Withdrawals Smart Treasury → Available: 1–3 business days (USDY→USD conversion)',
       '',
       'Available cash is modeled at 0%. Smart Treasury can model a variable T-bill-backed return pending approval.',
