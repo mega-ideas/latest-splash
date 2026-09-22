@@ -3,6 +3,7 @@ import { z } from 'zod';
 
 import { parseInvoice, type CopilotSuggestion } from '@/lib/server/copilot';
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
+import { RATE_LIMITS, enforceRateLimit } from '@/lib/server/rate-limit';
 import { readJsonBody } from '@/lib/server/http';
 import { readInvoice, updateAuditReceipt } from '@/lib/server/operations';
 import { sealAdapter } from '@/lib/server/seal';
@@ -13,6 +14,10 @@ const schema = z.object({ invoiceId: z.string().min(1) });
 export async function POST(request: Request) {
   const auth = await requireCustomerRequest(request);
   if (auth.response) return auth.response;
+
+  // Extraction feeds a document to the model: bounded per user.
+  const limited = await enforceRateLimit({ rule: RATE_LIMITS.extractInvoiceUser, key: auth.session.email });
+  if (limited) return limited;
 
   const parsed = schema.safeParse(await readJsonBody(request));
   if (!parsed.success) return NextResponse.json({ error: 'invoiceId is required' }, { status: 400 });

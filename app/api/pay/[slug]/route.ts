@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
 import { readJsonBody } from '@/lib/server/http';
+import { RATE_LIMITS, clientIp, enforceRateLimit } from '@/lib/server/rate-limit';
 import {
   findInvoiceBySlug,
   listRecipients,
@@ -50,6 +51,16 @@ export async function GET(_request: Request, { params }: { params: Promise<{ slu
 }
 
 export async function POST(request: Request, { params }: { params: Promise<{ slug: string }> }) {
+  // Public and unauthenticated: the only thing that bounds it is the network
+  // it comes from. Limited before the slug is even looked up, so probing
+  // slugs is bounded too.
+  const limited = await enforceRateLimit({
+    rule: RATE_LIMITS.payLinkIp,
+    key: clientIp(request),
+    message: 'Too many payment submissions from this network. Try again shortly.',
+  });
+  if (limited) return limited;
+
   const { slug } = await params;
   const invoice = findInvoiceBySlug(slug);
   if (!invoice) return NextResponse.json({ error: 'Payment request not found' }, { status: 404 });

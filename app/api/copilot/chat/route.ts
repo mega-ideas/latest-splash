@@ -19,6 +19,7 @@
 
 import { recallMemories, rememberFact, memwalConfigured, type RecalledMemory } from '@/lib/server/memwal';
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
+import { RATE_LIMITS, clientIp, enforceRateLimit } from '@/lib/server/rate-limit';
 import { readJsonBody } from '@/lib/server/http';
 import { getTreasuryRate } from '@/lib/server/usdy';
 import { getLedger } from '@/lib/server/treasury';
@@ -166,6 +167,12 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export async function POST(request: Request) {
   const auth = await requireCustomerRequest(request);
   if (auth.response) return auth.response;
+
+  // Every message can spend model credits: bounded per user, then per network.
+  const limited =
+    (await enforceRateLimit({ rule: RATE_LIMITS.copilotChatUser, key: auth.session.email })) ??
+    (await enforceRateLimit({ rule: RATE_LIMITS.copilotIp, key: clientIp(request) }));
+  if (limited) return limited;
 
   const body = (await readJsonBody(request)) as ChatRequest;
 
