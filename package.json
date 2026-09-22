@@ -23,7 +23,7 @@
     "check:env": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/check-env-reads.mjs",
     "setup:sui-pilot": "node scripts/setup-sui-pilot.mjs",
     "bootstrap:testnet": "node --use-system-ca --experimental-strip-types --env-file=.env.local scripts/bootstrap-testnet.ts",
-    "test:auth": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/customer-session.test.mjs tests/wallet-onboarding.test.mjs tests/auth-fail-closed.test.mjs tests/zklogin-authority.test.mjs tests/passkey-authority.test.mjs tests/membership-admin.test.mjs",
+    "test:auth": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/customer-session.test.mjs tests/wallet-onboarding.test.mjs tests/auth-fail-closed.test.mjs tests/zklogin-authority.test.mjs tests/passkey-authority.test.mjs tests/membership-admin.test.mjs tests/account-verification.test.mjs",
     "test:seal:integration": "node --use-system-ca --experimental-strip-types --env-file=.env.local tests/seal-decentralized.integration.mjs",
     "test:funding": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/funding-registry.test.mjs tests/funding-policy.test.mjs",
     "test:batch": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/batch-parse.test.mjs",
