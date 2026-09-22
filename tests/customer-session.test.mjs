@@ -8,6 +8,7 @@ import {
   timingSafeStrEqual,
 } from '../lib/auth/customer-session.ts';
 import { customerRequestOriginAllowed } from '../lib/auth/customer-request.ts';
+import { IDLE_TIMEOUT_MS, evaluateIdle } from '../lib/auth/idle-timeout.ts';
 
 const secret = 'test-secret-with-enough-entropy-for-hmac-signing';
 const now = Date.parse('2026-07-03T12:00:00.000Z');
@@ -99,4 +100,31 @@ test('customer request origin guard falls back to referer when origin is absent'
     })),
     false,
   );
+});
+
+/* ── The idle clock ────────────────────────────────────────────────────── */
+
+test('the idle clock survives the cookie round trip, so an abandoned browser actually logs out', () => {
+  // Phase 4 stamps lastSeenAt on the cookie and evaluates it on every read.
+  // The stamp is inside the signed payload, so it survives the signature —
+  // but readCustomerSessionToken rebuilds the session field by field, and a
+  // field it does not copy is silently gone. Before the fix, lastSeenAt was
+  // never copied: every read saw "no stamp", evaluateIdle treated that as
+  // "active, stamp now", and the fifteen-minute idle logout could not fire
+  // for anyone, ever.
+  const twentyMinutesAgo = new Date(now - 20 * 60 * 1000);
+  const session = createCustomerSessionFromIdentity({
+    email: 'finance@example.com',
+    now: new Date(now),
+    ttlSeconds: 60 * 60 * 12,
+    lastSeenAt: twentyMinutesAgo,
+  });
+  assert.equal(session.lastSeenAt, twentyMinutesAgo.toISOString());
+
+  const decoded = readCustomerSessionToken(createCustomerSessionToken(session, secret, now), secret, now);
+  assert.equal(decoded?.lastSeenAt, twentyMinutesAgo.toISOString(), 'the stamp must survive the read');
+
+  const verdict = evaluateIdle(Date.parse(decoded.lastSeenAt), now);
+  assert.equal(verdict.state, 'expired');
+  assert.ok(verdict.idleMs >= IDLE_TIMEOUT_MS);
 });
