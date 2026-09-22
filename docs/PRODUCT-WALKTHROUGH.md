@@ -153,27 +153,35 @@ Walrus — real, verifiable, 7-year retention — before any money is recommende
 
 ---
 
-## 5 · Treasury  (Finance → Treasury)  — now FULLY interactive
+## 5 · Treasury  (Finance → Treasury)  — Phase 0: gated, and says so
 
-**Goal:** idle USD earns a variable T-bill yield; withdrawals are controlled.
-(`TREASURY_EXECUTION_ENABLED=true` is set in `.env.local` — verified live:
-allocate, withdrawal notice, and cancel all work against the sandbox ledger.)
+**Goal:** show that the product refuses to hold funds until it may.
 
-1. Sidebar → **Treasury**. Show **Available (USD, instant, 0%)** vs
-   **Smart Treasury (variable Ondo USDY yield)** and the projection.
-2. **Allocate live:** enter `2000` → Move to Treasury. Both balances update
-   instantly — Available drops, Smart Treasury grows.
-3. **Withdraw live:** switch to Withdraw, enter `500` → a **notice** appears
-   with the 1–2 business-day window. This is the control story: withdrawal is
-   a scheduled, cancellable notice — not an instant drain.
-4. **Cancel it** → funds return to Treasury, notice clears. (Also keeps the
-   sandbox ledger tidy between runs.)
-5. End on the collapsed trust line at the bottom — click **"Splash
-   orchestrates — we never hold your funds."** to unfold the partner path.
+Holding customer funds — a treasury balance, a stored balance, a sweep
+account — is Phase 2 and needs a money-broking licence Splash does not hold.
+The code cannot check a licence, so it checks the custody package: with
+`SPLASH_CUSTODY_PACKAGE_ID` unset, `/api/treasury`, both treasury crons, a
+`STORED_BALANCE` or `SWEEP_ACCOUNT` delivery, and a recipient set up for one
+all answer the same plain 403 (`custody_not_licensed`). No demo balance and
+no demo transaction is shown anywhere.
 
-**Talking point:** "Operating cash stays instant; surplus earns a real
-T-bill-backed yield, and moving it out is a controlled, auditable action — a
-notice window you can cancel, not a button that drains the account."
+1. Sidebar → **Treasury**. The page reads **"Treasury arrives with our
+   licence"**, names the licence, and shows no balances and no projections.
+   The money-path panel below it still explains who holds what today.
+2. Dashboard → the treasury card says the same thing in one line; its button
+   reads **"When it arrives"**.
+3. Ask 0xWal about yield or treasury — it answers with the same reason and
+   never quotes a rate or a balance.
+4. **Send → Delivery**: only `PAYOUT_ONLY` is accepted; a `STORED_BALANCE`
+   request is refused before any recipient or intent is written.
+
+**Talking point:** "We built the controls before the licence. The product
+tells you what it is not allowed to do yet, in the words of the licence it
+needs — nothing is modelled as if it were already held."
+
+When the custody package is configured (Phase 2), the interactive walkthrough
+returns: allocate, a cancellable withdrawal notice, and the trust line at the
+bottom.
 
 ---
 

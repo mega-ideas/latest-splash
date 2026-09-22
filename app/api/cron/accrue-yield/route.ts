@@ -8,6 +8,7 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { NextResponse } from 'next/server';
 
+import { custodyPhaseEnabled, custodyPhaseResponse } from '@/lib/server/custody-phase';
 import { sealAdapter } from '@/lib/server/seal';
 import { anchorAuditHashOnSui } from '@/lib/server/sui-settlement';
 import { accrueDailyYield } from '@/lib/server/treasury';
@@ -31,6 +32,10 @@ async function handleAccrual(request: Request) {
   if (!isAuthorized(request)) {
     return NextResponse.json({ success: false, error: 'unauthorized' }, { status: 401 });
   }
+  // Phase 0: there is no treasury to accrue against. Nothing is written and
+  // nothing is anchored; the scheduler sees the same licence-named refusal
+  // a customer would.
+  if (!custodyPhaseEnabled()) return custodyPhaseResponse();
 
   try {
     const snapshot = await accrueDailyYield();

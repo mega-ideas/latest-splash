@@ -22,8 +22,9 @@ message; nothing is squashed.
 | **6 · Move authority** | `BusinessAccount` is shared and holds `owners` / `approvers` / two freeze flags / `recovery_party` / `authority_epoch`; four eyes and revoke-then-regrant enforced on chain; `mint_attestation_cap` deleted; 24h per-account ceiling (`daily_limit`); `ComplianceCap` subtractive by type; `TreasuryCap` split out of `AdminCap`; two CI guards; adversarial pass |
 | **7 · Break-glass** | `CapRegistry` + per-capability generations: a lost or stolen `AnchorCap` / `ComplianceCap` is killed on chain by a generation bump that mints its replacement in the same transaction. No timelock, and the module argues why. `check-cap-generations.mjs` fails the build if any consumer forgets the check |
 | **Membership admin** (not a numbered phase) | `/admin/memberships` — the operator surface for the grant Phase 3 removed. One grant path, no default role, no account creation from the form, and the two money-moving roles say so at the point of granting. `scripts/dev-db.mjs` runs it locally without a cluster |
+| **WS6 · Phase-0 custody gates** (Master Prompt v3) | `lib/server/custody-phase.ts`: the custody package being configured is the Phase-2 switch. Until then a `STORED_BALANCE` or `SWEEP_ACCOUNT` delivery, a recipient set up for one, `/api/treasury`, and both treasury crons answer a plain, licence-named 403 (`custody_not_licensed`); the treasury page and the overview card say "Treasury arrives with our licence" and show no balance; the seeded demo transactions and balances are deleted; the copilot no longer reads the demo ledger or quotes a rate in Phase 0. `tests/phase0-custody-gate.test.mjs` (7) |
 
-**304 tests across eleven suites**, plus **107 Move tests** (68 `splash_core` +
+**311 tests across eleven suites**, plus **107 Move tests** (68 `splash_core` +
 23 `splash_meter` + 16 `splash_custody`) on Sui CLI 1.77.2. Five Move-invariant
 CI guards in `npm run lint` (`check:core`, `check:compliance`, `check:treasury`,
 `check:generations`, `check:aborts`), plus `check:copy` and `check:env`. Lint, `tsc` and the production build are clean.

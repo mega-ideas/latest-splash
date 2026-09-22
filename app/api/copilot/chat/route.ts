@@ -22,6 +22,7 @@ import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { readJsonBody } from '@/lib/server/http';
 import { getTreasuryRate } from '@/lib/server/usdy';
 import { getLedger } from '@/lib/server/treasury';
+import { CUSTODY_PHASE_REASON, custodyPhaseEnabled } from '@/lib/server/custody-phase';
 import { suggestTreasuryAction } from '@/lib/server/copilot';
 
 export const runtime = 'nodejs';
@@ -102,15 +103,21 @@ async function groundedReply(message: string, memories: RecalledMemory[]): Promi
   if (declined) return declined;
   if (smallTalk) return smallTalk.reply;
   if (TREASURY_KEYWORDS.some((k) => q.includes(k))) {
-    // Floating USDY rate + a data-grounded treasury suggestion from the live ledger.
-    const rate = getTreasuryRate();
-    const ledger = getLedger();
-    const suggestion = await suggestTreasuryAction(ledger.availableMicro / 1_000_000, 0);
-    base =
-      `Smart Treasury earns from Ondo USDY (T-bill backed): ${rate.label}` +
-      `${rate.introductory ? ' — introductory promo rate' : ''}.\n` +
-      'Your Available balance (USDC) stays 0% but instant; withdrawals back to Available take 1–3 business days.\n\n' +
-      `${suggestion.title}. ${suggestion.description}`;
+    if (!custodyPhaseEnabled()) {
+      // Phase 0: there is no treasury to allocate to, and the demo ledger must
+      // not be read as if there were. Say why, plainly.
+      base = `${CUSTODY_PHASE_REASON} Until then I can help with corridors, FX timing, batch payouts, or compliance.`;
+    } else {
+      // Floating USDY rate + a data-grounded treasury suggestion from the live ledger.
+      const rate = getTreasuryRate();
+      const ledger = getLedger();
+      const suggestion = await suggestTreasuryAction(ledger.availableMicro / 1_000_000, 0);
+      base =
+        `Smart Treasury earns from Ondo USDY (T-bill backed): ${rate.label}` +
+        `${rate.introductory ? ' — introductory promo rate' : ''}.\n` +
+        'Your Available balance (USDC) stays 0% but instant; withdrawals back to Available take 1–3 business days.\n\n' +
+        `${suggestion.title}. ${suggestion.description}`;
+    }
   } else {
     for (const { keywords, reply } of DOMAIN_RESPONSES) {
       if (keywords.some((k) => q.includes(k))) { base = reply; break; }
@@ -137,10 +144,12 @@ function buildSystemPrompt(memories: RecalledMemory[]): string {
     'Introduce yourself as 0xWal if asked your name. ' +
     'You help with corridors (PHP, MYR, IDR, SGD, VND, THB, EUR, GBP), FX timing, batch payouts, ' +
     'Smart Treasury, and compliance (KYB/AML/KYT). ' +
-    `Smart Treasury earns yield from Ondo USDY (T-bill backed) at ${rate.label} — this rate is VARIABLE, never fixed` +
-    `${rate.introductory ? ', currently an introductory promo' : ''}. ` +
-    'The Available balance is USDC at 0% but instant; withdrawals from Smart Treasury take T+1–T+3 business days. ' +
-    'Never describe the yield as fixed, and never call DeFi-lending yield "Treasury yield" (it is genuine T-bill yield via USDY). ' +
+    (custodyPhaseEnabled()
+      ? `Smart Treasury earns yield from Ondo USDY (T-bill backed) at ${rate.label} — this rate is VARIABLE, never fixed` +
+        `${rate.introductory ? ', currently an introductory promo' : ''}. ` +
+        'The Available balance is USDC at 0% but instant; withdrawals from Smart Treasury take T+1–T+3 business days. ' +
+        'Never describe the yield as fixed, and never call DeFi-lending yield "Treasury yield" (it is genuine T-bill yield via USDY). '
+      : `${CUSTODY_PHASE_REASON} If asked about treasury, yield, or balances held at Splash, say exactly that, and never quote a rate or a balance. `) +
     'Be concise, concrete, and action-oriented. You only suggest — the user must authorize any execution. ' +
     'Never invent account numbers or PII.\n\n' +
     'CONVERSATION STYLE — be a warm, personable desk assistant, not a rigid FAQ. ' +

@@ -27,6 +27,7 @@ import {
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { assertCleanBody, ProvenanceViolationError, provenanceViolationResponse } from '@/lib/auth/provenance-guard';
 import { requireActiveOrg } from '@/lib/server/kyb-gate';
+import { custodyPhaseResponse, deliveryTierAllowed } from '@/lib/server/custody-phase';
 import { checkMinimumSettlement } from '@/lib/policy/limits';
 import { checkAuthorizationLimits } from '@/lib/policy/authorization-limits';
 import { verifyPayoutTotp } from '@/lib/auth/totp';
@@ -93,6 +94,12 @@ export async function POST(request: Request) {
   const parsed = authorizeSchema.safeParse(rawBody);
   if (!parsed.success) return NextResponse.json({ error: 'Invalid transfer authorization' }, { status: 400 });
   const body = parsed.data;
+
+  // Phase 0 pays out. A STORED_BALANCE or SWEEP_ACCOUNT delivery holds the
+  // recipient's funds, which needs the custody package — and the licence
+  // behind it. Refused here, before a recipient or an intent exists.
+  if (!deliveryTierAllowed(body.deliveryTier)) return custodyPhaseResponse();
+
   const totp = String(body.totp ?? '');
   const paymentRail = String(body.paymentRail ?? 'STRIPE_CHECKOUT');
 

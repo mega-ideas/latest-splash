@@ -121,8 +121,12 @@ function TxPill({ status }: { status: TxStatus }) {
 
 export default function DashboardOverview() {
   const [corridors] = useState(INITIAL_CORRIDORS);
-  const [yieldEarned, setYield]   = useState(98.72);
-  const [treasuryPrincipal, setTreasuryPrincipal] = useState(24500);
+  // No number is shown until the ledger answers; the card used to render
+  // $24,500 and $98.72 from constants, and "+$3.22" a day from nowhere.
+  const [treasuryPhase, setTreasuryPhase] = useState<'loading' | 'gated' | 'live'>('loading');
+  const [yieldEarned, setYield]   = useState(0);
+  const [treasuryPrincipal, setTreasuryPrincipal] = useState(0);
+  const [treasuryApy, setTreasuryApy] = useState(0);
   const [walSummary, setWalSummary] = useState({ detected: 0, batchable: 0, needsApproval: 0 });
   const [treasuryRateLabel, setTreasuryRateLabel] = useState('USDY · variable');
 
@@ -130,12 +134,20 @@ export default function DashboardOverview() {
   useEffect(() => {
     let active = true;
     fetch('/api/treasury')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (!active || !d) return;
+      .then(async (r) => {
+        if (!active) return;
+        if (!r.ok) {
+          // Phase 0: the treasury is not a feature yet. Say when it arrives.
+          const body = await r.json().catch(() => ({}));
+          if (r.status === 403 && body?.code === 'custody_not_licensed') setTreasuryPhase('gated');
+          return;
+        }
+        const d = await r.json();
         if (typeof d.treasuryPrincipal === 'number') setTreasuryPrincipal(d.treasuryPrincipal);
         if (typeof d.treasuryYield === 'number') setYield(d.treasuryYield);
         if (d.rate?.label) setTreasuryRateLabel(d.rate.label);
+        if (typeof d.rate?.apy === 'number') setTreasuryApy(d.rate.apy);
+        setTreasuryPhase('live');
       })
       .catch(() => {});
     return () => { active = false; };
@@ -399,44 +411,61 @@ export default function DashboardOverview() {
                   <p className="text-[13px] text-[#326273]/50">Ondo USDY · simulation only</p>
                 </div>
               </div>
-              <span className="rounded-full bg-[#D9A441]/15 px-2 py-0.5 text-[13px] font-semibold text-[#9a6f15]">
-                {treasuryRateLabel}
-              </span>
-            </div>
-
-            <div className="mt-3">
-              <p className="text-[11px] uppercase tracking-wide text-[#326273]/45">Modeled allocation</p>
-              <p className="money mt-0.5 text-2xl font-medium text-[#1F4452]">${fmt(treasuryPrincipal)}</p>
-              <p className="money mt-1 flex items-center gap-1 text-[13px] font-medium text-[var(--ok)]">
-                <TrendingUp size={11} />
-                +${yieldEarned.toFixed(2)} modeled this month
-              </p>
-            </div>
-
-            <div className="mt-3 space-y-1 rounded-lg bg-white/70 p-3 text-[13px]">
-              <div className="flex items-center justify-between">
-                <span className="text-[#326273]/55">Modeled daily yield</span>
-                <span className="money font-medium text-[var(--ok)]">+$3.22</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-[#326273]/55">Status</span>
-                <span className="flex items-center gap-1 font-medium text-[var(--ok)]">
-                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--ok)]" />
-                  Approval gated
+              {treasuryPhase === 'live' ? (
+                <span className="rounded-full bg-[#D9A441]/15 px-2 py-0.5 text-[13px] font-semibold text-[#9a6f15]">
+                  {treasuryRateLabel}
                 </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-[#326273]/55">Protocol</span>
-                <span className="font-medium text-[#326273]">Ondo USDY · T-bill</span>
-              </div>
+              ) : null}
             </div>
+
+            {treasuryPhase === 'live' ? (
+              <>
+                <div className="mt-3">
+                  <p className="text-[11px] uppercase tracking-wide text-[#326273]/45">Modeled allocation</p>
+                  <p className="money mt-0.5 text-2xl font-medium text-[#1F4452]">${fmt(treasuryPrincipal)}</p>
+                  <p className="money mt-1 flex items-center gap-1 text-[13px] font-medium text-[var(--ok)]">
+                    <TrendingUp size={11} />
+                    +${yieldEarned.toFixed(2)} modeled this month
+                  </p>
+                </div>
+
+                <div className="mt-3 space-y-1 rounded-lg bg-white/70 p-3 text-[13px]">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[#326273]/55">Modeled daily yield</span>
+                    <span className="money font-medium text-[var(--ok)]">
+                      +${((treasuryPrincipal * treasuryApy) / 100 / 365).toFixed(2)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[#326273]/55">Status</span>
+                    <span className="flex items-center gap-1 font-medium text-[var(--ok)]">
+                      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--ok)]" />
+                      Approval gated
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[#326273]/55">Protocol</span>
+                    <span className="font-medium text-[#326273]">Ondo USDY · T-bill</span>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="mt-3 rounded-lg bg-white/70 p-3 text-[13px] leading-relaxed text-[#326273]/75">
+                <p className="font-semibold text-[#1F4452]">Treasury arrives with our licence</p>
+                <p className="mt-1">
+                  {treasuryPhase === 'gated'
+                    ? 'Holding funds is a Phase 2 capability that needs a money-broking licence Splash does not hold yet. Today Splash pays out only.'
+                    : 'Checking the ledger…'}
+                </p>
+              </div>
+            )}
 
             <div className="mt-3 flex gap-2">
               <Link
                 href="/dashboard/treasury"
                 className="flex-1 rounded-lg bg-[var(--ok)] py-1.5 text-center text-[13px] font-semibold text-white transition-colors hover:opacity-90"
               >
-                View projection
+                {treasuryPhase === 'live' ? 'View projection' : 'When it arrives'}
               </Link>
               <Link
                 href="/dashboard/treasury"
