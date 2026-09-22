@@ -97,16 +97,18 @@ test('X5 · a pre-registered address receives the grant meant for the mailbox ow
 
   // An administrator grants approver rights to the address they know.
   //
-  // RED (this commit): the grant goes through, and the approval authority
-  // lands on whoever holds the attacker's password. This test PASSES on the
-  // tree before the fix — that is the reproduction. The green commit flips
-  // it to expect `unverified_email`.
-  await grantRole(db, { email: VICTIM, orgId: 'acme', role: 'checker', grantedBy: STAFF });
+  // Before the fix this went through, and the approval authority landed on
+  // whoever held the attacker's password (the red commit asserted exactly
+  // that). Now the grant is refused: nobody has proven the mailbox.
+  await assert.rejects(
+    grantRole(db, { email: VICTIM, orgId: 'acme', role: 'checker', grantedBy: STAFF }),
+    (error) => error instanceof MembershipAdminError && error.code === 'unverified_email',
+    'a grant to an address nobody has proven must be refused',
+  );
 
-  const holder = await verifyAccountPassword(db, { email: VICTIM, password: ATTACKER_PASSWORD });
-  assert.ok(holder, 'the attacker still signs in with the password they chose');
-  const authority = await resolveAuthorityFromDb(db, VICTIM);
-  assert.equal(authority.role, 'APPROVER', 'and can now approve payments as the CFO');
+  // The attacker still signs in — and can approve nothing.
+  assert.ok(await verifyAccountPassword(db, { email: VICTIM, password: ATTACKER_PASSWORD }));
+  await assert.rejects(() => resolveAuthorityFromDb(db, VICTIM), UnauthorizedError);
 
   await client.close();
 });

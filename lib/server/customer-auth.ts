@@ -8,6 +8,7 @@ import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 
 import { customerRequestOriginAllowed } from '@/lib/auth/customer-request';
+import { sessionCredentialIsCurrent } from '@/lib/auth/accounts';
 import { isKilledEntityEmail } from '@/lib/auth/killed-entities';
 import {
   CUSTOMER_SESSION_COOKIE,
@@ -76,6 +77,7 @@ function sessionFromIdentity(input: {
   userRole?: CustomerWorkspaceRole;
   suiAddress?: string;
   orgId?: string;
+  credentialVersion?: number;
 }): CustomerSession {
   return createCustomerSessionFromIdentity({
     ...input,
@@ -100,7 +102,7 @@ function sessionFromIdentity(input: {
  * A session proves identity. It carries no role: authority is read from a
  * membership row on every request, so a session cannot be a stale grant.
  */
-export function sessionForAccount(account: { email: string; name?: string }): CustomerSession {
+export function sessionForAccount(account: { email: string; name?: string; credentialVersion: number }): CustomerSession {
   const email = account.email.trim().toLowerCase();
 
   // Wallet spec §2.4 — a killed entity must not bind in through the auth layer.
@@ -108,7 +110,9 @@ export function sessionForAccount(account: { email: string; name?: string }): Cu
     throw new Error('killed-entity domain');
   }
 
-  return sessionFromIdentity({ email });
+  // The version is what lets a verification or a reset end this session
+  // from the server side; a session minted without one is refused on read.
+  return sessionFromIdentity({ email, credentialVersion: account.credentialVersion });
 }
 
 /**
@@ -135,6 +139,19 @@ export async function getCustomerSession(): Promise<CustomerSession | null> {
   const lastSeen = session.lastSeenAt ? Date.parse(session.lastSeenAt) : undefined;
   const verdict = evaluateIdle(Number.isNaN(lastSeen as number) ? undefined : lastSeen);
   if (verdict.state === 'expired') return null;
+
+  // The session must have been minted under the account's current
+  // credentials. Verification and password reset bump the row's version, so
+  // a cookie an attacker held before the mailbox owner verified stops
+  // reading as a session at that moment — no session table, nothing to
+  // sweep. Without a database there is no row to compare against; the
+  // password route refuses to mint in that state, and a zkLogin session is
+  // accepted as-is because there is nothing it could be checked against.
+  if (process.env.DATABASE_URL) {
+    const { getDb } = await import('@/lib/db/client');
+    const current = await sessionCredentialIsCurrent(getDb() as never, session);
+    if (!current) return null;
+  }
 
   return session;
 }
@@ -185,6 +202,7 @@ export async function setCustomerSessionCookie(
     userRole: session.userRole,
     suiAddress: session.suiAddress,
     orgId: session.orgId,
+    credentialVersion: session.credentialVersion,
   });
   const cookieStore = await cookies();
 

@@ -8,7 +8,7 @@ import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 
 import * as schema from '../lib/db/schema.ts';
-import { createAccount, verifyAccountPassword, AccountExistsError } from '../lib/auth/accounts.ts';
+import { createAccount, markEmailVerified, verifyAccountPassword, AccountExistsError } from '../lib/auth/accounts.ts';
 import {
   UnauthorizedError,
   grantMembership,
@@ -104,6 +104,8 @@ test('authority appears only when a membership is granted, and follows the grant
   await createAccount(db, { email, password: PASSWORD });
   await assert.rejects(() => resolveAuthorityFromDb(db, email), UnauthorizedError);
 
+  // A grant requires a proven mailbox (WS1, X5); the link stands in here.
+  await markEmailVerified(db, email);
   await grantMembership(db, { email, orgId: 'demo-business', role: 'maker' });
   const asMaker = await resolveAuthorityFromDb(db, email);
   assert.equal(asMaker.role, 'MAKER');

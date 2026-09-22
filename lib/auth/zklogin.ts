@@ -34,6 +34,10 @@ export type ZkLoginClaims = {
   sub: string;
   aud: string;
   email?: string;
+  /** True only when the token carries the boolean claim `email_verified: true`.
+   *  Absent, false, or the string "true" are all false: the account is not
+   *  marked verified on a guess. */
+  emailVerified: boolean;
   nonce?: string;
   exp: number;
   iat: number;
@@ -107,6 +111,16 @@ function requireNumber(source: Record<string, unknown>, key: string): number {
     throw new ZkLoginVerificationError('missing_claim', `${key} claim is missing or not a number`);
   }
   return value;
+}
+
+/**
+ * The OIDC `email_verified` claim, read strictly. Google sends a boolean;
+ * Microsoft does not send it at all; nobody's string "true" counts. This is
+ * what decides whether a zkLogin sign-in marks the mailbox proven — the same
+ * fact a delivered link proves — so it must not be inferred.
+ */
+export function readEmailVerifiedClaim(payload: Record<string, unknown>): boolean {
+  return payload.email_verified === true;
 }
 
 // ── JWKS ────────────────────────────────────────────────────────────────────
@@ -245,6 +259,7 @@ export async function verifyZkLoginJwt(input: VerifyZkLoginInput): Promise<ZkLog
     sub,
     aud,
     email: typeof payload.email === 'string' ? payload.email : undefined,
+    emailVerified: readEmailVerifiedClaim(payload),
     nonce,
     exp,
     iat,

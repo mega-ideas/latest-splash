@@ -7,6 +7,7 @@ import { drizzle } from 'drizzle-orm/pglite';
 import { eq } from 'drizzle-orm';
 
 import * as schema from '../lib/db/schema.ts';
+import { createAccount, markEmailVerified } from '../lib/auth/accounts.ts';
 import {
   grantMembership,
   resolveAuthorityFromDb,
@@ -167,6 +168,9 @@ test('14.12 session authority — role is provably DB-derived and re-read on eve
   // No membership row → unauthorized, not a permissive default.
   await assert.rejects(() => resolveAuthorityFromDb(db, email), UnauthorizedError);
 
+  // A grant now requires an account with a proven mailbox (WS1, X5).
+  await createAccount(db, { email, password: 'correct-horse-battery-staple-9', name: 'Ops' });
+  await markEmailVerified(db, email);
   await grantMembership(db, { email, orgId: 'demo-business', role: 'maker' });
   const asMaker = await resolveAuthorityFromDb(db, email);
   assert.equal(asMaker.role, 'MAKER');
@@ -184,6 +188,8 @@ test('14.12 session authority — role is provably DB-derived and re-read on eve
 
 test('14.12 session authority — the org policy record round-trips through the database', async () => {
   const { client, db } = await migratedDb();
+  await createAccount(db, { email: 'ops@splash.finance', password: 'correct-horse-battery-staple-9', name: 'Ops' });
+  await markEmailVerified(db, 'ops@splash.finance');
   await grantMembership(db, { email: 'ops@splash.finance', orgId: 'demo-business', role: 'checker' });
   const first = await resolveAuthorityFromDb(db, 'ops@splash.finance');
   const again = await resolveAuthorityFromDb(db, 'ops@splash.finance');

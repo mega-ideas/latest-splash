@@ -30,6 +30,32 @@ The remaining four modules (`smart_treasury`, `payment_intent`, `audit_anchor`, 
 
 ---
 
+## WS1 — account pre-hijacking (X5) — 2026-09-23
+
+**Scope**: the account lifecycle from signup to grant, on the application
+tier. Reproduced first as a test that passed on the tree before the fix
+(`tests/account-verification.test.mjs`, red commit `9edda4a`), then closed
+as one unit — refusing grants to unverified accounts without delivery would
+have blocked every onboarding.
+
+| ID | Sev | Finding | Status |
+|----|-----|---------|--------|
+| X5 | High | Signup never proved the mailbox — `lib/auth/accounts.ts` shipped `markEmailVerified` with no caller and a comment saying delivery was not built — and `grantRole` / `grantMembership` only required that a row exist. An attacker who registered `cfo@victim.example` first received the approver grant the administrator later made to that address; the real CFO's own signup answered 201 and changed nothing. **Fixed**: (1) a delivered, single-use, hashed, 30-minute token (`lib/auth/email-verification.ts`; table `email_verification_tokens`, migration `0006`); (2) a transport production cannot leave unset — `EMAIL_TRANSPORT=resend`; `console` is refused by `lib/env.ts` in production; (3) the mailbox owner wins: opening the link *sets* the password rather than confirming the one on file, so a pre-registered password stops working at that moment; (4) `users.credential_version`, carried in the session cookie and re-read by every `getCustomerSession()`, so every session minted before the verification is refused afterwards; (5) both grant paths refuse `email_verified_at IS NULL` with an operator-facing `unverified_email`, and `grantMembership` no longer inserts a password-less user on the way to granting; (6) zkLogin marks an address proven only when the token carries the boolean claim `email_verified: true`; (7) signup, resend, recovery and both link-consuming routes are rate limited per address and per network in Postgres (`lib/server/rate-limit.ts`, table `rate_limit_hits`); (8) `/forgot-password` is a real reset on the same primitive, with the same three consequences. | Fixed |
+
+**What it does not do.** An account can still be *created* for any address,
+and the 201 stays uniform so signup is not an enumeration oracle. What
+changed is that creating one earns nothing until the mailbox answers, and
+keeps nothing once it does.
+
+**Operator notes.** `EMAIL_TRANSPORT`, `EMAIL_API_KEY` and `EMAIL_FROM` are
+declared in `lib/env.ts` and `.env.example`. The staff console's grant now
+fails with `unverified_email` for an unproven address; the person has to open
+their link (or request a new one from `/verify-email`) first.
+`scripts/dev-db.mjs` seeds verified accounts, except Lin, who is left
+unverified on purpose so the refusal can be seen.
+
+---
+
 ## Re-audit pass — 2026-07-13
 
 **Scope**: all 9 modules under `move/sources/` at HEAD. Methodology: OtterSec

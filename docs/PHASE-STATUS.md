@@ -22,8 +22,9 @@ message; nothing is squashed.
 | **6 · Move authority** | `BusinessAccount` is shared and holds `owners` / `approvers` / two freeze flags / `recovery_party` / `authority_epoch`; four eyes and revoke-then-regrant enforced on chain; `mint_attestation_cap` deleted; 24h per-account ceiling (`daily_limit`); `ComplianceCap` subtractive by type; `TreasuryCap` split out of `AdminCap`; two CI guards; adversarial pass |
 | **7 · Break-glass** | `CapRegistry` + per-capability generations: a lost or stolen `AnchorCap` / `ComplianceCap` is killed on chain by a generation bump that mints its replacement in the same transaction. No timelock, and the module argues why. `check-cap-generations.mjs` fails the build if any consumer forgets the check |
 | **Membership admin** (not a numbered phase) | `/admin/memberships` — the operator surface for the grant Phase 3 removed. One grant path, no default role, no account creation from the form, and the two money-moving roles say so at the point of granting. `scripts/dev-db.mjs` runs it locally without a cluster |
+| **WS1 · Account verification** (Master Prompt v3, X5) | The pre-hijack closed as one unit: delivered single-use tokens (`email_verification_tokens`, migration `0006`), `EMAIL_TRANSPORT` that production cannot leave on `console`, the mailbox owner *sets* the password when the link is opened, `users.credential_version` in the session cookie ends every earlier session, both grant paths refuse an unverified address, zkLogin honours only a boolean `email_verified`, generic Postgres rate limits (`lib/server/rate-limit.ts`), and a real password reset. New pages `/verify-email` and `/reset-password`; `tests/account-verification.test.mjs` (16) |
 
-**304 tests across eleven suites**, plus **107 Move tests** (68 `splash_core` +
+**320 tests across eleven suites**, plus **107 Move tests** (68 `splash_core` +
 23 `splash_meter` + 16 `splash_custody`) on Sui CLI 1.77.2. Five Move-invariant
 CI guards in `npm run lint` (`check:core`, `check:compliance`, `check:treasury`,
 `check:generations`, `check:aborts`), plus `check:copy` and `check:env`. Lint, `tsc` and the production build are clean.

@@ -3,6 +3,7 @@ import {
   bigint,
   boolean,
   index,
+  integer,
   jsonb,
   numeric,
   pgEnum,
@@ -88,9 +89,61 @@ export const users = pgTable('users', {
   /** Null until the address is proven. Not a boolean: when it happened is the
    *  auditable fact, and `true` cannot answer that. */
   emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
+  /**
+   * Bumped whenever the credentials that mint a session change: a password
+   * set through verification or reset, and the verification itself. A
+   * session carries the version it was minted under, and a reader that finds
+   * a different number treats the session as absent. That is how "the
+   * mailbox owner verifies and every earlier session dies" is enforced
+   * without a session table to sweep.
+   */
+  credentialVersion: integer('credential_version').notNull().default(1),
   ...timestamps,
 }, (table) => [
   uniqueIndex('users_email_unique').on(table.email),
+]);
+
+/**
+ * Single-use, hashed, expiring tokens that prove a mailbox.
+ *
+ * Only the SHA-256 of the token is stored; the token itself exists in the
+ * link and nowhere else, so a copy of this table cannot be turned into
+ * links. `purpose` says what opening the link earns — `verify_email` or
+ * `reset_password` — and lib/auth/email-verification.ts is the authority on
+ * the values; a token issued for one purpose is refused for the other.
+ * `used_at` makes each row single use: consuming a token is one UPDATE that
+ * both checks and sets it, so two requests racing on the same link cannot
+ * both win.
+ */
+export const emailVerificationTokens = pgTable('email_verification_tokens', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  tokenHash: text('token_hash').notNull(),
+  purpose: text('purpose').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  usedAt: timestamp('used_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex('email_verification_tokens_hash_unique').on(table.tokenHash),
+  index('email_verification_tokens_user_idx').on(table.userId),
+]);
+
+/**
+ * Hits against a named rate-limit bucket, for lib/server/rate-limit.ts.
+ *
+ * The same shape as `login_attempts`, generalised: `bucket` names the rule
+ * (`signup:ip`, `verify-resend:email`, …) and `key` is the thing being
+ * limited within it. In Postgres, not Redis, for the reason login_attempts
+ * gives — a limit that evaporates when a cache restarts is a pause, not a
+ * limit. Rows are pruned by the limiter as it reads them.
+ */
+export const rateLimitHits = pgTable('rate_limit_hits', {
+  id: text('id').primaryKey(),
+  bucket: text('bucket').notNull(),
+  key: text('key').notNull(),
+  hitAt: timestamp('hit_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index('rate_limit_hits_bucket_key_idx').on(table.bucket, table.key, table.hitAt),
 ]);
 
 /**

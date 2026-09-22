@@ -37,7 +37,7 @@ export default function ForgotPasswordPage() {
       }
 
       setRecovery(body);
-      toast.success('Recovery instructions ready');
+      toast.success('Check your inbox');
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : 'Recovery instructions are unavailable. Try again or contact support.';
       setError(message);
@@ -50,10 +50,10 @@ export default function ForgotPasswordPage() {
   return (
     <IsometricAuthShell
       eyebrow="Account recovery"
-      title={recovery ? 'Verify through support.' : 'Recover workspace access.'}
+      title={recovery ? 'Check your inbox.' : 'Reset your password.'}
       description={recovery
-        ? 'For treasury safety, workspace recovery is handled by verified support instead of an automated reset link.'
-        : 'Enter your business email and we will show the secure recovery path for your workspace.'}
+        ? 'If that address has an account, a reset link is on its way. It expires in 30 minutes, and opening it ends every session that is signed in now.'
+        : 'Enter your business email and we will send a link to choose a new password.'}
       art="/isometric/treasury.svg"
       artAlt="Isometric smart treasury"
       visualTitle="Secure by default"
@@ -62,11 +62,11 @@ export default function ForgotPasswordPage() {
       {recovery ? (
         <section className="iso-auth-success">
           <CheckCircle2 aria-hidden="true" />
-          <h2>Recovery instructions ready</h2>
+          <h2>Check your inbox</h2>
           <p>{recovery.message}</p>
           {recovery.recoveryEmail ? (
             <Link href={`mailto:${recovery.recoveryEmail}?subject=Splash workspace recovery&body=Business email: ${encodeURIComponent(email)}`}>
-              Contact {recovery.recoveryEmail}
+              Lost the mailbox too? Contact {recovery.recoveryEmail}
             </Link>
           ) : null}
           <button type="button" onClick={() => { setRecovery(null); setError(''); }}>
@@ -91,7 +91,7 @@ export default function ForgotPasswordPage() {
             </div>
           </label>
           <button type="submit" disabled={!email.includes('@') || submitting} className="iso-auth-submit">
-            {submitting ? 'Checking recovery path...' : 'Show recovery path'}
+            {submitting ? 'Sending link...' : 'Email me a reset link'}
             {!submitting ? <ArrowRight aria-hidden="true" /> : null}
           </button>
           {error ? <p className="iso-auth-error" role="alert">{error}</p> : null}
@@ -99,8 +99,8 @@ export default function ForgotPasswordPage() {
       )}
 
       <div className="iso-auth-help">
-        <strong>Still locked out?</strong>
-        <span>Contact support after verifying your business identity.</span>
+        <strong>No email after a few minutes?</strong>
+        <span>Check spam, then request another link. Links work once and for 30 minutes.</span>
       </div>
 
       <p className="iso-auth-switch">
