@@ -4,6 +4,7 @@ import { z } from 'zod';
 
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { readJsonBody } from '@/lib/server/http';
+import { RATE_LIMITS, enforceRateLimit } from '@/lib/server/rate-limit';
 import { createInvoice, listInvoices } from '@/lib/server/operations';
 import { sealAdapter } from '@/lib/server/seal';
 import { storeEncryptedInvoice, WalrusAdapterError } from '@/lib/server/walrus';
@@ -29,6 +30,11 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const auth = await requireCustomerRequest(request);
   if (auth.response) return auth.response;
+
+  // Each invoice is a store write and, with a document, a Seal + Walrus
+  // round trip: bounded per user.
+  const limited = await enforceRateLimit({ rule: RATE_LIMITS.invoiceCreateUser, key: auth.session.email });
+  if (limited) return limited;
 
   const parsed = createInvoiceSchema.safeParse(await readJsonBody(request));
   if (!parsed.success) {

@@ -30,6 +30,24 @@ The remaining four modules (`smart_treasury`, `payment_intent`, `audit_anchor`, 
 
 ---
 
+## WS7 — rate limits and security headers — 2026-09-23
+
+**Scope**: the browser boundary and every route that spends something.
+Reproduced first as ten tests that fail on the tree before the fix
+(`tests/rate-limits-and-headers.test.mjs`, red commit `190a742`), then closed
+(`8dbdc59`).
+
+| ID | Sev | Finding | Status |
+|----|-----|---------|--------|
+| WS7-1 | High | No Content-Security-Policy anywhere, so any injected inline script ran, and no `frame-ancestors`, so the approval screens could be framed. **Fixed**: `lib/security/csp.ts` builds the policy around a nonce that `proxy.ts` mints per page request from the CSPRNG — `script-src 'self' 'nonce-…' 'strict-dynamic'`, never `'unsafe-inline'` or `'unsafe-eval'` in production; `frame-ancestors 'none'`; `object-src 'none'`; `base-uri` and `form-action 'self'`; the only third party allowed is Sumsub (a frame and its API), for KYB. The policy rides the request (`x-nonce` and the header Next reads to nonce its own scripts) and the response. Because a nonce cannot be prerendered, `app/layout.tsx` renders every page per request — the marketing pages lose static prerendering, deliberately. Styles keep `'unsafe-inline'`: React `style={{}}` props render as inline style attributes across the app, and scripts are the surface that matters. | Fixed |
+| WS7-2 | Medium | No HSTS, no `nosniff`, no referrer policy, no frame header. **Fixed**: `next.config.ts` `headers()` sets five on every response, API routes included — `Strict-Transport-Security: max-age=63072000; includeSubDomains; preload`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `X-Frame-Options: DENY`, and a `Permissions-Policy` that leaves only the camera and microphone on, for the Sumsub flow. `lib/security/headers.ts` is the single list the config and the test both read. | Fixed |
+| WS7-3 | High | The public pay link (marks an invoice paid and creates a recipient), the four `/api/copilot/*` routes (chat spends model credits per message; extraction feeds a document to the model), `/api/seal/access` (a key-server round trip), invoice creation and recipient creation had no limit of any kind. **Fixed**: `enforceRateLimit` in `lib/server/rate-limit.ts` in front of each, per user and/or per network, with the rules named in `RATE_LIMITS`. Without a database on a development machine the limits are skipped once, loudly; production cannot boot without one (`lib/env.ts`). | Fixed |
+| WS7-4 | Low | The login limiter was a second implementation on its own `login_attempts` table. **Fixed**: `lib/auth/login-rate-limit.ts` is now a thin layer over the one limiter — failures count, a success clears — with its public API unchanged. `login_attempts` is legacy, no longer written, and waits for a drop migration. | Fixed |
+
+**What it does not do.** The CSP allows inline *styles*; a hash-per-prop policy is not practical here. The rate limits are per address and per network, not per organisation; the tenant key arrives with the tenant-isolation patch. The public pay link still marks an invoice paid on the caller's word alone — that is a WS2/WS8 concern recorded in the report, not a limit problem.
+
+---
+
 ## WS1 — account pre-hijacking (X5) — 2026-09-23
 
 **Scope**: the account lifecycle from signup to grant, on the application

@@ -173,12 +173,10 @@ export const memberships = pgTable('memberships', {
 ]);
 
 /**
- * Failed login attempts, for the rate limit.
- *
- * Postgres rather than Redis: Redis is cache-only here by rule, and a lockout
- * that evaporates when the cache restarts is not a lockout. Rows are pruned by
- * the limiter as it reads them, so the table stays small without a separate
- * job.
+ * LEGACY — no longer written. Failed login attempts used to live here; the
+ * login limiter now rides `rate_limit_hits` like every other limit (WS7). The
+ * table stays until a migration drops it, so an in-flight deploy that still
+ * runs the old code does not fail on a missing relation.
  */
 export const loginAttempts = pgTable('login_attempts', {
   id: text('id').primaryKey(),

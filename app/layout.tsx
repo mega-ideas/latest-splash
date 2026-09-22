@@ -4,6 +4,16 @@ import "./globals.css";
 
 import { Providers } from "./providers";
 
+/**
+ * Every page renders per request. The Content-Security-Policy carries a
+ * nonce minted in proxy.ts for that request, and Next applies it to its
+ * scripts during server rendering — a prerendered page would ship without
+ * it, and its scripts would be refused by the very policy meant to protect
+ * it. The cost is no static prerendering of the marketing pages, accepted
+ * deliberately: a fintech app's pages are not the kind that need a CDN copy.
+ */
+export const dynamic = 'force-dynamic';
+
 const fontSans = Geist({
   variable: "--font-sans",
   subsets: ["latin"],
