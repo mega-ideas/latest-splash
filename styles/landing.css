@@ -417,8 +417,8 @@
 
 .ld-calc-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: var(--s3) var(--s4);
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--s2) var(--s4);
   padding: var(--s4);
   border: 1px solid var(--line);
   border-radius: var(--r-md);
@@ -442,7 +442,22 @@
 }
 
 .ld-calc-cost {
-  text-align: right;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--s2);
+}
+/* Two columns only once the row is wide enough for the cost to sit beside the
+   description without squeezing it to a word a line. */
+@media (min-width: 480px) {
+  .ld-calc-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: var(--s3) var(--s4);
+  }
+  .ld-calc-cost {
+    display: block;
+    text-align: right;
+  }
 }
 
 .ld-calc-cost strong {
