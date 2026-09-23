@@ -99,7 +99,7 @@ export async function POST(request: Request) {
     if (error instanceof ProvenanceViolationError) return provenanceViolationResponse(error);
     throw error;
   }
-  const gate = await requireActiveOrg(auth.session);
+  const gate = await requireActiveOrg(auth.session, { lane: 'TREASURY' });
   if (gate.response) return gate.response;
 
   // Scoped to the caller's org. `getLedger()` with no argument defaults to a

@@ -139,6 +139,16 @@ export const envSchema = z.object({
   USDT_BUFFER_ID: objectId,
   TREASURY_ADDRESS: suiAddress,
   OPERATOR_SUI_ADDRESS: suiAddress,
+  /** The stablecoin lane's fee destinations — Splash-controlled Sui addresses
+   *  that receive the 0.80% in the same transaction as the payment. Unset on a
+   *  network means that network's lane quotes nothing: a real fee must have a
+   *  real, named destination. Never defaulted. */
+  SPLASH_FEE_ADDRESS_MAINNET: suiAddress,
+  SPLASH_FEE_ADDRESS_TESTNET: suiAddress,
+  /** Chainalysis's free sanctions-screening API. Unset: wallet recipients
+   *  are saved unscreened, and reach mainnet only through a named admin's
+   *  attestation (lib/server/wallet-screening.ts). */
+  CHAINALYSIS_SANCTIONS_API_KEY: opt(str.min(8)),
   MIN_USDC_FLOAT_MICRO: int(0),
   SPLASH_SETTLEMENT_COIN_TYPE: coinType,
   SPLASH_PEG_USDC_DEVIATION_PPM: int(0),

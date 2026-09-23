@@ -7,7 +7,7 @@ import { getCorridorFeeBps } from '@/lib/fx/corridors';
 import type { RecipientTier } from '@/lib/server/operations';
 
 const options: Array<{ tier: RecipientTier; icon: typeof Building2; title: string; body: (currency: string) => string; eta: string }> = [
-  { tier: 'PAYOUT_ONLY', icon: Building2, title: 'Bank payout', body: (currency) => `Recipient gets ${currency} in their own bank. No account needed.`, eta: '3–20 min' },
+  { tier: 'PAYOUT_ONLY', icon: Building2, title: 'Direct to business bank account / crypto wallet', body: (currency) => `Bank: they receive ${currency} in their business account. Wallet: USDC on Sui lands in their Slush or MetaMask (Sui Snap) wallet.`, eta: '3–20 min' },
   { tier: 'SWEEP_ACCOUNT', icon: Zap, title: 'Splash receive account (auto-sweep)', body: () => 'Account experience; funds sweep to their bank in seconds.', eta: '≈5 s receive + sweep' },
   { tier: 'STORED_BALANCE', icon: Landmark, title: 'Splash balance', body: () => 'Funds stay as USD. Instant. Re-spendable in-network.', eta: 'Instant' },
 ];

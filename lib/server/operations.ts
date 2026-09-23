@@ -143,6 +143,14 @@ export type RecipientRecord = {
     sweepDelaySeconds: number;
   };
   kybInviteSent?: boolean;
+  /** BANK (local currency via a partner rail) or WALLET (USDC on Sui). */
+  payoutMethod?: 'BANK' | 'WALLET';
+  /** Lower-cased Sui address; set only for WALLET recipients. */
+  walletAddress?: string;
+  /** 'SLUSH' | 'METAMASK_SUI_SNAP'. */
+  walletProvider?: string;
+  /** Sanctions screening outcome; null/absent = never screened. */
+  screeningVerdict?: string | null;
   /**
    * The FATF R.16 beneficiary half.
    *
@@ -537,6 +545,9 @@ export function buildRecipient(input: {
   sweepConfig?: RecipientRecord['sweepConfig'];
   kybInviteSent?: boolean;
   demo?: boolean;
+  payoutMethod?: 'BANK' | 'WALLET';
+  walletAddress?: string;
+  walletProvider?: string;
 }): RecipientRecord {
   const record: RecipientRecord = {
     id: createId('rcpt'),
@@ -554,6 +565,9 @@ export function buildRecipient(input: {
     kybInviteSent: input.kybInviteSent,
     travelRule: input.travelRule,
     demo: input.demo,
+    payoutMethod: input.payoutMethod ?? 'BANK',
+    walletAddress: input.walletAddress,
+    walletProvider: input.walletProvider,
     createdAt: new Date().toISOString(),
   };
   return record;

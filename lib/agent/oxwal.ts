@@ -5,6 +5,16 @@ import { copilotModel } from '../ai/model.ts';
 import { findSavedRecipient, listSavedRecipients } from './recipient-tools.ts';
 import { prepareBeneficiaryFromInvoice } from './invoice-intake.ts';
 import {
+  assertZekeLane,
+  classifyLaneIntent,
+  formatUsdcAllowance,
+  laneRefusalText,
+  ZekeLaneRefusal,
+  zekeLaneState,
+} from './zeke-lane-guard.ts';
+import { isOnboarding, laneAccess } from '../payments/stablecoin-lane.ts';
+import type { KybLifecycleState } from '../compliance/kyb-state.ts';
+import {
   DEFAULT_ASSISTANT_NAME,
   recallAssistantName,
   rememberAssistantName,
@@ -43,6 +53,9 @@ export type OxwalAgentRequest = {
   actorId?: string;
   history?: OxwalChatTurn[];
   forceLocal?: boolean;
+  /** The org's verification state, when the caller already holds it. Server-
+   *  derived only — the route never takes it from a request body. */
+  kybState?: KybLifecycleState;
 };
 
 export type TrustedValue<T> = {
@@ -52,7 +65,7 @@ export type TrustedValue<T> = {
 };
 
 export type OxwalWarning = {
-  code: 'UNTRUSTED_INSTRUCTION' | 'UNVERIFIED_DESTINATION' | 'TOOL_ERROR';
+  code: 'UNTRUSTED_INSTRUCTION' | 'UNVERIFIED_DESTINATION' | 'TOOL_ERROR' | 'LANE_LOCKED';
   message: string;
   ref?: string;
 };
@@ -167,6 +180,11 @@ export const OXWAL_SYSTEM_PROMPT = [
   'When a user sends an invoice for a company you have no record of, call proposeRecipientFromInvoice with everything you can read off it.',
   'That tool PROPOSES. It does not save. Show what you extracted, say where each field came from, and ask the user to confirm before anything is added.',
   'When it returns NEEDS_MORE, ask for the missing field it names and say why that corridor asks. Ask for one or two things at a time, never a list of nine.',
+
+  // What an unverified business may do.
+  'A business that has not finished verification can send USDC on Sui to wallet recipients it has saved, up to 5,000 USDC in any 30 days shared with x402 payments. USD in, local-currency payouts, USD-to-local conversion and Treasury stay locked until it is verified.',
+  'When a propose tool refuses with a lane message, relay that message as written. Do not soften it, suggest a workaround, or offer to prepare the payment in another currency or through another route.',
+  'You cannot send a wallet transfer yourself: the business signs it in its own wallet on the Send screen. For a wallet recipient, say that and point there.',
 
   // Your name.
   'If a user asks you to go by a different name, call setAssistantName. It is cosmetic and changes nothing about what you can do.',
@@ -900,6 +918,10 @@ export async function proposePayment(input: unknown): Promise<UnsignedProposal> 
   const minimum = checkMinimumSettlement(amountUsd, 'transfer');
   if (!minimum.ok) throw new Error(minimum.message);
   const currency = requireString(object, 'currency').toUpperCase();
+  // USD in, `currency` out through a corridor partner: the fiat lane, whatever
+  // the currency. The invoice-loop path reaches here with the invoice's own
+  // target currency, which the operator may never have typed.
+  if (currency !== 'USDC') await assertZekeLane(orgId, 'FIAT_OUT_LOCAL', currency);
   const invoiceId = optionalString(object, 'invoiceId');
   const invoice = invoiceId ? getInvoice({ id: invoiceId }) : undefined;
   const corridor = optionalString(object, 'corridor') ?? `USD_${currency}`;
@@ -965,6 +987,7 @@ export /**
 async function proposeX402Payment(input: unknown): Promise<UnsignedProposal> {
   const object = objectInput(input);
   const orgId = requireString(object, 'orgId');
+  await assertZekeLane(orgId, 'X402');
   const challenge = parseX402Challenge(object.challenge);
   const index = typeof object.requirementIndex === 'number' ? object.requirementIndex : 0;
   const req = challenge.requirements[index];
@@ -993,6 +1016,7 @@ async function proposeFxConvert(input: unknown): Promise<UnsignedProposal> {
   const amountUsd = requireAmount(object, 'amountUsd');
   const currencyOut = requireString(object, 'currencyOut').toUpperCase();
   if (currencyOut === 'USD') throw new Error('MYR to USD and non-USD to USD conversion are out of scope for v1');
+  await assertZekeLane(orgId, 'FIAT_OUT_LOCAL', currencyOut);
   const fx = resolveCorridorFx(currencyOut);
   const targetAmount = fx ? amountUsd * fx.rate : amountUsd;
   return createDraftProposal({
@@ -1019,6 +1043,7 @@ export async function proposeTreasuryAllocation(input: unknown): Promise<Unsigne
   const orgId = requireString(object, 'orgId');
   const amountUsd = requireAmount(object, 'amountUsd');
   const corridor = requireString(object, 'corridor').toUpperCase();
+  await assertZekeLane(orgId, 'TREASURY');
   return createDraftProposal({
     keyParts: ['TREASURY_ALLOCATE', orgId, amountUsd, corridor],
     kind: 'TREASURY_ALLOCATE',
@@ -1039,6 +1064,7 @@ export async function proposeTreasuryRedeem(input: unknown): Promise<UnsignedPro
   const object = objectInput(input);
   const orgId = requireString(object, 'orgId');
   const amountUsd = requireAmount(object, 'amountUsd');
+  await assertZekeLane(orgId, 'TREASURY');
   return createDraftProposal({
     keyParts: ['TREASURY_REDEEM', orgId, amountUsd],
     kind: 'TREASURY_REDEEM',
@@ -1057,6 +1083,8 @@ export async function proposeNettingSettlement(input: unknown): Promise<Unsigned
   const orgId = requireString(object, 'orgId');
   const amountUsd = requireAmount(object, 'amountUsd');
   const corridor = requireString(object, 'corridor').toUpperCase();
+  // Netting settles corridor legs through the partners, in their currencies.
+  await assertZekeLane(orgId, 'FIAT_OUT_LOCAL');
   const ids = object.counterpartyIds;
   if (!Array.isArray(ids) || ids.some((id) => typeof id !== 'string')) {
     throw new Error('counterpartyIds must be verified Counterparty.id values');
@@ -1093,6 +1121,8 @@ export async function proposeBatchPayout(input: unknown): Promise<UnsignedPropos
     getCounterparty({ id: counterpartyId });
     counterpartyIds.push(counterpartyId);
     totalUsd += requireAmount(item, 'amountUsd');
+    const currency = typeof item.currency === 'string' ? item.currency.toUpperCase() : '';
+    if (currency !== 'USDC') await assertZekeLane(orgId, 'FIAT_OUT_LOCAL', currency || null);
   }
   // The floor applies to the batch TOTAL, not per row.
   const batchMinimum = checkMinimumSettlement(totalUsd, 'batch');
@@ -1410,14 +1440,22 @@ async function* runLocalPlanner(request: OxwalAgentRequest): AsyncGenerator<Oxwa
     yield { type: 'tool', name: 'getCounterparty', category: 'READ' };
     const amountUsd = extractAmountUsd(message, invoice);
     yield { type: 'tool', name: 'proposePayment', category: 'PROPOSE' };
-    const proposal = await proposePayment({
-      orgId,
-      counterpartyId,
-      amountUsd,
-      currency: invoice?.targetCurrency ?? 'PHP',
-      invoiceId: invoice?.id,
-      corridor: 'MY_PH',
-    });
+    let proposal: UnsignedProposal;
+    try {
+      proposal = await proposePayment({
+        orgId,
+        counterpartyId,
+        amountUsd,
+        currency: invoice?.targetCurrency ?? 'PHP',
+        invoiceId: invoice?.id,
+        corridor: 'MY_PH',
+      });
+    } catch (error) {
+      if (!(error instanceof ZekeLaneRefusal)) throw error;
+      yield { type: 'warning', warning: { code: 'LANE_LOCKED', message: error.message } };
+      for (const token of tokens(error.message)) yield { type: 'delta', text: token };
+      return;
+    }
     yield { type: 'proposal', proposal };
     const reply = 'I drafted an unsigned payment proposal. It is not executable until policy evaluation passes and a human signs the transaction bytes.';
     for (const token of tokens(reply)) yield { type: 'delta', text: token };
@@ -1427,7 +1465,15 @@ async function* runLocalPlanner(request: OxwalAgentRequest): AsyncGenerator<Oxwa
   if (/\b(treasury|yield|idle|allocate|sweep)\b/i.test(message)) {
     yield { type: 'tool', name: 'getTreasuryState', category: 'READ' };
     yield { type: 'tool', name: 'proposeTreasuryAllocation', category: 'PROPOSE' };
-    const proposal = await proposeTreasuryAllocation({ orgId, amountUsd: 2500, corridor: 'MY_PH' });
+    let proposal: UnsignedProposal;
+    try {
+      proposal = await proposeTreasuryAllocation({ orgId, amountUsd: 2500, corridor: 'MY_PH' });
+    } catch (error) {
+      if (!(error instanceof ZekeLaneRefusal)) throw error;
+      yield { type: 'warning', warning: { code: 'LANE_LOCKED', message: error.message } };
+      for (const token of tokens(error.message)) yield { type: 'delta', text: token };
+      return;
+    }
     yield { type: 'proposal', proposal };
     const reply = 'I drafted a reversible treasury allocation proposal. The policy engine still decides whether this can be auto-executed.';
     for (const token of tokens(reply)) yield { type: 'delta', text: token };
@@ -1898,6 +1944,17 @@ export async function* runOxwalAgent(request: OxwalAgentRequest): AsyncGenerator
 
   let answeredBy: OxwalAnswerSource = useLocal ? 'local' : 'claude';
 
+  // A locked lane is refused here, before the model, in fixed words. The
+  // propose tools refuse again underneath (an invoice names its currency even
+  // when the operator does not), so this is the early answer, not the only one.
+  const refusal = request.orgId ? await laneRefusalFor(request.orgId, request.message, request.kybState) : null;
+  if (refusal) {
+    yield { type: 'warning', warning: { code: 'LANE_LOCKED', message: refusal } };
+    for (const token of tokens(refusal)) yield { type: 'delta', text: token };
+    yield { type: 'done', source: 'scripted' };
+    return;
+  }
+
   // Deterministic demo intents answer instantly, before the model.
   const scripted = matchDemoScript(request.message.trim());
   if (scripted) {
@@ -1929,6 +1986,31 @@ export async function* runOxwalAgent(request: OxwalAgentRequest): AsyncGenerator
   }
 
   yield { type: 'done', source: answeredBy };
+}
+
+/**
+ * The refusal for a message that asks for a lane this org cannot use, or null.
+ * An onboarding business also hears how much of its wallet allowance is left —
+ * a fact from the outflow ledger, omitted rather than guessed when the ledger
+ * cannot be read.
+ */
+async function laneRefusalFor(orgId: string, message: string, known?: KybLifecycleState): Promise<string | null> {
+  const intent = classifyLaneIntent(message);
+  if (!intent) return null;
+  const state = known ?? await zekeLaneState(orgId);
+  if (laneAccess(state, intent.lane).allowed) return null;
+  const text = laneRefusalText(intent.lane, state, intent.currency);
+  if (!isOnboarding(state) || !process.env.DATABASE_URL) return text;
+  try {
+    const [{ getDb }, { readAllowance }] = await Promise.all([
+      import('../db/client.ts'),
+      import('../server/stablecoin-outflows.ts'),
+    ]);
+    const { allowance } = await readAllowance(getDb(), orgId);
+    return `${text}\n\nRight now you have ${formatUsdcAllowance(allowance.remainingMinor)} USDC of that allowance left.`;
+  } catch {
+    return text;
+  }
 }
 
 export function stringifyAgentJson(value: unknown): string {

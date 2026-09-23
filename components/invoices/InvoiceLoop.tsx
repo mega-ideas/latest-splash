@@ -88,14 +88,14 @@ export default function InvoiceLoop() {
     },
     {
       label: 'Zeke draft',
-      detail: suggestion ? 'Route recommendation ready' : selected ? 'Ready for extraction' : 'Needs invoice first',
-      state: suggestion ? 'complete' : selected ? 'active' : 'locked',
+      detail: suggestion?.blocked ? 'Refused: business not verified' : suggestion ? 'Route recommendation ready' : selected ? 'Ready for extraction' : 'Needs invoice first',
+      state: suggestion?.blocked ? 'warning' : suggestion ? 'complete' : selected ? 'active' : 'locked',
       icon: Sparkles,
     },
     {
       label: 'Payment intent',
-      detail: suggestion ? 'Transfer flow is unlocked' : 'Requires a recommendation',
-      state: suggestion ? 'active' : 'locked',
+      detail: suggestion?.blocked ? 'Locked until verification' : suggestion ? 'Transfer flow is unlocked' : 'Requires a recommendation',
+      state: suggestion && !suggestion.blocked ? 'active' : 'locked',
       icon: Route,
     },
   ], [hasGrantedAccess, selected, selectedCounterparty, suggestion]);
@@ -609,20 +609,37 @@ function ExtractionPanel({
             </div>
             <div className="mt-3 text-sm font-bold text-[#326273]">{Math.round(suggestion.confidence * 100)}% confidence</div>
           </div>
-          <div className="rounded-lg border border-[#E39774]/28 bg-[#E39774]/10 p-4">
-            <div className="flex items-start gap-3">
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white text-[#9F5839]">
-                <Route className="h-4 w-4" />
-              </span>
-              <div>
-                <strong className="text-[#1F4452]">{suggestion.title}</strong>
-                <p className="mt-2 text-sm font-medium leading-6 text-[#326273]/68">{suggestion.description}</p>
-                <span className="mt-3 inline-flex rounded-md border border-[#E39774]/25 bg-white/70 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#9F5839]">
-                  Approval required
+          {suggestion.blocked ? (
+            <div role="status" className="rounded-lg border border-[var(--warn)] bg-[var(--warn-bg)] p-4">
+              <div className="flex items-start gap-3">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white text-[var(--warn)]">
+                  <Lock className="h-4 w-4" />
                 </span>
+                <div>
+                  <strong className="text-[#1F4452]">{suggestion.title}</strong>
+                  <p className="mt-2 whitespace-pre-line text-sm font-medium leading-6 text-[#326273]/75">{suggestion.description}</p>
+                  <span className="mt-3 inline-flex rounded-md border border-[var(--warn)] bg-white/70 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--warn)]">
+                    Locked until verified
+                  </span>
+                </div>
               </div>
             </div>
-          </div>
+          ) : (
+            <div className="rounded-lg border border-[#E39774]/28 bg-[#E39774]/10 p-4">
+              <div className="flex items-start gap-3">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white text-[#9F5839]">
+                  <Route className="h-4 w-4" />
+                </span>
+                <div>
+                  <strong className="text-[#1F4452]">{suggestion.title}</strong>
+                  <p className="mt-2 text-sm font-medium leading-6 text-[#326273]/68">{suggestion.description}</p>
+                  <span className="mt-3 inline-flex rounded-md border border-[#E39774]/25 bg-white/70 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#9F5839]">
+                    Approval required
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         <EmptyState title="No extraction yet" body="Run extraction after selecting an invoice. The recommendation will appear here before any transfer flow opens." />
@@ -665,6 +682,28 @@ function ReleaseRail({ stages }: { stages: GateStage[] }) {
 }
 
 function IntentPanel({ selected, suggestion, href }: { selected: InvoiceRecord | null; suggestion: CopilotSuggestion | null; href: string }) {
+  if (suggestion?.blocked) {
+    return (
+      <section className="rounded-lg border border-[#326273]/15 bg-white/80 p-4 shadow-sm">
+        <div className="flex items-start gap-3">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--warn-bg)] text-[var(--warn)]">
+            <Lock className="h-5 w-5" />
+          </span>
+          <div className="min-w-0">
+            <h2 className="font-bold text-[#1F4452]">Next allowed action</h2>
+            <p className="mt-1 text-[13px] font-medium leading-5 text-[#326273]/60">{suggestion.blocked.reason}</p>
+          </div>
+        </div>
+        <Link
+          href="/dashboard/setup"
+          className="mt-4 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#0C3E48] px-4 py-2 text-sm font-bold text-white shadow-[0_12px_24px_rgba(12,62,72,0.2)] transition hover:bg-[#145D6A] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#5C9EAD]/22"
+        >
+          Finish verification
+          <ArrowRight className="h-4 w-4" />
+        </Link>
+      </section>
+    );
+  }
   return (
     <section className="rounded-lg border border-[#326273]/15 bg-white/80 p-4 shadow-sm">
       <div className="flex items-start gap-3">

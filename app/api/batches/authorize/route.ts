@@ -64,7 +64,7 @@ export async function POST(request: Request) {
     if (error instanceof ProvenanceViolationError) return provenanceViolationResponse(error);
     throw error;
   }
-  const gate = await requireActiveOrg(auth.session);
+  const gate = await requireActiveOrg(auth.session, { lane: 'FIAT_OUT_LOCAL' });
   if (gate.response) return gate.response;
 
   const rows = Array.isArray(body.rows) ? (body.rows as BatchRow[]) : [];

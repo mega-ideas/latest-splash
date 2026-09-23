@@ -70,6 +70,14 @@ export type RecipientRow = {
   kybInviteSent?: boolean;
   travelRule?: TravelRuleColumns;
   demo?: boolean;
+  /** BANK (local currency via a partner rail) or WALLET (USDC on Sui). */
+  payoutMethod?: 'BANK' | 'WALLET';
+  /** Lower-cased Sui address; set only for WALLET recipients. */
+  walletAddress?: string;
+  /** 'SLUSH' | 'METAMASK_SUI_SNAP'. */
+  walletProvider?: string;
+  /** Sanctions screening outcome; null = never screened. */
+  screeningVerdict?: string | null;
   createdAt: string;
 };
 
@@ -148,6 +156,10 @@ function toRow(row: SupplierSelect): RecipientRow {
     kybInviteSent: metadata.kybInviteSent,
     travelRule: hasTravelRule ? travelRule : undefined,
     demo: row.demo,
+    payoutMethod: row.payoutMethod === 'WALLET' ? 'WALLET' : 'BANK',
+    walletAddress: row.walletAddress ?? undefined,
+    walletProvider: row.walletProvider ?? undefined,
+    screeningVerdict: row.screeningVerdict ?? null,
     createdAt: row.createdAt.toISOString(),
   };
 }
@@ -184,11 +196,14 @@ export async function insertRecipient(db: DrizzleDb, input: NewRecipient): Promi
       bankIdValue: input.travelRule?.bankIdValue ?? null,
       bankBranchCode: input.travelRule?.bankBranchCode ?? null,
       bankCountry: input.travelRule?.bankCountry ?? null,
-      bankAccountNumber: input.travelRule?.bankAccountNumber ?? input.account ?? null,
+      bankAccountNumber: input.travelRule?.bankAccountNumber ?? (input.account || null),
       bankAccountName: input.travelRule?.bankAccountName ?? null,
       tier: input.tier,
       sweepConfig: input.sweepConfig ?? null,
       demo: input.demo ?? false,
+      payoutMethod: input.payoutMethod ?? 'BANK',
+      walletAddress: input.walletAddress ?? null,
+      walletProvider: input.walletProvider ?? null,
       recipientMetadata: {
         orgEmail: input.orgEmail,
         createdVia: input.createdVia,
@@ -197,6 +212,19 @@ export async function insertRecipient(db: DrizzleDb, input: NewRecipient): Promi
     })
     .returning();
   return toRow(row);
+}
+
+/** Store a screening outcome on one recipient, scoped to its org. */
+export async function setRecipientScreening(
+  db: DrizzleDb,
+  orgId: string,
+  recipientId: string,
+  screening: { verdict: SupplierSelect['screeningVerdict']; reference: string | null; screenedAt: Date | null },
+): Promise<void> {
+  await db
+    .update(suppliers)
+    .set({ screeningVerdict: screening.verdict, screeningReference: screening.reference, screenedAt: screening.screenedAt })
+    .where(and(eq(suppliers.id, recipientId), eq(suppliers.orgId, orgId)));
 }
 
 /** One beneficiary belonging to `orgId`. A foreign id reads as missing. */

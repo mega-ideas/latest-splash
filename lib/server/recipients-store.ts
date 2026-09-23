@@ -49,6 +49,10 @@ function toRecord(row: repo.RecipientRow): RecipientRecord {
     kybInviteSent: row.kybInviteSent,
     travelRule: row.travelRule as RecipientRecord['travelRule'],
     demo: row.demo,
+    payoutMethod: row.payoutMethod,
+    walletAddress: row.walletAddress,
+    walletProvider: row.walletProvider,
+    screeningVerdict: row.screeningVerdict ?? null,
     createdAt: row.createdAt,
   };
 }
@@ -75,8 +79,26 @@ export async function persistRecipient(record: RecipientRecord): Promise<Recipie
       kybInviteSent: record.kybInviteSent,
       travelRule: record.travelRule,
       demo: record.demo,
+      payoutMethod: record.payoutMethod,
+      walletAddress: record.walletAddress,
+      walletProvider: record.walletProvider,
     }),
   );
+}
+
+/** Record a wallet recipient's screening outcome. In-memory mode (no
+ *  database on a dev machine) keeps it on the record so reads agree. */
+export async function recordRecipientScreening(
+  orgId: string,
+  recipientId: string,
+  screening: { verdict: 'CLEAR' | 'BLOCK' | 'ERROR' | 'ATTESTED' | null; reference: string | null; screenedAt: Date | null },
+): Promise<void> {
+  if (!usingPostgres()) {
+    const record = operations.recipients.get(recipientId);
+    if (record && record.orgId === orgId) record.screeningVerdict = screening.verdict;
+    return;
+  }
+  await repo.setRecipientScreening(await db(), orgId, recipientId, screening);
 }
 
 /** One beneficiary belonging to `orgId`. A foreign id reads as missing. */

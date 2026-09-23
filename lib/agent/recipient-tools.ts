@@ -26,6 +26,10 @@
  * number. Ambiguity is answered with the candidates, never resolved silently.
  */
 import type { RecipientRecord } from '@/lib/server/operations';
+import type { KybLifecycleState } from '@/lib/compliance/kyb-state';
+import { laneAccess, type SuiNetwork } from '@/lib/payments/stablecoin-lane';
+import { walletSendable } from '@/lib/server/wallet-screening';
+import { zekeLaneState } from './zeke-lane-guard';
 
 export type RecipientMatch = {
   id: string;
@@ -33,12 +37,63 @@ export type RecipientMatch = {
   country: string;
   bank: string;
   tier: string;
+  /** BANK: a local-currency payout through a corridor partner. WALLET: USDC on
+   *  Sui, signed by the business in its own wallet on the Send screen. */
+  payoutMethod: 'BANK' | 'WALLET';
+  /** WALLET only: the address, shortened — enough to confirm, not to copy. */
+  wallet?: string;
   /** Whether this beneficiary can actually be paid, and if not, why. */
   payable: boolean;
   blockedBecause?: string;
+  /** WALLET only: Zeke cannot sign a wallet transfer; this says who does. */
+  howToPay?: string;
 };
 
-function describe(record: RecipientRecord): RecipientMatch {
+interface DescribeContext {
+  state: KybLifecycleState;
+  network: SuiNetwork;
+}
+
+function shortAddress(address: string): string {
+  return address.length > 14 ? `${address.slice(0, 8)}…${address.slice(-6)}` : address;
+}
+
+function describe(record: RecipientRecord, ctx: DescribeContext): RecipientMatch {
+  if (record.payoutMethod === 'WALLET') {
+    const lane = laneAccess(ctx.state, 'STABLECOIN_WALLET');
+    const screen = walletSendable(record.screeningVerdict, ctx.network);
+    const blockedBecause = !lane.allowed ? lane.reason : !screen.ok ? screen.reason : undefined;
+    return {
+      id: record.id,
+      name: record.name,
+      country: record.country,
+      bank: '',
+      tier: record.tier,
+      payoutMethod: 'WALLET',
+      wallet: record.walletAddress ? shortAddress(record.walletAddress) : undefined,
+      payable: !blockedBecause,
+      blockedBecause,
+      howToPay: `USDC on Sui ${ctx.network}. The business signs it in its own wallet on the Send screen; Zeke cannot send it.`,
+    };
+  }
+
+  // A bank payout is the fiat lane. For a business still in verification it
+  // is locked however complete the record is — say that first, because it is
+  // the reason that no amount of record-filling fixes.
+  const fiat = laneAccess(ctx.state, 'FIAT_OUT_LOCAL');
+  if (!fiat.allowed) {
+    return {
+      id: record.id,
+      name: record.name,
+      country: record.country,
+      bank: record.bank,
+      tier: record.tier,
+      payoutMethod: 'BANK',
+      payable: false,
+      blockedBecause: fiat.reason,
+    };
+  }
+
   // A saved beneficiary is not automatically a payable one. The travel-rule
   // half is what a partner files; without it the payment is refused at
   // authorize anyway, and finding that out at the last step is worse than
@@ -55,6 +110,7 @@ function describe(record: RecipientRecord): RecipientMatch {
     country: record.country,
     bank: record.bank,
     tier: record.tier,
+    payoutMethod: 'BANK',
     payable: missing.length === 0,
     blockedBecause:
       missing.length > 0
@@ -82,19 +138,20 @@ export async function findSavedRecipient(input: unknown): Promise<RecipientLooku
   }
 
   const { listRecipientsFor } = await import('@/lib/server/recipients-store');
-  const saved = await listRecipientsFor(orgId, 500);
+  const [saved, ctx] = await Promise.all([listRecipientsFor(orgId, 500), describeContext(orgId)]);
   const wanted = name.trim().toLowerCase();
+  const describeOne = (record: RecipientRecord) => describe(record, ctx);
 
   const exact = saved.filter((r) => r.name.trim().toLowerCase() === wanted);
   const prefix = saved.filter((r) => r.name.trim().toLowerCase().startsWith(wanted));
   const contains = saved.filter((r) => r.name.trim().toLowerCase().includes(wanted));
 
   for (const bucket of [exact, prefix, contains]) {
-    if (bucket.length === 1) return { status: 'FOUND', match: describe(bucket[0]) };
+    if (bucket.length === 1) return { status: 'FOUND', match: describeOne(bucket[0]) };
     if (bucket.length > 1) {
       return {
         status: 'AMBIGUOUS',
-        candidates: bucket.slice(0, 5).map(describe),
+        candidates: bucket.slice(0, 5).map(describeOne),
         message:
           `${bucket.length} saved beneficiaries match "${name}". ` +
           'Say which one — paying the wrong company is not something an approval catches.',
@@ -123,6 +180,13 @@ export async function listSavedRecipients(input: unknown): Promise<{
   if (!orgId) return { orgId: '', count: 0, recipients: [] };
 
   const { listRecipientsFor } = await import('@/lib/server/recipients-store');
-  const saved = await listRecipientsFor(orgId, 200);
-  return { orgId, count: saved.length, recipients: saved.map(describe) };
+  const [saved, ctx] = await Promise.all([listRecipientsFor(orgId, 200), describeContext(orgId)]);
+  return { orgId, count: saved.length, recipients: saved.map((record) => describe(record, ctx)) };
+}
+
+/** The lane state (as the money routes see it) and the org's settlement network. */
+async function describeContext(orgId: string): Promise<DescribeContext> {
+  const { orgStablecoinNetwork } = await import('@/lib/server/stablecoin-outflows');
+  const [state, network] = await Promise.all([zekeLaneState(orgId), orgStablecoinNetwork(orgId)]);
+  return { state, network };
 }

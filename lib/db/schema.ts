@@ -61,7 +61,7 @@ export const bankIdScheme = pgEnum('bank_id_scheme', [
   'PROXY_ID',
 ]);
 
-export const screeningVerdict = pgEnum('screening_verdict', ['CLEAR', 'REVIEW', 'BLOCK', 'ERROR']);
+export const screeningVerdict = pgEnum('screening_verdict', ['CLEAR', 'REVIEW', 'BLOCK', 'ERROR', 'ATTESTED']);
 export const webhookStatus = pgEnum('webhook_status', ['RECEIVED', 'PROCESSED', 'FAILED', 'SKIPPED']);
 
 export const organizations = pgTable('organizations', {
@@ -100,6 +100,12 @@ export const organizations = pgTable('organizations', {
    *  tailors which setup steps are emphasised and NOTHING else — the KYB
    *  lifecycle above stays the single authority on what may move money. */
   intent: text('intent'),
+  /** The Sui network this workspace's STABLECOIN lane settles on: 'testnet'
+   *  (sandbox, the default) or 'mainnet' (real money). Per workspace, not per
+   *  deployment, so a sandbox workspace and a live one can sit side by side.
+   *  Only the self-signed wallet lane reads it — nothing here reaches the
+   *  Splash contracts, which are not on mainnet. */
+  stablecoinNetwork: text('stablecoin_network').notNull().default('testnet'),
   /** Wallet spec §2.3 — the org's on-chain BusinessAccount object id. Null
    *  until the AdminCap-gated business_account::verify_business has run. */
   suiBusinessAccountId: text('sui_business_account_id'),
@@ -420,6 +426,16 @@ export const suppliers = pgTable('suppliers', {
    *  beneficiary was typed in or created by an invoice link. */
   recipientMetadata: jsonb('recipient_metadata'),
 
+  /** How this recipient is paid. BANK: local currency through a partner rail
+   *  (locked until the paying business is verified). WALLET: USDC on Sui to
+   *  `walletAddress` — the only lane an unverified business may use. */
+  payoutMethod: text('payout_method').notNull().default('BANK'),
+  /** Sui address, lower-cased, validated by normaliseSuiAddress — never an
+   *  Ethereum address padded to fit. Null for BANK recipients. */
+  walletAddress: text('wallet_address'),
+  /** 'SLUSH' | 'METAMASK_SUI_SNAP' — the wallet the recipient said they use. */
+  walletProvider: text('wallet_provider'),
+
   ...timestamps,
 }, (table) => [
   index('suppliers_org_idx').on(table.orgId),
@@ -575,6 +591,52 @@ export const termsAcceptances = pgTable('terms_acceptances', {
   version: text('version').notNull(),
   acceptedAt: timestamp('accepted_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * Every stablecoin payment Splash quoted or verified — wallet transfers AND
+ * x402 payments, because they share one allowance.
+ *
+ * A row is written at QUOTE time as a RESERVATION (status PENDING, with an
+ * expiry), inside a transaction that locks the organisation row. Without the
+ * reservation two quotes read the same "remaining" and both pass, and the cap
+ * is breached by concurrency rather than by anyone lying. The window counts
+ * CONFIRMED rows and PENDING rows that have not expired; an abandoned quote
+ * stops counting when it lapses.
+ *
+ * CONFIRMED only after the server has read the executed transaction from the
+ * chain and matched it to the quote — the browser's word is never enough.
+ */
+export const stablecoinOutflows = pgTable('stablecoin_outflows', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  /** 'TRANSFER' | 'X402' */
+  kind: text('kind').notNull(),
+  supplierId: text('supplier_id').references(() => suppliers.id),
+  /** 'mainnet' | 'testnet' */
+  network: text('network').notNull(),
+  coinType: text('coin_type').notNull(),
+  principalMinor: bigint('principal_minor', { mode: 'bigint' }).notNull(),
+  feeMinor: bigint('fee_minor', { mode: 'bigint' }).notNull(),
+  senderAddress: text('sender_address').notNull(),
+  recipientAddress: text('recipient_address').notNull(),
+  feeAddress: text('fee_address'),
+  /** 'PENDING' | 'CONFIRMED' | 'FAILED' | 'MISMATCH' | 'EXPIRED' */
+  status: text('status').notNull().default('PENDING'),
+  reservedUntil: timestamp('reserved_until', { withTimezone: true }).notNull(),
+  txDigest: text('tx_digest').unique(),
+  /** 'PENDING_MAINNET_PUBLISH' until Splash's contracts are on mainnet and the
+   *  anchor is backfilled; 'NOT_REQUIRED' for sandbox rows. */
+  anchorStatus: text('anchor_status').notNull(),
+  auditAnchorId: text('audit_anchor_id'),
+  /** For X402: the resource that was paid for. */
+  resource: text('resource'),
+  failureReason: text('failure_reason'),
+  confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
+  ...timestamps,
+}, (table) => [
+  index('stablecoin_outflows_org_created_idx').on(table.orgId, table.createdAt),
+]);
+
 
 /**
  * The operating dials, PER ORG.

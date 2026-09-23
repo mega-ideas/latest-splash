@@ -23,6 +23,9 @@ export interface CopilotSuggestion {
   confidence: number;
   requiresAuth: boolean;
   suggestedAction?: string;
+  /** Set when Zeke read the document and refused: the lane it asks for is
+   *  locked for this business. The UI must not offer a route onward. */
+  blocked?: { lane: string; reason: string };
 }
 
 const SUPPORTED = ['PHP', 'MYR', 'IDR', 'VND', 'THB', 'SGD', 'EUR', 'GBP'];

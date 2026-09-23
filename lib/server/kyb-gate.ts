@@ -6,6 +6,7 @@ import { resolveAuthorityForSession, UnauthorizedError } from '@/lib/auth/author
 import type { CustomerSession } from '@/lib/auth/customer-session';
 import { kybGateEnabled, readOrgKybState } from '@/lib/compliance/org-kyb';
 import { canMoveMoney, kybGateReason, type KybLifecycleState } from '@/lib/compliance/kyb-state';
+import { isOnboarding, laneAccess, type Lane } from '@/lib/payments/stablecoin-lane';
 
 /**
  * The money gate (wallet spec §3.2).
@@ -25,7 +26,13 @@ export type KybGateResult =
   | { state: KybLifecycleState; response: null }
   | { state: KybLifecycleState; response: NextResponse };
 
-export async function requireActiveOrg(session: CustomerSession): Promise<KybGateResult> {
+export async function requireActiveOrg(
+  session: CustomerSession,
+  // Which lane the route moves money on. It changes only the WORDS of a
+  // refusal — a business in onboarding is told what is locked and what is
+  // still open to it — never whether the route refuses.
+  opts: { lane?: Lane } = {},
+): Promise<KybGateResult> {
   // Opt-in: with the flag off the gate observes but never blocks, so enabling
   // it is a deliberate config change rather than a surprise outage.
   if (!kybGateEnabled()) {
@@ -63,14 +70,16 @@ export async function requireActiveOrg(session: CustomerSession): Promise<KybGat
     return { state, response: null };
   }
 
-  console.warn('[kyb-gate] blocked money route', { orgId: ctx.orgId, state });
+  console.warn('[kyb-gate] blocked money route', { orgId: ctx.orgId, state, lane: opts.lane });
+  const reason = opts.lane && isOnboarding(state) ? laneAccess(state, opts.lane).reason : kybGateReason(state);
   return {
     state,
     response: NextResponse.json(
       {
-        error: kybGateReason(state),
+        error: reason || kybGateReason(state),
         code: 'kyb_not_active',
         kybState: state,
+        ...(opts.lane ? { lane: opts.lane } : {}),
       },
       { status: 403, headers: { 'Cache-Control': 'no-store' } },
     ),
