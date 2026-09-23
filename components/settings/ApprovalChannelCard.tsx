@@ -130,9 +130,10 @@ export default function ApprovalChannelCard({
         className="mt-5 flex w-full items-center justify-between gap-3 rounded-xl border border-[#326273]/14 bg-white px-4 py-3 text-left transition hover:border-[#5C9EAD]/50"
       >
         <span className="min-w-0">
-          <span className="block text-sm font-bold text-[#1F4452]">Send approval requests to WhatsApp</span>
+          <span className="block text-sm font-bold text-[#1F4452]">Approve with a WhatsApp code and passkey</span>
           <span className="mt-0.5 block text-[13px] font-medium text-[#326273]/55">
-            Off means approvals happen only in the Splash approval queue.
+            On: payments and settings saves need a code sent to the approver&apos;s confirmed WhatsApp number, then their passkey. The main admin needs both before this can be switched on.
+            Off: approvers click Approve in Splash (a second person above the approval threshold when dual approval is on) — the simple setup for a one-person business.
           </span>
         </span>
         <span

@@ -52,6 +52,16 @@ export function suiScanTxUrl(digest: string): string {
 }
 
 /**
+ * Suiscan transaction page on a NAMED network, for a lane whose network does
+ * not follow SUI_NETWORK: the stablecoin lane settles on mainnet even when
+ * the rest of the app runs on testnet, and a testnet link to a mainnet
+ * payment is the receipt-that-proves-nothing this module exists to prevent.
+ */
+export function suiScanTxUrlOn(network: SuiNetworkName, digest: string): string {
+  return `https://suiscan.xyz/${network}/tx/${encodeURIComponent(digest)}`;
+}
+
+/**
  * The testnet faucet, or null on mainnet — where there is no faucet and
  * offering one is an invitation to look for free mainnet SUI.
  */

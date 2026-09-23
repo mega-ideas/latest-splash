@@ -68,6 +68,14 @@ export const RATE_LIMITS = {
   /** Writes to the operational store. */
   invoiceCreateUser: { bucket: 'invoice-create:user', limit: 60, windowMs: HOUR },
   recipientCreateUser: { bucket: 'recipient-create:user', limit: 60, windowMs: HOUR },
+  // Each quote reserves allowance and reads the sender's coins from a fullnode.
+  stablecoinQuoteUser: { bucket: 'stablecoin-quote:user', limit: 30, windowMs: 15 * MINUTE },
+  stablecoinSubmitUser: { bucket: 'stablecoin-submit:user', limit: 30, windowMs: 15 * MINUTE },
+  // Each request sends a WhatsApp message; the per-subject cooldown stops a
+  // double-click, this stops a loop.
+  stepUpRequestUser: { bucket: 'step-up-request:user', limit: 10, windowMs: 15 * MINUTE },
+  // Wrong codes are also capped per code (5); this caps them per person.
+  stepUpVerifyUser: { bucket: 'step-up-verify:user', limit: 60, windowMs: 15 * MINUTE },
 } as const satisfies Record<string, RateLimitRule>;
 
 /**

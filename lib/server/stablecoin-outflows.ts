@@ -7,9 +7,9 @@ import type { KybLifecycleState } from '@/lib/compliance/kyb-state';
 import {
   checkStablecoinAllowance,
   laneAccess,
+  STABLECOIN_NETWORK,
   STABLECOIN_WINDOW_MS,
   type AllowanceCheck,
-  type SuiNetwork,
 } from '@/lib/payments/stablecoin-lane';
 
 /**
@@ -48,11 +48,13 @@ export interface ReserveInput {
   recipientAddress: string;
   feeAddress: string | null;
   resource?: string | null;
+  /** Who asked — maker-checker refuses them as the second approver. */
+  requestedBy?: string | null;
   nowMs?: number;
 }
 
 export type ReserveResult =
-  | { ok: true; id: string; network: SuiNetwork; reservedUntil: Date; allowance: AllowanceCheck }
+  | { ok: true; id: string; network: typeof STABLECOIN_NETWORK; reservedUntil: Date; allowance: AllowanceCheck }
   | { ok: false; reason: string; allowance: AllowanceCheck | null };
 
 /** Rows that count against the window at `nowMs`. */
@@ -71,11 +73,11 @@ function countingRows(orgId: string, nowMs: number) {
 
 export async function readAllowance(d: Db, orgId: string, nowMs = Date.now()): Promise<{
   state: KybLifecycleState;
-  network: SuiNetwork;
+  network: typeof STABLECOIN_NETWORK;
   allowance: AllowanceCheck;
 }> {
   const [org] = await d
-    .select({ kyb: organizations.kybLifecycle, network: organizations.stablecoinNetwork })
+    .select({ kyb: organizations.kybLifecycle })
     .from(organizations)
     .where(eq(organizations.id, orgId))
     .limit(1);
@@ -92,7 +94,7 @@ export async function readAllowance(d: Db, orgId: string, nowMs = Date.now()): P
     prior: rows.map((r: { principal: bigint; createdAt: Date }) => ({ principalMinor: BigInt(r.principal), atMs: new Date(r.createdAt).getTime() })),
     nowMs,
   });
-  return { state, network: org.network as SuiNetwork, allowance };
+  return { state, network: STABLECOIN_NETWORK, allowance };
 }
 
 export async function reserveOutflow(d: Db, input: ReserveInput): Promise<ReserveResult> {
@@ -100,7 +102,7 @@ export async function reserveOutflow(d: Db, input: ReserveInput): Promise<Reserv
   return d.transaction(async (tx: Db) => {
     // Serialise every quote for this business behind one row lock.
     const [org] = await tx
-      .select({ kyb: organizations.kybLifecycle, network: organizations.stablecoinNetwork })
+      .select({ kyb: organizations.kybLifecycle })
       .from(organizations)
       .where(eq(organizations.id, input.orgId))
       .for('update')
@@ -122,7 +124,7 @@ export async function reserveOutflow(d: Db, input: ReserveInput): Promise<Reserv
     });
     if (!allowance.ok) return { ok: false as const, reason: allowance.reason, allowance };
 
-    const network = org.network as SuiNetwork;
+    const network = STABLECOIN_NETWORK;
     const id = `sco_${randomUUID()}`;
     const reservedUntil = new Date(nowMs + RESERVATION_MS);
     await tx.insert(stablecoinOutflows).values({
@@ -139,8 +141,10 @@ export async function reserveOutflow(d: Db, input: ReserveInput): Promise<Reserv
       feeAddress: input.feeAddress,
       status: 'PENDING',
       reservedUntil,
-      anchorStatus: network === 'mainnet' ? 'PENDING_MAINNET_PUBLISH' : 'NOT_REQUIRED',
+      // Recorded now, anchored once Splash's contracts are on mainnet.
+      anchorStatus: 'PENDING_MAINNET_PUBLISH',
       resource: input.resource ?? null,
+      requestedBy: input.requestedBy ?? null,
       createdAt: new Date(nowMs),
       updatedAt: new Date(nowMs),
     });
@@ -157,12 +161,14 @@ export async function readOutflow(d: Db, orgId: string, id: string) {
   return row ?? null;
 }
 
-/** PENDING → CONFIRMED, only for a still-pending row and a digest never seen before. */
-export async function confirmOutflow(d: Db, input: { orgId: string; id: string; txDigest: string; nowMs?: number }) {
+/** PENDING → CONFIRMED, only for a still-pending row and a digest never seen
+ *  before. The audit hash is required: the table refuses a CONFIRMED row
+ *  without one (migration 0021). */
+export async function confirmOutflow(d: Db, input: { orgId: string; id: string; txDigest: string; auditHash: string; nowMs?: number }) {
   const now = new Date(input.nowMs ?? Date.now());
   const updated = await d
     .update(stablecoinOutflows)
-    .set({ status: 'CONFIRMED', txDigest: input.txDigest, confirmedAt: now, updatedAt: now })
+    .set({ status: 'CONFIRMED', txDigest: input.txDigest, auditHash: input.auditHash, confirmedAt: now, updatedAt: now })
     .where(and(
       eq(stablecoinOutflows.id, input.id),
       eq(stablecoinOutflows.orgId, input.orgId),
@@ -190,21 +196,6 @@ export async function closeOutflow(d: Db, input: {
       eq(stablecoinOutflows.orgId, input.orgId),
       inArray(stablecoinOutflows.status, ['PENDING']),
     ));
-}
-
-/**
- * Which Sui network this workspace settles on. Without a database (the
- * in-memory demo) it is testnet: nothing reachable that way may touch mainnet.
- */
-export async function orgStablecoinNetwork(orgId: string): Promise<SuiNetwork> {
-  if (!process.env.DATABASE_URL) return 'testnet';
-  const { getDb } = await import('../db/client.ts');
-  const [org] = await getDb()
-    .select({ network: organizations.stablecoinNetwork })
-    .from(organizations)
-    .where(eq(organizations.id, orgId))
-    .limit(1);
-  return org?.network === 'mainnet' ? 'mainnet' : 'testnet';
 }
 
 /** Recent outflows for the screen. */

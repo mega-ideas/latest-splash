@@ -14,6 +14,7 @@
  * against a restored copy of production, which is still outstanding.
  */
 import { readdir, readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 
 import { PGlite } from '@electric-sql/pglite';
 import { PGLiteSocketServer } from '@electric-sql/pglite-socket';
@@ -82,23 +83,24 @@ for (const person of seed) {
 // seed script, a crashed dev server that never let go) wedges it for
 // everyone. One process, one command, and the demo works on first sign-in.
 //
-//   demo@acme.test  - VERIFIED, SANDBOX. KYB ACTIVE, terms accepted, intent
-//                     'pay', approvals set. USD in and local-currency out
-//                     (sandbox partners), USDC on Sui TESTNET.
-//   live@acme.test  - UNVERIFIED, REAL MONEY. Terms accepted, KYB not
-//                     started. Fiat and Treasury locked; USDC on Sui MAINNET
-//                     to saved wallet recipients, 5,000 USDC per 30 days,
-//                     signed in the operator's own wallet.
+//   demo@acme.test  - VERIFIED. KYB ACTIVE, terms accepted, intent 'pay',
+//                     approvals set. USD in and local-currency out through
+//                     the SANDBOX partners; USDC on Sui MAINNET (real).
+//   live@acme.test  - UNVERIFIED. Terms accepted, KYB not started. Fiat and
+//                     Treasury locked; USDC on Sui MAINNET (real) to saved
+//                     wallet recipients, 5,000 USDC per 30 days.
+//
+// Stablecoins are mainnet for everyone — there is no stablecoin sandbox.
 //   fresh@acme.test - a new business: REGISTERED, nothing accepted. Walks
 //                     the intent picker and the setup stepper, and shows
 //                     every lock.
 const DEMO_PASSWORD = 'SplashDemo!2026';
 const demos = [
-  { email: 'demo@acme.test', name: 'Demo Operator', orgId: 'demo-business', org: 'Acme Manufacturing', kyb: 'ACTIVE', onboarded: true, network: 'testnet',
-    blurb: 'verified, sandbox - USD in, local-currency out, USDC on Sui testnet' },
-  { email: 'live@acme.test', name: 'Live Operator', orgId: 'live-business', org: 'Live Stablecoin Co', kyb: 'REGISTERED', onboarded: true, network: 'mainnet',
-    blurb: 'UNVERIFIED, REAL USDC on Sui MAINNET - 5,000 USDC / 30 days, fiat locked' },
-  { email: 'fresh@acme.test', name: 'Fresh Operator', orgId: 'fresh-business', org: 'Fresh Trading', kyb: 'REGISTERED', onboarded: false, network: 'testnet',
+  { email: 'demo@acme.test', name: 'Demo Operator', orgId: 'demo-business', org: 'Acme Manufacturing', kyb: 'ACTIVE', onboarded: true,
+    blurb: 'verified - USD in / local-currency out (sandbox), USDC on Sui mainnet (real)' },
+  { email: 'live@acme.test', name: 'Live Operator', orgId: 'live-business', org: 'Live Stablecoin Co', kyb: 'REGISTERED', onboarded: true,
+    blurb: 'UNVERIFIED - USDC on Sui mainnet only (real), 5,000 USDC / 30 days, fiat locked' },
+  { email: 'fresh@acme.test', name: 'Fresh Operator', orgId: 'fresh-business', org: 'Fresh Trading', kyb: 'REGISTERED', onboarded: false,
     blurb: 'new business, walks onboarding' },
 ];
 for (const d of demos) {
@@ -106,12 +108,11 @@ for (const d of demos) {
   // payment has an org to read (the same values seed:demo writes).
   await client.query(
     `INSERT INTO organizations (id, name, kyb_lifecycle, legal_name, registration_number,
-       address_line1, address_city, address_state, address_postal_code, address_country,
-       stablecoin_network)
+       address_line1, address_city, address_state, address_postal_code, address_country)
      VALUES ($1, $2, $3, $4, '202401000001', 'Level 8, Menara Demo, Jalan Ampang',
-       'Kuala Lumpur', 'Wilayah Persekutuan', '50450', 'MY', $5)
+       'Kuala Lumpur', 'Wilayah Persekutuan', '50450', 'MY')
      ON CONFLICT (id) DO NOTHING`,
-    [d.orgId, d.org, d.kyb, `${d.org} Sdn Bhd`, d.network],
+    [d.orgId, d.org, d.kyb, `${d.org} Sdn Bhd`],
   );
   await createAccount(db, { email: d.email, password: DEMO_PASSWORD, name: d.name });
   await markEmailVerified(db, d.email);
@@ -126,6 +127,42 @@ for (const d of demos) {
     await client.query(`UPDATE organizations SET intent = 'pay' WHERE id = $1`, [d.orgId]);
     await client.query(`INSERT INTO org_settings (org_id, updated_by) VALUES ($1, $2)`, [d.orgId, userId]);
   }
+}
+
+// -- Optional: pre-verified WhatsApp numbers for the demo admins ------------
+// This database lives in memory, so a restart would mean re-verifying a number
+// every time. Local only: set DEV_WHATSAPP_DEMO_ADMIN / DEV_WHATSAPP_LIVE_ADMIN
+// (E.164, e.g. +60123456789) in .env.local, which is never committed. It skips
+// the proof round-trip the Settings screen does — acceptable for a throwaway
+// dev database, never anywhere else. One number, one person: the same number
+// cannot serve both admins (approver_channels_number_unique).
+try {
+  process.loadEnvFile(fileURLToPath(new URL('../.env.local', import.meta.url)));
+} catch {
+  // No .env.local: nothing to seed.
+}
+const seededNumbers = new Set();
+for (const [email, orgId, raw] of [
+  ['demo@acme.test', 'demo-business', process.env.DEV_WHATSAPP_DEMO_ADMIN],
+  ['live@acme.test', 'live-business', process.env.DEV_WHATSAPP_LIVE_ADMIN],
+]) {
+  const e164 = (raw ?? '').replace(/[^\d+]/g, '');
+  if (!e164) continue;
+  if (!/^\+[1-9]\d{7,14}$/.test(e164)) {
+    console.warn(`  skipped WhatsApp for ${email}: ${raw} is not E.164 (+ country code, digits)`);
+    continue;
+  }
+  if (seededNumbers.has(e164)) {
+    console.warn(`  skipped WhatsApp for ${email}: ${e164} is already the other admin's number`);
+    continue;
+  }
+  const { rows } = await client.query('SELECT id FROM users WHERE email = $1', [email]);
+  await client.query(
+    `INSERT INTO approver_channels (id, org_id, user_id, whatsapp_e164, verified_at) VALUES ($1, $2, $3, $4, now())`,
+    [`chn_dev_${orgId}`, orgId, rows[0].id, e164],
+  );
+  seededNumbers.add(e164);
+  console.log(`  WhatsApp ${e164.slice(0, 3)}••••${e164.slice(-4)} pre-verified for ${email}`);
 }
 
 const server = new PGLiteSocketServer({ db: client, port: PORT, host: '127.0.0.1' });

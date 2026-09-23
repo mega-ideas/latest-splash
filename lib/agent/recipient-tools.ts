@@ -27,7 +27,7 @@
  */
 import type { RecipientRecord } from '@/lib/server/operations';
 import type { KybLifecycleState } from '@/lib/compliance/kyb-state';
-import { laneAccess, type SuiNetwork } from '@/lib/payments/stablecoin-lane';
+import { laneAccess } from '@/lib/payments/stablecoin-lane';
 import { walletSendable } from '@/lib/server/wallet-screening';
 import { zekeLaneState } from './zeke-lane-guard';
 
@@ -51,7 +51,6 @@ export type RecipientMatch = {
 
 interface DescribeContext {
   state: KybLifecycleState;
-  network: SuiNetwork;
 }
 
 function shortAddress(address: string): string {
@@ -61,7 +60,7 @@ function shortAddress(address: string): string {
 function describe(record: RecipientRecord, ctx: DescribeContext): RecipientMatch {
   if (record.payoutMethod === 'WALLET') {
     const lane = laneAccess(ctx.state, 'STABLECOIN_WALLET');
-    const screen = walletSendable(record.screeningVerdict, ctx.network);
+    const screen = walletSendable(record.screeningVerdict);
     const blockedBecause = !lane.allowed ? lane.reason : !screen.ok ? screen.reason : undefined;
     return {
       id: record.id,
@@ -73,7 +72,7 @@ function describe(record: RecipientRecord, ctx: DescribeContext): RecipientMatch
       wallet: record.walletAddress ? shortAddress(record.walletAddress) : undefined,
       payable: !blockedBecause,
       blockedBecause,
-      howToPay: `USDC on Sui ${ctx.network}. The business signs it in its own wallet on the Send screen; Zeke cannot send it.`,
+      howToPay: 'USDC on Sui mainnet. The business approves it with a WhatsApp code and signs it in its own wallet on the Send screen; Zeke cannot send it.',
     };
   }
 
@@ -184,9 +183,7 @@ export async function listSavedRecipients(input: unknown): Promise<{
   return { orgId, count: saved.length, recipients: saved.map((record) => describe(record, ctx)) };
 }
 
-/** The lane state (as the money routes see it) and the org's settlement network. */
+/** The lane state, as the money routes see it. */
 async function describeContext(orgId: string): Promise<DescribeContext> {
-  const { orgStablecoinNetwork } = await import('@/lib/server/stablecoin-outflows');
-  const [state, network] = await Promise.all([zekeLaneState(orgId), orgStablecoinNetwork(orgId)]);
-  return { state, network };
+  return { state: await zekeLaneState(orgId) };
 }

@@ -35,6 +35,7 @@ import { custodyPhaseResponse, deliveryTierAllowed } from '@/lib/server/custody-
 import { checkMinimumSettlement } from '@/lib/policy/limits';
 import { checkAuthorizationLimits, startOfUtcDay } from '@/lib/policy/authorization-limits';
 import { verifyPayoutTotp } from '@/lib/auth/totp';
+import { consumeActionApproval } from '@/lib/server/step-up-gate';
 import { readOrgSettings } from '@/lib/server/org-settings';
 import { readComplianceControls } from '@/lib/server/sui-settlement';
 import { isForeignAccountId, requireSessionAccount } from '@/lib/server/session-account';
@@ -143,9 +144,28 @@ export async function POST(request: Request) {
     paymentRail !== 'STRIPE_CHECKOUT' &&
     paymentRail !== 'AIRWALLEX_WIRE';
   if (totpRequiredForThisRail) {
-    const verdict = verifyPayoutTotp({ code: totp, accountId: businessAccountId, requireTotp: settings.requireTotp });
-    if (!verdict.ok) {
-      return NextResponse.json({ error: verdict.message, code: `totp_${verdict.code}` }, { status: 400 });
+    // In WhatsApp style, a WhatsApp code + passkey approval for exactly this
+    // request stands in for the authenticator code.
+    const whatsappApproved = settings.requireTotp && settings.whatsappEnabled
+      && await consumeActionApproval({
+        session: auth.session,
+        orgId,
+        purpose: 'FIAT_TRANSFER',
+        payload: rawBody as Record<string, unknown>,
+      });
+    if (!whatsappApproved) {
+      const verdict = verifyPayoutTotp({ code: totp, accountId: businessAccountId, requireTotp: settings.requireTotp });
+      if (!verdict.ok) {
+        return NextResponse.json(
+          {
+            error: settings.whatsappEnabled
+              ? `${verdict.message} Or approve this payout with a WhatsApp code and your passkey.`
+              : verdict.message,
+            code: `totp_${verdict.code}`,
+          },
+          { status: 400 },
+        );
+      }
     }
   }
 

@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 
+import ApprovalFlow from '@/components/approvals/ApprovalFlow';
+import ApprovalsInbox from '@/components/approvals/ApprovalsInbox';
 import ApprovalChannelCard from '@/components/settings/ApprovalChannelCard';
 import {
   BadgeCheck,
@@ -65,6 +67,9 @@ export default function DashboardSettingsPage() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState('');
+  // The exact body awaiting approval: the approval covers these bytes, and the
+  // retry sends them unchanged.
+  const [approvalFor, setApprovalFor] = useState<Settings | null>(null);
 
   useEffect(() => {
     void fetch('/api/settings')
@@ -76,19 +81,24 @@ export default function DashboardSettingsPage() {
     setSettings((current) => current ? { ...current, [key]: value } : current);
   }
 
-  async function save() {
-    if (!settings) return;
+  async function save(exact?: Settings) {
+    const payload = exact ?? settings;
+    if (!payload) return;
     setSaving(true);
     setNotice('');
     const response = await fetch('/api/settings', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(settings),
+      body: JSON.stringify(payload),
     });
-    const body = await response.json() as Settings & { error?: string };
+    const body = await response.json() as Settings & { error?: string; code?: string };
     if (response.ok) {
       setSettings(body);
+      setApprovalFor(null);
       setNotice('Operating controls saved.');
+    } else if (body.code === 'approval_required') {
+      // WhatsApp approvals are on: this exact change needs a code + passkey.
+      setApprovalFor(payload);
     } else {
       setNotice(body.error ?? 'Unable to save operating controls.');
     }
@@ -115,7 +125,20 @@ export default function DashboardSettingsPage() {
         </button>
       </header>
 
-      {notice && <div className="rounded-xl border border-[#5C9EAD]/25 bg-[#5C9EAD]/10 px-4 py-3 text-sm font-semibold text-[#326273]">{notice}</div>}
+      {notice && <div role="status" className="rounded-xl border border-[#5C9EAD]/25 bg-[#5C9EAD]/10 px-4 py-3 text-sm font-semibold text-[#326273]">{notice}</div>}
+
+      {approvalFor ? (
+        <section className="dash-block p-5" aria-labelledby="settings-approval-title">
+          <h2 id="settings-approval-title" className="text-lg font-bold text-[#1F4452]">Approve this change</h2>
+          <p className="mt-1 text-[13px] leading-5 text-[#326273]/70">
+            WhatsApp approvals are on, so saving settings needs a WhatsApp code and a passkey confirmation — for exactly the change below. Edit anything and it needs a new approval.
+          </p>
+          <div className="mt-4">
+            <ApprovalFlow purpose="SETTINGS_CHANGE" payload={approvalFor} onApproved={() => void save(approvalFor)} />
+          </div>
+          <button type="button" onClick={() => setApprovalFor(null)} className="dash-btn-ghost mt-4 !px-4 !py-2 !text-[13px]">Cancel</button>
+        </section>
+      ) : null}
 
       <section className="grid gap-5 lg:grid-cols-[1.15fr_0.85fr]">
         <div className="dash-surface p-6">
@@ -150,6 +173,8 @@ export default function DashboardSettingsPage() {
           </div>
         </div>
       </section>
+
+      <ApprovalsInbox />
 
       <ApprovalChannelCard
         whatsappEnabled={settings.whatsappEnabled}

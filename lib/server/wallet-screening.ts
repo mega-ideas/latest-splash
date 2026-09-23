@@ -77,18 +77,14 @@ export function attestation(userId: string, now = new Date()): WalletScreening {
 }
 
 /**
- * Whether a recipient with this stored verdict may be paid on `network`.
- * Sandbox (testnet) is permissive for everything but a BLOCK; mainnet wants
- * CLEAR or a recorded attestation. A BLOCK stops every network, always.
+ * Whether a recipient with this stored verdict may be paid. The lane is
+ * mainnet-only, so this is the mainnet rule: CLEAR, or a recorded
+ * attestation. A BLOCK stops it, always.
  */
-export function walletSendable(
-  verdict: string | null | undefined,
-  network: 'mainnet' | 'testnet',
-): { ok: boolean; reason: string } {
+export function walletSendable(verdict: string | null | undefined): { ok: boolean; reason: string } {
   if (verdict === 'BLOCK') {
     return { ok: false, reason: 'This wallet is on a sanctions list. Splash will not send to it.' };
   }
-  if (network === 'testnet') return { ok: true, reason: '' };
   if (verdict === 'CLEAR' || verdict === 'ATTESTED') return { ok: true, reason: '' };
   if (verdict === 'ERROR') {
     return { ok: false, reason: 'Screening could not complete for this wallet. Re-save the recipient to screen it again.' };

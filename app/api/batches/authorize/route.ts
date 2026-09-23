@@ -8,6 +8,7 @@ import { checkMinimumSettlement } from '@/lib/policy/limits';
 import { MAX_BATCH_ROWS } from '@/lib/policy/batch-limits';
 import { checkAuthorizationLimits, startOfUtcDay } from '@/lib/policy/authorization-limits';
 import { verifyPayoutTotp } from '@/lib/auth/totp';
+import { consumeActionApproval } from '@/lib/server/step-up-gate';
 import { readOrgSettings } from '@/lib/server/org-settings';
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { readJsonBody } from '@/lib/server/http';
@@ -84,9 +85,29 @@ export async function POST(request: Request) {
 
   // Real second factor. This was `/^\d{6}$/` — `000000` authorized a payroll run
   // out of the shared SettlementPool.
-  const totpVerdict = verifyPayoutTotp({ code: totp, accountId, requireTotp: settings.requireTotp });
-  if (!totpVerdict.ok) {
-    return NextResponse.json({ error: totpVerdict.message, code: `totp_${totpVerdict.code}` }, { status: 400 });
+  // In WhatsApp style, a WhatsApp code + passkey approval for exactly these
+  // rows stands in for the authenticator code. Consumed only when a second
+  // factor is actually required.
+  const whatsappApproved = settings.requireTotp && settings.whatsappEnabled
+    && await consumeActionApproval({
+      session: auth.session,
+      orgId,
+      purpose: 'BATCH_PAYOUT',
+      payload: { rows: body.rows, targetCurrency: body.targetCurrency },
+    });
+  if (!whatsappApproved) {
+    const totpVerdict = verifyPayoutTotp({ code: totp, accountId, requireTotp: settings.requireTotp });
+    if (!totpVerdict.ok) {
+      return NextResponse.json(
+        {
+          error: settings.whatsappEnabled
+            ? `${totpVerdict.message} Or approve this batch with a WhatsApp code and your passkey.`
+            : totpVerdict.message,
+          code: `totp_${totpVerdict.code}`,
+        },
+        { status: 400 },
+      );
+    }
   }
 
   const acceptedRows = rows.filter((row) => row.name && row.address && Number.parseFloat(String(row.amount ?? '0')) > 0);

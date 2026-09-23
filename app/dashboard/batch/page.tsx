@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import HoverPopup from "@/components/HoverPopup";
 import StatusBadge from "@/components/StatusBadge";
 import DashPageHeader from "@/components/dashboard/DashPageHeader";
+import ApprovalFlow from '@/components/approvals/ApprovalFlow';
 import DashStat from "@/components/dashboard/DashStat";
 import ExplorerLinks from "@/components/dashboard/ExplorerLinks";
 import SettlementEngineFlow from "@/components/dashboard/SettlementEngineFlow";
@@ -166,6 +167,17 @@ export default function BatchPage() {
   const [rows, setRows] = useState<BatchRow[]>([]);
   const [busy, setBusy] = useState(false);
   const [totp, setTotp] = useState("");
+  // WhatsApp style: a code + passkey approval for exactly these rows stands in
+  // for the authenticator code (app/api/batches/authorize).
+  const [whatsappStyle, setWhatsappStyle] = useState(false);
+  const [showWhatsApp, setShowWhatsApp] = useState(false);
+  const [whatsappApproved, setWhatsappApproved] = useState(false);
+  useEffect(() => {
+    void fetch("/api/settings")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body: { whatsappEnabled?: boolean } | null) => setWhatsappStyle(Boolean(body?.whatsappEnabled)))
+      .catch(() => setWhatsappStyle(false));
+  }, []);
   const [batchId, setBatchId] = useState<string | null>(null);
   const [batchStatus, setBatchStatus] = useState<BatchStatus | null>(null);
 
@@ -267,7 +279,7 @@ export default function BatchPage() {
   }
 
   async function submitBatch() {
-    if (!/^\d{6}$/.test(totp)) {
+    if (!whatsappApproved && !/^\d{6}$/.test(totp)) {
       toast.error("Enter your 6-digit authorization code");
       return;
     }
@@ -496,10 +508,22 @@ ${sampleCsvRows.map((row) => `${row.name},${row.address},${row.country},${row.pu
                     className="w-32 rounded-lg border border-[#326273]/20 bg-[#F6F0ED] px-3 py-3 text-center font-mono tracking-[0.25em] text-[#326273] focus:border-[#5C9EAD] focus:outline-none"
                     placeholder="000000"
                   />
-                  <button type="submit" disabled={busy || acceptedRows.length === 0 || totp.length !== 6} className="flex-1 rounded-lg bg-[#E39774] px-6 py-3 font-semibold text-white hover:bg-[#cd825f] disabled:opacity-50">
+                  <button type="submit" disabled={busy || acceptedRows.length === 0 || (totp.length !== 6 && !whatsappApproved)} className="flex-1 rounded-lg bg-[#E39774] px-6 py-3 font-semibold text-white hover:bg-[#cd825f] disabled:opacity-50">
                     {busy ? <span className="inline-flex items-center gap-2"><Loader2 className="animate-spin" size={16} /> Queueing…</span> : "Authorize cleared rows"}
                   </button>
                 </form>
+                {whatsappStyle && acceptedRows.length > 0 ? (
+                  showWhatsApp ? (
+                    <div className="mt-4 rounded-lg border border-[#326273]/12 bg-white p-3">
+                      <ApprovalFlow purpose="BATCH_PAYOUT" payload={{ rows: acceptedRows }} onApproved={() => setWhatsappApproved(true)} />
+                      {whatsappApproved ? <p className="mt-2 text-[13px] text-[#326273]/75">Approved — authorize the cleared rows without an authenticator code.</p> : null}
+                    </div>
+                  ) : (
+                    <button type="button" onClick={() => setShowWhatsApp(true)} className="mt-3 text-[13px] font-semibold text-[var(--info)] hover:underline">
+                      Approve with a WhatsApp code and passkey instead
+                    </button>
+                  )
+                ) : null}
                 {batchStatus && <BatchStatusPanel status={batchStatus} />}
               </div>
 

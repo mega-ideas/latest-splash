@@ -5,6 +5,7 @@ import { assertCleanBody, ProvenanceViolationError, provenanceViolationResponse 
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { readJsonBody } from '@/lib/server/http';
 import { readOrgSettings, saveOrgSettings, SettingsInvariantError } from '@/lib/server/org-settings';
+import { approvalRequiredResponse, consumeActionApproval, whatsappApprovalsReady } from '@/lib/server/step-up-gate';
 
 /**
  * The operating dials.
@@ -84,6 +85,29 @@ export async function PUT(request: Request) {
       },
       { status: 403 },
     );
+  }
+
+  // Approval style (Settings → WhatsApp approvals). In WhatsApp style every
+  // save needs a WhatsApp code + passkey approval for exactly this change —
+  // including the save that switches WhatsApp approvals back OFF, so a stolen
+  // session cannot quietly downgrade the control. In click style, Save is its
+  // own confirmation.
+  const current = await readOrgSettings(ctx.orgId);
+  if (current.whatsappEnabled) {
+    const approved = await consumeActionApproval({
+      session: auth.session,
+      orgId: ctx.orgId,
+      purpose: 'SETTINGS_CHANGE',
+      payload: body as Record<string, unknown>,
+    });
+    if (!approved) return approvalRequiredResponse('SETTINGS_CHANGE');
+  }
+  // Switching WhatsApp approvals ON is refused until the main admin — who
+  // receives every payment code — can actually approve: a verified number AND
+  // a passkey. Otherwise every payment would wait on an approval nobody can give.
+  if ((body as Record<string, unknown>).whatsappEnabled === true && !current.whatsappEnabled) {
+    const ready = await whatsappApprovalsReady(ctx.orgId);
+    if (!ready.ok) return NextResponse.json({ error: ready.reason, code: 'whatsapp_not_ready' }, { status: 409 });
   }
 
   try {

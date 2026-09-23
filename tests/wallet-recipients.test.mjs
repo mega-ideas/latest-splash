@@ -64,17 +64,15 @@ test('an attestation names who vouched and when', () => {
   assert.equal(a.reference, `operator-attested:user_42:${NOW.toISOString()}`);
 });
 
-test('what may be paid where: BLOCK never; mainnet only CLEAR or ATTESTED; sandbox anything else', () => {
-  for (const network of ['mainnet', 'testnet']) {
-    assert.equal(walletSendable('BLOCK', network).ok, false, `BLOCK on ${network}`);
-  }
-  assert.equal(walletSendable('CLEAR', 'mainnet').ok, true);
-  assert.equal(walletSendable('ATTESTED', 'mainnet').ok, true);
-  assert.equal(walletSendable('ERROR', 'mainnet').ok, false);
-  assert.equal(walletSendable(null, 'mainnet').ok, false);
-  assert.equal(walletSendable(undefined, 'mainnet').ok, false);
-  assert.equal(walletSendable(null, 'testnet').ok, true);
-  assert.equal(walletSendable('ERROR', 'testnet').ok, true);
+test('what may be paid (mainnet, always): CLEAR or ATTESTED; never BLOCK, ERROR or unscreened', () => {
+  assert.equal(walletSendable('BLOCK').ok, false);
+  assert.equal(walletSendable('CLEAR').ok, true);
+  assert.equal(walletSendable('ATTESTED').ok, true);
+  assert.equal(walletSendable('ERROR').ok, false);
+  assert.match(walletSendable('ERROR').reason, /Re-save the recipient/);
+  assert.equal(walletSendable(null).ok, false);
+  assert.match(walletSendable(null).reason, /not been screened/);
+  assert.equal(walletSendable(undefined).ok, false);
 });
 
 // ─── The route ──────────────────────────────────────────────────────────────

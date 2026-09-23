@@ -1,5 +1,6 @@
 import { applyBps, formatMinor, MICRO_DECIMALS, parseMinor, sumMinor } from '../money.ts';
 import type { KybLifecycleState } from '../compliance/kyb-state.ts';
+import { suiScanTxUrlOn } from '../explorer.ts';
 
 /**
  * The stablecoin lane — what a business may send before, and after, it is
@@ -23,8 +24,9 @@ import type { KybLifecycleState } from '../compliance/kyb-state.ts';
  * first thing a suspended actor reached for.
  *
  * ─── Why the business signs ─────────────────────────────────────────────────
- * The business signs every transfer in its own wallet (Slush, or MetaMask with
- * the Sui Snap), and the principal goes wallet to wallet in one transaction —
+ * The business signs every transfer itself — with its Splash wallet (the Sui
+ * address of its own passkey), or in Slush, or MetaMask with the Sui Snap —
+ * and the principal goes wallet to wallet in one transaction —
  * it never passes through an address Splash controls. Splash quotes, reserves
  * allowance, and verifies the executed transaction against the chain. That is
  * what lets an unverified business use it at all: Splash is not moving money
@@ -37,6 +39,15 @@ import type { KybLifecycleState } from '../compliance/kyb-state.ts';
 
 export type SuiNetwork = 'mainnet' | 'testnet';
 
+/**
+ * The stablecoin lane settles on Sui MAINNET, always. There is no stablecoin
+ * sandbox: the sandbox covers USD in and local-currency out, where the
+ * partners offer one, and a testnet USDC transfer proves nothing a business
+ * can rely on. The testnet coin type below stays as a verified fact (x402
+ * challenges name networks), not as a lane.
+ */
+export const STABLECOIN_NETWORK = 'mainnet' as const satisfies SuiNetwork;
+
 /** Circle native USDC. Mainnet type verified against Circle's own announcement;
  *  testnet against the same source. Six decimals on both. */
 export const SUI_USDC_COIN_TYPE: Record<SuiNetwork, string> = {
@@ -45,6 +56,17 @@ export const SUI_USDC_COIN_TYPE: Record<SuiNetwork, string> = {
 };
 
 export const USDC_DECIMALS = MICRO_DECIMALS;
+
+/** The wallet-standard chain id a wallet is asked to sign for. */
+export function suiChain(network: SuiNetwork): `sui:${SuiNetwork}` {
+  return `sui:${network}`;
+}
+
+/** Where a person can look a transaction up themselves — on the lane's own
+ *  network, not the app's (lib/explorer.ts). */
+export function explorerTxUrl(network: SuiNetwork, digest: string): string {
+  return suiScanTxUrlOn(network, digest);
+}
 
 // ─── Price ──────────────────────────────────────────────────────────────────
 
@@ -274,6 +296,24 @@ export function normaliseSuiAddress(input: string): string {
   }
   if (/^0x0{64}$/.test(raw)) throw new StablecoinLaneError('The zero address cannot receive a payment.');
   return raw.toLowerCase();
+}
+
+// ─── Display ────────────────────────────────────────────────────────────────
+
+/** 1_250_500_000n → "1,250.50"; 1_234_567n → "1.234567". Exact: at least two
+ *  decimals, never rounded, trailing zeros past the cents dropped. */
+export function formatUsdc(minor: bigint): string {
+  const negative = minor < 0n;
+  const abs = negative ? -minor : minor;
+  const whole = (abs / 1_000_000n).toLocaleString('en-US');
+  let frac = (abs % 1_000_000n).toString().padStart(6, '0').replace(/0+$/, '');
+  if (frac.length < 2) frac = frac.padEnd(2, '0');
+  return `${negative ? '-' : ''}${whole}.${frac}`;
+}
+
+/** 0x1234…cdef — enough to confirm, not to copy. */
+export function shortAddress(address: string): string {
+  return address.length > 14 ? `${address.slice(0, 6)}…${address.slice(-4)}` : address;
 }
 
 // ─── Parsing ────────────────────────────────────────────────────────────────

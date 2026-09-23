@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 
+import { resolveAuthorityForSession, UnauthorizedError } from '@/lib/auth/authority';
 import { requireCustomerRequest, requireCustomerSession } from '@/lib/server/customer-auth';
+import { readOrgSettings } from '@/lib/server/org-settings';
+import { approvalRequiredResponse, consumeActionApproval } from '@/lib/server/step-up-gate';
 import { readJsonBody } from '@/lib/server/http';
 import {
   cancelPendingRequest,
@@ -30,8 +33,28 @@ export async function POST(request: Request) {
   if (auth.response) return auth.response;
   const { session } = auth;
 
+  const body = await readJsonBody(request);
+
+  // In a workspace with WhatsApp approvals on, submitting a profile change
+  // needs a WhatsApp code + passkey approval for exactly these changes. A
+  // signed-in person with no workspace yet has no approval style to apply.
+  let orgId: string | null = null;
   try {
-    const body = await readJsonBody(request);
+    orgId = (await resolveAuthorityForSession(session)).orgId;
+  } catch (error) {
+    if (!(error instanceof UnauthorizedError)) throw error;
+  }
+  if (orgId && (await readOrgSettings(orgId)).whatsappEnabled) {
+    const approved = await consumeActionApproval({
+      session,
+      orgId,
+      purpose: 'PROFILE_CHANGE',
+      payload: body as Record<string, unknown>,
+    });
+    if (!approved) return approvalRequiredResponse('PROFILE_CHANGE');
+  }
+
+  try {
     const changeRequest = submitProfileChangeRequest(session, body as Record<string, unknown>);
     return NextResponse.json({ pendingRequest: changeRequest }, { status: 201 });
   } catch (error) {

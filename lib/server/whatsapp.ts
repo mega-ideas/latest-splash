@@ -117,6 +117,77 @@ export async function sendWhatsApp(
   }
 }
 
+/** A template variable: WhatsApp refuses newlines, tabs and long runs of
+ *  spaces in one, and caps its length. */
+function templateVariable(value: string, max = 60): string {
+  const flat = value.replace(/[\r\n\t]+/g, ' ').replace(/ {2,}/g, ' ').trim();
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
+
+/**
+ * Send a one-time code.
+ *
+ * WhatsApp only delivers a message the business starts as an APPROVED
+ * TEMPLATE; free text arrives only within 24 hours of the recipient last
+ * messaging the sender. A code is always business-initiated, so with
+ * TWILIO_WHATSAPP_CODE_CONTENT_SID set it goes as the verification template —
+ * `Your {{1}} code is {{2}}`, with {{1}} a short label of what is being
+ * approved. Without it, `fallbackBody` goes as free text (fine for a sandbox
+ * phone that messaged recently; silently undelivered otherwise).
+ *
+ * Unconfigured, the code is written to the server log OUTSIDE production only,
+ * so local development can proceed. In production it is never logged.
+ */
+export async function sendWhatsAppCode(
+  to: string,
+  message: { label: string; code: string; fallbackBody: string },
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<WhatsAppSendResult> {
+  const e164 = normaliseE164(to);
+  if (!e164) return { sent: false, reason: 'not a valid E.164 number' };
+
+  const { accountSid, authToken, from } = config(env);
+  if (!whatsappConfigured(env)) {
+    if (env.NODE_ENV !== 'production') {
+      console.info('[whatsapp] not configured — local only: code %s for %s (%s)', message.code, e164, message.label);
+    }
+    return { sent: false, reason: 'TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN and TWILIO_WHATSAPP_FROM are not all set' };
+  }
+
+  const contentSid = (env.TWILIO_WHATSAPP_CODE_CONTENT_SID ?? '').trim();
+  const fields: Record<string, string> = {
+    To: channelAddress(e164),
+    From: channelAddress(normaliseE164(from) ?? from),
+  };
+  if (contentSid) {
+    fields.ContentSid = contentSid;
+    fields.ContentVariables = JSON.stringify({ 1: templateVariable(message.label), 2: message.code });
+  } else {
+    fields.Body = message.fallbackBody;
+  }
+
+  try {
+    const response = await fetch(
+      `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString('base64')}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams(fields),
+      },
+    );
+    const payload = (await response.json()) as { sid?: string; message?: string };
+    if (!response.ok) {
+      return { sent: false, reason: payload.message ?? `Twilio returned ${response.status}` };
+    }
+    return { sent: true, providerRef: payload.sid ?? 'unknown' };
+  } catch (error) {
+    return { sent: false, reason: error instanceof Error ? error.message : 'send failed' };
+  }
+}
+
 /**
  * Is this really Twilio?
  *

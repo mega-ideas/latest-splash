@@ -16,6 +16,7 @@ import {
   XCircle,
 } from 'lucide-react';
 
+import ApprovalFlow from '@/components/approvals/ApprovalFlow';
 import DashPageHeader from '@/components/dashboard/DashPageHeader';
 
 // Mirrors lib/server/customer-profile.ts (client copy of the wire types).
@@ -79,6 +80,8 @@ export default function ProfilePage() {
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
+  // The exact request awaiting a WhatsApp approval; the retry sends it unchanged.
+  const [approvalFor, setApprovalFor] = useState<Record<string, unknown> | null>(null);
 
   const load = useCallback(async () => {
     const response = await fetch('/api/profile', { cache: 'no-store' });
@@ -105,20 +108,26 @@ export default function ProfilePage() {
     setDraft((current) => ({ ...current, [field]: value }));
   }
 
-  async function submitForReview() {
-    if (!profile || dirtyFields.length === 0) return;
+  async function submitForReview(exact?: Record<string, unknown>) {
+    if (!profile || (!exact && dirtyFields.length === 0)) return;
     setBusy(true);
     setMessage(null);
     try {
-      const payload: Record<string, unknown> = { note };
-      for (const field of dirtyFields) payload[field] = draft[field];
+      const payload: Record<string, unknown> = exact ?? { note };
+      if (!exact) for (const field of dirtyFields) payload[field] = draft[field];
       const response = await fetch('/api/profile', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
       const body = await response.json();
+      if (response.status === 428 && body.code === 'approval_required') {
+        // WhatsApp approvals are on: this exact change needs a code + passkey.
+        setApprovalFor(payload);
+        return;
+      }
       if (!response.ok) throw new Error(body.error ?? 'Unable to submit the change request.');
+      setApprovalFor(null);
       setDraft({});
       setNote('');
       setMessage({ kind: 'ok', text: 'Saved for review. Our admin team will approve or decline it shortly.' });
@@ -171,6 +180,19 @@ export default function ProfilePage() {
           {message.text}
         </div>
       )}
+
+      {approvalFor ? (
+        <section className="dash-block p-5" aria-labelledby="profile-approval-title">
+          <h2 id="profile-approval-title" className="text-lg font-bold text-[#1F4452]">Approve this change</h2>
+          <p className="mt-1 text-[13px] leading-5 text-[#326273]/70">
+            Your workspace approves profile changes with a WhatsApp code and a passkey. The code goes to your confirmed number, or to the main admin if you have none.
+          </p>
+          <div className="mt-4">
+            <ApprovalFlow purpose="PROFILE_CHANGE" payload={approvalFor} onApproved={() => void submitForReview(approvalFor)} />
+          </div>
+          <button type="button" onClick={() => setApprovalFor(null)} className="dash-btn-ghost mt-4 !px-4 !py-2 !text-[13px]">Cancel</button>
+        </section>
+      ) : null}
 
       {/* ── Pending review ticket ────────────────────────────── */}
       {pending && (

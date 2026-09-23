@@ -21,6 +21,7 @@ import {
   Timer,
   TrendingUp,
   UserCircle,
+  Wallet,
   X,
   type LucideIcon,
   ShieldAlert,
@@ -43,6 +44,7 @@ const navGroups: NavGroup[] = [
     items: [
       { label: 'Zeke',        href: '/dashboard',          icon: Bot, badge: 'AI' },
       { label: 'Transfer',     href: '/dashboard/transfer', icon: Send },
+      { label: 'Send USDC',    href: '/dashboard/send-usdc', icon: Wallet },
       { label: 'Rate holds',   href: '/dashboard/transfers', icon: Timer },
       { label: 'Batch Payout', href: '/dashboard/batch',    icon: Layers },
     ],
@@ -95,7 +97,9 @@ function lockReasonFor(
   // BOTH the KYB gate and the terms (requireTermsAccepted), so a nav item
   // that only checked KYB would read as open and then answer 412 on submit.
   const spend = ['/dashboard/transfer', '/dashboard/transfers', '/dashboard/batch'];
-  const termsOnly = ['/dashboard/invoices', '/dashboard/recipients'];
+  // Send USDC is the lane an unverified business may use (lib/payments/
+  // stablecoin-lane.ts): terms, not KYB. Its page states any lane lock itself.
+  const termsOnly = ['/dashboard/invoices', '/dashboard/recipients', '/dashboard/send-usdc'];
   const termsReason = 'Accept the terms in Account setup to start here.';
   if (href === '/dashboard/treasury') {
     if (locks.moneyBlocked) return locks.reason;

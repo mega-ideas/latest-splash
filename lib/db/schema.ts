@@ -100,12 +100,6 @@ export const organizations = pgTable('organizations', {
    *  tailors which setup steps are emphasised and NOTHING else — the KYB
    *  lifecycle above stays the single authority on what may move money. */
   intent: text('intent'),
-  /** The Sui network this workspace's STABLECOIN lane settles on: 'testnet'
-   *  (sandbox, the default) or 'mainnet' (real money). Per workspace, not per
-   *  deployment, so a sandbox workspace and a live one can sit side by side.
-   *  Only the self-signed wallet lane reads it — nothing here reaches the
-   *  Splash contracts, which are not on mainnet. */
-  stablecoinNetwork: text('stablecoin_network').notNull().default('testnet'),
   /** Wallet spec §2.3 — the org's on-chain BusinessAccount object id. Null
    *  until the AdminCap-gated business_account::verify_business has run. */
   suiBusinessAccountId: text('sui_business_account_id'),
@@ -612,7 +606,7 @@ export const stablecoinOutflows = pgTable('stablecoin_outflows', {
   /** 'TRANSFER' | 'X402' */
   kind: text('kind').notNull(),
   supplierId: text('supplier_id').references(() => suppliers.id),
-  /** 'mainnet' | 'testnet' */
+  /** Always 'mainnet': the stablecoin lane has no sandbox (migration 0021). */
   network: text('network').notNull(),
   coinType: text('coin_type').notNull(),
   principalMinor: bigint('principal_minor', { mode: 'bigint' }).notNull(),
@@ -628,8 +622,12 @@ export const stablecoinOutflows = pgTable('stablecoin_outflows', {
    *  anchor is backfilled; 'NOT_REQUIRED' for sandbox rows. */
   anchorStatus: text('anchor_status').notNull(),
   auditAnchorId: text('audit_anchor_id'),
+  /** sha256 of the canonical confirmed record (lib/payments/stablecoin-verify.ts). */
+  auditHash: text('audit_hash'),
   /** For X402: the resource that was paid for. */
   resource: text('resource'),
+  /** Who quoted it — maker-checker refuses them as the second approver. */
+  requestedBy: text('requested_by').references(() => users.id),
   failureReason: text('failure_reason'),
   confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
   ...timestamps,
@@ -728,6 +726,42 @@ export const approverChannels = pgTable('approver_channels', {
    *  approvers agreed" mean one person pressed a button twice. */
   uniqueIndex('approver_channels_number_unique').on(table.whatsappE164),
 ]);
+
+/**
+ * Step-up codes (lib/server/step-up.ts): a 6-digit code WhatsApp'd to a
+ * verified number, typed back into Splash by that person, bound by digest to
+ * exactly what is being approved. Only an HMAC of the code is stored.
+ */
+export const stepUpCodes = pgTable('step_up_codes', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  /** 'WHATSAPP_PASSKEY' | 'CLICK' — the workspace's approval style at the time. */
+  method: text('method').notNull(),
+  /** Who approves: the person the code was sent to (WHATSAPP_PASSKEY), or the
+   *  person who clicked (CLICK). */
+  approverUserId: text('approver_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  requestedBy: text('requested_by').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  purpose: text('purpose').notNull(),
+  subjectId: text('subject_id').notNull(),
+  /** sha256 of the canonical subject — what the approver was shown. */
+  subjectDigest: text('subject_digest').notNull(),
+  summary: text('summary').notNull(),
+  /** HMAC of the code; null for CLICK approvals. */
+  codeHash: text('code_hash'),
+  sentTo: text('sent_to'),
+  delivered: boolean('delivered').notNull().default(false),
+  attempts: integer('attempts').notNull().default(0),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  /** WHATSAPP_PASSKEY: the right code was typed back. */
+  codeVerifiedAt: timestamp('code_verified_at', { withTimezone: true }),
+  /** WHATSAPP_PASSKEY: the passkey that then signed the approval. */
+  passkeyCredentialId: text('passkey_credential_id').references(() => passkeyCredentials.id),
+  /** The approval is given: code + passkey, or the click. */
+  verifiedAt: timestamp('verified_at', { withTimezone: true }),
+  consumedAt: timestamp('consumed_at', { withTimezone: true }),
+  supersededAt: timestamp('superseded_at', { withTimezone: true }),
+  ...timestamps,
+}, (table) => [index('step_up_codes_subject_idx').on(table.orgId, table.purpose, table.subjectId)]);
 
 export const proposals = pgTable('proposals', {
   id: text('id').primaryKey(),

@@ -26,11 +26,10 @@
  *   npm run seed:demo
  *   npm run seed:demo -- --kyb ACTIVE --email me@example.com
  *   npm run seed:demo -- --kyb ACTIVE --onboarded
- *   npm run seed:demo -- --email live@acme.test --org live-business --onboarded --network mainnet
+ *   npm run seed:demo -- --email live@acme.test --org live-business --onboarded
  *
- * --network mainnet points the workspace's USDC-on-Sui lane at mainnet: the
- * send screen then builds REAL transfers, which the operator signs in their
- * own wallet. testnet is the default.
+ * Stablecoin transfers are Sui MAINNET for every workspace — real funds,
+ * signed by the operator in their own wallet. There is no stablecoin sandbox.
  *
  * --onboarded finishes Account setup for the workspace, so a demo lands
  * straight in the product: accepts the CURRENT terms version, sets the
@@ -119,13 +118,6 @@ const kyb = args.get('kyb') ?? 'REGISTERED';
 // maker and checker on one proposal is still refused, by design.
 const role = args.get('role') ?? 'admin';
 const onboarded = args.has('onboarded');
-// Which Sui network the workspace's USDC lane settles on. testnet unless you
-// say otherwise: `mainnet` means the send screen builds REAL transfers.
-const network = args.get('network') ?? 'testnet';
-if (network !== 'testnet' && network !== 'mainnet') {
-  console.error('--network must be testnet or mainnet');
-  process.exit(1);
-}
 
 const client = new pg.Client({ connectionString: url });
 await client.connect();
@@ -139,14 +131,12 @@ try {
   await client.query(
     `INSERT INTO organizations (
        id, name, kyb_lifecycle, legal_name, registration_number,
-       address_line1, address_city, address_state, address_postal_code, address_country,
-       stablecoin_network
+       address_line1, address_city, address_state, address_postal_code, address_country
      )
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
      ON CONFLICT (id) DO UPDATE SET
        name = EXCLUDED.name,
        kyb_lifecycle = EXCLUDED.kyb_lifecycle,
-       stablecoin_network = EXCLUDED.stablecoin_network,
        legal_name = COALESCE(organizations.legal_name, EXCLUDED.legal_name),
        registration_number = COALESCE(organizations.registration_number, EXCLUDED.registration_number),
        address_line1 = COALESCE(organizations.address_line1, EXCLUDED.address_line1),
@@ -165,7 +155,6 @@ try {
       'Wilayah Persekutuan',
       '50450',
       'MY',
-      network,
     ],
   );
 
@@ -221,7 +210,7 @@ try {
   console.log(`  org       ${orgId} (${orgName})`);
   console.log(`  role      ${role}`);
   console.log(`  KYB       ${kyb}${gateNote}`);
-  console.log(`  USDC lane Sui ${network}${network === 'mainnet' ? '  — REAL funds; the operator signs every transfer in their own wallet' : ''}`);
+  console.log('  USDC lane Sui mainnet  — REAL funds; the operator signs every transfer in their own wallet');
   console.log(`  setup     ${onboarded ? `complete (terms ${TERMS_VERSION}, intent pay, approvals set)` : 'not started — the account walks onboarding on first sign-in'}`);
   console.log('\nSign in at /login.');
 } finally {

@@ -139,16 +139,19 @@ export const envSchema = z.object({
   USDT_BUFFER_ID: objectId,
   TREASURY_ADDRESS: suiAddress,
   OPERATOR_SUI_ADDRESS: suiAddress,
-  /** The stablecoin lane's fee destinations — Splash-controlled Sui addresses
-   *  that receive the 0.80% in the same transaction as the payment. Unset on a
-   *  network means that network's lane quotes nothing: a real fee must have a
-   *  real, named destination. Never defaulted. */
+  /** The stablecoin lane's fee destination — a Splash-controlled Sui mainnet
+   *  address that receives the 0.80% in the same transaction as the payment.
+   *  Unset: the lane quotes nothing — a real fee must have a real, named
+   *  destination. Never defaulted. */
   SPLASH_FEE_ADDRESS_MAINNET: suiAddress,
-  SPLASH_FEE_ADDRESS_TESTNET: suiAddress,
   /** Chainalysis's free sanctions-screening API. Unset: wallet recipients
    *  are saved unscreened, and reach mainnet only through a named admin's
    *  attestation (lib/server/wallet-screening.ts). */
   CHAINALYSIS_SANCTIONS_API_KEY: opt(str.min(8)),
+  /** Mainnet fullnode (gRPC-web) for the stablecoin lane, which is mainnet-only
+   *  while the rest of the app may run on testnet — so it cannot share
+   *  SUI_RPC_URL. Unset: Mysten's public mainnet fullnode. */
+  SUI_MAINNET_RPC_URL: url,
   MIN_USDC_FLOAT_MICRO: int(0),
   SPLASH_SETTLEMENT_COIN_TYPE: coinType,
   SPLASH_PEG_USDC_DEVIATION_PPM: int(0),
@@ -360,6 +363,12 @@ export const envSchema = z.object({
    *  given, which behind a proxy is not the URL the request arrives at — so
    *  signature verification uses this when set, and the request URL when not. */
   TWILIO_WEBHOOK_URL: optional,
+  /** The Content SID (HX…) of an approved "verification code" template,
+   *  `Your {{1}} code is {{2}}`. WhatsApp delivers a business-initiated message
+   *  only as an approved template; free text reaches a number only within 24
+   *  hours of it last messaging the sender. Unset: step-up codes go as free
+   *  text (lib/server/whatsapp.ts sendWhatsAppCode). */
+  TWILIO_WHATSAPP_CODE_CONTENT_SID: opt(str.regex(/^HX[0-9a-fA-F]{32}$/, 'must be a Twilio Content SID (HX + 32 hex)')),
 
   /** Signs Sumsub's inbound webhooks. Without it the KYB verdict endpoint
    *  refuses every request, which is the correct direction: an unverified

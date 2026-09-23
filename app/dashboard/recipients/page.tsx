@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { ArrowUpRight, Plus, Search, Trash2, Building2, Globe2, CreditCard, Layers, Send, ShieldCheck, Sparkles, Users } from 'lucide-react';
+import { ArrowUpRight, Plus, Search, Trash2, Building2, Globe2, CreditCard, Layers, Send, ShieldCheck, Sparkles, Users, Wallet } from 'lucide-react';
 import { toast } from 'sonner';
 import Link from 'next/link';
 
@@ -22,6 +22,10 @@ export default function RecipientsPage() {
   const [showAddForm, setShowAddForm] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [form, setForm] = useState({ name: '', country: 'PH', bank: '', swift: '', account: '' });
+  const [method, setMethod] = useState<'BANK' | 'WALLET'>('BANK');
+  const [walletForm, setWalletForm] = useState({ name: '', country: 'PH', walletAddress: '', walletProvider: 'SLUSH', attestKnownRecipient: false });
+  const [formError, setFormError] = useState('');
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -54,6 +58,35 @@ export default function RecipientsPage() {
     toast.success('Recipient added successfully');
   }
 
+  async function addWalletRecipient() {
+    setFormError('');
+    if (!walletForm.name.trim() || !walletForm.walletAddress.trim()) {
+      setFormError('Name and Sui wallet address are required.');
+      return;
+    }
+    setSaving(true);
+    try {
+      const response = await fetch('/api/recipients', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...walletForm, payoutMethod: 'WALLET' }),
+      });
+      const body = (await response.json().catch(() => ({}))) as RecipientRecord & { error?: string; screeningDetail?: string };
+      if (!response.ok) {
+        setFormError(body.error ?? 'The wallet recipient could not be saved.');
+        return;
+      }
+      setRecipients((prev) => [...prev, body]);
+      setWalletForm({ name: '', country: 'PH', walletAddress: '', walletProvider: 'SLUSH', attestKnownRecipient: false });
+      setShowAddForm(false);
+      toast.success(body.screeningVerdict
+        ? `Wallet recipient saved — ${body.screeningDetail ?? body.screeningVerdict}`
+        : 'Wallet recipient saved, unscreened. It cannot be paid until it is screened or an admin attests to it.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function removeRecipient(id: string) {
     const response = await fetch(`/api/recipients/${id}`, { method: 'DELETE' });
     if (!response.ok) return toast.error('Recipient could not be removed');
@@ -78,6 +111,97 @@ export default function RecipientsPage() {
       {showAddForm && (
         <div className="rounded-xl border border-[#326273]/10 bg-white p-4">
           <h2 className="text-lg font-semibold text-[#326273]">Add new recipient</h2>
+          <div role="radiogroup" aria-label="How they are paid" className="mt-3 inline-flex rounded-lg border border-[#326273]/15 bg-[#F6F0ED] p-1">
+            {([['BANK', 'Business bank account', Building2], ['WALLET', 'Crypto wallet · USDC on Sui', Wallet]] as const).map(([value, label, Icon]) => (
+              <button
+                key={value}
+                type="button"
+                role="radio"
+                aria-checked={method === value}
+                onClick={() => { setMethod(value); setFormError(''); }}
+                className={`inline-flex min-h-10 items-center gap-2 rounded-md px-3 text-[13px] font-semibold transition-colors ${method === value ? 'bg-[#0C3E48] text-white' : 'text-[#326273] hover:bg-white'}`}
+              >
+                <Icon className="h-4 w-4" /> {label}
+              </button>
+            ))}
+          </div>
+          {method === 'WALLET' ? (
+            <div className="mt-3 space-y-3">
+              <div className="grid gap-3 md:grid-cols-2">
+                <Field label="Recipient name" htmlFor="wallet-name">
+                  <input
+                    id="wallet-name"
+                    value={walletForm.name}
+                    onChange={(e) => setWalletForm((f) => ({ ...f, name: e.target.value }))}
+                    placeholder="e.g. Maria Santos Trading"
+                    className="w-full rounded-lg border border-[#326273]/20 bg-[#F6F0ED] px-3 py-2 text-sm text-[#326273] focus:border-[#5C9EAD] focus:outline-none"
+                  />
+                </Field>
+                <Field label="Country" htmlFor="wallet-country">
+                  <select
+                    id="wallet-country"
+                    value={walletForm.country}
+                    onChange={(e) => setWalletForm((f) => ({ ...f, country: e.target.value }))}
+                    className="w-full rounded-lg border border-[#326273]/20 bg-[#F6F0ED] px-3 py-2 text-sm text-[#326273] focus:border-[#5C9EAD] focus:outline-none"
+                  >
+                    <option value="MY">Malaysia</option>
+                    <option value="PH">Philippines</option>
+                    <option value="ID">Indonesia</option>
+                    <option value="SG">Singapore</option>
+                    <option value="TH">Thailand</option>
+                    <option value="VN">Vietnam</option>
+                  </select>
+                </Field>
+                <Field label="Their Sui wallet address" htmlFor="wallet-address" className="md:col-span-2">
+                  <input
+                    id="wallet-address"
+                    value={walletForm.walletAddress}
+                    onChange={(e) => setWalletForm((f) => ({ ...f, walletAddress: e.target.value.trim() }))}
+                    placeholder="0x… (64 characters after 0x)"
+                    spellCheck={false}
+                    autoComplete="off"
+                    className="w-full rounded-lg border border-[#326273]/20 bg-[#F6F0ED] px-3 py-2 font-mono text-sm text-[#326273] focus:border-[#5C9EAD] focus:outline-none"
+                    aria-describedby="wallet-address-help"
+                  />
+                  <p id="wallet-address-help" className="mt-1 text-[12px] leading-5 text-[#326273]/60">
+                    A <strong>Sui</strong> address, not an Ethereum one — MetaMask shows an Ethereum address unless the Sui Snap is used. USDC sent to the wrong network is lost.
+                  </p>
+                </Field>
+                <Field label="Their wallet" htmlFor="wallet-provider">
+                  <select
+                    id="wallet-provider"
+                    value={walletForm.walletProvider}
+                    onChange={(e) => setWalletForm((f) => ({ ...f, walletProvider: e.target.value }))}
+                    className="w-full rounded-lg border border-[#326273]/20 bg-[#F6F0ED] px-3 py-2 text-sm text-[#326273] focus:border-[#5C9EAD] focus:outline-none"
+                  >
+                    <option value="SLUSH">Slush</option>
+                    <option value="METAMASK_SUI_SNAP">MetaMask with the Sui Snap</option>
+                  </select>
+                </Field>
+              </div>
+              <label className="flex items-start gap-2 text-[13px] leading-5 text-[#326273]/80">
+                <input
+                  type="checkbox"
+                  checked={walletForm.attestKnownRecipient}
+                  onChange={(e) => setWalletForm((f) => ({ ...f, attestKnownRecipient: e.target.checked }))}
+                  className="mt-1 h-4 w-4 accent-[#0C3E48]"
+                />
+                <span>
+                  If no sanctions screening provider is configured, I attest that I know this recipient and this is their wallet (admins only; recorded with your name and the time).
+                </span>
+              </label>
+              {formError ? <p role="alert" className="text-[13px] font-medium text-[var(--error)]">{formError}</p> : null}
+              <div className="flex flex-wrap gap-2">
+                <button onClick={() => void addWalletRecipient()} disabled={saving} className="rounded-lg bg-[#5C9EAD] px-4 py-2 text-[13px] font-semibold text-white hover:bg-[#264e5b] disabled:opacity-50">
+                  {saving ? 'Screening…' : 'Screen & save'}
+                </button>
+                <button onClick={() => setShowAddForm(false)} className="rounded-lg border border-[#326273]/20 px-4 py-2 text-[13px] font-medium text-[#326273]">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+          <>
           <div className="mt-3 grid gap-3 md:grid-cols-2">
             <Field label="Recipient name">
               <input
@@ -133,6 +257,8 @@ export default function RecipientsPage() {
               Cancel
             </button>
           </div>
+          </>
+          )}
         </div>
       )}
 
@@ -167,16 +293,28 @@ export default function RecipientsPage() {
                 <div key={r.id} className="dash-block dash-block-interactive flex items-center justify-between gap-3 p-3 sm:p-4">
                   <div className="flex min-w-0 items-center gap-3">
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#5C9EAD]/10 text-[var(--info)]">
-                      <Building2 className="h-5 w-5" />
+                      {r.payoutMethod === 'WALLET' ? <Wallet className="h-5 w-5" /> : <Building2 className="h-5 w-5" />}
                     </div>
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2"><span className="truncate text-sm font-semibold text-[#326273]">{r.name}</span>{r.demo && <StatusBadge status="demo" />}</div>
+                      {r.payoutMethod === 'WALLET' ? (
+                        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[13px] text-[#326273]/60">
+                          <span className="flex items-center gap-1"><Globe2 className="h-3 w-3" /> {r.country}</span>
+                          <span className="font-mono">{r.walletAddress ? `${r.walletAddress.slice(0, 8)}…${r.walletAddress.slice(-6)}` : ''}</span>
+                          <span>{r.walletProvider === 'METAMASK_SUI_SNAP' ? 'MetaMask (Sui Snap)' : 'Slush'}</span>
+                          <span className={`rounded-full px-2 py-0.5 font-semibold ${r.screeningVerdict === 'CLEAR' || r.screeningVerdict === 'ATTESTED' ? 'bg-[#6FB4A0]/15 text-[var(--ok)]' : 'bg-[#E39774]/15 text-[#9F5839]'}`}>
+                            {r.screeningVerdict === 'CLEAR' ? 'Screened' : r.screeningVerdict === 'ATTESTED' ? 'Attested by admin' : r.screeningVerdict === 'ERROR' ? 'Screening failed' : 'Not screened'}
+                          </span>
+                          <span className="rounded-full bg-[#5C9EAD]/10 px-2 py-0.5 font-semibold text-[var(--info)]">USDC · Sui mainnet</span>
+                        </div>
+                      ) : (
                       <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[13px] text-[#326273]/60">
                         <span className="flex items-center gap-1"><Globe2 className="h-3 w-3" /> {r.country}</span>
                         <span className="flex items-center gap-1"><CreditCard className="h-3 w-3" /> {r.bank || 'No bank account'}</span>
                         {r.account && <span className="font-mono">{r.account}</span>}
                         <span className="rounded-full bg-[#5C9EAD]/10 px-2 py-0.5 font-semibold text-[var(--info)]">{r.tier.replaceAll('_', ' ')}</span>
                       </div>
+                      )}
                     </div>
                   </div>
                   <button onClick={() => removeRecipient(r.id)} className="rounded-lg p-2 text-[#E39774] hover:bg-[#E39774]/10" aria-label="Remove recipient">
@@ -238,6 +376,7 @@ export default function RecipientsPage() {
             <QuickLinksCard
               className="mt-3"
               links={[
+                { label: 'Send USDC to a wallet', href: '/dashboard/send-usdc', icon: Wallet },
                 { label: 'Single transfer', href: '/dashboard/transfer', icon: Send },
                 { label: 'Batch CSV payout', href: '/dashboard/batch', icon: Layers },
               ]}
@@ -269,10 +408,10 @@ export default function RecipientsPage() {
   );
 }
 
-function Field({ label, children, className = '' }: { label: string; children: React.ReactNode; className?: string }) {
+function Field({ label, children, className = '', htmlFor }: { label: string; children: React.ReactNode; className?: string; htmlFor?: string }) {
   return (
     <div className={className}>
-      <label className="text-[13px] font-medium text-[#326273]/70">{label}</label>
+      <label htmlFor={htmlFor} className="text-[13px] font-medium text-[#326273]/70">{label}</label>
       <div className="mt-1">{children}</div>
     </div>
   );
