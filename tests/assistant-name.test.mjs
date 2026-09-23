@@ -14,7 +14,7 @@ import {
  *
  * `setAssistantName` wrote a preference to MemWal and NOTHING read it back. The
  * tool reported success, the memory was stored, and the assistant carried on
- * introducing itself as 0xWal in the prompt and in every header. A rename that
+ * introducing itself as Zeke in the prompt and in every header. A rename that
  * appears to work and changes nothing is worse than one that refuses, because
  * the user has no way to tell.
  *

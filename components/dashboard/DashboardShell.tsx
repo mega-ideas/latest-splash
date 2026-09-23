@@ -11,6 +11,8 @@ import {
   History,
   Layers,
   LayoutDashboard,
+  ListChecks,
+  Lock,
   LogOut,
   Menu,
   Phone,
@@ -33,9 +35,13 @@ type NavGroup = { title: string; items: NavItem[] };
 
 const navGroups: NavGroup[] = [
   {
+    title: 'Getting started',
+    items: [{ label: 'Account setup', href: '/dashboard/setup', icon: ListChecks }],
+  },
+  {
     title: 'Payments',
     items: [
-      { label: '0xWal',        href: '/dashboard',          icon: Bot, badge: 'AI' },
+      { label: 'Zeke',        href: '/dashboard',          icon: Bot, badge: 'AI' },
       { label: 'Transfer',     href: '/dashboard/transfer', icon: Send },
       { label: 'Rate holds',   href: '/dashboard/transfers', icon: Timer },
       { label: 'Batch Payout', href: '/dashboard/batch',    icon: Layers },
@@ -65,9 +71,41 @@ type DashboardShellProps = {
   session: CustomerSession;
   /** KYB gate state, resolved server-side in app/dashboard/layout.tsx. */
   kyb?: { state: string; blocked: boolean; reason: string };
+  /** Onboarding locks, resolved by the SAME server layout from the SAME
+   *  gates the money routes enforce (lib/server/kyb-gate.ts,
+   *  lib/server/onboarding.ts, lib/server/custody-phase.ts). Padlocks here
+   *  are presentation; the routes stay the security. Absent (no database on
+   *  a dev machine) means nothing is locked, mirroring the gates' own dev
+   *  posture. */
+  locks?: { termsDone: boolean; moneyBlocked: boolean; custodyOn: boolean; reason: string };
 };
 
-export default function DashboardShell({ children, session, kyb }: DashboardShellProps) {
+/**
+ * The Stablecorp-pattern lock table. Zeke and Overview stay open at every
+ * state: Zeke cannot move money regardless (three independent gates prove
+ * it) and Overview is a read. Everything that spends follows the KYB gate;
+ * Invoices and Recipients only need the terms; Treasury also needs the
+ * custody phase.
+ */
+function lockReasonFor(
+  href: string,
+  locks: NonNullable<DashboardShellProps['locks']>,
+): string | null {
+  const money = ['/dashboard/transfer', '/dashboard/transfers', '/dashboard/batch', '/dashboard/history'];
+  const termsOnly = ['/dashboard/invoices', '/dashboard/recipients'];
+  if (href === '/dashboard/treasury') {
+    if (locks.moneyBlocked) return locks.reason;
+    if (!locks.custodyOn) return 'Treasury arrives with our licence. Nothing is held for you today.';
+    return null;
+  }
+  if (money.includes(href)) return locks.moneyBlocked ? locks.reason : null;
+  if (termsOnly.includes(href)) {
+    return locks.termsDone ? null : 'Accept the terms in Account setup to start here.';
+  }
+  return null;
+}
+
+export default function DashboardShell({ children, session, kyb, locks }: DashboardShellProps) {
   const [collapsed,  setCollapsed]  = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const router   = useRouter();
@@ -131,11 +169,13 @@ export default function DashboardShell({ children, session, kyb }: DashboardShel
               <div className="space-y-0.5">
                 {group.items.map(({ label, href, icon: Icon, badge }) => {
                   const active = pathname === href;
+                  const lockReason = locks ? lockReasonFor(href, locks) : null;
                   return (
                     <Link
                       key={href}
-                      href={href}
-                      title={collapsed ? label : undefined}
+                      href={lockReason ? '/dashboard/setup' : href}
+                      aria-disabled={lockReason ? true : undefined}
+                      title={lockReason ?? (collapsed ? label : undefined)}
                       className={`relative flex items-center rounded-lg px-2 py-2 text-sm transition-colors ${
                         collapsed ? 'justify-center' : 'gap-3'
                       } ${
@@ -150,7 +190,8 @@ export default function DashboardShell({ children, session, kyb }: DashboardShel
                       <Icon size={18} className={active ? 'text-[#5C9EAD]' : ''} />
                       {!collapsed && (
                         <>
-                          <span className="flex-1 font-medium">{label}</span>
+                          <span className={`flex-1 font-medium ${lockReason ? 'opacity-50' : ''}`}>{label}</span>
+                          {lockReason && <Lock size={13} aria-hidden="true" className="text-white/35" />}
                           {badge && (
                             <span
                               className={`rounded-full px-1.5 py-0.5 text-[13px] font-semibold ${
@@ -258,13 +299,14 @@ export default function DashboardShell({ children, session, kyb }: DashboardShel
                 <Link
                   key={href}
                   onClick={() => setMobileOpen(false)}
-                  href={href}
+                  href={locks && lockReasonFor(href, locks) ? '/dashboard/setup' : href}
                   className={`flex items-center gap-3 rounded-xl px-4 py-3 text-white transition-colors hover:bg-white/10 ${
                     pathname === href ? 'bg-white/15' : ''
                   }`}
                 >
                   <Icon size={20} />
-                  <span className="font-medium">{label}</span>
+                  <span className={`font-medium ${locks && lockReasonFor(href, locks) ? 'opacity-50' : ''}`}>{label}</span>
+                  {locks && lockReasonFor(href, locks) ? <Lock size={14} aria-hidden="true" className="ml-auto text-white/35" /> : null}
                 </Link>
               ))}
             </nav>
@@ -305,7 +347,21 @@ export default function DashboardShell({ children, session, kyb }: DashboardShel
             </Link>
           </div>
         ) : null}
-        {children}
+        {locks && lockReasonFor(pathname, locks) ? (
+          <section className="dash-surface mx-auto mt-10 max-w-lg p-8 text-center">
+            <Lock aria-hidden="true" className="mx-auto h-8 w-8 text-[#C9BDB5]" />
+            <h2 className="mt-4 text-lg font-bold text-[#1F4452]">Not open yet</h2>
+            <p className="mt-2 text-sm leading-relaxed text-[#326273]">{lockReasonFor(pathname, locks)}</p>
+            <Link
+              href="/dashboard/setup"
+              className="mt-5 inline-flex min-h-[44px] items-center justify-center rounded-lg bg-[#1F4452] px-5 text-sm font-semibold text-white transition hover:bg-[#326273]"
+            >
+              Finish account setup
+            </Link>
+          </section>
+        ) : (
+          children
+        )}
       </main>
 
       {/* ── Floating AI Copilot widget ────────────────────────── */}

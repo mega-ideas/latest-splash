@@ -9,7 +9,7 @@ import type { ActionCardProposal } from '@/lib/agent/action-card';
 import type { OxwalChatApproval, OxwalThreadItem } from '@/lib/oxwal/use-oxwal-thread';
 
 /**
- * How one turn of a 0xWal conversation looks, everywhere it appears.
+ * How one turn of a Zeke conversation looks, everywhere it appears.
  *
  * ─── Why the activity lines are not decoration ──────────────────────────────
  *
@@ -163,7 +163,7 @@ export default function ThreadRow({
       <div className="flex flex-wrap items-center gap-2 pl-8">
         <span className="inline-flex items-center gap-1.5 rounded-md border border-[#E39774]/55 bg-[#E39774]/15 px-2.5 py-1.5 text-[13px] font-semibold leading-5 text-[#9A4A2D]">
           <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-          Your session ended, so 0xWal paused. Sign in again to pick up where you left off.
+          Your session ended, so Zeke paused. Sign in again to pick up where you left off.
         </span>
         <Link
           href="/login"

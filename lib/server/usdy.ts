@@ -8,7 +8,7 @@ import { MICRO_DECIMALS, applyBps, applyRate, divideByRate, formatRate, type Rat
  * USDY's redemption value — never a fixed constant.
  *
  * This module is the single source of truth for the treasury rate, so every
- * surface (yields benchmark, 0xWal copilot, treasury UI) shows the same number.
+ * surface (yields benchmark, Zeke copilot, treasury UI) shows the same number.
  *
  * External wiring (drop-in via env when ready):
  *   USDY_TYPE                  Move coin type of USDY on the target network

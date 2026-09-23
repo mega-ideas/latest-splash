@@ -1,7 +1,7 @@
 import { USD_DECIMALS, formatMinor, parseMinor } from '../money.ts';
 import { copilotModel } from '../ai/model.ts';
 /**
- * 0xWal — layered copilot intelligence.
+ * Zeke — layered copilot intelligence.
  *
  * Real implementations (no placeholders): grounded in corridor data, MemWal
  * behavioral memory, and the floating USDY treasury rate. Claude is used where

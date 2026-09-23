@@ -1,7 +1,7 @@
 import type { DataStatus, EvidenceItem, EvidenceQuality } from './types.ts';
 
 /**
- * Track A WS2 — the truth envelope. Every tool result 0xWal consumes is
+ * Track A WS2 — the truth envelope. Every tool result Zeke consumes is
  * wrapped with its source, observation time, and an honest LIVE / STALE /
  * MODELED / DEMO status. Fixture-backed data says so — it is never presented
  * as live fact. The real data sources land in Track B; the honesty ships now.

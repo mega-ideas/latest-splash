@@ -2,6 +2,7 @@ import type { ComplianceResult, OrgPolicy, SimulationResult, UnsignedProposal, U
 import { evaluatePolicy, type PolicyDecision } from '../policy/evaluate.ts';
 import { ProposalStateError, transitionProposal } from '../queue/proposal-state.ts';
 import { circuitBreakerDecision, policyWithCircuitBreaker } from './circuit-breaker.ts';
+import { AGENT_ACTOR_ID } from '@/lib/agent/identity';
 
 export interface SubmitGuardInput {
   proposal: UnsignedProposal;
@@ -21,7 +22,7 @@ export function authorizeProposalSubmission(input: SubmitGuardInput): PolicyDeci
   if (!breaker.armed) {
     throw new ProposalStateError('circuit breaker blocks signing and submission');
   }
-  if (!input.signatureRef || !input.signedBy || input.signedBy === 'OXWAL') {
+  if (!input.signatureRef || !input.signedBy || input.signedBy === AGENT_ACTOR_ID) {
     throw new ProposalStateError('a human signature reference is required before submission');
   }
 

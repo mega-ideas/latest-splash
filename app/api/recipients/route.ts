@@ -7,6 +7,7 @@ import { RATE_LIMITS, enforceRateLimit } from '@/lib/server/rate-limit';
 import { buildRecipient, type RecipientRecord, type RecipientTier } from '@/lib/server/operations';
 import { listRecipientsFor, persistRecipient } from '@/lib/server/recipients-store';
 import { requireSessionAccount } from '@/lib/server/session-account';
+import { requireTermsAccepted } from '@/lib/server/onboarding';
 
 export async function GET(request: Request) {
   const auth = await requireCustomerRequest(request);
@@ -31,6 +32,12 @@ export async function POST(request: Request) {
   if (limited) return limited;
   const accountCheck = await requireSessionAccount(auth.session);
   if (accountCheck.response) return accountCheck.response;
+
+  // Onboarding: the terms are a fact on file before anything spends or a
+  // record is created (lib/server/onboarding.ts). Sits BESIDE the KYB gate,
+  // never instead of it.
+  const termsGate = await requireTermsAccepted(accountCheck.account.orgId);
+  if (termsGate) return termsGate;
 
   const body = await readJsonBody(request);
   const name = String(body.name ?? '').trim();

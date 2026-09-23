@@ -70,7 +70,7 @@ test('ActionCard model exposes full proposal anatomy and trust treatment', () =>
   assert.equal(model.primaryActionLabel, 'Sign & approve');
 });
 
-test('default dashboard is the streaming 0xWal surface and avoids browser money storage', async () => {
+test('default dashboard is the streaming Zeke surface and avoids browser money storage', async () => {
   const page = await readFile(new URL('../app/dashboard/page.tsx', import.meta.url), 'utf8');
   const layout = await readFile(new URL('../app/dashboard/layout.tsx', import.meta.url), 'utf8');
   const queue = await readFile(new URL('../app/queue/page.tsx', import.meta.url), 'utf8');
@@ -101,7 +101,7 @@ test('default dashboard is the streaming 0xWal surface and avoids browser money 
   // prop (e.g. the KYB gate state) does not fail a test about the desk surface.
   assert.match(layout, /<DashboardShell[^>]*session=\{session\}/);
   assert.match(layout, /\{children\}<\/DashboardShell>/);
-  assert.match(shell, /label: '0xWal',\s+href: '\/dashboard'/);
+  assert.match(shell, /label: 'Zeke',\s+href: '\/dashboard'/);
   assert.match(shell, /href: '\/dashboard\/overview'/);
   assert.match(queue, /export const dynamic = 'force-dynamic'/);
   assert.match(queue, /getCustomerSession/);
@@ -174,7 +174,7 @@ test('landing is the v1 cinematic: hero district, five steps with manual entry, 
   assert.match(composer, /onFilePrepared/);
   assert.doesNotMatch(composer, /priorityLabel|bg-black/);
   assert.match(floating, /OxWalComposer/);
-  assert.match(invoiceLoop, /What should 0xWal inspect\?/);
+  assert.match(invoiceLoop, /What should Zeke inspect\?/);
   assert.match(claims, /footerLegal/);
   assert.match(copyCheck, /8 corridors/);
   assert.match(copyCheck, /Sui network live/);

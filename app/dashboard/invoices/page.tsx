@@ -85,7 +85,7 @@ export default function InvoicesPage() {
           <p className="mt-1 text-sm text-foreground/55">
             {view === 'vault'
               ? 'Create a pay link, protect the document with Seal, and preserve its proof on Walrus.'
-              : 'Ask 0xWal to inspect an invoice: encrypted intake, Walrus proof, Seal access, and a route recommendation.'}
+              : 'Ask Zeke to inspect an invoice: encrypted intake, Walrus proof, Seal access, and a route recommendation.'}
           </p>
         </div>
         {view === 'vault' && (

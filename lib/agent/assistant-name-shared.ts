@@ -4,4 +4,6 @@
  * Separate from `assistant-name.ts` so a client component can import the
  * default without pulling in MemWal and the server-only module graph behind it.
  */
-export const DEFAULT_ASSISTANT_NAME = '0xWal';
+import { AGENT_DISPLAY_NAME } from './identity';
+
+export const DEFAULT_ASSISTANT_NAME = AGENT_DISPLAY_NAME;

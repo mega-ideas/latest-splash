@@ -157,7 +157,7 @@ export const envSchema = z.object({
   SUI_KYB_VERIFY_GAS_BUDGET: int(20_000_000, 1),
   USE_MOCK_APIS: flag('false'),
 
-  /* 0xWal chain composition. lib/chain/compose.ts, lib/agent/oxwal.ts. */
+  /* Zeke chain composition. lib/chain/compose.ts, lib/agent/oxwal.ts. */
   OXWAL_CHAIN_MODE: withDefault(z.enum(['mock', 'live']), 'mock'),
   OXWAL_SUI_SENDER: suiAddress,
   OXWAL_GAS_BUDGET: opt(z.coerce.number().int().min(1)),

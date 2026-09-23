@@ -62,10 +62,10 @@ const telemetry = [
     className: 'cin-callout-d',
     enter: 0.39,
     tag: 'Agent · Human-final',
-    value: '0xWal desk',
+    value: 'Zeke desk',
     meta: lockedCopy.agent,
     badge: '/cinematic/agent-bot.png',
-    badgeAlt: '0xWal assistant robot',
+    badgeAlt: 'Zeke assistant robot',
   },
 ];
 

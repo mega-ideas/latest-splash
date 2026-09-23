@@ -30,6 +30,18 @@ The remaining four modules (`smart_treasury`, `payment_intent`, `audit_anchor`, 
 
 ---
 
+## The agent's two names — 2026-09-23
+
+The agent's display name is **Zeke**. Its persisted actor id is `OXWAL` and
+does not change; two security rules compare against it — the maker-checker
+exemption and the signer rejection — and both now read the constant
+`AGENT_ACTOR_ID` from `lib/agent/identity.ts` rather than a string literal.
+`tests/agent-identity.test.mjs` fails the build if the literal drifts, if a
+raw comparison reappears outside the constant, or if the old display name
+resurfaces on a user-facing surface.
+
+---
+
 ## WS1 — account pre-hijacking (X5) — 2026-09-23
 
 **Scope**: the account lifecycle from signup to grant, on the application

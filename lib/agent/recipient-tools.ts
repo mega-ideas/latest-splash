@@ -1,5 +1,5 @@
 /**
- * The tools that let 0xWal work with real beneficiaries.
+ * The tools that let Zeke work with real beneficiaries.
  *
  * ─── Why sending is restricted to saved recipients ──────────────────────────
  *
@@ -9,7 +9,7 @@
  * asking the user to type an account number into a chat box, has invented a
  * beneficiary that nobody screened.
  *
- * So the rule is: 0xWal can only propose a payment to a beneficiary that is
+ * So the rule is: Zeke can only propose a payment to a beneficiary that is
  * ALREADY saved, verified and complete. If the name does not resolve, it says
  * so and asks for the invoice or for the beneficiary to be added properly —
  * through the form, where the corridor's requirements are enforced.
@@ -113,7 +113,7 @@ export async function findSavedRecipient(input: unknown): Promise<RecipientLooku
   };
 }
 
-/** Every saved beneficiary, so 0xWal can say who it CAN pay. */
+/** Every saved beneficiary, so Zeke can say who it CAN pay. */
 export async function listSavedRecipients(input: unknown): Promise<{
   orgId: string;
   count: number;

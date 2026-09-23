@@ -11,6 +11,7 @@ import { requireActiveOrg } from '@/lib/server/kyb-gate';
 import { readJsonBody } from '@/lib/server/http';
 import { authorizeProposalSubmission } from '@/lib/safety/submit-guard';
 import { executeApprovedProposal } from '@/lib/server/approval-execution';
+import { AGENT_ACTOR_ID } from '@/lib/agent/identity';
 
 /**
  * Track A §1.1 — the client may send ONLY its decision and signature binding.
@@ -82,7 +83,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
   // §1.5 maker-checker: the state machine enforces maker≠checker against the
   // DB-derived ctx.userId, never a request claim.
-  if (proposal.createdBy !== 'OXWAL' && proposal.createdBy === ctx.userId) {
+  if (proposal.createdBy !== AGENT_ACTOR_ID && proposal.createdBy === ctx.userId) {
     return json({ error: 'Maker cannot approve their own proposal' }, 403);
   }
 

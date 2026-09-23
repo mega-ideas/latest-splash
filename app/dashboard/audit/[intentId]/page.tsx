@@ -50,7 +50,7 @@ export default function AuditPage({ params }: { params: Promise<{ intentId: stri
         {rows.map(({ icon: Icon, label, value }) => <div key={label} className="dash-block p-5"><div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.15em] text-foreground/45"><Icon className="h-4 w-4 text-primary" /> {label}</div><div className="mt-3 break-all font-mono text-sm font-semibold">{value}</div></div>)}
       </section>
       <section className="dash-surface p-6">
-        <h2 className="text-lg font-bold">0xWal extraction snapshot</h2>
+        <h2 className="text-lg font-bold">Zeke extraction snapshot</h2>
         <pre className="mt-4 overflow-x-auto rounded-xl bg-muted/60 p-4 text-[13px] font-semibold text-foreground/70">{JSON.stringify(view.receipt.extractionSnapshot ?? { status: 'No extraction snapshot linked' }, null, 2)}</pre>
       </section>
       <section className="dash-surface p-6"><h2 className="text-lg font-bold">Status history</h2><div className="mt-5 space-y-4">{view.receipt.statusHistory.map((event, index) => <div key={`${event.state}-${event.at}`} className="grid grid-cols-[auto_1fr_auto] items-center gap-3"><span className="flex h-7 w-7 items-center justify-center rounded-full bg-primary text-[13px] font-bold text-card">{index + 1}</span><strong>{event.state}</strong><time className="text-[13px] text-foreground/45">{new Date(event.at).toLocaleString()}</time></div>)}</div></section>

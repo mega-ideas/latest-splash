@@ -34,10 +34,10 @@ function bpsToPct(bps: number) {
 
 // Treasury projection lives in the right column (single source on this page);
 // deeper treasury detail is the Treasury page's job.
-// Coral accent = 0xWal identity only (W9.0 coral rule); every other stat
+// Coral accent = Zeke identity only (W9.0 coral rule); every other stat
 // uses semantic/info tones from styles/tokens.css.
 const TOP_STATS = [
-  { label: '0xWal operating scan', value: null, icon: Bot, accent: 'text-[#E39774]', bg: 'bg-[#E39774]/10', id: '0xwal' },
+  { label: 'Zeke operating scan', value: null, icon: Bot, accent: 'text-[#E39774]', bg: 'bg-[#E39774]/10', id: '0xwal' },
   // Value and delta are filled from real settled transfers below. A 30-day
   // volume is the most quotable number on the page and it was a string literal.
   { label: 'Volume (30d)', value: null, icon: ArrowUpRight, accent: 'text-[var(--info)]', bg: 'bg-[var(--info-bg)]', id: 'volume' },
@@ -348,7 +348,7 @@ export default function DashboardOverview() {
                 <div className="mt-2 text-sm font-semibold leading-5 text-[#0c3e48]">
                   {walSummary.detected} invoices detected · {walSummary.batchable} batchable · {walSummary.needsApproval} needs approval
                 </div>
-                <div className="mt-1 text-[13px] font-medium text-[#E39774]">Open 0xWal →</div>
+                <div className="mt-1 text-[13px] font-medium text-[#E39774]">Open Zeke →</div>
               </Link>
             );
           }
@@ -387,7 +387,7 @@ export default function DashboardOverview() {
       <div className="mt-5 grid gap-5 lg:grid-cols-[1fr_300px]">
 
         {/* ── LEFT COLUMN ── */}
-        {/* AI recommendations live on the 0xWal desk and Copilot pages; this
+        {/* AI recommendations live on the Zeke desk and Copilot pages; this
             column stays focused on operating state. */}
         <div className="min-w-0 space-y-5">
 

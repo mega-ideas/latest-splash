@@ -3,7 +3,7 @@
  *
  * ─── What this does and does not decide ─────────────────────────────────────
  *
- * 0xWal reads the invoice and proposes a beneficiary record. It does not create
+ * Zeke reads the invoice and proposes a beneficiary record. It does not create
  * one. Every field it extracted is shown back with the source it came from, and
  * a person confirms before anything is saved.
  *
@@ -41,7 +41,7 @@ export type InvoiceIntake = {
   extracted: ExtractedField[];
   /** What the corridor still requires, in the payer's words, each with a reason. */
   missing: Array<{ field: string; label: string; because: string }>;
-  /** What 0xWal should say next. */
+  /** What Zeke should say next. */
   ask: string;
 };
 

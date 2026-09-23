@@ -39,6 +39,7 @@ import { readOrgSettings } from '@/lib/server/org-settings';
 import { readComplianceControls } from '@/lib/server/sui-settlement';
 import { isForeignAccountId, requireSessionAccount } from '@/lib/server/session-account';
 import { readJsonBody } from '@/lib/server/http';
+import { requireTermsAccepted } from '@/lib/server/onboarding';
 
 export const maxDuration = 60;
 
@@ -117,6 +118,12 @@ export async function POST(request: Request) {
   const accountCheck = await requireSessionAccount(auth.session);
   if (accountCheck.response) return accountCheck.response;
   const { accountId: businessAccountId, orgId } = accountCheck.account;
+
+  // Onboarding: the terms are a fact on file before anything spends or a
+  // record is created (lib/server/onboarding.ts). Sits BESIDE the KYB gate,
+  // never instead of it.
+  const termsGate = await requireTermsAccepted(orgId);
+  if (termsGate) return termsGate;
   if (isForeignAccountId(body.businessAccountId, businessAccountId)) {
     return NextResponse.json({ error: 'businessAccountId does not belong to this organization' }, { status: 403 });
   }

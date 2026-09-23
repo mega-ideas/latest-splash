@@ -11,7 +11,7 @@ import {
 import { isUsableName, sanitiseName, DEFAULT_ASSISTANT_NAME } from '../lib/agent/assistant-name.ts';
 
 /**
- * What 0xWal can now actually do.
+ * What Zeke can now actually do.
  *
  * Three capabilities, each with a rule that is the point of it:
  *
@@ -137,7 +137,7 @@ test('the assistant name is the only thing put in MemWal', async () => {
   // harmless to get wrong.
   assert.match(source, /org \$\{orgId\}/, 'the org is written into the fact');
   assert.match(source, /if \(!text\.includes\(`org \$\{orgId\}`\)\) continue/, 'and filtered on read');
-  assert.equal(DEFAULT_ASSISTANT_NAME, '0xWal');
+  assert.equal(DEFAULT_ASSISTANT_NAME, 'Zeke');
 });
 
 test('the system prompt teaches the rules, not just the tools', async () => {

@@ -28,7 +28,7 @@ type OxWalComposerProps = {
   onChange: (value: string) => void;
   onSubmit: () => void;
   onChipSubmit?: (prompt: string) => void;
-  /** Called when the operator prepares an uploaded batch. 0xWal prepares;
+  /** Called when the operator prepares an uploaded batch. Zeke prepares;
    *  the human approves downstream. No-op default keeps call sites safe. */
   onFilePrepared?: (batch: ParsedBatch) => void;
   chips?: OxWalComposerChip[];
@@ -58,7 +58,7 @@ export default function OxWalComposer({
   chips = [],
   disabled = false,
   title,
-  placeholder = 'Ask 0xWal, or attach an invoice or payout sheet',
+  placeholder = 'Ask Zeke, or attach an invoice or payout sheet',
   deskTag = 'USD→PHP · testnet',
   compact = false,
   className,
@@ -145,7 +145,7 @@ export default function OxWalComposer({
             {deskTag}
           </span>
           <span className="font-mono text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--muted-foreground)]">
-            0xWal prepares · you approve
+            Zeke prepares · you approve
           </span>
         </div>
 
@@ -225,7 +225,7 @@ export default function OxWalComposer({
 
           <button
             type="submit"
-            aria-label={hasBatch ? 'Prepare batch for approval' : 'Prepare request for 0xWal'}
+            aria-label={hasBatch ? 'Prepare batch for approval' : 'Prepare request for Zeke'}
             disabled={disabled || (!hasValue && !hasBatch)}
             className={cn(
               'inline-flex shrink-0 items-center gap-1.5 rounded-[var(--r-md)] bg-[var(--ink)] px-3.5 font-medium text-[var(--surface)] ring-1 ring-[var(--teal)]/40 shadow-[0_4px_0_var(--slate)] transition hover:bg-[var(--slate)] active:translate-y-0.5 active:shadow-[0_2px_0_var(--slate)] disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none',

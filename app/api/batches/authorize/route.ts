@@ -19,6 +19,7 @@ import { resolveAuthorityForSession } from '@/lib/auth/authority';
 import { listMovementsSince } from '@/lib/server/ledger-store';
 import { readComplianceControls, recordBatchSettlementOnSui } from '@/lib/server/sui-settlement';
 import { requireSessionAccount } from '@/lib/server/session-account';
+import { requireTermsAccepted } from '@/lib/server/onboarding';
 
 export const maxDuration = 60;
 
@@ -73,6 +74,12 @@ export async function POST(request: Request) {
   const accountCheck = await requireSessionAccount(auth.session);
   if (accountCheck.response) return accountCheck.response;
   const { accountId, orgId } = accountCheck.account;
+
+  // Onboarding: the terms are a fact on file before anything spends or a
+  // record is created (lib/server/onboarding.ts). Sits BESIDE the KYB gate,
+  // never instead of it.
+  const termsGate = await requireTermsAccepted(orgId);
+  if (termsGate) return termsGate;
   const settings = await readOrgSettings(orgId);
 
   // Real second factor. This was `/^\d{6}$/` — `000000` authorized a payroll run

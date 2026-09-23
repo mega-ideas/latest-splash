@@ -1,5 +1,5 @@
 /**
- * Which Claude model 0xWal runs on, in exactly one place.
+ * Which Claude model Zeke runs on, in exactly one place.
  *
  * The default used to be `claude-sonnet-4-6`, repeated in four files. That
  * model id does not exist. With `ANTHROPIC_API_KEY` set, every call threw, was

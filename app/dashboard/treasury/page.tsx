@@ -743,7 +743,7 @@ export default function TreasuryPage() {
             <div className="relative grid gap-0 sm:grid-cols-4">
               <div className="pointer-events-none absolute left-5 right-5 top-[3.25rem] hidden h-px bg-gradient-to-r from-[#5C9EAD]/0 via-[#D9A441] to-[#E39774]/40 sm:block" />
               {[
-                { step: '01', title: 'Prepare recommendation', desc: '0xWal models an allocation from Operating cash. Your business must approve it.', icon: CreditCard, accent: '#5C9EAD', bg: 'bg-[#5C9EAD]/10', tag: 'Human approval' },
+                { step: '01', title: 'Prepare recommendation', desc: 'Zeke models an allocation from Operating cash. Your business must approve it.', icon: CreditCard, accent: '#5C9EAD', bg: 'bg-[#5C9EAD]/10', tag: 'Human approval' },
                 { step: '02', title: 'Ondo USDY (T-bills)', desc: 'USDY is backed by short-dated US Treasuries — real, off-chain yield.', icon: Landmark, accent: '#C99A2E', bg: 'bg-[#D9A441]/15', tag: 'T-bill backed' },
                 { step: '03', title: 'Yield accrues', desc: 'USDY redemption price rises daily. Floating net rate — never fixed.', icon: Sprout, accent: '#4F9C88', bg: 'bg-[#6FB4A0]/18', tag: rate.label.replace(' · variable', '') },
                 { step: '04', title: 'Withdraw on notice', desc: `Request a withdrawal; USDY converts back to USD and lands in Operating in ${windowLabel}.`, icon: PiggyBank, accent: '#E39774', bg: 'bg-[#E39774]/10', tag: 'Notice required' },

@@ -1,5 +1,5 @@
 /**
- * 0xWal personalized suggestions — drawn from MemWal behavioral memory (with
+ * Zeke personalized suggestions — drawn from MemWal behavioral memory (with
  * grounded defaults). Powers the swipeable recommendation cards on the copilot
  * page. Suggest-only: each card links to a screen where the user authorizes.
  */

@@ -87,7 +87,7 @@ export default function InvoiceLoop() {
       icon: Lock,
     },
     {
-      label: '0xWal draft',
+      label: 'Zeke draft',
       detail: suggestion ? 'Route recommendation ready' : selected ? 'Ready for extraction' : 'Needs invoice first',
       state: suggestion ? 'complete' : selected ? 'active' : 'locked',
       icon: Sparkles,
@@ -256,7 +256,7 @@ export default function InvoiceLoop() {
               </span>
             </div>
             <h1 className="mt-4 max-w-3xl text-3xl font-bold tracking-tight text-white md:text-4xl">
-              0xWal invoice command desk
+              Zeke invoice command desk
             </h1>
             <p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-white/70">
               Move a private invoice from encrypted document to verifiable recommendation, then into a payment intent only after evidence and access checks are visible.
@@ -301,12 +301,12 @@ export default function InvoiceLoop() {
             <SectionTitle
               icon={Sparkles}
               eyebrow="Inspection console"
-              title="What should 0xWal inspect?"
+              title="What should Zeke inspect?"
               body="Use the prompt when you know the task, or work through the evidence panels below."
             />
             <div className="mt-4">
               <OxWalComposer
-                title="What should 0xWal inspect?"
+                title="What should Zeke inspect?"
                 value={prompt}
                 onChange={setPrompt}
                 onSubmit={() => runPrompt()}
@@ -314,7 +314,7 @@ export default function InvoiceLoop() {
                 onFilePrepared={(batch) => { stashBatchDraft(batch); router.push('/dashboard/batch?draft=1'); }}
                 chips={invoicePromptChips}
                 disabled={uploading || extracting}
-                placeholder="Ask 0xWal, or attach a payout sheet"
+                placeholder="Ask Zeke, or attach a payout sheet"
                 compact
                 className="max-w-none text-left [&_h2]:sr-only"
               />
@@ -444,7 +444,7 @@ function InvoicePanel({
         icon={FileText}
         eyebrow="Case file"
         title="Invoice queue"
-        body="Select the document 0xWal should inspect. Switching resets extraction and access evidence for clarity."
+        body="Select the document Zeke should inspect. Switching resets extraction and access evidence for clarity."
       />
       <div className="mt-4 grid gap-2">
         {invoices.length > 0 ? invoices.map((invoice) => {
@@ -584,7 +584,7 @@ function ExtractionPanel({
         <SectionTitle
           icon={Sparkles}
           eyebrow="Recommendation"
-          title="0xWal extraction"
+          title="Zeke extraction"
           body="The result can draft a transfer route, but execution remains human gated."
         />
         <button

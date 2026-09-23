@@ -56,7 +56,7 @@ export const RATE_LIMITS = {
   /* ── Money, documents, model credits (WS7) ─────────────────────────── */
   /** The public pay link: marks an invoice paid and creates a recipient. */
   payLinkIp: { bucket: 'pay-link:ip', limit: 20, windowMs: 15 * MINUTE },
-  /** 0xWal chat spends model credits per message. */
+  /** Zeke chat spends model credits per message. */
   copilotChatUser: { bucket: 'copilot-chat:user', limit: 30, windowMs: HOUR },
   /** The read-only copilot surfaces (suggestions, summary), per user and per network. */
   copilotUser: { bucket: 'copilot:user', limit: 120, windowMs: HOUR },

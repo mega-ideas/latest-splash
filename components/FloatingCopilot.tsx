@@ -18,7 +18,7 @@ import OxWalComposer, { type OxWalComposerChip } from './oxwal/OxWalComposer';
 import ThreadRow, { StreamingRow, ThinkingRow } from './oxwal/ThreadView';
 
 /**
- * 0xWal, reachable from anywhere in the dashboard.
+ * Zeke, reachable from anywhere in the dashboard.
  *
  * ─── One assistant, not a smaller different one ─────────────────────────────
  *
@@ -304,7 +304,7 @@ export default function FloatingCopilot() {
         </div>
       </div>
 
-      {/* ── Floating trigger: the 0xWal robot mascot ── */}
+      {/* ── Floating trigger: the Zeke robot mascot ── */}
       <div className="fixed bottom-4 right-4 z-50 flex items-end gap-2.5">
         {/* Nudge bubble (closed only) */}
         {!open && nudge && (

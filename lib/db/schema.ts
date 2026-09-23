@@ -95,6 +95,11 @@ export const organizations = pgTable('organizations', {
    *  text column means adding a state is a code change, not an ALTER TYPE
    *  migration. The coarse `kyb_status` enum above is left untouched. */
   kybLifecycle: text('kyb_lifecycle').notNull().default('REGISTERED'),
+  /** Onboarding — how this workspace said it will use Splash: 'pay',
+   *  'collect' or 'treasury'. Null until chosen; presentation only. It
+   *  tailors which setup steps are emphasised and NOTHING else — the KYB
+   *  lifecycle above stays the single authority on what may move money. */
+  intent: text('intent'),
   /** Wallet spec §2.3 — the org's on-chain BusinessAccount object id. Null
    *  until the AdminCap-gated business_account::verify_business has run. */
   suiBusinessAccountId: text('sui_business_account_id'),
@@ -551,6 +556,24 @@ export const orgPolicies = pgTable('org_policies', {
   perCorridorState: jsonb('per_corridor_state').notNull(),
   globalState: text('global_state').notNull().default('ARMED'),
   ...timestamps,
+});
+
+/**
+ * Onboarding step 1 — a delivered fact, not a checkbox in flight.
+ *
+ * Signup validated `accepted: true` and stored nothing, so no money route
+ * could ever prove the terms were agreed to. One row per user per terms
+ * version; the money gate asks for any CURRENT-version row in the org
+ * (lib/server/onboarding.ts), and re-acceptance after a version bump writes
+ * a new row rather than updating the old one — the history is the point.
+ */
+export const termsAcceptances = pgTable('terms_acceptances', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  /** content/legal.ts TERMS_VERSION at the moment of acceptance. */
+  version: text('version').notNull(),
+  acceptedAt: timestamp('accepted_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
 /**

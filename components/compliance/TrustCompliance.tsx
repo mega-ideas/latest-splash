@@ -53,9 +53,9 @@ const LICENSE_PATH = [
 // Folded in from the landing's former "readiness" strip: the controls that
 // gate value movement, kept here as a compact security summary.
 const CONTROLS = [
-  { label: 'Human approval', body: 'Every payment is prepared by 0xWal and released only by a human on the Action Queue — maker-checker, with dual approval above your threshold.' },
+  { label: 'Human approval', body: 'Every payment is prepared by Zeke and released only by a human on the Action Queue — maker-checker, with dual approval above your threshold.' },
   { label: 'Corridor gating', body: 'Corridors arm and pause under explicit controls; settlement halts on a peg deviation or compliance flag before any value moves.' },
-  { label: "Partner custody", body: "Partners of record hold client funds. Splash-side control is maker-checker — 0xWal prepares, a named human releases — and splash_core holds no client value, which is a property CI enforces rather than a key policy asserted in prose." },
+  { label: "Partner custody", body: "Partners of record hold client funds. Splash-side control is maker-checker — Zeke prepares, a named human releases — and splash_core holds no client value, which is a property CI enforces rather than a key policy asserted in prose." },
 ];
 
 export default function TrustCompliance() {

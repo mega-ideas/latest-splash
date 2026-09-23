@@ -182,7 +182,7 @@ export default async function QueuePage() {
     redirect('/login');
   }
 
-  // Live proposals 0xWal drafted this session. With DATABASE_URL set (W1),
+  // Live proposals Zeke drafted this session. With DATABASE_URL set (W1),
   // the store write-throughs to Postgres and rehydrates here after a cold
   // start — a pending approval survives a restart. Anything the operator did
   // not approve inside the 2-minute chat window surfaces as maker-checker work.
@@ -200,7 +200,7 @@ export default async function QueuePage() {
       approvalsCollected: new Set(item.approvals.map((approval) => approval.userId)).size,
       requiredApprovers: item.explain.requiredApprovers,
       risk: item.explain.risk,
-      expiryLabel: 'From 0xWal chat',
+      expiryLabel: 'From Zeke chat',
     }));
 
   // Serialize the queue for the interactive client board (no bigint/Date over
@@ -246,12 +246,12 @@ export default async function QueuePage() {
           <div className="flex items-center gap-3">
             <Image src="/splash-main-icon.png" alt="Splash" width={40} height={39} className="h-10 w-10 object-contain" />
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--info)]">0xWal control room</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--info)]">Zeke control room</p>
               <h1 className="text-3xl font-bold tracking-normal text-[#1F4452]">Approval queue</h1>
             </div>
           </div>
           <nav className="flex flex-wrap items-center gap-2 text-sm font-semibold">
-            <Link className="rounded-md border border-[#326273]/20 px-3 py-2 text-[#326273]" href="/dashboard">0xWal</Link>
+            <Link className="rounded-md border border-[#326273]/20 px-3 py-2 text-[#326273]" href="/dashboard">Zeke</Link>
             <Link className="rounded-md bg-[#1F4452] px-3 py-2 text-white" href="/dashboard">Dashboard</Link>
           </nav>
         </header>

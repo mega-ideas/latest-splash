@@ -172,7 +172,7 @@ export default function BatchPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
 
-    // Draft handed over from the 0xWal composer's file upload (prepared, not
+    // Draft handed over from the Zeke composer's file upload (prepared, not
     // executed) — hydrate the review table so the operator can authorize.
     if (params.get("draft") === "1") {
       const draft = takeBatchDraft();

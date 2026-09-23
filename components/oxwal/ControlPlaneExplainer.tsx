@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
 
 /**
- * Public explainer for the SHIPPED 0xWal control plane, in the §S card
+ * Public explainer for the SHIPPED Zeke control plane, in the §S card
  * grammar (iso-ctrl-card = meta / art / copy).
  * Every phase renders the actual ProposalStatus values from
  * lib/agent/types.ts — the UI matches the engine, not a marketing diagram
@@ -15,7 +15,7 @@ const PHASES = [
   {
     number: '01',
     title: 'Propose',
-    copy: '0xWal drafts an unsigned proposal and dry-runs it against live balances. Gas is sponsored — nothing is signed, nothing moves.',
+    copy: 'Zeke drafts an unsigned proposal and dry-runs it against live balances. Gas is sponsored — nothing is signed, nothing moves.',
     states: ['DRAFTED', 'SIMULATED'],
     image: '/isometric/ctrl-propose.png',
     imageAlt: 'Isometric AI robot drafting an unsigned proposal with a pen',
@@ -59,7 +59,7 @@ export default function ControlPlaneExplainer() {
     <div className="iso-ctrl">
       <div className="iso-ctrl-claim">
         <p>
-          <strong>0xWal prepares, you approve.</strong> 0xWal never moves money — deterministic
+          <strong>Zeke prepares, you approve.</strong> Zeke never moves money — deterministic
           policy and your approval do. This pipeline is shipped code, not a roadmap.
         </p>
         <Link href="/queue" className="iso-button iso-button-small">

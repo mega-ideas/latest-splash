@@ -1,10 +1,10 @@
 'use client';
 
 /**
- * Cross-page notifier for 0xWal work that still needs a human.
+ * Cross-page notifier for Zeke work that still needs a human.
  *
  * The desk page records how many unsigned proposals are waiting whenever the
- * agent streams one in; the floating 0xWal widget subscribes so it can remind
+ * agent streams one in; the floating Zeke widget subscribes so it can remind
  * the operator when they are anywhere else in the app. Storage is
  * display-metadata only (a count and one short label) — never proposal
  * contents, amounts, or recipients.

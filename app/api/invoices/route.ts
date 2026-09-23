@@ -10,6 +10,7 @@ import { listInvoicesFor, persistInvoice } from '@/lib/server/invoices-store';
 import { requireSessionAccount } from '@/lib/server/session-account';
 import { sealAdapter } from '@/lib/server/seal';
 import { storeEncryptedInvoice, WalrusAdapterError } from '@/lib/server/walrus';
+import { requireTermsAccepted } from '@/lib/server/onboarding';
 
 const createInvoiceSchema = z.object({
   issuerOrg: z.string().trim().min(2),
@@ -44,6 +45,12 @@ export async function POST(request: Request) {
   if (limited) return limited;
   const accountCheck = await requireSessionAccount(auth.session);
   if (accountCheck.response) return accountCheck.response;
+
+  // Onboarding: the terms are a fact on file before anything spends or a
+  // record is created (lib/server/onboarding.ts). Sits BESIDE the KYB gate,
+  // never instead of it.
+  const termsGate = await requireTermsAccepted(accountCheck.account.orgId);
+  if (termsGate) return termsGate;
 
   const parsed = createInvoiceSchema.safeParse(await readJsonBody(request));
   if (!parsed.success) {

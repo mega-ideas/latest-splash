@@ -1,6 +1,7 @@
 import type { FinancialImpact, ProposalStatus, SimulationResult, UnsignedProposal, UserRole } from '@/lib/agent/types';
 import { proposalApprovalHash } from '../proposals/canonical-hash.ts';
 import { recordProposalTransition } from '../observability/proposals.ts';
+import { AGENT_ACTOR_ID } from '@/lib/agent/identity';
 
 export class ProposalStateError extends Error {
   constructor(message: string) {
@@ -56,7 +57,7 @@ function assertApprovalAllowed(proposal: UnsignedProposal, approval: ProposalApp
   if (!approverRoles.has(approval.role)) {
     throw new ProposalStateError(`${approval.role} cannot approve proposals`);
   }
-  if (proposal.createdBy !== 'OXWAL' && approval.userId === proposal.createdBy) {
+  if (proposal.createdBy !== AGENT_ACTOR_ID && approval.userId === proposal.createdBy) {
     throw new ProposalStateError('maker cannot approve their own proposal');
   }
   if (proposal.approvals.some((item) => item.userId === approval.userId)) {
@@ -180,7 +181,7 @@ function applyProposalTransition(
       if (!event.policyAuthorized) {
         throw new ProposalStateError('policy authorization is required before signing');
       }
-      if (!event.signatureRef || !event.signedBy || event.signedBy === 'OXWAL' || !event.signedAt) {
+      if (!event.signatureRef || !event.signedBy || event.signedBy === AGENT_ACTOR_ID || !event.signedAt) {
         throw new ProposalStateError('a human signature reference is required before signing');
       }
       if (!hasMetApprovalRequirement(proposal)) {

@@ -21,6 +21,7 @@ export type ActionCardProposal = {
   orgId: string;
   corridor?: string;
   unsignedTxBytes: string;
+  /** AGENT_ACTOR_ID (lib/agent/identity.ts) or a human userId. */
   createdBy: 'OXWAL' | string;
   createdAt: string;
   expiresAt: string;

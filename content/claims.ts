@@ -20,7 +20,7 @@ export const lockedCopy = {
   speed: '~400ms Sui settlement finality',
   speedFootnote: 'Local delivery varies by rail.',
   yield: 'Variable APY - T-bill-backed',
-  agent: '0xWal prepares. You approve.',
+  agent: 'Zeke prepares. You approve.',
 } as const;
 
 export const claims = {

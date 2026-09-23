@@ -5,7 +5,7 @@ import test from 'node:test';
 import { DEFAULT_COPILOT_MODEL, copilotModel } from '../lib/ai/model.ts';
 
 /**
- * The model 0xWal actually runs on.
+ * The model Zeke actually runs on.
  *
  * The default was `claude-sonnet-4-6`, repeated in four files. That model id
  * does not exist. With an API key set, every call threw, was caught, and fell

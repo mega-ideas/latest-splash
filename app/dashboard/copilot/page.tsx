@@ -10,7 +10,7 @@ import ThreadRow, { BotAvatar, StreamingRow, ThinkingRow } from '@/components/ox
 import { useOxwalThread } from '@/lib/oxwal/use-oxwal-thread';
 
 /**
- * The 0xWal copilot room.
+ * The Zeke copilot room.
  *
  * ─── What this page used to be ──────────────────────────────────────────────
  *
@@ -32,7 +32,7 @@ import { useOxwalThread } from '@/lib/oxwal/use-oxwal-thread';
  *
  * They used to be cards with a button to another screen. Next to a chat that
  * can actually act, a suggestion is better as an opening line — clicking one
- * asks 0xWal about it here, where the answer can be questioned, instead of
+ * asks Zeke about it here, where the answer can be questioned, instead of
  * dropping the operator on a form with no memory of why they came.
  */
 
@@ -62,7 +62,7 @@ function mapSuggestion(s: ApiSuggestion): SuggestionCard {
     title: s.title,
     body: s.description,
     kind,
-    // The suggestion's own words become the question. 0xWal then has to go and
+    // The suggestion's own words become the question. Zeke then has to go and
     // read something to answer it, which is the point — a suggestion an
     // operator cannot interrogate is just a banner.
     prompt: `${s.title}. ${s.description} — walk me through this and prepare it if it holds up.`,

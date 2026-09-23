@@ -18,7 +18,7 @@ import { stashBatchDraft } from '@/lib/batch-parse';
 import { useOxwalThread } from '@/lib/oxwal/use-oxwal-thread';
 
 /**
- * 0xWal desk — a Claude-style expanding chat.
+ * Zeke desk — a Claude-style expanding chat.
  *
  * Fresh desk: a centered composer ("What's on the agenda today?").
  * First message: the surface becomes a conversation — the thread grows
@@ -37,7 +37,7 @@ const quickPrompts: OxWalComposerChip[] = [
 ];
 
 const WELCOME =
-  '0xWal is standing by. Every money movement becomes an unsigned proposal for human approval.';
+  'Zeke is standing by. Every money movement becomes an unsigned proposal for human approval.';
 
 export default function OxwalDeskPage() {
   const router = useRouter();
@@ -84,7 +84,7 @@ export default function OxwalDeskPage() {
       }}
       chips={hasStarted ? [] : quickPrompts}
       disabled={isSending}
-      placeholder="Ask 0xWal to read, prepare, or explain — or attach a payout sheet"
+      placeholder="Ask Zeke to read, prepare, or explain — or attach a payout sheet"
     />
   );
 

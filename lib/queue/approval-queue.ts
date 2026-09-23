@@ -1,4 +1,5 @@
 import type { ProposalStatus, UnsignedProposal, UserRole } from '@/lib/agent/types';
+import { AGENT_ACTOR_ID } from '@/lib/agent/identity';
 import {
   InMemoryProposalStore,
   ProposalStateError,
@@ -77,7 +78,7 @@ export function canActorApprove(proposal: UnsignedProposal, actor: ApprovalActor
   if (!approverRoles.has(actor.role)) {
     return { ok: false, reason: `${actor.role} cannot approve proposals` };
   }
-  if (proposal.createdBy !== 'OXWAL' && actor.userId === proposal.createdBy) {
+  if (proposal.createdBy !== AGENT_ACTOR_ID && actor.userId === proposal.createdBy) {
     return { ok: false, reason: 'maker cannot approve their own proposal' };
   }
   if (proposal.approvals.some((approval) => approval.userId === actor.userId)) {

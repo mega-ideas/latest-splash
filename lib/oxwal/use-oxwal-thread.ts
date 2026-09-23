@@ -7,7 +7,7 @@ import { DEFAULT_ASSISTANT_NAME } from '@/lib/agent/assistant-name-shared';
 import { recordPendingProposals } from '@/lib/oxwal-notify';
 
 /**
- * One conversation with 0xWal, for every surface that has one.
+ * One conversation with Zeke, for every surface that has one.
  *
  * ─── Why this exists ────────────────────────────────────────────────────────
  *
@@ -75,7 +75,7 @@ type OxwalStreamEvent =
   | { type: 'done'; source: 'claude' | 'local' | 'scripted' };
 
 /**
- * The operator sees what 0xWal is doing, never which backend does it.
+ * The operator sees what Zeke is doing, never which backend does it.
  *
  * Every tool in the registry is named here. A tool that reaches the UI without
  * a label reads as "Working", which tells an operator nothing about what was
@@ -169,7 +169,7 @@ export function useOxwalThread(options: UseOxwalThreadOptions = {}) {
     return () => window.clearInterval(interval);
   }, [hasOpenWindow]);
 
-  // Let the floating 0xWal remind the operator elsewhere in the app. A proposal
+  // Let the floating Zeke remind the operator elsewhere in the app. A proposal
   // stays pending until approved — in chat or in the queue.
   useEffect(() => {
     if (proposals.length === 0) return;
@@ -217,7 +217,7 @@ export function useOxwalThread(options: UseOxwalThreadOptions = {}) {
             {
               kind: 'notice',
               id: newId('notice'),
-              text: '0xWal could not open a secure line just now. Nothing was prepared — try again.',
+              text: 'Zeke could not open a secure line just now. Nothing was prepared — try again.',
               retryPrompt: prompt,
             },
           ]);

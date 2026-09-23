@@ -51,7 +51,7 @@ const operatingLayers = [
     number: '03',
     label: 'Treasury',
     title: 'Make cash work harder.',
-    copy: '0xWal recommends a treasury posture. Your business approves every action; execution remains gated.',
+    copy: 'Zeke recommends a treasury posture. Your business approves every action; execution remains gated.',
     image: '/cinematic/treasury-island.png',
     imageAlt: 'Isometric floating treasury island with an open vault of reserves and orbiting coins',
     meta: 'Simulation - human approval',
@@ -312,7 +312,7 @@ const trustGates = [
     label: 'Approve',
     icon: PenLine,
     title: 'A person signs. Always.',
-    copy: '0xWal prepares. You approve. No payout, batch, or treasury move executes without a human signature.',
+    copy: 'Zeke prepares. You approve. No payout, batch, or treasury move executes without a human signature.',
     meta: 'Maker-checker · human-final',
   },
   {
@@ -339,7 +339,7 @@ const headerNavItems = [
   { href: '/working-capital', label: 'Working capital', detail: 'Supply loop' },
   { href: '#corridors', label: 'Routes', detail: 'MY-PH testnet' },
   { href: '#comparison', label: 'Compare', detail: 'Fees + speed' },
-  { href: '#copilot', label: '0xWal', detail: 'Prepare + approve' },
+  { href: '#copilot', label: 'Zeke', detail: 'Prepare + approve' },
 ];
 
 
@@ -834,7 +834,7 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
           <div className="iso-copilot-stage">
             <Image
               src="/cinematic/copilot-desk.png"
-              alt="0xWal, an isometric robot assistant at a desk, presenting suggestion cards"
+              alt="Zeke, an isometric robot assistant at a desk, presenting suggestion cards"
               width={2172}
               height={1629}
             />
@@ -901,7 +901,7 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
                 </h2>
               </div>
               <p>
-                Every 0xWal recommendation runs this exact pipeline before money can move. The phase
+                Every Zeke recommendation runs this exact pipeline before money can move. The phase
                 names below are the engine&apos;s own state machine — inspect them in the Action Queue.
               </p>
             </div>
@@ -969,7 +969,7 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
           <nav className="cin-footer-col" aria-label="Trust">
             <strong>Trust</strong>
             <Link href="/trust">Trust &amp; compliance</Link>
-            <a href="#copilot">0xWal control plane</a>
+            <a href="#copilot">Zeke control plane</a>
             <Link href="/login">Log in</Link>
             <Link href="/signup">Open payment desk</Link>
           </nav>

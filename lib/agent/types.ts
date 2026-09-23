@@ -100,6 +100,7 @@ export interface UnsignedProposal {
   unsignedTxBytes: string;
   simulation?: SimulationResult;
   explain: ProposalExplain;
+  /** The agent's persisted actor id (AGENT_ACTOR_ID in lib/agent/identity.ts) or a human userId. */
   createdBy: 'OXWAL' | string;
   createdAt: string;
   expiresAt: string;
