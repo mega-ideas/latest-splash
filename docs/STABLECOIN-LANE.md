@@ -77,6 +77,36 @@ transfer, but the **seller's facilitator** broadcasts the payment, not Splash.
 - **Demo seller:** `/api/x402/demo/corridor-fees` sells the corridor fee
   schedule for 0.01 USDC to `X402_DEMO_PAY_TO`. It is off when that's unset.
 
+## Funding a Splash wallet (lib/payments/cctp.ts)
+
+The simplest route is also the recommended one: send **native USDC on Sui**
+to the Splash wallet address. The planner (Send USDC → "Fund this wallet
+from another chain") plans the rest. It moves nothing. Facts, from Circle's
+developer docs as of 2026-09-24:
+
+- **CCTP carries USDC only.** USDT is swapped to USDC on the source chain first, with a slippage floor.
+- **Sui is on CCTP V1 (legacy) only**, domain 8. V1 has been in a manual phase-out since **31 July 2026**, ending in a full contract pause.
+- **Ethereum (0), Arbitrum (3), Base (6) and Solana (5)** still reach Sui over V1, for now. The planner warns on every plan.
+- **Aptos has no CCTP route to Sui.** Aptos is V2-only, and V1 and V2 do not interoperate. The planner says so and offers alternatives.
+- **V1 waits for source-chain finality:** about 13–20 minutes from Ethereum and its rollups, under a minute from Solana.
+- **Fees:** Circle charges no fee on V1, but each side's gas is paid by the person. Claiming the mint on Sui needs SUI.
+
+Executing CCTP (the source-chain burn and the Sui claim) is not built. The planner gives the exact parameters: domains, and the 32-byte `mintRecipient`.
+
+## Treasury: Ondo USDY in the business's own wallet (lib/payments/treasury-usdy.ts)
+
+- **What it is:** USDC on Sui → Ondo USDY on Sui (`0x960b…56bb::usdy::USDY`, 6 decimals, the same as USDC), held in the business's own Splash wallet. Splash holds neither.
+- **Who can use it:** verified businesses only, never US persons.
+- **Preview until `USDY_ONDO_ELIGIBILITY_CONFIRMED=true`:** numbers are shown, nothing is swapped.
+- **The math:**
+  - USDY out = USDC × 10⁶ ÷ price (µUSD), rounded down, with a slippage floor.
+  - Projections compound daily at the modelled rate (`USDY_NET_APY_PCT`), rounded down each day.
+  - They are labelled variable, not promised.
+- **Price:** comes from `USDY_REDEMPTION_USD` and fails closed.
+  - No price: no quote.
+  - Stale: flagged.
+  - No `USDY_REDEMPTION_AS_OF`: no quote. An undated $1.00 is a placeholder; USDY trades above $1.
+
 ## Step-up approvals (lib/server/step-up.ts)
 
 Each workspace picks a style in **Settings → Approve with a WhatsApp code and passkey**:
@@ -106,6 +136,8 @@ Every approval is bound to the sha256 of exactly what it approves. It is spent w
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_FROM` | Delivering codes. |
 | `TWILIO_WHATSAPP_CODE_CONTENT_SID` | An approved "verification code" template (`Your {{1}} code is {{2}}`). Without it, codes go as free text, which WhatsApp delivers only within 24 hours of the recipient last messaging the sender. |
 | `X402_DEMO_PAY_TO` | The demo x402 seller's payee (0.01 USDC per call). Unset: demo seller off. |
+| `USDY_REDEMPTION_USD` + `USDY_REDEMPTION_AS_OF` | The USDY price for Treasury quotes. Without the timestamp, no quote. |
+| `USDY_ONDO_ELIGIBILITY_CONFIRMED` | `true` only once Ondo confirms eligibility. Until then Treasury is a preview. |
 | `FEATURE_KYB_GATE=true` | Locking fiat lanes for unverified businesses. In production it also needs the Sumsub keys. |
 
 ## Demo accounts (`npm run dev:db`, password `SplashDemo!2026`)
@@ -121,4 +153,4 @@ Every approval is bound to the sha256 of exactly what it approves. It is spent w
 - **MetaMask** reaches Sui only through the Sui Snap, on desktop.
 - **Every transfer needs a little SUI for gas** in the sending wallet.
 - **x402 on a slow facilitator:** a seller that accepts a payment which then never lands leaves the quote counting until it expires. Retrying resends the same signed payment, so it can't be paid twice.
-- **Still to come:** the CCTP funding planner, and Treasury (USDC → Ondo USDY; verified businesses only; non-US; allowlisted).
+- **Still to come:** executing CCTP (source burn + Sui claim), executing the USDY swap once Ondo eligibility is confirmed, and a live USDY price feed.

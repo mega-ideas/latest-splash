@@ -20,6 +20,8 @@ import { toast } from 'sonner';
 import ApprovalFlow from '@/components/approvals/ApprovalFlow';
 import ApprovalsInbox from '@/components/approvals/ApprovalsInbox';
 import DashPageHeader from '@/components/dashboard/DashPageHeader';
+import FundingPlanner from '@/components/stablecoin/FundingPlanner';
+import UsdyPreview from '@/components/stablecoin/UsdyPreview';
 import {
   formatUsdc,
   parseUsdcMinor,
@@ -707,6 +709,7 @@ export default function SendUsdcDesk() {
             />
           ) : null}
           <RecentTransfers outflows={lane?.outflows ?? []} recipients={recipients} />
+          <UsdyPreview />
         </aside>
       </section>
     </div>
@@ -813,9 +816,12 @@ function WalletBalances({ view, source }: { view: WalletView | null | undefined;
         <p className="mt-2 text-[12px] leading-5 text-[#9F5839]">Add a little SUI (about 0.05) to pay network fees — without it this wallet can hold USDC but not send it.</p>
       ) : null}
       {source === 'SPLASH' ? (
-        <p className="mt-2 text-[12px] leading-5 text-[#326273]/70">
-          Fund it from MetaMask (Sui Snap), Slush, an exchange or any wallet that sends <strong>USDC on Sui</strong> to this address. USDC on other chains comes over with Circle&apos;s CCTP.
-        </p>
+        <>
+          <p className="mt-2 text-[12px] leading-5 text-[#326273]/70">
+            Fund it from MetaMask (Sui Snap), Slush, an exchange or any wallet that sends <strong>USDC on Sui</strong> to this address.
+          </p>
+          <FundingPlanner destination={view.address} />
+        </>
       ) : null}
     </div>
   );

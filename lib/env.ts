@@ -156,6 +156,9 @@ export const envSchema = z.object({
    *  Sui mainnet. Unset: the demo seller answers 503. Use an address you
    *  control — paying it moves real USDC. */
   X402_DEMO_PAY_TO: suiAddress,
+  /** Ondo has confirmed this deployment's businesses may hold USDY. Off: the
+   *  treasury USDY quote is a preview (SANDBOX) — numbers, never a swap. */
+  USDY_ONDO_ELIGIBILITY_CONFIRMED: flag('false'),
   MIN_USDC_FLOAT_MICRO: int(0),
   SPLASH_SETTLEMENT_COIN_TYPE: coinType,
   SPLASH_PEG_USDC_DEVIATION_PPM: int(0),
