@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
+import { invoiceDeliveryTier } from '@/lib/server/custody-phase';
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { readJsonBody } from '@/lib/server/http';
 import { patchInvoice, readInvoice } from '@/lib/server/invoices-store';
@@ -22,8 +23,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const { id } = await params;
   const invoice = await readInvoice(accountCheck.account.orgId, id);
   // 404 for both "does not exist" and "not yours".
+  // The transfer page prefills its delivery step from recommendedDeliveryTier.
+  // It is a client component and cannot read the custody phase, so the server
+  // decides — with the same gate the authorize step enforces.
   return invoice
-    ? NextResponse.json(invoice)
+    ? NextResponse.json({ ...invoice, recommendedDeliveryTier: invoiceDeliveryTier(invoice.targetCurrency) })
     : NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
 }
 

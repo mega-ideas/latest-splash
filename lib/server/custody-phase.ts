@@ -51,6 +51,21 @@ export function deliveryTierAllowed(tier: string, config: CustodyConfig = getCon
 }
 
 /**
+ * The delivery tier to recommend for an invoice's payout. PHP used to map to
+ * SWEEP_ACCOUNT unconditionally, so the invoice loop and the transfer prefill
+ * recommended a fund-holding tier the authorize step then refused. The
+ * recommendation now goes through the same `deliveryTierAllowed()` the money
+ * routes enforce: SWEEP_ACCOUNT only once the custody phase is on, and
+ * PAYOUT_ONLY otherwise.
+ */
+export function invoiceDeliveryTier(
+  targetCurrency: string | undefined,
+  config: CustodyConfig = getContractConfig(),
+): 'PAYOUT_ONLY' | 'SWEEP_ACCOUNT' {
+  return targetCurrency === 'PHP' && deliveryTierAllowed('SWEEP_ACCOUNT', config) ? 'SWEEP_ACCOUNT' : 'PAYOUT_ONLY';
+}
+
+/**
  * The 403 every gated path answers with. A plain Response, so this module
  * stays importable under `node --test` without Next's runtime.
  */
