@@ -2,6 +2,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { ArrowLeft, ArrowRight, ShieldCheck } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { BRAND } from '@/content/brand';
 
 /**
  * Shared chrome for the two documents Google's OAuth consent screen links to.
@@ -76,7 +77,7 @@ export default function LegalShell({
 
       <footer className="wc-footer">
         <div className="iso-shell wc-footer-inner">
-          <span>© 2026 Splash Financial Labuan Ltd.</span>
+          <span>{BRAND.copyright()}</span>
           <span>
             <Link href="/privacy-policy">Privacy</Link>
             {' · '}

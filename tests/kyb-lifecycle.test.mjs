@@ -56,7 +56,9 @@ test('the Sumsub webhook verifies before it parses', async () => {
     new URL('../app/api/webhooks/sumsub/route.ts', import.meta.url),
     'utf8',
   );
-  const verifyAt = route.indexOf('if (\n    !verify(');
+  // Normalise newlines: this matches source text ACROSS a line break, so on a
+  // CRLF checkout the LF form never matched. The invariant is the ORDER.
+  const verifyAt = route.replace(/\r\n/g, '\n').indexOf('if (\n    !verify(');
   const parseAt = route.indexOf('JSON.parse(raw)');
   assert.ok(verifyAt > 0 && verifyAt < parseAt, 'the digest is checked before the body is read');
   assert.match(route, /return new Response\('forbidden', \{ status: 403 \}\)/);

@@ -30,7 +30,7 @@ import { RATE_LIMITS, checkRateLimit, rateLimited, recordHit } from '@/lib/serve
  * What it also does now (WS1, X5): delivers a confirmation link to the
  * address. Until that link is opened the account is unverified, and a
  * membership grant to an unverified account is refused — so registering
- * someone else's address first earns nothing. Opening the link sets the
+ * someone else's address first gains nothing. Opening the link sets the
  * password, so the mailbox owner wins even if someone else registered it.
  */
 

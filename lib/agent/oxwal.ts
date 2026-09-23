@@ -1510,7 +1510,11 @@ const SPLASH_ANSWERS: Array<{ test: RegExp; reply: string; skipIf?: RegExp }> = 
     // it never was, because this responder cannot read the caller's KYB state.
     // scripts/check-copy.mjs now bans that verdict, so it is described here
     // rather than quoted.
-    reply: 'Your verification standing is on the KYB screen — I do not assert it here, and the money routes enforce it themselves regardless of what any screen says. How the control works: every batch row is screened for AML lists, KYT amount rules (single transfers above 5,000 USD route to manual review), structuring patterns, corridor allowlist and purpose codes — before any value moves. The audit trail is retained on Walrus.',
+    reply: 'Every batch row is screened before any value moves: AML lists, KYT amount rules '
+      + '(single transfers above 5,000 USD route to manual review), structuring patterns, corridor '
+      + 'allowlist and purpose codes. The audit trail is retained on Walrus. For where YOUR '
+      + 'organisation stands — KYB state, tier and any open flags — open Settings → KYB; I will not '
+      + 'state your compliance status from memory.',
   },
   {
     // Settlement speed

@@ -23,10 +23,10 @@ export default function PrivacyPolicyPage() {
     >
       <h2>1. Who we are</h2>
       <p>
-        Splash Financial Labuan Ltd. (&ldquo;Splash&rdquo;, &ldquo;we&rdquo;) operates the software
-        described in this policy. Splash is the controller of the personal data described below.
-        Where a licensed partner is the system of record for a regulated activity, that partner is
-        the controller of the data it holds under its own licence and its own privacy notice.
+        Splash (&ldquo;we&rdquo;) operates the software described in this policy, and is the
+        controller of the personal data described below. Where a partner of record performs a
+        regulated activity, that partner is the controller of the data it holds under its own
+        licence and its own privacy notice.
       </p>
 
       <h2>2. Which service this covers</h2>
@@ -118,7 +118,7 @@ export default function PrivacyPolicyPage() {
 
       <h2>6. Who we share it with</h2>
       <p>
-        Licensed partners who are the system of record for a regulated step, where an instruction you
+        Partners of record for a regulated step, where an instruction you
         gave requires it. Service providers who host and operate our infrastructure, under contract
         and only on our instructions. Authorities, where the law requires it. Professional advisers,
         under a duty of confidentiality. A successor entity, if the business is transferred.

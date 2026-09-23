@@ -23,8 +23,7 @@ export default function TermsOfServicePage() {
     >
       <h2>1. These terms</h2>
       <p>
-        These terms are an agreement between you and Splash Financial Labuan Ltd.
-        (&ldquo;Splash&rdquo;, &ldquo;we&rdquo;). By creating an account or using the service you
+        These terms are an agreement between you and Splash (&ldquo;we&rdquo;). By creating an account or using the service you
         accept them. If you are accepting on behalf of a company, you confirm you are authorised to
         bind it, and &ldquo;you&rdquo; means that company.
       </p>
@@ -44,7 +43,7 @@ export default function TermsOfServicePage() {
       <h2>3. Our regulatory position</h2>
       <p>
         Splash is not yet a licensed money-services business. Where a step in a payment is a
-        regulated activity, a licensed partner is the system of record and performs it under its own
+        regulated activity, a partner of record is the system of record and performs it under its own
         licence, subject to its own terms and its own checks. Splash provides the software and the
         settlement layer between those parties.
       </p>

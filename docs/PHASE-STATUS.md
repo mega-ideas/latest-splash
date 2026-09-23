@@ -32,10 +32,16 @@ message; nothing is squashed.
 
 | **WS9 · Landing, calculator, numbers, copy** (Master Prompt v3) | One landing, `components/landing/Landing.tsx`: eight sections in order (hero, record, calculator, how it works, numbers, pricing, FAQ, footer), no protocol names, and no comparison with a leg Splash does not price. `lib/fx/calculator.ts` prices USD to PHP in bigint minor units and shows no peso figure without a dated rate; `lib/fx/comparison-baselines.ts` names the World Bank Remittance Prices Worldwide dataset it quotes. `content/sea-numbers.ts` gives every published number a source, URL and date, and `scripts/check-numbers.mjs` (in lint) refuses an unsourced one in production. `content/brand.ts` is the only place the name, domain and support address live, and no legal entity is named on any surface. `scripts/copy-rules.mjs` gives every copy rule a reason, and the lint tells marketing routes (claims and jargon) from the signed-in product (claims only); the locked sentence in `content/money-path.ts` is the one file allowed to say "in process". The Sui-blue landing, the mobile landing and the settlement cinematic are deleted. `tests/landing-and-numbers.test.mjs` (9) |
 
-**312 tests across twelve suites**, plus **114 Move tests** (75 `splash_core` +
-23 `splash_meter` + 16 `splash_custody`) on Sui CLI 1.77.2. Five Move-invariant
-CI guards in `npm run lint` (`check:core`, `check:compliance`, `check:treasury`,
-`check:generations`, `check:aborts`), plus `check:copy`, `check:numbers` and `check:env`. Lint, `tsc` and the production build are clean.
+**573 tests across 66 suites**, all passing, on the merged tree. The Move
+packages declare **133 tests** (94 `splash_core` + 23 `splash_meter` +
+16 `splash_custody`); that is a count of `#[test]` functions, **not** a run —
+no Sui CLI is installed on the machine this merge was integrated on, so
+`sui move build` and `sui move test` are still owed before any publish.
+Eleven CI guards in `npm run lint`, all green: five Move-invariant
+(`check:core`, `check:compliance`, `check:treasury`, `check:generations`,
+`check:aborts`) plus `check:copy`, `check:numbers`, `check:migrations`,
+`check:stores`, `check:binary` and `check:env`. Lint and `tsc --noEmit` are
+clean.
 
 ---
 

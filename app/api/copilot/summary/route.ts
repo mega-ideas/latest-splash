@@ -17,7 +17,6 @@ export async function GET(request: Request) {
     (await enforceRateLimit({ rule: RATE_LIMITS.copilotIp, key: clientIp(request) }));
   if (limited) return limited;
 
-  const invoices = listInvoices();
   // The assistant's view of "your invoices" was every tenant's, so it would
   // describe one customer's overdue invoices to another. Scoped to the caller.
   const accountCheck = await requireSessionAccount(auth.session);

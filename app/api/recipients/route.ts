@@ -46,7 +46,6 @@ export async function POST(request: Request) {
   const tier = typeof body.tier === 'string' && body.tier ? body.tier : 'PAYOUT_ONLY';
   if (!deliveryTierAllowed(tier)) return custodyPhaseResponse();
 
-  const record = createRecipient({
   const record = await persistRecipient(buildRecipient({
     // From the SESSION, never the request. This is the field that decides whose
     // beneficiary it is and therefore who can read it back.

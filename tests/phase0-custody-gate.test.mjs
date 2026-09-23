@@ -74,7 +74,7 @@ test('the transfer route refuses STORED_BALANCE and SWEEP_ACCOUNT before it writ
   const route = await source('app/api/transfers/authorize/route.ts');
   const check = route.indexOf('deliveryTierAllowed(');
   assert.ok(check > 0, 'the route must consult the custody phase');
-  assert.ok(check < route.indexOf('createRecipient('), 'the tier is checked before the recipient is created');
+  assert.ok(check < route.indexOf('persistRecipient('), 'the tier is checked before the recipient is created');
   assert.ok(check < route.indexOf('createTransferIntent('), 'and before the intent exists');
   assert.match(route, /custodyPhaseResponse\(\)/);
   // The schema still defaults to the one Phase-0 tier.
@@ -83,7 +83,7 @@ test('the transfer route refuses STORED_BALANCE and SWEEP_ACCOUNT before it writ
 
 test('a recipient cannot be created with a fund-holding tier in Phase 0 either', async () => {
   const route = await source('app/api/recipients/route.ts');
-  assert.ok(route.indexOf('deliveryTierAllowed(') < route.indexOf('createRecipient('));
+  assert.ok(route.indexOf('deliveryTierAllowed(') < route.indexOf('persistRecipient('));
   assert.match(route, /custodyPhaseResponse\(\)/);
 });
 
