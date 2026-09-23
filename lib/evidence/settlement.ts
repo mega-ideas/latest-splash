@@ -5,6 +5,7 @@ import type { SimulationResult, UnsignedProposal, UserRole } from '../agent/type
 import type { AuditReceipt } from '../server/operations.ts';
 import { readSealPolicy, sealAdapter, type SealPolicy } from '../server/seal.ts';
 import { retrieveBlob, storeEncryptedInvoice, type WalrusBlob } from '../server/walrus.ts';
+import type { DomainTag, PaymentCommitmentPayload } from './commitment.ts';
 
 export type EvidenceConversationItem = {
   role: 'USER' | 'ASSISTANT' | 'TOOL' | 'SYSTEM';
@@ -13,8 +14,23 @@ export type EvidenceConversationItem = {
   trusted: boolean;
 };
 
+/**
+ * WS5. What the chain holds is `commitmentHex`, on every lifecycle event of
+ * the payment. What only this bundle holds is the salt and the payload behind
+ * it. Whoever the Seal policy admits can recompute the commitment and check it
+ * against the events with `scripts/verify-commitment.mjs`. The salt is drawn
+ * once per payment and is never logged or emitted.
+ */
+export interface SettlementCommitmentRecord {
+  tag: DomainTag;
+  commitmentHex: string;
+  saltHex: string;
+  payload: PaymentCommitmentPayload;
+}
+
+/** v2: the bundle carries the commitment record. A v1 reader knows no salt. */
 export interface SettlementEvidenceBundle {
-  schema: 'splash.settlement-evidence.v1';
+  schema: 'splash.settlement-evidence.v2';
   transferId: string;
   proposal: Pick<UnsignedProposal, 'id' | 'idempotencyKey' | 'kind' | 'tier' | 'createdBy' | 'createdAt'> | null;
   conversation: EvidenceConversationItem[];
@@ -30,6 +46,7 @@ export interface SettlementEvidenceBundle {
     recipient: string;
     targetCurrency: string;
     paymentMist: number;
+    commitment: SettlementCommitmentRecord;
   };
   createdAt: string;
 }
@@ -78,6 +95,7 @@ export function createTransferSettlementEvidence(input: {
   paymentIntentId: string;
   intentCreateDigest: string;
   expectedAnchorId: string;
+  commitment: SettlementCommitmentRecord;
   funding?: AuditReceipt['funding'];
   approvals?: SettlementEvidenceBundle['approvals'];
   conversation?: EvidenceConversationItem[];
@@ -88,7 +106,7 @@ export function createTransferSettlementEvidence(input: {
 }): SettlementEvidenceBundle {
   const createdAt = input.createdAt ?? new Date().toISOString();
   return {
-    schema: 'splash.settlement-evidence.v1',
+    schema: 'splash.settlement-evidence.v2',
     transferId: input.transferId,
     proposal: null,
     conversation: input.conversation ?? [],
@@ -104,6 +122,7 @@ export function createTransferSettlementEvidence(input: {
       recipient: input.recipient,
       targetCurrency: input.targetCurrency,
       paymentMist: input.paymentMist,
+      commitment: input.commitment,
     },
     createdAt,
   };

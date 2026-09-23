@@ -30,6 +30,65 @@ The remaining four modules (`smart_treasury`, `payment_intent`, `audit_anchor`, 
 
 ---
 
+## WS5 — Event privacy before the immutable publish — 2026-09-23
+
+`splash_core` publishes immutable, and an event struct's fields freeze with
+it. Until this pass six events carried the payment in cleartext:
+`IntentCreated` (sender, recipient, amount_usd, target_currency,
+fx_rate_usd_local), `IntentConfirmed` (sender, recipient, amount_paid),
+`IntentCanceled` (sender), `SettlementAnchored` (sender, recipient,
+beneficiary_ref, amount, currency, corridor), `PayoutApproved` and
+`PayoutApprovalConsumed` (amount). `ReceiptIssued` carried the same, and the
+meta-test found three more of the same class: `ApplicationReceived` (the
+company registration number and the KYB pointer), `BusinessVerified` (the
+risk score) and `DailyCapChanged` (the ceiling).
+
+**What ships.** Every payment lifecycle event now carries `intent_id`, a
+32-byte `commitment`, `status` and `timestamp_ms`, and nothing else; the
+anchor event adds the two evidence pointers (a ciphertext hash and a Walrus
+blob id). The commitment is `blake2b256(DOMAIN_TAG || bcs(payload) || salt)`
+with a documented field order and 32 CSPRNG salt bytes per payment, computed
+off-chain by `lib/evidence/commitment.ts` before the intent is opened. Move
+asserts the length (`E_BAD_COMMITMENT`, 420 and 804) and carries the bytes.
+The salt and the payload live only in the Seal bundle
+(`splash.settlement-evidence.v2`); nothing logs or emits the salt, and a
+test checks the settlement layer does not have the word in it.
+`scripts/verify-commitment.mjs` checks a settlement against its events for
+anyone the Seal policy admits. Specification and vectors:
+`docs/commitments.md`. Tests: `tests/event-privacy.test.mjs` (8) and
+`move/splash_core/tests/event_privacy_tests.move` (7).
+
+**What this does not hide.** The base-layer coin transfer still shows
+sender, recipient and amount. This removes Splash's business metadata from
+the event stream, not the transfer. Confidential transfers stay quarantined
+under the four-gate decision below.
+
+**Found on the way, not resolved here, for Sebastian.**
+
+1. *Objects still hold the cleartext.* `PaymentIntent` (shared) stores
+   `recipient`, `beneficiary_ref`, `amount_usd`, `currency`, `corridor`,
+   `target_currency` and `fx_rate_usd_local`; `ReceiptV2` (shared) stores
+   the counterparties and both amounts; `BusinessAccount` stores the
+   registration number, the KYB pointer and the risk score. Anyone who reads
+   the object learns what the event no longer says. The amount and the
+   recipient must stay on the intent (`settle` splits the coin by them), but
+   the beneficiary reference, the corridor, the target currency and the rate
+   could be replaced by the same commitment. That changes object layouts,
+   which also freeze at publish, so it is the same deadline as this pass.
+2. *Per-family, not per-event, domain tags.* The prompt asked for a tag per
+   event. Every lifecycle event of one payment carries the same commitment,
+   because an intent can be expired by anyone and a stranger holds no salt,
+   and because a second hash over a salted value hides nothing more. If he
+   prefers a per-event derivation, `blake2b256(EVENT_TAG || commitment)` on
+   chain is a small change.
+3. *`amount_band`.* Not included. The prompt allows a coarse `amount_band: u8`
+   only if Sebastian approves it; adding a field later is trivial before
+   publish and impossible after.
+4. *The testnet settlement.* `scripts/verify-commitment.mjs` is exercised
+   against fixture events in the test suite. Verifying a real settlement
+   needs the new `splash_core` published to testnet, which is a publish and
+   therefore not done here.
+
 ## Re-audit pass — 2026-07-13
 
 **Scope**: all 9 modules under `move/sources/` at HEAD. Methodology: OtterSec

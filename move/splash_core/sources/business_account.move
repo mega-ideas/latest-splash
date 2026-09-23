@@ -245,11 +245,11 @@ public struct PayoutApproval has key {
 
 // ─── Events ────────────────────────────────────────────────────────────────
 
+/// WS5: the registration number and the KYB pointer stay on the object, off
+/// the event stream — an event is forever, and a company number is metadata.
 public struct ApplicationReceived has copy, drop {
     business_account_id: address,
     owner: address,
-    ssm_number: String,
-    kyb_cid: String,
 }
 
 public struct BusinessUnverified has copy, drop {
@@ -257,10 +257,10 @@ public struct BusinessUnverified has copy, drop {
     owner: address,
 }
 
+/// WS5: the risk score stays on the object, off the event stream.
 public struct BusinessVerified has copy, drop {
     business_account_id: address,
     owner: address,
-    risk_score: u8,
 }
 
 /// Every authority change, in one event shape, carrying the epoch it produced.
@@ -290,18 +290,21 @@ public struct RecoveryCancelled has copy, drop {
     cancelled_by: address,
 }
 
+/// WS5: the ceiling is read off the object; the event says only that it moved.
 public struct DailyCapChanged has copy, drop {
     business_account_id: address,
-    cap_minor: u64,
 }
 
+/// WS5: the payment's commitment where the amount used to be. The approver
+/// reads the amount off the intent object they are shown; the event stream
+/// gets thirty-two bytes only the Seal policy's allowlist can open.
 public struct PayoutApproved has copy, drop {
     approval_id: address,
     business_account_id: address,
     intent_id: ID,
     approver: address,
     maker: address,
-    amount: u64,
+    commitment: vector<u8>,
     authority_epoch: u64,
     expires_at_ms: u64,
 }
@@ -311,9 +314,8 @@ public struct PayoutApprovalConsumed has copy, drop {
     business_account_id: address,
     intent_id: ID,
     approver: address,
-    amount: u64,
-    daily_spent_after: u64,
-    daily_cap: u64,
+    commitment: vector<u8>,
+    consumed_at_ms: u64,
 }
 
 /// Emitted whenever anchor authority moves. Security-critical: off-chain
@@ -390,8 +392,6 @@ public fun submit_application(
     event::emit(ApplicationReceived {
         business_account_id: object::uid_to_address(&account.id),
         owner,
-        ssm_number: account.ssm_number,
-        kyb_cid: account.kyb_cid,
     });
 
     transfer::share_object(account);
@@ -407,7 +407,6 @@ public fun verify_business(_: &AdminCap, account: &mut BusinessAccount, risk_sco
     event::emit(BusinessVerified {
         business_account_id: object::uid_to_address(&account.id),
         owner: account.owner,
-        risk_score,
     });
 }
 
@@ -691,7 +690,6 @@ public fun set_daily_cap(_: &AdminCap, account: &mut BusinessAccount, cap_minor:
     daily_limit::set_cap(&mut account.limit, cap_minor);
     event::emit(DailyCapChanged {
         business_account_id: object::uid_to_address(&account.id),
-        cap_minor,
     });
 }
 
@@ -714,6 +712,7 @@ public(package) fun mint_approval(
     intent: ID,
     maker: address,
     amount: u64,
+    commitment: vector<u8>,
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
@@ -743,7 +742,7 @@ public(package) fun mint_approval(
         intent_id: intent,
         approver,
         maker,
-        amount,
+        commitment,
         authority_epoch: approval.authority_epoch,
         expires_at_ms: approval.expires_at_ms,
     });
@@ -773,6 +772,7 @@ public(package) fun consume_approval(
     approval: PayoutApproval,
     intent: ID,
     amount: u64,
+    commitment: vector<u8>,
     clock: &Clock,
 ) {
     assert!(approval.account == object::id(account), E_WRONG_ACCOUNT);
@@ -792,7 +792,7 @@ public(package) fun consume_approval(
         intent: intent_id,
         approver,
         authority_epoch: _,
-        amount: approved_amount,
+        amount: _,
         approved_at_ms: _,
         expires_at_ms: _,
     } = approval;
@@ -802,9 +802,8 @@ public(package) fun consume_approval(
         business_account_id: object::id_to_address(&account_id),
         intent_id,
         approver,
-        amount: approved_amount,
-        daily_spent_after: daily_limit::spent(&account.limit, clock),
-        daily_cap: daily_limit::cap_minor(&account.limit),
+        commitment,
+        consumed_at_ms: clock::timestamp_ms(clock),
     });
     object::delete(id);
 }
@@ -1013,7 +1012,40 @@ public fun consume_approval_for_testing(
     approval: PayoutApproval,
     intent: ID,
     amount: u64,
+    commitment: vector<u8>,
     clock: &Clock,
 ) {
-    consume_approval(account, approval, intent, amount, clock)
+    consume_approval(account, approval, intent, amount, commitment, clock)
+}
+
+#[test_only]
+public fun unpack_payout_approved_for_testing(
+    e: PayoutApproved,
+): (address, address, ID, address, address, vector<u8>, u64, u64) {
+    let PayoutApproved {
+        approval_id,
+        business_account_id,
+        intent_id,
+        approver,
+        maker,
+        commitment,
+        authority_epoch,
+        expires_at_ms,
+    } = e;
+    (approval_id, business_account_id, intent_id, approver, maker, commitment, authority_epoch, expires_at_ms)
+}
+
+#[test_only]
+public fun unpack_payout_approval_consumed_for_testing(
+    e: PayoutApprovalConsumed,
+): (address, address, ID, address, vector<u8>, u64) {
+    let PayoutApprovalConsumed {
+        approval_id,
+        business_account_id,
+        intent_id,
+        approver,
+        commitment,
+        consumed_at_ms,
+    } = e;
+    (approval_id, business_account_id, intent_id, approver, commitment, consumed_at_ms)
 }

@@ -14,8 +14,13 @@ export interface WalrusBlob {
 }
 
 export class WalrusAdapterError extends Error {
-  constructor(message: string, public readonly status = 502) {
+  // A plain field rather than a constructor parameter property: the Node test
+  // runner strips types only, and a parameter property is a transform.
+  readonly status: number;
+
+  constructor(message: string, status = 502) {
     super(message);
+    this.status = status;
     this.name = 'WalrusAdapterError';
   }
 }

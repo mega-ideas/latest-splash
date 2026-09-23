@@ -13,6 +13,8 @@
 ///   * Expiration uses `&Clock` (real wall-clock ms), not epoch boundaries.
 ///   * Overpay is refunded to the sender via `coin::split`.
 ///   * Named abort codes registered in `lib/server/sui-settlement.ts`.
+///   * Events carry a 32-byte commitment, never the payment (WS5). What an
+///     event carries freezes at the immutable publish; see docs/commitments.md.
 module splash_core::payment_intent;
 
 use splash_core::business_account::{Self, BusinessAccount, PayoutApproval};
@@ -52,6 +54,11 @@ const E_WRONG_BUSINESS_ACCOUNT: u64 = 417;
 const E_NOT_A_MEMBER: u64 = 418;
 /// The account is frozen, or not KYB-verified.
 const E_ACCOUNT_NOT_PAYABLE: u64 = 419;
+/// WS5. A commitment is thirty-two bytes, computed off-chain as
+/// blake2b256(tag || bcs(payload) || salt) — see docs/commitments.md. Any
+/// other length is a mis-encoding, never a commitment, and is refused before
+/// an intent exists.
+const E_BAD_COMMITMENT:        u64 = 420;
 
 /// The only module permitted to destroy a `SettleReceipt`. Bound by module name
 /// because Move forbids the circular import that naming the type would require —
@@ -61,6 +68,10 @@ const ANCHOR_MODULE: vector<u8> = b"audit_anchor";
 // ─── Constants ─────────────────────────────────────────────────────────────
 /// 5-minute expiration window.
 const EXPIRATION_WINDOW_MS: u64 = 300_000;
+/// Length of a commitment in bytes. The off-chain library
+/// (lib/evidence/commitment.ts) produces exactly this; Move checks the length
+/// and carries the bytes, and never sees the payload or the salt behind them.
+const COMMITMENT_BYTES: u64 = 32;
 
 // ─── Status constants ──────────────────────────────────────────────────────
 const STATUS_PENDING:   u8 = 0;
@@ -102,48 +113,72 @@ public struct PaymentIntent has key {
     created_epoch: u64,
     expires_at: u64,
     status: u8,
+    /// WS5. The 32-byte commitment every lifecycle event of this intent
+    /// carries: blake2b256(tag || bcs(payload) || salt), computed off-chain.
+    /// The payload and the salt live in the Seal bundle, never here.
+    commitment: vector<u8>,
 }
 
 /// Non-droppable receipt that must be consumed by audit_anchor::anchor.
+///
+/// It carries what the anchor event needs and nothing the event must not
+/// carry: the intent, its commitment, and when it settled.
 public struct SettleReceipt {
     intent_id: ID,
-    sender: address,
-    recipient: address,
-    beneficiary_ref: vector<u8>,
-    amount: u64,
-    currency: vector<u8>,
-    corridor: vector<u8>,
-    created_epoch: u64,
+    commitment: vector<u8>,
     settled_at: u64,
 }
 
 // ─── Events ────────────────────────────────────────────────────────────────
 
+/// WS5. Event structs freeze at the immutable publish, so what they carry is
+/// decided once. Every lifecycle event carries the intent, the commitment the
+/// intent was opened with, the status it is now in, and the clock — and
+/// nothing about who paid whom how much. Whoever the Seal policy admits to the
+/// bundle can open the commitment; see docs/commitments.md.
 public struct IntentCreated has copy, drop {
-    intent_id: address,
-    sender: address,
-    recipient: address,
-    amount_usd: u64,
-    target_currency: String,
-    fx_rate_usd_local: u64,
-    created_at: u64,
-    expires_at: u64,
+    intent_id: ID,
+    commitment: vector<u8>,
+    status: u8,
+    timestamp_ms: u64,
 }
 
 public struct IntentConfirmed has copy, drop {
-    intent_id: address,
-    sender: address,
-    recipient: address,
-    amount_paid: u64,
-    overpay_refunded: u64,
-    confirmed_at: u64,
+    intent_id: ID,
+    commitment: vector<u8>,
+    status: u8,
+    timestamp_ms: u64,
 }
 
+/// `status` is the reason: STATUS_EXPIRED (2) or STATUS_CANCELED (3).
 public struct IntentCanceled has copy, drop {
-    intent_id: address,
-    sender: address,
-    canceled_at: u64,
-    reason: u8, // STATUS_EXPIRED (2) or STATUS_CANCELED (3)
+    intent_id: ID,
+    commitment: vector<u8>,
+    status: u8,
+    timestamp_ms: u64,
+}
+
+fun emit_created(intent: &PaymentIntent, now: u64) {
+    event::emit(IntentCreated {
+        intent_id: object::id(intent),
+        commitment: intent.commitment,
+        status: STATUS_PENDING,
+        timestamp_ms: now,
+    });
+}
+
+fun emit_canceled(intent: &PaymentIntent, status: u8, now: u64) {
+    event::emit(IntentCanceled {
+        intent_id: object::id(intent),
+        commitment: intent.commitment,
+        status,
+        timestamp_ms: now,
+    });
+}
+
+/// The one check Move makes on a commitment. The bytes are opaque here.
+fun assert_commitment(commitment: &vector<u8>) {
+    assert!(commitment.length() == COMMITMENT_BYTES, E_BAD_COMMITMENT);
 }
 
 // ─── Entry / public functions ──────────────────────────────────────────────
@@ -155,6 +190,7 @@ public fun create_payment_intent<T>(
     amount_usd: u64,
     target_currency: String,
     fx_rate_usd_local: u64,
+    commitment: vector<u8>,
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
@@ -162,6 +198,7 @@ public fun create_payment_intent<T>(
     assert!(recipient != @0x0, E_INVALID_RECIPIENT);
     assert!(std::string::length(&target_currency) > 0, E_EMPTY_TARGET_CURRENCY);
     assert!(fx_rate_usd_local > 0, E_INVALID_FX_RATE);
+    assert_commitment(&commitment);
 
     let sender = tx_context::sender(ctx);
     let now = clock::timestamp_ms(clock);
@@ -186,18 +223,10 @@ public fun create_payment_intent<T>(
         created_epoch: ctx.epoch(),
         expires_at,
         status: STATUS_PENDING,
+        commitment,
     };
 
-    event::emit(IntentCreated {
-        intent_id: object::uid_to_address(&intent.id),
-        sender,
-        recipient,
-        amount_usd,
-        target_currency: intent.target_currency,
-        fx_rate_usd_local,
-        created_at: now,
-        expires_at,
-    });
+    emit_created(&intent, now);
 
     transfer::share_object(intent);
 }
@@ -219,6 +248,7 @@ public fun create_payment_intent_for_account<T>(
     amount_usd: u64,
     target_currency: String,
     fx_rate_usd_local: u64,
+    commitment: vector<u8>,
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
@@ -233,6 +263,7 @@ public fun create_payment_intent_for_account<T>(
     assert!(recipient != @0x0, E_INVALID_RECIPIENT);
     assert!(std::string::length(&target_currency) > 0, E_EMPTY_TARGET_CURRENCY);
     assert!(fx_rate_usd_local > 0, E_INVALID_FX_RATE);
+    assert_commitment(&commitment);
 
     let now = clock::timestamp_ms(clock);
     let expires_at = now + EXPIRATION_WINDOW_MS;
@@ -253,18 +284,10 @@ public fun create_payment_intent_for_account<T>(
         created_epoch: ctx.epoch(),
         expires_at,
         status: STATUS_PENDING,
+        commitment,
     };
 
-    event::emit(IntentCreated {
-        intent_id: object::uid_to_address(&intent.id),
-        sender: maker,
-        recipient,
-        amount_usd,
-        target_currency: intent.target_currency,
-        fx_rate_usd_local,
-        created_at: now,
-        expires_at,
-    });
+    emit_created(&intent, now);
 
     transfer::share_object(intent);
 }
@@ -279,6 +302,7 @@ public fun create<T>(
     corridor: vector<u8>,
     target_currency: String,
     fx_rate_usd_local: u64,
+    commitment: vector<u8>,
     clock: &Clock,
     ctx: &mut TxContext,
 ): PaymentIntent {
@@ -289,6 +313,7 @@ public fun create<T>(
     assert!(corridor.length() > 0, E_EMPTY_CORRIDOR);
     assert!(std::string::length(&target_currency) > 0, E_EMPTY_TARGET_CURRENCY);
     assert!(fx_rate_usd_local > 0, E_INVALID_FX_RATE);
+    assert_commitment(&commitment);
 
     let sender = tx_context::sender(ctx);
     let now = clock::timestamp_ms(clock);
@@ -311,19 +336,11 @@ public fun create<T>(
         created_epoch,
         expires_at,
         status: STATUS_PENDING,
+        commitment,
     };
     let intent_id = object::id(&intent);
 
-    event::emit(IntentCreated {
-        intent_id: object::uid_to_address(&intent.id),
-        sender,
-        recipient,
-        amount_usd: amount,
-        target_currency: intent.target_currency,
-        fx_rate_usd_local,
-        created_at: now,
-        expires_at,
-    });
+    emit_created(&intent, now);
 
     // M1 FIX — `create` used to mint a `SettleReceipt` right here, with
     // `settled_at: now` and no `Coin` anywhere in the function. The type asserted
@@ -389,6 +406,7 @@ public fun approve_payout(
         object::id(intent),
         intent.sender,
         intent.amount_usd,
+        intent.commitment,
         clock,
         ctx,
     );
@@ -422,6 +440,7 @@ public fun confirm_with_approval<T>(
         approval,
         object::id(intent),
         intent.amount_usd,
+        intent.commitment,
         clock,
     );
 
@@ -468,23 +487,15 @@ fun settle<T>(
     let confirmed_at = clock::timestamp_ms(clock);
 
     event::emit(IntentConfirmed {
-        intent_id: object::uid_to_address(&intent.id),
-        sender: intent.sender,
-        recipient: intent.recipient,
-        amount_paid: intent.amount_usd,
-        overpay_refunded: overpay,
-        confirmed_at,
+        intent_id: object::id(intent),
+        commitment: intent.commitment,
+        status: STATUS_CONFIRMED,
+        timestamp_ms: confirmed_at,
     });
 
     SettleReceipt {
         intent_id: object::id(intent),
-        sender: intent.sender,
-        recipient: intent.recipient,
-        beneficiary_ref: intent.beneficiary_ref,
-        amount: intent.amount_usd,
-        currency: intent.currency,
-        corridor: intent.corridor,
-        created_epoch: intent.created_epoch,
+        commitment: intent.commitment,
         settled_at: confirmed_at,
     }
 }
@@ -494,12 +505,7 @@ public fun cancel(intent: PaymentIntent, ctx: &mut TxContext) {
     assert!(tx_context::sender(ctx) == intent.sender, E_UNAUTHORIZED);
     assert!(intent.status == STATUS_PENDING, E_NOT_PENDING);
 
-    event::emit(IntentCanceled {
-        intent_id: object::uid_to_address(&intent.id),
-        sender: intent.sender,
-        canceled_at: ctx.epoch_timestamp_ms(),
-        reason: STATUS_CANCELED,
-    });
+    emit_canceled(&intent, STATUS_CANCELED, ctx.epoch_timestamp_ms());
 
     let PaymentIntent {
         id,
@@ -517,6 +523,7 @@ public fun cancel(intent: PaymentIntent, ctx: &mut TxContext) {
         created_epoch: _,
         expires_at: _,
         status: _,
+        commitment: _,
     } = intent;
     id.delete();
 }
@@ -533,12 +540,7 @@ public fun cancel_payment_intent(
 
     intent.status = STATUS_EXPIRED;
 
-    event::emit(IntentCanceled {
-        intent_id: object::uid_to_address(&intent.id),
-        sender: intent.sender,
-        canceled_at: now,
-        reason: STATUS_EXPIRED,
-    });
+    emit_canceled(intent, STATUS_EXPIRED, now);
 }
 
 /// Sender-initiated cancel before expiration. Only the original sender can call.
@@ -552,12 +554,7 @@ public fun cancel_by_sender(
 
     intent.status = STATUS_CANCELED;
 
-    event::emit(IntentCanceled {
-        intent_id: object::uid_to_address(&intent.id),
-        sender: intent.sender,
-        canceled_at: clock::timestamp_ms(clock),
-        reason: STATUS_CANCELED,
-    });
+    emit_canceled(intent, STATUS_CANCELED, clock::timestamp_ms(clock));
 }
 
 /// Delete a finalized (confirmed, expired, or canceled) intent to reclaim
@@ -583,6 +580,7 @@ public fun delete_finalized(intent: PaymentIntent) {
         created_epoch: _,
         expires_at: _,
         status: _,
+        commitment: _,
     } = intent;
     id.delete();
 }
@@ -595,6 +593,10 @@ public fun sender(intent: &PaymentIntent): address          { intent.sender }
 public fun recipient(intent: &PaymentIntent): address       { intent.recipient }
 public fun amount_usd(intent: &PaymentIntent): u64          { intent.amount_usd }
 public fun status(intent: &PaymentIntent): u8               { intent.status }
+/// The commitment this intent was opened with; what every lifecycle event carries.
+public fun commitment(intent: &PaymentIntent): vector<u8>   { intent.commitment }
+/// STATUS_CONFIRMED, for the anchor event that follows a settlement.
+public fun status_confirmed(): u8                           { STATUS_CONFIRMED }
 public fun expires_at(intent: &PaymentIntent): u64          { intent.expires_at }
 public fun target_currency(intent: &PaymentIntent): &String { &intent.target_currency }
 public fun settlement_asset(intent: &PaymentIntent): &String { &intent.settlement_asset }
@@ -626,32 +628,34 @@ public fun is_expired(intent: &PaymentIntent, clock: &Clock): bool {
 public(package) fun unpack_settle_receipt<W: drop>(
     _witness: W,
     receipt: SettleReceipt,
-): (ID, address, address, vector<u8>, u64, vector<u8>, vector<u8>, u64, u64) {
+): (ID, vector<u8>, u64) {
     assert!(
         type_name::with_defining_ids<W>().module_string() == std::ascii::string(ANCHOR_MODULE),
         E_UNAUTHORIZED_RECEIPT_CONSUMER,
     );
-    let SettleReceipt {
-        intent_id,
-        sender,
-        recipient,
-        beneficiary_ref,
-        amount,
-        currency,
-        corridor,
-        created_epoch,
-        settled_at,
-    } = receipt;
+    let SettleReceipt { intent_id, commitment, settled_at } = receipt;
+    (intent_id, commitment, settled_at)
+}
 
-    (
-        intent_id,
-        sender,
-        recipient,
-        beneficiary_ref,
-        amount,
-        currency,
-        corridor,
-        created_epoch,
-        settled_at,
-    )
+// ─── Test-only ─────────────────────────────────────────────────────────────
+// Event fields are private to this module. These unpackers let the tests read
+// what an event carries — and, because each returns every field, a field added
+// to an event changes a tuple and fails the test build.
+
+#[test_only]
+public fun unpack_intent_created_for_testing(e: IntentCreated): (ID, vector<u8>, u8, u64) {
+    let IntentCreated { intent_id, commitment, status, timestamp_ms } = e;
+    (intent_id, commitment, status, timestamp_ms)
+}
+
+#[test_only]
+public fun unpack_intent_confirmed_for_testing(e: IntentConfirmed): (ID, vector<u8>, u8, u64) {
+    let IntentConfirmed { intent_id, commitment, status, timestamp_ms } = e;
+    (intent_id, commitment, status, timestamp_ms)
+}
+
+#[test_only]
+public fun unpack_intent_canceled_for_testing(e: IntentCanceled): (ID, vector<u8>, u8, u64) {
+    let IntentCanceled { intent_id, commitment, status, timestamp_ms } = e;
+    (intent_id, commitment, status, timestamp_ms)
 }

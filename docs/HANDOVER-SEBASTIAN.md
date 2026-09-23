@@ -322,6 +322,22 @@ Still not merged. Still not published.
    third-party* dependencies; that reasoning is sound and is not what I am
    questioning.
 
+4. **Review WS5, event privacy, before the immutable publish** (branch
+   `ws5/event-privacy`, Master Prompt v3). Event structs freeze at publish.
+   Every payment lifecycle event now carries `intent_id`, a 32-byte
+   commitment, `status` and `timestamp_ms` instead of the sender, recipient,
+   amount, currency, rate and beneficiary reference; the approval and receipt
+   events carry the commitment where the amount was; three admin events drop
+   a registration number, a KYB pointer, a risk score and a ceiling. The
+   commitment is `blake2b256(tag || bcs(payload) || salt)`, computed off-chain,
+   with the salt only in the Seal bundle (`docs/commitments.md`). Three things
+   are yours to decide, listed in SECURITY.md under WS5: whether the objects
+   should stop holding the same cleartext (same deadline), whether you want a
+   per-event tag derived on chain rather than one commitment per payment, and
+   whether to add the coarse `amount_band: u8` the prompt allows only with
+   your approval. Every file under `move/` in that branch is yours to
+   approve; nothing is published.
+
 Phase 7 (break-glass) depends on Phase 6 and is untouched.
 
 ---

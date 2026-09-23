@@ -9,7 +9,7 @@ async function source(path) {
 test('settlement evidence module defines encrypted Walrus-backed evidence bundles', async () => {
   const evidence = await source('lib/evidence/settlement.ts');
 
-  assert.match(evidence, /splash\.settlement-evidence\.v1/);
+  assert.match(evidence, /splash\.settlement-evidence\.v2/);
   assert.match(evidence, /sealAndStoreSettlementEvidence/);
   assert.match(evidence, /sealAdapter\.encrypt/);
   assert.match(evidence, /storeEncryptedInvoice/);

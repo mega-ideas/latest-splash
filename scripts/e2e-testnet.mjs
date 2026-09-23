@@ -7,7 +7,7 @@
  * migration works end-to-end for signing + execution. Testnet SUI is valueless;
  * the configured test recipient is the operator itself, so funds cycle back.
  *
- * Run: node --use-system-ca --env-file=.env.local scripts/e2e-testnet.mjs
+ * Run: node --use-system-ca --experimental-strip-types --env-file=.env.local scripts/e2e-testnet.mjs
  */
 import { SuiGrpcClient } from '@mysten/sui/grpc';
 import { Transaction } from '@mysten/sui/transactions';
@@ -15,6 +15,9 @@ import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
 import { Secp256k1Keypair } from '@mysten/sui/keypairs/secp256k1';
 import { decodeSuiPrivateKey } from '@mysten/sui/cryptography';
 import { createHash } from 'node:crypto';
+import { mkdirSync, writeFileSync } from 'node:fs';
+
+import { DOMAIN_TAGS, newSalt, paymentCommitment, toHex } from '../lib/evidence/commitment.ts';
 
 const NETWORK = process.env.SUI_NETWORK === 'mainnet' ? 'mainnet' : 'testnet';
 const BASE_URL = process.env.SUI_RPC_URL || `https://fullnode.${NETWORK}.sui.io:443`;
@@ -80,6 +83,23 @@ async function testPeg() {
 
 // ── Test 2: create payment intent (transfer/invoice open) ────────────────────
 async function testCreateIntent() {
+  // WS5. The chain gets a 32-byte commitment, never the payment. The salt and
+  // the payload are written to a plaintext bundle under .tmp/ so this testnet
+  // settlement can be checked with scripts/verify-commitment.mjs; a real
+  // payment keeps them only inside the Seal bundle.
+  const salt = newSalt();
+  const payload = {
+    sender: signer.toSuiAddress(),
+    recipient: RECIPIENT,
+    beneficiaryRef: '',
+    amount: 20_000_000,
+    currency: '0x2::sui::SUI',
+    corridor: '',
+    targetCurrency: 'PHP',
+    fxRateUsdLocal: 56_420_000,
+  };
+  const commitment = paymentCommitment(payload, salt);
+
   const tx = new Transaction();
   tx.setGasBudget('30000000');
   tx.moveCall({
@@ -89,6 +109,7 @@ async function testCreateIntent() {
       tx.pure.u64(20_000_000), // 0.02 SUI
       tx.pure.string('PHP'),
       tx.pure.u64(56_420_000), // fx scaled 1e6
+      tx.pure.vector('u8', Array.from(commitment)),
       tx.object(CLOCK),
     ],
   });
@@ -96,6 +117,25 @@ async function testCreateIntent() {
   const created = eventBySuffix(events, '::payment_intent::IntentCreated');
   const intentId = typeof created?.data.intent_id === 'string' ? created.data.intent_id : '';
   if (!intentId) throw new Error(`IntentCreated missing intent_id. Digest ${digest}`);
+  mkdirSync('.tmp', { recursive: true });
+  const bundlePath = '.tmp/e2e-commitment-bundle.json';
+  writeFileSync(
+    bundlePath,
+    JSON.stringify(
+      {
+        schema: 'splash.settlement-evidence.v2',
+        settlement: {
+          paymentIntentId: intentId,
+          commitment: { tag: DOMAIN_TAGS.payment, commitmentHex: toHex(commitment), saltHex: toHex(salt), payload },
+        },
+      },
+      null,
+      2,
+    ),
+  );
+  console.log(
+    `  commitment ${toHex(commitment)} — verify with: node --experimental-strip-types scripts/verify-commitment.mjs --bundle ${bundlePath} --digest ${digest} --rpc ${BASE_URL}`,
+  );
   return { intentId, digest };
 }
 

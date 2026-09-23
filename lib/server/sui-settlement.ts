@@ -8,6 +8,7 @@ import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
 import { Secp256k1Keypair } from '@mysten/sui/keypairs/secp256k1';
 import { Transaction } from '@mysten/sui/transactions';
 
+import { assertCommitmentBytes } from '@/lib/evidence/commitment';
 import {
   CONTRACT_MAX_FEE_BPS,
   FALLBACK_FEE_BPS,
@@ -444,6 +445,7 @@ const ABORT_CODES: Record<number, string> = {
   417: 'E_WRONG_BUSINESS_ACCOUNT — the account passed is not the account the intent was opened against.',
   418: 'E_NOT_A_MEMBER — the signer is neither an owner nor an approver of the account, so cannot open an intent in its name.',
   419: 'E_ACCOUNT_NOT_PAYABLE — the account is frozen or not KYB-verified.',
+  420: 'E_BAD_COMMITMENT — the commitment passed to payment_intent::create* is not 32 bytes. It is blake2b256(tag || bcs(payload) || salt), computed by lib/evidence/commitment.ts; see docs/commitments.md.',
 
   // ── cap_registry (break-glass revocation) ────────────────────────────────
   210: 'E_STALE_GENERATION — the capability presented is from a superseded generation. It was revoked by a break-glass rotation and is permanently dead; a replacement was minted to whoever the rotation named. Check the CapabilityRevoked event and update the configured object id.',
@@ -460,6 +462,7 @@ const ABORT_CODES: Record<number, string> = {
   801: 'E_EMPTY_TX_DIGEST — receipt_v2::create_receipt called with empty tx_digest.',
   802: 'E_RECEIPT_ZERO_AMOUNT — receipt_v2::create_receipt called with amount_usd = 0.',
   803: 'E_RECEIPT_INVALID_RECIPIENT — receipt_v2::create_receipt called with recipient = 0x0.',
+  804: 'E_BAD_COMMITMENT — receipt_v2::create_receipt called with a commitment that is not 32 bytes.',
 };
 
 /** The modules ABORT_CODES actually describes. Anything else is a dependency. */
@@ -758,7 +761,7 @@ function custodyPackageIdOrThrow(): string {
  * it with SUI, which the new assert correctly rejects on chain. Rather than let
  * that surface as an opaque abort, refuse here with the reason.
  */
-function settlementCoinType(): string {
+export function settlementCoinType(): string {
   const configured = (process.env.SPLASH_SETTLEMENT_COIN_TYPE ?? '').trim();
   if (!configured || configured === SUI_COIN_TYPE) return SUI_COIN_TYPE;
   throw new Error(
@@ -789,8 +792,16 @@ export async function createPaymentIntentOnSui(input: {
   amountMist: number;
   targetCurrency: string;
   fxRateScaled: number;
+  /**
+   * WS5. blake2b256(tag || bcs(payload) || salt), 32 bytes, from
+   * lib/evidence/commitment.ts. This layer never sees the payload or the
+   * salt; the caller keeps them in the Seal bundle. Required, so a caller
+   * that still opens intents without one fails to compile.
+   */
+  commitment: Uint8Array;
 }) {
   await requireSdkExecution();
+  assertCommitmentBytes(input.commitment);
   const packageId = corePackageIdOrThrow();
   const recipient = requireConfiguredRecipient(input.recipient);
   const amountMist = Math.max(1, Math.floor(input.amountMist));
@@ -805,6 +816,7 @@ export async function createPaymentIntentOnSui(input: {
       tx.pure.u64(amountMist),
       tx.pure.string(input.targetCurrency.toUpperCase()),
       tx.pure.u64(fxRateScaled),
+      tx.pure.vector('u8', Array.from(input.commitment)),
       tx.object('0x6'),
     ],
   });

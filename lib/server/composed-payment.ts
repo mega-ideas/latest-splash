@@ -1,4 +1,11 @@
 import {
+  DOMAIN_TAGS,
+  newSalt,
+  paymentCommitment,
+  toHex,
+  type PaymentCommitmentPayload,
+} from '@/lib/evidence/commitment';
+import {
   createTransferSettlementEvidence,
   sealAndStoreSettlementEvidence,
 } from '@/lib/evidence/settlement';
@@ -7,6 +14,8 @@ import { assertSealWritable } from '@/lib/server/seal-health';
 import {
   confirmComposedPaymentOnSui,
   createPaymentIntentOnSui,
+  getOperatorKeypair,
+  settlementCoinType,
 } from '@/lib/server/sui-settlement';
 import type { AuditReceipt } from '@/lib/server/operations';
 
@@ -36,11 +45,35 @@ export async function executeComposedPayment(input: {
   // cannot accept the receipt payload.
   if (!shouldUseMockSeal()) await assertSealWritable();
   const paymentMist = Math.max(1, Math.floor(input.amountMist));
+  const fxRateScaled = scaleFxRate(input.fxRate);
+
+  // WS5. The salt is drawn here, once per payment, and travels only into the
+  // Seal bundle below. The chain gets the 32-byte commitment and nothing else
+  // about this payment; a party on the Seal allowlist recomputes it from the
+  // bundle with scripts/verify-commitment.mjs. Nothing here logs the salt.
+  const operator = getOperatorKeypair();
+  if (!operator) {
+    throw new Error('OPERATOR_SUI_PRIVATE_KEY is required: the commitment binds the operator address that opens the intent.');
+  }
+  const salt = newSalt();
+  const payload: PaymentCommitmentPayload = {
+    sender: operator.toSuiAddress(),
+    recipient: input.recipientAddress,
+    beneficiaryRef: '',
+    amount: paymentMist,
+    currency: settlementCoinType(),
+    corridor: '',
+    targetCurrency: input.targetCurrency.toUpperCase(),
+    fxRateUsdLocal: fxRateScaled,
+  };
+  const commitment = paymentCommitment(payload, salt);
+
   const intent = await createPaymentIntentOnSui({
     recipient: input.recipientAddress,
     amountMist: paymentMist,
     targetCurrency: input.targetCurrency,
-    fxRateScaled: scaleFxRate(input.fxRate),
+    fxRateScaled,
+    commitment,
   });
 
   const createdAt = new Date().toISOString();
@@ -53,6 +86,12 @@ export async function executeComposedPayment(input: {
     paymentIntentId: intent.intentId,
     intentCreateDigest: intent.digest,
     expectedAnchorId,
+    commitment: {
+      tag: DOMAIN_TAGS.payment,
+      commitmentHex: toHex(commitment),
+      saltHex: toHex(salt),
+      payload,
+    },
     funding: input.funding,
     createdAt,
   });

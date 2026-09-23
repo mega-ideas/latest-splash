@@ -33,6 +33,8 @@ const RECIPIENT: address = @0xB0B;
 
 const HASH: vector<u8> = b"0123456789abcdef0123456789abcdef";
 const BLOB: vector<u8> = b"walrus-blob-id";
+/// A 32-byte commitment, as lib/evidence/commitment.ts computes it off-chain.
+const COMMITMENT: vector<u8> = x"00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
 
 fun new_intent(c: &clock::Clock, ctx: &mut TxContext): payment_intent::PaymentIntent {
     payment_intent::create<SUI>(
@@ -43,6 +45,7 @@ fun new_intent(c: &clock::Clock, ctx: &mut TxContext): payment_intent::PaymentIn
         b"MY-PH",
         b"PHP".to_string(),
         56_000_000,
+        COMMITMENT,
         c,
         ctx,
     )
