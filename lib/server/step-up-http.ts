@@ -88,7 +88,7 @@ export async function stepUpContext(
   let amountUsd = 0;
   if (purpose === 'STABLECOIN_TRANSFER') {
     const row = await readOutflow(db, authority.orgId, String(body.subjectId ?? ''));
-    if (!row || row.kind !== 'TRANSFER') {
+    if (!row || (row.kind !== 'TRANSFER' && row.kind !== 'X402')) {
       return { response: NextResponse.json({ error: 'Transfer not found.', code: 'not_found' }, { status: 404 }) };
     }
     if (row.status !== 'PENDING') {

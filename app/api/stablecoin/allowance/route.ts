@@ -43,6 +43,8 @@ export async function GET(request: Request) {
     kybState: state,
     verified: state === 'ACTIVE',
     lane: { open: lane.allowed && feeConfigured, reason: !lane.allowed ? lane.reason : feeConfigured ? '' : 'Wallet transfers are not open yet: Splash’s mainnet fee address is not configured.' },
+    // x402 carries no Splash fee, so it does not wait on the fee address.
+    x402: { open: laneAccess(state, 'X402').allowed, reason: laneAccess(state, 'X402').reason },
     allowance: {
       usedMinor: allowance.usedMinor.toString(),
       remainingMinor: allowance.remainingMinor.toString(),

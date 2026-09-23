@@ -27,10 +27,12 @@ function withoutSecondFactor(payload: Payload): Payload {
   return copy;
 }
 
-/** A wallet transfer, as quoted and reserved. */
+/** A wallet transfer or an x402 payment, as quoted and reserved. */
 export function stablecoinTransferSubject(
   row: {
     id: string;
+    kind?: string;
+    resource?: string | null;
     senderAddress: string;
     recipientAddress: string;
     principalMinor: bigint | string;
@@ -43,6 +45,26 @@ export function stablecoinTransferSubject(
 ): StepUpSubject {
   const principal = BigInt(row.principalMinor);
   const fee = BigInt(row.feeMinor);
+  if (row.kind === 'X402') {
+    const host = safeHost(row.resource ?? '');
+    return {
+      subjectId: row.id,
+      subject: {
+        kind: 'x402-payment',
+        outflowId: row.id,
+        resource: row.resource ?? null,
+        sender: row.senderAddress,
+        payTo: row.recipientAddress,
+        principalMinor: principal.toString(),
+        coinType: row.coinType,
+        network: row.network,
+      },
+      label: `${formatUsdc(principal)} USDC x402 to ${host}`,
+      summary:
+        `Pay ${formatUsdc(principal)} USDC over x402 to ${host} (${shortAddress(row.recipientAddress)}) on Sui mainnet ` +
+        `for ${row.resource}. No Splash fee; it leaves ${shortAddress(row.senderAddress)}.`,
+    };
+  }
   return {
     subjectId: row.id,
     subject: {
@@ -61,6 +83,14 @@ export function stablecoinTransferSubject(
       `Send ${formatUsdc(principal)} USDC to ${recipientName} (${shortAddress(row.recipientAddress)}) on Sui mainnet. ` +
       `Fee ${formatUsdc(fee)} USDC; ${formatUsdc(principal + fee)} USDC leaves ${shortAddress(row.senderAddress)}.`,
   };
+}
+
+function safeHost(url: string): string {
+  try {
+    return new URL(url).host || url;
+  } catch {
+    return url;
+  }
 }
 
 export function settingsChangeSubject(ctx: { orgId: string; userId: string }, patch: Payload): StepUpSubject {

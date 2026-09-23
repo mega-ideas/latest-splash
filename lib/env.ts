@@ -152,6 +152,10 @@ export const envSchema = z.object({
    *  while the rest of the app may run on testnet — so it cannot share
    *  SUI_RPC_URL. Unset: Mysten's public mainnet fullnode. */
   SUI_MAINNET_RPC_URL: url,
+  /** The Splash demo x402 seller (app/api/x402/demo) is paid here, in USDC on
+   *  Sui mainnet. Unset: the demo seller answers 503. Use an address you
+   *  control — paying it moves real USDC. */
+  X402_DEMO_PAY_TO: suiAddress,
   MIN_USDC_FLOAT_MICRO: int(0),
   SPLASH_SETTLEMENT_COIN_TYPE: coinType,
   SPLASH_PEG_USDC_DEVIATION_PPM: int(0),

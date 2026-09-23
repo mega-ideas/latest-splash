@@ -14,6 +14,7 @@ import {
 import { outflowAuditHash, verifyStablecoinTransfer, type ExpectedTransfer } from '@/lib/payments/stablecoin-verify';
 import type { RecipientRecord } from '@/lib/server/operations';
 import {
+  bindOutflowDigest,
   closeOutflow,
   confirmOutflow,
   readOutflow,
@@ -226,6 +227,14 @@ export async function submitWalletTransfer(
   };
   const digest = deps.chain.digestOf(bytes);
 
+  // One signed transaction per quote. If another was already submitted, it is
+  // the only one that may settle this quote.
+  if (row.txDigest && row.txDigest !== digest) {
+    const first = await deps.chain.read(row.txDigest);
+    if (first) return settle(deps, row, expected, first);
+    return fail(409, 'already_submitted', 'A signed transaction for this quote was already submitted and may still land. Wait for it, or start a new transfer once this quote expires.');
+  }
+
   // A retry after a lost response: if the chain already has it, record what
   // it did rather than submitting twice. Checked BEFORE expiry, because a
   // payment that happened is recorded whether or not its quote has lapsed.
@@ -242,7 +251,10 @@ export async function submitWalletTransfer(
   // exactly this quote. Spent here, before the chain; handed back below if
   // nothing moves, so a retry does not need a second approval.
   const approvalSubject = stablecoinTransferSubject(row, '');
-  const approved = await deps.approval.consume({ orgId: input.orgId, subjectId: row.id, subject: approvalSubject.subject });
+  // (x402 rows are paid through lib/server/x402-pay.ts, never here.)
+  // A resend of the SAME bound transaction already spent its approval.
+  const resend = row.txDigest === digest;
+  const approved = resend || await deps.approval.consume({ orgId: input.orgId, subjectId: row.id, subject: approvalSubject.subject });
   if (!approved) {
     return fail(428, 'approval_required', 'This transfer has not been approved yet. Approve it first — by WhatsApp code and passkey, or by clicking Approve, depending on your Settings — then sign.');
   }
@@ -252,8 +264,13 @@ export async function submitWalletTransfer(
   const dry = await deps.chain.simulate(bytes);
   const preflight = verifyStablecoinTransfer(expected, dry);
   if (!preflight.ok) {
-    await handBack();
+    if (!resend) await handBack();
     return fail(409, 'preflight_mismatch', `Not sent — the signed transaction does not match the quote. ${preflight.reason}`);
+  }
+
+  // From here the transaction leaves Splash: bind the quote to it.
+  if (!(await bindOutflowDigest(deps.db, { orgId: input.orgId, id: row.id, txDigest: digest }))) {
+    return fail(409, 'already_submitted', 'Another transaction was submitted for this quote first. Refresh to see where it stands.');
   }
 
   let executed: Observed;
@@ -263,8 +280,9 @@ export async function submitWalletTransfer(
     // The submission may have landed even though the answer was lost.
     const landed = await deps.chain.read(digest).catch(() => null);
     if (landed) return settle(deps, row, expected, landed);
-    await handBack();
-    return fail(502, 'submit_unconfirmed', `The network did not confirm the submission (${error instanceof Error ? error.message : 'unknown error'}). Nothing is recorded as sent. Try again.`);
+    // Not handed back: the transaction may still land. Sending the SAME
+    // signed transaction again is safe (one digest, executed at most once).
+    return fail(502, 'submit_unconfirmed', `The network did not confirm the submission (${error instanceof Error ? error.message : 'unknown error'}). Nothing is recorded as sent yet. Send again — the same signed transaction cannot be paid twice.`);
   }
   return settle(deps, row, expected, executed);
 }

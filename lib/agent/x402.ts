@@ -32,6 +32,9 @@
 
 /** Networks the reference facilitators actually serve. */
 export const X402_KNOWN_NETWORKS = [
+  // x402 v2 exact scheme on Sui (native USDC) — payable by a person, from
+  // the Send USDC page; never by Zeke.
+  'sui:mainnet',
   'arbitrum-one',
   'arbitrum-sepolia',
   'base',
@@ -43,7 +46,7 @@ export interface X402Requirement {
   network: string;
   /** Base units of the asset (USDC: 6dp), as a bigint — never float money. */
   maxAmountRequiredMinor: bigint;
-  /** ERC-20 contract of the payment asset. */
+  /** The payment asset: an ERC-20 contract on EVM, a full coin type on Sui. */
   asset: string;
   payTo: string;
   resource: string;
@@ -87,7 +90,8 @@ export function parseX402Challenge(input: unknown): X402Challenge {
     const r = raw as Record<string, unknown>;
     const scheme = str(r.scheme, `accepts[${i}].scheme`);
     if (scheme !== 'exact') throw new X402ParseError(`unsupported scheme: ${scheme}`);
-    const amountRaw = str(r.maxAmountRequired, `accepts[${i}].maxAmountRequired`);
+    // v2 names it `amount`; v1 called it `maxAmountRequired`.
+    const amountRaw = str(r.amount ?? r.maxAmountRequired, `accepts[${i}].amount`);
     if (!/^\d+$/.test(amountRaw)) throw new X402ParseError(`maxAmountRequired is not integer base units: ${amountRaw}`);
     return {
       scheme: 'exact' as const,
@@ -95,7 +99,8 @@ export function parseX402Challenge(input: unknown): X402Challenge {
       maxAmountRequiredMinor: BigInt(amountRaw),
       asset: str(r.asset, `accepts[${i}].asset`),
       payTo: str(r.payTo, `accepts[${i}].payTo`),
-      resource: str(r.resource, `accepts[${i}].resource`),
+      // v2 moved the resource to the top level ({ url, description, mimeType }).
+      resource: str(r.resource ?? (body.resource as { url?: unknown } | undefined)?.url, `accepts[${i}].resource`),
       description: typeof r.description === 'string' ? r.description : '',
       maxTimeoutSeconds: typeof r.maxTimeoutSeconds === 'number' ? r.maxTimeoutSeconds : 60,
     };
@@ -136,7 +141,7 @@ export function x402SettlementAvailability(): { available: false; reason: string
   return {
     available: false,
     reason:
-      'Zeke can read this x402 request and price it, but Splash cannot settle it: settlement runs on Sui and x402 settles USDC on EVM rails, and — more fundamentally — every release of value here is approved by a named human. Per-request agent spending becomes possible when the capped, revocable, human-signed session mandate ships on-chain; until then this stays a quote, not a payment.',
+      'Zeke can read this x402 request and price it, but Zeke never pays it: every release of value here is approved by a named human, and per-request agent spending waits for the capped, revocable, human-signed session mandate on-chain. If the seller accepts USDC on Sui mainnet, pay it yourself on the Send USDC page (x402): you approve it, sign it in your own wallet, and it counts against the same allowance as your transfers. Sellers that accept only EVM chains (Base, Arbitrum) are not payable from a Sui wallet.',
   };
 }
 

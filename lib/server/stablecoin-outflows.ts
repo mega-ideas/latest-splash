@@ -178,8 +178,30 @@ export async function confirmOutflow(d: Db, input: { orgId: string; id: string; 
   return updated.length === 1;
 }
 
-/** PENDING → FAILED | MISMATCH, releasing the reservation. A MISMATCH keeps
- *  the digest so an operator can see what was actually signed. */
+/**
+ * Bind a still-pending quote to the ONE signed transaction that has left
+ * Splash (submitted to the chain, or handed to an x402 seller). After this,
+ * only that digest can settle the quote: a second, differently-signed
+ * transaction for the same payment is refused while the first may still land
+ * — otherwise a dropped connection plus a re-sign pays twice and records once.
+ */
+export async function bindOutflowDigest(d: Db, input: { orgId: string; id: string; txDigest: string }): Promise<boolean> {
+  const bound = await d
+    .update(stablecoinOutflows)
+    .set({ txDigest: input.txDigest, updatedAt: new Date() })
+    .where(and(
+      eq(stablecoinOutflows.id, input.id),
+      eq(stablecoinOutflows.orgId, input.orgId),
+      eq(stablecoinOutflows.status, 'PENDING'),
+      or(sql`${stablecoinOutflows.txDigest} IS NULL`, eq(stablecoinOutflows.txDigest, input.txDigest)),
+    ))
+    .returning({ id: stablecoinOutflows.id });
+  return bound.length === 1;
+}
+
+/** PENDING → FAILED | MISMATCH | EXPIRED, releasing the reservation. A digest
+ *  given here is recorded; a digest already bound is kept, so a lapsed quote
+ *  still says which transaction was signed for it. */
 export async function closeOutflow(d: Db, input: {
   orgId: string;
   id: string;
@@ -190,7 +212,7 @@ export async function closeOutflow(d: Db, input: {
   const now = new Date();
   await d
     .update(stablecoinOutflows)
-    .set({ status: input.status, failureReason: input.reason, txDigest: input.txDigest ?? null, updatedAt: now })
+    .set({ status: input.status, failureReason: input.reason, ...(input.txDigest ? { txDigest: input.txDigest } : {}), updatedAt: now })
     .where(and(
       eq(stablecoinOutflows.id, input.id),
       eq(stablecoinOutflows.orgId, input.orgId),

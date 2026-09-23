@@ -47,9 +47,35 @@ A wallet recipient must be saved first. Splash, and Zeke, only send to saved rec
 5. **Record:** a match is recorded as CONFIRMED with a sha256 audit hash, and the table refuses CONFIRMED without one.
    - A mismatch is recorded as MISMATCH, with the digest.
    - A failure releases the allowance.
-   - Retries are idempotent: a lost response is recovered by digest, never re-sent.
+   - Each quote is bound to the first signed transaction that leaves Splash. A retry resends that same transaction (one digest, on chain at most once), and a differently-signed second one is refused while the first may still land.
 
 **Audit anchor:** records are kept now with `anchor_status = PENDING_MAINNET_PUBLISH`. They get anchored once Splash's contracts are published on mainnet (not done; that's Sebastian's ceremony).
+
+## x402 (lib/server/x402-pay.ts)
+
+The Send USDC page also pays APIs that answer `402 Payment Required` over x402
+v2, in native USDC on `sui:mainnet`. The flow is the same shape as a wallet
+transfer, but the **seller's facilitator** broadcasts the payment, not Splash.
+
+- **Probe:** Splash fetches the URL itself, behind a request-forgery guard
+  (lib/server/safe-fetch.ts):
+  - https only;
+  - no private, loopback or link-local addresses;
+  - no redirects;
+  - timeouts and a size cap.
+
+  A pasted price is never trusted.
+- **Quote:** the seller's payee is screened; unscreened sellers need an admin
+  attestation. The amount is reserved (kind X402, no Splash fee) against the
+  shared allowance.
+- **Pay:**
+  1. Approve, sign, and dry-run the signed bytes.
+  2. Splash re-reads the price; a changed price is refused.
+  3. The quote is bound to the signed digest.
+  4. `PAYMENT-SIGNATURE` goes only to the URL the price came from.
+  5. The digest is confirmed on chain, and the seller's content is shown.
+- **Demo seller:** `/api/x402/demo/corridor-fees` sells the corridor fee
+  schedule for 0.01 USDC to `X402_DEMO_PAY_TO`. It is off when that's unset.
 
 ## Step-up approvals (lib/server/step-up.ts)
 
@@ -79,6 +105,7 @@ Every approval is bound to the sha256 of exactly what it approves. It is spent w
 | `SUI_MAINNET_RPC_URL` | Optional. A trusted gRPC-web fullnode; the default is Mysten's public one. |
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_FROM` | Delivering codes. |
 | `TWILIO_WHATSAPP_CODE_CONTENT_SID` | An approved "verification code" template (`Your {{1}} code is {{2}}`). Without it, codes go as free text, which WhatsApp delivers only within 24 hours of the recipient last messaging the sender. |
+| `X402_DEMO_PAY_TO` | The demo x402 seller's payee (0.01 USDC per call). Unset: demo seller off. |
 | `FEATURE_KYB_GATE=true` | Locking fiat lanes for unverified businesses. In production it also needs the Sumsub keys. |
 
 ## Demo accounts (`npm run dev:db`, password `SplashDemo!2026`)
@@ -93,4 +120,5 @@ Every approval is bound to the sha256 of exactly what it approves. It is spent w
 - **Local development:** the dev database is in memory, and a restart forgets the passkey's record (the key stays on the device). Don't leave real funds in a local-dev Splash wallet.
 - **MetaMask** reaches Sui only through the Sui Snap, on desktop.
 - **Every transfer needs a little SUI for gas** in the sending wallet.
-- **Still to come:** x402 buyer payments on mainnet, the CCTP funding planner, and Treasury (USDC → Ondo USDY; verified businesses only; non-US; allowlisted).
+- **x402 on a slow facilitator:** a seller that accepts a payment which then never lands leaves the quote counting until it expires. Retrying resends the same signed payment, so it can't be paid twice.
+- **Still to come:** the CCTP funding planner, and Treasury (USDC → Ondo USDY; verified businesses only; non-US; allowlisted).

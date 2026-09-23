@@ -5,6 +5,37 @@
 and the "Agentic Payments with x402" OH Singapore Buildathon deck
 (hummusonrails).*
 
+## Update, 2026-09-24: a person can now pay x402 on Sui mainnet
+
+The first blocker below, "wrong rail", no longer holds. x402 v2 defines an
+`exact` scheme for **Sui** (`specs/schemes/exact/scheme_exact_sui.md`):
+
+- The buyer signs a Sui transaction.
+- The seller's facilitator checks that the payee's balance change equals
+  `amount`, then broadcasts it.
+
+Splash now pays these sellers from the stablecoin lane
+(`lib/server/x402-pay.ts`, docs/STABLECOIN-LANE.md):
+
+- It pays only native USDC on `sui:mainnet`.
+- A person pays, on the Send USDC page. Zeke still only quotes.
+- Each payment is approved in the workspace's approval style and signed in the
+  person's own wallet.
+- Payments count against the **same** allowance as wallet transfers
+  (5,000 USDC in any 30 days while unverified), and carry no Splash fee.
+- Splash re-reads the seller's price at payment time.
+- Splash sends the signed payment only to the URL the price came from.
+- The quote is bound to one signed transaction, so a retry cannot pay twice.
+- The payment is recorded only after the chain confirms it.
+
+`/api/x402/demo/corridor-fees` is a Splash-run demo seller (0.01 USDC to
+`X402_DEMO_PAY_TO`), so the whole loop can be exercised with real funds
+against code in this repo.
+
+What has *not* changed: **agent** spending. Zeke paying per request without a
+person in the loop still waits for the on-chain session mandate. The rest of
+this document describes that, and remains true for it.
+
 ## The verdict, in one paragraph
 
 **Not into the money path today — and the blockers are Splash's own

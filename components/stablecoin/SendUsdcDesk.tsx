@@ -42,6 +42,7 @@ type Lane = {
   kybState: string;
   verified: boolean;
   lane: { open: boolean; reason: string };
+  x402: { open: boolean; reason: string };
   allowance: { usedMinor: string; remainingMinor: string; windowCapMinor: string; windowDays: number };
   feeBps: number;
   minimumMinor: string;
@@ -67,6 +68,8 @@ type WalletView = {
 };
 
 type Quote = {
+  kind?: 'TRANSFER' | 'X402';
+  resourceUrl?: string;
   outflowId: string;
   recipient: { id: string; name: string; address: string };
   senderAddress: string;
@@ -77,7 +80,23 @@ type Quote = {
   transactionBytes: string;
 };
 
-type Sent = { txDigest: string | null; explorerUrl: string | null; auditHash: string | null; principalMinor: string };
+type Sent = {
+  txDigest: string | null;
+  explorerUrl: string | null;
+  auditHash: string | null;
+  principalMinor?: string;
+  amountMinor?: string;
+  content?: { status: number; contentType: string; body: string; truncated: boolean } | null;
+};
+
+type X402Probe = {
+  ok: boolean;
+  error?: string;
+  resource?: { url: string; description: string; mimeType: string };
+  amountMinor?: string;
+  payTo?: string;
+  offered?: Array<{ network: string; scheme: string }>;
+};
 
 const STEPS = ['Pay from', 'Recipient & amount', 'Approve', 'Sign & send'] as const;
 
@@ -100,6 +119,15 @@ export default function SendUsdcDesk() {
   const [error, setError] = useState('');
   const [sent, setSent] = useState<Sent | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  // x402: pay an API that answers 402, from the same wallets and allowance.
+  const [mode, setMode] = useState<'WALLET' | 'X402'>('WALLET');
+  const [x402Url, setX402Url] = useState('');
+  const [x402Probe, setX402Probe] = useState<X402Probe | null>(null);
+  const [attestPayee, setAttestPayee] = useState(false);
+  // The signed payment, kept so a settling x402 payment can be checked again
+  // by resending the SAME signature (never a new one).
+  const [lastSigned, setLastSigned] = useState<{ bytes: string; signature: string } | null>(null);
+  const [settling, setSettling] = useState(false);
 
   const loadLane = useCallback(async () => {
     const res = await fetch('/api/stablecoin/allowance', { cache: 'no-store' });
@@ -183,6 +211,111 @@ export default function SendUsdcDesk() {
     }
   }
 
+  async function checkX402Price() {
+    setBusy('quote');
+    setError('');
+    setX402Probe(null);
+    try {
+      const res = await fetch('/api/x402/probe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: x402Url.trim() }),
+      });
+      setX402Probe(await json<X402Probe>(res));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function getX402Quote() {
+    if (!sender || !x402Probe?.ok) return;
+    setBusy('quote');
+    setError('');
+    try {
+      const res = await fetch('/api/x402/quote', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: x402Url.trim(), senderAddress: sender, attestPayee }),
+      });
+      const body = await json<{ error?: string; outflowId: string; resource: { url: string; description: string }; amountMinor: string; payTo: string; senderAddress: string; reservedUntil: string; transactionBytes: string }>(res);
+      if (!res.ok) throw new Error(body.error ?? 'The x402 payment could not be prepared.');
+      let host = body.resource.url;
+      try { host = new URL(x402Url.trim()).host; } catch { /* keep the url */ }
+      setQuote({
+        kind: 'X402',
+        resourceUrl: x402Url.trim(),
+        outflowId: body.outflowId,
+        recipient: { id: '', name: host, address: body.payTo },
+        senderAddress: body.senderAddress,
+        principalMinor: body.amountMinor,
+        feeMinor: '0',
+        totalDebitMinor: body.amountMinor,
+        reservedUntil: body.reservedUntil,
+        transactionBytes: body.transactionBytes,
+      });
+      setApproved(false);
+      setNow(Date.now());
+      void loadLane();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'The x402 payment could not be prepared.');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function payX402(signed: { bytes: string; signature: string }) {
+    if (!quote) return;
+    const res = await fetch('/api/x402/pay', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ outflowId: quote.outflowId, transactionBytes: signed.bytes, signature: signed.signature }),
+    });
+    const body = await json<Sent & { status?: string; error?: string }>(res);
+    if (!res.ok) throw new Error(body.error ?? 'The x402 payment did not go through.');
+    if (body.status === 'SETTLING') {
+      setSettling(true);
+      toast.message('The seller answered; the payment is settling on chain.');
+      return;
+    }
+    setSettling(false);
+    setSent(body);
+    toast.success('Paid and verified on Sui mainnet');
+    void loadLane();
+  }
+
+  async function submitWallet(signed: { bytes: string; signature: string }) {
+    if (!quote) return;
+    const res = await fetch('/api/stablecoin/submit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ outflowId: quote.outflowId, transactionBytes: signed.bytes, signature: signed.signature }),
+    });
+    const body = await json<Sent & { error?: string; code?: string }>(res);
+    if (!res.ok) {
+      // The network may still have it: offer to resend the SAME signed bytes.
+      setSettling(body.code === 'submit_unconfirmed');
+      throw new Error(body.error ?? 'The transfer was not sent.');
+    }
+    setSettling(false);
+    setSent(body);
+    toast.success('Sent and verified on Sui mainnet');
+    void loadLane();
+  }
+
+  async function checkAgain() {
+    if (!lastSigned) return;
+    setBusy('send');
+    setError('');
+    try {
+      if (quote?.kind === 'X402') await payX402(lastSigned);
+      else await submitWallet(lastSigned);
+    } catch (err) {
+      setError(describeSignError(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function signAndSend() {
     if (!quote) return;
     setBusy('send');
@@ -196,16 +329,12 @@ export default function SendUsdcDesk() {
         if (!external) throw new Error('Connect the wallet you quoted from.');
         signed = await signWithWallet(external.accepted, external.account, quote.transactionBytes);
       }
-      const res = await fetch('/api/stablecoin/submit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ outflowId: quote.outflowId, transactionBytes: signed.bytes, signature: signed.signature }),
-      });
-      const body = await json<Sent & { error?: string }>(res);
-      if (!res.ok) throw new Error(body.error ?? 'The transfer was not sent.');
-      setSent(body);
-      toast.success('Sent and verified on Sui mainnet');
-      void loadLane();
+      setLastSigned(signed);
+      if (quote.kind === 'X402') {
+        await payX402(signed);
+        return;
+      }
+      await submitWallet(signed);
     } catch (err) {
       setError(describeSignError(err));
     } finally {
@@ -219,6 +348,8 @@ export default function SendUsdcDesk() {
     setSent(null);
     setAmount('');
     setError('');
+    setLastSigned(null);
+    setSettling(false);
     void loadLane();
   }
 
@@ -236,7 +367,7 @@ export default function SendUsdcDesk() {
       <DashPageHeader
         kicker="USDC on Sui · mainnet"
         title="Send USDC"
-        description="Real USDC on Sui mainnet to a wallet recipient you have saved. The recipient receives exactly what you enter; the 0.80% Splash fee is added on top and paid in the same transaction."
+        description="Real USDC on Sui mainnet — to a wallet recipient you have saved, or to an API that asks for payment over x402. A recipient receives exactly what you enter; the 0.80% Splash fee is added on top in the same transaction. x402 payments carry no Splash fee."
       />
 
       {lane && !lane.lane.open ? (
@@ -307,8 +438,15 @@ export default function SendUsdcDesk() {
             <div className="dash-block p-5" role="status">
               <div className="flex items-center gap-2 text-lg font-bold text-[var(--ok)]"><CheckCircle2 className="h-5 w-5" /> Sent and verified on Sui mainnet</div>
               <p className="mt-2 text-sm leading-6 text-[#1F4452]">
-                {formatUsdc(BigInt(sent.principalMinor))} USDC reached {quote?.recipient.name}. Splash read the executed transaction back from the chain and matched every balance change to the quote before recording it.
+                {formatUsdc(BigInt(sent.principalMinor ?? sent.amountMinor ?? '0'))} USDC reached {quote?.recipient.name}. Splash read the executed transaction back from the chain and matched every balance change to the quote before recording it.
               </p>
+              {sent.content ? (
+                <div className="mt-3">
+                  <div className="text-[12px] font-semibold uppercase tracking-[0.12em] text-[#326273]/60">What the seller returned</div>
+                  <pre className="mt-1 max-h-64 overflow-auto rounded-lg border border-[#326273]/12 bg-[#F6F0ED]/60 p-3 font-mono text-[12px] leading-5 text-[#1F4452]">{prettyBody(sent.content.body)}</pre>
+                  {sent.content.truncated ? <p className="mt-1 text-[12px] text-[#326273]/60">Shortened for display.</p> : null}
+                </div>
+              ) : null}
               <dl className="mt-3 grid gap-2 text-[13px] sm:grid-cols-2">
                 <div><dt className="text-[#326273]/60">Transaction</dt><dd className="font-mono text-[#1F4452]">{sent.txDigest ? shortAddress(sent.txDigest) : '—'}</dd></div>
                 <div><dt className="text-[#326273]/60">Audit record</dt><dd className="font-mono text-[#1F4452]">{sent.auditHash ? `${sent.auditHash.slice(0, 12)}…` : '—'}</dd></div>
@@ -322,7 +460,7 @@ export default function SendUsdcDesk() {
                     View on Suiscan <ExternalLink className="h-3.5 w-3.5" />
                   </a>
                 ) : null}
-                <button type="button" onClick={startOver} className="dash-btn !px-4 !py-2 !text-[13px]">Send another</button>
+                <button type="button" onClick={startOver} className="dash-btn !px-4 !py-2 !text-[13px]">{quote?.kind === 'X402' ? 'Pay another' : 'Send another'}</button>
               </div>
             </div>
           ) : (
@@ -358,6 +496,89 @@ export default function SendUsdcDesk() {
                 <WalletBalances view={senderView} source={source} />
               </StepCard>
 
+              <div role="tablist" aria-label="What are you paying?" className="inline-flex rounded-lg border border-[#326273]/15 bg-[#F6F0ED] p-1">
+                {([['WALLET', 'A wallet recipient'], ['X402', 'An x402 API']] as const).map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    role="tab"
+                    aria-selected={mode === value}
+                    disabled={Boolean(quote)}
+                    onClick={() => { setMode(value); setError(''); }}
+                    className={`inline-flex min-h-10 items-center rounded-md px-3 text-[13px] font-semibold transition-colors ${mode === value ? 'bg-[#0C3E48] text-white' : 'text-[#326273] hover:bg-white'}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {mode === 'X402' ? (
+                <StepCard n={2} title="API & price" done={Boolean(quote)} disabled={!sender || Boolean(quote) || !lane?.x402.open}>
+                  {lane && !lane.x402.open ? <p className="text-[13px] text-[var(--error)]">{lane.x402.reason}</p> : null}
+                  <label htmlFor="x402-url" className="text-[13px] font-medium text-[#326273]/75">Resource URL</label>
+                  <div className="mt-1 flex flex-wrap gap-2">
+                    <input
+                      id="x402-url"
+                      value={x402Url}
+                      onChange={(e) => { setX402Url(e.target.value); setX402Probe(null); }}
+                      placeholder="https://api.example.com/data"
+                      spellCheck={false}
+                      disabled={Boolean(quote)}
+                      className="min-w-0 flex-1 rounded-lg border border-[#326273]/25 bg-[#F6F0ED] px-3 py-2 font-mono text-[13px] text-[#1F4452] focus:border-[#5C9EAD] focus:outline-none focus:ring-2 focus:ring-[#5C9EAD]/30"
+                    />
+                    <button type="button" onClick={() => void checkX402Price()} disabled={busy !== null || !x402Url.trim() || Boolean(quote)} className="dash-btn-ghost !px-3 !py-2 !text-[13px]">
+                      Check price
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { setX402Url(`${window.location.origin}/api/x402/demo/corridor-fees`); setX402Probe(null); }}
+                    disabled={Boolean(quote)}
+                    className="mt-1 text-[12px] font-semibold text-[var(--info)] hover:underline"
+                  >
+                    Try the Splash demo seller (0.01 USDC)
+                  </button>
+                  {x402Probe ? (
+                    x402Probe.ok ? (
+                      <div className="mt-3 rounded-lg border border-[#326273]/12 bg-white p-3 text-[13px] text-[#1F4452]">
+                        <div className="font-semibold">{x402Probe.resource?.description || 'x402 resource'}</div>
+                        <div className="mt-1 font-mono tabular-nums">{formatUsdc(BigInt(x402Probe.amountMinor ?? '0'))} USDC → {shortAddress(x402Probe.payTo ?? '')}</div>
+                        {!lane?.screeningConfigured ? (
+                          <label className="mt-2 flex items-start gap-2 text-[12px] leading-5 text-[#326273]/80">
+                            <input type="checkbox" checked={attestPayee} onChange={(e) => setAttestPayee(e.target.checked)} className="mt-0.5 h-4 w-4 accent-[#0C3E48]" />
+                            No screening provider is configured. As an admin, I attest that I know this seller (recorded with my name).
+                          </label>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <p role="alert" className="mt-3 text-[13px] leading-5 text-[var(--error)]">{x402Probe.error}</p>
+                    )
+                  ) : null}
+                  {!quote ? (
+                    <button
+                      type="button"
+                      onClick={() => void getX402Quote()}
+                      disabled={busy !== null || !sender || !x402Probe?.ok || !lane?.x402.open}
+                      className="dash-btn mt-3 !px-4 !py-2 !text-[13px] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {busy === 'quote' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
+                      Reserve & prepare
+                    </button>
+                  ) : (
+                    <div className="mt-3">
+                      <TransactionLegs quote={quote} />
+                      <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[12px] text-[#326273]/65">
+                        <span aria-live="polite">
+                          {secondsLeft > 0
+                            ? `Allowance held for ${Math.floor(secondsLeft / 60)}:${String(secondsLeft % 60).padStart(2, '0')}.`
+                            : 'This quote expired. Nothing was paid — start again.'}
+                        </span>
+                        <button type="button" onClick={startOver} className="font-semibold text-[var(--info)] hover:underline">Change</button>
+                      </div>
+                    </div>
+                  )}
+                </StepCard>
+              ) : (
               <StepCard n={2} title="Recipient & amount" done={Boolean(quote)} disabled={!sender || Boolean(quote) || !lane?.lane.open}>
                 {recipients.length === 0 ? (
                   <p className="text-[13px] leading-5 text-[#326273]/75">
@@ -431,6 +652,7 @@ export default function SendUsdcDesk() {
                   </div>
                 )}
               </StepCard>
+              )}
 
               <StepCard n={3} title="Approve" done={approved} disabled={!quote}>
                 {quote ? (
@@ -442,10 +664,19 @@ export default function SendUsdcDesk() {
 
               <StepCard n={4} title="Sign & send" done={false} disabled={!approved}>
                 <p className="text-[13px] leading-5 text-[#326273]/75">
-                  {source === 'SPLASH'
-                    ? 'Your passkey signs the exact transaction quoted. Splash dry-runs it, sends it, and checks the result on chain.'
-                    : `${external?.accepted.label ?? 'Your wallet'} signs the exact transaction quoted — it does not broadcast it. Splash dry-runs it, sends it, and checks the result on chain.`}
+                  {quote?.kind === 'X402'
+                    ? `${source === 'SPLASH' ? 'Your passkey' : external?.accepted.label ?? 'Your wallet'} signs the exact payment quoted. Splash dry-runs it, re-checks the seller's price, hands the signed payment to the seller to settle, and confirms it on chain.`
+                    : source === 'SPLASH'
+                      ? 'Your passkey signs the exact transaction quoted. Splash dry-runs it, sends it, and checks the result on chain.'
+                      : `${external?.accepted.label ?? 'Your wallet'} signs the exact transaction quoted — it does not broadcast it. Splash dry-runs it, sends it, and checks the result on chain.`}
                 </p>
+                {settling ? (
+                  <div role="status" className="mt-2 rounded-lg border border-[#326273]/15 bg-white p-3 text-[13px] text-[#1F4452]">
+                    {quote?.kind === 'X402' ? 'The seller accepted the payment; it has not shown on chain yet.' : 'The network did not confirm the submission yet.'}{' '}
+                    <button type="button" onClick={() => void checkAgain()} disabled={busy !== null} className="font-semibold text-[var(--info)] hover:underline">{quote?.kind === 'X402' ? 'Check again' : 'Send again'}</button>
+                    <span className="block text-[12px] text-[#326273]/60">This resends the same signed transaction — it cannot be paid twice.</span>
+                  </div>
+                ) : null}
                 <p className="mt-2 flex items-start gap-2 text-[12px] leading-5 text-[#326273]/65">
                   <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--warn)]" />
                   A transfer on Sui is final. Check the recipient address before you sign.
@@ -453,11 +684,11 @@ export default function SendUsdcDesk() {
                 <button
                   type="button"
                   onClick={() => void signAndSend()}
-                  disabled={!approved || busy !== null || secondsLeft === 0}
+                  disabled={!approved || busy !== null || secondsLeft === 0 || settling}
                   className="dash-btn mt-3 !px-4 !py-2 !text-[13px] disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {busy === 'send' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                  {quote ? `Sign & send ${formatUsdc(BigInt(quote.totalDebitMinor))} USDC` : 'Sign & send'}
+                  {quote ? `${quote.kind === 'X402' ? 'Sign & pay' : 'Sign & send'} ${formatUsdc(BigInt(quote.totalDebitMinor))} USDC` : 'Sign & send'}
                 </button>
               </StepCard>
             </>
@@ -469,7 +700,7 @@ export default function SendUsdcDesk() {
           <ApprovalsInbox onChange={() => void loadLane()} />
           {lane?.approval.style === 'CLICK' ? (
             <ClickApprovals
-              outflows={(lane?.outflows ?? []).filter((o) => o.kind === 'TRANSFER' && o.status === 'PENDING'
+              outflows={(lane?.outflows ?? []).filter((o) => o.status === 'PENDING'
                 && new Date(o.reservedUntil).getTime() > now && o.id !== quote?.outflowId)}
               recipients={recipients}
               onChange={() => void loadLane()}
@@ -488,14 +719,16 @@ export default function SendUsdcDesk() {
  * the same arithmetic Splash checks on the dry run and again on chain.
  */
 function TransactionLegs({ quote }: { quote: Quote }) {
-  const legs = [
-    { to: quote.recipient.name, address: quote.recipient.address, amount: BigInt(quote.principalMinor), note: 'receives exactly this' },
-    { to: 'Splash fee', address: null, amount: BigInt(quote.feeMinor), note: '0.80%, same transaction' },
-  ];
+  const legs = quote.kind === 'X402'
+    ? [{ to: quote.recipient.name, address: quote.recipient.address, amount: BigInt(quote.principalMinor), note: 'the seller’s price, exactly' }]
+    : [
+      { to: quote.recipient.name, address: quote.recipient.address, amount: BigInt(quote.principalMinor), note: 'receives exactly this' },
+      { to: 'Splash fee', address: null, amount: BigInt(quote.feeMinor), note: '0.80%, same transaction' },
+    ];
   return (
     <figure className="overflow-hidden rounded-xl border border-[#0C3E48]/20 bg-white" aria-label="What you are signing">
       <figcaption className="flex items-center justify-between gap-2 bg-[#0C3E48] px-3 py-2 font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-white/80">
-        <span>One transaction · two legs</span>
+        <span>{quote.kind === 'X402' ? 'One x402 payment · no Splash fee' : 'One transaction · two legs'}</span>
         <span className="text-[#efc46f]">Sui mainnet</span>
       </figcaption>
       <div className="px-3 pb-3 pt-2">
@@ -521,6 +754,15 @@ function TransactionLegs({ quote }: { quote: Quote }) {
       </div>
     </figure>
   );
+}
+
+/** A seller's JSON, indented; anything else as it came. */
+function prettyBody(body: string): string {
+  try {
+    return JSON.stringify(JSON.parse(body), null, 2);
+  } catch {
+    return body;
+  }
 }
 
 function StepCard({ n, title, done, disabled, children }: { n: number; title: string; done: boolean; disabled: boolean; children: React.ReactNode }) {

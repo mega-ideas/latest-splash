@@ -76,6 +76,8 @@ export const RATE_LIMITS = {
   stepUpRequestUser: { bucket: 'step-up-request:user', limit: 10, windowMs: 15 * MINUTE },
   // Wrong codes are also capped per code (5); this caps them per person.
   stepUpVerifyUser: { bucket: 'step-up-verify:user', limit: 60, windowMs: 15 * MINUTE },
+  // The public demo x402 seller simulates and broadcasts on each paid call.
+  x402DemoIp: { bucket: 'x402-demo:ip', limit: 60, windowMs: 15 * MINUTE },
 } as const satisfies Record<string, RateLimitRule>;
 
 /**
