@@ -195,3 +195,38 @@ test('the proposer is on the PROPOSE side, registered last, and the prompt says 
   const agent = await readFile(new URL('../lib/agent/oxwal.ts', import.meta.url), 'utf8');
   assert.match(agent, /approving records the decision and does not pay/);
 });
+
+/* ── The router: a pasted challenge is caught before any keyword route ── */
+
+async function ask(message) {
+  const { runOxwalAgent } = await import('../lib/agent/oxwal.ts');
+  let text = '';
+  let source = null;
+  for await (const event of runOxwalAgent({ message, orgId: 'org-1', actorId: 'usr-1', history: [], forceLocal: true })) {
+    if (event.type === 'delta') text += event.text;
+    if (event.type === 'done') source = event.source;
+  }
+  return { text, source };
+}
+
+test('a pasted challenge described as an "FX summary" is quoted, not answered with the rate line', async () => {
+  // This exact message was answered with the canned USD/PHP rate reply in a
+  // live run: "FX" hit the rate keyword route before anything saw the 402.
+  const { text, source } = await ask(`An API just answered 402 with this. What is it asking for, and can we pay it?\n\n${CHALLENGE}`);
+  assert.equal(source, 'scripted', 'deterministic — no model near a money figure');
+  assert.match(text, /0\.010000/);
+  assert.match(text, /arbitrum-sepolia/);
+  assert.match(text, /Can we pay it\? Not yet\./);
+  assert.match(text, /session mandate/);
+  assert.doesNotMatch(text, /56\.42|Rate holds/, 'the rate route must not win');
+});
+
+test('asking to queue it goes to the tools, where proposeX402Payment lives', async () => {
+  const { source } = await ask(`Please put this in the queue for approval: ${CHALLENGE}`);
+  assert.notEqual(source, 'scripted', 'a queue request is not answered from a string table');
+});
+
+test('an ordinary rate question still gets the rate answer', async () => {
+  const { text } = await ask('what is the USD to PHP rate today?');
+  assert.doesNotMatch(text, /x402/i, 'the x402 route only fires on a real challenge');
+});

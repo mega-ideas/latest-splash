@@ -100,7 +100,7 @@ for (const file of readdirSync(SOURCES).filter((f) => f.endsWith('.move'))) {
       // still return data — which is a smaller concern than authority, and the
       // reason this is an exemption for reads rather than for getters.
       const mutates =
-        /&\s*mut/.test(fn.params) || /transfer::/.test(fn.body) || /event::emit/.test(fn.body);
+        /&\s*mut\b/.test(fn.params) || /transfer::/.test(fn.body) || /event::emit/.test(fn.body);
       if (!mutates) continue;
 
       checked[cap] += 1;

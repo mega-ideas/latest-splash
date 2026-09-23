@@ -141,6 +141,11 @@ test('the shell locks from a server-resolved prop and reroutes to setup — it i
   assert.match(shell, /function lockReasonFor\(/);
   assert.match(shell, /lockReason \? '\/dashboard\/setup' : href/);
   assert.doesNotMatch(shell, /kybGateEnabled|readOrgKybState|getDb/, 'the client shell must not reach the DB or the gate itself');
+  // Parity: the spend routes require the terms AND KYB, so the padlock must too
+  // — otherwise an ACTIVE org without terms sees Transfer open and gets a 412.
+  const spendBlock = shell.slice(shell.indexOf('if (spend.includes(href))'), shell.indexOf('if (spend.includes(href))') + 200);
+  assert.match(spendBlock, /locks\.moneyBlocked/);
+  assert.match(spendBlock, /locks\.termsDone/);
 
   const layout = await readFile(new URL('../app/dashboard/layout.tsx', import.meta.url), 'utf8');
   assert.match(layout, /readOnboardingState/);

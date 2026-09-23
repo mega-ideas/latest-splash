@@ -25,12 +25,21 @@
  * Usage:
  *   npm run seed:demo
  *   npm run seed:demo -- --kyb ACTIVE --email me@example.com
+ *   npm run seed:demo -- --kyb ACTIVE --onboarded
+ *
+ * --onboarded finishes Account setup for the workspace, so a demo lands
+ * straight in the product: accepts the CURRENT terms version, sets the
+ * intent to 'pay', and writes a default org_settings row. Without it the
+ * account walks the real onboarding (intent picker, then the stepper), which
+ * is also worth demoing. Nothing here bypasses a gate: it writes the same
+ * rows the setup screens write.
  */
 import { readFileSync } from 'node:fs';
 
 import pg from 'pg';
 
 import { hashPassword } from '../lib/auth/password.ts';
+import { TERMS_VERSION } from '../content/legal.ts';
 
 /**
  * Read `.env.local` the way Next does, because a standalone script does not get
@@ -104,6 +113,7 @@ const kyb = args.get('kyb') ?? 'REGISTERED';
 // what a single-operator walkthrough needs — note that the same person being
 // maker and checker on one proposal is still refused, by design.
 const role = args.get('role') ?? 'admin';
+const onboarded = args.has('onboarded');
 
 const client = new pg.Client({ connectionString: url });
 await client.connect();
@@ -171,6 +181,24 @@ try {
     [`mem_seed_${slug}_${orgId}`, userId, orgId, role],
   );
 
+  if (onboarded) {
+    // Exactly what the setup screens write — step 1 (terms), the intent
+    // question, and step 4 (approvals). Profile is already filled above.
+    await client.query(
+      `INSERT INTO terms_acceptances (id, user_id, org_id, version)
+       SELECT $1, $2, $3, $4
+       WHERE NOT EXISTS (
+         SELECT 1 FROM terms_acceptances WHERE user_id = $2 AND org_id = $3 AND version = $4
+       )`,
+      [`terms_seed_${slug}_${orgId}`, userId, orgId, TERMS_VERSION],
+    );
+    await client.query(`UPDATE organizations SET intent = COALESCE(intent, 'pay') WHERE id = $1`, [orgId]);
+    await client.query(
+      `INSERT INTO org_settings (org_id, updated_by) VALUES ($1, $2) ON CONFLICT (org_id) DO NOTHING`,
+      [orgId, userId],
+    );
+  }
+
   const gateNote = kyb === 'ACTIVE' ? '' : '  — money movement is gated until this is ACTIVE';
   console.log('Seeded a demo operator:\n');
   console.log(`  email     ${email}`);
@@ -178,6 +206,7 @@ try {
   console.log(`  org       ${orgId} (${orgName})`);
   console.log(`  role      ${role}`);
   console.log(`  KYB       ${kyb}${gateNote}`);
+  console.log(`  setup     ${onboarded ? `complete (terms ${TERMS_VERSION}, intent pay, approvals set)` : 'not started — the account walks onboarding on first sign-in'}`);
   console.log('\nSign in at /login.');
 } finally {
   await client.end();

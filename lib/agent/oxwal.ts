@@ -1782,7 +1782,7 @@ const DAILY_TALK: Array<{ test: RegExp; reply: string }> = [
  */
 
 const OFF_TOPIC_PATTERNS = [
-  /(meme)/,
+  /\b(meme)\b/,
   /\b(poem|story|song|essay|lyrics|novel)\b/,
   /\b(movie|film|netflix|series|anime|music|playlist)\b/,
   /\b(football|soccer|basketball|nba|premier league|world cup|score)\b/,
@@ -1795,6 +1795,30 @@ const OFF_TOPIC_PATTERNS = [
   /\b(girlfriend|boyfriend|dating|relationship advice)\b/,
 ];
 
+/**
+ * The deterministic x402 answer. `undefined` = not an x402 message; `null` =
+ * an x402 message the operator wants queued, so the model and its
+ * proposeX402Payment tool take it; a string = the quote, verbatim.
+ */
+function x402ScriptedReply(message: string): string | null | undefined {
+  if (!/x402Version/.test(message) || !/accepts/.test(message)) return undefined;
+  if (/\b(queue|propose|proposal|put (it|this) in|send (it|this) (to|for) approval|raise (it|this))\b/i.test(message)) {
+    return null;
+  }
+  const first = message.indexOf('{');
+  const last = message.lastIndexOf('}');
+  const body = first >= 0 && last > first ? message.slice(first, last + 1) : message;
+  const quote = quoteX402Payment({ challenge: body });
+  if (quote.status !== 'QUOTED') return quote.message;
+  return [
+    ...quote.summaries,
+    '',
+    `Can we pay it? Not yet. ${quote.settlement.reason}`,
+    '',
+    'If you want a named person to approve it anyway, ask me to put it in the queue: approving records the decision, and a payee Splash has never screened will be held by compliance.',
+  ].join('\n');
+}
+
 function matchDemoScript(message: string): string | null {
   const q = message.toLowerCase();
 
@@ -1802,6 +1826,15 @@ function matchDemoScript(message: string): string | null {
   //    Note the underscore: plain words like "invoice" must NOT match.
   const namesTarget = /\binv[_-][\w-]+/i.test(message) || /\bcp[_-][\w-]+/i.test(message);
   if (namesTarget) return null;
+
+  // 1b. A pasted x402 challenge is caught HERE, before any keyword route —
+  //     otherwise a resource described as an "FX summary" lands on the rate
+  //     answer (it did). Asked to queue or propose it -> the tools, where
+  //     proposeX402Payment lives. Otherwise -> quoted deterministically: exact
+  //     base-unit figures and the settlement refusal, with no model anywhere
+  //     near a money number.
+  const x402 = x402ScriptedReply(message);
+  if (x402 !== undefined) return x402;
 
   // 2. Off-topic → business focus.
   // Warmth first, then the refusal — otherwise "how is your day" is met

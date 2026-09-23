@@ -91,17 +91,26 @@ function lockReasonFor(
   href: string,
   locks: NonNullable<DashboardShellProps['locks']>,
 ): string | null {
-  const money = ['/dashboard/transfer', '/dashboard/transfers', '/dashboard/batch', '/dashboard/history'];
+  // Parity with the routes, or the padlock lies: the spend routes require
+  // BOTH the KYB gate and the terms (requireTermsAccepted), so a nav item
+  // that only checked KYB would read as open and then answer 412 on submit.
+  const spend = ['/dashboard/transfer', '/dashboard/transfers', '/dashboard/batch'];
   const termsOnly = ['/dashboard/invoices', '/dashboard/recipients'];
+  const termsReason = 'Accept the terms in Account setup to start here.';
   if (href === '/dashboard/treasury') {
     if (locks.moneyBlocked) return locks.reason;
+    if (!locks.termsDone) return termsReason;
     if (!locks.custodyOn) return 'Treasury arrives with our licence. Nothing is held for you today.';
     return null;
   }
-  if (money.includes(href)) return locks.moneyBlocked ? locks.reason : null;
-  if (termsOnly.includes(href)) {
-    return locks.termsDone ? null : 'Accept the terms in Account setup to start here.';
+  if (spend.includes(href)) {
+    if (locks.moneyBlocked) return locks.reason;
+    return locks.termsDone ? null : termsReason;
   }
+  // History is a read of past transfers: nothing to show before verification,
+  // and nothing it can spend, so the terms do not gate it.
+  if (href === '/dashboard/history') return locks.moneyBlocked ? locks.reason : null;
+  if (termsOnly.includes(href)) return locks.termsDone ? null : termsReason;
   return null;
 }
 

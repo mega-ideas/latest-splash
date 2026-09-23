@@ -23,6 +23,21 @@
  *
  * The escape produces the identical byte at runtime. The only thing that
  * changes is whether a human can see the line.
+ *
+ * A literal BACKSPACE (0x08) is the same failure wearing a different byte,
+ * and it is worse: it does not hide the file, it hides the character. It is
+ * what a `\b` word boundary becomes when an escape is interpreted one layer
+ * too early, and a regex holding it matches nothing a person would write. It
+ * shipped twice, both invisible in every diff and every grep:
+ *
+ *   scripts/check-cap-generations.mjs — `/&\s*mut<BS>/` never matched a
+ *   `&mut` parameter, so the revocation guard classed mutating functions
+ *   as pure reads and exempted them. It saw 1 of 3 ComplianceCap consumers.
+ *
+ *   lib/agent/oxwal.ts — an off-topic pattern for "meme" that never fired.
+ *
+ * Unlike NUL, 0x08 has no legitimate use in source, so it is refused
+ * outright.
  */
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -55,6 +70,16 @@ for (const root of ROOTS) {
   for (const file of await filesUnder(root)) {
     scanned += 1;
     const bytes = await readFile(file);
+
+    const bs = bytes.indexOf(8);
+    if (bs !== -1) {
+      const bsLine = bytes.subarray(0, bs).toString('utf8').split('\n').length;
+      violations.push(
+        `${file.replace(/\\/g, '/')}:${bsLine} contains a literal BACKSPACE (0x08) — ` +
+          'almost certainly a \\b escape interpreted one layer too early; the regex it sits in matches nothing.',
+      );
+    }
+
     const at = bytes.indexOf(0);
     if (at === -1) continue;
 
@@ -81,4 +106,4 @@ if (violations.length > 0) {
   process.exit(1);
 }
 
-console.log(`No binary source: ${scanned} text file(s) scanned, none contain a NUL byte.`);
+console.log(`No binary source: ${scanned} text file(s) scanned, none contain a NUL or backspace byte.`);
