@@ -1290,7 +1290,15 @@ const SPLASH_ANSWERS: Array<{ test: RegExp; reply: string; skipIf?: RegExp }> = 
   {
     // Compliance / KYB / AML / limits
     test: /\b(compliance|kyb|kyc|aml|kyt|sanction|limit|screening|watchlist)\b/,
-    reply: 'Compliance posture: KYB Tier 1 approved, AML clear, no sanctions flags. Every batch row is screened for AML lists, KYT amount rules (single transfers above 5,000 USD route to manual review), structuring patterns, corridor allowlist and purpose codes — before any value moves. The audit trail is retained on Walrus.',
+    // States the CONTROL, never the caller's standing. This previously opened
+    // with a clean screening verdict — an approved KYB tier, no adverse AML or
+    // sanctions findings — asserted to every caller, including organisations
+    // with no KYB case at all, in a register that reads as a determination.
+    // The screening description below was always true; the verdict in front of
+    // it never was, because this responder cannot read the caller's KYB state.
+    // scripts/check-copy.mjs now bans that verdict, so it is described here
+    // rather than quoted.
+    reply: 'Your verification standing is on the KYB screen — I do not assert it here, and the money routes enforce it themselves regardless of what any screen says. How the control works: every batch row is screened for AML lists, KYT amount rules (single transfers above 5,000 USD route to manual review), structuring patterns, corridor allowlist and purpose codes — before any value moves. The audit trail is retained on Walrus.',
   },
   {
     // Settlement speed
