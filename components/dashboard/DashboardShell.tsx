@@ -4,6 +4,7 @@ import Image from 'next/image';
 import { useState, type ReactNode } from 'react';
 import FloatingCopilot from '@/components/FloatingCopilot';
 import DashboardHeader from '@/components/DashboardHeader';
+import { CustodyPhaseContext } from '@/components/dashboard/CustodyPhaseContext';
 import type { CustomerSession } from '@/lib/auth/customer-session';
 import {
   Bot,
@@ -369,7 +370,9 @@ export default function DashboardShell({ children, session, kyb, locks }: Dashbo
             </Link>
           </section>
         ) : (
-          children
+          // The same custodyOn the Treasury padlock reads, for pages that
+          // cannot import the server gate (StepDelivery's fund-holding tiers).
+          <CustodyPhaseContext value={locks?.custodyOn ?? false}>{children}</CustodyPhaseContext>
         )}
       </main>
 
