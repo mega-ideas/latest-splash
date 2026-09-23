@@ -180,25 +180,45 @@ test('brand name, domain and support email are configuration, and no entity that
 
 /* ── The landing ───────────────────────────────────────────────────────── */
 
-test('the landing is eight sections in order, explains no protocol, and compares nothing Splash does not price', async () => {
-  const landing = await source('components/landing/Landing.tsx');
+test('the landing is the v1 cinematic: sections in order, supply on its own page, no claim the truth pass removed', async () => {
+  // Rewritten 2026-09-23. The WS9 eight-section page was replaced by the
+  // restored v1 isometric cinematic on the owner's direction; what this test
+  // used to pin about STRUCTURE moved to the v1 layout, and what it pinned
+  // about TRUTH is kept verbatim — the claims WS9 stripped stay stripped,
+  // whichever landing renders.
+  const landing = await source('components/IsometricLanding.tsx');
+
   const ids = [...landing.matchAll(/id="([a-z-]+)"/g)].map((m) => m[1]);
-  const expected = ['hero', 'record', 'calculator', 'how-it-works', 'numbers', 'pricing', 'faq'];
+  const expected = ['loops', 'how-it-works', 'comparison', 'corridors', 'trust', 'platform', 'copilot', 'control-plane'];
   const inOrder = expected.map((id) => ids.indexOf(id));
   assert.ok(inOrder.every((i) => i >= 0), `every section is present; found ${ids.join(', ')}`);
   assert.deepEqual([...inOrder].sort((a, b) => a - b), inOrder, 'in this order');
-  assert.match(landing, /<footer/);
 
-  for (const banned of [/id="supply"/, /\bWise\b/, /yield benchmark/i, /Licensed[- ]partner/i, /from 'three'|@react-three/, /treasury/i]) {
+  // Corridors is a block INSIDE comparison (one argument, one section), and
+  // it keeps its anchor so the header nav still lands on it.
+  assert.doesNotMatch(landing, /<section id="corridors"/, 'corridors must not be its own section');
+  // Supply lives on /working-capital; the landing links it instead of
+  // repeating it.
+  assert.doesNotMatch(landing, /id="supply"/, 'supply must not be a landing section');
+  assert.match(landing, /href="\/working-capital"/, 'loop 03 links the supply page');
+
+  // Two ways into a payment: an invoice, or a transfer filled in by hand.
+  assert.match(landing, /Invoice in, or type it in/);
+  assert.match(landing, /Manual transfer branch/);
+
+  // The control plane reveals inside the copilot section, on demand.
+  assert.match(landing, /aria-controls="control-plane"/);
+  assert.match(landing, /ctrlOpen \?/);
+
+  // The truth rules, unchanged from the WS9 version of this test: no licence
+  // or regulator claim, no dead entity, no protocol vocabulary, no three.js.
+  for (const banned of [/Licensed[- ]partner/i, /Splash Financial/i, /Labuan FSA/, /\bBNM\b/, /\bBSP\b/, /Walrus/i, /audit spine/i, /from 'three'|@react-three/]) {
     assert.doesNotMatch(landing, banned, `${banned} must not be on the landing`);
   }
-  // How it works is three steps, not five.
-  assert.doesNotMatch(landing, /Five steps/);
 
   const page = await source('app/page.tsx');
-  assert.match(page, /<Landing/);
-  assert.doesNotMatch(page, /IsometricLanding|MobileLanding|isPhoneUserAgent/);
-  for (const banned of [/Licensed partners/, /Labuan FSA/, /BNM/, /\bBSP\b/, /legalName/, /Splash Financial/]) {
+  assert.match(page, /<IsometricLanding/);
+  for (const banned of [/Licensed partners/, /Labuan FSA/, /\bBNM\b/, /\bBSP\b/, /legalName/, /Splash Financial/]) {
     assert.doesNotMatch(page, banned, `JSON-LD must not carry ${banned}`);
   }
 });

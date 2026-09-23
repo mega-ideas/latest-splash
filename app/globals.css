@@ -7918,9 +7918,11 @@ button.iso-product-row {
   }
 
   /* Static-hero telemetry meta is real explanatory copy — lift it off the
-     9.5px compact floor so it reads on a phone. */
+     9.5px compact floor so it reads on a phone. 11.5px was still under the
+     floor for body text held at arm's length; the cards are full-width now
+     (see .cin-callout.cin-callout-static in cinematic.css) so there is room. */
   .iso-landing .cin-callout small {
-    font-size: 11.5px;
+    font-size: 14px;
     line-height: 1.5;
   }
 

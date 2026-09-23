@@ -4,16 +4,17 @@ import { ArrowRight } from 'lucide-react';
 
 /**
  * Public explainer for the SHIPPED 0xWal control plane, in the §S card
- * grammar (iso-ctrl-card = meta / art / copy, mirroring iso-supply-card).
- * Every phase names the real module that implements it and renders the
- * actual ProposalStatus values from lib/agent/types.ts — the UI matches the
- * engine, not a marketing diagram of it.
+ * grammar (iso-ctrl-card = meta / art / copy).
+ * Every phase renders the actual ProposalStatus values from
+ * lib/agent/types.ts — the UI matches the engine, not a marketing diagram
+ * of it. The implementing file paths used to render on every card too;
+ * a visitor reading a landing page does not need source paths, so the
+ * states stayed and the paths went.
  */
 const PHASES = [
   {
     number: '01',
     title: 'Propose',
-    module: 'lib/agent/oxwal.ts',
     copy: '0xWal drafts an unsigned proposal and dry-runs it against live balances. Gas is sponsored — nothing is signed, nothing moves.',
     states: ['DRAFTED', 'SIMULATED'],
     image: '/isometric/ctrl-propose.png',
@@ -22,7 +23,6 @@ const PHASES = [
   {
     number: '02',
     title: 'Policy',
-    module: 'lib/policy/evaluate.ts',
     copy: 'Deterministic rules — approval thresholds, corridor arm/pause state, operating minimums — evaluate the proposal. Code, not judgement.',
     states: ['POLICY_EVALUATED'],
     image: '/isometric/ctrl-policy.png',
@@ -31,7 +31,6 @@ const PHASES = [
   {
     number: '03',
     title: 'Guards',
-    module: 'lib/safety/*',
     copy: 'Anomaly screens, a circuit breaker, and a submit guard sit between the proposal and the queue. Any trip stops the pipeline.',
     states: ['PENDING_APPROVAL'],
     image: '/isometric/ctrl-guards.png',
@@ -40,7 +39,6 @@ const PHASES = [
   {
     number: '04',
     title: 'You approve',
-    module: 'app/queue',
     copy: 'A human signs in the Action Queue — maker-checker, with dual approval above your threshold. This is the only gate that releases money.',
     states: ['APPROVED', 'SIGNED'],
     image: '/isometric/ctrl-approve.png',
@@ -49,8 +47,7 @@ const PHASES = [
   {
     number: '05',
     title: 'Execute & prove',
-    module: 'lib/evidence/settlement.ts',
-    copy: 'The approved transaction settles on Sui, and Seal-encrypted evidence lands on Walrus, anchored on-chain for audit.',
+    copy: 'The approved payment settles, and the encrypted evidence is written beside it where it cannot be quietly changed.',
     states: ['SUBMITTED', 'SETTLED', 'ANCHORED'],
     image: '/isometric/ctrl-execute.png',
     imageAlt: 'Isometric settlement dock linking a sealed evidence document to an on-chain block chain',
@@ -88,7 +85,6 @@ export default function ControlPlaneExplainer() {
                   <code key={state}>{state}</code>
                 ))}
               </div>
-              <code className="iso-ctrl-module">{phase.module}</code>
             </div>
           </li>
         ))}
