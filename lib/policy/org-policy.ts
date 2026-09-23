@@ -25,7 +25,7 @@ export class PolicyMissingError extends Error {
 
 const PROPOSAL_KINDS: ProposalKind[] = [
   'PAYMENT', 'INTERNAL_TRANSFER', 'FX_CONVERT', 'TREASURY_ALLOCATE',
-  'TREASURY_REDEEM', 'BATCH_PAYOUT', 'NETTING_SETTLE',
+  'TREASURY_REDEEM', 'BATCH_PAYOUT', 'NETTING_SETTLE', 'X402_PAYMENT',
 ];
 
 /** The one server-side default, stated once. USD micro units. */

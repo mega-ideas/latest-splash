@@ -7,7 +7,11 @@ export type ProposalKind =
   | 'TREASURY_ALLOCATE'
   | 'TREASURY_REDEEM'
   | 'BATCH_PAYOUT'
-  | 'NETTING_SETTLE';
+  | 'NETTING_SETTLE'
+  /** An x402 (HTTP 402) payment request an operator pasted. Outbound, screened,
+   *  human-approved — and not settleable until the session mandate and EVM
+   *  payee screening exist (docs/X402-ASSESSMENT.md). */
+  | 'X402_PAYMENT';
 
 export type ProposalStatus =
   | 'DRAFTED'
@@ -43,7 +47,9 @@ export interface EvidenceItem {
     | 'TREASURY'
     | 'NETTING'
     | 'COMPLIANCE'
-    | 'CORRIDOR_LIQUIDITY';
+    | 'CORRIDOR_LIQUIDITY'
+    /** A 402 challenge the operator pasted — untrusted by construction. */
+    | 'X402_CHALLENGE';
   ref: string;
   observedAt: string;
   trusted: boolean;

@@ -68,6 +68,17 @@ need today and the same wrong-rail issue in reverse.
   a 402 response into the chat and Zeke prices it, names the network and
   payee, and carries the settlement refusal in the result so the model
   cannot answer "paid". The read/quote half of phase 2 — shipped.
+- **Phase 2b, the proposal lane — shipped.** `proposeX402Payment` turns a
+  challenge into an `X402_PAYMENT` proposal in the approval queue. It is
+  treated as outbound money everywhere that asks — compliance screening,
+  the anomaly burst and hourly-volume limits — and gets its own policy
+  branch: after the compliance hold, before the payout minimum (which
+  prices local-rail delivery and would refuse every cent-sized x402
+  payment for a reason that does not apply). A human approves, always; two
+  above the org's dual threshold; never auto, even if an org whitelists
+  the kind. Execution refuses it by name — "approved and recorded — not
+  paid" — rather than the default "settles through its own path", because
+  there is no path. `tests/x402-proposal.test.mjs` pins each of these.
 
 ## The path, when it opens
 
@@ -75,8 +86,24 @@ need today and the same wrong-rail issue in reverse.
 |---|---|---|
 | 1 | Parse, price, explain; refusal on settle | shipped |
 | 2a | `quoteX402Payment` as a Zeke READ tool | shipped |
-| 2b | The proposal lane: a quoted challenge becomes an unsigned proposal in the queue, a human approves each one | product call: is one-click-per-request approval useful, or noise? |
-| 3 | Session mandate on-chain; an EVM spend wallet funded within a mandate's caps; x402 payments auto-release **inside** the budget a human signed | `mandate.move` (Sebastian), KMS-held EVM key, facilitator selection |
+| 2b | The proposal lane: a quoted challenge becomes an unsigned proposal in the queue, a human approves each one | shipped |
+| 3 | Session mandate on-chain; an EVM spend wallet funded within a mandate's caps; x402 payments auto-release **inside** the budget a human signed | `mandate.move` (Sebastian), **EVM payee screening**, KMS-held EVM key, facilitator selection |
+
+## What building 2b surfaced
+
+**An x402 payee is held by compliance today, and that is correct.** The
+screening layer blocks outbound money with no screenable beneficiary
+(`NO_SCREENING_RECORD`), and an x402 `payTo` is an arbitrary EVM address
+Splash has never screened. So the lane is built end to end, and every x402
+proposal currently stops at the compliance hold with that flag — the same
+thing that would happen to a human paying an unknown address. Weakening the
+hold to make the demo reach "approved" would be the exact failure this
+codebase keeps refusing.
+
+That makes **EVM payee screening** (sanctions/KYT on `payTo` addresses, e.g.
+through the screening provider already used for counterparties) a phase-3
+prerequisite beside the mandate — not visible from the protocol docs, only
+from wiring the lane into the real controls.
 
 ## What the buildathon deck adds to the picture
 

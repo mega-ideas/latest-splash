@@ -137,6 +137,21 @@ export function evaluatePolicy(ctx: PolicyContext): PolicyDecision {
 
   const amount = amountUsdMicro(proposal);
 
+  // x402 has its own branch, and it sits here on purpose: AFTER the
+  // compliance hold (an unscreened EVM payee is blocked like any other
+  // unscreened beneficiary) and BEFORE the settlement minimum. That minimum
+  // prices the local-rail delivery of a cross-border payout; an x402 payment
+  // is a USDC micropayment on an EVM chain, typically cents, and the payout
+  // minimum would refuse every one for a reason that does not apply. What
+  // does apply: a human approves, always — never auto, whatever the tier —
+  // and two approve above the org's dual threshold.
+  if (proposal.kind === 'X402_PAYMENT') {
+    if (amount <= 0n) return { outcome: 'BLOCK', reason: 'x402 amount must be positive' };
+    return amount >= policy.dualApprovalThresholdUsd
+      ? { outcome: 'REQUIRE_APPROVAL', approvers: 2 }
+      : { outcome: 'REQUIRE_APPROVAL', approvers: 1 };
+  }
+
   // Minimum settlement size. Enforced here as well as at the API edge, because
   // this is the choke point every path shares — in-chat approval, the
   // maker-checker queue, and submit-time re-evaluation all run evaluatePolicy,

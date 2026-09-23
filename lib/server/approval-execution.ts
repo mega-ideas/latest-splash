@@ -32,6 +32,7 @@
 import 'server-only';
 
 import type { UnsignedProposal } from '@/lib/agent/types';
+import { x402SettlementAvailability } from '@/lib/agent/x402';
 
 export type ExecutionOutcome =
   | { state: 'EXECUTED'; detail: string; ref?: string }
@@ -73,6 +74,13 @@ export async function executeApprovedProposal(
         return await executeTransfer(proposal, payload, context);
       case 'BATCH_PAYOUT':
         return await executeBatch(proposal, payload, context);
+      case 'X402_PAYMENT':
+        // There is no path that settles x402, so the default's "settles
+        // through their own path" would be a lie. Recorded, named, not paid.
+        return {
+          state: 'SKIPPED',
+          detail: `Approved and recorded — not paid. ${x402SettlementAvailability().reason}`,
+        };
       default:
         // An agent-drafted treasury or FX proposal has its own settlement path
         // and is not replayed through the money routes. Saying so is better
