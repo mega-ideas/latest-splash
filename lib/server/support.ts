@@ -1,3 +1,5 @@
+import { BRAND } from '@/content/brand';
+
 export type SupportTicketType = 'bug' | 'feature' | 'complaint' | 'other';
 export type SupportTicketStatus = 'OPEN' | 'IN_REVIEW' | 'REPLIED' | 'CLOSED';
 
@@ -75,10 +77,10 @@ function seededTickets() {
         email: 'finance@nusantaraexports.my',
         status: 'REPLIED',
         priority: 'NORMAL',
-        assignedTo: 'support@splash.finance',
+        assignedTo: BRAND.supportEmail,
         createdAt: new Date(now - 1000 * 60 * 180).toISOString(),
         updatedAt: new Date(now - 1000 * 60 * 105).toISOString(),
-        replies: [reply('support@splash.finance', 'The receipt object ID appears on the completed transfer receipt and in the transfer status timeline.', 'staff')],
+        replies: [reply(BRAND.supportEmail, 'The receipt object ID appears on the completed transfer receipt and in the transfer status timeline.', 'staff')],
       },
     ],
   ]);

@@ -70,12 +70,12 @@ export const claims = {
     status: 'modeled',
   },
   auditTrail: {
-    claim: 'Settlement proofs are stored on Walrus and anchored on Sui when evidence is available.',
+    claim: 'Settlement proofs are stored permanently and anchored on Sui when evidence is available.',
     evidence: 'Existing settlement evidence and audit batch routes.',
     status: 'testnet-verified',
   },
   footerLegal: {
-    claim: 'Splash Financial Labuan Ltd. Licence application in progress with Labuan FSA. Not yet authorised to hold customer funds. Sandbox environment - no real money moves.',
+    claim: 'Licence application in preparation with Labuan FSA. Not yet authorised to hold customer funds. Sandbox environment; no real money moves.',
     evidence: 'Current compliance posture from v3 truth pass.',
     status: 'modeled',
   },

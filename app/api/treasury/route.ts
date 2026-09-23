@@ -8,6 +8,11 @@
  *          withdraw → Smart Treasury → Available, T+1–T+3 notice
  *
  * Amounts are USD (2dp) at the API boundary; the ledger stores micro-USD.
+ *
+ * Phase 0 (no custody package configured): every handler answers the
+ * licence-named 403 from lib/server/custody-phase.ts before the ledger is
+ * touched. The treasury holds customer funds, and that is a Phase 2
+ * capability. The seeded demo ledger is never served as a balance.
  */
 
 import { NextResponse } from 'next/server';
@@ -15,6 +20,7 @@ import { NextResponse } from 'next/server';
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { assertCleanBody, ProvenanceViolationError, provenanceViolationResponse } from '@/lib/auth/provenance-guard';
 import { requireActiveOrg } from '@/lib/server/kyb-gate';
+import { custodyPhaseEnabled, custodyPhaseResponse } from '@/lib/server/custody-phase';
 import { readJsonBody } from '@/lib/server/http';
 import { resolveSessionAccount } from '@/lib/server/session-account';
 import {
@@ -58,6 +64,7 @@ function snapshot(accountId: string) {
 export async function GET(request: Request) {
   const auth = await requireCustomerRequest(request);
   if (auth.response) return auth.response;
+  if (!custodyPhaseEnabled()) return custodyPhaseResponse();
 
   const { accountId } = await resolveSessionAccount(auth.session);
   return NextResponse.json(snapshot(accountId));
@@ -66,6 +73,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const auth = await requireCustomerRequest(request);
   if (auth.response) return auth.response;
+  if (!custodyPhaseEnabled()) return custodyPhaseResponse();
 
   if (process.env.TREASURY_EXECUTION_ENABLED !== 'true') {
     return NextResponse.json(

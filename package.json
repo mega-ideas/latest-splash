@@ -13,7 +13,7 @@
     "build": "next build",
     "doctor": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/doctor.mjs",
     "start": "cross-env NODE_OPTIONS=--use-system-ca next start",
-    "lint": "npm run check:core && npm run check:compliance && npm run check:treasury && npm run check:generations && npm run check:aborts && npm run check:copy && npm run check:env && eslint",
+    "lint": "npm run check:core && npm run check:compliance && npm run check:treasury && npm run check:generations && npm run check:aborts && npm run check:copy && npm run check:numbers && npm run check:env && eslint",
     "check:core": "node scripts/check-core-no-balance.mjs",
     "check:compliance": "node scripts/check-compliance-subtractive.mjs",
     "check:treasury": "node scripts/check-treasury-cap.mjs",
@@ -32,11 +32,12 @@
     "test:health": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --import ./scripts/alias-hook.mjs --test tests/health.test.mjs tests/rate-limits-and-headers.test.mjs",
     "test:explorer": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/explorer.test.mjs",
     "test:money": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/money.test.mjs",
-    "test:oxwal": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/oxwal-state-machine.test.mjs tests/oxwal-agent.test.mjs tests/oxwal-policy.test.mjs tests/oxwal-compose.test.mjs tests/oxwal-approval-queue.test.mjs tests/oxwal-evidence.test.mjs tests/oxwal-safety.test.mjs tests/oxwal-frontend.test.mjs tests/oxwal-e2e.test.mjs tests/oxwal-authority.test.mjs tests/comparison-baselines.test.mjs tests/money-path.test.mjs tests/deepbook-liquidity-guard.test.mjs tests/deepbook-pool-whitelist.test.mjs tests/payout-authorization.test.mjs tests/core-invariant-check.test.mjs tests/treasury-nav.test.mjs tests/settlement-minimum.test.mjs tests/receipt-share.test.mjs",
+    "test:oxwal": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/oxwal-state-machine.test.mjs tests/oxwal-agent.test.mjs tests/oxwal-policy.test.mjs tests/oxwal-compose.test.mjs tests/oxwal-approval-queue.test.mjs tests/oxwal-evidence.test.mjs tests/oxwal-safety.test.mjs tests/oxwal-frontend.test.mjs tests/oxwal-e2e.test.mjs tests/oxwal-authority.test.mjs tests/comparison-baselines.test.mjs tests/money-path.test.mjs tests/deepbook-liquidity-guard.test.mjs tests/deepbook-pool-whitelist.test.mjs tests/payout-authorization.test.mjs tests/core-invariant-check.test.mjs tests/treasury-nav.test.mjs tests/settlement-minimum.test.mjs tests/receipt-share.test.mjs tests/phase0-custody-gate.test.mjs tests/landing-and-numbers.test.mjs",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "test:db": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/ledger-invariant.test.mjs tests/proposal-persistence.test.mjs tests/wallet-identity-db.test.mjs",
-    "test:privacy": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --import ./scripts/alias-hook.mjs --test tests/event-privacy.test.mjs"
+    "test:privacy": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --import ./scripts/alias-hook.mjs --test tests/event-privacy.test.mjs",
+    "check:numbers": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/check-numbers.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.99.0",

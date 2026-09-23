@@ -10,7 +10,8 @@ import FundingSelector from '@/components/funding/FundingSelector';
 import HoverPopup from '@/components/HoverPopup';
 import { SourceBadge } from '@/components/SourceBadge';
 import MoneyPathPanel from '@/components/compliance/MoneyPathPanel';
-import { baselineCostUsd, getComparisonBaseline } from '@/lib/fx/comparison-baselines';
+import { baselineCostMinor, getComparisonBaseline } from '@/lib/fx/comparison-baselines';
+import { formatMinor as formatBaselineMinor, parseMinor as parseBaselineMinor } from '@/lib/money';
 import { lockedCopy } from '@/content/claims';
 
 const BASE_RATES: Record<TransferState['amount']['targetCurrency'], number> = {
@@ -409,12 +410,12 @@ export default function StepQuote({
             </div>
             <div className="grid grid-cols-[1.2fr_1fr_1fr] items-center px-4 py-2.5">
               <span className="font-medium text-[#326273]/75">Fintech transfer</span>
-              <span className="money text-right font-medium text-[#326273]/75">${baselineCostUsd(baseline.fintech, sendAmountUsd).toFixed(2)}</span>
+              <span className="money text-right font-medium text-[#326273]/75">${formatBaselineMinor(baselineCostMinor(baseline.fintech, parseBaselineMinor(sendAmountUsd.toFixed(2), 2)), 2)}</span>
               <span className="text-right text-[13px] font-medium text-[#326273]/60">{baseline.fintech.delivery}</span>
             </div>
             <div className="grid grid-cols-[1.2fr_1fr_1fr] items-center px-4 py-2.5">
               <span className="font-medium text-[#326273]/75">Bank wire</span>
-              <span className="money text-right font-medium text-[#326273]/75">${baselineCostUsd(baseline.bankWire, sendAmountUsd).toFixed(2)}</span>
+              <span className="money text-right font-medium text-[#326273]/75">${formatBaselineMinor(baselineCostMinor(baseline.bankWire, parseBaselineMinor(sendAmountUsd.toFixed(2), 2)), 2)}</span>
               <span className="text-right text-[13px] font-medium text-[#326273]/60">{baseline.bankWire.delivery}</span>
             </div>
           </div>

@@ -4,6 +4,7 @@
 @import "../styles/tokens.css";
 @import "../styles/cinematic.css";
 @import "../styles/mobile-landing.css";
+@import "../styles/landing.css";
 
 @custom-variant dark (&:is(.dark *));
 

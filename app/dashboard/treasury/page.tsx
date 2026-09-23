@@ -60,15 +60,6 @@ type TreasuryRateView = { apy: number; label: string; introductory: boolean };
 
 // ─── Seed data ──────────────────────────────────────────────────────────────
 
-const SEED_HISTORY: HistoryEntry[] = [
-  { id: 'tx_t001', type: 'yield',    desc: 'USDY yield accrual',              amount: '+$3.28',     amountNum:  3.28, date: 'Today, 00:01', status: 'confirmed' },
-  { id: 'tx_t002', type: 'yield',    desc: 'USDY yield accrual',              amount: '+$3.25',     amountNum:  3.25, date: 'Yesterday',    status: 'confirmed' },
-  { id: 'tx_t003', type: 'deposit',  desc: 'Available → Smart Treasury',      amount: '+$5,000.00', amountNum:  5000, date: '26 May 2026',  status: 'confirmed' },
-  { id: 'tx_t004', type: 'yield',    desc: 'USDY yield accrual',              amount: '+$3.22',     amountNum:  3.22, date: '25 May 2026',  status: 'confirmed' },
-  { id: 'tx_t006', type: 'withdraw', desc: 'Smart Treasury → Available',      amount: '-$2,000.00', amountNum: -2000, date: '23 May 2026',  status: 'confirmed' },
-  { id: 'tx_t007', type: 'deposit',  desc: 'Available → Smart Treasury',      amount: '+$8,000.00', amountNum:  8000, date: '20 May 2026',  status: 'confirmed' },
-];
-
 const DAILY_BARS_7D = [
   { day: 'Mon', label: 'Mon · 19 May', amount: 3.18 },
   { day: 'Tue', label: 'Tue · 20 May', amount: 3.21 },
@@ -87,7 +78,7 @@ const DAILY_BARS_30D = Array.from({ length: 30 }, (_, i) => {
 
 const RISK_ITEMS = [
   { label: 'Instrument',     value: 'Ondo USDY · US Treasury bills',  icon: Landmark    },
-  { label: 'Smart contract', value: 'Audited · Sui-native USDY',      icon: ShieldCheck },
+  { label: 'Smart contract', value: 'Sui-native USDY',                icon: ShieldCheck },
   { label: 'Custody',        value: 'Segregated from operating cash', icon: Lock        },
   { label: 'Liquidity',      value: 'USD ↔ USDY conversion on Sui',   icon: Zap         },
 ];
@@ -132,12 +123,16 @@ function HistIcon({ type }: { type: TxType }) {
 // ─── Page ────────────────────────────────────────────────────────────────────
 
 export default function TreasuryPage() {
-  const [available, setAvailable]     = useState(11140.0); // USD · 0% · instant
-  const [balance, setBalance]         = useState(24500.0); // USDY · Smart Treasury
-  const [yield30d, setYield30d]       = useState(98.72);
+  // Nothing is shown until the ledger answers. This page used to render
+  // $11,140 / $24,500 / $98.72 and six "confirmed" transactions from
+  // constants before its first fetch returned — a demo presented as a balance.
+  const [phase, setPhase]             = useState<'loading' | 'gated' | 'live'>('loading');
+  const [available, setAvailable]     = useState(0); // USD · 0% · instant
+  const [balance, setBalance]         = useState(0); // USDY · Smart Treasury
+  const [yield30d, setYield30d]       = useState(0);
   const [rate, setRate]               = useState<TreasuryRateView>({ apy: 0, label: 'Variable rate loading...', introductory: false });
   const [executionEnabled, setExecutionEnabled] = useState(false);
-  const [history, setHistory]         = useState<HistoryEntry[]>(SEED_HISTORY);
+  const [history, setHistory]         = useState<HistoryEntry[]>([]);
   const [notices, setNotices]         = useState<WithdrawalNotice[]>([]);
   const [tab, setTab]                 = useState<'toTreasury' | 'toAvailable'>('toTreasury');
   const [amount, setAmount]           = useState('');
@@ -166,8 +161,18 @@ export default function TreasuryPage() {
     let active = true;
     const load = () => {
       fetch('/api/treasury')
-        .then((r) => (r.ok ? (r.json() as Promise<TreasurySnapshot>) : null))
-        .then((d) => { if (active && d) applySnapshot(d); })
+        .then(async (r) => {
+          if (!active) return;
+          if (r.ok) {
+            applySnapshot((await r.json()) as TreasurySnapshot);
+            setPhase('live');
+            return;
+          }
+          // Phase 0: the treasury is not a feature yet, and the page says so
+          // instead of showing a projection as if it were a balance.
+          const body = (await r.json().catch(() => ({}))) as { code?: string };
+          if (r.status === 403 && body.code === 'custody_not_licensed') setPhase('gated');
+        })
         .catch(() => {});
     };
     load();
@@ -284,6 +289,34 @@ export default function TreasuryPage() {
   const feesDeleted = simulationFee * (nettingRatio / 100);
   const feesRelocated = simulationFee - feesDeleted;
 
+  if (phase !== 'live') {
+    return (
+      <div className="mx-auto max-w-5xl space-y-6">
+        <header>
+          <span className="dash-kicker">Working capital</span>
+          <h1 className="dash-title mt-2">Smart Treasury</h1>
+        </header>
+        {phase === 'gated' ? (
+          <section className="dash-block p-6">
+            <h2 className="text-base font-semibold text-[#1F4452]">Treasury arrives with our licence</h2>
+            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[#326273]/75">
+              Holding your funds — a treasury balance, a stored balance, a sweep account — is a Phase 2 capability that
+              needs a money-broking licence Splash does not hold yet. Today Splash pays out only: what you send is
+              delivered to the recipient, and nothing is kept on your behalf.
+            </p>
+            <p className="mt-3 max-w-2xl text-sm leading-relaxed text-[#326273]/75">
+              Until then this page shows no balances and no projections. When the licence and the custody package are in
+              place, the treasury opens here — every move approval-gated, every withdrawal on a cancellable notice.
+            </p>
+          </section>
+        ) : (
+          <section className="dash-block p-6 text-sm text-[#326273]/60">Loading the ledger…</section>
+        )}
+        <MoneyPathPanel />
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto max-w-5xl space-y-6">
 
@@ -300,7 +333,7 @@ export default function TreasuryPage() {
           <span className="dash-kicker">Working capital</span>
           <h1 className="dash-title mt-2">Smart Treasury</h1>
           <p className="mt-1 text-[13px] font-medium text-[#326273]/60">
-            Operating cash stays instant. Idle balance earns a floating T-bill rate through Ondo USDY.
+            Operating cash stays instant. Idle balance can be allocated to Ondo USDY at a variable rate, shown here as a projection.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -316,14 +349,14 @@ export default function TreasuryPage() {
         <div className="dash-block flex flex-wrap items-center gap-x-3 gap-y-1 border-[#6FB4A0]/30 bg-[#6FB4A0]/8 p-4 text-sm font-semibold text-[#1F4452]">
           <span className="inline-flex items-center gap-1.5"><CheckCircle2 size={14} className="text-[#4F9C88]" /> Treasury execution enabled · sandbox</span>
           <span className="text-[13px] font-medium text-[#326273]/65">
-            Moves settle against the Splash sandbox ledger · every action is approval-gated · withdrawals follow the notice window. Licensed partners are the system of record for customer funds.
+            Moves settle against the Splash sandbox ledger · every action is approval-gated · withdrawals follow the notice window. Partners of record hold customer funds.
           </span>
         </div>
       ) : (
         <div className="dash-block border-accent/30 bg-accent/10 p-4 text-sm font-semibold text-foreground">
           Projection only — execution disabled pending regulatory approval.
           <span className="mt-1 block text-[13px] font-medium text-foreground/65">
-            Licensed partners are the system of record for customer funds; treasury figures stay projected until controls are live.
+            Partners of record hold customer funds; treasury figures stay projected until controls are live.
           </span>
         </div>
       )}

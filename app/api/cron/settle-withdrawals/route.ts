@@ -13,6 +13,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import { NextResponse } from 'next/server';
 
+import { custodyPhaseEnabled, custodyPhaseResponse } from '@/lib/server/custody-phase';
 import { readJsonBody } from '@/lib/server/http';
 import { settleDueWithdrawals } from '@/lib/server/treasury';
 
@@ -40,6 +41,8 @@ async function handleSettlement(request: Request) {
   if (!isAuthorized(request)) {
     return NextResponse.json({ success: false, error: 'unauthorized' }, { status: 401 });
   }
+  // Phase 0: no treasury, so no withdrawal notices to settle.
+  if (!custodyPhaseEnabled()) return custodyPhaseResponse();
 
   const body = (request.method === 'POST' ? await readJsonBody(request).catch(() => ({})) : {}) as { force?: boolean };
   // Force is honoured only in demo/non-prod — never fast-forwards real money.

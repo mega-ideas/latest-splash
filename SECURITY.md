@@ -118,6 +118,20 @@ under the four-gate decision below.
 
 ---
 
+## WS6 — Phase-0 custody gates — 2026-09-23
+
+**Scope**: every path that would hold customer funds before the licence
+exists. Reproduced first as tests that fail on the tree before the fix
+(`tests/phase0-custody-gate.test.mjs`, red commit `ea423b6`).
+
+| ID | Sev | Finding | Status |
+|----|-----|---------|--------|
+| WS6-1 | High | `transfers/authorize` accepted `deliveryTier: STORED_BALANCE` or `SWEEP_ACCOUNT`, and `POST /api/recipients` accepted any `tier` string, with no custody package configured — the product would take a recipient's funds into a stored balance or a sweep account it has no licence to hold, in Phase 0. **Fixed**: `lib/server/custody-phase.ts` decides the phase from the custody package alone; both routes refuse non-`PAYOUT_ONLY` tiers with a plain, licence-named 403 (`custody_not_licensed`) before a recipient or an intent is written. | Fixed |
+| WS6-2 | High | `lib/server/treasury.ts` keeps a per-user USDC/USDY ledger in a process-global `Map` (invariant I7), seeds a $11,140 / $24,500 / $98.72 demo ledger for any unknown account, moves the ledger on a *quote* in `moveToTreasury` and `settleWithdrawal`, has a double-settle race (`notice.state = 'SWAPPING'` across an `await`), and does money arithmetic in JS `number`. `/api/treasury` served it as a balance. **Gated off**: `/api/treasury` GET and POST and both crons answer the licence-named 403 until the custody package exists; the ledger is never read in Phase 0. The module itself is unchanged and its defects stand until Phase 2 work replaces it — recorded here so they are not mistaken for fixed. | Gated |
+| WS6-3 | Medium | The treasury page rendered six hardcoded "confirmed" transactions and three hardcoded balances from constants before its first fetch, described the contract as "Audited" with no source, and promised that idle balance "earns a floating T-bill rate"; the overview card invented "+$3.22" of daily yield; 0xWal read the seeded demo ledger to pitch allocations. **Fixed**: constants deleted, both surfaces show "Treasury arrives with our licence" in Phase 0 and nothing before the ledger answers, the copy is a labelled projection, and the copilot answers with the phase reason and never quotes a rate or a balance. The illustrative daily-yield chart series on the treasury page remains for Phase 2 and is flagged for WS9's copy pass. | Fixed |
+
+---
+
 ## WS7 — rate limits and security headers — 2026-09-23
 
 **Scope**: the browser boundary and every route that spends something.
@@ -135,7 +149,6 @@ Reproduced first as ten tests that fail on the tree before the fix
 **What it does not do.** The CSP allows inline *styles*; a hash-per-prop policy is not practical here. The rate limits are per address and per network, not per organisation; the tenant key arrives with the tenant-isolation patch. The public pay link still marks an invoice paid on the caller's word alone — that is a WS2/WS8 concern recorded in the report, not a limit problem.
 
 ---
-
 
 ## Re-audit pass — 2026-07-13
 

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
+import { custodyPhaseResponse, deliveryTierAllowed } from '@/lib/server/custody-phase';
 import { readJsonBody } from '@/lib/server/http';
 import { RATE_LIMITS, enforceRateLimit } from '@/lib/server/rate-limit';
 import { createRecipient, listRecipients, type RecipientRecord, type RecipientTier } from '@/lib/server/operations';
@@ -28,13 +29,19 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Name and account number are required' }, { status: 400 });
   }
 
+  // Phase 0 pays out: a recipient may not be set up for a fund-holding
+  // delivery until the custody package exists. An unknown tier is refused
+  // too — it used to pass straight through to the store.
+  const tier = typeof body.tier === 'string' && body.tier ? body.tier : 'PAYOUT_ONLY';
+  if (!deliveryTierAllowed(tier)) return custodyPhaseResponse();
+
   const record = createRecipient({
     name,
     country: String(body.country ?? 'PH'),
     bank: String(body.bank ?? ''),
     swift: String(body.swift ?? ''),
     account,
-    tier: body.tier as RecipientTier | undefined,
+    tier: tier as RecipientTier,
     kybStatus: body.kybStatus as RecipientRecord['kybStatus'] | undefined,
     orgEmail: typeof body.orgEmail === 'string' ? body.orgEmail : undefined,
     createdVia: body.createdVia as RecipientRecord['createdVia'] | undefined,

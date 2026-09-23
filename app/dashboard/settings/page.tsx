@@ -31,7 +31,7 @@ const INFORMATION = [
   {
     icon: WalletCards,
     label: 'Custody',
-    text: 'licensed partners are the system of record for customer funds · reconciled daily',
+    text: 'partners of record hold customer funds · reconciled daily',
   },
   {
     icon: Landmark,

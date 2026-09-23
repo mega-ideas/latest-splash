@@ -5,6 +5,7 @@ import { findAccount } from '@/lib/auth/accounts';
 import { issueVerificationToken } from '@/lib/auth/email-verification';
 import { sendVerificationEmail } from '@/lib/auth/email-transport';
 import { clientIp } from '@/lib/auth/login-rate-limit';
+import { BRAND } from '@/content/brand';
 import { readJsonBody } from '@/lib/server/http';
 import { RATE_LIMITS, checkRateLimit, rateLimited, recordHit } from '@/lib/server/rate-limit';
 
@@ -30,8 +31,7 @@ const recoverySchema = z.object({
 function recoveryContact() {
   return (
     process.env.CUSTOMER_RECOVERY_EMAIL ||
-    process.env.NEXT_PUBLIC_SUPPORT_EMAIL ||
-    'support@splash.finance'
+    BRAND.supportEmail
   ).trim();
 }
 
