@@ -100,7 +100,10 @@ test('default dashboard is the streaming 0xWal surface and avoids browser money 
   assert.match(kybSettings, /getCustomerSession/);
   assert.match(kybSettings, /redirect\("\/login"\)/);
   assert.match(forgotPassword, /fetch\('\/api\/auth\/recovery'/);
-  assert.match(forgotPassword, /Recovery instructions ready/);
+  // WS1 replaced the support-mailbox recovery with a real, delivered reset
+  // link: the page now says to check the inbox. The line below still pins
+  // that no delivery is ever faked client-side.
+  assert.match(forgotPassword, /Check your inbox/);
   assert.doesNotMatch(forgotPassword, /setTimeout|Reset link sent|Recovery email sent/);
 });
 

@@ -27,6 +27,15 @@ export type CustomerSession = {
    *  only — the authority resolver re-derives org and role from the DB. */
   suiAddress?: string;
   orgId?: string;
+  /**
+   * The account's credential version at mint time (users.credential_version).
+   *
+   * Bumped whenever the credentials change — verification, password reset —
+   * and re-read from the row on every session read. A mismatch, or a session
+   * with no version at all, is treated as no session. This is how "the
+   * mailbox owner verifies and every earlier session dies" is enforced.
+   */
+  credentialVersion?: number;
   issuedAt: string;
   expiresAt: string;
   /**
@@ -91,6 +100,7 @@ export function createCustomerSessionFromIdentity(input: {
   userRole?: CustomerWorkspaceRole;
   suiAddress?: string;
   orgId?: string;
+  credentialVersion?: number;
   lastSeenAt?: Date;
 }): CustomerSession {
   const now = input.now ?? new Date();
@@ -106,6 +116,7 @@ export function createCustomerSessionFromIdentity(input: {
     ...(input.userRole ? { userRole: input.userRole } : {}),
     ...(input.suiAddress ? { suiAddress: input.suiAddress } : {}),
     ...(input.orgId ? { orgId: input.orgId } : {}),
+    ...(typeof input.credentialVersion === 'number' ? { credentialVersion: input.credentialVersion } : {}),
     lastSeenAt: (input.lastSeenAt ?? now).toISOString(),
     issuedAt: now.toISOString(),
     expiresAt: expiresAt.toISOString(),
@@ -163,10 +174,23 @@ export function readCustomerSessionToken(
       ...(isCustomerWorkspaceRole(payload.userRole) ? { userRole: payload.userRole } : {}),
       ...(typeof payload.suiAddress === 'string' && payload.suiAddress ? { suiAddress: payload.suiAddress } : {}),
       ...(typeof payload.orgId === 'string' && payload.orgId ? { orgId: payload.orgId } : {}),
+      ...(Number.isInteger(payload.credentialVersion) ? { credentialVersion: payload.credentialVersion as number } : {}),
+      // The idle clock. It was missing from this list, which meant every read
+      // saw "no stamp" and the fifteen-minute logout could never fire.
+      ...(typeof payload.lastSeenAt === 'string' && payload.lastSeenAt ? { lastSeenAt: payload.lastSeenAt } : {}),
       issuedAt: payload.issuedAt || new Date((payload.iat ?? 0) * 1000).toISOString(),
       expiresAt: payload.expiresAt || new Date(payload.exp * 1000).toISOString(),
     };
   } catch {
     return null;
   }
+}
+
+/**
+ * The same session, seen now. Only `lastSeenAt` moves: the absolute expiry
+ * is not a sliding window, and re-stamping the idle clock must never turn
+ * it into one.
+ */
+export function stampLastSeen(session: CustomerSession, now = new Date()): CustomerSession {
+  return { ...session, lastSeenAt: now.toISOString() };
 }

@@ -8,6 +8,7 @@ import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 
 import { customerRequestOriginAllowed } from '@/lib/auth/customer-request';
+import { sessionCredentialIsCurrent } from '@/lib/auth/accounts';
 import { isKilledEntityEmail } from '@/lib/auth/killed-entities';
 import {
   CUSTOMER_SESSION_COOKIE,
@@ -15,6 +16,7 @@ import {
   createCustomerSessionFromIdentity,
   createCustomerSessionToken,
   readCustomerSessionToken,
+  stampLastSeen,
   type CustomerSession,
   type CustomerWorkspaceRole,
 } from '@/lib/auth/customer-session';
@@ -76,6 +78,7 @@ function sessionFromIdentity(input: {
   userRole?: CustomerWorkspaceRole;
   suiAddress?: string;
   orgId?: string;
+  credentialVersion?: number;
 }): CustomerSession {
   return createCustomerSessionFromIdentity({
     ...input,
@@ -100,7 +103,7 @@ function sessionFromIdentity(input: {
  * A session proves identity. It carries no role: authority is read from a
  * membership row on every request, so a session cannot be a stale grant.
  */
-export function sessionForAccount(account: { email: string; name?: string }): CustomerSession {
+export function sessionForAccount(account: { email: string; name?: string; credentialVersion: number }): CustomerSession {
   const email = account.email.trim().toLowerCase();
 
   // Wallet spec §2.4 — a killed entity must not bind in through the auth layer.
@@ -108,7 +111,9 @@ export function sessionForAccount(account: { email: string; name?: string }): Cu
     throw new Error('killed-entity domain');
   }
 
-  return sessionFromIdentity({ email });
+  // The version is what lets a verification or a reset end this session
+  // from the server side; a session minted without one is refused on read.
+  return sessionFromIdentity({ email, credentialVersion: account.credentialVersion });
 }
 
 /**
@@ -119,11 +124,23 @@ export function sessionForAccount(account: { email: string; name?: string }): Cu
  * that an unattended browser stops being authenticated, and reading a
  * session is exactly the moment to decide that.
  *
- * Re-stamping happens in setCustomerSessionCookie on the routes that write a
- * response. A read alone does not extend the window, so a page that only
- * polls cannot keep an abandoned session alive forever.
+ * Re-stamping happens in requireCustomerRequest — the entry every
+ * authenticated route handler uses — at most once a minute, and never past
+ * the session's own expiry. A bare read, which is what a page render is,
+ * does not extend the window; a page that polls an API does, which is the
+ * "as requests arrive" rule in lib/auth/idle-timeout.ts.
  */
 export async function getCustomerSession(): Promise<CustomerSession | null> {
+  const read = await readSession();
+  return read ? read.session : null;
+}
+
+/**
+ * The session and whether its idle stamp is due for a refresh. Shared by the
+ * read-only entry (pages) and the route-handler entry, which is the one
+ * place allowed to act on `refresh`.
+ */
+async function readSession(): Promise<{ session: CustomerSession; refresh: boolean } | null> {
   const secret = resolveSecret();
   if (!secret) return null;
 
@@ -136,7 +153,20 @@ export async function getCustomerSession(): Promise<CustomerSession | null> {
   const verdict = evaluateIdle(Number.isNaN(lastSeen as number) ? undefined : lastSeen);
   if (verdict.state === 'expired') return null;
 
-  return session;
+  // The session must have been minted under the account's current
+  // credentials. Verification and password reset bump the row's version, so
+  // a cookie an attacker held before the mailbox owner verified stops
+  // reading as a session at that moment — no session table, nothing to
+  // sweep. Without a database there is no row to compare against; the
+  // password route refuses to mint in that state, and a zkLogin session is
+  // accepted as-is because there is nothing it could be checked against.
+  if (process.env.DATABASE_URL) {
+    const { getDb } = await import('@/lib/db/client');
+    const current = await sessionCredentialIsCurrent(getDb() as never, session);
+    if (!current) return null;
+  }
+
+  return { session, refresh: verdict.refresh };
 }
 
 export async function requireCustomerSession(): Promise<
@@ -149,8 +179,8 @@ export async function requireCustomerSession(): Promise<
 export async function requireCustomerRequest(request: Request): Promise<
   { session: CustomerSession; response: null } | { session: null; response: NextResponse }
 > {
-  const auth = await requireCustomerSession();
-  if (auth.response) return auth;
+  const read = await readSession();
+  if (!read) return { session: null, response: customerAuthRequiredResponse() };
 
   if (!customerRequestOriginAllowed(request)) {
     return {
@@ -162,7 +192,20 @@ export async function requireCustomerRequest(request: Request): Promise<
     };
   }
 
-  return auth;
+  // The "as requests arrive" of the idle clock. A route handler may write
+  // cookies and a page may not, and every authenticated API call comes
+  // through here — so this is where the stamp moves, at most once a minute
+  // and never past the session's own expiry.
+  if (read.refresh) {
+    try {
+      await touchCustomerSessionCookie(read.session);
+    } catch {
+      // A context that cannot set cookies keeps its session; it just does
+      // not extend the idle window from here.
+    }
+  }
+
+  return { session: read.session, response: null };
 }
 
 export async function setCustomerSessionCookie(
@@ -185,6 +228,7 @@ export async function setCustomerSessionCookie(
     userRole: session.userRole,
     suiAddress: session.suiAddress,
     orgId: session.orgId,
+    credentialVersion: session.credentialVersion,
   });
   const cookieStore = await cookies();
 
@@ -197,6 +241,31 @@ export async function setCustomerSessionCookie(
   });
 
   return refreshedSession;
+}
+
+/**
+ * Move the idle stamp and nothing else. The token keeps its `exp`, and the
+ * cookie's max-age is the lifetime the session already had — so an active
+ * user is not logged out mid-task, and an idle window cannot become a way
+ * to hold a session open past the day it was issued for.
+ */
+export async function touchCustomerSessionCookie(session: CustomerSession): Promise<void> {
+  const secret = resolveSecret();
+  if (!secret) return;
+
+  const expiresAtMs = Date.parse(session.expiresAt);
+  const remainingSeconds = Math.floor((expiresAtMs - Date.now()) / 1000);
+  if (!Number.isFinite(remainingSeconds) || remainingSeconds <= 0) return;
+
+  const stamped = stampLastSeen(session);
+  const cookieStore = await cookies();
+  cookieStore.set(CUSTOMER_SESSION_COOKIE, createCustomerSessionToken(stamped, secret), {
+    httpOnly: true,
+    maxAge: remainingSeconds,
+    path: '/',
+    sameSite: 'lax',
+    secure: isProduction,
+  });
 }
 
 export async function clearCustomerSessionCookie() {

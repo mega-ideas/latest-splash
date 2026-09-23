@@ -6,7 +6,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 
 import * as schema from '../lib/db/schema.ts';
-import { createAccount } from '../lib/auth/accounts.ts';
+import { createAccount, markEmailVerified } from '../lib/auth/accounts.ts';
 import { resolveAuthorityFromDb, UnauthorizedError } from '../lib/auth/authority.ts';
 import {
   MEMBERSHIP_ROLES,
@@ -48,11 +48,18 @@ async function migratedDb() {
 const PASSWORD = 'correct-horse-battery-staple-9';
 const STAFF = 'ops@splash.example';
 
+/** An account whose mailbox has been proven — what a grant requires (WS1, X5).
+ *  The refusal for an unproven one lives in tests/account-verification.test.mjs. */
+async function verifiedAccount(db, email, name) {
+  await createAccount(db, { email, password: PASSWORD, name });
+  await markEmailVerified(db, email);
+}
+
 /* ── Granting ──────────────────────────────────────────────────────────── */
 
 test('a granted role is the role that resolves', async () => {
   const { client, db } = await migratedDb();
-  await createAccount(db, { email: 'maker@example.com', password: PASSWORD, name: 'Maker Ltd' });
+  await verifiedAccount(db, 'maker@example.com', 'Maker Ltd');
 
   await assert.rejects(
     resolveAuthorityFromDb(db, 'maker@example.com'),
@@ -69,7 +76,7 @@ test('a granted role is the role that resolves', async () => {
 
 test('the grant records who made it', async () => {
   const { client, db } = await migratedDb();
-  await createAccount(db, { email: 'a@example.com', password: PASSWORD, name: 'A' });
+  await verifiedAccount(db, 'a@example.com', 'A');
   await grantRole(db, { email: 'a@example.com', orgId: 'acme', role: 'viewer', grantedBy: STAFF });
 
   const [row] = await listAccounts(db);
@@ -93,7 +100,7 @@ test('granting to an address with no account is refused, not silently created', 
 
 test('a second grant is refused rather than layered on the first', async () => {
   const { client, db } = await migratedDb();
-  await createAccount(db, { email: 'b@example.com', password: PASSWORD, name: 'B' });
+  await verifiedAccount(db, 'b@example.com', 'B');
   await grantRole(db, { email: 'b@example.com', orgId: 'acme', role: 'viewer', grantedBy: STAFF });
 
   await assert.rejects(
@@ -108,7 +115,7 @@ test('a second grant is refused rather than layered on the first', async () => {
 
 test('the email is normalised, so case cannot produce a second membership', async () => {
   const { client, db } = await migratedDb();
-  await createAccount(db, { email: 'c@example.com', password: PASSWORD, name: 'C' });
+  await verifiedAccount(db, 'c@example.com', 'C');
 
   await grantRole(db, { email: '  C@Example.COM  ', orgId: 'acme', role: 'maker', grantedBy: STAFF });
 
@@ -121,7 +128,7 @@ test('the email is normalised, so case cannot produce a second membership', asyn
 
 test('revoking removes the authority, not the account', async () => {
   const { client, db } = await migratedDb();
-  await createAccount(db, { email: 'd@example.com', password: PASSWORD, name: 'D' });
+  await verifiedAccount(db, 'd@example.com', 'D');
   await grantRole(db, { email: 'd@example.com', orgId: 'acme', role: 'checker', grantedBy: STAFF });
 
   await revokeRole(db, { email: 'd@example.com' });
@@ -136,7 +143,7 @@ test('revoking removes the authority, not the account', async () => {
 
 test('a revoked member can be granted again', async () => {
   const { client, db } = await migratedDb();
-  await createAccount(db, { email: 'e@example.com', password: PASSWORD, name: 'E' });
+  await verifiedAccount(db, 'e@example.com', 'E');
   await grantRole(db, { email: 'e@example.com', orgId: 'acme', role: 'admin', grantedBy: STAFF });
   await revokeRole(db, { email: 'e@example.com' });
 
@@ -153,8 +160,8 @@ test('a revoked member can be granted again', async () => {
 
 test('accounts without a membership are listed — they are the ones to act on', async () => {
   const { client, db } = await migratedDb();
-  await createAccount(db, { email: 'granted@example.com', password: PASSWORD, name: 'G' });
-  await createAccount(db, { email: 'waiting@example.com', password: PASSWORD, name: 'W' });
+  await verifiedAccount(db, 'granted@example.com', 'G');
+  await verifiedAccount(db, 'waiting@example.com', 'W');
   await grantRole(db, { email: 'granted@example.com', orgId: 'acme', role: 'maker', grantedBy: STAFF });
 
   const rows = await listAccounts(db);

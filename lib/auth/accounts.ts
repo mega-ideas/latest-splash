@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import type { PgDatabase } from 'drizzle-orm/pg-core';
 
 import { users } from '../db/schema.ts';
@@ -19,7 +19,8 @@ import { hashPassword, needsRehash, verifyPassword } from './password.ts';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type DrizzleDb = PgDatabase<any, typeof schemaModule, any>;
 
-export type AccountIdentity = { userId: string; email: string; name: string };
+export type AccountIdentity = { userId: string; email: string; name: string; credentialVersion: number };
+export type AccountStatus = AccountIdentity & { emailVerifiedAt: Date | null };
 
 const norm = (email: string) => email.trim().toLowerCase();
 
@@ -56,7 +57,7 @@ export async function createAccount(
   const name = input.name?.trim() || email.split('@')[0] || 'member';
 
   await db.insert(users).values({ id: userId, email, name, passwordHash }).onConflictDoNothing();
-  return { userId, email, name };
+  return { userId, email, name, credentialVersion: 1 };
 }
 
 /**
@@ -73,7 +74,13 @@ export async function verifyAccountPassword(
 ): Promise<AccountIdentity | null> {
   const email = norm(input.email);
   const rows = await db
-    .select({ id: users.id, email: users.email, name: users.name, passwordHash: users.passwordHash })
+    .select({
+      id: users.id,
+      email: users.email,
+      name: users.name,
+      passwordHash: users.passwordHash,
+      credentialVersion: users.credentialVersion,
+    })
     .from(users)
     .where(eq(users.email, email))
     .limit(1);
@@ -99,7 +106,7 @@ export async function verifyAccountPassword(
     }
   }
 
-  return { userId: row.id, email: row.email, name: row.name };
+  return { userId: row.id, email: row.email, name: row.name, credentialVersion: row.credentialVersion };
 }
 
 /**
@@ -112,17 +119,76 @@ function dummyHash(): Promise<string> {
   return dummy;
 }
 
-/** Mark an address proven. Verification delivery is not built yet. */
-export async function markEmailVerified(db: DrizzleDb, email: string): Promise<void> {
-  await db.update(users).set({ emailVerifiedAt: new Date() }).where(eq(users.email, norm(email)));
+/**
+ * Mark an address proven.
+ *
+ * Reached from exactly two places: the zkLogin route, when the provider's
+ * token carries the boolean claim `email_verified: true`, and
+ * `lib/auth/email-verification.ts`, when a link delivered to the mailbox is
+ * opened. The first proof time is kept — proving an address twice does not
+ * move the date it was first proven.
+ */
+export async function markEmailVerified(db: DrizzleDb, email: string, now = new Date()): Promise<void> {
+  await db
+    .update(users)
+    .set({ emailVerifiedAt: sql`coalesce(${users.emailVerifiedAt}, ${now}::timestamptz)`, updatedAt: now })
+    .where(eq(users.email, norm(email)));
 }
 
-export async function findAccount(db: DrizzleDb, email: string): Promise<AccountIdentity | null> {
+export async function findAccount(db: DrizzleDb, email: string): Promise<AccountStatus | null> {
   const rows = await db
-    .select({ id: users.id, email: users.email, name: users.name })
+    .select({
+      id: users.id,
+      email: users.email,
+      name: users.name,
+      credentialVersion: users.credentialVersion,
+      emailVerifiedAt: users.emailVerifiedAt,
+    })
     .from(users)
     .where(eq(users.email, norm(email)))
     .limit(1);
   const row = rows[0];
-  return row ? { userId: row.id, email: row.email, name: row.name } : null;
+  return row
+    ? {
+        userId: row.id,
+        email: row.email,
+        name: row.name,
+        credentialVersion: row.credentialVersion,
+        emailVerifiedAt: row.emailVerifiedAt,
+      }
+    : null;
+}
+
+/**
+ * The credential version on the row, or null when there is no such account.
+ *
+ * It moves with everything that changes what mints a session — a password
+ * set through verification or reset, and the verification itself. A session
+ * carries the version it was minted under; a reader that finds a different
+ * number treats the session as absent. That is how "verification ends every
+ * existing session" is enforced without a session table to sweep.
+ */
+export async function readCredentialVersion(db: DrizzleDb, email: string): Promise<number | null> {
+  const rows = await db
+    .select({ credentialVersion: users.credentialVersion })
+    .from(users)
+    .where(eq(users.email, norm(email)))
+    .limit(1);
+  return rows[0]?.credentialVersion ?? null;
+}
+
+/**
+ * Whether a session was minted under the account's current credentials.
+ *
+ * A session with no version at all is refused too: it predates versioning,
+ * and every session that predates it was minted before anyone had proven a
+ * mailbox.
+ */
+export async function sessionCredentialIsCurrent(
+  db: DrizzleDb,
+  session: { email: string; credentialVersion?: number },
+): Promise<boolean> {
+  if (typeof session.credentialVersion !== 'number') return false;
+  const current = await readCredentialVersion(db, session.email);
+  return current !== null && current === session.credentialVersion;
 }

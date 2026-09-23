@@ -10,6 +10,7 @@ import {
   zkLoginEnabled,
   deriveZkLoginAddress,
 } from '@/lib/auth/zklogin';
+import { markEmailVerified, readCredentialVersion } from '@/lib/auth/accounts';
 import { DEFAULT_ORG_ID } from '@/lib/auth/authority';
 import { ensureUserForIdentity, upsertWalletIdentity } from '@/lib/db/wallet-identities';
 import { createCustomerSessionFromIdentity } from '@/lib/auth/customer-session';
@@ -81,23 +82,41 @@ export async function POST(request: Request) {
     // address; without one we still mint a session, we just have no signer to
     // record yet.
     let suiAddress: string | undefined;
+    let credentialVersion: number | undefined;
     const userSalt = (process.env.ZKLOGIN_USER_SALT ?? '').trim();
-    if (userSalt && process.env.DATABASE_URL) {
+    if (process.env.DATABASE_URL) {
       try {
-        suiAddress = await deriveZkLoginAddress(jwt, userSalt);
         const { getDb } = await import('@/lib/db/client');
         const db = getDb() as never;
         const userId = `op_${email}`;
         await ensureUserForIdentity(db, { userId, orgId: DEFAULT_ORG_ID, email });
-        await upsertWalletIdentity(db, {
-          userId,
-          orgId: DEFAULT_ORG_ID,
-          suiAddress,
-          oauthIss: claims.iss,
-          oauthSub: claims.sub,
-          oauthAud: claims.aud,
-          emailAtLogin: email,
-        });
+
+        // The provider vouched for the mailbox, or it did not. Only the
+        // boolean claim marks the address proven; a token without it leaves
+        // the account exactly as unproven as a password signup, and a grant
+        // to it is refused until a delivered link is opened.
+        if (claims.emailVerified === true) {
+          await markEmailVerified(db, email);
+        }
+
+        // Deriving the address needs the salt; without one the identity row
+        // exists and we simply have no signer to record yet.
+        if (userSalt) {
+          suiAddress = await deriveZkLoginAddress(jwt, userSalt);
+          await upsertWalletIdentity(db, {
+            userId,
+            orgId: DEFAULT_ORG_ID,
+            suiAddress,
+            oauthIss: claims.iss,
+            oauthSub: claims.sub,
+            oauthAud: claims.aud,
+            emailAtLogin: email,
+          });
+        }
+
+        // The session is bound to the row's credential version, so a later
+        // verification or reset ends it from the server side.
+        credentialVersion = (await readCredentialVersion(db, email)) ?? undefined;
       } catch (error) {
         // A rebind conflict is a real signal, not noise — surface it rather
         // than minting a session against an identity we could not record.
@@ -113,6 +132,7 @@ export async function POST(request: Request) {
       email,
       suiAddress,
       orgId: DEFAULT_ORG_ID,
+      credentialVersion,
       fallbackOrganization: process.env.CUSTOMER_ORGANIZATION,
     });
     const refreshed = await setCustomerSessionCookie(session, { remember });

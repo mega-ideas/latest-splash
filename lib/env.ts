@@ -205,6 +205,13 @@ export const envSchema = z.object({
   CUSTOMER_ORGANIZATION: optional,
   CUSTOMER_SELF_SIGNUP_ENABLED: flag('false'),
   CUSTOMER_RECOVERY_EMAIL: opt(str.email()),
+  /* Email delivery. lib/auth/email-transport.ts. Verification links and
+     password resets go through it, and a membership grant requires a
+     verified mailbox, so without delivery nobody can be granted anything.
+     `console` prints the link to the server log and is development only. */
+  EMAIL_TRANSPORT: withDefault(z.enum(['console', 'resend']), 'console'),
+  EMAIL_API_KEY: optional,
+  EMAIL_FROM: opt(str.email()),
   ADMIN_SESSION_SECRET: optional,
   ADMIN_EMAIL: opt(str.email()),
   ADMIN_PASSWORD: optional,
@@ -377,6 +384,21 @@ function productionIssues(env: Env): Issue[] {
   }
   if (env.USDC_TYPE === '0x2::sui::SUI') {
     issues.push({ key: 'USDC_TYPE', message: 'is the development stand-in (native SUI); set the real USDC coin type' });
+  }
+
+  /* Email: a grant requires a verified mailbox, and verification is a link
+     delivered to it. `console` only prints the link to the server log, so a
+     production deployment on it can never verify anyone — and therefore
+     never grant anyone anything. */
+  if (env.EMAIL_TRANSPORT === 'console') {
+    issues.push({
+      key: 'EMAIL_TRANSPORT',
+      message: 'is `console`, which only prints verification links to the server log; set `resend` — no account can be verified, and so none granted access, without delivery',
+    });
+  }
+  if (env.EMAIL_TRANSPORT === 'resend') {
+    need('EMAIL_API_KEY', 'EMAIL_TRANSPORT=resend');
+    need('EMAIL_FROM', 'EMAIL_TRANSPORT=resend — the sender address');
   }
 
   /* Settlement: keys are required when settlement can actually move value.

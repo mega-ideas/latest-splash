@@ -30,6 +30,33 @@ The remaining four modules (`smart_treasury`, `payment_intent`, `audit_anchor`, 
 
 ---
 
+## WS1 — account pre-hijacking (X5) — 2026-09-23
+
+**Scope**: the account lifecycle from signup to grant, on the application
+tier. Reproduced first as a test that passed on the tree before the fix
+(`tests/account-verification.test.mjs`, red commit `9edda4a`), then closed
+as one unit — refusing grants to unverified accounts without delivery would
+have blocked every onboarding.
+
+| ID | Sev | Finding | Status |
+|----|-----|---------|--------|
+| X5 | High | Signup never proved the mailbox — `lib/auth/accounts.ts` shipped `markEmailVerified` with no caller and a comment saying delivery was not built — and `grantRole` / `grantMembership` only required that a row exist. An attacker who registered `cfo@victim.example` first received the approver grant the administrator later made to that address; the real CFO's own signup answered 201 and changed nothing. **Fixed**: (1) a delivered, single-use, hashed, 30-minute token (`lib/auth/email-verification.ts`; table `email_verification_tokens`, migration `0006`); (2) a transport production cannot leave unset — `EMAIL_TRANSPORT=resend`; `console` is refused by `lib/env.ts` in production; (3) the mailbox owner wins: opening the link *sets* the password rather than confirming the one on file, so a pre-registered password stops working at that moment; (4) `users.credential_version`, carried in the session cookie and re-read by every `getCustomerSession()`, so every session minted before the verification is refused afterwards; (5) both grant paths refuse `email_verified_at IS NULL` with an operator-facing `unverified_email`, and `grantMembership` no longer inserts a password-less user on the way to granting; (6) zkLogin marks an address proven only when the token carries the boolean claim `email_verified: true`; (7) signup, resend, recovery and both link-consuming routes are rate limited per address and per network in Postgres (`lib/server/rate-limit.ts`, table `rate_limit_hits`); (8) `/forgot-password` is a real reset on the same primitive, with the same three consequences. | Fixed |
+| WS1-F1 | Medium | Found while binding sessions to a credential version: the fifteen-minute idle timeout from Phase 4 had never fired. `readCustomerSessionToken` rebuilds the session field by field — correctly, so an unsigned field cannot ride in — and never copied `lastSeenAt`, so every read saw "no stamp", which `evaluateIdle` treats as active. Reproduced red in `174ef22`. **Fixed** in `6a1e5be`: the stamp survives the read; `requireCustomerRequest`, the entry every authenticated route handler uses, re-stamps it at most once a minute through `touchCustomerSessionCookie`, which moves `lastSeenAt` and nothing else — the token keeps its `exp` and the cookie its remaining lifetime — so making the clock real did not turn it into a sliding absolute expiry. Pages stay pure reads. | Fixed |
+
+**What it does not do.** An account can still be *created* for any address,
+and the 201 stays uniform so signup is not an enumeration oracle. What
+changed is that creating one earns nothing until the mailbox answers, and
+keeps nothing once it does.
+
+**Operator notes.** `EMAIL_TRANSPORT`, `EMAIL_API_KEY` and `EMAIL_FROM` are
+declared in `lib/env.ts` and `.env.example`. The staff console's grant now
+fails with `unverified_email` for an unproven address; the person has to open
+their link (or request a new one from `/verify-email`) first.
+`scripts/dev-db.mjs` seeds verified accounts, except Lin, who is left
+unverified on purpose so the refusal can be seen.
+
+---
+
 ## WS5 — Event privacy before the immutable publish — 2026-09-23
 
 `splash_core` publishes immutable, and an event struct's fields freeze with
@@ -88,6 +115,27 @@ under the four-gate decision below.
    against fixture events in the test suite. Verifying a real settlement
    needs the new `splash_core` published to testnet, which is a publish and
    therefore not done here.
+
+---
+
+## WS7 — rate limits and security headers — 2026-09-23
+
+**Scope**: the browser boundary and every route that spends something.
+Reproduced first as ten tests that fail on the tree before the fix
+(`tests/rate-limits-and-headers.test.mjs`, red commit `190a742`), then closed
+(`8dbdc59`).
+
+| ID | Sev | Finding | Status |
+|----|-----|---------|--------|
+| WS7-1 | High | No Content-Security-Policy anywhere, so any injected inline script ran, and no `frame-ancestors`, so the approval screens could be framed. **Fixed**: `lib/security/csp.ts` builds the policy around a nonce that `proxy.ts` mints per page request from the CSPRNG — `script-src 'self' 'nonce-…' 'strict-dynamic'`, never `'unsafe-inline'` or `'unsafe-eval'` in production; `frame-ancestors 'none'`; `object-src 'none'`; `base-uri` and `form-action 'self'`; the only third party allowed is Sumsub (a frame and its API), for KYB. The policy rides the request (`x-nonce` and the header Next reads to nonce its own scripts) and the response. Because a nonce cannot be prerendered, `app/layout.tsx` renders every page per request — the marketing pages lose static prerendering, deliberately. Styles keep `'unsafe-inline'`: React `style={{}}` props render as inline style attributes across the app, and scripts are the surface that matters. | Fixed |
+| WS7-2 | Medium | No HSTS, no `nosniff`, no referrer policy, no frame header. **Fixed**: `next.config.ts` `headers()` sets five on every response, API routes included — `Strict-Transport-Security: max-age=63072000; includeSubDomains; preload`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `X-Frame-Options: DENY`, and a `Permissions-Policy` that leaves only the camera and microphone on, for the Sumsub flow. `lib/security/headers.ts` is the single list the config and the test both read. | Fixed |
+| WS7-3 | High | The public pay link (marks an invoice paid and creates a recipient), the four `/api/copilot/*` routes (chat spends model credits per message; extraction feeds a document to the model), `/api/seal/access` (a key-server round trip), invoice creation and recipient creation had no limit of any kind. **Fixed**: `enforceRateLimit` in `lib/server/rate-limit.ts` in front of each, per user and/or per network, with the rules named in `RATE_LIMITS`. Without a database on a development machine the limits are skipped once, loudly; production cannot boot without one (`lib/env.ts`). | Fixed |
+| WS7-4 | Low | The login limiter was a second implementation on its own `login_attempts` table. **Fixed**: `lib/auth/login-rate-limit.ts` is now a thin layer over the one limiter — failures count, a success clears — with its public API unchanged. `login_attempts` is legacy, no longer written, and waits for a drop migration. | Fixed |
+
+**What it does not do.** The CSP allows inline *styles*; a hash-per-prop policy is not practical here. The rate limits are per address and per network, not per organisation; the tenant key arrives with the tenant-isolation patch. The public pay link still marks an invoice paid on the caller's word alone — that is a WS2/WS8 concern recorded in the report, not a limit problem.
+
+---
+
 
 ## Re-audit pass — 2026-07-13
 

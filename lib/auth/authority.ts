@@ -67,10 +67,6 @@ export function mapDbRole(role: string): UserRole {
   return DB_ROLE_MAP[role] ?? 'VIEWER';
 }
 
-function operatorIdFromEmail(email: string) {
-  return `op_${email.trim().toLowerCase()}`;
-}
-
 /**
  * Pure, DB-injected resolution — the SAME code runs against Postgres in
  * production and pglite in tests (14.12: role is provably DB-derived, re-read
@@ -132,12 +128,40 @@ export async function resolveAuthorityForSession(session: CustomerSession): Prom
 }
 
 /**
+ * A grant that was refused, and why. `no_account`: nobody has signed up with
+ * that address. `unverified_email`: someone has, but nobody has proven they
+ * read the mailbox — and until they do, the address is not evidence of who
+ * holds the account.
+ */
+export class GrantRefusedError extends Error {
+  readonly code: 'no_account' | 'unverified_email';
+
+  constructor(code: 'no_account' | 'unverified_email', message: string) {
+    super(message);
+    this.name = 'GrantRefusedError';
+    this.code = code;
+  }
+}
+
+/**
  * Grant a membership. Administrative, and never reachable from the auth path.
  *
  * This exists for seeding an organisation's first member and for the
  * invitation flow. It takes an explicit role because there is no safe default
  * — the old signature defaulted to `checker`, which is APPROVER, so a caller
  * that passed nothing granted payment-approval authority.
+ *
+ * It grants only to an account whose mailbox has been proven. This closes
+ * X5: signup never proved the address, and a grant only asked that a row
+ * exist, so whoever registered `cfo@victim.example` first was who the
+ * administrator's grant landed on. Now the row has to carry
+ * `email_verified_at`, which only a link delivered to the mailbox — or a
+ * provider token asserting `email_verified` — can set.
+ *
+ * It no longer creates the account on the way to granting, either. It used
+ * to insert a password-less `users` row for an unknown address, which made a
+ * typo in a grant form into a real identity. A grant is not a registration:
+ * an unknown address is refused, and nothing is written.
  *
  * tests/auth-fail-closed.test.mjs asserts that no module under the auth path
  * calls this.
@@ -147,27 +171,31 @@ export async function grantMembership(
   input: { email: string; orgId: string; role: 'maker' | 'checker' | 'admin' | 'viewer'; grantedBy?: string },
 ): Promise<void> {
   const normalized = input.email.trim().toLowerCase();
+
+  const existing = await db
+    .select({ id: users.id, emailVerifiedAt: users.emailVerifiedAt })
+    .from(users)
+    .where(eq(users.email, normalized))
+    .limit(1);
+  const account = existing[0];
+  if (!account) {
+    throw new GrantRefusedError('no_account', `no account exists for ${normalized}; they must sign up first`);
+  }
+  if (!account.emailVerifiedAt) {
+    throw new GrantRefusedError(
+      'unverified_email',
+      `${normalized} has not verified their email address; nothing can be granted to an address nobody has proven`,
+    );
+  }
+
   const { ensureOrganization } = await import('../db/proposal-repo.ts');
   await ensureOrganization(db, input.orgId);
-
-  const userId = operatorIdFromEmail(normalized);
-  await db
-    .insert(users)
-    .values({
-      id: userId,
-      email: normalized,
-      name: normalized.split('@')[0] || 'member',
-    })
-    .onConflictDoNothing();
-
-  const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, normalized)).limit(1);
-  const resolvedUserId = existing[0]?.id ?? userId;
 
   await db
     .insert(memberships)
     .values({
-      id: `mem_${resolvedUserId}_${input.orgId}`,
-      userId: resolvedUserId,
+      id: `mem_${account.id}_${input.orgId}`,
+      userId: account.id,
       orgId: input.orgId,
       role: input.role,
       grantedBy: input.grantedBy ?? null,

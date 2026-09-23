@@ -3,7 +3,7 @@ import type { PgDatabase } from 'drizzle-orm/pg-core';
 
 import { memberships, organizations, users } from '../db/schema.ts';
 import type * as schemaModule from '../db/schema.ts';
-import { grantMembership } from '../auth/authority.ts';
+import { GrantRefusedError, grantMembership } from '../auth/authority.ts';
 import type { AccountRow, MembershipRole } from '../membership-roles.ts';
 
 /**
@@ -113,11 +113,23 @@ export async function grantRole(
 ): Promise<void> {
   const email = input.email.trim().toLowerCase();
 
-  const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
+  const existing = await db
+    .select({ id: users.id, emailVerifiedAt: users.emailVerifiedAt })
+    .from(users)
+    .where(eq(users.email, email))
+    .limit(1);
   if (existing.length === 0) {
     throw new MembershipAdminError(
       `no account exists for ${email}. They must sign up before they can be granted access.`,
       'no_account',
+    );
+  }
+  if (!existing[0].emailVerifiedAt) {
+    // X5. An account nobody has proven is not evidence of who holds it: an
+    // attacker who registered this address first would receive the grant.
+    throw new MembershipAdminError(
+      `${email} has not verified their email address. Ask them to open the verification link (they can request a new one from the sign-in page) before granting access.`,
+      'unverified_email',
     );
   }
 
@@ -134,12 +146,19 @@ export async function grantRole(
   }
 
   // The same function the fail-closed tests assert against. One grant path.
-  await grantMembership(db, {
-    email,
-    orgId: input.orgId,
-    role: input.role,
-    grantedBy: input.grantedBy,
-  });
+  // It re-checks verification itself; a refusal from it is surfaced in the
+  // console's own vocabulary rather than leaking as a 500.
+  try {
+    await grantMembership(db, {
+      email,
+      orgId: input.orgId,
+      role: input.role,
+      grantedBy: input.grantedBy,
+    });
+  } catch (error) {
+    if (error instanceof GrantRefusedError) throw new MembershipAdminError(error.message, error.code);
+    throw error;
+  }
 }
 
 /**

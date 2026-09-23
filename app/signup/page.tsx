@@ -1,15 +1,14 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { useState, type FormEvent } from 'react';
-import { ArrowRight, Building2, Eye, EyeOff, Globe2, Lock, Mail } from 'lucide-react';
+import { ArrowRight, Building2, CheckCircle2, Eye, EyeOff, Globe2, Lock, Mail } from 'lucide-react';
 import { toast } from 'sonner';
 
 import IsometricAuthShell from '@/components/auth/IsometricAuthShell';
 
 export default function SignUpPage() {
-  const router = useRouter();
+  const [sent, setSent] = useState(false);
   const [company, setCompany] = useState('');
   const [email, setEmail] = useState('');
   const [region, setRegion] = useState('Singapore');
@@ -19,7 +18,9 @@ export default function SignUpPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
-  const strength = [password.length >= 8, /[A-Z]/.test(password), /\d/.test(password)].filter(Boolean).length;
+  // Mirrors lib/auth/password.ts: twelve characters, a letter, a digit. The
+  // server is the authority; this only stops a form the server would refuse.
+  const strength = [password.length >= 12, /[A-Za-z]/.test(password), /\d/.test(password)].filter(Boolean).length;
   const canSubmit = company.trim().length > 1 && email.includes('@') && strength === 3 && accepted && !submitting;
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
@@ -40,9 +41,8 @@ export default function SignUpPage() {
         throw new Error(body.error ?? 'Unable to create the workspace. Review the details and try again.');
       }
 
-      toast.success('Business profile created');
-      router.push('/settings/kyb');
-      router.refresh();
+      toast.success('Check your inbox to confirm the address');
+      setSent(true);
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : 'Unable to create the workspace. Review the details and try again.';
       setError(message);
@@ -62,6 +62,17 @@ export default function SignUpPage() {
       visualTitle="One operating layer"
       visualCopy="Move USD, settle globally, and retain every proof."
     >
+      {sent ? (
+        <section className="iso-auth-success">
+          <CheckCircle2 aria-hidden="true" />
+          <h2>Confirm your email</h2>
+          <p>
+            We sent a link to <strong>{email.trim().toLowerCase()}</strong>. Open it within 30 minutes to confirm the
+            address and finish creating the account. Nothing can be done with the account until then.
+          </p>
+          <Link href="/verify-email">Did not get it? Send a new link</Link>
+        </section>
+      ) : (
       <form onSubmit={onSubmit} className="iso-auth-form">
         <div className="iso-auth-field-grid">
           <label className="iso-auth-field" htmlFor="signup-company">
@@ -122,7 +133,7 @@ export default function SignUpPage() {
               type={showPassword ? 'text' : 'password'}
               required
               autoComplete="new-password"
-              placeholder="8+ characters, uppercase, and a number"
+              placeholder="12+ characters with a letter and a number"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
             />
@@ -139,7 +150,7 @@ export default function SignUpPage() {
 
         <div className="iso-password-strength" aria-label={`Password strength ${strength} of 3`}>
           {[1, 2, 3].map((level) => <span className={strength >= level ? 'is-active' : ''} key={level} />)}
-          <small>{strength === 3 ? 'Strong password' : 'Use 8+ characters, uppercase, and a number'}</small>
+          <small>{strength === 3 ? 'Meets the policy' : 'Use 12+ characters with a letter and a number'}</small>
         </div>
 
         <label className="iso-auth-consent">
@@ -154,10 +165,11 @@ export default function SignUpPage() {
           {!submitting ? <ArrowRight aria-hidden="true" /> : null}
         </button>
       </form>
+      )}
 
       <div className="iso-auth-next">
         <strong>What happens next?</strong>
-        <span>1. Create workspace</span>
+        <span>1. Confirm your email</span>
         <span>2. Complete KYB</span>
         <span>3. Activate corridors</span>
       </div>

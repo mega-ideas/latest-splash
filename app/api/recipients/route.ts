@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { readJsonBody } from '@/lib/server/http';
+import { RATE_LIMITS, enforceRateLimit } from '@/lib/server/rate-limit';
 import { createRecipient, listRecipients, type RecipientRecord, type RecipientTier } from '@/lib/server/operations';
 
 export async function GET(request: Request) {
@@ -14,6 +15,10 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const auth = await requireCustomerRequest(request);
   if (auth.response) return auth.response;
+
+  // A store write: bounded per user.
+  const limited = await enforceRateLimit({ rule: RATE_LIMITS.recipientCreateUser, key: auth.session.email });
+  if (limited) return limited;
 
   const body = await readJsonBody(request);
   const name = String(body.name ?? '').trim();

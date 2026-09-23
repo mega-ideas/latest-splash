@@ -25,6 +25,10 @@ const PROD_OK = {
   USE_MOCK_APIS: 'true',
   NEXT_PUBLIC_DEMO_MODE: 'true',
   SUI_SETTLEMENT_MODE: 'simulate',
+  // Verification links need a real transport in production (WS1, X5).
+  EMAIL_TRANSPORT: 'resend',
+  EMAIL_API_KEY: 're_test_key',
+  EMAIL_FROM: 'no-reply@splash.example',
 };
 
 const keysOf = (fn) => {
