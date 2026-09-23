@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { laneRefusalText, zekeLaneState } from '@/lib/agent/zeke-lane-guard';
 import { laneAccess } from '@/lib/payments/stablecoin-lane';
 import { parseInvoice, type CopilotSuggestion } from '@/lib/server/copilot';
+import { custodyPhaseEnabled, invoiceDeliveryTier } from '@/lib/server/custody-phase';
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { RATE_LIMITS, enforceRateLimit } from '@/lib/server/rate-limit';
 import { readJsonBody } from '@/lib/server/http';
@@ -72,15 +73,22 @@ export async function POST(request: Request) {
     }
   }
 
-  const deliveryTier = invoice.targetCurrency === 'PHP' ? 'SWEEP_ACCOUNT' : 'PAYOUT_ONLY';
+  // Only a tier the authorize step will accept: in Phase 0 that is PAYOUT_ONLY,
+  // PHP included. SWEEP_ACCOUNT holds funds and waits for the custody phase.
+  const deliveryTier = invoiceDeliveryTier(invoice.targetCurrency);
+  const directPayout = 'Direct payout - funds go straight to the recipient\'s bank account or wallet, and nothing is held in between.';
   const suggestion: CopilotSuggestion = {
     suggestionId: `invoice_${invoice.id}`,
     type: 'invoice',
     title: `${deliveryTier} recommended`,
     description: deliveryTier === 'SWEEP_ACCOUNT'
       ? 'SWEEP_ACCOUNT via PDAX - recipient has no stored-balance enablement.'
-      : 'Bank payout - direct local delivery is the enabled route for this corridor.',
-    confidence: Math.max(0.96, extraction.confidence),
+      : custodyPhaseEnabled()
+      ? directPayout
+      : `${directPayout} Phase 0 pays out only: sweep and stored-balance delivery need a money-broking licence Splash does not hold yet.`,
+    // What the parser actually returned. It was floored at 0.96, so a
+    // heuristic read at 0.2 was shown as 96% confident.
+    confidence: extraction.confidence,
     requiresAuth: true,
     suggestedAction: `deliveryTier:${deliveryTier}`,
   };

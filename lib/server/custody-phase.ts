@@ -1,3 +1,4 @@
+import { CUSTODY_PHASE_REASON, PHASE0_DELIVERY_TIERS, deliveryTierOpen } from '../custody-phase-rules.ts';
 import { getContractConfig } from './contract-config.ts';
 
 /**
@@ -20,17 +21,14 @@ import { getContractConfig } from './contract-config.ts';
  * were a balance.
  */
 
-export const PHASE0_DELIVERY_TIERS = ['PAYOUT_ONLY'] as const;
-export const CUSTODY_DELIVERY_TIERS = ['STORED_BALANCE', 'SWEEP_ACCOUNT'] as const;
+// The tier lists, the customer-facing reason and the tier decision live in
+// lib/custody-phase-rules.ts, which has no I/O, so the transfer form (a client
+// component) locks the same tiers this gate refuses, in the same words.
+export { CUSTODY_DELIVERY_TIERS, CUSTODY_PHASE_REASON, PHASE0_DELIVERY_TIERS } from '../custody-phase-rules.ts';
 
 export type CustodyPhase = 'PHASE_0_PAYOUT_ONLY' | 'PHASE_2_CUSTODY';
 
 export const CUSTODY_PHASE_CODE = 'custody_not_licensed';
-
-/** Plain, and licence-named. Shown to customers, so it claims nothing. */
-export const CUSTODY_PHASE_REASON =
-  'Holding customer funds — stored balances, sweep accounts and the treasury — is a Phase 2 capability that needs ' +
-  'a money-broking licence Splash does not hold yet. Phase 0 pays out only: choose the PAYOUT_ONLY delivery.';
 
 /** Only the field the decision reads, so callers and tests can pass a literal. */
 export type CustodyConfig = { custodyPackageId?: string };
@@ -45,9 +43,22 @@ export function currentCustodyPhase(config: CustodyConfig = getContractConfig())
 
 /** Whether a delivery tier may be used now. Unknown tiers are never allowed. */
 export function deliveryTierAllowed(tier: string, config: CustodyConfig = getContractConfig()): boolean {
-  if ((PHASE0_DELIVERY_TIERS as readonly string[]).includes(tier)) return true;
-  if ((CUSTODY_DELIVERY_TIERS as readonly string[]).includes(tier)) return custodyPhaseEnabled(config);
-  return false;
+  return deliveryTierOpen(tier, custodyPhaseEnabled(config));
+}
+
+/**
+ * The delivery tier to recommend for an invoice's payout. PHP used to map to
+ * SWEEP_ACCOUNT unconditionally, so the invoice loop and the transfer prefill
+ * recommended a fund-holding tier the authorize step then refused. The
+ * recommendation now goes through the same `deliveryTierAllowed()` the money
+ * routes enforce: SWEEP_ACCOUNT only once the custody phase is on, and
+ * PAYOUT_ONLY otherwise.
+ */
+export function invoiceDeliveryTier(
+  targetCurrency: string | undefined,
+  config: CustodyConfig = getContractConfig(),
+): 'PAYOUT_ONLY' | 'SWEEP_ACCOUNT' {
+  return targetCurrency === 'PHP' && deliveryTierAllowed('SWEEP_ACCOUNT', config) ? 'SWEEP_ACCOUNT' : 'PAYOUT_ONLY';
 }
 
 /**

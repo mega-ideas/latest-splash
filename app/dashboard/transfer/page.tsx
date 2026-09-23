@@ -136,7 +136,7 @@ export default function TransferPage() {
     const invoiceId = params.get('invoiceId');
     const holdId = params.get('holdId');
     if (invoiceId) {
-      void fetch(`/api/invoices/${invoiceId}`).then((response) => response.json()).then((invoice: { payerOrgName?: string; amountUsd?: string; targetCurrency?: TransferState['amount']['targetCurrency']; id?: string }) => {
+      void fetch(`/api/invoices/${invoiceId}`).then((response) => response.json()).then((invoice: { payerOrgName?: string; amountUsd?: string; targetCurrency?: TransferState['amount']['targetCurrency']; id?: string; recommendedDeliveryTier?: RecipientTier }) => {
         if (!invoice.id) return;
         setState((current) => ({
           ...current,
@@ -144,7 +144,10 @@ export default function TransferPage() {
           invoiceId: invoice.id,
           recipient: { ...current.recipient, name: invoice.payerOrgName ?? current.recipient.name, country: 'PH' },
           amount: { ...current.amount, value: invoice.amountUsd ?? current.amount.value, targetCurrency: invoice.targetCurrency ?? current.amount.targetCurrency },
-          deliveryTier: invoice.targetCurrency === 'PHP' ? 'SWEEP_ACCOUNT' : 'PAYOUT_ONLY',
+          // The server's pick, gated by the custody phase (PAYOUT_ONLY in
+          // Phase 0). A PHP invoice used to prefill SWEEP_ACCOUNT here, which
+          // the authorize step then refused.
+          deliveryTier: invoice.recommendedDeliveryTier ?? 'PAYOUT_ONLY',
         }));
       });
     }

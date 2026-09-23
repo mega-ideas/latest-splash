@@ -17,12 +17,30 @@ const nextConfig: NextConfig = {
   images: {
     // 90 is used by the landing hero artwork for crispness under scale.
     qualities: [75, 90],
-    remotePatterns: [
-      {
-        protocol: "https",
-        hostname: "**",
-      },
+    // /_next/image decodes whatever these patterns admit, unauthenticated.
+    // Every <Image> in the app is a file in public/ (the avatar preview is a
+    // blob: URL and the deposit QR a data: URL, both `unoptimized`), so no
+    // remote host is allowed at all. A remote image is a new pattern here, as
+    // narrow as its host and path allow — never a wildcard hostname.
+    remotePatterns: [],
+    // Local images are fetched through the router without the caller's
+    // cookies, so without this list any unauthenticated route that returns
+    // bytes would feed the decoder. Only the asset folders in public/, and no
+    // query strings.
+    localPatterns: [
+      { pathname: "/cinematic/**", search: "" },
+      { pathname: "/isometric/**", search: "" },
+      { pathname: "/partners/**", search: "" },
+      { pathname: "/splash-main-icon.png", search: "" },
+      { pathname: "/airwallex-logo.png", search: "" },
+      { pathname: "/sumsub-logo.png", search: "" },
+      { pathname: "/deepbook-mark.png", search: "" },
     ],
+    // A redirect is followed without re-checking remotePatterns (16.3 follows
+    // 3 by default), so follow none. dangerouslyAllowLocalIP is already false
+    // by default; pinned so it cannot drift.
+    maximumRedirects: 0,
+    dangerouslyAllowLocalIP: false,
   },
 };
 
