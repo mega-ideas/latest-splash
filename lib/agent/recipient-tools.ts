@@ -137,7 +137,10 @@ export async function findSavedRecipient(input: unknown): Promise<RecipientLooku
   }
 
   const { listRecipientsFor } = await import('@/lib/server/recipients-store');
-  const [saved, ctx] = await Promise.all([listRecipientsFor(orgId, 500), describeContext(orgId)]);
+  // Sequential, not Promise.all: the local dev database serves one
+  // connection, and two reads racing for it wedge it (scripts/dev-db.mjs).
+  const saved = await listRecipientsFor(orgId, 500);
+  const ctx = await describeContext(orgId);
   const wanted = name.trim().toLowerCase();
   const describeOne = (record: RecipientRecord) => describe(record, ctx);
 
@@ -179,7 +182,8 @@ export async function listSavedRecipients(input: unknown): Promise<{
   if (!orgId) return { orgId: '', count: 0, recipients: [] };
 
   const { listRecipientsFor } = await import('@/lib/server/recipients-store');
-  const [saved, ctx] = await Promise.all([listRecipientsFor(orgId, 200), describeContext(orgId)]);
+  const saved = await listRecipientsFor(orgId, 200);
+  const ctx = await describeContext(orgId);
   return { orgId, count: saved.length, recipients: saved.map((record) => describe(record, ctx)) };
 }
 
