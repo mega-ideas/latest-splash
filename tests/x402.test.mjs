@@ -92,3 +92,41 @@ test('settlement is a refusal with its reasons, not a stub that might succeed', 
   assert.match(availability.reason, /session mandate/);
   assert.match(availability.reason, /Sui/);
 });
+
+/* ── The Zeke tool: registered on the READ side, quoting, never paying ── */
+
+test('quoteX402Payment dispatches through the agent as a READ, in a truth envelope', async () => {
+  const { executeOxwalTool, OXWAL_TOOL_REGISTRY, READ_TOOL_NAMES } = await import('../lib/agent/oxwal.ts');
+
+  assert.ok(READ_TOOL_NAMES.includes('quoteX402Payment'), 'a quote is a read, never a proposal');
+  const def = OXWAL_TOOL_REGISTRY.find((tool) => tool.name === 'quoteX402Payment');
+  assert.ok(def, 'registered for the model');
+  assert.equal(def.category, 'READ');
+  assert.match(def.description, /never payment/i);
+
+  const envelope = await executeOxwalTool('quoteX402Payment', {
+    challenge: JSON.stringify(ARBITRUM_CHALLENGE),
+  });
+  assert.equal(envelope.source, 'operator.pasted-challenge', 'the label says where the data came from');
+  const data = envelope.data;
+  assert.equal(data.status, 'QUOTED');
+  assert.equal(data.requirements[0].maxAmountRequiredMinor, '10000', 'minor units travel as strings');
+  assert.equal(data.requirements[0].amount, '0.010000');
+  assert.equal(data.settlement.available, false);
+  assert.match(data.message, /quote, not a payment/);
+});
+
+test('a junk challenge through the tool refuses with guidance instead of throwing at the model', async () => {
+  const { executeOxwalTool } = await import('../lib/agent/oxwal.ts');
+  const envelope = await executeOxwalTool('quoteX402Payment', { challenge: 'hello' });
+  assert.equal(envelope.data.status, 'INVALID');
+  assert.match(envelope.data.message, /paste the full 402 response body/);
+  assert.equal(envelope.data.settlement.available, false, 'even an invalid quote carries the refusal');
+});
+
+test('the system prompt tells Zeke it can quote x402 and never pay it', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const agent = await readFile(new URL('../lib/agent/oxwal.ts', import.meta.url), 'utf8');
+  assert.match(agent, /call quoteX402Payment to price and explain it/);
+  assert.match(agent, /you can never pay it/);
+});

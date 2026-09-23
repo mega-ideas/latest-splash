@@ -139,3 +139,48 @@ export function x402SettlementAvailability(): { available: false; reason: string
       'Zeke can read this x402 request and price it, but Splash cannot settle it: settlement runs on Sui and x402 settles USDC on EVM rails, and — more fundamentally — every release of value here is approved by a named human. Per-request agent spending becomes possible when the capped, revocable, human-signed session mandate ships on-chain; until then this stays a quote, not a payment.',
   };
 }
+
+/**
+ * The Zeke read tool. Input is a pasted 402 response (text or object); the
+ * result prices and explains it, and carries the settlement refusal so the
+ * model cannot answer "paid" — there is nothing here that spends.
+ * Minor units serialize as strings: the envelope layer must never meet a
+ * bigint it did not ask for.
+ */
+export function quoteX402Payment(input: unknown): {
+  status: 'QUOTED' | 'INVALID';
+  requirements: Array<Omit<X402Requirement, 'maxAmountRequiredMinor'> & { maxAmountRequiredMinor: string; amount: string }>;
+  summaries: string[];
+  settlement: ReturnType<typeof x402SettlementAvailability>;
+  message: string;
+  observedAt: string;
+} {
+  const observedAt = new Date().toISOString();
+  const settlement = x402SettlementAvailability();
+  try {
+    const challenge = parseX402Challenge((input as { challenge?: unknown } | null)?.challenge);
+    const requirements = challenge.requirements.map((req) => ({
+      ...req,
+      maxAmountRequiredMinor: req.maxAmountRequiredMinor.toString(),
+      amount: formatX402Amount(req.maxAmountRequiredMinor),
+    }));
+    return {
+      status: 'QUOTED',
+      requirements,
+      summaries: challenge.requirements.map(describeX402Requirement),
+      settlement,
+      message:
+        'This is a quote, not a payment. Splash cannot settle x402 today — read the settlement.reason to the user verbatim if they ask to pay it.',
+      observedAt,
+    };
+  } catch (error) {
+    return {
+      status: 'INVALID',
+      requirements: [],
+      summaries: [],
+      settlement,
+      message: `That does not parse as an x402 challenge: ${error instanceof Error ? error.message : 'unknown error'}. Ask the user to paste the full 402 response body.`,
+      observedAt,
+    };
+  }
+}

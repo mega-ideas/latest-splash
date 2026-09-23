@@ -1,7 +1,9 @@
 # x402 on Splash — can it be integrated now?
 
 *Assessed 2026-09-23 against the Arbitrum workshop facilitator
-(github.com/hummusonrails/x402-facilitator) and the x402 spec it implements.*
+(github.com/hummusonrails/x402-facilitator), the x402 spec it implements,
+and the "Agentic Payments with x402" OH Singapore Buildathon deck
+(hummusonrails).*
 
 ## The verdict, in one paragraph
 
@@ -62,18 +64,37 @@ need today and the same wrong-rail issue in reverse.
   reasons.
 - `tests/x402.test.mjs` — five tests, including the workshop-shaped
   Arbitrum Sepolia challenge.
-- Deliberately **not** registered as a live agent tool yet: the tool
-  registry is pinned by the capability tests as the agent's exact surface,
-  and a tool that can only quote invites "just finish it" pressure. It
-  registers in phase 2, below.
+- `quoteX402Payment`, registered as a **READ** tool on Zeke's surface: paste
+  a 402 response into the chat and Zeke prices it, names the network and
+  payee, and carries the settlement refusal in the result so the model
+  cannot answer "paid". The read/quote half of phase 2 — shipped.
 
 ## The path, when it opens
 
 | Phase | What | Blocked on |
 |---|---|---|
-| 1 (now) | Parse, price, explain; refusal on settle | nothing — shipped |
-| 2 | `quoteX402Payment` as a read tool + a proposal lane: the challenge becomes an unsigned proposal in the queue, a human approves each one | product call: is one-click-per-request approval useful, or noise? |
+| 1 | Parse, price, explain; refusal on settle | shipped |
+| 2a | `quoteX402Payment` as a Zeke READ tool | shipped |
+| 2b | The proposal lane: a quoted challenge becomes an unsigned proposal in the queue, a human approves each one | product call: is one-click-per-request approval useful, or noise? |
 | 3 | Session mandate on-chain; an EVM spend wallet funded within a mandate's caps; x402 payments auto-release **inside** the budget a human signed | `mandate.move` (Sebastian), KMS-held EVM key, facilitator selection |
+
+## What the buildathon deck adds to the picture
+
+Two facts from the OH Singapore deck sharpen the assessment rather than
+change it:
+
+- **The rail is consolidating fast.** Cloudflare has integrated x402, AWS
+  launched an x402 payment service, Google Cloud adopted it as a payment
+  extension for AP2, with Adyen, Mastercard, American Express and Vercel
+  also named. That raises the odds x402 is the standard Splash will meet
+  when the mandate exists — it does not change which chain Splash settles
+  on today, or who approves a release.
+- **Fee predictability is the microtransaction constraint** — "agents can't
+  re-price mid-workflow because transaction fees spiked." That is exactly
+  the argument the session mandate answers on Splash's side: a per-payment
+  cap and a total budget make a fee spike a refusal instead of a surprise.
+  The mandate design (v3.1 §3.2) was right before the deck; the deck makes
+  it the industry's shape too.
 
 Phase 3 is the one that makes the workshop demo real without breaking the
 product's word. Everything before it is honest preparation.
