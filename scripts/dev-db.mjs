@@ -21,6 +21,7 @@ import { drizzle } from 'drizzle-orm/pglite';
 
 import * as schema from '../lib/db/schema.ts';
 import { createAccount, markEmailVerified } from '../lib/auth/accounts.ts';
+import { TERMS_VERSION } from '../content/legal.ts';
 
 const PORT = Number(process.env.DEV_DB_PORT ?? 5433);
 const PASSWORD = 'correct-horse-battery-staple-9';
@@ -75,12 +76,60 @@ for (const person of seed) {
   }
 }
 
+// -- The two demo operators ----------------------------------------------
+// Seeded HERE, in-process, rather than by `npm run seed:demo` over the
+// socket: the socket server takes exactly one client, and a second one (a
+// seed script, a crashed dev server that never let go) wedges it for
+// everyone. One process, one command, and the demo works on first sign-in.
+//
+//   demo@acme.test  - onboarded: KYB ACTIVE, terms accepted, intent 'pay',
+//                     approvals set. Lands straight in the product.
+//   fresh@acme.test - a new business: REGISTERED, nothing accepted. Walks
+//                     the intent picker and the setup stepper, and shows
+//                     every lock.
+const DEMO_PASSWORD = 'SplashDemo!2026';
+const demos = [
+  { email: 'demo@acme.test', name: 'Demo Operator', orgId: 'demo-business', org: 'Acme Manufacturing', kyb: 'ACTIVE', onboarded: true },
+  { email: 'fresh@acme.test', name: 'Fresh Operator', orgId: 'fresh-business', org: 'Fresh Trading', kyb: 'REGISTERED', onboarded: false },
+];
+for (const d of demos) {
+  // Obviously fictional originator details, so the travel-rule check on a
+  // payment has an org to read (the same values seed:demo writes).
+  await client.query(
+    `INSERT INTO organizations (id, name, kyb_lifecycle, legal_name, registration_number,
+       address_line1, address_city, address_state, address_postal_code, address_country)
+     VALUES ($1, $2, $3, $4, '202401000001', 'Level 8, Menara Demo, Jalan Ampang',
+       'Kuala Lumpur', 'Wilayah Persekutuan', '50450', 'MY')
+     ON CONFLICT (id) DO NOTHING`,
+    [d.orgId, d.org, d.kyb, `${d.org} Sdn Bhd`],
+  );
+  await createAccount(db, { email: d.email, password: DEMO_PASSWORD, name: d.name });
+  await markEmailVerified(db, d.email);
+  await grantMembership(db, { email: d.email, orgId: d.orgId, role: 'admin', grantedBy: 'staff@splash.finance' });
+  if (d.onboarded) {
+    const { rows } = await client.query('SELECT id FROM users WHERE email = $1', [d.email]);
+    const userId = rows[0].id;
+    await client.query(
+      `INSERT INTO terms_acceptances (id, user_id, org_id, version) VALUES ($1, $2, $3, $4)`,
+      [`terms_dev_${d.orgId}`, userId, d.orgId, TERMS_VERSION],
+    );
+    await client.query(`UPDATE organizations SET intent = 'pay' WHERE id = $1`, [d.orgId]);
+    await client.query(`INSERT INTO org_settings (org_id, updated_by) VALUES ($1, $2)`, [d.orgId, userId]);
+  }
+}
+
 const server = new PGLiteSocketServer({ db: client, port: PORT, host: '127.0.0.1' });
 await server.start();
 
 console.log(`\ndev postgres listening on 127.0.0.1:${PORT}`);
 console.log(`DATABASE_URL=postgres://postgres@127.0.0.1:${PORT}/postgres?sslmode=disable`);
-console.log(`${seed.length} accounts seeded; ${seed.filter((p) => !p.role).length} awaiting access.\n`);
+console.log(`${seed.length} accounts seeded; ${seed.filter((p) => !p.role).length} awaiting access.`);
+console.log('');
+console.log(`Demo operators (password ${DEMO_PASSWORD}):`);
+for (const d of demos) {
+  console.log(`  ${d.email.padEnd(18)} ${d.org} - ${d.onboarded ? 'onboarded, KYB ACTIVE' : 'new business, walks onboarding'}`);
+}
+console.log('');
 
 const stop = async () => {
   await server.stop();
