@@ -26,6 +26,10 @@ export type FundingSessionStatus =
 
 export type FundingSession = {
   id: string;
+  /** The tenant this deposit credits. The on-chain account id below is NOT a
+   *  tenant key — it falls back to a value shared across orgs — so the ledger
+   *  credit is keyed by this. */
+  orgId: string;
   businessAccountId: string;
   selection: FundingSelection;
   feeTier: FundingFeeTier;
@@ -120,6 +124,7 @@ function depositUri(
 }
 
 export function createFundingSession(input: {
+  orgId: string;
   businessAccountId: string;
   selection: FundingSelection;
   amountExpectedMicro: number;
@@ -139,6 +144,7 @@ export function createFundingSession(input: {
     : undefined;
   const session: FundingSession = {
     id: `fund_${randomUUID()}`,
+    orgId: input.orgId,
     businessAccountId: input.businessAccountId,
     selection: input.selection,
     feeTier: input.selection.feeTier,

@@ -34,14 +34,17 @@ test('Seal demo crypto is unavailable in production transfer runtime', async () 
 
   assert.match(seal, /canUseDemoCrypto/);
   assert.match(runtimeMode, /env\.NODE_ENV === 'production'/);
-  // Behavioural, not source-text: what matters is that a production deployment
-  // which has NOT declared a demo posture never reaches for stand-in crypto.
-  // That still holds, and is asserted here rather than by matching source.
+
+  // Behavioural, not source-text: a production deployment that has NOT declared
+  // a demo posture must never reach for stand-in crypto. This is the invariant
+  // that matters, and it still holds.
   const { canUseDemoCrypto } = await import('../lib/server/runtime-mode.ts');
   assert.equal(canUseDemoCrypto({ NODE_ENV: 'production' }), false);
+  assert.equal(canUseDemoCrypto({ NODE_ENV: 'production', USE_MOCK_APIS: 'false' }), false);
 
-  // A deployment that HAS declared one gets stand-in crypto, matching how the
-  // vendor keys are already optional under the same flags.
+  // A deployment that HAS declared one gets stand-in crypto, matching how
+  // lib/env.ts already makes the vendor keys optional under the same flags.
+  // The flags are the record of that decision.
   assert.equal(canUseDemoCrypto({ NODE_ENV: 'production', USE_MOCK_APIS: 'true' }), true);
   assert.equal(canUseDemoCrypto({ NODE_ENV: 'production', NEXT_PUBLIC_DEMO_MODE: 'true' }), true);
 });

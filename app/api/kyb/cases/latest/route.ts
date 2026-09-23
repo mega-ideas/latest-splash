@@ -1,11 +1,12 @@
 import { NextResponse } from 'next/server';
 
+import { resolveAuthorityForSession, UnauthorizedError } from '@/lib/auth/authority';
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
-import { findLatestKybCase } from '@/lib/server/kyb';
+import { findLatestKybCase, type KybCaseRecord } from '@/lib/server/kyb';
 
 export const dynamic = 'force-dynamic';
 
-function toPublicCase(record: NonNullable<ReturnType<typeof findLatestKybCase>>) {
+function toPublicCase(record: KybCaseRecord) {
   return {
     id: record.id,
     businessName: record.businessName,
@@ -34,11 +35,26 @@ export async function GET(request: Request) {
   const auth = await requireCustomerRequest(request);
   if (auth.response) return auth.response;
 
-  const { searchParams } = new URL(request.url);
-  const businessName = searchParams.get('businessName') ?? undefined;
-  const registrationNumber = searchParams.get('registrationNumber') ?? undefined;
+  // The business name and registration number used to come from the QUERY
+  // STRING and were matched against every case in the process. That made
+  // "which case is mine" answerable as "which case is anyone's": pass a
+  // competitor's name and receive their KYB file.
+  //
+  // An organisation has one KYB history and the session already says which
+  // organisation is asking, so the caller supplies nothing.
+  let orgId: string;
+  try {
+    orgId = (await resolveAuthorityForSession(auth.session)).orgId;
+  } catch (error) {
+    if (error instanceof UnauthorizedError) {
+      // A brand-new sign-up with no membership has no case yet. That is an
+      // answer, not a failure.
+      return NextResponse.json({ case: null });
+    }
+    throw error;
+  }
 
-  const record = findLatestKybCase({ businessName, registrationNumber });
+  const record = await findLatestKybCase(orgId);
 
   if (!record) {
     return NextResponse.json({ case: null });

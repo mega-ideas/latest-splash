@@ -7,6 +7,7 @@ module splash_core::compliance_config;
 
 use splash_core::business_account::AdminCap;
 use splash_core::cap_registry::{Self, CapRegistry};
+use sui::clock::Clock;
 use sui::event;
 use sui::vec_set::{Self, VecSet};
 
@@ -291,21 +292,27 @@ public fun admin_set_paused(_admin: &AdminCap, config: &mut ComplianceConfig, pa
 /// other half: a compliance key believed compromised could, until now, pause
 /// settlement as often as it liked forever, and `transfer_cap` is callable only
 /// BY ITS HOLDER, so there was no way to take it back.
-public fun break_glass_compliance_cap(
+public fun arm_break_glass_compliance_cap(
+    _admin: &AdminCap,
+    registry: &mut CapRegistry,
+    holder: address,
+    reason: vector<u8>,
+    clock: &Clock,
+    ctx: &TxContext,
+) {
+    cap_registry::arm(registry, cap_registry::kind_compliance(), holder, reason, clock, ctx);
+}
+
+/// Execute an armed compliance-cap revocation, inside the ninety-second window.
+public fun execute_break_glass_compliance_cap(
     _admin: &AdminCap,
     registry: &mut CapRegistry,
     config: &ComplianceConfig,
-    holder: address,
-    reason: vector<u8>,
+    clock: &Clock,
     ctx: &mut TxContext,
 ) {
-    let generation = cap_registry::bump(
-        registry,
-        cap_registry::kind_compliance(),
-        holder,
-        reason,
-        ctx,
-    );
+    let (generation, holder) =
+        cap_registry::bump(registry, cap_registry::kind_compliance(), clock, ctx);
     transfer::transfer(
         ComplianceCap { id: object::new(ctx), config_id: object::id(config), generation },
         holder,

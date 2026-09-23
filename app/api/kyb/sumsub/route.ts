@@ -26,7 +26,7 @@ export async function POST(request: Request) {
 
   try {
     const session = await createSumsubKybSession({ kybCaseId, businessName, registrationNumber });
-    attachSumsubApplicant(kybCaseId, session.applicantId);
+    await attachSumsubApplicant(kybCaseId, session.applicantId);
 
     return NextResponse.json({ configured: true, ...session });
   } catch (error) {

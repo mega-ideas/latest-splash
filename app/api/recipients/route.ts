@@ -4,13 +4,22 @@ import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { custodyPhaseResponse, deliveryTierAllowed } from '@/lib/server/custody-phase';
 import { readJsonBody } from '@/lib/server/http';
 import { RATE_LIMITS, enforceRateLimit } from '@/lib/server/rate-limit';
-import { createRecipient, listRecipients, type RecipientRecord, type RecipientTier } from '@/lib/server/operations';
+import { buildRecipient, type RecipientRecord, type RecipientTier } from '@/lib/server/operations';
+import { listRecipientsFor, persistRecipient } from '@/lib/server/recipients-store';
+import { requireSessionAccount } from '@/lib/server/session-account';
 
 export async function GET(request: Request) {
   const auth = await requireCustomerRequest(request);
   if (auth.response) return auth.response;
 
-  return NextResponse.json(listRecipients());
+  // This returned EVERY tenant's beneficiaries — names, banks, SWIFT codes,
+  // account numbers — to any authenticated caller. Not one record at a time:
+  // the whole list, which is the entire PII payload a travel-rule record
+  // exists to protect.
+  const accountCheck = await requireSessionAccount(auth.session);
+  if (accountCheck.response) return accountCheck.response;
+
+  return NextResponse.json(await listRecipientsFor(accountCheck.account.orgId));
 }
 
 export async function POST(request: Request) {
@@ -20,6 +29,8 @@ export async function POST(request: Request) {
   // A store write: bounded per user.
   const limited = await enforceRateLimit({ rule: RATE_LIMITS.recipientCreateUser, key: auth.session.email });
   if (limited) return limited;
+  const accountCheck = await requireSessionAccount(auth.session);
+  if (accountCheck.response) return accountCheck.response;
 
   const body = await readJsonBody(request);
   const name = String(body.name ?? '').trim();
@@ -36,6 +47,10 @@ export async function POST(request: Request) {
   if (!deliveryTierAllowed(tier)) return custodyPhaseResponse();
 
   const record = createRecipient({
+  const record = await persistRecipient(buildRecipient({
+    // From the SESSION, never the request. This is the field that decides whose
+    // beneficiary it is and therefore who can read it back.
+    orgId: accountCheck.account.orgId,
     name,
     country: String(body.country ?? 'PH'),
     bank: String(body.bank ?? ''),
@@ -46,7 +61,7 @@ export async function POST(request: Request) {
     orgEmail: typeof body.orgEmail === 'string' ? body.orgEmail : undefined,
     createdVia: body.createdVia as RecipientRecord['createdVia'] | undefined,
     sweepConfig: body.sweepConfig as RecipientRecord['sweepConfig'] | undefined,
-  });
+  }));
 
   return NextResponse.json(record, { status: 201 });
 }

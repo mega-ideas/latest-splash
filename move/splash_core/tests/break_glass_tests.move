@@ -73,14 +73,37 @@ fun anchor_as(scenario: &mut Scenario, who: address) {
     scenario.return_to_sender(cap);
 }
 
+/// Arm, then execute inside the window. Two transactions, as in production.
 fun break_glass(scenario: &mut Scenario, holder: address, reason: vector<u8>) {
     scenario.next_tx(PUBLISHER);
-    let admin = scenario.take_from_sender<AdminCap>();
-    let mut registry = scenario.take_shared<CapRegistry>();
-    let ctx = scenario.ctx();
-    business_account::break_glass_anchor_cap(&admin, &mut registry, holder, reason, ctx);
-    ts::return_shared(registry);
-    scenario.return_to_sender(admin);
+    {
+        let admin = scenario.take_from_sender<AdminCap>();
+        let mut registry = scenario.take_shared<CapRegistry>();
+        let c = scenario.take_shared<Clock>();
+        let ctx = scenario.ctx();
+        business_account::arm_break_glass_anchor_cap(&admin, &mut registry, holder, reason, &c, ctx);
+        ts::return_shared(c);
+        ts::return_shared(registry);
+        scenario.return_to_sender(admin);
+    };
+    scenario.next_tx(PUBLISHER);
+    {
+        let admin = scenario.take_from_sender<AdminCap>();
+        let mut registry = scenario.take_shared<CapRegistry>();
+        let c = scenario.take_shared<Clock>();
+        let ctx = scenario.ctx();
+        business_account::execute_break_glass_anchor_cap(&admin, &mut registry, &c, ctx);
+        ts::return_shared(c);
+        ts::return_shared(registry);
+        scenario.return_to_sender(admin);
+    };
+}
+
+fun advance(scenario: &mut Scenario, by_ms: u64) {
+    scenario.next_tx(PUBLISHER);
+    let mut c = scenario.take_shared<Clock>();
+    c.increment_for_testing(by_ms);
+    ts::return_shared(c);
 }
 
 // ─── Genesis ───────────────────────────────────────────────────────────────
@@ -130,15 +153,7 @@ fun a_stolen_cap_is_dead_without_its_holders_cooperation() {
 
     // The operator's cap ends up in a thief's hands. Modelled by minting one
     // to them directly — possession is the whole of the attacker's position.
-    scenario.next_tx(PUBLISHER);
-    {
-        let admin = scenario.take_from_sender<AdminCap>();
-        let mut registry = scenario.take_shared<CapRegistry>();
-        let ctx = scenario.ctx();
-        business_account::break_glass_anchor_cap(&admin, &mut registry, THIEF, b"seed", ctx);
-        ts::return_shared(registry);
-        scenario.return_to_sender(admin);
-    };
+    break_glass(&mut scenario, THIEF, b"seed");
     // It works, so the abort below is not a false pass.
     anchor_as(&mut scenario, THIEF);
 
@@ -282,15 +297,13 @@ fun a_compromised_compliance_cap_can_be_taken_back() {
         let admin = scenario.take_from_sender<AdminCap>();
         let mut registry = scenario.take_shared<CapRegistry>();
         let config = scenario.take_shared<ComplianceConfig>();
+        let c = scenario.take_shared<Clock>();
         let ctx = scenario.ctx();
-        compliance_config::break_glass_compliance_cap(
-            &admin,
-            &mut registry,
-            &config,
-            OPERATOR,
-            b"suspected compromise",
-            ctx,
+        compliance_config::arm_break_glass_compliance_cap(
+            &admin, &mut registry, OPERATOR, b"suspected compromise", &c, ctx,
         );
+        compliance_config::execute_break_glass_compliance_cap(&admin, &mut registry, &config, &c, ctx);
+        ts::return_shared(c);
         ts::return_shared(config);
         ts::return_shared(registry);
         scenario.return_to_sender(admin);
@@ -322,10 +335,13 @@ fun the_replacement_compliance_cap_works() {
         let admin = scenario.take_from_sender<AdminCap>();
         let mut registry = scenario.take_shared<CapRegistry>();
         let config = scenario.take_shared<ComplianceConfig>();
+        let c = scenario.take_shared<Clock>();
         let ctx = scenario.ctx();
-        compliance_config::break_glass_compliance_cap(
-            &admin, &mut registry, &config, OPERATOR, b"rotation", ctx,
+        compliance_config::arm_break_glass_compliance_cap(
+            &admin, &mut registry, OPERATOR, b"rotation", &c, ctx,
         );
+        compliance_config::execute_break_glass_compliance_cap(&admin, &mut registry, &config, &c, ctx);
+        ts::return_shared(c);
         ts::return_shared(config);
         ts::return_shared(registry);
         scenario.return_to_sender(admin);
@@ -400,5 +416,233 @@ fun is_current_answers_false_for_an_unknown_kind_rather_than_aborting() {
     assert_eq!(cap_registry::is_current(&registry, cap_registry::kind_anchor(), 0), true);
     assert_eq!(cap_registry::is_current(&registry, cap_registry::kind_anchor(), 1), false);
     cap_registry::share_for_testing(registry);
+    scenario.end();
+}
+
+// ─── The ninety-second commit window ───────────────────────────────────────
+//
+// A COMMIT window, not a notice period. Too short for a thief to notice and
+// react; long enough that revocation takes two deliberate transactions, so a
+// misclick or a stale script cannot kill a live operational capability alone.
+
+#[test]
+/// Arming revokes nothing. The capability keeps working until the second
+/// transaction lands.
+fun arming_alone_revokes_nothing() {
+    let mut scenario = publish();
+    scenario.next_tx(PUBLISHER);
+    {
+        let admin = scenario.take_from_sender<AdminCap>();
+        let mut registry = scenario.take_shared<CapRegistry>();
+        let c = scenario.take_shared<Clock>();
+        let ctx = scenario.ctx();
+        business_account::arm_break_glass_anchor_cap(&admin, &mut registry, OPERATOR, b"lost", &c, ctx);
+        assert_eq!(cap_registry::is_armed(&registry, &c), true);
+        assert_eq!(cap_registry::armed_holder(&registry), OPERATOR);
+        // Generation untouched — nothing has been revoked.
+        assert_eq!(cap_registry::anchor_generation(&registry), cap_registry::genesis());
+        ts::return_shared(c);
+        ts::return_shared(registry);
+        scenario.return_to_sender(admin);
+    };
+    // And the publisher's cap still anchors.
+    anchor_as(&mut scenario, PUBLISHER);
+    scenario.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 214, location = splash_core::cap_registry)]
+/// Ninety seconds and one millisecond. The arming is dead and the operator
+/// starts again — nothing is left half-done, because the generation moves only
+/// in the execute step.
+fun an_arming_that_lapses_cannot_be_executed() {
+    let mut scenario = publish();
+    scenario.next_tx(PUBLISHER);
+    {
+        let admin = scenario.take_from_sender<AdminCap>();
+        let mut registry = scenario.take_shared<CapRegistry>();
+        let c = scenario.take_shared<Clock>();
+        let ctx = scenario.ctx();
+        business_account::arm_break_glass_anchor_cap(&admin, &mut registry, OPERATOR, b"lost", &c, ctx);
+        ts::return_shared(c);
+        ts::return_shared(registry);
+        scenario.return_to_sender(admin);
+    };
+    advance(&mut scenario, cap_registry::arm_window_ms() + 1);
+    scenario.next_tx(PUBLISHER);
+    {
+        let admin = scenario.take_from_sender<AdminCap>();
+        let mut registry = scenario.take_shared<CapRegistry>();
+        let c = scenario.take_shared<Clock>();
+        let ctx = scenario.ctx();
+        business_account::execute_break_glass_anchor_cap(&admin, &mut registry, &c, ctx);
+        ts::return_shared(c);
+        ts::return_shared(registry);
+        scenario.return_to_sender(admin);
+    };
+    scenario.end();
+}
+
+#[test]
+/// One millisecond inside the window still works. An off-by-one at this
+/// boundary is an operator re-arming for no reason during an incident.
+fun the_last_millisecond_of_the_window_still_executes() {
+    let mut scenario = publish();
+    scenario.next_tx(PUBLISHER);
+    {
+        let admin = scenario.take_from_sender<AdminCap>();
+        let mut registry = scenario.take_shared<CapRegistry>();
+        let c = scenario.take_shared<Clock>();
+        let ctx = scenario.ctx();
+        business_account::arm_break_glass_anchor_cap(&admin, &mut registry, OPERATOR, b"lost", &c, ctx);
+        ts::return_shared(c);
+        ts::return_shared(registry);
+        scenario.return_to_sender(admin);
+    };
+    advance(&mut scenario, cap_registry::arm_window_ms() - 1);
+    scenario.next_tx(PUBLISHER);
+    {
+        let admin = scenario.take_from_sender<AdminCap>();
+        let mut registry = scenario.take_shared<CapRegistry>();
+        let c = scenario.take_shared<Clock>();
+        let ctx = scenario.ctx();
+        business_account::execute_break_glass_anchor_cap(&admin, &mut registry, &c, ctx);
+        assert_eq!(cap_registry::anchor_generation(&registry), 1);
+        ts::return_shared(c);
+        ts::return_shared(registry);
+        scenario.return_to_sender(admin);
+    };
+    scenario.end();
+}
+
+#[test]
+/// After a lapse, arming again is a plain arm — not a puzzle about why the
+/// registry still says something is pending.
+fun a_lapsed_arming_can_simply_be_armed_again() {
+    let mut scenario = publish();
+    scenario.next_tx(PUBLISHER);
+    {
+        let admin = scenario.take_from_sender<AdminCap>();
+        let mut registry = scenario.take_shared<CapRegistry>();
+        let c = scenario.take_shared<Clock>();
+        let ctx = scenario.ctx();
+        business_account::arm_break_glass_anchor_cap(&admin, &mut registry, OPERATOR, b"first", &c, ctx);
+        ts::return_shared(c);
+        ts::return_shared(registry);
+        scenario.return_to_sender(admin);
+    };
+    advance(&mut scenario, cap_registry::arm_window_ms() + 1);
+    scenario.next_tx(PUBLISHER);
+    {
+        let admin = scenario.take_from_sender<AdminCap>();
+        let mut registry = scenario.take_shared<CapRegistry>();
+        let c = scenario.take_shared<Clock>();
+        let ctx = scenario.ctx();
+        assert_eq!(cap_registry::is_armed(&registry, &c), false);
+        business_account::arm_break_glass_anchor_cap(&admin, &mut registry, THIEF, b"second", &c, ctx);
+        assert_eq!(cap_registry::armed_holder(&registry), THIEF);
+        ts::return_shared(c);
+        ts::return_shared(registry);
+        scenario.return_to_sender(admin);
+    };
+    scenario.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 215, location = splash_core::cap_registry)]
+/// Two live armings would make "what is about to be revoked?" a question with
+/// two answers.
+fun a_second_arming_while_one_is_live_is_refused() {
+    let mut scenario = publish();
+    scenario.next_tx(PUBLISHER);
+    {
+        let admin = scenario.take_from_sender<AdminCap>();
+        let mut registry = scenario.take_shared<CapRegistry>();
+        let c = scenario.take_shared<Clock>();
+        let ctx = scenario.ctx();
+        business_account::arm_break_glass_anchor_cap(&admin, &mut registry, OPERATOR, b"one", &c, ctx);
+        business_account::arm_break_glass_anchor_cap(&admin, &mut registry, THIEF, b"two", &c, ctx);
+        ts::return_shared(c);
+        ts::return_shared(registry);
+        scenario.return_to_sender(admin);
+    };
+    scenario.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 213, location = splash_core::cap_registry)]
+fun executing_with_nothing_armed_is_refused() {
+    let mut scenario = publish();
+    scenario.next_tx(PUBLISHER);
+    {
+        let admin = scenario.take_from_sender<AdminCap>();
+        let mut registry = scenario.take_shared<CapRegistry>();
+        let c = scenario.take_shared<Clock>();
+        let ctx = scenario.ctx();
+        business_account::execute_break_glass_anchor_cap(&admin, &mut registry, &c, ctx);
+        ts::return_shared(c);
+        ts::return_shared(registry);
+        scenario.return_to_sender(admin);
+    };
+    scenario.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 213, location = splash_core::cap_registry)]
+/// An arming for the compliance cap must not be executable as an anchor
+/// revocation. The kind is part of what was committed to.
+fun an_arming_for_one_capability_cannot_execute_another() {
+    let mut scenario = publish();
+    with_compliance_config(&mut scenario);
+    scenario.next_tx(PUBLISHER);
+    {
+        let admin = scenario.take_from_sender<AdminCap>();
+        let mut registry = scenario.take_shared<CapRegistry>();
+        let c = scenario.take_shared<Clock>();
+        let ctx = scenario.ctx();
+        compliance_config::arm_break_glass_compliance_cap(&admin, &mut registry, OPERATOR, b"x", &c, ctx);
+        business_account::execute_break_glass_anchor_cap(&admin, &mut registry, &c, ctx);
+        ts::return_shared(c);
+        ts::return_shared(registry);
+        scenario.return_to_sender(admin);
+    };
+    scenario.end();
+}
+
+#[test]
+/// An arming can be abandoned deliberately.
+fun an_arming_can_be_cancelled() {
+    let mut scenario = publish();
+    scenario.next_tx(PUBLISHER);
+    {
+        let admin = scenario.take_from_sender<AdminCap>();
+        let mut registry = scenario.take_shared<CapRegistry>();
+        let c = scenario.take_shared<Clock>();
+        let ctx = scenario.ctx();
+        business_account::arm_break_glass_anchor_cap(&admin, &mut registry, OPERATOR, b"mistake", &c, ctx);
+        business_account::cancel_break_glass(&admin, &mut registry, ctx);
+        assert_eq!(cap_registry::is_armed(&registry, &c), false);
+        assert_eq!(cap_registry::anchor_generation(&registry), cap_registry::genesis());
+        ts::return_shared(c);
+        ts::return_shared(registry);
+        scenario.return_to_sender(admin);
+    };
+    anchor_as(&mut scenario, PUBLISHER);
+    scenario.end();
+}
+
+#[test]
+/// The replacement goes where the ARMING said. Otherwise the first step is
+/// decorative — a second transaction free to name a different destination
+/// would carry all the authority.
+fun the_holder_is_fixed_at_arming_time() {
+    let mut scenario = publish();
+    break_glass(&mut scenario, OPERATOR, b"handover");
+    scenario.next_tx(OPERATOR);
+    {
+        let cap = scenario.take_from_sender<AnchorCap>();
+        assert_eq!(business_account::anchor_cap_generation(&cap), 1);
+        scenario.return_to_sender(cap);
+    };
     scenario.end();
 }

@@ -37,8 +37,27 @@ function resolveLocal(base) {
   return null;
 }
 
+/**
+ * `server-only` and `client-only` are Next.js build-time markers, not packages
+ * with runtime behaviour — they exist so a bundler errors when a server module
+ * is pulled into a client bundle, and they are not installed as dependencies.
+ *
+ * Outside Next there is nothing to resolve, so importing a module that carries
+ * one throws ERR_MODULE_NOT_FOUND and the module becomes untestable. That is a
+ * bad trade: the marker is a genuine safety net, and dropping it from a file to
+ * make the file testable removes a real guarantee to buy a test.
+ *
+ * So they resolve to an empty module here. Node gets nothing, Next still gets
+ * its build-time check, and `lib/server/*` stays both protected and testable.
+ */
+const BUILD_TIME_MARKERS = new Set(['server-only', 'client-only']);
+const EMPTY_MODULE = 'data:text/javascript,export{}';
+
 registerHooks({
   resolve(specifier, context, nextResolve) {
+    if (BUILD_TIME_MARKERS.has(specifier)) {
+      return { url: EMPTY_MODULE, shortCircuit: true };
+    }
     if (specifier.startsWith('@/')) {
       const url = resolveLocal(path.join(ROOT, specifier.slice(2)));
       if (url) return { url, shortCircuit: true };

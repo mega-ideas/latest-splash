@@ -1,4 +1,5 @@
 import { USD_DECIMALS, formatMinor, parseMinor } from '../money.ts';
+import { copilotModel } from '../ai/model.ts';
 /**
  * 0xWal — layered copilot intelligence.
  *
@@ -68,7 +69,7 @@ export async function parseInvoice(
       const { default: Anthropic } = await import('@anthropic-ai/sdk');
       const client = new Anthropic({ apiKey });
       const resp = await client.messages.create({
-        model: process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-6',
+        model: copilotModel(),
         max_tokens: 300,
         system:
           'Extract the payable amount, ISO-4217 currency, and recipient/vendor name from this invoice. ' +

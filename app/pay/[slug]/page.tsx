@@ -1,14 +1,15 @@
 import { notFound } from 'next/navigation';
 
 import PayInvoiceClient from '@/components/pay/PayInvoiceClient';
-import { findInvoiceBySlug, listRecipients } from '@/lib/server/operations';
+import { findInvoiceBySlug } from '@/lib/server/invoices-store';
+import { findIssuerForPayLink } from '@/lib/server/recipients-store';
 import { BANK_TRANSFER_INSTRUCTIONS } from '@/app/api/pay/[slug]/route';
 
 export default async function PayInvoicePage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const invoice = findInvoiceBySlug(slug);
+  const invoice = await findInvoiceBySlug(slug);
   if (!invoice) notFound();
-  const issuer = listRecipients().find((recipient) => recipient.name === invoice.issuerOrg);
+  const issuer = await findIssuerForPayLink(invoice.orgId, invoice.issuerOrg);
   const reference = invoice.paymentReference ?? `SPL-${slug.toUpperCase()}-${invoice.id.slice(-4).toUpperCase()}`;
 
   return (

@@ -8247,3 +8247,51 @@ button.iso-product-row {
   font-size: 13.5px;
   font-weight: 650;
 }
+
+/* ── Legal documents (/privacy-policy, /terms-of-service) ──────────────────
+   Long-form reading, so the column is narrower than the marketing sections
+   and the rhythm is set by the h2 rules rather than by cards. */
+.legal-main { background: var(--iso-paper); }
+.legal-shell { max-width: 780px; }
+.legal-hero .wc-hero-desc { max-width: 640px; }
+.legal-updated {
+  margin-top: 14px;
+  color: var(--iso-text-label);
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.legal-prose { margin-top: 28px; color: var(--iso-text-secondary); }
+.legal-prose h2 {
+  margin: 38px 0 12px;
+  padding-top: 18px;
+  border-top: 1px solid var(--iso-line);
+  color: var(--iso-ink);
+  font-size: 19px;
+  line-height: 1.35;
+  letter-spacing: -.01em;
+}
+.legal-prose h2:first-child { margin-top: 8px; border-top: 0; padding-top: 0; }
+.legal-prose h3 {
+  margin: 24px 0 8px;
+  color: var(--iso-ink);
+  font-size: 15.5px;
+  line-height: 1.4;
+}
+.legal-prose p { margin: 0 0 14px; font-size: 15px; line-height: 1.72; }
+.legal-prose ul { margin: 0 0 16px; padding-left: 20px; }
+.legal-prose li { margin-bottom: 9px; font-size: 15px; line-height: 1.7; }
+.legal-prose strong { color: var(--iso-ink); font-weight: 600; }
+.legal-prose a { color: var(--iso-ink); text-decoration: underline; text-underline-offset: 2px; }
+.legal-prose a:hover { opacity: .72; }
+
+.legal-page .wc-footer-inner a { color: var(--iso-text-label); text-decoration: none; }
+.legal-page .wc-footer-inner a:hover { text-decoration: underline; }
+
+@media (max-width: 720px) {
+  .legal-prose h2 { font-size: 17.5px; margin-top: 30px; }
+  .legal-prose p,
+  .legal-prose li { font-size: 14.5px; }
+}

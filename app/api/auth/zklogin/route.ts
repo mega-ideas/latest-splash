@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { ensureWorkspaceForEmail } from '@/lib/auth/signup-org';
 import { z } from 'zod';
 
 import { isKilledEntityEmail } from '@/lib/auth/killed-entities';
@@ -11,7 +12,6 @@ import {
   deriveZkLoginAddress,
 } from '@/lib/auth/zklogin';
 import { markEmailVerified, readCredentialVersion } from '@/lib/auth/accounts';
-import { DEFAULT_ORG_ID } from '@/lib/auth/authority';
 import { ensureUserForIdentity, upsertWalletIdentity } from '@/lib/db/wallet-identities';
 import { createCustomerSessionFromIdentity } from '@/lib/auth/customer-session';
 import { setCustomerSessionCookie } from '@/lib/server/customer-auth';
@@ -89,7 +89,13 @@ export async function POST(request: Request) {
         const { getDb } = await import('@/lib/db/client');
         const db = getDb() as never;
         const userId = `op_${email}`;
-        await ensureUserForIdentity(db, { userId, orgId: DEFAULT_ORG_ID, email });
+        // Their OWN workspace, not the shared demo org. zkLogin grants no
+        // membership and authority is re-read from the membership row, so a new
+        // signer could authorise nothing either way — but their identity and
+        // Sui address sat in 'demo-business' namespace, and the moment anyone
+        // granted them a role they would have landed inside it.
+        const workspace = await ensureWorkspaceForEmail(email);
+        await ensureUserForIdentity(db, { userId, orgId: workspace.orgId, email });
 
         // The provider vouched for the mailbox, or it did not. Only the
         // boolean claim marks the address proven; a token without it leaves
@@ -105,7 +111,7 @@ export async function POST(request: Request) {
           suiAddress = await deriveZkLoginAddress(jwt, userSalt);
           await upsertWalletIdentity(db, {
             userId,
-            orgId: DEFAULT_ORG_ID,
+            orgId: workspace.orgId,
             suiAddress,
             oauthIss: claims.iss,
             oauthSub: claims.sub,
@@ -128,10 +134,15 @@ export async function POST(request: Request) {
       }
     }
 
+    // The session's org is the signer's own workspace, resolved the same way
+    // the identity row was. The cookie is display-only by contract — authority
+    // is re-read from the membership table per request — but a cookie naming
+    // the demo org would still show the wrong workspace name on every screen.
+    const sessionWorkspace = await ensureWorkspaceForEmail(email);
     const session = createCustomerSessionFromIdentity({
       email,
       suiAddress,
-      orgId: DEFAULT_ORG_ID,
+      orgId: sessionWorkspace.orgId,
       credentialVersion,
       fallbackOrganization: process.env.CUSTOMER_ORGANIZATION,
     });

@@ -18,7 +18,7 @@ export const dynamic = 'force-dynamic';
  */
 export default async function SharedReceiptPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
-  const share = findReceiptShare(token);
+  const share = await findReceiptShare(token);
   if (!share) notFound();
 
   const { intent, audit, display } = share;

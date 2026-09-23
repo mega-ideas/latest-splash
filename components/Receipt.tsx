@@ -199,27 +199,35 @@ const SettlementReceipt = forwardRef<HTMLDivElement, ReceiptProps>(function Sett
             </span>
             <ChevronDown className="h-4 w-4 transition-transform group-open:rotate-180" style={{ color: MUTE }} />
           </summary>
+          {/* No digests, no blob ids, no URLs as link text.
+             *
+             * This section used to print a 64-character hex string, then the
+             * full https explorer address underneath it as its own link label.
+             * Neither is something a person reads — a customer cannot check a
+             * digest by looking at one, and an address rendered as prose is a
+             * URL bar that happens to be on a receipt. What they need is to
+             * ARRIVE at the page that proves it, where the explorer shows the
+             * reference in its own context.
+             *
+             * The proof is not weakened by hiding the string: the button
+             * carries it. The full reference still travels in the PDF, which
+             * is the artefact an accountant files. */}
           <div className="space-y-3 border-t px-4 py-3" style={{ borderColor: LINE }}>
-            <div>
-              <div className="text-[11px] font-medium uppercase tracking-[0.12em]" style={{ color: MUTE }}>Settlement record</div>
-              <div className="mt-0.5 break-all font-mono text-[13px] font-medium" style={{ color: INK }}>
-                {isPendingDigest ? 'Awaiting settlement record' : txDigest}
-              </div>
-              {explorerUrl && !isPendingDigest ? (
-                <a href={explorerUrl} target="_blank" rel="noopener noreferrer" className="mt-1 inline-block break-all font-mono text-[13px] underline-offset-2 hover:underline" style={{ color: TEAL }}>
-                  {explorerUrl}
-                </a>
-              ) : null}
-            </div>
-            <div>
-              <div className="text-[11px] font-medium uppercase tracking-[0.12em]" style={{ color: MUTE }}>Tamper-evident archive</div>
-              <div className="mt-0.5 break-all font-mono text-[13px] font-medium" style={{ color: INK }}>
-                {walrusBlobId ?? 'Archived with the daily audit batch'}
-              </div>
-              {sealedState ? (
-                <div className="mt-0.5 text-[13px] font-medium" style={{ color: OK }}>{sealedState}</div>
-              ) : null}
-            </div>
+            <ProofRow
+              label="Settlement record"
+              state={isPendingDigest ? 'Awaiting settlement' : 'Recorded on the network'}
+              href={isPendingDigest ? null : explorerUrl ?? null}
+              action="Check here"
+              reference={isPendingDigest ? null : txDigest}
+            />
+            <ProofRow
+              label="Tamper-evident archive"
+              state={walrusBlobId ? 'Archived and sealed' : 'Archived with the daily audit batch'}
+              detail={sealedState ?? null}
+              href={null}
+              action="Verify here"
+              reference={walrusBlobId ?? null}
+            />
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <div className="text-[11px] font-medium uppercase tracking-[0.12em]" style={{ color: MUTE }}>Network</div>
@@ -241,6 +249,71 @@ const SettlementReceipt = forwardRef<HTMLDivElement, ReceiptProps>(function Sett
     </div>
   );
 });
+
+/**
+ * One line of proof: what it is, whether it exists, and a way to go and see.
+ *
+ * The state is a sentence, not an identifier. "Recorded on the network" tells a
+ * customer what they need to know; the 64-character string that backs it tells
+ * them nothing they can act on and everything they might mistype.
+ *
+ * The action renders only when there is somewhere to send them. A button that
+ * goes nowhere is worse than no button — it reads as proof that failed.
+ */
+function ProofRow({
+  label,
+  state,
+  detail,
+  href,
+  action,
+  reference,
+}: {
+  label: string;
+  state: string;
+  detail?: string | null;
+  href: string | null;
+  action: string;
+  /** The underlying identifier. Printed, never shown on screen — see below. */
+  reference?: string | null;
+}) {
+  return (
+    <div className="flex flex-wrap items-start justify-between gap-2">
+      <div className="min-w-0">
+        <div className="text-[11px] font-medium uppercase tracking-[0.12em]" style={{ color: MUTE }}>
+          {label}
+        </div>
+        <div className="mt-0.5 text-[13px] font-medium" style={{ color: INK }}>{state}</div>
+        {detail ? (
+          <div className="mt-0.5 text-[13px] font-medium" style={{ color: OK }}>{detail}</div>
+        ) : null}
+        {/* On paper a button is not clickable, so the sheet an accountant files
+           would carry no way to verify at all. The reference appears only when
+           printing — which is also the only context where someone has a reason
+           to read a 64-character string. */}
+        {reference ? (
+          <div
+            className="mt-0.5 hidden break-all font-mono text-[11px] print:block"
+            style={{ color: MUTE }}
+          >
+            {reference}
+          </div>
+        ) : null}
+      </div>
+      {href ? (
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex shrink-0 items-center gap-1 rounded-lg px-3 py-1.5 text-[13px] font-semibold transition-colors print:hidden"
+          style={{ border: `1px solid ${TEAL}`, color: TEAL }}
+        >
+          {action}
+          <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+        </a>
+      ) : null}
+    </div>
+  );
+}
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (

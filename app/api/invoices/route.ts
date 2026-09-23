@@ -5,7 +5,9 @@ import { z } from 'zod';
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { readJsonBody } from '@/lib/server/http';
 import { RATE_LIMITS, enforceRateLimit } from '@/lib/server/rate-limit';
-import { createInvoice, listInvoices } from '@/lib/server/operations';
+import { buildInvoice } from '@/lib/server/operations';
+import { listInvoicesFor, persistInvoice } from '@/lib/server/invoices-store';
+import { requireSessionAccount } from '@/lib/server/session-account';
 import { sealAdapter } from '@/lib/server/seal';
 import { storeEncryptedInvoice, WalrusAdapterError } from '@/lib/server/walrus';
 
@@ -24,7 +26,12 @@ export async function GET(request: Request) {
   const auth = await requireCustomerRequest(request);
   if (auth.response) return auth.response;
 
-  return NextResponse.json({ invoices: listInvoices() });
+  // This returned every tenant's invoices — amounts, payers, memos, due
+  // dates — to any authenticated caller.
+  const accountCheck = await requireSessionAccount(auth.session);
+  if (accountCheck.response) return accountCheck.response;
+
+  return NextResponse.json({ invoices: await listInvoicesFor(accountCheck.account.orgId) });
 }
 
 export async function POST(request: Request) {
@@ -35,6 +42,8 @@ export async function POST(request: Request) {
   // round trip: bounded per user.
   const limited = await enforceRateLimit({ rule: RATE_LIMITS.invoiceCreateUser, key: auth.session.email });
   if (limited) return limited;
+  const accountCheck = await requireSessionAccount(auth.session);
+  if (accountCheck.response) return accountCheck.response;
 
   const parsed = createInvoiceSchema.safeParse(await readJsonBody(request));
   if (!parsed.success) {
@@ -63,7 +72,9 @@ export async function POST(request: Request) {
       };
     }
 
-    const invoice = createInvoice({
+    const invoice = await persistInvoice(buildInvoice({
+      // From the SESSION, never the request.
+      orgId: accountCheck.account.orgId,
       issuerOrg: input.issuerOrg,
       payerOrgName: input.payerOrgName,
       payerOrgEmail: input.payerOrgEmail || undefined,
@@ -75,7 +86,7 @@ export async function POST(request: Request) {
       walrusBlobId: document?.walrusBlobId,
       sealPolicyId: document?.sealPolicyId,
       documentSha256: document?.documentSha256,
-    });
+    }));
     return NextResponse.json({ invoice, walrus: document?.walrus ?? null }, { status: 201 });
   } catch (error) {
     if (error instanceof WalrusAdapterError) {

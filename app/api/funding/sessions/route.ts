@@ -6,7 +6,7 @@ import { FundingRegistryError, type FundingSelection } from '@/lib/funding/regis
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { createFundingSession } from '@/lib/server/funding-sessions';
 import { readJsonBody } from '@/lib/server/http';
-import { isForeignAccountId, resolveSessionAccount } from '@/lib/server/session-account';
+import { isForeignAccountId, requireSessionAccount } from '@/lib/server/session-account';
 
 const usdSelectionSchema = z.object({
   source: z.literal('BANK_USD'),
@@ -40,7 +40,9 @@ export async function POST(request: Request) {
   // The session's account decides who gets CREDITed when the deposit lands, so
   // it is resolved from the caller's org — a body-supplied value would let one
   // org credit a deposit to (and later spend it from) another org's ledger.
-  const { accountId } = await resolveSessionAccount(auth.session);
+  const accountCheck = await requireSessionAccount(auth.session);
+  if (accountCheck.response) return accountCheck.response;
+  const { accountId, orgId } = accountCheck.account;
   if (isForeignAccountId(parsed.data.businessAccountId, accountId)) {
     return NextResponse.json({ error: 'businessAccountId does not belong to this organization' }, { status: 403 });
   }
@@ -48,6 +50,7 @@ export async function POST(request: Request) {
   try {
     const amountExpectedMicro = Math.round(parsed.data.amountUsd * 1_000_000);
     const session = createFundingSession({
+      orgId,
       businessAccountId: accountId,
       selection: parsed.data.selection as FundingSelection,
       amountExpectedMicro,

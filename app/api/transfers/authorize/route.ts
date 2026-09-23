@@ -5,14 +5,18 @@ import { createIntercompanyTransfer } from '@/lib/server/intercompany';
 import { convertUsdToUsdc, usdCentsToUsdcMicro } from '@/lib/server/labuan-settlement';
 import { executeComposedPayment } from '@/lib/server/composed-payment';
 import {
-  createLedgerEntry,
-  createRecipient,
+  buildRecipient,
   createTransferIntent,
-  getLedgerBalance,
-  updateAuditReceipt,
-  updateInvoice,
-  updateTransferIntent,
 } from '@/lib/server/operations';
+import { accountBalance, listMovementsSince, recordMovement } from '@/lib/server/ledger-store';
+import { persistRecipient } from '@/lib/server/recipients-store';
+import { missingTravelRuleFields, travelRuleSnapshot } from '@/lib/compliance/travel-rule';
+import { readOriginator } from '@/lib/server/originator';
+import { patchInvoice } from '@/lib/server/invoices-store';
+import { patchAuditReceipt, patchTransfer, persistTransfer } from '@/lib/server/transfers-store';
+import { proposeForApproval } from '@/lib/server/dual-approval';
+import { resolveApprovalClaim } from '@/lib/server/approved-proposal';
+import { resolveAuthorityForSession } from '@/lib/auth/authority';
 import { pythAdapter } from '@/lib/server/pyth';
 import { calculateQuote } from '@/lib/server/quote';
 import { completeDeliveryForTransfer } from '@/lib/server/sweep';
@@ -29,12 +33,11 @@ import { assertCleanBody, ProvenanceViolationError, provenanceViolationResponse 
 import { requireActiveOrg } from '@/lib/server/kyb-gate';
 import { custodyPhaseResponse, deliveryTierAllowed } from '@/lib/server/custody-phase';
 import { checkMinimumSettlement } from '@/lib/policy/limits';
-import { checkAuthorizationLimits } from '@/lib/policy/authorization-limits';
+import { checkAuthorizationLimits, startOfUtcDay } from '@/lib/policy/authorization-limits';
 import { verifyPayoutTotp } from '@/lib/auth/totp';
-import { readOperatingSettings } from '@/lib/server/operating-settings';
+import { readOrgSettings } from '@/lib/server/org-settings';
 import { readComplianceControls } from '@/lib/server/sui-settlement';
-import { isForeignAccountId, resolveSessionAccount } from '@/lib/server/session-account';
-import { listLedgerEntries } from '@/lib/server/operations';
+import { isForeignAccountId, requireSessionAccount } from '@/lib/server/session-account';
 import { readJsonBody } from '@/lib/server/http';
 
 export const maxDuration = 60;
@@ -44,7 +47,12 @@ const authorizeSchema = z.object({
     name: z.string().trim().min(2),
     country: z.string().trim().min(2),
     bank: z.object({ swift: z.string().optional(), account: z.string().trim().min(1) }).optional(),
+    /** The FATF R.16 beneficiary half. Optional in the schema and REQUIRED
+     *  by `missingTravelRuleFields` below — so an incomplete record is
+     *  refused with the specific fields named, not with "invalid body". */
+    travelRule: z.record(z.string(), z.unknown()).optional(),
   }),
+  travelRulePayment: z.record(z.string(), z.unknown()).optional(),
   amount: z.object({ value: z.string(), targetCurrency: z.string().length(3) }),
   quote: z.object({ netReceived: z.string() }).optional(),
   deliveryTier: z.enum(['PAYOUT_ONLY', 'SWEEP_ACCOUNT', 'STORED_BALANCE']).default('PAYOUT_ONLY'),
@@ -106,12 +114,17 @@ export async function POST(request: Request) {
   // The paying account is resolved from the SESSION. It used to come from
   // `body.businessAccountId`, which let any session holder name another org's
   // funded account and spend it.
-  const { accountId: businessAccountId } = await resolveSessionAccount(auth.session);
+  const accountCheck = await requireSessionAccount(auth.session);
+  if (accountCheck.response) return accountCheck.response;
+  const { accountId: businessAccountId, orgId } = accountCheck.account;
   if (isForeignAccountId(body.businessAccountId, businessAccountId)) {
     return NextResponse.json({ error: 'businessAccountId does not belong to this organization' }, { status: 403 });
   }
 
-  const settings = readOperatingSettings();
+  // This org's dials, not a global file. The file version had no org id and
+  // its route had no role check, so any signed-in user could switch dual
+  // approval off for every tenant and then send whatever they liked.
+  const settings = await readOrgSettings(orgId);
 
   // Second factor. This used to be `/^\d{6}$/` and nothing else — any six
   // digits authorized a payout. `requireTotp` is now load-bearing: when it is
@@ -140,25 +153,130 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
+  // The beneficiary is resolved BEFORE the ceilings, because a payment that
+  // trips the dual-approval threshold becomes a proposal, and that proposal
+  // must name a beneficiary id the compliance screening store can resolve.
+  // Named in prose instead, the approval gate can never open — and a control
+  // nobody can pass is the dead end this change exists to close, wearing a
+  // different hat.
+  //
+  // The cost is that a refused payment leaves a beneficiary record. That is
+  // the operator's own input for a counterparty that exists either way, and
+  // it is scoped to their org.
+  const recipient = await persistRecipient(buildRecipient({
+    orgId,
+    name: body.recipient.name,
+    country: body.recipient.country,
+    swift: body.recipient.bank?.swift,
+    account: body.recipient.bank?.account,
+    tier: body.deliveryTier,
+    travelRule: body.recipient.travelRule as Parameters<typeof buildRecipient>[0]['travelRule'],
+  }));
+
+  // The travel rule, checked HERE and not only in the form.
+  //
+  // The same module the form asks — a client that skips the UI, or an
+  // integration posting straight to this route, meets the identical rule.
+  // The ORIGINATOR half is read from the org's own KYB record and never
+  // from the body: it is the payer's identity, and a request that could
+  // supply it is a request that could misstate who sent the money.
+  const { originator } = await readOriginator(orgId);
+  const travelRuleBeneficiary = {
+    name: recipient.name,
+    bankName: recipient.bank,
+    ...(body.recipient.travelRule ?? {}),
+  };
+  const travelRuleMissing = missingTravelRuleFields({
+    destinationCountry: body.recipient.country,
+    beneficiary: travelRuleBeneficiary,
+    originator,
+    payment: body.travelRulePayment ?? {},
+  });
+  if (travelRuleMissing.length > 0) {
+    return NextResponse.json(
+      {
+        error:
+          'This payment cannot be sent yet: the record that has to travel with it is incomplete.',
+        code: 'travel_rule_incomplete',
+        // Each one names the field AND why the corridor asks, so a caller
+        // can fix it without reading a regulation.
+        missing: travelRuleMissing,
+      },
+      { status: 400 },
+    );
+  }
+
   // Ceilings the operator configured in Settings. Until now the only amount
   // rule on this route was the $100 floor, so a $1,000 per-transfer limit
   // bounded nothing.
+  // The daily ceiling is computed from the ledger rather than a counter, which
+  // is right — but the ledger it read was the in-process map, so a restart
+  // reset every account's daily spend to zero and the cap stopped binding.
+  // Today's movements only, unpaged: a page limit here would hand a busy
+  // account its budget back once the early debits fell off the end.
+  const todaysMovements = await listMovementsSince(orgId, startOfUtcDay(Date.now()));
   const limits = checkAuthorizationLimits({
     amountUsd: sourceAmount,
     settings,
-    ledger: listLedgerEntries(businessAccountId),
+    ledger: todaysMovements.map((line) => ({
+      direction: line.direction,
+      amountUsdcMicro: Number(line.amountMinor),
+      createdAt: line.createdAt,
+    })),
   });
   if (!limits.ok) {
     return NextResponse.json({ error: limits.message, code: limits.code, limitUsd: limits.limitUsd }, { status: 400 });
   }
-  if (limits.requiresSecondApproval) {
+  // An approval already collected for THIS payment lifts the second-approver
+  // requirement and nothing else. Verified against the proposal store, never
+  // taken from the header: a client that could assert its own approval would
+  // be a considerably worse hole than the one dual approval closes.
+  const approvalClaim = await resolveApprovalClaim(request, orgId);
+  if (limits.requiresSecondApproval && !approvalClaim.approved) {
+    // This used to answer 409 telling the operator to "submit it through the
+    // approval queue", and put nothing in the approval queue. A control that
+    // stops work without offering the sanctioned path is one people route
+    // around — by splitting the payment under the threshold, which is worse
+    // than having no threshold.
+    const maker = await resolveAuthorityForSession(auth.session);
+    const proposal = await proposeForApproval({
+      orgId,
+      // The MAKER, from the session. The submit route compares this against
+      // the approver to refuse self-approval, so it is the whole substance
+      // of maker-checker.
+      createdBy: maker.userId,
+      kind: 'PAYMENT',
+      amountUsd: body.amount.value,
+      targetCurrency: body.amount.targetCurrency.toUpperCase(),
+      recommendation:
+        `Pay ${body.amount.value} USD to ${body.recipient.name} in ` +
+        `${body.amount.targetCurrency.toUpperCase()}. Above the ` +
+        `${settings.approvalThresholdUsd} USD dual-approval threshold.`,
+      passedChecks: [
+        { source: 'COMPLIANCE', ref: 'KYB org state is ACTIVE' },
+        { source: 'BALANCE', ref: `Per-transfer and daily ceilings, ${limits.spentTodayUsd} USD spent today` },
+        // The beneficiary ID, not its name. `resolveComplianceForProposal`
+        // reads COUNTERPARTY refs as ids and looks up the screening record;
+        // an unresolvable ref blocks forever rather than failing closed once.
+        { source: 'COUNTERPARTY', ref: recipient.id },
+      ],
+      payload: { ...body, businessAccountId: undefined },
+      idempotencyKey: `transfer:${orgId}:${body.amount.value}:${body.recipient.name}:${body.amount.targetCurrency}`,
+      approvalThresholdUsd: settings.approvalThresholdUsd,
+    });
     return NextResponse.json(
       {
         error:
           `${body.amount.value} USD is at or above the ${settings.approvalThresholdUsd} approval threshold and ` +
-          'dual approval is enabled, so this payment needs a second approver. Submit it through the approval queue.',
+          (proposal
+            ? 'dual approval is enabled. It is now in the approval queue and needs a second approver.'
+            : 'dual approval is enabled, so this payment needs a second approver. The approval queue could not be reached — try again.'),
         code: 'requires_second_approval',
         approvalThresholdUsd: settings.approvalThresholdUsd,
+        // Where it went, so the client can link straight to it rather than
+        // telling the operator to go looking.
+        proposalId: proposal?.id ?? null,
+        queueUrl: proposal ? '/queue' : null,
       },
       { status: 409 },
     );
@@ -213,7 +331,14 @@ export async function POST(request: Request) {
   if (!fundingSession && fundingSelection.type !== 'held') {
     return NextResponse.json({ error: 'Bank and coin sources require a funding session before settlement' }, { status: 409 });
   }
-  if (fundingSelection.type === 'held' && getLedgerBalance(businessAccountId) < sourceAmountMicro) {
+  // The balance this gate reads is now a SUM over ledger_postings rather than
+  // over a map that emptied on restart. Compared as bigint on both sides —
+  // mixing a bigint balance with a number amount is how a check passes on a
+  // figure the ledger does not hold.
+  if (
+    fundingSelection.type === 'held'
+    && (await accountBalance(orgId)) < BigInt(sourceAmountMicro)
+  ) {
     return NextResponse.json({ error: 'Splash balance is insufficient for this payment source' }, { status: 409 });
   }
   if (fundingSelection.type === 'fiat' && fundingSession) {
@@ -248,14 +373,10 @@ export async function POST(request: Request) {
     ? null
     : sourceAmount > 0 ? await convertUsdToUsdc(sourceAmount) : null;
   const sourceStablecoin = 'USDC' as const;
-  const recipient = createRecipient({
-    name: body.recipient.name,
-    country: body.recipient.country,
-    swift: body.recipient.bank?.swift,
-    account: body.recipient.bank?.account,
-    tier: body.deliveryTier,
-  });
   const intent = createTransferIntent({
+    // From the SESSION, never the request. This is the field that decides
+    // whose transfer it is and therefore who can read it back.
+    orgId,
     recipientName: recipient.name,
     recipientId: recipient.id,
     invoiceId: body.invoiceId,
@@ -281,13 +402,32 @@ export async function POST(request: Request) {
     fundingNormalizeVenue: fundingSession?.normalizeVenue,
     fundingEffectiveSlippageBps: fundingSession?.effectiveSlippageBps,
   });
+
+  // Freeze what travelled with THIS payment.
+  //
+  // A snapshot rather than a join to the beneficiary: R.16 is about what
+  // accompanied this transfer, and a beneficiary edited next week must not
+  // silently rewrite the record of a payment already sent. It rides in the
+  // settlement metadata, which is where `travel_rule_snapshot` lands.
+  Object.assign(intent, {
+    travelRuleSnapshot: travelRuleSnapshot({
+      destinationCountry: body.recipient.country,
+      beneficiary: travelRuleBeneficiary,
+      originator,
+      payment: body.travelRulePayment ?? {},
+    }),
+  });
+
+  // Postgres when configured, this process only when not — one place decides,
+  // and every read of this transfer goes back through the same store.
+  await persistTransfer(intent);
   if (fundingSession) updateFundingSession(fundingSession.id, { transferIntentId: intent.id });
 
   // Debit the PAYER for every funding source, not only `held`.
   //
   // `ingestStablecoinDeposit` writes a CREDIT against the funding session's
   // account when a deposit lands, and that same account is what
-  // `getLedgerBalance` reports as spendable "Splash Balance". Debiting only on
+  // `accountBalance` reports as spendable "Splash Balance". Debiting only on
   // the `held` branch meant a stablecoin-funded transfer settled without ever
   // consuming its credit — so one 5,000 deposit funded a 5,000 stablecoin
   // transfer AND a second 5,000 transfer from the balance it left behind.
@@ -296,10 +436,10 @@ export async function POST(request: Request) {
   const debitedAmountMicro = fundingSelection.type === 'stablecoin'
     ? fundingSession?.normalizedAmountUsdcMicro ?? sourceAmountMicro
     : sourceAmountMicro;
-  const payerDebit = createLedgerEntry({
-    accountId: businessAccountId,
+  const payerDebit = await recordMovement({
+    orgId,
     direction: 'DEBIT',
-    amountUsdcMicro: debitedAmountMicro,
+    amountMinor: BigInt(debitedAmountMicro),
     refType: 'TRANSFER',
     refId: intent.id,
     demo: process.env.NODE_ENV !== 'production' || process.env.USE_MOCK_APIS === 'true' || process.env.NEXT_PUBLIC_DEMO_MODE === 'true',
@@ -307,8 +447,8 @@ export async function POST(request: Request) {
   // Fiat rails fund the payout externally, so their balance legitimately dips
   // negative until the provider's credit posts; a coin or held source going
   // negative means we just spent money the ledger says is not there.
-  if (payerDebit.balanceAfterMicro < 0 && fundingSelection.type !== 'fiat') {
-    updateTransferIntent(intent.id, {
+  if (payerDebit.balanceAfterMinor < 0n && fundingSelection.type !== 'fiat') {
+    await patchTransfer(intent.id, {
       state: 'FAILED',
       failureReason: 'Ledger balance would go negative for this funding source',
       failedAtState: 'QUEUED',
@@ -319,20 +459,22 @@ export async function POST(request: Request) {
     );
   }
   recordLastUsedFundingSource(businessAccountId, fundingSelection.source);
-  updateAuditReceipt(intent.id, {
+  await patchAuditReceipt(intent.id, {
     approvedBy: 'dashboard-operator',
     approvedAt: new Date().toISOString(),
   });
-  if (body.invoiceId) updateInvoice(body.invoiceId, { transferIntentId: intent.id });
+  // Scoped: binding an invoice to a transfer is a write, and it used to accept
+  // any invoice id from the request body regardless of who owned it.
+  if (body.invoiceId) await patchInvoice(orgId, body.invoiceId, { transferIntentId: intent.id });
 
   if (conversion?.success && conversion.labuanSettlementId) {
     createIntercompanyTransfer({ transferIntentId: intent.id, amountUsd: conversion.usdAmount, usdToUsdcRate: conversion.usdToUsdcRate });
   }
 
   after(async () => {
-    updateTransferIntent(intent.id, { state: 'QUEUED' });
+    await patchTransfer(intent.id, { state: 'QUEUED' });
     try {
-      updateTransferIntent(intent.id, { state: 'SETTLING' });
+      await patchTransfer(intent.id, { state: 'SETTLING' });
       const result = await executeComposedPayment({
         transferId: intent.id,
         recipientAddress: '',
@@ -354,22 +496,16 @@ export async function POST(request: Request) {
           effectiveSlippageBps: intent.fundingEffectiveSlippageBps,
         },
       });
-      updateTransferIntent(intent.id, {
+      // This was two writes into two stores — the settlement fields into the
+      // transfer, then eleven of the same fields again into the audit receipt.
+      // Two records holding one fact, free to disagree the moment one write
+      // landed and the other did not. The receipt is now composed from this
+      // row, so there is one write and nothing to reconcile.
+      await patchTransfer(intent.id, {
         state: 'SETTLED',
         suiTxDigest: result.digest,
         verificationReference: result.digest,
         receiptObjectId: result.auditAnchorObjectId ?? undefined,
-        paymentIntentId: result.intentId,
-        intentCreateDigest: result.intentCreateDigest,
-        walrusBlobId: result.walrus.blobId,
-        sealPolicyId: result.sealPolicy.policyId,
-        auditHash: result.auditHash,
-        auditAnchorId: result.auditAnchorObjectId ?? undefined,
-        smartTreasuryId: result.smartTreasuryId ?? undefined,
-        composedActions: result.composedActions,
-      });
-      updateAuditReceipt(intent.id, {
-        suiTxDigest: result.digest,
         paymentIntentId: result.intentId,
         intentCreateDigest: result.intentCreateDigest,
         walrusBlobId: result.walrus.blobId,
@@ -383,7 +519,7 @@ export async function POST(request: Request) {
       });
       await completeDeliveryForTransfer(intent.id);
     } catch (error) {
-      updateTransferIntent(intent.id, {
+      await patchTransfer(intent.id, {
         state: 'FAILED',
         failureReason: error instanceof Error ? error.message : 'Unknown settlement error',
         failedAtState: 'SETTLING',

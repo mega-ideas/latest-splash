@@ -57,7 +57,7 @@
 module splash_core::business_account;
 
 use splash_core::cap_registry::{Self, CapRegistry};
-use splash_core::daily_limit::{Self, DailyLimit};
+use splash_core::spend_window::{Self, SpendWindow};
 use std::string::String;
 use sui::clock::{Self, Clock};
 use sui::event;
@@ -99,6 +99,11 @@ const E_RECOVERY_PENDING: u64 = 38;
 const E_NO_PENDING_RECOVERY: u64 = 39;
 const E_RECOVERY_NOT_DUE: u64 = 40;
 const E_WRONG_INTENT: u64 = 41;
+/// The payout is larger than this tier's single-transfer ceiling.
+const E_OVER_PER_TRANSFER_CAP: u64 = 42;
+/// The payout is below the platform minimum.
+const E_BELOW_MINIMUM: u64 = 43;
+const E_UNKNOWN_TIER: u64 = 44;
 
 // ─── Bounds ────────────────────────────────────────────────────────────────
 /// `VecSet` membership is a linear scan and an unbounded set is both a gas
@@ -116,11 +121,44 @@ const APPROVAL_TTL_MS: u64 = 900_000;
 /// `RecoveryRequested` is an event and why any owner can cancel.
 const RECOVERY_DELAY_MS: u64 = 259_200_000;
 
-/// USD 1,000 in the settled coin's MINOR UNITS, at the six decimals every
-/// stablecoin in the supported corridors uses. Deliberately written as the
-/// scaled integer rather than `1_000`, which would be a tenth of a cent and
-/// would read like a limit while being a brick.
-const DEFAULT_DAILY_CAP_MINOR: u64 = 1_000_000_000;
+// ─── Limits, by tier ────────────────────────────────────────────────────────
+//
+// Set by the custodian, not by the tenant. Every account starts at TIER 3 and
+// moves up only when the custodian says so — `request_limit_increase` records
+// that a tenant asked, and changes nothing on its own.
+//
+// All figures are the settled coin's MINOR UNITS at six decimals, which every
+// stablecoin in the supported corridors uses. Written as scaled integers on
+// purpose: `20_000` would be two cents, which reads like a limit and is a
+// brick.
+//
+//   Tier 3   per transfer     20,000     daily     20,000    monthly    500,000
+//   Tier 2   per transfer    200,000     daily    200,000    monthly  5,000,000
+//   Tier 1   per transfer  1,000,000     daily  unlimited    monthly  unlimited
+//
+// Tier 1's per-transfer ceiling is the platform maximum: "unlimited" is a
+// statement about the rolling windows, not a licence to move any single amount
+// without a second look. Tier 2's daily figure is the one number the custodian
+// did not state; it is set to the per-transfer ceiling, matching Tier 3 where
+// the two are equal, and is the value to correct if the real one differs.
+const TIER_1: u8 = 1;
+const TIER_2: u8 = 2;
+const TIER_3: u8 = 3;
+
+const TIER_1_PER_TRANSFER: u64 = 1_000_000_000_000;
+const TIER_2_PER_TRANSFER: u64 = 200_000_000_000;
+const TIER_3_PER_TRANSFER: u64 = 20_000_000_000;
+
+const TIER_2_DAILY: u64 = 200_000_000_000;
+const TIER_3_DAILY: u64 = 20_000_000_000;
+
+const TIER_2_MONTHLY: u64 = 5_000_000_000_000;
+const TIER_3_MONTHLY: u64 = 500_000_000_000;
+
+/// The floor on a single payout. Below this the fixed costs of settling,
+/// anchoring and screening exceed the payment, and the corridor minimums the
+/// partners quote start here.
+const MIN_TRANSFER_MINOR: u64 = 99_000_000;
 
 // ─── Capabilities ──────────────────────────────────────────────────────────
 
@@ -221,7 +259,12 @@ public struct BusinessAccount has key {
     kyb_cid: String,
     is_verified: bool,
     risk_score: u8,
-    limit: DailyLimit,
+    /// 1, 2 or 3. Every account starts at 3; only `AdminCap` moves it.
+    tier: u8,
+    /// The largest single payout this tier permits.
+    per_transfer_cap_minor: u64,
+    daily: SpendWindow,
+    monthly: SpendWindow,
 }
 
 /// Authority to release ONE payout, from ONE account, for ONE intent, at ONE
@@ -290,9 +333,23 @@ public struct RecoveryCancelled has copy, drop {
     cancelled_by: address,
 }
 
-/// WS5: the ceiling is read off the object; the event says only that it moved.
-public struct DailyCapChanged has copy, drop {
+public struct TierChanged has copy, drop {
     business_account_id: address,
+    tier: u8,
+    per_transfer_cap_minor: u64,
+    daily_cap_minor: u64,
+    monthly_cap_minor: u64,
+    by: address,
+}
+
+/// A tenant asking for more room. Carries no authority — the custodian's
+/// `set_tier` is the only thing that moves a ceiling.
+public struct LimitIncreaseRequested has copy, drop {
+    business_account_id: address,
+    current_tier: u8,
+    requested_tier: u8,
+    justification: vector<u8>,
+    requested_by: address,
 }
 
 /// WS5: the payment's commitment where the amount used to be. The approver
@@ -386,7 +443,12 @@ public fun submit_application(
         kyb_cid,
         is_verified: false,
         risk_score: 0,
-        limit: daily_limit::new(DEFAULT_DAILY_CAP_MINOR, clock),
+        // Everyone starts at the bottom tier. A new account is an account
+        // nobody has assessed, and the limits say so.
+        tier: TIER_3,
+        per_transfer_cap_minor: TIER_3_PER_TRANSFER,
+        daily: spend_window::new_daily(TIER_3_DAILY, clock),
+        monthly: spend_window::new_monthly(TIER_3_MONTHLY, clock),
     };
 
     event::emit(ApplicationReceived {
@@ -680,16 +742,73 @@ public fun execute_recovery(account: &mut BusinessAccount, clock: &Clock, ctx: &
 
 // ─── The ceiling ───────────────────────────────────────────────────────────
 
-/// Set this account's 24h payout ceiling, in the settled coin's minor units.
+/// Move an account to a tier, and with it every ceiling that tier grants.
 ///
-/// `AdminCap`-gated because it is a KYB-tier decision, not a tenant one — an
-/// account that could raise its own ceiling does not have one. Raising does not
-/// forgive spend already inside the window (see `daily_limit::set_cap`), so
-/// "raise, drain, lower" moves no more than "raise and drain".
-public fun set_daily_cap(_: &AdminCap, account: &mut BusinessAccount, cap_minor: u64) {
-    daily_limit::set_cap(&mut account.limit, cap_minor);
-    event::emit(DailyCapChanged {
+/// `AdminCap`-gated because it is a custodian decision, not a tenant one — an
+/// account that could raise its own ceiling does not have one.
+///
+/// Raising does not forgive spend already inside either window (see
+/// `spend_window::set_cap`), so "raise, drain, lower" moves no more than
+/// "raise and drain" would.
+public fun set_tier(_: &AdminCap, account: &mut BusinessAccount, tier: u8, ctx: &TxContext) {
+    let (per_transfer, daily, monthly) = tier_limits(tier);
+    account.tier = tier;
+    account.per_transfer_cap_minor = per_transfer;
+    spend_window::set_cap(&mut account.daily, daily);
+    spend_window::set_cap(&mut account.monthly, monthly);
+
+    event::emit(TierChanged {
         business_account_id: object::uid_to_address(&account.id),
+        tier,
+        per_transfer_cap_minor: per_transfer,
+        daily_cap_minor: daily,
+        monthly_cap_minor: monthly,
+        by: tx_context::sender(ctx),
+    });
+}
+
+/// The ceilings a tier grants. The single place they are written down.
+public fun tier_limits(tier: u8): (u64, u64, u64) {
+    if (tier == TIER_1) {
+        (TIER_1_PER_TRANSFER, spend_window::unlimited(), spend_window::unlimited())
+    } else if (tier == TIER_2) {
+        (TIER_2_PER_TRANSFER, TIER_2_DAILY, TIER_2_MONTHLY)
+    } else if (tier == TIER_3) {
+        (TIER_3_PER_TRANSFER, TIER_3_DAILY, TIER_3_MONTHLY)
+    } else {
+        abort E_UNKNOWN_TIER
+    }
+}
+
+/// Record that a tenant has asked for a higher tier.
+///
+/// It changes NOTHING. That is the point: a limit increase is a custodian
+/// decision taken after re-assessment, and a function that let a tenant move
+/// their own ceiling — even by one step, even with a delay — would be a
+/// self-service limit raise wearing a request's clothing. This emits an event
+/// the custodian's queue reads, and `set_tier` is the answer.
+///
+/// Callable by an owner only, and refused when the account is frozen: an
+/// account that has been stopped is not in a position to be asking for more.
+public fun request_limit_increase(
+    account: &BusinessAccount,
+    requested_tier: u8,
+    justification: vector<u8>,
+    ctx: &TxContext,
+) {
+    assert!(account.owners.contains(&tx_context::sender(ctx)), E_NOT_AN_OWNER);
+    assert!(!account.frozen && !account.admin_frozen, E_FROZEN);
+    // Refuses a request for a tier that does not exist, and a request that is
+    // not actually an increase — tier numbers descend as limits rise.
+    let (_, _, _) = tier_limits(requested_tier);
+    assert!(requested_tier < account.tier, E_UNKNOWN_TIER);
+
+    event::emit(LimitIncreaseRequested {
+        business_account_id: object::uid_to_address(&account.id),
+        current_tier: account.tier,
+        requested_tier,
+        justification,
+        requested_by: tx_context::sender(ctx),
     });
 }
 
@@ -784,7 +903,14 @@ public(package) fun consume_approval(
     assert!(account.is_verified, E_NOT_VERIFIED);
     assert!(!account.frozen && !account.admin_frozen, E_FROZEN);
 
-    daily_limit::charge(&mut account.limit, amount, clock);
+    // Three ceilings, in the order an operator would ask about them: is this
+    // payment itself too big, then has the day filled, then the month. Each
+    // aborts with its own code so the answer to "why was this refused?" is not
+    // a guess.
+    assert!(amount >= MIN_TRANSFER_MINOR, E_BELOW_MINIMUM);
+    assert!(amount <= account.per_transfer_cap_minor, E_OVER_PER_TRANSFER_CAP);
+    spend_window::charge(&mut account.daily, amount, clock);
+    spend_window::charge(&mut account.monthly, amount, clock);
 
     let PayoutApproval {
         id,
@@ -878,7 +1004,9 @@ public fun destroy_anchor_cap(cap: AnchorCap) {
     object::delete(id);
 }
 
-/// BREAK-GLASS. Revoke every outstanding `AnchorCap` and mint one replacement.
+/// BREAK-GLASS, step one of two: arm a revocation of every outstanding
+/// `AnchorCap`. Nothing is revoked until `execute_break_glass_anchor_cap` runs
+/// inside the ninety-second window.
 ///
 /// This is the answer to the two holes Phase 6 left open and named: a cap that
 /// is LOST (so `rotate_anchor_cap` has nothing to consume) and a cap that is
@@ -898,16 +1026,41 @@ public fun destroy_anchor_cap(cap: AnchorCap) {
 /// Operational cost, which is real: the operator server's cap dies the instant
 /// this lands, and anchoring fails until the new object id is deployed. The
 /// `CapabilityRevoked` event is the signal. See the key-ceremony runbook.
-public fun break_glass_anchor_cap(
+public fun arm_break_glass_anchor_cap(
     _: &AdminCap,
     registry: &mut CapRegistry,
     holder: address,
     reason: vector<u8>,
-    ctx: &mut TxContext,
+    clock: &Clock,
+    ctx: &TxContext,
 ) {
     assert!(holder != @0x0, E_INVALID_HOLDER);
-    let generation = cap_registry::bump(registry, cap_registry::kind_anchor(), holder, reason, ctx);
+    cap_registry::arm(registry, cap_registry::kind_anchor(), holder, reason, clock, ctx);
+}
+
+/// Execute an armed anchor-cap revocation, inside the ninety-second window.
+///
+/// Two transactions rather than one. The window is a COMMIT window, not a
+/// notice period: it is far too short for a thief to notice and react, and long
+/// enough that a misclick or a stale script cannot kill a live operational
+/// capability on its own. If it lapses, arm again — nothing is half-done,
+/// because the generation moves only here.
+///
+/// The holder comes from the arming, so this call cannot redirect the
+/// replacement somewhere the first transaction did not name.
+public fun execute_break_glass_anchor_cap(
+    _: &AdminCap,
+    registry: &mut CapRegistry,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    let (generation, holder) = cap_registry::bump(registry, cap_registry::kind_anchor(), clock, ctx);
     transfer::transfer(AnchorCap { id: object::new(ctx), generation }, holder);
+}
+
+/// Abandon an armed revocation without revoking anything.
+public fun cancel_break_glass(_: &AdminCap, registry: &mut CapRegistry, ctx: &TxContext) {
+    cap_registry::disarm(registry, ctx);
 }
 
 /// The check every consumer of an `AnchorCap` must make.
@@ -946,16 +1099,30 @@ public fun ssm_number(account: &BusinessAccount): &String { &account.ssm_number 
 public fun kyb_cid(account: &BusinessAccount): &String { &account.kyb_cid }
 public fun is_verified(account: &BusinessAccount): bool { account.is_verified }
 public fun risk_score(account: &BusinessAccount): u8 { account.risk_score }
+public fun tier(account: &BusinessAccount): u8 { account.tier }
+public fun per_transfer_cap_minor(account: &BusinessAccount): u64 {
+    account.per_transfer_cap_minor
+}
 public fun daily_cap_minor(account: &BusinessAccount): u64 {
-    daily_limit::cap_minor(&account.limit)
+    spend_window::cap_minor(&account.daily)
 }
 public fun daily_spent(account: &BusinessAccount, clock: &Clock): u64 {
-    daily_limit::spent(&account.limit, clock)
+    spend_window::spent(&account.daily, clock)
 }
 public fun daily_remaining(account: &BusinessAccount, clock: &Clock): u64 {
-    daily_limit::remaining(&account.limit, clock)
+    spend_window::remaining(&account.daily, clock)
 }
-public fun default_daily_cap_minor(): u64 { DEFAULT_DAILY_CAP_MINOR }
+public fun monthly_cap_minor(account: &BusinessAccount): u64 {
+    spend_window::cap_minor(&account.monthly)
+}
+public fun monthly_spent(account: &BusinessAccount, clock: &Clock): u64 {
+    spend_window::spent(&account.monthly, clock)
+}
+public fun monthly_remaining(account: &BusinessAccount, clock: &Clock): u64 {
+    spend_window::remaining(&account.monthly, clock)
+}
+public fun min_transfer_minor(): u64 { MIN_TRANSFER_MINOR }
+public fun starting_tier(): u8 { TIER_3 }
 public fun max_members(): u64 { MAX_MEMBERS }
 public fun approval_ttl_ms(): u64 { APPROVAL_TTL_MS }
 public fun recovery_delay_ms(): u64 { RECOVERY_DELAY_MS }

@@ -1,4 +1,5 @@
-import { createPayLinkSlug, readAuditReceipt, readTransferIntent, type AuditReceipt, type TransferIntentRecord } from './operations';
+import { createPayLinkSlug, type AuditReceipt, type TransferIntentRecord } from './operations';
+import { readAuditReceiptForStaff, readTransferForStaff } from './transfers-store';
 
 /**
  * W9.2 — tokenized read-only receipt links ("Share with supplier").
@@ -36,8 +37,8 @@ globalStore.splashReceiptShares = store;
 const shareTokens = store.tokens; // token -> record
 const intentTokens = store.byIntent; // transferIntentId -> token (idempotent mint)
 
-export function createReceiptShare(transferIntentId: string, display: ReceiptShareDisplay = {}): string | null {
-  if (!readTransferIntent(transferIntentId)) return null;
+export async function createReceiptShare(transferIntentId: string, display: ReceiptShareDisplay = {}): Promise<string | null> {
+  if (!await readTransferForStaff(transferIntentId)) return null;
   const existing = intentTokens.get(transferIntentId);
   if (existing) {
     const record = shareTokens.get(existing);
@@ -50,14 +51,18 @@ export function createReceiptShare(transferIntentId: string, display: ReceiptSha
   return token;
 }
 
-export function findReceiptShare(token: string): {
+export async function findReceiptShare(token: string): Promise<{
   intent: TransferIntentRecord;
   audit: AuditReceipt | null;
   display: ReceiptShareDisplay;
-} | null {
+} | null> {
   const record = shareTokens.get(token);
   if (!record) return null;
-  const intent = readTransferIntent(record.transferIntentId);
+  const intent = await readTransferForStaff(record.transferIntentId);
   if (!intent) return null;
-  return { intent, audit: readAuditReceipt(record.transferIntentId), display: record.display };
+  return {
+    intent,
+    audit: await readAuditReceiptForStaff(record.transferIntentId),
+    display: record.display,
+  };
 }

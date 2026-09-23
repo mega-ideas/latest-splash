@@ -31,6 +31,12 @@ export type TransferIntentState =
 
 export type TransferIntentRecord = {
   id: string;
+  /** The org this transfer belongs to.
+   *
+   *  Absent until now, which is why one process-global map served every tenant
+   *  with no scoping on read. Required, not optional: an optional owner is an
+   *  owner somebody forgets to set. */
+  orgId: string;
   state: TransferIntentState;
   recipientName: string;
   targetCurrency: string;
@@ -83,6 +89,10 @@ export type TransferIntentRecord = {
 
 export type BatchRecord = {
   id: string;
+  /** The org this run belongs to. Required — `accountId` below is an
+   *  on-chain object id that falls back to a value shared across orgs, so it
+   *  cannot serve as the ownership boundary. */
+  orgId: string;
   state: TransferIntentState;
   rowCount: number;
   acceptedRows: number;
@@ -92,8 +102,12 @@ export type BatchRecord = {
   packageId: string | null;
   explorer: { suiVisionTxUrl: string | null; suiScanTxUrl: string | null };
   demo?: boolean;
-  /** Owning account — batches are per-org and must not be readable across orgs. */
+  /** The on-chain BusinessAccount this run settles from. Recorded, not the
+   *  scoping key — see `orgId` above. */
   accountId?: string;
+  /** The proposal that authorized this run, when it needed a second
+   *  approver. */
+  proposalId?: string;
   /** Replay key. A repeat authorization with the same key returns this record
    *  instead of paying every recipient a second time. */
   idempotencyKey?: string;
@@ -102,6 +116,11 @@ export type BatchRecord = {
 
 export type RecipientRecord = {
   id: string;
+  /** The org this beneficiary belongs to.
+   *
+   *  Absent until now, which is why `listRecipients()` returned every tenant's
+   *  and `deleteRecipient(id)` deleted any of them. Required, not optional. */
+  orgId: string;
   name: string;
   country: string;
   bank: string;
@@ -124,13 +143,55 @@ export type RecipientRecord = {
     sweepDelaySeconds: number;
   };
   kybInviteSent?: boolean;
+  /**
+   * The FATF R.16 beneficiary half.
+   *
+   * `suppliers` has had these columns since migration 0006 and nothing wrote
+   * them: the product collected a name, an account number and a SWIFT code,
+   * which is not enough for a partner who has to file a travel-rule record.
+   *
+   * Kept as its own object rather than flattened, because it is one thing —
+   * what accompanies the payment — and because `travelRuleSnapshot` freezes
+   * exactly this shape at authorization.
+   */
+  travelRule?: TravelRuleBeneficiary;
   demo?: boolean;
   createdAt: string;
+};
+
+/** Mirrors `BeneficiaryRecord` in lib/compliance/travel-rule.ts, which is the
+ *  authority on what each corridor requires. */
+export type TravelRuleBeneficiary = {
+  beneficiaryType?: 'INDIVIDUAL' | 'BUSINESS';
+  /** Named on the payment instruction, and used to confirm the routing
+   *  identifier resolves to the same bank. */
+  bankName?: string;
+  legalName?: string;
+  registrationNumber?: string;
+  dateOfBirth?: string;
+  nationalIdNumber?: string;
+  addressLine1?: string;
+  addressLine2?: string;
+  addressCity?: string;
+  addressState?: string;
+  addressPostalCode?: string;
+  addressCountry?: string;
+  bankIdScheme?: string;
+  bankIdValue?: string;
+  bankBranchCode?: string;
+  bankCountry?: string;
+  bankAccountNumber?: string;
+  bankAccountName?: string;
 };
 
 export type InvoiceStatusV2 = 'draft' | 'sent' | 'viewed' | 'paid' | 'settled' | 'overdue';
 export type InvoiceRecord = {
   id: string;
+  /** The org this invoice belongs to.
+   *
+   *  Absent until now, which is why `listInvoices()` returned every tenant's
+   *  and `updateInvoice(id, …)` could MODIFY any of them. Required. */
+  orgId: string;
   issuerOrg: string;
   payerOrgName?: string;
   payerOrgEmail?: string;
@@ -154,8 +215,11 @@ export type LedgerEntry = {
   id: string;
   accountId: string;
   direction: 'CREDIT' | 'DEBIT';
-  amountUsdcMicro: number;
-  balanceAfterMicro: number;
+  /** Minor units as bigint, like the `ledger_postings` column this mirrors.
+   *  A JS number is exact only below 2^53 — about nine billion dollars at six
+   *  decimals — and the failure above it is silent rounding in a balance. */
+  amountUsdcMicro: bigint;
+  balanceAfterMicro: bigint;
   refType: 'TRANSFER' | 'SWEEP' | 'FEE' | 'FUNDING' | 'YIELD_SIM' | 'SEED';
   refId: string;
   suiTxDigest?: string;
@@ -181,6 +245,14 @@ export type SweepJob = {
 
 export type RateHold = {
   id: string;
+  /** The org that took this hold. A rate lock is a commitment made to one
+   *  customer; without an owner, `listRateHolds()` handed every tenant's
+   *  corridor positions to anyone signed in.
+   *
+   *  The ORG, not the on-chain account id: that id falls back to a value
+   *  shared by every org without a provisioned account, so scoping by it
+   *  would have merged two tenants' holds back together. */
+  orgId?: string;
   corridorCurrency: string;
   rate: string;
   feeBps: number;
@@ -272,6 +344,9 @@ export const operations = globalStore.splashOperations ?? {
 
 globalStore.splashOperations = operations;
 
+/** The org that owns seeded demo rows. Never a real tenant. */
+export const DEMO_ORG_ID = 'demo-workspace';
+
 export function createId(prefix: string) {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 }
@@ -288,6 +363,9 @@ function explorerLinks(digest: string | null) {
 }
 
 export function createTransferIntent(input: {
+  /** The org this transfer belongs to. Resolved from the SESSION by the caller,
+   *  never from the request — see lib/server/session-account.ts. */
+  orgId: string;
   recipientName: string;
   targetCurrency: string;
   targetAmount: string;
@@ -317,6 +395,7 @@ export function createTransferIntent(input: {
   const now = new Date().toISOString();
   const record: TransferIntentRecord = {
     id: createId('ti'),
+    orgId: input.orgId,
     state: 'AUTHORIZED',
     recipientName: input.recipientName,
     targetCurrency: input.targetCurrency,
@@ -352,7 +431,9 @@ export function createTransferIntent(input: {
     createdAt: now,
     updatedAt: now,
   };
-  operations.transfers.set(record.id, record);
+  // Builds the record; does NOT decide where it lives. The caller persists it
+  // through lib/server/transfers-store.ts, which writes to Postgres when one is
+  // configured and to this map only when there is not.
   operations.auditReceipts.set(record.id, {
     transferIntentId: record.id,
     invoiceId: input.invoiceId,
@@ -375,29 +456,19 @@ export function createTransferIntent(input: {
   return record;
 }
 
-export function readTransferIntent(intentId: string) {
-  return operations.transfers.get(intentId) ?? null;
-}
+// `readTransferIntent`, `updateTransferIntent` and `listTransfers` used to live
+// here, reading a process-global map by id with no org scoping at all. They are
+// gone rather than deprecated: a scoped replacement beside an unscoped original
+// is a choice somebody makes wrongly at 2am. Use `lib/server/transfers-store.ts`,
+// where every read takes an orgId and cross-tenant reach is spelled `*ForStaff`.
 
-export function updateTransferIntent(intentId: string, patch: Partial<TransferIntentRecord>): void {
-  const record = operations.transfers.get(intentId);
-  if (!record) return;
-  const stateChanged = patch.state && patch.state !== record.state;
-  const now = new Date().toISOString();
-  Object.assign(record, patch, { updatedAt: now });
-  operations.transfers.set(intentId, record);
-  const audit = operations.auditReceipts.get(intentId) ?? { transferIntentId: intentId, statusHistory: [] };
-  if (stateChanged) audit.statusHistory.push({ state: patch.state as string, at: now });
-  if (patch.suiTxDigest) audit.suiTxDigest = patch.suiTxDigest;
-  if (patch.sweepJobId) audit.sweepJobId = patch.sweepJobId;
-  operations.auditReceipts.set(intentId, audit);
-}
-
-export function listTransfers(): TransferIntentRecord[] {
-  return [...operations.transfers.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-}
-
-export function createBatch(input: {
+/**
+ * Build a payout-run record. Does NOT decide where it lives — the caller
+ * claims it through `lib/server/batches-store.ts`, where the replay key is
+ * enforced by a unique index rather than a lookup that a restart empties.
+ */
+export function buildBatch(input: {
+  orgId: string;
   rowCount: number;
   acceptedRows: number;
   blockedRows: number;
@@ -407,6 +478,7 @@ export function createBatch(input: {
 }) {
   const record: BatchRecord = {
     id: createId('batch'),
+    orgId: input.orgId,
     state: 'QUEUED',
     rowCount: input.rowCount,
     acceptedRows: input.acceptedRows,
@@ -431,29 +503,28 @@ export function createBatch(input: {
  * everyone twice. Returning the existing record makes the second call a no-op
  * rather than a second payroll run.
  */
-export function findBatchByIdempotencyKey(accountId: string, idempotencyKey: string): BatchRecord | null {
-  if (!idempotencyKey) return null;
-  for (const record of operations.batches.values()) {
-    if (record.idempotencyKey === idempotencyKey && (record.accountId ?? '') === accountId) return record;
-  }
-  return null;
-}
+// `readBatch`, `readBatchFor`, `updateBatch`, `listBatches` and
+// `findBatchByIdempotencyKey` used to live here over a process-global map.
+//
+// `readBatch(id)` and `listBatches()` were unscoped — any tenant's payout run,
+// row counts, totals and settlement digest, to anyone signed in. And the
+// idempotency lookup, the guard that stops a re-submitted file paying every
+// recipient twice, was a read of that same map: a restart between the two
+// submissions emptied it, and restarts are exactly when an operator retries.
+//
+// They are gone rather than deprecated. Use `lib/server/batches-store.ts`,
+// where every read takes an orgId, cross-tenant reach is spelled
+// `listBatchesForStaff`, and the replay key is claimed by a unique index rather
+// than consulted by a lookup.
 
-export function readBatch(batchId: string) {
-  return operations.batches.get(batchId) ?? null;
-}
-
-export function updateBatch(batchId: string, patch: Partial<BatchRecord>): void {
-  const record = operations.batches.get(batchId);
-  if (!record) return;
-  Object.assign(record, patch);
-}
-
-export function listBatches() {
-  return [...operations.batches.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-}
-
-export function createRecipient(input: {
+/**
+ * Build a beneficiary record. Does NOT decide where it lives — the caller
+ * persists it through `lib/server/recipients-store.ts`.
+ */
+export function buildRecipient(input: {
+  /** Resolved from the SESSION by the caller, never from the request. */
+  orgId: string;
+  travelRule?: TravelRuleBeneficiary;
   name: string;
   country: string;
   bank?: string;
@@ -469,6 +540,7 @@ export function createRecipient(input: {
 }): RecipientRecord {
   const record: RecipientRecord = {
     id: createId('rcpt'),
+    orgId: input.orgId,
     name: input.name,
     country: input.country,
     bank: input.bank ?? '',
@@ -480,43 +552,28 @@ export function createRecipient(input: {
     createdVia: input.createdVia ?? 'manual',
     sweepConfig: input.sweepConfig,
     kybInviteSent: input.kybInviteSent,
+    travelRule: input.travelRule,
     demo: input.demo,
     createdAt: new Date().toISOString(),
   };
-  operations.recipients.set(record.id, record);
   return record;
 }
 
-export function upsertRecipientFromInvoice(input: { name: string; orgEmail?: string }) {
-  const email = input.orgEmail?.trim().toLowerCase();
-  const existing = listRecipients().find((recipient) =>
-    email ? recipient.orgEmail?.toLowerCase() === email : recipient.name.toLowerCase() === input.name.toLowerCase(),
-  );
-  if (existing) return existing;
-  return createRecipient({
-    name: input.name,
-    orgEmail: input.orgEmail,
-    country: 'XX',
-    tier: 'PAYOUT_ONLY',
-    kybStatus: 'none',
-    createdVia: 'invoice_link',
-    kybInviteSent: true,
-  });
-}
+// `listRecipients`, `findRecipient`, `deleteRecipient` and
+// `upsertRecipientFromInvoice` used to live here, over a process-global map
+// with no org id on the record. `listRecipients()` returned every tenant's
+// beneficiaries — names, banks, SWIFT codes, account numbers — and
+// `deleteRecipient(id)` deleted any of them by id alone.
+//
+// They are gone rather than deprecated. Use `lib/server/recipients-store.ts`,
+// where every read takes an orgId, the delete is scoped, and cross-tenant reach
+// is spelled `readRecipientForStaff`.
 
-export function listRecipients() {
-  return [...operations.recipients.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-}
-
-export function findRecipient(recipientId: string) {
-  return operations.recipients.get(recipientId) ?? null;
-}
-
-export function deleteRecipient(recipientId: string): void {
-  operations.recipients.delete(recipientId);
-}
-
-export function createInvoice(input: Omit<InvoiceRecord, 'id' | 'payLinkSlug' | 'createdAt' | 'updatedAt'> & { id?: string; payLinkSlug?: string }) {
+/**
+ * Build an invoice record. Does NOT decide where it lives — the caller persists
+ * it through `lib/server/invoices-store.ts`.
+ */
+export function buildInvoice(input: Omit<InvoiceRecord, 'id' | 'payLinkSlug' | 'createdAt' | 'updatedAt'> & { id?: string; payLinkSlug?: string }) {
   const now = new Date().toISOString();
   const record: InvoiceRecord = {
     ...input,
@@ -525,28 +582,19 @@ export function createInvoice(input: Omit<InvoiceRecord, 'id' | 'payLinkSlug' | 
     createdAt: now,
     updatedAt: now,
   };
-  operations.invoices.set(record.id, record);
   return record;
 }
 
-export function listInvoices() {
-  return [...operations.invoices.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-}
-
-export function readInvoice(invoiceId: string) {
-  return operations.invoices.get(invoiceId) ?? null;
-}
-
-export function findInvoiceBySlug(slug: string) {
-  return listInvoices().find((invoice) => invoice.payLinkSlug === slug) ?? null;
-}
-
-export function updateInvoice(invoiceId: string, patch: Partial<InvoiceRecord>) {
-  const record = operations.invoices.get(invoiceId);
-  if (!record) return null;
-  Object.assign(record, patch, { updatedAt: new Date().toISOString() });
-  return record;
-}
+// `listInvoices`, `readInvoice`, `findInvoiceBySlug` and `updateInvoice` used to
+// live here over a process-global map with no org id on the record.
+// `listInvoices()` returned every tenant's, `readInvoice(id)` read any of them,
+// and `updateInvoice(id, patch)` MODIFIED any of them — a write across the
+// tenant boundary, not merely a read.
+//
+// They are gone rather than deprecated. Use `lib/server/invoices-store.ts`,
+// where every read takes an orgId, the patch is scoped, and the two deliberate
+// exceptions — the pay-link slug and the audit view — are named for what they
+// are.
 
 export function createLedgerEntry(input: Omit<LedgerEntry, 'id' | 'balanceAfterMicro' | 'createdAt'>) {
   const balanceBefore = getLedgerBalance(input.accountId);
@@ -561,16 +609,25 @@ export function createLedgerEntry(input: Omit<LedgerEntry, 'id' | 'balanceAfterM
   return entry;
 }
 
-export function listLedgerEntries(accountId?: string) {
+/**
+ * In-process ledger, for the no-database path in `lib/server/ledger-store.ts`
+ * and the demo seed. Every deployed environment goes through `postJournal`.
+ *
+ * `accountId` is REQUIRED. It used to be optional, and omitting it returned
+ * every account's entries — the enumeration primitive that turns a guessed
+ * account id into a targeted debit, documented at `app/api/ledger/route.ts`.
+ * Required means the unscoped call is a type error rather than a habit.
+ */
+export function listLedgerEntries(accountId: string) {
   return [...operations.ledgerEntries.values()]
-    .filter((entry) => !accountId || entry.accountId === accountId)
+    .filter((entry) => entry.accountId === accountId)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
-export function getLedgerBalance(accountId: string) {
+export function getLedgerBalance(accountId: string): bigint {
   return listLedgerEntries(accountId).reduce(
     (balance, entry) => balance + (entry.direction === 'CREDIT' ? entry.amountUsdcMicro : -entry.amountUsdcMicro),
-    0,
+    0n,
   );
 }
 
@@ -614,6 +671,8 @@ export function createRateHold(input: Omit<RateHold, 'id' | 'state' | 'createdAt
   return hold;
 }
 
+/** Expire what has run out, then return every hold. Staff console only —
+ *  the customer-facing reads below are scoped. */
 export function listRateHolds() {
   const now = Date.now();
   for (const hold of operations.rateHolds.values()) {
@@ -622,24 +681,42 @@ export function listRateHolds() {
   return [...operations.rateHolds.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
-export function readRateHold(holdId: string) {
+/**
+ * One org's rate holds.
+ *
+ * A hold is a commitment made to one customer, and a list of them reveals
+ * that customer's corridor positions and timing. The unscoped list went to
+ * anyone signed in.
+ *
+ * A hold with no `orgId` is a demo seed row and belongs to nobody, so it
+ * matches no org rather than every one.
+ */
+export function listRateHoldsFor(orgId: string) {
+  return listRateHolds().filter((hold) => hold.orgId === orgId);
+}
+
+export function readRateHoldFor(orgId: string, holdId: string) {
   listRateHolds();
-  return operations.rateHolds.get(holdId) ?? null;
+  const hold = operations.rateHolds.get(holdId) ?? null;
+  return hold && hold.orgId === orgId ? hold : null;
 }
 
-export function readAuditReceipt(intentId: string) {
-  return operations.auditReceipts.get(intentId) ?? null;
-}
+// `readAuditReceipt` and `updateAuditReceipt` are gone from here for the same
+// reason the transfer reads are: they took an intent id and no owner, so an
+// audit trail — which is as sensitive as the payment it describes — came back
+// to anyone who could name one. `lib/server/transfers-store.ts` composes the
+// receipt from the transfer's own row and its `intent_transitions`, scoped, and
+// spells cross-tenant reach `readAuditReceiptForStaff`.
+//
+// `findAuditReceiptByHash` went with them, unmourned: it scanned every tenant's
+// receipts for a hash and nothing had ever called it.
 
-export function updateAuditReceipt(intentId: string, patch: Partial<AuditReceipt>) {
+/** Demo seed only — the in-process map, never a real tenant's receipt. */
+function updateAuditReceipt(intentId: string, patch: Partial<AuditReceipt>) {
   const receipt = operations.auditReceipts.get(intentId) ?? { transferIntentId: intentId, statusHistory: [] };
   Object.assign(receipt, patch);
   operations.auditReceipts.set(intentId, receipt);
   return receipt;
-}
-
-export function findAuditReceiptByHash(auditHash: string) {
-  return [...operations.auditReceipts.values()].find((receipt) => receipt.auditHash === auditHash) ?? null;
 }
 
 export function recordAnalyticsEvent(name: string) {
@@ -653,8 +730,12 @@ export function analyticsSummary() {
   return Object.fromEntries(operations.analytics.entries());
 }
 
-export function listTransactions(): TransactionRecord[] {
-  const fromTransfers: TransactionRecord[] = listTransfers().map((transfer) => ({
+/** Staff-console aggregate across every tenant. Async because transfers now
+ *  live in Postgres; cross-tenant on purpose, which is why it is only reachable
+ *  from the admin console. */
+export async function listTransactions(): Promise<TransactionRecord[]> {
+  const { listTransfersForStaff } = await import('./transfers-store.ts');
+  const fromTransfers: TransactionRecord[] = (await listTransfersForStaff()).map((transfer) => ({
     id: transfer.id,
     kind: 'transfer',
     state: transfer.state,
@@ -666,7 +747,8 @@ export function listTransactions(): TransactionRecord[] {
     explorer: explorerLinks(transfer.suiTxDigest),
     createdAt: transfer.createdAt,
   }));
-  const fromBatches: TransactionRecord[] = listBatches().map((batch) => ({
+  const { listBatchesForStaff } = await import('./batches-store.ts');
+  const fromBatches: TransactionRecord[] = (await listBatchesForStaff()).map((batch) => ({
     id: batch.id,
     kind: 'batch',
     state: batch.state,
@@ -688,7 +770,16 @@ function seedDemoData() {
   void analyzeAndRemember('Batches on Friday');
   void analyzeAndRemember('Prefers USD settlement');
 
-  const acme = createRecipient({
+  // Demo seed lives in this process only, owned by DEMO_ORG_ID so it can never
+  // be read alongside a real tenant's beneficiaries.
+  const seedRecipient = (input: Parameters<typeof buildRecipient>[0]) => {
+    const record = buildRecipient(input);
+    operations.recipients.set(record.id, record);
+    return record;
+  };
+
+  const acme = seedRecipient({
+    orgId: DEMO_ORG_ID,
     name: 'Acme PH',
     country: 'PH',
     bank: 'BDO',
@@ -704,12 +795,21 @@ function seedDemoData() {
       sweepDelaySeconds: 4,
     },
   });
-  createRecipient({ name: 'Manila Textiles', country: 'PH', bank: 'BPI', account: 'DEMO-MANILA', tier: 'PAYOUT_ONLY', demo: true });
-  const cebu = createRecipient({ name: 'Cebu Components', country: 'PH', tier: 'STORED_BALANCE', demo: true });
+  seedRecipient({ orgId: DEMO_ORG_ID, name: 'Manila Textiles', country: 'PH', bank: 'BPI', account: 'DEMO-MANILA', tier: 'PAYOUT_ONLY', demo: true });
+  const cebu = seedRecipient({ orgId: DEMO_ORG_ID, name: 'Cebu Components', country: 'PH', tier: 'STORED_BALANCE', demo: true });
 
   const due = new Date(Date.now() + 16 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const oldDue = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-  const invoice = createInvoice({
+  // Same as the beneficiaries above: built here, kept in this process, owned
+  // by DEMO_ORG_ID so it can never be listed alongside a real tenant's.
+  const seedInvoice = (input: Parameters<typeof buildInvoice>[0]) => {
+    const record = buildInvoice(input);
+    operations.invoices.set(record.id, record);
+    return record;
+  };
+
+  const invoice = seedInvoice({
+    orgId: DEMO_ORG_ID,
     id: 'inv_demo_acme_5000',
     payLinkSlug: 'acme-ph-5000',
     issuerOrg: 'Splash Workspace',
@@ -725,10 +825,13 @@ function seedDemoData() {
     documentSha256: 'demo'.padEnd(64, '0'),
     demo: true,
   });
-  createInvoice({ issuerOrg: 'Splash Workspace', payerOrgName: 'Acme Manufacturing PH', amountUsd: '3200.00', targetCurrency: 'PHP', dueDate: due, memo: 'Freight invoice', status: 'sent', demo: true });
-  createInvoice({ issuerOrg: 'Splash Workspace', payerOrgName: 'Manila Textiles', amountUsd: '1800.00', targetCurrency: 'PHP', dueDate: oldDue, memo: 'Overdue textile invoice', status: 'overdue', demo: true });
+  seedInvoice({ orgId: DEMO_ORG_ID, issuerOrg: 'Splash Workspace', payerOrgName: 'Acme Manufacturing PH', amountUsd: '3200.00', targetCurrency: 'PHP', dueDate: due, memo: 'Freight invoice', status: 'sent', demo: true });
+  seedInvoice({ orgId: DEMO_ORG_ID, issuerOrg: 'Splash Workspace', payerOrgName: 'Manila Textiles', amountUsd: '1800.00', targetCurrency: 'PHP', dueDate: oldDue, memo: 'Overdue textile invoice', status: 'overdue', demo: true });
 
   const transfer = createTransferIntent({
+    // The seeded demo data belongs to a named demo org, so it can never be
+    // mistaken for — or read alongside — a real tenant's transfers.
+    orgId: DEMO_ORG_ID,
     recipientName: acme.name,
     recipientId: acme.id,
     invoiceId: invoice.id,
@@ -741,7 +844,9 @@ function seedDemoData() {
     pegChecked: true,
     demo: true,
   });
-  updateTransferIntent(transfer.id, { state: 'SETTLED' });
+  // Demo seed data, in this process only — never persisted, and owned by
+  // DEMO_ORG_ID so it can never be read alongside a real tenant's transfers.
+  Object.assign(transfer, { state: 'SETTLED' });
   const job = createSweepJob({
     transferIntentId: transfer.id,
     recipientId: acme.id,
@@ -755,7 +860,8 @@ function seedDemoData() {
     completedAt: new Date().toISOString(),
     demo: true,
   });
-  updateTransferIntent(transfer.id, { state: 'DISBURSED', sweepJobId: job.id });
+  Object.assign(transfer, { state: 'DISBURSED', sweepJobId: job.id });
+  operations.transfers.set(transfer.id, transfer);
   updateAuditReceipt(transfer.id, {
     invoiceId: invoice.id,
     walrusBlobId: invoice.walrusBlobId,
@@ -766,8 +872,8 @@ function seedDemoData() {
     sweepJobId: job.id,
     demo: true,
   });
-  updateInvoice(invoice.id, { transferIntentId: transfer.id });
-  createLedgerEntry({ accountId: cebu.id, direction: 'CREDIT', amountUsdcMicro: 5_000_000_000, refType: 'SEED', refId: 'demo_seed', demo: true });
+  Object.assign(invoice, { transferIntentId: transfer.id });
+  createLedgerEntry({ accountId: cebu.id, direction: 'CREDIT', amountUsdcMicro: 5_000_000_000n, refType: 'SEED', refId: 'demo_seed', demo: true });
   createRateHold({ corridorCurrency: 'PHP', rate: '56.5', feeBps: 80, demo: true });
 }
 

@@ -5,7 +5,9 @@ import { parseInvoice, type CopilotSuggestion } from '@/lib/server/copilot';
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { RATE_LIMITS, enforceRateLimit } from '@/lib/server/rate-limit';
 import { readJsonBody } from '@/lib/server/http';
-import { readInvoice, updateAuditReceipt } from '@/lib/server/operations';
+import { readInvoice } from '@/lib/server/invoices-store';
+import { requireSessionAccount } from '@/lib/server/session-account';
+import { patchAuditReceipt } from '@/lib/server/transfers-store';
 import { sealAdapter } from '@/lib/server/seal';
 import { retrieveBlob } from '@/lib/server/walrus';
 
@@ -21,7 +23,10 @@ export async function POST(request: Request) {
 
   const parsed = schema.safeParse(await readJsonBody(request));
   if (!parsed.success) return NextResponse.json({ error: 'invoiceId is required' }, { status: 400 });
-  const invoice = readInvoice(parsed.data.invoiceId);
+  const accountCheck = await requireSessionAccount(auth.session);
+  if (accountCheck.response) return accountCheck.response;
+
+  const invoice = await readInvoice(accountCheck.account.orgId, parsed.data.invoiceId);
   if (!invoice) return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
 
   let invoiceText = `${invoice.memo ?? ''} Vendor: ${invoice.payerOrgName ?? ''} Amount due ${invoice.amountUsd} ${invoice.targetCurrency}`;
@@ -45,6 +50,6 @@ export async function POST(request: Request) {
     requiresAuth: true,
     suggestedAction: `deliveryTier:${deliveryTier}`,
   };
-  if (invoice.transferIntentId) updateAuditReceipt(invoice.transferIntentId, { extractionSnapshot: extraction });
+  if (invoice.transferIntentId) await patchAuditReceipt(invoice.transferIntentId, { extractionSnapshot: extraction });
   return NextResponse.json({ extraction, suggestion });
 }

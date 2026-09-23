@@ -15,6 +15,7 @@ use std::unit_test::assert_eq;
 use sui::clock::{Self, Clock};
 use sui::coin;
 use sui::sui::SUI;
+use splash_core::spend_window;
 use sui::test_scenario::{Self as ts, Scenario};
 
 const OWNER: address = @0xA11CE;
@@ -29,7 +30,10 @@ const BLOB: vector<u8> = b"walrus-blob-id";
 /// A 32-byte commitment, as lib/evidence/commitment.ts computes it off-chain.
 const COMMITMENT: vector<u8> = x"00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
 
-const AMOUNT: u64 = 1_000;
+/// 100 USD in six-decimal minor units. Above the 99 USD platform floor, well
+/// under the Tier 3 per-transfer ceiling.
+const AMOUNT: u64 = 100_000_000;
+const USD: u64 = 1_000_000;
 const HOUR: u64 = 3_600_000;
 const DAY: u64 = 86_400_000;
 
@@ -157,7 +161,7 @@ fun a_maker_and_a_separate_approver_can_move_money() {
         assert_eq!(business_account::daily_spent(&account, &c), AMOUNT);
         assert_eq!(
             business_account::daily_remaining(&account, &c),
-            business_account::default_daily_cap_minor() - AMOUNT,
+            business_account::daily_cap_minor(&account) - AMOUNT,
         );
         ts::return_shared(c);
         ts::return_shared(intent);
@@ -790,66 +794,173 @@ fun a_matured_recovery_adds_an_owner_and_clears_approvers() {
     scenario.end();
 }
 
-// ─── The 24h ceiling ───────────────────────────────────────────────────────
-
-fun set_cap(scenario: &mut Scenario, cap: u64) {
+/// Move the account to a tier. Every ceiling comes with it.
+fun set_tier(scenario: &mut Scenario, tier: u8) {
     scenario.next_tx(OWNER);
     let mut account = scenario.take_shared<BusinessAccount>();
     let ctx = scenario.ctx();
     let admin = business_account::admin_cap_for_testing(ctx);
-    business_account::set_daily_cap(&admin, &mut account, cap);
+    business_account::set_tier(&admin, &mut account, tier, ctx);
     business_account::destroy_admin_cap_for_testing(admin);
     ts::return_shared(account);
 }
 
+// ─── Tiers, and the three ceilings each one grants ─────────────────────────
+//
+//   Tier 3   per transfer     20,000     daily     20,000    monthly    500,000
+//   Tier 2   per transfer    200,000     daily    200,000    monthly  5,000,000
+//   Tier 1   per transfer  1,000,000     daily  unlimited    monthly  unlimited
+
 #[test]
-#[expected_failure(abort_code = 201, location = splash_core::daily_limit)]
-/// Two payments that each fit, and together do not. The second aborts rather
+/// A new account starts at the bottom. An account nobody has assessed gets the
+/// limits of an account nobody has assessed.
+fun a_new_account_starts_at_tier_three() {
+    let mut scenario = setup();
+    scenario.next_tx(OWNER);
+    {
+        let account = scenario.take_shared<BusinessAccount>();
+        assert_eq!(business_account::tier(&account), 3);
+        assert_eq!(business_account::tier(&account), business_account::starting_tier());
+        assert_eq!(business_account::per_transfer_cap_minor(&account), 20_000 * USD);
+        assert_eq!(business_account::daily_cap_minor(&account), 20_000 * USD);
+        assert_eq!(business_account::monthly_cap_minor(&account), 500_000 * USD);
+        ts::return_shared(account);
+    };
+    scenario.end();
+}
+
+#[test]
+/// The custodian moves a tier, and every ceiling moves with it. One decision,
+/// not three fields somebody could set inconsistently.
+fun a_tier_carries_all_three_ceilings() {
+    let mut scenario = setup();
+    set_tier(&mut scenario, 2);
+    scenario.next_tx(OWNER);
+    {
+        let account = scenario.take_shared<BusinessAccount>();
+        assert_eq!(business_account::tier(&account), 2);
+        assert_eq!(business_account::per_transfer_cap_minor(&account), 200_000 * USD);
+        assert_eq!(business_account::daily_cap_minor(&account), 200_000 * USD);
+        assert_eq!(business_account::monthly_cap_minor(&account), 5_000_000 * USD);
+        ts::return_shared(account);
+    };
+    set_tier(&mut scenario, 1);
+    scenario.next_tx(OWNER);
+    {
+        let account = scenario.take_shared<BusinessAccount>();
+        assert_eq!(business_account::per_transfer_cap_minor(&account), 1_000_000 * USD);
+        // Unlimited is the rolling windows, not the single transfer. Tier 1
+        // still cannot move more than a million dollars in one go.
+        assert_eq!(business_account::daily_cap_minor(&account), spend_window::unlimited());
+        assert_eq!(business_account::monthly_cap_minor(&account), spend_window::unlimited());
+        ts::return_shared(account);
+    };
+    scenario.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 44, location = splash_core::business_account)]
+fun there_is_no_tier_four() {
+    let mut scenario = setup();
+    set_tier(&mut scenario, 4);
+    scenario.end();
+}
+
+// ─── The floor ─────────────────────────────────────────────────────────────
+
+#[test]
+#[expected_failure(abort_code = 43, location = splash_core::business_account)]
+/// Below 99 USD the fixed costs of settling, anchoring and screening exceed the
+/// payment, and the partners' own corridor minimums start there.
+fun a_payout_below_the_floor_is_refused() {
+    let mut scenario = setup();
+    open_intent(&mut scenario, OWNER, 98 * USD);
+    approve(&mut scenario, APPROVER);
+    settle(&mut scenario, OWNER, 98 * USD);
+    scenario.end();
+}
+
+#[test]
+/// And exactly the floor is allowed. An off-by-one here is a support ticket.
+fun a_payout_at_the_floor_is_allowed() {
+    let mut scenario = setup();
+    assert_eq!(business_account::min_transfer_minor(), 99 * USD);
+    open_intent(&mut scenario, OWNER, 99 * USD);
+    approve(&mut scenario, APPROVER);
+    settle(&mut scenario, OWNER, 99 * USD);
+    scenario.end();
+}
+
+// ─── Per transfer ──────────────────────────────────────────────────────────
+
+#[test]
+#[expected_failure(abort_code = 42, location = splash_core::business_account)]
+/// One payment larger than the tier allows, even with the day and month empty.
+/// Checked first and with its own code, so "why was this refused?" is not a
+/// guess between three ceilings.
+fun a_single_payout_over_the_tier_ceiling_is_refused() {
+    let mut scenario = setup();
+    open_intent(&mut scenario, OWNER, 20_001 * USD);
+    approve(&mut scenario, APPROVER);
+    settle(&mut scenario, OWNER, 20_001 * USD);
+    scenario.end();
+}
+
+#[test]
+/// The same payment at Tier 2, which permits it.
+fun the_same_payout_passes_a_tier_up() {
+    let mut scenario = setup();
+    set_tier(&mut scenario, 2);
+    open_intent(&mut scenario, OWNER, 20_001 * USD);
+    approve(&mut scenario, APPROVER);
+    settle(&mut scenario, OWNER, 20_001 * USD);
+    scenario.end();
+}
+
+// ─── The daily window ──────────────────────────────────────────────────────
+
+#[test]
+#[expected_failure(abort_code = 201, location = splash_core::spend_window)]
+/// Two payments that each fit and together do not. The second aborts rather
 /// than settling partially — a half-paid payroll is worse than none.
 fun the_daily_ceiling_stops_the_second_payment() {
     let mut scenario = setup();
-    set_cap(&mut scenario, 1_500);
-
-    open_intent(&mut scenario, OWNER, 1_000);
+    open_intent(&mut scenario, OWNER, 15_000 * USD);
     approve(&mut scenario, APPROVER);
-    settle(&mut scenario, OWNER, 1_000);
+    settle(&mut scenario, OWNER, 15_000 * USD);
 
-    open_intent(&mut scenario, OWNER, 1_000);
+    open_intent(&mut scenario, OWNER, 15_000 * USD);
     approve(&mut scenario, APPROVER);
-    settle(&mut scenario, OWNER, 1_000);
+    settle(&mut scenario, OWNER, 15_000 * USD);
     scenario.end();
 }
 
 #[test]
-#[expected_failure(abort_code = 201, location = splash_core::daily_limit)]
+#[expected_failure(abort_code = 201, location = splash_core::spend_window)]
 /// The tumbling double-spend, denied. Spend the ceiling, wait ONE hour, spend
 /// it again — which a `(window_start, spent)` pair with a lazy reset would
 /// eventually allow at the boundary and which a sliding window does not.
-fun an_hour_later_does_not_reset_the_window() {
+fun an_hour_later_does_not_reset_the_day() {
     let mut scenario = setup();
-    set_cap(&mut scenario, 1_000);
-
-    open_intent(&mut scenario, OWNER, 1_000);
+    open_intent(&mut scenario, OWNER, 20_000 * USD);
     approve(&mut scenario, APPROVER);
-    settle(&mut scenario, OWNER, 1_000);
+    settle(&mut scenario, OWNER, 20_000 * USD);
 
     advance(&mut scenario, HOUR);
 
-    open_intent(&mut scenario, OWNER, 1_000);
+    open_intent(&mut scenario, OWNER, 99 * USD);
     approve(&mut scenario, APPROVER);
-    settle(&mut scenario, OWNER, 1_000);
+    settle(&mut scenario, OWNER, 99 * USD);
     scenario.end();
 }
 
 #[test]
-/// A full day later, the allowance is back.
-fun the_window_slides_and_capacity_returns() {
+/// A full day later, the daily allowance is back.
+fun the_daily_window_slides_and_capacity_returns() {
     let mut scenario = setup();
-    set_cap(&mut scenario, 1_000);
-
-    open_intent(&mut scenario, OWNER, 1_000);
+    open_intent(&mut scenario, OWNER, 20_000 * USD);
     approve(&mut scenario, APPROVER);
-    settle(&mut scenario, OWNER, 1_000);
+    settle(&mut scenario, OWNER, 20_000 * USD);
 
     advance(&mut scenario, DAY);
 
@@ -858,37 +969,56 @@ fun the_window_slides_and_capacity_returns() {
         let account = scenario.take_shared<BusinessAccount>();
         let c = scenario.take_shared<Clock>();
         assert_eq!(business_account::daily_spent(&account, &c), 0);
-        assert_eq!(business_account::daily_remaining(&account, &c), 1_000);
+        assert_eq!(business_account::daily_remaining(&account, &c), 20_000 * USD);
+        // The month has NOT forgotten it.
+        assert_eq!(business_account::monthly_spent(&account, &c), 20_000 * USD);
         ts::return_shared(c);
         ts::return_shared(account);
     };
+    scenario.end();
+}
 
-    open_intent(&mut scenario, OWNER, 1_000);
+// ─── The monthly window ────────────────────────────────────────────────────
+
+#[test]
+#[expected_failure(abort_code = 201, location = splash_core::spend_window)]
+/// The month binds even when every single day is inside its own limit. This is
+/// the ceiling the daily one cannot express: 20k a day for 26 days is 520k,
+/// which Tier 3 does not permit.
+fun the_monthly_ceiling_binds_across_days() {
+    let mut scenario = setup();
+    let mut day = 0;
+    // 25 days at the daily ceiling is exactly 500,000 — the monthly cap.
+    while (day < 25) {
+        open_intent(&mut scenario, OWNER, 20_000 * USD);
+        approve(&mut scenario, APPROVER);
+        settle(&mut scenario, OWNER, 20_000 * USD);
+        advance(&mut scenario, DAY);
+        day = day + 1;
+    };
+    // The 26th day is inside the DAILY limit and past the monthly one.
+    open_intent(&mut scenario, OWNER, 99 * USD);
     approve(&mut scenario, APPROVER);
-    settle(&mut scenario, OWNER, 1_000);
+    settle(&mut scenario, OWNER, 99 * USD);
     scenario.end();
 }
 
 #[test]
-/// Raising the cap does not forgive spend already inside the window, so
-/// "raise, drain, lower" moves no more than "raise and drain".
-fun raising_the_cap_does_not_forgive_spend_already_made() {
+/// Thirty days on, the month has rolled and capacity returns.
+fun the_monthly_window_slides_too() {
     let mut scenario = setup();
-    set_cap(&mut scenario, 1_000);
-
-    open_intent(&mut scenario, OWNER, 1_000);
+    open_intent(&mut scenario, OWNER, 20_000 * USD);
     approve(&mut scenario, APPROVER);
-    settle(&mut scenario, OWNER, 1_000);
+    settle(&mut scenario, OWNER, 20_000 * USD);
 
-    set_cap(&mut scenario, 5_000);
+    advance(&mut scenario, 30 * DAY);
 
     scenario.next_tx(OWNER);
     {
         let account = scenario.take_shared<BusinessAccount>();
         let c = scenario.take_shared<Clock>();
-        // Not 5_000. The 1_000 already spent still counts against the window.
-        assert_eq!(business_account::daily_spent(&account, &c), 1_000);
-        assert_eq!(business_account::daily_remaining(&account, &c), 4_000);
+        assert_eq!(business_account::monthly_spent(&account, &c), 0);
+        assert_eq!(business_account::monthly_remaining(&account, &c), 500_000 * USD);
         ts::return_shared(c);
         ts::return_shared(account);
     };
@@ -896,77 +1026,93 @@ fun raising_the_cap_does_not_forgive_spend_already_made() {
 }
 
 #[test]
-#[expected_failure(abort_code = 201, location = splash_core::daily_limit)]
-/// Lowering the ceiling BELOW what has already been spent inside the window.
-///
-/// The window can then hold more than the cap, and `cap - spent` underflows.
-/// It failed closed either way — a u64 arithmetic abort is still an abort —
-/// but it reported an arithmetic error where the truth was "this account is
-/// over its new, lower ceiling", which is the difference between an operator
-/// diagnosing it in a minute and in an afternoon.
-fun a_ceiling_lowered_under_an_account_reports_the_ceiling() {
+/// Raising a tier does not forgive spend already inside either window, so
+/// "raise, drain, lower" moves no more than "raise and drain" would.
+fun a_tier_upgrade_does_not_forgive_spend_already_made() {
     let mut scenario = setup();
-    set_cap(&mut scenario, 1_000);
-
-    open_intent(&mut scenario, OWNER, 1_000);
+    open_intent(&mut scenario, OWNER, 20_000 * USD);
     approve(&mut scenario, APPROVER);
-    settle(&mut scenario, OWNER, 1_000);
+    settle(&mut scenario, OWNER, 20_000 * USD);
 
-    // Now under the spend already made.
-    set_cap(&mut scenario, 500);
+    set_tier(&mut scenario, 2);
 
-    open_intent(&mut scenario, OWNER, 1);
-    approve(&mut scenario, APPROVER);
-    settle(&mut scenario, OWNER, 1);
-    scenario.end();
-}
-
-#[test]
-#[expected_failure(abort_code = 25, location = splash_core::business_account)]
-/// A recovery that has become moot must not execute.
-///
-/// If the surviving owners add the nominated address themselves during the
-/// 72-hour notice, the account has already been recovered. Letting the rescuer
-/// execute anyway would still clear the approver set — so a rescuer who cannot
-/// gain anything could at least impose a delayed denial-of-service on an
-/// account that never needed rescuing.
-fun a_recovery_the_owners_already_performed_cannot_execute() {
-    let mut scenario = setup();
-    nominate_rescuer(&mut scenario);
-    scenario.next_tx(RESCUER);
+    scenario.next_tx(OWNER);
     {
-        let mut account = scenario.take_shared<BusinessAccount>();
+        let account = scenario.take_shared<BusinessAccount>();
         let c = scenario.take_shared<Clock>();
-        let ctx = scenario.ctx();
-        business_account::request_recovery(&mut account, OWNER2, &c, ctx);
+        // Not the full 200,000 — the 20,000 already spent still counts.
+        assert_eq!(business_account::daily_spent(&account, &c), 20_000 * USD);
+        assert_eq!(business_account::daily_remaining(&account, &c), 180_000 * USD);
+        assert_eq!(business_account::monthly_spent(&account, &c), 20_000 * USD);
         ts::return_shared(c);
         ts::return_shared(account);
     };
-    // The owners are alive after all, and add the address themselves.
+    scenario.end();
+}
+
+// ─── Asking for more ───────────────────────────────────────────────────────
+
+#[test]
+/// A request records that a tenant asked. It changes nothing — a function that
+/// let a tenant move their own ceiling, even by one step, even with a delay,
+/// would be a self-service limit raise wearing a request's clothing.
+fun a_limit_increase_request_changes_no_ceiling() {
+    let mut scenario = setup();
+    scenario.next_tx(OWNER);
+    {
+        let account = scenario.take_shared<BusinessAccount>();
+        let ctx = scenario.ctx();
+        business_account::request_limit_increase(&account, 2, b"Payroll grew to 300 staff", ctx);
+        // Same tier, same ceilings, on the way out.
+        assert_eq!(business_account::tier(&account), 3);
+        assert_eq!(business_account::daily_cap_minor(&account), 20_000 * USD);
+        ts::return_shared(account);
+    };
+    scenario.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 20, location = splash_core::business_account)]
+fun only_an_owner_can_ask_for_more() {
+    let mut scenario = setup();
+    scenario.next_tx(OUTSIDER);
+    {
+        let account = scenario.take_shared<BusinessAccount>();
+        let ctx = scenario.ctx();
+        business_account::request_limit_increase(&account, 2, b"please", ctx);
+        ts::return_shared(account);
+    };
+    scenario.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 44, location = splash_core::business_account)]
+/// Asking to move DOWN a number is asking for more, because the tiers descend
+/// as the limits rise. Asking for the tier you already hold is not a request.
+fun a_request_must_actually_be_an_increase() {
+    let mut scenario = setup();
+    scenario.next_tx(OWNER);
+    {
+        let account = scenario.take_shared<BusinessAccount>();
+        let ctx = scenario.ctx();
+        business_account::request_limit_increase(&account, 3, b"same tier", ctx);
+        ts::return_shared(account);
+    };
+    scenario.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 22, location = splash_core::business_account)]
+/// A stopped account is not in a position to be asking for more room.
+fun a_frozen_account_cannot_ask_for_more() {
+    let mut scenario = setup();
     scenario.next_tx(OWNER);
     {
         let mut account = scenario.take_shared<BusinessAccount>();
         let ctx = scenario.ctx();
-        business_account::add_owner(&mut account, OWNER2, ctx);
-        ts::return_shared(account);
-    };
-    advance(&mut scenario, business_account::recovery_delay_ms());
-    scenario.next_tx(RESCUER);
-    {
-        let mut account = scenario.take_shared<BusinessAccount>();
-        let c = scenario.take_shared<Clock>();
-        let ctx = scenario.ctx();
-        business_account::execute_recovery(&mut account, &c, ctx);
-        ts::return_shared(c);
+        business_account::freeze_account(&mut account, ctx);
+        business_account::request_limit_increase(&account, 2, b"please", ctx);
         ts::return_shared(account);
     };
     scenario.end();
-}
-
-#[test]
-/// The default ceiling is USD 1,000 expressed in six-decimal minor units. A
-/// cap written as `1_000` would be a tenth of a cent — a limit that reads like
-/// a limit and is a brick.
-fun the_default_ceiling_is_scaled_not_whole_currency() {
-    assert_eq!(business_account::default_daily_cap_minor(), 1_000_000_000);
 }

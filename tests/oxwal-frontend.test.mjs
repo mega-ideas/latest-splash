@@ -77,14 +77,24 @@ test('default dashboard is the streaming 0xWal surface and avoids browser money 
   const kybSettings = await readFile(new URL('../app/settings/kyb/page.tsx', import.meta.url), 'utf8');
   const forgotPassword = await readFile(new URL('../app/forgot-password/page.tsx', import.meta.url), 'utf8');
   const shell = await readFile(new URL('../components/dashboard/DashboardShell.tsx', import.meta.url), 'utf8');
+  // The conversation moved out of the page and into one shared engine, so that
+  // the desk, the copilot page and the floating widget cannot drift into three
+  // assistants again. The properties below did not move — they are asserted
+  // where they now live.
+  const engine = await readFile(new URL('../lib/oxwal/use-oxwal-thread.ts', import.meta.url), 'utf8');
+  const threadView = await readFile(new URL('../components/oxwal/ThreadView.tsx', import.meta.url), 'utf8');
 
-  assert.match(page, /fetch\('\/api\/oxwal'/);
-  assert.match(page, /response\.body\.getReader\(\)/);
-  assert.match(page, /<ActionCard key=\{proposal\.id\} proposal=\{proposal\}/);
+  assert.match(engine, /fetch\('\/api\/oxwal'/);
+  assert.match(engine, /response\.body\.getReader\(\)/);
+  assert.match(threadView, /<ActionCard key=\{proposal\.id\} proposal=\{proposal\}/);
+  // And the desk is wired to that engine rather than a private copy of it.
+  assert.match(page, /useOxwalThread\(/);
+  assert.doesNotMatch(page, /fetch\('\/api\//, 'the desk must not open its own agent connection');
   assert.match(page, /OxWalComposer/);
   assert.match(page, /What's on the agenda today\?/);
   assert.match(page, /href="\/queue"/);
   assert.doesNotMatch(page, /localStorage|sessionStorage/);
+  assert.doesNotMatch(engine, /localStorage|sessionStorage/);
   assert.match(layout, /export const dynamic = 'force-dynamic'/);
   // The layout must hand the server-resolved session to the shell and render
   // children through it. Matched by intent rather than exact JSX so adding a

@@ -2,7 +2,7 @@ import 'server-only';
 
 import { NextResponse } from 'next/server';
 
-import { resolveAuthorityForSession } from '@/lib/auth/authority';
+import { resolveAuthorityForSession, UnauthorizedError } from '@/lib/auth/authority';
 import type { CustomerSession } from '@/lib/auth/customer-session';
 import { kybGateEnabled, readOrgKybState } from '@/lib/compliance/org-kyb';
 import { canMoveMoney, kybGateReason, type KybLifecycleState } from '@/lib/compliance/kyb-state';
@@ -32,7 +32,31 @@ export async function requireActiveOrg(session: CustomerSession): Promise<KybGat
     return { state: 'ACTIVE', response: null };
   }
 
-  const ctx = await resolveAuthorityForSession(session);
+  // A session with no membership throws here. Unguarded, that surfaced as a
+  // 500 — an unhandled error for the most ordinary state a new account is in,
+  // and one that tells the caller nothing about what to do next.
+  let ctx;
+  try {
+    ctx = await resolveAuthorityForSession(session);
+  } catch (error) {
+    if (error instanceof UnauthorizedError) {
+      return {
+        state: 'REGISTERED',
+        response: NextResponse.json(
+          {
+            error:
+              'This account is not part of a verified workspace yet. Complete business ' +
+              'verification before moving money.',
+            code: 'kyb_required',
+            state: 'REGISTERED',
+          },
+          { status: 403 },
+        ),
+      };
+    }
+    throw error;
+  }
+
   const state = await readOrgKybState(ctx.orgId);
 
   if (canMoveMoney(state)) {
@@ -70,7 +94,22 @@ export async function readKybGateState(session: CustomerSession): Promise<{
     const state = await readOrgKybState(ctx.orgId);
     return { state, blocked: !canMoveMoney(state), reason: kybGateReason(state) };
   } catch (error) {
-    console.error('[kyb-gate] state read failed; treating as unblocked', error);
-    return { state: 'ACTIVE', blocked: false, reason: '' };
+    // Fails CLOSED, and this used to fail open — it caught, logged
+    // "treating as unblocked", and returned ACTIVE.
+    //
+    // The throw it was catching is `UnauthorizedError` from
+    // `resolveAuthorityForSession`, raised for a session with no membership
+    // row. That is not an edge case: it is exactly what a brand-new sign-up
+    // is, which is precisely the account this gate exists to stop. The one
+    // user the control was written for was the one it waved through.
+    //
+    // A compliance gate that cannot determine state has not determined that
+    // everything is fine.
+    console.error('[kyb-gate] state could not be read; blocking', error);
+    return {
+      state: 'REGISTERED',
+      blocked: true,
+      reason: kybGateReason('REGISTERED'),
+    };
   }
 }

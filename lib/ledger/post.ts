@@ -25,6 +25,10 @@ export type JournalInput = {
   orgId?: string | null;
   kind: string;
   intentId?: string | null;
+  /** What the movement refers to: sweep job, funding session, intent. */
+  refId?: string | null;
+  /** Chain evidence, where the movement had any. */
+  suiTxDigest?: string | null;
   description?: string | null;
   postings: PostingInput[];
 };
@@ -62,6 +66,8 @@ export async function postJournal(tx: Database, input: JournalInput): Promise<vo
     orgId: input.orgId ?? null,
     kind: input.kind,
     intentId: input.intentId ?? null,
+    refId: input.refId ?? null,
+    suiTxDigest: input.suiTxDigest ?? null,
     description: input.description ?? null,
   });
 

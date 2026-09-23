@@ -35,12 +35,29 @@ export function kybGateEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
 }
 
 /**
- * The state to assume when we cannot read one (no DATABASE_URL, missing row).
- * ACTIVE on purpose: the gate is opt-in, so an unreadable state must not
- * silently freeze a working demo. Once FEATURE_KYB_GATE is on in production
- * this is unreachable, because DATABASE_URL is required there.
+ * What to assume when the state cannot be read.
+ *
+ * This used to be a single ACTIVE for both "no DATABASE_URL" and "no row",
+ * justified by the gate being opt-in and DATABASE_URL being required in
+ * production. The first half of that reasoning held; the second did not. A
+ * MISSING ROW is reachable in production with the gate on and the database
+ * connected — an org id that does not exist, a row not yet created, a typo in
+ * a request — and it read as ACTIVE, meaning fully KYB-approved and cleared to
+ * move money. An unknown org was the most trusted kind.
+ *
+ * Split in two. With the gate OFF nothing here is enforcing anything and the
+ * permissive answer keeps local development and the demo working. With the
+ * gate ON, an org we cannot read is an org that has done nothing, and
+ * REGISTERED is the truthful answer — it blocks money movement, which is the
+ * point of a gate.
  */
-const ASSUMED_STATE_WITHOUT_DB: KybLifecycleState = 'ACTIVE';
+const DEMO_STATE_WITH_GATE_OFF: KybLifecycleState = 'ACTIVE';
+const UNKNOWN_ORG_STATE: KybLifecycleState = 'REGISTERED';
+
+/** The state for an org whose record we could not read, honestly. */
+function unreadableState(env: NodeJS.ProcessEnv = process.env): KybLifecycleState {
+  return kybGateEnabled(env) ? UNKNOWN_ORG_STATE : DEMO_STATE_WITH_GATE_OFF;
+}
 
 async function resolveDb(): Promise<DrizzleDb | null> {
   if (!process.env.DATABASE_URL) return null;
@@ -50,7 +67,7 @@ async function resolveDb(): Promise<DrizzleDb | null> {
 
 export async function readOrgKybState(orgId: string): Promise<KybLifecycleState> {
   const db = await resolveDb();
-  if (!db) return ASSUMED_STATE_WITHOUT_DB;
+  if (!db) return unreadableState();
 
   const rows = await db
     .select({ lifecycle: organizations.kybLifecycle })
@@ -58,7 +75,9 @@ export async function readOrgKybState(orgId: string): Promise<KybLifecycleState>
     .where(eq(organizations.id, orgId))
     .limit(1);
 
-  if (rows.length === 0) return ASSUMED_STATE_WITHOUT_DB;
+  // Not the same as "no database". This org is not on file, and with the gate
+  // on that must not read as approved.
+  if (rows.length === 0) return unreadableState();
   return toKybLifecycleState(rows[0].lifecycle);
 }
 

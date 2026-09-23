@@ -12,20 +12,17 @@ export function isDemoRuntime(env: NodeJS.ProcessEnv = process.env) {
  * Whether stand-in crypto (mock Seal) may be used instead of a real threshold
  * committee.
  *
- * This used to test NODE_ENV alone. A deployment running with
+ * This used to test NODE_ENV alone, which meant a deployment running with
  * USE_MOCK_APIS=true / NEXT_PUBLIC_DEMO_MODE=true under NODE_ENV=production
- * therefore demanded a live Seal committee and refused every payment at the
- * final step with "Seal is read-only: No Seal key servers configured" — after
- * the deposit was confirmed and the funds converted, which is the worst place
- * to fail.
+ * demanded a live Seal committee and refused every payment with
+ * "Seal is read-only: No Seal key servers configured" — the vendor keys are
+ * already optional under those same flags in lib/env.ts (see `vendorsLive`),
+ * so requiring a Seal committee was inconsistent with the posture the flags
+ * declare.
  *
- * The vendor keys are already optional under those same flags, so requiring a
- * Seal committee was inconsistent with the posture the flags declare. This now
- * delegates to isDemoRuntime, so exactly one predicate decides whether a
- * deployment is a demo.
- *
- * The invariant that matters is unchanged: a deployment that sets neither flag
- * still gets real crypto and still fails closed.
+ * It now delegates to isDemoRuntime, so exactly one predicate decides whether
+ * this deployment is a demo. The flags are the record of that decision: a
+ * deployment that sets neither still gets real crypto and still fails closed.
  */
 export function canUseDemoCrypto(env: NodeJS.ProcessEnv = process.env) {
   return isDemoRuntime(env);

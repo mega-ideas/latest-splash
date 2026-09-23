@@ -17,6 +17,8 @@ import {
 import SettlementEngineFlow from '@/components/dashboard/SettlementEngineFlow';
 
 import StepBeneficiary from '@/components/transfer/StepBeneficiary';
+import type { TravelRulePayment } from '@/components/transfer/TravelRuleFields';
+import type { TravelRuleBeneficiary } from '@/lib/server/operations';
 import StepQuote from '@/components/transfer/StepQuote';
 import StepReceipt from '@/components/transfer/StepReceipt';
 import StepStatus from '@/components/transfer/StepStatus';
@@ -44,7 +46,13 @@ export type TransferState = {
     country: 'MY' | 'PH' | 'ID' | 'SG' | 'VN' | 'TH' | 'EU' | 'GB';
     rail: 'bank';
     bank?: { swift: string; account: string };
+    /** The FATF R.16 beneficiary half. What each corridor requires comes
+     *  from `lib/compliance/travel-rule.ts`, not from this type. */
+    travelRule?: TravelRuleBeneficiary;
   };
+  /** Context belonging to the payment rather than the beneficiary:
+   *  purpose, source of funds, relationship. */
+  travelRulePayment?: TravelRulePayment;
   amount: { value: string; sourceCurrency: 'USD'; targetCurrency: 'MYR' | 'PHP' | 'IDR' | 'SGD' | 'VND' | 'THB' | 'EUR' | 'GBP' };
   quote?: { fxRate: number; netReceived: string; fee: string };
   funding: {
@@ -82,7 +90,8 @@ export type TransferState = {
 
 const initial: TransferState = {
   step: 1,
-  recipient: { name: '', country: 'PH', rail: 'bank' },
+  recipient: { name: '', country: 'PH', rail: 'bank', travelRule: {} },
+  travelRulePayment: {},
   amount: { value: '', sourceCurrency: 'USD', targetCurrency: 'PHP' },
   deliveryTier: 'PAYOUT_ONLY',
   funding: {

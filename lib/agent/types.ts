@@ -110,6 +110,14 @@ export interface UnsignedProposal {
   approvalHash?: string;
   approvals: { userId: string; role: UserRole; signedAt: string }[];
   settlement?: { digest: string; walrusBlobId: string; auditEventId: string };
+  /** The payment this rebuilds into once approved. On the proposal, not in a
+   *  process map: an approval that survives a restart must still be
+   *  executable, and the thing approved and the thing executed must be one
+   *  record rather than two that can drift apart. */
+  executionPayload?: Record<string, unknown>;
+  /** What happened when it was carried out, including a failure — so an
+   *  approval that could not be executed is visible rather than silent. */
+  execution?: { state: 'EXECUTED' | 'FAILED' | 'SKIPPED'; detail: string; ref?: string; at: string };
 }
 
 export interface OrgPolicy {

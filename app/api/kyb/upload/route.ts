@@ -1,6 +1,9 @@
 import { createHash, randomBytes } from 'crypto';
 import { NextResponse } from 'next/server';
 
+import { resolveAuthorityForSession, UnauthorizedError } from '@/lib/auth/authority';
+import { ensureWorkspaceForEmail } from '@/lib/auth/signup-org';
+import { setOrgKybState } from '@/lib/compliance/org-kyb';
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { recordKybSubmission, type KybDocumentRecord } from '@/lib/server/kyb';
 
@@ -56,11 +59,57 @@ export async function POST(request: Request) {
       };
     }),
   );
-  const kybCase = recordKybSubmission({ caseId: kybCaseId, businessName: legalName, registrationNumber, documents });
+  // Which organisation this case belongs to — resolved BEFORE the case is
+  // written, because it is now stored on the row.
+  //
+  // A membership-less session is what a brand-new sign-up IS: password sign-up
+  // deliberately grants no membership, and refusing their documents would make
+  // onboarding impossible for the only people who need it. Previously that case
+  // was filed under `orgId: 'demo-business'` — the literal demo workspace — so
+  // every new business's KYB documents landed in a namespace shared with the
+  // sample data and with each other.
+  //
+  // They get their own workspace instead, created in REGISTERED, which is the
+  // state that can do nothing. Submitting KYB documents is precisely the moment
+  // a business declares itself, so it is the right moment to create one.
+  let orgId: string;
+  try {
+    orgId = (await resolveAuthorityForSession(auth.session)).orgId;
+  } catch (error) {
+    if (!(error instanceof UnauthorizedError)) throw error;
+    orgId = (await ensureWorkspaceForEmail(auth.session.email)).orgId;
+  }
+
+  const kybCase = await recordKybSubmission({
+    caseId: kybCaseId,
+    orgId,
+    businessName: legalName,
+    registrationNumber,
+    documents,
+  });
+
+  // Advance the ORG, not just the case.
+  //
+  // Nothing anywhere called `setOrgKybState` with KYB_SUBMITTED, so the
+  // lifecycle could never leave REGISTERED however many documents were
+  // uploaded. An onboarding flow whose first step does not change the state
+  // it exists to change is a form that files paperwork into a drawer.
+  //
+  // SYSTEM is the only actor permitted to make this transition: a provider
+  // cannot declare a business submitted, and an admin signing it off is a
+  // later, separate step. That separation is the point of the machine.
+  let lifecycle: string | null = null;
+  try {
+    const moved = await setOrgKybState(orgId, 'KYB_SUBMITTED', 'SYSTEM');
+    lifecycle = moved.to;
+  } catch (error) {
+    console.error('[kyb] documents recorded but the org state did not advance', error);
+  }
 
   return NextResponse.json({
     kybCaseId,
     state: kybCase.state,
+    lifecycle,
     documents,
   });
 }

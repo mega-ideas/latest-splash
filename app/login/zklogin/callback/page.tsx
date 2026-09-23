@@ -73,10 +73,15 @@ export default function ZkLoginCallbackPage() {
           return;
         }
 
-        // Identity is established. Authority is not: without a membership the
-        // dashboard shows an empty workspace, which is the correct landing
-        // place for someone who has proved who they are and nothing else.
-        router.replace('/dashboard');
+        // Identity is established. Authority is not — and neither is the
+        // business verification that authority depends on.
+        //
+        // This used to land on /dashboard, which showed an empty workspace and
+        // a banner. A banner is not an onboarding step: it tells someone
+        // something is wrong and leaves them to find the screen that fixes it.
+        // Business verification is the next thing that has to happen, so it is
+        // the next thing they see.
+        router.replace('/settings/kyb?from=signin');
       } catch {
         if (!cancelled) setError('Sign-in could not be completed. Check your connection and try again.');
       }

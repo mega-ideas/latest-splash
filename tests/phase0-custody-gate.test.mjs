@@ -135,9 +135,11 @@ test('the overview card and the copilot stop presenting treasury numbers in Phas
   assert.match(overview, /Treasury arrives with our licence/);
   assert.match(overview, /custody_not_licensed/);
 
-  const copilot = await source('app/api/copilot/chat/route.ts');
-  const treasuryBranch = copilot.indexOf('TREASURY_KEYWORDS.some(');
-  assert.ok(treasuryBranch > 0);
-  assert.ok(copilot.indexOf('custodyPhaseEnabled(') > 0, 'the copilot consults the phase');
-  assert.match(copilot, /custodyPhaseEnabled\(\)\s*\?[\s\S]{0,400}getLedger\(|if \(!custodyPhaseEnabled\(\)\)[\s\S]{0,600}getLedger\(/, 'the ledger is read only when the treasury exists');
+  // The copilot used to answer treasury questions from a keyword matcher, so
+  // this asserted the matcher consulted the phase. v14 deleted the matcher and
+  // /api/copilot/chat with it — there is no longer a hand-written treasury
+  // answer to gate. The gate now lives on the route that serves the numbers.
+  const treasury = await source('app/api/treasury/route.ts');
+  assert.ok(treasury.indexOf('custodyPhaseEnabled(') > 0, 'the treasury route consults the phase');
+  assert.match(treasury, /if \(!custodyPhaseEnabled\(\)\) return custodyPhaseResponse\(\);/, 'and refuses before reading a ledger');
 });

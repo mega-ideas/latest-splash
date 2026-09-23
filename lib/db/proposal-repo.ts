@@ -71,6 +71,11 @@ export async function upsertProposal(db: DrizzleDb, proposal: UnsignedProposal):
       explain: encodeJsonWithBigints(proposal.explain),
       simulation: proposal.simulation ? encodeJsonWithBigints(proposal.simulation) : null,
       settlement: proposal.settlement ? encodeJsonWithBigints(proposal.settlement) : null,
+      executionPayload: proposal.executionPayload
+        ? encodeJsonWithBigints(proposal.executionPayload)
+        : null,
+      executionState: proposal.execution?.state ?? null,
+      executionError: proposal.execution?.state === 'FAILED' ? proposal.execution.detail : null,
       requiredApprovers: proposal.explain.requiredApprovers,
       version: proposal.version ?? 1,
       approvalHash: proposal.approvalHash ?? null,
@@ -117,6 +122,9 @@ function rowToProposal(row: typeof proposals.$inferSelect, approvalRows: (typeof
     explain: decodeJsonWithBigints(row.explain),
     simulation: row.simulation ? decodeJsonWithBigints(row.simulation) : undefined,
     settlement: row.settlement ? decodeJsonWithBigints(row.settlement) : undefined,
+    executionPayload: row.executionPayload
+      ? decodeJsonWithBigints(row.executionPayload)
+      : undefined,
   } as UnsignedProposal;
 }
 

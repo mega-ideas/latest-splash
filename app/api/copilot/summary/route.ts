@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { RATE_LIMITS, clientIp, enforceRateLimit } from '@/lib/server/rate-limit';
-import { listInvoices } from '@/lib/server/operations';
+import { listInvoicesFor } from '@/lib/server/invoices-store';
+import { requireSessionAccount } from '@/lib/server/session-account';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -17,6 +18,12 @@ export async function GET(request: Request) {
   if (limited) return limited;
 
   const invoices = listInvoices();
+  // The assistant's view of "your invoices" was every tenant's, so it would
+  // describe one customer's overdue invoices to another. Scoped to the caller.
+  const accountCheck = await requireSessionAccount(auth.session);
+  if (accountCheck.response) return accountCheck.response;
+
+  const invoices = await listInvoicesFor(accountCheck.account.orgId);
   const openInvoices = invoices.filter((invoice) => invoice.status !== 'paid' && invoice.status !== 'settled');
   const corridorCounts = openInvoices.reduce<Record<string, number>>((counts, invoice) => {
     counts[invoice.targetCurrency] = (counts[invoice.targetCurrency] ?? 0) + 1;

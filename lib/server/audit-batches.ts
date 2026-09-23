@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import { listTransfers } from '@/lib/server/operations';
+import { listTransfersForStaff } from '@/lib/server/transfers-store';
 import { sealAdapter } from '@/lib/server/seal';
 import { anchorAuditHashOnSui } from '@/lib/server/sui-settlement';
 import { retrieveBlob, storeEncryptedInvoice } from '@/lib/server/walrus';
@@ -100,7 +100,9 @@ export async function buildDailyAuditBatch(date = businessDate()) {
   const existing = batches.get(date);
   if (existing) return existing;
 
-  const settlements = listTransfers().filter((transfer) =>
+  // A system job anchoring the day across every tenant — the one place a
+  // cross-tenant read is the intent rather than an oversight.
+  const settlements = (await listTransfersForStaff(1000)).filter((transfer) =>
     !transfer.demo &&
     businessDate(transfer.createdAt) === date &&
     ['SETTLED', 'DISBURSED', 'CREDITED'].includes(transfer.state) &&

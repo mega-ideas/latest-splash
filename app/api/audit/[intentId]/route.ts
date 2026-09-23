@@ -3,21 +3,30 @@ import { NextResponse } from 'next/server';
 
 import { verifyStoredSettlementEvidence } from '@/lib/evidence/settlement';
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
-import { readAuditReceipt, readInvoice, readSweepJob, readTransferIntent } from '@/lib/server/operations';
+import { readSweepJob } from '@/lib/server/operations';
+import { readInvoiceForStaff } from '@/lib/server/invoices-store';
+import { requireSessionAccount } from '@/lib/server/session-account';
+import { readAuditReceipt, readTransfer } from '@/lib/server/transfers-store';
 import { readSealPolicy, sealAdapter } from '@/lib/server/seal';
 import { retrieveBlob } from '@/lib/server/walrus';
 
-function auditView(intentId: string) {
-  const transfer = readTransferIntent(intentId);
-  const receipt = readAuditReceipt(intentId);
+/** Scoped to the caller's org: an audit trail is as sensitive as the payment. */
+async function auditView(orgId: string, intentId: string) {
+  const transfer = await readTransfer(orgId, intentId);
+  // Composed from that same transfer, so the digest on the trail is the
+  // digest on the payment by construction rather than by agreement.
+  const receipt = await readAuditReceipt(orgId, intentId);
   if (!transfer || !receipt) return null;
-  const invoice = receipt.invoiceId ? readInvoice(receipt.invoiceId) : null;
+  // The transfer above was already scoped to this org, and the invoice is the
+  // one it names — so this read is reached only through an ownership check
+  // that has already passed.
+  const invoice = receipt.invoiceId ? await readInvoiceForStaff(receipt.invoiceId) : null;
   const sweepJob = receipt.sweepJobId ? readSweepJob(receipt.sweepJobId) : null;
   const policy = receipt.sealPolicyId ? readSealPolicy(receipt.sealPolicyId) : null;
   return { transfer, receipt, invoice, sweepJob, policy };
 }
 
-async function settlementProof(view: NonNullable<ReturnType<typeof auditView>>) {
+async function settlementProof(view: NonNullable<Awaited<ReturnType<typeof auditView>>>) {
   const evidence = view.receipt.evidence;
   const proof = await verifyStoredSettlementEvidence({
     walrusBlobId: evidence?.walrusBlobId ?? view.receipt.walrusBlobId,
@@ -46,8 +55,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ inte
   const auth = await requireCustomerRequest(request);
   if (auth.response) return auth.response;
 
+  const accountCheck = await requireSessionAccount(auth.session);
+  if (accountCheck.response) return accountCheck.response;
+
   const { intentId } = await params;
-  const view = auditView(intentId);
+  const view = await auditView(accountCheck.account.orgId, intentId);
   return view
     ? NextResponse.json({ ...view, proof: await settlementProof(view) })
     : NextResponse.json({ error: 'Audit receipt not found' }, { status: 404 });
@@ -57,8 +69,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ int
   const auth = await requireCustomerRequest(request);
   if (auth.response) return auth.response;
 
+  const accountCheck = await requireSessionAccount(auth.session);
+  if (accountCheck.response) return accountCheck.response;
+
   const { intentId } = await params;
-  const view = auditView(intentId);
+  const view = await auditView(accountCheck.account.orgId, intentId);
   const settlement = view ? await settlementProof(view) : null;
   if (!view?.invoice) return NextResponse.json({ error: 'Invoice proof not found' }, { status: 404 });
   if (view.invoice.demo && view.invoice.documentSha256?.startsWith('demo')) {

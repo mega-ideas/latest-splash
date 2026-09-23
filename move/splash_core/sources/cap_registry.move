@@ -64,6 +64,7 @@
 /// which is a human procedure and belongs in the runbook.
 module splash_core::cap_registry;
 
+use sui::clock::{Self, Clock};
 use sui::event;
 
 // ─── Abort codes (210-block, reserved for cap_registry) ─────────────────────
@@ -72,6 +73,12 @@ use sui::event;
 const E_STALE_GENERATION: u64 = 210;
 const E_UNKNOWN_KIND: u64 = 211;
 const E_INVALID_HOLDER: u64 = 212;
+/// `execute` called with nothing armed, or armed for a different capability.
+const E_NOTHING_ARMED: u64 = 213;
+/// The ninety-second window closed. Arm it again.
+const E_ARM_EXPIRED: u64 = 214;
+/// Something is already armed and has not yet expired.
+const E_ALREADY_ARMED: u64 = 215;
 
 /// Capability kinds that can be revoked. Deliberately a closed set of `u8`
 /// rather than a generic map: a registry that can name arbitrary kinds is a
@@ -79,21 +86,72 @@ const E_INVALID_HOLDER: u64 = 212;
 const KIND_ANCHOR: u8 = 0;
 const KIND_COMPLIANCE: u8 = 1;
 
+/// How long an armed break-glass stays executable: ninety seconds.
+///
+/// Not a notice period — a COMMIT WINDOW, and the distinction is the whole
+/// design. The reasoning that ruled out a long delay still holds: a thief given
+/// hours to notice and react would use them, and `AdminCap` gains nothing by
+/// rotating a capability that moves no value.
+///
+/// What a window of this length buys is different and worth having. Revocation
+/// becomes two deliberate transactions instead of one, so a misclick, a stale
+/// script or a fat-fingered object id cannot kill a live operational capability
+/// on its own. Ninety seconds is long enough to sign a second transaction from
+/// a hardware wallet and far too short to be a window a thief could use.
+///
+/// If it lapses the arming is dead and the operator arms again. Nothing is left
+/// half-done, because the generation moves only in `bump`.
+const ARM_WINDOW_MS: u64 = 90_000;
+
 /// The generation every capability is minted at when the package publishes.
 /// `business_account::init` and `cap_registry::init` both hardcode it, and they
 /// run in the same transaction — there is no ordering by which one could read
 /// the other. A test asserts they agree.
 const GENESIS: u64 = 0;
 
+/// A break-glass that has been armed and not yet executed.
+///
+/// `drop` so re-arming after an expiry is a plain overwrite rather than a
+/// two-step teardown.
+public struct ArmedBreakGlass has store, drop {
+    kind: u8,
+    holder: address,
+    reason: vector<u8>,
+    armed_by: address,
+    armed_at_ms: u64,
+    expires_at_ms: u64,
+}
+
 public struct CapRegistry has key {
     id: UID,
     anchor_generation: u64,
     compliance_generation: u64,
+    /// At most one at a time. Arming a second while the first is live would
+    /// make "what is about to be revoked?" a question with two answers.
+    armed: Option<ArmedBreakGlass>,
 }
 
 /// Emitted on every revocation. Security-critical, and the loudest event this
 /// package produces: it means an operational capability was killed. Off-chain
 /// monitoring should alert on any rotation it did not itself initiate.
+/// Emitted when a revocation is armed. The operator has ninety seconds.
+public struct BreakGlassArmed has copy, drop {
+    registry_id: address,
+    kind: u8,
+    holder: address,
+    reason: vector<u8>,
+    armed_by: address,
+    expires_at_ms: u64,
+}
+
+/// Emitted when an arming lapses or is abandoned without revoking anything.
+public struct BreakGlassCleared has copy, drop {
+    registry_id: address,
+    kind: u8,
+    armed_by: address,
+    expired: bool,
+}
+
 public struct CapabilityRevoked has copy, drop {
     registry_id: address,
     kind: u8,
@@ -111,6 +169,7 @@ fun init(ctx: &mut TxContext) {
         id: object::new(ctx),
         anchor_generation: GENESIS,
         compliance_generation: GENESIS,
+        armed: option::none(),
     });
 }
 
@@ -150,15 +209,80 @@ public fun is_current(registry: &CapRegistry, kind: u8, generation: u64): bool {
 /// callers are `business_account::break_glass_anchor_cap` and
 /// `compliance_config::break_glass_compliance_cap`, each of which does both in
 /// one transaction.
-public(package) fun bump(
+/// Arm a revocation. Nothing is revoked yet.
+///
+/// `public(package)`, called by `business_account::arm_break_glass_anchor_cap`
+/// and its compliance twin, so the two halves of a rotation cannot drift apart.
+public(package) fun arm(
     registry: &mut CapRegistry,
     kind: u8,
     holder: address,
     reason: vector<u8>,
+    clock: &Clock,
     ctx: &TxContext,
-): u64 {
+) {
     assert!(kind == KIND_ANCHOR || kind == KIND_COMPLIANCE, E_UNKNOWN_KIND);
     assert!(holder != @0x0, E_INVALID_HOLDER);
+
+    let now = clock::timestamp_ms(clock);
+    // An EXPIRED arming is not "already armed" — it is nothing, and the operator
+    // is entitled to arm again without an extra clearing step.
+    if (registry.armed.is_some() && now < registry.armed.borrow().expires_at_ms) {
+        abort E_ALREADY_ARMED
+    };
+
+    let expires_at_ms = now + ARM_WINDOW_MS;
+    registry.armed = option::some(ArmedBreakGlass {
+        kind,
+        holder,
+        reason,
+        armed_by: tx_context::sender(ctx),
+        armed_at_ms: now,
+        expires_at_ms,
+    });
+
+    event::emit(BreakGlassArmed {
+        registry_id: object::uid_to_address(&registry.id),
+        kind,
+        holder,
+        reason,
+        armed_by: tx_context::sender(ctx),
+        expires_at_ms,
+    });
+}
+
+/// Consume the arming and bump the generation, inside the window.
+///
+/// The holder and the reason come from the ARMING, not from this call. A second
+/// transaction that could name a different destination would make the first one
+/// decorative.
+public(package) fun bump(
+    registry: &mut CapRegistry,
+    kind: u8,
+    clock: &Clock,
+    ctx: &TxContext,
+): (u64, address) {
+    assert!(kind == KIND_ANCHOR || kind == KIND_COMPLIANCE, E_UNKNOWN_KIND);
+    assert!(registry.armed.is_some(), E_NOTHING_ARMED);
+    assert!(registry.armed.borrow().kind == kind, E_NOTHING_ARMED);
+
+    let now = clock::timestamp_ms(clock);
+    if (now >= registry.armed.borrow().expires_at_ms) {
+        // Clear it on the way out, so the operator's next `arm` is a plain arm
+        // rather than a puzzle about why the registry says something is pending.
+        let dead = registry.armed.extract();
+        event::emit(BreakGlassCleared {
+            registry_id: object::uid_to_address(&registry.id),
+            kind: dead.kind,
+            armed_by: dead.armed_by,
+            expired: true,
+        });
+        abort E_ARM_EXPIRED
+    };
+
+    let armed = registry.armed.extract();
+    let holder = armed.holder;
+    let reason = armed.reason;
 
     let previous = if (kind == KIND_ANCHOR) registry.anchor_generation
         else registry.compliance_generation;
@@ -179,8 +303,32 @@ public(package) fun bump(
         revoked_by: tx_context::sender(ctx),
     });
 
-    next
+    (next, holder)
 }
+
+/// Abandon an arming before it is used or expires.
+public(package) fun disarm(registry: &mut CapRegistry, ctx: &TxContext) {
+    assert!(registry.armed.is_some(), E_NOTHING_ARMED);
+    let dead = registry.armed.extract();
+    event::emit(BreakGlassCleared {
+        registry_id: object::uid_to_address(&registry.id),
+        kind: dead.kind,
+        armed_by: tx_context::sender(ctx),
+        expired: false,
+    });
+}
+
+// ─── Views on the armed state ───────────────────────────────────────────────
+
+public fun is_armed(registry: &CapRegistry, clock: &Clock): bool {
+    registry.armed.is_some() && clock::timestamp_ms(clock) < registry.armed.borrow().expires_at_ms
+}
+public fun armed_kind(registry: &CapRegistry): u8 { registry.armed.borrow().kind }
+public fun armed_holder(registry: &CapRegistry): address { registry.armed.borrow().holder }
+public fun armed_expires_at_ms(registry: &CapRegistry): u64 {
+    registry.armed.borrow().expires_at_ms
+}
+public fun arm_window_ms(): u64 { ARM_WINDOW_MS }
 
 #[test_only]
 public fun new_for_testing(ctx: &mut TxContext): CapRegistry {
@@ -188,6 +336,7 @@ public fun new_for_testing(ctx: &mut TxContext): CapRegistry {
         id: object::new(ctx),
         anchor_generation: GENESIS,
         compliance_generation: GENESIS,
+        armed: option::none(),
     }
 }
 

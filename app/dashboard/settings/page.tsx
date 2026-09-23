@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+
+import ApprovalChannelCard from '@/components/settings/ApprovalChannelCard';
 import {
   BadgeCheck,
   Building2,
@@ -24,6 +26,10 @@ type Settings = {
   requireDualApproval: boolean;
   blockHighRiskCorridors: boolean;
   notifyOnSettlement: boolean;
+  /** How an approver is asked to approve. Persisted server-side already; the
+   *  page simply never carried it, so saving used to blank it back to default. */
+  approvalChannel: 'code' | 'reply';
+  whatsappEnabled: boolean;
   updatedAt: string;
 };
 
@@ -144,6 +150,14 @@ export default function DashboardSettingsPage() {
           </div>
         </div>
       </section>
+
+      <ApprovalChannelCard
+        whatsappEnabled={settings.whatsappEnabled}
+        approvalChannel={settings.approvalChannel}
+        onChange={(patch) =>
+          setSettings((current) => (current ? { ...current, ...patch } : current))
+        }
+      />
 
       <section className="dash-surface p-6">
         <div className="flex items-center gap-3">

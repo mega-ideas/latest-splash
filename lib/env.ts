@@ -37,6 +37,7 @@
  * on or mocks are off. Development requires nothing and defaults everything,
  * which is what a fresh clone needs to boot.
  */
+import { DEFAULT_COPILOT_MODEL } from './ai/model.ts';
 import { z } from 'zod';
 
 /* ── Shapes ───────────────────────────────────────────────────────────── */
@@ -334,7 +335,27 @@ export const envSchema = z.object({
 
   /* Copilot and memory. */
   ANTHROPIC_API_KEY: optional,
-  ANTHROPIC_MODEL: withDefault(str, 'claude-sonnet-4-6'),
+  /** Overrides lib/ai/model.ts. The old default here was a model id that does
+   *  not exist, so every call threw and fell back to canned text. */
+  ANTHROPIC_MODEL: withDefault(str, DEFAULT_COPILOT_MODEL),
+
+  // WhatsApp approvals, through Twilio. All three are needed together —
+  // `whatsappConfigured()` is false unless every one is set, because a
+  // half-configured sender fails at the moment an approval is requested.
+  TWILIO_ACCOUNT_SID: optional,
+  TWILIO_AUTH_TOKEN: optional,
+  /** The WhatsApp-enabled sender, E.164. */
+  TWILIO_WHATSAPP_FROM: optional,
+  /** The URL Twilio was configured to call. Twilio signs the URL it was
+   *  given, which behind a proxy is not the URL the request arrives at — so
+   *  signature verification uses this when set, and the request URL when not. */
+  TWILIO_WEBHOOK_URL: optional,
+
+  /** Signs Sumsub's inbound webhooks. Without it the KYB verdict endpoint
+   *  refuses every request, which is the correct direction: an unverified
+   *  webhook could launder an unchecked business into the state a human
+   *  signs off on the basis that a provider already checked it. */
+  SUMSUB_WEBHOOK_SECRET: optional,
   MEMWAL_PRIVATE_KEY: optional,
   MEMWAL_ACCOUNT_ID: objectId,
   MEMWAL_SERVER_URL: url,

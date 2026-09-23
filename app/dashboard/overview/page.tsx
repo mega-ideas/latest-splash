@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -38,7 +38,9 @@ function bpsToPct(bps: number) {
 // uses semantic/info tones from styles/tokens.css.
 const TOP_STATS = [
   { label: '0xWal operating scan', value: null, icon: Bot, accent: 'text-[#E39774]', bg: 'bg-[#E39774]/10', id: '0xwal' },
-  { label: 'Volume (30d)', value: '$39,120', delta: '+12.4%', icon: ArrowUpRight, accent: 'text-[var(--info)]', bg: 'bg-[var(--info-bg)]', id: 'volume' },
+  // Value and delta are filled from real settled transfers below. A 30-day
+  // volume is the most quotable number on the page and it was a string literal.
+  { label: 'Volume (30d)', value: null, icon: ArrowUpRight, accent: 'text-[var(--info)]', bg: 'bg-[var(--info-bg)]', id: 'volume' },
   { label: 'Corridor Coverage', value: '1 live-model', delta: '8 implemented in code', icon: Globe, accent: 'text-[var(--info)]', bg: 'bg-[#5C9EAD]/10', id: 'corridors' },
   { label: 'Settlement SLA', value: '400ms', delta: 'On target', icon: Zap, accent: 'text-[var(--ok)]', bg: 'bg-[var(--ok-bg)]', id: 'sla' },
 ] as const;
@@ -57,31 +59,54 @@ const INITIAL_CORRIDORS = [
   { pair: 'USD → GBP', flag: '🇬🇧', rate: 0.789,  volume: '$0.2M', sla: '7.2m', success: 97.1, currency: 'GBP', dec: 3, fee: bpsToPct(getCorridorFeeBps('GBP')) },
 ];
 
-// Pipeline dots are STATE, not decoration — semantic tokens (W9.0).
-const PIPELINE = [
-  { label: 'Authorized',   count: 8,  amount: '$4,540', dot: 'bg-[var(--pending)]' },
-  { label: 'On the way',   count: 5,  amount: '$2,960', dot: 'bg-[var(--info)]' },
-  { label: 'Settled today',count: 19, amount: '$14,640', dot: 'bg-[var(--ok)]' },
-];
+/**
+ * The transfer states, grouped the way an operator reads them.
+ *
+ * What was here: three hard-coded pairs under a heading that says "Settlement
+ * Pipeline" — 8 authorized / $4,540, 19 settled today / $14,640 — plus six
+ * invented transactions carrying ids shaped exactly like real ones
+ * (`ti_m8q4_9b21fa`), and a Compliance panel asserting "KYB status: Approved ·
+ * Sumsub verified" and "Risk tier: Tier 1 · Low risk" to every reader.
+ *
+ * The compliance panel is the one that mattered. It rendered identically for an
+ * organisation sitting in REGISTERED that cannot move a dollar, and a panel on
+ * a dashboard is read as a reading. Telling a customer their KYB is approved
+ * when nothing has been checked is a statement about our own regulatory
+ * posture, in the place they are most likely to believe it.
+ *
+ * All of it now comes from /api/transfers, /api/kyb/state and /api/settings,
+ * and each panel says so when it has nothing to show.
+ */
+const SETTLED_STATES = new Set(['SETTLED', 'DISBURSED', 'CREDITED']);
+const FAILED_STATES = new Set(['FAILED', 'REFUNDED', 'REFUNDING']);
 
 type TxStatus = 'settled' | 'pending' | 'failed';
-const ACTIVITIES: Array<{
-  id: string; desc: string; corridor: string; usd: string; local: string; status: TxStatus; time: string;
-}> = [
-  { id: 'ti_m8q4_9b21fa',      desc: 'Vendor payout · Manila supplier',         corridor: 'USD→PHP', usd: '$748.00',    local: 'PHP 42,180',  status: 'settled', time: '14:32' },
-  { id: 'batch_m8q2_12ac08',   desc: 'BPO payroll batch · 12 recipients', corridor: 'USD→PHP', usd: '$6,670.00',  local: 'PHP 376,377', status: 'pending', time: '13:51' },
-  { id: 'dep_m8pr_77a932',     desc: 'Stripe deposit received',            corridor: '—',        usd: '$3,820.00',  local: '—',           status: 'settled', time: '12:04' },
-  { id: 'ti_m8pa_3c44f1',      desc: 'Textile supplier · Jakarta',         corridor: 'USD→IDR', usd: '$1,200.00',  local: 'IDR 19.5M',  status: 'settled', time: '11:20' },
-  { id: 'ti_m8p9_7e88b2',      desc: 'SG marketplace payout',             corridor: 'USD→SGD', usd: '$890.00',    local: 'SGD 1,197',  status: 'settled', time: '10:55' },
-  { id: 'ti_m8p7_2b11a4',      desc: 'EUR freelancer payment',             corridor: 'USD→EUR', usd: '$260.00',    local: 'EUR 240',    status: 'failed',  time: '09:18' },
-];
 
-const COMPLIANCE: Array<{ label: string; value: string; status: Status }> = [
-  { label: 'KYB status',   value: 'Approved · Sumsub verified',       status: 'verified' },
-  { label: 'Risk tier',    value: 'Tier 1 · Low risk',                 status: 'verified' },
-  { label: 'Daily limit',  value: '43% used · $12,100 remaining',      status: 'pending'  },
-  { label: 'Walrus audit', value: 'Active · 7-year retention',         status: 'verified' },
-];
+type TransferItem = {
+  id: string;
+  state: string;
+  recipientName: string;
+  targetCurrency: string;
+  targetAmount: string;
+  sourceAmountUsd: string;
+  createdAt: string;
+};
+
+function txStatusOf(state: string): TxStatus {
+  if (SETTLED_STATES.has(state)) return 'settled';
+  if (FAILED_STATES.has(state)) return 'failed';
+  return 'pending';
+}
+
+/** KYB lifecycle, in the words a customer needs rather than the enum. */
+const KYB_COPY: Record<string, { value: string; status: Status }> = {
+  REGISTERED: { value: 'Not started — complete business verification', status: 'pending' },
+  KYB_SUBMITTED: { value: 'Submitted — under review', status: 'pending' },
+  KYB_PROVIDER_APPROVED: { value: 'Provider approved — awaiting Splash sign-off', status: 'pending' },
+  ACTIVE: { value: 'Approved — verified and active', status: 'verified' },
+  REJECTED: { value: 'Rejected — contact compliance', status: 'failed' },
+  SUSPENDED: { value: 'Suspended — contact compliance', status: 'failed' },
+};
 
 const NETWORK_STATUS = [
   { label: 'Pay', status: 'Live-model', copy: 'MY-to-PH payout path' },
@@ -129,6 +154,104 @@ export default function DashboardOverview() {
   const [treasuryApy, setTreasuryApy] = useState(0);
   const [walSummary, setWalSummary] = useState({ detected: 0, batchable: 0, needsApproval: 0 });
   const [treasuryRateLabel, setTreasuryRateLabel] = useState('USDY · variable');
+  const [transfers, setTransfers] = useState<TransferItem[] | null>(null);
+  const [kyb, setKyb] = useState<{ state: string; blocked: boolean } | null>(null);
+  const [limits, setLimits] = useState<{ dailyLimitUsd: number; perTransferLimitUsd: number } | null>(null);
+  const [workspace, setWorkspace] = useState<string | null>(null);
+
+  // This organisation's own transfers. Everything below — the pipeline counts,
+  // the recent list and the 30-day volume — is derived from this one read, so
+  // three panels cannot disagree about the same transfers.
+  useEffect(() => {
+    let active = true;
+    void fetch('/api/transfers?filter=all', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { items?: TransferItem[] } | null) => {
+        if (!active) return;
+        setTransfers(Array.isArray(d?.items) ? d.items : []);
+      })
+      .catch(() => { if (active) setTransfers([]); });
+    return () => { active = false; };
+  }, []);
+
+  // Compliance standing, read rather than asserted.
+  useEffect(() => {
+    let active = true;
+    void fetch('/api/kyb/state', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { state?: string; blocked?: boolean } | null) => {
+        if (!active || !d?.state) return;
+        setKyb({ state: d.state, blocked: Boolean(d.blocked) });
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    void fetch('/api/settings', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { dailyLimitUsd?: number; perTransferLimitUsd?: number } | null) => {
+        if (!active || typeof d?.dailyLimitUsd !== 'number') return;
+        setLimits({ dailyLimitUsd: d.dailyLimitUsd, perTransferLimitUsd: d.perTransferLimitUsd ?? 0 });
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, []);
+
+  // The header used to read "Acme Trading Sdn Bhd" for everybody.
+  useEffect(() => {
+    let active = true;
+    void fetch('/api/auth/session', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { organization?: string } | null) => {
+        if (active && d?.organization) setWorkspace(d.organization);
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, []);
+
+  // Memoised so the three derivations below do not see a new array identity on
+  // every render.
+  const rows = useMemo(() => transfers ?? [], [transfers]);
+
+  // Read once, on mount. `Date.now()` during render is impure and the window
+  // does not need to move while somebody is looking at the page.
+  const [mountedAt] = useState(() => Date.now());
+
+  const pipeline = useMemo(() => {
+    const bucket = (match: (t: TransferItem) => boolean) => {
+      const picked = rows.filter(match);
+      const total = picked.reduce((sum, t) => sum + (Number.parseFloat(t.sourceAmountUsd) || 0), 0);
+      return { count: picked.length, amount: total };
+    };
+    return [
+      { label: 'Authorized', dot: 'bg-[var(--pending)]', ...bucket((t) => t.state === 'AUTHORIZED') },
+      {
+        label: 'On the way',
+        dot: 'bg-[var(--info)]',
+        ...bucket((t) => !SETTLED_STATES.has(t.state) && !FAILED_STATES.has(t.state) && t.state !== 'AUTHORIZED'),
+      },
+      { label: 'Settled', dot: 'bg-[var(--ok)]', ...bucket((t) => SETTLED_STATES.has(t.state)) },
+    ];
+  }, [rows]);
+
+  // Thirty days, counted from settled transfers only — an authorized transfer
+  // is money that has not moved, and counting it as volume overstates it.
+  const volume30d = useMemo(() => {
+    const since = mountedAt - 30 * 24 * 60 * 60 * 1000;
+    return rows
+      .filter((t) => SETTLED_STATES.has(t.state) && new Date(t.createdAt).getTime() >= since)
+      .reduce((sum, t) => sum + (Number.parseFloat(t.sourceAmountUsd) || 0), 0);
+  }, [rows, mountedAt]);
+
+  const recent = useMemo(
+    () =>
+      [...rows]
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        .slice(0, 6),
+    [rows],
+  );
 
   // Real two-bucket balances from the treasury ledger.
   useEffect(() => {
@@ -176,10 +299,12 @@ export default function DashboardOverview() {
         className="mt-5"
         kicker="Operating desk"
         title="Overview"
-        description="Acme Trading Sdn Bhd · Updated just now"
+        description={workspace ? `${workspace} · Updated just now` : 'Updated just now'}
         actions={
           <>
-            <StatusBadge status="verified" />
+            {/* Was always "verified", on every account, including one that
+                cannot move a dollar. */}
+            <StatusBadge status={kyb ? (kyb.blocked ? 'pending' : 'verified') : 'pending'} />
             <Link href="/dashboard/transfer" className="dash-btn">
               <Send size={14} />
               New Transfer
@@ -227,12 +352,27 @@ export default function DashboardOverview() {
               </Link>
             );
           }
+          // "$39,120 · +12.4%" was a string literal on the most quotable
+          // number on the page. It is now settled transfers over 30 days, and
+          // an em dash while it is still being read.
+          const resolved =
+            id === 'volume'
+              ? transfers === null
+                ? '…'
+                : `$${fmt(volume30d)}`
+              : value ?? '—';
+          const delta =
+            id === 'volume'
+              ? transfers === null
+                ? ''
+                : 'Settled, last 30 days'
+              : (TOP_STATS.find((s) => s.id === id) as { delta?: string })?.delta ?? '';
           return (
             <DashStat
               key={label}
               label={label}
-              value={value ?? '—'}
-              delta={(TOP_STATS.find((s) => s.id === id) as { delta?: string })?.delta ?? ''}
+              value={resolved}
+              delta={delta}
               deltaClassName="text-[var(--ok)]"
               icon={Icon}
               iconClassName={accent}
@@ -255,19 +395,29 @@ export default function DashboardOverview() {
           <div className="dash-surface p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 className="text-sm font-semibold text-[#1F4452]">Settlement Pipeline</h2>
+              {/* "Next window: 16:30 MYT · 13 transfers · $7,510" was a string.
+                  There is no batching window in the product, so there is
+                  nothing to replace it with — the count that IS real goes here
+                  instead. */}
               <span className="rounded-full bg-[#326273]/8 px-2.5 py-1 text-[13px] font-medium text-[#326273]/60">
-                Next window: 16:30 MYT · 13 transfers · $7,510
+                {transfers === null
+                  ? 'Loading…'
+                  : `${rows.length} ${rows.length === 1 ? 'transfer' : 'transfers'} on record`}
               </span>
             </div>
             <div className="mt-3 grid grid-cols-3 gap-3">
-              {PIPELINE.map((item) => (
+              {pipeline.map((item) => (
                 <div key={item.label} className="rounded-xl bg-[#F6F0ED] p-3">
                   <div className="flex items-center gap-1.5">
                     <span className={cn('h-2 w-2 rounded-full', item.dot)} />
                     <span className="text-[13px] text-[#326273]/60">{item.label}</span>
                   </div>
-                  <div className="money mt-2 text-2xl font-medium text-[#1F4452]">{item.count}</div>
-                  <div className="money mt-0.5 text-[13px] font-medium text-[var(--info)]">{item.amount}</div>
+                  <div className="money mt-2 text-2xl font-medium text-[#1F4452]">
+                    {transfers === null ? '—' : item.count}
+                  </div>
+                  <div className="money mt-0.5 text-[13px] font-medium text-[var(--info)]">
+                    {transfers === null ? '' : `$${fmt(item.amount)}`}
+                  </div>
                 </div>
               ))}
             </div>
@@ -369,27 +519,54 @@ export default function DashboardOverview() {
                   </tr>
                 </thead>
                 <tbody>
-                  {ACTIVITIES.map((a, i) => (
+                  {recent.map((t, i) => (
                     <tr
-                      key={a.id}
+                      key={t.id}
                       className={cn(
                         'border-b border-[#326273]/5 transition-colors hover:bg-[#F6F0ED]/50',
-                        i === ACTIVITIES.length - 1 && 'border-b-0'
+                        i === recent.length - 1 && 'border-b-0'
                       )}
                     >
                       <td className="px-4 py-2.5">
-                        <div className="font-medium text-[#1F4452]">{a.desc}</div>
-                        <div className="mt-0.5 text-[13px] text-[#326273]/35">{a.id}</div>
+                        <div className="font-medium text-[#1F4452]">{t.recipientName}</div>
+                        <div className="mt-0.5 text-[13px] text-[#326273]/35">{t.id}</div>
                       </td>
-                      <td className="hidden px-4 py-2.5 text-[#326273]/55 sm:table-cell">{a.corridor}</td>
-                      <td className="money px-4 py-2.5 font-medium text-[#1F4452]">{a.usd}</td>
-                      <td className="money hidden px-4 py-2.5 text-[#326273]/55 md:table-cell">{a.local}</td>
+                      <td className="hidden px-4 py-2.5 text-[#326273]/55 sm:table-cell">
+                        USD&rarr;{t.targetCurrency}
+                      </td>
+                      <td className="money px-4 py-2.5 font-medium text-[#1F4452]">
+                        ${fmt(Number.parseFloat(t.sourceAmountUsd) || 0)}
+                      </td>
+                      <td className="money hidden px-4 py-2.5 text-[#326273]/55 md:table-cell">
+                        {t.targetCurrency} {t.targetAmount}
+                      </td>
                       <td className="px-4 py-2.5 text-right">
-                        <TxPill status={a.status} />
+                        <TxPill status={txStatusOf(t.state)} />
                       </td>
-                      <td className="hidden px-4 py-2.5 text-right text-[#326273]/45 sm:table-cell">{a.time}</td>
+                      <td className="hidden px-4 py-2.5 text-right text-[#326273]/45 sm:table-cell">
+                        {new Date(t.createdAt).toLocaleTimeString('en-GB', {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </td>
                     </tr>
                   ))}
+                  {/* An empty desk says so. Six invented transactions carrying
+                      ids shaped like real ones is how a demo becomes a claim. */}
+                  {transfers !== null && recent.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="px-4 py-8 text-center text-[13px] font-medium text-[#326273]/55">
+                        No transfers yet. Your first one will appear here.
+                      </td>
+                    </tr>
+                  )}
+                  {transfers === null && (
+                    <tr>
+                      <td colSpan={6} className="px-4 py-8 text-center text-[13px] font-medium text-[#326273]/45">
+                        Loading transfers…
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -483,7 +660,34 @@ export default function DashboardOverview() {
               <h2 className="text-sm font-semibold text-[#1F4452]">Compliance</h2>
             </div>
             <div className="mt-3 space-y-2">
-              {COMPLIANCE.map((item) => (
+              {[
+                {
+                  label: 'KYB status',
+                  ...(kyb
+                    ? KYB_COPY[kyb.state] ?? { value: kyb.state, status: 'pending' as Status }
+                    : { value: 'Reading…', status: 'pending' as Status }),
+                },
+                {
+                  label: 'Money movement',
+                  value: kyb
+                    ? kyb.blocked
+                      ? 'Blocked until verification completes'
+                      : 'Unlocked'
+                    : 'Reading…',
+                  status: (kyb && !kyb.blocked ? 'verified' : 'pending') as Status,
+                },
+                {
+                  label: 'Daily limit',
+                  // The limit is a real setting. How much of it has been used
+                  // today is not computed anywhere, and "43% used · $12,100
+                  // remaining" was invented — so the limit is stated and the
+                  // usage is not.
+                  value: limits
+                    ? `$${limits.dailyLimitUsd.toLocaleString('en-US')} per day`
+                    : 'Reading…',
+                  status: 'verified' as Status,
+                },
+              ].map((item) => (
                 <HoverPopup key={item.label} title={item.label} content={item.value}>
                   <div className="flex cursor-pointer items-center justify-between rounded-lg bg-[#F6F0ED] px-3 py-2 transition-colors hover:bg-[#ede8e4]">
                     <div>

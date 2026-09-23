@@ -4,7 +4,7 @@ import { headers } from 'next/headers';
 import { AlertTriangle, CheckCircle2, ClipboardCheck, Headphones, ShieldCheck, Wallet } from 'lucide-react';
 
 import { adminConsolePath } from '@/lib/admin-routing';
-import { listKybCases } from '@/lib/server/kyb';
+import { listKybCasesForStaff } from '@/lib/server/kyb';
 import { listSupportTickets } from '@/lib/server/support';
 import { getOperatorWalletInfo } from '@/lib/server/sui-settlement';
 
@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic';
 export default async function AdminOverviewPage() {
   const headerStore = await headers();
   const hostname = headerStore.get('host');
-  const kybCases = listKybCases();
+  const kybCases = await listKybCasesForStaff();
   const tickets = listSupportTickets();
   const wallet = await getOperatorWalletInfo().catch(() => null);
   const pendingKyb = kybCases.filter((item) => item.state === 'SUBMITTED' || item.state === 'IN_REVIEW' || item.state === 'NEEDS_INFORMATION');

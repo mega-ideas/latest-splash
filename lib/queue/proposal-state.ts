@@ -317,6 +317,28 @@ export class InMemoryProposalStore {
     return next;
   }
 
+  /**
+   * Record what happened when an approved proposal was carried out.
+   *
+   * Deliberately NOT `revise`. A canon revision voids every approval, which
+   * is right for a quote refresh and catastrophic here: the execution
+   * outcome arrives immediately AFTER the approvals were collected, and
+   * writing it through `revise` would delete the signatures that authorised
+   * the payment it is reporting on.
+   *
+   * `execution` is not a canon field — it is an observation about a decision
+   * already made — so nothing is versioned and no approval is touched.
+   */
+  recordExecution(id: string, execution: NonNullable<UnsignedProposal['execution']>): UnsignedProposal {
+    const proposal = this.proposalsById.get(id);
+    if (!proposal) throw new ProposalStateError(`proposal ${id} was not found`);
+
+    const next: UnsignedProposal = { ...proposal, execution };
+    this.proposalsById.set(id, next);
+    this.recordWrite(next);
+    return next;
+  }
+
   /** Track A §1.4 — canon mutation (quote/route refresh): version bump, hash
    *  recompute, all prior approvals voided. */
   revise(id: string, revision: CanonRevision): UnsignedProposal {

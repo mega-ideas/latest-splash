@@ -92,16 +92,38 @@ export async function fetchEpochInfo(): Promise<EpochInfo | null> {
   try {
     const { suiClient } = await import('../sui.ts');
     const client = suiClient as unknown as {
+      core?: {
+        getCurrentSystemState?: () => Promise<Record<string, unknown>>;
+        getLatestSuiSystemState?: () => Promise<Record<string, unknown>>;
+      };
       getLatestSuiSystemState?: () => Promise<Record<string, unknown>>;
-      core?: { getLatestSuiSystemState?: () => Promise<Record<string, unknown>> };
     };
-    const read = client.getLatestSuiSystemState ?? client.core?.getLatestSuiSystemState;
-    if (typeof read !== 'function') return null;
 
-    const state = await read.call(client.getLatestSuiSystemState ? client : client.core);
+    // gRPC names this getCurrentSystemState and wraps the payload in
+    // a systemState envelope; the retired JSON-RPC named it
+    // getLatestSuiSystemState and
+    // returned the fields flat. Accept either, so pointing SUI_RPC_URL at a
+    // different client does not silently disable sign-in.
+    const candidates = [
+      [client.core?.getCurrentSystemState, client.core],
+      [client.core?.getLatestSuiSystemState, client.core],
+      [client.getLatestSuiSystemState, client],
+    ] as const;
+    const found = candidates.find(([fn]) => typeof fn === 'function');
+    if (!found) return null;
+    const [read, self] = found;
+
+    const raw = await (read as () => Promise<Record<string, unknown>>).call(self);
+    const state = ((raw as Record<string, unknown>).systemState ?? raw) as Record<string, unknown>;
+    const params = (state.parameters ?? {}) as Record<string, unknown>;
+
+    // Every gRPC scalar arrives as a string, so Number() the reads rather than
+    // trusting the type.
     const epoch = Number(state.epoch ?? state.epochId);
     const epochStartMs = Number(state.epochStartTimestampMs ?? state.epoch_start_timestamp_ms);
-    const epochDurationMs = Number(state.epochDurationMs ?? state.epoch_duration_ms ?? ASSUMED_EPOCH_MS);
+    const epochDurationMs = Number(
+      params.epochDurationMs ?? state.epochDurationMs ?? state.epoch_duration_ms ?? ASSUMED_EPOCH_MS,
+    );
     if (!Number.isFinite(epoch) || !Number.isFinite(epochStartMs)) return null;
     return {
       epoch,

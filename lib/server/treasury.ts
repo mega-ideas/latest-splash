@@ -17,6 +17,7 @@
  */
 
 import { deriveYieldMicros, spreadOnGain } from '@/lib/policy/yield-accrual';
+import * as repo from './repository/treasury.ts';
 import { getUsdyRedemptionPrice, navIsDecidable, navPriceUsd, quoteSwap } from './usdy';
 
 export type UserTreasuryLedger = {
@@ -55,7 +56,15 @@ export type YieldSnapshot = {
   skippedReason?: string;
 };
 
-// ─── In-memory store (demo). Swap for a DB + omnibus reconciliation in prod. ────
+// ─── Two backends ──────────────────────────────────────────────────────────
+//
+// Postgres when `DATABASE_URL` is configured; the in-process maps only when it
+// is not, because `npm run dev` has to work without a database.
+//
+// Everything below used to be process state alone, which meant a restart set
+// every customer's treasury back to zero, dropped every pending withdrawal
+// notice — a notice is a promise that funds land on a stated date — and reset
+// the accrual baseline, which silently skipped a day of yield for everybody.
 
 const ledgers = new Map<string, UserTreasuryLedger>();
 const notices: WithdrawalNotice[] = [];
@@ -66,9 +75,91 @@ let noticeCounter = 0;
  *
  * Yield is a price DELTA, so accrual needs the previous observation. `null`
  * means no baseline yet — the next reading establishes one and records nothing,
- * which is correct: there is no delta from a price we never saw.
+ * which is correct: there is no delta from a price we never saw. Persisted, so
+ * that "no baseline" means the first run ever rather than the first run since
+ * the last deploy.
  */
 let lastAccruedPriceMicros: bigint | null = null;
+
+let announced = false;
+
+function usingPostgres(): boolean {
+  if (process.env.DATABASE_URL) return true;
+  if (!announced) {
+    announced = true;
+    console.warn(
+      '[treasury] DATABASE_URL is not set, so balances and withdrawal notices ' +
+        'live in this process and disappear when it restarts. Local development only.',
+    );
+  }
+  return false;
+}
+
+async function db() {
+  const { getDb } = await import('../db/client.ts');
+  return getDb() as never;
+}
+
+/**
+ * The bigint→number boundary, in one place and range-checked.
+ *
+ * Money is `bigint` in the column and `number` micro-USD in this module's
+ * public API, which predates the move to Postgres. That conversion is exact
+ * below 2^53 and silently lossy above it — `Number(9007199254740993n)` is
+ * 9007199254740992, and a balance that quietly loses its last digit is the
+ * exact failure `lib/money.ts` exists to prevent.
+ *
+ * So it throws instead. 2^53 micro-USD is about $9.007 billion in one org's
+ * ledger: not a number this product reaches, and not one to discover by
+ * rounding. A bare `Number(...)` here would have been a silent truncation with
+ * no ceiling at all, which is why `scripts/check-copy.mjs` refuses it.
+ */
+function microToNumber(micro: bigint, field: string): number {
+  if (micro > BigInt(Number.MAX_SAFE_INTEGER) || micro < -BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new Error(
+      `treasury: ${field} = ${micro} micro-USD exceeds the safe integer range and cannot be ` +
+        'represented exactly. The ledger must move to bigint end-to-end before a balance this large.',
+    );
+  }
+  return Number(micro);
+}
+
+function ledgerFromRow(row: repo.LedgerRow): UserTreasuryLedger {
+  return {
+    userId: row.orgId,
+    availableMicro: microToNumber(row.availableMicro, 'availableMicro'),
+    treasuryPrincipalMicro: microToNumber(row.treasuryPrincipalMicro, 'treasuryPrincipalMicro'),
+    treasuryYieldMicro: microToNumber(row.treasuryYieldMicro, 'treasuryYieldMicro'),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+function noticeFromRow(row: repo.NoticeRow): WithdrawalNotice {
+  return {
+    id: row.id,
+    userId: row.orgId,
+    amountMicro: microToNumber(row.amountMicro, 'amountMicro'),
+    requestedAt: row.requestedAt.toISOString(),
+    availableAt: row.availableAt.toISOString(),
+    state: row.state as WithdrawalNoticeState,
+  };
+}
+
+/** Write a ledger back. The only place balances leave this module. */
+async function saveLedger(ledger: UserTreasuryLedger): Promise<UserTreasuryLedger> {
+  if (!usingPostgres()) {
+    ledgers.set(ledger.userId, ledger);
+    return ledger;
+  }
+  await repo.upsertLedger(await db(), {
+    orgId: ledger.userId,
+    availableMicro: BigInt(Math.trunc(ledger.availableMicro)),
+    treasuryPrincipalMicro: BigInt(Math.trunc(ledger.treasuryPrincipalMicro)),
+    treasuryYieldMicro: BigInt(Math.trunc(ledger.treasuryYieldMicro)),
+    updatedAt: new Date(ledger.updatedAt),
+  });
+  return ledger;
+}
 
 const DEMO_USER = 'demo-business';
 function seedDemo(): UserTreasuryLedger {
@@ -85,13 +176,64 @@ function seedDemo(): UserTreasuryLedger {
   return seeded;
 }
 
-export function getLedger(userId: string = DEMO_USER): UserTreasuryLedger {
-  return ledgers.get(userId) ?? seedDemo();
+/**
+ * One org's treasury ledger.
+ *
+ * This used to be `ledgers.get(userId) ?? seedDemo()`, and `seedDemo()` only
+ * ever writes the `demo-business` key. So EVERY org that was not the demo
+ * one fell through to the demo ledger — and every mutation then ran against
+ * `ledger.userId`, which was `'demo-business'`. One shared treasury: any
+ * tenant could move or withdraw another tenant's principal, and the balance
+ * on every dashboard was the same balance.
+ *
+ * An unknown org now gets a ledger OF ITS OWN, starting at zero. Zero is the
+ * honest opening balance for a treasury nobody has funded; the alternative
+ * was showing them somebody else's money.
+ */
+export async function getLedger(userId: string): Promise<UserTreasuryLedger> {
+  if (!usingPostgres()) {
+    const existing = ledgers.get(userId);
+    if (existing) return existing;
+    if (userId === DEMO_USER) return seedDemo();
+    const fresh: UserTreasuryLedger = {
+      userId,
+      availableMicro: 0,
+      treasuryPrincipalMicro: 0,
+      treasuryYieldMicro: 0,
+      updatedAt: new Date().toISOString(),
+    };
+    ledgers.set(userId, fresh);
+    return fresh;
+  }
+
+  const row = await repo.findLedger(await db(), userId);
+  if (row) return ledgerFromRow(row);
+
+  // A treasury nobody has funded opens at zero. Note the demo seed is NOT
+  // applied here: a fixture written to a real ledger is money that does not
+  // exist, and every reconciliation after it would be wrong by that amount.
+  return {
+    userId,
+    availableMicro: 0,
+    treasuryPrincipalMicro: 0,
+    treasuryYieldMicro: 0,
+    updatedAt: new Date().toISOString(),
+  };
 }
 
-export function listLedgers(): UserTreasuryLedger[] {
-  if (ledgers.size === 0) seedDemo();
-  return [...ledgers.values()];
+/**
+ * Every org's ledger.
+ *
+ * Cross-tenant on purpose and named for it: the accrual job pays yield to all
+ * of them and the daily reconciliation sums all of them. Nothing a customer can
+ * reach calls this.
+ */
+export async function listLedgersForStaff(): Promise<UserTreasuryLedger[]> {
+  if (!usingPostgres()) {
+    if (ledgers.size === 0) seedDemo();
+    return [...ledgers.values()];
+  }
+  return (await repo.listLedgersForStaff(await db())).map(ledgerFromRow);
 }
 
 // Notice window in business days. USDY is short-dated-T-bill backed, so this is
@@ -127,13 +269,14 @@ function addBusinessDays(from: Date, days: number): Date {
 
 /** Available (USDC) → Smart Treasury (USDY). Quotes a guarded USDC→USDY swap. */
 export async function moveToTreasury(userId: string, amountMicro: number) {
-  const ledger = getLedger(userId);
+  const ledger = await getLedger(userId);
   if (amountMicro <= 0) throw new Error('amount must be positive');
   if (amountMicro > ledger.availableMicro) throw new Error('insufficient available balance');
   const swap = await quoteSwap('usdc->usdy', BigInt(amountMicro));
   ledger.availableMicro -= amountMicro;
   ledger.treasuryPrincipalMicro += amountMicro;
   ledger.updatedAt = new Date().toISOString();
+  await saveLedger(ledger);
   return { ledger, swap };
 }
 
@@ -141,8 +284,11 @@ export async function moveToTreasury(userId: string, amountMicro: number) {
  * Smart Treasury → Available requires a withdrawal NOTICE (T+1–T+3). Funds are
  * reserved now; the USDY→USDC swap + credit happen on settle.
  */
-export function requestTreasuryWithdrawal(userId: string, amountMicro: number): WithdrawalNotice {
-  const ledger = getLedger(userId);
+export async function requestTreasuryWithdrawal(
+  userId: string,
+  amountMicro: number,
+): Promise<WithdrawalNotice> {
+  const ledger = await getLedger(userId);
   const redeemable = ledger.treasuryPrincipalMicro + ledger.treasuryYieldMicro;
   if (amountMicro <= 0) throw new Error('amount must be positive');
   if (amountMicro > redeemable) throw new Error('insufficient treasury balance');
@@ -160,22 +306,62 @@ export function requestTreasuryWithdrawal(userId: string, amountMicro: number): 
   ledger.treasuryPrincipalMicro -= fromPrincipal;
   ledger.treasuryYieldMicro -= amountMicro - fromPrincipal;
   ledger.updatedAt = now.toISOString();
-  notices.push(notice);
+
+  // The reservation and the notice are one fact. Written in this order so a
+  // failure between them leaves funds reserved with no notice — recoverable by
+  // support — rather than a notice promising money that was never reserved.
+  await saveLedger(ledger);
+  await saveNotice(notice);
   return notice;
+}
+
+/** Persist a notice, on whichever backend is in use. */
+async function saveNotice(notice: WithdrawalNotice): Promise<void> {
+  if (!usingPostgres()) {
+    const index = notices.findIndex((n) => n.id === notice.id);
+    if (index >= 0) notices[index] = notice;
+    else notices.push(notice);
+    return;
+  }
+  const existing = await repo.findNotice(await db(), notice.id);
+  if (existing) {
+    await repo.setNoticeState(await db(), notice.id, notice.state);
+    return;
+  }
+  await repo.insertNotice(await db(), {
+    id: notice.id,
+    orgId: notice.userId,
+    amountMicro: BigInt(Math.trunc(notice.amountMicro)),
+    requestedAt: new Date(notice.requestedAt),
+    availableAt: new Date(notice.availableAt),
+    state: notice.state,
+  });
+}
+
+async function findNotice(noticeId: string): Promise<WithdrawalNotice | null> {
+  if (!usingPostgres()) return notices.find((n) => n.id === noticeId) ?? null;
+  const row = await repo.findNotice(await db(), noticeId);
+  return row ? noticeFromRow(row) : null;
 }
 
 /** On settlement: swap USDY→USDC (guarded) and credit Available. */
 export async function settleWithdrawal(noticeId: string) {
-  const notice = notices.find((n) => n.id === noticeId);
+  const notice = await findNotice(noticeId);
   if (!notice) throw new Error('notice not found');
   if (notice.state === 'SETTLED') return notice;
   if (notice.state === 'CANCELLED') throw new Error('withdrawal was cancelled');
+
   notice.state = 'SWAPPING';
+  await saveNotice(notice);
+
   await quoteSwap('usdy->usdc', BigInt(notice.amountMicro));
-  const ledger = getLedger(notice.userId);
+  const ledger = await getLedger(notice.userId);
   ledger.availableMicro += notice.amountMicro;
   ledger.updatedAt = new Date().toISOString();
+  await saveLedger(ledger);
+
   notice.state = 'SETTLED';
+  await saveNotice(notice);
   return notice;
 }
 
@@ -186,44 +372,60 @@ export async function settleWithdrawal(noticeId: string) {
  * demo-only (used to fast-forward the T+N window without waiting real days).
  */
 export async function settleDueWithdrawals(opts: { force?: boolean } = {}): Promise<WithdrawalNotice[]> {
-  const now = Date.now();
-  const due = notices.filter(
-    (n) => n.state === 'PENDING' && (opts.force === true || new Date(n.availableAt).getTime() <= now),
-  );
+  const now = new Date();
+  let due: WithdrawalNotice[];
+  if (!usingPostgres()) {
+    due = notices.filter(
+      (n) => n.state === 'PENDING' && (opts.force === true || new Date(n.availableAt).getTime() <= now.getTime()),
+    );
+  } else if (opts.force === true) {
+    due = (await repo.listAllNoticesForStaff(await db()))
+      .map(noticeFromRow)
+      .filter((n) => n.state === 'PENDING');
+  } else {
+    // Filtered in the database rather than by loading every notice: this sweep
+    // runs across every tenant and the list only grows.
+    due = (await repo.listDueNotices(await db(), now)).map(noticeFromRow);
+  }
+
   const settled: WithdrawalNotice[] = [];
   for (const n of due) settled.push(await settleWithdrawal(n.id));
   return settled;
 }
 
 /**
- * Cancel a still-pending withdrawal and return the reserved funds to Treasury.
- * Completes the notice state machine (PENDING → CANCELLED).
- */
-/**
  * Cancel a pending withdrawal notice.
  *
  * `userId` is REQUIRED and checked against the notice's owner. It used to be
  * absent: any caller who had seen an id (they are handed out by the snapshot
  * endpoint) could cancel any other tenant's withdrawal. Harmless while every
- * caller resolves to the same demo ledger, and a cross-tenant write the moment
- * ledgers are keyed per user — which is exactly the kind of latent hole that
+ * caller resolved to the same demo ledger, and a cross-tenant write the moment
+ * ledgers are keyed per org — which is exactly the kind of latent hole that
  * gets missed during the migration that introduces it.
  */
-export function cancelTreasuryWithdrawal(noticeId: string, userId: string): WithdrawalNotice {
-  const notice = notices.find((n) => n.id === noticeId);
+export async function cancelTreasuryWithdrawal(
+  noticeId: string,
+  userId: string,
+): Promise<WithdrawalNotice> {
+  const notice = await findNotice(noticeId);
   // Same error for "does not exist" and "belongs to someone else" — otherwise
   // the response distinguishes them and the endpoint becomes an id oracle.
   if (!notice || notice.userId !== userId) throw new Error('notice not found');
   if (notice.state !== 'PENDING') throw new Error(`cannot cancel a ${notice.state} withdrawal`);
-  const ledger = getLedger(notice.userId);
+
+  const ledger = await getLedger(notice.userId);
   ledger.treasuryPrincipalMicro += notice.amountMicro; // un-reserve
   ledger.updatedAt = new Date().toISOString();
+  await saveLedger(ledger);
+
   notice.state = 'CANCELLED';
+  await saveNotice(notice);
   return notice;
 }
 
-export function listNotices(userId?: string): WithdrawalNotice[] {
-  return userId ? notices.filter((n) => n.userId === userId) : [...notices];
+export async function listNotices(userId: string): Promise<WithdrawalNotice[]> {
+  if (!usingPostgres()) return notices.filter((n) => n.userId === userId);
+  return (await repo.listNoticesForOrg(await db(), userId)).map(noticeFromRow);
 }
 
 // ─── Daily yield accrual (called by the accrue-yield cron) ──────────────────────
@@ -252,8 +454,30 @@ export function listNotices(userId?: string): WithdrawalNotice[] {
  * accruing against a stale or invented price is how a ledger drifts away from
  * the assets that are supposed to back it.
  */
+/**
+ * The accrual baseline, read from wherever it actually lives.
+ *
+ * It was a module-level `let`, so every deploy reset it to null. A null
+ * baseline correctly records nothing — there is no delta from a price we never
+ * saw — which meant a restart silently skipped a day of yield for every
+ * customer, and nothing anywhere said so.
+ */
+async function readBaseline(): Promise<bigint | null> {
+  if (!usingPostgres()) return lastAccruedPriceMicros;
+  return repo.readAccrualBaseline(await db());
+}
+
+async function writeBaseline(price: bigint | null): Promise<void> {
+  lastAccruedPriceMicros = price;
+  if (!usingPostgres()) return;
+  await repo.writeAccrualBaseline(await db(), price);
+}
+
 export async function accrueDailyYield(): Promise<YieldSnapshot> {
   const nav = await getUsdyRedemptionPrice();
+  // Read once. Four separate reads could see four different totals if a
+  // customer moved money mid-run, and the snapshot would not add up.
+  const allLedgers = await listLedgersForStaff();
 
   // FAIL CLOSED. No decidable NAV, no accrual. A skipped day is recoverable
   // from the next reading (price deltas compose); a day accrued against a
@@ -265,15 +489,15 @@ export async function accrueDailyYield(): Promise<YieldSnapshot> {
       navStatus: nav.status,
       navAsOf: nav.asOf,
       navSource: nav.source,
-      totalTreasuryMicro: listLedgers().reduce((sum, l) => sum + l.treasuryPrincipalMicro, 0),
+      totalTreasuryMicro: allLedgers.reduce((sum, l) => sum + l.treasuryPrincipalMicro, 0),
       yieldDistributedMicro: 0,
       spreadToOperatingMicro: 0,
       skippedReason: `NAV ${nav.status} — no accrual recorded`,
     };
   }
 
-  const previous = lastAccruedPriceMicros;
-  lastAccruedPriceMicros = nav.priceMicros;
+  const previous = await readBaseline();
+  await writeBaseline(nav.priceMicros);
 
   // First observation establishes the baseline. There is no delta to record yet.
   if (previous === null) {
@@ -283,7 +507,7 @@ export async function accrueDailyYield(): Promise<YieldSnapshot> {
       navStatus: nav.status,
       navAsOf: nav.asOf,
       navSource: nav.source,
-      totalTreasuryMicro: listLedgers().reduce((sum, l) => sum + l.treasuryPrincipalMicro, 0),
+      totalTreasuryMicro: allLedgers.reduce((sum, l) => sum + l.treasuryPrincipalMicro, 0),
       yieldDistributedMicro: 0,
       spreadToOperatingMicro: 0,
       skippedReason: 'first NAV observation — baseline established, no delta to record',
@@ -294,7 +518,7 @@ export async function accrueDailyYield(): Promise<YieldSnapshot> {
   // — a redemption price that moved down is a real loss on the position, and
   // clamping it at zero would report a floor the instrument does not have.
   let distributed = 0;
-  for (const ledger of listLedgers()) {
+  for (const ledger of allLedgers) {
     const result = deriveYieldMicros({
       principalMicro: BigInt(ledger.treasuryPrincipalMicro),
       priceMicros: nav.priceMicros,
@@ -304,11 +528,12 @@ export async function accrueDailyYield(): Promise<YieldSnapshot> {
     const dayYield = Number(result.yieldMicro);
     ledger.treasuryYieldMicro += dayYield;
     ledger.updatedAt = new Date().toISOString();
+    await saveLedger(ledger);
     distributed += dayYield;
   }
 
   const spread = Number(spreadOnGain(BigInt(Math.trunc(distributed))));
-  const total = listLedgers().reduce((sum, l) => sum + l.treasuryPrincipalMicro, 0);
+  const total = allLedgers.reduce((sum, l) => sum + l.treasuryPrincipalMicro, 0);
   return {
     date: new Date().toISOString().slice(0, 10),
     redemptionPriceUsd: navPriceUsd(nav.priceMicros),
@@ -321,16 +546,22 @@ export async function accrueDailyYield(): Promise<YieldSnapshot> {
   };
 }
 
-/** Test seam — the baseline is process-global and would leak across tests. */
-export function resetAccrualBaselineForTesting() {
-  lastAccruedPriceMicros = null;
+/** Test seam — the baseline is shared state and would leak across tests. */
+export async function resetAccrualBaselineForTesting() {
+  await writeBaseline(null);
 }
 
 // ─── Invariants (daily reconciliation) ──────────────────────────────────────────
 
-export function checkInvariants(poolUsdcMicro: number, poolUsdyUnitsMicro: number, redemptionPriceUsd: number) {
-  const sumAvailable = listLedgers().reduce((s, l) => s + l.availableMicro, 0);
-  const sumTreasury = listLedgers().reduce((s, l) => s + l.treasuryPrincipalMicro + l.treasuryYieldMicro, 0);
+export async function checkInvariants(
+  poolUsdcMicro: number,
+  poolUsdyUnitsMicro: number,
+  redemptionPriceUsd: number,
+) {
+  // One read, so the two sums describe the same instant.
+  const all = await listLedgersForStaff();
+  const sumAvailable = all.reduce((s, l) => s + l.availableMicro, 0);
+  const sumTreasury = all.reduce((s, l) => s + l.treasuryPrincipalMicro + l.treasuryYieldMicro, 0);
   const usdyValueMicro = Math.round(poolUsdyUnitsMicro * redemptionPriceUsd);
   const availableOk = sumAvailable <= poolUsdcMicro; // pool must cover claims
   const treasuryOk = sumTreasury <= usdyValueMicro;

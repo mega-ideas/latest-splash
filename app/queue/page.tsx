@@ -22,7 +22,7 @@ type ProposalOverride = Partial<Omit<UnsignedProposal, 'explain' | 'simulation' 
 const baseExplain: ProposalExplain = {
   recommendation: 'Release verified supplier payout',
   financialImpact: {
-    amountOut: BigInt(420000),
+    amountOut: BigInt(420_000_000_000),
     currencyOut: 'USD',
     feeBps: 18,
   },
@@ -76,7 +76,9 @@ const demoProposals: UnsignedProposal[] = [
   proposal('prop_dual_threshold', {
     explain: {
       recommendation: 'Approve dual-control supplier payout',
-      financialImpact: { amountOut: BigInt(1250000), currencyOut: 'USD', feeBps: 14 },
+      // Micro units, like a real proposal. These were display-scale, which is
+      // what hid the formatting bug above.
+      financialImpact: { amountOut: BigInt(1_250_000_000_000), currencyOut: 'USD', feeBps: 14 },
       requiredApprovers: 2,
       risk: 'MEDIUM',
       confidence: 0.86,
@@ -88,7 +90,7 @@ const demoProposals: UnsignedProposal[] = [
     expiresAt: minutesFromNow(11),
     explain: {
       recommendation: 'Convert corridor float before quote expiry',
-      financialImpact: { amountIn: BigInt(300000), amountOut: BigInt(299240), currencyIn: 'USD', currencyOut: 'USD', feeBps: 9 },
+      financialImpact: { amountIn: BigInt(300_000_000_000), amountOut: BigInt(299_240_000_000), currencyIn: 'USD', currencyOut: 'USD', feeBps: 9 },
       requiredApprovers: 1,
       risk: 'LOW',
     },
@@ -126,10 +128,36 @@ const demoProposals: UnsignedProposal[] = [
 
 const queueView = buildApprovalQueue(demoProposals, { now: generatedAt, expiringWithinMs: 20 * 60 * 1000 });
 
+/**
+ * `financialImpact` amounts are MICRO units — `lib/agent/oxwal.ts` builds
+ * every one of them through `usdMicro`/`toMicro`.
+ *
+ * This rendered the raw bigint, so a real proposal showed a figure a million
+ * times too large: a 15,000 USD payment read as 15,000,000,000 on the one
+ * screen whose entire job is to be read before money is released.
+ *
+ * It went unnoticed because the seeded rows below were hand-written at
+ * display scale rather than micro, so the only proposals this page had ever
+ * shown were the ones that happened to look right.
+ */
+const MICRO = BigInt(1_000_000);
+
 function formatAmount(proposal: UnsignedProposal) {
-  const amount = proposal.explain.financialImpact.amountOut ?? proposal.explain.financialImpact.amountIn ?? BigInt(0);
-  const currency = proposal.explain.financialImpact.currencyOut ?? proposal.explain.financialImpact.currencyIn ?? 'USD';
-  return `${currency} ${amount.toLocaleString()}`;
+  const impact = proposal.explain.financialImpact;
+  // Pair the amount with ITS OWN currency. `amountOut` with `currencyIn` (or
+  // the reverse) is how a PHP figure gets labelled USD.
+  const [amountMicro, currency] = impact.amountOut !== undefined
+    ? [impact.amountOut, impact.currencyOut ?? impact.currencyIn ?? 'USD']
+    : [impact.amountIn ?? BigInt(0), impact.currencyIn ?? 'USD'];
+
+  // Integer arithmetic to the last two places, then format. Dividing a
+  // bigint through Number() would round a large payment silently.
+  const negative = amountMicro < BigInt(0);
+  const abs = negative ? -amountMicro : amountMicro;
+  const whole = abs / MICRO;
+  const cents = (abs % MICRO) / BigInt(10_000);
+  const formatted = `${whole.toLocaleString('en-US')}.${cents.toString().padStart(2, '0')}`;
+  return `${currency} ${negative ? '-' : ''}${formatted}`;
 }
 
 function formatExpiry(expiresInMs: number | null) {

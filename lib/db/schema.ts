@@ -39,6 +39,28 @@ export const intentState = pgEnum('intent_state', [
   'AUTHORIZED', 'DEPOSIT_CONFIRMED', 'EXCHANGING', 'EXCHANGED', 'QUEUED', 'SETTLING', 'SETTLED',
   'SWEEPING', 'DISBURSED', 'CREDITED', 'FAILED', 'REFUNDING', 'REFUNDED', 'OPS_HOLD', 'COMPLIANCE_HOLD',
 ]);
+/** Individual or business. FATF R.16 requires different identifying data for each. */
+export const beneficiaryType = pgEnum('beneficiary_type', ['INDIVIDUAL', 'BUSINESS']);
+
+/**
+ * The identifier a corridor's banking system actually routes on.
+ *
+ * Not cosmetic: PH clears on a bank code through PESONet/InstaPay, the EU and
+ * UK on IBAN, GB domestic on sort code, and most of ASEAN on SWIFT plus a
+ * local account number. A beneficiary row that stores only "account number"
+ * cannot be paid in most of these corridors, which is the state this replaces.
+ */
+export const bankIdScheme = pgEnum('bank_id_scheme', [
+  'SWIFT_BIC',
+  'IBAN',
+  'LOCAL_BANK_CODE',
+  'GB_SORT_CODE',
+  'US_ROUTING_ABA',
+  'AU_BSB',
+  'IN_IFSC',
+  'PROXY_ID',
+]);
+
 export const screeningVerdict = pgEnum('screening_verdict', ['CLEAR', 'REVIEW', 'BLOCK', 'ERROR']);
 export const webhookStatus = pgEnum('webhook_status', ['RECEIVED', 'PROCESSED', 'FAILED', 'SKIPPED']);
 
@@ -46,6 +68,22 @@ export const organizations = pgTable('organizations', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   legalName: text('legal_name'),
+
+  // ── The payer's own half of FATF R.16 ─────────────────────────────────
+  // Migration 0006 gave `suppliers` the whole beneficiary side and the
+  // originator nothing, so a complete travel-rule record could not be
+  // produced however carefully the beneficiary was filled in. Org-level
+  // facts, established once at KYB and reused by every payment.
+  /** SSM, UEN, ACRA, DTI, NPWP — the identifier a business normally has. */
+  registrationNumber: text('registration_number'),
+  addressLine1: text('address_line1'),
+  addressLine2: text('address_line2'),
+  addressCity: text('address_city'),
+  addressState: text('address_state'),
+  addressPostalCode: text('address_postal_code'),
+  /** ISO 3166-1 alpha-2. */
+  addressCountry: text('address_country'),
+
   kybStatus: kybStatus('kyb_status').notNull().default('none'),
   kybTier: text('kyb_tier'),
   /** Wallet spec §3 — the accountable onboarding lifecycle:
@@ -291,6 +329,29 @@ export const walletIdentities = pgTable('wallet_identities', {
 ]);
 
 /** Suppliers — the relationship-first noun (today's "recipients"). */
+/**
+ * A beneficiary — the party who receives money.
+ *
+ * Until now this held a name, a country, a bank name, an optional SWIFT and an
+ * account reference. That is enough to display a row and not enough to pay
+ * anyone: a regulated cross-border payout needs the beneficiary's legal
+ * identity and address, the bank's routing identifier for that specific
+ * corridor, and — at the point of payment — a stated purpose and source of
+ * funds. Partners ask for all of it during onboarding, and FATF
+ * Recommendation 16 (the travel rule) requires the originator and beneficiary
+ * data to travel WITH the transfer, not sit in a file somewhere.
+ *
+ * The split is deliberate: identity and bank routing are properties of the
+ * BENEFICIARY and live here; purpose of payment, source of funds and the
+ * relationship are properties of a PAYMENT and live on `payment_intents`,
+ * because the same supplier can be paid for different reasons.
+ *
+ * Columns are nullable because an existing row predates them and because the
+ * required set differs by corridor. What is required is enforced in
+ * `lib/compliance/travel-rule.ts` per destination country, at the point the
+ * payment is authorized — not by the column definition, which cannot know the
+ * corridor.
+ */
 export const suppliers = pgTable('suppliers', {
   id: text('id').primaryKey(),
   orgId: text('org_id').notNull().references(() => organizations.id),
@@ -302,8 +363,64 @@ export const suppliers = pgTable('suppliers', {
   kybStatus: kybStatus('kyb_status').notNull().default('none'),
   /** Set when the counterparty claims a Splash account ("On Splash"). */
   claimedAt: timestamp('claimed_at', { withTimezone: true }),
+
+  // ── Legal identity (FATF R.16 beneficiary data) ──────────────────────────
+  /** INDIVIDUAL or BUSINESS. Decides which identity fields are required. */
+  beneficiaryType: beneficiaryType('beneficiary_type'),
+  /** Registered legal name, when it differs from the trading name in `name`. */
+  legalName: text('legal_name'),
+  /** Company registration number (BUSINESS) — SSM, UEN, DTI, NPWP and so on. */
+  registrationNumber: text('registration_number'),
+  /** Date of birth, ISO date (INDIVIDUAL). One of the R.16 identifiers. */
+  dateOfBirth: text('date_of_birth'),
+  /** National identity document number (INDIVIDUAL), where the corridor asks. */
+  nationalIdNumber: text('national_id_number'),
+
+  // ── Address. R.16 accepts an address as the originator identifier and most
+  //    SEA partners require the beneficiary's too. ISO 3166-1 alpha-2 country.
+  addressLine1: text('address_line1'),
+  addressLine2: text('address_line2'),
+  addressCity: text('address_city'),
+  addressState: text('address_state'),
+  addressPostalCode: text('address_postal_code'),
+  addressCountry: text('address_country'),
+
+  // ── Bank routing ─────────────────────────────────────────────────────────
+  /** Which identifier the destination banking system routes on. */
+  bankIdScheme: bankIdScheme('bank_id_scheme'),
+  /** The value for `bankIdScheme` — a BIC, an IBAN, a local bank code, a sort code. */
+  bankIdValue: text('bank_id_value'),
+  /** Branch code, where the corridor separates it from the bank code (SG, TH). */
+  bankBranchCode: text('bank_branch_code'),
+  /** ISO 3166-1 alpha-2 of the BANK, which is not always the beneficiary's. */
+  bankCountry: text('bank_country'),
+  /** Local account number, when the scheme is not itself the account (IBAN is). */
+  bankAccountNumber: text('bank_account_number'),
+  /** Account holder name exactly as the bank has it, for name-matching checks. */
+  bankAccountName: text('bank_account_name'),
+
+  // ── KYT / screening, the last result for this beneficiary ────────────────
+  screeningVerdict: screeningVerdict('screening_verdict'),
+  screenedAt: timestamp('screened_at', { withTimezone: true }),
+  /** Provider's reference, so a verdict can be re-fetched and audited. */
+  screeningReference: text('screening_reference'),
+
+  // ── Operational record ───────────────────────────────────────────────────
+  /** PAYOUT_ONLY, SWEEP_ACCOUNT or STORED_BALANCE — read on the settlement path. */
+  tier: text('tier'),
+  /** Venue, destination bank and account, delay. One object, queried by nobody. */
+  sweepConfig: jsonb('sweep_config'),
+  demo: boolean('demo').notNull().default(false),
+  /** Contact email for the KYB invite, whether one was sent, and whether this
+   *  beneficiary was typed in or created by an invoice link. */
+  recipientMetadata: jsonb('recipient_metadata'),
+
   ...timestamps,
-}, (table) => [index('suppliers_org_idx').on(table.orgId)]);
+}, (table) => [
+  index('suppliers_org_idx').on(table.orgId),
+  index('suppliers_org_created_idx').on(table.orgId, table.createdAt),
+  index('suppliers_screening_idx').on(table.screeningVerdict),
+]);
 
 export const invoices = pgTable('invoices', {
   id: text('id').primaryKey(),
@@ -321,9 +438,20 @@ export const invoices = pgTable('invoices', {
   walrusBlobId: text('walrus_blob_id'),
   sealPolicyId: text('seal_policy_id'),
   payLinkSlug: text('pay_link_slug'),
+  /** The reference a payer quotes on the wire, so a bank credit can be matched
+   *  back to the invoice it settles. */
+  paymentReference: text('payment_reference'),
+  /** Hash of the uploaded document. `walrusBlobId` says where it is; this says
+   *  what it was, so tampering is detectable without fetching it. */
+  documentSha256: text('document_sha256'),
+  /** The transfer that settles this invoice. The reverse link already exists on
+   *  `payment_intents.invoice_id`; without this one, "was this paid" is a scan. */
+  transferIntentId: text('transfer_intent_id'),
+  demo: boolean('demo').notNull().default(false),
   ...timestamps,
 }, (table) => [
   index('invoices_org_idx').on(table.orgId),
+  index('invoices_org_created_idx').on(table.orgId, table.createdAt),
   index('invoices_supplier_idx').on(table.supplierId),
   uniqueIndex('invoices_pay_link_unique').on(table.payLinkSlug),
 ]);
@@ -354,12 +482,50 @@ export const paymentIntents = pgTable('payment_intents', {
   failedAtState: text('failed_at_state'),
   demo: boolean('demo').notNull().default(false),
   idempotencyKey: text('idempotency_key'),
+
+  // ── Travel-rule context that belongs to the PAYMENT, not the beneficiary ──
+  /** Purpose-of-payment code. BNM, BSP and BI all require one on inbound wires. */
+  purposeCode: text('purpose_code'),
+  /** Free-text purpose, shown to the partner alongside the code. */
+  purposeDescription: text('purpose_description'),
+  /** Where the money came from — required above threshold in most corridors. */
+  sourceOfFunds: text('source_of_funds'),
+  /** Payer's relationship to the beneficiary (supplier, employee, intragroup). */
+  beneficiaryRelationship: text('beneficiary_relationship'),
+  /**
+   * The originator and beneficiary data as transmitted, frozen at authorization.
+   *
+   * A snapshot, not a join: R.16 is about what travelled WITH the payment, and
+   * a beneficiary edited next week must not change what this payment carried.
+   */
+  travelRuleSnapshot: jsonb('travel_rule_snapshot'),
+
+  // ── Settlement detail ────────────────────────────────────────────────────
+  /** The beneficiary as the operator typed it, before it resolves to a supplier. */
+  recipientName: text('recipient_name'),
+  /** PAYOUT_ONLY, SWEEP_ACCOUNT or STORED_BALANCE — read on the settlement path. */
+  deliveryTier: text('delivery_tier'),
+  /**
+   * The rest of one settlement's own detail: stablecoin and rail chosen, DAX
+   * tier, peg-check verdict, Seal policy id, the composed on-chain actions.
+   *
+   * One jsonb rather than twenty sparse columns because these are attributes of
+   * a single settlement, not dimensions anyone queries across. Anything that
+   * later needs an index earns a column of its own.
+   */
+  settlementMetadata: jsonb('settlement_metadata'),
+
   ...timestamps,
 }, (table) => [
   index('intents_org_idx').on(table.orgId),
+  index('intents_org_created_idx').on(table.orgId, table.createdAt),
   index('intents_supplier_idx').on(table.supplierId),
   index('intents_state_idx').on(table.state),
-  uniqueIndex('intents_idempotency_unique').on(table.idempotencyKey),
+  /** Scoped to the org, like `proposals_idempotency_unique` already is.
+   *  Unscoped, the first tenant to use "payroll-friday" would block every
+   *  other tenant from that key forever — a cross-tenant denial of service
+   *  through a field the client chooses. */
+  uniqueIndex('intents_idempotency_unique').on(table.orgId, table.idempotencyKey),
 ]);
 
 /** Lifecycle audit trail — one row per state transition (statusHistory). */
@@ -368,6 +534,8 @@ export const intentTransitions = pgTable('intent_transitions', {
   intentId: text('intent_id').notNull().references(() => paymentIntents.id),
   fromState: text('from_state'),
   toState: text('to_state').notNull(),
+  /** Why. FAILED without one sends an operator to a restarted process's logs. */
+  reason: text('reason'),
   actor: text('actor'),
   ...timestamps,
 }, (table) => [index('transitions_intent_idx').on(table.intentId)]);
@@ -384,6 +552,97 @@ export const orgPolicies = pgTable('org_policies', {
   globalState: text('global_state').notNull().default('ARMED'),
   ...timestamps,
 });
+
+/**
+ * The operating dials, PER ORG.
+ *
+ * These lived in one JSON file with no org id, and `PUT /api/settings` was
+ * guarded by `requireCustomerRequest` alone — no role check. So any signed-in
+ * user of any tenant could set `requireDualApproval` to false for everybody.
+ * The maker-checker control, the per-transfer ceiling and the daily ceiling all
+ * read that file. A control a payer can switch off is not a control.
+ */
+export const orgSettings = pgTable('org_settings', {
+  orgId: text('org_id').primaryKey().references(() => organizations.id),
+  /** Whole USD — policy dials a human types, not amounts that get multiplied. */
+  perTransferLimitUsd: integer('per_transfer_limit_usd').notNull().default(50_000),
+  dailyLimitUsd: integer('daily_limit_usd').notNull().default(250_000),
+  approvalThresholdUsd: integer('approval_threshold_usd').notNull().default(10_000),
+  autoAllocateTreasuryPct: integer('auto_allocate_treasury_pct').notNull().default(1),
+  requireTotp: boolean('require_totp').notNull().default(true),
+  requireDualApproval: boolean('require_dual_approval').notNull().default(true),
+  blockHighRiskCorridors: boolean('block_high_risk_corridors').notNull().default(true),
+  notifyOnSettlement: boolean('notify_on_settlement').notNull().default(true),
+  /** 'code' — a one-time code typed back into Splash, so approving needs the
+   *  phone AND a live authenticated session. 'reply' — APPROVE/REJECT in the
+   *  chat, which authenticates a handset rather than a person. */
+  approvalChannel: text('approval_channel').notNull().default('code'),
+  whatsappEnabled: boolean('whatsapp_enabled').notNull().default(false),
+  /** A limit that moved without a name attached is a limit nobody can ask about. */
+  updatedBy: text('updated_by'),
+  ...timestamps,
+});
+
+/**
+ * An approver's WhatsApp number, bound to a user identity.
+ *
+ * A phone number is not an identity. WhatsApp authenticates a handset, and a
+ * reply proves possession of a device rather than the intent of a person. So a
+ * reply is accepted only when its number resolves to a row here, and the
+ * approval is recorded against that USER — never against the number.
+ */
+/**
+ * One approver, one proposal, one chance.
+ *
+ * A token is bound to one proposal AND one user, single-use and short-lived.
+ * Per-approver rather than one code per proposal, because unanimous consent
+ * means N distinct people must each act: a single shared code makes "three
+ * approvers agreed" satisfiable by one person entering it three times, which
+ * is exactly the control being claimed and exactly what it would not deliver.
+ */
+export const approvalTokens = pgTable('approval_tokens', {
+  id: text('id').primaryKey(),
+  proposalId: text('proposal_id').notNull().references(() => proposals.id, { onDelete: 'cascade' }),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  /** Whose ballot this is. A token arriving from anyone else is refused. */
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  /** The digits typed back into Splash in `code` mode. Short enough to read off
+   *  a phone, and single-use, which is what makes short safe. */
+  code: text('code').notNull(),
+  channel: text('channel').notNull().default('code'),
+  sentTo: text('sent_to'),
+  sentAt: timestamp('sent_at', { withTimezone: true }),
+  /** An approval request is a claim about the world at a moment — this balance,
+   *  this corridor, this beneficiary. A code that still works next week
+   *  approves a payment nobody re-examined. */
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  /** APPROVE or REJECT. A rejection has no row in `approvals` and is the most
+   *  important answer that can come back, so it is recorded here. */
+  decision: text('decision'),
+  decidedAt: timestamp('decided_at', { withTimezone: true }),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('approval_tokens_proposal_user_unique').on(table.proposalId, table.userId),
+  index('approval_tokens_user_idx').on(table.userId, table.decidedAt),
+  index('approval_tokens_code_idx').on(table.code),
+]);
+
+export const approverChannels = pgTable('approver_channels', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  /** E.164, normalised on write. */
+  whatsappE164: text('whatsapp_e164'),
+  /** Proven by a round trip before it may approve anything — an unverified
+   *  number is a number somebody typed, and typos route approvals to strangers. */
+  verifiedAt: timestamp('verified_at', { withTimezone: true }),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('approver_channels_user_org_unique').on(table.orgId, table.userId),
+  /** One number, one person. Two approvers sharing a handset would make "two
+   *  approvers agreed" mean one person pressed a button twice. */
+  uniqueIndex('approver_channels_number_unique').on(table.whatsappE164),
+]);
 
 export const proposals = pgTable('proposals', {
   id: text('id').primaryKey(),
@@ -406,6 +665,17 @@ export const proposals = pgTable('proposals', {
   version: bigint('version', { mode: 'number' }).notNull().default(1),
   approvalHash: text('approval_hash'),
   expiresAt: timestamp('expires_at', { withTimezone: true }),
+  /** The payment this rebuilds into once approved. On the row, not in a
+   *  process map: an approval that survives a restart must still be
+   *  executable, and the thing approved and the thing executed must be one
+   *  record rather than two that can drift. */
+  executionPayload: jsonb('execution_payload'),
+  /** The attempt, including a failure — so an approval that could not be
+   *  carried out is visible rather than silent. Distinct from `settlement`,
+   *  which holds the chain result. */
+  executionState: text('execution_state'),
+  executionError: text('execution_error'),
+  executedAt: timestamp('executed_at', { withTimezone: true }),
   ...timestamps,
 }, (table) => [
   index('proposals_org_idx').on(table.orgId),
@@ -440,6 +710,43 @@ export const fundingEvents = pgTable('funding_events', {
 }, (table) => [
   index('funding_org_idx').on(table.orgId),
   uniqueIndex('funding_provider_ref_unique').on(table.provider, table.providerReference),
+]);
+
+/**
+ * A payroll run: many recipients paid under one authorization, one settlement
+ * digest, one replay key.
+ *
+ * The replay key is the reason this is a table and not a Map. It exists so a
+ * dropped response leg plus a re-submit does not pay every recipient twice
+ * out of the shared pool — and a Map-based guard forgot everything on
+ * restart, which is exactly when an operator retries.
+ */
+export const batchRuns = pgTable('batch_runs', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  /** The on-chain BusinessAccount the run settles from. Recorded, not used
+   *  for scoping — an account id falls back to a value shared across orgs. */
+  accountId: text('account_id'),
+  state: text('state').notNull(),
+  rowCount: integer('row_count').notNull(),
+  acceptedRows: integer('accepted_rows').notNull(),
+  blockedRows: integer('blocked_rows').notNull(),
+  totalAmountMinor: bigint('total_amount_minor', { mode: 'bigint' }).notNull(),
+  currency: text('currency').notNull().default('USD'),
+  targetCurrency: text('target_currency'),
+  idempotencyKey: text('idempotency_key').notNull(),
+  digest: text('digest'),
+  packageId: text('package_id'),
+  /** Which proposal authorized this run, when it needed a second approver. */
+  proposalId: text('proposal_id'),
+  demo: boolean('demo').notNull().default(false),
+  ...timestamps,
+}, (table) => [
+  /** The replay guard itself. A unique index rather than a read-then-write:
+   *  two submissions of the same file arriving together would both find
+   *  nothing and both insert. */
+  uniqueIndex('batch_runs_idempotency_unique').on(table.orgId, table.idempotencyKey),
+  index('batch_runs_org_created_idx').on(table.orgId, table.createdAt),
 ]);
 
 export const payouts = pgTable('payouts', {
@@ -524,6 +831,13 @@ export const journalEntries = pgTable('journal_entries', {
   orgId: text('org_id').references(() => organizations.id),
   kind: text('kind').notNull(),
   intentId: text('intent_id'),
+  /** What this movement refers to — the sweep job, funding session, intent.
+   *  `kind` says which. Without it these rode in `intent_id`, which means an
+   *  intent and nothing else. */
+  refId: text('ref_id'),
+  /** Chain evidence for a ledger line, so reconciling the ledger against the
+   *  chain is a join rather than parsing prose out of `description`. */
+  suiTxDigest: text('sui_tx_digest'),
   description: text('description'),
   ...timestamps,
 }, (table) => [index('journal_intent_idx').on(table.intentId)]);
@@ -539,4 +853,111 @@ export const ledgerPostings = pgTable('ledger_postings', {
 }, (table) => [
   index('postings_journal_idx').on(table.journalId),
   index('postings_account_idx').on(table.account, table.currency),
+  /** One account's movements newest-first: the ledger page and every balance
+   *  check. Carries the ordering so the read is a scan, not a sort. */
+  index('postings_account_created_idx').on(table.account, table.currency, table.createdAt),
 ]);
+
+/**
+ * A business's KYB review case.
+ *
+ * Held in a `globalThis` Map until now, seeded with two invented companies, and
+ * read by routes that were authenticated but not scoped — any signed-in user
+ * could fetch any company's case by id, or find one by passing a business name
+ * in a query string. The row carries a registration number, the SHA-256 of
+ * every uploaded document, the reviewer's notes and the rejection reason, so
+ * that was a cross-tenant read of exactly the material KYB exists to protect.
+ *
+ * `orgId` is not nullable. A case with no owner cannot be filtered by owner,
+ * and one such row would escape every scope in the system.
+ */
+export const kybCases = pgTable('kyb_cases', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  businessName: text('business_name').notNull(),
+  registrationNumber: text('registration_number').notNull(),
+  /** SUBMITTED | IN_REVIEW | NEEDS_INFORMATION | APPROVED | REJECTED.
+   *  Text rather than an enum: this is the reviewer's workflow, distinct from
+   *  the org lifecycle in lib/compliance/kyb-state.ts that gates money. */
+  state: text('state').notNull().default('SUBMITTED'),
+  riskTier: text('risk_tier').notNull().default('UNASSIGNED'),
+  corridorAccess: text('corridor_access').notNull().default('LOCKED'),
+  assignedTo: text('assigned_to'),
+  sumsubApplicantId: text('sumsub_applicant_id'),
+  /** Metadata only — name, type, size, hash, storage key. The files stay
+   *  encrypted behind `storageKey`. */
+  documents: jsonb('documents').notNull().default([]),
+  reviewNotes: text('review_notes'),
+  decisionReason: text('decision_reason'),
+  auditTrail: jsonb('audit_trail').notNull().default([]),
+  submittedAt: timestamp('submitted_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index('kyb_cases_org_idx').on(table.orgId),
+  index('kyb_cases_updated_idx').on(table.updatedAt),
+  /** One live case per registration number per org. Two rows for one company
+   *  mean two review histories, and a decision recorded against whichever the
+   *  reviewer happened to open. */
+  uniqueIndex('kyb_cases_org_registration_unique').on(table.orgId, table.registrationNumber),
+]);
+
+/**
+ * One organisation's treasury balances.
+ *
+ * Held in `new Map()` until now, so a restart set every balance to zero except
+ * the demo org's, which was re-seeded. A deploy could tell a customer their
+ * Smart Treasury was empty.
+ *
+ * Keyed by ORG and nothing narrower: keyed by account, tenants shared a
+ * treasury — which is exactly the bug that made every dashboard show the same
+ * balance.
+ */
+export const treasuryLedgers = pgTable('treasury_ledgers', {
+  orgId: text('org_id').primaryKey().references(() => organizations.id),
+  /** Micro-USD. Integers, never floats — see lib/server/json.ts for the wire
+   *  boundary these cross. */
+  availableMicro: bigint('available_micro', { mode: 'bigint' }).notNull().default(0n),
+  treasuryPrincipalMicro: bigint('treasury_principal_micro', { mode: 'bigint' }).notNull().default(0n),
+  /** MAY be negative. USDY accrues through price, so a falling redemption
+   *  price is a real loss on the position — see migration 0017, which
+   *  removed the floor 0016 wrongly put here. */
+  treasuryYieldMicro: bigint('treasury_yield_micro', { mode: 'bigint' }).notNull().default(0n),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * A promise that funds land back in Available on a stated date.
+ *
+ * These lived in a module-level array, and losing one loses an obligation: the
+ * settlement cron reads this list, so a restart between request and settlement
+ * dropped the withdrawal silently and the customer's money stayed in treasury
+ * with nothing scheduled to release it.
+ */
+export const withdrawalNotices = pgTable('withdrawal_notices', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  amountMicro: bigint('amount_micro', { mode: 'bigint' }).notNull(),
+  requestedAt: timestamp('requested_at', { withTimezone: true }).notNull().defaultNow(),
+  /** When the funds land back in Available (T+1..T+3). */
+  availableAt: timestamp('available_at', { withTimezone: true }).notNull(),
+  /** PENDING | SWAPPING | SETTLED | CANCELLED. */
+  state: text('state').notNull().default('PENDING'),
+}, (table) => [
+  index('withdrawal_notices_org_idx').on(table.orgId),
+  /** The settlement cron sweeps by due date and state, across every tenant. */
+  index('withdrawal_notices_due_idx').on(table.state, table.availableAt),
+]);
+
+/**
+ * The yield accrual baseline.
+ *
+ * Yield is a price DELTA, so accrual needs the previous observation. It was a
+ * module-level `let`, so every deploy reset it to null — and a null baseline
+ * correctly records nothing, which means a restart silently skipped a day of
+ * yield for every customer. One row: there is one USDY price, not one per org.
+ */
+export const treasuryAccrualState = pgTable('treasury_accrual_state', {
+  id: text('id').primaryKey(),
+  lastAccruedPriceMicros: bigint('last_accrued_price_micros', { mode: 'bigint' }),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});

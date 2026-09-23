@@ -3,13 +3,9 @@ import { z } from 'zod';
 
 import { readJsonBody } from '@/lib/server/http';
 import { RATE_LIMITS, clientIp, enforceRateLimit } from '@/lib/server/rate-limit';
-import {
-  findInvoiceBySlug,
-  listRecipients,
-  recordAnalyticsEvent,
-  updateInvoice,
-  upsertRecipientFromInvoice,
-} from '@/lib/server/operations';
+import { recordAnalyticsEvent } from '@/lib/server/operations';
+import { findInvoiceBySlug, patchInvoiceForStaff } from '@/lib/server/invoices-store';
+import { findIssuerForPayLink, upsertRecipientFromInvoice } from '@/lib/server/recipients-store';
 
 export const BANK_TRANSFER_INSTRUCTIONS = {
   beneficiary: 'Splash Labuan Ltd client account',
@@ -24,10 +20,12 @@ const paidSchema = z.object({
   paymentReference: z.string().trim().min(4),
 });
 
-function publicInvoice(slug: string) {
-  const invoice = findInvoiceBySlug(slug);
+async function publicInvoice(slug: string) {
+  // Unscoped by design: the slug IS the capability. It is unguessable, it was
+  // handed to a payer who has no account, and it resolves to one invoice.
+  const invoice = await findInvoiceBySlug(slug);
   if (!invoice) return null;
-  const issuer = listRecipients().find((recipient) => recipient.name === invoice.issuerOrg);
+  const issuer = await findIssuerForPayLink(invoice.orgId, invoice.issuerOrg);
   return {
     id: invoice.id,
     issuerOrg: invoice.issuerOrg,
@@ -44,7 +42,7 @@ function publicInvoice(slug: string) {
 
 export async function GET(_request: Request, { params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const invoice = publicInvoice(slug);
+  const invoice = await publicInvoice(slug);
   return invoice
     ? NextResponse.json(invoice)
     : NextResponse.json({ error: 'Payment request not found' }, { status: 404 });
@@ -62,16 +60,21 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
   if (limited) return limited;
 
   const { slug } = await params;
-  const invoice = findInvoiceBySlug(slug);
+  const invoice = await findInvoiceBySlug(slug);
   if (!invoice) return NextResponse.json({ error: 'Payment request not found' }, { status: 404 });
   const parsed = paidSchema.safeParse(await readJsonBody(request));
   if (!parsed.success) return NextResponse.json({ error: 'Valid payer details are required' }, { status: 400 });
 
-  const recipient = upsertRecipientFromInvoice({
+  // The payer becomes a beneficiary of the ISSUING org, which the invoice now
+  // names directly rather than by looking its issuer up by name.
+  const recipient = await upsertRecipientFromInvoice({
+    orgId: invoice.orgId,
     name: parsed.data.payerOrgName,
     orgEmail: parsed.data.payerOrgEmail,
   });
-  updateInvoice(invoice.id, {
+  // By id, not by session: the payer has no account. The slug already
+  // established which invoice this is.
+  await patchInvoiceForStaff(invoice.id, {
     payerOrgName: parsed.data.payerOrgName,
     payerOrgEmail: parsed.data.payerOrgEmail,
     paymentReference: parsed.data.paymentReference,

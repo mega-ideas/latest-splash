@@ -439,6 +439,9 @@ const ABORT_CODES: Record<number, string> = {
   39: 'E_NO_PENDING_RECOVERY — there is no recovery to cancel or execute; an owner may already have cancelled it.',
   40: 'E_RECOVERY_NOT_DUE — the 72-hour recovery notice has not elapsed. The delay is what makes it a defence rather than a countdown: any owner can cancel during it.',
   41: 'E_WRONG_INTENT — the approval was minted for a different payment intent.',
+  42: 'E_OVER_PER_TRANSFER_CAP — the payout is larger than this account’s tier allows in a single transfer. Tier 3 permits 20,000, Tier 2 permits 200,000, Tier 1 permits 1,000,000 (USD, six-decimal minor units). Split the payment or request a tier increase.',
+  43: 'E_BELOW_MINIMUM — the payout is under the 99 USD platform floor. Below that the fixed costs of settling, anchoring and screening exceed the payment, and the partners’ own corridor minimums start there.',
+  44: 'E_UNKNOWN_TIER — a tier other than 1, 2 or 3, or a limit-increase request that is not actually an increase (tier numbers descend as limits rise).',
 
   415: 'E_APPROVAL_REQUIRED — this intent is bound to a business account, so it settles only through confirm_with_approval. confirm_payment_intent would bypass the approver, the freeze flags and the 24h ceiling.',
   416: 'E_NOT_ACCOUNT_BOUND — confirm_with_approval or approve_payout called on an intent that is not bound to any business account.',
@@ -451,10 +454,13 @@ const ABORT_CODES: Record<number, string> = {
   210: 'E_STALE_GENERATION — the capability presented is from a superseded generation. It was revoked by a break-glass rotation and is permanently dead; a replacement was minted to whoever the rotation named. Check the CapabilityRevoked event and update the configured object id.',
   211: 'E_UNKNOWN_KIND — cap_registry was asked about a capability kind it does not track. Only AnchorCap (0) and ComplianceCap (1) carry generations.',
   212: 'E_INVALID_HOLDER — a break-glass rotation named 0x0 as the new holder, which would mint the replacement capability to nobody and leave the kind unusable.',
+  213: 'E_NOTHING_ARMED — break-glass execute called with nothing armed, or armed for a different capability. Revocation is two transactions: arm, then execute within ninety seconds.',
+  214: 'E_ARM_EXPIRED — the ninety-second commit window closed before the second transaction landed. Nothing was revoked; arm again. The window is deliberately short — it makes revocation two deliberate steps without giving a thief a useful cancellation period.',
+  215: 'E_ALREADY_ARMED — a break-glass is already armed and has not yet expired. Execute it, cancel it, or wait ninety seconds.',
 
   // ── daily_limit (per-account 24h ceiling) ────────────────────────────────
   200: 'E_ZERO_AMOUNT — daily_limit::charge called with a zero payout.',
-  201: 'E_CAP_EXCEEDED — the payout would push this business account past its 24h ceiling, or the ceiling was lowered below what it has already spent inside the window. Read business_account::daily_remaining before retrying; the allowance returns as the window slides.',
+  201: 'E_CAP_EXCEEDED — the payout would push this business account past one of its rolling ceilings (24h or 30-day), or a ceiling was lowered below what it has already spent inside the window. Read business_account::daily_remaining and monthly_remaining before retrying; the allowance returns as the window slides.',
   202: 'E_INVALID_CAP — business_account::set_daily_cap called with zero. A zero ceiling is a brick, not a limit.',
 
   // ── receipt_v2 ───────────────────────────────────────────────────────────

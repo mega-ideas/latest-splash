@@ -8,9 +8,9 @@ import {
   type FundingSourceId,
 } from '@/lib/funding/registry';
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
-import { getLedgerBalance } from '@/lib/server/operations';
+import { accountBalance } from '@/lib/server/ledger-store';
 import { readLastUsedFundingSource } from '@/lib/server/funding-sessions';
-import { isForeignAccountId, resolveSessionAccount } from '@/lib/server/session-account';
+import { isForeignAccountId, requireSessionAccount } from '@/lib/server/session-account';
 
 export async function GET(request: Request) {
   const auth = await requireCustomerRequest(request);
@@ -22,12 +22,14 @@ export async function GET(request: Request) {
   // Derived from the session, not the query string — this response discloses a
   // spendable balance, so a client-named account is a balance oracle for any
   // org whose account id you can guess.
-  const { accountId: businessAccountId } = await resolveSessionAccount(auth.session);
+  const accountCheck = await requireSessionAccount(auth.session);
+  if (accountCheck.response) return accountCheck.response;
+  const { accountId: businessAccountId } = accountCheck.account;
   if (isForeignAccountId(url.searchParams.get('businessAccountId'), businessAccountId)) {
     return NextResponse.json({ error: 'businessAccountId does not belong to this organization' }, { status: 403 });
   }
   const registry = getEnabledFundingOptions();
-  const heldBalanceMicro = getLedgerBalance(businessAccountId);
+  const heldBalanceMicro = Number(await accountBalance(accountCheck.account.orgId));
   const sources = buildFundingSources({ registry, heldBalanceMicro, amountDueMicro });
   const lastUsedSource = readLastUsedFundingSource(businessAccountId);
   const countryCode = request.headers.get('x-vercel-ip-country')

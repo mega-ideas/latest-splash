@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 
 import type { TransferState } from '@/app/dashboard/transfer/page';
+import TravelRuleFields, { type TravelRulePayment } from './TravelRuleFields';
 import type { RecipientRecord } from '@/lib/server/operations';
 import { checkMinimumSettlement, minSettlementUsd, formatUsd } from '@/lib/policy/limits';
 
@@ -63,6 +64,11 @@ export default function StepBeneficiary({ state, set, next }: { state: TransferS
   const [loadingRecipients, setLoadingRecipients] = useState(true);
   const [recipientError, setRecipientError] = useState<string | null>(null);
   const [touchedSubmit, setTouchedSubmit] = useState(false);
+  // Gated on the SERVER's answer, not on a field list in this component.
+  // Until `/api/compliance/travel-rule` says the corridor is satisfied the
+  // step does not advance — including before the first response lands,
+  // because unchecked is not the same as complete.
+  const [travelRuleReady, setTravelRuleReady] = useState(false);
 
   const nameOk = recipient.name.trim().length > 1;
   const accountOk = Boolean(recipient.bank?.account?.trim());
@@ -71,7 +77,10 @@ export default function StepBeneficiary({ state, set, next }: { state: TransferS
   // sub-minimum transfer all the way to the authorization screen.
   const minimumCheck = checkMinimumSettlement(Number.parseFloat(amount.value || '0'), 'transfer');
   const amountOk = minimumCheck.ok;
-  const valid = nameOk && accountOk && amountOk;
+  // A saved beneficiary was completed when it was saved, so it carries its
+  // travel-rule record already; a new one has to be filled in here.
+  const usingSaved = mode === 'saved' && Boolean(selectedRecipientId);
+  const valid = nameOk && accountOk && amountOk && (usingSaved || travelRuleReady);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -346,6 +355,41 @@ export default function StepBeneficiary({ state, set, next }: { state: TransferS
                   maxLength={11}
                 />
               </Field>
+            </div>
+
+            {/* What has to travel WITH the payment.
+
+                Splash asked for a name, an account and an optional SWIFT code.
+                A partner filing an R.16 record needs the beneficiary's legal
+                identity, address and the routing identifier their corridor
+                actually settles on — and which of those applies depends on
+                where the money lands. The fields come from the server so this
+                form cannot ask for something different from what authorize
+                will accept. */}
+            <div className="mt-5 border-t border-[#326273]/10 pt-5">
+              <TravelRuleFields
+                country={recipient.country}
+                value={recipient.travelRule ?? {}}
+                payment={state.travelRulePayment ?? {}}
+                showErrors={touchedSubmit}
+                onReadyChange={setTravelRuleReady}
+                onChange={(next) => {
+                  setSelectedRecipientId(null);
+                  set({
+                    recipient: {
+                      ...recipient,
+                      travelRule: next,
+                      // The legacy display fields stay in step with the
+                      // routing record rather than drifting from it.
+                      bank: {
+                        swift: next.bankIdScheme === 'SWIFT_BIC' ? (next.bankIdValue ?? '') : (recipient.bank?.swift ?? ''),
+                        account: next.bankAccountNumber ?? recipient.bank?.account ?? '',
+                      },
+                    },
+                  });
+                }}
+                onPaymentChange={(next: TravelRulePayment) => set({ travelRulePayment: next })}
+              />
             </div>
           </div>
         )}

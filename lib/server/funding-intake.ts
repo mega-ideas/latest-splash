@@ -4,7 +4,7 @@ import { timingSafeEqual } from 'node:crypto';
 
 import { assessKyt, type FundingSourceType } from '@/lib/funding/kyt-policy';
 import { resolveFundingSelection } from '@/lib/funding/registry';
-import { createLedgerEntry } from '@/lib/server/operations';
+import { recordMovement } from '@/lib/server/ledger-store';
 import { normalizeToUsdc } from '@/lib/server/funding-normalization';
 import {
   readFundingSession,
@@ -98,10 +98,13 @@ export async function ingestStablecoinDeposit(input: InboundDeposit) {
     })!;
   }
 
-  createLedgerEntry({
-    accountId: session.businessAccountId,
+  // The session's ORG, not its on-chain account id: that id falls back to a
+  // value shared by every org without a provisioned account, so crediting by
+  // it would put one tenant's deposit into another tenant's balance.
+  await recordMovement({
+    orgId: session.orgId,
     direction: 'CREDIT',
-    amountUsdcMicro: normalized.amountOutMicro,
+    amountMinor: BigInt(normalized.amountOutMicro),
     refType: 'FUNDING',
     refId: session.id,
     suiTxDigest: input.sourceTxDigest,

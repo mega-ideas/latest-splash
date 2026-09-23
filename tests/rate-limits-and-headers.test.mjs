@@ -161,13 +161,15 @@ test('next.config.ts applies the five headers to every path', async () => {
 test('every route that spends something is limited before it does the work', async () => {
   const routes = {
     'app/api/pay/[slug]/route.ts': ['upsertRecipientFromInvoice('],
-    'app/api/copilot/chat/route.ts': ["import('@anthropic-ai/sdk')"],
+    // v14 consolidated the three chat surfaces onto /api/oxwal and deleted
+    // /api/copilot/chat; the limiter moved with the model spend.
+    'app/api/oxwal/route.ts': ['runOxwalAgent('],
     'app/api/copilot/extract-invoice/route.ts': ['parseInvoice('],
     'app/api/copilot/suggest/route.ts': ['getCopilotSuggestions('],
-    'app/api/copilot/summary/route.ts': ['listInvoices('],
+    'app/api/copilot/summary/route.ts': ['listInvoicesFor('],
     'app/api/seal/access/route.ts': ['sealAdapter.canDecrypt('],
-    'app/api/invoices/route.ts': ['createInvoice('],
-    'app/api/recipients/route.ts': ['createRecipient('],
+    'app/api/invoices/route.ts': ['persistInvoice('],
+    'app/api/recipients/route.ts': ['persistRecipient('],
   };
   for (const [route, work] of Object.entries(routes)) {
     const text = await source(route);

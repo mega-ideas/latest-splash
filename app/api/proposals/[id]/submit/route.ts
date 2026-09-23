@@ -10,6 +10,7 @@ import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { requireActiveOrg } from '@/lib/server/kyb-gate';
 import { readJsonBody } from '@/lib/server/http';
 import { authorizeProposalSubmission } from '@/lib/safety/submit-guard';
+import { executeApprovedProposal } from '@/lib/server/approval-execution';
 
 /**
  * Track A §1.1 — the client may send ONLY its decision and signature binding.
@@ -143,7 +144,33 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     // W1: the approval/submission is durable before we tell the client so a
     // crash right after this response cannot lose it.
     await store.flush();
-    return json({ proposal: submitted, policyDecision });
+
+    // And then the payment actually happens.
+    //
+    // SUBMITTED used to be where this ended: nothing dispatched SETTLE, and
+    // the payload lived in a process map with no readers. Two approvers
+    // signed, the queue showed the run as submitted, and no money moved —
+    // worse than having no approval flow, because everyone believed it had.
+    //
+    // The replay runs the real authorize route, so every guard re-runs
+    // against current state. A day can pass between proposing and approving;
+    // an approval authorises a payment, it does not vouch for a balance.
+    const outcome = await executeApprovedProposal(
+      submitted,
+      submitted.executionPayload ?? null,
+      {
+        cookie: request.headers.get('cookie') ?? '',
+        origin: new URL(request.url).origin,
+      },
+    );
+    // `recordExecution`, never `revise` — a canon revision voids every
+    // approval, and this outcome arrives immediately after they were
+    // collected. Writing it through `revise` would delete the signatures
+    // that authorised the very payment it is reporting on.
+    store.recordExecution(submitted.id, { ...outcome, at: new Date().toISOString() });
+    await store.flush();
+
+    return json({ proposal: store.get(submitted.id) ?? submitted, policyDecision, execution: outcome });
   } catch (error) {
     await store.flush();
     return json({ error: error instanceof Error ? error.message : 'Proposal submission blocked' }, 409);
