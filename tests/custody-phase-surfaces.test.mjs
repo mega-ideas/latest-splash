@@ -20,7 +20,8 @@ const execution = () => import('../lib/server/approval-execution.ts');
  * opened Treasury to any verified business: it drafted allocations and
  * redemptions /api/treasury then refused, and its balance and treasury reads
  * answered with the $11,140 / $24,500 / $98.72 fixtures the treasury page had
- * already stopped showing as a balance.
+ * already stopped showing as a balance. The landing's recipient ladder sold
+ * the sweep account as a "Phase 1 launch" into "a Splash account".
  *
  * This file pins Phase 0: no custody package. tests/oxwal-authority.test.mjs
  * runs with one, and covers the same tools once Treasury is open.
@@ -101,6 +102,22 @@ test('with no collection account the payer is told to pay the issuer, and why, i
   assert.match(client, /paymentReference/, 'the matching reference stays');
   assert.doesNotMatch(client, /\blicensed\b/i);
   assert.match(CUSTODY_PHASE_WHY, new RegExp(CUSTODY_LICENCE), 'one licence clause, everywhere');
+});
+
+/* ── The landing ───────────────────────────────────────────────────────── */
+
+test('the landing ladder puts both fund-holding rungs in Phase 2, in the licence words', async () => {
+  const landing = await source('components/IsometricLanding.tsx');
+  const start = landing.indexOf('const recipientLadder');
+  assert.ok(start > 0, 'the ladder exists');
+  const ladder = landing.slice(start, landing.indexOf('];', start));
+  // It sold the sweep account as a "Phase 1 launch" into "a Splash account",
+  // and stored balance as merely "Corridor gated".
+  assert.doesNotMatch(ladder, /Phase 1 launch|Corridor gated|sweep value into a Splash account/);
+  for (const title of ['Sweep account', 'Stored balance']) {
+    assert.match(ladder, new RegExp(`title: '${title}',\\s*status: 'Phase 2'`), `${title} is Phase 2`);
+  }
+  assert.match(ladder, /\$\{CUSTODY_LICENCE\}/, 'the sweep rung names the licence it waits for');
 });
 
 /* ── Zeke and Treasury ─────────────────────────────────────────────────── */

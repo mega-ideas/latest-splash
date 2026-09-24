@@ -27,6 +27,7 @@ import ControlPlaneExplainer from '@/components/oxwal/ControlPlaneExplainer';
 import RoadmapChip from '@/components/supply/RoadmapChip';
 import { claims, lockedCopy } from '@/content/claims';
 import { BRAND } from '@/content/brand';
+import { CUSTODY_LICENCE } from '@/lib/custody-phase-rules';
 
 const operatingLayers = [
   {
@@ -274,6 +275,8 @@ const copilotLayers = [
   },
 ];
 
+// Rungs 02 and 03 hold customer funds: Phase 2, behind the same custody gate
+// the transfer form and /api/transfers/authorize enforce.
 const recipientLadder = [
   {
     number: '01',
@@ -284,13 +287,13 @@ const recipientLadder = [
   {
     number: '02',
     title: 'Sweep account',
-    status: 'Phase 1 launch',
-    copy: 'Let recipients sweep value into a Splash account and recruit the next counterparty.',
+    status: 'Phase 2',
+    copy: `A Splash account that sweeps to the recipient's bank. It holds funds, which needs ${CUSTODY_LICENCE}.`,
   },
   {
     number: '03',
     title: 'Stored balance',
-    status: 'Corridor gated',
+    status: 'Phase 2',
     copy: 'Keep value inside the network where regulation and partner controls permit it.',
   },
 ];
