@@ -15,10 +15,13 @@
 export const PHASE0_DELIVERY_TIERS = ['PAYOUT_ONLY'] as const;
 export const CUSTODY_DELIVERY_TIERS = ['STORED_BALANCE', 'SWEEP_ACCOUNT'] as const;
 
+/** The licence every fund-holding refusal names, in one place. It claims nothing. */
+export const CUSTODY_LICENCE = 'a money-broking licence Splash does not hold yet';
+
 /** Why the fund-holding tiers are closed. Plain, and licence-named; it claims nothing. */
 export const CUSTODY_PHASE_WHY =
   'Holding customer funds — stored balances, sweep accounts and the treasury — is a Phase 2 capability that needs ' +
-  'a money-broking licence Splash does not hold yet.';
+  `${CUSTODY_LICENCE}.`;
 
 /** The refusal every gated route answers with. Shown to customers, so it claims nothing. */
 export const CUSTODY_PHASE_REASON = `${CUSTODY_PHASE_WHY} Phase 0 pays out only: choose the PAYOUT_ONLY delivery.`;

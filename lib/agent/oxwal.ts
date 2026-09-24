@@ -9,6 +9,7 @@ import {
   classifyLaneIntent,
   formatUsdcAllowance,
   laneRefusalText,
+  treasuryCustodyRefusal,
   ZekeLaneRefusal,
   zekeLaneState,
 } from './zeke-lane-guard.ts';
@@ -788,6 +789,10 @@ async function createDraftProposal(input: {
 
 export function getBalances(input: unknown) {
   const orgId = requireString(objectInput(input), 'orgId');
+  // Phase 0 holds nothing for anyone, so there is no Splash-held balance to
+  // report. The fixture below would read as money Splash is keeping.
+  const custodyRefusal = treasuryCustodyRefusal();
+  if (custodyRefusal) return { orgId, observedAt: nowIso(), balances: [], note: custodyRefusal };
   return {
     orgId,
     observedAt: nowIso(),
@@ -800,6 +805,10 @@ export function getBalances(input: unknown) {
 
 export function getTreasuryState(input: unknown) {
   const orgId = requireString(objectInput(input), 'orgId');
+  // No principal, yield or floor to show in Phase 0: the fixture numbers are
+  // the ones the treasury page stopped showing as a balance.
+  const custodyRefusal = treasuryCustodyRefusal();
+  if (custodyRefusal) return { orgId, observedAt: nowIso(), open: false, note: custodyRefusal };
   return {
     orgId,
     observedAt: nowIso(),
@@ -1605,7 +1614,9 @@ function isInvoiceForAgent(value: unknown): value is InvoiceForAgent {
 const OFF_TOPIC_REPLY = 'Sorry, we need to focus on business! I can help with transfers, batch payouts, invoices, treasury, compliance, rates, and settlement proof.';
 const MISSING_DATA_REPLY = 'You need to provide me the data or upload a file. Attach a payout CSV or an invoice document in the composer, or point me at a record that exists on the desk (for example inv_demo_acme_5000 or cp_acme_ph).';
 
-const SPLASH_ANSWERS: Array<{ test: RegExp; reply: string; skipIf?: RegExp }> = [
+// A reply is a function when its truth depends on the phase: Treasury and the
+// balances it holds exist only once Splash may hold funds.
+const SPLASH_ANSWERS: Array<{ test: RegExp; reply: string | (() => string); skipIf?: RegExp }> = [
   {
     // Fees / pricing / cost
     test: /\b(fee|fees|pricing|price|cost|charge|commission|how much (do|does|will) (it|you|this) cost)\b/,
@@ -1632,12 +1643,12 @@ const SPLASH_ANSWERS: Array<{ test: RegExp; reply: string; skipIf?: RegExp }> = 
     // Treasury / yield — QUESTIONS only; allocate/sweep actions flow to the planner
     test: /\b(treasury|yield|apy|earn|interest|idle cash|usdy|t-?bill)\b/,
     skipIf: /\b(allocate|sweep|deploy|move|put|redeem|withdraw)\b/,
-    reply: 'Smart Treasury earns a variable Ondo USDY (T-bill backed) yield; your Available balance stays instant at 0%. Withdrawals from Smart Treasury take 1-3 business days and every movement is approval-gated. Ask me to "allocate idle treasury" and I will draft an unsigned proposal for you to sign.',
+    reply: () => treasuryCustodyRefusal() ?? 'Smart Treasury earns a variable Ondo USDY (T-bill backed) yield; your Available balance stays instant at 0%. Withdrawals from Smart Treasury take 1-3 business days and every movement is approval-gated. Ask me to "allocate idle treasury" and I will draft an unsigned proposal for you to sign.',
   },
   {
     // Balances
     test: /\b(balance|balances|how much (do|have) (i|we)|available funds|float)\b/,
-    reply: 'Your Available (instant) and Smart Treasury balances live on the Overview and Treasury pages. From here I can read balances into a proposal — say "allocate idle treasury" or start a transfer and I will pull the numbers with evidence attached. Heads up: desk balance figures are demo data today, and every evidence item carries its LIVE or DEMO label.',
+    reply: () => treasuryCustodyRefusal() ?? 'Your Available (instant) and Smart Treasury balances live on the Overview and Treasury pages. From here I can read balances into a proposal — say "allocate idle treasury" or start a transfer and I will pull the numbers with evidence attached. Heads up: desk balance figures are demo data today, and every evidence item carries its LIVE or DEMO label.',
   },
   {
     // Compliance / KYB / AML / limits
@@ -1914,7 +1925,7 @@ function matchDemoScript(message: string): string | null {
   // 5. Known Splash topics.
   for (const entry of SPLASH_ANSWERS) {
     if (entry.skipIf?.test(q)) continue;
-    if (entry.test.test(q)) return entry.reply;
+    if (entry.test.test(q)) return typeof entry.reply === 'function' ? entry.reply() : entry.reply;
   }
 
   return null;
@@ -1998,7 +2009,9 @@ async function laneRefusalFor(orgId: string, message: string, known?: KybLifecyc
   const intent = classifyLaneIntent(message);
   if (!intent) return null;
   const state = known ?? await zekeLaneState(orgId);
-  if (laneAccess(state, intent.lane).allowed) return null;
+  // Verified is not enough for Treasury: it holds funds, so it also waits for
+  // the custody phase. The propose tools refuse the same way underneath.
+  if (laneAccess(state, intent.lane).allowed) return intent.lane === 'TREASURY' ? treasuryCustodyRefusal() : null;
   const text = laneRefusalText(intent.lane, state, intent.currency);
   if (!isOnboarding(state) || !process.env.DATABASE_URL) return text;
   try {

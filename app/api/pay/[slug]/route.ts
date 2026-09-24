@@ -5,14 +5,8 @@ import { readJsonBody } from '@/lib/server/http';
 import { RATE_LIMITS, clientIp, enforceRateLimit } from '@/lib/server/rate-limit';
 import { recordAnalyticsEvent } from '@/lib/server/operations';
 import { findInvoiceBySlug, patchInvoiceForStaff } from '@/lib/server/invoices-store';
+import { payLinkBankInstructions } from '@/lib/server/pay-link';
 import { findIssuerForPayLink, upsertRecipientFromInvoice } from '@/lib/server/recipients-store';
-
-export const BANK_TRANSFER_INSTRUCTIONS = {
-  beneficiary: 'Splash Labuan Ltd client account',
-  bank: 'Maybank International Labuan Branch',
-  account: 'CLIENT-USD-SETTLEMENT',
-  swift: 'MBBEMYKL',
-};
 
 const paidSchema = z.object({
   payerOrgName: z.string().trim().min(2),
@@ -36,7 +30,9 @@ async function publicInvoice(slug: string) {
     memo: invoice.memo,
     status: invoice.status,
     paymentReference: invoice.paymentReference ?? `SPL-${slug.toUpperCase()}-${invoice.id.slice(-4).toUpperCase()}`,
-    bankInstructions: BANK_TRANSFER_INSTRUCTIONS,
+    // A Splash collection account only once Splash may hold the funds; null in
+    // Phase 0, and the payer pays the issuer directly.
+    bankInstructions: payLinkBankInstructions(),
   };
 }
 

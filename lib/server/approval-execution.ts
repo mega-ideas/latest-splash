@@ -33,6 +33,8 @@ import 'server-only';
 
 import type { UnsignedProposal } from '@/lib/agent/types';
 import { x402SettlementAvailability } from '@/lib/agent/x402';
+import { CUSTODY_PHASE_WHY } from '@/lib/custody-phase-rules';
+import { custodyPhaseEnabled } from '@/lib/server/custody-phase';
 
 export type ExecutionOutcome =
   | { state: 'EXECUTED'; detail: string; ref?: string }
@@ -81,6 +83,14 @@ export async function executeApprovedProposal(
           state: 'SKIPPED',
           detail: `Approved and recorded — not paid. ${x402SettlementAvailability().reason}`,
         };
+      case 'TREASURY_ALLOCATE':
+      case 'TREASURY_REDEEM':
+        // Same honesty in Phase 0: /api/treasury refuses every treasury move,
+        // so no "own path" exists to settle this one.
+        if (!custodyPhaseEnabled()) {
+          return { state: 'SKIPPED', detail: `Approved and recorded, not executed. ${CUSTODY_PHASE_WHY}` };
+        }
+      // falls through
       default:
         // An agent-drafted treasury or FX proposal has its own settlement path
         // and is not replayed through the money routes. Saying so is better

@@ -2,8 +2,8 @@ import { notFound } from 'next/navigation';
 
 import PayInvoiceClient from '@/components/pay/PayInvoiceClient';
 import { findInvoiceBySlug } from '@/lib/server/invoices-store';
+import { payLinkBankInstructions } from '@/lib/server/pay-link';
 import { findIssuerForPayLink } from '@/lib/server/recipients-store';
-import { BANK_TRANSFER_INSTRUCTIONS } from '@/app/api/pay/[slug]/route';
 
 export default async function PayInvoicePage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
@@ -24,7 +24,7 @@ export default async function PayInvoicePage({ params }: { params: Promise<{ slu
         memo: invoice.memo,
         status: invoice.status,
         paymentReference: reference,
-        bankInstructions: BANK_TRANSFER_INSTRUCTIONS,
+        bankInstructions: payLinkBankInstructions(),
       }}
     />
   );
