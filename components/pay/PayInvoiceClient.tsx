@@ -1,8 +1,10 @@
 'use client';
 
 import { useState } from 'react';
-import { Check, CheckCircle2, Copy, ShieldCheck } from 'lucide-react';
+import { Check, CheckCircle2, Copy, Info, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
+
+import { CUSTODY_LICENCE } from '@/lib/custody-phase-rules';
 
 type PublicInvoice = {
   issuerOrg: string;
@@ -13,7 +15,9 @@ type PublicInvoice = {
   memo?: string;
   status: string;
   paymentReference: string;
-  bankInstructions: { beneficiary: string; bank: string; account: string; swift: string };
+  /** A Splash collection account, or null in Phase 0: Splash may not hold the
+   *  payer's funds yet, so the payer pays the issuer directly. */
+  bankInstructions: { beneficiary: string; bank: string; account: string; swift: string } | null;
 };
 
 export default function PayInvoiceClient({ slug, invoice }: { slug: string; invoice: PublicInvoice }) {
@@ -65,10 +69,19 @@ export default function PayInvoiceClient({ slug, invoice }: { slug: string; invo
 
           <div className="grid gap-6 p-7 md:grid-cols-[1fr_0.9fr]">
             <div>
-              <h1 className="text-xl font-black">Bank transfer instructions</h1>
-              <p className="mt-1 text-sm text-foreground/60">Use the unique reference so the payment can be matched automatically.</p>
+              {invoice.bankInstructions ? (
+                <>
+                  <h1 className="text-xl font-black">Bank transfer instructions</h1>
+                  <p className="mt-1 text-sm text-foreground/60">Use the unique reference so the payment can be matched automatically.</p>
+                </>
+              ) : (
+                <>
+                  <h1 className="text-xl font-black">Pay {invoice.issuerOrg} directly</h1>
+                  <p className="mt-1 text-sm text-foreground/60">Send the transfer to the bank account on {invoice.issuerOrg}&rsquo;s invoice, with this reference so they can match it.</p>
+                </>
+              )}
               <div className="mt-5 space-y-3">
-                {Object.entries(invoice.bankInstructions).map(([label, value]) => (
+                {invoice.bankInstructions && Object.entries(invoice.bankInstructions).map(([label, value]) => (
                   <button key={label} type="button" onClick={() => copy(value)} className="flex w-full items-center justify-between rounded-xl bg-muted/50 p-3 text-left">
                     <span><small className="block uppercase tracking-wide text-foreground/45">{label}</small><strong>{value}</strong></span>
                     <Copy className="h-4 w-4 text-primary" />
@@ -79,6 +92,15 @@ export default function PayInvoiceClient({ slug, invoice }: { slug: string; invo
                   <Copy className="h-4 w-4 text-accent" />
                 </button>
               </div>
+              {!invoice.bankInstructions && (
+                <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-[var(--info)]/20 bg-[var(--info-bg)] p-3">
+                  <Info className="mt-0.5 h-4 w-4 shrink-0 text-[var(--info)]" aria-hidden="true" />
+                  <p className="text-[13px] leading-relaxed text-[var(--info)]">
+                    <strong className="block font-semibold text-[var(--ink)]">Splash doesn&rsquo;t collect payments yet</strong>
+                    Collecting a payment for someone else means holding their funds, which needs {CUSTODY_LICENCE}.
+                  </p>
+                </div>
+              )}
               {invoice.memo && <p className="mt-4 rounded-xl bg-muted/50 p-3 text-sm text-foreground/65">{invoice.memo}</p>}
             </div>
 

@@ -1,5 +1,7 @@
 import type { KybLifecycleState } from '../compliance/kyb-state.ts';
+import { CUSTODY_PHASE_WHY } from '../custody-phase-rules.ts';
 import { laneAccess, type Lane } from '../payments/stablecoin-lane.ts';
+import { custodyPhaseEnabled } from '../server/custody-phase.ts';
 
 /**
  * What Zeke may prepare for a business, given how far through verification it
@@ -82,6 +84,23 @@ export async function assertZekeLane(orgId: string, lane: Lane, currency: string
   if (!laneAccess(state, lane).allowed) {
     throw new ZekeLaneRefusal(lane, state, laneRefusalText(lane, state, currency));
   }
+  const custody = lane === 'TREASURY' ? treasuryCustodyRefusal() : null;
+  if (custody) throw new ZekeLaneRefusal(lane, state, custody);
+}
+
+/**
+ * Treasury holds customer funds, so verification alone does not open it: it
+ * also needs the custody phase, which /api/treasury enforces
+ * (lib/server/custody-phase.ts). Without this a verified business in Phase 0
+ * got a treasury proposal the route then refused. Worded for a question as
+ * well as a request, since "what's the treasury yield?" reaches it too.
+ */
+export const TREASURY_CUSTODY_REFUSAL =
+  `Treasury isn't open yet. ${CUSTODY_PHASE_WHY} Until then Splash pays out only, and nothing is held for you.`;
+
+/** The Phase 0 refusal for Treasury, or null once the custody phase is on. */
+export function treasuryCustodyRefusal(): string | null {
+  return custodyPhaseEnabled() ? null : TREASURY_CUSTODY_REFUSAL;
 }
 
 // ─── Reading a message ──────────────────────────────────────────────────────

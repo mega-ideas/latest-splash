@@ -43,6 +43,11 @@ import {
  * and truth-envelope acceptance tests.
  */
 
+// Treasury proposals and treasury/balance reads exist only in the custody
+// phase, and 14.15 exercises them, so this file runs with the custody package
+// configured. The Phase 0 refusal is pinned in tests/custody-phase-surfaces.
+process.env.SPLASH_CUSTODY_PACKAGE_ID = '0x' + 'cd'.repeat(32);
+
 async function migratedDb() {
   const client = new PGlite();
   const db = drizzle(client, { schema });
