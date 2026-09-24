@@ -64,7 +64,9 @@ export type PendingApproval = {
   orgId: string;
   /** The authenticated maker. From the session, never the request. */
   createdBy: string;
-  kind: Extract<ProposalKind, 'PAYMENT' | 'BATCH_PAYOUT'>;
+  /** Decides which path carries the approval out (lib/server/approval-execution.ts):
+   *  a treasury move proposed as a PAYMENT was replayed into the transfer route. */
+  kind: Extract<ProposalKind, 'PAYMENT' | 'BATCH_PAYOUT' | 'TREASURY_ALLOCATE' | 'TREASURY_REDEEM'>;
   amountUsd: string;
   targetCurrency: string;
   /** What the operator sees in the queue, in their words. */

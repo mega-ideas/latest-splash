@@ -82,7 +82,12 @@ function payoutBody(overrides = {}) {
 
 const batchScope = (body) => ({ kind: 'BATCH_PAYOUT', substance: batchPayoutSubstance, body, consumer: 'batches/authorize' });
 const payoutScope = (body) => ({ kind: 'PAYMENT', substance: fiatPaymentSubstance, body, consumer: 'transfers/authorize' });
-const treasuryScope = (body) => ({ kind: 'PAYMENT', substance: treasuryMoveSubstance, body, consumer: 'treasury' });
+const treasuryScope = (body) => ({
+  kind: body.action === 'withdraw' ? 'TREASURY_REDEEM' : 'TREASURY_ALLOCATE',
+  substance: treasuryMoveSubstance,
+  body,
+  consumer: 'treasury',
+});
 
 function claimRequest(proposalId) {
   return new Request('http://splash.test/api/batches/authorize', {
@@ -341,19 +346,25 @@ test('a single payout approval is bound to that payment and spent once', async (
 
 test('a treasury move takes only an approval of that move', async () => {
   const store = freshStore();
-  // A payout approval — also kind PAYMENT — does not lift the second approver
-  // on a withdrawal.
+  // A payout approval does not lift the second approver on a withdrawal.
   const payout = approvedProposal(store, { kind: 'PAYMENT', payload: payoutBody() });
   const withdraw = { action: 'withdraw', amountUsd: '50000', totp: '123456' };
   assert.equal(
     (await resolveApprovalClaim(claimRequest(payout.id), 'acme', treasuryScope(withdraw))).reason,
-    'it approved a different payment',
+    'a PAYMENT approval does not cover a TREASURY_REDEEM',
   );
+  // Nor does a payout approval whose payload happens to read as the move.
+  const lookalike = approvedProposal(store, { kind: 'PAYMENT', payload: withdraw });
+  assert.equal((await resolveApprovalClaim(claimRequest(lookalike.id), 'acme', treasuryScope(withdraw))).approved, false);
 
-  const move = approvedProposal(store, { kind: 'PAYMENT', payload: withdraw });
+  const move = approvedProposal(store, { kind: 'TREASURY_REDEEM', payload: withdraw });
   assert.equal(
     (await resolveApprovalClaim(claimRequest(move.id), 'acme', treasuryScope({ ...withdraw, action: 'move' }))).approved,
     false,
+  );
+  assert.equal(
+    (await resolveApprovalClaim(claimRequest(move.id), 'acme', treasuryScope({ ...withdraw, amountUsd: '50001' }))).reason,
+    'it approved a different payment',
   );
   assert.equal((await resolveApprovalClaim(claimRequest(move.id), 'acme', treasuryScope({ ...withdraw, totp: '000000' }))).approved, true);
   assert.equal((await resolveApprovalClaim(claimRequest(move.id), 'acme', treasuryScope(withdraw))).reason, 'already used');
@@ -554,7 +565,7 @@ test('each money route names the kind it makes and what an approval of it covers
   const expected = {
     'app/api/batches/authorize/route.ts': /resolveApprovalClaim\(request, orgId, \{\s*kind: 'BATCH_PAYOUT',\s*substance: batchPayoutSubstance,\s*body,/,
     'app/api/transfers/authorize/route.ts': /resolveApprovalClaim\(request, orgId, \{\s*kind: 'PAYMENT',\s*substance: fiatPaymentSubstance,\s*body: rawBody/,
-    'app/api/treasury/route.ts': /resolveApprovalClaim\(request, orgId, \{\s*kind: 'PAYMENT',\s*substance: treasuryMoveSubstance,\s*body,/,
+    'app/api/treasury/route.ts': /resolveApprovalClaim\(request, orgId, \{\s*kind: treasuryProposalKind\(action\),\s*substance: treasuryMoveSubstance,\s*body,/,
   };
   for (const [file, pattern] of Object.entries(expected)) {
     const route = await source(file);
@@ -581,4 +592,10 @@ test('the replay closes what it presented, whatever the route did', async () => 
   assert.match(replay, /finally \{\s*await closeApprovalClaim\(input\.approvedProposalId, input\.orgId\);\s*\}/);
   assert.match(replay, /return replayThroughRoute\(POST, '\/api\/transfers\/authorize', input\)/);
   assert.match(replay, /return replayThroughRoute\(POST, '\/api\/batches\/authorize', input\)/);
+  assert.match(replay, /return replayThroughRoute\(POST, '\/api\/treasury', input\)/);
+
+  // And the executor closes the ones no route saw: a Phase 0 treasury SKIP, a
+  // failure before the replay ran.
+  const execution = await source('lib/server/approval-execution.ts');
+  assert.match(execution, /finally \{[\s\S]*?await closeApprovalClaim\(proposal\.id, proposal\.orgId\);\s*\}/);
 });

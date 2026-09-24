@@ -9,6 +9,10 @@
  *
  * Amounts are USD (2dp) at the API boundary; the ledger stores micro-USD.
  *
+ * At or above the org's approval threshold a move becomes a TREASURY_ALLOCATE
+ * or TREASURY_REDEEM proposal, and the approval replays it through this route
+ * (lib/server/treasury-approval.ts says what the approval covers).
+ *
  * Phase 0 (no custody package configured): every handler answers the
  * licence-named 403 from lib/server/custody-phase.ts before the ledger is
  * touched. The treasury holds customer funds, and that is a Phase 2
@@ -31,6 +35,12 @@ import { listMovementsSince } from '@/lib/server/ledger-store';
 import { proposeForApproval } from '@/lib/server/dual-approval';
 import { resolveApprovalClaim } from '@/lib/server/approved-proposal';
 import { treasuryMoveSubstance } from '@/lib/server/step-up-subjects';
+import {
+  isTreasuryAction,
+  treasuryApprovedMove,
+  treasuryIdempotencyKey,
+  treasuryProposalKind,
+} from '@/lib/server/treasury-approval';
 import { resolveAuthorityForSession } from '@/lib/auth/authority';
 import {
   cancelTreasuryWithdrawal,
@@ -125,11 +135,23 @@ export async function POST(request: Request) {
     return NextResponse.json(await snapshot(orgId));
   }
 
+  // Settled before anything below spends the second factor or opens an
+  // approval. An unknown action used to clear TOTP, the pause and the
+  // ceilings first, and above the threshold it became a proposal for an
+  // action nothing could carry out.
+  const action = body.action;
+  if (!isTreasuryAction(action)) {
+    return NextResponse.json({ error: "action must be 'move', 'withdraw', or 'cancel'" }, { status: 400 });
+  }
+
   const amountUsd = Number(body.amountUsd);
   if (!Number.isFinite(amountUsd) || amountUsd <= 0) {
     return NextResponse.json({ error: 'amountUsd must be a positive number' }, { status: 400 });
   }
   const amountMicro = Math.round(amountUsd * 1_000_000);
+  // The move as the approval queue names it, to the cent: the proposal's key
+  // and payload are built from this.
+  const move = { action, amountUsd: amountUsd.toFixed(2) };
 
   // Everything below this line was missing.
   //
@@ -140,16 +162,32 @@ export async function POST(request: Request) {
   // principal into and out of a yield-bearing treasury is a money movement;
   // it was the only one on the product that nothing governed.
 
-  const totpVerdict = verifyPayoutTotp({
-    code: String(body.totp ?? ''),
-    accountId,
-    requireTotp: settings.requireTotp,
+  // Only an approval of this move, this amount, spent here. Unbound, any
+  // approved payment's id lifted the second approver for any treasury move,
+  // as many times as it was sent. Read before the second factor, because an
+  // approved move is replayed with none (lib/server/treasury-approval.ts).
+  const approvalClaim = await resolveApprovalClaim(request, orgId, {
+    kind: treasuryProposalKind(action),
+    substance: treasuryMoveSubstance,
+    body,
+    consumer: 'treasury',
   });
-  if (!totpVerdict.ok) {
-    return NextResponse.json(
-      { error: totpVerdict.message, code: `totp_${totpVerdict.code}` },
-      { status: 400 },
-    );
+
+  // The second factor. An approved move is exempt, and only that: its maker
+  // cleared this check to put it in the queue, and the code is single-use, so
+  // demanding it again when the approval is carried out could only fail.
+  if (!treasuryApprovedMove(approvalClaim)) {
+    const totpVerdict = verifyPayoutTotp({
+      code: String(body.totp ?? ''),
+      accountId,
+      requireTotp: settings.requireTotp,
+    });
+    if (!totpVerdict.ok) {
+      return NextResponse.json(
+        { error: totpVerdict.message, code: `totp_${totpVerdict.code}` },
+        { status: 400 },
+      );
+    }
   }
 
   // The chain-side pause governs settlement; a treasury allocation that
@@ -183,34 +221,33 @@ export async function POST(request: Request) {
     );
   }
 
-  // Only an approval of this move, this amount, spent here. Unbound, any
-  // approved payment's id lifted the second approver for any treasury move,
-  // as many times as it was sent.
-  const approvalClaim = await resolveApprovalClaim(request, orgId, {
-    kind: 'PAYMENT',
-    substance: treasuryMoveSubstance,
-    body,
-    consumer: 'treasury',
-  });
+  // The approval resolved above lifts the second approver here; the pause
+  // and the ceilings above applied to it as to any move.
   if (limits.requiresSecondApproval && !approvalClaim.approved) {
     const maker = await resolveAuthorityForSession(auth.session);
     const proposal = await proposeForApproval({
       orgId,
       createdBy: maker.userId,
-      kind: 'PAYMENT',
-      amountUsd: amountUsd.toFixed(2),
+      // A treasury kind, not PAYMENT. The kind decides where the approval is
+      // carried out, and a PAYMENT is replayed through the transfer route,
+      // which refused this body: every approved move was recorded FAILED.
+      kind: treasuryProposalKind(action),
+      amountUsd: move.amountUsd,
       targetCurrency: 'USD',
       recommendation:
-        `${body.action === 'withdraw' ? 'Withdraw' : 'Allocate'} ${amountUsd.toFixed(2)} USD ` +
-        `${body.action === 'withdraw' ? 'from' : 'to'} Smart Treasury. Above the ` +
+        `${action === 'withdraw' ? 'Withdraw' : 'Allocate'} ${move.amountUsd} USD ` +
+        `${action === 'withdraw' ? 'from' : 'to'} Smart Treasury. Above the ` +
         `${settings.approvalThresholdUsd} USD dual-approval threshold.`,
       passedChecks: [
         { source: 'COMPLIANCE', ref: 'KYB org state is ACTIVE, settlement not paused' },
         { source: 'BALANCE', ref: `Ceilings, ${limits.spentTodayUsd} USD spent today` },
-        { source: 'TREASURY', ref: `Smart Treasury ${String(body.action)}` },
+        { source: 'TREASURY', ref: `Smart Treasury ${action}` },
       ],
-      payload: { action: body.action, amountUsd: body.amountUsd, totp: body.totp },
-      idempotencyKey: `treasury:${orgId}:${String(body.action)}:${amountUsd.toFixed(2)}`,
+      // The move and nothing else; the approval replays it through this route.
+      // The TOTP code is not kept: it was spent above, and the approval stands
+      // in for it when the move is carried out.
+      payload: move,
+      idempotencyKey: treasuryIdempotencyKey(orgId, action, move.amountUsd),
       approvalThresholdUsd: settings.approvalThresholdUsd,
     });
     return NextResponse.json(
@@ -230,12 +267,10 @@ export async function POST(request: Request) {
   }
 
   try {
-    if (body.action === 'move') {
+    if (action === 'move') {
       await moveToTreasury(ledger.userId, amountMicro);
-    } else if (body.action === 'withdraw') {
-      await requestTreasuryWithdrawal(ledger.userId, amountMicro);
     } else {
-      return NextResponse.json({ error: "action must be 'move', 'withdraw', or 'cancel'" }, { status: 400 });
+      await requestTreasuryWithdrawal(ledger.userId, amountMicro);
     }
   } catch (error) {
     return NextResponse.json({ error: (error as Error).message }, { status: 400 });

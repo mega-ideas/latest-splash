@@ -486,6 +486,7 @@ export function buildBatch(input: {
   totalAmount: string;
   accountId?: string;
   idempotencyKey?: string;
+  proposalId?: string;
 }) {
   const record: BatchRecord = {
     id: createId('batch'),
@@ -500,6 +501,7 @@ export function buildBatch(input: {
     explorer: explorerLinks(null),
     accountId: input.accountId,
     idempotencyKey: input.idempotencyKey,
+    proposalId: input.proposalId,
     createdAt: new Date().toISOString(),
   };
   operations.batches.set(record.id, record);

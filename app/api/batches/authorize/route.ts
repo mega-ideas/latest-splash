@@ -16,6 +16,7 @@ import { buildBatch } from '@/lib/server/operations';
 import { claimBatch, patchBatch } from '@/lib/server/batches-store';
 import { proposeForApproval } from '@/lib/server/dual-approval';
 import { resolveApprovalClaim } from '@/lib/server/approved-proposal';
+import { batchRunKey, batchSecondFactor } from '@/lib/server/batch-approval';
 import { batchPayoutSubstance, batchTargetCurrency, payableBatchRows } from '@/lib/server/step-up-subjects';
 import { resolveAuthorityForSession } from '@/lib/auth/authority';
 import { listMovementsSince } from '@/lib/server/ledger-store';
@@ -40,7 +41,9 @@ type BatchRow = {
  * file — is caught even though the client sent no key. Two genuinely different
  * payrolls hash differently; the same payroll twice in a row is refused, and
  * `deriveIdempotencyKey` is deliberately NOT time-bucketed, so a real repeat
- * payment of an identical row set needs an explicit new key.
+ * payment of an identical row set needs an explicit new key. A run the
+ * approval queue releases is keyed by its approval instead
+ * (lib/server/batch-approval.ts).
  */
 function deriveIdempotencyKey(orgId: string, rows: BatchRow[], targetCurrency: string): string {
   const canonical = rows
@@ -84,37 +87,70 @@ export async function POST(request: Request) {
   if (termsGate) return termsGate;
   const settings = await readOrgSettings(orgId);
 
-  // Real second factor. This was `/^\d{6}$/` — `000000` authorized a payroll run
-  // out of the shared SettlementPool.
-  // In WhatsApp style, a WhatsApp code + passkey approval for exactly these
-  // rows stands in for the authenticator code. Consumed only when a second
-  // factor is actually required.
-  const whatsappApproved = settings.requireTotp && settings.whatsappEnabled
-    && await consumeActionApproval({
-      session: auth.session,
-      orgId,
-      purpose: 'BATCH_PAYOUT',
-      payload: { rows: body.rows, targetCurrency: body.targetCurrency },
-    });
-  if (!whatsappApproved) {
-    const totpVerdict = verifyPayoutTotp({ code: totp, accountId, requireTotp: settings.requireTotp });
-    if (!totpVerdict.ok) {
-      return NextResponse.json(
-        {
-          error: settings.whatsappEnabled
-            ? `${totpVerdict.message} Or approve this batch with a WhatsApp code and your passkey.`
-            : totpVerdict.message,
-          code: `totp_${totpVerdict.code}`,
-        },
-        { status: 400 },
-      );
-    }
-  }
-
   // The same rule the approval binding uses, so an approval covers exactly
   // the rows this run pays.
   const acceptedRows = payableBatchRows(rows);
   const total = acceptedRows.reduce((sum, row) => sum + Number.parseFloat(String(row.amount ?? '0')), 0);
+  const rowsKey = deriveIdempotencyKey(orgId, acceptedRows, targetCurrency);
+
+  // An approval already collected for THIS run lifts the second-approver
+  // requirement and the second factor, and nothing else. Verified against the
+  // proposal store, never taken from the header: a client that could assert
+  // its own approval would be a considerably worse hole than the one dual
+  // approval closes.
+  //
+  // It must be a batch approval for these payable rows in this currency, and
+  // it is spent here. The claim used to be checked for existence, org and
+  // status only: any approved proposal's id could ride on a different run,
+  // and an approval that had already paid could pay again under a fresh
+  // Idempotency-Key.
+  //
+  // Read before the second factor, because for an approved run it stands in
+  // for one (lib/server/batch-approval.ts).
+  const approvalClaim = await resolveApprovalClaim(request, orgId, {
+    kind: 'BATCH_PAYOUT',
+    substance: batchPayoutSubstance,
+    body,
+    consumer: 'batches/authorize',
+  });
+
+  // Settled before a second factor is spent on a request that could not use it.
+  const runKey = batchRunKey({ claim: approvalClaim, headerKey: request.headers.get('idempotency-key'), rowsKey });
+  if (!runKey.ok) return NextResponse.json({ error: runKey.error, code: runKey.code }, { status: 400 });
+
+  // Real second factor. This was `/^\d{6}$/` — `000000` authorized a payroll run
+  // out of the shared SettlementPool.
+  //
+  // An approved run is replayed with no code, and none could be valid: its
+  // maker's was single-use and spent making the proposal. Asked for anyway, it
+  // failed every approved run here. The approval of these rows stands in.
+  const secondFactor = batchSecondFactor(approvalClaim, settings);
+  if (secondFactor.by === 'request') {
+    // In WhatsApp style, a WhatsApp code + passkey approval for exactly these
+    // rows stands in for the authenticator code. Consumed only when a second
+    // factor is actually required.
+    const whatsappApproved = secondFactor.whatsapp
+      && await consumeActionApproval({
+        session: auth.session,
+        orgId,
+        purpose: 'BATCH_PAYOUT',
+        payload: { rows: body.rows, targetCurrency: body.targetCurrency },
+      });
+    if (!whatsappApproved) {
+      const totpVerdict = verifyPayoutTotp({ code: totp, accountId, requireTotp: settings.requireTotp });
+      if (!totpVerdict.ok) {
+        return NextResponse.json(
+          {
+            error: settings.whatsappEnabled
+              ? `${totpVerdict.message} Or approve this batch with a WhatsApp code and your passkey.`
+              : totpVerdict.message,
+            code: `totp_${totpVerdict.code}`,
+          },
+          { status: 400 },
+        );
+      }
+    }
+  }
 
   // Minimum applies to the batch TOTAL, not per row — a payroll run legitimately
   // contains small individual rows. Checked before the batch record is created
@@ -155,22 +191,9 @@ export async function POST(request: Request) {
   if (!limits.ok) {
     return NextResponse.json({ error: limits.message, code: limits.code, limitUsd: limits.limitUsd }, { status: 400 });
   }
-  // An approval already collected for THIS run lifts the second-approver
-  // requirement and nothing else. Verified against the proposal store, never
-  // taken from the header: a client that could assert its own approval would
-  // be a considerably worse hole than the one dual approval closes.
-  //
-  // It must be a batch approval for these payable rows in this currency, and
-  // it is spent here. The claim used to be checked for existence, org and
-  // status only: any approved proposal's id could ride on a different run,
-  // and an approval that had already paid could pay again under a fresh
-  // Idempotency-Key.
-  const approvalClaim = await resolveApprovalClaim(request, orgId, {
-    kind: 'BATCH_PAYOUT',
-    substance: batchPayoutSubstance,
-    body,
-    consumer: 'batches/authorize',
-  });
+  // The approval resolved above lifts the second approver here. The minimum,
+  // the row cap and the ceilings above, and the pause below, apply to an
+  // approved run exactly as to any other.
   if (limits.requiresSecondApproval && !approvalClaim.approved) {
     // Same dead end as the single-transfer path, and it matters more here:
     // a batch is many payouts under one authorization, so an operator with
@@ -191,9 +214,9 @@ export async function POST(request: Request) {
         { source: 'COUNTERPARTY', ref: `${acceptedRows.length} payable rows, ${rows.length - acceptedRows.length} blocked` },
       ],
       payload: { rows: acceptedRows, targetCurrency },
-      // The same replay key the run itself would use, so a re-submitted file
-      // finds the pending proposal rather than queueing a second one.
-      idempotencyKey: `batch:${deriveIdempotencyKey(orgId, acceptedRows, targetCurrency)}`,
+      // Named by the same rows the run's own replay key is, so a re-submitted
+      // file finds the pending proposal rather than queueing a second one.
+      idempotencyKey: `batch:${rowsKey}`,
       approvalThresholdUsd: settings.approvalThresholdUsd,
     });
     return NextResponse.json(
@@ -227,11 +250,12 @@ export async function POST(request: Request) {
   // Replay guard. This route used to mint a fresh batch on every call, so a
   // dropped response leg plus a re-submit paid every recipient twice out of the
   // shared pool — and the still-valid TOTP sailed through the format check.
-  const headerKey = request.headers.get('idempotency-key')?.trim();
-  const idempotencyKey = headerKey && headerKey.length > 0
-    ? headerKey
-    : deriveIdempotencyKey(orgId, acceptedRows, targetCurrency);
-
+  //
+  // Under `runKey` from above: the caller's key, else the rows' — and for a
+  // run the approval queue released, the approval's, so that one approval
+  // releases one run and next month's identical payroll, approved on its own,
+  // is not taken for this one.
+  //
   // Claim the key by INSERTING it, and let the unique index decide. The
   // read-then-write this replaces had two holes: a restart between the two
   // submissions emptied the map it consulted, and two copies of the same
@@ -244,7 +268,8 @@ export async function POST(request: Request) {
       blockedRows: rows.length - acceptedRows.length,
       totalAmount: total.toFixed(2),
       accountId,
-      idempotencyKey,
+      idempotencyKey: runKey.key,
+      proposalId: runKey.proposalId ?? undefined,
     }),
     targetCurrency,
   );

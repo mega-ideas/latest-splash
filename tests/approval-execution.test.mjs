@@ -184,6 +184,84 @@ test('execution replays the real route so every guard runs again', async () => {
   // largest ones, because being large is what sent them for approval.
   assert.match(replay, /await import\('@\/app\/api\/transfers\/authorize\/route'\)/);
   assert.match(replay, /await import\('@\/app\/api\/batches\/authorize\/route'\)/);
+  assert.match(replay, /await import\('@\/app\/api\/treasury\/route'\)/);
   // The approver's own cookie, so the replay resolves a real session.
   assert.match(replay, /cookie: input\.cookie/);
+});
+
+// ── One approval, one attempt ──────────────────────────────────────────────
+
+test('an approval is spent by its attempt, even one no route saw', async () => {
+  delete process.env.DATABASE_URL;
+  delete process.env.SPLASH_CUSTODY_PACKAGE_ID;
+  const { InMemoryProposalStore } = await import('../lib/queue/proposal-state.ts');
+  const { executeApprovedProposal } = await import('../lib/server/approval-execution.ts');
+  const { resolveApprovalClaim } = await import('../lib/server/approved-proposal.ts');
+  const { custodyPhaseEnabled } = await import('../lib/server/custody-phase.ts');
+  const { batchPayoutSubstance, treasuryMoveSubstance } = await import('../lib/server/step-up-subjects.ts');
+  assert.equal(custodyPhaseEnabled(), false, 'this test runs in Phase 0');
+
+  const store = new InMemoryProposalStore();
+  globalThis.oxwalProposalStore = store;
+  let n = 0;
+  const submitted = (kind, payload) => {
+    const id = `prop_attempt_${++n}`;
+    const now = new Date().toISOString();
+    store.create({
+      id,
+      idempotencyKey: `idem_${id}`,
+      kind,
+      status: 'SIMULATED',
+      tier: 'TIER_0_PROPOSE',
+      orgId: 'acme',
+      corridor: 'USD',
+      unsignedTxBytes: 'deadbeef',
+      createdBy: 'usr_maker',
+      createdAt: now,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      approvals: [],
+      explain: {
+        recommendation: 'test',
+        financialImpact: { amountIn: 65_000_000_000n, currencyIn: 'USD' },
+        evidence: [],
+        confidence: 1,
+        risk: 'MEDIUM',
+        requiredApprovers: 1,
+        reasoningTraceRef: 'dual-approval:test',
+      },
+      simulation: { ok: true, balanceChanges: [], gasSponsored: false, simulatedAt: now },
+      executionPayload: payload,
+    });
+    store.transition(id, { type: 'POLICY_EVALUATED', requiredApprovers: 1 });
+    store.transition(id, { type: 'QUEUE_FOR_APPROVAL' });
+    store.transition(id, { type: 'APPROVE', approval: { userId: 'usr_checker', role: 'APPROVER', signedAt: now } });
+    store.transition(id, { type: 'SIGN', signatureRef: 'sig', signedBy: 'usr_checker', policyAuthorized: true, signedAt: now });
+    return store.transition(id, { type: 'SUBMIT' });
+  };
+  const presented = (proposal, substance, body) =>
+    resolveApprovalClaim(
+      new Request('http://splash.test/', { method: 'POST', headers: { 'x-splash-approved-proposal': proposal.id } }),
+      'acme',
+      { kind: proposal.kind, substance, body, consumer: 'test' },
+    );
+  const context = { cookie: '', origin: 'http://splash.test' };
+
+  // Phase 0 records an approved treasury move SKIPPED and replays nothing.
+  // Left open, the approval would carry the move out later — once custody is
+  // on — for anyone who named it, with no second approver and, since an
+  // approval stands in for it, no code.
+  const move = { action: 'move', amountUsd: '65000.00' };
+  const treasury = submitted('TREASURY_ALLOCATE', move);
+  const skipped = await executeApprovedProposal(treasury, move, context);
+  assert.equal(skipped.state, 'SKIPPED');
+  assert.equal(store.get(treasury.id).approvalConsumedBy, 'execution');
+  assert.equal((await presented(treasury, treasuryMoveSubstance, move)).reason, 'already used');
+
+  // A replay that fails before its route runs spends nothing inside the
+  // route. (Outside Next, the route module cannot even load.)
+  const payload = { rows: [{ name: 'Maria Santos', address: `0x${'a'.repeat(64)}`, amount: '12500.00' }], targetCurrency: 'PHP' };
+  const batch = submitted('BATCH_PAYOUT', payload);
+  const failed = await executeApprovedProposal(batch, payload, context);
+  assert.equal(failed.state, 'FAILED');
+  assert.equal((await presented(batch, batchPayoutSubstance, payload)).reason, 'already used');
 });
