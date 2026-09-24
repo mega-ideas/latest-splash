@@ -270,3 +270,74 @@ test('the sync route is signed in, rate limited, and scoped to the session’s w
   assert.match(route, /RATE_LIMITS\.invoiceUsdcSyncUser/);
   assert.match(route, /syncOrgInvoiceUsdcPayments\(getDb\(\), accountCheck\.account\.orgId/);
 });
+
+// ─── Review fixes ───────────────────────────────────────────────────────────
+
+test('the wallet a payer was shown is pinned, so a later passkey change cannot strand the payment', async () => {
+  const { client, db } = await world();
+  const row = await invoiceUsdcBySlug(db, 'slug-one');
+  assert.equal((await invoiceUsdcTerms(db, row, 'localhost')).address, WALLET);
+  assert.equal((await invoiceUsdcBySlug(db, 'slug-one')).usdcReceiveAddress, WALLET);
+  // The main admin re-enrols with a new passkey: a new address.
+  const NEW = `0x${'ef'.repeat(32)}`;
+  await client.exec(`UPDATE passkey_credentials SET sui_address = '${NEW}' WHERE id = 'pk_ceo'`);
+  const again = await invoiceUsdcBySlug(db, 'slug-one');
+  assert.equal((await invoiceUsdcTerms(db, again, 'localhost')).address, WALLET, 'still the wallet the payer saw');
+  const checked = [];
+  await checkInvoiceUsdcPayment(db, again, { rpId: 'localhost', read: async (address) => { checked.push(address); return { available: true, movements: [], olderCursor: null }; } });
+  assert.deepEqual(checked, [WALLET], 'and that is the wallet checked');
+  await client.close();
+});
+
+test('a payment older than the newest page is still found, and paging stops once past the invoice', async () => {
+  const { client, db } = await world();
+  const row = await invoiceUsdcBySlug(db, 'slug-one');
+  const amount = invoiceUsdcAmountMinor('inv_1', 1_250_000_000n);
+  const befores = [];
+  const read = async (_address, before) => {
+    befores.push(before ?? null);
+    if (!before) return { available: true, movements: [move('RECENT', 1n, '2026-09-25T00:00:00Z')], olderCursor: 'older' };
+    return { available: true, movements: [move('OLDER_PAYMENT', amount, '2026-09-24T09:00:00Z'), move('ANCIENT', 1n, '2026-09-01T00:00:00Z')], olderCursor: 'even-older' };
+  };
+  const result = await checkInvoiceUsdcPayment(db, row, { rpId: 'localhost', read });
+  assert.equal(result.status, 'PAID');
+  assert.equal(result.digest, 'OLDER_PAYMENT');
+  assert.deepEqual(befores, [null, 'older'], 'stops once the page reaches before the invoice');
+  await client.close();
+});
+
+test('an invoice already reported paid is not offered in USDC, and the copied amount is plain', async () => {
+  const lib = code(await readFile(new URL('../lib/server/usdc-invoice-payments.ts', import.meta.url), 'utf8'));
+  assert.match(lib, /if \(row\.status === 'paid' \|\| row\.status === 'settled'\) return null;/);
+  assert.match(lib, /amountPlain: plainUsdc\(terms\.amountMinor\)/);
+  const ui = code(await readFile(new URL('../components/pay/PayWithUsdc.tsx', import.meta.url), 'utf8'));
+  assert.match(ui, /copy\(usdc\.terms!\.amountPlain, 'Amount'\)/);
+  assert.doesNotMatch(ui, /copy\(usdc\.terms!\.amount, /);
+});
+
+test('your own sends from another workspace are not flagged as missing a record', async () => {
+  const { client, db } = await world();
+  const USDC = '0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC';
+  await client.exec(`
+    INSERT INTO organizations (id, name) VALUES ('org_b', 'B Co');
+    INSERT INTO stablecoin_outflows (id, org_id, kind, network, coin_type, principal_minor, fee_minor, sender_address, recipient_address, status, reserved_until, tx_digest, anchor_status, audit_hash, confirmed_at)
+    VALUES ('sco_b', 'org_b', 'TRANSFER', 'mainnet', '${USDC}', 5000000, 40000, '${WALLET}', '${PAYER}', 'CONFIRMED', now(), 'SENT_IN_B', 'PENDING_MAINNET_PUBLISH', '${'ab'.repeat(32)}', now()),
+           ('sco_x', 'org_b', 'TRANSFER', 'mainnet', '${USDC}', 5000000, 40000, '${PAYER}', '${WALLET}', 'CONFIRMED', now(), 'SOMEONE_ELSE', 'PENDING_MAINNET_PUBLISH', '${'cd'.repeat(32)}', now());
+  `);
+  const own = await loadActivityLabels(db, 'org_a', ['SENT_IN_B', 'SOMEONE_ELSE'], WALLET);
+  assert.deepEqual([...own.elsewhereDigests], ['SENT_IN_B'], 'only sends from this wallet');
+  const viewingOther = await loadActivityLabels(db, 'org_a', ['SENT_IN_B'], null);
+  assert.equal(viewingOther.elsewhereDigests.size, 0, 'nothing revealed about a wallet that is not yours');
+  const [m] = labelMovements(
+    [{ digest: 'SENT_IN_B', timestamp: '2026-09-24T09:00:00Z', success: true, direction: 'OUT', amountMinor: 5_040_000n, counterparty: PAYER }],
+    new Map(), new Map(), { splashWallet: true, elsewhereDigests: own.elsewhereDigests },
+  );
+  assert.equal(m.origin, 'SPLASH');
+  assert.equal(m.label, 'Sent with Splash from another workspace');
+  await client.close();
+});
+
+test('treasury quotes are rate limited, since each one calls the Sui route finder', async () => {
+  const route = code(await readFile(new URL('../app/api/stablecoin/treasury-quote/route.ts', import.meta.url), 'utf8'));
+  assert.match(route, /enforceRateLimit\(\{ rule: RATE_LIMITS\.treasuryQuoteUser/);
+});

@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNotNull } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, ne } from 'drizzle-orm';
 
 import { invoices, stablecoinOutflows, stepUpCodes, suppliers, users } from '@/lib/db/schema';
 import type { UsdcRecord } from '@/lib/payments/usdc-records';
@@ -94,11 +94,16 @@ export async function listUsdcRecords(db: Db, orgId: string): Promise<UsdcRecord
  * What wallet activity needs to name its movements: this workspace's
  * transfers by transaction digest, and its wallet recipients by address.
  */
-export async function loadActivityLabels(db: Db, orgId: string, digests: string[]) {
+export async function loadActivityLabels(db: Db, orgId: string, digests: string[], ownWallet: string | null = null) {
   const outflowsByDigest = new Map<string, { kind: string; recipientName: string | null; resource: string | null; feeMinor: bigint }>();
   const recipientsByAddress = new Map<string, string>();
   // Deposits that paid one of this workspace's invoices (pay link, USDC on Sui).
   const invoicesByDigest = new Map<string, { invoiceId: string; payerName: string | null }>();
+  // The caller's own passkey wallet is theirs, not the workspace's: a send
+  // they made through Splash in another workspace is not "no record". Only
+  // for their own wallet and their own sends, so nothing about anyone
+  // else's wallet is revealed.
+  const elsewhereDigests = new Set<string>();
 
   const recipients: Array<{ name: string; walletAddress: string | null }> = await db
     .select({ name: suppliers.name, walletAddress: suppliers.walletAddress })
@@ -125,6 +130,17 @@ export async function loadActivityLabels(db: Db, orgId: string, digests: string[
       .from(invoices)
       .where(and(eq(invoices.orgId, orgId), inArray(invoices.usdcTxDigest, digests)));
     for (const i of paidInvoices) if (i.usdcTxDigest) invoicesByDigest.set(i.usdcTxDigest, { invoiceId: i.id, payerName: i.payerName });
+    if (ownWallet) {
+      const elsewhere: Array<{ txDigest: string | null }> = await db
+        .select({ txDigest: stablecoinOutflows.txDigest })
+        .from(stablecoinOutflows)
+        .where(and(
+          ne(stablecoinOutflows.orgId, orgId),
+          eq(stablecoinOutflows.senderAddress, ownWallet),
+          inArray(stablecoinOutflows.txDigest, digests),
+        ));
+      for (const e of elsewhere) if (e.txDigest) elsewhereDigests.add(e.txDigest);
+    }
     for (const r of rows) {
       if (!r.txDigest) continue;
       outflowsByDigest.set(r.txDigest, {
@@ -135,5 +151,5 @@ export async function loadActivityLabels(db: Db, orgId: string, digests: string[
       });
     }
   }
-  return { outflowsByDigest, recipientsByAddress, invoicesByDigest };
+  return { outflowsByDigest, recipientsByAddress, invoicesByDigest, elsewhereDigests };
 }

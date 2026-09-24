@@ -16,7 +16,8 @@ import { toast } from 'sonner';
 
 export type PublicUsdc = {
   paid: { digest: string; explorerUrl: string; paidAt: string | null } | null;
-  terms: { address: string; amount: string } | null;
+  /** `amount` is for reading; `amountPlain` (no separators) is what gets copied. */
+  terms: { address: string; amount: string; amountPlain: string } | null;
 } | null;
 
 type Check =
@@ -81,11 +82,15 @@ export default function PayWithUsdc({ slug, issuer, usdc }: { slug: string; issu
       ) : usdc.terms ? (
         <>
           <div className="mt-4 space-y-3">
-            <button type="button" onClick={() => void copy(usdc.terms!.amount, 'Amount')} className="flex w-full items-center justify-between gap-3 rounded-xl border border-accent/30 bg-accent/10 p-3 text-left">
+            <button type="button" onClick={() => void copy(usdc.terms!.amountPlain, 'Amount')} className="flex w-full items-center justify-between gap-3 rounded-xl border border-accent/30 bg-accent/10 p-3 text-left">
               <span className="min-w-0">
                 <small className="block uppercase tracking-wide text-foreground/45">Send exactly</small>
-                <strong className="font-mono text-lg tabular-nums">{usdc.terms.amount} USDC</strong>
-                <small className="mt-0.5 block text-foreground/55">The last digits identify this invoice — send every one of them.</small>
+                <strong className="font-mono text-lg tabular-nums">
+                  {/* The cents, then the four digits that identify this invoice, set apart. */}
+                  {usdc.terms.amount.slice(0, -4)}
+                  <span className="rounded bg-accent/20 px-0.5 text-accent underline decoration-dotted underline-offset-4">{usdc.terms.amount.slice(-4)}</span> USDC
+                </strong>
+                <small className="mt-0.5 block text-foreground/55">The highlighted digits identify this invoice — send every one of them.</small>
               </span>
               <Copy className="h-4 w-4 shrink-0 text-accent" aria-hidden="true" />
               <span className="sr-only">Copy amount</span>

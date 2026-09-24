@@ -506,9 +506,6 @@ async function authorize(request: Request, spent: SpentApproval) {
   // Postgres when configured, this process only when not — one place decides,
   // and every read of this transfer goes back through the same store.
   await persistTransfer(intent);
-  // From here the transfer exists and the approval is spent on it, whatever
-  // settlement does next.
-  spent.kept = true;
   if (fundingSession) updateFundingSession(fundingSession.id, { transferIntentId: intent.id });
 
   // Debit the PAYER for every funding source, not only `held`.
@@ -546,6 +543,10 @@ async function authorize(request: Request, spent: SpentApproval) {
       { status: 409 },
     );
   }
+  // From here the payer is debited and the approval is spent on this
+  // transfer, whatever settlement does next. Refused just above, nothing
+  // moved, so the approval is given back.
+  spent.kept = true;
   recordLastUsedFundingSource(businessAccountId, fundingSelection.source);
   await patchAuditReceipt(intent.id, {
     approvedBy: 'dashboard-operator',

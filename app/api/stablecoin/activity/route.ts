@@ -65,12 +65,13 @@ export async function GET(request: Request) {
   if (!page.available) {
     return NextResponse.json({ address, available: false, reason: page.reason }, { headers: { 'Cache-Control': 'no-store' } });
   }
-  const { outflowsByDigest, recipientsByAddress, invoicesByDigest } = await loadActivityLabels(
+  const { outflowsByDigest, recipientsByAddress, invoicesByDigest, elsewhereDigests } = await loadActivityLabels(
     db,
     accountCheck.account.orgId,
     page.movements.map((m) => m.digest),
+    asked ? null : address,
   );
-  const movements = labelMovements(page.movements, outflowsByDigest, recipientsByAddress, { splashWallet: !asked, invoicesByDigest });
+  const movements = labelMovements(page.movements, outflowsByDigest, recipientsByAddress, { splashWallet: !asked, invoicesByDigest, elsewhereDigests });
   return NextResponse.json({
     address,
     available: true,

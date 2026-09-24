@@ -3,7 +3,7 @@ import { and, asc, eq, gt, isNull, notInArray } from 'drizzle-orm';
 import { findCredential } from '../auth/passkey.ts';
 import { invoices } from '../db/schema.ts';
 import { explorerTxUrl, normaliseSuiAddress } from '../payments/stablecoin-lane.ts';
-import { findInvoicePayment, invoiceUsdcAmountMinor, type IncomingMovement } from '../payments/usdc-invoice.ts';
+import { findInvoicePayment, invoiceUsdcAmountMinor, PAYMENT_CLOCK_TOLERANCE_MS, type IncomingMovement } from '../payments/usdc-invoice.ts';
 import { mainAdmin } from './step-up.ts';
 import { readUsdcActivity, type ActivityPage } from './wallet-activity.ts';
 
@@ -35,7 +35,30 @@ export type InvoiceUsdcRow = {
   usdcTxDigest: string | null;
   usdcPaidAt: Date | null;
   usdcPayerAddress: string | null;
+  /** The wallet the payer was shown, pinned the first time (migration 0023). */
+  usdcReceiveAddress: string | null;
 };
+
+type ReadActivity = (address: string, before?: string | null) => Promise<ActivityPage>;
+
+/** Pages of a wallet's activity back to `since` (or at most MAX_READS pages). */
+const MAX_READS = 3;
+async function readSince(address: string, since: Date, read: ReadActivity): Promise<ActivityPage> {
+  const movements: IncomingMovement[] = [];
+  let before: string | null = null;
+  for (let i = 0; i < MAX_READS; i += 1) {
+    const page = await read(address, before);
+    if (!page.available) return page;
+    movements.push(...page.movements);
+    const oldest = page.movements.at(-1)?.timestamp;
+    const pastSince = oldest ? Date.parse(oldest) < since.getTime() - PAYMENT_CLOCK_TOLERANCE_MS : false;
+    if (!page.olderCursor || pastSince) break;
+    before = page.olderCursor;
+  }
+  return { available: true, movements, olderCursor: null };
+}
+
+const liveRead: ReadActivity = (address, before) => readUsdcActivity(address, { limit: 50, before });
 
 export type UsdcCheck =
   | { status: 'PAID'; digest: string; payer: string | null; paidAt: string; explorerUrl: string }
@@ -55,6 +78,7 @@ export async function invoiceUsdcBySlug(db: Db, slug: string): Promise<InvoiceUs
       usdcTxDigest: invoices.usdcTxDigest,
       usdcPaidAt: invoices.usdcPaidAt,
       usdcPayerAddress: invoices.usdcPayerAddress,
+      usdcReceiveAddress: invoices.usdcReceiveAddress,
     })
     .from(invoices)
     .where(eq(invoices.payLinkSlug, slug))
@@ -70,11 +94,30 @@ export async function issuerUsdcAddress(db: Db, orgId: string, rpId: string): Pr
   return credential ? normaliseSuiAddress(credential.suiAddress) : null;
 }
 
-/** What the pay page shows: the wallet and the exact amount, or null. */
+/**
+ * What the pay page shows: the wallet and the exact amount, or null. The
+ * wallet is pinned on the invoice the first time it is shown, so a later
+ * change of main admin or passkey cannot strand a payment already sent.
+ */
 export async function invoiceUsdcTerms(db: Db, row: InvoiceUsdcRow, rpId: string) {
   if (row.amountMinor <= 0n) return null;
-  const address = await issuerUsdcAddress(db, row.orgId, rpId);
-  return address ? { address, amountMinor: invoiceUsdcAmountMinor(row.id, row.amountMinor) } : null;
+  let address: string | null = row.usdcReceiveAddress;
+  if (!address) {
+    const resolved = await issuerUsdcAddress(db, row.orgId, rpId);
+    if (!resolved) return null;
+    const [pinned] = await db
+      .update(invoices)
+      .set({ usdcReceiveAddress: resolved })
+      .where(and(eq(invoices.id, row.id), isNull(invoices.usdcReceiveAddress)))
+      .returning({ address: invoices.usdcReceiveAddress });
+    // Pinned a moment ago by another request: use what it pinned.
+    const [current] = pinned
+      ? [pinned]
+      : await db.select({ address: invoices.usdcReceiveAddress }).from(invoices).where(eq(invoices.id, row.id)).limit(1);
+    address = (current?.address as string | null) ?? resolved;
+    row.usdcReceiveAddress = address;
+  }
+  return { address, amountMinor: invoiceUsdcAmountMinor(row.id, row.amountMinor) };
 }
 
 function paid(row: { usdcTxDigest: string; usdcPayerAddress: string | null; usdcPaidAt: Date | null }): UsdcCheck {
@@ -99,14 +142,13 @@ function uniqueViolation(error: unknown): boolean {
 export async function checkInvoiceUsdcPayment(
   db: Db,
   row: InvoiceUsdcRow,
-  deps: { rpId: string; read?: (address: string) => Promise<ActivityPage>; now?: () => Date },
+  deps: { rpId: string; read?: ReadActivity; now?: () => Date },
 ): Promise<UsdcCheck> {
   if (row.usdcTxDigest) return paid({ usdcTxDigest: row.usdcTxDigest, usdcPayerAddress: row.usdcPayerAddress, usdcPaidAt: row.usdcPaidAt });
   const terms = await invoiceUsdcTerms(db, row, deps.rpId);
   if (!terms) return { status: 'NO_WALLET' };
 
-  const read = deps.read ?? ((address: string) => readUsdcActivity(address, { limit: 50 }));
-  const activity = await read(terms.address);
+  const activity = await readSince(terms.address, row.createdAt, deps.read ?? liveRead);
   if (!activity.available) return { status: 'UNAVAILABLE', reason: activity.reason };
   const match = findInvoicePayment(activity.movements, terms.amountMinor, row.createdAt);
   if (!match) return { status: 'NOT_SEEN', expectedMinor: terms.amountMinor, address: terms.address };
@@ -162,10 +204,11 @@ export async function recordInvoiceUsdcPayment(
  */
 export async function publicUsdcForSlug(slug: string) {
   if (!process.env.DATABASE_URL) return null;
-  const [{ getDb }, { relyingPartyId }, { exactUsdc }] = await Promise.all([
+  const [{ getDb }, { relyingPartyId }, { exactUsdc }, { plainUsdc }] = await Promise.all([
     import('../db/client.ts'),
     import('../auth/passkey.ts'),
     import('../payments/usdc-invoice.ts'),
+    import('../payments/usdc-records.ts'),
   ]);
   const db = getDb();
   const row = await invoiceUsdcBySlug(db, slug);
@@ -176,8 +219,16 @@ export async function publicUsdcForSlug(slug: string) {
       terms: null,
     };
   }
+  // Reported paid (by bank) or settled: offering USDC now invites paying twice.
+  if (row.status === 'paid' || row.status === 'settled') return null;
   const terms = await invoiceUsdcTerms(db, row, relyingPartyId());
-  return terms ? { paid: null, terms: { address: terms.address, amount: exactUsdc(terms.amountMinor) } } : null;
+  return terms
+    ? {
+        paid: null,
+        // `amount` to read (with separators), `amountPlain` to copy into a wallet.
+        terms: { address: terms.address, amount: exactUsdc(terms.amountMinor), amountPlain: plainUsdc(terms.amountMinor) },
+      }
+    : null;
 }
 
 export type InvoiceSyncResult =
@@ -195,7 +246,7 @@ export type InvoiceSyncResult =
 export async function syncOrgInvoiceUsdcPayments(
   db: Db,
   orgId: string,
-  deps: { rpId: string; read?: (address: string) => Promise<ActivityPage>; now?: () => Date },
+  deps: { rpId: string; read?: ReadActivity; now?: () => Date },
 ): Promise<InvoiceSyncResult> {
   const address = await issuerUsdcAddress(db, orgId, deps.rpId);
   if (!address) return { status: 'NO_WALLET' };
@@ -210,6 +261,7 @@ export async function syncOrgInvoiceUsdcPayments(
       usdcTxDigest: invoices.usdcTxDigest,
       usdcPaidAt: invoices.usdcPaidAt,
       usdcPayerAddress: invoices.usdcPayerAddress,
+      usdcReceiveAddress: invoices.usdcReceiveAddress,
     })
     .from(invoices)
     .where(and(
@@ -222,8 +274,9 @@ export async function syncOrgInvoiceUsdcPayments(
     .limit(500)).map((r: InvoiceUsdcRow) => ({ ...r, amountMinor: BigInt(r.amountMinor) }));
   if (open.length === 0) return { status: 'SYNCED', checked: 0, paid: [], alreadyUsed: [] };
 
-  const read = deps.read ?? ((a: string) => readUsdcActivity(a, { limit: 50 }));
-  const activity = await read(address);
+  // Back as far as the oldest open invoice. An invoice pinned to an earlier
+  // wallet (main admin changed since) is checked on its own by the payer's check.
+  const activity = await readSince(address, open[0].createdAt, deps.read ?? liveRead);
   if (!activity.available) return { status: 'UNAVAILABLE', reason: activity.reason };
 
   const now = (deps.now ?? (() => new Date()))();
@@ -231,6 +284,7 @@ export async function syncOrgInvoiceUsdcPayments(
   const paidNow: Array<{ invoiceId: string; digest: string }> = [];
   const alreadyUsed: string[] = [];
   for (const invoice of open) {
+    if (invoice.usdcReceiveAddress && invoice.usdcReceiveAddress !== address) continue;
     const expected = invoiceUsdcAmountMinor(invoice.id, invoice.amountMinor);
     const match = findInvoicePayment(activity.movements.filter((m) => !used.has(m.digest)), expected, invoice.createdAt);
     if (!match) continue;

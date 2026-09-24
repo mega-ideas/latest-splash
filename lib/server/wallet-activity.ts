@@ -167,7 +167,12 @@ export function labelMovements(
   movements: ChainMovement[],
   outflowsByDigest: Map<string, { kind: string; recipientName: string | null; resource: string | null; feeMinor: bigint }>,
   recipientsByAddress: Map<string, string>,
-  opts: { splashWallet: boolean; invoicesByDigest?: Map<string, { invoiceId: string; payerName: string | null }> } = { splashWallet: true },
+  opts: {
+    splashWallet: boolean;
+    invoicesByDigest?: Map<string, { invoiceId: string; payerName: string | null }>;
+    /** Sends this wallet made through Splash in another workspace. */
+    elsewhereDigests?: Set<string>;
+  } = { splashWallet: true },
 ): LabelledMovement[] {
   return movements.map((m) => {
     const outflow = outflowsByDigest.get(m.digest);
@@ -177,6 +182,9 @@ export function labelMovements(
         ? `x402 payment${outflow.resource ? ` to ${hostOf(outflow.resource)}` : ''}`
         : `Sent with Splash to ${outflow.recipientName ?? who ?? (m.counterparty ? shortAddress(m.counterparty) : 'the recipient')}`;
       return { ...m, label, origin: 'SPLASH', feeMinor: outflow.kind === 'X402' ? null : outflow.feeMinor };
+    }
+    if (m.direction === 'OUT' && opts.elsewhereDigests?.has(m.digest)) {
+      return { ...m, label: 'Sent with Splash from another workspace', origin: 'SPLASH', feeMinor: null };
     }
     const invoice = m.direction === 'IN' ? opts.invoicesByDigest?.get(m.digest) : undefined;
     if (invoice) {

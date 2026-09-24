@@ -61,6 +61,8 @@ export const RATE_LIMITS = {
   payLinkUsdcIp: { bucket: 'pay-link-usdc:ip', limit: 30, windowMs: 15 * MINUTE },
   // The issuer matching all open invoices against one read of its wallet.
   invoiceUsdcSyncUser: { bucket: 'invoice-usdc-sync:user', limit: 30, windowMs: 15 * MINUTE },
+  // Each treasury quote asks the Cetus aggregator what Sui can fill.
+  treasuryQuoteUser: { bucket: 'treasury-quote:user', limit: 30, windowMs: 15 * MINUTE },
   /** Zeke chat spends model credits per message. */
   copilotChatUser: { bucket: 'copilot-chat:user', limit: 30, windowMs: HOUR },
   /** The read-only copilot surfaces (suggestions, summary), per user and per network. */

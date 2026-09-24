@@ -114,7 +114,11 @@ test('authorize: WhatsApp style needs an approval for EVERY payout, spent once a
   assert.match(route, /if \(!whatsappApproved\) return approvalRequiredResponse\('FIAT_TRANSFER'\)/);
   // Given back unless the transfer (or a queue proposal) now carries it.
   assert.match(route, /finally \{\s*if \(spent\.release && !spent\.kept\) await spent\.release\(\)/);
-  assert.match(route, /await persistTransfer\(intent\);\s*spent\.kept = true;/);
+  // Kept only once the payer is debited: a balance refusal after the transfer
+  // row exists still moved nothing, so it gives the approval back.
+  const refusal = route.indexOf("code: 'insufficient_ledger_balance'");
+  const kept = route.lastIndexOf('spent.kept = true;');
+  assert.ok(refusal > 0 && kept > refusal, 'the approval is kept after the balance check, not before');
   assert.match(route, /if \(proposal\) spent\.kept = true;/);
 });
 

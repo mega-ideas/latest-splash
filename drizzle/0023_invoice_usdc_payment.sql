@@ -9,6 +9,10 @@ ALTER TABLE "invoices" ADD COLUMN "usdc_paid_at" timestamp with time zone;
 --> statement-breakpoint
 ALTER TABLE "invoices" ADD COLUMN "usdc_payer_address" text;
 --> statement-breakpoint
+-- The wallet the payer was shown, pinned the first time it is shown: if the
+-- main admin changes or re-enrols, a payment already sent still matches.
+ALTER TABLE "invoices" ADD COLUMN "usdc_receive_address" text;
+--> statement-breakpoint
 -- One transaction pays one invoice: two invoices of the same amount can never
 -- both claim the same transfer.
 CREATE UNIQUE INDEX "invoices_usdc_tx_digest_unique" ON "invoices" ("usdc_tx_digest");

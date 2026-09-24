@@ -6,6 +6,7 @@ import { organizations } from '@/lib/db/schema';
 import { laneAccess, parseUsdcMinor, StablecoinLaneError } from '@/lib/payments/stablecoin-lane';
 import { treasuryQuote, type MarketInput } from '@/lib/payments/treasury-usdy';
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
+import { RATE_LIMITS, enforceRateLimit } from '@/lib/server/rate-limit';
 import { readJsonBody } from '@/lib/server/http';
 import { requireSessionAccount } from '@/lib/server/session-account';
 import { getUsdyNetApyPct, getUsdyRedemptionPrice } from '@/lib/server/usdy';
@@ -21,6 +22,9 @@ export const dynamic = 'force-dynamic';
 export async function POST(request: Request) {
   const auth = await requireCustomerRequest(request);
   if (auth.response) return auth.response;
+  // Each quote makes an outside call (the Sui DEX route finder).
+  const limited = await enforceRateLimit({ rule: RATE_LIMITS.treasuryQuoteUser, key: auth.session.email });
+  if (limited) return limited;
   const accountCheck = await requireSessionAccount(auth.session);
   if (accountCheck.response) return accountCheck.response;
   if (!process.env.DATABASE_URL) return NextResponse.json({ error: 'Treasury quotes need the database.' }, { status: 503 });

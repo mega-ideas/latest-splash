@@ -63,7 +63,13 @@ if (DATA_DIR) {
       // No such process: a stale lock from a run that was killed.
     }
     if (alive) {
-      console.error(`${DATA_DIR} is already served by process ${pid}. Stop it first, or point DEV_DB_DIR elsewhere.`);
+      // A hard-killed server leaves its lock behind, and Windows can hand its
+      // PID to an unrelated process — so say how to clear it, not just no.
+      console.error(
+        `${DATA_DIR} looks in use by process ${pid}. Stop that dev:db first, or point DEV_DB_DIR elsewhere.
+` +
+          `If no dev:db is running (it was killed and the PID was reused), delete ${LOCK} and start again.`,
+      );
       process.exit(1);
     }
   }

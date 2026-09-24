@@ -468,6 +468,8 @@ export const invoices = pgTable('invoices', {
   usdcTxDigest: text('usdc_tx_digest'),
   usdcPaidAt: timestamp('usdc_paid_at', { withTimezone: true }),
   usdcPayerAddress: text('usdc_payer_address'),
+  /** The wallet the payer was shown, pinned when first shown. */
+  usdcReceiveAddress: text('usdc_receive_address'),
   ...timestamps,
 }, (table) => [
   index('invoices_org_idx').on(table.orgId),
