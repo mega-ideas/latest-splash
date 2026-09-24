@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation';
 
 import type { ProposalExplain, SimulationResult, UnsignedProposal } from '@/lib/agent/types';
 import { getOxwalProposalStore } from '@/lib/agent/oxwal';
+import { resolveAuthorityForSession, UnauthorizedError } from '@/lib/auth/authority';
 import { ensureProposalStoreHydrated } from '@/lib/queue/proposal-persistence';
 import { buildApprovalQueue, queueLanes, type QueueLane } from '@/lib/queue/approval-queue';
 import { getCustomerSession } from '@/lib/server/customer-auth';
@@ -182,6 +183,17 @@ export default async function QueuePage() {
     redirect('/login');
   }
 
+  // This workspace's proposals and no one else's. The store holds every
+  // tenant's, and after a cold start it hydrates every tenant's open proposals
+  // from Postgres, so an unfiltered list showed each signed-in user everyone's
+  // payments. No membership means no workspace, and nothing to show.
+  let orgId: string | null = null;
+  try {
+    orgId = (await resolveAuthorityForSession(session)).orgId;
+  } catch (error) {
+    if (!(error instanceof UnauthorizedError)) throw error;
+  }
+
   // Live proposals Zeke drafted this session. With DATABASE_URL set (W1),
   // the store write-throughs to Postgres and rehydrates here after a cold
   // start — a pending approval survives a restart. Anything the operator did
@@ -190,6 +202,7 @@ export default async function QueuePage() {
   await ensureProposalStoreHydrated(proposalStore);
   const liveProposals: QueueItem[] = proposalStore
     .list()
+    .filter((item) => item.orgId === orgId)
     .filter((item) => item.status === 'SIMULATED' || item.status === 'POLICY_EVALUATED' || item.status === 'PENDING_APPROVAL')
     .map((item) => ({
       id: item.id,
