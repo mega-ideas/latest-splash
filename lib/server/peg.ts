@@ -1,4 +1,4 @@
-import { formatRate } from '../money.ts';
+import { rateToNumber } from '../money.ts';
 import { getDeepbookStablePrice } from './deepbook.ts';
 
 /**
@@ -50,7 +50,7 @@ export async function getPegStatus(env: NodeJS.ProcessEnv = process.env): Promis
     primary: 'deepbook',
     deepbook: {
       pair: book.pair,
-      midPrice: Number(formatRate(book.midPrice)),
+      midPrice: rateToNumber(book.midPrice),
       deviationBps: Number(book.deviationBps),
       pegged,
       source: book.source,

@@ -10,6 +10,7 @@ import {
   formatMinor,
   parseMinor,
   parseRate,
+  rateToNumber,
   sumMinor,
   MICRO_DECIMALS,
   USD_DECIMALS,
@@ -186,4 +187,12 @@ test('a batch of a hundred rows reconciles exactly against its own rows', () => 
   for (const r of rows) check += parseMinor(r, USD_DECIMALS);
   assert.equal(total, check);
   assert.equal(formatMinor(total, USD_DECIMALS), formatMinor(check, USD_DECIMALS));
+});
+
+test('a rate becomes a number for display, and only the digits it holds', () => {
+  // A status line shows a price; it never multiplies an amount by it.
+  assert.equal(rateToNumber(parseRate('1')), 1);
+  assert.equal(rateToNumber(parseRate('0.9990')), 0.999);
+  assert.equal(rateToNumber(parseRate('56.42')), 56.42);
+  assert.equal(rateToNumber(parseRate('-0.0005')), -0.0005);
 });
