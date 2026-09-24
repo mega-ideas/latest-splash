@@ -261,6 +261,20 @@ test('the delivery executor refuses a fund-holding tier itself, before any ledge
       assert.notEqual((await readTransferForStaff(intent.id)).state, 'CREDITED', tier);
     }
 
+    // With the sweep switch off as well, the licence is still the reason in
+    // Phase 0: the executor checks the phase before the switch
+    // (tests/sweep-account-switch.test.mjs covers the switch in Phase 2).
+    const prevSwitch = process.env.SWEEP_ACCOUNT_ENABLED;
+    process.env.SWEEP_ACCOUNT_ENABLED = 'false';
+    try {
+      const sweepOff = await intentWith('SWEEP_ACCOUNT');
+      await assert.rejects(() => completeDeliveryForTransfer(sweepOff.id), (error) => error.message === CUSTODY_PHASE_REASON);
+      assert.equal(linesFor(sweepOff.id).length, 0);
+    } finally {
+      if (prevSwitch === undefined) delete process.env.SWEEP_ACCOUNT_ENABLED;
+      else process.env.SWEEP_ACCOUNT_ENABLED = prevSwitch;
+    }
+
     // A payout still completes.
     const payout = await intentWith('PAYOUT_ONLY');
     assert.deepEqual(await completeDeliveryForTransfer(payout.id), { state: 'DISBURSED' });

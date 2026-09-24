@@ -7,6 +7,7 @@ import Link from 'next/link';
 import MemWalBehaviorCard from '@/components/MemWalBehaviorCard';
 import OxWalComposer, { type OxWalComposerChip } from '@/components/oxwal/OxWalComposer';
 import ThreadRow, { BotAvatar, StreamingRow, ThinkingRow } from '@/components/oxwal/ThreadView';
+import { confidencePercent } from '@/lib/confidence';
 import { useOxwalThread } from '@/lib/oxwal/use-oxwal-thread';
 
 /**
@@ -42,7 +43,8 @@ type SuggestionCard = {
   body: string;
   kind: string;
   prompt: string;
-  confidence: number;
+  /** Whole percent, or null when the suggestion measured nothing. */
+  confidence: number | null;
 };
 
 type ApiSuggestion = {
@@ -50,7 +52,7 @@ type ApiSuggestion = {
   type: string;
   title: string;
   description: string;
-  confidence: number;
+  confidence: number | null;
   suggestedAction?: string;
 };
 
@@ -66,7 +68,8 @@ function mapSuggestion(s: ApiSuggestion): SuggestionCard {
     // read something to answer it, which is the point — a suggestion an
     // operator cannot interrogate is just a banner.
     prompt: `${s.title}. ${s.description} — walk me through this and prepare it if it holds up.`,
-    confidence: Math.round((s.confidence ?? 0.6) * 100),
+    // No score, no percentage. A missing one used to be shown as 60%.
+    confidence: confidencePercent(s.confidence),
   };
 }
 
@@ -206,7 +209,7 @@ export default function CopilotPage() {
             <h2 className="text-sm font-bold text-[#1F4452]">Suggestions</h2>
           </div>
           <p className="mt-1 text-[13px] font-medium leading-5 text-[#326273]/55">
-            Read from your invoices and treasury. Tap one to ask about it.
+            Drawn from your open invoices and MemWal memory. Tap one to ask about it.
           </p>
 
           <div className="mt-3 space-y-2">
@@ -228,7 +231,7 @@ export default function CopilotPage() {
 
             {suggestState === 'ready' && suggestions.length === 0 && (
               <p className="rounded-lg border border-[#326273]/12 bg-[#F6F0ED] px-3 py-2.5 text-[13px] font-medium leading-5 text-[#326273]/70">
-                Nothing to suggest right now — no unpaid invoices or idle balances worth acting on.
+                Nothing to suggest right now. Ask directly in the chat.
               </p>
             )}
 
@@ -244,9 +247,14 @@ export default function CopilotPage() {
                   <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-[#326273]/55">
                     {suggestion.kind}
                   </span>
-                  <span className="font-mono text-[10px] font-semibold tabular-nums text-[#326273]/45">
-                    {suggestion.confidence}% confidence
-                  </span>
+                  {/* The only score these cards carry is how closely a recalled
+                      memory matched (lib/server/copilot.ts memoryRelevance), so
+                      it is labelled as that, not as confidence the suggestion is right. */}
+                  {suggestion.confidence !== null && (
+                    <span className="font-mono text-[10px] font-semibold tabular-nums text-[#326273]/45">
+                      {suggestion.confidence}% memory match
+                    </span>
+                  )}
                 </div>
                 <div className="mt-1 text-[13px] font-bold leading-5 text-[#1F4452]">
                   {suggestion.title}

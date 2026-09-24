@@ -1,7 +1,12 @@
 import { NextResponse } from 'next/server';
 
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
-import { custodyPhaseResponse, deliveryTierAllowed } from '@/lib/server/custody-phase';
+import {
+  custodyPhaseResponse,
+  deliveryTierAllowed,
+  sweepAccountDisabledResponse,
+  sweepAccountEnabled,
+} from '@/lib/server/custody-phase';
 import { readJsonBody } from '@/lib/server/http';
 import { RATE_LIMITS, enforceRateLimit } from '@/lib/server/rate-limit';
 import { buildRecipient, type RecipientRecord, type RecipientTier } from '@/lib/server/operations';
@@ -51,6 +56,8 @@ export async function POST(request: Request) {
   // bank/wallet split so no path can save first and gate later.
   const tier = typeof body.tier === 'string' && body.tier ? body.tier : 'PAYOUT_ONLY';
   if (!deliveryTierAllowed(tier)) return custodyPhaseResponse();
+  // And a sweep recipient needs the sweep switch, the same as a sweep transfer.
+  if (tier === 'SWEEP_ACCOUNT' && !sweepAccountEnabled()) return sweepAccountDisabledResponse();
 
   // ── Wallet recipients: USDC on Sui, the lane an unverified business may use.
   if (body.payoutMethod === 'WALLET') {

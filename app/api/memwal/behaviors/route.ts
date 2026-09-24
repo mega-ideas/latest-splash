@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 
+import { MIN_MEMORY_RELEVANCE, memoryRelevance } from '@/lib/server/copilot';
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { recallMemories } from '@/lib/server/memwal';
 
@@ -19,26 +20,33 @@ export async function GET(request: Request) {
   try {
     const recalled = await recallMemories('business payment behavior patterns', 3);
     const seen = new Set<string>();
-    const uniqueRecalled = recalled.filter((memory) => {
+    // The same score, cutoff and meaning as the copilot's suggestion cards
+    // (lib/server/copilot.ts): how closely a memory matched the query, shown
+    // as "memory match". Filler below the cutoff is not a pattern.
+    const uniqueRecalled = recalled.flatMap((memory) => {
       const normalized = memory.text.trim().toLowerCase();
-      if (!normalized || seen.has(normalized)) return false;
+      const relevance = memoryRelevance(memory.distance);
+      if (!normalized || seen.has(normalized)) return [];
+      if (relevance === null || relevance < MIN_MEMORY_RELEVANCE) return [];
       seen.add(normalized);
-      return true;
+      return [{ text: memory.text, relevance }];
     });
     const recalledMemories = uniqueRecalled.map((memory) => ({
       text: memory.text,
-      confidence: Math.max(0, 1 - memory.distance),
+      confidence: memory.relevance,
       demo: false,
     }));
+    // Demo memories were never recalled, so they have no match to show. They
+    // used to carry an invented 94% / 91% / 88%.
     const fallbackMemories = demoBehaviors
       .filter((text) => !seen.has(text.toLowerCase()))
-      .map((text, index) => ({ text, confidence: 0.94 - index * 0.03, demo: true }));
+      .map((text) => ({ text, confidence: null, demo: true }));
     const memories = [...recalledMemories, ...fallbackMemories].slice(0, 3);
     return NextResponse.json({ memories }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
     console.warn('[memwal] behavior route fallback:', error instanceof Error ? error.message : String(error));
     return NextResponse.json({
-      memories: demoBehaviors.map((text, index) => ({ text, confidence: 0.94 - index * 0.03, demo: true })),
+      memories: demoBehaviors.map((text) => ({ text, confidence: null, demo: true })),
     }, { headers: { 'Cache-Control': 'no-store' } });
   }
 }

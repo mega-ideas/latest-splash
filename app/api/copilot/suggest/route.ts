@@ -1,14 +1,15 @@
 /**
- * Zeke personalized suggestions — drawn from MemWal behavioral memory (with
- * grounded defaults). Powers the swipeable recommendation cards on the copilot
- * page. Suggest-only: each card links to a screen where the user authorizes.
+ * Zeke personalized suggestions, drawn from the caller's open invoices and
+ * MemWal behavioral memory. Powers the suggestion cards on the copilot page.
+ * Suggest-only: each card becomes a question for Zeke there, and anything
+ * that moves money still goes through a proposal the user approves.
  */
 
 import { NextResponse } from 'next/server';
 
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { RATE_LIMITS, clientIp, enforceRateLimit } from '@/lib/server/rate-limit';
-import { getCopilotSuggestions } from '@/lib/server/copilot';
+import { getCopilotSuggestions, type CopilotSuggestion } from '@/lib/server/copilot';
 import { listInvoicesFor } from '@/lib/server/invoices-store';
 import { requireSessionAccount } from '@/lib/server/session-account';
 
@@ -37,14 +38,19 @@ export async function GET(request: Request) {
     (groups[invoice.targetCurrency] ??= []).push(invoice);
     return groups;
   }, {});
-  const batchSuggestions = Object.entries(invoicesByCurrency)
+  // A rule, not a measurement: two or more open invoices on one corridor. So
+  // the card states that fact and claims nothing else. It used to show 92%
+  // confidence and "could save about $<(n - 1) × 23.5>", both invented. It
+  // does not say how a batch would settle them either: nothing turns invoices
+  // into a batch yet, so the card is a question for Zeke, not a plan.
+  const batchSuggestions: CopilotSuggestion[] = Object.entries(invoicesByCurrency)
     .filter(([, invoices]) => invoices.length >= 2)
     .map(([currency, invoices]) => ({
       suggestionId: `invoice_batch_${currency}`,
       type: 'batch' as const,
       title: `Batch ${invoices.length} open ${currency} invoices`,
-      description: `These invoices share the USD to ${currency} corridor. Drafting one batch could save about $${((invoices.length - 1) * 23.5).toFixed(0)} in repeated settlement costs.`,
-      confidence: 0.92,
+      description: `${invoices.length} open invoices are on the USD to ${currency} corridor.`,
+      confidence: null,
       requiresAuth: true,
       suggestedAction: `batch:${currency}:${invoices.map((invoice) => invoice.id).join(',')}`,
     }));

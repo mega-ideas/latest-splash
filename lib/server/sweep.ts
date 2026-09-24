@@ -1,4 +1,9 @@
-import { CUSTODY_PHASE_REASON, deliveryTierAllowed } from '@/lib/server/custody-phase';
+import {
+  CUSTODY_PHASE_REASON,
+  SWEEP_ACCOUNT_DISABLED_AT_DELIVERY,
+  deliveryTierAllowed,
+  sweepAccountEnabled,
+} from '@/lib/server/custody-phase';
 import { createSweepJob, updateSweepJob } from '@/lib/server/operations';
 import { readRecipientForStaff } from '@/lib/server/recipients-store';
 import { recordMovement } from '@/lib/server/ledger-store';
@@ -15,6 +20,12 @@ export async function completeDeliveryForTransfer(intentId: string) {
   // ledger line is written. Unknown tiers stop too, rather than falling
   // through to the sweep. The caller records this as the failure reason.
   if (!deliveryTierAllowed(intent.deliveryTier)) throw new Error(CUSTODY_PHASE_REASON);
+  // The sweep switch, checked here before anything is credited. It used to be
+  // read only after the recipient's stored-balance credit below, so a sweep
+  // refused by the switch left that credit behind. The authorize route
+  // refuses a sweep while the switch is off, so this is a backstop, like the
+  // custody check above; its reason never says "choose again".
+  if (intent.deliveryTier === 'SWEEP_ACCOUNT' && !sweepAccountEnabled()) throw new Error(SWEEP_ACCOUNT_DISABLED_AT_DELIVERY);
   const accountId = intent.recipientId ?? intent.recipientName;
 
   if (intent.deliveryTier === 'PAYOUT_ONLY') {
@@ -39,7 +50,6 @@ export async function completeDeliveryForTransfer(intentId: string) {
     return { state: 'CREDITED' as const };
   }
 
-  if (process.env.SWEEP_ACCOUNT_ENABLED === 'false') throw new Error('Sweep accounts are disabled');
   // Staff read: the transfer in hand already established who owns this.
   const recipient = intent.recipientId ? await readRecipientForStaff(intent.recipientId) : null;
   const quote = await pdaxAdapter.quote(intent.targetCurrency, intent.stablecoinAmountMicro);

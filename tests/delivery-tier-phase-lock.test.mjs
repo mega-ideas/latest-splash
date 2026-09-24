@@ -109,6 +109,18 @@ test('the shell hands its pages the custodyOn the layout resolved, failing close
 
   const context = await source('components/dashboard/CustodyPhaseContext.ts');
   assert.match(context, /createContext\(false\)/, 'no provider means Phase 0, the gate default');
+
+  // The sweep switch travels the same way, and also fails closed.
+  assert.match(layout, /sweepOn=\{sweepAccountEnabled\(\)\}/, 'the layout resolves the switch on the server');
+  assert.match(shell, /<SweepSwitchContext value=\{sweepOn \?\? false\}>/);
+  assert.match(context, /export const SweepSwitchContext = createContext\(false\);/);
+});
+
+test('StepDelivery offers no sweep while the switch is off, and says why', async () => {
+  const step = await source('components/transfer/StepDelivery.tsx');
+  assert.match(step, /import \{[^}]*\buseSweepSwitchOn\b[^}]*\} from '@\/components\/dashboard\/CustodyPhaseContext'/);
+  // The exact words pin that the switch's reason names the switch, not the licence.
+  assert.match(step, /lock === 'sweep_switch'\s*\? 'Switched off right now\. Choose a direct payout instead\.'/, 'the reason is visible text');
 });
 
 /* ── StepDelivery ──────────────────────────────────────────────────────── */
@@ -125,13 +137,16 @@ test('StepDelivery locks every fund-holding tier through the gate decision, befo
     assert.match(step, new RegExp(`tier: '${tier}'`), `${tier} is an option, so the lock below covers it`);
   }
 
-  // The phase lock comes first; the stored-balance corridor switch (which
-  // NEXT_PUBLIC_DEMO_MODE turns on) can only add a lock, never lift one.
+  // The phase lock comes first; the operator's sweep switch and the
+  // stored-balance corridor switch (which NEXT_PUBLIC_DEMO_MODE turns on) can
+  // only add a lock, never lift one. The sweep switch sits where the routes
+  // check it: after the phase (tests/sweep-account-switch.test.mjs).
   assert.match(
     step,
-    /if \(!deliveryTierOpen\(tier, custodyOn\)\) return 'custody_phase';\s*if \(tier === 'STORED_BALANCE' && !storedOpen\) return 'corridor';\s*return null;/,
+    /if \(!deliveryTierOpen\(tier, custodyOn\)\) return 'custody_phase';\s*if \(tier === 'SWEEP_ACCOUNT' && !sweepOn\) return 'sweep_switch';\s*if \(tier === 'STORED_BALANCE' && !storedOpen\) return 'corridor';\s*return null;/,
   );
-  assert.match(step, /const lock = lockFor\(option\.tier, custodyOn, storedOpen\);/, 'every option goes through it');
+  assert.match(step, /const sweepOn = useSweepSwitchOn\(\);/);
+  assert.match(step, /const lock = lockFor\(option\.tier, custodyOn, storedOpen, sweepOn\);/, 'every option goes through it');
   assert.match(step, /disabled=\{lock !== null\}/);
 });
 
@@ -145,7 +160,7 @@ test('a locked tier says why in visible text, and a prefilled locked tier is nev
   assert.doesNotMatch(step, /\btitle=/, 'no hover-only reason');
   assert.doesNotMatch(await raw('components/transfer/StepDelivery.tsx'), /\blicensed\b/i);
 
-  assert.match(step, /const chosen: RecipientTier = lockFor\(state\.deliveryTier, custodyOn, storedOpen\) \? 'PAYOUT_ONLY' : state\.deliveryTier;/);
+  assert.match(step, /const chosen: RecipientTier = lockFor\(state\.deliveryTier, custodyOn, storedOpen, sweepOn\) \? 'PAYOUT_ONLY' : state\.deliveryTier;/);
   assert.match(step, /const selected = chosen === option\.tier;/);
   assert.match(step, /onClick=\{\(\) => \{ set\(\{ deliveryTier: chosen \}\); next\(\); \}\}/, 'continuing commits the open tier');
 });

@@ -14,6 +14,11 @@ import test from 'node:test';
  * so a heuristic read parseInvoice scored 0.2 was shown as 96% confident.
  */
 
+// invoiceDeliveryTier() also reads the sweep switch by default. Unset is on,
+// so this file tests the custody phase alone whatever the shell exports;
+// tests/sweep-account-switch.test.mjs covers the switch.
+delete process.env.SWEEP_ACCOUNT_ENABLED;
+
 const gate = () => import('../lib/server/custody-phase.ts');
 
 const CUSTODY_OFF = { custodyPackageId: '' };

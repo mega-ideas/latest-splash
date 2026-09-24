@@ -4,8 +4,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { BrainCircuit, CheckCircle2, LockKeyhole } from 'lucide-react';
 
 import StatusBadge from '@/components/StatusBadge';
+import { confidencePercent } from '@/lib/confidence';
 
-type Memory = { text: string; confidence: number; demo: boolean };
+/** `confidence`: how closely a recalled memory matched, 0..1; null for demo memories and placeholders. */
+type Memory = { text: string; confidence: number | null; demo: boolean };
 
 export default function MemWalBehaviorCard({ compact = false }: { compact?: boolean }) {
   const [memories, setMemories] = useState<Memory[]>([]);
@@ -53,7 +55,7 @@ export default function MemWalBehaviorCard({ compact = false }: { compact?: bool
     ? displayMemories
     : [{
         text: loadState === 'error' ? 'Behavior memory is temporarily unavailable.' : 'Recalling behavior patterns...',
-        confidence: 0,
+        confidence: null,
         demo: false,
       }];
 
@@ -73,7 +75,7 @@ export default function MemWalBehaviorCard({ compact = false }: { compact?: bool
         {memoryCards.map((memory) => (
           <div key={memory.text.trim().toLowerCase()} className="rounded-xl bg-muted/55 p-3">
             <div className="flex items-start gap-2"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-primary" /><strong className="text-sm">{memory.text}</strong></div>
-            {memory.confidence > 0 && <div className="mt-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-foreground/40">{Math.round(memory.confidence * 100)}% pattern confidence</div>}
+            {confidencePercent(memory.confidence) !== null && <div className="mt-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-foreground/40">{confidencePercent(memory.confidence)}% memory match</div>}
           </div>
         ))}
       </div>
