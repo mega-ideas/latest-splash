@@ -77,6 +77,13 @@ test('redirects are not followed and private addresses stay blocked', async () =
   assert.equal(images.dangerouslyAllowLocalIP, false);
 });
 
+test('SVGs are served as files, never run through the optimizer', async () => {
+  // With dangerouslyAllowSVG on, /_next/image rasterizes SVG input (the
+  // GHSA-q8wf-6r8g-63ch DoS) and serves script-bearing SVG from our origin.
+  const images = await config();
+  assert.notEqual(images.dangerouslyAllowSVG, true);
+});
+
 test('local images are limited to public/ asset paths without query strings', async () => {
   const { localPatterns } = await config();
   assert.ok(Array.isArray(localPatterns) && localPatterns.length > 0, 'localPatterns must be set');
