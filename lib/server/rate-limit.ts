@@ -78,6 +78,10 @@ export const RATE_LIMITS = {
   stepUpVerifyUser: { bucket: 'step-up-verify:user', limit: 60, windowMs: 15 * MINUTE },
   // The public demo x402 seller simulates and broadcasts on each paid call.
   x402DemoIp: { bucket: 'x402-demo:ip', limit: 60, windowMs: 15 * MINUTE },
+  // Wallet activity pages through the Sui indexer (up to four queries each).
+  stablecoinActivityUser: { bucket: 'stablecoin-activity:user', limit: 60, windowMs: 15 * MINUTE },
+  // The records export reads every transfer the workspace ever quoted.
+  stablecoinExportUser: { bucket: 'stablecoin-export:user', limit: 20, windowMs: HOUR },
 } as const satisfies Record<string, RateLimitRule>;
 
 /**

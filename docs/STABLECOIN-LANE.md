@@ -51,6 +51,20 @@ A wallet recipient must be saved first. Splash, and Zeke, only send to saved rec
 
 **Audit anchor:** records are kept now with `anchor_status = PENDING_MAINNET_PUBLISH`. They get anchored once Splash's contracts are published on mainnet (not done; that's Sebastian's ceremony).
 
+## The Splash wallet as a wallet (lib/server/wallet-activity.ts)
+
+- **Wallet activity** on Send USDC shows USDC moving in *and* out of the wallet on screen: the Splash wallet, or a connected Slush or MetaMask wallet.
+  - It reads the chain through Sui GraphQL (mainnet): the transactions that touched the address, keeping the ones that changed its USDC. So deposits from Slush, an exchange or another chain show up, which Splash's own records cannot know about.
+  - Each movement is named from Splash's records: "Sent with Splash to …", an x402 payment, or "Received from …" when the sender is a saved recipient.
+  - An outgoing movement from the **Splash wallet** with no Splash record is flagged, because only Splash can sign for a passkey wallet. From a connected wallet it is just "Sent".
+  - If the indexer doesn't answer, the panel says so. It never shows an empty wallet instead.
+- **All records (CSV)** (`/api/stablecoin/export`) exports every USDC transfer the workspace quoted, including failed and expired ones. Each row has:
+  - amount, fee and total, exact to six decimals;
+  - who asked for the transfer, and who approved it and how (the approval actually spent);
+  - the Sui transaction, and the audit hash.
+
+  Text cells that could start a spreadsheet formula are neutralised.
+
 ## x402 (lib/server/x402-pay.ts)
 
 The Send USDC page also pays APIs that answer `402 Payment Required` over x402

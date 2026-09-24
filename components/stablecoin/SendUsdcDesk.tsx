@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   Circle,
   Copy,
+  Download,
   ExternalLink,
   Fingerprint,
   Info,
@@ -24,6 +25,7 @@ import ApprovalsInbox from '@/components/approvals/ApprovalsInbox';
 import DashPageHeader from '@/components/dashboard/DashPageHeader';
 import FundingPlanner from '@/components/stablecoin/FundingPlanner';
 import UsdyPreview from '@/components/stablecoin/UsdyPreview';
+import WalletActivity from '@/components/stablecoin/WalletActivity';
 import {
   formatUsdc,
   parseUsdcMinor,
@@ -721,6 +723,8 @@ export default function SendUsdcDesk() {
               onChange={() => void loadLane()}
             />
           ) : null}
+          {/* Reads the chain again when a send lands (sent flips) and on start-over. */}
+          <WalletActivity address={sender} splash={source === 'SPLASH'} refreshKey={sent ? 1 : 0} />
           <RecentTransfers outflows={lane?.outflows ?? []} recipients={recipients} />
           <UsdyPreview />
         </aside>
@@ -975,7 +979,14 @@ function RecentTransfers({ outflows, recipients }: { outflows: Lane['outflows'];
   const names = new Map(recipients.map((r) => [r.id, r.name]));
   return (
     <section className="dash-surface p-4" aria-labelledby="recent-usdc-title">
-      <h2 id="recent-usdc-title" className="text-sm font-semibold text-[#326273]">Recent USDC transfers</h2>
+      <div className="flex items-baseline justify-between gap-2">
+        <h2 id="recent-usdc-title" className="text-sm font-semibold text-[#326273]">Sent with Splash</h2>
+        {outflows.length > 0 ? (
+          <a href="/api/stablecoin/export" download className="inline-flex items-center gap-1 text-[12px] font-semibold text-[var(--info)] hover:underline">
+            <Download className="h-3.5 w-3.5" aria-hidden /> All records (CSV)
+          </a>
+        ) : null}
+      </div>
       {outflows.length === 0 ? (
         <p className="mt-2 text-[13px] text-[#326273]/60">None yet.</p>
       ) : (
