@@ -156,7 +156,8 @@ export default function ApprovalCodeCard() {
             </h2>
           </div>
           <p id={helpId} className="mt-1 text-[13px] font-medium leading-5 text-[#326273]/65">
-            Enter the code from your WhatsApp approval message. It works once, only for you, for 30 minutes.
+            For a payment someone asked you to approve: enter the code from that WhatsApp message. It works once,
+            only for you, for 30 minutes.
           </p>
         </div>
 

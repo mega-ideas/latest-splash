@@ -82,7 +82,7 @@ function messageFor(input: {
   // The two channels ask for materially different things, so they say so
   // plainly rather than sharing a vague "respond to approve".
   return input.channel === 'code'
-    ? `${head}Your code is ${input.code}\nEnter it in Splash to approve. It expires in 30 minutes.\n\n` +
+    ? `${head}Your code is ${input.code}\nEnter it in Splash, on the Approval queue page, to approve. It expires in 30 minutes.\n\n` +
         `If you did not expect this, do not enter the code — reply REJECT.`
     : `${head}Reply APPROVE or REJECT. This request expires in 30 minutes.`;
 }
