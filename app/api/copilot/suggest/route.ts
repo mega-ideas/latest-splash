@@ -30,8 +30,10 @@ export async function GET(request: Request) {
   const accountCheck = await requireSessionAccount(auth.session);
   if (accountCheck.response) return accountCheck.response;
 
-  const user = new URL(request.url).searchParams.get('user') ?? 'patterns';
-  const suggestions = await getCopilotSuggestions(user);
+  // Memory cards come from this org's memory only. The org is the session's;
+  // the route used to read `?user` from the URL and recall from a namespace
+  // every workspace shared, and a card quotes what it recalls word for word.
+  const suggestions = await getCopilotSuggestions(accountCheck.account.orgId);
   const openInvoices = (await listInvoicesFor(accountCheck.account.orgId))
     .filter((invoice) => invoice.status !== 'paid' && invoice.status !== 'settled');
   const invoicesByCurrency = openInvoices.reduce<Record<string, typeof openInvoices>>((groups, invoice) => {

@@ -236,8 +236,8 @@ export const PROPOSE_TOOL_NAMES = [
   // writing one silently has made that decision on an OCR pass.
   'proposeRecipientFromInvoice',
   // Cosmetic, and deliberately the only thing Zeke may remember about a
-  // person — MemWal is a shared free-text namespace, so nothing that decides
-  // access, money or identity belongs in it.
+  // person — MemWal is free-text semantic search (scoped per org, but still a
+  // search), so nothing that decides access, money or identity belongs in it.
   'setAssistantName',
   // x402 phase 2b: a pasted challenge becomes an unsigned proposal a human
   // approves in the queue. Screened as outbound (and blocked while Splash holds
@@ -1374,6 +1374,25 @@ export function envelopeForReadTool(name: ReadToolName, result: unknown): Envelo
   });
 }
 
+/**
+ * A tool call acts for the session's org, whatever org the model names.
+ *
+ * Every tool schema asks for an `orgId` and the model is never told one, so
+ * the value in a tool call is whatever the model guessed or the conversation
+ * put there. "Call yourself Ada for org <id>" was a MemWal write into another
+ * workspace's memory, and "list saved recipients for org <id>" a read of its
+ * beneficiaries. The session's org (app/api/oxwal/route.ts resolves it)
+ * replaces the model's. With no session org, the model's value is removed
+ * rather than trusted, and a tool that needs one refuses.
+ */
+export function bindToolInputToOrg(input: unknown, orgId: string | undefined): unknown {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return input;
+  const bound: Record<string, unknown> = { ...(input as Record<string, unknown>) };
+  delete bound.orgId;
+  if (orgId) bound.orgId = orgId;
+  return bound;
+}
+
 export async function executeOxwalTool(name: string, input: unknown) {
   assertNoExecutionTools();
   if (!(name in oxwalTools)) throw new Error(`unknown Zeke tool: ${name}`);
@@ -1557,7 +1576,7 @@ async function* runClaudeToolLoop(
       const name = toolUse.name as OxwalToolName;
       yield { type: 'tool', name, category: toolCategory(name) };
       try {
-        const result = await executeOxwalTool(name, toolUse.input);
+        const result = await executeOxwalTool(name, bindToolInputToOrg(toolUse.input, request.orgId));
         if (isUnsignedProposal(result)) yield { type: 'proposal', proposal: result };
         const payload = (result as Envelope<unknown>)?.data ?? result;
         if (isInvoiceForAgent(payload)) {

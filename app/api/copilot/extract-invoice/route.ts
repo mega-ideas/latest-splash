@@ -40,7 +40,8 @@ export async function POST(request: Request) {
       if (decrypted) invoiceText = `${invoiceText}\n${Buffer.from(decrypted, 'base64').toString('utf8').slice(0, 5000)}`;
     }
   }
-  const parsedInvoice = await parseInvoice(invoiceText);
+  // The vendor pattern is remembered for the caller's org, from the session.
+  const parsedInvoice = await parseInvoice(invoiceText, accountCheck.account.orgId);
   // amountMinor is a bigint, which JSON cannot carry — this route answered 500
   // on every extraction until it was converted. A decimal string, so the
   // minor-unit amount stays exact on the wire and in the stored receipt.
