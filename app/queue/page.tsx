@@ -171,9 +171,9 @@ function formatExpiry(expiresInMs: number | null) {
   return `${minutes}m`;
 }
 
-/** How long an approved payment can still be sent. Its window is a day, so
- *  hours, not a four-digit count of minutes. */
-function sendWindowLabel(msLeft: number) {
+/** How long a proposal can still be approved, or an approved payment sent.
+ *  The window is a day, so hours, not a four-digit count of minutes. */
+function windowLabel(msLeft: number) {
   if (!Number.isFinite(msLeft)) return 'No expiry';
   if (msLeft <= 0) return 'Window closed';
   const minutes = Math.ceil(msLeft / 60000);
@@ -217,10 +217,12 @@ export default async function QueuePage() {
     if (!(error instanceof UnauthorizedError)) throw error;
   }
 
-  // Live proposals Zeke drafted this session. With DATABASE_URL set (W1),
-  // the store write-throughs to Postgres and rehydrates here after a cold
-  // start — a pending approval survives a restart. Anything the operator did
-  // not approve inside the 2-minute chat window surfaces as maker-checker work.
+  // Proposals waiting for a decision: over-threshold payments from the money
+  // routes, and what Zeke drafted and nobody approved in the chat. With
+  // DATABASE_URL set (W1), the store writes through to Postgres and rehydrates
+  // here after a cold start, so a pending approval survives a restart; reading
+  // it lapses whatever has passed its expiry.
+  const now = new Date();
   const proposalStore = getOxwalProposalStore();
   await ensureProposalStoreHydrated(proposalStore);
   const liveProposals: QueueItem[] = proposalStore
@@ -236,13 +238,15 @@ export default async function QueuePage() {
       approvalsCollected: new Set(item.approvals.map((approval) => approval.userId)).size,
       requiredApprovers: item.explain.requiredApprovers,
       risk: item.explain.risk,
-      expiryLabel: 'From Zeke chat',
+      expiryLabel: windowLabel(Date.parse(item.expiresAt) - now.getTime()),
+      // What the approver is looking at. Sent back with the decision, and the
+      // submit route refuses it if the proposal has changed since.
+      approvalHash: item.approvalHash,
     }));
 
   // Approved, and waiting for a signed-in approver to send it: where a vote
   // that finished on WhatsApp lands, because a reply cannot send money. The
   // viewer's own workspace only, like the list above.
-  const now = new Date();
   const readyItems: ReadyToSendItem[] = readyToSend(proposalStore.list(), viewer, now).map(
     ({ proposal, blockedReason }) => ({
       id: proposal.id,
@@ -250,30 +254,29 @@ export default async function QueuePage() {
       kind: proposal.kind,
       amountLabel: formatAmount(proposal),
       approvalsLabel: approvalsLabel(proposal),
-      expiryLabel: sendWindowLabel(Date.parse(proposal.expiresAt) - now.getTime()),
+      expiryLabel: windowLabel(Date.parse(proposal.expiresAt) - now.getTime()),
       approvalHash: proposal.approvalHash ?? null,
       blockedReason,
     }),
   );
 
-  // Serialize the queue for the interactive client board (no bigint/Date over
-  // the boundary). Approve/Reject state lives client-side for the demo.
-  const pending: QueueItem[] = [
-    ...liveProposals,
-    ...queueView.lanes.PENDING_APPROVALS.map((item) => ({
-      id: item.proposal.id,
-      recommendation: item.proposal.explain.recommendation,
-      kind: item.proposal.kind,
-      maker: item.proposal.createdBy,
-      amountLabel: formatAmount(item.proposal),
-      approvalsCollected: item.approvalsCollected,
-      requiredApprovers: item.requiredApprovers,
-      risk: item.proposal.explain.risk,
-      expiryLabel: formatExpiry(item.expiresInMs),
-    })),
-  ];
+  // The seeded rows are fixtures, not anyone's payments. They go to the board
+  // as examples, which it shows apart and never offers to approve. Mixed into
+  // the pending list, their Approve changed only the screen: an approval that
+  // released nothing, read as one that had.
+  const examplePending: QueueItem[] = queueView.lanes.PENDING_APPROVALS.map((item) => ({
+    id: item.proposal.id,
+    recommendation: item.proposal.explain.recommendation,
+    kind: item.proposal.kind,
+    maker: item.proposal.createdBy,
+    amountLabel: formatAmount(item.proposal),
+    approvalsCollected: item.approvalsCollected,
+    requiredApprovers: item.requiredApprovers,
+    risk: item.proposal.explain.risk,
+    expiryLabel: formatExpiry(item.expiresInMs),
+  }));
 
-  const otherLanes: QueueLaneData[] = queueLanes
+  const exampleLanes: QueueLaneData[] = queueLanes
     .filter((lane) => lane !== 'PENDING_APPROVALS')
     .map((lane) => ({
       key: lane,
@@ -312,7 +315,7 @@ export default async function QueuePage() {
         <ApprovalCodeCard />
         <ReadyToSendLane items={readyItems} />
 
-        <ApprovalQueueBoard pending={pending} otherLanes={otherLanes} />
+        <ApprovalQueueBoard live={liveProposals} examples={{ pending: examplePending, lanes: exampleLanes }} />
       </div>
     </main>
   );
