@@ -73,8 +73,10 @@ export type PendingApproval = {
   passedChecks: PassedCheck[];
   /** Enough to rebuild the payment when it is approved. */
   payload: Record<string, unknown>;
-  /** Ties the proposal to the same replay key the route derived, so a
-   *  re-submitted file finds the pending proposal instead of making a second. */
+  /** Names the payment, so a re-submitted file finds the proposal still in
+   *  flight for it instead of making a second. Only while it is in flight:
+   *  once it is finished (rejected, expired, failed or carried out), the same
+   *  payment again gets a proposal of its own under the same key. */
   idempotencyKey: string;
   approvalThresholdUsd: number;
 };
@@ -91,17 +93,20 @@ export async function proposeForApproval(
 ): Promise<UnsignedProposal | null> {
   try {
     const { getOxwalProposalStore } = await import('@/lib/agent/oxwal');
-    const { ensureProposalStoreHydrated } = await import('@/lib/queue/proposal-persistence');
+    const { ensureProposalStoreHydrated, hydrateOpenProposalForKey } = await import('@/lib/queue/proposal-persistence');
 
     const store = getOxwalProposalStore();
-    // A pending proposal for this exact payment may already be in Postgres from
-    // a previous process; without hydrating first we would mint a second.
-    await ensureProposalStoreHydrated(store);
-
-    const existing = store
-      .list()
-      .find((p) => p.orgId === input.orgId && p.idempotencyKey === input.idempotencyKey);
-    if (existing) return existing;
+    // The proposal in flight for this exact payment may be in Postgres and not
+    // in memory: from before a restart, or from another instance since this one
+    // booted. Without it we would mint a second, which the database refuses to
+    // store. So an unreadable database stops here, and the route still refuses
+    // the payment.
+    if (
+      !(await ensureProposalStoreHydrated(store)) ||
+      !(await hydrateOpenProposalForKey(store, input.orgId, input.idempotencyKey))
+    ) {
+      throw new Error('the proposals in Postgres could not be read');
+    }
 
     const createdAt = new Date().toISOString();
     const simulatedAt = createdAt;
@@ -161,7 +166,14 @@ export async function proposeForApproval(
       executionPayload: input.payload,
     };
 
+    // One proposal in flight per payment, per org. A re-submission while one is
+    // (a re-uploaded file, a retried request) gets it back rather than a second
+    // card. It used to get back ANY proposal ever made under the key: once the
+    // payment had been carried out, or rejected, or had expired, the same
+    // payment again was answered with the finished one, and the 409 said it was
+    // in the approval queue when nothing there could ever be approved.
     const stored = store.create(proposal);
+    if (stored.id !== proposal.id) return stored;
 
     // Record the checks as the simulation. Honest about what it is: the money
     // movement and the gates it already cleared, not a chain dry-run.

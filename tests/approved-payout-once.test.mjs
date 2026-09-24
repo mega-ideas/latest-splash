@@ -35,9 +35,11 @@ import * as schema from '../lib/db/schema.ts';
  * part of this reaches the network.
  *
  * The proposal store writes through to Postgres, as the app's does
- * (lib/agent/oxwal.ts). That is the harder case: an approval carried out before
- * a restart is back after it, SUBMITTED, without the in-process mark, and only
- * the `consumed_approvals` row stands between it and a second payment.
+ * (lib/agent/oxwal.ts). That is the harder case: an approval whose outcome never
+ * reached Postgres (the process stopped after paying) is back after a restart,
+ * SUBMITTED, without the in-process mark, and only the `consumed_approvals` row
+ * stands between it and a second payment. One whose outcome was recorded is
+ * finished and stays out of the restarted store altogether.
  */
 
 process.env.DATABASE_URL = 'postgres://pglite.invalid/approved-payout-once';
@@ -376,7 +378,7 @@ test('an approved payout is paid once: the replay sends it, and the same claim s
   assert.deepEqual(await spendRecord(id), [{ org_id: 'acme', consumed_by: 'transfers/authorize' }]);
 });
 
-test('after a restart the approval is back, SUBMITTED and unmarked, and it still pays nothing', async () => {
+test('after a restart a payment already carried out stays in Postgres, and its approval pays nothing', async () => {
   freshStore();
   const body = payout('26000');
   const id = await propose(body);
@@ -386,7 +388,32 @@ test('after a restart the approval is back, SUBMITTED and unmarked, and it still
   const settlingBefore = scope.deferred.length;
 
   // A deploy: a new process, its store rebuilt from Postgres the way
-  // ensureProposalStoreHydrated rebuilds it.
+  // ensureProposalStoreHydrated rebuilds it. Boot hydration loads the work in
+  // flight, and a payment with its outcome recorded is finished, so it is not
+  // loaded (tests/proposal-idempotency.test.mjs). Nothing in the new process
+  // has it to act on.
+  const rebooted = freshStore();
+  rebooted.hydrate(await app.loadOpenProposals(db));
+  assert.equal(rebooted.get(id), null);
+
+  assertSentForApproval(await authorize(PEOPLE.maker, body, id));
+  assert.equal((await payoutDebits('acme')).length, paidBefore);
+  assert.equal(scope.deferred.length, settlingBefore);
+});
+
+test('after a restart the approval is back, SUBMITTED and unmarked, when its outcome never landed, and it still pays nothing', async () => {
+  freshStore();
+  const body = payout('26500');
+  const id = await propose(body);
+  await approve(id);
+  assert.equal((await carryOut(id)).state, 'EXECUTED');
+  const paidBefore = (await payoutDebits('acme')).length;
+  const settlingBefore = scope.deferred.length;
+
+  // The process stopped after the payment and before its outcome was written.
+  // Postgres has the approval SUBMITTED with no outcome, which is still in
+  // flight (an unknown outcome is not a failure), so the restart brings it back.
+  await client.query(`UPDATE proposals SET execution_state = NULL, execution_error = NULL WHERE id = $1`, [id]);
   const rebooted = freshStore();
   rebooted.hydrate(await app.loadOpenProposals(db));
   const back = rebooted.get(id);

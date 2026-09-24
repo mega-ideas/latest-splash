@@ -25,7 +25,11 @@ import { estimateNettingSavedUsd, getCorridorFeeBps, getUsdCorridorByCurrency } 
 import { getUsdyNetApyPct } from '../server/usdy.ts';
 import { checkMinimumSettlement } from '../policy/limits.ts';
 import { InMemoryProposalStore } from '../queue/proposal-state.ts';
-import { makeProposalWriter } from '../queue/proposal-persistence.ts';
+import {
+  ensureProposalStoreHydrated,
+  hydrateOpenProposalForKey,
+  makeProposalWriter,
+} from '../queue/proposal-persistence.ts';
 import { evidenceQualityOf, makeEnvelope, type Envelope } from './envelope.ts';
 import { AGENT_ACTOR_ID } from './identity';
 import {
@@ -761,11 +765,22 @@ async function createDraftProposal(input: {
   createdBy?: UnsignedProposal['createdBy'];
   status?: ProposalStatus;
 }): Promise<UnsignedProposal> {
+  const store = proposalStore();
+  const key = idempotencyKey(input.keyParts);
+  // After a restart the draft for these exact parts may be in Postgres and not
+  // yet in memory. Drafting first minted a second proposal under its key, which
+  // the database refused to store, and when hydration later loaded the first
+  // there were two cards for one payment. So read first: the store, then this
+  // one key, which another instance may have drafted since this one booted. A
+  // draft moves no money, so a database that cannot be read does not stop it.
+  await ensureProposalStoreHydrated(store);
+  await hydrateOpenProposalForKey(store, input.orgId, key);
+
   const createdAt = nowIso();
   const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
   const proposal: UnsignedProposal = {
     id: `prop_${randomUUID()}`,
-    idempotencyKey: idempotencyKey(input.keyParts),
+    idempotencyKey: key,
     kind: input.kind,
     status: input.status ?? 'DRAFTED',
     tier: input.tier ?? 'TIER_0_PROPOSE',
@@ -797,14 +812,17 @@ async function createDraftProposal(input: {
     expiresAt,
     approvals: [],
   };
-  const stored = proposalStore().create(proposal);
+  // The draft already in flight for these parts, if there is one. A finished
+  // one (rejected, lapsed, carried out) no longer holds the key, so drafting the
+  // same thing again is a new proposal rather than the old one handed back.
+  const stored = store.create(proposal);
   const composed = await composeAndSimulateProposal(stored);
   // Persist the simulation outcome so the approval surfaces (in-chat approve,
   // control-room queue) act on the same state the operator saw in the chat —
   // without this the store copy stays DRAFTED and submission 409s.
   if (composed.simulation) {
     try {
-      proposalStore().transition(stored.id, {
+      store.transition(stored.id, {
         type: 'SIMULATION_COMPLETED',
         simulation: composed.simulation,
       });

@@ -93,6 +93,15 @@ export async function replayThroughRoute(
     return { ok: false, error: detail };
   }
 
+  // The route answered with a run it had ALREADY carried out: this approval
+  // paid nothing. Counted as a success, it read "Payout run started" and nobody
+  // was paid. A payment proposed again after the first was carried out is a new
+  // proposal now, so its replay can meet the earlier run's replay key.
+  if (parsed.idempotentReplay === true) {
+    const earlier = typeof parsed.id === 'string' ? ` as ${parsed.id}` : '';
+    return { ok: false, error: `This run had already been carried out${earlier}; nothing new was paid for this approval.` };
+  }
+
   const ref =
     (typeof parsed.id === 'string' && parsed.id) ||
     (typeof parsed.transferIntentId === 'string' && parsed.transferIntentId) ||

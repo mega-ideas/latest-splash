@@ -36,6 +36,71 @@ export function canRoleApprove(role: UserRole): boolean {
   return approverRoles.has(role);
 }
 
+/**
+ * Where EXPIRE is legal: anywhere before the proposal is signed. Past that the
+ * payment is being carried out, or has been, and "expired" would misdescribe
+ * money that may already have moved.
+ */
+const expirableStatuses = new Set<ProposalStatus>(['DRAFTED', 'SIMULATED', 'POLICY_EVALUATED', 'PENDING_APPROVAL', 'APPROVED']);
+
+/** Every approval collected, on the way to being carried out. */
+const committedStatuses = new Set<ProposalStatus>(['APPROVED', 'SIGNED', 'SUBMITTED']);
+
+export function isTerminalProposalStatus(status: ProposalStatus): boolean {
+  return terminalStatuses.has(status);
+}
+
+/**
+ * Still in flight: not finished, and not yet carried out.
+ *
+ * A proposal is finished when it reaches a terminal status, when it settles, or
+ * when an execution outcome is recorded against it: an approved payment that
+ * was sent, refused on replay, or skipped. SUBMITTED alone is not finished.
+ * That is the window while the payment is being carried out, and an outcome
+ * nobody recorded is an unknown outcome, not a failure.
+ *
+ * This is what an idempotency key covers. A proposal holds its key while it is
+ * in flight, so a re-submission of the same payment finds it instead of making a
+ * second. Once it is finished, the same payment again is a new attempt and gets
+ * a proposal of its own. The partial unique index
+ * `proposals_open_idempotency_unique` (drizzle/0025) says the same in Postgres,
+ * and tests/proposal-idempotency.test.mjs holds the two together.
+ */
+export function isProposalInFlight(proposal: UnsignedProposal): boolean {
+  if (terminalStatuses.has(proposal.status) || proposal.status === 'SETTLED') return false;
+  return proposal.execution === undefined;
+}
+
+/**
+ * Past its expiry, and still at a point where lapsing it is legal.
+ *
+ * The policy engine already refuses to approve a proposal whose `expiresAt` has
+ * passed (lib/policy/evaluate.ts, "quote expired"), by the same comparison.
+ * Nothing moved the status, though, so the proposal went on reading as pending:
+ * in the queue, to a re-submission it absorbed, and on every boot.
+ */
+export function isStaleProposal(proposal: UnsignedProposal, nowMs: number): boolean {
+  if (!expirableStatuses.has(proposal.status)) return false;
+  const expiresAt = Date.parse(proposal.expiresAt);
+  return Number.isFinite(expiresAt) && expiresAt < nowMs;
+}
+
+/**
+ * How long a payment everyone approved stays in view after its window closes.
+ * Approved and not sent is when someone most needs to see it, and the queue's
+ * ready-to-send lane says why it can no longer go (lib/queue/ready-to-send.ts).
+ * A re-submission of the same payment replaces it at once (`create`); this only
+ * bounds how long it lingers when nobody does.
+ */
+const APPROVED_LINGER_MS = 24 * 60 * 60 * 1000;
+
+/** Stale, and past being shown: what reads and hydration lapse. */
+function isDueToLapse(proposal: UnsignedProposal, nowMs: number): boolean {
+  if (!isStaleProposal(proposal, nowMs)) return false;
+  if (proposal.status !== 'APPROVED') return true;
+  return Date.parse(proposal.expiresAt) + APPROVED_LINGER_MS < nowMs;
+}
+
 function assertTransition(current: ProposalStatus, allowed: ProposalStatus[], eventType: ProposalTransitionEvent['type']) {
   if (!allowed.includes(current)) {
     throw new ProposalStateError(`${eventType} is not allowed from ${current}`);
@@ -210,7 +275,7 @@ function applyProposalTransition(
       assertNotTerminal(proposal.status, event.type);
       return { ...proposal, status: 'FAILED' };
     case 'EXPIRE':
-      assertTransition(proposal.status, ['DRAFTED', 'SIMULATED', 'POLICY_EVALUATED', 'PENDING_APPROVAL', 'APPROVED'], event.type);
+      assertTransition(proposal.status, [...expirableStatuses], event.type);
       return { ...proposal, status: 'EXPIRED' };
     case 'REVERSE':
       assertTransition(proposal.status, ['SETTLED', 'ANCHORED'], event.type);
@@ -253,9 +318,31 @@ function writeFailureReason(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** The key index's slot for one org's idempotency key. Keys are compared within
+ *  an org, as the unique index compares them: the same key in two orgs is two
+ *  payments, and one org must never be handed the other's proposal. */
+function keySlot(orgId: string, idempotencyKey: string): string {
+  return `${orgId}\u0000${idempotencyKey}`;
+}
+
+export type ProposalStoreOptions = {
+  /** The clock expiry is judged by, in epoch ms. The app runs on the wall
+   *  clock; tests pin it. */
+  now?: () => number;
+};
+
 export class InMemoryProposalStore {
   private readonly proposalsById = new Map<string, UnsignedProposal>();
-  private readonly idsByIdempotencyKey = new Map<string, string>();
+  /**
+   * (org, idempotency key) → the proposal in flight under it.
+   *
+   * Only in flight. This used to map every key any proposal had carried, for
+   * the life of the process, on the key alone: a payment that had been
+   * rejected, had expired or had been carried out came back as its old
+   * proposal every time it was proposed again. A proposal leaves the index when
+   * it finishes (`isProposalInFlight`), and the key is free for the next attempt.
+   */
+  private readonly keyHolders = new Map<string, string>();
   /** W1 — durable write-through hook: called after every mutation with the
    *  latest proposal state. Persistence failures must not break the demo
    *  path, so the hook's promise is tracked (flush) but never thrown here. */
@@ -265,9 +352,11 @@ export class InMemoryProposalStore {
    *  state of them or none at all. Every write is the whole row, so the next
    *  write of the same proposal that lands clears its entry. */
   private readonly unwritten = new Set<string>();
+  private readonly now: () => number;
 
-  constructor(onWrite?: (proposal: UnsignedProposal) => Promise<void>) {
+  constructor(onWrite?: (proposal: UnsignedProposal) => Promise<void>, options: ProposalStoreOptions = {}) {
     this.onWrite = onWrite;
+    this.now = options.now ?? (() => Date.now());
   }
 
   private recordWrite(proposal: UnsignedProposal) {
@@ -313,37 +402,133 @@ export class InMemoryProposalStore {
     return this.unwritten.has(id);
   }
 
-  /** Boot hydration (W1): seed the hot in-memory map from the database
-   *  without re-triggering writes. Existing entries win — live state is
-   *  newer than anything loaded later. */
+  /**
+   * Boot hydration (W1): seed the hot in-memory map from the database. Existing
+   * entries win — live state is newer than anything loaded later.
+   *
+   * Two things here write, on purpose:
+   *
+   * - A loaded proposal past its expiry is lapsed (EXPIRE) and the lapse
+   *   written back, by the rule reads use (`isDueToLapse`). Nothing else
+   *   dispatched EXPIRE, so it read as pending forever and came back on every
+   *   boot.
+   * - A loaded proposal in flight under a key a live proposal already holds is
+   *   a duplicate: two attempts at one payment, which the database will not
+   *   store side by side. One of them gives way (`adoptKey`).
+   */
   hydrate(proposals: UnsignedProposal[]) {
+    const now = this.now();
     for (const proposal of proposals) {
       if (this.proposalsById.has(proposal.id)) continue;
       // Legacy rows without a stored hash get anchored now; rows WITH a
       // stored hash keep it verbatim so a drifted row fails assertCanonIntact.
       const anchored = proposal.approvalHash ? proposal : withApprovalCanon(proposal);
       this.proposalsById.set(anchored.id, anchored);
-      this.idsByIdempotencyKey.set(anchored.idempotencyKey, anchored.id);
+      if (isDueToLapse(anchored, now)) {
+        this.transition(anchored.id, { type: 'EXPIRE' });
+      } else if (isProposalInFlight(anchored)) {
+        this.adoptKey(anchored, now);
+      }
     }
   }
 
-  create(proposal: UnsignedProposal): UnsignedProposal {
-    const existingId = this.idsByIdempotencyKey.get(proposal.idempotencyKey);
-    if (existingId) {
-      const existing = this.proposalsById.get(existingId);
-      if (!existing) throw new ProposalStateError('idempotency index points to a missing proposal');
-      return existing;
+  /**
+   * Seat a loaded, in-flight proposal in the key index.
+   *
+   * A live proposal already holding the key is a duplicate, proposed while
+   * this process could not see the database (hydration had failed, or had not
+   * run yet). The unique index has refused its writes since. Leaving both is
+   * two cards for one payment.
+   *
+   * The loaded one keeps the key: it is the one in Postgres, and the approvals
+   * and approval requests already made name its id. The live one lapses.
+   * Unless the live one already has every approval (and is not past its
+   * expiry): then it is the one being carried out, and the loaded one lapses.
+   */
+  private adoptKey(loaded: UnsignedProposal, now: number) {
+    const slot = keySlot(loaded.orgId, loaded.idempotencyKey);
+    const liveId = this.keyHolders.get(slot);
+    const live = liveId ? this.proposalsById.get(liveId) : undefined;
+    if (!live) {
+      this.keyHolders.set(slot, loaded.id);
+      return;
     }
+    if (!committedStatuses.has(live.status) || isStaleProposal(live, now)) {
+      this.keyHolders.set(slot, loaded.id);
+      this.transition(live.id, { type: 'EXPIRE' });
+      return;
+    }
+    if (expirableStatuses.has(loaded.status)) {
+      this.transition(loaded.id, { type: 'EXPIRE' });
+      return;
+    }
+    // Both past signing: two executions of one payment were started. Lapsing
+    // either would misdescribe money that may have moved, so both stay for a
+    // person to reconcile.
+    console.error(
+      `[proposal-store] ${live.id} and ${loaded.id} are both being carried out under one idempotency key`,
+    );
+  }
+
+  /** The proposal in flight for this org and key, if there is one. */
+  private keyHolder(orgId: string, idempotencyKey: string): UnsignedProposal | null {
+    const id = this.keyHolders.get(keySlot(orgId, idempotencyKey));
+    if (!id) return null;
+    const holder = this.proposalsById.get(id);
+    if (!holder) throw new ProposalStateError('idempotency index points to a missing proposal');
+    return holder;
+  }
+
+  /**
+   * Create a proposal, or return the one already in flight for the same
+   * payment: same org, same idempotency key.
+   *
+   * A holder past its expiry does not count. Policy would refuse to approve it,
+   * so it is lapsed here and the new proposal takes the key.
+   */
+  create(proposal: UnsignedProposal): UnsignedProposal {
+    const holder = this.keyHolder(proposal.orgId, proposal.idempotencyKey);
+    if (holder && !isStaleProposal(holder, this.now())) return holder;
 
     if (this.proposalsById.has(proposal.id)) {
       throw new ProposalStateError(`proposal ${proposal.id} already exists`);
     }
+    // Written before the new proposal, so the database sees the old attempt
+    // finished before the new one claims the key.
+    if (holder) this.transition(holder.id, { type: 'EXPIRE' });
 
     const anchored = withApprovalCanon(proposal);
     this.proposalsById.set(anchored.id, anchored);
-    this.idsByIdempotencyKey.set(anchored.idempotencyKey, anchored.id);
+    if (isProposalInFlight(anchored)) {
+      this.keyHolders.set(keySlot(anchored.orgId, anchored.idempotencyKey), anchored.id);
+    }
     this.recordWrite(anchored);
     return anchored;
+  }
+
+  /**
+   * Lapse every proposal past its expiry that has not been signed, and return
+   * the ones lapsed. `ensureProposalStoreHydrated` runs this before the store
+   * is read, so an expired proposal stops showing in the pending lane and stops
+   * absorbing re-submissions of its payment. One everyone approved lingers a
+   * day first (`APPROVED_LINGER_MS`).
+   */
+  expireStale(): UnsignedProposal[] {
+    const now = this.now();
+    return [...this.proposalsById.values()]
+      .filter((proposal) => isDueToLapse(proposal, now))
+      .map((proposal) => this.transition(proposal.id, { type: 'EXPIRE' }));
+  }
+
+  /** Keep a new state of a proposal, give its key back if it just finished,
+   *  and write it through. */
+  private commit(next: UnsignedProposal) {
+    this.proposalsById.set(next.id, next);
+    if (!isProposalInFlight(next)) {
+      const slot = keySlot(next.orgId, next.idempotencyKey);
+      if (this.keyHolders.get(slot) === next.id) this.keyHolders.delete(slot);
+    }
+    this.recordWrite(next);
   }
 
   get(id: string): UnsignedProposal | null {
@@ -359,8 +544,7 @@ export class InMemoryProposalStore {
     if (!proposal) throw new ProposalStateError(`proposal ${id} was not found`);
 
     const next = transitionProposal(proposal, event);
-    this.proposalsById.set(id, next);
-    this.recordWrite(next);
+    this.commit(next);
     return next;
   }
 
@@ -375,14 +559,16 @@ export class InMemoryProposalStore {
    *
    * `execution` is not a canon field — it is an observation about a decision
    * already made — so nothing is versioned and no approval is touched.
+   *
+   * It does finish the proposal: its idempotency key is free again, so the same
+   * payment proposed after this is a new attempt, not this one returned.
    */
   recordExecution(id: string, execution: NonNullable<UnsignedProposal['execution']>): UnsignedProposal {
     const proposal = this.proposalsById.get(id);
     if (!proposal) throw new ProposalStateError(`proposal ${id} was not found`);
 
     const next: UnsignedProposal = { ...proposal, execution };
-    this.proposalsById.set(id, next);
-    this.recordWrite(next);
+    this.commit(next);
     return next;
   }
 
@@ -414,8 +600,7 @@ export class InMemoryProposalStore {
     if (!proposal) throw new ProposalStateError(`proposal ${id} was not found`);
 
     const next = reviseProposalCanon(proposal, revision);
-    this.proposalsById.set(id, next);
-    this.recordWrite(next);
+    this.commit(next);
     return next;
   }
 }

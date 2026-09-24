@@ -1,4 +1,4 @@
-import { eq, notInArray } from 'drizzle-orm';
+import { and, asc, eq, isNull, notInArray, type SQL } from 'drizzle-orm';
 import type { PgDatabase } from 'drizzle-orm/pg-core';
 
 import { approvals, consumedApprovals, organizations, proposals } from './schema.ts';
@@ -43,8 +43,18 @@ export function decodeJsonWithBigints<T>(value: unknown): T {
   return revive(value) as T;
 }
 
-/** Statuses that stay out of boot hydration — finished work. */
-const TERMINAL_STATUSES = ['ANCHORED', 'REJECTED', 'FAILED', 'EXPIRED', 'REVERSED'];
+/**
+ * Statuses a proposal has finished in. With `execution_state IS NULL` (nothing
+ * recorded as carried out), the complement is a proposal still in flight:
+ * `isProposalInFlight` in lib/queue/proposal-state.ts, and the predicate of the
+ * partial unique index `proposals_open_idempotency_unique` (drizzle/0025).
+ * tests/proposal-idempotency.test.mjs holds the three to one another.
+ */
+const FINISHED_STATUSES = ['ANCHORED', 'REJECTED', 'FAILED', 'EXPIRED', 'REVERSED', 'SETTLED'];
+
+function inFlight(): SQL {
+  return and(notInArray(proposals.status, FINISHED_STATUSES), isNull(proposals.executionState))!;
+}
 
 /** Create the org row if it is missing. For the paths that create a tenant on
  *  purpose (an administrative grant, policy seeding for a member's own org) —
@@ -164,19 +174,54 @@ export async function consumeApprovalRecord(
   return rows.length === 1;
 }
 
-/** Boot hydration: every proposal still in flight (non-terminal). */
-export async function loadOpenProposals(db: DrizzleDb): Promise<UnsignedProposal[]> {
-  const rows: (typeof proposals.$inferSelect)[] = await db
-    .select()
+type ProposalRow = typeof proposals.$inferSelect;
+type ApprovalRow = typeof approvals.$inferSelect;
+
+/** In-flight proposals matching `where`, each with its approvals, in one
+ *  statement: one consistent read, however many there are. */
+async function loadInFlight(db: DrizzleDb, where: SQL): Promise<UnsignedProposal[]> {
+  const rows: { proposal: ProposalRow; approval: ApprovalRow | null }[] = await db
+    .select({ proposal: proposals, approval: approvals })
     .from(proposals)
-    .where(notInArray(proposals.status, TERMINAL_STATUSES));
-  const result: UnsignedProposal[] = [];
-  for (const row of rows) {
-    const approvalRows: (typeof approvals.$inferSelect)[] = await db
-      .select()
-      .from(approvals)
-      .where(eq(approvals.proposalId, row.id));
-    result.push(rowToProposal(row, approvalRows));
+    .leftJoin(approvals, eq(approvals.proposalId, proposals.id))
+    .where(where)
+    .orderBy(asc(proposals.createdAt), asc(proposals.id), asc(approvals.signedAt), asc(approvals.id));
+  const grouped = new Map<string, { row: ProposalRow; approvals: ApprovalRow[] }>();
+  for (const { proposal, approval } of rows) {
+    const entry = grouped.get(proposal.id) ?? { row: proposal, approvals: [] };
+    if (approval) entry.approvals.push(approval);
+    grouped.set(proposal.id, entry);
   }
-  return result;
+  return [...grouped.values()].map(({ row, approvals: approvalRows }) => rowToProposal(row, approvalRows));
+}
+
+/**
+ * Boot hydration: every proposal still in flight.
+ *
+ * It was every non-terminal proposal, then one more query per proposal for its
+ * approvals. Non-terminal took in each approval ever carried out (SUBMITTED,
+ * with an outcome recorded, is where they rest) and every draft nobody acted
+ * on, so the boot read grew with the table's history. Now it is the work in
+ * flight, in one statement. Anything past its expiry is lapsed when the store
+ * takes it (InMemoryProposalStore.hydrate), and the lapse is written back, so
+ * it does not come back on the next boot.
+ */
+export async function loadOpenProposals(db: DrizzleDb): Promise<UnsignedProposal[]> {
+  return loadInFlight(db, inFlight());
+}
+
+/**
+ * The proposal in flight for one payment, if there is one. At most one: the
+ * partial unique index allows no more, and this reads through it.
+ */
+export async function loadOpenProposalByKey(
+  db: DrizzleDb,
+  orgId: string,
+  idempotencyKey: string,
+): Promise<UnsignedProposal | null> {
+  const found = await loadInFlight(
+    db,
+    and(inFlight(), eq(proposals.orgId, orgId), eq(proposals.idempotencyKey, idempotencyKey))!,
+  );
+  return found[0] ?? null;
 }
