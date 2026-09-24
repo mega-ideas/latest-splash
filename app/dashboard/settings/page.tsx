@@ -5,6 +5,8 @@ import { useEffect, useState } from 'react';
 import ApprovalFlow from '@/components/approvals/ApprovalFlow';
 import ApprovalsInbox from '@/components/approvals/ApprovalsInbox';
 import ApprovalChannelCard from '@/components/settings/ApprovalChannelCard';
+import { useCustodyPhaseOn } from '@/components/dashboard/CustodyPhaseContext';
+import { CUSTODY_LICENCE } from '@/lib/custody-phase-rules';
 import {
   BadgeCheck,
   Building2,
@@ -35,6 +37,11 @@ type Settings = {
   updatedAt: string;
 };
 
+// Treasury, and the sweep and stored-balance rungs, hold customer funds: Phase
+// 2, behind the custody gate the money routes enforce. Until the phase is on
+// these say so, rather than describing them as running.
+const TREASURY_PHASE0 = `Phase 2 · Smart Treasury holds customer funds, which needs ${CUSTODY_LICENCE}`;
+
 const INFORMATION = [
   {
     icon: WalletCards,
@@ -49,7 +56,8 @@ const INFORMATION = [
   {
     icon: Building2,
     label: 'Treasury',
-    text: 'Smart Treasury models projected Ondo USDY yield; execution gated; projected, not promised',
+    text: (custodyOn: boolean) =>
+      custodyOn ? 'Smart Treasury models projected Ondo USDY yield; execution gated; projected, not promised' : TREASURY_PHASE0,
   },
   {
     icon: Database,
@@ -59,11 +67,13 @@ const INFORMATION = [
   {
     icon: Users,
     label: 'Recipient ladder',
-    text: 'payout/sweep/stored',
+    text: (custodyOn: boolean) =>
+      custodyOn ? 'payout/sweep/stored' : 'payout today · sweep and stored balance in Phase 2, since both hold customer funds',
   },
 ] as const;
 
 export default function DashboardSettingsPage() {
+  const custodyOn = useCustodyPhaseOn();
   const [settings, setSettings] = useState<Settings | null>(null);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState('');
@@ -116,7 +126,7 @@ export default function DashboardSettingsPage() {
           <span className="dash-kicker">Operating policy</span>
           <h1 className="dash-title mt-2">Settings</h1>
           <p className="mt-1 max-w-2xl text-[13px] text-[#326273]/60">
-            Persisted controls applied to payment approvals, treasury allocation, and account security.
+            Persisted controls applied to payment approvals and account security.
           </p>
         </div>
         <button type="button" onClick={() => void save()} disabled={saving} className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#073d49] px-5 py-3 text-sm font-bold text-white shadow-[0_5px_0_#022b33] transition-transform hover:-translate-y-0.5 disabled:opacity-50">
@@ -153,7 +163,7 @@ export default function DashboardSettingsPage() {
             <NumberControl label="Per-transfer limit" value={settings.perTransferLimitUsd} suffix="USD" onChange={(value) => update('perTransferLimitUsd', value)} />
             <NumberControl label="Daily limit" value={settings.dailyLimitUsd} suffix="USD" onChange={(value) => update('dailyLimitUsd', value)} />
             <NumberControl label="Approval threshold" value={settings.approvalThresholdUsd} suffix="USD" onChange={(value) => update('approvalThresholdUsd', value)} />
-            <NumberControl label="Auto-allocate to treasury" value={settings.autoAllocateTreasuryPct} suffix="%" onChange={(value) => update('autoAllocateTreasuryPct', value)} />
+            <NumberControl label="Auto-allocate to treasury" value={settings.autoAllocateTreasuryPct} suffix="%" onChange={(value) => update('autoAllocateTreasuryPct', value)} disabled={!custodyOn} note={custodyOn ? undefined : TREASURY_PHASE0} />
           </div>
         </div>
 
@@ -197,7 +207,7 @@ export default function DashboardSettingsPage() {
             <div key={label} className="rounded-2xl border border-[#326273]/10 bg-[#F6F0ED] p-5">
               <Icon size={20} className="text-[var(--info)]" />
               <div className="mt-3 text-xs font-semibold uppercase tracking-[0.12em] text-[#326273]/55">{label}</div>
-              <p className="mt-2 text-sm font-medium leading-6 text-[#326273]">{text}</p>
+              <p className="mt-2 text-sm font-medium leading-6 text-[#326273]">{typeof text === 'function' ? text(custodyOn) : text}</p>
             </div>
           ))}
         </div>
@@ -211,14 +221,21 @@ export default function DashboardSettingsPage() {
   );
 }
 
-function NumberControl({ label, value, suffix, onChange }: { label: string; value: number; suffix: string; onChange: (value: number) => void }) {
+function NumberControl({ label, value, suffix, onChange, disabled = false, note }: { label: string; value: number; suffix: string; onChange: (value: number) => void; disabled?: boolean; note?: string }) {
   return (
-    <label className="rounded-2xl border border-[#326273]/10 bg-[#F6F0ED] p-4">
+    <label className={`rounded-2xl border border-[#326273]/10 bg-[#F6F0ED] p-4 ${disabled ? 'cursor-not-allowed border-dashed' : ''}`}>
       <span className="text-xs font-semibold uppercase tracking-[0.1em] text-[#326273]/55">{label}</span>
-      <span className="mt-3 flex items-center gap-2">
-        <input type="number" min={0} value={value} onChange={(event) => onChange(Number(event.target.value))} className="min-w-0 flex-1 bg-transparent text-2xl font-bold text-[#326273] outline-none" />
+      {/* Only the value dims; the reason below keeps full contrast. */}
+      <span className={`mt-3 flex items-center gap-2 ${disabled ? 'opacity-50' : ''}`}>
+        <input type="number" min={0} value={value} disabled={disabled} onChange={(event) => onChange(Number(event.target.value))} className="min-w-0 flex-1 bg-transparent text-2xl font-bold text-[#326273] outline-none disabled:cursor-not-allowed" />
         <span className="text-[13px] font-bold text-[var(--info)]">{suffix}</span>
       </span>
+      {note && (
+        <span className="mt-2 flex items-start gap-1.5 text-[12px] font-semibold leading-5 text-[#326273]">
+          <LockKeyhole size={13} className="mt-0.5 shrink-0" aria-hidden="true" />
+          {note}
+        </span>
+      )}
     </label>
   );
 }

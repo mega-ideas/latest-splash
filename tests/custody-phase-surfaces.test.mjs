@@ -120,6 +120,23 @@ test('the landing ladder puts both fund-holding rungs in Phase 2, in the licence
   assert.match(ladder, /\$\{CUSTODY_LICENCE\}/, 'the sweep rung names the licence it waits for');
 });
 
+/* ── Settings ──────────────────────────────────────────────────────────── */
+
+test('the settings page stops presenting Treasury and the fund-holding rungs as running in Phase 0', async () => {
+  const page = await source('app/dashboard/settings/page.tsx');
+  assert.match(page, /const custodyOn = useCustodyPhaseOn\(\);/, 'the phase the shell resolved');
+  // Nothing reads autoAllocateTreasuryPct, so "applied to treasury allocation" was never true.
+  assert.doesNotMatch(page, /treasury allocation, and account security/);
+  assert.match(page, /Phase 2 · Smart Treasury holds customer funds, which needs \$\{CUSTODY_LICENCE\}/);
+  assert.match(page, /custodyOn \? 'payout\/sweep\/stored' : 'payout today · sweep and stored balance in Phase 2/);
+  assert.match(page, /text\(custodyOn\)/, 'the phase-dependent cards are rendered with the phase');
+  assert.match(
+    page,
+    /label="Auto-allocate to treasury"[^\n]*disabled=\{!custodyOn\} note=\{custodyOn \? undefined : TREASURY_PHASE0\}/,
+    'the treasury control is not offered in Phase 0',
+  );
+});
+
 /* ── Zeke and Treasury ─────────────────────────────────────────────────── */
 
 test('a verified business still cannot get a treasury proposal in Phase 0', async () => {
