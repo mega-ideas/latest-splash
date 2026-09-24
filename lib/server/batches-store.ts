@@ -69,6 +69,9 @@ export async function claimBatch(
   targetCurrency?: string,
 ): Promise<{ claimed: boolean; batch: BatchRecord }> {
   if (!usingPostgres()) {
+    // The map holds claimed runs only, and this is the one place a run enters
+    // it. A record stored before its claim is found holding its own key, and
+    // the first submission reads as a replay of itself.
     const existing = [...operations.batches.values()].find(
       (b) => b.orgId === record.orgId && b.idempotencyKey === record.idempotencyKey,
     );
