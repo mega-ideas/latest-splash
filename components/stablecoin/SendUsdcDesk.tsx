@@ -6,9 +6,11 @@ import {
   AlertTriangle,
   ArrowRight,
   CheckCircle2,
+  Circle,
   Copy,
   ExternalLink,
   Fingerprint,
+  Info,
   Loader2,
   Lock,
   Send,
@@ -49,7 +51,7 @@ type Lane = {
   feeBps: number;
   minimumMinor: string;
   screeningConfigured: boolean;
-  approval: { style: 'WHATSAPP_PASSKEY' | 'CLICK'; requireDualApproval: boolean; approvalThresholdUsd: number };
+  approval: { style: 'WHATSAPP_PASSKEY' | 'CLICK'; requireDualApproval: boolean; approvalThresholdUsd: number; ready?: boolean; readyReason?: string };
   outflows: Array<{
     id: string; kind: string; status: string; principalMinor: string; feeMinor: string; recipientAddress: string;
     supplierId: string | null; txDigest: string | null; explorerUrl: string | null; anchorStatus: string;
@@ -422,6 +424,17 @@ export default function SendUsdcDesk() {
         </div>
       </section>
 
+      {lane && !sent ? (
+        <Readiness
+          lane={lane}
+          mode={mode}
+          source={source}
+          sender={sender}
+          senderView={senderView}
+          walletRecipients={recipients.length}
+        />
+      ) : null}
+
       <ol className="grid grid-cols-2 gap-2 sm:grid-cols-4" aria-label="Progress">
         {STEPS.map((label, index) => (
           <li
@@ -759,6 +772,116 @@ function TransactionLegs({ quote }: { quote: Quote }) {
   );
 }
 
+type Check = { key: string; label: string; state: 'ok' | 'todo' | 'waiting' | 'note'; detail: string; href?: string; action?: string };
+
+/**
+ * What has to be true before a real mainnet transfer can go, in the order
+ * it is usually fixed. Every row is read from the server or the chain —
+ * nothing here is a guess — and each open row says what to do next.
+ */
+function Readiness({
+  lane,
+  mode,
+  source,
+  sender,
+  senderView,
+  walletRecipients,
+}: {
+  lane: Lane;
+  mode: 'WALLET' | 'X402';
+  source: 'SPLASH' | 'EXTERNAL';
+  sender: string | null;
+  senderView: WalletView | null | undefined;
+  walletRecipients: number;
+}) {
+  const usdc = senderView?.usdcMinor !== undefined ? BigInt(senderView.usdcMinor) : null;
+  const minimum = BigInt(lane.minimumMinor);
+  const checks: Check[] = [
+    mode === 'X402'
+      ? { key: 'lane', label: 'x402 payments open', state: lane.x402.open ? 'ok' : 'todo', detail: lane.x402.open ? 'No Splash fee on x402.' : lane.x402.reason }
+      : { key: 'lane', label: 'Wallet transfers open', state: lane.lane.open ? 'ok' : 'todo', detail: lane.lane.open ? 'Mainnet, with the 0.80% fee added on top.' : lane.lane.reason },
+    {
+      key: 'approval',
+      label: lane.approval.style === 'WHATSAPP_PASSKEY' ? 'Approver reachable on WhatsApp' : 'An approver',
+      state: lane.approval.ready === false ? 'todo' : 'ok',
+      detail: lane.approval.ready === false
+        ? lane.approval.readyReason ?? 'Approvals cannot be given right now.'
+        : lane.approval.style === 'WHATSAPP_PASSKEY'
+          ? 'The main admin has a confirmed number and a passkey.'
+          : 'An admin or checker approves with a click.',
+      href: lane.approval.ready === false ? '/dashboard/settings' : undefined,
+      action: 'Settings',
+    },
+    sender
+      ? { key: 'wallet', label: 'A wallet to pay from', state: 'ok', detail: `${source === 'SPLASH' ? 'Splash wallet' : 'Your wallet'} ${shortAddress(sender)}.` }
+      : source === 'SPLASH'
+        ? { key: 'wallet', label: 'A wallet to pay from', state: 'todo', detail: 'Your Splash wallet is your passkey’s address. Create one — or restore the one already on this device — then come back.', href: '/settings/security', action: 'Passkey settings' }
+        : { key: 'wallet', label: 'A wallet to pay from', state: 'todo', detail: 'Connect Slush or MetaMask (Sui Snap) under Pay from.' },
+    !sender || usdc === null
+      ? { key: 'usdc', label: 'USDC to send', state: 'waiting', detail: 'Shown once a wallet is chosen.' }
+      : usdc >= minimum
+        ? { key: 'usdc', label: 'USDC to send', state: 'ok', detail: `${formatUsdc(usdc)} USDC in the wallet.` }
+        : { key: 'usdc', label: 'USDC to send', state: 'todo', detail: `${formatUsdc(usdc)} USDC in the wallet. Send USDC on Sui to it from Slush, MetaMask or an exchange — or bring it from another chain (Add funds, under Pay from).` },
+    !sender || senderView?.suiMist === undefined
+      ? { key: 'gas', label: 'SUI for network fees', state: 'waiting', detail: 'Shown once a wallet is chosen.' }
+      : senderView.gasLow
+        ? { key: 'gas', label: 'SUI for network fees', state: 'todo', detail: 'About 0.05 SUI covers the network fee on many transfers. Without it the wallet can hold USDC but not send it.' }
+        : { key: 'gas', label: 'SUI for network fees', state: 'ok', detail: 'Enough for the network fee.' },
+    ...(mode === 'WALLET'
+      ? [walletRecipients > 0
+        ? { key: 'recipient', label: 'A saved wallet recipient', state: 'ok' as const, detail: `${walletRecipients} saved. Recipients are only ever added by hand.` }
+        : { key: 'recipient', label: 'A saved wallet recipient', state: 'todo' as const, detail: 'Add the Slush or MetaMask Sui address you are paying, by hand.', href: '/dashboard/recipients', action: 'Recipients' }]
+      : []),
+    {
+      key: 'screening',
+      label: 'Recipient screening',
+      state: lane.screeningConfigured ? 'ok' : 'note',
+      detail: lane.screeningConfigured
+        ? 'Each wallet recipient is checked against sanctions lists when it is saved.'
+        : 'No screening provider is connected, so an owner or finance admin vouches for each wallet recipient when saving it.',
+    },
+  ];
+  const open = checks.filter((c) => c.state === 'todo').length;
+  const ready = open === 0 && checks.every((c) => c.state !== 'waiting');
+
+  return (
+    <section className="dash-block p-4" aria-labelledby="send-readiness-title">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 id="send-readiness-title" className="dash-kicker">Before you send</h2>
+        <span className={`text-[13px] font-semibold ${ready ? 'text-[var(--ok)]' : 'text-[#326273]/70'}`} role="status">
+          {ready ? 'Ready for a mainnet transfer' : open > 0 ? `${open} to sort out` : 'Choose a wallet to finish the check'}
+        </span>
+      </div>
+      <ul className="mt-3 grid gap-x-5 gap-y-2.5 md:grid-cols-2">
+        {checks.map((c) => (
+          <li key={c.key} className="flex items-start gap-2.5">
+            <CheckMark state={c.state} />
+            <div className="min-w-0 text-[13px] leading-5">
+              <span className="font-semibold text-[#1F4452]">{c.label}</span>
+              <span className="block text-[#326273]/70">
+                {c.detail}
+                {c.href && c.state === 'todo' ? (
+                  <>
+                    {' '}
+                    <Link href={c.href} className="font-semibold text-[var(--info)] hover:underline">{c.action} <ArrowRight className="inline h-3 w-3" aria-hidden /></Link>
+                  </>
+                ) : null}
+              </span>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function CheckMark({ state }: { state: Check['state'] }) {
+  if (state === 'ok') return <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-[var(--ok)]" aria-label="Done" />;
+  if (state === 'todo') return <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[var(--warn)]" aria-label="To do" />;
+  if (state === 'note') return <Info className="mt-0.5 h-4 w-4 shrink-0 text-[var(--info)]" aria-label="Note" />;
+  return <Circle className="mt-0.5 h-4 w-4 shrink-0 text-[#326273]/35" aria-label="Waiting" />;
+}
+
 /** A seller's JSON, indented; anything else as it came. */
 function prettyBody(body: string): string {
   try {
@@ -788,7 +911,7 @@ function WalletBalances({ view, source }: { view: WalletView | null | undefined;
     return (
       <p className="mt-3 text-[13px] leading-5 text-[#326273]/75">
         {view.reason ?? 'No wallet yet.'}{' '}
-        {source === 'SPLASH' ? <Link href="/settings/security" className="font-semibold text-[var(--info)] hover:underline">Create a passkey</Link> : null}
+        {source === 'SPLASH' ? <Link href="/settings/security" className="font-semibold text-[var(--info)] hover:underline">Create or restore a passkey</Link> : null}
       </p>
     );
   }

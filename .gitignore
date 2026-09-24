@@ -71,6 +71,10 @@ next-env.d.ts
 /.claude/skills/
 
 
+# The durable local dev database (DEV_DB_DIR=.dev-db) and its lock file.
+/.dev-db/
+/.dev-db.lock
+
 # Local scratch: dev-server logs and the design-exploration previews.
 # Neither belongs in the published tree.
 *.log

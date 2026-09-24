@@ -21,6 +21,9 @@ export type ApprovalClaim = {
   /** True only when a real, approved, same-org proposal backs the header. */
   approved: boolean;
   proposalId: string | null;
+  /** The request the approvers signed off, so a route can check the claim is
+   *  for THIS payment and not another one it is being attached to. */
+  payload?: Record<string, unknown> | null;
   /** Why it was refused, for the log. Never returned to the caller: a client
    *  probing header values should learn nothing from the difference. */
   reason?: string;
@@ -63,7 +66,7 @@ export async function resolveApprovalClaim(
       };
     }
 
-    return { approved: true, proposalId: proposal.id };
+    return { approved: true, proposalId: proposal.id, payload: proposal.executionPayload ?? null };
   } catch (error) {
     // Unreadable store means unverifiable claim means not approved.
     console.error('[approval] could not verify the approval claim', error);

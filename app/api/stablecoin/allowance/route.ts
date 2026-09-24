@@ -37,6 +37,10 @@ export async function GET(request: Request) {
   const rows = await listOutflows(db, orgId, 20);
   const { readOrgSettings } = await import('@/lib/server/org-settings');
   const settings = await readOrgSettings(orgId);
+  // WhatsApp style is only switched on when the main admin can approve, but
+  // they can lose that afterwards (a removed passkey), so it is asked again.
+  const { whatsappApprovalsReady } = await import('@/lib/server/step-up-gate');
+  const approvalReady = settings.whatsappEnabled ? await whatsappApprovalsReady(orgId, 'approve') : { ok: true as const };
 
   return NextResponse.json({
     network: network as SuiNetwork,
@@ -61,6 +65,8 @@ export async function GET(request: Request) {
       style: settings.whatsappEnabled ? 'WHATSAPP_PASSKEY' : 'CLICK',
       requireDualApproval: settings.requireDualApproval,
       approvalThresholdUsd: settings.approvalThresholdUsd,
+      ready: approvalReady.ok,
+      readyReason: approvalReady.ok ? '' : approvalReady.reason,
     },
     outflows: rows.map((r: {
       id: string; kind: string; status: string; network: string; principalMinor: bigint; feeMinor: bigint;

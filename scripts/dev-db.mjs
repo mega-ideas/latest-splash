@@ -10,10 +10,21 @@
  *   node --experimental-strip-types scripts/dev-db.mjs
  *   DATABASE_URL=postgres://postgres@127.0.0.1:5433/postgres?sslmode=disable
  *
- * It is not durable and it is not a substitute for running migration `0004`
- * against a restored copy of production, which is still outstanding.
+ * By default it lives in memory and every row is gone when it stops. Set
+ * DEV_DB_DIR (in .env.local or the shell, e.g. DEV_DB_DIR=.dev-db) to keep
+ * it on disk instead: passkeys, saved recipients, transfers and verified
+ * WhatsApp numbers then survive a restart. On disk, only migrations not yet
+ * applied run (tracked in splash_dev_migrations) and the seed runs once.
+ * Stop it with Ctrl+C so Postgres shuts down cleanly; delete the directory
+ * to start over.
+ *
+ * Neither mode is a substitute for running migration `0004` against a
+ * restored copy of production, which is still outstanding.
  */
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { PGlite } from '@electric-sql/pglite';
@@ -24,23 +35,96 @@ import * as schema from '../lib/db/schema.ts';
 import { createAccount, markEmailVerified } from '../lib/auth/accounts.ts';
 import { TERMS_VERSION } from '../content/legal.ts';
 
+// .env.local first: DEV_DB_DIR, DEV_DB_PORT and the WhatsApp numbers below may
+// live there. Values already in the shell win.
+try {
+  process.loadEnvFile(fileURLToPath(new URL('../.env.local', import.meta.url)));
+} catch {
+  // No .env.local: defaults apply.
+}
+
 const PORT = Number(process.env.DEV_DB_PORT ?? 5433);
 const PASSWORD = 'correct-horse-battery-staple-9';
 
-const client = new PGlite();
-await client.waitReady;
-
-const dir = new URL('../drizzle', import.meta.url);
-for (const file of (await readdir(dir)).filter((f) => f.endsWith('.sql')).sort()) {
-  const sqlText = await readFile(new URL(`../drizzle/${file}`, import.meta.url), 'utf8');
-  for (const statement of sqlText.split('--> statement-breakpoint')) {
-    const trimmed = statement.trim();
-    if (trimmed) await client.exec(trimmed);
+// -- Where the data lives ---------------------------------------------------
+const DATA_DIR = process.env.DEV_DB_DIR ? resolve(process.env.DEV_DB_DIR) : null;
+const LOCK = DATA_DIR ? `${DATA_DIR}.lock` : null;
+if (DATA_DIR) {
+  // Two servers on one data directory corrupt it, and PGlite does not stop
+  // that on its own. The lock sits beside the directory, not in it, so
+  // Postgres never finds a stranger among its files.
+  if (existsSync(LOCK)) {
+    const pid = Number(readFileSync(LOCK, 'utf8'));
+    let alive = false;
+    try {
+      process.kill(pid, 0);
+      alive = true;
+    } catch {
+      // No such process: a stale lock from a run that was killed.
+    }
+    if (alive) {
+      console.error(`${DATA_DIR} is already served by process ${pid}. Stop it first, or point DEV_DB_DIR elsewhere.`);
+      process.exit(1);
+    }
   }
-  console.log(`  applied ${file}`);
+  mkdirSync(DATA_DIR, { recursive: true });
+  writeFileSync(LOCK, String(process.pid));
 }
 
+const client = DATA_DIR ? new PGlite(DATA_DIR) : new PGlite();
+await client.waitReady;
+
+// -- Migrations: apply what this database has not seen ----------------------
+// Each file's statements run one by one, as before (0020 adds an enum value
+// and uses it, which a single wrapping transaction would refuse). A file is
+// recorded only once all of it succeeded; the hash catches a migration edited
+// after this database applied it, which would otherwise drift silently.
+await client.exec(`CREATE TABLE IF NOT EXISTS splash_dev_migrations (
+  name text PRIMARY KEY,
+  sha256 text NOT NULL,
+  applied_at timestamptz NOT NULL DEFAULT now()
+)`);
+const applied = new Map(
+  (await client.query('SELECT name, sha256 FROM splash_dev_migrations')).rows.map((r) => [r.name, r.sha256]),
+);
+const dir = new URL('../drizzle', import.meta.url);
+let appliedNow = 0;
+for (const file of (await readdir(dir)).filter((f) => f.endsWith('.sql')).sort()) {
+  const sqlText = await readFile(new URL(`../drizzle/${file}`, import.meta.url), 'utf8');
+  const sha256 = createHash('sha256').update(sqlText).digest('hex');
+  if (applied.has(file)) {
+    if (applied.get(file) !== sha256) {
+      console.warn(`  ${file} has changed since this database applied it; delete ${DATA_DIR} to rebuild if it matters`);
+    }
+    continue;
+  }
+  try {
+    for (const statement of sqlText.split('--> statement-breakpoint')) {
+      const trimmed = statement.trim();
+      if (trimmed) await client.exec(trimmed);
+    }
+  } catch (error) {
+    console.error(`  ${file} failed: ${error instanceof Error ? error.message : error}`);
+    if (DATA_DIR) console.error(`  ${DATA_DIR} may be half-migrated. Delete it and start again.`);
+    await client.close();
+    if (LOCK) rmSync(LOCK, { force: true });
+    process.exit(1);
+  }
+  await client.query('INSERT INTO splash_dev_migrations (name, sha256) VALUES ($1, $2)', [file, sha256]);
+  appliedNow += 1;
+  console.log(`  applied ${file}`);
+}
+if (applied.size > 0) console.log(`  ${applied.size} migrations already applied, ${appliedNow} new`);
+
 const db = drizzle(client, { schema });
+
+// -- Seed, once --------------------------------------------------------------
+// In memory this is every start. On disk, the demo operator's row says the
+// seed already ran, and running it again would trip on the accounts it made.
+const firstBoot =
+  (await client.query('SELECT 1 FROM users WHERE email = $1', ['demo@acme.test'])).rows.length === 0;
+
+const { grantMembership } = await import('../lib/auth/authority.ts');
 
 await client.exec(`
   INSERT INTO organizations (id, name, legal_name)
@@ -62,8 +146,7 @@ const seed = [
   { email: 'lin@northwind.example', name: 'Lin Chua', role: null, verified: false },
 ];
 
-const { grantMembership } = await import('../lib/auth/authority.ts');
-for (const person of seed) {
+for (const person of firstBoot ? seed : []) {
   await createAccount(db, { email: person.email, password: PASSWORD, name: person.name });
   // A grant requires a proven mailbox. The seed stands in for the link.
   if (person.verified) await markEmailVerified(db, person.email);
@@ -103,7 +186,7 @@ const demos = [
   { email: 'fresh@acme.test', name: 'Fresh Operator', orgId: 'fresh-business', org: 'Fresh Trading', kyb: 'REGISTERED', onboarded: false,
     blurb: 'new business, walks onboarding' },
 ];
-for (const d of demos) {
+for (const d of firstBoot ? demos : []) {
   // Obviously fictional originator details, so the travel-rule check on a
   // payment has an org to read (the same values seed:demo writes).
   await client.query(
@@ -130,17 +213,13 @@ for (const d of demos) {
 }
 
 // -- Optional: pre-verified WhatsApp numbers for the demo admins ------------
-// This database lives in memory, so a restart would mean re-verifying a number
-// every time. Local only: set DEV_WHATSAPP_DEMO_ADMIN / DEV_WHATSAPP_LIVE_ADMIN
-// (E.164, e.g. +60123456789) in .env.local, which is never committed. It skips
-// the proof round-trip the Settings screen does — acceptable for a throwaway
-// dev database, never anywhere else. One number, one person: the same number
-// cannot serve both admins (approver_channels_number_unique).
-try {
-  process.loadEnvFile(fileURLToPath(new URL('../.env.local', import.meta.url)));
-} catch {
-  // No .env.local: nothing to seed.
-}
+// In memory, a restart would mean re-verifying a number every time. Local
+// only: set DEV_WHATSAPP_DEMO_ADMIN / DEV_WHATSAPP_LIVE_ADMIN (E.164, e.g.
+// +60123456789) in .env.local, which is never committed. It skips the proof
+// round-trip the Settings screen does — acceptable for a dev database, never
+// anywhere else. One number, one person: the same number cannot serve both
+// admins (approver_channels_number_unique). An admin who already has a
+// number (seeded earlier, or verified in Settings) keeps it.
 const seededNumbers = new Set();
 for (const [email, orgId, raw] of [
   ['demo@acme.test', 'demo-business', process.env.DEV_WHATSAPP_DEMO_ADMIN],
@@ -157,6 +236,14 @@ for (const [email, orgId, raw] of [
     continue;
   }
   const { rows } = await client.query('SELECT id FROM users WHERE email = $1', [email]);
+  const taken = await client.query('SELECT 1 FROM approver_channels WHERE user_id = $1 OR whatsapp_e164 = $2', [
+    rows[0].id,
+    e164,
+  ]);
+  if (taken.rows.length > 0) {
+    seededNumbers.add(e164);
+    continue;
+  }
   await client.query(
     `INSERT INTO approver_channels (id, org_id, user_id, whatsapp_e164, verified_at) VALUES ($1, $2, $3, $4, now())`,
     [`chn_dev_${orgId}`, orgId, rows[0].id, e164],
@@ -170,7 +257,12 @@ await server.start();
 
 console.log(`\ndev postgres listening on 127.0.0.1:${PORT}`);
 console.log(`DATABASE_URL=postgres://postgres@127.0.0.1:${PORT}/postgres?sslmode=disable`);
-console.log(`${seed.length} accounts seeded; ${seed.filter((p) => !p.role).length} awaiting access.`);
+console.log(DATA_DIR ? `data kept in ${DATA_DIR} (Ctrl+C to stop cleanly)` : 'data in memory: gone when this stops (set DEV_DB_DIR to keep it)');
+console.log(
+  firstBoot
+    ? `${seed.length} accounts seeded; ${seed.filter((p) => !p.role).length} awaiting access.`
+    : 'existing database: seed skipped, your rows are as you left them.',
+);
 console.log('');
 console.log(`Demo operators (password ${DEMO_PASSWORD}):`);
 for (const d of demos) {
@@ -181,6 +273,7 @@ console.log('');
 const stop = async () => {
   await server.stop();
   await client.close();
+  if (LOCK) rmSync(LOCK, { force: true });
   process.exit(0);
 };
 process.on('SIGINT', stop);

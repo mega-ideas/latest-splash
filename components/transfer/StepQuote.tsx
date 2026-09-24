@@ -1,11 +1,12 @@
 'use client';
 
 import Image from 'next/image';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, CheckCircle2, Clock3, Copy, Info, Loader2, RefreshCw, Send, ShieldCheck, TrendingUp, X } from 'lucide-react';
 import { toast } from 'sonner';
 
 import type { TransferState } from '@/app/dashboard/transfer/page';
+import ApprovalFlow from '@/components/approvals/ApprovalFlow';
 import FundingSelector from '@/components/funding/FundingSelector';
 import HoverPopup from '@/components/HoverPopup';
 import { SourceBadge } from '@/components/SourceBadge';
@@ -62,6 +63,12 @@ export default function StepQuote({
   // Maker-checker note beside the CTA reads the REAL threshold from operating
   // settings — never a hardcoded figure (W9.1).
   const [approvalPolicy, setApprovalPolicy] = useState<{ thresholdUsd: number; dual: boolean } | null>(null);
+  // WhatsApp style (Settings → Approvals): this payout needs a WhatsApp code
+  // and passkey approval before it can be sent. `approvedKey` is the payment
+  // the approval was given for; edit the payment and it no longer counts.
+  const [whatsappStyle, setWhatsappStyle] = useState(false);
+  const [approvedKey, setApprovedKey] = useState<string | null>(null);
+  const [approvalRound, setApprovalRound] = useState(0);
   // Live countdown for the rate-lock chip while a hold is active.
   const [lockNowMs, setLockNowMs] = useState(() => Date.now());
 
@@ -69,9 +76,10 @@ export default function StepQuote({
     let active = true;
     void fetch('/api/settings')
       .then((response) => (response.ok ? response.json() : null))
-      .then((body: { approvalThresholdUsd?: number; requireDualApproval?: boolean } | null) => {
+      .then((body: { approvalThresholdUsd?: number; requireDualApproval?: boolean; whatsappEnabled?: boolean } | null) => {
         if (!active || !body || typeof body.approvalThresholdUsd !== 'number') return;
         setApprovalPolicy({ thresholdUsd: body.approvalThresholdUsd, dual: body.requireDualApproval ?? true });
+        setWhatsappStyle(Boolean(body.whatsappEnabled));
       })
       .catch(() => {});
     return () => { active = false; };
@@ -153,6 +161,19 @@ export default function StepQuote({
     set,
   ]);
 
+  // What the approval covers — the fields the server's payout subject reads
+  // (lib/server/step-up-subjects.ts), in the shape the authorize body has.
+  const approvalPayload = useMemo(() => ({
+    recipient: state.recipient,
+    travelRulePayment: state.travelRulePayment,
+    amount: { value: state.amount.value, targetCurrency: state.amount.targetCurrency },
+    deliveryTier: state.deliveryTier,
+    invoiceId: state.invoiceId,
+    fundingSelection: state.funding.selection,
+  }), [state.recipient, state.travelRulePayment, state.amount.value, state.amount.targetCurrency, state.deliveryTier, state.invoiceId, state.funding.selection]);
+  const approvalKey = JSON.stringify(approvalPayload);
+  const awaitingApproval = whatsappStyle && approvedKey !== approvalKey;
+
   const createTransferIntent = useCallback(async () => {
     try {
       const selection = state.funding.selection;
@@ -171,7 +192,14 @@ export default function StepQuote({
         }),
       });
       if (!response.ok) {
-        const body = (await response.json()) as { error?: string };
+        const body = (await response.json()) as { error?: string; code?: string };
+        if (body.code === 'approval_required') {
+          // Expired or already used: show the approval again, fresh.
+          setApprovedKey(null);
+          setApprovalRound((round) => round + 1);
+          setDepositOpen(false);
+          throw new Error('This payout needs a WhatsApp approval again — the last one expired or was used. Approve it, then send.');
+        }
         throw new Error(body.error ?? 'Send request failed');
       }
 
@@ -198,7 +226,7 @@ export default function StepQuote({
   }, [isSending, createTransferIntent]);
 
   async function startDeposit() {
-    if (!agree || !state.quote) return;
+    if (!agree || !state.quote || awaitingApproval) return;
     if (state.funding.selection.type === 'held') {
       setProgress(18);
       setIsSending(true);
@@ -446,6 +474,24 @@ export default function StepQuote({
       <MoneyPathPanel compact />
 
 
+      {whatsappStyle ? (
+        <section aria-label="Payout approval" className="rounded-xl border border-[#326273]/12 bg-white p-4">
+          <h3 className="text-sm font-semibold text-[#1F4452]">Approve this payout</h3>
+          <p className="mt-1 text-[13px] leading-5 text-[#326273]/70">
+            Your workspace approves payouts with a WhatsApp code and passkey. The approval covers this recipient, account,
+            amount, currency and payment source — change any of them and it has to be approved again.
+          </p>
+          <div className="mt-3">
+            <ApprovalFlow
+              key={approvalRound}
+              purpose="FIAT_TRANSFER"
+              payload={approvalPayload}
+              onApproved={() => setApprovedKey(approvalKey)}
+            />
+          </div>
+        </section>
+      ) : null}
+
       <label className="flex items-start gap-3 text-sm text-[#326273]/80">
         <input type="checkbox" checked={agree} onChange={(event) => setAgree(event.target.checked)} className="mt-1 size-4 cursor-pointer rounded border-[#326273]/30 bg-white accent-[#5C9EAD]" />
         I confirm the recipient details are correct and I want to continue from {selectedFundingLabel}.
@@ -455,9 +501,9 @@ export default function StepQuote({
           <ArrowLeft className="size-4" aria-hidden="true" />
           Back
         </button>
-        <button type="button" disabled={!agree || isQuoteRefreshing || creatingSession || isSending} onClick={() => void startDeposit()} className={primaryActionClass}>
+        <button type="button" disabled={!agree || awaitingApproval || isQuoteRefreshing || creatingSession || isSending} onClick={() => void startDeposit()} className={primaryActionClass}>
           {creatingSession || isSending || isQuoteRefreshing ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : <Send className="size-4" aria-hidden="true" />}
-          {isQuoteRefreshing ? 'Updating quote...' : creatingSession || isSending ? 'Preparing...' : 'Send'}
+          {isQuoteRefreshing ? 'Updating quote...' : creatingSession || isSending ? 'Preparing...' : awaitingApproval ? 'Approve to send' : 'Send'}
         </button>
       </div>
 

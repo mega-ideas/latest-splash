@@ -134,13 +134,55 @@ export function batchPayoutSubject(ctx: { orgId: string; userId: string }, paylo
   };
 }
 
+function text(value: unknown): string {
+  if (typeof value === 'string') return value.trim();
+  return value === undefined || value === null ? '' : String(value);
+}
+
+/**
+ * What a payout approval covers: who is paid, to which account, how much, in
+ * what currency, and from which source. Not the whole request body — the
+ * transfer wizard adds a funding session, a quote and display state between
+ * approving and sending, and none of those changes what the approver agreed
+ * to. Change anything here and the approval no longer applies.
+ */
+export function fiatPaymentSubstance(payload: Payload) {
+  const body = withoutSecondFactor(payload);
+  const recipient = (body.recipient ?? {}) as Record<string, unknown>;
+  const bank = (recipient.bank ?? {}) as Record<string, unknown>;
+  const amount = (body.amount ?? {}) as Record<string, unknown>;
+  const funding = (body.fundingSelection ?? null) as Record<string, unknown> | null;
+  return {
+    recipient: {
+      name: text(recipient.name),
+      country: text(recipient.country).toUpperCase(),
+      bank: { swift: text(bank.swift), account: text(bank.account) },
+      travelRule: recipient.travelRule ?? null,
+    },
+    travelRulePayment: body.travelRulePayment ?? null,
+    amount: { value: text(amount.value), targetCurrency: text(amount.targetCurrency).toUpperCase() },
+    deliveryTier: text(body.deliveryTier) || 'PAYOUT_ONLY',
+    invoiceId: text(body.invoiceId) || null,
+    funding: funding
+      ? {
+          source: text(funding.source),
+          type: text(funding.type),
+          provider: text(funding.provider) || null,
+          asset: text(funding.asset) || null,
+          rail: text(funding.rail) || null,
+          sourceChain: text(funding.sourceChain) || null,
+        }
+      : null,
+  };
+}
+
 export function fiatTransferSubject(ctx: { orgId: string; userId: string }, payload: Payload): StepUpSubject {
   const body = withoutSecondFactor(payload);
   const amount = (body.amount ?? {}) as { value?: unknown; targetCurrency?: unknown };
   const recipient = (body.recipient ?? {}) as { name?: unknown };
   return {
     subjectId: `fiat:${ctx.orgId}:${ctx.userId}`,
-    subject: { kind: 'fiat-transfer', orgId: ctx.orgId, body },
+    subject: { kind: 'fiat-transfer', orgId: ctx.orgId, payment: fiatPaymentSubstance(payload) },
     label: `$${String(amount.value ?? '?')} payout`,
     summary: `Authorize a payout of $${String(amount.value ?? '?')} to ${String(recipient.name ?? 'the recipient')}, paid out in ${String(amount.targetCurrency ?? '?')}.`,
   };

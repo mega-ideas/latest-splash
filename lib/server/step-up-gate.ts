@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 
 import { resolveAuthorityForSession } from '@/lib/auth/authority';
 import type { CustomerSession } from '@/lib/auth/customer-session';
-import { consumeStepUp, mainAdmin, type StepUpPurpose } from '@/lib/server/step-up';
+import { consumeStepUp, mainAdmin, releaseStepUp, type StepUpPurpose } from '@/lib/server/step-up';
 import { payloadSubject } from '@/lib/server/step-up-subjects';
 
 /**
@@ -31,6 +31,21 @@ export async function consumeActionApproval(input: {
   });
 }
 
+/** Give back an approval `consumeActionApproval` spent, when the action it was
+ *  spent on was refused and nothing happened. */
+export async function releaseActionApproval(input: {
+  session: CustomerSession;
+  orgId: string;
+  purpose: PayloadPurpose;
+  payload: Record<string, unknown>;
+}): Promise<void> {
+  if (!process.env.DATABASE_URL) return;
+  const authority = await resolveAuthorityForSession(input.session);
+  const subject = payloadSubject(input.purpose, { orgId: input.orgId, userId: authority.userId }, input.payload);
+  const { getDb } = await import('@/lib/db/client');
+  await releaseStepUp(getDb(), { orgId: input.orgId, purpose: input.purpose, subjectId: subject.subjectId });
+}
+
 export function approvalRequiredResponse(purpose: StepUpPurpose): NextResponse {
   return NextResponse.json(
     {
@@ -48,22 +63,29 @@ export function approvalRequiredResponse(purpose: StepUpPurpose): NextResponse {
  * Can this workspace switch WhatsApp approvals ON? Only if the main admin —
  * who receives every payment code — has a verified number AND a passkey.
  * Otherwise the switch would lock every payment behind an approval nobody can
- * give.
+ * give. `when: 'approve'` asks the same of a workspace already switched on
+ * (the admin may since have removed their passkey), worded for that.
  */
-export async function whatsappApprovalsReady(orgId: string): Promise<{ ok: true } | { ok: false; reason: string }> {
+export async function whatsappApprovalsReady(
+  orgId: string,
+  when: 'enable' | 'approve' = 'enable',
+): Promise<{ ok: true } | { ok: false; reason: string }> {
   if (!process.env.DATABASE_URL) return { ok: false, reason: 'WhatsApp approvals need the database.' };
+  const tail = when === 'enable'
+    ? ' before WhatsApp approvals can be switched on.'
+    : ' — until then, no payment here can be approved.';
   const { getDb } = await import('@/lib/db/client');
   const db = getDb();
   const admin = await mainAdmin(db, orgId);
   if (!admin) return { ok: false, reason: 'This workspace has no admin.' };
   if (!admin.e164) {
-    return { ok: false, reason: `${admin.name}, the main admin, must verify a WhatsApp number (Settings → Approvals) before WhatsApp approvals can be switched on.` };
+    return { ok: false, reason: `${admin.name}, the main admin, must verify a WhatsApp number (Settings → Approvals)${tail}` };
   }
   const { findCredential, relyingPartyId } = await import('@/lib/auth/passkey');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const credential = await findCredential(db as any, { userId: admin.userId, rpId: relyingPartyId() });
   if (!credential) {
-    return { ok: false, reason: `${admin.name}, the main admin, must create a passkey (Settings → Security) before WhatsApp approvals can be switched on.` };
+    return { ok: false, reason: `${admin.name}, the main admin, must create or restore a passkey (Settings → Security)${tail}` };
   }
   return { ok: true };
 }

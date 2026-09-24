@@ -120,11 +120,28 @@ Each workspace picks a style in **Settings → Approve with a WhatsApp code and 
   - Settings and profile saves send it to the editor's own confirmed number, or to the main admin if they have none.
   - The approver enters the code in **their own** session, then signs the approval with their passkey.
   - Codes expire after 10 minutes and lock after 5 wrong attempts. Only an HMAC of each code is stored.
-  - In this style, batch and fiat payouts accept the approval in place of the authenticator code.
+  - **Every single local-currency payout needs one** (the transfer wizard shows the approval before Send). It covers the recipient, their account, the amount, the currency and the payment source; the funding session, quote and screen state the wizard adds afterwards do not change it. If the payout is refused before it exists (travel-rule gap, ceiling, balance), the approval is given back.
+  - Batch payouts accept the approval in place of the authenticator code.
+  - A payout released from the approval queue was approved there. The queue's approval now counts only for the payment it approved: before, an approved proposal's id could be attached to a different payment.
 
 Every approval is bound to the sha256 of exactly what it approves. It is spent where it is used, where the route recomputes that digest from what it is about to do, so changing one dial or one amount needs a new approval.
 
 **Switching WhatsApp on** is refused until the main admin has a confirmed WhatsApp number **and** a passkey. **Switching it off** is itself a settings save, so it needs a WhatsApp + passkey approval.
+
+**Passkeys can be restored.** WebAuthn hands over a passkey's public key only when the passkey is created. Settings → Security → *Restore a passkey on this device* recovers it from two signatures instead. The device asks twice, and the same passkey must be picked both times. A restored passkey has the same Sui address, so any USDC already sent to it is back in reach. Setting up a *new* passkey creates a new address.
+
+## Before you send (Send USDC)
+
+The page checks what a real mainnet transfer needs, and each open item links to its fix:
+
+- the lane is open, including Splash's fee address;
+- an approver can approve (in WhatsApp style: the main admin still has a confirmed number and a passkey);
+- a wallet to pay from;
+- USDC in that wallet;
+- SUI for gas;
+- a saved wallet recipient.
+
+Recipient screening is shown as a note: Chainalysis if configured, otherwise the admin vouches for each recipient.
 
 ## Configuration
 
@@ -142,6 +159,14 @@ Every approval is bound to the sha256 of exactly what it approves. It is spent w
 
 ## Demo accounts (`npm run dev:db`, password `SplashDemo!2026`)
 
+By default the dev database lives in memory. Set `DEV_DB_DIR=.dev-db` in `.env.local` to keep it on disk, so passkeys, recipients and transfers survive a restart:
+
+- only migrations it has not seen are applied (tracked with a hash in `splash_dev_migrations`);
+- the seed runs once;
+- a lock file stops a second server opening the same directory.
+
+Stop it with Ctrl+C, and delete `.dev-db/` to start over.
+
 - `live@acme.test`: **unverified**. USDC on Sui mainnet only, 5,000 / 30 days. Fiat and Treasury locked. Zeke refuses local-currency payouts.
 - `demo@acme.test`: **verified**. USD in and local-currency out through the sandbox partners; USDC on Sui mainnet is real.
 - `fresh@acme.test`: a new business that walks onboarding.
@@ -149,7 +174,7 @@ Every approval is bound to the sha256 of exactly what it approves. It is spent w
 ## Known limits
 
 - **The Splash wallet is the admin's passkey.** Lose the passkey and the funds at that address can't be signed for. Hold operating balances there, not reserves.
-- **Local development:** the dev database is in memory, and a restart forgets the passkey's record (the key stays on the device). Don't leave real funds in a local-dev Splash wallet.
+- **Local development:** the in-memory dev database forgets the passkey's record on restart (the key stays on the device). Restore it in Settings → Security, or run with `DEV_DB_DIR`. Don't leave real funds in a local-dev Splash wallet.
 - **MetaMask** reaches Sui only through the Sui Snap, on desktop.
 - **Every transfer needs a little SUI for gas** in the sending wallet.
 - **x402 on a slow facilitator:** a seller that accepts a payment which then never lands leaves the quote counting until it expires. Retrying resends the same signed payment, so it can't be paid twice.

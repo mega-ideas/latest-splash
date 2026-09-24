@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
-import { userIdFromEmail } from '@/lib/auth/accounts';
+import { eq } from 'drizzle-orm';
+
+import { users } from '@/lib/db/schema';
 import {
   PasskeyError,
   enrolPasskey,
@@ -45,6 +47,23 @@ async function db() {
   return getDb() as never;
 }
 
+/**
+ * The signed-in person's user id, from the users table. It was derived from
+ * the email (userIdFromEmail), which matches accounts made by signup but not
+ * ones seeded with their own ids — for those, enrolment failed on the foreign
+ * key and a lookup found nothing. Every other reader of passkeys
+ * (step-up approvals, the Splash wallet) uses the database id, so this must.
+ */
+async function sessionUserId(email: string): Promise<string | null> {
+  const { getDb } = await import('@/lib/db/client');
+  const [row] = await getDb()
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.email, email.trim().toLowerCase()))
+    .limit(1);
+  return row?.id ?? null;
+}
+
 export async function GET() {
   const auth = await requireCustomerSession();
   if (auth.response) return auth.response;
@@ -54,10 +73,8 @@ export async function GET() {
     return NextResponse.json({ rpId, credential: null, storage: false }, { headers: { 'Cache-Control': 'no-store' } });
   }
 
-  const credential = await findCredential(await db(), {
-    userId: userIdFromEmail(auth.session.email),
-    rpId,
-  });
+  const userId = await sessionUserId(auth.session.email);
+  const credential = userId ? await findCredential(await db(), { userId, rpId }) : null;
 
   return NextResponse.json(
     {
@@ -90,9 +107,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'A credential id and public key are required' }, { status: 400 });
   }
 
+  const userId = await sessionUserId(auth.session.email);
+  if (!userId) return NextResponse.json({ error: 'No account found for this session.' }, { status: 404 });
+
   try {
     const credential = await enrolPasskey(await db(), {
-      userId: userIdFromEmail(auth.session.email),
+      userId,
       credentialId: parsed.data.credentialId,
       publicKey: parsed.data.publicKey,
       rpId: relyingPartyId(),
@@ -118,7 +138,8 @@ export async function DELETE() {
 
   const database = await db();
   const rpId = relyingPartyId();
-  const credential = await findCredential(database, { userId: userIdFromEmail(auth.session.email), rpId });
+  const userId = await sessionUserId(auth.session.email);
+  const credential = userId ? await findCredential(database, { userId, rpId }) : null;
   if (!credential) return NextResponse.json({ revoked: false }, { status: 404 });
 
   await revokePasskey(database, credential.id);

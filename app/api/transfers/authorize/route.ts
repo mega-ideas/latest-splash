@@ -35,7 +35,9 @@ import { custodyPhaseResponse, deliveryTierAllowed } from '@/lib/server/custody-
 import { checkMinimumSettlement } from '@/lib/policy/limits';
 import { checkAuthorizationLimits, startOfUtcDay } from '@/lib/policy/authorization-limits';
 import { verifyPayoutTotp } from '@/lib/auth/totp';
-import { consumeActionApproval } from '@/lib/server/step-up-gate';
+import { approvalRequiredResponse, consumeActionApproval, releaseActionApproval } from '@/lib/server/step-up-gate';
+import { fiatPaymentSubstance } from '@/lib/server/step-up-subjects';
+import { subjectDigest } from '@/lib/server/step-up';
 import { readOrgSettings } from '@/lib/server/org-settings';
 import { readComplianceControls } from '@/lib/server/sui-settlement';
 import { isForeignAccountId, requireSessionAccount } from '@/lib/server/session-account';
@@ -87,7 +89,24 @@ const authorizeSchema = z.object({
   kycTier: z.union([z.number(), z.string()]).optional(),
 });
 
+/**
+ * A WhatsApp approval spent by this request, and whether the payment it was
+ * spent on went ahead. Anything else — a refusal after the approval was used,
+ * or a throw — gives it back, so a travel-rule gap or a ceiling does not cost
+ * the approver another round of code and passkey.
+ */
+type SpentApproval = { release: (() => Promise<void>) | null; kept: boolean };
+
 export async function POST(request: Request) {
+  const spent: SpentApproval = { release: null, kept: false };
+  try {
+    return await authorize(request, spent);
+  } finally {
+    if (spent.release && !spent.kept) await spent.release().catch(() => {});
+  }
+}
+
+async function authorize(request: Request, spent: SpentApproval) {
   const auth = await requireCustomerRequest(request);
   if (auth.response) return auth.response;
 
@@ -134,6 +153,36 @@ export async function POST(request: Request) {
   // approval off for every tenant and then send whatever they liked.
   const settings = await readOrgSettings(orgId);
 
+  // An approval collected through the queue, verified against the proposal
+  // store and — new — against THIS payment. The claim used to be checked for
+  // existence, org and status only, so an approved proposal's id could ride
+  // on a different payment and skip the second approver.
+  const claim = await resolveApprovalClaim(request, orgId);
+  const approvalClaim = {
+    ...claim,
+    approved:
+      claim.approved &&
+      claim.payload != null &&
+      subjectDigest(fiatPaymentSubstance(claim.payload)) === subjectDigest(fiatPaymentSubstance(rawBody as Record<string, unknown>)),
+  };
+
+  // WhatsApp style (Settings → Approvals): every payout needs a WhatsApp code
+  // and passkey approval for exactly this payment — recipient, account,
+  // amount, currency, source. Spent here, given back below if the payment is
+  // refused. A payment carried out from the approval queue was approved there.
+  let whatsappApproved = false;
+  if (settings.whatsappEnabled && !approvalClaim.approved) {
+    const approval = {
+      session: auth.session,
+      orgId,
+      purpose: 'FIAT_TRANSFER' as const,
+      payload: rawBody as Record<string, unknown>,
+    };
+    whatsappApproved = await consumeActionApproval(approval);
+    if (!whatsappApproved) return approvalRequiredResponse('FIAT_TRANSFER');
+    spent.release = () => releaseActionApproval(approval);
+  }
+
   // Second factor. This used to be `/^\d{6}$/` and nothing else — any six
   // digits authorized a payout. `requireTotp` is now load-bearing: when it is
   // on and no secret is enrolled, we refuse rather than fall back to the shape
@@ -144,15 +193,8 @@ export async function POST(request: Request) {
     paymentRail !== 'STRIPE_CHECKOUT' &&
     paymentRail !== 'AIRWALLEX_WIRE';
   if (totpRequiredForThisRail) {
-    // In WhatsApp style, a WhatsApp code + passkey approval for exactly this
-    // request stands in for the authenticator code.
-    const whatsappApproved = settings.requireTotp && settings.whatsappEnabled
-      && await consumeActionApproval({
-        session: auth.session,
-        orgId,
-        purpose: 'FIAT_TRANSFER',
-        payload: rawBody as Record<string, unknown>,
-      });
+    // A WhatsApp code + passkey approval for exactly this payment stands in
+    // for the authenticator code.
     if (!whatsappApproved) {
       const verdict = verifyPayoutTotp({ code: totp, accountId: businessAccountId, requireTotp: settings.requireTotp });
       if (!verdict.ok) {
@@ -254,11 +296,11 @@ export async function POST(request: Request) {
   if (!limits.ok) {
     return NextResponse.json({ error: limits.message, code: limits.code, limitUsd: limits.limitUsd }, { status: 400 });
   }
-  // An approval already collected for THIS payment lifts the second-approver
-  // requirement and nothing else. Verified against the proposal store, never
-  // taken from the header: a client that could assert its own approval would
-  // be a considerably worse hole than the one dual approval closes.
-  const approvalClaim = await resolveApprovalClaim(request, orgId);
+  // An approval already collected for THIS payment (resolved above) lifts
+  // the second-approver requirement and nothing else. Verified against the
+  // proposal store, never taken from the header: a client that could assert
+  // its own approval would be a considerably worse hole than the one dual
+  // approval closes.
   if (limits.requiresSecondApproval && !approvalClaim.approved) {
     // This used to answer 409 telling the operator to "submit it through the
     // approval queue", and put nothing in the approval queue. A control that
@@ -291,6 +333,8 @@ export async function POST(request: Request) {
       idempotencyKey: `transfer:${orgId}:${body.amount.value}:${body.recipient.name}:${body.amount.targetCurrency}`,
       approvalThresholdUsd: settings.approvalThresholdUsd,
     });
+    // The WhatsApp approval went into the proposal: the queue carries it now.
+    if (proposal) spent.kept = true;
     return NextResponse.json(
       {
         error:
@@ -448,6 +492,9 @@ export async function POST(request: Request) {
   // Postgres when configured, this process only when not — one place decides,
   // and every read of this transfer goes back through the same store.
   await persistTransfer(intent);
+  // From here the transfer exists and the approval is spent on it, whatever
+  // settlement does next.
+  spent.kept = true;
   if (fundingSession) updateFundingSession(fundingSession.id, { transferIntentId: intent.id });
 
   // Debit the PAYER for every funding source, not only `held`.
