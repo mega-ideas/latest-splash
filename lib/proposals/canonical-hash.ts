@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import type { UnsignedProposal } from '../agent/types.ts';
+import type { ProposalFxRate, UnsignedProposal } from '../agent/types.ts';
 
 /**
  * Track A §1.4 — canonical approval hash.
@@ -29,6 +29,15 @@ export interface ApprovalCanon {
   expiresAt: string;
 }
 
+/**
+ * The quote's name in the canon. New proposals carry `quoteRef`; stored ones
+ * carry the legacy `pythPriceId`, read as-is so the canon string, and so
+ * every stored approval hash, is exactly what it was.
+ */
+export function fxQuoteRef(fxRate: ProposalFxRate): string {
+  return 'quoteRef' in fxRate ? fxRate.quoteRef : fxRate.pythPriceId;
+}
+
 export function canonFromProposal(proposal: UnsignedProposal): ApprovalCanon {
   const impact = proposal.explain.financialImpact;
   const beneficiaryIds = proposal.explain.evidence
@@ -46,7 +55,7 @@ export function canonFromProposal(proposal: UnsignedProposal): ApprovalCanon {
     currencyIn: impact.currencyIn ?? '',
     currencyOut: impact.currencyOut ?? '',
     routeId: proposal.corridor ?? '',
-    quoteId: impact.fxRate ? `${impact.fxRate.pythPriceId}@${impact.fxRate.observedAt}` : '',
+    quoteId: impact.fxRate ? `${fxQuoteRef(impact.fxRate)}@${impact.fxRate.observedAt}` : '',
     feeBps: impact.feeBps?.toString() ?? '',
     expiresAt: proposal.expiresAt,
   };

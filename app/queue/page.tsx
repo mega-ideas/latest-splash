@@ -32,7 +32,7 @@ const baseExplain: ProposalExplain = {
   },
   evidence: [
     { source: 'COUNTERPARTY', ref: 'cp_acme_ph', observedAt: generatedAt.toISOString(), trusted: true },
-    { source: 'PYTH_RATE', ref: 'pyth_usdc_usd', observedAt: generatedAt.toISOString(), trusted: true },
+    { source: 'CORRIDOR_RATE', ref: 'USD/PHP', observedAt: generatedAt.toISOString(), trusted: true, status: 'MODELED' },
   ],
   confidence: 0.91,
   risk: 'LOW',

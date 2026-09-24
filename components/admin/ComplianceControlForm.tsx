@@ -30,8 +30,8 @@ export default function ComplianceControlForm({ initial }: { initial: Compliance
   }
 
   const numberFields = [
-    ['maxDeviationPpm', 'Pyth max deviation', 'ppm'],
-    ['maxStalenessMs', 'Pyth max age', 'ms'],
+    ['maxDeviationPpm', 'Peg max deviation', 'ppm'],
+    ['maxStalenessMs', 'Peg reading max age', 'ms'],
     ['maxSlippageBps', 'DeepBook max slippage', 'bps'],
     ['minDepthBaseUnits', 'DeepBook minimum depth', 'base units'],
     ['minSettlementAmount', 'Minimum settlement', 'minor units'],
@@ -42,7 +42,7 @@ export default function ComplianceControlForm({ initial }: { initial: Compliance
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <span className="dash-kicker">On-chain risk controls</span>
-          <h2 className="mt-2 text-lg font-bold text-[#1f4350]">Pyth truth + DeepBook V3 execution</h2>
+          <h2 className="mt-2 text-lg font-bold text-[#1f4350]">Peg limits + DeepBook V3 execution</h2>
           <p className="mt-1 max-w-2xl text-sm text-[#326273]/65">Updates require the owned ComplianceCap. The pause switch fails every settlement closed.</p>
         </div>
         <label className="flex items-center gap-2 rounded-full border border-[#326273]/15 px-3 py-2 text-xs font-bold text-[#326273]">

@@ -1,4 +1,4 @@
-import type { DataStatus, EvidenceItem, EvidenceQuality, ProposalKind, ProposalStatus, RiskBand, SimulationResult, UserRole } from './types';
+import type { DataStatus, EvidenceItem, EvidenceQuality, ProposalFxRate, ProposalKind, ProposalStatus, RiskBand, SimulationResult, UserRole } from './types';
 
 type AmountLike = bigint | number | string | undefined;
 
@@ -8,7 +8,7 @@ export type ClientFinancialImpact = {
   currencyIn?: string;
   currencyOut?: string;
   feeBps?: number;
-  fxRate?: { value: string; pythPriceId: string; observedAt: string };
+  fxRate?: ProposalFxRate;
   yieldDeltaBps?: number;
   nettingSaved?: AmountLike;
 };
@@ -95,6 +95,18 @@ function row(label: string, value: string): ActionCardRow {
   return { label, value, status: value === '-' ? 'empty' : 'ok' };
 }
 
+/**
+ * Where a proposal's rate came from, in words. Legacy rows carry a
+ * `pythPriceId` but their rate came from the corridor table as well; the card
+ * used to say "via Pyth" for every one of them.
+ */
+function fxSourceLabel(fxRate: ProposalFxRate): string {
+  const ref = 'quoteRef' in fxRate ? fxRate.quoteRef : 'corridor:';
+  if (ref.startsWith('corridor:')) return 'corridor reference rate';
+  if (ref.startsWith('par:')) return 'at par';
+  return ref;
+}
+
 export function buildActionCardModel(proposal: ActionCardProposal): ActionCardModel {
   const impact = proposal.explain.financialImpact;
   const requiredApprovers = Math.max(0, proposal.explain.requiredApprovers);
@@ -122,7 +134,7 @@ export function buildActionCardModel(proposal: ActionCardProposal): ActionCardMo
       row('Amount in', money(impact.amountIn, impact.currencyIn)),
       row('Amount out', money(impact.amountOut, impact.currencyOut)),
       row('Fee', bps(impact.feeBps)),
-      row('FX', impact.fxRate ? `${impact.fxRate.value} via Pyth` : '-'),
+      row('FX', impact.fxRate ? `${impact.fxRate.value} (${fxSourceLabel(impact.fxRate)})` : '-'),
       row('Yield delta', bps(impact.yieldDeltaBps)),
       row('Netting saved', money(impact.nettingSaved, impact.currencyIn ?? impact.currencyOut ?? 'USD')),
     ],

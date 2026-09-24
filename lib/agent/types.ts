@@ -41,6 +41,12 @@ export interface EvidenceItem {
   status?: DataStatus;
   source:
     | 'BALANCE'
+    /** The rate came from Splash's corridor table (lib/fx/corridors.ts): a
+     *  reference rate, MODELED, not a market reading. */
+    | 'CORRIDOR_RATE'
+    /** Legacy: proposals stored before 2026-09-25 named their rate evidence
+     *  this. It was never Pyth — the rate came from the corridor table then
+     *  too — but stored rows must stay readable. Never written now. */
     | 'PYTH_RATE'
     | 'COUNTERPARTY'
     | 'INVOICE'
@@ -61,10 +67,23 @@ export interface FinancialImpact {
   currencyIn?: string;
   currencyOut?: string;
   feeBps?: number;
-  fxRate?: { value: string; pythPriceId: string; observedAt: string };
+  fxRate?: ProposalFxRate;
   yieldDeltaBps?: number;
   nettingSaved?: bigint;
 }
+
+/**
+ * The FX quote a proposal was priced at. `quoteRef` names where the rate came
+ * from, e.g. `corridor:USD/PHP`.
+ *
+ * Proposals stored before 2026-09-25 carry `pythPriceId` instead: a misnomer
+ * (their rate also came from the corridor table), kept because the field is
+ * part of the canonical approval hash (lib/proposals/canonical-hash.ts) and
+ * their stored approvals must still verify. Never written now.
+ */
+export type ProposalFxRate =
+  | { value: string; quoteRef: string; observedAt: string }
+  | { value: string; pythPriceId: string; observedAt: string };
 
 export interface ProposalExplain {
   recommendation: string;

@@ -35,7 +35,7 @@ type Quote = {
 
 function priceSourceLabel(source: string | undefined): string {
   if (!source) return '';
-  if (source.startsWith('pyth:')) return 'Pyth redemption rate';
+  if (source.startsWith('ondo:')) return 'Ondo price oracle';
   if (source.startsWith('env:')) return 'configured price';
   return source;
 }

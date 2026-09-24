@@ -691,21 +691,20 @@ function toMicro(amount: number): bigint {
 }
 
 /**
- * Real FX for a USD→currency corridor. The reference rate comes from the
- * corridor table (source of truth for all 8 live currencies) and the Pyth
- * price id + timestamp from getRate — so the FX row is a genuine quote, not a
- * placeholder. Returns `null` for an unknown/unsupported currency.
+ * FX for a USD→currency corridor, from the corridor table (the source of
+ * truth for the live currencies): a reference rate, not a market reading.
+ * `quoteRef` names it, and it goes into the approval canon, so an approval is
+ * bound to the rate it was shown. Returns `null` for an unsupported currency.
  */
 function resolveCorridorFx(currency: string) {
   const corridor = getUsdCorridorByCurrency(currency);
   if (!corridor) return null;
-  const quote = getRate({ pair: `USD/${currency}` });
   return {
     rate: corridor.rate,
     fxRate: {
       value: corridor.rate.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 }),
-      pythPriceId: quote.pythPriceId,
-      observedAt: quote.observedAt,
+      quoteRef: `corridor:USD/${corridor.currency}`,
+      observedAt: nowIso(),
     },
   };
 }
@@ -752,7 +751,8 @@ async function createDraftProposal(input: {
   currencyIn?: string;
   currencyOut?: string;
   feeBps?: number;
-  fxRate?: { value: string; pythPriceId: string; observedAt: string };
+  /** New proposals name their quote (`quoteRef`); only stored ones carry the legacy field. */
+  fxRate?: { value: string; quoteRef: string; observedAt: string };
   yieldDeltaBps?: number;
   nettingSaved?: bigint;
   evidence: EvidenceItem[];
@@ -861,25 +861,28 @@ export function getCorridorLiquidity(input: unknown) {
   };
 }
 
+/**
+ * A reference rate, named for where it comes from. USD→currency rates are
+ * Splash's corridor table (lib/fx/corridors.ts): configured, not measured.
+ * USDC and USDT are taken at par; whether that holds is the peg check's job
+ * (DeepBook, lib/server/peg.ts), before any payout starts. Any other pair has
+ * no rate, and says so: it used to answer 1.0000 for anything, labelled Pyth.
+ */
 export function getRate(input: unknown) {
   const pair = requireString(objectInput(input), 'pair').toUpperCase().replace('->', '/');
   const observedAt = nowIso();
-  const pythPriceId = pair === 'USDT/USD'
-    ? '0x2b89b9dc8fdf9f34709a5b106b472f0f39bb6ca9ce04b0fd7f2e971688e2e53b'
-    : '0xeaa020c61cc479712813461ce153894a96a6c00b21ed0cfc2798d1f9a9e9c94a';
-  const corridorRates: Record<string, string> = {
-    'USD/PHP': '56.4200',
-    'USD/MYR': '4.7100',
-    'USD/SGD': '1.3450',
-    'USDC/USD': '1.0000',
-    'USDT/USD': '1.0000',
-  };
+  if (pair === 'USDC/USD' || pair === 'USDT/USD') {
+    return { pair, value: '1.0000', quoteRef: `par:${pair}`, observedAt, source: 'par_assumed' };
+  }
+  const [base, quote] = pair.split('/');
+  const corridor = base === 'USD' && quote ? getUsdCorridorByCurrency(quote) : undefined;
+  if (!corridor) throw new Error(`no reference rate for ${pair}`);
   return {
     pair,
-    value: corridorRates[pair] ?? '1.0000',
-    pythPriceId,
+    value: corridor.rate.toFixed(4),
+    quoteRef: `corridor:${pair}`,
     observedAt,
-    source: pair.startsWith('USD/') ? 'corridor_reference_with_pyth_stablecoin_guard' : 'pyth_hermes',
+    source: 'corridor_table',
   };
 }
 
@@ -985,7 +988,7 @@ export async function proposePayment(input: unknown): Promise<UnsignedProposal> 
     nettingSaved: usdMicro(estimateNettingSavedUsd(amountUsd)),
     evidence: [
       evidence('COUNTERPARTY', counterparty.id, true),
-      ...(fx ? [evidence('PYTH_RATE', `USD/${currency}`, true)] : []),
+      ...(fx ? [evidence('CORRIDOR_RATE', `USD/${currency}`, true, 'MODELED')] : []),
       ...(invoice ? [evidence('INVOICE', invoice.id, false)] : []),
       evidence('COMPLIANCE', counterparty.id, true),
     ],
@@ -1070,7 +1073,7 @@ async function proposeFxConvert(input: unknown): Promise<UnsignedProposal> {
     feeBps: getCorridorFeeBps(currencyOut),
     fxRate: fx?.fxRate,
     nettingSaved: usdMicro(estimateNettingSavedUsd(amountUsd)),
-    evidence: [evidence('PYTH_RATE', `USD/${currencyOut}`, true)],
+    evidence: [evidence('CORRIDOR_RATE', `USD/${currencyOut}`, true, 'MODELED')],
     risk: 'MEDIUM',
     confidence: 0.68,
   });
@@ -1392,12 +1395,13 @@ export const oxwalTools = {
 
 /** WS2 — honest source labels per read tool. All read data is fixture- or
  *  model-backed today (DEMO/MODELED); the Track B Postgres sources will flip
- *  these to "ledger.postgres"/"pyth.hermes" and the statuses to LIVE. */
+ *  these to "ledger.postgres" and the statuses to LIVE. */
 const READ_TOOL_SOURCES: Record<ReadToolName, string> = {
   getBalances: 'fixture.balances',
   getTreasuryState: 'fixture.treasury',
   getCorridorLiquidity: 'model.corridor-liquidity',
-  getRate: 'fixture.rates',
+  // The corridor table: a configured reference rate, not a market reading.
+  getRate: 'model.corridor-table',
   getCounterparty: 'fixture.counterparties',
   getInvoice: 'fixture.invoices',
   getNettingOpportunities: 'model.netting',

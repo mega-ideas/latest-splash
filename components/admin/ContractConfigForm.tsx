@@ -17,7 +17,7 @@ const FIELDS: Field[] = [
   { key: 'treasuryId', label: 'Treasury / Settlement Pool', envKey: 'SPLASH_TREASURY_ID', placeholder: '0x…', help: 'SettlementPool<SUI> object created on deploy.' },
   { key: 'adminCapId', label: 'Admin Cap', envKey: 'SPLASH_ADMIN_CAP_ID', placeholder: '0x…', help: 'business_account::AdminCap object owned by the operator wallet.' },
   { key: 'pegStateId', label: 'Peg State', envKey: 'SPLASH_PEG_STATE_ID', placeholder: '0x…', help: 'peg_monitor::PegState shared object.' },
-  { key: 'complianceConfigId', label: 'Compliance Config', envKey: 'SPLASH_COMPLIANCE_CONFIG_ID', placeholder: '0x…', help: 'Shared Pyth staleness, deviation, DeepBook slippage, depth, and pause controls.' },
+  { key: 'complianceConfigId', label: 'Compliance Config', envKey: 'SPLASH_COMPLIANCE_CONFIG_ID', placeholder: '0x…', help: 'Shared peg staleness, deviation, DeepBook slippage, depth, and pause controls.' },
   { key: 'complianceCapId', label: 'Compliance Cap', envKey: 'SPLASH_COMPLIANCE_CAP_ID', placeholder: '0x…', help: 'Owned capability required to update settlement risk thresholds.' },
   { key: 'deepbookPoolId', label: 'DeepBook V3 Pool', envKey: 'DEEPBOOK_POOL_ID', placeholder: '0x…', help: 'Independent amount-sized liquidity source used by the Move settlement guard.' },
   { key: 'businessAccountId', label: 'Business Account', envKey: 'SPLASH_BUSINESS_ACCOUNT_ID', placeholder: '0x…', help: 'business_account::BusinessAccount shared object.' },
