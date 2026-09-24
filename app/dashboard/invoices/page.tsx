@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 
 import InvoiceLoop from '@/components/invoices/InvoiceLoop';
 import StatusBadge from '@/components/StatusBadge';
+import { suiScanTxUrlOn } from '@/lib/explorer';
 import { ACTIVE_USD_CORRIDORS } from '@/lib/fx/corridors';
 import type { InvoiceRecord, InvoiceStatusV2 } from '@/lib/server/operations';
 
@@ -163,7 +164,7 @@ export default function InvoicesPage() {
                     <td className="px-4 py-4">
                       {invoice.walrusBlobId ? <span className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-2.5 py-1 text-[13px] font-semibold text-primary"><ShieldCheck className="h-3 w-3" /> Seal + Walrus</span> : <span className="text-[13px] text-foreground/35">No document</span>}
                     </td>
-                    <td className="px-4 py-4"><span className={`rounded-full px-2.5 py-1 text-[13px] font-bold capitalize ${statusStyle[invoice.status]}`}>{invoice.status}</span>{invoice.demo && <span className="ml-2"><StatusBadge status="demo" /></span>}</td>
+                    <td className="px-4 py-4"><span className={`rounded-full px-2.5 py-1 text-[13px] font-bold capitalize ${statusStyle[invoice.status]}`}>{invoice.status}</span>{invoice.demo && <span className="ml-2"><StatusBadge status="demo" /></span>}{invoice.usdcTxDigest && <a href={suiScanTxUrlOn('mainnet', invoice.usdcTxDigest)} target="_blank" rel="noreferrer" className="mt-1 block text-[12px] font-semibold text-primary hover:underline">Paid in USDC · verified on Sui</a>}</td>
                     <td className="px-4 py-4">
                       <div className="flex justify-end gap-2">
                         <button onClick={() => copyPayLink(invoice)} className="inline-flex items-center gap-1 rounded-lg border border-foreground/10 bg-card px-3 py-2 text-[13px] font-bold"><Copy className="h-3.5 w-3.5" /> Pay link</button>

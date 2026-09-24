@@ -4,6 +4,7 @@ import PayInvoiceClient from '@/components/pay/PayInvoiceClient';
 import { findInvoiceBySlug } from '@/lib/server/invoices-store';
 import { payLinkBankInstructions } from '@/lib/server/pay-link';
 import { findIssuerForPayLink } from '@/lib/server/recipients-store';
+import { publicUsdcForSlug } from '@/lib/server/usdc-invoice-payments';
 
 export default async function PayInvoicePage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
@@ -11,6 +12,7 @@ export default async function PayInvoicePage({ params }: { params: Promise<{ slu
   if (!invoice) notFound();
   const issuer = await findIssuerForPayLink(invoice.orgId, invoice.issuerOrg);
   const reference = invoice.paymentReference ?? `SPL-${slug.toUpperCase()}-${invoice.id.slice(-4).toUpperCase()}`;
+  const usdc = await publicUsdcForSlug(slug);
 
   return (
     <PayInvoiceClient
@@ -25,6 +27,7 @@ export default async function PayInvoicePage({ params }: { params: Promise<{ slu
         status: invoice.status,
         paymentReference: reference,
         bankInstructions: payLinkBankInstructions(),
+        usdc,
       }}
     />
   );

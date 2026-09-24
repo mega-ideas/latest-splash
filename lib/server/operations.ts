@@ -215,6 +215,9 @@ export type InvoiceRecord = {
   documentSha256?: string;
   transferIntentId?: string;
   demo?: boolean;
+  /** Paid in USDC on Sui to the issuer's own wallet (lib/server/usdc-invoice-payments.ts). */
+  usdcTxDigest?: string;
+  usdcPaidAt?: string;
   createdAt: string;
   updatedAt: string;
 };

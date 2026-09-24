@@ -162,6 +162,13 @@
       "when": 1790467200000,
       "tag": "0022_step_up_codes",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1790553600000,
+      "tag": "0023_invoice_usdc_payment",
+      "breakpoints": true
     }
   ]
 }

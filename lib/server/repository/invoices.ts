@@ -49,6 +49,9 @@ export type InvoiceRow = {
   transferIntentId?: string;
   recipientId?: string;
   demo?: boolean;
+  /** Paid in USDC on Sui to the issuer's own wallet: the proving transaction. */
+  usdcTxDigest?: string;
+  usdcPaidAt?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -98,6 +101,8 @@ function toRow(row: InvoiceSelect): InvoiceRow {
     transferIntentId: row.transferIntentId ?? undefined,
     recipientId: row.supplierId ?? undefined,
     demo: row.demo,
+    usdcTxDigest: row.usdcTxDigest ?? undefined,
+    usdcPaidAt: row.usdcPaidAt ? row.usdcPaidAt.toISOString() : undefined,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };

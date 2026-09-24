@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Check, CheckCircle2, Copy, Info, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 
+import PayWithUsdc, { type PublicUsdc } from '@/components/pay/PayWithUsdc';
 import { CUSTODY_LICENCE } from '@/lib/custody-phase-rules';
 
 type PublicInvoice = {
@@ -18,6 +19,8 @@ type PublicInvoice = {
   /** A Splash collection account, or null in Phase 0: Splash may not hold the
    *  payer's funds yet, so the payer pays the issuer directly. */
   bankInstructions: { beneficiary: string; bank: string; account: string; swift: string } | null;
+  /** USDC on Sui straight to the issuer's own wallet, when they have one. */
+  usdc?: PublicUsdc;
 };
 
 export default function PayInvoiceClient({ slug, invoice }: { slug: string; invoice: PublicInvoice }) {
@@ -102,6 +105,7 @@ export default function PayInvoiceClient({ slug, invoice }: { slug: string; invo
                 </div>
               )}
               {invoice.memo && <p className="mt-4 rounded-xl bg-muted/50 p-3 text-sm text-foreground/65">{invoice.memo}</p>}
+              <PayWithUsdc slug={slug} issuer={invoice.issuerOrg} usdc={invoice.usdc ?? null} />
             </div>
 
             <div className="rounded-2xl border border-foreground/10 bg-card p-5">

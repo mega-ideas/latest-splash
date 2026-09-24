@@ -7,6 +7,7 @@ import { recordAnalyticsEvent } from '@/lib/server/operations';
 import { findInvoiceBySlug, patchInvoiceForStaff } from '@/lib/server/invoices-store';
 import { payLinkBankInstructions } from '@/lib/server/pay-link';
 import { findIssuerForPayLink, upsertRecipientFromInvoice } from '@/lib/server/recipients-store';
+import { publicUsdcForSlug } from '@/lib/server/usdc-invoice-payments';
 
 const paidSchema = z.object({
   payerOrgName: z.string().trim().min(2),
@@ -33,6 +34,7 @@ async function publicInvoice(slug: string) {
     // A Splash collection account only once Splash may hold the funds; null in
     // Phase 0, and the payer pays the issuer directly.
     bankInstructions: payLinkBankInstructions(),
+    usdc: await publicUsdcForSlug(slug),
   };
 }
 

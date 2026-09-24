@@ -463,12 +463,18 @@ export const invoices = pgTable('invoices', {
    *  `payment_intents.invoice_id`; without this one, "was this paid" is a scan. */
   transferIntentId: text('transfer_intent_id'),
   demo: boolean('demo').notNull().default(false),
+  /** Paid in USDC on Sui to the issuer's own wallet (migration 0023): the
+   *  transaction that proved it. One transaction pays one invoice. */
+  usdcTxDigest: text('usdc_tx_digest'),
+  usdcPaidAt: timestamp('usdc_paid_at', { withTimezone: true }),
+  usdcPayerAddress: text('usdc_payer_address'),
   ...timestamps,
 }, (table) => [
   index('invoices_org_idx').on(table.orgId),
   index('invoices_org_created_idx').on(table.orgId, table.createdAt),
   index('invoices_supplier_idx').on(table.supplierId),
   uniqueIndex('invoices_pay_link_unique').on(table.payLinkSlug),
+  uniqueIndex('invoices_usdc_tx_digest_unique').on(table.usdcTxDigest),
 ]);
 
 export const paymentIntents = pgTable('payment_intents', {

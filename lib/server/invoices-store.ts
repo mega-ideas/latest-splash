@@ -48,6 +48,8 @@ function toRecord(row: repo.InvoiceRow): InvoiceRecord {
     documentSha256: row.documentSha256,
     transferIntentId: row.transferIntentId,
     demo: row.demo,
+    usdcTxDigest: row.usdcTxDigest,
+    usdcPaidAt: row.usdcPaidAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
