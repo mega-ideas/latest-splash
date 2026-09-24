@@ -4,10 +4,14 @@ import { redirect } from 'next/navigation';
 
 import type { ProposalExplain, SimulationResult, UnsignedProposal } from '@/lib/agent/types';
 import { getOxwalProposalStore } from '@/lib/agent/oxwal';
+import { resolveAuthorityForSession, UnauthorizedError } from '@/lib/auth/authority';
 import { ensureProposalStoreHydrated } from '@/lib/queue/proposal-persistence';
 import { buildApprovalQueue, queueLanes, type QueueLane } from '@/lib/queue/approval-queue';
+import { readyToSend, type QueueViewer } from '@/lib/queue/ready-to-send';
 import { getCustomerSession } from '@/lib/server/customer-auth';
+import ApprovalCodeCard from '@/components/queue/ApprovalCodeCard';
 import ApprovalQueueBoard, { type QueueItem, type QueueLaneData } from '@/components/queue/ApprovalQueueBoard';
+import ReadyToSendLane, { type ReadyToSendItem } from '@/components/queue/ReadyToSendLane';
 
 export const dynamic = 'force-dynamic';
 
@@ -167,6 +171,23 @@ function formatExpiry(expiresInMs: number | null) {
   return `${minutes}m`;
 }
 
+/** How long an approved payment can still be sent. Its window is a day, so
+ *  hours, not a four-digit count of minutes. */
+function sendWindowLabel(msLeft: number) {
+  if (!Number.isFinite(msLeft)) return 'No expiry';
+  if (msLeft <= 0) return 'Window closed';
+  const minutes = Math.ceil(msLeft / 60000);
+  if (minutes < 60) return `${minutes}m left`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m left`;
+}
+
+function approvalsLabel(proposal: UnsignedProposal) {
+  const required = proposal.explain.requiredApprovers;
+  if (required === 0) return 'approved by policy';
+  const collected = new Set(proposal.approvals.map((approval) => approval.userId)).size;
+  return `${collected} of ${required} approved`;
+}
+
 const laneLabels: Record<QueueLane, string> = {
   PENDING_APPROVALS: 'Pending approvals',
   COMPLIANCE_HOLDS: 'Compliance holds',
@@ -202,6 +223,32 @@ export default async function QueuePage() {
       risk: item.explain.risk,
       expiryLabel: 'From Zeke chat',
     }));
+
+  // Approved, and waiting for a signed-in approver to send it: where a vote
+  // that finished on WhatsApp lands, because a reply cannot send money. Only
+  // the viewer's own workspace. The store holds every tenant's proposals, and
+  // nothing about another workspace's approved payments is theirs to see. No
+  // membership, no workspace, nothing listed.
+  let viewer: QueueViewer | null = null;
+  try {
+    const ctx = await resolveAuthorityForSession(session);
+    viewer = { orgId: ctx.orgId, userId: ctx.userId, role: ctx.role };
+  } catch (error) {
+    if (!(error instanceof UnauthorizedError)) throw error;
+  }
+  const now = new Date();
+  const readyItems: ReadyToSendItem[] = readyToSend(proposalStore.list(), viewer, now).map(
+    ({ proposal, blockedReason }) => ({
+      id: proposal.id,
+      recommendation: proposal.explain.recommendation,
+      kind: proposal.kind,
+      amountLabel: formatAmount(proposal),
+      approvalsLabel: approvalsLabel(proposal),
+      expiryLabel: sendWindowLabel(Date.parse(proposal.expiresAt) - now.getTime()),
+      approvalHash: proposal.approvalHash ?? null,
+      blockedReason,
+    }),
+  );
 
   // Serialize the queue for the interactive client board (no bigint/Date over
   // the boundary). Approve/Reject state lives client-side for the demo.
@@ -255,6 +302,9 @@ export default async function QueuePage() {
             <Link className="rounded-md bg-[#1F4452] px-3 py-2 text-white" href="/dashboard">Dashboard</Link>
           </nav>
         </header>
+
+        <ApprovalCodeCard />
+        <ReadyToSendLane items={readyItems} />
 
         <ApprovalQueueBoard pending={pending} otherLanes={otherLanes} />
       </div>
