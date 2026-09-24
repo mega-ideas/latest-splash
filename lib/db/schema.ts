@@ -463,7 +463,7 @@ export const invoices = pgTable('invoices', {
    *  `payment_intents.invoice_id`; without this one, "was this paid" is a scan. */
   transferIntentId: text('transfer_intent_id'),
   demo: boolean('demo').notNull().default(false),
-  /** Paid in USDC on Sui to the issuer's own wallet (migration 0023): the
+  /** Paid in USDC on Sui to the issuer's own wallet (migration 0024): the
    *  transaction that proved it. One transaction pays one invoice. */
   usdcTxDigest: text('usdc_tx_digest'),
   usdcPaidAt: timestamp('usdc_paid_at', { withTimezone: true }),
@@ -821,6 +821,26 @@ export const approvals = pgTable('approvals', {
 }, (table) => [
   uniqueIndex('approvals_one_per_user').on(table.proposalId, table.userId),
 ]);
+
+/**
+ * An approval, spent (lib/server/approved-proposal.ts). The first money route
+ * to act on a proposal's approved-proposal claim inserts the row — or the
+ * approvers' replay does, when the route refused before reaching the claim.
+ * The primary key is the control: a second insert conflicts, so one approval
+ * carries out one payment, however many requests or processes race for it.
+ *
+ * No foreign key to `proposals`. The proposal store is in memory and its
+ * write-through is best-effort, so the proposal row may not be there; the
+ * spend must not depend on it.
+ */
+export const consumedApprovals = pgTable('consumed_approvals', {
+  proposalId: text('proposal_id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  /** What spent it: the route that acted on the claim, 'execution' when the
+   *  replay closed it, 'backfill' for approvals carried out before the table. */
+  consumedBy: text('consumed_by').notNull(),
+  consumedAt: timestamp('consumed_at', { withTimezone: true }).notNull().defaultNow(),
+});
 
 export const fundingEvents = pgTable('funding_events', {
   id: text('id').primaryKey(),

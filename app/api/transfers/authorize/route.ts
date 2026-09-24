@@ -37,7 +37,6 @@ import { checkAuthorizationLimits, startOfUtcDay } from '@/lib/policy/authorizat
 import { verifyPayoutTotp } from '@/lib/auth/totp';
 import { approvalRequiredResponse, consumeActionApproval, releaseActionApproval } from '@/lib/server/step-up-gate';
 import { fiatPaymentSubstance } from '@/lib/server/step-up-subjects';
-import { subjectDigest } from '@/lib/server/step-up';
 import { readOrgSettings } from '@/lib/server/org-settings';
 import { readComplianceControls } from '@/lib/server/sui-settlement';
 import { isForeignAccountId, requireSessionAccount } from '@/lib/server/session-account';
@@ -154,17 +153,16 @@ async function authorize(request: Request, spent: SpentApproval) {
   const settings = await readOrgSettings(orgId);
 
   // An approval collected through the queue, verified against the proposal
-  // store and — new — against THIS payment. The claim used to be checked for
-  // existence, org and status only, so an approved proposal's id could ride
-  // on a different payment and skip the second approver.
-  const claim = await resolveApprovalClaim(request, orgId);
-  const approvalClaim = {
-    ...claim,
-    approved:
-      claim.approved &&
-      claim.payload != null &&
-      subjectDigest(fiatPaymentSubstance(claim.payload)) === subjectDigest(fiatPaymentSubstance(rawBody as Record<string, unknown>)),
-  };
+  // store and against THIS payment, and spent here. The claim used to be
+  // checked for existence, org and status only, so an approved proposal's id
+  // could ride on a different payment and skip the second approver — and the
+  // same approved payment could be sent again after it executed.
+  const approvalClaim = await resolveApprovalClaim(request, orgId, {
+    kind: 'PAYMENT',
+    substance: fiatPaymentSubstance,
+    body: rawBody as Record<string, unknown>,
+    consumer: 'transfers/authorize',
+  });
 
   // WhatsApp style (Settings → Approvals): every payout needs a WhatsApp code
   // and passkey approval for exactly this payment — recipient, account,

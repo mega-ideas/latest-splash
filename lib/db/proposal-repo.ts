@@ -1,7 +1,7 @@
 import { eq, notInArray } from 'drizzle-orm';
 import type { PgDatabase } from 'drizzle-orm/pg-core';
 
-import { approvals, organizations, proposals } from './schema.ts';
+import { approvals, consumedApprovals, organizations, proposals } from './schema.ts';
 import type * as schemaModule from './schema.ts';
 import type { UnsignedProposal } from '../agent/types';
 
@@ -126,6 +126,30 @@ function rowToProposal(row: typeof proposals.$inferSelect, approvalRows: (typeof
       ? decodeJsonWithBigints(row.executionPayload)
       : undefined,
   } as UnsignedProposal;
+}
+
+/**
+ * Spend a proposal's approval: true for exactly one caller, ever.
+ *
+ * An insert against the primary key, so the database decides — two processes
+ * acting on the same approval at once cannot both win, and nothing on the
+ * write-through path can clear it afterwards.
+ */
+export async function consumeApprovalRecord(
+  db: DrizzleDb,
+  input: { proposalId: string; orgId: string; consumedBy: string; consumedAt?: Date },
+): Promise<boolean> {
+  const rows = await db
+    .insert(consumedApprovals)
+    .values({
+      proposalId: input.proposalId,
+      orgId: input.orgId,
+      consumedBy: input.consumedBy,
+      consumedAt: input.consumedAt ?? new Date(),
+    })
+    .onConflictDoNothing({ target: consumedApprovals.proposalId })
+    .returning({ proposalId: consumedApprovals.proposalId });
+  return rows.length === 1;
 }
 
 /** Boot hydration: every proposal still in flight (non-terminal). */

@@ -16,6 +16,7 @@ import { buildBatch } from '@/lib/server/operations';
 import { claimBatch, patchBatch } from '@/lib/server/batches-store';
 import { proposeForApproval } from '@/lib/server/dual-approval';
 import { resolveApprovalClaim } from '@/lib/server/approved-proposal';
+import { batchPayoutSubstance, batchTargetCurrency, payableBatchRows } from '@/lib/server/step-up-subjects';
 import { resolveAuthorityForSession } from '@/lib/auth/authority';
 import { listMovementsSince } from '@/lib/server/ledger-store';
 import { readComplianceControls, recordBatchSettlementOnSui } from '@/lib/server/sui-settlement';
@@ -70,7 +71,7 @@ export async function POST(request: Request) {
 
   const rows = Array.isArray(body.rows) ? (body.rows as BatchRow[]) : [];
   const totp = String(body.totp ?? '');
-  const targetCurrency = typeof body.targetCurrency === 'string' ? body.targetCurrency : 'PHP';
+  const targetCurrency = batchTargetCurrency(body);
 
   const accountCheck = await requireSessionAccount(auth.session);
   if (accountCheck.response) return accountCheck.response;
@@ -110,7 +111,9 @@ export async function POST(request: Request) {
     }
   }
 
-  const acceptedRows = rows.filter((row) => row.name && row.address && Number.parseFloat(String(row.amount ?? '0')) > 0);
+  // The same rule the approval binding uses, so an approval covers exactly
+  // the rows this run pays.
+  const acceptedRows = payableBatchRows(rows);
   const total = acceptedRows.reduce((sum, row) => sum + Number.parseFloat(String(row.amount ?? '0')), 0);
 
   // Minimum applies to the batch TOTAL, not per row — a payroll run legitimately
@@ -152,11 +155,22 @@ export async function POST(request: Request) {
   if (!limits.ok) {
     return NextResponse.json({ error: limits.message, code: limits.code, limitUsd: limits.limitUsd }, { status: 400 });
   }
-  // An approval already collected for THIS payment lifts the second-approver
+  // An approval already collected for THIS run lifts the second-approver
   // requirement and nothing else. Verified against the proposal store, never
   // taken from the header: a client that could assert its own approval would
   // be a considerably worse hole than the one dual approval closes.
-  const approvalClaim = await resolveApprovalClaim(request, orgId);
+  //
+  // It must be a batch approval for these payable rows in this currency, and
+  // it is spent here. The claim used to be checked for existence, org and
+  // status only: any approved proposal's id could ride on a different run,
+  // and an approval that had already paid could pay again under a fresh
+  // Idempotency-Key.
+  const approvalClaim = await resolveApprovalClaim(request, orgId, {
+    kind: 'BATCH_PAYOUT',
+    substance: batchPayoutSubstance,
+    body,
+    consumer: 'batches/authorize',
+  });
   if (limits.requiresSecondApproval && !approvalClaim.approved) {
     // Same dead end as the single-transfer path, and it matters more here:
     // a batch is many payouts under one authorization, so an operator with

@@ -91,7 +91,7 @@ test('an approval lifts only the second approver, not the other guards', async (
   // The claim is resolved against the store, and it gates ONLY the approval
   // branch — TOTP, the pause and the ceilings are checked before it and are
   // not conditional on it.
-  assert.match(route, /resolveApprovalClaim\(request, orgId\)/);
+  assert.match(route, /resolveApprovalClaim\(request, orgId, \{/);
   assert.match(route, /limits\.requiresSecondApproval && !approvalClaim\.approved/);
 
   const totpAt = route.indexOf('verifyPayoutTotp');

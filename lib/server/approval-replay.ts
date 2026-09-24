@@ -27,10 +27,19 @@
  *
  * `x-splash-approved-proposal` tells the route which approval to look for. The
  * route does not trust it: it loads that proposal, checks it belongs to the
- * caller's org, checks it is genuinely approved, and checks it describes this
- * payment. A client sending the header by hand gets nowhere.
+ * caller's org, checks it is genuinely approved, checks it describes this
+ * payment, and spends it (lib/server/approved-proposal.ts). A client sending
+ * the header by hand gets nowhere.
+ *
+ * ─── Presented once ─────────────────────────────────────────────────────────
+ *
+ * When the route returns, whatever it returned, the replay closes the claim.
+ * A route that refused before reaching it would otherwise leave an approved,
+ * unspent claim behind for the next request to present.
  */
 import 'server-only';
+
+import { closeApprovalClaim } from '@/lib/server/approved-proposal';
 
 export const APPROVED_PROPOSAL_HEADER = 'x-splash-approved-proposal';
 
@@ -46,7 +55,8 @@ type ReplayInput = {
   origin: string;
 };
 
-async function invoke(
+/** Exported for the tests, which drive it with a stand-in handler. */
+export async function replayThroughRoute(
   handler: (request: Request) => Promise<Response>,
   path: string,
   input: ReplayInput,
@@ -61,7 +71,13 @@ async function invoke(
     body: JSON.stringify(input.body),
   });
 
-  const response = await handler(request);
+  let response: Response;
+  try {
+    response = await handler(request);
+  } finally {
+    // One approval, one attempt: spent now if the route did not spend it.
+    await closeApprovalClaim(input.approvedProposalId, input.orgId);
+  }
   const text = await response.text();
   let parsed: Record<string, unknown> = {};
   try {
@@ -86,10 +102,10 @@ async function invoke(
 
 export async function authorizeTransferForApproval(input: ReplayInput): Promise<ReplayResult> {
   const { POST } = await import('@/app/api/transfers/authorize/route');
-  return invoke(POST, '/api/transfers/authorize', input);
+  return replayThroughRoute(POST, '/api/transfers/authorize', input);
 }
 
 export async function authorizeBatchForApproval(input: ReplayInput): Promise<ReplayResult> {
   const { POST } = await import('@/app/api/batches/authorize/route');
-  return invoke(POST, '/api/batches/authorize', input);
+  return replayThroughRoute(POST, '/api/batches/authorize', input);
 }

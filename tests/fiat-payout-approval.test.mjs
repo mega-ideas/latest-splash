@@ -124,9 +124,11 @@ test('authorize: WhatsApp style needs an approval for EVERY payout, spent once a
 
 test('authorize: an approved-proposal claim only counts for the payment it approved', async () => {
   const route = code(await readFile(new URL('../app/api/transfers/authorize/route.ts', import.meta.url), 'utf8'));
+  // The claim is resolved against THIS payment's substance and spent there
+  // (lib/server/approved-proposal.ts compares the two digests).
   assert.match(
     route,
-    /subjectDigest\(fiatPaymentSubstance\(claim\.payload\)\) === subjectDigest\(fiatPaymentSubstance\(rawBody as Record<string, unknown>\)\)/,
+    /resolveApprovalClaim\(request, orgId, \{\s*kind: 'PAYMENT',\s*substance: fiatPaymentSubstance,\s*body: rawBody as Record<string, unknown>,/,
   );
   // One resolution, used for both the second-approver lift and the WhatsApp skip.
   assert.equal(route.match(/resolveApprovalClaim\(/g).length, 1);

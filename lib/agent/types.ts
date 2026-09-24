@@ -125,6 +125,11 @@ export interface UnsignedProposal {
   /** What happened when it was carried out, including a failure — so an
    *  approval that could not be executed is visible rather than silent. */
   execution?: { state: 'EXECUTED' | 'FAILED' | 'SKIPPED'; detail: string; ref?: string; at: string };
+  /** When the approval was spent, and what spent it: the money route that
+   *  acted on the approved-proposal claim, or the approvers' replay closing it.
+   *  An approval carries out one payment; set once, never cleared. */
+  approvalConsumedAt?: string;
+  approvalConsumedBy?: string;
 }
 
 export interface OrgPolicy {

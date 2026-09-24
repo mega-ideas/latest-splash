@@ -71,7 +71,7 @@ An invoice's pay link offers **Or pay in USDC on Sui**, straight to the issuer's
 
 - **Where the money goes.** The receiving address is the Splash wallet of the issuer's main admin (their passkey's address, the same person who approves payments). Splash never holds the money, so this fits Phase 0: nothing is collected on anyone's behalf. If the main admin has no passkey yet, the option is not shown.
 - **How a payment is matched.** A Sui transfer carries no memo, so the payer is asked for an exact amount: the invoice amount plus 1–997 millionths of a dollar, fixed per invoice (1,250.00 becomes something like 1,250.000417). **I've sent it — check** reads the issuer's wallet from chain and looks for money in of exactly that amount, which succeeded and did not arrive before the invoice existed.
-- **Recorded once.** The matching transaction is stored on the invoice (migration 0023) with one conditional update, and a unique index means one transaction can pay only one invoice. The invoice becomes *paid*, and the issuer's list links to the transfer on Suiscan.
+- **Recorded once.** The matching transaction is stored on the invoice (migration 0024) with one conditional update, and a unique index means one transaction can pay only one invoice. The invoice becomes *paid*, and the issuer's list links to the transfer on Suiscan.
 - A different amount is not matched automatically. The issuer reconciles it by hand, as with a bank transfer. The check is public, like the pay link, and limited per network.
 - **The issuer doesn't have to wait for the payer.** **Check USDC payments** on the Invoices page matches every open invoice against one read of the wallet and records what it finds. Each transfer goes to at most one invoice, oldest invoice first, through the same conditional update. Invoices already marked paid by a bank report are left alone.
 - **Wallet activity names them.** A deposit that paid an invoice shows as "Invoice …123456 paid by Cebu Traders".
@@ -168,7 +168,7 @@ Each workspace picks a style in **Settings → Approve with a WhatsApp code and 
   - Codes expire after 10 minutes and lock after 5 wrong attempts. Only an HMAC of each code is stored.
   - **Every single local-currency payout needs one** (the transfer wizard shows the approval before Send). It covers the recipient, their account, the amount, the currency and the payment source; the funding session, quote and screen state the wizard adds afterwards do not change it. If the payout is refused before it exists (travel-rule gap, ceiling, balance), the approval is given back.
   - Batch payouts accept the approval in place of the authenticator code.
-  - A payout released from the approval queue was approved there. The queue's approval now counts only for the payment it approved: before, an approved proposal's id could be attached to a different payment.
+  - A payout released from the approval queue was approved there. The queue's approval counts only for the payment it approved (the single payout, or the batch's payable rows and currency) and only once: the route spends it, and the replay closes it whatever the route did. Before, an approved proposal's id could be attached to a different payment, and could pay the same one again after it had executed.
 
 Every approval is bound to the sha256 of exactly what it approves. It is spent where it is used, where the route recomputes that digest from what it is about to do, so changing one dial or one amount needs a new approval.
 

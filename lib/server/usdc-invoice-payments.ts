@@ -35,7 +35,7 @@ export type InvoiceUsdcRow = {
   usdcTxDigest: string | null;
   usdcPaidAt: Date | null;
   usdcPayerAddress: string | null;
-  /** The wallet the payer was shown, pinned the first time (migration 0023). */
+  /** The wallet the payer was shown, pinned the first time (migration 0024). */
   usdcReceiveAddress: string | null;
 };
 

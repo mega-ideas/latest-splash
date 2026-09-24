@@ -30,6 +30,7 @@ import { checkAuthorizationLimits, startOfUtcDay } from '@/lib/policy/authorizat
 import { listMovementsSince } from '@/lib/server/ledger-store';
 import { proposeForApproval } from '@/lib/server/dual-approval';
 import { resolveApprovalClaim } from '@/lib/server/approved-proposal';
+import { treasuryMoveSubstance } from '@/lib/server/step-up-subjects';
 import { resolveAuthorityForSession } from '@/lib/auth/authority';
 import {
   cancelTreasuryWithdrawal,
@@ -182,7 +183,15 @@ export async function POST(request: Request) {
     );
   }
 
-  const approvalClaim = await resolveApprovalClaim(request, orgId);
+  // Only an approval of this move, this amount, spent here. Unbound, any
+  // approved payment's id lifted the second approver for any treasury move,
+  // as many times as it was sent.
+  const approvalClaim = await resolveApprovalClaim(request, orgId, {
+    kind: 'PAYMENT',
+    substance: treasuryMoveSubstance,
+    body,
+    consumer: 'treasury',
+  });
   if (limits.requiresSecondApproval && !approvalClaim.approved) {
     const maker = await resolveAuthorityForSession(auth.session);
     const proposal = await proposeForApproval({

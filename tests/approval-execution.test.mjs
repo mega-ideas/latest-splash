@@ -156,7 +156,11 @@ test('an approved-proposal header is a claim the route resolves', async () => {
   // — a considerably worse hole than the one it closes.
   assert.match(guard, /proposal\.orgId !== orgId/, 'an approval in another org is not an approval');
   assert.match(guard, /distinctApprovers < required/, 'the signatures, not just the status');
-  assert.match(guard, /APPROVED_STATUSES/);
+  // SUBMITTED only: SETTLED and ANCHORED are after the money moved, and
+  // counting them is how an executed approval stayed spendable.
+  assert.match(guard, /const EXECUTABLE_STATUS = 'SUBMITTED';/);
+  assert.match(guard, /proposal\.status !== EXECUTABLE_STATUS/);
+  assert.doesNotMatch(guard, /'SETTLED'|'ANCHORED'/);
   // Unverifiable means not approved.
   assert.match(guard, /reason: 'store unavailable'/);
 
@@ -165,7 +169,7 @@ test('an approved-proposal header is a claim the route resolves', async () => {
     '../app/api/batches/authorize/route.ts',
   ]) {
     const route = await readFile(new URL(file, import.meta.url), 'utf8');
-    assert.match(route, /resolveApprovalClaim\(request, orgId\)/);
+    assert.match(route, /resolveApprovalClaim\(request, orgId, \{/);
     assert.match(route, /limits\.requiresSecondApproval && !approvalClaim\.approved/);
   }
 });
