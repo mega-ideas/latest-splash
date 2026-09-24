@@ -141,10 +141,20 @@ export function parseSealServerConfigs(raw: string | unknown[], mode: SealKeySer
 
 /* ── File selection and loading ───────────────────────────────────────── */
 
-/** config/seal.<NODE_ENV>.json, or SEAL_CONFIG_FILE when set (tests). */
+/**
+ * config/seal.<NODE_ENV>.json, or SEAL_CONFIG_FILE when set (tests).
+ *
+ * The file is a path chosen at run time (the override can be anything), and
+ * Turbopack cannot trace that: it traced the WHOLE project, source and
+ * public/, into every server output to cover it. So the path and the reads
+ * carry `turbopackIgnore`, and the committed files are included explicitly
+ * instead (`outputFileTracingIncludes` in next.config.ts), so production
+ * still ships its Seal committee. An override file must already exist on the
+ * host; it is never bundled.
+ */
 export function sealConfigPath(env: NodeJS.ProcessEnv = process.env): string {
   const override = env.SEAL_CONFIG_FILE?.trim();
-  if (override) return path.resolve(process.cwd(), override);
+  if (override) return path.resolve(/*turbopackIgnore: true*/ process.cwd(), override);
   const mode = env.NODE_ENV === 'production' ? 'production' : env.NODE_ENV === 'test' ? 'test' : 'development';
   return path.resolve(process.cwd(), 'config', `seal.${mode}.json`);
 }
@@ -152,7 +162,7 @@ export function sealConfigPath(env: NodeJS.ProcessEnv = process.env): string {
 function readFile(file: string): SealConfigFile {
   let text: string;
   try {
-    text = readFileSync(file, 'utf8');
+    text = readFileSync(/*turbopackIgnore: true*/ file, 'utf8');
   } catch (error) {
     throw new Error(`Seal config ${file} could not be read: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -233,7 +243,7 @@ export function getSealConfig(env: NodeJS.ProcessEnv = process.env): ParsedSealC
   const hit = cache.get(file);
   if (hit) return hit;
 
-  if (!existsSync(file)) {
+  if (!existsSync(/*turbopackIgnore: true*/ file)) {
     if (env.NODE_ENV === 'production') {
       throw new Error(`Seal config ${file} does not exist. Production refuses to start without its committed Seal committee; see config/README.md.`);
     }

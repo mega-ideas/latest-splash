@@ -14,6 +14,13 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: process.cwd(),
   },
+  // lib/server/seal-config.ts reads config/seal.<NODE_ENV>.json at a path it
+  // picks at run time, so its reads are marked turbopackIgnore (untraced, they
+  // pulled the whole project into every server output). The committed files
+  // are included here instead, for every route that might reach Seal.
+  outputFileTracingIncludes: {
+    '/*': ['./config/seal.*.json'],
+  },
   images: {
     // 90 is used by the landing hero artwork for crispness under scale.
     qualities: [75, 90],

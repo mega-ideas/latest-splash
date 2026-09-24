@@ -128,3 +128,17 @@ test('the committed development and test files load and are unconfigured', () =>
     assert.match(c.source, new RegExp(`seal\\.${NODE_ENV}\\.json$`));
   }
 });
+
+test('the build traces the committed Seal files, not the whole project', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const source = await readFile(new URL('../lib/server/seal-config.ts', import.meta.url), 'utf8');
+  const fn = source.slice(source.indexOf('export function sealConfigPath('), source.indexOf('function readFile('));
+  // Without the comment Turbopack traced the whole project, public/ included, into the server output.
+  assert.match(fn, /path\.resolve\(\/\*turbopackIgnore: true\*\/ process\.cwd\(\), override\)/);
+  const loader = source.slice(source.indexOf('function readFile('));
+  assert.match(loader, /readFileSync\(\/\*turbopackIgnore: true\*\/ file, 'utf8'\)/);
+  assert.match(loader, /existsSync\(\/\*turbopackIgnore: true\*\/ file\)/);
+  // So the committed files are included explicitly, or production ships without its Seal committee.
+  const config = await readFile(new URL('../next.config.ts', import.meta.url), 'utf8');
+  assert.match(config, /outputFileTracingIncludes: \{\s*'\/\*': \['\.\/config\/seal\.\*\.json'\]/);
+});
