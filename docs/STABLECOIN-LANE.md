@@ -157,7 +157,7 @@ Each workspace picks a style in **Settings → Approve with a WhatsApp code and 
   - Codes expire after 10 minutes and lock after 5 wrong attempts. Only an HMAC of each code is stored.
   - **Every single local-currency payout needs one** (the transfer wizard shows the approval before Send). It covers the recipient, their account, the amount, the currency and the payment source; the funding session, quote and screen state the wizard adds afterwards do not change it. If the payout is refused before it exists (travel-rule gap, ceiling, balance), the approval is given back.
   - Batch payouts accept the approval in place of the authenticator code.
-  - A payout released from the approval queue was approved there. The queue's approval now counts only for the payment it approved: before, an approved proposal's id could be attached to a different payment.
+  - A payout released from the approval queue was approved there. The queue's approval counts only for the payment it approved (the single payout, or the batch's payable rows and currency) and only once: the route spends it, and the replay closes it whatever the route did. Before, an approved proposal's id could be attached to a different payment, and could pay the same one again after it had executed.
 
 Every approval is bound to the sha256 of exactly what it approves. It is spent where it is used, where the route recomputes that digest from what it is about to do, so changing one dial or one amount needs a new approval.
 

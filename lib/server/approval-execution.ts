@@ -115,7 +115,9 @@ export async function executeApprovedProposal(
  * second-approver requirement has already been met. It is read from the header
  * and then VERIFIED against the proposal store — a client sending that header
  * on its own gets nowhere, because the route checks that the named proposal
- * exists, belongs to the caller's org, and is actually approved.
+ * exists, belongs to the caller's org, is actually approved, approves this
+ * payment, and has not been used. The route spends it; the replay closes it
+ * when the route returns (lib/server/approved-proposal.ts).
  */
 async function executeTransfer(
   proposal: UnsignedProposal,

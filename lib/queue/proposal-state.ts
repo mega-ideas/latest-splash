@@ -340,6 +340,27 @@ export class InMemoryProposalStore {
     return next;
   }
 
+  /**
+   * Spend the approval on one execution. True exactly once per proposal.
+   *
+   * The check and the mark are one synchronous step, so two requests racing
+   * through this process cannot both find it unspent. Across processes the
+   * `consumed_approvals` row decides (lib/server/approved-proposal.ts); this is
+   * the in-process half, and it is not written through: the upsert does not
+   * carry the mark, so a stale copy elsewhere cannot write it away.
+   */
+  consumeApproval(id: string, consumption: { at: string; by: string }): boolean {
+    const proposal = this.proposalsById.get(id);
+    if (!proposal || proposal.approvalConsumedAt) return false;
+
+    this.proposalsById.set(id, {
+      ...proposal,
+      approvalConsumedAt: consumption.at,
+      approvalConsumedBy: consumption.by,
+    });
+    return true;
+  }
+
   /** Track A §1.4 — canon mutation (quote/route refresh): version bump, hash
    *  recompute, all prior approvals voided. */
   revise(id: string, revision: CanonRevision): UnsignedProposal {
