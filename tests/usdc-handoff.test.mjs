@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-import { parseUsdcSendIntent, usdcHandoffFor } from '../lib/agent/usdc-handoff.ts';
+import { parseUsdcSendIntent, prepareUsdcHandoff, usdcHandoffFor } from '../lib/agent/usdc-handoff.ts';
 
 /**
  * "Send 500 USDC to Manila Parts": Zeke prepares it, a person sends it.
@@ -174,4 +174,58 @@ test('the card links only into Send USDC, and Send USDC fills in without quoting
   const prefill = desk.slice(desk.indexOf("const to = params.get('to')"), desk.indexOf("setPrefilled(params.get('from') === 'zeke')"));
   assert.match(prefill, /wallets\.some\(\(r\) => r\.id === to\)/, 'only a recipient this workspace saved');
   assert.doesNotMatch(prefill, /getQuote\(|fetch\(/, 'filling in is not quoting');
+});
+
+// ─── Phase 12: more ways to ask, and the model's own way in ─────────────────
+
+test('it also reads "in USDC", USDC before the amount, and polite framing', () => {
+  assert.deepEqual(parseUsdcSendIntent('pay Manila Parts 500 in USDC'), { amount: '500', name: 'Manila Parts' });
+  assert.deepEqual(parseUsdcSendIntent('send 500 in usdc to Manila Parts'), { amount: '500', name: 'Manila Parts' });
+  assert.deepEqual(parseUsdcSendIntent('send USDC 500 to Manila Parts'), { amount: '500', name: 'Manila Parts' });
+  assert.deepEqual(parseUsdcSendIntent('Can you send 75 USDC to Acme?'), { amount: '75', name: 'Acme' });
+  assert.equal(parseUsdcSendIntent('pay Manila Parts 500 in pesos'), null, 'a currency that is not USDC is not this');
+});
+
+test('the preparation core takes a name and an amount as a person writes it', async () => {
+  const answer = await prepareUsdcHandoff('org_1', { name: 'Manila Parts', amount: '$1,250.50' }, deps());
+  assert.equal(answer.handoff.href, '/dashboard/send-usdc?to=sup_manila&amount=1250.5&from=zeke');
+  const bad = await prepareUsdcHandoff('org_1', { name: 'Manila Parts', amount: 'five hundred' }, deps());
+  assert.equal(bad.handoff, null);
+  assert.match(bad.text, /I can't prepare that/);
+});
+
+test('Zeke has prepareUsdcTransfer as a READ tool, labelled, and it goes through the same checks', async () => {
+  const { OXWAL_TOOL_REGISTRY, READ_TOOL_NAMES, executeOxwalTool } = await import('../lib/agent/oxwal.ts');
+  assert.ok(READ_TOOL_NAMES.includes('prepareUsdcTransfer'));
+  const tool = OXWAL_TOOL_REGISTRY.find((t) => t.name === 'prepareUsdcTransfer');
+  assert.equal(tool.category, 'READ');
+  assert.deepEqual(tool.input_schema.required, ['orgId', 'recipientName', 'amountUsdc']);
+
+  // No fee address in the test environment: the lane is closed, so it refuses in words.
+  const saved = process.env.SPLASH_FEE_ADDRESS_MAINNET;
+  delete process.env.SPLASH_FEE_ADDRESS_MAINNET;
+  try {
+    const result = await executeOxwalTool('prepareUsdcTransfer', { orgId: 'org_test', recipientName: 'Manila Parts', amountUsdc: '500' });
+    assert.equal(result.status, 'LIVE', 'read live, inside a truth envelope');
+    assert.equal(result.data.prepared, false);
+    assert.equal(result.data.handoff, null);
+    assert.match(result.data.message, /fee address is not configured/);
+  } finally {
+    if (saved !== undefined) process.env.SPLASH_FEE_ADDRESS_MAINNET = saved;
+  }
+});
+
+test('the model path turns a prepared transfer into the same card, and every tool has a label', async () => {
+  const oxwal = code(await readFile(new URL('../lib/agent/oxwal.ts', import.meta.url), 'utf8'));
+  const exec = oxwal.indexOf('const result = await executeOxwalTool(name, scopeToolInputToOrg(name, toolUse.input, request.orgId));');
+  const card = oxwal.indexOf("if (handoff) yield { type: 'handoff', handoff };", exec);
+  assert.ok(exec > 0 && card > exec, 'the Claude loop yields the handoff after running the tool');
+  assert.match(oxwal, /const handoff = name === 'prepareUsdcTransfer' \? usdcHandoffIn\(payload\) : null;/, 'only this tool makes a card');
+  assert.match(oxwal, /handoff\.href\.startsWith\('\/dashboard\/send-usdc\?'\)/, 'only a Send USDC link becomes a card');
+
+  const { OXWAL_TOOL_REGISTRY } = await import('../lib/agent/oxwal.ts');
+  const hook = await readFile(new URL('../lib/oxwal/use-oxwal-thread.ts', import.meta.url), 'utf8');
+  const labels = hook.slice(hook.indexOf('const ACTIVITY_LABELS'), hook.indexOf('};', hook.indexOf('const ACTIVITY_LABELS')));
+  const unlabelled = OXWAL_TOOL_REGISTRY.map((t) => t.name).filter((name) => !new RegExp(`\\b${name}:`).test(labels));
+  assert.deepEqual(unlabelled, [], 'a tool without a label shows the operator only "Working"');
 });
