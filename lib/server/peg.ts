@@ -10,9 +10,11 @@ import { getDeepbookStablePrice } from './deepbook.ts';
  * Hermes has needed a paid data-plan key since 26 August 2026, and Splash
  * chose not to pay for one, so DeepBook decides on its own.
  *
- * What it measures: the native USDT/USDC mid. That catches either coin
- * drifting from the other. It cannot see both drifting from the dollar
- * together; nothing on Sui prices in dollars without an oracle.
+ * What it measures: USDC against another dollar stablecoin, on the
+ * most-traded listed book with a usable spread (lib/server/deepbook.ts). That
+ * catches USDC drifting from the others. It cannot see every dollar
+ * stablecoin drifting from the dollar together; nothing on Sui prices in
+ * dollars without an oracle.
  *
  * No reading means not pegged. A peg nobody measured is not a peg anyone may
  * settle on.
@@ -40,7 +42,7 @@ function toleranceBps(env: NodeJS.ProcessEnv): bigint {
 }
 
 export async function getPegStatus(env: NodeJS.ProcessEnv = process.env): Promise<PegStatus> {
-  const book = await getDeepbookStablePrice();
+  const book = await getDeepbookStablePrice(env);
   if (!book) return { pegged: false, primary: 'none', deepbook: null };
   const pegged = book.deviationBps <= toleranceBps(env);
   return {

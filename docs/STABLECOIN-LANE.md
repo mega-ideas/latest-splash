@@ -138,21 +138,36 @@ Executing CCTP (the source-chain burn and the Sui claim) is not built. The plann
   - USDY out = USDC × 10⁶ ÷ price (µUSD), rounded down, with a slippage floor.
   - Projections compound daily at the modelled rate (`USDY_NET_APY_PCT`), rounded down each day.
   - They are labelled variable, not promised.
-- **Price:** Pyth's USDY redemption rate (`Crypto.USDY/USD.RR`) when `PYTH_API_KEY` is set, dated by Pyth. Otherwise `USDY_REDEMPTION_USD` with its `USDY_REDEMPTION_AS_OF`. It fails closed.
+- **Price:** Ondo's own USDY oracle (`USDYOracleWrapper`, `0x87b1…DF90` on Ethereum), read free with one `eth_call` through a public node (`ETHEREUM_RPC_URL`, default publicnode). It read $1.14730001 on 2026-09-24, the price ondo.finance showed. If the oracle can't be read, the fallback is `USDY_REDEMPTION_USD` with its `USDY_REDEMPTION_AS_OF`. It fails closed.
   - No price: no quote.
   - Stale: flagged.
   - No observation time: no quote. An undated $1.00 is a placeholder; USDY trades above $1.
 - **What Sui can actually fill:** every quote also asks the Cetus aggregator (read-only) what a swap of that size would return on Sui right now, and values it at the redemption rate. If that comes out more than 1% short (`MAX_MARKET_SHORTFALL_BPS`), or there is no route, the quote says so and calls the size unfillable. Projections then start from what the business would actually hold.
   - **Measured 2026-09-24:** Sui has very little USDY liquidity. 1 USDC filled within 1%. 100 USDC came back 14.5% short, 1,000 USDC 70.7% short, and 10,000 USDC had no route at all.
-  - So a Sui DEX swap is not a treasury route at any real size today. Minting and redeeming with Ondo directly is the alternative. It needs Ondo onboarding and settles in days, and it is not built.
+  - So a Sui DEX swap is not a treasury route at any real size today. Minting and redeeming with Ondo directly is the alternative, and it is not built:
+    - On Sui it goes through Ondo support (support@ondo.finance) with a $5,000 minimum.
+    - Ondo onboards institutions only for now, through KYC/KYB with document signing (about 3–4 business days).
+    - US persons are excluded. In Malaysia, Singapore, the UK and the EEA only professional or qualified investors can buy.
+    - Ondo's instant USDC mint and redeem runs on Ethereum and BNB Chain, not Sui.
+    - Ondo publishes no fee schedule and no named program for platforms.
+    - Checked 2026-09-25 against docs.ondo.finance.
 
-## Prices: Pyth and DeepBook (lib/server/pyth.ts, lib/server/deepbook.ts)
+## Prices: DeepBook and Ondo's oracle (lib/server/peg.ts, deepbook.ts, ondo-oracle.ts)
 
-- **Pyth Hermes has required an API key since 26 August 2026.** It is sent as `Authorization: Bearer` (`PYTH_API_KEY`). Pyth's Starter plan is listed at $500 a month.
-- Without a key, Hermes answers 401. The adapter used to turn that 401 into a mock $1.00. The peg check, Zeke's peg note and the on-chain peg refresher (`/api/cron/update-peg`) then all ran on a price nobody had measured.
-- Now no key, or any failure, means "Pyth unavailable", with the reason. A mock only exists under `USE_MOCK_APIS=true`.
-- **The peg check:** DeepBook's USDT/USDC book decides first, then Pyth. With neither, the peg is unverified, and settlement pauses with `peg_unverified` rather than passing.
-- **The refresher** pushes nothing without a live Pyth price, so the on-chain `PegState` goes stale and `assert_pegged` refuses settlement. That is the breaker doing its job. Settlements that need a fresh on-chain peg need a Pyth key.
+Splash reads prices only from free sources. Pyth's Hermes has required a paid key since 26 August 2026 (Starter is listed at $500 a month), and Splash chose not to buy one, so Pyth is gone.
+
+- **The peg check reads DeepBook V3**, Sui's on-chain order book, through Mysten's public indexer. It needs no key.
+  - It compares USDC with other dollar stablecoins, using a fixed list of pools: `USDSUI_USDC`, `SUIUSDE_USDC` and `USDT_USDC` (`DEEPBOOK_STABLE_PAIRS`).
+  - A book counts only if its spread is within 1%. The most-traded one decides.
+  - USDT_USDC alone was too thin. At one reading its best bid was 0.321, so payouts would have paused and resumed with it, and anyone could move it for a dollar or two.
+  - No usable book means the peg is unverified: payouts pause with `peg_unverified` rather than passing.
+  - It cannot see every dollar stablecoin leaving the dollar together. Nothing on Sui prices in dollars without an oracle.
+  - A mock exists only under `USE_MOCK_APIS=true`.
+- **The on-chain peg attestation** (`update_peg`) needs each coin's distance from the *dollar*. DeepBook prices USDT in USDC, and writing 0 for USDC would be a made-up reading. So nothing is pushed:
+  - `PegState` stays stale, and `assert_pegged` refuses settlement.
+  - Only splash_custody's settlement reads PegState, and that sits behind the custody gate.
+  - Payouts check the peg off chain before they start. `confirm_payment_intent` doesn't read PegState.
+- **USDY's price** comes from Ondo's oracle on Ethereum (see Treasury above).
 
 ## Step-up approvals (lib/server/step-up.ts)
 
@@ -200,8 +215,9 @@ Recipient screening is shown as a note: Chainalysis if configured, otherwise the
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_FROM` | Delivering codes. |
 | `TWILIO_WHATSAPP_CODE_CONTENT_SID` | An approved "verification code" template (`Your {{1}} code is {{2}}`). Without it, codes go as free text, which WhatsApp delivers only within 24 hours of the recipient last messaging the sender. |
 | `X402_DEMO_PAY_TO` | The demo x402 seller's payee (0.01 USDC per call). Unset: demo seller off. |
-| `PYTH_API_KEY` | Pyth prices: the second peg source, the on-chain peg refresher, and the live USDY redemption rate. Without it Pyth is off (never mocked). Optional `PYTH_HERMES_URL`. |
-| `USDY_REDEMPTION_USD` + `USDY_REDEMPTION_AS_OF` | A hand-set USDY price, used only without Pyth. Without the timestamp, no quote. |
+| `DEEPBOOK_STABLE_PAIRS` | Optional. The dollar-stablecoin/USDC pools the peg is read from. Default `USDSUI_USDC,SUIUSDE_USDC,USDT_USDC`. |
+| `ETHEREUM_RPC_URL` | Optional. The Ethereum node Ondo's USDY oracle is read through. The default is publicnode; use one you trust before Treasury moves money. `USDY_ORACLE=off` skips the oracle. |
+| `USDY_REDEMPTION_USD` + `USDY_REDEMPTION_AS_OF` | A hand-set USDY price, used only when the oracle can't be read. Without the timestamp, no quote. |
 | `USDY_ONDO_ELIGIBILITY_CONFIRMED` | `true` only once Ondo confirms eligibility. Until then Treasury is a preview. |
 | `FEATURE_KYB_GATE=true` | Locking fiat lanes for unverified businesses. In production it also needs the Sumsub keys. |
 

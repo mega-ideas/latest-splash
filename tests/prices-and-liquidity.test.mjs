@@ -79,24 +79,80 @@ test('a drift past the tolerance is a broken peg, measured on DeepBook', async (
   assert.equal((await getPegStatus({ DEEPBOOK_PEG_TOLERANCE_BPS: '250' })).pegged, true, 'the tolerance is configurable');
 });
 
-// ─── The USDY price ─────────────────────────────────────────────────────────
+test('the most-traded listed book with a spread under 1% decides; thin, wide and unlisted books do not', async () => {
+  const summary = [
+    // USDT/USDC as seen on 2026-09-25: the best bid collapsed to 0.321.
+    { trading_pairs: 'USDT_USDC', last_price: 0.9994, highest_bid: 0.321001, lowest_ask: 1.000434, base_volume: 1_997 },
+    { trading_pairs: 'SUIUSDE_USDC', last_price: 1.0002, highest_bid: 0.999599, lowest_ask: 1.000234, base_volume: 5_259 },
+    { trading_pairs: 'USDSUI_USDC', last_price: 1.0008, highest_bid: 0.999597, lowest_ask: 1.000931, base_volume: 584_435 },
+    // Not on the list, however much it trades.
+    { trading_pairs: 'FAKEUSD_USDC', last_price: 1.2, highest_bid: 1.19, lowest_ask: 1.2, base_volume: 9_000_000 },
+  ];
+  stubFetch([['/summary', () => json(summary)]]);
+  const peg = await getPegStatus({});
+  assert.equal(peg.primary, 'deepbook');
+  assert.equal(peg.deepbook.pair, 'USDSUI_USDC');
+  assert.equal(peg.pegged, true);
 
-test('USDY: the configured price with its time, in integer micros, and no network call', async () => {
-  const calls = stubFetch([]);
-  const fresh = await getUsdyRedemptionPrice({ USDY_REDEMPTION_USD: '1.1391', USDY_REDEMPTION_AS_OF: new Date().toISOString() });
-  assert.equal(fresh.status, 'LIVE');
-  assert.equal(fresh.source, 'env:USDY_REDEMPTION_USD');
-  assert.equal(fresh.priceMicros, 1_139_100n);
-  assert.equal(calls.length, 0);
+  // Only USDT/USDC listed, and its book is broken: no reading, not "a depeg".
+  const onlyThin = await getPegStatus({ DEEPBOOK_STABLE_PAIRS: 'USDT_USDC' });
+  assert.equal(onlyThin.primary, 'none');
+  assert.equal(onlyThin.pegged, false);
+
+  // The list is configuration.
+  assert.equal((await getPegStatus({ DEEPBOOK_STABLE_PAIRS: 'suiusde_usdc' })).deepbook.pair, 'SUIUSDE_USDC');
 });
 
-test('USDY: an old price is STALE, a price without its time is STALE, and nothing is not $1.00', async () => {
-  const old = await getUsdyRedemptionPrice({ USDY_REDEMPTION_USD: '1.14', USDY_REDEMPTION_AS_OF: new Date(Date.now() - 7 * 3600_000).toISOString() });
+// ─── The USDY price ─────────────────────────────────────────────────────────
+
+/** An eth_call answer: (price with 18 decimals, unix seconds), 32 bytes each. */
+function oracleAnswer(price18, seconds) {
+  const word = (n) => BigInt(n).toString(16).padStart(64, '0');
+  return json({ jsonrpc: '2.0', id: 1, result: `0x${word(price18)}${word(seconds)}` });
+}
+const NOW_S = Math.floor(Date.now() / 1000);
+
+test('USDY: Ondo’s own oracle, read with one eth_call, in integer micros', async () => {
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), body: JSON.parse(init.body) });
+    return oracleAnswer(1_147_300_010_000_000_000n, NOW_S);
+  };
+  const nav = await getUsdyRedemptionPrice({});
+  assert.equal(nav.status, 'LIVE');
+  assert.equal(nav.priceMicros, 1_147_300n, '1.14730001 → 1.147300');
+  assert.equal(nav.source, 'ondo:USDYOracleWrapper@ethereum');
+  assert.equal(nav.asOf, new Date(NOW_S * 1000).toISOString());
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, 'https://ethereum-rpc.publicnode.com');
+  assert.deepEqual(calls[0].body.params, [{ to: '0x87b126e5518b6a1Bb8465779b4607C45C643DF90', data: '0xa4a28168' }, 'latest']);
+});
+
+test('USDY: an oracle that errors, answers garbage or an implausible price is no reading, and the dated configured price applies', async () => {
+  const configured = { USDY_REDEMPTION_USD: '1.1391', USDY_REDEMPTION_AS_OF: new Date().toISOString() };
+  for (const respond of [
+    () => json({ jsonrpc: '2.0', id: 1, error: { code: 3, message: 'execution reverted' } }),
+    () => json({ jsonrpc: '2.0', id: 1, result: '0x1234' }),
+    () => oracleAnswer(1_000_000_000_000_000n, NOW_S), // $0.001
+    () => new Response('bad gateway', { status: 502 }),
+  ]) {
+    globalThis.fetch = async () => respond();
+    const nav = await getUsdyRedemptionPrice(configured);
+    assert.equal(nav.source, 'env:USDY_REDEMPTION_USD');
+    assert.equal(nav.priceMicros, 1_139_100n);
+    assert.equal(nav.status, 'LIVE');
+  }
+});
+
+test('USDY: USDY_ORACLE=off reads nothing; old or undated prices are STALE; nothing is not $1.00', async () => {
+  const calls = stubFetch([]);
+  const old = await getUsdyRedemptionPrice({ USDY_ORACLE: 'off', USDY_REDEMPTION_USD: '1.14', USDY_REDEMPTION_AS_OF: new Date(Date.now() - 7 * 3600_000).toISOString() });
   assert.equal(old.status, 'STALE');
-  assert.equal((await getUsdyRedemptionPrice({ USDY_REDEMPTION_USD: '1.14' })).status, 'STALE');
-  const none = await getUsdyRedemptionPrice({});
+  assert.equal((await getUsdyRedemptionPrice({ USDY_ORACLE: 'off', USDY_REDEMPTION_USD: '1.14' })).status, 'STALE');
+  const none = await getUsdyRedemptionPrice({ USDY_ORACLE: 'off' });
   assert.equal(none.status, 'UNAVAILABLE');
   assert.equal(none.priceMicros, null);
+  assert.equal(calls.length, 0);
 });
 
 // ─── What Sui can actually fill ─────────────────────────────────────────────

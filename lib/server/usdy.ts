@@ -1,4 +1,5 @@
-import { MICRO_DECIMALS, applyBps, applyRate, divRound, divideByRate, formatRate, type Rate } from '../money.ts';
+import { MICRO_DECIMALS, applyBps, applyRate, divideByRate, formatRate, type Rate } from '../money.ts';
+import { readUsdyOracle } from './ondo-oracle.ts';
 /**
  * Ondo USDY — the yield instrument behind Smart Treasury.
  *
@@ -15,7 +16,8 @@ import { MICRO_DECIMALS, applyBps, applyRate, divRound, divideByRate, formatRate
  *
  * External wiring (drop-in via env when ready):
  *   USDY_TYPE                  Move coin type of USDY on the target network
- *   USDY_REDEMPTION_USD        the redemption price, with USDY_REDEMPTION_AS_OF
+ *   ETHEREUM_RPC_URL           where Ondo's USDY price oracle is read (lib/server/ondo-oracle.ts)
+ *   USDY_REDEMPTION_USD        a hand-set price, with USDY_REDEMPTION_AS_OF, when the oracle is not read
  *   USDY_NET_APY_PCT           net APY credited to users (after Splash spread)
  *   SPLASH_PROMO_APY_PCT       introductory promo APY (first ~6 months)
  *   SPLASH_PROMO_UNTIL         ISO date the promo ends
@@ -109,11 +111,25 @@ export const NAV_STALE_THRESHOLD_MS = Number(process.env.USDY_NAV_STALE_MS ?? 6 
  * freshly observed.
  */
 export async function getUsdyRedemptionPrice(env: NodeJS.ProcessEnv = process.env): Promise<NavReading> {
-  // The redemption price as configured, with when it was observed. Pyth's
-  // USDY redemption-rate feed used to come first; its Hermes API needs a paid
-  // key since 26 August 2026, and Splash chose not to buy one.
+  // Read the configured fallback first, before anything awaits.
   const raw = (env.USDY_REDEMPTION_USD ?? '').trim();
   const asOfRaw = (env.USDY_REDEMPTION_AS_OF ?? '').trim();
+
+  // Ondo's own oracle first: the price Ondo publishes, with the time it
+  // applies to, read for free (lib/server/ondo-oracle.ts). Pyth's USDY feed
+  // used to fill this role; its Hermes API needs a paid key since 26 August
+  // 2026, and Splash chose not to buy one.
+  const oracle = await readUsdyOracle(env);
+  if (oracle) {
+    return {
+      status: Date.now() - oracle.observedAt.getTime() > NAV_STALE_THRESHOLD_MS ? 'STALE' : 'LIVE',
+      priceMicros: oracle.priceMicros,
+      asOf: oracle.observedAt.toISOString(),
+      source: 'ondo:USDYOracleWrapper@ethereum',
+    };
+  }
+
+  // Otherwise the price as configured, with when it was observed.
 
   const px = Number(raw);
   if (!raw || !Number.isFinite(px) || px <= 0) {
@@ -139,13 +155,6 @@ export async function getUsdyRedemptionPrice(env: NodeJS.ProcessEnv = process.en
     asOf: new Date(observedAt).toISOString(),
     source: 'env:USDY_REDEMPTION_USD',
   };
-}
-
-/** A price at any decimal scale, as integer micro-USD (6 dp), half-even. */
-function rateToMicros(rate: Rate): bigint {
-  if (rate.scale === MICRO_DECIMALS) return rate.scaled;
-  if (rate.scale > MICRO_DECIMALS) return divRound(rate.scaled, 10n ** BigInt(rate.scale - MICRO_DECIMALS), 'half-even');
-  return rate.scaled * 10n ** BigInt(MICRO_DECIMALS - rate.scale);
 }
 
 /** True when a reading may be used to make an allocation decision. */

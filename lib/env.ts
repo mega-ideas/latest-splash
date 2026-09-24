@@ -333,7 +333,7 @@ export const envSchema = z.object({
   LABUAN_API_KEY: optional,
   LABUAN_OTC_MIN_USD: int(10_000),
   DEEPBOOK_INDEXER_URL: url,
-  DEEPBOOK_STABLE_PAIR: optional,
+  DEEPBOOK_STABLE_PAIRS: optional,
   DEEPBOOK_TIMEOUT_MS: int(2_500, 1),
   DEEPBOOK_PEG_TOLERANCE_BPS: int(100, 0),
 
@@ -341,6 +341,9 @@ export const envSchema = z.object({
   USDY_NET_APY_PCT: opt(z.coerce.number()),
   USDY_NAV_STALE_MS: int(6 * 60 * 60 * 1000, 1),
   USDY_REDEMPTION_USD: opt(z.coerce.number().min(0)),
+  /* Ondo's USDY price oracle is read through this Ethereum node (lib/server/ondo-oracle.ts). */
+  ETHEREUM_RPC_URL: url,
+  USDY_ORACLE: opt(z.enum(['on', 'off'])),
   USDY_REDEMPTION_AS_OF: optional,
   USDY_SWAP_SLIPPAGE_BPS: int(30, 0),
   USDY_SWAP_VENUE: withDefault(z.enum(['cetus', 'aftermath']), 'cetus'),

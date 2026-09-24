@@ -4,26 +4,36 @@ import { divRound, parseRate, type Rate } from '../money.ts';
  * (lib/server/peg.ts). Pyth was a second source until its Hermes API began
  * requiring a paid key.
  *
- * DeepBook gives a real on-chain USDT↔USDC mid-price: market-driven, free to
- * read, and no oracle key.
- *
  * Read path: the DeepBook Indexer REST `/summary` (per-pair last_price +
- * top-of-book). The peg is a real-world market fact, so we default to the
- * MAINNET indexer (deepest stablecoin liquidity) even on a testnet deployment;
- * override via env. Never throws — returns null, and the peg then counts as
- * unverified (not pegged).
+ * top-of-book), Mysten's public indexer: free, no key. The peg is a
+ * real-world market fact, so we default to the MAINNET indexer even on a
+ * testnet deployment; override via env. Never throws — returns null, and the
+ * peg then counts as unverified (not pegged).
+ *
+ * WHICH book. The peg is USDC against other dollar stablecoins, read from an
+ * explicit list of pools whose base coin was checked by type (2026-09-25):
+ *
+ *   USDSUI_USDC   usdSUI   0x44f8…b1c1::usdsui::USDSUI       (~584k a day)
+ *   SUIUSDE_USDC  suiUSDe  0x41d5…1402::sui_usde::SUI_USDE   (~5k a day)
+ *   USDT_USDC     USDT     0x375f…b068::usdt::USDT           (~1–2k a day)
+ *
+ * It used to be USDT_USDC alone. That book is so thin its best bid was 0.321
+ * at one reading and 0.9994 minutes earlier, so payouts would pause and
+ * resume with it, and anyone could move it for a dollar or two. Now every
+ * listed book whose spread is within 1% counts, and the most-traded of them
+ * decides: moving the price means moving the deepest book. A book wider than
+ * 1% cannot place its mid within the 1% peg tolerance, so it is not a reading.
  *
  * Env:
- *   DEEPBOOK_INDEXER_URL   default https://deepbook-indexer.mainnet.mystenlabs.com
- *   DEEPBOOK_STABLE_PAIR   default WUSDT_USDC (USDT priced in USDC)
- *   DEEPBOOK_TIMEOUT_MS    default 2500 (settlement pre-check must stay snappy)
+ *   DEEPBOOK_INDEXER_URL    default https://deepbook-indexer.mainnet.mystenlabs.com
+ *   DEEPBOOK_STABLE_PAIRS   comma-separated pools, default USDSUI_USDC,SUIUSDE_USDC,USDT_USDC
+ *   DEEPBOOK_TIMEOUT_MS     default 2500 (settlement pre-check must stay snappy)
  */
 
 const DEFAULT_INDEXER = 'https://deepbook-indexer.mainnet.mystenlabs.com';
-// Native USDT/USDC is the liquid stable pool (~66k vol). Wrapped/dead pools
-// (WUSDT_USDC, WUSDC_USDC, AUSD_USDC) have junk top-of-book and are rejected.
-const DEFAULT_PAIR = 'USDT_USDC';
-const STABLES = ['USDC', 'WUSDC', 'USDT', 'WUSDT', 'AUSD', 'USDY', 'USDD', 'BUSD'];
+export const DEFAULT_STABLE_PAIRS = ['USDSUI_USDC', 'SUIUSDE_USDC', 'USDT_USDC'] as const;
+/** ask ÷ bid above this is not a usable book: 1%. */
+const MAX_SPREAD_RATIO = 1.01;
 
 export interface DeepbookStable {
   pair: string;
@@ -46,51 +56,48 @@ type SummaryItem = {
   base_volume: number;
 };
 
-function indexerUrl(): string {
-  return (process.env.DEEPBOOK_INDEXER_URL ?? DEFAULT_INDEXER).replace(/\/+$/, '');
+function indexerUrl(env: NodeJS.ProcessEnv): string {
+  return (env.DEEPBOOK_INDEXER_URL?.trim() || DEFAULT_INDEXER).replace(/\/+$/, '');
+}
+
+export function stablePairs(env: NodeJS.ProcessEnv = process.env): string[] {
+  const configured = (env.DEEPBOOK_STABLE_PAIRS ?? '').split(',').map((p) => p.trim().toUpperCase()).filter(Boolean);
+  return configured.length > 0 ? configured : [...DEFAULT_STABLE_PAIRS];
+}
+
+/** A two-sided book no wider than 1%. */
+function saneBook(item: SummaryItem): boolean {
+  const bid = Number(item.highest_bid);
+  const ask = Number(item.lowest_ask);
+  return bid > 0 && ask > 0 && ask >= bid && ask / bid <= MAX_SPREAD_RATIO;
 }
 
 /**
- * Current DeepBook stable-pair price. Returns null on any error / no stable pool
- * / timeout; callers treat that as "no reading", never as a peg.
+ * The peg reading from the most-traded listed pool with a usable book.
+ * Returns null on any error, timeout, or when no listed book is usable;
+ * callers treat that as "no reading", never as a peg.
  */
-export async function getDeepbookStablePrice(): Promise<DeepbookStable | null> {
-  if (process.env.USE_MOCK_APIS === 'true') {
+export async function getDeepbookStablePrice(env: NodeJS.ProcessEnv = process.env): Promise<DeepbookStable | null> {
+  if (env.USE_MOCK_APIS === 'true') {
     return { pair: 'MOCK_USDT_USDC', midPrice: parseRate('1'), lastPrice: parseRate('1'), deviationBps: 0n, source: 'mock', asOf: new Date().toISOString() };
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), Number(process.env.DEEPBOOK_TIMEOUT_MS ?? 2500));
+  const timeout = setTimeout(() => controller.abort(), Number(env.DEEPBOOK_TIMEOUT_MS ?? 2500));
   try {
-    const res = await fetch(`${indexerUrl()}/summary`, {
+    const res = await fetch(`${indexerUrl(env)}/summary`, {
       headers: { Accept: 'application/json' },
       signal: controller.signal,
       next: { revalidate: 30 },
-    });
+    } as RequestInit);
     if (!res.ok) return null;
     const data = (await res.json()) as SummaryItem[];
     if (!Array.isArray(data)) return null;
 
-    // A pool is only usable if its top-of-book is sane. Dead/empty pools list
-    // junk quotes (e.g. WUSDT_USDC bid 0.987 / ask 1.078, or 0.10 / 99.99) that
-    // would fake a depeg — reject anything with a >5% spread or non-positive book.
-    const isLive = (d: SummaryItem) => {
-      const bid = Number(d.highest_bid);
-      const ask = Number(d.lowest_ask);
-      return bid > 0 && ask > 0 && ask / bid < 1.05;
-    };
-
-    const want = (process.env.DEEPBOOK_STABLE_PAIR ?? DEFAULT_PAIR).toUpperCase();
-    let item = data.find((d) => d.trading_pairs?.toUpperCase() === want && isLive(d));
-    // Fallback: the most-liquid LIVE stable/stable pool.
-    if (!item) {
-      item = data
-        .filter((d) => {
-          const [base, quote] = (d.trading_pairs ?? '').toUpperCase().split('_');
-          return STABLES.includes(base) && STABLES.includes(quote) && isLive(d);
-        })
-        .sort((a, b) => Number(b.base_volume) - Number(a.base_volume))[0];
-    }
+    const listed = new Set(stablePairs(env));
+    const item = data
+      .filter((d) => listed.has((d.trading_pairs ?? '').toUpperCase()) && saneBook(d))
+      .sort((a, b) => Number(b.base_volume) - Number(a.base_volume))[0];
     if (!item) return null;
 
     // The book quotes decimal strings. Parsing them as rates keeps the mid

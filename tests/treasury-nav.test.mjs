@@ -19,6 +19,10 @@ import { deriveYieldMicros, spreadOnGain } from '../lib/policy/yield-accrual.ts'
  *      instrument earned anything.
  */
 
+// These tests are about the configured price; Ondo's oracle (read first in
+// production) is covered in tests/prices-and-liquidity.test.mjs.
+process.env.USDY_ORACLE = 'off';
+
 function withEnv(vars, fn) {
   const saved = {};
   for (const [k, v] of Object.entries(vars)) {
