@@ -10,17 +10,19 @@ import { copilotModel } from '../ai/model.ts';
  * authorize execution. Never invents PII/account numbers.
  */
 
-import { getCorridorFeeBps, getUsdCorridorByCurrency } from '@/lib/fx/corridors';
-import { recallMemories, analyzeAndRemember } from '@/lib/server/memwal';
+import { getCorridorFeeBps } from '@/lib/fx/corridors';
+import { custodyPhaseEnabled } from '@/lib/server/custody-phase';
+import { recallMemories, analyzeAndRemember, type RecalledMemory } from '@/lib/server/memwal';
 import { getTreasuryRate } from '@/lib/server/usdy';
-import { pythAdapter } from '@/lib/server/pyth';
 
 export interface CopilotSuggestion {
   suggestionId: string;
   type: 'timing' | 'batch' | 'treasury' | 'invoice';
   title: string;
   description: string;
-  confidence: number;
+  /** 0..1, only when something measured it. null = nothing did: a canned or
+   *  rule-based card has no confidence to state, and must not invent one. */
+  confidence: number | null;
   requiresAuth: boolean;
   suggestedAction?: string;
   /** Set when Zeke read the document and refused: the lane it asks for is
@@ -105,49 +107,6 @@ export async function parseInvoice(
   return { ...amount, currency, recipient, confidence: amount.amountMinor > 0n ? 0.55 : 0.2 };
 }
 
-// ─── FX forecast (grounded in the live corridor rate) ───────────────────────────
-
-export async function forecastFxRate(
-  corridor: string,
-  horizonHours: number,
-): Promise<{ predictedRate: number; confidence: number; currentRate: number; note: string }> {
-  const currency = corridor.replace(/^USD[\/→-]?/i, '').toUpperCase().slice(0, 3);
-  const current = getUsdCorridorByCurrency(currency)?.rate ?? 1;
-
-  // Every corridor settles via USDC, so USDC peg health (Pyth) is a real
-  // confidence signal: a tight peg = more reliable quotes; a stressed peg = less.
-  let pegFactor = 1;
-  let pegNote = '';
-  try {
-    const peg = await pythAdapter.getPegStatus();
-    // Name the source that actually measured it. This used to say "Pyth"
-    // while Pyth was answering with a mock $1.00.
-    if (peg.primary === 'none') {
-      pegFactor = 0.85;
-      pegNote = 'USDC peg unverified right now (no live price source answered)';
-    } else {
-      const usdcDevBps = peg.primary === 'deepbook'
-        ? (peg.deepbook?.deviationBps ?? 0)
-        : Math.abs((peg.usdcUsd?.price ?? 1) - 1) * 10_000;
-      const measuredBy = peg.primary === 'deepbook' ? 'DeepBook USDT/USDC' : 'Pyth';
-      pegFactor = peg.pegged ? Math.max(0.85, 1 - usdcDevBps / 100) : 0.7;
-      pegNote = peg.pegged
-        ? `USDC peg healthy (${usdcDevBps.toFixed(1)} bps, ${measuredBy})`
-        : `USDC peg under stress (${measuredBy}) — settle cautiously`;
-    }
-  } catch {
-    // Pyth unavailable — fall back to horizon-only confidence.
-  }
-
-  // Confidence decays with horizon; we don't pretend to predict direction.
-  const horizonDecay = Math.max(0.4, 0.95 - (Math.min(horizonHours, 168) / 168) * 0.45);
-  const confidence = Number((horizonDecay * pegFactor).toFixed(2));
-  const note = SUPPORTED.includes(currency)
-    ? `USD→${currency} is ${current}.${pegNote ? ` ${pegNote}.` : ''} Over ${horizonHours}h expect normal drift; lock during pre-open liquidity for the tightest spread.`
-    : `USD→${currency} is not an active corridor.`;
-  return { predictedRate: current, confidence, currentRate: current, note };
-}
-
 // ─── Batch optimizer (group same-corridor rows; real fee math) ──────────────────
 
 export async function optimizeBatch(
@@ -178,82 +137,108 @@ export async function optimizeBatch(
   };
 }
 
-// ─── Treasury advice (live two-bucket balances + floating rate) ─────────────────
+// ─── Personalized suggestions from MemWal behavioral memory ─────────────────────
 
-export async function suggestTreasuryAction(
-  currentAvailableUsd: number,
-  pendingOutflowsUsd: number,
-): Promise<CopilotSuggestion> {
-  const rate = getTreasuryRate();
-  const buffer = Number(process.env.OPERATING_BUFFER_USD ?? 5_000);
-  const idle = Math.max(0, currentAvailableUsd - pendingOutflowsUsd - buffer);
-  const dailyOnIdle = (idle * (rate.netApyPct / 100)) / 365;
-  if (idle < 1_000) {
-    return {
-      suggestionId: `cop_${Date.now()}`,
-      type: 'treasury',
-      title: 'Available balance is working efficiently',
-      description: `Your Available cash is close to the operating buffer ($${buffer.toLocaleString('en-US')}). Nothing idle to move right now.`,
-      confidence: 0.7,
-      requiresAuth: false,
-    };
+/**
+ * How close a recalled memory is to the recall query, 0..1. The MemWal SDK
+ * defines semantic similarity as `1.0 - distance` (lower distance is closer)
+ * and documents no bound on distance, so the result is clamped. It is the only thing
+ * these cards measure, and it measures relevance to the query, not whether
+ * the suggestion is right. It used to be floored at 0.6 and 0.55, so a filler
+ * memory at distance 0.95 (5% similar) was shown as 60%. null when the
+ * relayer gave no usable distance.
+ */
+export function memoryRelevance(distance: number): number | null {
+  if (!Number.isFinite(distance)) return null;
+  return Math.min(1, Math.max(0, 1 - distance));
+}
+
+/**
+ * Below this, a recalled memory is filler, not a pattern: the MemWal SDK's
+ * own default `minRelevance` (its AI middleware keeps `1 - distance >= 0.3`).
+ * This adapter calls `recall()` without a cutoff, so without one the cards
+ * were built from whatever came back.
+ */
+export const MIN_MEMORY_RELEVANCE = 0.3;
+
+/**
+ * The cards a set of recalled memories supports, each at its own measured
+ * relevance. A memory that cannot be scored, or scores below the cutoff,
+ * makes no card.
+ */
+export function suggestionsFromMemories(memories: RecalledMemory[]): CopilotSuggestion[] {
+  const out: CopilotSuggestion[] = [];
+  for (const m of memories) {
+    const relevance = memoryRelevance(m.distance);
+    if (relevance === null || relevance < MIN_MEMORY_RELEVANCE) continue;
+    const text = m.text.toLowerCase();
+    const ccy = SUPPORTED.find((c) => text.includes(c.toLowerCase()));
+    if (text.includes('batch') || text.includes('payroll')) {
+      out.push({
+        suggestionId: `cop_${Date.now()}_${out.length}`,
+        type: 'batch',
+        title: 'Pre-stage your recurring batch',
+        // Only what Zeke can do: proposeBatchPayout drafts a batch for approval.
+        // It used to promise the cheapest corridor and a pre-open lock, which
+        // nothing computes.
+        description: `Pattern recalled: “${m.text}”. Want me to draft this batch for your approval?`,
+        confidence: relevance,
+        requiresAuth: true,
+      });
+    } else if (ccy) {
+      out.push({
+        suggestionId: `cop_${Date.now()}_${out.length}`,
+        type: 'timing',
+        // Zeke can read the rate (getRate); nothing watches it or picks a lock
+        // window, which this card used to promise.
+        title: `Check USD→${ccy}`,
+        description: `Pattern recalled: “${m.text}”. Want me to check the current USD→${ccy} rate?`,
+        confidence: relevance,
+        requiresAuth: false,
+      });
+    }
   }
+  return out;
+}
+
+/**
+ * The card shown when memory suggests nothing. It pitches Smart Treasury,
+ * which holds customer funds, so it waits for the custody phase like every
+ * other treasury surface (lib/server/custody-phase.ts). It also waits for
+ * TREASURY_EXECUTION_ENABLED, which /api/treasury requires before it moves
+ * anything: "Move some over?" is not an offer to make while that refuses.
+ * Otherwise there is no card, and the copilot page says there is nothing to
+ * suggest. It is a canned card, so it has no confidence to state: it was
+ * shown at an invented 60%.
+ */
+export function idleCashSuggestion(custodyOn: boolean, executionOn: boolean): CopilotSuggestion | null {
+  if (!custodyOn || !executionOn) return null;
+  const rate = getTreasuryRate();
   return {
     suggestionId: `cop_${Date.now()}`,
     type: 'treasury',
-    title: `Move ~$${Math.round(idle).toLocaleString('en-US')} idle USDC into Smart Treasury`,
-    description:
-      `After a $${buffer.toLocaleString('en-US')} operating buffer and $${Math.round(pendingOutflowsUsd).toLocaleString('en-US')} pending outflows, ` +
-      `~$${Math.round(idle).toLocaleString('en-US')} is idle. At ${rate.label} (Ondo USDY, T-bill) that earns ≈$${dailyOnIdle.toFixed(2)}/day. ` +
-      `Withdrawals back to Available take 1–3 business days.`,
-    confidence: 0.82,
+    title: 'Put idle USDC to work',
+    description: `Idle Available cash earns 0%. Smart Treasury (Ondo USDY, T-bill) is ${rate.label}. Move some over?`,
+    confidence: null,
     requiresAuth: true,
-    suggestedAction: `move:${Math.round(idle)}:available->treasury`,
   };
 }
 
-// ─── Personalized suggestions from MemWal behavioral memory ─────────────────────
-
-export async function getCopilotSuggestions(userIdHash: string): Promise<CopilotSuggestion[]> {
-  const out: CopilotSuggestion[] = [];
+export async function getCopilotSuggestions(
+  userIdHash: string,
+  custodyOn: boolean = custodyPhaseEnabled(),
+  // The same reading as app/api/treasury/route.ts.
+  treasuryExecutionOn: boolean = process.env.TREASURY_EXECUTION_ENABLED === 'true',
+): Promise<CopilotSuggestion[]> {
+  let out: CopilotSuggestion[] = [];
   try {
-    const memories = await recallMemories(userIdHash || 'patterns', 6);
-    for (const m of memories) {
-      const text = m.text.toLowerCase();
-      const ccy = SUPPORTED.find((c) => text.includes(c.toLowerCase()));
-      if (text.includes('batch') || text.includes('payroll')) {
-        out.push({
-          suggestionId: `cop_${Date.now()}_${out.length}`,
-          type: 'batch',
-          title: 'Pre-stage your recurring batch',
-          description: `Pattern recalled: “${m.text}”. Want me to draft it on the cheapest corridor and lock during pre-open liquidity?`,
-          confidence: Math.max(0.6, 1 - m.distance),
-          requiresAuth: true,
-        });
-      } else if (ccy) {
-        out.push({
-          suggestionId: `cop_${Date.now()}_${out.length}`,
-          type: 'timing',
-          title: `Watch USD→${ccy}`,
-          description: `Pattern recalled: “${m.text}”. I'll flag the optimal lock window for ${ccy}.`,
-          confidence: Math.max(0.55, 1 - m.distance),
-          requiresAuth: false,
-        });
-      }
-    }
+    out = suggestionsFromMemories(await recallMemories(userIdHash || 'patterns', 6));
   } catch {
-    // memory unavailable — return defaults below
+    // memory unavailable — fall back below
   }
   if (out.length === 0) {
-    const rate = getTreasuryRate();
-    out.push({
-      suggestionId: `cop_${Date.now()}`,
-      type: 'treasury',
-      title: 'Put idle USDC to work',
-      description: `Idle Available cash earns 0%. Smart Treasury (Ondo USDY, T-bill) is ${rate.label}. Move some over?`,
-      confidence: 0.6,
-      requiresAuth: true,
-    });
+    const fallback = idleCashSuggestion(custodyOn, treasuryExecutionOn);
+    if (fallback) out.push(fallback);
   }
   return out.slice(0, 5);
 }

@@ -28,6 +28,7 @@ import MemWalBehaviorCard from '@/components/MemWalBehaviorCard';
 import OxWalComposer, { type OxWalComposerChip } from '@/components/oxwal/OxWalComposer';
 import StatusBadge from '@/components/StatusBadge';
 import { stashBatchDraft } from '@/lib/batch-parse';
+import { confidencePercent } from '@/lib/confidence';
 import type { CopilotSuggestion } from '@/lib/server/copilot';
 import type { InvoiceRecord } from '@/lib/server/operations';
 
@@ -64,7 +65,8 @@ export default function InvoiceLoop() {
   const hasGrantedAccess = accessChecks.some(([, granted]) => granted);
   const selectedAmount = selected ? `${formatUsd(selected.amountUsd)} -> ${selected.targetCurrency}` : 'No invoice selected';
   const selectedCounterparty = selected?.payerOrgName ?? selected?.payerOrgEmail ?? 'No counterparty selected';
-  const confidenceLabel = suggestion ? `${Math.round(suggestion.confidence * 100)}%` : extraction ? `${Math.round(extraction.confidence * 100)}%` : 'Pending';
+  const shownConfidence = confidencePercent(suggestion ? suggestion.confidence : extraction?.confidence);
+  const confidenceLabel = shownConfidence !== null ? `${shownConfidence}%` : suggestion || extraction ? 'Not measured' : 'Pending';
   const transferHref = selected ? `/dashboard/transfer?invoiceId=${selected.id}` : '/dashboard/transfer';
 
   const releaseStages = useMemo<GateStage[]>(() => [
@@ -607,7 +609,9 @@ function ExtractionPanel({
               <ProofPill label="Amount" value={`${extraction.amount}`} />
               <ProofPill label="Currency" value={extraction.currency} />
             </div>
-            <div className="mt-3 text-sm font-bold text-[#326273]">{Math.round(suggestion.confidence * 100)}% confidence</div>
+            {confidencePercent(suggestion.confidence) !== null && (
+              <div className="mt-3 text-sm font-bold text-[#326273]">{confidencePercent(suggestion.confidence)}% confidence</div>
+            )}
           </div>
           {suggestion.blocked ? (
             <div role="status" className="rounded-lg border border-[var(--warn)] bg-[var(--warn-bg)] p-4">
