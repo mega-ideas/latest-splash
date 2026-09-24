@@ -32,7 +32,7 @@ export async function settleFullyApprovedProposal(proposalId: string): Promise<S
   try {
     const { getOxwalProposalStore } = await import('@/lib/agent/oxwal');
     const { ensureProposalStoreHydrated } = await import('@/lib/queue/proposal-persistence');
-    const { executeApprovedProposal } = await import('@/lib/server/approval-execution');
+    const { APPROVAL_NOT_SAVED, executeApprovedProposal } = await import('@/lib/server/approval-execution');
 
     const store = getOxwalProposalStore();
     await ensureProposalStoreHydrated(store);
@@ -96,7 +96,19 @@ export async function settleFullyApprovedProposal(proposalId: string): Promise<S
           });
     const submitted =
       signed.status === 'SUBMITTED' ? signed : store.transition(signed.id, { type: 'SUBMIT' });
-    await store.flush();
+
+    // Saved before anything moves, as in the submit route: an approval held
+    // only in memory loses who approved it at the next restart and comes back
+    // as still pending for a payment already made. Nothing is sent and the
+    // claim is closed. `writeFailed` awaits the same writes `flush` would.
+    if (await store.writeFailed(submitted.id)) {
+      console.error(`[approval-settle] ${submitted.id}: approval not saved, payment withheld`);
+      const { closeApprovalClaim } = await import('@/lib/server/approved-proposal');
+      await closeApprovalClaim(submitted.id, submitted.orgId);
+      store.recordExecution(submitted.id, { ...APPROVAL_NOT_SAVED, at: new Date().toISOString() });
+      await store.flush();
+      return { settled: false, message: `Approved, but the payment did not go: ${APPROVAL_NOT_SAVED.detail}` };
+    }
 
     // No session here — a webhook has none. The replay therefore runs without a
     // forwarded cookie, and the authorize route resolves the org from the

@@ -42,6 +42,23 @@ export type ExecutionOutcome =
   | { state: 'SKIPPED'; detail: string };
 
 /**
+ * What an approval that did not reach the database causes: nothing.
+ *
+ * The proposal store writes through to Postgres and never throws when a write
+ * fails, so the caller asks `store.writeFailed(id)` before executing. A payment
+ * made on an approval held only in memory keeps its money movement and loses
+ * its authorisation: after a restart the proposal comes back as whatever state
+ * last landed — still pending, no signatures — and approvers are asked again
+ * for a payment already made (which `consumed_approvals` then refuses as
+ * "already used"). The caller also closes the claim (closeApprovalClaim), so
+ * nothing can present it later.
+ */
+export const APPROVAL_NOT_SAVED = {
+  state: 'FAILED',
+  detail: 'The approval could not be saved, so the payment was not sent and nothing moved.',
+} as const satisfies ExecutionOutcome;
+
+/**
  * Carry out the payment an approved proposal describes.
  *
  * Never throws. A proposal that cannot be executed is recorded as FAILED with

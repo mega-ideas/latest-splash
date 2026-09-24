@@ -81,7 +81,7 @@ An invoice's pay link offers **Or pay in USDC on Sui**, straight to the issuer's
 Ask Zeke "send 500 USDC to Manila Parts" (or "pay Manila Parts 500 in USDC", "send USDC 500 to Manila Parts", "can you send 75 USDC to Acme?") and it prepares the transfer without sending it:
 
 - Those phrasings are answered in fixed words, before any model runs, the same way the lane refusal does. Other wordings reach the model, which has one way to do it: the READ tool `prepareUsdcTransfer`. That tool runs the same preparation below, and only its Send USDC link becomes a card.
-- Every Zeke tool acts for the signed-in workspace. The tool loop replaces whatever `orgId` the model wrote with the session's; with no session org it removes it, and the tool refuses (`bindToolInputToOrg`).
+- Every Zeke tool acts for the signed-in workspace. The tool loop replaces whatever `orgId` the model wrote with the session's, and refuses an org-scoped tool when there is no session org (`scopeToolInputToOrg`).
 - The recipient must be a **saved wallet recipient** that can be paid (screened or vouched for). A bank recipient, an unknown name or an ambiguous one gets an explanation instead.
 - It checks the lane, the fee address, the 1 USDC minimum, the per-transfer limit and the 30-day allowance with the lane's own functions. The card shows the amount, the 0.80% fee on top, what leaves the wallet, and the allowance left afterwards.
 - **Review in Send USDC** opens the send screen with the recipient and amount filled in. The link carries only the saved recipient's id and an amount re-printed from integer minor units; nothing typed in the chat reaches it. Send USDC ignores anything that is not a saved wallet recipient of this workspace.

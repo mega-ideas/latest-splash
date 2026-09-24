@@ -17,7 +17,7 @@
  * Both calls are scoped to the org (lib/server/memwal-scope.ts): its own
  * namespace, and its key at the start of the stored text, checked again on
  * recall. The org is the session's. Zeke's tool loop replaces whatever org the
- * model names with it (`bindToolInputToOrg` in lib/agent/oxwal.ts), so a
+ * model names with it (`scopeToolInputToOrg` in lib/agent/oxwal.ts), so a
  * conversation cannot rename another workspace's assistant.
  */
 import { DEFAULT_ASSISTANT_NAME } from '@/lib/agent/assistant-name-shared';

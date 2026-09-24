@@ -236,16 +236,21 @@ test('unconfigured, the adapter degrades to nothing for every org', async () => 
 /* ── Zeke: the model does not choose the org ───────────────────────────── */
 
 test("Zeke's tool calls act for the session org, whatever org the model names", async () => {
-  const { bindToolInputToOrg } = await import('../lib/agent/oxwal.ts');
+  const { scopeToolInputToOrg } = await import('../lib/agent/oxwal.ts');
 
   const fromModel = { orgId: ORG_B, name: 'Mallory' };
-  assert.deepEqual(bindToolInputToOrg(fromModel, ORG_A), { orgId: ORG_A, name: 'Mallory' });
+  assert.deepEqual(scopeToolInputToOrg('setAssistantName', fromModel, ORG_A), { orgId: ORG_A, name: 'Mallory' });
   assert.deepEqual(fromModel, { orgId: ORG_B, name: 'Mallory' }, 'the model input is not mutated');
-  assert.deepEqual(bindToolInputToOrg({ name: 'Ada' }, ORG_A), { name: 'Ada', orgId: ORG_A });
-  assert.deepEqual(bindToolInputToOrg(fromModel, undefined), { name: 'Mallory' }, 'no session org: removed, not trusted');
-  assert.deepEqual(bindToolInputToOrg(fromModel, ''), { name: 'Mallory' });
-  assert.equal(bindToolInputToOrg('text', ORG_A), 'text');
-  assert.equal(bindToolInputToOrg(null, ORG_A), null);
+  assert.deepEqual(scopeToolInputToOrg('setAssistantName', { name: 'Ada' }, ORG_A), { name: 'Ada', orgId: ORG_A });
+  // Every tool that writes an org's memory or reads its beneficiaries.
+  for (const tool of ['setAssistantName', 'findSavedRecipient', 'listSavedRecipients', 'proposeRecipientFromInvoice']) {
+    assert.equal(scopeToolInputToOrg(tool, { orgId: ORG_B }, ORG_A).orgId, ORG_A, tool);
+  }
+  // No session org: refused, not trusted.
+  assert.throws(() => scopeToolInputToOrg('setAssistantName', fromModel, undefined), /no organization is in scope/);
+  assert.throws(() => scopeToolInputToOrg('setAssistantName', fromModel, ''), /no organization is in scope/);
+  assert.equal(scopeToolInputToOrg('setAssistantName', 'text', ORG_A), 'text');
+  assert.equal(scopeToolInputToOrg('setAssistantName', null, ORG_A), null);
 });
 
 /* ── Every caller passes the session's org ─────────────────────────────── */
@@ -311,7 +316,7 @@ test('each MemWal caller takes the org from the session, never the request', asy
   assert.equal((operations.match(/rememberForOrg\(DEMO_ORG_ID, /g) ?? []).length, 3, 'demo memories belong to the demo org');
 
   const agent = await source('lib/agent/oxwal.ts');
-  assert.match(agent, /executeOxwalTool\(name, bindToolInputToOrg\(toolUse\.input, request\.orgId\)\)/);
+  assert.match(agent, /executeOxwalTool\(name, scopeToolInputToOrg\(name, toolUse\.input, request\.orgId\)\)/);
   assert.doesNotMatch(agent, /executeOxwalTool\(name, toolUse\.input\)/);
 
   // …and request.orgId is the session's: the route derives it, and refuses a
