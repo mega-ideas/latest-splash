@@ -387,23 +387,3 @@ test('14.16 maker≠checker — dual control requires two DISTINCT approver user
   });
   assert.equal(done.status, 'APPROVED');
 });
-
-test('14.17 Zeke tools read and write the session org — never an org the model names', async () => {
-  const { scopeToolInputToOrg } = await import('../lib/agent/oxwal.ts');
-  // The model is not told the id; a message can ask it to use someone else's.
-  assert.deepEqual(
-    scopeToolInputToOrg('prepareUsdcTransfer', { orgId: 'org_someone_else', recipientName: 'Manila Parts', amountUsdc: '500' }, 'org_session'),
-    { orgId: 'org_session', recipientName: 'Manila Parts', amountUsdc: '500' },
-  );
-  assert.deepEqual(scopeToolInputToOrg('findSavedRecipient', { name: 'Manila Parts' }, 'org_session'), { name: 'Manila Parts', orgId: 'org_session' });
-  // A tool that takes no org is left as the model wrote it.
-  assert.deepEqual(scopeToolInputToOrg('getRate', { from: 'USD', to: 'PHP' }, 'org_session'), { from: 'USD', to: 'PHP' });
-  // No session org: an org-scoped tool refuses rather than trusting the model.
-  assert.throws(() => scopeToolInputToOrg('listSavedRecipients', { orgId: 'org_someone_else' }, undefined), /no organization is in scope/);
-
-  // Every tool the model runs goes through it.
-  const source = await readFile(new URL('../lib/agent/oxwal.ts', import.meta.url), 'utf8');
-  const loop = source.slice(source.indexOf('async function* runClaudeToolLoop('), source.indexOf('function usdcHandoffIn('));
-  assert.equal(loop.match(/executeOxwalTool\(/g)?.length, 1);
-  assert.match(loop, /executeOxwalTool\(name, scopeToolInputToOrg\(name, toolUse\.input, request\.orgId\)\)/);
-});

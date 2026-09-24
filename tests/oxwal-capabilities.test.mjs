@@ -23,8 +23,9 @@ import { isUsableName, sanitiseName, DEFAULT_ASSISTANT_NAME } from '../lib/agent
  *   record decides where money goes; a model writing one silently has made that
  *   decision on the strength of an OCR pass.
  *
- *   Answer to a chosen name — cosmetic, and deliberately the only thing stored
- *   in MemWal, which is a shared free-text namespace.
+ *   Answer to a chosen name — cosmetic, and deliberately the only thing Zeke
+ *   stores in MemWal, which is free-text search (scoped per org, see
+ *   tests/memwal-tenant-scope.test.mjs, but still a search).
  */
 
 test('the three capabilities are registered and dispatchable', () => {
@@ -132,11 +133,13 @@ test('the assistant name is the only thing put in MemWal', async () => {
     new URL('../lib/agent/assistant-name.ts', import.meta.url),
     'utf8',
   );
-  // MemWal is free-text and process-wide, so a recall can return another org's
-  // memory. That constrains what is safe to store: cosmetic, non-authoritative,
-  // harmless to get wrong.
-  assert.match(source, /org \$\{orgId\}/, 'the org is written into the fact');
-  assert.match(source, /if \(!text\.includes\(`org \$\{orgId\}`\)\) continue/, 'and filtered on read');
+  // MemWal is free-text search, so what is safe to store there is cosmetic,
+  // non-authoritative and harmless to get wrong. It used to be one namespace
+  // for every org, with the org id in the sentence as the only fence; both
+  // calls now go through the org-scoped adapter.
+  assert.match(source, /rememberForOrg\(orgId, `\$\{MARKER\} is "\$\{clean\}"\.`\)/, 'written for the org');
+  assert.match(source, /recallForOrg\(orgId, MARKER, 5\)/, 'and read back for the same org');
+  assert.doesNotMatch(source, /rememberFact|recallMemories/, 'no unscoped path is left');
   assert.equal(DEFAULT_ASSISTANT_NAME, 'Zeke');
 });
 

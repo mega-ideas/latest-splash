@@ -217,7 +217,7 @@ test('Zeke has prepareUsdcTransfer as a READ tool, labelled, and it goes through
 
 test('the model path turns a prepared transfer into the same card, and every tool has a label', async () => {
   const oxwal = code(await readFile(new URL('../lib/agent/oxwal.ts', import.meta.url), 'utf8'));
-  const exec = oxwal.indexOf('const result = await executeOxwalTool(name, scopeToolInputToOrg(name, toolUse.input, request.orgId));');
+  const exec = oxwal.indexOf('const result = await executeOxwalTool(name, bindToolInputToOrg(toolUse.input, request.orgId));');
   const card = oxwal.indexOf("if (handoff) yield { type: 'handoff', handoff };", exec);
   assert.ok(exec > 0 && card > exec, 'the Claude loop yields the handoff after running the tool');
   assert.match(oxwal, /const handoff = name === 'prepareUsdcTransfer' \? usdcHandoffIn\(payload\) : null;/, 'only this tool makes a card');

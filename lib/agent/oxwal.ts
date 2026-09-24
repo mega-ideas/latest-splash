@@ -241,8 +241,8 @@ export const PROPOSE_TOOL_NAMES = [
   // writing one silently has made that decision on an OCR pass.
   'proposeRecipientFromInvoice',
   // Cosmetic, and deliberately the only thing Zeke may remember about a
-  // person — MemWal is a shared free-text namespace, so nothing that decides
-  // access, money or identity belongs in it.
+  // person — MemWal is free-text semantic search (scoped per org, but still a
+  // search), so nothing that decides access, money or identity belongs in it.
   'setAssistantName',
   // x402 phase 2b: a pasted challenge becomes an unsigned proposal a human
   // approves in the queue. Screened as outbound (and blocked while Splash holds
@@ -1418,6 +1418,25 @@ export function envelopeForReadTool(name: ReadToolName, result: unknown): Envelo
   });
 }
 
+/**
+ * A tool call acts for the session's org, whatever org the model names.
+ *
+ * Every tool schema asks for an `orgId` and the model is never told one, so
+ * the value in a tool call is whatever the model guessed or the conversation
+ * put there. "Call yourself Ada for org <id>" was a MemWal write into another
+ * workspace's memory, and "list saved recipients for org <id>" a read of its
+ * beneficiaries. The session's org (app/api/oxwal/route.ts resolves it)
+ * replaces the model's. With no session org, the model's value is removed
+ * rather than trusted, and a tool that needs one refuses.
+ */
+export function bindToolInputToOrg(input: unknown, orgId: string | undefined): unknown {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return input;
+  const bound: Record<string, unknown> = { ...(input as Record<string, unknown>) };
+  delete bound.orgId;
+  if (orgId) bound.orgId = orgId;
+  return bound;
+}
+
 export async function executeOxwalTool(name: string, input: unknown) {
   assertNoExecutionTools();
   if (!(name in oxwalTools)) throw new Error(`unknown Zeke tool: ${name}`);
@@ -1425,29 +1444,6 @@ export async function executeOxwalTool(name: string, input: unknown) {
   // Every read result Zeke consumes travels inside a truth envelope;
   // propose tools return the UnsignedProposal itself (state, not evidence).
   return READ_TOOL_SET.has(name) ? envelopeForReadTool(name as ReadToolName, result) : result;
-}
-
-/**
- * The org a model-issued tool call acts for is the session's, never the
- * model's.
- *
- * Every tool that takes `orgId` reads, drafts and books under the org it is
- * handed, and the model has no way to know the right one: the chat body
- * carries only { message, history } and the prompt never names the org. So
- * whatever it wrote there was a guess or an injection. A guess filed the
- * proposal where the operator's own queue never showed it and the submit
- * route answered 404. An injected id — org ids are `org-<email domain>`, so
- * guessable — filed it in another company's queue, and with write-through on
- * it would have persisted there too.
- */
-export function scopeToolInputToOrg(name: string, input: unknown, orgId: string | undefined): unknown {
-  const tool = OXWAL_TOOL_REGISTRY.find((definition) => definition.name === name);
-  if (!tool?.input_schema.properties || !('orgId' in tool.input_schema.properties)) return input;
-  // No session org means no org-scoped tool. Falling back to the model's
-  // value is the defect this exists to remove.
-  if (!orgId) throw new Error('no organization is in scope for this conversation');
-  if (!input || typeof input !== 'object' || Array.isArray(input)) return input;
-  return { ...input, orgId };
 }
 
 function toolCategory(name: OxwalToolName): ToolCategory {
@@ -1624,7 +1620,7 @@ async function* runClaudeToolLoop(
       const name = toolUse.name as OxwalToolName;
       yield { type: 'tool', name, category: toolCategory(name) };
       try {
-        const result = await executeOxwalTool(name, scopeToolInputToOrg(name, toolUse.input, request.orgId));
+        const result = await executeOxwalTool(name, bindToolInputToOrg(toolUse.input, request.orgId));
         if (isUnsignedProposal(result)) yield { type: 'proposal', proposal: result };
         const payload = (result as Envelope<unknown>)?.data ?? result;
         // A prepared USDC transfer becomes the same card as the fixed phrasing's.

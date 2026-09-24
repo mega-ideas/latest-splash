@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 
 import { MIN_MEMORY_RELEVANCE, memoryRelevance } from '@/lib/server/copilot';
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
-import { recallMemories } from '@/lib/server/memwal';
+import { recallForOrg } from '@/lib/server/memwal';
+import { requireSessionAccount } from '@/lib/server/session-account';
 
 const demoBehaviors = [
   'Pays PH suppliers weekly',
@@ -16,9 +17,14 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: Request) {
   const auth = await requireCustomerRequest(request);
   if (auth.response) return auth.response;
+  // Whose behaviour: the session's org, never the request's. This recalled
+  // from a namespace every workspace shared and returned the text verbatim,
+  // so one tenant's card could show another's payment patterns.
+  const accountCheck = await requireSessionAccount(auth.session);
+  if (accountCheck.response) return accountCheck.response;
 
   try {
-    const recalled = await recallMemories('business payment behavior patterns', 3);
+    const recalled = await recallForOrg(accountCheck.account.orgId, 'business payment behavior patterns', 3);
     const seen = new Set<string>();
     // The same score, cutoff and meaning as the copilot's suggestion cards
     // (lib/server/copilot.ts): how closely a memory matched the query, shown

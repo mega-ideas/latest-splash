@@ -130,9 +130,9 @@ test('the Smart Treasury card waits for custody AND treasury execution, and clai
 
 test('with memory unavailable, Phase 0 suggests nothing rather than a treasury pitch', async () => {
   const { getCopilotSuggestions } = await copilot();
-  assert.deepEqual(await getCopilotSuggestions('patterns'), [], 'the defaults read the phase: this file is Phase 0');
-  assert.deepEqual(await getCopilotSuggestions('patterns', true, false), [], 'custody on, execution off');
-  const open = await getCopilotSuggestions('patterns', true, true);
+  assert.deepEqual(await getCopilotSuggestions('org-a'), [], 'the defaults read the phase: this file is Phase 0');
+  assert.deepEqual(await getCopilotSuggestions('org-a', true, false), [], 'custody on, execution off');
+  const open = await getCopilotSuggestions('org-a', true, true);
   assert.equal(open.length, 1);
   assert.equal(open[0].type, 'treasury');
   assert.equal(open[0].confidence, null);

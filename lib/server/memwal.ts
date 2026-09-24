@@ -6,6 +6,12 @@
  * NEVER leaves the server — this module must only be imported from server code
  * (API routes / server actions).
  *
+ * Every read and write is scoped to one org (lib/server/memwal-scope.ts): its
+ * own namespace, and its key at the start of every stored memory, checked
+ * again on recall. There is deliberately no unscoped remember or recall here.
+ * The org is the SESSION's — callers take it from `requireSessionAccount` or
+ * `resolveAuthorityForSession`, never from the request.
+ *
  * Every helper is defensive: if MemWal is unconfigured or the relayer errors
  * (e.g. 401 before the delegate key is registered), it degrades to a no-op so
  * the Copilot keeps working without memory rather than crashing.
@@ -14,15 +20,17 @@
  *   MEMWAL_PRIVATE_KEY  – delegate Ed25519 private key (hex)         [secret]
  *   MEMWAL_ACCOUNT_ID   – Walrus Memory account object ID on Sui
  *   MEMWAL_SERVER_URL   – relayer URL (default relayer.memory.walrus.xyz)
- *   MEMWAL_NAMESPACE    – memory namespace (default "splash-copilot")
+ *   MEMWAL_NAMESPACE    – namespace PREFIX (default "splash-copilot"); each
+ *                         org gets `<prefix>:org:<key>` under it
  */
 
 import { MemWal } from '@mysten-incubation/memwal';
 
-const DEFAULT_SERVER_URL = 'https://relayer.memory.walrus.xyz';
-const DEFAULT_NAMESPACE = 'splash-copilot';
+import { DEFAULT_MEMWAL_NAMESPACE, orgScopedMemory, type RecalledMemory } from '@/lib/server/memwal-scope';
 
-export type RecalledMemory = { text: string; distance: number };
+export type { RecalledMemory };
+
+const DEFAULT_SERVER_URL = 'https://relayer.memory.walrus.xyz';
 
 let client: MemWal | null = null;
 let warned = false;
@@ -31,7 +39,10 @@ export function memwalConfigured(): boolean {
   return Boolean(process.env.MEMWAL_PRIVATE_KEY && process.env.MEMWAL_ACCOUNT_ID);
 }
 
-/** Lazily build a singleton MemWal client, or null when unconfigured. */
+/**
+ * Lazily build a singleton MemWal client, or null when unconfigured. No
+ * default namespace is set on it: every call names the org's own.
+ */
 function getClient(): MemWal | null {
   if (!memwalConfigured()) {
     if (!warned) {
@@ -45,49 +56,42 @@ function getClient(): MemWal | null {
       key: process.env.MEMWAL_PRIVATE_KEY!,
       accountId: process.env.MEMWAL_ACCOUNT_ID!,
       serverUrl: process.env.MEMWAL_SERVER_URL ?? DEFAULT_SERVER_URL,
-      namespace: process.env.MEMWAL_NAMESPACE ?? DEFAULT_NAMESPACE,
     });
   }
   return client;
 }
 
-/** Semantic recall. Returns [] on any error (never throws). */
-export async function recallMemories(query: string, limit = 5): Promise<RecalledMemory[]> {
+function scopedMemory() {
   const m = getClient();
-  if (!m || !query.trim()) return [];
+  return m ? orgScopedMemory(m, process.env.MEMWAL_NAMESPACE || DEFAULT_MEMWAL_NAMESPACE) : null;
+}
+
+/**
+ * Semantic recall within one org's memory. Returns [] for an empty org, and
+ * on any error (never throws).
+ */
+export async function recallForOrg(orgId: string, query: string, limit = 5): Promise<RecalledMemory[]> {
+  const memory = scopedMemory();
+  if (!memory) return [];
   try {
-    const res = await m.recall({ query, limit });
-    return res.results
-      .filter((r) => r.text?.trim())
-      .map((r) => ({ text: r.text, distance: r.distance }));
+    return await memory.recall(orgId, query, limit);
   } catch (error) {
     console.warn('[memwal] recall failed:', (error as Error)?.message ?? String(error));
     return [];
   }
 }
 
-/** Persist a memory (fire-and-forget; server accepts a background job). */
-export async function rememberFact(text: string): Promise<boolean> {
-  const m = getClient();
-  if (!m || !text.trim()) return false;
+/**
+ * Persist a memory for one org (the server accepts it as a background job).
+ * false when nothing was stored: unconfigured, no org, empty text, or error.
+ */
+export async function rememberForOrg(orgId: string, text: string): Promise<boolean> {
+  const memory = scopedMemory();
+  if (!memory) return false;
   try {
-    await m.remember(text.trim());
-    return true;
+    return await memory.remember(orgId, text);
   } catch (error) {
     console.warn('[memwal] remember failed:', (error as Error)?.message ?? String(error));
-    return false;
-  }
-}
-
-/** Extract salient facts from a conversation turn and store each. */
-export async function analyzeAndRemember(text: string): Promise<boolean> {
-  const m = getClient();
-  if (!m || !text.trim()) return false;
-  try {
-    await m.analyze(text.trim());
-    return true;
-  } catch (error) {
-    console.warn('[memwal] analyze failed:', (error as Error)?.message ?? String(error));
     return false;
   }
 }
