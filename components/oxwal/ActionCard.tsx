@@ -64,16 +64,39 @@ export default function ActionCard({ proposal, readOnly = false }: ActionCardPro
           <p className="mt-1 font-mono text-[13px] font-medium text-[#326273]/50">
             {proposal.id} - {proposal.status} - {proposal.corridor ?? 'NO_CORRIDOR'}
           </p>
+          {/* Checked facts, not a score: what the approver should look at
+              that the chips above do not already say. */}
+          {model.reviewReasons.length > 0 && (
+            <div className="mt-3 rounded-md border border-[var(--warn)] bg-[var(--warn-bg)] px-3 py-2">
+              {/* Ink, not --warn, for the label: --warn on --warn-bg is under
+                  4.5:1 at this size. The icon carries the caution, not colour alone. */}
+              <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#1F4452]">
+                <AlertTriangle className="h-3.5 w-3.5 text-[var(--warn)]" aria-hidden="true" />
+                Check before approving
+              </p>
+              <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[13px] font-medium leading-5 text-[#1F4452]">
+                {model.reviewReasons.map((reason) => (
+                  <li key={reason}>{reason}</li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
 
         <div className="min-w-[190px]">
           <div className="flex items-center justify-between gap-3">
             <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#326273]/48">Confidence</span>
-            <span className="font-mono text-sm font-bold text-[#1F4452]">{model.confidencePercent}%</span>
+            <span className="font-mono text-sm font-bold text-[#1F4452]">
+              {model.confidencePercent === null ? 'Not measured' : `${model.confidencePercent}%`}
+            </span>
           </div>
-          <div className="mt-2 h-2 overflow-hidden rounded-full bg-[#326273]/10">
-            <div className={`h-full rounded-full ${confidenceTone}`} style={{ width: `${model.confidencePercent}%` }} />
-          </div>
+          {/* A bar only for a measured score: an empty or full bar for "not
+              measured" would read as 0% or 100%. */}
+          {model.confidencePercent !== null && (
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-[#326273]/10">
+              <div className={`h-full rounded-full ${confidenceTone}`} style={{ width: `${model.confidencePercent}%` }} />
+            </div>
+          )}
           <div className="mt-3 flex items-center justify-between gap-2 rounded-md border border-[#326273]/12 bg-[#F6F0ED] px-3 py-2">
             <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#326273]/50">Approvers</span>
             <span className="font-mono text-sm font-bold text-[#1F4452]">{model.approverText}</span>

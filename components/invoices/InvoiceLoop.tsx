@@ -32,7 +32,9 @@ import { confidencePercent } from '@/lib/confidence';
 import type { CopilotSuggestion } from '@/lib/server/copilot';
 import type { InvoiceRecord } from '@/lib/server/operations';
 
-type Extraction = { amount: number; currency: string; recipient: string; confidence: number };
+/** From /api/copilot/extract-invoice. currency and recipient are '' when the
+ *  parser could not read them; confidence is null when nothing measured it. */
+type Extraction = { amount: number; currency: string; recipient: string; confidence: number | null };
 type WalrusProof = { blobId: string; sizeBytes: number; epochs: number; mode: 'demo' | 'live'; createdAt: string };
 type GateState = 'complete' | 'active' | 'locked' | 'warning';
 type GateStage = { label: string; detail: string; state: GateState; icon: LucideIcon };
@@ -607,7 +609,7 @@ function ExtractionPanel({
             <strong className="mt-2 block text-lg text-[#1F4452]">{extraction.recipient || selected?.payerOrgName}</strong>
             <div className="mt-3 grid grid-cols-2 gap-2">
               <ProofPill label="Amount" value={`${extraction.amount}`} />
-              <ProofPill label="Currency" value={extraction.currency} />
+              <ProofPill label="Currency" value={extraction.currency || 'Not read'} />
             </div>
             {confidencePercent(suggestion.confidence) !== null && (
               <div className="mt-3 text-sm font-bold text-[#326273]">{confidencePercent(suggestion.confidence)}% confidence</div>

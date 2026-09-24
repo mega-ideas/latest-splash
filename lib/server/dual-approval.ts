@@ -148,7 +148,9 @@ export async function proposeForApproval(
           trusted: true,
           status: 'LIVE' as const,
         })),
-        confidence: 1,
+        // Passed checks are listed above as evidence; they are pass/fail, not
+        // a measured confidence. This used to claim 1 (100%).
+        confidence: null,
         risk: 'MEDIUM',
         // The policy engine decides the real number at submit time; this is the
         // floor that put the payment here.

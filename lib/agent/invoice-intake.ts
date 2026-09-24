@@ -30,7 +30,13 @@ export type ExtractedField = {
   value: string;
   /** Where it came from, so a person can check the one that looks wrong. */
   source: 'invoice-text' | 'existing-record' | 'inferred';
-  /** Inferred values are the ones worth a second look. */
+  /**
+   * True only for a value already on the saved recipient: a person entered it
+   * earlier, and it was not read off this invoice. It is not a claim that the
+   * value was verified or screened. A value read off the invoice is
+   * unconfirmed until the person confirms it, so it is false. Every field
+   * used to be marked true.
+   */
   confident: boolean;
 };
 
@@ -81,17 +87,19 @@ export async function prepareBeneficiaryFromInvoice(input: {
   // reading of one.
   const draft = { ...input.read, ...pruneEmpty(input.existing ?? {}) };
 
+  const onRecord = pruneEmpty(input.existing ?? {});
   const extracted: ExtractedField[] = Object.entries(draft)
     .filter(([, value]) => typeof value === 'string' && value.trim().length > 0)
-    .map(([field, value]) => ({
-      field,
-      label: LABELS[field] ?? field,
-      value: String(value),
-      source: pruneEmpty(input.existing ?? {})[field] !== undefined
-        ? ('existing-record' as const)
-        : ('invoice-text' as const),
-      confident: true,
-    }));
+    .map(([field, value]) => {
+      const source = onRecord[field] !== undefined ? ('existing-record' as const) : ('invoice-text' as const);
+      return {
+        field,
+        label: LABELS[field] ?? field,
+        value: String(value),
+        source,
+        confident: source === 'existing-record',
+      };
+    });
 
   const { originator } = await readOriginator(input.orgId);
   const missing = missingTravelRuleFields({

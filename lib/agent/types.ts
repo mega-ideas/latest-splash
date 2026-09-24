@@ -89,12 +89,28 @@ export interface ProposalExplain {
   recommendation: string;
   financialImpact: FinancialImpact;
   evidence: EvidenceItem[];
-  confidence: number;
+  /**
+   * 0..1, only when something measured it; null when nothing did. No Zeke
+   * proposal measures one today: they used to carry fixed numbers (0.82,
+   * 0.58, 0.4, …), which read as a measured score on the action card and in
+   * the model's tool results. Proposals stored before that keep their numbers.
+   */
+  confidence: number | null;
   risk: RiskBand;
   requiredApprovers: number;
   reasoningTraceRef: string;
   /** Track A WS2 — set at proposal creation from the evidence statuses. */
   evidenceQuality?: EvidenceQuality;
+  /**
+   * Compared facts a person should look at before approving, that the rest
+   * of the proposal does not already show. Today, for a payment drafted
+   * against an invoice: the invoice's warnings, an amount or currency that is
+   * not the invoice's, an invoice already marked paid. Untrusted and non-LIVE
+   * evidence is already visible in `evidence` / `evidenceQuality`, so it is
+   * not repeated here. Not a score. Absent on proposals stored before it
+   * existed.
+   */
+  reviewReasons?: string[];
 }
 
 export interface SimulationResult {

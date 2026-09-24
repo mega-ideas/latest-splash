@@ -1,3 +1,4 @@
+import { confidencePercent as formatConfidencePercent } from '../confidence.ts';
 import type { DataStatus, EvidenceItem, EvidenceQuality, ProposalFxRate, ProposalKind, ProposalStatus, RiskBand, SimulationResult, UserRole } from './types';
 
 type AmountLike = bigint | number | string | undefined;
@@ -33,11 +34,13 @@ export type ActionCardProposal = {
     recommendation: string;
     financialImpact: ClientFinancialImpact;
     evidence: EvidenceItem[];
-    confidence: number;
+    /** null when nothing measured it (lib/agent/types.ts ProposalExplain). */
+    confidence: number | null;
     risk: RiskBand;
     requiredApprovers: number;
     reasoningTraceRef: string;
     evidenceQuality?: EvidenceQuality;
+    reviewReasons?: string[];
   };
 };
 
@@ -60,7 +63,10 @@ export type ActionCardModel = {
   impactRows: ActionCardRow[];
   simulationRows: ActionCardRow[];
   evidenceRows: ActionCardEvidence[];
-  confidencePercent: number;
+  /** Whole percent, or null when the proposal measured none: no number, no bar. */
+  confidencePercent: number | null;
+  /** Checked facts to look at before approving (ProposalExplain.reviewReasons). */
+  reviewReasons: string[];
   riskTone: 'low' | 'medium' | 'high';
   approverText: string;
   primaryActionLabel: 'Sign & approve' | 'Send for approval';
@@ -111,7 +117,10 @@ export function buildActionCardModel(proposal: ActionCardProposal): ActionCardMo
   const impact = proposal.explain.financialImpact;
   const requiredApprovers = Math.max(0, proposal.explain.requiredApprovers);
   const approvalsCollected = new Set(proposal.approvals.map((approval) => approval.userId)).size;
-  const confidencePercent = Math.max(0, Math.min(100, Math.round(proposal.explain.confidence * 100)));
+  // The shared formatter: a missing score is no percentage. This used to be
+  // Math.round(confidence * 100), which read null as "0%" and a missing key
+  // as "NaN%" (and a bar of width NaN%).
+  const confidencePercent = formatConfidencePercent(proposal.explain.confidence);
   const evidenceRows = proposal.explain.evidence.map((item) => {
     const statusLabel: DataStatus = item.status ?? 'DEMO';
     return {
@@ -159,6 +168,7 @@ export function buildActionCardModel(proposal: ActionCardProposal): ActionCardMo
       : [{ label: 'Dry-run', value: 'Pending', status: 'warning' }],
     evidenceRows,
     confidencePercent,
+    reviewReasons: proposal.explain.reviewReasons ?? [],
     riskTone: proposal.explain.risk.toLowerCase() as ActionCardModel['riskTone'],
     approverText: `${approvalsCollected}/${requiredApprovers}`,
     primaryActionLabel,
