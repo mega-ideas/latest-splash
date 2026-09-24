@@ -14,7 +14,9 @@ import {
   PAYMENT_CLOCK_TOLERANCE_MS,
   SUFFIX_RANGE,
 } from '../lib/payments/usdc-invoice.ts';
-import { checkInvoiceUsdcPayment, invoiceUsdcBySlug, invoiceUsdcTerms } from '../lib/server/usdc-invoice-payments.ts';
+import { checkInvoiceUsdcPayment, invoiceUsdcBySlug, invoiceUsdcTerms, syncOrgInvoiceUsdcPayments } from '../lib/server/usdc-invoice-payments.ts';
+import { loadActivityLabels } from '../lib/server/usdc-records.ts';
+import { labelMovements } from '../lib/server/wallet-activity.ts';
 
 /**
  * Invoices paid in USDC on Sui, straight to the issuer's own wallet: an exact
@@ -196,4 +198,75 @@ test('the pay page and its API show the same USDC terms', async () => {
   const ui = await readFile(new URL('../components/pay/PayWithUsdc.tsx', import.meta.url), 'utf8');
   assert.match(ui, /Send exactly/);
   assert.match(ui, /Splash never holds it/);
+});
+
+// ─── The issuer's side: every open invoice, one read ───────────────────────
+
+test('the issuer syncs every open invoice against one read of its wallet', async () => {
+  const { client, db } = await world();
+  await client.exec(`
+    INSERT INTO invoices (id, org_id, issuer_org, payer_name, amount_minor, currency, target_currency, status, pay_link_slug, created_at) VALUES
+      ('inv_bank', 'org_a', 'A Co', 'Bank Payer', 1250000000, 'USD', 'PHP', 'paid', 'slug-bank', '${T_INVOICE.toISOString()}');
+    UPDATE invoices SET payer_name = 'Cebu Traders' WHERE id = 'inv_2';
+  `);
+  const one = invoiceUsdcAmountMinor('inv_1', 1_250_000_000n);
+  const two = invoiceUsdcAmountMinor('inv_2', 1_250_000_000n);
+  const bank = invoiceUsdcAmountMinor('inv_bank', 1_250_000_000n);
+  let reads = 0;
+  const read = async () => {
+    reads += 1;
+    return {
+      available: true,
+      olderCursor: null,
+      movements: [
+        move('PAYS_TWO', two, '2026-09-24T09:00:00Z'),
+        move('PAYS_ONE', one, '2026-09-24T09:05:00Z'),
+        move('PAYS_BANK', bank, '2026-09-24T09:06:00Z'),
+      ],
+    };
+  };
+  const result = await syncOrgInvoiceUsdcPayments(db, 'org_a', { rpId: 'localhost', read });
+  assert.equal(result.status, 'SYNCED');
+  assert.equal(reads, 1, 'one read of the wallet for all of them');
+  assert.equal(result.checked, 2, 'an invoice already marked paid by bank is not re-matched');
+  assert.deepEqual(result.paid.map((p) => `${p.invoiceId}:${p.digest}`).sort(), ['inv_1:PAYS_ONE', 'inv_2:PAYS_TWO']);
+  assert.equal((await invoiceUsdcBySlug(db, 'slug-bank')).usdcTxDigest, null);
+
+  // Nothing left open: a second sync checks nothing and reads nothing.
+  const again = await syncOrgInvoiceUsdcPayments(db, 'org_a', { rpId: 'localhost', read });
+  assert.deepEqual(again, { status: 'SYNCED', checked: 0, paid: [], alreadyUsed: [] });
+  assert.equal(reads, 1);
+
+  // Wallet activity now names the deposits.
+  const labels = await loadActivityLabels(db, 'org_a', ['PAYS_TWO', 'PAYS_ONE', 'UNRELATED']);
+  assert.deepEqual(labels.invoicesByDigest.get('PAYS_TWO'), { invoiceId: 'inv_2', payerName: 'Cebu Traders' });
+  assert.equal(labels.invoicesByDigest.has('UNRELATED'), false);
+  const [named] = labelMovements(
+    [{ digest: 'PAYS_TWO', timestamp: '2026-09-24T09:00:00Z', success: true, direction: 'IN', amountMinor: two, counterparty: PAYER }],
+    new Map(),
+    new Map(),
+    { splashWallet: true, invoicesByDigest: labels.invoicesByDigest },
+  );
+  assert.equal(named.label, 'Invoice inv_2 paid by Cebu Traders');
+  await client.close();
+});
+
+test('the issuer sync reads nothing without a wallet, and records nothing when Sui does not answer', async () => {
+  const bare = await world({ passkey: false });
+  const none = await syncOrgInvoiceUsdcPayments(bare.db, 'org_a', { rpId: 'localhost', read: async () => { throw new Error('must not read'); } });
+  assert.deepEqual(none, { status: 'NO_WALLET' });
+  await bare.client.close();
+
+  const { client, db } = await world();
+  const down = await syncOrgInvoiceUsdcPayments(db, 'org_a', { rpId: 'localhost', read: async () => ({ available: false, reason: 'indexer down' }) });
+  assert.deepEqual(down, { status: 'UNAVAILABLE', reason: 'indexer down' });
+  assert.equal((await invoiceUsdcBySlug(db, 'slug-one')).usdcTxDigest, null);
+  await client.close();
+});
+
+test('the sync route is signed in, rate limited, and scoped to the session’s workspace', async () => {
+  const route = code(await readFile(new URL('../app/api/invoices/usdc-sync/route.ts', import.meta.url), 'utf8'));
+  assert.match(route, /requireCustomerRequest\(request\)/);
+  assert.match(route, /RATE_LIMITS\.invoiceUsdcSyncUser/);
+  assert.match(route, /syncOrgInvoiceUsdcPayments\(getDb\(\), accountCheck\.account\.orgId/);
 });

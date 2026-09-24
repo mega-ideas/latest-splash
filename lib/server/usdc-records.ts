@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray, isNotNull } from 'drizzle-orm';
 
-import { stablecoinOutflows, stepUpCodes, suppliers, users } from '@/lib/db/schema';
+import { invoices, stablecoinOutflows, stepUpCodes, suppliers, users } from '@/lib/db/schema';
 import type { UsdcRecord } from '@/lib/payments/usdc-records';
 
 /**
@@ -97,6 +97,8 @@ export async function listUsdcRecords(db: Db, orgId: string): Promise<UsdcRecord
 export async function loadActivityLabels(db: Db, orgId: string, digests: string[]) {
   const outflowsByDigest = new Map<string, { kind: string; recipientName: string | null; resource: string | null; feeMinor: bigint }>();
   const recipientsByAddress = new Map<string, string>();
+  // Deposits that paid one of this workspace's invoices (pay link, USDC on Sui).
+  const invoicesByDigest = new Map<string, { invoiceId: string; payerName: string | null }>();
 
   const recipients: Array<{ name: string; walletAddress: string | null }> = await db
     .select({ name: suppliers.name, walletAddress: suppliers.walletAddress })
@@ -118,6 +120,11 @@ export async function loadActivityLabels(db: Db, orgId: string, digests: string[
         .where(and(eq(suppliers.orgId, orgId), inArray(suppliers.id, supplierIds)));
       for (const s of found) names.set(s.id, s.name);
     }
+    const paidInvoices: Array<{ id: string; payerName: string | null; usdcTxDigest: string | null }> = await db
+      .select({ id: invoices.id, payerName: invoices.payerName, usdcTxDigest: invoices.usdcTxDigest })
+      .from(invoices)
+      .where(and(eq(invoices.orgId, orgId), inArray(invoices.usdcTxDigest, digests)));
+    for (const i of paidInvoices) if (i.usdcTxDigest) invoicesByDigest.set(i.usdcTxDigest, { invoiceId: i.id, payerName: i.payerName });
     for (const r of rows) {
       if (!r.txDigest) continue;
       outflowsByDigest.set(r.txDigest, {
@@ -128,5 +135,5 @@ export async function loadActivityLabels(db: Db, orgId: string, digests: string[
       });
     }
   }
-  return { outflowsByDigest, recipientsByAddress };
+  return { outflowsByDigest, recipientsByAddress, invoicesByDigest };
 }

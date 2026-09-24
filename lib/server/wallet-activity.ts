@@ -167,7 +167,7 @@ export function labelMovements(
   movements: ChainMovement[],
   outflowsByDigest: Map<string, { kind: string; recipientName: string | null; resource: string | null; feeMinor: bigint }>,
   recipientsByAddress: Map<string, string>,
-  opts: { splashWallet: boolean } = { splashWallet: true },
+  opts: { splashWallet: boolean; invoicesByDigest?: Map<string, { invoiceId: string; payerName: string | null }> } = { splashWallet: true },
 ): LabelledMovement[] {
   return movements.map((m) => {
     const outflow = outflowsByDigest.get(m.digest);
@@ -178,6 +178,11 @@ export function labelMovements(
         : `Sent with Splash to ${outflow.recipientName ?? who ?? (m.counterparty ? shortAddress(m.counterparty) : 'the recipient')}`;
       return { ...m, label, origin: 'SPLASH', feeMinor: outflow.kind === 'X402' ? null : outflow.feeMinor };
     }
+    const invoice = m.direction === 'IN' ? opts.invoicesByDigest?.get(m.digest) : undefined;
+    if (invoice) {
+      const payer = invoice.payerName ?? who;
+      return { ...m, label: `Invoice ${shortInvoiceId(invoice.invoiceId)} paid${payer ? ` by ${payer}` : ''}`, origin: 'RECEIVED', feeMinor: null };
+    }
     if (m.direction === 'IN') {
       return { ...m, label: who ? `Received from ${who}` : m.counterparty ? `Received from ${shortAddress(m.counterparty)}` : 'Received', origin: 'RECEIVED', feeMinor: null };
     }
@@ -186,6 +191,11 @@ export function labelMovements(
       ? { ...m, label: `Sent with no Splash record${to}`, origin: 'NO_RECORD', feeMinor: null }
       : { ...m, label: `Sent${to}`, origin: 'SENT', feeMinor: null };
   });
+}
+
+/** Invoice ids are long; the tail is what people recognise. */
+function shortInvoiceId(id: string): string {
+  return id.length > 10 ? `…${id.slice(-6)}` : id;
 }
 
 function hostOf(url: string): string {

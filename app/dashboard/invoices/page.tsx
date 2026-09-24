@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Archive, CheckCircle2, Copy, Database, FilePlus2, FileText, Lock, Search, Send, ShieldCheck, Sparkles, X } from 'lucide-react';
+import { Archive, CheckCircle2, Copy, Database, FilePlus2, FileText, Loader2, Lock, RefreshCw, Search, Send, ShieldCheck, Sparkles, X } from 'lucide-react';
 import { toast } from 'sonner';
 
 import InvoiceLoop from '@/components/invoices/InvoiceLoop';
@@ -64,6 +64,33 @@ export default function InvoicesPage() {
     onError: (error) => toast.error(error.message),
   });
 
+  // Every open invoice against one read of the main admin's Splash wallet on
+  // Sui (lib/server/usdc-invoice-payments.ts): records USDC payments a payer
+  // never pressed "check" for. Reads and records; moves nothing.
+  const usdcSync = useMutation({
+    mutationFn: async () => {
+      const response = await fetch('/api/invoices/usdc-sync', { method: 'POST' });
+      const body = (await response.json().catch(() => ({}))) as {
+        status?: string; paid?: Array<{ invoiceId: string }>; checked?: number; alreadyUsed?: string[]; reason?: string; error?: string;
+      };
+      if (!response.ok) throw new Error(body.error ?? 'USDC payments could not be checked.');
+      return body;
+    },
+    onSuccess: (body) => {
+      if (body.status === 'NO_WALLET') {
+        toast.info('USDC payments go to your main admin’s Splash wallet — they need a passkey first (Settings → Security).');
+      } else if (body.status === 'UNAVAILABLE') {
+        toast.error(`Couldn't read Sui just now: ${body.reason ?? 'try again shortly'}`);
+      } else {
+        const paid = body.paid?.length ?? 0;
+        toast.success(paid > 0 ? `${paid} invoice${paid === 1 ? '' : 's'} paid in USDC — recorded.` : `No new USDC payments across ${body.checked ?? 0} open invoice${body.checked === 1 ? '' : 's'}.`);
+        if ((body.alreadyUsed?.length ?? 0) > 0) toast.warning('A transfer matched more than one invoice; it was recorded against the first only.');
+      }
+      void queryClient.invalidateQueries({ queryKey: ['invoices'] });
+    },
+    onError: (error) => toast.error(error.message),
+  });
+
   async function copyPayLink(invoice: InvoiceRecord) {
     const link = `${window.location.origin}/pay/${invoice.payLinkSlug}`;
     await navigator.clipboard.writeText(link);
@@ -90,9 +117,20 @@ export default function InvoicesPage() {
           </p>
         </div>
         {view === 'vault' && (
-          <button onClick={() => setCreateOpen(true)} className="inline-flex items-center justify-center gap-2 rounded-xl bg-accent px-5 py-3 text-sm font-bold text-card shadow-lg shadow-accent/20">
-            <FilePlus2 className="h-4 w-4" /> Create invoice
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => usdcSync.mutate()}
+              disabled={usdcSync.isPending}
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-foreground/15 bg-card px-4 py-3 text-sm font-bold disabled:opacity-60"
+            >
+              {usdcSync.isPending ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <RefreshCw className="h-4 w-4" aria-hidden="true" />}
+              Check USDC payments
+            </button>
+            <button onClick={() => setCreateOpen(true)} className="inline-flex items-center justify-center gap-2 rounded-xl bg-accent px-5 py-3 text-sm font-bold text-card shadow-lg shadow-accent/20">
+              <FilePlus2 className="h-4 w-4" /> Create invoice
+            </button>
+          </div>
         )}
       </header>
 

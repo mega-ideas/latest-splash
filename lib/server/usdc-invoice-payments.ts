@@ -1,9 +1,9 @@
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, asc, eq, gt, isNull, notInArray } from 'drizzle-orm';
 
 import { findCredential } from '../auth/passkey.ts';
 import { invoices } from '../db/schema.ts';
 import { explorerTxUrl, normaliseSuiAddress } from '../payments/stablecoin-lane.ts';
-import { findInvoicePayment, invoiceUsdcAmountMinor } from '../payments/usdc-invoice.ts';
+import { findInvoicePayment, invoiceUsdcAmountMinor, type IncomingMovement } from '../payments/usdc-invoice.ts';
 import { mainAdmin } from './step-up.ts';
 import { readUsdcActivity, type ActivityPage } from './wallet-activity.ts';
 
@@ -111,7 +111,20 @@ export async function checkInvoiceUsdcPayment(
   const match = findInvoicePayment(activity.movements, terms.amountMinor, row.createdAt);
   if (!match) return { status: 'NOT_SEEN', expectedMinor: terms.amountMinor, address: terms.address };
 
-  const now = (deps.now ?? (() => new Date()))();
+  return recordInvoiceUsdcPayment(db, row, match, (deps.now ?? (() => new Date()))());
+}
+
+/**
+ * Record `match` as the transfer that paid `row`, once: a conditional UPDATE
+ * that only lands on an invoice not already paid in USDC, with the unique
+ * index refusing a transaction that already paid another invoice.
+ */
+export async function recordInvoiceUsdcPayment(
+  db: Db,
+  row: Pick<InvoiceUsdcRow, 'id' | 'status'>,
+  match: IncomingMovement,
+  now: Date,
+): Promise<UsdcCheck> {
   try {
     const updated = await db
       .update(invoices)
@@ -165,4 +178,66 @@ export async function publicUsdcForSlug(slug: string) {
   }
   const terms = await invoiceUsdcTerms(db, row, relyingPartyId());
   return terms ? { paid: null, terms: { address: terms.address, amount: exactUsdc(terms.amountMinor) } } : null;
+}
+
+export type InvoiceSyncResult =
+  | { status: 'NO_WALLET' }
+  | { status: 'UNAVAILABLE'; reason: string }
+  | { status: 'SYNCED'; checked: number; paid: Array<{ invoiceId: string; digest: string }>; alreadyUsed: string[] };
+
+/**
+ * The issuer's side of the same check: every open invoice at once, against one
+ * read of the main admin's Splash wallet. A payer who never presses "check"
+ * still gets their invoice marked paid. Each transfer is assigned to at most
+ * one invoice (oldest invoice first), and recorded through the same
+ * conditional update as the payer's check.
+ */
+export async function syncOrgInvoiceUsdcPayments(
+  db: Db,
+  orgId: string,
+  deps: { rpId: string; read?: (address: string) => Promise<ActivityPage>; now?: () => Date },
+): Promise<InvoiceSyncResult> {
+  const address = await issuerUsdcAddress(db, orgId, deps.rpId);
+  if (!address) return { status: 'NO_WALLET' };
+
+  const open: InvoiceUsdcRow[] = (await db
+    .select({
+      id: invoices.id,
+      orgId: invoices.orgId,
+      amountMinor: invoices.amountMinor,
+      status: invoices.status,
+      createdAt: invoices.createdAt,
+      usdcTxDigest: invoices.usdcTxDigest,
+      usdcPaidAt: invoices.usdcPaidAt,
+      usdcPayerAddress: invoices.usdcPayerAddress,
+    })
+    .from(invoices)
+    .where(and(
+      eq(invoices.orgId, orgId),
+      isNull(invoices.usdcTxDigest),
+      notInArray(invoices.status, ['paid', 'settled']),
+      gt(invoices.amountMinor, 0n),
+    ))
+    .orderBy(asc(invoices.createdAt))
+    .limit(500)).map((r: InvoiceUsdcRow) => ({ ...r, amountMinor: BigInt(r.amountMinor) }));
+  if (open.length === 0) return { status: 'SYNCED', checked: 0, paid: [], alreadyUsed: [] };
+
+  const read = deps.read ?? ((a: string) => readUsdcActivity(a, { limit: 50 }));
+  const activity = await read(address);
+  if (!activity.available) return { status: 'UNAVAILABLE', reason: activity.reason };
+
+  const now = (deps.now ?? (() => new Date()))();
+  const used = new Set<string>();
+  const paidNow: Array<{ invoiceId: string; digest: string }> = [];
+  const alreadyUsed: string[] = [];
+  for (const invoice of open) {
+    const expected = invoiceUsdcAmountMinor(invoice.id, invoice.amountMinor);
+    const match = findInvoicePayment(activity.movements.filter((m) => !used.has(m.digest)), expected, invoice.createdAt);
+    if (!match) continue;
+    used.add(match.digest);
+    const result = await recordInvoiceUsdcPayment(db, invoice, match, now);
+    if (result.status === 'PAID') paidNow.push({ invoiceId: invoice.id, digest: result.digest });
+    else if (result.status === 'ALREADY_USED') alreadyUsed.push(invoice.id);
+  }
+  return { status: 'SYNCED', checked: open.length, paid: paidNow, alreadyUsed };
 }

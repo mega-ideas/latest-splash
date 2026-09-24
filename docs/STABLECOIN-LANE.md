@@ -73,6 +73,8 @@ An invoice's pay link offers **Or pay in USDC on Sui**, straight to the issuer's
 - **How a payment is matched.** A Sui transfer carries no memo, so the payer is asked for an exact amount: the invoice amount plus 1–997 millionths of a dollar, fixed per invoice (1,250.00 becomes something like 1,250.000417). **I've sent it — check** reads the issuer's wallet from chain and looks for money in of exactly that amount, which succeeded and did not arrive before the invoice existed.
 - **Recorded once.** The matching transaction is stored on the invoice (migration 0023) with one conditional update, and a unique index means one transaction can pay only one invoice. The invoice becomes *paid*, and the issuer's list links to the transfer on Suiscan.
 - A different amount is not matched automatically. The issuer reconciles it by hand, as with a bank transfer. The check is public, like the pay link, and limited per network.
+- **The issuer doesn't have to wait for the payer.** **Check USDC payments** on the Invoices page matches every open invoice against one read of the wallet and records what it finds. Each transfer goes to at most one invoice, oldest invoice first, through the same conditional update. Invoices already marked paid by a bank report are left alone.
+- **Wallet activity names them.** A deposit that paid an invoice shows as "Invoice …123456 paid by Cebu Traders".
 
 ## Zeke prepares, you send (lib/agent/usdc-handoff.ts)
 
