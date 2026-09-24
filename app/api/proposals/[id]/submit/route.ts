@@ -10,7 +10,8 @@ import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { requireActiveOrg } from '@/lib/server/kyb-gate';
 import { readJsonBody } from '@/lib/server/http';
 import { evaluateAtApproval, releaseApproved } from '@/lib/queue/approval-walk';
-import { executeApprovedProposal } from '@/lib/server/approval-execution';
+import { APPROVAL_NOT_SAVED, executeApprovedProposal } from '@/lib/server/approval-execution';
+import { closeApprovalClaim } from '@/lib/server/approved-proposal';
 import { AGENT_ACTOR_ID } from '@/lib/agent/identity';
 
 /**
@@ -118,8 +119,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       });
       if (current.status === 'PENDING_APPROVAL') {
         // Dual-control: this signature is recorded; a distinct co-approver
-        // must sign from the queue before submission. Durable before the
-        // answer, like every other mutation here.
+        // must sign from the queue before submission. Flushed first, like every
+        // other response here, so a crash after it cannot lose the signature.
         await store.flush();
         return json({
           proposal: current,
@@ -140,8 +141,26 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       now,
     });
     // W1: the approval/submission is durable before we tell the client so a
-    // crash right after this response cannot lose it.
-    await store.flush();
+    // crash right after this response cannot lose it — and before any money
+    // moves. `flush` resolves whether or not the write landed; `writeFailed`
+    // waits for the same writes and says which. Money does not move on an
+    // approval held only in memory: the next restart would lose who approved
+    // it and bring the proposal back as still pending for a payment already
+    // made. So nothing is sent, the claim is closed the way the replay closes
+    // one a route refused (nothing can present it later), and the answer is
+    // not a 2xx, which the chat would show as "approved".
+    if (await store.writeFailed(submitted.id)) {
+      console.error(`[proposals/submit] ${submitted.id}: approval not saved, payment withheld`);
+      await closeApprovalClaim(submitted.id, submitted.orgId);
+      store.recordExecution(submitted.id, { ...APPROVAL_NOT_SAVED, at: new Date().toISOString() });
+      await store.flush();
+      return json({
+        proposal: store.get(submitted.id) ?? submitted,
+        policyDecision,
+        execution: APPROVAL_NOT_SAVED,
+        error: APPROVAL_NOT_SAVED.detail,
+      }, 503);
+    }
 
     // And then the payment actually happens.
     //

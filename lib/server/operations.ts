@@ -1,6 +1,6 @@
 import { suiScanTxUrl, suiVisionTxUrl } from '@/lib/explorer';
 import { getContractConfig } from '@/lib/server/contract-config';
-import { analyzeAndRemember } from '@/lib/server/memwal';
+import { rememberForOrg } from '@/lib/server/memwal';
 import type { StoredSettlementEvidence } from '@/lib/evidence/settlement';
 import type {
   CctpSourceChain,
@@ -783,9 +783,11 @@ export async function listTransactions(): Promise<TransactionRecord[]> {
 function seedDemoData() {
   if (operations.demoSeeded || process.env.NEXT_PUBLIC_DEMO_MODE !== 'true') return;
   operations.demoSeeded = true;
-  void analyzeAndRemember('Pays PH suppliers weekly');
-  void analyzeAndRemember('Batches on Friday');
-  void analyzeAndRemember('Prefers USD settlement');
+  // Demo memories belong to the demo org like the rest of the seed. They used
+  // to go to the namespace every workspace shared.
+  void rememberForOrg(DEMO_ORG_ID, 'Pays PH suppliers weekly');
+  void rememberForOrg(DEMO_ORG_ID, 'Batches on Friday');
+  void rememberForOrg(DEMO_ORG_ID, 'Prefers USD settlement');
 
   // Demo seed lives in this process only, owned by DEMO_ORG_ID so it can never
   // be read alongside a real tenant's beneficiaries.

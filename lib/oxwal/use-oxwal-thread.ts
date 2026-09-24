@@ -107,6 +107,9 @@ const ACTIVITY_LABELS: Record<string, string> = {
   proposeBatchPayout: 'Preparing batch payout',
   proposeRecipientFromInvoice: 'Reading recipient off the invoice',
   setAssistantName: 'Remembering what to be called',
+  quoteX402Payment: 'Pricing the x402 request',
+  proposeX402Payment: 'Preparing x402 proposal',
+  prepareUsdcTransfer: 'Preparing USDC transfer',
 };
 
 export function activityLabel(tool: string): string {

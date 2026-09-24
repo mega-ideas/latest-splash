@@ -444,6 +444,7 @@ function settleDeps(db, store, overrides = {}) {
     compliance: resolveComplianceForProposal,
     canMoveMoney: async () => ({ ok: true }),
     execute: recordingExecutor().execute,
+    closeClaim: async () => {},
     now: () => new Date(),
     ...overrides,
   };
@@ -820,6 +821,39 @@ test('a payment is carried out once, however many times the vote is settled', as
     assert.equal(late.rejected, false);
     assert.match(late.message, /had already been released/);
     assert.equal(store.get(proposal.id).status, 'SUBMITTED');
+  });
+});
+
+test('a release whose approval did not reach Postgres sends nothing and spends the claim', async () => {
+  await withChannelWorld(async ({ client, db, store }) => {
+    const { proposal, codes } = await moneyRoutePayment(client);
+    const executor = recordingExecutor();
+    const closed = [];
+    const deps = settleDeps(db, store, {
+      execute: executor.execute,
+      closeClaim: async (proposalId, orgId) => {
+        closed.push([proposalId, orgId]);
+      },
+    });
+    await answerByCode(deps, { userId: 'usr_priya', code: codes.usr_priya });
+
+    // Proposal writes fail (one transaction each) while reads and ballots work:
+    // a database dropping mid-request, as the release is signed and submitted.
+    db.transaction = async () => {
+      throw new Error('Connection terminated unexpectedly');
+    };
+    let last;
+    try {
+      last = await answerByCode(deps, { userId: 'usr_nadia', code: codes.usr_nadia });
+    } finally {
+      delete db.transaction;
+    }
+
+    assert.equal(last.settle.stage, 'NOT_SENT');
+    assert.match(last.settle.message, /could not be saved/);
+    assert.equal(executor.calls.length, 0, 'the payment route was never asked');
+    assert.deepEqual(closed, [[proposal.id, 'acme']], 'nothing can present the approval later');
+    assert.equal(store.get(proposal.id).execution.state, 'FAILED');
   });
 });
 

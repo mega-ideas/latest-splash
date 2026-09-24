@@ -39,10 +39,11 @@ test('a name has to be a name, not an instruction', () => {
 });
 
 test('an empty org never inherits another workspace\'s name', async () => {
-  // The stored sentence is filtered by `org ${orgId}`. With an empty id that
-  // becomes the substring "org ", which matches every org's memory — one
-  // workspace's chosen name answering in another's chat. The guard is a plain
-  // early return, and this is the test that keeps it there.
+  // The stored sentence used to be filtered by `org ${orgId}`, and an empty id
+  // made that the substring "org ", which matched every org's memory — one
+  // workspace's chosen name answering in another's chat. Recall is scoped per
+  // org now (tests/memwal-tenant-scope.test.mjs) and a blank org scopes to
+  // nothing; the early return stays, and this is the test that keeps it.
   assert.equal(await recallAssistantName(''), DEFAULT_ASSISTANT_NAME);
   assert.equal(await recallAssistantName('   '), DEFAULT_ASSISTANT_NAME);
 });
@@ -51,6 +52,17 @@ test('MemWal being unavailable costs a nickname and nothing else', async () => {
   // No MEMWAL credentials are set in test, so recall throws internally and is
   // swallowed. A memory store that is down must not fail a conversation.
   assert.equal(await recallAssistantName('org-that-does-not-exist'), DEFAULT_ASSISTANT_NAME);
+});
+
+test('a name that was not saved is not reported as saved', async () => {
+  // The adapter answers `false` rather than throwing when nothing was stored
+  // (unconfigured, no org, relayer refused), and this used to reply "Noted"
+  // regardless. No MEMWAL credentials are set in test.
+  const { rememberAssistantName } = await import('../lib/agent/assistant-name.ts');
+  const result = await rememberAssistantName({ orgId: 'org-a', name: 'Ada' });
+  assert.equal(result.ok, false);
+  assert.match(result.message, /could not save that/);
+  assert.equal((await rememberAssistantName({ orgId: '', name: 'Ada' })).ok, false);
 });
 
 test('the chosen name reaches the model, and says it buys nothing', async () => {

@@ -244,6 +244,15 @@ export function transitionProposal(
   return next;
 }
 
+/** Why a write failed, without the statement. drizzle wraps the driver error in
+ *  one whose message is the whole query and its parameters — for a proposal,
+ *  the explain, the simulation and the execution payload with the beneficiary
+ *  in it — and a failure log is no place for those. */
+function writeFailureReason(error: unknown): string {
+  if (error instanceof Error && error.cause instanceof Error) return error.cause.message;
+  return error instanceof Error ? error.message : String(error);
+}
+
 export class InMemoryProposalStore {
   private readonly proposalsById = new Map<string, UnsignedProposal>();
   private readonly idsByIdempotencyKey = new Map<string, string>();
@@ -252,6 +261,10 @@ export class InMemoryProposalStore {
    *  path, so the hook's promise is tracked (flush) but never thrown here. */
   private lastWrite: Promise<unknown> = Promise.resolve();
   private readonly onWrite?: (proposal: UnsignedProposal) => Promise<void>;
+  /** Proposals whose most recent write failed, so Postgres holds an older
+   *  state of them or none at all. Every write is the whole row, so the next
+   *  write of the same proposal that lands clears its entry. */
+  private readonly unwritten = new Set<string>();
 
   constructor(onWrite?: (proposal: UnsignedProposal) => Promise<void>) {
     this.onWrite = onWrite;
@@ -259,18 +272,45 @@ export class InMemoryProposalStore {
 
   private recordWrite(proposal: UnsignedProposal) {
     if (!this.onWrite) return;
+    const { id } = proposal;
     this.lastWrite = this.lastWrite
       .then(() => this.onWrite!(proposal))
-      .catch((error) => {
-        console.error('[proposal-store] persistence write failed', error);
-      });
+      .then(
+        () => {
+          this.unwritten.delete(id);
+        },
+        (error) => {
+          this.unwritten.add(id);
+          console.error(`[proposal-store] persistence write failed for ${id}: ${writeFailureReason(error)}`);
+        },
+      );
   }
 
   /** Await durable persistence of every mutation issued so far. Mutating API
    *  routes call this before responding so a crash right after the response
-   *  cannot lose an approval. */
+   *  cannot lose an approval. Never rejects: a failed write is logged, and
+   *  `writeFailed` is how a caller finds out about it. */
   flush(): Promise<unknown> {
     return this.lastWrite;
+  }
+
+  /**
+   * Whether this proposal's latest state failed to reach the database, asked
+   * once every write issued so far has settled.
+   *
+   * `flush` cannot tell you: it resolves either way, so that a database outage
+   * never breaks reading or drafting. That is the wrong default for moving
+   * money. An approval held only in memory comes back from Postgres after a
+   * restart as whatever state last landed — still pending, say — without the
+   * signatures that authorised whatever it paid. Anything about to act on an
+   * approval asks this first.
+   *
+   * False with no writer (no DATABASE_URL): nothing was attempted, so nothing
+   * failed, and nothing was durable to begin with.
+   */
+  async writeFailed(id: string): Promise<boolean> {
+    await this.lastWrite;
+    return this.unwritten.has(id);
   }
 
   /** Boot hydration (W1): seed the hot in-memory map from the database

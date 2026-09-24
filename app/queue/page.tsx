@@ -203,6 +203,20 @@ export default async function QueuePage() {
     redirect('/login');
   }
 
+  // This workspace's proposals and no one else's. The store holds every
+  // tenant's, and after a cold start it hydrates every tenant's open proposals
+  // from Postgres, so an unfiltered list showed each signed-in user everyone's
+  // payments. No membership means no workspace, and nothing to show.
+  let orgId: string | null = null;
+  let viewer: QueueViewer | null = null;
+  try {
+    const ctx = await resolveAuthorityForSession(session);
+    orgId = ctx.orgId;
+    viewer = { orgId: ctx.orgId, userId: ctx.userId, role: ctx.role };
+  } catch (error) {
+    if (!(error instanceof UnauthorizedError)) throw error;
+  }
+
   // Live proposals Zeke drafted this session. With DATABASE_URL set (W1),
   // the store write-throughs to Postgres and rehydrates here after a cold
   // start — a pending approval survives a restart. Anything the operator did
@@ -211,6 +225,7 @@ export default async function QueuePage() {
   await ensureProposalStoreHydrated(proposalStore);
   const liveProposals: QueueItem[] = proposalStore
     .list()
+    .filter((item) => item.orgId === orgId)
     .filter((item) => item.status === 'SIMULATED' || item.status === 'POLICY_EVALUATED' || item.status === 'PENDING_APPROVAL')
     .map((item) => ({
       id: item.id,
@@ -225,17 +240,8 @@ export default async function QueuePage() {
     }));
 
   // Approved, and waiting for a signed-in approver to send it: where a vote
-  // that finished on WhatsApp lands, because a reply cannot send money. Only
-  // the viewer's own workspace. The store holds every tenant's proposals, and
-  // nothing about another workspace's approved payments is theirs to see. No
-  // membership, no workspace, nothing listed.
-  let viewer: QueueViewer | null = null;
-  try {
-    const ctx = await resolveAuthorityForSession(session);
-    viewer = { orgId: ctx.orgId, userId: ctx.userId, role: ctx.role };
-  } catch (error) {
-    if (!(error instanceof UnauthorizedError)) throw error;
-  }
+  // that finished on WhatsApp lands, because a reply cannot send money. The
+  // viewer's own workspace only, like the list above.
   const now = new Date();
   const readyItems: ReadyToSendItem[] = readyToSend(proposalStore.list(), viewer, now).map(
     ({ proposal, blockedReason }) => ({

@@ -45,11 +45,13 @@ export interface HandoffDeps {
 }
 
 // "send 500 USDC to Manila Parts", "pay 1,250.50 usdc to Cebu Traders",
-// "transfer $75 USDC to Acme". USDC must be said: "pay Maria 500" is a
-// payout request and belongs to the lane rules, not here.
-const AMOUNT_FIRST = /^\s*(?:please\s+)?(?:send|pay|transfer)\s+\$?(\d[\d,]*(?:\.\d+)?)\s*usdc\s+to\s+(.+?)\s*$/i;
-// "send Manila Parts 500 USDC".
-const NAME_FIRST = /^\s*(?:please\s+)?(?:send|pay)\s+(.+?)\s+\$?(\d[\d,]*(?:\.\d+)?)\s*usdc\s*$/i;
+// "transfer $75 USDC to Acme", "send 500 in USDC to Acme". USDC must be
+// said: "pay Maria 500" is a payout request and belongs to the lane rules.
+const AMOUNT_FIRST = /^\s*(?:please\s+)?(?:can you\s+)?(?:send|pay|transfer)\s+\$?(\d[\d,]*(?:\.\d+)?)\s*(?:in\s+)?usdc\s+to\s+(.+?)\s*$/i;
+// "send USDC 500 to Manila Parts".
+const COIN_FIRST = /^\s*(?:please\s+)?(?:can you\s+)?(?:send|pay|transfer)\s+usdc\s+\$?(\d[\d,]*(?:\.\d+)?)\s+to\s+(.+?)\s*$/i;
+// "send Manila Parts 500 USDC", "pay Manila Parts 500 in USDC".
+const NAME_FIRST = /^\s*(?:please\s+)?(?:can you\s+)?(?:send|pay)\s+(.+?)\s+\$?(\d[\d,]*(?:\.\d+)?)\s*(?:in\s+)?usdc\s*$/i;
 
 function cleanName(raw: string): string {
   return raw
@@ -63,9 +65,9 @@ function cleanName(raw: string): string {
 }
 
 export function parseUsdcSendIntent(message: string): { amount: string; name: string } | null {
-  const text = message.replace(/\s+/g, ' ').trim();
+  const text = message.replace(/\s+/g, ' ').trim().replace(/[.!?]+$/, '');
   if (text.length > 200) return null;
-  const a = AMOUNT_FIRST.exec(text);
+  const a = AMOUNT_FIRST.exec(text) ?? COIN_FIRST.exec(text);
   if (a) {
     const name = cleanName(a[2]);
     return name ? { amount: a[1].replace(/,/g, ''), name } : null;
@@ -87,13 +89,25 @@ function plainAmount(minor: bigint): string {
 
 export async function usdcHandoffFor(orgId: string, message: string, deps: HandoffDeps): Promise<HandoffAnswer | null> {
   const intent = parseUsdcSendIntent(message);
-  if (!intent) return null;
+  return intent ? prepareUsdcHandoff(orgId, intent, deps) : null;
+}
 
+/**
+ * The same preparation for a recipient name and an amount already known —
+ * what Zeke's `prepareUsdcTransfer` tool calls when the model, not the fixed
+ * phrasing, understood the request. Same checks, same card, same limits:
+ * nothing is quoted, reserved, approved or signed here.
+ */
+export async function prepareUsdcHandoff(
+  orgId: string,
+  intent: { name: string; amount: string },
+  deps: HandoffDeps,
+): Promise<HandoffAnswer> {
   let principal: bigint;
   let fee: bigint;
   let total: bigint;
   try {
-    principal = parseUsdcMinor(intent.amount);
+    principal = parseUsdcMinor(intent.amount.replace(/,/g, '').replace(/^\$/, '').trim());
     if (principal < MIN_STABLECOIN_TRANSFER_MINOR) {
       return { text: `I can't prepare that: the smallest wallet transfer is ${formatUsdc(MIN_STABLECOIN_TRANSFER_MINOR)} USDC.`, handoff: null };
     }

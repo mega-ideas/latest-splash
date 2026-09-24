@@ -46,6 +46,9 @@ export function decodeJsonWithBigints<T>(value: unknown): T {
 /** Statuses that stay out of boot hydration — finished work. */
 const TERMINAL_STATUSES = ['ANCHORED', 'REJECTED', 'FAILED', 'EXPIRED', 'REVERSED'];
 
+/** Create the org row if it is missing. For the paths that create a tenant on
+ *  purpose (an administrative grant, policy seeding for a member's own org) —
+ *  never for an id that arrived with a proposal. */
 export async function ensureOrganization(db: DrizzleDb, orgId: string): Promise<void> {
   await db
     .insert(organizations)
@@ -53,10 +56,19 @@ export async function ensureOrganization(db: DrizzleDb, orgId: string): Promise<
     .onConflictDoNothing();
 }
 
-/** Durable write-through: upsert the proposal row + replace its approvals,
- *  atomically. Called after every store mutation. */
+/**
+ * Durable write-through: upsert the proposal row + replace its approvals,
+ * atomically. Called after every store mutation.
+ *
+ * The org must already exist. This used to call ensureOrganization first,
+ * which made writing a proposal a way to create a tenant: Zeke's tools took
+ * `orgId` from the model, so any string it produced — a guess,
+ * 'demo-business', or another company's `org-<domain>` id that a later signup
+ * from that domain would land in — became an organizations row with
+ * proposals already filed under it. Now the FK refuses the write, and the
+ * store reports it through `writeFailed`.
+ */
 export async function upsertProposal(db: DrizzleDb, proposal: UnsignedProposal): Promise<void> {
-  await ensureOrganization(db, proposal.orgId);
   await db.transaction(async (tx) => {
     const row = {
       id: proposal.id,

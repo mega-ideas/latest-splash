@@ -62,7 +62,11 @@ import {
   type ApprovalActor,
 } from '@/lib/queue/approval-walk';
 import { canRoleApprove, type InMemoryProposalStore } from '@/lib/queue/proposal-state';
-import type { ExecutionContext, ExecutionOutcome } from '@/lib/server/approval-execution';
+import {
+  APPROVAL_NOT_SAVED,
+  type ExecutionContext,
+  type ExecutionOutcome,
+} from '@/lib/server/approval-execution';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type DrizzleDb = PgDatabase<any, typeof schemaModule, any>;
@@ -127,6 +131,8 @@ export type SettleDeps = {
    *  been spent on the attempt. */
   canMoveMoney: (orgId: string) => Promise<{ ok: true } | { ok: false; reason: string }>;
   execute: (proposal: UnsignedProposal, context: ExecutionContext) => Promise<ExecutionOutcome>;
+  /** Spend an approval nothing may present again (approved-proposal.ts). */
+  closeClaim: (proposalId: string, orgId: string) => Promise<void>;
   now: () => Date;
 };
 
@@ -353,8 +359,18 @@ export async function settleBallots(
     const reason = error instanceof Error ? error.message : 'the approval could not be applied';
     return outcome('BLOCKED', `Approved, but the payment cannot go: ${reason}.`);
   }
-  // SUBMITTED is durable before the money route is asked to act on it.
-  await store.flush();
+  // Saved before anything moves, as in the submit route: an approval held only
+  // in memory loses who approved it at the next restart and comes back as
+  // still pending for a payment already made. So nothing is sent, and the
+  // claim is closed the way the replay closes one a route refused, so nothing
+  // can present it later. `writeFailed` awaits the same writes `flush` would.
+  if (await store.writeFailed(submitted.id)) {
+    console.error(`[approval-settle] ${submitted.id}: approval not saved, payment withheld`);
+    await deps.closeClaim(submitted.id, submitted.orgId);
+    store.recordExecution(submitted.id, { ...APPROVAL_NOT_SAVED, at: deps.now().toISOString() });
+    await store.flush();
+    return outcome('NOT_SENT', `Approved, but the payment did not go: ${APPROVAL_NOT_SAVED.detail}`);
+  }
 
   const execution = await deps.execute(submitted, context);
   store.recordExecution(submitted.id, { ...execution, at: deps.now().toISOString() });
@@ -395,6 +411,7 @@ export async function settleFullyApprovedProposal(
     const { ensureProposalStoreHydrated } = await import('@/lib/queue/proposal-persistence');
     const { resolveComplianceForProposal } = await import('@/lib/compliance/proposal-screening');
     const { executeApprovedProposal } = await import('@/lib/server/approval-execution');
+    const { closeApprovalClaim } = await import('@/lib/server/approved-proposal');
     const { getDb } = await import('@/lib/db/client');
 
     const store = getOxwalProposalStore();
@@ -407,6 +424,7 @@ export async function settleFullyApprovedProposal(
         compliance: resolveComplianceForProposal,
         canMoveMoney: orgCanMoveMoney,
         execute: (proposal, context) => executeApprovedProposal(proposal, proposal.executionPayload ?? null, context),
+        closeClaim: closeApprovalClaim,
         now: () => new Date(),
       },
       { proposalId, channel: options.channel, releaser: options.releaser },

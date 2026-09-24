@@ -12,7 +12,7 @@ import { copilotModel } from '../ai/model.ts';
 
 import { getCorridorFeeBps } from '@/lib/fx/corridors';
 import { custodyPhaseEnabled } from '@/lib/server/custody-phase';
-import { recallMemories, analyzeAndRemember, type RecalledMemory } from '@/lib/server/memwal';
+import { recallForOrg, rememberForOrg, type RecalledMemory } from '@/lib/server/memwal';
 import { getTreasuryRate } from '@/lib/server/usdy';
 
 export interface CopilotSuggestion {
@@ -54,8 +54,29 @@ function normaliseAmount(raw: string): { amount: string; amountMinor: bigint } {
   }
 }
 
+/**
+ * Remember the behavioural pattern (vendor + currency), never the raw
+ * document, and only for the org whose invoice it is.
+ *
+ * It used to go through `analyze` into one namespace every workspace shared,
+ * and the suggestion cards print a recalled memory word for word, so one
+ * tenant was shown another's counterparty names. `remember` rather than
+ * `analyze`: the sentence is already the fact, and the relayer's extractor
+ * rewrites text, which would drop the org key recall checks for.
+ *
+ * The vendor is read off a document a third party wrote, so it is kept to one
+ * short line before it becomes a memory.
+ */
+function rememberInvoiceVendor(orgId: string, recipient: string, currency: string): void {
+  const vendor = recipient.replace(/\s+/g, ' ').trim().slice(0, 80);
+  if (!vendor) return;
+  void rememberForOrg(orgId, `Invoice vendor ${vendor} settles in ${currency}`);
+}
+
 export async function parseInvoice(
   invoiceText: string,
+  /** The session's org. The vendor pattern is remembered for it and no other. */
+  orgId: string,
 /**
  * Extract the payable amount, currency and vendor from invoice text.
  *
@@ -85,13 +106,14 @@ export async function parseInvoice(
       const json = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)) as {
         amount: string | number; currency: string; recipient: string;
       };
-      // Remember the behavioral pattern (vendor + currency), never the raw doc.
-      void analyzeAndRemember(`Invoice vendor ${json.recipient} settles in ${json.currency}`);
       // A model can still answer with a bare number despite the instruction;
       // normalise, then parse exactly. An unparseable answer is zero rather
       // than a guess, and the low confidence downstream reflects that.
       const amount = normaliseAmount(String(json.amount ?? ''));
-      return { ...amount, currency: String(json.currency || 'USD').toUpperCase(), recipient: String(json.recipient || ''), confidence: 0.9 };
+      const currency = String(json.currency || 'USD').toUpperCase();
+      const recipient = String(json.recipient || '');
+      rememberInvoiceVendor(orgId, recipient, currency);
+      return { ...amount, currency, recipient, confidence: 0.9 };
     } catch {
       // fall through to heuristic
     }
@@ -103,7 +125,7 @@ export async function parseInvoice(
   const amount = normaliseAmount(amountMatch?.[1] ?? '');
   const currency = (currencyMatch?.[1] ?? 'USD').toUpperCase();
   const recipient = recipientMatch?.[1]?.trim() ?? '';
-  if (recipient) void analyzeAndRemember(`Invoice vendor ${recipient} settles in ${currency}`);
+  rememberInvoiceVendor(orgId, recipient, currency);
   return { ...amount, currency, recipient, confidence: amount.amountMinor > 0n ? 0.55 : 0.2 };
 }
 
@@ -224,15 +246,23 @@ export function idleCashSuggestion(custodyOn: boolean, executionOn: boolean): Co
   };
 }
 
+/** What the cards ask memory for. The copilot page never sent its own. */
+const SUGGESTION_RECALL_QUERY = 'patterns';
+
+/**
+ * Cards for one org, from that org's memory only. `orgId` is the session's:
+ * the route used to take a `?user` query string and recall from a namespace
+ * every workspace shared, so the cards could quote another tenant's memory.
+ */
 export async function getCopilotSuggestions(
-  userIdHash: string,
+  orgId: string,
   custodyOn: boolean = custodyPhaseEnabled(),
   // The same reading as app/api/treasury/route.ts.
   treasuryExecutionOn: boolean = process.env.TREASURY_EXECUTION_ENABLED === 'true',
 ): Promise<CopilotSuggestion[]> {
   let out: CopilotSuggestion[] = [];
   try {
-    out = suggestionsFromMemories(await recallMemories(userIdHash || 'patterns', 6));
+    out = suggestionsFromMemories(await recallForOrg(orgId, SUGGESTION_RECALL_QUERY, 6));
   } catch {
     // memory unavailable — fall back below
   }

@@ -3,10 +3,10 @@
  *
  * ─── Why this is stored in MemWal and not a settings column ─────────────────
  *
- * MemWal is free-text semantic memory: `rememberFact(text)` and
- * `recallMemories(query)`. There is no key/value get and set, and the namespace
- * is process-wide rather than per user — so a name stored there is recalled by
- * SEARCHING for it, and a search can return somebody else's.
+ * MemWal is free-text semantic memory: `rememberForOrg(orgId, text)` and
+ * `recallForOrg(orgId, query)`. There is no key/value get and set, so a name
+ * stored there is recalled by SEARCHING for it, and the newest one is not
+ * guaranteed to rank first.
  *
  * That is a real constraint and it shapes what is safe to put there. A
  * preferred name is: cosmetic, non-authoritative, and harmless to get wrong —
@@ -14,8 +14,11 @@
  * that decides access, money or identity belongs in a store with those
  * properties, and none of it is here.
  *
- * The fact is written with the org id inside the sentence so recall can be
- * filtered rather than trusted, and the read is anchored to the same org.
+ * Both calls are scoped to the org (lib/server/memwal-scope.ts): its own
+ * namespace, and its key at the start of the stored text, checked again on
+ * recall. The org is the session's. Zeke's tool loop replaces whatever org the
+ * model names with it (`scopeToolInputToOrg` in lib/agent/oxwal.ts), so a
+ * conversation cannot rename another workspace's assistant.
  */
 import { DEFAULT_ASSISTANT_NAME } from '@/lib/agent/assistant-name-shared';
 
@@ -23,6 +26,8 @@ export { DEFAULT_ASSISTANT_NAME };
 
 /** The phrase a stored name is wrapped in, so recall can find and parse it. */
 const MARKER = 'Preferred assistant name';
+/** A stored name, and nothing else: the whole memory is the marker sentence. */
+const STORED_NAME = /^Preferred assistant name is "([^"]+)"\.?$/;
 
 /**
  * Names people may actually choose.
@@ -62,40 +67,42 @@ export async function rememberAssistantName(input: unknown): Promise<{
     };
   }
 
+  // Cosmetic. A memory that did not save is not worth failing a conversation
+  // over, and saying so is better than pretending it stuck. The adapter
+  // reports that with `false` rather than a throw, so both are read: this
+  // said "Noted" whenever MemWal was unconfigured or refused the write.
+  const notSaved = {
+    ok: false,
+    message: `I could not save that just now, so I will still answer to ${DEFAULT_ASSISTANT_NAME}.`,
+  };
   try {
-    const { rememberFact } = await import('@/lib/server/memwal');
-    await rememberFact(`${MARKER} for org ${orgId} is "${clean}".`);
+    const { rememberForOrg } = await import('@/lib/server/memwal');
+    const saved = await rememberForOrg(orgId, `${MARKER} is "${clean}".`);
+    if (!saved) return notSaved;
     return { ok: true, name: clean, message: `Noted — I will answer to ${clean} from now on.` };
   } catch {
-    // Cosmetic. A memory that did not save is not worth failing a conversation
-    // over, and saying so is better than pretending it stuck.
-    return {
-      ok: false,
-      message: `I could not save that just now, so I will still answer to ${DEFAULT_ASSISTANT_NAME}.`,
-    };
+    return notSaved;
   }
 }
 
 /**
  * What this workspace calls the assistant.
  *
- * Falls back to the default on anything unexpected. A recall that returns
- * another org's memory is filtered out by the org id in the sentence; a recall
- * that returns nothing usable simply means the default name.
+ * Falls back to the default on anything unexpected. Recall only returns this
+ * org's memories; of those, only one that is a stored name counts, so an
+ * invoice memory that happens to contain `is "…"` cannot rename anything. A
+ * recall that returns nothing usable simply means the default name.
  */
 export async function recallAssistantName(orgId: string): Promise<string> {
-  // Without an org there is nothing to anchor recall to, and an empty id would
-  // turn the `org ${orgId}` filter below into a substring that matches every
-  // org's memory — one workspace's chosen name answering in another's chat.
+  // Without an org there is nothing to anchor recall to. The scoped adapter
+  // refuses a blank org too; this answers before importing it.
   if (!orgId.trim()) return DEFAULT_ASSISTANT_NAME;
 
   try {
-    const { recallMemories } = await import('@/lib/server/memwal');
-    const memories = await recallMemories(`${MARKER} for org ${orgId}`, 5);
+    const { recallForOrg } = await import('@/lib/server/memwal');
+    const memories = await recallForOrg(orgId, MARKER, 5);
     for (const memory of memories) {
-      const text = typeof memory === 'string' ? memory : memory.text;
-      if (!text.includes(`org ${orgId}`)) continue;
-      const match = /is "([^"]+)"/.exec(text);
+      const match = STORED_NAME.exec(memory.text);
       const candidate = match?.[1] ? sanitiseName(match[1]) : null;
       if (candidate) return candidate;
     }
