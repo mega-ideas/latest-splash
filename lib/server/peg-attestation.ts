@@ -17,9 +17,10 @@
  *
  *  1. The pushed value was a CONSTANT (env, defaulting to `0`), not a
  *     measurement. A settlement may only attest a reading it actually took.
- *  2. `pythAdapter` falls back to `mockPrice()` — an exact $1.00, `source:
+ *  2. `pythAdapter` fell back to `mockPrice()` — an exact $1.00, `source:
  *     'mock'` — on any Hermes error, so even "measured" could mean fabricated.
- *     A fabricated reading is never pushed.
+ *     It now reports Pyth as unavailable instead (a mock only exists when
+ *     USE_MOCK_APIS asks for one), and a fabricated reading is never pushed.
  *
  * When no live reading is available the PTB simply omits `update_peg`. That is
  * the fail-closed direction: `PegState` goes stale and `assert_pegged` aborts
@@ -57,6 +58,9 @@ export async function resolvePegAttestation(env: NodeJS.ProcessEnv = process.env
     return { push: false, reason: `peg oracle unavailable: ${error instanceof Error ? error.message : 'unknown error'}` };
   }
 
+  if (!status.usdcUsd || !status.usdtUsd) {
+    return { push: false, reason: `no live Pyth price to attest: ${status.pyth.reason ?? 'Pyth unavailable'}` };
+  }
   const fabricated = status.usdcUsd.source === 'mock' || status.usdtUsd.source === 'mock';
   if (fabricated && !mocksAllowed) {
     return {

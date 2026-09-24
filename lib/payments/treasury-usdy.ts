@@ -1,5 +1,5 @@
 import type { KybLifecycleState } from '../compliance/kyb-state.ts';
-import { laneAccess } from './stablecoin-lane.ts';
+import { formatUsdc, laneAccess } from './stablecoin-lane.ts';
 
 /**
  * Treasury in the business's own wallet: USDC on Sui → Ondo USDY on Sui.
@@ -59,6 +59,18 @@ export function projectValue(principalMinor: bigint, apyPct: number, days: numbe
   return v;
 }
 
+/**
+ * The most a swap may lose against the redemption value — route fees and
+ * price impact together — before Splash calls it unfillable. Above this the
+ * business is paying the market's thinness, not buying a treasury asset.
+ */
+export const MAX_MARKET_SHORTFALL_BPS = 100;
+
+/** A Sui DEX quote for the same USDC (lib/server/usdy-liquidity.ts), or why there is none. */
+export type MarketInput =
+  | { usdyOutMinor: bigint; providers: string[]; asOf: string }
+  | { unavailable: string };
+
 export interface TreasuryQuote {
   allowed: boolean;
   /** SANDBOX until Ondo eligibility is confirmed: numbers, no swap. */
@@ -67,8 +79,17 @@ export interface TreasuryQuote {
   usdcInMinor: bigint;
   priceMicros: bigint | null;
   priceStatus: 'LIVE' | 'STALE' | 'UNAVAILABLE';
+  /** USDY at the redemption rate — what the USDC is worth in USDY, not what a DEX returns. */
   usdyOutMinor: bigint | null;
   minUsdyOutMinor: bigint | null;
+  /**
+   * What a Sui DEX returns for the same USDC right now: the USDY, its value
+   * at the redemption rate, and how far short of the USDC paid that is.
+   * null when the market was not checked, or had no route.
+   */
+  market: { usdyOutMinor: bigint; valueMinor: bigint | null; shortfallBps: number | null; providers: string[]; asOf: string } | null;
+  /** Could this size be swapped on Sui near the redemption value? null: not checked. */
+  fillable: boolean | null;
   apyPct: number;
   projections: Array<{ days: number; valueMinor: bigint; yieldMinor: bigint }>;
 }
@@ -83,6 +104,8 @@ export function treasuryQuote(input: {
   apyPct: number;
   slippageBps?: number;
   ondoEligibilityConfirmed: boolean;
+  /** The live Sui DEX quote for this amount, when the caller checked one. */
+  market?: MarketInput | null;
 }): TreasuryQuote {
   const reasons: string[] = [];
   const lane = laneAccess(input.state, 'TREASURY');
@@ -106,7 +129,39 @@ export function treasuryQuote(input: {
   }
 
   const priced = allowed && input.nav.priceMicros !== null;
-  const usdyOut = priced ? usdyForUsdc(input.usdcInMinor, input.nav.priceMicros as bigint) : null;
+  const price = input.nav.priceMicros;
+  const usdyOut = priced ? usdyForUsdc(input.usdcInMinor, price as bigint) : null;
+  const slippageBps = input.slippageBps ?? 50;
+
+  // The market, when checked: what a swap would really return on Sui, valued
+  // at the redemption rate, against the USDC paid for it.
+  let market: TreasuryQuote['market'] = null;
+  let fillable: boolean | null = null;
+  if (allowed && input.market) {
+    if ('unavailable' in input.market) {
+      fillable = false;
+      reasons.push(input.market.unavailable);
+    } else {
+      const valueMinor = price !== null ? usdcValueOfUsdy(input.market.usdyOutMinor, price) : null;
+      const shortfallBps = valueMinor !== null && input.usdcInMinor > 0n
+        ? Number(((input.usdcInMinor - valueMinor) * 10_000n) / input.usdcInMinor)
+        : null;
+      market = { ...input.market, valueMinor, shortfallBps };
+      fillable = shortfallBps === null ? null : shortfallBps <= MAX_MARKET_SHORTFALL_BPS;
+      if (fillable === false && valueMinor !== null && shortfallBps !== null) {
+        reasons.push(
+          `On Sui right now, ${formatUsdc(input.usdcInMinor)} USDC buys ${formatUsdc(input.market.usdyOutMinor)} USDY on the best route — ` +
+          `worth ${formatUsdc(valueMinor)} USDC at the redemption rate, ${formatBps(shortfallBps)} less than you would pay. ` +
+          'There is not enough USDY liquidity on Sui for this size, so Splash would not route it.',
+        );
+      }
+    }
+  }
+
+  // A projection starts from what the business would actually hold. When the
+  // market was checked, that is the swap's value at the redemption rate —
+  // never more than the USDC paid.
+  const startMinor = market?.valueMinor != null && market.valueMinor < input.usdcInMinor ? market.valueMinor : input.usdcInMinor;
   return {
     allowed,
     mode,
@@ -115,13 +170,21 @@ export function treasuryQuote(input: {
     priceMicros: input.nav.priceMicros,
     priceStatus: input.nav.status,
     usdyOutMinor: usdyOut,
-    minUsdyOutMinor: usdyOut === null ? null : minReceived(usdyOut, input.slippageBps ?? 50),
+    // The floor a swap would enforce: from the market's own quote when there
+    // is one, otherwise from the redemption rate.
+    minUsdyOutMinor: market ? minReceived(market.usdyOutMinor, slippageBps) : usdyOut === null ? null : minReceived(usdyOut, slippageBps),
+    market,
+    fillable,
     apyPct: input.apyPct,
     projections: priced
       ? [30, 90, 365].map((days) => {
-          const valueMinor = projectValue(input.usdcInMinor, input.apyPct, days);
+          const valueMinor = projectValue(startMinor, input.apyPct, days);
           return { days, valueMinor, yieldMinor: valueMinor - input.usdcInMinor };
         })
       : [],
   };
+}
+
+function formatBps(bps: number): string {
+  return `${(bps / 100).toFixed(bps >= 1000 ? 0 : 1)}%`;
 }

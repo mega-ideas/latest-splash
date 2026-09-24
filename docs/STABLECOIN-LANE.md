@@ -102,10 +102,21 @@ Executing CCTP (the source-chain burn and the Sui claim) is not built. The plann
   - USDY out = USDC × 10⁶ ÷ price (µUSD), rounded down, with a slippage floor.
   - Projections compound daily at the modelled rate (`USDY_NET_APY_PCT`), rounded down each day.
   - They are labelled variable, not promised.
-- **Price:** comes from `USDY_REDEMPTION_USD` and fails closed.
+- **Price:** Pyth's USDY redemption rate (`Crypto.USDY/USD.RR`) when `PYTH_API_KEY` is set, dated by Pyth. Otherwise `USDY_REDEMPTION_USD` with its `USDY_REDEMPTION_AS_OF`. It fails closed.
   - No price: no quote.
   - Stale: flagged.
-  - No `USDY_REDEMPTION_AS_OF`: no quote. An undated $1.00 is a placeholder; USDY trades above $1.
+  - No observation time: no quote. An undated $1.00 is a placeholder; USDY trades above $1.
+- **What Sui can actually fill:** every quote also asks the Cetus aggregator (read-only) what a swap of that size would return on Sui right now, and values it at the redemption rate. If that comes out more than 1% short (`MAX_MARKET_SHORTFALL_BPS`), or there is no route, the quote says so and calls the size unfillable. Projections then start from what the business would actually hold.
+  - **Measured 2026-09-24:** Sui has very little USDY liquidity. 1 USDC filled within 1%. 100 USDC came back 14.5% short, 1,000 USDC 70.7% short, and 10,000 USDC had no route at all.
+  - So a Sui DEX swap is not a treasury route at any real size today. Minting and redeeming with Ondo directly is the alternative. It needs Ondo onboarding and settles in days, and it is not built.
+
+## Prices: Pyth and DeepBook (lib/server/pyth.ts, lib/server/deepbook.ts)
+
+- **Pyth Hermes has required an API key since 26 August 2026.** It is sent as `Authorization: Bearer` (`PYTH_API_KEY`). Pyth's Starter plan is listed at $500 a month.
+- Without a key, Hermes answers 401. The adapter used to turn that 401 into a mock $1.00. The peg check, Zeke's peg note and the on-chain peg refresher (`/api/cron/update-peg`) then all ran on a price nobody had measured.
+- Now no key, or any failure, means "Pyth unavailable", with the reason. A mock only exists under `USE_MOCK_APIS=true`.
+- **The peg check:** DeepBook's USDT/USDC book decides first, then Pyth. With neither, the peg is unverified, and settlement pauses with `peg_unverified` rather than passing.
+- **The refresher** pushes nothing without a live Pyth price, so the on-chain `PegState` goes stale and `assert_pegged` refuses settlement. That is the breaker doing its job. Settlements that need a fresh on-chain peg need a Pyth key.
 
 ## Step-up approvals (lib/server/step-up.ts)
 
@@ -153,7 +164,8 @@ Recipient screening is shown as a note: Chainalysis if configured, otherwise the
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_FROM` | Delivering codes. |
 | `TWILIO_WHATSAPP_CODE_CONTENT_SID` | An approved "verification code" template (`Your {{1}} code is {{2}}`). Without it, codes go as free text, which WhatsApp delivers only within 24 hours of the recipient last messaging the sender. |
 | `X402_DEMO_PAY_TO` | The demo x402 seller's payee (0.01 USDC per call). Unset: demo seller off. |
-| `USDY_REDEMPTION_USD` + `USDY_REDEMPTION_AS_OF` | The USDY price for Treasury quotes. Without the timestamp, no quote. |
+| `PYTH_API_KEY` | Pyth prices: the second peg source, the on-chain peg refresher, and the live USDY redemption rate. Without it Pyth is off (never mocked). Optional `PYTH_HERMES_URL`. |
+| `USDY_REDEMPTION_USD` + `USDY_REDEMPTION_AS_OF` | A hand-set USDY price, used only without Pyth. Without the timestamp, no quote. |
 | `USDY_ONDO_ELIGIBILITY_CONFIRMED` | `true` only once Ondo confirms eligibility. Until then Treasury is a preview. |
 | `FEATURE_KYB_GATE=true` | Locking fiat lanes for unverified businesses. In production it also needs the Sumsub keys. |
 
@@ -178,4 +190,5 @@ Stop it with Ctrl+C, and delete `.dev-db/` to start over.
 - **MetaMask** reaches Sui only through the Sui Snap, on desktop.
 - **Every transfer needs a little SUI for gas** in the sending wallet.
 - **x402 on a slow facilitator:** a seller that accepts a payment which then never lands leaves the quote counting until it expires. Retrying resends the same signed payment, so it can't be paid twice.
-- **Still to come:** executing CCTP (source burn + Sui claim), executing the USDY swap once Ondo eligibility is confirmed, and a live USDY price feed.
+- **USDY on Sui is thin:** see Treasury. Beyond pocket change, a Sui DEX swap loses heavily or finds no route.
+- **Still to come:** executing CCTP (source burn + Sui claim); a USDY route that works at treasury size (Ondo mint/redeem), then executing it once Ondo eligibility is confirmed.

@@ -18,12 +18,16 @@ export default async function AdminTransactionsPage() {
   const fundingSessions = listFundingSessions();
   const pegStatus = await pythAdapter.getPegStatus();
   const complianceControls = await readComplianceControls();
-  const usdcDevBps = Math.abs(pegStatus.usdcUsd.price - 1.0) * 10_000;
-  const usdtDevBps = Math.abs(pegStatus.usdtUsd.price - 1.0) * 10_000;
-  const maxDev = Math.max(usdcDevBps, usdtDevBps);
+  // Pyth is null when it is not configured (Hermes needs PYTH_API_KEY) or did not answer.
+  const usdcDevBps = pegStatus.usdcUsd ? Math.abs(pegStatus.usdcUsd.price - 1.0) * 10_000 : null;
+  const usdtDevBps = pegStatus.usdtUsd ? Math.abs(pegStatus.usdtUsd.price - 1.0) * 10_000 : null;
+  const maxDev = Math.max(usdcDevBps ?? 0, usdtDevBps ?? 0);
   // DeepBook (primary) drives the zone; fall back to Pyth deviation if unavailable.
   const primaryDevBps = pegStatus.deepbook ? pegStatus.deepbook.deviationBps : maxDev;
   const zone = !pegStatus.pegged ? 'red' : primaryDevBps > 30 ? 'yellow' : 'green';
+  const pythDetail = usdcDevBps !== null && usdtDevBps !== null
+    ? `Pyth USDC ${usdcDevBps.toFixed(1)}/USDT ${usdtDevBps.toFixed(1)} bps`
+    : `Pyth off (${pegStatus.pyth.reason ?? 'no reading'})`;
   const volume = transfers.reduce((sum, transfer) => sum + Number.parseFloat(transfer.sourceAmountUsd || '0'), 0);
   const fees = volume * 0.015;
 
@@ -36,7 +40,7 @@ export default async function AdminTransactionsPage() {
       </header>
 
       <section className="grid gap-5 md:grid-cols-3">
-        <MonitorCard icon={Circle} label="Peg Status" value={`${zone === 'green' ? '🟢' : zone === 'yellow' ? '🟡' : '🔴'} ${zone[0].toUpperCase()}${zone.slice(1)}`} detail={`DeepBook ${pegStatus.deepbook ? `${pegStatus.deepbook.midPrice.toFixed(4)} (${pegStatus.deepbook.deviationBps.toFixed(1)} bps)` : 'n/a'} · Pyth USDC ${usdcDevBps.toFixed(1)}/USDT ${usdtDevBps.toFixed(1)} bps · ${pegStatus.confirmedBy}/2 confirm`} />
+        <MonitorCard icon={Circle} label="Peg Status" value={`${zone === 'green' ? '🟢' : zone === 'yellow' ? '🟡' : '🔴'} ${zone[0].toUpperCase()}${zone.slice(1)}`} detail={`DeepBook ${pegStatus.deepbook ? `${pegStatus.deepbook.midPrice.toFixed(4)} (${pegStatus.deepbook.deviationBps.toFixed(1)} bps)` : 'n/a'} · ${pythDetail} · ${pegStatus.confirmedBy}/2 confirm`} />
         <MonitorCard icon={Activity} label="24h Volume" value={`RM ${volume.toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} detail={`${transfers.length} transfer intents`} />
         <MonitorCard icon={ReceiptText} label="Fees" value={`RM ${fees.toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} detail="Estimated at 1.5% headline" />
       </section>

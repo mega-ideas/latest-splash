@@ -1,18 +1,23 @@
-import { MICRO_DECIMALS, applyBps, applyRate, divideByRate, formatRate, type Rate } from '../money.ts';
+import { MICRO_DECIMALS, applyBps, applyRate, divRound, divideByRate, formatRate, type Rate } from '../money.ts';
+import { fetchUsdyRedemptionRate, hermesConfig, PythUnavailableError } from './pyth.ts';
 /**
  * Ondo USDY — the yield instrument behind Smart Treasury.
  *
- * USDY is a T-bill-backed token, native on Sui, with Cetus/Aftermath/Suilend
- * liquidity. We move balances in/out by SWAPPING USDC↔USDY on a Sui DEX (NOT
- * direct Ondo mint/redeem, which is T+40–50). Yield is FLOATING — derived from
- * USDY's redemption value — never a fixed constant.
+ * USDY is a T-bill-backed token, native on Sui. The plan was to move balances
+ * in/out by SWAPPING USDC↔USDY on a Sui DEX rather than Ondo mint/redeem
+ * (T+40–50) — but measured on 2026-09-24, Sui's USDY liquidity only fills
+ * pocket change (100 USDC came back 14.5% short, 10,000 found no route), so
+ * lib/server/usdy-liquidity.ts checks the market before any quote is trusted.
+ * Yield is FLOATING — derived from USDY's redemption value — never a fixed
+ * constant.
  *
  * This module is the single source of truth for the treasury rate, so every
  * surface (yields benchmark, Zeke copilot, treasury UI) shows the same number.
  *
  * External wiring (drop-in via env when ready):
  *   USDY_TYPE                  Move coin type of USDY on the target network
- *   USDY_REDEMPTION_USD        latest USDY→USD redemption price (oracle/Ondo feed)
+ *   PYTH_API_KEY               Pyth's USDY redemption rate, dated (preferred)
+ *   USDY_REDEMPTION_USD        a hand-set redemption price, with USDY_REDEMPTION_AS_OF
  *   USDY_NET_APY_PCT           net APY credited to users (after Splash spread)
  *   SPLASH_PROMO_APY_PCT       introductory promo APY (first ~6 months)
  *   SPLASH_PROMO_UNTIL         ISO date the promo ends
@@ -105,9 +110,31 @@ export const NAV_STALE_THRESHOLD_MS = Number(process.env.USDY_NAV_STALE_MS ?? 6 
  * `new Date()` even on the fabricated value, which made a made-up price look
  * freshly observed.
  */
-export async function getUsdyRedemptionPrice(): Promise<NavReading> {
-  const raw = (process.env.USDY_REDEMPTION_USD ?? '').trim();
-  const asOfRaw = (process.env.USDY_REDEMPTION_AS_OF ?? '').trim();
+export async function getUsdyRedemptionPrice(env: NodeJS.ProcessEnv = process.env): Promise<NavReading> {
+  // Read the configured fallback first, before anything awaits.
+  const raw = (env.USDY_REDEMPTION_USD ?? '').trim();
+  const asOfRaw = (env.USDY_REDEMPTION_AS_OF ?? '').trim();
+
+  // Pyth publishes Ondo's redemption rate (`Crypto.USDY/USD.RR`) with the time
+  // it was published — a measured price, where the env value is typed in by
+  // hand. Used whenever a Pyth key is configured; if Pyth does not answer,
+  // the configured price below still applies, aged as before.
+  if (hermesConfig(env).apiKey) {
+    try {
+      const rr = await fetchUsdyRedemptionRate(env);
+      const observedAt = rr.publishTime * 1000;
+      const priceMicros = rateToMicros(rr.priceRate);
+      if (priceMicros <= 0n) throw new PythUnavailableError('missing_feed', 'Pyth returned a non-positive USDY redemption rate.');
+      return {
+        status: Date.now() - observedAt > NAV_STALE_THRESHOLD_MS ? 'STALE' : 'LIVE',
+        priceMicros,
+        asOf: new Date(observedAt).toISOString(),
+        source: 'pyth:Crypto.USDY/USD.RR',
+      };
+    } catch (error) {
+      if (!(error instanceof PythUnavailableError)) throw error;
+    }
+  }
 
   const px = Number(raw);
   if (!raw || !Number.isFinite(px) || px <= 0) {
@@ -133,6 +160,13 @@ export async function getUsdyRedemptionPrice(): Promise<NavReading> {
     asOf: new Date(observedAt).toISOString(),
     source: 'env:USDY_REDEMPTION_USD',
   };
+}
+
+/** A price at any decimal scale, as integer micro-USD (6 dp), half-even. */
+function rateToMicros(rate: Rate): bigint {
+  if (rate.scale === MICRO_DECIMALS) return rate.scaled;
+  if (rate.scale > MICRO_DECIMALS) return divRound(rate.scaled, 10n ** BigInt(rate.scale - MICRO_DECIMALS), 'half-even');
+  return rate.scaled * 10n ** BigInt(MICRO_DECIMALS - rate.scale);
 }
 
 /** True when a reading may be used to make an allocation decision. */

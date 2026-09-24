@@ -432,7 +432,21 @@ async function authorize(request: Request, spent: SpentApproval) {
     : null;
   const pegStatus = await pythAdapter.getPegStatus();
   if (!pegStatus.pegged) {
-    return NextResponse.json({ error: `Settlement blocked: stablecoin peg deviation too high (${pegStatus.deviationPpm} ppm).` }, { status: 409 });
+    // No live price at all is its own answer, not a "deviation": this used to
+    // pass on Pyth's mock $1.00 whenever DeepBook was unreachable.
+    if (pegStatus.primary === 'none') {
+      return NextResponse.json(
+        {
+          error: 'Settlement paused: no live stablecoin price is available to check the USDC peg right now. Nothing was sent; try again shortly.',
+          code: 'peg_unverified',
+        },
+        { status: 409 },
+      );
+    }
+    const measured = pegStatus.primary === 'deepbook'
+      ? `${pegStatus.deepbook?.deviationBps} bps on DeepBook`
+      : `${pegStatus.deviationPpm} ppm on Pyth`;
+    return NextResponse.json({ error: `Settlement blocked: stablecoin peg deviation too high (${measured}).`, code: 'peg_deviation' }, { status: 409 });
   }
 
   const stablecoinAmountMicro = fundingSelection.type === 'stablecoin'

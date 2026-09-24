@@ -120,11 +120,21 @@ export async function forecastFxRate(
   let pegNote = '';
   try {
     const peg = await pythAdapter.getPegStatus();
-    const usdcDevBps = Math.abs(peg.usdcUsd.price - 1) * 10_000;
-    pegFactor = peg.pegged ? Math.max(0.85, 1 - usdcDevBps / 100) : 0.7;
-    pegNote = peg.pegged
-      ? `USDC peg healthy (${usdcDevBps.toFixed(1)} bps, Pyth)`
-      : 'USDC peg under stress (Pyth) — settle cautiously';
+    // Name the source that actually measured it. This used to say "Pyth"
+    // while Pyth was answering with a mock $1.00.
+    if (peg.primary === 'none') {
+      pegFactor = 0.85;
+      pegNote = 'USDC peg unverified right now (no live price source answered)';
+    } else {
+      const usdcDevBps = peg.primary === 'deepbook'
+        ? (peg.deepbook?.deviationBps ?? 0)
+        : Math.abs((peg.usdcUsd?.price ?? 1) - 1) * 10_000;
+      const measuredBy = peg.primary === 'deepbook' ? 'DeepBook USDT/USDC' : 'Pyth';
+      pegFactor = peg.pegged ? Math.max(0.85, 1 - usdcDevBps / 100) : 0.7;
+      pegNote = peg.pegged
+        ? `USDC peg healthy (${usdcDevBps.toFixed(1)} bps, ${measuredBy})`
+        : `USDC peg under stress (${measuredBy}) — settle cautiously`;
+    }
   } catch {
     // Pyth unavailable — fall back to horizon-only confidence.
   }

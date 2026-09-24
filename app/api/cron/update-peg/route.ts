@@ -31,7 +31,17 @@ async function handlePegUpdate(request: Request) {
   }
 
   try {
-    const { usdc, usdt } = await pythAdapter.getStablecoinPrices();
+    const reading = await pythAdapter.getStablecoinPrices();
+    // Never push a price nobody measured. This route used to write Pyth's
+    // mock $1.00 on chain whenever Hermes failed — and since Hermes began
+    // requiring an API key it always failed — which kept the peg breaker
+    // fresh on invented numbers. Without a live reading PegState goes stale,
+    // and `assert_pegged` refuses settlement: the breaker working.
+    if (!reading.available) {
+      console.warn('[cron/update-peg] no live Pyth price; nothing pushed:', reading.reason);
+      return NextResponse.json({ success: false, error: 'no live price', code: reading.code }, { status: 503 });
+    }
+    const { usdc, usdt } = reading;
     const result = await refreshPegOnSui({ usdcPrice: usdc.price, usdtPrice: usdt.price });
 
     return NextResponse.json({
