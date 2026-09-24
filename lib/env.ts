@@ -336,10 +336,6 @@ export const envSchema = z.object({
   DEEPBOOK_STABLE_PAIR: optional,
   DEEPBOOK_TIMEOUT_MS: int(2_500, 1),
   DEEPBOOK_PEG_TOLERANCE_BPS: int(100, 0),
-  /* Pyth Hermes has required a data-plan key since 26 Aug 2026. Unset: no
-   * Pyth readings (never a mock). lib/server/pyth.ts. */
-  PYTH_API_KEY: optional,
-  PYTH_HERMES_URL: url,
 
   /* Treasury and yield. lib/server/usdy.ts, treasury.ts, copilot.ts. */
   USDY_NET_APY_PCT: opt(z.coerce.number()),

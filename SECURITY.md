@@ -945,7 +945,7 @@ These are the items the security/ops team should **always** keep eyes on. Each h
 | # | Dependency | Why it matters | Where to look |
 |---|------------|----------------|---------------|
 | 25 | `lib/fx/corridors.ts` | Single source of truth for `fee_bps` | Code review on every PR; alert if `feeBps` mutated |
-| 26 | `lib/server/pyth.ts` | Drives `update_peg` deviations | Logs should show successful Pyth fetches every cycle |
+| 26 | `lib/server/peg.ts` (DeepBook V3 indexer) | The off-chain peg gate on payouts; no reading pauses them | `/api/quotes/peg-status` answers `primary: "deepbook"`. `update_peg` has no dollar source since Pyth needs a paid key, so it is not pushed (`lib/server/peg-attestation.ts`) |
 | 27 | `SPLASH_ADMIN_CAP_ID` env | Required for peg updates | Vault / secret-manager audit trail |
 | 28 | `lib/server/sumsub.ts` | KYB verification feed | Sumsub webhook signature verified |
 | 29 | `lib/server/walrus.ts` | Audit anchor backing store | Walrus retention policy = 7 yr, blob count monotonic |

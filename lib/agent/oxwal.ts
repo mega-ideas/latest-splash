@@ -1715,7 +1715,7 @@ const SPLASH_ANSWERS: Array<{ test: RegExp; reply: string | (() => string); skip
     // FX rate
     test: /\b(rate|fx|exchange|peso|php price|convert)\b/,
     skipIf: /\b(hold|lock)\b/, // rate-hold questions get the hold answer below
-    reply: 'The desk models 1 USD ~ 56.42 PHP right now. A quote locks for 30 seconds at review, and you can hold a rate for 48 hours from the Rate holds page. On-chain, settlement aborts if the stablecoin peg deviates beyond the configured threshold, so a broken peg can never settle.',
+    reply: 'The desk models 1 USD ~ 56.42 PHP right now. A quote locks for 30 seconds at review, and you can hold a rate for 48 hours from the Rate holds page. Before a payout starts, Splash checks the USDT/USDC price on DeepBook, the on-chain order book on Sui, and pauses it if the peg has drifted past the threshold or cannot be read.',
   },
   {
     // Rate holds
@@ -1764,7 +1764,7 @@ const SPLASH_ANSWERS: Array<{ test: RegExp; reply: string | (() => string); skip
   {
     // Security / custody / safety
     test: /\b(secure|security|safe|hack|custody|trust|risk of loss)\b/,
-    reply: 'Controls are layered: I can only read state and draft unsigned proposals — there is no execution tool on my side. A human signs every money movement (maker-checker), the policy engine re-checks at submit time, an on-chain peg monitor halts settlement on a broken peg, and a circuit breaker can pause each corridor.',
+    reply: 'Controls are layered: I can only read state and draft unsigned proposals — there is no execution tool on my side. A human signs every money movement (maker-checker), the policy engine re-checks at submit time, a DeepBook peg check pauses payouts on a broken or unreadable peg, and a circuit breaker can pause each corridor.',
   },
   {
     // Approvals / maker-checker / queue
@@ -1840,7 +1840,7 @@ const SPLASH_ANSWERS: Array<{ test: RegExp; reply: string | (() => string); skip
   {
     // Depeg protection
     test: /\b(depeg|de-?peg|broken peg|peg (break|breaks|broke|protection|guard|drift|deviat)|stable ?coin (safe|stable|break))\b/,
-    reply: 'Settlement is peg-guarded. A fresh peg reading is pushed on chain in the same transaction as the payment, and the contract aborts if the peg drifts past the configured threshold — a broken peg can never settle, and the check is atomic with the transfer.',
+    reply: 'Payouts are peg-guarded. Before one starts, Splash reads the USDT/USDC price on DeepBook, the on-chain order book on Sui, and pauses it if the two coins have drifted apart past the threshold, or if there is no reading at all. USDC sent as USDC involves no conversion, so there is no peg to guard.',
   },
   {
     // Volume / bulk pricing

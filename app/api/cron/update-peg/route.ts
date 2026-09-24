@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { timingSafeEqual } from 'crypto';
 
-import { pythAdapter } from '@/lib/server/pyth';
+import { resolvePegAttestation } from '@/lib/server/peg-attestation';
 import { refreshPegOnSui } from '@/lib/server/sui-settlement';
 
 export const dynamic = 'force-dynamic';
@@ -31,25 +31,24 @@ async function handlePegUpdate(request: Request) {
   }
 
   try {
-    const reading = await pythAdapter.getStablecoinPrices();
-    // Never push a price nobody measured. This route used to write Pyth's
-    // mock $1.00 on chain whenever Hermes failed — and since Hermes began
-    // requiring an API key it always failed — which kept the peg breaker
-    // fresh on invented numbers. Without a live reading PegState goes stale,
-    // and `assert_pegged` refuses settlement: the breaker working.
-    if (!reading.available) {
-      console.warn('[cron/update-peg] no live Pyth price; nothing pushed:', reading.reason);
-      return NextResponse.json({ success: false, error: 'no live price', code: reading.code }, { status: 503 });
+    // Never push a price nobody measured. The on-chain monitor wants each
+    // coin's distance from the dollar, and Splash has no dollar price source
+    // (lib/server/peg-attestation.ts), so outside mock mode nothing is pushed:
+    // PegState goes stale and `assert_pegged` refuses settlement, which is
+    // the breaker working.
+    const attestation = await resolvePegAttestation();
+    if (!attestation.push) {
+      console.warn('[cron/update-peg] nothing pushed:', attestation.reason);
+      return NextResponse.json({ success: false, error: 'no dollar price to attest', reason: attestation.reason }, { status: 503 });
     }
-    const { usdc, usdt } = reading;
-    const result = await refreshPegOnSui({ usdcPrice: usdc.price, usdtPrice: usdt.price });
+    const result = await refreshPegOnSui({
+      usdcDeviationPpm: attestation.usdcDeviationPpm,
+      usdtDeviationPpm: attestation.usdtDeviationPpm,
+    });
 
     return NextResponse.json({
       success: true,
-      usdc_price: usdc.price,
-      usdt_price: usdt.price,
-      usdc_source: usdc.source,
-      usdt_source: usdt.source,
+      source: attestation.primary,
       usdc_deviation_ppm: result.usdcDeviationPpm,
       usdt_deviation_ppm: result.usdtDeviationPpm,
       tx_digest: result.digest,

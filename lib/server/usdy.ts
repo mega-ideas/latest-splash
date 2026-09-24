@@ -1,5 +1,4 @@
 import { MICRO_DECIMALS, applyBps, applyRate, divRound, divideByRate, formatRate, type Rate } from '../money.ts';
-import { fetchUsdyRedemptionRate, hermesConfig, PythUnavailableError } from './pyth.ts';
 /**
  * Ondo USDY — the yield instrument behind Smart Treasury.
  *
@@ -16,8 +15,7 @@ import { fetchUsdyRedemptionRate, hermesConfig, PythUnavailableError } from './p
  *
  * External wiring (drop-in via env when ready):
  *   USDY_TYPE                  Move coin type of USDY on the target network
- *   PYTH_API_KEY               Pyth's USDY redemption rate, dated (preferred)
- *   USDY_REDEMPTION_USD        a hand-set redemption price, with USDY_REDEMPTION_AS_OF
+ *   USDY_REDEMPTION_USD        the redemption price, with USDY_REDEMPTION_AS_OF
  *   USDY_NET_APY_PCT           net APY credited to users (after Splash spread)
  *   SPLASH_PROMO_APY_PCT       introductory promo APY (first ~6 months)
  *   SPLASH_PROMO_UNTIL         ISO date the promo ends
@@ -111,30 +109,11 @@ export const NAV_STALE_THRESHOLD_MS = Number(process.env.USDY_NAV_STALE_MS ?? 6 
  * freshly observed.
  */
 export async function getUsdyRedemptionPrice(env: NodeJS.ProcessEnv = process.env): Promise<NavReading> {
-  // Read the configured fallback first, before anything awaits.
+  // The redemption price as configured, with when it was observed. Pyth's
+  // USDY redemption-rate feed used to come first; its Hermes API needs a paid
+  // key since 26 August 2026, and Splash chose not to buy one.
   const raw = (env.USDY_REDEMPTION_USD ?? '').trim();
   const asOfRaw = (env.USDY_REDEMPTION_AS_OF ?? '').trim();
-
-  // Pyth publishes Ondo's redemption rate (`Crypto.USDY/USD.RR`) with the time
-  // it was published — a measured price, where the env value is typed in by
-  // hand. Used whenever a Pyth key is configured; if Pyth does not answer,
-  // the configured price below still applies, aged as before.
-  if (hermesConfig(env).apiKey) {
-    try {
-      const rr = await fetchUsdyRedemptionRate(env);
-      const observedAt = rr.publishTime * 1000;
-      const priceMicros = rateToMicros(rr.priceRate);
-      if (priceMicros <= 0n) throw new PythUnavailableError('missing_feed', 'Pyth returned a non-positive USDY redemption rate.');
-      return {
-        status: Date.now() - observedAt > NAV_STALE_THRESHOLD_MS ? 'STALE' : 'LIVE',
-        priceMicros,
-        asOf: new Date(observedAt).toISOString(),
-        source: 'pyth:Crypto.USDY/USD.RR',
-      };
-    } catch (error) {
-      if (!(error instanceof PythUnavailableError)) throw error;
-    }
-  }
 
   const px = Number(raw);
   if (!raw || !Number.isFinite(px) || px <= 0) {

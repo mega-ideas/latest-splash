@@ -17,7 +17,7 @@ import { patchAuditReceipt, patchTransfer, persistTransfer } from '@/lib/server/
 import { proposeForApproval } from '@/lib/server/dual-approval';
 import { resolveApprovalClaim } from '@/lib/server/approved-proposal';
 import { resolveAuthorityForSession } from '@/lib/auth/authority';
-import { pythAdapter } from '@/lib/server/pyth';
+import { getPegStatus } from '@/lib/server/peg';
 import { calculateQuote } from '@/lib/server/quote';
 import { completeDeliveryForTransfer } from '@/lib/server/sweep';
 import { confirmUsdFunding } from '@/lib/server/funding-intake';
@@ -437,10 +437,11 @@ async function authorize(request: Request, spent: SpentApproval) {
   const serverQuote = sourceAmountCents > 0
     ? await calculateQuote(sourceAmountCents, undefined, body.amount.targetCurrency, feeTier)
     : null;
-  const pegStatus = await pythAdapter.getPegStatus();
+  const pegStatus = await getPegStatus();
   if (!pegStatus.pegged) {
     // No live price at all is its own answer, not a "deviation": this used to
-    // pass on Pyth's mock $1.00 whenever DeepBook was unreachable.
+    // pass on Pyth's mock $1.00 whenever DeepBook was unreachable. DeepBook is
+    // now the only source (lib/server/peg.ts).
     if (pegStatus.primary === 'none') {
       return NextResponse.json(
         {
@@ -450,10 +451,10 @@ async function authorize(request: Request, spent: SpentApproval) {
         { status: 409 },
       );
     }
-    const measured = pegStatus.primary === 'deepbook'
-      ? `${pegStatus.deepbook?.deviationBps} bps on DeepBook`
-      : `${pegStatus.deviationPpm} ppm on Pyth`;
-    return NextResponse.json({ error: `Settlement blocked: stablecoin peg deviation too high (${measured}).`, code: 'peg_deviation' }, { status: 409 });
+    return NextResponse.json(
+      { error: `Settlement blocked: stablecoin peg deviation too high (${pegStatus.deepbook?.deviationBps} bps on DeepBook).`, code: 'peg_deviation' },
+      { status: 409 },
+    );
   }
 
   const stablecoinAmountMicro = fundingSelection.type === 'stablecoin'

@@ -1,17 +1,17 @@
 import { divRound, parseRate, type Rate } from '../money.ts';
 /**
- * DeepBook V3 — Sui's native central-limit order book — as a SECOND peg source.
+ * DeepBook V3 — Sui's native central-limit order book — as THE peg source
+ * (lib/server/peg.ts). Pyth was a second source until its Hermes API began
+ * requiring a paid key.
  *
- * Pyth gives us USDC/USD and USDT/USD oracle prices. DeepBook gives us a real
- * on-chain USDT↔USDC CLOB mid-price: an independent, market-driven confirmation
- * of the stablecoin peg that doesn't rely on a single oracle. If the two sources
- * disagree, the peg monitor can flag it instead of trusting one feed blindly.
+ * DeepBook gives a real on-chain USDT↔USDC mid-price: market-driven, free to
+ * read, and no oracle key.
  *
  * Read path: the DeepBook Indexer REST `/summary` (per-pair last_price +
  * top-of-book). The peg is a real-world market fact, so we default to the
  * MAINNET indexer (deepest stablecoin liquidity) even on a testnet deployment;
- * override via env. Never throws — returns null so the peg monitor falls back
- * to Pyth-only.
+ * override via env. Never throws — returns null, and the peg then counts as
+ * unverified (not pegged).
  *
  * Env:
  *   DEEPBOOK_INDEXER_URL   default https://deepbook-indexer.mainnet.mystenlabs.com
@@ -52,7 +52,7 @@ function indexerUrl(): string {
 
 /**
  * Current DeepBook stable-pair price. Returns null on any error / no stable pool
- * / timeout, so callers degrade to Pyth-only.
+ * / timeout; callers treat that as "no reading", never as a peg.
  */
 export async function getDeepbookStablePrice(): Promise<DeepbookStable | null> {
   if (process.env.USE_MOCK_APIS === 'true') {

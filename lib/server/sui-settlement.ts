@@ -1047,13 +1047,14 @@ export async function verifyBusinessOnSui(input: {
   return { digest: result.digest, businessAccountId, riskScore, event: verified };
 }
 
-export async function refreshPegOnSui(input: { usdcPrice: number; usdtPrice: number }) {
+/** Writes an attested reading (lib/server/peg-attestation.ts) into PegState. */
+export async function refreshPegOnSui(input: { usdcDeviationPpm: number; usdtDeviationPpm: number }) {
   await requireSdkExecution();
   const packageId = corePackageIdOrThrow();
   const pegStateId = configIdOrThrow('pegStateId', 'SPLASH_PEG_STATE_ID');
   const anchorCapId = anchorCapObjectId();
-  const usdcDeviationPpm = Math.max(0, Math.round(Math.abs(input.usdcPrice - 1) * 1_000_000));
-  const usdtDeviationPpm = Math.max(0, Math.round(Math.abs(input.usdtPrice - 1) * 1_000_000));
+  const usdcDeviationPpm = Math.max(0, Math.trunc(input.usdcDeviationPpm));
+  const usdtDeviationPpm = Math.max(0, Math.trunc(input.usdtDeviationPpm));
 
   const tx = new Transaction();
   tx.setGasBudget(process.env.SUI_PEG_UPDATE_GAS_BUDGET ?? '10000000');
