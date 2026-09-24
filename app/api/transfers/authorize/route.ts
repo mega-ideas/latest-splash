@@ -31,7 +31,12 @@ import {
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { assertCleanBody, ProvenanceViolationError, provenanceViolationResponse } from '@/lib/auth/provenance-guard';
 import { requireActiveOrg } from '@/lib/server/kyb-gate';
-import { custodyPhaseResponse, deliveryTierAllowed } from '@/lib/server/custody-phase';
+import {
+  custodyPhaseResponse,
+  deliveryTierAllowed,
+  sweepAccountDisabledResponse,
+  sweepAccountEnabled,
+} from '@/lib/server/custody-phase';
 import { checkMinimumSettlement } from '@/lib/policy/limits';
 import { checkAuthorizationLimits, startOfUtcDay } from '@/lib/policy/authorization-limits';
 import { verifyPayoutTotp } from '@/lib/auth/totp';
@@ -127,6 +132,10 @@ async function authorize(request: Request, spent: SpentApproval) {
   // recipient's funds, which needs the custody package — and the licence
   // behind it. Refused here, before a recipient or an intent exists.
   if (!deliveryTierAllowed(body.deliveryTier)) return custodyPhaseResponse();
+  // A sweep also needs the operator's switch. It used to be read only by the
+  // delivery executor, after the payer was debited and the payment settled,
+  // so a sweep with the switch off failed with the money already moved.
+  if (body.deliveryTier === 'SWEEP_ACCOUNT' && !sweepAccountEnabled()) return sweepAccountDisabledResponse();
 
   const totp = String(body.totp ?? '');
   const paymentRail = String(body.paymentRail ?? 'STRIPE_CHECKOUT');

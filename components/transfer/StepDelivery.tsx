@@ -3,7 +3,7 @@
 import { Building2, Check, Landmark, Lock, Zap } from 'lucide-react';
 
 import type { TransferState } from '@/app/dashboard/transfer/page';
-import { useCustodyPhaseOn } from '@/components/dashboard/CustodyPhaseContext';
+import { useCustodyPhaseOn, useSweepSwitchOn } from '@/components/dashboard/CustodyPhaseContext';
 import { CUSTODY_PHASE_WHY, deliveryTierOpen } from '@/lib/custody-phase-rules';
 import { getCorridorFeeBps } from '@/lib/fx/corridors';
 import type { RecipientTier } from '@/lib/server/operations';
@@ -16,32 +16,35 @@ const options: Array<{ tier: RecipientTier; icon: typeof Building2; title: strin
 
 const CUSTODY_NOTE_ID = 'delivery-custody-phase-note';
 
-type TierLock = 'custody_phase' | 'corridor';
+type TierLock = 'custody_phase' | 'sweep_switch' | 'corridor';
 
 /**
  * Why a tier cannot be chosen, if it cannot. The custody phase comes first,
  * through the same `deliveryTierOpen()` the authorize and recipients routes
- * enforce, so this step never offers a tier the next one refuses. The
- * stored-balance corridor switch is a second, narrower lock on top (an
- * in-country partner per currency, still needed in Phase 2): it can close a
- * tier the phase has opened, and never open one the phase has closed.
+ * enforce. The operator's sweep switch comes next, as those routes check it
+ * next, so this step never offers a tier the next one refuses. The
+ * stored-balance corridor switch is a further, narrower lock on top (an
+ * in-country partner per currency, still needed in Phase 2). The switches can
+ * close a tier the phase has opened, and never open one the phase has closed.
  */
-function lockFor(tier: RecipientTier, custodyOn: boolean, storedOpen: boolean): TierLock | null {
+function lockFor(tier: RecipientTier, custodyOn: boolean, storedOpen: boolean, sweepOn: boolean): TierLock | null {
   if (!deliveryTierOpen(tier, custodyOn)) return 'custody_phase';
+  if (tier === 'SWEEP_ACCOUNT' && !sweepOn) return 'sweep_switch';
   if (tier === 'STORED_BALANCE' && !storedOpen) return 'corridor';
   return null;
 }
 
 export default function StepDelivery({ state, set, prev, next }: { state: TransferState; set: (patch: Partial<TransferState>) => void; prev: () => void; next: () => void }) {
   const custodyOn = useCustodyPhaseOn();
+  const sweepOn = useSweepSwitchOn();
   const storedCurrencies = (process.env.NEXT_PUBLIC_STORED_BALANCE_CORRIDORS ?? '').split(',').map((value) => value.trim().toUpperCase());
   const storedOpen = process.env.NEXT_PUBLIC_DEMO_MODE === 'true' || storedCurrencies.includes(state.amount.targetCurrency);
   const feeBps = getCorridorFeeBps(state.amount.targetCurrency);
   // A tier already in state that is locked here (chosen before the target
   // currency changed, or prefilled under a different phase) is not one the
   // operator can keep: show and continue with PAYOUT_ONLY, always open.
-  const chosen: RecipientTier = lockFor(state.deliveryTier, custodyOn, storedOpen) ? 'PAYOUT_ONLY' : state.deliveryTier;
-  const custodyLocked = options.some((option) => lockFor(option.tier, custodyOn, storedOpen) === 'custody_phase');
+  const chosen: RecipientTier = lockFor(state.deliveryTier, custodyOn, storedOpen, sweepOn) ? 'PAYOUT_ONLY' : state.deliveryTier;
+  const custodyLocked = options.some((option) => lockFor(option.tier, custodyOn, storedOpen, sweepOn) === 'custody_phase');
 
   return (
     <div className="space-y-5">
@@ -49,7 +52,7 @@ export default function StepDelivery({ state, set, prev, next }: { state: Transf
       <div className="grid gap-3">
         {options.map((option) => {
           const selected = chosen === option.tier;
-          const lock = lockFor(option.tier, custodyOn, storedOpen);
+          const lock = lockFor(option.tier, custodyOn, storedOpen, sweepOn);
           const Icon = option.icon;
           return (
             <button
@@ -68,7 +71,11 @@ export default function StepDelivery({ state, set, prev, next }: { state: Transf
                 {lock && (
                   <small className="mt-3 flex items-start gap-1.5 text-[13px] font-semibold leading-5 text-foreground">
                     <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                    {lock === 'custody_phase' ? 'Locked until Phase 2' : 'Available when in-country custody partner is live — pilot via PDAX.'}
+                    {lock === 'custody_phase'
+                      ? 'Locked until Phase 2'
+                      : lock === 'sweep_switch'
+                        ? 'Switched off right now. Choose a direct payout instead.'
+                        : 'Available when in-country custody partner is live — pilot via PDAX.'}
                   </small>
                 )}
               </span>

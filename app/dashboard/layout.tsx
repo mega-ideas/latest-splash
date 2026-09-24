@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation';
 import type { ReactNode } from 'react';
 
 import DashboardShell from '@/components/dashboard/DashboardShell';
-import { custodyPhaseEnabled } from '@/lib/server/custody-phase';
+import { custodyPhaseEnabled, sweepAccountEnabled } from '@/lib/server/custody-phase';
 import { getCustomerSession } from '@/lib/server/customer-auth';
 import { readKybGateState } from '@/lib/server/kyb-gate';
 import { readOnboardingState } from '@/lib/server/onboarding';
@@ -45,5 +45,6 @@ export default async function DashboardLayout({ children }: { children: ReactNod
 
   // One line on purpose: tests/oxwal-frontend.test.mjs pins the shape
   // {children}</DashboardShell> as the no-second-wrapper contract.
-  return <DashboardShell session={session} kyb={kyb} locks={locks}>{children}</DashboardShell>;
+  // sweepOn needs no database, so it is resolved even when `locks` is not.
+  return <DashboardShell session={session} kyb={kyb} locks={locks} sweepOn={sweepAccountEnabled()}>{children}</DashboardShell>;
 }

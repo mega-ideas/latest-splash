@@ -4,7 +4,7 @@ import Image from 'next/image';
 import { useState, type ReactNode } from 'react';
 import FloatingCopilot from '@/components/FloatingCopilot';
 import DashboardHeader from '@/components/DashboardHeader';
-import { CustodyPhaseContext } from '@/components/dashboard/CustodyPhaseContext';
+import { CustodyPhaseContext, SweepSwitchContext } from '@/components/dashboard/CustodyPhaseContext';
 import type { CustomerSession } from '@/lib/auth/customer-session';
 import {
   Bot,
@@ -81,6 +81,9 @@ type DashboardShellProps = {
    *  a dev machine) means nothing is locked, mirroring the gates' own dev
    *  posture. */
   locks?: { termsDone: boolean; moneyBlocked: boolean; custodyOn: boolean; reason: string };
+  /** The operator's sweep switch (`sweepAccountEnabled()`), resolved by the
+   *  same layout. Separate from `locks` because it needs no database. */
+  sweepOn?: boolean;
 };
 
 /**
@@ -119,7 +122,7 @@ function lockReasonFor(
   return null;
 }
 
-export default function DashboardShell({ children, session, kyb, locks }: DashboardShellProps) {
+export default function DashboardShell({ children, session, kyb, locks, sweepOn }: DashboardShellProps) {
   const [collapsed,  setCollapsed]  = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const router   = useRouter();
@@ -375,8 +378,11 @@ export default function DashboardShell({ children, session, kyb, locks }: Dashbo
           </section>
         ) : (
           // The same custodyOn the Treasury padlock reads, for pages that
-          // cannot import the server gate (StepDelivery's fund-holding tiers).
-          <CustodyPhaseContext value={locks?.custodyOn ?? false}>{children}</CustodyPhaseContext>
+          // cannot import the server gate (StepDelivery's fund-holding tiers),
+          // and the sweep switch the transfer routes also enforce.
+          <SweepSwitchContext value={sweepOn ?? false}>
+            <CustodyPhaseContext value={locks?.custodyOn ?? false}>{children}</CustodyPhaseContext>
+          </SweepSwitchContext>
         )}
       </main>
 
