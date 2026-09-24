@@ -30,6 +30,12 @@ export type ProposalTransitionEvent =
 const terminalStatuses = new Set<ProposalStatus>(['ANCHORED', 'REJECTED', 'FAILED', 'EXPIRED', 'REVERSED']);
 const approverRoles = new Set<UserRole>(['OWNER', 'FINANCE_ADMIN', 'APPROVER']);
 
+/** Whether an approval from this role counts. The state machine's own set,
+ *  exported so a channel asks the question the APPROVE transition will. */
+export function canRoleApprove(role: UserRole): boolean {
+  return approverRoles.has(role);
+}
+
 function assertTransition(current: ProposalStatus, allowed: ProposalStatus[], eventType: ProposalTransitionEvent['type']) {
   if (!allowed.includes(current)) {
     throw new ProposalStateError(`${eventType} is not allowed from ${current}`);

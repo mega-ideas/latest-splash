@@ -3,10 +3,10 @@ import { z } from 'zod';
 
 import { resolveAuthorityForSession, UnauthorizedError } from '@/lib/auth/authority';
 import { assertCleanBody, ProvenanceViolationError, provenanceViolationResponse } from '@/lib/auth/provenance-guard';
-import { canApprove, type MembershipRole } from '@/lib/membership-roles';
 import { applyDecision } from '@/lib/server/approval-requests';
 import { findTokenByCode } from '@/lib/server/approval-tokens';
-import { settleFullyApprovedProposal } from '@/lib/server/approval-settle';
+import { refuseFromBallot, settleFullyApprovedProposal } from '@/lib/server/approval-settle';
+import { resolveApproverById } from '@/lib/server/approver-channels';
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { readJsonBody } from '@/lib/server/http';
 
@@ -19,7 +19,9 @@ import { readJsonBody } from '@/lib/server/http';
  * to go without a session.
  *
  * Reply-by-WhatsApp authenticates a handset. This authenticates a handset and a
- * person, and the person is the one recorded.
+ * person, and the person is the one recorded. It is also why this route, and
+ * not the webhook, releases the payment when the last code completes the vote:
+ * the replay of the money route runs as this session.
  *
  * The code is scoped to the SESSION's user — it is not a bearer secret. Reading
  * somebody else's code off their screen achieves nothing here, because the
@@ -63,16 +65,6 @@ export async function POST(request: Request) {
     throw error;
   }
 
-  const dbRole = ({ OWNER: 'admin', APPROVER: 'checker', MAKER: 'maker' } as Record<string, MembershipRole>)[
-    ctx.role
-  ] ?? 'viewer';
-  if (!canApprove(dbRole)) {
-    return NextResponse.json(
-      { error: 'Your role cannot approve payments.', code: 'not_an_approver' },
-      { status: 403 },
-    );
-  }
-
   const now = new Date();
   // Scoped to this user. A code belonging to another approver does not resolve.
   const lookup = await findTokenByCode(ctx.userId, parsed.data.code, now);
@@ -80,31 +72,62 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: lookup.reason }, { status: 400 });
   }
 
+  // The role that counts is the one this person holds in the org the payment
+  // belongs to, read from that membership row. Never `ctx.role` mapped back to
+  // a membership name: that table had no FINANCE_ADMIN, so a finance admin fell
+  // through to viewer, and `ctx.role` is the role in whichever workspace the
+  // session resolved to.
+  const eligible = await resolveApproverById(ctx.userId, lookup.token.orgId);
+  if (!eligible.ok) {
+    return NextResponse.json(
+      { error: 'Your role cannot approve payments.', code: 'not_an_approver' },
+      { status: 403 },
+    );
+  }
+
   const result = await applyDecision({
     tokenId: lookup.token.id,
     proposalId: lookup.token.proposalId,
-    approver: {
-      userId: ctx.userId,
-      email: auth.session.email,
-      name: null,
-      role: dbRole,
-      whatsappE164: null,
-    },
+    approver: eligible.approver,
     decision: parsed.data.decision,
     now,
   });
 
   if (!result.ok) return NextResponse.json({ error: result.message }, { status: 409 });
 
-  // The same settlement path a WhatsApp reply reaches. The channel decided how
-  // the question was asked; it does not decide what an approval is worth.
+  // One refusal ends it: the proposal is closed too, so no other path can
+  // release what a ballot refused.
+  if (result.tally.refused) {
+    const refusal = await refuseFromBallot(lookup.token.proposalId);
+    return NextResponse.json({
+      ok: true,
+      decision: result.decision,
+      tally: result.tally,
+      settled: false,
+      message: refusal.message,
+    });
+  }
+
+  // The same walk a WhatsApp reply and an in-app approval take. This request
+  // carries a session, so the approver who completed the vote is the one who
+  // releases the payment, if they may: an approver in the payment's own org,
+  // not its maker, signed in to that org.
   if (result.tally.unanimous) {
-    const outcome = await settleFullyApprovedProposal(lookup.token.proposalId);
+    const outcome = await settleFullyApprovedProposal(lookup.token.proposalId, {
+      channel: 'code',
+      releaser: {
+        userId: ctx.userId,
+        sessionOrgId: ctx.orgId,
+        cookie: request.headers.get('cookie') ?? '',
+        origin: new URL(request.url).origin,
+      },
+    });
     return NextResponse.json({
       ok: true,
       decision: result.decision,
       tally: result.tally,
       settled: outcome.settled,
+      stage: outcome.stage,
       message: outcome.message,
     });
   }

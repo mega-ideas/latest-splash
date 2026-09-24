@@ -15,8 +15,10 @@ import { Check, Loader2, MessageSquare, ShieldAlert, Smartphone } from 'lucide-r
  * session with an approver role — a stolen phone alone releases nothing.
  *
  * `reply` accepts APPROVE in the chat. It is faster, and it authenticates a
- * HANDSET rather than a person: whoever is holding the device can release a
- * payment. A phone left unlocked on a desk becomes an approver.
+ * HANDSET rather than a person: whoever is holding the device can cast that
+ * approver's vote. A phone left unlocked on a desk becomes an approver. What it
+ * cannot do is send the money: a reply stops at approved, and a signed-in
+ * approver sends the payment (lib/server/approval-settle.ts).
  *
  * An admin picking between these is making a security decision, so the
  * consequence is written next to each option instead of in documentation
@@ -165,7 +167,7 @@ export default function ApprovalChannelCard({
             disabled={!whatsappEnabled}
             onSelect={() => onChange({ approvalChannel: 'reply' })}
             title="Reply APPROVE or REJECT"
-            body="Faster, and it proves possession of the handset rather than the identity of a person. Whoever is holding the phone can release the payment."
+            body="Faster, and it proves possession of the handset rather than the identity of a person: whoever is holding the phone can approve for its owner. Sending the payment still needs an approver signed in to Splash."
             caution
           />
         </div>

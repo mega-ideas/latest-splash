@@ -9,7 +9,7 @@ import { ensureProposalStoreHydrated } from '@/lib/queue/proposal-persistence';
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { requireActiveOrg } from '@/lib/server/kyb-gate';
 import { readJsonBody } from '@/lib/server/http';
-import { authorizeProposalSubmission } from '@/lib/safety/submit-guard';
+import { evaluateAtApproval, releaseApproved } from '@/lib/queue/approval-walk';
 import { executeApprovedProposal } from '@/lib/server/approval-execution';
 import { AGENT_ACTOR_ID } from '@/lib/agent/identity';
 
@@ -91,30 +91,25 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     // §1.4 TOCTOU — policy, quote expiry, and compliance are re-evaluated NOW
     // (approval/submit time), not just at proposal time. Compliance comes
     // from persisted screening records; a missing record BLOCKS.
-    const policyDecision = authorizeProposalSubmission({
-      proposal,
-      actor: ctx.role,
+    //
+    // Then the maker-checker chain is walked from wherever the proposal sits;
+    // the policy engine (not the caller) decides how many approvers are
+    // needed. The WhatsApp and code channels take this same walk
+    // (lib/queue/approval-walk.ts): an approval is worth the same whichever
+    // way it arrived.
+    const now = new Date();
+    const signedAt = now.toISOString();
+    const actor = { userId: ctx.userId, role: ctx.role };
+    const gate = evaluateAtApproval(store, {
+      proposalId: id,
+      actor,
       policy: ctx.policy,
-      simulation: proposal.simulation,
-      compliance: resolveComplianceForProposal(proposal),
+      compliance: resolveComplianceForProposal,
       signatureRef: parsed.data.signatureRef,
-      signedBy: ctx.userId,
+      now,
     });
-
-    // Walk the maker-checker chain from wherever the proposal currently sits.
-    // The policy engine (not the caller) decides how many approvers are needed.
-    const signedAt = new Date().toISOString();
-    let current = proposal;
-
-    if (current.status === 'SIMULATED') {
-      const approvers = policyDecision.outcome === 'REQUIRE_APPROVAL' ? policyDecision.approvers : 0;
-      current = store.transition(id, { type: 'POLICY_EVALUATED', requiredApprovers: approvers });
-      if (approvers === 0) {
-        current = store.transition(id, { type: 'MARK_APPROVED' });
-      } else {
-        current = store.transition(id, { type: 'QUEUE_FOR_APPROVAL' });
-      }
-    }
+    const policyDecision = gate.decision;
+    let current = gate.proposal;
 
     if (current.status === 'PENDING_APPROVAL') {
       current = store.transition(id, {
@@ -123,7 +118,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       });
       if (current.status === 'PENDING_APPROVAL') {
         // Dual-control: this signature is recorded; a distinct co-approver
-        // must sign from the queue before submission.
+        // must sign from the queue before submission. Durable before the
+        // answer, like every other mutation here.
+        await store.flush();
         return json({
           proposal: current,
           policyDecision,
@@ -132,16 +129,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       }
     }
 
-    const signed = current.status === 'SIGNED'
-      ? current
-      : store.transition(id, {
-          type: 'SIGN',
-          signatureRef: parsed.data.signatureRef,
-          signedBy: ctx.userId,
-          policyAuthorized: true,
-          signedAt,
-        });
-    const submitted = store.transition(signed.id, { type: 'SUBMIT' });
+    // SIGN → SUBMIT. Maker ≠ checker holds here too, and a payment approved in
+    // full elsewhere (every ballot said yes on WhatsApp) waits at APPROVED for
+    // exactly this step: releasing it takes an approving role, not only a
+    // membership.
+    const submitted = releaseApproved(store, id, {
+      releaser: actor,
+      signatureRef: parsed.data.signatureRef,
+      decision: policyDecision,
+      now,
+    });
     // W1: the approval/submission is durable before we tell the client so a
     // crash right after this response cannot lose it.
     await store.flush();

@@ -30,6 +30,37 @@ The remaining four modules (`smart_treasury`, `payment_intent`, `audit_anchor`, 
 
 ---
 
+## Approvals by code and WhatsApp — 2026-09-24
+
+**Scope**: the two ballot channels for payments the money routes send for
+approval — a code typed into Splash (`app/api/approvals/code`) and a WhatsApp
+reply (`app/api/webhooks/whatsapp`) — and where they meet the in-app submit
+route. Tests: `tests/approval-channel-settlement.test.mjs` (PGlite, driving the
+real `proposeForApproval`, ballots and settle path; source assertions for the
+three routes).
+
+| ID | Sev | Finding | Status |
+|----|-----|---------|--------|
+| AC-1 | Medium | No ballot-approved payment could ever execute. `proposeForApproval` leaves a proposal SIMULATED; `settleFullyApprovedProposal` applied APPROVE (accepted only from PENDING_APPROVAL), swallowed every refusal, then threw on SIGN from SIMULATED, so every approver was told "Approved, but the payment could not be completed." **Fixed**: one walk for every channel (`lib/queue/approval-walk.ts`) — SIMULATED → POLICY_EVALUATED → PENDING_APPROVAL (or APPROVED when policy asks for nobody), then one APPROVE per ballot through the state machine. The submit route now calls the same functions. | Fixed |
+| AC-2 | High | Once AC-1 was fixed, the ballot path would have skipped the approval-time re-evaluation the submit route runs: policy, quote expiry, compliance screening, circuit breaker. A reply would have been worth more than a click. **Fixed**: `evaluateAtApproval` runs `authorizeProposalSubmission` before any ballot is counted; a block leaves the proposal where it was. | Fixed |
+| AC-3 | High | The webhook replayed the money route with `cookie: ''`. The route reads its session through `cookies()`, which answers from the incoming (Twilio) request, so it refused. The fix that suggests itself — let the replay authenticate as "the approval" — would add a sessionless way into both money routes and make a SIM swap or an unlocked phone enough to move money past maker-checker. **Decision**: a reply is a vote. A unanimous reply walks the proposal to APPROVED and stops; money moves only for a signed-in approver — the one whose code completes the vote, or one who releases it in the app. `releaseApproved` refuses the maker and, once approvals were required, anyone without an approving role (a viewer is read-only). | Fixed (by design) |
+| AC-4 | Medium | In `code` mode an APPROVE reply was accepted anyway: the webhook never read the ballot's channel, so the default "handset AND signed-in approver" was one reply from "handset only". **Fixed**: on a `code` ballot a reply can refuse and cannot approve. | Fixed |
+| AC-5 | Medium | The code route decided eligibility from the session's role mapped back to a membership name through a table with no FINANCE_ADMIN (a finance admin became `viewer`), and that role is the one in whichever workspace the session resolved to. Settle read each ballot's role from any of the user's memberships. **Fixed**: `resolveApproverById(userId, token.orgId)` reads the membership row in the payment's org; ballot roles are read in the proposal's org; the webhook's ballot lookup is scoped to the org the number was checked in. | Fixed |
+| AC-6 | Medium | A ballot REJECT stopped the tally but left the proposal approvable in the app, although the approver was told "no further approvals can change that". **Fixed**: a refusal rejects the proposal, unless the payment was already released, in which case the record is left true and the approver is told so. | Fixed |
+| AC-7 | High (latent) | A code-channel release runs the replay as the releasing session, and the money route takes the paying account from the session. An approver signed in to another workspace would have had the approved payload carried out there: the approval claim is refused cross-org, and the route treats the request as a new payment. **Fixed**: release requires the session's org to be the proposal's; otherwise the proposal waits at APPROVED. | Fixed |
+
+**Still open.** Compliance at approval time reads only the agent's counterparty
+fixtures (`resolveComplianceForProposal`), so a real money-route beneficiary
+blocks with "compliance hold" on every path, in the app and on both ballot
+channels. Nothing in the UI posts to `/api/approvals/code`, and the queue
+board's Approve/Reject is client-only, so a payment approved over WhatsApp is
+released today through `proposals/[id]/submit` (the Zeke card, or a direct
+call). Approvals given in the app and ballots are counted separately: an
+approver who approved in the app still has an open ballot, and a unanimous
+tally waits for it.
+
+---
+
 ## The agent's two names — 2026-09-23
 
 The agent's display name is **Zeke**. Its persisted actor id is `OXWAL` and

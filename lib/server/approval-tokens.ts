@@ -131,9 +131,20 @@ export async function issueTokens(input: {
   return issued;
 }
 
+/**
+ * What the approver was asked to do. `reply` accepts APPROVE in the chat;
+ * `code` needs the code typed into Splash to approve, and a reply can only
+ * refuse. Anything else on the row reads as `code`, the stronger of the two.
+ */
+export type BallotChannel = 'code' | 'reply';
+
 export type TokenLookup =
-  | { ok: true; token: { id: string; proposalId: string; orgId: string; userId: string } }
+  | { ok: true; token: { id: string; proposalId: string; orgId: string; userId: string; channel: BallotChannel } }
   | { ok: false; reason: string };
+
+function ballotChannel(value: string): BallotChannel {
+  return value === 'reply' ? 'reply' : 'code';
+}
 
 /**
  * Find this approver's live, undecided ballot.
@@ -141,18 +152,23 @@ export type TokenLookup =
  * Both lookups below refuse a token that has already been decided. A ballot is
  * single-use: an approver who answers twice has not agreed twice, and allowing
  * it would let one person satisfy a two-approver requirement by replying again.
+ *
+ * `orgId` narrows the search to the org the caller has just checked this
+ * person's role in. Without it, a reply checked against one workspace could
+ * answer a ballot in another, where the same person may no longer approve.
  */
 export async function findLiveTokenForUser(
   userId: string,
   now: Date,
-  proposalId?: string,
+  scope: { proposalId?: string; orgId?: string } = {},
 ): Promise<TokenLookup> {
   if (!process.env.DATABASE_URL) return { ok: false, reason: 'no database configured' };
   const { getDb } = await import('@/lib/db/client');
   const db = getDb();
 
   const conditions = [eq(approvalTokens.userId, userId), isNull(approvalTokens.decidedAt)];
-  if (proposalId) conditions.push(eq(approvalTokens.proposalId, proposalId));
+  if (scope.proposalId) conditions.push(eq(approvalTokens.proposalId, scope.proposalId));
+  if (scope.orgId) conditions.push(eq(approvalTokens.orgId, scope.orgId));
 
   const rows = await db
     .select()
@@ -164,7 +180,7 @@ export async function findLiveTokenForUser(
   // A reply carries no proposal id, so an approver with two payments waiting
   // cannot be disambiguated. Asking is the only safe answer — guessing would
   // approve the wrong payment.
-  if (rows.length > 1 && !proposalId) {
+  if (rows.length > 1 && !scope.proposalId) {
     return { ok: false, reason: 'more than one payment is waiting on this approver' };
   }
 
@@ -174,7 +190,13 @@ export async function findLiveTokenForUser(
   }
   return {
     ok: true,
-    token: { id: row.id, proposalId: row.proposalId, orgId: row.orgId, userId: row.userId },
+    token: {
+      id: row.id,
+      proposalId: row.proposalId,
+      orgId: row.orgId,
+      userId: row.userId,
+      channel: ballotChannel(row.channel),
+    },
   };
 }
 
@@ -208,7 +230,13 @@ export async function findTokenByCode(
 
   return {
     ok: true,
-    token: { id: row.id, proposalId: row.proposalId, orgId: row.orgId, userId: row.userId },
+    token: {
+      id: row.id,
+      proposalId: row.proposalId,
+      orgId: row.orgId,
+      userId: row.userId,
+      channel: ballotChannel(row.channel),
+    },
   };
 }
 

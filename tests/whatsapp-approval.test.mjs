@@ -207,7 +207,10 @@ test('the code channel needs a session as well as the phone', async () => {
   // because the code has nowhere to go without an authenticated session.
   assert.match(route, /requireCustomerRequest\(request\)/);
   assert.match(route, /resolveAuthorityForSession\(auth\.session\)/);
-  assert.match(route, /canApprove\(dbRole\)/);
+  // May approve = an approving membership in the PAYMENT's org, read from the
+  // row. Not the session's role mapped back to a membership name, which had no
+  // FINANCE_ADMIN (tests/approval-channel-settlement.test.mjs).
+  assert.match(route, /resolveApproverById\(ctx\.userId, lookup\.token\.orgId\)/);
   // Scoped to the session's user — not a bearer secret. Reading somebody
   // else's code off their screen achieves nothing.
   assert.match(route, /findTokenByCode\(ctx\.userId, parsed\.data\.code, now\)/);

@@ -196,11 +196,15 @@ export async function applyDecision(input: {
   }
 
   if (counted.unanimous) {
+    // Not "being sent": whether it is sent now depends on who completed the
+    // vote. A reply cannot send a payment; a signed-in approver can
+    // (lib/server/approval-settle.ts). Both routes answer with the settle
+    // outcome instead of this.
     return {
       ok: true,
       decision: input.decision,
       tally: counted,
-      message: 'Approved by everyone. The payment is being sent.',
+      message: 'Approved by everyone.',
     };
   }
 

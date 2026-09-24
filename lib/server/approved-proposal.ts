@@ -38,9 +38,11 @@ import { subjectDigest } from '@/lib/server/step-up';
 
 /**
  * The one status an approved payment is carried out in. Both callers of the
- * replay — the submit route and the WhatsApp settle path — walk the proposal
- * SIGNED -> SUBMITTED and replay it there. APPROVED is before SIGN checks the
- * canon; SETTLED and ANCHORED are after the money moved.
+ * replay — the submit route, and the settle path when a code typed into Splash
+ * completes the vote — walk the proposal SIGNED -> SUBMITTED and replay it
+ * there. (A WhatsApp reply never replays: it has no session to run as.)
+ * APPROVED is before SIGN checks the canon; SETTLED and ANCHORED are after the
+ * money moved.
  */
 const EXECUTABLE_STATUS = 'SUBMITTED';
 

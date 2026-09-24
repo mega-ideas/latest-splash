@@ -137,3 +137,59 @@ export async function resolveApproverByNumber(
     },
   };
 }
+
+/**
+ * The same question for a person the session has already identified — someone
+ * typing a code into Splash: may THIS person approve in THIS org?
+ *
+ * Answered from their membership row in the org the payment belongs to. The
+ * code route used to take the session's resolved role and map it back to a
+ * membership name through a table with no entry for FINANCE_ADMIN, so a finance
+ * admin became a viewer and could not approve by code. And the session's role
+ * is the one held in whichever workspace the session resolved to, which need
+ * not be this payment's. Read here, per org, neither can happen.
+ */
+export async function resolveApproverById(userId: string, orgId: string): Promise<ResolvedApprover> {
+  if (!process.env.DATABASE_URL) return { ok: false, reason: 'no database configured' };
+
+  const { getDb } = await import('@/lib/db/client');
+  const db = getDb();
+
+  const rows = await db
+    .select({
+      userId: users.id,
+      email: users.email,
+      name: users.name,
+      role: memberships.role,
+      whatsappE164: approverChannels.whatsappE164,
+      verifiedAt: approverChannels.verifiedAt,
+    })
+    .from(memberships)
+    .innerJoin(users, eq(users.id, memberships.userId))
+    .leftJoin(
+      approverChannels,
+      and(eq(approverChannels.userId, memberships.userId), eq(approverChannels.orgId, memberships.orgId)),
+    )
+    .where(and(eq(memberships.userId, userId), eq(memberships.orgId, orgId)))
+    .limit(1);
+
+  const row = rows[0];
+  if (!row) return { ok: false, reason: 'not a member of this org' };
+  // Re-checked NOW, as a reply is: a role revoked since the code was sent must
+  // not still count.
+  if (!(APPROVING_ROLES as readonly string[]).includes(row.role)) {
+    return { ok: false, reason: `role ${row.role} may not approve` };
+  }
+
+  return {
+    ok: true,
+    orgId,
+    approver: {
+      userId: row.userId,
+      email: row.email,
+      name: row.name,
+      role: row.role as MembershipRole,
+      whatsappE164: row.verifiedAt ? row.whatsappE164 : null,
+    },
+  };
+}

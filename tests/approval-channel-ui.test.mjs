@@ -28,12 +28,17 @@ test('the settings page carries the two dials it saves', async () => {
 test('the choice between modes states what each one actually authenticates', async () => {
   const source = await card();
 
-  // This is the sentence that makes the decision an informed one: `code`
-  // requires the handset AND a signed-in approver; `reply` requires only the
-  // handset. An admin choosing between them is making a security decision, so
-  // the consequence belongs beside the option, not in documentation.
+  // This is the sentence that makes the decision an informed one: approving by
+  // `code` requires the handset AND a signed-in approver; approving by `reply`
+  // requires only the handset. An admin choosing between them is making a
+  // security decision, so the consequence belongs beside the option, not in
+  // documentation.
   assert.match(source, /a stolen handset on its own releases nothing/i);
-  assert.match(source, /Whoever is holding the phone can release the payment/i);
+  assert.match(source, /whoever is holding the phone can approve for its owner/i);
+  // And it no longer claims a reply sends money: a reply stops at approved,
+  // and a signed-in approver sends it (lib/server/approval-settle.ts).
+  assert.match(source, /Sending the payment still needs an approver signed in to Splash/);
+  assert.doesNotMatch(source, /Whoever is holding the phone can release the payment/i);
 
   // And the weaker option is marked as weaker rather than merely "faster".
   assert.match(source, /Weaker/);
