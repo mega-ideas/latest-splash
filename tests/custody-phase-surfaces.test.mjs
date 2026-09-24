@@ -10,6 +10,9 @@ const payLink = () => import('../lib/server/pay-link.ts');
 const guard = () => import('../lib/agent/zeke-lane-guard.ts');
 const agent = () => import('../lib/agent/oxwal.ts');
 const execution = () => import('../lib/server/approval-execution.ts');
+const operationsModule = () => import('../lib/server/operations.ts');
+const transfersStore = () => import('../lib/server/transfers-store.ts');
+const sweep = () => import('../lib/server/sweep.ts');
 
 /**
  * Two fund-holding surfaces the Phase 0 custody gate never reached.
@@ -21,7 +24,9 @@ const execution = () => import('../lib/server/approval-execution.ts');
  * redemptions /api/treasury then refused, and its balance and treasury reads
  * answered with the $11,140 / $24,500 / $98.72 fixtures the treasury page had
  * already stopped showing as a balance. The landing's recipient ladder sold
- * the sweep account as a "Phase 1 launch" into "a Splash account".
+ * the sweep account as a "Phase 1 launch" into "a Splash account". And the
+ * delivery executor (lib/server/sweep.ts) credited a stored balance or opened
+ * a sweep for any tier it was handed, trusting its one caller to have gated it.
  *
  * This file pins Phase 0: no custody package. tests/oxwal-authority.test.mjs
  * runs with one, and covers the same tools once Treasury is open.
@@ -221,6 +226,45 @@ test('an unverified business still hears the verification reason first', async (
   } finally {
     if (prevGate === undefined) delete process.env.FEATURE_KYB_GATE;
     else process.env.FEATURE_KYB_GATE = prevGate;
+    if (prevDb !== undefined) process.env.DATABASE_URL = prevDb;
+  }
+});
+
+/* ── The delivery executor ─────────────────────────────────────────────── */
+
+test('the delivery executor refuses a fund-holding tier itself, before any ledger line', async () => {
+  const { createTransferIntent, operations } = await operationsModule();
+  const { persistTransfer, readTransferForStaff } = await transfersStore();
+  const { completeDeliveryForTransfer } = await sweep();
+  const { CUSTODY_PHASE_REASON } = await rules();
+  const prevDb = process.env.DATABASE_URL;
+  delete process.env.DATABASE_URL; // the in-process stores, which this reads back
+  try {
+    const intentWith = async (deliveryTier) => persistTransfer(createTransferIntent({
+      orgId: 'org-executor',
+      recipientName: 'Acme PH',
+      targetCurrency: 'PHP',
+      targetAmount: '5642.00',
+      stablecoinAmountMicro: 100_000_000,
+      deliveryTier,
+    }));
+    const linesFor = (id) => [...operations.ledgerEntries.values()].filter((entry) => entry.refId === id);
+
+    // An intent that reached it anyway — an old row, a future caller — with a
+    // tier the authorize route would have refused, or one nobody knows.
+    for (const tier of ['STORED_BALANCE', 'SWEEP_ACCOUNT', 'NOT_A_TIER']) {
+      const intent = await intentWith(tier);
+      const sweepsBefore = operations.sweepJobs.size;
+      await assert.rejects(() => completeDeliveryForTransfer(intent.id), (error) => error.message === CUSTODY_PHASE_REASON, tier);
+      assert.equal(linesFor(intent.id).length, 0, `${tier}: no stored-balance credit`);
+      assert.equal(operations.sweepJobs.size, sweepsBefore, `${tier}: no sweep job`);
+      assert.notEqual((await readTransferForStaff(intent.id)).state, 'CREDITED', tier);
+    }
+
+    // A payout still completes.
+    const payout = await intentWith('PAYOUT_ONLY');
+    assert.deepEqual(await completeDeliveryForTransfer(payout.id), { state: 'DISBURSED' });
+  } finally {
     if (prevDb !== undefined) process.env.DATABASE_URL = prevDb;
   }
 });

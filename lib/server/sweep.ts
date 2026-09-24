@@ -1,3 +1,4 @@
+import { CUSTODY_PHASE_REASON, deliveryTierAllowed } from '@/lib/server/custody-phase';
 import { createSweepJob, updateSweepJob } from '@/lib/server/operations';
 import { readRecipientForStaff } from '@/lib/server/recipients-store';
 import { recordMovement } from '@/lib/server/ledger-store';
@@ -7,6 +8,13 @@ import { pdaxAdapter } from '@/lib/server/pdax';
 export async function completeDeliveryForTransfer(intentId: string) {
   const intent = await readTransferForStaff(intentId);
   if (!intent) throw new Error('Transfer intent not found');
+  // The custody gate, enforced here as well. The authorize route refuses a
+  // fund-holding tier before this runs, but this is the code that credits a
+  // stored balance and opens a sweep, so it does not rely on its caller: any
+  // intent carrying such a tier (an old row, a new caller) stops before a
+  // ledger line is written. Unknown tiers stop too, rather than falling
+  // through to the sweep. The caller records this as the failure reason.
+  if (!deliveryTierAllowed(intent.deliveryTier)) throw new Error(CUSTODY_PHASE_REASON);
   const accountId = intent.recipientId ?? intent.recipientName;
 
   if (intent.deliveryTier === 'PAYOUT_ONLY') {
