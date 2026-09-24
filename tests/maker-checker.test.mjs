@@ -103,7 +103,12 @@ test('the proposal is simulated, because the submit route refuses one that is no
 test('a re-submitted payment finds its pending proposal rather than queueing a second', async () => {
   const text = await source('lib/server/dual-approval.ts');
   assert.match(text, /ensureProposalStoreHydrated/, 'a cold start must see Postgres first');
-  assert.match(text, /p\.orgId === input\.orgId && p\.idempotencyKey === input\.idempotencyKey/);
+  // And what another instance proposed since this one booted.
+  assert.match(text, /hydrateOpenProposalForKey\(store, input\.orgId, input\.idempotencyKey\)/);
+  // The store decides: one proposal in flight per org and key, handed back to
+  // a re-submission. tests/proposal-idempotency.test.mjs drives it end to end,
+  // across a restart and after the first proposal is carried out.
+  assert.match(text, /const stored = store\.create\(proposal\);\s*if \(stored\.id !== proposal\.id\) return stored;/);
 
   const batch = await source('app/api/batches/authorize/route.ts');
   // The batch reuses the run's own derived key, so the queued proposal and the

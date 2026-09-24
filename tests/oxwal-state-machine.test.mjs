@@ -95,7 +95,10 @@ test('failed simulations stop the proposal before approval', () => {
 });
 
 test('idempotency key returns the existing proposal instead of duplicating work', () => {
-  const store = new InMemoryProposalStore();
+  // The fixture's clock. A proposal past its expiry no longer absorbs a
+  // re-submission (tests/proposal-idempotency.test.mjs), and on the wall clock
+  // this fixture expired on 2026-07-01.
+  const store = new InMemoryProposalStore(undefined, { now: () => Date.parse(now) });
   const first = store.create(proposal({ id: 'proposal-1', idempotencyKey: 'same-intent' }));
   const replay = store.create(proposal({ id: 'proposal-2', idempotencyKey: 'same-intent' }));
 

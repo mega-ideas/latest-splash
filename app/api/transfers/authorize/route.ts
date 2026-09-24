@@ -42,6 +42,7 @@ import { checkAuthorizationLimits, startOfUtcDay } from '@/lib/policy/authorizat
 import { verifyPayoutTotp } from '@/lib/auth/totp';
 import { approvalRequiredResponse, consumeActionApproval, releaseActionApproval } from '@/lib/server/step-up-gate';
 import { fiatPaymentSubstance } from '@/lib/server/step-up-subjects';
+import { subjectDigest } from '@/lib/server/step-up';
 import { readOrgSettings } from '@/lib/server/org-settings';
 import { readComplianceControls } from '@/lib/server/sui-settlement';
 import { isForeignAccountId, requireSessionAccount } from '@/lib/server/session-account';
@@ -315,6 +316,8 @@ async function authorize(request: Request, spent: SpentApproval) {
     // around — by splitting the payment under the threshold, which is worse
     // than having no threshold.
     const maker = await resolveAuthorityForSession(auth.session);
+    // What is replayed once it is approved, and what names the payment.
+    const approvalPayload = { ...body, businessAccountId: undefined };
     const proposal = await proposeForApproval({
       orgId,
       // The MAKER, from the session. The submit route compares this against
@@ -336,8 +339,13 @@ async function authorize(request: Request, spent: SpentApproval) {
         // an unresolvable ref blocks forever rather than failing closed once.
         { source: 'COUNTERPARTY', ref: recipient.id },
       ],
-      payload: { ...body, businessAccountId: undefined },
-      idempotencyKey: `transfer:${orgId}:${body.amount.value}:${body.recipient.name}:${body.amount.targetCurrency}`,
+      payload: approvalPayload,
+      // The payment, reduced to what an approval of it covers: the digest
+      // resolveApprovalClaim compares when the approval is carried out. It was
+      // the amount, the recipient's NAME and the currency, so two payments of
+      // one amount to two accounts held under one name shared a key, and the
+      // second came back as the first's pending proposal and was never queued.
+      idempotencyKey: `transfer:${orgId}:${subjectDigest(fiatPaymentSubstance(approvalPayload))}`,
       approvalThresholdUsd: settings.approvalThresholdUsd,
     });
     // The WhatsApp approval went into the proposal: the queue carries it now.

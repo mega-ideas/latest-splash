@@ -544,7 +544,7 @@ export const paymentIntents = pgTable('payment_intents', {
   index('intents_org_created_idx').on(table.orgId, table.createdAt),
   index('intents_supplier_idx').on(table.supplierId),
   index('intents_state_idx').on(table.state),
-  /** Scoped to the org, like `proposals_idempotency_unique` already is.
+  /** Scoped to the org, like `proposals_open_idempotency_unique` already is.
    *  Unscoped, the first tenant to use "payroll-friday" would block every
    *  other tenant from that key forever — a cross-tenant denial of service
    *  through a field the client chooses. */
@@ -807,7 +807,12 @@ export const proposals = pgTable('proposals', {
 }, (table) => [
   index('proposals_org_idx').on(table.orgId),
   index('proposals_status_idx').on(table.status),
-  uniqueIndex('proposals_idempotency_unique').on(table.orgId, table.idempotencyKey),
+  /** One proposal in flight per payment, not one proposal per payment ever
+   *  (drizzle/0025). Finished — terminal, settled, or carried out — gives the
+   *  key back. Mirrors `isProposalInFlight` in lib/queue/proposal-state.ts. */
+  uniqueIndex('proposals_open_idempotency_unique')
+    .on(table.orgId, table.idempotencyKey)
+    .where(sql`${table.status} NOT IN ('ANCHORED', 'REJECTED', 'FAILED', 'EXPIRED', 'REVERSED', 'SETTLED') AND ${table.executionState} IS NULL`),
 ]);
 
 export const approvals = pgTable('approvals', {

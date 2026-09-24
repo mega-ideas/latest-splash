@@ -6,6 +6,7 @@ import { assertCleanBody, ProvenanceViolationError, provenanceViolationResponse 
 import { resolveComplianceForProposal } from '@/lib/compliance/proposal-screening';
 import { proposalApprovalHash } from '@/lib/proposals/canonical-hash';
 import { ensureProposalStoreHydrated } from '@/lib/queue/proposal-persistence';
+import { isProposalInFlight } from '@/lib/queue/proposal-state';
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { requireActiveOrg } from '@/lib/server/kyb-gate';
 import { readJsonBody } from '@/lib/server/http';
@@ -64,6 +65,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const proposal = store.get(id);
   // Tenancy: a proposal outside the caller's org does not exist for them.
   if (!proposal || proposal.orgId !== ctx.orgId) return json({ error: 'Proposal not found' }, 404);
+  // Finished — rejected, expired, failed, or already carried out — takes no
+  // further decision. Hydration now lapses a proposal past its expiry, and a
+  // REJECT of one threw from the state machine outside the try below: a 500.
+  if (!isProposalInFlight(proposal)) {
+    const state = proposal.execution ? 'already acted on' : proposal.status.toLowerCase();
+    return json({
+      proposal,
+      error: `This proposal is ${state} and takes no further decision. Propose the payment again if it is still needed.`,
+      code: 'PROPOSAL_CLOSED',
+    }, 409);
+  }
   if (!proposal.simulation) return json({ error: 'Proposal must be simulated before submission' }, 409);
 
   // §1.4 approval binding — recompute the canonical hash from the stored row.
