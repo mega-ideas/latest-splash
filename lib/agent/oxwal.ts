@@ -4,6 +4,7 @@ import { composeAndSimulateProposal } from '../chain/compose.ts';
 import { copilotModel } from '../ai/model.ts';
 import { findSavedRecipient, listSavedRecipients } from './recipient-tools.ts';
 import { prepareBeneficiaryFromInvoice } from './invoice-intake.ts';
+import { liveHandoffDeps, usdcHandoffFor, type UsdcHandoff } from './usdc-handoff.ts';
 import {
   assertZekeLane,
   classifyLaneIntent,
@@ -90,6 +91,8 @@ export type OxwalAgentEvent =
   | { type: 'tool'; name: OxwalToolName; category: ToolCategory }
   | { type: 'warning'; warning: OxwalWarning }
   | { type: 'proposal'; proposal: UnsignedProposal }
+  /** A USDC transfer prepared for a person to send (lib/agent/usdc-handoff.ts). */
+  | { type: 'handoff'; handoff: UsdcHandoff }
   | { type: 'done'; source: OxwalAnswerSource };
 
 export type CounterpartyRecord = {
@@ -1962,6 +1965,16 @@ export async function* runOxwalAgent(request: OxwalAgentRequest): AsyncGenerator
   if (refusal) {
     yield { type: 'warning', warning: { code: 'LANE_LOCKED', message: refusal } };
     for (const token of tokens(refusal)) yield { type: 'delta', text: token };
+    yield { type: 'done', source: 'scripted' };
+    return;
+  }
+
+  // "Send 500 USDC to Manila Parts": prepared for a person to send, in fixed
+  // words and before the model. Zeke never quotes, approves or signs it.
+  const handoff = request.orgId ? await usdcHandoffFor(request.orgId, request.message, liveHandoffDeps()) : null;
+  if (handoff) {
+    for (const token of tokens(handoff.text)) yield { type: 'delta', text: token };
+    if (handoff.handoff) yield { type: 'handoff', handoff: handoff.handoff };
     yield { type: 'done', source: 'scripted' };
     return;
   }

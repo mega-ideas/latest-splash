@@ -65,6 +65,16 @@ A wallet recipient must be saved first. Splash, and Zeke, only send to saved rec
 
   Text cells that could start a spreadsheet formula are neutralised.
 
+## Zeke prepares, you send (lib/agent/usdc-handoff.ts)
+
+Ask Zeke "send 500 USDC to Manila Parts" (or "pay Manila Parts 500 USDC") and it prepares the transfer without sending it:
+
+- It answers in fixed words, before any model runs, the same way the lane refusal does.
+- The recipient must be a **saved wallet recipient** that can be paid (screened or vouched for). A bank recipient, an unknown name or an ambiguous one gets an explanation instead.
+- It checks the lane, the fee address, the 1 USDC minimum, the per-transfer limit and the 30-day allowance with the lane's own functions. The card shows the amount, the 0.80% fee on top, what leaves the wallet, and the allowance left afterwards.
+- **Review in Send USDC** opens the send screen with the recipient and amount filled in. The link carries only the saved recipient's id and an amount re-printed from integer minor units; nothing typed in the chat reaches it. Send USDC ignores anything that is not a saved wallet recipient of this workspace.
+- Zeke never quotes (a quote reserves allowance), approves or signs. The person continues from the send screen: quote, approval (WhatsApp code + passkey, or a click), and a signature from their own wallet.
+
 ## x402 (lib/server/x402-pay.ts)
 
 The Send USDC page also pays APIs that answer `402 Payment Required` over x402

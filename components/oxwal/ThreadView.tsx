@@ -2,7 +2,7 @@
 
 import Image from 'next/image';
 import Link from 'next/link';
-import { AlertTriangle, CheckCircle2, Clock3, RotateCcw } from 'lucide-react';
+import { AlertTriangle, ArrowUpRight, CheckCircle2, Clock3, RotateCcw } from 'lucide-react';
 
 import ActionCard from '@/components/oxwal/ActionCard';
 import type { ActionCardProposal } from '@/lib/agent/action-card';
@@ -171,6 +171,35 @@ export default function ThreadRow({
         >
           Sign in again
         </Link>
+      </div>
+    );
+  }
+
+  if (item.kind === 'handoff') {
+    // Only ever a link into Send USDC. The server builds it; this refuses to
+    // render anything else, so a stream cannot turn the card into a link out.
+    const safe = item.handoff.href.startsWith('/dashboard/send-usdc?');
+    return (
+      <div className={compact ? 'pl-7' : 'pl-8'}>
+        <div className="rounded-lg border border-[#5C9EAD]/40 bg-white px-3 py-2.5">
+          <div className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-[#326273]">
+            {item.handoff.title}
+          </div>
+          <ul className="mt-1.5 space-y-0.5 text-[13px] leading-5 tabular-nums text-[#1F4452]">
+            {item.handoff.lines.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+          {safe ? (
+            <Link
+              href={item.handoff.href}
+              className="mt-2 inline-flex min-h-11 items-center gap-1.5 rounded-md bg-[#1F4452] px-3 py-2 text-[13px] font-bold text-white transition hover:bg-[#326273]"
+            >
+              {item.handoff.cta}
+              <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />
+            </Link>
+          ) : null}
+        </div>
       </div>
     );
   }

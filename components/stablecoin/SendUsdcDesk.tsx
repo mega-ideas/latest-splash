@@ -127,6 +127,9 @@ export default function SendUsdcDesk() {
   const [now, setNow] = useState(() => Date.now());
   // x402: pay an API that answers 402, from the same wallets and allowance.
   const [mode, setMode] = useState<'WALLET' | 'X402'>('WALLET');
+  // A transfer Zeke prepared (lib/agent/usdc-handoff.ts): filled in from the
+  // link, never quoted from it — the person reviews it first.
+  const [prefilled, setPrefilled] = useState(false);
   const [x402Url, setX402Url] = useState('');
   const [x402Probe, setX402Probe] = useState<X402Probe | null>(null);
   const [attestPayee, setAttestPayee] = useState(false);
@@ -144,7 +147,21 @@ export default function SendUsdcDesk() {
     const first = window.setTimeout(() => void loadLane(), 0);
     void fetch('/api/recipients', { cache: 'no-store' })
       .then((r) => json<RecipientRecord[]>(r))
-      .then((list) => setRecipients(Array.isArray(list) ? list.filter((r) => r.payoutMethod === 'WALLET') : []));
+      .then((list) => {
+        const wallets = Array.isArray(list) ? list.filter((r) => r.payoutMethod === 'WALLET') : [];
+        setRecipients(wallets);
+        // ?to=<saved recipient id>&amount=<USDC>: only a recipient this
+        // workspace saved, and only a plain amount; anything else is ignored.
+        const params = new URLSearchParams(window.location.search);
+        const to = params.get('to');
+        const asked = params.get('amount') ?? '';
+        if (to && wallets.some((r) => r.id === to)) {
+          setMode('WALLET');
+          setRecipientId(to);
+          if (/^\d{1,9}(\.\d{1,6})?$/.test(asked)) setAmount(asked);
+          setPrefilled(params.get('from') === 'zeke');
+        }
+      });
     void fetch('/api/stablecoin/wallet', { cache: 'no-store' }).then((r) => json<WalletView>(r)).then(setSplash);
     void discoverWallets().then(setWallets);
     return () => window.clearTimeout(first);
@@ -349,6 +366,7 @@ export default function SendUsdcDesk() {
   }
 
   function startOver() {
+    setPrefilled(false);
     setQuote(null);
     setApproved(false);
     setSent(null);
@@ -597,6 +615,11 @@ export default function SendUsdcDesk() {
                 </StepCard>
               ) : (
               <StepCard n={2} title="Recipient & amount" done={Boolean(quote)} disabled={!sender || Boolean(quote) || !lane?.lane.open}>
+                {prefilled && !quote ? (
+                  <p className="mb-3 rounded-lg border border-[#5C9EAD]/40 bg-[#5C9EAD]/10 px-3 py-2 text-[13px] leading-5 text-[#1F4452]" role="status">
+                    Zeke filled this in. Check the recipient and the amount — nothing is reserved or sent until you continue, and it is approved and signed the usual way.
+                  </p>
+                ) : null}
                 {recipients.length === 0 ? (
                   <p className="text-[13px] leading-5 text-[#326273]/75">
                     No wallet recipients yet. <Link href="/dashboard/recipients" className="font-semibold text-[var(--info)] hover:underline">Add one under Recipients</Link> — Splash and Zeke only send to recipients you have saved.

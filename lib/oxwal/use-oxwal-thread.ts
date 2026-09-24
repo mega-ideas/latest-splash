@@ -44,7 +44,11 @@ export type OxwalThreadItem =
   | { kind: 'activity'; id: string; label: string; tone: 'read' | 'propose' }
   | { kind: 'notice'; id: string; text: string; retryPrompt?: string }
   | { kind: 'session-expired'; id: string }
-  | { kind: 'proposal'; id: string; proposal: ActionCardProposal };
+  | { kind: 'proposal'; id: string; proposal: ActionCardProposal }
+  /** A USDC transfer Zeke prepared for the operator to review and send. */
+  | { kind: 'handoff'; id: string; handoff: OxwalHandoff };
+
+export type OxwalHandoff = { title: string; lines: string[]; href: string; cta: string };
 
 /**
  * In-chat approval window per proposal. `waiting` counts down; an unapproved
@@ -72,6 +76,7 @@ type OxwalStreamEvent =
   | { type: 'tool'; name: string; category: 'READ' | 'PROPOSE' }
   | { type: 'warning'; warning: { code: string; message: string; ref?: string } }
   | { type: 'proposal'; proposal: ActionCardProposal }
+  | { type: 'handoff'; handoff: OxwalHandoff }
   | { type: 'done'; source: 'claude' | 'local' | 'scripted' };
 
 /**
@@ -294,6 +299,15 @@ export function useOxwalThread(options: UseOxwalThreadOptions = {}) {
               setThread((current) => [
                 ...current,
                 { kind: 'proposal', id: newId('proposal'), proposal: event.proposal },
+              ]);
+            }
+
+            if (event.type === 'handoff') {
+              // Text first, then the card: "I've prepared it…" reads above it.
+              flushAssistant();
+              setThread((current) => [
+                ...current,
+                { kind: 'handoff', id: newId('handoff'), handoff: event.handoff },
               ]);
             }
 
