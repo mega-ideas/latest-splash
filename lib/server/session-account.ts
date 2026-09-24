@@ -31,15 +31,32 @@ export type SessionAccount = {
 
 export async function resolveSessionAccount(session: CustomerSession): Promise<SessionAccount> {
   const ctx = await resolveAuthorityForSession(session);
+  return resolveOrgAccount(ctx.orgId);
+}
+
+/** The ledger account of an org the server has already established — from a
+ *  membership above, or from an approved proposal on replay. */
+export async function resolveOrgAccount(orgId: string): Promise<SessionAccount> {
   try {
-    return { orgId: ctx.orgId, accountId: await resolveBusinessAccountId(ctx.orgId) };
+    return { orgId, accountId: await resolveBusinessAccountId(orgId) };
   } catch {
     // `resolveBusinessAccountId` throws when the org has no on-chain account and
     // no env fallback. That is a legitimate local-dev state, not an auth
     // failure — but it must never widen into "use whatever the client asked
     // for", so it collapses to a single fixed key.
-    return { orgId: ctx.orgId, accountId: FALLBACK_ACCOUNT_ID };
+    return { orgId, accountId: FALLBACK_ACCOUNT_ID };
   }
+}
+
+/**
+ * `requireSessionAccount`'s shape for an approved payment carried out with no
+ * session (lib/server/payment-request.ts). The org is the proposal's, which the
+ * replay has already verified, so there is no membership case to answer here.
+ */
+export async function requireOrgAccount(
+  orgId: string,
+): Promise<{ account: SessionAccount; response: null }> {
+  return { account: await resolveOrgAccount(orgId), response: null };
 }
 
 /**

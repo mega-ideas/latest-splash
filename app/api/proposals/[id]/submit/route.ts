@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { getOxwalProposalStore } from '@/lib/agent/oxwal';
 import { resolveAuthorityForSession } from '@/lib/auth/authority';
 import { assertCleanBody, ProvenanceViolationError, provenanceViolationResponse } from '@/lib/auth/provenance-guard';
-import { resolveComplianceForProposal } from '@/lib/compliance/proposal-screening';
+import { describeComplianceHold, resolveDurableComplianceForProposal } from '@/lib/compliance/proposal-screening';
 import { proposalApprovalHash } from '@/lib/proposals/canonical-hash';
 import { ensureProposalStoreHydrated } from '@/lib/queue/proposal-persistence';
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
@@ -87,16 +87,19 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return json({ error: 'Maker cannot approve their own proposal' }, 403);
   }
 
+  // §1.4 TOCTOU — policy, quote expiry, and compliance are re-evaluated NOW
+  // (approval/submit time), not just at proposal time. Compliance comes from
+  // the payees' persisted screening records (lib/server/screening-record.ts);
+  // a missing or unscreened record BLOCKS.
+  const compliance = await resolveDurableComplianceForProposal(proposal);
+
   try {
-    // §1.4 TOCTOU — policy, quote expiry, and compliance are re-evaluated NOW
-    // (approval/submit time), not just at proposal time. Compliance comes
-    // from persisted screening records; a missing record BLOCKS.
     const policyDecision = authorizeProposalSubmission({
       proposal,
       actor: ctx.role,
       policy: ctx.policy,
       simulation: proposal.simulation,
-      compliance: resolveComplianceForProposal(proposal),
+      compliance,
       signatureRef: parsed.data.signatureRef,
       signedBy: ctx.userId,
     });
@@ -156,12 +159,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     // The replay runs the real authorize route, so every guard re-runs
     // against current state. A day can pass between proposing and approving;
     // an approval authorises a payment, it does not vouch for a balance.
+    //
+    // It runs as the approval — this proposal's org, maker and approvers —
+    // not as the caller's cookie, which the route never read from here.
     const outcome = await executeApprovedProposal(
       submitted,
       submitted.executionPayload ?? null,
       {
-        cookie: request.headers.get('cookie') ?? '',
         origin: new URL(request.url).origin,
+        channel: 'in-app',
       },
     );
     // `recordExecution`, never `revise` — a canon revision voids every
@@ -174,6 +180,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return json({ proposal: store.get(submitted.id) ?? submitted, policyDecision, execution: outcome });
   } catch (error) {
     await store.flush();
-    return json({ error: error instanceof Error ? error.message : 'Proposal submission blocked' }, 409);
+    const message = error instanceof Error ? error.message : 'Proposal submission blocked';
+    // "compliance hold" alone gives an approver nothing to act on: say which
+    // payee record is missing what.
+    if (/compliance hold/.test(message)) {
+      return json({
+        error: `${message} (${describeComplianceHold(compliance)})`,
+        code: 'compliance_hold',
+        holdReasons: [...new Set(compliance.flags)],
+      }, 409);
+    }
+    return json({ error: message }, 409);
   }
 }

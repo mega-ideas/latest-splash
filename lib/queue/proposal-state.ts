@@ -30,6 +30,82 @@ export type ProposalTransitionEvent =
 const terminalStatuses = new Set<ProposalStatus>(['ANCHORED', 'REJECTED', 'FAILED', 'EXPIRED', 'REVERSED']);
 const approverRoles = new Set<UserRole>(['OWNER', 'FINANCE_ADMIN', 'APPROVER']);
 
+/**
+ * Where a proposal can still become the payment it describes: awaiting
+ * approval (the three statuses /queue shows as open work), or approved and not
+ * yet handed to the executor. SUBMITTED is not here — from then on the
+ * proposal has been carried out, whatever the outcome, and its approval is
+ * spent.
+ */
+const resubmissionAbsorbingStatuses = new Set<ProposalStatus>([
+  'SIMULATED',
+  'POLICY_EVALUATED',
+  'PENDING_APPROVAL',
+  'APPROVED',
+  'SIGNED',
+]);
+
+/**
+ * Should a re-submission of the same payment find this proposal rather than
+ * make a new one?
+ *
+ * Only while it can still be approved and carried out: in one of the statuses
+ * above, and inside its approval window. It used to be ANY proposal with the
+ * key. Once an approved payment's replay failed — balance, pause, peg, a
+ * ceiling — the re-authorization the failure asked for got the spent proposal
+ * back, and the 409 said it was in the approval queue when nothing there could
+ * ever approve it. A rejected or expired payment was stuck the same way.
+ */
+export function absorbsResubmission(proposal: UnsignedProposal, nowMs = Date.now()): boolean {
+  if (!resubmissionAbsorbingStatuses.has(proposal.status)) return false;
+  const expiresAt = Date.parse(proposal.expiresAt);
+  // Policy's rule, mirrored (lib/policy/evaluate.ts): blocked once the expiry
+  // is past, and a proposal with no readable expiry is judged by policy.
+  return !Number.isFinite(expiresAt) || expiresAt >= nowMs;
+}
+
+// ── Idempotency-key generations ─────────────────────────────────────────────
+//
+// A proposal's idempotency key names the payment: the same recipient, amount
+// and currency, or the same payroll rows. It lets a re-submission find the
+// proposal still waiting for approval. But the same payment can legitimately
+// be made again — the retry after a failed attempt, next month's identical
+// payroll — and both the store's key index and Postgres's unique index on
+// (org_id, idempotency_key) keep a key for as long as its proposal exists,
+// which is forever. So the next proposal for the same payment takes the next
+// generation of the key: `key`, then `key#2`, `key#3`. Generation 1 is the bare
+// key, so every proposal made before generations existed is generation 1.
+
+export function idempotencyKeyForGeneration(baseKey: string, generation: number): string {
+  if (!Number.isSafeInteger(generation) || generation < 1) {
+    throw new ProposalStateError(`key generation must be a positive integer, got ${generation}`);
+  }
+  return generation === 1 ? baseKey : `${baseKey}#${generation}`;
+}
+
+/** Which generation of `baseKey` this key is, or null when it is not one. */
+export function idempotencyKeyGeneration(baseKey: string, key: string): number | null {
+  if (key === baseKey) return 1;
+  if (!key.startsWith(`${baseKey}#`)) return null;
+  // Canonical digits only: a transfer key carries free text (the payee's
+  // name), so another payment's key could begin with this one's plus '#' — but
+  // what follows it then is never a bare number.
+  const suffix = key.slice(baseKey.length + 1);
+  if (!/^[1-9]\d{0,8}$/.test(suffix)) return null;
+  const generation = Number(suffix);
+  return generation >= 2 ? generation : null;
+}
+
+/** The first generation of `baseKey` above every one `usedKeys` has taken. */
+export function nextIdempotencyKeyGeneration(baseKey: string, usedKeys: Iterable<string>): number {
+  let highest = 0;
+  for (const key of usedKeys) {
+    const generation = idempotencyKeyGeneration(baseKey, key);
+    if (generation !== null && generation > highest) highest = generation;
+  }
+  return highest + 1;
+}
+
 function assertTransition(current: ProposalStatus, allowed: ProposalStatus[], eventType: ProposalTransitionEvent['type']) {
   if (!allowed.includes(current)) {
     throw new ProposalStateError(`${eventType} is not allowed from ${current}`);

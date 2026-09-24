@@ -147,16 +147,20 @@ test('recording an outcome does not void the approvals that authorised it', asyn
 
 // ── The approval claim is verified, never trusted ──────────────────────────
 
-test('an approved-proposal header is a claim the route resolves', async () => {
+test('an approval claim is resolved against the store, and never read from a header', async () => {
   const guard = await readFile(
     new URL('../lib/server/approved-proposal.ts', import.meta.url),
     'utf8',
   );
-  // Trusting the header would make dual approval a thing any client can assert
-  // — a considerably worse hole than the one it closes.
+  // Trusting a header would make dual approval a thing any client can assert
+  // — a considerably worse hole than the one it closes. Resolving one was not
+  // enough either: a batch approval's id lifted the second approver for any
+  // batch. A claim now exists only on the replay's own request object.
   assert.match(guard, /proposal\.orgId !== orgId/, 'an approval in another org is not an approval');
   assert.match(guard, /distinctApprovers < required/, 'the signatures, not just the status');
   assert.match(guard, /APPROVED_STATUSES/);
+  assert.match(guard, /const replay = approvalReplayOf\(request\);/);
+  assert.doesNotMatch(guard, /headers\.get\(/);
   // Unverifiable means not approved.
   assert.match(guard, /reason: 'store unavailable'/);
 
@@ -165,7 +169,8 @@ test('an approved-proposal header is a claim the route resolves', async () => {
     '../app/api/batches/authorize/route.ts',
   ]) {
     const route = await readFile(new URL(file, import.meta.url), 'utf8');
-    assert.match(route, /resolveApprovalClaim\(request, orgId\)/);
+    // Bound to the payment the route is about to make.
+    assert.match(route, /resolveApprovalClaim\(request, orgId, \{/);
     assert.match(route, /limits\.requiresSecondApproval && !approvalClaim\.approved/);
   }
 });
@@ -180,6 +185,9 @@ test('execution replays the real route so every guard runs again', async () => {
   // largest ones, because being large is what sent them for approval.
   assert.match(replay, /await import\('@\/app\/api\/transfers\/authorize\/route'\)/);
   assert.match(replay, /await import\('@\/app\/api\/batches\/authorize\/route'\)/);
-  // The approver's own cookie, so the replay resolves a real session.
-  assert.match(replay, /cookie: input\.cookie/);
+  // As the approval, bound to the request object — not the approver's cookie,
+  // which the route never read (`cookies()` answers from the incoming request,
+  // so a WhatsApp reply's replay had no session and got 401).
+  assert.match(replay, /issueApprovalReplay\(/);
+  assert.doesNotMatch(replay, /cookie: input\.cookie/);
 });

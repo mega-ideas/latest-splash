@@ -176,6 +176,23 @@ export function fiatPaymentSubstance(payload: Payload) {
   };
 }
 
+/**
+ * What a batch approval covers: every row — who, which address, how much — in
+ * order, and the currency the run pays out in. A run that differs in any row
+ * is a different run, whatever it is called.
+ */
+export function batchPaymentSubstance(payload: Payload) {
+  const body = withoutSecondFactor(payload);
+  const rows = Array.isArray(body.rows) ? (body.rows as unknown[]) : [];
+  return {
+    rows: rows.map((row) => {
+      const r = (row && typeof row === 'object' ? row : {}) as Record<string, unknown>;
+      return { name: text(r.name), address: text(r.address), amount: text(r.amount) };
+    }),
+    targetCurrency: text(body.targetCurrency).toUpperCase() || 'PHP',
+  };
+}
+
 export function fiatTransferSubject(ctx: { orgId: string; userId: string }, payload: Payload): StepUpSubject {
   const body = withoutSecondFactor(payload);
   const amount = (body.amount ?? {}) as { value?: unknown; targetCurrency?: unknown };

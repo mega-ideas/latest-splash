@@ -1,5 +1,5 @@
-import { loadOpenProposals, upsertProposal } from '../db/proposal-repo.ts';
-import type { InMemoryProposalStore } from './proposal-state.ts';
+import { loadOpenProposals, loadProposalKeyFamily, upsertProposal } from '../db/proposal-repo.ts';
+import { idempotencyKeyGeneration, type InMemoryProposalStore } from './proposal-state.ts';
 import type { UnsignedProposal } from '../agent/types';
 
 /**
@@ -46,4 +46,25 @@ export async function ensureProposalStoreHydrated(store: InMemoryProposalStore):
     }
   })();
   await hydrated.inFlight;
+}
+
+/**
+ * Bring every generation of one payment's idempotency key into the hot store,
+ * finished proposals included. Boot hydration leaves those out; the unique
+ * index on (org_id, idempotency_key) does not, so without them the store cannot
+ * say which generation a new proposal for that payment may take.
+ *
+ * Throws when the database cannot be read, unlike boot hydration. A generation
+ * picked without seeing the rows the index holds can collide with one of them,
+ * and then every write of the new proposal fails: an approval that exists only
+ * in this process, with nothing saying so.
+ */
+export async function hydrateKeyGenerations(
+  store: InMemoryProposalStore,
+  orgId: string,
+  baseKey: string,
+): Promise<void> {
+  if (!proposalPersistenceEnabled()) return;
+  const family = await loadProposalKeyFamily(await db(), orgId, baseKey);
+  store.hydrate(family.filter((proposal) => idempotencyKeyGeneration(baseKey, proposal.idempotencyKey) !== null));
 }

@@ -25,15 +25,22 @@
  * drained, the corridor can have been paused, the beneficiary can have failed
  * screening, and the daily ceiling can have been consumed by other payments.
  *
- * An approval says "this payment is authorised", not "skip the checks". The
- * only thing it removes is the requirement for a second approver, because that
- * is precisely what it supplied.
+ * An approval says "this payment is authorised", not "skip the checks". It
+ * removes the requirement for a second approver, because that is precisely
+ * what it supplied, and stands in for the maker's second factor, which was
+ * checked when the payment was proposed and cannot be checked twice — the
+ * trade-off is written down in approved-proposal.ts.
  */
 import 'server-only';
 
 import type { UnsignedProposal } from '@/lib/agent/types';
 import { x402SettlementAvailability } from '@/lib/agent/x402';
 import { CUSTODY_PHASE_WHY } from '@/lib/custody-phase-rules';
+import {
+  replayIdentityFromProposal,
+  type ReplayChannel,
+  type ReplayKind,
+} from '@/lib/server/approval-replay-identity';
 import { custodyPhaseEnabled } from '@/lib/server/custody-phase';
 
 export type ExecutionOutcome =
@@ -50,10 +57,13 @@ export type ExecutionOutcome =
  * would be the same bug wearing a different hat.
  */
 export type ExecutionContext = {
-  /** The approver's own cookie, forwarded so the replay resolves a real
-   *  session and a real membership rather than being handed an identity. */
-  cookie: string;
+  /** Where the replayed request says it is addressed. Nothing reads it for
+   *  authority. */
   origin: string;
+  /** How the final approval arrived. Recorded with the replay; it grants
+   *  nothing. The replay runs as the approval itself — the proposal's org,
+   *  maker and approvers — whichever channel delivered it. */
+  channel: ReplayChannel;
 };
 
 export async function executeApprovedProposal(
@@ -73,9 +83,8 @@ export async function executeApprovedProposal(
   try {
     switch (proposal.kind) {
       case 'PAYMENT':
-        return await executeTransfer(proposal, payload, context);
       case 'BATCH_PAYOUT':
-        return await executeBatch(proposal, payload, context);
+        return await replayApproved(proposal.kind, proposal, payload, context);
       case 'X402_PAYMENT':
         // There is no path that settles x402, so the default's "settles
         // through their own path" would be a lie. Recorded, named, not paid.
@@ -109,44 +118,45 @@ export async function executeApprovedProposal(
 }
 
 /**
- * Replay a single transfer.
+ * Replay a transfer or a payout run through its real route, as the approval.
  *
- * `X-Splash-Approved-Proposal` is what tells the authorize route that the
- * second-approver requirement has already been met. It is read from the header
- * and then VERIFIED against the proposal store — a client sending that header
- * on its own gets nowhere, because the route checks that the named proposal
- * exists, belongs to the caller's org, and is actually approved.
+ * The identity is derived from the proposal record here and bound to the
+ * request the replay builds; the route re-verifies it against the store, the
+ * membership table and the payment in the body before anything moves. Nothing
+ * about it travels in a header a client could also send.
  */
-async function executeTransfer(
+async function replayApproved(
+  kind: ReplayKind,
   proposal: UnsignedProposal,
   payload: Record<string, unknown>,
   context: ExecutionContext,
 ): Promise<ExecutionOutcome> {
-  const { authorizeTransferForApproval } = await import('./approval-replay.ts');
-  const result = await authorizeTransferForApproval({
-    orgId: proposal.orgId,
-    approvedProposalId: proposal.id,
+  const { authorizeTransferForApproval, authorizeBatchForApproval } = await import('./approval-replay.ts');
+  const replay = kind === 'PAYMENT' ? authorizeTransferForApproval : authorizeBatchForApproval;
+  const result = await replay({
+    identity: replayIdentityFromProposal(proposal, context.channel),
     body: payload,
-    ...context,
+    origin: context.origin,
   });
-  return result.ok
-    ? { state: 'EXECUTED', detail: 'Payment sent.', ref: result.ref }
-    : { state: 'FAILED', detail: result.error };
-}
 
-async function executeBatch(
-  proposal: UnsignedProposal,
-  payload: Record<string, unknown>,
-  context: ExecutionContext,
-): Promise<ExecutionOutcome> {
-  const { authorizeBatchForApproval } = await import('./approval-replay.ts');
-  const result = await authorizeBatchForApproval({
-    orgId: proposal.orgId,
-    approvedProposalId: proposal.id,
-    body: payload,
-    ...context,
-  });
-  return result.ok
-    ? { state: 'EXECUTED', detail: 'Payout run started.', ref: result.ref }
-    : { state: 'FAILED', detail: result.error };
+  if (result.ok && result.alreadyMade) {
+    // The batch replay key found this exact run already made. Nothing new was
+    // paid, and saying "started" would claim a payout that did not happen.
+    return {
+      state: 'SKIPPED',
+      detail: `Approved. This exact run was already submitted${result.ref ? ` as ${result.ref}` : ''}, so it was not sent again.`,
+    };
+  }
+  if (result.ok) {
+    return { state: 'EXECUTED', detail: kind === 'PAYMENT' ? 'Payment sent.' : 'Payout run started.', ref: result.ref };
+  }
+  if (result.code === 'approval_already_used') {
+    // Another replay of the same approval got there first and its outcome is
+    // the one that counts. This one released nothing.
+    return {
+      state: 'SKIPPED',
+      detail: 'Approved. This approval already released its payment, so it was not sent a second time.',
+    };
+  }
+  return { state: 'FAILED', detail: result.error };
 }

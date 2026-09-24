@@ -30,6 +30,58 @@ The remaining four modules (`smart_treasury`, `payment_intent`, `audit_anchor`, 
 
 ---
 
+## Approval queue tenancy — 2026-09-24
+
+| ID | Sev | Finding | Status |
+|----|-----|---------|--------|
+| AQ-1 | High | `/queue` checked only that a session existed, then listed the process-global proposal store — hydrated after a cold start with every tenant's open proposals — filtered by status alone. Every signed-in user, including a brand-new account with no membership, saw every tenant's pending payments: payee and amount in the recommendation text, the amount, and the maker's user id. **Fixed**: the page resolves the viewer's org from their membership row (`viewerOrgId`, lib/server/viewer-org.ts — no membership, or no database, means no workspace) and lists only `openProposalsForOrg(store.list(), orgId)` (lib/queue/queue-scope.ts). A failure to read the membership errors rather than rendering an empty queue. The seeded demo rows are fixtures and unchanged. `tests/queue-scope.test.mjs` also fails the build if any page or API route lists the store without that scope. | Fixed |
+| AQ-3 | High | The `/queue` board's Approve and Reject changed only React state and toasted "Approved & queued for settlement". No request was made: the proposal stayed pending and the approver believed the payment had gone. Demo fixtures sat in the same list with the same buttons, and the lane counters counted fixtures as if they were the workspace's. **Fixed**: decisions go to `POST /api/proposals/[id]/submit` with the reviewed `approvalHash` (a proposal that changed since the page loaded is refused, not signed unseen). The board shows the server's outcome — sent, approved but not sent, recorded pending another approver, held for compliance with reasons, refused, or no answer — via `lib/queue/queue-decision.ts`, which claims a payment went only on an EXECUTED execution. Fixtures render in a separate, read-only Examples section. | Fixed |
+| AQ-2 | High | Found on the way, not fixed here: in Zeke's Claude tool loop (`runClaudeToolLoop`, lib/agent/oxwal.ts) the model supplies `orgId` to every tool, `executeOxwalTool(name, toolUse.input)` passes it through, and the system prompt never states the caller's org. A user can have Zeke list another org's saved recipients (`listSavedRecipients`), read saved travel-rule fields (`proposeRecipientFromInvoice`), rename another org's assistant (`setAssistantName`), or draft proposals into another org — which, after AQ-1, land in THAT org's queue. The input must be pinned to the session's org (`request.orgId`) before any tool runs. Pins exist on in-flight branches (`scopeToolInputToOrg`, `bindToolInputToOrg`), not on main as of this entry. | **Open** |
+
+---
+
+## Approval replay — 2026-09-24
+
+**Scope**: carrying out an approved payment — `proposals/[id]/submit`,
+`approvals/code` and the WhatsApp webhook → `settleFullyApprovedProposal` →
+`executeApprovedProposal` → the in-process replay of `transfers/authorize` and
+`batches/authorize`. Pinned in `tests/approval-replay.test.mjs`.
+
+| ID | Sev | Finding | Status |
+|----|-----|---------|--------|
+| AR-1 | High | The batch route verified the authenticator code BEFORE it read the approval claim, and the replayed body `{ rows, targetCurrency }` has no code — with `requireTotp` on, the default, every approved batch was recorded FAILED with `totp_*`. The transfer route replayed the maker's code stored in the proposal, already spent (`markStepConsumed`) and long expired, so every approved transfer on a code rail failed the same way. **Fixed**: a verified, payment-bound, single-use claim stands in for the maker's second factor on a replay, and only on a replay (decision below); the maker's code is no longer stored in the proposal. | Fixed |
+| AR-2 | High | The replay forwarded the approver's cookie, but `requireCustomerRequest` reads the session through `cookies()`, which answers from the incoming request's scope and never from the replayed Request. From the WhatsApp webhook there is no session, so every reply-approved payment answered 401; from the submit and code routes the replay silently ran as the approver's ambient session. **Fixed**: `lib/server/approval-replay-identity.ts` — the replay runs as an identity derived from the proposal (org, maker, approvers), bound to the exact Request object the replay constructs in a process-local WeakMap. No header, cookie or body field can produce one. The route re-reads the maker's membership and every approver's approving role in the proposal's org (`requirePaymentRequest`), then verifies the claim against the store and the body. | Fixed |
+| AR-3 | High | `batches/authorize` resolved `x-splash-approved-proposal` for existence, org and status only, never against the rows. Any member of an org who could pass the second factor could attach an approved batch's id to a different batch and skip the second approver. **Fixed**: a header carries nothing now; a batch claim is bound to every row and the currency, a transfer claim to payee, account, amount, currency, source, tier, invoice and travel rule. | Fixed |
+| AR-4 | High | Nothing spent a claim. `settleFullyApprovedProposal` replayed a proposal that was already SUBMITTED — a duplicate Twilio delivery, a late second approver — and `transfers/authorize` has no idempotency key, so one approval could pay twice; a client could also re-send an approved transfer with the header and a fresh code. **Fixed**: the claim is spent atomically (`UPDATE proposals SET executed_at … WHERE executed_at IS NULL`, `claimProposalExecution`) after every other guard and immediately before the payment record exists, and the write-through upsert never carries that column. Settle reports a submitted proposal instead of replaying it. | Fixed |
+| AR-5 | High | `settleFullyApprovedProposal` could not move a proposal out of SIMULATED — only the in-app submit route ran `POLICY_EVALUATED`/`QUEUE_FOR_APPROVAL` — so every ballot's APPROVE threw and was swallowed, SIGN threw, and no code or reply approval ever reached a money route. It also skipped the submit route's policy re-evaluation (a reply would have been worth more than a click the moment it worked) and read ballot roles from the user's membership in any org. **Fixed**: the same `authorizeProposalSubmission` re-evaluation and walk as the submit route, with roles read in the proposal's org. | Fixed |
+| AR-6 | Medium | Submit-time policy read beneficiary screening only from the agent's in-memory counterparty fixture (`getComplianceStatus`). Fiat beneficiaries from `transfers/authorize` are never written there, and batch proposals carried a prose COUNTERPARTY ref, so every real dual-approval payment stopped at "compliance hold" in both channels for a reason no screening could change. Each replay of a transfer also minted a fresh `rcpt_` record, so the executed transfer named a different beneficiary than its proposal. **Narrowed**: `lib/server/screening-record.ts` records verdicts durably — latest on the beneficiary row, every verdict appended to `screening_results` — and `resolveDurableComplianceForProposal` reads them in the proposal's org for both approval paths. A payroll run names each payee as `wallet:<address>`, screened after the proposal against the wallet provider (Chainalysis sanctions list, when `CHAINALYSIS_SANCTIONS_API_KEY` is set). A replay reuses the approved beneficiary record and refuses if it is gone or no longer matches. A hold now says why (`describeComplianceHold`). Nothing defaults to clear. **Still needs a decision or a provider, and is not decided in code:** (1) no provider screens bank beneficiaries' names, so they stay NOT_SCREENED; (2) policy requires a VERIFIED counterparty, and no flow sets a recipient's KYB to `full`; (3) a payroll address has no KYB, so a CLEAR payee holds as PAYEE_KYB_NOT_ESTABLISHED until compliance decides whether sanctions screening alone may release a run; (4) an admin's ATTESTED is accepted by the capped wallet lane and deliberately not here; (5) verdicts carry no staleness rule, matching the wallet lane. Gap behind all five: A-15. | **Open (narrowed)** |
+
+**The decision behind AR-1**, recorded in full in `lib/server/approved-proposal.ts`.
+The maker's second factor was verified at the moment the maker authorized
+this exact payment: both routes check it before `proposeForApproval` stores
+the payload, and the claim is bound to that payload. It cannot be verified a
+second time — a TOTP step is single-use and gone in about ninety seconds, a
+WhatsApp approval is spent when used — so re-checking it on replay is not a
+stricter control but one nobody can pass, and asking the maker for a fresh
+code at approval time would make them a participant in the checker's act.
+Accepted residual risk: a stolen maker session still needs the maker's factor
+to create the proposal and then approvers who are not the maker; a stolen
+approver session or handset is one signature, with reply approval unanimous
+and every approver's role re-read at replay; and if `requireTotp` was off
+when the maker proposed and on when the approvers sign, the payment goes with
+no maker code ever checked — the approvers are the control at that point. The
+claim lifts the second factor and the second approver and nothing else: KYB,
+terms, the minimum, the row cap, the travel rule, both ceilings, the
+compliance pause, the funding session, the balance, the peg and the batch
+replay key all run again against current state. A session request carries no
+claim, so nothing changes for it.
+
+**Residual, architectural.** In-memory proposal stores write through
+last-writer-wins. Across two instances the spend still releases one payment,
+but a racing instance can overwrite the proposal row's recorded outcome.
+
+---
+
 ## The agent's two names — 2026-09-23
 
 The agent's display name is **Zeke**. Its persisted actor id is `OXWAL` and

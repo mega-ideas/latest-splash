@@ -20,46 +20,67 @@
  * balance can drain, a corridor can be paused, a beneficiary can fail
  * screening, and the daily ceiling can be consumed by other payments. An
  * approval says "this payment is authorised". It does not say "skip the
- * checks". The only thing it removes is the second-approver requirement,
- * because that is exactly what it supplied.
+ * checks". It lifts the second-approver requirement, because that is exactly
+ * what it supplied, and the maker's second factor, which was checked when the
+ * payment was proposed and cannot be checked again (approved-proposal.ts).
  *
- * ─── The header is a claim, not a credential ────────────────────────────────
+ * ─── Who the route sees ─────────────────────────────────────────────────────
  *
- * `x-splash-approved-proposal` tells the route which approval to look for. The
- * route does not trust it: it loads that proposal, checks it belongs to the
- * caller's org, checks it is genuinely approved, and checks it describes this
- * payment. A client sending the header by hand gets nowhere.
+ * The approval, bound to the Request object built here
+ * (approval-replay-identity.ts). Not a cookie: the route reads the session
+ * through `cookies()`, which answers from the INCOMING request's scope and
+ * never from this object, so a forwarded cookie was never read — code and
+ * in-app approvals ran as the approver's ambient session, and WhatsApp replies
+ * ran as nobody and got 401. And not a header: anything in this Request is
+ * something a client could also send.
  */
 import 'server-only';
 
-export const APPROVED_PROPOSAL_HEADER = 'x-splash-approved-proposal';
+import {
+  issueApprovalReplay,
+  type ApprovalReplayIdentity,
+} from '@/lib/server/approval-replay-identity';
 
-export type ReplayResult = { ok: true; ref?: string } | { ok: false; error: string };
+export type ReplayResult =
+  | {
+      ok: true;
+      ref?: string;
+      /** The route found this exact payment already made and returned it
+       *  rather than making it again (the batch replay key). */
+      alreadyMade?: boolean;
+    }
+  | { ok: false; error: string; code?: string };
 
 type ReplayInput = {
-  orgId: string;
-  approvedProposalId: string;
+  /** What the payment runs as. Bound to the Request, never written into it. */
+  identity: ApprovalReplayIdentity;
   body: Record<string, unknown>;
-  /** The approver's own cookie, forwarded so the route resolves a real session
-   *  and a real membership rather than being handed an identity. */
-  cookie: string;
+  /** Where the request says it is addressed. Nothing in the route reads it
+   *  for authority. */
   origin: string;
 };
 
-async function invoke(
-  handler: (request: Request) => Promise<Response>,
+type RouteHandler = (request: Request) => Promise<Response>;
+
+/**
+ * Invoke a route handler as the replay of one approved proposal.
+ *
+ * Exported for tests, which stand a plain function in for the route: the
+ * route modules import `next/server` and cannot load outside Next.
+ */
+export async function replayThroughHandler(
+  handler: RouteHandler,
   path: string,
   input: ReplayInput,
 ): Promise<ReplayResult> {
-  const request = new Request(`${input.origin}${path}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      cookie: input.cookie,
-      [APPROVED_PROPOSAL_HEADER]: input.approvedProposalId,
-    },
-    body: JSON.stringify(input.body),
-  });
+  const request = issueApprovalReplay(
+    new Request(new URL(path, input.origin), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input.body),
+    }),
+    input.identity,
+  );
 
   const response = await handler(request);
   const text = await response.text();
@@ -74,22 +95,22 @@ async function invoke(
 
   if (!response.ok) {
     const detail = typeof parsed.error === 'string' ? parsed.error : `HTTP ${response.status}`;
-    return { ok: false, error: detail };
+    return { ok: false, error: detail, code: typeof parsed.code === 'string' ? parsed.code : undefined };
   }
 
   const ref =
     (typeof parsed.id === 'string' && parsed.id) ||
     (typeof parsed.transferIntentId === 'string' && parsed.transferIntentId) ||
     undefined;
-  return { ok: true, ref };
+  return { ok: true, ref, alreadyMade: parsed.idempotentReplay === true };
 }
 
 export async function authorizeTransferForApproval(input: ReplayInput): Promise<ReplayResult> {
   const { POST } = await import('@/app/api/transfers/authorize/route');
-  return invoke(POST, '/api/transfers/authorize', input);
+  return replayThroughHandler(POST, '/api/transfers/authorize', input);
 }
 
 export async function authorizeBatchForApproval(input: ReplayInput): Promise<ReplayResult> {
   const { POST } = await import('@/app/api/batches/authorize/route');
-  return invoke(POST, '/api/batches/authorize', input);
+  return replayThroughHandler(POST, '/api/batches/authorize', input);
 }

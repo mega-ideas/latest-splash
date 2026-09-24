@@ -15,7 +15,14 @@ import { readOriginator } from '@/lib/server/originator';
 import { patchInvoice } from '@/lib/server/invoices-store';
 import { patchAuditReceipt, patchTransfer, persistTransfer } from '@/lib/server/transfers-store';
 import { proposeForApproval } from '@/lib/server/dual-approval';
-import { resolveApprovalClaim } from '@/lib/server/approved-proposal';
+import {
+  approvalBeneficiaryRefusal,
+  approvalClaimRefusal,
+  approvalSpendRefusal,
+  approvedBeneficiary,
+  resolveApprovalClaim,
+  spendApprovalClaim,
+} from '@/lib/server/approved-proposal';
 import { resolveAuthorityForSession } from '@/lib/auth/authority';
 import { pythAdapter } from '@/lib/server/pyth';
 import { calculateQuote } from '@/lib/server/quote';
@@ -28,19 +35,17 @@ import {
   resolveFundingSelection,
   type FundingSelection,
 } from '@/lib/funding/registry';
-import { requireCustomerRequest } from '@/lib/server/customer-auth';
+import { requirePaymentRequest } from '@/lib/server/payment-request';
 import { assertCleanBody, ProvenanceViolationError, provenanceViolationResponse } from '@/lib/auth/provenance-guard';
-import { requireActiveOrg } from '@/lib/server/kyb-gate';
+import { requireActiveOrg, requireActiveOrgId } from '@/lib/server/kyb-gate';
 import { custodyPhaseResponse, deliveryTierAllowed } from '@/lib/server/custody-phase';
 import { checkMinimumSettlement } from '@/lib/policy/limits';
 import { checkAuthorizationLimits, startOfUtcDay } from '@/lib/policy/authorization-limits';
 import { verifyPayoutTotp } from '@/lib/auth/totp';
 import { approvalRequiredResponse, consumeActionApproval, releaseActionApproval } from '@/lib/server/step-up-gate';
-import { fiatPaymentSubstance } from '@/lib/server/step-up-subjects';
-import { subjectDigest } from '@/lib/server/step-up';
 import { readOrgSettings } from '@/lib/server/org-settings';
 import { readComplianceControls } from '@/lib/server/sui-settlement';
-import { isForeignAccountId, requireSessionAccount } from '@/lib/server/session-account';
+import { isForeignAccountId, requireOrgAccount, requireSessionAccount } from '@/lib/server/session-account';
 import { readJsonBody } from '@/lib/server/http';
 import { requireTermsAccepted } from '@/lib/server/onboarding';
 
@@ -107,7 +112,9 @@ export async function POST(request: Request) {
 }
 
 async function authorize(request: Request, spent: SpentApproval) {
-  const auth = await requireCustomerRequest(request);
+  // A signed-in person, or an approved payment being carried out by the replay
+  // (lib/server/payment-request.ts). Nothing a client sends selects the second.
+  const auth = await requirePaymentRequest(request);
   if (auth.response) return auth.response;
 
   const rawBody = await readJsonBody(request);
@@ -117,7 +124,10 @@ async function authorize(request: Request, spent: SpentApproval) {
     if (error instanceof ProvenanceViolationError) return provenanceViolationResponse(error);
     throw error;
   }
-  const gate = await requireActiveOrg(auth.session, { lane: 'FIAT_OUT_LOCAL' });
+  // The same gate and lane either way; a replay's org is the proposal's.
+  const gate = auth.replay
+    ? await requireActiveOrgId(auth.replay.orgId, { lane: 'FIAT_OUT_LOCAL' })
+    : await requireActiveOrg(auth.session, { lane: 'FIAT_OUT_LOCAL' });
   if (gate.response) return gate.response;
 
   const parsed = authorizeSchema.safeParse(rawBody);
@@ -132,10 +142,12 @@ async function authorize(request: Request, spent: SpentApproval) {
   const totp = String(body.totp ?? '');
   const paymentRail = String(body.paymentRail ?? 'STRIPE_CHECKOUT');
 
-  // The paying account is resolved from the SESSION. It used to come from
-  // `body.businessAccountId`, which let any session holder name another org's
-  // funded account and spend it.
-  const accountCheck = await requireSessionAccount(auth.session);
+  // The paying account is resolved from the SESSION — or, on a replay, from the
+  // approved proposal's org. It used to come from `body.businessAccountId`,
+  // which let any session holder name another org's funded account and spend it.
+  const accountCheck = auth.replay
+    ? await requireOrgAccount(auth.replay.orgId)
+    : await requireSessionAccount(auth.session);
   if (accountCheck.response) return accountCheck.response;
   const { accountId: businessAccountId, orgId } = accountCheck.account;
 
@@ -154,17 +166,16 @@ async function authorize(request: Request, spent: SpentApproval) {
   const settings = await readOrgSettings(orgId);
 
   // An approval collected through the queue, verified against the proposal
-  // store and — new — against THIS payment. The claim used to be checked for
-  // existence, org and status only, so an approved proposal's id could ride
-  // on a different payment and skip the second approver.
-  const claim = await resolveApprovalClaim(request, orgId);
-  const approvalClaim = {
-    ...claim,
-    approved:
-      claim.approved &&
-      claim.payload != null &&
-      subjectDigest(fiatPaymentSubstance(claim.payload)) === subjectDigest(fiatPaymentSubstance(rawBody as Record<string, unknown>)),
-  };
+  // store and bound to THIS payment — recipient, account, amount, currency,
+  // source (lib/server/approved-proposal.ts). Only the replay can carry one;
+  // the header it used to be read from is ignored.
+  const approvalClaim = await resolveApprovalClaim(request, orgId, {
+    kind: 'PAYMENT',
+    payment: rawBody as Record<string, unknown>,
+  });
+  // A replay has no session to fall back on and no maker present to send the
+  // payment for approval again. If its claim does not verify, nothing happens.
+  if (auth.replay && !approvalClaim.approved) return approvalClaimRefusal(approvalClaim);
 
   // WhatsApp style (Settings → Approvals): every payout needs a WhatsApp code
   // and passkey approval for exactly this payment — recipient, account,
@@ -172,6 +183,8 @@ async function authorize(request: Request, spent: SpentApproval) {
   // refused. A payment carried out from the approval queue was approved there.
   let whatsappApproved = false;
   if (settings.whatsappEnabled && !approvalClaim.approved) {
+    // Only a signed-in person reaches this: an unverified replay was refused.
+    if (!auth.session) return approvalClaimRefusal(approvalClaim);
     const approval = {
       session: auth.session,
       orgId,
@@ -192,22 +205,23 @@ async function authorize(request: Request, spent: SpentApproval) {
     body.fundingSelection?.type !== 'held' &&
     paymentRail !== 'STRIPE_CHECKOUT' &&
     paymentRail !== 'AIRWALLEX_WIRE';
-  if (totpRequiredForThisRail) {
-    // A WhatsApp code + passkey approval for exactly this payment stands in
-    // for the authenticator code.
-    if (!whatsappApproved) {
-      const verdict = verifyPayoutTotp({ code: totp, accountId: businessAccountId, requireTotp: settings.requireTotp });
-      if (!verdict.ok) {
-        return NextResponse.json(
-          {
-            error: settings.whatsappEnabled
-              ? `${verdict.message} Or approve this payout with a WhatsApp code and your passkey.`
-              : verdict.message,
-            code: `totp_${verdict.code}`,
-          },
-          { status: 400 },
-        );
-      }
+  // A WhatsApp code + passkey approval for exactly this payment stands in for
+  // the authenticator code. So does a verified approval on a replay: the code
+  // in the replayed body is the maker's, checked and spent when the payment was
+  // proposed a day earlier, and it can never pass again. The trade-off is
+  // written down in lib/server/approved-proposal.ts.
+  if (totpRequiredForThisRail && !whatsappApproved && !approvalClaim.approved) {
+    const verdict = verifyPayoutTotp({ code: totp, accountId: businessAccountId, requireTotp: settings.requireTotp });
+    if (!verdict.ok) {
+      return NextResponse.json(
+        {
+          error: settings.whatsappEnabled
+            ? `${verdict.message} Or approve this payout with a WhatsApp code and your passkey.`
+            : verdict.message,
+          code: `totp_${verdict.code}`,
+        },
+        { status: 400 },
+      );
     }
   }
 
@@ -232,15 +246,23 @@ async function authorize(request: Request, spent: SpentApproval) {
   // The cost is that a refused payment leaves a beneficiary record. That is
   // the operator's own input for a counterparty that exists either way, and
   // it is scoped to their org.
-  const recipient = await persistRecipient(buildRecipient({
-    orgId,
-    name: body.recipient.name,
-    country: body.recipient.country,
-    swift: body.recipient.bank?.swift,
-    account: body.recipient.bank?.account,
-    tier: body.deliveryTier,
-    travelRule: body.recipient.travelRule as Parameters<typeof buildRecipient>[0]['travelRule'],
-  }));
+  //
+  // A replay is paying the beneficiary its proposal named — the record the
+  // approvers signed and any screening was recorded against — so it reuses
+  // that record instead of minting a second, and refuses if it is gone or no
+  // longer matches (lib/server/approved-proposal.ts).
+  const recipient = approvalClaim.approved
+    ? await approvedBeneficiary(orgId, approvalClaim, body.recipient)
+    : await persistRecipient(buildRecipient({
+      orgId,
+      name: body.recipient.name,
+      country: body.recipient.country,
+      swift: body.recipient.bank?.swift,
+      account: body.recipient.bank?.account,
+      tier: body.deliveryTier,
+      travelRule: body.recipient.travelRule as Parameters<typeof buildRecipient>[0]['travelRule'],
+    }));
+  if (!recipient) return approvalBeneficiaryRefusal();
 
   // The travel rule, checked HERE and not only in the form.
   //
@@ -297,11 +319,13 @@ async function authorize(request: Request, spent: SpentApproval) {
     return NextResponse.json({ error: limits.message, code: limits.code, limitUsd: limits.limitUsd }, { status: 400 });
   }
   // An approval already collected for THIS payment (resolved above) lifts
-  // the second-approver requirement and nothing else. Verified against the
-  // proposal store, never taken from the header: a client that could assert
-  // its own approval would be a considerably worse hole than the one dual
-  // approval closes.
+  // the second-approver requirement — and, above, the maker's second factor —
+  // and nothing else. Verified against the proposal store, never taken from a
+  // header: a client that could assert its own approval would be a
+  // considerably worse hole than the one dual approval closes.
   if (limits.requiresSecondApproval && !approvalClaim.approved) {
+    // Only a signed-in person reaches this: an unverified replay was refused.
+    if (!auth.session) return approvalClaimRefusal(approvalClaim);
     // This used to answer 409 telling the operator to "submit it through the
     // approval queue", and put nothing in the approval queue. A control that
     // stops work without offering the sanctioned path is one people route
@@ -329,7 +353,10 @@ async function authorize(request: Request, spent: SpentApproval) {
         // an unresolvable ref blocks forever rather than failing closed once.
         { source: 'COUNTERPARTY', ref: recipient.id },
       ],
-      payload: { ...body, businessAccountId: undefined },
+      // Never the second-factor code. It was verified and spent a moment ago
+      // to get this far, a replay cannot use it, and a secret has no business
+      // sitting in a proposal row.
+      payload: { ...body, businessAccountId: undefined, totp: undefined },
       idempotencyKey: `transfer:${orgId}:${body.amount.value}:${body.recipient.name}:${body.amount.targetCurrency}`,
       approvalThresholdUsd: settings.approvalThresholdUsd,
     });
@@ -489,6 +516,16 @@ async function authorize(request: Request, spent: SpentApproval) {
     }),
   });
 
+  // Single-use. Every guard above has passed; the approval is spent here,
+  // atomically in Postgres, before the transfer exists. This route has no
+  // idempotency key of its own, so without this a second replay of the same
+  // approval — a duplicate webhook, two approvers answering together — would
+  // pay the beneficiary twice.
+  if (approvalClaim.approved) {
+    const approvalSpend = await spendApprovalClaim(approvalClaim);
+    if (approvalSpend !== 'spent') return approvalSpendRefusal(approvalSpend);
+  }
+
   // Postgres when configured, this process only when not — one place decides,
   // and every read of this transfer goes back through the same store.
   await persistTransfer(intent);
@@ -534,7 +571,9 @@ async function authorize(request: Request, spent: SpentApproval) {
   }
   recordLastUsedFundingSource(businessAccountId, fundingSelection.source);
   await patchAuditReceipt(intent.id, {
-    approvedBy: 'dashboard-operator',
+    // A replayed payment was released by its approval, and the receipt says
+    // which one — the trail from payout back to signatures.
+    approvedBy: approvalClaim.approved ? `approval:${approvalClaim.proposalId}` : 'dashboard-operator',
     approvedAt: new Date().toISOString(),
   });
   // Scoped: binding an invoice to a transfer is a write, and it used to accept

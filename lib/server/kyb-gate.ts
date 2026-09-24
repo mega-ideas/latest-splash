@@ -64,13 +64,30 @@ export async function requireActiveOrg(
     throw error;
   }
 
-  const state = await readOrgKybState(ctx.orgId);
+  return requireActiveOrgId(ctx.orgId, opts);
+}
+
+/**
+ * The same gate for a caller with no session: an approved payment carried out
+ * for its org (lib/server/payment-request.ts). The org comes from the proposal,
+ * the one record that says whose money it is — so a replay meets exactly the
+ * check, and the lane wording, a signed-in person would.
+ */
+export async function requireActiveOrgId(
+  orgId: string,
+  opts: { lane?: Lane } = {},
+): Promise<KybGateResult> {
+  if (!kybGateEnabled()) {
+    return { state: 'ACTIVE', response: null };
+  }
+
+  const state = await readOrgKybState(orgId);
 
   if (canMoveMoney(state)) {
     return { state, response: null };
   }
 
-  console.warn('[kyb-gate] blocked money route', { orgId: ctx.orgId, state, lane: opts.lane });
+  console.warn('[kyb-gate] blocked money route', { orgId, state, lane: opts.lane });
   const reason = opts.lane && isOnboarding(state) ? laneAccess(state, opts.lane).reason : kybGateReason(state);
   return {
     state,

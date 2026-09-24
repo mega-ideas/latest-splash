@@ -1,4 +1,4 @@
-import { eq, notInArray } from 'drizzle-orm';
+import { and, eq, inArray, isNull, notInArray, or, sql } from 'drizzle-orm';
 import type { PgDatabase } from 'drizzle-orm/pg-core';
 
 import { approvals, organizations, proposals } from './schema.ts';
@@ -54,7 +54,12 @@ export async function ensureOrganization(db: DrizzleDb, orgId: string): Promise<
 }
 
 /** Durable write-through: upsert the proposal row + replace its approvals,
- *  atomically. Called after every store mutation. */
+ *  atomically. Called after every store mutation.
+ *
+ *  `executed_at` is deliberately NOT in the row: it is the single-use marker
+ *  `claimProposalExecution` sets, and the in-memory proposal does not know it.
+ *  Writing it from here would clear the marker on the next mutation and let
+ *  one approval release a second payment. */
 export async function upsertProposal(db: DrizzleDb, proposal: UnsignedProposal): Promise<void> {
   await ensureOrganization(db, proposal.orgId);
   await db.transaction(async (tx) => {
@@ -99,6 +104,43 @@ export async function upsertProposal(db: DrizzleDb, proposal: UnsignedProposal):
   });
 }
 
+export type ExecutionClaim = 'claimed' | 'already-claimed' | 'missing';
+
+/**
+ * Spend an approved proposal's authority — once.
+ *
+ * An approval releases ONE payment. The replay that carries it out can run
+ * more than once: a duplicate webhook delivery, two approvers answering
+ * together, two instances holding the same proposal. The transfer route has no
+ * idempotency key of its own, so without this a second replay pays again.
+ *
+ * The `isNull(executedAt)` in the UPDATE's WHERE clause is the guarantee, the
+ * same shape as `recordDecision`'s: two replays arriving together would both
+ * pass a prior read, and exactly one of them can win this write.
+ *
+ * `missing` means the row is not there for this org — a write-through that
+ * failed, or a proposal from somewhere else. The caller refuses either way.
+ */
+export async function claimProposalExecution(
+  db: DrizzleDb,
+  input: { proposalId: string; orgId: string; at: Date },
+): Promise<ExecutionClaim> {
+  const scope = and(eq(proposals.id, input.proposalId), eq(proposals.orgId, input.orgId));
+  const claimed = await db
+    .update(proposals)
+    .set({ executedAt: input.at, updatedAt: input.at })
+    .where(and(scope, isNull(proposals.executedAt)))
+    .returning({ id: proposals.id });
+  if (claimed.length > 0) return 'claimed';
+
+  const existing = await db
+    .select({ executedAt: proposals.executedAt })
+    .from(proposals)
+    .where(scope)
+    .limit(1);
+  return existing[0]?.executedAt ? 'already-claimed' : 'missing';
+}
+
 function rowToProposal(row: typeof proposals.$inferSelect, approvalRows: (typeof approvals.$inferSelect)[]): UnsignedProposal {
   return {
     id: row.id,
@@ -125,7 +167,56 @@ function rowToProposal(row: typeof proposals.$inferSelect, approvalRows: (typeof
     executionPayload: row.executionPayload
       ? decodeJsonWithBigints(row.executionPayload)
       : undefined,
+    // Read back as well as written. Without it, a proposal carried out before
+    // a restart came back with no outcome: a failed attempt read the same as
+    // one still in flight. Only a failure's detail is stored; `executed_at` is
+    // read here and never written by `upsertProposal` (see above).
+    execution: row.executionState
+      ? {
+          state: row.executionState as NonNullable<UnsignedProposal['execution']>['state'],
+          detail: row.executionError ?? '',
+          at: (row.executedAt ?? row.updatedAt).toISOString(),
+        }
+      : undefined,
   } as UnsignedProposal;
+}
+
+/**
+ * Every proposal in `orgId` whose idempotency key is `baseKey` or begins
+ * `baseKey#` — the candidates for that payment's key generations
+ * (lib/queue/proposal-state.ts), whatever their status.
+ *
+ * Boot hydration loads only open proposals, but the unique index on
+ * (org_id, idempotency_key) holds the finished ones too, so the generation a
+ * new proposal takes has to be decided against this, not the hot store alone.
+ * `starts_with` rather than LIKE: a key carries free text, and LIKE would read
+ * a payee name's `%` or `_` as a wildcard.
+ */
+export async function loadProposalKeyFamily(
+  db: DrizzleDb,
+  orgId: string,
+  baseKey: string,
+): Promise<UnsignedProposal[]> {
+  const rows: (typeof proposals.$inferSelect)[] = await db
+    .select()
+    .from(proposals)
+    .where(
+      and(
+        eq(proposals.orgId, orgId),
+        or(eq(proposals.idempotencyKey, baseKey), sql`starts_with(${proposals.idempotencyKey}, ${`${baseKey}#`})`),
+      ),
+    );
+  if (rows.length === 0) return [];
+  const approvalRows: (typeof approvals.$inferSelect)[] = await db
+    .select()
+    .from(approvals)
+    .where(
+      inArray(
+        approvals.proposalId,
+        rows.map((row) => row.id),
+      ),
+    );
+  return rows.map((row) => rowToProposal(row, approvalRows.filter((approval) => approval.proposalId === row.id)));
 }
 
 /** Boot hydration: every proposal still in flight (non-terminal). */

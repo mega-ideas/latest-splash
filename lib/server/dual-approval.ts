@@ -39,6 +39,12 @@
 import { createHash, randomUUID } from 'node:crypto';
 
 import type { EvidenceItem, ProposalKind, UnsignedProposal } from '@/lib/agent/types';
+import {
+  absorbsResubmission,
+  idempotencyKeyForGeneration,
+  idempotencyKeyGeneration,
+  nextIdempotencyKeyGeneration,
+} from '@/lib/queue/proposal-state';
 
 /** How long an unapproved payment stays approvable. Beyond this the quote and
  *  the balance behind it are stale enough that re-authorizing is the honest
@@ -73,14 +79,35 @@ export type PendingApproval = {
   passedChecks: PassedCheck[];
   /** Enough to rebuild the payment when it is approved. */
   payload: Record<string, unknown>;
-  /** Ties the proposal to the same replay key the route derived, so a
-   *  re-submitted file finds the pending proposal instead of making a second. */
+  /** Names the payment: the same payee, amount and currency, or the same
+   *  payroll rows. A re-submission finds the proposal that can still carry it
+   *  out instead of making a second; once that proposal is finished, the same
+   *  payment again gets a proposal of its own under the next generation of
+   *  this key (lib/queue/proposal-state.ts). */
   idempotencyKey: string;
   approvalThresholdUsd: number;
+  /** The clock, for the approval window. Defaults to now. */
+  now?: Date;
 };
 
 /**
- * Create the proposal a blocked payment becomes.
+ * Create the proposal a blocked payment becomes — or find the one that is
+ * already carrying it.
+ *
+ * ─── What happens to the proposal a re-submission does not absorb ───────────
+ *
+ * A re-submission finds a proposal only while that proposal can still be
+ * approved and carried out (`absorbsResubmission`). Otherwise the payment gets
+ * a new proposal, with its own approvals, under the next key generation.
+ *
+ * The earlier one is left exactly as it is. Carried out — succeeded or failed —
+ * it is the record of what was approved and what happened, and its approval is
+ * spent (`proposals.executed_at`); rejected, it is the record of the refusal.
+ * None of those is reopened, re-approved or re-used. The one change: a
+ * proposal still reading as pending, or approved, but past its approval window
+ * is marked EXPIRED when the new one supersedes it. Policy would refuse it
+ * anyway; left as it was, the queue would show an approvable-looking proposal
+ * beside its replacement.
  *
  * Returns the proposal, or `null` when the store is unavailable — the caller
  * still refuses the payment, because failing to create the approval record is
@@ -91,30 +118,63 @@ export async function proposeForApproval(
 ): Promise<UnsignedProposal | null> {
   try {
     const { getOxwalProposalStore } = await import('@/lib/agent/oxwal');
-    const { ensureProposalStoreHydrated } = await import('@/lib/queue/proposal-persistence');
+    const { ensureProposalStoreHydrated, hydrateKeyGenerations } = await import(
+      '@/lib/queue/proposal-persistence'
+    );
 
     const store = getOxwalProposalStore();
     // A pending proposal for this exact payment may already be in Postgres from
     // a previous process; without hydrating first we would mint a second.
     await ensureProposalStoreHydrated(store);
+    // And the finished generations, which boot hydration leaves out but the
+    // unique index still holds: they decide which generation is free.
+    await hydrateKeyGenerations(store, input.orgId, input.idempotencyKey);
 
-    const existing = store
+    // Synchronous from here to `create`, so two identical submissions in this
+    // process cannot both find nothing and both open a generation.
+    const now = input.now ?? new Date();
+    const generationOf = (p: UnsignedProposal) => idempotencyKeyGeneration(input.idempotencyKey, p.idempotencyKey);
+    const generations = store
       .list()
-      .find((p) => p.orgId === input.orgId && p.idempotencyKey === input.idempotencyKey);
-    if (existing) return existing;
+      .filter((p) => p.orgId === input.orgId && generationOf(p) !== null);
 
-    const createdAt = new Date().toISOString();
+    const carrying = generations
+      .filter((p) => absorbsResubmission(p, now.getTime()))
+      .sort((a, b) => (generationOf(b) ?? 0) - (generationOf(a) ?? 0))[0];
+    if (carrying) return carrying;
+
+    // Nothing can carry this payment any more. Whatever still reads as
+    // pending or approved is past its window: superseded, and marked so.
+    for (const stale of generations) {
+      if (
+        stale.status === 'SIMULATED' ||
+        stale.status === 'POLICY_EVALUATED' ||
+        stale.status === 'PENDING_APPROVAL' ||
+        stale.status === 'APPROVED'
+      ) {
+        store.transition(stale.id, { type: 'EXPIRE' });
+      }
+    }
+
+    const idempotencyKey = idempotencyKeyForGeneration(
+      input.idempotencyKey,
+      nextIdempotencyKeyGeneration(
+        input.idempotencyKey,
+        generations.map((p) => p.idempotencyKey),
+      ),
+    );
+    const createdAt = now.toISOString();
     const simulatedAt = createdAt;
     const proposal: UnsignedProposal = {
       id: `prop_${randomUUID()}`,
-      idempotencyKey: input.idempotencyKey,
+      idempotencyKey,
       kind: input.kind,
       status: 'DRAFTED',
       tier: 'TIER_0_PROPOSE',
       orgId: input.orgId,
       corridor: input.targetCurrency,
       unsignedTxBytes: createHash('sha256')
-        .update(`${input.kind}\u0000${input.orgId}\u0000${input.idempotencyKey}`)
+        .update(`${input.kind}\u0000${input.orgId}\u0000${idempotencyKey}`)
         .digest('hex'),
       explain: {
         recommendation: input.recommendation,
@@ -146,7 +206,7 @@ export async function proposeForApproval(
         // The policy engine decides the real number at submit time; this is the
         // floor that put the payment here.
         requiredApprovers: 2,
-        reasoningTraceRef: `dual-approval:${input.idempotencyKey.slice(0, 20)}`,
+        reasoningTraceRef: `dual-approval:${idempotencyKey.slice(0, 20)}`,
       },
       // The maker. Compared against the approver by the submit route, and the
       // reason this cannot come from the request body.
@@ -162,6 +222,13 @@ export async function proposeForApproval(
     };
 
     const stored = store.create(proposal);
+    if (stored.id !== proposal.id) {
+      // The store's key index already maps this key to another proposal. The
+      // index is not keyed by org and nothing above found this generation, so
+      // this is not a re-submission: refuse rather than hand back a proposal
+      // made for some other payment.
+      throw new Error(`idempotency key ${idempotencyKey} already belongs to ${stored.id}`);
+    }
 
     // Record the checks as the simulation. Honest about what it is: the money
     // movement and the gates it already cleared, not a chain dry-run.

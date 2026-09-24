@@ -103,7 +103,11 @@ test('the proposal is simulated, because the submit route refuses one that is no
 test('a re-submitted payment finds its pending proposal rather than queueing a second', async () => {
   const text = await source('lib/server/dual-approval.ts');
   assert.match(text, /ensureProposalStoreHydrated/, 'a cold start must see Postgres first');
-  assert.match(text, /p\.orgId === input\.orgId && p\.idempotencyKey === input\.idempotencyKey/);
+  // Any generation of this payment's key, in this org — and only one that can
+  // still carry the payment absorbs the re-submission
+  // (tests/proposal-resubmission.test.mjs has the behaviour).
+  assert.match(text, /p\.orgId === input\.orgId && generationOf\(p\) !== null/);
+  assert.match(text, /absorbsResubmission\(p, now\.getTime\(\)\)/);
 
   const batch = await source('app/api/batches/authorize/route.ts');
   // The batch reuses the run's own derived key, so the queued proposal and the
@@ -165,7 +169,8 @@ test('the money route names the beneficiary by id, not by name', async () => {
 
   // Which means the beneficiary must be resolved BEFORE the ceiling check that
   // creates the proposal.
-  const beneficiaryAt = text.indexOf('const recipient = await persistRecipient');
+  // A replay reuses the approved record instead (tests/beneficiary-screening.test.mjs).
+  const beneficiaryAt = text.indexOf('persistRecipient(buildRecipient(');
   const ceilingAt = text.indexOf('const limits = checkAuthorizationLimits');
   assert.ok(beneficiaryAt > 0 && beneficiaryAt < ceilingAt,
     'the beneficiary must exist before the proposal that names it');

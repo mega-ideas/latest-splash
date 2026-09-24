@@ -120,10 +120,21 @@ test('authorize: WhatsApp style needs an approval for EVERY payout, spent once a
 
 test('authorize: an approved-proposal claim only counts for the payment it approved', async () => {
   const route = code(await readFile(new URL('../app/api/transfers/authorize/route.ts', import.meta.url), 'utf8'));
-  assert.match(
-    route,
-    /subjectDigest\(fiatPaymentSubstance\(claim\.payload\)\) === subjectDigest\(fiatPaymentSubstance\(rawBody as Record<string, unknown>\)\)/,
-  );
+  // The route hands the resolver the payment it is about to make; the binding
+  // itself lives with the claim, where the batch route now gets it too.
+  assert.match(route, /resolveApprovalClaim\(request, orgId, \{\s*kind: 'PAYMENT',\s*payment: rawBody as Record<string, unknown>/);
+  const claim = code(await readFile(new URL('../lib/server/approved-proposal.ts', import.meta.url), 'utf8'));
+  assert.match(claim, /approvalPaymentDigest\(expected\.kind, payload\) !== approvalPaymentDigest\(expected\.kind, expected\.payment\)/);
+  assert.match(claim, /fiatPaymentSubstance\(payload\)/);
+
+  // The substance an approval covers is the same one the WhatsApp approval
+  // covers: the wizard's state around it and the second-factor code are not
+  // part of it; who, where and how much are.
+  const { approvalPaymentDigest } = await import('../lib/server/approved-proposal.ts');
+  const approved = approvalPaymentDigest('PAYMENT', wizardBody());
+  assert.equal(approvalPaymentDigest('PAYMENT', wizardBody({ totp: '654321', step: 5 })), approved);
+  assert.notEqual(approvalPaymentDigest('PAYMENT', wizardBody({ amount: { value: '25000', targetCurrency: 'PHP' } })), approved);
+
   // One resolution, used for both the second-approver lift and the WhatsApp skip.
   assert.equal(route.match(/resolveApprovalClaim\(/g).length, 1);
 });

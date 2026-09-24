@@ -110,9 +110,11 @@ export async function POST(request: Request) {
 
     // A unanimous approval settles through the same path an in-app approval
     // does — this route decides nothing about money, it only records a vote.
+    // There is no session here, and none is needed: the payment runs as the
+    // approval itself (lib/server/approval-replay-identity.ts).
     if (result.tally.unanimous) {
       const { settleFullyApprovedProposal } = await import('@/lib/server/approval-settle');
-      const outcome = await settleFullyApprovedProposal(lookup.token.proposalId);
+      const outcome = await settleFullyApprovedProposal(lookup.token.proposalId, { channel: 'whatsapp' });
       return twiml(outcome.message);
     }
 

@@ -99,7 +99,7 @@ export async function POST(request: Request) {
   // The same settlement path a WhatsApp reply reaches. The channel decided how
   // the question was asked; it does not decide what an approval is worth.
   if (result.tally.unanimous) {
-    const outcome = await settleFullyApprovedProposal(lookup.token.proposalId);
+    const outcome = await settleFullyApprovedProposal(lookup.token.proposalId, { channel: 'code' });
     return NextResponse.json({
       ok: true,
       decision: result.decision,

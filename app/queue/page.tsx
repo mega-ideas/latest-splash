@@ -6,7 +6,9 @@ import type { ProposalExplain, SimulationResult, UnsignedProposal } from '@/lib/
 import { getOxwalProposalStore } from '@/lib/agent/oxwal';
 import { ensureProposalStoreHydrated } from '@/lib/queue/proposal-persistence';
 import { buildApprovalQueue, queueLanes, type QueueLane } from '@/lib/queue/approval-queue';
+import { approvalWindowLabel, openProposalsForOrg } from '@/lib/queue/queue-scope';
 import { getCustomerSession } from '@/lib/server/customer-auth';
+import { viewerOrgId } from '@/lib/server/viewer-org';
 import ApprovalQueueBoard, { type QueueItem, type QueueLaneData } from '@/components/queue/ApprovalQueueBoard';
 
 export const dynamic = 'force-dynamic';
@@ -161,10 +163,12 @@ function formatAmount(proposal: UnsignedProposal) {
 }
 
 function formatExpiry(expiresInMs: number | null) {
-  if (expiresInMs === null) return 'No expiry';
+  if (expiresInMs === null || !Number.isFinite(expiresInMs)) return 'No expiry';
   if (expiresInMs < 0) return 'Expired';
   const minutes = Math.ceil(expiresInMs / 60000);
-  return `${minutes}m`;
+  if (minutes < 60) return `Expires in ${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  return `Expires in ${hours}h ${minutes % 60}m`;
 }
 
 const laneLabels: Record<QueueLane, string> = {
@@ -182,15 +186,20 @@ export default async function QueuePage() {
     redirect('/login');
   }
 
+  // This workspace's proposals and nobody else's. The store holds every
+  // tenant's, and after a cold start it hydrates every tenant's open
+  // proposals from Postgres — listed whole, it showed each signed-in user
+  // every tenant's pending payments. The org comes from the viewer's
+  // membership; with none, they see none (lib/queue/queue-scope.ts).
+  const orgId = await viewerOrgId(session);
+
   // Live proposals Zeke drafted this session. With DATABASE_URL set (W1),
   // the store write-throughs to Postgres and rehydrates here after a cold
   // start — a pending approval survives a restart. Anything the operator did
   // not approve inside the 2-minute chat window surfaces as maker-checker work.
   const proposalStore = getOxwalProposalStore();
   await ensureProposalStoreHydrated(proposalStore);
-  const liveProposals: QueueItem[] = proposalStore
-    .list()
-    .filter((item) => item.status === 'SIMULATED' || item.status === 'POLICY_EVALUATED' || item.status === 'PENDING_APPROVAL')
+  const liveProposals: QueueItem[] = openProposalsForOrg(proposalStore.list(), orgId)
     .map((item) => ({
       id: item.id,
       recommendation: item.explain.recommendation,
@@ -200,27 +209,28 @@ export default async function QueuePage() {
       approvalsCollected: new Set(item.approvals.map((approval) => approval.userId)).size,
       requiredApprovers: item.explain.requiredApprovers,
       risk: item.explain.risk,
-      expiryLabel: 'From Zeke chat',
+      expiryLabel: approvalWindowLabel(item.expiresAt),
+      // What the approver is looking at. Sent back with the decision, and the
+      // submit route refuses it if the proposal has changed since.
+      approvalHash: item.approvalHash,
     }));
 
-  // Serialize the queue for the interactive client board (no bigint/Date over
-  // the boundary). Approve/Reject state lives client-side for the demo.
-  const pending: QueueItem[] = [
-    ...liveProposals,
-    ...queueView.lanes.PENDING_APPROVALS.map((item) => ({
-      id: item.proposal.id,
-      recommendation: item.proposal.explain.recommendation,
-      kind: item.proposal.kind,
-      maker: item.proposal.createdBy,
-      amountLabel: formatAmount(item.proposal),
-      approvalsCollected: item.approvalsCollected,
-      requiredApprovers: item.requiredApprovers,
-      risk: item.proposal.explain.risk,
-      expiryLabel: formatExpiry(item.expiresInMs),
-    })),
-  ];
+  // The seeded rows are fixtures, not anyone's payments. They go to the board
+  // as examples, which it shows apart and never offers to approve: an approval
+  // that only changes the screen reads as one that released money.
+  const examplePending: QueueItem[] = queueView.lanes.PENDING_APPROVALS.map((item) => ({
+    id: item.proposal.id,
+    recommendation: item.proposal.explain.recommendation,
+    kind: item.proposal.kind,
+    maker: item.proposal.createdBy,
+    amountLabel: formatAmount(item.proposal),
+    approvalsCollected: item.approvalsCollected,
+    requiredApprovers: item.requiredApprovers,
+    risk: item.proposal.explain.risk,
+    expiryLabel: formatExpiry(item.expiresInMs),
+  }));
 
-  const otherLanes: QueueLaneData[] = queueLanes
+  const exampleLanes: QueueLaneData[] = queueLanes
     .filter((lane) => lane !== 'PENDING_APPROVALS')
     .map((lane) => ({
       key: lane,
@@ -256,7 +266,7 @@ export default async function QueuePage() {
           </nav>
         </header>
 
-        <ApprovalQueueBoard pending={pending} otherLanes={otherLanes} />
+        <ApprovalQueueBoard live={liveProposals} examples={{ pending: examplePending, lanes: exampleLanes }} />
       </div>
     </main>
   );

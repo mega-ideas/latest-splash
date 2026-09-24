@@ -3,23 +3,29 @@ import { createHash } from 'node:crypto';
 import { after, NextResponse } from 'next/server';
 
 import { assertCleanBody, ProvenanceViolationError, provenanceViolationResponse } from '@/lib/auth/provenance-guard';
-import { requireActiveOrg } from '@/lib/server/kyb-gate';
+import { requireActiveOrg, requireActiveOrgId } from '@/lib/server/kyb-gate';
 import { checkMinimumSettlement } from '@/lib/policy/limits';
 import { MAX_BATCH_ROWS } from '@/lib/policy/batch-limits';
 import { checkAuthorizationLimits, startOfUtcDay } from '@/lib/policy/authorization-limits';
 import { verifyPayoutTotp } from '@/lib/auth/totp';
 import { consumeActionApproval } from '@/lib/server/step-up-gate';
 import { readOrgSettings } from '@/lib/server/org-settings';
-import { requireCustomerRequest } from '@/lib/server/customer-auth';
+import { requirePaymentRequest } from '@/lib/server/payment-request';
 import { readJsonBody } from '@/lib/server/http';
 import { buildBatch } from '@/lib/server/operations';
 import { claimBatch, patchBatch } from '@/lib/server/batches-store';
 import { proposeForApproval } from '@/lib/server/dual-approval';
-import { resolveApprovalClaim } from '@/lib/server/approved-proposal';
+import {
+  approvalClaimRefusal,
+  approvalSpendRefusal,
+  resolveApprovalClaim,
+  spendApprovalClaim,
+} from '@/lib/server/approved-proposal';
 import { resolveAuthorityForSession } from '@/lib/auth/authority';
 import { listMovementsSince } from '@/lib/server/ledger-store';
 import { readComplianceControls, recordBatchSettlementOnSui } from '@/lib/server/sui-settlement';
-import { requireSessionAccount } from '@/lib/server/session-account';
+import { payeeScreeningRefs, screenRunPayees } from '@/lib/server/screening-record';
+import { requireOrgAccount, requireSessionAccount } from '@/lib/server/session-account';
 import { requireTermsAccepted } from '@/lib/server/onboarding';
 
 export const maxDuration = 60;
@@ -55,7 +61,9 @@ function deriveIdempotencyKey(orgId: string, rows: BatchRow[], targetCurrency: s
 }
 
 export async function POST(request: Request) {
-  const auth = await requireCustomerRequest(request);
+  // A signed-in person, or an approved run being carried out by the replay
+  // (lib/server/payment-request.ts). Nothing a client sends selects the second.
+  const auth = await requirePaymentRequest(request);
   if (auth.response) return auth.response;
 
   const body = await readJsonBody(request);
@@ -65,14 +73,19 @@ export async function POST(request: Request) {
     if (error instanceof ProvenanceViolationError) return provenanceViolationResponse(error);
     throw error;
   }
-  const gate = await requireActiveOrg(auth.session, { lane: 'FIAT_OUT_LOCAL' });
+  // The same gate and lane either way; a replay's org is the proposal's.
+  const gate = auth.replay
+    ? await requireActiveOrgId(auth.replay.orgId, { lane: 'FIAT_OUT_LOCAL' })
+    : await requireActiveOrg(auth.session, { lane: 'FIAT_OUT_LOCAL' });
   if (gate.response) return gate.response;
 
   const rows = Array.isArray(body.rows) ? (body.rows as BatchRow[]) : [];
   const totp = String(body.totp ?? '');
   const targetCurrency = typeof body.targetCurrency === 'string' ? body.targetCurrency : 'PHP';
 
-  const accountCheck = await requireSessionAccount(auth.session);
+  const accountCheck = auth.replay
+    ? await requireOrgAccount(auth.replay.orgId)
+    : await requireSessionAccount(auth.session);
   if (accountCheck.response) return accountCheck.response;
   const { accountId, orgId } = accountCheck.account;
 
@@ -83,30 +96,52 @@ export async function POST(request: Request) {
   if (termsGate) return termsGate;
   const settings = await readOrgSettings(orgId);
 
+  // An approval already collected for THIS run: verified against the proposal
+  // store and bound to these exact rows (lib/server/approved-proposal.ts). Only
+  // the replay can carry one. It used to be checked for existence, org and
+  // status only, so any approved batch's id lifted the second approver for
+  // any other batch in the org.
+  const approvalClaim = await resolveApprovalClaim(request, orgId, {
+    kind: 'BATCH_PAYOUT',
+    payment: { rows: body.rows, targetCurrency: body.targetCurrency },
+  });
+  // A replay has no session to fall back on and no maker present to send the
+  // run for approval again. If its claim does not verify, nothing happens.
+  if (auth.replay && !approvalClaim.approved) return approvalClaimRefusal(approvalClaim);
+
   // Real second factor. This was `/^\d{6}$/` — `000000` authorized a payroll run
   // out of the shared SettlementPool.
-  // In WhatsApp style, a WhatsApp code + passkey approval for exactly these
-  // rows stands in for the authenticator code. Consumed only when a second
-  // factor is actually required.
-  const whatsappApproved = settings.requireTotp && settings.whatsappEnabled
-    && await consumeActionApproval({
-      session: auth.session,
-      orgId,
-      purpose: 'BATCH_PAYOUT',
-      payload: { rows: body.rows, targetCurrency: body.targetCurrency },
-    });
-  if (!whatsappApproved) {
-    const totpVerdict = verifyPayoutTotp({ code: totp, accountId, requireTotp: settings.requireTotp });
-    if (!totpVerdict.ok) {
-      return NextResponse.json(
-        {
-          error: settings.whatsappEnabled
-            ? `${totpVerdict.message} Or approve this batch with a WhatsApp code and your passkey.`
-            : totpVerdict.message,
-          code: `totp_${totpVerdict.code}`,
-        },
-        { status: 400 },
-      );
+  //
+  // It ran BEFORE the approval claim was read, so an approved run — replayed
+  // with no code, a day after the maker's code was checked and spent — failed
+  // here every time. The approvers' signatures now stand in for the maker's
+  // code on a replay: the maker's factor was checked before the proposal was
+  // created, and can never be checked again. The trade-off is written down in
+  // lib/server/approved-proposal.ts.
+  if (!approvalClaim.approved) {
+    // In WhatsApp style, a WhatsApp code + passkey approval for exactly these
+    // rows stands in for the authenticator code. Consumed only when a second
+    // factor is actually required.
+    const whatsappApproved = settings.requireTotp && settings.whatsappEnabled && auth.session !== null
+      && await consumeActionApproval({
+        session: auth.session,
+        orgId,
+        purpose: 'BATCH_PAYOUT',
+        payload: { rows: body.rows, targetCurrency: body.targetCurrency },
+      });
+    if (!whatsappApproved) {
+      const totpVerdict = verifyPayoutTotp({ code: totp, accountId, requireTotp: settings.requireTotp });
+      if (!totpVerdict.ok) {
+        return NextResponse.json(
+          {
+            error: settings.whatsappEnabled
+              ? `${totpVerdict.message} Or approve this batch with a WhatsApp code and your passkey.`
+              : totpVerdict.message,
+            code: `totp_${totpVerdict.code}`,
+          },
+          { status: 400 },
+        );
+      }
     }
   }
 
@@ -152,12 +187,13 @@ export async function POST(request: Request) {
   if (!limits.ok) {
     return NextResponse.json({ error: limits.message, code: limits.code, limitUsd: limits.limitUsd }, { status: 400 });
   }
-  // An approval already collected for THIS payment lifts the second-approver
-  // requirement and nothing else. Verified against the proposal store, never
-  // taken from the header: a client that could assert its own approval would
-  // be a considerably worse hole than the one dual approval closes.
-  const approvalClaim = await resolveApprovalClaim(request, orgId);
+  // The approval resolved above lifts the second-approver requirement — and,
+  // above, the maker's second factor — and nothing else: the minimum, the row
+  // cap, the ceilings, the pause and the replay key all still apply.
   if (limits.requiresSecondApproval && !approvalClaim.approved) {
+    // Only a signed-in person reaches this: a replay whose claim did not
+    // verify was refused above.
+    if (!auth.session) return approvalClaimRefusal(approvalClaim);
     // Same dead end as the single-transfer path, and it matters more here:
     // a batch is many payouts under one authorization, so an operator with
     // nowhere to submit it splits the file instead.
@@ -174,7 +210,13 @@ export async function POST(request: Request) {
       passedChecks: [
         { source: 'COMPLIANCE', ref: 'KYB org state is ACTIVE, settlement not paused' },
         { source: 'BALANCE', ref: `Daily ceiling, ${limits.spentTodayUsd} USD spent today` },
-        { source: 'COUNTERPARTY', ref: `${acceptedRows.length} payable rows, ${rows.length - acceptedRows.length} blocked` },
+        { source: 'COMPLIANCE', ref: `${acceptedRows.length} payable rows, ${rows.length - acceptedRows.length} blocked` },
+        // One per payee, by the address the run pays: what the approval-time
+        // compliance check looks each screening record up by
+        // (lib/server/screening-record.ts). The row count above used to be the
+        // COUNTERPARTY ref — prose no record could ever answer, so every run
+        // stopped at a compliance hold whatever its payees' screening said.
+        ...payeeScreeningRefs(acceptedRows).map((ref) => ({ source: 'COUNTERPARTY' as const, ref })),
       ],
       payload: { rows: acceptedRows, targetCurrency },
       // The same replay key the run itself would use, so a re-submitted file
@@ -182,6 +224,10 @@ export async function POST(request: Request) {
       idempotencyKey: `batch:${deriveIdempotencyKey(orgId, acceptedRows, targetCurrency)}`,
       approvalThresholdUsd: settings.approvalThresholdUsd,
     });
+    // Screen the payees after the response, so their verdicts are on record
+    // by the time the approvers answer. With no wallet screening provider
+    // configured nothing is recorded, and the run stays held.
+    if (proposal) after(() => screenRunPayees(orgId, acceptedRows));
     return NextResponse.json(
       {
         error:
@@ -213,10 +259,28 @@ export async function POST(request: Request) {
   // Replay guard. This route used to mint a fresh batch on every call, so a
   // dropped response leg plus a re-submit paid every recipient twice out of the
   // shared pool — and the still-valid TOTP sailed through the format check.
+  //
+  // An approved run is keyed by its approval instead. The rows-derived key is
+  // there to catch the same file sent twice by accident; an approved run went
+  // through that when it was proposed, and its approval is spent once (below).
+  // Keyed by its rows, the approved retry of a run whose settlement failed —
+  // or next month's identical payroll, approved — would be swallowed here as a
+  // replay of the earlier run and never paid.
   const headerKey = request.headers.get('idempotency-key')?.trim();
-  const idempotencyKey = headerKey && headerKey.length > 0
-    ? headerKey
-    : deriveIdempotencyKey(orgId, acceptedRows, targetCurrency);
+  const idempotencyKey = approvalClaim.approved
+    ? `approval:${approvalClaim.proposalId}`
+    : headerKey && headerKey.length > 0
+      ? headerKey
+      : deriveIdempotencyKey(orgId, acceptedRows, targetCurrency);
+
+  // Single-use. Every guard above has passed; the approval is spent here,
+  // atomically in Postgres, before the run exists. A second replay of the same
+  // approval — a duplicate webhook, two approvers answering together — finds
+  // it spent and creates nothing.
+  if (approvalClaim.approved) {
+    const approvalSpend = await spendApprovalClaim(approvalClaim);
+    if (approvalSpend !== 'spent') return approvalSpendRefusal(approvalSpend);
+  }
 
   // Claim the key by INSERTING it, and let the unique index decide. The
   // read-then-write this replaces had two holes: a restart between the two
