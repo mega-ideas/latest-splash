@@ -62,7 +62,7 @@ export default function AppError({
         <button
           type="button"
           onClick={reset}
-          className="inline-flex items-center gap-2 rounded-lg bg-[#1F4452] px-4 py-2.5 text-sm font-bold text-white transition hover:bg-[#326273] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#5C9EAD]/30"
+          className="inline-flex items-center gap-2 rounded-lg bg-[#1F4452] px-4 py-2.5 text-sm font-bold text-white transition hover:bg-[#326273] focus-ring"
         >
           <RotateCcw className="h-4 w-4" />
           Try again

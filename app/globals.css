@@ -6755,10 +6755,13 @@ button.iso-product-row {
 .fintech-dashboard-main input:focus-visible,
 .fintech-dashboard-main select:focus-visible,
 .fintech-dashboard-main textarea:focus-visible {
-  outline: none;
+  /* The shared focus indicator (the dashboard rule and the focus-ring
+     utility, further down). It was a 3px halo at 30%, about 1.4:1. */
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
   border-color: rgba(13, 99, 112, .65);
   background: #fffdf9;
-  box-shadow: 0 0 0 3px rgba(111, 205, 190, .3);
+  box-shadow: 0 0 0 2px var(--focus-gap);
 }
 
 .fintech-dashboard-main thead th {
@@ -8039,16 +8042,46 @@ button.iso-product-row {
     0 18px 44px rgba(9, 45, 54, .12);
 }
 
-/* One focus language across the whole dashboard (keyboard = first-class). */
+/* One focus language across the whole dashboard (keyboard = first-class).
+   Two tones (WCAG C40): a 2px --focus outline, 2px out, with a --focus-gap
+   ring filling the gap, so it holds 3:1 on a white card, on --bg and on the
+   dark sidebar. An outline, so forced-colours mode keeps it. It was a 3px
+   halo of #5C9EAD at 38%, about 1.5:1 on a card and less on the sidebar,
+   and it reset every focused element's border-radius. */
 .fintech-dashboard-shell a:focus-visible,
 .fintech-dashboard-shell button:focus-visible,
 .fintech-dashboard-shell input:focus-visible,
 .fintech-dashboard-shell select:focus-visible,
+.fintech-dashboard-shell textarea:focus-visible,
 .fintech-dashboard-shell [role="button"]:focus-visible,
 .fintech-dashboard-shell summary:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px rgba(92, 158, 173, .38);
-  border-radius: var(--r-sm);
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 2px var(--focus-gap);
+}
+
+/* The admin console had no shared indicator: its fields showed focus as a
+   1px #5C9EAD border (3.02:1) or a 2px halo at 40%. The same one now. */
+.fintech-admin-shell a:focus-visible,
+.fintech-admin-shell button:focus-visible,
+.fintech-admin-shell input:focus-visible,
+.fintech-admin-shell select:focus-visible,
+.fintech-admin-shell textarea:focus-visible,
+.fintech-admin-shell [role="button"]:focus-visible,
+.fintech-admin-shell summary:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 2px var(--focus-gap);
+}
+
+/* The same indicator for pages outside those shells (/queue, the error
+   page), as a class: `focus-ring` in place of a faint ring utility. */
+@utility focus-ring {
+  &:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+    box-shadow: 0 0 0 2px var(--focus-gap);
+  }
 }
 
 /* Brand-tinted text selection — small cue, expensive feel. */

@@ -144,7 +144,7 @@ export default function ContractConfigForm({ initialConfig, initialEnv, initialM
                     placeholder={field.placeholder}
                     spellCheck={false}
                     autoComplete="off"
-                    className={`w-full rounded-2xl border px-4 py-3 pr-20 font-mono text-xs text-[#1f4350] focus:outline-none focus:ring-2 focus:ring-[#5C9EAD]/40 ${error ? 'border-red-400 bg-red-50' : 'border-[#326273]/15 bg-white'}`}
+                    className={`w-full rounded-2xl border px-4 py-3 pr-20 font-mono text-xs text-[#1f4350] focus-ring ${error ? 'border-red-400 bg-red-50' : 'border-[#326273]/15 bg-white'}`}
                   />
                   <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1">
                     {envValue && (

@@ -123,7 +123,7 @@ export default function ReadyToSendLane({ items }: { items: ReadyToSendItem[] })
                   onClick={() => void send(item)}
                   disabled={item.blockedReason !== null || sending !== null}
                   aria-describedby={item.blockedReason ? `${item.id}-blocked` : undefined}
-                  className="inline-flex h-11 w-full items-center justify-center gap-1.5 rounded-md bg-[#1F4452] px-4 text-[13px] font-bold text-white transition hover:bg-[#326273] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#5C9EAD]/30 disabled:cursor-not-allowed disabled:opacity-45 md:w-auto"
+                  className="inline-flex h-11 w-full items-center justify-center gap-1.5 rounded-md bg-[#1F4452] px-4 text-[13px] font-bold text-white transition hover:bg-[#326273] focus-ring disabled:cursor-not-allowed disabled:opacity-45 md:w-auto"
                 >
                   {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Send className="h-4 w-4" aria-hidden="true" />}
                   Send payment

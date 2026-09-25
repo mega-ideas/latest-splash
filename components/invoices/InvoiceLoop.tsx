@@ -284,7 +284,7 @@ export default function InvoiceLoop() {
               </div>
               <Link
                 href="/dashboard"
-                className="inline-flex shrink-0 items-center gap-2 rounded-md border border-white/20 bg-white/10 px-3 py-2 text-[13px] font-bold text-white transition hover:bg-white/15 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-white/20"
+                className="inline-flex shrink-0 items-center gap-2 rounded-md border border-white/20 bg-white/10 px-3 py-2 text-[13px] font-bold text-white transition hover:bg-white/15 focus-ring"
               >
                 <Bot className="h-4 w-4" />
                 Chat
@@ -459,7 +459,7 @@ function InvoicePanel({
               type="button"
               aria-pressed={active}
               onClick={() => onSelect(invoice)}
-              className={`grid min-h-20 gap-1 rounded-lg border p-3 text-left transition focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#5C9EAD]/20 ${active ? 'border-[#0C3E48] bg-[#0C3E48] text-white shadow-[0_12px_24px_rgba(12,62,72,0.16)]' : 'border-[#326273]/12 bg-white text-[#326273] hover:border-[#5C9EAD]/65 hover:bg-[#F8FCFD]'}`}
+              className={`grid min-h-20 gap-1 rounded-lg border p-3 text-left transition focus-ring ${active ? 'border-[#0C3E48] bg-[#0C3E48] text-white shadow-[0_12px_24px_rgba(12,62,72,0.16)]' : 'border-[#326273]/12 bg-white text-[#326273] hover:border-[#5C9EAD]/65 hover:bg-[#F8FCFD]'}`}
             >
               <span className="flex items-center justify-between gap-3">
                 <strong className="truncate text-sm">{invoice.payerOrgName ?? invoice.id}</strong>
@@ -502,7 +502,7 @@ function WalrusPanel({ selected, proof }: { selected: InvoiceRecord | null; proo
               type="button"
               aria-label="Copy Walrus blob ID"
               onClick={() => { void navigator.clipboard.writeText(blobId); toast.success('Blob ID copied'); }}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[#326273] transition hover:bg-white focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#5C9EAD]/20"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[#326273] transition hover:bg-white focus-ring"
             >
               <Copy className="h-4 w-4" />
             </button>
@@ -557,7 +557,7 @@ function SealPanel({
               type="button"
               disabled={!selected?.sealPolicyId || checkingIdentity !== null}
               onClick={() => onCheck(identity)}
-              className="flex min-h-12 items-center justify-between gap-3 rounded-lg border border-[#326273]/10 bg-white p-3 text-left text-sm font-bold text-[#1F4452] transition hover:border-[#5C9EAD]/55 hover:bg-[#F8FCFD] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#5C9EAD]/20 disabled:cursor-not-allowed disabled:opacity-55"
+              className="flex min-h-12 items-center justify-between gap-3 rounded-lg border border-[#326273]/10 bg-white p-3 text-left text-sm font-bold text-[#1F4452] transition hover:border-[#5C9EAD]/55 hover:bg-[#F8FCFD] focus-ring disabled:cursor-not-allowed disabled:opacity-55"
             >
               <span className="truncate">Check access: {identity}</span>
               <AccessIcon checking={checking} granted={access[identity]} />
@@ -595,7 +595,7 @@ function ExtractionPanel({
           type="button"
           disabled={!selected || extracting}
           onClick={onExtract}
-          className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-lg bg-[#E39774] px-4 py-2 text-sm font-bold text-white shadow-[0_12px_24px_rgba(227,151,116,0.24)] transition hover:bg-[#CD825F] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#E39774]/25 disabled:cursor-not-allowed disabled:opacity-50"
+          className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-lg bg-[#E39774] px-4 py-2 text-sm font-bold text-white shadow-[0_12px_24px_rgba(227,151,116,0.24)] transition hover:bg-[#CD825F] focus-ring disabled:cursor-not-allowed disabled:opacity-50"
         >
           {extracting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
           {extracting ? 'Inspecting...' : 'Extract and recommend route'}
@@ -702,7 +702,7 @@ function IntentPanel({ selected, suggestion, href }: { selected: InvoiceRecord |
         </div>
         <Link
           href="/dashboard/setup"
-          className="mt-4 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#0C3E48] px-4 py-2 text-sm font-bold text-white shadow-[0_12px_24px_rgba(12,62,72,0.2)] transition hover:bg-[#145D6A] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#5C9EAD]/22"
+          className="mt-4 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#0C3E48] px-4 py-2 text-sm font-bold text-white shadow-[0_12px_24px_rgba(12,62,72,0.2)] transition hover:bg-[#145D6A] focus-ring"
         >
           Finish verification
           <ArrowRight className="h-4 w-4" />
@@ -726,7 +726,7 @@ function IntentPanel({ selected, suggestion, href }: { selected: InvoiceRecord |
       <Link
         href={href}
         aria-disabled={!selected || !suggestion}
-        className={`mt-4 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-bold transition focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#5C9EAD]/22 ${selected && suggestion ? 'bg-[#0C3E48] text-white shadow-[0_12px_24px_rgba(12,62,72,0.2)] hover:bg-[#145D6A]' : 'pointer-events-none border border-[#326273]/12 bg-[#F6F0ED] text-[#326273]/45'}`}
+        className={`mt-4 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-bold transition focus-ring ${selected && suggestion ? 'bg-[#0C3E48] text-white shadow-[0_12px_24px_rgba(12,62,72,0.2)] hover:bg-[#145D6A]' : 'pointer-events-none border border-[#326273]/12 bg-[#F6F0ED] text-[#326273]/45'}`}
       >
         Open payment intent
         <ArrowRight className="h-4 w-4" />

@@ -22,6 +22,12 @@
   --pending: #6B7C85;
   --pending-bg: #EDEFF0;
 
+  /* Keyboard focus: a --focus outline around a --focus-gap ring, two tones
+     (WCAG C40), so it holds 3:1 on white cards, on --bg and on the dark
+     sidebar alike (app/globals.css, the focus-ring utility). */
+  --focus: var(--slate);
+  --focus-gap: var(--surface);
+
   --font-sans: 'Geist', system-ui, sans-serif;
   --font-mono: 'Geist Mono', ui-monospace, monospace;
   --text-xs: .75rem;

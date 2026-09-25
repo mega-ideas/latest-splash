@@ -157,7 +157,7 @@ function InboxItem({ item, onDone }: { item: Pending; onDone: () => void }) {
               onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
               inputMode="numeric"
               autoComplete="one-time-code"
-              className="mt-1 block w-36 rounded-lg border border-[#326273]/25 bg-[#F6F0ED] px-3 py-2 font-mono tracking-[0.3em] text-[#1F4452] focus:border-[#5C9EAD] focus:outline-none focus:ring-2 focus:ring-[#5C9EAD]/30"
+              className="mt-1 block w-36 rounded-lg border border-[#326273]/25 bg-[#F6F0ED] px-3 py-2 font-mono tracking-[0.3em] text-[#1F4452] focus:border-[#5C9EAD] focus-ring"
             />
           </div>
           <button type="button" onClick={verify} disabled={busy !== null || code.length !== 6} className="dash-btn !px-4 !py-2 !text-[13px] disabled:cursor-not-allowed disabled:opacity-50">

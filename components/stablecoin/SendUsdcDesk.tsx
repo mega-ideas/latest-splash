@@ -559,7 +559,7 @@ export default function SendUsdcDesk() {
                       placeholder="https://api.example.com/data"
                       spellCheck={false}
                       disabled={Boolean(quote)}
-                      className="min-w-0 flex-1 rounded-lg border border-[#326273]/25 bg-[#F6F0ED] px-3 py-2 font-mono text-[13px] text-[#1F4452] focus:border-[#5C9EAD] focus:outline-none focus:ring-2 focus:ring-[#5C9EAD]/30"
+                      className="min-w-0 flex-1 rounded-lg border border-[#326273]/25 bg-[#F6F0ED] px-3 py-2 font-mono text-[13px] text-[#1F4452] focus:border-[#5C9EAD] focus-ring"
                     />
                     <button type="button" onClick={() => void checkX402Price()} disabled={busy !== null || !x402Url.trim() || Boolean(quote)} className="dash-btn-ghost !px-3 !py-2 !text-[13px]">
                       Check price
@@ -633,7 +633,7 @@ export default function SendUsdcDesk() {
                         value={recipientId}
                         onChange={(e) => setRecipientId(e.target.value)}
                         disabled={Boolean(quote)}
-                        className="mt-1 w-full rounded-lg border border-[#326273]/25 bg-[#F6F0ED] px-3 py-2 text-sm text-[#1F4452] focus:border-[#5C9EAD] focus:outline-none focus:ring-2 focus:ring-[#5C9EAD]/30"
+                        className="mt-1 w-full rounded-lg border border-[#326273]/25 bg-[#F6F0ED] px-3 py-2 text-sm text-[#1F4452] focus:border-[#5C9EAD] focus-ring"
                       >
                         <option value="">Choose a wallet recipient</option>
                         {recipients.map((r) => (
@@ -650,7 +650,7 @@ export default function SendUsdcDesk() {
                         inputMode="decimal"
                         placeholder="1,000.00"
                         disabled={Boolean(quote)}
-                        className="mt-1 w-full rounded-lg border border-[#326273]/25 bg-[#F6F0ED] px-3 py-2 font-mono text-sm tabular-nums text-[#1F4452] focus:border-[#5C9EAD] focus:outline-none focus:ring-2 focus:ring-[#5C9EAD]/30"
+                        className="mt-1 w-full rounded-lg border border-[#326273]/25 bg-[#F6F0ED] px-3 py-2 font-mono text-sm tabular-nums text-[#1F4452] focus:border-[#5C9EAD] focus-ring"
                         aria-describedby="send-amount-help"
                       />
                     </div>

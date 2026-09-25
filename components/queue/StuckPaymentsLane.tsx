@@ -142,7 +142,7 @@ export default function StuckPaymentsLane({ items }: { items: StuckPaymentItem[]
                       {' '}
                       <Link
                         href={item.checkHint.href}
-                        className="inline-flex items-center gap-0.5 font-bold text-[#1F4452] underline underline-offset-2 hover:text-[#326273] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#5C9EAD]/30"
+                        className="inline-flex items-center gap-0.5 font-bold text-[#1F4452] underline underline-offset-2 hover:text-[#326273] focus-ring"
                       >
                         {item.checkHint.label}
                         <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />
@@ -168,7 +168,7 @@ export default function StuckPaymentsLane({ items }: { items: StuckPaymentItem[]
                       }}
                       disabled={locked}
                       placeholder="Transfer or run ID"
-                      className="h-11 w-full rounded-md border border-[#326273]/70 bg-white px-3 text-[13px] font-medium text-[#1F4452] placeholder:text-[#326273]/90 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#5C9EAD]/30 disabled:opacity-45 md:w-60"
+                      className="h-11 w-full rounded-md border border-[#326273]/70 bg-white px-3 text-[13px] font-medium text-[#1F4452] placeholder:text-[#326273]/90 focus-ring disabled:opacity-45 md:w-60"
                     />
                   </label>
                 )}
@@ -179,7 +179,7 @@ export default function StuckPaymentsLane({ items }: { items: StuckPaymentItem[]
                     onClick={() => void record(item, 'NOT_SENT')}
                     disabled={locked}
                     aria-describedby={[noteId, item.blockedReason ? `${item.id}-blocked` : null].filter(Boolean).join(' ')}
-                    className="inline-flex h-11 w-full items-center justify-center gap-1.5 rounded-md bg-[#1F4452] px-4 text-[13px] font-bold text-white transition hover:bg-[#326273] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#5C9EAD]/30 disabled:cursor-not-allowed disabled:opacity-45 md:w-auto"
+                    className="inline-flex h-11 w-full items-center justify-center gap-1.5 rounded-md bg-[#1F4452] px-4 text-[13px] font-bold text-white transition hover:bg-[#326273] focus-ring disabled:cursor-not-allowed disabled:opacity-45 md:w-auto"
                   >
                     {working && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
                     Close as not sent
@@ -192,7 +192,7 @@ export default function StuckPaymentsLane({ items }: { items: StuckPaymentItem[]
                       onClick={() => void record(item, choice)}
                       disabled={locked}
                       aria-describedby={[noteId, item.blockedReason ? `${item.id}-blocked` : null].filter(Boolean).join(' ')}
-                      className="inline-flex h-11 w-full items-center justify-center gap-1.5 rounded-md border border-[#326273]/30 bg-white px-4 text-[13px] font-bold text-[#1F4452] transition hover:border-[#326273]/60 hover:bg-[#326273]/[0.04] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#5C9EAD]/30 disabled:cursor-not-allowed disabled:opacity-45 md:w-auto"
+                      className="inline-flex h-11 w-full items-center justify-center gap-1.5 rounded-md border border-[#326273]/30 bg-white px-4 text-[13px] font-bold text-[#1F4452] transition hover:border-[#326273]/60 hover:bg-[#326273]/[0.04] focus-ring disabled:cursor-not-allowed disabled:opacity-45 md:w-auto"
                     >
                       {working && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
                       {choice === 'SENT' ? 'It was sent' : "It wasn't sent"}

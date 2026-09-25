@@ -231,7 +231,7 @@ export default function StepBeneficiary({ state, set, next }: { state: TransferS
                       key={saved.id}
                       type="button"
                       onClick={() => applySavedRecipient(saved)}
-                      className={`group flex items-center gap-3 rounded-xl border p-3.5 text-left transition-all hover:border-[#5C9EAD]/70 hover:bg-[#F8FCFD] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#5C9EAD]/20 ${
+                      className={`group flex items-center gap-3 rounded-xl border p-3.5 text-left transition-all hover:border-[#5C9EAD]/70 hover:bg-[#F8FCFD] focus-ring ${
                         active
                           ? 'border-[#5C9EAD] bg-[#F8FCFD] shadow-[inset_3px_0_0_#5C9EAD,0_10px_22px_rgba(12,62,72,0.07)]'
                           : 'border-[#326273]/10 bg-white'

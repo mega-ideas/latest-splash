@@ -108,7 +108,7 @@ function OutcomeLine({ outcome }: { outcome: DecisionOutcome }) {
         <button
           type="button"
           onClick={() => window.location.reload()}
-          className="mt-2 ml-6 inline-flex min-h-9 items-center gap-1.5 rounded-md border border-[#326273]/25 px-3 text-[13px] font-bold text-[#1F4452] transition hover:bg-[#326273]/5 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#5C9EAD]/30"
+          className="mt-2 ml-6 inline-flex min-h-9 items-center gap-1.5 rounded-md border border-[#326273]/25 px-3 text-[13px] font-bold text-[#1F4452] transition hover:bg-[#326273]/5 focus-ring"
         >
           <RotateCw className="h-3.5 w-3.5" aria-hidden="true" />
           Reload the queue
@@ -117,7 +117,7 @@ function OutcomeLine({ outcome }: { outcome: DecisionOutcome }) {
       {outcome.kind === 'signed-out' && (
         <Link
           href="/login"
-          className="mt-2 ml-6 inline-flex min-h-9 items-center rounded-md border border-[#326273]/25 px-3 text-[13px] font-bold text-[#1F4452] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#5C9EAD]/30"
+          className="mt-2 ml-6 inline-flex min-h-9 items-center rounded-md border border-[#326273]/25 px-3 text-[13px] font-bold text-[#1F4452] focus-ring"
         >
           Sign in
         </Link>
@@ -293,14 +293,14 @@ export default function ApprovalQueueBoard({
                         type="button"
                         autoFocus
                         onClick={() => setConfirmingReject(null)}
-                        className="inline-flex h-11 items-center rounded-md border border-[#326273]/25 px-3 text-[13px] font-bold text-[#1F4452] transition hover:bg-[#326273]/5 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#5C9EAD]/30 md:h-9"
+                        className="inline-flex h-11 items-center rounded-md border border-[#326273]/25 px-3 text-[13px] font-bold text-[#1F4452] transition hover:bg-[#326273]/5 focus-ring md:h-9"
                       >
                         Keep it
                       </button>
                       <button
                         type="button"
                         onClick={() => decide(item, 'REJECT')}
-                        className="inline-flex h-11 items-center rounded-md bg-[var(--error)] px-3 text-[13px] font-bold text-white transition hover:opacity-90 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--error)]/25 md:h-9"
+                        className="inline-flex h-11 items-center rounded-md bg-[var(--error)] px-3 text-[13px] font-bold text-white transition hover:opacity-90 focus-ring md:h-9"
                       >
                         Reject payment
                       </button>
@@ -311,7 +311,7 @@ export default function ApprovalQueueBoard({
                         type="button"
                         disabled={Boolean(busy)}
                         onClick={() => decide(item, 'APPROVE')}
-                        className="inline-flex h-11 items-center gap-1.5 rounded-md bg-[#1F4452] px-3 text-[13px] font-bold text-white transition hover:bg-[#326273] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#5C9EAD]/30 disabled:cursor-not-allowed disabled:opacity-50 md:h-9"
+                        className="inline-flex h-11 items-center gap-1.5 rounded-md bg-[#1F4452] px-3 text-[13px] font-bold text-white transition hover:bg-[#326273] focus-ring disabled:cursor-not-allowed disabled:opacity-50 md:h-9"
                       >
                         {busy === 'APPROVE' ? (
                           <Loader2 className="h-4 w-4 motion-safe:animate-spin" aria-hidden="true" />
@@ -324,7 +324,7 @@ export default function ApprovalQueueBoard({
                         type="button"
                         disabled={Boolean(busy)}
                         onClick={() => setConfirmingReject(item.id)}
-                        className="inline-flex h-11 items-center gap-1.5 rounded-md border border-[var(--error)] px-3 text-[13px] font-bold text-[var(--error)] transition hover:bg-[var(--error-bg)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--error)]/25 disabled:cursor-not-allowed disabled:opacity-50 md:h-9"
+                        className="inline-flex h-11 items-center gap-1.5 rounded-md border border-[var(--error)] px-3 text-[13px] font-bold text-[var(--error)] transition hover:bg-[var(--error-bg)] focus-ring disabled:cursor-not-allowed disabled:opacity-50 md:h-9"
                       >
                         {busy === 'REJECT' ? (
                           <Loader2 className="h-4 w-4 motion-safe:animate-spin" aria-hidden="true" />
@@ -458,7 +458,7 @@ export default function ApprovalQueueBoard({
       <div className="flex flex-wrap items-center gap-2 pt-1">
         <Link
           href="/dashboard"
-          className="rounded-md border border-[#326273]/20 px-3 py-2 text-sm font-bold text-[#326273] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#5C9EAD]/30"
+          className="rounded-md border border-[#326273]/20 px-3 py-2 text-sm font-bold text-[#326273] focus-ring"
         >
           Back to Zeke
         </Link>

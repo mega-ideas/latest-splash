@@ -199,7 +199,7 @@ export default function ApprovalChannelCard({
             value={number}
             onChange={(event) => setNumber(event.target.value)}
             placeholder="+60102651678"
-            className="min-w-[200px] flex-1 rounded-lg border border-[#326273]/16 bg-white px-3 py-2 font-mono text-sm text-[#1F4452] outline-none focus:border-[#5C9EAD] focus:ring-4 focus:ring-[#5C9EAD]/20"
+            className="min-w-[200px] flex-1 rounded-lg border border-[#326273]/16 bg-white px-3 py-2 font-mono text-sm text-[#1F4452] outline-none focus:border-[#5C9EAD] focus-ring"
           />
           <button
             type="button"
@@ -219,7 +219,7 @@ export default function ApprovalChannelCard({
               value={code}
               onChange={(event) => setCode(event.target.value)}
               placeholder="6-digit code"
-              className="min-w-[160px] rounded-lg border border-[#326273]/16 bg-white px-3 py-2 font-mono text-sm tabular-nums text-[#1F4452] outline-none focus:border-[#5C9EAD] focus:ring-4 focus:ring-[#5C9EAD]/20"
+              className="min-w-[160px] rounded-lg border border-[#326273]/16 bg-white px-3 py-2 font-mono text-sm tabular-nums text-[#1F4452] outline-none focus:border-[#5C9EAD] focus-ring"
             />
             <button
               type="button"

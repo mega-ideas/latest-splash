@@ -284,7 +284,7 @@ function PrimaryFundingButton({
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        'flex min-h-32 items-stretch gap-3 rounded-2xl border p-4 text-left transition-[background-color,border-color,box-shadow,transform] duration-150 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#5C9EAD]/20 disabled:cursor-not-allowed disabled:opacity-55',
+        'flex min-h-32 items-stretch gap-3 rounded-2xl border p-4 text-left transition-[background-color,border-color,box-shadow,transform] duration-150 focus-ring disabled:cursor-not-allowed disabled:opacity-55',
         active
           ? 'border-[#0C3E48] bg-[#0C3E48] text-white shadow-[0_14px_30px_rgba(12,62,72,0.18)]'
           : 'border-[#326273]/14 bg-[#F6F0ED]/45 text-[#0C3E48] shadow-sm hover:-translate-y-0.5 hover:border-[#5C9EAD]/70 hover:bg-[#F8FCFD]',
@@ -426,7 +426,7 @@ function ContextualFlow({
               type="button"
               disabled={disabled}
               onClick={onUsdcDeposit}
-              className="inline-flex min-h-10 items-center justify-center rounded-xl border border-[#326273]/14 bg-white px-3 py-2 text-xs font-bold text-[#0C3E48] transition-all hover:border-[#5C9EAD]/70 hover:bg-[#F8FCFD] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#5C9EAD]/18 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex min-h-10 items-center justify-center rounded-xl border border-[#326273]/14 bg-white px-3 py-2 text-xs font-bold text-[#0C3E48] transition-all hover:border-[#5C9EAD]/70 hover:bg-[#F8FCFD] focus-ring disabled:cursor-not-allowed disabled:opacity-60"
             >
               Deposit USDC instead
             </button>
@@ -455,7 +455,7 @@ function ContextualFlow({
                 disabled={disabled}
                 onClick={() => onProviderChange(provider.id)}
                 className={cn(
-                  'flex min-h-20 items-center gap-3 rounded-xl border p-3 text-left transition-[background-color,border-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#5C9EAD]/18 disabled:cursor-not-allowed disabled:opacity-60',
+                  'flex min-h-20 items-center gap-3 rounded-xl border p-3 text-left transition-[background-color,border-color,box-shadow] duration-150 focus-ring disabled:cursor-not-allowed disabled:opacity-60',
                   active
                     ? 'border-[#5C9EAD] bg-[#EAF7F8] shadow-[inset_3px_0_0_#5C9EAD,0_10px_22px_rgba(12,62,72,0.08)]'
                     : 'border-[#326273]/12 bg-white hover:border-[#5C9EAD]/70 hover:bg-[#F8FCFD]',
@@ -491,7 +491,7 @@ function ContextualFlow({
             type="button"
             disabled={disabled}
             onClick={onUsdcBalance}
-            className="inline-flex min-h-10 items-center justify-center rounded-xl border border-[#326273]/14 bg-white px-3 py-2 text-xs font-bold text-[#0C3E48] transition-all hover:border-[#5C9EAD]/70 hover:bg-[#F8FCFD] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#5C9EAD]/18 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex min-h-10 items-center justify-center rounded-xl border border-[#326273]/14 bg-white px-3 py-2 text-xs font-bold text-[#0C3E48] transition-all hover:border-[#5C9EAD]/70 hover:bg-[#F8FCFD] focus-ring disabled:cursor-not-allowed disabled:opacity-60"
           >
             Use USDC balance
           </button>
@@ -508,7 +508,7 @@ function ContextualFlow({
                 disabled={disabled}
                 onClick={() => onRailChange(rail)}
                 className={cn(
-                  'min-h-11 rounded-xl border px-4 py-3 text-sm font-bold text-[#0C3E48] transition-[background-color,border-color,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#5C9EAD]/18 disabled:cursor-not-allowed disabled:opacity-60',
+                  'min-h-11 rounded-xl border px-4 py-3 text-sm font-bold text-[#0C3E48] transition-[background-color,border-color,box-shadow] duration-150 focus-ring disabled:cursor-not-allowed disabled:opacity-60',
                   selection.rail === rail
                     ? 'border-[#5C9EAD] bg-[#EAF7F8] shadow-[inset_0_-3px_0_#5C9EAD,0_10px_22px_rgba(12,62,72,0.08)]'
                     : 'border-[#326273]/12 bg-white hover:border-[#5C9EAD]/70 hover:bg-[#F8FCFD]',

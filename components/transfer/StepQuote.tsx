@@ -26,8 +26,8 @@ const BASE_RATES: Record<TransferState['amount']['targetCurrency'], number> = {
   GBP: 0.789,
 };
 
-const primaryActionClass = 'inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-[#0C3E48] px-5 py-3 text-sm font-semibold text-white shadow-[0_14px_30px_rgba(12,62,72,0.22)] transition-all hover:-translate-y-0.5 hover:bg-[#145D6A] hover:shadow-[0_18px_34px_rgba(12,62,72,0.26)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#5C9EAD]/28 disabled:cursor-not-allowed disabled:bg-[#326273]/45 disabled:text-white/70 disabled:shadow-none disabled:hover:translate-y-0';
-const secondaryActionClass = 'inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-[#326273]/18 bg-white px-5 py-3 text-sm font-semibold text-[#0C3E48] shadow-[0_10px_22px_rgba(12,62,72,0.06)] transition-all hover:-translate-y-0.5 hover:border-[#5C9EAD]/70 hover:bg-[#EAF7F8] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#5C9EAD]/20 disabled:cursor-not-allowed disabled:bg-[#F6F0ED] disabled:text-[#326273]/45 disabled:shadow-none disabled:hover:translate-y-0';
+const primaryActionClass = 'inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-[#0C3E48] px-5 py-3 text-sm font-semibold text-white shadow-[0_14px_30px_rgba(12,62,72,0.22)] transition-all hover:-translate-y-0.5 hover:bg-[#145D6A] hover:shadow-[0_18px_34px_rgba(12,62,72,0.26)] focus-ring disabled:cursor-not-allowed disabled:bg-[#326273]/45 disabled:text-white/70 disabled:shadow-none disabled:hover:translate-y-0';
+const secondaryActionClass = 'inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-[#326273]/18 bg-white px-5 py-3 text-sm font-semibold text-[#0C3E48] shadow-[0_10px_22px_rgba(12,62,72,0.06)] transition-all hover:-translate-y-0.5 hover:border-[#5C9EAD]/70 hover:bg-[#EAF7F8] focus-ring disabled:cursor-not-allowed disabled:bg-[#F6F0ED] disabled:text-[#326273]/45 disabled:shadow-none disabled:hover:translate-y-0';
 
 export default function StepQuote({
   state,
@@ -454,7 +454,7 @@ export default function StepQuote({
         </div>
       ) : null}
 
-      <button type="button" disabled={holdBusy || isQuoteRefreshing || state.rateHold?.state === 'ACTIVE'} onClick={() => void holdRate()} className="group flex min-h-12 w-full items-center justify-between gap-3 rounded-xl border border-[#5C9EAD]/35 bg-white px-4 py-3 text-left font-semibold text-[#0C3E48] shadow-[0_10px_24px_rgba(12,62,72,0.06)] transition-all hover:-translate-y-0.5 hover:border-[#5C9EAD]/80 hover:bg-[#EAF7F8] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#5C9EAD]/20 disabled:cursor-not-allowed disabled:border-[#326273]/10 disabled:bg-[#F6F0ED] disabled:text-[#326273]/50 disabled:shadow-none disabled:hover:translate-y-0">
+      <button type="button" disabled={holdBusy || isQuoteRefreshing || state.rateHold?.state === 'ACTIVE'} onClick={() => void holdRate()} className="group flex min-h-12 w-full items-center justify-between gap-3 rounded-xl border border-[#5C9EAD]/35 bg-white px-4 py-3 text-left font-semibold text-[#0C3E48] shadow-[0_10px_24px_rgba(12,62,72,0.06)] transition-all hover:-translate-y-0.5 hover:border-[#5C9EAD]/80 hover:bg-[#EAF7F8] focus-ring disabled:cursor-not-allowed disabled:border-[#326273]/10 disabled:bg-[#F6F0ED] disabled:text-[#326273]/50 disabled:shadow-none disabled:hover:translate-y-0">
         <span className="flex items-center gap-3"><Clock3 className="size-4 text-[var(--info)]" aria-hidden="true" />{state.rateHold?.state === 'ACTIVE' ? 'Rate hold active' : 'Hold this rate 48h'}</span>
         <span className="font-mono text-[13px] text-[#326273]/55">{liveRate.toLocaleString()}</span>
       </button>
@@ -533,7 +533,7 @@ export default function StepQuote({
                 <h3 className="text-2xl font-semibold">{selection.type === 'fiat' ? `Continue with ${selection.provider}` : selection.type === 'stablecoin' ? `Deposit ${selection.asset}` : 'Settle from Splash balance'}</h3>
                 <p className="mt-1 text-sm text-[#326273]/60">{selection.type === 'fiat' ? 'Provider funding is confirmed before settlement.' : 'Send USDC over the selected rail using the push-only deposit address.'}</p>
               </div>
-              <button type="button" aria-label="Close funding dialog" onClick={() => !isSending && setDepositOpen(false)} className="inline-flex size-9 shrink-0 items-center justify-center rounded-full text-[#326273]/55 transition hover:bg-[#F6F0ED] hover:text-[#0C3E48] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#5C9EAD]/20 disabled:cursor-not-allowed disabled:opacity-45" disabled={isSending}>
+              <button type="button" aria-label="Close funding dialog" onClick={() => !isSending && setDepositOpen(false)} className="inline-flex size-9 shrink-0 items-center justify-center rounded-full text-[#326273]/55 transition hover:bg-[#F6F0ED] hover:text-[#0C3E48] focus-ring disabled:cursor-not-allowed disabled:opacity-45" disabled={isSending}>
                 <X className="size-4" aria-hidden="true" />
               </button>
             </div>
@@ -549,7 +549,7 @@ export default function StepQuote({
                 <div className="min-w-0">
                   <div className="text-xs font-semibold uppercase tracking-wide text-[#326273]/55">Deposit address</div>
                   <div className="mt-2 break-all rounded-xl bg-[#F6F0ED] p-3 font-['DejaVu_Sans_Mono',monospace] text-[13px] text-[#326273]">{state.funding.depositAddress}</div>
-                  <button type="button" onClick={() => { void navigator.clipboard.writeText(state.funding.depositAddress ?? ''); toast.success('Deposit address copied'); }} className="mt-2 inline-flex items-center gap-2 rounded-lg px-1 py-1 text-[13px] font-semibold text-[#237284] transition hover:bg-[#5C9EAD]/10 hover:text-[#0C3E48] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#5C9EAD]/20"><Copy className="size-3.5" aria-hidden="true" /> Copy address</button>
+                  <button type="button" onClick={() => { void navigator.clipboard.writeText(state.funding.depositAddress ?? ''); toast.success('Deposit address copied'); }} className="mt-2 inline-flex items-center gap-2 rounded-lg px-1 py-1 text-[13px] font-semibold text-[#237284] transition hover:bg-[#5C9EAD]/10 hover:text-[#0C3E48] focus-ring"><Copy className="size-3.5" aria-hidden="true" /> Copy address</button>
                   <div className="mt-4 flex flex-wrap gap-2 text-[13px] font-semibold">
                     <span className="rounded-full bg-[#5C9EAD]/10 px-3 py-1">{selection.rail}{selection.sourceChain ? ` / ${selection.sourceChain}` : ''}</span>
                     <span className="rounded-full bg-[#F6F0ED] px-3 py-1">{state.funding.sessionStatus}</span>

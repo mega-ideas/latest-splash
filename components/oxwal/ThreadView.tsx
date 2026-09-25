@@ -255,7 +255,7 @@ export default function ThreadRow({
             <button
               type="button"
               onClick={() => onApprove(proposal)}
-              className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#1F4452] px-3.5 text-[13px] font-bold text-white transition hover:bg-[#326273] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#5C9EAD]/30"
+              className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#1F4452] px-3.5 text-[13px] font-bold text-white transition hover:bg-[#326273] focus-ring"
             >
               <CheckCircle2 className="h-4 w-4" />
               Approve now

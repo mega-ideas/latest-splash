@@ -179,14 +179,14 @@ export default function ApprovalCodeCard() {
               maxLength={12}
               placeholder="000000"
               disabled={busy !== null}
-              className="h-11 w-full rounded-md border border-[#326273]/70 bg-white px-3 font-mono text-lg tracking-[0.3em] text-[#1F4452] tabular-nums outline-none transition placeholder:text-[#326273]/90 focus:border-[#5C9EAD] focus:ring-4 focus:ring-[#5C9EAD]/20 disabled:opacity-60 sm:w-44"
+              className="h-11 w-full rounded-md border border-[#326273]/70 bg-white px-3 font-mono text-lg tracking-[0.3em] text-[#1F4452] tabular-nums outline-none transition placeholder:text-[#326273]/90 focus:border-[#5C9EAD] focus-ring disabled:opacity-60 sm:w-44"
             />
           </label>
           <div className="flex gap-2">
             <button
               type="submit"
               disabled={!canAnswer}
-              className="inline-flex h-11 flex-1 items-center justify-center gap-1.5 rounded-md bg-[#1F4452] px-4 text-[13px] font-bold text-white transition hover:bg-[#326273] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#5C9EAD]/30 disabled:cursor-not-allowed disabled:opacity-45 sm:flex-none"
+              className="inline-flex h-11 flex-1 items-center justify-center gap-1.5 rounded-md bg-[#1F4452] px-4 text-[13px] font-bold text-white transition hover:bg-[#326273] focus-ring disabled:cursor-not-allowed disabled:opacity-45 sm:flex-none"
             >
               {busy === 'APPROVE' ? (
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
@@ -199,7 +199,7 @@ export default function ApprovalCodeCard() {
               type="button"
               onClick={() => void answer('REJECT')}
               disabled={!canAnswer}
-              className="inline-flex h-11 flex-1 items-center justify-center gap-1.5 rounded-md border border-[var(--error)] px-4 text-[13px] font-bold text-[var(--error)] transition hover:bg-[var(--error-bg)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[var(--error)]/25 disabled:cursor-not-allowed disabled:opacity-45 sm:flex-none"
+              className="inline-flex h-11 flex-1 items-center justify-center gap-1.5 rounded-md border border-[var(--error)] px-4 text-[13px] font-bold text-[var(--error)] transition hover:bg-[var(--error-bg)] focus-ring disabled:cursor-not-allowed disabled:opacity-45 sm:flex-none"
             >
               {busy === 'REJECT' ? (
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
