@@ -109,7 +109,7 @@ export default function StuckPaymentsLane({ items }: { items: StuckPaymentItem[]
             </span>
           )}
         </div>
-        <p className="text-[13px] font-medium text-[#326273]/60">
+        <p className="text-[13px] font-medium text-[#326273]/90">
           Approved and sent for payment, but no result came back. Record what happened.
         </p>
       </div>
@@ -126,7 +126,7 @@ export default function StuckPaymentsLane({ items }: { items: StuckPaymentItem[]
               <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-1">
                 <div className="min-w-0">
                   <strong className="block text-sm text-[#1F4452]">{item.recommendation}</strong>
-                  <p className="mt-1 text-[13px] font-medium text-[#326273]/65">
+                  <p className="mt-1 text-[13px] font-medium text-[#326273]/90">
                     {item.id} · {kindLabel(item.kind)} · {item.waitingLabel}
                   </p>
                 </div>
@@ -154,7 +154,7 @@ export default function StuckPaymentsLane({ items }: { items: StuckPaymentItem[]
 
               <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-end">
                 {item.outcomes.includes('SENT') && (
-                  <label className="flex flex-col gap-1 text-[12px] font-bold text-[#326273]/80 md:mr-auto">
+                  <label className="flex flex-col gap-1 text-[12px] font-bold text-[#326273]/90 md:mr-auto">
                     Reference, if it was sent (optional)
                     <input
                       type="text"
@@ -168,7 +168,7 @@ export default function StuckPaymentsLane({ items }: { items: StuckPaymentItem[]
                       }}
                       disabled={locked}
                       placeholder="Transfer or run ID"
-                      className="h-11 w-full rounded-md border border-[#326273]/25 bg-white px-3 text-[13px] font-medium text-[#1F4452] placeholder:text-[#326273]/40 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#5C9EAD]/30 disabled:opacity-45 md:w-60"
+                      className="h-11 w-full rounded-md border border-[#326273]/25 bg-white px-3 text-[13px] font-medium text-[#1F4452] placeholder:text-[#326273]/90 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#5C9EAD]/30 disabled:opacity-45 md:w-60"
                     />
                   </label>
                 )}
@@ -202,7 +202,7 @@ export default function StuckPaymentsLane({ items }: { items: StuckPaymentItem[]
               </div>
 
               {item.blockedReason && (
-                <p id={`${item.id}-blocked`} className="text-[12px] font-semibold text-[#326273]/60 md:text-right">
+                <p id={`${item.id}-blocked`} className="text-[12px] font-semibold text-[#326273]/90 md:text-right">
                   {item.blockedReason}
                 </p>
               )}
@@ -219,19 +219,22 @@ export default function StuckPaymentsLane({ items }: { items: StuckPaymentItem[]
           <div key={`recorded-${item.id}`} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
             <div className="min-w-0">
               <strong className="block truncate text-sm text-[#1F4452]">{item.recommendation}</strong>
-              <p className="mt-0.5 truncate text-[13px] font-medium text-[#326273]/60">
+              <p className="mt-0.5 truncate text-[13px] font-medium text-[#326273]/90">
                 {item.id} · {item.amountLabel}
               </p>
             </div>
             <span
               className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[13px] font-medium ${
                 result.kind === 'recorded' && result.outcome === 'SENT'
-                  ? 'border-[var(--ok)] bg-[var(--ok-bg)] text-[var(--ok)]'
+                  ? 'border-[var(--ok)] bg-[var(--ok-bg)] text-[#1F4452]'
                   : 'border-[#326273]/25 bg-white text-[#1F4452]'
               }`}
             >
+              {/* Ink, not --ok, for the words: --ok on --ok-bg is 4.25:1, under
+                  4.5:1 at this size. The icon keeps the colour (3:1 is enough
+                  for it), and the words say what was recorded. */}
               {result.kind === 'recorded' && result.outcome === 'SENT' ? (
-                <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+                <CheckCircle2 className="h-3.5 w-3.5 text-[var(--ok)]" aria-hidden="true" />
               ) : (
                 <XCircle className="h-3.5 w-3.5" aria-hidden="true" />
               )}
