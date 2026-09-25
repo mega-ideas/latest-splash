@@ -21,7 +21,7 @@ const json = (body, status = 200) => new Response(JSON.stringify(body), { status
 const consistent = (check) => assert.equal(check.ok, check.status !== 'fail', `ok must match status: ${JSON.stringify(check)}`);
 
 const TWILIO = {
-  TWILIO_ACCOUNT_SID: 'AC00000000000000000000000000000001',
+  TWILIO_ACCOUNT_SID: 'ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
   TWILIO_AUTH_TOKEN: 'super-secret-token',
   TWILIO_WHATSAPP_FROM: '+14155238886',
 };
@@ -52,7 +52,7 @@ test('Twilio: proven by an account lookup that sends nothing, and the token neve
   assert.match(accepted.detail, /credentials accepted \(Trial account\); sending from \+14155238886/);
   assert.match(accepted.detail, /free text, which WhatsApp delivers only within 24 hours/);
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].url, 'https://api.twilio.com/2010-04-01/Accounts/AC00000000000000000000000000000001.json');
+  assert.equal(calls[0].url, 'https://api.twilio.com/2010-04-01/Accounts/ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.json');
   assert.equal(calls[0].init.method, undefined, 'a GET: nothing is sent');
   assert.equal(calls[0].init.headers.Authorization, `Basic ${Buffer.from(`${TWILIO.TWILIO_ACCOUNT_SID}:${TWILIO.TWILIO_AUTH_TOKEN}`).toString('base64')}`);
 
@@ -152,4 +152,23 @@ test('doctor and /api/health both show every go-live check, by name', () => {
     assert.match(health, new RegExp(`\\b${key}\\b`), `${key} in the health report`);
     assert.match(doctor, new RegExp(`\\b${key}: '`), `${key} named in doctor`);
   }
+});
+
+test('the admin Go-live page shows every check in the report, staff-only, and never by colour alone', () => {
+  const page = readFileSync(new URL('../app/admin/(console)/go-live/page.tsx', import.meta.url), 'utf8');
+  const view = readFileSync(new URL('../components/admin/GoLiveView.tsx', import.meta.url), 'utf8');
+  const health = readFileSync(new URL('../lib/server/health-checks.ts', import.meta.url), 'utf8');
+  const layout = readFileSync(new URL('../app/admin/(console)/layout.tsx', import.meta.url), 'utf8');
+  // Every key the report carries has a row, so a new check cannot go unseen.
+  const block = health.slice(health.indexOf('checks: {'), health.indexOf('};', health.indexOf('checks: {')));
+  const keys = [...block.matchAll(/\b([a-zA-Z]+): Check\b/g)].map((m) => m[1]);
+  assert.ok(keys.length >= 12, `found ${keys.length} report keys`);
+  for (const key of keys) assert.match(view, new RegExp(`key: '${key}'`), `${key} has a row on the page`);
+  // The same module as doctor and /api/health.
+  assert.match(page, /runHealthChecks\(\)/);
+  // Under (console), whose layout redirects anyone without a staff session.
+  assert.match(layout, /if \(!session\) \{\s*redirect\(/);
+  assert.match(layout, /label: 'Go-live', href: '\/admin\/go-live'/);
+  // Each status has a word next to its colour.
+  for (const word of ["word: 'Working'", "word: 'Not set up'", "word: 'Failing'"]) assert.ok(view.includes(word), word);
 });

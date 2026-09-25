@@ -2,7 +2,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { Activity, ClipboardCheck, Headphones, KeyRound, LayoutDashboard, Settings2, UserRoundCheck } from 'lucide-react';
+import { Activity, ClipboardCheck, Headphones, KeyRound, LayoutDashboard, ListChecks, Settings2, UserRoundCheck } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import AdminLogoutButton from '@/components/admin/AdminLogoutButton';
@@ -17,6 +17,7 @@ const navItems = [
   { label: 'Profile requests', href: '/admin/profile-requests', icon: UserRoundCheck },
   { label: 'Support', href: '/admin/support', icon: Headphones },
   { label: 'Contract config', href: '/admin/contracts', icon: Settings2 },
+  { label: 'Go-live', href: '/admin/go-live', icon: ListChecks },
   { label: 'Workspace access', href: '/admin/memberships', icon: KeyRound },
 ];
 
