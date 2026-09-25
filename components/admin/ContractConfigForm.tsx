@@ -106,14 +106,14 @@ export default function ContractConfigForm({ initialConfig, initialEnv, initialM
       <div className="rounded-[2rem] border border-[#326273]/10 bg-white p-6 shadow-sm md:p-8">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <div className="inline-flex rounded-full bg-[#5C9EAD]/10 px-3 py-1 text-xs font-bold uppercase tracking-wide text-[#5C9EAD]">{network}</div>
+            <div className="inline-flex rounded-full bg-[#5C9EAD]/10 px-3 py-1 text-xs font-bold uppercase tracking-wide text-[#237284]">{network}</div>
             <h1 className="mt-3 text-3xl font-black tracking-[-0.04em] text-[#1f4350]">Contract config</h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-[#326273]/65">
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-[#326273]/90">
               On-chain object IDs used by settlement, peg refresh, and business-account flows. Changes apply immediately to new requests — no server restart needed. The previous{' '}
               <code className="rounded bg-[#F6F0ED] px-1 py-0.5 text-xs">.env.local</code> values remain as the fallback.
             </p>
           </div>
-          <div className="rounded-2xl border border-[#326273]/10 bg-[#F6F0ED] px-4 py-3 text-xs leading-5 text-[#326273]/80">
+          <div className="rounded-2xl border border-[#326273]/10 bg-[#F6F0ED] px-4 py-3 text-xs leading-5 text-[#326273]/90">
             <div><span className="font-bold text-[#1f4350]">File:</span> {meta.path}</div>
             <div className="mt-1"><span className="font-bold text-[#1f4350]">Status:</span> {meta.exists ? `Override active${meta.updatedAt ? ` — updated ${new Date(meta.updatedAt).toLocaleString()}` : ''}` : 'No override (using env)'}</div>
           </div>
@@ -133,7 +133,7 @@ export default function ContractConfigForm({ initialConfig, initialEnv, initialM
                   <label htmlFor={field.key} className="text-sm font-bold text-[#1f4350]">
                     {field.label}
                   </label>
-                  <code className="text-[10px] uppercase tracking-[0.16em] text-[#326273]/55">{field.envKey}</code>
+                  <code className="text-[12px] uppercase tracking-[0.16em] text-[#326273]/90">{field.envKey}</code>
                 </div>
                 <div className="relative">
                   <input
@@ -144,7 +144,7 @@ export default function ContractConfigForm({ initialConfig, initialEnv, initialM
                     placeholder={field.placeholder}
                     spellCheck={false}
                     autoComplete="off"
-                    className={`w-full rounded-2xl border px-4 py-3 pr-20 font-mono text-xs text-[#1f4350] focus-ring ${error ? 'border-red-400 bg-red-50' : 'border-[#326273]/15 bg-white'}`}
+                    className={`w-full rounded-2xl border px-4 py-3 pr-20 font-mono text-xs text-[#1f4350] focus-ring ${error ? 'border-red-500 bg-red-50' : 'border-[#326273]/70 bg-white'}`}
                   />
                   <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1">
                     {envValue && (
@@ -152,7 +152,7 @@ export default function ContractConfigForm({ initialConfig, initialEnv, initialM
                         type="button"
                         title={`Revert to env: ${envValue.slice(0, 14)}…`}
                         onClick={() => revertToEnv(field.key)}
-                        className="rounded-lg p-1.5 text-[#326273]/55 hover:bg-[#F6F0ED] hover:text-[#326273]"
+                        className="rounded-lg p-1.5 text-[#326273]/90 hover:bg-[#F6F0ED] hover:text-[#326273]"
                       >
                         <RotateCcw className="h-3.5 w-3.5" />
                       </button>
@@ -161,16 +161,16 @@ export default function ContractConfigForm({ initialConfig, initialEnv, initialM
                       type="button"
                       title="Copy value"
                       onClick={() => copyValue(field.key, current)}
-                      className="rounded-lg p-1.5 text-[#326273]/55 hover:bg-[#F6F0ED] hover:text-[#326273]"
+                      className="rounded-lg p-1.5 text-[#326273]/90 hover:bg-[#F6F0ED] hover:text-[#326273]"
                     >
                       {copied === field.key ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
                     </button>
                   </div>
                 </div>
                 {error && <p className="text-xs text-red-600">{error}</p>}
-                {!error && field.help && <p className="text-xs leading-5 text-[#326273]/55">{field.help}</p>}
+                {!error && field.help && <p className="text-xs leading-5 text-[#326273]/90">{field.help}</p>}
                 {overridden && (
-                  <p className="text-[11px] leading-4 text-[#5C9EAD]">
+                  <p className="text-[12px] leading-4 text-[#237284]">
                     Override active (env: <code className="font-mono">{envValue.slice(0, 18)}…</code>)
                   </p>
                 )}
@@ -179,7 +179,7 @@ export default function ContractConfigForm({ initialConfig, initialEnv, initialM
                     href={suiVisionObjectUrl(current)}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#5C9EAD] hover:underline"
+                    className="inline-flex items-center gap-1 text-[12px] font-semibold text-[#237284] hover:underline"
                   >
                     SuiVision <ExternalLink className="h-3 w-3" />
                   </a>
@@ -191,8 +191,8 @@ export default function ContractConfigForm({ initialConfig, initialEnv, initialM
       </div>
 
       <div className="sticky bottom-4 flex items-center justify-between gap-3 rounded-[2rem] border border-[#326273]/10 bg-white p-4 shadow-md">
-        <div className="text-xs text-[#326273]/65">
-          {status.kind === 'success' && <span className="font-semibold text-green-700">Saved at {status.at}. New requests use these values immediately.</span>}
+        <div className="text-xs text-[#326273]/90">
+          {status.kind === 'success' && <span className="font-semibold text-green-800">Saved at {status.at}. New requests use these values immediately.</span>}
           {status.kind === 'error' && <span className="font-semibold text-red-600">{status.message}</span>}
           {status.kind === 'idle' && <span>Changes are written to <code className="rounded bg-[#F6F0ED] px-1 py-0.5">data/contract-config.json</code>.</span>}
         </div>

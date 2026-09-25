@@ -37,7 +37,7 @@ export default async function AdminConsoleLayout({ children }: { children: React
           <Image src="/splash-main-icon.png" alt="Splash" width={48} height={47} className="h-auto w-9" loading="eager" />
           <div>
             <div className="text-xl font-black tracking-[-0.03em]">Splash Admin</div>
-            <div className="text-[10px] uppercase tracking-[0.2em] text-white/45">Staff console</div>
+            <div className="text-[12px] font-medium text-white/80">Staff console</div>
           </div>
         </Link>
 
@@ -58,10 +58,10 @@ export default async function AdminConsoleLayout({ children }: { children: React
           </span>
         </div>
 
-        <div className="rounded-2xl border border-white/10 bg-white/10 p-4 text-xs text-white/70">
+        <div className="rounded-2xl border border-white/10 bg-white/10 p-4 text-xs text-white/90">
           <div className="font-bold text-white">{session.name}</div>
           <div className="mt-1 break-all">{session.email}</div>
-          <div className="mt-2 uppercase tracking-[0.16em] text-[#A7D6DF]">{session.role}</div>
+          <div className="mt-2 uppercase tracking-[0.16em] text-[#d8fff4]">{session.role}</div>
         </div>
         <div className="mt-4">
           <AdminLogoutButton />

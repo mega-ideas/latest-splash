@@ -31,7 +31,7 @@ export default async function AdminTransactionsPage() {
       <header className="dash-surface p-6 md:p-8">
         <span className="dash-kicker">Settlement monitor</span>
         <h1 className="dash-title mt-2 text-4xl">Live transfer feed</h1>
-        <p className="mt-3 max-w-3xl text-sm leading-6 text-[#326273]/65">Monitor peg health, cross-border volume, fee capture, and Sui settlement transactions linked to the active package.</p>
+        <p className="mt-3 max-w-3xl text-sm leading-6 text-[#326273]/90">Monitor peg health, cross-border volume, fee capture, and Sui settlement transactions linked to the active package.</p>
       </header>
 
       <section className="grid gap-5 md:grid-cols-3">
@@ -45,15 +45,15 @@ export default async function AdminTransactionsPage() {
       <div className="dash-surface">
         <div className="border-b border-[#326273]/10 p-5">
           <h2 className="text-lg font-bold text-[#1f4350]">Funding intake and KYT</h2>
-          <p className="mt-1 text-xs text-[#326273]/60">Deposits stay outside the available balance until KYT and normalization complete.</p>
+          <p className="mt-1 text-xs text-[#326273]/90">Deposits stay outside the available balance until KYT and normalization complete.</p>
         </div>
         {fundingSessions.length === 0 ? (
-          <div className="p-8 text-center text-sm text-[#326273]/60">No funding sessions yet.</div>
+          <div className="p-8 text-center text-sm text-[#326273]/90">No funding sessions yet.</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[1050px] text-sm">
               <thead className="bg-[#326273]/5">
-                <tr className="text-left text-[#326273]/70">
+                <tr className="text-left text-[#326273]/90">
                   <th className="p-3">Session</th>
                   <th>Status</th>
                   <th>Source</th>
@@ -90,12 +90,12 @@ export default async function AdminTransactionsPage() {
         <div className="divide-y divide-[#326273]/10">
           {transfers.slice(0, 8).map((transfer) => (
             <div key={transfer.id} className="grid gap-3 p-4 text-sm md:grid-cols-[120px_1fr_auto] md:items-center">
-              <div className="text-xs font-semibold text-[#326273]/65">{new Date(transfer.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+              <div className="text-xs font-semibold text-[#326273]/90">{new Date(transfer.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
               <div className="font-mono font-semibold text-[#1f4350]">$ {transfer.sourceAmountUsd} → {transfer.targetAmount} {transfer.targetCurrency}</div>
               <div className="rounded-full bg-[#F6F0ED] px-3 py-1 text-xs font-bold text-[#326273]">{transfer.state}</div>
             </div>
           ))}
-          {transfers.length === 0 && <div className="p-8 text-center text-sm text-[#326273]/65">No transfers yet.</div>}
+          {transfers.length === 0 && <div className="p-8 text-center text-sm text-[#326273]/90">No transfers yet.</div>}
         </div>
       </div>
 
@@ -104,12 +104,12 @@ export default async function AdminTransactionsPage() {
           <h2 className="text-lg font-bold text-[#326273]">Single transfers</h2>
         </div>
         {transfers.length === 0 ? (
-          <div className="p-8 text-center text-sm text-[#326273]/60">No single transfers yet.</div>
+          <div className="p-8 text-center text-sm text-[#326273]/90">No single transfers yet.</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[1050px] text-sm">
               <thead className="bg-[#326273]/5">
-                <tr className="text-left text-[#326273]/70">
+                <tr className="text-left text-[#326273]/90">
                   <th className="p-3">Transfer ID</th>
                   <th>State</th>
                   <th>Recipient</th>
@@ -127,9 +127,9 @@ export default async function AdminTransactionsPage() {
                     <td className="p-3 font-mono text-xs text-[#326273]">{transfer.id}</td>
                     <td>
                       <div className="flex items-center gap-2">
-                        {transfer.state === 'SETTLED' && <CheckCircle2 className="text-[#5C9EAD]" size={14} />}
-                        {transfer.state === 'SETTLING' && <Loader2 className="animate-spin text-[#E39774]" size={14} />}
-                        {transfer.state === 'QUEUED' && <Loader2 className="animate-spin text-[#326273]/60" size={14} />}
+                        {transfer.state === 'SETTLED' && <CheckCircle2 className="text-[#237284]" size={14} />}
+                        {transfer.state === 'SETTLING' && <Loader2 className="animate-spin text-[#9f5839]" size={14} />}
+                        {transfer.state === 'QUEUED' && <Loader2 className="animate-spin text-[#326273]/90" size={14} />}
                         {transfer.state === 'FAILED' && <XCircle className="text-red-500" size={14} />}
                         <span className="font-semibold text-[#326273]">{transfer.state}</span>
                       </div>
@@ -138,22 +138,22 @@ export default async function AdminTransactionsPage() {
                     <td className="font-semibold text-[#326273]">{transfer.fundingSource}</td>
                     <td className="font-bold text-[#326273]">{transfer.fundingFeeTier}</td>
                     <td className="text-right font-mono text-[#326273]">{transfer.targetAmount} {transfer.targetCurrency}</td>
-                    <td className="font-mono text-xs text-[#326273]/70">{transfer.verificationReference || '—'}</td>
+                    <td className="font-mono text-xs text-[#326273]/90">{transfer.verificationReference || '—'}</td>
                     <td>
                       {transfer.verificationReference && (
                         <div className="flex gap-1">
-                          <a href={suiVisionTxUrl(transfer.verificationReference)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded bg-[#5C9EAD]/10 px-2 py-1 text-xs font-semibold text-[#5C9EAD] hover:bg-[#5C9EAD]/20">
+                          <a href={suiVisionTxUrl(transfer.verificationReference)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded bg-[#5C9EAD]/10 px-2 py-1 text-xs font-semibold text-[#237284] hover:bg-[#5C9EAD]/20">
                             <ExternalLink size={10} />
                             SuiVision
                           </a>
-                          <a href={suiScanTxUrl(transfer.verificationReference)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded bg-[#5C9EAD]/10 px-2 py-1 text-xs font-semibold text-[#5C9EAD] hover:bg-[#5C9EAD]/20">
+                          <a href={suiScanTxUrl(transfer.verificationReference)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded bg-[#5C9EAD]/10 px-2 py-1 text-xs font-semibold text-[#237284] hover:bg-[#5C9EAD]/20">
                             <ExternalLink size={10} />
                             SuiScan
                           </a>
                         </div>
                       )}
                     </td>
-                    <td className="text-xs text-[#326273]/60">{new Date(transfer.createdAt).toLocaleString()}</td>
+                    <td className="text-xs text-[#326273]/90">{new Date(transfer.createdAt).toLocaleString()}</td>
                   </tr>
                 ))}
               </tbody>
@@ -167,12 +167,12 @@ export default async function AdminTransactionsPage() {
           <h2 className="text-lg font-bold text-[#326273]">Batch payouts</h2>
         </div>
         {batches.length === 0 ? (
-          <div className="p-8 text-center text-sm text-[#326273]/60">No batch transactions yet.</div>
+          <div className="p-8 text-center text-sm text-[#326273]/90">No batch transactions yet.</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[900px] text-sm">
               <thead className="bg-[#326273]/5">
-                <tr className="text-left text-[#326273]/70">
+                <tr className="text-left text-[#326273]/90">
                   <th className="p-3">Batch ID</th>
                   <th>State</th>
                   <th className="text-right">Rows</th>
@@ -189,34 +189,34 @@ export default async function AdminTransactionsPage() {
                     <td className="p-3 font-mono text-xs text-[#326273]">{batch.id}</td>
                     <td>
                       <div className="flex items-center gap-2">
-                        {batch.state === 'SETTLED' && <CheckCircle2 className="text-[#5C9EAD]" size={14} />}
-                        {batch.state === 'SETTLING' && <Loader2 className="animate-spin text-[#E39774]" size={14} />}
-                        {batch.state === 'QUEUED' && <Loader2 className="animate-spin text-[#326273]/60" size={14} />}
+                        {batch.state === 'SETTLED' && <CheckCircle2 className="text-[#237284]" size={14} />}
+                        {batch.state === 'SETTLING' && <Loader2 className="animate-spin text-[#9f5839]" size={14} />}
+                        {batch.state === 'QUEUED' && <Loader2 className="animate-spin text-[#326273]/90" size={14} />}
                         {batch.state === 'FAILED' && <XCircle className="text-red-500" size={14} />}
                         <span className="font-semibold text-[#326273]">{batch.state}</span>
                       </div>
                     </td>
                     <td className="text-right text-[#326273]">{batch.acceptedRows}</td>
                     <td className="text-right font-mono text-[#326273]">$ {batch.totalAmount}</td>
-                    <td className="font-mono text-xs text-[#326273]/70">{batch.digest || '—'}</td>
-                    <td className="font-mono text-xs text-[#326273]/70">{batch.packageId || '—'}</td>
+                    <td className="font-mono text-xs text-[#326273]/90">{batch.digest || '—'}</td>
+                    <td className="font-mono text-xs text-[#326273]/90">{batch.packageId || '—'}</td>
                     <td>
                       <div className="flex gap-1">
                         {batch.explorer.suiVisionTxUrl && (
-                          <a href={batch.explorer.suiVisionTxUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded bg-[#5C9EAD]/10 px-2 py-1 text-xs font-semibold text-[#5C9EAD] hover:bg-[#5C9EAD]/20">
+                          <a href={batch.explorer.suiVisionTxUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded bg-[#5C9EAD]/10 px-2 py-1 text-xs font-semibold text-[#237284] hover:bg-[#5C9EAD]/20">
                             <ExternalLink size={10} />
                             SuiVision
                           </a>
                         )}
                         {batch.explorer.suiScanTxUrl && (
-                          <a href={batch.explorer.suiScanTxUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded bg-[#5C9EAD]/10 px-2 py-1 text-xs font-semibold text-[#5C9EAD] hover:bg-[#5C9EAD]/20">
+                          <a href={batch.explorer.suiScanTxUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded bg-[#5C9EAD]/10 px-2 py-1 text-xs font-semibold text-[#237284] hover:bg-[#5C9EAD]/20">
                             <ExternalLink size={10} />
                             SuiScan
                           </a>
                         )}
                       </div>
                     </td>
-                    <td className="text-xs text-[#326273]/60">{new Date(batch.createdAt).toLocaleString()}</td>
+                    <td className="text-xs text-[#326273]/90">{new Date(batch.createdAt).toLocaleString()}</td>
                   </tr>
                 ))}
               </tbody>
@@ -230,12 +230,12 @@ export default async function AdminTransactionsPage() {
           <h2 className="text-lg font-bold text-[#326273]">All transactions</h2>
         </div>
         {transactions.length === 0 ? (
-          <div className="p-8 text-center text-sm text-[#326273]/60">No transactions yet.</div>
+          <div className="p-8 text-center text-sm text-[#326273]/90">No transactions yet.</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[1000px] text-sm">
               <thead className="bg-[#326273]/5">
-                <tr className="text-left text-[#326273]/70">
+                <tr className="text-left text-[#326273]/90">
                   <th className="p-3">ID</th>
                   <th>Kind</th>
                   <th>State</th>
@@ -254,36 +254,36 @@ export default async function AdminTransactionsPage() {
                     <td className="font-semibold text-[#326273]">{tx.kind}</td>
                     <td>
                       <div className="flex items-center gap-2">
-                        {tx.state === 'SETTLED' && <CheckCircle2 className="text-[#5C9EAD]" size={14} />}
-                        {tx.state === 'SETTLING' && <Loader2 className="animate-spin text-[#E39774]" size={14} />}
-                        {tx.state === 'QUEUED' && <Loader2 className="animate-spin text-[#326273]/60" size={14} />}
+                        {tx.state === 'SETTLED' && <CheckCircle2 className="text-[#237284]" size={14} />}
+                        {tx.state === 'SETTLING' && <Loader2 className="animate-spin text-[#9f5839]" size={14} />}
+                        {tx.state === 'QUEUED' && <Loader2 className="animate-spin text-[#326273]/90" size={14} />}
                         {tx.state === 'FAILED' && <XCircle className="text-red-500" size={14} />}
                         <span className="font-semibold text-[#326273]">{tx.state}</span>
                       </div>
                     </td>
-                    <td className="font-mono text-xs text-[#326273]/70">
+                    <td className="font-mono text-xs text-[#326273]/90">
                       {tx.module}::{tx.functionName}
                     </td>
                     <td className="text-right font-mono text-[#326273]">{tx.amount}</td>
-                    <td className="font-mono text-xs text-[#326273]/70">{tx.digest || '—'}</td>
-                    <td className="font-mono text-xs text-[#326273]/70">{tx.packageId || '—'}</td>
+                    <td className="font-mono text-xs text-[#326273]/90">{tx.digest || '—'}</td>
+                    <td className="font-mono text-xs text-[#326273]/90">{tx.packageId || '—'}</td>
                     <td>
                       <div className="flex gap-1">
                         {tx.explorer.suiVisionTxUrl && (
-                          <a href={tx.explorer.suiVisionTxUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded bg-[#5C9EAD]/10 px-2 py-1 text-xs font-semibold text-[#5C9EAD] hover:bg-[#5C9EAD]/20">
+                          <a href={tx.explorer.suiVisionTxUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded bg-[#5C9EAD]/10 px-2 py-1 text-xs font-semibold text-[#237284] hover:bg-[#5C9EAD]/20">
                             <ExternalLink size={10} />
                             SuiVision
                           </a>
                         )}
                         {tx.explorer.suiScanTxUrl && (
-                          <a href={tx.explorer.suiScanTxUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded bg-[#5C9EAD]/10 px-2 py-1 text-xs font-semibold text-[#5C9EAD] hover:bg-[#5C9EAD]/20">
+                          <a href={tx.explorer.suiScanTxUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded bg-[#5C9EAD]/10 px-2 py-1 text-xs font-semibold text-[#237284] hover:bg-[#5C9EAD]/20">
                             <ExternalLink size={10} />
                             SuiScan
                           </a>
                         )}
                       </div>
                     </td>
-                    <td className="text-xs text-[#326273]/60">{new Date(tx.createdAt).toLocaleString()}</td>
+                    <td className="text-xs text-[#326273]/90">{new Date(tx.createdAt).toLocaleString()}</td>
                   </tr>
                 ))}
               </tbody>
@@ -298,10 +298,10 @@ export default async function AdminTransactionsPage() {
 function MonitorCard({ icon: Icon, label, value, detail }: { icon: typeof Circle; label: string; value: string; detail: string }) {
   return (
     <div className="dash-block p-6">
-      <Icon className="h-5 w-5 text-[#5C9EAD]" />
-      <div className="mt-4 text-[11px] font-bold uppercase tracking-wide text-[#326273]/55">{label}</div>
+      <Icon className="h-5 w-5 text-[#237284]" />
+      <div className="mt-4 text-[12px] font-bold uppercase tracking-wide text-[#326273]/90">{label}</div>
       <div className="mt-2 text-2xl font-black text-[#1f4350]">{value}</div>
-      <div className="mt-1 text-sm text-[#326273]/65">{detail}</div>
+      <div className="mt-1 text-sm text-[#326273]/90">{detail}</div>
     </div>
   );
 }

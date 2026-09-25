@@ -14,9 +14,10 @@ import { NON_TEXT, ROOT, SMALLEST_PX, WORDS, auditPages, hex, over, paintsOf } f
  * The dashboard's colours come from more places than /queue's: its own CSS
  * classes (.dash-surface, .dash-kicker, .dash-btn), variables set on the shell
  * (--fintech-*), theme names (text-primary, bg-card), rules that lift every
- * bg-[#1F4452] and bg-white inside it, a gradient page, and a stylesheet rule
- * that styles every field. tests/helpers/contrast-audit.mjs reads all of them
- * the way the browser cascades them, and measures what is painted.
+ * bg-[#1F4452] and bg-white inside it, a gradient page with a glow fixed over
+ * it, a glow on the sidebar, and a stylesheet rule that styles every field.
+ * tests/helpers/contrast-audit.mjs reads all of them the way the browser
+ * cascades them, and measures what is painted.
  *
  * Disabled controls are exempt (WCAG 1.4.3), and so is a section dimmed while
  * a condition says it cannot be used yet (disabled, locked, busy, loading).
@@ -55,14 +56,19 @@ test('the dashboard stylesheet is read the way the browser paints it', () => {
   );
 });
 
-test('the check finds the dashboard’s surfaces: the gradient page, the lifted ink sidebar, cards and fields', (t) => {
+test('the check finds the dashboard’s surfaces: the gradient page and the glow over it, the sidebars, cards and fields', (t) => {
   const white = [255, 255, 255];
   const stops = { top: [236, 227, 222], middle: [239, 230, 225], bottom: [229, 216, 209] };
   const expected = {
     'the page, top of its gradient': stops.top,
     'the page, middle': stops.middle,
     'the page, bottom': stops.bottom,
-    'the sidebar (bg-[#1F4452], lifted towards white)': over([31, 68, 82, 0.85], white),
+    // .fintech-dashboard-shell::before, fixed to the window: its glow's brightest point over the page.
+    'the page under its fixed glow, at the bottom of the gradient': over([92, 158, 173, 0.08], stops.bottom),
+    // .fintech-dashboard-sidebar's own glow, at its brightest over the top of the rail.
+    'the sidebar rail under its glow': over([159, 207, 199, 0.1], [36, 85, 99]),
+    // Buttons, avatars, the mobile header: not the sidebar, whose own background wins.
+    'an ink element (bg-[#1F4452], lifted towards white)': over([31, 68, 82, 0.85], white),
     'a .dash-surface card on the page': over([255, 253, 249, 0.93], stops.top),
     'a field in the dashboard (the field rule)': over([255, 253, 247, 0.92], over([255, 253, 249, 0.93], stops.top)),
   };

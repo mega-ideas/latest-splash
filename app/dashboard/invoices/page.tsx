@@ -196,8 +196,8 @@ export default function InvoicesPage() {
               {isLoading ? <tr><td colSpan={6} className="p-8 text-center text-foreground/90">Loading invoice vault...</td></tr> :
                 filtered.map((invoice) => (
                   <tr key={invoice.id} className="border-t border-foreground/8">
-                    <td className="px-4 py-4"><strong>{invoice.payerOrgName ?? 'Draft payer'}</strong><small className="mt-1 block font-mono text-foreground/90">{invoice.id}</small></td>
-                    <td className="px-4 py-4"><strong>${Number(invoice.amountUsd).toLocaleString()}</strong><small className="mt-1 block text-foreground/90">USD → {invoice.targetCurrency}</small></td>
+                    <td className="px-4 py-4"><strong>{invoice.payerOrgName ?? 'Draft payer'}</strong><small className="mt-1 block font-mono text-[12px] text-foreground/90">{invoice.id}</small></td>
+                    <td className="px-4 py-4"><strong>${Number(invoice.amountUsd).toLocaleString()}</strong><small className="mt-1 block text-[12px] text-foreground/90">USD → {invoice.targetCurrency}</small></td>
                     <td className="px-4 py-4 text-foreground/90">{invoice.dueDate}</td>
                     <td className="px-4 py-4">
                       {invoice.walrusBlobId ? <span className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-2.5 py-1 text-[13px] font-semibold text-foreground"><ShieldCheck className="h-3 w-3" /> Seal + Walrus</span> : <span className="text-[13px] text-foreground/90">No document</span>}

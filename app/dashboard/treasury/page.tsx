@@ -516,7 +516,7 @@ export default function TreasuryPage() {
             </div>
             <div className="dash-num mt-2 text-3xl font-semibold text-[#0c3e48]">${fmtUsd(balance)}</div>
             <div className="mt-1 flex flex-wrap items-center gap-2 text-[13px] font-medium">
-              <span className="rounded-full bg-[#D9A441]/15 px-2 py-0.5 text-[#8b6418]">Ondo USDY</span>
+              <span className="rounded-full bg-[#D9A441]/10 px-2 py-0.5 text-[#8b6418]">Ondo USDY</span>
               <span className="text-[#326273]/90">{rate.label}</span>
             </div>
             <div className="mt-2 flex items-center gap-1.5 text-[13px] font-medium text-[var(--ok)]">

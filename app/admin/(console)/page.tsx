@@ -23,12 +23,12 @@ export default async function AdminOverviewPage() {
   return (
     <div className="mx-auto max-w-7xl space-y-6">
       <header className="dash-surface p-6 md:p-8">
-        <div className="mb-3 inline-flex rounded-full bg-[#5C9EAD]/10 px-3 py-1 text-xs font-bold uppercase tracking-wide text-[#5C9EAD]">admin.splash.xyz</div>
+        <div className="mb-3 inline-flex rounded-full bg-[#5C9EAD]/10 px-3 py-1 text-xs font-bold uppercase tracking-wide text-[#237284]">admin.splash.xyz</div>
         <div className="grid gap-5 xl:grid-cols-[1fr_auto] xl:items-end">
           <div>
             <span className="dash-kicker">Control room</span>
             <h1 className="dash-title mt-2 text-4xl">Staff operations console</h1>
-            <p className="mt-3 max-w-3xl text-sm leading-6 text-[#326273]/65">Separate internal workspace for compliance approvals, manual customer operations, complaint handling, and regulator-facing review evidence.</p>
+            <p className="mt-3 max-w-3xl text-sm leading-6 text-[#326273]/90">Separate internal workspace for compliance approvals, manual customer operations, complaint handling, and regulator-facing review evidence.</p>
           </div>
           <div className="grid grid-cols-3 gap-2 rounded-2xl bg-[#F6F0ED] p-2 text-center">
             <Metric label="KYB queue" value={pendingKyb.length} />
@@ -42,9 +42,9 @@ export default async function AdminOverviewPage() {
         <Link href={adminConsolePath('/kyb', hostname)} className="dash-block dash-block-interactive group p-6">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#5C9EAD]/10 text-[#5C9EAD]"><ClipboardCheck className="h-6 w-6" /></div>
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#5C9EAD]/10 text-[#237284]"><ClipboardCheck className="h-6 w-6" /></div>
               <h2 className="mt-5 text-2xl font-black text-[#1f4350]">KYB approval verification</h2>
-              <p className="mt-2 text-sm leading-6 text-[#326273]/65">Review submitted businesses, documents, Sumsub applicant references, missing-info requests, and approval or rejection rationale.</p>
+              <p className="mt-2 text-sm leading-6 text-[#326273]/90">Review submitted businesses, documents, Sumsub applicant references, missing-info requests, and approval or rejection rationale.</p>
             </div>
             <span className="rounded-full bg-[#F6F0ED] px-3 py-1 text-xs font-bold text-[#326273]">{pendingKyb.length} pending</span>
           </div>
@@ -52,19 +52,19 @@ export default async function AdminOverviewPage() {
             {pendingKyb.slice(0, 3).map((item) => (
               <div key={item.id} className="rounded-2xl bg-[#F6F0ED] p-4 text-sm">
                 <div className="font-bold text-[#1f4350]">{item.businessName}</div>
-                <div className="mt-1 text-xs text-[#326273]/60">{item.state.replace('_', ' ')} · {item.registrationNumber}</div>
+                <div className="mt-1 text-xs text-[#326273]/90">{item.state.replace('_', ' ')} · {item.registrationNumber}</div>
               </div>
             ))}
-            {pendingKyb.length === 0 && <div className="rounded-2xl bg-[#F6F0ED] p-4 text-sm text-[#326273]/60">No pending KYB cases.</div>}
+            {pendingKyb.length === 0 && <div className="rounded-2xl bg-[#F6F0ED] p-4 text-sm text-[#326273]/90">No pending KYB cases.</div>}
           </div>
         </Link>
 
         <Link href={adminConsolePath('/support', hostname)} className="dash-block dash-block-interactive group p-6">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#E39774]/10 text-[#E39774]"><Headphones className="h-6 w-6" /></div>
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#E39774]/10 text-[#9f5839]"><Headphones className="h-6 w-6" /></div>
               <h2 className="mt-5 text-2xl font-black text-[#1f4350]">Feedback and complaints</h2>
-              <p className="mt-2 text-sm leading-6 text-[#326273]/65">Triage support tickets from the customer dashboard, assign ownership, reply manually, and close resolved complaints.</p>
+              <p className="mt-2 text-sm leading-6 text-[#326273]/90">Triage support tickets from the customer dashboard, assign ownership, reply manually, and close resolved complaints.</p>
             </div>
             <span className="rounded-full bg-[#F6F0ED] px-3 py-1 text-xs font-bold text-[#326273]">{openTickets.length} open</span>
           </div>
@@ -72,10 +72,10 @@ export default async function AdminOverviewPage() {
             {openTickets.slice(0, 3).map((ticket) => (
               <div key={ticket.id} className="rounded-2xl bg-[#F6F0ED] p-4 text-sm">
                 <div className="font-bold text-[#1f4350]">{ticket.subject}</div>
-                <div className="mt-1 text-xs text-[#326273]/60">{ticket.type} · {ticket.priority}</div>
+                <div className="mt-1 text-xs text-[#326273]/90">{ticket.type} · {ticket.priority}</div>
               </div>
             ))}
-            {openTickets.length === 0 && <div className="rounded-2xl bg-[#F6F0ED] p-4 text-sm text-[#326273]/60">No open support tickets.</div>}
+            {openTickets.length === 0 && <div className="rounded-2xl bg-[#F6F0ED] p-4 text-sm text-[#326273]/90">No open support tickets.</div>}
           </div>
         </Link>
       </section>
@@ -83,14 +83,14 @@ export default async function AdminOverviewPage() {
       {wallet && (
         <section className="dash-surface p-6">
           <div className="flex items-center gap-3 mb-4">
-            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#5C9EAD]/10 text-[#5C9EAD]">
+            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#5C9EAD]/10 text-[#237284]">
               <Wallet className="h-5 w-5" />
             </div>
             <div>
               <h2 className="font-black text-[#1f4350]">Operator wallet</h2>
-              <p className="text-xs text-[#326273]/60">This is the address the server&apos;s Sui CLI uses to pay for gas and fund settlements.</p>
+              <p className="text-xs text-[#326273]/90">This is the address the server&apos;s Sui CLI uses to pay for gas and fund settlements.</p>
             </div>
-            <span className={`ml-auto rounded-full px-3 py-1 text-xs font-bold ${BigInt(wallet.totalMist) < 100_000_000n ? 'bg-red-100 text-red-700' : BigInt(wallet.totalMist) < 1_000_000_000n ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'}`}>
+            <span className={`ml-auto rounded-full px-3 py-1 text-xs font-bold ${BigInt(wallet.totalMist) < 100_000_000n ? 'bg-red-100 text-red-700' : BigInt(wallet.totalMist) < 1_000_000_000n ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-800'}`}>
               {wallet.totalSui} SUI
             </span>
           </div>
@@ -111,12 +111,12 @@ export default async function AdminOverviewPage() {
                 href={faucetUrl(wallet.address) as string}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="rounded-lg bg-[#5C9EAD] px-3 py-1.5 font-semibold text-white hover:bg-[#4A8B9A]"
+                className="rounded-lg bg-[#237284] px-3 py-1.5 font-semibold text-white hover:bg-[#145d6a]"
               >
                 Get testnet SUI (faucet)
               </a>
             )}
-            <span className="ml-auto text-[#326273]/50">{wallet.coinCount} coin{wallet.coinCount !== 1 ? 's' : ''} · {wallet.totalMist.toLocaleString()} MIST</span>
+            <span className="ml-auto text-[#326273]/90">{wallet.coinCount} coin{wallet.coinCount !== 1 ? 's' : ''} · {wallet.totalMist.toLocaleString()} MIST</span>
           </div>
         </section>
       )}
@@ -134,7 +134,7 @@ function Metric({ label, value }: { label: string; value: number }) {
   return (
     <div className="rounded-xl bg-white px-5 py-3">
       <div className="dash-num text-2xl font-black text-[#1f4350]">{value}</div>
-      <div className="text-[11px] font-bold uppercase tracking-wide text-[#326273]/55">{label}</div>
+      <div className="text-[12px] font-bold uppercase tracking-wide text-[#326273]/90">{label}</div>
     </div>
   );
 }
@@ -142,9 +142,9 @@ function Metric({ label, value }: { label: string; value: number }) {
 function Control({ icon: Icon, title, detail }: { icon: typeof ShieldCheck; title: string; detail: string }) {
   return (
     <div className="dash-block p-5">
-      <Icon className="h-5 w-5 text-[#5C9EAD]" />
+      <Icon className="h-5 w-5 text-[#237284]" />
       <div className="mt-4 font-bold text-[#1f4350]">{title}</div>
-      <p className="mt-2 text-sm leading-6 text-[#326273]/60">{detail}</p>
+      <p className="mt-2 text-sm leading-6 text-[#326273]/90">{detail}</p>
     </div>
   );
 }

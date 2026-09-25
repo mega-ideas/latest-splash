@@ -24,9 +24,9 @@ type Props = {
 
 function roleClass(role: MembershipRole) {
   // Only two of the four can release a payment. They look different.
-  if (canApprove(role)) return 'border-[#E39774]/45 bg-[#E39774]/12 text-[#9d5f43]';
+  if (canApprove(role)) return 'border-[#E39774]/45 bg-[#E39774]/12 text-[#9a4a2d]';
   if (role === 'maker') return 'border-[#5C9EAD]/30 bg-[#5C9EAD]/10 text-[#326273]';
-  return 'border-[#326273]/15 bg-white text-[#326273]/70';
+  return 'border-[#326273]/15 bg-white text-[#326273]/90';
 }
 
 export default function AdminMemberships({ initialAccounts, organizations }: Props) {
@@ -99,7 +99,7 @@ export default function AdminMemberships({ initialAccounts, organizations }: Pro
     <div className="mx-auto max-w-6xl space-y-6">
       <header>
         <h1 className="text-2xl font-black tracking-[-0.02em] text-[#1f4350]">Workspace access</h1>
-        <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[#326273]/75">
+        <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[#326273]/90">
           An account that signs up has no access. It can log in, see an empty workspace, and do nothing else until a
           membership is granted here. Authority is read from these rows on every request, so a change takes effect on
           the member&apos;s next action — there is no session to wait out.
@@ -108,29 +108,29 @@ export default function AdminMemberships({ initialAccounts, organizations }: Pro
 
       {/* Grant */}
       <section className="rounded-2xl border border-[#326273]/12 bg-white p-6">
-        <h2 className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.14em] text-[#326273]/70">
+        <h2 className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.14em] text-[#326273]/90">
           <UserRoundPlus className="h-4 w-4" />
           Grant access
         </h2>
 
         <div className="mt-5 grid gap-4 md:grid-cols-3">
           <label className="block">
-            <span className="text-xs font-bold uppercase tracking-[0.12em] text-[#326273]/60">Account email</span>
+            <span className="text-xs font-bold uppercase tracking-[0.12em] text-[#326273]/90">Account email</span>
             <input
               type="email"
               value={email}
               onChange={(event) => setEmail(event.target.value)}
               placeholder="person@company.com"
-              className="mt-2 w-full rounded-lg border border-[#326273]/18 px-3 py-2.5 text-sm text-[#1f4350] outline-none focus:border-[#5C9EAD]"
+              className="mt-2 w-full rounded-lg border border-[#326273]/70 px-3 py-2.5 text-sm text-[#1f4350] outline-none focus:border-[#5C9EAD]"
             />
           </label>
 
           <label className="block">
-            <span className="text-xs font-bold uppercase tracking-[0.12em] text-[#326273]/60">Organisation</span>
+            <span className="text-xs font-bold uppercase tracking-[0.12em] text-[#326273]/90">Organisation</span>
             <select
               value={orgId}
               onChange={(event) => setOrgId(event.target.value)}
-              className="mt-2 w-full rounded-lg border border-[#326273]/18 px-3 py-2.5 text-sm text-[#1f4350] outline-none focus:border-[#5C9EAD]"
+              className="mt-2 w-full rounded-lg border border-[#326273]/70 px-3 py-2.5 text-sm text-[#1f4350] outline-none focus:border-[#5C9EAD]"
             >
               {organizations.length === 0 ? <option value="">No organisations yet</option> : null}
               {organizations.map((org) => (
@@ -142,11 +142,11 @@ export default function AdminMemberships({ initialAccounts, organizations }: Pro
           </label>
 
           <label className="block">
-            <span className="text-xs font-bold uppercase tracking-[0.12em] text-[#326273]/60">Role</span>
+            <span className="text-xs font-bold uppercase tracking-[0.12em] text-[#326273]/90">Role</span>
             <select
               value={role}
               onChange={(event) => setRole(event.target.value as MembershipRole | '')}
-              className="mt-2 w-full rounded-lg border border-[#326273]/18 px-3 py-2.5 text-sm text-[#1f4350] outline-none focus:border-[#5C9EAD]"
+              className="mt-2 w-full rounded-lg border border-[#326273]/70 px-3 py-2.5 text-sm text-[#1f4350] outline-none focus:border-[#5C9EAD]"
             >
               <option value="">Choose a role…</option>
               {MEMBERSHIP_ROLES.map((value) => (
@@ -164,8 +164,8 @@ export default function AdminMemberships({ initialAccounts, organizations }: Pro
           <p
             className={`mt-4 flex items-start gap-2 rounded-lg border px-3.5 py-3 text-sm ${
               canApprove(role)
-                ? 'border-[#E39774]/45 bg-[#E39774]/10 text-[#9d5f43]'
-                : 'border-[#326273]/15 bg-[#326273]/[0.03] text-[#326273]/80'
+                ? 'border-[#E39774]/45 bg-[#E39774]/10 text-[#9a4a2d]'
+                : 'border-[#326273]/15 bg-[#326273]/[0.03] text-[#326273]/90'
             }`}
           >
             {canApprove(role) ? (
@@ -191,10 +191,10 @@ export default function AdminMemberships({ initialAccounts, organizations }: Pro
       {/* Awaiting access — the reason an operator is on this page */}
       {withoutMembership.length > 0 ? (
         <section className="rounded-2xl border border-[#326273]/12 bg-white p-6">
-          <h2 className="text-sm font-black uppercase tracking-[0.14em] text-[#326273]/70">
+          <h2 className="text-sm font-black uppercase tracking-[0.14em] text-[#326273]/90">
             Awaiting access · {withoutMembership.length}
           </h2>
-          <p className="mt-2 text-sm text-[#326273]/70">
+          <p className="mt-2 text-sm text-[#326273]/90">
             Signed up, cannot act. Granting is a deliberate step, so these stay here until someone takes it.
           </p>
           <ul className="mt-4 divide-y divide-[#326273]/10">
@@ -202,7 +202,7 @@ export default function AdminMemberships({ initialAccounts, organizations }: Pro
               <li key={account.userId} className="flex flex-wrap items-center gap-3 py-3">
                 <span className="font-semibold text-[#1f4350]">{account.email}</span>
                 {!account.hasPassword ? (
-                  <span className="inline-flex items-center gap-1 rounded-full border border-[#326273]/15 px-2 py-0.5 text-[11px] font-bold text-[#326273]/60">
+                  <span className="inline-flex items-center gap-1 rounded-full border border-[#326273]/15 px-2 py-0.5 text-[12px] font-bold text-[#326273]/90">
                     <KeyRound className="h-3 w-3" /> no password
                   </span>
                 ) : null}
@@ -222,10 +222,10 @@ export default function AdminMemberships({ initialAccounts, organizations }: Pro
       {/* Everyone, with the approvers called out */}
       <section className="rounded-2xl border border-[#326273]/12 bg-white p-6">
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <h2 className="text-sm font-black uppercase tracking-[0.14em] text-[#326273]/70">
+          <h2 className="text-sm font-black uppercase tracking-[0.14em] text-[#326273]/90">
             All accounts · {accounts.length}
           </h2>
-          <p className="text-sm text-[#326273]/70">
+          <p className="text-sm text-[#326273]/90">
             {approvers.length} can release a payment.
           </p>
         </div>
@@ -233,7 +233,7 @@ export default function AdminMemberships({ initialAccounts, organizations }: Pro
         <div className="mt-4 overflow-x-auto">
           <table className="w-full min-w-[720px] border-collapse text-sm">
             <thead>
-              <tr className="border-b border-[#326273]/12 text-left text-[11px] uppercase tracking-[0.12em] text-[#326273]/55">
+              <tr className="border-b border-[#326273]/12 text-left text-[12px] uppercase tracking-[0.12em] text-[#326273]/90">
                 <th scope="col" className="py-2.5 pr-4 font-bold">Account</th>
                 <th scope="col" className="py-2.5 pr-4 font-bold">Organisation</th>
                 <th scope="col" className="py-2.5 pr-4 font-bold">Role</th>
@@ -247,17 +247,17 @@ export default function AdminMemberships({ initialAccounts, organizations }: Pro
                   <td className="py-3 pr-4">
                     <span className="font-semibold text-[#1f4350]">{account.email}</span>
                   </td>
-                  <td className="py-3 pr-4 text-[#326273]/75">{account.membership?.orgId ?? '—'}</td>
+                  <td className="py-3 pr-4 text-[#326273]/90">{account.membership?.orgId ?? '—'}</td>
                   <td className="py-3 pr-4">
                     {account.membership ? (
-                      <span className={`inline-flex rounded-full border px-2.5 py-0.5 text-[11px] font-bold ${roleClass(account.membership.role)}`}>
+                      <span className={`inline-flex rounded-full border px-2.5 py-0.5 text-[12px] font-bold ${roleClass(account.membership.role)}`}>
                         {account.membership.role}
                       </span>
                     ) : (
-                      <span className="text-[#326273]/45">no access</span>
+                      <span className="text-[#326273]/90">no access</span>
                     )}
                   </td>
-                  <td className="py-3 pr-4 text-[13px] text-[#326273]/60">
+                  <td className="py-3 pr-4 text-[13px] text-[#326273]/90">
                     {account.membership?.grantedBy ?? (account.membership ? 'not recorded' : '—')}
                   </td>
                   <td className="py-3 text-right">

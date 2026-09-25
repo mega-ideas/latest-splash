@@ -5389,14 +5389,17 @@ body {
 .fintech-dashboard-shell { --fintech-paper: #fffaf2; }
 .fintech-admin-shell { --fintech-paper: #fdfeff; }
 
+/* Fixed to the window, so any word on the page can scroll under the top
+   glow's brightest point: at .2 the page's #326273 read 4.2:1 there. The
+   lower glow sits where the mask fades the layer out. */
 .fintech-dashboard-shell::before {
   position: fixed;
   z-index: -1;
   inset: 0;
   pointer-events: none;
   background:
-    radial-gradient(circle at 76% 6%, rgba(92, 158, 173, .2), transparent 24%),
-    radial-gradient(circle at 28% 82%, rgba(227, 151, 116, .15), transparent 27%),
+    radial-gradient(circle at 76% 6%, rgba(92, 158, 173, .08), transparent 24%),
+    radial-gradient(circle at 28% 82%, rgba(227, 151, 116, .05), transparent 27%),
     linear-gradient(rgba(18, 63, 73, .035) 1px, transparent 1px),
     linear-gradient(90deg, rgba(18, 63, 73, .035) 1px, transparent 1px);
   background-size: auto, auto, 28px 28px, 28px 28px;
@@ -5404,14 +5407,15 @@ body {
   mask-image: linear-gradient(to bottom, black, transparent 82%);
 }
 
+/* As above: at .16 the console's intro lines read 4.3:1 under the top glow. */
 .fintech-admin-shell::before {
   position: fixed;
   z-index: -1;
   inset: 0;
   pointer-events: none;
   background:
-    radial-gradient(circle at 76% 6%, rgba(92, 158, 173, .16), transparent 24%),
-    radial-gradient(circle at 28% 82%, rgba(111, 121, 164, .1), transparent 27%),
+    radial-gradient(circle at 76% 6%, rgba(92, 158, 173, .08), transparent 24%),
+    radial-gradient(circle at 28% 82%, rgba(111, 121, 164, .05), transparent 27%),
     linear-gradient(rgba(18, 63, 73, .035) 1px, transparent 1px),
     linear-gradient(90deg, rgba(18, 63, 73, .035) 1px, transparent 1px);
   background-size: auto, auto, 28px 28px, 28px 28px;
@@ -5419,12 +5423,15 @@ body {
   mask-image: linear-gradient(to bottom, black, transparent 82%);
 }
 
+/* The glow is placed and sized by percentages of an h-screen rail, so on a
+   tall window it reaches the tagline and the first links: at .28 they read
+   4.1-4.3:1 on it. At .1 every word on the rail keeps 4.5:1. */
 .fintech-dashboard-sidebar,
 .fintech-admin-sidebar {
   overflow: hidden;
   border-right: 1px solid rgba(255, 255, 255, .1);
   background:
-    radial-gradient(circle at 20% 4%, rgba(159, 207, 199, .28), transparent 26%),
+    radial-gradient(circle at 20% 4%, rgba(159, 207, 199, .1), transparent 26%),
     linear-gradient(165deg, #245563 0%, #143c47 62%, #0c3039 100%) !important;
   box-shadow: 18px 0 45px rgba(9, 45, 54, .13);
 }
@@ -5481,6 +5488,14 @@ body {
   background-color: rgba(253, 254, 255, .93) !important;
   box-shadow: 0 15px 42px rgba(9, 45, 54, .055);
   backdrop-filter: blur(14px);
+}
+
+/* A field's edge is what shows it is one: 3:1 (WCAG 1.4.11). The card rule
+   above would give a bg-white field its 10% border, about 1.2:1. */
+.fintech-admin-main input[class~="bg-white"],
+.fintech-admin-main select[class~="bg-white"],
+.fintech-admin-main textarea[class~="bg-white"] {
+  border-color: rgba(16, 63, 72, .62);
 }
 
 .fintech-dashboard-main table,
@@ -5549,14 +5564,15 @@ body {
     0 30px 56px rgba(8, 54, 64, .10);
 }
 
-/* Highlighted variant — gold/mint inner sheen like .iso-layer-card::before. */
+/* Highlighted variant — gold/mint inner sheen like .iso-layer-card::before.
+   At .2 it took the green and gold words on accent cards below 4.5:1. */
 .dash-block-accent::before {
   position: absolute;
   inset: 0;
   z-index: 0;
   content: "";
   pointer-events: none;
-  background: linear-gradient(135deg, rgba(159, 207, 199, .2), transparent 46%);
+  background: linear-gradient(135deg, rgba(159, 207, 199, .1), transparent 46%);
 }
 .dash-block-accent > * { position: relative; z-index: 1; }
 
@@ -5919,7 +5935,7 @@ th.money { text-align: right; }
 .fintech-context-copy span,
 .fintech-admin-trust small,
 .fintech-sidebar-signal small {
-  color: rgba(18, 63, 73, .52);
+  color: rgba(18, 63, 73, .85);
   font-size: 12px;
   font-weight: 850;
   letter-spacing: .14em;
@@ -5934,7 +5950,7 @@ th.money { text-align: right; }
 
 .fintech-context-copy p {
   max-width: 650px;
-  color: rgba(18, 63, 73, .62);
+  color: rgba(18, 63, 73, .85);
   font-size: 12px;
   font-weight: 600;
   line-height: 1.55;
@@ -5955,9 +5971,9 @@ th.money { text-align: right; }
   border: 1px solid rgba(18, 63, 73, .11);
   border-radius: 999px;
   padding: 5px 9px;
-  color: rgba(18, 63, 73, .65);
+  color: rgba(18, 63, 73, .85);
   background: rgba(255, 255, 255, .55);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: .08em;
   text-transform: uppercase;
@@ -6893,8 +6909,8 @@ button.iso-product-row {
 
 .admin-login-brand small {
   margin-top: 4px;
-  color: #9fc9c3;
-  font-size: 10px;
+  color: #d8fff4;
+  font-size: 12px;
   letter-spacing: .14em;
 }
 
@@ -6908,7 +6924,7 @@ button.iso-product-row {
 
 .admin-login-story p {
   max-width: 600px;
-  color: #c0ded9;
+  color: #d8fff4;
   font-size: 17px;
   line-height: 1.6;
 }
@@ -6982,7 +6998,7 @@ button.iso-product-row {
 }
 
 .admin-login-signals svg {
-  color: #efb15d;
+  color: #ffe6a4;
 }
 
 .admin-login-signals strong,
@@ -6997,8 +7013,13 @@ button.iso-product-row {
 
 .admin-login-signals span {
   margin-top: 4px;
-  color: #9fc9c3;
+  color: #d8fff4;
   font-size: 13px;
+}
+
+/* <small> is 80% of its parent: 10.4px here without this. */
+.admin-login-signals small {
+  font-size: 12px;
 }
 
 .admin-login-form-wrap {
@@ -7045,7 +7066,7 @@ button.iso-product-row {
 }
 
 .admin-login-form-heading span {
-  color: #d17b31;
+  color: #9a4a2d;
   font-size: 12px;
   font-weight: 900;
   letter-spacing: .12em;
@@ -7071,7 +7092,7 @@ button.iso-product-row {
 
 .admin-login-form input {
   min-height: 48px;
-  border: 1px solid rgba(16, 63, 72, .25);
+  border: 1px solid rgba(16, 63, 72, .62);
   border-radius: 10px;
   background: #fffdf8;
   color: #123f48;
@@ -7115,7 +7136,7 @@ button.iso-product-row {
   border: 1px solid rgba(16, 63, 72, .12);
   border-radius: 10px;
   background: #f1e7d5;
-  color: #718388;
+  color: #326273;
   font-size: 13px;
   line-height: 1.5;
 }
@@ -7137,6 +7158,7 @@ button.iso-product-row {
 
 .admin-login-note small {
   margin-top: 3px;
+  font-size: 12px;
 }
 
 .splash-loading-shell {

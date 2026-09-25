@@ -50,7 +50,7 @@ function CheckList({ id, title, lead, rows, report }: { id: string; title: strin
   return (
     <section aria-labelledby={id} className="dash-surface p-5 md:p-6">
       <h2 id={id} className="text-lg font-black text-[#1f4350]">{title}</h2>
-      <p className="mt-1 max-w-3xl text-sm leading-6 text-[#326273]/70">{lead}</p>
+      <p className="mt-1 max-w-3xl text-sm leading-6 text-[#326273]/90">{lead}</p>
       <ul className="mt-4 divide-y divide-[#326273]/10">
         {rows.map(({ key, name, role }) => {
           const check = report.checks[key];
@@ -59,10 +59,10 @@ function CheckList({ id, title, lead, rows, report }: { id: string; title: strin
               <StatusChip status={check.status} />
               <div>
                 <div className="font-bold text-[#1f4350]">{name}</div>
-                <div className="text-xs leading-5 text-[#326273]/60">{role}</div>
+                <div className="text-xs leading-5 text-[#326273]/90">{role}</div>
               </div>
               <p className="text-sm leading-6 text-[#326273] [overflow-wrap:anywhere]">{check.detail}</p>
-              <span className="text-xs tabular-nums text-[#326273]/70 md:text-right">
+              <span className="text-xs tabular-nums text-[#326273]/90 md:text-right">
                 {check.latencyMs === undefined ? '' : `${check.latencyMs} ms`}
               </span>
             </li>
@@ -84,7 +84,7 @@ export default function GoLiveView({ report, rerunHref }: { report: HealthReport
       <header className="dash-surface p-6 md:p-8">
         <span className="dash-kicker">Go-live</span>
         <h1 className="dash-title mt-2 text-4xl">Is this server ready to move real money?</h1>
-        <p className="mt-3 max-w-3xl text-sm leading-6 text-[#326273]/70">
+        <p className="mt-3 max-w-3xl text-sm leading-6 text-[#326273]/90">
           The checks <code className="font-mono text-[13px]">npm run doctor</code> prints, run now on this server.
           &ldquo;Not set up&rdquo; means a step nobody has done yet, and says what stays closed until it is.
           &ldquo;Failing&rdquo; means something is set but wrong, or a source did not answer, and says what to fix.
@@ -93,7 +93,7 @@ export default function GoLiveView({ report, rerunHref }: { report: HealthReport
         <p className="mt-4 text-sm font-semibold text-[#1f4350]" role="status">
           {failing === 0 ? 'Nothing is failing.' : `${failing} failing.`}
           {notSetUp > 0 ? ` ${notSetUp} not set up yet.` : ''}
-          <span className="font-normal text-[#326273]/60"> Checked {report.checkedAt.slice(11, 19)} UTC · </span>
+          <span className="font-normal text-[#326273]/90"> Checked {report.checkedAt.slice(11, 19)} UTC · </span>
           <a href={rerunHref} className="font-semibold text-[var(--info)] underline-offset-4 hover:underline focus-visible:underline">
             Run the checks again
           </a>

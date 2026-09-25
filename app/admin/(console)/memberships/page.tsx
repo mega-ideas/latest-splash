@@ -16,7 +16,7 @@ export default async function AdminMembershipsPage() {
     return (
       <div className="mx-auto max-w-3xl">
         <h1 className="text-2xl font-black tracking-[-0.02em] text-[#1f4350]">Workspace access</h1>
-        <p className="mt-3 rounded-2xl border border-[#E39774]/45 bg-[#E39774]/10 p-5 text-sm leading-relaxed text-[#9d5f43]">
+        <p className="mt-3 rounded-2xl border border-[#E39774]/45 bg-[#E39774]/10 p-5 text-sm leading-relaxed text-[#9a4a2d]">
           Account storage is not configured on this deployment. <code>DATABASE_URL</code> is unset, so there are no
           accounts to list and no membership can be granted. Memberships are the only source of authority — there is
           no fallback that assumes one.

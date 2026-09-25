@@ -21,7 +21,7 @@ const stateLabels: Record<KybReviewState, string> = {
 function stateClass(state: KybReviewState) {
   if (state === 'APPROVED') return 'border-[#5C9EAD]/30 bg-[#5C9EAD]/10 text-[#326273]';
   if (state === 'REJECTED') return 'border-red-500/30 bg-red-500/10 text-red-700';
-  if (state === 'NEEDS_INFORMATION') return 'border-[#E39774]/40 bg-[#E39774]/10 text-[#9d5f43]';
+  if (state === 'NEEDS_INFORMATION') return 'border-[#E39774]/40 bg-[#E39774]/10 text-[#9a4a2d]';
   return 'border-[#326273]/15 bg-white text-[#326273]';
 }
 
@@ -91,9 +91,9 @@ export default function AdminKybConsole({ initialCases }: Props) {
     <div className="space-y-6">
       <header className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
         <div>
-          <div className="mb-2 inline-flex rounded-full bg-[#5C9EAD]/10 px-3 py-1 text-xs font-bold uppercase tracking-wide text-[#5C9EAD]">Compliance Operations</div>
+          <div className="mb-2 inline-flex rounded-full bg-[#5C9EAD]/10 px-3 py-1 text-xs font-bold uppercase tracking-wide text-[#145d6a]">Compliance Operations</div>
           <h1 className="text-3xl font-black tracking-[-0.03em] text-[#1f4350]">KYB approval verification</h1>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-[#326273]/65">Smart contracts can settle funds and record receipts, but staff still need off-chain checks for business registration, directors, UBO evidence, sanctions/PEP flags, and approval rationale.</p>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-[#326273]/90">Smart contracts can settle funds and record receipts, but staff still need off-chain checks for business registration, directors, UBO evidence, sanctions/PEP flags, and approval rationale.</p>
         </div>
         <div className="grid grid-cols-3 gap-2 rounded-2xl border border-[#326273]/10 bg-white p-2 text-center shadow-sm">
           <Metric label="Pending" value={pendingCount} />
@@ -107,7 +107,7 @@ export default function AdminKybConsole({ initialCases }: Props) {
           <div className="mb-4 flex items-center justify-between">
             <h2 className="font-bold text-[#1f4350]">Review queue</h2>
             <button type="button" disabled={refreshing} onClick={() => void refreshCases()} className="inline-flex items-center gap-2 rounded-lg border border-[#5C9EAD]/30 px-3 py-2 text-xs font-bold text-[#326273] hover:border-[#5C9EAD] disabled:opacity-60">
-              {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <ClipboardCheck className="h-4 w-4 text-[#5C9EAD]" />}
+              {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <ClipboardCheck className="h-4 w-4 text-[#237284]" />}
               Refresh
             </button>
           </div>
@@ -117,11 +117,11 @@ export default function AdminKybConsole({ initialCases }: Props) {
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="truncate font-bold text-[#1f4350]">{item.businessName}</div>
-                    <div className="mt-1 font-mono text-[11px] text-[#326273]/55">{item.registrationNumber}</div>
+                    <div className="mt-1 font-mono text-[12px] text-[#326273]/90">{item.registrationNumber}</div>
                   </div>
-                  <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-bold ${stateClass(item.state)}`}>{stateLabels[item.state]}</span>
+                  <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[12px] font-bold ${stateClass(item.state)}`}>{stateLabels[item.state]}</span>
                 </div>
-                <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-[#326273]/60">
+                <div className="mt-3 grid grid-cols-2 gap-2 text-[12px] text-[#326273]/90">
                   <div>Risk: {item.riskTier.replace('_', ' ')}</div>
                   <div>Access: {item.corridorAccess}</div>
                 </div>
@@ -135,9 +135,9 @@ export default function AdminKybConsole({ initialCases }: Props) {
             <section className="rounded-2xl border border-[#326273]/10 bg-white p-6 shadow-sm">
               <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                 <div>
-                  <div className="text-xs font-bold uppercase tracking-[0.2em] text-[#5C9EAD]">{selected.id}</div>
+                  <div className="text-xs font-bold uppercase tracking-[0.2em] text-[#237284]">{selected.id}</div>
                   <h2 className="mt-2 text-2xl font-black text-[#1f4350]">{selected.businessName}</h2>
-                  <p className="mt-1 text-sm text-[#326273]/60">SSM registration {selected.registrationNumber}</p>
+                  <p className="mt-1 text-sm text-[#326273]/90">SSM registration {selected.registrationNumber}</p>
                 </div>
                 <span className={`rounded-full border px-3 py-1 text-xs font-bold ${stateClass(selected.state)}`}>{stateLabels[selected.state]}</span>
               </div>
@@ -152,48 +152,48 @@ export default function AdminKybConsole({ initialCases }: Props) {
 
             <section className="grid gap-5 lg:grid-cols-2">
               <div className="rounded-2xl border border-[#326273]/10 bg-white p-5 shadow-sm">
-                <div className="mb-4 flex items-center gap-2 font-bold text-[#1f4350]"><FileText className="h-5 w-5 text-[#5C9EAD]" /> Documents</div>
+                <div className="mb-4 flex items-center gap-2 font-bold text-[#1f4350]"><FileText className="h-5 w-5 text-[#237284]" /> Documents</div>
                 <div className="space-y-3">
                   {selected.documents.map((document) => (
                     <div key={document.sha256} className="rounded-xl border border-[#326273]/10 bg-[#F6F0ED] p-3">
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
                           <div className="truncate text-sm font-bold text-[#1f4350]">{document.name}</div>
-                          <div className="mt-1 text-xs text-[#326273]/60">{document.kind.replace('_', ' ')} · {(document.size / 1024).toFixed(1)} KB</div>
+                          <div className="mt-1 text-xs text-[#326273]/90">{document.kind.replace('_', ' ')} · {(document.size / 1024).toFixed(1)} KB</div>
                         </div>
-                        <span className="rounded-full bg-[#5C9EAD]/10 px-2 py-1 text-[10px] font-bold text-[#326273]">{document.virusScanResult}</span>
+                        <span className="rounded-full bg-[#5C9EAD]/10 px-2 py-1 text-[12px] font-bold text-[#326273]">{document.virusScanResult}</span>
                       </div>
-                      <div className="mt-2 break-all font-mono text-[10px] text-[#326273]/45">SHA-256 {document.sha256}</div>
+                      <div className="mt-2 break-all font-mono text-[12px] text-[#326273]/90">SHA-256 {document.sha256}</div>
                     </div>
                   ))}
                 </div>
               </div>
 
               <div className="rounded-2xl border border-[#326273]/10 bg-white p-5 shadow-sm">
-                <div className="mb-4 flex items-center gap-2 font-bold text-[#1f4350]"><ShieldAlert className="h-5 w-5 text-[#E39774]" /> Manual decision</div>
-                <textarea value={note} onChange={(event) => setNote(event.target.value)} rows={5} placeholder="Add approval rationale, missing-info request, or rejection reason" className="w-full resize-none rounded-xl border border-[#326273]/15 bg-[#F6F0ED] px-4 py-3 text-sm outline-none focus:border-[#5C9EAD]" />
+                <div className="mb-4 flex items-center gap-2 font-bold text-[#1f4350]"><ShieldAlert className="h-5 w-5 text-[#9f5839]" /> Manual decision</div>
+                <textarea value={note} onChange={(event) => setNote(event.target.value)} rows={5} placeholder="Add approval rationale, missing-info request, or rejection reason" className="w-full resize-none rounded-xl border border-[#326273]/70 bg-[#F6F0ED] px-4 py-3 text-sm outline-none focus:border-[#5C9EAD]" />
                 <div className="mt-4 grid gap-2 sm:grid-cols-2">
                   <ActionButton state="IN_REVIEW" label="Start review" loadingAction={loadingAction} onClick={updateCase} />
                   <ActionButton state="NEEDS_INFORMATION" label="Request info" loadingAction={loadingAction} onClick={updateCase} />
                   <ActionButton state="APPROVED" label="Approve KYB" loadingAction={loadingAction} onClick={updateCase} />
                   <ActionButton state="REJECTED" label="Reject KYB" loadingAction={loadingAction} onClick={updateCase} />
                 </div>
-                <div className="mt-4 rounded-xl border border-[#E39774]/20 bg-[#E39774]/10 p-3 text-xs leading-5 text-[#326273]/70">
-                  <AlertTriangle className="mr-2 inline h-4 w-4 text-[#E39774]" /> Approval unlocks off-chain customer access. Settlement contracts still enforce transfer execution separately.
+                <div className="mt-4 rounded-xl border border-[#E39774]/20 bg-[#E39774]/10 p-3 text-xs leading-5 text-[#326273]/90">
+                  <AlertTriangle className="mr-2 inline h-4 w-4 text-[#9f5839]" /> Approval unlocks off-chain customer access. Settlement contracts still enforce transfer execution separately.
                 </div>
               </div>
             </section>
 
             <section className="rounded-2xl border border-[#326273]/10 bg-white p-5 shadow-sm">
-              <div className="mb-4 flex items-center gap-2 font-bold text-[#1f4350]"><CheckCircle2 className="h-5 w-5 text-[#5C9EAD]" /> Audit trail</div>
+              <div className="mb-4 flex items-center gap-2 font-bold text-[#1f4350]"><CheckCircle2 className="h-5 w-5 text-[#237284]" /> Audit trail</div>
               <div className="space-y-3">
                 {selected.auditTrail.map((event) => (
                   <div key={event.id} className="rounded-xl bg-[#F6F0ED] p-3 text-sm">
                     <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
                       <span className="font-bold text-[#1f4350]">{event.action}</span>
-                      <span className="text-xs text-[#326273]/50">{new Date(event.createdAt).toLocaleString()}</span>
+                      <span className="text-xs text-[#326273]/90">{new Date(event.createdAt).toLocaleString()}</span>
                     </div>
-                    <div className="mt-1 text-xs text-[#326273]/60">{event.actor}{event.note ? ` · ${event.note}` : ''}</div>
+                    <div className="mt-1 text-xs text-[#326273]/90">{event.actor}{event.note ? ` · ${event.note}` : ''}</div>
                   </div>
                 ))}
               </div>
@@ -209,7 +209,7 @@ function Metric({ label, value }: { label: string; value: number }) {
   return (
     <div className="rounded-xl bg-[#F6F0ED] px-5 py-3">
       <div className="text-2xl font-black text-[#1f4350]">{value}</div>
-      <div className="text-[11px] font-bold uppercase tracking-wide text-[#326273]/55">{label}</div>
+      <div className="text-[12px] font-bold uppercase tracking-wide text-[#326273]/90">{label}</div>
     </div>
   );
 }
@@ -217,7 +217,7 @@ function Metric({ label, value }: { label: string; value: number }) {
 function Info({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-xl bg-[#F6F0ED] p-3">
-      <div className="text-[11px] font-bold uppercase tracking-wide text-[#326273]/50">{label}</div>
+      <div className="text-[12px] font-bold uppercase tracking-wide text-[#326273]/90">{label}</div>
       <div className="mt-1 truncate text-sm font-bold text-[#1f4350]">{value}</div>
     </div>
   );
@@ -227,7 +227,7 @@ function ActionButton({ state, label, loadingAction, onClick }: { state: KybRevi
   const isLoading = loadingAction === state;
 
   return (
-    <button type="button" disabled={Boolean(loadingAction)} onClick={() => void onClick(state)} className={`flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold text-white transition disabled:opacity-60 ${state === 'APPROVED' ? 'bg-[#5C9EAD] hover:bg-[#4a8b99]' : state === 'REJECTED' ? 'bg-red-600 hover:bg-red-700' : 'bg-[#326273] hover:bg-[#254e5c]'}`}>
+    <button type="button" disabled={Boolean(loadingAction)} onClick={() => void onClick(state)} className={`flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold text-white transition disabled:opacity-60 ${state === 'APPROVED' ? 'bg-[#237284] hover:bg-[#145d6a]' : state === 'REJECTED' ? 'bg-red-600 hover:bg-red-700' : 'bg-[#326273] hover:bg-[#254e5c]'}`}>
       {isLoading && <Loader2 className="h-4 w-4 animate-spin" />}
       {label}
     </button>

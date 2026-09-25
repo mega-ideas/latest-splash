@@ -1606,7 +1606,8 @@
 }
 
 .cin-loading-line {
-  color: rgba(12, 62, 72, .68);
+  /* .68 was 4.3:1 on the cream the screen fades to; words need 4.5:1. */
+  color: rgba(12, 62, 72, .8);
   font-family: var(--font-mono), monospace;
   font-size: 12px;
   font-weight: 800;

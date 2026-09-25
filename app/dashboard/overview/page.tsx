@@ -589,7 +589,7 @@ export default function DashboardOverview() {
                 </div>
               </div>
               {treasuryPhase === 'live' ? (
-                <span className="rounded-full bg-[#D9A441]/15 px-2 py-0.5 text-[13px] font-semibold text-[#8b6418]">
+                <span className="rounded-full bg-[#D9A441]/10 px-2 py-0.5 text-[13px] font-semibold text-[#8b6418]">
                   {treasuryRateLabel}
                 </span>
               ) : null}

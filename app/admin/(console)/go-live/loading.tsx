@@ -5,7 +5,7 @@ export default function GoLiveLoading() {
       <header className="dash-surface p-6 md:p-8">
         <span className="dash-kicker">Go-live</span>
         <h1 className="dash-title mt-2 text-4xl">Is this server ready to move real money?</h1>
-        <p className="mt-3 text-sm text-[#326273]/70" role="status">Running the checks: prices, the mainnet node, Twilio and screening take a few seconds.</p>
+        <p className="mt-3 text-sm text-[#326273]/90" role="status">Running the checks: prices, the mainnet node, Twilio and screening take a few seconds.</p>
       </header>
       {[7, 5].map((rows, section) => (
         <div key={section} className="dash-surface p-5 md:p-6" aria-hidden="true">

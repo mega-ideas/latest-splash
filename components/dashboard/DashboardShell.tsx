@@ -215,8 +215,9 @@ export default function DashboardShell({ children, session, kyb, locks, sweepOn 
                               className={`rounded-full px-1.5 py-0.5 text-[13px] font-semibold ${
                                 badge === 'New' ? 'bg-[#E39774]/25' : 'bg-[#5C9EAD]/20'
                               } ${
-                                // On the dark rail a light tint of the accent; on the white active pill, ink.
-                                active ? 'text-[#1F4452]' : badge === 'New' ? 'text-[#ffd9c9]' : 'text-white'
+                                // On the dark rail, warm white on the accent's tint (the light coral
+                                // was 4.1:1 there); on the white active pill, ink.
+                                active ? 'text-[#1F4452]' : badge === 'New' ? 'text-[#fffaf6]' : 'text-white'
                               }`}
                             >
                               {badge}

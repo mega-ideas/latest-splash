@@ -164,7 +164,7 @@ export default function CustomerServicePage() {
                     <Send className="h-7 w-7" />
                   </div>
                   <div>
-                    <h2 className="text-lg font-semibold text-[#326273]">Ticket Submitted</h2>
+                    <h2 className="text-lg font-semibold text-[#1F4452]">Ticket Submitted</h2>
                     <p className="mt-1 text-sm text-[#1F4452]">Your support request is now visible in the staff admin console.</p>
                     {ticket && <p className="mt-2 break-all font-mono text-[13px] text-[#1F4452]">Ticket ID: {ticket.id}</p>}
                   </div>

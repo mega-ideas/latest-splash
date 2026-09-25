@@ -19,9 +19,15 @@
  *
  * Where it cannot know, it errs towards checking more: every alternative a
  * condition can choose, every place a component is rendered, every stop of a
- * linear gradient. A colour it cannot resolve (one passed in at runtime) is
- * counted and left out rather than guessed, and so is a radial or conic glow,
- * whose position the source does not give.
+ * gradient. A condition on a component's own prop is settled where the usage
+ * passes a literal (or leaves the default), so a variant is checked where it
+ * is used. A glow (a radial or conic gradient that fades out) is placed by
+ * percentages of a box that changes with the window, so its brightest point
+ * is laid under every word in the element; an element's glows are laid one at
+ * a time, as they are placed apart. A ::before or ::after that covers its
+ * element paints between that element's background and its content. A colour
+ * it cannot resolve (one passed in at runtime) is counted and left out rather
+ * than guessed.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -58,6 +64,17 @@ export function contrast(a, b) {
 
 export const hex = (colour) =>
   `#${colour.slice(0, 3).map((c) => Math.round(c).toString(16).padStart(2, '0')).join('').toUpperCase()}`;
+
+/**
+ * At most `keep` of these colours: the darkest and the lightest. Contrast with
+ * one text colour falls as its surface nears it in luminance, so the worst
+ * case for dark words is the darkest surface and for light words the lightest.
+ */
+function extremes(items, colourOf = (item) => item, keep = 24) {
+  if (items.length <= keep) return items;
+  const sorted = [...items].sort((a, b) => luminance(colourOf(a)) - luminance(colourOf(b)));
+  return [...sorted.slice(0, keep / 2), ...sorted.slice(-keep / 2)];
+}
 
 function oklchToRgb(L, C, H) {
   const h = (H * Math.PI) / 180;
@@ -416,24 +433,34 @@ export function loadStyles(entry = 'app/globals.css') {
   return { rules, theme, index };
 }
 
-/** The rules whose selectors hold for an element, with the specificity each matched at. */
+/** The pseudo-elements whose rules are read: a field's placeholder, and what ::before and ::after paint. */
+const PARTS = new Set(['placeholder', 'before', 'after']);
+
+/**
+ * The rules whose selectors hold for an element, with the specificity each
+ * matched at and the part they style: the element itself (part null), or one
+ * of PARTS.
+ */
 function matchingRules(styles, element) {
   const keys = new Set(['*', ...[...element.tags], ...[...element.classes].map((c) => `.${c}`)]);
   const out = [];
+  const seen = new Set();
   for (const key of keys) {
     for (const rule of styles.index.get(key) ?? []) {
-      let best = -1;
+      if (seen.has(rule)) continue;
+      seen.add(rule);
+      const best = new Map();
       for (const selector of rule.selectors) {
         const subject = selector.compounds.at(-1);
-        const placeholder = subject.element === 'placeholder';
-        if (subject.element && !placeholder) continue;
+        const part = subject.element ?? null;
+        if (part && !PARTS.has(part)) continue;
         if (!compoundMatches(subject, element.tags, element.classes)) continue;
         const ancestorsOk = selector.compounds
           .slice(0, -1)
           .every((compound) => compoundMatches(compound, element.ancestorTags, element.ancestorClasses));
-        if (ancestorsOk) best = Math.max(best, selector.specificity + (placeholder ? 0.5 : 0));
+        if (ancestorsOk) best.set(part, Math.max(best.get(part) ?? -1, selector.specificity));
       }
-      if (best >= 0 && !out.some((m) => m.rule === rule)) out.push({ rule, specificity: Math.floor(best), placeholder: best % 1 !== 0 });
+      for (const [part, specificity] of best) out.push({ rule, specificity, part });
     }
   }
   return out;
@@ -481,7 +508,9 @@ function utilityDecls({ base }, theme) {
   const [raw, modifier] = splitTop(rest, ['/']);
   let colour = null;
   if (raw.startsWith('[') && raw.endsWith(']')) {
-    const inner = raw.slice(1, -1).replace(/^color:/, '').replaceAll('_', ' ');
+    const inner = raw.slice(1, -1).replace(/^(color|image):/, '').replaceAll('_', ' ');
+    // bg-[linear-gradient(…),#EEF4F5]: a whole background, layers and all.
+    if (kind === 'bg' && /(^|,)\s*(repeating-)?(linear|radial|conic)-gradient\(/i.test(inner)) return [{ prop: 'background-color', value: inner }];
     if (/^(#|rgb|rgba|oklch|hsl|color-mix|var\(|transparent|white|black)/i.test(inner)) colour = inner;
     else if (kind === 'text' && /^\d*\.?\d+(px|rem)$/.test(inner)) return [{ prop: 'font-size', value: inner }];
     else return [];
@@ -994,10 +1023,11 @@ export function auditPages({ entries, css = 'app/globals.css', layouts = [] }) {
     const classes = new Set(tokens.filter((t) => t !== UNRESOLVED));
     const candidates = [];
     const rules = matchingRules(styles, { tags: info.tags, classes, ancestorTags: higher.tags, ancestorClasses: higher.classes });
-    for (const { rule, specificity, placeholder } of rules) {
+    for (const { rule, specificity, part } of rules) {
       if (rule.viewport && rule.viewport !== state) continue;
       for (const decl of rule.decls) {
-        const prop = placeholder && decl.prop === 'color' ? 'placeholder-color' : decl.prop;
+        // ::before { background } is x-before:background-color, beside the element's own.
+        const prop = part === 'placeholder' && decl.prop === 'color' ? 'placeholder-color' : part === 'before' || part === 'after' ? `x-${part}:${decl.prop}` : decl.prop;
         const layerRank = rule.layer ? LAYER_RANK[rule.layer] ?? 3 : 4;
         candidates.push({ ...decl, prop, rank: decl.important ? 10 - layerRank : layerRank, specificity, order: rule.order, source: `css "${rule.text.slice(0, 60)}"` });
       }
@@ -1029,7 +1059,7 @@ export function auditPages({ entries, css = 'app/globals.css', layouts = [] }) {
     }
     for (const c of candidates) {
       if (c.prop === 'border') continue;
-      const prop = c.prop === 'background' ? 'background-color' : c.prop;
+      const prop = c.prop.replace(/(^|:)background$/, '$1background-color');
       const current = best.get(prop);
       if (!current || c.rank > current.rank || (c.rank === current.rank && (c.specificity > current.specificity || (c.specificity === current.specificity && c.order > current.order)))) {
         best.set(prop, { ...c, prop });
@@ -1057,7 +1087,8 @@ export function auditPages({ entries, css = 'app/globals.css', layouts = [] }) {
     if (!node.root) for (const parent of parentsOf(node)) for (const [k, v] of varsOf(parent)) vars.set(k, v);
     const info = ownOf(node);
     const higher = above(node);
-    for (const { rule } of matchingRules(styles, { tags: info.tags, classes: info.classes, ancestorTags: higher.tags, ancestorClasses: higher.classes })) {
+    for (const { rule, part } of matchingRules(styles, { tags: info.tags, classes: info.classes, ancestorTags: higher.tags, ancestorClasses: higher.classes })) {
+      if (part) continue;
       for (const decl of rule.decls) if (decl.prop.startsWith('--')) vars.set(decl.prop, decl.value);
     }
     varsMemo.set(node, vars);
@@ -1091,12 +1122,82 @@ export function auditPages({ entries, css = 'app/globals.css', layouts = [] }) {
     }
   }
 
+  /**
+   * What a component's own conditions come to where one usage renders it: a
+   * prop that usage sets to a literal, or leaves at its default, settles
+   * `variant === 'dark'` or a bare `compact` there. So the dark logout button
+   * is checked in the dark sidebar, and the light one in the light header.
+   */
+  const literalOf = (input) => {
+    const e = unwrap(input);
+    if (!e) return { known: false };
+    if (ts.isStringLiteral(e) || ts.isNoSubstitutionTemplateLiteral(e)) return { known: true, value: e.text };
+    if (e.kind === ts.SyntaxKind.TrueKeyword) return { known: true, value: true };
+    if (e.kind === ts.SyntaxKind.FalseKeyword) return { known: true, value: false };
+    if (ts.isNumericLiteral(e)) return { known: true, value: Number(e.text) };
+    return { known: false };
+  };
+  const settledMemo = new Map();
+  const settledAt = (definition, usage) => {
+    if (settledMemo.has(usage)) return settledMemo.get(usage);
+    const when = new Map();
+    const param = definition.parameters?.[0];
+    if (param && ts.isObjectBindingPattern(param.name)) {
+      const attributes = openingOf(usage).attributes.properties;
+      const spread = attributes.some((p) => ts.isJsxSpreadAttribute(p));
+      const props = new Map();
+      for (const element of param.name.elements) {
+        if (!ts.isIdentifier(element.name)) continue;
+        const name = (element.propertyName ?? element.name).getText();
+        const attribute = attributes.find((p) => ts.isJsxAttribute(p) && p.name.getText() === name);
+        if (attribute) props.set(element.name.text, attribute.initializer ? literalOf(attribute.initializer.expression ?? attribute.initializer) : { known: true, value: true });
+        else props.set(element.name.text, spread ? { known: false } : element.initializer ? literalOf(element.initializer) : { known: true, value: undefined });
+      }
+      walk(definition, (node) => {
+        const condition = ts.isConditionalExpression(node)
+          ? node.condition
+          : ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken
+            ? node.left
+            : null;
+        if (!condition) return;
+        let base = unwrap(condition);
+        while (ts.isPrefixUnaryExpression(base) && base.operator === ts.SyntaxKind.ExclamationToken) base = unwrap(base.operand);
+        let truth;
+        if (ts.isIdentifier(base) && props.get(base.text)?.known) truth = Boolean(props.get(base.text).value);
+        const equality = [ts.SyntaxKind.EqualsEqualsEqualsToken, ts.SyntaxKind.EqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsToken];
+        if (ts.isBinaryExpression(base) && equality.includes(base.operatorToken.kind)) {
+          const [prop, other] = ts.isIdentifier(base.left) ? [base.left, base.right] : [base.right, base.left];
+          const value = ts.isIdentifier(prop) ? props.get(prop.text) : undefined;
+          const literal = literalOf(other);
+          // conditionOf names a != test by its == form, so the truth stored is the equality's.
+          if (value?.known && literal.known) truth = value.value === literal.value;
+        }
+        if (truth !== undefined) when.set(conditionOf(condition).key, truth);
+      });
+    }
+    settledMemo.set(usage, when);
+    return when;
+  };
+
   const lookMemo = new Map();
   let unresolvedColours = 0;
   const looksOf = (node) => {
     if (lookMemo.has(node)) return lookMemo.get(node);
     lookMemo.set(node, []);
-    const parentLooks = node.root ? [] : parentsOf(node).flatMap(looksOf);
+    let parentLooks = [];
+    if (!node.root) {
+      const definition = jsxParent(node) ? null : enclosingDefinition(node);
+      const uses = definition ? usages.get(definition) ?? [] : [];
+      parentLooks = uses.length
+        ? uses.flatMap((use) => {
+            const settled = settledAt(definition, use);
+            return parentsOf(use).flatMap(looksOf).flatMap((look) => {
+              const when = agree(look.when, settled);
+              return when ? [{ ...look, when }] : [];
+            });
+          })
+        : parentsOf(node).flatMap(looksOf);
+    }
     const vars = varsOf(node);
     const info = ownOf(node);
     const looks = [];
@@ -1122,18 +1223,42 @@ export function auditPages({ entries, css = 'app/globals.css', layouts = [] }) {
         const stops = win.get('x-stop');
         let layers = null;
         let bgSource = null;
+        // A glow, a radial or conic gradient that fades out, is placed and sized by percentages
+        // of a box that changes with the window (the sidebars are h-screen), so any word in the
+        // element can end up on its brightest point.
+        const glows = new Set();
+        const layersOf = (value, withText) =>
+          splitTop(String(value).replace(/!important/gi, ''), [',']).map((layer) => {
+            // A hairline grid, `linear-gradient(rgba(…) 1px, transparent 1px)`, crosses a word
+            // rather than sitting under it.
+            if (/^(repeating-)?linear-gradient\(/i.test(layer.trim()) && /\s(0?\.\d+|[12])px\s*,/.test(layer)) return [];
+            const painted = paintsOf(layer, vars);
+            const paints = painted.current && withText ? [...painted.paints, ...ownText.map((t) => t.paint)] : painted.paints;
+            if (/^(repeating-)?(radial|conic)-gradient\(/i.test(layer.trim()) && paints.some((paint) => paint[3] < 0.95)) glows.add(paints);
+            return paints;
+          });
         if (win.has('x-gradient') && stops.length) {
           layers = [stops.flatMap((stop) => paintsOf(stop.value, vars).paints)];
           bgSource = stops.map((stop) => stop.source).join(' ');
         } else if (bgDecl) {
-          layers = splitTop(String(bgDecl.value).replace(/!important/gi, ''), [',']).map((layer) => {
-            // A radial or conic gradient is a glow placed somewhere on the element; where is not in
-            // the source, so it is left out rather than laid under every word.
-            if (/^(repeating-)?(radial|conic)-gradient\(/i.test(layer)) return [];
-            const painted = paintsOf(layer, vars);
-            return painted.current && ownText ? [...painted.paints, ...ownText.map((t) => t.paint)] : painted.paints;
-          });
+          layers = layersOf(bgDecl.value, Boolean(ownText));
           bgSource = bgDecl.source;
+        }
+        // A ::before or ::after that covers the element and paints a background sits between
+        // the element's background and its content: the shells' fixed glows, the sheen on
+        // .dash-block-accent. Its mask is left out; a mask only ever fades it.
+        for (const part of ['before', 'after']) {
+          const decl = (prop) => win.get(`x-${part}:${prop}`);
+          const value = (prop) => decl(prop)?.value.replace(/!important/gi, '').trim();
+          const paint = decl('background-color');
+          const content = value('content');
+          if (!paint || content === undefined || /^(none|normal)$/.test(content) || value('display') === 'none') continue;
+          const zero = (v) => v !== undefined && /^0(px|%|rem)?$/.test(v);
+          const inset = value('inset');
+          const covers = inset !== undefined ? splitTop(inset, [' ']).every(zero) : ['top', 'right', 'bottom', 'left'].every((side) => zero(value(side)));
+          if (!covers) continue;
+          layers = [...layersOf(paint.value, false), ...(layers ?? [])];
+          bgSource = [`${paint.source} (::${part})`, bgSource].filter(Boolean).join(' over ');
         }
         const pxDecl = win.get('font-size');
         const px = pxDecl && /^(\d*\.?\d+)(px|rem)$/.test(pxDecl.value.trim()) ? parseFloat(pxDecl.value) * (pxDecl.value.trim().endsWith('rem') ? 16 : 1) : null;
@@ -1141,13 +1266,22 @@ export function auditPages({ entries, css = 'app/globals.css', layouts = [] }) {
         for (const base of bases) {
           const agreed = agree(base.when, when);
           if (!agreed) continue;
-          // Layers stack bottom up: each stop of a layer over each colour beneath it.
-          let beneath = [base.surface];
+          // Layers stack bottom up: each stop of a layer over each colour beneath it. One
+          // element's glows are drawn one at a time, each at its brightest: they are placed
+          // apart, so no word sits on two brightest points at once.
+          let beneath = [{ colour: base.surface, glowed: false }];
           for (const layer of [...(layers ?? [])].reverse()) {
             if (layer.length === 0) continue;
-            beneath = [...new Map(layer.flatMap((paint) => beneath.map((colour) => over(paint, colour))).map((c) => [hex(c), c])).values()].slice(0, 24);
+            const glow = glows.has(layer);
+            const outside = Math.min(...layer.map((paint) => paint[3]));
+            const next = layer.flatMap((paint) => {
+              const inside = glow && paint[3] > outside;
+              return beneath.filter((b) => !(inside && b.glowed)).map((b) => ({ colour: over(paint, b.colour), glowed: b.glowed || inside }));
+            });
+            beneath = extremes([...new Map(next.map((b) => [`${hex(b.colour)}${b.glowed ? ' glowed' : ''}`, b])).values()], (b) => b.colour);
           }
-          const surfaces = layers?.some((layer) => layer.length) ? beneath.map((colour) => ({ colour, source: bgSource })) : [{ colour: base.surface, source: base.from }];
+          const colours = [...new Map(beneath.map((b) => [hex(b.colour), b.colour])).values()];
+          const surfaces = layers?.some((layer) => layer.length) ? colours.map((colour) => ({ colour, source: bgSource })) : [{ colour: base.surface, source: base.from }];
           const texts = ownText ?? (unresolved && !colourDecl ? null : base.text);
           for (const surface of surfaces) {
             looks.push({
@@ -1157,8 +1291,9 @@ export function auditPages({ entries, css = 'app/globals.css', layouts = [] }) {
               text: texts,
               ownText: Boolean(ownText),
               unresolved: unresolved && !ownText,
-              px: px ?? base.px,
-              pxSource: pxDecl?.source ?? base.pxSource,
+              // Tailwind's base styles set <small> to 80% of its parent: under 12px text, 9.6px.
+              px: px ?? (info.tags.has('small') ? base.px * 0.8 : base.px),
+              pxSource: pxDecl?.source ?? (info.tags.has('small') ? `<small> at 80% of ${base.pxSource ?? 'its parent'}` : base.pxSource),
               hidden: base.hidden || hidden,
               opacity: base.opacity * (Number.isFinite(opacity) ? opacity : 1),
               when: agreed,
