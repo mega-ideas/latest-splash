@@ -18,18 +18,24 @@ const subscribe = () => () => {};
  * renders after hydration, as dates fetched in the browser do, shows the
  * viewer's straight away.
  *
- * `format` picks toLocaleString, toLocaleDateString or toLocaleTimeString, and
- * `options` pass through to it. This is the one client module that formats in
- * the viewer's locale: tests/client-locale-format.test.mjs holds every other
- * client component to a fixed one.
+ * `format` picks toLocaleString, toLocaleDateString or toLocaleTimeString;
+ * `locale` and `options` pass through to it. Without a `locale` the text
+ * reads the viewer's way; with one, that locale's way (a 24-hour 'en-GB'
+ * clock, say). The zone is the viewer's unless `options.timeZone` names one.
+ *
+ * This is the one client module that formats dates:
+ * tests/client-locale-format.test.mjs sends every other client component's
+ * dates here.
  */
 export default function LocalTime({
   value,
   format = 'datetime',
+  locale,
   options,
 }: {
   value: DateInput;
   format?: DateFormat;
+  locale?: string;
   options?: Intl.DateTimeFormatOptions;
 }) {
   const hydrated = useSyncExternalStore(subscribe, () => true, () => false);
@@ -37,8 +43,8 @@ export default function LocalTime({
   let text: string;
   if (!date) text = 'Invalid Date';
   else if (!hydrated) text = formatUtc(date, format);
-  else if (format === 'date') text = date.toLocaleDateString(undefined, options);
-  else if (format === 'time') text = date.toLocaleTimeString(undefined, options);
-  else text = date.toLocaleString(undefined, options);
+  else if (format === 'date') text = date.toLocaleDateString(locale, options);
+  else if (format === 'time') text = date.toLocaleTimeString(locale, options);
+  else text = date.toLocaleString(locale, options);
   return <time dateTime={date?.toISOString()}>{text}</time>;
 }

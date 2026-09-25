@@ -105,6 +105,22 @@ test('LocalTime says "Invalid Date" for input that names no moment, with no date
   assert.match(serverHtml({ value: 'not a date' }), /^<time>Invalid Date<\/time>$/);
 });
 
+test('the public receipt renders the same HTML whatever zone the server is in', async () => {
+  // app/receipt/[token] renders <Receipt> on the server. Its times were
+  // toLocaleString('en-US', { …, timeZoneName: 'short' }): "12:47 PM UTC"
+  // from a server in UTC, "08:47 PM GMT+8" in a browser in Kuala Lumpur.
+  const { default: Receipt } = await import('../components/Receipt.tsx');
+  const props = {
+    txDigest: 'Pending', sender: 'Splash operator', recipient: 'Manila Parts Supply', amount: '1250.00', currency: 'USD', fee: '6.25',
+    status: 'Settled', timestamp: '2026-09-25T12:47:50.000Z', sentAt: '2026-09-25T12:48:10.000Z', deliveredAt: '2026-09-25T12:52:00.000Z',
+  };
+  const html = (zone) => inZone(zone, () => renderToString(createElement(Receipt, props)));
+  const kualaLumpur = html('Asia/Kuala_Lumpur');
+  assert.equal(kualaLumpur, html('America/New_York'));
+  const times = [...kualaLumpur.matchAll(/<time[^>]*>([^<]*)<\/time>/g)].map((match) => match[1]);
+  assert.deepEqual(times, ['25 Sep 2026, 12:48:10 UTC', '25 Sep 2026, 12:52:00 UTC', '25 Sep 2026, 12:47:50 UTC']);
+});
+
 test('LocalTime switches to the viewer\'s own text only once the page has hydrated', () => {
   // useSyncExternalStore reads the server snapshot while hydrating and the
   // client snapshot after: false, then true.

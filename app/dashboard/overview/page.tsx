@@ -18,6 +18,7 @@ import Link from 'next/link';
 
 import HoverPopup from '@/components/HoverPopup';
 import LiveExchangeTicker from '@/components/LiveExchangeTicker';
+import LocalTime from '@/components/LocalTime';
 import DashPageHeader from '@/components/dashboard/DashPageHeader';
 import DashStat from '@/components/dashboard/DashStat';
 import SettlementEngineFlow from '@/components/dashboard/SettlementEngineFlow';
@@ -544,10 +545,7 @@ export default function DashboardOverview() {
                         <TxPill status={txStatusOf(t.state)} />
                       </td>
                       <td className="hidden px-4 py-2.5 text-right text-[#326273]/90 sm:table-cell">
-                        {new Date(t.createdAt).toLocaleTimeString('en-GB', {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
+                        <LocalTime value={t.createdAt} format="time" locale="en-GB" options={{ hour: '2-digit', minute: '2-digit' }} />
                       </td>
                     </tr>
                   ))}
