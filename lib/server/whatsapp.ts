@@ -44,6 +44,16 @@ export function whatsappConfigured(env: NodeJS.ProcessEnv = process.env): boolea
 }
 
 /**
+ * True when WhatsApp approvals cannot work here: production with no delivery.
+ * (Outside production an undelivered code goes to the server log, so local
+ * work can proceed.) Twilio was dropped on 2026-09-26 — the account was
+ * flagged inactive — so this is the state production is in until it returns.
+ */
+export function whatsappDeliveryMissing(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.NODE_ENV === 'production' && !whatsappConfigured(env);
+}
+
+/**
  * E.164, or null.
  *
  * Stored and compared in one shape only. `+60 10-265 1678`, `010 265 1678` and

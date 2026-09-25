@@ -26,15 +26,48 @@ const TWILIO = {
   TWILIO_WHATSAPP_FROM: '+14155238886',
 };
 
-test('the fee wallet: not set is skipped, a non-Sui address fails, a Sui address opens the lane', () => {
-  const unset = checkFeeAddress({});
+test('the fee wallet: not set is skipped, a non-Sui address fails, an object id fails, a wallet opens the lane', async () => {
+  const wallet = async () => false;
+  const unset = await checkFeeAddress({}, wallet);
   assert.equal(unset.status, 'skipped');
   assert.match(unset.detail, /USDC wallet transfers stay closed/);
-  assert.equal(checkFeeAddress({ SPLASH_FEE_ADDRESS_MAINNET: '0x52908400098527886E0F7030069857D2E4169EE7' }).status, 'fail');
-  const set = checkFeeAddress({ SPLASH_FEE_ADDRESS_MAINNET: `0x${'ab'.repeat(32)}` });
+  assert.equal((await checkFeeAddress({ SPLASH_FEE_ADDRESS_MAINNET: '0x52908400098527886E0F7030069857D2E4169EE7' }, wallet)).status, 'fail');
+
+  const set = await checkFeeAddress({ SPLASH_FEE_ADDRESS_MAINNET: `0x${'ab'.repeat(32)}` }, wallet);
   assert.equal(set.status, 'ok');
-  assert.match(set.detail, /0\.80% fee goes to 0xabab…abab/);
-  for (const c of [unset, set]) consistent(c);
+  assert.match(set.detail, /0\.80% fee goes to 0xabab…abab, a wallet address on mainnet/);
+
+  // A coin id copied from an explorer looks exactly like an address.
+  const object = await checkFeeAddress({ SPLASH_FEE_ADDRESS_MAINNET: `0x${'cd'.repeat(32)}` }, async () => true);
+  assert.equal(object.status, 'fail');
+  assert.match(object.detail, /is an object on mainnet, not a wallet/);
+
+  const unreachable = await checkFeeAddress({ SPLASH_FEE_ADDRESS_MAINNET: `0x${'ab'.repeat(32)}` }, async () => { throw new Error('connection reset'); });
+  assert.equal(unreachable.status, 'fail');
+  for (const c of [unset, set, object, unreachable]) consistent(c);
+});
+
+test('.env.example keeps the fee address blank: it is a template, and the app never reads it', () => {
+  // 2026-09-26: the real address was typed into .env.example, where the app
+  // did not see it (the lane stayed closed) and a commit would have published it.
+  const example = readFileSync(new URL('../.env.example', import.meta.url), 'utf8');
+  assert.match(example, /^SPLASH_FEE_ADDRESS_MAINNET=\s*$/m);
+});
+
+test('without WhatsApp delivery, production refuses WhatsApp approvals instead of locking the workspace', async () => {
+  const { whatsappDeliveryMissing } = await import('../lib/server/whatsapp.ts');
+  assert.equal(whatsappDeliveryMissing({ NODE_ENV: 'production' }), true, 'Twilio dropped: no codes can be sent');
+  assert.equal(whatsappDeliveryMissing({ NODE_ENV: 'production', ...TWILIO }), false);
+  assert.equal(whatsappDeliveryMissing({ NODE_ENV: 'development' }), false, 'locally the code goes to the server log');
+
+  // Asked first — before the main admin, the number or the passkey — for
+  // switching on AND for approving in a workspace already switched on.
+  const gate = readFileSync(new URL('../lib/server/step-up-gate.ts', import.meta.url), 'utf8');
+  const fn = gate.slice(gate.indexOf('export async function whatsappApprovalsReady('));
+  const asked = fn.indexOf('if (whatsappDeliveryMissing())');
+  assert.ok(asked > 0 && asked < fn.indexOf('mainAdmin('), 'delivery is checked before anything else');
+  assert.match(fn, /cannot be switched on\. Payments are approved by click until it is\./);
+  assert.match(fn, /switch this workspace to click approvals/);
 });
 
 test('Twilio: proven by an account lookup that sends nothing, and the token never printed', async () => {

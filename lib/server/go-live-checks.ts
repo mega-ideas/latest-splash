@@ -97,7 +97,26 @@ export async function checkUsdyPrice(env: NodeJS.ProcessEnv = process.env, fetch
 
 /* ── The fee wallet ────────────────────────────────────────────────────── */
 
-export function checkFeeAddress(env: NodeJS.ProcessEnv = process.env): Check {
+/** Whether an id names an existing object on mainnet. */
+type ObjectProbe = (id: string) => Promise<boolean>;
+
+const objectExistsOnMainnet: ObjectProbe = async (id) => {
+  try {
+    const result = await laneClient().core.getObject({ objectId: id });
+    return Boolean(result?.object);
+  } catch (error) {
+    if (/not ?found|does not exist|deleted/i.test(reason(error))) return false;
+    throw error;
+  }
+};
+
+/**
+ * A Sui address and an object id look the same. A coin id copied from an
+ * explorer passes the format check, and USDC "sent" to it becomes owned by
+ * that object, out of every wallet's reach. So the address is also checked
+ * on mainnet: an existing object there is not a wallet.
+ */
+export async function checkFeeAddress(env: NodeJS.ProcessEnv = process.env, isObject: ObjectProbe = objectExistsOnMainnet): Promise<Check> {
   const address = (env.SPLASH_FEE_ADDRESS_MAINNET ?? '').trim();
   if (!address) {
     return skipped(`SPLASH_FEE_ADDRESS_MAINNET not set: USDC wallet transfers stay closed until your company's fee wallet is set (${GUIDE}, Configuration)`);
@@ -105,7 +124,15 @@ export function checkFeeAddress(env: NodeJS.ProcessEnv = process.env): Check {
   if (!SUI_ADDRESS.test(address)) {
     return failed('SPLASH_FEE_ADDRESS_MAINNET is not a Sui address (0x followed by 64 hex characters); an Ethereum address will not do.');
   }
-  return ok(`USDC wallet transfers open: the 0.80% fee goes to ${short(address)}`);
+  try {
+    const { value: object, ms } = await withTimeout('Sui mainnet', () => isObject(address));
+    if (object) {
+      return failed(`SPLASH_FEE_ADDRESS_MAINNET (${short(address)}) is an object on mainnet, not a wallet: fees sent there would be owned by that object and unreachable. Copy the address from the wallet itself (Slush: Receive).`, ms);
+    }
+    return ok(`USDC wallet transfers open: the 0.80% fee goes to ${short(address)}, a wallet address on mainnet`, ms);
+  } catch (e) {
+    return failed(`could not check ${short(address)} on mainnet: ${reason(e)}`);
+  }
 }
 
 /* ── WhatsApp codes (Twilio) ──────────────────────────────────────────── */

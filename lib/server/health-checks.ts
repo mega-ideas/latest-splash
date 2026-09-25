@@ -225,13 +225,13 @@ export type HealthReport = {
 };
 
 export async function runHealthChecks(): Promise<HealthReport> {
-  const [rpc, pkg, db, seal, enoki, laneNode, peg, usdyPrice, twilio, screening] = await Promise.all([
+  const [rpc, pkg, db, seal, enoki, laneNode, peg, usdyPrice, feeAddress, twilio, screening] = await Promise.all([
     checkRpc(), checkPackage(), checkDb(), checkSeal(), checkEnoki(),
-    checkLaneNode(), checkPeg(), checkUsdyPrice(), checkTwilio(), checkScreening(),
+    checkLaneNode(), checkPeg(), checkUsdyPrice(), checkFeeAddress(), checkTwilio(), checkScreening(),
   ]);
   const checks = {
     rpc, package: pkg, db, seal, enoki,
-    laneNode, peg, usdyPrice, feeAddress: checkFeeAddress(), twilio, passkeyDomain: checkPasskeyDomain(), screening,
+    laneNode, peg, usdyPrice, feeAddress, twilio, passkeyDomain: checkPasskeyDomain(), screening,
   };
   // 'skipped' is not a failure: it is a deliberate absence in this env.
   const ok = Object.values(checks).every((c) => c.status !== 'fail');

@@ -71,6 +71,20 @@ export async function whatsappApprovalsReady(
   when: 'enable' | 'approve' = 'enable',
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
   if (!process.env.DATABASE_URL) return { ok: false, reason: 'WhatsApp approvals need the database.' };
+  // No delivery, no codes. Outside production a code goes to the server log
+  // (lib/server/whatsapp.ts), so local work can proceed; in production an
+  // unconfigured (or dropped) Twilio would lock every payment and every
+  // settings save — switching this back off included — behind a code that
+  // can never arrive. Refused before anything else.
+  const { whatsappDeliveryMissing } = await import('@/lib/server/whatsapp');
+  if (whatsappDeliveryMissing()) {
+    return {
+      ok: false,
+      reason: when === 'enable'
+        ? 'WhatsApp delivery is not set up on this server, so WhatsApp approvals cannot be switched on. Payments are approved by click until it is.'
+        : 'WhatsApp delivery is not set up on this server, so no approval code can be sent. Ask Splash support to switch this workspace to click approvals.',
+    };
+  }
   const tail = when === 'enable'
     ? ' before WhatsApp approvals can be switched on.'
     : ' — until then, no payment here can be approved.';

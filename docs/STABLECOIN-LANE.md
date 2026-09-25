@@ -193,6 +193,8 @@ Splash reads prices only from free sources. Pyth's Hermes has required a paid ke
 
 ## Step-up approvals (lib/server/step-up.ts)
 
+> **2026-09-26: WhatsApp delivery is dropped for now** (the Twilio account was flagged inactive). Workspaces approve by click. In production, WhatsApp approvals cannot be switched on without Twilio configured (`whatsappDeliveryMissing()`), because a workspace in WhatsApp mode would need a code for every payment and every settings save. See docs/GO-LIVE-HANDOVER.md.
+
 Each workspace picks a style in **Settings → Approve with a WhatsApp code and passkey**:
 
 - **Off (default): click to approve.**

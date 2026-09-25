@@ -14,9 +14,10 @@
  * moves). A dry run needs no signature, so nothing is signed, submitted or
  * spent. It also checks what a wallet with no USDC is told.
  *
- * The recipient and fee legs go to two fixed placeholder addresses
- * (0x…aa / 0x…fee). Nobody holds them and nothing is sent to them: this is a
- * simulation, and they are never Splash's configured fee address.
+ * The recipient leg goes to a placeholder (0x…aa). The fee leg goes to
+ * SPLASH_FEE_ADDRESS_MAINNET when it is set (loaded from .env.local), so the
+ * rehearsal proves the real fee wallet can be paid; otherwise to a
+ * placeholder (0x…fee). Nothing is sent to either: this is a simulation.
  *
  * Exit code 0 when every check passes.
  */
@@ -27,7 +28,10 @@ import { buildTransferBytes, describeBuildError, digestOf, laneClient, senderOf,
 const USDC = SUI_USDC_COIN_TYPE.mainnet;
 const GRAPHQL = process.env.SUI_GRAPHQL_URL || 'https://graphql.mainnet.sui.io/graphql';
 const RECIPIENT = `0x${'aa'.repeat(32)}`;
-const FEE = `0x${'0'.repeat(61)}fee`;
+// .env.local, as `next dev` reads it; a dry run needs no secret from it.
+try { process.loadEnvFile('.env.local'); } catch { /* no file: the placeholder fee leg */ }
+const CONFIGURED_FEE = (process.env.SPLASH_FEE_ADDRESS_MAINNET ?? '').trim();
+const FEE = /^0x[0-9a-fA-F]{64}$/.test(CONFIGURED_FEE) ? CONFIGURED_FEE : `0x${'0'.repeat(61)}fee`;
 const EMPTY_WALLET = `0x${'0'.repeat(62)}42`;
 
 function arg(name) {
@@ -68,7 +72,8 @@ const client = laneClient();
 const amount = arg('amount') ?? '10';
 const principal = parseUsdcMinor(amount);
 const quote = quoteStablecoinTransfer(principal);
-console.log(`Rehearsing ${formatUsdc(principal)} USDC + ${formatUsdc(quote.feeMinor)} fee on Sui mainnet (${process.env.SUI_MAINNET_RPC_URL || 'fullnode.mainnet.sui.io'}). Nothing is signed or sent.\n`);
+console.log(`Rehearsing ${formatUsdc(principal)} USDC + ${formatUsdc(quote.feeMinor)} fee on Sui mainnet (${process.env.SUI_MAINNET_RPC_URL || 'fullnode.mainnet.sui.io'}). Nothing is signed or sent.`);
+console.log(`Fee leg: ${FEE === CONFIGURED_FEE ? `your fee wallet ${FEE.slice(0, 6)}…${FEE.slice(-4)} (SPLASH_FEE_ADDRESS_MAINNET)` : 'a placeholder (SPLASH_FEE_ADDRESS_MAINNET is not set)'}\n`);
 
 const sender = arg('sender') ?? await findHolder(client, quote.totalDebitMinor);
 if (!sender) {
