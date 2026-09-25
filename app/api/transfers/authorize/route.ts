@@ -202,8 +202,11 @@ async function authorize(request: Request, spent: SpentApproval) {
     paymentRail !== 'AIRWALLEX_WIRE';
   if (totpRequiredForThisRail) {
     // A WhatsApp code + passkey approval for exactly this payment stands in
-    // for the authenticator code.
-    if (!whatsappApproved) {
+    // for the authenticator code. So does the queue's approval of it: the
+    // maker cleared this check to file the payment, the code is single-use
+    // and was spent then, and the replay carries no code that could pass.
+    // Asked for one anyway, every approved payout on this rail failed here.
+    if (!whatsappApproved && !approvalClaim.approved) {
       const verdict = verifyPayoutTotp({ code: totp, accountId: businessAccountId, requireTotp: settings.requireTotp });
       if (!verdict.ok) {
         return NextResponse.json(
@@ -316,8 +319,9 @@ async function authorize(request: Request, spent: SpentApproval) {
     // around — by splitting the payment under the threshold, which is worse
     // than having no threshold.
     const maker = await resolveAuthorityForSession(auth.session);
-    // What is replayed once it is approved, and what names the payment.
-    const approvalPayload = { ...body, businessAccountId: undefined };
+    // What is replayed once it is approved, and what names the payment. Not
+    // the code: it was spent above, and the approval stands in for it.
+    const approvalPayload = { ...body, businessAccountId: undefined, totp: undefined };
     const proposal = await proposeForApproval({
       orgId,
       // The MAKER, from the session. The submit route compares this against

@@ -9,6 +9,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 
 import * as schema from '../lib/db/schema.ts';
+import { decodeBase32, hotp, TOTP_STEP_SECONDS } from '../lib/auth/totp.ts';
 
 /**
  * An approved payout is paid once, on the real transfers route.
@@ -52,6 +53,9 @@ process.env.USE_MOCK_APIS = 'true';
 process.env.SPLASH_DATA_DIR = path.join(os.tmpdir(), 'splash-approved-payout-once-no-data');
 delete process.env.SPLASH_COMPLIANCE_CONFIG_ID;
 delete process.env.REDIS_URL;
+// An authenticator is enrolled, so a payment on a rail that asks for the code
+// can be filed for approval. The held-balance payouts ask for none.
+process.env.SPLASH_TOTP_SECRET = 'JBSWY3DPEHPK3PXP';
 
 // ── A request scope outside Next ────────────────────────────────────────────
 
@@ -455,4 +459,85 @@ test('an approval does not cover another payment or another org, and presenting 
   assert.equal(outcome.state, 'EXECUTED', outcome.detail);
   assert.equal((await payoutDebits('acme')).length, acmeBefore + 1);
   assert.deepEqual(await spendRecord(id), [{ org_id: 'acme', consumed_by: 'transfers/authorize' }]);
+});
+
+// ── The maker's code, spent once ────────────────────────────────────────────
+//
+// A payment with no funding session and no held balance, on a rail other than
+// card checkout or wire, asks the maker for the authenticator code. The code is
+// single-use, and filing the payment for approval spent it. The replay carries
+// none that could pass, so the approval of the payment stands in for it — as it
+// does on the batch and treasury routes — and only that approval, unspent.
+
+const TOTP_SECRET = decodeBase32(process.env.SPLASH_TOTP_SECRET);
+const usedSteps = new Set();
+
+/** A valid code the route has not seen: each step's code is single-use. */
+function freshCode() {
+  const now = Math.floor(Date.now() / 1000 / TOTP_STEP_SECONDS);
+  for (const step of [now, now + 1, now - 1]) {
+    if (usedSteps.has(step)) continue;
+    usedSteps.add(step);
+    return hotp(TOTP_SECRET, step);
+  }
+  throw new Error('every code in the window is spent');
+}
+
+/** The payout paid in USDC on Sui, with no funding session: a rail that asks for the code. */
+function coinPayout(amount) {
+  return {
+    ...payout(amount),
+    paymentRail: 'SUI_NATIVE',
+    fundingSelection: { source: 'USDC', type: 'stablecoin', asset: 'USDC', rail: 'SUI_NATIVE', feeTier: 'DISCOUNT' },
+  };
+}
+
+test('an approved payout is not asked again for the code its maker spent filing it', async () => {
+  const store = freshStore();
+  const body = coinPayout('28000');
+  const paidBefore = (await payoutDebits('acme')).length;
+  const settlingBefore = scope.deferred.length;
+
+  // This rail asks for the code.
+  const noCode = await authorize(PEOPLE.maker, body);
+  assert.equal(noCode.status, 400, JSON.stringify(noCode.body));
+  assert.match(noCode.body.code, /^totp_/);
+
+  // With it, over the threshold, the payment is filed for approval — without
+  // the code, which was spent and which the approval stands in for.
+  const id = await propose({ ...body, totp: freshCode() });
+  assert.equal(store.get(id).executionPayload.totp, undefined);
+  await approve(id);
+
+  // The replay is not asked for it again. Asked, it failed as an authorization
+  // code the maker had already used, a check they had passed. Now it meets the
+  // rail's own precondition, which is the real reason this one cannot pay: a
+  // coin source settles from a funding session, and it has none.
+  const outcome = await carryOut(id);
+  assert.equal(outcome.state, 'FAILED');
+  assert.doesNotMatch(outcome.detail, /authorization code/i);
+  assert.match(outcome.detail, /funding session/);
+  assert.equal((await payoutDebits('acme')).length, paidBefore, 'nothing moved');
+  assert.equal(scope.deferred.length, settlingBefore);
+});
+
+test('the approval stands in for the code only on its own payment, and only once', async () => {
+  freshStore();
+  const body = coinPayout('29000');
+  const id = await propose({ ...body, totp: freshCode() });
+  await approve(id);
+  const paidBefore = (await payoutDebits('acme')).length;
+
+  // On another payment the claim does not hold, so the code is asked for.
+  const elsewhere = await authorize(PEOPLE.maker, coinPayout('29500'), id);
+  assert.equal(elsewhere.status, 400, JSON.stringify(elsewhere.body));
+  assert.match(elsewhere.body.code, /^totp_/);
+
+  // Carried out, the claim is spent. The same payment presented with it again
+  // clears the code like any other request.
+  assert.equal((await carryOut(id)).state, 'FAILED');
+  const again = await authorize(PEOPLE.maker, body, id);
+  assert.equal(again.status, 400, JSON.stringify(again.body));
+  assert.match(again.body.code, /^totp_/);
+  assert.equal((await payoutDebits('acme')).length, paidBefore);
 });
