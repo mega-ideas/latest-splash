@@ -31,8 +31,21 @@ new build refuses to install or start on the old runtime and environment.
    are in `docs/W1-BACKUPS.md`). Migrations are applied with
    `npm run db:migrate:run` — **not** `npm run db:migrate`: `drizzle-kit
    migrate` needs a TTY, and run headless it applies nothing and exits 0.
-   `db:migrate:run` reads `.env.local` for `DATABASE_URL` and re-running it is
-   a no-op.
+   `db:migrate:run` reads `.env.local` for `DATABASE_URL` (a value already in
+   the environment wins), applies every pending migration in one transaction
+   — a failure applies nothing — and re-running it is a no-op.
+
+   **TLS**: DigitalOcean's connection string ends in `?sslmode=require`.
+   `pg` 8 treats that as full certificate verification against Node's
+   trusted CAs, and it overrides the `ssl` option in `lib/db/client.ts` and
+   `scripts/migrate.mjs`. DigitalOcean signs database certificates with its
+   own CA, so the app, `doctor` and the migration all fail to connect with
+   the string as shown. Download the cluster's CA certificate (cluster page →
+   *Download CA certificate*), put it on the host (e.g.
+   `/etc/splash/do-postgres-ca.crt`, mode 644), and end `DATABASE_URL` with
+   `?sslmode=verify-full&sslrootcert=/etc/splash/do-postgres-ca.crt`.
+   `?sslmode=no-verify` also connects, encrypted but unverified. `doctor`'s
+   Postgres row proves whichever you choose.
 5. **Collect production configuration.** The environment is validated at
    startup (`lib/env.ts`, called from `instrumentation.ts`): in production a
    missing, malformed or removed key **refuses to start** and names every
@@ -45,7 +58,7 @@ new build refuses to install or start on the old runtime and environment.
    |---|---|
    | `CUSTOMER_SESSION_SECRET` | ≥32 random chars: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` |
    | `ADMIN_SESSION_SECRET` | Separate from the customer secret |
-   | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Staff console. The password may not be the `.env.example` demo value |
+   | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Staff console. The startup check only refuses the `.env.example` demo password, but staff sign-in is refused in production unless both are set (with `ADMIN_SESSION_SECRET`), and without it nobody can grant the first membership |
    | `CRON_SECRET` | Every `/api/cron/*` route refuses callers without `Authorization: Bearer $CRON_SECRET` |
    | `DATABASE_URL` | The managed Postgres cluster |
    | `SPLASH_PACKAGE_ID` | The published Move package |
@@ -59,21 +72,21 @@ new build refuses to install or start on the old runtime and environment.
    | `SUI_NETWORK` | `testnet` until a mainnet package exists |
    | `SUI_RPC_URL` | The **gRPC** base URL — the app uses `SuiGrpcClient`. Unset means `https://fullnode.<network>.sui.io:443`. `sui-testnet-rpc.publicnode.com` serves JSON-RPC only and answers every call "Bad Request" |
    | `SUI_MAINNET_RPC_URL` | Optional; the stablecoin lane's mainnet client. Defaults to `https://fullnode.mainnet.sui.io:443` |
-   | `SUI_SETTLEMENT_MODE` | `auto` (recommended), `live`, or `simulate` for demos |
+   | `SUI_SETTLEMENT_MODE` | `auto` (the default and recommended), `live`, or `simulate` for demos. `auto` with mocks off is live settlement, so the defaults require the signer below |
    | `SPLASH_TREASURY_ID`, `SPLASH_PEG_STATE_ID`, `SPLASH_COMPLIANCE_CONFIG_ID`, `SPLASH_ADMIN_CAP_ID`, `SPLASH_ANCHOR_CAP_ID`, `SPLASH_BUSINESS_ACCOUNT_ID`, `DEEPBOOK_POOL_ID`, `DEEPBOOK_QUOTE_TYPE`, `USDC_TYPE` | From your working `.env.local`. `USDC_TYPE` must be the real coin type — the dev stand-in `0x2::sui::SUI` is refused |
    | `OPERATOR_SUI_ADDRESS` / `OPERATOR_SUI_PRIVATE_KEY` | Required once settlement is live (`live`, or `auto` with mocks off) or `TREASURY_EXECUTION_ENABLED=true`. Ed25519 or Secp256k1 `suiprivkey…`. **Encrypted/secret env vars only** |
-   | `PASSKEY_RP_ID` | **Decide before anyone enrols a passkey.** Unset, it is the host of `NEXT_PUBLIC_APP_URL`; changing it later orphans every passkey. Use the parent domain (`splashz.xyz`) if passkeys must work on more than one subdomain — see `docs/PHASE-STATUS.md` |
+   | `PASSKEY_RP_ID` | **Decide before anyone enrols a passkey.** Unset, it is the host of `NEXT_PUBLIC_APP_URL`; changing it later orphans every passkey, and a passkey's Sui address is the user's Splash wallet, so another domain means another wallet. Use the parent domain (`splashz.xyz`) if passkeys must work on more than one subdomain — see `docs/PHASE-STATUS.md` |
 
    **Decided by your flags**
 
    | When | Then set |
    |---|---|
    | `USE_MOCK_APIS` and `NEXT_PUBLIC_DEMO_MODE` both off | `PDAX_API_KEY`, `WALRUS_PUBLISHER_URL`, `WALRUS_AGGREGATOR_URL`, `ENOKI_API_KEY`; and `STRIPE_SECRET_KEY` / `AIRWALLEX_API_KEY` unless `FUNDING_PROVIDER_STRIPE_ENABLED` / `FUNDING_PROVIDER_AIRWALLEX_ENABLED` are `false` (both default on) |
-   | `FEATURE_KYB_GATE=true` | `SUMSUB_APP_TOKEN`, `SUMSUB_SECRET_KEY`; `SUMSUB_WEBHOOK_SECRET` for `/api/webhooks/sumsub` |
+   | `FEATURE_KYB_GATE=true` | `SUMSUB_APP_TOKEN`, `SUMSUB_SECRET_KEY`; `SUMSUB_WEBHOOK_SECRET` for `/api/webhooks/sumsub`. A compliance decision: **off** (the default) the gate never blocks, so an unverified business can use USD in and local-currency payouts. **On**, a workspace moves money only once staff approve it at `/admin/kyb` |
    | `FEATURE_ZKLOGIN=true` | `ZKLOGIN_GOOGLE_CLIENT_ID` (part of address derivation — never rotate once users exist), `ZKLOGIN_USER_SALT` |
-   | WhatsApp approvals | `TWILIO_*`; point the Twilio webhook at `/api/webhooks/whatsapp` |
+   | WhatsApp approvals | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_FROM`; point the Twilio webhook at `/api/webhooks/whatsapp` and set `TWILIO_WEBHOOK_URL` to that exact public URL — behind a proxy the request URL differs from the one Twilio signed, and every inbound message is refused |
    | MemWal | `MEMWAL_PRIVATE_KEY` and `MEMWAL_ACCOUNT_ID` together, or neither |
-   | Stablecoin lane | `CHAINALYSIS_SANCTIONS_API_KEY` to screen wallet recipients |
+   | Stablecoin lane | `SPLASH_FEE_ADDRESS_MAINNET` (no USDC transfer is quoted without it), `CHAINALYSIS_SANCTIONS_API_KEY` to screen wallet recipients; optional `ETHEREUM_RPC_URL` / `USDY_ORACLE` and `DEEPBOOK_STABLE_PAIRS` (the old name `DEEPBOOK_STABLE_PAIR` is ignored). See `docs/STABLECOIN-LANE.md`, Configuration |
    | 0xWal | `ANTHROPIC_API_KEY` (+ `ANTHROPIC_MODEL`) recommended; without it 0xWal runs the local planner |
    | Extra POST origins | `ALLOWED_ORIGINS`, comma-separated |
 
@@ -83,14 +96,19 @@ new build refuses to install or start on the old runtime and environment.
    |---|---|
    | `CUSTOMER_EMAIL`, `CUSTOMER_PASSWORD` | The single env login is gone; accounts are rows in `users` |
    | `SPLASH_ATTESTATION_CAP_ID` | Renamed to `SPLASH_ANCHOR_CAP_ID` |
-   | `SEAL_KEY_SERVER_ENDPOINTS`, `SEAL_KEY_SERVER_URLS`, `SEAL_KEY_SERVER_MODE`, `SEAL_THRESHOLD`, `SEAL_PACKAGE_ID`, `SEAL_POLICY_OBJECT_ID`, `SEAL_APPROVE_TARGET` | Seal is configured by the committed `config/seal.production.json` (see `config/README.md`). Empty servers there means Seal is unconfigured and fails closed |
+   | `SEAL_KEY_SERVER_ENDPOINTS`, `SEAL_KEY_SERVER_URLS`, `SEAL_KEY_SERVER_MODE`, `SEAL_THRESHOLD`, `SEAL_PACKAGE_ID`, `SEAL_POLICY_OBJECT_ID`, `SEAL_APPROVE_TARGET` | Seal is configured by the committed `config/seal.production.json` (see `config/README.md`). Empty servers there means Seal is unconfigured and fails closed: sealing is refused, and the Seal health row fails, so `/api/health` answers 503 until a committee is configured |
 
    Never commit `.env.local`. On App Platform, enter these in the dashboard.
 6. **First operator.** Nobody can sign in until a membership exists. The
-   sequence: sign up at `/signup` → open the verification email → a staff
-   member signs in at `/admin/login` and grants a role at
-   `/admin/memberships` → the operator signs in. Signing up grants nothing on
-   its own, by design.
+   sequence: sign up at `/signup` → open the verification email (a grant to
+   an unverified address is refused) → a staff member signs in at
+   `/admin/login` and grants a role (`maker`, `checker`, `admin` or `viewer`)
+   in a workspace at `/admin/memberships`, which creates a new workspace id on
+   the spot → the operator signs in. Signing up grants nothing on its own, by
+   design. On an upgraded database, `0004` has already given every old user a
+   membership with their old workspace and role: once they sign up again with
+   the same address and open the link, they hold it. Review those at
+   `/admin/memberships`.
 
 ---
 
@@ -105,13 +123,16 @@ new build refuses to install or start on the old runtime and environment.
      App Platform sets `PORT`)
    - Instance: at least **1 GB RAM** (Next builds are memory-hungry; 512 MB
      often OOMs). Start with Basic 1 GB / 1 vCPU, scale later.
+   - Health check: an HTTP check on `/login`. Not `/api/health`: in
+     production it answers 401 without a staff session.
 3. **Environment variables**: App → Settings → App-Level Environment
    Variables. Add everything from the checklist. Mark secrets as *Encrypt*.
    Set `NODE_ENV=production` (App Platform usually sets this already).
 4. **Migrations**: App → Create → *Job*, kind **Pre-deploy**, same repo and
    branch, run command `npm run db:migrate:run`. It runs after the build and
    before the new version takes traffic, with the app-level environment, so
-   every deploy migrates first; with nothing new to apply it is a no-op. Add
+   every deploy migrates first; with nothing new to apply it is a no-op. The
+   migrations run in one transaction, so a failed job applies nothing. Add
    the app to the database's trusted sources.
 5. **Deploy**: Save → it builds and deploys. Watch the build logs; the first
    build takes several minutes. A deploy that fails the environment check
@@ -159,6 +180,7 @@ stays untouched as the rollback. `sudo -u splash pm2 describe splash | grep
 3. **Get the code**:
    ```bash
    sudo adduser --system --group splash
+   sudo install -d -o splash -g splash /opt/splash   # splash can't create directories in /opt
    sudo -u splash git clone https://github.com/sky9484/phase1.git /opt/splash
    cd /opt/splash && sudo -u splash git checkout <RELEASE_SHA>
    ```
@@ -176,7 +198,10 @@ stays untouched as the rollback. `sudo -u splash pm2 describe splash | grep
    sudo -u splash pm2 save && pm2 startup   # follow the printed command
    ```
    `NEXT_PUBLIC_*` values are inlined at build time: finish `.env.local`
-   before `npm run build`.
+   before `npm run build`. `doctor` exits 1 while any row fails. Before
+   migrating, the Postgres row fails with "reachable, but 0/N migrations
+   applied" — expected. The Seal row fails until `config/seal.production.json`
+   has a committee. Any other failure needs fixing first.
 6. **Nginx reverse proxy** (`/etc/nginx/sites-available/splash`):
    ```nginx
    server {
@@ -214,7 +239,7 @@ stays untouched as the rollback. `sudo -u splash pm2 describe splash | grep
    NEXT=/opt/splash-next     # the other one
 
    # Stage (the site keeps serving)
-   [ -d "$NEXT" ] || sudo -u splash git clone https://github.com/sky9484/phase1.git "$NEXT"
+   [ -d "$NEXT/.git" ] || { sudo install -d -o splash -g splash "$NEXT" && sudo -u splash git clone https://github.com/sky9484/phase1.git "$NEXT"; }
    sudo -u splash git -C "$NEXT" fetch origin
    sudo -u splash git -C "$NEXT" checkout <RELEASE_SHA>
    sudo install -m 600 -o splash -g splash "$LIVE/.env.local" "$NEXT/.env.local"
@@ -232,13 +257,16 @@ stays untouched as the rollback. `sudo -u splash pm2 describe splash | grep
    sudo -u splash pm2 save
    sudo -u splash pm2 logs splash --lines 60 --nostream
    ```
-   `doctor` reports pending migrations as a failed database row until the
-   switch; every other row must pass. If the new build logs
-   `EnvValidationError`, fix `$NEXT/.env.local` and `pm2 restart splash`.
+   `doctor` reports pending migrations as a failed Postgres row until the
+   switch, and Seal fails until it has a committee; every other row must
+   pass. `db:migrate:run` ends with "Done. N migration(s) recorded" and exits
+   1 if fewer. If the new build logs `EnvValidationError`, fix
+   `$NEXT/.env.local` and `pm2 restart splash`.
 
-   **Rollback**: if the release applied no migrations, start PM2 from
-   `$LIVE` again. If it did, the old build may not run against the new
-   schema — restore the database to the recorded time first
+   **Rollback**: if the release applied no migrations — including when
+   `db:migrate:run` failed, since it applies all or nothing — start PM2 from
+   `$LIVE` again. If it applied them, the old build may not run against the
+   new schema — restore the database to the recorded time first
    (`docs/W1-BACKUPS.md`), point `$LIVE/.env.local` at the restored cluster,
    then start from `$LIVE`.
 
@@ -255,14 +283,22 @@ causes an outage:
    the old build on the new Node for a few seconds).
 2. **Environment**: delete every key under *Must NOT be set*, add the
    *Required* ones (`EMAIL_TRANSPORT=resend` is the one most often missing),
-   point `SUI_RPC_URL` at a gRPC host, and decide `PASSKEY_RP_ID`.
-3. **Migrations `0003`–`0022`**. `0004_real_users` is hand-written and moves
+   give `DATABASE_URL` the cluster's CA (checklist item 4, TLS), point
+   `SUI_RPC_URL` at a gRPC host, and decide `PASSKEY_RP_ID` and
+   `FEATURE_KYB_GATE`. With the gate on, every carried-over workspace starts
+   `REGISTERED` and moves no money until staff approve it at `/admin/kyb`.
+3. **Migrations `0003`–`0026`**. `0004_real_users` is hand-written and moves
    data — each user's org and role into `memberships` — before dropping those
-   columns. Rehearse it first on a point-in-time fork of production
-   (`DATABASE_URL=<fork> npm run db:migrate:run`), and record a restore point
-   before the real run: after it, rolling back means restoring the database.
+   columns. Rehearse on a point-in-time fork of production first, from the
+   staged checkout with the release's own dependencies:
+   `sudo -u splash env DATABASE_URL='<fork, with the TLS ending>' npm run db:migrate:run`
+   (the command-line value wins over `.env.local`). Compare `select count(*)
+   from users` before with the rows in `memberships` after. Record a restore
+   point before the real run: once it succeeds, rolling back means restoring
+   the database.
 4. **Logins**: old `users` rows have no password. Create the first operator
-   with the sequence in checklist item 6.
+   with the sequence in checklist item 6, then review the memberships `0004`
+   carried over.
 
 `docs/PHASE-STATUS.md` ("Deploy order") has the reasoning behind each.
 
@@ -270,9 +306,12 @@ causes an outage:
 
 ## Post-deploy smoke test (either path)
 
-1. `curl -s https://<domain>/api/health` → `"ok": true`; RPC names your gRPC
-   host, the package resolves, and every migration in
-   `drizzle/meta/_journal.json` is applied. The go-live rows cover the setup done by hand:
+1. The health report. In production `GET /api/health` needs a staff session
+   — a plain `curl` gets 401 — and answers 503 while any row fails. Read it
+   with `NODE_ENV=production npm run doctor` on the server, or in the staff
+   console at `/admin/go-live`. RPC names your gRPC host, the package
+   resolves, and every migration in `drizzle/meta/_journal.json` is applied.
+   Seal fails until `config/seal.production.json` has a committee. The go-live rows cover the setup done by hand:
    - `laneNode`, `peg` and `usdyPrice` must be `ok`.
    - `feeAddress`, `twilio` and `screening` show `skipped` until they are configured, with the reason.
    - `passkeyDomain` must be `ok` **before** anyone creates a passkey on this domain. A passkey's Sui address is tied to its domain.
