@@ -444,9 +444,10 @@ test('after a restart, a payment whose proposal was rejected can be proposed aga
     return { second, refused, rows };
   };
 
-  // The defect, under the index as it was (migrations through 0024): the new
-  // proposal existed only in memory, its write refused.
-  const before = await run((file) => file < '0025');
+  // The defect, under the index as it was (every migration but 0025, so the
+  // columns this code writes are there): the new proposal existed only in
+  // memory, its write refused.
+  const before = await run((file) => !file.startsWith('0025'));
   assert.equal(before.second.id, 'second');
   assert.deepEqual(before.refused, ['second']);
   assert.deepEqual(before.rows, [['first', 'REJECTED', null]]);

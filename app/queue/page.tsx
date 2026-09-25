@@ -12,6 +12,7 @@ import { getCustomerSession } from '@/lib/server/customer-auth';
 import ApprovalCodeCard from '@/components/queue/ApprovalCodeCard';
 import ApprovalQueueBoard, { type QueueItem, type QueueLaneData } from '@/components/queue/ApprovalQueueBoard';
 import ReadyToSendLane, { type ReadyToSendItem } from '@/components/queue/ReadyToSendLane';
+import StuckPaymentsSection from '@/components/queue/StuckPaymentsSection';
 
 export const dynamic = 'force-dynamic';
 
@@ -313,6 +314,7 @@ export default async function QueuePage() {
         </header>
 
         <ApprovalCodeCard />
+        <StuckPaymentsSection viewer={viewer} />
         <ReadyToSendLane items={readyItems} />
 
         <ApprovalQueueBoard live={liveProposals} examples={{ pending: examplePending, lanes: exampleLanes }} />

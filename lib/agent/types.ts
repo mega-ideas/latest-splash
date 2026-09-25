@@ -160,6 +160,10 @@ export interface UnsignedProposal {
   /** What happened when it was carried out, including a failure — so an
    *  approval that could not be executed is visible rather than silent. */
   execution?: { state: 'EXECUTED' | 'FAILED' | 'SKIPPED'; detail: string; ref?: string; at: string };
+  /** When it was handed to the payment route (SUBMIT). With no `execution`
+   *  long after this, nobody knows whether the payment went: the process
+   *  stopped between the two (lib/queue/stuck-payments.ts). */
+  submittedAt?: string;
   /** When the approval was spent, and what spent it: the money route that
    *  acted on the approved-proposal claim, or the approvers' replay closing it.
    *  An approval carries out one payment; set once, never cleared. */

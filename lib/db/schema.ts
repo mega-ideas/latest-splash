@@ -803,6 +803,10 @@ export const proposals = pgTable('proposals', {
   executionState: text('execution_state'),
   executionError: text('execution_error'),
   executedAt: timestamp('executed_at', { withTimezone: true }),
+  /** When it was handed to the payment route. SUBMITTED with no execution
+   *  state long after this is a payment whose outcome nobody recorded
+   *  (drizzle/0026, lib/queue/stuck-payments.ts). */
+  submittedAt: timestamp('submitted_at', { withTimezone: true }),
   ...timestamps,
 }, (table) => [
   index('proposals_org_idx').on(table.orgId),

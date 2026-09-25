@@ -543,7 +543,10 @@ export class InMemoryProposalStore {
     const proposal = this.proposalsById.get(id);
     if (!proposal) throw new ProposalStateError(`proposal ${id} was not found`);
 
-    const next = transitionProposal(proposal, event);
+    const moved = transitionProposal(proposal, event);
+    // When it went to the payment route: with no outcome recorded long after
+    // this, nobody knows whether it paid (lib/queue/stuck-payments.ts).
+    const next = event.type === 'SUBMIT' ? { ...moved, submittedAt: new Date(this.now()).toISOString() } : moved;
     this.commit(next);
     return next;
   }

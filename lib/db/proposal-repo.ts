@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull, notInArray, type SQL } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, notInArray, type SQL } from 'drizzle-orm';
 import type { PgDatabase } from 'drizzle-orm/pg-core';
 
 import { approvals, consumedApprovals, organizations, proposals } from './schema.ts';
@@ -98,6 +98,7 @@ export async function upsertProposal(db: DrizzleDb, proposal: UnsignedProposal):
         : null,
       executionState: proposal.execution?.state ?? null,
       executionError: proposal.execution?.state === 'FAILED' ? proposal.execution.detail : null,
+      submittedAt: proposal.submittedAt ? new Date(proposal.submittedAt) : null,
       requiredApprovers: proposal.explain.requiredApprovers,
       version: proposal.version ?? 1,
       approvalHash: proposal.approvalHash ?? null,
@@ -147,6 +148,7 @@ function rowToProposal(row: typeof proposals.$inferSelect, approvalRows: (typeof
     executionPayload: row.executionPayload
       ? decodeJsonWithBigints(row.executionPayload)
       : undefined,
+    submittedAt: row.submittedAt ? row.submittedAt.toISOString() : undefined,
   } as UnsignedProposal;
 }
 
@@ -172,6 +174,27 @@ export async function consumeApprovalRecord(
     .onConflictDoNothing({ target: consumedApprovals.proposalId })
     .returning({ proposalId: consumedApprovals.proposalId });
   return rows.length === 1;
+}
+
+export type ApprovalSpend = { consumedBy: string; consumedAt: Date };
+
+/**
+ * Each proposal's approval spend, where one is on record: what used the
+ * approval, and when. A money route spends it before any money step, so a
+ * proposal with no spend was never paid through its approval
+ * (lib/queue/stuck-payments.ts reads it that way).
+ */
+export async function loadApprovalSpends(db: DrizzleDb, proposalIds: string[]): Promise<Map<string, ApprovalSpend>> {
+  if (proposalIds.length === 0) return new Map();
+  const rows: { proposalId: string; consumedBy: string; consumedAt: Date }[] = await db
+    .select({
+      proposalId: consumedApprovals.proposalId,
+      consumedBy: consumedApprovals.consumedBy,
+      consumedAt: consumedApprovals.consumedAt,
+    })
+    .from(consumedApprovals)
+    .where(inArray(consumedApprovals.proposalId, proposalIds));
+  return new Map(rows.map((row) => [row.proposalId, { consumedBy: row.consumedBy, consumedAt: row.consumedAt }]));
 }
 
 type ProposalRow = typeof proposals.$inferSelect;
