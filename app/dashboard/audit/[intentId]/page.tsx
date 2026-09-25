@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { ClipboardCheck, Copy, Database, ExternalLink, FileText, Lock, ShieldCheck, Timer } from 'lucide-react';
 import { toast } from 'sonner';
 
+import LocalTime from '@/components/LocalTime';
 import type { AuditReceipt, InvoiceRecord, SweepJob, TransferIntentRecord } from '@/lib/server/operations';
 import type { SealPolicy } from '@/lib/server/seal';
 
@@ -53,7 +54,7 @@ export default function AuditPage({ params }: { params: Promise<{ intentId: stri
         <h2 className="text-lg font-bold">Zeke extraction snapshot</h2>
         <pre className="mt-4 overflow-x-auto rounded-xl bg-muted/60 p-4 text-[13px] font-semibold text-[#1F4452]">{JSON.stringify(view.receipt.extractionSnapshot ?? { status: 'No extraction snapshot linked' }, null, 2)}</pre>
       </section>
-      <section className="dash-surface p-6"><h2 className="text-lg font-bold">Status history</h2><div className="mt-5 space-y-4">{view.receipt.statusHistory.map((event, index) => <div key={`${event.state}-${event.at}`} className="grid grid-cols-[auto_1fr_auto] items-center gap-3"><span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#237284] text-[13px] font-bold text-card">{index + 1}</span><strong>{event.state}</strong><time className="text-[13px] text-foreground/90">{new Date(event.at).toLocaleString()}</time></div>)}</div></section>
+      <section className="dash-surface p-6"><h2 className="text-lg font-bold">Status history</h2><div className="mt-5 space-y-4">{view.receipt.statusHistory.map((event, index) => <div key={`${event.state}-${event.at}`} className="grid grid-cols-[auto_1fr_auto] items-center gap-3"><span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#237284] text-[13px] font-bold text-card">{index + 1}</span><strong>{event.state}</strong><span className="text-[13px] text-foreground/90"><LocalTime value={event.at} /></span></div>)}</div></section>
       {view.receipt.suiTxDigest && <a href={suiVisionTxUrl(view.receipt.suiTxDigest)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-sm font-bold text-foreground">Open Sui proof <ExternalLink className="h-4 w-4" /></a>}
       {view.receipt.suiTxDigest && <button onClick={() => { void navigator.clipboard.writeText(view.receipt.suiTxDigest!); toast.success('Sui digest copied'); }} className="ml-3 inline-flex items-center gap-2 text-sm font-bold text-foreground"><Copy className="h-4 w-4" /> Copy Sui digest</button>}
       <button onClick={() => { void navigator.clipboard.writeText(intentId); toast.success('Intent ID copied'); }} className="ml-3 inline-flex items-center gap-2 text-sm font-bold text-foreground"><Copy className="h-4 w-4" /> Copy intent ID</button>

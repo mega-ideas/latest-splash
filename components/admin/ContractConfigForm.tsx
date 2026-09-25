@@ -4,6 +4,8 @@ import { suiVisionObjectUrl } from '@/lib/explorer';
 import { useState, useTransition } from 'react';
 import { Check, Copy, ExternalLink, RotateCcw } from 'lucide-react';
 
+import LocalTime from '@/components/LocalTime';
+
 type Field = {
   key: string;
   label: string;
@@ -94,7 +96,7 @@ export default function ContractConfigForm({ initialConfig, initialEnv, initialM
         }
         setValues(data.config);
         setMeta(data.meta);
-        setStatus({ kind: 'success', at: new Date().toLocaleTimeString() });
+        setStatus({ kind: 'success', at: new Date().toISOString() });
       } catch (error) {
         setStatus({ kind: 'error', message: error instanceof Error ? error.message : 'Network error' });
       }
@@ -115,7 +117,7 @@ export default function ContractConfigForm({ initialConfig, initialEnv, initialM
           </div>
           <div className="rounded-2xl border border-[#326273]/10 bg-[#F6F0ED] px-4 py-3 text-xs leading-5 text-[#326273]/90">
             <div><span className="font-bold text-[#1f4350]">File:</span> {meta.path}</div>
-            <div className="mt-1"><span className="font-bold text-[#1f4350]">Status:</span> {meta.exists ? `Override active${meta.updatedAt ? ` — updated ${new Date(meta.updatedAt).toLocaleString()}` : ''}` : 'No override (using env)'}</div>
+            <div className="mt-1"><span className="font-bold text-[#1f4350]">Status:</span> {meta.exists ? <>Override active{meta.updatedAt ? <> — updated <LocalTime value={meta.updatedAt} /></> : null}</> : 'No override (using env)'}</div>
           </div>
         </div>
       </div>
@@ -192,7 +194,7 @@ export default function ContractConfigForm({ initialConfig, initialEnv, initialM
 
       <div className="sticky bottom-4 flex items-center justify-between gap-3 rounded-[2rem] border border-[#326273]/10 bg-white p-4 shadow-md">
         <div className="text-xs text-[#326273]/90">
-          {status.kind === 'success' && <span className="font-semibold text-green-800">Saved at {status.at}. New requests use these values immediately.</span>}
+          {status.kind === 'success' && <span className="font-semibold text-green-800">Saved at <LocalTime value={status.at} format="time" />. New requests use these values immediately.</span>}
           {status.kind === 'error' && <span className="font-semibold text-red-600">{status.message}</span>}
           {status.kind === 'idle' && <span>Changes are written to <code className="rounded bg-[#F6F0ED] px-1 py-0.5">data/contract-config.json</code>.</span>}
         </div>

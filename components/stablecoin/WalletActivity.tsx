@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { AlertTriangle, ArrowDownLeft, ArrowUpRight, ExternalLink, Loader2 } from 'lucide-react';
 
+import LocalTime from '@/components/LocalTime';
 import { formatUsdc, shortAddress } from '@/lib/payments/stablecoin-lane';
 
 /**
@@ -35,10 +36,9 @@ type Page = {
   olderCursor?: string | null;
 };
 
-function when(timestamp: string | null): string {
-  if (!timestamp) return '';
-  const date = new Date(timestamp);
-  return Number.isNaN(date.getTime()) ? '' : date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+function when(timestamp: string | null) {
+  if (!timestamp || Number.isNaN(new Date(timestamp).getTime())) return null;
+  return <LocalTime value={timestamp} options={{ dateStyle: 'medium', timeStyle: 'short' }} />;
 }
 
 export default function WalletActivity({

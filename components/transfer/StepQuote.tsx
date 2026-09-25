@@ -9,6 +9,7 @@ import type { TransferState } from '@/app/dashboard/transfer/page';
 import ApprovalFlow from '@/components/approvals/ApprovalFlow';
 import FundingSelector from '@/components/funding/FundingSelector';
 import HoverPopup from '@/components/HoverPopup';
+import LocalTime from '@/components/LocalTime';
 import { SourceBadge } from '@/components/SourceBadge';
 import MoneyPathPanel from '@/components/compliance/MoneyPathPanel';
 import { baselineCostMinor, getComparisonBaseline } from '@/lib/fx/comparison-baselines';
@@ -377,7 +378,7 @@ export default function StepQuote({
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
           <HoverPopup title="Live FX rate" content="Rate may change when you refresh or authorize unless a rate hold is active.">
             <span className="money text-sm font-medium text-[#326273]">
-              1 USD = {liveRate.toLocaleString(undefined, { maximumFractionDigits: rateDecimals })} {state.amount.targetCurrency}
+              1 USD = {liveRate.toLocaleString('en-US', { maximumFractionDigits: rateDecimals })} {state.amount.targetCurrency}
             </span>
           </HoverPopup>
           {holdActive && lockRemainingLabel ? (
@@ -416,7 +417,7 @@ export default function StepQuote({
           {isQuoteRefreshing ? <Loader2 className="size-3.5 animate-spin text-[var(--info)]" aria-hidden="true" /> : <Info className="size-3.5" aria-hidden="true" />}
           {isQuoteRefreshing
             ? `Updating quote for ${selectedFundingLabel}.`
-            : holdActive && state.rateHold ? `Rate hold active until ${new Date(state.rateHold.holdUntil).toLocaleString()}.` : `Funding from ${selectedFundingLabel}.`}
+            : holdActive && state.rateHold ? <>Rate hold active until <LocalTime value={state.rateHold.holdUntil} />.</> : `Funding from ${selectedFundingLabel}.`}
         </div>
       </div>
 
@@ -456,7 +457,7 @@ export default function StepQuote({
 
       <button type="button" disabled={holdBusy || isQuoteRefreshing || state.rateHold?.state === 'ACTIVE'} onClick={() => void holdRate()} className="group flex min-h-12 w-full items-center justify-between gap-3 rounded-xl border border-[#5C9EAD]/35 bg-white px-4 py-3 text-left font-semibold text-[#0C3E48] shadow-[0_10px_24px_rgba(12,62,72,0.06)] transition-all hover:-translate-y-0.5 hover:border-[#5C9EAD]/80 hover:bg-[#EAF7F8] focus-ring disabled:cursor-not-allowed disabled:border-[#326273]/10 disabled:bg-[#F6F0ED] disabled:text-[#326273]/50 disabled:shadow-none disabled:hover:translate-y-0">
         <span className="flex items-center gap-3"><Clock3 className="size-4 text-[var(--info)]" aria-hidden="true" />{state.rateHold?.state === 'ACTIVE' ? 'Rate hold active' : 'Hold this rate 48h'}</span>
-        <span className="font-mono text-[13px] text-[#326273]/90">{liveRate.toLocaleString()}</span>
+        <span className="font-mono text-[13px] text-[#326273]/90">{liveRate.toLocaleString('en-US')}</span>
       </button>
 
       <div className="rounded-xl border border-[#5C9EAD]/20 bg-[#5C9EAD]/10 p-4 text-sm text-[#326273]/90">
@@ -512,8 +513,8 @@ export default function StepQuote({
         <div className="flex items-center gap-2 text-[13px] font-medium text-[#326273]/90">
           <ShieldCheck className="size-4 shrink-0 text-[var(--info)]" aria-hidden="true" />
           {approvalPolicy.dual && sendAmountUsd > approvalPolicy.thresholdUsd
-            ? <span>Over the <span className="money">${approvalPolicy.thresholdUsd.toLocaleString()}</span> approval threshold — a second approver signs before settlement.</span>
-            : <span>Under the <span className="money">${approvalPolicy.thresholdUsd.toLocaleString()}</span> approval threshold — one approver signs before settlement.</span>}
+            ? <span>Over the <span className="money">${approvalPolicy.thresholdUsd.toLocaleString('en-US')}</span> approval threshold — a second approver signs before settlement.</span>
+            : <span>Under the <span className="money">${approvalPolicy.thresholdUsd.toLocaleString('en-US')}</span> approval threshold — one approver signs before settlement.</span>}
         </div>
       ) : null}
 

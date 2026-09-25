@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import ApprovalFlow from '@/components/approvals/ApprovalFlow';
 import ApprovalsInbox from '@/components/approvals/ApprovalsInbox';
 import ApprovalChannelCard from '@/components/settings/ApprovalChannelCard';
+import LocalTime from '@/components/LocalTime';
 import { useCustodyPhaseOn } from '@/components/dashboard/CustodyPhaseContext';
 import { CUSTODY_LICENCE } from '@/lib/custody-phase-rules';
 import {
@@ -215,7 +216,7 @@ export default function DashboardSettingsPage() {
 
       <div className="flex items-center gap-2 text-[13px] font-medium text-[#326273]">
         <BadgeCheck size={15} className="text-[var(--info)]" />
-        Last persisted {new Date(settings.updatedAt).getTime() === 0 ? 'using policy defaults' : new Date(settings.updatedAt).toLocaleString()}
+        Last persisted {new Date(settings.updatedAt).getTime() === 0 ? 'using policy defaults' : <LocalTime value={settings.updatedAt} />}
       </div>
     </div>
   );

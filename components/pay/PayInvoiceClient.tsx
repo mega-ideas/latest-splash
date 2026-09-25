@@ -66,7 +66,7 @@ export default function PayInvoiceClient({ slug, invoice }: { slug: string; invo
               Payment request from {invoice.issuerOrg}
               {invoice.issuerVerified && <span className="rounded-full bg-primary/20 px-2 py-1 text-primary">Verified</span>}
             </div>
-            <div className="mt-5 text-5xl font-black">${Number(invoice.amountUsd).toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+            <div className="mt-5 text-5xl font-black">${Number(invoice.amountUsd).toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>
             <div className="mt-2 text-sm text-card/65">Due {invoice.dueDate} · settlement target {invoice.targetCurrency}</div>
           </div>
 

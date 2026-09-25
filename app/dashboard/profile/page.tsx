@@ -18,6 +18,7 @@ import {
 
 import ApprovalFlow from '@/components/approvals/ApprovalFlow';
 import DashPageHeader from '@/components/dashboard/DashPageHeader';
+import LocalTime from '@/components/LocalTime';
 
 // Mirrors lib/server/customer-profile.ts (client copy of the wire types).
 type AccountTier = 'TIER_1' | 'TIER_2' | 'TIER_3';
@@ -203,7 +204,7 @@ export default function ProfilePage() {
               Waiting for admin approval
             </div>
             <div className="text-[13px] font-medium text-[#326273]/90">
-              Submitted {new Date(pending.submittedAt).toLocaleString()}
+              Submitted <LocalTime value={pending.submittedAt} />
             </div>
           </div>
           <div className="grid gap-2 p-5">
@@ -264,7 +265,7 @@ export default function ProfilePage() {
             <BadgeCheck className="mr-1 inline h-3.5 w-3.5 text-[var(--info)]" />
             This is your profile of record — the version our admin team has approved.
             {profile.updatedAt && new Date(profile.updatedAt).getTime() > 0
-              ? ` Last approved change ${new Date(profile.updatedAt).toLocaleDateString()}.`
+              ? <> Last approved change <LocalTime value={profile.updatedAt} format="date" />.</>
               : ' No approved changes yet.'}
           </p>
         </div>
@@ -388,8 +389,8 @@ export default function ProfilePage() {
                   {Object.keys(request.changes).map((f) => FIELD_LABELS[f] ?? f).join(', ')}
                 </span>
                 <span className="text-[#326273]/90">
-                  {new Date(request.submittedAt).toLocaleDateString()}
-                  {request.decidedAt ? ` → decided ${new Date(request.decidedAt).toLocaleDateString()}` : ''}
+                  <LocalTime value={request.submittedAt} format="date" />
+                  {request.decidedAt ? <> → decided <LocalTime value={request.decidedAt} format="date" /></> : ''}
                 </span>
                 {request.decisionReason && (
                   <span className="basis-full text-[#326273]/90">Reviewer: “{request.decisionReason}”</span>

@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { AlertTriangle, CheckCircle2, Loader2, TrendingUp } from 'lucide-react';
 
+import LocalTime from '@/components/LocalTime';
 import { formatUsdc } from '@/lib/payments/stablecoin-lane';
 
 /**
@@ -114,7 +115,7 @@ export default function UsdyPreview() {
                 ) : null}
                 <div className="flex justify-between gap-3 tabular-nums text-[#326273]/90"><span>At least (0.5% slippage)</span><span className="font-mono">{formatUsdc(BigInt(quote.minUsdyOutMinor ?? '0'))} USDY</span></div>
                 <div className="text-[12px] text-[#326273]/90">
-                  USDY price ${formatUsdc(BigInt(quote.priceMicros ?? '0'))} ({[quote.priceStatus.toLowerCase(), priceSourceLabel(quote.priceSource), quote.priceAsOf ? new Date(quote.priceAsOf).toLocaleString() : ''].filter(Boolean).join(', ')})
+                  USDY price ${formatUsdc(BigInt(quote.priceMicros ?? '0'))} ({[quote.priceStatus.toLowerCase(), priceSourceLabel(quote.priceSource)].filter(Boolean).join(', ')}{quote.priceAsOf ? <>, <LocalTime value={quote.priceAsOf} /></> : null})
                 </div>
                 <ul className="border-t border-[#326273]/10 pt-2">
                   {quote.projections.map((p) => (

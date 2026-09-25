@@ -63,7 +63,7 @@ export default function RateHoldsPage() {
                 <span className="rounded-full bg-white px-2.5 py-1 text-[13px] font-bold text-[#326273]">ACTIVE</span>
               </div>
               <div className="mt-5 grid grid-cols-2 gap-3 text-sm">
-                <Metric label="Held rate" value={Number(hold.rate).toLocaleString()} />
+                <Metric label="Held rate" value={Number(hold.rate).toLocaleString('en-US')} />
                 <Metric label="Time remaining" value={remaining(hold.holdUntil, now)} />
               </div>
               <Link href={`/dashboard/transfer?holdId=${encodeURIComponent(hold.id)}`} className="mt-5 inline-flex w-full items-center justify-center rounded-xl bg-[#E39774] px-4 py-3 text-sm font-bold text-[#073d49] transition hover:bg-[#E39774]/85">

@@ -465,7 +465,7 @@ export default function DashboardOverview() {
                         </div>
                       </td>
                       <td className="money px-4 py-2.5 font-medium text-[#1F4452]">
-                        {c.rate.toLocaleString(undefined, {
+                        {c.rate.toLocaleString('en-US', {
                           maximumFractionDigits: c.dec,
                           minimumFractionDigits: c.dec,
                         })}

@@ -5,6 +5,7 @@ import { BRAND } from '@/content/brand';
 import { Headphones, Loader2, Mail, MessageSquareReply, Send } from 'lucide-react';
 import { toast } from 'sonner';
 
+import LocalTime from '@/components/LocalTime';
 import type { SupportTicketRecord, SupportTicketStatus } from '@/lib/server/support';
 
 type Props = {
@@ -134,7 +135,7 @@ export default function AdminSupportConsole({ initialTickets }: Props) {
                 <div>
                   <div className="text-xs font-bold uppercase tracking-[0.2em] text-[#237284]">{selected.id}</div>
                   <h2 className="mt-2 text-2xl font-black text-[#1f4350]">{selected.subject}</h2>
-                  <p className="mt-1 text-sm text-[#326273]/90">{selected.email ?? 'No email supplied'} · {new Date(selected.createdAt).toLocaleString()}</p>
+                  <p className="mt-1 text-sm text-[#326273]/90">{selected.email ?? 'No email supplied'} · <LocalTime value={selected.createdAt} /></p>
                 </div>
                 <span className={`rounded-full border px-3 py-1 text-xs font-bold ${statusClass(selected.status)}`}>{statusLabels[selected.status]}</span>
               </div>
@@ -170,7 +171,7 @@ export default function AdminSupportConsole({ initialTickets }: Props) {
                   <div key={reply.id} className="rounded-xl bg-[#F6F0ED] p-4 text-sm">
                     <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
                       <span className="font-bold text-[#1f4350]">{reply.actor}</span>
-                      <span className="text-xs text-[#326273]/90">{new Date(reply.createdAt).toLocaleString()}</span>
+                      <span className="text-xs text-[#326273]/90"><LocalTime value={reply.createdAt} /></span>
                     </div>
                     <p className="mt-2 leading-6 text-[#326273]/90">{reply.message}</p>
                   </div>

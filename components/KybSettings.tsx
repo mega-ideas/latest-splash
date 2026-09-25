@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { CheckCircle2, FileUp, Loader2, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 
+import LocalTime from '@/components/LocalTime';
 import StatusBadge from '@/components/StatusBadge';
 
 type UploadResponse = {
@@ -320,7 +321,7 @@ export default function KybSettings() {
                 <div>Risk tier: {caseStatus.riskTier.replace('_', ' ')}</div>
                 <div>Corridor access: {caseStatus.corridorAccess}</div>
                 <div>Documents: {caseStatus.documents.length}</div>
-                <div>Updated: {new Date(caseStatus.updatedAt).toLocaleString()}</div>
+                <div>Updated: <LocalTime value={caseStatus.updatedAt} /></div>
               </div>
               {(caseStatus.reviewNotes || caseStatus.decisionReason) && (
                 <div className="mt-3 rounded-lg bg-white p-3 text-xs leading-5">

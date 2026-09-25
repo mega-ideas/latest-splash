@@ -22,6 +22,7 @@ import Papa from 'papaparse';
 import DashPageHeader from '@/components/dashboard/DashPageHeader';
 import DashStat from '@/components/dashboard/DashStat';
 import ExplorerLinks from '@/components/dashboard/ExplorerLinks';
+import LocalTime from '@/components/LocalTime';
 import StatusBadge from '@/components/StatusBadge';
 import type { TransferIntentRecord, TransferIntentState } from '@/lib/server/operations';
 import { getCorridorFeeBps } from '@/lib/fx/corridors';
@@ -189,7 +190,7 @@ function TransferCard({ record }: { record: TransferIntentRecord & { heldDuratio
       </div>
 
       <div className="mt-3 flex items-center justify-between text-[13px] text-[#326273]/90">
-        <span>{new Date(record.createdAt).toLocaleString()}</span>
+        <span><LocalTime value={record.createdAt} /></span>
         {record.exchangeRate && <span>Rate: {record.exchangeRate}</span>}
       </div>
     </div>

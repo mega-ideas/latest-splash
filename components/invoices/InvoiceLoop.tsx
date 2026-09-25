@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 
+import LocalTime from '@/components/LocalTime';
 import MemWalBehaviorCard from '@/components/MemWalBehaviorCard';
 import OxWalComposer, { type OxWalComposerChip } from '@/components/oxwal/OxWalComposer';
 import StatusBadge from '@/components/StatusBadge';
@@ -279,7 +280,7 @@ export default function InvoiceLoop() {
                 <div className="text-[12px] font-semibold uppercase tracking-[0.18em] text-white/80">Active invoice</div>
                 <div className="mt-2 truncate text-xl font-bold text-white">{selectedCounterparty}</div>
                 <div className="mt-1 text-[13px] font-medium text-white/80">
-                  {selected ? `${selected.id} / due ${formatDate(selected.dueDate)}` : 'Select or upload an invoice to begin.'}
+                  {selected ? <>{selected.id} / due {dueDay(selected.dueDate)}</> : 'Select or upload an invoice to begin.'}
                 </div>
               </div>
               <Link
@@ -466,7 +467,7 @@ function InvoicePanel({
                 <span className={active ? 'text-[12px] font-semibold uppercase tracking-[0.12em] text-[#BFE6EE]' : 'text-[12px] font-semibold uppercase tracking-[0.12em] text-[#326273]/90'}>{invoice.status}</span>
               </span>
               <span className={active ? 'text-[13px] font-medium text-white/80' : 'text-[13px] font-medium text-[#326273]/90'}>
-                {formatUsd(invoice.amountUsd)} {'->'} {invoice.targetCurrency} / due {formatDate(invoice.dueDate)}
+                {formatUsd(invoice.amountUsd)} {'->'} {invoice.targetCurrency} / due {dueDay(invoice.dueDate)}
               </span>
               <span className={active ? 'truncate font-mono text-[13px] text-white/80' : 'truncate font-mono text-[13px] text-[#326273]/90'}>{invoice.id}</span>
             </button>
@@ -509,7 +510,7 @@ function WalrusPanel({ selected, proof }: { selected: InvoiceRecord | null; proo
           </div>
           <div className="mt-4 flex flex-wrap gap-2">
             {proof?.mode === 'demo' ? <StatusBadge status="demo" /> : <StatusBadge status="live" />}
-            <ProofPill label="Bytes" value={proof ? proof.sizeBytes.toLocaleString() : 'Loading'} />
+            <ProofPill label="Bytes" value={proof ? proof.sizeBytes.toLocaleString('en-US') : 'Loading'} />
             <ProofPill label="Epochs" value={proof ? String(proof.epochs) : 'Loading'} />
           </div>
         </div>
@@ -783,8 +784,8 @@ function formatUsd(value: string) {
   }).format(parsed);
 }
 
-function formatDate(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+/** A due date is a calendar day, stored as YYYY-MM-DD: read in UTC, no time zone moves it. */
+function dueDay(value: string) {
+  if (Number.isNaN(new Date(value).getTime())) return value;
+  return <LocalTime value={value} format="date" options={{ month: 'short', day: 'numeric', timeZone: 'UTC' }} />;
 }

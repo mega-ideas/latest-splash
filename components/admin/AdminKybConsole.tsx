@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, ClipboardCheck, FileText, Loader2, ShieldAlert } from 'lucide-react';
 import { toast } from 'sonner';
 
+import LocalTime from '@/components/LocalTime';
 import type { KybCaseRecord, KybReviewState } from '@/lib/server/kyb';
 
 type Props = {
@@ -191,7 +192,7 @@ export default function AdminKybConsole({ initialCases }: Props) {
                   <div key={event.id} className="rounded-xl bg-[#F6F0ED] p-3 text-sm">
                     <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
                       <span className="font-bold text-[#1f4350]">{event.action}</span>
-                      <span className="text-xs text-[#326273]/90">{new Date(event.createdAt).toLocaleString()}</span>
+                      <span className="text-xs text-[#326273]/90"><LocalTime value={event.createdAt} /></span>
                     </div>
                     <div className="mt-1 text-xs text-[#326273]/90">{event.actor}{event.note ? ` · ${event.note}` : ''}</div>
                   </div>

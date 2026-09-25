@@ -123,7 +123,7 @@ export default function StepBeneficiary({ state, set, next }: { state: TransferS
   const converted = useMemo(() => {
     const value = Number.parseFloat(amount.value || '0');
     if (!Number.isFinite(value) || value <= 0) return null;
-    return (value * rate).toLocaleString(undefined, {
+    return (value * rate).toLocaleString('en-US', {
       maximumFractionDigits: amount.targetCurrency === 'IDR' || amount.targetCurrency === 'VND' ? 0 : 2,
     });
   }, [amount.value, amount.targetCurrency, rate]);
@@ -442,7 +442,7 @@ export default function StepBeneficiary({ state, set, next }: { state: TransferS
               <span className="absolute -left-2 -top-2 hidden h-4 w-4 rounded-full border border-[#0C3E48]/25 bg-[#F6F0ED] sm:block" />
               <span className="absolute -bottom-2 -left-2 hidden h-4 w-4 rounded-full border border-[#0C3E48]/25 bg-[#F6F0ED] sm:block" />
               <span className="flex items-center gap-2 rounded-full bg-[#0C3E48] px-3 py-1.5 font-mono text-[13px] font-bold text-[#8FD7C7]">
-                1 USD ≈ {rate.toLocaleString()} {amount.targetCurrency}
+                1 USD ≈ {rate.toLocaleString('en-US')} {amount.targetCurrency}
                 <ArrowRight className="h-3 w-3" />
               </span>
             </div>

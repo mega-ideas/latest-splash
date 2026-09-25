@@ -5,6 +5,8 @@ import { BRAND } from '@/content/brand';
 import { Headphones, Send, Bug, MessageSquareWarning, MessageSquare, Mail, Phone, Clock3, BookOpen } from 'lucide-react';
 import { toast } from 'sonner';
 
+import LocalTime from '@/components/LocalTime';
+
 type SupportTicket = {
   id: string;
   type: string;
@@ -191,7 +193,7 @@ export default function CustomerServicePage() {
                       <div key={reply.id} className={`rounded-xl p-3 text-sm ${reply.actorType === 'staff' ? 'bg-[#5C9EAD]/10' : 'bg-[#F6F0ED]'}`}>
                         <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
                           <span className="font-semibold text-[#326273]">{reply.actorType === 'staff' ? 'Splash staff' : 'You'} · {reply.actor}</span>
-                          <span className="text-[13px] text-[#326273]/90">{new Date(reply.createdAt).toLocaleString()}</span>
+                          <span className="text-[13px] text-[#326273]/90"><LocalTime value={reply.createdAt} /></span>
                         </div>
                         <p className="mt-2 leading-6 text-[#326273]/90">{reply.message}</p>
                       </div>

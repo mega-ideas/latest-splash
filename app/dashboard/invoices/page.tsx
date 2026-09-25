@@ -161,7 +161,7 @@ export default function InvoicesPage() {
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {[
           { label: 'Invoices', value: invoices.length, icon: FileText },
-          { label: 'Invoice value', value: `$${totals.value.toLocaleString()}`, icon: Archive },
+          { label: 'Invoice value', value: `$${totals.value.toLocaleString('en-US')}`, icon: Archive },
           { label: 'Walrus proofs', value: `${totals.walrus}/${invoices.length}`, icon: Database },
           { label: 'Settled', value: totals.settled, icon: CheckCircle2 },
         ].map(({ label, value, icon: Icon }) => (
@@ -197,7 +197,7 @@ export default function InvoicesPage() {
                 filtered.map((invoice) => (
                   <tr key={invoice.id} className="border-t border-foreground/8">
                     <td className="px-4 py-4"><strong>{invoice.payerOrgName ?? 'Draft payer'}</strong><small className="mt-1 block font-mono text-[12px] text-foreground/90">{invoice.id}</small></td>
-                    <td className="px-4 py-4"><strong>${Number(invoice.amountUsd).toLocaleString()}</strong><small className="mt-1 block text-[12px] text-foreground/90">USD → {invoice.targetCurrency}</small></td>
+                    <td className="px-4 py-4"><strong>${Number(invoice.amountUsd).toLocaleString('en-US')}</strong><small className="mt-1 block text-[12px] text-foreground/90">USD → {invoice.targetCurrency}</small></td>
                     <td className="px-4 py-4 text-foreground/90">{invoice.dueDate}</td>
                     <td className="px-4 py-4">
                       {invoice.walrusBlobId ? <span className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-2.5 py-1 text-[13px] font-semibold text-foreground"><ShieldCheck className="h-3 w-3" /> Seal + Walrus</span> : <span className="text-[13px] text-foreground/90">No document</span>}

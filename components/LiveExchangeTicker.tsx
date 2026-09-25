@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import { Activity, TrendingDown, TrendingUp } from 'lucide-react';
 
+import LocalTime from '@/components/LocalTime';
+
 const RATES = [
   { pair: 'USD/PHP', rate: 56.42, precision: 2 },
   { pair: 'USD/MYR', rate: 4.71, precision: 2 },
@@ -57,7 +59,7 @@ export default function LiveExchangeTicker() {
             </span>
             <Activity className="h-4 w-4 text-[#bfe6ee]" />
             <span>USD INDICATIVE FX</span>
-            <span className="hidden text-[13px] text-white/80 sm:inline">Updated {lastUpdate?.toLocaleTimeString() ?? '—'}</span>
+            <span className="hidden text-[13px] text-white/80 sm:inline">Updated {lastUpdate ? <LocalTime value={lastUpdate} format="time" /> : '—'}</span>
           </div>
           <div className="min-w-0 flex-1 overflow-hidden">
             <div className="flex w-max animate-[splashFxTicker_38s_linear_infinite] items-center gap-8 whitespace-nowrap">

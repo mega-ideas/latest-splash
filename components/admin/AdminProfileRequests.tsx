@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { BadgeCheck, Clock3, Loader2, RefreshCcw, ShieldQuestion, Undo2, UserRoundCheck, XCircle } from 'lucide-react';
 
+import LocalTime from '@/components/LocalTime';
+
 type ChangeFields = Record<string, string>;
 
 type AdminProfileRequest = {
@@ -122,7 +124,7 @@ export default function AdminProfileRequests({ initialRequests }: { initialReque
                 </div>
                 <div className="flex items-center gap-2 text-xs font-bold text-[#9b4e32]">
                   <Clock3 className="h-3.5 w-3.5" />
-                  {new Date(request.submittedAt).toLocaleString()}
+                  <LocalTime value={request.submittedAt} />
                 </div>
               </div>
 
@@ -182,7 +184,7 @@ export default function AdminProfileRequests({ initialRequests }: { initialReque
                 <span className="text-[#1F4452]/90">{Object.keys(request.changes).map((f) => FIELD_LABELS[f] ?? f).join(', ')}</span>
                 <span className="ml-auto text-[#1F4452]/90">
                   {request.decidedBy ? `${request.decidedBy} · ` : ''}
-                  {request.decidedAt ? new Date(request.decidedAt).toLocaleString() : ''}
+                  {request.decidedAt ? <LocalTime value={request.decidedAt} /> : ''}
                 </span>
               </div>
             ))}
