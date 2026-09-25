@@ -784,7 +784,7 @@ function formatUsd(value: string) {
   }).format(parsed);
 }
 
-/** A due date is a calendar day, stored as YYYY-MM-DD: read in UTC, no time zone moves it. */
+// A due date is a calendar day, stored as YYYY-MM-DD: read in UTC, no time zone moves it.
 function dueDay(value: string) {
   if (Number.isNaN(new Date(value).getTime())) return value;
   return <LocalTime value={value} format="date" options={{ month: 'short', day: 'numeric', timeZone: 'UTC' }} />;
