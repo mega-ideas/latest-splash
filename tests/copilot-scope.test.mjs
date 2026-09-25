@@ -6,7 +6,7 @@ import test from 'node:test';
  * The copilot may state a PRODUCT fact. It may not state an ACCOUNT fact it has
  * not read.
  *
- *   Product fact — "the PHP corridor fee is 0.80%". True for everyone,
+ *   Product fact — "the PHP corridor fee is 0.70%". True for everyone,
  *   checkable against the pricing table, wrong only if the product changes.
  *   Account fact — "your KYB is Tier 1 approved", "your daily limit is 43%
  *   used", "your average batch is 52 recipients". True only if it was read from

@@ -234,7 +234,7 @@ async function testBatch() {
       tx.object(env('SPLASH_COMPLIANCE_CONFIG_ID')),
       tx.object(env('DEEPBOOK_POOL_ID')),
       paymentVec,
-      tx.pure.u64(80), // 0.80% corridor fee
+      tx.pure.u64(70), // 0.70% corridor fee
       tx.object(CLOCK),
     ],
   });

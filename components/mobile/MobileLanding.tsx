@@ -22,14 +22,15 @@ import { BRAND } from '@/content/brand';
 
 const proofChips = [
   '~400ms settlement',
-  'From 0.80% fee',
+  'Free USDC transfers',
   'Human-approved AI',
 ];
 
 const marqueeItems = [
   ['1 live testnet', 'MY to PH corridor'],
   ['~400ms', 'Sui settlement finality'],
-  ['From 0.80%', 'starting edge fee'],
+  ['Free', 'USDC transfers'],
+  ['0.70%', 'to local currency'],
   ['Human approved', 'AI recommendations'],
   ['Stored proof', 'A record that lasts'],
 ];
@@ -44,7 +45,7 @@ const steps = [
 
 const compareRows = [
   { label: 'Settlement speed', bank: '2–5 days', splash: '~400ms finality' },
-  { label: 'Starting fee', bank: '3–5%', splash: 'From 0.80%' },
+  { label: 'Fee to local currency', bank: '3–5%', splash: '0.70%' },
   { label: 'Audit trail', bank: 'Siloed records', splash: 'One record, both sides' },
 ];
 

@@ -2,6 +2,7 @@ import { fromBase64, toBase64 } from '@mysten/sui/utils';
 
 import type { UserRole } from '@/lib/agent/types';
 import {
+  anchorFeeEnabled,
   explorerTxUrl,
   normaliseSuiAddress,
   parseUsdcMinor,
@@ -65,6 +66,10 @@ export interface SendDeps {
   approval: ApprovalDeps;
   readRecipient(orgId: string, recipientId: string): Promise<RecipientRecord | null>;
   feeAddress(): string | undefined;
+  /** Is this address a Splash user's wallet? Transfers to one are always free. */
+  isSplashWallet(address: string): Promise<boolean>;
+  /** The audit-anchor fee on transfers out of Splash; off unless switched on. */
+  anchorFeeOn?: () => boolean;
   now?: () => number;
 }
 
@@ -103,14 +108,6 @@ export async function quoteWalletTransfer(
     throw error;
   }
 
-  let quote;
-  try {
-    quote = quoteStablecoinTransfer(principalMinor);
-  } catch (error) {
-    if (error instanceof StablecoinLaneError) return fail(400, 'below_minimum', `Amount refused: ${error.message}.`);
-    throw error;
-  }
-
   const recipient = await deps.readRecipient(input.orgId, input.recipientId);
   if (!recipient) return fail(404, 'recipient_not_found', 'Recipient not found. Save them under Recipients first.');
   if (recipient.payoutMethod !== 'WALLET' || !recipient.walletAddress) {
@@ -124,14 +121,28 @@ export async function quoteWalletTransfer(
   const recipientAddress = normaliseSuiAddress(recipient.walletAddress);
   if (recipientAddress === sender) return fail(400, 'self_transfer', 'The recipient wallet is the wallet you are sending from.');
 
-  const configuredFee = deps.feeAddress();
-  if (!configuredFee) {
-    // Never defaulted: a real fee needs a real, named destination.
-    return fail(503, 'fee_address_missing', 'Wallet transfers are not open yet: Splash’s mainnet fee address is not configured.');
+  // Free to a Splash user's wallet; to anywhere else, the audit-anchor fee
+  // when it is switched on (free until then). lib/payments/stablecoin-lane.ts.
+  const destination = (await deps.isSplashWallet(recipientAddress)) ? 'SPLASH' as const : 'EXTERNAL' as const;
+  let quote;
+  try {
+    quote = quoteStablecoinTransfer(principalMinor, { destination, anchorFeeOn: deps.anchorFeeOn?.() ?? anchorFeeEnabled() });
+  } catch (error) {
+    if (error instanceof StablecoinLaneError) return fail(400, 'below_minimum', `Amount refused: ${error.message}.`);
+    throw error;
   }
-  const feeAddress = normaliseSuiAddress(configuredFee);
-  if (feeAddress === recipientAddress || feeAddress === sender) {
-    return fail(400, 'fee_address_conflict', 'This recipient or sender is Splash’s own fee address. That is not a payment Splash will quote.');
+
+  // A fee needs a real, named destination — never defaulted. No fee, no leg.
+  let feeAddress: string | null = null;
+  if (quote.feeMinor > 0n) {
+    const configuredFee = deps.feeAddress();
+    if (!configuredFee) {
+      return fail(503, 'fee_address_missing', 'Transfers out of Splash are not open yet: Splash’s mainnet fee address is not configured.');
+    }
+    feeAddress = normaliseSuiAddress(configuredFee);
+    if (feeAddress === recipientAddress || feeAddress === sender) {
+      return fail(400, 'fee_address_conflict', 'This recipient or sender is Splash’s own fee address. That is not a payment Splash will quote.');
+    }
   }
 
   const coinType = SUI_USDC_COIN_TYPE[network];
@@ -158,7 +169,7 @@ export async function quoteWalletTransfer(
       coinType,
       legs: [
         { address: recipientAddress, amountMinor: quote.principalMinor },
-        { address: feeAddress, amountMinor: quote.feeMinor },
+        ...(feeAddress ? [{ address: feeAddress, amountMinor: quote.feeMinor }] : []),
       ],
     });
   } catch (error) {
@@ -176,10 +187,11 @@ export async function quoteWalletTransfer(
     recipient: { id: recipient.id, name: recipient.name, address: recipientAddress, screeningVerdict: recipient.screeningVerdict ?? null },
     senderAddress: sender,
     feeAddress,
+    destination: quote.destination,
+    feeKind: quote.feeKind,
     principalMinor: quote.principalMinor.toString(),
     feeMinor: quote.feeMinor.toString(),
     totalDebitMinor: quote.totalDebitMinor.toString(),
-    feeBps: quote.feeBps,
     reservedUntil: reserved.reservedUntil.toISOString(),
     allowance: allowanceView(reserved.allowance),
     transactionBytes: toBase64(bytes),
@@ -222,7 +234,7 @@ export async function submitWalletTransfer(
     coinType: row.coinType,
     legs: [
       { address: row.recipientAddress, amountMinor: BigInt(row.principalMinor) },
-      ...(row.feeAddress ? [{ address: row.feeAddress, amountMinor: BigInt(row.feeMinor) }] : []),
+      ...(row.feeAddress && BigInt(row.feeMinor) > 0n ? [{ address: row.feeAddress, amountMinor: BigInt(row.feeMinor) }] : []),
     ],
   };
   const digest = deps.chain.digestOf(bytes);

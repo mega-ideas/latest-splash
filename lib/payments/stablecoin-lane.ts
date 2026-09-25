@@ -70,41 +70,94 @@ export function explorerTxUrl(network: SuiNetwork, digest: string): string {
 
 // ─── Price ──────────────────────────────────────────────────────────────────
 
-/** "From 0.80%": the published Splash fee, applied to wallet transfers. */
-export const STABLECOIN_FEE_BPS = 80;
-
 /**
- * The fee is charged ON TOP: the recipient receives exactly the amount the
- * business entered, and the business's wallet is debited amount + fee. An
- * invoice states what the payee must receive, and an x402 seller verifies it
- * received exactly `amount` — a fee deducted from the principal would break
- * both. Rounded half-up, the house convention (lib/fx/calculator.ts).
+ * Stablecoin transfers are free (decision of 2026-09-26).
+ *
+ *   To a Splash user's wallet    free, always: it never leaves Splash.
+ *   To a wallet outside Splash   the audit-anchor fee — 0.02% with a 0.05 USDC
+ *                                floor and a 5 USDC cap — pays for the record
+ *                                Splash anchors for the transfer. Built, but
+ *                                OFF until STABLECOIN_ANCHOR_FEE=on, so today
+ *                                it is free too and the screens say so.
+ *   x402                         no Splash fee (the seller sets the price).
+ *
+ * Network gas is separate: the sender's wallet pays it in SUI until Splash's
+ * sponsor wallet pays it (docs/STABLECOIN-LANE.md). Local-currency payouts
+ * are priced elsewhere (lib/fx/corridors.ts, 0.70%).
+ *
+ * A fee, when there is one, is charged ON TOP: the recipient receives exactly
+ * the amount the business entered, and the business's wallet is debited
+ * amount + fee. An invoice states what the payee must receive, and an x402
+ * seller verifies it received exactly `amount` — a fee deducted from the
+ * principal would break both. Rounded half-up, the house convention.
  */
-export function stablecoinFeeMinor(principalMinor: bigint): bigint {
-  if (principalMinor <= 0n) throw new StablecoinLaneError('amount must be positive');
-  return applyBps(principalMinor, STABLECOIN_FEE_BPS, 'half-up');
+export const ANCHOR_FEE_BPS = 2;
+/** 0.05 USDC: covers the anchor's own cost on small transfers. */
+export const ANCHOR_FEE_MIN_MINOR = 50_000n;
+/** 5 USDC: keeps large treasury moves cheap. */
+export const ANCHOR_FEE_CAP_MINOR = 5_000_000n;
+
+/** Where the USDC goes: to a Splash user's wallet, or out of Splash. */
+export type StablecoinDestination = 'SPLASH' | 'EXTERNAL';
+
+export type StablecoinFeeKind = 'FREE' | 'AUDIT_ANCHOR';
+
+/** The audit-anchor fee is charged only when switched on. Off by default. */
+export function anchorFeeEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return (env.STABLECOIN_ANCHOR_FEE ?? '').trim().toLowerCase() === 'on';
 }
 
-/** Below this a wallet transfer is refused: the fee rounds to noise and the
- *  gas outweighs the payment. 1.00 USDC. x402 is exempt — the seller sets the
- *  price, and cents are the point of it. */
+export function stablecoinFeeMinor(
+  principalMinor: bigint,
+  destination: StablecoinDestination,
+  anchorFeeOn: boolean,
+): bigint {
+  if (principalMinor <= 0n) throw new StablecoinLaneError('amount must be positive');
+  if (destination === 'SPLASH' || !anchorFeeOn) return 0n;
+  const proportional = applyBps(principalMinor, ANCHOR_FEE_BPS, 'half-up');
+  if (proportional < ANCHOR_FEE_MIN_MINOR) return ANCHOR_FEE_MIN_MINOR;
+  if (proportional > ANCHOR_FEE_CAP_MINOR) return ANCHOR_FEE_CAP_MINOR;
+  return proportional;
+}
+
+/** Below this a wallet transfer is refused: the gas outweighs the payment.
+ *  1.00 USDC. x402 is exempt — the seller sets the price, and cents are the
+ *  point of it. */
 export const MIN_STABLECOIN_TRANSFER_MINOR = 1_000_000n;
 
 export interface StablecoinQuote {
   principalMinor: bigint;
   feeMinor: bigint;
   totalDebitMinor: bigint;
-  feeBps: number;
+  feeKind: StablecoinFeeKind;
+  destination: StablecoinDestination;
 }
 
-export function quoteStablecoinTransfer(principalMinor: bigint): StablecoinQuote {
+export function quoteStablecoinTransfer(
+  principalMinor: bigint,
+  pricing: { destination: StablecoinDestination; anchorFeeOn: boolean },
+): StablecoinQuote {
   if (principalMinor < MIN_STABLECOIN_TRANSFER_MINOR) {
     throw new StablecoinLaneError(
       `the minimum wallet transfer is ${formatMinor(MIN_STABLECOIN_TRANSFER_MINOR, USDC_DECIMALS)} USDC`,
     );
   }
-  const feeMinor = stablecoinFeeMinor(principalMinor);
-  return { principalMinor, feeMinor, totalDebitMinor: principalMinor + feeMinor, feeBps: STABLECOIN_FEE_BPS };
+  const feeMinor = stablecoinFeeMinor(principalMinor, pricing.destination, pricing.anchorFeeOn);
+  return {
+    principalMinor,
+    feeMinor,
+    totalDebitMinor: principalMinor + feeMinor,
+    feeKind: feeMinor > 0n ? 'AUDIT_ANCHOR' : 'FREE',
+    destination: pricing.destination,
+  };
+}
+
+/** How a quote's fee reads to the person paying. */
+export function describeStablecoinFee(quote: Pick<StablecoinQuote, 'feeMinor' | 'destination'>): string {
+  if (quote.feeMinor === 0n) {
+    return quote.destination === 'SPLASH' ? 'Free: to another Splash user' : 'Free';
+  }
+  return `Audit-anchor fee ${formatUsdc(quote.feeMinor)} USDC (0.02%, min 0.05, max 5)`;
 }
 
 // ─── Limits ─────────────────────────────────────────────────────────────────

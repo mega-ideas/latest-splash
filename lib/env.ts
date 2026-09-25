@@ -139,11 +139,13 @@ export const envSchema = z.object({
   USDT_BUFFER_ID: objectId,
   TREASURY_ADDRESS: suiAddress,
   OPERATOR_SUI_ADDRESS: suiAddress,
-  /** The stablecoin lane's fee destination — a Splash-controlled Sui mainnet
-   *  address that receives the 0.80% in the same transaction as the payment.
-   *  Unset: the lane quotes nothing — a real fee must have a real, named
-   *  destination. Never defaulted. */
+  /** Splash's Sui mainnet fee wallet: receives the audit-anchor fee on USDC
+   *  sent out of Splash, in the same transaction, when STABLECOIN_ANCHOR_FEE
+   *  is on. Stablecoin transfers are otherwise free and do not need it. A real
+   *  fee must have a real, named destination: never defaulted. */
   SPLASH_FEE_ADDRESS_MAINNET: suiAddress,
+  /* 'on' charges the audit-anchor fee on USDC sent out of Splash (lib/payments/stablecoin-lane.ts). */
+  STABLECOIN_ANCHOR_FEE: opt(z.enum(['on', 'off'])),
   /** Chainalysis's free sanctions-screening API. Unset: wallet recipients
    *  are saved unscreened, and reach mainnet only through a named admin's
    *  attestation (lib/server/wallet-screening.ts). */
@@ -283,10 +285,9 @@ export const envSchema = z.object({
 
   /* Quotes, fees, corridors. lib/server/quote.ts, pdax.ts, operations.ts. */
   PLATFORM_FEE_BPS: opt(z.coerce.number().int().min(0).max(200)),
-  FIXED_FEE_CENTS: int(450),
-  FIXED_FEE_SEN: opt(z.coerce.number().int().min(0)),
+  FIXED_FEE_CENTS: int(0),
   QUOTE_TTL_SECONDS: int(30, 1),
-  FUNDING_DISCOUNT_BPS: int(20),
+  FUNDING_DISCOUNT_BPS: int(0),
   PHP_PER_USDC: num(56.5),
   MYR_TO_USD_RATE: opt(z.coerce.number().positive()),
   FALLBACK_MYR_USD_RATE: opt(z.coerce.number().positive()),

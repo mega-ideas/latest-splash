@@ -26,16 +26,21 @@ const TWILIO = {
   TWILIO_WHATSAPP_FROM: '+14155238886',
 };
 
-test('the fee wallet: not set is skipped, a non-Sui address fails, an object id fails, a wallet opens the lane', async () => {
+test('the fee wallet: not needed while transfers are free, required once the anchor fee is on, and never an object id', async () => {
   const wallet = async () => false;
   const unset = await checkFeeAddress({}, wallet);
   assert.equal(unset.status, 'skipped');
-  assert.match(unset.detail, /USDC wallet transfers stay closed/);
+  assert.match(unset.detail, /not needed while stablecoin transfers are free/);
+  const needed = await checkFeeAddress({ STABLECOIN_ANCHOR_FEE: 'on' }, wallet);
+  assert.equal(needed.status, 'fail');
+  assert.match(needed.detail, /USDC transfers out of Splash are closed until the fee wallet is set/);
   assert.equal((await checkFeeAddress({ SPLASH_FEE_ADDRESS_MAINNET: '0x52908400098527886E0F7030069857D2E4169EE7' }, wallet)).status, 'fail');
 
   const set = await checkFeeAddress({ SPLASH_FEE_ADDRESS_MAINNET: `0x${'ab'.repeat(32)}` }, wallet);
   assert.equal(set.status, 'ok');
-  assert.match(set.detail, /0\.80% fee goes to 0xabab…abab, a wallet address on mainnet/);
+  assert.match(set.detail, /fee wallet 0xabab…abab is a wallet address on mainnet; the audit-anchor fee is off, so stablecoin transfers are free/);
+  const on = await checkFeeAddress({ SPLASH_FEE_ADDRESS_MAINNET: `0x${'ab'.repeat(32)}`, STABLECOIN_ANCHOR_FEE: 'on' }, wallet);
+  assert.match(on.detail, /the audit-anchor fee is on and goes there/);
 
   // A coin id copied from an explorer looks exactly like an address.
   const object = await checkFeeAddress({ SPLASH_FEE_ADDRESS_MAINNET: `0x${'cd'.repeat(32)}` }, async () => true);
@@ -44,7 +49,7 @@ test('the fee wallet: not set is skipped, a non-Sui address fails, an object id 
 
   const unreachable = await checkFeeAddress({ SPLASH_FEE_ADDRESS_MAINNET: `0x${'ab'.repeat(32)}` }, async () => { throw new Error('connection reset'); });
   assert.equal(unreachable.status, 'fail');
-  for (const c of [unset, set, object, unreachable]) consistent(c);
+  for (const c of [unset, needed, set, on, object, unreachable]) consistent(c);
 });
 
 test('.env.example keeps the fee address blank: it is a template, and the app never reads it', () => {

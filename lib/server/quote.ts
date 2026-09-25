@@ -20,7 +20,8 @@ const DEFAULT_PLATFORM_FEE_BPS = Math.min(
   Number.parseInt(process.env.PLATFORM_FEE_BPS ?? String(FALLBACK_FEE_BPS), 10),
   CONTRACT_MAX_FEE_BPS,
 );
-const FIXED_FEE_CENTS = Number.parseInt(process.env.FIXED_FEE_CENTS ?? '450', 10);
+// No fixed fee since 2026-09-26: local-currency payouts are 0.70% of the amount, nothing more.
+const FIXED_FEE_CENTS = Number.parseInt(process.env.FIXED_FEE_CENTS ?? '0', 10);
 const QUOTE_TTL_SECONDS = Number.parseInt(process.env.QUOTE_TTL_SECONDS ?? '30', 10);
 
 const fallbackRates: Record<string, number> = {
@@ -95,8 +96,11 @@ export async function calculateQuote(
   const corridorFeeBps = source === 'corridor'
     ? getCorridorFeeBps(targetCurrency)
     : DEFAULT_PLATFORM_FEE_BPS;
+  // The DISCOUNT tier (payouts funded from held USDC) is priced like every
+  // other since 2026-09-26: 0.70% flat. The tier label stays — it is part of
+  // the funding record and of approvals already given — and the discount is 0.
   const discountBps = feeTier === 'DISCOUNT'
-    ? Math.max(0, Number.parseInt(process.env.FUNDING_DISCOUNT_BPS ?? '20', 10) || 0)
+    ? Math.max(0, Number.parseInt(process.env.FUNDING_DISCOUNT_BPS ?? '0', 10) || 0)
     : 0;
   const appliedFeeBps = Math.max(0, corridorFeeBps - discountBps);
   const percentageFee = Math.floor((fromAmountCents * appliedFeeBps) / 10_000);

@@ -58,7 +58,7 @@ Restart the dev server after any `.env.local` change.
 1. Sidebar → **Transfer**.
 2. **Beneficiary:** pick 🇵🇭 Philippines. Business name `Acme Manufacturing PH`,
    account `1234567890`. Amount `$500`. → **Continue to delivery**.
-3. **Delivery:** choose **Bank payout** (0.80% corridor fee). → **Review quote**.
+3. **Delivery:** choose **Bank payout** (0.70% corridor fee). → **Review quote**.
 4. **Quote & Send:** point out the locked rate (≈56.42 PHP), fee ($8.50), recipient
    receives ≈27,730 PHP, 30-second quote hold. Tick the confirm box → **Send**.
 5. **Provider deposit:** → **Continue with STRIPE**.

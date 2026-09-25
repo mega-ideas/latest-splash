@@ -19,6 +19,7 @@ import { relyingPartyId } from '../auth/passkey.ts';
 import { readUsdyOracle } from './ondo-oracle.ts';
 import { getPegStatus } from './peg.ts';
 import { laneClient } from './stablecoin-chain.ts';
+import { anchorFeeEnabled } from '../payments/stablecoin-lane.ts';
 import { navPriceUsd } from './usdy.ts';
 import { screenWalletAddress } from './wallet-screening.ts';
 
@@ -118,8 +119,12 @@ const objectExistsOnMainnet: ObjectProbe = async (id) => {
  */
 export async function checkFeeAddress(env: NodeJS.ProcessEnv = process.env, isObject: ObjectProbe = objectExistsOnMainnet): Promise<Check> {
   const address = (env.SPLASH_FEE_ADDRESS_MAINNET ?? '').trim();
+  const anchorFeeOn = anchorFeeEnabled(env);
   if (!address) {
-    return skipped(`SPLASH_FEE_ADDRESS_MAINNET not set: USDC wallet transfers stay closed until your company's fee wallet is set (${GUIDE}, Configuration)`);
+    // Stablecoin transfers are free; only the audit-anchor fee needs a wallet.
+    return anchorFeeOn
+      ? failed(`STABLECOIN_ANCHOR_FEE is on but SPLASH_FEE_ADDRESS_MAINNET is not set: USDC transfers out of Splash are closed until the fee wallet is set (${GUIDE}, Configuration).`)
+      : skipped('SPLASH_FEE_ADDRESS_MAINNET not set: not needed while stablecoin transfers are free; the audit-anchor fee (off) will need it');
   }
   if (!SUI_ADDRESS.test(address)) {
     return failed('SPLASH_FEE_ADDRESS_MAINNET is not a Sui address (0x followed by 64 hex characters); an Ethereum address will not do.');
@@ -129,7 +134,7 @@ export async function checkFeeAddress(env: NodeJS.ProcessEnv = process.env, isOb
     if (object) {
       return failed(`SPLASH_FEE_ADDRESS_MAINNET (${short(address)}) is an object on mainnet, not a wallet: fees sent there would be owned by that object and unreachable. Copy the address from the wallet itself (Slush: Receive).`, ms);
     }
-    return ok(`USDC wallet transfers open: the 0.80% fee goes to ${short(address)}, a wallet address on mainnet`, ms);
+    return ok(`fee wallet ${short(address)} is a wallet address on mainnet; the audit-anchor fee is ${anchorFeeOn ? 'on and goes there' : 'off, so stablecoin transfers are free'}`, ms);
   } catch (e) {
     return failed(`could not check ${short(address)} on mainnet: ${reason(e)}`);
   }

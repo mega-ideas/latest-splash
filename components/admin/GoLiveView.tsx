@@ -16,7 +16,7 @@ const MONEY: Row[] = [
   { key: 'laneNode', name: 'Sui mainnet node', role: 'Builds, dry-runs and sends USDC transfers' },
   { key: 'peg', name: 'Stablecoin peg (DeepBook)', role: 'Gates every payout' },
   { key: 'usdyPrice', name: 'USDY price (Ondo)', role: 'Values the treasury preview' },
-  { key: 'feeAddress', name: 'Fee wallet', role: 'Receives the 0.80% on USDC wallet transfers' },
+  { key: 'feeAddress', name: 'Fee wallet', role: 'Receives the audit-anchor fee on USDC sent out of Splash, when it is on' },
   { key: 'twilio', name: 'WhatsApp codes (Twilio)', role: 'Delivers approval codes to the main admin' },
   { key: 'passkeyDomain', name: 'Passkey domain', role: "Ties each admin's Splash wallet to this site" },
   { key: 'screening', name: 'Wallet screening (Chainalysis)', role: 'Checks new wallet recipients against sanctions lists' },

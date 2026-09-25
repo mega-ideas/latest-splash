@@ -4,7 +4,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 import { PGlite } from '@electric-sql/pglite';
-import { toBase64 } from '@mysten/sui/utils';
+import { fromBase64, toBase64 } from '@mysten/sui/utils';
 import { drizzle } from 'drizzle-orm/pglite';
 
 import * as schema from '../lib/db/schema.ts';
@@ -85,7 +85,7 @@ function scriptedChain({ buildError, executeThrows = false, executeFails = false
   };
 }
 
-async function setup({ kyb = 'REGISTERED', verdict = 'CLEAR', payoutMethod = 'WALLET', fee = FEE, approved = true, chainOpts } = {}) {
+async function setup({ kyb = 'REGISTERED', verdict = 'CLEAR', payoutMethod = 'WALLET', fee = FEE, approved = true, chainOpts, anchorFee = false, splashWallet = false } = {}) {
   const { client, db } = await migratedDb();
   await client.exec(`INSERT INTO organizations (id, name, kyb_lifecycle) VALUES ('org_s', 'S Co', '${kyb}')`);
   await client.exec(`INSERT INTO users (id, email, name) VALUES ('u_owner', 'owner@s.test', 'Owner')`);
@@ -109,6 +109,8 @@ async function setup({ kyb = 'REGISTERED', verdict = 'CLEAR', payoutMethod = 'WA
     },
     readRecipient: async (orgId, id) => (orgId === 'org_s' && id === 'rcpt_w' ? recipient : null),
     feeAddress: () => fee ?? undefined,
+    isSplashWallet: async () => splashWallet,
+    anchorFeeOn: () => anchorFee,
     now: () => now,
   };
   return { client, db, deps, chain, approvals, advance: (ms) => { now += ms; } };
@@ -119,7 +121,7 @@ const quote = (deps, amount = '1000', extra = {}) =>
 const submit = (deps, q, bytes = q.transactionBytes) =>
   submitWalletTransfer(deps, { orgId: 'org_s', role: 'OWNER', outflowId: q.outflowId, transactionBytes: bytes, signature: 'sig' });
 
-test('the happy path: 1,000 USDC to the recipient, 8 to Splash, one transaction, recorded with its audit hash', async () => {
+test('the happy path: 1,000 USDC to the recipient, no Splash fee, one leg, recorded with its audit hash', async () => {
   const { client, db, deps, chain } = await setup();
   const q = await quote(deps, '1000');
   assert.equal(q.ok, true);
@@ -127,8 +129,11 @@ test('the happy path: 1,000 USDC to the recipient, 8 to Splash, one transaction,
   assert.equal(q.chain, 'sui:mainnet');
   assert.equal(q.coinType, SUI_USDC_COIN_TYPE.mainnet);
   assert.equal(q.principalMinor, usdc('1000').toString());
-  assert.equal(q.feeMinor, usdc('8').toString());
-  assert.equal(q.totalDebitMinor, usdc('1008').toString());
+  assert.equal(q.feeMinor, '0', 'stablecoin transfers are free');
+  assert.equal(q.totalDebitMinor, usdc('1000').toString());
+  assert.equal(q.feeKind, 'FREE');
+  assert.equal(q.feeAddress, null, 'no fee, no fee leg, no fee address');
+  assert.deepEqual(JSON.parse(new TextDecoder().decode(fromBase64(q.transactionBytes))).legs.map((l) => l.address), [RECIPIENT]);
 
   const done = await submit(deps, q);
   assert.equal(done.ok, true);
@@ -169,7 +174,7 @@ test('a wallet that changed the transaction is caught on the dry run, and nothin
   const tampered = chain.encode({
     sender: SENDER,
     coinType: SUI_USDC_COIN_TYPE.mainnet,
-    legs: [{ address: OTHER, amountMinor: usdc('1000') }, { address: FEE, amountMinor: usdc('8') }],
+    legs: [{ address: OTHER, amountMinor: usdc('1000') }],
   });
   const r = await submit(deps, q, toBase64(tampered));
   assert.equal(r.ok, false);
@@ -258,13 +263,19 @@ test('refusals before any reservation: role, bank recipient, unscreened on mainn
   assert.equal((await quote(s.deps)).code, 'recipient_not_sendable', 'a listed wallet is refused everywhere');
   await s.client.close();
 
+  // Free transfers need no fee address at all.
   s = await setup({ fee: null });
+  assert.equal((await quote(s.deps)).ok, true);
+  await s.client.close();
+
+  // With the audit-anchor fee on, a transfer out of Splash needs one.
+  s = await setup({ fee: null, anchorFee: true });
   const noFee = await quote(s.deps);
   assert.equal(noFee.code, 'fee_address_missing');
   assert.equal((await readAllowance(s.db, 'org_s', T0)).allowance.usedMinor, 0n, 'nothing reserved');
   await s.client.close();
 
-  s = await setup({ fee: RECIPIENT });
+  s = await setup({ fee: RECIPIENT, anchorFee: true });
   assert.equal((await quote(s.deps)).code, 'fee_address_conflict');
   await s.client.close();
 });
@@ -288,11 +299,37 @@ test('an approval is handed back when nothing moved, and the quote records who a
   const tampered = chain.encode({
     sender: SENDER,
     coinType: SUI_USDC_COIN_TYPE.mainnet,
-    legs: [{ address: OTHER, amountMinor: usdc('1000') }, { address: FEE, amountMinor: usdc('8') }],
+    legs: [{ address: OTHER, amountMinor: usdc('1000') }],
   });
   await submit(deps, q, toBase64(tampered));
   assert.equal(approvals.consumed, 1);
   assert.equal(approvals.released, 1, 'the preflight refused, so the approval is still good');
+  await client.close();
+});
+
+test('with the audit-anchor fee on, a transfer out of Splash pays it on top, in the same transaction', async () => {
+  const { client, deps } = await setup({ anchorFee: true });
+  const q = await quote(deps, '1000');
+  assert.equal(q.feeMinor, usdc('0.2').toString(), '0.02% of 1,000');
+  assert.equal(q.totalDebitMinor, usdc('1000.2').toString());
+  assert.equal(q.feeKind, 'AUDIT_ANCHOR');
+  assert.equal(q.feeAddress, FEE);
+  const legs = JSON.parse(new TextDecoder().decode(fromBase64(q.transactionBytes))).legs;
+  assert.deepEqual(legs.map((l) => [l.address, l.amountMinor]), [[RECIPIENT, usdc('1000').toString()], [FEE, usdc('0.2').toString()]]);
+  assert.equal((await submit(deps, q)).status, 'CONFIRMED', 'the dry run and the chain check the fee leg too');
+
+  const small = await quote(deps, '10');
+  assert.equal(small.feeMinor, usdc('0.05').toString(), 'the 0.05 floor');
+  await client.close();
+});
+
+test('to a Splash user wallet it stays free, even with the audit-anchor fee on', async () => {
+  const { client, deps } = await setup({ anchorFee: true, splashWallet: true });
+  const q = await quote(deps, '1000');
+  assert.equal(q.feeMinor, '0');
+  assert.equal(q.destination, 'SPLASH');
+  assert.equal(q.feeAddress, null);
+  assert.equal((await submit(deps, q)).status, 'CONFIRMED');
   await client.close();
 });
 

@@ -114,7 +114,8 @@ const marqueeItems = [
   ['1 live testnet', 'MY to PH corridor'],
   ['Modeled routes', 'expand with controls'],
   ['~400ms', 'Sui settlement finality'],
-  ['From 0.80%', 'starting edge fee'],
+  ['Free', 'USDC transfers'],
+  ['0.70%', 'to local currency'],
   ['Human approved', 'AI recommendations'],
   ['Stored proof', 'A record that lasts'],
 ];

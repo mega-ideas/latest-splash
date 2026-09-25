@@ -1801,7 +1801,7 @@ const SPLASH_ANSWERS: Array<{ test: RegExp; reply: string | (() => string); skip
     // Fees / pricing / cost
     test: /\b(fee|fees|pricing|price|cost|charge|commission|how much (do|does|will) (it|you|this) cost)\b/,
     skipIf: /\b(gas|sponsor|network fee|hold sui|fund (a|my)? ?wallet|top ?up)\b/, // gas/sponsorship gets the dedicated answer below
-    reply: 'Corridor fees start at 0.80% on the live USD to PHP testnet path (MYR, SGD, IDR, VND, THB, EUR and GBP stay modeled until partner rails activate). Batch runs quote one blended rate, typically 15-30 bps tighter. A hard on-chain ceiling caps any settlement fee at 2.00% — the contract aborts above it.',
+    reply: 'Sending USDC is free: Splash charges nothing on stablecoin transfers. Payouts to local currency are 0.70% of the amount on every corridor, with no fixed fee — live on the USD to PHP testnet path; MYR, SGD, IDR, VND, THB, EUR and GBP stay modeled until partner rails activate. Batch runs quote one blended rate, typically 15-30 bps tighter. A hard on-chain ceiling caps any settlement fee at 2.00% — the contract aborts above it.',
   },
   {
     // Corridors / countries / currencies
@@ -1932,7 +1932,7 @@ const SPLASH_ANSWERS: Array<{ test: RegExp; reply: string | (() => string); skip
   {
     // Who pays gas / sponsored
     test: /\b(gas|who pays|network fee|do i need sui|hold sui|wallet funding|top ?up)\b/,
-    reply: 'Network gas is sponsored — nobody sending or receiving has to fund a wallet or hold SUI. You see a settlement fee on the corridor, never a separate gas charge.',
+    reply: 'For local-currency payouts, Splash settles on Sui and pays the network fee itself: you see the 0.70% fee, never a separate gas charge. For USDC you send from your own wallet, that wallet pays the Sui network fee in SUI — about 0.003 SUI a transfer — until Splash sponsors it.',
   },
   {
     // Depeg protection

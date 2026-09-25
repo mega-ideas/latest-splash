@@ -48,18 +48,18 @@ async function filesUnder(dir) {
 test('the calculator prices the one leg Splash prices, in minor units, and fails closed without a rate', async () => {
   const { SPLASH_USD_PHP, splashCostMinor, estimatePayment } = await calculator();
 
-  // Flat $4.50 + 0.80% — the same numbers lib/server/quote.ts applies.
-  assert.equal(SPLASH_USD_PHP.flatUsdMinor, 450n);
-  assert.equal(SPLASH_USD_PHP.marginBps, 80);
+  // 0.70%, nothing fixed (2026-09-26) — the same numbers lib/server/quote.ts applies.
+  assert.equal(SPLASH_USD_PHP.flatUsdMinor, 0n);
+  assert.equal(SPLASH_USD_PHP.marginBps, 70);
   assert.equal(SPLASH_USD_PHP.label, 'Illustrative');
-  assert.equal(splashCostMinor(100_000n), 450n + 800n, '$1,000 costs $4.50 + $8.00');
+  assert.equal(splashCostMinor(100_000n), 700n, '$1,000 costs $7.00');
   assert.equal(typeof splashCostMinor(1n), 'bigint');
 
   // No exchange rate: no PHP figure. Never a substituted default.
   const estimate = estimatePayment({ amountUsdMinor: 100_000n, baseline: null, fxRate: null });
   assert.equal(estimate.phpReceivedMinor, null);
   assert.equal(estimate.bankWire, null, 'no dataset, no bank row');
-  assert.equal(estimate.splash.costMinor, 1250n);
+  assert.equal(estimate.splash.costMinor, 700n);
 
   // With a dated rate the received amount is exact integer arithmetic.
   const withRate = estimatePayment({
@@ -67,7 +67,7 @@ test('the calculator prices the one leg Splash prices, in minor units, and fails
     baseline: null,
     fxRate: { phpPerUsd: '56.00', asOf: '2026-09-01' },
   });
-  assert.equal(withRate.phpReceivedMinor, (100_000n - 1250n) * 56n, 'PHP centavos on the net amount');
+  assert.equal(withRate.phpReceivedMinor, (100_000n - 700n) * 56n, 'PHP centavos on the net amount');
 
   // The Splash row never carries a leg Splash does not price: no MYR anywhere
   // near it, and no Wise anywhere at all.

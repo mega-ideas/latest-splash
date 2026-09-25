@@ -17,7 +17,13 @@ Suspended and rejected businesses get nothing, not even the unverified allowance
 
 - **Mainnet only.** There is no stablecoin sandbox; the sandbox covers USD in and local-currency out.
 - **Asset:** Circle native USDC on Sui (`0xdba3…::usdc::USDC`). There is no native USDT on Sui, only bridge-wrapped versions, so USDT isn't settled.
-- **Fee:** 0.80% **on top**, rounded half-up at the micro-unit. The recipient receives exactly what was entered, and the fee goes to `SPLASH_FEE_ADDRESS_MAINNET` in the same transaction.
+- **Fee: free** (decision of 2026-09-26, `lib/payments/stablecoin-lane.ts`).
+  - **To a Splash user's wallet** (the Sui address of any Splash user's passkey): free, always.
+  - **To a wallet outside Splash:** the **audit-anchor fee**, 0.02% with a 0.05 USDC floor and a 5 USDC cap, pays for the record Splash anchors for the transfer. It is built but **off** until `STABLECOIN_ANCHOR_FEE=on`, so today these transfers are free too and the screens say so.
+  - When the anchor fee is on, it is charged **on top** and rounded half-up at the micro-unit. The recipient receives exactly what was entered, and the fee goes to `SPLASH_FEE_ADDRESS_MAINNET` in the same transaction.
+  - **x402:** no Splash fee.
+  - **Network gas** (≈ 0.002–0.004 SUI a transfer) is paid in SUI by the sending wallet until Splash's sponsor wallet pays it (next phase).
+- **Local-currency payouts** (outside this lane): **0.70%** of the amount on every corridor, with no fixed fee and no discount tier (`lib/fx/corridors.ts`).
 - **Minimum:** 1 USDC per transfer. x402 payments are exempt.
 - **The window rolls:** each transfer counts for 30 days from when it was quoted, so the calendar-month reset trick does not work.
 
@@ -34,12 +40,12 @@ A wallet recipient must be saved first. Splash, and Zeke, only send to saved rec
 
 ## Sending (lib/server/stablecoin-send.ts)
 
-1. **Quote:** validate the recipient, screening, fee address and allowance, then **reserve** the principal under an org row lock, so two quotes can't jointly breach the cap. The reservation lasts 15 minutes. Splash then builds the exact transaction from the sender's own coins.
+1. **Quote:** validate the recipient, screening and allowance; work out whether the recipient is a Splash user (always free) and, if the anchor fee is on, the fee and its address; then **reserve** the principal under an org row lock, so two quotes can't jointly breach the cap. The reservation lasts 15 minutes. Splash then builds the exact transaction from the sender's own coins.
 2. **Approve:** in the workspace's approval style (next section).
 3. **Sign:** with the **Splash wallet** (the Sui address of the admin's own passkey) or with Slush / MetaMask (Sui Snap). Wallets sign; they never broadcast.
 4. **Submit:** Splash dry-runs the signed bytes and checks the balance changes:
    - the recipient's USDC goes up by exactly the principal;
-   - the fee address's goes up by exactly the fee;
+   - when there is a fee, the fee address's goes up by exactly the fee;
    - the sender's goes down by exactly the sum;
    - nobody else's USDC moves.
 
@@ -69,7 +75,7 @@ Usage:
 
 - `npm run rehearse:usdc` rehearses from a public USDC holder it finds.
 - `npm run rehearse:usdc -- --sender 0x… --amount 25` rehearses from your own wallet, e.g. the main admin's passkey address.
-- The two legs go to placeholder addresses, never to the configured fee address.
+- The recipient leg goes to a placeholder address. The fee leg goes to `SPLASH_FEE_ADDRESS_MAINNET` when it is set, so the rehearsal proves the real fee wallet can be paid; otherwise to a placeholder. Nothing is sent.
 
 First run, 2026-09-25: 8/8 on mainnet. It found that a dry run carries its digest only under `effects.transactionDigest`, and the chain reader now reads it from there.
 
@@ -105,7 +111,7 @@ Ask Zeke "send 500 USDC to Manila Parts" (or "pay Manila Parts 500 in USDC", "se
 - Those phrasings are answered in fixed words, before any model runs, the same way the lane refusal does. Other wordings reach the model, which has one way to do it: the READ tool `prepareUsdcTransfer`. That tool runs the same preparation below, and only its Send USDC link becomes a card.
 - Every Zeke tool acts for the signed-in workspace. The tool loop replaces whatever `orgId` the model wrote with the session's, and refuses an org-scoped tool when there is no session org (`scopeToolInputToOrg`).
 - The recipient must be a **saved wallet recipient** that can be paid (screened or vouched for). A bank recipient, an unknown name or an ambiguous one gets an explanation instead.
-- It checks the lane, the fee address, the 1 USDC minimum, the per-transfer limit and the 30-day allowance with the lane's own functions. The card shows the amount, the 0.80% fee on top, what leaves the wallet, and the allowance left afterwards.
+- It checks the lane, the 1 USDC minimum, the per-transfer limit and the 30-day allowance with the lane's own functions, and prices the transfer the same way Send USDC does. The fee is free, or the audit-anchor fee when it is on and the recipient is outside Splash, which also needs the fee address. The card shows the amount, the fee, what leaves the wallet, and the allowance left afterwards.
 - **Review in Send USDC** opens the send screen with the recipient and amount filled in. The link carries only the saved recipient's id and an amount re-printed from integer minor units; nothing typed in the chat reaches it. Send USDC ignores anything that is not a saved wallet recipient of this workspace.
 - Zeke never quotes (a quote reserves allowance), approves or signs. The person continues from the send screen: quote, approval (WhatsApp code + passkey, or a click), and a signature from their own wallet.
 
@@ -220,7 +226,7 @@ Every approval is bound to the sha256 of exactly what it approves. It is spent w
 
 The page checks what a real mainnet transfer needs, and each open item links to its fix:
 
-- the lane is open, including Splash's fee address;
+- the lane is open (with the audit-anchor fee on, that includes Splash's fee address);
 - an approver can approve (in WhatsApp style: the main admin still has a confirmed number and a passkey);
 - a wallet to pay from;
 - USDC in that wallet;
@@ -250,7 +256,9 @@ The checks are:
 
 | Variable | Needed for |
 |---|---|
-| `SPLASH_FEE_ADDRESS_MAINNET` | **Required.** Without it, no wallet transfer is quoted. Never defaulted. |
+| `SPLASH_FEE_ADDRESS_MAINNET` | Splash's fee wallet. Needed only when the audit-anchor fee is on; stablecoin transfers are free without it. Never defaulted. |
+| `STABLECOIN_ANCHOR_FEE` | `on` charges the audit-anchor fee (0.02%, min 0.05, max 5 USDC) on USDC sent out of Splash. Blank or `off`: free. |
+| `PLATFORM_FEE_BPS`, `FIXED_FEE_CENTS`, `FUNDING_DISCOUNT_BPS` | Local-currency pricing knobs: fallback fee for a currency with no corridor (70), fixed fee (0) and USDC-funded discount (0). Leave them at those values: pricing is 0.70% flat. |
 | `CHAINALYSIS_SANCTIONS_API_KEY` | Screening wallet recipients. Without it, only admin attestation makes a wallet sendable. |
 | `SUI_MAINNET_RPC_URL` | Optional. A trusted gRPC-web fullnode; the default is Mysten's public one. |
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_FROM` | Delivering codes. |

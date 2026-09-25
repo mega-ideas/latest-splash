@@ -15,8 +15,8 @@ import { getCorridorFeeBps } from './corridors.ts';
  * page says the rate is quoted when you send.
  */
 
-/** Mirrors FIXED_FEE_CENTS in lib/server/quote.ts — $4.50. */
-export const SPLASH_FIXED_FEE_MINOR = 450n;
+/** Mirrors FIXED_FEE_CENTS in lib/server/quote.ts: none since 2026-09-26. */
+export const SPLASH_FIXED_FEE_MINOR = 0n;
 
 export const SPLASH_USD_PHP = {
   leg: 'USD to PHP',

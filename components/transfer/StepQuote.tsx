@@ -131,8 +131,9 @@ export default function StepQuote({
         setSettledQuoteKey(quoteRequestKey);
       } catch {
         if (cancelled) return;
-        const discount = state.funding.selection.feeTier === 'DISCOUNT' ? 0.002 : 0;
-        const fee = source * Math.max(0, 0.014 - discount) + 4.5;
+        // Offline estimate only; the server quote decides. 0.70% of the
+        // amount, every corridor, nothing fixed (lib/fx/corridors.ts).
+        const fee = source * 0.007;
         const net = source - fee;
         const fx = BASE_RATES[state.amount.targetCurrency];
         set({ quote: { fxRate: fx, fee: fee.toFixed(2), netReceived: (net * fx).toFixed(2) } });

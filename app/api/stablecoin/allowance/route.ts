@@ -4,7 +4,7 @@ import {
   explorerTxUrl,
   laneAccess,
   MIN_STABLECOIN_TRANSFER_MINOR,
-  STABLECOIN_FEE_BPS,
+  anchorFeeEnabled,
   STABLECOIN_WINDOW_MS,
   type SuiNetwork,
 } from '@/lib/payments/stablecoin-lane';
@@ -33,7 +33,10 @@ export async function GET(request: Request) {
   const orgId = accountCheck.account.orgId;
   const { state, network, allowance } = await readAllowance(db, orgId);
   const lane = laneAccess(state, 'STABLECOIN_WALLET');
-  const feeConfigured = Boolean(process.env.SPLASH_FEE_ADDRESS_MAINNET);
+  // Stablecoin transfers are free; only the audit-anchor fee (out of Splash,
+  // when switched on) needs Splash's fee address.
+  const anchorFeeOn = anchorFeeEnabled();
+  const feeConfigured = !anchorFeeOn || Boolean(process.env.SPLASH_FEE_ADDRESS_MAINNET);
   const rows = await listOutflows(db, orgId, 20);
   const { readOrgSettings } = await import('@/lib/server/org-settings');
   const settings = await readOrgSettings(orgId);
@@ -55,7 +58,7 @@ export async function GET(request: Request) {
       windowCapMinor: allowance.windowCapMinor.toString(),
       windowDays: STABLECOIN_WINDOW_MS / 86_400_000,
     },
-    feeBps: STABLECOIN_FEE_BPS,
+    pricing: { anchorFeeOn },
     minimumMinor: MIN_STABLECOIN_TRANSFER_MINOR.toString(),
     screeningConfigured: Boolean(process.env.CHAINALYSIS_SANCTIONS_API_KEY),
     // How a transfer is approved here (Settings): WhatsApp code + passkey, or a

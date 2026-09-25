@@ -31,6 +31,8 @@ function deps(overrides = {}) {
     },
     remainingAllowance: async () => ('remaining' in overrides ? overrides.remaining : 5_000_000_000n),
     feeAddressConfigured: () => overrides.fee ?? true,
+    destinationOf: async () => overrides.destination ?? 'EXTERNAL',
+    anchorFeeOn: () => overrides.anchorFee ?? false,
   };
 }
 
@@ -59,7 +61,7 @@ test('it reads the ways people ask, and only when USDC is said', () => {
 
 // ─── Prepared ───────────────────────────────────────────────────────────────
 
-test('a saved wallet recipient: fee, total and allowance, and a link that carries only an id and an amount', async () => {
+test('a saved wallet recipient: free, total and allowance, and a link that carries only an id and an amount', async () => {
   const d = deps({ remaining: 5_000_000_000n });
   const answer = await usdcHandoffFor('org_1', 'send 500 USDC to Manila Parts', d);
   assert.ok(answer.handoff);
@@ -67,8 +69,8 @@ test('a saved wallet recipient: fee, total and allowance, and a link that carrie
   assert.deepEqual(answer.handoff.lines, [
     'To Manila Parts Supply · 0xcccccc…cccccc',
     'Amount 500.00 USDC',
-    'Splash fee 4.00 USDC, added on top',
-    'Leaves your wallet 504.00 USDC, plus a little SUI for gas',
+    'Splash fee: free',
+    'Leaves your wallet 500.00 USDC, plus a little SUI for gas',
     '4,500.00 USDC of your 30-day allowance left after',
   ]);
   assert.equal(answer.handoff.cta, 'Review in Send USDC');
@@ -128,12 +130,22 @@ test('amounts the lane would refuse are refused here too', async () => {
   assert.match(perTransfer.text, /20,000\.00 USDC per transfer/);
 });
 
-test('a closed lane or a missing fee address prepares nothing', async () => {
+test('a closed lane prepares nothing; a missing fee address matters only when the anchor fee is on', async () => {
   const suspended = await usdcHandoffFor('org_1', 'send 5 USDC to Manila Parts', deps({ state: 'SUSPENDED' }));
   assert.equal(suspended.handoff, null);
-  const noFee = await usdcHandoffFor('org_1', 'send 5 USDC to Manila Parts', deps({ fee: false }));
+  // Free transfers need no fee address.
+  assert.ok((await usdcHandoffFor('org_1', 'send 5 USDC to Manila Parts', deps({ fee: false }))).handoff);
+  const noFee = await usdcHandoffFor('org_1', 'send 5 USDC to Manila Parts', deps({ fee: false, anchorFee: true }));
   assert.equal(noFee.handoff, null);
   assert.match(noFee.text, /fee address is not configured/);
+});
+
+test('the anchor fee, when on, shows on the card; to a Splash user it stays free', async () => {
+  const out = await usdcHandoffFor('org_1', 'send 500 USDC to Manila Parts', deps({ anchorFee: true }));
+  assert.ok(out.handoff.lines.includes('Audit-anchor fee 0.10 USDC, added on top'));
+  assert.ok(out.handoff.lines.includes('Leaves your wallet 500.10 USDC, plus a little SUI for gas'));
+  const internal = await usdcHandoffFor('org_1', 'send 500 USDC to Manila Parts', deps({ anchorFee: true, destination: 'SPLASH' }));
+  assert.ok(internal.handoff.lines.includes('Splash fee: free (to another Splash user)'));
 });
 
 test('text around a name never reaches the link', async () => {
@@ -201,18 +213,13 @@ test('Zeke has prepareUsdcTransfer as a READ tool, labelled, and it goes through
   assert.equal(tool.category, 'READ');
   assert.deepEqual(tool.input_schema.required, ['orgId', 'recipientName', 'amountUsdc']);
 
-  // No fee address in the test environment: the lane is closed, so it refuses in words.
-  const saved = process.env.SPLASH_FEE_ADDRESS_MAINNET;
-  delete process.env.SPLASH_FEE_ADDRESS_MAINNET;
-  try {
-    const result = await executeOxwalTool('prepareUsdcTransfer', { orgId: 'org_test', recipientName: 'Manila Parts', amountUsdc: '500' });
-    assert.equal(result.status, 'LIVE', 'read live, inside a truth envelope');
-    assert.equal(result.data.prepared, false);
-    assert.equal(result.data.handoff, null);
-    assert.match(result.data.message, /fee address is not configured/);
-  } finally {
-    if (saved !== undefined) process.env.SPLASH_FEE_ADDRESS_MAINNET = saved;
-  }
+  // No saved recipients in the test environment: it refuses in words, and
+  // prepares nothing. (Free transfers need no fee address to get this far.)
+  const result = await executeOxwalTool('prepareUsdcTransfer', { orgId: 'org_test', recipientName: 'Manila Parts', amountUsdc: '500' });
+  assert.equal(result.status, 'LIVE', 'read live, inside a truth envelope');
+  assert.equal(result.data.prepared, false);
+  assert.equal(result.data.handoff, null);
+  assert.match(result.data.message, /No saved wallet recipient matches "Manila Parts"/);
 });
 
 test('the model path turns a prepared transfer into the same card, and every tool has a label', async () => {

@@ -1,5 +1,6 @@
 import type { KybLifecycleState } from '../compliance/kyb-state.ts';
 import {
+  anchorFeeEnabled,
   formatUsdc,
   laneAccess,
   MIN_STABLECOIN_TRANSFER_MINOR,
@@ -7,6 +8,7 @@ import {
   quoteStablecoinTransfer,
   StablecoinLaneError,
   stablecoinLimitsFor,
+  type StablecoinDestination,
 } from '../payments/stablecoin-lane.ts';
 import type { RecipientLookup } from './recipient-tools.ts';
 
@@ -42,6 +44,10 @@ export interface HandoffDeps {
   /** Unused allowance in the rolling window, or null when it cannot be read. */
   remainingAllowance(orgId: string): Promise<bigint | null>;
   feeAddressConfigured(): boolean;
+  /** 'SPLASH' when the saved recipient's wallet is a Splash user's. */
+  destinationOf(orgId: string, recipientId: string): Promise<StablecoinDestination>;
+  /** The audit-anchor fee on transfers out of Splash; off unless switched on. */
+  anchorFeeOn(): boolean;
 }
 
 // "send 500 USDC to Manila Parts", "pay 1,250.50 usdc to Cebu Traders",
@@ -104,25 +110,19 @@ export async function prepareUsdcHandoff(
   deps: HandoffDeps,
 ): Promise<HandoffAnswer> {
   let principal: bigint;
-  let fee: bigint;
-  let total: bigint;
   try {
     principal = parseUsdcMinor(intent.amount.replace(/,/g, '').replace(/^\$/, '').trim());
-    if (principal < MIN_STABLECOIN_TRANSFER_MINOR) {
-      return { text: `I can't prepare that: the smallest wallet transfer is ${formatUsdc(MIN_STABLECOIN_TRANSFER_MINOR)} USDC.`, handoff: null };
-    }
-    ({ feeMinor: fee, totalDebitMinor: total } = quoteStablecoinTransfer(principal));
   } catch (error) {
     const why = error instanceof StablecoinLaneError || error instanceof Error ? error.message : 'that amount is not valid';
     return { text: `I can't prepare that: ${why}.`, handoff: null };
+  }
+  if (principal < MIN_STABLECOIN_TRANSFER_MINOR) {
+    return { text: `I can't prepare that: the smallest wallet transfer is ${formatUsdc(MIN_STABLECOIN_TRANSFER_MINOR)} USDC.`, handoff: null };
   }
 
   const state = await deps.laneState(orgId);
   const lane = laneAccess(state, 'STABLECOIN_WALLET');
   if (!lane.allowed) return { text: lane.reason, handoff: null };
-  if (!deps.feeAddressConfigured()) {
-    return { text: 'Wallet transfers are not open yet: Splash’s mainnet fee address is not configured, so nothing can be sent until it is.', handoff: null };
-  }
 
   const lookup = await deps.findRecipient(orgId, intent.name);
   if (lookup.status === 'NOT_FOUND') {
@@ -143,6 +143,16 @@ export async function prepareUsdcHandoff(
   }
   if (!match.payable) {
     return { text: `I can't prepare a transfer to ${match.name}: ${match.blockedBecause ?? 'this recipient cannot be paid yet.'}`, handoff: null };
+  }
+
+  // Free to a Splash user's wallet; out of Splash, the audit-anchor fee when
+  // it is switched on (free until then). Same rule as the send screen.
+  const quote = quoteStablecoinTransfer(principal, {
+    destination: await deps.destinationOf(orgId, match.id),
+    anchorFeeOn: deps.anchorFeeOn(),
+  });
+  if (quote.feeMinor > 0n && !deps.feeAddressConfigured()) {
+    return { text: 'Transfers out of Splash are not open yet: Splash’s mainnet fee address is not configured, so nothing can be sent until it is.', handoff: null };
   }
 
   const limits = stablecoinLimitsFor(state);
@@ -167,8 +177,10 @@ export async function prepareUsdcHandoff(
       lines: [
         `To ${match.name}${match.wallet ? ` · ${match.wallet}` : ''}`,
         `Amount ${formatUsdc(principal)} USDC`,
-        `Splash fee ${formatUsdc(fee)} USDC, added on top`,
-        `Leaves your wallet ${formatUsdc(total)} USDC, plus a little SUI for gas`,
+        quote.feeMinor === 0n
+          ? `Splash fee: free${quote.destination === 'SPLASH' ? ' (to another Splash user)' : ''}`
+          : `Audit-anchor fee ${formatUsdc(quote.feeMinor)} USDC, added on top`,
+        `Leaves your wallet ${formatUsdc(quote.totalDebitMinor)} USDC, plus a little SUI for gas`,
         ...(remaining !== null ? [`${formatUsdc(remaining - principal)} USDC of your 30-day allowance left after`] : []),
       ],
       href: `/dashboard/send-usdc?${params.toString()}`,
@@ -203,6 +215,22 @@ export function liveHandoffDeps(): HandoffDeps {
     },
     feeAddressConfigured() {
       return Boolean((process.env.SPLASH_FEE_ADDRESS_MAINNET ?? '').trim());
+    },
+    async destinationOf(orgId, recipientId) {
+      // Without the database there is no saved address to look up: out of
+      // Splash is the conservative answer (it is the one that may carry a fee).
+      if (!process.env.DATABASE_URL) return 'EXTERNAL';
+      const [{ getDb }, { readRecipient }, { isSplashWallet }] = await Promise.all([
+        import('../db/client.ts'),
+        import('../server/recipients-store.ts'),
+        import('../server/stablecoin-deps.ts'),
+      ]);
+      const recipient = await readRecipient(orgId, recipientId);
+      if (!recipient?.walletAddress) return 'EXTERNAL';
+      return (await isSplashWallet(getDb(), recipient.walletAddress)) ? 'SPLASH' : 'EXTERNAL';
+    },
+    anchorFeeOn() {
+      return anchorFeeEnabled();
     },
   };
 }

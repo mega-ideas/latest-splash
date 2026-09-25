@@ -88,7 +88,7 @@ function formatTimestamp(iso: string | undefined) {
 const SettlementReceipt = forwardRef<HTMLDivElement, ReceiptProps>(function SettlementReceipt(props, ref) {
   const {
     amount, fee, currency, status = 'Settled',
-    feeTier = 'STANDARD', recipientName, txDigest, explorerUrl, fxRate, targetCurrency,
+    recipientName, txDigest, explorerUrl, fxRate, targetCurrency,
     amountToPayee, invoiceRef, invoiceClosedOnDelivery, approvedBy, sentAt, deliveredAt,
     walrusBlobId, sealedState, networkLine,
   } = props;
@@ -177,7 +177,7 @@ const SettlementReceipt = forwardRef<HTMLDivElement, ReceiptProps>(function Sett
               <span className="font-medium">{money(fxRate)}</span>
             </Field>
           )}
-          <Field label={`Total cost${feeTier === 'DISCOUNT' ? ' · discount tier' : ''}`}>
+          <Field label="Total cost">
             <span className="font-medium">
               {totalCost !== null ? `${money(totalCost)} ${currency}` : '—'}
               <span className="ml-1 text-[13px]" style={{ color: MUTE }}>incl. {money(fee)} fee</span>
