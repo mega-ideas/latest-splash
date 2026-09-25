@@ -22,7 +22,7 @@ Suspended and rejected businesses get nothing, not even the unverified allowance
   - **To a wallet outside Splash:** the **audit-anchor fee**, 0.02% with a 0.05 USDC floor and a 5 USDC cap, pays for the record Splash anchors for the transfer. It is built but **off** until `STABLECOIN_ANCHOR_FEE=on`, so today these transfers are free too and the screens say so.
   - When the anchor fee is on, it is charged **on top** and rounded half-up at the micro-unit. The recipient receives exactly what was entered, and the fee goes to `SPLASH_FEE_ADDRESS_MAINNET` in the same transaction.
   - **x402:** no Splash fee.
-  - **Network gas** (≈ 0.002–0.004 SUI a transfer) is paid in SUI by the sending wallet until Splash's sponsor wallet pays it (next phase).
+  - **Network gas: none** on a wallet transfer. See *Gas* below.
 - **Local-currency payouts** (outside this lane): **0.70%** of the amount on every corridor, with no fixed fee and no discount tier (`lib/fx/corridors.ts`).
 - **Minimum:** 1 USDC per transfer. x402 payments are exempt.
 - **The window rolls:** each transfer counts for 30 days from when it was quoted, so the calendar-month reset trick does not work.
@@ -40,7 +40,7 @@ A wallet recipient must be saved first. Splash, and Zeke, only send to saved rec
 
 ## Sending (lib/server/stablecoin-send.ts)
 
-1. **Quote:** validate the recipient, screening and allowance; work out whether the recipient is a Splash user (always free) and, if the anchor fee is on, the fee and its address; then **reserve** the principal under an org row lock, so two quotes can't jointly breach the cap. The reservation lasts 15 minutes. Splash then builds the exact transaction from the sender's own coins.
+1. **Quote:** validate the recipient, screening and allowance; work out whether the recipient is a Splash user (always free) and, if the anchor fee is on, the fee and its address; then **reserve** the principal under an org row lock, so two quotes can't jointly breach the cap. The reservation lasts 15 minutes. Splash then builds the exact transaction from the sender's own USDC, gasless where Sui takes it (*Gas*, below), and the quote says how its gas is paid.
 2. **Approve:** in the workspace's approval style (next section).
 3. **Sign:** with the **Splash wallet** (the Sui address of the admin's own passkey) or with Slush / MetaMask (Sui Snap). Wallets sign; they never broadcast.
 4. **Submit:** Splash dry-runs the signed bytes and checks the balance changes:
@@ -56,6 +56,38 @@ A wallet recipient must be saved first. Splash, and Zeke, only send to saved rec
    - Each quote is bound to the first signed transaction that leaves Splash. A retry resends that same transaction (one digest, on chain at most once), and a differently-signed second one is refused while the first may still land.
 
 **Audit anchor:** records are kept now with `anchor_status = PENDING_MAINNET_PUBLISH`. They get anchored once Splash's contracts are published on mainnet (not done; that's Sebastian's ceremony).
+
+## Gas (decided 2026-09-26)
+
+A wallet transfer carries **no network fee**, and nobody pays one for it: not the sender, not Splash. Sui runs a transfer of an allowlisted stablecoin without gas when the transaction does nothing but move that coin (docs.sui.io, *Gasless Stablecoin Transfers*). Native USDC has been on that list since mainnet release `v1.72.2` (2026-05-20). So the sending wallet needs **no SUI**, and there is **no sponsor wallet and no key** on the server.
+
+This replaced the plan for a Splash-run sponsor wallet (chosen over Enoki's $120/month plan). That plan was made on the premise that every transfer costs gas, which stopped being true for USDC.
+
+**How it works** (`lib/server/stablecoin-chain.ts`, `buildTransferBytes`):
+- Each leg is `0x2::balance::send_funds<USDC>`, with the funds from `tx.balance()`.
+- Gas price 0, budget 0, no gas coins, and a `ValidDuring` window (this epoch and the next) with a nonce, all set by Splash rather than left to the node.
+- Building dry-runs it, so a transfer Sui would not take gasless fails before anyone signs.
+- A wallet holding coin objects has them merged, and its change goes to its **address balance**. The recipient's USDC also lands in its address balance.
+
+**Where the money lands.** An address balance is part of the wallet's USDC alongside its coin objects: Sui's balance queries (gRPC `balance`, GraphQL `totalBalance`), Suiscan and suisnap.com all count it. So does Splash (balance and activity read `balanceChanges`, never coin objects).
+- Sui warns that a wallet with no address-balance support "cannot see or access the funds" (they are not lost).
+- Slush's own store listing (2026-09-24) says its stablecoin sends are free and need no SUI, so Slush itself sends this way.
+- The MetaMask window shows no Sui balances at all; suisnap.com does, including address balances.
+- No exchange has published support; Fireblocks, a custodian, is the only named supporter. Recipients here are Slush or Sui Snap wallets, not exchange deposit addresses.
+
+**When the wallet pays gas instead** (a coin transfer; the quote and the screen say so before anything is signed):
+- **x402**, always: the seller's facilitator broadcasts it, and the x402 Sui scheme is written against a coin transfer.
+- **Send it as a coin**, the sender's choice on Send USDC, for a recipient whose wallet does not show address balances.
+- **A wallet that would not sign the gasless version.** Send USDC then offers *Pay the network fee in SUI*: a new quote that releases the first (never one already sent) and is approved again.
+- **Sui would not take it gasless.** The quote falls back automatically. One case to know: a gasless transfer must leave the wallet with no USDC or with at least 0.01 (checked on mainnet). With no SUI to fall back on, the sender is told to change the amount by a cent or send everything. A node that is only busy (`Too Many Requests`) is not a refusal: the quote asks to try again rather than switching to paid gas.
+- **`STABLECOIN_GASLESS=off`**, the switch for a protocol change, without a deploy.
+
+**Limits.**
+- Sui's minimum is 0.01 USDC per leg, far under Splash's 1 USDC minimum and the anchor fee's 0.05 floor.
+- The whole network takes about 300 gasless transactions a second. Over that, or under congestion, a gasless transfer is refused uncharged and retried, and paid transactions go first. Send USDC's *Send again* resends the same signed transaction.
+- A failed gasless transfer costs nothing; the failure message reads the gas charged from the chain.
+- The wallet can change between quote and send (say, other USDC arrives or leaves and the change would now be dust). The check before sending then refuses the signed transaction: nothing is sent, the approval goes back, and the message says why. A node that does not answer is reported as busy, also with the approval handed back.
+- *Change amount or recipient* releases the old quote's allowance with the next quote, provided the old one was never signed and sent.
 
 ## Rehearse before the first real transfer (`npm run rehearse:usdc`)
 
@@ -75,9 +107,10 @@ Usage:
 
 - `npm run rehearse:usdc` rehearses from a public USDC holder it finds.
 - `npm run rehearse:usdc -- --sender 0x… --amount 25` rehearses from your own wallet, e.g. the main admin's passkey address.
+- It rehearses, in order: the transfer as Send USDC quotes it today (gasless: gas price 0, no gas coins, and the sender's SUI does not move); the audit-anchor fee leg; the sender-pays fallback (skipped for a wallet under 0.01 SUI, which only the fallback needs); and what an empty wallet is told.
 - The recipient leg goes to a placeholder address. The fee leg goes to `SPLASH_FEE_ADDRESS_MAINNET` when it is set, so the rehearsal proves the real fee wallet can be paid; otherwise to a placeholder. Nothing is sent.
 
-First run, 2026-09-25: 8/8 on mainnet. It found that a dry run carries its digest only under `effects.transactionDigest`, and the chain reader now reads it from there.
+First run, 2026-09-25: 8/8 on mainnet. It found that a dry run carries its digest only under `effects.transactionDigest`, and the chain reader now reads it from there. With gasless, 2026-09-26: 23/23.
 
 ## The Splash wallet as a wallet (lib/server/wallet-activity.ts)
 
@@ -230,7 +263,7 @@ The page checks what a real mainnet transfer needs, and each open item links to 
 - an approver can approve (in WhatsApp style: the main admin still has a confirmed number and a passkey);
 - a wallet to pay from;
 - USDC in that wallet;
-- SUI for gas;
+- the network fee: none for a wallet transfer; SUI only for x402, for a transfer sent as a coin, or with gasless switched off;
 - a saved wallet recipient.
 
 Recipient screening is shown as a note: Chainalysis if configured, otherwise the admin vouches for each recipient.
@@ -258,9 +291,10 @@ The checks are:
 |---|---|
 | `SPLASH_FEE_ADDRESS_MAINNET` | Splash's fee wallet. Needed only when the audit-anchor fee is on; stablecoin transfers are free without it. Never defaulted. |
 | `STABLECOIN_ANCHOR_FEE` | `on` charges the audit-anchor fee (0.02%, min 0.05, max 5 USDC) on USDC sent out of Splash. Blank or `off`: free. |
+| `STABLECOIN_GASLESS` | Blank or `on`: wallet transfers carry no network fee. `off`: the sending wallet pays gas in SUI (a switch for a protocol change). |
 | `PLATFORM_FEE_BPS`, `FIXED_FEE_CENTS`, `FUNDING_DISCOUNT_BPS` | Local-currency pricing knobs: fallback fee for a currency with no corridor (70), fixed fee (0) and USDC-funded discount (0). Leave them at those values: pricing is 0.70% flat. |
 | `CHAINALYSIS_SANCTIONS_API_KEY` | Screening wallet recipients. Without it, only admin attestation makes a wallet sendable. |
-| `SUI_MAINNET_RPC_URL` | Optional. A trusted gRPC-web fullnode; the default is Mysten's public one. |
+| `SUI_MAINNET_RPC_URL` | Recommended in production: a dedicated gRPC-web fullnode. The default is Mysten's public one, which rate-limits (`Too Many Requests`) under bursts. |
 | `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_FROM` | Delivering codes. |
 | `TWILIO_WHATSAPP_CODE_CONTENT_SID` | An approved "verification code" template (`Your {{1}} code is {{2}}`). Without it, codes go as free text, which WhatsApp delivers only within 24 hours of the recipient last messaging the sender. |
 | `X402_DEMO_PAY_TO` | The demo x402 seller's payee (0.01 USDC per call). Unset: demo seller off. |
@@ -289,7 +323,8 @@ Stop it with Ctrl+C, and delete `.dev-db/` to start over.
 - **The Splash wallet is the admin's passkey.** Lose the passkey and the funds at that address can't be signed for. Hold operating balances there, not reserves.
 - **Local development:** the in-memory dev database forgets the passkey's record on restart (the key stays on the device). Restore it in Settings → Security, or run with `DEV_DB_DIR`. Don't leave real funds in a local-dev Splash wallet.
 - **MetaMask** reaches Sui only through the Sui Snap, on desktop.
-- **Every transfer needs a little SUI for gas** in the sending wallet.
+- **SUI is needed only for x402**, for a transfer sent as a coin, and if gasless is switched off. A wallet transfer needs none.
+- **Gasless transfers land in address balances.** Wallets that read only coin objects don't show them (Sui's own warning). Recipients here are Slush or Sui Snap wallets; *Send it as a coin* covers the rest.
 - **x402 on a slow facilitator:** a seller that accepts a payment which then never lands leaves the quote counting until it expires. Retrying resends the same signed payment, so it can't be paid twice.
 - **USDY on Sui is thin:** see Treasury. Beyond pocket change, a Sui DEX swap loses heavily or finds no route.
 - **Still to come:** executing CCTP (source burn + Sui claim); a USDY route that works at treasury size (Ondo mint/redeem), then executing it once Ondo eligibility is confirmed.

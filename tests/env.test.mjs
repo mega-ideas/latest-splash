@@ -97,9 +97,12 @@ test('production: live settlement requires the signer; simulate does not', () =>
 
 test('production: vendor keys are demanded only when mocks and demo mode are both off', () => {
   const keys = keysOf(() => parseEnv({ ...PROD_OK, USE_MOCK_APIS: 'false', NEXT_PUBLIC_DEMO_MODE: 'false', SUI_SETTLEMENT_MODE: 'simulate' }));
-  for (const k of ['PDAX_API_KEY', 'WALRUS_PUBLISHER_URL', 'ENOKI_API_KEY', 'AIRWALLEX_API_KEY', 'STRIPE_SECRET_KEY']) {
+  for (const k of ['PDAX_API_KEY', 'WALRUS_PUBLISHER_URL', 'AIRWALLEX_API_KEY', 'STRIPE_SECRET_KEY']) {
     assert.ok(keys.includes(k), `${k} should be named once vendors are live`);
   }
+  // Nothing calls Enoki: USDC transfers carry no gas, so production must not
+  // refuse to boot without a key for it.
+  assert.ok(!keys.includes('ENOKI_API_KEY'), 'ENOKI_API_KEY is optional');
 });
 
 test('production: FEATURE_ZKLOGIN=true requires the client id and the salt', () => {

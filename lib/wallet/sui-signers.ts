@@ -146,8 +146,13 @@ export async function signApprovalWithPasskey(
 
 /** A person cancelling a wallet or passkey prompt is not an error worth alarming them with. */
 export function describeSignError(error: unknown): string {
+  if (isSignCancelled(error)) return 'Cancelled — nothing was signed.';
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** The person cancelled or declined — not the wallet failing. */
+export function isSignCancelled(error: unknown): boolean {
   const name = (error as { name?: string })?.name;
   const message = error instanceof Error ? error.message : String(error);
-  if (name === 'NotAllowedError' || /reject|denied|cancel/i.test(message)) return 'Cancelled — nothing was signed.';
-  return message;
+  return name === 'NotAllowedError' || /reject|denied|cancel/i.test(message);
 }

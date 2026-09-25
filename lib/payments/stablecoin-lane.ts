@@ -81,9 +81,9 @@ export function explorerTxUrl(network: SuiNetwork, digest: string): string {
  *                                it is free too and the screens say so.
  *   x402                         no Splash fee (the seller sets the price).
  *
- * Network gas is separate: the sender's wallet pays it in SUI until Splash's
- * sponsor wallet pays it (docs/STABLECOIN-LANE.md). Local-currency payouts
- * are priced elsewhere (lib/fx/corridors.ts, 0.70%).
+ * Network gas is separate, and on a wallet transfer there is none: see Gas
+ * below. Local-currency payouts are priced elsewhere (lib/fx/corridors.ts,
+ * 0.70%).
  *
  * A fee, when there is one, is charged ON TOP: the recipient receives exactly
  * the amount the business entered, and the business's wallet is debited
@@ -120,10 +120,70 @@ export function stablecoinFeeMinor(
   return proportional;
 }
 
-/** Below this a wallet transfer is refused: the gas outweighs the payment.
- *  1.00 USDC. x402 is exempt — the seller sets the price, and cents are the
- *  point of it. */
+/** Below this a wallet transfer is refused: 1.00 USDC. It keeps test-sized
+ *  sends and typos off a mainnet ledger, and sits far above Sui's 0.01 floor
+ *  for gasless transfers. x402 is exempt — the seller sets the price, and
+ *  cents are the point of it. */
 export const MIN_STABLECOIN_TRANSFER_MINOR = 1_000_000n;
+
+// ─── Gas ────────────────────────────────────────────────────────────────────
+
+/**
+ * A wallet transfer carries no network fee. Since protocol 137, Sui runs a
+ * transfer of an allowlisted stablecoin — native USDC among them — without
+ * gas, when the transaction does nothing but move that coin with
+ * 0x2::balance::send_funds (docs.sui.io, "Gasless Stablecoin Transfers").
+ * The sending wallet needs no SUI and Splash pays nothing: no sponsor wallet,
+ * no key on the server. Checked on mainnet with dry runs on 2026-09-26,
+ * from a wallet holding only coin objects and from one holding an address
+ * balance.
+ *
+ *   GASLESS      balance::send_funds for every leg, gas price 0, no gas coins.
+ *                The recipient's USDC lands in its address balance, which
+ *                wallets and Sui's own balance queries count with its coins.
+ *   SENDER_PAYS  a coin transfer; the sending wallet pays a little SUI. Used
+ *                for x402 (the seller's facilitator broadcasts that payment,
+ *                so it stays the coin transfer the x402 Sui scheme was
+ *                written against, and its price may sit under the floor),
+ *                when gasless is switched off, and as the fallback when the
+ *                network will not accept a gasless transfer. The quote says
+ *                which, before anything is signed.
+ *
+ * Under congestion Sui serves gas-paying transactions first, so a gasless
+ * transfer can take longer to land.
+ */
+export type GasMode = 'GASLESS' | 'SENDER_PAYS';
+
+/** Sui refuses a gasless transfer under 0.01 of the coin (six decimals). */
+export const GASLESS_MIN_LEG_MINOR = 10_000n;
+
+/** The coins Splash sends gasless: the lane's own USDC. Sui's allowlist is
+ *  longer (get_gasless_allowed_token_types); the lane only moves USDC. */
+export const GASLESS_COIN_TYPES: readonly string[] = [SUI_USDC_COIN_TYPE.mainnet];
+
+/** Gasless is on unless STABLECOIN_GASLESS=off — the switch for a protocol
+ *  change or a wallet that mishandles it, without a deploy. */
+export function gaslessEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return (env.STABLECOIN_GASLESS ?? '').trim().toLowerCase() !== 'off';
+}
+
+/**
+ * Does the sending wallet need SUI for this send? Only where gas is paid:
+ * every x402 payment, a transfer sent as a coin, any transfer while gasless
+ * is switched off, and a quote that says the wallet pays — the quote's word
+ * is final, since it may have fallen back.
+ */
+export function sendNeedsSui(input: { x402: boolean; gaslessOn: boolean; asCoin: boolean; quoteGas?: GasMode | null }): boolean {
+  return input.x402 || !input.gaslessOn || input.asCoin || input.quoteGas === 'SENDER_PAYS';
+}
+
+/** Can these legs go without gas? Every leg must clear Sui's floor. */
+export function gaslessEligible(coinType: string, legs: ReadonlyArray<{ amountMinor: bigint }>): boolean {
+  const paying = legs.filter((leg) => leg.amountMinor > 0n);
+  return GASLESS_COIN_TYPES.includes(coinType)
+    && paying.length > 0
+    && paying.every((leg) => leg.amountMinor >= GASLESS_MIN_LEG_MINOR);
+}
 
 export interface StablecoinQuote {
   principalMinor: bigint;

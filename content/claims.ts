@@ -15,8 +15,8 @@ export type Claim = {
 
 export const lockedCopy = {
   headline: 'Collect USD. Pay Southeast Asia. Keep cash working.',
-  fee: 'From 0.80% at the edge',
-  feeFootnote: 'Starting fee; varies by corridor and volume.',
+  fee: '0.70% to local currency',
+  feeFootnote: 'Flat on every corridor, no fixed fee. USDC transfers are free.',
   speed: '~400ms Sui settlement finality',
   speedFootnote: 'Local delivery varies by rail.',
   yield: 'Variable APY - T-bill-backed',
@@ -56,7 +56,7 @@ export const claims = {
   },
   fee: {
     claim: lockedCopy.fee,
-    evidence: 'Corridor fee table in lib/fx/corridors.ts; exact fee varies by route and volume.',
+    evidence: 'Corridor fee table in lib/fx/corridors.ts: 70 bps on every corridor and no fixed fee (pricing decision of 2026-09-26).',
     status: 'modeled',
   },
   treasuryYield: {

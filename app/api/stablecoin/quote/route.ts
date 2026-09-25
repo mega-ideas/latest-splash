@@ -40,6 +40,10 @@ export async function POST(request: Request) {
     recipientId: String(body.recipientId ?? ''),
     amount: String(body.amount ?? ''),
     senderAddress: String(body.senderAddress ?? ''),
+    // After a wallet would not sign the gasless transfer: the same one with
+    // gas paid in SUI, replacing (and releasing) the quote it could not sign.
+    payGasInSui: body.payGasInSui === true,
+    replaces: typeof body.replaces === 'string' && body.replaces ? body.replaces : undefined,
   });
   if (!result.ok) {
     const { status, ...rest } = result;

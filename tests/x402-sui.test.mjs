@@ -168,6 +168,9 @@ test('an x402 payment: reserved with no fee, sent to the seller, confirmed from 
   const q = await quote(w.deps);
   assert.equal(q.ok, true);
   assert.equal(q.amountMinor, '10000');
+  // Never gasless: the seller's facilitator broadcasts a coin transfer the buyer pays gas for.
+  assert.equal(q.gas, 'SENDER_PAYS');
+  assert.equal(JSON.parse(Buffer.from(q.transactionBytes, 'base64').toString()).gas, 'SENDER_PAYS');
   const row = (await w.client.query(`SELECT kind, fee_minor, resource, requested_by FROM stablecoin_outflows WHERE id = '${q.outflowId}'`)).rows[0];
   assert.equal(row.kind, 'X402');
   assert.equal(Number(row.fee_minor), 0, 'no Splash fee on x402');
@@ -269,5 +272,23 @@ test('quote refusals: EVM-only seller, unscreened payee without an admin attesta
 
   w = await world({ verdict: 'BLOCK' });
   assert.equal((await quote(w.deps)).code, 'payee_blocked');
+  await w.client.close();
+});
+
+test('a dry run the node refuses or does not answer: nothing is paid and the approval goes back', async () => {
+  const w = await world();
+  const q = await quote(w.deps);
+  w.deps.chain.simulate = async () => { throw new Error('Too Many Requests'); };
+  w.deps.chain.isTransient = (e) => /too many requests/i.test(e.message);
+  let r = await pay(w.deps, q);
+  assert.equal(r.code, 'chain_busy');
+  assert.equal(w.calls.sellerPaid, 0);
+  assert.equal(w.calls.released, 1);
+
+  w.deps.chain.simulate = async () => { throw new Error('Error checking transaction input objects: denied'); };
+  r = await pay(w.deps, q);
+  assert.equal(r.code, 'preflight_refused');
+  assert.equal(w.calls.sellerPaid, 0);
+  assert.equal(w.calls.released, 2);
   await w.client.close();
 });

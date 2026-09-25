@@ -14,7 +14,7 @@ import {
   ZekeLaneRefusal,
   zekeLaneState,
 } from './zeke-lane-guard.ts';
-import { isOnboarding, laneAccess } from '../payments/stablecoin-lane.ts';
+import { gaslessEnabled, isOnboarding, laneAccess } from '../payments/stablecoin-lane.ts';
 import type { KybLifecycleState } from '../compliance/kyb-state.ts';
 import {
   DEFAULT_ASSISTANT_NAME,
@@ -1932,7 +1932,10 @@ const SPLASH_ANSWERS: Array<{ test: RegExp; reply: string | (() => string); skip
   {
     // Who pays gas / sponsored
     test: /\b(gas|who pays|network fee|do i need sui|hold sui|wallet funding|top ?up)\b/,
-    reply: 'For local-currency payouts, Splash settles on Sui and pays the network fee itself: you see the 0.70% fee, never a separate gas charge. For USDC you send from your own wallet, that wallet pays the Sui network fee in SUI — about 0.003 SUI a transfer — until Splash sponsors it.',
+    reply: () => 'For local-currency payouts, Splash settles on Sui and pays the network fee itself: you see the 0.70% fee, never a separate gas charge. '
+      + (gaslessEnabled()
+        ? 'A USDC transfer from your wallet has no network fee at all: Sui carries USDC between wallets without gas, so the wallet needs no SUI to send it. Paying an x402 API, or claiming USDC bridged in from another chain, still takes a little SUI for gas.'
+        : 'For USDC you send from your own wallet, that wallet pays the Sui network fee in SUI, a few thousandths of a SUI a transfer.'),
   },
   {
     // Depeg protection

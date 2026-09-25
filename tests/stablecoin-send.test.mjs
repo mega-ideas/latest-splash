@@ -9,6 +9,7 @@ import { drizzle } from 'drizzle-orm/pglite';
 
 import * as schema from '../lib/db/schema.ts';
 import { parseUsdcMinor, SUI_USDC_COIN_TYPE } from '../lib/payments/stablecoin-lane.ts';
+import { explainGaslessRefusal, isTransientChainError } from '../lib/server/stablecoin-chain.ts';
 import { readAllowance, RESERVATION_MS } from '../lib/server/stablecoin-outflows.ts';
 import { quoteWalletTransfer, submitWalletTransfer } from '../lib/server/stablecoin-send.ts';
 
@@ -40,15 +41,18 @@ async function migratedDb() {
   return { client, db };
 }
 
-/** A chain double. Bytes are JSON {sender, coinType, legs}; "signing" is the
- *  identity; balance changes are derived from the legs. */
-function scriptedChain({ buildError, executeThrows = false, executeFails = false } = {}) {
+/** A chain double. Bytes are JSON {sender, coinType, legs, gas}; "signing" is
+ *  the identity; balance changes are derived from the legs. A SENDER_PAYS
+ *  transaction also costs the sender SUI, whether or not it succeeds; a
+ *  GASLESS one costs nothing. */
+function scriptedChain({ buildError, gaslessBuildError, senderPaysBuildError, simulateThrows, executeThrows = false, executeLost = false, executeFails = false } = {}) {
   const landed = new Map();
-  const calls = { execute: 0, simulate: 0 };
+  const calls = { execute: 0, simulate: 0, builds: [] };
   const decode = (bytes) => JSON.parse(new TextDecoder().decode(bytes));
   const observe = (bytes, success = true) => {
     const tx = decode(bytes);
     const total = tx.legs.reduce((s, l) => s + BigInt(l.amountMinor), 0n);
+    const gas = tx.gas === 'SENDER_PAYS' ? [{ coinType: '0x2::sui::SUI', address: tx.sender, amount: '-2000000' }] : [];
     return {
       digest: createHash('sha256').update(bytes).digest('hex'),
       success,
@@ -56,8 +60,9 @@ function scriptedChain({ buildError, executeThrows = false, executeFails = false
       sender: tx.sender,
       balanceChanges: success
         ? [{ coinType: tx.coinType, address: tx.sender, amount: (-total).toString() },
-          ...tx.legs.map((l) => ({ coinType: tx.coinType, address: l.address, amount: String(l.amountMinor) }))]
-        : [],
+          ...tx.legs.map((l) => ({ coinType: tx.coinType, address: l.address, amount: String(l.amountMinor) })),
+          ...gas]
+        : gas,
     };
   };
   return {
@@ -66,12 +71,21 @@ function scriptedChain({ buildError, executeThrows = false, executeFails = false
     encode: (tx) => new TextEncoder().encode(JSON.stringify(tx, (_k, v) => (typeof v === 'bigint' ? v.toString() : v))),
     deps: {
       async build(input) {
+        calls.builds.push(input.gas);
         if (buildError) throw new Error(buildError);
+        if (gaslessBuildError && input.gas === 'GASLESS') throw new Error(gaslessBuildError);
+        if (senderPaysBuildError && input.gas === 'SENDER_PAYS') throw new Error(senderPaysBuildError);
         return new TextEncoder().encode(JSON.stringify({ ...input, legs: input.legs.map((l) => ({ ...l, amountMinor: l.amountMinor.toString() })) }));
       },
-      async simulate(bytes) { calls.simulate += 1; return observe(bytes); },
+      async simulate(bytes) {
+        calls.simulate += 1;
+        if (simulateThrows) throw new Error(simulateThrows);
+        return observe(bytes);
+      },
       async execute(bytes) {
         calls.execute += 1;
+        // Sent, and nothing came back: not on chain (yet) as far as Splash can tell.
+        if (executeLost) throw new Error('socket hang up');
         const o = observe(bytes, !executeFails);
         landed.set(o.digest, o);
         if (executeThrows) throw new Error('socket hang up');
@@ -81,11 +95,13 @@ function scriptedChain({ buildError, executeThrows = false, executeFails = false
       digestOf: (bytes) => createHash('sha256').update(bytes).digest('hex'),
       senderOf: (bytes) => decode(bytes).sender,
       describeBuildError: (e) => `described: ${e.message}`,
+      explainGaslessRefusal,
+      isTransient: isTransientChainError,
     },
   };
 }
 
-async function setup({ kyb = 'REGISTERED', verdict = 'CLEAR', payoutMethod = 'WALLET', fee = FEE, approved = true, chainOpts, anchorFee = false, splashWallet = false } = {}) {
+async function setup({ kyb = 'REGISTERED', verdict = 'CLEAR', payoutMethod = 'WALLET', fee = FEE, approved = true, chainOpts, anchorFee = false, splashWallet = false, gasless = true } = {}) {
   const { client, db } = await migratedDb();
   await client.exec(`INSERT INTO organizations (id, name, kyb_lifecycle) VALUES ('org_s', 'S Co', '${kyb}')`);
   await client.exec(`INSERT INTO users (id, email, name) VALUES ('u_owner', 'owner@s.test', 'Owner')`);
@@ -111,6 +127,7 @@ async function setup({ kyb = 'REGISTERED', verdict = 'CLEAR', payoutMethod = 'WA
     feeAddress: () => fee ?? undefined,
     isSplashWallet: async () => splashWallet,
     anchorFeeOn: () => anchorFee,
+    gaslessOn: () => gasless,
     now: () => now,
   };
   return { client, db, deps, chain, approvals, advance: (ms) => { now += ms; } };
@@ -134,6 +151,8 @@ test('the happy path: 1,000 USDC to the recipient, no Splash fee, one leg, recor
   assert.equal(q.feeKind, 'FREE');
   assert.equal(q.feeAddress, null, 'no fee, no fee leg, no fee address');
   assert.deepEqual(JSON.parse(new TextDecoder().decode(fromBase64(q.transactionBytes))).legs.map((l) => l.address), [RECIPIENT]);
+  assert.equal(q.gas, 'GASLESS', 'a wallet transfer carries no network fee');
+  assert.deepEqual(chain.calls.builds, ['GASLESS']);
 
   const done = await submit(deps, q);
   assert.equal(done.ok, true);
@@ -209,14 +228,152 @@ test('a quote that lapsed before submission is closed, and nothing is sent', asy
 test('a transaction that fails on chain is recorded FAILED and releases the allowance', async () => {
   const { client, db, deps } = await setup({ chainOpts: { executeFails: true } });
   const q = await quote(deps, '5000');
+  assert.equal(q.gas, 'GASLESS');
   const r = await submit(deps, q);
   assert.equal(r.code, 'failed_on_chain');
-  assert.match(r.error, /gas\) was still charged/);
+  assert.match(r.error, /no network fee was charged/, 'a failed gasless transfer cost nothing');
   const row = (await client.query(`SELECT status, tx_digest FROM stablecoin_outflows WHERE id = '${q.outflowId}'`)).rows[0];
   assert.equal(row.status, 'FAILED');
   assert.ok(row.tx_digest, 'the digest is kept so it can be looked up');
   assert.equal((await readAllowance(db, 'org_s', T0)).allowance.usedMinor, 0n);
   await client.close();
+});
+
+test('a failed transfer that paid gas says the gas was still charged — read from the chain', async () => {
+  const { client, deps } = await setup({ gasless: false, chainOpts: { executeFails: true } });
+  const q = await quote(deps, '50');
+  assert.equal(q.gas, 'SENDER_PAYS');
+  const r = await submit(deps, q);
+  assert.equal(r.code, 'failed_on_chain');
+  assert.match(r.error, /gas\) was still charged/);
+  await client.close();
+});
+
+test('gas: gasless by default; the switch off, or a network that refuses gasless, means the wallet pays — and the quote says so', async () => {
+  let s = await setup({ gasless: false });
+  let q = await quote(s.deps, '20');
+  assert.equal(q.gas, 'SENDER_PAYS');
+  assert.deepEqual(s.chain.calls.builds, ['SENDER_PAYS'], 'switched off: gasless is never tried');
+  await s.client.close();
+
+  s = await setup({ chainOpts: { gaslessBuildError: 'Transaction is not eligible for gasless execution' } });
+  q = await quote(s.deps, '20');
+  assert.equal(q.ok, true);
+  assert.equal(q.gas, 'SENDER_PAYS');
+  assert.deepEqual(s.chain.calls.builds, ['GASLESS', 'SENDER_PAYS']);
+  assert.equal(JSON.parse(new TextDecoder().decode(fromBase64(q.transactionBytes))).gas, 'SENDER_PAYS', 'the bytes are the fallback build');
+  // …and it still goes through: gas in SUI is not a USDC movement.
+  const done = await submit(s.deps, q);
+  assert.equal(done.status, 'CONFIRMED');
+  await s.client.close();
+
+  // The fee leg counts too: every leg must clear Sui's 0.01 floor (0.05 does).
+  s = await setup({ anchorFee: true });
+  q = await quote(s.deps, '10');
+  assert.equal(q.feeMinor, '50000');
+  assert.equal(q.gas, 'GASLESS');
+  await s.client.close();
+});
+
+test('a wallet that would not sign gasless: re-quote with gas in SUI, releasing the first quote', async () => {
+  const { client, db, deps, chain } = await setup();
+  const first = await quote(deps, '3000');
+  assert.equal(first.gas, 'GASLESS');
+  assert.equal((await readAllowance(db, 'org_s', T0)).allowance.usedMinor, usdc('3000'));
+
+  const second = await quote(deps, '3000', { payGasInSui: true, replaces: first.outflowId });
+  assert.equal(second.ok, true);
+  assert.equal(second.gas, 'SENDER_PAYS');
+  assert.deepEqual(chain.calls.builds, ['GASLESS', 'SENDER_PAYS'], 'asked for SUI gas: gasless is not tried');
+  const old = (await client.query(`SELECT status, failure_reason FROM stablecoin_outflows WHERE id = '${first.outflowId}'`)).rows[0];
+  assert.deepEqual(old, { status: 'EXPIRED', failure_reason: 'replaced by a new quote' });
+  assert.equal((await readAllowance(db, 'org_s', T0)).allowance.usedMinor, usdc('3000'), 'the allowance counts once, not twice');
+
+  // The replaced quote cannot be sent any more; the new one can.
+  assert.equal((await submit(deps, first)).status, 409);
+  assert.equal((await submit(deps, second)).status, 'CONFIRMED');
+  await client.close();
+});
+
+test('a quote already signed and sent is never released by a re-quote', async () => {
+  const { client, deps } = await setup({ chainOpts: { executeLost: true } });
+  const first = await quote(deps, '100');
+  const sent = await submit(deps, first);
+  assert.equal(sent.ok, false, 'no answer from the network');
+  const row = (await client.query(`SELECT status, tx_digest FROM stablecoin_outflows WHERE id = '${first.outflowId}'`)).rows[0];
+  assert.equal(row.status, 'PENDING');
+  assert.ok(row.tx_digest, 'bound before it was sent, so it may still land');
+  const again = await quote(deps, '100', { payGasInSui: true, replaces: first.outflowId });
+  assert.equal(again.code, 'quote_already_sent');
+  assert.equal((await client.query(`SELECT status FROM stablecoin_outflows WHERE id = '${first.outflowId}'`)).rows[0].status, 'PENDING');
+  await client.close();
+});
+
+test('a re-quote releases only the asker’s own unsent quote', async () => {
+  const { client, deps } = await setup();
+  await client.exec(`INSERT INTO users (id, email, name) VALUES ('u_other', 'other@s.test', 'Other')`);
+  const theirs = await quote(deps, '200', { userId: 'u_other' });
+  const mine = await quote(deps, '200', { replaces: theirs.outflowId });
+  assert.equal(mine.ok, true);
+  const row = (await client.query(`SELECT status FROM stablecoin_outflows WHERE id = '${theirs.outflowId}'`)).rows[0];
+  assert.equal(row.status, 'PENDING', 'someone else’s quote is left alone');
+  await client.close();
+});
+
+test('change under 0.01 USDC: Sui refuses it gasless, and with no SUI either, the sender is told how to fix the amount', async () => {
+  // The node's own words, from a mainnet dry run (2026-09-26).
+  const dust = 'Error checking transaction input objects: Invalid withdraw reservation: Invalid gasless withdrawal of coin type USDC from address 0x9f63. Gasless transactions must either use the entire address balance, or leave at least 10000. Remaining amount would be 5000';
+  let s = await setup({ chainOpts: { gaslessBuildError: dust, senderPaysBuildError: 'No valid gas coins found for the transaction.' } });
+  const r = await quote(s.deps, '100');
+  assert.equal(r.code, 'cannot_build');
+  assert.match(r.error, /no USDC or with at least 0\.01 USDC/);
+  assert.equal((await readAllowance(s.db, 'org_s', T0)).allowance.usedMinor, 0n);
+  await s.client.close();
+
+  // With SUI in the wallet it simply goes with gas paid — the quote says so.
+  s = await setup({ chainOpts: { gaslessBuildError: dust } });
+  assert.equal((await quote(s.deps, '100')).gas, 'SENDER_PAYS');
+  await s.client.close();
+
+  // A refusal the amount cannot fix is described as the fallback's own error.
+  s = await setup({ chainOpts: { gaslessBuildError: 'network unreachable', senderPaysBuildError: 'No valid gas coins found for the transaction.' } });
+  assert.match((await quote(s.deps, '100')).error, /described: No valid gas coins/);
+  await s.client.close();
+});
+
+test('a busy node is not a refusal: nothing falls back to paid gas, nothing stays reserved', async () => {
+  const { client, db, deps, chain } = await setup({ chainOpts: { gaslessBuildError: 'Too Many Requests' } });
+  const r = await quote(deps, '100');
+  assert.equal(r.status, 503);
+  assert.equal(r.code, 'chain_busy');
+  assert.deepEqual(chain.calls.builds, ['GASLESS'], 'the sender is not quietly made to pay gas');
+  assert.equal((await readAllowance(db, 'org_s', T0)).allowance.usedMinor, 0n);
+  await client.close();
+});
+
+test('Sui refusing the signed transaction at the check before sending: nothing sent, the approval handed back, and why', async () => {
+  // The wallet changed between quote and submit, so the change would now be dust.
+  const dust = 'Error checking transaction input objects: Invalid withdraw reservation: Gasless transactions must either use the entire address balance, or leave at least 10000. Remaining amount would be 5000';
+  let s = await setup({ chainOpts: { simulateThrows: dust } });
+  let q = await quote(s.deps, '100');
+  let r = await submit(s.deps, q);
+  assert.equal(r.code, 'preflight_refused');
+  assert.match(r.error, /Not sent/);
+  assert.match(r.error, /at least 0\.01 USDC/);
+  assert.equal(s.approvals.consumed, 1);
+  assert.equal(s.approvals.released, 1, 'the approval goes back: nothing moved');
+  assert.equal(s.chain.calls.execute, 0);
+  assert.equal((await s.client.query(`SELECT status, tx_digest FROM stablecoin_outflows WHERE id = '${q.outflowId}'`)).rows[0].tx_digest, null);
+  await s.client.close();
+
+  s = await setup({ chainOpts: { simulateThrows: 'Too Many Requests' } });
+  q = await quote(s.deps, '100');
+  r = await submit(s.deps, q);
+  assert.equal(r.code, 'chain_busy');
+  assert.equal(r.status, 503);
+  assert.equal(s.approvals.released, 1);
+  assert.equal(s.chain.calls.execute, 0);
+  await s.client.close();
 });
 
 test('the unverified cap holds across quotes', async () => {
@@ -230,10 +387,11 @@ test('the unverified cap holds across quotes', async () => {
 });
 
 test('a build failure (no USDC, no gas) releases the reservation it made', async () => {
-  const { client, db, deps } = await setup({ chainOpts: { buildError: 'Insufficient balance of USDC' } });
+  const { client, db, deps, chain } = await setup({ chainOpts: { buildError: 'Insufficient balance of USDC' } });
   const r = await quote(deps, '4000');
   assert.equal(r.status, 422);
   assert.match(r.error, /described: Insufficient balance/);
+  assert.deepEqual(chain.calls.builds, ['GASLESS', 'SENDER_PAYS'], 'the reason given is the last attempt');
   assert.equal((await readAllowance(db, 'org_s', T0)).allowance.usedMinor, 0n);
   await client.close();
 });

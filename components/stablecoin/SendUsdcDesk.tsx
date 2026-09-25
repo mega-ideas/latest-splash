@@ -30,6 +30,7 @@ import {
   formatUsdc,
   parseUsdcMinor,
   quoteStablecoinTransfer,
+  sendNeedsSui,
   shortAddress,
   StablecoinLaneError,
 } from '@/lib/payments/stablecoin-lane';
@@ -38,6 +39,7 @@ import {
   connectWallet,
   describeSignError,
   discoverWallets,
+  isSignCancelled,
   signWithPasskey,
   signWithWallet,
   type AcceptedWallet,
@@ -52,6 +54,8 @@ type Lane = {
   allowance: { usedMinor: string; remainingMinor: string; windowCapMinor: string; windowDays: number };
   /** Stablecoin transfers are free; the audit-anchor fee (out of Splash) only when switched on. */
   pricing: { anchorFeeOn: boolean };
+  /** Wallet transfers carry no network fee while this is on (x402 still needs SUI). */
+  gas?: { gasless: boolean };
   minimumMinor: string;
   screeningConfigured: boolean;
   approval: { style: 'WHATSAPP_PASSKEY' | 'CLICK'; requireDualApproval: boolean; approvalThresholdUsd: number; ready?: boolean; readyReason?: string };
@@ -85,6 +89,8 @@ type Quote = {
   totalDebitMinor: string;
   /** 'SPLASH' when the recipient's wallet is a Splash user's (always free). */
   destination?: 'SPLASH' | 'EXTERNAL';
+  /** How this transaction's network fee is paid: none (gasless) or by the sending wallet in SUI. */
+  gas?: 'GASLESS' | 'SENDER_PAYS';
   reservedUntil: string;
   transactionBytes: string;
 };
@@ -140,6 +146,16 @@ export default function SendUsdcDesk() {
   // by resending the SAME signature (never a new one).
   const [lastSigned, setLastSigned] = useState<{ bytes: string; signature: string } | null>(null);
   const [settling, setSettling] = useState(false);
+  // A connected wallet that would not sign the gasless transfer: offer the
+  // same transfer with gas paid in SUI (a re-quote, approved again).
+  const [walletRefusedGasless, setWalletRefusedGasless] = useState(false);
+  // The sender's own choice: a coin transfer with gas paid in SUI, for a
+  // recipient whose wallet does not show Sui address balances.
+  const [asCoin, setAsCoin] = useState(false);
+  // A quote the person walked away from (Change amount or recipient) before
+  // signing: the next quote releases its allowance instead of waiting for it
+  // to lapse. The server releases only a quote that never left Splash.
+  const [abandonedQuoteId, setAbandonedQuoteId] = useState<string | null>(null);
 
   const loadLane = useCallback(async () => {
     const res = await fetch('/api/stablecoin/allowance', { cache: 'no-store' });
@@ -181,6 +197,8 @@ export default function SendUsdcDesk() {
   const senderView = source === 'SPLASH' ? splash : external?.view ?? null;
 
   const anchorFeeOn = lane?.pricing?.anchorFeeOn ?? false;
+  const gasless = lane?.gas?.gasless ?? false;
+  const needsSui = sendNeedsSui({ x402: mode === 'X402', gaslessOn: gasless, asCoin, quoteGas: quote?.gas });
   const preview = useMemo(() => {
     if (!amount.trim()) return null;
     try {
@@ -218,19 +236,31 @@ export default function SendUsdcDesk() {
     }
   }
 
-  async function getQuote() {
+  async function getQuote(options: { payGasInSui?: boolean; replaces?: string } = {}) {
     if (!sender || !recipientId || !preview?.ok) return;
     setBusy('quote');
     setError('');
+    const replaces = options.replaces ?? abandonedQuoteId ?? undefined;
     try {
       const res = await fetch('/api/stablecoin/quote', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ recipientId, amount: amount.trim(), senderAddress: sender }),
+        body: JSON.stringify({ recipientId, amount: amount.trim(), senderAddress: sender, ...options, ...(replaces ? { replaces } : {}) }),
       });
-      const body = await json<Quote & { error?: string }>(res);
-      if (!res.ok) throw new Error(body.error ?? 'The quote could not be prepared.');
+      setAbandonedQuoteId(null);
+      const body = await json<Quote & { error?: string; code?: string }>(res);
+      if (!res.ok) {
+        // A re-quote releases the quote it replaces before it builds, so if
+        // it fails that quote is gone too — unless it was already sent.
+        if (options.replaces && body.code !== 'quote_already_sent') {
+          setQuote(null);
+          setApproved(false);
+          setWalletRefusedGasless(false);
+        }
+        throw new Error(body.error ?? 'The quote could not be prepared.');
+      }
       setQuote(body);
+      setWalletRefusedGasless(false);
       setApproved(false);
       setNow(Date.now());
       void loadLane();
@@ -280,6 +310,7 @@ export default function SendUsdcDesk() {
         principalMinor: body.amountMinor,
         feeMinor: '0',
         totalDebitMinor: body.amountMinor,
+        gas: 'SENDER_PAYS',
         reservedUntil: body.reservedUntil,
         transactionBytes: body.transactionBytes,
       });
@@ -357,7 +388,14 @@ export default function SendUsdcDesk() {
         signed = await signWithPasskey(splash.passkey, quote.transactionBytes);
       } else {
         if (!external) throw new Error('Connect the wallet you quoted from.');
-        signed = await signWithWallet(external.accepted, external.account, quote.transactionBytes);
+        try {
+          signed = await signWithWallet(external.accepted, external.account, quote.transactionBytes);
+          setWalletRefusedGasless(false);
+        } catch (err) {
+          // A person cancelling is not the wallet refusing the transaction.
+          if (quote.gas === 'GASLESS' && !isSignCancelled(err)) setWalletRefusedGasless(true);
+          throw err;
+        }
       }
       setLastSigned(signed);
       if (quote.kind === 'X402') {
@@ -373,6 +411,8 @@ export default function SendUsdcDesk() {
   }
 
   function startOver() {
+    // Never signed here, so never sent from here: the next quote can free it.
+    if (quote && quote.kind !== 'X402' && !sent && !lastSigned) setAbandonedQuoteId(quote.outflowId);
     setPrefilled(false);
     setQuote(null);
     setApproved(false);
@@ -381,6 +421,7 @@ export default function SendUsdcDesk() {
     setError('');
     setLastSigned(null);
     setSettling(false);
+    setWalletRefusedGasless(false);
     void loadLane();
   }
 
@@ -398,7 +439,9 @@ export default function SendUsdcDesk() {
       <DashPageHeader
         kicker="USDC on Sui · mainnet"
         title="Send USDC"
-        description="Real USDC on Sui mainnet — to a wallet recipient you have saved, or to an API that asks for payment over x402. A recipient receives exactly what you enter, and Splash charges nothing on stablecoin transfers. The network fee (gas) is paid in SUI by the sending wallet."
+        description={`Real USDC on Sui mainnet — to a wallet recipient you have saved, or to an API that asks for payment over x402. A recipient receives exactly what you enter, and Splash charges nothing on stablecoin transfers. ${gasless
+          ? 'Sui carries a wallet transfer of USDC without a network fee, so the sending wallet needs no SUI; an x402 payment still takes a little SUI for gas.'
+          : 'The network fee (gas) is paid in SUI by the sending wallet.'}`}
       />
 
       {lane && !lane.lane.open ? (
@@ -455,6 +498,7 @@ export default function SendUsdcDesk() {
         <Readiness
           lane={lane}
           mode={mode}
+          needsSui={needsSui}
           source={source}
           sender={sender}
           senderView={senderView}
@@ -535,7 +579,7 @@ export default function SendUsdcDesk() {
                   </div>
                 </div>
 
-                <WalletBalances view={senderView} source={source} />
+                <WalletBalances view={senderView} source={source} needsSui={needsSui} />
               </StepCard>
 
               <div role="tablist" aria-label="What are you paying?" className="inline-flex rounded-lg border border-[#326273]/15 bg-[#F6F0ED] p-1">
@@ -670,15 +714,29 @@ export default function SendUsdcDesk() {
                       ) : preview ? (
                         <p className="text-[13px] text-[var(--error)]">{preview.reason}</p>
                       ) : (
-                        <p className="text-[13px] text-[#326273]/90">Minimum 1 USDC. The network fee (gas) is paid in SUI from the sending wallet.</p>
+                        <p className="text-[13px] text-[#326273]/90">Minimum 1 USDC. {gasless && !asCoin ? 'No network fee: Sui carries USDC transfers without gas.' : 'The network fee (gas) is paid in SUI from the sending wallet.'}</p>
                       )}
                     </div>
+                    {gasless ? (
+                      <label className="flex cursor-pointer items-start gap-2 text-[13px] leading-5 text-[#326273]/90 sm:col-span-2">
+                        <input
+                          type="checkbox"
+                          checked={asCoin}
+                          onChange={(e) => setAsCoin(e.target.checked)}
+                          disabled={Boolean(quote)}
+                          className="mt-0.5 h-4 w-4 shrink-0 accent-[#0C3E48] focus-ring"
+                        />
+                        <span>
+                          Send it as a coin instead — for a wallet or exchange that does not show Sui address balances yet. Your wallet pays a little SUI for gas.
+                        </span>
+                      </label>
+                    ) : null}
                   </div>
                 )}
                 {!quote ? (
                   <button
                     type="button"
-                    onClick={() => void getQuote()}
+                    onClick={() => void getQuote(asCoin ? { payGasInSui: true } : {})}
                     disabled={busy !== null || !sender || !recipientId || !preview?.ok || !lane?.lane.open}
                     className="dash-btn mt-3 !px-4 !py-2 !text-[13px] disabled:cursor-not-allowed disabled:opacity-50"
                   >
@@ -703,7 +761,7 @@ export default function SendUsdcDesk() {
 
               <StepCard n={3} title="Approve" done={approved} disabled={!quote}>
                 {quote ? (
-                  <ApprovalFlow purpose="STABLECOIN_TRANSFER" subjectId={quote.outflowId} onApproved={() => setApproved(true)} />
+                  <ApprovalFlow key={quote.outflowId} purpose="STABLECOIN_TRANSFER" subjectId={quote.outflowId} onApproved={() => setApproved(true)} />
                 ) : (
                   <p className="text-[13px] text-[#326273]/90">Get a quote first.</p>
                 )}
@@ -722,6 +780,19 @@ export default function SendUsdcDesk() {
                     {quote?.kind === 'X402' ? 'The seller accepted the payment; it has not shown on chain yet.' : 'The network did not confirm the submission yet.'}{' '}
                     <button type="button" onClick={() => void checkAgain()} disabled={busy !== null} className="font-semibold text-[var(--info)] hover:underline">{quote?.kind === 'X402' ? 'Check again' : 'Send again'}</button>
                     <span className="block text-[12px] text-[#326273]/90">This resends the same signed transaction — it cannot be paid twice.</span>
+                  </div>
+                ) : null}
+                {walletRefusedGasless && quote?.gas === 'GASLESS' && quote.kind !== 'X402' && source === 'EXTERNAL' ? (
+                  <div role="status" className="mt-2 rounded-lg border border-[#326273]/15 bg-white p-3 text-[13px] leading-5 text-[#1F4452]">
+                    {external?.accepted.label ?? 'Your wallet'} did not sign the transfer without a network fee. It can go as an ordinary coin transfer instead: the wallet pays a little SUI for gas, and the new quote is approved again.{' '}
+                    <button
+                      type="button"
+                      onClick={() => void getQuote({ payGasInSui: true, replaces: quote.outflowId })}
+                      disabled={busy !== null}
+                      className="font-semibold text-[var(--info)] hover:underline disabled:opacity-50"
+                    >
+                      Pay the network fee in SUI
+                    </button>
                   </div>
                 ) : null}
                 <p className="mt-2 flex items-start gap-2 text-[12px] leading-5 text-[#326273]/90">
@@ -804,7 +875,11 @@ function TransactionLegs({ quote }: { quote: Quote }) {
           <span className="font-semibold text-[#1F4452]">Leaves your wallet</span>
           <span className="font-mono text-base font-bold text-[#0C3E48]">{formatUsdc(BigInt(quote.totalDebitMinor))} USDC</span>
         </div>
-        <p className="mt-1 text-[12px] text-[#326273]/90">Plus a small network fee in SUI.</p>
+        <p className="mt-1 text-[12px] text-[#326273]/90">
+          {quote.gas === 'GASLESS'
+            ? 'No network fee: Sui carries this USDC transfer without gas. It lands in the recipient’s Sui address balance, which Suiscan and suisnap.com count with the rest of their USDC.'
+            : 'Plus a small network fee in SUI, paid by the sending wallet.'}
+        </p>
       </div>
     </figure>
   );
@@ -820,6 +895,7 @@ type Check = { key: string; label: string; state: 'ok' | 'todo' | 'waiting' | 'n
 function Readiness({
   lane,
   mode,
+  needsSui,
   source,
   sender,
   senderView,
@@ -827,6 +903,7 @@ function Readiness({
 }: {
   lane: Lane;
   mode: 'WALLET' | 'X402';
+  needsSui: boolean;
   source: 'SPLASH' | 'EXTERNAL';
   sender: string | null;
   senderView: WalletView | null | undefined;
@@ -860,11 +937,13 @@ function Readiness({
       : usdc >= minimum
         ? { key: 'usdc', label: 'USDC to send', state: 'ok', detail: `${formatUsdc(usdc)} USDC in the wallet.` }
         : { key: 'usdc', label: 'USDC to send', state: 'todo', detail: `${formatUsdc(usdc)} USDC in the wallet. Send USDC on Sui to it from Slush, MetaMask or an exchange — or bring it from another chain (Add funds, under Pay from).` },
-    !sender || senderView?.suiMist === undefined
-      ? { key: 'gas', label: 'SUI for network fees', state: 'waiting', detail: 'Shown once a wallet is chosen.' }
-      : senderView.gasLow
-        ? { key: 'gas', label: 'SUI for network fees', state: 'todo', detail: 'About 0.05 SUI covers the network fee on many transfers. Without it the wallet can hold USDC but not send it.' }
-        : { key: 'gas', label: 'SUI for network fees', state: 'ok', detail: 'Enough for the network fee.' },
+    !needsSui
+      ? { key: 'gas', label: 'Network fee', state: 'ok', detail: 'None. Sui carries USDC transfers without gas, so the wallet needs no SUI.' }
+      : !sender || senderView?.suiMist === undefined
+        ? { key: 'gas', label: 'SUI for network fees', state: 'waiting', detail: 'Shown once a wallet is chosen.' }
+        : senderView.gasLow
+          ? { key: 'gas', label: 'SUI for network fees', state: 'todo', detail: mode === 'X402' ? 'An x402 payment is paid for in SUI gas. About 0.05 SUI covers many payments.' : 'About 0.05 SUI covers the network fee on many transfers. Without it the wallet can hold USDC but not send it.' }
+          : { key: 'gas', label: 'SUI for network fees', state: 'ok', detail: 'Enough for the network fee.' },
     ...(mode === 'WALLET'
       ? [walletRecipients > 0
         ? { key: 'recipient', label: 'A saved wallet recipient', state: 'ok' as const, detail: `${walletRecipients} saved. Recipients are only ever added by hand.` }
@@ -943,7 +1022,7 @@ function StepCard({ n, title, done, disabled, children }: { n: number; title: st
   );
 }
 
-function WalletBalances({ view, source }: { view: WalletView | null | undefined; source: 'SPLASH' | 'EXTERNAL' }) {
+function WalletBalances({ view, source, needsSui }: { view: WalletView | null | undefined; source: 'SPLASH' | 'EXTERNAL'; needsSui: boolean }) {
   if (!view) return null;
   if (!view.address) {
     return (
@@ -970,10 +1049,10 @@ function WalletBalances({ view, source }: { view: WalletView | null | undefined;
       ) : (
         <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[13px] tabular-nums text-[#1F4452]">
           <span><strong>{view.usdcMinor ? formatUsdc(BigInt(view.usdcMinor)) : '—'}</strong> USDC</span>
-          <span><strong>{view.suiMist ? (Number(BigInt(view.suiMist) / 1_000_000n) / 1000).toFixed(3) : '—'}</strong> SUI for gas</span>
+          <span><strong>{view.suiMist ? (Number(BigInt(view.suiMist) / 1_000_000n) / 1000).toFixed(3) : '—'}</strong> SUI{needsSui ? ' for gas' : ''}</span>
         </div>
       )}
-      {view.gasLow ? (
+      {view.gasLow && needsSui ? (
         <p className="mt-2 text-[12px] leading-5 text-[#9F5839]">Add a little SUI (about 0.05) to pay network fees — without it this wallet can hold USDC but not send it.</p>
       ) : null}
       {source === 'SPLASH' ? (

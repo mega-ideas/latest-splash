@@ -3,6 +3,8 @@ import {
   describeBuildError,
   digestOf,
   executeTransfer,
+  explainGaslessRefusal,
+  isTransientChainError,
   laneClient,
   readTransfer,
   senderOf,
@@ -40,6 +42,8 @@ export async function liveSendDeps(): Promise<SendDeps | null> {
       digestOf,
       senderOf,
       describeBuildError,
+      explainGaslessRefusal,
+      isTransient: isTransientChainError,
     },
   };
 }

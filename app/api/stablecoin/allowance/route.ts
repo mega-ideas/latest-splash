@@ -5,6 +5,7 @@ import {
   laneAccess,
   MIN_STABLECOIN_TRANSFER_MINOR,
   anchorFeeEnabled,
+  gaslessEnabled,
   STABLECOIN_WINDOW_MS,
   type SuiNetwork,
 } from '@/lib/payments/stablecoin-lane';
@@ -59,6 +60,10 @@ export async function GET(request: Request) {
       windowDays: STABLECOIN_WINDOW_MS / 86_400_000,
     },
     pricing: { anchorFeeOn },
+    // Wallet transfers carry no network fee while this is on; each quote
+    // still says how its own gas is paid (it can fall back). x402 always
+    // needs a little SUI.
+    gas: { gasless: gaslessEnabled() },
     minimumMinor: MIN_STABLECOIN_TRANSFER_MINOR.toString(),
     screeningConfigured: Boolean(process.env.CHAINALYSIS_SANCTIONS_API_KEY),
     // How a transfer is approved here (Settings): WhatsApp code + passkey, or a

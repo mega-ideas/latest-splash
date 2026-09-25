@@ -160,15 +160,16 @@ export async function checkSeal(): Promise<Check> {
 /* ── Enoki ────────────────────────────────────────────────────────────── */
 
 /**
- * The application makes no Enoki call today — ENOKI_API_KEY is declared and
- * plumbed and nothing invokes it; sponsorship arrives with passkey authority.
+ * The application makes no Enoki call, and needs none: USDC wallet transfers
+ * carry no gas on Sui (lib/payments/stablecoin-lane.ts, Gas), and settlement
+ * pays its own. ENOKI_API_KEY stays optional for a later sponsor.
  * This probe is therefore the codebase's only Enoki request: an authenticated
  * read of the app record, which is what a valid key unlocks and an invalid
  * one does not. It proves the key, not the integration.
  */
 export async function checkEnoki(): Promise<Check> {
   const key = getEnv().ENOKI_API_KEY;
-  if (!key) return { ok: true, status: 'skipped', detail: 'ENOKI_API_KEY not set — sponsorship is not configured (nothing calls Enoki yet)' };
+  if (!key) return { ok: true, status: 'skipped', detail: 'ENOKI_API_KEY not set — not needed: USDC transfers carry no gas, and nothing calls Enoki' };
   try {
     const { value, ms } = await timed('Enoki', async () => {
       const controller = new AbortController();

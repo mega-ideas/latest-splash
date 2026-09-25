@@ -1,9 +1,12 @@
-import { fromBase64, toBase64 } from '@mysten/sui/utils';
+import { fromBase64, normalizeStructTag, toBase64 } from '@mysten/sui/utils';
 
 import type { UserRole } from '@/lib/agent/types';
 import {
   anchorFeeEnabled,
   explorerTxUrl,
+  gaslessEligible,
+  gaslessEnabled,
+  type GasMode,
   normaliseSuiAddress,
   parseUsdcMinor,
   quoteStablecoinTransfer,
@@ -19,6 +22,7 @@ import {
   closeOutflow,
   confirmOutflow,
   readOutflow,
+  releaseUnsentQuote,
   reserveOutflow,
 } from '@/lib/server/stablecoin-outflows';
 import { walletSendable } from '@/lib/server/wallet-screening';
@@ -28,7 +32,8 @@ import { stablecoinTransferSubject } from '@/lib/server/step-up-subjects';
  * A wallet transfer, end to end: quote → the business signs → submit.
  *
  *   quote   validate everything, RESERVE the allowance, then build the exact
- *           transaction from the sender's own coins. Nothing is signed yet.
+ *           transaction from the sender's own USDC — gasless where Sui takes
+ *           it, so the wallet needs no SUI. Nothing is signed yet.
  *   submit  take the signed bytes, dry-run them, and only if they do exactly
  *           what was quoted, put them on chain. Then read back what happened
  *           and record THAT: CONFIRMED with its audit hash, or FAILED, or
@@ -44,13 +49,18 @@ type Db = any;
 type Observed = Awaited<ReturnType<ChainDeps['simulate']>>;
 
 export interface ChainDeps {
-  build(input: { sender: string; coinType: string; legs: Array<{ address: string; amountMinor: bigint }> }): Promise<Uint8Array>;
+  /** `gas` is always stated: a caller that forgot it must not get a mode by default. */
+  build(input: { sender: string; coinType: string; legs: Array<{ address: string; amountMinor: bigint }>; gas: GasMode }): Promise<Uint8Array>;
   simulate(bytes: Uint8Array): Promise<{ digest: string; success: boolean; error?: string | null; sender: string | null; balanceChanges: Array<{ coinType: string; address: string; amount: string }> }>;
   execute(bytes: Uint8Array, signature: string): Promise<Observed>;
   read(digest: string): Promise<Observed | null>;
   digestOf(bytes: Uint8Array): string;
   senderOf(bytes: Uint8Array): string | null;
   describeBuildError(error: unknown): string;
+  /** A gasless refusal the sender can fix (say, change under 0.01 USDC), or null. */
+  explainGaslessRefusal?(error: unknown): string | null;
+  /** The node did not answer (rate limit, overload), rather than refusing. */
+  isTransient?(error: unknown): boolean;
 }
 
 /** The approval a transfer must carry before it may reach the chain
@@ -70,6 +80,8 @@ export interface SendDeps {
   isSplashWallet(address: string): Promise<boolean>;
   /** The audit-anchor fee on transfers out of Splash; off unless switched on. */
   anchorFeeOn?: () => boolean;
+  /** Gasless wallet transfers; on unless STABLECOIN_GASLESS=off. */
+  gaslessOn?: () => boolean;
   now?: () => number;
 }
 
@@ -92,7 +104,18 @@ function allowanceView(a: { usedMinor: bigint; remainingMinor: bigint; windowCap
 
 export async function quoteWalletTransfer(
   deps: SendDeps,
-  input: { orgId: string; userId: string; role: UserRole; recipientId: string; amount: string; senderAddress: string },
+  input: {
+    orgId: string;
+    userId: string;
+    role: UserRole;
+    recipientId: string;
+    amount: string;
+    senderAddress: string;
+    /** The sender asked for the wallet to pay gas in SUI: a coin transfer, never gasless. */
+    payGasInSui?: boolean;
+    /** An earlier quote of theirs this one replaces: released first if it never left Splash. */
+    replaces?: string;
+  },
 ) {
   if (!SENDER_ROLES.has(input.role)) {
     return fail(403, 'role_cannot_send', 'Your role can view payments but not start one. Ask an owner, finance admin or maker.');
@@ -145,6 +168,19 @@ export async function quoteWalletTransfer(
     }
   }
 
+  // A re-quote (say, with gas paid in SUI after a wallet would not sign the
+  // gasless one) gives back the allowance the first quote held — but never a
+  // quote already signed and sent, which may still land.
+  if (input.replaces) {
+    const released = await releaseUnsentQuote(deps.db, { orgId: input.orgId, id: input.replaces, requestedBy: input.userId, reason: 'replaced by a new quote' });
+    if (!released) {
+      const earlier = await readOutflow(deps.db, input.orgId, input.replaces);
+      if (earlier?.status === 'PENDING' && earlier.txDigest) {
+        return fail(409, 'quote_already_sent', 'The earlier quote was already signed and sent. Wait for it to settle before quoting again.');
+      }
+    }
+  }
+
   const coinType = SUI_USDC_COIN_TYPE[network];
   const nowMs = deps.now?.() ?? Date.now();
   const reserved = await reserveOutflow(deps.db, {
@@ -162,21 +198,41 @@ export async function quoteWalletTransfer(
   });
   if (!reserved.ok) return fail(409, 'allowance', reserved.reason, allowanceView(reserved.allowance));
 
-  let bytes: Uint8Array;
+  const legs = [
+    { address: recipientAddress, amountMinor: quote.principalMinor },
+    ...(feeAddress ? [{ address: feeAddress, amountMinor: quote.feeMinor }] : []),
+  ];
+  // Gasless when Sui will take it: the sending wallet then needs no SUI. When
+  // the network will not (a protocol change, a leg under its floor, the switch
+  // off), or the sender asked to pay gas in SUI, the same transfer with the
+  // wallet paying gas — and the quote says so.
+  let built: { bytes: Uint8Array; gas: GasMode } | null = null;
+  let gaslessRefusal: unknown = null;
+  if (!input.payGasInSui && (deps.gaslessOn?.() ?? gaslessEnabled()) && gaslessEligible(coinType, legs)) {
+    try {
+      built = { bytes: await deps.chain.build({ sender, coinType, legs, gas: 'GASLESS' }), gas: 'GASLESS' };
+    } catch (error) {
+      // A busy node is not a refusal: falling back would make the sender pay
+      // gas for a transfer that goes free a moment later.
+      if (deps.chain.isTransient?.(error)) {
+        await closeOutflow(deps.db, { orgId: input.orgId, id: reserved.id, status: 'FAILED', reason: 'the Sui node was busy' });
+        return fail(503, 'chain_busy', 'The Sui network node did not answer just now, so nothing was prepared or reserved. Try again in a moment.');
+      }
+      gaslessRefusal = error;
+      console.warn('[stablecoin] gasless build refused, falling back to sender-paid gas:', error instanceof Error ? error.message : error);
+    }
+  }
   try {
-    bytes = await deps.chain.build({
-      sender,
-      coinType,
-      legs: [
-        { address: recipientAddress, amountMinor: quote.principalMinor },
-        ...(feeAddress ? [{ address: feeAddress, amountMinor: quote.feeMinor }] : []),
-      ],
-    });
+    built ??= { bytes: await deps.chain.build({ sender, coinType, legs, gas: 'SENDER_PAYS' }), gas: 'SENDER_PAYS' };
   } catch (error) {
     // Release the reservation: nothing was prepared, so nothing may count.
     await closeOutflow(deps.db, { orgId: input.orgId, id: reserved.id, status: 'FAILED', reason: 'could not build' });
-    return fail(422, 'cannot_build', deps.chain.describeBuildError(error));
+    // Neither way worked. If gasless failed for a reason the sender can fix
+    // (the amount would leave dust), that is the useful thing to say.
+    const fixable = gaslessRefusal ? deps.chain.explainGaslessRefusal?.(gaslessRefusal) ?? null : null;
+    return fail(422, 'cannot_build', fixable ?? deps.chain.describeBuildError(error));
   }
+  const { bytes, gas } = built;
 
   return {
     ok: true as const,
@@ -189,6 +245,7 @@ export async function quoteWalletTransfer(
     feeAddress,
     destination: quote.destination,
     feeKind: quote.feeKind,
+    gas,
     principalMinor: quote.principalMinor.toString(),
     feeMinor: quote.feeMinor.toString(),
     totalDebitMinor: quote.totalDebitMinor.toString(),
@@ -273,7 +330,20 @@ export async function submitWalletTransfer(
   const handBack = () => deps.approval.release({ orgId: input.orgId, subjectId: row.id });
 
   // The dry run: what these exact signed bytes would do, with nothing moved.
-  const dry = await deps.chain.simulate(bytes);
+  // A node that refuses them outright (Sui's gasless rules, checked again
+  // against the wallet as it is now) or does not answer has moved nothing
+  // either: the approval goes back, and the person is told which it was.
+  let dry: Observed;
+  try {
+    dry = await deps.chain.simulate(bytes);
+  } catch (error) {
+    if (!resend) await handBack();
+    if (deps.chain.isTransient?.(error)) {
+      return fail(503, 'chain_busy', 'The Sui network node did not answer the check before sending. Nothing was sent. Send again in a moment.');
+    }
+    const fixable = deps.chain.explainGaslessRefusal?.(error);
+    return fail(422, 'preflight_refused', `Not sent — Sui refused the transaction on the check before sending. ${fixable ?? (error instanceof Error ? error.message : String(error))}`);
+  }
   const preflight = verifyStablecoinTransfer(expected, dry);
   if (!preflight.ok) {
     if (!resend) await handBack();
@@ -321,10 +391,28 @@ async function settle(deps: SendDeps, row: Record<string, unknown> & OutflowRow,
   }
   if (!observed.success) {
     await closeOutflow(deps.db, { orgId: row.orgId, id: row.id, status: 'FAILED', reason: verdict.reason, txDigest: observed.digest });
-    return fail(422, 'failed_on_chain', `${verdict.reason} Your USDC did not move; the network fee (gas) was still charged.`);
+    // Read from the chain, not the quote: a gasless transfer that failed cost
+    // nothing, one that paid gas was still charged for it.
+    const charged = gasCharged(observed, row.senderAddress);
+    return fail(422, 'failed_on_chain', `${verdict.reason} Your USDC did not move${charged ? '; the network fee (gas) was still charged' : ', and no network fee was charged'}.`);
   }
   await closeOutflow(deps.db, { orgId: row.orgId, id: row.id, status: 'MISMATCH', reason: verdict.reason, txDigest: observed.digest });
   return fail(409, 'executed_mismatch', `The transaction went through but did not match the quote, so Splash has not recorded it as this payment. ${verdict.reason}`);
+}
+
+const SUI_COIN = normalizeStructTag('0x2::sui::SUI');
+
+/** Did the sender's SUI go down? That is the gas a transaction was charged. */
+function gasCharged(observed: Observed, sender: string): boolean {
+  const who = normaliseSuiAddress(sender);
+  return observed.balanceChanges.some((change) => {
+    if (normalizeStructTag(change.coinType) !== SUI_COIN) return false;
+    try {
+      return normaliseSuiAddress(change.address) === who && BigInt(change.amount) < 0n;
+    } catch {
+      return false;
+    }
+  });
 }
 
 interface OutflowRow {

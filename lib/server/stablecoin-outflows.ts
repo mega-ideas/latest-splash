@@ -220,6 +220,28 @@ export async function closeOutflow(d: Db, input: {
     ));
 }
 
+/**
+ * PENDING → EXPIRED for a wallet-transfer quote that never left Splash — no
+ * digest bound — so its allowance is free again. Only the person who asked
+ * for the quote can release it, and one conditional UPDATE decides: a submit
+ * that binds a digest first wins, and the quote stays.
+ */
+export async function releaseUnsentQuote(d: Db, input: { orgId: string; id: string; requestedBy: string; reason: string }): Promise<boolean> {
+  const released = await d
+    .update(stablecoinOutflows)
+    .set({ status: 'EXPIRED', failureReason: input.reason, updatedAt: new Date() })
+    .where(and(
+      eq(stablecoinOutflows.id, input.id),
+      eq(stablecoinOutflows.orgId, input.orgId),
+      eq(stablecoinOutflows.kind, 'TRANSFER'),
+      eq(stablecoinOutflows.status, 'PENDING'),
+      eq(stablecoinOutflows.requestedBy, input.requestedBy),
+      sql`${stablecoinOutflows.txDigest} IS NULL`,
+    ))
+    .returning({ id: stablecoinOutflows.id });
+  return released.length === 1;
+}
+
 /** Recent outflows for the screen. */
 export async function listOutflows(d: Db, orgId: string, limit = 50) {
   return d

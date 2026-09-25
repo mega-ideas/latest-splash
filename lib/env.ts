@@ -146,6 +146,8 @@ export const envSchema = z.object({
   SPLASH_FEE_ADDRESS_MAINNET: suiAddress,
   /* 'on' charges the audit-anchor fee on USDC sent out of Splash (lib/payments/stablecoin-lane.ts). */
   STABLECOIN_ANCHOR_FEE: opt(z.enum(['on', 'off'])),
+  /* Unset or 'on': wallet transfers go gasless. 'off': the sending wallet pays gas in SUI. */
+  STABLECOIN_GASLESS: opt(z.enum(['on', 'off'])),
   /** Chainalysis's free sanctions-screening API. Unset: wallet recipients
    *  are saved unscreened, and reach mainnet only through a named admin's
    *  attestation (lib/server/wallet-screening.ts). */
@@ -475,7 +477,8 @@ function productionIssues(env: Env): Issue[] {
     need('PDAX_API_KEY', 'PHP payout is live (USE_MOCK_APIS and NEXT_PUBLIC_DEMO_MODE are both off)');
     need('WALRUS_PUBLISHER_URL', 'audit proofs are live');
     need('WALRUS_AGGREGATOR_URL', 'audit proofs are live');
-    need('ENOKI_API_KEY', 'sponsored transactions are live');
+    // Not ENOKI_API_KEY: nothing calls Enoki. USDC transfers carry no gas
+    // (lib/payments/stablecoin-lane.ts, Gas) and settlement pays its own.
   }
   if (env.CARD_FUNDING_ENABLED || (vendorsLive && env.FUNDING_PROVIDER_STRIPE_ENABLED)) {
     need('STRIPE_SECRET_KEY', env.CARD_FUNDING_ENABLED ? 'CARD_FUNDING_ENABLED=true' : 'Stripe funding is enabled and mocks are off');

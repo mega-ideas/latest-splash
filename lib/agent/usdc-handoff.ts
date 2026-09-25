@@ -2,6 +2,7 @@ import type { KybLifecycleState } from '../compliance/kyb-state.ts';
 import {
   anchorFeeEnabled,
   formatUsdc,
+  gaslessEnabled,
   laneAccess,
   MIN_STABLECOIN_TRANSFER_MINOR,
   parseUsdcMinor,
@@ -48,6 +49,8 @@ export interface HandoffDeps {
   destinationOf(orgId: string, recipientId: string): Promise<StablecoinDestination>;
   /** The audit-anchor fee on transfers out of Splash; off unless switched on. */
   anchorFeeOn(): boolean;
+  /** Wallet transfers carry no network fee while this is on (STABLECOIN_GASLESS). */
+  gaslessOn(): boolean;
 }
 
 // "send 500 USDC to Manila Parts", "pay 1,250.50 usdc to Cebu Traders",
@@ -180,7 +183,9 @@ export async function prepareUsdcHandoff(
         quote.feeMinor === 0n
           ? `Splash fee: free${quote.destination === 'SPLASH' ? ' (to another Splash user)' : ''}`
           : `Audit-anchor fee ${formatUsdc(quote.feeMinor)} USDC, added on top`,
-        `Leaves your wallet ${formatUsdc(quote.totalDebitMinor)} USDC, plus a little SUI for gas`,
+        deps.gaslessOn()
+          ? `Leaves your wallet ${formatUsdc(quote.totalDebitMinor)} USDC, with no network fee`
+          : `Leaves your wallet ${formatUsdc(quote.totalDebitMinor)} USDC, plus a little SUI for gas`,
         ...(remaining !== null ? [`${formatUsdc(remaining - principal)} USDC of your 30-day allowance left after`] : []),
       ],
       href: `/dashboard/send-usdc?${params.toString()}`,
@@ -231,6 +236,9 @@ export function liveHandoffDeps(): HandoffDeps {
     },
     anchorFeeOn() {
       return anchorFeeEnabled();
+    },
+    gaslessOn() {
+      return gaslessEnabled();
     },
   };
 }

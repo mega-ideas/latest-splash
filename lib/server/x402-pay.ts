@@ -152,7 +152,9 @@ export async function quoteX402(
 
   let bytes: Uint8Array;
   try {
-    bytes = await deps.chain.build({ sender, coinType: USDC, legs: [{ address: payTo, amountMinor: accept.amountMinor }] });
+    // Never gasless: the seller's facilitator broadcasts this, and the x402
+    // Sui scheme is a coin transfer the buyer pays gas for (x402-sui.ts).
+    bytes = await deps.chain.build({ sender, coinType: USDC, legs: [{ address: payTo, amountMinor: accept.amountMinor }], gas: 'SENDER_PAYS' });
   } catch (error) {
     await closeOutflow(deps.db, { orgId: input.orgId, id: reserved.id, status: 'FAILED', reason: 'could not build' });
     return fail(422, 'cannot_build', deps.chain.describeBuildError(error));
@@ -168,6 +170,7 @@ export async function quoteX402(
     senderAddress: sender,
     payeeScreening: screening.verdict ?? 'ATTESTED',
     reservedUntil: reserved.reservedUntil.toISOString(),
+    gas: 'SENDER_PAYS' as const,
     transactionBytes: toBase64(bytes),
   };
 }
@@ -236,7 +239,17 @@ export async function payX402(
     if (!resend) await deps.approval.release({ orgId: input.orgId, subjectId: row.id });
   };
 
-  const dry = await deps.chain.simulate(bytes);
+  let dry: Awaited<ReturnType<X402Deps['chain']['simulate']>>;
+  try {
+    dry = await deps.chain.simulate(bytes);
+  } catch (error) {
+    // Refused or unanswered before anything left Splash: the approval goes back.
+    await handBack();
+    if (deps.chain.isTransient?.(error)) {
+      return fail(503, 'chain_busy', 'The Sui network node did not answer the check before paying. Nothing was paid. Try again in a moment.');
+    }
+    return fail(422, 'preflight_refused', `Not paid — Sui refused the transaction on the check before paying. ${error instanceof Error ? error.message : String(error)}`);
+  }
   const preflight = verifyStablecoinTransfer(expected, dry);
   if (!preflight.ok) {
     await handBack();

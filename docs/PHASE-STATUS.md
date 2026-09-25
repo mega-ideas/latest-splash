@@ -92,7 +92,7 @@ belong in that file and must never be pasted into a chat or committed.
 | Key | Who | Note |
 |---|---|---|
 | `DATABASE_URL` | you, in `.env.local` | Phases 3–5 need it; auth and passkeys are Postgres-backed |
-| `ENOKI_API_KEY` | you, in `.env.local` | Sponsorship. Nothing calls Enoki yet except the health probe |
+| `ENOKI_API_KEY` | optional | Not needed: USDC transfers carry no gas on Sui (2026-09-26). Only the health probe reads it |
 | `SPLASH_PACKAGE_ID` | public — can be committed | `npm run doctor` fails on this today |
 | `SUI_NETWORK` | public | `testnet` until a mainnet package exists |
 | Seal committee | public — goes in `config/seal.production.json` | Object ids, aggregator URLs, weights, threshold, package + policy ids |

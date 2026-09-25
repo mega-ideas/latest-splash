@@ -33,6 +33,7 @@ function deps(overrides = {}) {
     feeAddressConfigured: () => overrides.fee ?? true,
     destinationOf: async () => overrides.destination ?? 'EXTERNAL',
     anchorFeeOn: () => overrides.anchorFee ?? false,
+    gaslessOn: () => overrides.gasless ?? true,
   };
 }
 
@@ -70,7 +71,7 @@ test('a saved wallet recipient: free, total and allowance, and a link that carri
     'To Manila Parts Supply · 0xcccccc…cccccc',
     'Amount 500.00 USDC',
     'Splash fee: free',
-    'Leaves your wallet 500.00 USDC, plus a little SUI for gas',
+    'Leaves your wallet 500.00 USDC, with no network fee',
     '4,500.00 USDC of your 30-day allowance left after',
   ]);
   assert.equal(answer.handoff.cta, 'Review in Send USDC');
@@ -143,7 +144,7 @@ test('a closed lane prepares nothing; a missing fee address matters only when th
 test('the anchor fee, when on, shows on the card; to a Splash user it stays free', async () => {
   const out = await usdcHandoffFor('org_1', 'send 500 USDC to Manila Parts', deps({ anchorFee: true }));
   assert.ok(out.handoff.lines.includes('Audit-anchor fee 0.10 USDC, added on top'));
-  assert.ok(out.handoff.lines.includes('Leaves your wallet 500.10 USDC, plus a little SUI for gas'));
+  assert.ok(out.handoff.lines.includes('Leaves your wallet 500.10 USDC, with no network fee'));
   const internal = await usdcHandoffFor('org_1', 'send 500 USDC to Manila Parts', deps({ anchorFee: true, destination: 'SPLASH' }));
   assert.ok(internal.handoff.lines.includes('Splash fee: free (to another Splash user)'));
 });
@@ -235,4 +236,10 @@ test('the model path turns a prepared transfer into the same card, and every too
   const labels = hook.slice(hook.indexOf('const ACTIVITY_LABELS'), hook.indexOf('};', hook.indexOf('const ACTIVITY_LABELS')));
   const unlabelled = OXWAL_TOOL_REGISTRY.map((t) => t.name).filter((name) => !new RegExp(`\\b${name}:`).test(labels));
   assert.deepEqual(unlabelled, [], 'a tool without a label shows the operator only "Working"');
+});
+
+test('with gasless switched off, the card says the wallet pays gas in SUI', async () => {
+  const out = await usdcHandoffFor('org_1', 'send 500 USDC to Manila Parts', deps({ gasless: false }));
+  assert.ok(out.handoff.lines.includes('Leaves your wallet 500.00 USDC, plus a little SUI for gas'));
+  assert.ok(!out.handoff.lines.some((line) => /no network fee/.test(line)));
 });
