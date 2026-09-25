@@ -180,18 +180,19 @@ export default function SendUsdcDesk() {
   const sender = source === 'SPLASH' ? splash?.address ?? null : external?.account.address ?? null;
   const senderView = source === 'SPLASH' ? splash : external?.view ?? null;
 
+  const anchorFeeOn = lane?.pricing?.anchorFeeOn ?? false;
   const preview = useMemo(() => {
     if (!amount.trim()) return null;
     try {
       // An estimate: the server's quote decides whether the recipient is a
       // Splash user (always free). While the audit-anchor fee is off, every
       // stablecoin transfer is free.
-      const q = quoteStablecoinTransfer(parseUsdcMinor(amount.trim()), { destination: 'EXTERNAL', anchorFeeOn: lane?.pricing?.anchorFeeOn ?? false });
+      const q = quoteStablecoinTransfer(parseUsdcMinor(amount.trim()), { destination: 'EXTERNAL', anchorFeeOn });
       return { ok: true as const, q };
     } catch (err) {
       return { ok: false as const, reason: err instanceof StablecoinLaneError || err instanceof Error ? err.message : 'Invalid amount' };
     }
-  }, [amount, lane?.pricing?.anchorFeeOn]);
+  }, [amount, anchorFeeOn]);
 
   const remaining = lane?.allowance ? BigInt(lane.allowance.remainingMinor) : 0n;
   const cap = lane?.allowance ? BigInt(lane.allowance.windowCapMinor) : 0n;
