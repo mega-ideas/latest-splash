@@ -48,20 +48,20 @@ export default function FundingPlanner({ destination }: { destination: string })
       <summary className="cursor-pointer text-[13px] font-semibold text-[#1F4452]">Fund this wallet from another chain</summary>
       <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto_auto_auto] sm:items-end">
         <div>
-          <label htmlFor="fund-source" className="text-[12px] font-medium text-[#326273]/70">From</label>
+          <label htmlFor="fund-source" className="text-[12px] font-medium text-[#326273]/90">From</label>
           <select id="fund-source" value={source} onChange={(e) => { setSource(e.target.value as typeof source); setPlan(null); }} className="mt-1 w-full rounded-lg border border-[#326273]/25 bg-[#F6F0ED] px-2 py-2 text-[13px] text-[#1F4452]">
             {SOURCES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select>
         </div>
         <div>
-          <label htmlFor="fund-asset" className="text-[12px] font-medium text-[#326273]/70">Asset</label>
+          <label htmlFor="fund-asset" className="text-[12px] font-medium text-[#326273]/90">Asset</label>
           <select id="fund-asset" value={asset} onChange={(e) => { setAsset(e.target.value as 'USDC' | 'USDT'); setPlan(null); }} className="mt-1 w-full rounded-lg border border-[#326273]/25 bg-[#F6F0ED] px-2 py-2 text-[13px] text-[#1F4452]">
             <option value="USDC">USDC</option>
             <option value="USDT">USDT</option>
           </select>
         </div>
         <div>
-          <label htmlFor="fund-amount" className="text-[12px] font-medium text-[#326273]/70">Amount</label>
+          <label htmlFor="fund-amount" className="text-[12px] font-medium text-[#326273]/90">Amount</label>
           <input id="fund-amount" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^\d.]/g, ''))} inputMode="decimal" placeholder="1000" className="mt-1 w-28 rounded-lg border border-[#326273]/25 bg-[#F6F0ED] px-2 py-2 font-mono text-[13px] text-[#1F4452]" />
         </div>
         <button type="button" onClick={() => void ask()} disabled={busy || !amount} className="dash-btn-ghost inline-flex items-center gap-1 !px-3 !py-2 !text-[13px]">
@@ -80,7 +80,7 @@ export default function FundingPlanner({ destination }: { destination: string })
             </ol>
             <ul className="mt-2 space-y-1">
               {plan.warnings.map((w) => (
-                <li key={w} className="flex items-start gap-1.5 text-[12px] leading-5 text-[#326273]/75">
+                <li key={w} className="flex items-start gap-1.5 text-[12px] leading-5 text-[#326273]/90">
                   <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--warn)]" /> {w}
                 </li>
               ))}
@@ -89,7 +89,7 @@ export default function FundingPlanner({ destination }: { destination: string })
         ) : (
           <div className="mt-3 text-[13px] text-[#1F4452]">
             <p className="font-semibold text-[var(--error)]">{plan.reason}</p>
-            <ul className="mt-1 list-disc pl-5 text-[#326273]/80">{plan.alternatives.map((a) => <li key={a}>{a}</li>)}</ul>
+            <ul className="mt-1 list-disc pl-5 text-[#326273]/90">{plan.alternatives.map((a) => <li key={a}>{a}</li>)}</ul>
           </div>
         )
       ) : null}

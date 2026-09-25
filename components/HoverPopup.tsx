@@ -33,7 +33,7 @@ export default function HoverPopup({ children, title, content, position = 'top' 
             <Info className="mt-0.5 h-4 w-4 shrink-0 text-[var(--info)]" />
             <div>
               <div className="text-sm font-semibold text-[#326273]">{title}</div>
-              <div className="mt-1 text-[13px] text-[#326273]/70">{content}</div>
+              <div className="mt-1 text-[13px] text-[#326273]/90">{content}</div>
             </div>
           </div>
         </div>

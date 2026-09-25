@@ -70,9 +70,9 @@ export default function ApprovalsInbox({ onChange }: { onChange?: () => void }) 
       </div>
       {error ? <p role="alert" className="mt-2 text-[13px] text-[var(--error)]">{error}</p> : null}
       {items === null ? (
-        <p className="mt-3 flex items-center gap-2 text-[13px] text-[#326273]/60"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</p>
+        <p className="mt-3 flex items-center gap-2 text-[13px] text-[#326273]/90"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</p>
       ) : items.length === 0 ? (
-        <p className="mt-3 text-[13px] leading-5 text-[#326273]/60">Nothing waiting. WhatsApp codes sent to you appear here to approve.</p>
+        <p className="mt-3 text-[13px] leading-5 text-[#326273]/90">Nothing waiting. WhatsApp codes sent to you appear here to approve.</p>
       ) : (
         <ul className="mt-3 space-y-3">
           {items.map((item) => (
@@ -136,12 +136,12 @@ function InboxItem({ item, onDone }: { item: Pending; onDone: () => void }) {
   const inputId = `inbox-code-${item.id}`;
   return (
     <li className="rounded-lg border border-[#326273]/12 bg-white p-3">
-      <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#326273]/55">
+      <div className="text-[12px] font-semibold uppercase tracking-[0.12em] text-[#326273]/90">
         {PURPOSE_LABEL[item.purpose] ?? item.purpose} · asked by {item.requestedByName}
       </div>
       <p className="mt-1 text-sm leading-6 text-[#1F4452]">{item.summary}</p>
       {item.locked ? (
-        <p className="mt-2 text-[13px] text-[#326273]/70">Too many wrong attempts. {item.requestedByName} needs to request a new code.</p>
+        <p className="mt-2 text-[13px] text-[#326273]/90">Too many wrong attempts. {item.requestedByName} needs to request a new code.</p>
       ) : message ? (
         <button type="button" onClick={passkey} disabled={busy !== null} className="dash-btn mt-2 !px-4 !py-2 !text-[13px] disabled:cursor-not-allowed disabled:opacity-50">
           {busy === 'passkey' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Fingerprint className="h-4 w-4" />}
@@ -150,7 +150,7 @@ function InboxItem({ item, onDone }: { item: Pending; onDone: () => void }) {
       ) : (
         <div className="mt-2 flex flex-wrap items-end gap-2">
           <div>
-            <label htmlFor={inputId} className="text-[12px] font-medium text-[#326273]/70">Code from WhatsApp</label>
+            <label htmlFor={inputId} className="text-[12px] font-medium text-[#326273]/90">Code from WhatsApp</label>
             <input
               id={inputId}
               value={code}

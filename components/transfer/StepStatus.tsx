@@ -144,20 +144,20 @@ export default function StepStatus({ state, set, next }: { state: TransferState;
 
   return (
     <div className="space-y-6 py-2">
-      <div className="rounded-3xl bg-[#326273] p-6 text-white">
+      <div className="rounded-3xl bg-[#1F4452] p-6 text-white">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-[var(--info)]">
+            <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-white">
               {status === 'success' ? <CheckCircle2 className="h-3.5 w-3.5" /> : status === 'failed' ? <XCircle className="h-3.5 w-3.5" /> : <Loader2 className="h-3.5 w-3.5 animate-spin" />}
               Live settlement
             </div>
             <h2 className="mt-3 text-2xl font-semibold">{status === 'success' ? 'Recipient payment confirmed' : status === 'failed' ? 'Settlement failed' : 'Moving money now'}</h2>
-            <p className="mt-1 text-sm text-white/65">
+            <p className="mt-1 text-sm text-white">
               {status === 'success' ? 'Payment is confirmed. Redirecting to receipt...' : status === 'failed' ? 'No funds were released. Please retry this transfer.' : 'The selected source is being finalized through Splash on Sui.'}
             </p>
           </div>
           <div className="rounded-2xl bg-white/10 px-4 py-3 text-sm">
-            <div className="text-white/55">Recipient receives</div>
+            <div className="text-white">Recipient receives</div>
             <div className="mt-1 text-xl font-semibold">{state.quote?.netReceived ?? '0.00'} {state.amount.targetCurrency}</div>
           </div>
         </div>
@@ -172,18 +172,18 @@ export default function StepStatus({ state, set, next }: { state: TransferState;
 
           return (
             <div key={stage.label} className={`grid grid-cols-[auto_1fr_auto] items-center gap-4 rounded-2xl border p-4 transition-all ${deliveredNow ? 'motion-safe:animate-[dash-rise_.6s_var(--ease-decel)] border-[var(--ok)] bg-[var(--ok-bg)]' : complete ? 'border-[var(--ok)] bg-[var(--ok-bg)]' : active ? 'border-[var(--info)] bg-[var(--info-bg)] shadow-lg shadow-[#326273]/10' : status === 'failed' ? 'border-[var(--error)] bg-[var(--error-bg)]' : 'border-[#326273]/10 bg-[#F6F0ED]'}`}>
-              <div className={`flex h-11 w-11 items-center justify-center rounded-2xl ${complete || deliveredNow ? 'bg-[var(--ok)] text-white' : active ? 'bg-[var(--info)] text-white' : 'bg-white text-[#326273]/50'}`}>
+              <div className={`flex h-11 w-11 items-center justify-center rounded-2xl ${complete || deliveredNow ? 'bg-[var(--ok)] text-white' : active ? 'bg-[var(--info)] text-white' : 'bg-white text-[#326273]/90'}`}>
                 {complete || deliveredNow ? <CheckCircle2 className="h-5 w-5" /> : active ? <Loader2 className="h-5 w-5 animate-spin" /> : <Icon className="h-5 w-5" />}
               </div>
               <div>
                 <div className="font-semibold text-[#326273]">{stage.label}</div>
-                <div className="mt-1 text-[13px] text-[#326273]/60">{stage.detail}</div>
+                <div className="mt-1 text-[13px] text-[#326273]/90">{stage.detail}</div>
               </div>
               <div className="flex flex-col items-end gap-1">
-                <div className={`rounded-full px-3 py-1 text-[13px] font-semibold ${complete || deliveredNow ? 'bg-[var(--ok-bg)] text-[var(--ok)]' : active ? 'bg-[var(--info-bg)] text-[var(--info)]' : 'bg-white text-[#326273]/45'}`}>
+                <div className={`rounded-full px-3 py-1 text-[13px] font-semibold ${complete || deliveredNow ? 'bg-[var(--ok-bg)] text-[#1F4452]' : active ? 'bg-[var(--info-bg)] text-[var(--info)]' : 'bg-white text-[#326273]/90'}`}>
                   {complete || deliveredNow ? 'Done' : active ? 'Live' : 'Waiting'}
                 </div>
-                {stage.at ? <div className="money text-[13px] font-medium text-[#326273]/55">{stage.at}</div> : null}
+                {stage.at ? <div className="money text-[13px] font-medium text-[#326273]/90">{stage.at}</div> : null}
               </div>
             </div>
           );
@@ -205,21 +205,21 @@ export default function StepStatus({ state, set, next }: { state: TransferState;
 
       {state.composedActions?.length ? (
         <section className="rounded-3xl border-2 border-[#5C9EAD]/35 bg-[#5C9EAD]/10 p-5">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#326273]/55">One composed Sui transaction</div>
+          <div className="text-[12px] font-semibold uppercase tracking-[0.16em] text-[#326273]/90">One composed Sui transaction</div>
           <h3 className="mt-1 text-lg font-semibold text-[#0c3e48]">Pay, allocate, and prove</h3>
           <div className="mt-4 grid gap-3 md:grid-cols-3">
             {state.composedActions.map((action, index) => (
               <div key={`${action.kind}-${action.eventType}`} className="rounded-2xl border border-[#326273]/10 bg-white p-4">
-                <div className="text-[13px] font-bold text-[#E39774]">0{index + 1}</div>
+                <div className="text-[13px] font-bold text-[#9f5839]">0{index + 1}</div>
                 <div className="mt-1 text-sm font-semibold text-[#326273]">{action.label}</div>
-                <div className="mt-2 break-all font-mono text-[13px] text-[#326273]/50">{action.eventType}</div>
+                <div className="mt-2 break-all font-mono text-[13px] text-[#326273]/90">{action.eventType}</div>
               </div>
             ))}
           </div>
         </section>
       ) : null}
 
-      {state.transferIntentId && <div className="break-all rounded-2xl bg-[#F6F0ED] p-4 font-mono text-[13px] text-[#326273]/55">Transfer intent: {state.transferIntentId}</div>}
+      {state.transferIntentId && <div className="break-all rounded-2xl bg-[#F6F0ED] p-4 font-mono text-[13px] text-[#326273]/90">Transfer intent: {state.transferIntentId}</div>}
     </div>
   );
 }

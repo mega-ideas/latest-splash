@@ -47,11 +47,14 @@ export type ReceiptProps = {
 
 const INK = '#1F4452';
 const SLATE = '#326273';
+/** The brand teal, for the top bar and outlines. As words it is 3:1, so words and icons take TEAL_TEXT. */
 const TEAL = '#5C9EAD';
+const TEAL_TEXT = '#237284';
 const OK = '#2E7D6B';
 const OK_BG = '#E4F1ED';
 const LINE = '#E5DCD6';
-const MUTE = '#6B7C85';
+/** Muted labels on the white receipt: 4.55:1. The old #6B7C85 was 4.33:1. */
+const MUTE = '#6e7781';
 const MUTE_BG = '#EDEFF0';
 
 function toNumber(value: string | number | undefined): number | null {
@@ -106,15 +109,15 @@ const SettlementReceipt = forwardRef<HTMLDivElement, ReceiptProps>(function Sett
         <header className="flex items-start justify-between gap-4">
           <div>
             <div className="text-2xl font-semibold tracking-[-0.01em]">
-              SPLASH<span style={{ color: TEAL }}>.</span>
+              SPLASH<span style={{ color: TEAL_TEXT }}>.</span>
             </div>
-            <div className="mt-1 text-[11px] font-medium uppercase tracking-[0.16em]" style={{ color: MUTE }}>
+            <div className="mt-1 text-[12px] font-medium uppercase tracking-[0.16em]" style={{ color: MUTE }}>
               Payment receipt{props.reference ? ` · ${props.reference}` : ''}
             </div>
           </div>
           <span
             className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[13px] font-semibold"
-            style={delivered ? { color: OK, background: OK_BG } : { color: MUTE, background: MUTE_BG }}
+            style={delivered ? { color: INK, background: OK_BG } : { color: INK, background: MUTE_BG }}
           >
             {delivered ? <Check className="h-3.5 w-3.5" /> : <Clock className="h-3.5 w-3.5" />}
             {delivered ? 'Delivered' : 'In progress'}
@@ -123,7 +126,7 @@ const SettlementReceipt = forwardRef<HTMLDivElement, ReceiptProps>(function Sett
 
         {/* Amount to payee */}
         <section className="mt-7">
-          <div className="text-[11px] font-medium uppercase tracking-[0.14em]" style={{ color: MUTE }}>
+          <div className="text-[12px] font-medium uppercase tracking-[0.14em]" style={{ color: MUTE }}>
             Amount to payee
           </div>
           <div className="mt-1 flex items-baseline gap-2">
@@ -146,7 +149,7 @@ const SettlementReceipt = forwardRef<HTMLDivElement, ReceiptProps>(function Sett
           <Field label="Paid by"><span className="font-medium">{props.sender}</span></Field>
           <Field label="Payment source">
             <span className="inline-flex items-center gap-1.5 font-medium">
-              <Landmark className="h-3.5 w-3.5" style={{ color: TEAL }} />
+              <Landmark className="h-3.5 w-3.5" style={{ color: TEAL_TEXT }} />
               {props.fundingSource ?? 'Bank USD'}
             </span>
           </Field>
@@ -230,10 +233,10 @@ const SettlementReceipt = forwardRef<HTMLDivElement, ReceiptProps>(function Sett
             />
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
-                <div className="text-[11px] font-medium uppercase tracking-[0.12em]" style={{ color: MUTE }}>Network</div>
+                <div className="text-[12px] font-medium uppercase tracking-[0.12em]" style={{ color: MUTE }}>Network</div>
                 <div className="mt-0.5 text-[13px] font-medium" style={{ color: INK }}>{networkLine ?? 'Sui · sandbox, no customer funds'}</div>
               </div>
-              <a href="/trust" className="text-[13px] font-medium underline-offset-2 hover:underline" style={{ color: TEAL }}>
+              <a href="/trust" className="text-[13px] font-medium underline-offset-2 hover:underline" style={{ color: TEAL_TEXT }}>
                 Where your money sits
               </a>
             </div>
@@ -279,7 +282,7 @@ function ProofRow({
   return (
     <div className="flex flex-wrap items-start justify-between gap-2">
       <div className="min-w-0">
-        <div className="text-[11px] font-medium uppercase tracking-[0.12em]" style={{ color: MUTE }}>
+        <div className="text-[12px] font-medium uppercase tracking-[0.12em]" style={{ color: MUTE }}>
           {label}
         </div>
         <div className="mt-0.5 text-[13px] font-medium" style={{ color: INK }}>{state}</div>
@@ -305,7 +308,7 @@ function ProofRow({
           target="_blank"
           rel="noopener noreferrer"
           className="inline-flex shrink-0 items-center gap-1 rounded-lg px-3 py-1.5 text-[13px] font-semibold transition-colors print:hidden"
-          style={{ border: `1px solid ${TEAL}`, color: TEAL }}
+          style={{ border: `1px solid ${TEAL}`, color: TEAL_TEXT }}
         >
           {action}
           <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
@@ -318,7 +321,7 @@ function ProofRow({
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <dt className="text-[10px] font-medium uppercase tracking-[0.12em]" style={{ color: MUTE }}>{label}</dt>
+      <dt className="text-[12px] font-medium uppercase tracking-[0.12em]" style={{ color: MUTE }}>{label}</dt>
       <dd className="mt-0.5 break-words">{children}</dd>
     </div>
   );
@@ -329,7 +332,7 @@ function TimelineStep({ label, done }: { label: string; done?: boolean }) {
     <div className="flex flex-1 flex-col items-center gap-1 text-center">
       <span
         className="flex h-6 w-6 items-center justify-center rounded-full"
-        style={done ? { background: OK, color: '#FFFFFF' } : { background: MUTE_BG, color: MUTE }}
+        style={done ? { background: OK, color: '#FFFFFF' } : { background: MUTE_BG, color: SLATE }}
       >
         {done ? <Check className="h-3.5 w-3.5" /> : <Clock className="h-3 w-3" />}
       </span>
@@ -339,7 +342,7 @@ function TimelineStep({ label, done }: { label: string; done?: boolean }) {
 }
 
 function TimelineArrow() {
-  return <ArrowRight className="mx-1 h-3.5 w-3.5 shrink-0" style={{ color: TEAL }} aria-hidden />;
+  return <ArrowRight className="mx-1 h-3.5 w-3.5 shrink-0" style={{ color: TEAL_TEXT }} aria-hidden />;
 }
 
 export default SettlementReceipt;

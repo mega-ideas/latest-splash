@@ -23,7 +23,7 @@ export default function QuickLinksCard({ links, className }: { links: QuickLink[
             <span className="flex items-center gap-2">
               <Icon size={13} /> {label}
             </span>
-            <ChevronRight size={13} className="text-[#326273]/30" />
+            <ChevronRight size={13} className="text-[#326273]/90" />
           </>
         );
         return external ? (

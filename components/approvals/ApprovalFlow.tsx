@@ -159,7 +159,7 @@ export default function ApprovalFlow({
 
   if (!status) {
     return (
-      <div className="flex items-center gap-2 text-[13px] text-[#326273]/70" role="status">
+      <div className="flex items-center gap-2 text-[13px] text-[#326273]/90" role="status">
         <Loader2 className="h-4 w-4 animate-spin" /> Checking approval…
       </div>
     );
@@ -173,7 +173,7 @@ export default function ApprovalFlow({
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2 text-[12px] font-semibold uppercase tracking-[0.12em] text-[#326273]/60">
+      <div className="flex flex-wrap items-center gap-2 text-[12px] font-semibold uppercase tracking-[0.12em] text-[#326273]/90">
         {whatsapp ? <MessageCircle className="h-3.5 w-3.5" /> : <MousePointerClick className="h-3.5 w-3.5" />}
         {whatsapp ? 'WhatsApp code + passkey' : 'Click to approve'}
         {!whatsapp && status.secondPersonRequired ? <span className="rounded-full bg-[#E39774]/15 px-2 py-0.5 text-[#9F5839]">second person required</span> : null}
@@ -181,7 +181,7 @@ export default function ApprovalFlow({
       {status.summary ? <p className="text-sm leading-6 text-[#1F4452]">{status.summary}</p> : null}
 
       {approved ? (
-        <div role="status" className="flex items-center gap-2 rounded-lg border border-[#6FB4A0]/40 bg-[#6FB4A0]/12 px-3 py-2 text-sm font-semibold text-[var(--ok)]">
+        <div role="status" className="flex items-center gap-2 rounded-lg border border-[#6FB4A0]/40 bg-[#6FB4A0]/12 px-3 py-2 text-sm font-semibold text-[#1F4452]">
           <CheckCircle2 className="h-4 w-4" /> Approved{status.approverName ? ` by ${status.approverName}` : ''}.
         </div>
       ) : whatsapp ? (
@@ -197,7 +197,7 @@ export default function ApprovalFlow({
           onPasskey={confirmPasskey}
         />
       ) : !status.youCanApprove ? (
-        <p className="flex items-start gap-2 text-[13px] leading-5 text-[#326273]/75">
+        <p className="flex items-start gap-2 text-[13px] leading-5 text-[#326273]/90">
           <Hourglass className="mt-0.5 h-4 w-4 shrink-0" />
           {status.secondPersonRequired && status.youAreRequester
             ? 'Waiting for a second approver. An admin or checker other than you approves it on their Send USDC page; this updates when they do.'
@@ -210,7 +210,7 @@ export default function ApprovalFlow({
         </button>
       )}
 
-      {notice && !approved ? <p className="text-[13px] leading-5 text-[#326273]/75" aria-live="polite">{notice}</p> : null}
+      {notice && !approved ? <p className="text-[13px] leading-5 text-[#326273]/90" aria-live="polite">{notice}</p> : null}
       {error ? <p role="alert" className="text-[13px] font-medium text-[var(--error)]">{error}</p> : null}
     </div>
   );
@@ -243,9 +243,9 @@ function WhatsAppSteps({
     <div className="space-y-3">
       {!sent || status.state === 'EXPIRED' || status.state === 'LOCKED' || status.state === 'CHANGED' ? (
         <div className="space-y-2">
-          {status.state === 'EXPIRED' ? <p className="text-[13px] text-[#326273]/75">The last code expired.</p> : null}
-          {status.state === 'LOCKED' ? <p className="text-[13px] text-[#326273]/75">Too many wrong attempts on the last code.</p> : null}
-          {status.state === 'CHANGED' ? <p className="text-[13px] text-[#326273]/75">The details changed after the last code was sent.</p> : null}
+          {status.state === 'EXPIRED' ? <p className="text-[13px] text-[#326273]/90">The last code expired.</p> : null}
+          {status.state === 'LOCKED' ? <p className="text-[13px] text-[#326273]/90">Too many wrong attempts on the last code.</p> : null}
+          {status.state === 'CHANGED' ? <p className="text-[13px] text-[#326273]/90">The details changed after the last code was sent.</p> : null}
           <button type="button" onClick={onSend} disabled={busy !== null} className="dash-btn !px-4 !py-2 !text-[13px] disabled:cursor-not-allowed disabled:opacity-50">
             {busy === 'send' ? <Loader2 className="h-4 w-4 animate-spin" /> : <MessageCircle className="h-4 w-4" />}
             Send WhatsApp code
@@ -254,7 +254,7 @@ function WhatsAppSteps({
       ) : null}
 
       {waitingOnOther ? (
-        <p className="flex items-start gap-2 text-[13px] leading-5 text-[#326273]/75">
+        <p className="flex items-start gap-2 text-[13px] leading-5 text-[#326273]/90">
           <Hourglass className="mt-0.5 h-4 w-4 shrink-0" />
           Code sent to {status.approverName} ({status.sentTo}). They enter it and confirm with their passkey from their own Approvals inbox; this page updates when they do.
         </p>
@@ -263,7 +263,7 @@ function WhatsAppSteps({
       {canEnterCode ? (
         <div className="flex flex-wrap items-end gap-2">
           <div>
-            <label htmlFor="approval-code" className="text-[13px] font-medium text-[#326273]/75">6-digit code from WhatsApp</label>
+            <label htmlFor="approval-code" className="text-[13px] font-medium text-[#326273]/90">6-digit code from WhatsApp</label>
             <input
               id="approval-code"
               value={code}

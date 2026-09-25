@@ -396,7 +396,7 @@ export default function SendUsdcDesk() {
 
       {lane && !lane.lane.open ? (
         <div role="alert" className="flex items-start gap-3 rounded-xl border border-[var(--warn)] bg-[var(--warn-bg)] p-4 text-sm text-[#1F4452]">
-          <Lock className="mt-0.5 h-4 w-4 shrink-0 text-[var(--warn)]" />
+          <Lock className="mt-0.5 h-4 w-4 shrink-0 text-[#8b6418]" />
           <span>{lane.lane.reason}</span>
         </div>
       ) : null}
@@ -408,17 +408,17 @@ export default function SendUsdcDesk() {
               <div className="dash-kicker">30-day allowance</div>
               <div className="mt-2 font-mono text-2xl font-bold tabular-nums text-[#1F4452]">
                 {lane ? `${formatUsdc(remaining)} USDC` : '—'}
-                <span className="ml-2 text-sm font-medium text-[#326273]/60">left of {lane ? formatUsdc(cap) : '—'}</span>
+                <span className="ml-2 text-sm font-medium text-[#326273]/90">left of {lane ? formatUsdc(cap) : '—'}</span>
               </div>
             </div>
-            <span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${lane?.verified ? 'bg-[#6FB4A0]/15 text-[var(--ok)]' : 'bg-[#E39774]/15 text-[#9F5839]'}`}>
+            <span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${lane?.verified ? 'bg-[#6FB4A0]/15 text-[#1F4452]' : 'bg-[#E39774]/15 text-[#9F5839]'}`}>
               {lane ? (lane.verified ? 'Verified business' : 'Not yet verified') : '…'}
             </span>
           </div>
           <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-[#F6F0ED]" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={usedPct} aria-label="Allowance used">
             <div className="h-full rounded-full bg-[#5C9EAD] transition-[width] duration-300" style={{ width: `${Math.min(100, usedPct)}%` }} />
           </div>
-          <p className="mt-2 text-[13px] leading-5 text-[#326273]/70">
+          <p className="mt-2 text-[13px] leading-5 text-[#326273]/90">
             {lane?.verified
               ? 'Verified businesses send up to 20,000 USDC per transfer and 500,000 in any 30 days.'
               : 'Until your business is verified you can send up to 5,000 USDC in any 30 days, x402 payments included. USD in and local-currency payouts unlock with verification.'}
@@ -431,7 +431,7 @@ export default function SendUsdcDesk() {
             <ShieldCheck className="h-4 w-4 text-[var(--info)]" />
             {lane?.approval.style === 'WHATSAPP_PASSKEY' ? 'WhatsApp code + passkey' : 'Click to approve'}
           </div>
-          <p className="mt-2 text-[13px] leading-5 text-[#326273]/70">
+          <p className="mt-2 text-[13px] leading-5 text-[#326273]/90">
             {lane?.approval.style === 'WHATSAPP_PASSKEY'
               ? 'The main admin receives a code on WhatsApp, enters it here and confirms with their passkey.'
               : lane?.approval.requireDualApproval
@@ -460,7 +460,7 @@ export default function SendUsdcDesk() {
           <li
             key={label}
             aria-current={index === Math.min(step, 3) ? 'step' : undefined}
-            className={`rounded-lg border px-3 py-2 text-[13px] font-semibold ${index < step || sent ? 'border-[#6FB4A0]/40 bg-[#6FB4A0]/10 text-[var(--ok)]' : index === step ? 'border-[#0C3E48] bg-[#0C3E48] text-white' : 'border-[#326273]/12 bg-white text-[#326273]/55'}`}
+            className={`rounded-lg border px-3 py-2 text-[13px] font-semibold ${index < step || sent ? 'border-[#6FB4A0]/40 bg-[#6FB4A0]/10 text-[#1F4452]' : index === step ? 'border-[#0C3E48] bg-[#0C3E48] text-white' : 'border-[#326273]/12 bg-white text-[#326273]/90'}`}
           >
             <span className="font-mono">{index + 1}</span> · {label}
           </li>
@@ -477,16 +477,16 @@ export default function SendUsdcDesk() {
               </p>
               {sent.content ? (
                 <div className="mt-3">
-                  <div className="text-[12px] font-semibold uppercase tracking-[0.12em] text-[#326273]/60">What the seller returned</div>
+                  <div className="text-[12px] font-semibold uppercase tracking-[0.12em] text-[#326273]/90">What the seller returned</div>
                   <pre className="mt-1 max-h-64 overflow-auto rounded-lg border border-[#326273]/12 bg-[#F6F0ED]/60 p-3 font-mono text-[12px] leading-5 text-[#1F4452]">{prettyBody(sent.content.body)}</pre>
-                  {sent.content.truncated ? <p className="mt-1 text-[12px] text-[#326273]/60">Shortened for display.</p> : null}
+                  {sent.content.truncated ? <p className="mt-1 text-[12px] text-[#326273]/90">Shortened for display.</p> : null}
                 </div>
               ) : null}
               <dl className="mt-3 grid gap-2 text-[13px] sm:grid-cols-2">
-                <div><dt className="text-[#326273]/60">Transaction</dt><dd className="font-mono text-[#1F4452]">{sent.txDigest ? shortAddress(sent.txDigest) : '—'}</dd></div>
-                <div><dt className="text-[#326273]/60">Audit record</dt><dd className="font-mono text-[#1F4452]">{sent.auditHash ? `${sent.auditHash.slice(0, 12)}…` : '—'}</dd></div>
+                <div><dt className="text-[#326273]/90">Transaction</dt><dd className="font-mono text-[#1F4452]">{sent.txDigest ? shortAddress(sent.txDigest) : '—'}</dd></div>
+                <div><dt className="text-[#326273]/90">Audit record</dt><dd className="font-mono text-[#1F4452]">{sent.auditHash ? `${sent.auditHash.slice(0, 12)}…` : '—'}</dd></div>
               </dl>
-              <p className="mt-2 text-[12px] leading-5 text-[#326273]/60">
+              <p className="mt-2 text-[12px] leading-5 text-[#326273]/90">
                 Recorded now; anchored on chain once Splash&apos;s contracts are published on mainnet.
               </p>
               <div className="mt-4 flex flex-wrap gap-2">
@@ -510,13 +510,13 @@ export default function SendUsdcDesk() {
                     className={`rounded-xl border p-3 text-left transition-colors ${source === 'SPLASH' ? 'border-[#0C3E48] bg-[#0C3E48]/5' : 'border-[#326273]/15 hover:border-[#5C9EAD]'}`}
                   >
                     <div className="flex items-center gap-2 text-sm font-semibold text-[#1F4452]"><Fingerprint className="h-4 w-4 text-[var(--info)]" /> Splash wallet</div>
-                    <p className="mt-1 text-[13px] leading-5 text-[#326273]/70">Your passkey&apos;s own Sui address. Only your device can sign; Splash never holds the key.</p>
+                    <p className="mt-1 text-[13px] leading-5 text-[#326273]/90">Your passkey&apos;s own Sui address. Only your device can sign; Splash never holds the key.</p>
                   </button>
                   <div className={`rounded-xl border p-3 ${source === 'EXTERNAL' ? 'border-[#0C3E48] bg-[#0C3E48]/5' : 'border-[#326273]/15'}`}>
                     <div className="flex items-center gap-2 text-sm font-semibold text-[#1F4452]"><Wallet className="h-4 w-4 text-[var(--info)]" /> Your own wallet</div>
                     <div className="mt-2 flex flex-wrap gap-2">
                       {wallets.length === 0 ? (
-                        <p className="text-[13px] leading-5 text-[#326273]/70">No Slush or MetaMask (Sui Snap) found in this browser.</p>
+                        <p className="text-[13px] leading-5 text-[#326273]/90">No Slush or MetaMask (Sui Snap) found in this browser.</p>
                       ) : wallets.map((w) => (
                         <button key={w.kind} type="button" disabled={busy !== null || Boolean(quote)} onClick={() => void connect(w)} className="dash-btn-ghost inline-flex items-center gap-2 !px-3 !py-1.5 !text-[13px]">
                           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -550,7 +550,7 @@ export default function SendUsdcDesk() {
               {mode === 'X402' ? (
                 <StepCard n={2} title="API & price" done={Boolean(quote)} disabled={!sender || Boolean(quote) || !lane?.x402.open}>
                   {lane && !lane.x402.open ? <p className="text-[13px] text-[var(--error)]">{lane.x402.reason}</p> : null}
-                  <label htmlFor="x402-url" className="text-[13px] font-medium text-[#326273]/75">Resource URL</label>
+                  <label htmlFor="x402-url" className="text-[13px] font-medium text-[#326273]/90">Resource URL</label>
                   <div className="mt-1 flex flex-wrap gap-2">
                     <input
                       id="x402-url"
@@ -579,7 +579,7 @@ export default function SendUsdcDesk() {
                         <div className="font-semibold">{x402Probe.resource?.description || 'x402 resource'}</div>
                         <div className="mt-1 font-mono tabular-nums">{formatUsdc(BigInt(x402Probe.amountMinor ?? '0'))} USDC → {shortAddress(x402Probe.payTo ?? '')}</div>
                         {!lane?.screeningConfigured ? (
-                          <label className="mt-2 flex items-start gap-2 text-[12px] leading-5 text-[#326273]/80">
+                          <label className="mt-2 flex items-start gap-2 text-[12px] leading-5 text-[#326273]/90">
                             <input type="checkbox" checked={attestPayee} onChange={(e) => setAttestPayee(e.target.checked)} className="mt-0.5 h-4 w-4 accent-[#0C3E48]" />
                             No screening provider is configured. As an admin, I attest that I know this seller (recorded with my name).
                           </label>
@@ -602,7 +602,7 @@ export default function SendUsdcDesk() {
                   ) : (
                     <div className="mt-3">
                       <TransactionLegs quote={quote} />
-                      <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[12px] text-[#326273]/65">
+                      <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[12px] text-[#326273]/90">
                         <span aria-live="polite">
                           {secondsLeft > 0
                             ? `Allowance held for ${Math.floor(secondsLeft / 60)}:${String(secondsLeft % 60).padStart(2, '0')}.`
@@ -621,13 +621,13 @@ export default function SendUsdcDesk() {
                   </p>
                 ) : null}
                 {recipients.length === 0 ? (
-                  <p className="text-[13px] leading-5 text-[#326273]/75">
+                  <p className="text-[13px] leading-5 text-[#326273]/90">
                     No wallet recipients yet. <Link href="/dashboard/recipients" className="font-semibold text-[var(--info)] hover:underline">Add one under Recipients</Link> — Splash and Zeke only send to recipients you have saved.
                   </p>
                 ) : (
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div>
-                      <label htmlFor="send-recipient" className="text-[13px] font-medium text-[#326273]/75">Recipient</label>
+                      <label htmlFor="send-recipient" className="text-[13px] font-medium text-[#326273]/90">Recipient</label>
                       <select
                         id="send-recipient"
                         value={recipientId}
@@ -642,7 +642,7 @@ export default function SendUsdcDesk() {
                       </select>
                     </div>
                     <div>
-                      <label htmlFor="send-amount" className="text-[13px] font-medium text-[#326273]/75">They receive (USDC)</label>
+                      <label htmlFor="send-amount" className="text-[13px] font-medium text-[#326273]/90">They receive (USDC)</label>
                       <input
                         id="send-amount"
                         value={amount}
@@ -656,14 +656,14 @@ export default function SendUsdcDesk() {
                     </div>
                     <div id="send-amount-help" className="sm:col-span-2" aria-live="polite">
                       {preview?.ok ? (
-                        <p className="text-[13px] tabular-nums text-[#326273]/80">
+                        <p className="text-[13px] tabular-nums text-[#326273]/90">
                           Fee {formatUsdc(preview.q.feeMinor)} USDC (0.80%) · you send <strong className="text-[#1F4452]">{formatUsdc(preview.q.totalDebitMinor)} USDC</strong>
                           {preview.q.principalMinor > remaining ? <span className="ml-2 font-semibold text-[var(--error)]">— more than your remaining allowance</span> : null}
                         </p>
                       ) : preview ? (
                         <p className="text-[13px] text-[var(--error)]">{preview.reason}</p>
                       ) : (
-                        <p className="text-[13px] text-[#326273]/60">Minimum 1 USDC. The network fee (gas) is paid in SUI from the sending wallet.</p>
+                        <p className="text-[13px] text-[#326273]/90">Minimum 1 USDC. The network fee (gas) is paid in SUI from the sending wallet.</p>
                       )}
                     </div>
                   </div>
@@ -681,7 +681,7 @@ export default function SendUsdcDesk() {
                 ) : (
                   <div className="mt-3">
                     <TransactionLegs quote={quote} />
-                    <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[12px] text-[#326273]/65">
+                    <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[12px] text-[#326273]/90">
                       <span aria-live="polite">
                         {secondsLeft > 0
                           ? `Allowance held for ${Math.floor(secondsLeft / 60)}:${String(secondsLeft % 60).padStart(2, '0')}.`
@@ -698,12 +698,12 @@ export default function SendUsdcDesk() {
                 {quote ? (
                   <ApprovalFlow purpose="STABLECOIN_TRANSFER" subjectId={quote.outflowId} onApproved={() => setApproved(true)} />
                 ) : (
-                  <p className="text-[13px] text-[#326273]/60">Get a quote first.</p>
+                  <p className="text-[13px] text-[#326273]/90">Get a quote first.</p>
                 )}
               </StepCard>
 
               <StepCard n={4} title="Sign & send" done={false} disabled={!approved}>
-                <p className="text-[13px] leading-5 text-[#326273]/75">
+                <p className="text-[13px] leading-5 text-[#326273]/90">
                   {quote?.kind === 'X402'
                     ? `${source === 'SPLASH' ? 'Your passkey' : external?.accepted.label ?? 'Your wallet'} signs the exact payment quoted. Splash dry-runs it, re-checks the seller's price, hands the signed payment to the seller to settle, and confirms it on chain.`
                     : source === 'SPLASH'
@@ -714,11 +714,11 @@ export default function SendUsdcDesk() {
                   <div role="status" className="mt-2 rounded-lg border border-[#326273]/15 bg-white p-3 text-[13px] text-[#1F4452]">
                     {quote?.kind === 'X402' ? 'The seller accepted the payment; it has not shown on chain yet.' : 'The network did not confirm the submission yet.'}{' '}
                     <button type="button" onClick={() => void checkAgain()} disabled={busy !== null} className="font-semibold text-[var(--info)] hover:underline">{quote?.kind === 'X402' ? 'Check again' : 'Send again'}</button>
-                    <span className="block text-[12px] text-[#326273]/60">This resends the same signed transaction — it cannot be paid twice.</span>
+                    <span className="block text-[12px] text-[#326273]/90">This resends the same signed transaction — it cannot be paid twice.</span>
                   </div>
                 ) : null}
-                <p className="mt-2 flex items-start gap-2 text-[12px] leading-5 text-[#326273]/65">
-                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--warn)]" />
+                <p className="mt-2 flex items-start gap-2 text-[12px] leading-5 text-[#326273]/90">
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#8b6418]" />
                   A transfer on Sui is final. Check the recipient address before you sign.
                 </p>
                 <button
@@ -770,20 +770,20 @@ function TransactionLegs({ quote }: { quote: Quote }) {
     ];
   return (
     <figure className="overflow-hidden rounded-xl border border-[#0C3E48]/20 bg-white" aria-label="What you are signing">
-      <figcaption className="flex items-center justify-between gap-2 bg-[#0C3E48] px-3 py-2 font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-white/80">
+      <figcaption className="flex items-center justify-between gap-2 bg-[#0C3E48] px-3 py-2 font-mono text-[12px] font-semibold uppercase tracking-[0.14em] text-white/80">
         <span>{quote.kind === 'X402' ? 'One x402 payment · no Splash fee' : 'One transaction · two legs'}</span>
         <span className="text-[#efc46f]">Sui mainnet</span>
       </figcaption>
       <div className="px-3 pb-3 pt-2">
-        <div className="font-mono text-[12px] text-[#326273]/70">from {shortAddress(quote.senderAddress)}</div>
+        <div className="font-mono text-[12px] text-[#326273]/90">from {shortAddress(quote.senderAddress)}</div>
         <ol className="mt-1 border-l-2 border-[#0C3E48]/25 pl-3">
           {legs.map((leg) => (
             <li key={leg.to} className="relative flex items-baseline justify-between gap-3 py-1.5 text-[13px] tabular-nums">
               <span aria-hidden className="absolute -left-[15px] top-[13px] h-0.5 w-2.5 bg-[#0C3E48]/25" />
               <span className="min-w-0">
                 <span className="font-semibold text-[#1F4452]">{leg.to}</span>
-                {leg.address ? <span className="ml-1.5 font-mono text-[12px] text-[#326273]/60">{shortAddress(leg.address)}</span> : null}
-                <span className="block text-[12px] text-[#326273]/55">{leg.note}</span>
+                {leg.address ? <span className="ml-1.5 font-mono text-[12px] text-[#326273]/90">{shortAddress(leg.address)}</span> : null}
+                <span className="block text-[12px] text-[#326273]/90">{leg.note}</span>
               </span>
               <span className="shrink-0 font-mono font-semibold text-[#1F4452]">{formatUsdc(leg.amount)} USDC</span>
             </li>
@@ -793,7 +793,7 @@ function TransactionLegs({ quote }: { quote: Quote }) {
           <span className="font-semibold text-[#1F4452]">Leaves your wallet</span>
           <span className="font-mono text-base font-bold text-[#0C3E48]">{formatUsdc(BigInt(quote.totalDebitMinor))} USDC</span>
         </div>
-        <p className="mt-1 text-[12px] text-[#326273]/55">Plus a small network fee in SUI.</p>
+        <p className="mt-1 text-[12px] text-[#326273]/90">Plus a small network fee in SUI.</p>
       </div>
     </figure>
   );
@@ -875,7 +875,7 @@ function Readiness({
     <section className="dash-block p-4" aria-labelledby="send-readiness-title">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 id="send-readiness-title" className="dash-kicker">Before you send</h2>
-        <span className={`text-[13px] font-semibold ${ready ? 'text-[var(--ok)]' : 'text-[#326273]/70'}`} role="status">
+        <span className={`text-[13px] font-semibold ${ready ? 'text-[var(--ok)]' : 'text-[#326273]/90'}`} role="status">
           {ready ? 'Ready for a mainnet transfer' : open > 0 ? `${open} to sort out` : 'Choose a wallet to finish the check'}
         </span>
       </div>
@@ -885,7 +885,7 @@ function Readiness({
             <CheckMark state={c.state} />
             <div className="min-w-0 text-[13px] leading-5">
               <span className="font-semibold text-[#1F4452]">{c.label}</span>
-              <span className="block text-[#326273]/70">
+              <span className="block text-[#326273]/90">
                 {c.detail}
                 {c.href && c.state === 'todo' ? (
                   <>
@@ -904,9 +904,9 @@ function Readiness({
 
 function CheckMark({ state }: { state: Check['state'] }) {
   if (state === 'ok') return <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-[var(--ok)]" aria-label="Done" />;
-  if (state === 'todo') return <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[var(--warn)]" aria-label="To do" />;
+  if (state === 'todo') return <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[#8b6418]" aria-label="To do" />;
   if (state === 'note') return <Info className="mt-0.5 h-4 w-4 shrink-0 text-[var(--info)]" aria-label="Note" />;
-  return <Circle className="mt-0.5 h-4 w-4 shrink-0 text-[#326273]/35" aria-label="Waiting" />;
+  return <Circle className="mt-0.5 h-4 w-4 shrink-0 text-[#326273]/90" aria-label="Waiting" />;
 }
 
 /** A seller's JSON, indented; anything else as it came. */
@@ -922,7 +922,7 @@ function StepCard({ n, title, done, disabled, children }: { n: number; title: st
   return (
     <section className={`dash-surface p-4 transition-opacity ${disabled && !done ? 'opacity-60' : ''}`} aria-labelledby={`send-step-${n}`}>
       <h2 id={`send-step-${n}`} className="flex items-center gap-2 text-sm font-semibold text-[#1F4452]">
-        <span className={`flex h-6 w-6 items-center justify-center rounded-full font-mono text-[12px] ${done ? 'bg-[#6FB4A0] text-white' : 'bg-[#0C3E48] text-white'}`}>
+        <span className={`flex h-6 w-6 items-center justify-center rounded-full font-mono text-[12px] ${done ? 'bg-[#6FB4A0] text-[#073d49]' : 'bg-[#0C3E48] text-white'}`}>
           {done ? <CheckCircle2 className="h-3.5 w-3.5" /> : n}
         </span>
         {title}
@@ -936,7 +936,7 @@ function WalletBalances({ view, source }: { view: WalletView | null | undefined;
   if (!view) return null;
   if (!view.address) {
     return (
-      <p className="mt-3 text-[13px] leading-5 text-[#326273]/75">
+      <p className="mt-3 text-[13px] leading-5 text-[#326273]/90">
         {view.reason ?? 'No wallet yet.'}{' '}
         {source === 'SPLASH' ? <Link href="/settings/security" className="font-semibold text-[var(--info)] hover:underline">Create or restore a passkey</Link> : null}
       </p>
@@ -967,7 +967,7 @@ function WalletBalances({ view, source }: { view: WalletView | null | undefined;
       ) : null}
       {source === 'SPLASH' ? (
         <>
-          <p className="mt-2 text-[12px] leading-5 text-[#326273]/70">
+          <p className="mt-2 text-[12px] leading-5 text-[#326273]/90">
             Fund it from MetaMask (Sui Snap), Slush, an exchange or any wallet that sends <strong>USDC on Sui</strong> to this address.
           </p>
           <FundingPlanner destination={view.address} />
@@ -987,7 +987,7 @@ function ClickApprovals({ outflows, recipients, onChange }: { outflows: Lane['ou
       <ul className="mt-3 space-y-3">
         {outflows.map((o) => (
           <li key={o.id} className="rounded-lg border border-[#326273]/12 bg-white p-3">
-            <div className="mb-2 text-[12px] font-semibold text-[#326273]/60">
+            <div className="mb-2 text-[12px] font-semibold text-[#326273]/90">
               {names.get(o.supplierId ?? '') ?? shortAddress(o.recipientAddress)} · {formatUsdc(BigInt(o.principalMinor))} USDC
             </div>
             <ApprovalFlow purpose="STABLECOIN_TRANSFER" subjectId={o.id} onApproved={onChange} />
@@ -1011,7 +1011,7 @@ function RecentTransfers({ outflows, recipients }: { outflows: Lane['outflows'];
         ) : null}
       </div>
       {outflows.length === 0 ? (
-        <p className="mt-2 text-[13px] text-[#326273]/60">None yet.</p>
+        <p className="mt-2 text-[13px] text-[#326273]/90">None yet.</p>
       ) : (
         <ul className="mt-3 space-y-2">
           {outflows.slice(0, 8).map((o) => (
@@ -1020,7 +1020,7 @@ function RecentTransfers({ outflows, recipients }: { outflows: Lane['outflows'];
                 <span className="truncate font-semibold text-[#1F4452]">{o.kind === 'X402' ? 'x402 payment' : names.get(o.supplierId ?? '') ?? shortAddress(o.recipientAddress)}</span>
                 <span className="font-mono tabular-nums text-[#1F4452]">{formatUsdc(BigInt(o.principalMinor))}</span>
               </div>
-              <div className="mt-0.5 flex items-center justify-between gap-2 text-[12px] text-[#326273]/60">
+              <div className="mt-0.5 flex items-center justify-between gap-2 text-[12px] text-[#326273]/90">
                 <span>{o.status === 'CONFIRMED' ? 'Verified on chain' : o.status === 'PENDING' ? 'Awaiting approval / signature' : o.status.toLowerCase()}</span>
                 {o.explorerUrl ? (
                   <a href={o.explorerUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-semibold text-[var(--info)] hover:underline">

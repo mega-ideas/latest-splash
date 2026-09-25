@@ -96,13 +96,13 @@ export default function OxwalDeskPage() {
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="dash-kicker">Operating desk · AI</span>
-                <span className="inline-flex items-center gap-2 rounded-md bg-[#0c3e48] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-white">
+                <span className="inline-flex items-center gap-2 rounded-md bg-[#0c3e48] px-2.5 py-1 text-[12px] font-semibold uppercase tracking-[0.18em] text-white">
                   <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" aria-hidden="true" />
                   {assistantName} online
                 </span>
               </div>
               <h1 className="dash-title mt-3 text-3xl md:text-4xl">Finance command desk</h1>
-              <p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-[#326273]/62">
+              <p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-[#326273]/90">
                 Read financial state, prepare unsigned proposals, and route approvals from one operating surface.
               </p>
             </div>
@@ -126,7 +126,7 @@ export default function OxwalDeskPage() {
               <div className="flex items-center gap-2">
                 <BotAvatar size={24} />
                 <h2 className="text-sm font-bold text-[#1F4452]">{assistantName}</h2>
-                <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-[#326273]/45">
+                <span className="font-mono text-[12px] font-semibold uppercase tracking-[0.12em] text-[#326273]/90">
                   prepares · you approve
                 </span>
               </div>
@@ -174,15 +174,15 @@ export default function OxwalDeskPage() {
           </div>
         </div>
         <div className="rounded-2xl border border-[#0c3e48] bg-[#0c3e48] p-4 text-white shadow-[6px_7px_0_rgba(12,62,72,0.18)]">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#efc46f]/80">Approval surface</p>
+          <p className="text-[12px] font-semibold uppercase tracking-[0.18em] text-[#efc46f]/80">Approval surface</p>
           <div className="mt-2 text-2xl font-bold">Maker-checker</div>
           {deskStats.needsApproval > 0 ? (
-            <p className="mt-2 text-[13px] font-medium leading-5 text-white/78">
+            <p className="mt-2 text-[13px] font-medium leading-5 text-white/80">
               {deskStats.needsApproval} unsigned {deskStats.needsApproval === 1 ? 'proposal is' : 'proposals are'} waiting
               for your approval.
             </p>
           ) : (
-            <p className="mt-2 text-[13px] font-medium leading-5 text-white/62">
+            <p className="mt-2 text-[13px] font-medium leading-5 text-white/80">
               Pending proposals, compliance holds, expiring quotes, failed settlements, and anomaly halts live in the queue.
             </p>
           )}
@@ -198,10 +198,10 @@ export default function OxwalDeskPage() {
 function DeskStat({ label, value, caution = false }: { label: string; value: number; caution?: boolean }) {
   return (
     <div className="min-w-0 border-r border-[#326273]/10 px-3 py-2 last:border-r-0">
-      <div className={caution ? 'text-2xl font-bold text-[#E39774]' : 'text-2xl font-bold text-[#1F4452]'}>
+      <div className={caution ? 'text-2xl font-bold text-[#9f5839]' : 'text-2xl font-bold text-[#1F4452]'}>
         {value}
       </div>
-      <div className="mt-0.5 text-[10px] font-semibold uppercase tracking-normal text-[#326273]/50">{label}</div>
+      <div className="mt-0.5 text-[12px] font-semibold uppercase tracking-normal text-[#326273]/90">{label}</div>
     </div>
   );
 }

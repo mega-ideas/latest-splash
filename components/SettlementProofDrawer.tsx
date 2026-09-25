@@ -71,7 +71,7 @@ export default function SettlementProofDrawer({ transferIntentId, fallback }: Se
           <ShieldCheck className="h-4 w-4 text-[var(--info)]" />
           View independent settlement proof
         </span>
-        <ChevronDown className="h-4 w-4 text-[#326273]/55 transition-transform group-open:rotate-180" />
+        <ChevronDown className="h-4 w-4 text-[#326273]/90 transition-transform group-open:rotate-180" />
       </summary>
       <div className="border-t border-[#326273]/10 px-4 py-4">
         {proof?.receipt && (
@@ -91,7 +91,7 @@ export default function SettlementProofDrawer({ transferIntentId, fallback }: Se
           <CheckTile label="Hash match" ok={independent?.walrusHashVerified ?? false} icon={FileKey2} detail={independent?.ciphertextHash?.slice(0, 16) ?? 'Pending'} />
         </div>
 
-        <div className="mt-4 rounded-md bg-[#F6F0ED] p-3 text-[13px] text-[#326273]/70">
+        <div className="mt-4 rounded-md bg-[#F6F0ED] p-3 text-[13px] text-[#326273]/90">
           <div className="flex flex-wrap items-center gap-2">
             <StatusPill ok={independent?.verified ?? false} label={independent?.verified ? 'Verified' : checking ? 'Checking' : 'Needs review'} />
             {independent?.anchorRecorded && <StatusPill ok label="Sui anchor recorded" />}
@@ -117,7 +117,7 @@ export default function SettlementProofDrawer({ transferIntentId, fallback }: Se
 function ProofRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="flex min-w-0 justify-between gap-3">
-      <span className="shrink-0 font-semibold text-[#326273]/55">{label}</span>
+      <span className="shrink-0 font-semibold text-[#326273]/90">{label}</span>
       <span className={`min-w-0 break-all text-right font-medium text-[#326273] ${mono ? 'font-mono text-[13px]' : ''}`}>{value}</span>
     </div>
   );
@@ -127,11 +127,11 @@ function CheckTile({ label, ok, icon: Icon, detail }: { label: string; ok: boole
   return (
     <div className={`rounded-md border p-3 ${ok ? 'border-[#5C9EAD]/35 bg-[#5C9EAD]/10' : 'border-[#E39774]/40 bg-[#E39774]/10'}`}>
       <div className="flex items-center justify-between gap-2">
-        <Icon className={`h-4 w-4 ${ok ? 'text-[var(--info)]' : 'text-[#E39774]'}`} />
-        {ok ? <CheckCircle2 className="h-4 w-4 text-[var(--info)]" /> : <XCircle className="h-4 w-4 text-[#E39774]" />}
+        <Icon className={`h-4 w-4 ${ok ? 'text-[var(--info)]' : 'text-[#9f5839]'}`} />
+        {ok ? <CheckCircle2 className="h-4 w-4 text-[var(--info)]" /> : <XCircle className="h-4 w-4 text-[#9f5839]" />}
       </div>
       <div className="mt-2 text-sm font-bold text-[#326273]">{label}</div>
-      <div className="mt-1 break-all font-mono text-[13px] text-[#326273]/55">{detail}</div>
+      <div className="mt-1 break-all font-mono text-[13px] text-[#326273]/90">{detail}</div>
     </div>
   );
 }

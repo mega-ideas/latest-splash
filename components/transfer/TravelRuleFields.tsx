@@ -68,7 +68,7 @@ type CheckResponse = {
 };
 
 const INPUT =
-  'w-full rounded-xl border border-[#326273]/15 bg-[#F6F0ED] px-3 py-3 text-sm text-[#326273] outline-none placeholder:text-[#326273]/35 focus:border-[#5C9EAD]';
+  'w-full rounded-xl border border-[#326273]/15 bg-[#F6F0ED] px-3 py-3 text-sm text-[#326273] outline-none placeholder:text-[#326273]/90 focus:border-[#5C9EAD]';
 const MONO = `${INPUT} font-mono uppercase placeholder:font-sans placeholder:normal-case`;
 
 export default function TravelRuleFields({
@@ -160,7 +160,7 @@ export default function TravelRuleFields({
             <p className="text-[13px] font-semibold text-[#0C3E48]">
               Paying into {corridor.country} · {corridor.currency}
             </p>
-            <p className="mt-0.5 text-[13px] leading-relaxed text-[#326273]/80">{corridor.note}</p>
+            <p className="mt-0.5 text-[13px] leading-relaxed text-[#326273]/90">{corridor.note}</p>
           </div>
         </div>
       )}
@@ -172,7 +172,7 @@ export default function TravelRuleFields({
             <CircleAlert className="h-3.5 w-3.5" aria-hidden="true" />
             Your own business details are incomplete
           </p>
-          <p className="mt-1 text-[13px] leading-relaxed text-[#326273]/80">
+          <p className="mt-1 text-[13px] leading-relaxed text-[#326273]/90">
             The travel rule sends the payer&rsquo;s identity alongside the beneficiary&rsquo;s. These
             are set once and reused on every payment, so they live in your business profile rather
             than in this form.
@@ -181,7 +181,7 @@ export default function TravelRuleFields({
             {check.originator.missing.map((item) => (
               <li key={item.field} className="text-[13px] text-[#326273]">
                 <span className="font-semibold">{item.label}</span>
-                <span className="text-[#326273]/70"> — {item.because}</span>
+                <span className="text-[#326273]/90"> — {item.because}</span>
               </li>
             ))}
           </ul>
@@ -196,7 +196,7 @@ export default function TravelRuleFields({
 
       {/* ── Who they are ───────────────────────────────────────────────────── */}
       <section>
-        <h4 className="text-xs font-semibold uppercase tracking-[0.1em] text-[#326273]/55">
+        <h4 className="text-xs font-semibold uppercase tracking-[0.1em] text-[#326273]/90">
           Who you are paying
         </h4>
         <div className="mt-2.5 grid gap-3 sm:grid-cols-2">
@@ -221,7 +221,7 @@ export default function TravelRuleFields({
                     aria-checked={on}
                     onClick={() => set({ beneficiaryType: key })}
                     className={`flex items-center justify-center gap-1.5 rounded-lg py-2 transition ${
-                      on ? 'bg-white text-[#0C3E48] shadow-sm' : 'text-[#326273]/60 hover:text-[#326273]'
+                      on ? 'bg-white text-[#0C3E48] shadow-sm' : 'text-[#326273]/90 hover:text-[#326273]'
                     }`}
                   >
                     <Icon className="h-3.5 w-3.5" aria-hidden="true" />
@@ -279,7 +279,7 @@ export default function TravelRuleFields({
 
       {/* ── Where they are ─────────────────────────────────────────────────── */}
       <section>
-        <h4 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.1em] text-[#326273]/55">
+        <h4 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.1em] text-[#326273]/90">
           <MapPin className="h-3.5 w-3.5" aria-hidden="true" />
           Their registered address
         </h4>
@@ -327,7 +327,7 @@ export default function TravelRuleFields({
 
       {/* ── How the money routes ───────────────────────────────────────────── */}
       <section>
-        <h4 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.1em] text-[#326273]/55">
+        <h4 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.1em] text-[#326273]/90">
           <Landmark className="h-3.5 w-3.5" aria-hidden="true" />
           How the money reaches them
         </h4>
@@ -414,7 +414,7 @@ export default function TravelRuleFields({
 
       {/* ── Why you are paying ─────────────────────────────────────────────── */}
       <section>
-        <h4 className="text-xs font-semibold uppercase tracking-[0.1em] text-[#326273]/55">
+        <h4 className="text-xs font-semibold uppercase tracking-[0.1em] text-[#326273]/90">
           Why you are paying
         </h4>
         <div className="mt-2.5 grid gap-3 sm:grid-cols-2">
@@ -474,15 +474,15 @@ export default function TravelRuleFields({
       {check && check.missing.length > 0 && (
         <div className="rounded-xl border border-[#326273]/15 bg-[#F6F0ED] px-3.5 py-3">
           <p className="flex items-center gap-1.5 text-[13px] font-semibold text-[#0C3E48]">
-            <CircleHelp className="h-3.5 w-3.5 text-[#326273]/50" aria-hidden="true" />
+            <CircleHelp className="h-3.5 w-3.5 text-[#326273]/90" aria-hidden="true" />
             Still needed for {corridor?.country ?? country}
-            {loading && <span className="font-normal text-[#326273]/45">· checking</span>}
+            {loading && <span className="font-normal text-[#326273]/90">· checking</span>}
           </p>
           <ul className="mt-2 space-y-1.5">
             {check.missing.map((item) => (
               <li key={item.field} className="text-[13px] leading-relaxed">
                 <span className="font-semibold text-[#326273]">{item.label}</span>
-                <span className="text-[#326273]/70"> — {item.because}</span>
+                <span className="text-[#326273]/90"> — {item.because}</span>
               </li>
             ))}
           </ul>
@@ -515,10 +515,10 @@ function TrField({
   return (
     <div className={className}>
       <div className="flex items-baseline justify-between gap-2">
-        <label className="text-xs font-semibold uppercase tracking-[0.1em] text-[#326273]/55">
+        <label className="text-xs font-semibold uppercase tracking-[0.1em] text-[#326273]/90">
           {label}
         </label>
-        {hint && <span className="text-[13px] font-semibold text-[#326273]/35">{hint}</span>}
+        {hint && <span className="text-[13px] font-semibold text-[#326273]/90">{hint}</span>}
       </div>
       <div className="mt-1.5">{children}</div>
       {error && (

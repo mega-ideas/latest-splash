@@ -125,7 +125,7 @@ export default function DashboardSettingsPage() {
         <div>
           <span className="dash-kicker">Operating policy</span>
           <h1 className="dash-title mt-2">Settings</h1>
-          <p className="mt-1 max-w-2xl text-[13px] text-[#326273]/60">
+          <p className="mt-1 max-w-2xl text-[13px] text-[#326273]">
             Persisted controls applied to payment approvals and account security.
           </p>
         </div>
@@ -135,12 +135,12 @@ export default function DashboardSettingsPage() {
         </button>
       </header>
 
-      {notice && <div role="status" className="rounded-xl border border-[#5C9EAD]/25 bg-[#5C9EAD]/10 px-4 py-3 text-sm font-semibold text-[#326273]">{notice}</div>}
+      {notice && <div role="status" className="rounded-xl border border-[#5C9EAD]/25 bg-[#5C9EAD]/10 px-4 py-3 text-sm font-semibold text-[#1F4452]">{notice}</div>}
 
       {approvalFor ? (
         <section className="dash-block p-5" aria-labelledby="settings-approval-title">
           <h2 id="settings-approval-title" className="text-lg font-bold text-[#1F4452]">Approve this change</h2>
-          <p className="mt-1 text-[13px] leading-5 text-[#326273]/70">
+          <p className="mt-1 text-[13px] leading-5 text-[#326273]/90">
             WhatsApp approvals are on, so saving settings needs a WhatsApp code and a passkey confirmation — for exactly the change below. Edit anything and it needs a new approval.
           </p>
           <div className="mt-4">
@@ -156,7 +156,7 @@ export default function DashboardSettingsPage() {
             <SlidersHorizontal className="text-[var(--info)]" />
             <div>
               <h2 className="text-xl font-bold text-[#326273]">Payment controls</h2>
-              <p className="text-[13px] text-[#326273]/55">Limits are enforced as an operating policy and preserved between sessions.</p>
+              <p className="text-[13px] text-[#326273]/90">Limits are enforced as an operating policy and preserved between sessions.</p>
             </div>
           </div>
           <div className="mt-6 grid gap-4 sm:grid-cols-2">
@@ -172,7 +172,7 @@ export default function DashboardSettingsPage() {
             <LockKeyhole className="text-[var(--info)]" />
             <div>
               <h2 className="text-xl font-bold text-[#326273]">Security controls</h2>
-              <p className="text-[13px] text-[#326273]/55">Click a control to change the policy, then save.</p>
+              <p className="text-[13px] text-[#326273]/90">Click a control to change the policy, then save.</p>
             </div>
           </div>
           <div className="mt-5 space-y-3">
@@ -199,21 +199,21 @@ export default function DashboardSettingsPage() {
           <ShieldCheck className="text-[var(--info)]" />
           <div>
             <h2 className="text-xl font-bold text-[#326273]">How Splash operates</h2>
-            <p className="text-[13px] text-[#326273]/55">Plain-language operating position, without over-claiming.</p>
+            <p className="text-[13px] text-[#326273]/90">Plain-language operating position, without over-claiming.</p>
           </div>
         </div>
         <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {INFORMATION.map(({ icon: Icon, label, text }) => (
             <div key={label} className="rounded-2xl border border-[#326273]/10 bg-[#F6F0ED] p-5">
               <Icon size={20} className="text-[var(--info)]" />
-              <div className="mt-3 text-xs font-semibold uppercase tracking-[0.12em] text-[#326273]/55">{label}</div>
+              <div className="mt-3 text-xs font-semibold uppercase tracking-[0.12em] text-[#326273]/90">{label}</div>
               <p className="mt-2 text-sm font-medium leading-6 text-[#326273]">{typeof text === 'function' ? text(custodyOn) : text}</p>
             </div>
           ))}
         </div>
       </section>
 
-      <div className="flex items-center gap-2 text-[13px] font-medium text-[#326273]/50">
+      <div className="flex items-center gap-2 text-[13px] font-medium text-[#326273]">
         <BadgeCheck size={15} className="text-[var(--info)]" />
         Last persisted {new Date(settings.updatedAt).getTime() === 0 ? 'using policy defaults' : new Date(settings.updatedAt).toLocaleString()}
       </div>
@@ -224,7 +224,7 @@ export default function DashboardSettingsPage() {
 function NumberControl({ label, value, suffix, onChange, disabled = false, note }: { label: string; value: number; suffix: string; onChange: (value: number) => void; disabled?: boolean; note?: string }) {
   return (
     <label className={`rounded-2xl border border-[#326273]/10 bg-[#F6F0ED] p-4 ${disabled ? 'cursor-not-allowed border-dashed' : ''}`}>
-      <span className="text-xs font-semibold uppercase tracking-[0.1em] text-[#326273]/55">{label}</span>
+      <span className="text-xs font-semibold uppercase tracking-[0.1em] text-[#326273]/90">{label}</span>
       {/* Only the value dims; the reason below keeps full contrast. */}
       <span className={`mt-3 flex items-center gap-2 ${disabled ? 'opacity-50' : ''}`}>
         <input type="number" min={0} value={value} disabled={disabled} onChange={(event) => onChange(Number(event.target.value))} className="min-w-0 flex-1 bg-transparent text-2xl font-bold text-[#326273] outline-none disabled:cursor-not-allowed" />

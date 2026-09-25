@@ -48,7 +48,7 @@ export default function StepDelivery({ state, set, prev, next }: { state: Transf
 
   return (
     <div className="space-y-5">
-      <div><h2 className="text-xl font-bold">How should they receive it?</h2><p className="mt-1 text-sm text-foreground/60">Same payment, three delivery depths. You remain in control of the final route.</p></div>
+      <div><h2 className="text-xl font-bold">How should they receive it?</h2><p className="mt-1 text-sm text-foreground/90">Same payment, three delivery depths. You remain in control of the final route.</p></div>
       <div className="grid gap-3">
         {options.map((option) => {
           const selected = chosen === option.tier;
@@ -64,10 +64,10 @@ export default function StepDelivery({ state, set, prev, next }: { state: Transf
               onClick={() => set({ deliveryTier: option.tier })}
               className={`grid grid-cols-[auto_1fr_auto] items-start gap-4 rounded-2xl border p-5 text-left transition ${lock ? 'cursor-not-allowed border-dashed border-foreground/20 bg-card' : selected ? 'border-primary bg-primary/10 shadow-lg shadow-primary/10' : 'border-foreground/10 bg-card hover:border-primary/40'}`}
             >
-              <span className={`flex h-11 w-11 items-center justify-center rounded-xl ${selected ? 'bg-primary text-card' : 'bg-muted text-foreground/55'} ${lock ? 'opacity-50' : ''}`}><Icon className="h-5 w-5" /></span>
+              <span className={`flex h-11 w-11 items-center justify-center rounded-xl ${selected ? 'bg-[#237284] text-card' : 'bg-muted text-[#1F4452]'} ${lock ? 'opacity-50' : ''}`}><Icon className="h-5 w-5" /></span>
               <span>
                 {/* Only the offer dims; the reason below stays at full contrast. */}
-                <span className={`block ${lock ? 'opacity-55' : ''}`}><strong className="block">{option.title}</strong><small className="mt-1 block leading-5 text-foreground/60">{option.body(state.amount.targetCurrency)}</small><small className="mt-2 block font-semibold text-primary">ETA {option.eta} · {option.tier === 'STORED_BALANCE' ? '0.00% transfer' : `${(feeBps / 100).toFixed(2)}% corridor fee`}</small>{option.tier === 'SWEEP_ACCOUNT' && <small className="mt-1 block text-foreground/45">Pass-through account; funds rest for seconds.</small>}{option.tier === 'STORED_BALANCE' && <small className="mt-1 block text-foreground/45">Off-ramp fees apply when leaving the network.</small>}</span>
+                <span className={`block ${lock ? 'opacity-55' : ''}`}><strong className="block">{option.title}</strong><small className="mt-1 block leading-5 text-foreground/90">{option.body(state.amount.targetCurrency)}</small><small className="mt-2 block font-semibold text-foreground">ETA {option.eta} · {option.tier === 'STORED_BALANCE' ? '0.00% transfer' : `${(feeBps / 100).toFixed(2)}% corridor fee`}</small>{option.tier === 'SWEEP_ACCOUNT' && <small className="mt-1 block text-foreground/90">Pass-through account; funds rest for seconds.</small>}{option.tier === 'STORED_BALANCE' && <small className="mt-1 block text-foreground/90">Off-ramp fees apply when leaving the network.</small>}</span>
                 {lock && (
                   <small className="mt-3 flex items-start gap-1.5 text-[13px] font-semibold leading-5 text-foreground">
                     <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
@@ -79,7 +79,7 @@ export default function StepDelivery({ state, set, prev, next }: { state: Transf
                   </small>
                 )}
               </span>
-              {selected ? <Check className="h-5 w-5 text-primary" /> : null}
+              {selected ? <Check className="h-5 w-5 text-foreground" /> : null}
             </button>
           );
         })}
@@ -93,7 +93,7 @@ export default function StepDelivery({ state, set, prev, next }: { state: Transf
           </div>
         </div>
       )}
-      <div className="flex gap-3"><button onClick={prev} className="flex-1 rounded-xl border border-foreground/15 py-3 font-bold">Back</button><button onClick={() => { set({ deliveryTier: chosen }); next(); }} className="flex-1 rounded-xl bg-accent py-3 font-bold text-card">Review quote</button></div>
+      <div className="flex gap-3"><button onClick={prev} className="flex-1 rounded-xl border border-foreground/15 py-3 font-bold">Back</button><button onClick={() => { set({ deliveryTier: chosen }); next(); }} className="flex-1 rounded-xl bg-accent py-3 font-bold text-[#073d49]">Review quote</button></div>
     </div>
   );
 }

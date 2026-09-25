@@ -126,8 +126,8 @@ export default function ThreadRow({
         <span
           className={
             item.tone === 'propose'
-              ? 'inline-flex items-center gap-1.5 rounded-md border border-[#5C9EAD]/35 bg-[#5C9EAD]/10 px-2 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-[#326273]'
-              : 'inline-flex items-center gap-1.5 rounded-md border border-[#326273]/14 bg-white px-2 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-[#326273]/70'
+              ? 'inline-flex items-center gap-1.5 rounded-md border border-[#5C9EAD]/35 bg-[#5C9EAD]/10 px-2 py-1 font-mono text-[12px] font-semibold uppercase tracking-[0.12em] text-[#326273]'
+              : 'inline-flex items-center gap-1.5 rounded-md border border-[#326273]/14 bg-white px-2 py-1 font-mono text-[12px] font-semibold uppercase tracking-[0.12em] text-[#326273]/90'
           }
         >
           <span className="h-1 w-1 rounded-full bg-current" aria-hidden="true" />
@@ -182,7 +182,7 @@ export default function ThreadRow({
     return (
       <div className={compact ? 'pl-7' : 'pl-8'}>
         <div className="rounded-lg border border-[#5C9EAD]/40 bg-white px-3 py-2.5">
-          <div className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-[#326273]">
+          <div className="font-mono text-[12px] font-semibold uppercase tracking-[0.12em] text-[#326273]">
             {item.handoff.title}
           </div>
           <ul className="mt-1.5 space-y-0.5 text-[13px] leading-5 tabular-nums text-[#1F4452]">
@@ -214,7 +214,7 @@ export default function ThreadRow({
   if (compact) {
     return (
       <div className="rounded-lg border border-[#efc46f]/60 bg-[#efc46f]/12 px-3 py-2.5">
-        <div className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-[#9A4A2D]">
+        <div className="font-mono text-[12px] font-semibold uppercase tracking-[0.12em] text-[#9A4A2D]">
           Unsigned proposal
         </div>
         <p className="mt-1 text-[13px] font-semibold leading-5 text-[#1F4452]">
@@ -235,7 +235,7 @@ export default function ThreadRow({
   return (
     <div className="space-y-1.5">
       <div className="flex items-center gap-2 pl-8">
-        <span className="inline-flex items-center gap-1.5 rounded-md border border-[#efc46f]/60 bg-[#efc46f]/15 px-2 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-[#9A4A2D]">
+        <span className="inline-flex items-center gap-1.5 rounded-md border border-[#efc46f]/60 bg-[#efc46f]/15 px-2 py-1 font-mono text-[12px] font-semibold uppercase tracking-[0.12em] text-[#9A4A2D]">
           {approval?.state === 'approved' ? 'Signed · queued for settlement' : 'Unsigned proposal'}
         </span>
       </div>
@@ -273,7 +273,7 @@ export default function ThreadRow({
       {/* No window was opened on this surface — the queue is the only route. */}
       {!approval && (
         <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[#326273]/14 bg-[#F6F0ED] px-3 py-2.5 text-[13px] font-semibold text-[#326273]">
-          <Clock3 className="h-4 w-4 shrink-0 text-[#326273]/50" />
+          <Clock3 className="h-4 w-4 shrink-0 text-[#326273]/90" />
           Prepared and waiting in the maker-checker queue.
           <Link
             href="/queue"
@@ -303,7 +303,7 @@ export default function ThreadRow({
 
       {approval?.state === 'expired' && (
         <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[#326273]/14 bg-[#F6F0ED] px-3 py-2.5 text-[13px] font-semibold text-[#326273]">
-          <Clock3 className="h-4 w-4 shrink-0 text-[#326273]/50" />
+          <Clock3 className="h-4 w-4 shrink-0 text-[#326273]/90" />
           The in-chat window passed — this proposal now waits in the maker-checker queue.
           <Link
             href="/queue"

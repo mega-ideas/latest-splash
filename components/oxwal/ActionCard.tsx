@@ -14,8 +14,8 @@ const actionLabels = {
    only — never a risk/error signal. high=error, medium=warn, low=ok. */
 function riskClass(tone: ReturnType<typeof buildActionCardModel>['riskTone']) {
   if (tone === 'high') return 'border-[var(--error)] bg-[var(--error-bg)] text-[var(--error)]';
-  if (tone === 'medium') return 'border-[var(--warn)] bg-[var(--warn-bg)] text-[var(--warn)]';
-  return 'border-[var(--ok)] bg-[var(--ok-bg)] text-[var(--ok)]';
+  if (tone === 'medium') return 'border-[var(--warn)] bg-[var(--warn-bg)] text-[#8b6418]';
+  return 'border-[var(--ok)] bg-[var(--ok-bg)] text-[#1F4452]';
 }
 
 function confidenceColor(tone: ReturnType<typeof buildActionCardModel>['riskTone'], hasUntrustedEvidence: boolean) {
@@ -38,21 +38,21 @@ export default function ActionCard({ proposal, readOnly = false }: ActionCardPro
       <div className="grid gap-4 border-b border-[#326273]/10 p-4 md:grid-cols-[minmax(0,1fr)_auto]">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="rounded-md bg-[#1F4452] px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-white">
+            <span className="rounded-md bg-[#1F4452] px-2 py-1 text-[12px] font-semibold uppercase tracking-[0.16em] text-white">
               {proposal.kind}
             </span>
-            <span className={`rounded-md border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] ${riskClass(model.riskTone)}`}>
+            <span className={`rounded-md border px-2 py-1 text-[12px] font-semibold uppercase tracking-[0.16em] ${riskClass(model.riskTone)}`}>
               {proposal.explain.risk} risk
             </span>
             {model.hasUntrustedEvidence && (
-              <span className="inline-flex items-center gap-1 rounded-md border border-[var(--warn)] bg-[var(--warn-bg)] px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--warn)]">
+              <span className="inline-flex items-center gap-1 rounded-md border border-[var(--warn)] bg-[var(--warn-bg)] px-2 py-1 text-[12px] font-semibold uppercase tracking-[0.16em] text-[#8b6418]">
                 <AlertTriangle className="h-3.5 w-3.5" />
                 Untrusted data
               </span>
             )}
             {/* WS2 truth chip — evidence built on DEMO/MODELED sources says so. */}
             {model.containsDemoData && (
-              <span className="inline-flex items-center gap-1 rounded-md border border-[var(--warn)] bg-[var(--warn-bg)] px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--warn)]">
+              <span className="inline-flex items-center gap-1 rounded-md border border-[var(--warn)] bg-[var(--warn-bg)] px-2 py-1 text-[12px] font-semibold uppercase tracking-[0.16em] text-[#8b6418]">
                 <AlertTriangle className="h-3.5 w-3.5" />
                 Contains demo data
               </span>
@@ -61,7 +61,7 @@ export default function ActionCard({ proposal, readOnly = false }: ActionCardPro
           <h2 className="mt-3 text-xl font-bold tracking-normal text-[#1F4452]">
             {proposal.explain.recommendation}
           </h2>
-          <p className="mt-1 font-mono text-[13px] font-medium text-[#326273]/50">
+          <p className="mt-1 font-mono text-[13px] font-medium text-[#326273]/90">
             {proposal.id} - {proposal.status} - {proposal.corridor ?? 'NO_CORRIDOR'}
           </p>
           {/* Checked facts, not a score: what the approver should look at
@@ -70,8 +70,8 @@ export default function ActionCard({ proposal, readOnly = false }: ActionCardPro
             <div className="mt-3 rounded-md border border-[var(--warn)] bg-[var(--warn-bg)] px-3 py-2">
               {/* Ink, not --warn, for the label: --warn on --warn-bg is under
                   4.5:1 at this size. The icon carries the caution, not colour alone. */}
-              <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#1F4452]">
-                <AlertTriangle className="h-3.5 w-3.5 text-[var(--warn)]" aria-hidden="true" />
+              <p className="flex items-center gap-1.5 text-[12px] font-semibold uppercase tracking-[0.16em] text-[#1F4452]">
+                <AlertTriangle className="h-3.5 w-3.5 text-[#8b6418]" aria-hidden="true" />
                 Check before approving
               </p>
               <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[13px] font-medium leading-5 text-[#1F4452]">
@@ -85,7 +85,7 @@ export default function ActionCard({ proposal, readOnly = false }: ActionCardPro
 
         <div className="min-w-[190px]">
           <div className="flex items-center justify-between gap-3">
-            <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#326273]/48">Confidence</span>
+            <span className="text-[12px] font-semibold uppercase tracking-[0.16em] text-[#326273]/90">Confidence</span>
             <span className="font-mono text-sm font-bold text-[#1F4452]">
               {model.confidencePercent === null ? 'Not measured' : `${model.confidencePercent}%`}
             </span>
@@ -98,7 +98,7 @@ export default function ActionCard({ proposal, readOnly = false }: ActionCardPro
             </div>
           )}
           <div className="mt-3 flex items-center justify-between gap-2 rounded-md border border-[#326273]/12 bg-[#F6F0ED] px-3 py-2">
-            <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#326273]/50">Approvers</span>
+            <span className="text-[12px] font-semibold uppercase tracking-[0.16em] text-[#326273]/90">Approvers</span>
             <span className="font-mono text-sm font-bold text-[#1F4452]">{model.approverText}</span>
           </div>
         </div>
@@ -115,7 +115,7 @@ export default function ActionCard({ proposal, readOnly = false }: ActionCardPro
               <tbody className="divide-y divide-[#326273]/10">
                 {model.impactRows.map((item) => (
                   <tr key={item.label}>
-                    <th className="bg-[#F6F0ED] px-3 py-2 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[#326273]/55">
+                    <th className="bg-[#F6F0ED] px-3 py-2 text-left text-xs font-semibold uppercase tracking-[0.12em] text-[#326273]/90">
                       {item.label}
                     </th>
                     <td className="money px-3 py-2 font-medium text-[#1F4452]">{item.value}</td>
@@ -134,8 +134,8 @@ export default function ActionCard({ proposal, readOnly = false }: ActionCardPro
           <div className="divide-y divide-[#326273]/10 rounded-md border border-[#326273]/12">
             {model.simulationRows.map((item) => (
               <div key={`${item.label}-${item.value}`} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 px-3 py-2 text-sm">
-                <span className="min-w-0 truncate font-medium text-[#326273]/72">{item.label}</span>
-                <span className={item.status === 'warning' ? 'money font-bold text-[var(--warn)]' : 'money font-bold text-[#1F4452]'}>
+                <span className="min-w-0 truncate font-medium text-[#326273]/90">{item.label}</span>
+                <span className={item.status === 'warning' ? 'money font-bold text-[#8b6418]' : 'money font-bold text-[#1F4452]'}>
                   {item.value}
                 </span>
               </div>
@@ -151,16 +151,16 @@ export default function ActionCard({ proposal, readOnly = false }: ActionCardPro
             <span
               key={`${item.source}-${item.ref}`}
               className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[13px] font-bold ${item.tone === 'untrusted'
-                ? 'border-[var(--warn)] bg-[var(--warn-bg)] text-[var(--warn)]'
-                : 'border-[var(--ok)] bg-[var(--ok-bg)] text-[var(--ok)]'}`}
+                ? 'border-[var(--warn)] bg-[var(--warn-bg)] text-[#8b6418]'
+                : 'border-[var(--ok)] bg-[var(--ok-bg)] text-[#1F4452]'}`}
             >
               {item.source} - {item.trustLabel}
               {/* WS2 provenance chip: LIVE keeps default styling; anything else
                   is clearly marked with the existing caution accent. */}
               <span
                 className={item.statusTone === 'live'
-                  ? 'rounded border border-[var(--ok)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--ok)]'
-                  : 'rounded border border-[var(--warn)] bg-[var(--warn-bg)] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--warn)]'}
+                  ? 'rounded border border-[var(--ok)] px-1.5 py-0.5 text-[12px] font-semibold uppercase tracking-[0.12em] text-[#1F4452]'
+                  : 'rounded border border-[var(--warn)] bg-[var(--warn-bg)] px-1.5 py-0.5 text-[12px] font-semibold uppercase tracking-[0.12em] text-[#8b6418]'}
               >
                 {item.statusLabel}
               </span>
@@ -174,7 +174,7 @@ export default function ActionCard({ proposal, readOnly = false }: ActionCardPro
           <summary className="cursor-pointer font-bold text-[#326273]">Reasoning trace</summary>
           <a
             href={`/api/walrus/${encodeURIComponent(proposal.explain.reasoningTraceRef)}`}
-            className="mt-2 inline-flex max-w-full items-center gap-1 break-all font-mono text-[13px] font-medium text-[#326273]/62"
+            className="mt-2 inline-flex max-w-full items-center gap-1 break-all font-mono text-[13px] font-medium text-[#326273]/90"
           >
             {proposal.explain.reasoningTraceRef}
             <ExternalLink className="h-3.5 w-3.5 shrink-0" />
@@ -182,7 +182,7 @@ export default function ActionCard({ proposal, readOnly = false }: ActionCardPro
         </details>
 
         {readOnly ? (
-          <span className="inline-flex items-center gap-2 rounded-md border border-[#326273]/16 bg-white px-3 py-2 font-mono text-xs font-semibold uppercase tracking-[0.1em] text-[#326273]/70">
+          <span className="inline-flex items-center gap-2 rounded-md border border-[#326273]/16 bg-white px-3 py-2 font-mono text-xs font-semibold uppercase tracking-[0.1em] text-[#326273]/90">
             <ShieldCheck className="h-4 w-4 text-[var(--info)]" />
             Approve or reject in the queue
           </span>

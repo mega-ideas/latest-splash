@@ -34,7 +34,7 @@ export default function MoneyPathPanel({ compact = false }: { compact?: boolean 
           <ShieldCheck size={15} className="shrink-0 text-[var(--info)]" aria-hidden="true" />
           {MONEY_PATH_HEADER}
         </span>
-        <ChevronDown size={15} aria-hidden="true" className="shrink-0 text-[#326273]/45 transition-transform group-open:rotate-180" />
+        <ChevronDown size={15} aria-hidden="true" className="shrink-0 text-[#326273]/90 transition-transform group-open:rotate-180" />
       </summary>
       <div className="flex justify-end border-t border-[#326273]/10 px-4 pt-2">
         <Link
@@ -62,12 +62,12 @@ export default function MoneyPathPanel({ compact = false }: { compact?: boolean 
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-1.5">
                   <strong className="text-sm font-semibold text-[#1F4452]">{step.partner}</strong>
-                  <span className="text-[13px] font-medium text-[#326273]/55">· {step.role}</span>
+                  <span className="text-[13px] font-medium text-[#326273]/90">· {step.role}</span>
                   {!compact && index < MONEY_PATH_STEPS.length - 1 ? (
-                    <ArrowRight size={13} aria-hidden="true" className="hidden text-[#326273]/35 lg:inline" />
+                    <ArrowRight size={13} aria-hidden="true" className="hidden text-[#326273]/90 lg:inline" />
                   ) : null}
                 </div>
-                <p className="mt-1 text-[13px] font-medium leading-5 text-[#326273]/70">{step.detail}</p>
+                <p className="mt-1 text-[13px] font-medium leading-5 text-[#326273]/90">{step.detail}</p>
               </div>
             </li>
           );

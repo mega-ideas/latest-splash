@@ -73,7 +73,7 @@ export default function DashStat({
   return (
     <div className={cn('dash-block p-4', interactive && 'dash-block-interactive', className)}>
       <div className="flex items-center justify-between">
-        <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#326273]/55">{label}</span>
+        <span className="text-[12px] font-semibold uppercase tracking-[0.12em] text-[#326273]/90">{label}</span>
         {Icon && (
           <span className={cn('rounded-lg p-1.5', iconWrapClassName ?? 'bg-[#5C9EAD]/10')}>
             <Icon size={14} className={iconClassName ?? 'text-[var(--info)]'} />
@@ -83,7 +83,7 @@ export default function DashStat({
       <div ref={valueRef} className={cn('dash-num mt-2 text-2xl font-semibold text-[#0c3e48]', valueClassName)}>
         {value}
       </div>
-      {delta && <div className={cn('mt-0.5 text-[13px] font-medium', deltaClassName ?? 'text-[#326273]/55')}>{delta}</div>}
+      {delta && <div className={cn('mt-0.5 text-[13px] font-medium', deltaClassName ?? 'text-[#326273]/90')}>{delta}</div>}
     </div>
   );
 }

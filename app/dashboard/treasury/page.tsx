@@ -115,9 +115,9 @@ function smoothPath(pts: Array<[number, number]>) {
 const CH = { W: 560, H: 160, PL: 10, PR: 10, PT: 16, PB: 10 };
 
 function HistIcon({ type }: { type: TxType }) {
-  if (type === 'deposit')  return <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#D9A441]/15"><ArrowUpRight size={14} className="text-[#C99A2E]" /></div>;
+  if (type === 'deposit')  return <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#D9A441]/15"><ArrowUpRight size={14} className="text-[#8b6418]" /></div>;
   if (type === 'withdraw') return <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#5C9EAD]/10"><ArrowDownLeft size={14} className="text-[var(--info)]" /></div>;
-  return <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#6FB4A0]/18"><Sparkles size={14} className="text-[#4F9C88]" /></div>;
+  return <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#6FB4A0]/18"><Sparkles size={14} className="text-[var(--ok)]" /></div>;
 }
 
 // ─── Page ────────────────────────────────────────────────────────────────────
@@ -299,18 +299,18 @@ export default function TreasuryPage() {
         {phase === 'gated' ? (
           <section className="dash-block p-6">
             <h2 className="text-base font-semibold text-[#1F4452]">Treasury arrives with our licence</h2>
-            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[#326273]/75">
+            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[#326273]/90">
               Holding your funds — a treasury balance, a stored balance, a sweep account — is a Phase 2 capability that
               needs a money-broking licence Splash does not hold yet. Today Splash pays out only: what you send is
               delivered to the recipient, and nothing is kept on your behalf.
             </p>
-            <p className="mt-3 max-w-2xl text-sm leading-relaxed text-[#326273]/75">
+            <p className="mt-3 max-w-2xl text-sm leading-relaxed text-[#326273]/90">
               Until then this page shows no balances and no projections. When the licence and the custody package are in
               place, the treasury opens here — every move approval-gated, every withdrawal on a cancellable notice.
             </p>
           </section>
         ) : (
-          <section className="dash-block p-6 text-sm text-[#326273]/60">Loading the ledger…</section>
+          <section className="dash-block p-6 text-sm text-[#326273]/90">Loading the ledger…</section>
         )}
         <MoneyPathPanel />
       </div>
@@ -332,14 +332,14 @@ export default function TreasuryPage() {
         <div>
           <span className="dash-kicker">Working capital</span>
           <h1 className="dash-title mt-2">Smart Treasury</h1>
-          <p className="mt-1 text-[13px] font-medium text-[#326273]/60">
+          <p className="mt-1 text-[13px] font-medium text-[#326273]">
             Operating cash stays instant. Idle balance can be allocated to Ondo USDY at a variable rate, shown here as a projection.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <span className="rounded-full border border-[#D9A441]/40 bg-[#D9A441]/12 px-3 py-1.5 text-sm font-semibold text-[#9a6f15]">{rate.label}</span>
+          <span className="rounded-full border border-[#D9A441]/40 bg-[#D9A441]/12 px-3 py-1.5 text-sm font-semibold text-[#1F4452]">{rate.label}</span>
           {rate.introductory && (
-            <span className="rounded-full border border-[#E39774]/40 bg-[#E39774]/12 px-3 py-1.5 text-[13px] font-semibold text-[#C97A56]">Introductory rate</span>
+            <span className="rounded-full border border-[#E39774]/40 bg-[#E39774]/12 px-3 py-1.5 text-[13px] font-semibold text-[#1F4452]">Introductory rate</span>
           )}
         </div>
       </header>
@@ -347,15 +347,15 @@ export default function TreasuryPage() {
       {/* Status strip — reflects the real execution state (never contradicts it) */}
       {executionEnabled ? (
         <div className="dash-block flex flex-wrap items-center gap-x-3 gap-y-1 border-[#6FB4A0]/30 bg-[#6FB4A0]/8 p-4 text-sm font-semibold text-[#1F4452]">
-          <span className="inline-flex items-center gap-1.5"><CheckCircle2 size={14} className="text-[#4F9C88]" /> Treasury execution enabled · sandbox</span>
-          <span className="text-[13px] font-medium text-[#326273]/65">
+          <span className="inline-flex items-center gap-1.5"><CheckCircle2 size={14} className="text-[var(--ok)]" /> Treasury execution enabled · sandbox</span>
+          <span className="text-[13px] font-medium text-[#326273]/90">
             Moves settle against the Splash sandbox ledger · every action is approval-gated · withdrawals follow the notice window. Partners of record hold customer funds.
           </span>
         </div>
       ) : (
         <div className="dash-block border-accent/30 bg-accent/10 p-4 text-sm font-semibold text-foreground">
           Projection only — execution disabled pending regulatory approval.
-          <span className="mt-1 block text-[13px] font-medium text-foreground/65">
+          <span className="mt-1 block text-[13px] font-medium text-foreground/90">
             Partners of record hold customer funds; treasury figures stay projected until controls are live.
           </span>
         </div>
@@ -369,9 +369,9 @@ export default function TreasuryPage() {
           <div className="flex items-center gap-2">
             <span className="dash-kicker">Treasury rail</span>
           </div>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] font-medium text-[#326273]/60">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] font-medium text-[#326273]/90">
             <span>Total position <span className="dash-num font-semibold text-[#0c3e48]">${fmtUsd(totalPosition)}</span></span>
-            <span className="text-[#4F9C88]">+${fmtUsd(yield30d)} yield accrued</span>
+            <span className="text-[var(--ok)]">+${fmtUsd(yield30d)} yield accrued</span>
             <span className="hidden sm:inline">{treasuryShare}% allocated to treasury</span>
           </div>
         </div>
@@ -384,13 +384,13 @@ export default function TreasuryPage() {
             !toTreasury && 'tr-vessel-dest-teal',
           )}>
             <div className="flex items-center justify-between">
-              <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#326273]/55">Operating cash</span>
+              <span className="text-[12px] font-semibold uppercase tracking-[0.12em] text-[#326273]/90">Operating cash</span>
               <div className="flex items-center gap-1.5">
                 <span className={cn(
-                  'rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] transition-colors',
+                  'rounded-full px-2 py-0.5 text-[12px] font-semibold uppercase tracking-[0.14em] transition-colors',
                   toTreasury
-                    ? 'border border-[#326273]/20 bg-white text-[#326273]/60'
-                    : 'bg-[#5C9EAD] text-white shadow-sm',
+                    ? 'border border-[#326273]/20 bg-white text-[#326273]/90'
+                    : 'bg-[#237284] text-white shadow-sm',
                 )}>
                   {toTreasury ? 'From' : 'To'}
                 </span>
@@ -399,8 +399,8 @@ export default function TreasuryPage() {
             </div>
             <div className="dash-num mt-2 text-3xl font-semibold text-[#0c3e48]">${fmtUsd(available)}</div>
             <div className="mt-1 flex items-center gap-2 text-[13px] font-medium">
-              <span className="rounded-full bg-[#326273]/8 px-2 py-0.5 text-[#326273]/70">USD</span>
-              <span className="text-[#326273]/55">Instant · funds every payout · 0%</span>
+              <span className="rounded-full bg-[#326273]/8 px-2 py-0.5 text-[#326273]/90">USD</span>
+              <span className="text-[#326273]/90">Instant · funds every payout · 0%</span>
             </div>
             <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[#326273]/8">
               <div className="h-full rounded-full bg-[#5C9EAD]/70 transition-all" style={{ width: `${100 - treasuryShare}%` }} />
@@ -426,11 +426,11 @@ export default function TreasuryPage() {
                   className={cn(
                     'inline-flex flex-1 items-center justify-center gap-1.5 rounded-md py-2 text-[13px] font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-50',
                     tab === t
-                      ? (t === 'toTreasury' ? 'bg-[#C99A2E] text-white shadow' : 'bg-[#5C9EAD] text-white shadow')
+                      ? (t === 'toTreasury' ? 'bg-[#C99A2E] text-[#073d49] shadow' : 'bg-[#237284] text-white shadow')
                       // bg-transparent is load-bearing: the global button
                       // normalizer paints any bg-less flex-1 button teal,
                       // which made BOTH toggle tabs look pressed.
-                      : 'bg-transparent text-[#326273]/45 hover:text-[#326273]',
+                      : 'bg-transparent text-[#326273]/90 hover:text-[#326273]',
                   )}
                 >
                   <Icon size={12} />{lbl}
@@ -441,7 +441,7 @@ export default function TreasuryPage() {
             {/* Explicit direction — sentence order matches the vessels' layout */}
             <div className={cn(
               'flex items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-[13px] font-semibold',
-              toTreasury ? 'bg-[#D9A441]/14 text-[#9a6f15]' : 'bg-[#5C9EAD]/14 text-[#326273]',
+              toTreasury ? 'bg-[#D9A441]/14 text-[#1F4452]' : 'bg-[#5C9EAD]/14 text-[#326273]',
             )}>
               <span>Operating cash</span>
               {toTreasury ? <ArrowRight size={12} className="shrink-0" /> : <ArrowLeft size={12} className="shrink-0" />}
@@ -454,9 +454,9 @@ export default function TreasuryPage() {
             </div>
 
             <div>
-              <label className="text-[11px] font-medium uppercase tracking-wide text-[#326273]/50">Amount (USD)</label>
+              <label className="text-[12px] font-medium uppercase tracking-wide text-[#326273]/90">Amount (USD)</label>
               <div className="mt-1 flex items-center gap-2 rounded-lg border border-[#326273]/15 bg-white px-3 py-2.5 transition-all focus-within:border-[#D9A441] focus-within:ring-2 focus-within:ring-[#D9A441]/15">
-                <span className="text-sm font-medium text-[#326273]/50">$</span>
+                <span className="text-sm font-medium text-[#326273]/90">$</span>
                 <input
                   type="text"
                   inputMode="decimal"
@@ -466,17 +466,17 @@ export default function TreasuryPage() {
                   placeholder="0.00"
                   className="min-w-0 flex-1 bg-transparent text-sm font-semibold text-[#1F4452] placeholder-[#326273]/30 outline-none"
                 />
-                <button type="button" disabled={!executionEnabled} onClick={() => setAmount(String(Math.floor(sourceBalance)))} className="shrink-0 rounded-md bg-[#326273]/10 px-2 py-0.5 text-[13px] font-semibold text-[#326273]/60 transition-colors hover:bg-[#326273]/20 hover:text-[#326273] disabled:cursor-not-allowed disabled:opacity-40">MAX</button>
+                <button type="button" disabled={!executionEnabled} onClick={() => setAmount(String(Math.floor(sourceBalance)))} className="shrink-0 rounded-md bg-[#326273]/10 px-2 py-0.5 text-[13px] font-semibold text-[#326273]/90 transition-colors hover:bg-[#326273]/20 hover:text-[#326273] disabled:cursor-not-allowed disabled:opacity-40">MAX</button>
               </div>
             </div>
 
             <div className="space-y-1.5 rounded-lg bg-white/70 p-3 text-[13px]">
-              <div className="flex justify-between"><span className="text-[#326273]/55">From {toTreasury ? 'Operating (USD)' : 'Treasury (USDY)'}</span><span className="dash-num font-medium text-[#1F4452]">${fmtUsd(sourceBalance)}</span></div>
+              <div className="flex justify-between"><span className="text-[#326273]/90">From {toTreasury ? 'Operating (USD)' : 'Treasury (USDY)'}</span><span className="dash-num font-medium text-[#1F4452]">${fmtUsd(sourceBalance)}</span></div>
               {previewSource !== null && (
-                <div className="flex justify-between border-t border-[#326273]/10 pt-1.5"><span className="font-medium text-[#326273]/70">After</span><span className="dash-num font-semibold text-[#1F4452]">${fmtUsd(previewSource)}</span></div>
+                <div className="flex justify-between border-t border-[#326273]/10 pt-1.5"><span className="font-medium text-[#326273]/90">After</span><span className="dash-num font-semibold text-[#1F4452]">${fmtUsd(previewSource)}</span></div>
               )}
               {!toTreasury && (
-                <div className="flex items-center gap-1.5 text-[13px] text-[#C97A56]"><Clock size={10} /> Lands in Operating in {windowLabel}</div>
+                <div className="flex items-center gap-1.5 text-[13px] text-[#9f5839]"><Clock size={10} /> Lands in Operating in {windowLabel}</div>
               )}
             </div>
 
@@ -484,8 +484,9 @@ export default function TreasuryPage() {
               type="submit"
               disabled={!executionEnabled || loading || !validAmount}
               className={cn(
-                'w-full rounded-lg py-2.5 text-sm font-semibold text-white transition-all disabled:opacity-50',
-                toTreasury ? 'bg-[#C99A2E] hover:bg-[#b3881f]' : 'bg-[#5C9EAD] hover:bg-[#4a8a99]',
+                'w-full rounded-lg py-2.5 text-sm font-semibold transition-all disabled:opacity-50',
+                // Gold takes ink words and lightens on hover; the teal is deep enough for white.
+                toTreasury ? 'bg-[#C99A2E] text-[#073d49] hover:bg-[#C99A2E]/85' : 'bg-[#237284] text-white hover:bg-[#145d6a]',
               )}
             >
               {!executionEnabled ? 'Execution disabled' : loading ? 'Processing…' : toTreasury
@@ -500,25 +501,25 @@ export default function TreasuryPage() {
             toTreasury && 'tr-vessel-dest',
           )}>
             <div className="flex items-center justify-between">
-              <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#9a6f15]">Smart Treasury</span>
+              <span className="text-[12px] font-semibold uppercase tracking-[0.12em] text-[#8b6418]">Smart Treasury</span>
               <div className="flex items-center gap-1.5">
                 <span className={cn(
-                  'rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] transition-colors',
+                  'rounded-full px-2 py-0.5 text-[12px] font-semibold uppercase tracking-[0.14em] transition-colors',
                   toTreasury
-                    ? 'bg-[#C99A2E] text-white shadow-sm'
-                    : 'border border-[#326273]/20 bg-white text-[#326273]/60',
+                    ? 'bg-[#C99A2E] text-[#073d49] shadow-sm'
+                    : 'border border-[#326273]/20 bg-white text-[#326273]/90',
                 )}>
                   {toTreasury ? 'To' : 'From'}
                 </span>
-                <div className="rounded-lg bg-[#D9A441]/18 p-1.5"><TrendingUp size={14} className="text-[#C99A2E]" /></div>
+                <div className="rounded-lg bg-[#D9A441]/18 p-1.5"><TrendingUp size={14} className="text-[#8b6418]" /></div>
               </div>
             </div>
             <div className="dash-num mt-2 text-3xl font-semibold text-[#0c3e48]">${fmtUsd(balance)}</div>
             <div className="mt-1 flex flex-wrap items-center gap-2 text-[13px] font-medium">
-              <span className="rounded-full bg-[#D9A441]/15 px-2 py-0.5 text-[#9a6f15]">Ondo USDY</span>
-              <span className="text-[#326273]/55">{rate.label}</span>
+              <span className="rounded-full bg-[#D9A441]/15 px-2 py-0.5 text-[#8b6418]">Ondo USDY</span>
+              <span className="text-[#326273]/90">{rate.label}</span>
             </div>
-            <div className="mt-2 flex items-center gap-1.5 text-[13px] font-medium text-[#4F9C88]">
+            <div className="mt-2 flex items-center gap-1.5 text-[13px] font-medium text-[var(--ok)]">
               <Sparkles size={11} /> +${fmtUsd(yield30d)} accrued · ~${dailyYield.toFixed(2)}/day · accrues daily 00:00 UTC
             </div>
             <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[#326273]/8">
@@ -540,11 +541,11 @@ export default function TreasuryPage() {
               <div>
                 <div className="flex items-center gap-2">
                   <h2 className="text-sm font-semibold text-[#1F4452]">USDY daily yield</h2>
-                  <span className="inline-flex items-center gap-1 rounded-full bg-[#D9A441]/15 px-1.5 py-0.5 text-[13px] font-semibold text-[#9a6f15]">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-[#D9A441]/15 px-1.5 py-0.5 text-[13px] font-semibold text-[#8b6418]">
                     variable
                   </span>
                 </div>
-                <p className="mt-0.5 text-[13px] text-[#326273]/50">
+                <p className="mt-0.5 text-[13px] text-[#326273]/90">
                   {focusBar
                     ? <>Hovering <span className="font-medium text-[#1F4452]">{focusBar.label}</span></>
                     : 'Accrues daily via USDY redemption price · floating, not fixed'}
@@ -552,10 +553,10 @@ export default function TreasuryPage() {
               </div>
               <div className="flex flex-col items-end gap-2">
                 <div className="text-right">
-                  <div className="text-lg font-semibold text-[#C99A2E]">
+                  <div className="text-lg font-semibold text-[#8b6418]">
                     +${focusBar ? focusBar.amount.toFixed(3) : dailyYield.toFixed(3)}
                   </div>
-                  <div className="text-[13px] text-[#326273]/50">{focusBar ? 'that day' : 'estimated today'}</div>
+                  <div className="text-[13px] text-[#326273]/90">{focusBar ? 'that day' : 'estimated today'}</div>
                 </div>
                 <div className="inline-flex rounded-md bg-[#F6F0ED] p-0.5">
                   {(['7d', '30d'] as const).map((r) => (
@@ -563,7 +564,7 @@ export default function TreasuryPage() {
                       key={r}
                       type="button"
                       onClick={() => { setChartRange(r); setHoveredBar(null); }}
-                      className={cn('rounded px-2.5 py-1 text-[13px] font-semibold transition-colors', chartRange === r ? 'bg-white text-[#1F4452] shadow-sm' : 'text-[#326273]/55 hover:text-[#326273]')}
+                      className={cn('rounded px-2.5 py-1 text-[13px] font-semibold transition-colors', chartRange === r ? 'bg-white text-[#1F4452] shadow-sm' : 'text-[#326273]/90 hover:text-[#326273]')}
                     >
                       {r.toUpperCase()}
                     </button>
@@ -613,9 +614,9 @@ export default function TreasuryPage() {
               </svg>
 
               {/* Scale labels pinned to their gridlines */}
-              <span className="dash-num pointer-events-none absolute right-1 -translate-y-1/2 rounded bg-white/80 px-1 font-mono text-[9px] font-semibold text-[#326273]/55" style={{ top: `${(chart.cy(maxBar) / CH.H) * 100}%` }}>high ${maxBar.toFixed(2)}</span>
-              <span className="dash-num pointer-events-none absolute right-1 -translate-y-1/2 rounded bg-white/80 px-1 font-mono text-[9px] font-semibold text-[#326273]/55" style={{ top: `${(chart.cy(minBar) / CH.H) * 100}%` }}>low ${minBar.toFixed(2)}</span>
-              <span className="dash-num pointer-events-none absolute left-1 -translate-y-1/2 rounded bg-white/80 px-1 font-mono text-[9px] font-semibold text-[var(--info)]" style={{ top: `${(chart.cy(avgBar) / CH.H) * 100}%` }}>avg ${avgBar.toFixed(2)}</span>
+              <span className="dash-num pointer-events-none absolute right-1 -translate-y-1/2 rounded bg-white/80 px-1 font-mono text-[12px] font-semibold text-[#326273]/90" style={{ top: `${(chart.cy(maxBar) / CH.H) * 100}%` }}>high ${maxBar.toFixed(2)}</span>
+              <span className="dash-num pointer-events-none absolute right-1 -translate-y-1/2 rounded bg-white/80 px-1 font-mono text-[12px] font-semibold text-[#326273]/90" style={{ top: `${(chart.cy(minBar) / CH.H) * 100}%` }}>low ${minBar.toFixed(2)}</span>
+              <span className="dash-num pointer-events-none absolute left-1 -translate-y-1/2 rounded bg-white/80 px-1 font-mono text-[12px] font-semibold text-[var(--info)]" style={{ top: `${(chart.cy(avgBar) / CH.H) * 100}%` }}>avg ${avgBar.toFixed(2)}</span>
 
               {/* Tooltip above the hovered point */}
               {focusBar && hoveredBar !== null && (
@@ -626,14 +627,14 @@ export default function TreasuryPage() {
                     top: `${(chart.pts[hoveredBar][1] / CH.H) * 100}%`,
                   }}
                 >
-                  <div className="text-white/60">{focusBar.label}</div>
+                  <div className="text-white/80">{focusBar.label}</div>
                   <div className="font-mono text-[#E0B05A]">+${focusBar.amount.toFixed(3)}</div>
                 </div>
               )}
             </div>
 
             {/* X-axis: every day on 7d, sparse markers on 30d */}
-            <div className="mt-1 flex justify-between px-1 text-[13px] text-[#326273]/40">
+            <div className="mt-1 flex justify-between px-1 text-[13px] text-[#326273]/90">
               {(chartRange === '7d' ? bars : [bars[0], bars[9], bars[19], bars[29]]).map((d) => (
                 <span key={d.day} className={cn('transition-colors', focusBar?.day === d.day && 'font-semibold text-[#1F4452]')}>{d.day}</span>
               ))}
@@ -641,19 +642,19 @@ export default function TreasuryPage() {
 
             <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
               <div className="rounded-lg border border-[#D9A441]/20 bg-[#D9A441]/8 p-3">
-                <div className="flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-[#9a6f15]"><Sparkles size={10} /> Daily yield</div>
-                <div className="dash-num mt-1 font-mono text-sm font-semibold text-[#9a6f15]">+${dailyYield.toFixed(3)}</div>
+                <div className="flex items-center gap-1 text-[12px] font-medium uppercase tracking-wide text-[#8b6418]"><Sparkles size={10} /> Daily yield</div>
+                <div className="dash-num mt-1 font-mono text-sm font-semibold text-[#8b6418]">+${dailyYield.toFixed(3)}</div>
               </div>
               <div className="rounded-lg bg-[#F6F0ED] p-3">
-                <div className="flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-[#326273]/55"><CalendarDays size={10} /> Period total</div>
+                <div className="flex items-center gap-1 text-[12px] font-medium uppercase tracking-wide text-[#326273]/90"><CalendarDays size={10} /> Period total</div>
                 <div className="dash-num mt-1 font-mono text-sm font-semibold text-[#1F4452]">+${totalRange.toFixed(2)}</div>
               </div>
               <div className="rounded-lg bg-[#F6F0ED] p-3">
-                <div className="flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-[#326273]/55"><TrendingUp size={10} /> Avg / day</div>
+                <div className="flex items-center gap-1 text-[12px] font-medium uppercase tracking-wide text-[#326273]/90"><TrendingUp size={10} /> Avg / day</div>
                 <div className="dash-num mt-1 font-mono text-sm font-semibold text-[#1F4452]">+${avgBar.toFixed(3)}</div>
               </div>
               <div className="rounded-lg bg-[#5C9EAD]/10 p-3">
-                <div className="flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-[var(--info)]"><PiggyBank size={10} /> Est. annual</div>
+                <div className="flex items-center gap-1 text-[12px] font-medium uppercase tracking-wide text-[var(--info)]"><PiggyBank size={10} /> Est. annual</div>
                 <div className="dash-num mt-1 font-mono text-sm font-semibold text-[#326273]">+${projAnnual.toFixed(2)}</div>
               </div>
             </div>
@@ -665,13 +666,13 @@ export default function TreasuryPage() {
               <div className="border-b border-[#326273]/10 p-5 lg:border-b-0 lg:border-r">
                 <span className="dash-kicker">Loop economics simulator</span>
                 <h2 className="mt-2 text-xl font-semibold text-[#0c3e48]">Sweep vs hold</h2>
-                <p className="mt-2 max-w-xl text-[13px] leading-5 text-[#326273]/60">
+                <p className="mt-2 max-w-xl text-[13px] leading-5 text-[#326273]/90">
                   On a $5,000 payment, internal netting removes repeated payout work. The remainder is relocated to the point where funds eventually leave the Splash loop.
                 </p>
                 <label className="mt-6 block">
                   <span className="flex items-center justify-between text-[13px] font-semibold text-[#326273]">
                     <span>Netting ratio</span>
-                    <span className="font-mono text-[#E39774]">{nettingRatio}%</span>
+                    <span className="font-mono text-[#9f5839]">{nettingRatio}%</span>
                   </span>
                   <input
                     type="range"
@@ -681,26 +682,26 @@ export default function TreasuryPage() {
                     onChange={(event) => setNettingRatio(Number(event.target.value))}
                     className="mt-3 h-2 w-full cursor-pointer accent-[#E39774]"
                   />
-                  <span className="mt-2 flex justify-between text-[10px] font-semibold uppercase tracking-wide text-[#326273]/35"><span>Full sweep</span><span>Full hold</span></span>
+                  <span className="mt-2 flex justify-between text-[12px] font-semibold uppercase tracking-wide text-[#326273]/90"><span>Full sweep</span><span>Full hold</span></span>
                 </label>
               </div>
               <div className="bg-[#F6F0ED]/55 p-5">
                 <div className="grid grid-cols-2 gap-3">
                   <div className="rounded-2xl border border-[#5C9EAD]/20 bg-white p-4">
-                    <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--info)]">Fees deleted</div>
+                    <div className="text-[12px] font-semibold uppercase tracking-[0.14em] text-[var(--info)]">Fees deleted</div>
                     <div className="dash-num mt-2 text-2xl font-semibold text-[#0c3e48]">${feesDeleted.toFixed(2)}</div>
-                    <p className="mt-1 text-[13px] leading-4 text-[#326273]/55">Avoided while value stays netted inside the operating loop.</p>
+                    <p className="mt-1 text-[13px] leading-4 text-[#326273]/90">Avoided while value stays netted inside the operating loop.</p>
                   </div>
                   <div className="rounded-2xl border border-[#E39774]/20 bg-white p-4">
-                    <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#E39774]">Fees relocated</div>
+                    <div className="text-[12px] font-semibold uppercase tracking-[0.14em] text-[#9f5839]">Fees relocated</div>
                     <div className="dash-num mt-2 text-2xl font-semibold text-[#0c3e48]">${feesRelocated.toFixed(2)}</div>
-                    <p className="mt-1 text-[13px] leading-4 text-[#326273]/55">Still paid when the remaining value reaches a local cash-out rail.</p>
+                    <p className="mt-1 text-[13px] leading-4 text-[#326273]/90">Still paid when the remaining value reaches a local cash-out rail.</p>
                   </div>
                 </div>
                 <div className="mt-4 overflow-hidden rounded-full bg-[#E39774]/25">
                   <div className="h-3 rounded-full bg-[#5C9EAD] transition-all" style={{ width: `${nettingRatio}%` }} />
                 </div>
-                <div className="mt-3 flex items-start gap-2 rounded-xl bg-white p-3 text-[13px] leading-4 text-[#326273]/60">
+                <div className="mt-3 flex items-start gap-2 rounded-xl bg-white p-3 text-[13px] leading-4 text-[#326273]/90">
                   <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--info)]" />
                   Simulation only. Netting reduces repeated payout costs; it does not remove the cost of the final external payout.
                 </div>
@@ -712,7 +713,7 @@ export default function TreasuryPage() {
           <div className="dash-surface overflow-hidden">
             <div className="flex items-center justify-between border-b border-[#326273]/8 px-4 py-3">
               <h2 className="text-sm font-semibold text-[#1F4452]">Treasury activity</h2>
-              <span className="text-[13px] font-medium text-[#326273]/45">USD ↔ USDY · treasury ledger</span>
+              <span className="text-[13px] font-medium text-[#326273]/90">USD ↔ USDY · treasury ledger</span>
             </div>
             <div className="divide-y divide-[#326273]/5">
               {history.slice(0, 10).map((tx) => (
@@ -720,11 +721,11 @@ export default function TreasuryPage() {
                   <HistIcon type={tx.type} />
                   <div className="min-w-0 flex-1">
                     <div className="text-[13px] font-medium text-[#1F4452]">{tx.desc}</div>
-                    <div className="text-[13px] text-[#326273]/45">{tx.date} · {tx.id}</div>
+                    <div className="text-[13px] text-[#326273]/90">{tx.date} · {tx.id}</div>
                   </div>
                   <div className="text-right">
-                    <div className={cn('dash-num text-sm font-semibold', tx.type === 'withdraw' ? 'text-[var(--info)]' : tx.type === 'yield' ? 'text-[#4F9C88]' : 'text-[#C99A2E]')}>{tx.amount}</div>
-                    <div className={cn('text-[13px]', tx.status === 'confirmed' ? 'text-[#4F9C88]' : 'text-[#C99A2E]')}>{tx.status}</div>
+                    <div className={cn('dash-num text-sm font-semibold', tx.type === 'withdraw' ? 'text-[var(--info)]' : tx.type === 'yield' ? 'text-[var(--ok)]' : 'text-[#8b6418]')}>{tx.amount}</div>
+                    <div className={cn('text-[13px]', tx.status === 'confirmed' ? 'text-[var(--ok)]' : 'text-[#8b6418]')}>{tx.status}</div>
                   </div>
                 </div>
               ))}
@@ -735,10 +736,10 @@ export default function TreasuryPage() {
           <div className="dash-surface overflow-hidden">
             <div className="flex items-center justify-between border-b border-[#326273]/8 px-5 py-3">
               <div className="flex items-center gap-2">
-                <Sprout size={14} className="text-[#4F9C88]" />
+                <Sprout size={14} className="text-[var(--ok)]" />
                 <h2 className="text-sm font-semibold text-[#1F4452]">How the treasury works</h2>
               </div>
-              <span className="rounded-full bg-[#D9A441]/12 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#9a6f15]">T-bill yield</span>
+              <span className="rounded-full bg-[#D9A441]/12 px-2 py-0.5 text-[12px] font-semibold uppercase tracking-wide text-[#8b6418]">T-bill yield</span>
             </div>
             <div className="relative grid gap-0 sm:grid-cols-4">
               <div className="pointer-events-none absolute left-5 right-5 top-[3.25rem] hidden h-px bg-gradient-to-r from-[#5C9EAD]/0 via-[#D9A441] to-[#E39774]/40 sm:block" />
@@ -753,20 +754,20 @@ export default function TreasuryPage() {
                     <div className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-xl shadow-sm ring-2 ring-white', bg)} style={{ color: accent }}>
                       <Icon size={16} />
                     </div>
-                    <span className="font-mono text-[10px] font-semibold uppercase tracking-widest text-[#326273]/35">{step}</span>
+                    <span className="font-mono text-[12px] font-semibold uppercase tracking-widest text-[#326273]/90">{step}</span>
                   </div>
                   <div className="mt-3 text-[13px] font-semibold text-[#1F4452]">{title}</div>
-                  <div className="mt-1 text-[13px] leading-[1.125rem] text-[#326273]/65">{desc}</div>
-                  <div className="mt-2.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider" style={{ backgroundColor: `${accent}15`, color: accent }}>
+                  <div className="mt-1 text-[13px] leading-[1.125rem] text-[#326273]/90">{desc}</div>
+                  <div className="mt-2.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-semibold uppercase tracking-wider" style={{ backgroundColor: `${accent}15`, color: accent }}>
                     <CheckCircle2 size={9} />{tag}
                   </div>
                 </div>
               ))}
             </div>
             <div className="flex flex-wrap items-center gap-3 border-t border-[#326273]/8 bg-gradient-to-r from-[#D9A441]/8 via-[#6FB4A0]/5 to-[#5C9EAD]/5 px-5 py-3 text-[13px]">
-              <div className="flex items-center gap-1.5 font-medium text-[#1F4452]"><ShieldCheck size={12} className="text-[#4F9C88]" /> Funds segregated from operating</div>
-              <span className="text-[#326273]/30">•</span>
-              <div className="flex items-center gap-1.5 text-[#326273]/65"><Lock size={11} className="text-[var(--info)]" /> Daily reconciliation, audit-anchored on Sui</div>
+              <div className="flex items-center gap-1.5 font-medium text-[#1F4452]"><ShieldCheck size={12} className="text-[var(--ok)]" /> Funds segregated from operating</div>
+              <span className="text-[#326273]/90">•</span>
+              <div className="flex items-center gap-1.5 text-[#326273]/90"><Lock size={11} className="text-[var(--info)]" /> Daily reconciliation, audit-anchored on Sui</div>
             </div>
           </div>
         </div>
@@ -778,7 +779,7 @@ export default function TreasuryPage() {
           {notices.length > 0 && (
             <div className="dash-block p-4">
               <div className="flex items-center gap-2">
-                <Clock size={14} className="text-[#C97A56]" />
+                <Clock size={14} className="text-[#9f5839]" />
                 <h2 className="text-sm font-semibold text-[#1F4452]">Pending withdrawals</h2>
               </div>
               <div className="mt-3 space-y-2">
@@ -790,12 +791,12 @@ export default function TreasuryPage() {
                       <div className="flex items-center justify-between gap-2">
                         <span className="dash-num font-semibold text-[#1F4452]">${fmtUsd(n.amount)}</span>
                         <div className="flex items-center gap-2">
-                          <span className="text-[#C97A56]">by {new Date(n.availableAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                          <span className="text-[#9f5839]">by {new Date(n.availableAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
                           {!confirming && (
                             <button
                               type="button"
                               onClick={() => setConfirmCancelId(n.id)}
-                              className="rounded-md px-1.5 py-0.5 text-[13px] font-semibold text-[#326273]/50 transition-colors hover:bg-[#326273]/10 hover:text-[#326273]"
+                              className="rounded-md px-1.5 py-0.5 text-[13px] font-semibold text-[#326273]/90 transition-colors hover:bg-[#326273]/10 hover:text-[#326273]"
                             >
                               Cancel
                             </button>
@@ -804,13 +805,13 @@ export default function TreasuryPage() {
                       </div>
                       {confirming && (
                         <div className="mt-2 flex items-center justify-between gap-2 border-t border-[#E39774]/25 pt-2">
-                          <span className="text-[13px] text-[#326273]/60">Cancel and return to Treasury?</span>
+                          <span className="text-[13px] text-[#326273]/90">Cancel and return to Treasury?</span>
                           <div className="flex items-center gap-1.5">
                             <button
                               type="button"
                               disabled={busy}
                               onClick={() => cancelWithdrawal(n.id)}
-                              className="rounded-md bg-[#C97A56] px-2 py-1 text-[13px] font-semibold text-white transition-colors hover:bg-[#b65f3f] disabled:opacity-50"
+                              className="rounded-md bg-[#9f5839] px-2 py-1 text-[13px] font-semibold text-white transition-colors hover:bg-[#9a4a2d] disabled:opacity-50"
                             >
                               {busy ? 'Cancelling…' : 'Yes, cancel'}
                             </button>
@@ -818,7 +819,7 @@ export default function TreasuryPage() {
                               type="button"
                               disabled={busy}
                               onClick={() => setConfirmCancelId(null)}
-                              className="rounded-md px-2 py-1 text-[13px] font-semibold text-[#326273]/60 transition-colors hover:bg-[#326273]/10 disabled:opacity-50"
+                              className="rounded-md px-2 py-1 text-[13px] font-semibold text-[#326273]/90 transition-colors hover:bg-[#326273]/10 disabled:opacity-50"
                             >
                               Keep
                             </button>
@@ -829,7 +830,7 @@ export default function TreasuryPage() {
                   );
                 })}
               </div>
-              <p className="mt-2 text-[13px] leading-4 text-[#326273]/50">Reserved from Treasury now · credited to Operating on the date shown. Cancel any time before it settles.</p>
+              <p className="mt-2 text-[13px] leading-4 text-[#326273]/90">Reserved from Treasury now · credited to Operating on the date shown. Cancel any time before it settles.</p>
             </div>
           )}
 
@@ -844,10 +845,10 @@ export default function TreasuryPage() {
                 <div key={r.label} className="flex items-start gap-2 rounded-lg bg-[#F6F0ED] px-3 py-2">
                   <r.icon size={13} className="mt-0.5 shrink-0 text-[var(--info)]" />
                   <div className="min-w-0 flex-1">
-                    <div className="text-[13px] text-[#326273]/50">{r.label}</div>
+                    <div className="text-[13px] text-[#326273]/90">{r.label}</div>
                     <div className="text-[13px] font-medium text-[#1F4452]">{r.value}</div>
                   </div>
-                  <CheckCircle2 size={13} className="mt-0.5 shrink-0 text-[#4F9C88]" />
+                  <CheckCircle2 size={13} className="mt-0.5 shrink-0 text-[var(--ok)]" />
                 </div>
               ))}
             </div>
@@ -867,7 +868,7 @@ export default function TreasuryPage() {
             ].map(({ label, icon: Icon, href }) => (
               <a key={label} href={href} target="_blank" rel="noopener noreferrer" className="flex w-full items-center justify-between rounded-lg border border-[#326273]/10 bg-white px-3 py-2.5 text-[13px] font-medium text-[#326273] transition-colors hover:border-[#5C9EAD]/40 hover:text-[var(--info)]">
                 <div className="flex items-center gap-2"><Icon size={13} />{label}</div>
-                <ChevronRight size={13} className="text-[#326273]/30" />
+                <ChevronRight size={13} className="text-[#326273]/90" />
               </a>
             ))}
           </div>

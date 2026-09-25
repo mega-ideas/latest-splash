@@ -206,7 +206,7 @@ export default function FloatingCopilot() {
             </div>
             <div>
               <div className="text-[13px] font-semibold text-white">{assistantName}</div>
-              <div className="flex items-center gap-1.5 text-[13px] text-white/50">
+              <div className="flex items-center gap-1.5 text-[13px] text-white/80">
                 <span
                   className={cn(
                     'h-1.5 w-1.5 rounded-full',
@@ -220,13 +220,13 @@ export default function FloatingCopilot() {
           <div className="flex items-center gap-2">
             {/* The AI marker is separate from the name so that renaming the
                 assistant cannot remove it. */}
-            <span className="flex items-center gap-1 font-mono text-[9px] uppercase tracking-[0.12em] text-white/40">
+            <span className="flex items-center gap-1 font-mono text-[12px] uppercase tracking-[0.12em] text-white/80">
               <Sparkles size={9} /> AI
             </span>
             <button
               type="button"
               onClick={() => setOpen(false)}
-              className="text-white/50 transition-colors hover:text-white"
+              className="text-white/80 transition-colors hover:text-white"
               aria-label={`Close ${assistantName}`}
             >
               <X size={16} />
@@ -249,7 +249,7 @@ export default function FloatingCopilot() {
               for your approval
               {pending.label ? ` — ${pending.label}` : ''}
             </span>
-            <span className="shrink-0 rounded-md bg-[#0c3e48] px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-white">
+            <span className="shrink-0 rounded-md bg-[#0c3e48] px-2 py-1 text-[12px] font-semibold uppercase tracking-[0.1em] text-white">
               Queue
             </span>
           </Link>
@@ -260,7 +260,7 @@ export default function FloatingCopilot() {
             was a static string, which is the one thing a terminal must not do.
             What is here instead is true on every render. */}
         <div className="shrink-0 border-b border-[#0c3e48]/10 bg-[#f4efe4] px-4 py-1.5">
-          <span className="font-mono text-[9px] font-semibold uppercase tracking-[0.14em] text-[#0d6370]">
+          <span className="font-mono text-[12px] font-semibold uppercase tracking-[0.14em] text-[#0d6370]">
             Reads state · prepares proposals · cannot send
           </span>
         </div>
@@ -354,7 +354,7 @@ export default function FloatingCopilot() {
           {/* Closed-state indicator: approval count when work is waiting,
               otherwise the ambient pulse dot */}
           {!open && hasReminder && (
-            <span className="absolute -right-0.5 -top-0.5 grid h-5 min-w-5 place-items-center rounded-full bg-[#E39774] px-1 font-mono text-[13px] font-bold text-white ring-2 ring-white/80">
+            <span className="absolute -right-0.5 -top-0.5 grid h-5 min-w-5 place-items-center rounded-full bg-[#E39774] px-1 font-mono text-[13px] font-bold text-[#073d49] ring-2 ring-white/80">
               {pending.count > 9 ? '9+' : pending.count}
             </span>
           )}

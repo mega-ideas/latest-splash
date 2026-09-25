@@ -56,7 +56,7 @@ export default function SetupStepper({ state }: { state: OnboardingState }) {
                 step.done
                   ? 'bg-[#2E7D6B] text-white'
                   : step.pending
-                    ? 'bg-[#D9A441]/20 text-[#B4690E]'
+                    ? 'bg-[#D9A441]/20 text-[#1F4452]'
                     : 'border border-[#C9BDB5] text-[#326273]'
               }`}
               aria-hidden="true"
@@ -65,7 +65,7 @@ export default function SetupStepper({ state }: { state: OnboardingState }) {
             </span>
             <span className="min-w-0">
               <strong className="block truncate text-[13.5px] font-semibold text-[#1F4452]">{step.title}</strong>
-              <small className="block truncate text-[11.5px] text-[#326273]/75">
+              <small className="block truncate text-[12px] text-[#326273]/90">
                 {step.done ? 'Done' : step.pending ? 'In review' : 'To do'}
               </small>
             </span>
@@ -74,7 +74,7 @@ export default function SetupStepper({ state }: { state: OnboardingState }) {
       </ol>
 
       {error ? (
-        <p role="alert" className="text-sm font-medium text-[#B3402F]">{error}</p>
+        <p role="alert" className="rounded-lg bg-[var(--error-bg)] px-3 py-2 text-sm font-medium text-[var(--error)]">{error}</p>
       ) : null}
 
       {/* 1 · Terms */}
@@ -179,14 +179,14 @@ function StepHeading({ n, title, done, pending }: { n: number; title: string; do
     <h2 className="flex items-center gap-3 text-lg font-bold text-[#1F4452]">
       <span
         className={`flex h-7 w-7 items-center justify-center rounded-full text-[13px] ${
-          done ? 'bg-[#2E7D6B] text-white' : pending ? 'bg-[#D9A441]/20 text-[#B4690E]' : 'border border-[#C9BDB5] text-[#326273]'
+          done ? 'bg-[#2E7D6B] text-white' : pending ? 'bg-[#D9A441]/20 text-[#1F4452]' : 'border border-[#C9BDB5] text-[#326273]'
         }`}
         aria-hidden="true"
       >
         {done ? <Check className="h-4 w-4" /> : n}
       </span>
       {title}
-      {pending ? <span className="text-[12px] font-semibold text-[#B4690E]">In review</span> : null}
+      {pending ? <span className="text-[12px] font-semibold text-[#8b6418]">In review</span> : null}
     </h2>
   );
 }

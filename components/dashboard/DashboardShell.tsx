@@ -167,9 +167,10 @@ export default function DashboardShell({ children, session, kyb, locks, sweepOn 
           {!collapsed && (
             <span className="grid text-left">
               <strong className="text-xl font-semibold tracking-tight text-white">
-                Splash<span className="text-[#5C9EAD]">.</span>
+                Splash<span className="text-[#bfe6ee]">.</span>
               </strong>
-              <small className="text-[8px] font-semibold uppercase tracking-[0.18em] text-white/40">Global settlement engine</small>
+              {/* 12px is the floor; in capitals with wide tracking it took three lines. */}
+              <small className="text-[12px] font-medium text-white/80">Global settlement engine</small>
             </span>
           )}
         </button>
@@ -179,7 +180,7 @@ export default function DashboardShell({ children, session, kyb, locks, sweepOn 
           {navGroups.map((group) => (
             <div key={group.title}>
               {!collapsed && (
-                <div className="mb-1 px-2 text-[10px] font-semibold uppercase tracking-widest text-white/25">
+                <div className="mb-1 px-2 text-[12px] font-semibold uppercase tracking-widest text-white/80">
                   {group.title}
                 </div>
               )}
@@ -200,7 +201,7 @@ export default function DashboardShell({ children, session, kyb, locks, sweepOn 
                           ? collapsed
                             ? 'bg-white text-[#1F4452] shadow-sm'
                             : 'bg-white pl-3 text-[#1F4452] shadow-sm'
-                          : 'text-white/55 hover:bg-white/10 hover:text-white'
+                          : 'text-white/80 hover:bg-white/10 hover:text-white'
                       }`}
                     >
                       {active && !collapsed && <span aria-hidden="true" className="absolute left-0 top-1/2 h-6 w-1 -translate-y-1/2 rounded-full bg-[#5C9EAD]" />}
@@ -208,13 +209,14 @@ export default function DashboardShell({ children, session, kyb, locks, sweepOn 
                       {!collapsed && (
                         <>
                           <span className={`flex-1 font-medium ${lockReason ? 'opacity-50' : ''}`}>{label}</span>
-                          {lockReason && <Lock size={13} aria-hidden="true" className="text-white/35" />}
+                          {lockReason && <Lock size={13} aria-hidden="true" className={active ? 'text-[#1F4452]/70' : 'text-white/80'} />}
                           {badge && (
                             <span
                               className={`rounded-full px-1.5 py-0.5 text-[13px] font-semibold ${
-                                badge === 'New'
-                                  ? 'bg-[#E39774]/25 text-[#E39774]'
-                                  : 'bg-[#5C9EAD]/20 text-[#5C9EAD]'
+                                badge === 'New' ? 'bg-[#E39774]/25' : 'bg-[#5C9EAD]/20'
+                              } ${
+                                // On the dark rail a light tint of the accent; on the white active pill, ink.
+                                active ? 'text-[#1F4452]' : badge === 'New' ? 'text-[#ffd9c9]' : 'text-white'
                               }`}
                             >
                               {badge}
@@ -250,7 +252,7 @@ export default function DashboardShell({ children, session, kyb, locks, sweepOn 
             } ${
               pathname === '/dashboard/settings'
                 ? 'bg-white/15 text-white'
-                : 'text-white/55'
+                : 'text-white/80'
             }`}
           >
             <Settings size={18} />
@@ -259,7 +261,7 @@ export default function DashboardShell({ children, session, kyb, locks, sweepOn 
           <Link
             href="/dashboard/customer-service"
             title={collapsed ? 'Support' : undefined}
-            className={`flex items-center rounded-lg px-2 py-2 text-sm text-white/55 transition-colors hover:bg-white/10 hover:text-white ${
+            className={`flex items-center rounded-lg px-2 py-2 text-sm text-white/80 transition-colors hover:bg-white/10 hover:text-white ${
               collapsed ? 'justify-center' : 'gap-3'
             }`}
           >
@@ -270,7 +272,7 @@ export default function DashboardShell({ children, session, kyb, locks, sweepOn 
             type="button"
             onClick={logout}
             title={collapsed ? 'Log out' : undefined}
-            className={`flex w-full items-center rounded-lg px-2 py-2 text-sm text-white/55 transition-colors hover:bg-white/10 hover:text-[#E39774] ${
+            className={`flex w-full items-center rounded-lg px-2 py-2 text-sm text-white/80 transition-colors hover:bg-white/10 hover:text-[#E39774] ${
               collapsed ? 'justify-center' : 'gap-3'
             }`}
           >
@@ -293,7 +295,7 @@ export default function DashboardShell({ children, session, kyb, locks, sweepOn 
             unoptimized
           />
           <span className="text-lg font-semibold text-white">
-            Splash<span className="text-[#5C9EAD]">.</span>
+            Splash<span className="text-[#bfe6ee]">.</span>
           </span>
         </div>
         <button
@@ -323,7 +325,7 @@ export default function DashboardShell({ children, session, kyb, locks, sweepOn 
                 >
                   <Icon size={20} />
                   <span className={`font-medium ${locks && lockReasonFor(href, locks) ? 'opacity-50' : ''}`}>{label}</span>
-                  {locks && lockReasonFor(href, locks) ? <Lock size={14} aria-hidden="true" className="ml-auto text-white/35" /> : null}
+                  {locks && lockReasonFor(href, locks) ? <Lock size={14} aria-hidden="true" className="ml-auto text-white/80" /> : null}
                 </Link>
               ))}
             </nav>
@@ -353,8 +355,8 @@ export default function DashboardShell({ children, session, kyb, locks, sweepOn 
           >
             <ShieldAlert aria-hidden="true" className="h-4 w-4 shrink-0 text-[var(--warn)]" />
             <div className="min-w-0 flex-1">
-              <p className="text-[13px] font-bold text-[var(--warn)]">Read-only workspace</p>
-              <p className="mt-0.5 text-[13px] font-medium text-[#326273]/78">{kyb.reason}</p>
+              <p className="text-[13px] font-bold text-[#8b6418]">Read-only workspace</p>
+              <p className="mt-0.5 text-[13px] font-medium text-[#326273]/90">{kyb.reason}</p>
             </div>
             <Link
               href="/settings/kyb"
@@ -366,7 +368,7 @@ export default function DashboardShell({ children, session, kyb, locks, sweepOn 
         ) : null}
         {locks && lockReasonFor(pathname, locks) ? (
           <section className="dash-surface mx-auto mt-10 max-w-lg p-8 text-center">
-            <Lock aria-hidden="true" className="mx-auto h-8 w-8 text-[#C9BDB5]" />
+            <Lock aria-hidden="true" className="mx-auto h-8 w-8 text-[#326273]/70" />
             <h2 className="mt-4 text-lg font-bold text-[#1F4452]">Not open yet</h2>
             <p className="mt-2 text-sm leading-relaxed text-[#326273]">{lockReasonFor(pathname, locks)}</p>
             <Link

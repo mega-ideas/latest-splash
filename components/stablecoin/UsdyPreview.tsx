@@ -73,14 +73,14 @@ export default function UsdyPreview() {
         <h2 id="usdy-title" className="flex items-center gap-2 text-sm font-semibold text-[#326273]">
           <TrendingUp className="h-4 w-4 text-[var(--info)]" /> Treasury · Ondo USDY
         </h2>
-        {quote?.mode === 'SANDBOX' ? <span className="rounded-full bg-[var(--warn-bg)] px-2 py-0.5 text-[11px] font-semibold text-[var(--warn)]">Preview</span> : null}
+        {quote?.mode === 'SANDBOX' ? <span className="rounded-full bg-[var(--warn-bg)] px-2 py-0.5 text-[12px] font-semibold text-[#8b6418]">Preview</span> : null}
       </div>
-      <p className="mt-1 text-[12px] leading-5 text-[#326273]/65">
+      <p className="mt-1 text-[12px] leading-5 text-[#326273]/90">
         Swap USDC for USDY in your own Splash wallet. USDY is priced above $1 and its price moves; the figures below are a projection at a variable modeled rate, not a promise. Verified, non-US businesses only.
       </p>
       <div className="mt-3 flex items-end gap-2">
         <div>
-          <label htmlFor="usdy-amount" className="text-[12px] font-medium text-[#326273]/70">USDC</label>
+          <label htmlFor="usdy-amount" className="text-[12px] font-medium text-[#326273]/90">USDC</label>
           <input id="usdy-amount" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^\d.]/g, ''))} inputMode="decimal" className="mt-1 w-32 rounded-lg border border-[#326273]/25 bg-[#F6F0ED] px-2 py-2 font-mono text-[13px] text-[#1F4452]" />
         </div>
         <button type="button" onClick={() => void ask()} disabled={busy || !amount} className="dash-btn-ghost inline-flex items-center gap-1 !px-3 !py-2 !text-[13px]">
@@ -100,20 +100,20 @@ export default function UsdyPreview() {
                     <div className="flex justify-between gap-3 tabular-nums">
                       <span className="flex items-center gap-1.5 font-semibold">
                         {quote.fillable === false
-                          ? <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-[var(--warn)]" aria-hidden />
+                          ? <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-[#8b6418]" aria-hidden />
                           : <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-[var(--ok)]" aria-hidden />}
                         On Sui right now
                       </span>
                       <span className="font-mono font-semibold">{formatUsdc(BigInt(market.usdyOutMinor))} USDY</span>
                     </div>
-                    <p className="mt-1 text-[12px] leading-5 text-[#326273]/75">
+                    <p className="mt-1 text-[12px] leading-5 text-[#326273]/90">
                       {market.shortfallBps !== null ? `${shortfallLabel(market.shortfallBps)}` : 'Value unknown without a redemption price'}
                       {market.providers.length > 0 ? ` · best route via ${market.providers.join(', ')}` : ''}
                     </p>
                   </div>
                 ) : null}
-                <div className="flex justify-between gap-3 tabular-nums text-[#326273]/75"><span>At least (0.5% slippage)</span><span className="font-mono">{formatUsdc(BigInt(quote.minUsdyOutMinor ?? '0'))} USDY</span></div>
-                <div className="text-[12px] text-[#326273]/60">
+                <div className="flex justify-between gap-3 tabular-nums text-[#326273]/90"><span>At least (0.5% slippage)</span><span className="font-mono">{formatUsdc(BigInt(quote.minUsdyOutMinor ?? '0'))} USDY</span></div>
+                <div className="text-[12px] text-[#326273]/90">
                   USDY price ${formatUsdc(BigInt(quote.priceMicros ?? '0'))} ({[quote.priceStatus.toLowerCase(), priceSourceLabel(quote.priceSource), quote.priceAsOf ? new Date(quote.priceAsOf).toLocaleString() : ''].filter(Boolean).join(', ')})
                 </div>
                 <ul className="border-t border-[#326273]/10 pt-2">
@@ -121,10 +121,10 @@ export default function UsdyPreview() {
                     <li key={p.days} className="flex justify-between tabular-nums"><span>After {p.days} days</span><span className="font-mono">{formatUsdc(BigInt(p.valueMinor))} ({BigInt(p.yieldMinor) >= 0n ? '+' : ''}{formatUsdc(BigInt(p.yieldMinor))})</span></li>
                   ))}
                 </ul>
-                <div className="text-[12px] text-[#326273]/60">{quote.apyLabel}</div>
+                <div className="text-[12px] text-[#326273]/90">{quote.apyLabel}</div>
               </>
             ) : null}
-            {quote.reasons.map((r) => <p key={r} className="text-[12px] leading-5 text-[var(--warn)]">{r}</p>)}
+            {quote.reasons.map((r) => <p key={r} className="text-[12px] leading-5 text-[#8b6418]">{r}</p>)}
           </div>
         )
       ) : null}

@@ -72,7 +72,7 @@ export default function DashboardHeader({ collapsed, session, onLogout }: Dashbo
     >
       {/* ── Search ─────────────────────────────────────────── */}
       <div className="flex max-w-sm flex-1 items-center gap-2 rounded-xl border border-[#326273]/10 bg-white px-3 py-2 shadow-sm">
-        <Search size={14} className="shrink-0 text-[#326273]/35" />
+        <Search size={14} className="shrink-0 text-[#326273]/90" />
         <input
           type="text"
           aria-label="Search dashboard"
@@ -103,11 +103,11 @@ export default function DashboardHeader({ collapsed, session, onLogout }: Dashbo
             {/* Name */}
             <div className="hidden text-left sm:block">
               <div className="text-[13px] font-medium leading-none text-[#326273]">{session.name}</div>
-              <div className="mt-0.5 text-[13px] capitalize leading-none text-[#326273]/40">{session.role.replace('_', ' ')}</div>
+              <div className="mt-0.5 text-[13px] capitalize leading-none text-[#326273]/90">{session.role.replace('_', ' ')}</div>
             </div>
             <ChevronDown
               size={13}
-              className={`text-[#326273]/40 transition-transform duration-200 ${profileOpen ? 'rotate-180' : ''}`}
+              className={`text-[#326273]/90 transition-transform duration-200 ${profileOpen ? 'rotate-180' : ''}`}
             />
           </button>
 
@@ -123,7 +123,7 @@ export default function DashboardHeader({ collapsed, session, onLogout }: Dashbo
                 </div>
                 <div className="min-w-0">
                   <div className="text-sm font-medium text-[#326273]">{session.organization}</div>
-                  <div className="truncate text-[13px] text-[#326273]/40">
+                  <div className="truncate text-[13px] text-[#326273]/90">
                     {session.email}
                   </div>
                 </div>
@@ -134,7 +134,7 @@ export default function DashboardHeader({ collapsed, session, onLogout }: Dashbo
                 <Link
                   href="/dashboard/profile"
                   onClick={() => setProfileOpen(false)}
-                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-[13px] text-[#326273]/65 transition-colors hover:bg-[#F6F0ED] hover:text-[#326273]"
+                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-[13px] text-[#326273]/90 transition-colors hover:bg-[#F6F0ED] hover:text-[#326273]"
                   role="menuitem"
                 >
                   <UserRound size={13} />
@@ -143,7 +143,7 @@ export default function DashboardHeader({ collapsed, session, onLogout }: Dashbo
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-[13px] text-[#326273]/65 transition-colors hover:bg-[#F6F0ED] hover:text-[#326273]"
+                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-[13px] text-[#326273]/90 transition-colors hover:bg-[#F6F0ED] hover:text-[#326273]"
                   role="menuitem"
                 >
                   <Camera size={13} />
@@ -152,7 +152,7 @@ export default function DashboardHeader({ collapsed, session, onLogout }: Dashbo
                 <Link
                   href="/dashboard/settings"
                   onClick={() => setProfileOpen(false)}
-                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-[13px] text-[#326273]/65 transition-colors hover:bg-[#F6F0ED] hover:text-[#326273]"
+                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-[13px] text-[#326273]/90 transition-colors hover:bg-[#F6F0ED] hover:text-[#326273]"
                   role="menuitem"
                 >
                   <Settings size={13} />
@@ -164,7 +164,7 @@ export default function DashboardHeader({ collapsed, session, onLogout }: Dashbo
                 <button
                   type="button"
                   onClick={onLogout}
-                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-[13px] text-[#E39774] transition-colors hover:bg-orange-50"
+                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-[13px] text-[#9f5839] transition-colors hover:bg-orange-50"
                   role="menuitem"
                 >
                   <LogOut size={13} />

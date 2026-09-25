@@ -63,10 +63,10 @@ export default function MemWalBehaviorCard({ compact = false }: { compact?: bool
     <section className="dash-surface p-5">
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-3">
-          <span className="rounded-xl bg-primary/10 p-2 text-primary"><BrainCircuit className="h-5 w-5" /></span>
+          <span className="rounded-xl bg-primary/10 p-2 text-foreground"><BrainCircuit className="h-5 w-5" /></span>
           <div>
             <h2 className="font-bold text-foreground">MemWal behavior memory</h2>
-            <p className="mt-1 text-[13px] text-foreground/55">Safe operating patterns that sharpen suggestions.</p>
+            <p className="mt-1 text-[13px] text-foreground/90">Safe operating patterns that sharpen suggestions.</p>
           </div>
         </div>
         {displayMemories.some((memory) => memory.demo) && <StatusBadge status="demo" />}
@@ -74,12 +74,12 @@ export default function MemWalBehaviorCard({ compact = false }: { compact?: bool
       <div className={`mt-4 grid gap-2 ${compact ? '' : 'sm:grid-cols-3'}`}>
         {memoryCards.map((memory) => (
           <div key={memory.text.trim().toLowerCase()} className="rounded-xl bg-muted/55 p-3">
-            <div className="flex items-start gap-2"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-primary" /><strong className="text-sm">{memory.text}</strong></div>
-            {confidencePercent(memory.confidence) !== null && <div className="mt-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-foreground/40">{confidencePercent(memory.confidence)}% memory match</div>}
+            <div className="flex items-start gap-2"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-foreground" /><strong className="text-sm">{memory.text}</strong></div>
+            {confidencePercent(memory.confidence) !== null && <div className="mt-2 text-[12px] font-semibold uppercase tracking-[0.12em] text-[#1F4452]">{confidencePercent(memory.confidence)}% memory match</div>}
           </div>
         ))}
       </div>
-      <p className="mt-4 flex items-center gap-2 text-[13px] font-semibold text-foreground/45"><LockKeyhole className="h-3.5 w-3.5" /> Behavioral text only. No amounts, accounts, or KYC data.</p>
+      <p className="mt-4 flex items-center gap-2 text-[13px] font-semibold text-foreground/90"><LockKeyhole className="h-3.5 w-3.5" /> Behavioral text only. No amounts, accounts, or KYC data.</p>
     </section>
   );
 }

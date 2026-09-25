@@ -147,7 +147,7 @@ export default function CustomerServicePage() {
         <div>
           <span className="dash-kicker">Operations support</span>
           <h1 className="dash-title mt-2">Customer Service</h1>
-          <p className="mt-0.5 text-[13px] text-[#326273]/60">Submit issues, bugs, or complaints. We aim to respond within 24 hours.</p>
+          <p className="mt-0.5 text-[13px] text-[#326273]">Submit issues, bugs, or complaints. We aim to respond within 24 hours.</p>
         </div>
         <div className="rounded-xl border border-[#326273]/10 bg-white px-3 py-2 text-[13px] font-medium text-[#326273]">
           Tickets · Avg first reply &lt; 6h
@@ -165,8 +165,8 @@ export default function CustomerServicePage() {
                   </div>
                   <div>
                     <h2 className="text-lg font-semibold text-[#326273]">Ticket Submitted</h2>
-                    <p className="mt-1 text-sm text-[#326273]/60">Your support request is now visible in the staff admin console.</p>
-                    {ticket && <p className="mt-2 break-all font-mono text-[13px] text-[#326273]/60">Ticket ID: {ticket.id}</p>}
+                    <p className="mt-1 text-sm text-[#1F4452]">Your support request is now visible in the staff admin console.</p>
+                    {ticket && <p className="mt-2 break-all font-mono text-[13px] text-[#1F4452]">Ticket ID: {ticket.id}</p>}
                   </div>
                 </div>
                 {ticket && <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold uppercase tracking-wide text-[#326273]">{ticket.status}</span>}
@@ -183,25 +183,25 @@ export default function CustomerServicePage() {
                       Refresh thread
                     </button>
                   </div>
-                  <div className="mt-4 rounded-xl bg-[#F6F0ED] p-3 text-sm leading-6 text-[#326273]/70">{ticket.message}</div>
+                  <div className="mt-4 rounded-xl bg-[#F6F0ED] p-3 text-sm leading-6 text-[#326273]/90">{ticket.message}</div>
 
                   <div className="mt-4 space-y-3">
-                    {ticket.replies.length === 0 && <div className="rounded-xl border border-dashed border-[#326273]/20 p-3 text-[13px] text-[#326273]/55">No staff reply yet. You can add more context below.</div>}
+                    {ticket.replies.length === 0 && <div className="rounded-xl border border-dashed border-[#326273]/20 p-3 text-[13px] text-[#326273]/90">No staff reply yet. You can add more context below.</div>}
                     {ticket.replies.map((reply) => (
                       <div key={reply.id} className={`rounded-xl p-3 text-sm ${reply.actorType === 'staff' ? 'bg-[#5C9EAD]/10' : 'bg-[#F6F0ED]'}`}>
                         <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
                           <span className="font-semibold text-[#326273]">{reply.actorType === 'staff' ? 'Splash staff' : 'You'} · {reply.actor}</span>
-                          <span className="text-[13px] text-[#326273]/50">{new Date(reply.createdAt).toLocaleString()}</span>
+                          <span className="text-[13px] text-[#326273]/90">{new Date(reply.createdAt).toLocaleString()}</span>
                         </div>
-                        <p className="mt-2 leading-6 text-[#326273]/70">{reply.message}</p>
+                        <p className="mt-2 leading-6 text-[#326273]/90">{reply.message}</p>
                       </div>
                     ))}
                   </div>
 
                   <div className="mt-4">
-                    <label className="text-[13px] font-medium text-[#326273]/70">Add a follow-up message</label>
+                    <label className="text-[13px] font-medium text-[#326273]/90">Add a follow-up message</label>
                     <textarea value={replyMessage} onChange={(event) => setReplyMessage(event.target.value)} rows={3} className="mt-1 w-full resize-none rounded-lg border border-[#326273]/20 bg-[#F6F0ED] px-4 py-3 text-sm text-[#326273] focus:border-[#5C9EAD] focus:outline-none" placeholder="Add extra details for the support team..." />
-                    <button type="button" disabled={sendingReply} onClick={() => void sendFollowUp()} className="mt-3 rounded-lg bg-[#5C9EAD] px-5 py-2.5 text-[13px] font-semibold text-white hover:bg-[#264e5b] disabled:opacity-60">
+                    <button type="button" disabled={sendingReply} onClick={() => void sendFollowUp()} className="mt-3 rounded-lg bg-[#237284] px-5 py-2.5 text-[13px] font-semibold text-white hover:bg-[#264e5b] disabled:opacity-60">
                       {sendingReply ? 'Sending…' : 'Send follow-up'}
                     </button>
                   </div>
@@ -226,15 +226,15 @@ export default function CustomerServicePage() {
                         : 'border-[#326273]/10 bg-white hover:border-[#5C9EAD]/30'
                     }`}
                   >
-                    <Icon className={`h-5 w-5 ${type === id ? 'text-[var(--info)]' : 'text-[#326273]/50'}`} />
-                    <div className={`mt-1.5 text-[13px] font-semibold ${type === id ? 'text-[#326273]' : 'text-[#326273]/70'}`}>{label}</div>
-                    <div className="mt-0.5 text-[13px] text-[#326273]/50 leading-tight">{desc}</div>
+                    <Icon className={`h-5 w-5 ${type === id ? 'text-[var(--info)]' : 'text-[#326273]/90'}`} />
+                    <div className={`mt-1.5 text-[13px] font-semibold ${type === id ? 'text-[#326273]' : 'text-[#326273]/90'}`}>{label}</div>
+                    <div className="mt-0.5 text-[13px] text-[#326273]/90 leading-tight">{desc}</div>
                   </button>
                 ))}
               </div>
 
               <div>
-                <label className="text-[13px] font-medium text-[#326273]/70">Subject</label>
+                <label className="text-[13px] font-medium text-[#326273]/90">Subject</label>
                 <input
                   value={subject}
                   onChange={(e) => setSubject(e.target.value)}
@@ -244,7 +244,7 @@ export default function CustomerServicePage() {
               </div>
 
               <div>
-                <label className="text-[13px] font-medium text-[#326273]/70">Email (optional)</label>
+                <label className="text-[13px] font-medium text-[#326273]/90">Email (optional)</label>
                 <input
                   type="email"
                   value={email}
@@ -255,7 +255,7 @@ export default function CustomerServicePage() {
               </div>
 
               <div>
-                <label className="text-[13px] font-medium text-[#326273]/70">Message</label>
+                <label className="text-[13px] font-medium text-[#326273]/90">Message</label>
                 <textarea
                   value={message}
                   onChange={(e) => setMessage(e.target.value)}
@@ -267,7 +267,7 @@ export default function CustomerServicePage() {
 
               <button
                 onClick={() => void submit()}
-                className="w-full rounded-lg bg-[#5C9EAD] px-4 py-3 font-semibold text-white hover:bg-[#264e5b]"
+                className="w-full rounded-lg bg-[#237284] px-4 py-3 font-semibold text-white hover:bg-[#264e5b]"
               >
                 Submit Ticket
               </button>
@@ -280,7 +280,7 @@ export default function CustomerServicePage() {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h2 className="text-sm font-semibold text-[#326273]">Get in touch</h2>
-                <p className="mt-0.5 text-[13px] text-[#326273]/60">Direct channels to reach Splash support.</p>
+                <p className="mt-0.5 text-[13px] text-[#326273]/90">Direct channels to reach Splash support.</p>
               </div>
               <Headphones className="text-[var(--info)]" size={16} />
             </div>
@@ -292,7 +292,7 @@ export default function CustomerServicePage() {
                   </div>
                   <div className="min-w-0">
                     <div className="truncate text-[13px] font-semibold text-[#326273]">{label}</div>
-                    <div className="mt-0.5 text-[13px] text-[#326273]/60">{detail}</div>
+                    <div className="mt-0.5 text-[13px] text-[#326273]/90">{detail}</div>
                   </div>
                 </div>
               ))}
@@ -303,7 +303,7 @@ export default function CustomerServicePage() {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h2 className="text-sm font-semibold text-[#326273]">Common questions</h2>
-                <p className="mt-0.5 text-[13px] text-[#326273]/60">Quick answers before you raise a ticket.</p>
+                <p className="mt-0.5 text-[13px] text-[#326273]/90">Quick answers before you raise a ticket.</p>
               </div>
               <BookOpen className="text-[var(--info)]" size={16} />
             </div>
@@ -313,14 +313,14 @@ export default function CustomerServicePage() {
                   <summary className="cursor-pointer list-none font-medium marker:hidden">
                     {item.question}
                   </summary>
-                  <p className="mt-2 text-[13px] leading-5 text-[#326273]/70">{item.answer}</p>
+                  <p className="mt-2 text-[13px] leading-5 text-[#326273]/90">{item.answer}</p>
                 </details>
               ))}
             </div>
           </div>
 
-          <div className="rounded-2xl border border-[#E39774]/30 bg-[#E39774]/10 p-4 text-[13px] text-[#326273]/75">
-            <div className="font-semibold uppercase tracking-[0.16em] text-[#E39774]">Priority support</div>
+          <div className="rounded-2xl border border-[#E39774]/30 bg-[#E39774]/10 p-4 text-[13px] text-[#1F4452]">
+            <div className="font-semibold uppercase tracking-[0.16em] text-[#1F4452]">Priority support</div>
             <p className="mt-2 leading-5">
               Tier 1 KYB-approved customers get priority response. Mention your Splash organization ID in the message for fastest routing.
             </p>

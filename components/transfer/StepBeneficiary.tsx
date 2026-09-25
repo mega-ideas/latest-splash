@@ -169,7 +169,7 @@ export default function StepBeneficiary({ state, set, next }: { state: TransferS
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-xl font-bold text-[#0C3E48]">Who gets paid?</h2>
-            <p className="mt-0.5 text-sm text-[#326273]/60">Start from a saved contact or type a new beneficiary.</p>
+            <p className="mt-0.5 text-sm text-[#326273]/90">Start from a saved contact or type a new beneficiary.</p>
           </div>
           {/* Mode switch */}
           <div className="grid grid-cols-2 rounded-xl border border-[#326273]/12 bg-[#F6F0ED] p-1 text-[13px] font-bold" role="tablist" aria-label="Beneficiary source">
@@ -179,7 +179,7 @@ export default function StepBeneficiary({ state, set, next }: { state: TransferS
               aria-selected={mode === 'saved'}
               onClick={() => setMode('saved')}
               className={`flex items-center justify-center gap-1.5 rounded-lg px-3.5 py-2 transition-all ${
-                mode === 'saved' ? 'bg-white text-[#0C3E48] shadow-sm' : 'text-[#326273]/55 hover:text-[#326273]'
+                mode === 'saved' ? 'bg-white text-[#0C3E48] shadow-sm' : 'text-[#326273]/90 hover:text-[#326273]'
               }`}
             >
               <Users className="h-3.5 w-3.5" />
@@ -191,7 +191,7 @@ export default function StepBeneficiary({ state, set, next }: { state: TransferS
               aria-selected={mode === 'new'}
               onClick={() => { setMode('new'); setSelectedRecipientId(null); }}
               className={`flex items-center justify-center gap-1.5 rounded-lg px-3.5 py-2 transition-all ${
-                mode === 'new' ? 'bg-white text-[#0C3E48] shadow-sm' : 'text-[#326273]/55 hover:text-[#326273]'
+                mode === 'new' ? 'bg-white text-[#0C3E48] shadow-sm' : 'text-[#326273]/90 hover:text-[#326273]'
               }`}
             >
               <UserRoundPlus className="h-3.5 w-3.5" />
@@ -203,18 +203,18 @@ export default function StepBeneficiary({ state, set, next }: { state: TransferS
         {mode === 'saved' ? (
           <div className="mt-4 space-y-3">
             <div className="flex min-h-10 items-center gap-2 rounded-xl border border-[#326273]/12 bg-white px-3 shadow-sm">
-              <Search className="h-4 w-4 shrink-0 text-[#326273]/40" aria-hidden="true" />
+              <Search className="h-4 w-4 shrink-0 text-[#326273]/90" aria-hidden="true" />
               <input
                 value={recipientSearch}
                 onChange={(event) => setRecipientSearch(event.target.value)}
-                className="min-w-0 flex-1 bg-transparent py-2.5 text-sm text-[#326273] outline-none placeholder:text-[#326273]/35"
+                className="min-w-0 flex-1 bg-transparent py-2.5 text-sm text-[#326273] outline-none placeholder:text-[#326273]/90"
                 placeholder="Search name, bank, account or country"
                 aria-label="Search saved recipients"
               />
             </div>
 
             {loadingRecipients ? (
-              <div className="flex items-center gap-2 rounded-xl border border-[#326273]/10 bg-[#F6F0ED] px-4 py-3.5 text-sm font-medium text-[#326273]/65">
+              <div className="flex items-center gap-2 rounded-xl border border-[#326273]/10 bg-[#F6F0ED] px-4 py-3.5 text-sm font-medium text-[#326273]/90">
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
                 Loading saved recipients…
               </div>
@@ -238,13 +238,13 @@ export default function StepBeneficiary({ state, set, next }: { state: TransferS
                       }`}
                     >
                       <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-sm font-bold transition-colors ${
-                        active ? 'bg-[#5C9EAD] text-white' : 'bg-[#5C9EAD]/10 text-[#326273]'
+                        active ? 'bg-[#237284] text-white' : 'bg-[#5C9EAD]/10 text-[#326273]'
                       }`}>
                         {active ? <Check className="h-4 w-4" aria-hidden="true" /> : saved.name.slice(0, 2).toUpperCase()}
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-sm font-bold text-[#0C3E48]">{saved.name}</span>
-                        <span className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[13px] text-[#326273]/60">
+                        <span className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[13px] text-[#326273]/90">
                           <span className="font-semibold">{saved.country}</span>
                           <span className="truncate">{saved.bank || 'Bank transfer'}</span>
                           <span className="font-mono">···{saved.account.slice(-4)}</span>
@@ -255,7 +255,7 @@ export default function StepBeneficiary({ state, set, next }: { state: TransferS
                 })}
               </div>
             ) : (
-              <div className="rounded-xl border border-dashed border-[#326273]/18 bg-white px-4 py-4 text-sm text-[#326273]/60">
+              <div className="rounded-xl border border-dashed border-[#326273]/18 bg-white px-4 py-4 text-sm text-[#326273]/90">
                 No contacts match this search — try “New recipient” instead.
               </div>
             )}
@@ -268,7 +268,7 @@ export default function StepBeneficiary({ state, set, next }: { state: TransferS
                 <button
                   type="button"
                   onClick={() => setMode('new')}
-                  className="inline-flex shrink-0 items-center gap-1 text-[13px] font-bold text-[#326273]/60 hover:text-[#326273]"
+                  className="inline-flex shrink-0 items-center gap-1 text-[13px] font-bold text-[#326273]/90 hover:text-[#326273]"
                 >
                   <PencilLine className="h-3 w-3" />
                   Edit details
@@ -280,7 +280,7 @@ export default function StepBeneficiary({ state, set, next }: { state: TransferS
           <div className="mt-4 space-y-4">
             {/* Destination country chips */}
             <div>
-              <span className="text-xs font-semibold uppercase tracking-[0.1em] text-[#326273]/55">Destination</span>
+              <span className="text-xs font-semibold uppercase tracking-[0.1em] text-[#326273]/90">Destination</span>
               <div className="mt-2 grid grid-cols-2 gap-1.5 sm:grid-cols-4">
                 {COUNTRIES.map((country) => {
                   const active = recipient.country === country.code;
@@ -299,7 +299,7 @@ export default function StepBeneficiary({ state, set, next }: { state: TransferS
                       <span aria-hidden="true" className="text-base leading-none">{country.flag}</span>
                       <span className="min-w-0">
                         <span className="block truncate text-[13px] font-bold">{country.name}</span>
-                        <span className={`block font-mono text-[13px] font-semibold ${active ? 'text-[#8FD7C7]' : 'text-[#326273]/45'}`}>
+                        <span className={`block font-mono text-[13px] font-semibold ${active ? 'text-[#8FD7C7]' : 'text-[#326273]/90'}`}>
                           {COUNTRY_TO_CURRENCY[country.code]}
                           {country.live ? ' · testnet live' : ''}
                         </span>
@@ -314,14 +314,14 @@ export default function StepBeneficiary({ state, set, next }: { state: TransferS
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Business name" error={touchedSubmit && !nameOk ? 'Enter the recipient’s registered name.' : null} className="sm:col-span-2">
                 <div className="flex items-center gap-2 rounded-xl border border-[#326273]/15 bg-[#F6F0ED] px-3 focus-within:border-[#5C9EAD]">
-                  <Building2 className="h-4 w-4 shrink-0 text-[#326273]/40" aria-hidden="true" />
+                  <Building2 className="h-4 w-4 shrink-0 text-[#326273]/90" aria-hidden="true" />
                   <input
                     value={recipient.name}
                     onChange={(event) => {
                       setSelectedRecipientId(null);
                       set({ recipient: { ...recipient, name: event.target.value } });
                     }}
-                    className="min-w-0 flex-1 bg-transparent py-3 text-sm font-medium text-[#326273] outline-none placeholder:text-[#326273]/35"
+                    className="min-w-0 flex-1 bg-transparent py-3 text-sm font-medium text-[#326273] outline-none placeholder:text-[#326273]/90"
                     placeholder="Acme Trading Sdn Bhd"
                   />
                 </div>
@@ -329,14 +329,14 @@ export default function StepBeneficiary({ state, set, next }: { state: TransferS
 
               <Field label="Bank account" error={touchedSubmit && !accountOk ? 'The local account number is required.' : null}>
                 <div className="flex items-center gap-2 rounded-xl border border-[#326273]/15 bg-[#F6F0ED] px-3 focus-within:border-[#5C9EAD]">
-                  <Landmark className="h-4 w-4 shrink-0 text-[#326273]/40" aria-hidden="true" />
+                  <Landmark className="h-4 w-4 shrink-0 text-[#326273]/90" aria-hidden="true" />
                   <input
                     value={recipient.bank?.account ?? ''}
                     onChange={(event) => {
                       setSelectedRecipientId(null);
                       set({ recipient: { ...recipient, bank: { ...(recipient.bank ?? { swift: '' }), account: event.target.value } } });
                     }}
-                    className="min-w-0 flex-1 bg-transparent py-3 font-mono text-sm text-[#326273] outline-none placeholder:font-sans placeholder:text-[#326273]/35"
+                    className="min-w-0 flex-1 bg-transparent py-3 font-mono text-sm text-[#326273] outline-none placeholder:font-sans placeholder:text-[#326273]/90"
                     placeholder="Account number"
                     inputMode="numeric"
                   />
@@ -350,7 +350,7 @@ export default function StepBeneficiary({ state, set, next }: { state: TransferS
                     setSelectedRecipientId(null);
                     set({ recipient: { ...recipient, bank: { ...(recipient.bank ?? { account: '' }), swift: event.target.value.toUpperCase() } } });
                   }}
-                  className="w-full rounded-xl border border-[#326273]/15 bg-[#F6F0ED] px-3 py-3 font-mono text-sm uppercase text-[#326273] outline-none placeholder:font-sans placeholder:normal-case placeholder:text-[#326273]/35 focus:border-[#5C9EAD]"
+                  className="w-full rounded-xl border border-[#326273]/15 bg-[#F6F0ED] px-3 py-3 font-mono text-sm uppercase text-[#326273] outline-none placeholder:font-sans placeholder:normal-case placeholder:text-[#326273]/90 focus:border-[#5C9EAD]"
                   placeholder="e.g. BPIAPHMM"
                   maxLength={11}
                 />
@@ -398,26 +398,26 @@ export default function StepBeneficiary({ state, set, next }: { state: TransferS
       {/* ── Zone 2 · Corridor ticket (amount) ──────────────── */}
       <section>
         <h2 className="text-xl font-bold text-[#0C3E48]">How much?</h2>
-        <p className="mt-0.5 text-sm text-[#326273]/60">Funded in USD, delivered in {amount.targetCurrency}.</p>
+        <p className="mt-0.5 text-sm text-[#326273]/90">Funded in USD, delivered in {amount.targetCurrency}.</p>
 
         <div className="mt-3 overflow-hidden rounded-2xl border border-[#0C3E48]/25 bg-white shadow-[5px_6px_0_rgba(12,62,72,0.1)]">
           <div className="grid sm:grid-cols-[1fr_auto_1fr]">
             {/* You send */}
             <label className="block p-5">
-              <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#326273]/50">You send</span>
+              <span className="text-[12px] font-semibold uppercase tracking-[0.16em] text-[#326273]/90">You send</span>
               <span className="mt-2 flex items-baseline gap-2">
-                <span className="text-lg font-bold text-[#326273]/40">$</span>
+                <span className="text-lg font-bold text-[#326273]/90">$</span>
                 <input
                   type="number"
                   min="0"
                   step="0.01"
                   value={amount.value}
                   onChange={(event) => set({ amount: { ...amount, value: event.target.value } })}
-                  className="w-full min-w-0 bg-transparent text-3xl font-bold text-[#0C3E48] outline-none placeholder:text-[#326273]/25"
+                  className="w-full min-w-0 bg-transparent text-3xl font-bold text-[#0C3E48] outline-none placeholder:text-[#326273]/90"
                   placeholder="0.00"
                   aria-label="Amount to send in US dollars"
                 />
-                <span className="font-mono text-sm font-bold text-[#326273]/55">USD</span>
+                <span className="font-mono text-sm font-bold text-[#326273]/90">USD</span>
               </span>
               <span className="mt-3 flex flex-wrap gap-1.5">
                 {QUICK_AMOUNTS.map((quick) => (
@@ -428,7 +428,7 @@ export default function StepBeneficiary({ state, set, next }: { state: TransferS
                     className={`rounded-md px-2.5 py-1 font-mono text-[13px] font-bold transition-colors ${
                       amount.value === quick
                         ? 'bg-[#0C3E48] text-white'
-                        : 'bg-[#326273]/8 text-[#326273]/70 hover:bg-[#326273]/15'
+                        : 'bg-[#326273]/8 text-[#326273]/90 hover:bg-[#326273]/15'
                     }`}
                   >
                     ${quick}
@@ -449,16 +449,16 @@ export default function StepBeneficiary({ state, set, next }: { state: TransferS
 
             {/* Recipient gets */}
             <div className="bg-[#F4F8FA] p-5">
-              <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#326273]/50">
+              <span className="text-[12px] font-semibold uppercase tracking-[0.16em] text-[#326273]/90">
                 Recipient gets · {selectedCountry?.flag ?? ''} {selectedCountry?.name ?? recipient.country}
               </span>
               <div className="mt-2 flex items-baseline gap-2">
-                <span className={`truncate text-3xl font-bold ${converted ? 'text-[#0d6370]' : 'text-[#326273]/25'}`}>
+                <span className={`truncate text-3xl font-bold ${converted ? 'text-[#0d6370]' : 'text-[#326273]/90'}`}>
                   {converted ?? '0.00'}
                 </span>
-                <span className="font-mono text-sm font-bold text-[#326273]/55">{amount.targetCurrency}</span>
+                <span className="font-mono text-sm font-bold text-[#326273]/90">{amount.targetCurrency}</span>
               </div>
-              <p className="mt-3 text-[13px] leading-4 text-[#326273]/50">
+              <p className="mt-3 text-[13px] leading-4 text-[#326273]/90">
                 Indicative only — the exact quote locks with fees shown before you sign.
                 {' '}Minimum transfer {formatUsd(minSettlementUsd())}.
               </p>
@@ -474,7 +474,7 @@ export default function StepBeneficiary({ state, set, next }: { state: TransferS
 
       {/* ── Continue ───────────────────────────────────────── */}
       <div className="flex flex-col gap-2 border-t border-[#326273]/10 pt-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="text-[13px] font-medium text-[#326273]/55">
+        <div className="text-[13px] font-medium text-[#326273]/90">
           {valid
             ? <>Next: choose how {recipient.name.split(' ')[0] || 'the recipient'} receives it.</>
             : 'Recipient, account and amount unlock the next step.'}
@@ -507,8 +507,8 @@ function Field({ label, hint, error, children, className = '' }: {
   return (
     <div className={className}>
       <div className="flex items-baseline justify-between">
-        <label className="text-xs font-semibold uppercase tracking-[0.1em] text-[#326273]/55">{label}</label>
-        {hint && <span className="text-[13px] font-semibold text-[#326273]/35">{hint}</span>}
+        <label className="text-xs font-semibold uppercase tracking-[0.1em] text-[#326273]/90">{label}</label>
+        {hint && <span className="text-[13px] font-semibold text-[#326273]/90">{hint}</span>}
       </div>
       <div className="mt-1.5">{children}</div>
       {error && (

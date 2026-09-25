@@ -117,7 +117,7 @@ export default function FundingSelector({
 
   if (!options) {
     return (
-      <div className="flex items-center gap-2 rounded-xl bg-[#F6F0ED] p-4 text-sm font-semibold text-[#326273]/65">
+      <div className="flex items-center gap-2 rounded-xl bg-[#F6F0ED] p-4 text-sm font-semibold text-[#326273]/90">
         <Loader2 className="size-4 animate-spin" />
         Loading payment sources...
       </div>
@@ -201,13 +201,13 @@ export default function FundingSelector({
           </div>
           <div>
             <h3 className="font-bold text-[#0C3E48]">Pay from</h3>
-            <p className="mt-1 max-w-md text-xs leading-5 text-[#326273]/65">
+            <p className="mt-1 max-w-md text-xs leading-5 text-[#326273]/90">
               Choose the money you want to use. Details stay one level down so the transfer path stays easy to scan.
             </p>
           </div>
         </div>
         <div className="rounded-xl border border-[#326273]/10 bg-[#F6F0ED] px-3 py-2 text-left sm:text-right">
-          <span className="block text-[10px] font-bold uppercase tracking-[0.14em] text-[#326273]/50">Applied fee</span>
+          <span className="block text-[12px] font-bold uppercase tracking-[0.14em] text-[#326273]/90">Applied fee</span>
           <span className="mt-0.5 block text-xs font-bold text-[#0C3E48]">{selection.feeTier}</span>
         </div>
       </div>
@@ -298,10 +298,10 @@ function PrimaryFundingButton({
         {icon === 'USD' ? <Landmark className="size-5" aria-hidden="true" /> : <Coins className="size-5" aria-hidden="true" />}
       </span>
       <span className="flex min-w-0 flex-1 flex-col">
-        <span className={cn('text-[10px] font-bold uppercase tracking-[0.16em]', active ? 'text-white/55' : 'text-[#326273]/45')}>{label}</span>
+        <span className={cn('text-[12px] font-bold uppercase tracking-[0.16em]', active ? 'text-white/80' : 'text-[#326273]/90')}>{label}</span>
         <strong className="mt-1 text-base leading-tight">{title}</strong>
-        <span className={cn('mt-1 text-xs leading-5', active ? 'text-white/68' : 'text-[#326273]/62')}>{detail}</span>
-        <span className={cn('mt-auto pt-3 text-[10px] font-bold uppercase tracking-[0.14em]', active ? 'text-[#bfe6ee]' : 'text-[#326273]/45')}>{meta}</span>
+        <span className={cn('mt-1 text-xs leading-5', active ? 'text-white/80' : 'text-[#326273]/90')}>{detail}</span>
+        <span className={cn('mt-auto pt-3 text-[12px] font-bold uppercase tracking-[0.14em]', active ? 'text-[#bfe6ee]' : 'text-[#326273]/90')}>{meta}</span>
       </span>
       <span className={cn(
         'flex size-6 shrink-0 items-center justify-center rounded-full border',
@@ -416,7 +416,7 @@ function ContextualFlow({
             </span>
             <div className="min-w-0">
               <h4 className="text-sm font-bold text-[#0C3E48]">Using available USDC balance</h4>
-              <p className="mt-1 text-xs leading-5 text-[#326273]/60">
+              <p className="mt-1 text-xs leading-5 text-[#326273]/90">
                 Splash will debit held native USDC at confirmation. Available balance: {options.heldBalanceUsdc} USDC.
               </p>
             </div>
@@ -441,7 +441,7 @@ function ContextualFlow({
       <div className="min-h-36 rounded-2xl border border-[#326273]/10 bg-[#F6F0ED]/45 p-4 transition-[background-color,border-color,box-shadow] duration-150">
         <div>
           <h4 className="text-sm font-bold text-[#0C3E48]">USD bank provider</h4>
-          <p className="mt-1 text-xs leading-5 text-[#326273]/60">
+          <p className="mt-1 text-xs leading-5 text-[#326273]/90">
             {options.countryCode === 'MY' ? 'Airwallex is suggested for Malaysia. Both providers remain selectable.' : 'Stripe is suggested for your region. Both providers remain selectable.'}
           </p>
         </div>
@@ -466,7 +466,7 @@ function ContextualFlow({
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block text-sm font-bold text-[#0C3E48]">{provider.label}</span>
-                  <span className="block text-xs text-[#326273]/60">{provider.rails.join(' / ')}</span>
+                  <span className="block text-xs text-[#326273]/90">{provider.rails.join(' / ')}</span>
                 </span>
                 {active ? <Check className="size-4 shrink-0 text-[#326273]" aria-hidden="true" /> : null}
               </button>
@@ -482,7 +482,7 @@ function ContextualFlow({
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h4 className="text-sm font-bold text-[#0C3E48]">USDC deposit</h4>
-          <p className="mt-1 text-xs leading-5 text-[#326273]/60">
+          <p className="mt-1 text-xs leading-5 text-[#326273]/90">
             Deposit details and QR appear after confirmation. CCTP must mint native USDC on Sui; wrapped assets are rejected.
           </p>
         </div>
@@ -526,7 +526,7 @@ function ContextualFlow({
 
         {selection.rail === 'CCTP' ? (
           <div className="flex flex-col gap-2">
-            <label className="text-xs font-bold uppercase tracking-wide text-[#326273]/55" htmlFor="cctp-source-chain">Source chain</label>
+            <label className="text-xs font-bold uppercase tracking-wide text-[#326273]/90" htmlFor="cctp-source-chain">Source chain</label>
             <Select
               value={selection.sourceChain ?? undefined}
               onValueChange={(value) => onChainChange(value as CctpSourceChain)}
@@ -544,8 +544,8 @@ function ContextualFlow({
           </div>
         ) : null}
 
-        <div className="rounded-xl border border-[#326273]/10 bg-white p-3 text-xs leading-5 text-[#326273]/65">
-          <Banknote className="mr-2 inline size-4 text-[#5C9EAD]" aria-hidden="true" />
+        <div className="rounded-xl border border-[#326273]/10 bg-white p-3 text-xs leading-5 text-[#326273]/90">
+          <Banknote className="mr-2 inline size-4 text-[#326273]" aria-hidden="true" />
           USDC will settle as native USDC before payment_router.
         </div>
       </div>

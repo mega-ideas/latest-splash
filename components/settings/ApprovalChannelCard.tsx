@@ -119,7 +119,7 @@ export default function ApprovalChannelCard({
         <MessageSquare className="text-[var(--info)]" />
         <div>
           <h2 className="text-xl font-bold text-[#326273]">Approvals on WhatsApp</h2>
-          <p className="text-[13px] text-[#326273]/55">
+          <p className="text-[13px] text-[#326273]/90">
             Where an approver is reached, and what they have to do to release a payment.
           </p>
         </div>
@@ -133,7 +133,7 @@ export default function ApprovalChannelCard({
       >
         <span className="min-w-0">
           <span className="block text-sm font-bold text-[#1F4452]">Approve with a WhatsApp code and passkey</span>
-          <span className="mt-0.5 block text-[13px] font-medium text-[#326273]/55">
+          <span className="mt-0.5 block text-[13px] font-medium text-[#326273]/90">
             On: payments and settings saves need a code sent to the approver&apos;s confirmed WhatsApp number, then their passkey. The main admin needs both before this can be switched on.
             Off: approvers click Approve in Splash (a second person above the approval threshold when dual approval is on) — the simple setup for a one-person business.
           </span>
@@ -150,7 +150,7 @@ export default function ApprovalChannelCard({
       {/* The security consequence sits next to the option, because choosing
           between these IS the security decision. */}
       <fieldset className="mt-4" disabled={!whatsappEnabled}>
-        <legend className="font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-[#326273]/55">
+        <legend className="font-mono text-[12px] font-semibold uppercase tracking-[0.14em] text-[#326273]/90">
           How an approver responds
         </legend>
         <div className="mt-2 space-y-2">
@@ -178,17 +178,17 @@ export default function ApprovalChannelCard({
           <Smartphone className="h-4 w-4 text-[var(--info)]" />
           <h3 className="text-sm font-bold text-[#1F4452]">Your number</h3>
           {channel?.verified && (
-            <span className="inline-flex items-center gap-1 rounded-md bg-[#5C9EAD]/15 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-[#326273]">
+            <span className="inline-flex items-center gap-1 rounded-md bg-[#5C9EAD]/15 px-2 py-0.5 font-mono text-[12px] font-semibold uppercase tracking-[0.12em] text-[#326273]">
               <Check className="h-3 w-3" /> Confirmed
             </span>
           )}
           {channel && channel.whatsapp && !channel.verified && (
-            <span className="inline-flex items-center gap-1 rounded-md bg-[#E39774]/20 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-[#9A4A2D]">
+            <span className="inline-flex items-center gap-1 rounded-md bg-[#E39774]/20 px-2 py-0.5 font-mono text-[12px] font-semibold uppercase tracking-[0.12em] text-[#9A4A2D]">
               <ShieldAlert className="h-3 w-3" /> Not confirmed
             </span>
           )}
         </div>
-        <p className="mt-1 text-[13px] font-medium leading-5 text-[#326273]/55">
+        <p className="mt-1 text-[13px] font-medium leading-5 text-[#326273]/90">
           An unconfirmed number is never used. Requests would otherwise go to whoever owns a
           mistyped number, and you would never know you had not been asked.
         </p>
@@ -279,17 +279,17 @@ function ChannelOption({
         </span>
         <span className="text-sm font-bold text-[#1F4452]">{title}</span>
         {recommended && (
-          <span className="rounded-md bg-[#5C9EAD]/20 px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-[#326273]">
+          <span className="rounded-md bg-[#5C9EAD]/20 px-1.5 py-0.5 font-mono text-[12px] font-semibold uppercase tracking-[0.12em] text-[#326273]">
             Default
           </span>
         )}
         {caution && (
-          <span className="rounded-md bg-[#E39774]/20 px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-[#9A4A2D]">
+          <span className="rounded-md bg-[#E39774]/20 px-1.5 py-0.5 font-mono text-[12px] font-semibold uppercase tracking-[0.12em] text-[#9A4A2D]">
             Weaker
           </span>
         )}
       </span>
-      <span className="mt-1 block pl-6 text-[13px] font-medium leading-5 text-[#326273]/62">{body}</span>
+      <span className="mt-1 block pl-6 text-[13px] font-medium leading-5 text-[#326273]/90">{body}</span>
     </button>
   );
 }

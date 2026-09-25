@@ -116,16 +116,16 @@ export default function StepReceipt({ state, reset }: { state: TransferState; re
       />
       {state.composedActions?.length ? (
         <section className="rounded-2xl border border-[#5C9EAD]/30 bg-[#5C9EAD]/10 p-5">
-          <div className="text-xs font-semibold uppercase tracking-[0.15em] text-[#326273]/55">Composed actions in this digest</div>
+          <div className="text-xs font-semibold uppercase tracking-[0.15em] text-[#326273]/90">Composed actions in this digest</div>
           <div className="mt-3 grid gap-3 md:grid-cols-3">
             {state.composedActions.map((action) => (
               <div key={`${action.kind}-${action.eventType}`} className="rounded-xl bg-white p-3">
                 <div className="text-sm font-semibold text-[#326273]">{action.label}</div>
-                <pre className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap break-all text-[13px] text-[#326273]/55">{JSON.stringify(action.data, null, 2)}</pre>
+                <pre className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap break-all text-[13px] text-[#326273]/90">{JSON.stringify(action.data, null, 2)}</pre>
               </div>
             ))}
           </div>
-          <div className="mt-3 grid gap-2 text-[13px] text-[#326273]/60 md:grid-cols-3">
+          <div className="mt-3 grid gap-2 text-[13px] text-[#326273]/90 md:grid-cols-3">
             <div className="break-all"><strong>Intent:</strong> {state.paymentIntentId}</div>
             <div className="break-all"><strong>Walrus:</strong> {state.walrusBlobId}</div>
             <div className="break-all"><strong>Anchor:</strong> {state.auditAnchorId}</div>

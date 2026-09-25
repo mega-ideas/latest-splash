@@ -43,7 +43,7 @@ export default function DashPageHeader({ kicker, title, description, actions, cl
       <div>
         <span className="dash-kicker">{kicker}</span>
         <h1 className="dash-title mt-2">{title}</h1>
-        {description && <p className="mt-1 max-w-2xl text-[13px] font-medium text-[#326273]/60">{description}</p>}
+        {description && <p className="mt-1 max-w-2xl text-[13px] font-medium text-[#326273]">{description}</p>}
       </div>
       {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
     </header>

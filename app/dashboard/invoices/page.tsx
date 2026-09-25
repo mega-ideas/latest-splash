@@ -14,12 +14,12 @@ import type { InvoiceRecord, InvoiceStatusV2 } from '@/lib/server/operations';
 type InvoiceView = 'vault' | 'loop';
 
 const statusStyle: Record<InvoiceStatusV2, string> = {
-  draft: 'bg-foreground/10 text-foreground/60',
-  sent: 'bg-primary/10 text-primary',
-  viewed: 'bg-primary/10 text-primary',
-  paid: 'bg-accent/15 text-accent',
-  settled: 'bg-primary/15 text-primary',
-  overdue: 'bg-destructive/10 text-destructive',
+  draft: 'bg-foreground/10 text-foreground/90',
+  sent: 'bg-primary/10 text-foreground',
+  viewed: 'bg-primary/10 text-foreground',
+  paid: 'bg-accent/15 text-[#9f5839]',
+  settled: 'bg-primary/15 text-foreground',
+  overdue: 'bg-destructive/10 text-[#1F4452]',
 };
 
 async function fetchInvoices() {
@@ -110,7 +110,7 @@ export default function InvoicesPage() {
         <div>
           <span className="dash-kicker">Get paid</span>
           <h1 className="dash-title mt-2">Invoices</h1>
-          <p className="mt-1 text-sm text-foreground/55">
+          <p className="mt-1 text-sm text-foreground">
             {view === 'vault'
               ? 'Create a pay link, protect the document with Seal, and preserve its proof on Walrus.'
               : 'Ask Zeke to inspect an invoice: encrypted intake, Walrus proof, Seal access, and a route recommendation.'}
@@ -127,7 +127,7 @@ export default function InvoicesPage() {
               {usdcSync.isPending ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <RefreshCw className="h-4 w-4" aria-hidden="true" />}
               Check USDC payments
             </button>
-            <button onClick={() => setCreateOpen(true)} className="inline-flex items-center justify-center gap-2 rounded-xl bg-accent px-5 py-3 text-sm font-bold text-card shadow-lg shadow-accent/20">
+            <button onClick={() => setCreateOpen(true)} className="inline-flex items-center justify-center gap-2 rounded-xl bg-accent px-5 py-3 text-sm font-bold text-[#073d49] shadow-lg shadow-accent/20">
               <FilePlus2 className="h-4 w-4" /> Create invoice
             </button>
           </div>
@@ -146,7 +146,7 @@ export default function InvoicesPage() {
             aria-pressed={view === key}
             onClick={() => setView(key)}
             className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-bold transition ${
-              view === key ? 'bg-foreground text-card shadow-sm' : 'text-foreground/55 hover:text-foreground'
+              view === key ? 'bg-foreground text-card shadow-sm' : 'text-foreground/90 hover:text-foreground'
             }`}
           >
             <Icon className="h-4 w-4" />
@@ -166,7 +166,7 @@ export default function InvoicesPage() {
           { label: 'Settled', value: totals.settled, icon: CheckCircle2 },
         ].map(({ label, value, icon: Icon }) => (
           <div key={label} className="dash-block p-4">
-            <div className="flex items-center justify-between"><span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-foreground/45">{label}</span><Icon className="h-4 w-4 text-primary" /></div>
+            <div className="flex items-center justify-between"><span className="text-[12px] font-semibold uppercase tracking-[0.16em] text-foreground/90">{label}</span><Icon className="h-4 w-4 text-foreground" /></div>
             <div className="dash-num mt-2 text-2xl font-bold">{value}</div>
           </div>
         ))}
@@ -176,37 +176,37 @@ export default function InvoicesPage() {
         <div className="flex flex-col gap-3 border-b border-foreground/10 p-4 md:flex-row md:items-center md:justify-between">
           <div className="flex flex-wrap gap-2">
             {(['all', 'draft', 'sent', 'paid', 'settled', 'overdue'] as const).map((value) => (
-              <button key={value} onClick={() => setFilter(value)} className={`rounded-full px-3 py-1.5 text-[13px] font-bold capitalize ${filter === value ? 'bg-foreground text-card' : 'bg-muted/50 text-foreground/55'}`}>
+              <button key={value} onClick={() => setFilter(value)} className={`rounded-full px-3 py-1.5 text-[13px] font-bold capitalize ${filter === value ? 'bg-foreground text-card' : 'bg-muted/50 text-[#1F4452]'}`}>
                 {value}
               </button>
             ))}
           </div>
           <label className="flex items-center gap-2 rounded-xl border border-foreground/10 bg-card px-3 py-2">
-            <Search className="h-4 w-4 text-foreground/35" />
+            <Search className="h-4 w-4 text-foreground/90" />
             <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search invoices" className="bg-transparent text-sm outline-none" />
           </label>
         </div>
 
         <div className="overflow-x-auto">
           <table className="w-full min-w-[820px] text-sm">
-            <thead className="bg-muted/40 text-left text-[10px] font-semibold uppercase tracking-[0.14em] text-foreground/45">
+            <thead className="bg-muted/40 text-left text-[12px] font-semibold uppercase tracking-[0.14em] text-foreground/90">
               <tr><th className="px-4 py-3">Payer</th><th className="px-4 py-3">Amount</th><th className="px-4 py-3">Due</th><th className="px-4 py-3">Proof</th><th className="px-4 py-3">Status</th><th className="px-4 py-3 text-right">Action</th></tr>
             </thead>
             <tbody>
-              {isLoading ? <tr><td colSpan={6} className="p-8 text-center text-foreground/50">Loading invoice vault...</td></tr> :
+              {isLoading ? <tr><td colSpan={6} className="p-8 text-center text-foreground/90">Loading invoice vault...</td></tr> :
                 filtered.map((invoice) => (
                   <tr key={invoice.id} className="border-t border-foreground/8">
-                    <td className="px-4 py-4"><strong>{invoice.payerOrgName ?? 'Draft payer'}</strong><small className="mt-1 block font-mono text-foreground/40">{invoice.id}</small></td>
-                    <td className="px-4 py-4"><strong>${Number(invoice.amountUsd).toLocaleString()}</strong><small className="mt-1 block text-foreground/45">USD → {invoice.targetCurrency}</small></td>
-                    <td className="px-4 py-4 text-foreground/60">{invoice.dueDate}</td>
+                    <td className="px-4 py-4"><strong>{invoice.payerOrgName ?? 'Draft payer'}</strong><small className="mt-1 block font-mono text-foreground/90">{invoice.id}</small></td>
+                    <td className="px-4 py-4"><strong>${Number(invoice.amountUsd).toLocaleString()}</strong><small className="mt-1 block text-foreground/90">USD → {invoice.targetCurrency}</small></td>
+                    <td className="px-4 py-4 text-foreground/90">{invoice.dueDate}</td>
                     <td className="px-4 py-4">
-                      {invoice.walrusBlobId ? <span className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-2.5 py-1 text-[13px] font-semibold text-primary"><ShieldCheck className="h-3 w-3" /> Seal + Walrus</span> : <span className="text-[13px] text-foreground/35">No document</span>}
+                      {invoice.walrusBlobId ? <span className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-2.5 py-1 text-[13px] font-semibold text-foreground"><ShieldCheck className="h-3 w-3" /> Seal + Walrus</span> : <span className="text-[13px] text-foreground/90">No document</span>}
                     </td>
-                    <td className="px-4 py-4"><span className={`rounded-full px-2.5 py-1 text-[13px] font-bold capitalize ${statusStyle[invoice.status]}`}>{invoice.status}</span>{invoice.demo && <span className="ml-2"><StatusBadge status="demo" /></span>}{invoice.usdcTxDigest && <a href={suiScanTxUrlOn('mainnet', invoice.usdcTxDigest)} target="_blank" rel="noreferrer" className="mt-1 block text-[12px] font-semibold text-primary hover:underline">Paid in USDC · verified on Sui</a>}</td>
+                    <td className="px-4 py-4"><span className={`rounded-full px-2.5 py-1 text-[13px] font-bold capitalize ${statusStyle[invoice.status]}`}>{invoice.status}</span>{invoice.demo && <span className="ml-2"><StatusBadge status="demo" /></span>}{invoice.usdcTxDigest && <a href={suiScanTxUrlOn('mainnet', invoice.usdcTxDigest)} target="_blank" rel="noreferrer" className="mt-1 block text-[12px] font-semibold text-foreground hover:underline">Paid in USDC · verified on Sui</a>}</td>
                     <td className="px-4 py-4">
                       <div className="flex justify-end gap-2">
                         <button onClick={() => copyPayLink(invoice)} className="inline-flex items-center gap-1 rounded-lg border border-foreground/10 bg-card px-3 py-2 text-[13px] font-bold"><Copy className="h-3.5 w-3.5" /> Pay link</button>
-                        {invoice.status === 'paid' && <button onClick={() => statusMutation.mutate({ id: invoice.id, status: 'settled' })} className="inline-flex items-center gap-1 rounded-lg bg-primary px-3 py-2 text-[13px] font-bold text-card"><CheckCircle2 className="h-3.5 w-3.5" /> Settle</button>}
+                        {invoice.status === 'paid' && <button onClick={() => statusMutation.mutate({ id: invoice.id, status: 'settled' })} className="inline-flex items-center gap-1 rounded-lg bg-[#237284] px-3 py-2 text-[13px] font-bold text-card"><CheckCircle2 className="h-3.5 w-3.5" /> Settle</button>}
                       </div>
                     </td>
                   </tr>
@@ -260,16 +260,16 @@ function CreateInvoiceModal({ close, onCreated }: { close: () => void; onCreated
         </div>
         <Field label="Memo"><textarea value={form.memo} onChange={(e) => setForm({ ...form, memo: e.target.value })} /></Field>
         <label className="mt-4 flex cursor-pointer items-center gap-3 rounded-2xl border border-dashed border-primary/35 bg-primary/5 p-4">
-          <Lock className="h-5 w-5 text-primary" /><span><strong className="block">Optional PDF</strong><small className="text-foreground/55">Encrypted before Walrus storage</small></span>
+          <Lock className="h-5 w-5 text-foreground" /><span><strong className="block">Optional PDF</strong><small className="text-foreground/90">Encrypted before Walrus storage</small></span>
           <input type="file" accept=".pdf,image/*" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) void fileToBase64(file); }} />
-          {documentBase64 && <CheckCircle2 className="ml-auto h-5 w-5 text-primary" />}
+          {documentBase64 && <CheckCircle2 className="ml-auto h-5 w-5 text-foreground" />}
         </label>
-        <button disabled={submitting} onClick={create} className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-accent px-5 py-3 font-bold text-card disabled:opacity-50"><Send className="h-4 w-4" /> {submitting ? 'Creating...' : 'Create secure pay link'}</button>
+        <button disabled={submitting} onClick={create} className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-accent px-5 py-3 font-bold text-[#073d49] disabled:opacity-50"><Send className="h-4 w-4" /> {submitting ? 'Creating...' : 'Create secure pay link'}</button>
       </div>
     </div>
   );
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return <label className="mt-4 block text-xs font-semibold uppercase tracking-[0.12em] text-foreground/50">{label}<div className="mt-1 [&_input]:w-full [&_input]:rounded-xl [&_input]:border [&_input]:border-foreground/15 [&_input]:bg-card [&_input]:px-3 [&_input]:py-3 [&_input]:text-sm [&_input]:font-medium [&_select]:w-full [&_select]:rounded-xl [&_select]:border [&_select]:border-foreground/15 [&_select]:bg-card [&_select]:px-3 [&_select]:py-3 [&_textarea]:min-h-20 [&_textarea]:w-full [&_textarea]:rounded-xl [&_textarea]:border [&_textarea]:border-foreground/15 [&_textarea]:bg-card [&_textarea]:px-3 [&_textarea]:py-3">{children}</div></label>;
+  return <label className="mt-4 block text-xs font-semibold uppercase tracking-[0.12em] text-foreground/90">{label}<div className="mt-1 [&_input]:w-full [&_input]:rounded-xl [&_input]:border [&_input]:border-foreground/15 [&_input]:bg-card [&_input]:px-3 [&_input]:py-3 [&_input]:text-sm [&_input]:font-medium [&_select]:w-full [&_select]:rounded-xl [&_select]:border [&_select]:border-foreground/15 [&_select]:bg-card [&_select]:px-3 [&_select]:py-3 [&_textarea]:min-h-20 [&_textarea]:w-full [&_textarea]:rounded-xl [&_textarea]:border [&_textarea]:border-foreground/15 [&_textarea]:bg-card [&_textarea]:px-3 [&_textarea]:py-3">{children}</div></label>;
 }

@@ -138,13 +138,13 @@ export default function CopilotPage() {
             {/* The AI label is not attached to the name, so renaming the
                 assistant cannot remove it. Someone reading a payment
                 recommendation is entitled to know what wrote it. */}
-            <span className="inline-flex items-center gap-1.5 rounded-md bg-[#0c3e48] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-white">
+            <span className="inline-flex items-center gap-1.5 rounded-md bg-[#0c3e48] px-2.5 py-1 text-[12px] font-semibold uppercase tracking-[0.18em] text-white">
               <Sparkles className="h-3 w-3 text-[#efc46f]" aria-hidden="true" />
               AI assistant
             </span>
           </div>
           <h1 className="dash-title mt-3 text-3xl md:text-4xl">{assistantName}</h1>
-          <p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-[#326273]/62">
+          <p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-[#326273]/90">
             Grounded in what your workspace actually holds. It reads live state and prepares
             unsigned proposals — it cannot send, sign, or settle anything.
           </p>
@@ -155,7 +155,7 @@ export default function CopilotPage() {
             <div className="flex items-center gap-2">
               <BotAvatar size={24} />
               <h2 className="text-sm font-bold text-[#1F4452]">{assistantName}</h2>
-              <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-[#326273]/45">
+              <span className="font-mono text-[12px] font-semibold uppercase tracking-[0.12em] text-[#326273]/90">
                 prepares · you approve
               </span>
             </div>
@@ -208,7 +208,7 @@ export default function CopilotPage() {
             <Sparkles className="h-4 w-4 text-[var(--info)]" />
             <h2 className="text-sm font-bold text-[#1F4452]">Suggestions</h2>
           </div>
-          <p className="mt-1 text-[13px] font-medium leading-5 text-[#326273]/55">
+          <p className="mt-1 text-[13px] font-medium leading-5 text-[#326273]/90">
             Drawn from your open invoices and MemWal memory. Tap one to ask about it.
           </p>
 
@@ -230,7 +230,7 @@ export default function CopilotPage() {
             )}
 
             {suggestState === 'ready' && suggestions.length === 0 && (
-              <p className="rounded-lg border border-[#326273]/12 bg-[#F6F0ED] px-3 py-2.5 text-[13px] font-medium leading-5 text-[#326273]/70">
+              <p className="rounded-lg border border-[#326273]/12 bg-[#F6F0ED] px-3 py-2.5 text-[13px] font-medium leading-5 text-[#326273]/90">
                 Nothing to suggest right now. Ask directly in the chat.
               </p>
             )}
@@ -244,14 +244,14 @@ export default function CopilotPage() {
                 className="w-full rounded-lg border border-[#326273]/12 border-l-2 border-l-[#5C9EAD] bg-white px-3 py-2.5 text-left transition hover:border-[#5C9EAD]/50 disabled:opacity-50"
               >
                 <div className="flex items-center justify-between gap-2">
-                  <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-[#326273]/55">
+                  <span className="font-mono text-[12px] font-semibold uppercase tracking-[0.12em] text-[#326273]/90">
                     {suggestion.kind}
                   </span>
                   {/* The only score these cards carry is how closely a recalled
                       memory matched (lib/server/copilot.ts memoryRelevance), so
                       it is labelled as that, not as confidence the suggestion is right. */}
                   {suggestion.confidence !== null && (
-                    <span className="font-mono text-[10px] font-semibold tabular-nums text-[#326273]/45">
+                    <span className="font-mono text-[12px] font-semibold tabular-nums text-[#326273]/90">
                       {suggestion.confidence}% memory match
                     </span>
                   )}
@@ -259,7 +259,7 @@ export default function CopilotPage() {
                 <div className="mt-1 text-[13px] font-bold leading-5 text-[#1F4452]">
                   {suggestion.title}
                 </div>
-                <div className="mt-0.5 text-[13px] font-medium leading-5 text-[#326273]/62">
+                <div className="mt-0.5 text-[13px] font-medium leading-5 text-[#326273]/90">
                   {suggestion.body}
                 </div>
               </button>
@@ -276,7 +276,7 @@ export default function CopilotPage() {
           </div>
           <div className="mt-3 space-y-2">
             <div>
-              <div className="mb-1.5 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-emerald-700">
+              <div className="mb-1.5 font-mono text-[12px] font-semibold uppercase tracking-[0.12em] text-emerald-700">
                 Stored — behavioural only
               </div>
               {[
@@ -287,7 +287,7 @@ export default function CopilotPage() {
               ].map((item) => (
                 <div
                   key={item}
-                  className="flex items-center gap-1.5 py-0.5 text-[13px] font-medium text-[#326273]/70"
+                  className="flex items-center gap-1.5 py-0.5 text-[13px] font-medium text-[#326273]/90"
                 >
                   <span className="h-1 w-1 shrink-0 rounded-full bg-emerald-600" aria-hidden="true" />
                   {item}
@@ -295,7 +295,7 @@ export default function CopilotPage() {
               ))}
             </div>
             <div className="border-t border-[#326273]/10 pt-2">
-              <div className="mb-1.5 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-[#9A4A2D]">
+              <div className="mb-1.5 font-mono text-[12px] font-semibold uppercase tracking-[0.12em] text-[#9A4A2D]">
                 Never stored
               </div>
               {[
@@ -306,7 +306,7 @@ export default function CopilotPage() {
               ].map((item) => (
                 <div
                   key={item}
-                  className="flex items-center gap-1.5 py-0.5 text-[13px] font-medium text-[#326273]/70"
+                  className="flex items-center gap-1.5 py-0.5 text-[13px] font-medium text-[#326273]/90"
                 >
                   <X className="h-2.5 w-2.5 shrink-0 text-[#9A4A2D]" />
                   {item}
@@ -331,7 +331,7 @@ export default function CopilotPage() {
                 <Icon className="h-3.5 w-3.5" />
                 {label}
               </span>
-              <ChevronRight className="h-3.5 w-3.5 text-[#326273]/30" />
+              <ChevronRight className="h-3.5 w-3.5 text-[#326273]/90" />
             </Link>
           ))}
         </div>

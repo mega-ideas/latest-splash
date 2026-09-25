@@ -105,18 +105,18 @@ export default function WalletActivity({
     <section className="dash-surface p-4" aria-labelledby="wallet-activity-title">
       <div className="flex items-baseline justify-between gap-2">
         <h2 id="wallet-activity-title" className="text-sm font-semibold text-[#326273]">Wallet activity</h2>
-        <span className="font-mono text-[11px] text-[#326273]/55">{shortAddress(address)}</span>
+        <span className="font-mono text-[12px] text-[#326273]/90">{shortAddress(address)}</span>
       </div>
-      <p className="mt-0.5 text-[12px] leading-5 text-[#326273]/60">
+      <p className="mt-0.5 text-[12px] leading-5 text-[#326273]/90">
         USDC in and out of {splash ? 'your Splash wallet' : 'this wallet'}, read from Sui mainnet.
       </p>
 
       {busy === 'first' && movements.length === 0 ? (
-        <p className="mt-3 flex items-center gap-2 text-[13px] text-[#326273]/70" role="status">
+        <p className="mt-3 flex items-center gap-2 text-[13px] text-[#326273]/90" role="status">
           <Loader2 className="h-4 w-4 animate-spin" /> Reading the chain…
         </p>
       ) : movements.length === 0 ? (
-        <p className="mt-3 text-[13px] leading-5 text-[#326273]/70">
+        <p className="mt-3 text-[13px] leading-5 text-[#326273]/90">
           {notice || 'No USDC has moved in or out yet. Send USDC on Sui to the address above to fund it.'}
         </p>
       ) : (
@@ -133,17 +133,17 @@ export default function WalletActivity({
                   aria-hidden
                   className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${m.direction === 'IN' ? 'bg-[var(--ok-bg)] text-[var(--ok)]' : 'bg-[#0C3E48]/8 text-[#0C3E48]'}`}
                 >
-                  {noRecord ? <AlertTriangle className="h-3.5 w-3.5 text-[var(--warn)]" /> : m.direction === 'IN' ? <ArrowDownLeft className="h-3.5 w-3.5" /> : <ArrowUpRight className="h-3.5 w-3.5" />}
+                  {noRecord ? <AlertTriangle className="h-3.5 w-3.5 text-[#8b6418]" /> : m.direction === 'IN' ? <ArrowDownLeft className="h-3.5 w-3.5" /> : <ArrowUpRight className="h-3.5 w-3.5" />}
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline justify-between gap-2">
                     <span className="truncate font-semibold text-[#1F4452]" title={m.counterparty ?? undefined}>{m.label}</span>
-                    <span className={`shrink-0 font-mono tabular-nums ${m.direction === 'IN' ? 'text-[var(--ok)]' : 'text-[#1F4452]'}`}>
+                    <span className={`shrink-0 font-mono tabular-nums ${m.direction === 'IN' ? 'text-[#1F4452]' : 'text-[#1F4452]'}`}>
                       <span className="sr-only">{m.direction === 'IN' ? 'received' : 'sent'} </span>
                       {m.direction === 'IN' ? '+' : '−'}{amount}
                     </span>
                   </div>
-                  <div className="mt-0.5 flex items-center justify-between gap-2 text-[12px] text-[#326273]/60">
+                  <div className="mt-0.5 flex items-center justify-between gap-2 text-[12px] text-[#326273]/90">
                     <span>
                       {when(m.timestamp)}
                       {!m.success ? ' · failed on chain' : ''}
@@ -160,7 +160,7 @@ export default function WalletActivity({
         </ul>
       )}
 
-      {movements.length > 0 && notice ? <p className="mt-2 text-[12px] text-[var(--warn)]" role="alert">{notice}</p> : null}
+      {movements.length > 0 && notice ? <p className="mt-2 text-[12px] text-[#8b6418]" role="alert">{notice}</p> : null}
       {olderCursor ? (
         <button type="button" onClick={() => void loadOlder()} disabled={busy !== null} className="dash-btn-ghost mt-3 inline-flex min-h-10 items-center gap-1.5 !px-3 !py-1.5 !text-[13px] disabled:opacity-50">
           {busy === 'older' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null} Show older

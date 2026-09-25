@@ -311,7 +311,7 @@ export default function StepQuote({
     }
   }
 
-  if (!state.quote) return <div className="py-10 text-center text-[#326273]/60">Fetching live FX and fee quote...</div>;
+  if (!state.quote) return <div className="py-10 text-center text-[#326273]/90">Fetching live FX and fee quote...</div>;
 
   const selection = state.funding.selection;
   const isQuoteRefreshing = loading || settledQuoteKey !== quoteRequestKey;
@@ -334,7 +334,7 @@ export default function StepQuote({
     <div className="flex flex-col gap-5">
       <div>
         <h2 className="text-xl font-semibold text-[#326273]">Quote, review and send</h2>
-        <p className="mt-1 text-sm text-[#326273]/60">Choose USD or USDC for this transfer. Provider and rail details stay below the selected option.</p>
+        <p className="mt-1 text-sm text-[#326273]/90">Choose USD or USDC for this transfer. Provider and rail details stay below the selected option.</p>
       </div>
 
       <FundingSelector
@@ -362,7 +362,7 @@ export default function StepQuote({
         <HoverPopup title="Recipient" content="The business receiving this payment. Verify the name matches your records.">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <span className="text-base font-semibold text-[#1F4452]">{state.recipient.name || 'Supplier pending'}</span>
-            <span className="text-[13px] font-medium text-[#326273]/60">
+            <span className="text-[13px] font-medium text-[#326273]">
               {state.recipient.country}
               {state.recipient.bank?.account ? <span className="money"> · {state.recipient.bank.account}</span> : null}
             </span>
@@ -371,7 +371,7 @@ export default function StepQuote({
 
         <div className="money mt-3 text-3xl font-semibold tracking-tight text-[#1F4452]">
           ${state.amount.value || '0'}
-          <span className="ml-2 text-sm font-medium text-[#326273]/55">USD</span>
+          <span className="ml-2 text-sm font-medium text-[#326273]/90">USD</span>
         </div>
 
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
@@ -381,26 +381,26 @@ export default function StepQuote({
             </span>
           </HoverPopup>
           {holdActive && lockRemainingLabel ? (
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--ok-bg)] px-2.5 py-1 text-[13px] font-medium text-[var(--ok)]">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--ok-bg)] px-2.5 py-1 text-[13px] font-medium text-[#1F4452]">
               <Clock3 className="size-3.5" aria-hidden="true" />
               Rate locked · {lockRemainingLabel}
             </span>
           ) : (
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-[13px] font-medium text-[#326273]/60">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-[13px] font-medium text-[#326273]/90">
               <Clock3 className="size-3.5" aria-hidden="true" />
               Quote valid for 30 seconds
             </span>
           )}
-          {rateDirection !== 'neutral' ? <TrendingUp className={rateDirection === 'up' ? 'text-[var(--info)]' : 'rotate-180 text-[var(--warn)]'} /> : null}
+          {rateDirection !== 'neutral' ? <TrendingUp className={rateDirection === 'up' ? 'text-[var(--info)]' : 'rotate-180 text-[#8b6418]'} /> : null}
         </div>
 
         <div className="mt-4 h-px bg-[#326273]/10" />
 
         <div className="mt-3 flex items-center justify-between gap-4">
-          <span className="text-[#326273]/60">All-in fee ({selection.feeTier})</span>
+          <span className="text-[#326273]/90">All-in fee ({selection.feeTier})</span>
           <span className="money inline-flex items-center gap-2 font-medium text-[#326273]">
             {feeValue}
-            {sendAmountUsd > 0 ? <span className="text-[13px] text-[#326273]/55">({allInFeePct.toFixed(2)}%)</span> : null}
+            {sendAmountUsd > 0 ? <span className="text-[13px] text-[#326273]/90">({allInFeePct.toFixed(2)}%)</span> : null}
             {isQuoteRefreshing ? <Loader2 className="size-3.5 animate-spin text-[var(--info)]" aria-label="Refreshing quote" /> : null}
           </span>
         </div>
@@ -412,7 +412,7 @@ export default function StepQuote({
           </span>
         </div>
 
-        <div className="mt-3 flex items-center gap-2 text-[13px] text-[#326273]/60">
+        <div className="mt-3 flex items-center gap-2 text-[13px] text-[#326273]/90">
           {isQuoteRefreshing ? <Loader2 className="size-3.5 animate-spin text-[var(--info)]" aria-hidden="true" /> : <Info className="size-3.5" aria-hidden="true" />}
           {isQuoteRefreshing
             ? `Updating quote for ${selectedFundingLabel}.`
@@ -425,7 +425,7 @@ export default function StepQuote({
           numbers are approved into the claims register. */}
       {baseline && sendAmountUsd > 0 ? (
         <div className="overflow-hidden rounded-xl border border-[#326273]/12 bg-white">
-          <div className="grid grid-cols-[1.2fr_1fr_1fr] gap-0 border-b border-[#326273]/10 bg-[#F6F0ED]/70 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#326273]/55">
+          <div className="grid grid-cols-[1.2fr_1fr_1fr] gap-0 border-b border-[#326273]/10 bg-[#F6F0ED]/70 px-4 py-2 text-[12px] font-semibold uppercase tracking-[0.12em] text-[#326273]/90">
             <span>Route</span>
             <span className="text-right">Cost</span>
             <span className="text-right">Delivery</span>
@@ -434,20 +434,20 @@ export default function StepQuote({
             <div className="grid grid-cols-[1.2fr_1fr_1fr] items-center px-4 py-2.5 bg-[var(--ok-bg)]/50">
               <span className="font-semibold text-[#1F4452]">Splash</span>
               <span className="money text-right font-semibold text-[#1F4452]">{feeValue}</span>
-              <span className="text-right text-[13px] font-medium text-[#326273]/70">{lockedCopy.speed}</span>
+              <span className="text-right text-[13px] font-medium text-[#326273]/90">{lockedCopy.speed}</span>
             </div>
             <div className="grid grid-cols-[1.2fr_1fr_1fr] items-center px-4 py-2.5">
-              <span className="font-medium text-[#326273]/75">Fintech transfer</span>
-              <span className="money text-right font-medium text-[#326273]/75">${formatBaselineMinor(baselineCostMinor(baseline.fintech, parseBaselineMinor(sendAmountUsd.toFixed(2), 2)), 2)}</span>
-              <span className="text-right text-[13px] font-medium text-[#326273]/60">{baseline.fintech.delivery}</span>
+              <span className="font-medium text-[#326273]/90">Fintech transfer</span>
+              <span className="money text-right font-medium text-[#326273]/90">${formatBaselineMinor(baselineCostMinor(baseline.fintech, parseBaselineMinor(sendAmountUsd.toFixed(2), 2)), 2)}</span>
+              <span className="text-right text-[13px] font-medium text-[#326273]/90">{baseline.fintech.delivery}</span>
             </div>
             <div className="grid grid-cols-[1.2fr_1fr_1fr] items-center px-4 py-2.5">
-              <span className="font-medium text-[#326273]/75">Bank wire</span>
-              <span className="money text-right font-medium text-[#326273]/75">${formatBaselineMinor(baselineCostMinor(baseline.bankWire, parseBaselineMinor(sendAmountUsd.toFixed(2), 2)), 2)}</span>
-              <span className="text-right text-[13px] font-medium text-[#326273]/60">{baseline.bankWire.delivery}</span>
+              <span className="font-medium text-[#326273]/90">Bank wire</span>
+              <span className="money text-right font-medium text-[#326273]/90">${formatBaselineMinor(baselineCostMinor(baseline.bankWire, parseBaselineMinor(sendAmountUsd.toFixed(2), 2)), 2)}</span>
+              <span className="text-right text-[13px] font-medium text-[#326273]/90">{baseline.bankWire.delivery}</span>
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2 border-t border-[#326273]/10 bg-[#F6F0ED]/50 px-4 py-2 text-[11px] font-medium text-[#326273]/55">
+          <div className="flex flex-wrap items-center gap-2 border-t border-[#326273]/10 bg-[#F6F0ED]/50 px-4 py-2 text-[12px] font-medium text-[#326273]/90">
             <SourceBadge state="modeled" />
             Illustrative, mid-market baseline · reviewed {baseline.lastReviewed}
           </div>
@@ -456,10 +456,10 @@ export default function StepQuote({
 
       <button type="button" disabled={holdBusy || isQuoteRefreshing || state.rateHold?.state === 'ACTIVE'} onClick={() => void holdRate()} className="group flex min-h-12 w-full items-center justify-between gap-3 rounded-xl border border-[#5C9EAD]/35 bg-white px-4 py-3 text-left font-semibold text-[#0C3E48] shadow-[0_10px_24px_rgba(12,62,72,0.06)] transition-all hover:-translate-y-0.5 hover:border-[#5C9EAD]/80 hover:bg-[#EAF7F8] focus-ring disabled:cursor-not-allowed disabled:border-[#326273]/10 disabled:bg-[#F6F0ED] disabled:text-[#326273]/50 disabled:shadow-none disabled:hover:translate-y-0">
         <span className="flex items-center gap-3"><Clock3 className="size-4 text-[var(--info)]" aria-hidden="true" />{state.rateHold?.state === 'ACTIVE' ? 'Rate hold active' : 'Hold this rate 48h'}</span>
-        <span className="font-mono text-[13px] text-[#326273]/55">{liveRate.toLocaleString()}</span>
+        <span className="font-mono text-[13px] text-[#326273]/90">{liveRate.toLocaleString()}</span>
       </button>
 
-      <div className="rounded-xl border border-[#5C9EAD]/20 bg-[#5C9EAD]/10 p-4 text-sm text-[#326273]/75">
+      <div className="rounded-xl border border-[#5C9EAD]/20 bg-[#5C9EAD]/10 p-4 text-sm text-[#326273]/90">
         <div className="flex gap-3">
           <ShieldCheck />
           <span>{selection.type === 'held'
@@ -477,7 +477,7 @@ export default function StepQuote({
       {whatsappStyle ? (
         <section aria-label="Payout approval" className="rounded-xl border border-[#326273]/12 bg-white p-4">
           <h3 className="text-sm font-semibold text-[#1F4452]">Approve this payout</h3>
-          <p className="mt-1 text-[13px] leading-5 text-[#326273]/70">
+          <p className="mt-1 text-[13px] leading-5 text-[#326273]/90">
             Your workspace approves payouts with a WhatsApp code and passkey. The approval covers this recipient, account,
             amount, currency and payment source — change any of them and it has to be approved again.
           </p>
@@ -492,7 +492,7 @@ export default function StepQuote({
         </section>
       ) : null}
 
-      <label className="flex items-start gap-3 text-sm text-[#326273]/80">
+      <label className="flex items-start gap-3 text-sm text-[#326273]/90">
         <input type="checkbox" checked={agree} onChange={(event) => setAgree(event.target.checked)} className="mt-1 size-4 cursor-pointer rounded border-[#326273]/30 bg-white accent-[#5C9EAD]" />
         I confirm the recipient details are correct and I want to continue from {selectedFundingLabel}.
       </label>
@@ -509,7 +509,7 @@ export default function StepQuote({
 
       {/* Maker-checker note — reads the REAL threshold from operating settings. */}
       {approvalPolicy ? (
-        <div className="flex items-center gap-2 text-[13px] font-medium text-[#326273]/65">
+        <div className="flex items-center gap-2 text-[13px] font-medium text-[#326273]/90">
           <ShieldCheck className="size-4 shrink-0 text-[var(--info)]" aria-hidden="true" />
           {approvalPolicy.dual && sendAmountUsd > approvalPolicy.thresholdUsd
             ? <span>Over the <span className="money">${approvalPolicy.thresholdUsd.toLocaleString()}</span> approval threshold — a second approver signs before settlement.</span>
@@ -520,7 +520,7 @@ export default function StepQuote({
       {isSending && !depositOpen ? (
         <div className="flex flex-col gap-3 rounded-2xl border border-[#5C9EAD]/25 bg-[#5C9EAD]/10 p-4">
           <div className="h-3 overflow-hidden rounded-full bg-white"><div className="h-full rounded-full bg-[#5C9EAD] transition-all" style={{ width: `${progress}%` }} /></div>
-          <div className="flex items-center gap-2 text-sm font-medium text-[#326273]/70"><Loader2 className="animate-spin" /> Debiting source and preparing settlement...</div>
+          <div className="flex items-center gap-2 text-sm font-medium text-[#326273]/90"><Loader2 className="animate-spin" /> Debiting source and preparing settlement...</div>
         </div>
       ) : null}
 
@@ -529,25 +529,25 @@ export default function StepQuote({
           <div className="w-full max-w-2xl rounded-3xl bg-white p-6 text-[#326273] shadow-2xl">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <div className="mb-2 inline-flex rounded-full bg-[#E39774]/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-[#E39774]">{selection.type === 'fiat' ? 'Provider deposit' : 'USDC deposit'}</div>
+                <div className="mb-2 inline-flex rounded-full bg-[#E39774]/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-[#9f5839]">{selection.type === 'fiat' ? 'Provider deposit' : 'USDC deposit'}</div>
                 <h3 className="text-2xl font-semibold">{selection.type === 'fiat' ? `Continue with ${selection.provider}` : selection.type === 'stablecoin' ? `Deposit ${selection.asset}` : 'Settle from Splash balance'}</h3>
-                <p className="mt-1 text-sm text-[#326273]/60">{selection.type === 'fiat' ? 'Provider funding is confirmed before settlement.' : 'Send USDC over the selected rail using the push-only deposit address.'}</p>
+                <p className="mt-1 text-sm text-[#326273]/90">{selection.type === 'fiat' ? 'Provider funding is confirmed before settlement.' : 'Send USDC over the selected rail using the push-only deposit address.'}</p>
               </div>
-              <button type="button" aria-label="Close funding dialog" onClick={() => !isSending && setDepositOpen(false)} className="inline-flex size-9 shrink-0 items-center justify-center rounded-full text-[#326273]/55 transition hover:bg-[#F6F0ED] hover:text-[#0C3E48] focus-ring disabled:cursor-not-allowed disabled:opacity-45" disabled={isSending}>
+              <button type="button" aria-label="Close funding dialog" onClick={() => !isSending && setDepositOpen(false)} className="inline-flex size-9 shrink-0 items-center justify-center rounded-full text-[#326273]/90 transition hover:bg-[#F6F0ED] hover:text-[#0C3E48] focus-ring disabled:cursor-not-allowed disabled:opacity-45" disabled={isSending}>
                 <X className="size-4" aria-hidden="true" />
               </button>
             </div>
 
-            <div className="mt-5 rounded-2xl bg-[#326273] p-5 text-white">
-              <div className="flex items-center justify-between"><span className="text-sm text-white/65">Transfer amount</span><span className="text-2xl font-semibold">${state.amount.value}</span></div>
-              <div className="mt-3 flex items-center justify-between text-sm"><span className="text-white/65">Fee tier</span><span className="font-medium">{selection.feeTier}</span></div>
+            <div className="mt-5 rounded-2xl bg-[#1F4452] p-5 text-white">
+              <div className="flex items-center justify-between"><span className="text-sm text-white/80">Transfer amount</span><span className="text-2xl font-semibold">${state.amount.value}</span></div>
+              <div className="mt-3 flex items-center justify-between text-sm"><span className="text-white/80">Fee tier</span><span className="font-medium">{selection.feeTier}</span></div>
             </div>
 
             {selection.type === 'stablecoin' ? (
               <div className="mt-5 grid gap-4 sm:grid-cols-[224px_1fr] sm:items-center">
                 {state.funding.qrDataUrl ? <Image unoptimized src={state.funding.qrDataUrl} alt={`QR code for ${selection.asset} deposit`} width={224} height={224} className="mx-auto size-56 rounded-2xl border border-[#326273]/10 bg-[#F6F0ED] p-2" /> : null}
                 <div className="min-w-0">
-                  <div className="text-xs font-semibold uppercase tracking-wide text-[#326273]/55">Deposit address</div>
+                  <div className="text-xs font-semibold uppercase tracking-wide text-[#326273]/90">Deposit address</div>
                   <div className="mt-2 break-all rounded-xl bg-[#F6F0ED] p-3 font-['DejaVu_Sans_Mono',monospace] text-[13px] text-[#326273]">{state.funding.depositAddress}</div>
                   <button type="button" onClick={() => { void navigator.clipboard.writeText(state.funding.depositAddress ?? ''); toast.success('Deposit address copied'); }} className="mt-2 inline-flex items-center gap-2 rounded-lg px-1 py-1 text-[13px] font-semibold text-[#237284] transition hover:bg-[#5C9EAD]/10 hover:text-[#0C3E48] focus-ring"><Copy className="size-3.5" aria-hidden="true" /> Copy address</button>
                   <div className="mt-4 flex flex-wrap gap-2 text-[13px] font-semibold">
@@ -561,7 +561,7 @@ export default function StepQuote({
             {isSending ? (
               <div className="mt-5 flex flex-col gap-3">
                 <div className="h-3 overflow-hidden rounded-full bg-[#F6F0ED]"><div className="h-full rounded-full bg-[#5C9EAD] transition-all" style={{ width: `${progress}%` }} /></div>
-                <div className="flex items-center gap-2 text-sm font-medium text-[#326273]/70">{progress >= 100 ? <CheckCircle2 /> : <Loader2 className="animate-spin" />} Confirming funding...</div>
+                <div className="flex items-center gap-2 text-sm font-medium text-[#326273]/90">{progress >= 100 ? <CheckCircle2 /> : <Loader2 className="animate-spin" />} Confirming funding...</div>
               </div>
             ) : null}
 

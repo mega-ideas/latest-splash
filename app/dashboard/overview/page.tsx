@@ -37,7 +37,7 @@ function bpsToPct(bps: number) {
 // Coral accent = Zeke identity only (W9.0 coral rule); every other stat
 // uses semantic/info tones from styles/tokens.css.
 const TOP_STATS = [
-  { label: 'Zeke operating scan', value: null, icon: Bot, accent: 'text-[#E39774]', bg: 'bg-[#E39774]/10', id: '0xwal' },
+  { label: 'Zeke operating scan', value: null, icon: Bot, accent: 'text-[#9f5839]', bg: 'bg-[#E39774]/10', id: '0xwal' },
   // Value and delta are filled from real settled transfers below. A 30-day
   // volume is the most quotable number on the page and it was a string literal.
   { label: 'Volume (30d)', value: null, icon: ArrowUpRight, accent: 'text-[var(--info)]', bg: 'bg-[var(--info-bg)]', id: 'volume' },
@@ -124,8 +124,8 @@ function fmt(n: number) {
 function TxPill({ status }: { status: TxStatus }) {
   // Transaction states = semantic tokens (W9.0), never palette one-offs.
   const styles = {
-    settled: 'bg-[var(--ok-bg)] text-[var(--ok)]',
-    pending: 'bg-[var(--warn-bg)] text-[var(--warn)]',
+    settled: 'bg-[var(--ok-bg)] text-[#1F4452]',
+    pending: 'bg-[var(--warn-bg)] text-[#8b6418]',
     failed: 'bg-[var(--error-bg)] text-[var(--error)]',
   };
   const dots = {
@@ -328,7 +328,7 @@ export default function DashboardOverview() {
               <span className={cn('h-2 w-2 rounded-full', index === 0 ? 'bg-[var(--ok)]' : 'bg-[var(--pending)]')} />
             </div>
             <strong className="mt-2 block text-lg font-semibold text-[#0c3e48]">{item.label}</strong>
-            <small className="mt-1 block text-[13px] font-medium text-[#326273]/55">{item.copy}</small>
+            <small className="mt-1 block text-[13px] font-medium text-[#326273]/90">{item.copy}</small>
           </div>
         ))}
       </section>
@@ -340,7 +340,7 @@ export default function DashboardOverview() {
             return (
               <Link key={label} href="/dashboard/0xwal" className="dash-block dash-block-interactive p-4">
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#326273]/55">{label}</span>
+                  <span className="text-[12px] font-semibold uppercase tracking-[0.12em] text-[#326273]/90">{label}</span>
                   <div className={cn('rounded-lg p-1.5', bg)}>
                     <Icon size={14} className={accent} />
                   </div>
@@ -348,7 +348,7 @@ export default function DashboardOverview() {
                 <div className="mt-2 text-sm font-semibold leading-5 text-[#0c3e48]">
                   {walSummary.detected} invoices detected · {walSummary.batchable} batchable · {walSummary.needsApproval} needs approval
                 </div>
-                <div className="mt-1 text-[13px] font-medium text-[#E39774]">Open Zeke →</div>
+                <div className="mt-1 text-[13px] font-medium text-[#9f5839]">Open Zeke →</div>
               </Link>
             );
           }
@@ -399,7 +399,7 @@ export default function DashboardOverview() {
                   There is no batching window in the product, so there is
                   nothing to replace it with — the count that IS real goes here
                   instead. */}
-              <span className="rounded-full bg-[#326273]/8 px-2.5 py-1 text-[13px] font-medium text-[#326273]/60">
+              <span className="rounded-full bg-[#326273]/8 px-2.5 py-1 text-[13px] font-medium text-[#326273]/90">
                 {transfers === null
                   ? 'Loading…'
                   : `${rows.length} ${rows.length === 1 ? 'transfer' : 'transfers'} on record`}
@@ -410,7 +410,7 @@ export default function DashboardOverview() {
                 <div key={item.label} className="rounded-xl bg-[#F6F0ED] p-3">
                   <div className="flex items-center gap-1.5">
                     <span className={cn('h-2 w-2 rounded-full', item.dot)} />
-                    <span className="text-[13px] text-[#326273]/60">{item.label}</span>
+                    <span className="text-[13px] text-[#326273]/90">{item.label}</span>
                   </div>
                   <div className="money mt-2 text-2xl font-medium text-[#1F4452]">
                     {transfers === null ? '—' : item.count}
@@ -427,7 +427,7 @@ export default function DashboardOverview() {
           <div className="dash-surface overflow-hidden">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#326273]/8 px-4 py-3">
               <h2 className="text-sm font-semibold text-[#1F4452]">Corridor Readiness</h2>
-              <div className="flex items-center gap-1.5 text-[13px] font-medium text-[#326273]/50">
+              <div className="flex items-center gap-1.5 text-[13px] font-medium text-[#326273]/90">
                 <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--ok)]" />
                 1 live-model · 8 implemented in code
               </div>
@@ -436,11 +436,11 @@ export default function DashboardOverview() {
               <table className="w-full text-[13px]">
                 <thead>
                   <tr className="border-b border-[#326273]/8 bg-[#F6F0ED]/60">
-                    <th className="px-4 py-2 text-left font-medium text-[#326273]/50">Corridor</th>
-                    <th className="px-4 py-2 text-right font-medium text-[#326273]/50">Reference rate</th>
-                    <th className="hidden px-4 py-2 text-right font-medium text-[#326273]/50 sm:table-cell">Model volume</th>
-                    <th className="hidden px-4 py-2 text-right font-medium text-[#326273]/50 md:table-cell">Splash fee</th>
-                    <th className="px-4 py-2 text-right font-medium text-[#326273]/50">Test success</th>
+                    <th className="px-4 py-2 text-left font-medium text-[#326273]/90">Corridor</th>
+                    <th className="px-4 py-2 text-right font-medium text-[#326273]/90">Reference rate</th>
+                    <th className="hidden px-4 py-2 text-right font-medium text-[#326273]/90 sm:table-cell">Model volume</th>
+                    <th className="hidden px-4 py-2 text-right font-medium text-[#326273]/90 md:table-cell">Splash fee</th>
+                    <th className="px-4 py-2 text-right font-medium text-[#326273]/90">Test success</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -458,7 +458,7 @@ export default function DashboardOverview() {
                           <span className="font-medium text-[#1F4452]">{c.pair}</span>
                           <span className={cn(
                             'hidden rounded-full px-1.5 py-0.5 text-[13px] font-semibold sm:inline',
-                            i === 0 ? 'bg-[var(--ok-bg)] text-[var(--ok)]' : 'bg-[#5C9EAD]/10 text-[#326273]',
+                            i === 0 ? 'bg-[var(--ok-bg)] text-[#1F4452]' : 'bg-[#5C9EAD]/10 text-[#326273]',
                           )}>
                             {i === 0 ? 'Live-model' : 'In code'}
                           </span>
@@ -470,9 +470,9 @@ export default function DashboardOverview() {
                           minimumFractionDigits: c.dec,
                         })}
                       </td>
-                      <td className="money hidden px-4 py-2.5 font-medium text-[#326273]/55 sm:table-cell">{c.volume}</td>
+                      <td className="money hidden px-4 py-2.5 font-medium text-[#326273]/90 sm:table-cell">{c.volume}</td>
                       <td className="hidden px-4 py-2.5 text-right md:table-cell">
-                        <span className="money rounded-full bg-[var(--ok-bg)] px-2 py-0.5 text-[13px] font-medium text-[var(--ok)]">{c.fee}</span>
+                        <span className="money rounded-full bg-[var(--ok-bg)] px-2 py-0.5 text-[13px] font-medium text-[#1F4452]">{c.fee}</span>
                       </td>
                       <td className="px-4 py-2.5 text-right">
                         <span
@@ -482,7 +482,7 @@ export default function DashboardOverview() {
                               ? 'text-[var(--ok)]'
                               : c.success >= 98
                               ? 'text-[var(--info)]'
-                              : 'text-[var(--warn)]'
+                              : 'text-[#8b6418]'
                           )}
                         >
                           {c.success.toFixed(1)}%
@@ -510,12 +510,12 @@ export default function DashboardOverview() {
               <table className="w-full text-[13px]">
                 <thead>
                   <tr className="border-b border-[#326273]/8 bg-[#F6F0ED]/60">
-                    <th className="px-4 py-2 text-left font-medium text-[#326273]/50">Description</th>
-                    <th className="hidden px-4 py-2 text-left font-medium text-[#326273]/50 sm:table-cell">Corridor</th>
-                    <th className="px-4 py-2 text-right font-medium text-[#326273]/50">USD</th>
-                    <th className="hidden px-4 py-2 text-right font-medium text-[#326273]/50 md:table-cell">Local</th>
-                    <th className="px-4 py-2 text-right font-medium text-[#326273]/50">Status</th>
-                    <th className="hidden px-4 py-2 text-right font-medium text-[#326273]/50 sm:table-cell">Time</th>
+                    <th className="px-4 py-2 text-left font-medium text-[#326273]/90">Description</th>
+                    <th className="hidden px-4 py-2 text-left font-medium text-[#326273]/90 sm:table-cell">Corridor</th>
+                    <th className="px-4 py-2 text-right font-medium text-[#326273]/90">USD</th>
+                    <th className="hidden px-4 py-2 text-right font-medium text-[#326273]/90 md:table-cell">Local</th>
+                    <th className="px-4 py-2 text-right font-medium text-[#326273]/90">Status</th>
+                    <th className="hidden px-4 py-2 text-right font-medium text-[#326273]/90 sm:table-cell">Time</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -529,21 +529,21 @@ export default function DashboardOverview() {
                     >
                       <td className="px-4 py-2.5">
                         <div className="font-medium text-[#1F4452]">{t.recipientName}</div>
-                        <div className="mt-0.5 text-[13px] text-[#326273]/35">{t.id}</div>
+                        <div className="mt-0.5 text-[13px] text-[#326273]/90">{t.id}</div>
                       </td>
-                      <td className="hidden px-4 py-2.5 text-[#326273]/55 sm:table-cell">
+                      <td className="hidden px-4 py-2.5 text-[#326273]/90 sm:table-cell">
                         USD&rarr;{t.targetCurrency}
                       </td>
                       <td className="money px-4 py-2.5 font-medium text-[#1F4452]">
                         ${fmt(Number.parseFloat(t.sourceAmountUsd) || 0)}
                       </td>
-                      <td className="money hidden px-4 py-2.5 text-[#326273]/55 md:table-cell">
+                      <td className="money hidden px-4 py-2.5 text-[#326273]/90 md:table-cell">
                         {t.targetCurrency} {t.targetAmount}
                       </td>
                       <td className="px-4 py-2.5 text-right">
                         <TxPill status={txStatusOf(t.state)} />
                       </td>
-                      <td className="hidden px-4 py-2.5 text-right text-[#326273]/45 sm:table-cell">
+                      <td className="hidden px-4 py-2.5 text-right text-[#326273]/90 sm:table-cell">
                         {new Date(t.createdAt).toLocaleTimeString('en-GB', {
                           hour: '2-digit',
                           minute: '2-digit',
@@ -555,14 +555,14 @@ export default function DashboardOverview() {
                       ids shaped like real ones is how a demo becomes a claim. */}
                   {transfers !== null && recent.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="px-4 py-8 text-center text-[13px] font-medium text-[#326273]/55">
+                      <td colSpan={6} className="px-4 py-8 text-center text-[13px] font-medium text-[#326273]/90">
                         No transfers yet. Your first one will appear here.
                       </td>
                     </tr>
                   )}
                   {transfers === null && (
                     <tr>
-                      <td colSpan={6} className="px-4 py-8 text-center text-[13px] font-medium text-[#326273]/45">
+                      <td colSpan={6} className="px-4 py-8 text-center text-[13px] font-medium text-[#326273]/90">
                         Loading transfers…
                       </td>
                     </tr>
@@ -585,11 +585,11 @@ export default function DashboardOverview() {
                 </div>
                 <div>
                   <h2 className="text-sm font-semibold text-[#1F4452]">Treasury Projection</h2>
-                  <p className="text-[13px] text-[#326273]/50">Ondo USDY · simulation only</p>
+                  <p className="text-[13px] text-[#326273]/90">Ondo USDY · simulation only</p>
                 </div>
               </div>
               {treasuryPhase === 'live' ? (
-                <span className="rounded-full bg-[#D9A441]/15 px-2 py-0.5 text-[13px] font-semibold text-[#9a6f15]">
+                <span className="rounded-full bg-[#D9A441]/15 px-2 py-0.5 text-[13px] font-semibold text-[#8b6418]">
                   {treasuryRateLabel}
                 </span>
               ) : null}
@@ -598,7 +598,7 @@ export default function DashboardOverview() {
             {treasuryPhase === 'live' ? (
               <>
                 <div className="mt-3">
-                  <p className="text-[11px] uppercase tracking-wide text-[#326273]/45">Modeled allocation</p>
+                  <p className="text-[12px] uppercase tracking-wide text-[#326273]/90">Modeled allocation</p>
                   <p className="money mt-0.5 text-2xl font-medium text-[#1F4452]">${fmt(treasuryPrincipal)}</p>
                   <p className="money mt-1 flex items-center gap-1 text-[13px] font-medium text-[var(--ok)]">
                     <TrendingUp size={11} />
@@ -608,26 +608,26 @@ export default function DashboardOverview() {
 
                 <div className="mt-3 space-y-1 rounded-lg bg-white/70 p-3 text-[13px]">
                   <div className="flex items-center justify-between">
-                    <span className="text-[#326273]/55">Modeled daily yield</span>
+                    <span className="text-[#326273]/90">Modeled daily yield</span>
                     <span className="money font-medium text-[var(--ok)]">
                       +${((treasuryPrincipal * treasuryApy) / 100 / 365).toFixed(2)}
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-[#326273]/55">Status</span>
+                    <span className="text-[#326273]/90">Status</span>
                     <span className="flex items-center gap-1 font-medium text-[var(--ok)]">
                       <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--ok)]" />
                       Approval gated
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-[#326273]/55">Protocol</span>
+                    <span className="text-[#326273]/90">Protocol</span>
                     <span className="font-medium text-[#326273]">Ondo USDY · T-bill</span>
                   </div>
                 </div>
               </>
             ) : (
-              <div className="mt-3 rounded-lg bg-white/70 p-3 text-[13px] leading-relaxed text-[#326273]/75">
+              <div className="mt-3 rounded-lg bg-white/70 p-3 text-[13px] leading-relaxed text-[#326273]/90">
                 <p className="font-semibold text-[#1F4452]">Treasury arrives with our licence</p>
                 <p className="mt-1">
                   {treasuryPhase === 'gated'
@@ -692,7 +692,7 @@ export default function DashboardOverview() {
                   <div className="flex cursor-pointer items-center justify-between rounded-lg bg-[#F6F0ED] px-3 py-2 transition-colors hover:bg-[#ede8e4]">
                     <div>
                       <div className="text-[13px] font-medium text-[#1F4452]">{item.label}</div>
-                      <div className="text-[13px] text-[#326273]/55">{item.value}</div>
+                      <div className="text-[13px] text-[#326273]/90">{item.value}</div>
                     </div>
                     <StatusBadge status={item.status} />
                   </div>
@@ -704,18 +704,18 @@ export default function DashboardOverview() {
           {/* Pending actions */}
           <div className="dash-block p-4">
             <div className="flex items-center gap-2">
-              <AlertTriangle size={16} className="text-[var(--warn)]" />
+              <AlertTriangle size={16} className="text-[#8b6418]" />
               <h2 className="text-sm font-semibold text-[#1F4452]">Pending Actions</h2>
             </div>
             <div className="mt-3 space-y-2">
               <div className="flex items-center justify-between rounded-lg bg-[var(--warn-bg)] px-3 py-2.5">
                 <div>
-                  <div className="text-[13px] font-medium text-[var(--warn)]">Batch TOTP authorization</div>
-                  <div className="text-[13px] text-[var(--warn)]/80">12 transfers · $6,670</div>
+                  <div className="text-[13px] font-medium text-[#8b6418]">Batch TOTP authorization</div>
+                  <div className="text-[13px] text-[#8b6418]">12 transfers · $6,670</div>
                 </div>
                 <Link
                   href="/dashboard/batch"
-                  className="shrink-0 rounded-md bg-[var(--warn-bg)]0 px-2.5 py-1 text-[13px] font-semibold text-white transition-colors hover:opacity-90"
+                  className="shrink-0 rounded-md bg-[#8b6418] px-2.5 py-1 text-[13px] font-semibold text-white transition-colors hover:opacity-90"
                 >
                   Authorize
                 </Link>
@@ -723,11 +723,11 @@ export default function DashboardOverview() {
               <div className="flex items-center justify-between rounded-lg bg-[#F6F0ED] px-3 py-2.5">
                 <div>
                   <div className="text-[13px] font-medium text-[#1F4452]">KYB document review</div>
-                  <div className="text-[13px] text-[#326273]/55">Sumsub · in progress</div>
+                  <div className="text-[13px] text-[#326273]/90">Sumsub · in progress</div>
                 </div>
                 <Link
                   href="/dashboard/settings"
-                  className="shrink-0 rounded-md bg-[#5C9EAD] px-2.5 py-1 text-[13px] font-semibold text-white transition-colors hover:bg-[#4a8a99]"
+                  className="shrink-0 rounded-md bg-[#237284] px-2.5 py-1 text-[13px] font-semibold text-white transition-colors hover:bg-[#4a8a99]"
                 >
                   Review
                 </Link>
@@ -745,9 +745,9 @@ export default function DashboardOverview() {
               href="/dashboard/invoices"
               className="mt-3 flex flex-col items-center rounded-lg border-2 border-dashed border-[#326273]/15 bg-[#F6F0ED] p-4 text-center transition-colors hover:border-[#5C9EAD]/40 hover:bg-[#5C9EAD]/5"
             >
-              <Upload size={22} className="text-[#326273]/25" />
-              <p className="mt-2 text-[13px] font-medium text-[#326273]/50">Go to Invoice Vault</p>
-              <p className="mt-1 text-[13px] text-[#326273]/35">
+              <Upload size={22} className="text-[#326273]/90" />
+              <p className="mt-2 text-[13px] font-medium text-[#326273]/90">Go to Invoice Vault</p>
+              <p className="mt-1 text-[13px] text-[#326273]/90">
                 Access-controlled · stored on Walrus · 7-yr retention
               </p>
             </Link>

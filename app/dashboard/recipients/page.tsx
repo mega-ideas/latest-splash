@@ -163,7 +163,7 @@ export default function RecipientsPage() {
                     className="w-full rounded-lg border border-[#326273]/20 bg-[#F6F0ED] px-3 py-2 font-mono text-sm text-[#326273] focus:border-[#5C9EAD] focus:outline-none"
                     aria-describedby="wallet-address-help"
                   />
-                  <p id="wallet-address-help" className="mt-1 text-[12px] leading-5 text-[#326273]/60">
+                  <p id="wallet-address-help" className="mt-1 text-[12px] leading-5 text-[#326273]/90">
                     A <strong>Sui</strong> address, not an Ethereum one — MetaMask shows an Ethereum address unless the Sui Snap is used. USDC sent to the wrong network is lost.
                   </p>
                 </Field>
@@ -179,7 +179,7 @@ export default function RecipientsPage() {
                   </select>
                 </Field>
               </div>
-              <label className="flex items-start gap-2 text-[13px] leading-5 text-[#326273]/80">
+              <label className="flex items-start gap-2 text-[13px] leading-5 text-[#326273]/90">
                 <input
                   type="checkbox"
                   checked={walletForm.attestKnownRecipient}
@@ -192,7 +192,7 @@ export default function RecipientsPage() {
               </label>
               {formError ? <p role="alert" className="text-[13px] font-medium text-[var(--error)]">{formError}</p> : null}
               <div className="flex flex-wrap gap-2">
-                <button onClick={() => void addWalletRecipient()} disabled={saving} className="rounded-lg bg-[#5C9EAD] px-4 py-2 text-[13px] font-semibold text-white hover:bg-[#264e5b] disabled:opacity-50">
+                <button onClick={() => void addWalletRecipient()} disabled={saving} className="rounded-lg bg-[#237284] px-4 py-2 text-[13px] font-semibold text-white hover:bg-[#264e5b] disabled:opacity-50">
                   {saving ? 'Screening…' : 'Screen & save'}
                 </button>
                 <button onClick={() => setShowAddForm(false)} className="rounded-lg border border-[#326273]/20 px-4 py-2 text-[13px] font-medium text-[#326273]">
@@ -250,7 +250,7 @@ export default function RecipientsPage() {
             </Field>
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
-            <button onClick={addRecipient} className="rounded-lg bg-[#5C9EAD] px-4 py-2 text-[13px] font-semibold text-white hover:bg-[#264e5b]">
+            <button onClick={addRecipient} className="rounded-lg bg-[#237284] px-4 py-2 text-[13px] font-semibold text-white hover:bg-[#264e5b]">
               Save recipient
             </button>
             <button onClick={() => setShowAddForm(false)} className="rounded-lg border border-[#326273]/20 px-4 py-2 text-[13px] font-medium text-[#326273]">
@@ -275,7 +275,7 @@ export default function RecipientsPage() {
               Payment history <ArrowUpRight className="h-3 w-3" />
             </Link>
             <div className="ml-auto flex min-w-0 items-center gap-2">
-              <Search className="h-4 w-4 shrink-0 text-[#326273]/50" />
+              <Search className="h-4 w-4 shrink-0 text-[#326273]/90" />
               <input
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
@@ -287,7 +287,7 @@ export default function RecipientsPage() {
 
           <div className="space-y-3">
             {filtered.length === 0 ? (
-              <div className="dash-surface p-6 text-center text-sm text-[#326273]/60">No recipients found.</div>
+              <div className="dash-surface p-6 text-center text-sm text-[#326273]/90">No recipients found.</div>
             ) : (
               filtered.map((r) => (
                 <div key={r.id} className="dash-block dash-block-interactive flex items-center justify-between gap-3 p-3 sm:p-4">
@@ -298,17 +298,17 @@ export default function RecipientsPage() {
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2"><span className="truncate text-sm font-semibold text-[#326273]">{r.name}</span>{r.demo && <StatusBadge status="demo" />}</div>
                       {r.payoutMethod === 'WALLET' ? (
-                        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[13px] text-[#326273]/60">
+                        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[13px] text-[#326273]/90">
                           <span className="flex items-center gap-1"><Globe2 className="h-3 w-3" /> {r.country}</span>
                           <span className="font-mono">{r.walletAddress ? `${r.walletAddress.slice(0, 8)}…${r.walletAddress.slice(-6)}` : ''}</span>
                           <span>{r.walletProvider === 'METAMASK_SUI_SNAP' ? 'MetaMask (Sui Snap)' : 'Slush'}</span>
-                          <span className={`rounded-full px-2 py-0.5 font-semibold ${r.screeningVerdict === 'CLEAR' || r.screeningVerdict === 'ATTESTED' ? 'bg-[#6FB4A0]/15 text-[var(--ok)]' : 'bg-[#E39774]/15 text-[#9F5839]'}`}>
+                          <span className={`rounded-full px-2 py-0.5 font-semibold ${r.screeningVerdict === 'CLEAR' || r.screeningVerdict === 'ATTESTED' ? 'bg-[#6FB4A0]/15 text-[#1F4452]' : 'bg-[#E39774]/15 text-[#9F5839]'}`}>
                             {r.screeningVerdict === 'CLEAR' ? 'Screened' : r.screeningVerdict === 'ATTESTED' ? 'Attested by admin' : r.screeningVerdict === 'ERROR' ? 'Screening failed' : 'Not screened'}
                           </span>
                           <span className="rounded-full bg-[#5C9EAD]/10 px-2 py-0.5 font-semibold text-[var(--info)]">USDC · Sui mainnet</span>
                         </div>
                       ) : (
-                      <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[13px] text-[#326273]/60">
+                      <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[13px] text-[#326273]/90">
                         <span className="flex items-center gap-1"><Globe2 className="h-3 w-3" /> {r.country}</span>
                         <span className="flex items-center gap-1"><CreditCard className="h-3 w-3" /> {r.bank || 'No bank account'}</span>
                         {r.account && <span className="font-mono">{r.account}</span>}
@@ -317,7 +317,7 @@ export default function RecipientsPage() {
                       )}
                     </div>
                   </div>
-                  <button onClick={() => removeRecipient(r.id)} className="rounded-lg p-2 text-[#E39774] hover:bg-[#E39774]/10" aria-label="Remove recipient">
+                  <button onClick={() => removeRecipient(r.id)} className="rounded-lg p-2 text-[#9f5839] hover:bg-[#E39774]/10" aria-label="Remove recipient">
                     <Trash2 className="h-4 w-4" />
                   </button>
                 </div>
@@ -331,14 +331,14 @@ export default function RecipientsPage() {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h2 className="text-sm font-semibold text-[#326273]">Corridor mix</h2>
-                <p className="mt-0.5 text-[13px] text-[#326273]/60">Where your beneficiaries are.</p>
+                <p className="mt-0.5 text-[13px] text-[#326273]/90">Where your beneficiaries are.</p>
               </div>
               <Globe2 className="text-[var(--info)]" size={16} />
             </div>
             <div className="mt-4 space-y-3">
               {corridorBreakdown.map((corridor) => (
                 <div key={corridor.country}>
-                  <div className="flex items-center justify-between text-[13px] text-[#326273]/65">
+                  <div className="flex items-center justify-between text-[13px] text-[#326273]/90">
                     <span className="font-mono font-semibold text-[#326273]">USD → {corridor.country}</span>
                     <span>{corridor.count} · {corridor.percent}%</span>
                   </div>
@@ -354,11 +354,11 @@ export default function RecipientsPage() {
             <div className="flex items-start gap-3">
               <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-[var(--info)]" />
               <div>
-                <div className="text-sm font-semibold text-[#326273]">Compliance check</div>
-                <p className="mt-1 text-[13px] leading-5 text-[#326273]/65">
+                <div className="text-sm font-semibold text-[#1F4452]">Compliance check</div>
+                <p className="mt-1 text-[13px] leading-5 text-[#1F4452]">
                   Beneficiaries are screened automatically against AML, PEP, and sanctions lists before any value moves.
                 </p>
-                <Link href="/dashboard/settings" className="mt-3 inline-flex items-center gap-1 text-[13px] font-semibold text-[var(--info)] hover:underline">
+                <Link href="/dashboard/settings" className="mt-3 inline-flex items-center gap-1 text-[13px] font-semibold text-[#1F4452] hover:underline">
                   View screening rules →
                 </Link>
               </div>
@@ -369,9 +369,9 @@ export default function RecipientsPage() {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h2 className="text-sm font-semibold text-[#326273]">Quick actions</h2>
-                <p className="mt-0.5 text-[13px] text-[#326273]/60">Move money to these recipients.</p>
+                <p className="mt-0.5 text-[13px] text-[#326273]/90">Move money to these recipients.</p>
               </div>
-              <Sparkles className="text-[#E39774]" size={16} />
+              <Sparkles className="text-[#9f5839]" size={16} />
             </div>
             <QuickLinksCard
               className="mt-3"
@@ -387,17 +387,17 @@ export default function RecipientsPage() {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h2 className="text-sm font-semibold text-[#326273]">Beneficiary stats</h2>
-                <p className="mt-0.5 text-[13px] text-[#326273]/60">Snapshot of your address book.</p>
+                <p className="mt-0.5 text-[13px] text-[#326273]/90">Snapshot of your address book.</p>
               </div>
               <Users className="text-[var(--info)]" size={16} />
             </div>
             <div className="mt-3 grid grid-cols-2 gap-2 text-[13px]">
               <div className="rounded-lg bg-[#F6F0ED] p-2.5">
-                <div className="text-[10px] uppercase tracking-wide text-[#326273]/55">Total</div>
+                <div className="text-[12px] uppercase tracking-wide text-[#326273]/90">Total</div>
                 <div className="mt-0.5 text-lg font-semibold text-[#326273]">{recipients.length}</div>
               </div>
               <div className="rounded-lg bg-[#F6F0ED] p-2.5">
-                <div className="text-[10px] uppercase tracking-wide text-[#326273]/55">Active corridors</div>
+                <div className="text-[12px] uppercase tracking-wide text-[#326273]/90">Active corridors</div>
                 <div className="mt-0.5 text-lg font-semibold text-[#326273]">{corridorBreakdown.length}</div>
               </div>
             </div>
@@ -411,7 +411,7 @@ export default function RecipientsPage() {
 function Field({ label, children, className = '', htmlFor }: { label: string; children: React.ReactNode; className?: string; htmlFor?: string }) {
   return (
     <div className={className}>
-      <label htmlFor={htmlFor} className="text-[13px] font-medium text-[#326273]/70">{label}</label>
+      <label htmlFor={htmlFor} className="text-[13px] font-medium text-[#326273]/90">{label}</label>
       <div className="mt-1">{children}</div>
     </div>
   );

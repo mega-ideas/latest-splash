@@ -190,10 +190,10 @@ export default function TransferPage() {
         <div className="grid gap-5 p-5 md:grid-cols-[minmax(0,1fr)_300px] md:p-6">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-2 rounded-md border border-white/20 bg-white/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-white/75">
+              <span className="inline-flex items-center gap-2 rounded-md border border-white/20 bg-white/10 px-2.5 py-1 text-[12px] font-semibold uppercase tracking-[0.18em] text-white/80">
                 Payment intent
               </span>
-              <span className="inline-flex items-center gap-2 rounded-md border border-[#8FD7C7]/30 bg-[#8FD7C7]/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#D9FFF6]">
+              <span className="inline-flex items-center gap-2 rounded-md border border-[#8FD7C7]/30 bg-[#8FD7C7]/10 px-2.5 py-1 text-[12px] font-semibold uppercase tracking-[0.18em] text-[#D9FFF6]">
                 <BadgeCheck className="h-3.5 w-3.5" />
                 {transferStatus}
               </span>
@@ -201,10 +201,10 @@ export default function TransferPage() {
             <h1 className="mt-4 text-3xl font-bold tracking-tight text-white md:text-4xl">
               Send a payout
             </h1>
-            <p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-white/70">
+            <p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-white/80">
               Capture the beneficiary, choose delivery, lock the USD quote, and finish with an audit-ready receipt.
             </p>
-            <div className="mt-5 flex flex-wrap items-center gap-2 text-[13px] font-semibold text-white/70">
+            <div className="mt-5 flex flex-wrap items-center gap-2 text-[13px] font-semibold text-white/80">
               <span className="rounded-md border border-white/20 bg-white/10 px-3 py-2 font-mono text-white">
                 USD -&gt; {state.amount.targetCurrency}
               </span>
@@ -219,13 +219,13 @@ export default function TransferPage() {
 
           <div className="grid content-between gap-4 border-t border-white/20 pt-4 md:border-l md:border-t-0 md:pl-5 md:pt-0">
             <div>
-              <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/50">Current step</div>
+              <div className="text-[12px] font-semibold uppercase tracking-[0.18em] text-white/80">Current step</div>
               <div className="mt-2 flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <div className="truncate text-xl font-bold text-white">{currentStepLabel}</div>
-                  <div className="mt-1 text-[13px] font-medium text-white/55">Step {state.step} of 5</div>
+                  <div className="mt-1 text-[13px] font-medium text-white/80">Step {state.step} of 5</div>
                 </div>
-                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[#E39774] text-sm font-bold text-white">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[#E39774] text-sm font-bold text-[#073d49]">
                   {state.step}/5
                 </div>
               </div>
@@ -273,14 +273,14 @@ export default function TransferPage() {
             <div className="border-b border-white/10 p-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/50">Live transfer</div>
+                  <div className="text-[12px] font-semibold uppercase tracking-[0.18em] text-white/80">Live transfer</div>
                   <div className="mt-2 text-xl font-bold">{amountLabel}</div>
                 </div>
                 <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white/10 text-[#8FD7C7]">
                   <WalletCards className="h-5 w-5" />
                 </div>
               </div>
-              <div className="mt-3 min-w-0 text-[13px] font-medium text-white/60">
+              <div className="mt-3 min-w-0 text-[13px] font-medium text-white/80">
                 <span className="block truncate">To {recipientLabel}</span>
                 <span className="mt-1 block font-mono text-white/80">USD -&gt; {state.amount.targetCurrency}</span>
               </div>
@@ -319,7 +319,7 @@ function SummaryMetric({ icon: Icon, label, value }: { icon: LucideIcon; label: 
         <Icon className="h-4 w-4" />
       </span>
       <span className="min-w-0">
-        <span className="block text-[10px] font-semibold uppercase tracking-[0.16em] text-white/45">{label}</span>
+        <span className="block text-[12px] font-semibold uppercase tracking-[0.16em] text-white/80">{label}</span>
         <span className="mt-1 block truncate text-sm font-bold text-white">{value}</span>
       </span>
     </div>
@@ -329,7 +329,7 @@ function SummaryMetric({ icon: Icon, label, value }: { icon: LucideIcon; label: 
 function Pill({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0 border-r border-white/10 px-4 py-3 last:border-r-0">
-      <div className="text-[10px] uppercase tracking-wide text-white/55">{label}</div>
+      <div className="text-[12px] uppercase tracking-wide text-white/80">{label}</div>
       <div className="mt-0.5 truncate font-mono text-sm font-medium text-white">{value}</div>
     </div>
   );
@@ -350,7 +350,7 @@ function RouteLine({ source, target }: { source: string; target: string }) {
 function RouteNode({ label, value, alignRight = false }: { label: string; value: string; alignRight?: boolean }) {
   return (
     <div className={alignRight ? 'min-w-0 text-right' : 'min-w-0'}>
-      <div className="text-[10px] font-semibold uppercase tracking-[0.15em] text-white/45">{label}</div>
+      <div className="text-[12px] font-semibold uppercase tracking-[0.15em] text-white/80">{label}</div>
       <div className="mt-1 truncate font-mono text-sm font-bold text-white">{value}</div>
     </div>
   );
@@ -370,7 +370,7 @@ function SignalRow({ icon: Icon, title, metric, body }: { icon: LucideIcon; titl
               {metric}
             </div>
           </div>
-          <p className="mt-1 text-[13px] leading-5 text-[#326273]/65">{body}</p>
+          <p className="mt-1 text-[13px] leading-5 text-[#326273]/90">{body}</p>
         </div>
       </div>
     </div>
@@ -394,18 +394,18 @@ function Stepper({ current }: { current: number }) {
           >
             <span
               className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[13px] font-bold transition-all ${done
-                ? 'bg-[#5C9EAD] text-white shadow-md shadow-[#5C9EAD]/30'
+                ? 'bg-[#237284] text-white shadow-md shadow-[#5C9EAD]/30'
                 : active
-                ? 'bg-[#E39774] text-white shadow-md shadow-[#E39774]/30'
-                : 'bg-[#326273]/10 text-[#326273]/55'}`}
+                ? 'bg-[#E39774] text-[#073d49] shadow-md shadow-[#E39774]/30'
+                : 'bg-[#326273]/10 text-[#326273]/90'}`}
             >
               {done ? <Check className="h-4 w-4" /> : step}
             </span>
             <div className="min-w-0 flex-1">
-              <div className={`text-[10px] font-semibold uppercase tracking-[0.18em] ${active ? 'text-[#E39774]' : done ? 'text-[var(--info)]' : 'text-[#326273]/45'}`}>
+              <div className={`text-[12px] font-semibold uppercase tracking-[0.18em] ${active ? 'text-[#9f5839]' : done ? 'text-[var(--info)]' : 'text-[#326273]/90'}`}>
                 Step {step}
               </div>
-              <div className={`mt-0.5 truncate text-sm font-bold leading-tight ${active || done ? 'text-[#326273]' : 'text-[#326273]/55'}`}>
+              <div className={`mt-0.5 truncate text-sm font-bold leading-tight ${active || done ? 'text-[#326273]' : 'text-[#326273]/90'}`}>
                 {label}
               </div>
             </div>

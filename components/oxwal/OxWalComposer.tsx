@@ -140,11 +140,11 @@ export default function OxWalComposer({
       >
         {/* Desk header: mono context tag — reads like a payment terminal. */}
         <div className="flex items-center justify-between border-b border-[var(--line)] px-3 py-1.5">
-          <span className="inline-flex items-center gap-1.5 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--slate)]">
+          <span className="inline-flex items-center gap-1.5 font-mono text-[12px] font-semibold uppercase tracking-[0.12em] text-[var(--slate)]">
             <span className="h-1.5 w-1.5 rounded-full bg-[var(--teal)]" aria-hidden="true" />
             {deskTag}
           </span>
-          <span className="font-mono text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--muted-foreground)]">
+          <span className="font-mono text-[12px] font-medium uppercase tracking-[0.1em] text-[#326273]/90">
             Zeke prepares · you approve
           </span>
         </div>
@@ -165,7 +165,7 @@ export default function OxWalComposer({
             )}
             {hasBatch && !parsing && attached && (
               <div className="inline-flex max-w-full items-center gap-2 rounded-[var(--r-md)] border border-[var(--teal)]/35 bg-[var(--ok-bg)] px-3 py-1.5">
-                <FileSpreadsheet className="h-4 w-4 shrink-0 text-[var(--teal)]" aria-hidden="true" />
+                <FileSpreadsheet className="h-4 w-4 shrink-0 text-[#326273]" aria-hidden="true" />
                 <span className="truncate text-[13px] font-medium text-[var(--ink)]">{attached.fileName}</span>
                 <span className="shrink-0 font-mono text-[13px] font-semibold text-[var(--slate)]">
                   {attached.rows.length} {attached.rows.length === 1 ? 'row' : 'rows'} · USD→{attached.corridor}
@@ -206,7 +206,7 @@ export default function OxWalComposer({
             disabled={disabled}
             placeholder={hasBatch ? 'Add a note for approval (optional)' : placeholder}
             className={cn(
-              'min-w-0 flex-1 bg-transparent text-left font-medium text-[var(--ink)] outline-none placeholder:text-[var(--muted-foreground)] disabled:cursor-not-allowed',
+              'min-w-0 flex-1 bg-transparent text-left font-medium text-[var(--ink)] outline-none placeholder:text-[#326273]/90 disabled:cursor-not-allowed',
               compact ? 'text-[13px]' : 'text-sm',
             )}
           />
