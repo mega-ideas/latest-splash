@@ -138,11 +138,13 @@ export default function ApprovalCodeCard() {
     void answer('APPROVE');
   }
 
+  // Ink words on every tone, as `recorded` and `stopped` already were; the
+  // border and tint carry the state. --ok on --ok-bg is 4.25:1, under 4.5:1.
   const resultTone: Record<Result['tone'], string> = {
-    sent: 'border-[var(--ok)] bg-[var(--ok-bg)] text-[var(--ok)]',
+    sent: 'border-[var(--ok)] bg-[var(--ok-bg)] text-[#1F4452]',
     recorded: 'border-[#326273]/16 bg-[#F6F0ED] text-[#1F4452]',
     stopped: 'border-[var(--warn)] bg-[var(--warn-bg)] text-[#1F4452]',
-    refused: 'border-[var(--error)] bg-[var(--error-bg)] text-[var(--error)]',
+    refused: 'border-[var(--error)] bg-[var(--error-bg)] text-[#1F4452]',
   };
 
   return (
@@ -155,7 +157,7 @@ export default function ApprovalCodeCard() {
               Approve with a code
             </h2>
           </div>
-          <p id={helpId} className="mt-1 text-[13px] font-medium leading-5 text-[#326273]/65">
+          <p id={helpId} className="mt-1 text-[13px] font-medium leading-5 text-[#326273]/90">
             For a payment someone asked you to approve: enter the code from that WhatsApp message. It works once,
             only for you, for 30 minutes.
           </p>
@@ -163,7 +165,7 @@ export default function ApprovalCodeCard() {
 
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
           <label htmlFor={inputId} className="flex flex-col gap-1">
-            <span className="font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-[#326273]/60">
+            <span className="font-mono text-[12px] font-semibold uppercase tracking-[0.14em] text-[#326273]/90">
               Approval code
             </span>
             <input
@@ -177,7 +179,7 @@ export default function ApprovalCodeCard() {
               maxLength={12}
               placeholder="000000"
               disabled={busy !== null}
-              className="h-11 w-full rounded-md border border-[#326273]/20 bg-white px-3 font-mono text-lg tracking-[0.3em] text-[#1F4452] tabular-nums outline-none transition placeholder:text-[#326273]/25 focus:border-[#5C9EAD] focus:ring-4 focus:ring-[#5C9EAD]/20 disabled:opacity-60 sm:w-44"
+              className="h-11 w-full rounded-md border border-[#326273]/70 bg-white px-3 font-mono text-lg tracking-[0.3em] text-[#1F4452] tabular-nums outline-none transition placeholder:text-[#326273]/90 focus:border-[#5C9EAD] focus:ring-4 focus:ring-[#5C9EAD]/20 disabled:opacity-60 sm:w-44"
             />
           </label>
           <div className="flex gap-2">

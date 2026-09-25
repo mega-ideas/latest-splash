@@ -65,25 +65,29 @@ const laneMeta: Record<QueueLaneKey, { label: string; icon: LucideIcon; tone: st
   ANOMALY_HALTS: { label: 'Anomaly halts', icon: AlertTriangle, tone: 'text-[var(--error)]' },
 };
 
+/* The word carries the level; the border and tint carry its colour. The
+   tokens as text on their own tints are under 4.5:1 at 13px (--warn 3.72,
+   --ok 4.25); ink is 8.75:1 or more on every tint. */
 function riskClass(risk: QueueItem['risk']) {
-  if (risk === 'HIGH') return 'border-[var(--error)] bg-[var(--error-bg)] text-[var(--error)]';
-  if (risk === 'MEDIUM') return 'border-[var(--warn)] bg-[var(--warn-bg)] text-[var(--warn)]';
-  return 'border-[var(--ok)] bg-[var(--ok-bg)] text-[var(--ok)]';
+  if (risk === 'HIGH') return 'border-[var(--error)] bg-[var(--error-bg)] text-[#1F4452]';
+  if (risk === 'MEDIUM') return 'border-[var(--warn)] bg-[var(--warn-bg)] text-[#1F4452]';
+  return 'border-[var(--ok)] bg-[var(--ok-bg)] text-[#1F4452]';
 }
 
-/** How each answer reads on the page: the server's words, in its state's
- *  colour, with an icon so colour is never the only signal. */
-const outcomeTone: Record<DecisionOutcome['kind'], { icon: LucideIcon; rule: string; text: string; label: string }> = {
-  executed: { icon: CheckCircle2, rule: 'border-[var(--ok)]', text: 'text-[var(--ok)]', label: 'Sent' },
-  'approved-not-sent': { icon: AlertTriangle, rule: 'border-[var(--warn)]', text: 'text-[var(--warn)]', label: 'Approved, not sent' },
-  rejected: { icon: CircleSlash, rule: 'border-[#326273]/40', text: 'text-[#326273]', label: 'Rejected' },
-  closed: { icon: CircleSlash, rule: 'border-[#326273]/40', text: 'text-[#326273]', label: 'No longer open' },
-  recorded: { icon: ShieldCheck, rule: 'border-[var(--info)]', text: 'text-[var(--info)]', label: 'Approval recorded' },
-  held: { icon: ShieldAlert, rule: 'border-[var(--warn)]', text: 'text-[var(--warn)]', label: 'Held for compliance' },
-  changed: { icon: RotateCw, rule: 'border-[var(--warn)]', text: 'text-[var(--warn)]', label: 'Changed since loaded' },
-  refused: { icon: XCircle, rule: 'border-[var(--error)]', text: 'text-[var(--error)]', label: 'Not approved' },
-  'signed-out': { icon: XCircle, rule: 'border-[var(--error)]', text: 'text-[var(--error)]', label: 'Signed out' },
-  unreachable: { icon: AlertTriangle, rule: 'border-[var(--warn)]', text: 'text-[var(--warn)]', label: 'No answer' },
+/** How each answer reads on the page: the server's words in ink, with the
+ *  state's colour on the rule and the icon, so colour is never the only
+ *  signal. The words used to take the colour, and --warn is 4.1:1 here. */
+const outcomeTone: Record<DecisionOutcome['kind'], { icon: LucideIcon; rule: string; iconTone: string; label: string }> = {
+  executed: { icon: CheckCircle2, rule: 'border-[var(--ok)]', iconTone: 'text-[var(--ok)]', label: 'Sent' },
+  'approved-not-sent': { icon: AlertTriangle, rule: 'border-[var(--warn)]', iconTone: 'text-[var(--warn)]', label: 'Approved, not sent' },
+  rejected: { icon: CircleSlash, rule: 'border-[#326273]/40', iconTone: 'text-[#326273]', label: 'Rejected' },
+  closed: { icon: CircleSlash, rule: 'border-[#326273]/40', iconTone: 'text-[#326273]', label: 'No longer open' },
+  recorded: { icon: ShieldCheck, rule: 'border-[var(--info)]', iconTone: 'text-[var(--info)]', label: 'Approval recorded' },
+  held: { icon: ShieldAlert, rule: 'border-[var(--warn)]', iconTone: 'text-[var(--warn)]', label: 'Held for compliance' },
+  changed: { icon: RotateCw, rule: 'border-[var(--warn)]', iconTone: 'text-[var(--warn)]', label: 'Changed since loaded' },
+  refused: { icon: XCircle, rule: 'border-[var(--error)]', iconTone: 'text-[var(--error)]', label: 'Not approved' },
+  'signed-out': { icon: XCircle, rule: 'border-[var(--error)]', iconTone: 'text-[var(--error)]', label: 'Signed out' },
+  unreachable: { icon: AlertTriangle, rule: 'border-[var(--warn)]', iconTone: 'text-[var(--warn)]', label: 'No answer' },
 };
 
 const GRID = 'md:grid-cols-[1.3fr_0.8fr_0.7fr_0.6fr_0.6fr_1fr]';
@@ -93,12 +97,12 @@ function OutcomeLine({ outcome }: { outcome: DecisionOutcome }) {
   const Icon = tone.icon;
   return (
     <div className={`border-l-2 ${tone.rule} pl-3`}>
-      <p className={`flex items-start gap-2 text-[13px] font-semibold leading-5 ${tone.text}`}>
-        <Icon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+      <p className="flex items-start gap-2 text-[13px] font-semibold leading-5 text-[#1F4452]">
+        <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${tone.iconTone}`} aria-hidden="true" />
         <span>{outcome.message}</span>
       </p>
       {outcome.kind === 'executed' && outcome.ref && (
-        <p className="mt-1 pl-6 font-mono text-[12px] text-[#326273]/70">Reference {outcome.ref}</p>
+        <p className="mt-1 pl-6 font-mono text-[12px] text-[#326273]/90">Reference {outcome.ref}</p>
       )}
       {(outcome.kind === 'changed' || outcome.kind === 'unreachable') && (
         <button
@@ -217,7 +221,7 @@ export default function ApprovalQueueBoard({
         <div className="flex flex-wrap items-baseline justify-between gap-3 border-b border-[#326273]/12 px-4 py-4">
           <div>
             <h2 id="queue-live-heading" className="text-lg font-bold text-[#1F4452]">Waiting for your decision</h2>
-            <p className="mt-1 max-w-2xl text-[13px] font-medium leading-5 text-[#326273]/75">
+            <p className="mt-1 max-w-2xl text-[13px] font-medium leading-5 text-[#326273]/90">
               Approving re-checks policy and compliance, then sends the payment once every approver has signed.
               Rejecting returns it to the maker.
             </p>
@@ -244,7 +248,7 @@ export default function ApprovalQueueBoard({
             <li className="px-4 py-10 text-center">
               <ShieldCheck className="mx-auto h-7 w-7 text-[var(--info)]" aria-hidden="true" />
               <p className="mt-2 text-sm font-bold text-[#1F4452]">Nothing is waiting for a decision in this workspace</p>
-              <p className="mt-1 text-[13px] font-medium text-[#326273]/65">
+              <p className="mt-1 text-[13px] font-medium text-[#326273]/90">
                 A payment at or above your approval threshold appears here once its maker authorizes it.
               </p>
             </li>
@@ -262,7 +266,7 @@ export default function ApprovalQueueBoard({
                       <FileWarning className="h-4 w-4 shrink-0 text-[var(--pending)]" aria-hidden="true" />
                       <strong className="text-sm text-[#1F4452]">{item.recommendation}</strong>
                     </div>
-                    <p className="mt-1 truncate text-[13px] font-medium text-[#326273]/65">
+                    <p className="mt-1 truncate text-[13px] font-medium text-[#326273]/90">
                       {item.id} · maker {item.maker} · {item.expiryLabel}
                     </p>
                   </div>
@@ -354,7 +358,7 @@ export default function ApprovalQueueBoard({
               <li key={`${item.id}-${item.outcome.kind}`} className="grid gap-2 px-4 py-3 md:grid-cols-[1fr_1.4fr] md:items-start">
                 <div className="min-w-0">
                   <strong className="text-sm text-[#1F4452]">{item.recommendation}</strong>
-                  <p className="mt-0.5 truncate text-[13px] font-medium text-[#326273]/60">
+                  <p className="mt-0.5 truncate text-[13px] font-medium text-[#326273]/90">
                     {item.id} · {item.amountLabel}
                   </p>
                 </div>
@@ -373,7 +377,7 @@ export default function ApprovalQueueBoard({
           <h2 id="queue-examples-heading" className="text-sm font-bold uppercase tracking-[0.14em] text-[#326273]">
             Examples
           </h2>
-          <p className="text-[13px] font-medium text-[#326273]/70">
+          <p className="text-[13px] font-medium text-[#326273]/90">
             Sample proposals that show what each lane holds. They are not payments in your workspace and cannot be approved.
           </p>
         </div>
@@ -400,12 +404,12 @@ export default function ApprovalQueueBoard({
               <li key={`example-${item.id}`} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="rounded border border-[#326273]/25 px-1.5 py-0.5 text-[11px] font-bold uppercase tracking-[0.1em] text-[#326273]/80">
+                    <span className="rounded border border-[#326273]/25 px-1.5 py-0.5 text-[11px] font-bold uppercase tracking-[0.1em] text-[#326273]/90">
                       Example
                     </span>
                     <strong className="text-sm text-[#1F4452]">{item.recommendation}</strong>
                   </div>
-                  <p className="mt-1 text-[13px] font-medium text-[#326273]/65">
+                  <p className="mt-1 text-[13px] font-medium text-[#326273]/90">
                     {kindLabel(item.kind)} · <span className="money">{item.amountLabel}</span> · {item.approvalsCollected} of{' '}
                     {item.requiredApprovers} approvers · {item.expiryLabel}
                   </p>
@@ -434,16 +438,16 @@ export default function ApprovalQueueBoard({
                     <li key={`${lane.key}-${item.id}`} className="grid gap-2 px-4 py-3 text-sm">
                       <div className="flex items-center justify-between gap-3">
                         <strong className="min-w-0 truncate text-[#1F4452]">{item.recommendation}</strong>
-                        <span className="shrink-0 text-[13px] font-bold tabular-nums text-[#326273]/60">{item.expiryLabel}</span>
+                        <span className="shrink-0 text-[13px] font-bold tabular-nums text-[#326273]/90">{item.expiryLabel}</span>
                       </div>
-                      <div className="flex flex-wrap items-center gap-2 text-[13px] font-medium text-[#326273]/65">
+                      <div className="flex flex-wrap items-center gap-2 text-[13px] font-medium text-[#326273]/90">
                         <span>{kindLabel(item.kind)}</span>
                         <span className="money">{item.amountLabel}</span>
                         {item.reason && <span>{item.reason}</span>}
                       </div>
                     </li>
                   ))}
-                  {lane.items.length === 0 && <li className="px-4 py-5 text-sm font-medium text-[#326273]/55">Clear</li>}
+                  {lane.items.length === 0 && <li className="px-4 py-5 text-sm font-medium text-[#326273]/90">Clear</li>}
                 </ul>
               </div>
             );

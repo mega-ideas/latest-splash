@@ -98,7 +98,7 @@ export default function ReadyToSendLane({ items }: { items: ReadyToSendItem[] })
             Approved, ready to send
           </h2>
         </div>
-        <p className="text-[13px] font-medium text-[#326273]/60">
+        <p className="text-[13px] font-medium text-[#326273]/90">
           Every approver agreed. A signed-in approver sends it; a WhatsApp reply cannot.
         </p>
       </div>
@@ -111,12 +111,12 @@ export default function ReadyToSendLane({ items }: { items: ReadyToSendItem[] })
             <div key={item.id} className="grid grid-cols-1 gap-3 px-4 py-4 md:grid-cols-[1.4fr_0.7fr_0.7fr_1fr] md:items-center">
               <div className="min-w-0">
                 <strong className="block truncate text-sm text-[#1F4452]">{item.recommendation}</strong>
-                <p className="mt-1 truncate text-[13px] font-medium text-[#326273]/65">
+                <p className="mt-1 truncate text-[13px] font-medium text-[#326273]/90">
                   {item.id} · {item.kind} · {item.approvalsLabel}
                 </p>
               </div>
               <span className="money text-sm font-medium text-[#1F4452]">{item.amountLabel}</span>
-              <span className="text-[13px] font-bold tabular-nums text-[#326273]/65">{item.expiryLabel}</span>
+              <span className="text-[13px] font-bold tabular-nums text-[#326273]/90">{item.expiryLabel}</span>
               <div className="flex flex-col gap-1.5 md:items-end">
                 <button
                   type="button"
@@ -129,7 +129,7 @@ export default function ReadyToSendLane({ items }: { items: ReadyToSendItem[] })
                   Send payment
                 </button>
                 {item.blockedReason && (
-                  <p id={`${item.id}-blocked`} className="text-[12px] font-semibold text-[#326273]/60 md:text-right">
+                  <p id={`${item.id}-blocked`} className="text-[12px] font-semibold text-[#326273]/90 md:text-right">
                     {item.blockedReason}
                   </p>
                 )}
@@ -145,18 +145,24 @@ export default function ReadyToSendLane({ items }: { items: ReadyToSendItem[] })
           <div key={`sent-${outcome.item.id}`} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
             <div className="min-w-0">
               <strong className="block truncate text-sm text-[#1F4452]">{outcome.item.recommendation}</strong>
-              <p className="mt-0.5 truncate text-[13px] font-medium text-[#326273]/60">
+              <p className="mt-0.5 truncate text-[13px] font-medium text-[#326273]/90">
                 {outcome.item.id} · {outcome.item.amountLabel}
               </p>
             </div>
             <span
               className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[13px] font-medium ${
                 outcome.sent
-                  ? 'border-[var(--ok)] bg-[var(--ok-bg)] text-[var(--ok)]'
-                  : 'border-[var(--error)] bg-[var(--error-bg)] text-[var(--error)]'
+                  ? 'border-[var(--ok)] bg-[var(--ok-bg)] text-[#1F4452]'
+                  : 'border-[var(--error)] bg-[var(--error-bg)] text-[#1F4452]'
               }`}
             >
-              {outcome.sent ? <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" /> : <XCircle className="h-3.5 w-3.5" aria-hidden="true" />}
+              {/* Ink words, the state's colour on the icon: --ok on --ok-bg
+                  is 4.25:1, under 4.5:1 at this size. */}
+              {outcome.sent ? (
+                <CheckCircle2 className="h-3.5 w-3.5 text-[var(--ok)]" aria-hidden="true" />
+              ) : (
+                <XCircle className="h-3.5 w-3.5 text-[var(--error)]" aria-hidden="true" />
+              )}
               {outcome.message}
             </span>
           </div>

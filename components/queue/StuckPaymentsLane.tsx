@@ -168,7 +168,7 @@ export default function StuckPaymentsLane({ items }: { items: StuckPaymentItem[]
                       }}
                       disabled={locked}
                       placeholder="Transfer or run ID"
-                      className="h-11 w-full rounded-md border border-[#326273]/25 bg-white px-3 text-[13px] font-medium text-[#1F4452] placeholder:text-[#326273]/90 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#5C9EAD]/30 disabled:opacity-45 md:w-60"
+                      className="h-11 w-full rounded-md border border-[#326273]/70 bg-white px-3 text-[13px] font-medium text-[#1F4452] placeholder:text-[#326273]/90 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#5C9EAD]/30 disabled:opacity-45 md:w-60"
                     />
                   </label>
                 )}
