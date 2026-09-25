@@ -197,6 +197,18 @@ export function formatRate(rate: Rate): string {
 }
 
 /**
+ * A rate as a JavaScript number, for showing it or for a response field typed
+ * as one: a price to four places on a status line.
+ *
+ * Never for arithmetic on money. An amount times a rate goes through
+ * `applyRate`, which stays in integers; a rate is not an amount, and display
+ * is the one job a double does well enough.
+ */
+export function rateToNumber(rate: Rate): number {
+  return Number(formatRate(rate));
+}
+
+/**
  * amount × rate, exactly, with the rounding stated.
  *
  * `outDecimals` defaults to the amount's own decimals — a USD amount times an

@@ -20,8 +20,9 @@
  * balance can drain, a corridor can be paused, a beneficiary can fail
  * screening, and the daily ceiling can be consumed by other payments. An
  * approval says "this payment is authorised". It does not say "skip the
- * checks". The only thing it removes is the second-approver requirement,
- * because that is exactly what it supplied.
+ * checks". It removes the second-approver requirement, because that is
+ * exactly what it supplied, and on the batch and treasury routes the maker's
+ * second factor, which was single-use and spent making the proposal.
  *
  * ─── The header is a claim, not a credential ────────────────────────────────
  *
@@ -95,8 +96,9 @@ export async function replayThroughRoute(
 
   // The route answered with a run it had ALREADY carried out: this approval
   // paid nothing. Counted as a success, it read "Payout run started" and nobody
-  // was paid. A payment proposed again after the first was carried out is a new
-  // proposal now, so its replay can meet the earlier run's replay key.
+  // was paid. An approved run is claimed under its own approval's key
+  // (lib/server/batch-approval.ts), so this means that approval had already
+  // released one; whatever the cause, nothing new was paid.
   if (parsed.idempotentReplay === true) {
     const earlier = typeof parsed.id === 'string' ? ` as ${parsed.id}` : '';
     return { ok: false, error: `This run had already been carried out${earlier}; nothing new was paid for this approval.` };
@@ -117,4 +119,9 @@ export async function authorizeTransferForApproval(input: ReplayInput): Promise<
 export async function authorizeBatchForApproval(input: ReplayInput): Promise<ReplayResult> {
   const { POST } = await import('@/app/api/batches/authorize/route');
   return replayThroughRoute(POST, '/api/batches/authorize', input);
+}
+
+export async function authorizeTreasuryForApproval(input: ReplayInput): Promise<ReplayResult> {
+  const { POST } = await import('@/app/api/treasury/route');
+  return replayThroughRoute(POST, '/api/treasury', input);
 }

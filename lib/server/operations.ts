@@ -477,6 +477,11 @@ export function createTransferIntent(input: {
  * Build a payout-run record. Does NOT decide where it lives — the caller
  * claims it through `lib/server/batches-store.ts`, where the replay key is
  * enforced by a unique index rather than a lookup that a restart empties.
+ *
+ * Nor does it put the record anywhere. It used to add it to the in-process
+ * map, and with no database the claim then looked for a run holding the key
+ * and found this one: every first submission came back as an idempotent
+ * replay, and nothing settled.
  */
 export function buildBatch(input: {
   orgId: string;
@@ -486,6 +491,7 @@ export function buildBatch(input: {
   totalAmount: string;
   accountId?: string;
   idempotencyKey?: string;
+  proposalId?: string;
 }) {
   const record: BatchRecord = {
     id: createId('batch'),
@@ -500,9 +506,9 @@ export function buildBatch(input: {
     explorer: explorerLinks(null),
     accountId: input.accountId,
     idempotencyKey: input.idempotencyKey,
+    proposalId: input.proposalId,
     createdAt: new Date().toISOString(),
   };
-  operations.batches.set(record.id, record);
   return record;
 }
 

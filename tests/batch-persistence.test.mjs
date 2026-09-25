@@ -128,6 +128,73 @@ test('two tenants may use the same replay key', async () => {
   await client.close();
 });
 
+// ── The same guard without a database ──────────────────────────────────────
+//
+// `npm run dev` runs with no DATABASE_URL, and the store keeps runs in the
+// process. The route claims through the same `claimBatch`, so the promise is
+// the same: one run per key per org, and the first submission is the one that
+// pays.
+
+async function inProcessStore() {
+  delete process.env.DATABASE_URL;
+  const { buildBatch } = await import('../lib/server/operations.ts');
+  const store = await import('../lib/server/batches-store.ts');
+  const draft = (over) =>
+    buildBatch({
+      orgId: 'acme',
+      rowCount: 12,
+      acceptedRows: 11,
+      blockedRows: 1,
+      totalAmount: '48250.00',
+      accountId: 'dashboard-primary',
+      idempotencyKey: 'k1',
+      ...over,
+    });
+  return { draft, ...store };
+}
+
+test('without a database, the first submission is claimed, not taken for a replay of itself', async () => {
+  const { draft, claimBatch, readBatch, listBatchesFor } = await inProcessStore();
+  const orgId = 'org_mem_first';
+  const record = draft({ orgId });
+  // Built is not stored. The store decides, when the key is claimed.
+  assert.equal(await readBatch(orgId, record.id), null);
+
+  // This used to find the record buildBatch had just put in the map and
+  // answer claimed: false. The route returned the run as an idempotent
+  // replay, and it never settled.
+  const first = await claimBatch(record, 'PHP');
+  assert.equal(first.claimed, true);
+  assert.equal(first.batch.id, record.id);
+  assert.equal((await readBatch(orgId, record.id))?.id, record.id);
+  assert.deepEqual((await listBatchesFor(orgId)).map((b) => b.id), [record.id]);
+});
+
+test('without a database, the same file again is refused and gets the first run back', async () => {
+  const { draft, claimBatch, readBatch, listBatchesFor } = await inProcessStore();
+  const orgId = 'org_mem_again';
+  const first = await claimBatch(draft({ orgId }), 'PHP');
+  assert.equal(first.claimed, true);
+
+  // The operator's retry: a fresh run id, the same org and key.
+  const retry = draft({ orgId });
+  const second = await claimBatch(retry, 'PHP');
+  assert.equal(second.claimed, false, 'the second submission must not settle');
+  assert.equal(second.batch.id, first.batch.id, 'it gets back the run that holds the key');
+  // And the refused record is not left behind as a second run that never settles.
+  assert.equal(await readBatch(orgId, retry.id), null);
+  assert.deepEqual((await listBatchesFor(orgId)).map((b) => b.id), [first.batch.id]);
+});
+
+test('without a database, two tenants may use the same replay key', async () => {
+  const { draft, claimBatch } = await inProcessStore();
+  const mine = await claimBatch(draft({ orgId: 'org_mem_acme' }), 'PHP');
+  const theirs = await claimBatch(draft({ orgId: 'org_mem_northwind' }), 'PHP');
+  assert.equal(mine.claimed, true);
+  assert.equal(theirs.claimed, true);
+  assert.notEqual(theirs.batch.id, mine.batch.id);
+});
+
 // ── Tenant isolation ────────────────────────────────────────────────────────
 
 test('one tenant cannot read another tenant’s payout run', async () => {

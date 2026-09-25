@@ -111,9 +111,12 @@ test('a re-submitted payment finds its pending proposal rather than queueing a s
   assert.match(text, /const stored = store\.create\(proposal\);\s*if \(stored\.id !== proposal\.id\) return stored;/);
 
   const batch = await source('app/api/batches/authorize/route.ts');
-  // The batch reuses the run's own derived key, so the queued proposal and the
-  // run that would have been created share an identity.
-  assert.match(batch, /idempotencyKey: `batch:\$\{deriveIdempotencyKey\(orgId, acceptedRows, targetCurrency\)\}`/);
+  // The proposal is named by the same rows the run's own replay key is, so the
+  // queued proposal and the run that would have been created share an
+  // identity. (Once approved, the run itself is keyed by the approval —
+  // tests/batch-approval.test.mjs.)
+  assert.match(batch, /const rowsKey = deriveIdempotencyKey\(orgId, acceptedRows, targetCurrency\);/);
+  assert.match(batch, /idempotencyKey: `batch:\$\{rowsKey\}`/);
 });
 
 test('the submit route still enforces maker ≠ checker against the DB identity', async () => {

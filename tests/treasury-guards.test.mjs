@@ -86,19 +86,28 @@ test('the treasury is keyed by org everywhere', async () => {
   assert.match(store, /if \(userId === DEMO_USER\) return seedDemo\(\)/);
 });
 
-test('an approval lifts only the second approver, not the other guards', async () => {
+test('an approval lifts only the second approver and the spent code, not the other guards', async () => {
   const route = withoutComments(await source('app/api/treasury/route.ts'));
-  // The claim is resolved against the store, and it gates ONLY the approval
-  // branch — TOTP, the pause and the ceilings are checked before it and are
-  // not conditional on it.
+  // The claim is resolved against the store, bound to this move and spent
+  // before anything reads it (lib/server/treasury-approval.ts).
   assert.match(route, /resolveApprovalClaim\(request, orgId, \{/);
   assert.match(route, /limits\.requiresSecondApproval && !approvalClaim\.approved/);
 
-  const totpAt = route.indexOf('verifyPayoutTotp');
-  const pauseAt = route.indexOf('readComplianceControls');
-  const limitsAt = route.indexOf('checkAuthorizationLimits');
-  const claimAt = route.indexOf('resolveApprovalClaim');
-  assert.ok(totpAt < claimAt, 'the second factor runs before the approval check');
-  assert.ok(pauseAt < claimAt, 'the compliance pause runs before the approval check');
-  assert.ok(limitsAt < claimAt, 'the ceilings run before the approval check');
+  // It stands in for the TOTP code its maker spent proposing the move, which
+  // a replay could never present again — and for nothing else. The pause and
+  // the ceilings are not conditional on it: they are statements of the
+  // handler itself, after the TOTP check and before the approval branch.
+  assert.match(route, /if \(!treasuryApprovedMove\(approvalClaim\)\) \{\s*const totpVerdict = verifyPayoutTotp\(/);
+  assert.match(route, /^ {2}const controls = await readComplianceControls\(\);/m);
+  assert.match(route, /^ {2}const limits = checkAuthorizationLimits\(\{/m);
+  const claimAt = route.indexOf('resolveApprovalClaim(');
+  const totpAt = route.indexOf('verifyPayoutTotp(');
+  const pauseAt = route.indexOf('readComplianceControls(');
+  const limitsAt = route.indexOf('checkAuthorizationLimits(');
+  const branchAt = route.indexOf('limits.requiresSecondApproval && !approvalClaim.approved');
+  assert.ok(
+    claimAt < totpAt && totpAt < pauseAt && pauseAt < limitsAt && limitsAt < branchAt,
+    'the claim, TOTP, the pause, the ceilings, then the approval branch',
+  );
+  assert.equal(route.match(/\bapprovalClaim\b/g).length, 3, 'defined once, read by the TOTP check and the approval branch only');
 });

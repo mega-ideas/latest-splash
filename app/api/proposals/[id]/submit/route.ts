@@ -10,7 +10,7 @@ import { isProposalInFlight } from '@/lib/queue/proposal-state';
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { requireActiveOrg } from '@/lib/server/kyb-gate';
 import { readJsonBody } from '@/lib/server/http';
-import { evaluateAtApproval, releaseApproved } from '@/lib/queue/approval-walk';
+import { evaluateAtApproval, rejectUnlessReleased, releaseApproved } from '@/lib/queue/approval-walk';
 import { APPROVAL_NOT_SAVED, executeApprovedProposal } from '@/lib/server/approval-execution';
 import { closeApprovalClaim } from '@/lib/server/approved-proposal';
 import { AGENT_ACTOR_ID } from '@/lib/agent/identity';
@@ -89,9 +89,24 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   }
 
   if (parsed.data.decision === 'REJECT') {
-    const rejected = store.transition(id, { type: 'REJECT', reason: `rejected by ${ctx.userId}` });
+    // Released (signed, and being sent) is past rejecting, as it already is for
+    // a ballot's REJECT: the proposal is not rewritten to claim it stopped a
+    // payment that may already have moved.
+    const refusal = rejectUnlessReleased(store, id, `rejected by ${ctx.userId}`);
     await store.flush();
-    return json({ proposal: rejected });
+    if (refusal.state === 'REJECTED') return json({ proposal: refusal.proposal });
+    if (refusal.state === 'ALREADY_RELEASED') {
+      return json({
+        proposal: refusal.proposal,
+        error: 'This payment was already approved and is being sent, so it can no longer be rejected.',
+        code: 'ALREADY_RELEASED',
+      }, 409);
+    }
+    return json({
+      proposal: store.get(id),
+      error: 'This proposal is closed and takes no further decision.',
+      code: 'PROPOSAL_CLOSED',
+    }, 409);
   }
 
   // §1.5 maker-checker: the state machine enforces maker≠checker against the
