@@ -177,9 +177,8 @@ export default function ApprovalCodeCard() {
               autoComplete="one-time-code"
               pattern="[0-9 ]*"
               maxLength={12}
-              placeholder="000000"
               disabled={busy !== null}
-              className="h-11 w-full rounded-md border border-[#326273]/70 bg-white px-3 font-mono text-lg tracking-[0.3em] text-[#1F4452] tabular-nums outline-none transition placeholder:text-[#326273]/90 focus:border-[#5C9EAD] focus-ring disabled:opacity-60 sm:w-44"
+              className="h-11 w-full rounded-md border border-[#326273]/70 bg-white px-3 font-mono text-lg tracking-[0.3em] text-[#1F4452] tabular-nums outline-none transition focus:border-[#5C9EAD] focus-ring disabled:opacity-60 sm:w-44"
             />
           </label>
           <div className="flex gap-2">
