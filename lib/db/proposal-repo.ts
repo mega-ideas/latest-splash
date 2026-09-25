@@ -197,6 +197,32 @@ export async function loadApprovalSpends(db: DrizzleDb, proposalIds: string[]): 
   return new Map(rows.map((row) => [row.proposalId, { consumedBy: row.consumedBy, consumedAt: row.consumedAt }]));
 }
 
+export type SavedProposalState = { status: string; executionState: string | null; executionError: string | null };
+
+/**
+ * These proposals' status and outcome as saved, within one org. Each process
+ * loads its store once, so an outcome another process recorded since is only
+ * here: lib/server/stuck-payments.ts reads it before listing a payment as
+ * stuck, and before recording an outcome for one.
+ */
+export async function loadSavedStates(
+  db: DrizzleDb,
+  orgId: string,
+  proposalIds: string[],
+): Promise<Map<string, SavedProposalState>> {
+  if (proposalIds.length === 0) return new Map();
+  const rows: ({ id: string } & SavedProposalState)[] = await db
+    .select({
+      id: proposals.id,
+      status: proposals.status,
+      executionState: proposals.executionState,
+      executionError: proposals.executionError,
+    })
+    .from(proposals)
+    .where(and(eq(proposals.orgId, orgId), inArray(proposals.id, proposalIds)));
+  return new Map(rows.map(({ id, ...state }) => [id, state]));
+}
+
 type ProposalRow = typeof proposals.$inferSelect;
 type ApprovalRow = typeof approvals.$inferSelect;
 

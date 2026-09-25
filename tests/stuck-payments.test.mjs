@@ -6,13 +6,21 @@ import { PGlite } from '@electric-sql/pglite';
 import { drizzle } from 'drizzle-orm/pglite';
 
 import * as schema from '../lib/db/schema.ts';
-import { consumeApprovalRecord, loadApprovalSpends, loadOpenProposals, upsertProposal } from '../lib/db/proposal-repo.ts';
+import {
+  consumeApprovalRecord,
+  loadApprovalSpends,
+  loadOpenProposals,
+  loadSavedStates,
+  upsertProposal,
+} from '../lib/db/proposal-repo.ts';
 import { ensureProposalStoreHydrated } from '../lib/queue/proposal-persistence.ts';
 import { InMemoryProposalStore } from '../lib/queue/proposal-state.ts';
 import {
   STUCK_AFTER_MS,
   classifySpend,
   isStuckSubmission,
+  savedOutcome,
+  stuckFrom,
   stuckPaymentItem,
 } from '../lib/queue/stuck-payments.ts';
 import {
@@ -27,8 +35,8 @@ import {
 } from '../lib/queue/stuck-payment-view.ts';
 import {
   findStuckPayments,
-  liveSpendReader,
   liveSpendRecorder,
+  liveStuckRecords,
   reconcileStuckPayment,
 } from '../lib/server/stuck-payments.ts';
 import { resolveApprovalClaim } from '../lib/server/approved-proposal.ts';
@@ -122,13 +130,17 @@ function stuckStore(overrides = {}) {
   return { store, clock };
 }
 
-function fakeDeps(store, clock, { spend = null, recordSpend, readSpends } = {}) {
+/** No saved rows: one process, whose store is the record. */
+const nothingSaved = async () => new Map();
+
+function fakeDeps(store, clock, { spend = null, recordSpend, readSpends, readSaved } = {}) {
   const spent = [];
   return {
     spent,
     deps: {
       store,
       readSpends: readSpends ?? (async (ids) => new Map(ids.map((id) => [id, spend]))),
+      readSaved: readSaved ?? nothingSaved,
       recordSpend:
         recordSpend ??
         (async (p) => {
@@ -164,6 +176,45 @@ test('stuck means SUBMITTED, no outcome, and past the time any request could sti
   for (const status of ['APPROVED', 'SIGNED', 'SETTLED', 'REJECTED', 'EXPIRED']) {
     assert.equal(isStuckSubmission({ ...base, status }, NOW), false, status);
   }
+});
+
+test('a route that took the approval up in the last ten minutes may still be paying, whenever the proposal says it went', () => {
+  const routeAt = (ms) => ({ kind: 'route-used', route: 'transfers/authorize', at: iso(ms) });
+  const long = { status: 'SUBMITTED', submittedAt: iso(NOW - 30 * MINUTE) };
+  assert.equal(isStuckSubmission(long, NOW, routeAt(NOW - 3 * MINUTE)), false, 'the route took it up three minutes ago');
+  assert.equal(isStuckSubmission(long, NOW, routeAt(NOW - 11 * MINUTE)), true);
+  assert.equal(stuckFrom(long, routeAt(NOW - 3 * MINUTE)), NOW - 3 * MINUTE + STUCK_AFTER_MS, 'the later of the two');
+  assert.equal(stuckFrom(long), NOW - 30 * MINUTE + STUCK_AFTER_MS);
+
+  // Submitted by code from before submission times were recorded (drizzle/0026),
+  // during a rolling deploy: the route's time is the only one on record.
+  const untimed = { status: 'SUBMITTED' };
+  assert.equal(isStuckSubmission(untimed, NOW, routeAt(NOW - 2 * MINUTE)), false);
+  assert.equal(isStuckSubmission(untimed, NOW, routeAt(NOW - 11 * MINUTE)), true);
+  assert.equal(stuckFrom(untimed), null);
+
+  // Nothing else is a route at work: no spend, a closed approval, the backfill.
+  const recent = iso(NOW - MINUTE);
+  for (const evidence of [
+    { kind: 'never-used' },
+    { kind: 'closed-unused', at: recent },
+    { kind: 'backfilled', at: recent },
+    { kind: 'unreadable' },
+  ]) {
+    assert.equal(isStuckSubmission(untimed, NOW, evidence), true, evidence.kind);
+    assert.equal(isStuckSubmission({ status: 'SUBMITTED', submittedAt: iso(NOW - 11 * MINUTE) }, NOW, evidence), true, evidence.kind);
+  }
+});
+
+test('the saved row says when a payment is finished, whatever this process’s copy says', () => {
+  const row = (status, executionState = null, executionError = null) => ({ status, executionState, executionError });
+  assert.equal(savedOutcome(undefined), null, 'nothing saved');
+  assert.equal(savedOutcome(row('SUBMITTED')), null, 'still waiting for an outcome');
+  assert.equal(savedOutcome(row('SUBMITTED', 'EXECUTED')), 'sent');
+  assert.equal(savedOutcome(row('SUBMITTED', 'FAILED', 'The recipient bank refused it.')), 'not sent (The recipient bank refused it.)');
+  assert.equal(savedOutcome(row('SUBMITTED', 'FAILED')), 'not sent');
+  assert.equal(savedOutcome(row('SUBMITTED', 'SKIPPED')), 'nothing sent');
+  assert.equal(savedOutcome(row('SETTLED')), 'settled');
 });
 
 // ── What the records show ───────────────────────────────────────────────────
@@ -277,7 +328,8 @@ test('not sent, where the route never used the approval: spent first, recorded, 
 
 test('sent, where a route used the approval: recorded with its reference', async () => {
   const { store, clock } = stuckStore();
-  const at = iso(NOW + MINUTE);
+  // The route took it up as it was submitted, eleven minutes ago.
+  const at = iso(NOW);
   const { deps } = fakeDeps(store, clock, { spend: { consumedBy: 'transfers/authorize', consumedAt: at } });
   const answer = await reconcileStuckPayment(deps, { proposalId: 'stuck', actor: priya, outcome: 'SENT', reference: ' tr_8812 ' });
 
@@ -392,6 +444,56 @@ test('an outcome recorded while the approver was deciding wins', async () => {
   assert.equal(store.get('stuck').execution.detail, 'Payment sent.');
 });
 
+test('a payment a route took up in the last ten minutes is not reconciled, and nothing is spent', async () => {
+  // Submitted eleven minutes ago; the transfer route took its approval up three minutes ago.
+  const { store, clock } = stuckStore();
+  const { deps, spent } = fakeDeps(store, clock, {
+    spend: { consumedBy: 'transfers/authorize', consumedAt: iso(clock.now - 3 * MINUTE) },
+  });
+  const answer = await reconcileStuckPayment(deps, { proposalId: 'stuck', actor: priya, outcome: 'NOT_SENT' });
+  assert.equal(answer.status, 409);
+  assert.equal(answer.body.code, 'STILL_SENDING');
+  assert.match(answer.body.error, /Check again in 7 minutes\./);
+  assert.deepEqual(spent, []);
+  assert.equal(store.get('stuck').execution, undefined);
+});
+
+test('an outcome another process saved is not overwritten, and the refusal says what it was', async () => {
+  // This process's copy has it SUBMITTED with no outcome; the saved row says it went.
+  const { store, clock } = stuckStore();
+  const asked = [];
+  const { deps } = fakeDeps(store, clock, {
+    spend: { consumedBy: 'transfers/authorize', consumedAt: iso(NOW) },
+    readSaved: async (orgId, ids) => {
+      asked.push([orgId, ids]);
+      return new Map([['stuck', { status: 'SUBMITTED', executionState: 'EXECUTED', executionError: null }]]);
+    },
+  });
+  const answer = await reconcileStuckPayment(deps, { proposalId: 'stuck', actor: priya, outcome: 'NOT_SENT' });
+  assert.equal(answer.status, 409);
+  assert.equal(answer.body.code, 'PROPOSAL_CLOSED');
+  assert.equal(answer.body.error, 'An outcome for this payment is already on record: sent. Nothing was changed.');
+  assert.deepEqual(asked, [['acme', ['stuck']]], 'read within the approver’s org');
+  assert.equal(store.get('stuck').execution, undefined, 'nothing recorded from the copy');
+  const shown = interpretReconcileResponse(answer.status, answer.body, 'NOT_SENT');
+  assert.equal(shown.kind, 'closed');
+  assert.equal(shown.message, answer.body.error, 'the lane shows what is on record');
+
+  // A saved row that cannot be read stops it too.
+  const blind = stuckStore();
+  const unreadable = await reconcileStuckPayment(
+    fakeDeps(blind.store, blind.clock, {
+      readSaved: async () => {
+        throw new Error('connection refused');
+      },
+    }).deps,
+    { proposalId: 'stuck', actor: priya, outcome: 'NOT_SENT' },
+  );
+  assert.equal(unreadable.status, 503);
+  assert.equal(unreadable.body.code, 'RECORDS_UNREADABLE');
+  assert.equal(blind.store.get('stuck').execution, undefined);
+});
+
 test('the lane lists the org’s stuck payments, oldest first, and never guesses when the records cannot be read', async () => {
   const { store, clock } = clockedStore();
   for (const [id, orgId, at] of [
@@ -408,7 +510,10 @@ test('the lane lists the org’s stuck payments, oldest first, and never guesses
   clock.now = NOW + 35 * MINUTE;
 
   const spends = new Map([['p_newer', { consumedBy: 'transfers/authorize', consumedAt: iso(NOW + 2 * MINUTE) }]]);
-  const found = await findStuckPayments(store, 'acme', new Date(clock.now), async (ids) => new Map(ids.map((id) => [id, spends.get(id) ?? null])));
+  const found = await findStuckPayments(store, 'acme', new Date(clock.now), {
+    readSpends: async (ids) => new Map(ids.map((id) => [id, spends.get(id) ?? null])),
+    readSaved: nothingSaved,
+  });
   assert.deepEqual(
     found.map(({ proposal: p, evidence }) => [p.id, evidence.kind]),
     [
@@ -418,11 +523,49 @@ test('the lane lists the org’s stuck payments, oldest first, and never guesses
     'the one sent five minutes ago may still be going; the pending one was never sent; another org’s is not listed',
   );
 
-  const blind = await findStuckPayments(store, 'acme', new Date(clock.now), async () => {
-    throw new Error('connection refused');
+  const blind = await findStuckPayments(store, 'acme', new Date(clock.now), {
+    readSpends: async () => {
+      throw new Error('connection refused');
+    },
+    readSaved: nothingSaved,
   });
   assert.deepEqual(blind.map(({ evidence }) => evidence.kind), ['unreadable', 'unreadable']);
   assert.deepEqual(outcomesAllowed(blind[0].evidence), [], 'no answer is offered without the records');
+});
+
+test('the lane leaves out a payment finished in its saved row, or taken up by a route in the last ten minutes', async () => {
+  const { store, clock } = clockedStore();
+  for (const id of ['p_saved', 'p_busy', 'p_stuck']) {
+    store.create(proposal(id, { idempotencyKey: `k_${id}` }));
+    submit(store, id);
+  }
+  clock.now = NOW + 30 * MINUTE;
+  const asked = [];
+  const records = {
+    readSpends: async (ids) =>
+      new Map(ids.map((id) => [id, id === 'p_busy' ? { consumedBy: 'transfers/authorize', consumedAt: iso(clock.now - 4 * MINUTE) } : null])),
+    readSaved: async (orgId, ids) => {
+      asked.push(orgId);
+      const saved = { status: 'SUBMITTED', executionState: 'EXECUTED', executionError: null };
+      return new Map(ids.filter((id) => id === 'p_saved').map((id) => [id, saved]));
+    },
+  };
+  const found = await findStuckPayments(store, 'acme', new Date(clock.now), records);
+  assert.deepEqual(found.map(({ proposal: p }) => p.id), ['p_stuck']);
+  assert.deepEqual(asked, ['acme']);
+
+  // Without the saved rows, no answer is offered: this copy may be out of date.
+  const blind = await findStuckPayments(store, 'acme', new Date(clock.now), {
+    ...records,
+    readSaved: async () => {
+      throw new Error('connection refused');
+    },
+  });
+  assert.deepEqual(blind.map(({ proposal: p, evidence }) => [p.id, evidence.kind]), [
+    ['p_saved', 'unreadable'],
+    ['p_busy', 'unreadable'],
+    ['p_stuck', 'unreadable'],
+  ]);
 });
 
 test('once recorded, the approval cannot be presented again', async () => {
@@ -431,7 +574,7 @@ test('once recorded, the approval cannot be presented again', async () => {
   const answer = await reconcileStuckPayment(
     {
       store,
-      readSpends: liveSpendReader(store),
+      ...liveStuckRecords(store),
       recordSpend: liveSpendRecorder(store, () => new Date(clock.now)),
       now: () => new Date(clock.now),
     },
@@ -516,7 +659,7 @@ test('a stuck payment survives a restart, is found with its evidence, and is rec
     const a = clockedStore(writer);
     a.store.create(proposal('p_route', { idempotencyKey: 'transfer:acme:route' }));
     submit(a.store, 'p_route');
-    await consumeApprovalRecord(db, { proposalId: 'p_route', orgId: 'acme', consumedBy: 'transfers/authorize' });
+    await consumeApprovalRecord(db, { proposalId: 'p_route', orgId: 'acme', consumedBy: 'transfers/authorize', consumedAt: new Date(NOW) });
     a.clock.now = NOW + MINUTE;
     a.store.create(proposal('p_never', { idempotencyKey: 'transfer:acme:never' }));
     submit(a.store, 'p_never');
@@ -527,17 +670,17 @@ test('a stuck payment survives a restart, is found with its evidence, and is rec
     b.clock.now = NOW + STUCK_AFTER_MS + 2 * MINUTE;
     assert.equal(await ensureProposalStoreHydrated(b.store), true);
     assert.equal(b.store.get('p_route').submittedAt, iso(NOW), 'when it went, from Postgres');
-    const found = await findStuckPayments(b.store, 'acme', new Date(b.clock.now), liveSpendReader(b.store));
+    const found = await findStuckPayments(b.store, 'acme', new Date(b.clock.now), liveStuckRecords(b.store));
     assert.deepEqual(found.map(({ proposal: p, evidence }) => [p.id, evidence.kind]), [
       ['p_route', 'route-used'],
       ['p_never', 'never-used'],
     ]);
     assert.equal(found[0].evidence.route, 'transfers/authorize');
-    assert.deepEqual(await findStuckPayments(b.store, 'northwind', new Date(b.clock.now), liveSpendReader(b.store)), []);
+    assert.deepEqual(await findStuckPayments(b.store, 'northwind', new Date(b.clock.now), liveStuckRecords(b.store)), []);
 
     const deps = {
       store: b.store,
-      readSpends: liveSpendReader(b.store),
+      ...liveStuckRecords(b.store),
       recordSpend: liveSpendRecorder(b.store, () => new Date(b.clock.now)),
       now: () => new Date(b.clock.now),
     };
@@ -570,6 +713,87 @@ test('a stuck payment survives a restart, is found with its evidence, and is rec
   await client.close();
 });
 
+/** Reconcile in `side`'s process, against the database. */
+function liveDeps(side) {
+  return {
+    store: side.store,
+    ...liveStuckRecords(side.store),
+    recordSpend: liveSpendRecorder(side.store, () => new Date(side.clock.now)),
+    now: () => new Date(side.clock.now),
+  };
+}
+
+test('a process whose copy is out of date neither lists nor overwrites an outcome another process saved', async () => {
+  const { client, db } = await migratedDb();
+  await withDatabase(db, async () => {
+    const writer = (p) => upsertProposal(db, p);
+
+    // Process A sends a payment: it goes to the route, which takes up its approval.
+    const a = clockedStore(writer);
+    a.store.create(proposal('p_sent', { idempotencyKey: 'transfer:acme:sent' }));
+    submit(a.store, 'p_sent');
+    await consumeApprovalRecord(db, { proposalId: 'p_sent', orgId: 'acme', consumedBy: 'transfers/authorize', consumedAt: new Date(NOW) });
+    await a.store.flush();
+
+    // Process B starts while it is being sent (a rolling deploy) and loads it with no outcome.
+    const b = clockedStore(writer);
+    b.clock.now = NOW + MINUTE;
+    assert.equal(await ensureProposalStoreHydrated(b.store), true);
+
+    // A records that it went. B's copy never hears of it.
+    a.store.recordExecution('p_sent', { state: 'EXECUTED', detail: 'Payment sent.', ref: 'tr_4471', at: iso(NOW + MINUTE) });
+    await a.store.flush();
+    assert.equal(b.store.get('p_sent').execution, undefined);
+
+    b.clock.now = NOW + 2 * STUCK_AFTER_MS;
+    assert.deepEqual(await findStuckPayments(b.store, 'acme', new Date(b.clock.now), liveStuckRecords(b.store)), [], 'not listed');
+
+    const answer = await reconcileStuckPayment(liveDeps(b), { proposalId: 'p_sent', actor: priya, outcome: 'NOT_SENT' });
+    assert.equal(answer.status, 409);
+    assert.equal(answer.body.error, 'An outcome for this payment is already on record: sent. Nothing was changed.');
+    await b.store.flush();
+    const { rows } = await client.query(`SELECT execution_state FROM proposals WHERE id = 'p_sent'`);
+    assert.equal(rows[0].execution_state, 'EXECUTED', 'what A saved stands');
+    assert.equal((await loadApprovalSpends(db, ['p_sent'])).get('p_sent').consumedBy, 'transfers/authorize');
+
+    // Saved states are read within one org.
+    assert.equal((await loadSavedStates(db, 'acme', ['p_sent'])).get('p_sent').executionState, 'EXECUTED');
+    assert.equal((await loadSavedStates(db, 'northwind', ['p_sent'])).size, 0);
+  });
+  await client.close();
+});
+
+test('a payment submitted by code from before 0026 is not called stuck while its route may still be paying', async () => {
+  const { client, db } = await migratedDb();
+  await withDatabase(db, async () => {
+    const writer = (p) => upsertProposal(db, p);
+
+    // Process A, on the old code, submits without a time, and the route takes the approval up.
+    const a = clockedStore(writer);
+    a.store.create(proposal('p_old', { idempotencyKey: 'transfer:acme:old' }));
+    submit(a.store, 'p_old');
+    await a.store.flush();
+    await client.exec(`UPDATE proposals SET submitted_at = NULL WHERE id = 'p_old'`);
+    await consumeApprovalRecord(db, { proposalId: 'p_old', orgId: 'acme', consumedBy: 'transfers/authorize', consumedAt: new Date(NOW) });
+
+    // Process B, on this code, starts two minutes later.
+    const b = clockedStore(writer);
+    b.clock.now = NOW + 2 * MINUTE;
+    assert.equal(await ensureProposalStoreHydrated(b.store), true);
+    assert.equal(b.store.get('p_old').submittedAt, undefined);
+    assert.deepEqual(await findStuckPayments(b.store, 'acme', new Date(b.clock.now), liveStuckRecords(b.store)), []);
+    const early = await reconcileStuckPayment(liveDeps(b), { proposalId: 'p_old', actor: priya, outcome: 'NOT_SENT' });
+    assert.equal(early.body.code, 'STILL_SENDING');
+    assert.match(early.body.error, /Check again in 8 minutes\./);
+
+    // Ten minutes after the route took it up, with no outcome, it is stuck.
+    b.clock.now = NOW + STUCK_AFTER_MS + MINUTE;
+    const found = await findStuckPayments(b.store, 'acme', new Date(b.clock.now), liveStuckRecords(b.store));
+    assert.deepEqual(found.map(({ proposal: p, evidence }) => [p.id, evidence.kind]), [['p_old', 'route-used']]);
+  });
+  await client.close();
+});
+
 // ── The route, the page and the lane ────────────────────────────────────────
 
 const code = (text) =>
@@ -582,6 +806,7 @@ test('the reconcile route takes the answer from the body and everything else fro
   assert.match(route, /resolveAuthorityForSession\(auth\.session\)/);
   assert.match(route, /actor: \{ userId: ctx\.userId, role: ctx\.role, orgId: ctx\.orgId \}/);
   assert.match(route, /await ensureProposalStoreHydrated\(store\)/, 'a stuck payment is in Postgres after a restart');
+  assert.match(route, /\.\.\.liveStuckRecords\(store\)/, 'reads the saved rows, not only this process’s copy');
   assert.match(route, /outcome: z\.enum\(\['SENT', 'NOT_SENT'\]\)/);
   assert.doesNotMatch(route, /parsed\.data\.(userId|role|orgId)/);
 });
@@ -594,7 +819,7 @@ test('the queue shows the lane for the viewer’s own workspace, ahead of ready-
 
   const section = await source('components/queue/StuckPaymentsSection.tsx');
   assert.match(section, /if \(!viewer\) return null;/);
-  assert.match(section, /findStuckPayments\(store, viewer\.orgId, now, liveSpendReader\(store\)\)/);
+  assert.match(section, /findStuckPayments\(store, viewer\.orgId, now, liveStuckRecords\(store\)\)/);
 });
 
 test('the lane confirms before recording, announces what happened, and stays out of server code', async () => {

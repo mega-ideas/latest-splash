@@ -23,6 +23,14 @@
  * Who may answer: an approving role in the payment's org, and not the person
  * who requested it. "Not sent" frees the payment to be requested again, so it
  * gets the same maker-checker line as releasing one.
+ *
+ * ─── Other processes ────────────────────────────────────────────────────────
+ *
+ * This process's store is a copy, loaded once. Another process may have sent
+ * the payment and recorded its outcome since, and every write puts the whole
+ * proposal row, so recording from a stale copy would overwrite what that one
+ * saved. The saved row decides: a payment finished there is not listed, and no
+ * outcome is recorded over it.
  */
 import 'server-only';
 
@@ -32,7 +40,9 @@ import { canRoleApprove, type InMemoryProposalStore } from '@/lib/queue/proposal
 import {
   classifySpend,
   isStuckSubmission,
+  savedOutcome,
   stuckFrom,
+  type SavedState,
   type SpendRecord,
   type StuckEvidence,
 } from '@/lib/queue/stuck-payments';
@@ -41,38 +51,56 @@ import { findingText, outcomesAllowed, type ReconcileOutcome } from '@/lib/queue
 /** Each proposal's approval spend, where one is on record. */
 export type SpendReader = (proposalIds: string[]) => Promise<Map<string, SpendRecord>>;
 
+/** Each proposal's saved status and outcome, within one org. Empty where nothing is saved. */
+export type SavedStateReader = (orgId: string, proposalIds: string[]) => Promise<Map<string, SavedState>>;
+
+/** What the lane and the reconcile route read besides this process's store. */
+export type StuckRecords = { readSpends: SpendReader; readSaved: SavedStateReader };
+
 /** Spend the approval for reconciliation. True when this call spent it, false when it already was. Throws when it cannot be recorded. */
 export type SpendRecorder = (proposal: UnsignedProposal) => Promise<boolean>;
 
 export type StuckPayment = { proposal: UnsignedProposal; evidence: StuckEvidence };
 
 /**
- * The org's stuck payments, oldest first, each with what its spend shows. A
- * spend that cannot be read makes the evidence 'unreadable', and the lane
+ * The org's stuck payments, oldest first, each with what its spend shows.
+ *
+ * Records that cannot be read make the evidence 'unreadable', and the lane
  * offers no answer for it: guessing is how a paid payment gets requested twice.
+ * A payment whose saved row has an outcome is not listed, whatever this
+ * process's copy says, and neither is one a route took up in the last ten
+ * minutes.
  */
 export async function findStuckPayments(
   store: InMemoryProposalStore,
   orgId: string,
   now: Date,
-  readSpends: SpendReader,
+  records: StuckRecords,
 ): Promise<StuckPayment[]> {
-  const stuck = store
+  const candidates = store
     .list()
     .filter((proposal) => proposal.orgId === orgId && isStuckSubmission(proposal, now.getTime()))
     .sort((a, b) => Date.parse(a.submittedAt ?? '') - Date.parse(b.submittedAt ?? ''));
-  if (stuck.length === 0) return [];
+  if (candidates.length === 0) return [];
 
-  let spends: Map<string, SpendRecord> | null = null;
-  try {
-    spends = await readSpends(stuck.map((proposal) => proposal.id));
-  } catch (error) {
-    console.error('[stuck-payments] could not read approval spends', error instanceof Error ? error.message : error);
+  const ids = candidates.map((proposal) => proposal.id);
+  const [spendRead, savedRead] = await Promise.allSettled([records.readSpends(ids), records.readSaved(orgId, ids)]);
+  for (const read of [spendRead, savedRead]) {
+    if (read.status === 'rejected') {
+      const reason: unknown = read.reason;
+      console.error('[stuck-payments] could not read the records', reason instanceof Error ? reason.message : reason);
+    }
   }
-  return stuck.map((proposal) => ({
-    proposal,
-    evidence: spends ? classifySpend(spends.get(proposal.id) ?? null) : { kind: 'unreadable' },
-  }));
+  const spends = spendRead.status === 'fulfilled' ? spendRead.value : null;
+  const saved = savedRead.status === 'fulfilled' ? savedRead.value : null;
+
+  return candidates
+    .filter((proposal) => savedOutcome(saved?.get(proposal.id)) === null)
+    .map((proposal): StuckPayment => ({
+      proposal,
+      evidence: spends && saved ? classifySpend(spends.get(proposal.id) ?? null) : { kind: 'unreadable' },
+    }))
+    .filter(({ proposal, evidence }) => isStuckSubmission(proposal, now.getTime(), evidence));
 }
 
 /**
@@ -107,6 +135,24 @@ export function liveSpendReader(store: InMemoryProposalStore): SpendReader {
   };
 }
 
+/**
+ * Saved states from Postgres, scoped to the org. Without Postgres there is one
+ * process, and its store is the record: nothing to add.
+ */
+export function liveSavedReader(): SavedStateReader {
+  return async (orgId, ids) => {
+    const { proposalPersistenceEnabled } = await import('@/lib/queue/proposal-persistence');
+    if (!proposalPersistenceEnabled()) return new Map();
+    const { getDb } = await import('@/lib/db/client');
+    const { loadSavedStates } = await import('@/lib/db/proposal-repo');
+    return loadSavedStates(getDb(), orgId, ids);
+  };
+}
+
+export function liveStuckRecords(store: InMemoryProposalStore): StuckRecords {
+  return { readSpends: liveSpendReader(store), readSaved: liveSavedReader() };
+}
+
 /** Spend in this process, then in Postgres, whose primary key is the record. */
 export function liveSpendRecorder(store: InMemoryProposalStore, now: () => Date): SpendRecorder {
   return async (proposal) => {
@@ -119,9 +165,8 @@ export function liveSpendRecorder(store: InMemoryProposalStore, now: () => Date)
   };
 }
 
-export type ReconcileDeps = {
+export type ReconcileDeps = StuckRecords & {
   store: InMemoryProposalStore;
-  readSpends: SpendReader;
   recordSpend: SpendRecorder;
   now: () => Date;
 };
@@ -145,6 +190,15 @@ function minutesUntil(ms: number): number {
   return Math.max(1, Math.ceil(ms / 60000));
 }
 
+function stillSending(proposal: UnsignedProposal, now: Date, evidence?: StuckEvidence): ReconcileAnswer {
+  const from = stuckFrom(proposal, evidence) ?? now.getTime();
+  return refuse(
+    409,
+    'STILL_SENDING',
+    `This payment went to the payment route moments ago and may still be going. Check again in ${minutesUntil(from - now.getTime())} minutes.`,
+  );
+}
+
 /** Record whether a stuck payment went. Never throws. */
 export async function reconcileStuckPayment(deps: ReconcileDeps, input: ReconcileInput): Promise<ReconcileAnswer> {
   const { store } = deps;
@@ -164,14 +218,7 @@ export async function reconcileStuckPayment(deps: ReconcileDeps, input: Reconcil
     return refuse(409, 'PROPOSAL_CLOSED', 'This payment was never sent for payment, so there is no outcome to record.');
   }
   const now = deps.now();
-  if (!isStuckSubmission(proposal, now.getTime())) {
-    const from = stuckFrom(proposal) ?? now.getTime();
-    return refuse(
-      409,
-      'STILL_SENDING',
-      `This payment went to the payment route moments ago and may still be going. Check again in ${minutesUntil(from - now.getTime())} minutes.`,
-    );
-  }
+  if (!isStuckSubmission(proposal, now.getTime())) return stillSending(proposal, now);
 
   let evidence: StuckEvidence;
   try {
@@ -181,6 +228,9 @@ export async function reconcileStuckPayment(deps: ReconcileDeps, input: Reconcil
     console.error('[reconcile] could not read the approval spend', error instanceof Error ? error.message : error);
     return refuse(503, 'RECORDS_UNREADABLE', 'Splash could not read whether the payment route used this approval, so nothing was recorded. Try again.');
   }
+  // A route that took it up in the last ten minutes may still be paying,
+  // whenever the proposal says it was submitted.
+  if (!isStuckSubmission(proposal, now.getTime(), evidence)) return stillSending(proposal, now, evidence);
   if (!outcomesAllowed(evidence).includes(input.outcome)) {
     return refuse(
       409,
@@ -202,6 +252,20 @@ export async function reconcileStuckPayment(deps: ReconcileDeps, input: Reconcil
   const current = store.get(proposal.id);
   if (!current || current.execution || current.status !== 'SUBMITTED') {
     return refuse(409, 'PROPOSAL_CLOSED', 'Someone recorded an outcome for this payment while you were deciding.');
+  }
+
+  // And the saved row, which another process may have written since this one
+  // loaded its copy. Recording here would overwrite it.
+  let saved: SavedState | undefined;
+  try {
+    saved = (await deps.readSaved(input.actor.orgId, [proposal.id])).get(proposal.id);
+  } catch (error) {
+    console.error('[reconcile] could not read the saved payment', error instanceof Error ? error.message : error);
+    return refuse(503, 'RECORDS_UNREADABLE', 'Splash could not read the saved payment, so nothing was recorded. Try again.');
+  }
+  const already = savedOutcome(saved);
+  if (already !== null) {
+    return refuse(409, 'PROPOSAL_CLOSED', `An outcome for this payment is already on record: ${already}. Nothing was changed.`);
   }
 
   const at = deps.now().toISOString();

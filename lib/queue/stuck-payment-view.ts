@@ -19,7 +19,7 @@ export type StuckEvidence =
   | { kind: 'route-used'; route: string; at: string }
   /** Marked spent when spends started being recorded (drizzle/0023). Whether it paid is not on record. */
   | { kind: 'backfilled'; at: string }
-  /** The spend could not be read. */
+  /** The spend, or the saved payment, could not be read. */
   | { kind: 'unreadable' };
 
 /** A row of the queue's stuck-payments lane. Serializable: no bigint, no Date. */
@@ -73,7 +73,7 @@ export function findingText(evidence: StuckEvidence, at: (iso: string) => string
     case 'backfilled':
       return `This approval was marked used at ${at(evidence.at)}, before Splash recorded which route used it. Whether it paid is not on record.`;
     case 'unreadable':
-      return 'Splash could not read whether the payment route used this approval. Reload to try again.';
+      return 'Splash could not read the records for this payment. Reload to try again.';
   }
 }
 

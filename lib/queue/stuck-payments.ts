@@ -27,6 +27,15 @@
  *   a spend by a route: the claim check passed. The route may have paid, or
  *   refused at a later check. Only the downstream record (the transfer, the
  *   payroll run) says which, so a person looks before recording it.
+ *
+ * ─── Another process's view ─────────────────────────────────────────────────
+ *
+ * Each process loads its proposal store once. One that loaded while another
+ * was sending keeps that payment SUBMITTED with no outcome after the other
+ * records it, and a process on code from before drizzle/0026 submits without
+ * the time. So a payment whose approval a route used recently counts as still
+ * going, and the saved row, not this process's copy, says whether an outcome
+ * is already on record.
  */
 import type { UnsignedProposal, UserRole } from '../agent/types.ts';
 import { canRoleApprove } from './proposal-state.ts';
@@ -43,24 +52,36 @@ export type { ReconcileOutcome, StuckEvidence, StuckPaymentItem } from './stuck-
 
 /**
  * How long a payment may take to come back from the payment route before its
- * outcome counts as missing. The replay runs inside one request and answers in
+ * outcome counts as missing, from when it was submitted and from when a route
+ * accepted its approval. The replay runs inside one request and answers in
  * seconds; ten minutes is margin, not an estimate. Before this, it may still
  * be going, and nobody is asked to guess.
  */
 export const STUCK_AFTER_MS = 10 * 60 * 1000;
 
-/** SUBMITTED, no outcome recorded, and past the time any request would still be carrying it out. */
-export function isStuckSubmission(proposal: UnsignedProposal, nowMs: number): boolean {
+/**
+ * SUBMITTED, no outcome recorded, and past the time any request would still be
+ * carrying it out. With `evidence`, a route's use of the approval counts too:
+ * that is when the route started paying, and a process on code from before
+ * drizzle/0026 submits without a time.
+ */
+export function isStuckSubmission(proposal: UnsignedProposal, nowMs: number, evidence?: StuckEvidence): boolean {
   if (proposal.status !== 'SUBMITTED' || proposal.execution) return false;
-  const submittedAt = Date.parse(proposal.submittedAt ?? '');
+  const from = stuckFrom(proposal, evidence);
   // A row submitted before the time was recorded has been waiting at least since then.
-  return !Number.isFinite(submittedAt) || nowMs - submittedAt > STUCK_AFTER_MS;
+  return from === null || nowMs > from;
 }
 
-/** When a submission stops being one that may still be sending, or null if the time is not on record. */
-export function stuckFrom(proposal: UnsignedProposal): number | null {
-  const submittedAt = Date.parse(proposal.submittedAt ?? '');
-  return Number.isFinite(submittedAt) ? submittedAt + STUCK_AFTER_MS : null;
+/**
+ * When a submission stops being one that may still be sending: ten minutes
+ * after the later of its submission and a route's use of its approval. Null
+ * when neither time is on record.
+ */
+export function stuckFrom(proposal: UnsignedProposal, evidence?: StuckEvidence): number | null {
+  const times = [Date.parse(proposal.submittedAt ?? '')];
+  if (evidence?.kind === 'route-used') times.push(Date.parse(evidence.at));
+  const known = times.filter(Number.isFinite);
+  return known.length > 0 ? Math.max(...known) + STUCK_AFTER_MS : null;
 }
 
 /** An approval's spend, as lib/server/approved-proposal.ts records it. */
@@ -76,6 +97,29 @@ export function classifySpend(spend: SpendRecord): StuckEvidence {
   if (CLOSED_WITHOUT_ROUTE.has(spend.consumedBy)) return { kind: 'closed-unused', at: spend.consumedAt };
   if (spend.consumedBy === BACKFILLED) return { kind: 'backfilled', at: spend.consumedAt };
   return { kind: 'route-used', route: spend.consumedBy, at: spend.consumedAt };
+}
+
+/** A proposal's status and outcome as its saved row holds them (lib/db/proposal-repo.ts). */
+export type SavedState = { status: string; executionState: string | null; executionError: string | null };
+
+/**
+ * What the saved row says became of the payment, when it is finished there;
+ * null while it still waits for an outcome, or when there is no row.
+ */
+export function savedOutcome(saved: SavedState | undefined): string | null {
+  if (!saved) return null;
+  switch (saved.executionState) {
+    case null:
+      return saved.status === 'SUBMITTED' ? null : saved.status.toLowerCase();
+    case 'EXECUTED':
+      return 'sent';
+    case 'FAILED':
+      return saved.executionError ? `not sent (${saved.executionError})` : 'not sent';
+    case 'SKIPPED':
+      return 'nothing sent';
+    default:
+      return saved.executionState.toLowerCase();
+  }
 }
 
 /** The person looking at the queue, as their membership says. */

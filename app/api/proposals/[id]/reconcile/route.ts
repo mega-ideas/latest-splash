@@ -7,8 +7,8 @@ import { ensureProposalStoreHydrated } from '@/lib/queue/proposal-persistence';
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { readJsonBody } from '@/lib/server/http';
 import {
-  liveSpendReader,
   liveSpendRecorder,
+  liveStuckRecords,
   reconcileStuckPayment,
 } from '@/lib/server/stuck-payments';
 
@@ -62,7 +62,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   await ensureProposalStoreHydrated(store);
   const now = () => new Date();
   const answer = await reconcileStuckPayment(
-    { store, readSpends: liveSpendReader(store), recordSpend: liveSpendRecorder(store, now), now },
+    { store, ...liveStuckRecords(store), recordSpend: liveSpendRecorder(store, now), now },
     {
       proposalId: id,
       actor: { userId: ctx.userId, role: ctx.role, orgId: ctx.orgId },
