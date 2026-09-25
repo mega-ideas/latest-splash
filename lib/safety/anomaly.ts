@@ -89,9 +89,14 @@ export function evaluateAnomalyRules(
     });
   }
 
-  const confidenceSample = events.slice(-config.lowConfidenceSampleSize);
+  // Only measured scores. A proposal with confidence null measured none;
+  // counting it as 0 would raise a "shift" that nothing measured.
+  const confidenceSample = events
+    .map((event) => event.proposal.explain.confidence)
+    .filter((confidence): confidence is number => typeof confidence === 'number' && Number.isFinite(confidence))
+    .slice(-config.lowConfidenceSampleSize);
   if (confidenceSample.length >= config.lowConfidenceSampleSize) {
-    const average = confidenceSample.reduce((sum, event) => sum + event.proposal.explain.confidence, 0) / confidenceSample.length;
+    const average = confidenceSample.reduce((sum, confidence) => sum + confidence, 0) / confidenceSample.length;
     if (average < config.lowConfidenceAverageThreshold) {
       findings.push({
         rule: 'CONFIDENCE_SHIFT',

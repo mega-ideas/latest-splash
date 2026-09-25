@@ -65,11 +65,14 @@ function normaliseAmount(raw: string): { amount: string; amountMinor: bigint } {
  * rewrites text, which would drop the org key recall checks for.
  *
  * The vendor is read off a document a third party wrote, so it is kept to one
- * short line before it becomes a memory.
+ * short line before it becomes a memory. Only a pattern that was read is
+ * remembered: a vendor or currency the parser could not read ('') is not a
+ * fact to store ("settles in " with nothing after it, or, before, an
+ * invented 'USD').
  */
 function rememberInvoiceVendor(orgId: string, recipient: string, currency: string): void {
   const vendor = recipient.replace(/\s+/g, ' ').trim().slice(0, 80);
-  if (!vendor) return;
+  if (!vendor || !currency) return;
   void rememberForOrg(orgId, `Invoice vendor ${vendor} settles in ${currency}`);
 }
 
@@ -87,8 +90,17 @@ export async function parseInvoice(
  * asked for a string for the same reason: a JSON number is parsed as a
  * double before this code ever sees it, so asking for one throws away the
  * precision before there is anything to preserve.
+ *
+ * Nothing here is invented. A currency that was not read is '' (it used to
+ * default to 'USD', shown, stored in the audit receipt and remembered as the
+ * invoice's currency; see invoiceLocalCurrency in
+ * lib/payments/stablecoin-lane.ts for how the lane check treats ''), and a
+ * recipient that was not read is ''. `confidence` is null on both paths: neither the
+ * model's answer nor the regex measures its own accuracy. It used to be a
+ * fixed 0.9 for any model answer, even an unparseable one, and 0.55 or 0.2
+ * for the regex, shown on the invoice loop as "% confidence".
  */
-): Promise<{ amount: string; amountMinor: bigint; currency: string; recipient: string; confidence: number }> {
+): Promise<{ amount: string; amountMinor: bigint; currency: string; recipient: string; confidence: number | null }> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (apiKey) {
     try {
@@ -106,27 +118,36 @@ export async function parseInvoice(
       const json = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)) as {
         amount: string | number; currency: string; recipient: string;
       };
+      // Only a code is a reading. 'XXX' (ISO 4217's "no currency", and the
+      // placeholder in the prompt above), a symbol, "N/A" or "..." is not.
+      const answered = String(json.currency ?? '').trim().toUpperCase();
+      const currency = /^(USDC|[A-Z]{3})$/.test(answered) && answered !== 'XXX' ? answered : '';
+      const named = String(json.recipient ?? '').trim();
+      const recipient = named === '...' ? '' : named;
       // A model can still answer with a bare number despite the instruction;
       // normalise, then parse exactly. An unparseable answer is zero rather
-      // than a guess, and the low confidence downstream reflects that.
+      // than a guess, and the zero on screen says so.
       const amount = normaliseAmount(String(json.amount ?? ''));
-      const currency = String(json.currency || 'USD').toUpperCase();
-      const recipient = String(json.recipient || '');
       rememberInvoiceVendor(orgId, recipient, currency);
-      return { ...amount, currency, recipient, confidence: 0.9 };
+      return { ...amount, currency, recipient, confidence: null };
     } catch {
       // fall through to heuristic
     }
   }
   // Heuristic fallback — regex extraction.
   const amountMatch = invoiceText.match(/(?:total|amount due|balance)\D{0,12}([\d,]+\.?\d{0,2})/i) ?? invoiceText.match(/([\d,]+\.\d{2})/);
-  const currencyMatch = invoiceText.match(/\b(USD|PHP|MYR|IDR|VND|THB|SGD|EUR|GBP)\b/i);
+  // The first local currency named anywhere, as before; USDC only when no
+  // local one is named; '' when nothing is. Preferring a local code keeps a
+  // PHP document behind a USDC mention (a memo, a record) a PHP reading, which
+  // is what the lane check needs. What changed is the case where no code was
+  // named: that used to read as an invented 'USD'.
+  const named = [...invoiceText.matchAll(/\b(USDC|USD|PHP|MYR|IDR|VND|THB|SGD|EUR|GBP)\b/gi)].map((match) => match[1].toUpperCase());
   const recipientMatch = invoiceText.match(/(?:bill to|vendor|from|pay to)\s*:?\s*([A-Z][\w .,&-]{2,40})/i);
   const amount = normaliseAmount(amountMatch?.[1] ?? '');
-  const currency = (currencyMatch?.[1] ?? 'USD').toUpperCase();
+  const currency = named.find((code) => code !== 'USDC') ?? (named.includes('USDC') ? 'USDC' : '');
   const recipient = recipientMatch?.[1]?.trim() ?? '';
   rememberInvoiceVendor(orgId, recipient, currency);
-  return { ...amount, currency, recipient, confidence: amount.amountMinor > 0n ? 0.55 : 0.2 };
+  return { ...amount, currency, recipient, confidence: null };
 }
 
 // ─── Batch optimizer (group same-corridor rows; real fee math) ──────────────────
