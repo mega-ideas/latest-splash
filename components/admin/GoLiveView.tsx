@@ -62,7 +62,7 @@ function CheckList({ id, title, lead, rows, report }: { id: string; title: strin
                 <div className="text-xs leading-5 text-[#326273]/60">{role}</div>
               </div>
               <p className="text-sm leading-6 text-[#326273] [overflow-wrap:anywhere]">{check.detail}</p>
-              <span className="text-xs tabular-nums text-[#326273]/55 md:text-right">
+              <span className="text-xs tabular-nums text-[#326273]/70 md:text-right">
                 {check.latencyMs === undefined ? '' : `${check.latencyMs} ms`}
               </span>
             </li>
