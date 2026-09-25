@@ -85,16 +85,19 @@ const INCLUDE = { balanceChanges: true, transaction: true, effects: true } as co
 
 type LaneResult = Awaited<ReturnType<SuiGrpcClient['core']['getTransaction']>>;
 
-function observe(result: LaneResult | Awaited<ReturnType<SuiGrpcClient['core']['simulateTransaction']>>): ObservedTransaction & { digest: string } {
+export function observe(result: LaneResult | Awaited<ReturnType<SuiGrpcClient['core']['simulateTransaction']>>): ObservedTransaction & { digest: string } {
   const t = result.$kind === 'Transaction' ? result.Transaction : result.FailedTransaction;
   const data = t as unknown as {
-    digest: string;
+    digest?: string;
+    effects?: { transactionDigest?: string } | null;
     status: { success: boolean; error: { message?: string } | null };
     balanceChanges?: Array<{ coinType: string; address: string; amount: string }>;
     transaction?: { sender?: string | null };
   };
   return {
-    digest: data.digest,
+    // A dry run of unsigned bytes has no top-level digest (checked on mainnet,
+    // 2026-09-25); its effects carry the one the transaction will have.
+    digest: data.digest ?? data.effects?.transactionDigest ?? '',
     success: data.status.success,
     error: data.status.success ? null : data.status.error?.message ?? 'execution failed',
     sender: data.transaction?.sender ?? null,

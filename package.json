@@ -11,6 +11,7 @@
     "dev": "cross-env NODE_OPTIONS=--use-system-ca next dev",
     "dev:db": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --import ./scripts/alias-hook.mjs scripts/dev-db.mjs",
     "build": "next build",
+    "rehearse:usdc": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --import ./scripts/alias-hook.mjs scripts/rehearse-usdc-send.mjs",
     "doctor": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/doctor.mjs",
     "start": "cross-env NODE_OPTIONS=--use-system-ca next start",
     "lint": "npm run check:core && npm run check:compliance && npm run check:treasury && npm run check:generations && npm run check:aborts && npm run check:copy && npm run check:numbers && npm run check:migrations && npm run check:stores && npm run check:binary && npm run check:env && eslint",

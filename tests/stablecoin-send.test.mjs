@@ -303,3 +303,15 @@ test('a suspended business cannot quote at all', async () => {
   assert.match(r.error, /suspended/);
   await s.client.close();
 });
+
+test('the chain reader takes the digest from effects when a dry run has none at the top level', async () => {
+  const { observe } = await import('../lib/server/stablecoin-chain.ts');
+  const status = { success: true, error: null };
+  // Shapes seen on Sui mainnet on 2026-09-25 (scripts/rehearse-usdc-send.mjs).
+  const simulated = observe({ $kind: 'Transaction', Transaction: { effects: { transactionDigest: 'DryRunDigest' }, status, balanceChanges: [], transaction: { sender: '0xabc' } } });
+  assert.equal(simulated.digest, 'DryRunDigest');
+  const executed = observe({ $kind: 'Transaction', Transaction: { digest: 'RealDigest', effects: { transactionDigest: 'RealDigest' }, status, balanceChanges: [] } });
+  assert.equal(executed.digest, 'RealDigest');
+  const failed = observe({ $kind: 'FailedTransaction', FailedTransaction: { digest: 'F', status: { success: false, error: { message: 'InsufficientCoinBalance' } } } });
+  assert.deepEqual([failed.success, failed.error], [false, 'InsufficientCoinBalance']);
+});

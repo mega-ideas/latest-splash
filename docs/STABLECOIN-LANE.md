@@ -51,6 +51,28 @@ A wallet recipient must be saved first. Splash, and Zeke, only send to saved rec
 
 **Audit anchor:** records are kept now with `anchor_status = PENDING_MAINNET_PUBLISH`. They get anchored once Splash's contracts are published on mainnet (not done; that's Sebastian's ceremony).
 
+## Rehearse before the first real transfer (`npm run rehearse:usdc`)
+
+`scripts/rehearse-usdc-send.mjs` runs the lane's real code against Sui **mainnet** and moves nothing:
+
+1. `buildTransferBytes` builds the transaction Send USDC would hand a wallet.
+2. `simulateTransfer` dry-runs it, which needs no signature.
+3. `verifyStablecoinTransfer` checks the result: the recipient gets exactly the amount, the fee leg exactly the fee, the sender pays exactly both, and nobody else's USDC moves.
+
+It also checks:
+
+- that a quote one micro-USDC different is refused;
+- that an empty wallet is told in plain words;
+- with `--sender`, that your balances did not change.
+
+Usage:
+
+- `npm run rehearse:usdc` rehearses from a public USDC holder it finds.
+- `npm run rehearse:usdc -- --sender 0x… --amount 25` rehearses from your own wallet, e.g. the main admin's passkey address.
+- The two legs go to placeholder addresses, never to the configured fee address.
+
+First run, 2026-09-25: 8/8 on mainnet. It found that a dry run carries its digest only under `effects.transactionDigest`, and the chain reader now reads it from there.
+
 ## The Splash wallet as a wallet (lib/server/wallet-activity.ts)
 
 - **Wallet activity** on Send USDC shows USDC moving in *and* out of the wallet on screen: the Splash wallet, or a connected Slush or MetaMask wallet.
