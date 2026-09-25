@@ -404,7 +404,7 @@ export default function ApprovalQueueBoard({
               <li key={`example-${item.id}`} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="rounded border border-[#326273]/25 px-1.5 py-0.5 text-[11px] font-bold uppercase tracking-[0.1em] text-[#326273]/90">
+                    <span className="rounded border border-[#326273]/25 px-1.5 py-0.5 text-[12px] font-bold uppercase tracking-[0.1em] text-[#326273]/90">
                       Example
                     </span>
                     <strong className="text-sm text-[#1F4452]">{item.recommendation}</strong>

@@ -5,7 +5,8 @@ import test from 'node:test';
 import ts from 'typescript';
 
 /**
- * Every word on /queue reads at 4.5:1, and every icon and text-field edge at 3:1.
+ * Every word on /queue reads at 4.5:1 and 12px or more, and every icon and
+ * text-field edge at 3:1.
  *
  * /queue is where payments are released, read quickly by the person who
  * answers for them. Its secondary text was #326273 at 55-80% (2.47-4.15:1 on
@@ -17,6 +18,9 @@ import ts from 'typescript';
  * WCAG 2.2 AA: 4.5:1 for text (1.4.3; everything here is 12-14px, so the
  * large-text allowance never applies), 3:1 for icons and for the edge that
  * identifies a field (1.4.11). Disabled controls are exempt.
+ *
+ * Size: nothing is set below 12px, the size of the board's column headers.
+ * The approval code's label was 10px and the Example badge 11px.
  *
  * This reads the class names the files use, including those chosen by a
  * condition, a lookup table or a helper function. It works out what each
@@ -59,6 +63,13 @@ function contrast(a, b) {
 const PAGE = rgb(TOKENS.get('bg'));
 const WORDS = 4.5;
 const NON_TEXT = 3;
+const SMALLEST_PX = 12;
+
+/** The size an arbitrary font-size class sets, in px (`text-[13px]`, `text-[0.75rem]`), or null. */
+function fontSizePx(token) {
+  const match = /^text-\[(\d*\.?\d+)(px|rem)\]$/.exec(token.split(':').at(-1));
+  return match ? Number(match[1]) * (match[2] === 'rem' ? 16 : 1) : null;
+}
 
 const COLOUR_CLASS =
   /^(text|bg|border)-(?:\[(#[0-9a-fA-F]{6}|var\(--[\w-]+\))\]|(white|black))(?:\/(?:(\d{1,3})|\[(\d*\.?\d+)\]))?$/;
@@ -409,4 +420,23 @@ test('every icon on /queue is at least 3:1 against what it sits on', () => {
 test('every text field on /queue shows its edge at 3:1, inside and out', () => {
   const edges = RESULT.failures.filter((line) => / field edge /.test(line));
   assert.equal(edges.length, 0, report(edges));
+});
+
+test('nothing on /queue is set smaller than 12px', () => {
+  const small = [];
+  let sized = 0;
+  for (const source of SOURCES) {
+    walk(source, (element) => {
+      const className = isElement(element) ? attribute(element, 'className') : undefined;
+      if (!className) return;
+      for (const token of new Set(classesOf(className).flat())) {
+        const px = fontSizePx(token);
+        if (px === null) continue;
+        sized += 1;
+        if (px < SMALLEST_PX) small.push(`${lineOf(element)}  ${token}: ${px}px, needs ${SMALLEST_PX}px`);
+      }
+    });
+  }
+  assert.ok(sized >= 30, `only ${sized} sized elements were found`);
+  assert.equal(small.length, 0, report(small));
 });
