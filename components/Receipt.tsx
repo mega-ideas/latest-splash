@@ -3,6 +3,8 @@
 import { forwardRef } from "react";
 import { ShieldCheck, Check, ArrowRight, Landmark, Clock, ChevronDown } from "lucide-react";
 
+import LocalTime from "@/components/LocalTime";
+
 /**
  * W9.2 — settlement receipt with a business face and a proof layer.
  *
@@ -69,15 +71,18 @@ function money(value: string | number | undefined): string {
   return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-function formatTimestamp(iso: string | undefined): string {
+// The public receipt page renders on the server: LocalTime keeps its text the
+// same there and in the browser, then shows the reader's own zone.
+function formatTimestamp(iso: string | undefined) {
   if (!iso) return '—';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString('en-US', {
-    year: 'numeric', month: 'short', day: 'numeric',
-    hour: '2-digit', minute: '2-digit',
-    timeZoneName: 'short',
-  });
+  if (Number.isNaN(new Date(iso).getTime())) return iso;
+  return (
+    <LocalTime
+      value={iso}
+      locale="en-US"
+      options={{ year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' }}
+    />
+  );
 }
 
 const SettlementReceipt = forwardRef<HTMLDivElement, ReceiptProps>(function SettlementReceipt(props, ref) {

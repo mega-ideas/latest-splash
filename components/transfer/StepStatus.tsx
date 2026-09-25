@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Banknote, CheckCircle2, Globe2, Loader2, Network, XCircle } from 'lucide-react';
 
 import type { TransferState } from '@/app/dashboard/transfer/page';
+import LocalTime from '@/components/LocalTime';
 
 /** Destination country names for the "Sent to …" stage (human language). */
 const COUNTRY_NAMES: Record<string, string> = {
@@ -11,13 +12,11 @@ const COUNTRY_NAMES: Record<string, string> = {
   VN: 'Vietnam', TH: 'Thailand', EU: 'the Eurozone', GB: 'the United Kingdom',
 };
 
-/** Real stage timestamp from the lifecycle audit trail (W9.5 — never faked). */
+/** Real stage timestamp from the lifecycle audit trail (W9.5 — never faked), as ISO 8601. */
 function stageTimestamp(history: Array<{ state: string; at: string }>, states: string[]): string | null {
   const hit = history.find((entry) => states.includes(entry.state));
   if (!hit) return null;
-  const date = new Date(hit.at);
-  if (Number.isNaN(date.getTime())) return null;
-  return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  return Number.isNaN(new Date(hit.at).getTime()) ? null : hit.at;
 }
 
 export default function StepStatus({ state, set, next }: { state: TransferState; set: (patch: Partial<TransferState>) => void; next: () => void }) {
@@ -183,7 +182,11 @@ export default function StepStatus({ state, set, next }: { state: TransferState;
                 <div className={`rounded-full px-3 py-1 text-[13px] font-semibold ${complete || deliveredNow ? 'bg-[var(--ok-bg)] text-[#1F4452]' : active ? 'bg-[var(--info-bg)] text-[var(--info)]' : 'bg-white text-[#326273]/90'}`}>
                   {complete || deliveredNow ? 'Done' : active ? 'Live' : 'Waiting'}
                 </div>
-                {stage.at ? <div className="money text-[13px] font-medium text-[#326273]/90">{stage.at}</div> : null}
+                {stage.at ? (
+                  <div className="money text-[13px] font-medium text-[#326273]/90">
+                    <LocalTime value={stage.at} format="time" locale="en-US" options={{ hour: '2-digit', minute: '2-digit', second: '2-digit' }} />
+                  </div>
+                ) : null}
               </div>
             </div>
           );

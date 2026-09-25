@@ -23,6 +23,7 @@ import {
 import FloatingToken from '@/components/landing/FloatingToken';
 import SettlementCinematic from '@/components/landing/SettlementCinematic';
 import WaitlistCta from '@/components/landing/WaitlistCta';
+import LocalTime from '@/components/LocalTime';
 import ControlPlaneExplainer from '@/components/oxwal/ControlPlaneExplainer';
 import RoadmapChip from '@/components/supply/RoadmapChip';
 import { claims, lockedCopy } from '@/content/claims';
@@ -737,7 +738,7 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
               <strong>Reference yield benchmark</strong>
               <span>
                 FDIC national savings - IBKR Pro cash - Wise USD Interest - Splash treasury projection
-                {yieldBenchmarks.asOf ? ` - refreshed ${new Date(yieldBenchmarks.asOf).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
+                {yieldBenchmarks.asOf ? <> - refreshed <LocalTime value={yieldBenchmarks.asOf} format="time" options={{ hour: '2-digit', minute: '2-digit' }} /></> : ''}
                 {' '}· Yield is hygiene, not the headline — the working-capital loop is.
               </span>
             </div>

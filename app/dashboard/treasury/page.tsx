@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../../../lib/utils';
 import MoneyPathPanel from '@/components/compliance/MoneyPathPanel';
+import LocalTime from '@/components/LocalTime';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -36,7 +37,7 @@ type HistoryEntry = {
   desc: string;
   amount: string;
   amountNum: number;
-  date: string;
+  at: string; // ISO 8601, shown with LocalTime
   status: 'confirmed' | 'pending';
 };
 
@@ -87,10 +88,6 @@ const RISK_ITEMS = [
 
 function fmtUsd(n: number) {
   return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
-function nowLabel() {
-  return new Date().toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
 /** Catmull-Rom → cubic bézier: a smooth line through every data point. */
@@ -254,10 +251,10 @@ export default function TreasuryPage() {
         if (!r.ok) throw new Error(d.error || 'Move failed');
         applySnapshot(d);
         if (action === 'move') {
-          setHistory((prev) => [{ id, type: 'deposit', desc: 'Available → Smart Treasury', amount: `+$${fmtUsd(parsedAmount)}`, amountNum: parsedAmount, date: nowLabel(), status: 'confirmed' }, ...prev]);
+          setHistory((prev) => [{ id, type: 'deposit', desc: 'Available → Smart Treasury', amount: `+$${fmtUsd(parsedAmount)}`, amountNum: parsedAmount, at: new Date().toISOString(), status: 'confirmed' }, ...prev]);
           showToast(`$${fmtUsd(parsedAmount)} allocated to Smart Treasury`);
         } else {
-          setHistory((prev) => [{ id, type: 'withdraw', desc: 'Smart Treasury → Available (notice)', amount: `-$${fmtUsd(parsedAmount)}`, amountNum: -parsedAmount, date: nowLabel(), status: 'pending' }, ...prev]);
+          setHistory((prev) => [{ id, type: 'withdraw', desc: 'Smart Treasury → Available (notice)', amount: `-$${fmtUsd(parsedAmount)}`, amountNum: -parsedAmount, at: new Date().toISOString(), status: 'pending' }, ...prev]);
           showToast(`Withdrawal requested · funds in Available in ${windowLabel}`);
         }
         setAmount('');
@@ -721,7 +718,9 @@ export default function TreasuryPage() {
                   <HistIcon type={tx.type} />
                   <div className="min-w-0 flex-1">
                     <div className="text-[13px] font-medium text-[#1F4452]">{tx.desc}</div>
-                    <div className="text-[13px] text-[#326273]/90">{tx.date} · {tx.id}</div>
+                    <div className="text-[13px] text-[#326273]/90">
+                      <LocalTime value={tx.at} locale="en-US" options={{ month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }} /> · {tx.id}
+                    </div>
                   </div>
                   <div className="text-right">
                     <div className={cn('dash-num text-sm font-semibold', tx.type === 'withdraw' ? 'text-[var(--info)]' : tx.type === 'yield' ? 'text-[var(--ok)]' : 'text-[#8b6418]')}>{tx.amount}</div>
@@ -791,7 +790,7 @@ export default function TreasuryPage() {
                       <div className="flex items-center justify-between gap-2">
                         <span className="dash-num font-semibold text-[#1F4452]">${fmtUsd(n.amount)}</span>
                         <div className="flex items-center gap-2">
-                          <span className="text-[#9f5839]">by {new Date(n.availableAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                          <span className="text-[#9f5839]">by <LocalTime value={n.availableAt} format="date" locale="en-US" options={{ month: 'short', day: 'numeric' }} /></span>
                           {!confirming && (
                             <button
                               type="button"
