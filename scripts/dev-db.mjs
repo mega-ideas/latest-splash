@@ -14,16 +14,15 @@
  * DEV_DB_DIR (in .env.local or the shell, e.g. DEV_DB_DIR=.dev-db) to keep
  * it on disk instead: passkeys, saved recipients, transfers and verified
  * WhatsApp numbers then survive a restart. On disk, only migrations not yet
- * applied run (tracked in splash_dev_migrations) and the seed runs once.
+ * applied run (tracked in splash_dev_migrations, and in drizzle's own ledger
+ * so the health check and `npm run db:migrate` see them) and the seed runs once.
  * Stop it with Ctrl+C so Postgres shuts down cleanly; delete the directory
  * to start over.
  *
  * Neither mode is a substitute for running migration `0004` against a
  * restored copy of production, which is still outstanding.
  */
-import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { readdir, readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -34,6 +33,7 @@ import { drizzle } from 'drizzle-orm/pglite';
 import * as schema from '../lib/db/schema.ts';
 import { createAccount, markEmailVerified } from '../lib/auth/accounts.ts';
 import { TERMS_VERSION } from '../content/legal.ts';
+import { migrateDevDatabase } from './dev-db-migrations.mjs';
 
 // .env.local first: DEV_DB_DIR, DEV_DB_PORT and the WhatsApp numbers below may
 // live there. Values already in the shell win.
@@ -81,46 +81,29 @@ const client = DATA_DIR ? new PGlite(DATA_DIR) : new PGlite();
 await client.waitReady;
 
 // -- Migrations: apply what this database has not seen ----------------------
-// Each file's statements run one by one, as before (0020 adds an enum value
-// and uses it, which a single wrapping transaction would refuse). A file is
-// recorded only once all of it succeeded; the hash catches a migration edited
-// after this database applied it, which would otherwise drift silently.
-await client.exec(`CREATE TABLE IF NOT EXISTS splash_dev_migrations (
-  name text PRIMARY KEY,
-  sha256 text NOT NULL,
-  applied_at timestamptz NOT NULL DEFAULT now()
-)`);
-const applied = new Map(
-  (await client.query('SELECT name, sha256 FROM splash_dev_migrations')).rows.map((r) => [r.name, r.sha256]),
-);
-const dir = new URL('../drizzle', import.meta.url);
-let appliedNow = 0;
-for (const file of (await readdir(dir)).filter((f) => f.endsWith('.sql')).sort()) {
-  const sqlText = await readFile(new URL(`../drizzle/${file}`, import.meta.url), 'utf8');
-  const sha256 = createHash('sha256').update(sqlText).digest('hex');
-  if (applied.has(file)) {
-    if (applied.get(file) !== sha256) {
-      console.warn(`  ${file} has changed since this database applied it; delete ${DATA_DIR} to rebuild if it matters`);
-    }
-    continue;
-  }
-  try {
-    for (const statement of sqlText.split('--> statement-breakpoint')) {
-      const trimmed = statement.trim();
-      if (trimmed) await client.exec(trimmed);
-    }
-  } catch (error) {
-    console.error(`  ${file} failed: ${error instanceof Error ? error.message : error}`);
-    if (DATA_DIR) console.error(`  ${DATA_DIR} may be half-migrated. Delete it and start again.`);
-    await client.close();
-    if (LOCK) rmSync(LOCK, { force: true });
-    process.exit(1);
-  }
-  await client.query('INSERT INTO splash_dev_migrations (name, sha256) VALUES ($1, $2)', [file, sha256]);
-  appliedNow += 1;
-  console.log(`  applied ${file}`);
+// scripts/dev-db-migrations.mjs applies each file statement by statement,
+// records it in splash_dev_migrations, and writes the row drizzle's migrator
+// would have written in drizzle.__drizzle_migrations, which /api/health,
+// `npm run doctor` and `npm run db:migrate` read.
+let migrated;
+try {
+  migrated = await migrateDevDatabase(client, new URL('../drizzle/', import.meta.url), {
+    onApplied: (file) => console.log(`  applied ${file}`),
+    onChanged: (file) =>
+      console.warn(`  ${file} has changed since this database applied it; delete ${DATA_DIR} to rebuild if it matters`),
+  });
+} catch (error) {
+  console.error(`  ${error instanceof Error ? error.message : error}`);
+  if (DATA_DIR) console.error(`  ${DATA_DIR} may be half-migrated. Delete it and start again.`);
+  await client.close();
+  if (LOCK) rmSync(LOCK, { force: true });
+  process.exit(1);
 }
-if (applied.size > 0) console.log(`  ${applied.size} migrations already applied, ${appliedNow} new`);
+if (migrated.alreadyApplied > 0) {
+  console.log(`  ${migrated.alreadyApplied} migrations already applied, ${migrated.appliedNow} new`);
+  // A database made before the dev database wrote drizzle's ledger.
+  if (migrated.ledgerAdded > 0) console.log(`  ${migrated.ledgerAdded} recorded in drizzle's migration ledger`);
+}
 
 const db = drizzle(client, { schema });
 
