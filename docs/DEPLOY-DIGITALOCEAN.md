@@ -272,7 +272,10 @@ causes an outage:
 
 1. `curl -s https://<domain>/api/health` → `"ok": true`; RPC names your gRPC
    host, the package resolves, and every migration in
-   `drizzle/meta/_journal.json` is applied.
+   `drizzle/meta/_journal.json` is applied. The go-live rows cover the setup done by hand:
+   - `laneNode`, `peg` and `usdyPrice` must be `ok`.
+   - `feeAddress`, `twilio` and `screening` show `skipped` until they are configured, with the reason.
+   - `passkeyDomain` must be `ok` **before** anyone creates a passkey on this domain. A passkey's Sui address is tied to its domain.
 2. The image optimizer serves only our own files:
    ```bash
    curl -s -o /dev/null -w '%{http_code}\n' 'https://<domain>/_next/image?url=https%3A%2F%2Fexample.com%2Fa.avif&w=64&q=75'   # 400

@@ -133,7 +133,12 @@ try {
 const { runHealthChecks } = await import('@/lib/server/health-checks.ts');
 const report = await runHealthChecks();
 
-const NAMES = { rpc: 'Sui RPC', package: 'Package ID', db: 'Postgres', seal: 'Seal', enoki: 'Enoki' };
+const NAMES = {
+  rpc: 'Sui RPC', package: 'Package ID', db: 'Postgres', seal: 'Seal', enoki: 'Enoki',
+  // Go-live: the setup steps a person does by hand.
+  laneNode: 'Sui mainnet (USDC)', peg: 'Peg (DeepBook)', usdyPrice: 'USDY price (Ondo)', feeAddress: 'Fee wallet',
+  twilio: 'WhatsApp (Twilio)', passkeyDomain: 'Passkey domain', screening: 'Wallet screening',
+};
 for (const [key, check] of Object.entries(report.checks)) {
   rows.push({ name: NAMES[key] ?? key, status: check.status, detail: check.detail, latencyMs: check.latencyMs });
 }

@@ -13,6 +13,7 @@ import { readdirSync } from 'node:fs';
 import path from 'node:path';
 
 import { getEnv } from '@/lib/env';
+import { checkFeeAddress, checkLaneNode, checkPasskeyDomain, checkPeg, checkScreening, checkTwilio, checkUsdyPrice } from '@/lib/server/go-live-checks';
 import { getSealHealthSnapshot } from '@/lib/server/seal-health';
 import { getSealConfig } from '@/lib/server/seal-config';
 import { suiClient, SPLASH_PACKAGE_ID, SUI_NETWORK, SUI_RPC_URL } from '@/lib/sui';
@@ -216,12 +217,22 @@ export type HealthReport = {
   ok: boolean;
   checkedAt: string;
   flags: Record<string, string | boolean>;
-  checks: { rpc: Check; package: Check; db: Check; seal: Check; enoki: Check };
+  checks: {
+    rpc: Check; package: Check; db: Check; seal: Check; enoki: Check;
+    /* Go-live: the setup a person does by hand (lib/server/go-live-checks.ts). */
+    laneNode: Check; peg: Check; usdyPrice: Check; feeAddress: Check; twilio: Check; passkeyDomain: Check; screening: Check;
+  };
 };
 
 export async function runHealthChecks(): Promise<HealthReport> {
-  const [rpc, pkg, db, seal, enoki] = await Promise.all([checkRpc(), checkPackage(), checkDb(), checkSeal(), checkEnoki()]);
-  const checks = { rpc, package: pkg, db, seal, enoki };
+  const [rpc, pkg, db, seal, enoki, laneNode, peg, usdyPrice, twilio, screening] = await Promise.all([
+    checkRpc(), checkPackage(), checkDb(), checkSeal(), checkEnoki(),
+    checkLaneNode(), checkPeg(), checkUsdyPrice(), checkTwilio(), checkScreening(),
+  ]);
+  const checks = {
+    rpc, package: pkg, db, seal, enoki,
+    laneNode, peg, usdyPrice, feeAddress: checkFeeAddress(), twilio, passkeyDomain: checkPasskeyDomain(), screening,
+  };
   // 'skipped' is not a failure: it is a deliberate absence in this env.
   const ok = Object.values(checks).every((c) => c.status !== 'fail');
   return { ok, checkedAt: new Date().toISOString(), flags: featureFlags(), checks };

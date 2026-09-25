@@ -229,6 +229,23 @@ Recipient screening is shown as a note: Chainalysis if configured, otherwise the
 
 ## Configuration
 
+`npm run doctor` (and `GET /api/health`, staff-only in production) checks this setup; the checks live in `lib/server/go-live-checks.ts`. Each check reads one of three ways:
+
+- **ok**: set up and working.
+- **skipped**: not set up yet. The line says what stays closed until it is.
+- **FAIL**: set but wrong (a rejected key, a passkey domain the browser will refuse), or a price source that didn't answer.
+
+The checks are:
+
+- the USDC lane's mainnet node;
+- the DeepBook peg;
+- Ondo's USDY price;
+- the fee wallet;
+- Twilio (an account lookup; nothing is sent);
+- the passkey domain against the app's host;
+- the Chainalysis key.
+
+
 | Variable | Needed for |
 |---|---|
 | `SPLASH_FEE_ADDRESS_MAINNET` | **Required.** Without it, no wallet transfer is quoted. Never defaulted. |
