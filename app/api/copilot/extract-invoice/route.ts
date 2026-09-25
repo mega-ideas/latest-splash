@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
 import { laneRefusalText, zekeLaneState } from '@/lib/agent/zeke-lane-guard';
-import { laneAccess } from '@/lib/payments/stablecoin-lane';
+import { invoiceLocalCurrency, laneAccess } from '@/lib/payments/stablecoin-lane';
 import { parseInvoice, type CopilotSuggestion } from '@/lib/server/copilot';
 import { custodyPhaseEnabled, invoiceDeliveryTier } from '@/lib/server/custody-phase';
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
@@ -51,11 +51,9 @@ export async function POST(request: Request) {
   // is the fiat lane, and a business still in verification cannot use it — so
   // the loop stops here, with the reason, instead of recommending a route the
   // authorize button would refuse. Both the record's currency and the one read
-  // off the document count: an invoice re-typed as USDC that still says PHP on
-  // its face is still a PHP invoice.
-  const localCurrency = [invoice.targetCurrency, extraction.currency]
-    .map((c) => String(c ?? '').trim().toUpperCase())
-    .find((c) => c && c !== 'USDC');
+  // off the document count; a currency the parser could not read ('') does
+  // not, and then the record decides (lib/payments/stablecoin-lane.ts).
+  const localCurrency = invoiceLocalCurrency(invoice.targetCurrency, extraction.currency);
   if (localCurrency) {
     const state = await zekeLaneState(accountCheck.account.orgId);
     const access = laneAccess(state, 'FIAT_OUT_LOCAL');

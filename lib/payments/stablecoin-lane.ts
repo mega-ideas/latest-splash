@@ -185,6 +185,30 @@ export function laneAccess(state: KybLifecycleState, lane: Lane): LaneAccess {
   }
 }
 
+/**
+ * The local currency an invoice payout would be made in, or null for a USDC
+ * payout: the question the FIAT_OUT_LOCAL lane answers. Both the record's
+ * currency and the one read off the document count: an invoice re-typed as
+ * USDC that still says PHP on its face is still a PHP invoice. A currency the
+ * reader could not find is not a reading. `parseInvoice` returns '' for it,
+ * and then the record alone decides. It used to return an invented 'USD',
+ * which this would have treated as a USD payout.
+ *
+ * Invoice records are three-letter currencies today (/api/invoices), so a
+ * USDC record cannot be created there yet; the USDC cases pin the rule for
+ * when one can.
+ */
+export function invoiceLocalCurrency(
+  recordCurrency: string | null | undefined,
+  readCurrency: string | null | undefined,
+): string | null {
+  return (
+    [recordCurrency, readCurrency]
+      .map((currency) => String(currency ?? '').trim().toUpperCase())
+      .find((currency) => currency && currency !== 'USDC') ?? null
+  );
+}
+
 export function stablecoinLimitsFor(state: KybLifecycleState): StablecoinLimits | null {
   if (state === 'ACTIVE') {
     return {
