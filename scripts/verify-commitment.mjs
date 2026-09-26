@@ -75,38 +75,55 @@ let events;
 if (eventsPath) {
   events = JSON.parse(await readFile(eventsPath, 'utf8'));
 } else {
-  const { SuiClient, getFullnodeUrl } = await import('@mysten/sui/client');
-  const client = new SuiClient({ url: arg('--rpc') ?? getFullnodeUrl('testnet') });
-  const tx = await client.getTransactionBlock({ digest, options: { showEvents: true } });
-  events = tx.events ?? [];
+  // gRPC, as the app reads the chain: SDK 2 no longer exports the JSON-RPC
+  // SuiClient this used. Events come back as { eventType, json }.
+  const { SuiGrpcClient } = await import('@mysten/sui/grpc');
+  const { SUI_NETWORK, SUI_RPC_URL } = await import('../lib/sui.ts');
+  const client = new SuiGrpcClient({ network: SUI_NETWORK, baseUrl: arg('--rpc') ?? SUI_RPC_URL });
+  const res = await client.core.getTransaction({ digest, include: { events: true } });
+  const t = res.$kind === 'Transaction' ? res.Transaction : res.FailedTransaction;
+  events = (t.events ?? []).map((e) => ({ type: e.eventType, parsedJson: e.json }));
 }
-if (!Array.isArray(events)) fail('events must be a JSON array');
+// From here on the chain may have been asked, so the result is returned as an
+// exit code, never through process.exit: after a gRPC call on Windows with
+// Node 24 that reports 127 whatever code it is given.
+process.exitCode = verifyEvents(events);
 
-const wanted = record.tag === 'splash:receipt:v1' ? [RECEIPT] : LIFECYCLE;
-const lifecycle = events.filter((e) => typeof e?.type === 'string' && wanted.some((suffix) => e.type.endsWith(suffix)));
-if (lifecycle.length === 0) fail('no payment lifecycle event in the transaction; nothing to verify');
-
-const intentId = typeof bundle?.settlement?.paymentIntentId === 'string' ? bundle.settlement.paymentIntentId.toLowerCase() : null;
-let verified = 0;
-let mismatched = 0;
-for (const event of lifecycle) {
-  const name = event.type.slice(event.type.lastIndexOf('::') + 2);
-  const bytes = commitmentFromEventField(event.parsedJson?.commitment);
-  const got = bytes ? toHex(bytes) : '(missing)';
-  const eventIntent = typeof event.parsedJson?.intent_id === 'string' ? event.parsedJson.intent_id.toLowerCase() : null;
-  const wrongIntent = intentId && eventIntent && eventIntent !== intentId;
-  if (got === expectedHex && !wrongIntent) {
-    verified += 1;
-    console.log(`ok       ${name}  ${got}`);
-  } else {
-    mismatched += 1;
-    console.log(
-      wrongIntent
-        ? `MISMATCH ${name}  intent ${eventIntent} is not the bundle's ${intentId}`
-        : `MISMATCH ${name}  expected ${expectedHex} got ${got}: the event does not match the bundle`,
-    );
+function verifyEvents(events) {
+  if (!Array.isArray(events)) {
+    console.error('verify-commitment: events must be a JSON array');
+    return 1;
   }
-}
 
-console.log(`${verified} of ${lifecycle.length} events verified`);
-process.exit(mismatched === 0 ? 0 : 1);
+  const wanted = record.tag === 'splash:receipt:v1' ? [RECEIPT] : LIFECYCLE;
+  const lifecycle = events.filter((e) => typeof e?.type === 'string' && wanted.some((suffix) => e.type.endsWith(suffix)));
+  if (lifecycle.length === 0) {
+    console.error('verify-commitment: no payment lifecycle event in the transaction; nothing to verify');
+    return 1;
+  }
+
+  const intentId = typeof bundle?.settlement?.paymentIntentId === 'string' ? bundle.settlement.paymentIntentId.toLowerCase() : null;
+  let verified = 0;
+  let mismatched = 0;
+  for (const event of lifecycle) {
+    const name = event.type.slice(event.type.lastIndexOf('::') + 2);
+    const bytes = commitmentFromEventField(event.parsedJson?.commitment);
+    const got = bytes ? toHex(bytes) : '(missing)';
+    const eventIntent = typeof event.parsedJson?.intent_id === 'string' ? event.parsedJson.intent_id.toLowerCase() : null;
+    const wrongIntent = intentId && eventIntent && eventIntent !== intentId;
+    if (got === expectedHex && !wrongIntent) {
+      verified += 1;
+      console.log(`ok       ${name}  ${got}`);
+    } else {
+      mismatched += 1;
+      console.log(
+        wrongIntent
+          ? `MISMATCH ${name}  intent ${eventIntent} is not the bundle's ${intentId}`
+          : `MISMATCH ${name}  expected ${expectedHex} got ${got}: the event does not match the bundle`,
+      );
+    }
+  }
+
+  console.log(`${verified} of ${lifecycle.length} events verified`);
+  return mismatched === 0 ? 0 : 1;
+}

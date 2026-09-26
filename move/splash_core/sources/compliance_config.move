@@ -284,8 +284,10 @@ public fun admin_set_paused(_admin: &AdminCap, config: &mut ComplianceConfig, pa
     emit_update(config);
 }
 
-/// BREAK-GLASS. Revoke every outstanding `ComplianceCap` and mint one
-/// replacement, bound to `config`.
+/// BREAK-GLASS, step one of two: arm a revocation of every outstanding
+/// `ComplianceCap`. Nothing is revoked until `execute_break_glass_compliance_cap`
+/// runs inside the ninety-second window and mints one replacement, bound to
+/// `config`.
 ///
 /// Unlike the anchor cap, losing this one bricks nothing — `AdminCap` already
 /// holds strictly larger versions of everything it does. This exists for the

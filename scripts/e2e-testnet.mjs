@@ -1,122 +1,620 @@
 #!/usr/bin/env node
 /**
- * e2e-testnet — live testnet proof of the gRPC write path.
+ * e2e-testnet — check a splash_core publish against the chain.
  *
- * Drives the REAL deployed Splash Move calls through SuiGrpcClient, mirroring
- * the PTBs in lib/server/sui-settlement.ts, to prove the JSON-RPC -> gRPC
- * migration works end-to-end for signing + execution. Testnet SUI is valueless;
- * the configured test recipient is the operator itself, so funds cycle back.
+ * The verify step of docs/KEY-CEREMONY-RUNBOOK.md §3.8. It builds the same
+ * transactions as lib/server/sui-settlement.ts, on the Phase 0 core package
+ * only (splash_custody publishes with the licence, not before), and checks
+ * that the configured ids, the AnchorCap and the CapRegistry work together:
  *
- * Run: node --use-system-ca --experimental-strip-types --env-file=.env.local scripts/e2e-testnet.mjs
+ *   ids      every configured object exists and belongs to this package; the
+ *            AnchorCap is held by the operator address.
+ *   abi      every function called takes the parameters the current source
+ *            declares, so a package published from older source is named.
+ *   peg      peg_monitor::update_peg on the AnchorCap and CapRegistry
+ *            → PegUpdated.
+ *   anchor   audit_anchor::anchor_audit_hash on its own → AuditAnchored.
+ *   intent   payment_intent::create_payment_intent<SUI> → IntentCreated.
+ *   confirm  confirm_payment_intent<SUI>, audit_anchor::anchor on its receipt,
+ *            audit_anchor::anchor_audit_hash on the AnchorCap
+ *            → IntentConfirmed, SettlementAnchored, AuditAnchored.
+ *            No TreasuryDeposited: the treasury is a custody module.
+ *
+ * By default every transaction is SIMULATED: the node runs it as the operator
+ * address would and reports what it would do. Nothing is signed or sent, no
+ * coin moves, no object is written and no gas is spent, so this is safe on any
+ * network, mainnet included. It runs as OPERATOR_SUI_ADDRESS and never reads
+ * the private key. The network and node come from lib/sui.ts, as in the app.
+ *
+ * --execute signs and sends the intent and the confirm with
+ * OPERATOR_SUI_PRIVATE_KEY, as two transactions, the shape the app uses.
+ * Testnet only: the node's chain id decides, not SUI_NETWORK alone. The payment
+ * goes back to the operator unless SPLASH_TEST_RECIPIENT_ADDRESS is set. The
+ * peg call stays simulated: this script has no attested reading to write, and
+ * the app writes only attested ones (lib/server/peg-attestation.ts).
+ *
+ * Run:
+ *   node --use-system-ca --experimental-strip-types --env-file=.env.local scripts/e2e-testnet.mjs
+ *   node --use-system-ca --experimental-strip-types --env-file=.env.local scripts/e2e-testnet.mjs --execute
  */
 import { SuiGrpcClient } from '@mysten/sui/grpc';
 import { Transaction } from '@mysten/sui/transactions';
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
 import { Secp256k1Keypair } from '@mysten/sui/keypairs/secp256k1';
 import { decodeSuiPrivateKey } from '@mysten/sui/cryptography';
+import { fromBase58, isValidSuiAddress, isValidSuiObjectId, normalizeSuiAddress } from '@mysten/sui/utils';
 import { createHash } from 'node:crypto';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 
 import { DOMAIN_TAGS, newSalt, paymentCommitment, toHex } from '../lib/evidence/commitment.ts';
-
-const NETWORK = process.env.SUI_NETWORK === 'mainnet' ? 'mainnet' : 'testnet';
-const BASE_URL = process.env.SUI_RPC_URL || `https://fullnode.${NETWORK}.sui.io:443`;
-const client = new SuiGrpcClient({ network: NETWORK, baseUrl: BASE_URL });
+import { SUI_NETWORK, SUI_RPC_URL } from '../lib/sui.ts';
+import { SPLASH_CORE_ABI } from './splash-core-abi.mjs';
 
 const env = (k) => (process.env[k] ?? '').trim();
-const PACKAGE = env('SPLASH_PACKAGE_ID');
-const ADMIN_CAP = env('SPLASH_ADMIN_CAP_ID');
-/** Cap split (spec §5): attestations (peg push, audit anchor, receipts) run on
- *  the hot AnchorCap once it exists; before the fresh publish the deployed
- *  package still expects the AdminCap in that argument slot, so fall back. */
-const ANCHOR_CAP = env('SPLASH_ANCHOR_CAP_ID') || ADMIN_CAP;
-const PEG_STATE = env('SPLASH_PEG_STATE_ID');
-const BUSINESS = env('SPLASH_BUSINESS_ACCOUNT_ID');
-const SMART_TREASURY = env('SPLASH_SMART_TREASURY_SUI_ID');
-const RECIPIENT = env('SPLASH_TEST_RECIPIENT_ADDRESS') || env('OPERATOR_SUI_ADDRESS');
-const CLOCK = '0x6';
 
-function operatorKeypair() {
-  const encoded = (env('OPERATOR_SUI_PRIVATE_KEY') || env('SUI_SPONSOR_PRIVATE_KEY'));
-  if (!encoded) throw new Error('OPERATOR_SUI_PRIVATE_KEY is required.');
-  const { scheme, secretKey } = decodeSuiPrivateKey(encoded);
-  return scheme === 'Secp256k1'
-    ? Secp256k1Keypair.fromSecretKey(secretKey)
-    : Ed25519Keypair.fromSecretKey(secretKey);
+/** A refusal while the configuration is read, before anything touches the chain. */
+function stop(message) {
+  console.error(`\n✗ ${message}\n`);
+  process.exit(1);
 }
-const signer = operatorKeypair();
+
+/**
+ * A refusal once the chain has been asked something. Past that point this
+ * script never calls process.exit: on Windows with Node 24 it then reports 127
+ * whatever code it is given (measured 2026-09-26), so a passing verify would
+ * read as a failure. It sets process.exitCode and lets Node finish.
+ */
+class Refused extends Error {}
+function refuse(message) {
+  console.error(`\n✗ ${message}\n`);
+  throw new Refused(message);
+}
+
+const args = process.argv.slice(2);
+for (const arg of args) {
+  if (arg !== '--execute') stop(`Unknown argument ${arg}. The only option is --execute.`);
+}
+const EXECUTE = args.includes('--execute');
+
+// The app's own resolution, so this asks the node the app asks.
+const NETWORK = SUI_NETWORK;
+const BASE_URL = SUI_RPC_URL;
+if (!BASE_URL) stop('SUI_RPC_URL is set but empty. Unset it for the default node, or name one.');
+const client = new SuiGrpcClient({ network: NETWORK, baseUrl: BASE_URL });
+
+/** First four bytes of the genesis checkpoint digest, as Published.toml and
+ *  Move.toml write chain ids. */
+const CHAIN_IDS = { testnet: '4c78adac', mainnet: '35834a8a' };
+
+const SUI = '0x2::sui::SUI';
+const CLOCK = '0x6';
+// 0.001 SUI. Enough to prove a coin moves; in --execute it comes back to the
+// operator unless a test recipient is set.
+const PAYMENT_MIST = 1_000_000;
+const FX_RATE_SCALED = 56_420_000; // PHP per USD, scaled 1e6
+
+function objectIdFromEnv(key, { required }) {
+  const value = env(key);
+  if (!value) {
+    if (required) stop(`${key} is required.`);
+    return '';
+  }
+  if (!isValidSuiObjectId(normalizeSuiAddress(value))) stop(`${key} is not a Sui object id: ${value}`);
+  return normalizeSuiAddress(value);
+}
+
+// The core package, as corePackageIdOrThrow resolves it: SPLASH_CORE_PACKAGE_ID,
+// or the legacy SPLASH_PACKAGE_ID alias.
+const CORE_FROM_ENV = env('SPLASH_CORE_PACKAGE_ID');
+const PACKAGE = CORE_FROM_ENV
+  ? objectIdFromEnv('SPLASH_CORE_PACKAGE_ID', { required: true })
+  : objectIdFromEnv('SPLASH_PACKAGE_ID', { required: false });
+if (!PACKAGE) stop('Set SPLASH_CORE_PACKAGE_ID to the splash_core package id.');
+// No fallback to the AdminCap, as in anchorCapObjectId / capRegistryObjectId.
+const ANCHOR_CAP = objectIdFromEnv('SPLASH_ANCHOR_CAP_ID', { required: true });
+const CAP_REGISTRY = objectIdFromEnv('SPLASH_CAP_REGISTRY_ID', { required: true });
+const PEG_STATE = objectIdFromEnv('SPLASH_PEG_STATE_ID', { required: false });
+const BUSINESS = objectIdFromEnv('SPLASH_BUSINESS_ACCOUNT_ID', { required: false });
+const ADMIN_CAP = objectIdFromEnv('SPLASH_ADMIN_CAP_ID', { required: false });
+
+/** Read only for --execute. A malformed key is reported without its text. */
+function operatorSigner() {
+  const encoded = env('OPERATOR_SUI_PRIVATE_KEY');
+  if (!encoded) stop('--execute signs with OPERATOR_SUI_PRIVATE_KEY, which is not set.');
+  let decoded;
+  try {
+    decoded = decodeSuiPrivateKey(encoded);
+  } catch {
+    stop('OPERATOR_SUI_PRIVATE_KEY is not a valid suiprivkey string.');
+  }
+  const { scheme, secretKey } = decoded;
+  if (scheme === 'Secp256k1') return Secp256k1Keypair.fromSecretKey(secretKey);
+  if (scheme === 'ED25519') return Ed25519Keypair.fromSecretKey(secretKey);
+  stop(`OPERATOR_SUI_PRIVATE_KEY is a ${scheme} key. The app signs with Ed25519 or Secp256k1.`);
+}
+
+// No signer exists without --execute, so nothing in a simulation can sign.
+const signer = EXECUTE ? operatorSigner() : null;
+const addressFromEnv = env('OPERATOR_SUI_ADDRESS');
+if (addressFromEnv && !isValidSuiAddress(normalizeSuiAddress(addressFromEnv))) {
+  stop(`OPERATOR_SUI_ADDRESS is not a Sui address: ${addressFromEnv}`);
+}
+const SENDER = signer ? signer.toSuiAddress() : addressFromEnv ? normalizeSuiAddress(addressFromEnv) : '';
+if (!SENDER) stop('Set OPERATOR_SUI_ADDRESS. A simulation runs as that address and never reads the key.');
+if (signer && addressFromEnv && normalizeSuiAddress(addressFromEnv) !== SENDER) {
+  stop(`OPERATOR_SUI_ADDRESS is ${addressFromEnv}, but OPERATOR_SUI_PRIVATE_KEY belongs to ${SENDER}.`);
+}
+const recipientFromEnv = env('SPLASH_TEST_RECIPIENT_ADDRESS');
+if (recipientFromEnv && !isValidSuiAddress(normalizeSuiAddress(recipientFromEnv))) {
+  stop(`SPLASH_TEST_RECIPIENT_ADDRESS is not a Sui address: ${recipientFromEnv}`);
+}
+const RECIPIENT = recipientFromEnv ? normalizeSuiAddress(recipientFromEnv) : SENDER;
+
+// ── Results ───────────────────────────────────────────────────────────────────
 
 const results = [];
+function record(check, status, detail) {
+  results.push({ check, status, detail });
+  const mark = { PASS: '✔', FAIL: '✗', WARN: '!', SKIP: '-' }[status];
+  console.log(`${mark} ${check.padEnd(28)} ${detail}`);
+}
 
-async function exec(label, tx) {
+// ── Chain helpers ─────────────────────────────────────────────────────────────
+
+/** `0x2::sui::SUI` and `0x000…002::sui::SUI` name the same type. */
+function normalizeType(type) {
+  const [address, ...rest] = type.split('::');
+  return rest.length ? [normalizeSuiAddress(address), ...rest].join('::') : type;
+}
+
+function typeIn(name) {
+  return `${PACKAGE}::${name}`;
+}
+
+function eventsOf(t) {
+  return (t.events ?? []).map((e) => ({ type: normalizeType(e.eventType), data: e.json ?? {} }));
+}
+
+function findEvent(events, name) {
+  return events.find((e) => e.type === typeIn(name)) ?? null;
+}
+
+function eventNames(events) {
+  return events.map((e) => e.type.split('::').slice(-1)[0]).join(', ') || 'none';
+}
+
+/**
+ * Why a Move call aborted, in the terms the ceremony uses. Applied in run(),
+ * so it also reaches aborts the node reports while resolving the transaction
+ * in tx.build, before any simulation result exists.
+ */
+function explain(message) {
+  if (/\b210\b/.test(message) && /cap_registry/.test(message)) {
+    // A cap or registry from another publish never gets this far: it is the
+    // wrong type, which the id checks name.
+    return `${message} — the AnchorCap was revoked: a break-glass execute moved its generation on. Use the AnchorCap that execute_break_glass_anchor_cap minted.`;
+  }
+  return message;
+}
+
+async function simulate(label, tx) {
+  tx.setSender(SENDER);
+  const bytes = await tx.build({ client });
+  const res = await client.core.simulateTransaction({ transaction: bytes, include: { effects: true, events: true } });
+  const t = res.$kind === 'Transaction' ? res.Transaction : res.FailedTransaction;
+  if (!t.status.success) throw new Error(`${label} would abort: ${t.status.error?.message ?? 'no reason given'}`);
+  return { digest: null, events: eventsOf(t) };
+}
+
+async function execute(label, tx) {
   const res = await client.signAndExecuteTransaction({
     signer,
     transaction: tx,
     include: { effects: true, events: true },
   });
-  const t = res.Transaction ?? res.FailedTransaction;
-  if (res.$kind !== 'Transaction' || !t.status.success) {
-    throw new Error(`${label} failed: ${JSON.stringify(t?.status?.error)}`);
+  const t = res.$kind === 'Transaction' ? res.Transaction : res.FailedTransaction;
+  if (!t.status.success) {
+    throw new Error(`${label} failed: ${t.status.error?.message ?? 'no reason given'}. Digest ${t.digest}`);
   }
   await client.waitForTransaction({ digest: t.digest }).catch(() => {});
-  return {
-    digest: t.digest,
-    events: (t.events ?? []).map((e) => ({ type: e.eventType, data: e.json ?? {} })),
-  };
+  return { digest: t.digest, events: eventsOf(t) };
 }
 
-function eventBySuffix(events, suffix) {
-  return events.find((e) => e.type.endsWith(suffix)) ?? null;
+// ── The calls, as the current source declares them ───────────────────────────
+
+const ABI = SPLASH_CORE_ABI;
+
+/** Functions whose on-chain parameters differ from ABI, or that are missing. */
+const drifted = new Set();
+
+function describeBody(body) {
+  switch (body.$kind) {
+    case 'vector':
+      return `vector<${describeBody(body.vector)}>`;
+    case 'datatype': {
+      const name = body.datatype.typeName.split('::').slice(1).join('::');
+      const params = body.datatype.typeParameters ?? [];
+      return params.length ? `${name}<${params.map(describeBody).join(', ')}>` : name;
+    }
+    case 'typeParameter':
+      return `T${body.index}`;
+    default:
+      return body.$kind;
+  }
 }
 
-// ── Test 1: peg refresh (simplest gRPC write) ────────────────────────────────
-async function testPeg() {
+function describeParameters(parameters) {
+  const described = parameters.map((p) => {
+    const prefix = p.reference === 'mutable' ? '&mut ' : p.reference === 'immutable' ? '&' : '';
+    return prefix + describeBody(p.body);
+  });
+  if (/^&(mut )?tx_context::TxContext$/.test(described.at(-1) ?? '')) described.pop();
+  return described.join(', ');
+}
+
+async function checkAbi() {
+  const problems = [];
+  for (const [fn, expected] of Object.entries(ABI)) {
+    const [moduleName, name] = fn.split('::');
+    try {
+      const { function: onChain } = await client.core.getMoveFunction({ packageId: PACKAGE, moduleName, name });
+      const actual = describeParameters(onChain.parameters);
+      if (actual !== expected) {
+        drifted.add(fn);
+        problems.push(`${fn} takes (${actual}) on chain; the source declares (${expected})`);
+      }
+    } catch {
+      drifted.add(fn);
+      problems.push(`${fn} is not in the package on chain`);
+    }
+  }
+  if (problems.length) {
+    record(
+      'Function signatures',
+      'FAIL',
+      `the package was published from different source. Publish the current splash_core (runbook §3.2). ${problems.join('; ')}.`,
+    );
+  } else {
+    record('Function signatures', 'PASS', `all ${Object.keys(ABI).length} match the source.`);
+  }
+}
+
+/** A check whose calls differ on chain would fail with the node's unnamed
+ *  error; it reports the mismatch instead. */
+function blockedBy(functions) {
+  const hit = functions.filter((fn) => drifted.has(fn));
+  return hit.length ? `not run: ${hit.join(', ')} differ on chain (see Function signatures).` : null;
+}
+
+// ── Checks ────────────────────────────────────────────────────────────────────
+
+async function checkChain() {
+  const { chainIdentifier } = await client.core.getChainIdentifier();
+  const chainId = Buffer.from(fromBase58(chainIdentifier).subarray(0, 4)).toString('hex');
+  if (chainId !== CHAIN_IDS[NETWORK]) {
+    refuse(`SUI_NETWORK is ${NETWORK} (chain ${CHAIN_IDS[NETWORK]}), but ${BASE_URL} serves chain ${chainId}.`);
+  }
+  if (EXECUTE && chainId !== CHAIN_IDS.testnet) {
+    refuse('--execute runs on testnet only. On mainnet, run without it: the simulation checks the same calls.');
+  }
+  return chainId;
+}
+
+/** Published.toml records the package this source tree last published on each
+ *  chain. Runbook §3.7 commits it after the publish, so a different id here
+ *  means the environment or the file is stale. */
+function checkPublishedToml(chainId) {
+  const path = new URL('../move/splash_core/Published.toml', import.meta.url);
+  if (!existsSync(path)) {
+    record('Published.toml', 'WARN', 'move/splash_core/Published.toml is missing.');
+    return;
+  }
+  const sections = readFileSync(path, 'utf8').split(/^\[/m);
+  const section = sections.find((s) => new RegExp(`^\\s*chain-id\\s*=\\s*"${chainId}"`, 'm').test(s));
+  const recorded = section?.match(/^\s*published-at\s*=\s*"(0x[0-9a-fA-F]+)"/m)?.[1];
+  if (!recorded) {
+    record('Published.toml', 'WARN', `no splash_core publish recorded for chain ${chainId}.`);
+  } else if (normalizeSuiAddress(recorded) !== PACKAGE) {
+    record(
+      'Published.toml',
+      'FAIL',
+      `records ${recorded} for this chain, but the environment names ${PACKAGE}. Fix the id, or commit the regenerated Published.toml (runbook §3.7).`,
+    );
+  } else {
+    record('Published.toml', 'PASS', `matches the configured package (chain ${chainId}).`);
+  }
+}
+
+function ownerAddress(owner) {
+  if (owner?.$kind === 'AddressOwner') return normalizeSuiAddress(owner.AddressOwner);
+  return null;
+}
+
+async function fetchObject(id) {
+  try {
+    return (await client.core.getObject({ objectId: id })).object;
+  } catch {
+    return null;
+  }
+}
+
+async function checkObject(label, envKey, id, expectedType, { shared }) {
+  if (!id) {
+    record(label, 'FAIL', `${envKey} is not set.`);
+    return null;
+  }
+  const object = await fetchObject(id);
+  if (!object) {
+    record(label, 'FAIL', `${envKey} ${id} does not exist on this chain.`);
+    return null;
+  }
+  if (normalizeType(object.type) !== expectedType) {
+    record(label, 'FAIL', `${envKey} is a ${object.type}, not a ${expectedType}.`);
+    return null;
+  }
+  if (shared && object.owner?.$kind !== 'Shared') {
+    record(label, 'FAIL', `${envKey} is not a shared object.`);
+    return null;
+  }
+  return object;
+}
+
+async function checkIds() {
+  const pkg = await fetchObject(PACKAGE);
+  if (!pkg || pkg.type !== 'package') {
+    record('Core package', 'FAIL', `${PACKAGE} is not a package on this chain.`);
+  } else {
+    record('Core package', 'PASS', CORE_FROM_ENV ? PACKAGE : `${PACKAGE} (from the legacy SPLASH_PACKAGE_ID; set SPLASH_CORE_PACKAGE_ID too)`);
+  }
+
+  const anchorCap = await checkObject('AnchorCap', 'SPLASH_ANCHOR_CAP_ID', ANCHOR_CAP, typeIn('business_account::AnchorCap'), { shared: false });
+  if (anchorCap) {
+    const holder = ownerAddress(anchorCap.owner);
+    if (holder === SENDER) {
+      record('AnchorCap', 'PASS', `held by the operator ${SENDER}.`);
+    } else {
+      record('AnchorCap', 'FAIL', `held by ${holder ?? 'no address'}, not the operator ${SENDER}. Move it with rotate_anchor_cap (runbook §3.4).`);
+    }
+  }
+
+  if (await checkObject('CapRegistry', 'SPLASH_CAP_REGISTRY_ID', CAP_REGISTRY, typeIn('cap_registry::CapRegistry'), { shared: true })) {
+    record('CapRegistry', 'PASS', CAP_REGISTRY);
+  }
+  if (await checkObject('PegState', 'SPLASH_PEG_STATE_ID', PEG_STATE, typeIn('peg_monitor::PegState'), { shared: true })) {
+    record('PegState', 'PASS', PEG_STATE);
+  }
+  if (await checkObject('BusinessAccount', 'SPLASH_BUSINESS_ACCOUNT_ID', BUSINESS, typeIn('business_account::BusinessAccount'), { shared: true })) {
+    record('BusinessAccount', 'PASS', BUSINESS);
+  }
+
+  // The authority the hot key must NOT hold, read from what the operator owns,
+  // so it is checked whether or not the ids are configured. The AdminCap and
+  // the TreasuryCap go to the cold multisig (runbook §3.6) and have no
+  // break-glass; the UpgradeCap is burned, or held by the multisig (§3.2).
+  await checkNotHeld('AdminCap custody', 'business_account::AdminCap', typeIn('business_account::AdminCap'), 'Move it to the cold multisig (runbook §3.6).');
+  await checkNotHeld('TreasuryCap custody', 'business_account::TreasuryCap', typeIn('business_account::TreasuryCap'), 'Move it to the cold multisig (runbook §3.6).');
+  await checkNotHeld(
+    'UpgradeCap custody',
+    'UpgradeCap for this package',
+    '0x2::package::UpgradeCap',
+    'Burn it, or move it to the cold multisig (runbook §3.2).',
+    (o) => typeof o.json?.package === 'string' && normalizeSuiAddress(o.json.package) === PACKAGE,
+  );
+  if (ADMIN_CAP && (await checkObject('AdminCap', 'SPLASH_ADMIN_CAP_ID', ADMIN_CAP, typeIn('business_account::AdminCap'), { shared: false }))) {
+    record('AdminCap', 'PASS', ADMIN_CAP);
+  }
+}
+
+/** Everything of `type` the operator owns, every page. */
+async function ownedByOperator(type) {
+  const objects = [];
+  let cursor = null;
+  do {
+    const page = await client.core.listOwnedObjects({ owner: SENDER, type, cursor, limit: 50, include: { json: true } });
+    objects.push(...page.objects);
+    cursor = page.hasNextPage ? page.cursor : null;
+  } while (cursor);
+  return objects;
+}
+
+async function checkNotHeld(check, what, type, remedy, matches = () => true) {
+  try {
+    const held = (await ownedByOperator(type)).filter(matches);
+    if (held.length) {
+      record(
+        check,
+        NETWORK === 'mainnet' ? 'FAIL' : 'WARN',
+        `the operator holds ${held.map((o) => o.objectId).join(', ')}. ${remedy}`,
+      );
+    } else {
+      record(check, 'PASS', `the operator holds no ${what}.`);
+    }
+  } catch (e) {
+    record(check, 'FAIL', `could not list the operator's objects: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+async function checkPeg() {
+  if (!PEG_STATE) {
+    record('Peg refresh (simulated)', 'FAIL', 'needs SPLASH_PEG_STATE_ID.');
+    return;
+  }
   const tx = new Transaction();
-  tx.setGasBudget('10000000');
+  tx.setGasBudget(10_000_000);
   tx.moveCall({
     target: `${PACKAGE}::peg_monitor::update_peg`,
-    arguments: [tx.object(PEG_STATE), tx.object(ANCHOR_CAP), tx.pure.u64(0), tx.pure.u64(0), tx.object(CLOCK)],
+    arguments: [
+      tx.object(PEG_STATE),
+      tx.object(ANCHOR_CAP),
+      tx.object(CAP_REGISTRY),
+      tx.pure.u64(0),
+      tx.pure.u64(0),
+      tx.object(CLOCK),
+    ],
   });
-  const { digest } = await exec('peg refresh', tx);
-  return { flow: 'Peg refresh', ok: true, digest };
+  const { events } = await simulate('update_peg', tx);
+  if (!findEvent(events, 'peg_monitor::PegUpdated')) throw new Error(`update_peg emitted ${eventNames(events)}, not PegUpdated.`);
+  record('Peg refresh (simulated)', 'PASS', 'PegUpdated, on the AnchorCap and CapRegistry.');
 }
 
-// ── Test 2: create payment intent (transfer/invoice open) ────────────────────
-async function testCreateIntent() {
-  // WS5. The chain gets a 32-byte commitment, never the payment. The salt and
-  // the payload are written to a plaintext bundle under .tmp/ so this testnet
-  // settlement can be checked with scripts/verify-commitment.mjs; a real
-  // payment keeps them only inside the Seal bundle.
+function newCommitment() {
+  // WS5. The chain gets a 32-byte commitment, never the payment itself.
   const salt = newSalt();
   const payload = {
-    sender: signer.toSuiAddress(),
+    sender: SENDER,
     recipient: RECIPIENT,
     beneficiaryRef: '',
-    amount: 20_000_000,
-    currency: '0x2::sui::SUI',
+    amount: PAYMENT_MIST,
+    currency: SUI,
     corridor: '',
     targetCurrency: 'PHP',
-    fxRateUsdLocal: 56_420_000,
+    fxRateUsdLocal: FX_RATE_SCALED,
   };
-  const commitment = paymentCommitment(payload, salt);
+  return { salt, payload, commitment: paymentCommitment(payload, salt) };
+}
 
+function auditValues(commitment) {
+  const auditHash = createHash('sha256').update(`e2e:${toHex(commitment)}`).digest('hex');
+  return { auditHash, anchorId: `e2e:${Date.now().toString(36)}`, blobId: `e2e-no-blob:${auditHash.slice(0, 24)}` };
+}
+
+/** audit_anchor::anchor_audit_hash, as anchorAuditHashOnSui builds it. */
+function addAuditAnchor(tx, { auditHash, anchorId, blobId }) {
+  tx.moveCall({
+    target: `${PACKAGE}::audit_anchor::anchor_audit_hash`,
+    arguments: [
+      tx.object(ANCHOR_CAP),
+      tx.object(CAP_REGISTRY),
+      tx.pure.string(auditHash),
+      tx.pure.string(anchorId),
+      tx.pure.string(blobId),
+      tx.pure.address(BUSINESS),
+      tx.object(CLOCK),
+    ],
+  });
+}
+
+/** Two anchors per settlement, as in confirmComposedPaymentOnSui: the receipt
+ *  anchor (SettlementAnchored) and the audit-hash anchor (AuditAnchored). */
+function addAnchors(tx, receipt, commitment) {
+  const values = auditValues(commitment);
+  tx.moveCall({
+    target: `${PACKAGE}::audit_anchor::anchor`,
+    arguments: [
+      receipt,
+      tx.pure.vector('u8', Array.from(Buffer.from(values.auditHash, 'utf8'))),
+      tx.pure.vector('u8', Array.from(Buffer.from(values.blobId, 'utf8'))),
+      tx.object(CLOCK),
+    ],
+  });
+  addAuditAnchor(tx, values);
+}
+
+/** The AnchorCap and CapRegistry on their own: the ceremony's hand-over of
+ *  anchor authority, without a payment around it. */
+async function checkAuditAnchorSimulated() {
+  const { commitment } = newCommitment();
   const tx = new Transaction();
-  tx.setGasBudget('30000000');
+  tx.setGasBudget(20_000_000);
+  addAuditAnchor(tx, auditValues(commitment));
+  const { events } = await simulate('anchor_audit_hash', tx);
+  if (!findEvent(events, 'audit_anchor::AuditAnchored')) {
+    throw new Error(`anchor_audit_hash emitted ${eventNames(events)}, not AuditAnchored.`);
+  }
+  record('Audit anchor (simulated)', 'PASS', 'AuditAnchored, on the AnchorCap and CapRegistry.');
+}
+
+function confirmProof(events) {
+  const expected = ['payment_intent::IntentConfirmed', 'audit_anchor::SettlementAnchored', 'audit_anchor::AuditAnchored'];
+  const missing = expected.filter((name) => !findEvent(events, name));
+  if (missing.length) throw new Error(`missing ${missing.join(', ')}; emitted ${eventNames(events)}.`);
+  if (events.some((e) => e.type.endsWith('::smart_treasury::TreasuryDeposited'))) {
+    throw new Error('TreasuryDeposited was emitted. Phase 0 publishes no treasury.');
+  }
+}
+
+function openIntent(tx, commitment) {
   tx.moveCall({
     target: `${PACKAGE}::payment_intent::create_payment_intent`,
+    typeArguments: [SUI],
     arguments: [
       tx.pure.address(RECIPIENT),
-      tx.pure.u64(20_000_000), // 0.02 SUI
+      tx.pure.u64(PAYMENT_MIST),
       tx.pure.string('PHP'),
-      tx.pure.u64(56_420_000), // fx scaled 1e6
+      tx.pure.u64(FX_RATE_SCALED),
       tx.pure.vector('u8', Array.from(commitment)),
       tx.object(CLOCK),
     ],
   });
-  const { digest, events } = await exec('create payment intent', tx);
-  const created = eventBySuffix(events, '::payment_intent::IntentCreated');
+}
+
+async function checkIntentSimulated() {
+  const { commitment } = newCommitment();
+  const tx = new Transaction();
+  tx.setGasBudget(30_000_000);
+  openIntent(tx, commitment);
+  const { events } = await simulate('create_payment_intent', tx);
+  if (!findEvent(events, 'payment_intent::IntentCreated')) {
+    throw new Error(`create_payment_intent emitted ${eventNames(events)}, not IntentCreated.`);
+  }
+  record('Payment intent (simulated)', 'PASS', 'IntentCreated.');
+}
+
+/**
+ * The confirm, simulated in one transaction. A simulation cannot confirm an
+ * intent opened by another simulation, so this opens one with `create<SUI>`,
+ * which returns it instead of sharing it, confirms it through the same
+ * `confirm_payment_intent<SUI>` the app calls on the shared object, anchors
+ * both ways, and deletes the confirmed intent.
+ */
+async function checkConfirmSimulated() {
+  const { commitment } = newCommitment();
+  const tx = new Transaction();
+  tx.setGasBudget(30_000_000);
+  const [intent] = tx.moveCall({
+    target: `${PACKAGE}::payment_intent::create`,
+    typeArguments: [SUI],
+    arguments: [
+      tx.pure.address(RECIPIENT),
+      tx.pure.vector('u8', Array.from(Buffer.from('e2e', 'utf8'))),
+      tx.pure.u64(PAYMENT_MIST),
+      tx.pure.vector('u8', Array.from(Buffer.from(SUI, 'utf8'))),
+      tx.pure.vector('u8', Array.from(Buffer.from('USD-PHP', 'utf8'))),
+      tx.pure.string('PHP'),
+      tx.pure.u64(FX_RATE_SCALED),
+      tx.pure.vector('u8', Array.from(commitment)),
+      tx.object(CLOCK),
+    ],
+  });
+  const [payment] = tx.splitCoins(tx.gas, [PAYMENT_MIST]);
+  const [receipt] = tx.moveCall({
+    target: `${PACKAGE}::payment_intent::confirm_payment_intent`,
+    typeArguments: [SUI],
+    arguments: [intent, payment, tx.object(CLOCK)],
+  });
+  addAnchors(tx, receipt, commitment);
+  tx.moveCall({ target: `${PACKAGE}::payment_intent::delete_finalized`, arguments: [intent] });
+  const { events } = await simulate('confirm', tx);
+  confirmProof(events);
+  record('Confirm + anchors (simulated)', 'PASS', 'IntentConfirmed, SettlementAnchored, AuditAnchored.');
+}
+
+/** --execute: the app's two transactions, for real, on testnet. */
+async function checkPaymentExecuted() {
+  const { salt, payload, commitment } = newCommitment();
+  const open = new Transaction();
+  open.setGasBudget(30_000_000);
+  openIntent(open, commitment);
+  const opened = await execute('create_payment_intent', open);
+  const created = findEvent(opened.events, 'payment_intent::IntentCreated');
   const intentId = typeof created?.data.intent_id === 'string' ? created.data.intent_id : '';
-  if (!intentId) throw new Error(`IntentCreated missing intent_id. Digest ${digest}`);
+  if (!intentId) throw new Error(`IntentCreated missing intent_id. Digest ${opened.digest}`);
+  record('Payment intent (executed)', 'PASS', `${opened.digest}  intent ${intentId}`);
+
+  // The salt and payload go to a plaintext bundle under .tmp/, and the events
+  // of both transactions next to it, so this testnet settlement can be checked
+  // with scripts/verify-commitment.mjs. A real payment keeps the salt and
+  // payload only inside the Seal bundle.
   mkdirSync('.tmp', { recursive: true });
   const bundlePath = '.tmp/e2e-commitment-bundle.json';
   writeFileSync(
@@ -133,178 +631,99 @@ async function testCreateIntent() {
       2,
     ),
   );
-  console.log(
-    `  commitment ${toHex(commitment)} — verify with: node --experimental-strip-types scripts/verify-commitment.mjs --bundle ${bundlePath} --digest ${digest} --rpc ${BASE_URL}`,
-  );
-  return { intentId, digest };
-}
 
-// ── Test 3: confirm composed (pay + treasury deposit + audit anchor) ─────────
-async function testComposedConfirm(intentId) {
-  const paymentMist = 20_000_000;
-  const treasuryMist = 1_000_000;
-  const auditHash = createHash('sha256').update(`e2e:${intentId}`).digest('hex');
-  const anchorId = `transfer:e2e_${Date.now().toString(36)}`;
-  const blobId = `DEMO_WALRUS_${auditHash.slice(0, 24)}`;
-
-  const tx = new Transaction();
-  tx.setGasBudget('30000000');
-  const [paymentCoin] = tx.splitCoins(tx.gas, [paymentMist]);
-  // 2026-07-19 package (0xec3b06…): confirm_payment_intent returns the
-  // SettleReceipt hot-potato — it must be consumed by audit_anchor::anchor in
-  // the same PTB or the transaction aborts.
-  const [settleReceipt] = tx.moveCall({
+  const confirm = new Transaction();
+  confirm.setGasBudget(30_000_000);
+  const [payment] = confirm.splitCoins(confirm.gas, [PAYMENT_MIST]);
+  const [receipt] = confirm.moveCall({
     target: `${PACKAGE}::payment_intent::confirm_payment_intent`,
-    arguments: [tx.object(intentId), paymentCoin, tx.object(CLOCK)],
+    typeArguments: [SUI],
+    arguments: [confirm.object(intentId), payment, confirm.object(CLOCK)],
   });
-  tx.moveCall({
-    target: `${PACKAGE}::audit_anchor::anchor`,
-    arguments: [
-      settleReceipt,
-      tx.pure.vector('u8', Array.from(Buffer.from(auditHash, 'utf8'))),
-      tx.pure.vector('u8', Array.from(Buffer.from(blobId, 'utf8'))),
-      tx.object(CLOCK),
-    ],
-  });
-  if (SMART_TREASURY) {
-    const [treasuryCoin] = tx.splitCoins(tx.gas, [treasuryMist]);
-    tx.moveCall({
-      target: `${PACKAGE}::smart_treasury::deposit`,
-      typeArguments: ['0x2::sui::SUI'],
-      arguments: [tx.object(SMART_TREASURY), treasuryCoin, tx.object(CLOCK)],
-    });
-  }
-  tx.moveCall({
-    target: `${PACKAGE}::audit_anchor::anchor_audit_hash`,
-    arguments: [
-      tx.object(ANCHOR_CAP),
-      tx.pure.string(auditHash),
-      tx.pure.string(anchorId),
-      tx.pure.string(blobId),
-      tx.pure.address(BUSINESS),
-      tx.object(CLOCK),
-    ],
-  });
-  const { digest, events } = await exec('confirm composed', tx);
-  console.log(`  emitted events: ${events.map((e) => e.type.split('::').slice(-1)[0]).join(', ')}`);
-  const paid = eventBySuffix(events, '::payment_intent::IntentConfirmed') ?? eventBySuffix(events, '::payment_intent::IntentSettled');
-  const allocated = eventBySuffix(events, '::smart_treasury::TreasuryDeposited') ?? eventBySuffix(events, '::smart_treasury::Deposited');
-  const anchored = eventBySuffix(events, '::audit_anchor::AuditAnchored');
-  const settlementAnchored = eventBySuffix(events, '::audit_anchor::SettlementAnchored');
-  return {
-    digest,
-    proofEvents: { paid: !!paid, treasuryAllocated: !!allocated, anchored: !!anchored, settlementAnchored: !!settlementAnchored },
-  };
+  addAnchors(confirm, receipt, commitment);
+  const confirmed = await execute('confirm', confirm);
+  confirmProof(confirmed.events);
+  record('Confirm + anchors (executed)', 'PASS', confirmed.digest);
+
+  // IntentCreated is in the first transaction; IntentConfirmed and
+  // SettlementAnchored in the second. One file carries all three, in the
+  // `{ type, parsedJson }` shape verify-commitment reads.
+  const eventsPath = '.tmp/e2e-events.json';
+  writeFileSync(
+    eventsPath,
+    JSON.stringify([...opened.events, ...confirmed.events].map((e) => ({ type: e.type, parsedJson: e.data })), null, 2),
+  );
+  console.log(
+    `  verify the commitment: node --experimental-strip-types scripts/verify-commitment.mjs --bundle ${bundlePath} --events ${eventsPath}`,
+  );
 }
 
-// ── Test 4: batch payout via SUI-native settle_sui_batch (no DeepBook) ───────
-async function testBatch() {
-  // The batch TOTAL must clear the DeepBook pool's minSize, or
-  // peg_monitor::assert_deepbook_liquidity aborts 304 E_INSUFFICIENT_DEPTH:
-  // `get_quote_quantity_out_input_fee` leaves the whole amount unfilled
-  // (remaining_base != 0, quote_out == 0) for anything below minSize.
-  // SUI_DBUSDC on testnet has minSize = 1 SUI, so keep the total above it.
-  const rows = [
-    { recipient: RECIPIENT, amount: 700_000_000 }, // 0.7 SUI
-    { recipient: RECIPIENT, amount: 600_000_000 }, // 0.6 SUI  → 1.3 SUI total
-  ];
-  const tx = new Transaction();
-  tx.setGasBudget('30000000');
-  tx.moveCall({
-    target: `${PACKAGE}::peg_monitor::update_peg`,
-    arguments: [tx.object(PEG_STATE), tx.object(ANCHOR_CAP), tx.pure.u64(0), tx.pure.u64(0), tx.object(CLOCK)],
-  });
-  const payments = rows.map((r) =>
-    tx.moveCall({
-      target: `${PACKAGE}::settlement::new_payment`,
-      arguments: [tx.pure.address(r.recipient), tx.pure.u64(r.amount)],
-    }),
-  );
-  const paymentVec = tx.makeMoveVec({ type: `${PACKAGE}::settlement::Payment`, elements: payments });
-  // 2026-07-19 package: settle_sui_batch<QuoteAsset> now requires the
-  // ComplianceConfig and a DeepBook Pool<SUI, QuoteAsset> for the liquidity guard.
-  tx.moveCall({
-    target: `${PACKAGE}::settlement::settle_sui_batch`,
-    typeArguments: [env('DEEPBOOK_QUOTE_TYPE')],
-    arguments: [
-      tx.object(ADMIN_CAP),
-      tx.object(env('SPLASH_TREASURY_ID')), // SettlementPool<SUI>
-      tx.object(BUSINESS),
-      tx.object(PEG_STATE),
-      tx.object(env('SPLASH_COMPLIANCE_CONFIG_ID')),
-      tx.object(env('DEEPBOOK_POOL_ID')),
-      paymentVec,
-      tx.pure.u64(70), // 0.70% corridor fee
-      tx.object(CLOCK),
-    ],
-  });
-  const { digest, events } = await exec('settle sui batch', tx);
-  console.log(`  emitted events: ${events.map((e) => e.type.split('::').slice(-1)[0]).join(', ')}`);
-  return { digest, rows: rows.length };
+async function run(check, fn) {
+  try {
+    await fn();
+  } catch (e) {
+    record(check, 'FAIL', explain(e instanceof Error ? e.message : String(e)));
+  }
 }
+
+async function gated(check, functions, fn) {
+  const blocked = blockedBy(functions);
+  if (blocked) {
+    record(check, 'FAIL', blocked);
+    return;
+  }
+  await run(check, fn);
+}
+
+const CONFIRM_CALLS = [
+  'payment_intent::create',
+  'payment_intent::confirm_payment_intent',
+  'audit_anchor::anchor',
+  'audit_anchor::anchor_audit_hash',
+  'payment_intent::delete_finalized',
+];
 
 async function main() {
-  console.log(`\n▓▓ Splash live testnet e2e — gRPC write path ▓▓`);
-  console.log(`network=${NETWORK} base=${BASE_URL}`);
-  const addr = signer.getPublicKey().toSuiAddress();
-  const bal = await client.getBalance({ owner: addr, coinType: '0x2::sui::SUI' });
-  console.log(`operator=${addr.slice(0, 14)}… balance=${(Number(bal.balance.balance) / 1e9).toFixed(4)} SUI`);
-  console.log(`recipient=${RECIPIENT.slice(0, 14)}… (self-cycle)\n`);
-
-  // Config gate for the DeepBook settle_payment path (single transfer UI + batch).
-  const deepbookReady = env('DEEPBOOK_POOL_ID') && env('DEEPBOOK_QUOTE_TYPE') && env('SPLASH_COMPLIANCE_CONFIG_ID');
-
-  try {
-    results.push(await testPeg());
-    console.log(`✔ Peg refresh            ${results.at(-1).digest}`);
-  } catch (e) {
-    results.push({ flow: 'Peg refresh', ok: false, error: e.message });
-    console.log(`x Peg refresh FAILED     ${e.message}`);
+  console.log(`\nsplash_core verify — ${EXECUTE ? 'EXECUTE (testnet, real transactions)' : 'simulation, nothing is sent'}`);
+  console.log(`network=${NETWORK} rpc=${BASE_URL}`);
+  const chainId = await checkChain();
+  console.log(`chain=${chainId} package=${PACKAGE}`);
+  console.log(`operator=${SENDER} recipient=${RECIPIENT === SENDER ? 'the operator' : RECIPIENT}`);
+  if (existsSync(new URL('../data/contract-config.json', import.meta.url))) {
+    console.log('note: data/contract-config.json exists. The app lets it override these ids; this script reads the environment only.');
   }
+  console.log('');
 
-  try {
-    const { intentId, digest } = await testCreateIntent();
-    console.log(`✔ Payment intent (open)  ${digest}`);
-    console.log(`  intent=${intentId.slice(0, 18)}…`);
-    const confirm = await testComposedConfirm(intentId);
-    console.log(`✔ Composed confirm       ${confirm.digest}`);
-    console.log(`  proof events: paid=${confirm.proofEvents.paid} treasury=${confirm.proofEvents.treasuryAllocated} anchored=${confirm.proofEvents.anchored} settlementAnchored=${confirm.proofEvents.settlementAnchored}`);
-    results.push({ flow: 'Transfer/Invoice (payment_intent)', ok: true, digest, confirmDigest: confirm.digest, proof: confirm.proofEvents });
-    results.push({ flow: 'Treasury deposit (in composed tx)', ok: confirm.proofEvents.treasuryAllocated, digest: confirm.digest });
-    results.push({ flow: 'Audit anchor (in composed tx)', ok: confirm.proofEvents.anchored, digest: confirm.digest });
-  } catch (e) {
-    results.push({ flow: 'Transfer/Invoice (payment_intent)', ok: false, error: e.message });
-    console.log(`✗ Composed flow FAILED   ${e.message}`);
-  }
-
-  // Batch: the new settle_sui_batch<QuoteAsset> needs DeepBook + compliance
-  // config, and the SettlementPool must hold funds — skip cleanly when unset.
-  if (!deepbookReady) {
-    const missing = ['DEEPBOOK_POOL_ID', 'DEEPBOOK_QUOTE_TYPE', 'SPLASH_COMPLIANCE_CONFIG_ID'].filter((k) => !env(k));
-    results.push({ flow: 'Batch payout (settle_sui_batch)', ok: 'SKIP', missing });
-    console.log(`- Batch payout SKIPPED   needs ${missing.join(', ')}`);
+  checkPublishedToml(chainId);
+  await checkIds();
+  await checkAbi();
+  await gated('Peg refresh (simulated)', ['peg_monitor::update_peg'], checkPeg);
+  if (BUSINESS) {
+    await gated('Audit anchor (simulated)', ['audit_anchor::anchor_audit_hash'], checkAuditAnchorSimulated);
   } else {
-    try {
-      const batch = await testBatch();
-      console.log(`✔ Batch payout (sui)     ${batch.digest}  (${batch.rows} recipients)`);
-      results.push({ flow: 'Batch payout (settle_sui_batch)', ok: true, digest: batch.digest });
-    } catch (e) {
-      results.push({ flow: 'Batch payout (settle_sui_batch)', ok: false, error: e.message });
-      console.log(`✗ Batch payout FAILED    ${e.message}`);
+    record('Anchors', 'FAIL', 'needs SPLASH_BUSINESS_ACCOUNT_ID, which the app passes to anchor_audit_hash.');
+  }
+  await gated('Payment intent (simulated)', ['payment_intent::create_payment_intent'], checkIntentSimulated);
+  if (BUSINESS) await gated('Confirm + anchors (simulated)', CONFIRM_CALLS, checkConfirmSimulated);
+  if (EXECUTE) {
+    // Real transactions only after a clean simulation: gas spent on a
+    // transaction the simulation already refused proves nothing.
+    if (results.some((r) => r.status === 'FAIL')) {
+      console.log('- --execute skipped: fix the failures above first.');
+    } else {
+      await run('Payment (executed)', checkPaymentExecuted);
     }
   }
 
-  console.log(`\n── summary ──`);
-  for (const r of results) {
-    const status = r.ok === true ? 'PASS' : r.ok === false ? 'FAIL' : r.ok;
-    console.log(`  [${status}] ${r.flow}${r.digest ? `  ${r.digest}` : ''}${r.error ? `  — ${r.error}` : ''}${r.missing ? `  — needs ${r.missing.join(', ')}` : ''}`);
-  }
-  const hardFail = results.some((r) => r.ok === false);
-  console.log(`\n${hardFail ? '✗ some flows failed' : '✔ all runnable flows passed'}\n`);
-  process.exit(hardFail ? 1 : 0);
+  const failed = results.filter((r) => r.status === 'FAIL');
+  const warned = results.filter((r) => r.status === 'WARN');
+  console.log(
+    `\n${failed.length ? `✗ ${failed.length} failed` : '✔ every check passed'}${warned.length ? `, ${warned.length} warning(s)` : ''}\n`,
+  );
+  process.exitCode = failed.length ? 1 : 0;
 }
 
 main().catch((e) => {
-  console.error('FATAL', e);
-  process.exit(1);
+  if (!(e instanceof Refused)) console.error('FATAL', e);
+  process.exitCode = 1;
 });

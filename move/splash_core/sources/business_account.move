@@ -961,11 +961,10 @@ public fun discard_approval(approval: PayoutApproval) {
 /// can MOVE anchor authority and can never manufacture a second concurrent
 /// holder.
 ///
-/// The honest cost: if the live cap is LOST rather than rotated, anchoring is
-/// bricked and this function cannot help, because there is no old cap to
-/// consume. That recovery is Phase 7's break-glass and is not built yet — it
-/// is the reason this package must not be published as immutable until Phase 7
-/// lands.
+/// If the live cap is LOST rather than rotated, this function cannot help,
+/// because there is no old cap to consume. That recovery is the break-glass
+/// below, which needs no old cap: `arm_break_glass_anchor_cap`, then
+/// `execute_break_glass_anchor_cap` inside the ninety-second window.
 public fun rotate_anchor_cap(
     _: &AdminCap,
     retired: AnchorCap,
@@ -1018,13 +1017,13 @@ public fun destroy_anchor_cap(cap: AnchorCap) {
 /// creates this capability is the same bump that kills the previous one, in one
 /// transaction, so there is still never a second concurrent holder.
 ///
-/// There is no delay, and `cap_registry`'s module comment argues that at
-/// length: a delay would protect against an `AdminCap` that already holds
-/// strictly more authority than the cap being rotated, and would hand a thief
-/// a window.
+/// There is no notice period, only the ninety-second commit window, and
+/// `cap_registry`'s module comment argues that at length: a notice period would
+/// protect against an `AdminCap` that already holds strictly more authority
+/// than the cap being rotated, and would hand a thief a window.
 ///
 /// Operational cost, which is real: the operator server's cap dies the instant
-/// this lands, and anchoring fails until the new object id is deployed. The
+/// the execute lands, and anchoring fails until the new object id is deployed. The
 /// `CapabilityRevoked` event is the signal. See the key-ceremony runbook.
 public fun arm_break_glass_anchor_cap(
     _: &AdminCap,

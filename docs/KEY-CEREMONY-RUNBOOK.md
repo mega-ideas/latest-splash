@@ -327,21 +327,50 @@ Also commit the regenerated `move/splash_core/Published.toml`.
 ```bash
 node --use-system-ca --experimental-strip-types --env-file=.env.local scripts/e2e-testnet.mjs
 ```
-Update the script before relying on it. It predates Phase 7: its `update_peg`
-and `anchor_audit_hash` calls pass no `CapRegistry`, and both functions now take
-one (`peg_monitor::update_peg`, `audit_anchor::anchor_audit_hash`). Its
-`create_payment_intent` and `confirm_payment_intent` calls pass no type argument,
-and both are now generic over the coin type. Against the new package those calls
-fail.
+It takes the network and node from `lib/sui.ts`, as the app does, and
+SIMULATES every transaction: the node runs it as `OPERATOR_SUI_ADDRESS` would
+and reports the result. Nothing is signed or sent and no gas is spent, so run
+it on mainnet too. It runs as the operator address and never reads the key. It
+reads the same ids as the app (`SPLASH_CORE_PACKAGE_ID`, falling back to
+`SPLASH_PACKAGE_ID`; `SPLASH_ANCHOR_CAP_ID`; `SPLASH_CAP_REGISTRY_ID`;
+`SPLASH_PEG_STATE_ID`; `SPLASH_BUSINESS_ACCOUNT_ID`; `SPLASH_ADMIN_CAP_ID` when
+set) and checks, on the core package only:
+- the package id matches `move/splash_core/Published.toml` for the chain (a
+  failure if it names another package, a warning if the file has no record
+  for this chain);
+- every id exists and belongs to that package;
+- the operator holds the `AnchorCap`, and holds none of the package's
+  `AdminCap`, `TreasuryCap` or `UpgradeCap` (read from what the operator owns,
+  so the ids need not be set; a failure on mainnet, a warning on testnet). The
+  first two go to the cold multisig in §3.6; the `UpgradeCap` is burned or held
+  by the multisig (§3.2);
+- every function it calls takes the parameters the current source declares. A
+  failure here means the package was published from different source: publish
+  the current `splash_core` (§3.2). The checks that call a mismatched function
+  report that instead of running;
+- `peg_monitor::update_peg` on the AnchorCap and CapRegistry emits `PegUpdated`;
+- `audit_anchor::anchor_audit_hash` on its own emits `AuditAnchored`;
+- `payment_intent::create_payment_intent<SUI>` emits `IntentCreated`;
+- `confirm_payment_intent<SUI>`, then `audit_anchor::anchor` on its receipt and
+  `audit_anchor::anchor_audit_hash`, emit `IntentConfirmed`,
+  `SettlementAnchored` and `AuditAnchored`, and no `TreasuryDeposited`.
+  A simulation cannot confirm an intent another simulation opened, so this
+  check opens one with `payment_intent::create`, confirms it, and deletes it,
+  all in one transaction.
 
-Once it is updated, expect peg refresh, payment intent, and composed confirm to
-pass with `IntentConfirmed + SettlementAnchored + AuditAnchored`. Phase 0 has no
-`SmartTreasury`, so leave `SPLASH_SMART_TREASURY_SUI_ID` unset: the script skips
-the treasury deposit, no `TreasuryDeposited` is emitted, and its summary marks the
-treasury row FAIL for that reason. The batch test calls `settlement`, a custody
-module, so it cannot pass in Phase 0; the script skips it when
-`DEEPBOOK_QUOTE_TYPE` is unset. The peg and anchor calls run on the AnchorCap. If
-they abort, the cap id or the registry id is wrong.
+It exits 1 on any failure. If the peg or anchor calls abort with 210, the
+AnchorCap was revoked: a break-glass execute moved its generation on, and the
+cap to use is the one `execute_break_glass_anchor_cap` minted. A cap or registry
+from another publish fails the id checks instead, as the wrong type. The
+treasury and batch payouts are custody modules and are not checked; they
+publish with the licence.
+
+`--execute` sends the intent and the confirm for real, as the app does, signed
+with `OPERATOR_SUI_PRIVATE_KEY`. It runs only after a clean simulation and only
+on testnet (the node's chain id decides); the peg call stays simulated, because
+the script has no attested reading to write. It prints the
+`scripts/verify-commitment.mjs` command that checks the settlement's events
+against the commitment.
 
 ---
 
@@ -400,8 +429,8 @@ green.
 
 **Also note:** the batch total must exceed the pool's `minSize` (1 SUI on
 SUI/DBUSDC). Below it DeepBook fills nothing and returns a zero quote, which the
-guard correctly rejects. The e2e batch was 0.009 SUI — 100× too small — and is
-now 1.3 SUI.
+guard correctly rejects. The e2e batch was 0.009 SUI — 100× too small — and
+became 1.3 SUI.
 
 **Testnet risk parameters were widened deliberately.** `max_slippage_bps` was
 raised 30 → 150 via `scripts/set-compliance-config.mjs`, because the testnet
@@ -409,9 +438,17 @@ book's spread is ~43 bps and a mainnet-grade 30 bps band captures zero bids.
 **Mainnet must keep the tight value** — the script hard-refuses >50 bps on
 mainnet.
 
-**After this publish**, re-run `scripts/e2e-testnet.mjs`; the batch flow should
-settle for real. If it still aborts 304, re-measure the book — testnet depth
-moves.
+**After this publish**, prove a batch settles for real. That needs
+`splash_custody`, which publishes only with the licence, and
+`scripts/e2e-testnet.mjs` no longer runs a batch: since 2026-09-26 it checks the
+core package only (§3.8). Its last batch flow (`testBatch` in
+`git show 248137e:scripts/e2e-testnet.mjs`) is stale too: its `update_peg`
+passes no `CapRegistry`, it calls `settlement` on the core package id, and it
+calls `settle_sui_batch` with the `AdminCap`. Build the proof from the app's
+batch path instead, `recordBatchSettlementOnSui` in
+`lib/server/sui-settlement.ts`, which calls
+`splash_custody::settlement::settle_sui_batch_delegated`. If a batch still
+aborts 304, re-measure the book — testnet depth moves.
 
 ---
 

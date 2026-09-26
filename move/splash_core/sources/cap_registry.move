@@ -27,9 +27,10 @@
 /// asserts against the registry, and `scripts/check-cap-generations.mjs` fails
 /// the build if a new consumer forgets to.
 ///
-/// `AdminCap` can bump a generation. Doing so mints exactly one replacement and
-/// kills every outstanding cap of that kind in the same transaction. So it
-/// answers both holes with one lever, and it does NOT restore what Phase 6
+/// `AdminCap` can bump a generation, in two transactions: it arms the bump,
+/// then executes it inside a ninety-second commit window (`ARM_WINDOW_MS`). The
+/// execute mints exactly one replacement and kills every outstanding cap of that
+/// kind in the same transaction. So it answers both holes with one lever, and it does NOT restore what Phase 6
 /// removed: there is still never a second concurrent holder, because the bump
 /// that creates the new cap is the same bump that kills the old.
 ///
@@ -144,7 +145,10 @@ public struct BreakGlassArmed has copy, drop {
     expires_at_ms: u64,
 }
 
-/// Emitted when an arming lapses or is abandoned without revoking anything.
+/// Emitted when an arming is abandoned without revoking anything
+/// (`business_account::cancel_break_glass`). A lapse emits nothing: the execute
+/// that finds it lapsed aborts, which reverts its emit, so `expired` is `false`
+/// in every event that lands.
 public struct BreakGlassCleared has copy, drop {
     registry_id: address,
     kind: u8,
@@ -199,16 +203,19 @@ public fun is_current(registry: &CapRegistry, kind: u8, generation: u64): bool {
 }
 
 // ─── The lever ─────────────────────────────────────────────────────────────
+//
+// `arm` records a revocation, `bump` consumes it inside the ninety-second
+// window and moves the generation, and `disarm` abandons it. All three are
+// `public(package)` on purpose. The generation and the replacement capability
+// must move together — a bump without a mint leaves the kind unusable, and a
+// mint without a bump is the arbitrary minting Phase 6 deleted. Exposing them
+// publicly would let those halves be called separately, so the only callers
+// are the break-glass functions: `business_account::arm_break_glass_anchor_cap`,
+// `execute_break_glass_anchor_cap` and `cancel_break_glass`, and
+// `compliance_config::arm_break_glass_compliance_cap` and
+// `execute_break_glass_compliance_cap`. Each execute bumps and mints in one
+// transaction.
 
-/// Bump a generation, killing every outstanding capability of that kind.
-///
-/// `public(package)` on purpose. The generation and the replacement capability
-/// must move together — a bump without a mint leaves the kind unusable, and a
-/// mint without a bump is the arbitrary minting Phase 6 deleted. Exposing this
-/// publicly would let those two halves be called separately, so the only
-/// callers are `business_account::break_glass_anchor_cap` and
-/// `compliance_config::break_glass_compliance_cap`, each of which does both in
-/// one transaction.
 /// Arm a revocation. Nothing is revoked yet.
 ///
 /// `public(package)`, called by `business_account::arm_break_glass_anchor_cap`
@@ -268,8 +275,11 @@ public(package) fun bump(
 
     let now = clock::timestamp_ms(clock);
     if (now >= registry.armed.borrow().expires_at_ms) {
-        // Clear it on the way out, so the operator's next `arm` is a plain arm
-        // rather than a puzzle about why the registry says something is pending.
+        // The abort below reverts this clear and this event, so neither lands:
+        // a lapsed arming stays in the registry until the next `arm`
+        // overwrites it (an expired arming counts as nothing) or
+        // `cancel_break_glass` clears it, emitting BreakGlassCleared with
+        // `expired` false.
         let dead = registry.armed.extract();
         event::emit(BreakGlassCleared {
             registry_id: object::uid_to_address(&registry.id),
