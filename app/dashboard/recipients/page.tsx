@@ -9,6 +9,8 @@ import DashPageHeader from '@/components/dashboard/DashPageHeader';
 import QuickLinksCard from '@/components/dashboard/QuickLinksCard';
 import StatusBadge from '@/components/StatusBadge';
 import type { RecipientRecord } from '@/lib/server/operations';
+import { useLaunchScope } from '@/components/dashboard/CustodyPhaseContext';
+import { LAUNCH_SCOPE_WHY } from '@/lib/launch-scope-rules';
 
 const corridorBreakdown = [
   { country: 'PH', count: 2, percent: 40 },
@@ -22,7 +24,11 @@ export default function RecipientsPage() {
   const [showAddForm, setShowAddForm] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [form, setForm] = useState({ name: '', country: 'PH', bank: '', swift: '', account: '' });
-  const [method, setMethod] = useState<'BANK' | 'WALLET'>('BANK');
+  const [chosenMethod, setMethod] = useState<'BANK' | 'WALLET'>('BANK');
+  // A USDC-only launch pays no bank recipient (lib/launch-scope-rules.ts):
+  // the form offers wallets only, rather than a bank form the route refuses.
+  const bankOpen = useLaunchScope() !== 'stablecoin';
+  const method = bankOpen ? chosenMethod : 'WALLET';
   const [walletForm, setWalletForm] = useState({ name: '', country: 'PH', walletAddress: '', walletProvider: 'SLUSH', attestKnownRecipient: false });
   const [formError, setFormError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -50,8 +56,9 @@ export default function RecipientsPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(form),
     });
-    if (!response.ok) return toast.error('Recipient could not be added');
-    const newRecipient = (await response.json()) as RecipientRecord;
+    const body = (await response.json().catch(() => ({}))) as RecipientRecord & { error?: string };
+    if (!response.ok) return toast.error(body.error ?? 'Recipient could not be added');
+    const newRecipient = body;
     setRecipients((prev) => [...prev, newRecipient]);
     setForm({ name: '', country: 'PH', bank: '', swift: '', account: '' });
     setShowAddForm(false);
@@ -112,7 +119,7 @@ export default function RecipientsPage() {
         <div className="rounded-xl border border-[#326273]/10 bg-white p-4">
           <h2 className="text-lg font-semibold text-[#326273]">Add new recipient</h2>
           <div role="radiogroup" aria-label="How they are paid" className="mt-3 inline-flex rounded-lg border border-[#326273]/15 bg-[#F6F0ED] p-1">
-            {([['BANK', 'Business bank account', Building2], ['WALLET', 'Crypto wallet · USDC on Sui', Wallet]] as const).map(([value, label, Icon]) => (
+            {([['BANK', 'Business bank account', Building2], ['WALLET', 'Crypto wallet · USDC on Sui', Wallet]] as const).filter(([value]) => bankOpen || value === 'WALLET').map(([value, label, Icon]) => (
               <button
                 key={value}
                 type="button"
@@ -125,6 +132,7 @@ export default function RecipientsPage() {
               </button>
             ))}
           </div>
+          {!bankOpen ? <p className="mt-2 text-[13px] text-[#326273]/90">{LAUNCH_SCOPE_WHY} Recipients are Sui wallets for now.</p> : null}
           {method === 'WALLET' ? (
             <div className="mt-3 space-y-3">
               <div className="grid gap-3 md:grid-cols-2">

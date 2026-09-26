@@ -1,4 +1,5 @@
 import { custodyPhaseEnabled, type CustodyConfig } from './custody-phase.ts';
+import { stablecoinOnly } from './launch-scope.ts';
 
 /**
  * Where an invoice's payer is told to send the money, or null when Splash may
@@ -24,5 +25,8 @@ const SPLASH_COLLECTION_ACCOUNT = {
 export type PayLinkBankInstructions = typeof SPLASH_COLLECTION_ACCOUNT;
 
 export function payLinkBankInstructions(config?: CustodyConfig): PayLinkBankInstructions | null {
+  // A USDC-only launch collects nothing in fiat, custody or not
+  // (lib/launch-scope-rules.ts).
+  if (stablecoinOnly()) return null;
   return custodyPhaseEnabled(config) ? SPLASH_COLLECTION_ACCOUNT : null;
 }

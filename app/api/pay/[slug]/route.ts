@@ -8,6 +8,7 @@ import { findInvoiceBySlug, patchInvoiceForStaff } from '@/lib/server/invoices-s
 import { payLinkBankInstructions } from '@/lib/server/pay-link';
 import { findIssuerForPayLink, upsertRecipientFromInvoice } from '@/lib/server/recipients-store';
 import { publicUsdcForSlug } from '@/lib/server/usdc-invoice-payments';
+import { refuseOutsideLaunchScope, stablecoinOnly } from '@/lib/server/launch-scope';
 
 const paidSchema = z.object({
   payerOrgName: z.string().trim().min(2),
@@ -34,6 +35,7 @@ async function publicInvoice(slug: string) {
     // A Splash collection account only once Splash may hold the funds; null in
     // Phase 0, and the payer pays the issuer directly.
     bankInstructions: payLinkBankInstructions(),
+    bankReports: !stablecoinOnly(),
     usdc: await publicUsdcForSlug(slug),
   };
 }
@@ -56,6 +58,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
     message: 'Too many payment submissions from this network. Try again shortly.',
   });
   if (limited) return limited;
+  const outOfScope = refuseOutsideLaunchScope();
+  if (outOfScope) return outOfScope;
 
   const { slug } = await params;
   const invoice = await findInvoiceBySlug(slug);

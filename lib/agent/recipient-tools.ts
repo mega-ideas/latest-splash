@@ -29,6 +29,7 @@ import type { RecipientRecord } from '@/lib/server/operations';
 import type { KybLifecycleState } from '@/lib/compliance/kyb-state';
 import { laneAccess } from '@/lib/payments/stablecoin-lane';
 import { walletSendable } from '@/lib/server/wallet-screening';
+import { launchScope, laneInScope, LAUNCH_SCOPE_WHY } from '@/lib/server/launch-scope';
 import { zekeLaneState } from './zeke-lane-guard';
 
 export type RecipientMatch = {
@@ -79,6 +80,20 @@ function describe(record: RecipientRecord, ctx: DescribeContext): RecipientMatch
   // A bank payout is the fiat lane. For a business still in verification it
   // is locked however complete the record is — say that first, because it is
   // the reason that no amount of record-filling fixes.
+  // In a USDC-only launch no bank recipient is payable, whatever the
+  // verification — and verification is not what would change it.
+  if (!laneInScope('FIAT_OUT_LOCAL', launchScope())) {
+    return {
+      id: record.id,
+      name: record.name,
+      country: record.country,
+      bank: record.bank,
+      tier: record.tier,
+      payoutMethod: 'BANK',
+      payable: false,
+      blockedBecause: `${LAUNCH_SCOPE_WHY} Pay a Sui wallet recipient instead.`,
+    };
+  }
   const fiat = laneAccess(ctx.state, 'FIAT_OUT_LOCAL');
   if (!fiat.allowed) {
     return {

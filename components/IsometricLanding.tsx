@@ -989,7 +989,7 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
           <div className="iso-shell cin-footer-bar-inner">
             <span>{BRAND.copyright()}</span>
             <span className="cin-footer-tick">
-              USD → PHP · {lockedCopy.speed} · {lockedCopy.fee} · zero-fee USD rail on Sui, gas-sponsored settlement — you never hold SUI
+              USDC transfers carry no Splash fee · {lockedCopy.speed} · {lockedCopy.fee}
             </span>
           </div>
         </div>

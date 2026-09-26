@@ -6,6 +6,7 @@ import { organizations } from '@/lib/db/schema';
 import { laneAccess, parseUsdcMinor, StablecoinLaneError } from '@/lib/payments/stablecoin-lane';
 import { treasuryQuote, type MarketInput } from '@/lib/payments/treasury-usdy';
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
+import { refuseOutsideLaunchScope } from '@/lib/server/launch-scope';
 import { RATE_LIMITS, enforceRateLimit } from '@/lib/server/rate-limit';
 import { readJsonBody } from '@/lib/server/http';
 import { requireSessionAccount } from '@/lib/server/session-account';
@@ -22,6 +23,8 @@ export const dynamic = 'force-dynamic';
 export async function POST(request: Request) {
   const auth = await requireCustomerRequest(request);
   if (auth.response) return auth.response;
+  const outOfScope = refuseOutsideLaunchScope();
+  if (outOfScope) return outOfScope;
   // Each quote makes an outside call (the Sui DEX route finder).
   const limited = await enforceRateLimit({ rule: RATE_LIMITS.treasuryQuoteUser, key: auth.session.email });
   if (limited) return limited;

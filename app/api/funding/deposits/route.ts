@@ -6,6 +6,7 @@ import {
   ingestStablecoinDeposit,
 } from '@/lib/server/funding-intake';
 import { readJsonBody } from '@/lib/server/http';
+import { refuseOutsideLaunchScope } from '@/lib/server/launch-scope';
 
 const depositSchema = z.object({
   sessionId: z.string().trim().min(1),
@@ -24,6 +25,8 @@ const depositSchema = z.object({
 export async function POST(request: Request) {
   try {
     assertFundingWebhookSecret(request.headers.get('x-funding-webhook-secret'));
+    const outOfScope = refuseOutsideLaunchScope();
+    if (outOfScope) return outOfScope;
     const parsed = depositSchema.safeParse(await readJsonBody(request));
     if (!parsed.success) return NextResponse.json({ error: 'Invalid deposit event' }, { status: 400 });
     const session = await ingestStablecoinDeposit(parsed.data);

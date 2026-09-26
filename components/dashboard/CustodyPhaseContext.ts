@@ -2,6 +2,8 @@
 
 import { createContext, useContext } from 'react';
 
+import type { LaunchScope } from '@/lib/launch-scope-rules';
+
 /**
  * Whether the custody phase is on, as app/dashboard/layout.tsx resolved it on
  * the server (`custodyPhaseEnabled()`, handed to DashboardShell in `locks`).
@@ -30,4 +32,16 @@ export const SweepSwitchContext = createContext(false);
 
 export function useSweepSwitchOn(): boolean {
   return useContext(SweepSwitchContext);
+}
+
+/**
+ * The launch scope (`launchScope()`, resolved by the same layout). In a
+ * USDC-only launch the pages hide what the routes would refuse: bank
+ * recipients, invoice documents, treasury previews. Defaults to 'full':
+ * outside the shell nothing is hidden, and the routes still refuse.
+ */
+export const LaunchScopeContext = createContext<LaunchScope>('full');
+
+export function useLaunchScope(): LaunchScope {
+  return useContext(LaunchScopeContext);
 }

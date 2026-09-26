@@ -13,6 +13,7 @@ import { requireSessionAccount } from '@/lib/server/session-account';
 import { patchAuditReceipt } from '@/lib/server/transfers-store';
 import { sealAdapter } from '@/lib/server/seal';
 import { retrieveBlob } from '@/lib/server/walrus';
+import { LAUNCH_SCOPE_REASON, stablecoinOnly } from '@/lib/server/launch-scope';
 
 const schema = z.object({ invoiceId: z.string().min(1) });
 
@@ -53,6 +54,23 @@ export async function POST(request: Request) {
   // authorize button would refuse. Both the record's currency and the one read
   // off the document count; a currency the parser could not read ('') does
   // not, and then the record decides (lib/payments/stablecoin-lane.ts).
+  // A USDC-only launch opens no payout from an invoice at all: every route
+  // this loop leads to answers 403 (lib/launch-scope-rules.ts). Said here,
+  // before a recommendation the transfer page would refuse.
+  if (stablecoinOnly()) {
+    const refused: CopilotSuggestion = {
+      suggestionId: `invoice_${invoice.id}`,
+      type: 'invoice',
+      title: 'Refused: invoice payouts are not open in this launch',
+      description: LAUNCH_SCOPE_REASON,
+      confidence: extraction.confidence,
+      requiresAuth: false,
+      suggestedAction: 'scope:stablecoin',
+      blocked: { lane: 'LAUNCH_SCOPE', reason: LAUNCH_SCOPE_REASON },
+    };
+    return NextResponse.json({ extraction, suggestion: refused });
+  }
+
   const localCurrency = invoiceLocalCurrency(invoice.targetCurrency, extraction.currency);
   if (localCurrency) {
     const state = await zekeLaneState(accountCheck.account.orgId);

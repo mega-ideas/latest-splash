@@ -13,6 +13,7 @@ import { sealAdapter } from '@/lib/server/seal';
 import { anchorAuditHashOnSui } from '@/lib/server/sui-settlement';
 import { accrueDailyYield } from '@/lib/server/treasury';
 import { storeEncryptedInvoice } from '@/lib/server/walrus';
+import { refuseOutsideLaunchScope } from '@/lib/server/launch-scope';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
@@ -32,6 +33,8 @@ async function handleAccrual(request: Request) {
   if (!isAuthorized(request)) {
     return NextResponse.json({ success: false, error: 'unauthorized' }, { status: 401 });
   }
+  const outOfScope = refuseOutsideLaunchScope();
+  if (outOfScope) return outOfScope;
   // Phase 0: there is no treasury to accrue against. Nothing is written and
   // nothing is anchored; the scheduler sees the same licence-named refusal
   // a customer would.

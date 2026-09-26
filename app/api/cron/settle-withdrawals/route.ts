@@ -16,6 +16,7 @@ import { NextResponse } from 'next/server';
 import { custodyPhaseEnabled, custodyPhaseResponse } from '@/lib/server/custody-phase';
 import { readJsonBody } from '@/lib/server/http';
 import { settleDueWithdrawals } from '@/lib/server/treasury';
+import { refuseOutsideLaunchScope } from '@/lib/server/launch-scope';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
@@ -41,6 +42,8 @@ async function handleSettlement(request: Request) {
   if (!isAuthorized(request)) {
     return NextResponse.json({ success: false, error: 'unauthorized' }, { status: 401 });
   }
+  const outOfScope = refuseOutsideLaunchScope();
+  if (outOfScope) return outOfScope;
   // Phase 0: no treasury, so no withdrawal notices to settle.
   if (!custodyPhaseEnabled()) return custodyPhaseResponse();
 

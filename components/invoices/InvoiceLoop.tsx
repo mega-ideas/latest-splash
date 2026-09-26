@@ -32,6 +32,8 @@ import { stashBatchDraft } from '@/lib/batch-parse';
 import { confidencePercent } from '@/lib/confidence';
 import type { CopilotSuggestion } from '@/lib/server/copilot';
 import type { InvoiceRecord } from '@/lib/server/operations';
+import { useLaunchScope } from '@/components/dashboard/CustodyPhaseContext';
+import { LAUNCH_SCOPE_WHY } from '@/lib/launch-scope-rules';
 
 /** From /api/copilot/extract-invoice. currency and recipient are '' when the
  *  parser could not read them; confidence is null when nothing measured it. */
@@ -47,6 +49,7 @@ const invoicePromptChips: OxWalComposerChip[] = [
 ];
 
 export default function InvoiceLoop() {
+  const documentsOpen = useLaunchScope() !== 'stablecoin';
   const router = useRouter();
   const [invoices, setInvoices] = useState<InvoiceRecord[]>([]);
   const [selected, setSelected] = useState<InvoiceRecord | null>(null);
@@ -93,13 +96,13 @@ export default function InvoiceLoop() {
     },
     {
       label: 'Zeke draft',
-      detail: suggestion?.blocked ? 'Refused: business not verified' : suggestion ? 'Route recommendation ready' : selected ? 'Ready for extraction' : 'Needs invoice first',
+      detail: suggestion?.blocked ? (suggestion.blocked.lane === 'LAUNCH_SCOPE' ? 'Refused: not open in this launch' : 'Refused: business not verified') : suggestion ? 'Route recommendation ready' : selected ? 'Ready for extraction' : 'Needs invoice first',
       state: suggestion?.blocked ? 'warning' : suggestion ? 'complete' : selected ? 'active' : 'locked',
       icon: Sparkles,
     },
     {
       label: 'Payment intent',
-      detail: suggestion?.blocked ? 'Locked until verification' : suggestion ? 'Transfer flow is unlocked' : 'Requires a recommendation',
+      detail: suggestion?.blocked ? (suggestion.blocked.lane === 'LAUNCH_SCOPE' ? 'Not open in this launch' : 'Locked until verification') : suggestion ? 'Transfer flow is unlocked' : 'Requires a recommendation',
       state: suggestion && !suggestion.blocked ? 'active' : 'locked',
       icon: Route,
     },
@@ -158,9 +161,9 @@ export default function InvoiceLoop() {
           documentBase64,
         }),
       });
-      const result = (await response.json()) as { invoice?: InvoiceRecord };
+      const result = (await response.json().catch(() => ({}))) as { invoice?: InvoiceRecord; error?: string };
       if (!response.ok || !result.invoice) {
-        toast.error('Invoice upload failed');
+        toast.error(result.error ?? 'Invoice upload failed');
         return;
       }
       setSelected(result.invoice);
@@ -327,7 +330,16 @@ export default function InvoiceLoop() {
           </section>
 
           <section className="grid gap-4 lg:grid-cols-[0.95fr_1.05fr]">
-            <UploadPanel uploading={uploading} onUpload={(file) => void upload(file)} />
+            {documentsOpen ? (
+              <UploadPanel uploading={uploading} onUpload={(file) => void upload(file)} />
+            ) : (
+              // A USDC-only launch stores no invoice documents and pays out no
+              // local currency, which is where this loop leads.
+              <section className="dash-surface p-5 text-sm leading-6 text-[#326273]">
+                <strong className="block text-[#1F4452]">Invoice uploads are not open yet</strong>
+                {LAUNCH_SCOPE_WHY} Create an invoice without a document to get a pay link payers can settle in USDC on Sui.
+              </section>
+            )}
             <InvoicePanel invoices={invoices} selected={selected} onSelect={chooseInvoice} />
           </section>
 
@@ -702,10 +714,10 @@ function IntentPanel({ selected, suggestion, href }: { selected: InvoiceRecord |
           </div>
         </div>
         <Link
-          href="/dashboard/setup"
+          href={suggestion.blocked.lane === 'LAUNCH_SCOPE' ? '/dashboard/send-usdc' : '/dashboard/setup'}
           className="mt-4 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#0C3E48] px-4 py-2 text-sm font-bold text-white shadow-[0_12px_24px_rgba(12,62,72,0.2)] transition hover:bg-[#145D6A] focus-ring"
         >
-          Finish verification
+          {suggestion.blocked.lane === 'LAUNCH_SCOPE' ? 'Send USDC' : 'Finish verification'}
           <ArrowRight className="h-4 w-4" />
         </Link>
       </section>

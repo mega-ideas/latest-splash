@@ -4,8 +4,9 @@ import Image from 'next/image';
 import { useState, type ReactNode } from 'react';
 import FloatingCopilot from '@/components/FloatingCopilot';
 import DashboardHeader from '@/components/DashboardHeader';
-import { CustodyPhaseContext, SweepSwitchContext } from '@/components/dashboard/CustodyPhaseContext';
+import { CustodyPhaseContext, LaunchScopeContext, SweepSwitchContext } from '@/components/dashboard/CustodyPhaseContext';
 import type { CustomerSession } from '@/lib/auth/customer-session';
+import { LAUNCH_SCOPE_REASON, type LaunchScope } from '@/lib/launch-scope-rules';
 import {
   Bot,
   FileText,
@@ -84,7 +85,27 @@ type DashboardShellProps = {
   /** The operator's sweep switch (`sweepAccountEnabled()`), resolved by the
    *  same layout. Separate from `locks` because it needs no database. */
   sweepOn?: boolean;
+  /** The launch scope (lib/server/launch-scope.ts), resolved by the same
+   *  layout. Needs no database, so it locks even when `locks` is absent. */
+  launchScope?: LaunchScope;
 };
+
+/** The pages a USDC-only launch does not open; their routes answer 403. */
+const OUT_OF_STABLECOIN_SCOPE = ['/dashboard/transfer', '/dashboard/transfers', '/dashboard/batch', '/dashboard/treasury'];
+
+/** Why a page is closed, and where to go instead. The launch scope answers
+ *  first: no verification or setup step opens what this launch leaves out. */
+function pageLock(
+  href: string,
+  locks: DashboardShellProps['locks'],
+  scope: LaunchScope | undefined,
+): { reason: string; href: string; action: string } | null {
+  if (scope === 'stablecoin' && OUT_OF_STABLECOIN_SCOPE.includes(href)) {
+    return { reason: LAUNCH_SCOPE_REASON, href: '/dashboard/send-usdc', action: 'Send USDC' };
+  }
+  const reason = locks ? lockReasonFor(href, locks) : null;
+  return reason ? { reason, href: '/dashboard/setup', action: 'Finish account setup' } : null;
+}
 
 /**
  * The Stablecorp-pattern lock table. Zeke and Overview stay open at every
@@ -122,7 +143,7 @@ function lockReasonFor(
   return null;
 }
 
-export default function DashboardShell({ children, session, kyb, locks, sweepOn }: DashboardShellProps) {
+export default function DashboardShell({ children, session, kyb, locks, sweepOn, launchScope }: DashboardShellProps) {
   const [collapsed,  setCollapsed]  = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const router   = useRouter();
@@ -187,11 +208,12 @@ export default function DashboardShell({ children, session, kyb, locks, sweepOn 
               <div className="space-y-0.5">
                 {group.items.map(({ label, href, icon: Icon, badge }) => {
                   const active = pathname === href;
-                  const lockReason = locks ? lockReasonFor(href, locks) : null;
+                  const lock = pageLock(href, locks, launchScope);
+                  const lockReason = lock?.reason ?? null;
                   return (
                     <Link
                       key={href}
-                      href={lockReason ? '/dashboard/setup' : href}
+                      href={lock ? lock.href : href}
                       aria-disabled={lockReason ? true : undefined}
                       title={lockReason ?? (collapsed ? label : undefined)}
                       className={`relative flex items-center rounded-lg px-2 py-2 text-sm transition-colors ${
@@ -319,14 +341,14 @@ export default function DashboardShell({ children, session, kyb, locks, sweepOn 
                 <Link
                   key={href}
                   onClick={() => setMobileOpen(false)}
-                  href={locks && lockReasonFor(href, locks) ? '/dashboard/setup' : href}
+                  href={pageLock(href, locks, launchScope)?.href ?? href}
                   className={`flex items-center gap-3 rounded-xl px-4 py-3 text-white transition-colors hover:bg-white/10 ${
                     pathname === href ? 'bg-white/15' : ''
                   }`}
                 >
                   <Icon size={20} />
-                  <span className={`font-medium ${locks && lockReasonFor(href, locks) ? 'opacity-50' : ''}`}>{label}</span>
-                  {locks && lockReasonFor(href, locks) ? <Lock size={14} aria-hidden="true" className="ml-auto text-white/80" /> : null}
+                  <span className={`font-medium ${pageLock(href, locks, launchScope) ? 'opacity-50' : ''}`}>{label}</span>
+                  {pageLock(href, locks, launchScope) ? <Lock size={14} aria-hidden="true" className="ml-auto text-white/80" /> : null}
                 </Link>
               ))}
             </nav>
@@ -367,16 +389,16 @@ export default function DashboardShell({ children, session, kyb, locks, sweepOn 
             </Link>
           </div>
         ) : null}
-        {locks && lockReasonFor(pathname, locks) ? (
+        {pageLock(pathname, locks, launchScope) ? (
           <section className="dash-surface mx-auto mt-10 max-w-lg p-8 text-center">
             <Lock aria-hidden="true" className="mx-auto h-8 w-8 text-[#326273]/70" />
             <h2 className="mt-4 text-lg font-bold text-[#1F4452]">Not open yet</h2>
-            <p className="mt-2 text-sm leading-relaxed text-[#326273]">{lockReasonFor(pathname, locks)}</p>
+            <p className="mt-2 text-sm leading-relaxed text-[#326273]">{pageLock(pathname, locks, launchScope)?.reason}</p>
             <Link
-              href="/dashboard/setup"
+              href={pageLock(pathname, locks, launchScope)?.href ?? '/dashboard/setup'}
               className="mt-5 inline-flex min-h-[44px] items-center justify-center rounded-lg bg-[#1F4452] px-5 text-sm font-semibold text-white transition hover:bg-[#326273]"
             >
-              Finish account setup
+              {pageLock(pathname, locks, launchScope)?.action}
             </Link>
           </section>
         ) : (
@@ -384,7 +406,9 @@ export default function DashboardShell({ children, session, kyb, locks, sweepOn 
           // cannot import the server gate (StepDelivery's fund-holding tiers),
           // and the sweep switch the transfer routes also enforce.
           <SweepSwitchContext value={sweepOn ?? false}>
-            <CustodyPhaseContext value={locks?.custodyOn ?? false}>{children}</CustodyPhaseContext>
+            <CustodyPhaseContext value={locks?.custodyOn ?? false}>
+              <LaunchScopeContext value={launchScope ?? 'full'}>{children}</LaunchScopeContext>
+            </CustodyPhaseContext>
           </SweepSwitchContext>
         )}
       </main>

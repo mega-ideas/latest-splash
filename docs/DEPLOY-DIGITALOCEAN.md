@@ -81,7 +81,8 @@ new build refuses to install or start on the old runtime and environment.
 
    | When | Then set |
    |---|---|
-   | `USE_MOCK_APIS` and `NEXT_PUBLIC_DEMO_MODE` both off | `PDAX_API_KEY`, `WALRUS_PUBLISHER_URL`, `WALRUS_AGGREGATOR_URL`; and `STRIPE_SECRET_KEY` / `AIRWALLEX_API_KEY` unless `FUNDING_PROVIDER_STRIPE_ENABLED` / `FUNDING_PROVIDER_AIRWALLEX_ENABLED` are `false` (both default on). `ENOKI_API_KEY` is **not** needed: USDC transfers carry no gas on Sui, and nothing calls Enoki |
+   | `LAUNCH_SCOPE=stablecoin` (USDC on Sui only) | Nothing extra. With mocks and demo off it lifts the PDAX, Walrus, Stripe, Airwallex and settlement-signer rules below, because every route that would use them answers 403 `not_in_launch_scope`. It refuses `USE_MOCK_APIS`, `NEXT_PUBLIC_DEMO_MODE`, `CARD_FUNDING_ENABLED` and `TREASURY_EXECUTION_ENABLED` set to true, and `SUI_SETTLEMENT_MODE=live`. It still needs `OPERATOR_SUI_PRIVATE_KEY` + `OPERATOR_SUI_ADDRESS`: approving a business's verification records it on Sui, and verification raises its USDC limits. Doctor's **Launch scope** row shows which launch the server runs |
+   | `USE_MOCK_APIS` and `NEXT_PUBLIC_DEMO_MODE` both off, full scope | `PDAX_API_KEY`, `WALRUS_PUBLISHER_URL`, `WALRUS_AGGREGATOR_URL`; and `STRIPE_SECRET_KEY` / `AIRWALLEX_API_KEY` unless `FUNDING_PROVIDER_STRIPE_ENABLED` / `FUNDING_PROVIDER_AIRWALLEX_ENABLED` are `false` (both default on). `ENOKI_API_KEY` is **not** needed: USDC transfers carry no gas on Sui, and nothing calls Enoki |
    | `FEATURE_KYB_GATE=true` | `SUMSUB_APP_TOKEN`, `SUMSUB_SECRET_KEY`; `SUMSUB_WEBHOOK_SECRET` for `/api/webhooks/sumsub`. A compliance decision: **off** (the default) the gate never blocks, so an unverified business can use USD in and local-currency payouts. **On**, a workspace moves money only once staff approve it at `/admin/kyb` |
    | `FEATURE_ZKLOGIN=true` | `ZKLOGIN_GOOGLE_CLIENT_ID` (part of address derivation — never rotate once users exist), `ZKLOGIN_USER_SALT` |
    | WhatsApp approvals | Dropped for now: the Twilio account is inactive, and in production WhatsApp approvals can't be switched on without delivery, so workspaces approve by click (`docs/GO-LIVE-HANDOVER.md`). To bring it back: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_FROM`; point the Twilio webhook at `/api/webhooks/whatsapp` and set `TWILIO_WEBHOOK_URL` to that exact public URL — behind a proxy the request URL differs from the one Twilio signed, and every inbound message is refused |
@@ -149,7 +150,8 @@ new build refuses to install or start on the old runtime and environment.
 8. **Cron routes**: DO → App → Settings → *Scheduled Jobs* (or an external
    cron) hitting `https://<domain>/api/cron/update-peg`, `accrue-yield`,
    `audit-batch` and `settle-withdrawals` with
-   `Authorization: Bearer $CRON_SECRET`.
+   `Authorization: Bearer $CRON_SECRET`. With `LAUNCH_SCOPE=stablecoin` all
+   four answer 403 `not_in_launch_scope`: leave them unscheduled.
 
 **Redeploys**: push to `main` → App Platform rebuilds, runs the pre-deploy
 migration job, then deploys. Deleted files disappear from the server because

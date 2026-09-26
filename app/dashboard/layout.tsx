@@ -6,6 +6,7 @@ import { custodyPhaseEnabled, sweepAccountEnabled } from '@/lib/server/custody-p
 import { getCustomerSession } from '@/lib/server/customer-auth';
 import { readKybGateState } from '@/lib/server/kyb-gate';
 import { readOnboardingState } from '@/lib/server/onboarding';
+import { launchScope } from '@/lib/server/launch-scope';
 
 export const dynamic = 'force-dynamic';
 
@@ -46,5 +47,5 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   // One line on purpose: tests/oxwal-frontend.test.mjs pins the shape
   // {children}</DashboardShell> as the no-second-wrapper contract.
   // sweepOn needs no database, so it is resolved even when `locks` is not.
-  return <DashboardShell session={session} kyb={kyb} locks={locks} sweepOn={sweepAccountEnabled()}>{children}</DashboardShell>;
+  return <DashboardShell session={session} kyb={kyb} locks={locks} sweepOn={sweepAccountEnabled()} launchScope={launchScope()}>{children}</DashboardShell>;
 }

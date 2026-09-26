@@ -3,6 +3,7 @@ import { timingSafeEqual } from 'crypto';
 
 import { resolvePegAttestation } from '@/lib/server/peg-attestation';
 import { refreshPegOnSui } from '@/lib/server/sui-settlement';
+import { refuseOutsideLaunchScope } from '@/lib/server/launch-scope';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 10;
@@ -29,6 +30,8 @@ async function handlePegUpdate(request: Request) {
   if (!isAuthorized(request)) {
     return NextResponse.json({ success: false, error: 'unauthorized' }, { status: 401 });
   }
+  const outOfScope = refuseOutsideLaunchScope();
+  if (outOfScope) return outOfScope;
 
   try {
     // Never push a price nobody measured. The on-chain monitor wants each

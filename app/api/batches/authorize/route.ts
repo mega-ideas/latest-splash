@@ -23,6 +23,7 @@ import { listMovementsSince } from '@/lib/server/ledger-store';
 import { readComplianceControls, recordBatchSettlementOnSui } from '@/lib/server/sui-settlement';
 import { requireSessionAccount } from '@/lib/server/session-account';
 import { requireTermsAccepted } from '@/lib/server/onboarding';
+import { refuseOutsideLaunchScope } from '@/lib/server/launch-scope';
 
 export const maxDuration = 60;
 
@@ -61,6 +62,8 @@ function deriveIdempotencyKey(orgId: string, rows: BatchRow[], targetCurrency: s
 export async function POST(request: Request) {
   const auth = await requireCustomerRequest(request);
   if (auth.response) return auth.response;
+  const outOfScope = refuseOutsideLaunchScope();
+  if (outOfScope) return outOfScope;
 
   const body = await readJsonBody(request);
   try {

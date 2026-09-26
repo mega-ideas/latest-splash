@@ -12,9 +12,12 @@ import {
   laneRefusalText,
   treasuryCustodyRefusal,
   ZekeLaneRefusal,
+  assertZekeKindInScope,
+  launchScopeRefusal,
   zekeLaneState,
 } from './zeke-lane-guard.ts';
 import { gaslessEnabled, isOnboarding, laneAccess } from '../payments/stablecoin-lane.ts';
+import { kindInScope, launchScope } from '../server/launch-scope.ts';
 import type { KybLifecycleState } from '../compliance/kyb-state.ts';
 import {
   DEFAULT_ASSISTANT_NAME,
@@ -158,6 +161,13 @@ type ToolDefinition = {
  * name like "Admin" or "Splash Compliance" buys no authority.
  */
 function systemPromptFor(assistantName: string): string {
+  // The launch scope comes last, so it overrides what the prompt says
+  // verification unlocks (STABLECOIN_SCOPE_PROMPT, below).
+  const prompt = namedPrompt(assistantName);
+  return launchScope() === 'stablecoin' ? `${prompt}\n${STABLECOIN_SCOPE_PROMPT}` : prompt;
+}
+
+function namedPrompt(assistantName: string): string {
   if (assistantName === DEFAULT_ASSISTANT_NAME) return OXWAL_SYSTEM_PROMPT;
   return [
     `This workspace calls you ${assistantName}. Introduce yourself with that name.`,
@@ -166,6 +176,19 @@ function systemPromptFor(assistantName: string): string {
     OXWAL_SYSTEM_PROMPT,
   ].join('\n');
 }
+
+/**
+ * The launch scope, for the model (lib/launch-scope-rules.ts). It comes last,
+ * so it overrides the prompt's lines about what verification unlocks: in a
+ * USDC-only launch, verification raises USDC limits and unlocks nothing else.
+ */
+const STABLECOIN_SCOPE_PROMPT = [
+  'This deployment is open for USDC on Sui only. USD in, local-currency payouts, USD-to-local conversion, payout runs, netting and Treasury are not open, and verifying a business does not open them: it only raises the USDC limits.',
+  'Do not offer to draft a payment, transfer, FX conversion, treasury move, netting settlement or batch payout. Offer a USDC transfer to a saved wallet recipient (prepareUsdcTransfer) or an x402 payment instead.',
+].join('\n');
+
+/** A scripted answer that has a USDC-only version for this launch. */
+const scoped = (full: string, stablecoin: string) => () => (launchScope() === 'stablecoin' ? stablecoin : full);
 
 export const OXWAL_SYSTEM_PROMPT = [
   'You are Zeke, an agentic finance command layer for Splash.',
@@ -478,9 +501,26 @@ export const OXWAL_TOOL_REGISTRY: ToolDefinition[] = [
   },
 ];
 
+/** The proposal kind each drafting tool creates: what the launch scope checks. */
+const TOOL_PROPOSAL_KIND: Partial<Record<string, string>> = {
+  proposePayment: 'PAYMENT',
+  proposeInternalTransfer: 'INTERNAL_TRANSFER',
+  proposeFxConvert: 'FX_CONVERT',
+  proposeTreasuryAllocation: 'TREASURY_ALLOCATE',
+  proposeTreasuryRedeem: 'TREASURY_REDEEM',
+  proposeNettingSettlement: 'NETTING_SETTLE',
+  proposeBatchPayout: 'BATCH_PAYOUT',
+};
+
+/** Whether Zeke offers this tool in the launch scope (lib/launch-scope-rules.ts). */
+function toolInScope(name: string): boolean {
+  const kind = TOOL_PROPOSAL_KIND[name];
+  return kind === undefined || kindInScope(kind, launchScope());
+}
+
 export function anthropicToolDefinitions() {
   assertNoExecutionTools();
-  return OXWAL_TOOL_REGISTRY.map(({ name, description, input_schema }) => ({
+  return OXWAL_TOOL_REGISTRY.filter(({ name }) => toolInScope(name)).map(({ name, description, input_schema }) => ({
     name,
     description,
     input_schema,
@@ -1033,6 +1073,7 @@ function invoiceReviewReasons(invoice: InvoiceForAgent, amountUsd: number, curre
 }
 
 export async function proposePayment(input: unknown): Promise<UnsignedProposal> {
+  assertZekeKindInScope('PAYMENT', 'FIAT_OUT_LOCAL');
   const object = objectInput(input);
   assertNoRawDestination(object);
   const orgId = requireString(object, 'orgId');
@@ -1091,6 +1132,7 @@ export async function proposePayment(input: unknown): Promise<UnsignedProposal> 
 }
 
 export async function proposeInternalTransfer(input: unknown): Promise<UnsignedProposal> {
+  assertZekeKindInScope('INTERNAL_TRANSFER', 'FIAT_OUT_LOCAL');
   const object = objectInput(input);
   const orgId = requireString(object, 'orgId');
   const toOrgId = requireString(object, 'toOrgId');
@@ -1146,6 +1188,7 @@ async function proposeX402Payment(input: unknown): Promise<UnsignedProposal> {
 }
 
 async function proposeFxConvert(input: unknown): Promise<UnsignedProposal> {
+  assertZekeKindInScope('FX_CONVERT', 'FIAT_OUT_LOCAL');
   const object = objectInput(input);
   const orgId = requireString(object, 'orgId');
   const amountUsd = requireAmount(object, 'amountUsd');
@@ -1175,6 +1218,7 @@ async function proposeFxConvert(input: unknown): Promise<UnsignedProposal> {
 }
 
 export async function proposeTreasuryAllocation(input: unknown): Promise<UnsignedProposal> {
+  assertZekeKindInScope('TREASURY_ALLOCATE', 'TREASURY');
   const object = objectInput(input);
   const orgId = requireString(object, 'orgId');
   const amountUsd = requireAmount(object, 'amountUsd');
@@ -1196,6 +1240,7 @@ export async function proposeTreasuryAllocation(input: unknown): Promise<Unsigne
 }
 
 export async function proposeTreasuryRedeem(input: unknown): Promise<UnsignedProposal> {
+  assertZekeKindInScope('TREASURY_REDEEM', 'TREASURY');
   const object = objectInput(input);
   const orgId = requireString(object, 'orgId');
   const amountUsd = requireAmount(object, 'amountUsd');
@@ -1213,6 +1258,7 @@ export async function proposeTreasuryRedeem(input: unknown): Promise<UnsignedPro
 }
 
 export async function proposeNettingSettlement(input: unknown): Promise<UnsignedProposal> {
+  assertZekeKindInScope('NETTING_SETTLE', 'FIAT_OUT_LOCAL');
   const object = objectInput(input);
   const orgId = requireString(object, 'orgId');
   const amountUsd = requireAmount(object, 'amountUsd');
@@ -1239,6 +1285,7 @@ export async function proposeNettingSettlement(input: unknown): Promise<Unsigned
 }
 
 export async function proposeBatchPayout(input: unknown): Promise<UnsignedProposal> {
+  assertZekeKindInScope('BATCH_PAYOUT', 'FIAT_OUT_LOCAL');
   const object = objectInput(input);
   assertNoRawDestination(object);
   const orgId = requireString(object, 'orgId');
@@ -1521,6 +1568,7 @@ export function envelopeForReadTool(name: ReadToolName, result: unknown): Envelo
 export async function executeOxwalTool(name: string, input: unknown) {
   assertNoExecutionTools();
   if (!(name in oxwalTools)) throw new Error(`unknown Zeke tool: ${name}`);
+  if (!toolInScope(name)) assertZekeKindInScope(TOOL_PROPOSAL_KIND[name] ?? name);
   const result = await oxwalTools[name as OxwalToolName](input);
   // Every read result Zeke consumes travels inside a truth envelope;
   // propose tools return the UnsignedProposal itself (state, not evidence).
@@ -1912,7 +1960,10 @@ const SPLASH_ANSWERS: Array<{ test: RegExp; reply: string | (() => string); skip
   {
     // Refund
     test: /\b(refund|money back|return (the|my) (funds|payment)|charge ?back)\b/,
-    reply: 'On-chain settlements are final, so a refund is itself a payment back to the original sender. Tell me the settled transfer and I will prepare an unsigned refund to the same verified counterparty for you to approve.',
+    reply: scoped(
+      'On-chain settlements are final, so a refund is itself a payment back to the original sender. Tell me the settled transfer and I will prepare an unsigned refund to the same verified counterparty for you to approve.',
+      'A USDC transfer on Sui is final, so a refund is a new USDC transfer back to the sender. Save them as a wallet recipient and I will prepare it for you to review and sign in Send USDC.',
+    ),
   },
   {
     // Cutoff / hours / when
@@ -1927,7 +1978,10 @@ const SPLASH_ANSWERS: Array<{ test: RegExp; reply: string | (() => string); skip
   {
     // Batch CSV format
     test: /\b(csv|file format|columns|template|how (do|to) (i|we) (upload|import)|batch format|payroll file)\b/,
-    reply: 'Batch payout reads a CSV with the columns name, address, country, purpose, amount. Every row is screened for AML lists, KYT thresholds, structuring patterns and corridor rules before anything settles, and the whole run is authorized once. Drop the file in the composer and I will screen it.',
+    reply: scoped(
+      'Batch payout reads a CSV with the columns name, address, country, purpose, amount. Every row is screened for AML lists, KYT thresholds, structuring patterns and corridor rules before anything settles, and the whole run is authorized once. Drop the file in the composer and I will screen it.',
+      'Payout runs are not open in this launch: Splash is open for USDC on Sui only for now. Each USDC transfer goes to a saved wallet recipient from Send USDC, and I can prepare them one at a time.',
+    ),
   },
   {
     // Who pays gas / sponsored
@@ -1955,17 +2009,26 @@ const SPLASH_ANSWERS: Array<{ test: RegExp; reply: string | (() => string); skip
   {
     // Onboarding / getting started
     test: /\b(how (do|to) (i|we) (start|begin|use)|get started|onboard|new here|tutorial|guide)\b/,
-    reply: 'Quick tour: Transfer sends one payout (beneficiary > delivery > locked quote > receipt). Batch Payout screens a CSV payroll and settles it under one authorization. Invoices collects money with Seal-protected pay links. Treasury puts idle USD to work. I sit on top — ask me to read state or prepare any of it, and you approve.',
+    reply: scoped(
+      'Quick tour: Transfer sends one payout (beneficiary > delivery > locked quote > receipt). Batch Payout screens a CSV payroll and settles it under one authorization. Invoices collects money with Seal-protected pay links. Treasury puts idle USD to work. I sit on top — ask me to read state or prepare any of it, and you approve.',
+      'Quick tour: Send USDC pays a saved Sui wallet recipient in USDC, approved in your workspace and signed in your own wallet, with no Splash fee and no gas. Invoices gives you pay links a payer can settle in USDC on Sui. Recipients holds the wallets you pay. I sit on top: ask me to read state or prepare a USDC transfer, and you approve and sign.',
+    ),
   },
   {
     // Capabilities
     test: /\b(what can you (do|read|prepare)|help|capabilities|tools|commands)\b/,
-    reply: 'I can read balances, treasury state, corridor liquidity, rates, counterparties, invoices, netting opportunities, and compliance status. I can also draft unsigned proposals — payments, transfers, FX conversions, treasury moves, netting, batch payouts — but I cannot sign or submit transactions. That authority stays with you.',
+    reply: scoped(
+      'I can read balances, treasury state, corridor liquidity, rates, counterparties, invoices, netting opportunities, and compliance status. I can also draft unsigned proposals — payments, transfers, FX conversions, treasury moves, netting, batch payouts — but I cannot sign or submit transactions. That authority stays with you.',
+      'I can read balances, rates, recipients, invoices and compliance status, and prepare a USDC transfer to a saved wallet recipient or an x402 payment for you to review. I cannot sign or send anything: you approve it and your own wallet signs. Splash is open for USDC on Sui only for now, so I do not draft fiat payouts, payout runs or treasury moves.',
+    ),
   },
   {
     // Greetings
     test: /^(hi|hey|hello|good (morning|afternoon|evening)|yo|sup)\b/,
-    reply: 'Hey! Ready when you are — I can check a rate, draft a transfer or batch, inspect an invoice, or look at treasury. What is on the agenda?',
+    reply: scoped(
+      'Hey! Ready when you are — I can check a rate, draft a transfer or batch, inspect an invoice, or look at treasury. What is on the agenda?',
+      'Hey! Ready when you are. I can prepare a USDC transfer to a saved wallet recipient, inspect an invoice, or check a balance. What is on the agenda?',
+    ),
   },
   {
     // Thanks
@@ -2132,7 +2195,7 @@ export async function* runOxwalAgent(request: OxwalAgentRequest): AsyncGenerator
     type: 'meta',
     attempting: useLocal ? 'local' : 'claude',
     readTools: [...READ_TOOL_NAMES],
-    proposeTools: [...PROPOSE_TOOL_NAMES],
+    proposeTools: PROPOSE_TOOL_NAMES.filter((name) => toolInScope(name)),
     assistantName,
   };
 
@@ -2192,6 +2255,8 @@ export async function* runOxwalAgent(request: OxwalAgentRequest): AsyncGenerator
   yield { type: 'done', source: answeredBy };
 }
 
+const SCOPED_OUT_REQUEST = /\b(batch|payroll|bulk payout|mass payout|pay everyone|netting|net (?:off|out|settle)|internal transfer|convert\b.*\b(?:usd|php|myr|sgd|idr|vnd|thb|eur|gbp))\b/i;
+
 /**
  * The refusal for a message that asks for a lane this org cannot use, or null.
  * An onboarding business also hears how much of its wallet allowance is left —
@@ -2199,8 +2264,16 @@ export async function* runOxwalAgent(request: OxwalAgentRequest): AsyncGenerator
  * cannot be read.
  */
 async function laneRefusalFor(orgId: string, message: string, known?: KybLifecycleState): Promise<string | null> {
+  // Payout runs, netting and conversions are not lanes a business unlocks,
+  // so classifyLaneIntent leaves them to the propose tools; in a USDC-only
+  // launch they are simply not offered, and saying so now is clearer.
+  if (launchScope() === 'stablecoin' && SCOPED_OUT_REQUEST.test(message) && !/\busdc\b/i.test(message)) {
+    return launchScopeRefusal('FIAT_OUT_LOCAL');
+  }
   const intent = classifyLaneIntent(message);
   if (!intent) return null;
+  const scoped = launchScopeRefusal(intent.lane);
+  if (scoped) return scoped;
   const state = known ?? await zekeLaneState(orgId);
   // Verified is not enough for Treasury: it holds funds, so it also waits for
   // the custody phase. The propose tools refuse the same way underneath.

@@ -75,8 +75,8 @@ export const claims = {
     status: 'testnet-verified',
   },
   footerLegal: {
-    claim: 'Licence application in preparation with Labuan FSA. Not yet authorised to hold customer funds. Sandbox environment; no real money moves.',
-    evidence: 'Current compliance posture from v3 truth pass.',
+    claim: 'Licence application in preparation with Labuan FSA. Not yet authorised to hold customer funds. USDC transfers are real, on Sui mainnet, signed by the sending business in its own wallet. USD in and local-currency payouts are not live yet.',
+    evidence: 'Custody gate (lib/custody-phase-rules.ts); the stablecoin lane is mainnet-only and the business wallet signs every transfer (lib/payments/stablecoin-lane.ts); fiat partners are not connected (docs/GO-LIVE-HANDOVER.md).',
     status: 'modeled',
   },
 } satisfies Record<string, Claim>;

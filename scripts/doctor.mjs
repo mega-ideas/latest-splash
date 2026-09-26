@@ -138,6 +138,7 @@ const NAMES = {
   // Go-live: the setup steps a person does by hand.
   laneNode: 'Sui mainnet (USDC)', peg: 'Peg (DeepBook)', usdyPrice: 'USDY price (Ondo)', feeAddress: 'Fee wallet',
   twilio: 'WhatsApp (Twilio)', passkeyDomain: 'Passkey domain', screening: 'Wallet screening',
+  launchScope: 'Launch scope',
 };
 for (const [key, check] of Object.entries(report.checks)) {
   rows.push({ name: NAMES[key] ?? key, status: check.status, detail: check.detail, latencyMs: check.latencyMs });

@@ -6,6 +6,7 @@ import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { ingestStablecoinDeposit } from '@/lib/server/funding-intake';
 import { readFundingSession } from '@/lib/server/funding-sessions';
 import { readJsonBody } from '@/lib/server/http';
+import { refuseOutsideLaunchScope } from '@/lib/server/launch-scope';
 
 const actionSchema = z.object({ action: z.literal('SIMULATE_DEPOSIT') });
 
@@ -23,6 +24,8 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const auth = await requireCustomerRequest(request);
   if (auth.response) return auth.response;
+  const outOfScope = refuseOutsideLaunchScope();
+  if (outOfScope) return outOfScope;
 
   if (process.env.NODE_ENV === 'production' && process.env.USE_MOCK_APIS !== 'true' && process.env.NEXT_PUBLIC_DEMO_MODE !== 'true') {
     return NextResponse.json({ error: 'Deposit simulation is disabled' }, { status: 404 });

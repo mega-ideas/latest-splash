@@ -25,6 +25,7 @@ import SettlementEngineFlow from '@/components/dashboard/SettlementEngineFlow';
 import StatusBadge, { type Status } from '@/components/StatusBadge';
 import { cn } from '@/lib/utils';
 import { getCorridorFeeBps } from '@/lib/fx/corridors';
+import { LAUNCH_SCOPE_CODE } from '@/lib/launch-scope-rules';
 
 /** Convert bps to display percentage (e.g. 80 -> "0.80%"). */
 function bpsToPct(bps: number) {
@@ -149,7 +150,7 @@ export default function DashboardOverview() {
   const [corridors] = useState(INITIAL_CORRIDORS);
   // No number is shown until the ledger answers; the card used to render
   // $24,500 and $98.72 from constants, and "+$3.22" a day from nowhere.
-  const [treasuryPhase, setTreasuryPhase] = useState<'loading' | 'gated' | 'live'>('loading');
+  const [treasuryPhase, setTreasuryPhase] = useState<'loading' | 'gated' | 'scoped' | 'live'>('loading');
   const [yieldEarned, setYield]   = useState(0);
   const [treasuryPrincipal, setTreasuryPrincipal] = useState(0);
   const [treasuryApy, setTreasuryApy] = useState(0);
@@ -264,6 +265,8 @@ export default function DashboardOverview() {
           // Phase 0: the treasury is not a feature yet. Say when it arrives.
           const body = await r.json().catch(() => ({}));
           if (r.status === 403 && body?.code === 'custody_not_licensed') setTreasuryPhase('gated');
+          // A USDC-only launch: the treasury is not part of it at all.
+          else if (r.status === 403 && body?.code === LAUNCH_SCOPE_CODE) setTreasuryPhase('scoped');
           return;
         }
         const d = await r.json();
@@ -626,16 +629,18 @@ export default function DashboardOverview() {
               </>
             ) : (
               <div className="mt-3 rounded-lg bg-white/70 p-3 text-[13px] leading-relaxed text-[#326273]/90">
-                <p className="font-semibold text-[#1F4452]">Treasury arrives with our licence</p>
+                <p className="font-semibold text-[#1F4452]">{treasuryPhase === 'scoped' ? 'Treasury is not open yet' : 'Treasury arrives with our licence'}</p>
                 <p className="mt-1">
                   {treasuryPhase === 'gated'
                     ? 'Holding funds is a Phase 2 capability that needs a money-broking licence Splash does not hold yet. Today Splash pays out only.'
-                    : 'Checking the ledger…'}
+                    : treasuryPhase === 'scoped'
+                      ? 'Splash is open for USDC on Sui only for now. Send USDC from Send USDC.'
+                      : 'Checking the ledger…'}
                 </p>
               </div>
             )}
 
-            <div className="mt-3 flex gap-2">
+            {treasuryPhase === 'scoped' ? null : <div className="mt-3 flex gap-2">
               <Link
                 href="/dashboard/treasury"
                 className="flex-1 rounded-lg bg-[var(--ok)] py-1.5 text-center text-[13px] font-semibold text-white transition-colors hover:opacity-90"
@@ -648,7 +653,7 @@ export default function DashboardOverview() {
               >
                 Review controls
               </Link>
-            </div>
+            </div>}
           </div>
 
           {/* Compliance posture */}

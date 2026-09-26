@@ -4,6 +4,7 @@ import { z } from 'zod';
 
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { readJsonBody } from '@/lib/server/http';
+import { LAUNCH_SCOPE_CODE, stablecoinOnly } from '@/lib/server/launch-scope';
 import { RATE_LIMITS, enforceRateLimit } from '@/lib/server/rate-limit';
 import { buildInvoice } from '@/lib/server/operations';
 import { listInvoicesFor, persistInvoice } from '@/lib/server/invoices-store';
@@ -61,6 +62,16 @@ export async function POST(request: Request) {
   let document:
     | { walrusBlobId: string; sealPolicyId: string; documentSha256: string; walrus: { sizeBytes: number; epochs: number; mode: string } }
     | undefined;
+
+  // A document is sealed and stored on Walrus, neither of which this launch
+  // runs (lib/launch-scope-rules.ts): refuse it up front rather than keep a
+  // copy that would not survive. An invoice without one, paid in USDC, is open.
+  if (input.documentBase64 && stablecoinOnly()) {
+    return NextResponse.json(
+      { error: 'Attaching the invoice document is not open yet. Create the invoice without it; it can still be paid in USDC on Sui.', code: LAUNCH_SCOPE_CODE },
+      { status: 403, headers: { 'Cache-Control': 'no-store' } },
+    );
+  }
 
   try {
     if (input.documentBase64) {

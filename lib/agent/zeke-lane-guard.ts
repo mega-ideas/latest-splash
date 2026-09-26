@@ -2,6 +2,7 @@ import type { KybLifecycleState } from '../compliance/kyb-state.ts';
 import { CUSTODY_PHASE_WHY } from '../custody-phase-rules.ts';
 import { laneAccess, type Lane } from '../payments/stablecoin-lane.ts';
 import { custodyPhaseEnabled } from '../server/custody-phase.ts';
+import { kindInScope, launchScope, laneInScope, LAUNCH_SCOPE_REASON } from '../server/launch-scope.ts';
 
 /**
  * What Zeke may prepare for a business, given how far through verification it
@@ -27,9 +28,10 @@ import { custodyPhaseEnabled } from '../server/custody-phase.ts';
 export class ZekeLaneRefusal extends Error {
   readonly code = 'LANE_LOCKED';
   readonly lane: Lane;
-  readonly state: KybLifecycleState;
+  /** Null when the refusal is the launch scope, which no verification changes. */
+  readonly state: KybLifecycleState | null;
 
-  constructor(lane: Lane, state: KybLifecycleState, message: string) {
+  constructor(lane: Lane, state: KybLifecycleState | null, message: string) {
     super(message);
     this.name = 'ZekeLaneRefusal';
     this.lane = lane;
@@ -78,8 +80,26 @@ export function laneRefusalText(lane: Lane, state: KybLifecycleState, currency: 
   }
 }
 
+/**
+ * Zeke's words when the launch scope leaves a lane out
+ * (lib/launch-scope-rules.ts), or null. Checked before verification: no
+ * verification opens what this launch does not offer.
+ */
+export function launchScopeRefusal(lane: Lane): string | null {
+  if (laneInScope(lane, launchScope())) return null;
+  return `I can't prepare that. ${LAUNCH_SCOPE_REASON} I can prepare a USDC transfer to a saved wallet recipient.`;
+}
+
+/** The same for a proposal kind: what an approval here could carry out. */
+export function assertZekeKindInScope(kind: string, lane: Lane = 'FIAT_OUT_LOCAL'): void {
+  if (kindInScope(kind, launchScope())) return;
+  throw new ZekeLaneRefusal(lane, null, `I can't prepare that. ${LAUNCH_SCOPE_REASON} I can prepare a USDC transfer to a saved wallet recipient.`);
+}
+
 /** Throw a ZekeLaneRefusal unless this org may use `lane`. */
 export async function assertZekeLane(orgId: string, lane: Lane, currency: string | null = null): Promise<void> {
+  const scoped = launchScopeRefusal(lane);
+  if (scoped) throw new ZekeLaneRefusal(lane, null, scoped);
   const state = await zekeLaneState(orgId);
   if (!laneAccess(state, lane).allowed) {
     throw new ZekeLaneRefusal(lane, state, laneRefusalText(lane, state, currency));

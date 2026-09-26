@@ -21,6 +21,9 @@ type PublicInvoice = {
   bankInstructions: { beneficiary: string; bank: string; account: string; swift: string } | null;
   /** USDC on Sui straight to the issuer's own wallet, when they have one. */
   usdc?: PublicUsdc;
+  /** Whether a bank payment can be reported here. False in a USDC-only
+   *  launch, where the report route answers 403. Absent means true. */
+  bankReports?: boolean;
 };
 
 export default function PayInvoiceClient({ slug, invoice }: { slug: string; invoice: PublicInvoice }) {
@@ -67,7 +70,7 @@ export default function PayInvoiceClient({ slug, invoice }: { slug: string; invo
               {invoice.issuerVerified && <span className="rounded-full bg-primary/20 px-2 py-1 text-primary">Verified</span>}
             </div>
             <div className="mt-5 text-5xl font-black">${Number(invoice.amountUsd).toLocaleString('en-US', { minimumFractionDigits: 2 })}</div>
-            <div className="mt-2 text-sm text-card/65">Due {invoice.dueDate} · settlement target {invoice.targetCurrency}</div>
+            <div className="mt-2 text-sm text-card/65">Due {invoice.dueDate}{invoice.bankReports === false ? '' : ` · settlement target ${invoice.targetCurrency}`}</div>
           </div>
 
           <div className="grid gap-6 p-7 md:grid-cols-[1fr_0.9fr]">
@@ -109,7 +112,15 @@ export default function PayInvoiceClient({ slug, invoice }: { slug: string; invo
             </div>
 
             <div className="rounded-2xl border border-foreground/10 bg-card p-5">
-              {paid ? (
+              {invoice.bankReports === false && !paid ? (
+                <div className="flex h-full flex-col justify-center">
+                  <h2 className="text-lg font-black">Paid by bank?</h2>
+                  <p className="mt-1 text-sm text-foreground/60">
+                    Let {invoice.issuerOrg} know directly.{' '}
+                    {invoice.usdc ? 'This page confirms USDC payments on Sui only.' : `${invoice.issuerOrg} has not set up USDC payments on Sui yet, so pay them directly.`}
+                  </p>
+                </div>
+              ) : paid ? (
                 <div className="flex h-full flex-col items-center justify-center text-center">
                   <CheckCircle2 className="h-12 w-12 text-primary" />
                   <h2 className="mt-3 text-lg font-black">Payment reported</h2>

@@ -56,6 +56,8 @@ type Lane = {
   pricing: { anchorFeeOn: boolean };
   /** Wallet transfers carry no network fee while this is on (x402 still needs SUI). */
   gas?: { gasless: boolean };
+  /** 'stablecoin' when this launch opens USDC on Sui only. */
+  scope?: 'full' | 'stablecoin';
   minimumMinor: string;
   screeningConfigured: boolean;
   approval: { style: 'WHATSAPP_PASSKEY' | 'CLICK'; requireDualApproval: boolean; approvalThresholdUsd: number; ready?: boolean; readyReason?: string };
@@ -471,7 +473,9 @@ export default function SendUsdcDesk() {
           <p className="mt-2 text-[13px] leading-5 text-[#326273]/90">
             {lane?.verified
               ? 'Verified businesses send up to 20,000 USDC per transfer and 500,000 in any 30 days.'
-              : 'Until your business is verified you can send up to 5,000 USDC in any 30 days, x402 payments included. USD in and local-currency payouts unlock with verification.'}
+              : lane?.scope === 'stablecoin'
+                ? 'Until your business is verified you can send up to 5,000 USDC in any 30 days, x402 payments included. Verification raises that to 20,000 per transfer and 500,000 in any 30 days.'
+                : 'Until your business is verified you can send up to 5,000 USDC in any 30 days, x402 payments included. USD in and local-currency payouts unlock with verification.'}
             {' '}The window rolls: each transfer counts for 30 days from when it was sent.
           </p>
         </div>
@@ -827,7 +831,8 @@ export default function SendUsdcDesk() {
           {/* Reads the chain again when a send lands (sent flips) and on start-over. */}
           <WalletActivity address={sender} splash={source === 'SPLASH'} refreshKey={sent ? 1 : 0} />
           <RecentTransfers outflows={lane?.outflows ?? []} recipients={recipients} />
-          <UsdyPreview />
+          {/* The treasury is not part of a USDC-only launch (lib/launch-scope-rules.ts). */}
+          {lane?.scope === 'stablecoin' ? null : <UsdyPreview />}
         </aside>
       </section>
     </div>

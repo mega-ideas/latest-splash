@@ -29,6 +29,7 @@ Production environment, to match:
 - Leave `STABLECOIN_ANCHOR_FEE` blank.
 - Leave `STABLECOIN_GASLESS` blank (gasless on).
 - `ENOKI_API_KEY` is no longer required in production. Nothing calls Enoki.
+- **`LAUNCH_SCOPE=stablecoin`** for a USDC-only launch (recommended while fiat partners aren't connected). With `USE_MOCK_APIS=false` and `NEXT_PUBLIC_DEMO_MODE=false`, production then starts without PDAX, Walrus, Stripe or Airwallex (it still needs the settlement signer, which verifies businesses), and every fiat, payout-run, treasury and settling-cron route answers 403 `not_in_launch_scope`. Leave the four cron jobs unscheduled in this scope. Details: `docs/STABLECOIN-LANE.md`, Configuration.
 
 The `DISCOUNT` / `STANDARD` funding tier labels stay in the data model because they are part of existing approvals' fingerprints. Both now price at 0.70%.
 

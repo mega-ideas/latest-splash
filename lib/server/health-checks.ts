@@ -13,7 +13,7 @@ import { readdirSync } from 'node:fs';
 import path from 'node:path';
 
 import { getEnv } from '@/lib/env';
-import { checkFeeAddress, checkLaneNode, checkPasskeyDomain, checkPeg, checkScreening, checkTwilio, checkUsdyPrice } from '@/lib/server/go-live-checks';
+import { checkFeeAddress, checkLaneNode, checkLaunchScope, checkPasskeyDomain, checkPeg, checkScreening, checkTwilio, checkUsdyPrice } from '@/lib/server/go-live-checks';
 import { getSealHealthSnapshot } from '@/lib/server/seal-health';
 import { getSealConfig } from '@/lib/server/seal-config';
 import { suiClient, SPLASH_PACKAGE_ID, SUI_NETWORK, SUI_RPC_URL } from '@/lib/sui';
@@ -202,6 +202,7 @@ export function featureFlags(): Record<string, string | boolean> {
     SUI_NETWORK: env.SUI_NETWORK,
     SUI_SETTLEMENT_MODE: env.SUI_SETTLEMENT_MODE,
     USE_MOCK_APIS: env.USE_MOCK_APIS,
+    LAUNCH_SCOPE: env.LAUNCH_SCOPE,
     NEXT_PUBLIC_DEMO_MODE: env.NEXT_PUBLIC_DEMO_MODE,
     FEATURE_ZKLOGIN: env.FEATURE_ZKLOGIN,
     FEATURE_KYB_GATE: env.FEATURE_KYB_GATE,
@@ -222,6 +223,7 @@ export type HealthReport = {
     rpc: Check; package: Check; db: Check; seal: Check; enoki: Check;
     /* Go-live: the setup a person does by hand (lib/server/go-live-checks.ts). */
     laneNode: Check; peg: Check; usdyPrice: Check; feeAddress: Check; twilio: Check; passkeyDomain: Check; screening: Check;
+    launchScope: Check;
   };
 };
 
@@ -233,6 +235,7 @@ export async function runHealthChecks(): Promise<HealthReport> {
   const checks = {
     rpc, package: pkg, db, seal, enoki,
     laneNode, peg, usdyPrice, feeAddress, twilio, passkeyDomain: checkPasskeyDomain(), screening,
+    launchScope: checkLaunchScope(),
   };
   // 'skipped' is not a failure: it is a deliberate absence in this env.
   const ok = Object.values(checks).every((c) => c.status !== 'fail');

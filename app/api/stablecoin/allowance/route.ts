@@ -10,6 +10,7 @@ import {
   type SuiNetwork,
 } from '@/lib/payments/stablecoin-lane';
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
+import { launchScope } from '@/lib/server/launch-scope';
 import { requireSessionAccount } from '@/lib/server/session-account';
 import { listOutflows, readAllowance } from '@/lib/server/stablecoin-outflows';
 
@@ -64,6 +65,9 @@ export async function GET(request: Request) {
     // still says how its own gas is paid (it can fall back). x402 always
     // needs a little SUI.
     gas: { gasless: gaslessEnabled() },
+    // 'stablecoin' when this launch opens USDC on Sui only: verification then
+    // raises the USDC limits but unlocks no fiat lane (lib/launch-scope-rules.ts).
+    scope: launchScope(),
     minimumMinor: MIN_STABLECOIN_TRANSFER_MINOR.toString(),
     screeningConfigured: Boolean(process.env.CHAINALYSIS_SANCTIONS_API_KEY),
     // How a transfer is approved here (Settings): WhatsApp code + passkey, or a

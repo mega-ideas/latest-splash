@@ -186,7 +186,7 @@ test('the peg: DeepBook’s reading, or payouts paused, said plainly', async () 
 test('doctor and /api/health both show every go-live check, by name', () => {
   const health = readFileSync(new URL('../lib/server/health-checks.ts', import.meta.url), 'utf8');
   const doctor = readFileSync(new URL('../scripts/doctor.mjs', import.meta.url), 'utf8');
-  for (const key of ['laneNode', 'peg', 'usdyPrice', 'feeAddress', 'twilio', 'passkeyDomain', 'screening']) {
+  for (const key of ['laneNode', 'peg', 'usdyPrice', 'feeAddress', 'twilio', 'passkeyDomain', 'screening', 'launchScope']) {
     assert.match(health, new RegExp(`\\b${key}\\b`), `${key} in the health report`);
     assert.match(doctor, new RegExp(`\\b${key}: '`), `${key} named in doctor`);
   }

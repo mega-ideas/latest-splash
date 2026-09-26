@@ -48,6 +48,7 @@ import { readComplianceControls } from '@/lib/server/sui-settlement';
 import { isForeignAccountId, requireSessionAccount } from '@/lib/server/session-account';
 import { readJsonBody } from '@/lib/server/http';
 import { requireTermsAccepted } from '@/lib/server/onboarding';
+import { refuseOutsideLaunchScope } from '@/lib/server/launch-scope';
 
 export const maxDuration = 60;
 
@@ -114,6 +115,8 @@ export async function POST(request: Request) {
 async function authorize(request: Request, spent: SpentApproval) {
   const auth = await requireCustomerRequest(request);
   if (auth.response) return auth.response;
+  const outOfScope = refuseOutsideLaunchScope();
+  if (outOfScope) return outOfScope;
 
   const rawBody = await readJsonBody(request);
   try {

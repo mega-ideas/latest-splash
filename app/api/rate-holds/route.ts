@@ -6,6 +6,7 @@ import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { readJsonBody } from '@/lib/server/http';
 import { createRateHold, listRateHoldsFor, readRateHoldFor } from '@/lib/server/operations';
 import { requireSessionAccount } from '@/lib/server/session-account';
+import { refuseOutsideLaunchScope } from '@/lib/server/launch-scope';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -39,6 +40,8 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const auth = await requireCustomerRequest(request);
   if (auth.response) return auth.response;
+  const outOfScope = refuseOutsideLaunchScope();
+  if (outOfScope) return outOfScope;
 
   const accountCheck = await requireSessionAccount(auth.session);
   if (accountCheck.response) return accountCheck.response;

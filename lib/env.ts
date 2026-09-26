@@ -180,6 +180,10 @@ export const envSchema = z.object({
   SUI_AUDIT_ANCHOR_GAS_BUDGET: int(20_000_000, 1),
   SUI_KYB_VERIFY_GAS_BUDGET: int(20_000_000, 1),
   USE_MOCK_APIS: flag('false'),
+  /* 'stablecoin' opens USDC on Sui only (lib/launch-scope-rules.ts): fiat,
+     payout runs, treasury and Splash's own settlement answer 403, and the
+     keys only they use stop being required. Default 'full'. */
+  LAUNCH_SCOPE: withDefault(z.enum(['full', 'stablecoin']), 'full'),
 
   /* Zeke chain composition. lib/chain/compose.ts, lib/agent/oxwal.ts. */
   OXWAL_CHAIN_MODE: withDefault(z.enum(['mock', 'live']), 'mock'),
@@ -457,7 +461,27 @@ function productionIssues(env: Env): Issue[] {
   /* Settlement: keys are required when settlement can actually move value.
      'auto' with mocks off resolves to live at runtime. */
   const settlementLive = env.SUI_SETTLEMENT_MODE === 'live' || (env.SUI_SETTLEMENT_MODE === 'auto' && !env.USE_MOCK_APIS);
-  if (settlementLive) {
+  /* LAUNCH_SCOPE=stablecoin: USDC on Sui only. Every route that would settle,
+     pay out or take fiat answers 403 (lib/server/launch-scope.ts), so the
+     keys only those routes use are not required — and nothing may fake what
+     the scope leaves out. A settlement caller that slipped past the guards
+     still fails closed: 'auto' with mocks off and no key throws rather than
+     simulating (lib/server/sui-settlement.ts, resolveSettlementExecution). */
+  const stablecoinOnly = env.LAUNCH_SCOPE === 'stablecoin';
+  if (stablecoinOnly) {
+    const scoped = 'LAUNCH_SCOPE=stablecoin launches USDC on Sui only';
+    if (env.USE_MOCK_APIS) issues.push({ key: 'USE_MOCK_APIS', message: `must be false: ${scoped}, and mocks would fake settlement` });
+    if (env.NEXT_PUBLIC_DEMO_MODE) issues.push({ key: 'NEXT_PUBLIC_DEMO_MODE', message: `must be false: ${scoped}, and demo mode credits deposits nobody made` });
+    if (env.CARD_FUNDING_ENABLED) issues.push({ key: 'CARD_FUNDING_ENABLED', message: `must be false: ${scoped}` });
+    if (env.TREASURY_EXECUTION_ENABLED) issues.push({ key: 'TREASURY_EXECUTION_ENABLED', message: `must be false: ${scoped}` });
+    if (env.SUI_SETTLEMENT_MODE === 'live') issues.push({ key: 'SUI_SETTLEMENT_MODE', message: `must not be live: ${scoped}` });
+    // Staff approving a business's verification records it on Sui with the
+    // operator key (lib/compliance/org-kyb.ts), and a verified business gets
+    // the higher USDC limits, so this launch still needs the signer.
+    need('OPERATOR_SUI_PRIVATE_KEY', `${scoped}, and approving a business's verification records it on Sui`);
+    need('OPERATOR_SUI_ADDRESS', 'the signer must be named so it can be checked against the key');
+  }
+  if (settlementLive && !stablecoinOnly) {
     need('OPERATOR_SUI_PRIVATE_KEY', `SUI_SETTLEMENT_MODE=${env.SUI_SETTLEMENT_MODE} with mocks off means real signing`);
     need('OPERATOR_SUI_ADDRESS', 'the signer must be named so it can be checked against the key');
     need('SPLASH_TREASURY_ID', 'settlement records against the treasury object');
@@ -472,7 +496,7 @@ function productionIssues(env: Env): Issue[] {
 
   /* Vendors: required when their feature is on. Mocks and demo mode make
      them optional, which is a posture decision recorded by those flags. */
-  const vendorsLive = !env.USE_MOCK_APIS && !env.NEXT_PUBLIC_DEMO_MODE;
+  const vendorsLive = !env.USE_MOCK_APIS && !env.NEXT_PUBLIC_DEMO_MODE && !stablecoinOnly;
   if (vendorsLive) {
     need('PDAX_API_KEY', 'PHP payout is live (USE_MOCK_APIS and NEXT_PUBLIC_DEMO_MODE are both off)');
     need('WALRUS_PUBLISHER_URL', 'audit proofs are live');

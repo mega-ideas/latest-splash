@@ -62,6 +62,7 @@ import {
   type ApprovalActor,
 } from '@/lib/queue/approval-walk';
 import { canRoleApprove, type InMemoryProposalStore } from '@/lib/queue/proposal-state';
+import { kindInScope, launchScope, LAUNCH_SCOPE_NOT_SENT } from '@/lib/server/launch-scope';
 import {
   APPROVAL_NOT_SAVED,
   type ExecutionContext,
@@ -256,6 +257,8 @@ async function checkReleaser(
   }
   const gate = await deps.canMoveMoney(proposal.orgId);
   if (!gate.ok) return { ok: false, reason: gate.reason };
+  // Nothing outside this launch is released (lib/launch-scope-rules.ts).
+  if (!kindInScope(proposal.kind, launchScope())) return { ok: false, reason: LAUNCH_SCOPE_NOT_SENT };
   return { ok: true, actor: { userId: releaser.userId, role } };
 }
 

@@ -37,6 +37,7 @@ import { x402SettlementAvailability } from '@/lib/agent/x402';
 import { CUSTODY_PHASE_WHY } from '@/lib/custody-phase-rules';
 import { closeApprovalClaim } from '@/lib/server/approved-proposal';
 import { custodyPhaseEnabled } from '@/lib/server/custody-phase';
+import { kindInScope, launchScope, LAUNCH_SCOPE_NOT_SENT } from '@/lib/server/launch-scope';
 
 export type ExecutionOutcome =
   | { state: 'EXECUTED'; detail: string; ref?: string }
@@ -106,6 +107,13 @@ async function carryOut(
         'The payment details for this approval could not be found, so nothing was sent. ' +
         'Re-authorize the payment to try again.',
     };
+  }
+
+  // The backstop for an approval that reached the executor anyway (approved
+  // before the scope was set, or a caller that skipped the gate): recorded,
+  // named, not carried out (lib/launch-scope-rules.ts).
+  if (!kindInScope(proposal.kind, launchScope())) {
+    return { state: 'SKIPPED', detail: `Approved and recorded, not executed. ${LAUNCH_SCOPE_NOT_SENT}` };
   }
 
   try {

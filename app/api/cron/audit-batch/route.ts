@@ -2,6 +2,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { NextResponse } from 'next/server';
 
 import { buildDailyAuditBatch } from '@/lib/server/audit-batches';
+import { refuseOutsideLaunchScope } from '@/lib/server/launch-scope';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -19,6 +20,8 @@ async function handle(request: Request) {
   if (!isAuthorized(request)) {
     return NextResponse.json({ success: false, error: 'unauthorized' }, { status: 401 });
   }
+  const outOfScope = refuseOutsideLaunchScope();
+  if (outOfScope) return outOfScope;
   try {
     const url = new URL(request.url);
     const batch = await buildDailyAuditBatch(url.searchParams.get('date') ?? undefined);

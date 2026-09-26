@@ -103,7 +103,7 @@ test('the shell hands its pages the custodyOn the layout resolved, failing close
   const shell = await source('components/dashboard/DashboardShell.tsx');
   assert.match(
     shell,
-    /<CustodyPhaseContext value=\{locks\?\.custodyOn \?\? false\}>\{children\}<\/CustodyPhaseContext>/,
+    /<CustodyPhaseContext value=\{locks\?\.custodyOn \?\? false\}>\s*<LaunchScopeContext value=\{launchScope \?\? 'full'\}>\{children\}<\/LaunchScopeContext>\s*<\/CustodyPhaseContext>/,
     'the pages render inside the phase the Treasury padlock reads',
   );
 

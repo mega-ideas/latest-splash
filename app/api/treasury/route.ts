@@ -52,6 +52,7 @@ import {
   requestTreasuryWithdrawal,
 } from '@/lib/server/treasury';
 import { getTreasuryRate } from '@/lib/server/usdy';
+import { refuseOutsideLaunchScope } from '@/lib/server/launch-scope';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -85,6 +86,8 @@ async function snapshot(orgId: string) {
 export async function GET(request: Request) {
   const auth = await requireCustomerRequest(request);
   if (auth.response) return auth.response;
+  const outOfScope = refuseOutsideLaunchScope();
+  if (outOfScope) return outOfScope;
   if (!custodyPhaseEnabled()) return custodyPhaseResponse();
 
   const accountCheck = await requireSessionAccount(auth.session);
@@ -95,6 +98,8 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const auth = await requireCustomerRequest(request);
   if (auth.response) return auth.response;
+  const outOfScope = refuseOutsideLaunchScope();
+  if (outOfScope) return outOfScope;
   if (!custodyPhaseEnabled()) return custodyPhaseResponse();
 
   if (process.env.TREASURY_EXECUTION_ENABLED !== 'true') {

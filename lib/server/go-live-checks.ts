@@ -22,6 +22,7 @@ import { laneClient } from './stablecoin-chain.ts';
 import { anchorFeeEnabled } from '../payments/stablecoin-lane.ts';
 import { navPriceUsd } from './usdy.ts';
 import { screenWalletAddress } from './wallet-screening.ts';
+import { parseLaunchScope } from '../launch-scope-rules.ts';
 
 type Fetcher = typeof fetch;
 
@@ -225,4 +226,17 @@ export async function checkScreening(env: NodeJS.ProcessEnv = process.env, fetch
     return failed('Chainalysis rejected CHAINALYSIS_SANCTIONS_API_KEY: new wallet recipients cannot be screened.', ms);
   }
   return failed(`sanctions screening is not working: ${result.detail}`, ms);
+}
+
+/* ── Launch scope ─────────────────────────────────────────────────────── */
+
+/**
+ * Which launch this server runs (lib/launch-scope-rules.ts). Never a failure:
+ * boot has already refused a scope whose rules are not met (lib/env.ts). It
+ * is here so the person reading the report sees what is open.
+ */
+export function checkLaunchScope(env: NodeJS.ProcessEnv = process.env): Check {
+  return parseLaunchScope(env.LAUNCH_SCOPE) === 'stablecoin'
+    ? ok('USDC on Sui only: wallet transfers and x402 are open; fiat, payout runs, treasury and the settling cron jobs answer 403 not_in_launch_scope')
+    : ok('full: every lane the rest of this report allows');
 }

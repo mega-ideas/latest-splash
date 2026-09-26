@@ -6,6 +6,7 @@ import { Archive, CheckCircle2, Copy, Database, FilePlus2, FileText, Loader2, Lo
 import { toast } from 'sonner';
 
 import InvoiceLoop from '@/components/invoices/InvoiceLoop';
+import { useLaunchScope } from '@/components/dashboard/CustodyPhaseContext';
 import StatusBadge from '@/components/StatusBadge';
 import { suiScanTxUrlOn } from '@/lib/explorer';
 import { ACTIVE_USD_CORRIDORS } from '@/lib/fx/corridors';
@@ -225,6 +226,7 @@ export default function InvoicesPage() {
 function CreateInvoiceModal({ close, onCreated }: { close: () => void; onCreated: () => void }) {
   const [form, setForm] = useState({ issuerOrg: 'Splash Workspace', payerOrgName: '', payerOrgEmail: '', amountUsd: '', targetCurrency: 'PHP', dueDate: '', memo: '' });
   const [documentBase64, setDocumentBase64] = useState<string>();
+  const documentsOpen = useLaunchScope() !== 'stablecoin';
   const [submitting, setSubmitting] = useState(false);
 
   async function fileToBase64(file: File) {
@@ -241,7 +243,10 @@ function CreateInvoiceModal({ close, onCreated }: { close: () => void; onCreated
       body: JSON.stringify({ ...form, documentBase64 }),
     });
     setSubmitting(false);
-    if (!response.ok) return toast.error('Complete the required invoice fields');
+    if (!response.ok) {
+      const body = (await response.json().catch(() => ({}))) as { error?: string };
+      return toast.error(body.error ?? 'Complete the required invoice fields');
+    }
     toast.success('Invoice created');
     onCreated();
   }
@@ -259,11 +264,14 @@ function CreateInvoiceModal({ close, onCreated }: { close: () => void; onCreated
           <Field label="Due date"><input type="date" value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} /></Field>
         </div>
         <Field label="Memo"><textarea value={form.memo} onChange={(e) => setForm({ ...form, memo: e.target.value })} /></Field>
-        <label className="mt-4 flex cursor-pointer items-center gap-3 rounded-2xl border border-dashed border-primary/35 bg-primary/5 p-4">
-          <Lock className="h-5 w-5 text-foreground" /><span><strong className="block">Optional PDF</strong><small className="text-foreground/90">Encrypted before Walrus storage</small></span>
-          <input type="file" accept=".pdf,image/*" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) void fileToBase64(file); }} />
-          {documentBase64 && <CheckCircle2 className="ml-auto h-5 w-5 text-foreground" />}
-        </label>
+        {/* A USDC-only launch stores no invoice documents (lib/launch-scope-rules.ts). */}
+        {documentsOpen ? (
+          <label className="mt-4 flex cursor-pointer items-center gap-3 rounded-2xl border border-dashed border-primary/35 bg-primary/5 p-4">
+            <Lock className="h-5 w-5 text-foreground" /><span><strong className="block">Optional PDF</strong><small className="text-foreground/90">Encrypted before Walrus storage</small></span>
+            <input type="file" accept=".pdf,image/*" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; if (file) void fileToBase64(file); }} />
+            {documentBase64 && <CheckCircle2 className="ml-auto h-5 w-5 text-foreground" />}
+          </label>
+        ) : null}
         <button disabled={submitting} onClick={create} className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-accent px-5 py-3 font-bold text-[#073d49] disabled:opacity-50"><Send className="h-4 w-4" /> {submitting ? 'Creating...' : 'Create secure pay link'}</button>
       </div>
     </div>

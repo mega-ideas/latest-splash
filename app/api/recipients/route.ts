@@ -8,6 +8,7 @@ import {
   sweepAccountEnabled,
 } from '@/lib/server/custody-phase';
 import { readJsonBody } from '@/lib/server/http';
+import { refuseOutsideLaunchScope } from '@/lib/server/launch-scope';
 import { RATE_LIMITS, enforceRateLimit } from '@/lib/server/rate-limit';
 import { buildRecipient, type RecipientRecord, type RecipientTier } from '@/lib/server/operations';
 import { listRecipientsFor, persistRecipient, recordRecipientScreening } from '@/lib/server/recipients-store';
@@ -58,6 +59,13 @@ export async function POST(request: Request) {
   if (!deliveryTierAllowed(tier)) return custodyPhaseResponse();
   // And a sweep recipient needs the sweep switch, the same as a sweep transfer.
   if (tier === 'SWEEP_ACCOUNT' && !sweepAccountEnabled()) return sweepAccountDisabledResponse();
+
+  // A bank recipient exists to be paid in local currency, which this launch
+  // does not do (lib/launch-scope-rules.ts). Refused before anything is saved.
+  if (body.payoutMethod !== 'WALLET') {
+    const outOfScope = refuseOutsideLaunchScope();
+    if (outOfScope) return outOfScope;
+  }
 
   // ── Wallet recipients: USDC on Sui, the lane an unverified business may use.
   if (body.payoutMethod === 'WALLET') {

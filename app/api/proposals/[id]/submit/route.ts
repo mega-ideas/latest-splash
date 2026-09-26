@@ -14,6 +14,7 @@ import { evaluateAtApproval, rejectUnlessReleased, releaseApproved } from '@/lib
 import { APPROVAL_NOT_SAVED, executeApprovedProposal } from '@/lib/server/approval-execution';
 import { closeApprovalClaim } from '@/lib/server/approved-proposal';
 import { AGENT_ACTOR_ID } from '@/lib/agent/identity';
+import { kindInScope, launchScope, LAUNCH_SCOPE_CODE, LAUNCH_SCOPE_REASON } from '@/lib/server/launch-scope';
 
 /**
  * Track A §1.1 — the client may send ONLY its decision and signature binding.
@@ -113,6 +114,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   // DB-derived ctx.userId, never a request claim.
   if (proposal.createdBy !== AGENT_ACTOR_ID && proposal.createdBy === ctx.userId) {
     return json({ error: 'Maker cannot approve their own proposal' }, 403);
+  }
+
+  // This launch carries out only what the business's own wallet settles
+  // (lib/launch-scope-rules.ts). Refused before any vote is recorded, so an
+  // approval is never spent on a payment that cannot go. Rejecting stays open.
+  if (!kindInScope(proposal.kind, launchScope())) {
+    return json({ error: LAUNCH_SCOPE_REASON, code: LAUNCH_SCOPE_CODE }, 403);
   }
 
   try {
