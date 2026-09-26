@@ -219,8 +219,14 @@ fun account_scenario(): Scenario {
 /// The approval and its consumption carry the payment's commitment where the
 /// amount used to be. The approver reads the amount off the intent object they
 /// are shown; the event stream gets the commitment.
+///
+/// It pays the floor, not AMOUNT: an approved payout is charged against the
+/// account in `consume_approval`, which refuses anything under
+/// `min_transfer_minor()` (abort 43). The floor is well inside a new account's
+/// tier-three ceilings, per transfer, per day and per month.
 fun approval_events_carry_the_commitment_not_the_amount() {
     let mut scenario = account_scenario();
+    let amount = business_account::min_transfer_minor();
 
     scenario.next_tx(OWNER);
     {
@@ -230,7 +236,7 @@ fun approval_events_carry_the_commitment_not_the_amount() {
         payment_intent::create_payment_intent_for_account<SUI>(
             &account,
             RECIPIENT,
-            AMOUNT,
+            amount,
             b"PHP".to_string(),
             56_000_000,
             COMMITMENT,
@@ -273,7 +279,7 @@ fun approval_events_carry_the_commitment_not_the_amount() {
         let c = scenario.take_shared<Clock>();
         let approval = scenario.take_from_sender<PayoutApproval>();
         let ctx = scenario.ctx();
-        let payment = coin::mint_for_testing<SUI>(AMOUNT, ctx);
+        let payment = coin::mint_for_testing<SUI>(amount, ctx);
         let receipt = payment_intent::confirm_with_approval(&mut intent, &mut account, approval, payment, &c, ctx);
         audit_anchor::anchor(receipt, HASH, BLOB, &c, ctx);
 
