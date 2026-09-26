@@ -2,7 +2,8 @@
 
 **Target:** Sui mainnet, week 2 September 2026
 **Governing constraint:** Splash **cannot hold client funds** — self-imposed, enforced by the type system and by CI, and a precondition for operating before an e-money licence exists. No licence is held today.
-E-money tier (RM 1.5M, Labuan money broking paras 6.1 + 6.2) is Phase 1.
+E-money tier (RM 1.5M, Labuan money broking paras 6.1 + 6.2) is Phase 2, the name the code uses
+(`PHASE_2_CUSTODY` in `lib/server/custody-phase.ts`). The build phases 0–7 below are a separate numbering.
 
 **Build phases 0–7** (env contract, claims, money arithmetic, real users,
 zkLogin, passkeys, Move authority, break-glass) are tracked separately in
@@ -122,7 +123,7 @@ Do not publish `splash_core` until every line is checked.
       so one signer suffices and attribution stays chain-enforced.
 - [x] **A-11 built**: `move/splash_meter` (spend meters + guardian, **22 tests
       passing**), per-tenant credit segregation, tenant delegations with a
-      30-day TTL, fixed fee recipient. Publishes with custody in Phase 1.
+      30-day TTL, fixed fee recipient. Publishes with custody in Phase 2.
 - [x] **Both treasuries metered.** `allocate` and `redeem` deleted; the
       operating floor, the withdrawal allowlist, the USDT sweep destination and
       the KYC threshold are all STORED rather than caller-supplied. Every value
@@ -174,14 +175,18 @@ immutable on 2026-07-19 and the re-bootstrap path is exercised
 
 ---
 
-## Phase 0 vs Phase 1 — what the server does
+## Phase 0 vs Phase 2 — what the server does
 
-`SPLASH_CORE_PACKAGE_ID` is **required**. `SPLASH_CUSTODY_PACKAGE_ID` is
+`SPLASH_CORE_PACKAGE_ID` names the core package and falls back to
+`SPLASH_PACKAGE_ID`, which production requires at boot. Set both: with only
+`SPLASH_PACKAGE_ID`, the app treats it as a pre-split package that also holds
+custody, and the refusal below does not fire (`custodyPackageIdOrThrow` in
+`lib/server/sui-settlement.ts`). `SPLASH_CUSTODY_PACKAGE_ID` is
 **absent in Phase 0**, and any code path needing custody fails with:
 
 > Batch settlement requires the splash_custody package, which publishes when the
-> Labuan e-money licence is granted. Phase 0 uses payment_intent
-> (non-custodial). See STATUS.md.
+> Labuan e-money licence is granted. Phase 0 settles through payment_intent,
+> which holds no balance. See STATUS.md.
 
 The error names the licence rather than reporting a missing environment
 variable, because "not configured" reads as a deployment mistake when it is
@@ -199,5 +204,5 @@ supplier list on a public chain.
 **Open items from the 2026-08-13 adversarial pass** (`SECURITY.md`, A-11..A-19)
 — chiefly A-11 (no amount cap or velocity limit on any `AdminCap` function) and
 A-12 (the S-10 cap split is written but not yet in effect at runtime). Both are
-custody-side and land with the Phase 1 publish, but A-12 is an operational
+custody-side and land with the Phase 2 publish, but A-12 is an operational
 change that should happen at the September ceremony regardless.

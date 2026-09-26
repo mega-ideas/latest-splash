@@ -73,7 +73,7 @@ new build refuses to install or start on the old runtime and environment.
    | `SUI_RPC_URL` | The **gRPC** base URL — the app uses `SuiGrpcClient`. Unset means `https://fullnode.<network>.sui.io:443`. `sui-testnet-rpc.publicnode.com` serves JSON-RPC only and answers every call "Bad Request" |
    | `SUI_MAINNET_RPC_URL` | Optional; the stablecoin lane's mainnet client. Defaults to `https://fullnode.mainnet.sui.io:443` |
    | `SUI_SETTLEMENT_MODE` | `auto` (the default and recommended), `live`, or `simulate` for demos. `auto` with mocks off is live settlement, so the defaults require the signer below |
-   | `SPLASH_TREASURY_ID`, `SPLASH_PEG_STATE_ID`, `SPLASH_COMPLIANCE_CONFIG_ID`, `SPLASH_ADMIN_CAP_ID`, `SPLASH_ANCHOR_CAP_ID`, `SPLASH_BUSINESS_ACCOUNT_ID`, `DEEPBOOK_POOL_ID`, `DEEPBOOK_QUOTE_TYPE`, `USDC_TYPE` | From your working `.env.local`. `USDC_TYPE` must be the real coin type — the dev stand-in `0x2::sui::SUI` is refused |
+   | `SPLASH_CORE_PACKAGE_ID`, `SPLASH_PEG_STATE_ID`, `SPLASH_COMPLIANCE_CONFIG_ID`, `SPLASH_ADMIN_CAP_ID`, `SPLASH_ANCHOR_CAP_ID`, `SPLASH_CAP_REGISTRY_ID`, `SPLASH_BUSINESS_ACCOUNT_ID`, `DEEPBOOK_POOL_ID`, `DEEPBOOK_QUOTE_TYPE`, `USDC_TYPE` | From the package the deployment runs, all from one publish (`docs/KEY-CEREMONY-RUNBOOK.md` §3.7). Settlement, anchors and peg pushes throw without `SPLASH_ANCHOR_CAP_ID` and `SPLASH_CAP_REGISTRY_ID`. `USDC_TYPE` must be the real coin type — the dev stand-in `0x2::sui::SUI` is refused. `SPLASH_TREASURY_ID`, `SPLASH_SMART_TREASURY_SUI_ID` and `SPLASH_PAYOUT_DELEGATION_ID` are custody-phase only: blank in Phase 0, unless the full-scope settlement rule asks for `SPLASH_TREASURY_ID` |
    | `OPERATOR_SUI_ADDRESS` / `OPERATOR_SUI_PRIVATE_KEY` | Required once settlement is live (`live`, or `auto` with mocks off) or `TREASURY_EXECUTION_ENABLED=true`. Ed25519 or Secp256k1 `suiprivkey…`. **Encrypted/secret env vars only** |
    | `PASSKEY_RP_ID` | **Decide before anyone enrols a passkey.** Unset, it is the host of `NEXT_PUBLIC_APP_URL`; changing it later orphans every passkey, and a passkey's Sui address is the user's Splash wallet, so another domain means another wallet. Use the parent domain (`splashz.xyz`) if passkeys must work on more than one subdomain — see `docs/PHASE-STATUS.md`. Production's decision is `splashz.xyz` (`docs/GO-LIVE-HANDOVER.md`) |
 
@@ -129,6 +129,11 @@ new build refuses to install or start on the old runtime and environment.
 3. **Environment variables**: App → Settings → App-Level Environment
    Variables. Add everything from the checklist. Mark secrets as *Encrypt*.
    Set `NODE_ENV=production` (App Platform usually sets this already).
+   Set `CLIENT_IP_HEADER=do-connecting-ip`: App Platform puts its own ingress
+   address in `X-Forwarded-For` and the caller's in `do-connecting-ip`
+   (DigitalOcean's "Where can I find the client IP address" page). Without it
+   every visitor shares one rate-limit bucket, and 20 failed sign-ins an hour
+   from anyone lock everyone out of signing in.
 4. **Migrations**: App → Create → *Job*, kind **Pre-deploy**, same repo and
    branch, run command `npm run db:migrate:run`. It runs after the build and
    before the new version takes traffic, with the app-level environment, so
@@ -196,9 +201,14 @@ stays untouched as the rollback. `sudo -u splash pm2 describe splash | grep
    sudo -u splash env NODE_ENV=production npm run doctor   # env contract must be valid
    sudo -u splash npm run db:migrate:run
    sudo -u splash npm run build
-   sudo -u splash pm2 start npm --name splash --cwd /opt/splash -- run start
+   sudo -u splash pm2 start npm --name splash --cwd /opt/splash -- run start -- -H 127.0.0.1
    sudo -u splash pm2 save && pm2 startup   # follow the printed command
    ```
+   `-H 127.0.0.1` keeps the app on the loopback interface, so only nginx
+   reaches it: `next start` listens on every interface by default, and a
+   caller who reached port 3000 directly would skip TLS and choose their own
+   rate-limit address. From another machine, `curl -m 5 http://<droplet-ip>:3000`
+   must fail.
    `NEXT_PUBLIC_*` values are inlined at build time: finish `.env.local`
    before `npm run build`. `doctor` exits 1 while any row fails. Before
    migrating, the Postgres row fails with "reachable, but 0/N migrations
@@ -215,6 +225,7 @@ stays untouched as the rollback. `sudo -u splash pm2 describe splash | grep
        proxy_set_header Host $host;
        proxy_set_header X-Forwarded-Host $host;
        proxy_set_header X-Forwarded-Proto $scheme;
+       proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
        proxy_set_header Upgrade $http_upgrade;
        proxy_set_header Connection "upgrade";
        # SSE (0xWal stream) — don't buffer event streams
@@ -224,7 +235,13 @@ stays untouched as the rollback. `sudo -u splash pm2 describe splash | grep
    }
    ```
    `X-Forwarded-Host`/`X-Forwarded-Proto` are REQUIRED — the customer origin
-   guard trusts them to recognize the public origin. `proxy_buffering off`
+   guard trusts them to recognize the public origin. `X-Forwarded-For` is
+   REQUIRED for the per-address rate limits (sign-in, sign-up, pay links):
+   the app reads the address nginx appends, the last entry, and ignores what
+   the caller put in front of it (`TRUSTED_PROXY_HOPS`, default 1 — set 2 if a
+   CDN such as Cloudflare sits in front of nginx). Without the line nginx
+   passes the caller's own header through untouched, so a caller who sends
+   one picks their own bucket again. `proxy_buffering off`
    is REQUIRED for the 0xWal chat stream; with buffering on, nginx holds the
    SSE frames and the chat appears dead. The app sets its own security
    headers and per-request Content-Security-Policy; don't add them in nginx.
@@ -255,7 +272,7 @@ stays untouched as the rollback. `sudo -u splash pm2 describe splash | grep
    sudo -u splash pm2 stop splash
    sudo -u splash npm run db:migrate:run
    sudo -u splash pm2 delete splash
-   sudo -u splash pm2 start npm --name splash --cwd "$NEXT" -- run start
+   sudo -u splash pm2 start npm --name splash --cwd "$NEXT" -- run start -- -H 127.0.0.1
    sudo -u splash pm2 save
    sudo -u splash pm2 logs splash --lines 60 --nostream
    ```

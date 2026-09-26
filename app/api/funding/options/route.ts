@@ -11,10 +11,15 @@ import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { accountBalance } from '@/lib/server/ledger-store';
 import { readLastUsedFundingSource } from '@/lib/server/funding-sessions';
 import { isForeignAccountId, requireSessionAccount } from '@/lib/server/session-account';
+import { refuseOutsideLaunchScope } from '@/lib/server/launch-scope';
 
 export async function GET(request: Request) {
   const auth = await requireCustomerRequest(request);
   if (auth.response) return auth.response;
+  // The funding choices of the fiat transfer flow, which a USDC-only launch
+  // does not open: it would list Stripe and Airwallex as live.
+  const outOfScope = refuseOutsideLaunchScope();
+  if (outOfScope) return outOfScope;
 
   const url = new URL(request.url);
   const amountUsd = Number.parseFloat(url.searchParams.get('amountUsd') ?? '0');

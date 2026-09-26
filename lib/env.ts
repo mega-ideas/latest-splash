@@ -218,6 +218,14 @@ export const envSchema = z.object({
   DATABASE_URL: opt(str.regex(/^postgres(ql)?:\/\//, 'must be a postgres:// or postgresql:// URL')),
   DATABASE_POOL_MAX: int(10, 1),
   REDIS_URL: url,
+  /* How many proxies sit in front of the app; the client address for rate
+     limits is read that many places from the end of X-Forwarded-For
+     (lib/server/rate-limit.ts). Default 1 (nginx on the Droplet). */
+  TRUSTED_PROXY_HOPS: int(1, 0),
+  /* A header the edge sets to the caller's address, read instead of
+     X-Forwarded-For: `do-connecting-ip` on App Platform. Blank on the
+     Droplet, where a caller could send it. */
+  CLIENT_IP_HEADER: opt(str.regex(/^[A-Za-z0-9-]{1,64}$/, 'must be a header name, e.g. do-connecting-ip')),
   REDIS_TIMEOUT_MS: int(500, 1),
   SPLASH_DATA_DIR: optional,
 

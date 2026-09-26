@@ -114,7 +114,7 @@ export async function checkDb(): Promise<Check> {
       status: migrated ? 'ok' : 'fail',
       detail: migrated
         ? `${host} reachable, ${applied}/${onDisk} migrations applied`
-        : `${host} reachable, but ${applied}/${onDisk} migrations applied — run npm run db:migrate`,
+        : `${host} reachable, but ${applied}/${onDisk} migrations applied — run npm run db:migrate:run`,
       latencyMs: ms,
       data: { host, applied, onDisk },
     };

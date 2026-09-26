@@ -290,7 +290,56 @@ test('attempts outside the window stop counting', async () => {
 });
 
 test('an unknown client address shares one bucket rather than trusting a header it cannot verify', () => {
+  // Our proxy appended 5.6.7.8; 1.2.3.4 is what the caller claimed.
   const withHeader = new Request('https://example.com', { headers: { 'x-forwarded-for': '1.2.3.4, 5.6.7.8' } });
-  assert.equal(clientIp(withHeader), '1.2.3.4');
+  assert.equal(clientIp(withHeader), '5.6.7.8');
   assert.equal(clientIp(new Request('https://example.com')), 'unknown');
+});
+
+test('a caller cannot pick their own rate-limit bucket by sending X-Forwarded-For', () => {
+  const seen = new Set();
+  for (let i = 0; i < 20; i += 1) {
+    // Each request claims a new address; our proxy appends the real one.
+    const request = new Request('https://example.com', { headers: { 'x-forwarded-for': `10.0.0.${i}, 203.0.113.7` } });
+    seen.add(clientIp(request));
+  }
+  assert.deepEqual([...seen], ['203.0.113.7'], 'one bucket, the address our proxy saw');
+});
+
+test('the proxy count decides which entry is believed, and anything doubtful shares one bucket', () => {
+  const req = (xff) => new Request('https://example.com', { headers: xff === null ? {} : { 'x-forwarded-for': xff } });
+  // Two proxies (a CDN, then nginx): the CDN's view of the caller.
+  assert.equal(clientIp(req('6.6.6.6, 198.51.100.4, 10.0.0.2'), 2), '198.51.100.4');
+  // A chain shorter than our proxies did not come through them.
+  assert.equal(clientIp(req('198.51.100.4'), 2), 'unknown');
+  // No proxy configured: no header can be believed.
+  assert.equal(clientIp(req('198.51.100.4'), 0), 'unknown');
+  // Not an address.
+  assert.equal(clientIp(req('<script>'), 1), 'unknown');
+  // IPv6 is an address.
+  assert.equal(clientIp(req('2001:db8::1'), 1), '2001:db8::1');
+});
+
+test('CLIENT_IP_HEADER replaces X-Forwarded-For when set, and only then', async () => {
+  const { clientIpHeader } = await import('../lib/server/rate-limit.ts');
+  const headers = { 'x-forwarded-for': '10.244.0.9', 'do-connecting-ip': '198.51.100.4' };
+  const request = new Request('https://example.com', { headers });
+  // App Platform: the ingress address is in X-Forwarded-For.
+  assert.equal(clientIp(request, 1, 'do-connecting-ip'), '198.51.100.4');
+  // Unset (the Droplet): a do-connecting-ip the caller sent is never read.
+  assert.equal(clientIp(request, 1, null), '10.244.0.9');
+  // Named but missing, or not an address: one shared bucket, no fallback.
+  assert.equal(clientIp(new Request('https://example.com', { headers: { 'x-forwarded-for': '1.2.3.4' } }), 1, 'do-connecting-ip'), 'unknown');
+  assert.equal(clientIp(new Request('https://example.com', { headers: { 'do-connecting-ip': '1.2.3.4, 5.6.7.8' } }), 1, 'do-connecting-ip'), 'unknown');
+  assert.equal(clientIpHeader({}), null);
+  assert.equal(clientIpHeader({ CLIENT_IP_HEADER: ' DO-Connecting-IP ' }), 'do-connecting-ip');
+  assert.equal(clientIpHeader({ CLIENT_IP_HEADER: 'bad header!' }), null);
+});
+
+test('TRUSTED_PROXY_HOPS: blank is one proxy; a bad value falls back to one', async () => {
+  const { trustedProxyHops } = await import('../lib/server/rate-limit.ts');
+  assert.equal(trustedProxyHops({}), 1);
+  assert.equal(trustedProxyHops({ TRUSTED_PROXY_HOPS: '2' }), 2);
+  assert.equal(trustedProxyHops({ TRUSTED_PROXY_HOPS: '0' }), 0);
+  assert.equal(trustedProxyHops({ TRUSTED_PROXY_HOPS: 'x' }), 1);
 });

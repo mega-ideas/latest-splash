@@ -86,15 +86,16 @@ deployed package; it needs a fresh publish and fresh object ids for everything.
 
 ## Configuration still outstanding
 
-`.env.local` does not exist on this machine, so nothing is configured. Secrets
-belong in that file and must never be pasted into a chat or committed.
+On the founder's machine the file is `D:/phase1-main/.env.local`; this table
+does not record what is set in it. Secrets belong in that file and must never
+be pasted into a chat or committed.
 
 | Key | Who | Note |
 |---|---|---|
 | `DATABASE_URL` | you, in `.env.local` | Phases 3–5 need it; auth and passkeys are Postgres-backed |
 | `ENOKI_API_KEY` | optional | Not needed: USDC transfers carry no gas on Sui (2026-09-26). Only the health probe reads it |
 | `SPLASH_PACKAGE_ID` | public — can be committed | `npm run doctor` fails on this today |
-| `SUI_NETWORK` | public | `testnet` until a mainnet package exists |
+| `SUI_NETWORK` | public | `testnet` until a mainnet package exists. The USDC stablecoin lane is mainnet-only and does not read it; it uses `SUI_MAINNET_RPC_URL` |
 | Seal committee | public — goes in `config/seal.production.json` | Object ids, aggregator URLs, weights, threshold, package + policy ids |
 | `ZKLOGIN_GOOGLE_CLIENT_ID` | public | **Part of zkLogin address derivation.** One per environment, never rotated after users exist |
 | `PASSKEY_RP_ID` | public | **See the warning below** |

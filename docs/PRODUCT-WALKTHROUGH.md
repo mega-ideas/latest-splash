@@ -1,7 +1,9 @@
 # Splash product walkthrough
 
+> This script describes the July 2026 testnet demo (pre-flight 2026-07-18). Steps other than the login line below may not match the current build.
+
 Covers, in order: **1) Transfer · 2) Batch payout · 3) 0xWal · 4) Invoice loop · 5) Treasury.**
-Login: whatever `CUSTOMER_EMAIL` / `CUSTOMER_PASSWORD` are set to in your `.env.local`. In development, unset falls back to the values in `lib/auth/customer-session.ts`; production refuses to start without real ones.
+Login: accounts are rows in `users`. Sign up at `/signup`, open the verification link (with `EMAIL_TRANSPORT=console` it is printed in the server log), then a staff member grants a membership at `/admin/memberships`. On a production build, `/signup` answers 403 unless `CUSTOMER_SELF_SIGNUP_ENABLED=true`. Locally, `npm run dev:db` seeds `demo@acme.test` (and `live@acme.test`, `fresh@acme.test`) and prints their password on start; `docs/STABLECOIN-LANE.md` lists the same accounts. `CUSTOMER_EMAIL` / `CUSTOMER_PASSWORD` no longer exist: `lib/env.ts` refuses to boot while either is set.
 Branch: `w9/type-color-discipline` (the polished surfaces — PR #3).
 
 ---

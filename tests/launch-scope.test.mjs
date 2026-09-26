@@ -231,7 +231,7 @@ test('the named fiat routes carry the guard', () => {
     'transfers/authorize', 'batches/authorize', 'treasury', 'funding/sessions', 'funding/sessions/[id]',
     'funding/deposits', 'funding/usd-deposits', 'rate-holds', 'pay/[slug]',
     'cron/accrue-yield', 'cron/settle-withdrawals', 'cron/update-peg', 'cron/audit-batch', 'recipients',
-    'stablecoin/treasury-quote',
+    'stablecoin/treasury-quote', 'funding/options',
   ]) {
     const source = readFileSync(path.join(ROOT, 'app/api', route, 'route.ts'), 'utf8');
     assert.ok(source.includes('refuseOutsideLaunchScope('), route);

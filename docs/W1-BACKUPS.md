@@ -18,9 +18,16 @@ project already runs on DO.
    DB is not open to the internet.
 3. Create a restricted `splash_app` role — the `doadmin` superuser stays out
    of `DATABASE_URL`.
-4. Put the connection string (with `sslmode=require`) in `.env.local` /
-   the deployment env as `DATABASE_URL`. Never commit it.
-5. Run `npm run db:migrate` to apply the checked-in migrations in `drizzle/`.
+4. Put the connection string in `.env.local` / the deployment env as
+   `DATABASE_URL`. Never commit it. Do not keep DigitalOcean's
+   `?sslmode=require` ending: `pg` 8 then verifies against Node's trusted CAs
+   and fails on DigitalOcean's own CA. Download the cluster's CA certificate
+   and end the string with
+   `?sslmode=verify-full&sslrootcert=<path to the CA file>`
+   (`docs/DEPLOY-DIGITALOCEAN.md`, checklist item 4, TLS).
+5. Run `npm run db:migrate:run` to apply the checked-in migrations in
+   `drizzle/`. Not `npm run db:migrate`: `drizzle-kit migrate` needs a TTY,
+   and run headless it applies nothing and exits 0.
 
 ## Restore drill (run once, record evidence — W1 acceptance)
 
@@ -28,11 +35,14 @@ project already runs on DO.
    `insert into webhook_events (id, provider, event_id, payload) values ('drill-<date>','DRILL','drill-<date>','{}');`
 2. In the DO console: **Databases → cluster → Backups → Restore** — choose
    "point in time", pick T+1 minute, restore to a NEW cluster.
-3. Connect to the forked cluster; verify the marker row exists and
-   `npm run test:db` invariants hold against it
-   (`DATABASE_URL=<fork> node --experimental-strip-types ...`).
+3. Connect to the forked cluster; verify the marker row exists and the
+   ledger invariant holds on it. `npm run test:db` does not help here: it
+   runs against in-memory PGlite and never reads `DATABASE_URL`. Run the
+   invariant query directly, which must return no rows:
+   `select journal_id, currency from ledger_postings group by journal_id, currency having sum(amount_minor) <> 0;`
 4. Record: restore start/end wall-clock, fork cluster name, verification
-   output. Commit the notes to `docs/runbooks/db-restore-drill-<date>.md`.
+   output. Commit the notes to this file under a dated "Drill log" heading,
+   and tick the restore-drill line in `docs/MAINNET-CHECKLIST.md`.
 5. Destroy the fork.
 
 ## Invariants in CI

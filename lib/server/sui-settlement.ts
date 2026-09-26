@@ -165,7 +165,7 @@ async function resolveSettlementExecution(): Promise<SettlementExecution> {
 
   throw new Error(
     `Real Sui settlement is not configured: ${cli.reason}. ` +
-    'Set OPERATOR_SUI_PRIVATE_KEY to the funded ED25519 operator key in the production environment, ' +
+    'Set OPERATOR_SUI_PRIVATE_KEY to the funded Ed25519 or Secp256k1 operator key in the production environment, ' +
     'or configure a persistent funded Sui CLI keystore. Use SUI_SETTLEMENT_MODE=simulate only for an explicitly labeled demo.',
   );
 }
@@ -197,23 +197,13 @@ function optionalConfigId(field: ContractConfigField): string {
   return value ? requireSuiObjectId(value, field) : '';
 }
 
-/**
- * Object id for the AnchorCap-gated calls — audit anchors, receipts, and
- * peg updates.
- *
- * The capability split (spec §5) moves those three off the money-authority
- * `AdminCap` and onto a hot `AnchorCap`, so a stolen server key can write
- * attestations but cannot move a coin. The package currently deployed on
- * testnet is IMMUTABLE and still expects an `AdminCap` in that argument
- * position, so:
- *
- *   - `SPLASH_ANCHOR_CAP_ID` set   → post-republish, pass the new cap.
- *   - unset                             → pass the AdminCap id, exactly as
- *                                         today, so the live deployment keeps
- *                                         working until Sebastian republishes.
- *
- * The argument position is identical in both ABIs, so this is a pure object-id
- * swap with no PTB restructuring.
+/*
+ * The AnchorCap-gated calls — audit anchors, receipts and peg updates — take
+ * the hot `AnchorCap` (spec §5), so a stolen server key can write
+ * attestations but cannot move a coin. There is no fallback to the
+ * `AdminCap`: `anchorCapObjectId()` and `capRegistryObjectId()` throw when
+ * SPLASH_ANCHOR_CAP_ID or SPLASH_CAP_REGISTRY_ID is unset
+ * (docs/KEY-CEREMONY-RUNBOOK.md §0).
  */
 /**
  * Pre-flight for batch settlement: the shared SettlementPool must already hold
@@ -343,7 +333,7 @@ const ABORT_CODES: Record<number, string> = {
   // ── peg_monitor ──────────────────────────────────────────────────────────
   300: 'E_PEG_BROKEN_USDC — USDC deviation > 30 bps. Update peg with valid data.',
   301: 'E_PEG_BROKEN_USDT — USDT deviation > 30 bps. Update peg with valid data.',
-  302: 'E_PEG_STALE — Peg price update is older than 60 seconds OR no real update_peg has fired since init. The app refreshes it automatically; verify SPLASH_ADMIN_CAP_ID and SPLASH_PEG_STATE_ID if this appears.',
+  302: 'E_PEG_STALE — Peg price update is older than 60 seconds OR no real update_peg has fired since init. The app refreshes it automatically; verify SPLASH_ANCHOR_CAP_ID, SPLASH_CAP_REGISTRY_ID and SPLASH_PEG_STATE_ID if this appears.',
   303: 'E_TIMESTAMP_REGRESSION — peg_monitor::update_peg called with a Clock timestamp older than the stored one. Indicates a clock bug or replay.',
   304: 'E_INSUFFICIENT_DEPTH — DeepBook cannot fill this settlement amount inside the configured depth window. Common causes, in order: (1) the batch total is BELOW the pool\’s minSize (SUI/DBUSDC testnet minSize = 1 SUI — anything smaller returns a zero quote); (2) the SettlementPool is underfunded (fund it with scripts/fund-settlement-pool.mjs); (3) the book genuinely lacks depth in the [mid*(1-slippage), mid] band. NOTE: the package deployed on testnet still carries the pre-S-11 guard, which requires a PERFECT fill (remaining_base == 0) — unsatisfiable on a lot-quantized book, so batch cannot settle live until the fixed contract is published.',
   305: 'E_SLIPPAGE_EXCEEDED — DeepBook amount-sized execution price exceeds the configured slippage limit.',

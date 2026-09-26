@@ -219,17 +219,63 @@ export async function enforceRateLimit(input: {
 }
 
 /**
- * The client address, from the proxy headers the app already trusts for
- * origin checks. Falls back to a constant rather than to something
- * attacker-controlled: an unknown source shares one bucket, which is
- * restrictive, and being wrong in the restrictive direction is the right way
- * to be wrong here.
+ * How many proxies we run in front of the app (TRUSTED_PROXY_HOPS): nginx on
+ * the Droplet is 1, and each proxy in front of it, such as a CDN, adds one.
+ * Read on every call so tests can set it.
  */
-export function clientIp(request: Request): string {
-  const forwarded = request.headers.get('x-forwarded-for');
-  if (forwarded) {
-    const first = forwarded.split(',')[0]?.trim();
-    if (first) return first;
+export function trustedProxyHops(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = (env.TRUSTED_PROXY_HOPS ?? '').trim();
+  if (raw === '') return 1;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 0 ? n : 1;
+}
+
+/**
+ * A header the edge in front of the app sets to the caller's address
+ * (CLIENT_IP_HEADER), for a host whose X-Forwarded-For does not carry it:
+ * App Platform puts DigitalOcean's ingress address there and the caller's in
+ * `do-connecting-ip`. Blank on the Droplet, where nginx passes any header a
+ * caller sends straight through, so naming one there would let the caller
+ * write their own address.
+ */
+export function clientIpHeader(env: NodeJS.ProcessEnv = process.env): string | null {
+  const raw = (env.CLIENT_IP_HEADER ?? '').trim().toLowerCase();
+  return /^[a-z0-9-]{1,64}$/.test(raw) ? raw : null;
+}
+
+const PLAUSIBLE_IP = /^[0-9a-fA-F:.]{2,45}$/;
+
+/**
+ * The client address, for per-address rate limits.
+ *
+ * X-Forwarded-For is a list each proxy appends to: `client-claimed, …,
+ * address-our-proxy-saw`. Only the entries our own proxies added can be
+ * believed, so the address is the one `hops` places from the END. The first
+ * entry is whatever the caller typed: trusting it let anyone take a fresh
+ * rate-limit bucket on every request by sending a new header. Next fills the
+ * header in only when it is missing (`??=`, next/dist/server/base-server.js),
+ * so it adds no entry of its own behind a proxy. With CLIENT_IP_HEADER set,
+ * that header is read instead and X-Forwarded-For is ignored.
+ *
+ * Anything that cannot be believed — no proxy configured (hops 0), a chain
+ * shorter than our proxies, an entry that is not an address — shares one
+ * bucket. That is restrictive, and restrictive is the right way to be wrong.
+ */
+export function clientIp(
+  request: Request,
+  hops: number = trustedProxyHops(),
+  header: string | null = clientIpHeader(),
+): string {
+  if (header) {
+    const value = request.headers.get(header)?.trim() ?? '';
+    return PLAUSIBLE_IP.test(value) ? value : 'unknown';
   }
-  return request.headers.get('x-real-ip')?.trim() || 'unknown';
+  if (hops <= 0) return 'unknown';
+  const chain = (request.headers.get('x-forwarded-for') ?? '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  if (chain.length < hops) return 'unknown';
+  const address = chain[chain.length - hops];
+  return PLAUSIBLE_IP.test(address) ? address : 'unknown';
 }

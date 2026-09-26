@@ -68,7 +68,7 @@ export function getUsdCorridorByCountry(country: string) {
 
 /**
  * Resolve the customer-facing fee in bps for a given currency.
- * Falls back to FALLBACK_FEE_BPS (80) if unknown.
+ * Falls back to FALLBACK_FEE_BPS (70) if unknown.
  * Always clamped to CONTRACT_MAX_FEE_BPS so the result is guaranteed to be
  * accepted on-chain.
  */

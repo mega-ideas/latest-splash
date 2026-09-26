@@ -3,7 +3,7 @@ import test from 'node:test';
 
 /**
  * Regression guard for the S-11 fix in
- * `peg_monitor::assert_deepbook_liquidity` (move/sources/peg_monitor.move).
+ * `liquidity_guard::assert_deepbook_liquidity` (move/splash_custody/sources/liquidity_guard.move).
  *
  * `sui move test` cannot run in this repo — the pinned DeepBook dependency
  * ships test files that fail to compile against the current toolchain
@@ -25,7 +25,7 @@ import test from 'node:test';
  */
 
 const BPS = 10_000;
-const MIN_FILL_BPS = 9_000; // must match MIN_FILL_BPS in peg_monitor.move
+const MIN_FILL_BPS = 9_000; // must match MIN_FILL_BPS in move/splash_custody/sources/liquidity_guard.move
 
 // Measured on-chain, in base units (MIST) to mirror the contract's u64 math.
 const MID_PRICE = 0.691;
