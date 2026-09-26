@@ -14,8 +14,10 @@ import test from 'node:test';
 import { SPLASH_CORE_ABI } from '../scripts/splash-core-abi.mjs';
 
 const root = new URL('../', import.meta.url);
+/** A file's text with LF line endings, so the patterns below hold on a CRLF
+ *  (Windows autocrlf) checkout too. */
 async function source(rel) {
-  return readFile(new URL(rel, root), 'utf8');
+  return (await readFile(new URL(rel, root), 'utf8')).split(/\r?\n/).join('\n');
 }
 
 /** Split at commas outside angle brackets: `Coin<T>, &Clock`. */
