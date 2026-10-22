@@ -9,6 +9,7 @@ import { EnvValidationError, ENV_KEYS, parseEnv } from '../lib/env.ts';
 
 const OBJ = '0x' + 'ab'.repeat(32);
 const KEY = 'suiprivkey1' + 'q'.repeat(58);
+const KMS_KEY = 'arn:aws:kms:ap-southeast-1:111122223333:key/0b5e7f8a-1c2d-4e3f-9a0b-1c2d3e4f5a6b';
 
 /** A production environment that passes. Cases below remove one thing. */
 const PROD_OK = {
@@ -82,16 +83,19 @@ test('production: a complete sandbox environment passes', () => {
 });
 
 test('production: live settlement requires the signer; simulate does not', () => {
+  // WS4: the production signer is the KMS key. A raw key is refused outright
+  // (tests/operator-custody.test.mjs), so it is not what is asked for here.
   const live = keysOf(() => parseEnv({ ...PROD_OK, SUI_SETTLEMENT_MODE: 'live' }));
-  assert.ok(live.includes('OPERATOR_SUI_PRIVATE_KEY'));
+  assert.ok(live.includes('OPERATOR_KMS_KEY_ID'));
+  assert.ok(live.includes('AWS_REGION'));
   assert.ok(live.includes('OPERATOR_SUI_ADDRESS'));
   assert.ok(live.includes('SPLASH_TREASURY_ID'));
 
   // auto with mocks off resolves to live at runtime, so it is live here too.
   const auto = keysOf(() => parseEnv({ ...PROD_OK, SUI_SETTLEMENT_MODE: 'auto', USE_MOCK_APIS: 'false' }));
-  assert.ok(auto.includes('OPERATOR_SUI_PRIVATE_KEY'));
+  assert.ok(auto.includes('OPERATOR_KMS_KEY_ID'));
 
-  const withSigner = parseEnv({ ...PROD_OK, SUI_SETTLEMENT_MODE: 'live', OPERATOR_SUI_PRIVATE_KEY: KEY, OPERATOR_SUI_ADDRESS: OBJ, SPLASH_TREASURY_ID: OBJ });
+  const withSigner = parseEnv({ ...PROD_OK, SUI_SETTLEMENT_MODE: 'live', OPERATOR_KMS_KEY_ID: KMS_KEY, AWS_REGION: 'ap-southeast-1', OPERATOR_HOT_BALANCE_CEILING_MICRO: '5000000000', OPERATOR_SUI_ADDRESS: OBJ, SPLASH_TREASURY_ID: OBJ });
   assert.equal(withSigner.SUI_SETTLEMENT_MODE, 'live');
 });
 

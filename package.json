@@ -32,6 +32,7 @@
     "test:funding": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/funding-registry.test.mjs tests/funding-policy.test.mjs",
     "test:batch": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/batch-parse.test.mjs",
     "test:env": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/env.test.mjs",
+    "test:custody": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --import ./scripts/alias-hook.mjs --test tests/operator-custody.test.mjs tests/launch-scope.test.mjs",
     "test:seal": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/seal-config.test.mjs",
     "test:health": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --import ./scripts/alias-hook.mjs --test tests/health.test.mjs tests/rate-limits-and-headers.test.mjs",
     "test:explorer": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/explorer.test.mjs",
