@@ -30,6 +30,62 @@ The remaining four modules (`smart_treasury`, `payment_intent`, `audit_anchor`, 
 
 ---
 
+## WS8 — every store in Postgres — 2026-10-23
+
+**Scope**: the stores that still kept their records in a `Map` on
+`globalThis`. On serverless each instance has its own copy, so state differs
+between instances and a cold start drops it: a deposit webhook answered by
+another instance found no funding session, a staff console found no ticket a
+customer had just raised, and a reconciliation summed only one instance's
+legs. Every one of them now reads and writes Postgres; the in-process map is
+kept only as the fallback when `DATABASE_URL` is unset (`npm run dev` without
+a database), and each store warns once when it falls back. Tests drive a
+migrated PGlite behind the app's own `getDb()` and simulate a cold start by
+dropping every `globalThis` store and evaluating the module again
+(`tests/helpers/store-db.mjs`), all in `npm run test:db`.
+
+| Slice | Tables (migration) | What the database now enforces | Tests |
+|---|---|---|---|
+| Recipients, invoices, transfers + receipts, ledger | already on main | pinned: survive a cold start; a race on one idempotency key or pay-link slug leaves one row | `operational-store-durability` (6) |
+| Sweep jobs, rate holds | `sweep_jobs`, `rate_holds` (0027) | one sweep per transfer (a second is a second payout); a hold must have an owner | `sweep-rate-hold-persistence` (5) |
+| Funding sessions | `funding_sessions`, `funding_source_transactions`, `funding_last_used_sources` (0028) | one deposit, one session (digest is the key); credit and CREDITED in one locked transaction; last-used source per org | `funding-session-persistence` (5) |
+| Intercompany legs | `intercompany_transfers` (0029) | one leg per customer transfer; the daily reconciliation sums every instance's rows | `intercompany-persistence` (3) |
+| Support tickets | `support_tickets`, `support_ticket_replies` (0030) | `org_id NOT NULL` + FK on both; WS2's org scope is in the WHERE clause, so a foreign id reads as missing and a foreign reply or close writes nothing; replies are inserts, so two at once both land | `support-persistence` (4) |
+| Daily audit batches | `daily_audit_batches` (0031) | one batch per business date (unique index); the cron's "already built?" check sees every instance's batches | `audit-batch-persistence` (3) |
+
+**Support tickets and daily audit batches are no longer in memory.** They
+were the last two `globalThis` stores holding records, and the ones WS2 had
+just scoped. Support keeps WS2's shape exactly — customer functions take the
+session's org first, staff reach across tenants only through `*ForStaff` —
+and the demo seed tickets stay in the fallback, because the demo org does
+not exist in a real database. The audit-batch table has **no `org_id`**, on
+purpose and said so in the schema and migration: a batch spans every tenant
+(its leaves are many workspaces' transfer ids), so there is no owner to scope
+by, and the protection remains who may read it (staff-only readers behind
+`getAdminSession()`).
+
+Every function in both stores is async now, and every caller awaits it. Two
+of those callers handed the result straight to `NextResponse.json`
+(`/api/admin/support`, `/api/audit-batches`), where a Promise serialises as
+`{}` and `tsc` does not object; both await explicitly, with a comment.
+
+**Operators must apply migrations `0030_support_tickets` and
+`0031_daily_audit_batches`** (with 0027–0029 if not yet applied) before this
+release serves traffic: `npm run db:migrate:run`, or the pre-deploy job in
+`docs/DEPLOY-DIGITALOCEAN.md`. No backfill: the in-memory tickets and batches
+never outlived an instance, so there is nothing to carry over.
+
+**What it does not do.** Two cron runs for the same business date that both
+start before either records still both seal, store and anchor; the database
+keeps the first batch and both runs return it, so the day has one recorded
+root, but the later run's Walrus blob and Sui anchor are left unreferenced.
+Closing that would mean holding a lock across up to a minute of Seal, Walrus
+and Sui calls, for a job that runs once a day. Demo-mode Walrus blobs are
+still process state, so verifying a demo batch after a cold start reports the
+blob missing; live Walrus is unaffected.
+
+---
+
 ## WS2 — the four remaining unscoped stores — 2026-10-23
 
 **Scope**: the stores that still answered any signed-in session with every
@@ -81,9 +137,10 @@ in `npm run test:db`.
   `reconcileStuckPayment`, which answers 404 on the same mismatch
   (`lib/server/stuck-payments.ts`). **Scoped.**
 
-**Still open.** Support tickets and audit batches still live in an
+**Still open.** ~~Support tickets and audit batches still live in an
 in-process `Map`, so they are per-instance and disappear on restart; they are
-scoped now, but not durable. A signed-in person with no membership yet gets
+scoped now, but not durable.~~ Closed by WS8 (above): both are in Postgres,
+migrations 0030 and 0031. A signed-in person with no membership yet gets
 `no_membership` (403) from the support routes and has to use the support
 address instead. The staff console has no audit-batch page, so the
 staff-only API currently has no UI. `components/oxwal/ActionCard.tsx` links
