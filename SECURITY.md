@@ -30,6 +30,71 @@ The remaining four modules (`smart_treasury`, `payment_intent`, `audit_anchor`, 
 
 ---
 
+## WS2 — the four remaining unscoped stores — 2026-10-23
+
+**Scope**: the stores that still answered any signed-in session with every
+tenant's data, and the routes in front of them. The pattern is the one the
+transfer, invoice, beneficiary and ledger stores already follow: `orgId` is
+the first, required parameter of every customer read and write, so an
+unscoped call site does not compile; the org comes from the session
+(`requireCustomerRequest`, then `requireSessionAccount`, which resolves it
+through `resolveAuthorityForSession`), never from the request; reach across
+tenants is spelled `*ForStaff` and sits behind `getAdminSession()`. The
+master prompt calls the member guard `requireMember`; it does not exist on
+main, and these two existing helpers are what it means. Tests:
+`tests/tenant-isolation.test.mjs` (11; red commit `8b278d5`, fix `0124707`),
+in `npm run test:db`.
+
+| ID | Sev | Finding | Status |
+|----|-----|---------|--------|
+| WS2-1 | Low (pinned) | MemWal (Copilot memory). Already scoped on main: `recallForOrg` / `rememberForOrg` in `lib/server/memwal.ts` are the only entry points, every write goes to the org's own namespace with the org's key at the start of the text, and recall drops anything without that key (`lib/server/memwal-scope.ts`). Every caller passes the session's org or, in the demo seed, `DEMO_ORG_ID`. **Pinned**: recall for org B returns none of org A's fact even from a relayer that ignores namespaces; the adapter exports nothing unscoped; nothing but `memwal.ts` imports the SDK. | No change needed |
+| WS2-2 | High | Support tickets. `listSupportTickets()` and `readSupportTicket(id)` took no org, so any customer could list every tenant's tickets (subjects, messages, contact addresses, staff replies) or read and reply to one by id. The reply's author was a name the request body supplied. **Fixed**: tickets carry `orgId`; `create/list/read/updateSupportTicket(orgId, …)`; a foreign id reads as missing, for a reply too; the staff console and admin routes use `listSupportTicketsForStaff`, `readSupportTicketForStaff`, `updateSupportTicketForStaff`; a customer reply is attributed to `session.email`. | Fixed |
+| WS2-3 | High | `GET /api/walrus/:blobId` returned any blob's metadata to any session, and blob ids are not secret: they appear on invoices, receipts and evidence records. **Fixed**: `orgReferencesBlob(orgId, blobId)` (`lib/server/walrus-access.ts`) answers true only when the caller's org owns an invoice, or a transfer whose receipt references the blob (the transfer's own blob, or the evidence bundle in `settlement_metadata.evidence`). Scoped queries in both repositories, reached through their stores. The check runs before the blob is fetched, so another tenant's blob and a missing one are the same 404, and every answer is `private, no-store`. | Fixed |
+| WS2-4 | High | Daily audit batches. `GET /api/audit-batches` and `POST /api/audit-batches/verify` took any customer session and returned every batch: each one lists every tenant's settled transfer ids with their Merkle proofs, and the customer history page displayed them. **Decision (Sky)**: staff-only, roots and contents. **Fixed**: the readers are `listDailyAuditBatchesForStaff`, `readDailyAuditBatchForStaff`, `verifyDailyAuditBatchForStaff`; both routes require `getAdminSession()`; the panel is removed from `/dashboard/history`. | Fixed |
+
+### The routes re-checked, and why each is safe
+
+- **`/api/copilot/chat`** no longer exists; it was deleted with
+  `lib/copilot-client.ts` (see `docs/HANDOVER-2026-09-06.md`). The copilot
+  routes that remain, `copilot/extract-invoice`, `copilot/suggest` and
+  `copilot/summary`, each run `requireCustomerRequest` and then
+  `requireSessionAccount`, and read only through scoped stores:
+  `readInvoice(orgId, id)`, `listInvoicesFor(orgId)`,
+  `getCopilotSuggestions(orgId)`, and MemWal through `recallForOrg` and
+  `rememberForOrg`. **Scoped.**
+- **`/api/profile`** is **per-user by design**. GET, POST and DELETE read
+  and write the customer-profile store keyed by `session.email`, and the
+  request cannot name another address. The org is resolved only to decide
+  whether a WhatsApp approval is required. The staff side
+  (`/api/admin/profile-requests`) is behind `getAdminSession()`.
+- **`/api/quotes`** is **stateless**: `calculateQuote` prices an amount from
+  the corridor table and a cached market rate, and reads no tenant store.
+  `recipientId` is echoed back, not looked up. **`/api/quotes/peg-status`**
+  is public market data from DeepBook, with no tenant data in it.
+- **`/api/oxwal`** takes `orgId` and `actorId` from
+  `resolveAuthorityForSession`. The body is only `{ message, history }`, and
+  `assertCleanBody` refuses provenance fields, so the agent runs in the
+  session's org and nowhere else. **Scoped.**
+- **`/api/proposals/[id]/submit`** resolves the session's authority and
+  answers 404 when `proposal.orgId !== ctx.orgId`.
+  **`/api/proposals/[id]/reconcile`** passes `ctx.orgId` to
+  `reconcileStuckPayment`, which answers 404 on the same mismatch
+  (`lib/server/stuck-payments.ts`). **Scoped.**
+
+**Still open.** Support tickets and audit batches still live in an
+in-process `Map`, so they are per-instance and disappear on restart; they are
+scoped now, but not durable. A signed-in person with no membership yet gets
+`no_membership` (403) from the support routes and has to use the support
+address instead. The staff console has no audit-batch page, so the
+staff-only API currently has no UI. `components/oxwal/ActionCard.tsx` links
+to `/api/walrus/<reasoningTraceRef>`, but those refs (`pending-walrus:…`,
+`dual-approval:…`) are not blob ids, so the link 404s, as it already did.
+`listAllRequests` and `decideProfileRequest` in
+`lib/server/customer-profile.ts` are staff-only in practice but not named
+`*ForStaff`.
+
+---
+
 ## Approvals by code and WhatsApp — 2026-09-24
 
 **Scope**: the two ballot channels for payments the money routes send for

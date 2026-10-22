@@ -100,6 +100,15 @@ export async function readInvoiceForStaff(invoiceId: string): Promise<InvoiceRec
   return row ? toRecord(row) : null;
 }
 
+/** True when one of `orgId`'s invoices references this Walrus blob. */
+export async function invoiceReferencesBlob(orgId: string, blobId: string): Promise<boolean> {
+  if (!orgId || !blobId) return false;
+  if (!usingPostgres()) {
+    return [...operations.invoices.values()].some((i) => i.orgId === orgId && i.walrusBlobId === blobId);
+  }
+  return (await repo.findInvoiceIdByBlob(await db(), orgId, blobId)) !== null;
+}
+
 /**
  * By pay-link slug. Deliberately unscoped — the slug is the capability.
  */

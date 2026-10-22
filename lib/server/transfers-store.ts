@@ -160,6 +160,22 @@ export async function listTransfersFor(orgId: string, limit = 100): Promise<Tran
   return rows.map(toRecord);
 }
 
+/**
+ * True when one of `orgId`'s transfers references this Walrus blob, as its own
+ * blob or as the receipt's settlement evidence bundle.
+ */
+export async function transferReferencesBlob(orgId: string, blobId: string): Promise<boolean> {
+  if (!orgId || !blobId) return false;
+  if (!usingPostgres()) {
+    return [...operations.transfers.values()].some((t) => {
+      if (t.orgId !== orgId) return false;
+      const evidence = (t as { evidence?: { walrusBlobId?: string } }).evidence;
+      return t.walrusBlobId === blobId || evidence?.walrusBlobId === blobId;
+    });
+  }
+  return (await repo.findTransferIdByBlob(await db(), orgId, blobId)) !== null;
+}
+
 /** Every transfer, for the staff console. Named so it cannot be reached by accident. */
 export async function listTransfersForStaff(limit = 200): Promise<TransferIntentRecord[]> {
   if (!usingPostgres()) {
