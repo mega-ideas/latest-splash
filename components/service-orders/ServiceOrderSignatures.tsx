@@ -1,9 +1,14 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { CheckCircle2, Circle, Clock, KeyRound, Loader2, PenLine } from 'lucide-react';
 
-import { serviceOrderWindow, type SignatureParty } from '@/lib/sui/service-orders';
+import {
+  serviceOrderCountdownText,
+  serviceOrderWindow,
+  type ServiceOrderWindow,
+  type SignatureParty,
+} from '@/lib/sui/service-orders';
 import {
   connectWallet,
   describeSignError,
@@ -73,24 +78,47 @@ async function signWithStandardWallet(accepted: AcceptedWallet, account: StdAcco
   return feature.signTransaction({ transaction: { toJSON: async () => json }, account, chain: `sui:${network}` });
 }
 
-function Countdown({ order, offset }: { order: OrderView; offset: number }) {
+const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
+function subscribeReducedMotion(onChange: () => void) {
+  const query = window.matchMedia(REDUCED_MOTION);
+  query.addEventListener('change', onChange);
+  return () => query.removeEventListener('change', onChange);
+}
+
+/** What is left of this order's window, ticking each second, and whether the viewer asked for less motion. */
+function useWindowLeft(order: OrderView, offset: number) {
   const [now, setNow] = useState(() => Date.now() + offset);
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now() + offset), 1000);
     return () => window.clearInterval(timer);
   }, [offset]);
-  if (order.expiresAtMs === null || !order.window) {
+  const reducedMotion = useSyncExternalStore(subscribeReducedMotion, () => window.matchMedia(REDUCED_MOTION).matches, () => false);
+  const left =
+    order.expiresAtMs === null || !order.window
+      ? null
+      : serviceOrderWindow({ createdAtMs: order.expiresAtMs - order.window.totalMs, expiresAtMs: order.expiresAtMs }, now);
+  return { left, reducedMotion };
+}
+
+function Countdown({ order, left, reducedMotion }: { order: OrderView; left: ServiceOrderWindow | null; reducedMotion: boolean }) {
+  // Once approved, paying or failed, there is no window left to count.
+  if (order.state !== 'AWAITING_ORDER_SIGNATURE' && order.state !== 'AWAITING_APPROVAL') return null;
+  if (!left) {
     return <span className="text-[13px] font-medium text-[#326273]/90">The window starts when the order is signed.</span>;
   }
-  const left = serviceOrderWindow({ createdAtMs: order.expiresAtMs - order.window.totalMs, expiresAtMs: order.expiresAtMs }, now);
+  const text = serviceOrderCountdownText(left, { reducedMotion });
   return (
-    <span
-      className={`inline-flex items-center gap-1.5 text-[13px] font-bold tabular-nums ${left.expired ? 'text-[var(--error)]' : 'text-[#1F4452]'}`}
-      aria-live="off"
-    >
-      <Clock className="h-3.5 w-3.5" aria-hidden="true" />
-      {left.expired ? 'Window closed. Nothing moved; create the payment again.' : `${left.label} to approve`}
-    </span>
+    <>
+      <span
+        className={`inline-flex items-start gap-1.5 text-[13px] tabular-nums ${left.expired ? 'font-semibold text-[var(--error)]' : 'font-bold text-[#1F4452]'}`}
+        aria-live="off"
+      >
+        <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        {text}
+      </span>
+      {/* The ticking words stay silent; the close is said once. */}
+      <span className="sr-only" aria-live="polite">{left.expired ? text : ''}</span>
+    </>
   );
 }
 
@@ -104,7 +132,7 @@ function PartyRow({ party }: { party: SignatureParty }) {
       )}
       <div className="min-w-0">
         <p className="text-[13px] font-bold text-[#1F4452]">{party.title}</p>
-        <p className="truncate text-[12px] font-medium text-[#326273]/90">
+        <p className="text-[12px] font-medium text-[#326273]/90 [overflow-wrap:anywhere]">
           {party.label}
           {party.digest ? <span className="font-mono"> ({party.digest.slice(0, 10)}…)</span> : null}
         </p>
@@ -119,25 +147,38 @@ function OrderCard({
   signers,
   offset,
   onChanged,
+  onPaid,
 }: {
   order: OrderView;
   viewerId: string;
   signers: Signer[];
   offset: number;
   onChanged: () => void;
+  onPaid: (order: OrderView) => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const { left, reducedMotion } = useWindowLeft(order, offset);
+  const expired = left?.expired ?? false;
 
   const step = order.state === 'AWAITING_ORDER_SIGNATURE' ? 'order' : order.state === 'AWAITING_APPROVAL' ? 'approve' : null;
   // Who may sign what. The server and the chain enforce both; this only
-  // avoids offering a button that would be refused.
+  // avoids offering a button that would be refused, including after the
+  // window has closed.
   const mine = order.makerUserId === viewerId;
-  const canSign = step === 'order' ? mine : step === 'approve' ? !mine : false;
-  const waitingOn =
-    step === 'order' && !mine ? 'Waiting for the member who created it to sign the order.'
-      : step === 'approve' && mine ? 'You ordered this payment, so a different approver must sign it.'
+  const canSign = !expired && (step === 'order' ? mine : step === 'approve' ? !mine : false);
+  const waitingOn = expired
+    ? null
+    : step === 'order' && !mine
+      ? 'Waiting for the member who created it to sign the order. A second approver signs after.'
+      : step === 'approve' && mine
+        ? 'You ordered this payment, so a different approver signs it in their approval queue.'
         : null;
+  const whatSigningDoes = !canSign
+    ? null
+    : step === 'order'
+      ? 'Signing orders the payment. A second approver then signs to approve it.'
+      : 'Signing approves the payment, and Splash pays it straight away.';
 
   async function sign(signer: Signer) {
     if (!step) return;
@@ -174,6 +215,9 @@ function OrderCard({
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error ?? `Splash refused the signature (HTTP ${response.status}). Nothing moved.`);
       setMessage(step === 'order' ? 'Order signed. A second approver signs next.' : 'Approved. Splash has paid it.');
+      // A paid order leaves the listing on the reload; the section keeps
+      // saying it was paid so the approver sees what their signature did.
+      if (step === 'approve') onPaid(order);
       onChanged();
     } catch (error) {
       setMessage(describeSignError(error));
@@ -188,7 +232,7 @@ function OrderCard({
         <strong className="block truncate text-sm text-[#1F4452]">{order.recipientLabel}</strong>
         <p className="money mt-1 text-sm font-medium text-[#1F4452]">{usd(order.amountMinor)} to {order.targetCurrency}</p>
         <div className="mt-2">
-          <Countdown order={order} offset={offset} />
+          <Countdown order={order} left={left} reducedMotion={reducedMotion} />
         </div>
       </div>
       <ol className="flex flex-col gap-2" aria-label="Signatures">
@@ -197,6 +241,7 @@ function OrderCard({
         ))}
       </ol>
       <div className="flex flex-col gap-1.5 md:items-end">
+        {whatSigningDoes && <p className="text-[12px] font-semibold text-[#326273]/90 md:text-right">{whatSigningDoes}</p>}
         {canSign && signers.length === 0 && (
           <p className="text-[12px] font-semibold text-[#326273]/90 md:text-right">
             Enrol a Splash passkey or connect a Sui wallet to sign.
@@ -234,6 +279,8 @@ export default function ServiceOrderSignatures({ orderId }: { orderId?: string }
   const [wallets, setWallets] = useState<AcceptedWallet[]>([]);
   // Bumped after a signature lands, so the list reloads at once.
   const [reloads, setReloads] = useState(0);
+  // Orders this viewer approved and Splash paid, which the listing no longer carries.
+  const [paid, setPaid] = useState<OrderView[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -262,10 +309,17 @@ export default function ServiceOrderSignatures({ orderId }: { orderId?: string }
   }, []);
 
   if (error) return <p className="text-[13px] font-semibold text-[var(--error)]">Signatures could not be loaded: {error}</p>;
-  if (!listing) return <div className="h-24 animate-pulse rounded-lg bg-white/60" aria-label="Loading signatures" />;
+  if (!listing) {
+    return (
+      <div role="status" className="h-24 animate-pulse rounded-lg bg-white/60 motion-reduce:animate-none">
+        <span className="sr-only">Loading signatures</span>
+      </div>
+    );
+  }
 
   const orders = orderId ? listing.orders.filter((order) => order.id === orderId) : listing.orders;
-  if (orders.length === 0) return null;
+  const paidHere = paid.filter((order) => (!orderId || order.id === orderId) && !orders.some((o) => o.id === order.id));
+  if (orders.length === 0 && paidHere.length === 0) return null;
 
   const signers: Signer[] = [
     ...listing.passkeys.map((passkey) => ({ kind: 'passkey' as const, label: 'Splash passkey', address: passkey.address, passkey })),
@@ -284,7 +338,23 @@ export default function ServiceOrderSignatures({ orderId }: { orderId?: string }
       </div>
       <div className="divide-y divide-[#326273]/10">
         {orders.map((order) => (
-          <OrderCard key={order.id} order={order} viewerId={listing.viewer.userId} signers={signers} offset={listing.offset} onChanged={() => setReloads((n) => n + 1)} />
+          <OrderCard
+            key={order.id}
+            order={order}
+            viewerId={listing.viewer.userId}
+            signers={signers}
+            offset={listing.offset}
+            onChanged={() => setReloads((n) => n + 1)}
+            onPaid={(done) => setPaid((current) => [...current.filter((o) => o.id !== done.id), done])}
+          />
+        ))}
+        {paidHere.map((order) => (
+          <div key={`paid-${order.id}`} role="status" className="flex items-start gap-2.5 px-4 py-3">
+            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-[var(--ok)]" aria-hidden="true" />
+            <p className="min-w-0 text-[13px] font-semibold text-[#1F4452]">
+              Paid. Both members signed, and Splash paid {usd(order.amountMinor)} to {order.recipientLabel}.
+            </p>
+          </div>
         ))}
       </div>
     </section>

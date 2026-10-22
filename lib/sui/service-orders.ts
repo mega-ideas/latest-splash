@@ -206,6 +206,22 @@ export function serviceOrderWindow(
   return { remainingMs, totalMs, expired, label };
 }
 
+/**
+ * What the countdown says to a person. With motion it ticks m:ss; under
+ * prefers-reduced-motion the words change once a minute, so nothing rewrites
+ * itself every second. The boundary is the window's either way.
+ */
+export function serviceOrderCountdownText(left: ServiceOrderWindow, options: { reducedMotion: boolean }): string {
+  if (left.expired) {
+    return 'The approval window closed before a second approver signed. Nothing was paid. Create the payment again to send it.';
+  }
+  if (!options.reducedMotion) return `${left.label} for a second approver to sign`;
+  const minutes = Math.ceil(left.remainingMs / 60_000);
+  return minutes <= 1
+    ? 'Under a minute left for a second approver to sign'
+    : `${minutes} minutes left for a second approver to sign`;
+}
+
 // ─── Who has signed ─────────────────────────────────────────────────────────
 
 export type SignatureRecord = { address: string; digest: string; at?: string } | null;

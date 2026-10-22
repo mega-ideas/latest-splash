@@ -29,7 +29,8 @@ test('under reduced motion the countdown words change once a minute, not every s
   assert.match(at(361_000, false), /^3:59 left for a second approver to sign$/);
 
   // Without, every second of the same minute reads the same.
-  const minute = new Set([361_000, 375_000, 399_000, 420_000].map((now) => at(now, true)));
+  // 239 s to 181 s left: all of them "4 minutes".
+  const minute = new Set([361_000, 375_000, 399_000, 419_000].map((now) => at(now, true)));
   assert.equal(minute.size, 1, [...minute].join(' | '));
   assert.match([...minute][0], /^4 minutes left for a second approver to sign$/);
   assert.match(at(570_000, true), /^Under a minute left for a second approver to sign$/);
