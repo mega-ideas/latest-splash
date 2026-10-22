@@ -1247,3 +1247,30 @@ export const fundingLastUsedSources = pgTable('funding_last_used_sources', {
 }, (table) => [
   primaryKey({ columns: [table.orgId, table.businessAccountId] }),
 ]);
+
+/**
+ * One Splash US → Splash Labuan leg behind a customer transfer: the USD sent,
+ * the USDC acquired, and the bank and Labuan references an auditor follows.
+ *
+ * Held in a `Map` on `globalThis` until WS8, which the daily reconciliation
+ * summed — so each serverless instance reconciled its own slice of the day.
+ */
+export const intercompanyTransfers = pgTable('intercompany_transfers', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  transferIntentId: text('transfer_intent_id').notNull(),
+  /** Micro units, integers. The record carries decimal strings; the store
+   *  converts through lib/money.ts. */
+  amountUsdMicro: bigint('amount_usd_micro', { mode: 'bigint' }).notNull(),
+  amountUsdcMicro: bigint('amount_usdc_micro', { mode: 'bigint' }).notNull().default(0n),
+  /** A ratio, not money: exact decimal, string in JS. */
+  usdToUsdcRate: numeric('usd_to_usdc_rate').notNull(),
+  maybankRef: text('maybank_ref').notNull().default(''),
+  labuanSettlementId: text('labuan_settlement_id').notNull().default(''),
+  state: text('state').notNull().default('INITIATED'),
+  ...timestamps,
+}, (table) => [
+  /** One leg per customer transfer. A second would send the USD twice. */
+  uniqueIndex('intercompany_transfer_unique').on(table.transferIntentId),
+  index('intercompany_created_idx').on(table.createdAt),
+]);

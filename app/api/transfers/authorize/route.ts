@@ -580,7 +580,7 @@ async function authorize(request: Request, spent: SpentApproval) {
   if (body.invoiceId) await patchInvoice(orgId, body.invoiceId, { transferIntentId: intent.id });
 
   if (conversion?.success && conversion.labuanSettlementId) {
-    createIntercompanyTransfer({ transferIntentId: intent.id, amountUsd: conversion.usdAmount, usdToUsdcRate: conversion.usdToUsdcRate });
+    await createIntercompanyTransfer({ orgId, transferIntentId: intent.id, amountUsd: conversion.usdAmount, usdToUsdcRate: conversion.usdToUsdcRate });
   }
 
   after(async () => {

@@ -204,6 +204,13 @@
       "when": 1790985600000,
       "tag": "0028_funding_sessions",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1791072000000,
+      "tag": "0029_intercompany_transfers",
+      "breakpoints": true
     }
   ]
 }
