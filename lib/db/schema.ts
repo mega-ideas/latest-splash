@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import {
   bigint,
+  bigserial,
   boolean,
   index,
   integer,
@@ -1273,4 +1274,56 @@ export const intercompanyTransfers = pgTable('intercompany_transfers', {
   /** One leg per customer transfer. A second would send the USD twice. */
   uniqueIndex('intercompany_transfer_unique').on(table.transferIntentId),
   index('intercompany_created_idx').on(table.createdAt),
+]);
+
+/**
+ * A support ticket: a customer telling us something is wrong, and our answer.
+ *
+ * Held in a `Map` on `globalThis` in `lib/server/support.ts` until WS8, so a
+ * ticket raised on one serverless instance was unknown to the instance the
+ * staff console reached, and a cold start dropped every ticket. WS2 scoped the
+ * store by org; `orgId` is NOT NULL here with a foreign key, because a ticket
+ * with no owner cannot be scoped. The demo seed tickets live only in the
+ * in-process fallback and never reach a real database.
+ */
+export const supportTickets = pgTable('support_tickets', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  /** bug | feature | complaint | other. */
+  type: text('type').notNull(),
+  subject: text('subject').notNull(),
+  message: text('message').notNull(),
+  email: text('email'),
+  /** OPEN | IN_REVIEW | REPLIED | CLOSED. */
+  status: text('status').notNull().default('OPEN'),
+  /** NORMAL | HIGH. */
+  priority: text('priority').notNull().default('NORMAL'),
+  assignedTo: text('assigned_to'),
+  ...timestamps,
+}, (table) => [
+  index('support_tickets_org_updated_idx').on(table.orgId, table.updatedAt),
+  index('support_tickets_updated_idx').on(table.updatedAt),
+]);
+
+/**
+ * One reply on a ticket, customer or staff.
+ *
+ * Its own table, not an array on the ticket: the `Map` replaced the whole
+ * replies array on every write, which in a database is a read-modify-write
+ * that loses one of two replies sent at the same moment. An insert cannot.
+ * `seq` orders replies even when two share a millisecond.
+ */
+export const supportTicketReplies = pgTable('support_ticket_replies', {
+  id: text('id').primaryKey(),
+  seq: bigserial('seq', { mode: 'number' }).notNull(),
+  ticketId: text('ticket_id').notNull().references(() => supportTickets.id),
+  /** The ticket's org, so a reply can never be read across tenants on its own. */
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  actor: text('actor').notNull(),
+  /** customer | staff. */
+  actorType: text('actor_type').notNull(),
+  message: text('message').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index('support_ticket_replies_ticket_idx').on(table.ticketId, table.seq),
 ]);

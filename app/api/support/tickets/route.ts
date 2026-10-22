@@ -30,7 +30,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Subject and message are required' }, { status: 400 });
   }
 
-  const ticket = createSupportTicket(accountCheck.account.orgId, { type, subject, message, email });
+  const ticket = await createSupportTicket(accountCheck.account.orgId, { type, subject, message, email });
 
   return NextResponse.json({ ticket }, { status: 201 });
 }
