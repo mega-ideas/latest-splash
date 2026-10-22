@@ -162,6 +162,24 @@ export async function getInvoiceForStaff(
 }
 
 /**
+ * The id of `orgId`'s invoice that references this Walrus blob, or null.
+ * Ownership for `GET /api/walrus/:blobId`: another org's blob reads as absent.
+ */
+export async function findInvoiceIdByBlob(
+  db: DrizzleDb,
+  orgId: string,
+  blobId: string,
+): Promise<string | null> {
+  if (!orgId || !blobId) return null;
+  const rows = await db
+    .select({ id: invoices.id })
+    .from(invoices)
+    .where(and(eq(invoices.orgId, orgId), eq(invoices.walrusBlobId, blobId)))
+    .limit(1);
+  return rows[0]?.id ?? null;
+}
+
+/**
  * By pay-link slug, and deliberately unscoped.
  *
  * The slug IS the authority here: it is unguessable, it was handed to a payer
