@@ -3,6 +3,7 @@ import {
   bigint,
   bigserial,
   boolean,
+  date,
   index,
   integer,
   jsonb,
@@ -1326,4 +1327,44 @@ export const supportTicketReplies = pgTable('support_ticket_replies', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   index('support_ticket_replies_ticket_idx').on(table.ticketId, table.seq),
+]);
+
+/**
+ * One business day's settlements across every tenant, folded into a Merkle
+ * root, sealed to Walrus and anchored on Sui.
+ *
+ * Held in a `Map` on `globalThis` in `lib/server/audit-batches.ts` until WS8:
+ * the batch existed only on the instance the cron hit, and after a cold start
+ * the cron found no record of a root already on chain and anchored the day
+ * again.
+ *
+ * No `org_id`, deliberately. Every other WS8 table has one because its rows
+ * belong to a tenant; a batch belongs to all of them at once — its leaves are
+ * many workspaces' transfer ids — so there is no owner to scope by. That is
+ * why its readers are staff-only by name (`*ForStaff`, WS2) and sit behind the
+ * staff session: the protection is who may read, not which rows.
+ *
+ * One batch per business date. The in-memory code relied on that (the map was
+ * keyed by date) and the unique index now enforces it across instances.
+ */
+export const dailyAuditBatches = pgTable('daily_audit_batches', {
+  /** `daily-audit:<business date>`. */
+  id: text('id').primaryKey(),
+  businessDate: date('business_date', { mode: 'string' }).notNull(),
+  merkleRoot: text('merkle_root').notNull(),
+  settlementCount: integer('settlement_count').notNull(),
+  /** Each settlement's leaf hash and inclusion proof. One value, read whole. */
+  leaves: jsonb('leaves').notNull(),
+  walrusBlobId: text('walrus_blob_id').notNull(),
+  /** demo | live. */
+  walrusMode: text('walrus_mode').notNull(),
+  sealPolicyId: text('seal_policy_id').notNull(),
+  /** demo | live. */
+  sealMode: text('seal_mode').notNull(),
+  ciphertextHash: text('ciphertext_hash').notNull(),
+  anchorObjectId: text('anchor_object_id'),
+  anchorDigest: text('anchor_digest').notNull(),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('daily_audit_batches_business_date_unique').on(table.businessDate),
 ]);
