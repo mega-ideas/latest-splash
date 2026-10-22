@@ -62,6 +62,10 @@ process.env.SPLASH_TOTP_SECRET = 'JBSWY3DPEHPK3PXP';
 /** The request the route runs in: the session cookie it carries, and the work
  *  it handed to `after()`. */
 const scope = { cookies: new Map(), deferred: [] };
+/** WS3: a carried-out payment no longer starts settlement in `after()`. It
+ *  opens a service order that two members must sign before anything is paid,
+ *  so "settlement started once" is "one order opened". */
+const ordersOpened = () => globalThis.splashServiceOrders?.size ?? 0;
 globalThis.__approvedPayoutOnceScope = scope;
 
 const stubModule = (source) => `data:text/javascript,${encodeURIComponent(source)}`;
@@ -358,7 +362,7 @@ test('an approved payout is paid once: the replay sends it, and the same claim s
   await approve(id);
 
   // The first execution, through lib/server/approval-replay.ts.
-  const settlingBefore = scope.deferred.length;
+  const settlingBefore = ordersOpened();
   const first = await carryOut(id);
   assert.equal(first.state, 'EXECUTED', first.detail);
   const debits = await payoutDebits('acme');
@@ -366,7 +370,7 @@ test('an approved payout is paid once: the replay sends it, and the same claim s
   const paid = debits.find((line) => line.refId === first.ref);
   assert.ok(paid, 'the debit is the transfer the replay made');
   assert.equal(paid.amountMinor, 25_000_000_000n);
-  assert.equal(scope.deferred.length, settlingBefore + 1, 'settlement started once');
+  assert.equal(ordersOpened(), settlingBefore + 1, 'settlement started once');
   assert.equal(store.get(id).status, 'SUBMITTED', 'carried out, it is still SUBMITTED; the status alone would not stop a second');
 
   // The replay itself, again: a retried settle, a second click on Approve.
@@ -376,7 +380,7 @@ test('an approved payout is paid once: the replay sends it, and the same claim s
   assertSentForApproval(await authorize(PEOPLE.secondChecker, body, id));
 
   assert.equal((await payoutDebits('acme')).length, paidBefore + 1, 'still one payment');
-  assert.equal(scope.deferred.length, settlingBefore + 1, 'and one settlement');
+  assert.equal(ordersOpened(), settlingBefore + 1, 'and one settlement');
   // Spent by the route as it paid, in the row every process reads, not only by
   // the replay's clean-up afterwards.
   assert.deepEqual(await spendRecord(id), [{ org_id: 'acme', consumed_by: 'transfers/authorize' }]);
@@ -389,7 +393,7 @@ test('after a restart a payment already carried out stays in Postgres, and its a
   await approve(id);
   assert.equal((await carryOut(id)).state, 'EXECUTED');
   const paidBefore = (await payoutDebits('acme')).length;
-  const settlingBefore = scope.deferred.length;
+  const settlingBefore = ordersOpened();
 
   // A deploy: a new process, its store rebuilt from Postgres the way
   // ensureProposalStoreHydrated rebuilds it. Boot hydration loads the work in
@@ -402,7 +406,7 @@ test('after a restart a payment already carried out stays in Postgres, and its a
 
   assertSentForApproval(await authorize(PEOPLE.maker, body, id));
   assert.equal((await payoutDebits('acme')).length, paidBefore);
-  assert.equal(scope.deferred.length, settlingBefore);
+  assert.equal(ordersOpened(), settlingBefore);
 });
 
 test('after a restart the approval is back, SUBMITTED and unmarked, when its outcome never landed, and it still pays nothing', async () => {
@@ -412,7 +416,7 @@ test('after a restart the approval is back, SUBMITTED and unmarked, when its out
   await approve(id);
   assert.equal((await carryOut(id)).state, 'EXECUTED');
   const paidBefore = (await payoutDebits('acme')).length;
-  const settlingBefore = scope.deferred.length;
+  const settlingBefore = ordersOpened();
 
   // The process stopped after the payment and before its outcome was written.
   // Postgres has the approval SUBMITTED with no outcome, which is still in
@@ -429,7 +433,7 @@ test('after a restart the approval is back, SUBMITTED and unmarked, when its out
   assert.equal((await replay(id)).state, 'FAILED');
 
   assert.equal((await payoutDebits('acme')).length, paidBefore);
-  assert.equal(scope.deferred.length, settlingBefore);
+  assert.equal(ordersOpened(), settlingBefore);
 });
 
 // ── Only its own payment, only its own org ──────────────────────────────────
@@ -496,7 +500,7 @@ test('an approved payout is not asked again for the code its maker spent filing 
   const store = freshStore();
   const body = coinPayout('28000');
   const paidBefore = (await payoutDebits('acme')).length;
-  const settlingBefore = scope.deferred.length;
+  const settlingBefore = ordersOpened();
 
   // This rail asks for the code.
   const noCode = await authorize(PEOPLE.maker, body);
@@ -518,7 +522,7 @@ test('an approved payout is not asked again for the code its maker spent filing 
   assert.doesNotMatch(outcome.detail, /authorization code/i);
   assert.match(outcome.detail, /funding session/);
   assert.equal((await payoutDebits('acme')).length, paidBefore, 'nothing moved');
-  assert.equal(scope.deferred.length, settlingBefore);
+  assert.equal(ordersOpened(), settlingBefore);
 });
 
 test('the approval stands in for the code only on its own payment, and only once', async () => {

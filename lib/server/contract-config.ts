@@ -15,6 +15,8 @@ export type ContractConfigField =
   | 'adminCapId'
   | 'anchorCapId'
   | 'capRegistryId'
+  /** WS3. The shared SettlementPolicy naming the operator that pays service orders. */
+  | 'settlementPolicyId'
   | 'pegStateId'
   | 'complianceConfigId'
   | 'complianceCapId'
@@ -45,6 +47,7 @@ const FIELD_TO_ENV: Record<ContractConfigField, string> = {
   adminCapId: 'SPLASH_ADMIN_CAP_ID',
   anchorCapId: 'SPLASH_ANCHOR_CAP_ID',
   capRegistryId: 'SPLASH_CAP_REGISTRY_ID',
+  settlementPolicyId: 'SPLASH_SETTLEMENT_POLICY_ID',
   pegStateId: 'SPLASH_PEG_STATE_ID',
   complianceConfigId: 'SPLASH_COMPLIANCE_CONFIG_ID',
   complianceCapId: 'SPLASH_COMPLIANCE_CAP_ID',
@@ -151,6 +154,7 @@ const ID_FIELDS: ContractConfigField[] = [
   'treasuryId',
   'adminCapId',
   'anchorCapId',
+  'settlementPolicyId',
   'pegStateId',
   'complianceConfigId',
   'complianceCapId',

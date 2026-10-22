@@ -51,11 +51,13 @@ test('Seal demo crypto is unavailable in production transfer runtime', async () 
 
 test('audit receipt persists evidence and audit route verifies it', async () => {
   const operations = await source('lib/server/operations.ts');
-  const authorizeRoute = await source('app/api/transfers/authorize/route.ts');
+  // WS3: the settled transfer is written where the operator's signature lands,
+  // after two members signed the service order, not in the authorize route.
+  const settleRoute = await source('app/api/service-orders/route.ts');
   const auditRoute = await source('app/api/audit/[intentId]/route.ts');
 
   assert.match(operations, /evidence\?: StoredSettlementEvidence/);
-  assert.match(authorizeRoute, /evidence: result\.evidence/);
+  assert.match(settleRoute, /evidence: result\.evidence/);
   assert.match(auditRoute, /verifyStoredSettlementEvidence/);
   assert.match(auditRoute, /proof: await settlementProof/);
 });

@@ -113,6 +113,11 @@ if (!PACKAGE) stop('Set SPLASH_CORE_PACKAGE_ID to the splash_core package id.');
 // No fallback to the AdminCap, as in anchorCapObjectId / capRegistryObjectId.
 const ANCHOR_CAP = objectIdFromEnv('SPLASH_ANCHOR_CAP_ID', { required: true });
 const CAP_REGISTRY = objectIdFromEnv('SPLASH_CAP_REGISTRY_ID', { required: true });
+// WS3. Every intent creator reads the shared SettlementPolicy. This verify
+// opens its intents as the operator, the shape the policy refuses (421) once
+// set_operator has run, so it is run BEFORE the operator is registered
+// (runbook section 3.8, then 3.9).
+const SETTLEMENT_POLICY = objectIdFromEnv('SPLASH_SETTLEMENT_POLICY_ID', { required: true });
 const PEG_STATE = objectIdFromEnv('SPLASH_PEG_STATE_ID', { required: false });
 const BUSINESS = objectIdFromEnv('SPLASH_BUSINESS_ACCOUNT_ID', { required: false });
 const ADMIN_CAP = objectIdFromEnv('SPLASH_ADMIN_CAP_ID', { required: false });
@@ -193,6 +198,9 @@ function explain(message) {
     // A cap or registry from another publish never gets this far: it is the
     // wrong type, which the id checks name.
     return `${message} — the AnchorCap was revoked: a break-glass execute moved its generation on. Use the AnchorCap that execute_break_glass_anchor_cap minted.`;
+  }
+  if (/\b421\b/.test(message) && /payment_intent/.test(message)) {
+    return `${message} — the operator is already registered in the SettlementPolicy, so it may not open an intent (WS3, by design). This verify runs before set_operator; after it, payouts are service orders two members sign.`;
   }
   return message;
 }
@@ -380,6 +388,9 @@ async function checkIds() {
   if (await checkObject('CapRegistry', 'SPLASH_CAP_REGISTRY_ID', CAP_REGISTRY, typeIn('cap_registry::CapRegistry'), { shared: true })) {
     record('CapRegistry', 'PASS', CAP_REGISTRY);
   }
+  if (await checkObject('SettlementPolicy', 'SPLASH_SETTLEMENT_POLICY_ID', SETTLEMENT_POLICY, typeIn('settlement_policy::SettlementPolicy'), { shared: true })) {
+    record('SettlementPolicy', 'PASS', SETTLEMENT_POLICY);
+  }
   if (await checkObject('PegState', 'SPLASH_PEG_STATE_ID', PEG_STATE, typeIn('peg_monitor::PegState'), { shared: true })) {
     record('PegState', 'PASS', PEG_STATE);
   }
@@ -538,6 +549,7 @@ function openIntent(tx, commitment) {
     target: `${PACKAGE}::payment_intent::create_payment_intent`,
     typeArguments: [SUI],
     arguments: [
+      tx.object(SETTLEMENT_POLICY),
       tx.pure.address(RECIPIENT),
       tx.pure.u64(PAYMENT_MIST),
       tx.pure.string('PHP'),
@@ -575,6 +587,7 @@ async function checkConfirmSimulated() {
     target: `${PACKAGE}::payment_intent::create`,
     typeArguments: [SUI],
     arguments: [
+      tx.object(SETTLEMENT_POLICY),
       tx.pure.address(RECIPIENT),
       tx.pure.vector('u8', Array.from(Buffer.from('e2e', 'utf8'))),
       tx.pure.u64(PAYMENT_MIST),

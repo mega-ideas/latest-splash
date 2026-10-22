@@ -35,7 +35,7 @@ async function source(rel) {
 const orders = () => import('../lib/sui/service-orders.ts');
 const settlement = () => import('../lib/server/sui-settlement.ts');
 
-const PKG = normalizeSuiAddress('0xc0re');
+const PKG = normalizeSuiAddress('0xc02e');
 const POLICY = normalizeSuiAddress('0x9011c7');
 const ACCOUNT = normalizeSuiAddress('0xacc0');
 const RECIPIENT = normalizeSuiAddress('0xb0b');
@@ -212,7 +212,8 @@ test('once an operator is registered, the server-pays path aborts 421 — 420 is
   }
 
   const { humanizeSuiError } = await settlement();
-  const abort = (code, module) => `MoveAbort(MoveLocation { module: ModuleId { address: 0x1, name: Identifier("${module}") }, function: 2, instruction: 9, function_name: Some("create_payment_intent") }, ${code}) in command 0`;
+  // The shape describeExecutionError renders a node's MoveAbort in.
+  const abort = (code, module) => `MoveAbort(${module}::create_payment_intent, ${code}) function_name: Some("create_payment_intent") - aborted`;
   assert.match(humanizeSuiError(abort(421, 'payment_intent'), ''), /^E_OPERATOR_NEEDS_SERVICE_ORDER/);
   assert.match(humanizeSuiError(abort(422, 'payment_intent'), ''), /^E_NO_OPERATOR/);
   assert.match(humanizeSuiError(abort(423, 'payment_intent'), ''), /^E_PAYER_CANNOT_APPROVE/);

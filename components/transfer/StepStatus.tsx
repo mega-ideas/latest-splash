@@ -5,6 +5,7 @@ import { Banknote, CheckCircle2, Globe2, Loader2, Network, XCircle } from 'lucid
 
 import type { TransferState } from '@/app/dashboard/transfer/page';
 import LocalTime from '@/components/LocalTime';
+import ServiceOrderSignatures from '@/components/service-orders/ServiceOrderSignatures';
 
 /** Destination country names for the "Sent to …" stage (human language). */
 const COUNTRY_NAMES: Record<string, string> = {
@@ -143,6 +144,11 @@ export default function StepStatus({ state, set, next }: { state: TransferState;
 
   return (
     <div className="space-y-6 py-2">
+      {/* WS3. Until two members sign, nothing is paid. Who has signed, and the
+          window the contract gave the order, are shown here. */}
+      {state.serviceOrderId && (chainState === 'AUTHORIZED' || chainState === 'QUEUED' || chainState === 'SETTLING') && (
+        <ServiceOrderSignatures orderId={state.serviceOrderId} />
+      )}
       <div className="rounded-3xl bg-[#1F4452] p-6 text-white">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>

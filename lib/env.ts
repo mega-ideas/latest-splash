@@ -114,6 +114,11 @@ export const envSchema = z.object({
    *  ComplianceCap passes it, so a revoked capability stops working on chain
    *  rather than being rejected by convention off it. */
   SPLASH_CAP_REGISTRY_ID: objectId,
+  /** WS3. The shared SettlementPolicy, shared at publish. Names the operator
+   *  that pays service orders; once one is registered the operator can open
+   *  no intent of its own (payment_intent abort 421). Service orders refuse
+   *  to build without it. */
+  SPLASH_SETTLEMENT_POLICY_ID: objectId,
   /** Renamed with the Phase 6 cap split (`AttestationCap` -> `AnchorCap`).
    *  Declared must-be-unset rather than silently ignored: a stale object id
    *  under the old name would point at a capability type that no longer

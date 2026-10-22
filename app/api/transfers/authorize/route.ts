@@ -1,9 +1,9 @@
-import { after, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
 import { createIntercompanyTransfer } from '@/lib/server/intercompany';
 import { convertUsdToUsdc, usdCentsToUsdcMicro } from '@/lib/server/labuan-settlement';
-import { executeComposedPayment } from '@/lib/server/composed-payment';
+import { openServiceOrder } from '@/lib/server/composed-payment';
 import {
   buildRecipient,
   createTransferIntent,
@@ -19,7 +19,6 @@ import { resolveApprovalClaim } from '@/lib/server/approved-proposal';
 import { resolveAuthorityForSession } from '@/lib/auth/authority';
 import { getPegStatus } from '@/lib/server/peg';
 import { calculateQuote } from '@/lib/server/quote';
-import { completeDeliveryForTransfer } from '@/lib/server/sweep';
 import { confirmUsdFunding } from '@/lib/server/funding-intake';
 import { readFundingSession, recordLastUsedFundingSource, updateFundingSession } from '@/lib/server/funding-sessions';
 import {
@@ -583,18 +582,29 @@ async function authorize(request: Request, spent: SpentApproval) {
     createIntercompanyTransfer({ transferIntentId: intent.id, amountUsd: conversion.usdAmount, usdToUsdcRate: conversion.usdToUsdcRate });
   }
 
-  after(async () => {
-    await patchTransfer(intent.id, { state: 'QUEUED' });
-    try {
-      await patchTransfer(intent.id, { state: 'SETTLING' });
-      const result = await executeComposedPayment({
-        transferId: intent.id,
-        recipientAddress: '',
-        recipientLabel: intent.recipientName,
-        amountMist: Math.max(1_000_000, stablecoinAmountMicro),
-        targetCurrency: serverQuote?.targetCurrency ?? body.amount.targetCurrency,
-        fxRate: serverQuote?.exchangeRate ?? intent.exchangeRate,
-        funding: {
+  // WS3. This used to hand the payment to the operator key in `after()`: it
+  // opened an intent and paid it from its own gas coin, so the chain saw one
+  // address authorise and fund its own payout. Now the payment becomes a
+  // service order, and nothing moves until two members of this account sign
+  // in their own wallets — the maker's create_service_order, then a
+  // different approver's approve_payout — after which the operator pays
+  // exactly what was approved (app/api/service-orders/route.ts).
+  let serviceOrder: { orderId: string };
+  try {
+    const makerCtx = await resolveAuthorityForSession(auth.session);
+    serviceOrder = await openServiceOrder({
+      orgId,
+      transferId: intent.id,
+      account: businessAccountId,
+      makerUserId: makerCtx.userId,
+      // The payout partner's address (or the testnet override) is resolved
+      // when the maker's signature is composed, not here.
+      recipientAddress: '',
+      recipientLabel: intent.recipientName,
+      amountMinor: BigInt(Math.max(1_000_000, stablecoinAmountMicro)),
+      targetCurrency: serverQuote?.targetCurrency ?? body.amount.targetCurrency,
+      fxRate: serverQuote?.exchangeRate ?? intent.exchangeRate,
+      funding: {
           sessionId: intent.fundingSessionId,
           source: intent.fundingSource,
           method: intent.fundingMethod,
@@ -607,41 +617,30 @@ async function authorize(request: Request, spent: SpentApproval) {
           normalizeVenue: intent.fundingNormalizeVenue,
           effectiveSlippageBps: intent.fundingEffectiveSlippageBps,
         },
-      });
-      // This was two writes into two stores — the settlement fields into the
-      // transfer, then eleven of the same fields again into the audit receipt.
-      // Two records holding one fact, free to disagree the moment one write
-      // landed and the other did not. The receipt is now composed from this
-      // row, so there is one write and nothing to reconcile.
-      await patchTransfer(intent.id, {
-        state: 'SETTLED',
-        suiTxDigest: result.digest,
-        verificationReference: result.digest,
-        receiptObjectId: result.auditAnchorObjectId ?? undefined,
-        paymentIntentId: result.intentId,
-        intentCreateDigest: result.intentCreateDigest,
-        walrusBlobId: result.walrus.blobId,
-        sealPolicyId: result.sealPolicy.policyId,
-        auditHash: result.auditHash,
-        auditAnchorId: result.auditAnchorObjectId ?? undefined,
-        auditAnchorDigest: result.digest,
-        evidence: result.evidence,
-        smartTreasuryId: result.smartTreasuryId ?? undefined,
-        composedActions: result.composedActions,
-      });
-      await completeDeliveryForTransfer(intent.id);
-    } catch (error) {
-      await patchTransfer(intent.id, {
-        state: 'FAILED',
-        failureReason: error instanceof Error ? error.message : 'Unknown settlement error',
-        failedAtState: 'SETTLING',
-      });
-    }
-  });
+    });
+    await patchTransfer(intent.id, { state: 'QUEUED' });
+  } catch (error) {
+    await patchTransfer(intent.id, {
+      state: 'FAILED',
+      failureReason: error instanceof Error ? error.message : 'The service order could not be opened',
+      failedAtState: 'QUEUED',
+    });
+    return NextResponse.json(
+      {
+        error: error instanceof Error ? error.message : 'The service order could not be opened',
+        code: 'service_order_unavailable',
+        transferIntentId: intent.id,
+      },
+      { status: 503 },
+    );
+  }
 
   return NextResponse.json({
     transferIntentId: intent.id,
-    state: intent.state,
+    state: 'QUEUED',
+    // The three signatures this payment still needs, and where they are
+    // given. The maker signs the first one now, in their own wallet.
+    serviceOrder: { id: serviceOrder.orderId, state: 'AWAITING_ORDER_SIGNATURE', queueUrl: '/queue' },
     quote: serverQuote,
     stablecoinUsed: sourceStablecoin,
     daxProvider: intent.daxProvider,
