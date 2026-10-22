@@ -5,8 +5,8 @@
  * is the first, required argument of every customer read and write, and it
  * comes from the session (`requireSessionAccount`), never from the request.
  * `listSupportTickets()` and `readSupportTicket(id)` used to take no org, so
- * any signed-in customer could list every tenant's tickets — subjects,
- * messages, contact addresses, staff replies — or read one by id.
+ * any signed-in customer could list every tenant's tickets â€” subjects,
+ * messages, contact addresses, staff replies â€” or read one by id.
  *
  * The staff console reads across tenants, and says so: `*ForStaff`, behind
  * `getAdminSession()` only. A foreign id reads as missing, the same answer a
