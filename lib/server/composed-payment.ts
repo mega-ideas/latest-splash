@@ -14,7 +14,7 @@ import { assertSealWritable } from '@/lib/server/seal-health';
 import {
   confirmComposedPaymentOnSui,
   createPaymentIntentOnSui,
-  getOperatorKeypair,
+  getOperatorSigner,
   settlementCoinType,
 } from '@/lib/server/sui-settlement';
 import type { AuditReceipt } from '@/lib/server/operations';
@@ -51,9 +51,9 @@ export async function executeComposedPayment(input: {
   // Seal bundle below. The chain gets the 32-byte commitment and nothing else
   // about this payment; a party on the Seal allowlist recomputes it from the
   // bundle with scripts/verify-commitment.mjs. Nothing here logs the salt.
-  const operator = getOperatorKeypair();
+  const operator = await getOperatorSigner();
   if (!operator) {
-    throw new Error('OPERATOR_SUI_PRIVATE_KEY is required: the commitment binds the operator address that opens the intent.');
+    throw new Error('The operator signer (OPERATOR_KMS_KEY_ID) is required: the commitment binds the operator address that opens the intent.');
   }
   const salt = newSalt();
   const payload: PaymentCommitmentPayload = {

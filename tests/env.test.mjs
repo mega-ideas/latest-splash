@@ -8,7 +8,6 @@ import { EnvValidationError, ENV_KEYS, parseEnv } from '../lib/env.ts';
    leaks into the assertions. */
 
 const OBJ = '0x' + 'ab'.repeat(32);
-const KEY = 'suiprivkey1' + 'q'.repeat(58);
 const KMS_KEY = 'arn:aws:kms:ap-southeast-1:111122223333:key/0b5e7f8a-1c2d-4e3f-9a0b-1c2d3e4f5a6b';
 
 /** A production environment that passes. Cases below remove one thing. */
