@@ -1117,3 +1117,66 @@ export const treasuryAccrualState = pgTable('treasury_accrual_state', {
   lastAccruedPriceMicros: bigint('last_accrued_price_micros', { mode: 'bigint' }),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * A stored balance being paid out to a bank through a sweep partner.
+ *
+ * Held in `operations.sweepJobs`, a `Map` on `globalThis`, until WS8. On
+ * serverless every instance had its own copy, so the instance that opened a
+ * sweep and the one asked about it later were usually not the same one, and a
+ * cold start between EXECUTING and COMPLETED left the transfer pointing at a
+ * job nobody could read.
+ *
+ * One per transfer. The in-memory code relied on that without saying so — a
+ * transfer carries a single `sweepJobId` — and a second sweep for the same
+ * transfer is a second payout of the same money.
+ */
+export const sweepJobs = pgTable('sweep_jobs', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  transferIntentId: text('transfer_intent_id').notNull().references(() => paymentIntents.id),
+  recipientId: text('recipient_id').notNull(),
+  partner: text('partner').notNull(),
+  /** Micro-USDC. Integer minor units, never a float. */
+  amountUsdcMicro: bigint('amount_usdc_micro', { mode: 'bigint' }).notNull(),
+  targetCurrency: text('target_currency').notNull(),
+  /** A ratio, not money: exact decimal, string in JS. */
+  fxRate: numeric('fx_rate').notNull(),
+  /** PENDING | EXECUTING | COMPLETED | FAILED. */
+  state: text('state').notNull().default('PENDING'),
+  heldDurationMs: integer('held_duration_ms'),
+  partnerPayoutRef: text('partner_payout_ref'),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+  demo: boolean('demo').notNull().default(false),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('sweep_jobs_transfer_unique').on(table.transferIntentId),
+  index('sweep_jobs_org_created_idx').on(table.orgId, table.createdAt),
+]);
+
+/**
+ * A rate commitment made to one customer: this corridor, this rate, until then.
+ *
+ * Held in `operations.rateHolds` until WS8. `orgId` was optional there so the
+ * demo seed could own nothing; here it is NOT NULL, because a hold with no
+ * owner cannot be scoped and the demo seed never reaches a real database.
+ */
+export const rateHolds = pgTable('rate_holds', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  corridorCurrency: text('corridor_currency').notNull(),
+  /** A ratio, not money: exact decimal, string in JS. */
+  rate: numeric('rate').notNull(),
+  feeBps: integer('fee_bps').notNull(),
+  holdUntil: timestamp('hold_until', { withTimezone: true }).notNull(),
+  scheduledExecuteAt: timestamp('scheduled_execute_at', { withTimezone: true }),
+  alertRule: jsonb('alert_rule'),
+  /** ACTIVE | EXECUTED | EXPIRED | CANCELLED. */
+  state: text('state').notNull().default('ACTIVE'),
+  transferIntentId: text('transfer_intent_id'),
+  demo: boolean('demo').notNull().default(false),
+  ...timestamps,
+}, (table) => [
+  index('rate_holds_org_created_idx').on(table.orgId, table.createdAt),
+  index('rate_holds_active_until_idx').on(table.state, table.holdUntil),
+]);

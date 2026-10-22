@@ -21,7 +21,7 @@ async function auditView(orgId: string, intentId: string) {
   // one it names — so this read is reached only through an ownership check
   // that has already passed.
   const invoice = receipt.invoiceId ? await readInvoiceForStaff(receipt.invoiceId) : null;
-  const sweepJob = receipt.sweepJobId ? readSweepJob(receipt.sweepJobId) : null;
+  const sweepJob = receipt.sweepJobId ? await readSweepJob(receipt.sweepJobId) : null;
   const policy = receipt.sealPolicyId ? readSealPolicy(receipt.sealPolicyId) : null;
   return { transfer, receipt, invoice, sweepJob, policy };
 }

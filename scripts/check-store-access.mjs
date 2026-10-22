@@ -28,7 +28,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 /** The maps that belong to a store. */
-const OWNED = ['transfers', 'invoices', 'recipients', 'ledgerEntries', 'auditReceipts'];
+const OWNED = ['transfers', 'invoices', 'recipients', 'ledgerEntries', 'auditReceipts', 'sweepJobs', 'rateHolds'];
 
 /** The store modules, plus operations.ts itself, which defines them. */
 const ALLOWED = new Set(

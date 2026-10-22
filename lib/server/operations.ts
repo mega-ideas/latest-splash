@@ -240,6 +240,9 @@ export type LedgerEntry = {
 
 export type SweepJob = {
   id: string;
+  /** The org whose stored balance is being swept out. The transfer already
+   *  has one; the job carries it too so its own row can be scoped. */
+  orgId: string;
   transferIntentId: string;
   recipientId: string;
   partner: 'PDAX';
@@ -654,54 +657,124 @@ export function getLedgerBalance(accountId: string): bigint {
   );
 }
 
-export function createSweepJob(input: Omit<SweepJob, 'id' | 'state' | 'createdAt'> & { state?: SweepJob['state'] }) {
-  const job: SweepJob = {
+/* ─── Sweep jobs and rate holds ───────────────────────────────────────────────
+ *
+ * Two backends, like every store here: Postgres when `DATABASE_URL` is set,
+ * which is every deployed environment, and the maps above only when it is not,
+ * so `npm run dev` works without a database. They lived in those maps alone
+ * until WS8, and on serverless each instance had its own — a sweep opened by
+ * one instance was unknown to the next, and a cold start dropped every hold.
+ *
+ * Async because Postgres is. The signatures are otherwise the ones every
+ * caller already used.
+ */
+
+let announcedMemory = false;
+
+function usingPostgres(): boolean {
+  if (process.env.DATABASE_URL) return true;
+  if (!announcedMemory) {
+    announcedMemory = true;
+    console.warn(
+      '[operations] DATABASE_URL is not set, so sweep jobs and rate holds live in ' +
+        'this process and disappear when it restarts. Local development only.',
+    );
+  }
+  return false;
+}
+
+async function storeDb() {
+  const { getDb } = await import('../db/client.ts');
+  return getDb() as never;
+}
+
+async function sweepRepo() {
+  return import('./repository/sweeps-and-holds.ts');
+}
+
+function buildSweepJob(input: Omit<SweepJob, 'id' | 'state' | 'createdAt'> & { state?: SweepJob['state'] }): SweepJob {
+  return {
     ...input,
     id: createId('sweep'),
     state: input.state ?? 'PENDING',
     createdAt: new Date().toISOString(),
   };
-  operations.sweepJobs.set(job.id, job);
-  return job;
 }
 
-export function updateSweepJob(jobId: string, patch: Partial<SweepJob>) {
-  const job = operations.sweepJobs.get(jobId);
-  if (!job) return null;
-  Object.assign(job, patch);
-  return job;
+export async function createSweepJob(input: Omit<SweepJob, 'id' | 'state' | 'createdAt'> & { state?: SweepJob['state'] }) {
+  const job = buildSweepJob(input);
+  if (!usingPostgres()) {
+    operations.sweepJobs.set(job.id, job);
+    return job;
+  }
+  return (await sweepRepo()).insertSweepJob(await storeDb(), job);
 }
 
-export function readSweepJob(jobId: string) {
-  return operations.sweepJobs.get(jobId) ?? null;
+export async function updateSweepJob(jobId: string, patch: Partial<SweepJob>) {
+  if (!usingPostgres()) {
+    const job = operations.sweepJobs.get(jobId);
+    if (!job) return null;
+    Object.assign(job, patch);
+    return job;
+  }
+  return (await sweepRepo()).patchSweepJob(await storeDb(), jobId, patch);
 }
 
-export function listSweepJobs() {
-  return [...operations.sweepJobs.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+export async function readSweepJob(jobId: string) {
+  if (!usingPostgres()) return operations.sweepJobs.get(jobId) ?? null;
+  return (await sweepRepo()).getSweepJob(await storeDb(), jobId);
 }
 
-export function createRateHold(input: Omit<RateHold, 'id' | 'state' | 'createdAt' | 'holdUntil'> & { holdUntil?: string; state?: RateHold['state'] }) {
+export async function listSweepJobs() {
+  if (!usingPostgres()) {
+    return [...operations.sweepJobs.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+  return (await sweepRepo()).listSweepJobs(await storeDb());
+}
+
+function buildRateHold(input: Omit<RateHold, 'id' | 'state' | 'createdAt' | 'holdUntil'> & { holdUntil?: string; state?: RateHold['state'] }): RateHold {
   const createdAt = new Date();
   const hours = Math.max(24, Math.min(72, Number(process.env.RATE_HOLD_HOURS ?? 48)));
-  const hold: RateHold = {
+  return {
     ...input,
     id: createId('hold'),
     state: input.state ?? 'ACTIVE',
     holdUntil: input.holdUntil ?? new Date(createdAt.getTime() + hours * 60 * 60 * 1000).toISOString(),
     createdAt: createdAt.toISOString(),
   };
-  operations.rateHolds.set(hold.id, hold);
-  return hold;
+}
+
+export async function createRateHold(input: Omit<RateHold, 'id' | 'state' | 'createdAt' | 'holdUntil'> & { holdUntil?: string; state?: RateHold['state'] }) {
+  const hold = buildRateHold(input);
+  if (!usingPostgres()) {
+    operations.rateHolds.set(hold.id, hold);
+    return hold;
+  }
+  // An ownerless hold is a demo seed row, and the seed never reaches a real
+  // database. Here it would be a commitment no org can read or cancel.
+  const { orgId } = hold;
+  if (!orgId) throw new Error('A rate hold must belong to an org');
+  return (await sweepRepo()).insertRateHold(await storeDb(), { ...hold, orgId });
 }
 
 /** Expire what has run out, then return every hold. Staff console only —
  *  the customer-facing reads below are scoped. */
-export function listRateHolds() {
+export async function listRateHolds() {
+  if (usingPostgres()) {
+    const repo = await sweepRepo();
+    const db = await storeDb();
+    await repo.expireRateHolds(db);
+    return repo.listRateHolds(db);
+  }
+  expireRateHoldsInMemory();
+  return [...operations.rateHolds.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+function expireRateHoldsInMemory() {
   const now = Date.now();
   for (const hold of operations.rateHolds.values()) {
     if (hold.state === 'ACTIVE' && new Date(hold.holdUntil).getTime() <= now) hold.state = 'EXPIRED';
   }
-  return [...operations.rateHolds.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 /**
@@ -714,12 +787,24 @@ export function listRateHolds() {
  * A hold with no `orgId` is a demo seed row and belongs to nobody, so it
  * matches no org rather than every one.
  */
-export function listRateHoldsFor(orgId: string) {
-  return listRateHolds().filter((hold) => hold.orgId === orgId);
+export async function listRateHoldsFor(orgId: string) {
+  if (usingPostgres()) {
+    const repo = await sweepRepo();
+    const db = await storeDb();
+    await repo.expireRateHolds(db);
+    return repo.listRateHoldsFor(db, orgId);
+  }
+  return (await listRateHolds()).filter((hold) => hold.orgId === orgId);
 }
 
-export function readRateHoldFor(orgId: string, holdId: string) {
-  listRateHolds();
+export async function readRateHoldFor(orgId: string, holdId: string) {
+  if (usingPostgres()) {
+    const repo = await sweepRepo();
+    const db = await storeDb();
+    await repo.expireRateHolds(db);
+    return repo.getRateHoldFor(db, orgId, holdId);
+  }
+  expireRateHoldsInMemory();
   const hold = operations.rateHolds.get(holdId) ?? null;
   return hold && hold.orgId === orgId ? hold : null;
 }
@@ -872,7 +957,9 @@ function seedDemoData() {
   // Demo seed data, in this process only — never persisted, and owned by
   // DEMO_ORG_ID so it can never be read alongside a real tenant's transfers.
   Object.assign(transfer, { state: 'SETTLED' });
-  const job = createSweepJob({
+  // Into the map directly, like the rest of the seed: never a real database.
+  const job = buildSweepJob({
+    orgId: DEMO_ORG_ID,
     transferIntentId: transfer.id,
     recipientId: acme.id,
     partner: 'PDAX',
@@ -885,6 +972,7 @@ function seedDemoData() {
     completedAt: new Date().toISOString(),
     demo: true,
   });
+  operations.sweepJobs.set(job.id, job);
   Object.assign(transfer, { state: 'DISBURSED', sweepJobId: job.id });
   operations.transfers.set(transfer.id, transfer);
   updateAuditReceipt(transfer.id, {
@@ -899,7 +987,8 @@ function seedDemoData() {
   });
   Object.assign(invoice, { transferIntentId: transfer.id });
   createLedgerEntry({ accountId: cebu.id, direction: 'CREDIT', amountUsdcMicro: 5_000_000_000n, refType: 'SEED', refId: 'demo_seed', demo: true });
-  createRateHold({ corridorCurrency: 'PHP', rate: '56.5', feeBps: 80, demo: true });
+  const hold = buildRateHold({ corridorCurrency: 'PHP', rate: '56.5', feeBps: 80, demo: true });
+  operations.rateHolds.set(hold.id, hold);
 }
 
 // Sample rows exist so a fresh local instance has something to render. They

@@ -33,7 +33,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
   return NextResponse.json({
     ...intent,
-    sweepJob: intent.sweepJobId ? readSweepJob(intent.sweepJobId) : null,
+    sweepJob: intent.sweepJobId ? await readSweepJob(intent.sweepJobId) : null,
     statusHistory,
   });
 }
