@@ -439,6 +439,13 @@ const ABORT_CODES: Record<number, string> = {
   418: 'E_NOT_A_MEMBER — the signer is neither an owner nor an approver of the account, so cannot open an intent in its name.',
   419: 'E_ACCOUNT_NOT_PAYABLE — the account is frozen or not KYB-verified.',
   420: 'E_BAD_COMMITMENT — the commitment passed to payment_intent::create* is not 32 bytes. It is blake2b256(tag || bcs(payload) || salt), computed by lib/evidence/commitment.ts; see docs/commitments.md.',
+  // WS3. 420 was already E_BAD_COMMITMENT (WS5), so the operator refusal is 421.
+  421: 'E_OPERATOR_NEEDS_SERVICE_ORDER — the signer is the operator the SettlementPolicy names. The operator pays service orders and opens no intent of its own: the old server-pays path (create_payment_intent signed by the operator, then paid from its gas coin) is closed by design. Open a service order from a client member’s wallet instead (lib/sui/service-orders.ts).',
+  422: 'E_NO_OPERATOR — a service order was opened while the SettlementPolicy names no operator, so nobody could pay it. The cold AdminCap registers one with settlement_policy::set_operator (docs/KEY-CEREMONY-RUNBOOK.md).',
+  423: 'E_PAYER_CANNOT_APPROVE — the approver is the service order’s payer. The operator may be the third signature on a service order, never the second; a different member of the account must approve.',
+
+  // ── settlement_policy (WS3) ──────────────────────────────────────────────
+  1000: 'E_INVALID_OPERATOR — settlement_policy::set_operator was given 0x0. Every service order would record a payer nobody can sign for.',
 
   // ── cap_registry (break-glass revocation) ────────────────────────────────
   210: 'E_STALE_GENERATION — the capability presented is from a superseded generation. It was revoked by a break-glass rotation and is permanently dead; a replacement was minted to whoever the rotation named. Check the CapabilityRevoked event and update the configured object id.',
@@ -472,6 +479,7 @@ const OUR_MODULES = new Set([
   'dual_treasury',
   'smart_treasury',
   'receipt_v2',
+  'settlement_policy',
 ]);
 
 /**

@@ -826,10 +826,17 @@ public fun request_limit_increase(
 /// Moving the entry point into `payment_intent`, which can see both objects,
 /// makes the amount and the maker DERIVED from the intent rather than asserted
 /// about it. The mismatch is then unrepresentable instead of merely checked.
+///
+/// WS3. `holder` is who receives the approval: whoever will settle. That is
+/// the maker on every intent but a service order, where it is the registered
+/// operator. Four eyes is still asserted against the MAKER, and
+/// `payment_intent::approve_payout` separately refuses an approver who is the
+/// holder, so the holder is always a third address on a service order.
 public(package) fun mint_approval(
     account: &BusinessAccount,
     intent: ID,
     maker: address,
+    holder: address,
     amount: u64,
     commitment: vector<u8>,
     clock: &Clock,
@@ -841,6 +848,7 @@ public(package) fun mint_approval(
     assert!(!account.frozen && !account.admin_frozen, E_FROZEN);
     assert!(amount > 0, E_AMOUNT_MISMATCH);
     assert!(maker != @0x0, E_INVALID_ADDRESS);
+    assert!(holder != @0x0, E_INVALID_ADDRESS);
     assert!(maker != approver, E_SELF_APPROVAL);
 
     let now = clock::timestamp_ms(clock);
@@ -866,7 +874,7 @@ public(package) fun mint_approval(
         expires_at_ms: approval.expires_at_ms,
     });
 
-    transfer::transfer(approval, maker);
+    transfer::transfer(approval, holder);
 }
 
 /// Consume an approval and charge the account's window.
@@ -935,7 +943,7 @@ public(package) fun consume_approval(
 }
 
 /// Discard an approval that was never used. Callable by whoever holds it,
-/// which is the maker — an unused approval is otherwise an owned object that
+/// which is the maker (or, on a WS3 service order, the operator) — an unused approval is otherwise an owned object that
 /// lives forever.
 public fun discard_approval(approval: PayoutApproval) {
     let PayoutApproval {

@@ -17,6 +17,7 @@ use splash_core::audit_anchor;
 use splash_core::business_account;
 use splash_core::cap_registry;
 use splash_core::payment_intent;
+use splash_core::settlement_policy;
 use std::unit_test::assert_eq;
 use sui::clock;
 use sui::coin::{Self, Coin};
@@ -37,7 +38,11 @@ const BLOB: vector<u8> = b"walrus-blob-id";
 const COMMITMENT: vector<u8> = x"00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
 
 fun new_intent(c: &clock::Clock, ctx: &mut TxContext): payment_intent::PaymentIntent {
-    payment_intent::create<SUI>(
+    // WS3: every creator reads the SettlementPolicy. None registered here, so
+    // the unbound path behaves as it always has.
+    let policy = settlement_policy::new_for_testing(ctx);
+    let intent = payment_intent::create<SUI>(
+        &policy,
         RECIPIENT,
         b"counterparty:vendor-001",
         1_000,
@@ -48,7 +53,9 @@ fun new_intent(c: &clock::Clock, ctx: &mut TxContext): payment_intent::PaymentIn
         COMMITMENT,
         c,
         ctx,
-    )
+    );
+    settlement_policy::destroy_for_testing(policy);
+    intent
 }
 
 // ── M1: no receipt without a consumed coin ─────────────────────────────────

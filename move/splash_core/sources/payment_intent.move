@@ -15,9 +15,14 @@
 ///   * Named abort codes registered in `lib/server/sui-settlement.ts`.
 ///   * Events carry a 32-byte commitment, never the payment (WS5). What an
 ///     event carries freezes at the immutable publish; see docs/commitments.md.
+///   * WS3. The maker and the payer are separate fields. For every path but a
+///     service order they are the same address; a service order is opened by
+///     a client member and paid by the operator the `SettlementPolicy` names,
+///     and the operator can open no intent at all once it is registered.
 module splash_core::payment_intent;
 
 use splash_core::business_account::{Self, BusinessAccount, PayoutApproval};
+use splash_core::settlement_policy::{Self, SettlementPolicy};
 use std::string::String;
 use std::type_name;
 use sui::clock::{Self, Clock};
@@ -59,6 +64,18 @@ const E_ACCOUNT_NOT_PAYABLE: u64 = 419;
 /// other length is a mis-encoding, never a commitment, and is refused before
 /// an intent exists.
 const E_BAD_COMMITMENT:        u64 = 420;
+/// WS3. The signer is the operator the `SettlementPolicy` names. The operator
+/// pays service orders; it does not open intents. Opening one and then paying
+/// it is the self-authorised payout this package no longer permits, on every
+/// creator: `create_payment_intent`, `create`, `create_payment_intent_for_account`
+/// and `create_service_order` alike.
+const E_OPERATOR_NEEDS_SERVICE_ORDER: u64 = 421;
+/// WS3. A service order was opened while the policy names no operator, so
+/// nobody could ever pay it.
+const E_NO_OPERATOR:           u64 = 422;
+/// WS3. The approver is the order's payer. The operator may be the third
+/// signature on a service order, never the second.
+const E_PAYER_CANNOT_APPROVE:  u64 = 423;
 
 /// The only module permitted to destroy a `SettleReceipt`. Bound by module name
 /// because Move forbids the circular import that naming the type would require —
@@ -89,7 +106,15 @@ public struct PaymentIntent has key {
     /// `confirm_payment_intent` refuses a bound intent outright, so the
     /// unapproved path is not a fallback, it is a different product.
     account: Option<ID>,
+    /// The maker: whoever opened the intent. Always `tx_context::sender` at
+    /// creation, never an argument (C-03).
     sender: address,
+    /// WS3. Whoever settles it and funds the coin. The maker, on every path
+    /// but a service order; the registered operator on a service order.
+    /// `settle` and `confirm_with_approval` check THIS, and an approval is
+    /// transferred to it, so a client's signature can authorise an operator's
+    /// coin without the operator ever being able to authorise itself.
+    payer: address,
     recipient: address,
     /// Hash/reference of the verified counterparty record. Never raw PII.
     beneficiary_ref: vector<u8>,
@@ -181,11 +206,23 @@ fun assert_commitment(commitment: &vector<u8>) {
     assert!(commitment.length() == COMMITMENT_BYTES, E_BAD_COMMITMENT);
 }
 
+/// WS3. Every creator calls this: once the policy names an operator, that
+/// address opens nothing. Before registration it is a no-op, so a fresh
+/// publish behaves as it did until the cold key runs `set_operator`.
+fun assert_not_operator(policy: &SettlementPolicy, maker: address) {
+    assert!(!settlement_policy::is_operator(policy, maker), E_OPERATOR_NEEDS_SERVICE_ORDER);
+}
+
 // ─── Entry / public functions ──────────────────────────────────────────────
 
 /// Create a new intent. `sender` is bound to `tx_context::sender(ctx)` —
 /// no longer a caller-supplied argument (C-03 fix).
+///
+/// WS3. Kept for a payer spending their own coin. The registered operator is
+/// refused (421): this is exactly the shape the server used to open and then
+/// pay from its own gas coin.
 public fun create_payment_intent<T>(
+    policy: &SettlementPolicy,
     recipient: address,
     amount_usd: u64,
     target_currency: String,
@@ -201,6 +238,7 @@ public fun create_payment_intent<T>(
     assert_commitment(&commitment);
 
     let sender = tx_context::sender(ctx);
+    assert_not_operator(policy, sender);
     let now = clock::timestamp_ms(clock);
     let expires_at = now + EXPIRATION_WINDOW_MS;
 
@@ -208,6 +246,7 @@ public fun create_payment_intent<T>(
         id: object::new(ctx),
         account: option::none(),
         sender,
+        payer: sender,
         recipient,
         beneficiary_ref: vector[],
         amount_usd,
@@ -242,8 +281,14 @@ public fun create_payment_intent<T>(
 /// and at settlement. That is deliberate redundancy on the cheapest step: a
 /// frozen account should not accumulate a queue of intents waiting for the
 /// thaw.
+///
+/// WS3. The maker pays with their own coin after approval. The registered
+/// operator cannot be the maker even if it is a member of the account: it
+/// would open and then pay its own payout, with the tenant's approver as the
+/// only other party. That payout is a service order.
 public fun create_payment_intent_for_account<T>(
     account: &BusinessAccount,
+    policy: &SettlementPolicy,
     recipient: address,
     amount_usd: u64,
     target_currency: String,
@@ -257,6 +302,7 @@ public fun create_payment_intent_for_account<T>(
         business_account::is_owner(account, maker) || business_account::is_approver(account, maker),
         E_NOT_A_MEMBER,
     );
+    assert_not_operator(policy, maker);
     assert!(business_account::is_verified(account), E_ACCOUNT_NOT_PAYABLE);
     assert!(!business_account::is_frozen(account), E_ACCOUNT_NOT_PAYABLE);
     assert!(amount_usd > 0, E_INVALID_AMOUNT);
@@ -272,6 +318,77 @@ public fun create_payment_intent_for_account<T>(
         id: object::new(ctx),
         account: option::some(object::id(account)),
         sender: maker,
+        payer: maker,
+        recipient,
+        beneficiary_ref: vector[],
+        amount_usd,
+        currency: type_name::with_defining_ids<T>().into_string().into_bytes(),
+        corridor: vector[],
+        target_currency,
+        settlement_asset: type_name::with_defining_ids<T>().into_string().to_string(),
+        fx_rate_usd_local,
+        created_at: now,
+        created_epoch: ctx.epoch(),
+        expires_at,
+        status: STATUS_PENDING,
+        commitment,
+    };
+
+    emit_created(&intent, now);
+
+    transfer::share_object(intent);
+}
+
+/// WS3. Order a payout that Splash funds: signature one of three.
+///
+/// Opened by a member of the client's business account, in their own wallet,
+/// with the same membership, KYB and freeze checks as
+/// `create_payment_intent_for_account`. The difference is who pays: the
+/// intent records the operator the `SettlementPolicy` names as its payer, so
+///
+///   2. a DIFFERENT approver of the account approves it (`approve_payout`),
+///      and the approval is transferred to the operator, not to the maker;
+///   3. the operator settles it (`confirm_with_approval`) with Splash's coin,
+///      for exactly `amount_usd`, under the account's own ceilings.
+///
+/// The operator cannot open one (421), cannot approve one (423), and cannot
+/// settle anything a client member did not order and an approver did not
+/// approve. The order is refused outright while no operator is registered
+/// (422), rather than opened as an obligation nobody can ever pay.
+public fun create_service_order<T>(
+    account: &BusinessAccount,
+    policy: &SettlementPolicy,
+    recipient: address,
+    amount_usd: u64,
+    target_currency: String,
+    fx_rate_usd_local: u64,
+    commitment: vector<u8>,
+    clock: &Clock,
+    ctx: &mut TxContext,
+) {
+    let maker = tx_context::sender(ctx);
+    assert!(
+        business_account::is_owner(account, maker) || business_account::is_approver(account, maker),
+        E_NOT_A_MEMBER,
+    );
+    assert!(settlement_policy::has_operator(policy), E_NO_OPERATOR);
+    assert_not_operator(policy, maker);
+    assert!(business_account::is_verified(account), E_ACCOUNT_NOT_PAYABLE);
+    assert!(!business_account::is_frozen(account), E_ACCOUNT_NOT_PAYABLE);
+    assert!(amount_usd > 0, E_INVALID_AMOUNT);
+    assert!(recipient != @0x0, E_INVALID_RECIPIENT);
+    assert!(std::string::length(&target_currency) > 0, E_EMPTY_TARGET_CURRENCY);
+    assert!(fx_rate_usd_local > 0, E_INVALID_FX_RATE);
+    assert_commitment(&commitment);
+
+    let now = clock::timestamp_ms(clock);
+    let expires_at = now + EXPIRATION_WINDOW_MS;
+
+    let intent = PaymentIntent {
+        id: object::new(ctx),
+        account: option::some(object::id(account)),
+        sender: maker,
+        payer: *settlement_policy::operator(policy).borrow(),
         recipient,
         beneficiary_ref: vector[],
         amount_usd,
@@ -294,7 +411,11 @@ public fun create_payment_intent_for_account<T>(
 
 /// Create an owned intent plus a non-droppable receipt that must be anchored
 /// in the same PTB. The caller can share the returned intent with share_intent.
+///
+/// WS3. Refused to the registered operator (421): an owned intent the same
+/// PTB confirms is the server-pays path in one transaction instead of two.
 public fun create<T>(
+    policy: &SettlementPolicy,
     recipient: address,
     beneficiary_ref: vector<u8>,
     amount: u64,
@@ -316,6 +437,7 @@ public fun create<T>(
     assert_commitment(&commitment);
 
     let sender = tx_context::sender(ctx);
+    assert_not_operator(policy, sender);
     let now = clock::timestamp_ms(clock);
     let created_epoch = ctx.epoch();
     let expires_at = now + EXPIRATION_WINDOW_MS;
@@ -324,6 +446,7 @@ public fun create<T>(
         id: object::new(ctx),
         account: option::none(),
         sender,
+        payer: sender,
         recipient,
         beneficiary_ref,
         amount_usd: amount,
@@ -400,11 +523,20 @@ public fun approve_payout(
     assert!(*intent.account.borrow() == object::id(account), E_WRONG_BUSINESS_ACCOUNT);
     assert!(intent.status == STATUS_PENDING, E_NOT_PENDING);
     assert!(clock::timestamp_ms(clock) < intent.expires_at, E_EXPIRED);
+    // WS3. On a service order the payer is a third party; it may not also be
+    // the second. On every other intent payer == maker, and the four-eyes
+    // check in `mint_approval` already refuses that address (29).
+    if (intent.payer != intent.sender) {
+        assert!(tx_context::sender(ctx) != intent.payer, E_PAYER_CANNOT_APPROVE);
+    };
 
+    // The approval goes to whoever will settle: the maker, or on a service
+    // order the operator. Four eyes is still checked against the maker.
     business_account::mint_approval(
         account,
         object::id(intent),
         intent.sender,
+        intent.payer,
         intent.amount_usd,
         intent.commitment,
         clock,
@@ -429,11 +561,11 @@ public fun confirm_with_approval<T>(
 ): SettleReceipt {
     assert!(intent.account.is_some(), E_NOT_ACCOUNT_BOUND);
     assert!(*intent.account.borrow() == object::id(account), E_WRONG_BUSINESS_ACCOUNT);
-    // The maker. Asserted here as well as in `settle`, because the approval is
-    // transferred to an address named by the APPROVER, and an approver naming
-    // the wrong address must not be able to hand release authority to someone
-    // the intent never authorised.
-    assert!(tx_context::sender(ctx) == intent.sender, E_UNAUTHORIZED);
+    // The payer: the maker, or on a service order the registered operator the
+    // order recorded. Asserted here as well as in `settle`, because the
+    // approval is transferred to an address read off the intent, and a payer
+    // check that lived only downstream would be one refactor from gone.
+    assert!(tx_context::sender(ctx) == intent.payer, E_UNAUTHORIZED);
 
     business_account::consume_approval(
         account,
@@ -454,7 +586,7 @@ fun settle<T>(
     ctx: &mut TxContext,
 ): SettleReceipt {
     let caller = tx_context::sender(ctx);
-    assert!(caller == intent.sender, E_UNAUTHORIZED);
+    assert!(caller == intent.payer, E_UNAUTHORIZED);
     assert!(intent.status == STATUS_PENDING, E_NOT_PENDING);
     assert!(clock::timestamp_ms(clock) < intent.expires_at, E_EXPIRED);
     // The asset is bound to the one the intent was opened in. Generic-without-
@@ -511,6 +643,7 @@ public fun cancel(intent: PaymentIntent, ctx: &mut TxContext) {
         id,
         account: _,
         sender: _,
+        payer: _,
         recipient: _,
         beneficiary_ref: _,
         amount_usd: _,
@@ -568,6 +701,7 @@ public fun delete_finalized(intent: PaymentIntent) {
         id,
         account: _,
         sender: _,
+        payer: _,
         recipient: _,
         beneficiary_ref: _,
         amount_usd: _,
@@ -590,6 +724,14 @@ public fun delete_finalized(intent: PaymentIntent) {
 public fun account(intent: &PaymentIntent): Option<ID>      { intent.account }
 public fun is_account_bound(intent: &PaymentIntent): bool   { intent.account.is_some() }
 public fun sender(intent: &PaymentIntent): address          { intent.sender }
+/// WS3. Whoever must settle: the maker, or the operator on a service order.
+public fun payer(intent: &PaymentIntent): address           { intent.payer }
+/// WS3. A service order is the one intent whose payer is not its maker.
+public fun is_service_order(intent: &PaymentIntent): bool   { intent.payer != intent.sender }
+public fun created_at(intent: &PaymentIntent): u64          { intent.created_at }
+/// The window every intent is opened with. The UI reads `expires_at` off the
+/// object rather than adding this to a clock of its own.
+public fun expiration_window_ms(): u64                      { EXPIRATION_WINDOW_MS }
 public fun recipient(intent: &PaymentIntent): address       { intent.recipient }
 public fun amount_usd(intent: &PaymentIntent): u64          { intent.amount_usd }
 public fun status(intent: &PaymentIntent): u8               { intent.status }

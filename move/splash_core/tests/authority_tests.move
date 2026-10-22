@@ -11,6 +11,7 @@ module splash_core::authority_tests;
 use splash_core::audit_anchor;
 use splash_core::business_account::{Self, BusinessAccount, PayoutApproval};
 use splash_core::payment_intent::{Self, PaymentIntent};
+use splash_core::settlement_policy::{Self, SettlementPolicy};
 use std::unit_test::assert_eq;
 use sui::clock::{Self, Clock};
 use sui::coin;
@@ -48,6 +49,9 @@ fun setup(): Scenario {
         let mut c = clock::create_for_testing(ctx);
         c.set_for_testing(DAY);
         clock::share_for_testing(c);
+        // WS3. Shared with no operator registered, as at publish: these
+        // tests are about the maker-pays path, which the policy leaves alone.
+        settlement_policy::init_for_testing(ctx);
     };
     scenario.next_tx(OWNER);
     {
@@ -78,10 +82,12 @@ fun setup(): Scenario {
 fun open_intent(scenario: &mut Scenario, maker: address, amount: u64) {
     scenario.next_tx(maker);
     let account = scenario.take_shared<BusinessAccount>();
+    let policy = scenario.take_shared<SettlementPolicy>();
     let c = scenario.take_shared<Clock>();
     let ctx = scenario.ctx();
     payment_intent::create_payment_intent_for_account<SUI>(
         &account,
+        &policy,
         RECIPIENT,
         amount,
         b"PHP".to_string(),
@@ -91,6 +97,7 @@ fun open_intent(scenario: &mut Scenario, maker: address, amount: u64) {
         ctx,
     );
     ts::return_shared(c);
+    ts::return_shared(policy);
     ts::return_shared(account);
 }
 

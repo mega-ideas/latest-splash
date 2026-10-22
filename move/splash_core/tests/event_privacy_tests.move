@@ -17,6 +17,7 @@ use splash_core::business_account::{Self, BusinessAccount, PayoutApproval};
 use splash_core::cap_registry;
 use splash_core::payment_intent::{Self, PaymentIntent};
 use splash_core::receipt_v2;
+use splash_core::settlement_policy::{Self, SettlementPolicy};
 use std::unit_test::assert_eq;
 use sui::clock::{Self, Clock};
 use sui::coin;
@@ -44,7 +45,11 @@ const DAY: u64 = 86_400_000;
 const EXPIRY_WINDOW: u64 = 300_000;
 
 fun new_intent(commitment: vector<u8>, c: &Clock, ctx: &mut TxContext): PaymentIntent {
-    payment_intent::create<SUI>(
+    // WS3: every creator reads the SettlementPolicy. None registered here, so
+    // the unbound path behaves as it always has.
+    let policy = settlement_policy::new_for_testing(ctx);
+    let intent = payment_intent::create<SUI>(
+        &policy,
         RECIPIENT,
         b"counterparty:vendor-001",
         AMOUNT,
@@ -55,7 +60,9 @@ fun new_intent(commitment: vector<u8>, c: &Clock, ctx: &mut TxContext): PaymentI
         commitment,
         c,
         ctx,
-    )
+    );
+    settlement_policy::destroy_for_testing(policy);
+    intent
 }
 
 // ── Length ──────────────────────────────────────────────────────────────────
@@ -189,6 +196,7 @@ fun account_scenario(): Scenario {
         let mut c = clock::create_for_testing(ctx);
         c.set_for_testing(DAY);
         clock::share_for_testing(c);
+        settlement_policy::init_for_testing(ctx);
     };
     scenario.next_tx(OWNER);
     {
@@ -231,10 +239,12 @@ fun approval_events_carry_the_commitment_not_the_amount() {
     scenario.next_tx(OWNER);
     {
         let account = scenario.take_shared<BusinessAccount>();
+        let policy = scenario.take_shared<SettlementPolicy>();
         let c = scenario.take_shared<Clock>();
         let ctx = scenario.ctx();
         payment_intent::create_payment_intent_for_account<SUI>(
             &account,
+            &policy,
             RECIPIENT,
             amount,
             b"PHP".to_string(),
@@ -244,6 +254,7 @@ fun approval_events_carry_the_commitment_not_the_amount() {
             ctx,
         );
         ts::return_shared(c);
+        ts::return_shared(policy);
         ts::return_shared(account);
     };
 
