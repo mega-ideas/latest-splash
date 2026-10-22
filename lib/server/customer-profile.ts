@@ -229,7 +229,7 @@ export function cancelPendingRequest(email: string): ProfileChangeRequest {
 
 // ─── Admin (checker) side ─────────────────────────────────────────────────────
 
-export function listAllRequests(): Array<ProfileChangeRequest & { currentProfile: CustomerProfile }> {
+export function listProfileRequestsForStaff(): Array<ProfileChangeRequest & { currentProfile: CustomerProfile }> {
   const store = readStore();
   return store.requests
     .slice()
@@ -244,7 +244,7 @@ export function listAllRequests(): Array<ProfileChangeRequest & { currentProfile
     }));
 }
 
-export function decideProfileRequest(
+export function decideProfileRequestForStaff(
   id: string,
   decision: { action: 'approve' | 'reject'; actor: string; reason?: string },
 ): ProfileChangeRequest {

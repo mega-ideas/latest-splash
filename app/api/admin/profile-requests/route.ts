@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { getAdminSession } from '@/lib/server/admin-auth';
-import { listAllRequests } from '@/lib/server/customer-profile';
+import { listProfileRequestsForStaff } from '@/lib/server/customer-profile';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,5 +12,5 @@ export async function GET() {
     return NextResponse.json({ error: 'Staff authentication required' }, { status: 401 });
   }
 
-  return NextResponse.json({ requests: listAllRequests() });
+  return NextResponse.json({ requests: listProfileRequestsForStaff() });
 }
