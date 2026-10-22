@@ -30,6 +30,62 @@ The remaining four modules (`smart_treasury`, `payment_intent`, `audit_anchor`, 
 
 ---
 
+## WS4 — operator custody, the code half — 2026-10-23
+
+**Scope**: the hot operator signer — how it is held, how much it may hold, and
+who watches what leaves it. Code: `lib/server/operator-signer.ts`,
+`lib/server/operator-balance.ts`, `lib/server/operator-outflows.ts` (pure) and
+`operator-outflow-monitor.ts`, `app/api/cron/operator-outflows`, `lib/env.ts`.
+Runbook: `docs/OPERATOR-KEY-ROTATION.md`. Tests:
+`tests/operator-custody.test.mjs` (16), plus updated expectations in
+`tests/env.test.mjs` and `tests/launch-scope.test.mjs`; nothing in them reaches
+AWS or a fullnode.
+
+| ID | Sev | Finding | Status |
+|----|-----|---------|--------|
+| OC-1 | High | The operator key was a raw `suiprivkey` in the host environment, decoded into the Node process on first use. Anyone who could read the environment or the process memory — a dependency, a leaked backup of `.env.local`, a debug endpoint — had the key for good, and rebuilding the host did not revoke it. **Fixed**: `getOperatorSigner()` returns an `AwsKmsSigner` (`@mysten/aws-kms-signer`, `AwsKmsSigner.fromKeyId`) when `OPERATOR_KMS_KEY_ID` is set; the key is generated in KMS and never leaves it. A compromised host can request signatures while it is compromised — see OC-3 — but cannot take the key away, and disabling the KMS key stops it at once. | Fixed (code); key and IAM role pending |
+| OC-2 | High | Nothing stopped production from running on the raw key after a KMS key existed. **Fixed**: `NODE_ENV=production` refuses to boot while `OPERATOR_SUI_PRIVATE_KEY` or `SUI_SPONSOR_PRIVATE_KEY` is set, even next to a KMS key and even in simulate mode (a key in the environment is a key in the process, used or not); `getOperatorSigner()` refuses it at runtime too; and production no longer falls back to the Sui CLI keystore, which is a raw key in a file. Where the operator signs, production requires `OPERATOR_KMS_KEY_ID`, `AWS_REGION`, `OPERATOR_SUI_ADDRESS` (checked against the KMS public key) and `OPERATOR_HOT_BALANCE_CEILING_MICRO`. | Fixed |
+| OC-3 | Medium | The operator address could hold any amount, and a payout larger than its balance failed only on chain, with an opaque abort. **Fixed**: `assertOperatorCanPay(amount)` runs before the operator-funded paths (`recordSingleTransferOnSui`, `confirmComposedPaymentOnSui`) build and sign. Below the payout it throws `OperatorTopUpNeededError` (`state: 'top-up-needed'`) and pays nothing — never a partial payment. Above `OPERATOR_HOT_BALANCE_CEILING_MICRO` (micro-USDC) it alerts with the excess to sweep to cold, and does not block the payout. bigint throughout. | Fixed |
+| OC-4 | High | No one would have noticed value leaving the operator address by any route other than Splash's own. **Fixed**: `/api/cron/operator-outflows` (bearer `CRON_SECRET`, every 15 minutes) reads what the address sent over Sui GraphQL and alerts on any outflow that is not `payment_intent::confirm_with_approval` in our core package, to a wallet beneficiary whose screening is CLEAR or ATTESTED. Gas is not an outflow. Value into an object rather than an address is flagged. A monitor that cannot read its inputs answers 502 rather than reporting all clear. | Fixed |
+| OC-5 | Info | Canon D-0004: the operator key must never enter 0xWal's process or any agent tool. **Enforced**: a test fails the build if anything under `lib/agent`, `lib/oxwal`, `lib/ai`, `lib/chain` or the agent and copilot routes imports the signer or settlement module, or names an operator key or AWS secret. The outflow monitor itself never builds a signer. | Guarded |
+
+**Still open, and stated.**
+
+- **The monitor is deliberately stricter than main.** The gas-funded
+  `settle_payment` path and the composed `confirm_payment_intent` path both
+  pay out of the operator address without the approver, and the monitor
+  flags both. That is the intended pressure: those paths should move onto
+  `confirm_with_approval` (WS3's service orders do). Until they do, a flagged
+  digest from one of them is expected noise and is checked against Splash's
+  own settlement records before it is treated as a compromise. Batch payouts
+  are paid from the treasury object, not the operator, so they carry no
+  hot-balance check; the monitor still sees them, because the operator signs.
+- **The hot-balance check is a pre-flight, not a lock.** Two payouts racing
+  for the last coins can both pass it; the chain then rejects the one it
+  cannot fund, and that one pays nothing.
+- **The ceiling is measured in USDC.** On main the operator-funded payouts are
+  in SUI; for those the check refuses below the payout in MIST and alerts on
+  the USDC balance. With the development stand-in (`USDC_TYPE=0x2::sui::SUI`)
+  the ceiling is skipped rather than compared across decimals.
+- **The GraphQL query shape** follows the one `lib/server/wallet-activity.ts`
+  already runs in production, with `relation: SENT`, Move-call commands and
+  gas effects added. It was not run against a live indexer from the machine
+  this was written on (no outbound TLS); the first scheduled run answers 502
+  with the indexer's message if the schema disagrees.
+- **Static AWS keys.** The DigitalOcean Droplet cannot assume an EC2 role.
+  `OPERATOR_KMS_CREDENTIALS=static` exists for it; the IAM user must be scoped
+  to `kms:Sign` and `kms:GetPublicKey` on this one key. IAM Roles Anywhere is
+  the better answer and is supported through temporary credentials in the
+  environment.
+- **On-chain rotation arrives with WS3.** `settlement_policy::set_operator`
+  from the cold multisig is documented in the runbook and is not on `main`.
+- **People and hardware.** The KMS key itself, the IAM role or scoped user,
+  the alert receiver and the cold multisig signers are not code and do not
+  exist yet. Until they do, production cannot boot with the operator signing,
+  which is the intended state.
+
+---
+
 ## Approvals by code and WhatsApp — 2026-09-24
 
 **Scope**: the two ballot channels for payments the money routes send for
