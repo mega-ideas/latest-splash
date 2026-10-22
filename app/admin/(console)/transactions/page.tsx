@@ -15,7 +15,7 @@ export default async function AdminTransactionsPage() {
   const batches = await listBatchesForStaff();
   const transfers = await listTransfersForStaff();
   const transactions = await listTransactions();
-  const fundingSessions = listFundingSessions();
+  const fundingSessions = await listFundingSessions();
   const pegStatus = await getPegStatus();
   const complianceControls = await readComplianceControls();
   // DeepBook is the only peg source; no reading is red, never a guess.

@@ -390,7 +390,7 @@ async function authorize(request: Request, spent: SpentApproval) {
 
   const sourceAmountCents = Math.round(sourceAmount * 100);
   const sourceAmountMicro = Math.round(sourceAmount * 1_000_000);
-  let fundingSession = body.fundingSessionId ? readFundingSession(body.fundingSessionId) : null;
+  let fundingSession = body.fundingSessionId ? await readFundingSession(body.fundingSessionId) : null;
   if (body.fundingSessionId && !fundingSession) {
     return NextResponse.json({ error: 'Funding session not found' }, { status: 404 });
   }
@@ -436,7 +436,7 @@ async function authorize(request: Request, spent: SpentApproval) {
   }
   if (fundingSelection.type === 'fiat' && fundingSession) {
     try {
-      fundingSession = confirmUsdFunding(fundingSession.id);
+      fundingSession = await confirmUsdFunding(fundingSession.id);
       fundingSelection = fundingSession.selection;
     } catch (error) {
       return NextResponse.json(
@@ -529,7 +529,7 @@ async function authorize(request: Request, spent: SpentApproval) {
   // Postgres when configured, this process only when not — one place decides,
   // and every read of this transfer goes back through the same store.
   await persistTransfer(intent);
-  if (fundingSession) updateFundingSession(fundingSession.id, { transferIntentId: intent.id });
+  if (fundingSession) await updateFundingSession(fundingSession.id, { transferIntentId: intent.id });
 
   // Debit the PAYER for every funding source, not only `held`.
   //
@@ -570,7 +570,7 @@ async function authorize(request: Request, spent: SpentApproval) {
   // transfer, whatever settlement does next. Refused just above, nothing
   // moved, so the approval is given back.
   spent.kept = true;
-  recordLastUsedFundingSource(businessAccountId, fundingSelection.source);
+  await recordLastUsedFundingSource(orgId, businessAccountId, fundingSelection.source);
   await patchAuditReceipt(intent.id, {
     approvedBy: 'dashboard-operator',
     approvedAt: new Date().toISOString(),

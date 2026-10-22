@@ -22,7 +22,7 @@ export async function POST(request: Request) {
     if (outOfScope) return outOfScope;
     const parsed = usdDepositSchema.safeParse(await readJsonBody(request));
     if (!parsed.success) return NextResponse.json({ error: 'Invalid USD deposit event' }, { status: 400 });
-    return NextResponse.json({ session: confirmUsdProviderDeposit(parsed.data) });
+    return NextResponse.json({ session: await confirmUsdProviderDeposit(parsed.data) });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'USD deposit event could not be processed' },

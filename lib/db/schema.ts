@@ -8,6 +8,7 @@ import {
   numeric,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -1179,4 +1180,70 @@ export const rateHolds = pgTable('rate_holds', {
 }, (table) => [
   index('rate_holds_org_created_idx').on(table.orgId, table.createdAt),
   index('rate_holds_active_until_idx').on(table.state, table.holdUntil),
+]);
+
+/**
+ * A deposit a customer was asked to make, and what became of it.
+ *
+ * Held in a `Map` on `globalThis` in `lib/server/funding-sessions.ts` until
+ * WS8, so a deposit webhook answered by another instance found no session.
+ * `selection` is the funding choice exactly as the registry resolved it; it is
+ * one value, not columns anyone queries across.
+ */
+export const fundingSessions = pgTable('funding_sessions', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  /** On-chain account id. Recorded, not the tenant key — it falls back to a
+   *  value shared across orgs. */
+  businessAccountId: text('business_account_id').notNull(),
+  selection: jsonb('selection').notNull(),
+  feeTier: text('fee_tier').notNull(),
+  amountExpectedMicro: bigint('amount_expected_micro', { mode: 'bigint' }).notNull(),
+  depositAddress: text('deposit_address'),
+  depositUri: text('deposit_uri'),
+  status: text('status').notNull().default('AWAITING_DEPOSIT'),
+  sourceType: text('source_type'),
+  kytPolicy: text('kyt_policy'),
+  kytReasons: jsonb('kyt_reasons'),
+  sourceTxDigest: text('source_tx_digest'),
+  receivedCoinType: text('received_coin_type'),
+  receivedAmountMicro: bigint('received_amount_micro', { mode: 'bigint' }),
+  nativeSuiUsdc: boolean('native_sui_usdc'),
+  normalizedAmountUsdcMicro: bigint('normalized_amount_usdc_micro', { mode: 'bigint' }),
+  normalizeVenue: text('normalize_venue'),
+  effectiveSlippageBps: integer('effective_slippage_bps'),
+  transferIntentId: text('transfer_intent_id'),
+  adminFlag: text('admin_flag'),
+  ...timestamps,
+}, (table) => [
+  index('funding_sessions_org_created_idx').on(table.orgId, table.createdAt),
+  index('funding_sessions_created_idx').on(table.createdAt),
+]);
+
+/**
+ * Which funding session an on-chain deposit belongs to.
+ *
+ * The digest is the primary key: one deposit, one session, enforced by the
+ * database rather than by a `Map` that guarded only the instance holding it.
+ */
+export const fundingSourceTransactions = pgTable('funding_source_transactions', {
+  txDigest: text('tx_digest').primaryKey(),
+  sessionId: text('session_id').notNull().references(() => fundingSessions.id),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * The funding source an org last paid with, per on-chain account.
+ *
+ * Keyed by org AND account. Keyed by account alone, as the `Map` was, every
+ * org on the shared fallback account id read each other's last choice.
+ */
+export const fundingLastUsedSources = pgTable('funding_last_used_sources', {
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  businessAccountId: text('business_account_id').notNull(),
+  source: text('source').notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  primaryKey({ columns: [table.orgId, table.businessAccountId] }),
 ]);
