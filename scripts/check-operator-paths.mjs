@@ -11,7 +11,7 @@
  * (payment_intent abort 421).
  *
  * This keeps it deleted. In any server module that can sign as the operator
- * (it names the operator signer: getOperatorKeypair, executeSdkTransaction,
+ * (it names the operator signer: getOperatorKeypair, getOperatorSigner (WS4), executeSdkTransaction,
  * OPERATOR_SUI_PRIVATE_KEY), the build fails if
  *
  *   1. it composes `payment_intent::create_payment_intent`, `::create`,
@@ -44,7 +44,7 @@ const EXT = /\.(ts|tsx|mjs|js)$/;
 const SKIP = new Set(['node_modules', '.next', '.git', 'dist', 'build']);
 
 /** A module that names one of these can sign as the operator. */
-const OPERATOR_SIGNER = /\b(getOperatorKeypair|executeSdkTransaction|cachedOperatorKeypair|OPERATOR_SUI_PRIVATE_KEY)\b/;
+const OPERATOR_SIGNER = /\b(getOperatorKeypair|getOperatorSigner|executeSdkTransaction|cachedOperatorKeypair|OPERATOR_SUI_PRIVATE_KEY)\b/;
 
 /** A Move target composed in code: `${pkg}::payment_intent::create…` or `0x…::payment_intent::create…`. */
 const CREATE_TARGET =
