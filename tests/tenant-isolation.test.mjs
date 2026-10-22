@@ -268,10 +268,37 @@ test('staff routes use the staff session and the *ForStaff readers, never the cu
 test('the customer dashboard no longer calls the staff-only audit batch routes', async () => {
   const offenders = [];
   for (const file of await sourceFiles()) {
+    // The staff console's own components may call the staff-only routes.
     if (!file.startsWith('app/dashboard') && !file.startsWith('components/')) continue;
+    if (file.startsWith('components/admin/')) continue;
     if ((await source(file)).includes('/api/audit-batches')) offenders.push(file);
   }
   assert.deepEqual(offenders, []);
+});
+
+test('staff can still read the audit batches: the console has a page that lists and verifies them', async () => {
+  const page = await source('app/admin/(console)/audit-batches/page.tsx');
+  assert.match(page, /listDailyAuditBatchesForStaff\(\)/, 'the page reads through the staff-only reader');
+  const nav = await source('app/admin/(console)/layout.tsx');
+  assert.match(nav, /href: '\/admin\/audit-batches'/, 'the console navigation links to it');
+  const component = await source('components/admin/AdminAuditBatches.tsx');
+  assert.match(component, /\/api\/audit-batches\/verify/, 'a leaf can be verified from the page');
+});
+
+test('profile-request functions that only staff may call are named for staff', async () => {
+  const profile = await source('lib/server/customer-profile.ts');
+  assert.match(profile, /export function listProfileRequestsForStaff\(/);
+  assert.match(profile, /export function decideProfileRequestForStaff\(/);
+  assert.doesNotMatch(profile, /export function (listAllRequests|decideProfileRequest)\(/);
+  for (const file of await sourceFiles()) {
+    if (file.startsWith('app/admin') || file.startsWith('app/api/admin') || file === 'lib/server/customer-profile.ts') continue;
+    assert.doesNotMatch(await source(file), /ProfileRequests?ForStaff/, `${file} calls a staff-only profile function`);
+  }
+});
+
+test('a reasoning trace reference is shown as text, not linked to a blob route that cannot serve it', async () => {
+  const card = await source('components/oxwal/ActionCard.tsx');
+  assert.doesNotMatch(card, /\/api\/walrus\/\$\{encodeURIComponent\(proposal\.explain\.reasoningTraceRef\)\}/);
 });
 
 // ── helpers ─────────────────────────────────────────────────────────────────
