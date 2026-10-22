@@ -34,6 +34,7 @@ import * as schema from '../lib/db/schema.ts';
 import { createAccount, markEmailVerified } from '../lib/auth/accounts.ts';
 import { TERMS_VERSION } from '../content/legal.ts';
 import { migrateDevDatabase } from './dev-db-migrations.mjs';
+import { devDbSocketOptions } from './dev-db-server.mjs';
 
 // .env.local first: DEV_DB_DIR, DEV_DB_PORT and the WhatsApp numbers below may
 // live there. Values already in the shell win.
@@ -241,7 +242,8 @@ for (const [email, orgId, raw] of [
   console.log(`  WhatsApp ${e164.slice(0, 3)}••••${e164.slice(-4)} pre-verified for ${email}`);
 }
 
-const server = new PGLiteSocketServer({ db: client, port: PORT, host: '127.0.0.1' });
+// One connection per pool slot, or a dashboard page's parallel queries hang.
+const server = new PGLiteSocketServer({ db: client, port: PORT, host: '127.0.0.1', ...devDbSocketOptions(process.env) });
 await server.start();
 
 console.log(`\ndev postgres listening on 127.0.0.1:${PORT}`);

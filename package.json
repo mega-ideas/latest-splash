@@ -61,7 +61,7 @@
     "db:migrate": "drizzle-kit migrate",
     "db:migrate:run": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/migrate.mjs",
     "seed:demo": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --import ./scripts/alias-hook.mjs scripts/seed-demo-user.mjs",
-    "test:db": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --import ./scripts/alias-hook.mjs --test tests/ledger-invariant.test.mjs tests/proposal-persistence.test.mjs tests/wallet-identity-db.test.mjs",
+    "test:db": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --import ./scripts/alias-hook.mjs --test tests/ledger-invariant.test.mjs tests/proposal-persistence.test.mjs tests/wallet-identity-db.test.mjs tests/dev-db-connections.test.mjs",
     "test:privacy": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --import ./scripts/alias-hook.mjs --test tests/event-privacy.test.mjs",
     "check:numbers": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types scripts/check-numbers.mjs"
   },
