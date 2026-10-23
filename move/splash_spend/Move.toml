@@ -1,0 +1,31 @@
+# splash_spend — the only code that pulls a business's funds under an allowance (D2).
+#
+# A spending rule (a "sub-account") is an app-bound Sui allowance from the
+# business's multisig wallet to a staff member's address, bound to this
+# package's `SPLASH_SPEND` type. The allowance itself enforces the caps, the
+# expiry, who the spender is, and that the money comes from the business's own
+# address balance. This package adds the business's `SpendPolicy` on top:
+# verified recipients, a per-payment maximum, and a second owner approval above
+# a threshold. Only this package can spend under such an allowance, because
+# only this package can mint `SpendPermit<SPLASH_SPEND>`.
+#
+# It publishes IMMUTABLE (D11). An app that holds `SettingsPermit<SPLASH_SPEND>`
+# could rotate the spender of every allowance bound to it, and an upgradeable
+# app could gain that power later. So there is no `rotate_spender` here, no
+# function returns a permit, and the package can never change.
+# `scripts/check-spend-permits.mjs` fails the build if that stops being true.
+#
+# Built and tested with Sui CLI mainnet-v1.82.3. `sui::allowance` first ships
+# in mainnet-v1.80.1; older CLIs cannot build this package.
+[package]
+name = "splash_spend"
+version = "0.0.1"
+edition = "2024"
+license = "Apache-2.0"
+authors = ["Splash Finance"]
+
+[dependencies]
+splash_core = { local = "../splash_core" }
+
+[addresses]
+splash_spend = "0x0"
