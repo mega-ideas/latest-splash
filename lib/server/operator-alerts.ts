@@ -41,6 +41,17 @@ export type OperatorAlert =
       digest: string;
       reason: string;
       detail: unknown;
+    }
+  | {
+      /** The canonical upgrade wrapper emitted an event naming a core package
+       *  other than SPLASH_CORE_PACKAGE_ID, which must be core's original id
+       *  (lib/server/governance-alert-monitor.ts). Owners were NOT told; fix
+       *  the id so they are. */
+      kind: 'governance_config_drift';
+      severity: 'critical';
+      digest: string;
+      reason: string;
+      detail: unknown;
     };
 
 export type OperatorAlertSink = (alert: OperatorAlert) => Promise<void>;

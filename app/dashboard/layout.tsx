@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 import DashboardShell from '@/components/dashboard/DashboardShell';
 import { custodyPhaseEnabled, sweepAccountEnabled } from '@/lib/server/custody-phase';
 import { getCustomerSession } from '@/lib/server/customer-auth';
+import { readGovernanceBannerForSession } from '@/lib/server/governance-alerts-store';
 import { readKybGateState } from '@/lib/server/kyb-gate';
 import { readOnboardingState } from '@/lib/server/onboarding';
 import { launchScope } from '@/lib/server/launch-scope';
@@ -44,8 +45,14 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   }
   if (needsIntent) redirect('/onboarding/intent');
 
+  // v2 governance (brief 3.5): the contract changes this person, as a business
+  // owner, was told about and that are still active. Their own deliveries
+  // only; it never throws, and an unreadable store means no banner, not a
+  // broken dashboard (email and WhatsApp carry the same alert).
+  const governanceAlerts = await readGovernanceBannerForSession(session);
+
   // One line on purpose: tests/oxwal-frontend.test.mjs pins the shape
   // {children}</DashboardShell> as the no-second-wrapper contract.
   // sweepOn needs no database, so it is resolved even when `locks` is not.
-  return <DashboardShell session={session} kyb={kyb} locks={locks} sweepOn={sweepAccountEnabled()} launchScope={launchScope()}>{children}</DashboardShell>;
+  return <DashboardShell session={session} kyb={kyb} locks={locks} sweepOn={sweepAccountEnabled()} launchScope={launchScope()} governanceAlerts={governanceAlerts}>{children}</DashboardShell>;
 }

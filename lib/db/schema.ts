@@ -1368,3 +1368,81 @@ export const dailyAuditBatches = pgTable('daily_audit_batches', {
 }, (table) => [
   uniqueIndex('daily_audit_batches_business_date_unique').on(table.businessDate),
 ]);
+
+/**
+ * A governance event every business owner is told about (v2, brief 3.5): a
+ * core upgrade or a new governance owner announced by the canonical wrapper,
+ * or a registry addition announced by the canonical compliance config.
+ * lib/server/governance-events.ts decides what counts; only canonical events
+ * ever become a row.
+ *
+ * No `org_id`, like `daily_audit_batches`: one announcement concerns every
+ * tenant at once. Who sees it is decided per person, by
+ * `governance_alert_deliveries`.
+ *
+ * One row per on-chain event. Sui identifies an event by its transaction
+ * digest and its position in that transaction, and the unique index on both
+ * is what lets every cron run re-read the same events without recording one
+ * twice.
+ */
+export const governanceAlerts = pgTable('governance_alerts', {
+  /** `gov_<digest>_<event seq>`. */
+  id: text('id').primaryKey(),
+  digest: text('digest').notNull(),
+  eventSeq: integer('event_seq').notNull(),
+  /** upgrade_proposed | upgrade_authorized | owner_change_proposed |
+   *  registry_addition_proposed | registry_addition_activated. */
+  kind: text('kind').notNull(),
+  eventType: text('event_type').notNull(),
+  /** The announced bytecode digest, 0x + 64 hex (upgrade events). */
+  bytecodeDigest: text('bytecode_digest'),
+  upgradePolicy: integer('upgrade_policy'),
+  /** 1 asset, 2 settlement app, 3 bridge adapter (registry events). */
+  registry: integer('registry'),
+  typeName: text('type_name'),
+  newOwner: text('new_owner'),
+  proposedAt: timestamp('proposed_at', { withTimezone: true }),
+  /** When the change can take effect. */
+  etaAt: timestamp('eta_at', { withTimezone: true }),
+  /** When the transaction was finalized. */
+  occurredAt: timestamp('occurred_at', { withTimezone: true }),
+  /** The dashboard shows it until then. */
+  activeUntil: timestamp('active_until', { withTimezone: true }).notNull(),
+  summary: text('summary').notNull(),
+  detail: text('detail').notNull(),
+  reviewPath: text('review_path').notNull(),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('governance_alerts_digest_seq_unique').on(table.digest, table.eventSeq),
+  index('governance_alerts_active_until_idx').on(table.activeUntil),
+]);
+
+/**
+ * One owner told about one governance alert on one channel.
+ *
+ * The unique index on (alert, user, channel) is the idempotency: a cron run
+ * claims a delivery by inserting its row first and sends only if the insert
+ * won, so a re-run, a retry or a second instance never sends twice. A send
+ * that failed is recorded as `failed` and may be claimed again, a bounded
+ * number of times; one left in `sending` (the process died mid-send) is not,
+ * because whether it arrived is unknown and sending twice is the worse error.
+ */
+export const governanceAlertDeliveries = pgTable('governance_alert_deliveries', {
+  id: text('id').primaryKey(),
+  alertId: text('alert_id').notNull().references(() => governanceAlerts.id),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  /** The org in which this person is an owner (the first, if several). */
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  /** in_app | email | whatsapp. */
+  channel: text('channel').notNull(),
+  /** sending | sent | failed. */
+  status: text('status').notNull(),
+  attempts: integer('attempts').notNull().default(1),
+  providerRef: text('provider_ref'),
+  error: text('error'),
+  sentAt: timestamp('sent_at', { withTimezone: true }),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('governance_alert_deliveries_alert_user_channel_unique').on(table.alertId, table.userId, table.channel),
+  index('governance_alert_deliveries_user_channel_idx').on(table.userId, table.channel),
+]);

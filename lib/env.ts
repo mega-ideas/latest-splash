@@ -201,9 +201,23 @@ export const envSchema = z.object({
   OPERATOR_HOT_BALANCE_CEILING_MICRO: opt(str.regex(/^\d+$/, 'must be a whole number of micro-USDC')),
   /** Where operator custody alerts are POSTed (ceiling, top-up, outflow). */
   OPERATOR_ALERT_WEBHOOK_URL: httpsUrl,
-  /** Sui GraphQL, read by the outflow monitor. Unset: Mysten's public
-   *  endpoint for SUI_NETWORK. */
+  /** Sui GraphQL, read by the outflow monitor and the governance alert
+   *  monitor. Unset: Mysten's public endpoint for SUI_NETWORK. */
   SUI_GRAPHQL_URL: url,
+  /* v2 upgrade governance (brief 3.5). lib/server/governance-alert-monitor.ts
+     tells every business owner when the canonical wrapper announces a core
+     upgrade or a new governance owner, and when the canonical compliance
+     config announces a registry addition. These ids are what make an event
+     canonical: `wrap` is public, so anyone can emit an UpgradeProposed from a
+     wrapper of their own. Read from the environment only, never from
+     data/contract-config.json, so a file staff can edit at runtime cannot
+     widen what counts as canonical. Unset, the cron answers 502 rather than
+     watch nothing. SPLASH_CORE_PACKAGE_ID (above) is read there as the core's
+     ORIGINAL id, the one its event types carry. */
+  /** The published, immutable splash_upgrade_delay package. */
+  SPLASH_UPGRADE_DELAY_PACKAGE_ID: objectId,
+  /** The one DelayedUpgradeCap that wraps splash_core's UpgradeCap. */
+  SPLASH_UPGRADE_WRAPPER_ID: objectId,
   ENOKI_API_KEY: optional,
   SUI_PEG_UPDATE_GAS_BUDGET: int(10_000_000, 1),
   SUI_RECORD_SETTLEMENT_GAS_BUDGET: int(10_000_000, 1),
