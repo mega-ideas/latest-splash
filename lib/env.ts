@@ -372,6 +372,11 @@ export const envSchema = z.object({
   USDT_AVAILABLE_MICRO: opt(z.coerce.number().int().min(0)),
   USDT_BUFFER_AGE_MS: int(0),
 
+  /** Partners whose agreements are signed, by id (lib/partners/signed-partners.ts).
+   *  Only these are named in shipped copy; everyone else is described by role.
+   *  Empty by default, so a fresh deployment names nobody (brief §0.8, §3.9). */
+  SIGNED_PARTNERS: opt(str.regex(/^[a-z]+(\s*,\s*[a-z]+)*$/, 'must be comma-separated partner ids, e.g. pdax,sumsub')),
+
   /* Payout and settlement partners. Mocked when USE_MOCK_APIS or unset. */
   PDAX_API_BASE_URL: url,
   PDAX_API_KEY: optional,
