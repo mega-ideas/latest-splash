@@ -95,33 +95,35 @@ test('memwal: the adapter has no unscoped entry point, and every memory call tak
 // ── 2 · Support tickets ─────────────────────────────────────────────────────
 
 test('support: org B can neither list, read nor reply to org A\'s ticket; staff can see both', async () => {
+  // The in-process fallback (no DATABASE_URL). The same scoping in Postgres is
+  // pinned by tests/support-persistence.test.mjs.
   const support = await import('../lib/server/support.ts');
-  const ticket = support.createSupportTicket(ORG_A, {
+  const ticket = await support.createSupportTicket(ORG_A, {
     type: 'complaint',
     subject: 'Batch stuck',
     message: 'Our PH supplier batch has not moved.',
     email: 'ops@acme.example',
   });
   assert.equal(ticket.orgId, ORG_A, 'the ticket carries its org');
-  support.createSupportTicket(ORG_B, { type: 'other', subject: 'Receipt', message: 'Where is it?' });
+  await support.createSupportTicket(ORG_B, { type: 'other', subject: 'Receipt', message: 'Where is it?' });
 
-  const listedForB = support.listSupportTickets(ORG_B);
+  const listedForB = await support.listSupportTickets(ORG_B);
   assert.ok(listedForB.length >= 1);
   assert.ok(listedForB.every((t) => t.orgId === ORG_B), 'org B lists only its own tickets');
   assert.ok(!listedForB.some((t) => t.id === ticket.id));
 
-  assert.equal(support.readSupportTicket(ORG_B, ticket.id), null, 'a foreign id reads as missing');
+  assert.equal(await support.readSupportTicket(ORG_B, ticket.id), null, 'a foreign id reads as missing');
   assert.equal(
-    support.updateSupportTicket(ORG_B, ticket.id, { actor: 'b@bravo.example', actorType: 'customer', replyMessage: 'mine now' }),
+    await support.updateSupportTicket(ORG_B, ticket.id, { actor: 'b@bravo.example', actorType: 'customer', replyMessage: 'mine now' }),
     null,
     'a foreign id cannot be replied to',
   );
-  assert.equal(support.readSupportTicket(ORG_A, ticket.id).replies.length, 0, 'and nothing was written');
+  assert.equal((await support.readSupportTicket(ORG_A, ticket.id)).replies.length, 0, 'and nothing was written');
 
-  assert.equal(support.readSupportTicket(ORG_A, ticket.id)?.id, ticket.id, 'the owner still reads it');
-  assert.ok(support.listSupportTicketsForStaff().some((t) => t.id === ticket.id), 'staff lists every tenant');
-  assert.equal(support.readSupportTicketForStaff(ticket.id)?.id, ticket.id);
-  assert.equal(support.listSupportTickets('').length, 0, 'an empty org lists nothing');
+  assert.equal((await support.readSupportTicket(ORG_A, ticket.id))?.id, ticket.id, 'the owner still reads it');
+  assert.ok((await support.listSupportTicketsForStaff()).some((t) => t.id === ticket.id), 'staff lists every tenant');
+  assert.equal((await support.readSupportTicketForStaff(ticket.id))?.id, ticket.id);
+  assert.equal((await support.listSupportTickets('')).length, 0, 'an empty org lists nothing');
 });
 
 // ── 3 · Walrus blobs ────────────────────────────────────────────────────────

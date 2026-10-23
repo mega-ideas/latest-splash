@@ -36,8 +36,58 @@ export type DailyAuditBatch = {
 const globalAuditBatches = globalThis as typeof globalThis & {
   splashAuditBatches?: Map<string, DailyAuditBatch>;
 };
+/**
+ * The in-process fallback, keyed by business date, used only when
+ * `DATABASE_URL` is not set so that `npm run dev` works without a database.
+ * Every deployed environment reads and writes `daily_audit_batches`
+ * (migration 0031). This map was the only store until WS8: the batch existed
+ * only on the instance the cron hit, and a cold start forgot a root that was
+ * already on chain, so the next run anchored the same day again.
+ */
 const batches = globalAuditBatches.splashAuditBatches ?? new Map<string, DailyAuditBatch>();
 globalAuditBatches.splashAuditBatches = batches;
+
+let announced = false;
+
+function usingPostgres(): boolean {
+  if (process.env.DATABASE_URL) return true;
+  if (!announced) {
+    announced = true;
+    console.warn(
+      '[audit-batches] DATABASE_URL is not set, so daily audit batches live in this ' +
+        'process and disappear when it restarts. Local development only.',
+    );
+  }
+  return false;
+}
+
+async function db() {
+  const { getDb } = await import('../db/client.ts');
+  return getDb() as never;
+}
+
+async function repo() {
+  return import('./repository/audit-batches.ts');
+}
+
+/** The batch already recorded for a business date, from any instance. */
+async function recordedBatch(date: string): Promise<DailyAuditBatch | null> {
+  if (usingPostgres()) return (await repo()).readBatchByDate(await db(), date);
+  return batches.get(date) ?? null;
+}
+
+/**
+ * Record the day's batch and return the one that was kept. With Postgres the
+ * unique business date decides, so two cron runs for one day — two instances,
+ * or a retry — agree on a single batch.
+ */
+async function recordBatch(batch: DailyAuditBatch): Promise<DailyAuditBatch> {
+  if (usingPostgres()) return (await repo()).recordDailyAuditBatch(await db(), batch);
+  const existing = batches.get(batch.date);
+  if (existing) return existing;
+  batches.set(batch.date, batch);
+  return batch;
+}
 
 function businessDate(isoDate = new Date().toISOString()) {
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -96,8 +146,10 @@ export function verifyMerkleProof(leafHash: string, proof: MerkleProofStep[], ro
   return calculated === root;
 }
 
-export async function buildDailyAuditBatch(date = businessDate()) {
-  const existing = batches.get(date);
+export async function buildDailyAuditBatch(date = businessDate()): Promise<DailyAuditBatch> {
+  // Already built, on this instance or any other: return it rather than seal,
+  // store and anchor the same day a second time.
+  const existing = await recordedBatch(date);
   if (existing) return existing;
 
   // A system job anchoring the day across every tenant — the one place a
@@ -160,8 +212,12 @@ export async function buildDailyAuditBatch(date = businessDate()) {
     anchorDigest: anchor.digest,
     createdAt: new Date().toISOString(),
   };
-  batches.set(date, batch);
-  return batch;
+  // Two runs that both passed the check above both reach here. The database
+  // keeps the first and both return it, so the day has one recorded root; the
+  // later run's Walrus blob and anchor are left unreferenced. Holding a lock
+  // across the Seal, Walrus and Sui calls would trade that for a connection
+  // held for up to a minute, and the cron runs once a day.
+  return recordBatch(batch);
 }
 
 /*
@@ -172,16 +228,18 @@ export async function buildDailyAuditBatch(date = businessDate()) {
  * routes in front of them require a staff session (`getAdminSession`).
  */
 
-export function listDailyAuditBatchesForStaff() {
+export async function listDailyAuditBatchesForStaff(): Promise<DailyAuditBatch[]> {
+  if (usingPostgres()) return (await repo()).listBatches(await db());
   return [...batches.values()].sort((a, b) => b.date.localeCompare(a.date));
 }
 
-export function readDailyAuditBatchForStaff(batchId: string) {
+export async function readDailyAuditBatchForStaff(batchId: string): Promise<DailyAuditBatch | null> {
+  if (usingPostgres()) return (await repo()).readBatchById(await db(), batchId);
   return [...batches.values()].find((batch) => batch.id === batchId) ?? null;
 }
 
 export async function verifyDailyAuditBatchForStaff(batchId: string, transferId: string) {
-  const batch = readDailyAuditBatchForStaff(batchId);
+  const batch = await readDailyAuditBatchForStaff(batchId);
   if (!batch) throw new Error('Daily audit batch not found.');
   const leaf = batch.leaves.find((entry) => entry.transferId === transferId);
   if (!leaf) throw new Error('Transfer is not included in this daily audit batch.');

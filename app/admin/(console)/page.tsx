@@ -14,7 +14,7 @@ export default async function AdminOverviewPage() {
   const headerStore = await headers();
   const hostname = headerStore.get('host');
   const kybCases = await listKybCasesForStaff();
-  const tickets = listSupportTicketsForStaff();
+  const tickets = await listSupportTicketsForStaff();
   const wallet = await getOperatorWalletInfo().catch(() => null);
   const pendingKyb = kybCases.filter((item) => item.state === 'SUBMITTED' || item.state === 'IN_REVIEW' || item.state === 'NEEDS_INFORMATION');
   const openTickets = tickets.filter((ticket) => ticket.status === 'OPEN' || ticket.status === 'IN_REVIEW');

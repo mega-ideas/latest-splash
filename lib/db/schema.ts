@@ -1,7 +1,9 @@
 import { sql } from 'drizzle-orm';
 import {
   bigint,
+  bigserial,
   boolean,
+  date,
   index,
   integer,
   jsonb,
@@ -1273,4 +1275,96 @@ export const intercompanyTransfers = pgTable('intercompany_transfers', {
   /** One leg per customer transfer. A second would send the USD twice. */
   uniqueIndex('intercompany_transfer_unique').on(table.transferIntentId),
   index('intercompany_created_idx').on(table.createdAt),
+]);
+
+/**
+ * A support ticket: a customer telling us something is wrong, and our answer.
+ *
+ * Held in a `Map` on `globalThis` in `lib/server/support.ts` until WS8, so a
+ * ticket raised on one serverless instance was unknown to the instance the
+ * staff console reached, and a cold start dropped every ticket. WS2 scoped the
+ * store by org; `orgId` is NOT NULL here with a foreign key, because a ticket
+ * with no owner cannot be scoped. The demo seed tickets live only in the
+ * in-process fallback and never reach a real database.
+ */
+export const supportTickets = pgTable('support_tickets', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  /** bug | feature | complaint | other. */
+  type: text('type').notNull(),
+  subject: text('subject').notNull(),
+  message: text('message').notNull(),
+  email: text('email'),
+  /** OPEN | IN_REVIEW | REPLIED | CLOSED. */
+  status: text('status').notNull().default('OPEN'),
+  /** NORMAL | HIGH. */
+  priority: text('priority').notNull().default('NORMAL'),
+  assignedTo: text('assigned_to'),
+  ...timestamps,
+}, (table) => [
+  index('support_tickets_org_updated_idx').on(table.orgId, table.updatedAt),
+  index('support_tickets_updated_idx').on(table.updatedAt),
+]);
+
+/**
+ * One reply on a ticket, customer or staff.
+ *
+ * Its own table, not an array on the ticket: the `Map` replaced the whole
+ * replies array on every write, which in a database is a read-modify-write
+ * that loses one of two replies sent at the same moment. An insert cannot.
+ * `seq` orders replies even when two share a millisecond.
+ */
+export const supportTicketReplies = pgTable('support_ticket_replies', {
+  id: text('id').primaryKey(),
+  seq: bigserial('seq', { mode: 'number' }).notNull(),
+  ticketId: text('ticket_id').notNull().references(() => supportTickets.id),
+  /** The ticket's org, so a reply can never be read across tenants on its own. */
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  actor: text('actor').notNull(),
+  /** customer | staff. */
+  actorType: text('actor_type').notNull(),
+  message: text('message').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index('support_ticket_replies_ticket_idx').on(table.ticketId, table.seq),
+]);
+
+/**
+ * One business day's settlements across every tenant, folded into a Merkle
+ * root, sealed to Walrus and anchored on Sui.
+ *
+ * Held in a `Map` on `globalThis` in `lib/server/audit-batches.ts` until WS8:
+ * the batch existed only on the instance the cron hit, and after a cold start
+ * the cron found no record of a root already on chain and anchored the day
+ * again.
+ *
+ * No `org_id`, deliberately. Every other WS8 table has one because its rows
+ * belong to a tenant; a batch belongs to all of them at once — its leaves are
+ * many workspaces' transfer ids — so there is no owner to scope by. That is
+ * why its readers are staff-only by name (`*ForStaff`, WS2) and sit behind the
+ * staff session: the protection is who may read, not which rows.
+ *
+ * One batch per business date. The in-memory code relied on that (the map was
+ * keyed by date) and the unique index now enforces it across instances.
+ */
+export const dailyAuditBatches = pgTable('daily_audit_batches', {
+  /** `daily-audit:<business date>`. */
+  id: text('id').primaryKey(),
+  businessDate: date('business_date', { mode: 'string' }).notNull(),
+  merkleRoot: text('merkle_root').notNull(),
+  settlementCount: integer('settlement_count').notNull(),
+  /** Each settlement's leaf hash and inclusion proof. One value, read whole. */
+  leaves: jsonb('leaves').notNull(),
+  walrusBlobId: text('walrus_blob_id').notNull(),
+  /** demo | live. */
+  walrusMode: text('walrus_mode').notNull(),
+  sealPolicyId: text('seal_policy_id').notNull(),
+  /** demo | live. */
+  sealMode: text('seal_mode').notNull(),
+  ciphertextHash: text('ciphertext_hash').notNull(),
+  anchorObjectId: text('anchor_object_id'),
+  anchorDigest: text('anchor_digest').notNull(),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('daily_audit_batches_business_date_unique').on(table.businessDate),
 ]);

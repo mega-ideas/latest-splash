@@ -16,7 +16,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   if (accountCheck.response) return accountCheck.response;
 
   const { id } = await params;
-  const ticket = readSupportTicket(accountCheck.account.orgId, id);
+  const ticket = await readSupportTicket(accountCheck.account.orgId, id);
 
   if (!ticket) {
     return NextResponse.json({ error: 'Support ticket not found' }, { status: 404 });
@@ -41,7 +41,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: 'Message is required' }, { status: 400 });
   }
 
-  const ticket = updateSupportTicket(accountCheck.account.orgId, id, {
+  const ticket = await updateSupportTicket(accountCheck.account.orgId, id, {
     status: 'OPEN',
     actor,
     actorType: 'customer',

@@ -14,7 +14,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
   }
 
   const { id } = await params;
-  const record = readSupportTicketForStaff(id);
+  const record = await readSupportTicketForStaff(id);
 
   if (!record) {
     return NextResponse.json({ error: 'Support ticket not found' }, { status: 404 });
@@ -38,7 +38,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     return NextResponse.json({ error: 'Unsupported ticket status' }, { status: 400 });
   }
 
-  const record = updateSupportTicketForStaff(id, {
+  const record = await updateSupportTicketForStaff(id, {
     status,
     actor: session.email,
     replyMessage: typeof body.replyMessage === 'string' ? body.replyMessage : undefined,
