@@ -4,8 +4,9 @@
  * went stale once already: Phase 7 added a CapRegistry argument and the calls
  * became generic, and nothing failed until someone read the script. These
  * tests hold the table to the Move source, and the script to the table, to the
- * core package and to its simulate-first rules, so the next signature change
- * fails here.
+ * core package and to the v2 rules it checks (it cannot sign; the payment runs
+ * as the business wallet; the operator alone is refused), so the next
+ * signature change fails here.
  */
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
@@ -145,8 +146,15 @@ function topLevelItems(inner) {
   return items.map((s) => s.trim()).filter(Boolean);
 }
 
-/** Every `.moveCall({...})` in the script: its target, how many arguments it
- *  passes, and whether it passes type arguments. */
+/** The framework calls the script may make, with their argument and
+ *  type-argument counts: redeeming the business wallet's address balance. */
+const FRAMEWORK_CALLS = {
+  '0x2::balance::redeem_funds': { args: 1, typeArguments: 1 },
+};
+
+/** Every `.moveCall({...})` in the script: its target (a core function as
+ *  `module::function`, or a framework one as written), how many arguments it
+ *  passes, and how many type arguments. */
 function moveCalls(script) {
   return [...script.matchAll(/\.moveCall\(\{/g)].map((m) => {
     const open = m.index + m[0].length - 1;
@@ -157,8 +165,11 @@ function moveCalls(script) {
       const open = body.indexOf('[', at);
       return topLevelItems(body.slice(open + 1, closeOf(body, open) - 1));
     };
+    const core = /target: `\$\{PACKAGE\}::(\w+::\w+)`/.exec(body)?.[1] ?? null;
+    const framework = /target: '(0x2::\w+::\w+)'/.exec(body)?.[1] ?? null;
     return {
-      target: /target: `\$\{PACKAGE\}::(\w+::\w+)`/.exec(body)?.[1] ?? null,
+      target: core,
+      framework,
       args: listAfter('arguments').length,
       typeArguments: listAfter('typeArguments').length,
     };
@@ -171,6 +182,14 @@ function functionBody(script, name) {
   assert.ok(start >= 0, `scripts/e2e-testnet.mjs defines ${name}`);
   const next = script.slice(start + 1).search(/\n(async )?function \w+\(|\nclass |\nconst \w+ = /);
   return next < 0 ? script.slice(start) : script.slice(start, start + 1 + next);
+}
+
+/** A `const NAME: type = value;` in a core module, as a number. */
+async function moveConstant(moduleName, name) {
+  const code = withoutComments(await source(`move/splash_core/sources/${moduleName}.move`));
+  const m = new RegExp(`\\bconst\\s+${name}\\s*:\\s*u\\d+\\s*=\\s*(\\d+)\\s*;`).exec(code);
+  assert.ok(m, `${moduleName}.move declares ${name}`);
+  return Number(m[1]);
 }
 
 test('every splash_core call in the verify table matches the Move source, module paths included', async () => {
@@ -191,22 +210,33 @@ test("every call the verify script builds is in the table, on the core package, 
   const calls = moveCalls(script);
   assert.equal(calls.length, script.match(/\.moveCall\(/g)?.length, 'every moveCall is written as .moveCall({ … })');
   assert.ok(calls.length >= 7, 'the script builds its calls with moveCall');
+  const called = new Set();
   for (const call of calls) {
-    assert.ok(call.target, 'every moveCall names its target as `${PACKAGE}::module::function`');
+    if (call.framework) {
+      const expected = FRAMEWORK_CALLS[call.framework];
+      assert.ok(expected, `${call.framework} is a framework call the verify script is not expected to make`);
+      assert.equal(call.args, expected.args, `${call.framework} passes ${call.args} arguments`);
+      assert.equal(call.typeArguments, expected.typeArguments, `${call.framework} passes ${call.typeArguments} type arguments`);
+      continue;
+    }
+    assert.ok(call.target, 'every core moveCall names its target as `${PACKAGE}::module::function`');
+    called.add(call.target);
     const signature = SPLASH_CORE_ABI[call.target];
     assert.ok(signature, `${call.target} is called but not in scripts/splash-core-abi.mjs`);
     // The Phase 7 break was exactly this: update_peg and anchor_audit_hash
     // kept passing one argument fewer after the CapRegistry was added.
     assert.equal(call.args, splitTopLevel(signature).length, `${call.target} passes ${call.args} arguments; the source takes ${splitTopLevel(signature).length}`);
-    // And the other half: create_payment_intent and confirm_payment_intent
-    // became generic over the coin type.
+    // And the other half: the payment calls are generic over the coin type.
     const [moduleName, name] = call.target.split('::');
     const { typeParameters } = await sourceFunction(moduleName, name);
     assert.equal(call.typeArguments, typeParameters, `${call.target} passes ${call.typeArguments} type arguments; the source takes ${typeParameters}`);
   }
+  // The table names nothing the script does not call, so the on-chain
+  // signature check covers exactly what runs.
+  assert.deepEqual([...called].sort(), Object.keys(SPLASH_CORE_ABI).sort());
 });
 
-test('the verify script touches no custody module: splash_custody does not publish in Phase 0', async () => {
+test('the verify script touches no custody module and no removed v1 payment call', async () => {
   const script = await source('scripts/e2e-testnet.mjs');
   // Calls are covered by the table test above; these are the custody entry
   // points and ids the old script used.
@@ -217,14 +247,24 @@ test('the verify script touches no custody module: splash_custody does not publi
     'SPLASH_CUSTODY_PACKAGE_ID',
     'SPLASH_SMART_TREASURY_SUI_ID',
     'SPLASH_TREASURY_ID',
+    'SPLASH_PAYOUT_DELEGATION_ID',
   ]) {
     assert.ok(!script.includes(custody), `scripts/e2e-testnet.mjs mentions ${custody}`);
   }
+  // v2 removed the unbound path, in which any signer opened and paid an intent.
+  assert.doesNotMatch(script, /payment_intent::(create_payment_intent|create|confirm_payment_intent)`/);
 });
 
 test('the verify script reads the ids the app reads, with no AdminCap stand-in for the AnchorCap', async () => {
   const script = await source('scripts/e2e-testnet.mjs');
-  for (const key of ['SPLASH_CORE_PACKAGE_ID', 'SPLASH_PACKAGE_ID', 'SPLASH_ANCHOR_CAP_ID', 'SPLASH_CAP_REGISTRY_ID']) {
+  for (const key of [
+    'SPLASH_CORE_PACKAGE_ID',
+    'SPLASH_PACKAGE_ID',
+    'SPLASH_ANCHOR_CAP_ID',
+    'SPLASH_CAP_REGISTRY_ID',
+    'SPLASH_COMPLIANCE_CONFIG_ID',
+    'SPLASH_VERIFY_BUSINESS_ACCOUNT_ID',
+  ]) {
     assert.ok(script.includes(`'${key}'`), `scripts/e2e-testnet.mjs reads ${key}`);
   }
   assert.match(script, /\nconst ANCHOR_CAP = objectIdFromEnv\('SPLASH_ANCHOR_CAP_ID', \{ required: true \}\);\n/);
@@ -232,52 +272,83 @@ test('the verify script reads the ids the app reads, with no AdminCap stand-in f
   assert.doesNotMatch(script, /tx\.object\(ADMIN_CAP\)|ANCHOR_CAP\s*=[^\n]*ADMIN/);
 });
 
-test('without --execute nothing can sign, and --execute sends only on testnet after a clean simulation', async () => {
+test('the verify script cannot sign: it holds no key and only simulates', async () => {
   const script = await source('scripts/e2e-testnet.mjs');
-  assert.match(script, /const EXECUTE = args\.includes\('--execute'\);/);
+  // No key is read and nothing can sign or send.
+  assert.doesNotMatch(script, /OPERATOR_SUI_PRIVATE_KEY/);
+  assert.doesNotMatch(script, /signAndExecuteTransaction|executeTransaction|signTransaction|signPersonalMessage/);
+  assert.doesNotMatch(script, /@mysten\/sui\/keypairs|decodeSuiPrivateKey|Ed25519Keypair|Secp256k1Keypair|Secp256r1Keypair/);
+  // Nothing is written either: the old --execute left a bundle under .tmp/.
+  assert.doesNotMatch(script, /writeFileSync|mkdirSync/);
 
-  // No signer exists in a simulation, and the key is read only to make one:
-  // the environment is read through env() alone, and env() reads the key once,
-  // inside operatorSigner.
-  assert.match(script, /\nconst signer = EXECUTE \? operatorSigner\(\) : null;\n/);
+  // The environment is read through env() alone.
   assert.equal(script.match(/process\.env/g)?.length, 1, 'process.env is read only by env()');
   assert.match(script, /\nconst env = \(k\) => \(process\.env\[k\] \?\? ''\)\.trim\(\);\n/);
-  assert.equal(script.match(/env\('OPERATOR_SUI_PRIVATE_KEY'\)/g)?.length, 1, 'the key is read in one place');
-  assert.match(functionBody(script, 'operatorSigner'), /env\('OPERATOR_SUI_PRIVATE_KEY'\)/);
 
-  // Signing happens in execute() alone, and every call of execute() is in the
-  // executed-payment check.
-  assert.equal(script.match(/signAndExecuteTransaction|executeTransaction/g)?.length, 1);
-  assert.match(functionBody(script, 'execute'), /signAndExecuteTransaction/);
-  const callSites = (text) => [...text.matchAll(/(?<![\w.])execute\(/g)].filter((m) => !text.slice(0, m.index).endsWith('function ')).length;
-  assert.ok(callSites(script) >= 2);
-  assert.equal(callSites(functionBody(script, 'checkPaymentExecuted')), callSites(script), 'execute() is called only from checkPaymentExecuted');
+  // --execute is gone, and any argument stops with a pointer to the executed proof.
+  assert.doesNotMatch(script, /args\.includes\('--execute'\)|\bEXECUTE\b/);
+  assert.match(script, /for \(const arg of args\) \{\s*stop\(/);
+  assert.match(script, /experiments\/v2-phase1\/testnet-e2e\.mjs/);
 
-  // That check runs once, inside `if (EXECUTE)`, after the failure gate, and
-  // after every simulation.
-  assert.equal(script.match(/checkPaymentExecuted/g)?.length, 2, 'defined once, called once');
+  // Every transaction goes through simulate(), which builds and simulates.
+  const simulateBody = functionBody(script, 'simulate');
+  assert.match(simulateBody, /tx\.build\(\{ client \}\)/);
+  assert.match(simulateBody, /client\.core\.simulateTransaction\(/);
+  assert.equal(script.match(/new Transaction\(\)/g)?.length, script.match(/await simulate\(/g)?.length, 'each transaction built is simulated');
+
+  // main runs the configuration checks before any simulation.
   const main = functionBody(script, 'main');
-  assert.match(
-    main,
-    /if \(EXECUTE\) \{[\s\S]*?if \(results\.some\(\(r\) => r\.status === 'FAIL'\)\) \{[\s\S]*?\} else \{\s*await run\('Payment \(executed\)', checkPaymentExecuted\);/,
-  );
   const order = [
     'await checkChain()',
     'await checkIds()',
     'await checkAbi()',
     "gated('Peg refresh (simulated)'",
-    "gated('Payment intent (simulated)'",
-    "gated('Confirm + anchors (simulated)'",
-    "await run('Payment (executed)'",
+    "gated('Audit anchor (simulated)'",
+    "gated('Wallet payment (simulated)'",
+    "gated('Operator refused (simulated)'",
   ].map((marker) => {
     assert.ok(main.includes(marker), `main runs ${marker}`);
     return main.indexOf(marker);
   });
-  assert.deepEqual(order, [...order].sort((a, b) => a - b), 'main simulates everything before it may send');
+  assert.deepEqual(order, [...order].sort((a, b) => a - b), 'main checks the ids and signatures before it simulates');
 
-  // The chain id, not SUI_NETWORK alone, decides.
+  // The chain id, not SUI_NETWORK alone, decides which network answered.
   assert.match(script, /testnet: '4c78adac'/);
-  assert.match(functionBody(script, 'checkChain'), /if \(EXECUTE && chainId !== CHAIN_IDS\.testnet\) \{\s*refuse\(/);
+  assert.match(functionBody(script, 'checkChain'), /if \(chainId !== CHAIN_IDS\[NETWORK\]\) \{\s*refuse\(/);
+});
+
+test('the payment runs as the business wallet with the operator paying gas, and the operator alone is refused', async () => {
+  const script = await source('scripts/e2e-testnet.mjs');
+  // The constants the checks rely on are the source's.
+  const kind = /\nconst KIND_WALLET = (\d+);/.exec(script);
+  assert.ok(kind, 'the script names KIND_WALLET');
+  assert.equal(Number(kind[1]), await moveConstant('payment_intent', 'KIND_WALLET'));
+  const notWallet = /\nconst E_NOT_THE_WALLET = (\d+);/.exec(script);
+  assert.ok(notWallet, 'the script names E_NOT_THE_WALLET');
+  assert.equal(Number(notWallet[1]), await moveConstant('business_account', 'E_NOT_THE_WALLET'));
+
+  // The wallet path: the sender is the account's registered wallet, read from
+  // the chain, and the operator only pays gas.
+  const payment = functionBody(script, 'checkWalletPaymentSimulated');
+  assert.match(payment, /const wallet = await verifyWallet\(\);/);
+  assert.match(payment, /simulate\('the wallet payment', tx, \{ sender: wallet, gasOwner: OPERATOR \}\)/);
+  assert.match(payment, /tx\.withdrawal\(\{ amount: PAYMENT_MINOR, type: USDC \}\)/);
+  for (const event of ['payment_intent::IntentCreated', 'payment_intent::IntentConfirmed', 'audit_anchor::SettlementAnchored']) {
+    assert.ok(payment.includes(`'${event}'`), `the payment check expects ${event}`);
+  }
+  assert.match(functionBody(script, 'verifyWallet'), /account\.json\?\.wallet/);
+
+  // The refusal: the same create, as the operator, must abort in
+  // business_account with E_NOT_THE_WALLET, on this package.
+  const refusal = functionBody(script, 'checkOperatorRefused');
+  assert.match(refusal, /await simulate\('create_for_wallet as the operator', tx\);/);
+  assert.match(refusal, /abort\.package !== PACKAGE \|\| abort\.module !== 'business_account' \|\| abort\.code !== E_NOT_THE_WALLET/);
+
+  // Without a verify account both are reported as skipped, never as passed.
+  const main = functionBody(script, 'main');
+  assert.match(main, /record\('Wallet payment \(simulated\)', 'SKIP', why\);/);
+  assert.match(main, /record\('Operator refused \(simulated\)', 'SKIP', why\);/);
+  assert.match(main, /skipped\.length \? `, \$\{skipped\.length\} skipped` : ''/);
 });
 
 test('the verify script never calls process.exit once the chain has answered: on Windows it would report 127', async () => {
