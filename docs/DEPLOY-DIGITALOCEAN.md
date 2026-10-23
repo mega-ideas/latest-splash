@@ -157,6 +157,10 @@ new build refuses to install or start on the old runtime and environment.
    `audit-batch` and `settle-withdrawals` with
    `Authorization: Bearer $CRON_SECRET`. With `LAUNCH_SCOPE=stablecoin` all
    four answer 403 `not_in_launch_scope`: leave them unscheduled.
+   Schedule `https://<domain>/api/cron/operator-outflows` every 15 minutes in
+   every scope (WS4): it watches the operator address, which signs in the
+   stablecoin scope too. A 502 from it means the monitor could not look, and
+   is an alert in itself.
 
 **Redeploys**: push to `main` → App Platform rebuilds, runs the pre-deploy
 migration job, then deploys. Deleted files disappear from the server because

@@ -140,6 +140,21 @@ export async function listRecipientsFor(orgId: string, limit = 200): Promise<Rec
   return rows.map(toRecord);
 }
 
+/**
+ * Cross-tenant, staff only: approved on-chain payout addresses — wallet
+ * beneficiaries whose screening is CLEAR or ATTESTED. The operator outflow
+ * monitor (WS4) treats a `confirm_with_approval` to anything else as an
+ * unapproved outflow. Addresses only.
+ */
+export async function listApprovedWalletAddressesForStaff(): Promise<string[]> {
+  if (!usingPostgres()) {
+    return [...operations.recipients.values()]
+      .filter((r) => r.payoutMethod === 'WALLET' && r.walletAddress && (r.screeningVerdict === 'CLEAR' || r.screeningVerdict === 'ATTESTED'))
+      .map((r) => r.walletAddress as string);
+  }
+  return repo.listApprovedWalletAddressesForStaff(await db());
+}
+
 /** Delete, scoped. `false` means it was not there OR was not theirs. */
 export async function removeRecipient(orgId: string, recipientId: string): Promise<boolean> {
   if (!usingPostgres()) {

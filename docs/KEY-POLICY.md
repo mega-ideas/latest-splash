@@ -35,6 +35,10 @@ non-mutating multisig dry run.
 
 - AdminCap is still modeled as a single capability in the current Move package.
 - Operator settlement can still use a raw env key in development/testnet flows.
+  Production refuses it at boot and at runtime since WS4 (rule 1 above is
+  enforced by `lib/env.ts` and `lib/server/operator-signer.ts`); the KMS key
+  and its IAM role are not yet provisioned. Setup and rotation:
+  `docs/OPERATOR-KEY-ROTATION.md`.
 - TreasuryOperatorCap and AnchorCap are not yet split from AdminCap on-chain.
 
 These gaps block mainnet readiness and are tracked by the SPLASH v3 Phase A
