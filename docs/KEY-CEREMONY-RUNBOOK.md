@@ -163,6 +163,14 @@ same public keys — if the address differs, stop.
 
 ### 3.2 Publish the package(s)
 
+⚠️ **v2 (24 Oct 2026) changes this step.** Mainnet publishes three packages, in
+order: `splash_core`, then `splash_spend` and `splash_upgrade_delay`, each of
+the last two made immutable in the next transaction. Core's `UpgradeCap` is
+not burned; it goes into the `splash_upgrade_delay` wrapper, which allows only
+additive upgrades after 24 hours' public notice. The order and every step are
+in `docs/MAINNET-CHECKLIST.md` ("v2 mainnet steps") and `docs/UPGRADE-POLICY.md`.
+What follows is the v1 procedure; where they disagree, those two files win.
+
 ⚠️ **`move/` is now TWO packages** (2026-08-17). There is no `move/Move.toml` any more.
 
 **Phase 0 — publish `splash_core` ONLY.**
@@ -185,6 +193,10 @@ Record from the publish output: the new **package id**; the **AdminCap**,
 `business_account::init`); the shared **CapRegistry** id (shared by
 `cap_registry::init` in the same transaction); and the **UpgradeCap**.
 
+> **Superseded in v2 (D11).** Core upgrades additive-only through
+> `splash_upgrade_delay`; see the note at the top of this step. The v1 decision
+> is kept below for the record.
+>
 > **Decision made (STATUS.md): `splash_core` publishes IMMUTABLE — burn the `UpgradeCap`.**
 > A settlement contract whose logic cannot change is a stronger regulatory position than
 > one under multisig, where "who holds the keys" becomes a custody procedure an auditor
@@ -201,14 +213,17 @@ Record from the publish output: the new **package id**; the **AdminCap**,
 Then set both package ids in the environment:
 ```
 SPLASH_CORE_PACKAGE_ID=<new core package id>
-SPLASH_CUSTODY_PACKAGE_ID=                  # EMPTY in Phase 0 — intentionally
+SPLASH_CUSTODY_PACKAGE_ID=                  # EMPTY: retired in v2; production on mainnet refuses to boot with it
 ```
 
 ### 3.3 Re-bootstrap every shared object
 Nothing carries over. `CapRegistry` already exists from the publish. Re-create
 and record ids for:
-`compliance_config::create` → shared `ComplianceConfig` + a `ComplianceCap` sent
-  to the caller. ⚠️ Its arguments, in order: `AdminCap`, `CapRegistry`,
+`compliance_config::create<SettlementAsset>` → shared `ComplianceConfig` + a
+  `ComplianceCap` sent to the caller. In v2 the type argument is the first
+  accepted asset (native USDC on mainnet) and the call consumes the
+  `ConfigTicket` the publish minted, so only one config can ever exist.
+  ⚠️ Its arguments, in order: `ConfigTicket`, `AdminCap`, `CapRegistry`,
   `max_deviation_ppm`, `max_staleness_ms`, `max_slippage_bps`,
   `min_depth_base_units`, `min_settlement_amount`, `allowed_deepbook_pools`.
   The last two need care:
@@ -328,13 +343,16 @@ Also commit the regenerated `move/splash_core/Published.toml`.
 node --use-system-ca --experimental-strip-types --env-file=.env.local scripts/e2e-testnet.mjs
 ```
 It takes the network and node from `lib/sui.ts`, as the app does, and
-SIMULATES every transaction: the node runs it as `OPERATOR_SUI_ADDRESS` would
-and reports the result. Nothing is signed or sent and no gas is spent, so run
-it on mainnet too. It runs as the operator address and never reads the key. It
-reads the same ids as the app (`SPLASH_CORE_PACKAGE_ID`, falling back to
-`SPLASH_PACKAGE_ID`; `SPLASH_ANCHOR_CAP_ID`; `SPLASH_CAP_REGISTRY_ID`;
-`SPLASH_PEG_STATE_ID`; `SPLASH_BUSINESS_ACCOUNT_ID`; `SPLASH_ADMIN_CAP_ID` when
-set) and checks, on the core package only:
+SIMULATES every transaction: the node runs it as the named sender would and
+reports the result. Nothing is signed or sent and no gas is spent, so run it
+on mainnet too. The script holds no key and cannot sign; it takes no
+arguments. It reads the same ids as the app (`SPLASH_CORE_PACKAGE_ID`,
+falling back to `SPLASH_PACKAGE_ID`; `SPLASH_ANCHOR_CAP_ID`;
+`SPLASH_CAP_REGISTRY_ID`; `SPLASH_PEG_STATE_ID`; `SPLASH_COMPLIANCE_CONFIG_ID`;
+`SPLASH_BUSINESS_ACCOUNT_ID`; `SPLASH_ADMIN_CAP_ID` when set; `USDC_TYPE`, or
+Circle's USDC on the network when it is unset), plus
+`SPLASH_VERIFY_BUSINESS_ACCOUNT_ID` for the payment check, and checks, on the
+core package only:
 - the package id matches `move/splash_core/Published.toml` for the chain (a
   failure if it names another package, a warning if the file has no record
   for this chain);
@@ -342,35 +360,38 @@ set) and checks, on the core package only:
 - the operator holds the `AnchorCap`, and holds none of the package's
   `AdminCap`, `TreasuryCap` or `UpgradeCap` (read from what the operator owns,
   so the ids need not be set; a failure on mainnet, a warning on testnet). The
-  first two go to the cold multisig in §3.6; the `UpgradeCap` is burned or held
-  by the multisig (§3.2);
+  first two go to the cold multisig in §3.6; in v2 the `UpgradeCap` goes into
+  the `splash_upgrade_delay` wrapper (`docs/UPGRADE-POLICY.md`);
 - every function it calls takes the parameters the current source declares. A
   failure here means the package was published from different source: publish
   the current `splash_core` (§3.2). The checks that call a mismatched function
   report that instead of running;
 - `peg_monitor::update_peg` on the AnchorCap and CapRegistry emits `PegUpdated`;
 - `audit_anchor::anchor_audit_hash` on its own emits `AuditAnchored`;
-- `payment_intent::create_payment_intent<SUI>` emits `IntentCreated`;
-- `confirm_payment_intent<SUI>`, then `audit_anchor::anchor` on its receipt and
-  `audit_anchor::anchor_audit_hash`, emit `IntentConfirmed`,
-  `SettlementAnchored` and `AuditAnchored`, and no `TreasuryDeposited`.
-  A simulation cannot confirm an intent another simulation opened, so this
-  check opens one with `payment_intent::create`, confirms it, and deletes it,
-  all in one transaction.
+- the v2 wallet path, in one transaction sent as the registered wallet of
+  `SPLASH_VERIFY_BUSINESS_ACCOUNT_ID` with the operator paying gas: the
+  wallet's USDC address balance redeemed, `payment_intent::create_for_wallet<USDC>`,
+  `confirm_from_business_wallet_balance<USDC>`, `audit_anchor::anchor` on its
+  receipt and `delete_finalized` emit `IntentCreated`, `IntentConfirmed` and
+  `SettlementAnchored`, and no `TreasuryDeposited`. The wallet must hold at
+  least 0.01 USDC in its address balance. A simulation checks no signatures,
+  so no wallet signer is needed;
+- the same `create_for_wallet` sent as the operator aborts with
+  `business_account::E_NOT_THE_WALLET` (50): the operator key cannot open, or
+  pay, a business's intent.
 
 It exits 1 on any failure. If the peg or anchor calls abort with 210, the
 AnchorCap was revoked: a break-glass execute moved its generation on, and the
 cap to use is the one `execute_break_glass_anchor_cap` minted. A cap or registry
-from another publish fails the id checks instead, as the wrong type. The
-treasury and batch payouts are custody modules and are not checked; they
-publish with the licence.
+from another publish fails the id checks instead, as the wrong type. `splash_custody`
+and `splash_meter` are not on the mainnet path and are not checked.
 
-`--execute` sends the intent and the confirm for real, as the app does, signed
-with `OPERATOR_SUI_PRIVATE_KEY`. It runs only after a clean simulation and only
-on testnet (the node's chain id decides); the peg call stays simulated, because
-the script has no attested reading to write. It prints the
-`scripts/verify-commitment.mjs` command that checks the settlement's events
-against the commitment.
+Without `SPLASH_VERIFY_BUSINESS_ACCOUNT_ID` the last two checks are reported as
+skipped, not passed. Name a business account whose wallet is registered and
+funded, for example one opened for the ceremony. The executed v2 payments on
+testnet are proved by `experiments/v2-phase1/testnet-e2e.mjs`, which signs with
+its own test keys. This script has no `--execute`: in v2 the operator cannot
+pay on a business's behalf, which is what the old option did.
 
 ---
 

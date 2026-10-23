@@ -2,10 +2,10 @@
 /**
  * e2e-testnet — check a splash_core publish against the chain.
  *
- * The verify step of docs/KEY-CEREMONY-RUNBOOK.md §3.8. It builds the same
- * transactions as lib/server/sui-settlement.ts, on the Phase 0 core package
- * only (splash_custody publishes with the licence, not before), and checks
- * that the configured ids, the AnchorCap and the CapRegistry work together:
+ * The verify step of docs/KEY-CEREMONY-RUNBOOK.md §3.8. It checks the v2 core
+ * package only (splash_custody is not on the mainnet path), and that the
+ * configured ids, the AnchorCap, the CapRegistry and the ComplianceConfig work
+ * together:
  *
  *   ids      every configured object exists and belongs to this package; the
  *            AnchorCap is held by the operator address.
@@ -14,39 +14,43 @@
  *   peg      peg_monitor::update_peg on the AnchorCap and CapRegistry
  *            → PegUpdated.
  *   anchor   audit_anchor::anchor_audit_hash on its own → AuditAnchored.
- *   intent   payment_intent::create_payment_intent<SUI> → IntentCreated.
- *   confirm  confirm_payment_intent<SUI>, audit_anchor::anchor on its receipt,
- *            audit_anchor::anchor_audit_hash on the AnchorCap
- *            → IntentConfirmed, SettlementAnchored, AuditAnchored.
- *            No TreasuryDeposited: the treasury is a custody module.
+ *   payment  one transaction, as a business account's registered wallet with
+ *            the operator paying gas: the wallet's address balance redeemed,
+ *            payment_intent::create_for_wallet<USDC>,
+ *            confirm_from_business_wallet_balance<USDC>, audit_anchor::anchor
+ *            on its receipt, delete_finalized → IntentCreated,
+ *            IntentConfirmed, SettlementAnchored. No TreasuryDeposited: the
+ *            treasury is a custody module. Needs
+ *            SPLASH_VERIFY_BUSINESS_ACCOUNT_ID; without it the check is
+ *            skipped and says so.
+ *   refusal  the same create_for_wallet as the operator must abort with
+ *            business_account::E_NOT_THE_WALLET: in v2 the operator key cannot
+ *            open, or pay, a business's intent.
  *
- * By default every transaction is SIMULATED: the node runs it as the operator
- * address would and reports what it would do. Nothing is signed or sent, no
- * coin moves, no object is written and no gas is spent, so this is safe on any
- * network, mainnet included. It runs as OPERATOR_SUI_ADDRESS and never reads
- * the private key. The network and node come from lib/sui.ts, as in the app.
+ * Every transaction is SIMULATED: the node runs it as the named sender would
+ * and reports what it would do. Nothing is signed or sent, no coin moves, no
+ * object is written and no gas is spent, so this is safe on any network,
+ * mainnet included. The script holds no key and cannot sign. A simulation
+ * checks no signatures, which is how it runs as the business wallet (a
+ * multisig address) and the operator at once. The network and node come from
+ * lib/sui.ts, as in the app.
  *
- * --execute signs and sends the intent and the confirm with
- * OPERATOR_SUI_PRIVATE_KEY, as two transactions, the shape the app uses.
- * Testnet only: the node's chain id decides, not SUI_NETWORK alone. The payment
- * goes back to the operator unless SPLASH_TEST_RECIPIENT_ADDRESS is set. The
- * peg call stays simulated: this script has no attested reading to write, and
- * the app writes only attested ones (lib/server/peg-attestation.ts).
+ * Executed payments are proved on testnet by experiments/v2-phase1/testnet-e2e.mjs,
+ * which signs with test keys of its own. v2 has no operator-signed payment to
+ * execute here: the old --execute (the operator opening and confirming an
+ * intent) is exactly what v2 removed.
  *
  * Run:
  *   node --use-system-ca --experimental-strip-types --env-file=.env.local scripts/e2e-testnet.mjs
- *   node --use-system-ca --experimental-strip-types --env-file=.env.local scripts/e2e-testnet.mjs --execute
  */
 import { SuiGrpcClient } from '@mysten/sui/grpc';
 import { Transaction } from '@mysten/sui/transactions';
-import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
-import { Secp256k1Keypair } from '@mysten/sui/keypairs/secp256k1';
-import { decodeSuiPrivateKey } from '@mysten/sui/cryptography';
 import { fromBase58, isValidSuiAddress, isValidSuiObjectId, normalizeSuiAddress } from '@mysten/sui/utils';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 
-import { DOMAIN_TAGS, newSalt, paymentCommitment, toHex } from '../lib/evidence/commitment.ts';
+import { newSalt, paymentCommitment, paymentRefCommitment, railCommitment, toHex } from '../lib/evidence/commitment.ts';
+import { SUI_USDC_COIN_TYPE } from '../lib/payments/stablecoin-lane.ts';
 import { SUI_NETWORK, SUI_RPC_URL } from '../lib/sui.ts';
 import { SPLASH_CORE_ABI } from './splash-core-abi.mjs';
 
@@ -72,9 +76,10 @@ function refuse(message) {
 
 const args = process.argv.slice(2);
 for (const arg of args) {
-  if (arg !== '--execute') stop(`Unknown argument ${arg}. The only option is --execute.`);
+  stop(
+    `Unknown argument ${arg}. This script takes none: it only simulates. Executed v2 payments are proved on testnet by experiments/v2-phase1/testnet-e2e.mjs.`,
+  );
 }
-const EXECUTE = args.includes('--execute');
 
 // The app's own resolution, so this asks the node the app asks.
 const NETWORK = SUI_NETWORK;
@@ -86,12 +91,17 @@ const client = new SuiGrpcClient({ network: NETWORK, baseUrl: BASE_URL });
  *  Move.toml write chain ids. */
 const CHAIN_IDS = { testnet: '4c78adac', mainnet: '35834a8a' };
 
-const SUI = '0x2::sui::SUI';
 const CLOCK = '0x6';
-// 0.001 SUI. Enough to prove a coin moves; in --execute it comes back to the
-// operator unless a test recipient is set.
-const PAYMENT_MIST = 1_000_000;
-const FX_RATE_SCALED = 56_420_000; // PHP per USD, scaled 1e6
+// 0.01 USDC. Enough to prove the wallet can pay; a simulation moves nothing.
+const PAYMENT_MINOR = 10_000;
+// A wallet payment in USDC pays USDC: one to one, scaled 1e6.
+const FX_RATE_SCALED = 1_000_000;
+// payment_intent::KIND_WALLET, and business_account::E_NOT_THE_WALLET.
+// tests/e2e-verify-abi.test.mjs holds both to the source.
+const KIND_WALLET = 3;
+const E_NOT_THE_WALLET = 50;
+const INTENT_LIFETIME_MS = 3_600_000;
+const SETTLE_WINDOW_MS = 1_800_000;
 
 function objectIdFromEnv(key, { required }) {
   const value = env(key);
@@ -114,41 +124,30 @@ if (!PACKAGE) stop('Set SPLASH_CORE_PACKAGE_ID to the splash_core package id.');
 const ANCHOR_CAP = objectIdFromEnv('SPLASH_ANCHOR_CAP_ID', { required: true });
 const CAP_REGISTRY = objectIdFromEnv('SPLASH_CAP_REGISTRY_ID', { required: true });
 const PEG_STATE = objectIdFromEnv('SPLASH_PEG_STATE_ID', { required: false });
+const COMPLIANCE_CONFIG = objectIdFromEnv('SPLASH_COMPLIANCE_CONFIG_ID', { required: false });
 const BUSINESS = objectIdFromEnv('SPLASH_BUSINESS_ACCOUNT_ID', { required: false });
 const ADMIN_CAP = objectIdFromEnv('SPLASH_ADMIN_CAP_ID', { required: false });
+// A business account with a registered wallet that holds USDC in its address
+// balance. Only the payment check uses it; it is never the app's own account.
+const VERIFY_ACCOUNT = objectIdFromEnv('SPLASH_VERIFY_BUSINESS_ACCOUNT_ID', { required: false });
 
-/** Read only for --execute. A malformed key is reported without its text. */
-function operatorSigner() {
-  const encoded = env('OPERATOR_SUI_PRIVATE_KEY');
-  if (!encoded) stop('--execute signs with OPERATOR_SUI_PRIVATE_KEY, which is not set.');
-  let decoded;
-  try {
-    decoded = decodeSuiPrivateKey(encoded);
-  } catch {
-    stop('OPERATOR_SUI_PRIVATE_KEY is not a valid suiprivkey string.');
-  }
-  const { scheme, secretKey } = decoded;
-  if (scheme === 'Secp256k1') return Secp256k1Keypair.fromSecretKey(secretKey);
-  if (scheme === 'ED25519') return Ed25519Keypair.fromSecretKey(secretKey);
-  stop(`OPERATOR_SUI_PRIVATE_KEY is a ${scheme} key. The app signs with Ed25519 or Secp256k1.`);
+const operatorFromEnv = env('OPERATOR_SUI_ADDRESS');
+if (operatorFromEnv && !isValidSuiAddress(normalizeSuiAddress(operatorFromEnv))) {
+  stop(`OPERATOR_SUI_ADDRESS is not a Sui address: ${operatorFromEnv}`);
 }
-
-// No signer exists without --execute, so nothing in a simulation can sign.
-const signer = EXECUTE ? operatorSigner() : null;
-const addressFromEnv = env('OPERATOR_SUI_ADDRESS');
-if (addressFromEnv && !isValidSuiAddress(normalizeSuiAddress(addressFromEnv))) {
-  stop(`OPERATOR_SUI_ADDRESS is not a Sui address: ${addressFromEnv}`);
-}
-const SENDER = signer ? signer.toSuiAddress() : addressFromEnv ? normalizeSuiAddress(addressFromEnv) : '';
-if (!SENDER) stop('Set OPERATOR_SUI_ADDRESS. A simulation runs as that address and never reads the key.');
-if (signer && addressFromEnv && normalizeSuiAddress(addressFromEnv) !== SENDER) {
-  stop(`OPERATOR_SUI_ADDRESS is ${addressFromEnv}, but OPERATOR_SUI_PRIVATE_KEY belongs to ${SENDER}.`);
-}
+const OPERATOR = operatorFromEnv ? normalizeSuiAddress(operatorFromEnv) : '';
+if (!OPERATOR) stop('Set OPERATOR_SUI_ADDRESS. The simulations run as that address, or with it paying gas.');
 const recipientFromEnv = env('SPLASH_TEST_RECIPIENT_ADDRESS');
 if (recipientFromEnv && !isValidSuiAddress(normalizeSuiAddress(recipientFromEnv))) {
   stop(`SPLASH_TEST_RECIPIENT_ADDRESS is not a Sui address: ${recipientFromEnv}`);
 }
-const RECIPIENT = recipientFromEnv ? normalizeSuiAddress(recipientFromEnv) : SENDER;
+// Without one, the simulated payment goes back to the wallet that makes it.
+const RECIPIENT_FROM_ENV = recipientFromEnv ? normalizeSuiAddress(recipientFromEnv) : '';
+
+// The coin the app settles in (USDC_TYPE), or Circle's USDC on this network
+// when USDC_TYPE is unset or the development stand-in.
+const usdcFromEnv = env('USDC_TYPE');
+const USDC = usdcFromEnv && usdcFromEnv !== '0x2::sui::SUI' ? usdcFromEnv : SUI_USDC_COIN_TYPE[NETWORK];
 
 // ── Results ───────────────────────────────────────────────────────────────────
 
@@ -197,27 +196,32 @@ function explain(message) {
   return message;
 }
 
-async function simulate(label, tx) {
-  tx.setSender(SENDER);
-  const bytes = await tx.build({ client });
-  const res = await client.core.simulateTransaction({ transaction: bytes, include: { effects: true, events: true } });
-  const t = res.$kind === 'Transaction' ? res.Transaction : res.FailedTransaction;
-  if (!t.status.success) throw new Error(`${label} would abort: ${t.status.error?.message ?? 'no reason given'}`);
-  return { digest: null, events: eventsOf(t) };
+/** The abort a refusal reports: its code, and where in this package. */
+function abortOf(message) {
+  const m = /abort code: (\d+), in '(0x[0-9a-fA-F]+)::(\w+)::(\w+)'/.exec(message);
+  if (!m) return null;
+  return { code: Number(m[1]), package: normalizeSuiAddress(m[2]), module: m[3], fn: m[4] };
 }
 
-async function execute(label, tx) {
-  const res = await client.signAndExecuteTransaction({
-    signer,
-    transaction: tx,
-    include: { effects: true, events: true },
-  });
-  const t = res.$kind === 'Transaction' ? res.Transaction : res.FailedTransaction;
-  if (!t.status.success) {
-    throw new Error(`${label} failed: ${t.status.error?.message ?? 'no reason given'}. Digest ${t.digest}`);
+/**
+ * Simulate `tx` as `sender`, with `gasOwner` paying gas when it is someone
+ * else. Throws with the node's reason when it would abort, whether the node
+ * says so while tx.build resolves the transaction or in the simulation.
+ */
+async function simulate(label, tx, { sender = OPERATOR, gasOwner = null } = {}) {
+  tx.setSender(sender);
+  if (gasOwner) tx.setGasOwner(gasOwner);
+  let t;
+  try {
+    const bytes = await tx.build({ client });
+    const res = await client.core.simulateTransaction({ transaction: bytes, include: { effects: true, events: true } });
+    t = res.$kind === 'Transaction' ? res.Transaction : res.FailedTransaction;
+  } catch (e) {
+    const reason = e?.executionError?.message ?? (e instanceof Error ? e.message : String(e));
+    throw new Error(`${label} would abort: ${reason}`);
   }
-  await client.waitForTransaction({ digest: t.digest }).catch(() => {});
-  return { digest: t.digest, events: eventsOf(t) };
+  if (!t.status.success) throw new Error(`${label} would abort: ${t.status.error?.message ?? 'no reason given'}`);
+  return { events: eventsOf(t) };
 }
 
 // ── The calls, as the current source declares them ───────────────────────────
@@ -294,9 +298,6 @@ async function checkChain() {
   if (chainId !== CHAIN_IDS[NETWORK]) {
     refuse(`SUI_NETWORK is ${NETWORK} (chain ${CHAIN_IDS[NETWORK]}), but ${BASE_URL} serves chain ${chainId}.`);
   }
-  if (EXECUTE && chainId !== CHAIN_IDS.testnet) {
-    refuse('--execute runs on testnet only. On mainnet, run without it: the simulation checks the same calls.');
-  }
   return chainId;
 }
 
@@ -330,9 +331,9 @@ function ownerAddress(owner) {
   return null;
 }
 
-async function fetchObject(id) {
+async function fetchObject(id, include) {
   try {
-    return (await client.core.getObject({ objectId: id })).object;
+    return (await client.core.getObject({ objectId: id, include })).object;
   } catch {
     return null;
   }
@@ -370,10 +371,10 @@ async function checkIds() {
   const anchorCap = await checkObject('AnchorCap', 'SPLASH_ANCHOR_CAP_ID', ANCHOR_CAP, typeIn('business_account::AnchorCap'), { shared: false });
   if (anchorCap) {
     const holder = ownerAddress(anchorCap.owner);
-    if (holder === SENDER) {
-      record('AnchorCap', 'PASS', `held by the operator ${SENDER}.`);
+    if (holder === OPERATOR) {
+      record('AnchorCap', 'PASS', `held by the operator ${OPERATOR}.`);
     } else {
-      record('AnchorCap', 'FAIL', `held by ${holder ?? 'no address'}, not the operator ${SENDER}. Move it with rotate_anchor_cap (runbook §3.4).`);
+      record('AnchorCap', 'FAIL', `held by ${holder ?? 'no address'}, not the operator ${OPERATOR}. Move it with rotate_anchor_cap (runbook §3.4).`);
     }
   }
 
@@ -383,6 +384,13 @@ async function checkIds() {
   if (await checkObject('PegState', 'SPLASH_PEG_STATE_ID', PEG_STATE, typeIn('peg_monitor::PegState'), { shared: true })) {
     record('PegState', 'PASS', PEG_STATE);
   }
+  if (
+    await checkObject('ComplianceConfig', 'SPLASH_COMPLIANCE_CONFIG_ID', COMPLIANCE_CONFIG, typeIn('compliance_config::ComplianceConfig'), {
+      shared: true,
+    })
+  ) {
+    record('ComplianceConfig', 'PASS', COMPLIANCE_CONFIG);
+  }
   if (await checkObject('BusinessAccount', 'SPLASH_BUSINESS_ACCOUNT_ID', BUSINESS, typeIn('business_account::BusinessAccount'), { shared: true })) {
     record('BusinessAccount', 'PASS', BUSINESS);
   }
@@ -390,14 +398,15 @@ async function checkIds() {
   // The authority the hot key must NOT hold, read from what the operator owns,
   // so it is checked whether or not the ids are configured. The AdminCap and
   // the TreasuryCap go to the cold multisig (runbook §3.6) and have no
-  // break-glass; the UpgradeCap is burned, or held by the multisig (§3.2).
+  // break-glass; in v2 the UpgradeCap goes into the splash_upgrade_delay
+  // wrapper (docs/UPGRADE-POLICY.md).
   await checkNotHeld('AdminCap custody', 'business_account::AdminCap', typeIn('business_account::AdminCap'), 'Move it to the cold multisig (runbook §3.6).');
   await checkNotHeld('TreasuryCap custody', 'business_account::TreasuryCap', typeIn('business_account::TreasuryCap'), 'Move it to the cold multisig (runbook §3.6).');
   await checkNotHeld(
     'UpgradeCap custody',
     'UpgradeCap for this package',
     '0x2::package::UpgradeCap',
-    'Burn it, or move it to the cold multisig (runbook §3.2).',
+    'Wrap it in splash_upgrade_delay under the governance multisig (docs/UPGRADE-POLICY.md).',
     (o) => typeof o.json?.package === 'string' && normalizeSuiAddress(o.json.package) === PACKAGE,
   );
   if (ADMIN_CAP && (await checkObject('AdminCap', 'SPLASH_ADMIN_CAP_ID', ADMIN_CAP, typeIn('business_account::AdminCap'), { shared: false }))) {
@@ -410,7 +419,7 @@ async function ownedByOperator(type) {
   const objects = [];
   let cursor = null;
   do {
-    const page = await client.core.listOwnedObjects({ owner: SENDER, type, cursor, limit: 50, include: { json: true } });
+    const page = await client.core.listOwnedObjects({ owner: OPERATOR, type, cursor, limit: 50, include: { json: true } });
     objects.push(...page.objects);
     cursor = page.hasNextPage ? page.cursor : null;
   } while (cursor);
@@ -457,29 +466,18 @@ async function checkPeg() {
   record('Peg refresh (simulated)', 'PASS', 'PegUpdated, on the AnchorCap and CapRegistry.');
 }
 
-function newCommitment() {
-  // WS5. The chain gets a 32-byte commitment, never the payment itself.
-  const salt = newSalt();
-  const payload = {
-    sender: SENDER,
-    recipient: RECIPIENT,
-    beneficiaryRef: '',
-    amount: PAYMENT_MIST,
-    currency: SUI,
-    corridor: '',
-    targetCurrency: 'PHP',
-    fxRateUsdLocal: FX_RATE_SCALED,
-  };
-  return { salt, payload, commitment: paymentCommitment(payload, salt) };
-}
-
-function auditValues(commitment) {
-  const auditHash = createHash('sha256').update(`e2e:${toHex(commitment)}`).digest('hex');
+function auditValues(seed) {
+  const auditHash = createHash('sha256').update(`e2e:${toHex(seed)}`).digest('hex');
   return { auditHash, anchorId: `e2e:${Date.now().toString(36)}`, blobId: `e2e-no-blob:${auditHash.slice(0, 24)}` };
 }
 
-/** audit_anchor::anchor_audit_hash, as anchorAuditHashOnSui builds it. */
-function addAuditAnchor(tx, { auditHash, anchorId, blobId }) {
+/** audit_anchor::anchor_audit_hash, as anchorAuditHashOnSui builds it. The
+ *  operator's own transaction: the AnchorCap is the operator's owned object,
+ *  so it cannot be an input to a transaction the business wallet sends. */
+async function checkAuditAnchorSimulated() {
+  const { auditHash, anchorId, blobId } = auditValues(newSalt());
+  const tx = new Transaction();
+  tx.setGasBudget(20_000_000);
   tx.moveCall({
     target: `${PACKAGE}::audit_anchor::anchor_audit_hash`,
     arguments: [
@@ -492,31 +490,6 @@ function addAuditAnchor(tx, { auditHash, anchorId, blobId }) {
       tx.object(CLOCK),
     ],
   });
-}
-
-/** Two anchors per settlement, as in confirmComposedPaymentOnSui: the receipt
- *  anchor (SettlementAnchored) and the audit-hash anchor (AuditAnchored). */
-function addAnchors(tx, receipt, commitment) {
-  const values = auditValues(commitment);
-  tx.moveCall({
-    target: `${PACKAGE}::audit_anchor::anchor`,
-    arguments: [
-      receipt,
-      tx.pure.vector('u8', Array.from(Buffer.from(values.auditHash, 'utf8'))),
-      tx.pure.vector('u8', Array.from(Buffer.from(values.blobId, 'utf8'))),
-      tx.object(CLOCK),
-    ],
-  });
-  addAuditAnchor(tx, values);
-}
-
-/** The AnchorCap and CapRegistry on their own: the ceremony's hand-over of
- *  anchor authority, without a payment around it. */
-async function checkAuditAnchorSimulated() {
-  const { commitment } = newCommitment();
-  const tx = new Transaction();
-  tx.setGasBudget(20_000_000);
-  addAuditAnchor(tx, auditValues(commitment));
   const { events } = await simulate('anchor_audit_hash', tx);
   if (!findEvent(events, 'audit_anchor::AuditAnchored')) {
     throw new Error(`anchor_audit_hash emitted ${eventNames(events)}, not AuditAnchored.`);
@@ -524,138 +497,161 @@ async function checkAuditAnchorSimulated() {
   record('Audit anchor (simulated)', 'PASS', 'AuditAnchored, on the AnchorCap and CapRegistry.');
 }
 
-function confirmProof(events) {
-  const expected = ['payment_intent::IntentConfirmed', 'audit_anchor::SettlementAnchored', 'audit_anchor::AuditAnchored'];
-  const missing = expected.filter((name) => !findEvent(events, name));
-  if (missing.length) throw new Error(`missing ${missing.join(', ')}; emitted ${eventNames(events)}.`);
-  if (events.some((e) => e.type.endsWith('::smart_treasury::TreasuryDeposited'))) {
-    throw new Error('TreasuryDeposited was emitted. Phase 0 publishes no treasury.');
+/** The verify account's registered wallet, read from the chain. */
+async function verifyWallet() {
+  const account = await fetchObject(VERIFY_ACCOUNT, { json: true });
+  if (!account) throw new Error(`SPLASH_VERIFY_BUSINESS_ACCOUNT_ID ${VERIFY_ACCOUNT} does not exist on this chain.`);
+  if (normalizeType(account.type) !== typeIn('business_account::BusinessAccount')) {
+    throw new Error(`SPLASH_VERIFY_BUSINESS_ACCOUNT_ID is a ${account.type}, not a BusinessAccount of this package.`);
   }
-}
-
-function openIntent(tx, commitment) {
-  tx.moveCall({
-    target: `${PACKAGE}::payment_intent::create_payment_intent`,
-    typeArguments: [SUI],
-    arguments: [
-      tx.pure.address(RECIPIENT),
-      tx.pure.u64(PAYMENT_MIST),
-      tx.pure.string('PHP'),
-      tx.pure.u64(FX_RATE_SCALED),
-      tx.pure.vector('u8', Array.from(commitment)),
-      tx.object(CLOCK),
-    ],
-  });
-}
-
-async function checkIntentSimulated() {
-  const { commitment } = newCommitment();
-  const tx = new Transaction();
-  tx.setGasBudget(30_000_000);
-  openIntent(tx, commitment);
-  const { events } = await simulate('create_payment_intent', tx);
-  if (!findEvent(events, 'payment_intent::IntentCreated')) {
-    throw new Error(`create_payment_intent emitted ${eventNames(events)}, not IntentCreated.`);
+  const wallet = account.json?.wallet;
+  if (typeof wallet !== 'string' || !isValidSuiAddress(normalizeSuiAddress(wallet))) {
+    throw new Error('SPLASH_VERIFY_BUSINESS_ACCOUNT_ID has no registered wallet. Register one (business_account::register_wallet) first.');
   }
-  record('Payment intent (simulated)', 'PASS', 'IntentCreated.');
+  return normalizeSuiAddress(wallet);
 }
 
 /**
- * The confirm, simulated in one transaction. A simulation cannot confirm an
- * intent opened by another simulation, so this opens one with `create<SUI>`,
- * which returns it instead of sharing it, confirms it through the same
- * `confirm_payment_intent<SUI>` the app calls on the shared object, anchors
- * both ways, and deletes the confirmed intent.
+ * The 32-byte values an intent carries, built as the app builds them
+ * (lib/evidence/commitment.ts): the payment and rail commitments, and a
+ * payment reference no earlier intent has claimed.
  */
-async function checkConfirmSimulated() {
-  const { commitment } = newCommitment();
-  const tx = new Transaction();
-  tx.setGasBudget(30_000_000);
+function intentValues(wallet, recipient) {
+  const salt = newSalt();
+  const commitment = paymentCommitment(
+    {
+      sender: wallet,
+      recipient,
+      beneficiaryRef: '',
+      amount: PAYMENT_MINOR,
+      currency: USDC,
+      corridor: '',
+      targetCurrency: 'USDC',
+      fxRateUsdLocal: FX_RATE_SCALED,
+    },
+    salt,
+  );
+  const rail = railCommitment({ rail: 'sui', partnerReference: '' }, salt);
+  const paymentRef = paymentRefCommitment({ businessAccountId: VERIFY_ACCOUNT, paymentId: `e2e:${Date.now().toString(36)}` }, newSalt());
+  return { commitment, rail, paymentRef };
+}
+
+/** payment_intent::create_for_wallet<USDC>, a kind-3 (wallet) intent. */
+function openForWallet(tx, { recipient, commitment, rail, paymentRef }) {
+  const now = Date.now();
   const [intent] = tx.moveCall({
-    target: `${PACKAGE}::payment_intent::create`,
-    typeArguments: [SUI],
+    target: `${PACKAGE}::payment_intent::create_for_wallet`,
+    typeArguments: [USDC],
     arguments: [
-      tx.pure.address(RECIPIENT),
-      tx.pure.vector('u8', Array.from(Buffer.from('e2e', 'utf8'))),
-      tx.pure.u64(PAYMENT_MIST),
-      tx.pure.vector('u8', Array.from(Buffer.from(SUI, 'utf8'))),
-      tx.pure.vector('u8', Array.from(Buffer.from('USD-PHP', 'utf8'))),
-      tx.pure.string('PHP'),
+      tx.object(VERIFY_ACCOUNT),
+      tx.object(COMPLIANCE_CONFIG),
+      tx.pure.vector('u8', Array.from(paymentRef)),
+      tx.pure.address(recipient),
+      tx.pure.vector('u8', []),
+      tx.pure.u64(PAYMENT_MINOR),
+      tx.pure.string('USDC'),
       tx.pure.u64(FX_RATE_SCALED),
       tx.pure.vector('u8', Array.from(commitment)),
+      tx.pure.u8(KIND_WALLET),
+      tx.pure.vector('u8', Array.from(rail)),
+      tx.pure.u64(now + INTENT_LIFETIME_MS),
       tx.object(CLOCK),
     ],
   });
-  const [payment] = tx.splitCoins(tx.gas, [PAYMENT_MIST]);
-  const [receipt] = tx.moveCall({
-    target: `${PACKAGE}::payment_intent::confirm_payment_intent`,
-    typeArguments: [SUI],
-    arguments: [intent, payment, tx.object(CLOCK)],
-  });
-  addAnchors(tx, receipt, commitment);
-  tx.moveCall({ target: `${PACKAGE}::payment_intent::delete_finalized`, arguments: [intent] });
-  const { events } = await simulate('confirm', tx);
-  confirmProof(events);
-  record('Confirm + anchors (simulated)', 'PASS', 'IntentConfirmed, SettlementAnchored, AuditAnchored.');
+  return intent;
 }
 
-/** --execute: the app's two transactions, for real, on testnet. */
-async function checkPaymentExecuted() {
-  const { salt, payload, commitment } = newCommitment();
-  const open = new Transaction();
-  open.setGasBudget(30_000_000);
-  openIntent(open, commitment);
-  const opened = await execute('create_payment_intent', open);
-  const created = findEvent(opened.events, 'payment_intent::IntentCreated');
-  const intentId = typeof created?.data.intent_id === 'string' ? created.data.intent_id : '';
-  if (!intentId) throw new Error(`IntentCreated missing intent_id. Digest ${opened.digest}`);
-  record('Payment intent (executed)', 'PASS', `${opened.digest}  intent ${intentId}`);
+/**
+ * The v2 wallet path in one transaction, as the business wallet with the
+ * operator paying gas: redeem the wallet's address balance, open the intent,
+ * pay it from that balance, anchor the receipt and delete the confirmed
+ * intent. A simulation cannot pay an intent another simulation opened, so
+ * the intent is opened and paid in the same transaction, as the app does.
+ */
+async function checkWalletPaymentSimulated() {
+  if (!COMPLIANCE_CONFIG) {
+    record('Wallet payment (simulated)', 'FAIL', 'needs SPLASH_COMPLIANCE_CONFIG_ID.');
+    return;
+  }
+  const wallet = await verifyWallet();
+  const recipient = RECIPIENT_FROM_ENV || wallet;
+  const { balance } = await client.core.getBalance({ owner: wallet, coinType: USDC });
+  if (BigInt(balance.addressBalance ?? 0) < BigInt(PAYMENT_MINOR)) {
+    throw new Error(
+      `the wallet ${wallet} has ${balance.addressBalance ?? 0} of ${USDC} in its address balance; the check pays ${PAYMENT_MINOR}. Send it some with coin::send_funds.`,
+    );
+  }
 
-  // The salt and payload go to a plaintext bundle under .tmp/, and the events
-  // of both transactions next to it, so this testnet settlement can be checked
-  // with scripts/verify-commitment.mjs. A real payment keeps the salt and
-  // payload only inside the Seal bundle.
-  mkdirSync('.tmp', { recursive: true });
-  const bundlePath = '.tmp/e2e-commitment-bundle.json';
-  writeFileSync(
-    bundlePath,
-    JSON.stringify(
-      {
-        schema: 'splash.settlement-evidence.v2',
-        settlement: {
-          paymentIntentId: intentId,
-          commitment: { tag: DOMAIN_TAGS.payment, commitmentHex: toHex(commitment), saltHex: toHex(salt), payload },
-        },
-      },
-      null,
-      2,
-    ),
-  );
-
-  const confirm = new Transaction();
-  confirm.setGasBudget(30_000_000);
-  const [payment] = confirm.splitCoins(confirm.gas, [PAYMENT_MIST]);
-  const [receipt] = confirm.moveCall({
-    target: `${PACKAGE}::payment_intent::confirm_payment_intent`,
-    typeArguments: [SUI],
-    arguments: [confirm.object(intentId), payment, confirm.object(CLOCK)],
+  const values = intentValues(wallet, recipient);
+  const { auditHash, blobId } = auditValues(values.commitment);
+  const tx = new Transaction();
+  tx.setGasBudget(50_000_000);
+  const withdrawal = tx.withdrawal({ amount: PAYMENT_MINOR, type: USDC });
+  const [payment] = tx.moveCall({ target: '0x2::balance::redeem_funds', typeArguments: [USDC], arguments: [withdrawal] });
+  const intent = openForWallet(tx, { recipient, ...values });
+  const [receipt] = tx.moveCall({
+    target: `${PACKAGE}::payment_intent::confirm_from_business_wallet_balance`,
+    typeArguments: [USDC],
+    arguments: [
+      intent,
+      tx.object(VERIFY_ACCOUNT),
+      tx.object(COMPLIANCE_CONFIG),
+      payment,
+      tx.pure.u64(Date.now() + SETTLE_WINDOW_MS),
+      tx.object(CLOCK),
+    ],
   });
-  addAnchors(confirm, receipt, commitment);
-  const confirmed = await execute('confirm', confirm);
-  confirmProof(confirmed.events);
-  record('Confirm + anchors (executed)', 'PASS', confirmed.digest);
+  tx.moveCall({
+    target: `${PACKAGE}::audit_anchor::anchor`,
+    arguments: [
+      receipt,
+      tx.pure.vector('u8', Array.from(Buffer.from(auditHash, 'utf8'))),
+      tx.pure.vector('u8', Array.from(Buffer.from(blobId, 'utf8'))),
+      tx.object(CLOCK),
+    ],
+  });
+  tx.moveCall({ target: `${PACKAGE}::payment_intent::delete_finalized`, arguments: [intent] });
 
-  // IntentCreated is in the first transaction; IntentConfirmed and
-  // SettlementAnchored in the second. One file carries all three, in the
-  // `{ type, parsedJson }` shape verify-commitment reads.
-  const eventsPath = '.tmp/e2e-events.json';
-  writeFileSync(
-    eventsPath,
-    JSON.stringify([...opened.events, ...confirmed.events].map((e) => ({ type: e.type, parsedJson: e.data })), null, 2),
+  const { events } = await simulate('the wallet payment', tx, { sender: wallet, gasOwner: OPERATOR });
+  const expected = ['payment_intent::IntentCreated', 'payment_intent::IntentConfirmed', 'audit_anchor::SettlementAnchored'];
+  const missing = expected.filter((name) => !findEvent(events, name));
+  if (missing.length) throw new Error(`missing ${missing.join(', ')}; emitted ${eventNames(events)}.`);
+  if (events.some((e) => e.type.endsWith('::smart_treasury::TreasuryDeposited'))) {
+    throw new Error('TreasuryDeposited was emitted. The mainnet path has no treasury.');
+  }
+  record(
+    'Wallet payment (simulated)',
+    'PASS',
+    `IntentCreated, IntentConfirmed, SettlementAnchored, as the wallet ${wallet} with the operator paying gas.`,
   );
-  console.log(
-    `  verify the commitment: node --experimental-strip-types scripts/verify-commitment.mjs --bundle ${bundlePath} --events ${eventsPath}`,
-  );
+}
+
+/** The v2 property the payment check cannot show: the operator alone cannot
+ *  open a business's intent, so it cannot pay one either. */
+async function checkOperatorRefused() {
+  if (!COMPLIANCE_CONFIG) {
+    record('Operator refused (simulated)', 'FAIL', 'needs SPLASH_COMPLIANCE_CONFIG_ID.');
+    return;
+  }
+  const wallet = await verifyWallet();
+  const tx = new Transaction();
+  tx.setGasBudget(50_000_000);
+  const intent = openForWallet(tx, { recipient: OPERATOR, ...intentValues(wallet, OPERATOR) });
+  tx.moveCall({ target: `${PACKAGE}::payment_intent::share_intent`, arguments: [intent] });
+  let reason;
+  try {
+    await simulate('create_for_wallet as the operator', tx);
+  } catch (e) {
+    reason = e instanceof Error ? e.message : String(e);
+  }
+  if (reason === undefined) {
+    throw new Error('create_for_wallet as the operator would succeed. The operator must not be able to open a business intent.');
+  }
+  const abort = abortOf(reason);
+  if (!abort || abort.package !== PACKAGE || abort.module !== 'business_account' || abort.code !== E_NOT_THE_WALLET) {
+    throw new Error(`expected business_account abort ${E_NOT_THE_WALLET} (E_NOT_THE_WALLET); ${reason}`);
+  }
+  record('Operator refused (simulated)', 'PASS', `create_for_wallet as the operator aborts ${E_NOT_THE_WALLET} (E_NOT_THE_WALLET) in business_account::${abort.fn}.`);
 }
 
 async function run(check, fn) {
@@ -675,20 +671,20 @@ async function gated(check, functions, fn) {
   await run(check, fn);
 }
 
-const CONFIRM_CALLS = [
-  'payment_intent::create',
-  'payment_intent::confirm_payment_intent',
+const PAYMENT_CALLS = [
+  'payment_intent::create_for_wallet',
+  'payment_intent::confirm_from_business_wallet_balance',
   'audit_anchor::anchor',
-  'audit_anchor::anchor_audit_hash',
   'payment_intent::delete_finalized',
 ];
+const REFUSAL_CALLS = ['payment_intent::create_for_wallet', 'payment_intent::share_intent'];
 
 async function main() {
-  console.log(`\nsplash_core verify — ${EXECUTE ? 'EXECUTE (testnet, real transactions)' : 'simulation, nothing is sent'}`);
+  console.log('\nsplash_core verify — simulation, nothing is signed or sent');
   console.log(`network=${NETWORK} rpc=${BASE_URL}`);
   const chainId = await checkChain();
   console.log(`chain=${chainId} package=${PACKAGE}`);
-  console.log(`operator=${SENDER} recipient=${RECIPIENT === SENDER ? 'the operator' : RECIPIENT}`);
+  console.log(`operator=${OPERATOR} settlement asset=${USDC}`);
   if (existsSync(new URL('../data/contract-config.json', import.meta.url))) {
     console.log('note: data/contract-config.json exists. The app lets it override these ids; this script reads the environment only.');
   }
@@ -701,24 +697,22 @@ async function main() {
   if (BUSINESS) {
     await gated('Audit anchor (simulated)', ['audit_anchor::anchor_audit_hash'], checkAuditAnchorSimulated);
   } else {
-    record('Anchors', 'FAIL', 'needs SPLASH_BUSINESS_ACCOUNT_ID, which the app passes to anchor_audit_hash.');
+    record('Audit anchor (simulated)', 'FAIL', 'needs SPLASH_BUSINESS_ACCOUNT_ID, which the app passes to anchor_audit_hash.');
   }
-  await gated('Payment intent (simulated)', ['payment_intent::create_payment_intent'], checkIntentSimulated);
-  if (BUSINESS) await gated('Confirm + anchors (simulated)', CONFIRM_CALLS, checkConfirmSimulated);
-  if (EXECUTE) {
-    // Real transactions only after a clean simulation: gas spent on a
-    // transaction the simulation already refused proves nothing.
-    if (results.some((r) => r.status === 'FAIL')) {
-      console.log('- --execute skipped: fix the failures above first.');
-    } else {
-      await run('Payment (executed)', checkPaymentExecuted);
-    }
+  if (VERIFY_ACCOUNT) {
+    await gated('Wallet payment (simulated)', PAYMENT_CALLS, checkWalletPaymentSimulated);
+    await gated('Operator refused (simulated)', REFUSAL_CALLS, checkOperatorRefused);
+  } else {
+    const why = 'skipped: set SPLASH_VERIFY_BUSINESS_ACCOUNT_ID to a business account whose registered wallet holds USDC in its address balance.';
+    record('Wallet payment (simulated)', 'SKIP', why);
+    record('Operator refused (simulated)', 'SKIP', why);
   }
 
   const failed = results.filter((r) => r.status === 'FAIL');
   const warned = results.filter((r) => r.status === 'WARN');
+  const skipped = results.filter((r) => r.status === 'SKIP');
   console.log(
-    `\n${failed.length ? `✗ ${failed.length} failed` : '✔ every check passed'}${warned.length ? `, ${warned.length} warning(s)` : ''}\n`,
+    `\n${failed.length ? `✗ ${failed.length} failed` : '✔ every check that ran passed'}${warned.length ? `, ${warned.length} warning(s)` : ''}${skipped.length ? `, ${skipped.length} skipped` : ''}\n`,
   );
   process.exitCode = failed.length ? 1 : 0;
 }
