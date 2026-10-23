@@ -19,8 +19,9 @@ Non-custody is not a runtime flag. It is a property of the type system.
 
 `splash_core` — the package that publishes to mainnet — contains **no struct
 that holds a `Balance<T>`**. Not gated; absent. Client value exists only as a
-`Coin<T>` parameter that enters and exits `payment_intent::confirm_payment_intent`
-inside a single PTB. There is no object to accumulate into.
+`Coin<T>` or `Balance<T>` parameter that enters and leaves a `payment_intent`
+settle path inside a single PTB. In v2 it comes from the business's own wallet,
+or under one of its spending rules. There is no object to accumulate into.
 
 > *"How do I know Splash cannot hold my money?"*
 >
@@ -40,20 +41,23 @@ so there is no flag to flip and no assert to forget.
 
 ```
 move/
-  splash_core/        ← mainnet, September. NO third-party dependencies.
-    business_account.move  payment_intent.move  audit_anchor.move
-    receipt_v2.move        compliance_config.move  peg_monitor.move
-    tests/core_invariants_tests.move        (10 tests, all passing)
+  splash_core/          ← mainnet. Upgradeable, ADDITIVE ONLY, behind the 24h delay (v2, D11).
+    business_account.move  payment_intent.move  compliance_config.move
+    multisig.move          audit_anchor.move    receipt_v2.move
+    peg_monitor.move       cap_registry.move    spend_window.move
 
-  splash_meter/       ← velocity bounds. UPGRADEABLE, no dependencies.
-    spend_meter.move       guardian.move
-    tests/spend_meter_tests.move            (22 tests, all passing)
+  splash_spend/         ← mainnet, IMMUTABLE. The only spender of app-bound allowances (D2).
+    splash_spend.move      spend_policy.move
 
-  splash_custody/     ← publishes ONLY on the e-money licence
-    settlement.move   smart_treasury.move   dual_treasury.move
-    liquidity_guard.move   delegation.move
-    tests/custody_tests.move  delegation_tests.move   (16 tests, all passing)
+  splash_upgrade_delay/ ← mainnet, IMMUTABLE. Holds core's UpgradeCap behind a 24h public notice.
+    upgrade_delay.move
+
+  splash_meter/         ← retired from the mainnet path in v2 (code and tests kept).
+  splash_custody/       ← retired from the mainnet path in v2 (code and tests kept).
 ```
+
+Every package builds and tests with Sui CLI `mainnet-v1.82.3` (framework
+`719fb296`); `sui::allowance` needs at least `v1.80.1`.
 
 **Why `liquidity_guard` sits in custody.** It exists to protect *pooled* funds,
 and pools only exist in custody. Keeping it in core also forced a DeepBook
@@ -151,27 +155,35 @@ Do not publish `splash_core` until every line is checked.
 
 ---
 
-## Upgrade policy — `splash_core` publishes IMMUTABLE
+## Upgrade policy — v2 (D11, 24 Oct 2026)
 
-The `UpgradeCap` is burned at publish. No upgrade path exists.
+**Superseded:** until v2, `splash_core` was to publish immutable, with its
+`UpgradeCap` burned. Decision D11 replaces that.
+[`docs/UPGRADE-POLICY.md`](docs/UPGRADE-POLICY.md) has the procedure and
+[`docs/v2/phase1-move-design.md`](docs/v2/phase1-move-design.md) the design.
 
-**Why.** A settlement contract whose logic *cannot* change is a stronger
-regulatory position than one under multisig: with multisig the question becomes
-"who controls the keys, and what stops them rewriting the contract?", and the
-answer is a custody procedure an auditor has to take on trust. Immutable makes
-the question disappear. The package split is what makes this affordable — core
-is six modules with no third-party dependencies, small enough to review
-exhaustively.
+- **`splash_core`: upgradeable, additive only.** The 2-of-3 governance
+  multisig upgrades it through `splash_upgrade_delay`. Every proposal is
+  announced 24 hours ahead, every business owner is alerted, and a proposal
+  lapses 7 days after its notice runs out. No existing function can change.
+- **`splash_upgrade_delay`: immutable.** It holds core's `UpgradeCap` for ever.
+- **`splash_spend`: immutable.** It is the only code that spends under a
+  business's app-bound allowances. Nothing in it can rotate a spender or let a
+  permit out (`npm run check:spend`).
+- **`splash_custody`, `splash_meter`: retired from the mainnet path.** The
+  code and tests stay. Allowances and address balances replace pooling and the
+  spend meter.
 
-**What this costs, stated plainly.** A bug found after publish cannot be
-patched. It requires a fresh publish and a re-bootstrap of every shared object,
-and the old package keeps running until clients are repointed. That is the
-trade, accepted deliberately. It raises the stakes on the independent review,
-which is why that gate above is not optional.
+**Why the change.** An immutable core could never gain what v2 needs later:
+a new asset, a new bridge adapter, a fix. Every fix would mean a fresh publish
+and a re-bootstrap that orphans every business's spending rules. Additive-only
+behind a public 24-hour delay keeps the property that matters: no existing
+behaviour can change. Additions are announced to every owner before they
+apply, and a business that disagrees can revoke its allowances first.
 
-The precedent is good: the current testnet package `0xec3b063e…` was published
-immutable on 2026-07-19 and the re-bootstrap path is exercised
-(`docs/KEY-CEREMONY-RUNBOOK.md`).
+**v2 core is a fresh publish,** on testnet and on mainnet. Its struct and event
+layouts differ from testnet package `0xae1fb78a…`, which no upgrade policy can
+change, so every package and object ID is new.
 
 ---
 

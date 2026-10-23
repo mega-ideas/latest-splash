@@ -161,6 +161,13 @@ new build refuses to install or start on the old runtime and environment.
    every scope (WS4): it watches the operator address, which signs in the
    stablecoin scope too. A 502 from it means the monitor could not look, and
    is an alert in itself.
+   Schedule `https://<domain>/api/cron/governance-alerts` every 15 minutes in
+   every scope too (v2): it tells every business owner when a core upgrade,
+   a governance owner change or a registry addition is announced, inside the
+   24-hour notice. It needs `SPLASH_UPGRADE_DELAY_PACKAGE_ID`,
+   `SPLASH_UPGRADE_WRAPPER_ID`, `SPLASH_CORE_PACKAGE_ID` (core's original
+   id) and `SPLASH_COMPLIANCE_CONFIG_ID`; without them, or when it cannot
+   read the chain, it answers 502, which is again an alert in itself.
 
 **Redeploys**: push to `main` → App Platform rebuilds, runs the pre-deploy
 migration job, then deploys. Deleted files disappear from the server because

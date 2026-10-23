@@ -30,6 +30,98 @@ The remaining four modules (`smart_treasury`, `payment_intent`, `audit_anchor`, 
 
 ---
 
+## v2 Phase 1 — business wallets, spending rules, a delayed upgrade — 2026-10-24
+
+Brief: `SPLASH_SUI_V2_PROMPT.md` §3. Design and its two reviews:
+`docs/v2/phase1-move-design.md`. Mainnet gate: `docs/mainnet-checks-2026-10.md`.
+
+### The money paths, after v2
+
+Exactly three paths move a business's funds to a third party.
+
+| Path | Function | Who authorises |
+|---|---|---|
+| The owners' multisig | `payment_intent::confirm_from_business_wallet`, `_balance`, `confirm_cross_chain_from_business_wallet` | The protocol: the business wallet signed the transaction |
+| Spending rules | `splash_spend::pay_intent`, `pay_intent_cross_chain` | An app-bound allowance from the business wallet, plus its `SpendPolicy` |
+| Legacy approvals | `payment_intent::confirm_with_approval` | **DEPRECATED.** It closes for an account once that account registers a wallet, and for everyone once `ComplianceConfig.legacy_enabled` is switched off. It honours the pause and the asset registry |
+
+The unbound path (`create_payment_intent`, `create`, `confirm_payment_intent`)
+is **not in v2 core**. It let any signer, in practice Splash's operator, pay a
+recipient from its own coin, and an additive upgrade policy could never remove
+it again.
+
+### What v2 enforces on chain
+
+- **Wallet registration.** Only the founder nominates a wallet. The wallet
+  registers itself: the transaction sender must equal the multisig address
+  recomputed in Move from its members, and every member must be an owner.
+  If one member can meet the threshold alone, the founder must have chosen
+  that and the wallet must acknowledge it (D1).
+- **Wallet rotation** takes two steps: the current wallet proposes, and the new
+  wallet confirms. `wallet_epoch` goes up, so spending rules made under the old
+  wallet stop paying, even after a rotation back to the same address.
+- **`splash_spend` is immutable.** Nothing in it can rotate a spender or let a
+  permit or a `Balance` escape (`npm run check:spend`, in CI).
+- **Every `SpendPolicy` mutation is signed by the business wallet.** The policy
+  lives outside core, so no core upgrade can reach it.
+- **Splash's KMS operator is an EXECUTOR.** It cannot open an intent, and it
+  pays only with an approval naming it: an owner's, or the maker's own
+  delegation for an amount the maker could have paid alone.
+- **One `ComplianceConfig`**, created by consuming a ticket minted once at
+  publish. A PTB cannot pick a laxer config.
+- **Registry additions** (assets, settlement apps, bridge adapters) need
+  `AdminCap` and on-chain proof that the sender is a quorum multisig. Each one
+  gives 24 hours' notice, with every owner alerted, and lapses after 7 days.
+  Removals are immediate. The last asset cannot be removed.
+- **The upgrade delay.** `splash_core` upgrades additive-only through
+  `splash_upgrade_delay`, which holds the `UpgradeCap`. An upgrade gives 24
+  hours' notice, must be authorised within 7 days of it, and the wrapper itself
+  is immutable.
+- **Idempotency.** A v2 intent's UID is derived from the business's own
+  payment reference, so a second intent for the same reference can never exist.
+- **Bridge obligations name their coin.** A cross-chain settlement cannot keep
+  the business's coin and burn another.
+
+### What a freeze does and does not do
+
+A freeze, whether by an owner or by compliance, stops every Splash path:
+intents, the wallet path, staff allowances and the legacy path. **It does not
+and cannot freeze the business's own wallet.** The business holds its keys
+(D1) and can always move its own funds directly. Copy, evidence exports and
+partner material must never describe a freeze as a funds freeze.
+
+### Accepted limits, stated plainly
+
+- **Address aliases.** `address_aliases` is on mainnet, and Move cannot see
+  whether a multisig has aliased itself to a single key. A wallet whose quorum
+  signs `0x2::address_alias` hands that key the wallet. The wallet transaction
+  builder refuses alias commands, and a watcher alerts if an alias object
+  appears for a wallet, the governance multisig or the operator (Phase 2).
+- **What an additive core upgrade can still do.** It could add a function that
+  writes an intent's fields, and so make a spender pay a verified recipient
+  twice, within caps. It cannot add a recipient, raise a limit or create an
+  allowance. This is why every proposal alerts every owner 24 hours ahead.
+- **Fixed windows.** Allowance rate limits are fixed windows, so a limit can
+  move twice its size across a window boundary.
+- **Split payments.** The second-approval threshold is per payment. The
+  backend flags payments to the same beneficiary that together exceed it in 24
+  hours.
+- **Bank payouts.** The chain proves the funds reached the partner deposit
+  address bound to a verified beneficiary. The partner then pays the bank
+  account in the instruction; Phase 2 recomputes the beneficiary commitment
+  from that instruction and refuses to send it if they differ.
+- **Partner deposit model.** Phase 0 check 6 is still "ask partner". Whether
+  partners use one deposit address per business must be confirmed before
+  mainnet.
+
+### Open for Sky
+
+- **The audit-anchor fee address.** The stablecoin lane's optional fee leg pays
+  `SPLASH_FEE_ADDRESS_MAINNET` in the same transaction as a payment. It is off
+  by default. Review item B1 rates any Splash-owned receiving address in a
+  payout transaction as Critical. The recommendation is to keep it off and
+  invoice the SaaS fee off chain.
+
 ## WS4 — operator custody, the code half — 2026-10-23
 
 **Scope**: the hot operator signer — how it is held, how much it may hold, and
