@@ -51,12 +51,42 @@ const ALLOWED = {
     requireAll: ['.remove('],
     forbid: ['.insert('],
   },
+  // v2 (D11). The three registries an addition to takes 24 hours' notice and
+  // the cold multisig. Taking something OFF one only stops money moving.
+  remove_registry_entry: {
+    why: 'removes an asset, settlement app or bridge adapter from a v2 registry',
+    requireAll: ['.remove(', 'E_LAST_ASSET'],
+    forbid: ['.insert(', 'push_back'],
+  },
+  cancel_registry_addition: {
+    why: 'withdraws an announced registry addition before it takes effect',
+    requireAll: ['pending_additions.remove('],
+    forbid: ['.insert(', 'push_back'],
+  },
+  disable_legacy: {
+    why: 'switches the deprecated per-person approval path off, for good',
+    requireAll: ['legacy_enabled = false'],
+    forbid: ['legacy_enabled = true'],
+  },
 };
 
 /** Loosening shapes no `&ComplianceCap` function may contain, whatever its name. */
 const NEVER = [
   { pattern: '.insert(', why: 'adding a DeepBook venue is a loosening — use admin_allow_pool' },
   { pattern: 'paused = false', why: 'resuming settlement is a loosening — use admin_set_paused' },
+  { pattern: 'legacy_enabled = true', why: 're-opening the legacy approval path is a loosening, and nothing may do it' },
+];
+
+/**
+ * Patterns no function in splash_core may contain, whatever cap it takes.
+ *
+ * `legacy_enabled` is one-way by design: once compliance or governance has
+ * declared migration complete, no key may re-open the deprecated per-person
+ * path. The initial `legacy_enabled: true` in `create`'s struct literal is not
+ * an assignment and does not match.
+ */
+const NOWHERE = [
+  { pattern: 'legacy_enabled = true', why: 'the legacy approval path can only ever be switched off' },
 ];
 
 function stripComments(source) {
@@ -135,6 +165,11 @@ for (const file of readdirSync(SOURCES).filter((f) => f.endsWith('.move'))) {
   }
 
   for (const fn of functions(source)) {
+    for (const { pattern, why } of NOWHERE) {
+      if (fn.body.includes(pattern)) {
+        failures.push(`${path}: \`${fn.name}\` contains \`${pattern}\` — ${why}.`);
+      }
+    }
     if (!/&\s*ComplianceCap\b/.test(fn.params)) continue;
 
     // Pure reads are exempt, structurally rather than by name: a function with
