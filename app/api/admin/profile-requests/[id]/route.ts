@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 
 import { getAdminSession } from '@/lib/server/admin-auth';
 import { readJsonBody } from '@/lib/server/http';
-import { decideProfileRequest } from '@/lib/server/customer-profile';
+import { decideProfileRequestForStaff } from '@/lib/server/customer-profile';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,7 +23,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   }
 
   try {
-    const decided = decideProfileRequest(id, {
+    const decided = decideProfileRequestForStaff(id, {
       action,
       actor: session.email,
       reason: typeof body.reason === 'string' ? body.reason : undefined,

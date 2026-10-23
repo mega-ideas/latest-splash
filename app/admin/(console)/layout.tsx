@@ -2,7 +2,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { Activity, ClipboardCheck, Headphones, KeyRound, LayoutDashboard, ListChecks, Settings2, UserRoundCheck } from 'lucide-react';
+import { Activity, ClipboardCheck, Database, Headphones, KeyRound, LayoutDashboard, ListChecks, Settings2, UserRoundCheck } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import AdminLogoutButton from '@/components/admin/AdminLogoutButton';
@@ -13,6 +13,7 @@ import { getAdminSession } from '@/lib/server/admin-auth';
 const navItems = [
   { label: 'Overview', href: '/admin', icon: LayoutDashboard },
   { label: 'Transactions', href: '/admin/transactions', icon: Activity },
+  { label: 'Audit batches', href: '/admin/audit-batches', icon: Database },
   { label: 'KYB Review', href: '/admin/kyb', icon: ClipboardCheck },
   { label: 'Profile requests', href: '/admin/profile-requests', icon: UserRoundCheck },
   { label: 'Support', href: '/admin/support', icon: Headphones },

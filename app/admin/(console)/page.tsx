@@ -5,7 +5,7 @@ import { AlertTriangle, CheckCircle2, ClipboardCheck, Headphones, ShieldCheck, W
 
 import { adminConsolePath } from '@/lib/admin-routing';
 import { listKybCasesForStaff } from '@/lib/server/kyb';
-import { listSupportTickets } from '@/lib/server/support';
+import { listSupportTicketsForStaff } from '@/lib/server/support';
 import { getOperatorWalletInfo } from '@/lib/server/sui-settlement';
 
 export const dynamic = 'force-dynamic';
@@ -14,7 +14,7 @@ export default async function AdminOverviewPage() {
   const headerStore = await headers();
   const hostname = headerStore.get('host');
   const kybCases = await listKybCasesForStaff();
-  const tickets = listSupportTickets();
+  const tickets = listSupportTicketsForStaff();
   const wallet = await getOperatorWalletInfo().catch(() => null);
   const pendingKyb = kybCases.filter((item) => item.state === 'SUBMITTED' || item.state === 'IN_REVIEW' || item.state === 'NEEDS_INFORMATION');
   const openTickets = tickets.filter((ticket) => ticket.status === 'OPEN' || ticket.status === 'IN_REVIEW');
