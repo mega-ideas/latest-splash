@@ -63,34 +63,47 @@ const FORBIDDEN = [
 
 /* ── 1. The meta-test ─────────────────────────────────────────────────── */
 
-test('no event struct in splash_core carries a forbidden field: what is emitted freezes at the immutable publish', async () => {
-  const dir = new URL('move/splash_core/sources/', root);
-  const files = (await readdir(dir)).filter((f) => f.endsWith('.move')).sort();
-  assert.ok(files.length >= 8, 'the package has its modules');
-
+test('no event struct in splash_core, splash_spend or splash_upgrade_delay carries a forbidden field: what is emitted freezes at publish', async () => {
+  // v2: splash_spend and splash_upgrade_delay publish immutable, so their
+  // events freeze too and are held to the same rule.
+  const packages = ['move/splash_core/sources/', 'move/splash_spend/sources/', 'move/splash_upgrade_delay/sources/'];
   const violations = [];
   let events = 0;
-  for (const file of files) {
-    const text = await readFile(new URL(file, dir), 'utf8');
-    for (const { name, fields } of eventStructs(text)) {
-      events += 1;
-      for (const field of fields) {
-        if (FORBIDDEN.includes(field)) violations.push(`${file}::${name}.${field}`);
+  let modules = 0;
+  for (const pkg of packages) {
+    const dir = new URL(pkg, root);
+    const files = (await readdir(dir)).filter((f) => f.endsWith('.move')).sort();
+    modules += files.length;
+    for (const file of files) {
+      const text = await readFile(new URL(file, dir), 'utf8');
+      for (const { name, fields } of eventStructs(text)) {
+        events += 1;
+        for (const field of fields) {
+          if (FORBIDDEN.includes(field)) violations.push(`${pkg}${file}::${name}.${field}`);
+        }
       }
     }
   }
-  assert.ok(events >= 20, `the scan found the package's events (${events})`);
+  assert.ok(modules >= 12, `the scan found every package's modules (${modules})`);
+  assert.ok(events >= 40, `the scan found the packages' events (${events})`);
   assert.deepEqual(violations, [], `events carrying business metadata:\n  ${violations.join('\n  ')}`);
 });
 
-test('the payment lifecycle events carry intent_id, commitment, status and timestamp_ms, and nothing else', async () => {
+test('the payment lifecycle events carry the commitment and what an indexer needs, and nothing about the payment', async () => {
   const intent = eventStructs(await source('move/splash_core/sources/payment_intent.move'));
   const byName = Object.fromEntries(intent.map((e) => [e.name, e.fields]));
-  const SHAPE = ['intent_id', 'commitment', 'status', 'timestamp_ms'];
-  assert.deepEqual(byName.IntentCreated, SHAPE, 'IntentCreated');
-  assert.deepEqual(byName.IntentConfirmed, SHAPE, 'IntentConfirmed');
-  assert.deepEqual(byName.IntentCanceled, SHAPE, 'IntentCanceled: the reason is the status');
+  // v2 (brief §3.1): the schema freezes at publish, so it carries what an
+  // indexer needs once `delete_finalized` has removed the intent: the rail
+  // commitment, the settlement asset's type name and the kind. The asset type
+  // is the one deliberate exception to WS5's "no currency" rule; the brief
+  // requires it, and it is the coin type, which the base-layer transfer
+  // already shows. Still no amount, no address, no account.
+  const CORE = ['intent_id', 'commitment', 'rail_commitment', 'settlement_asset', 'kind', 'status'];
+  assert.deepEqual(byName.IntentCreated, [...CORE, 'expires_at_ms', 'timestamp_ms'], 'IntentCreated');
+  assert.deepEqual(byName.IntentConfirmed, [...CORE, 'path', 'timestamp_ms'], 'IntentConfirmed: path is which settlement path released it');
+  assert.deepEqual(byName.IntentCanceled, [...CORE, 'timestamp_ms'], 'IntentCanceled: the reason is the status');
 
+  const SHAPE = ['intent_id', 'commitment', 'status', 'timestamp_ms'];
   const anchor = eventStructs(await source('move/splash_core/sources/audit_anchor.move'));
   const anchored = anchor.find((e) => e.name === 'SettlementAnchored');
   assert.deepEqual(
@@ -338,10 +351,52 @@ test('docs/commitments.md carries the field order and test vectors the library r
   assert.ok(block, 'a fenced json block with "vectors"');
   const { vectors } = JSON.parse(block[1]);
   assert.ok(vectors.length >= 3, 'at least three vectors');
-  const { paymentCommitment, receiptCommitment, fromHex, toHex } = await lib();
+  const c = await lib();
+  // Every family the library knows has a vector, and every vector's family is
+  // one the library knows: a tag nobody can reproduce is not a specification.
+  const byTag = {
+    'splash:payment:v1': [c.paymentCommitment, c.encodePaymentPayload],
+    'splash:receipt:v1': [c.receiptCommitment, c.encodeReceiptPayload],
+    'splash:rail:v1': [c.railCommitment, c.encodeRailPayload],
+    'splash:beneficiary:v1': [c.beneficiaryCommitment, c.encodeBeneficiaryPayload],
+    'splash:payment-ref:v1': [c.paymentRefCommitment, c.encodePaymentRefPayload],
+  };
+  assert.deepEqual(Object.keys(byTag).sort(), Object.values(c.DOMAIN_TAGS).sort(), 'one reproducer per domain tag');
+  const covered = new Set();
   for (const v of vectors) {
-    const salt = fromHex(v.saltHex);
-    const got = v.tag === 'splash:receipt:v1' ? receiptCommitment(v.payload, salt) : paymentCommitment(v.payload, salt);
-    assert.equal(toHex(got), v.commitmentHex, `${v.name} reproduces`);
+    const family = byTag[v.tag];
+    assert.ok(family, `${v.name}: unknown tag ${v.tag}`);
+    covered.add(v.tag);
+    const [commit, encode] = family;
+    if (v.payloadBcsHex) assert.equal(c.toHex(encode(v.payload)), v.payloadBcsHex, `${v.name}: field order`);
+    assert.equal(c.toHex(commit(v.payload, c.fromHex(v.saltHex))), v.commitmentHex, `${v.name} reproduces`);
   }
+  assert.deepEqual([...covered].sort(), Object.keys(byTag).sort(), 'every tag has at least one vector');
+  for (const tag of ['splash:rail:v1', 'splash:beneficiary:v1', 'splash:payment-ref:v1']) {
+    assert.match(doc, new RegExp(tag.replace(/[-:]/g, (m) => `\\${m}`)), `the doc specifies ${tag}`);
+  }
+});
+
+test('no domain tag is a prefix of another, so two families can never collide', async () => {
+  const { DOMAIN_TAGS } = await lib();
+  const tags = Object.values(DOMAIN_TAGS);
+  for (const a of tags) for (const b of tags) if (a !== b) assert.ok(!b.startsWith(a), `${a} is a prefix of ${b}`);
+});
+
+test('the stable v2 commitments are stable: same record and secret, same bytes; another secret, other bytes', async () => {
+  const c = await lib();
+  const record = { partner: 'pdax', country: 'PH', bankCode: 'BDO', accountNumber: '001234567890', holderName: 'Dela Cruz Trading Corp' };
+  const secret = new Uint8Array(32).fill(0x33);
+  assert.equal(c.toHex(c.beneficiaryCommitment(record, secret)), c.toHex(c.beneficiaryCommitment({ ...record }, secret)));
+  assert.notEqual(c.toHex(c.beneficiaryCommitment(record, secret)), c.toHex(c.beneficiaryCommitment(record, new Uint8Array(32).fill(0x34))));
+  assert.notEqual(
+    c.toHex(c.beneficiaryCommitment(record, secret)),
+    c.toHex(c.beneficiaryCommitment({ ...record, accountNumber: '001234567891' }, secret)),
+    'one digit of the account number changes the commitment',
+  );
+  const ref = { businessAccountId: '0x' + 'c0'.repeat(32), paymentId: 'INV-2026-0042' };
+  const bizSecret = new Uint8Array(32).fill(0x44);
+  assert.equal(c.toHex(c.paymentRefCommitment(ref, bizSecret)), c.toHex(c.paymentRefCommitment({ ...ref }, bizSecret)), 'a retry derives the same payment_ref');
+  assert.throws(() => c.beneficiaryCommitment({ ...record, holderName: '' }, secret), /holderName/);
+  assert.throws(() => c.paymentRefCommitment({ ...ref, paymentId: '' }, bizSecret), /payment id/);
 });
