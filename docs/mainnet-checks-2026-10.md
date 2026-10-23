@@ -4,12 +4,13 @@ Prompt: `SPLASH_SUI_V2_PROMPT.md` §2. Base: `main` @ `d39d428`.
 Mainnet reads: 24 Oct 2026. Testnet transactions: 23 Oct 2026 19:26–19:46 UTC
 (24 Oct 03:26–03:46 MYT).
 
-**Verdict: passed, with one item open for Sky.** Every check is proven on chain
-except one requirement as the brief words it: check 3 asks for "a 2-of-3 of real
-passkeys from `lib/wallet/sui-signers.ts`". The proof used **software** WebAuthn
+**Verdict: passed.** Every check is proven on chain. One requirement, as the
+brief words it, was met with software passkeys, and Sky accepted that for the
+gate on 24 Oct 2026. Check 3 asks for "a 2-of-3 of real passkeys from
+`lib/wallet/sui-signers.ts`". The proof used **software** WebAuthn
 passkeys, and `sui-signers.ts` has no multisig code yet. The protocol question
 (passkey members in a Sui multisig, signing allowances) is answered on testnet.
-Whether that is enough to start Phase 1 is Sky's decision, recorded below.
+The hardware 2-of-3 is the first test of Phase 2.1.
 
 Mainnet was only read. Every transaction ran on **testnet**, signed by a
 throwaway testnet key and three software passkeys made for this proof. No
@@ -19,7 +20,7 @@ Splash key was used, and nothing was published to mainnet.
 |---|---|---|
 | 1 | `0x2::allowance` on mainnet | **Pass.** All nine functions present; `new` and `propose_for_app` are private `entry` |
 | 2 | Address balances with USDC | **Pass.** `balance::send_funds`, `coin::send_funds`, `balance::redeem_funds`, `coin::redeem_funds` and both withdrawal inputs run with USDC on testnet; same bytecode as mainnet |
-| 3 | Passkeys inside a Sui multisig | **Pass at the protocol level; open for Sky.** 2-of-3 passkey multisig signed `new`, `propose_for_app` + accept, withdrawals and `revoke`; one passkey alone is refused. Software passkeys, not hardware |
+| 3 | Passkeys inside a Sui multisig | **Pass** (software passkeys, accepted by Sky). 2-of-3 passkey multisig signed `new`, `propose_for_app` + accept, withdrawals and `revoke`; one passkey alone is refused |
 | 4 | `@mysten/sui` and the Sui CLI | **Pass.** SDK locked at 2.31.3; CLI `mainnet-v1.82.3` installed and the existing Move packages pass on it (see §4) |
 | 5 | CCTP V2 on Sui | **Pass.** Domain 8; all 16 package and state IDs resolve on chain. Fast Transfer *from* Sui: N/A |
 | 6 | Partner USDC deposit networks | **Ask partner** (allowed by the brief) |
@@ -194,7 +195,7 @@ digest):
 | 750,001 more (one unit over) | `EExceedsLifetimeCap`: the cap is cumulative (dry run) |
 | spending from an allowance by a key that is not its spender | refused before execution: `Transaction sender is not the spender of allowance …` |
 
-**The open item: software passkeys.** The three passkeys are a minimal
+**Limit: software passkeys.** The three passkeys are a minimal
 software stand-in for a WebAuthn authenticator. They are P-256 keys that return
 a DER public key on create, and authenticator data, client data JSON and a DER
 signature on get, used through the SDK's own `PasskeyKeypair`. Sui's verifier
@@ -215,10 +216,10 @@ has no `MultiSigPublicKey` or signature combining. So "a 2-of-3 of real
 passkeys from `sui-signers.ts`" needs new code first. That code is Phase 2.1
 (business wallet creation).
 
-**Decision for Sky:** accept the software-passkey proof for this gate and run
-the hardware 2-of-3 as the first test of Phase 2.1, or ask for a hardware run
-now. A hardware run needs three people (or three authenticators) and the
-multisig code; testnet gas is no longer a blocker.
+**Decided by Sky, 24 Oct 2026:** the software-passkey proof is accepted for
+this gate. The hardware 2-of-3, through `sui-signers.ts`, is the first test of
+Phase 2.1 (business wallet creation). It needs three people (or three
+authenticators) and the multisig code.
 
 The probe package (`experiments/v2-phase0/allowance_probe`, published at
 `0xa21e6a5c70d2069ce13b57ace0f69cdf273550312ee306a9729f1010d8a4e82c`, digest
@@ -390,8 +391,7 @@ proof:
     `u256` in minor units (USDC has 6 decimals).
 11. **Gasless withdrawals** of USDC by the multisig worked on testnet (§2).
 
-## Phase 1 can start once Sky decides the open item
+## Phase 1 can start
 
-Everything Phase 1's Move work depends on is proven on chain. The one open
-item, hardware passkeys through `sui-signers.ts`, belongs to Phase 2.1 code and
-does not change any Move design.
+Everything Phase 1's Move work depends on is proven on chain. Hardware passkeys
+through `sui-signers.ts` are Phase 2.1 work and do not change any Move design.
