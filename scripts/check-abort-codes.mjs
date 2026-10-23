@@ -24,7 +24,13 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-const PACKAGES = ['move/splash_core/sources', 'move/splash_custody/sources', 'move/splash_meter/sources'];
+const PACKAGES = [
+  'move/splash_core/sources',
+  'move/splash_custody/sources',
+  'move/splash_meter/sources',
+  'move/splash_spend/sources',
+  'move/splash_upgrade_delay/sources',
+];
 const TABLE = 'lib/server/sui-settlement.ts';
 
 const ABORT_CONST = /const\s+(E_[A-Z0-9_]+)\s*:\s*u64\s*=\s*([0-9_]+)\s*;/g;

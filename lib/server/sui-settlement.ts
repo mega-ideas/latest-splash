@@ -270,6 +270,9 @@ function resolveFeeBps(input: { feeBps?: number; targetCurrency?: string }): num
  *   600–699 dual_treasury
  *   700–799 smart_treasury
  *   800–899 receipt_v2
+ *   1000–1099 splash_spend
+ *   1100–1199 splash_upgrade_delay
+ *   1200–1249 multisig
  */
 const ABORT_CODES: Record<number, string> = {
   // ── business_account ──────────────────────────────────────────────────────
@@ -341,9 +344,9 @@ const ABORT_CODES: Record<number, string> = {
   406: 'E_INVALID_RECIPIENT — payment_intent recipient is the zero address.',
   407: 'E_EMPTY_TARGET_CURRENCY — payment_intent target currency is empty.',
   408: 'E_INVALID_FX_RATE — payment_intent FX rate must be greater than zero.',
-  409: 'E_EMPTY_BENEFICIARY_REF — payment_intent::create called without a verified counterparty reference hash.',
-  410: 'E_EMPTY_CURRENCY — payment_intent::create called without a currency tag.',
-  411: 'E_EMPTY_CORRIDOR — payment_intent::create called without a corridor tag.',
+  409: 'E_EMPTY_BENEFICIARY_REF (v1 testnet package only) — payment_intent::create called without a verified counterparty reference hash.',
+  410: 'E_EMPTY_CURRENCY (v1 testnet package only) — payment_intent::create called without a currency tag.',
+  411: 'E_EMPTY_CORRIDOR (v1 testnet package only) — payment_intent::create called without a corridor tag.',
   413: 'E_UNAUTHORIZED_RECEIPT_CONSUMER — a module other than audit_anchor tried to unpack a SettleReceipt. Only the anchoring path can construct the witness, which is what makes “every settlement is anchored” a type-system guarantee.',
   414: 'E_WRONG_SETTLEMENT_ASSET — the coin type offered does not match the asset the intent was opened in. The intent binds its settlement asset at creation; check SPLASH_SETTLEMENT_COIN_TYPE and how the payment coin is sourced.',
   412: 'E_STILL_PENDING — payment_intent::delete_finalized called on a pending intent; confirm or cancel it first.',
@@ -402,7 +405,7 @@ const ABORT_CODES: Record<number, string> = {
   43: 'E_BELOW_MINIMUM — the payout is under the 99 USD platform floor. Below that the fixed costs of settling, anchoring and screening exceed the payment, and the partners’ own corridor minimums start there.',
   44: 'E_UNKNOWN_TIER — a tier other than 1, 2 or 3, or a limit-increase request that is not actually an increase (tier numbers descend as limits rise).',
 
-  415: 'E_APPROVAL_REQUIRED — this intent is bound to a business account, so it settles only through confirm_with_approval. confirm_payment_intent would bypass the approver, the freeze flags and the 24h ceiling.',
+  415: 'E_APPROVAL_REQUIRED (v1 testnet package only) — this intent is bound to a business account, so it settles only through confirm_with_approval. confirm_payment_intent would bypass the approver, the freeze flags and the 24h ceiling.',
   416: 'E_NOT_ACCOUNT_BOUND — confirm_with_approval or approve_payout called on an intent that is not bound to any business account.',
   417: 'E_WRONG_BUSINESS_ACCOUNT — the account passed is not the account the intent was opened against.',
   418: 'E_NOT_A_MEMBER — the signer is neither an owner nor an approver of the account, so cannot open an intent in its name.',
@@ -428,6 +431,113 @@ const ABORT_CODES: Record<number, string> = {
   802: 'E_RECEIPT_ZERO_AMOUNT — receipt_v2::create_receipt called with amount_usd = 0.',
   803: 'E_RECEIPT_INVALID_RECIPIENT — receipt_v2::create_receipt called with recipient = 0x0.',
   804: 'E_BAD_COMMITMENT — receipt_v2::create_receipt called with a commitment that is not 32 bytes.',
+
+  // ── business_account: the v2 business wallet ─────────────────────────────
+  45: 'E_WALLET_ALREADY_REGISTERED — this account already has a business wallet. A wallet changes only by rotation (rotate_wallet, then confirm_wallet_rotation from the new wallet).',
+  46: 'E_WALLET_NOT_NOMINATED — the wallet registering is not the one an owner nominated for this account. An owner calls nominate_wallet first.',
+  47: 'E_WALLET_MISMATCH — the sender is not the multisig address these members, weights and threshold derive. Pass the members exactly as the wallet was built, in the same order.',
+  48: 'E_SINGLE_SIGNER_NOT_ACKNOWLEDGED — one member of this wallet can sign alone. That is allowed only when the wallet says so: pass single_signer_ack = true.',
+  49: 'E_NO_WALLET — this account has no business wallet registered yet.',
+  50: 'E_NOT_THE_WALLET — only the account business wallet (the owners multisig) can do this.',
+  51: 'E_SAME_WALLET — the rotation names the wallet that is already current.',
+  52: 'E_NO_PENDING_ROTATION — there is no wallet rotation waiting to be confirmed or cancelled.',
+  53: 'E_NOT_THE_PENDING_WALLET — only the new wallet named in the rotation can confirm it.',
+  54: 'E_ROTATION_PENDING — a wallet rotation is already waiting. Cancel it before proposing another.',
+  55: 'E_NOT_THE_FOUNDER — only the founding owner nominates the account business wallet.',
+  56: 'E_NOMINATION_MISMATCH — the wallet registering is not the one the founder nominated, or its single-signer status is not what the founder chose.',
+  57: 'E_SIGNER_NOT_AN_OWNER — a wallet member is not an owner of this account. Add the person as an owner first; the signers are the business own people.',
+  58: 'E_WALLET_MUST_UNFREEZE — this account has a business wallet, so only the wallet (the owners quorum) can lift an owner freeze.',
+  59: 'E_OWNER_IS_A_SIGNER — this owner is a member of the business wallet, or of the wallet a pending rotation names. Rotate them out of the wallet first, then remove them as an owner.',
+
+  // ── compliance_config: v2 registries (24-hour additions) ─────────────────
+  357: 'E_ASSET_NOT_ACCEPTED — the payment asset is not on the accepted-asset registry. Native USDC is the one payment asset; anything else is refused, and a removed asset stops intents already open.',
+  358: 'E_NOT_A_SETTLEMENT_APP — the app tried to open or settle an intent but is not a registered settlement app. Registration takes 24 hours public notice (propose_addition, then activate_addition).',
+  359: 'E_NOT_A_BRIDGE_ADAPTER — only a registered bridge adapter can discharge a cross-chain obligation, and none is registered yet. Cross-chain payments settle once the CCTP V2 adapter is registered.',
+  360: 'E_UNKNOWN_REGISTRY — registry kind must be 1 (asset), 2 (settlement app) or 3 (bridge adapter).',
+  361: 'E_ALREADY_REGISTERED — that type is already on this registry.',
+  362: 'E_ALREADY_PROPOSED — that addition is already waiting out its 24-hour notice.',
+  363: 'E_NOT_PROPOSED — there is no such pending addition to activate or cancel.',
+  364: 'E_NOTICE_NOT_RUN — the 24-hour notice for this addition has not run yet. Read pending_additions for its eta.',
+  365: 'E_NOT_REGISTERED — that type is not on this registry, so there is nothing to remove.',
+  366: 'E_REGISTRY_FULL — the registry, or the list of pending additions, is at its limit of eight.',
+  367: 'E_ADDITION_LAPSED — the addition window closed seven days after its 24-hour notice ran. Propose it again, so owners are alerted again.',
+  368: 'E_LAST_ASSET — refused to remove the last accepted asset, which would stop every payment for at least 24 hours. Use pause to halt settlement.',
+  369: 'E_LEGACY_DISABLED — the legacy per-person approval path has been switched off for good. Pay from the business wallet or under a spending rule.',
+
+  // ── payment_intent: v2 ───────────────────────────────────────────────────
+  421: 'E_BAD_EXPIRY — expires_at must be in the future and no more than 30 days away.',
+  422: 'E_INVALID_KIND — kind must be 1 (bank payout), 2 (Splash business), 3 (wallet) or 4 (cross-chain wallet), and a path that pays an address on Sui does not take kind 4.',
+  423: 'E_BAD_DOMAIN — the destination domain does not fit the kind: a payment on Sui lands on CCTP domain 8, a cross-chain one on any other domain.',
+  424: 'E_BAD_RAIL_COMMITMENT — the rail commitment is not 32 bytes. It is blake2b256(splash:rail:v1 || bcs(payload) || salt); see docs/commitments.md.',
+  425: 'E_CROSS_CHAIN_ONLY — this is a cross-chain intent. It settles only through a _cross_chain path, which hands the coin to a bridge adapter.',
+  426: 'E_NOT_CROSS_CHAIN — a _cross_chain path was given an intent that lands on Sui. Use the matching path that pays the recipient address.',
+  427: 'E_EXACT_AMOUNT_REQUIRED — funds drawn under a spending rule must equal the intent amount exactly.',
+  428: 'E_BENEFICIARY_REQUIRED — a bank payout names its beneficiary by a 32-byte commitment (splash:beneficiary:v1); other kinds name none.',
+  429: 'E_BAD_PAYMENT_REF — the payment reference must be a 32-byte commitment over the business own invoice or payment id.',
+  430: 'E_SETTLE_BY_PASSED — the quote this transaction was signed against has lapsed. Get a fresh quote and sign again.',
+  431: 'E_LEGACY_CLOSED — this account has a business wallet, so the legacy approval path is closed for it. Pay from the wallet or under a spending rule.',
+  432: 'E_WRONG_BRIDGE_COIN — the coin handed to the bridge adapter is not the coin the settlement released, or not its type or amount.',
+  433: 'E_BAD_BRIDGE_FEE — the cross-chain fee ceiling would take the whole payment.',
+
+  // ── splash_spend (spending rules) ────────────────────────────────────────
+  1000: 'E_WRONG_FUNDER — the allowance is not funded by this spending rule wallet.',
+  1001: 'E_NOT_A_SPENDER — the payer is not a spender under this spending rule, or was removed from it.',
+  1002: 'E_WRONG_ACCOUNT — the spending rule, the account and the intent do not all belong to the same business.',
+  1003: 'E_RECIPIENT_NOT_VERIFIED — the destination is not on this spending rule verified list. The owners verify it first.',
+  1004: 'E_BENEFICIARY_NOT_VERIFIED — the bank beneficiary is not verified for this partner deposit address.',
+  1005: 'E_OVER_PER_PAYMENT_MAX — the payment is above the spending rule per-payment maximum, or the spender own.',
+  1006: 'E_APPROVAL_REQUIRED — this payment needs an approval and carries none: it is above the second-approval threshold, or the payer is the scheduled-payment operator.',
+  1007: 'E_APPROVAL_MISMATCH — the approval is for a different rule, intent, amount or payer.',
+  1008: 'E_SELF_APPROVAL — the approver opened this payment or is paying it. A second approval needs a second person.',
+  1009: 'E_NOT_AN_OWNER — the approver is not a member of the business wallet.',
+  1010: 'E_APPROVAL_EXPIRED — the approval expired with its intent.',
+  1011: 'E_STALE_POLICY — the business wallet has changed since this spending rule was made. The new wallet sets up its rules again.',
+  1012: 'E_PROPOSAL_FUNDER — the allowance proposal is funded by someone other than the spending rule wallet.',
+  1013: 'E_PROPOSAL_SPENDER — the allowance proposal names a spender who is not on the spending rule. Add them first.',
+  1014: 'E_NOT_PAYABLE — the intent is no longer pending, or has expired.',
+  1015: 'E_NOT_STAFF — only staff open payments. The scheduled-payment operator only pays what someone else opened and approved.',
+  1016: 'E_MAKER_NOT_A_SPENDER — the person who opened this payment is no longer a spender, so it cannot be paid under the rule.',
+  1017: 'E_WRONG_ASSET — the coin is not the asset this spending rule pays in (USDC).',
+  1018: 'E_OWNER_APPROVAL_REQUIRED — above the second-approval threshold, the approval must come from an owner, not a delegation.',
+  1019: 'E_NOT_THE_MAKER — only the person who opened a payment can hand its execution to the operator.',
+  1020: 'E_NOT_AN_EXECUTOR — execution can be handed only to the scheduled-payment operator on the rule.',
+  1021: 'E_STALE_APPROVAL — the account authority changed (a freeze, a membership or wallet change) after this approval was given. Approve again.',
+  1022: 'E_WRONG_PAY_PATH — a cross-chain intent is paid with pay_intent_cross_chain and only it; any other with pay_intent.',
+  1023: 'E_ALLOWANCE_NOT_FOR_POLICY — this allowance was not issued for this spending rule. Its name must be the rule allowance_name (splash-policy: and the rule id); an allowance from an earlier wallet never pays under a later rule.',
+  1050: 'E_NOT_THE_WALLET — only the business wallet that made this spending rule can change it.',
+  1051: 'E_WALLET_MISMATCH — the members do not derive the sender, or the sender is not the account registered business wallet.',
+  1052: 'E_TOO_MANY_SPENDERS — this spending rule is at its limit of 64 spenders.',
+  1053: 'E_ALREADY_A_SPENDER — that address is already a spender on this rule. Remove it first to change its role or limit.',
+  1054: 'E_NOT_A_SPENDER — that address is not a spender on this rule.',
+  1055: 'E_INVALID_ADDRESS — zero, or the business wallet itself, which pays through its own path.',
+  1056: 'E_ALREADY_VERIFIED — that destination or beneficiary is already verified.',
+  1057: 'E_NOT_VERIFIED — that destination or beneficiary is not on the list.',
+  1058: 'E_BAD_BENEFICIARY — a beneficiary is named by its 32-byte commitment (splash:beneficiary:v1).',
+  1059: 'E_BAD_LIMIT — a per-payment maximum of zero would refuse every payment.',
+  1060: 'E_UNKNOWN_ROLE — a spender role is 1 (staff) or 2 (scheduled-payment operator).',
+
+  // ── upgrade_delay (splash_upgrade_delay, the 24-hour upgrade notice) ─────
+  1100: 'E_BAD_DIGEST — upgrade_delay::propose was given a digest that is not 32 bytes. Pass the digest the build prints for the new bytecode.',
+  1101: 'E_ALREADY_PROPOSED — an upgrade is already announced. Cancel it first; every proposal owners are alerted to gets its own full 24 hours.',
+  1102: 'E_NOTHING_PROPOSED — upgrade_delay authorize or cancel with no upgrade announced. Announce it with propose and wait 24 hours.',
+  1103: 'E_DIGEST_MISMATCH — the digest being authorised is not the one announced to owners. Only the announced bytecode can run.',
+  1104: 'E_TOO_EARLY — the 24-hour notice has not run yet. Read pending_eta_ms and try again after it.',
+  1105: 'E_INVALID_OWNER — the new governance owner would be a multisig one member can sign for alone. The upgrade cap moves only to a real quorum.',
+  1107: 'E_PROPOSAL_LAPSED — the proposal window closed seven days after its 24-hour notice ran. Propose it again, so owners are alerted again.',
+  1108: 'E_CAP_ALREADY_USED — this upgrade cap was already used for an upgrade outside the delay wrapper, so the wrapper cannot vouch for the package history. Wrap a cap at version 1.',
+  1106: 'E_UPGRADE_IN_PROGRESS — the upgrade cap is between authorise and commit. Finish the upgrade in the same transaction.',
+
+  // ── multisig (splash_core, business wallet address derivation) ────────────
+  1200: 'E_BAD_MEMBER_COUNT — a business wallet needs between 1 and 10 members, the Sui multisig limit.',
+  1201: 'E_LENGTH_MISMATCH — the wallet registration passed a different number of weights and keys.',
+  1202: 'E_ZERO_WEIGHT — a wallet member has weight zero, which Sui refuses in a multisig.',
+  1203: 'E_ZERO_THRESHOLD — the wallet threshold is zero, which Sui refuses in a multisig.',
+  1204: 'E_UNREACHABLE_THRESHOLD — the member weights cannot add up to the threshold, so no quorum could ever sign for this wallet.',
+  1205: 'E_DUPLICATE_MEMBER — the same key appears twice in the wallet, which Sui refuses in a multisig.',
+  1206: 'E_UNKNOWN_SCHEME — a wallet key does not start with a scheme flag Sui accepts in a multisig (Ed25519, Secp256k1, Secp256r1, zkLogin or passkey).',
+  1207: 'E_BAD_KEY_LENGTH — a wallet key has the wrong length for its scheme. Pass flag || public key, as publicKey.toSuiBytes() returns it; zkLogin keys need the padded 32-byte address seed.',
+  1208: 'E_NOT_THIS_MULTISIG — the sender is not the multisig these members derive.',
+  1209: 'E_NOT_A_QUORUM — this multisig lets one member sign alone, so it cannot act for governance.',
 };
 
 /** The modules ABORT_CODES actually describes. Anything else is a dependency. */
@@ -441,6 +551,10 @@ const OUR_MODULES = new Set([
   'dual_treasury',
   'smart_treasury',
   'receipt_v2',
+  'multisig',
+  'upgrade_delay',
+  'splash_spend',
+  'spend_policy',
 ]);
 
 /**
