@@ -1,6 +1,6 @@
 'use client';
 
-import { AlertTriangle, CheckCircle2, ExternalLink, PenLine, Send, ShieldCheck, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, PenLine, Send, ShieldCheck, XCircle } from 'lucide-react';
 
 import { buildActionCardModel, type ActionCardProposal } from '@/lib/agent/action-card';
 
@@ -172,13 +172,11 @@ export default function ActionCard({ proposal, readOnly = false }: ActionCardPro
       <div className="flex flex-col gap-3 border-t border-[#326273]/10 bg-[#F6F0ED]/70 p-4 md:flex-row md:items-center md:justify-between">
         <details className="group min-w-0 text-sm">
           <summary className="cursor-pointer font-bold text-[#326273]">Reasoning trace</summary>
-          <a
-            href={`/api/walrus/${encodeURIComponent(proposal.explain.reasoningTraceRef)}`}
-            className="mt-2 inline-flex max-w-full items-center gap-1 break-all font-mono text-[13px] font-medium text-[#326273]/90"
-          >
+          {/* A reference, not a blob id: the trace is written into the sealed
+              settlement evidence, so there is nothing at /api/walrus to open. */}
+          <span className="mt-2 inline-flex max-w-full select-all break-all font-mono text-[13px] font-medium text-[#326273]/90">
             {proposal.explain.reasoningTraceRef}
-            <ExternalLink className="h-3.5 w-3.5 shrink-0" />
-          </a>
+          </span>
         </details>
 
         {readOnly ? (

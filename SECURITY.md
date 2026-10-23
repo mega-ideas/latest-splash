@@ -86,6 +86,129 @@ AWS or a fullnode.
 
 ---
 
+## WS8 — every store in Postgres — 2026-10-23
+
+**Scope**: the stores that still kept their records in a `Map` on
+`globalThis`. On serverless each instance has its own copy, so state differs
+between instances and a cold start drops it: a deposit webhook answered by
+another instance found no funding session, a staff console found no ticket a
+customer had just raised, and a reconciliation summed only one instance's
+legs. Every one of them now reads and writes Postgres; the in-process map is
+kept only as the fallback when `DATABASE_URL` is unset (`npm run dev` without
+a database), and each store warns once when it falls back. Tests drive a
+migrated PGlite behind the app's own `getDb()` and simulate a cold start by
+dropping every `globalThis` store and evaluating the module again
+(`tests/helpers/store-db.mjs`), all in `npm run test:db`.
+
+| Slice | Tables (migration) | What the database now enforces | Tests |
+|---|---|---|---|
+| Recipients, invoices, transfers + receipts, ledger | already on main | pinned: survive a cold start; a race on one idempotency key or pay-link slug leaves one row | `operational-store-durability` (6) |
+| Sweep jobs, rate holds | `sweep_jobs`, `rate_holds` (0027) | one sweep per transfer (a second is a second payout); a hold must have an owner | `sweep-rate-hold-persistence` (5) |
+| Funding sessions | `funding_sessions`, `funding_source_transactions`, `funding_last_used_sources` (0028) | one deposit, one session (digest is the key); credit and CREDITED in one locked transaction; last-used source per org | `funding-session-persistence` (5) |
+| Intercompany legs | `intercompany_transfers` (0029) | one leg per customer transfer; the daily reconciliation sums every instance's rows | `intercompany-persistence` (3) |
+| Support tickets | `support_tickets`, `support_ticket_replies` (0030) | `org_id NOT NULL` + FK on both; WS2's org scope is in the WHERE clause, so a foreign id reads as missing and a foreign reply or close writes nothing; replies are inserts, so two at once both land | `support-persistence` (4) |
+| Daily audit batches | `daily_audit_batches` (0031) | one batch per business date (unique index); the cron's "already built?" check sees every instance's batches | `audit-batch-persistence` (3) |
+
+**Support tickets and daily audit batches are no longer in memory.** They
+were the last two `globalThis` stores holding records, and the ones WS2 had
+just scoped. Support keeps WS2's shape exactly — customer functions take the
+session's org first, staff reach across tenants only through `*ForStaff` —
+and the demo seed tickets stay in the fallback, because the demo org does
+not exist in a real database. The audit-batch table has **no `org_id`**, on
+purpose and said so in the schema and migration: a batch spans every tenant
+(its leaves are many workspaces' transfer ids), so there is no owner to scope
+by, and the protection remains who may read it (staff-only readers behind
+`getAdminSession()`).
+
+Every function in both stores is async now, and every caller awaits it. Two
+of those callers handed the result straight to `NextResponse.json`
+(`/api/admin/support`, `/api/audit-batches`), where a Promise serialises as
+`{}` and `tsc` does not object; both await explicitly, with a comment.
+
+**Operators must apply migrations `0030_support_tickets` and
+`0031_daily_audit_batches`** (with 0027–0029 if not yet applied) before this
+release serves traffic: `npm run db:migrate:run`, or the pre-deploy job in
+`docs/DEPLOY-DIGITALOCEAN.md`. No backfill: the in-memory tickets and batches
+never outlived an instance, so there is nothing to carry over.
+
+**What it does not do.** Two cron runs for the same business date that both
+start before either records still both seal, store and anchor; the database
+keeps the first batch and both runs return it, so the day has one recorded
+root, but the later run's Walrus blob and Sui anchor are left unreferenced.
+Closing that would mean holding a lock across up to a minute of Seal, Walrus
+and Sui calls, for a job that runs once a day. Demo-mode Walrus blobs are
+still process state, so verifying a demo batch after a cold start reports the
+blob missing; live Walrus is unaffected.
+
+---
+
+## WS2 — the four remaining unscoped stores — 2026-10-23
+
+**Scope**: the stores that still answered any signed-in session with every
+tenant's data, and the routes in front of them. The pattern is the one the
+transfer, invoice, beneficiary and ledger stores already follow: `orgId` is
+the first, required parameter of every customer read and write, so an
+unscoped call site does not compile; the org comes from the session
+(`requireCustomerRequest`, then `requireSessionAccount`, which resolves it
+through `resolveAuthorityForSession`), never from the request; reach across
+tenants is spelled `*ForStaff` and sits behind `getAdminSession()`. The
+master prompt calls the member guard `requireMember`; it does not exist on
+main, and these two existing helpers are what it means. Tests:
+`tests/tenant-isolation.test.mjs` (11; red commit `8b278d5`, fix `0124707`),
+in `npm run test:db`.
+
+| ID | Sev | Finding | Status |
+|----|-----|---------|--------|
+| WS2-1 | Low (pinned) | MemWal (Copilot memory). Already scoped on main: `recallForOrg` / `rememberForOrg` in `lib/server/memwal.ts` are the only entry points, every write goes to the org's own namespace with the org's key at the start of the text, and recall drops anything without that key (`lib/server/memwal-scope.ts`). Every caller passes the session's org or, in the demo seed, `DEMO_ORG_ID`. **Pinned**: recall for org B returns none of org A's fact even from a relayer that ignores namespaces; the adapter exports nothing unscoped; nothing but `memwal.ts` imports the SDK. | No change needed |
+| WS2-2 | High | Support tickets. `listSupportTickets()` and `readSupportTicket(id)` took no org, so any customer could list every tenant's tickets (subjects, messages, contact addresses, staff replies) or read and reply to one by id. The reply's author was a name the request body supplied. **Fixed**: tickets carry `orgId`; `create/list/read/updateSupportTicket(orgId, …)`; a foreign id reads as missing, for a reply too; the staff console and admin routes use `listSupportTicketsForStaff`, `readSupportTicketForStaff`, `updateSupportTicketForStaff`; a customer reply is attributed to `session.email`. | Fixed |
+| WS2-3 | High | `GET /api/walrus/:blobId` returned any blob's metadata to any session, and blob ids are not secret: they appear on invoices, receipts and evidence records. **Fixed**: `orgReferencesBlob(orgId, blobId)` (`lib/server/walrus-access.ts`) answers true only when the caller's org owns an invoice, or a transfer whose receipt references the blob (the transfer's own blob, or the evidence bundle in `settlement_metadata.evidence`). Scoped queries in both repositories, reached through their stores. The check runs before the blob is fetched, so another tenant's blob and a missing one are the same 404, and every answer is `private, no-store`. | Fixed |
+| WS2-4 | High | Daily audit batches. `GET /api/audit-batches` and `POST /api/audit-batches/verify` took any customer session and returned every batch: each one lists every tenant's settled transfer ids with their Merkle proofs, and the customer history page displayed them. **Decision (Sky)**: staff-only, roots and contents. **Fixed**: the readers are `listDailyAuditBatchesForStaff`, `readDailyAuditBatchForStaff`, `verifyDailyAuditBatchForStaff`; both routes require `getAdminSession()`; the panel is removed from `/dashboard/history`. | Fixed |
+
+### The routes re-checked, and why each is safe
+
+- **`/api/copilot/chat`** no longer exists; it was deleted with
+  `lib/copilot-client.ts` (see `docs/HANDOVER-2026-09-06.md`). The copilot
+  routes that remain, `copilot/extract-invoice`, `copilot/suggest` and
+  `copilot/summary`, each run `requireCustomerRequest` and then
+  `requireSessionAccount`, and read only through scoped stores:
+  `readInvoice(orgId, id)`, `listInvoicesFor(orgId)`,
+  `getCopilotSuggestions(orgId)`, and MemWal through `recallForOrg` and
+  `rememberForOrg`. **Scoped.**
+- **`/api/profile`** is **per-user by design**. GET, POST and DELETE read
+  and write the customer-profile store keyed by `session.email`, and the
+  request cannot name another address. The org is resolved only to decide
+  whether a WhatsApp approval is required. The staff side
+  (`/api/admin/profile-requests`) is behind `getAdminSession()`.
+- **`/api/quotes`** is **stateless**: `calculateQuote` prices an amount from
+  the corridor table and a cached market rate, and reads no tenant store.
+  `recipientId` is echoed back, not looked up. **`/api/quotes/peg-status`**
+  is public market data from DeepBook, with no tenant data in it.
+- **`/api/oxwal`** takes `orgId` and `actorId` from
+  `resolveAuthorityForSession`. The body is only `{ message, history }`, and
+  `assertCleanBody` refuses provenance fields, so the agent runs in the
+  session's org and nowhere else. **Scoped.**
+- **`/api/proposals/[id]/submit`** resolves the session's authority and
+  answers 404 when `proposal.orgId !== ctx.orgId`.
+  **`/api/proposals/[id]/reconcile`** passes `ctx.orgId` to
+  `reconcileStuckPayment`, which answers 404 on the same mismatch
+  (`lib/server/stuck-payments.ts`). **Scoped.**
+
+**Still open.** ~~Support tickets and audit batches still live in an
+in-process `Map`, so they are per-instance and disappear on restart; they are
+scoped now, but not durable.~~ Closed by WS8 (above): both are in Postgres,
+migrations 0030 and 0031. A signed-in person with no membership yet gets
+`no_membership` (403) from the support routes and has to use the support
+address instead. The staff console has no audit-batch page, so the
+staff-only API currently has no UI. `components/oxwal/ActionCard.tsx` links
+to `/api/walrus/<reasoningTraceRef>`, but those refs (`pending-walrus:…`,
+`dual-approval:…`) are not blob ids, so the link 404s, as it already did.
+~~`listAllRequests` and `decideProfileRequest` in
+`lib/server/customer-profile.ts` are staff-only in practice but not named
+`*ForStaff`.~~ Renamed `listProfileRequestsForStaff` and
+`decideProfileRequestForStaff` in the WS2 follow-up (5ba1ba2).
+
+---
+
 ## Approvals by code and WhatsApp — 2026-09-24
 
 **Scope**: the two ballot channels for payments the money routes send for

@@ -1,4 +1,26 @@
+/**
+ * Support tickets, belonging to somebody.
+ *
+ * Same rule as the transfer, invoice, beneficiary and ledger stores: `orgId`
+ * is the first, required argument of every customer read and write, and it
+ * comes from the session (`requireSessionAccount`), never from the request.
+ * `listSupportTickets()` and `readSupportTicket(id)` used to take no org, so
+ * any signed-in customer could list every tenant's tickets — subjects,
+ * messages, contact addresses, staff replies — or read one by id.
+ *
+ * The staff console reads across tenants, and says so: `*ForStaff`, behind
+ * `getAdminSession()` only. A foreign id reads as missing, the same answer a
+ * non-existent id gets, so probing tells a caller nothing.
+ *
+ * Since WS8 the tickets and their replies live in Postgres
+ * (`support_tickets`, `support_ticket_replies`, migration 0030), and the org
+ * scope is in the WHERE clause of every query (`repository/support.ts`). The
+ * `Map` below is the fallback for `npm run dev` without a database only: on
+ * serverless each instance had its own, so a ticket raised on one was unknown
+ * to the staff console on another, and a cold start lost them all.
+ */
 import { BRAND } from '@/content/brand';
+import { DEMO_ORG_ID } from '@/lib/server/operations';
 
 export type SupportTicketType = 'bug' | 'feature' | 'complaint' | 'other';
 export type SupportTicketStatus = 'OPEN' | 'IN_REVIEW' | 'REPLIED' | 'CLOSED';
@@ -13,6 +35,8 @@ export type SupportReply = {
 
 export type SupportTicketRecord = {
   id: string;
+  /** The workspace that raised it. Every customer read is scoped by it. */
+  orgId: string;
   type: SupportTicketType;
   subject: string;
   message: string;
@@ -55,6 +79,7 @@ function seededTickets() {
       complaintId,
       {
         id: complaintId,
+        orgId: DEMO_ORG_ID,
         type: 'complaint',
         subject: 'Batch payout still pending after SLA',
         message: 'Our Philippines supplier batch has not moved from queued for more than 20 minutes. Please check if there is a rail issue.',
@@ -71,6 +96,7 @@ function seededTickets() {
       questionId,
       {
         id: questionId,
+        orgId: DEMO_ORG_ID,
         type: 'other',
         subject: 'Need receipt object ID for audit file',
         message: 'Can support confirm where the on-chain receipt object ID is shown after settlement?',
@@ -86,24 +112,80 @@ function seededTickets() {
   ]);
 }
 
-export const supportStore = globalStore.splashSupportStore ?? {
+/**
+ * The in-process fallback, used only when `DATABASE_URL` is not set. The two
+ * demo tickets are seeded here and nowhere else: they belong to the demo org,
+ * which a real database does not have.
+ */
+const supportStore = globalStore.splashSupportStore ?? {
   tickets: seededTickets(),
 };
 
 globalStore.splashSupportStore = supportStore;
 
-export function listSupportTickets() {
-  return Array.from(supportStore.tickets.values()).sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+let announced = false;
+
+function usingPostgres(): boolean {
+  if (process.env.DATABASE_URL) return true;
+  if (!announced) {
+    announced = true;
+    console.warn(
+      '[support] DATABASE_URL is not set, so support tickets live in this process ' +
+        'and disappear when it restarts. Local development only.',
+    );
+  }
+  return false;
 }
 
-export function readSupportTicket(ticketId: string) {
+async function db() {
+  const { getDb } = await import('../db/client.ts');
+  return getDb() as never;
+}
+
+async function repo() {
+  return import('./repository/support.ts');
+}
+
+function newestFirst(a: SupportTicketRecord, b: SupportTicketRecord) {
+  return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+}
+
+/** An org's own tickets, newest first. An empty org owns nothing. */
+export async function listSupportTickets(orgId: string): Promise<SupportTicketRecord[]> {
+  if (!orgId) return [];
+  if (usingPostgres()) return (await repo()).listTickets(await db(), orgId);
+  return Array.from(supportStore.tickets.values()).filter((ticket) => ticket.orgId === orgId).sort(newestFirst);
+}
+
+/** One ticket belonging to `orgId`. A foreign id reads as missing. */
+export async function readSupportTicket(orgId: string, ticketId: string): Promise<SupportTicketRecord | null> {
+  if (!orgId) return null;
+  if (usingPostgres()) return (await repo()).readTicket(await db(), orgId, ticketId);
+  const record = supportStore.tickets.get(ticketId) ?? null;
+  return record && record.orgId === orgId ? record : null;
+}
+
+/** Every tenant's tickets. The staff console only, behind `getAdminSession()`. */
+export async function listSupportTicketsForStaff(): Promise<SupportTicketRecord[]> {
+  if (usingPostgres()) return (await repo()).listTickets(await db(), null);
+  return Array.from(supportStore.tickets.values()).sort(newestFirst);
+}
+
+/** Any ticket by id. The staff console only, behind `getAdminSession()`. */
+export async function readSupportTicketForStaff(ticketId: string): Promise<SupportTicketRecord | null> {
+  if (usingPostgres()) return (await repo()).readTicket(await db(), null, ticketId);
   return supportStore.tickets.get(ticketId) ?? null;
 }
 
-export function createSupportTicket(input: { type: SupportTicketType; subject: string; message: string; email?: string | null }) {
+export async function createSupportTicket(
+  orgId: string,
+  input: { type: SupportTicketType; subject: string; message: string; email?: string | null },
+): Promise<SupportTicketRecord> {
+  if (!orgId) throw new Error('A support ticket belongs to a workspace.');
   const now = new Date().toISOString();
   const record: SupportTicketRecord = {
     id: id('ticket'),
+    orgId,
     type: input.type,
     subject: input.subject,
     message: input.message,
@@ -116,18 +198,23 @@ export function createSupportTicket(input: { type: SupportTicketType; subject: s
     replies: [],
   };
 
+  // The org must exist: `support_tickets.org_id` is a foreign key.
+  if (usingPostgres()) return (await repo()).insertTicket(await db(), record);
   supportStore.tickets.set(record.id, record);
 
   return record;
 }
 
-export function updateSupportTicket(ticketId: string, input: { status?: SupportTicketStatus; actor: string; actorType?: SupportReply['actorType']; replyMessage?: string; assignedTo?: string | null }) {
-  const record = supportStore.tickets.get(ticketId);
+type SupportTicketUpdate = {
+  status?: SupportTicketStatus;
+  actor: string;
+  actorType?: SupportReply['actorType'];
+  replyMessage?: string;
+  assignedTo?: string | null;
+};
 
-  if (!record) {
-    return null;
-  }
-
+/** The fallback's update: the record is the map's own object. */
+function applyUpdate(record: SupportTicketRecord, input: SupportTicketUpdate) {
   const replyMessage = input.replyMessage?.trim();
   record.status = input.status ?? (replyMessage ? 'REPLIED' : record.status);
   record.assignedTo = input.assignedTo === undefined ? record.assignedTo : input.assignedTo;
@@ -140,4 +227,36 @@ export function updateSupportTicket(ticketId: string, input: { status?: SupportT
   supportStore.tickets.set(record.id, record);
 
   return record;
+}
+
+/** The same rule in Postgres, with the scope in the query. A `null` org is staff. */
+async function changeInPostgres(orgId: string | null, ticketId: string, input: SupportTicketUpdate) {
+  const replyMessage = input.replyMessage?.trim();
+  return (await repo()).changeTicket(await db(), orgId, ticketId, {
+    status: input.status,
+    assignedTo: input.assignedTo,
+    reply: replyMessage ? reply(input.actor, replyMessage, input.actorType ?? 'staff') : undefined,
+  });
+}
+
+/** A customer's reply, scoped. `null` means it was not there OR was not theirs. */
+export async function updateSupportTicket(
+  orgId: string,
+  ticketId: string,
+  input: SupportTicketUpdate,
+): Promise<SupportTicketRecord | null> {
+  if (!orgId) return null;
+  if (usingPostgres()) return changeInPostgres(orgId, ticketId, input);
+  const record = await readSupportTicket(orgId, ticketId);
+  return record ? applyUpdate(record, input) : null;
+}
+
+/** A staff reply or status change, on any tenant's ticket. Staff console only. */
+export async function updateSupportTicketForStaff(
+  ticketId: string,
+  input: SupportTicketUpdate,
+): Promise<SupportTicketRecord | null> {
+  if (usingPostgres()) return changeInPostgres(null, ticketId, input);
+  const record = await readSupportTicketForStaff(ticketId);
+  return record ? applyUpdate(record, input) : null;
 }

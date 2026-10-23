@@ -25,23 +25,56 @@ export interface IntercompanyRecord {
   updatedAt: string;
 }
 
-type IntercompanyStore = Map<string, IntercompanyRecord>;
+type IntercompanyStore = Map<string, IntercompanyRecord & { orgId?: string }>;
 const globalStore = globalThis as typeof globalThis & { splashIntercompany?: IntercompanyStore };
-export const intercompanyStore = globalStore.splashIntercompany ?? new Map<string, IntercompanyRecord>();
+/**
+ * The in-process fallback, used only when `DATABASE_URL` is not set so that
+ * `npm run dev` works without a database. Every deployed environment reads and
+ * writes `intercompany_transfers` (migration 0029). This map was the only
+ * store until WS8, so each serverless instance reconciled its own slice of
+ * the day and a cold start reconciled nothing.
+ */
+const intercompanyStore = globalStore.splashIntercompany ?? new Map<string, IntercompanyRecord & { orgId?: string }>();
 globalStore.splashIntercompany = intercompanyStore;
+
+let announced = false;
+
+function usingPostgres(): boolean {
+  if (process.env.DATABASE_URL) return true;
+  if (!announced) {
+    announced = true;
+    console.warn(
+      '[intercompany] DATABASE_URL is not set, so intercompany transfers live in ' +
+        'this process and disappear when it restarts. Local development only.',
+    );
+  }
+  return false;
+}
+
+async function db() {
+  const { getDb } = await import('../db/client.ts');
+  return getDb() as never;
+}
+
+async function repo() {
+  return import('./repository/intercompany.ts');
+}
 
 function uid() {
   return `ic_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export function createIntercompanyTransfer(input: {
+export async function createIntercompanyTransfer(input: {
+  /** The org whose customer transfer this leg funds. */
+  orgId: string;
   transferIntentId: string;
   amountUsd: string;
   usdToUsdcRate: string;
-}): IntercompanyRecord {
+}): Promise<IntercompanyRecord> {
   const now = new Date().toISOString();
-  const record: IntercompanyRecord = {
+  const record: IntercompanyRecord & { orgId: string } = {
     id: uid(),
+    orgId: input.orgId,
     transferIntentId: input.transferIntentId,
     amountUsd: input.amountUsd,
     amountUsdc: '0',
@@ -52,28 +85,43 @@ export function createIntercompanyTransfer(input: {
     createdAt: now,
     updatedAt: now,
   };
-  intercompanyStore.set(record.id, record);
-  return record;
-}
-
-export function updateIntercompany(id: string, patch: Partial<IntercompanyRecord>): void {
-  const record = intercompanyStore.get(id);
-  if (!record) return;
-  Object.assign(record, patch, { updatedAt: new Date().toISOString() });
-  intercompanyStore.set(id, record);
-}
-
-export function getIntercompanyByTransfer(transferIntentId: string): IntercompanyRecord | null {
-  for (const record of intercompanyStore.values()) {
-    if (record.transferIntentId === transferIntentId) return record;
+  if (!usingPostgres()) {
+    intercompanyStore.set(record.id, record);
+    return record;
   }
-  return null;
+  // One leg per customer transfer is a unique index: a second leg would send
+  // the USD twice.
+  return (await repo()).insertIntercompany(await db(), record);
 }
 
-export function listIntercompanyTransfers(): IntercompanyRecord[] {
-  return [...intercompanyStore.values()].sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-  );
+export async function updateIntercompany(id: string, patch: Partial<IntercompanyRecord>): Promise<void> {
+  if (!usingPostgres()) {
+    const record = intercompanyStore.get(id);
+    if (!record) return;
+    Object.assign(record, patch, { updatedAt: new Date().toISOString() });
+    intercompanyStore.set(id, record);
+    return;
+  }
+  await (await repo()).patchIntercompany(await db(), id, patch);
+}
+
+export async function getIntercompanyByTransfer(transferIntentId: string): Promise<IntercompanyRecord | null> {
+  if (!usingPostgres()) {
+    for (const record of intercompanyStore.values()) {
+      if (record.transferIntentId === transferIntentId) return record;
+    }
+    return null;
+  }
+  return (await repo()).getByTransfer(await db(), transferIntentId);
+}
+
+export async function listIntercompanyTransfers(): Promise<IntercompanyRecord[]> {
+  if (!usingPostgres()) {
+    return [...intercompanyStore.values()].sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
+  }
+  return (await repo()).listIntercompany(await db());
 }
 
 /**
@@ -95,7 +143,7 @@ export function listIntercompanyTransfers(): IntercompanyRecord[] {
  * is what a caller should compare or accumulate, the string is what it should
  * display, and neither invites a float back in.
  */
-export function getDailyReconciliation(dateStr?: string): {
+export async function getDailyReconciliation(dateStr?: string): Promise<{
   date: string;
   totalUsdInMicro: bigint;
   totalUsdcSettledMicro: bigint;
@@ -104,17 +152,27 @@ export function getDailyReconciliation(dateStr?: string): {
   transferCount: number;
   discrepancyMicro: bigint;
   discrepancy: string;
-} {
+}> {
   const targetDate = dateStr ?? new Date().toISOString().split('T')[0];
   let totalUsdMicro = 0n;
   let totalUsdcMicro = 0n;
   let count = 0;
 
-  for (const record of intercompanyStore.values()) {
-    if (record.createdAt.startsWith(targetDate)) {
-      totalUsdMicro += parseMinor(record.amountUsd, MICRO_DECIMALS);
-      totalUsdcMicro += parseMinor(record.amountUsdc, MICRO_DECIMALS);
+  if (usingPostgres()) {
+    // Every instance's legs for the day, not this instance's. Already integer
+    // micro units in the row, so nothing is parsed back out of a string.
+    for (const row of await (await repo()).listForDay(await db(), targetDate)) {
+      totalUsdMicro += row.amountUsdMicro;
+      totalUsdcMicro += row.amountUsdcMicro;
       count++;
+    }
+  } else {
+    for (const record of intercompanyStore.values()) {
+      if (record.createdAt.startsWith(targetDate)) {
+        totalUsdMicro += parseMinor(record.amountUsd, MICRO_DECIMALS);
+        totalUsdcMicro += parseMinor(record.amountUsdc, MICRO_DECIMALS);
+        count++;
+      }
     }
   }
 

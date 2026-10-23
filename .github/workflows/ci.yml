@@ -42,35 +42,12 @@ jobs:
         # come first because they are the ones with the regulatory weight.
         run: npm run lint
 
-      - name: test — auth, accounts and fail-closed authority
-        run: npm run test:auth
-
-      - name: test — funding
-        run: npm run test:funding
-
-      - name: test — oxwal
-        run: npm run test:oxwal
-
-      - name: test — db (PGlite, in-process)
-        run: npm run test:db
-
-      - name: test — batch parser
-        run: npm run test:batch
-
-      - name: test — environment contract
-        run: npm run test:env
-
-      - name: test — seal config loader
-        run: npm run test:seal
-
-      - name: test — health checks
-        run: npm run test:health
-
-      - name: test — explorer links follow the network
-        run: npm run test:explorer
-
-      - name: test — exact money arithmetic
-        run: npm run test:money
+      - name: test — every test file
+        # `npm test` runs every tests/*.test.mjs. The named test:* scripts
+        # used to be listed here one by one, and together they covered 41 of
+        # 117 files; the other 76 never ran in CI. A new test now runs in CI
+        # the moment it is committed, with nothing to remember.
+        run: npm test
 
       - name: production build
         env:

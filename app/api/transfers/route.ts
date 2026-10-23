@@ -41,10 +41,10 @@ export async function GET(request: Request) {
   }
 
   const total = records.length;
-  const items = records.slice((page - 1) * perPage, page * perPage).map((record) => ({
+  const items = await Promise.all(records.slice((page - 1) * perPage, page * perPage).map(async (record) => ({
     ...record,
-    heldDurationMs: record.sweepJobId ? readSweepJob(record.sweepJobId)?.heldDurationMs ?? null : null,
-  }));
+    heldDurationMs: record.sweepJobId ? (await readSweepJob(record.sweepJobId))?.heldDurationMs ?? null : null,
+  })));
 
   return NextResponse.json({ items, total, page, perPage });
 }
