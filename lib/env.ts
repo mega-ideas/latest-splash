@@ -487,6 +487,19 @@ function productionIssues(env: Env): Issue[] {
     issues.push({ key: 'USDC_TYPE', message: 'is the development stand-in (native SUI); set the real USDC coin type' });
   }
 
+  /* v2 (D11): splash_custody and splash_meter are retired from the mainnet
+     path. App-bound allowances and address balances replace pooling and the
+     spend meter, so a mainnet deployment that names the custody package or a
+     payout delegation is configured for a path that no longer exists. The code
+     stays, for testnet and for the record. */
+  if (env.SUI_NETWORK === 'mainnet') {
+    for (const key of ['SPLASH_CUSTODY_PACKAGE_ID', 'SPLASH_PAYOUT_DELEGATION_ID'] as const) {
+      if (env[key] !== undefined) {
+        issues.push({ key, message: 'names the retired custody path; splash_custody and splash_meter do not publish to mainnet in v2 (docs/v2/phase1-move-design.md §8) — remove it from the host' });
+      }
+    }
+  }
+
   /* Email: a grant requires a verified mailbox, and verification is a link
      delivered to it. `console` only prints the link to the server log, so a
      production deployment on it can never verify anyone — and therefore
