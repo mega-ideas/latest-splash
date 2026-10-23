@@ -1,0 +1,1714 @@
+{
+  "bytecodeIdentity": [
+    {
+      "module": "allowance",
+      "mainnet": "c6d5da6a8b01fd154b3afa2c24ea85bee1db2f0607bffa068d5c70bd6c1c1cc3",
+      "testnet": "c6d5da6a8b01fd154b3afa2c24ea85bee1db2f0607bffa068d5c70bd6c1c1cc3",
+      "identical": true
+    },
+    {
+      "module": "balance",
+      "mainnet": "1df1564c974d75017784511221fadf9aa41d32c719df7d962a752686efdb6674",
+      "testnet": "1df1564c974d75017784511221fadf9aa41d32c719df7d962a752686efdb6674",
+      "identical": true
+    },
+    {
+      "module": "coin",
+      "mainnet": "e4e580a50b7a14edda7346e78e0fe38bd22ffce4a1b6b330c2942fc9a11f8478",
+      "testnet": "e4e580a50b7a14edda7346e78e0fe38bd22ffce4a1b6b330c2942fc9a11f8478",
+      "identical": true
+    },
+    {
+      "module": "funds_accumulator",
+      "mainnet": "735e317ba53b94f310b958699cdd21b17025b68cf5d9c194a838074a7aca1044",
+      "testnet": "735e317ba53b94f310b958699cdd21b17025b68cf5d9c194a838074a7aca1044",
+      "identical": true
+    }
+  ],
+  "raw": {
+    "mainnet": {
+      "allowance::new": {
+        "network": "mainnet",
+        "endpoint": "https://graphql.mainnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:46:48.461Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"allowance\") { function(name:\"new\") { visibility isEntry typeParameters { constraints } parameters { repr } return { repr } } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "function": {
+                  "visibility": "PRIVATE",
+                  "isEntry": true,
+                  "typeParameters": [
+                    {
+                      "constraints": []
+                    }
+                  ],
+                  "parameters": [
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000001::string::String"
+                    },
+                    {
+                      "repr": "address"
+                    },
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000001::option::Option<u256>"
+                    },
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000001::option::Option<u64>"
+                    },
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000001::option::Option<u64>"
+                    },
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000001::option::Option<0x0000000000000000000000000000000000000000000000000000000000000002::allowance::RateLimit>"
+                    },
+                    {
+                      "repr": "&mut 0x0000000000000000000000000000000000000000000000000000000000000002::tx_context::TxContext"
+                    }
+                  ],
+                  "return": []
+                }
+              }
+            }
+          }
+        }
+      },
+      "allowance::propose_for_app": {
+        "network": "mainnet",
+        "endpoint": "https://graphql.mainnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:46:49.511Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"allowance\") { function(name:\"propose_for_app\") { visibility isEntry typeParameters { constraints } parameters { repr } return { repr } } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "function": {
+                  "visibility": "PRIVATE",
+                  "isEntry": true,
+                  "typeParameters": [
+                    {
+                      "constraints": []
+                    },
+                    {
+                      "constraints": []
+                    }
+                  ],
+                  "parameters": [
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000001::string::String"
+                    },
+                    {
+                      "repr": "address"
+                    },
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000001::option::Option<u256>"
+                    },
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000001::option::Option<u64>"
+                    },
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000001::option::Option<u64>"
+                    },
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000001::option::Option<0x0000000000000000000000000000000000000000000000000000000000000002::allowance::RateLimit>"
+                    },
+                    {
+                      "repr": "&0x0000000000000000000000000000000000000000000000000000000000000002::tx_context::TxContext"
+                    }
+                  ],
+                  "return": [
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::allowance::AllowanceProposal<$0>"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "allowance::issue": {
+        "network": "mainnet",
+        "endpoint": "https://graphql.mainnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:46:50.530Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"allowance\") { function(name:\"issue\") { visibility isEntry typeParameters { constraints } parameters { repr } return { repr } } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "function": {
+                  "visibility": "PUBLIC",
+                  "isEntry": false,
+                  "typeParameters": [
+                    {
+                      "constraints": []
+                    },
+                    {
+                      "constraints": []
+                    }
+                  ],
+                  "parameters": [
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::allowance::AllowanceProposal<$0>"
+                    },
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::allowance::SettingsPermit<$1>"
+                    },
+                    {
+                      "repr": "&mut 0x0000000000000000000000000000000000000000000000000000000000000002::tx_context::TxContext"
+                    }
+                  ],
+                  "return": []
+                }
+              }
+            }
+          }
+        }
+      },
+      "allowance::balance_spend": {
+        "network": "mainnet",
+        "endpoint": "https://graphql.mainnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:46:51.531Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"allowance\") { function(name:\"balance_spend\") { visibility isEntry typeParameters { constraints } parameters { repr } return { repr } } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "function": {
+                  "visibility": "PUBLIC",
+                  "isEntry": false,
+                  "typeParameters": [
+                    {
+                      "constraints": []
+                    }
+                  ],
+                  "parameters": [
+                    {
+                      "repr": "&mut 0x0000000000000000000000000000000000000000000000000000000000000002::allowance::Allowance<0x0000000000000000000000000000000000000000000000000000000000000002::balance::Balance<$0>>"
+                    },
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::allowance::AllowanceWithdrawal<0x0000000000000000000000000000000000000000000000000000000000000002::balance::Balance<$0>>"
+                    },
+                    {
+                      "repr": "&0x0000000000000000000000000000000000000000000000000000000000000002::clock::Clock"
+                    },
+                    {
+                      "repr": "&0x0000000000000000000000000000000000000000000000000000000000000002::tx_context::TxContext"
+                    }
+                  ],
+                  "return": [
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::balance::Balance<$0>"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "allowance::app_balance_spend": {
+        "network": "mainnet",
+        "endpoint": "https://graphql.mainnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:46:51.809Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"allowance\") { function(name:\"app_balance_spend\") { visibility isEntry typeParameters { constraints } parameters { repr } return { repr } } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "function": {
+                  "visibility": "PUBLIC",
+                  "isEntry": false,
+                  "typeParameters": [
+                    {
+                      "constraints": []
+                    },
+                    {
+                      "constraints": []
+                    }
+                  ],
+                  "parameters": [
+                    {
+                      "repr": "&mut 0x0000000000000000000000000000000000000000000000000000000000000002::allowance::Allowance<0x0000000000000000000000000000000000000000000000000000000000000002::balance::Balance<$0>>"
+                    },
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::allowance::SpendPermit<$1>"
+                    },
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::allowance::AllowanceWithdrawal<0x0000000000000000000000000000000000000000000000000000000000000002::balance::Balance<$0>>"
+                    },
+                    {
+                      "repr": "&0x0000000000000000000000000000000000000000000000000000000000000002::clock::Clock"
+                    },
+                    {
+                      "repr": "&0x0000000000000000000000000000000000000000000000000000000000000002::tx_context::TxContext"
+                    }
+                  ],
+                  "return": [
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::balance::Balance<$0>"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "allowance::spend_permit": {
+        "network": "mainnet",
+        "endpoint": "https://graphql.mainnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:46:52.995Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"allowance\") { function(name:\"spend_permit\") { visibility isEntry typeParameters { constraints } parameters { repr } return { repr } } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "function": {
+                  "visibility": "PUBLIC",
+                  "isEntry": false,
+                  "typeParameters": [
+                    {
+                      "constraints": []
+                    }
+                  ],
+                  "parameters": [
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000001::internal::Permit<$0>"
+                    }
+                  ],
+                  "return": [
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::allowance::SpendPermit<$0>"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "allowance::settings_permit": {
+        "network": "mainnet",
+        "endpoint": "https://graphql.mainnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:46:53.997Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"allowance\") { function(name:\"settings_permit\") { visibility isEntry typeParameters { constraints } parameters { repr } return { repr } } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "function": {
+                  "visibility": "PUBLIC",
+                  "isEntry": false,
+                  "typeParameters": [
+                    {
+                      "constraints": []
+                    }
+                  ],
+                  "parameters": [
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000001::internal::Permit<$0>"
+                    }
+                  ],
+                  "return": [
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::allowance::SettingsPermit<$0>"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "allowance::revoke": {
+        "network": "mainnet",
+        "endpoint": "https://graphql.mainnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:46:54.280Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"allowance\") { function(name:\"revoke\") { visibility isEntry typeParameters { constraints } parameters { repr } return { repr } } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "function": {
+                  "visibility": "PUBLIC",
+                  "isEntry": false,
+                  "typeParameters": [
+                    {
+                      "constraints": []
+                    }
+                  ],
+                  "parameters": [
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::allowance::AllowanceCap<$0>"
+                    },
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::allowance::Allowance<$0>"
+                    }
+                  ],
+                  "return": []
+                }
+              }
+            }
+          }
+        }
+      },
+      "allowance::rotate_spender": {
+        "network": "mainnet",
+        "endpoint": "https://graphql.mainnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:46:55.285Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"allowance\") { function(name:\"rotate_spender\") { visibility isEntry typeParameters { constraints } parameters { repr } return { repr } } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "function": {
+                  "visibility": "PUBLIC",
+                  "isEntry": false,
+                  "typeParameters": [
+                    {
+                      "constraints": []
+                    },
+                    {
+                      "constraints": []
+                    }
+                  ],
+                  "parameters": [
+                    {
+                      "repr": "&mut 0x0000000000000000000000000000000000000000000000000000000000000002::allowance::Allowance<$0>"
+                    },
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::allowance::SettingsPermit<$1>"
+                    },
+                    {
+                      "repr": "address"
+                    }
+                  ],
+                  "return": []
+                }
+              }
+            }
+          }
+        }
+      },
+      "allowance::periodic_rate_limit": {
+        "network": "mainnet",
+        "endpoint": "https://graphql.mainnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:46:55.559Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"allowance\") { function(name:\"periodic_rate_limit\") { visibility isEntry typeParameters { constraints } parameters { repr } return { repr } } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "function": {
+                  "visibility": "PUBLIC",
+                  "isEntry": false,
+                  "typeParameters": [],
+                  "parameters": [
+                    {
+                      "repr": "u64"
+                    },
+                    {
+                      "repr": "u256"
+                    }
+                  ],
+                  "return": [
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::allowance::RateLimit"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "allowance::monthly_rate_limit": {
+        "network": "mainnet",
+        "endpoint": "https://graphql.mainnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:46:55.830Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"allowance\") { function(name:\"monthly_rate_limit\") { visibility isEntry typeParameters { constraints } parameters { repr } return { repr } } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "function": {
+                  "visibility": "PUBLIC",
+                  "isEntry": false,
+                  "typeParameters": [],
+                  "parameters": [
+                    {
+                      "repr": "u256"
+                    }
+                  ],
+                  "return": [
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::allowance::RateLimit"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "balance::send_funds": {
+        "network": "mainnet",
+        "endpoint": "https://graphql.mainnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:46:56.102Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"balance\") { function(name:\"send_funds\") { visibility isEntry typeParameters { constraints } parameters { repr } return { repr } } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "function": {
+                  "visibility": "PUBLIC",
+                  "isEntry": false,
+                  "typeParameters": [
+                    {
+                      "constraints": []
+                    }
+                  ],
+                  "parameters": [
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::balance::Balance<$0>"
+                    },
+                    {
+                      "repr": "address"
+                    }
+                  ],
+                  "return": []
+                }
+              }
+            }
+          }
+        }
+      },
+      "balance::redeem_funds": {
+        "network": "mainnet",
+        "endpoint": "https://graphql.mainnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:46:56.381Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"balance\") { function(name:\"redeem_funds\") { visibility isEntry typeParameters { constraints } parameters { repr } return { repr } } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "function": {
+                  "visibility": "PUBLIC",
+                  "isEntry": false,
+                  "typeParameters": [
+                    {
+                      "constraints": []
+                    }
+                  ],
+                  "parameters": [
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::funds_accumulator::Withdrawal<0x0000000000000000000000000000000000000000000000000000000000000002::balance::Balance<$0>>"
+                    }
+                  ],
+                  "return": [
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::balance::Balance<$0>"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "coin::redeem_funds": {
+        "network": "mainnet",
+        "endpoint": "https://graphql.mainnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:46:56.664Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"coin\") { function(name:\"redeem_funds\") { visibility isEntry typeParameters { constraints } parameters { repr } return { repr } } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "function": {
+                  "visibility": "PUBLIC",
+                  "isEntry": false,
+                  "typeParameters": [
+                    {
+                      "constraints": []
+                    }
+                  ],
+                  "parameters": [
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::funds_accumulator::Withdrawal<0x0000000000000000000000000000000000000000000000000000000000000002::balance::Balance<$0>>"
+                    },
+                    {
+                      "repr": "&mut 0x0000000000000000000000000000000000000000000000000000000000000002::tx_context::TxContext"
+                    }
+                  ],
+                  "return": [
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::coin::Coin<$0>"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "coin::send_funds": {
+        "network": "mainnet",
+        "endpoint": "https://graphql.mainnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:46:56.943Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"coin\") { function(name:\"send_funds\") { visibility isEntry typeParameters { constraints } parameters { repr } return { repr } } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "function": {
+                  "visibility": "PUBLIC",
+                  "isEntry": false,
+                  "typeParameters": [
+                    {
+                      "constraints": []
+                    }
+                  ],
+                  "parameters": [
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::coin::Coin<$0>"
+                    },
+                    {
+                      "repr": "address"
+                    }
+                  ],
+                  "return": []
+                }
+              }
+            }
+          }
+        }
+      },
+      "balance::withdraw_funds_from_object": {
+        "network": "mainnet",
+        "endpoint": "https://graphql.mainnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:46:57.216Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"balance\") { function(name:\"withdraw_funds_from_object\") { visibility isEntry typeParameters { constraints } parameters { repr } return { repr } } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "function": {
+                  "visibility": "PUBLIC",
+                  "isEntry": false,
+                  "typeParameters": [
+                    {
+                      "constraints": []
+                    }
+                  ],
+                  "parameters": [
+                    {
+                      "repr": "&mut 0x0000000000000000000000000000000000000000000000000000000000000002::object::UID"
+                    },
+                    {
+                      "repr": "u64"
+                    }
+                  ],
+                  "return": [
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::funds_accumulator::Withdrawal<0x0000000000000000000000000000000000000000000000000000000000000002::balance::Balance<$0>>"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "funds_accumulator::withdrawal_split": {
+        "network": "mainnet",
+        "endpoint": "https://graphql.mainnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:46:57.491Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"funds_accumulator\") { function(name:\"withdrawal_split\") { visibility isEntry typeParameters { constraints } parameters { repr } return { repr } } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "function": {
+                  "visibility": "PUBLIC",
+                  "isEntry": false,
+                  "typeParameters": [
+                    {
+                      "constraints": [
+                        "STORE"
+                      ]
+                    }
+                  ],
+                  "parameters": [
+                    {
+                      "repr": "&mut 0x0000000000000000000000000000000000000000000000000000000000000002::funds_accumulator::Withdrawal<$0>"
+                    },
+                    {
+                      "repr": "u256"
+                    }
+                  ],
+                  "return": [
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::funds_accumulator::Withdrawal<$0>"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "address_alias::enable": {
+        "network": "mainnet",
+        "endpoint": "https://graphql.mainnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:46:57.765Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"address_alias\") { function(name:\"enable\") { visibility isEntry typeParameters { constraints } parameters { repr } return { repr } } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "function": {
+                  "visibility": "PRIVATE",
+                  "isEntry": true,
+                  "typeParameters": [],
+                  "parameters": [
+                    {
+                      "repr": "&mut 0x0000000000000000000000000000000000000000000000000000000000000002::address_alias::AddressAliasState"
+                    },
+                    {
+                      "repr": "&0x0000000000000000000000000000000000000000000000000000000000000002::tx_context::TxContext"
+                    }
+                  ],
+                  "return": []
+                }
+              }
+            }
+          }
+        }
+      },
+      "address_alias::add": {
+        "network": "mainnet",
+        "endpoint": "https://graphql.mainnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:46:58.044Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"address_alias\") { function(name:\"add\") { visibility isEntry typeParameters { constraints } parameters { repr } return { repr } } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "function": {
+                  "visibility": "PRIVATE",
+                  "isEntry": true,
+                  "typeParameters": [],
+                  "parameters": [
+                    {
+                      "repr": "&mut 0x0000000000000000000000000000000000000000000000000000000000000002::address_alias::AddressAliases"
+                    },
+                    {
+                      "repr": "address"
+                    }
+                  ],
+                  "return": []
+                }
+              }
+            }
+          }
+        }
+      },
+      "allowance::Allowance (struct)": {
+        "network": "mainnet",
+        "endpoint": "https://graphql.mainnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:46:59.035Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"allowance\") { datatype(name:\"Allowance\") { abilities } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "datatype": {
+                  "abilities": [
+                    "KEY"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "allowance::AllowanceCap (struct)": {
+        "network": "mainnet",
+        "endpoint": "https://graphql.mainnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:46:59.310Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"allowance\") { datatype(name:\"AllowanceCap\") { abilities } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "datatype": {
+                  "abilities": [
+                    "KEY"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "allowance::AllowanceProposal (struct)": {
+        "network": "mainnet",
+        "endpoint": "https://graphql.mainnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:46:59.581Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"allowance\") { datatype(name:\"AllowanceProposal\") { abilities } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "datatype": {
+                  "abilities": [
+                    "DROP"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "allowance::AllowanceWithdrawal (struct)": {
+        "network": "mainnet",
+        "endpoint": "https://graphql.mainnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:46:59.854Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"allowance\") { datatype(name:\"AllowanceWithdrawal\") { abilities } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "datatype": {
+                  "abilities": [
+                    "DROP"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "allowance::SpendPermit (struct)": {
+        "network": "mainnet",
+        "endpoint": "https://graphql.mainnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:47:00.851Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"allowance\") { datatype(name:\"SpendPermit\") { abilities } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "datatype": {
+                  "abilities": [
+                    "DROP"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "allowance::SettingsPermit (struct)": {
+        "network": "mainnet",
+        "endpoint": "https://graphql.mainnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:47:01.125Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"allowance\") { datatype(name:\"SettingsPermit\") { abilities } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "datatype": {
+                  "abilities": [
+                    "DROP"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "allowance::RateLimit (struct)": {
+        "network": "mainnet",
+        "endpoint": "https://graphql.mainnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:47:01.398Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"allowance\") { datatype(name:\"RateLimit\") { abilities } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "datatype": {
+                  "abilities": [
+                    "COPY",
+                    "DROP",
+                    "STORE"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "allowance (bytecode sha256)": {
+        "readAt": "2026-10-23T19:47:01.684Z",
+        "sha256": "c6d5da6a8b01fd154b3afa2c24ea85bee1db2f0607bffa068d5c70bd6c1c1cc3"
+      },
+      "balance (bytecode sha256)": {
+        "readAt": "2026-10-23T19:47:01.959Z",
+        "sha256": "1df1564c974d75017784511221fadf9aa41d32c719df7d962a752686efdb6674"
+      },
+      "coin (bytecode sha256)": {
+        "readAt": "2026-10-23T19:47:02.236Z",
+        "sha256": "e4e580a50b7a14edda7346e78e0fe38bd22ffce4a1b6b330c2942fc9a11f8478"
+      },
+      "funds_accumulator (bytecode sha256)": {
+        "readAt": "2026-10-23T19:47:02.507Z",
+        "sha256": "735e317ba53b94f310b958699cdd21b17025b68cf5d9c194a838074a7aca1044"
+      }
+    },
+    "testnet": {
+      "allowance::new": {
+        "network": "testnet",
+        "endpoint": "https://graphql.testnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:47:03.596Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"allowance\") { function(name:\"new\") { visibility isEntry typeParameters { constraints } parameters { repr } return { repr } } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "function": {
+                  "visibility": "PRIVATE",
+                  "isEntry": true,
+                  "typeParameters": [
+                    {
+                      "constraints": []
+                    }
+                  ],
+                  "parameters": [
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000001::string::String"
+                    },
+                    {
+                      "repr": "address"
+                    },
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000001::option::Option<u256>"
+                    },
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000001::option::Option<u64>"
+                    },
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000001::option::Option<u64>"
+                    },
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000001::option::Option<0x0000000000000000000000000000000000000000000000000000000000000002::allowance::RateLimit>"
+                    },
+                    {
+                      "repr": "&mut 0x0000000000000000000000000000000000000000000000000000000000000002::tx_context::TxContext"
+                    }
+                  ],
+                  "return": []
+                }
+              }
+            }
+          }
+        }
+      },
+      "allowance::propose_for_app": {
+        "network": "testnet",
+        "endpoint": "https://graphql.testnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:47:03.929Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"allowance\") { function(name:\"propose_for_app\") { visibility isEntry typeParameters { constraints } parameters { repr } return { repr } } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "function": {
+                  "visibility": "PRIVATE",
+                  "isEntry": true,
+                  "typeParameters": [
+                    {
+                      "constraints": []
+                    },
+                    {
+                      "constraints": []
+                    }
+                  ],
+                  "parameters": [
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000001::string::String"
+                    },
+                    {
+                      "repr": "address"
+                    },
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000001::option::Option<u256>"
+                    },
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000001::option::Option<u64>"
+                    },
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000001::option::Option<u64>"
+                    },
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000001::option::Option<0x0000000000000000000000000000000000000000000000000000000000000002::allowance::RateLimit>"
+                    },
+                    {
+                      "repr": "&0x0000000000000000000000000000000000000000000000000000000000000002::tx_context::TxContext"
+                    }
+                  ],
+                  "return": [
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::allowance::AllowanceProposal<$0>"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "allowance::issue": {
+        "network": "testnet",
+        "endpoint": "https://graphql.testnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:47:04.226Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"allowance\") { function(name:\"issue\") { visibility isEntry typeParameters { constraints } parameters { repr } return { repr } } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "function": {
+                  "visibility": "PUBLIC",
+                  "isEntry": false,
+                  "typeParameters": [
+                    {
+                      "constraints": []
+                    },
+                    {
+                      "constraints": []
+                    }
+                  ],
+                  "parameters": [
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::allowance::AllowanceProposal<$0>"
+                    },
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::allowance::SettingsPermit<$1>"
+                    },
+                    {
+                      "repr": "&mut 0x0000000000000000000000000000000000000000000000000000000000000002::tx_context::TxContext"
+                    }
+                  ],
+                  "return": []
+                }
+              }
+            }
+          }
+        }
+      },
+      "allowance::balance_spend": {
+        "network": "testnet",
+        "endpoint": "https://graphql.testnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:47:05.226Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"allowance\") { function(name:\"balance_spend\") { visibility isEntry typeParameters { constraints } parameters { repr } return { repr } } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "function": {
+                  "visibility": "PUBLIC",
+                  "isEntry": false,
+                  "typeParameters": [
+                    {
+                      "constraints": []
+                    }
+                  ],
+                  "parameters": [
+                    {
+                      "repr": "&mut 0x0000000000000000000000000000000000000000000000000000000000000002::allowance::Allowance<0x0000000000000000000000000000000000000000000000000000000000000002::balance::Balance<$0>>"
+                    },
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::allowance::AllowanceWithdrawal<0x0000000000000000000000000000000000000000000000000000000000000002::balance::Balance<$0>>"
+                    },
+                    {
+                      "repr": "&0x0000000000000000000000000000000000000000000000000000000000000002::clock::Clock"
+                    },
+                    {
+                      "repr": "&0x0000000000000000000000000000000000000000000000000000000000000002::tx_context::TxContext"
+                    }
+                  ],
+                  "return": [
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::balance::Balance<$0>"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "allowance::app_balance_spend": {
+        "network": "testnet",
+        "endpoint": "https://graphql.testnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:47:06.304Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"allowance\") { function(name:\"app_balance_spend\") { visibility isEntry typeParameters { constraints } parameters { repr } return { repr } } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "function": {
+                  "visibility": "PUBLIC",
+                  "isEntry": false,
+                  "typeParameters": [
+                    {
+                      "constraints": []
+                    },
+                    {
+                      "constraints": []
+                    }
+                  ],
+                  "parameters": [
+                    {
+                      "repr": "&mut 0x0000000000000000000000000000000000000000000000000000000000000002::allowance::Allowance<0x0000000000000000000000000000000000000000000000000000000000000002::balance::Balance<$0>>"
+                    },
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::allowance::SpendPermit<$1>"
+                    },
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::allowance::AllowanceWithdrawal<0x0000000000000000000000000000000000000000000000000000000000000002::balance::Balance<$0>>"
+                    },
+                    {
+                      "repr": "&0x0000000000000000000000000000000000000000000000000000000000000002::clock::Clock"
+                    },
+                    {
+                      "repr": "&0x0000000000000000000000000000000000000000000000000000000000000002::tx_context::TxContext"
+                    }
+                  ],
+                  "return": [
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::balance::Balance<$0>"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "allowance::spend_permit": {
+        "network": "testnet",
+        "endpoint": "https://graphql.testnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:47:07.301Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"allowance\") { function(name:\"spend_permit\") { visibility isEntry typeParameters { constraints } parameters { repr } return { repr } } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "function": {
+                  "visibility": "PUBLIC",
+                  "isEntry": false,
+                  "typeParameters": [
+                    {
+                      "constraints": []
+                    }
+                  ],
+                  "parameters": [
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000001::internal::Permit<$0>"
+                    }
+                  ],
+                  "return": [
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::allowance::SpendPermit<$0>"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "allowance::settings_permit": {
+        "network": "testnet",
+        "endpoint": "https://graphql.testnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:47:07.593Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"allowance\") { function(name:\"settings_permit\") { visibility isEntry typeParameters { constraints } parameters { repr } return { repr } } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "function": {
+                  "visibility": "PUBLIC",
+                  "isEntry": false,
+                  "typeParameters": [
+                    {
+                      "constraints": []
+                    }
+                  ],
+                  "parameters": [
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000001::internal::Permit<$0>"
+                    }
+                  ],
+                  "return": [
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::allowance::SettingsPermit<$0>"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "allowance::revoke": {
+        "network": "testnet",
+        "endpoint": "https://graphql.testnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:47:08.596Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"allowance\") { function(name:\"revoke\") { visibility isEntry typeParameters { constraints } parameters { repr } return { repr } } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "function": {
+                  "visibility": "PUBLIC",
+                  "isEntry": false,
+                  "typeParameters": [
+                    {
+                      "constraints": []
+                    }
+                  ],
+                  "parameters": [
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::allowance::AllowanceCap<$0>"
+                    },
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::allowance::Allowance<$0>"
+                    }
+                  ],
+                  "return": []
+                }
+              }
+            }
+          }
+        }
+      },
+      "allowance::rotate_spender": {
+        "network": "testnet",
+        "endpoint": "https://graphql.testnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:47:08.897Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"allowance\") { function(name:\"rotate_spender\") { visibility isEntry typeParameters { constraints } parameters { repr } return { repr } } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "function": {
+                  "visibility": "PUBLIC",
+                  "isEntry": false,
+                  "typeParameters": [
+                    {
+                      "constraints": []
+                    },
+                    {
+                      "constraints": []
+                    }
+                  ],
+                  "parameters": [
+                    {
+                      "repr": "&mut 0x0000000000000000000000000000000000000000000000000000000000000002::allowance::Allowance<$0>"
+                    },
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::allowance::SettingsPermit<$1>"
+                    },
+                    {
+                      "repr": "address"
+                    }
+                  ],
+                  "return": []
+                }
+              }
+            }
+          }
+        }
+      },
+      "allowance::periodic_rate_limit": {
+        "network": "testnet",
+        "endpoint": "https://graphql.testnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:47:09.896Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"allowance\") { function(name:\"periodic_rate_limit\") { visibility isEntry typeParameters { constraints } parameters { repr } return { repr } } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "function": {
+                  "visibility": "PUBLIC",
+                  "isEntry": false,
+                  "typeParameters": [],
+                  "parameters": [
+                    {
+                      "repr": "u64"
+                    },
+                    {
+                      "repr": "u256"
+                    }
+                  ],
+                  "return": [
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::allowance::RateLimit"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "allowance::monthly_rate_limit": {
+        "network": "testnet",
+        "endpoint": "https://graphql.testnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:47:10.197Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"allowance\") { function(name:\"monthly_rate_limit\") { visibility isEntry typeParameters { constraints } parameters { repr } return { repr } } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "function": {
+                  "visibility": "PUBLIC",
+                  "isEntry": false,
+                  "typeParameters": [],
+                  "parameters": [
+                    {
+                      "repr": "u256"
+                    }
+                  ],
+                  "return": [
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::allowance::RateLimit"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "balance::send_funds": {
+        "network": "testnet",
+        "endpoint": "https://graphql.testnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:47:10.474Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"balance\") { function(name:\"send_funds\") { visibility isEntry typeParameters { constraints } parameters { repr } return { repr } } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "function": {
+                  "visibility": "PUBLIC",
+                  "isEntry": false,
+                  "typeParameters": [
+                    {
+                      "constraints": []
+                    }
+                  ],
+                  "parameters": [
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::balance::Balance<$0>"
+                    },
+                    {
+                      "repr": "address"
+                    }
+                  ],
+                  "return": []
+                }
+              }
+            }
+          }
+        }
+      },
+      "balance::redeem_funds": {
+        "network": "testnet",
+        "endpoint": "https://graphql.testnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:47:11.537Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"balance\") { function(name:\"redeem_funds\") { visibility isEntry typeParameters { constraints } parameters { repr } return { repr } } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "function": {
+                  "visibility": "PUBLIC",
+                  "isEntry": false,
+                  "typeParameters": [
+                    {
+                      "constraints": []
+                    }
+                  ],
+                  "parameters": [
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::funds_accumulator::Withdrawal<0x0000000000000000000000000000000000000000000000000000000000000002::balance::Balance<$0>>"
+                    }
+                  ],
+                  "return": [
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::balance::Balance<$0>"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "coin::redeem_funds": {
+        "network": "testnet",
+        "endpoint": "https://graphql.testnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:47:12.539Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"coin\") { function(name:\"redeem_funds\") { visibility isEntry typeParameters { constraints } parameters { repr } return { repr } } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "function": {
+                  "visibility": "PUBLIC",
+                  "isEntry": false,
+                  "typeParameters": [
+                    {
+                      "constraints": []
+                    }
+                  ],
+                  "parameters": [
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::funds_accumulator::Withdrawal<0x0000000000000000000000000000000000000000000000000000000000000002::balance::Balance<$0>>"
+                    },
+                    {
+                      "repr": "&mut 0x0000000000000000000000000000000000000000000000000000000000000002::tx_context::TxContext"
+                    }
+                  ],
+                  "return": [
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::coin::Coin<$0>"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "coin::send_funds": {
+        "network": "testnet",
+        "endpoint": "https://graphql.testnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:47:12.849Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"coin\") { function(name:\"send_funds\") { visibility isEntry typeParameters { constraints } parameters { repr } return { repr } } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "function": {
+                  "visibility": "PUBLIC",
+                  "isEntry": false,
+                  "typeParameters": [
+                    {
+                      "constraints": []
+                    }
+                  ],
+                  "parameters": [
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::coin::Coin<$0>"
+                    },
+                    {
+                      "repr": "address"
+                    }
+                  ],
+                  "return": []
+                }
+              }
+            }
+          }
+        }
+      },
+      "balance::withdraw_funds_from_object": {
+        "network": "testnet",
+        "endpoint": "https://graphql.testnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:47:13.840Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"balance\") { function(name:\"withdraw_funds_from_object\") { visibility isEntry typeParameters { constraints } parameters { repr } return { repr } } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "function": {
+                  "visibility": "PUBLIC",
+                  "isEntry": false,
+                  "typeParameters": [
+                    {
+                      "constraints": []
+                    }
+                  ],
+                  "parameters": [
+                    {
+                      "repr": "&mut 0x0000000000000000000000000000000000000000000000000000000000000002::object::UID"
+                    },
+                    {
+                      "repr": "u64"
+                    }
+                  ],
+                  "return": [
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::funds_accumulator::Withdrawal<0x0000000000000000000000000000000000000000000000000000000000000002::balance::Balance<$0>>"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "funds_accumulator::withdrawal_split": {
+        "network": "testnet",
+        "endpoint": "https://graphql.testnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:47:14.853Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"funds_accumulator\") { function(name:\"withdrawal_split\") { visibility isEntry typeParameters { constraints } parameters { repr } return { repr } } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "function": {
+                  "visibility": "PUBLIC",
+                  "isEntry": false,
+                  "typeParameters": [
+                    {
+                      "constraints": [
+                        "STORE"
+                      ]
+                    }
+                  ],
+                  "parameters": [
+                    {
+                      "repr": "&mut 0x0000000000000000000000000000000000000000000000000000000000000002::funds_accumulator::Withdrawal<$0>"
+                    },
+                    {
+                      "repr": "u256"
+                    }
+                  ],
+                  "return": [
+                    {
+                      "repr": "0x0000000000000000000000000000000000000000000000000000000000000002::funds_accumulator::Withdrawal<$0>"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "address_alias::enable": {
+        "network": "testnet",
+        "endpoint": "https://graphql.testnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:47:15.122Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"address_alias\") { function(name:\"enable\") { visibility isEntry typeParameters { constraints } parameters { repr } return { repr } } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "function": {
+                  "visibility": "PRIVATE",
+                  "isEntry": true,
+                  "typeParameters": [],
+                  "parameters": [
+                    {
+                      "repr": "&mut 0x0000000000000000000000000000000000000000000000000000000000000002::address_alias::AddressAliasState"
+                    },
+                    {
+                      "repr": "&0x0000000000000000000000000000000000000000000000000000000000000002::tx_context::TxContext"
+                    }
+                  ],
+                  "return": []
+                }
+              }
+            }
+          }
+        }
+      },
+      "address_alias::add": {
+        "network": "testnet",
+        "endpoint": "https://graphql.testnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:47:15.413Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"address_alias\") { function(name:\"add\") { visibility isEntry typeParameters { constraints } parameters { repr } return { repr } } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "function": {
+                  "visibility": "PRIVATE",
+                  "isEntry": true,
+                  "typeParameters": [],
+                  "parameters": [
+                    {
+                      "repr": "&mut 0x0000000000000000000000000000000000000000000000000000000000000002::address_alias::AddressAliases"
+                    },
+                    {
+                      "repr": "address"
+                    }
+                  ],
+                  "return": []
+                }
+              }
+            }
+          }
+        }
+      },
+      "allowance::Allowance (struct)": {
+        "network": "testnet",
+        "endpoint": "https://graphql.testnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:47:15.681Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"allowance\") { datatype(name:\"Allowance\") { abilities } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "datatype": {
+                  "abilities": [
+                    "KEY"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "allowance::AllowanceCap (struct)": {
+        "network": "testnet",
+        "endpoint": "https://graphql.testnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:47:16.684Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"allowance\") { datatype(name:\"AllowanceCap\") { abilities } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "datatype": {
+                  "abilities": [
+                    "KEY"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "allowance::AllowanceProposal (struct)": {
+        "network": "testnet",
+        "endpoint": "https://graphql.testnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:47:17.687Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"allowance\") { datatype(name:\"AllowanceProposal\") { abilities } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "datatype": {
+                  "abilities": [
+                    "DROP"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "allowance::AllowanceWithdrawal (struct)": {
+        "network": "testnet",
+        "endpoint": "https://graphql.testnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:47:17.982Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"allowance\") { datatype(name:\"AllowanceWithdrawal\") { abilities } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "datatype": {
+                  "abilities": [
+                    "DROP"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "allowance::SpendPermit (struct)": {
+        "network": "testnet",
+        "endpoint": "https://graphql.testnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:47:18.252Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"allowance\") { datatype(name:\"SpendPermit\") { abilities } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "datatype": {
+                  "abilities": [
+                    "DROP"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "allowance::SettingsPermit (struct)": {
+        "network": "testnet",
+        "endpoint": "https://graphql.testnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:47:18.547Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"allowance\") { datatype(name:\"SettingsPermit\") { abilities } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "datatype": {
+                  "abilities": [
+                    "DROP"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "allowance::RateLimit (struct)": {
+        "network": "testnet",
+        "endpoint": "https://graphql.testnet.sui.io/graphql",
+        "readAt": "2026-10-23T19:47:18.829Z",
+        "query": "{ package(address:\"0x2\") { module(name:\"allowance\") { datatype(name:\"RateLimit\") { abilities } } } }",
+        "response": {
+          "data": {
+            "package": {
+              "module": {
+                "datatype": {
+                  "abilities": [
+                    "COPY",
+                    "DROP",
+                    "STORE"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "allowance (bytecode sha256)": {
+        "readAt": "2026-10-23T19:47:19.113Z",
+        "sha256": "c6d5da6a8b01fd154b3afa2c24ea85bee1db2f0607bffa068d5c70bd6c1c1cc3"
+      },
+      "balance (bytecode sha256)": {
+        "readAt": "2026-10-23T19:47:19.393Z",
+        "sha256": "1df1564c974d75017784511221fadf9aa41d32c719df7d962a752686efdb6674"
+      },
+      "coin (bytecode sha256)": {
+        "readAt": "2026-10-23T19:47:19.678Z",
+        "sha256": "e4e580a50b7a14edda7346e78e0fe38bd22ffce4a1b6b330c2942fc9a11f8478"
+      },
+      "funds_accumulator (bytecode sha256)": {
+        "readAt": "2026-10-23T19:47:19.960Z",
+        "sha256": "735e317ba53b94f310b958699cdd21b17025b68cf5d9c194a838074a7aca1044"
+      }
+    }
+  }
+}

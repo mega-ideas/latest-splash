@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Transfer step 3</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800;900&amp;family=Geist+Mono:wght@500;600;700&amp;display=swap">
+<style>
+body{margin:0;background:#ece3de}
+*{box-sizing:border-box}
+.num{font-variant-numeric:tabular-nums}
+.mono{font-family:'Geist Mono',ui-monospace,monospace}
+.card{background:#fffaf2;border:1px solid rgba(50,98,115,.14);border-radius:14px;box-shadow:0 1px 2px rgba(50,98,115,.06),0 10px 24px -16px rgba(50,98,115,.26)}
+.nav{display:flex;align-items:center;gap:12px;padding:8px 10px;border-radius:8px;color:rgba(255,255,255,.82);font-size:14px;font-weight:500}
+.tab{display:flex;align-items:center;gap:10px;padding:12px 14px;flex:1;min-width:150px}
+.tabn{width:26px;height:26px;border-radius:7px;display:grid;place-items:center;font-size:13px;font-weight:700;background:#efe7df;color:#326273;flex:none}
+.src{display:flex;align-items:center;gap:12px;padding:14px;border-radius:12px;border:1.5px solid rgba(50,98,115,.16);background:#fff;text-align:left;font:inherit;color:#0c3e48;cursor:pointer;width:100%}
+.lbl{font-size:12px;color:#4e6f78}
+button{font:inherit}
+</style>
+</helmet>
+<div style="min-height: 1100px; display: flex; flex-wrap: wrap; font-family: Geist, ui-sans-serif, system-ui, sans-serif; color: #0c3e48; background: linear-gradient(180deg, #f3ece7, #e9ded7)">
+<aside aria-label="Navigation" style="flex: 1 1 240px; max-width: 240px; background: #1F4452; color: #fff; padding: 16px; display: flex; flex-direction: column; gap: 22px">
+<div style="display: flex; align-items: center; gap: 12px; padding: 4px"><img src="/_blob/6193a3f61fc3c88e80b8955cab664679" alt="" style="width: 32px; height: 32px"><div style="display: flex; flex-direction: column; line-height: 1.15"><strong style="font-size: 20px">Splash<span style="color: #bfe6ee">.</span></strong><small style="font-size: 12px; color: rgba(255,255,255,.8)">Global settlement engine</small></div></div>
+<nav style="display: flex; flex-direction: column; gap: 2px">
+<span class="nav">Home</span><span class="nav">Zeke</span>
+<span class="nav" style="background: #fff; color: #1F4452; font-weight: 600">Transfer</span>
+<span class="nav">Batch payouts</span><span class="nav">Invoices</span><span class="nav">Wallet</span><span class="nav">Treasury</span><span class="nav">Recipients</span><span class="nav">History</span>
+</nav>
+</aside>
+<div style="flex: 999 1 640px; min-width: 0; display: flex; flex-direction: column">
+<header style="height: 60px; background: #F6F0ED; border-bottom: 1px solid rgba(50,98,115,.1)"></header>
+<main style="padding: 22px; display: flex; flex-direction: column; gap: 16px">
+
+<nav aria-label="Steps" class="card" style="display: flex; flex-wrap: wrap; overflow: hidden; padding: 0">
+<span class="tab"><span class="tabn" style="background: #e2f2ec; color: #1d6b4f">✓</span><span style="font-weight: 600; font-size: 14px; color: #326273">Who you're paying</span></span>
+<span class="tab"><span class="tabn" style="background: #e2f2ec; color: #1d6b4f">✓</span><span style="font-weight: 600; font-size: 14px; color: #326273">Recipient details</span></span>
+<span class="tab" style="background: #fff; box-shadow: inset 0 -2px 0 #0d6370"><span class="tabn" style="background: #0c3e48; color: #fff">3</span><span style="font-weight: 700; font-size: 14px">Amount and pay from</span></span>
+<span class="tab"><span class="tabn">4</span><span style="font-weight: 600; font-size: 14px; color: #326273">Review and approve</span></span>
+<span class="tab"><span class="tabn">5</span><span style="font-weight: 600; font-size: 14px; color: #326273">Receipt</span></span>
+</nav>
+
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr)); gap: 16px; align-items: start">
+<div style="grid-column: span 2; display: flex; flex-direction: column; gap: 16px; min-width: 0">
+
+<section class="card num" style="padding: 22px; display: flex; flex-direction: column; gap: 14px">
+<h2 style="margin: 0; font-size: 20px; font-weight: 800">How much?</h2>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); border: 1px solid rgba(50,98,115,.14); border-radius: 14px; overflow: hidden; background: #fff">
+<div style="padding: 16px 18px; display: flex; flex-direction: column; gap: 4px"><span class="lbl">PT Sinar Jaya Abadi receives</span><span style="font-size: 30px; font-weight: 800; letter-spacing: -.02em">Rp 850,000,000</span><span class="lbl">to BCA ••0391, Jakarta</span></div>
+<div style="padding: 16px 18px; display: flex; flex-direction: column; gap: 4px; background: #f6faf8; border-left: 1px solid rgba(50,98,115,.12)"><span class="lbl">You pay</span><span style="font-size: 30px; font-weight: 800; letter-spacing: -.02em; color: #0d6370">52,544.50 USDC</span><span class="lbl">includes 365.25 USDC fee · 1 USDC ≈ 16,290 IDR, locks when approved</span></div>
+</div>
+</section>
+
+<section class="card num" style="padding: 22px; display: flex; flex-direction: column; gap: 14px">
+<h2 style="margin: 0; font-size: 20px; font-weight: 800">Pay from</h2>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 12px">
+<button type="button" class="src" style="border-color: #0d6370; box-shadow: 0 0 0 4px rgba(13,99,112,.1); flex-direction: column; align-items: stretch; gap: 6px">
+<span style="display: flex; justify-content: space-between; align-items: center"><span style="font-weight: 700">Splash Wallet · USDC</span><span style="width: 18px; height: 18px; border-radius: 50%; border: 5px solid #0d6370; background: #fff"></span></span>
+<span style="font-size: 22px; font-weight: 800">48,250.00</span>
+<span style="display: flex; align-items: center; gap: 6px; font-size: 13px; color: #8a4a12; font-weight: 600"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v6M12 16.5h.01"/></svg>Short by 4,294.50 USDC</span>
+</button>
+<button type="button" class="src" disabled style="flex-direction: column; align-items: stretch; gap: 6px; opacity: .6; cursor: not-allowed">
+<span style="font-weight: 700">Splash Wallet · USDT</span>
+<span style="font-size: 22px; font-weight: 800">0.00</span>
+<span style="font-size: 13px; color: #4e6f78">Nothing to pay from</span>
+</button>
+</div>
+
+<div style="border: 1px solid rgba(239,196,111,.7); background: #fffaf0; border-radius: 14px; padding: 16px; display: flex; flex-direction: column; gap: 12px">
+<div style="display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: baseline"><span style="font-weight: 800; font-size: 16px">Top up 4,294.50 USDC to continue</span><span class="lbl">Funds arrive in your Splash Wallet first, then this payment goes on.</span></div>
+<button type="button" class="src">
+<span style="width: 38px; height: 38px; border-radius: 10px; background: #eef5f3; display: grid; place-items: center; flex: none"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0d6370" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10h18L12 4zM5 10v8M19 10v8M3 20h18"/></svg></span>
+<span style="flex: 1; display: flex; flex-direction: column"><span style="font-weight: 700">Maybank ••2210 · MYR to USDC</span><span class="lbl">Bank transfer through [on-ramp partner] · same day</span></span>
+<span style="font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 99px; background: #e2f2ec; color: #1d6b4f">Verified source</span>
+</button>
+<button type="button" class="src">
+<span style="width: 38px; height: 38px; border-radius: 10px; background: #eef5f3; display: grid; place-items: center; flex: none"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0d6370" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M16 12h2M3 10h18"/></svg></span>
+<span style="flex: 1; display: flex; flex-direction: column"><span style="font-weight: 700">Slush wallet 0x9c1…7e20</span><span class="lbl">USDC on Sui · seconds</span></span>
+<span style="font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 99px; background: #e2f2ec; color: #1d6b4f">Verified source</span>
+</button>
+<button type="button" class="src">
+<span style="width: 38px; height: 38px; border-radius: 10px; background: #f1ebe3; display: grid; place-items: center; flex: none"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#326273" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></span>
+<span style="flex: 1; display: flex; flex-direction: column"><span style="font-weight: 700">Add a new source</span><span class="lbl">Bank, card, or a wallet on another chain. Checked once before first use.</span></span>
+</button>
+<span class="lbl">We keep this draft. When the top-up clears its checks, the rate is quoted and the payment goes to approval.</span>
+</div>
+
+<div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; border-top: 1px solid rgba(50,98,115,.1); padding-top: 14px; flex-wrap: wrap">
+<button type="button" style="padding: 12px 18px; border-radius: 10px; border: 1px solid rgba(50,98,115,.2); background: #fff; color: #0c3e48; font-weight: 600; cursor: pointer">Back</button>
+<button type="button" style="display: inline-flex; align-items: center; gap: 8px; padding: 12px 20px; border-radius: 10px; border: 0; background: #0d6370; color: #fff; font-weight: 700; cursor: pointer">Top up and continue</button>
+</div>
+</section>
+</div>
+
+<aside style="display: flex; flex-direction: column; gap: 14px; min-width: 0">
+<div class="card" style="padding: 18px; display: flex; flex-direction: column; gap: 10px">
+<span style="font-weight: 800; font-size: 16px">Why we check where funds come from</span>
+<p style="margin: 0; font-size: 13.5px; color: #326273; line-height: 1.55">Payout banks in the Philippines and Indonesia ask where the money started. A source checked once, here, means your payouts aren't held for questions later.</p>
+<div style="display: flex; flex-direction: column; gap: 8px; font-size: 13px">
+<span style="display: flex; gap: 8px"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#1d6b4f" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Bank accounts in your company's name</span>
+<span style="display: flex; gap: 8px"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#1d6b4f" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Wallets you prove you control</span>
+<span style="display: flex; gap: 8px"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#1d6b4f" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>Every deposit screened on arrival</span>
+</div>
+</div>
+<div class="card num" style="padding: 18px; display: flex; flex-direction: column; gap: 8px; font-size: 13px">
+<span class="mono" style="font-size: 11px; letter-spacing: .14em; color: #145d6a; font-weight: 700">FUNDING SOURCES</span>
+<span style="display: flex; justify-content: space-between"><span>Maybank ••2210</span><span style="color: #1d6b4f; font-weight: 600">Verified</span></span>
+<span style="display: flex; justify-content: space-between"><span>Slush 0x9c1…7e20</span><span style="color: #1d6b4f; font-weight: 600">Verified</span></span>
+<span style="display: flex; justify-content: space-between"><span>Visa ••8812</span><span style="color: #7a5310; font-weight: 600">Checking</span></span>
+</div>
+</aside>
+</div>
+</main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1100}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

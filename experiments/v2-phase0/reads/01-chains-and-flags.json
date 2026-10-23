@@ -1,0 +1,1591 @@
+{
+  "summary": {
+    "mainnet": {
+      "chainIdentifier": "4btiuiMPvEENsttpZC7CZ53DruC3MAgfznDbASZ7DR6S",
+      "epoch": 1289,
+      "protocolVersion": 139,
+      "framework0x2Version": 60,
+      "flags": {
+        "enable_allowances": true,
+        "enable_accumulators": true,
+        "create_root_accumulator_object": true,
+        "enable_object_funds_withdraw": true,
+        "check_object_funds_withdraw_in_execution": false,
+        "enable_address_balance_gas_payments": true,
+        "passkey_auth": true,
+        "accept_passkey_in_multisig": true,
+        "accept_zklogin_in_multisig": true,
+        "upgraded_multisig_supported": true,
+        "additional_multisig_checks": true,
+        "address_aliases": true,
+        "enable_gasless": true
+      }
+    },
+    "testnet": {
+      "chainIdentifier": "69WiPg3DAQiwdxfncX6wYQ2siKwAe6L9BZthQea3JNMD",
+      "epoch": 1261,
+      "protocolVersion": 139,
+      "framework0x2Version": 58,
+      "flags": {
+        "enable_allowances": true,
+        "enable_accumulators": true,
+        "create_root_accumulator_object": true,
+        "enable_object_funds_withdraw": true,
+        "check_object_funds_withdraw_in_execution": true,
+        "enable_address_balance_gas_payments": true,
+        "passkey_auth": true,
+        "accept_passkey_in_multisig": true,
+        "accept_zklogin_in_multisig": true,
+        "upgraded_multisig_supported": true,
+        "additional_multisig_checks": true,
+        "address_aliases": true,
+        "enable_gasless": true
+      }
+    }
+  },
+  "flagsThatDiffer": [
+    {
+      "flag": "allow_dkg_completion_after_timeout",
+      "mainnet": false,
+      "testnet": true
+    },
+    {
+      "flag": "check_object_funds_withdraw_in_execution",
+      "mainnet": false,
+      "testnet": true
+    },
+    {
+      "flag": "disable_effects_tx_dependencies",
+      "mainnet": false,
+      "testnet": true
+    },
+    {
+      "flag": "enable_ristretto255_group_ops",
+      "mainnet": false,
+      "testnet": true
+    },
+    {
+      "flag": "enable_verify_bulletproofs_ristretto255",
+      "mainnet": false,
+      "testnet": true
+    }
+  ],
+  "raw": {
+    "mainnet": {
+      "network": "mainnet",
+      "endpoint": "https://graphql.mainnet.sui.io/graphql",
+      "readAt": "2026-10-23T19:46:46.392Z",
+      "query": "{ chainIdentifier epoch { epochId protocolConfigs { protocolVersion featureFlags { key value } } } package(address:\"0x2\") { version } }",
+      "response": {
+        "data": {
+          "chainIdentifier": "4btiuiMPvEENsttpZC7CZ53DruC3MAgfznDbASZ7DR6S",
+          "epoch": {
+            "epochId": 1289,
+            "protocolConfigs": {
+              "protocolVersion": 139,
+              "featureFlags": [
+                {
+                  "key": "abstract_size_in_object_runtime",
+                  "value": true
+                },
+                {
+                  "key": "accept_passkey_in_multisig",
+                  "value": true
+                },
+                {
+                  "key": "accept_zklogin_in_multisig",
+                  "value": true
+                },
+                {
+                  "key": "additional_borrow_checks",
+                  "value": true
+                },
+                {
+                  "key": "additional_consensus_digest_indirect_state",
+                  "value": true
+                },
+                {
+                  "key": "additional_multisig_checks",
+                  "value": true
+                },
+                {
+                  "key": "address_aliases",
+                  "value": true
+                },
+                {
+                  "key": "address_balance_gas_check_rgp_at_signing",
+                  "value": true
+                },
+                {
+                  "key": "address_balance_gas_reject_gas_coin_arg",
+                  "value": false
+                },
+                {
+                  "key": "advance_epoch_start_time_in_safe_mode",
+                  "value": true
+                },
+                {
+                  "key": "advance_to_highest_supported_protocol_version",
+                  "value": true
+                },
+                {
+                  "key": "allow_dkg_completion_after_timeout",
+                  "value": false
+                },
+                {
+                  "key": "allow_private_accumulator_entrypoints",
+                  "value": false
+                },
+                {
+                  "key": "allow_receiving_object_id",
+                  "value": true
+                },
+                {
+                  "key": "allow_references_in_ptbs",
+                  "value": false
+                },
+                {
+                  "key": "allow_unbounded_system_objects",
+                  "value": true
+                },
+                {
+                  "key": "allowed_proposers",
+                  "value": true
+                },
+                {
+                  "key": "always_advance_dkg_to_resolution",
+                  "value": true
+                },
+                {
+                  "key": "authority_capabilities_v2",
+                  "value": true
+                },
+                {
+                  "key": "ban_entry_init",
+                  "value": true
+                },
+                {
+                  "key": "better_adapter_type_resolution_errors",
+                  "value": true
+                },
+                {
+                  "key": "better_loader_errors",
+                  "value": true
+                },
+                {
+                  "key": "bridge",
+                  "value": true
+                },
+                {
+                  "key": "cancel_for_failed_dkg_early",
+                  "value": true
+                },
+                {
+                  "key": "charge_ld_const_abstract_size",
+                  "value": true
+                },
+                {
+                  "key": "check_for_init_during_upgrade",
+                  "value": true
+                },
+                {
+                  "key": "check_object_funds_withdraw_in_execution",
+                  "value": false
+                },
+                {
+                  "key": "commit_root_state_digest",
+                  "value": true
+                },
+                {
+                  "key": "consensus_always_accept_system_transactions",
+                  "value": true
+                },
+                {
+                  "key": "consensus_batched_block_sync",
+                  "value": true
+                },
+                {
+                  "key": "consensus_checkpoint_signature_key_includes_digest",
+                  "value": true
+                },
+                {
+                  "key": "consensus_distributed_vote_scoring_strategy",
+                  "value": true
+                },
+                {
+                  "key": "consensus_linearize_subdag_v2",
+                  "value": true
+                },
+                {
+                  "key": "consensus_median_based_commit_timestamp",
+                  "value": true
+                },
+                {
+                  "key": "consensus_order_end_of_epoch_last",
+                  "value": true
+                },
+                {
+                  "key": "consensus_round_prober",
+                  "value": true
+                },
+                {
+                  "key": "consensus_round_prober_probe_accepted_rounds",
+                  "value": true
+                },
+                {
+                  "key": "consensus_skip_gced_accept_votes",
+                  "value": true
+                },
+                {
+                  "key": "consensus_skip_gced_blocks_in_direct_finalization",
+                  "value": true
+                },
+                {
+                  "key": "consensus_slim_block_propagation",
+                  "value": false
+                },
+                {
+                  "key": "consensus_smart_ancestor_selection",
+                  "value": true
+                },
+                {
+                  "key": "consensus_zstd_compression",
+                  "value": true
+                },
+                {
+                  "key": "convert_type_argument_error",
+                  "value": true
+                },
+                {
+                  "key": "convert_withdrawal_compatibility_ptb_arguments",
+                  "value": true
+                },
+                {
+                  "key": "correct_gas_payment_limit_check",
+                  "value": true
+                },
+                {
+                  "key": "create_forwarding_address_registry",
+                  "value": false
+                },
+                {
+                  "key": "create_root_accumulator_object",
+                  "value": true
+                },
+                {
+                  "key": "debug_fatal_on_move_invariant_violation",
+                  "value": true
+                },
+                {
+                  "key": "defer_owned_object_double_spend",
+                  "value": false
+                },
+                {
+                  "key": "defer_unpaid_amplification",
+                  "value": false
+                },
+                {
+                  "key": "dependency_linkage_error",
+                  "value": true
+                },
+                {
+                  "key": "deprecate_global_storage_ops",
+                  "value": true
+                },
+                {
+                  "key": "deprecate_global_storage_ops_during_deserialization",
+                  "value": false
+                },
+                {
+                  "key": "disable_effects_tx_dependencies",
+                  "value": false
+                },
+                {
+                  "key": "disable_entry_point_signature_check",
+                  "value": true
+                },
+                {
+                  "key": "disable_invariant_violation_check_in_swap_loc",
+                  "value": true
+                },
+                {
+                  "key": "disable_preconsensus_locking",
+                  "value": true
+                },
+                {
+                  "key": "disallow_adding_abilities_on_upgrade",
+                  "value": true
+                },
+                {
+                  "key": "disallow_change_struct_type_params_on_upgrade",
+                  "value": true
+                },
+                {
+                  "key": "disallow_jump_orphans",
+                  "value": true
+                },
+                {
+                  "key": "disallow_new_modules_in_deps_only_packages",
+                  "value": true
+                },
+                {
+                  "key": "disallow_self_identifier",
+                  "value": true
+                },
+                {
+                  "key": "early_exit_on_iffw",
+                  "value": true
+                },
+                {
+                  "key": "early_return_receive_object_mismatched_type",
+                  "value": true
+                },
+                {
+                  "key": "enable_accumulators",
+                  "value": true
+                },
+                {
+                  "key": "enable_address_balance_gas_payments",
+                  "value": true
+                },
+                {
+                  "key": "enable_allowances",
+                  "value": true
+                },
+                {
+                  "key": "enable_authenticated_event_streams",
+                  "value": true
+                },
+                {
+                  "key": "enable_coin_deny_list",
+                  "value": true
+                },
+                {
+                  "key": "enable_coin_deny_list_v2",
+                  "value": true
+                },
+                {
+                  "key": "enable_coin_registry",
+                  "value": true
+                },
+                {
+                  "key": "enable_coin_reservation_obj_refs",
+                  "value": true
+                },
+                {
+                  "key": "enable_display_registry",
+                  "value": true
+                },
+                {
+                  "key": "enable_effects_v2",
+                  "value": true
+                },
+                {
+                  "key": "enable_forwarding_addresses",
+                  "value": false
+                },
+                {
+                  "key": "enable_gasless",
+                  "value": true
+                },
+                {
+                  "key": "enable_group_ops_native_function_msm",
+                  "value": false
+                },
+                {
+                  "key": "enable_group_ops_native_functions",
+                  "value": true
+                },
+                {
+                  "key": "enable_init_on_upgrade",
+                  "value": true
+                },
+                {
+                  "key": "enable_jwk_consensus_updates",
+                  "value": true
+                },
+                {
+                  "key": "enable_multi_epoch_transaction_expiration",
+                  "value": true
+                },
+                {
+                  "key": "enable_nitro_attestation",
+                  "value": true
+                },
+                {
+                  "key": "enable_nitro_attestation_all_nonzero_pcrs_parsing",
+                  "value": true
+                },
+                {
+                  "key": "enable_nitro_attestation_always_include_required_pcrs_parsing",
+                  "value": true
+                },
+                {
+                  "key": "enable_nitro_attestation_upgraded_parsing",
+                  "value": true
+                },
+                {
+                  "key": "enable_non_exclusive_writes",
+                  "value": false
+                },
+                {
+                  "key": "enable_object_funds_withdraw",
+                  "value": true
+                },
+                {
+                  "key": "enable_order_independent_upgrade_init_linkage",
+                  "value": true
+                },
+                {
+                  "key": "enable_party_transfer",
+                  "value": true
+                },
+                {
+                  "key": "enable_poseidon",
+                  "value": true
+                },
+                {
+                  "key": "enable_ptb_execution_v2",
+                  "value": true
+                },
+                {
+                  "key": "enable_ristretto255_group_ops",
+                  "value": false
+                },
+                {
+                  "key": "enable_unified_linkage",
+                  "value": true
+                },
+                {
+                  "key": "enable_vdf",
+                  "value": false
+                },
+                {
+                  "key": "enable_verify_bulletproofs_ristretto255",
+                  "value": false
+                },
+                {
+                  "key": "end_of_epoch_transaction_supported",
+                  "value": true
+                },
+                {
+                  "key": "enforce_address_balance_change_invariant",
+                  "value": false
+                },
+                {
+                  "key": "enforce_checkpoint_timestamp_monotonicity",
+                  "value": true
+                },
+                {
+                  "key": "fix_checkpoint_signature_mapping",
+                  "value": true
+                },
+                {
+                  "key": "fix_ptb_generated_reads",
+                  "value": true
+                },
+                {
+                  "key": "flexible_tx_context_positions",
+                  "value": true
+                },
+                {
+                  "key": "framework_tx_context_mut_restrictions",
+                  "value": true
+                },
+                {
+                  "key": "fresh_vm_on_framework_upgrade",
+                  "value": true
+                },
+                {
+                  "key": "gas_rounding_halve_digits",
+                  "value": true
+                },
+                {
+                  "key": "gasless_transaction_drop_safety",
+                  "value": true
+                },
+                {
+                  "key": "gasless_verify_remaining_balance",
+                  "value": true
+                },
+                {
+                  "key": "generate_df_type_layouts",
+                  "value": true
+                },
+                {
+                  "key": "granular_post_execution_checks",
+                  "value": true
+                },
+                {
+                  "key": "harden_linkage_consistency",
+                  "value": true
+                },
+                {
+                  "key": "hardened_otw_check",
+                  "value": true
+                },
+                {
+                  "key": "ignore_execution_time_observations_after_certs_closed",
+                  "value": true
+                },
+                {
+                  "key": "include_cancelled_randomness_txns_in_prologue",
+                  "value": true
+                },
+                {
+                  "key": "include_checkpoint_artifacts_digest_in_summary",
+                  "value": true
+                },
+                {
+                  "key": "include_consensus_digest_in_prologue",
+                  "value": true
+                },
+                {
+                  "key": "include_function_signatures_in_instantiation_limits",
+                  "value": true
+                },
+                {
+                  "key": "limit_groth16_pvk_inputs",
+                  "value": true
+                },
+                {
+                  "key": "loaded_child_object_format",
+                  "value": true
+                },
+                {
+                  "key": "loaded_child_object_format_type",
+                  "value": true
+                },
+                {
+                  "key": "loaded_child_objects_fixed",
+                  "value": true
+                },
+                {
+                  "key": "max_ptb_value_size_v2",
+                  "value": true
+                },
+                {
+                  "key": "memory_safety_invariant_check_v2",
+                  "value": true
+                },
+                {
+                  "key": "merge_colliding_deferrals",
+                  "value": true
+                },
+                {
+                  "key": "merge_randomness_into_checkpoint",
+                  "value": true
+                },
+                {
+                  "key": "minimize_child_object_mutations",
+                  "value": true
+                },
+                {
+                  "key": "missing_type_is_compatibility_error",
+                  "value": true
+                },
+                {
+                  "key": "move_native_context",
+                  "value": true
+                },
+                {
+                  "key": "mysticeti_fastpath",
+                  "value": true
+                },
+                {
+                  "key": "mysticeti_leader_scoring_and_schedule",
+                  "value": true
+                },
+                {
+                  "key": "mysticeti_use_committed_subdag_digest",
+                  "value": true
+                },
+                {
+                  "key": "narwhal_certificate_v2",
+                  "value": true
+                },
+                {
+                  "key": "narwhal_new_leader_election_schedule",
+                  "value": true
+                },
+                {
+                  "key": "narwhal_versioned_metadata",
+                  "value": true
+                },
+                {
+                  "key": "native_charging_v2",
+                  "value": true
+                },
+                {
+                  "key": "no_extraneous_module_bytes",
+                  "value": true
+                },
+                {
+                  "key": "normalize_depth_formula",
+                  "value": true
+                },
+                {
+                  "key": "normalize_ptb_arguments",
+                  "value": true
+                },
+                {
+                  "key": "object_runtime_charge_cache_load_gas",
+                  "value": true
+                },
+                {
+                  "key": "package_digest_hash_module",
+                  "value": true
+                },
+                {
+                  "key": "package_upgrades",
+                  "value": true
+                },
+                {
+                  "key": "passkey_auth",
+                  "value": true
+                },
+                {
+                  "key": "per_command_shared_object_transfer_rules",
+                  "value": false
+                },
+                {
+                  "key": "prepend_prologue_tx_in_consensus_commit_in_checkpoints",
+                  "value": true
+                },
+                {
+                  "key": "private_generics_verifier_v2",
+                  "value": true
+                },
+                {
+                  "key": "ptb_tx_context_restrictions",
+                  "value": true
+                },
+                {
+                  "key": "random_beacon",
+                  "value": true
+                },
+                {
+                  "key": "randomize_checkpoint_tx_limit_in_tests",
+                  "value": true
+                },
+                {
+                  "key": "receive_objects",
+                  "value": true
+                },
+                {
+                  "key": "recompute_has_public_transfer_in_execution",
+                  "value": true
+                },
+                {
+                  "key": "record_additional_state_digest_in_prologue",
+                  "value": true
+                },
+                {
+                  "key": "record_consensus_determined_version_assignments_in_prologue",
+                  "value": true
+                },
+                {
+                  "key": "record_consensus_determined_version_assignments_in_prologue_v2",
+                  "value": true
+                },
+                {
+                  "key": "record_net_unsettled_object_withdraws",
+                  "value": true
+                },
+                {
+                  "key": "record_time_estimate_processed",
+                  "value": true
+                },
+                {
+                  "key": "reject_mutable_random_on_entry_functions",
+                  "value": true
+                },
+                {
+                  "key": "relax_valid_during_for_owned_inputs",
+                  "value": true
+                },
+                {
+                  "key": "relocate_event_module",
+                  "value": true
+                },
+                {
+                  "key": "reshare_at_same_initial_version",
+                  "value": true
+                },
+                {
+                  "key": "resolve_abort_locations_to_package_id",
+                  "value": true
+                },
+                {
+                  "key": "resolve_type_input_ids_to_defining_id",
+                  "value": true
+                },
+                {
+                  "key": "restrict_hot_or_not_entry_functions",
+                  "value": true
+                },
+                {
+                  "key": "rethrow_serialization_type_layout_errors",
+                  "value": true
+                },
+                {
+                  "key": "scoring_decision_with_validity_cutoff",
+                  "value": true
+                },
+                {
+                  "key": "share_transaction_deny_config_in_consensus",
+                  "value": true
+                },
+                {
+                  "key": "shared_object_deletion",
+                  "value": true
+                },
+                {
+                  "key": "simple_conservation_checks",
+                  "value": true
+                },
+                {
+                  "key": "simplified_unwrap_then_delete",
+                  "value": true
+                },
+                {
+                  "key": "soft_bundle",
+                  "value": true
+                },
+                {
+                  "key": "split_checkpoints_in_consensus_handler",
+                  "value": true
+                },
+                {
+                  "key": "throughput_aware_consensus_submission",
+                  "value": false
+                },
+                {
+                  "key": "timestamp_based_epoch_close",
+                  "value": true
+                },
+                {
+                  "key": "txn_base_cost_as_multiplier",
+                  "value": true
+                },
+                {
+                  "key": "type_tags_in_object_runtime",
+                  "value": true
+                },
+                {
+                  "key": "uncompressed_g1_group_elements",
+                  "value": true
+                },
+                {
+                  "key": "upgraded_multisig_supported",
+                  "value": true
+                },
+                {
+                  "key": "use_coin_party_owner",
+                  "value": true
+                },
+                {
+                  "key": "use_mfp_txns_in_load_initial_object_debts",
+                  "value": true
+                },
+                {
+                  "key": "use_new_commit_handler",
+                  "value": true
+                },
+                {
+                  "key": "validate_identifier_inputs",
+                  "value": true
+                },
+                {
+                  "key": "validate_ptb_argument_indices",
+                  "value": true
+                },
+                {
+                  "key": "validate_zklogin_public_identifier",
+                  "value": true
+                },
+                {
+                  "key": "validator_metadata_verify_v2",
+                  "value": true
+                },
+                {
+                  "key": "variant_nodes",
+                  "value": true
+                },
+                {
+                  "key": "verify_legacy_zklogin_address",
+                  "value": true
+                },
+                {
+                  "key": "zklogin_auth",
+                  "value": true
+                }
+              ]
+            }
+          },
+          "package": {
+            "version": 60
+          }
+        }
+      }
+    },
+    "testnet": {
+      "network": "testnet",
+      "endpoint": "https://graphql.testnet.sui.io/graphql",
+      "readAt": "2026-10-23T19:46:47.445Z",
+      "query": "{ chainIdentifier epoch { epochId protocolConfigs { protocolVersion featureFlags { key value } } } package(address:\"0x2\") { version } }",
+      "response": {
+        "data": {
+          "chainIdentifier": "69WiPg3DAQiwdxfncX6wYQ2siKwAe6L9BZthQea3JNMD",
+          "epoch": {
+            "epochId": 1261,
+            "protocolConfigs": {
+              "protocolVersion": 139,
+              "featureFlags": [
+                {
+                  "key": "abstract_size_in_object_runtime",
+                  "value": true
+                },
+                {
+                  "key": "accept_passkey_in_multisig",
+                  "value": true
+                },
+                {
+                  "key": "accept_zklogin_in_multisig",
+                  "value": true
+                },
+                {
+                  "key": "additional_borrow_checks",
+                  "value": true
+                },
+                {
+                  "key": "additional_consensus_digest_indirect_state",
+                  "value": true
+                },
+                {
+                  "key": "additional_multisig_checks",
+                  "value": true
+                },
+                {
+                  "key": "address_aliases",
+                  "value": true
+                },
+                {
+                  "key": "address_balance_gas_check_rgp_at_signing",
+                  "value": true
+                },
+                {
+                  "key": "address_balance_gas_reject_gas_coin_arg",
+                  "value": false
+                },
+                {
+                  "key": "advance_epoch_start_time_in_safe_mode",
+                  "value": true
+                },
+                {
+                  "key": "advance_to_highest_supported_protocol_version",
+                  "value": true
+                },
+                {
+                  "key": "allow_dkg_completion_after_timeout",
+                  "value": true
+                },
+                {
+                  "key": "allow_private_accumulator_entrypoints",
+                  "value": false
+                },
+                {
+                  "key": "allow_receiving_object_id",
+                  "value": true
+                },
+                {
+                  "key": "allow_references_in_ptbs",
+                  "value": false
+                },
+                {
+                  "key": "allow_unbounded_system_objects",
+                  "value": true
+                },
+                {
+                  "key": "allowed_proposers",
+                  "value": true
+                },
+                {
+                  "key": "always_advance_dkg_to_resolution",
+                  "value": true
+                },
+                {
+                  "key": "authority_capabilities_v2",
+                  "value": true
+                },
+                {
+                  "key": "ban_entry_init",
+                  "value": true
+                },
+                {
+                  "key": "better_adapter_type_resolution_errors",
+                  "value": true
+                },
+                {
+                  "key": "better_loader_errors",
+                  "value": true
+                },
+                {
+                  "key": "bridge",
+                  "value": true
+                },
+                {
+                  "key": "cancel_for_failed_dkg_early",
+                  "value": true
+                },
+                {
+                  "key": "charge_ld_const_abstract_size",
+                  "value": true
+                },
+                {
+                  "key": "check_for_init_during_upgrade",
+                  "value": true
+                },
+                {
+                  "key": "check_object_funds_withdraw_in_execution",
+                  "value": true
+                },
+                {
+                  "key": "commit_root_state_digest",
+                  "value": true
+                },
+                {
+                  "key": "consensus_always_accept_system_transactions",
+                  "value": true
+                },
+                {
+                  "key": "consensus_batched_block_sync",
+                  "value": true
+                },
+                {
+                  "key": "consensus_checkpoint_signature_key_includes_digest",
+                  "value": true
+                },
+                {
+                  "key": "consensus_distributed_vote_scoring_strategy",
+                  "value": true
+                },
+                {
+                  "key": "consensus_linearize_subdag_v2",
+                  "value": true
+                },
+                {
+                  "key": "consensus_median_based_commit_timestamp",
+                  "value": true
+                },
+                {
+                  "key": "consensus_order_end_of_epoch_last",
+                  "value": true
+                },
+                {
+                  "key": "consensus_round_prober",
+                  "value": true
+                },
+                {
+                  "key": "consensus_round_prober_probe_accepted_rounds",
+                  "value": true
+                },
+                {
+                  "key": "consensus_skip_gced_accept_votes",
+                  "value": true
+                },
+                {
+                  "key": "consensus_skip_gced_blocks_in_direct_finalization",
+                  "value": true
+                },
+                {
+                  "key": "consensus_slim_block_propagation",
+                  "value": false
+                },
+                {
+                  "key": "consensus_smart_ancestor_selection",
+                  "value": true
+                },
+                {
+                  "key": "consensus_zstd_compression",
+                  "value": true
+                },
+                {
+                  "key": "convert_type_argument_error",
+                  "value": true
+                },
+                {
+                  "key": "convert_withdrawal_compatibility_ptb_arguments",
+                  "value": true
+                },
+                {
+                  "key": "correct_gas_payment_limit_check",
+                  "value": true
+                },
+                {
+                  "key": "create_forwarding_address_registry",
+                  "value": false
+                },
+                {
+                  "key": "create_root_accumulator_object",
+                  "value": true
+                },
+                {
+                  "key": "debug_fatal_on_move_invariant_violation",
+                  "value": true
+                },
+                {
+                  "key": "defer_owned_object_double_spend",
+                  "value": false
+                },
+                {
+                  "key": "defer_unpaid_amplification",
+                  "value": false
+                },
+                {
+                  "key": "dependency_linkage_error",
+                  "value": true
+                },
+                {
+                  "key": "deprecate_global_storage_ops",
+                  "value": true
+                },
+                {
+                  "key": "deprecate_global_storage_ops_during_deserialization",
+                  "value": false
+                },
+                {
+                  "key": "disable_effects_tx_dependencies",
+                  "value": true
+                },
+                {
+                  "key": "disable_entry_point_signature_check",
+                  "value": true
+                },
+                {
+                  "key": "disable_invariant_violation_check_in_swap_loc",
+                  "value": true
+                },
+                {
+                  "key": "disable_preconsensus_locking",
+                  "value": true
+                },
+                {
+                  "key": "disallow_adding_abilities_on_upgrade",
+                  "value": true
+                },
+                {
+                  "key": "disallow_change_struct_type_params_on_upgrade",
+                  "value": true
+                },
+                {
+                  "key": "disallow_jump_orphans",
+                  "value": true
+                },
+                {
+                  "key": "disallow_new_modules_in_deps_only_packages",
+                  "value": true
+                },
+                {
+                  "key": "disallow_self_identifier",
+                  "value": true
+                },
+                {
+                  "key": "early_exit_on_iffw",
+                  "value": true
+                },
+                {
+                  "key": "early_return_receive_object_mismatched_type",
+                  "value": true
+                },
+                {
+                  "key": "enable_accumulators",
+                  "value": true
+                },
+                {
+                  "key": "enable_address_balance_gas_payments",
+                  "value": true
+                },
+                {
+                  "key": "enable_allowances",
+                  "value": true
+                },
+                {
+                  "key": "enable_authenticated_event_streams",
+                  "value": true
+                },
+                {
+                  "key": "enable_coin_deny_list",
+                  "value": true
+                },
+                {
+                  "key": "enable_coin_deny_list_v2",
+                  "value": true
+                },
+                {
+                  "key": "enable_coin_registry",
+                  "value": true
+                },
+                {
+                  "key": "enable_coin_reservation_obj_refs",
+                  "value": true
+                },
+                {
+                  "key": "enable_display_registry",
+                  "value": true
+                },
+                {
+                  "key": "enable_effects_v2",
+                  "value": true
+                },
+                {
+                  "key": "enable_forwarding_addresses",
+                  "value": false
+                },
+                {
+                  "key": "enable_gasless",
+                  "value": true
+                },
+                {
+                  "key": "enable_group_ops_native_function_msm",
+                  "value": false
+                },
+                {
+                  "key": "enable_group_ops_native_functions",
+                  "value": true
+                },
+                {
+                  "key": "enable_init_on_upgrade",
+                  "value": true
+                },
+                {
+                  "key": "enable_jwk_consensus_updates",
+                  "value": true
+                },
+                {
+                  "key": "enable_multi_epoch_transaction_expiration",
+                  "value": true
+                },
+                {
+                  "key": "enable_nitro_attestation",
+                  "value": true
+                },
+                {
+                  "key": "enable_nitro_attestation_all_nonzero_pcrs_parsing",
+                  "value": true
+                },
+                {
+                  "key": "enable_nitro_attestation_always_include_required_pcrs_parsing",
+                  "value": true
+                },
+                {
+                  "key": "enable_nitro_attestation_upgraded_parsing",
+                  "value": true
+                },
+                {
+                  "key": "enable_non_exclusive_writes",
+                  "value": false
+                },
+                {
+                  "key": "enable_object_funds_withdraw",
+                  "value": true
+                },
+                {
+                  "key": "enable_order_independent_upgrade_init_linkage",
+                  "value": true
+                },
+                {
+                  "key": "enable_party_transfer",
+                  "value": true
+                },
+                {
+                  "key": "enable_poseidon",
+                  "value": true
+                },
+                {
+                  "key": "enable_ptb_execution_v2",
+                  "value": true
+                },
+                {
+                  "key": "enable_ristretto255_group_ops",
+                  "value": true
+                },
+                {
+                  "key": "enable_unified_linkage",
+                  "value": true
+                },
+                {
+                  "key": "enable_vdf",
+                  "value": false
+                },
+                {
+                  "key": "enable_verify_bulletproofs_ristretto255",
+                  "value": true
+                },
+                {
+                  "key": "end_of_epoch_transaction_supported",
+                  "value": true
+                },
+                {
+                  "key": "enforce_address_balance_change_invariant",
+                  "value": false
+                },
+                {
+                  "key": "enforce_checkpoint_timestamp_monotonicity",
+                  "value": true
+                },
+                {
+                  "key": "fix_checkpoint_signature_mapping",
+                  "value": true
+                },
+                {
+                  "key": "fix_ptb_generated_reads",
+                  "value": true
+                },
+                {
+                  "key": "flexible_tx_context_positions",
+                  "value": true
+                },
+                {
+                  "key": "framework_tx_context_mut_restrictions",
+                  "value": true
+                },
+                {
+                  "key": "fresh_vm_on_framework_upgrade",
+                  "value": true
+                },
+                {
+                  "key": "gas_rounding_halve_digits",
+                  "value": true
+                },
+                {
+                  "key": "gasless_transaction_drop_safety",
+                  "value": true
+                },
+                {
+                  "key": "gasless_verify_remaining_balance",
+                  "value": true
+                },
+                {
+                  "key": "generate_df_type_layouts",
+                  "value": true
+                },
+                {
+                  "key": "granular_post_execution_checks",
+                  "value": true
+                },
+                {
+                  "key": "harden_linkage_consistency",
+                  "value": true
+                },
+                {
+                  "key": "hardened_otw_check",
+                  "value": true
+                },
+                {
+                  "key": "ignore_execution_time_observations_after_certs_closed",
+                  "value": true
+                },
+                {
+                  "key": "include_cancelled_randomness_txns_in_prologue",
+                  "value": true
+                },
+                {
+                  "key": "include_checkpoint_artifacts_digest_in_summary",
+                  "value": true
+                },
+                {
+                  "key": "include_consensus_digest_in_prologue",
+                  "value": true
+                },
+                {
+                  "key": "include_function_signatures_in_instantiation_limits",
+                  "value": true
+                },
+                {
+                  "key": "limit_groth16_pvk_inputs",
+                  "value": true
+                },
+                {
+                  "key": "loaded_child_object_format",
+                  "value": true
+                },
+                {
+                  "key": "loaded_child_object_format_type",
+                  "value": true
+                },
+                {
+                  "key": "loaded_child_objects_fixed",
+                  "value": true
+                },
+                {
+                  "key": "max_ptb_value_size_v2",
+                  "value": true
+                },
+                {
+                  "key": "memory_safety_invariant_check_v2",
+                  "value": true
+                },
+                {
+                  "key": "merge_colliding_deferrals",
+                  "value": true
+                },
+                {
+                  "key": "merge_randomness_into_checkpoint",
+                  "value": true
+                },
+                {
+                  "key": "minimize_child_object_mutations",
+                  "value": true
+                },
+                {
+                  "key": "missing_type_is_compatibility_error",
+                  "value": true
+                },
+                {
+                  "key": "move_native_context",
+                  "value": true
+                },
+                {
+                  "key": "mysticeti_fastpath",
+                  "value": true
+                },
+                {
+                  "key": "mysticeti_leader_scoring_and_schedule",
+                  "value": true
+                },
+                {
+                  "key": "mysticeti_use_committed_subdag_digest",
+                  "value": true
+                },
+                {
+                  "key": "narwhal_certificate_v2",
+                  "value": true
+                },
+                {
+                  "key": "narwhal_new_leader_election_schedule",
+                  "value": true
+                },
+                {
+                  "key": "narwhal_versioned_metadata",
+                  "value": true
+                },
+                {
+                  "key": "native_charging_v2",
+                  "value": true
+                },
+                {
+                  "key": "no_extraneous_module_bytes",
+                  "value": true
+                },
+                {
+                  "key": "normalize_depth_formula",
+                  "value": true
+                },
+                {
+                  "key": "normalize_ptb_arguments",
+                  "value": true
+                },
+                {
+                  "key": "object_runtime_charge_cache_load_gas",
+                  "value": true
+                },
+                {
+                  "key": "package_digest_hash_module",
+                  "value": true
+                },
+                {
+                  "key": "package_upgrades",
+                  "value": true
+                },
+                {
+                  "key": "passkey_auth",
+                  "value": true
+                },
+                {
+                  "key": "per_command_shared_object_transfer_rules",
+                  "value": false
+                },
+                {
+                  "key": "prepend_prologue_tx_in_consensus_commit_in_checkpoints",
+                  "value": true
+                },
+                {
+                  "key": "private_generics_verifier_v2",
+                  "value": true
+                },
+                {
+                  "key": "ptb_tx_context_restrictions",
+                  "value": true
+                },
+                {
+                  "key": "random_beacon",
+                  "value": true
+                },
+                {
+                  "key": "randomize_checkpoint_tx_limit_in_tests",
+                  "value": true
+                },
+                {
+                  "key": "receive_objects",
+                  "value": true
+                },
+                {
+                  "key": "recompute_has_public_transfer_in_execution",
+                  "value": true
+                },
+                {
+                  "key": "record_additional_state_digest_in_prologue",
+                  "value": true
+                },
+                {
+                  "key": "record_consensus_determined_version_assignments_in_prologue",
+                  "value": true
+                },
+                {
+                  "key": "record_consensus_determined_version_assignments_in_prologue_v2",
+                  "value": true
+                },
+                {
+                  "key": "record_net_unsettled_object_withdraws",
+                  "value": true
+                },
+                {
+                  "key": "record_time_estimate_processed",
+                  "value": true
+                },
+                {
+                  "key": "reject_mutable_random_on_entry_functions",
+                  "value": true
+                },
+                {
+                  "key": "relax_valid_during_for_owned_inputs",
+                  "value": true
+                },
+                {
+                  "key": "relocate_event_module",
+                  "value": true
+                },
+                {
+                  "key": "reshare_at_same_initial_version",
+                  "value": true
+                },
+                {
+                  "key": "resolve_abort_locations_to_package_id",
+                  "value": true
+                },
+                {
+                  "key": "resolve_type_input_ids_to_defining_id",
+                  "value": true
+                },
+                {
+                  "key": "restrict_hot_or_not_entry_functions",
+                  "value": true
+                },
+                {
+                  "key": "rethrow_serialization_type_layout_errors",
+                  "value": true
+                },
+                {
+                  "key": "scoring_decision_with_validity_cutoff",
+                  "value": true
+                },
+                {
+                  "key": "share_transaction_deny_config_in_consensus",
+                  "value": true
+                },
+                {
+                  "key": "shared_object_deletion",
+                  "value": true
+                },
+                {
+                  "key": "simple_conservation_checks",
+                  "value": true
+                },
+                {
+                  "key": "simplified_unwrap_then_delete",
+                  "value": true
+                },
+                {
+                  "key": "soft_bundle",
+                  "value": true
+                },
+                {
+                  "key": "split_checkpoints_in_consensus_handler",
+                  "value": true
+                },
+                {
+                  "key": "throughput_aware_consensus_submission",
+                  "value": false
+                },
+                {
+                  "key": "timestamp_based_epoch_close",
+                  "value": true
+                },
+                {
+                  "key": "txn_base_cost_as_multiplier",
+                  "value": true
+                },
+                {
+                  "key": "type_tags_in_object_runtime",
+                  "value": true
+                },
+                {
+                  "key": "uncompressed_g1_group_elements",
+                  "value": true
+                },
+                {
+                  "key": "upgraded_multisig_supported",
+                  "value": true
+                },
+                {
+                  "key": "use_coin_party_owner",
+                  "value": true
+                },
+                {
+                  "key": "use_mfp_txns_in_load_initial_object_debts",
+                  "value": true
+                },
+                {
+                  "key": "use_new_commit_handler",
+                  "value": true
+                },
+                {
+                  "key": "validate_identifier_inputs",
+                  "value": true
+                },
+                {
+                  "key": "validate_ptb_argument_indices",
+                  "value": true
+                },
+                {
+                  "key": "validate_zklogin_public_identifier",
+                  "value": true
+                },
+                {
+                  "key": "validator_metadata_verify_v2",
+                  "value": true
+                },
+                {
+                  "key": "variant_nodes",
+                  "value": true
+                },
+                {
+                  "key": "verify_legacy_zklogin_address",
+                  "value": true
+                },
+                {
+                  "key": "zklogin_auth",
+                  "value": true
+                }
+              ]
+            }
+          },
+          "package": {
+            "version": 58
+          }
+        }
+      }
+    }
+  }
+}

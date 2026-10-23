@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Floating Zeke</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&amp;family=Geist+Mono:wght@500;600;700&amp;display=swap">
+<style>
+body{margin:0}
+*{box-sizing:border-box}
+.num{font-variant-numeric:tabular-nums}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border-radius:99px;border:1px solid rgba(13,99,112,.28);background:#fff;color:#0d6370;font-weight:600;font-size:13px;cursor:pointer}
+.panel{width:400px;height:640px;border-radius:20px;overflow:hidden;background:#fffdf9;border:1px solid rgba(12,62,72,.14);box-shadow:0 30px 60px -24px rgba(8,54,64,.45);display:flex;flex-direction:column}
+.limit{display:flex;gap:8px;align-items:flex-start;padding:9px 11px;border-radius:10px;background:#fdf3dc;color:#5e4310;font-size:12.5px;line-height:1.45}
+button{font:inherit}
+</style>
+</helmet>
+<div style="width: 900px; height: 720px; padding: 40px 34px; display: flex; gap: 32px; font-family: Geist, ui-sans-serif, system-ui, sans-serif; color: #0c3e48; background: linear-gradient(180deg, #efe6e0, #e5d9d1)">
+
+<!-- A: just opened -->
+<section aria-label="Zeke, just opened" class="panel">
+<div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; background: linear-gradient(90deg, #0c3e48, #0d6370); color: #fff">
+<span style="display: flex; align-items: center; gap: 10px"><img src="/_blob/4a88e0ea54eac28f14bd4a37b2e206a8" alt="" style="width: 32px; height: 32px; border-radius: 50%; background: radial-gradient(circle at 50% 35%, #eaf6f1, #cfe8e0); box-shadow: 0 0 0 1px rgba(239,196,111,.45)"><span style="display: flex; flex-direction: column; line-height: 1.2"><strong style="font-size: 14px">Zeke</strong><span style="font-size: 12px; color: rgba(255,255,255,.82); display: flex; align-items: center; gap: 6px"><span style="width: 6px; height: 6px; border-radius: 50%; background: #6fd3a8"></span>Online</span></span></span>
+<span style="display: flex; gap: 4px"><button type="button" aria-label="Open Zeke page" style="width: 32px; height: 32px; border: 0; border-radius: 8px; background: transparent; color: #fff; display: grid; place-items: center"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></button><button type="button" aria-label="Close Zeke" style="width: 32px; height: 32px; border: 0; border-radius: 8px; background: transparent; color: #fff; display: grid; place-items: center"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button></span>
+</div>
+<div style="flex: 1; padding: 16px; display: flex; flex-direction: column; gap: 12px; overflow: hidden">
+<div style="display: flex; gap: 10px; align-items: flex-start">
+<img src="/_blob/4a88e0ea54eac28f14bd4a37b2e206a8" alt="" style="width: 26px; height: 26px; border-radius: 50%; background: #e3f2ed; flex: none">
+<div style="display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border-radius: 4px 14px 14px 14px; background: #f1ebe3; font-size: 14px; line-height: 1.5">
+<span>Hi Nadia. Two payments are waiting for approval, and one rate expires in 3 minutes. What would you like to look at?</span>
+<div style="display: flex; flex-wrap: wrap; gap: 6px">
+<button type="button" class="chip">Approvals (2)</button>
+<button type="button" class="chip">Balances</button>
+<button type="button" class="chip">Receipts</button>
+<button type="button" class="chip">Treasury</button>
+</div>
+</div>
+</div>
+</div>
+<div style="padding: 10px 12px 12px; border-top: 1px solid rgba(50,98,115,.1); display: flex; gap: 8px; align-items: center">
+<label for="fz1" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Ask Zeke</label>
+<input id="fz1" placeholder="Ask Zeke, or attach an invoice" style="flex: 1; min-width: 0; border: 1px solid rgba(50,98,115,.18); border-radius: 12px; padding: 11px 12px; font: inherit; font-size: 14px; outline: none; background: #fff">
+<button type="button" aria-label="Attach a file" style="width: 40px; height: 40px; border: 0; border-radius: 10px; background: transparent; color: #326273; display: grid; place-items: center"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m21 11-8.5 8.5a5 5 0 0 1-7-7L14 4a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-3-3L15 7"/></svg></button>
+<button type="button" aria-label="Send message" style="width: 40px; height: 40px; border: 0; border-radius: 10px; background: #0c3e48; color: #fff; display: grid; place-items: center"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+</div>
+</section>
+
+<!-- B: asked to send money -->
+<section aria-label="Zeke, asked to send money" class="panel">
+<div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; background: linear-gradient(90deg, #0c3e48, #0d6370); color: #fff">
+<span style="display: flex; align-items: center; gap: 10px"><img src="/_blob/4a88e0ea54eac28f14bd4a37b2e206a8" alt="" style="width: 32px; height: 32px; border-radius: 50%; background: radial-gradient(circle at 50% 35%, #eaf6f1, #cfe8e0)"><span style="display: flex; flex-direction: column; line-height: 1.2"><strong style="font-size: 14px">Zeke</strong><span style="font-size: 12px; color: rgba(255,255,255,.82)">Online</span></span></span>
+<button type="button" aria-label="Close Zeke" style="width: 32px; height: 32px; border: 0; border-radius: 8px; background: transparent; color: #fff; display: grid; place-items: center"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+</div>
+<div style="flex: 1; padding: 16px; display: flex; flex-direction: column; gap: 12px; overflow: hidden">
+<div style="align-self: flex-end; max-width: 80%; padding: 10px 13px; border-radius: 14px 14px 4px 14px; background: #0c3e48; color: #fffaf4; font-size: 14px">Send 2,400 USDC to Kedai Teknik</div>
+<div style="display: flex; gap: 10px; align-items: flex-start">
+<img src="/_blob/4a88e0ea54eac28f14bd4a37b2e206a8" alt="" style="width: 26px; height: 26px; border-radius: 50%; background: #e3f2ed; flex: none">
+<div style="flex: 1; display: flex; flex-direction: column; gap: 10px">
+<div class="limit"><svg width="15" height="15" viewBox="0 0 24 24" style="flex: none; margin-top: 1px" aria-hidden="true"><circle cx="12" cy="12" r="11" fill="#efc46f"/><path d="M12 7v6M12 16.5h.01" stroke="#0c3e48" stroke-width="2.4" stroke-linecap="round"/></svg><span>I can't send money. I'll prepare it, and you approve and sign it yourself.</span></div>
+<div class="num" style="border: 1px solid rgba(50,98,115,.16); border-radius: 12px; background: #fff; overflow: hidden">
+<div style="padding: 12px 14px; display: flex; flex-direction: column; gap: 4px">
+<span style="font-size: 12px; color: #4e6f78">Draft · Splash business · free</span>
+<span style="font-weight: 700">Kedai Teknik Sdn Bhd</span>
+<span style="font-size: 20px; font-weight: 800; color: #0d6370">2,400.00 USDC</span>
+<span style="font-size: 12px; color: #4e6f78">From your Splash Wallet · arrives in seconds</span>
+</div>
+<div style="display: flex; gap: 8px; padding: 10px 14px; border-top: 1px solid rgba(50,98,115,.1); background: #fbf6ee">
+<button type="button" style="flex: 1; padding: 10px; border-radius: 10px; border: 0; background: #0c3e48; color: #fff; font-weight: 700; font-size: 13px">Review and sign</button>
+<button type="button" style="padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(50,98,115,.2); background: #fff; color: #0c3e48; font-weight: 600; font-size: 13px">Edit</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div style="padding: 10px 12px 12px; border-top: 1px solid rgba(50,98,115,.1); display: flex; gap: 8px; align-items: center">
+<label for="fz2" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Ask Zeke</label>
+<input id="fz2" placeholder="Ask Zeke, or attach an invoice" style="flex: 1; min-width: 0; border: 1px solid rgba(50,98,115,.18); border-radius: 12px; padding: 11px 12px; font: inherit; font-size: 14px; outline: none; background: #fff">
+<button type="button" aria-label="Send message" style="width: 40px; height: 40px; border: 0; border-radius: 10px; background: #0c3e48; color: #fff; display: grid; place-items: center"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+</div>
+</section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":900,"height":720}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>How it works pop-up</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800;900&amp;family=Geist+Mono:wght@500;600;700&amp;display=swap">
+<style>
+body{margin:0}
+*{box-sizing:border-box}
+.num{font-variant-numeric:tabular-nums}
+.mono{font-family:'Geist Mono',ui-monospace,monospace}
+.step{display:grid;grid-template-columns:40px 1fr;gap:14px;padding:14px 0;border-top:1px solid rgba(50,98,115,.12)}
+.sn{width:32px;height:32px;border-radius:9px;background:#0c3e48;color:#fff;display:grid;place-items:center;font-weight:700;font-size:14px}
+.st{margin:0;font-size:16px;font-weight:700}
+.sd{margin:3px 0 0;font-size:13.5px;color:#326273;line-height:1.5}
+button{font:inherit}
+</style>
+</helmet>
+<div style="position: relative; width: 1440px; height: 900px; overflow: hidden; font-family: Geist, ui-sans-serif, system-ui, sans-serif; color: #0c3e48; background: linear-gradient(180deg, #f3ece7, #e9ded7)">
+<div aria-hidden="true" style="position: absolute; left: 0; top: 0; bottom: 0; width: 240px; background: #1F4452"></div>
+<div aria-hidden="true" style="position: absolute; left: 262px; right: 22px; top: 82px; height: 150px; border-radius: 18px; background: #0c3e48"></div>
+<div aria-hidden="true" style="position: absolute; left: 262px; right: 22px; top: 250px; height: 60px; border-radius: 14px; background: #fffaf2"></div>
+<div aria-hidden="true" style="position: absolute; left: 262px; width: 760px; top: 328px; height: 520px; border-radius: 14px; background: #fffaf2"></div>
+<div aria-hidden="true" style="position: absolute; left: 1040px; right: 22px; top: 328px; height: 260px; border-radius: 16px; background: #0c3e48"></div>
+<div aria-hidden="true" style="position: absolute; inset: 0; background: rgba(8,54,64,.42); backdrop-filter: blur(7px)"></div>
+
+<div role="dialog" aria-modal="true" aria-labelledby="hiw-title" style="position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 980px; max-height: 820px; background: #fffaf2; border-radius: 22px; box-shadow: 0 50px 100px -30px rgba(8,54,64,.6); display: grid; grid-template-columns: 1.25fr 1fr; overflow: hidden">
+<div style="padding: 28px 30px; display: flex; flex-direction: column; gap: 6px">
+<span class="mono" style="align-self: flex-start; border-left: 3px solid #efc46f; padding-left: 9px; color: #145d6a; font-size: 12px; font-weight: 800; letter-spacing: .14em">HOW IT WORKS</span>
+<h2 id="hiw-title" style="margin: 4px 0 8px; font-size: 28px; font-weight: 900; letter-spacing: -.035em">One payment, start to finish</h2>
+<div class="step"><span class="sn">1</span><div><p class="st">You choose who you're paying</p><p class="sd">A business bank account, a business on Splash, or a Sui wallet address.</p></div></div>
+<div class="step"><span class="sn">2</span><div><p class="st">Splash checks the recipient</p><p class="sd">Bank details against what PH or ID banks require. Wallet addresses against sanctions lists.</p></div></div>
+<div class="step"><span class="sn">3</span><div><p class="st">The money comes from your Splash Wallet</p><p class="sd">Your business holds the keys. Splash never holds your funds.</p></div></div>
+<div class="step"><span class="sn">4</span><div><p class="st">A second person approves</p><p class="sd">The rate locks for 5 minutes and your approver signs on their own device.</p></div></div>
+<div class="step" style="border-bottom: 1px solid rgba(50,98,115,.12)"><span class="sn">5</span><div><p class="st">One Sui transaction pays and records it</p><p class="sd">The payment, its record and its receipt happen together, or not at all. For a bank payout, our licensed partner then credits the account by InstaPay, PESONet or BI-FAST.</p></div></div>
+</div>
+<div style="background: #0c3e48; color: #fff; padding: 28px 28px; display: flex; flex-direction: column; gap: 14px; position: relative">
+<button type="button" aria-label="Close" style="position: absolute; right: 16px; top: 16px; width: 40px; height: 40px; border-radius: 50%; border: 1px solid rgba(255,255,255,.25); background: rgba(255,255,255,.08); color: #fff; display: grid; place-items: center; cursor: pointer"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+<span class="mono" style="font-size: 11px; letter-spacing: .16em; color: #efc46f; font-weight: 700">THE RECEIPT</span>
+<span style="font-size: 20px; font-weight: 800; max-width: 15em">Proof you can hand to your supplier or accountant</span>
+<div class="num" style="background: #fffdf9; color: #0c3e48; border-radius: 14px; padding: 16px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; justify-content: space-between; align-items: center"><span style="display: flex; align-items: center; gap: 8px; font-weight: 700"><img src="/_blob/6193a3f61fc3c88e80b8955cab664679" alt="" style="width: 20px; height: 20px">Payment receipt</span><span style="font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 99px; background: #e2f2ec; color: #1d6b4f">Verified on Sui</span></div>
+<div><div style="font-size: 12px; color: #4e6f78">Luzon Components Inc. received</div><div style="font-size: 26px; font-weight: 800; letter-spacing: -.02em">₱287,000.00</div></div>
+<div style="display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 12.5px">
+<span style="color: #4e6f78">You paid</span><span style="text-align: right">5,035.00 USDC</span>
+<span style="color: #4e6f78">Fee</span><span style="text-align: right">35.00 USDC</span>
+<span style="color: #4e6f78">Rate</span><span style="text-align: right">1 USDC = 57.40 PHP</span>
+<span style="color: #4e6f78">Approved by</span><span style="text-align: right">Priya S.</span>
+<span style="color: #4e6f78">Receipt no.</span><span class="mono" style="text-align: right">SPL-2610-00142</span>
+<span style="color: #4e6f78">Sui transaction</span><span class="mono" style="text-align: right">8xK3…f9Qa</span>
+</div>
+</div>
+<span style="font-size: 13px; color: rgba(255,255,255,.82); line-height: 1.5">Anyone with the link can check it against Sui without logging in. Change one field and the check fails.</span>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

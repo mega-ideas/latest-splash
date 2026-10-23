@@ -1,0 +1,12 @@
+{
+  "layout": "blake2b256( 0x03 || threshold u16 LE (02 00) || for each member: 0x06 (passkey flag) || 33-byte compressed P-256 key || weight u8 (01) )",
+  "compressedKeysHex": [
+    "0355969b344645e48573e045cdbf4cbb0adb4369d411962cfc8a6ae3c33b8acf16",
+    "025cb0f7961afbdc293a3cd22290d86697bcceb402011804a4e72119960f2741f9",
+    "0399ca5c2f751fbe57d9e493e174085dee6144965b20fd5895e28902fb1148e04a"
+  ],
+  "recomputedAddress": "0xafea5352bb6313c6af89594eac518d24049e5bc6dfd4bbc18a14bf191f82b6b5",
+  "multisigAddress": "0xafea5352bb6313c6af89594eac518d24049e5bc6dfd4bbc18a14bf191f82b6b5",
+  "matches": true,
+  "note": "The keys are taken from a multisig signature the validators accepted; the address the chain treated as sender is the multisig address."
+}
