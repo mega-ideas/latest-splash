@@ -36,7 +36,7 @@ export async function GET(request: Request) {
   const registry = getEnabledFundingOptions();
   const heldBalanceMicro = Number(await accountBalance(accountCheck.account.orgId));
   const sources = buildFundingSources({ registry, heldBalanceMicro, amountDueMicro });
-  const lastUsedSource = readLastUsedFundingSource(businessAccountId);
+  const lastUsedSource = await readLastUsedFundingSource(accountCheck.account.orgId, businessAccountId);
   const countryCode = request.headers.get('x-vercel-ip-country')
     ?? request.headers.get('cf-ipcountry')
     ?? request.headers.get('x-country-code');

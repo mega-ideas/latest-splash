@@ -30,6 +30,185 @@ The remaining four modules (`smart_treasury`, `payment_intent`, `audit_anchor`, 
 
 ---
 
+## WS4 — operator custody, the code half — 2026-10-23
+
+**Scope**: the hot operator signer — how it is held, how much it may hold, and
+who watches what leaves it. Code: `lib/server/operator-signer.ts`,
+`lib/server/operator-balance.ts`, `lib/server/operator-outflows.ts` (pure) and
+`operator-outflow-monitor.ts`, `app/api/cron/operator-outflows`, `lib/env.ts`.
+Runbook: `docs/OPERATOR-KEY-ROTATION.md`. Tests:
+`tests/operator-custody.test.mjs` (16), plus updated expectations in
+`tests/env.test.mjs` and `tests/launch-scope.test.mjs`; nothing in them reaches
+AWS or a fullnode.
+
+| ID | Sev | Finding | Status |
+|----|-----|---------|--------|
+| OC-1 | High | The operator key was a raw `suiprivkey` in the host environment, decoded into the Node process on first use. Anyone who could read the environment or the process memory — a dependency, a leaked backup of `.env.local`, a debug endpoint — had the key for good, and rebuilding the host did not revoke it. **Fixed**: `getOperatorSigner()` returns an `AwsKmsSigner` (`@mysten/aws-kms-signer`, `AwsKmsSigner.fromKeyId`) when `OPERATOR_KMS_KEY_ID` is set; the key is generated in KMS and never leaves it. A compromised host can request signatures while it is compromised — see OC-3 — but cannot take the key away, and disabling the KMS key stops it at once. | Fixed (code); key and IAM role pending |
+| OC-2 | High | Nothing stopped production from running on the raw key after a KMS key existed. **Fixed**: `NODE_ENV=production` refuses to boot while `OPERATOR_SUI_PRIVATE_KEY` or `SUI_SPONSOR_PRIVATE_KEY` is set, even next to a KMS key and even in simulate mode (a key in the environment is a key in the process, used or not); `getOperatorSigner()` refuses it at runtime too; and production no longer falls back to the Sui CLI keystore, which is a raw key in a file. Where the operator signs, production requires `OPERATOR_KMS_KEY_ID`, `AWS_REGION`, `OPERATOR_SUI_ADDRESS` (checked against the KMS public key) and `OPERATOR_HOT_BALANCE_CEILING_MICRO`. | Fixed |
+| OC-3 | Medium | The operator address could hold any amount, and a payout larger than its balance failed only on chain, with an opaque abort. **Fixed**: `assertOperatorCanPay(amount)` runs before the operator-funded paths (`recordSingleTransferOnSui`, `confirmComposedPaymentOnSui`) build and sign. Below the payout it throws `OperatorTopUpNeededError` (`state: 'top-up-needed'`) and pays nothing — never a partial payment. Above `OPERATOR_HOT_BALANCE_CEILING_MICRO` (micro-USDC) it alerts with the excess to sweep to cold, and does not block the payout. bigint throughout. | Fixed |
+| OC-4 | High | No one would have noticed value leaving the operator address by any route other than Splash's own. **Fixed**: `/api/cron/operator-outflows` (bearer `CRON_SECRET`, every 15 minutes) reads what the address sent over Sui GraphQL and alerts on any outflow that is not `payment_intent::confirm_with_approval` in our core package, to a wallet beneficiary whose screening is CLEAR or ATTESTED. Gas is not an outflow. Value into an object rather than an address is flagged. A monitor that cannot read its inputs answers 502 rather than reporting all clear. | Fixed |
+| OC-5 | Info | Canon D-0004: the operator key must never enter 0xWal's process or any agent tool. **Enforced**: a test fails the build if anything under `lib/agent`, `lib/oxwal`, `lib/ai`, `lib/chain` or the agent and copilot routes imports the signer or settlement module, or names an operator key or AWS secret. The outflow monitor itself never builds a signer. | Guarded |
+
+**Still open, and stated.**
+
+- **The monitor is deliberately stricter than main.** The gas-funded
+  `settle_payment` path and the composed `confirm_payment_intent` path both
+  pay out of the operator address without the approver, and the monitor
+  flags both. That is the intended pressure: those paths should move onto
+  `confirm_with_approval` (WS3's service orders do). Until they do, a flagged
+  digest from one of them is expected noise and is checked against Splash's
+  own settlement records before it is treated as a compromise. Batch payouts
+  are paid from the treasury object, not the operator, so they carry no
+  hot-balance check; the monitor still sees them, because the operator signs.
+- **The hot-balance check is a pre-flight, not a lock.** Two payouts racing
+  for the last coins can both pass it; the chain then rejects the one it
+  cannot fund, and that one pays nothing.
+- **The ceiling is measured in USDC.** On main the operator-funded payouts are
+  in SUI; for those the check refuses below the payout in MIST and alerts on
+  the USDC balance. With the development stand-in (`USDC_TYPE=0x2::sui::SUI`)
+  the ceiling is skipped rather than compared across decimals.
+- **The GraphQL query shape** follows the one `lib/server/wallet-activity.ts`
+  already runs in production, with `relation: SENT`, Move-call commands and
+  gas effects added. It was not run against a live indexer from the machine
+  this was written on (no outbound TLS); the first scheduled run answers 502
+  with the indexer's message if the schema disagrees.
+- **Static AWS keys.** The DigitalOcean Droplet cannot assume an EC2 role.
+  `OPERATOR_KMS_CREDENTIALS=static` exists for it; the IAM user must be scoped
+  to `kms:Sign` and `kms:GetPublicKey` on this one key. IAM Roles Anywhere is
+  the better answer and is supported through temporary credentials in the
+  environment.
+- **On-chain rotation arrives with WS3.** `settlement_policy::set_operator`
+  from the cold multisig is documented in the runbook and is not on `main`.
+- **People and hardware.** The KMS key itself, the IAM role or scoped user,
+  the alert receiver and the cold multisig signers are not code and do not
+  exist yet. Until they do, production cannot boot with the operator signing,
+  which is the intended state.
+
+---
+
+## WS8 — every store in Postgres — 2026-10-23
+
+**Scope**: the stores that still kept their records in a `Map` on
+`globalThis`. On serverless each instance has its own copy, so state differs
+between instances and a cold start drops it: a deposit webhook answered by
+another instance found no funding session, a staff console found no ticket a
+customer had just raised, and a reconciliation summed only one instance's
+legs. Every one of them now reads and writes Postgres; the in-process map is
+kept only as the fallback when `DATABASE_URL` is unset (`npm run dev` without
+a database), and each store warns once when it falls back. Tests drive a
+migrated PGlite behind the app's own `getDb()` and simulate a cold start by
+dropping every `globalThis` store and evaluating the module again
+(`tests/helpers/store-db.mjs`), all in `npm run test:db`.
+
+| Slice | Tables (migration) | What the database now enforces | Tests |
+|---|---|---|---|
+| Recipients, invoices, transfers + receipts, ledger | already on main | pinned: survive a cold start; a race on one idempotency key or pay-link slug leaves one row | `operational-store-durability` (6) |
+| Sweep jobs, rate holds | `sweep_jobs`, `rate_holds` (0027) | one sweep per transfer (a second is a second payout); a hold must have an owner | `sweep-rate-hold-persistence` (5) |
+| Funding sessions | `funding_sessions`, `funding_source_transactions`, `funding_last_used_sources` (0028) | one deposit, one session (digest is the key); credit and CREDITED in one locked transaction; last-used source per org | `funding-session-persistence` (5) |
+| Intercompany legs | `intercompany_transfers` (0029) | one leg per customer transfer; the daily reconciliation sums every instance's rows | `intercompany-persistence` (3) |
+| Support tickets | `support_tickets`, `support_ticket_replies` (0030) | `org_id NOT NULL` + FK on both; WS2's org scope is in the WHERE clause, so a foreign id reads as missing and a foreign reply or close writes nothing; replies are inserts, so two at once both land | `support-persistence` (4) |
+| Daily audit batches | `daily_audit_batches` (0031) | one batch per business date (unique index); the cron's "already built?" check sees every instance's batches | `audit-batch-persistence` (3) |
+
+**Support tickets and daily audit batches are no longer in memory.** They
+were the last two `globalThis` stores holding records, and the ones WS2 had
+just scoped. Support keeps WS2's shape exactly — customer functions take the
+session's org first, staff reach across tenants only through `*ForStaff` —
+and the demo seed tickets stay in the fallback, because the demo org does
+not exist in a real database. The audit-batch table has **no `org_id`**, on
+purpose and said so in the schema and migration: a batch spans every tenant
+(its leaves are many workspaces' transfer ids), so there is no owner to scope
+by, and the protection remains who may read it (staff-only readers behind
+`getAdminSession()`).
+
+Every function in both stores is async now, and every caller awaits it. Two
+of those callers handed the result straight to `NextResponse.json`
+(`/api/admin/support`, `/api/audit-batches`), where a Promise serialises as
+`{}` and `tsc` does not object; both await explicitly, with a comment.
+
+**Operators must apply migrations `0030_support_tickets` and
+`0031_daily_audit_batches`** (with 0027–0029 if not yet applied) before this
+release serves traffic: `npm run db:migrate:run`, or the pre-deploy job in
+`docs/DEPLOY-DIGITALOCEAN.md`. No backfill: the in-memory tickets and batches
+never outlived an instance, so there is nothing to carry over.
+
+**What it does not do.** Two cron runs for the same business date that both
+start before either records still both seal, store and anchor; the database
+keeps the first batch and both runs return it, so the day has one recorded
+root, but the later run's Walrus blob and Sui anchor are left unreferenced.
+Closing that would mean holding a lock across up to a minute of Seal, Walrus
+and Sui calls, for a job that runs once a day. Demo-mode Walrus blobs are
+still process state, so verifying a demo batch after a cold start reports the
+blob missing; live Walrus is unaffected.
+
+---
+
+## WS2 — the four remaining unscoped stores — 2026-10-23
+
+**Scope**: the stores that still answered any signed-in session with every
+tenant's data, and the routes in front of them. The pattern is the one the
+transfer, invoice, beneficiary and ledger stores already follow: `orgId` is
+the first, required parameter of every customer read and write, so an
+unscoped call site does not compile; the org comes from the session
+(`requireCustomerRequest`, then `requireSessionAccount`, which resolves it
+through `resolveAuthorityForSession`), never from the request; reach across
+tenants is spelled `*ForStaff` and sits behind `getAdminSession()`. The
+master prompt calls the member guard `requireMember`; it does not exist on
+main, and these two existing helpers are what it means. Tests:
+`tests/tenant-isolation.test.mjs` (11; red commit `8b278d5`, fix `0124707`),
+in `npm run test:db`.
+
+| ID | Sev | Finding | Status |
+|----|-----|---------|--------|
+| WS2-1 | Low (pinned) | MemWal (Copilot memory). Already scoped on main: `recallForOrg` / `rememberForOrg` in `lib/server/memwal.ts` are the only entry points, every write goes to the org's own namespace with the org's key at the start of the text, and recall drops anything without that key (`lib/server/memwal-scope.ts`). Every caller passes the session's org or, in the demo seed, `DEMO_ORG_ID`. **Pinned**: recall for org B returns none of org A's fact even from a relayer that ignores namespaces; the adapter exports nothing unscoped; nothing but `memwal.ts` imports the SDK. | No change needed |
+| WS2-2 | High | Support tickets. `listSupportTickets()` and `readSupportTicket(id)` took no org, so any customer could list every tenant's tickets (subjects, messages, contact addresses, staff replies) or read and reply to one by id. The reply's author was a name the request body supplied. **Fixed**: tickets carry `orgId`; `create/list/read/updateSupportTicket(orgId, …)`; a foreign id reads as missing, for a reply too; the staff console and admin routes use `listSupportTicketsForStaff`, `readSupportTicketForStaff`, `updateSupportTicketForStaff`; a customer reply is attributed to `session.email`. | Fixed |
+| WS2-3 | High | `GET /api/walrus/:blobId` returned any blob's metadata to any session, and blob ids are not secret: they appear on invoices, receipts and evidence records. **Fixed**: `orgReferencesBlob(orgId, blobId)` (`lib/server/walrus-access.ts`) answers true only when the caller's org owns an invoice, or a transfer whose receipt references the blob (the transfer's own blob, or the evidence bundle in `settlement_metadata.evidence`). Scoped queries in both repositories, reached through their stores. The check runs before the blob is fetched, so another tenant's blob and a missing one are the same 404, and every answer is `private, no-store`. | Fixed |
+| WS2-4 | High | Daily audit batches. `GET /api/audit-batches` and `POST /api/audit-batches/verify` took any customer session and returned every batch: each one lists every tenant's settled transfer ids with their Merkle proofs, and the customer history page displayed them. **Decision (Sky)**: staff-only, roots and contents. **Fixed**: the readers are `listDailyAuditBatchesForStaff`, `readDailyAuditBatchForStaff`, `verifyDailyAuditBatchForStaff`; both routes require `getAdminSession()`; the panel is removed from `/dashboard/history`. | Fixed |
+
+### The routes re-checked, and why each is safe
+
+- **`/api/copilot/chat`** no longer exists; it was deleted with
+  `lib/copilot-client.ts` (see `docs/HANDOVER-2026-09-06.md`). The copilot
+  routes that remain, `copilot/extract-invoice`, `copilot/suggest` and
+  `copilot/summary`, each run `requireCustomerRequest` and then
+  `requireSessionAccount`, and read only through scoped stores:
+  `readInvoice(orgId, id)`, `listInvoicesFor(orgId)`,
+  `getCopilotSuggestions(orgId)`, and MemWal through `recallForOrg` and
+  `rememberForOrg`. **Scoped.**
+- **`/api/profile`** is **per-user by design**. GET, POST and DELETE read
+  and write the customer-profile store keyed by `session.email`, and the
+  request cannot name another address. The org is resolved only to decide
+  whether a WhatsApp approval is required. The staff side
+  (`/api/admin/profile-requests`) is behind `getAdminSession()`.
+- **`/api/quotes`** is **stateless**: `calculateQuote` prices an amount from
+  the corridor table and a cached market rate, and reads no tenant store.
+  `recipientId` is echoed back, not looked up. **`/api/quotes/peg-status`**
+  is public market data from DeepBook, with no tenant data in it.
+- **`/api/oxwal`** takes `orgId` and `actorId` from
+  `resolveAuthorityForSession`. The body is only `{ message, history }`, and
+  `assertCleanBody` refuses provenance fields, so the agent runs in the
+  session's org and nowhere else. **Scoped.**
+- **`/api/proposals/[id]/submit`** resolves the session's authority and
+  answers 404 when `proposal.orgId !== ctx.orgId`.
+  **`/api/proposals/[id]/reconcile`** passes `ctx.orgId` to
+  `reconcileStuckPayment`, which answers 404 on the same mismatch
+  (`lib/server/stuck-payments.ts`). **Scoped.**
+
+**Still open.** ~~Support tickets and audit batches still live in an
+in-process `Map`, so they are per-instance and disappear on restart; they are
+scoped now, but not durable.~~ Closed by WS8 (above): both are in Postgres,
+migrations 0030 and 0031. A signed-in person with no membership yet gets
+`no_membership` (403) from the support routes and has to use the support
+address instead. The staff console has no audit-batch page, so the
+staff-only API currently has no UI. `components/oxwal/ActionCard.tsx` links
+to `/api/walrus/<reasoningTraceRef>`, but those refs (`pending-walrus:…`,
+`dual-approval:…`) are not blob ids, so the link 404s, as it already did.
+~~`listAllRequests` and `decideProfileRequest` in
+`lib/server/customer-profile.ts` are staff-only in practice but not named
+`*ForStaff`.~~ Renamed `listProfileRequestsForStaff` and
+`decideProfileRequestForStaff` in the WS2 follow-up (5ba1ba2).
+
+---
+
 ## Approvals by code and WhatsApp — 2026-09-24
 
 **Scope**: the two ballot channels for payments the money routes send for

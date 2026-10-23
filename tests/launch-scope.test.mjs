@@ -70,7 +70,6 @@ test('the refusal says what is open and what to do', () => {
 // ─── Boot ───────────────────────────────────────────────────────────────────
 
 const OBJ = '0x' + 'ab'.repeat(32);
-const KEY = 'suiprivkey1' + 'q'.repeat(58);
 const LIVE = {
   NODE_ENV: 'production',
   CUSTOMER_SESSION_SECRET: 's'.repeat(32),
@@ -89,7 +88,8 @@ const LIVE = {
   NEXT_PUBLIC_DEMO_MODE: 'false',
 };
 // The settlement signer: the stablecoin scope still needs it to verify businesses.
-const SIGNER = { OPERATOR_SUI_PRIVATE_KEY: KEY, OPERATOR_SUI_ADDRESS: OBJ };
+// WS4: in production that is the KMS key, never a raw one.
+const SIGNER = { OPERATOR_KMS_KEY_ID: 'arn:aws:kms:ap-southeast-1:111122223333:key/0b5e7f8a-1c2d-4e3f-9a0b-1c2d3e4f5a6b', AWS_REGION: 'ap-southeast-1', OPERATOR_HOT_BALANCE_CEILING_MICRO: '5000000000', OPERATOR_SUI_ADDRESS: OBJ };
 
 const keysOf = (raw) => {
   try {
@@ -103,7 +103,7 @@ const keysOf = (raw) => {
 
 test('boot: the full scope with mocks off still demands every vendor and the settlement signer', () => {
   const keys = keysOf(LIVE);
-  for (const k of ['PDAX_API_KEY', 'WALRUS_PUBLISHER_URL', 'WALRUS_AGGREGATOR_URL', 'STRIPE_SECRET_KEY', 'AIRWALLEX_API_KEY', 'OPERATOR_SUI_PRIVATE_KEY', 'SPLASH_TREASURY_ID']) {
+  for (const k of ['PDAX_API_KEY', 'WALRUS_PUBLISHER_URL', 'WALRUS_AGGREGATOR_URL', 'STRIPE_SECRET_KEY', 'AIRWALLEX_API_KEY', 'OPERATOR_KMS_KEY_ID', 'SPLASH_TREASURY_ID']) {
     assert.ok(keys.includes(k), `${k} is named in the full scope`);
   }
 });
@@ -111,7 +111,7 @@ test('boot: the full scope with mocks off still demands every vendor and the set
 test('boot: the stablecoin scope starts with mocks off and none of the keys only fiat and settlement use', () => {
   assert.deepEqual(keysOf({ ...LIVE, ...SIGNER, LAUNCH_SCOPE: 'stablecoin' }), []);
   // The signer stays required: approving a business's verification records it on Sui.
-  assert.deepEqual(keysOf({ ...LIVE, LAUNCH_SCOPE: 'stablecoin' }).sort(), ['OPERATOR_SUI_ADDRESS', 'OPERATOR_SUI_PRIVATE_KEY']);
+  assert.deepEqual(keysOf({ ...LIVE, LAUNCH_SCOPE: 'stablecoin' }).sort(), ['AWS_REGION', 'OPERATOR_HOT_BALANCE_CEILING_MICRO', 'OPERATOR_KMS_KEY_ID', 'OPERATOR_SUI_ADDRESS']);
   const env = parseEnv({ ...LIVE, ...SIGNER, LAUNCH_SCOPE: 'stablecoin' });
   assert.equal(env.LAUNCH_SCOPE, 'stablecoin');
 });

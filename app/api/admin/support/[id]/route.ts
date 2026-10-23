@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 
 import { getAdminSession } from '@/lib/server/admin-auth';
 import { readJsonBody } from '@/lib/server/http';
-import { readSupportTicket, updateSupportTicket, type SupportTicketStatus } from '@/lib/server/support';
+import { readSupportTicketForStaff, updateSupportTicketForStaff, type SupportTicketStatus } from '@/lib/server/support';
 
 const allowedStatuses = new Set<SupportTicketStatus>(['OPEN', 'IN_REVIEW', 'REPLIED', 'CLOSED']);
 
@@ -14,7 +14,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
   }
 
   const { id } = await params;
-  const record = readSupportTicket(id);
+  const record = await readSupportTicketForStaff(id);
 
   if (!record) {
     return NextResponse.json({ error: 'Support ticket not found' }, { status: 404 });
@@ -38,7 +38,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     return NextResponse.json({ error: 'Unsupported ticket status' }, { status: 400 });
   }
 
-  const record = updateSupportTicket(id, {
+  const record = await updateSupportTicketForStaff(id, {
     status,
     actor: session.email,
     replyMessage: typeof body.replyMessage === 'string' ? body.replyMessage : undefined,

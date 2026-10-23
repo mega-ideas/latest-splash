@@ -48,6 +48,8 @@ const SUI_ADDRESS = OBJECT_ID;
 const SUI_PRIVKEY = /^suiprivkey1[a-z0-9]{50,}$/;
 /** `0x…::module::Type` — a Move type tag. `0x2::sui::SUI` is the dev stand-in. */
 const COIN_TYPE = /^0x[a-fA-F0-9]{1,64}::[A-Za-z_][A-Za-z0-9_]*::[A-Za-z_][A-Za-z0-9_]*$/;
+/** A KMS key reference: key id, multi-Region key id, alias, or either as an ARN. */
+const KMS_KEY_ID = /^(arn:aws[a-z-]*:kms:[a-z0-9-]+:\d{12}:(key\/[A-Za-z0-9-]+|alias\/[A-Za-z0-9/_-]+)|alias\/[A-Za-z0-9/_-]+|mrk-[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
 
 const str = z.string().trim();
 const optional = str.optional();
@@ -176,8 +178,37 @@ export const envSchema = z.object({
   /* Settlement. lib/server/sui-settlement.ts, lib/sui/gas.ts. */
   SUI_SETTLEMENT_MODE: withDefault(z.enum(['auto', 'live', 'simulate']), 'auto'),
   SUI_BATCH_SETTLEMENT_MODE: optional,
+  /** Raw operator keys: development and testnet only. Production refuses
+   *  both (WS4) — it signs through OPERATOR_KMS_KEY_ID. */
   OPERATOR_SUI_PRIVATE_KEY: privkey,
   SUI_SPONSOR_PRIVATE_KEY: privkey,
+  /* WS4 operator custody. lib/server/operator-signer.ts, operator-balance.ts,
+     operator-outflow-monitor.ts. The operator key lives in AWS KMS and never
+     enters the process: these name it and say how to reach it. */
+  /** The KMS key that signs as the operator: a key id, key ARN, alias, or
+   *  multi-Region key id. Its public key must derive OPERATOR_SUI_ADDRESS. */
+  OPERATOR_KMS_KEY_ID: opt(str.regex(KMS_KEY_ID, 'must be a KMS key id, key ARN, alias/… or mrk-… id')),
+  AWS_REGION: opt(str.regex(/^[a-z]{2}(-[a-z]+)+-\d$/, 'must be an AWS region such as ap-southeast-1')),
+  /** 'role' (default): the machine's role — temporary credentials in the
+   *  environment, the ECS/EKS container endpoint, or the EC2 instance
+   *  profile. 'static': a long-lived key pair, for hosts AWS cannot issue a
+   *  role to; scope it to kms:Sign + kms:GetPublicKey on this key only. */
+  OPERATOR_KMS_CREDENTIALS: withDefault(z.enum(['role', 'static']), 'role'),
+  AWS_ACCESS_KEY_ID: optional,
+  AWS_SECRET_ACCESS_KEY: optional,
+  AWS_SESSION_TOKEN: optional,
+  AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: optional,
+  AWS_CONTAINER_CREDENTIALS_FULL_URI: url,
+  AWS_CONTAINER_AUTHORIZATION_TOKEN: optional,
+  /** Most the hot operator address should hold, in micro-USDC (USDC_TYPE).
+   *  Above it, each settlement alerts with the excess to sweep to cold. A
+   *  whole number, read as bigint. */
+  OPERATOR_HOT_BALANCE_CEILING_MICRO: opt(str.regex(/^\d+$/, 'must be a whole number of micro-USDC')),
+  /** Where operator custody alerts are POSTed (ceiling, top-up, outflow). */
+  OPERATOR_ALERT_WEBHOOK_URL: httpsUrl,
+  /** Sui GraphQL, read by the outflow monitor. Unset: Mysten's public
+   *  endpoint for SUI_NETWORK. */
+  SUI_GRAPHQL_URL: url,
   ENOKI_API_KEY: optional,
   SUI_PEG_UPDATE_GAS_BUDGET: int(10_000_000, 1),
   SUI_RECORD_SETTLEMENT_GAS_BUDGET: int(10_000_000, 1),
@@ -481,6 +512,9 @@ function productionIssues(env: Env): Issue[] {
      still fails closed: 'auto' with mocks off and no key throws rather than
      simulating (lib/server/sui-settlement.ts, resolveSettlementExecution). */
   const stablecoinOnly = env.LAUNCH_SCOPE === 'stablecoin';
+  /** Why the operator signer is required, when it is. Collected so the
+   *  signer's keys are named once however many reasons there are. */
+  let signerNeededBecause: string | undefined;
   if (stablecoinOnly) {
     const scoped = 'LAUNCH_SCOPE=stablecoin launches USDC on Sui only';
     if (env.USE_MOCK_APIS) issues.push({ key: 'USE_MOCK_APIS', message: `must be false: ${scoped}, and mocks would fake settlement` });
@@ -491,17 +525,35 @@ function productionIssues(env: Env): Issue[] {
     // Staff approving a business's verification records it on Sui with the
     // operator key (lib/compliance/org-kyb.ts), and a verified business gets
     // the higher USDC limits, so this launch still needs the signer.
-    need('OPERATOR_SUI_PRIVATE_KEY', `${scoped}, and approving a business's verification records it on Sui`);
-    need('OPERATOR_SUI_ADDRESS', 'the signer must be named so it can be checked against the key');
+    signerNeededBecause ??= `${scoped}, and approving a business's verification records it on Sui`;
   }
   if (settlementLive && !stablecoinOnly) {
-    need('OPERATOR_SUI_PRIVATE_KEY', `SUI_SETTLEMENT_MODE=${env.SUI_SETTLEMENT_MODE} with mocks off means real signing`);
-    need('OPERATOR_SUI_ADDRESS', 'the signer must be named so it can be checked against the key');
+    signerNeededBecause ??= `SUI_SETTLEMENT_MODE=${env.SUI_SETTLEMENT_MODE} with mocks off means real signing`;
     need('SPLASH_TREASURY_ID', 'settlement records against the treasury object');
     need('USDC_TYPE', 'settlement needs the real coin type');
   }
   if (env.TREASURY_EXECUTION_ENABLED) {
-    need('OPERATOR_SUI_PRIVATE_KEY', 'TREASURY_EXECUTION_ENABLED moves treasury funds');
+    signerNeededBecause ??= 'TREASURY_EXECUTION_ENABLED moves treasury funds';
+  }
+
+  /* WS4 — the operator signer is a KMS key, and only a KMS key. A raw key in
+     a production environment is a key in the process, whether or not a code
+     path still reads it, so its presence alone refuses boot. */
+  for (const key of ['OPERATOR_SUI_PRIVATE_KEY', 'SUI_SPONSOR_PRIVATE_KEY'] as const) {
+    if (env[key] !== undefined) {
+      issues.push({ key, message: 'is a raw operator key, and production signs only through KMS — set OPERATOR_KMS_KEY_ID and remove this from the host (docs/OPERATOR-KEY-ROTATION.md)' });
+    }
+  }
+  if (signerNeededBecause !== undefined || env.OPERATOR_KMS_KEY_ID !== undefined) {
+    const why = signerNeededBecause ?? 'OPERATOR_KMS_KEY_ID is set';
+    need('OPERATOR_KMS_KEY_ID', `${why} — the operator signs through AWS KMS`);
+    need('AWS_REGION', "the KMS signer needs the key's region");
+    need('OPERATOR_SUI_ADDRESS', 'the signer must be named so it can be checked against the KMS public key');
+    need('OPERATOR_HOT_BALANCE_CEILING_MICRO', 'the hot operator wallet needs a ceiling above which the excess is swept to cold');
+    if (env.OPERATOR_KMS_CREDENTIALS === 'static') {
+      need('AWS_ACCESS_KEY_ID', 'OPERATOR_KMS_CREDENTIALS=static');
+      need('AWS_SECRET_ACCESS_KEY', 'OPERATOR_KMS_CREDENTIALS=static');
+    }
   }
   if (env.OXWAL_CHAIN_MODE === 'live') {
     need('OXWAL_SUI_SENDER', 'OXWAL_CHAIN_MODE=live composes real transactions');

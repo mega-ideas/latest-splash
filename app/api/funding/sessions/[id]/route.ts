@@ -15,7 +15,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   if (auth.response) return auth.response;
 
   const { id } = await context.params;
-  const session = readFundingSession(id);
+  const session = await readFundingSession(id);
   return session
     ? NextResponse.json({ session })
     : NextResponse.json({ error: 'Funding session not found' }, { status: 404 });
@@ -33,7 +33,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const parsed = actionSchema.safeParse(await readJsonBody(request));
   if (!parsed.success) return NextResponse.json({ error: 'Invalid funding action' }, { status: 400 });
   const { id } = await context.params;
-  const session = readFundingSession(id);
+  const session = await readFundingSession(id);
   if (!session) return NextResponse.json({ error: 'Funding session not found' }, { status: 404 });
   if (session.selection.type !== 'stablecoin') {
     return NextResponse.json({ error: 'Only stablecoin deposits can be simulated' }, { status: 400 });

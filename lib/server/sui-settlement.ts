@@ -3,9 +3,6 @@ import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { promisify } from 'node:util';
 
-import { decodeSuiPrivateKey } from '@mysten/sui/cryptography';
-import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
-import { Secp256k1Keypair } from '@mysten/sui/keypairs/secp256k1';
 import { Transaction } from '@mysten/sui/transactions';
 import { normalizeSuiAddress } from '@mysten/sui/utils';
 
@@ -21,6 +18,8 @@ import {
   type PoolWhitelistVerdict,
 } from '@/lib/policy/deepbook-whitelist';
 import { getContractConfig, type ContractConfigField } from '@/lib/server/contract-config';
+import { assertOperatorCanPay } from '@/lib/server/operator-balance';
+import { getOperatorSigner } from '@/lib/server/operator-signer';
 import { resolvePegAttestation } from '@/lib/server/peg-attestation';
 import { suiClient } from '@/lib/sui';
 import { parseIntentObject, type IntentView, type ServiceOrderContract } from '@/lib/sui/service-orders';
@@ -34,7 +33,6 @@ const execFileAsync = promisify(execFile);
 type SettlementExecution = 'sdk' | 'cli' | 'simulate';
 type CliReadiness = { ready: true; address: string } | { ready: false; reason: string };
 
-let cachedOperatorKeypair: Ed25519Keypair | Secp256k1Keypair | null | undefined;
 let cachedCliReadiness: CliReadiness | null = null;
 
 function settlementMode(): 'auto' | 'live' | 'simulate' {
@@ -58,43 +56,10 @@ function configuredOperatorAddress(): string {
   return (getContractConfig().operatorAddress ?? '').trim();
 }
 
-export function getOperatorKeypair(): Ed25519Keypair | Secp256k1Keypair | null {
-  if (cachedOperatorKeypair !== undefined) return cachedOperatorKeypair;
-
-  const encoded = (
-    process.env.OPERATOR_SUI_PRIVATE_KEY ??
-    process.env.SUI_SPONSOR_PRIVATE_KEY ??
-    ''
-  ).trim();
-
-  if (!encoded) {
-    cachedOperatorKeypair = null;
-    return null;
-  }
-
-  try {
-    const parsed = decodeSuiPrivateKey(encoded);
-    let keypair: Ed25519Keypair | Secp256k1Keypair;
-    if (parsed.scheme === 'ED25519') {
-      keypair = Ed25519Keypair.fromSecretKey(parsed.secretKey);
-    } else if (parsed.scheme === 'Secp256k1') {
-      keypair = Secp256k1Keypair.fromSecretKey(parsed.secretKey);
-    } else {
-      throw new Error(`unsupported key scheme ${parsed.scheme}; Splash supports ED25519 and Secp256k1`);
-    }
-
-    const signerAddress = keypair.toSuiAddress();
-    const expectedAddress = configuredOperatorAddress();
-    if (expectedAddress && signerAddress.toLowerCase() !== expectedAddress.toLowerCase()) {
-      throw new Error('OPERATOR_SUI_PRIVATE_KEY does not match OPERATOR_SUI_ADDRESS');
-    }
-
-    cachedOperatorKeypair = keypair;
-    return keypair;
-  } catch (error) {
-    throw new Error(`Invalid OPERATOR_SUI_PRIVATE_KEY: ${error instanceof Error ? error.message : String(error)}`);
-  }
-}
+// WS4: the operator signer is resolved in lib/server/operator-signer.ts —
+// AWS KMS in production, a raw key only outside it. Re-exported so callers
+// keep one import site for settlement.
+export { getOperatorSigner };
 
 function parseCliGasCoins(stdout: string): OperatorGasCoin[] {
   const jsonStart = stdout.indexOf('[');
@@ -157,16 +122,20 @@ async function getCliReadiness(): Promise<CliReadiness> {
 async function resolveSettlementExecution(): Promise<SettlementExecution> {
   const mode = settlementMode();
   if (mode === 'simulate') return 'simulate';
-  if (getOperatorKeypair()) return 'sdk';
+  if (await getOperatorSigner()) return 'sdk';
 
-  const cli = await getCliReadiness();
+  // The CLI keystore is a raw key in a file on disk. Production signs only
+  // through KMS (WS4), so the CLI fallback is a development convenience.
+  const cli: CliReadiness = process.env.NODE_ENV === 'production'
+    ? { ready: false, reason: "production signs only through AWS KMS, and the Sui CLI keystore is a raw key — set OPERATOR_KMS_KEY_ID and AWS_REGION, with the key's address as OPERATOR_SUI_ADDRESS" }
+    : await getCliReadiness();
   if (cli.ready) return 'cli';
 
   if (mode === 'auto' && process.env.USE_MOCK_APIS === 'true') return 'simulate';
 
   throw new Error(
     `Real Sui settlement is not configured: ${cli.reason}. ` +
-    'Set OPERATOR_SUI_PRIVATE_KEY to the funded Ed25519 or Secp256k1 operator key in the production environment, ' +
+    'Set OPERATOR_KMS_KEY_ID (production), or OPERATOR_SUI_PRIVATE_KEY to a funded Ed25519 or Secp256k1 key for development, ' +
     'or configure a persistent funded Sui CLI keystore. Use SUI_SETTLEMENT_MODE=simulate only for an explicitly labeled demo.',
   );
 }
@@ -590,8 +559,8 @@ function isTransientTransportError(error: unknown): boolean {
 }
 
 async function executeSdkTransaction(tx: Transaction) {
-  const signer = getOperatorKeypair();
-  if (!signer) throw new Error('OPERATOR_SUI_PRIVATE_KEY is required for SDK settlement.');
+  const signer = await getOperatorSigner();
+  if (!signer) throw new Error('An operator signer (OPERATOR_KMS_KEY_ID, or OPERATOR_SUI_PRIVATE_KEY outside production) is required for SDK settlement.');
 
   // Re-submitting the SAME signed bytes is idempotent on Sui (same digest), so
   // a bounded retry on transport errors cannot double-settle.
@@ -782,7 +751,7 @@ async function requireSdkExecution() {
   const execution = await resolveSettlementExecution();
   if (execution !== 'sdk') {
     throw new Error(
-      'Settling a service order requires OPERATOR_SUI_PRIVATE_KEY, so the operator\'s one transaction can confirm with the approval and anchor atomically.',
+      'Settling a service order requires the operator signer (OPERATOR_KMS_KEY_ID), so the operator\'s one transaction can confirm with the approval and anchor atomically.',
     );
   }
 }
@@ -827,8 +796,8 @@ export function resolveServiceOrderRecipient(inputRecipient: string): string {
 }
 
 /** The operator address, as the signer reports it: the payer a service order records. */
-export function operatorSignerAddress(): string | null {
-  const signer = getOperatorKeypair();
+export async function operatorSignerAddress(): Promise<string | null> {
+  const signer = await getOperatorSigner();
   return signer ? normalizeSuiAddress(signer.toSuiAddress()) : null;
 }
 
@@ -858,8 +827,8 @@ export async function readServiceOrderOnSui(intentId: string): Promise<IntentVie
  * payer the intent recorded, so this is where signature two arrives.
  */
 export async function findOperatorApprovalOnSui(intentId: string): Promise<{ approvalId: string; amountMinor: bigint; approver: string } | null> {
-  const owner = operatorSignerAddress();
-  if (!owner) throw new Error('OPERATOR_SUI_PRIVATE_KEY is required to read the approvals the operator holds.');
+  const owner = await operatorSignerAddress();
+  if (!owner) throw new Error('The operator signer (OPERATOR_KMS_KEY_ID) is required to read the approvals the operator holds.');
   const packageId = corePackageIdOrThrow();
   const wanted = normalizeSuiAddress(intentId);
   let cursor: string | null = null;
@@ -983,8 +952,8 @@ export async function confirmServiceOrderOnSui(input: {
   await requireSdkExecution();
   const packageId = corePackageIdOrThrow();
   const account = requireSuiObjectId(input.account, 'Business account');
-  const operator = operatorSignerAddress();
-  if (!operator) throw new Error('OPERATOR_SUI_PRIVATE_KEY is required to settle a service order.');
+  const operator = await operatorSignerAddress();
+  if (!operator) throw new Error('The operator signer (OPERATOR_KMS_KEY_ID) is required to settle a service order.');
 
   const intent = await readServiceOrderOnSui(input.intentId);
   if (!intent.isServiceOrder) {
@@ -1008,6 +977,10 @@ export async function confirmServiceOrderOnSui(input: {
   if (approval.amountMinor !== intent.amountMinor) {
     throw new Error('The approval the operator holds is for a different amount than the order. Refusing to pay either.');
   }
+
+  // WS4: the operator pays this order out of its own coin. Refuse before
+  // signing if its hot balance cannot cover it; never a partial payment.
+  await assertOperatorCanPay(intent.amountMinor, { coinType: settlementCoinType(), owner: operator });
 
   const tx = buildConfirmServiceOrderTx({
     packageId,
@@ -1213,7 +1186,7 @@ export async function getOperatorWalletInfo(): Promise<{
   totalSui: string;
   coinCount: number;
 }> {
-  const signer = getOperatorKeypair();
+  const signer = await getOperatorSigner();
   if (signer) {
     const address = signer.toSuiAddress();
     const coins = await listSdkGasCoins(address);
@@ -1486,6 +1459,9 @@ export async function recordSingleTransferOnSui(input: {
         ],
       });
     }
+    // WS4: the payment is split from the operator's own SUI. Refuse before
+    // signing if it cannot cover it; never a partial payment.
+    await assertOperatorCanPay(BigInt(paymentMist), { coinType: SUI_COIN_TYPE });
     const [payment] = tx.splitCoins(tx.gas, [paymentMist]);
     tx.moveCall({
       target: `${SPLASH_CUSTODY_PACKAGE_ID}::settlement::settle_payment`,
@@ -1954,7 +1930,7 @@ export async function updateComplianceControls(
   const packageId = corePackageIdOrThrow();
   const configId = configIdOrThrow('complianceConfigId', 'SPLASH_COMPLIANCE_CONFIG_ID');
   const capId = configIdOrThrow('complianceCapId', 'SPLASH_COMPLIANCE_CAP_ID');
-  if (!getOperatorKeypair()) throw new Error('OPERATOR_SUI_PRIVATE_KEY is required to update compliance controls.');
+  if (!(await getOperatorSigner())) throw new Error('The operator signer (OPERATOR_KMS_KEY_ID) is required to update compliance controls.');
 
   // ABI straddle. `update` gained a 5th parameter (min_settlement_amount) in the
   // republished package; the version deployed today still has 4. Detect which

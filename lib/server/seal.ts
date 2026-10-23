@@ -9,7 +9,7 @@ import { fromHex, toHex } from '@mysten/sui/utils';
 import { getSealConfig } from '@/lib/server/seal-config';
 import { assertSealWritable } from '@/lib/server/seal-health';
 import { canUseDemoCrypto } from '@/lib/server/runtime-mode';
-import { getOperatorKeypair } from '@/lib/server/sui-settlement';
+import { getOperatorSigner } from '@/lib/server/operator-signer';
 import { suiClient } from '@/lib/sui';
 
 export type SealPolicy = {
@@ -157,8 +157,8 @@ export const liveSealAdapter: SealAdapter = {
     const sealId = sealIdFor(policyId);
     if (!sealId) return null;
     const config = getSealConfig();
-    const signer = getOperatorKeypair();
-    if (!signer) throw new NotConfiguredError('OPERATOR_SUI_PRIVATE_KEY is required for live Seal decryption.');
+    const signer = await getOperatorSigner();
+    if (!signer) throw new NotConfiguredError('The operator signer (OPERATOR_KMS_KEY_ID, or OPERATOR_SUI_PRIVATE_KEY outside production) is required for live Seal decryption.');
 
     const sessionKey = await SessionKey.create({
       address: signer.toSuiAddress(),

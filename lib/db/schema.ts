@@ -1,13 +1,16 @@
 import { sql } from 'drizzle-orm';
 import {
   bigint,
+  bigserial,
   boolean,
+  date,
   index,
   integer,
   jsonb,
   numeric,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -1117,3 +1120,251 @@ export const treasuryAccrualState = pgTable('treasury_accrual_state', {
   lastAccruedPriceMicros: bigint('last_accrued_price_micros', { mode: 'bigint' }),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * A stored balance being paid out to a bank through a sweep partner.
+ *
+ * Held in `operations.sweepJobs`, a `Map` on `globalThis`, until WS8. On
+ * serverless every instance had its own copy, so the instance that opened a
+ * sweep and the one asked about it later were usually not the same one, and a
+ * cold start between EXECUTING and COMPLETED left the transfer pointing at a
+ * job nobody could read.
+ *
+ * One per transfer. The in-memory code relied on that without saying so — a
+ * transfer carries a single `sweepJobId` — and a second sweep for the same
+ * transfer is a second payout of the same money.
+ */
+export const sweepJobs = pgTable('sweep_jobs', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  transferIntentId: text('transfer_intent_id').notNull().references(() => paymentIntents.id),
+  recipientId: text('recipient_id').notNull(),
+  partner: text('partner').notNull(),
+  /** Micro-USDC. Integer minor units, never a float. */
+  amountUsdcMicro: bigint('amount_usdc_micro', { mode: 'bigint' }).notNull(),
+  targetCurrency: text('target_currency').notNull(),
+  /** A ratio, not money: exact decimal, string in JS. */
+  fxRate: numeric('fx_rate').notNull(),
+  /** PENDING | EXECUTING | COMPLETED | FAILED. */
+  state: text('state').notNull().default('PENDING'),
+  heldDurationMs: integer('held_duration_ms'),
+  partnerPayoutRef: text('partner_payout_ref'),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+  demo: boolean('demo').notNull().default(false),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('sweep_jobs_transfer_unique').on(table.transferIntentId),
+  index('sweep_jobs_org_created_idx').on(table.orgId, table.createdAt),
+]);
+
+/**
+ * A rate commitment made to one customer: this corridor, this rate, until then.
+ *
+ * Held in `operations.rateHolds` until WS8. `orgId` was optional there so the
+ * demo seed could own nothing; here it is NOT NULL, because a hold with no
+ * owner cannot be scoped and the demo seed never reaches a real database.
+ */
+export const rateHolds = pgTable('rate_holds', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  corridorCurrency: text('corridor_currency').notNull(),
+  /** A ratio, not money: exact decimal, string in JS. */
+  rate: numeric('rate').notNull(),
+  feeBps: integer('fee_bps').notNull(),
+  holdUntil: timestamp('hold_until', { withTimezone: true }).notNull(),
+  scheduledExecuteAt: timestamp('scheduled_execute_at', { withTimezone: true }),
+  alertRule: jsonb('alert_rule'),
+  /** ACTIVE | EXECUTED | EXPIRED | CANCELLED. */
+  state: text('state').notNull().default('ACTIVE'),
+  transferIntentId: text('transfer_intent_id'),
+  demo: boolean('demo').notNull().default(false),
+  ...timestamps,
+}, (table) => [
+  index('rate_holds_org_created_idx').on(table.orgId, table.createdAt),
+  index('rate_holds_active_until_idx').on(table.state, table.holdUntil),
+]);
+
+/**
+ * A deposit a customer was asked to make, and what became of it.
+ *
+ * Held in a `Map` on `globalThis` in `lib/server/funding-sessions.ts` until
+ * WS8, so a deposit webhook answered by another instance found no session.
+ * `selection` is the funding choice exactly as the registry resolved it; it is
+ * one value, not columns anyone queries across.
+ */
+export const fundingSessions = pgTable('funding_sessions', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  /** On-chain account id. Recorded, not the tenant key — it falls back to a
+   *  value shared across orgs. */
+  businessAccountId: text('business_account_id').notNull(),
+  selection: jsonb('selection').notNull(),
+  feeTier: text('fee_tier').notNull(),
+  amountExpectedMicro: bigint('amount_expected_micro', { mode: 'bigint' }).notNull(),
+  depositAddress: text('deposit_address'),
+  depositUri: text('deposit_uri'),
+  status: text('status').notNull().default('AWAITING_DEPOSIT'),
+  sourceType: text('source_type'),
+  kytPolicy: text('kyt_policy'),
+  kytReasons: jsonb('kyt_reasons'),
+  sourceTxDigest: text('source_tx_digest'),
+  receivedCoinType: text('received_coin_type'),
+  receivedAmountMicro: bigint('received_amount_micro', { mode: 'bigint' }),
+  nativeSuiUsdc: boolean('native_sui_usdc'),
+  normalizedAmountUsdcMicro: bigint('normalized_amount_usdc_micro', { mode: 'bigint' }),
+  normalizeVenue: text('normalize_venue'),
+  effectiveSlippageBps: integer('effective_slippage_bps'),
+  transferIntentId: text('transfer_intent_id'),
+  adminFlag: text('admin_flag'),
+  ...timestamps,
+}, (table) => [
+  index('funding_sessions_org_created_idx').on(table.orgId, table.createdAt),
+  index('funding_sessions_created_idx').on(table.createdAt),
+]);
+
+/**
+ * Which funding session an on-chain deposit belongs to.
+ *
+ * The digest is the primary key: one deposit, one session, enforced by the
+ * database rather than by a `Map` that guarded only the instance holding it.
+ */
+export const fundingSourceTransactions = pgTable('funding_source_transactions', {
+  txDigest: text('tx_digest').primaryKey(),
+  sessionId: text('session_id').notNull().references(() => fundingSessions.id),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * The funding source an org last paid with, per on-chain account.
+ *
+ * Keyed by org AND account. Keyed by account alone, as the `Map` was, every
+ * org on the shared fallback account id read each other's last choice.
+ */
+export const fundingLastUsedSources = pgTable('funding_last_used_sources', {
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  businessAccountId: text('business_account_id').notNull(),
+  source: text('source').notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  primaryKey({ columns: [table.orgId, table.businessAccountId] }),
+]);
+
+/**
+ * One Splash US → Splash Labuan leg behind a customer transfer: the USD sent,
+ * the USDC acquired, and the bank and Labuan references an auditor follows.
+ *
+ * Held in a `Map` on `globalThis` until WS8, which the daily reconciliation
+ * summed — so each serverless instance reconciled its own slice of the day.
+ */
+export const intercompanyTransfers = pgTable('intercompany_transfers', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  transferIntentId: text('transfer_intent_id').notNull(),
+  /** Micro units, integers. The record carries decimal strings; the store
+   *  converts through lib/money.ts. */
+  amountUsdMicro: bigint('amount_usd_micro', { mode: 'bigint' }).notNull(),
+  amountUsdcMicro: bigint('amount_usdc_micro', { mode: 'bigint' }).notNull().default(0n),
+  /** A ratio, not money: exact decimal, string in JS. */
+  usdToUsdcRate: numeric('usd_to_usdc_rate').notNull(),
+  maybankRef: text('maybank_ref').notNull().default(''),
+  labuanSettlementId: text('labuan_settlement_id').notNull().default(''),
+  state: text('state').notNull().default('INITIATED'),
+  ...timestamps,
+}, (table) => [
+  /** One leg per customer transfer. A second would send the USD twice. */
+  uniqueIndex('intercompany_transfer_unique').on(table.transferIntentId),
+  index('intercompany_created_idx').on(table.createdAt),
+]);
+
+/**
+ * A support ticket: a customer telling us something is wrong, and our answer.
+ *
+ * Held in a `Map` on `globalThis` in `lib/server/support.ts` until WS8, so a
+ * ticket raised on one serverless instance was unknown to the instance the
+ * staff console reached, and a cold start dropped every ticket. WS2 scoped the
+ * store by org; `orgId` is NOT NULL here with a foreign key, because a ticket
+ * with no owner cannot be scoped. The demo seed tickets live only in the
+ * in-process fallback and never reach a real database.
+ */
+export const supportTickets = pgTable('support_tickets', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  /** bug | feature | complaint | other. */
+  type: text('type').notNull(),
+  subject: text('subject').notNull(),
+  message: text('message').notNull(),
+  email: text('email'),
+  /** OPEN | IN_REVIEW | REPLIED | CLOSED. */
+  status: text('status').notNull().default('OPEN'),
+  /** NORMAL | HIGH. */
+  priority: text('priority').notNull().default('NORMAL'),
+  assignedTo: text('assigned_to'),
+  ...timestamps,
+}, (table) => [
+  index('support_tickets_org_updated_idx').on(table.orgId, table.updatedAt),
+  index('support_tickets_updated_idx').on(table.updatedAt),
+]);
+
+/**
+ * One reply on a ticket, customer or staff.
+ *
+ * Its own table, not an array on the ticket: the `Map` replaced the whole
+ * replies array on every write, which in a database is a read-modify-write
+ * that loses one of two replies sent at the same moment. An insert cannot.
+ * `seq` orders replies even when two share a millisecond.
+ */
+export const supportTicketReplies = pgTable('support_ticket_replies', {
+  id: text('id').primaryKey(),
+  seq: bigserial('seq', { mode: 'number' }).notNull(),
+  ticketId: text('ticket_id').notNull().references(() => supportTickets.id),
+  /** The ticket's org, so a reply can never be read across tenants on its own. */
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  actor: text('actor').notNull(),
+  /** customer | staff. */
+  actorType: text('actor_type').notNull(),
+  message: text('message').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index('support_ticket_replies_ticket_idx').on(table.ticketId, table.seq),
+]);
+
+/**
+ * One business day's settlements across every tenant, folded into a Merkle
+ * root, sealed to Walrus and anchored on Sui.
+ *
+ * Held in a `Map` on `globalThis` in `lib/server/audit-batches.ts` until WS8:
+ * the batch existed only on the instance the cron hit, and after a cold start
+ * the cron found no record of a root already on chain and anchored the day
+ * again.
+ *
+ * No `org_id`, deliberately. Every other WS8 table has one because its rows
+ * belong to a tenant; a batch belongs to all of them at once — its leaves are
+ * many workspaces' transfer ids — so there is no owner to scope by. That is
+ * why its readers are staff-only by name (`*ForStaff`, WS2) and sit behind the
+ * staff session: the protection is who may read, not which rows.
+ *
+ * One batch per business date. The in-memory code relied on that (the map was
+ * keyed by date) and the unique index now enforces it across instances.
+ */
+export const dailyAuditBatches = pgTable('daily_audit_batches', {
+  /** `daily-audit:<business date>`. */
+  id: text('id').primaryKey(),
+  businessDate: date('business_date', { mode: 'string' }).notNull(),
+  merkleRoot: text('merkle_root').notNull(),
+  settlementCount: integer('settlement_count').notNull(),
+  /** Each settlement's leaf hash and inclusion proof. One value, read whole. */
+  leaves: jsonb('leaves').notNull(),
+  walrusBlobId: text('walrus_blob_id').notNull(),
+  /** demo | live. */
+  walrusMode: text('walrus_mode').notNull(),
+  sealPolicyId: text('seal_policy_id').notNull(),
+  /** demo | live. */
+  sealMode: text('seal_mode').notNull(),
+  ciphertextHash: text('ciphertext_hash').notNull(),
+  anchorObjectId: text('anchor_object_id'),
+  anchorDigest: text('anchor_digest').notNull(),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('daily_audit_batches_business_date_unique').on(table.businessDate),
+]);

@@ -22,7 +22,7 @@
  * `suppliers.org_id` is NOT NULL, so scoping here is a property of the table
  * rather than a filter each read has to remember.
  */
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull } from 'drizzle-orm';
 import type { PgDatabase } from 'drizzle-orm/pg-core';
 
 import { suppliers } from '../../db/schema.ts';
@@ -263,6 +263,26 @@ export async function listRecipients(
     .orderBy(desc(suppliers.createdAt))
     .limit(limit);
   return rows.map(toRow);
+}
+
+/**
+ * Cross-tenant, staff only: the wallet addresses of every beneficiary that is
+ * paid on chain and has cleared screening (or carries a named admin's
+ * attestation). The operator outflow monitor's allowlist (WS4). Addresses
+ * only — no names, no banks — because that is all the monitor needs.
+ */
+export async function listApprovedWalletAddressesForStaff(db: DrizzleDb): Promise<string[]> {
+  const rows = await db
+    .select({ walletAddress: suppliers.walletAddress })
+    .from(suppliers)
+    .where(
+      and(
+        eq(suppliers.payoutMethod, 'WALLET'),
+        isNotNull(suppliers.walletAddress),
+        inArray(suppliers.screeningVerdict, ['CLEAR', 'ATTESTED']),
+      ),
+    );
+  return rows.map((r: { walletAddress: string | null }) => r.walletAddress).filter((a: string | null): a is string => Boolean(a));
 }
 
 /**
