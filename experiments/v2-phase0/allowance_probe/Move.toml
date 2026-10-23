@@ -1,0 +1,14 @@
+# TESTNET-ONLY probe for the v2 Phase 0 gate (docs/mainnet-checks-2026-10.md).
+#
+# It exists to prove, on testnet, that a business multisig can make an
+# app-bound allowance with `0x2::allowance::propose_for_app` and an app module
+# can accept it with `issue`, and that the app path can then spend USDC from
+# the funder's address balance. It is NOT Splash's `splash_spend` package and
+# must never be published to mainnet.
+#
+# Built with Sui CLI mainnet-v1.82.3 (sui::allowance first ships in v1.80.1).
+[package]
+name = "allowance_probe"
+edition = "2024"
+license = "Apache-2.0"
+
