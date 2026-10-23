@@ -18,6 +18,7 @@ use splash_core::cap_registry::{Self, CapRegistry};
 use splash_core::compliance_config::{Self, ComplianceConfig, ComplianceCap};
 use std::unit_test::assert_eq;
 use sui::clock::{Self, Clock};
+use sui::sui::SUI;
 use sui::test_scenario::{Self as ts, Scenario};
 
 const PUBLISHER: address = @0xA11CE;
@@ -253,7 +254,8 @@ fun with_compliance_config(scenario: &mut Scenario) {
     let admin = scenario.take_from_sender<AdminCap>();
     let registry = scenario.take_shared<CapRegistry>();
     let ctx = scenario.ctx();
-    compliance_config::create(
+    compliance_config::create<SUI>(
+        compliance_config::ticket_for_testing(ctx),
         &admin,
         &registry,
         DEVIATION,

@@ -10,6 +10,8 @@ module splash_core::authority_tests;
 
 use splash_core::audit_anchor;
 use splash_core::business_account::{Self, BusinessAccount, PayoutApproval};
+use splash_core::cap_registry;
+use splash_core::compliance_config::{Self, ComplianceConfig};
 use splash_core::payment_intent::{Self, PaymentIntent};
 use std::unit_test::assert_eq;
 use sui::clock::{Self, Clock};
@@ -68,6 +70,20 @@ fun setup(): Scenario {
         let admin = business_account::admin_cap_for_testing(ctx);
         business_account::verify_business(&admin, &mut account, 20);
         business_account::add_approver(&mut account, APPROVER, ctx);
+        let registry = cap_registry::new_for_testing(ctx);
+        compliance_config::create<SUI>(
+            compliance_config::ticket_for_testing(ctx),
+            &admin,
+            &registry,
+            5_000,
+            60_000,
+            50,
+            1_000_000,
+            1_000_000,
+            vector[object::id_from_address(@0xF001)],
+            ctx,
+        );
+        cap_registry::share_for_testing(registry);
         business_account::destroy_admin_cap_for_testing(admin);
         ts::return_shared(account);
     };
@@ -78,19 +94,25 @@ fun setup(): Scenario {
 fun open_intent(scenario: &mut Scenario, maker: address, amount: u64) {
     scenario.next_tx(maker);
     let account = scenario.take_shared<BusinessAccount>();
+    let config = scenario.take_shared<ComplianceConfig>();
     let c = scenario.take_shared<Clock>();
     let ctx = scenario.ctx();
     payment_intent::create_payment_intent_for_account<SUI>(
         &account,
+        &config,
         RECIPIENT,
         amount,
         b"PHP".to_string(),
         56_000_000,
         COMMITMENT,
+        payment_intent::kind_bank_payout(),
+        COMMITMENT,
+        c.timestamp_ms() + 300_000,
         &c,
         ctx,
     );
     ts::return_shared(c);
+    ts::return_shared(config);
     ts::return_shared(account);
 }
 
@@ -99,12 +121,14 @@ fun open_intent(scenario: &mut Scenario, maker: address, amount: u64) {
 fun approve(scenario: &mut Scenario, approver: address) {
     scenario.next_tx(approver);
     let account = scenario.take_shared<BusinessAccount>();
+    let config = scenario.take_shared<ComplianceConfig>();
     let intent = scenario.take_shared<PaymentIntent>();
     let c = scenario.take_shared<Clock>();
     let ctx = scenario.ctx();
-    payment_intent::approve_payout(&intent, &account, &c, ctx);
+    payment_intent::approve_payout(&intent, &account, &config, &c, ctx);
     ts::return_shared(c);
     ts::return_shared(intent);
+    ts::return_shared(config);
     ts::return_shared(account);
 }
 
@@ -112,6 +136,7 @@ fun approve(scenario: &mut Scenario, approver: address) {
 fun settle(scenario: &mut Scenario, maker: address, amount: u64) {
     scenario.next_tx(maker);
     let mut account = scenario.take_shared<BusinessAccount>();
+    let config = scenario.take_shared<ComplianceConfig>();
     let mut intent = scenario.take_shared<PaymentIntent>();
     let c = scenario.take_shared<Clock>();
     let approval = scenario.take_from_sender<PayoutApproval>();
@@ -121,6 +146,7 @@ fun settle(scenario: &mut Scenario, maker: address, amount: u64) {
     let receipt = payment_intent::confirm_with_approval(
         &mut intent,
         &mut account,
+        &config,
         approval,
         payment,
         &c,
@@ -130,6 +156,7 @@ fun settle(scenario: &mut Scenario, maker: address, amount: u64) {
 
     ts::return_shared(c);
     ts::return_shared(intent);
+    ts::return_shared(config);
     ts::return_shared(account);
 }
 
@@ -377,27 +404,11 @@ fun a_cancelled_intent_cannot_be_approved() {
     scenario.end();
 }
 
-#[test]
-#[expected_failure(abort_code = 415, location = splash_core::payment_intent)]
-/// The bypass that would have made all of this decoration. An account-bound
-/// intent cannot be settled through the unapproved path.
-fun a_bound_intent_cannot_be_settled_without_an_approval() {
-    let mut scenario = setup();
-    open_intent(&mut scenario, OWNER, AMOUNT);
-
-    scenario.next_tx(OWNER);
-    {
-        let mut intent = scenario.take_shared<PaymentIntent>();
-        let c = scenario.take_shared<Clock>();
-        let ctx = scenario.ctx();
-        let payment = coin::mint_for_testing<SUI>(AMOUNT, ctx);
-        let receipt = payment_intent::confirm_payment_intent(&mut intent, payment, &c, ctx);
-        audit_anchor::anchor(receipt, HASH, BLOB, &c, ctx);
-        ts::return_shared(c);
-        ts::return_shared(intent);
-    };
-    scenario.end();
-}
+// v2: `a_bound_intent_cannot_be_settled_without_an_approval` exercised
+// `confirm_payment_intent`, which v2 does not contain. Its property — an
+// account-bound intent has no unapproved path — now holds by construction:
+// every remaining settle path is the wallet, a registered app, or this
+// approval path (docs/v2/phase1-move-design.md, "The money paths").
 
 #[test]
 #[expected_failure(abort_code = 32, location = splash_core::business_account)]
