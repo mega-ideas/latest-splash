@@ -34,7 +34,7 @@ import * as schema from '../lib/db/schema.ts';
 import { createAccount, markEmailVerified } from '../lib/auth/accounts.ts';
 import { TERMS_VERSION } from '../content/legal.ts';
 import { migrateDevDatabase } from './dev-db-migrations.mjs';
-import { devDbSocketOptions } from './dev-db-server.mjs';
+import { devDbSocketOptions, isFirstBoot, markSeeded } from './dev-db-server.mjs';
 
 // .env.local first: DEV_DB_DIR, DEV_DB_PORT and the WhatsApp numbers below may
 // live there. Values already in the shell win.
@@ -109,10 +109,10 @@ if (migrated.alreadyApplied > 0) {
 const db = drizzle(client, { schema });
 
 // -- Seed, once --------------------------------------------------------------
-// In memory this is every start. On disk, the demo operator's row says the
-// seed already ran, and running it again would trip on the accounts it made.
-const firstBoot =
-  (await client.query('SELECT 1 FROM users WHERE email = $1', ['demo@acme.test'])).rows.length === 0;
+// In memory this is every start. On disk, a marker row says the seed already
+// ran (see isFirstBoot), so deleting the demo accounts neither crashes the
+// next start nor brings them back.
+const firstBoot = await isFirstBoot(client);
 
 const { grantMembership } = await import('../lib/auth/authority.ts');
 
@@ -242,6 +242,8 @@ for (const [email, orgId, raw] of [
   console.log(`  WhatsApp ${e164.slice(0, 3)}••••${e164.slice(-4)} pre-verified for ${email}`);
 }
 
+if (firstBoot) await markSeeded(client);
+
 // One connection per pool slot, or a dashboard page's parallel queries hang.
 const server = new PGLiteSocketServer({ db: client, port: PORT, host: '127.0.0.1', ...devDbSocketOptions(process.env) });
 await server.start();
@@ -254,10 +256,14 @@ console.log(
     ? `${seed.length} accounts seeded; ${seed.filter((p) => !p.role).length} awaiting access.`
     : 'existing database: seed skipped, your rows are as you left them.',
 );
-console.log('');
-console.log(`Demo operators (password ${DEMO_PASSWORD}):`);
-for (const d of demos) {
-  console.log(`  ${d.email.padEnd(18)} ${d.org} - ${d.blurb}`);
+// Only a database the seed just made has these accounts; on an existing one
+// they may have been deleted on purpose.
+if (firstBoot) {
+  console.log('');
+  console.log(`Demo operators (password ${DEMO_PASSWORD}):`);
+  for (const d of demos) {
+    console.log(`  ${d.email.padEnd(18)} ${d.org} - ${d.blurb}`);
+  }
 }
 console.log('');
 

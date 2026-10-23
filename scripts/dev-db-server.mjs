@@ -16,3 +16,27 @@ export function devDbSocketOptions(env) {
   const maxConnections = Number.isInteger(configured) && configured >= 1 ? configured : APP_POOL_DEFAULT;
   return { maxConnections };
 }
+
+/**
+ * Whether this database still needs the dev seed. The seed writes a marker
+ * row when it finishes (see markSeeded); a database seeded before the marker
+ * existed is recognised by the demo workspace it made. Neither depends on a
+ * particular account, so deleting the demo accounts does not make the next
+ * start reseed them, or crash on the rows that are still there.
+ *
+ * @param {{ query: (sql: string, params?: unknown[]) => Promise<{ rows: unknown[] }> }} client
+ */
+export async function isFirstBoot(client) {
+  await client.query('CREATE TABLE IF NOT EXISTS splash_dev_seed (seeded_at timestamptz NOT NULL DEFAULT now())');
+  if ((await client.query('SELECT 1 FROM splash_dev_seed LIMIT 1')).rows.length > 0) return false;
+  const legacy = await client.query("SELECT 1 FROM organizations WHERE id = 'demo-business' LIMIT 1");
+  return legacy.rows.length === 0;
+}
+
+/** Record that the dev seed ran. Safe to call more than once. */
+export async function markSeeded(client) {
+  await client.query('CREATE TABLE IF NOT EXISTS splash_dev_seed (seeded_at timestamptz NOT NULL DEFAULT now())');
+  if ((await client.query('SELECT 1 FROM splash_dev_seed LIMIT 1')).rows.length === 0) {
+    await client.query('INSERT INTO splash_dev_seed DEFAULT VALUES');
+  }
+}
