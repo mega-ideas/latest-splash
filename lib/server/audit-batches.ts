@@ -164,16 +164,24 @@ export async function buildDailyAuditBatch(date = businessDate()) {
   return batch;
 }
 
-export function listDailyAuditBatches() {
+/*
+ * Staff-only, roots and contents (Sky's decision, WS2). A daily batch spans
+ * every tenant: its leaves are other workspaces' transfer ids and the proofs
+ * that place them, so even the Merkle root and the count say how much the
+ * platform settled that day. The readers say so in their names, and the two
+ * routes in front of them require a staff session (`getAdminSession`).
+ */
+
+export function listDailyAuditBatchesForStaff() {
   return [...batches.values()].sort((a, b) => b.date.localeCompare(a.date));
 }
 
-export function readDailyAuditBatch(batchId: string) {
+export function readDailyAuditBatchForStaff(batchId: string) {
   return [...batches.values()].find((batch) => batch.id === batchId) ?? null;
 }
 
-export async function verifyDailyAuditBatch(batchId: string, transferId: string) {
-  const batch = readDailyAuditBatch(batchId);
+export async function verifyDailyAuditBatchForStaff(batchId: string, transferId: string) {
+  const batch = readDailyAuditBatchForStaff(batchId);
   if (!batch) throw new Error('Daily audit batch not found.');
   const leaf = batch.leaves.find((entry) => entry.transferId === transferId);
   if (!leaf) throw new Error('Transfer is not included in this daily audit batch.');

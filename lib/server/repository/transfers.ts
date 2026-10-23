@@ -22,7 +22,7 @@
  * so that granting cross-tenant reach is a visible act at the call site rather
  * than a forgotten argument.
  */
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, or, sql } from 'drizzle-orm';
 import type { PgDatabase } from 'drizzle-orm/pg-core';
 
 import { intentTransitions, paymentIntents } from '../../db/schema.ts';
@@ -173,6 +173,33 @@ export async function getTransfer(
     .where(and(eq(paymentIntents.id, intentId), eq(paymentIntents.orgId, orgId)))
     .limit(1);
   return rows.length > 0 ? toRow(rows[0]) : null;
+}
+
+/**
+ * The id of `orgId`'s transfer whose receipt references this Walrus blob, or
+ * null: the transfer's own blob, or the settlement evidence bundle recorded in
+ * `settlement_metadata.evidence`. Ownership for `GET /api/walrus/:blobId`.
+ */
+export async function findTransferIdByBlob(
+  db: DrizzleDb,
+  orgId: string,
+  blobId: string,
+): Promise<string | null> {
+  if (!orgId || !blobId) return null;
+  const rows = await db
+    .select({ id: paymentIntents.id })
+    .from(paymentIntents)
+    .where(
+      and(
+        eq(paymentIntents.orgId, orgId),
+        or(
+          eq(paymentIntents.walrusBlobId, blobId),
+          sql`${paymentIntents.settlementMetadata} -> 'evidence' ->> 'walrusBlobId' = ${blobId}`,
+        ),
+      ),
+    )
+    .limit(1);
+  return rows[0]?.id ?? null;
 }
 
 /** Cross-tenant read for the staff console. Named so it cannot be reached by accident. */

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { getAdminSession } from '@/lib/server/admin-auth';
-import { listSupportTickets } from '@/lib/server/support';
+import { listSupportTicketsForStaff } from '@/lib/server/support';
 
 export async function GET() {
   const session = await getAdminSession();
@@ -10,5 +10,5 @@ export async function GET() {
     return NextResponse.json({ error: 'Staff authentication required' }, { status: 401 });
   }
 
-  return NextResponse.json({ tickets: listSupportTickets() });
+  return NextResponse.json({ tickets: listSupportTicketsForStaff() });
 }
