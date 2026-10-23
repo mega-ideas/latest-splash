@@ -57,6 +57,7 @@
 module splash_core::business_account;
 
 use splash_core::cap_registry::{Self, CapRegistry};
+use splash_core::multisig;
 use splash_core::spend_window::{Self, SpendWindow};
 use std::string::String;
 use sui::clock::{Self, Clock};
@@ -104,6 +105,42 @@ const E_OVER_PER_TRANSFER_CAP: u64 = 42;
 /// The payout is below the platform minimum.
 const E_BELOW_MINIMUM: u64 = 43;
 const E_UNKNOWN_TIER: u64 = 44;
+
+// ─── v2 business wallet (45-block) ─────────────────────────────────────────
+/// The account already has a wallet. A wallet changes only by rotation.
+const E_WALLET_ALREADY_REGISTERED: u64 = 45;
+/// The sender is not the wallet an owner nominated for this account.
+const E_WALLET_NOT_NOMINATED: u64 = 46;
+/// The sender is not the multisig address these members derive.
+const E_WALLET_MISMATCH: u64 = 47;
+/// One member can meet the threshold alone, and the wallet did not say it
+/// chose that.
+const E_SINGLE_SIGNER_NOT_ACKNOWLEDGED: u64 = 48;
+/// The account has no wallet yet.
+const E_NO_WALLET: u64 = 49;
+/// The sender is not the account's wallet.
+const E_NOT_THE_WALLET: u64 = 50;
+/// The rotation names the wallet that is already current.
+const E_SAME_WALLET: u64 = 51;
+/// There is no rotation waiting to be confirmed or cancelled.
+const E_NO_PENDING_ROTATION: u64 = 52;
+/// The sender is not the wallet the rotation is waiting for.
+const E_NOT_THE_PENDING_WALLET: u64 = 53;
+/// A rotation is already waiting. Cancel it before proposing another.
+const E_ROTATION_PENDING: u64 = 54;
+/// Only the founding owner nominates the account's wallet.
+const E_NOT_THE_FOUNDER: u64 = 55;
+/// The wallet registering does not match the nomination: a different
+/// address, or a different single-signer choice.
+const E_NOMINATION_MISMATCH: u64 = 56;
+/// A wallet member is not an owner of the account. The signers are the
+/// business's own people (D1).
+const E_SIGNER_NOT_AN_OWNER: u64 = 57;
+/// Once a wallet is registered, only the wallet can lift an owner freeze.
+const E_WALLET_MUST_UNFREEZE: u64 = 58;
+/// This owner is a member of the business wallet, or of the wallet a pending
+/// rotation names. Rotate them out of the wallet first.
+const E_OWNER_IS_A_SIGNER: u64 = 59;
 
 // ─── Bounds ────────────────────────────────────────────────────────────────
 /// `VecSet` membership is a linear scan and an unbounded set is both a gas
@@ -238,6 +275,21 @@ public struct PendingRecovery has store, drop {
     effective_at_ms: u64,
 }
 
+/// A wallet rotation the new wallet has not yet confirmed.
+public struct PendingWallet has store, drop {
+    wallet: address,
+    threshold: u16,
+    signers: vector<address>,
+    single_signer: bool,
+}
+
+/// The founder's nomination: which wallet may register, and whether the
+/// founder chose a wallet one member can sign for alone.
+public struct Nomination has store, drop, copy {
+    wallet: address,
+    single_signer: bool,
+}
+
 public struct BusinessAccount has key {
     id: UID,
     /// The founding owner. Kept as a stable attribution anchor for events and
@@ -265,6 +317,28 @@ public struct BusinessAccount has key {
     per_transfer_cap_minor: u64,
     daily: SpendWindow,
     monthly: SpendWindow,
+    /// v2 (D1). The business's Splash Wallet: a Sui native multisig address
+    /// whose members are the owners' passkeys. Splash has no key to it. Its
+    /// own signature authorises paying from it (`payment_intent::
+    /// confirm_from_business_wallet`) and funding spending rules
+    /// (`splash_spend`). `none` until the wallet registers itself.
+    wallet: Option<address>,
+    wallet_threshold: u16,
+    /// Each member's own single-key address (`multisig::signer_address`), in
+    /// member order. These are the people who may give a second approval.
+    wallet_signers: vector<address>,
+    /// True if any one member can meet the threshold alone. The founder chose
+    /// that at nomination and the wallet acknowledged it (D1).
+    single_signer: bool,
+    /// Goes up on every registration and every confirmed rotation. Spending
+    /// rules copy it, so rotating A → B → A brings back A's address but none
+    /// of A's old rules.
+    wallet_epoch: u64,
+    /// Named by the founder before the wallet registers, so neither a
+    /// stranger's multisig nor a single co-owner can claim the account.
+    nominated_wallet: Option<Nomination>,
+    /// A rotation the new wallet has not confirmed yet.
+    pending_wallet: Option<PendingWallet>,
 }
 
 /// Authority to release ONE payout, from ONE account, for ONE intent, at ONE
@@ -387,6 +461,50 @@ public struct AnchorCapDestroyed has copy, drop {
     anchor_cap_id: address,
 }
 
+/// An owner named the wallet that may register for this account.
+public struct WalletNominated has copy, drop {
+    business_account_id: address,
+    wallet: address,
+    by: address,
+}
+
+/// The wallet registered itself. Everything here is already public on chain:
+/// the wallet is the sender, and its members are in every signature it makes.
+public struct WalletRegistered has copy, drop {
+    business_account_id: address,
+    wallet: address,
+    threshold: u16,
+    signer_count: u64,
+    single_signer: bool,
+    authority_epoch: u64,
+}
+
+/// The current wallet proposed a new one. Nothing changes until the new
+/// wallet confirms.
+public struct WalletRotationProposed has copy, drop {
+    business_account_id: address,
+    wallet: address,
+    new_wallet: address,
+    threshold: u16,
+    signer_count: u64,
+    single_signer: bool,
+}
+
+/// The new wallet confirmed; it is now the account's wallet. Funds stay at
+/// the old address until the owners move them, and every allowance the old
+/// wallet funded stays bound to the old wallet.
+public struct WalletRotated has copy, drop {
+    business_account_id: address,
+    old_wallet: address,
+    new_wallet: address,
+    authority_epoch: u64,
+}
+
+public struct WalletRotationCancelled has copy, drop {
+    business_account_id: address,
+    cancelled_wallet: address,
+}
+
 // ─── Publish ───────────────────────────────────────────────────────────────
 
 /// Mint exactly one of each cap, to the publisher.
@@ -449,6 +567,13 @@ public fun submit_application(
         per_transfer_cap_minor: TIER_3_PER_TRANSFER,
         daily: spend_window::new_daily(TIER_3_DAILY, clock),
         monthly: spend_window::new_monthly(TIER_3_MONTHLY, clock),
+        wallet: option::none(),
+        wallet_threshold: 0,
+        wallet_signers: vector[],
+        single_signer: false,
+        wallet_epoch: 0,
+        nominated_wallet: option::none(),
+        pending_wallet: option::none(),
     };
 
     event::emit(ApplicationReceived {
@@ -562,6 +687,14 @@ public fun remove_owner(account: &mut BusinessAccount, who: address, ctx: &TxCon
     // path back except the recovery party, and `recovery_party` is optional.
     assert!(account.owners.length() > 1, E_LAST_OWNER);
     assert!(who != account.owner || tx_context::sender(ctx) == account.owner, E_NOT_AN_OWNER);
+    // v2: every member of the business wallet is an owner, always. Someone
+    // leaving is rotated out of the wallet first (rotate_wallet, then
+    // confirm_wallet_rotation), and removed as an owner after.
+    assert!(!account.wallet_signers.contains(&who), E_OWNER_IS_A_SIGNER);
+    assert!(
+        account.pending_wallet.is_none() || !account.pending_wallet.borrow().signers.contains(&who),
+        E_OWNER_IS_A_SIGNER,
+    );
 
     account.owners.remove(&who);
     bump(account, b"remove_owner", who, ctx);
@@ -606,8 +739,18 @@ public fun freeze_account(account: &mut BusinessAccount, ctx: &TxContext) {
     bump(account, b"freeze", tx_context::sender(ctx), ctx);
 }
 
+/// Lift an owner freeze.
+///
+/// Any one owner can freeze, as the emergency brake. Before a business wallet
+/// exists, any one owner can also lift it. Once the wallet is registered,
+/// only the wallet (the owners' quorum) can: a single rogue co-owner must not
+/// be able to release a brake their colleagues pulled.
 public fun unfreeze_account(account: &mut BusinessAccount, ctx: &TxContext) {
-    assert_owner(account, ctx);
+    if (account.wallet.is_some()) {
+        assert!(tx_context::sender(ctx) == *account.wallet.borrow(), E_WALLET_MUST_UNFREEZE);
+    } else {
+        assert_owner(account, ctx);
+    };
     assert!(account.frozen, E_NOT_FROZEN);
     // Note what this does NOT clear: `admin_frozen`. An owner lifting their own
     // freeze must not lift a compliance one.
@@ -739,6 +882,219 @@ public fun execute_recovery(account: &mut BusinessAccount, clock: &Clock, ctx: &
 
     bump(account, b"recovered", new_owner, ctx);
 }
+
+// ─── The business wallet (v2, D1) ──────────────────────────────────────────
+//
+// The wallet is a Sui native multisig of the owners' passkeys. These functions
+// record WHICH multisig it is, and the only party that can write that record
+// is the multisig itself: every write below asserts that the transaction's
+// sender is the address the members derive, so it carries the protocol's proof
+// that a quorum of exactly those members signed. The operator, `AdminCap` and
+// the approver set have no path in here at all.
+
+/// Name the wallet that may register for this account. FOUNDER only.
+///
+/// Without a nomination, any multisig could register itself as the wallet of
+/// an account that has none. With a nomination any owner could make, one
+/// co-owner could register a 1-of-1 of their own key first, and only the
+/// wallet can rotate the wallet, so nobody could take the slot back. The
+/// founder is already this account's anchor (the one owner the others cannot
+/// remove), so the founder names the wallet AND whether it is a wallet one
+/// member can sign for alone. Re-nominating before registration replaces the
+/// earlier choice; after registration, the wallet changes only by rotation.
+public fun nominate_wallet(
+    account: &mut BusinessAccount,
+    wallet: address,
+    single_signer: bool,
+    ctx: &TxContext,
+) {
+    assert!(tx_context::sender(ctx) == account.owner, E_NOT_THE_FOUNDER);
+    // A founder who has left the owners no longer speaks for the account.
+    assert!(account.owners.contains(&account.owner), E_NOT_THE_FOUNDER);
+    assert_thawed(account);
+    assert!(wallet != @0x0, E_INVALID_ADDRESS);
+    assert!(account.wallet.is_none(), E_WALLET_ALREADY_REGISTERED);
+
+    account.nominated_wallet = option::some(Nomination { wallet, single_signer });
+    event::emit(WalletNominated {
+        business_account_id: object::uid_to_address(&account.id),
+        wallet,
+        by: tx_context::sender(ctx),
+    });
+}
+
+/// The wallet registers itself: `keys`, `weights` and `threshold` describe it,
+/// and the sender must be exactly the address they derive.
+///
+/// Three further rules. The wallet must be the one the founder nominated,
+/// with the single-signer choice the founder made. Every member must be an
+/// owner of the account, so the signers are the business's own people (D1)
+/// and no key the business does not know can be slipped in. And a wallet one
+/// member can sign for alone must say so itself: `single_signer_ack`. That
+/// status comes from `multisig::is_single_signer`, from the weights, not from
+/// `threshold < 2`: weights `[2, 1, 1]` under threshold 2 are a one-person
+/// wallet as surely as a 1-of-1 is.
+public fun register_wallet(
+    account: &mut BusinessAccount,
+    keys: vector<vector<u8>>,
+    weights: vector<u8>,
+    threshold: u16,
+    single_signer_ack: bool,
+    ctx: &TxContext,
+) {
+    assert_thawed(account);
+    assert!(account.wallet.is_none(), E_WALLET_ALREADY_REGISTERED);
+    let sender = tx_context::sender(ctx);
+    assert!(account.nominated_wallet.is_some(), E_WALLET_NOT_NOMINATED);
+    let nomination = *account.nominated_wallet.borrow();
+    assert!(nomination.wallet == sender, E_WALLET_NOT_NOMINATED);
+    assert!(multisig::derive_address(&keys, &weights, threshold) == sender, E_WALLET_MISMATCH);
+    let single_signer = multisig::is_single_signer(&weights, threshold);
+    assert!(single_signer == nomination.single_signer, E_NOMINATION_MISMATCH);
+    assert!(!single_signer || single_signer_ack, E_SINGLE_SIGNER_NOT_ACKNOWLEDGED);
+    let signers = multisig::signer_addresses(&keys);
+    assert_signers_are_owners(account, &signers);
+
+    let signer_count = signers.length();
+    account.wallet = option::some(sender);
+    account.wallet_threshold = threshold;
+    account.wallet_signers = signers;
+    account.single_signer = single_signer;
+    account.wallet_epoch = account.wallet_epoch + 1;
+    account.nominated_wallet = option::none();
+    bump(account, b"register_wallet", sender, ctx);
+
+    event::emit(WalletRegistered {
+        business_account_id: object::uid_to_address(&account.id),
+        wallet: sender,
+        threshold,
+        signer_count,
+        single_signer,
+        authority_epoch: account.authority_epoch,
+    });
+}
+
+/// Propose a new wallet, signed by the current one.
+///
+/// A Sui multisig address is the hash of its members, so adding or removing a
+/// signer gives a new address. This records the new one as PENDING; it becomes
+/// the wallet only when it signs `confirm_wallet_rotation` itself. That second
+/// step proves the new members can actually reach their threshold before
+/// anything depends on them. A one-step rotation to a wallet nobody can sign
+/// for would lock the account, because only the wallet can rotate it.
+///
+/// The members are validated against Sui's own multisig rules here, since the
+/// new wallet has not signed anything yet, and every new member must be an
+/// owner, as at registration.
+///
+/// Allowed while the OWNERS have frozen the account: replacing a compromised
+/// signer is exactly what a freeze buys time for. Refused under a compliance
+/// freeze.
+public fun rotate_wallet(
+    account: &mut BusinessAccount,
+    keys: vector<vector<u8>>,
+    weights: vector<u8>,
+    threshold: u16,
+    single_signer_ack: bool,
+    ctx: &TxContext,
+) {
+    assert!(!account.admin_frozen, E_FROZEN);
+    let current = assert_wallet(account, ctx);
+    assert!(account.pending_wallet.is_none(), E_ROTATION_PENDING);
+    let new_wallet = multisig::derive_address(&keys, &weights, threshold);
+    assert!(new_wallet != current, E_SAME_WALLET);
+    let single_signer = multisig::is_single_signer(&weights, threshold);
+    assert!(!single_signer || single_signer_ack, E_SINGLE_SIGNER_NOT_ACKNOWLEDGED);
+    let signers = multisig::signer_addresses(&keys);
+    assert_signers_are_owners(account, &signers);
+
+    let signer_count = signers.length();
+    account.pending_wallet = option::some(PendingWallet {
+        wallet: new_wallet,
+        threshold,
+        signers,
+        single_signer,
+    });
+
+    event::emit(WalletRotationProposed {
+        business_account_id: object::uid_to_address(&account.id),
+        wallet: current,
+        new_wallet,
+        threshold,
+        signer_count,
+        single_signer,
+    });
+}
+
+/// The new wallet confirms the rotation and becomes the account's wallet.
+///
+/// What this does NOT do: move funds, or move allowances. Funds sit in the old
+/// wallet's address balance, and every allowance the old wallet funded names
+/// the old wallet as funder, until the owners move the balance and revoke and
+/// re-propose from the new wallet. The dashboard runs that as a one-time flow.
+public fun confirm_wallet_rotation(account: &mut BusinessAccount, ctx: &TxContext) {
+    assert!(!account.admin_frozen, E_FROZEN);
+    assert!(account.pending_wallet.is_some(), E_NO_PENDING_ROTATION);
+    let sender = tx_context::sender(ctx);
+    assert!(account.pending_wallet.borrow().wallet == sender, E_NOT_THE_PENDING_WALLET);
+
+    let old_wallet = *account.wallet.borrow();
+    let PendingWallet { wallet, threshold, signers, single_signer } = account.pending_wallet.extract();
+    // Checked again: an owner removed since the proposal must not become a signer.
+    assert_signers_are_owners(account, &signers);
+    account.wallet = option::some(wallet);
+    account.wallet_threshold = threshold;
+    account.wallet_signers = signers;
+    account.single_signer = single_signer;
+    account.wallet_epoch = account.wallet_epoch + 1;
+    bump(account, b"rotate_wallet", wallet, ctx);
+
+    event::emit(WalletRotated {
+        business_account_id: object::uid_to_address(&account.id),
+        old_wallet,
+        new_wallet: wallet,
+        authority_epoch: account.authority_epoch,
+    });
+}
+
+/// The current wallet withdraws a rotation the new one has not confirmed.
+/// Allowed while frozen: withdrawing a change is always safe.
+public fun cancel_wallet_rotation(account: &mut BusinessAccount, ctx: &TxContext) {
+    assert_wallet(account, ctx);
+    assert!(account.pending_wallet.is_some(), E_NO_PENDING_ROTATION);
+    let PendingWallet { wallet, threshold: _, signers: _, single_signer: _ } = account.pending_wallet.extract();
+    event::emit(WalletRotationCancelled {
+        business_account_id: object::uid_to_address(&account.id),
+        cancelled_wallet: wallet,
+    });
+}
+
+/// The sender is this account's registered wallet. Returns it.
+public fun assert_wallet(account: &BusinessAccount, ctx: &TxContext): address {
+    assert!(account.wallet.is_some(), E_NO_WALLET);
+    let wallet = *account.wallet.borrow();
+    assert!(tx_context::sender(ctx) == wallet, E_NOT_THE_WALLET);
+    wallet
+}
+
+fun assert_signers_are_owners(account: &BusinessAccount, signers: &vector<address>) {
+    let mut i = 0;
+    while (i < signers.length()) {
+        assert!(account.owners.contains(&signers[i]), E_SIGNER_NOT_AN_OWNER);
+        i = i + 1;
+    };
+}
+
+/// The account's UID, for `payment_intent` to derive v2 intent UIDs from
+/// (`derived_object::claim`), so one payment reference opens one intent per
+/// account, for ever. The Sui verifier requires the claim to sit in the module
+/// that builds the intent, hence this accessor.
+///
+/// `public(package)`: nothing outside `splash_core` can touch the account's
+/// dynamic fields.
+public(package) fun uid_mut(account: &mut BusinessAccount): &mut UID { &mut account.id }
+
+public(package) fun uid(account: &BusinessAccount): &UID { &account.id }
 
 // ─── The ceiling ───────────────────────────────────────────────────────────
 
@@ -900,17 +1256,8 @@ public(package) fun consume_approval(
     assert!(approval.authority_epoch == account.authority_epoch, E_STALE_AUTHORITY);
     assert!(account.approvers.contains(&approval.approver), E_NOT_AN_APPROVER);
     assert!(clock::timestamp_ms(clock) < approval.expires_at_ms, E_APPROVAL_EXPIRED);
-    assert!(account.is_verified, E_NOT_VERIFIED);
-    assert!(!account.frozen && !account.admin_frozen, E_FROZEN);
-
-    // Three ceilings, in the order an operator would ask about them: is this
-    // payment itself too big, then has the day filled, then the month. Each
-    // aborts with its own code so the answer to "why was this refused?" is not
-    // a guess.
-    assert!(amount >= MIN_TRANSFER_MINOR, E_BELOW_MINIMUM);
-    assert!(amount <= account.per_transfer_cap_minor, E_OVER_PER_TRANSFER_CAP);
-    spend_window::charge(&mut account.daily, amount, clock);
-    spend_window::charge(&mut account.monthly, amount, clock);
+    // The legacy path keeps the platform floor on every payout, as before.
+    charge_payout(account, amount, true, clock);
 
     let PayoutApproval {
         id,
@@ -932,6 +1279,33 @@ public(package) fun consume_approval(
         consumed_at_ms: clock::timestamp_ms(clock),
     });
     object::delete(id);
+}
+
+/// The checks every payout from an account passes, whichever path released
+/// it: KYB, both freeze flags, this tier's per-transfer ceiling, and the
+/// rolling day and month. `with_floor` adds the platform minimum.
+///
+/// The floor exists because a partner payout's fixed costs (settling,
+/// anchoring, screening, the corridor minimums) exceed a smaller payment. A
+/// USDC transfer to a wallet or to another Splash business has none of those
+/// costs and a product minimum of 1 USDC, so the v2 paths apply the floor to
+/// bank payouts only. The legacy path applies it to everything, as it always
+/// has.
+///
+/// `public(package)`. Exposing it would let anyone burn a tenant's daily room
+/// without settling anything.
+public(package) fun charge_payout(account: &mut BusinessAccount, amount: u64, with_floor: bool, clock: &Clock) {
+    assert!(account.is_verified, E_NOT_VERIFIED);
+    assert!(!account.frozen && !account.admin_frozen, E_FROZEN);
+
+    // Three ceilings, in the order an operator would ask about them: is this
+    // payment itself too big, then has the day filled, then the month. Each
+    // aborts with its own code so the answer to "why was this refused?" is not
+    // a guess.
+    assert!(!with_floor || amount >= MIN_TRANSFER_MINOR, E_BELOW_MINIMUM);
+    assert!(amount <= account.per_transfer_cap_minor, E_OVER_PER_TRANSFER_CAP);
+    spend_window::charge(&mut account.daily, amount, clock);
+    spend_window::charge(&mut account.monthly, amount, clock);
 }
 
 /// Discard an approval that was never used. Callable by whoever holds it,
@@ -1125,6 +1499,32 @@ public fun starting_tier(): u8 { TIER_3 }
 public fun max_members(): u64 { MAX_MEMBERS }
 public fun approval_ttl_ms(): u64 { APPROVAL_TTL_MS }
 public fun recovery_delay_ms(): u64 { RECOVERY_DELAY_MS }
+
+public fun has_wallet(account: &BusinessAccount): bool { account.wallet.is_some() }
+/// The account's wallet. Aborts if none is registered.
+public fun wallet(account: &BusinessAccount): address {
+    assert!(account.wallet.is_some(), E_NO_WALLET);
+    *account.wallet.borrow()
+}
+public fun wallet_threshold(account: &BusinessAccount): u16 { account.wallet_threshold }
+public fun wallet_signers(account: &BusinessAccount): vector<address> { account.wallet_signers }
+public fun is_wallet_signer(account: &BusinessAccount, who: address): bool {
+    account.wallet_signers.contains(&who)
+}
+public fun is_single_signer_wallet(account: &BusinessAccount): bool { account.single_signer }
+public fun wallet_epoch(account: &BusinessAccount): u64 { account.wallet_epoch }
+public fun nominated_wallet(account: &BusinessAccount): Option<address> {
+    if (account.nominated_wallet.is_some()) option::some(account.nominated_wallet.borrow().wallet)
+    else option::none()
+}
+public fun nominated_single_signer(account: &BusinessAccount): bool {
+    account.nominated_wallet.is_some() && account.nominated_wallet.borrow().single_signer
+}
+public fun has_pending_wallet(account: &BusinessAccount): bool { account.pending_wallet.is_some() }
+public fun pending_wallet(account: &BusinessAccount): address {
+    assert!(account.pending_wallet.is_some(), E_NO_PENDING_ROTATION);
+    account.pending_wallet.borrow().wallet
+}
 
 public fun approval_account(approval: &PayoutApproval): ID { approval.account }
 public fun approval_intent(approval: &PayoutApproval): ID { approval.intent }

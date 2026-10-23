@@ -6,9 +6,14 @@
 # hold them. That is not
 # enforced here by a runtime flag or an assert someone could forget to call —
 # it is enforced by the ABSENCE of any field capable of accumulating value.
-# Client value exists only as a `Coin<T>` parameter that enters and leaves
-# `payment_intent::confirm_payment_intent` inside a single PTB. There is no
+# Client value exists only as a `Coin<T>` or `Balance<T>` parameter that enters
+# and leaves a `payment_intent` settle path inside a single PTB: from the
+# business's own wallet, or under one of its spending rules (v2). There is no
 # object to accumulate into.
+#
+# v2 (D11): this package upgrades ADDITIVE-ONLY, through splash_upgrade_delay's
+# 24-hour public notice, by the 2-of-3 governance multisig. Built and tested
+# with Sui CLI mainnet-v1.82.3; Move.lock pins that CLI's framework (719fb296).
 #
 # The question "how do I know Splash cannot hold my money?" is answered by
 # `grep -rn 'Balance<' move/splash_core/sources/` returning nothing, which

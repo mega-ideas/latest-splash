@@ -10,9 +10,9 @@
  *
  * The strong way — the one this script enforces — is that the published package
  * contains NO STRUCT FIELD CAPABLE OF HOLDING VALUE. Not gated. Absent. Client
- * value exists only as a `Coin<T>` parameter that enters and exits
- * `confirm_payment_intent` within a single PTB; there is no object to
- * accumulate into.
+ * value exists only as a `Coin<T>` or `Balance<T>` parameter that enters and
+ * exits a `payment_intent` settle path within a single PTB; there is no
+ * object to accumulate into.
  *
  * ─────────────────────────────────────────────────────────────────────────────
  * REWRITTEN 2026-08-17 after an adversarial review DEFEATED the first version.
