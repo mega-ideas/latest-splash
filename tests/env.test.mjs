@@ -81,6 +81,15 @@ test('production: a complete sandbox environment passes', () => {
   assert.equal(env.SPLASH_PACKAGE_ID, OBJ);
 });
 
+test('production on mainnet refuses the retired custody path (v2, D11); testnet still accepts it', () => {
+  const custody = { SPLASH_CUSTODY_PACKAGE_ID: OBJ, SPLASH_PAYOUT_DELEGATION_ID: OBJ };
+  const refused = keysOf(() => parseEnv({ ...PROD_OK, SUI_NETWORK: 'mainnet', ...custody }));
+  assert.ok(refused.includes('SPLASH_CUSTODY_PACKAGE_ID'));
+  assert.ok(refused.includes('SPLASH_PAYOUT_DELEGATION_ID'));
+  assert.equal(parseEnv({ ...PROD_OK, SUI_NETWORK: 'mainnet' }).SUI_NETWORK, 'mainnet', 'mainnet without them boots');
+  assert.equal(parseEnv({ ...PROD_OK, SUI_NETWORK: 'testnet', ...custody }).SPLASH_CUSTODY_PACKAGE_ID, OBJ, 'testnet keeps the code path');
+});
+
 test('production: live settlement requires the signer; simulate does not', () => {
   // WS4: the production signer is the KMS key. A raw key is refused outright
   // (tests/operator-custody.test.mjs), so it is not what is asked for here.
