@@ -53,7 +53,8 @@ export async function completeDeliveryForTransfer(intentId: string) {
   // Staff read: the transfer in hand already established who owns this.
   const recipient = intent.recipientId ? await readRecipientForStaff(intent.recipientId) : null;
   const quote = await pdaxAdapter.quote(intent.targetCurrency, intent.stablecoinAmountMicro);
-  const job = createSweepJob({
+  const job = await createSweepJob({
+    orgId: intent.orgId,
     transferIntentId: intent.id,
     recipientId: recipient?.id ?? accountId,
     partner: 'PDAX',
@@ -62,7 +63,7 @@ export async function completeDeliveryForTransfer(intentId: string) {
     fxRate: quote.fxRate,
   });
   await patchTransfer(intent.id, { state: 'SWEEPING', sweepJobId: job.id });
-  updateSweepJob(job.id, { state: 'EXECUTING' });
+  await updateSweepJob(job.id, { state: 'EXECUTING' });
 
   try {
     const result = await pdaxAdapter.payout(job);
@@ -77,11 +78,11 @@ export async function completeDeliveryForTransfer(intentId: string) {
       refId: job.id,
       suiTxDigest: intent.suiTxDigest ?? undefined,
     });
-    updateSweepJob(job.id, { state: 'COMPLETED', partnerPayoutRef: result.partnerPayoutRef, heldDurationMs, completedAt: completedAt.toISOString() });
+    await updateSweepJob(job.id, { state: 'COMPLETED', partnerPayoutRef: result.partnerPayoutRef, heldDurationMs, completedAt: completedAt.toISOString() });
     await patchTransfer(intent.id, { state: 'DISBURSED' });
     return { state: 'DISBURSED' as const, heldDurationMs, partnerPayoutRef: result.partnerPayoutRef };
   } catch (error) {
-    updateSweepJob(job.id, { state: 'FAILED' });
+    await updateSweepJob(job.id, { state: 'FAILED' });
     await patchTransfer(intent.id, { state: 'FAILED', failedAtState: 'SWEEPING', failureReason: error instanceof Error ? error.message : 'Sweep failed' });
     throw error;
   }

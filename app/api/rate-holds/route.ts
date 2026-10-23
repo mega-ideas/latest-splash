@@ -29,12 +29,12 @@ export async function GET(request: Request) {
 
   const holdId = new URL(request.url).searchParams.get('id');
   if (holdId) {
-    const hold = readRateHoldFor(orgId, holdId);
+    const hold = await readRateHoldFor(orgId, holdId);
     return hold
       ? NextResponse.json(hold)
       : NextResponse.json({ error: 'Rate hold not found' }, { status: 404 });
   }
-  return NextResponse.json({ items: listRateHoldsFor(orgId) });
+  return NextResponse.json({ items: await listRateHoldsFor(orgId) });
 }
 
 export async function POST(request: Request) {
@@ -51,7 +51,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'A valid corridor and rate are required' }, { status: 400 });
   }
   const corridorCurrency = parsed.data.corridorCurrency.toUpperCase();
-  const hold = createRateHold({
+  const hold = await createRateHold({
     orgId: accountCheck.account.orgId,
     corridorCurrency,
     rate: String(parsed.data.rate),

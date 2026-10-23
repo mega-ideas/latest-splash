@@ -53,9 +53,17 @@ export type FundingSession = {
   updatedAt: string;
 };
 
+/**
+ * The in-process fallback, used only when `DATABASE_URL` is not set so that
+ * `npm run dev` works without a database. Every deployed environment reads
+ * and writes `funding_sessions`, `funding_source_transactions` and
+ * `funding_last_used_sources` instead (migration 0028). These maps were the
+ * only store until WS8, and on serverless each instance had its own copy.
+ */
 type FundingSessionStore = {
   sessions: Map<string, FundingSession>;
   sourceTransactions: Map<string, string>;
+  /** Keyed `<orgId>:<businessAccountId>`. */
   lastUsedSources: Map<string, FundingSourceId>;
 };
 
@@ -66,6 +74,29 @@ const store = globalStore.splashFundingSessions ?? {
   lastUsedSources: new Map<string, FundingSourceId>(),
 };
 globalStore.splashFundingSessions = store;
+
+let announced = false;
+
+function usingPostgres(): boolean {
+  if (process.env.DATABASE_URL) return true;
+  if (!announced) {
+    announced = true;
+    console.warn(
+      '[funding] DATABASE_URL is not set, so funding sessions live in this process ' +
+        'and disappear when it restarts. Local development only.',
+    );
+  }
+  return false;
+}
+
+async function db() {
+  const { getDb } = await import('../db/client.ts');
+  return getDb() as never;
+}
+
+async function repo() {
+  return import('./repository/funding-sessions.ts');
+}
 
 function isDemoMode(env: NodeJS.ProcessEnv) {
   return env.NODE_ENV !== 'production' || env.USE_MOCK_APIS === 'true' || env.NEXT_PUBLIC_DEMO_MODE === 'true';
@@ -123,7 +154,7 @@ function depositUri(
   return `${scheme}:${address}?${params.toString()}`;
 }
 
-export function createFundingSession(input: {
+export async function createFundingSession(input: {
   orgId: string;
   businessAccountId: string;
   selection: FundingSelection;
@@ -157,39 +188,131 @@ export function createFundingSession(input: {
     createdAt: now,
     updatedAt: now,
   };
-  store.sessions.set(session.id, session);
-  recordLastUsedFundingSource(input.businessAccountId, input.selection.source);
+  if (usingPostgres()) {
+    await (await repo()).insertSession(await db(), session);
+  } else {
+    store.sessions.set(session.id, session);
+  }
+  await recordLastUsedFundingSource(input.orgId, input.businessAccountId, input.selection.source);
   return session;
 }
 
-export function readFundingSession(sessionId: string) {
-  return store.sessions.get(sessionId) ?? null;
+export async function readFundingSession(sessionId: string) {
+  if (!usingPostgres()) return store.sessions.get(sessionId) ?? null;
+  return (await repo()).getSession(await db(), sessionId);
 }
 
-export function listFundingSessions() {
-  return [...store.sessions.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+export async function listFundingSessions() {
+  if (!usingPostgres()) {
+    return [...store.sessions.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+  return (await repo()).listSessions(await db());
 }
 
-export function updateFundingSession(sessionId: string, patch: Partial<FundingSession>) {
-  const session = readFundingSession(sessionId);
-  if (!session) return null;
-  Object.assign(session, patch, { updatedAt: new Date().toISOString() });
-  store.sessions.set(sessionId, session);
-  return session;
+export async function updateFundingSession(sessionId: string, patch: Partial<FundingSession>) {
+  if (!usingPostgres()) {
+    const session = store.sessions.get(sessionId) ?? null;
+    if (!session) return null;
+    // CREDITED is terminal for the status, as it is in the database store.
+    if (session.status === 'CREDITED' && patch.status !== undefined && patch.status !== 'CREDITED') return null;
+    Object.assign(session, patch, { updatedAt: new Date().toISOString() });
+    store.sessions.set(sessionId, session);
+    return session;
+  }
+  return (await repo()).patchSession(await db(), sessionId, patch);
 }
 
-export function registerSourceTransaction(txDigest: string, sessionId: string) {
-  const existing = store.sourceTransactions.get(txDigest);
-  if (existing && existing !== sessionId) throw new Error('Source transaction was already assigned to another funding session');
-  store.sourceTransactions.set(txDigest, sessionId);
+/**
+ * Assign an on-chain deposit to a session, once.
+ *
+ * The same session again is a retried webhook and passes. Another session is
+ * the same deposit being credited twice, and throws — whichever instance it
+ * reaches, and whichever of two simultaneous claims arrives second.
+ */
+export async function registerSourceTransaction(txDigest: string, sessionId: string) {
+  if (!usingPostgres()) {
+    const existing = store.sourceTransactions.get(txDigest);
+    if (existing && existing !== sessionId) throw new Error('Source transaction was already assigned to another funding session');
+    store.sourceTransactions.set(txDigest, sessionId);
+    return;
+  }
+  const r = await repo();
+  const database = await db();
+  const session = await r.getSession(database, sessionId);
+  if (!session) throw new Error('Funding session not found');
+  const owner = await r.claimSourceTransaction(database, { txDigest, sessionId, orgId: session.orgId });
+  if (owner !== sessionId) throw new Error('Source transaction was already assigned to another funding session');
 }
 
-export function readLastUsedFundingSource(businessAccountId: string) {
-  return store.lastUsedSources.get(businessAccountId) ?? null;
+/**
+ * Credit a cleared deposit to the org's balance and mark the session CREDITED,
+ * as one write.
+ *
+ * On Postgres the ledger journal and the status change commit in one
+ * transaction, with the session row locked: a second credit of the same
+ * session — a retried webhook, two at once — waits, then finds it CREDITED and
+ * returns it without touching the ledger. Before this the credit and the
+ * status were two writes, and a crash between them left money credited to a
+ * session that still read CLEARED, ready to be credited again.
+ */
+export async function creditFundingSession(
+  sessionId: string,
+  credit: { amountMinor: bigint; suiTxDigest?: string; patch: Partial<FundingSession> },
+): Promise<FundingSession> {
+  if (!usingPostgres()) {
+    const session = store.sessions.get(sessionId);
+    if (!session) throw new Error('Funding session not found');
+    if (session.status === 'CREDITED') return session;
+    const { recordMovement } = await import('./ledger-store.ts');
+    await recordMovement({
+      orgId: session.orgId,
+      direction: 'CREDIT',
+      amountMinor: credit.amountMinor,
+      refType: 'FUNDING',
+      refId: session.id,
+      suiTxDigest: credit.suiTxDigest,
+    });
+    return (await updateFundingSession(sessionId, { ...credit.patch, status: 'CREDITED' }))!;
+  }
+  const r = await repo();
+  const { recordEntry } = await import('./repository/ledger.ts');
+  const database = (await db()) as { transaction: <T>(run: (tx: never) => Promise<T>) => Promise<T> };
+  return database.transaction(async (tx) => {
+    const session = await r.getSessionForUpdate(tx, sessionId);
+    if (!session) throw new Error('Funding session not found');
+    if (session.status === 'CREDITED') return session;
+    // The session's ORG, not its on-chain account id: that id falls back to a
+    // value shared by every org without a provisioned account.
+    await recordEntry(tx, {
+      orgId: session.orgId,
+      direction: 'CREDIT',
+      amountMinor: credit.amountMinor,
+      refType: 'FUNDING',
+      refId: session.id,
+      suiTxDigest: credit.suiTxDigest,
+    });
+    return (await r.patchSession(tx, sessionId, { ...credit.patch, status: 'CREDITED' }))!;
+  });
 }
 
-export function recordLastUsedFundingSource(businessAccountId: string, source: FundingSourceId) {
-  store.lastUsedSources.set(businessAccountId, source);
+/**
+ * The funding source this org last paid with from this account.
+ *
+ * Keyed by org as well as account. The account id alone falls back to a value
+ * shared by every org without a provisioned on-chain account, so keyed by it
+ * one org's last choice was offered to another as its default.
+ */
+export async function readLastUsedFundingSource(orgId: string, businessAccountId: string) {
+  if (!usingPostgres()) return store.lastUsedSources.get(`${orgId}:${businessAccountId}`) ?? null;
+  return (await repo()).readLastUsedSource(await db(), orgId, businessAccountId);
+}
+
+export async function recordLastUsedFundingSource(orgId: string, businessAccountId: string, source: FundingSourceId) {
+  if (!usingPostgres()) {
+    store.lastUsedSources.set(`${orgId}:${businessAccountId}`, source);
+    return;
+  }
+  await (await repo()).writeLastUsedSource(await db(), { orgId, businessAccountId, source });
 }
 
 export function assetDetails(session: FundingSession): {

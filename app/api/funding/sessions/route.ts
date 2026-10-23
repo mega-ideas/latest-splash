@@ -52,7 +52,7 @@ export async function POST(request: Request) {
 
   try {
     const amountExpectedMicro = Math.round(parsed.data.amountUsd * 1_000_000);
-    const session = createFundingSession({
+    const session = await createFundingSession({
       orgId,
       businessAccountId: accountId,
       selection: parsed.data.selection as FundingSelection,
