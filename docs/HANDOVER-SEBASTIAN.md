@@ -342,6 +342,40 @@ Phase 7 (break-glass) depends on Phase 6 and is untouched.
 
 ---
 
+## WS3 — the operator no longer pays itself (branch `ws3/service-orders`, draft PR)
+
+The audit of `main` found the Move half of the server-pays fix had never
+landed, so this branch builds it. **Every file under `move/` is yours to
+approve; nothing is published or deployed.** What I need you to decide, in
+order:
+
+1. **`PaymentIntent` gains a `payer` field.** Equal to the maker on every
+   existing path; the registered operator on a service order. `settle` and
+   `confirm_with_approval` now check the payer. It changes the struct, so it
+   rides the fresh publish WS5 already needs.
+2. **Code 421, not 420.** The spec said 420; WS5 owns it
+   (`E_BAD_COMMITMENT`). New: 421 `E_OPERATOR_NEEDS_SERVICE_ORDER`, 422
+   `E_NO_OPERATOR`, 423 `E_PAYER_CANNOT_APPROVE`, 1000
+   `settlement_policy::E_INVALID_OPERATOR`.
+3. **All three existing creators take `&SettlementPolicy`** and refuse the
+   operator, not only `create_payment_intent`: `create` is the same
+   self-payout in one PTB, and the operator as maker of an account intent
+   would pay its own payout with one tenant approver beside it.
+4. **No `clear_operator`.** Clearing reopens the server-pays path; rotation
+   is `set_operator` again.
+5. **The approval goes to the payer** (`mint_approval` gained a `holder`).
+   Four eyes still binds the maker; the payer may not approve its own order.
+6. **Rotation leaves open orders on the old payer.** They expire in the
+   window. Alternative: make `confirm_with_approval` read the policy.
+7. **Velocity units.** `MIN_TRANSFER_MINOR` and the tier ceilings assume six
+   decimals; the operator still pays in SUI (nine). Your item 1 above, now on
+   the operator's coin.
+
+Runbook: verify (§3.8) runs before `set_operator` (§3.9), because the verify
+opens an intent as the operator, which 421 then refuses.
+
+---
+
 ## Three things that will cause an outage if deployed singly
 
 Not Phase 6 blockers — they bite the first time this branch is deployed. Full

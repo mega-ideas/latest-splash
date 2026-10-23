@@ -279,6 +279,29 @@ unverified on purpose so the refusal can be seen.
 
 ---
 
+## WS3 — Server-pays becomes three signatures by three parties — 2026-10-23
+
+Branch `ws3/service-orders`, draft PR, **every file under `move/` pending Sebastian**. Nothing is published.
+
+**What was wrong.** `createPaymentIntentOnSui` opened an unbound intent with the operator key and `confirmComposedPaymentOnSui` paid it from the operator's own gas coin in the next transaction. Nobody else signed anything: the dual-approval queue was a Postgres row, and to the chain one address authorised and funded its own payout. A stolen operator key was a stolen treasury, bounded only by what it held. The patch that was meant to add the Move side had never landed on `main`: no policy object, no operator registration, no service order.
+
+| ID | Severity | Finding | Status |
+|---|---|---|---|
+| WS3-1 | Critical | The operator key both authorised and paid every Splash-funded payout; no client or approver signature existed on chain. **Fixed**: a payout Splash funds is a *service order*. A member of the client's `BusinessAccount` signs `payment_intent::create_service_order` in their own wallet (passkey, or a Wallet Standard wallet such as Slush, which carries zkLogin accounts); a different approver signs `approve_payout`, and the approval is transferred to the operator the order recorded as payer; only then does `confirmServiceOrderOnSui` sign, splitting exactly the intent's amount from Splash's coin and calling `confirm_with_approval`, which meters the client's own ceilings. | Fixed (branch) |
+| WS3-2 | High | Nothing on chain named the operator, so the contract could not refuse it. **Fixed**: shared `settlement_policy::SettlementPolicy`, `set_operator` gated by the cold `AdminCap`, `OperatorChanged` event, no `clear_operator`. Once an operator is registered, `create_payment_intent`, `create` and `create_payment_intent_for_account` signed by it abort `E_OPERATOR_NEEDS_SERVICE_ORDER` (**421** — the spec said 420, which WS5 already uses for `E_BAD_COMMITMENT`). | Fixed (branch) |
+| WS3-3 | High | The server-pays path existed in TypeScript and could come back. **Fixed**: both functions are deleted; `scripts/check-operator-paths.mjs` (in `npm run lint`) fails if any server module that names the operator signer composes a `payment_intent::create*` call or a `transferObjects` outside `confirmServiceOrderOnSui`. The test plants both violations and asserts the guard fails, and runs it on the real tree. | Fixed (branch) |
+| WS3-4 | Medium | The five-minute window was implicit. **Fixed**: the UI reads `expires_at` off the intent object (`readServiceOrderOnSui`) and counts down to it; the window is not a constant anywhere in the UI or the builders, and the test greps for one. | Fixed (branch) |
+
+**Limits, stated rather than discovered.**
+- The order in flight (the salt and the digests of the bytes Splash built for each member) lives in the server process. A restart between signatures loses the order; it expires with nothing moved, because the chain holds the money and the window is five minutes. Moving it to Postgres is the same debt funding sessions carry.
+- A member pays the network fee for their own signature. There is no gas sponsorship on this path.
+- The verify step of the key ceremony (`scripts/e2e-testnet.mjs`) still opens an intent as the operator; it must run **before** `set_operator` (runbook §3.9), after which the chain refuses it with 421 and the script says why.
+- The operator key still holds gas and the coin it pays with. It can only spend it on an order a client member opened and a second member approved, for that order's amount, to that order's recipient; it cannot be the maker (421) or the approver (423).
+- Rotating the operator does not retarget orders already open: each recorded its payer at creation. They expire within the window.
+- `SPLASH_TEST_RECIPIENT_ADDRESS` still decides the on-chain recipient of a fiat-corridor payout on testnet; the mainnet refusal is unchanged.
+
+**For Sebastian**: see the PR body. The struct gains a field (`PaymentIntent.payer`), so this cannot be an upgrade of the testnet package; it rides the same fresh publish WS5 already requires.
+
 ## WS5 — Event privacy before the immutable publish — 2026-09-23
 
 `splash_core` publishes immutable, and an event struct's fields freeze with

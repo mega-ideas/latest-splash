@@ -72,7 +72,9 @@ export const RECEIPT_PAYLOAD_FIELDS = [
 
 /** What a payment's lifecycle events commit to. Integers may arrive as bigint, safe number or decimal string. */
 export type PaymentCommitmentPayload = {
-  /** The intent's sender: the address that opens and settles it. */
+  /** The intent's sender: the address that opens it (the maker). On every path
+   *  but a WS3 service order it also settles it; a service order is settled by
+   *  the operator the SettlementPolicy names, which is not in the payload. */
   sender: string;
   /** The on-chain recipient of the settlement coin. */
   recipient: string;

@@ -66,6 +66,8 @@ export type TransferState = {
   txDigest?: string;
   txStatus?: 'pending' | 'success' | 'failed';
   transferIntentId?: string;
+  /** WS3. The service order two members must sign before Splash pays. */
+  serviceOrderId?: string;
   receiptObjectId?: string;
   paymentIntentId?: string;
   intentCreateDigest?: string;

@@ -125,7 +125,9 @@ test('the authorize route refuses a sweep with the switch off before a recipient
   const check = route.indexOf("if (body.deliveryTier === 'SWEEP_ACCOUNT' && !sweepAccountEnabled()) return sweepAccountDisabledResponse();");
   assert.ok(custody > 0, 'the custody gate is still there');
   assert.ok(check > custody, 'the switch is checked after the custody gate, so Phase 0 still answers with the licence');
-  for (const write of ['persistRecipient(', 'createTransferIntent(', 'recordMovement(', 'executeComposedPayment(', 'completeDeliveryForTransfer(']) {
+  for (const write of ['persistRecipient(', 'createTransferIntent(', 'recordMovement(', 'openServiceOrder(']) {
+    // WS3: delivery now runs where the operator's signature lands (app/api/service-orders/route.ts),
+    // after this route and its switch check; sweep.ts re-checks the switch as its own backstop.
     const at = route.indexOf(write);
     assert.ok(at > 0, `${write} exists`);
     assert.ok(check < at, `the switch is checked before ${write}`);

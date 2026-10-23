@@ -12,9 +12,10 @@
 export const SPLASH_CORE_ABI = {
   'peg_monitor::update_peg':
     '&mut peg_monitor::PegState, &business_account::AnchorCap, &cap_registry::CapRegistry, u64, u64, &clock::Clock',
-  'payment_intent::create_payment_intent': 'address, u64, string::String, u64, vector<u8>, &clock::Clock',
+  'payment_intent::create_payment_intent':
+    '&settlement_policy::SettlementPolicy, address, u64, string::String, u64, vector<u8>, &clock::Clock',
   'payment_intent::create':
-    'address, vector<u8>, u64, vector<u8>, vector<u8>, string::String, u64, vector<u8>, &clock::Clock',
+    '&settlement_policy::SettlementPolicy, address, vector<u8>, u64, vector<u8>, vector<u8>, string::String, u64, vector<u8>, &clock::Clock',
   'payment_intent::confirm_payment_intent': '&mut payment_intent::PaymentIntent, coin::Coin<T0>, &clock::Clock',
   'payment_intent::delete_finalized': 'payment_intent::PaymentIntent',
   'audit_anchor::anchor': 'payment_intent::SettleReceipt, vector<u8>, vector<u8>, &clock::Clock',

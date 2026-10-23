@@ -58,7 +58,7 @@ BCS struct `PaymentCommitmentPayload`, fields in this order:
 
 | # | Field | BCS type | Meaning |
 |---|---|---|---|
-| 1 | `sender` | `address` | the address that opens and settles the intent |
+| 1 | `sender` | `address` | the address that opens the intent (the maker); on a WS3 service order the operator settles it and is not in the payload |
 | 2 | `recipient` | `address` | the on-chain recipient of the settlement coin |
 | 3 | `beneficiary_ref` | `vector<u8>` | the verified counterparty reference, UTF-8; empty on the simple path |
 | 4 | `amount` | `u64` | minor units of the settlement asset, as the intent stores it |

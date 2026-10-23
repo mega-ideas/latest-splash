@@ -231,11 +231,15 @@ test('the bundle carries payload and salt, the chain gets only the commitment, a
   assert.match(composed, /newSalt\(\)/, 'the salt is drawn where the payment starts');
   assert.match(composed, /paymentCommitment\(/);
 
+  // WS3: the create call moved out of the operator's settlement layer into
+  // the builder the client member's wallet signs (lib/sui/service-orders.ts).
+  const builder = await source('lib/sui/service-orders.ts');
+  assert.match(builder, /commitment: Uint8Array;/, 'the create call takes the commitment, so an unchanged caller fails to compile');
+  assert.match(builder, /input\.commitment\.length !== COMMITMENT_LENGTH/);
+  assert.match(builder, /tx\.pure\.vector\('u8', Array\.from\(input\.commitment\)\)/);
   const settlement = await source('lib/server/sui-settlement.ts');
-  assert.match(settlement, /commitment: Uint8Array;/, 'the create call takes the commitment, so an unchanged caller fails to compile');
-  assert.match(settlement, /assertCommitmentBytes\(input\.commitment\)/);
-  assert.match(settlement, /tx\.pure\.vector\('u8', Array\.from\(input\.commitment\)\)/);
   assert.doesNotMatch(settlement, /newSalt|saltHex|\bsalt\s*[=:(]/, 'the settlement layer never handles a salt');
+  assert.doesNotMatch(builder, /newSalt|saltHex|\bsalt\s*[=:(]/, 'the builder never handles a salt');
 
   for (const file of ['lib/server/composed-payment.ts', 'lib/evidence/settlement.ts', 'lib/evidence/commitment.ts']) {
     const text = await source(file);

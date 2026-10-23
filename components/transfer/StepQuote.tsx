@@ -205,8 +205,10 @@ export default function StepQuote({
         throw new Error(body.error ?? 'Send request failed');
       }
 
-      const body = (await response.json()) as { transferIntentId: string };
-      set({ transferIntentId: body.transferIntentId, txStatus: 'pending' });
+      const body = (await response.json()) as { transferIntentId: string; serviceOrder?: { id: string } };
+      // WS3. Nothing is paid yet: the next screen asks the maker to sign the
+      // order in their own wallet, and a second approver signs after.
+      set({ transferIntentId: body.transferIntentId, serviceOrderId: body.serviceOrder?.id, txStatus: 'pending' });
       toast.success(selection.type === 'held' ? 'Splash balance debited' : selection.type === 'fiat' ? 'Provider deposit confirmed' : 'Coin source normalized to USDC');
       setDepositOpen(false);
       setIsSending(false);

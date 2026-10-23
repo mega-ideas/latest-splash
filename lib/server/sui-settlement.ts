@@ -4,8 +4,8 @@ import { createHash } from 'node:crypto';
 import { promisify } from 'node:util';
 
 import { Transaction } from '@mysten/sui/transactions';
+import { normalizeSuiAddress } from '@mysten/sui/utils';
 
-import { assertCommitmentBytes } from '@/lib/evidence/commitment';
 import {
   CONTRACT_MAX_FEE_BPS,
   FALLBACK_FEE_BPS,
@@ -22,6 +22,7 @@ import { assertOperatorCanPay } from '@/lib/server/operator-balance';
 import { getOperatorSigner } from '@/lib/server/operator-signer';
 import { resolvePegAttestation } from '@/lib/server/peg-attestation';
 import { suiClient } from '@/lib/sui';
+import { parseIntentObject, type IntentView, type ServiceOrderContract } from '@/lib/sui/service-orders';
 
 const execFileAsync = promisify(execFile);
 
@@ -408,6 +409,13 @@ const ABORT_CODES: Record<number, string> = {
   418: 'E_NOT_A_MEMBER — the signer is neither an owner nor an approver of the account, so cannot open an intent in its name.',
   419: 'E_ACCOUNT_NOT_PAYABLE — the account is frozen or not KYB-verified.',
   420: 'E_BAD_COMMITMENT — the commitment passed to payment_intent::create* is not 32 bytes. It is blake2b256(tag || bcs(payload) || salt), computed by lib/evidence/commitment.ts; see docs/commitments.md.',
+  // WS3. 420 was already E_BAD_COMMITMENT (WS5), so the operator refusal is 421.
+  421: 'E_OPERATOR_NEEDS_SERVICE_ORDER — the signer is the operator the SettlementPolicy names. The operator pays service orders and opens no intent of its own: the old server-pays path (create_payment_intent signed by the operator, then paid from its gas coin) is closed by design. Open a service order from a client member’s wallet instead (lib/sui/service-orders.ts).',
+  422: 'E_NO_OPERATOR — a service order was opened while the SettlementPolicy names no operator, so nobody could pay it. The cold AdminCap registers one with settlement_policy::set_operator (docs/KEY-CEREMONY-RUNBOOK.md).',
+  423: 'E_PAYER_CANNOT_APPROVE — the approver is the service order’s payer. The operator may be the third signature on a service order, never the second; a different member of the account must approve.',
+
+  // ── settlement_policy (WS3) ──────────────────────────────────────────────
+  1000: 'E_INVALID_OPERATOR — settlement_policy::set_operator was given 0x0. Every service order would record a payer nobody can sign for.',
 
   // ── cap_registry (break-glass revocation) ────────────────────────────────
   210: 'E_STALE_GENERATION — the capability presented is from a superseded generation. It was revoked by a break-glass rotation and is permanently dead; a replacement was minted to whoever the rotation named. Check the CapabilityRevoked event and update the configured object id.',
@@ -441,6 +449,7 @@ const OUR_MODULES = new Set([
   'dual_treasury',
   'smart_treasury',
   'receipt_v2',
+  'settlement_policy',
 ]);
 
 /**
@@ -467,7 +476,7 @@ const DEPENDENCY_ABORT_CODES: Record<string, Record<number, string>> = {
   },
 };
 
-function humanizeSuiError(rawError: string | undefined | null, stderr: string): string {
+export function humanizeSuiError(rawError: string | undefined | null, stderr: string): string {
   const error = [rawError, stderr].filter(Boolean).join('\n') || 'Unknown Sui error';
   if (/No managed addresses|no active managed address/i.test(error)) {
     return 'The Sui CLI has no managed operator address. Configure OPERATOR_SUI_PRIVATE_KEY for server-side settlement, or create and fund a persistent CLI address.';
@@ -738,202 +747,330 @@ export function settlementCoinType(): string {
 
 const SUI_COIN_TYPE = '0x2::sui::SUI';
 
-function configuredSmartTreasuryId() {
-  const value = getContractConfig().smartTreasurySuiId.trim();
-  return value ? requireSuiObjectId(value, 'SPLASH_SMART_TREASURY_SUI_ID') : '';
-}
-
 async function requireSdkExecution() {
   const execution = await resolveSettlementExecution();
   if (execution !== 'sdk') {
     throw new Error(
-      'The composed payment proof requires the operator signer (OPERATOR_KMS_KEY_ID) so one server-signed SDK transaction can confirm, allocate, and anchor atomically.',
+      'Settling a service order requires the operator signer (OPERATOR_KMS_KEY_ID), so the operator\'s one transaction can confirm with the approval and anchor atomically.',
     );
   }
 }
 
-export async function createPaymentIntentOnSui(input: {
-  recipient: string;
-  amountMist: number;
-  targetCurrency: string;
-  fxRateScaled: number;
-  /**
-   * WS5. blake2b256(tag || bcs(payload) || salt), 32 bytes, from
-   * lib/evidence/commitment.ts. This layer never sees the payload or the
-   * salt; the caller keeps them in the Seal bundle. Required, so a caller
-   * that still opens intents without one fails to compile.
-   */
-  commitment: Uint8Array;
-}) {
-  await requireSdkExecution();
-  assertCommitmentBytes(input.commitment);
-  const packageId = corePackageIdOrThrow();
-  const recipient = requireConfiguredRecipient(input.recipient);
-  const amountMist = Math.max(1, Math.floor(input.amountMist));
-  const fxRateScaled = Math.max(1, Math.floor(input.fxRateScaled));
-  const tx = new Transaction();
-  tx.setGasBudget(process.env.SUI_COMPOSED_GAS_BUDGET ?? '30000000');
-  tx.moveCall({
-    target: `${packageId}::payment_intent::create_payment_intent`,
-    typeArguments: [settlementCoinType()],
-    arguments: [
-      tx.pure.address(recipient),
-      tx.pure.u64(amountMist),
-      tx.pure.string(input.targetCurrency.toUpperCase()),
-      tx.pure.u64(fxRateScaled),
-      tx.pure.vector('u8', Array.from(input.commitment)),
-      tx.object('0x6'),
-    ],
-  });
+/*
+ * WS3. `createPaymentIntentOnSui` and `confirmComposedPaymentOnSui` lived
+ * here: the operator key opened an unbound intent, then paid it from its own
+ * gas coin in the next transaction. Nobody else signed anything, so to the
+ * chain one address authorised and funded its own payout, and a stolen
+ * operator key was a stolen treasury. Both are deleted. Once an operator is
+ * registered in the SettlementPolicy, that shape aborts on chain too
+ * (payment_intent::E_OPERATOR_NEEDS_SERVICE_ORDER, 421).
+ *
+ * A payout Splash funds is now a service order: the client member signs
+ * create_service_order (lib/sui/service-orders.ts), a different approver
+ * signs approve_payout, and only then does `confirmServiceOrderOnSui` below
+ * sign — with the approval the operator received, for the amount on the
+ * intent. `scripts/check-operator-paths.mjs` fails the build if any server
+ * module composes a create call with the operator signer again.
+ */
 
-  const result = await executeSdkTransaction(tx);
-  const events = resultEvents(result);
-  const created = eventBySuffix(events, '::payment_intent::IntentCreated');
-  const intentId = typeof created?.data.intent_id === 'string' ? created.data.intent_id : '';
-  if (!intentId) {
-    throw new Error(`PaymentIntent creation succeeded but IntentCreated was missing. Digest: ${result.digest}`);
-  }
+/** The shared SettlementPolicy (WS3). Required for every service-order call. */
+function settlementPolicyObjectId(): string {
+  return configIdOrThrow('settlementPolicyId', 'SPLASH_SETTLEMENT_POLICY_ID');
+}
 
+/** What the browser builders need to compose a service order for a member's wallet. */
+export function serviceOrderContract(): ServiceOrderContract {
   return {
-    digest: result.digest,
-    intentId,
-    event: created,
+    packageId: corePackageIdOrThrow(),
+    policyId: settlementPolicyObjectId(),
+    coinType: settlementCoinType(),
   };
 }
 
-export async function confirmComposedPaymentOnSui(input: {
+/**
+ * The on-chain recipient a service order pays: the payout partner's address,
+ * or the testnet demo override, with the same mainnet refusal as before.
+ */
+export function resolveServiceOrderRecipient(inputRecipient: string): string {
+  return requireConfiguredRecipient(inputRecipient);
+}
+
+/** The operator address, as the signer reports it: the payer a service order records. */
+export async function operatorSignerAddress(): Promise<string | null> {
+  const signer = await getOperatorSigner();
+  return signer ? normalizeSuiAddress(signer.toSuiAddress()) : null;
+}
+
+/** The operator the SettlementPolicy names on chain, or null while none is registered. */
+export async function readSettlementOperatorOnSui(): Promise<string | null> {
+  const { object } = await suiClient.getObject({ objectId: settlementPolicyObjectId(), include: { json: true } });
+  const json = (object.json ?? {}) as Record<string, unknown>;
+  const operator = json.operator;
+  if (typeof operator === 'string' && operator) return normalizeSuiAddress(operator);
+  if (Array.isArray(operator) && typeof operator[0] === 'string') return normalizeSuiAddress(operator[0]);
+  const vec = (operator as { vec?: unknown[] } | null | undefined)?.vec;
+  if (Array.isArray(vec) && typeof vec[0] === 'string') return normalizeSuiAddress(vec[0]);
+  return null;
+}
+
+/** A service order as the chain holds it: maker, payer, amount and its own window. */
+export async function readServiceOrderOnSui(intentId: string): Promise<IntentView> {
+  const objectId = requireSuiObjectId(intentId, 'Service order');
+  const { object } = await suiClient.getObject({ objectId, include: { json: true } });
+  if (!object?.json) throw new Error(`Service order ${objectId} was not found on ${process.env.SUI_NETWORK ?? 'testnet'}.`);
+  return parseIntentObject({ id: objectId, ...(object.json as Record<string, unknown>) });
+}
+
+/**
+ * The PayoutApproval the operator holds for this intent, or null if no second
+ * member has signed yet. `approve_payout` transfers the approval to the
+ * payer the intent recorded, so this is where signature two arrives.
+ */
+export async function findOperatorApprovalOnSui(intentId: string): Promise<{ approvalId: string; amountMinor: bigint; approver: string } | null> {
+  const owner = await operatorSignerAddress();
+  if (!owner) throw new Error('The operator signer (OPERATOR_KMS_KEY_ID) is required to read the approvals the operator holds.');
+  const packageId = corePackageIdOrThrow();
+  const wanted = normalizeSuiAddress(intentId);
+  let cursor: string | null = null;
+  for (let page = 0; page < 20; page += 1) {
+    const result: { objects: Array<{ objectId: string; json?: unknown }>; hasNextPage: boolean; cursor: string | null } = await suiClient.core.listOwnedObjects({
+      owner,
+      type: `${packageId}::business_account::PayoutApproval`,
+      cursor,
+      include: { json: true },
+    });
+    for (const item of result.objects) {
+      const json = (item.json ?? {}) as Record<string, unknown>;
+      if (typeof json.intent === 'string' && normalizeSuiAddress(json.intent) === wanted) {
+        return {
+          approvalId: item.objectId,
+          amountMinor: BigInt(String(json.amount)),
+          approver: normalizeSuiAddress(String(json.approver)),
+        };
+      }
+    }
+    if (!result.hasNextPage || !result.cursor) break;
+    cursor = result.cursor;
+  }
+  return null;
+}
+
+/**
+ * Signature 3 of 3, composed: split exactly the approved amount from Splash's
+ * own coin, settle with the approval, and anchor the hot-potato receipt.
+ *
+ * Pure — it signs and sends nothing — so the TypeScript mirror of
+ * `operator_pays_what_the_client_approved` can read it command by command.
+ * There is no transferObjects: the contract pays the recipient and refunds
+ * any excess to the payer, and the PTB moves nothing itself.
+ */
+export function buildConfirmServiceOrderTx(input: {
+  packageId: string;
+  coinType: string;
   intentId: string;
-  intentCreateDigest: string;
-  paymentMist: number;
-  treasuryAmountMist: number;
+  account: string;
+  approvalId: string;
+  amountMinor: bigint;
+  anchorCapId: string;
+  capRegistryId: string;
   auditHash: string;
   anchorId: string;
   backingBlobId: string;
-}): Promise<ComposedSettlementResult> {
-  await requireSdkExecution();
-  const packageId = corePackageIdOrThrow();
-  const anchorCapId = anchorCapObjectId();
-  const businessAccountId = configIdOrThrow('businessAccountId', 'SPLASH_BUSINESS_ACCOUNT_ID');
-  const smartTreasuryId = configuredSmartTreasuryId();
-  const paymentMist = Math.max(1, Math.floor(input.paymentMist));
-  const treasuryAmountMist = Math.max(0, Math.floor(input.treasuryAmountMist));
-
-  if (treasuryAmountMist > 0 && !smartTreasuryId) {
-    throw new Error('SPLASH_SMART_TREASURY_SUI_ID is required when treasuryAmountMist is greater than zero.');
+}): Transaction {
+  if (input.amountMinor <= 0n) throw new Error('A service order settles a positive amount.');
+  if (!input.auditHash || !input.backingBlobId || !input.anchorId) {
+    throw new Error('A service order settles only with its evidence anchored: audit hash, anchor id and Walrus blob are required.');
   }
-
-  // WS4: both splits come out of the operator's own SUI. Refuse before
-  // signing if it cannot cover them; never a partial payment.
-  await assertOperatorCanPay(BigInt(paymentMist) + BigInt(treasuryAmountMist), { coinType: SUI_COIN_TYPE });
-
   const tx = new Transaction();
   tx.setGasBudget(process.env.SUI_COMPOSED_GAS_BUDGET ?? '30000000');
-  const [paymentCoin] = tx.splitCoins(tx.gas, [paymentMist]);
-  // 2026-07-19 package (0xec3b06…): confirm_payment_intent returns the
-  // SettleReceipt hot-potato again — it MUST be consumed in the same PTB by
-  // audit_anchor::anchor or the transaction aborts (unused value without drop).
-  const [settleReceipt] = tx.moveCall({
-    target: `${packageId}::payment_intent::confirm_payment_intent`,
-    typeArguments: [settlementCoinType()],
+  const [payment] = tx.splitCoins(tx.gas, [input.amountMinor]);
+  const [receipt] = tx.moveCall({
+    target: `${input.packageId}::payment_intent::confirm_with_approval`,
+    typeArguments: [input.coinType],
     arguments: [
       tx.object(input.intentId),
-      paymentCoin,
+      tx.object(input.account),
+      tx.object(input.approvalId),
+      payment,
       tx.object('0x6'),
     ],
   });
-  // Consume the receipt: emits SettlementAnchored binding the settlement to
-  // the evidence ciphertext hash + Walrus blob (both guaranteed non-empty by
-  // the composed-payment caller).
   tx.moveCall({
-    target: `${packageId}::audit_anchor::anchor`,
+    target: `${input.packageId}::audit_anchor::anchor`,
     arguments: [
-      settleReceipt,
+      receipt,
       tx.pure.vector('u8', Array.from(Buffer.from(input.auditHash, 'utf8'))),
       tx.pure.vector('u8', Array.from(Buffer.from(input.backingBlobId, 'utf8'))),
       tx.object('0x6'),
     ],
   });
-
-  if (treasuryAmountMist > 0) {
-    // `smart_treasury` is a splash_custody module — the ONE custody call on the
-    // composed path, which otherwise holds no balance. It must resolve through custody
-    // package, not the core one: addressing a custody module with the core
-    // package id is not a compile error, it is a runtime failure deep inside a
-    // PTB. In Phase 0 this throws the licence-named error instead, which is the
-    // honest outcome — the treasury allocation is a custodial operation and the
-    // licence does not permit it yet.
-    const custodyPackageId = custodyPackageIdOrThrow();
-    const [treasuryCoin] = tx.splitCoins(tx.gas, [treasuryAmountMist]);
-    tx.moveCall({
-      target: `${custodyPackageId}::smart_treasury::deposit`,
-      typeArguments: ['0x2::sui::SUI'],
-      arguments: [
-        tx.object(smartTreasuryId),
-        treasuryCoin,
-        tx.object('0x6'),
-      ],
-    });
-  }
-
   tx.moveCall({
-    target: `${packageId}::audit_anchor::anchor_audit_hash`,
+    target: `${input.packageId}::audit_anchor::anchor_audit_hash`,
     arguments: [
-      tx.object(anchorCapId),
-      tx.object(capRegistryObjectId()),
+      tx.object(input.anchorCapId),
+      tx.object(input.capRegistryId),
       tx.pure.string(input.auditHash),
       tx.pure.string(input.anchorId),
       tx.pure.string(input.backingBlobId),
-      tx.pure.address(businessAccountId),
+      tx.pure.address(input.account),
       tx.object('0x6'),
     ],
+  });
+  return tx;
+}
+
+export type ServiceOrderSettlement = {
+  digest: string;
+  intentId: string;
+  approvalId: string;
+  approver: string;
+  operator: string;
+  amountMinor: bigint;
+  auditAnchorObjectId: string | null;
+  events: SuiEventView[];
+  composedActions: ComposedAction[];
+};
+
+/**
+ * Signature 3 of 3: the operator settles a service order a client member
+ * opened and a different approver approved.
+ *
+ * Everything it pays is read off the chain, never taken from the caller: the
+ * amount from the intent, the approval from the operator's own objects. It
+ * refuses before signing when the order is not a service order, is not
+ * payable by this operator, is past its window, or has no approval yet —
+ * each is an abort the chain would raise anyway, refused here with a reason.
+ */
+export async function confirmServiceOrderOnSui(input: {
+  intentId: string;
+  /** The client's shared BusinessAccount the order was opened against. */
+  account: string;
+  auditHash: string;
+  anchorId: string;
+  backingBlobId: string;
+}): Promise<ServiceOrderSettlement> {
+  await requireSdkExecution();
+  const packageId = corePackageIdOrThrow();
+  const account = requireSuiObjectId(input.account, 'Business account');
+  const operator = await operatorSignerAddress();
+  if (!operator) throw new Error('The operator signer (OPERATOR_KMS_KEY_ID) is required to settle a service order.');
+
+  const intent = await readServiceOrderOnSui(input.intentId);
+  if (!intent.isServiceOrder) {
+    throw new Error('This intent is not a service order: its maker pays it, and the operator never settles it.');
+  }
+  if (intent.payer !== operator) {
+    throw new Error(`This service order is payable by ${intent.payer}, not by this operator (${operator}). Was the operator rotated after it was opened?`);
+  }
+  if (intent.account !== normalizeSuiAddress(account)) {
+    throw new Error('The account passed is not the account the service order was opened against.');
+  }
+  if (intent.status !== 0) throw new Error('This service order is no longer pending.');
+  if (Date.now() >= intent.expiresAtMs) {
+    throw new Error('This service order is past the window the contract opened it with. Nothing moved; the member can open a new one.');
+  }
+
+  const approval = await findOperatorApprovalOnSui(intent.intentId);
+  if (!approval) {
+    throw new Error('No approval for this service order has reached the operator. A second member of the account must sign approve_payout first.');
+  }
+  if (approval.amountMinor !== intent.amountMinor) {
+    throw new Error('The approval the operator holds is for a different amount than the order. Refusing to pay either.');
+  }
+
+  // WS4: the operator pays this order out of its own coin. Refuse before
+  // signing if its hot balance cannot cover it; never a partial payment.
+  await assertOperatorCanPay(intent.amountMinor, { coinType: settlementCoinType(), owner: operator });
+
+  const tx = buildConfirmServiceOrderTx({
+    packageId,
+    coinType: settlementCoinType(),
+    intentId: intent.intentId,
+    account,
+    approvalId: approval.approvalId,
+    amountMinor: intent.amountMinor,
+    anchorCapId: anchorCapObjectId(),
+    capRegistryId: capRegistryObjectId(),
+    auditHash: input.auditHash,
+    anchorId: input.anchorId,
+    backingBlobId: input.backingBlobId,
   });
 
   const result = await executeSdkTransaction(tx);
   const events = resultEvents(result);
   const paid = eventBySuffix(events, '::payment_intent::IntentConfirmed');
-  const allocated = eventBySuffix(events, '::smart_treasury::TreasuryDeposited');
-  const anchored = eventBySuffix(events, '::audit_anchor::AuditAnchored');
-  // Receipt-consuming proof (new package): audit_anchor::anchor must fire.
+  const consumed = eventBySuffix(events, '::business_account::PayoutApprovalConsumed');
   const settlementAnchored = eventBySuffix(events, '::audit_anchor::SettlementAnchored');
-  const auditAnchorObjectId =
-    typeof anchored?.data.anchor_object === 'string' ? anchored.data.anchor_object : null;
-
-  if (!paid || !anchored || !settlementAnchored || (treasuryAmountMist > 0 && !allocated)) {
-    throw new Error(`Composed transaction succeeded but required proof events were missing. Digest: ${result.digest}`);
+  const anchored = eventBySuffix(events, '::audit_anchor::AuditAnchored');
+  if (!paid || !consumed || !settlementAnchored || !anchored) {
+    throw new Error(`The service order settled but a required proof event is missing. Digest: ${result.digest}`);
   }
+  const auditAnchorObjectId = typeof anchored.data.anchor_object === 'string' ? anchored.data.anchor_object : null;
 
   return {
     digest: result.digest,
-    intentId: input.intentId,
-    intentCreateDigest: input.intentCreateDigest,
+    intentId: intent.intentId,
+    approvalId: approval.approvalId,
+    approver: approval.approver,
+    operator,
+    amountMinor: intent.amountMinor,
     auditAnchorObjectId,
-    smartTreasuryId: smartTreasuryId || null,
     events,
-    objectChanges: result.objectChanges ?? [],
     composedActions: [
-      {
-        kind: 'paid',
-        label: 'Payment intent confirmed',
-        eventType: paid.type,
-        data: paid.data,
-      },
-      ...(allocated
-        ? [{
-            kind: 'allocated' as const,
-            label: 'Reserve allocated to Smart Treasury',
-            eventType: allocated.type,
-            data: allocated.data,
-          }]
-        : []),
-      {
-        kind: 'anchored',
-        label: 'Audit proof anchored on Sui',
-        eventType: anchored.type,
-        data: anchored.data,
-      },
+      { kind: 'paid', label: 'Service order paid by Splash, as approved', eventType: paid.type, data: paid.data },
+      { kind: 'anchored', label: 'Audit proof anchored on Sui', eventType: anchored.type, data: anchored.data },
     ],
-    demo: false,
   };
+}
+
+/**
+ * Submit a transaction a MEMBER signed in their browser: signature one or two
+ * of a service order. The operator key signs nothing here — this relays the
+ * member's bytes and their signature, exactly as given, and reports what the
+ * chain did. `expected` is the digest of the bytes this server built for that
+ * member, so a client cannot swap in a different transaction under the
+ * order's name.
+ */
+export async function relayMemberSignedTransactionOnSui(input: {
+  bytes: string;
+  signature: string;
+  expectedDigest: string;
+}): Promise<{ digest: string; events: SuiEventView[] }> {
+  const bytes = new Uint8Array(Buffer.from(input.bytes, 'base64'));
+  const digest = await Transaction.from(bytes).getDigest();
+  if (digest !== input.expectedDigest) {
+    throw new Error('The signed transaction is not the one Splash built for this step. Nothing was submitted.');
+  }
+  const response = await suiClient.core.executeTransaction({
+    transaction: bytes,
+    signatures: [input.signature],
+    include: { effects: true, events: true },
+  });
+  const executed = response.Transaction ?? response.FailedTransaction;
+  if (response.$kind !== 'Transaction' || !executed.status.success) {
+    throw new Error(humanizeSuiError(describeExecutionError(executed.status.error), ''));
+  }
+  try { await suiClient.waitForTransaction({ digest: executed.digest }); } catch {}
+  return {
+    digest: executed.digest,
+    events: (executed.events ?? []).map((event) => ({
+      type: event.eventType,
+      data: (event.json && typeof event.json === 'object' ? event.json : {}) as Record<string, unknown>,
+    })),
+  };
+}
+
+/**
+ * Build the bytes a member signs for step one or two, with the member as
+ * sender and gas owner. Splash sponsors nothing here: the member's own wallet
+ * pays the network fee for their own signature.
+ */
+export async function buildMemberTransactionBytes(tx: Transaction, sender: string): Promise<{ bytes: string; digest: string }> {
+  tx.setSender(requireSuiAddress(sender, 'Signer'));
+  tx.setGasBudget(process.env.SUI_COMPOSED_GAS_BUDGET ?? '30000000');
+  const built = await tx.build({ client: suiClient });
+  const digest = await Transaction.from(built).getDigest();
+  return { bytes: Buffer.from(built).toString('base64'), digest };
 }
 
 export async function anchorAuditHashOnSui(input: {

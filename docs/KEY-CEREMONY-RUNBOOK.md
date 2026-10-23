@@ -297,6 +297,7 @@ SPLASH_ADMIN_CAP_ID=<from 3.2>              # now owned by the multisig
 SPLASH_TREASURY_CAP_ID=<from 3.2>           # cold multisig; recorded, not read by the app
 SPLASH_ANCHOR_CAP_ID=<new_cap_id from 3.4>  # hot server
 SPLASH_CAP_REGISTRY_ID=<from 3.2>
+SPLASH_SETTLEMENT_POLICY_ID=<from 3.2>       # WS3: shared SettlementPolicy; the operator is registered in 3.9
 SPLASH_PEG_STATE_ID=<new>
 SPLASH_COMPLIANCE_CONFIG_ID=<new>
 SPLASH_COMPLIANCE_CAP_ID=<new>              # unchanged by transfer_cap in 3.5
@@ -371,6 +372,25 @@ on testnet (the node's chain id decides); the peg call stays simulated, because
 the script has no attested reading to write. It prints the
 `scripts/verify-commitment.mjs` command that checks the settlement's events
 against the commitment.
+
+### 3.9 Register the operator (WS3) — after the verify
+
+The verify in §3.8 opens an intent as the operator. Once the operator is
+registered that is refused on chain (`payment_intent` abort 421, by design),
+so register it only after §3.8 passes. `AdminCap` is on the multisig by now
+(§3.6), so this is a multisig transaction:
+
+```bash
+sui client call --package <core package id> --module settlement_policy --function set_operator \
+  --args <ADMIN_CAP_ID> <SETTLEMENT_POLICY_ID> <OPERATOR_SUI_ADDRESS> --serialize-unsigned-transaction
+```
+
+Sign it with two of the three multisig keys as in §3.6. Confirm the
+`OperatorChanged` event names the hot server's address and record
+`SPLASH_SETTLEMENT_POLICY_ID` in §3.7's environment. From here a payout Splash
+funds is a service order: a client member signs it, a different approver
+signs the approval, and only then does the operator pay. Alert on any
+`OperatorChanged` you did not initiate.
 
 ---
 

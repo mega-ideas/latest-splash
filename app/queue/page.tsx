@@ -12,6 +12,7 @@ import { getCustomerSession } from '@/lib/server/customer-auth';
 import ApprovalCodeCard from '@/components/queue/ApprovalCodeCard';
 import ApprovalQueueBoard, { type QueueItem, type QueueLaneData } from '@/components/queue/ApprovalQueueBoard';
 import ReadyToSendLane, { type ReadyToSendItem } from '@/components/queue/ReadyToSendLane';
+import ServiceOrderSignatures from '@/components/service-orders/ServiceOrderSignatures';
 import StuckPaymentsSection from '@/components/queue/StuckPaymentsSection';
 
 export const dynamic = 'force-dynamic';
@@ -316,6 +317,8 @@ export default async function QueuePage() {
         <ApprovalCodeCard />
         <StuckPaymentsSection viewer={viewer} />
         <ReadyToSendLane items={readyItems} />
+        {/* WS3. Service orders: the maker signed, a different member signs the approval here. */}
+        <ServiceOrderSignatures />
 
         <ApprovalQueueBoard live={liveProposals} examples={{ pending: examplePending, lanes: exampleLanes }} />
       </div>
