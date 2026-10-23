@@ -8,8 +8,10 @@ import { suiScanTxUrlOn } from '../explorer.ts';
  *
  * ─── The asset ──────────────────────────────────────────────────────────────
  * Settlement is native USDC on Sui, and only that. Businesses may FUND from
- * USDC on other chains through Circle's CCTP (see lib/payments/cctp.ts), but
- * what moves between wallets here is Circle's native Sui USDC. There is no
+ * USDC on other chains through Circle's CCTP V2, and a cross-chain recipient
+ * is paid by burning USDC on Sui and minting it on their chain (both planned
+ * in lib/payments/cctp.ts), but what moves between wallets here is Circle's
+ * native Sui USDC. There is no
  * native Tether USDT on Sui — only bridge-wrapped versions — and settling in a
  * bridge wrapper adds a bridge's failure modes to every payment for no gain.
  *

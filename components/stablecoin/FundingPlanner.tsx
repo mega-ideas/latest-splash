@@ -3,27 +3,36 @@
 import { useState } from 'react';
 import { AlertTriangle, Loader2, Route } from 'lucide-react';
 
+import { FUNDING_CHAINS, type FundingChain } from '@/lib/payments/cctp';
+
 /**
  * "How do I get USDC into this wallet?" — asked of the funding planner
- * (lib/payments/cctp.ts). It plans; it does not bridge.
+ * (lib/payments/cctp.ts). It plans; it does not bridge. Every chain Circle
+ * lists for CCTP V2 with USDC is a source; the plan is a standard transfer.
  */
 
 type Plan =
-  | { available: true; route: 'DIRECT' | 'CCTP_V1'; arrives: string; wait: string; steps: Array<{ where: string; action: string }>; warnings: string[] }
+  | {
+      available: true;
+      route: 'DIRECT' | 'CCTP_V2';
+      transfer: 'STANDARD' | 'FAST' | null;
+      arrives: string;
+      wait: string;
+      steps: Array<{ where: string; action: string }>;
+      warnings: string[];
+    }
   | { available: false; reason: string; alternatives: string[] }
   | { error: string };
 
-const SOURCES = [
+const SOURCES: ReadonlyArray<readonly [FundingChain, string]> = [
   ['SUI', 'Sui (direct)'],
-  ['ETHEREUM', 'Ethereum'],
-  ['ARBITRUM', 'Arbitrum'],
-  ['BASE', 'Base'],
-  ['SOLANA', 'Solana'],
-  ['APTOS', 'Aptos'],
-] as const;
+  ...(Object.entries(FUNDING_CHAINS) as Array<[FundingChain, { label: string }]>)
+    .map(([value, chain]) => [value, chain.label] as const)
+    .sort((a, b) => a[1].localeCompare(b[1])),
+];
 
 export default function FundingPlanner({ destination }: { destination: string }) {
-  const [source, setSource] = useState<(typeof SOURCES)[number][0]>('SUI');
+  const [source, setSource] = useState<FundingChain>('SUI');
   const [asset, setAsset] = useState<'USDC' | 'USDT'>('USDC');
   const [amount, setAmount] = useState('');
   const [plan, setPlan] = useState<Plan | null>(null);
@@ -74,7 +83,10 @@ export default function FundingPlanner({ destination }: { destination: string })
           <p role="alert" className="mt-3 text-[13px] text-[var(--error)]">{plan.error}</p>
         ) : plan.available ? (
           <div className="mt-3 text-[13px] text-[#1F4452]">
-            <p><strong>{plan.route === 'DIRECT' ? 'Direct on Sui' : 'Circle CCTP (V1)'}</strong> · arrives: <span className="font-mono">{plan.arrives} USDC</span> · wait: {plan.wait}</p>
+            <p>
+              <strong>{plan.route === 'DIRECT' ? 'Direct on Sui' : `CCTP V2, ${plan.transfer === 'FAST' ? 'fast' : 'standard'} transfer`}</strong>
+              {' · '}arrives: <span className="font-mono">{plan.route === 'DIRECT' ? '' : 'at least '}{plan.arrives} USDC</span> · wait: {plan.wait}
+            </p>
             <ol className="mt-2 list-decimal space-y-1 pl-5">
               {plan.steps.map((s) => <li key={s.action}><span className="font-semibold">{s.where}:</span> {s.action}</li>)}
             </ol>
