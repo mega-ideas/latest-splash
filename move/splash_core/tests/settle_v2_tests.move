@@ -57,6 +57,9 @@ const HOUR: u64 = 3_600_000;
 const QUOTE_MS: u64 = 300_000;
 /// Tier 3's per-transfer ceiling and its daily ceiling: 20,000 USDC.
 const TIER_3_CAP: u64 = 20_000_000_000;
+/// `payment_intent::E_BELOW_SETTLEMENT_FLOOR`: a bank payout below the larger
+/// of 99 USDC and `ComplianceConfig.min_settlement_amount`.
+const BELOW_SETTLEMENT_FLOOR: u64 = 434;
 
 /// A staff member, the maker an app vouches for.
 const STAFF: address = @0x57AFF;
@@ -327,6 +330,24 @@ fun remove<T>(s: &mut Scenario, registry: u8) {
     let cap = s.take_from_sender<ComplianceCap>();
     let caps = s.take_shared<CapRegistry>();
     compliance_config::remove_registry_entry(&mut config, &cap, &caps, registry, compliance_config::type_string<T>());
+    ts::return_shared(caps);
+    s.return_to_sender(cap);
+    ts::return_shared(config);
+}
+
+/// Compliance raises the config's settlement floor to `floor`, leaving every
+/// other parameter where it was (`ComplianceCap`, held by owner 1).
+fun raise_floor(s: &mut Scenario, floor: u64) {
+    s.next_tx(h::owner_1());
+    let mut config = s.take_shared<ComplianceConfig>();
+    let cap = s.take_from_sender<ComplianceCap>();
+    let caps = s.take_shared<CapRegistry>();
+    let deviation = compliance_config::max_deviation_ppm(&config);
+    let staleness = compliance_config::max_staleness_ms(&config);
+    let slippage = compliance_config::max_slippage_bps(&config);
+    let depth = compliance_config::min_depth_base_units(&config);
+    compliance_config::tighten(&mut config, &cap, &caps, deviation, staleness, slippage, depth, floor);
+    assert_eq!(compliance_config::min_settlement_amount(&config), floor);
     ts::return_shared(caps);
     s.return_to_sender(cap);
     ts::return_shared(config);
@@ -1332,30 +1353,177 @@ fun a_1_usdc_cross_chain_payment_releases() {
 }
 
 #[test]
-#[expected_failure(abort_code = business_account::E_BELOW_MINIMUM)]
-/// A bank payout one minor unit under 99 USDC is refused: below it the
-/// partner's fixed costs exceed the payment.
+#[expected_failure(abort_code = BELOW_SETTLEMENT_FLOOR, location = splash_core::payment_intent)]
+/// A bank payout one minor unit under 99 USDC is refused, and refused when it
+/// opens: below 99 USDC the partner's fixed costs exceed the payment, and an
+/// intent that could never settle must not claim its payment reference.
 fun a_bank_payout_one_unit_under_99_usdc_aborts() {
     let mut s = h::setup();
     tx!(&mut s, h::wallet(), |account, config, c, ctx| {
-        let mut intent = h::wallet_intent(account, config, 1, 99 * USD - 1, c, ctx);
-        pay(&mut intent, account, config, 99 * USD - 1, h::settle_by(c), c, ctx);
-        payment_intent::delete_finalized(intent);
+        let intent = h::wallet_intent(account, config, 1, 99 * USD - 1, c, ctx);
+        payment_intent::share_intent(intent);
     });
     s.end();
 }
 
 #[test]
-#[expected_failure(abort_code = business_account::E_BELOW_MINIMUM)]
-/// The floor is about the intent, not the coin: overpaying a small bank
-/// payout does not lift it over the floor.
+#[expected_failure(abort_code = BELOW_SETTLEMENT_FLOOR, location = splash_core::payment_intent)]
+/// The floor is about the intent, not the coin: overpaying a bank payout the
+/// floor has risen above does not lift it over the floor.
 fun overpaying_a_small_bank_payout_does_not_lift_the_floor() {
     let mut s = h::setup();
+    open_shared(&mut s, 1, payment_intent::kind_bank_payout(), h::recipient(), 120 * USD);
+    raise_floor(&mut s, 150 * USD);
+    pay_shared_from_balance(&mut s, h::wallet(), 200 * USD);
+    s.end();
+}
+
+// ─── The bank-payout floor follows ComplianceConfig ────────────────────────
+//
+// The floor of a bank payout is the larger of the 99 USDC platform minimum
+// and `ComplianceConfig.min_settlement_amount`, which `ComplianceCap` can
+// raise. It is checked when the intent opens and again when it settles, on
+// every v2 path. The harness's config floor is 1 USDC, so 99 USDC binds until
+// a test raises it.
+
+#[test]
+#[expected_failure(abort_code = BELOW_SETTLEMENT_FLOOR, location = splash_core::payment_intent)]
+/// Raised to 150 USDC, the compliance floor refuses a 149.999999 USDC bank
+/// payout when it opens.
+fun a_bank_payout_under_a_raised_compliance_floor_is_refused_at_creation() {
+    let mut s = h::setup();
+    raise_floor(&mut s, 150 * USD);
     tx!(&mut s, h::wallet(), |account, config, c, ctx| {
-        let mut intent = h::wallet_intent(account, config, 1, 98 * USD, c, ctx);
-        pay_balance(&mut intent, account, config, 200 * USD, h::settle_by(c), c, ctx);
+        let intent = h::wallet_intent(account, config, 1, 150 * USD - 1, c, ctx);
+        payment_intent::share_intent(intent);
+    });
+    s.end();
+}
+
+#[test]
+/// At the raised floor exactly, the bank payout opens and settles.
+fun a_bank_payout_at_a_raised_compliance_floor_settles() {
+    let mut s = h::setup();
+    raise_floor(&mut s, 150 * USD);
+    tx!(&mut s, h::wallet(), |account, config, c, ctx| {
+        let mut intent = h::wallet_intent(account, config, 1, 150 * USD, c, ctx);
+        pay(&mut intent, account, config, 150 * USD, h::settle_by(c), c, ctx);
         payment_intent::delete_finalized(intent);
     });
+    assert_coin_at(&mut s, h::recipient(), 150 * USD);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = BELOW_SETTLEMENT_FLOOR, location = splash_core::payment_intent)]
+/// An intent opened before compliance raised the floor no longer settles by
+/// coin.
+fun a_bank_payout_opened_before_the_floor_rose_cannot_settle_by_coin() {
+    let mut s = h::setup();
+    open_shared(&mut s, 1, payment_intent::kind_bank_payout(), h::recipient(), 120 * USD);
+    raise_floor(&mut s, 150 * USD);
+    pay_shared(&mut s, h::wallet(), 120 * USD);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = BELOW_SETTLEMENT_FLOOR, location = splash_core::payment_intent)]
+/// Nor from the wallet's address balance.
+fun a_bank_payout_opened_before_the_floor_rose_cannot_settle_from_balance() {
+    let mut s = h::setup();
+    open_shared(&mut s, 1, payment_intent::kind_bank_payout(), h::recipient(), 120 * USD);
+    raise_floor(&mut s, 150 * USD);
+    pay_shared_from_balance(&mut s, h::wallet(), 120 * USD);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = BELOW_SETTLEMENT_FLOOR, location = splash_core::payment_intent)]
+/// Nor through a settlement app (a spending rule).
+fun a_bank_payout_opened_before_the_floor_rose_cannot_settle_through_an_app() {
+    let mut s = h::setup();
+    register<TestApp>(&mut s, compliance_config::registry_settlement_app());
+    tx!(&mut s, STAFF, |account, config, c, ctx| {
+        let intent = app_intent(account, config, 1, payment_intent::kind_bank_payout(), h::recipient(), 120 * USD, c, ctx);
+        payment_intent::share_intent(intent);
+    });
+    raise_floor(&mut s, 150 * USD);
+    with_intent!(&mut s, STAFF, |intent, account, config, c, ctx| {
+        let funds = balance::create_for_testing<USDC>(120 * USD);
+        let receipt = payment_intent::settle_from_app<USDC, TestApp>(
+            TestApp {}, intent, account, config, funds, h::settle_by(c), c, ctx,
+        );
+        audit_anchor::anchor(receipt, HASH, BLOB, c, ctx);
+    });
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = BELOW_SETTLEMENT_FLOOR, location = splash_core::payment_intent)]
+/// A settlement app cannot open a bank payout under the floor either.
+fun an_app_cannot_open_a_bank_payout_under_the_floor() {
+    let mut s = h::setup();
+    register<TestApp>(&mut s, compliance_config::registry_settlement_app());
+    tx!(&mut s, STAFF, |account, config, c, ctx| {
+        let intent = app_intent(account, config, 1, payment_intent::kind_bank_payout(), h::recipient(), 99 * USD - 1, c, ctx);
+        payment_intent::share_intent(intent);
+    });
+    s.end();
+}
+
+#[test]
+/// The floor is for bank payouts only: with the compliance floor at 1,000
+/// USDC, a 1 USDC wallet transfer still opens and settles.
+fun a_raised_compliance_floor_does_not_apply_to_a_wallet_transfer() {
+    let mut s = h::setup();
+    raise_floor(&mut s, 1_000 * USD);
+    tx!(&mut s, h::wallet(), |account, config, c, ctx| {
+        let mut intent = h::wallet_intent_of_kind(account, config, 1, payment_intent::kind_wallet(), SUPPLIER_WALLET, USD, c, ctx);
+        pay(&mut intent, account, config, USD, h::settle_by(c), c, ctx);
+        payment_intent::delete_finalized(intent);
+    });
+    assert_coin_at(&mut s, SUPPLIER_WALLET, USD);
+    s.end();
+}
+
+// ─── A bank payout the tier could never settle does not open ──────────────
+
+#[test]
+#[expected_failure(abort_code = business_account::E_OVER_PER_TRANSFER_CAP)]
+/// One unit over Tier 3's per-transfer ceiling, a bank payout is refused when
+/// it opens, not left to expire with its payment reference claimed.
+fun a_bank_payout_over_the_tier_ceiling_is_refused_at_creation() {
+    let mut s = h::setup();
+    tx!(&mut s, h::wallet(), |account, config, c, ctx| {
+        let intent = h::wallet_intent(account, config, 1, TIER_3_CAP + 1, c, ctx);
+        payment_intent::share_intent(intent);
+    });
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = business_account::E_OVER_PER_TRANSFER_CAP)]
+/// The same for an app-made bank payout.
+fun an_app_cannot_open_a_bank_payout_over_the_tier_ceiling() {
+    let mut s = h::setup();
+    register<TestApp>(&mut s, compliance_config::registry_settlement_app());
+    tx!(&mut s, STAFF, |account, config, c, ctx| {
+        let intent = app_intent(account, config, 1, payment_intent::kind_bank_payout(), h::recipient(), TIER_3_CAP + 1, c, ctx);
+        payment_intent::share_intent(intent);
+    });
+    s.end();
+}
+
+#[test]
+/// At the ceiling exactly, the bank payout opens and settles.
+fun a_bank_payout_at_the_tier_ceiling_settles() {
+    let mut s = h::setup();
+    tx!(&mut s, h::wallet(), |account, config, c, ctx| {
+        let mut intent = h::wallet_intent(account, config, 1, TIER_3_CAP, c, ctx);
+        pay(&mut intent, account, config, TIER_3_CAP, h::settle_by(c), c, ctx);
+        payment_intent::delete_finalized(intent);
+    });
+    assert_coin_at(&mut s, h::recipient(), TIER_3_CAP);
     s.end();
 }
 
