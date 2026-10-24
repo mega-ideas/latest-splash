@@ -16,6 +16,11 @@
  *     caches, refreshes when it sees FeeScheduleApplied from the config's own
  *     package and not from a look-alike, and never serves a cache past its
  *     expiry when a read fails;
+ *   * Splash's fees are off until the first fee recipient change has been
+ *     applied (Sky, 24 Oct): a FeeConfig with no recipient reads as fees
+ *     off, the fee quoted under it is 0 as `fee_config::splash_fee` returns,
+ *     and the cache refreshes on FeeRecipientApplied and at a pending
+ *     recipient's eta, when the fees could turn on;
  *   * the module is server-only.
  */
 import assert from 'node:assert/strict';
@@ -31,6 +36,7 @@ import {
   LAUNCH_SCHEDULE,
   createFeeConfigCache,
   deriveKind,
+  feeUnderConfig,
   graphqlDiscountReader,
   graphqlFeeConfigReader,
   parseFeeConfig,
@@ -184,11 +190,34 @@ test('a well-formed FeeConfig parses to the schedule the chain holds', () => {
   assert.deepEqual(state.schedule, LAUNCH_SCHEDULE);
   assert.equal(state.packageId, PKG);
   assert.equal(state.feeRecipient, FINANCE);
+  assert.equal(state.feesOn, true);
   assert.equal(state.discountsTableId, TABLE_ID);
   assert.equal(state.discountCount, 0n);
   assert.equal(state.version, 42);
   assert.deepEqual(state.pendingSchedules, [null, null, null, null, null]);
   assert.equal(state.pendingRecipient, null);
+});
+
+test('a FeeConfig with no fee recipient applied reads as fees off', () => {
+  const state = parseFeeConfig(configObject({ json: { fee_recipient: null } }), CONFIG_ID);
+  assert.equal(state.feeRecipient, null);
+  assert.equal(state.feesOn, false);
+  assert.deepEqual(state.schedule, LAUNCH_SCHEDULE);
+});
+
+test('the fee under a config is the schedule’s while the fees are on, and 0 while they are off, as on chain', () => {
+  const on = parseFeeConfig(configObject(), CONFIG_ID);
+  const off = parseFeeConfig(configObject({ json: { fee_recipient: null } }), CONFIG_ID);
+  const quote = (config, kind, principal, discountBps = 0) =>
+    feeUnderConfig({ config, kind, principalMinor: principal, discountBps });
+  assert.equal(quote(on, FEE_KIND.BANK_PAYOUT, 5_000_000_000n), 10_000_000n);
+  assert.equal(quote(on, FEE_KIND.BANK_PAYOUT, 5_000_000_000n, 10), 5_000_000n);
+  for (let kind = 0; kind < 5; kind += 1) {
+    assert.equal(quote(off, kind, 5_000_000_000n), 0n);
+    assert.equal(quote(off, kind, U64_MAX), 0n);
+  }
+  // an unknown kind is refused fees on or off, as the chain aborts on it first
+  assert.throws(() => quote(off, 5, 1n), RangeError);
 });
 
 test('a pending schedule and recipient are read with their eta', () => {
@@ -345,6 +374,44 @@ test('FeeScheduleApplied from the config’s own package refreshes it; a look-al
   // the same package in upper case, or without its 0x, is the same package
   assert.equal(cache.observeEvent(`0x${'A'.repeat(64)}::fee_config::FeeScheduleApplied`), true);
   assert.equal(cache.observeEvent(`${'a'.repeat(64)}::fee_config::FeeScheduleApplied`), true);
+});
+
+test('FeeRecipientApplied from the config’s own package refreshes it, since it can turn the fees on', async () => {
+  let reads = 0;
+  const cache = createFeeConfigCache({ id: CONFIG_ID, read: async () => (reads++, stateWith()), ttlMs: 60_000 });
+  await cache.get();
+  assert.equal(cache.observeEvent(`${OTHER_PKG}::fee_config::FeeRecipientApplied`), false);
+  assert.equal(cache.observeEvent(`${PKG}::fee_config::FeeRecipientProposed`), false);
+  await cache.get();
+  assert.equal(reads, 1);
+  assert.equal(cache.observeEvent(`${PKG}::fee_config::FeeRecipientApplied`), true);
+  await cache.get();
+  assert.equal(reads, 2);
+});
+
+test('a pending recipient shortens the cache to its eta, and to seconds once it could apply', async () => {
+  const c = clock(1_000_000);
+  let reads = 0;
+  const cache = createFeeConfigCache({
+    id: CONFIG_ID,
+    read: async () => (reads++, stateWith({ feeRecipient: null, feesOn: false, pendingRecipient: { recipient: FINANCE, etaMs: 1_010_000n } })),
+    ttlMs: 60_000,
+    applicableTtlMs: 5_000,
+    now: c.now,
+  });
+  await cache.get();
+  c.advance(9_999);
+  await cache.get();
+  assert.equal(reads, 1);
+  c.advance(1); // the eta
+  await cache.get();
+  assert.equal(reads, 2);
+  c.advance(4_999);
+  await cache.get();
+  assert.equal(reads, 2);
+  c.advance(1);
+  await cache.get();
+  assert.equal(reads, 3);
 });
 
 test('a pending schedule shortens the cache to its eta, and to seconds once it could apply', async () => {
