@@ -112,12 +112,24 @@ async function build(tx: Transaction): Promise<Uint8Array> {
   return tx.build();
 }
 
-/** The founder names the wallet that may register (Phase 1 R2). Sender: the founder. */
+/**
+ * The founder names the wallet that may register (Phase 1 R2). Sender: the
+ * founder. `addOwners` are wallet members whose own passkey address is not
+ * yet an owner of the BusinessAccount: `register_wallet` refuses a member who
+ * is not one (E_SIGNER_NOT_AN_OWNER), and before a wallet registers any owner
+ * may add one, so the founder adds them in the same transaction.
+ */
 export function nominateWalletTx(
   chain: V2Chain,
-  input: { founder: string; account: SharedRef; wallet: string; singleSigner: boolean; gas: SponsoredGas },
+  input: { founder: string; account: SharedRef; wallet: string; singleSigner: boolean; gas: SponsoredGas; addOwners?: readonly string[] },
 ): Promise<Uint8Array> {
   const tx = new Transaction();
+  for (const owner of input.addOwners ?? []) {
+    tx.moveCall({
+      target: fn(chain, 'business_account::add_owner'),
+      arguments: [shared(tx, input.account, true), tx.pure.address(normalizeSuiAddress(owner))],
+    });
+  }
   tx.moveCall({
     target: fn(chain, 'business_account::nominate_wallet'),
     arguments: [shared(tx, input.account, true), tx.pure.address(normalizeSuiAddress(input.wallet)), tx.pure.bool(input.singleSigner)],

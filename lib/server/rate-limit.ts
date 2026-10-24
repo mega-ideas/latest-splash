@@ -78,6 +78,11 @@ export const RATE_LIMITS = {
   // Each quote reserves allowance and reads the sender's coins from a fullnode.
   stablecoinQuoteUser: { bucket: 'stablecoin-quote:user', limit: 30, windowMs: 15 * MINUTE },
   stablecoinSubmitUser: { bucket: 'stablecoin-submit:user', limit: 30, windowMs: 15 * MINUTE },
+  // A business wallet request reads the chain, simulates, and asks the
+  // sponsor to pay; per person and per business (v2 §4.1). The sponsor's
+  // own 24-hour gas budget per business sits behind these.
+  walletRequestUser: { bucket: 'wallet-request:user', limit: 20, windowMs: HOUR },
+  walletRequestOrg: { bucket: 'wallet-request:org', limit: 60, windowMs: HOUR },
   // Each request sends a WhatsApp message; the per-subject cooldown stops a
   // double-click, this stops a loop.
   stepUpRequestUser: { bucket: 'step-up-request:user', limit: 10, windowMs: 15 * MINUTE },

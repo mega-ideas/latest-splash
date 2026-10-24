@@ -2,29 +2,37 @@
  * The live wiring for the Business Splash Wallet: Postgres, the chain
  * (SUI_NETWORK's fullnode), the gas sponsor, WhatsApp, for ONE org.
  *
- * Fails closed. No database, no v2 object ids, or an org without its own
- * BusinessAccount id answers a refusal with the reason, never a stand-in: in
- * particular the account comes from `organizations.sui_business_account_id`
- * only, never from the single-tenant SPLASH_BUSINESS_ACCOUNT_ID fallback, so
- * one org's wallet transactions can never name another's account. A missing
- * sponsor is not a refusal here, because reading the inbox needs none; every
- * sponsored request is then refused when it would be opened (503).
+ * Fails closed. No database, no v2 object ids, an org without its own
+ * BusinessAccount id, or mainnet before the hardware passkey check is
+ * recorded (lib/server/wallet-network-gate.ts) answers a refusal with the
+ * reason, never a stand-in: in particular the account comes from
+ * `organizations.sui_business_account_id` only, never from the single-tenant
+ * SPLASH_BUSINESS_ACCOUNT_ID fallback, so one org's wallet transactions can
+ * never name another's account. A missing sponsor is not a refusal here,
+ * because reading the inbox needs none; every sponsored request is then
+ * refused when it would be opened (503).
+ *
+ * What the wallet is, who the founder is and who the owners are on chain are
+ * read from the BusinessAccount itself (`readAccount`), never inferred from
+ * request history or memberships.
  */
 import 'server-only';
 
 import { randomInt } from 'node:crypto';
 
-import { and, eq, isNull } from 'drizzle-orm';
-import { normalizeSuiAddress } from '@mysten/sui/utils';
+import { eq } from 'drizzle-orm';
+import { normalizeStructTag, normalizeSuiAddress } from '@mysten/sui/utils';
 
 import { relyingPartyId } from '@/lib/auth/passkey';
 import { memberships, organizations, passkeyCredentials } from '@/lib/db/schema';
-import { SUI_USDC_COIN_TYPE } from '@/lib/payments/stablecoin-lane';
+import { gaslessEnabled, SUI_USDC_COIN_TYPE } from '@/lib/payments/stablecoin-lane';
 import { listApprovers } from '@/lib/server/approver-channels';
 import { walletSigningNotifier } from '@/lib/server/approval-requests';
-import { continueWalletSteps, type WalletContext } from '@/lib/server/business-wallet';
+import { continueWalletSteps, type AccountState, type IntentState, type WalletContext } from '@/lib/server/business-wallet';
 import { v2ObjectIdsFromEnv, type SharedRef } from '@/lib/server/sui-v2-builders';
-import type { SigningDeps, WalletChain } from '@/lib/server/wallet-signing';
+import { memberWalletAddresses, pickWalletMembers, type PasskeyRow } from '@/lib/server/wallet-members';
+import { walletNetworkGate } from '@/lib/server/wallet-network-gate';
+import type { ChainResult, SigningDeps, WalletChain } from '@/lib/server/wallet-signing';
 import type { DrizzleDb } from '@/lib/server/wallet-signing-store';
 import { walletSponsorFromEnv } from '@/lib/server/wallet-sponsor';
 
@@ -44,7 +52,7 @@ async function sharedRef(objectId: string): Promise<SharedRef> {
   return { objectId: id, initialSharedVersion: String(owner.Shared.initialSharedVersion) };
 }
 
-function liveChain(): WalletChain {
+export function liveChain(): WalletChain & { read(digest: string): Promise<ChainResult | null>; currentEpoch(): Promise<bigint> } {
   return {
     async simulate(bytes) {
       const [{ suiClient }, { observe }] = await Promise.all([import('@/lib/sui'), import('@/lib/server/stablecoin-chain')]);
@@ -65,6 +73,10 @@ function liveChain(): WalletChain {
         return null;
       }
     },
+    async currentEpoch() {
+      const { suiClient } = await import('@/lib/sui');
+      return BigInt((await suiClient.core.getCurrentSystemState()).systemState.epoch);
+    },
   };
 }
 
@@ -73,9 +85,85 @@ export function walletUsdcType(env: NodeJS.ProcessEnv = process.env): string {
   return SUI_USDC_COIN_TYPE[(env.SUI_NETWORK ?? '').trim() === 'mainnet' ? 'mainnet' : 'testnet'];
 }
 
+// ─── Reading Move objects as JSON ───────────────────────────────────────────
+
+type Json = Record<string, unknown>;
+const isObject = (v: unknown): v is Json => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/** Option<T> as the fullnode renders it: null, the value, or `{ vec: [v] }`. */
+function option(v: unknown): unknown {
+  if (v === null || v === undefined) return null;
+  if (isObject(v) && Array.isArray(v.vec)) return v.vec.length ? v.vec[0] : null;
+  return v;
+}
+function address(v: unknown, what: string): string {
+  if (typeof v !== 'string' || !/^(0x)?[0-9a-fA-F]{1,64}$/.test(v)) throw new Error(`${what} is not an address`);
+  return normalizeSuiAddress(v);
+}
+function addressSet(v: unknown, what: string): string[] {
+  const list = isObject(v) && Array.isArray(v.contents) ? v.contents : Array.isArray(v) ? v : null;
+  if (!list) throw new Error(`${what} is not a set of addresses`);
+  return list.map((x) => address(x, what));
+}
+function u64(v: unknown, what: string): bigint {
+  if ((typeof v !== 'string' && typeof v !== 'number') || !/^\d+$/.test(String(v))) throw new Error(`${what} is not a u64`);
+  return BigInt(v);
+}
+
+async function readJsonObject(objectId: string, typeSuffix: string): Promise<{ json: Json; owner: unknown; type: string } | null> {
+  const { suiClient } = await import('@/lib/sui');
+  let object: { json?: unknown; owner: unknown; type: string };
+  try {
+    ({ object } = (await suiClient.core.getObject({ objectId, include: { json: true } })) as unknown as { object: { json?: unknown; owner: unknown; type: string } });
+  } catch {
+    return null;
+  }
+  if (!object.type.endsWith(typeSuffix)) throw new Error(`${objectId} is not a ${typeSuffix.slice(2)}`);
+  if (!isObject(object.json)) throw new Error(`${objectId} could not be read`);
+  return { json: object.json, owner: object.owner, type: object.type };
+}
+
+/** splash_core::business_account::BusinessAccount, as the chain has it now. */
+export function parseBusinessAccount(json: Json): AccountState {
+  const nominated = option(json.nominated_wallet);
+  const pending = option(json.pending_wallet);
+  const wallet = option(json.wallet);
+  return {
+    owner: address(json.owner, 'the account owner'),
+    owners: addressSet(json.owners, 'the account owners'),
+    wallet: wallet === null ? null : address(wallet, 'the wallet'),
+    nominatedWallet: isObject(nominated) ? address(nominated.wallet, 'the nominated wallet') : null,
+    pendingWallet: isObject(pending) ? address(pending.wallet, 'the pending wallet') : null,
+  };
+}
+
+/** splash_core::payment_intent::PaymentIntent. */
+export function parsePaymentIntent(id: string, json: Json, owner: unknown): IntentState {
+  const shared = (owner as { $kind?: string; Shared?: { initialSharedVersion: string } }) ?? {};
+  if (shared.$kind !== 'Shared' || !shared.Shared) throw new Error('the intent is not shared');
+  const account = option(json.account);
+  const asset = String(json.settlement_asset ?? '');
+  return {
+    id: normalizeSuiAddress(id),
+    initialSharedVersion: String(shared.Shared.initialSharedVersion),
+    account: account === null ? null : address(account, 'the intent account'),
+    recipient: address(json.recipient, 'the intent recipient'),
+    amountMinor: u64(json.amount_usd, 'the intent amount'),
+    kind: Number(u64(json.kind, 'the intent kind')),
+    targetCurrency: String(json.target_currency ?? ''),
+    fxRateUsdLocal: u64(json.fx_rate_usd_local, 'the intent rate'),
+    expiresAtMs: u64(json.expires_at, 'the intent expiry'),
+    status: Number(u64(json.status, 'the intent status')),
+    // type_name strings carry no 0x prefix.
+    asset: normalizeStructTag(asset.startsWith('0x') ? asset : `0x${asset}`),
+  };
+}
+
 /** Everything the wallet flows need for one org, or why it cannot run. */
 export async function liveWalletContext(orgId: string): Promise<{ ok: true; ctx: WalletContext; db: DrizzleDb } | WalletDepsRefusal> {
   if (!process.env.DATABASE_URL) return { ok: false, status: 503, error: 'the business wallet needs the database, and DATABASE_URL is not set' };
+  const gate = walletNetworkGate();
+  if (!gate.ok) return { ok: false, status: 503, error: gate.reason };
   const ids = v2ObjectIdsFromEnv();
   if (!ids.ok) return { ok: false, status: 503, error: ids.reason };
 
@@ -122,6 +210,21 @@ export async function liveWalletContext(orgId: string): Promise<{ ok: true; ctx:
     signing,
     chain: { corePackageId: ids.ids.corePackageId, complianceConfig, feeConfig, registry, usdcType },
     account,
+    readAccount: async () => {
+      const read = await readJsonObject(accountId, '::business_account::BusinessAccount');
+      if (!read) throw new Error('the business account could not be read');
+      return parseBusinessAccount(read.json);
+    },
+    readIntent: async (id) => {
+      const read = await readJsonObject(normalizeSuiAddress(id), '::payment_intent::PaymentIntent');
+      return read ? parsePaymentIntent(id, read.json, read.owner) : null;
+    },
+    readUsdc: async (owner) => {
+      const { suiClient } = await import('@/lib/sui');
+      const { balance } = await suiClient.core.getBalance({ owner, coinType: usdcType });
+      return { coinMinor: BigInt(balance.coinBalance), addressBalanceMinor: BigInt(balance.addressBalance) };
+    },
+    gasless: () => gaslessEnabled(),
     validity: async () => {
       const { suiClient } = await import('@/lib/sui');
       const [{ systemState }, { chainIdentifier }] = await Promise.all([suiClient.core.getCurrentSystemState(), suiClient.core.getChainIdentifier()]);
@@ -134,20 +237,31 @@ export async function liveWalletContext(orgId: string): Promise<{ ok: true; ctx:
   return { ok: true, ctx, db };
 }
 
-export type OwnerPasskey = { userId: string; publicKey: string; address: string; founder: boolean };
+/** Every member of the org with every passkey they have (or none). */
+async function memberPasskeyRows(db: DrizzleDb, orgId: string): Promise<PasskeyRow[]> {
+  const people = await db.select({ userId: memberships.userId, role: memberships.role }).from(memberships).where(eq(memberships.orgId, orgId));
+  const rows: PasskeyRow[] = [];
+  for (const p of people) {
+    const keys = await db
+      .select({ publicKey: passkeyCredentials.publicKey, address: passkeyCredentials.suiAddress, rpId: passkeyCredentials.rpId, revokedAt: passkeyCredentials.revokedAt, createdAt: passkeyCredentials.createdAt })
+      .from(passkeyCredentials)
+      .where(eq(passkeyCredentials.userId, p.userId));
+    if (keys.length === 0) rows.push({ userId: p.userId, role: String(p.role), publicKey: null, address: null, rpId: null, revokedAt: null, createdAt: null });
+    for (const k of keys) rows.push({ userId: p.userId, role: String(p.role), ...k });
+  }
+  return rows;
+}
 
 /**
- * The org's owners (role admin) and their active passkey on this origin.
- * The founder is the owner whose membership nobody granted (the first one).
+ * The org's owners (role admin) and the passkey each signs with on this
+ * site, the founder being the BusinessAccount's on-chain owner; and the
+ * owners who have no passkey here (lib/server/wallet-members.ts).
  */
-export async function orgOwnerPasskeys(db: DrizzleDb, orgId: string): Promise<OwnerPasskey[]> {
-  const rows = await db
-    .select({ userId: memberships.userId, grantedBy: memberships.grantedBy, publicKey: passkeyCredentials.publicKey, address: passkeyCredentials.suiAddress })
-    .from(memberships)
-    .innerJoin(
-      passkeyCredentials,
-      and(eq(passkeyCredentials.userId, memberships.userId), eq(passkeyCredentials.rpId, relyingPartyId()), isNull(passkeyCredentials.revokedAt)),
-    )
-    .where(and(eq(memberships.orgId, orgId), eq(memberships.role, 'admin')));
-  return rows.map((r) => ({ userId: r.userId, publicKey: r.publicKey, address: normalizeSuiAddress(r.address), founder: r.grantedBy === null }));
+export async function orgWalletMembers(db: DrizzleDb, orgId: string, account: AccountState) {
+  return pickWalletMembers(await memberPasskeyRows(db, orgId), account, relyingPartyId());
+}
+
+/** Every address any member of the org has a passkey wallet at (for migration). */
+export async function orgMemberWalletAddresses(db: DrizzleDb, orgId: string) {
+  return memberWalletAddresses(await memberPasskeyRows(db, orgId), relyingPartyId());
 }
