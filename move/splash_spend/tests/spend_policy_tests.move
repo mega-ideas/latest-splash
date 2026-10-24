@@ -1497,6 +1497,31 @@ fun every_mutation_emits_one_policy_changed() {
     s.end();
 }
 
+#[test]
+/// Each removal moves the policy's generation by one, which retires every
+/// approval given before it. Additions and limit changes do not move it.
+fun every_removal_and_only_a_removal_moves_the_generation() {
+    let (mut s, id) = begin_with_policy();
+    s.next_tx(h::wallet());
+    {
+        let mut policy = s.take_shared_by_id<SpendPolicy>(id);
+        assert_eq!(spend_policy::generation(&policy), 0);
+        spend_policy::add_spender(&mut policy, STAFF, spend_policy::role_staff(), STAFF_MAX, s.ctx());
+        spend_policy::verify_recipient(&mut policy, SUI, SUPPLIER, payment_intent::kind_wallet(), s.ctx());
+        spend_policy::verify_beneficiary(&mut policy, BENEFICIARY_A, PARTNER, s.ctx());
+        spend_policy::set_limits(&mut policy, POLICY_MAX, 0, s.ctx());
+        assert_eq!(spend_policy::generation(&policy), 0);
+        spend_policy::remove_spender(&mut policy, STAFF, s.ctx());
+        assert_eq!(spend_policy::generation(&policy), 1);
+        spend_policy::remove_recipient(&mut policy, SUI, SUPPLIER, s.ctx());
+        assert_eq!(spend_policy::generation(&policy), 2);
+        spend_policy::remove_beneficiary(&mut policy, BENEFICIARY_A, s.ctx());
+        assert_eq!(spend_policy::generation(&policy), 3);
+        ts::return_shared(policy);
+    };
+    s.end();
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // accept: issuing a spending rule
 // ════════════════════════════════════════════════════════════════════════════

@@ -1703,6 +1703,56 @@ fun re_binding_a_beneficiary_does_not_revive_an_approval() {
 }
 
 #[test]
+#[expected_failure(abort_code = splash_spend::E_STALE_APPROVAL)]
+/// The retirement is policy-wide: removing any spender, here JUNIOR, ends
+/// every approval outstanding, here STAFF's. The owners approve again.
+fun any_removal_retires_every_outstanding_approval() {
+    let (mut s, fx) = setup();
+    let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, THRESHOLD + 1);
+    approve(&mut s, &fx, h::owner_2(), intent, STAFF);
+    let mut p = wallet_policy(&mut s, &fx);
+    p.remove_spender(JUNIOR, s.ctx());
+    ts::return_shared(p);
+    pay(&mut s, &fx, STAFF, fx.staff, intent, true);
+    s.end();
+}
+
+#[test]
+/// Additions and limit changes retire nothing: limits are read again at pay
+/// time, so an approval given before them still pays within them.
+fun additions_and_limit_changes_leave_approvals_alive() {
+    let (mut s, fx) = setup();
+    let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, THRESHOLD + 1);
+    approve(&mut s, &fx, h::owner_2(), intent, STAFF);
+    let mut p = wallet_policy(&mut s, &fx);
+    p.add_spender(STRANGER, spend_policy::role_staff(), PAY, s.ctx());
+    p.verify_recipient(SUI_DOMAIN, UNLISTED, payment_intent::kind_wallet(), s.ctx());
+    p.set_limits(POLICY_MAX, THRESHOLD - 1, s.ctx());
+    assert_eq!(spend_policy::generation(&p), 0);
+    ts::return_shared(p);
+    pay(&mut s, &fx, STAFF, fx.staff, intent, true);
+    assert_eq!(coin_received(&mut s, SUPPLIER), THRESHOLD + 1);
+    s.end();
+}
+
+#[test]
+/// An approval records the generation it was given under.
+fun an_approval_records_the_policy_generation() {
+    let (mut s, fx) = setup();
+    let mut p = wallet_policy(&mut s, &fx);
+    p.remove_spender(JUNIOR, s.ctx());
+    ts::return_shared(p);
+    let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, THRESHOLD + 1);
+    approve(&mut s, &fx, h::owner_2(), intent, STAFF);
+    s.next_tx(STAFF);
+    let approval = s.take_from_sender<PayoutApproval>();
+    assert_eq!(splash_spend::approval_policy_generation(&approval), 1);
+    pay_in_tx(&mut s, fx.account, fx.policy, fx.staff, intent, option::some(approval));
+    assert_eq!(coin_received(&mut s, SUPPLIER), THRESHOLD + 1);
+    s.end();
+}
+
+#[test]
 #[expected_failure(abort_code = splash_core::business_account::E_FROZEN)]
 /// A freeze stops every Splash path, including staff allowances.
 fun a_frozen_account_cannot_pay_under_a_spending_rule() {

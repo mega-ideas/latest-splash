@@ -106,7 +106,8 @@ const E_NOT_THE_MAKER: u64 = 1019;
 /// Execution can be delegated only to an executor.
 const E_NOT_AN_EXECUTOR: u64 = 1020;
 /// The account's authority changed (a freeze, a membership change, a wallet
-/// change) after this approval was given.
+/// change), or the policy removed a spender, a recipient or a beneficiary,
+/// after this approval was given.
 const E_STALE_APPROVAL: u64 = 1021;
 /// A cross-chain intent is not paid under a spending rule. The owners pay it
 /// from the wallet.
@@ -140,8 +141,9 @@ public struct SPLASH_SPEND() has drop;
 public struct SettleWitness has drop {}
 
 /// The owners' approval to pay ONE intent: this policy, this intent, this
-/// amount, by this payer, while the account's authority is unchanged, and
-/// against a quote that holds until `settle_by_ms`.
+/// amount, by this payer, while the account's authority and the policy's
+/// generation are unchanged, and against a quote that holds until
+/// `settle_by_ms`.
 ///
 /// It is one of two things, and both are the owners' decision: an owner's
 /// second approval (`approve_payout`; the approver is a wallet member), or
@@ -153,6 +155,9 @@ public struct SettleWitness has drop {}
 public struct PayoutApproval has key {
     id: UID,
     policy: ID,
+    /// The policy's generation when this was given. Any removal from the
+    /// policy moves it, and the approval is then dead for good.
+    policy_generation: u64,
     intent: ID,
     amount: u64,
     approver: address,
@@ -370,6 +375,7 @@ fun mint(
     let approval = PayoutApproval {
         id: object::new(ctx),
         policy: object::id(policy),
+        policy_generation: spend_policy::generation(policy),
         intent: object::id(intent),
         amount: payment_intent::amount_usd(intent),
         approver,
@@ -393,6 +399,7 @@ public fun discard_approval(approval: PayoutApproval) {
     let PayoutApproval {
         id,
         policy: _,
+        policy_generation: _,
         intent: _,
         amount: _,
         approver: _,
@@ -531,6 +538,7 @@ fun consume(
     let PayoutApproval {
         id,
         policy: policy_id,
+        policy_generation,
         intent: intent_id,
         amount,
         approver,
@@ -543,6 +551,7 @@ fun consume(
     assert!(amount == payment_intent::amount_usd(intent), E_APPROVAL_MISMATCH);
     assert!(named_payer == payer, E_APPROVAL_MISMATCH);
     assert!(authority_epoch == business_account::authority_epoch(account), E_STALE_APPROVAL);
+    assert!(policy_generation == spend_policy::generation(policy), E_STALE_APPROVAL);
     assert!(clock.timestamp_ms() < approved_settle_by_ms, E_APPROVAL_EXPIRED);
     assert!(settle_by_ms <= approved_settle_by_ms, E_SETTLE_BY_AFTER_APPROVAL);
     // Who approved, checked again at use, not trusted from minting.
@@ -607,6 +616,7 @@ public fun allowance_name(policy: &SpendPolicy): String {
 }
 
 public fun approval_policy(a: &PayoutApproval): ID { a.policy }
+public fun approval_policy_generation(a: &PayoutApproval): u64 { a.policy_generation }
 public fun approval_intent(a: &PayoutApproval): ID { a.intent }
 public fun approval_amount(a: &PayoutApproval): u64 { a.amount }
 public fun approval_approver(a: &PayoutApproval): address { a.approver }

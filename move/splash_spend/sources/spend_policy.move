@@ -123,6 +123,10 @@ public struct SpendPolicy has key {
     per_payment_max: u64,
     /// Above this amount a payment needs a second approval from an owner.
     second_approval_threshold: u64,
+    /// Moves on every removal (a spender, a recipient, a beneficiary). Each
+    /// approval records the generation it was given under and dies when it
+    /// moves, so adding back what was removed never brings an approval back.
+    generation: u64,
 }
 
 // ─── Events ────────────────────────────────────────────────────────────────
@@ -193,6 +197,7 @@ public fun create_policy<T>(
         beneficiary_count: 0,
         per_payment_max,
         second_approval_threshold: DEFAULT_SECOND_APPROVAL_THRESHOLD,
+        generation: 0,
     };
     let policy_id = object::id(&policy);
     event::emit(PolicyCreated {
@@ -214,6 +219,13 @@ fun assert_wallet(policy: &SpendPolicy, ctx: &TxContext) {
 
 fun changed(policy: &SpendPolicy, change: vector<u8>) {
     event::emit(PolicyChanged { policy_id: object::id(policy), change });
+}
+
+/// A removal withdraws the owners' trust in someone or somewhere. Every
+/// approval given before it, to anyone, dies with it, so that re-adding the
+/// same entry never revives one; the owners approve again.
+fun retire_approvals(policy: &mut SpendPolicy) {
+    policy.generation = policy.generation + 1;
 }
 
 /// Add a spender: STAFF, who open and pay, or EXECUTOR (Splash's KMS
@@ -238,12 +250,17 @@ public fun add_spender(
 
 /// Stops a spender at once, without waiting for the business to revoke the
 /// allowance: `pay_intent` checks this list on every payment, for the payer
-/// and for the intent's maker, so the spender's open intents stop too.
+/// and for the intent's maker, so the spender's open intents stop too while
+/// they stay removed. It also retires every approval given so far, so
+/// adding the spender back (for example with a new limit) revives none of
+/// them. Their open intents do become payable again if they are added
+/// back; the wallet cancels any it does not want with `cancel_by_wallet`.
 public fun remove_spender(policy: &mut SpendPolicy, spender: address, ctx: &TxContext) {
     assert_wallet(policy, ctx);
     assert!(policy.spenders.contains(spender), E_NOT_A_SPENDER);
     policy.spenders.remove(spender);
     policy.spender_count = policy.spender_count - 1;
+    retire_approvals(policy);
     changed(policy, b"remove_spender");
 }
 
@@ -279,12 +296,15 @@ public fun verify_recipient(
     changed(policy, b"verify_recipient");
 }
 
+/// Removing a recipient stops its open intents at once, and retires every
+/// approval given so far.
 public fun remove_recipient(policy: &mut SpendPolicy, domain: u32, addr: address, ctx: &TxContext) {
     assert_wallet(policy, ctx);
     let key = Destination { domain, addr };
     assert!(policy.recipients.contains(key), E_NOT_VERIFIED);
     policy.recipients.remove(key);
     policy.recipient_count = policy.recipient_count - 1;
+    retire_approvals(policy);
     changed(policy, b"remove_recipient");
 }
 
@@ -307,11 +327,14 @@ public fun verify_beneficiary(
     changed(policy, b"verify_beneficiary");
 }
 
+/// Removing a beneficiary stops its open bank payouts at once, and retires
+/// every approval given so far.
 public fun remove_beneficiary(policy: &mut SpendPolicy, commitment: vector<u8>, ctx: &TxContext) {
     assert_wallet(policy, ctx);
     assert!(policy.beneficiaries.contains(commitment), E_NOT_VERIFIED);
     policy.beneficiaries.remove(commitment);
     policy.beneficiary_count = policy.beneficiary_count - 1;
+    retire_approvals(policy);
     changed(policy, b"remove_beneficiary");
 }
 
@@ -370,6 +393,9 @@ public fun recipient_count(policy: &SpendPolicy): u64 { policy.recipient_count }
 public fun beneficiary_count(policy: &SpendPolicy): u64 { policy.beneficiary_count }
 public fun per_payment_max(policy: &SpendPolicy): u64 { policy.per_payment_max }
 public fun second_approval_threshold(policy: &SpendPolicy): u64 { policy.second_approval_threshold }
+/// How many removals this policy has seen. An approval is valid only under
+/// the generation it was given in.
+public fun generation(policy: &SpendPolicy): u64 { policy.generation }
 public fun default_second_approval_threshold(): u64 { DEFAULT_SECOND_APPROVAL_THRESHOLD }
 public fun max_spenders(): u64 { MAX_SPENDERS }
 public fun role_staff(): u8 { ROLE_STAFF }

@@ -502,7 +502,7 @@ const ABORT_CODES: Record<number, string> = {
   1017: 'E_WRONG_ASSET — the coin is not the asset this spending rule pays in (USDC).',
   1019: 'E_NOT_THE_MAKER — the business wallet hands only a payment it opened itself to the scheduled-payment operator. For a staff member payment, an owner approves it with the operator as payer.',
   1020: 'E_NOT_AN_EXECUTOR — execution can be handed only to the scheduled-payment operator on the rule.',
-  1021: 'E_STALE_APPROVAL — the account authority changed (a freeze, a membership or wallet change) after this approval was given. Approve again.',
+  1021: 'E_STALE_APPROVAL — the account authority changed (a freeze, a membership or wallet change), or the spending rule removed a spender, recipient or beneficiary, after this approval was given. Approve again.',
   1022: 'E_WRONG_PAY_PATH — a cross-chain payment is not paid, approved or delegated under a spending rule. The owners pay it from the business wallet.',
   1023: 'E_ALLOWANCE_NOT_FOR_POLICY — this allowance was not issued for this spending rule. Its name must be the rule allowance_name (splash-policy: and the rule id); an allowance from an earlier wallet never pays under a later rule.',
   1024: 'E_ONLY_THE_WALLET_DELEGATES — only the business wallet can hand a payment to the scheduled-payment operator. A staff member cannot; an owner approves the payment with the operator as payer instead.',
