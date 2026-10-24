@@ -110,10 +110,12 @@ fun create_as(
 ): ID {
     s.next_tx(sender);
     let mut registry = s.take_shared<PolicyRegistry>();
+    let config = s.take_shared<ComplianceConfig>();
     let account = s.take_shared<BusinessAccount>();
     let id = spend_policy::create_policy<USDC>(
         &mut registry,
         &account,
+        &config,
         keys,
         weights,
         threshold,
@@ -121,6 +123,7 @@ fun create_as(
         s.ctx(),
     );
     ts::return_shared(account);
+    ts::return_shared(config);
     ts::return_shared(registry);
     id
 }
@@ -136,10 +139,12 @@ fun create_for(
 ): ID {
     s.next_tx(sender);
     let mut registry = s.take_shared<PolicyRegistry>();
+    let config = s.take_shared<ComplianceConfig>();
     let account = s.take_shared_by_id<BusinessAccount>(account_id);
     let id = spend_policy::create_policy<USDC>(
         &mut registry,
         &account,
+        &config,
         keys,
         weights,
         threshold,
@@ -147,6 +152,7 @@ fun create_for(
         s.ctx(),
     );
     ts::return_shared(account);
+    ts::return_shared(config);
     ts::return_shared(registry);
     id
 }
@@ -221,16 +227,22 @@ fun add_second_business(s: &mut Scenario): (ID, ID, address) {
 /// Put `splash_spend`'s settlement witness on the settlement-app registry
 /// through the 24-hour path, signed by a 3-of-3 governance multisig.
 fun register_settle_witness(s: &mut Scenario) {
+    register<SettleWitness>(s, compliance_config::registry_settlement_app());
+}
+
+/// Put `X` on `registry` through the 24-hour path, signed by a 3-of-3
+/// governance multisig.
+fun register<X>(s: &mut Scenario, registry: u8) {
     let gov = multisig::derive_address(&h::keys(), &h::weights(), 3);
     s.next_tx(gov);
     {
         let mut config = s.take_shared<ComplianceConfig>();
         let c = s.take_shared<Clock>();
         let admin = business_account::admin_cap_for_testing(s.ctx());
-        compliance_config::propose_addition<SettleWitness>(
+        compliance_config::propose_addition<X>(
             &admin,
             &mut config,
-            compliance_config::registry_settlement_app(),
+            registry,
             h::keys(),
             h::weights(),
             3,
@@ -247,10 +259,10 @@ fun register_settle_witness(s: &mut Scenario) {
         c.increment_for_testing(h::day());
         let mut config = s.take_shared<ComplianceConfig>();
         let admin = business_account::admin_cap_for_testing(s.ctx());
-        compliance_config::activate_addition<SettleWitness>(
+        compliance_config::activate_addition<X>(
             &admin,
             &mut config,
-            compliance_config::registry_settlement_app(),
+            registry,
             h::keys(),
             h::weights(),
             3,
@@ -420,11 +432,13 @@ fun create_policy_records_wallet_generation_asset_and_owners() {
     s.next_tx(h::wallet());
     let id = {
         let mut registry = s.take_shared<PolicyRegistry>();
+        let config = s.take_shared<ComplianceConfig>();
         let account = s.take_shared<BusinessAccount>();
         let before = event::events_by_type<PolicyCreated>().length();
         let id = spend_policy::create_policy<USDC>(
             &mut registry,
             &account,
+            &config,
             h::keys(),
             h::weights(),
             h::threshold(),
@@ -433,6 +447,7 @@ fun create_policy_records_wallet_generation_asset_and_owners() {
         );
         assert_eq!(event::events_by_type<PolicyCreated>().length(), before + 1);
         ts::return_shared(account);
+        ts::return_shared(config);
         ts::return_shared(registry);
         id
     };
@@ -624,15 +639,19 @@ fun second_policy_for_the_same_generation_aborts() {
 #[test]
 #[expected_failure(abort_code = sui::derived_object::EObjectAlreadyExists)]
 /// Changing the asset or the limits does not make a second policy a different
-/// one: the slot is the (account, generation), whatever the policy says.
+/// one: the slot is the (account, generation), whatever the policy says. USDT
+/// is made an accepted asset first, so the slot is what refuses it.
 fun second_policy_in_another_asset_for_the_same_generation_aborts() {
     let (mut s, _) = begin_with_policy();
+    register<USDT>(&mut s, compliance_config::registry_asset());
     s.next_tx(h::wallet());
     let mut registry = s.take_shared<PolicyRegistry>();
+    let config = s.take_shared<ComplianceConfig>();
     let account = s.take_shared<BusinessAccount>();
     spend_policy::create_policy<USDT>(
         &mut registry,
         &account,
+        &config,
         h::keys(),
         h::weights(),
         h::threshold(),
@@ -640,12 +659,13 @@ fun second_policy_in_another_asset_for_the_same_generation_aborts() {
         s.ctx(),
     );
     ts::return_shared(account);
+    ts::return_shared(config);
     ts::return_shared(registry);
     s.end();
 }
 
 #[test]
-#[expected_failure(abort_code = 1063, location = spend_policy)]
+#[expected_failure(abort_code = spend_policy::E_ASSET_NOT_ACCEPTED)]
 /// Review A4: the asset is fixed at creation, and the (account, generation)
 /// slot is single-use. A policy in a coin type the compliance config does
 /// not accept would make spending rules impossible for the whole wallet
@@ -654,10 +674,12 @@ fun a_policy_in_an_asset_the_config_does_not_accept_cannot_be_created() {
     let mut s = begin();
     s.next_tx(h::wallet());
     let mut registry = s.take_shared<PolicyRegistry>();
+    let config = s.take_shared<ComplianceConfig>();
     let account = s.take_shared<BusinessAccount>();
     spend_policy::create_policy<USDT>(
         &mut registry,
         &account,
+        &config,
         h::keys(),
         h::weights(),
         h::threshold(),
@@ -665,6 +687,7 @@ fun a_policy_in_an_asset_the_config_does_not_accept_cannot_be_created() {
         s.ctx(),
     );
     ts::return_shared(account);
+    ts::return_shared(config);
     ts::return_shared(registry);
     s.end();
 }

@@ -522,6 +522,7 @@ const ABORT_CODES: Record<number, string> = {
   1060: 'E_UNKNOWN_ROLE — a spender role is 1 (staff) or 2 (scheduled-payment operator).',
   1061: 'E_NOT_ON_SUI — a spending rule pays only on Sui (CCTP domain 8). A recipient on another chain is paid from the business wallet, not verified on the rule.',
   1062: 'E_BAD_KIND — a recipient on a spending rule is verified as 2 (a business on Splash) or 3 (a wallet or exchange address). A bank payout partner is bound to its beneficiary with verify_beneficiary.',
+  1063: 'E_ASSET_NOT_ACCEPTED — a spending rule can be made only in an asset the compliance config accepts (USDC). Nothing was created, so the wallet can make its rule in USDC.',
 
   // ── upgrade_delay (splash_upgrade_delay, the 24-hour upgrade notice) ─────
   1100: 'E_BAD_DIGEST — upgrade_delay::propose was given a digest that is not 32 bytes. Pass the digest the build prints for the new bytecode.',

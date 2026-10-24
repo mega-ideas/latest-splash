@@ -192,12 +192,14 @@ fun setup_with(accept_other: bool): (Scenario, Fx) {
     let policy_id;
     {
         let mut registry = s.take_shared<PolicyRegistry>();
+        let config = s.take_shared<ComplianceConfig>();
         let account = s.take_shared<BusinessAccount>();
         account_id = object::id(&account);
         policy_id =
             spend_policy::create_policy<USDC>(
                 &mut registry,
                 &account,
+                &config,
                 h::keys(),
                 h::weights(),
                 h::threshold(),
@@ -206,6 +208,7 @@ fun setup_with(accept_other: bool): (Scenario, Fx) {
             );
         balance::create_for_testing<USDC>(FUNDS).send_funds(h::wallet());
         ts::return_shared(account);
+        ts::return_shared(config);
         ts::return_shared(registry);
     };
 
@@ -571,11 +574,13 @@ fun second_business(s: &mut Scenario): (ID, ID) {
     let policy2;
     {
         let mut registry = s.take_shared<PolicyRegistry>();
+        let config = s.take_shared<ComplianceConfig>();
         let account = s.take_shared_by_id<BusinessAccount>(account2);
         policy2 =
             spend_policy::create_policy<USDC>(
                 &mut registry,
                 &account,
+                &config,
                 h::keys(),
                 h::weights(),
                 h::threshold(),
@@ -583,6 +588,7 @@ fun second_business(s: &mut Scenario): (ID, ID) {
                 s.ctx(),
             );
         ts::return_shared(account);
+        ts::return_shared(config);
         ts::return_shared(registry);
     };
     s.next_tx(h::wallet());
@@ -2358,11 +2364,13 @@ fun a_new_policy_for_the_new_generation_pays() {
     let policy3;
     {
         let mut registry = s.take_shared<PolicyRegistry>();
+        let config = s.take_shared<ComplianceConfig>();
         let account = s.take_shared_by_id<BusinessAccount>(fx.account);
         policy3 =
             spend_policy::create_policy<USDC>(
                 &mut registry,
                 &account,
+                &config,
                 h::keys(),
                 h::weights(),
                 h::threshold(),
@@ -2370,6 +2378,7 @@ fun a_new_policy_for_the_new_generation_pays() {
                 s.ctx(),
             );
         ts::return_shared(account);
+        ts::return_shared(config);
         ts::return_shared(registry);
     };
     s.next_tx(h::wallet());
@@ -2630,10 +2639,12 @@ fun an_old_generations_allowance_does_not_pay_under_a_new_policy() {
     let policy3;
     {
         let mut registry = s.take_shared<PolicyRegistry>();
+        let config = s.take_shared<ComplianceConfig>();
         let account = s.take_shared_by_id<BusinessAccount>(fx.account);
         policy3 =
-            spend_policy::create_policy<USDC>(&mut registry, &account, h::keys(), h::weights(), h::threshold(), POLICY_MAX, s.ctx());
+            spend_policy::create_policy<USDC>(&mut registry, &account, &config, h::keys(), h::weights(), h::threshold(), POLICY_MAX, s.ctx());
         ts::return_shared(account);
+        ts::return_shared(config);
         ts::return_shared(registry);
     };
     s.next_tx(h::wallet());

@@ -23,7 +23,7 @@
 module splash_spend::spend_policy;
 
 use splash_core::business_account::{Self, BusinessAccount};
-use splash_core::compliance_config;
+use splash_core::compliance_config::{Self, ComplianceConfig};
 use splash_core::multisig;
 use splash_core::payment_intent;
 use std::string::String;
@@ -56,6 +56,9 @@ const E_NOT_ON_SUI: u64 = 1061;
 /// A recipient is verified as a Splash business (kind 2) or a wallet
 /// (kind 3). Bank payouts (kind 1) go through `verify_beneficiary`.
 const E_BAD_KIND: u64 = 1062;
+/// The compliance config does not accept `T` as a settlement asset. A policy
+/// in it could never pay, and its wallet generation's one slot would be gone.
+const E_ASSET_NOT_ACCEPTED: u64 = 1063;
 
 // ─── Constants ─────────────────────────────────────────────────────────────
 /// Staff open intents and pay them.
@@ -161,10 +164,13 @@ fun init(ctx: &mut TxContext) {
 ///
 /// The keys, weights and threshold must derive the sender, exactly as
 /// `register_wallet` checked, and the sender must be the account's registered
-/// wallet. The owners are derived from the same keys.
+/// wallet. The owners are derived from the same keys. `T` must be an asset
+/// the compliance config accepts (there is one config), checked before the
+/// generation's one slot is claimed.
 public fun create_policy<T>(
     registry: &mut PolicyRegistry,
     account: &BusinessAccount,
+    config: &ComplianceConfig,
     keys: vector<vector<u8>>,
     weights: vector<u8>,
     threshold: u16,
@@ -176,6 +182,8 @@ public fun create_policy<T>(
     assert!(business_account::has_wallet(account), E_WALLET_MISMATCH);
     assert!(business_account::wallet(account) == sender, E_WALLET_MISMATCH);
     assert!(per_payment_max > 0, E_BAD_LIMIT);
+    let asset = compliance_config::type_string<T>();
+    assert!(compliance_config::is_asset_accepted(config, &asset), E_ASSET_NOT_ACCEPTED);
 
     let owners = multisig::signer_addresses(&keys);
     let owner_count = owners.length();
@@ -187,7 +195,7 @@ public fun create_policy<T>(
         account: account_id,
         wallet: sender,
         wallet_epoch,
-        asset: compliance_config::type_string<T>(),
+        asset,
         owners,
         spenders: table::new(ctx),
         spender_count: 0,
