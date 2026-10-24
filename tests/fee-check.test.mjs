@@ -332,7 +332,7 @@ test('(d) a discount written anywhere but set_discount is caught', () => {
 
 test('(d) an apply that does not wait for the eta is caught', () => {
   withRoot(
-    { edits: { [FEE_CONFIG]: replace('    assert!(clock.timestamp_ms() >= slot.borrow().eta_ms, E_FEE_PROPOSAL_NOT_READY);\n', '') } },
+    { edits: { [FEE_CONFIG]: replace('    assert!(now >= slot.borrow().eta_ms, E_FEE_PROPOSAL_NOT_READY);\n', '') } },
     (root) => caught(checkFeeConfigSetters(root), /`apply_schedule` does not assert E_FEE_PROPOSAL_NOT_READY/),
   );
 });
