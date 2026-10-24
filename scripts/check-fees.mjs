@@ -75,10 +75,13 @@
  *          assignment (`.f = `, `.f[i] = `), a `&mut` borrow of the field, or
  *          a method call on it other than a read (borrow, contains, length,
  *          is_some, is_none, is_empty).
- *       3. Each apply_* asserts E_FEE_PROPOSAL_NOT_READY against `eta_ms`
+ *       3. Each apply_* asserts E_FEE_PROPOSAL_NOT_READY against `eta_ms`,
+ *          and E_FEE_PROPOSAL_LAPSED against `eta_ms + FEE_APPLY_WINDOW_MS`,
  *          before it writes the in-force field; each propose_* sets its eta
- *          as `+ FEE_NOTICE_MS`; FEE_NOTICE_MS is at least 24 hours; nothing
- *          assigns an `eta_ms`.
+ *          as `+ FEE_NOTICE_MS`; FEE_NOTICE_MS is at least 24 hours;
+ *          FEE_APPLY_WINDOW_MS is more than 0 and at most seven days, so a
+ *          proposal lapses rather than waits to be cashed in months later;
+ *          nothing assigns an `eta_ms`.
  *       4. No second way to a config: a FeeConfig is packed only in `new`,
  *          and `new` is called only by `init`. A payer could otherwise hand a
  *          settle path a config of its own.
@@ -344,6 +347,8 @@ export function checkFeeRates(root, pending = PENDING_2_8) {
 
 const FEE_MODULE = 'fee_config';
 const NOTICE_MIN_MS = 86_400_000n;
+/** A proposal lapses at most this long after its eta (the A1 review): seven days, as the registry and upgrade paths. */
+const WINDOW_MAX_MS = 604_800_000n;
 const IN_FORCE = { schedules: 'apply_schedule', fee_recipient: 'apply_fee_recipient', discounts: 'set_discount' };
 const PENDING_FIELDS = {
   pending_schedules: ['propose_schedule', 'apply_schedule'],
@@ -455,6 +460,12 @@ export function checkFeeConfigSetters(root) {
   else if (number(notice[0][1]) < NOTICE_MIN_MS) {
     failures.push(`(d) ${where(notice[0].index)}: FEE_NOTICE_MS is ${number(notice[0][1])} ms; a schedule or recipient change needs at least 24 hours' notice (${NOTICE_MIN_MS}).`);
   }
+  // The window a proposal can be applied in, after its notice.
+  const window = [...unit.code.matchAll(/\bconst\s+FEE_APPLY_WINDOW_MS\s*:\s*\w+\s*=\s*([0-9][0-9_]*)(?:u\d+)?\s*;/g)];
+  if (window.length !== 1) failures.push(`(d) fee_config defines FEE_APPLY_WINDOW_MS ${window.length} time(s); it must define it once.`);
+  else if (number(window[0][1]) === 0n || number(window[0][1]) > WINDOW_MAX_MS) {
+    failures.push(`(d) ${where(window[0].index)}: FEE_APPLY_WINDOW_MS is ${number(window[0][1])} ms; a proposal must lapse within seven days (${WINDOW_MAX_MS}) of its eta, and a window of 0 could never apply.`);
+  }
 
   for (const [name, shape] of Object.entries(CHANGES)) {
     const fn = byName.get(name);
@@ -474,6 +485,12 @@ export function checkFeeConfigSetters(root) {
         failures.push(`(d) ${where(fn.index)}: \`${name}\` does not assert E_FEE_PROPOSAL_NOT_READY against the proposal's eta_ms. Applying early must abort.`);
       } else if (writes.length && writes[0] < gate) {
         failures.push(`(d) ${where(fn.bodyStart + writes[0])}: \`${name}\` writes ${shape.applies} before it checks the eta.`);
+      }
+      const lapse = fn.body.search(/\bE_FEE_PROPOSAL_LAPSED\b/);
+      if (lapse === -1 || !/\beta_ms\s*\+\s*FEE_APPLY_WINDOW_MS\b/.test(fn.body)) {
+        failures.push(`(d) ${where(fn.index)}: \`${name}\` does not assert E_FEE_PROPOSAL_LAPSED against the proposal's eta_ms + FEE_APPLY_WINDOW_MS. A proposal lapses seven days after its notice runs; applying it later must abort.`);
+      } else if (writes.length && writes[0] < lapse) {
+        failures.push(`(d) ${where(fn.bodyStart + writes[0])}: \`${name}\` writes ${shape.applies} before it checks the window.`);
       }
     }
   }
@@ -525,7 +542,7 @@ function main() {
   const pending = PENDING_2_8.reduce((n, p) => n + p.count, 0);
   console.log(
     `check:fees: the Move vector test is up to date; FEE_CEILING_BPS is ${A1_CEILING_BPS} in splash_core, splash_spend and lib/fees/schedule.ts; ` +
-      `no new literal fee rate in ${RATE_ROOTS.map((r) => (path.extname(r) ? r : `${r}/`)).join(', ')} (${pending} still listed for A1 §2.8); fee_config changes only through the 24-hour path, but set_discount.`,
+      `no new literal fee rate in ${RATE_ROOTS.map((r) => (path.extname(r) ? r : `${r}/`)).join(', ')} (${pending} still listed for A1 §2.8); fee_config changes only through the 24-hour path, applied within seven days, but set_discount.`,
   );
 }
 
