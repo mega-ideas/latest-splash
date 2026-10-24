@@ -1001,6 +1001,43 @@ fun a_rotation_with_a_duplicate_member_is_refused() {
     s.end();
 }
 
+/// p1()'s P-256 key as a secp256r1 member (flag 0x02).
+fun p1_as_secp256r1(): vector<u8> {
+    let mut key = p1();
+    *&mut key[0] = 0x02;
+    key
+}
+
+/// What [p1_as_secp256r1(), p1()] with weights [1, 1] and threshold 2
+/// would derive, were it accepted (tests/multisig_tests.move).
+const ONE_KEY_TWO_SCHEMES: address = @0x955480ef415314f43ab8106f22934ea6e583076385f4d871c1f8b1d1a7603fb5;
+
+#[test]
+#[expected_failure(abort_code = multisig::E_DUPLICATE_MEMBER)]
+/// The A1 review: one P-256 key listed as a secp256r1 member and as a
+/// passkey is one person counted twice. Registered as a "2-of-2" business
+/// wallet without the single-signer acknowledgment, it would be a wallet one
+/// person signs alone. Refused as a duplicate member.
+fun registering_one_p256_key_under_two_schemes_is_refused() {
+    let mut s = h::setup_without_wallet();
+    // Its secp256r1 member's own address is made an owner too, so nothing
+    // but the duplicate can refuse it.
+    add_owner(&mut s, multisig::signer_address(&p1_as_secp256r1()));
+    nominate(&mut s, h::founder(), ONE_KEY_TWO_SCHEMES, false);
+    register(&mut s, ONE_KEY_TWO_SCHEMES, vector[p1_as_secp256r1(), p1()], vector[1, 1], 2, false);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = multisig::E_DUPLICATE_MEMBER)]
+/// Nor can a wallet rotate into one.
+fun rotating_to_one_p256_key_under_two_schemes_is_refused() {
+    let mut s = h::setup();
+    add_owner(&mut s, multisig::signer_address(&p1_as_secp256r1()));
+    rotate(&mut s, h::wallet(), vector[p1_as_secp256r1(), p1()], vector[1, 1], 2, false);
+    s.end();
+}
+
 #[test]
 /// Boundary: ten members, Sui's maximum, all of them owners, rotate in.
 fun a_ten_member_wallet_of_owners_rotates_in() {

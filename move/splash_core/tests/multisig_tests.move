@@ -184,6 +184,62 @@ fun a_duplicate_member_is_refused() {
     multisig::derive_address(&vector[PASSKEY_1, PASSKEY_2, PASSKEY_1], &vector[1, 1, 1], 2);
 }
 
+// ─── One key under two schemes is one member (the A1 review) ───────────────
+//
+// A passkey's key is a P-256 key. Listed once as a raw secp256r1 member
+// (flag 0x02) and once as a passkey (0x06), it is one person counted twice:
+// whoever holds the private key can make both a raw secp256r1 signature and
+// a passkey assertion, so that "2-of-2" is one signer. Sui's protocol
+// compares whole keys, scheme included, and would accept it. The TS SDK
+// compares the raw key bytes and refuses it ("Multisig does not support
+// duplicate public keys", tests/multisig-vectors.test.mjs), and so does
+// this module.
+
+/// PASSKEY_1's P-256 key as a secp256r1 member.
+const PASSKEY_1_AS_SECP256R1: vector<u8> = x"020355969b344645e48573e045cdbf4cbb0adb4369d411962cfc8a6ae3c33b8acf16";
+/// What [PASSKEY_1_AS_SECP256R1, PASSKEY_1] with weights [1, 1] and
+/// threshold 2 would derive, were it accepted.
+const ONE_KEY_TWO_SCHEMES: address = @0x955480ef415314f43ab8106f22934ea6e583076385f4d871c1f8b1d1a7603fb5;
+
+#[test]
+#[expected_failure(abort_code = multisig::E_DUPLICATE_MEMBER)]
+fun one_p256_key_as_secp256r1_and_as_a_passkey_is_refused() {
+    multisig::derive_address(&vector[PASSKEY_1_AS_SECP256R1, PASSKEY_1], &vector[1, 1], 2);
+}
+
+#[test]
+#[expected_failure(abort_code = multisig::E_DUPLICATE_MEMBER)]
+/// In either order, with another member between them.
+fun one_p256_key_under_two_schemes_is_refused_in_any_position() {
+    multisig::derive_address(&vector[PASSKEY_1, PASSKEY_2, PASSKEY_1_AS_SECP256R1], &vector[1, 1, 1], 2);
+}
+
+#[test]
+#[expected_failure(abort_code = multisig::E_DUPLICATE_MEMBER)]
+/// Any two members with the same raw key bytes are one member, whatever
+/// their flags, as the SDK has it: here the same 33 bytes as secp256k1.
+fun the_same_raw_key_bytes_under_any_two_schemes_are_refused() {
+    let mut as_k1 = PASSKEY_1;
+    *&mut as_k1[0] = 0x01;
+    multisig::derive_address(&vector[as_k1, PASSKEY_1], &vector[1, 1], 2);
+}
+
+#[test]
+#[expected_failure(abort_code = multisig::E_DUPLICATE_MEMBER)]
+/// The governance check refuses it, sent from the address it would derive:
+/// otherwise one person would pass as a quorum.
+fun the_quorum_check_refuses_one_p256_key_under_two_schemes() {
+    let ctx = tx_context::new_from_hint(ONE_KEY_TWO_SCHEMES, 0, 0, 0, 0);
+    multisig::assert_quorum_sender(&vector[PASSKEY_1_AS_SECP256R1, PASSKEY_1], &vector[1, 1], 2, &ctx);
+}
+
+#[test]
+/// Two different P-256 keys, one under each scheme, are two members.
+fun two_p256_keys_one_secp256r1_and_one_passkey_are_two_members() {
+    let keys = vector[SECP256R1, PASSKEY_1];
+    assert!(multisig::derive_address(&keys, &vector[1, 1], 2) != ONE_KEY_TWO_SCHEMES);
+}
+
 #[test]
 #[expected_failure(abort_code = multisig::E_UNKNOWN_SCHEME)]
 fun a_multisig_member_flag_is_refused() {

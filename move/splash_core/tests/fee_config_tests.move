@@ -682,6 +682,17 @@ fun a_duplicate_member_cannot_be_the_fee_recipient() {
 }
 
 #[test]
+#[expected_failure(abort_code = multisig::E_DUPLICATE_MEMBER)]
+/// The A1 review: one P-256 key listed as a secp256r1 member (0x02) and as
+/// a passkey (0x06) is one person counted twice, so this "2-of-2" would let
+/// its one holder move the fees alone. Refused as a duplicate member.
+fun one_p256_key_under_two_schemes_cannot_be_the_fee_recipient() {
+    let mut as_secp256r1 = PASSKEY_1;
+    *&mut as_secp256r1[0] = 0x02;
+    try_propose_recipient(vector[as_secp256r1, PASSKEY_1], vector[1, 1], 2);
+}
+
+#[test]
 /// The cap moves to the governance multisig like any object with `store`,
 /// and works there.
 fun the_cap_works_from_the_governance_multisig() {
