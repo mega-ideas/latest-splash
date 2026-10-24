@@ -17,7 +17,8 @@ import { MoneyError, formatMinor, parseMinor } from '@/lib/money';
  * Splash's fee with its kind and tier, the payout partner's fee with its
  * source, the total debited. It is computed from `schedule`, which the page
  * reads from the FeeConfig in force and hands down as data, so no rate is
- * typed in here. Beside it, a bank wire from a named, dated dataset: a
+ * typed in here; while that FeeConfig's fees are off (`feesOn` false) the
+ * breakdown shows no Splash fee and says it is not charged yet. Beside it, a bank wire from a named, dated dataset: a
  * category, never a competitor. No exchange rate is assumed, so no peso
  * figure is shown: the rate is quoted when the customer sends. All
  * arithmetic is bigint minor units through lib/money.ts.
@@ -32,7 +33,7 @@ function usd(minor: bigint): string {
   return `US$${Number(whole).toLocaleString('en-US')}.${fraction}`;
 }
 
-export default function FeeCalculator({ schedule = LAUNCH_WIRE }: { schedule?: FeeScheduleWire }) {
+export default function FeeCalculator({ schedule = LAUNCH_WIRE, feesOn = true }: { schedule?: FeeScheduleWire; feesOn?: boolean }) {
   const [amount, setAmount] = useState<string>('1000');
   const fees = useMemo(() => scheduleFromWire(schedule), [schedule]);
 
@@ -49,7 +50,7 @@ export default function FeeCalculator({ schedule = LAUNCH_WIRE }: { schedule?: F
     }
   }, [amount]);
 
-  const estimate = parsed.minor ? estimatePayment({ amountUsdMinor: parsed.minor, baseline: BASELINE, fxRate: null, schedule: fees }) : null;
+  const estimate = parsed.minor ? estimatePayment({ amountUsdMinor: parsed.minor, baseline: BASELINE, fxRate: null, schedule: fees, feesOn }) : null;
 
   return (
     <div className="ld-calc">

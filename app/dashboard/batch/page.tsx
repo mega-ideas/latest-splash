@@ -244,8 +244,9 @@ export default function BatchPage() {
   const total = useMemo(() => rows.reduce((sum, row) => sum + (Number.parseFloat(row.amount) || 0), 0), [rows]);
   const acceptedTotal = useMemo(() => acceptedRows.reduce((sum, row) => sum + (Number.parseFloat(row.amount) || 0), 0), [acceptedRows]);
   // Splash's fee on each cleared row, a payout to a bank each, from the
-  // schedule in force (A1 §2.2): no flat rate and no fixed fee. Null until the
-  // schedule has loaded. Payout-partner fees are quoted with the batch.
+  // schedule in force (A1 §2.2): no flat rate and no fixed fee, and 0 while
+  // FeeConfig's fees are off. Null until the schedule has loaded.
+  // Payout-partner fees are quoted with the batch.
   const published = usePublishedFees();
   const splashFeesMinor = useMemo(() => {
     if (!published) return null;
@@ -254,7 +255,7 @@ export default function BatchPage() {
       try {
         const cents = parseMinor(String(row.amount ?? '0').replace(/[,\s]/g, ''), 2, 'half-up');
         if (cents <= 0n) continue;
-        sum += buildFeeQuote({ kind: FEE_KIND.BANK_PAYOUT, principalMinor: cents * 10_000n, state: { feesOn: true, schedule: published.schedule } }).splashFee.minor;
+        sum += buildFeeQuote({ kind: FEE_KIND.BANK_PAYOUT, principalMinor: cents * 10_000n, state: { feesOn: published.feesOn, schedule: published.schedule } }).splashFee.minor;
       } catch (error) {
         if (!(error instanceof MoneyError)) throw error;
       }
@@ -506,7 +507,7 @@ ${sampleCsvRows.map((row) => `${row.name},${row.address},${row.country},${row.pu
                 <div className="mt-4 space-y-3 text-sm">
                   <Row label="Uploaded total" value={`$${total.toFixed(2)}`} />
                   <Row label="Cleared total" value={`$${acceptedTotal.toFixed(2)}`} />
-                  <Row label="Splash fees (schedule)" value={splashFeesMinor === null ? '—' : `${formatUsdc(splashFeesMinor)} USDC`} />
+                  <Row label="Splash fees (schedule)" value={splashFeesMinor === null ? '—' : published && !published.feesOn ? 'None charged yet' : `${formatUsdc(splashFeesMinor)} USDC`} />
                   <Row label="Rows excluded" value={`${reviewRows.length + blockedRows.length}`} />
                   <Row label="Minimum batch total" value={formatUsd(minSettlementUsd())} />
                 </div>

@@ -62,9 +62,10 @@ export default async function Home() {
   const isPhone = isPhoneUserAgent(headerStore.get("user-agent"));
   // Splash's prices, in words, from the fee schedule in force: the live
   // FeeConfig when it can be read, the launch schedule when it cannot
-  // (lib/fees/fee-config.ts). Never typed into the page.
-  const { schedule } = await publishedFeeSchedule();
-  const pricing = pricingSummary(schedule);
+  // (lib/fees/fee-config.ts). Never typed into the page. While the
+  // FeeConfig's fees are off, the page says no Splash fee is charged yet.
+  const { schedule, feesOn } = await publishedFeeSchedule();
+  const pricing = pricingSummary(schedule, { feesOn });
 
   return (
     <>
@@ -74,7 +75,7 @@ export default async function Home() {
       />
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd(landingFaq(schedule))).replace(/</g, "\\u003c") }}
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd(landingFaq(schedule, { feesOn }))).replace(/</g, "\\u003c") }}
       />
       <IsometricLanding isPhone={isPhone} pricing={pricing} />
     </>

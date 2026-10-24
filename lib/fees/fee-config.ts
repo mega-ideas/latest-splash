@@ -395,13 +395,13 @@ function configuredCache(): FeeConfigCache {
 /** The live FeeConfig named by SPLASH_FEE_CONFIG_ID. Throws FeeConfigUnavailableError. */
 export function getFeeConfig(): Promise<FeeConfigState> {
   return configuredCache().get().then((cfg) => {
-    lastReadSchedule = cfg.schedule;
+    lastRead = { schedule: cfg.schedule, feesOn: cfg.feesOn };
     return cfg;
   });
 }
 
-/** The schedule of the last FeeConfig this process read, for copy that cannot wait for a read. */
-let lastReadSchedule: FeeSchedule | null = null;
+/** The schedule, and whether the fees were on, in the last FeeConfig this process read. */
+let lastRead: { schedule: FeeSchedule; feesOn: boolean } | null = null;
 
 /**
  * The schedule copy renders from when it cannot await a read (Zeke's canned
@@ -409,7 +409,16 @@ let lastReadSchedule: FeeSchedule | null = null;
  * schedule. A quote never uses it.
  */
 export function lastPublishedFeeSchedule(): FeeSchedule {
-  return lastReadSchedule ?? LAUNCH_SCHEDULE;
+  return lastRead?.schedule ?? LAUNCH_SCHEDULE;
+}
+
+/**
+ * The schedule and whether the fees are on, for copy that cannot await a
+ * read: the last live FeeConfig this process read, else the launch schedule
+ * read as on, as `publishedFeeSchedule` reads it when it has no config.
+ */
+export function lastPublishedFees(): { schedule: FeeSchedule; feesOn: boolean } {
+  return lastRead ?? { schedule: LAUNCH_SCHEDULE, feesOn: true };
 }
 
 /** For the event listener: pass every event type seen; a FeeScheduleApplied
@@ -496,17 +505,24 @@ export async function quoteDiscountBps(
 }
 
 /**
- * The schedule Splash's pricing copy renders from: the live FeeConfig's when
- * it is configured and can be read, else the launch schedule (the FeeConfig
- * default at publish). Never throws: a pricing line is not a payment, and the
- * quote, which is, fails closed on its own.
+ * The schedule Splash's pricing copy renders from, and whether its fees are
+ * on: the live FeeConfig's when it is configured and can be read, else the
+ * launch schedule (the FeeConfig default at publish). Never throws: a pricing
+ * line is not a payment, and the quote, which is, fails closed on its own.
+ *
+ * `feesOn` is the FeeConfig's (false until a fee recipient is applied), so a
+ * surface can say no Splash fee is charged yet. With no config to read it is
+ * true: off mainnet that is what a quote charges (`quoteFeeState`), and a
+ * price list that cannot be checked shows the price rather than "free".
  */
-export async function publishedFeeSchedule(env: NodeJS.ProcessEnv = process.env): Promise<{ schedule: FeeSchedule; source: FeeScheduleSource }> {
-  if (!feeConfigIdFromEnv(env).ok) return { schedule: LAUNCH_SCHEDULE, source: 'launch-schedule' };
+export async function publishedFeeSchedule(
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<{ schedule: FeeSchedule; source: FeeScheduleSource; feesOn: boolean }> {
+  if (!feeConfigIdFromEnv(env).ok) return { schedule: LAUNCH_SCHEDULE, source: 'launch-schedule', feesOn: true };
   try {
     const cfg = await getFeeConfig();
-    return { schedule: cfg.schedule, source: 'fee-config' };
+    return { schedule: cfg.schedule, source: 'fee-config', feesOn: cfg.feesOn };
   } catch {
-    return { schedule: LAUNCH_SCHEDULE, source: 'launch-schedule' };
+    return { schedule: LAUNCH_SCHEDULE, source: 'launch-schedule', feesOn: true };
   }
 }

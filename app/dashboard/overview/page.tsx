@@ -472,7 +472,7 @@ export default function DashboardOverview() {
                       </td>
                       <td className="money hidden px-4 py-2.5 font-medium text-[#326273]/90 sm:table-cell">{c.volume}</td>
                       <td className="hidden px-4 py-2.5 text-right md:table-cell">
-                        <span className="money rounded-full bg-[var(--ok-bg)] px-2 py-0.5 text-[13px] font-medium text-[#1F4452]">{pricing ? pricing.bankRange : '—'}</span>
+                        <span className="money rounded-full bg-[var(--ok-bg)] px-2 py-0.5 text-[13px] font-medium text-[#1F4452]">{pricing ? pricing.bankFee : '—'}</span>
                       </td>
                       <td className="px-4 py-2.5 text-right">
                         <span

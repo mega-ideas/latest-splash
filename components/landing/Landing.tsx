@@ -4,7 +4,7 @@ import Link from 'next/link';
 import FeeCalculator from '@/components/landing/FeeCalculator';
 import { BRAND } from '@/content/brand';
 import { publishedNumbers } from '@/content/sea-numbers';
-import { pricingParts, scheduleToWire } from '@/lib/fees/copy';
+import { FEES_OFF_NOTICE, pricingParts, scheduleToWire } from '@/lib/fees/copy';
 import { publishedFeeSchedule } from '@/lib/fees/fee-config';
 
 /**
@@ -23,7 +23,7 @@ import { landingFaq } from '@/content/landing-faq';
 export { LANDING_FAQ, landingFaq } from '@/content/landing-faq';
 
 export default async function Landing() {
-  const { schedule } = await publishedFeeSchedule();
+  const { schedule, feesOn } = await publishedFeeSchedule();
   const year = new Date().getFullYear();
   const numbers = publishedNumbers();
   const preview = process.env.NODE_ENV !== 'production';
@@ -146,7 +146,7 @@ export default async function Landing() {
               Splash prices one leg: US dollars to Philippine pesos. If you hold ringgit or another currency,
               you convert it to dollars at your own bank first, and that leg is not in these figures.
             </p>
-            <FeeCalculator schedule={scheduleToWire(schedule)} />
+            <FeeCalculator schedule={scheduleToWire(schedule)} feesOn={feesOn} />
           </div>
         </section>
 
@@ -201,6 +201,7 @@ export default async function Landing() {
           <div className="ld-shell">
             <h2 id="pricing-title">Priced by where the payment goes</h2>
             <div className="ld-price">
+              {feesOn ? null : <p>{FEES_OFF_NOTICE} Then:</p>}
               <ul>
                 {prices.map((part) => (
                   <li key={part}>{part}</li>
@@ -224,7 +225,7 @@ export default async function Landing() {
           <div className="ld-shell">
             <h2 id="faq-title">Asked before signing up</h2>
             <div className="ld-faq">
-              {landingFaq(schedule).map((item) => (
+              {landingFaq(schedule, { feesOn }).map((item) => (
                 <details key={item.q}>
                   <summary>{item.q}</summary>
                   <p>{item.a}</p>

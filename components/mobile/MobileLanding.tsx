@@ -33,7 +33,7 @@ const marqueeFor = (pricing: PricingSummary) => [
   ['1 live testnet', 'MY to PH corridor'],
   ['~400ms', 'Sui settlement finality'],
   [pricing.business, 'between Splash businesses'],
-  [pricing.bankRange, 'Splash fee to a bank'],
+  [pricing.bankFee, 'Splash fee to a bank'],
   ['Human approved', 'AI recommendations'],
   ['Stored proof', 'A record that lasts'],
 ];
@@ -50,7 +50,7 @@ const compareRowsFor = (pricing: PricingSummary) => [
   { label: 'Settlement speed', bank: '2–5 days', splash: '~400ms finality' },
   // A bank's own wire fee varies by bank and is not sourced here, so the row
   // compares what Splash charges with nothing invented beside it.
-  { label: 'Splash fee to a bank', bank: 'Varies by bank', splash: pricing.bank },
+  { label: 'Splash fee to a bank', bank: 'Varies by bank', splash: pricing.feesOn ? pricing.bank : pricing.bankFeePhrase },
   { label: 'Audit trail', bank: 'Siloed records', splash: 'One record, both sides' },
 ];
 

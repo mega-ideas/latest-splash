@@ -49,8 +49,9 @@ const telemetryFor = (pricing: PricingSummary) => [
     className: 'cin-callout-b',
     enter: 0.31,
     tag: 'Splash fee · To a bank',
-    value: pricing.bankRange,
-    meta: `${pricing.parts[0]}. Partner fees are shown before you approve.`,
+    // "None yet" and why, while FeeConfig's fees are off.
+    value: pricing.bankFee,
+    meta: pricing.notice ?? `${pricing.parts[0]}. Partner fees are shown before you approve.`,
   },
   {
     id: 'treasury',

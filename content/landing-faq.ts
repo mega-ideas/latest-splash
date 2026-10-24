@@ -4,9 +4,11 @@ import { LAUNCH_SCHEDULE, type FeeSchedule } from '../lib/fees/schedule.ts';
 /**
  * The questions, shared with the FAQ JSON-LD in app/page.tsx so both say the
  * same thing. The cost answer is Splash's pricing line, rendered from
- * `schedule` (A1 §2.7): the page passes the schedule in force.
+ * `schedule` (A1 §2.7): the page passes the schedule in force, and whether
+ * its fees are on; while they are off the answer says no Splash fee is
+ * charged yet.
  */
-export function landingFaq(schedule: FeeSchedule): Array<{ q: string; a: string }> {
+export function landingFaq(schedule: FeeSchedule, { feesOn = true }: { feesOn?: boolean } = {}): Array<{ q: string; a: string }> {
   return [
     {
       q: 'Does Splash hold a money-services licence?',
@@ -14,7 +16,7 @@ export function landingFaq(schedule: FeeSchedule): Array<{ q: string; a: string 
     },
     {
       q: 'What does a payment cost?',
-      a: `Splash's fee depends on where the payment goes. ${pricingLine(schedule)} The exchange rate is quoted when you send and written on the record.`,
+      a: `Splash's fee depends on where the payment goes. ${pricingLine(schedule, { feesOn })} The exchange rate is quoted when you send and written on the record.`,
     },
     {
       q: 'How long does it take?',

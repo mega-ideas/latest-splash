@@ -26,7 +26,7 @@ import {
 } from './assistant-name.ts';
 import { estimateNettingSavedUsd, getUsdCorridorByCurrency } from '../fx/corridors.ts';
 import { formatRate, pricingLine } from '../fees/copy.ts';
-import { lastPublishedFeeSchedule, quoteFeeState } from '../fees/fee-config.ts';
+import { lastPublishedFees, quoteFeeState } from '../fees/fee-config.ts';
 import { buildFeeQuote } from '../fees/quote.ts';
 import { FEE_CEILING_BPS, FEE_KIND } from '../fees/schedule.ts';
 import { getUsdyNetApyPct } from '../server/usdy.ts';
@@ -1869,7 +1869,8 @@ const SPLASH_ANSWERS: Array<{ test: RegExp; reply: string | (() => string); skip
     test: /\b(fee|fees|pricing|price|cost|charge|commission|how much (do|does|will) (it|you|this) cost)\b/,
     skipIf: /\b(gas|sponsor|network fee|hold sui|fund (a|my)? ?wallet|top ?up)\b/, // gas/sponsorship gets the dedicated answer below
     // Rendered from the fee schedule, never typed in (A1 §2.7).
-    reply: () => `Splash's fee depends on where the payment goes. ${pricingLine(lastPublishedFeeSchedule())} `
+    // While FeeConfig's fees are off it says none is charged yet.
+    reply: () => `Splash's fee depends on where the payment goes. ${pricingLine(lastPublishedFees().schedule, { feesOn: lastPublishedFees().feesOn })} `
       + 'Your quote shows the exact fee, its band and the total debited before you approve; Splash charges it on top, and the payment is refused if the fee would be higher than the one you were shown. '
       + `No fee can exceed ${formatRate(FEE_CEILING_BPS)} of the amount: the network refuses one above it. `
       + 'Payouts to local currency are live on the USD to PHP testnet path; MYR, SGD, IDR, VND, THB, EUR and GBP stay modeled until partner rails activate.',
@@ -2026,7 +2027,7 @@ const SPLASH_ANSWERS: Array<{ test: RegExp; reply: string | (() => string); skip
     // §2.7, §2.8). There is no batch or corridor rate: the fee comes from
     // where each payment goes and its size.
     reply: () => 'Splash has no volume or batch rate: each payment is priced on its own, by where it goes and how large it is. '
-      + `${pricingLine(lastPublishedFeeSchedule())} `
+      + `${pricingLine(lastPublishedFees().schedule, { feesOn: lastPublishedFees().feesOn })} `
       + 'A business discount, when Splash agrees one, only ever lowers the fee, and your quote shows it before you approve. '
       + `No fee can exceed ${formatRate(FEE_CEILING_BPS)} of the amount: the network refuses one above it.`,
   },

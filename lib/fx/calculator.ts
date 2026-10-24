@@ -31,13 +31,21 @@ export const SPLASH_LEG = {
   label: 'Illustrative',
 } as const;
 
-/** Splash's fee quote on a USD amount sent to a supplier's bank, under `schedule`. */
-export function splashQuote(amountUsdMinor: bigint, schedule: FeeSchedule = LAUNCH_SCHEDULE): FeeQuote {
+/**
+ * Splash's fee quote on a USD amount sent to a supplier's bank, under
+ * `schedule`. `feesOn` is the FeeConfig's, with the schedule it came with:
+ * while it is false no Splash fee is charged, and the quote says so.
+ */
+export function splashQuote(
+  amountUsdMinor: bigint,
+  schedule: FeeSchedule = LAUNCH_SCHEDULE,
+  { feesOn = true }: { feesOn?: boolean } = {},
+): FeeQuote {
   if (amountUsdMinor < 0n) throw new RangeError('an amount is never negative');
   return buildFeeQuote({
     kind: FEE_KIND.BANK_PAYOUT,
     principalMinor: amountUsdMinor * CENT_IN_USDC_MINOR,
-    state: { feesOn: true, schedule },
+    state: { feesOn, schedule },
     partnerFee: { minor: null, source: "From the payout partner's live quote when you send" },
   });
 }
@@ -77,6 +85,8 @@ export function estimatePayment(input: {
   baseline: ComparisonBaseline | null;
   fxRate: FxRateInput | null;
   schedule?: FeeSchedule;
+  /** Whether Splash's fees are on under that schedule (FeeConfig's). */
+  feesOn?: boolean;
 }): CalculatorEstimate {
   const { amountUsdMinor, baseline, fxRate } = input;
 
@@ -102,7 +112,7 @@ export function estimatePayment(input: {
 
   return {
     amountUsdMinor,
-    splash: { quote: splashQuote(amountUsdMinor, input.schedule), label: SPLASH_LEG.label, leg: SPLASH_LEG.leg },
+    splash: { quote: splashQuote(amountUsdMinor, input.schedule, { feesOn: input.feesOn ?? true }), label: SPLASH_LEG.label, leg: SPLASH_LEG.leg },
     bankWire,
     phpReceivedMinor,
     fxRate,

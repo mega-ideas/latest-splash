@@ -99,7 +99,7 @@ const flowStepsFor = (pricing: PricingSummary) => [
     description: 'Pay a verified supplier or sweep value into the recipient ladder where the corridor allows it.',
     image: '/cinematic/flow-deliver-v4.png',
     imageAlt: 'Deliver isometric typography with a truck bringing a peso coin to a local shop',
-    stat: `${pricing.bankRange} Splash fee to a bank`,
+    stat: pricing.bankFeePhrase,
   },
   {
     id: 'proof',
@@ -114,13 +114,13 @@ const flowStepsFor = (pricing: PricingSummary) => [
 
 /* Metrics ticker: the moving bridge band at the bottom of the hero. Splash's
    fees are the schedule's (A1 §2.7): free between Splash businesses, a rate
-   to a bank. */
+   to a bank, and "None yet" while FeeConfig's fees are off. */
 const marqueeFor = (pricing: PricingSummary) => [
   ['1 live testnet', 'MY to PH corridor'],
   ['Modeled routes', 'expand with controls'],
   ['~400ms', 'Sui settlement finality'],
   [pricing.business, 'between Splash businesses'],
-  [pricing.bankRange, 'Splash fee to a bank'],
+  [pricing.bankFee, 'Splash fee to a bank'],
   ['Human approved', 'AI recommendations'],
   ['Stored proof', 'A record that lasts'],
 ];
@@ -174,7 +174,8 @@ const comparisonRowsFor = (pricing: PricingSummary) => [
     bank: '3-5%',
     broker: '2-4%',
     wise: '0.5-1.5%',
-    splash: pricing.bank,
+    // The schedule once fees are on; until then, none is charged.
+    splash: pricing.feesOn ? pricing.bank : pricing.bankFeePhrase,
   },
   {
     feature: 'FX transparency',
@@ -1008,7 +1009,7 @@ export default function IsometricLanding({ isPhone = false, pricing = LAUNCH_PRI
           <div className="iso-shell cin-footer-bar-inner">
             <span>{BRAND.copyright()}</span>
             <span className="cin-footer-tick">
-              {pricing.parts[0]} · {lockedCopy.speed} · {pricing.bankRange} Splash fee to a bank
+              {pricing.parts[0]} · {lockedCopy.speed} · {pricing.bankFeePhrase}
             </span>
           </div>
         </div>

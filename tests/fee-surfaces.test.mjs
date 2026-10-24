@@ -16,8 +16,16 @@
  */
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
+import { registerHooks } from 'node:module';
 import path from 'node:path';
 import test from 'node:test';
+
+// A route imports 'next/server', which plain Node resolves only with its extension.
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    return nextResolve(specifier === 'next/server' ? 'next/server.js' : specifier, context);
+  },
+});
 
 import { FEE_KIND, LAUNCH_SCHEDULE } from '../lib/fees/schedule.ts';
 import { pricingLine, pricingSummary, rateRange, scheduleToWire } from '../lib/fees/copy.ts';

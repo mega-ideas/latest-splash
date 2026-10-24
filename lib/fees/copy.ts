@@ -156,9 +156,23 @@ export function pricingParts(schedule: FeeSchedule): string[] {
   return parts;
 }
 
-/** A1 §2.7's pricing line, from `schedule`. */
-export function pricingLine(schedule: FeeSchedule): string {
-  return `${pricingParts(schedule).join(' · ')}. ${PRICING_FOOTNOTE}`;
+/**
+ * What every surface says while FeeConfig's fees are off (no fee recipient
+ * applied yet, Sky's FIXUP 1): the chain charges 0 on every kind. Fees start
+ * only when a fee recipient is applied, and that change waits 24 hours after
+ * it is proposed, in public.
+ */
+export const FEES_OFF_NOTICE = "No Splash fee is charged yet. Fees start only after 24 hours' public notice.";
+const FEES_OFF_LEAD = "No Splash fee is charged yet. Once fees start, after 24 hours' public notice:";
+
+/**
+ * A1 §2.7's pricing line, from `schedule`. While the fees are off
+ * (`feesOn: false`) it says no Splash fee is charged yet, then the schedule
+ * that applies once they start.
+ */
+export function pricingLine(schedule: FeeSchedule, { feesOn = true }: { feesOn?: boolean } = {}): string {
+  const prices = `${pricingParts(schedule).join(' · ')}. ${PRICING_FOOTNOTE}`;
+  return feesOn ? prices : `${FEES_OFF_LEAD} ${prices}`;
 }
 
 /** One kind's price as a phrase on its own, for a table cell: "0.05–0.30%, lower for larger payments". */
@@ -277,9 +291,17 @@ export function feeBreakdownRows(q: FeeQuoteWire): FeeBreakdownRow[] {
 
 // ─── The landing's pricing, as data a client component can take ────────────
 
-/** Splash's prices in the phrases the landing uses, all from one schedule. */
+/**
+ * Splash's prices in the phrases the landing uses, all from one schedule,
+ * and whether they are charged yet. The per-kind prices and `bankRange` are
+ * the schedule (the price list); a surface that shows what a payment pays
+ * now uses `bankFee`, `bankFeePhrase` and `notice`, which say "none yet"
+ * while the fees are off.
+ */
 export type PricingSummary = {
-  /** A1 §2.7's pricing line. */
+  /** False while FeeConfig has no fee recipient: Splash charges nothing. */
+  feesOn: boolean;
+  /** A1 §2.7's pricing line; while the fees are off it says none is charged yet. */
   line: string;
   /** Its phrases, one per kind (or bank and chain together). */
   parts: string[];
@@ -291,17 +313,28 @@ export type PricingSummary = {
   chain: string;
   /** The bank schedule's range alone: "0.05–0.30%". */
   bankRange: string;
+  /** Splash's fee to a bank now, as a value: the range, or "None yet". */
+  bankFee: string;
+  /** The same as a phrase: "0.05–0.30% Splash fee to a bank", or "No Splash fee charged yet". */
+  bankFeePhrase: string;
+  /** While the fees are off, a sentence saying so; null while they are on. */
+  notice: string | null;
 };
 
-export function pricingSummary(schedule: FeeSchedule): PricingSummary {
+export function pricingSummary(schedule: FeeSchedule, { feesOn = true }: { feesOn?: boolean } = {}): PricingSummary {
+  const bankRange = rateRange(schedule[FEE_KIND.BANK_PAYOUT]);
   return {
-    line: pricingLine(schedule),
+    feesOn,
+    line: pricingLine(schedule, { feesOn }),
     parts: pricingParts(schedule),
     business: kindPrice(schedule, FEE_KIND.SPLASH_BUSINESS),
     wallet: kindPrice(schedule, FEE_KIND.WALLET),
     exchange: kindPrice(schedule, FEE_KIND.EXCHANGE),
     bank: kindPrice(schedule, FEE_KIND.BANK_PAYOUT),
     chain: kindPrice(schedule, FEE_KIND.CROSS_CHAIN),
-    bankRange: rateRange(schedule[FEE_KIND.BANK_PAYOUT]),
+    bankRange,
+    bankFee: feesOn ? bankRange : 'None yet',
+    bankFeePhrase: feesOn ? `${bankRange} Splash fee to a bank` : 'No Splash fee charged yet',
+    notice: feesOn ? null : FEES_OFF_NOTICE,
   };
 }
