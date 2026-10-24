@@ -19,7 +19,6 @@
 import { timingSafeEqual } from 'node:crypto';
 import { NextResponse } from 'next/server';
 
-import { continueWalletSteps } from '@/lib/server/business-wallet';
 import { liveChain, liveWalletContext } from '@/lib/server/wallet-deps';
 import { reconcileSigningRequestsForStaff, SUBMISSION_LEASE_MS } from '@/lib/server/wallet-signing';
 import {
@@ -51,10 +50,13 @@ async function handle(request: Request) {
     db,
     chain: liveChain(),
     now: () => now,
-    // The follow-up runs with the request's OWN org's context, never another's.
+    // The follow-up runs with the request's OWN org's context, never
+    // another's: the same steps as when it executes on a signer's request
+    // (the next wallet step, the approval ask it answered, the spending
+    // rules it changed).
     onExecuted: async (executed) => {
       const live = await liveWalletContext(executed.orgId);
-      if (live.ok) await continueWalletSteps(live.ctx, executed);
+      if (live.ok && live.ctx.signing.onExecuted) await live.ctx.signing.onExecuted(executed);
     },
   });
   const lingering = await countLingeringSignaturesForStaff(db);

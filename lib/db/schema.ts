@@ -1560,3 +1560,91 @@ export const walletSingleSignerConsents = pgTable('wallet_single_signer_consents
 }, (table) => [
   primaryKey({ columns: [table.orgId, table.userId, table.walletAddress] }),
 ]);
+
+/**
+ * Who did what with the Business Splash Wallet's off-chain authority: an
+ * owner appointing or revoking a person in charge, a migration sign-off, a
+ * staff member's approval ask and what became of it (migration 0035).
+ * Append-only: a trigger refuses UPDATE and DELETE.
+ */
+export const walletAuthorityEvents = pgTable('wallet_authority_events', {
+  id: text('id').primaryKey(),
+  /** The order events happened in, even within one clock tick. */
+  seq: bigserial('seq', { mode: 'number' }).notNull(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  actorUserId: text('actor_user_id').notNull().references(() => users.id),
+  action: text('action').notNull(),
+  subjectUserId: text('subject_user_id').references(() => users.id),
+  ref: text('ref'),
+  detail: jsonb('detail').notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index('wallet_authority_events_org_idx').on(table.orgId, table.createdAt),
+]);
+
+/**
+ * The person in charge: an off-chain role an owner appoints and revokes, per
+ * business (Sky, 25 Oct). With the owners, the highest authority, who signs
+ * off a staff member's migration of their own USDC (migration 0035).
+ */
+export const walletPersonsInCharge = pgTable('wallet_persons_in_charge', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  grantedBy: text('granted_by').notNull().references(() => users.id),
+  grantedAt: timestamp('granted_at', { withTimezone: true }).notNull(),
+  revokedBy: text('revoked_by').references(() => users.id),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+}, (table) => [
+  uniqueIndex('wallet_persons_in_charge_active_unique').on(table.orgId, table.userId).where(sql`${table.revokedAt} is null`),
+]);
+
+/**
+ * The highest authority's passkey-signed sign-off for one member moving the
+ * USDC at one address into one business wallet (migration 0035).
+ */
+export const walletMigrationSignoffs = pgTable('wallet_migration_signoffs', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  memberUserId: text('member_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  fromAddress: text('from_address').notNull(),
+  toWallet: text('to_wallet').notNull(),
+  signedBy: text('signed_by').notNull().references(() => users.id),
+  message: text('message').notNull(),
+  nonce: text('nonce').notNull().unique(),
+  signature: text('signature'),
+  signerAddress: text('signer_address'),
+  signedAt: timestamp('signed_at', { withTimezone: true }),
+  voidedAt: timestamp('voided_at', { withTimezone: true }),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index('wallet_migration_signoffs_member_idx').on(table.orgId, table.memberUserId, table.fromAddress),
+]);
+
+/**
+ * A request, by a staff member (or anyone but a viewer), that the owners
+ * approve one open payment, for example one over the asker's spending rule.
+ * `intent` is what the chain said when it was asked (migration 0035).
+ */
+export const walletApprovalAsks = pgTable('wallet_approval_asks', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  intentId: text('intent_id').notNull(),
+  requestedBy: text('requested_by').notNull().references(() => users.id),
+  intent: jsonb('intent').notNull(),
+  note: text('note'),
+  contentHash: text('content_hash').notNull(),
+  walrusBlobId: text('walrus_blob_id').notNull(),
+  /** open | signing | approved | declined | withdrawn */
+  status: text('status').notNull(),
+  signingRequestId: text('signing_request_id').references(() => walletSigningRequests.id),
+  decidedBy: text('decided_by').references(() => users.id),
+  decidedAt: timestamp('decided_at', { withTimezone: true }),
+  decisionNote: text('decision_note'),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('wallet_approval_asks_open_unique').on(table.orgId, table.intentId).where(sql`${table.status} in ('open', 'signing')`),
+  index('wallet_approval_asks_org_idx').on(table.orgId, table.status),
+]);

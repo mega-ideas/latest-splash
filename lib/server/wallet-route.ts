@@ -57,6 +57,19 @@ export function requireOwner(route: WalletRoute, what: string): Response | null 
   return NextResponse.json({ error: `Only an owner can ${what}.` }, { status: 403, headers: NO_STORE });
 }
 
+/** A non-negative integer field (minor units, milliseconds) as a bigint, or null if absent or malformed. */
+export function bigintField(value: unknown): bigint | null {
+  const s = typeof value === 'number' && Number.isSafeInteger(value) ? String(value) : typeof value === 'string' ? value.trim() : '';
+  if (!/^\d{1,20}$/.test(s)) return null;
+  const n = BigInt(s);
+  return n <= 18_446_744_073_709_551_615n ? n : null;
+}
+
+/** A refusal in the shape every wallet route answers with. */
+export function refusal(status: number, error: string, code?: string): Response {
+  return NextResponse.json({ error, ...(code ? { code } : {}) }, { status, headers: NO_STORE });
+}
+
 /** A service result as a response. A refusal's `details` (who is missing, say) go with it. */
 export function asResponse(
   result: { ok: true } | { ok: false; status: number; code: string; error: string; details?: Record<string, unknown> },

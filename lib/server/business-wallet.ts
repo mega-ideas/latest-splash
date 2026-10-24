@@ -79,7 +79,11 @@ export type IntentState = {
   initialSharedVersion: string | number;
   /** The BusinessAccount it is bound to. */
   account: string | null;
+  /** Who opened it (`sender` on chain): a staff member, or the wallet. */
+  maker?: string | null;
   recipient: string;
+  /** Hex of the 32-byte beneficiary commitment on a bank payout; empty otherwise. */
+  beneficiaryRef?: string;
   amountMinor: bigint;
   kind: number;
   targetCurrency: string;

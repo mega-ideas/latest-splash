@@ -29,6 +29,7 @@ import { gaslessEnabled, SUI_USDC_COIN_TYPE } from '@/lib/payments/stablecoin-la
 import { listApprovers } from '@/lib/server/approver-channels';
 import { walletSigningNotifier } from '@/lib/server/approval-requests';
 import { continueWalletSteps, type AccountState, type IntentState, type WalletContext } from '@/lib/server/business-wallet';
+import { settleApprovalAsks } from '@/lib/server/payment-approval-asks';
 import { v2ObjectIdsFromEnv, type SharedRef } from '@/lib/server/sui-v2-builders';
 import { memberWalletAddresses, pickWalletMembers, type PasskeyRow } from '@/lib/server/wallet-members';
 import { walletNetworkGate } from '@/lib/server/wallet-network-gate';
@@ -110,6 +111,14 @@ function u64(v: unknown, what: string): bigint {
   return BigInt(v);
 }
 
+/** vector<u8> as hex: the fullnode renders it as a number array or as base64. */
+function bytesHex(v: unknown): string {
+  if (v === null || v === undefined) return '';
+  if (Array.isArray(v)) return Buffer.from(v.map((x) => Number(x))).toString('hex');
+  if (typeof v === 'string') return Buffer.from(v, 'base64').toString('hex');
+  return '';
+}
+
 async function readJsonObject(objectId: string, typeSuffix: string): Promise<{ json: Json; owner: unknown; type: string } | null> {
   const { suiClient } = await import('@/lib/sui');
   let object: { json?: unknown; owner: unknown; type: string };
@@ -147,7 +156,9 @@ export function parsePaymentIntent(id: string, json: Json, owner: unknown): Inte
     id: normalizeSuiAddress(id),
     initialSharedVersion: String(shared.Shared.initialSharedVersion),
     account: account === null ? null : address(account, 'the intent account'),
+    maker: json.sender === undefined ? null : address(json.sender, 'the intent maker'),
     recipient: address(json.recipient, 'the intent recipient'),
+    beneficiaryRef: bytesHex(json.beneficiary_ref),
     amountMinor: u64(json.amount_usd, 'the intent amount'),
     kind: Number(u64(json.kind, 'the intent kind')),
     targetCurrency: String(json.target_currency ?? ''),
@@ -232,6 +243,7 @@ export async function liveWalletContext(orgId: string): Promise<{ ok: true; ctx:
     },
   };
   signing.onExecuted = async (request) => {
+    await settleApprovalAsks(db, request);
     await continueWalletSteps(ctx, request);
   };
   return { ok: true, ctx, db };

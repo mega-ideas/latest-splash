@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 
 import { gaslessEnabled } from '@/lib/payments/stablecoin-lane';
 import { collectCoins, detectMemberFunds, requestMigrationTransfer } from '@/lib/server/business-wallet';
+import { memberRole, migrationClearance, recordAuthorityEvent } from '@/lib/server/wallet-authority';
 import { orgMemberWalletAddresses, walletUsdcType } from '@/lib/server/wallet-deps';
 import { asResponse, limitWalletRequests, NO_STORE, walletRoute } from '@/lib/server/wallet-route';
 
@@ -20,6 +21,13 @@ export const dynamic = 'force-dynamic';
  *       which they sign alone (Sky's decision), gasless. Coin objects are
  *       read page by page; a wallet with more than one transfer's worth of
  *       coins moves the rest with a second request (`more`).
+ *
+ * USDC only (Sky, 25 Oct: "we only accept USDC for now"): no other coin is
+ * read or moved. An owner moves their own freely. Anyone else (staff, or a
+ * person in charge moving their own) needs the highest authority's sign-off
+ * first: an owner or the person in charge, signed with their passkey, for
+ * exactly this wallet and this business wallet (lib/server/wallet-authority.ts,
+ * POST /api/wallet/migration/sign-offs). Nothing is built without it.
  *
  * The business wallet is the one the BusinessAccount names on chain.
  */
@@ -43,10 +51,19 @@ export async function GET(request: Request) {
   if (!read) return NextResponse.json({ error: 'Balances cannot be read from the chain.' }, { status: 503, headers: NO_STORE });
   const found = await detectMemberFunds(read, addresses);
   const canSign = new Map(addresses.map((a) => [a.address, a.canSign]));
+  const roles = new Map<string, string | null>();
+  for (const f of found) if (!roles.has(f.userId)) roles.set(f.userId, await memberRole(db, orgId, f.userId));
   return NextResponse.json(
     {
       businessWallet: wallet,
-      members: found.map((f) => ({ userId: f.userId, address: f.address, usdcMinor: f.usdcMinor.toString(), canMove: canSign.get(f.address) === true })),
+      asset: 'USDC',
+      members: found.map((f) => ({
+        userId: f.userId,
+        address: f.address,
+        usdcMinor: f.usdcMinor.toString(),
+        canMove: canSign.get(f.address) === true,
+        needsSignOff: roles.get(f.userId) !== 'admin',
+      })),
     },
     { headers: NO_STORE },
   );
@@ -68,6 +85,8 @@ export async function POST(request: Request) {
   if (!wallet) return NextResponse.json({ error: 'Register the business wallet first.' }, { status: 409, headers: NO_STORE });
   const me = (await orgMemberWalletAddresses(db, orgId)).find((a) => a.userId === authority.userId && a.canSign);
   if (!me) return NextResponse.json({ error: 'You have no passkey wallet on this site in this business.' }, { status: 404, headers: NO_STORE });
+  const clearance = await migrationClearance(db, { orgId, userId: authority.userId, fromAddress: me.address, toWallet: wallet });
+  if (!clearance.ok) return asResponse(clearance);
 
   const { suiClient } = await import('@/lib/sui');
   const coinType = walletUsdcType();
@@ -86,5 +105,15 @@ export async function POST(request: Request) {
     addressBalanceMinor: funds.addressBalanceMinor,
     gasless: gaslessEnabled(),
   });
+  if (result.ok && clearance.signOffId) {
+    await recordAuthorityEvent(db, {
+      orgId,
+      actorUserId: authority.userId,
+      action: 'migration_sign_off_used',
+      subjectUserId: clearance.signedOffBy,
+      ref: clearance.signOffId,
+      detail: { signingRequestId: result.request.id },
+    });
+  }
   return asResponse(result, result.ok ? { request: result.request, more } : undefined);
 }

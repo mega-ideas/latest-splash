@@ -246,6 +246,13 @@
       "when": 1791504000000,
       "tag": "0034_wallet_signing_lifecycle",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1791590400000,
+      "tag": "0035_wallet_authority",
+      "breakpoints": true
     }
   ]
 }
