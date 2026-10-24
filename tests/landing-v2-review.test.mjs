@@ -117,7 +117,7 @@ test('staff can read the pilot access requests, and only staff', () => {
 
   for (const file of [...filesUnder('app'), ...filesUnder('components'), ...filesUnder('lib')]) {
     if (file.startsWith('app/admin/') || file.startsWith('app/api/admin/') || file === 'lib/server/access-requests.ts') continue;
-    assert.doesNotMatch(read(file), /listAccessRequestsForStaff/, `${file} reads the access requests outside the staff console`);
+    assert.doesNotMatch(code(file), /listAccessRequestsForStaff/, `${file} reads the access requests outside the staff console`);
   }
 });
 
@@ -201,7 +201,7 @@ test('the product copy claims no more than the product does', () => {
   const product = code('components/landing/ProductSection.tsx');
   assert.doesNotMatch(product, /anyone can check/, 'receipts are shared by link, not public');
   assert.match(product, /a receipt you can share with your supplier/);
-  assert.match(product, /The on-chain step settles in one Sui transaction/);
+  assert.match(product, /It leaves your Splash Wallet in one Sui transaction/, 'the Sui transaction is the wallet leg, not the bank credit');
   assert.doesNotMatch(product, /See its fee above/, 'no pointer to a fee that is not shown');
   const css = read('styles/landing-v2.css');
   assert.match(css, /\.pr-list li:last-child:nth-child\(odd\) \{ grid-column: 1 \/ -1; \}/, 'the fifth rail fills its row on two columns');

@@ -23,6 +23,7 @@ import {
 import FloatingToken from '@/components/landing/FloatingToken';
 import HowItWorks from '@/components/landing/HowItWorks';
 import PartnersRail, { type SignedPartner } from '@/components/landing/PartnersRail';
+import PhoneStickyCta from '@/components/landing/PhoneStickyCta';
 import ProductSection from '@/components/landing/ProductSection';
 import SettlementCinematic from '@/components/landing/SettlementCinematic';
 import WaitlistCta from '@/components/landing/WaitlistCta';
@@ -30,7 +31,7 @@ import LocalTime from '@/components/LocalTime';
 import ControlPlaneExplainer from '@/components/oxwal/ControlPlaneExplainer';
 import RoadmapChip from '@/components/supply/RoadmapChip';
 import { claims, lockedCopy } from '@/content/claims';
-import { pricingSummary, scheduleToWire, type FeeScheduleWire, type PricingSummary } from '@/lib/fees/copy';
+import { pricingSummary, type FeeScheduleWire, type PricingSummary } from '@/lib/fees/copy';
 import { LAUNCH_SCHEDULE } from '@/lib/fees/schedule';
 import { formatBps } from '@/lib/fx/calculator';
 import { getComparisonBaseline } from '@/lib/fx/comparison-baselines';
@@ -474,7 +475,7 @@ export default function IsometricLanding({
 
           <div className="iso-header-actions">
             <Link href="/signup" className="iso-button iso-button-small">
-              Start sending
+              Open payment desk
               <ArrowDownRight aria-hidden="true" />
             </Link>
           </div>
@@ -846,7 +847,7 @@ export default function IsometricLanding({
             </p>
             <div className="iso-hero-actions">
               <Link href="/signup" className="iso-button iso-button-gold">
-                Start sending
+                Open payment desk
                 <ArrowRight aria-hidden="true" />
               </Link>
               <Link href="/login" className="iso-button iso-button-dark-ghost">Log in</Link>
@@ -913,6 +914,7 @@ export default function IsometricLanding({
           </div>
         </div>
       </footer>
+      <PhoneStickyCta />
       <button
         type="button"
         className={`iso-back-to-top ${showBackToTop ? 'is-visible' : ''}`}

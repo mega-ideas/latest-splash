@@ -59,18 +59,6 @@
   background: radial-gradient(circle, rgba(159, 207, 199, .5), transparent 70%);
 }
 
-.cin-grid {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  background-image:
-    linear-gradient(rgba(12, 62, 72, .06) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(12, 62, 72, .06) 1px, transparent 1px);
-  background-size: 68px 68px;
-  -webkit-mask-image: radial-gradient(ellipse 90% 75% at 55% 45%, rgba(0, 0, 0, .9), transparent 78%);
-  mask-image: radial-gradient(ellipse 90% 75% at 55% 45%, rgba(0, 0, 0, .9), transparent 78%);
-}
-
 .cin-vignette {
   position: absolute;
   inset: 0;
@@ -1961,8 +1949,7 @@
 }
 
 .is-phone .cin-static-stage,
-.is-phone .cin-static-hero .cin-orb,
-.is-phone .cin-static-hero .cin-grid {
+.is-phone .cin-static-hero .cin-orb {
   display: none;
 }
 

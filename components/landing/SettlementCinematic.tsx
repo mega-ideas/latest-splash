@@ -239,7 +239,7 @@ function HeroCopy({ animated, onEnterEngine }: { animated: boolean; onEnterEngin
         <WaitlistCta />
       </motion.div>
       <motion.div variants={animated ? rise : undefined} className="iso-proof-line">
-        <span><Check aria-hidden="true" /> KYB on both sides</span>
+        <span><Check aria-hidden="true" /> Every recipient verified</span>
         <span><Check aria-hidden="true" /> Settles on Sui</span>
         <span><Check aria-hidden="true" /> {lockedCopy.agent}</span>
       </motion.div>
@@ -248,20 +248,25 @@ function HeroCopy({ animated, onEnterEngine }: { animated: boolean; onEnterEngin
 }
 
 /** Non-pinned fallback for prefers-reduced-motion: same story, no choreography. */
-function StaticCinematic({ telemetry }: { telemetry: ReturnType<typeof telemetryFor> }) {
+function StaticCinematic({ telemetry, phone }: { telemetry: ReturnType<typeof telemetryFor>; phone: boolean }) {
   return (
-    <section id="cinematic" className="cin-section cin-section-static" aria-label="Splash settlement network">
+    <section id="cinematic" className={`cin-section cin-section-static${phone ? ' is-phone' : ''}`} aria-label="Splash settlement network">
       <div className="cin-static-hero">
         <div className="cin-orb cin-orb-gold" aria-hidden="true" />
         <div className="cin-orb cin-orb-mint" aria-hidden="true" />
-        <div className="cin-static-stage" aria-hidden="true">
-          <div className="cin-object-layer">
-            <div className="cin-object">
-              <div className="cin-object-glow" />
-              <Image src={HERO.src} loader={HERO.loader} alt="" width={HERO.width} height={HERO.height} sizes="(max-width: 1200px) 100vw, 1700px" priority />
+        {/* Desktop reduced-motion only. On a phone the stage is hidden by CSS,
+            so it is not rendered at all: its priority image would be fetched
+            for nothing. */}
+        {!phone ? (
+          <div className="cin-static-stage" aria-hidden="true">
+            <div className="cin-object-layer">
+              <div className="cin-object">
+                <div className="cin-object-glow" />
+                <Image src={HERO.src} loader={HERO.loader} alt="" width={HERO.width} height={HERO.height} sizes="(max-width: 1200px) 100vw, 1700px" priority />
+              </div>
             </div>
           </div>
-        </div>
+        ) : null}
         <div className="iso-shell cin-copy cin-copy-static">
           <HeroCopy animated={false} />
         </div>
@@ -276,6 +281,7 @@ function StaticCinematic({ telemetry }: { telemetry: ReturnType<typeof telemetry
             height={HERO.phone.height}
             sizes="92vw"
             unoptimized
+            priority={phone}
           />
         </div>
       </div>
@@ -383,7 +389,7 @@ export default function SettlementCinematic({ isPhone = false, pricing = LAUNCH_
   const flashOpacity = useTransform(scrollYProgress, [0.58, 0.72, 0.82, 0.92], [0, 0.9, 0.35, 0]);
 
   if (reducedMotion || phoneLayout) {
-    return <StaticCinematic telemetry={telemetry} />;
+    return <StaticCinematic telemetry={telemetry} phone={phoneLayout} />;
   }
 
   function enterEngine() {

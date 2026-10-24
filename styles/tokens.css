@@ -22,6 +22,10 @@
 
   --ok: #2E7D6B;
   --ok-bg: #E4F1ED;
+  /* Words in a success state: --ok is 4.25:1 on --ok-bg, under 4.5:1 for
+     small text, so its words take this darker green (5.7:1 on --ok-bg,
+     6.6:1 on white). */
+  --ok-ink: #24675A;
   --warn: #B4690E;
   --warn-bg: #FBEFDD;
   /* Words that need attention: --warn itself is 3.7:1 on --warn-bg and 4.2:1

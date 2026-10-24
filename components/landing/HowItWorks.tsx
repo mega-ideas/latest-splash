@@ -87,9 +87,9 @@ export default function HowItWorks({ fundingPartners }: { fundingPartners: reado
           <span>No limbo.</span>
         </h2>
 
-        <div className="hw-kinds" role="radiogroup" aria-label="Kind of transfer">
+        <div className="hw-kinds" role="group" aria-label="Kind of transfer">
           {KINDS.map((k) => (
-            <button key={k.id} type="button" role="radio" aria-checked={kind === k.id} className={kind === k.id ? 'is-on' : undefined} onClick={() => setKind(k.id)}>
+            <button key={k.id} type="button" aria-pressed={kind === k.id} className={kind === k.id ? 'is-on' : undefined} onClick={() => setKind(k.id)}>
               <strong>{k.label}</strong>
               <span>{k.detail}</span>
             </button>
@@ -125,6 +125,21 @@ export default function HowItWorks({ fundingPartners }: { fundingPartners: reado
             );
           })}
         </div>
+
+        {/* Phones: the five steps stacked, each with its own words for the
+            kind chosen, instead of tabs and a panel (D15). Hidden on wider
+            screens, where the tabs and the picture do this job. */}
+        <ol className="hw-steps-phone" aria-label="The five steps">
+          {STEPS.map((s, i) => (
+            <li key={s.id}>
+              <span aria-hidden="true">{i + 1}</span>
+              <div>
+                <strong>{s.title}</strong>
+                <p>{s[kind]}</p>
+              </div>
+            </li>
+          ))}
+        </ol>
       </div>
 
       <div className="hw-right">

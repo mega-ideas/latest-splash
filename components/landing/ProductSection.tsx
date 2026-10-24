@@ -2,9 +2,10 @@
 
 import Image from 'next/image';
 import Link from 'next/link';
-import { useEffect, useId, useMemo, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent } from 'react';
 import {
   ArrowRight,
+  ArrowRightLeft,
   BadgeCheck,
   Clock3,
   FileText,
@@ -24,6 +25,7 @@ import {
 
 import { formatUsdc, scheduleFromWire, type FeeScheduleWire } from '@/lib/fees/copy';
 import { FEE_KIND, splashFee, type FeeKind, type FeeSchedule } from '@/lib/fees/schedule';
+import { formatRate, rateChip, settlementLines } from '@/lib/landing/calculator';
 import { PILOT_ROUTES, QUOTABLE_ROUTES, isPilot, isQuotable, type PilotCurrency, type QuotableCurrency } from '@/lib/landing/routes';
 import { MoneyError, formatMinor, parseMinor } from '@/lib/money';
 
@@ -39,7 +41,10 @@ import { MoneyError, formatMinor, parseMinor } from '@/lib/money';
  *   * the exchange rate, the partner's fee and what the supplier receives
  *     are the payout partner's own quote (GET /api/quotes/preview), or "Not
  *     quoted yet" when there is none;
- *   * how long the rate holds is the quote's own TTL.
+ *   * how long the rate is valid counts down from the quote's own TTL; an
+ *     expired quote is asked for again while the calculator is on screen.
+ * The rows add up on the card (lib/landing/calculator.ts settlementLines):
+ * amount + Splash fee is the debit, amount - partner fee is converted.
  * The desk behind it is a picture of the layout, with no figures in it.
  *
  * PHP and IDR are quoted. MYR, VND, THB and SGD are under pilot access, and
@@ -157,6 +162,9 @@ function DeskPreview() {
 
 /* ── Pilot access ───────────────────────────────────────────────────── */
 
+/** How long the access form waits for the server before it lets the reader try again. */
+const ACCESS_TIMEOUT_MS = 12_000;
+
 function RequestAccess({ currency }: { currency: PilotCurrency }) {
   const route = PILOT_ROUTES.find((r) => r.currency === currency)!;
   const [email, setEmail] = useState('');
@@ -164,29 +172,47 @@ function RequestAccess({ currency }: { currency: PilotCurrency }) {
   const [website, setWebsite] = useState('');
   const [phase, setPhase] = useState<'idle' | 'sending' | 'done'>('idle');
   const [error, setError] = useState<{ field: string; message: string } | null>(null);
+  const emailRef = useRef<HTMLInputElement>(null);
+  const companyRef = useRef<HTMLInputElement>(null);
   const id = useId();
+
+  function fail(field: string, message: string) {
+    setError({ field, message });
+    setPhase('idle');
+    // The field the server named gets focus, so the reader lands on what to fix.
+    if (field === 'email') emailRef.current?.focus();
+    else if (field === 'company') companyRef.current?.focus();
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (phase === 'sending') return;
     setPhase('sending');
     setError(null);
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), ACCESS_TIMEOUT_MS);
     try {
       const response = await fetch('/api/access-requests', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, company, currency, website }),
+        signal: controller.signal,
       });
       const body = (await response.json().catch(() => ({}))) as { error?: string; field?: string };
       if (!response.ok) {
-        setError({ field: body.field ?? 'form', message: body.error ?? 'That did not go through. Try again in a minute.' });
-        setPhase('idle');
+        fail(body.field ?? 'form', body.error ?? 'That did not go through. Try again in a minute.');
         return;
       }
       setPhase('done');
     } catch {
-      setError({ field: 'form', message: 'That did not go through. Check your connection and try again.' });
-      setPhase('idle');
+      fail(
+        'form',
+        controller.signal.aborted
+          ? 'The request took too long. Try again.'
+          : 'That did not go through. Check your connection and try again.',
+      );
+    } finally {
+      window.clearTimeout(timer);
     }
   }
 
@@ -207,6 +233,7 @@ function RequestAccess({ currency }: { currency: PilotCurrency }) {
       </p>
       <label htmlFor={`${id}-email`}>Work email</label>
       <input
+        ref={emailRef}
         id={`${id}-email`}
         type="email"
         autoComplete="email"
@@ -219,6 +246,7 @@ function RequestAccess({ currency }: { currency: PilotCurrency }) {
       />
       <label htmlFor={`${id}-company`}>Company</label>
       <input
+        ref={companyRef}
         id={`${id}-company`}
         type="text"
         autoComplete="organization"
@@ -241,13 +269,21 @@ function RequestAccess({ currency }: { currency: PilotCurrency }) {
 
 /* ── The calculator ─────────────────────────────────────────────────── */
 
+type Answer = { key: string; quote: PreviewQuote | null; receivedAt: number };
+
 function Calculator({ schedule, feesOn }: { schedule: FeeSchedule; feesOn: boolean }) {
   const [mode, setMode] = useState<Mode>('bank');
   const [amount, setAmount] = useState('5000');
   const [destination, setDestination] = useState<Destination>('PHP');
   // The last answer, with the request it answers: an answer for another
   // amount or route is never shown as this one's.
-  const [answer, setAnswer] = useState<{ key: string; quote: PreviewQuote | null } | null>(null);
+  const [answer, setAnswer] = useState<Answer | null>(null);
+  // Bumped to ask the partner again once a quote's TTL has run out.
+  const [refresh, setRefresh] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
+  const rootRef = useRef<HTMLDivElement>(null);
+  const inView = useRef(false);
+  const answerRef = useRef<Answer | null>(null);
   const id = useId();
 
   const parsed = useMemo(() => parseUsdc(amount), [amount]);
@@ -255,8 +291,13 @@ function Calculator({ schedule, feesOn }: { schedule: FeeSchedule; feesOn: boole
   const pilot = mode === 'bank' && isPilot(destination);
   const route = quotable ? QUOTABLE_ROUTES.find((r) => r.currency === destination)! : null;
   const requestKey = quotable && parsed.minor !== null ? `${destination}:${parsed.minor}` : null;
-  const quote = requestKey && answer?.key === requestKey ? answer.quote : null;
+  const current = requestKey && answer?.key === requestKey ? answer : null;
+  const quote = current?.quote ?? null;
   const quoting = requestKey !== null && answer?.key !== requestKey;
+
+  useEffect(() => {
+    answerRef.current = current;
+  }, [current]);
 
   // The partner's quote, once typing pauses. A stale answer never lands on a newer amount.
   useEffect(() => {
@@ -271,38 +312,80 @@ function Calculator({ schedule, feesOn }: { schedule: FeeSchedule; feesOn: boole
       } catch {
         result = null;
       }
-      if (!controller.signal.aborted) setAnswer({ key: requestKey, quote: result });
+      if (!controller.signal.aborted) {
+        const receivedAt = Date.now();
+        setNow(receivedAt);
+        setAnswer({ key: requestKey, quote: result, receivedAt });
+      }
     }, 350);
     return () => {
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [requestKey, destination, parsed.minor]);
+  }, [requestKey, destination, parsed.minor, refresh]);
+
+  // An expired quote is fetched again only while the calculator is on
+  // screen, so a page left open in a tab does not keep asking.
+  const askAgainIfExpired = useCallback(() => {
+    const last = answerRef.current;
+    if (!inView.current || !last?.quote?.rate) return;
+    if (rateChip(last.quote, Date.now() - last.receivedAt).state === 'expired') setRefresh((n) => n + 1);
+  }, []);
+
+  useEffect(() => {
+    const node = rootRef.current;
+    if (!node || typeof IntersectionObserver === 'undefined') return;
+    const observer = new IntersectionObserver(([entry]) => {
+      inView.current = entry.isIntersecting;
+      if (entry.isIntersecting) askAgainIfExpired();
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [askAgainIfExpired]);
+
+  // The chip counts down once a second while there is a rate on it.
+  const ticking = Boolean(quote?.rate);
+  useEffect(() => {
+    if (!ticking) return;
+    const timer = window.setInterval(() => {
+      setNow(Date.now());
+      askAgainIfExpired();
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [ticking, askAgainIfExpired]);
 
   const kind = mode === 'bank' ? FEE_KIND.BANK_PAYOUT : FEE_KIND.WALLET;
   const fee = parsed.minor === null ? null : feeFor(schedule, feesOn, kind, parsed.minor);
   const businessFee = parsed.minor === null ? null : feeFor(schedule, feesOn, FEE_KIND.SPLASH_BUSINESS, parsed.minor);
   const partnerMinor = mode === 'bank' && quote?.partnerFee.minor ? BigInt(quote.partnerFee.minor) : null;
-  const totalFees = fee === null ? null : fee + (partnerMinor ?? 0n);
-  const total = parsed.minor !== null && fee !== null ? parsed.minor + fee : null;
+  const lines = parsed.minor !== null && fee !== null
+    ? settlementLines({ mode, principalMinor: parsed.minor, splashFeeMinor: fee, partnerFeeMinor: partnerMinor })
+    : null;
   const rateKnown = quotable && quote?.rate && quote.receivedMinor;
+  const chip = rateKnown && current ? rateChip(quote!, now - current.receivedAt) : null;
 
   return (
-    <div className="pv-calc" role="group" aria-label="Payment calculator">
+    <div className="pv-calc" role="group" aria-label="Payment calculator" ref={rootRef}>
       <div className="pv-calc-top">
-        <div className="pv-toggle" role="radiogroup" aria-label="Send to">
+        <div className="pv-toggle" role="group" aria-label="Send to">
           {(['bank', 'wallet'] as const).map((m) => (
-            <button key={m} type="button" role="radio" aria-checked={mode === m} className={mode === m ? 'is-on' : undefined} onClick={() => setMode(m)}>
+            <button key={m} type="button" aria-pressed={mode === m} className={mode === m ? 'is-on' : undefined} onClick={() => setMode(m)}>
               {m === 'bank' ? 'To a bank' : 'To a wallet'}
             </button>
           ))}
         </div>
         {quotable ? (
-          <span className="pv-rate" aria-live="polite">
+          <span className={`pv-rate${chip?.state === 'expired' ? ' is-expired' : ''}`}>
             <Lock aria-hidden="true" />
-            {rateKnown ? (
-              <>1 USDC = {quote!.rate} {destination}, held {quote!.ttlSeconds}s</>
-            ) : quoting ? 'Asking for a rate…' : 'Rate not quoted yet'}
+            <span aria-live="polite">
+              {rateKnown ? `1 USDC = ${formatRate(quote!.rate!)} ${destination}` : quoting ? 'Asking for a rate…' : 'Rate not quoted yet'}
+            </span>
+            {chip?.state === 'held' ? <span className="pv-rate-ttl">valid {chip.secondsLeft}s</span> : null}
+            {chip?.state === 'expired' ? (
+              <button type="button" className="pv-rate-refresh" onClick={() => setRefresh((n) => n + 1)}>
+                Rate expired, refresh
+              </button>
+            ) : null}
             {rateKnown && quote!.sandbox ? <em>Sandbox rate</em> : null}
           </span>
         ) : null}
@@ -332,12 +415,12 @@ function Calculator({ schedule, feesOn }: { schedule: FeeSchedule; feesOn: boole
         {parsed.error ? <p className="pv-error" id={`${id}-amount-error`} role="alert">{parsed.error}</p> : null}
       </div>
 
-      {mode === 'wallet' ? (
+      {mode === 'wallet' && businessFee !== null ? (
         <p className="pv-hint">
           <Info aria-hidden="true" />
           <span>
             Paying a business that uses Splash?{' '}
-            <strong>{businessFee === 0n ? 'No Splash fee.' : businessFee === null ? 'See its fee above.' : `${formatUsdc(businessFee)} USDC Splash fee.`}</strong>
+            <strong>{businessFee === 0n ? 'No Splash fee.' : `${formatUsdc(businessFee)} USDC Splash fee.`}</strong>
           </span>
         </p>
       ) : null}
@@ -383,34 +466,36 @@ function Calculator({ schedule, feesOn }: { schedule: FeeSchedule; feesOn: boole
               <dd>{mode === 'bank' ? route?.arrives : 'Seconds, on Sui'}</dd>
             </div>
             <div>
-              <dt><ReceiptText aria-hidden="true" />Splash fee</dt>
-              <dd className="num">{fee === null ? '-' : feesOn ? `${formatUsdc(fee)} USDC` : 'None yet'}</dd>
+              <dt><ReceiptText aria-hidden="true" />Splash fee, added to the amount</dt>
+              <dd className="num">{lines === null ? '-' : feesOn ? `${formatUsdc(lines.splashFeeMinor)} USDC` : 'None yet'}</dd>
             </div>
             {mode === 'bank' ? (
-              <div>
-                <dt><Landmark aria-hidden="true" />Partner fee</dt>
-                <dd className="num">
-                  {partnerMinor !== null ? `${formatUsdc(partnerMinor)} USDC` : 'Not quoted yet'}
-                  {partnerMinor !== null && quote ? <small>{quote.partnerFee.source}</small> : null}
-                </dd>
-              </div>
+              <>
+                <div>
+                  <dt><Landmark aria-hidden="true" />Partner fee, deducted before conversion</dt>
+                  <dd className="num">
+                    {lines?.partnerFeeMinor != null ? `${formatUsdc(lines.partnerFeeMinor)} USDC` : 'Not quoted yet'}
+                    {lines?.partnerFeeMinor != null && quote ? <small>{quote.partnerFee.source}</small> : null}
+                  </dd>
+                </div>
+                <div>
+                  <dt><ArrowRightLeft aria-hidden="true" />Converted to {destination}</dt>
+                  <dd className="num">{lines?.convertedMinor != null ? `${formatUsdc(lines.convertedMinor)} USDC` : 'Not quoted yet'}</dd>
+                </div>
+              </>
             ) : null}
             <div className="is-total">
-              <dt>Total fees{mode === 'bank' && partnerMinor === null ? ' quoted so far' : ''}</dt>
-              <dd className="num">{totalFees === null ? '-' : `${formatUsdc(totalFees)} USDC`}</dd>
-            </div>
-            <div className="is-total">
-              <dt>From your Splash Wallet, fees included</dt>
-              <dd className="num">{total === null ? '-' : `${formatUsdc(total)} USDC`}</dd>
+              <dt>From your Splash Wallet (amount + Splash fee)</dt>
+              <dd className="num">{lines === null ? '-' : `${formatUsdc(lines.debitMinor)} USDC`}</dd>
             </div>
           </dl>
           <p className="pv-note">
             {mode === 'bank'
-              ? "Splash's fee is added to the amount. The partner's fee comes out of the amount it converts. Payouts go only to verified business bank accounts, and the rate is fixed when you approve."
+              ? "Payouts go only to verified business bank accounts, and the rate is fixed when you approve."
               : 'Sui transfers are final. Splash checks the address, and you approve before anything moves.'}
           </p>
           <Link href="/signup" className="pv-send">
-            Start this payment
+            Open payment desk
             <ArrowRight aria-hidden="true" />
           </Link>
         </>
@@ -430,7 +515,7 @@ export default function ProductSection({ fees }: { fees: { schedule: FeeSchedule
             <span className="pv-title-a">Pay the invoice.</span>
             <span className="pv-title-b">Keep the proof.</span>
           </h2>
-          <p>Your team approves every payment. It settles in one Sui transaction and leaves a receipt anyone can check.</p>
+          <p>Your team approves every payment. It leaves your Splash Wallet in one Sui transaction, with a receipt you can share with your supplier.</p>
           <div className="pv-actions">
             <Link href="/signup" className="iso-button iso-button-gold">
               Open payment desk
