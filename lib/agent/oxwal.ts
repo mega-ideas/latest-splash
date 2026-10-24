@@ -2005,7 +2005,7 @@ const SPLASH_ANSWERS: Array<{ test: RegExp; reply: string | (() => string); skip
     test: /\b(csv|file format|columns|template|how (do|to) (i|we) (upload|import)|batch format|payroll file)\b/,
     reply: scoped(
       'Batch payout reads a CSV with the columns name, address, country, purpose, amount. Every row is screened for AML lists, KYT thresholds, structuring patterns and corridor rules before anything settles, and the whole run is authorized once. Drop the file in the composer and I will screen it.',
-      'Payout runs are not open in this launch: Splash is open for USDC on Sui only for now. Each USDC transfer goes to a saved wallet recipient from Send USDC, and I can prepare them one at a time.',
+      'Payout runs are not open in this launch: Splash is open for USDC on Sui only for now. Each USDC transfer goes to a saved wallet recipient from Wallet, and I can prepare them one at a time.',
     ),
   },
   {

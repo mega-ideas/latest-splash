@@ -87,7 +87,7 @@ export default function FloatingCopilot() {
 
   // The desk records unsigned proposals; remind the operator whenever they are
   // anywhere else in the app.
-  const awayFromDesk = pathname !== '/dashboard' && pathname !== '/queue';
+  const awayFromDesk = pathname !== '/dashboard/zeke' && pathname !== '/queue';
   const hasReminder = pending.count > 0 && awayFromDesk;
 
   useEffect(() => {

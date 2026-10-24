@@ -1,20 +1,30 @@
 'use client';
 
 import Image from 'next/image';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import FloatingCopilot from '@/components/FloatingCopilot';
 import DashboardHeader from '@/components/DashboardHeader';
 import { CustodyPhaseContext, LaunchScopeContext, SweepSwitchContext } from '@/components/dashboard/CustodyPhaseContext';
 import GovernanceAlertBanner from '@/components/dashboard/GovernanceAlertBanner';
 import type { CustomerSession } from '@/lib/auth/customer-session';
 import type { GovernanceBannerAlert } from '@/lib/server/governance-events';
-import { LAUNCH_SCOPE_REASON, type LaunchScope } from '@/lib/launch-scope-rules';
+import type { LaunchScope } from '@/lib/launch-scope-rules';
+import {
+  dashboardNav,
+  isCurrent,
+  pageLock,
+  type DashboardNav,
+  type NavIcon,
+  type NavItem,
+  type NavLocks,
+  type SetupProgress,
+} from '@/lib/dashboard/nav';
 import {
   Bot,
   FileText,
   History,
+  House,
   Layers,
-  LayoutDashboard,
   ListChecks,
   Lock,
   LogOut,
@@ -22,7 +32,6 @@ import {
   Phone,
   Send,
   Settings,
-  Timer,
   TrendingUp,
   UserCircle,
   Wallet,
@@ -33,44 +42,24 @@ import {
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 
-// ─── Nav structure ────────────────────────────────────────────────────────────
+// ─── Nav ──────────────────────────────────────────────────────────────────────
+// The order, the locks and the current-page rule live in lib/dashboard/nav.ts
+// (tested as behaviour in tests/dashboard-nav.test.mjs). This file draws them.
 
-type NavItem = { label: string; href: string; icon: LucideIcon; badge?: string };
-type NavGroup = { title: string; items: NavItem[] };
-
-const navGroups: NavGroup[] = [
-  {
-    title: 'Getting started',
-    items: [{ label: 'Account setup', href: '/dashboard/setup', icon: ListChecks }],
-  },
-  {
-    title: 'Payments',
-    items: [
-      { label: 'Zeke',        href: '/dashboard',          icon: Bot, badge: 'AI' },
-      { label: 'Transfer',     href: '/dashboard/transfer', icon: Send },
-      { label: 'Send USDC',    href: '/dashboard/send-usdc', icon: Wallet },
-      { label: 'Rate holds',   href: '/dashboard/transfers', icon: Timer },
-      { label: 'Batch Payout', href: '/dashboard/batch',    icon: Layers },
-    ],
-  },
-  {
-    title: 'Finance',
-    items: [
-      { label: 'Overview', href: '/dashboard/overview', icon: LayoutDashboard },
-      { label: 'Treasury', href: '/dashboard/treasury', icon: TrendingUp },
-      { label: 'Invoices', href: '/dashboard/invoices', icon: FileText },
-    ],
-  },
-  {
-    title: 'Contacts',
-    items: [
-      { label: 'Recipients', href: '/dashboard/recipients', icon: UserCircle },
-      { label: 'History',    href: '/dashboard/history',    icon: History },
-    ],
-  },
-];
-
-// ─── Layout ───────────────────────────────────────────────────────────────────
+const ICONS: Record<NavIcon, LucideIcon> = {
+  home: House,
+  zeke: Bot,
+  transfer: Send,
+  batch: Layers,
+  invoices: FileText,
+  wallet: Wallet,
+  treasury: TrendingUp,
+  recipients: UserCircle,
+  history: History,
+  settings: Settings,
+  support: Phone,
+  setup: ListChecks,
+};
 
 type DashboardShellProps = {
   children: ReactNode;
@@ -83,7 +72,10 @@ type DashboardShellProps = {
    *  are presentation; the routes stay the security. Absent (no database on
    *  a dev machine) means nothing is locked, mirroring the gates' own dev
    *  posture. */
-  locks?: { termsDone: boolean; moneyBlocked: boolean; custodyOn: boolean; reason: string };
+  locks?: NavLocks;
+  /** Account setup progress (required steps 1-4), from the same layout.
+   *  Absent when it could not be read. */
+  setup?: SetupProgress;
   /** The operator's sweep switch (`sweepAccountEnabled()`), resolved by the
    *  same layout. Separate from `locks` because it needs no database. */
   sweepOn?: boolean;
@@ -97,64 +89,177 @@ type DashboardShellProps = {
   governanceAlerts?: GovernanceBannerAlert[];
 };
 
-/** The pages a USDC-only launch does not open; their routes answer 403. */
-const OUT_OF_STABLECOIN_SCOPE = ['/dashboard/transfer', '/dashboard/transfers', '/dashboard/batch', '/dashboard/treasury'];
+type LinkProps = {
+  item: NavItem;
+  pathname: string;
+  collapsed: boolean;
+  locks: NavLocks | undefined;
+  scope: LaunchScope | undefined;
+  nested?: boolean;
+  onNavigate?: () => void;
+};
 
-/** Why a page is closed, and where to go instead. The launch scope answers
- *  first: no verification or setup step opens what this launch leaves out. */
-function pageLock(
-  href: string,
-  locks: DashboardShellProps['locks'],
-  scope: LaunchScope | undefined,
-): { reason: string; href: string; action: string } | null {
-  if (scope === 'stablecoin' && OUT_OF_STABLECOIN_SCOPE.includes(href)) {
-    return { reason: LAUNCH_SCOPE_REASON, href: '/dashboard/send-usdc', action: 'Send USDC' };
-  }
-  const reason = locks ? lockReasonFor(href, locks) : null;
-  return reason ? { reason, href: '/dashboard/setup', action: 'Finish account setup' } : null;
+/** One rail link: 44px tall, the current page announced, a padlock said in words. */
+function NavLink({ item, pathname, collapsed, locks, scope, nested = false, onNavigate }: LinkProps) {
+  const current = isCurrent(item.href, pathname, item.also);
+  const lock = pageLock(item.href, locks, scope);
+  const Icon = ICONS[item.icon];
+  return (
+    <Link
+      href={lock ? lock.href : item.href}
+      aria-current={current ? 'page' : undefined}
+      title={lock?.reason ?? (collapsed ? item.label : undefined)}
+      onClick={onNavigate}
+      className={`relative flex min-h-11 items-center rounded-lg px-2 py-2 text-sm transition-colors ${
+        collapsed ? 'justify-center' : nested ? 'gap-3 pl-9' : 'gap-3'
+      } ${
+        current
+          ? collapsed
+            ? 'bg-white text-[var(--ink)] shadow-sm'
+            : 'bg-white pl-3 text-[var(--ink)] shadow-sm'
+          : 'text-white/80 hover:bg-white/10 hover:text-white'
+      }`}
+    >
+      {current && !collapsed && <span aria-hidden="true" className="absolute left-0 top-1/2 h-6 w-1 -translate-y-1/2 rounded-full bg-[var(--teal)]" />}
+      <Icon size={nested ? 16 : 18} aria-hidden="true" className={current ? 'text-[var(--slate)]' : ''} />
+      {collapsed ? (
+        <span className="sr-only">{item.label}</span>
+      ) : (
+        <>
+          <span className={`flex-1 font-medium ${lock ? 'opacity-50' : ''}`}>{item.label}</span>
+          {lock && <Lock size={13} aria-hidden="true" className={current ? 'text-[var(--ink)]/70' : 'text-white/80'} />}
+          {item.badge && (
+            <span
+              className={`rounded-full bg-[var(--teal)]/20 px-1.5 py-0.5 text-[12px] font-semibold ${
+                current ? 'text-[var(--ink)]' : 'text-white'
+              }`}
+            >
+              {item.badge}
+            </span>
+          )}
+        </>
+      )}
+      {lock && <span className="sr-only">. Locked: {lock.reason}</span>}
+    </Link>
+  );
 }
 
-/**
- * The Stablecorp-pattern lock table. Zeke and Overview stay open at every
- * state: Zeke cannot move money regardless (three independent gates prove
- * it) and Overview is a read. Everything that spends follows the KYB gate;
- * Invoices and Recipients only need the terms; Treasury also needs the
- * custody phase.
- */
-function lockReasonFor(
-  href: string,
-  locks: NonNullable<DashboardShellProps['locks']>,
-): string | null {
-  // Parity with the routes, or the padlock lies: the spend routes require
-  // BOTH the KYB gate and the terms (requireTermsAccepted), so a nav item
-  // that only checked KYB would read as open and then answer 412 on submit.
-  const spend = ['/dashboard/transfer', '/dashboard/transfers', '/dashboard/batch'];
-  // Send USDC is the lane an unverified business may use (lib/payments/
-  // stablecoin-lane.ts): terms, not KYB. Its page states any lane lock itself.
-  const termsOnly = ['/dashboard/invoices', '/dashboard/recipients', '/dashboard/send-usdc'];
-  const termsReason = 'Accept the terms in Account setup to start here.';
-  if (href === '/dashboard/treasury') {
-    if (locks.moneyBlocked) return locks.reason;
-    if (!locks.termsDone) return termsReason;
-    if (!locks.custodyOn) return 'Treasury arrives with our licence. Nothing is held for you today.';
-    return null;
+/** The setup step still to finish, with its progress, until it is complete. */
+function SetupCard({
+  setup,
+  pathname,
+  collapsed,
+  onNavigate,
+}: {
+  setup: NonNullable<DashboardNav['setup']>;
+  pathname: string;
+  collapsed: boolean;
+  onNavigate?: () => void;
+}) {
+  const current = isCurrent(setup.href, pathname);
+  const progress = `${setup.done} of ${setup.total} steps done`;
+  if (collapsed) {
+    return (
+      <Link
+        href={setup.href}
+        aria-current={current ? 'page' : undefined}
+        title={`${setup.label}: ${progress}`}
+        onClick={onNavigate}
+        className="relative mb-3 flex min-h-11 items-center justify-center rounded-lg text-white/80 hover:bg-white/10 hover:text-white"
+      >
+        <ListChecks size={18} aria-hidden="true" />
+        <span aria-hidden="true" className="absolute right-3 top-2.5 h-2 w-2 rounded-full bg-[var(--gold-light)]" />
+        <span className="sr-only">{setup.label}, {progress}</span>
+      </Link>
+    );
   }
-  if (spend.includes(href)) {
-    if (locks.moneyBlocked) return locks.reason;
-    return locks.termsDone ? null : termsReason;
-  }
-  // History is a read of past transfers: nothing to show before verification,
-  // and nothing it can spend, so the terms do not gate it.
-  if (href === '/dashboard/history') return locks.moneyBlocked ? locks.reason : null;
-  if (termsOnly.includes(href)) return locks.termsDone ? null : termsReason;
-  return null;
+  return (
+    <Link
+      href={setup.href}
+      aria-current={current ? 'page' : undefined}
+      onClick={onNavigate}
+      className={`mb-3 block min-h-11 rounded-xl border px-3 py-2.5 transition-colors ${
+        current ? 'border-white bg-white text-[var(--ink)]' : 'border-white/15 bg-white/[0.07] text-white hover:bg-white/10'
+      }`}
+    >
+      <span className="flex items-center gap-2 text-sm font-semibold">
+        <ListChecks size={16} aria-hidden="true" />
+        {setup.label}
+      </span>
+      <span className={`mt-1 block text-[12px] font-medium ${current ? 'text-[var(--slate)]' : 'text-white'}`}>{progress}</span>
+      <span aria-hidden="true" className={`mt-2 block h-1.5 overflow-hidden rounded-full ${current ? 'bg-[var(--line)]' : 'bg-white/15'}`}>
+        <span className="block h-full rounded-full bg-[var(--gold-light)]" style={{ width: `${Math.round((setup.done / Math.max(setup.total, 1)) * 100)}%` }} />
+      </span>
+    </Link>
+  );
 }
 
-export default function DashboardShell({ children, session, kyb, locks, sweepOn, launchScope, governanceAlerts }: DashboardShellProps) {
+type ListProps = {
+  view: DashboardNav;
+  pathname: string;
+  collapsed: boolean;
+  locks: NavLocks | undefined;
+  scope: LaunchScope | undefined;
+  onNavigate?: () => void;
+};
+
+/** The groups, used by the rail and the phone drawer alike. */
+function NavSections({ view, pathname, collapsed, locks, scope, onNavigate, idPrefix }: ListProps & { idPrefix: string }) {
+  return (
+    <>
+      {view.sections.map((section, index) => (
+        <div key={section.title ?? 'top'}>
+          {section.title && !collapsed ? (
+            <p id={`${idPrefix}-group-${index}`} className="mb-1 px-2 text-[12px] font-semibold uppercase tracking-widest text-white/80">
+              {section.title}
+            </p>
+          ) : section.title ? (
+            <span aria-hidden="true" className="mx-auto mb-2 block h-px w-8 bg-white/15" />
+          ) : null}
+          <ul className="space-y-0.5" aria-labelledby={section.title && !collapsed ? `${idPrefix}-group-${index}` : undefined}>
+            {section.items.map((item) => (
+              <li key={item.href}>
+                <NavLink item={item} pathname={pathname} collapsed={collapsed} locks={locks} scope={scope} onNavigate={onNavigate} />
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </>
+  );
+}
+
+/** Settings (with Account setup under it once setup is complete) and Support. */
+function UtilityLinks({ view, pathname, collapsed, locks, scope, onNavigate }: ListProps) {
+  return (
+    <ul className="space-y-0.5">
+      {view.utility.map((item) => (
+        <li key={item.href}>
+          <NavLink item={item} pathname={pathname} collapsed={collapsed} locks={locks} scope={scope} onNavigate={onNavigate} />
+          {item.children?.length ? (
+            <ul className="mt-0.5 space-y-0.5">
+              {item.children.map((child) => (
+                <li key={child.href}>
+                  <NavLink item={child} pathname={pathname} collapsed={collapsed} locks={locks} scope={scope} nested onNavigate={onNavigate} />
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+export default function DashboardShell({ children, session, kyb, locks, setup, sweepOn, launchScope, governanceAlerts }: DashboardShellProps) {
   const [collapsed,  setCollapsed]  = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const router   = useRouter();
   const pathname = usePathname();
+  const view = dashboardNav(setup);
+  const drawerRef = useRef<HTMLDivElement>(null);
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
 
   async function logout() {
     await fetch('/api/auth/logout', { method: 'POST' });
@@ -162,15 +267,64 @@ export default function DashboardShell({ children, session, kyb, locks, sweepOn,
     router.refresh();
   }
 
+  function closeDrawer() {
+    setMobileOpen(false);
+    toggleRef.current?.focus();
+  }
+
+  // The phone menu is a modal dialog: focus moves in, Escape closes it, the
+  // page behind does not scroll, and focus returns to the menu button.
+  useEffect(() => {
+    if (!mobileOpen) return;
+    closeRef.current?.focus();
+    const { overflow } = document.body.style;
+    document.body.style.overflow = 'hidden';
+    function onKey(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setMobileOpen(false);
+        toggleRef.current?.focus();
+      }
+    }
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = overflow;
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [mobileOpen]);
+
+  /** Keep Tab inside the open drawer. */
+  function trapFocus(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.key !== 'Tab' || !drawerRef.current) return;
+    const focusable = drawerRef.current.querySelectorAll<HTMLElement>('a[href], button:not([disabled])');
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
+  const pageClosed = pageLock(pathname, locks, launchScope);
+
   return (
     <div className="fintech-dashboard-shell flex min-h-screen splash-page-bg">
+      <a
+        href="#dashboard-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-[60] focus:rounded-lg focus:bg-white focus:px-4 focus:py-3 focus:text-sm focus:font-semibold focus:text-[var(--ink)] focus:shadow-lg"
+      >
+        Skip to content
+      </a>
 
       {/* ── Desktop top header ───────────────────────────────── */}
       <DashboardHeader collapsed={collapsed} session={session} onLogout={logout} />
 
       {/* ── Desktop sidebar ──────────────────────────────────── */}
       <aside
-        className={`fintech-dashboard-sidebar hidden flex-col bg-[#1F4452] p-4 text-white transition-all duration-300 md:flex fixed left-0 top-0 z-30 h-screen ${
+        className={`fintech-dashboard-sidebar hidden flex-col bg-[var(--ink)] p-4 text-white transition-all duration-300 md:flex fixed left-0 top-0 z-30 h-screen ${
           collapsed ? 'w-20' : 'w-60'
         }`}
       >
@@ -178,14 +332,16 @@ export default function DashboardShell({ children, session, kyb, locks, sweepOn,
         <button
           type="button"
           onClick={() => setCollapsed((v) => !v)}
-          className={`mb-8 flex items-center rounded-xl transition-colors hover:bg-white/10 ${
+          className={`mb-6 flex min-h-11 items-center rounded-xl transition-colors hover:bg-white/10 ${
             collapsed ? 'mx-auto justify-center p-2' : 'gap-3 px-2 py-2'
           }`}
           aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
+          aria-expanded={!collapsed}
+          aria-controls="dashboard-rail"
         >
           <Image
             src="/splash-main-icon.png"
-            alt="Splash"
+            alt=""
             width={48}
             height={47}
             className="h-auto w-8 shrink-0 object-contain"
@@ -203,121 +359,51 @@ export default function DashboardShell({ children, session, kyb, locks, sweepOn,
           )}
         </button>
 
-        {/* Nav groups */}
-        <nav className="flex-1 space-y-5 overflow-y-auto">
-          {navGroups.map((group) => (
-            <div key={group.title}>
-              {!collapsed && (
-                <div className="mb-1 px-2 text-[12px] font-semibold uppercase tracking-widest text-white/80">
-                  {group.title}
-                </div>
-              )}
-              <div className="space-y-0.5">
-                {group.items.map(({ label, href, icon: Icon, badge }) => {
-                  const active = pathname === href;
-                  const lock = pageLock(href, locks, launchScope);
-                  const lockReason = lock?.reason ?? null;
-                  return (
-                    <Link
-                      key={href}
-                      href={lock ? lock.href : href}
-                      aria-disabled={lockReason ? true : undefined}
-                      title={lockReason ?? (collapsed ? label : undefined)}
-                      className={`relative flex items-center rounded-lg px-2 py-2 text-sm transition-colors ${
-                        collapsed ? 'justify-center' : 'gap-3'
-                      } ${
-                        active
-                          ? collapsed
-                            ? 'bg-white text-[#1F4452] shadow-sm'
-                            : 'bg-white pl-3 text-[#1F4452] shadow-sm'
-                          : 'text-white/80 hover:bg-white/10 hover:text-white'
-                      }`}
-                    >
-                      {active && !collapsed && <span aria-hidden="true" className="absolute left-0 top-1/2 h-6 w-1 -translate-y-1/2 rounded-full bg-[#5C9EAD]" />}
-                      <Icon size={18} className={active ? 'text-[#5C9EAD]' : ''} />
-                      {!collapsed && (
-                        <>
-                          <span className={`flex-1 font-medium ${lockReason ? 'opacity-50' : ''}`}>{label}</span>
-                          {lockReason && <Lock size={13} aria-hidden="true" className={active ? 'text-[#1F4452]/70' : 'text-white/80'} />}
-                          {badge && (
-                            <span
-                              className={`rounded-full px-1.5 py-0.5 text-[13px] font-semibold ${
-                                badge === 'New' ? 'bg-[#E39774]/25' : 'bg-[#5C9EAD]/20'
-                              } ${
-                                // On the dark rail, warm white on the accent's tint (the light coral
-                                // was 4.1:1 there); on the white active pill, ink.
-                                active ? 'text-[#1F4452]' : badge === 'New' ? 'text-[#fffaf6]' : 'text-white'
-                              }`}
-                            >
-                              {badge}
-                            </span>
-                          )}
-                        </>
-                      )}
-                    </Link>
-                  );
-                })}
+        <nav id="dashboard-rail" aria-label="Dashboard" className="flex min-h-0 flex-1 flex-col">
+          <div className="flex-1 space-y-4 overflow-y-auto">
+            <NavSections view={view} pathname={pathname} collapsed={collapsed} locks={locks} scope={launchScope} idPrefix="rail" />
+          </div>
+
+          <div className="pt-4">
+            {view.setup ? <SetupCard setup={view.setup} pathname={pathname} collapsed={collapsed} /> : null}
+
+            {!collapsed && (
+              <div className="fintech-sidebar-signal">
+                <Image src="/isometric/sui-logo-clean.svg" alt="" width={32} height={42} />
+                <span>
+                  <small>Settlement rail</small>
+                  <strong><i aria-hidden="true" /> Sui mainnet</strong>
+                </span>
               </div>
+            )}
+
+            <div className="border-t border-white/10 pt-3">
+              <UtilityLinks view={view} pathname={pathname} collapsed={collapsed} locks={locks} scope={launchScope} />
             </div>
-          ))}
+          </div>
         </nav>
 
-        {/* Bottom items */}
-        {!collapsed && (
-          <div className="fintech-sidebar-signal">
-            <Image src="/isometric/sui-logo-clean.svg" alt="" width={32} height={42} />
-            <span>
-              <small>Settlement rail</small>
-              <strong><i /> Sui testnet ready</strong>
-            </span>
-          </div>
-        )}
-
-        <div className="space-y-0.5 border-t border-white/10 pt-4">
-          <Link
-            href="/dashboard/settings"
-            title={collapsed ? 'Settings' : undefined}
-            className={`flex items-center rounded-lg px-2 py-2 text-sm transition-colors hover:bg-white/10 hover:text-white ${
-              collapsed ? 'justify-center' : 'gap-3'
-            } ${
-              pathname === '/dashboard/settings'
-                ? 'bg-white/15 text-white'
-                : 'text-white/80'
-            }`}
-          >
-            <Settings size={18} />
-            {!collapsed && <span className="font-medium">Settings</span>}
-          </Link>
-          <Link
-            href="/dashboard/customer-service"
-            title={collapsed ? 'Support' : undefined}
-            className={`flex items-center rounded-lg px-2 py-2 text-sm text-white/80 transition-colors hover:bg-white/10 hover:text-white ${
-              collapsed ? 'justify-center' : 'gap-3'
-            }`}
-          >
-            <Phone size={18} />
-            {!collapsed && <span className="font-medium">Support</span>}
-          </Link>
+        <div className="mt-2 border-t border-white/10 pt-2">
           <button
             type="button"
             onClick={logout}
             title={collapsed ? 'Log out' : undefined}
-            className={`flex w-full items-center rounded-lg px-2 py-2 text-sm text-white/80 transition-colors hover:bg-white/10 hover:text-[#E39774] ${
+            className={`flex min-h-11 w-full items-center rounded-lg px-2 py-2 text-sm text-white/80 transition-colors hover:bg-white/10 hover:text-[var(--gold-light)] ${
               collapsed ? 'justify-center' : 'gap-3'
             }`}
           >
-            <LogOut size={18} />
-            {!collapsed && <span className="font-medium">Log out</span>}
+            <LogOut size={18} aria-hidden="true" />
+            {collapsed ? <span className="sr-only">Log out</span> : <span className="font-medium">Log out</span>}
           </button>
         </div>
       </aside>
 
       {/* ── Mobile top header ─────────────────────────────────── */}
-      <header className="fixed left-0 right-0 top-0 z-40 flex items-center justify-between bg-[#1F4452] px-4 py-3 md:hidden">
-        <div className="flex items-center gap-3">
+      <header className="fixed left-0 right-0 top-0 z-40 flex h-[60px] items-center justify-between bg-[var(--ink)] px-4 md:hidden">
+        <Link href="/dashboard" className="flex min-h-11 items-center gap-3 rounded-lg">
           <Image
             src="/splash-main-icon.png"
-            alt="Splash"
+            alt=""
             width={48}
             height={47}
             className="h-auto w-7 object-contain"
@@ -326,47 +412,75 @@ export default function DashboardShell({ children, session, kyb, locks, sweepOn,
           />
           <span className="text-lg font-semibold text-white">
             Splash<span className="text-[#bfe6ee]">.</span>
+            <span className="sr-only">, Home</span>
           </span>
-        </div>
+        </Link>
         <button
+          ref={toggleRef}
           type="button"
-          onClick={() => setMobileOpen((v) => !v)}
-          className="text-white"
-          aria-label={mobileOpen ? 'Close navigation' : 'Open navigation'}
+          onClick={() => setMobileOpen(true)}
+          className="grid h-11 w-11 place-items-center rounded-lg text-white hover:bg-white/10"
+          aria-label="Open navigation"
           aria-expanded={mobileOpen}
+          aria-controls="dashboard-drawer"
+          aria-haspopup="dialog"
         >
-          {mobileOpen ? <X size={24} /> : <Menu size={24} />}
+          <Menu size={24} aria-hidden="true" />
         </button>
       </header>
 
-      {/* ── Mobile overlay ────────────────────────────────────── */}
+      {/* ── Phone drawer ──────────────────────────────────────── */}
       {mobileOpen && (
-        <div className="fixed inset-0 z-50 bg-[#1F4452] pt-16 md:hidden">
-          <div className="flex h-full flex-col p-6">
-            <nav className="flex-1 space-y-1 overflow-y-auto">
-              {navGroups.flatMap((g) => g.items).map(({ label, href, icon: Icon }) => (
-                <Link
-                  key={href}
-                  onClick={() => setMobileOpen(false)}
-                  href={pageLock(href, locks, launchScope)?.href ?? href}
-                  className={`flex items-center gap-3 rounded-xl px-4 py-3 text-white transition-colors hover:bg-white/10 ${
-                    pathname === href ? 'bg-white/15' : ''
-                  }`}
-                >
-                  <Icon size={20} />
-                  <span className={`font-medium ${pageLock(href, locks, launchScope) ? 'opacity-50' : ''}`}>{label}</span>
-                  {pageLock(href, locks, launchScope) ? <Lock size={14} aria-hidden="true" className="ml-auto text-white/80" /> : null}
-                </Link>
-              ))}
+        <div className="fixed inset-0 z-50 md:hidden">
+          <button
+            type="button"
+            tabIndex={-1}
+            aria-hidden="true"
+            className="absolute inset-0 bg-[var(--ink)]/55 backdrop-blur-[2px]"
+            onClick={closeDrawer}
+          />
+          <div
+            id="dashboard-drawer"
+            ref={drawerRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Navigation"
+            onKeyDown={trapFocus}
+            className="fintech-dashboard-sidebar absolute inset-y-0 left-0 flex w-[min(20rem,86vw)] flex-col bg-[var(--ink)] text-white shadow-2xl"
+          >
+            <div className="flex h-[60px] shrink-0 items-center justify-between px-4">
+              <span className="text-lg font-semibold text-white">
+                Splash<span className="text-[#bfe6ee]">.</span>
+              </span>
+              <button
+                ref={closeRef}
+                type="button"
+                onClick={closeDrawer}
+                className="grid h-11 w-11 place-items-center rounded-lg text-white hover:bg-white/10"
+                aria-label="Close navigation"
+              >
+                <X size={24} aria-hidden="true" />
+              </button>
+            </div>
+            <nav aria-label="Dashboard" className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 pb-4">
+              <div className="space-y-4">
+                <NavSections view={view} pathname={pathname} collapsed={false} locks={locks} scope={launchScope} onNavigate={() => setMobileOpen(false)} idPrefix="drawer" />
+              </div>
+              <div className="mt-5">
+                {view.setup ? <SetupCard setup={view.setup} pathname={pathname} collapsed={false} onNavigate={() => setMobileOpen(false)} /> : null}
+                <div className="border-t border-white/10 pt-3">
+                  <UtilityLinks view={view} pathname={pathname} collapsed={false} locks={locks} scope={launchScope} onNavigate={() => setMobileOpen(false)} />
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => { setMobileOpen(false); logout(); }}
+                className="mt-3 flex min-h-11 items-center gap-3 rounded-lg border-t border-white/10 px-2 py-3 text-sm text-white/80 transition-colors hover:bg-white/10 hover:text-[var(--gold-light)]"
+              >
+                <LogOut size={18} aria-hidden="true" />
+                <span className="font-medium">Log out</span>
+              </button>
             </nav>
-            <button
-              type="button"
-              onClick={() => { setMobileOpen(false); logout(); }}
-              className="flex items-center gap-3 rounded-xl px-4 py-3 text-white transition-colors hover:bg-white/10 hover:text-[#E39774]"
-            >
-              <LogOut size={20} />
-              <span className="font-medium">Log out</span>
-            </button>
           </div>
         </div>
       )}
@@ -374,7 +488,9 @@ export default function DashboardShell({ children, session, kyb, locks, sweepOn,
       {/* ── Main content ──────────────────────────────────────── */}
       {/* Mobile top pad = 60 px (mobile header); desktop = 76 px (desktop header + gap) */}
       <main
-        className={`fintech-dashboard-main relative z-0 min-w-0 flex-1 overflow-x-hidden transition-all duration-300 p-4 pt-[60px] pb-16 md:px-8 md:pb-8 md:pt-[76px] ${
+        id="dashboard-content"
+        tabIndex={-1}
+        className={`fintech-dashboard-main relative z-0 min-w-0 flex-1 overflow-x-hidden outline-none transition-all duration-300 p-4 pt-[76px] pb-16 md:px-8 md:pb-8 md:pt-[76px] ${
           collapsed ? 'md:ml-20' : 'md:ml-60'
         }`}
       >
@@ -389,32 +505,32 @@ export default function DashboardShell({ children, session, kyb, locks, sweepOn,
             <ShieldAlert aria-hidden="true" className="h-4 w-4 shrink-0 text-[var(--warn)]" />
             <div className="min-w-0 flex-1">
               <p className="text-[13px] font-bold text-[#8b6418]">Read-only workspace</p>
-              <p className="mt-0.5 text-[13px] font-medium text-[#326273]/90">{kyb.reason}</p>
+              <p className="mt-0.5 text-[13px] font-medium text-[var(--slate)]">{kyb.reason}</p>
             </div>
             <Link
               href="/settings/kyb"
-              className="rounded-md bg-[#1F4452] px-3 py-1.5 text-[13px] font-bold text-white"
+              className="inline-flex min-h-11 items-center rounded-md bg-[var(--ink)] px-3 text-[13px] font-bold text-white"
             >
               Verification
             </Link>
           </div>
         ) : null}
-        {pageLock(pathname, locks, launchScope) ? (
+        {pageClosed ? (
           <section className="dash-surface mx-auto mt-10 max-w-lg p-8 text-center">
-            <Lock aria-hidden="true" className="mx-auto h-8 w-8 text-[#326273]/70" />
-            <h2 className="mt-4 text-lg font-bold text-[#1F4452]">Not open yet</h2>
-            <p className="mt-2 text-sm leading-relaxed text-[#326273]">{pageLock(pathname, locks, launchScope)?.reason}</p>
+            <Lock aria-hidden="true" className="mx-auto h-8 w-8 text-[var(--slate)]" />
+            <h2 className="mt-4 text-lg font-bold text-[var(--ink)]">Not open yet</h2>
+            <p className="mt-2 text-sm leading-relaxed text-[var(--slate)]">{pageClosed.reason}</p>
             <Link
-              href={pageLock(pathname, locks, launchScope)?.href ?? '/dashboard/setup'}
-              className="mt-5 inline-flex min-h-[44px] items-center justify-center rounded-lg bg-[#1F4452] px-5 text-sm font-semibold text-white transition hover:bg-[#326273]"
+              href={pageClosed.href}
+              className="mt-5 inline-flex min-h-[44px] items-center justify-center rounded-lg bg-[var(--ink)] px-5 text-sm font-semibold text-white transition hover:bg-[var(--slate)]"
             >
-              {pageLock(pathname, locks, launchScope)?.action}
+              {pageClosed.action}
             </Link>
           </section>
         ) : (
-          // The same custodyOn the Treasury padlock reads, for pages that
-          // cannot import the server gate (StepDelivery's fund-holding tiers),
-          // and the sweep switch the transfer routes also enforce.
+          // The same custodyOn the layout resolves, for pages that cannot
+          // import the server gate (StepDelivery's fund-holding tiers), and
+          // the sweep switch the transfer routes also enforce.
           <SweepSwitchContext value={sweepOn ?? false}>
             <CustodyPhaseContext value={locks?.custodyOn ?? false}>
               <LaunchScopeContext value={launchScope ?? 'full'}>{children}</LaunchScopeContext>
