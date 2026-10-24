@@ -6,7 +6,8 @@
 ///   * an intent lives `now < expires_at <= now + 30 days`, and at
 ///     `expires_at` exactly it is expired, for settlement and for anyone
 ///     expiring it;
-///   * kinds 1 to 3 land on Sui (domain 8), kind 4 only through a cross-chain
+///   * A1's kinds: Splash business 0, wallet 1, exchange 2 and bank payout 4
+///     land on Sui (domain 8), cross-chain 3 only through a cross-chain
 ///     create and never on domain 8, and nothing else is a kind;
 ///   * a bank payout names a 32-byte beneficiary commitment and no other kind
 ///     names one; the rail commitment and the payment reference are 32 bytes;
@@ -697,15 +698,23 @@ fun an_intent_cannot_be_expired_one_ms_early() {
 // ═══ Kinds ═════════════════════════════════════════════════════════════════
 
 #[test]
-/// Kinds 1, 2 and 3 land on Sui: domain 8, no bridge parameters, and a
-/// beneficiary on the bank payout only.
-fun kinds_one_to_three_open_on_sui() {
+/// Amendment A1 numbers the kinds: Splash business 0, wallet 1, exchange 2,
+/// cross-chain 3, bank payout 4. The four Sui kinds land on Sui: domain 8, no
+/// bridge parameters, and a beneficiary on the bank payout only.
+fun the_four_sui_kinds_open_on_sui() {
     let mut s = h::setup();
     s.next_tx(h::wallet());
     let (mut account, config, c) = take(&s);
-    let mut kind = 1;
-    while (kind <= 3) {
-        let intent = by_wallet(&mut account, &config, of_kind(kind, kind, &c), &c, s.ctx());
+    let kinds = vector[
+        payment_intent::kind_splash_business(),
+        payment_intent::kind_wallet(),
+        payment_intent::kind_exchange(),
+        payment_intent::kind_bank_payout(),
+    ];
+    let mut i = 0;
+    while (i < kinds.length()) {
+        let kind = kinds[i];
+        let intent = by_wallet(&mut account, &config, of_kind(kind + 1, kind, &c), &c, s.ctx());
         assert_eq!(payment_intent::kind(&intent), kind);
         assert_eq!(payment_intent::destination_domain(&intent), payment_intent::sui_domain());
         assert_eq!(payment_intent::destination_domain(&intent), 8);
@@ -718,24 +727,13 @@ fun kinds_one_to_three_open_on_sui() {
         };
         assert_eq!(payment_intent::rail_commitment(&intent), h::rail());
         payment_intent::share_intent(intent);
-        kind = kind + 1;
+        i = i + 1;
     };
-    assert_eq!(payment_intent::kind_bank_payout(), 1);
-    assert_eq!(payment_intent::kind_splash_business(), 2);
-    assert_eq!(payment_intent::kind_wallet(), 3);
-    assert_eq!(payment_intent::kind_cross_chain_wallet(), 4);
-    give(account, config, c);
-    s.end();
-}
-
-#[test]
-#[expected_failure(abort_code = payment_intent::E_INVALID_KIND)]
-/// Zero is never a kind, so a field left unset cannot read as one.
-fun kind_zero_is_refused() {
-    let mut s = h::setup();
-    s.next_tx(h::wallet());
-    let (mut account, config, c) = take(&s);
-    payment_intent::share_intent(by_wallet(&mut account, &config, of_kind(1, 0, &c), &c, s.ctx()));
+    assert_eq!(payment_intent::kind_splash_business(), 0);
+    assert_eq!(payment_intent::kind_wallet(), 1);
+    assert_eq!(payment_intent::kind_exchange(), 2);
+    assert_eq!(payment_intent::kind_cross_chain(), 3);
+    assert_eq!(payment_intent::kind_bank_payout(), 4);
     give(account, config, c);
     s.end();
 }
@@ -755,13 +753,13 @@ fun kind_five_is_refused() {
 
 #[test]
 #[expected_failure(abort_code = payment_intent::E_INVALID_KIND)]
-/// `create_for_wallet` lands on Sui. A kind-4 intent opened there would have
+/// `create_for_wallet` lands on Sui. A kind-3 intent opened there would have
 /// domain 8 and no bridge parameters, a cross-chain payment with nowhere to go.
 fun wallet_create_refuses_the_cross_chain_kind() {
     let mut s = h::setup();
     s.next_tx(h::wallet());
     let (mut account, config, c) = take(&s);
-    let d = of_kind(1, payment_intent::kind_cross_chain_wallet(), &c);
+    let d = of_kind(1, payment_intent::kind_cross_chain(), &c);
     payment_intent::share_intent(by_wallet(&mut account, &config, d, &c, s.ctx()));
     give(account, config, c);
     s.end();
@@ -775,7 +773,7 @@ fun app_create_refuses_the_cross_chain_kind() {
     register_app(&mut s);
     s.next_tx(STAFF);
     let (mut account, config, c) = take(&s);
-    let d = of_kind(1, payment_intent::kind_cross_chain_wallet(), &c);
+    let d = of_kind(1, payment_intent::kind_cross_chain(), &c);
     payment_intent::share_intent(by_app(&mut account, &config, STAFF, d, &c, s.ctx()));
     give(account, config, c);
     s.end();
@@ -797,15 +795,15 @@ fun cross_chain_wallet_create_refuses_the_sui_domain() {
 }
 
 #[test]
-/// A cross-chain create records kind 4, its domain and mint recipient, the
+/// A cross-chain create records kind 3, its domain and mint recipient, the
 /// bridge limits the owners signed, and no beneficiary.
-fun cross_chain_create_records_kind_four() {
+fun cross_chain_create_records_kind_three() {
     let mut s = h::setup();
     s.next_tx(h::wallet());
     let (mut account, config, c) = take(&s);
     let expires_at = c.timestamp_ms() + FIVE_MINUTES;
     let intent = cross_chain_by_wallet(&mut account, &config, 1, BASE_DOMAIN, expires_at, &c, s.ctx());
-    assert_eq!(payment_intent::kind(&intent), payment_intent::kind_cross_chain_wallet());
+    assert_eq!(payment_intent::kind(&intent), payment_intent::kind_cross_chain());
     assert_eq!(payment_intent::destination_domain(&intent), BASE_DOMAIN);
     assert_eq!(payment_intent::recipient(&intent), MINT_RECIPIENT);
     assert_eq!(payment_intent::beneficiary_ref(&intent), vector[]);
