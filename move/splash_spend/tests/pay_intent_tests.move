@@ -4334,6 +4334,62 @@ fun a_fee_above_max_fee_aborts() {
 }
 
 #[test]
+#[expected_failure(abort_code = splash_spend::E_MAX_FEE_ABOVE_CEILING)]
+/// The A1 review (L4): max_fee is bounded by this package's own ceiling, 1%
+/// of the principal, the most Splash's fee can ever be on a rule payment.
+/// One unit above it aborts, though the fee itself is far below it.
+fun a_max_fee_one_unit_above_one_percent_of_the_principal_aborts() {
+    let (mut s, fx) = fee_setup();
+    let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    let max_fee = PAY / 100 + 1;
+    pay_fee(&mut s, &fx, STAFF, fx.staff, intent, false, PAY + max_fee, max_fee);
+    s.end();
+}
+
+#[test]
+/// A max_fee of exactly 1% of the principal pays. Core charges the fee, and
+/// the rest of max_fee goes back to the wallet.
+fun a_max_fee_of_exactly_one_percent_of_the_principal_pays() {
+    let (mut s, fx) = fee_setup();
+    let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    let max_fee = PAY / 100;
+    pay_fee(&mut s, &fx, STAFF, fx.staff, intent, false, PAY + max_fee, max_fee);
+    assert_eq!(coin_received(&mut s, SUPPLIER), PAY);
+    assert_eq!(settled(&mut s, h::fee_recipient()), WALLET_FEE);
+    assert_eq!(settled(&mut s, h::wallet()), FUNDS - PAY - WALLET_FEE);
+    assert_eq!(alw_spend(&mut s, fx.staff), (PAY + max_fee) as u256);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = splash_spend::E_MAX_FEE_ABOVE_CEILING)]
+/// The review's case. A staff spender pays a 500 USDC intent and signs for
+/// 49,500 USDC of fee headroom, drawing the allowance's whole 50,000 USDC
+/// lifetime cap. The headroom would come back to the wallet, but the
+/// allowance would count all of it, and every later payment under the rule
+/// would abort. Refused at the draw.
+fun fee_headroom_cannot_use_up_the_allowance() {
+    let (mut s, fx) = fee_setup();
+    let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    let max_fee = (ALLOWANCE_CAP as u64) - PAY;
+    pay_fee(&mut s, &fx, STAFF, fx.staff, intent, false, PAY + max_fee, max_fee);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = splash_spend::E_MAX_FEE_ABOVE_CEILING)]
+/// The bound holds with Splash's fees off too: it bounds what the spender
+/// draws, whatever the fee turns out to be.
+fun with_fees_off_max_fee_is_still_bounded_by_one_percent() {
+    let (mut s, fx) = fee_setup();
+    h::turn_fees_off(&mut s);
+    let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    let max_fee = PAY / 100 + 1;
+    pay_fee(&mut s, &fx, STAFF, fx.staff, intent, false, PAY + max_fee, max_fee);
+    s.end();
+}
+
+#[test]
 #[expected_failure(abort_code = splash_core::payment_intent::E_EXACT_AMOUNT_REQUIRED)]
 /// The spender draws the principal and max_fee, exactly: drawing only the
 /// principal while signing for a fee aborts in core.
