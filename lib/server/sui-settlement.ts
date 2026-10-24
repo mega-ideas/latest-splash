@@ -491,7 +491,7 @@ const ABORT_CODES: Record<number, string> = {
   1003: 'E_RECIPIENT_NOT_VERIFIED — the destination is not on this spending rule verified list. The owners verify it first.',
   1004: 'E_BENEFICIARY_NOT_VERIFIED — the bank beneficiary is not verified for this partner deposit address.',
   1005: 'E_OVER_PER_PAYMENT_MAX — the payment is above the spending rule per-payment maximum, or the spender own.',
-  1006: 'E_APPROVAL_REQUIRED — this payment needs an approval and carries none: together with what this payer has already paid this recipient in the current window (24 hours by default, from the first of those payments), it is above the second-approval threshold, or the payer is the scheduled-payment operator. An owner approves it, or it waits for the window to end.',
+  1006: 'E_APPROVAL_REQUIRED — this payment needs an approval and carries none: together with what this payer has already paid this recipient in the current window (24 hours by default, from the first of those payments), and what the window before it paid less than a window ago, it is above the second-approval threshold, or the payer is the scheduled-payment operator. An owner approves it, or it waits until those payments stop counting.',
   1007: 'E_APPROVAL_MISMATCH — the approval is for a different rule, intent, amount or payer.',
   1008: 'E_SELF_APPROVAL — the approver opened this payment or is paying it. A second approval needs a second person.',
   1009: 'E_NOT_AN_OWNER — the approver is not a member of the business wallet.',

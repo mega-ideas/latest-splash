@@ -3728,6 +3728,88 @@ fun a_part_paid_late_in_a_window_counts_in_the_next() {
     s.end();
 }
 
+/// What the second-approval check counts for STAFF paying SUPPLIER now.
+fun counted_now(s: &mut Scenario, fx: &Fx): u64 {
+    s.next_tx(STRANGER);
+    let policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
+    let c = s.take_shared<Clock>();
+    let n = spend_policy::threshold_total(&policy, STAFF, payment_intent::kind_wallet(), SUPPLIER, vector[], c.timestamp_ms());
+    ts::return_shared(c);
+    ts::return_shared(policy);
+    n
+}
+
+#[test]
+/// `threshold_total`, the view the check reads: the current window's total
+/// plus what the window before it still counts. A window's total counts
+/// until a window length after its last payment, into the next window,
+/// while `running_total` shows the current window only.
+fun a_windows_total_counts_until_a_window_after_its_last_payment() {
+    let (mut s, fx) = setup();
+    let w = spend_policy::default_running_window_ms();
+    let first = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    pay(&mut s, &fx, STAFF, fx.staff, first, false);
+    advance(&mut s, w - 1);
+    let second = open(&mut s, &fx, STAFF, 2, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    pay(&mut s, &fx, STAFF, fx.staff, second, false);
+    assert_eq!(counted_now(&mut s, &fx), 2 * PAY);
+    // The window ends: the view of it goes, the count does not.
+    advance(&mut s, 1);
+    assert_eq!(total_paid(&mut s, &fx, STAFF, payment_intent::kind_wallet(), SUPPLIER), 0);
+    assert_eq!(counted_now(&mut s, &fx), 2 * PAY);
+    // A payment opens the next window and carries the first one's total.
+    let third = open(&mut s, &fx, STAFF, 3, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    pay(&mut s, &fx, STAFF, fx.staff, third, false);
+    assert_eq!(total_paid(&mut s, &fx, STAFF, payment_intent::kind_wallet(), SUPPLIER), PAY);
+    assert_eq!(counted_now(&mut s, &fx), 3 * PAY);
+    // A window after the first window's last payment, it stops counting.
+    advance(&mut s, w - 1);
+    assert_eq!(counted_now(&mut s, &fx), PAY);
+    // And a window after the third, nothing counts.
+    advance(&mut s, 1);
+    assert_eq!(counted_now(&mut s, &fx), 0);
+    s.end();
+}
+
+#[test]
+/// With nothing paid late in the window, its total stops counting at its
+/// end, exactly as before: Sky's boundary case, and a third part a window
+/// after the second, each pay alone.
+fun parts_a_window_apart_each_pay_alone() {
+    let (mut s, fx) = setup();
+    let w = spend_policy::default_running_window_ms();
+    let mut n = 1;
+    while (n <= 3) {
+        assert_eq!(counted_now(&mut s, &fx), 0);
+        let id = open(&mut s, &fx, STAFF, n, payment_intent::kind_wallet(), SUPPLIER, UNDER);
+        pay(&mut s, &fx, STAFF, fx.staff, id, false);
+        assert_eq!(intent_status(&mut s, id), payment_intent::status_confirmed());
+        advance(&mut s, w);
+        n = n + 1;
+    };
+    s.end();
+}
+
+#[test]
+/// An approved part counts like any other into the next window: after it,
+/// the next part needs an approval of its own.
+fun an_approved_late_part_counts_in_the_next_window() {
+    let (mut s, fx) = setup();
+    let first = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    pay(&mut s, &fx, STAFF, fx.staff, first, false);
+    advance(&mut s, spend_policy::default_running_window_ms() - 1);
+    let late = open(&mut s, &fx, STAFF, 2, payment_intent::kind_wallet(), SUPPLIER, THRESHOLD);
+    approve(&mut s, &fx, h::owner_2(), late, STAFF);
+    pay(&mut s, &fx, STAFF, fx.staff, late, true);
+    advance(&mut s, 1);
+    assert_eq!(counted_now(&mut s, &fx), PAY + THRESHOLD);
+    let next = open(&mut s, &fx, STAFF, 3, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    approve(&mut s, &fx, h::owner_2(), next, STAFF);
+    pay(&mut s, &fx, STAFF, fx.staff, next, true);
+    assert_eq!(intent_status(&mut s, next), payment_intent::status_confirmed());
+    s.end();
+}
+
 #[test]
 #[expected_failure(abort_code = sui::allowance::EExceedsLifetimeCap)]
 /// The allowance cap stays the hard ceiling. Approvals lift the threshold,
@@ -3856,6 +3938,29 @@ fun a_removed_spenders_total_is_pruned_once_its_window_ends() {
     };
     assert_eq!(prune(&mut s, &fx, h::wallet(), 10), 0);
     advance(&mut s, spend_policy::default_running_window_ms());
+    assert_eq!(prune(&mut s, &fx, h::wallet(), 10), 1);
+    assert_eq!(entries(&mut s, &fx), 0);
+    s.end();
+}
+
+#[test]
+/// An entry is pruned only once nothing in it counts: a total paid late in
+/// its window is kept past the window's end, until a window after that
+/// payment.
+fun a_total_still_counting_is_not_pruned_at_its_windows_end() {
+    let (mut s, fx) = setup();
+    let w = spend_policy::default_running_window_ms();
+    let first = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    pay(&mut s, &fx, STAFF, fx.staff, first, false);
+    advance(&mut s, w - 1);
+    let second = open(&mut s, &fx, STAFF, 2, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    pay(&mut s, &fx, STAFF, fx.staff, second, false);
+    advance(&mut s, 1);
+    assert_eq!(prune(&mut s, &fx, h::wallet(), 10), 0);
+    assert_eq!(entries(&mut s, &fx), 1);
+    advance(&mut s, w - 2);
+    assert_eq!(prune(&mut s, &fx, h::wallet(), 10), 0);
+    advance(&mut s, 1);
     assert_eq!(prune(&mut s, &fx, h::wallet(), 10), 1);
     assert_eq!(entries(&mut s, &fx), 0);
     s.end();

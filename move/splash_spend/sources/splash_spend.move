@@ -86,8 +86,9 @@ const E_BENEFICIARY_NOT_VERIFIED: u64 = 1004;
 /// The payment is above the policy's or the spender's per-payment maximum.
 const E_OVER_PER_PAYMENT_MAX: u64 = 1005;
 /// The payment needs an approval and carries none: with what its payer has
-/// already paid its recipient in the current window, it is above the
-/// second-approval threshold, or the payer is an executor.
+/// already paid its recipient in the current window, and what the window
+/// before it paid less than a window ago (`spend_policy::threshold_total`),
+/// it is above the second-approval threshold, or the payer is an executor.
 const E_APPROVAL_REQUIRED: u64 = 1006;
 /// The approval is for a different policy, intent, amount or payer.
 const E_APPROVAL_MISMATCH: u64 = 1007;
@@ -643,12 +644,15 @@ fun draw<C>(
     assert!(fee <= fee_ceiling(amount), E_FEE_ABOVE_CEILING);
 
     // Approvals: the owners', when this payment takes what the payer has
-    // paid this recipient in the current window above the threshold
-    // (decision 4), and for an executor always. Every approval is the
-    // owners' (an owner's, or the wallet's delegation), and any approval
-    // passed must match and is consumed.
+    // paid this recipient above the threshold (decision 4), and for an
+    // executor always. What counts is the current window's total and what
+    // the window before it paid less than a window length ago
+    // (`threshold_total`), so a window primed at its start cannot double
+    // the threshold across its boundary. Every approval is the owners' (an
+    // owner's, or the wallet's delegation), and any approval passed must
+    // match and is consumed.
     let now = clock.timestamp_ms();
-    let paid_so_far = spend_policy::running_total(policy, payer, kind, recipient, beneficiary_ref, now);
+    let paid_so_far = spend_policy::threshold_total(policy, payer, kind, recipient, beneficiary_ref, now);
     let threshold = spend_policy::second_approval_threshold(policy);
     let over_threshold = paid_so_far > threshold || amount > threshold - paid_so_far;
     let needs_approval = over_threshold || spend_policy::is_executor(policy, payer);
