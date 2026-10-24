@@ -314,6 +314,11 @@ export async function checkUpgradeWrapper(node, { wrapperId, delayPackageId, cor
   const multisig = governance ? normalizeSuiAddress(governance) : '';
   if (wrongType) {
     owner = { check: O, status: 'FAIL', detail: `not checked: SPLASH_UPGRADE_WRAPPER_ID ${id} is not the wrapper.` };
+  } else if (!expected) {
+    // Without the canonical package the type was only suffix-matched, so a
+    // look-alike wrapper from any package would pass. Who holds it proves
+    // nothing until the object is known to be the canonical one.
+    owner = { check: O, status: 'SKIP', detail: `skipped: set SPLASH_UPGRADE_DELAY_PACKAGE_ID so ${id} is known to be the canonical wrapper before its holder is checked.` };
   } else if (!holder) {
     owner = { check: O, status: 'FAIL', detail: `${id} is not owned by an address (${object.owner?.$kind ?? 'no owner returned'}).` };
   } else if (hot && holder === hot) {
