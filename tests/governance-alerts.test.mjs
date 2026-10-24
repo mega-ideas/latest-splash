@@ -503,3 +503,388 @@ test('the GraphQL reader parses indexer nodes into classifier input and stops at
   assert.deepEqual(events.map((e) => [e.digest, e.eventSeq]), [['TxNew', 2]], 'too old and not yet indexed are both dropped');
   assert.equal(classifyGovernanceEvents(events, POLICY).alerts.length, 1);
 });
+
+// ─── 4. Review (v2 Phase 1): the chain's state is the source, not a feed ───
+//
+// These run the real cron route against a fake Sui. The fake serves BOTH the
+// global event feed (`events(filter: { type })`, paged backwards the way Sui
+// GraphQL pages it) and the two canonical objects (`GovernanceState`), and
+// the two always agree, so each test says what the chain holds whichever of
+// them a monitor reads. Email (Resend), WhatsApp (Twilio) and the operator
+// page (OPERATOR_ALERT_WEBHOOK_URL) go through the same fake, so the test
+// sees exactly what left the process. Times are relative to the real clock,
+// because the route reads it.
+
+const GRAPHQL = 'https://graphql.review.invalid/graphql';
+const WEBHOOK = 'https://pager.review.invalid/hook';
+const STRANGER_WRAP = '0x' + 'ee'.repeat(32);
+const GOVERNANCE = '0x' + '6a'.repeat(32);
+const NEW_GOVERNANCE = '0x' + '0b'.repeat(32);
+const CORE_CAP = '0x' + '5c'.repeat(32);
+const USDC_TYPE = `${'a1'.repeat(32)}::usdc::USDC`;
+const APP_TYPE = `${'ab'.repeat(32)}::payroll_app::PAYROLL_APP`;
+const EVIL_ADAPTER = `${'ee'.repeat(32)}::evil::EvilAdapter`;
+const DIGEST_HEX = `0x${'07'.repeat(32)}`;
+const DIGEST_B64 = Buffer.alloc(32, 7).toString('base64');
+const T_UPGRADE = `${UD}::upgrade_delay::UpgradeProposed`;
+const T_UPGRADE_CANCELLED = `${UD}::upgrade_delay::UpgradeCancelled`;
+const T_OWNER = `${UD}::upgrade_delay::OwnerChangeProposed`;
+const T_ADDITION = `${CORE}::compliance_config::RegistryAdditionProposed`;
+const T_ADDITION_CANCELLED = `${CORE}::compliance_config::RegistryAdditionCancelled`;
+
+/** The canonical wrapper as `object(address) { … }` renders it. */
+function wrapperObject(over = {}) {
+  return {
+    address: over.address ?? WRAP,
+    version: over.version ?? 40,
+    owner: { __typename: 'AddressOwner', address: { address: over.owner ?? GOVERNANCE } },
+    asMoveObject: {
+      contents: {
+        type: { repr: over.type ?? `${UD}::upgrade_delay::DelayedUpgradeCap` },
+        json: over.json ?? {
+          id: over.address ?? WRAP,
+          cap: { id: CORE_CAP, package: over.latest ?? CORE, version: String(over.capVersion ?? 1), policy: 128 },
+          original_package: over.original ?? CORE,
+          pending: over.pending ?? null,
+          pending_owner: over.pendingOwner ?? null,
+        },
+      },
+    },
+  };
+}
+
+/** The canonical compliance config, likewise. */
+function configObject(over = {}) {
+  return {
+    address: CONFIG,
+    version: over.version ?? 900,
+    owner: { __typename: 'Shared' },
+    asMoveObject: {
+      contents: {
+        type: { repr: over.type ?? `${CORE}::compliance_config::ComplianceConfig` },
+        json: over.json ?? {
+          id: CONFIG,
+          paused: false,
+          accepted_assets: { contents: over.assets ?? [USDC_TYPE] },
+          settlement_apps: { contents: over.apps ?? [] },
+          bridge_adapters: { contents: over.adapters ?? [] },
+          pending_additions: (over.pending ?? []).map((p) => ({
+            registry: p.registry,
+            type_name: p.typeName,
+            proposed_at_ms: String(p.proposedAtMs),
+            eta_ms: String(p.etaMs),
+          })),
+          legacy_enabled: true,
+        },
+      },
+    },
+  };
+}
+
+function eventNode(type, digest, seq, ms, json) {
+  return { sequenceNumber: seq, timestamp: new Date(ms).toISOString(), transaction: { digest }, contents: { type: { repr: type }, json } };
+}
+
+/**
+ * Everything outside the process. `chain.wrapper` / `chain.config` are the
+ * objects (null: no such object), `chain.events` the feed oldest first,
+ * `chain.stateReply` overrides the object read's whole HTTP reply.
+ */
+function fakeWorld(chain) {
+  const calls = { events: 0, state: 0 };
+  const emails = [];
+  const whatsapps = [];
+  const pages = [];
+  const fetcher = async (url, init = {}) => {
+    const href = String(url);
+    if (href === GRAPHQL) {
+      const { query, variables } = JSON.parse(init.body);
+      if (query.includes('events(')) {
+        calls.events += 1;
+        const matching = (chain.events ?? []).filter((n) => n.contents.type.repr === variables.type);
+        const end = variables.before == null ? matching.length : Number(variables.before);
+        const start = Math.max(0, end - variables.last);
+        const nodes = matching.slice(start, end);
+        return Response.json({ data: { events: { pageInfo: { hasPreviousPage: start > 0, startCursor: nodes.length ? String(start) : null }, nodes } } });
+      }
+      if (query.includes('GovernanceState')) {
+        calls.state += 1;
+        if (chain.stateReply) return chain.stateReply();
+        return Response.json({ data: { wrapper: chain.wrapper === undefined ? wrapperObject() : chain.wrapper, config: chain.config === undefined ? configObject() : chain.config } });
+      }
+      return Response.json({ errors: [{ message: 'unknown query' }] });
+    }
+    if (href === 'https://api.resend.com/emails') {
+      const body = JSON.parse(init.body);
+      emails.push({ to: body.to[0], subject: body.subject, text: body.text });
+      return Response.json({ id: `em_${emails.length}` });
+    }
+    if (href.startsWith('https://api.twilio.com/')) {
+      const form = new URLSearchParams(String(init.body));
+      whatsapps.push({ to: form.get('To'), body: form.get('Body') });
+      return Response.json({ sid: `SM${whatsapps.length}` });
+    }
+    if (href === WEBHOOK) {
+      pages.push(JSON.parse(init.body));
+      return new Response(null, { status: 204 });
+    }
+    throw new Error(`the test world has no ${href}`);
+  };
+  return { fetcher, calls, emails, whatsapps, pages };
+}
+
+const ROUTE_ENV = {
+  CRON_SECRET: 'governance-cron-secret-0123456789',
+  SPLASH_UPGRADE_DELAY_PACKAGE_ID: UD,
+  SPLASH_UPGRADE_WRAPPER_ID: WRAP,
+  SPLASH_CORE_PACKAGE_ID: CORE,
+  SPLASH_COMPLIANCE_CONFIG_ID: CONFIG,
+  SUI_GRAPHQL_URL: GRAPHQL,
+  OPERATOR_ALERT_WEBHOOK_URL: WEBHOOK,
+  NEXT_PUBLIC_APP_URL: 'https://v1.splashz.xyz',
+  EMAIL_TRANSPORT: 'resend',
+  EMAIL_API_KEY: 're_test_governance',
+  EMAIL_FROM: 'alerts@splashz.xyz',
+  TWILIO_ACCOUNT_SID: 'ACgovernancetest',
+  TWILIO_AUTH_TOKEN: 'governance-test-token',
+  TWILIO_WHATSAPP_FROM: '+60100000000',
+};
+
+/** Seeded owners, the real route, and a fake world the test can change between runs. */
+async function withRoute(run, envOver = {}) {
+  await withDb(async ({ client, db }) => {
+    await seedOwners(client);
+    const env = { ...ROUTE_ENV, ...envOver };
+    const saved = { fetch: globalThis.fetch };
+    for (const key of Object.keys(env)) saved[key] = process.env[key];
+    const chain = {};
+    const world = fakeWorld(chain);
+    try {
+      Object.assign(process.env, env);
+      globalThis.fetch = world.fetcher;
+      const route = await import('@/app/api/cron/governance-alerts/route');
+      const cron = async () => {
+        const res = await route.GET(new Request('http://localhost/api/cron/governance-alerts', { headers: { authorization: `Bearer ${env.CRON_SECRET}` } }));
+        return { status: res.status, body: await res.json() };
+      };
+      await run({ client, db, chain, world, cron });
+    } finally {
+      globalThis.fetch = saved.fetch;
+      for (const [key, value] of Object.entries(saved)) {
+        if (key === 'fetch') continue;
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
+}
+
+const alertRows = async (client) =>
+  (await client.query(`SELECT kind, bytecode_digest, eta_at, new_owner, registry, type_name, detail FROM governance_alerts ORDER BY kind`)).rows;
+
+test('review A7: a flood of look-alike events cannot hide a pending proposal; the wrapper\'s own state alerts, and the event feed is not read', async () => {
+  await withRoute(async ({ client, chain, world, cron }) => {
+    const proposed = Date.now() - 10 * 60_000;
+    const eta = proposed + 86_400_000;
+    chain.wrapper = wrapperObject({
+      pending: { digest: DIGEST_B64, proposed_at_ms: String(proposed), eta_ms: String(eta) },
+      pendingOwner: { new_owner: NEW_GOVERNANCE, eta_ms: String(eta) },
+    });
+    // The genuine announcements, then 300 + 200 look-alikes of exactly the
+    // canonical types from a stranger's own wrapper (`wrap` is public), all
+    // newer. Faithfully paged, the feed's newest 200 per type are the flood.
+    chain.events = [
+      eventNode(T_UPGRADE, 'TxGenuineUpgrade', 0, proposed, { wrapper_id: WRAP, package: CORE, digest: DIGEST_B64, proposed_at_ms: String(proposed), eta_ms: String(eta), policy: 128 }),
+      eventNode(T_OWNER, 'TxGenuineOwner', 1, proposed, { wrapper_id: WRAP, new_owner: NEW_GOVERNANCE, eta_ms: String(eta) }),
+      ...Array.from({ length: 300 }, (_, i) => eventNode(T_UPGRADE, 'TxFlood', i * 2, proposed + 2_000, {
+        wrapper_id: STRANGER_WRAP, package: ATTACKER, digest: DIGEST_B64, proposed_at_ms: String(proposed + 2_000), eta_ms: String(eta + 2_000), policy: 128,
+      })),
+      ...Array.from({ length: 200 }, (_, i) => eventNode(T_OWNER, 'TxFlood', 600 + i * 2, proposed + 2_000, { wrapper_id: STRANGER_WRAP, new_owner: '0x' + '0c'.repeat(32), eta_ms: String(eta + 2_000) })),
+    ];
+
+    const { status, body } = await cron();
+    assert.equal(status, 200, body.error);
+    const rows = await alertRows(client);
+    assert.deepEqual(rows.map((r) => r.kind), ['owner_change_proposed', 'upgrade_proposed'], 'both genuine proposals alerted, nothing from the flood');
+    const upgrade = rows.find((r) => r.kind === 'upgrade_proposed');
+    assert.equal(upgrade.bytecode_digest, DIGEST_HEX);
+    assert.equal(new Date(upgrade.eta_at).getTime(), eta);
+    assert.equal(rows.find((r) => r.kind === 'owner_change_proposed').new_owner, NEW_GOVERNANCE);
+    assert.equal(world.emails.length, 8, 'four owners, two announcements each');
+    assert.equal(world.calls.events, 0, 'discovery never touches the global event feed anyone can write to');
+    assert.ok(world.calls.state >= 1);
+  });
+});
+
+test('review A7: a configured id that is not the canonical object on chain answers 502, records nothing and pages a person', async () => {
+  await withRoute(async ({ client, chain, world, cron }) => {
+    const proposed = Date.now() - 10 * 60_000;
+    const pending = { digest: DIGEST_B64, proposed_at_ms: String(proposed), eta_ms: String(proposed + 86_400_000) };
+    chain.events = [eventNode(T_UPGRADE, 'TxGenuineUpgrade', 0, proposed, { wrapper_id: WRAP, package: CORE, digest: DIGEST_B64, proposed_at_ms: pending.proposed_at_ms, eta_ms: pending.eta_ms, policy: 128 })];
+    const cases = [
+      ['the wrapper id names no object', { wrapper: null }, /SPLASH_UPGRADE_WRAPPER_ID/],
+      ['the wrapper is a DelayedUpgradeCap of a look-alike package', { wrapper: wrapperObject({ type: `${ATTACKER}::upgrade_delay::DelayedUpgradeCap`, pending }) }, /SPLASH_UPGRADE_WRAPPER_ID/],
+      ['the wrapper id names some other object', { wrapper: wrapperObject({ type: `${CORE}::business_account::AdminCap`, pending }) }, /SPLASH_UPGRADE_WRAPPER_ID/],
+      ['the config id names no object', { wrapper: wrapperObject({ pending }), config: null }, /SPLASH_COMPLIANCE_CONFIG_ID/],
+      ['the config is a ComplianceConfig of another package', { wrapper: wrapperObject({ pending }), config: configObject({ type: `${ATTACKER}::compliance_config::ComplianceConfig` }) }, /SPLASH_COMPLIANCE_CONFIG_ID/],
+    ];
+    for (const [label, objects, names] of cases) {
+      Object.assign(chain, objects);
+      const pagesBefore = world.pages.length;
+      const { status, body } = await cron();
+      assert.equal(status, 502, `${label}: must not answer success`);
+      assert.equal(body.success, false, label);
+      assert.match(body.error, names, label);
+      assert.equal((await alertRows(client)).length, 0, `${label}: nothing recorded`);
+      assert.equal(world.emails.length, 0, `${label}: nobody told anything`);
+      assert.ok(world.pages.slice(pagesBefore).some((p) => p.severity === 'critical'), `${label}: a person is paged`);
+      delete chain.wrapper;
+      delete chain.config;
+    }
+  });
+});
+
+test('review A7: an unreadable or partial read of the chain answers 502, never success', async () => {
+  await withRoute(async ({ client, chain, world, cron }) => {
+    const proposed = Date.now() - 10 * 60_000;
+    const pending = { digest: DIGEST_B64, proposed_at_ms: String(proposed), eta_ms: String(proposed + 86_400_000) };
+    chain.events = [eventNode(T_UPGRADE, 'TxGenuineUpgrade', 0, proposed, { wrapper_id: WRAP, package: CORE, digest: DIGEST_B64, proposed_at_ms: pending.proposed_at_ms, eta_ms: pending.eta_ms, policy: 128 })];
+    const good = wrapperObject({ pending }).asMoveObject.contents.json;
+    const replies = [
+      ['the indexer is down', () => new Response('upstream unavailable', { status: 503 })],
+      ['the query is refused', () => Response.json({ errors: [{ message: 'Query exceeded max output nodes' }] })],
+      ['no data at all', () => Response.json({ data: null })],
+      ['the wrapper has no pending field', () => Response.json({ data: { wrapper: wrapperObject({ json: { ...good, pending: undefined } }), config: configObject() } })],
+      ['a 31-byte digest', () => Response.json({ data: { wrapper: wrapperObject({ pending: { ...pending, digest: Buffer.alloc(31, 7).toString('base64') } }), config: configObject() } })],
+      ['an eta that is not a number', () => Response.json({ data: { wrapper: wrapperObject({ pending: { ...pending, eta_ms: 'soon' } }), config: configObject() } })],
+      ['a registry with no contents', () => Response.json({ data: { wrapper: wrapperObject({ pending }), config: configObject({ json: { ...configObject().asMoveObject.contents.json, settlement_apps: null } }) } })],
+      ['pending additions that are not a list', () => Response.json({ data: { wrapper: wrapperObject({ pending }), config: configObject({ json: { ...configObject().asMoveObject.contents.json, pending_additions: { truncated: true } } }) } })],
+    ];
+    for (const [label, reply] of replies) {
+      chain.stateReply = reply;
+      const { status, body } = await cron();
+      assert.equal(status, 502, `${label}: must not answer success`);
+      assert.equal(body.success, false, label);
+      assert.equal((await alertRows(client)).length, 0, `${label}: nothing recorded from a read that could not be trusted`);
+    }
+    assert.equal(world.emails.length, 0);
+  });
+});
+
+test('review A9: core\'s original id comes from the wrapper, so SPLASH_CORE_PACKAGE_ID set to a later version cannot silence a registry addition', async () => {
+  await withRoute(async ({ client, chain, cron }) => {
+    const proposed = Date.now() - 10 * 60_000;
+    const eta = proposed + 86_400_000;
+    chain.wrapper = wrapperObject({ original: CORE, latest: CORE_V2, capVersion: 2 });
+    chain.config = configObject({ pending: [{ registry: 3, typeName: EVIL_ADAPTER, proposedAtMs: proposed, etaMs: eta }] });
+    chain.events = [eventNode(T_ADDITION, 'TxEvilAdapter', 0, proposed, { config_id: CONFIG, registry: 3, type_name: EVIL_ADAPTER, proposed_at_ms: String(proposed), eta_ms: String(eta) })];
+    const { status, body } = await cron();
+    assert.equal(status, 200, body.error);
+    const rows = await alertRows(client);
+    assert.deepEqual(rows.map((r) => [r.kind, r.registry, r.type_name]), [['registry_addition_proposed', 3, EVIL_ADAPTER]]);
+    assert.equal(new Date(rows[0].eta_at).getTime(), eta);
+  }, { SPLASH_CORE_PACKAGE_ID: CORE_V2 });
+});
+
+test('review: a withdrawn proposal stops showing as a change that can take effect', async () => {
+  await withRoute(async ({ chain, cron }) => {
+    const { readGovernanceBannerForSession } = await import('../lib/server/governance-alerts-store.ts');
+    const proposed = Date.now() - 10 * 60_000;
+    const eta = proposed + 86_400_000;
+    const upgradeEvent = eventNode(T_UPGRADE, 'TxUp', 0, proposed, { wrapper_id: WRAP, package: CORE, digest: DIGEST_B64, proposed_at_ms: String(proposed), eta_ms: String(eta), policy: 128 });
+    const additionEvent = eventNode(T_ADDITION, 'TxApp', 0, proposed, { config_id: CONFIG, registry: 2, type_name: APP_TYPE, proposed_at_ms: String(proposed), eta_ms: String(eta) });
+    chain.wrapper = wrapperObject({ version: 40, pending: { digest: DIGEST_B64, proposed_at_ms: String(proposed), eta_ms: String(eta) } });
+    chain.config = configObject({ version: 900, pending: [{ registry: 2, typeName: APP_TYPE, proposedAtMs: proposed, etaMs: eta }] });
+    chain.events = [upgradeEvent, additionEvent];
+    assert.equal((await cron()).status, 200);
+    assert.equal((await readGovernanceBannerForSession({ email: 'alice@acme.example' })).length, 2);
+
+    // Governance cancels both. The objects no longer hold them; the feed
+    // gains the cancellations.
+    chain.wrapper = wrapperObject({ version: 41 });
+    chain.config = configObject({ version: 901 });
+    chain.events = [
+      upgradeEvent,
+      additionEvent,
+      eventNode(T_UPGRADE_CANCELLED, 'TxUpCancel', 0, proposed + 60_000, { wrapper_id: WRAP, package: CORE, digest: DIGEST_B64 }),
+      eventNode(T_ADDITION_CANCELLED, 'TxAppCancel', 0, proposed + 60_000, { config_id: CONFIG, registry: 2, type_name: APP_TYPE }),
+    ];
+    assert.equal((await cron()).status, 200);
+    assert.deepEqual(await readGovernanceBannerForSession({ email: 'alice@acme.example' }), [], 'nothing withdrawn is shown as able to take effect');
+  });
+});
+
+test('review: every channel says what the chain shows, and nothing it cannot back', async () => {
+  await withRoute(async ({ client, chain, world, cron }) => {
+    const proposed = Date.now() - 10 * 60_000;
+    const eta = proposed + 86_400_000;
+    chain.wrapper = wrapperObject({
+      pending: { digest: DIGEST_B64, proposed_at_ms: String(proposed), eta_ms: String(eta) },
+      pendingOwner: { new_owner: NEW_GOVERNANCE, eta_ms: String(eta) },
+    });
+    chain.config = configObject({ pending: [{ registry: 2, typeName: APP_TYPE, proposedAtMs: proposed, etaMs: eta }] });
+    chain.events = [
+      eventNode(T_UPGRADE, 'TxUp', 0, proposed, { wrapper_id: WRAP, package: CORE, digest: DIGEST_B64, proposed_at_ms: String(proposed), eta_ms: String(eta), policy: 128 }),
+      eventNode(T_OWNER, 'TxOwner', 0, proposed, { wrapper_id: WRAP, new_owner: NEW_GOVERNANCE, eta_ms: String(eta) }),
+      eventNode(T_ADDITION, 'TxApp', 0, proposed, { config_id: CONFIG, registry: 2, type_name: APP_TYPE, proposed_at_ms: String(proposed), eta_ms: String(eta) }),
+    ];
+    assert.equal((await cron()).status, 200);
+    const rows = await alertRows(client);
+    const by = Object.fromEntries(rows.map((r) => [r.kind, r]));
+
+    // The upgrade: the bytecode digest, the policy and the eta, on every
+    // channel, and where an owner can check them without trusting us.
+    assert.match(by.upgrade_proposed.detail, new RegExp(DIGEST_HEX));
+    assert.match(by.upgrade_proposed.detail, /additive/);
+    const email = world.emails.find((m) => m.to === 'alice@acme.example' && m.text.includes(DIGEST_HEX));
+    assert.ok(email, 'the upgrade email carries the bytecode digest');
+    assert.match(email.text, new RegExp(formatUtc(eta)));
+    assert.match(email.text, new RegExp(WRAP), 'the object an owner can look up on any explorer');
+    const whatsapp = world.whatsapps.find((w) => w.body.includes('update to its payment contract'));
+    assert.ok(whatsapp, 'the verified number is told about the upgrade');
+    assert.match(whatsapp.body, new RegExp(DIGEST_HEX), 'WhatsApp carries the digest too');
+
+    // A settlement app: what it can actually do once registered.
+    assert.match(by.registry_addition_proposed.detail, /open payment requests in your account's name/);
+    assert.match(by.registry_addition_proposed.detail, /only under an allowance you grant to this app/);
+    assert.doesNotMatch(by.registry_addition_proposed.detail, /can pay from an allowance within your spending rules/);
+
+    // The owner change: the chain proves no single KEY can sign, not that no
+    // single person holds two keys.
+    assert.match(by.owner_change_proposed.detail, /no single key can sign for it alone/);
+    assert.doesNotMatch(by.owner_change_proposed.detail, /no single person/);
+  });
+});
+
+test('review: a delivery left in sending by a run that died is claimed again once its lease has run out, and sent once', async () => {
+  await withRoute(async ({ client, chain, world, cron }) => {
+    const { readGovernanceBannerForSession } = await import('../lib/server/governance-alerts-store.ts');
+    const proposed = Date.now() - 10 * 60_000;
+    const eta = proposed + 86_400_000;
+    chain.wrapper = wrapperObject({ pending: { digest: DIGEST_B64, proposed_at_ms: String(proposed), eta_ms: String(eta) } });
+    chain.events = [eventNode(T_UPGRADE, 'TxUp', 0, proposed, { wrapper_id: WRAP, package: CORE, digest: DIGEST_B64, proposed_at_ms: String(proposed), eta_ms: String(eta), policy: 128 })];
+    assert.equal((await cron()).status, 200);
+    assert.equal(world.emails.length, 4);
+
+    // A run claimed alice's email and her banner and died before finishing
+    // either, an hour ago. Bob's email was claimed a moment ago by a run that
+    // is still going.
+    await client.exec(`
+      UPDATE governance_alert_deliveries SET status = 'sending', sent_at = NULL, updated_at = now() - interval '1 hour'
+        WHERE user_id = 'u_alice' AND channel IN ('email', 'in_app');
+      UPDATE governance_alert_deliveries SET status = 'sending', sent_at = NULL, updated_at = now()
+        WHERE user_id = 'u_bob' AND channel = 'email';
+    `);
+    assert.deepEqual(await readGovernanceBannerForSession({ email: 'alice@acme.example' }), []);
+
+    assert.equal((await cron()).status, 200);
+    assert.deepEqual(world.emails.slice(4).map((m) => m.to), ['alice@acme.example'], 'alice\'s stale claim is retried; bob\'s live one is left to its run');
+    const alice = (await client.query(`SELECT channel, status, attempts FROM governance_alert_deliveries WHERE user_id = 'u_alice' ORDER BY channel`)).rows;
+    assert.deepEqual(alice.find((r) => r.channel === 'email'), { channel: 'email', status: 'sent', attempts: 2 });
+    assert.equal(alice.find((r) => r.channel === 'in_app').status, 'sent');
+    assert.equal((await readGovernanceBannerForSession({ email: 'alice@acme.example' })).length, 1, 'her banner is back');
+
+    assert.equal((await cron()).status, 200);
+    assert.equal(world.emails.length, 5, 'and only once: nothing is sent again');
+  });
+});
