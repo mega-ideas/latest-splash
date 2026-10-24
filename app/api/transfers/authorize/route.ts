@@ -18,6 +18,7 @@ import { proposeForApproval } from '@/lib/server/dual-approval';
 import { resolveApprovalClaim } from '@/lib/server/approved-proposal';
 import { resolveAuthorityForSession } from '@/lib/auth/authority';
 import { getPegStatus } from '@/lib/server/peg';
+import { BANK_DESTINATION } from '@/lib/fees/destination';
 import { calculateQuote, type QuoteData } from '@/lib/server/quote';
 import { FeeConfigUnavailableError } from '@/lib/fees/fee-config';
 import { feeQuoteFromWire, feeQuoteToWire } from '@/lib/fees/quote';
@@ -411,7 +412,8 @@ async function authorize(request: Request, spent: SpentApproval) {
   // the fee quoted now.
   let serverQuote: QuoteData;
   try {
-    serverQuote = await calculateQuote(sourceAmountCents, undefined, body.amount.targetCurrency, 'STANDARD', { businessId: businessAccountId });
+    // This route sends a payout to the recipient's bank account.
+    serverQuote = await calculateQuote(sourceAmountCents, undefined, body.amount.targetCurrency, 'STANDARD', { businessId: businessAccountId, destination: BANK_DESTINATION });
   } catch (error) {
     if (error instanceof FeeConfigUnavailableError) {
       return NextResponse.json(

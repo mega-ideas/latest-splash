@@ -269,7 +269,8 @@ test('the quote route takes the destination from the request, and the transfer f
   assert.match(route, /QuoteDestinationError/, 'and names a destination it cannot price yet');
   assert.match(route, /calculateQuote\([^)]*\{ businessId: businessAccountId, destination \}\)/);
   const step = read('components/transfer/StepQuote.tsx');
-  assert.match(step, /destination: destinationForRecipient\(state\.recipient\)/, 'the review says where its payment goes');
+  assert.match(step, /destination: destinationForRecipient\(\{ rail: recipientRail \}\)/, 'the review says where its payment goes');
+  assert.match(step, /const recipientRail = state\.recipient\.rail;/);
   const authorize = read('app/api/transfers/authorize/route.ts');
   assert.match(authorize, /calculateQuote\([^)]*\{ businessId: businessAccountId, destination: BANK_DESTINATION \}\)/, 'authorize re-quotes the bank payout it sends');
 });

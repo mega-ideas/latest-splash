@@ -1,5 +1,6 @@
 import { applyBps, applyRate, divRound, parseRate } from '../money.ts';
-import { FEE_KIND, LAUNCH_SCHEDULE, type FeeSchedule } from '../fees/schedule.ts';
+import { BANK_DESTINATION, destinationKind } from '../fees/destination.ts';
+import { LAUNCH_SCHEDULE, type FeeSchedule } from '../fees/schedule.ts';
 import { buildFeeQuote, type FeeQuote } from '../fees/quote.ts';
 import { baselineCostMinor, type BaselineDataset, type ComparisonBaseline } from './comparison-baselines.ts';
 
@@ -43,7 +44,7 @@ export function splashQuote(
 ): FeeQuote {
   if (amountUsdMinor < 0n) throw new RangeError('an amount is never negative');
   return buildFeeQuote({
-    kind: FEE_KIND.BANK_PAYOUT,
+    kind: destinationKind(BANK_DESTINATION),
     principalMinor: amountUsdMinor * CENT_IN_USDC_MINOR,
     state: { feesOn, schedule },
     partnerFee: { minor: null, source: "From the payout partner's live quote when you send" },

@@ -5,14 +5,15 @@ import { redirect } from 'next/navigation';
 import type { ProposalExplain, SimulationResult, UnsignedProposal } from '@/lib/agent/types';
 import { publishedFeeSchedule } from '@/lib/fees/fee-config';
 import { buildFeeQuote } from '@/lib/fees/quote';
-import { FEE_KIND, type FeeState } from '@/lib/fees/schedule';
+import { BANK_DESTINATION, destinationKind } from '@/lib/fees/destination';
+import type { FeeState } from '@/lib/fees/schedule';
 
 /**
  * The preview's Splash fee: the published schedule's bank-payout fee on the
  * amount (A1 §2.2), never a typed rate, and 0 while FeeConfig's fees are off.
  */
 const previewFee = (fees: FeeState, principalMicro: bigint) =>
-  buildFeeQuote({ kind: FEE_KIND.BANK_PAYOUT, principalMinor: principalMicro, state: fees }).splashFee.minor;
+  buildFeeQuote({ kind: destinationKind(BANK_DESTINATION), principalMinor: principalMicro, state: fees }).splashFee.minor;
 import { getOxwalProposalStore } from '@/lib/agent/oxwal';
 import { resolveAuthorityForSession, UnauthorizedError } from '@/lib/auth/authority';
 import { ensureProposalStoreHydrated } from '@/lib/queue/proposal-persistence';

@@ -17,6 +17,7 @@ import { baselineCostMinor, getComparisonBaseline } from '@/lib/fx/comparison-ba
 import { formatMinor as formatBaselineMinor, parseMinor as parseBaselineMinor } from '@/lib/money';
 import { lockedCopy } from '@/content/claims';
 import { formatUsdc } from '@/lib/fees/copy';
+import { destinationForRecipient } from '@/lib/fees/destination';
 import { feeQuoteFromWire, feeQuoteToWire, type FeeQuoteWire } from '@/lib/fees/quote';
 
 const BASE_RATES: Record<TransferState['amount']['targetCurrency'], number> = {
@@ -96,6 +97,7 @@ export default function StepQuote({
     return () => window.clearInterval(interval);
   }, [holdActive]);
 
+  const recipientRail = state.recipient.rail;
   useEffect(() => {
     let cancelled = false;
 
@@ -117,6 +119,8 @@ export default function StepQuote({
             targetCurrency: state.amount.targetCurrency,
             recipientId: state.recipient.bank?.account,
             fundingFeeTier: state.funding.selection.feeTier,
+            // Where the payment goes prices Splash's fee: this flow pays a bank account.
+            destination: destinationForRecipient({ rail: recipientRail }),
           }),
         });
         if (!response.ok) throw new Error('Quote unavailable');
@@ -160,6 +164,7 @@ export default function StepQuote({
     state.rateHold?.rate,
     state.rateHold?.state,
     state.recipient.bank?.account,
+    recipientRail,
     quoteRequestKey,
     set,
   ]);

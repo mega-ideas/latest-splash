@@ -28,7 +28,8 @@ import { estimateNettingSavedUsd, getUsdCorridorByCurrency } from '../fx/corrido
 import { formatRate, pricingLine } from '../fees/copy.ts';
 import { lastPublishedFees, quoteFeeState } from '../fees/fee-config.ts';
 import { buildFeeQuote } from '../fees/quote.ts';
-import { FEE_CEILING_BPS, FEE_KIND } from '../fees/schedule.ts';
+import { BANK_DESTINATION, destinationKind } from '../fees/destination.ts';
+import { FEE_CEILING_BPS } from '../fees/schedule.ts';
 import { getUsdyNetApyPct } from '../server/usdy.ts';
 import { checkMinimumSettlement } from '../policy/limits.ts';
 import { InMemoryProposalStore } from '../queue/proposal-state.ts';
@@ -738,7 +739,7 @@ function requireAmount(input: Record<string, unknown>, key: string): number {
 async function splashFeeForPayout(principalMicro: bigint): Promise<bigint | undefined> {
   try {
     const state = await quoteFeeState();
-    return buildFeeQuote({ kind: FEE_KIND.BANK_PAYOUT, principalMinor: principalMicro, state }).splashFee.minor;
+    return buildFeeQuote({ kind: destinationKind(BANK_DESTINATION), principalMinor: principalMicro, state }).splashFee.minor;
   } catch {
     return undefined;
   }

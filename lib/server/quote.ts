@@ -3,8 +3,8 @@ import { randomUUID } from 'crypto';
 import { getUsdCorridorByCurrency } from '@/lib/fx/corridors';
 import { applyBps, applyRate, formatMinor, parseRate } from '@/lib/money';
 import { quoteDiscountBps, quoteFeeState, type FeeScheduleSource } from '@/lib/fees/fee-config';
+import { BANK_DESTINATION, destinationKind, destinationLabel, type PaymentDestination } from '@/lib/fees/destination';
 import { buildFeeQuote, feeQuoteToWire, type FeeQuoteWire, type ThirdPartyFee } from '@/lib/fees/quote';
-import { FEE_KIND } from '@/lib/fees/schedule';
 import { getCachedJson, setCachedJson } from '@/lib/server/redis-cache';
 import { evaluateTransferLimits, type LimitResult } from '@/lib/server/limits';
 import { pdaxAdapter, mockPdaxAdapter } from '@/lib/server/pdax';
@@ -14,11 +14,19 @@ import type { FundingFeeTier } from '@/lib/funding/registry';
 /**
  * The quote for a local-currency payout (Amendment A1 §4).
  *
- * A payout to a supplier's bank in local currency goes to the payout
- * partner's deposit address, so on chain it is a BANK_PAYOUT: Splash's fee is
- * the bank schedule's, on the principal, from lib/fees/schedule.ts under the
- * FeeConfig in force (lib/fees/fee-config.ts `quoteFeeState`), and charged on
- * top. The partner's fee is the partner's, from its own quote, and comes out
+ * The quote is priced by where the payment goes (`destination`, from the
+ * flow that knows it), through the settle paths' own kind rules
+ * (lib/fees/destination.ts `destinationKind`). A payout to a supplier's bank
+ * in local currency goes to the payout partner's deposit address, so on chain
+ * it is a BANK_PAYOUT: Splash's fee is the bank schedule's, on the principal,
+ * from lib/fees/schedule.ts under the FeeConfig in force
+ * (lib/fees/fee-config.ts `quoteFeeState`), and charged on top. A payment to
+ * a Sui wallet, an exchange, a Splash business or another chain is priced by
+ * the same function once a flow can pay one through the v2 settle path
+ * (Phase 2: its payment builder and the registry read); until then this
+ * engine refuses it by name (QuoteDestinationError) rather than price it as
+ * a bank payout. A wallet transfer today is the Send USDC desk's, priced by
+ * its own lane (lib/payments/stablecoin-lane.ts). The partner's fee is the partner's, from its own quote, and comes out
  * of what it pays out; Splash neither collects nor marks it up. There is no
  * flat rate, no fixed fee and no funding-source discount any more: a
  * business's discount lives in FeeConfig.
@@ -35,6 +43,14 @@ import type { FundingFeeTier } from '@/lib/funding/registry';
  * Throws FeeConfigUnavailableError when the fee cannot be read (the route
  * answers 503): no fee is shown and no payment is built on a guess.
  */
+
+/** A destination this engine cannot price yet: no flow pays it through the v2 settle path before Phase 2. */
+export class QuoteDestinationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'QuoteDestinationError';
+  }
+}
 
 const QUOTE_TTL_SECONDS = Number.parseInt(process.env.QUOTE_TTL_SECONDS ?? '30', 10);
 const CENT_IN_USDC_MINOR = 10_000n;
@@ -66,6 +82,8 @@ export type QuoteData = FeeQuoteWire & {
   source: 'corridor' | 'fallback';
   /** Where Splash's fee schedule came from: the live FeeConfig, or A1's launch schedule off mainnet. */
   scheduleSource: FeeScheduleSource;
+  /** Where the payment goes, which set the kind Splash's fee is charged as. */
+  destination: PaymentDestination;
   feeTier: FundingFeeTier;
   /** Rail + KYB-tier + AML evaluation (no MYR monthly cap). */
   limit: LimitResult;
@@ -125,9 +143,17 @@ export async function calculateQuote(
   recipientId?: string,
   targetCurrency = 'PHP',
   feeTier: FundingFeeTier = 'STANDARD',
-  options: { businessId?: string | null } = {},
+  options: { businessId?: string | null; destination?: PaymentDestination } = {},
 ): Promise<QuoteData> {
   if (!Number.isSafeInteger(fromAmountCents) || fromAmountCents <= 0) throw new RangeError('a quote needs a positive whole number of cents');
+  // A local-currency payout pays a bank: the default for a caller that is one.
+  const destination = options.destination ?? BANK_DESTINATION;
+  if (destination.type !== 'bank') {
+    throw new QuoteDestinationError(
+      `A payment to ${destinationLabel(destination.type)} is priced when its route opens in Phase 2. Today a quote prices a payout to a bank account; to pay a Sui wallet, use Send USDC.`,
+    );
+  }
+  const kind = destinationKind(destination);
   const currency = targetCurrency.toUpperCase();
   const principalMinor = BigInt(fromAmountCents) * CENT_IN_USDC_MINOR;
 
@@ -136,7 +162,7 @@ export async function calculateQuote(
   const { rate, source } = await getLiveUsdToTargetRate(currency);
   const partnerFee = await partnerFeeFor(currency, principalMinor);
 
-  const fees = buildFeeQuote({ kind: FEE_KIND.BANK_PAYOUT, principalMinor, discountBps, state, partnerFee });
+  const fees = buildFeeQuote({ kind, principalMinor, discountBps, state, partnerFee });
 
   // What the supplier receives: the principal, less the partner's own fee,
   // at the corridor rate. Splash's fee is on top and does not reduce it.
@@ -159,6 +185,7 @@ export async function calculateQuote(
     targetCurrency: currency,
     source,
     scheduleSource: state.source,
+    destination,
     feeTier,
     limit,
   };

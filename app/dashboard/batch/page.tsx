@@ -15,7 +15,7 @@ import SettlementEngineFlow from "@/components/dashboard/SettlementEngineFlow";
 import { takeBatchDraft } from "@/lib/batch-parse";
 import { formatUsdc } from "@/lib/fees/copy";
 import { buildFeeQuote } from "@/lib/fees/quote";
-import { FEE_KIND } from "@/lib/fees/schedule";
+import { BANK_DESTINATION, destinationKind } from "@/lib/fees/destination";
 import { usePublishedFees } from "@/lib/fees/use-published-pricing";
 import { MoneyError, parseMinor } from "@/lib/money";
 import { checkMinimumSettlement, minSettlementUsd, formatUsd } from '@/lib/policy/limits';
@@ -255,7 +255,7 @@ export default function BatchPage() {
       try {
         const cents = parseMinor(String(row.amount ?? '0').replace(/[,\s]/g, ''), 2, 'half-up');
         if (cents <= 0n) continue;
-        sum += buildFeeQuote({ kind: FEE_KIND.BANK_PAYOUT, principalMinor: cents * 10_000n, state: { feesOn: published.feesOn, schedule: published.schedule } }).splashFee.minor;
+        sum += buildFeeQuote({ kind: destinationKind(BANK_DESTINATION), principalMinor: cents * 10_000n, state: { feesOn: published.feesOn, schedule: published.schedule } }).splashFee.minor;
       } catch (error) {
         if (!(error instanceof MoneyError)) throw error;
       }

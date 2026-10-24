@@ -29,7 +29,7 @@ import MoneyPathPanel from '@/components/compliance/MoneyPathPanel';
 import LocalTime from '@/components/LocalTime';
 import { FEES_OFF_NOTICE } from '@/lib/fees/copy';
 import { buildFeeQuote } from '@/lib/fees/quote';
-import { FEE_KIND } from '@/lib/fees/schedule';
+import { BANK_DESTINATION, destinationKind } from '@/lib/fees/destination';
 import { usePublishedFees } from '@/lib/fees/use-published-pricing';
 import { formatMinor } from '@/lib/money';
 
@@ -294,7 +294,7 @@ export default function TreasuryPage() {
   const simulationPrincipalMicro = 5_000_000_000n;
   const simulationFee = publishedFees
     ? Number(formatMinor(
-      buildFeeQuote({ kind: FEE_KIND.BANK_PAYOUT, principalMinor: simulationPrincipalMicro, state: { feesOn: publishedFees.feesOn, schedule: publishedFees.schedule } }).splashFee.minor,
+      buildFeeQuote({ kind: destinationKind(BANK_DESTINATION), principalMinor: simulationPrincipalMicro, state: { feesOn: publishedFees.feesOn, schedule: publishedFees.schedule } }).splashFee.minor,
       6,
     ))
     : null;
