@@ -3,12 +3,8 @@
   --ink: #1F4452;
   --slate: #326273;
   --teal: #5C9EAD;
-  /* Coral is retired (v2 D14). Only the landing still reads it, until
-     Phase 4 rebuilds the landing; nothing a signed-in person sees uses it
-     (tests/dashboard-brand.test.mjs). */
-  --coral: #E39774;
   --gold: #D9A441;
-  /* What replaces coral: a solid gold fill with --ink words on it, the pale
+  /* The accent (v2 D14): a solid gold fill with --ink words on it, the pale
      gold tint where a peach tint was, and --gold-ink for words on the tint
      (6.1:1 on --gold-tint, 6.8:1 on white). */
   --gold-light: #efc46f;

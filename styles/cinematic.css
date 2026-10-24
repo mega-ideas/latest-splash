@@ -1670,7 +1670,7 @@
    #loops — the three-loop reframe band (§4.B), directly after the
    marquee. Mirrors the #operating-layer card grammar (iso-layer-card:
    meta → art → copy, hard-offset shadow, mono meta) at band scale.
-   Supply (card 3) is the weighted coral moat.
+   Supply (card 3) is the weighted gold moat.
    ═══════════════════════════════════════════════════════════════════ */
 .iso-loops-grid {
   display: grid;
@@ -1695,11 +1695,11 @@
   box-shadow: 10px 12px 0 color-mix(in srgb, var(--ink) 14%, transparent);
 }
 .iso-loops-card-3 {
-  border-color: color-mix(in srgb, var(--coral) 60%, transparent);
+  border-color: color-mix(in srgb, var(--gold-light) 60%, transparent);
   background:
-    linear-gradient(160deg, color-mix(in srgb, var(--coral) 10%, transparent), transparent 46%),
+    linear-gradient(160deg, color-mix(in srgb, var(--gold-light) 10%, transparent), transparent 46%),
     color-mix(in srgb, var(--surface) 72%, transparent);
-  box-shadow: 8px 9px 0 color-mix(in srgb, var(--coral) 34%, transparent);
+  box-shadow: 8px 9px 0 color-mix(in srgb, var(--gold-light) 34%, transparent);
 }
 
 .iso-loops-meta {
@@ -1727,8 +1727,9 @@
   box-shadow: 3px 3px 0 var(--ink);
 }
 .iso-loops-card-3 .iso-loops-meta span {
-  background: var(--coral);
-  box-shadow: 3px 3px 0 color-mix(in srgb, var(--coral) 55%, var(--ink));
+  color: var(--ink);
+  background: var(--gold-light);
+  box-shadow: 3px 3px 0 color-mix(in srgb, var(--gold-light) 55%, var(--ink));
 }
 .iso-loops-meta p { flex: 1; }
 .iso-loops-meta .iso-roadmap-chip { letter-spacing: .08em; }
@@ -1813,17 +1814,14 @@
    #supply — the promoted moat (§4.D), between #operating-layer and
    #copilot. Compact landscape step cards (deliberately smaller scale
    than the operating layer's portrait cards to vary the rhythm) +
-   the iso-wheel flywheel + roadmap CTA bar. Roadmap-labeled: there is
+   the roadmap CTA bar. Roadmap-labeled: there is
    no receivable.move yet.
    ═══════════════════════════════════════════════════════════════════ */
 .iso-supply {
   border-bottom: 1px solid color-mix(in srgb, var(--ink) 16%, transparent);
   background:
-    radial-gradient(circle at 90% 4%, color-mix(in srgb, var(--coral) 14%, transparent), transparent 30%),
-    linear-gradient(color-mix(in srgb, var(--ink) 4%, transparent) 1px, transparent 1px),
-    linear-gradient(90deg, color-mix(in srgb, var(--ink) 4%, transparent) 1px, transparent 1px),
+    radial-gradient(circle at 90% 4%, color-mix(in srgb, var(--gold-light) 18%, transparent), transparent 30%),
     var(--surface-2);
-  background-size: auto, 64px 64px, 64px 64px, auto;
 }
 
 .iso-supply-chip { margin-top: 14px; }
@@ -1837,18 +1835,18 @@
 .iso-supply-card {
   display: flex;
   flex-direction: column;
-  border: 1px solid color-mix(in srgb, var(--coral) 46%, transparent);
+  border: 1px solid color-mix(in srgb, var(--gold-light) 46%, transparent);
   border-radius: 12px;
   padding: 18px;
   background:
-    linear-gradient(155deg, color-mix(in srgb, var(--coral) 8%, transparent), transparent 44%),
+    linear-gradient(155deg, color-mix(in srgb, var(--gold-light) 8%, transparent), transparent 44%),
     color-mix(in srgb, var(--surface) 78%, transparent);
-  box-shadow: 7px 8px 0 color-mix(in srgb, var(--coral) 26%, transparent);
+  box-shadow: 7px 8px 0 color-mix(in srgb, var(--gold-light) 26%, transparent);
   transition: transform var(--dur-slow) var(--ease-standard), box-shadow var(--dur-slow) var(--ease-standard);
 }
 .iso-supply-card:hover {
   transform: translateY(-4px);
-  box-shadow: 9px 11px 0 color-mix(in srgb, var(--coral) 32%, transparent);
+  box-shadow: 9px 11px 0 color-mix(in srgb, var(--gold-light) 32%, transparent);
 }
 
 .iso-supply-meta {
@@ -1869,9 +1867,9 @@
   place-items: center;
   border: 1px solid var(--line);
   border-radius: var(--r-sm);
-  color: var(--surface);
-  background: var(--coral);
-  box-shadow: 3px 3px 0 color-mix(in srgb, var(--coral) 55%, var(--ink));
+  color: var(--ink);
+  background: var(--gold-light);
+  box-shadow: 3px 3px 0 color-mix(in srgb, var(--gold-light) 55%, var(--ink));
 }
 
 .iso-supply-art {
@@ -1920,7 +1918,6 @@
   text-transform: uppercase;
 }
 
-.iso-supply .iso-wheel { margin-top: var(--s6); }
 .iso-supply-actions { display: flex; flex-wrap: wrap; gap: 10px; }
 
 @media (max-width: 960px) {

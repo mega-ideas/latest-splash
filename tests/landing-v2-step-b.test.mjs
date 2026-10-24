@@ -161,5 +161,10 @@ test('/working-capital: the build-order card is dark cyan, and the loop renders 
 
   const css = read('app/globals.css');
   const close = css.match(/\.wc-close \{([^}]*)\}/)?.[1] ?? '';
-  assert.match(close, /background:\s*var\(--iso-teal-dark\)/, 'the Shape the build order card sits on dark cyan');
+  assert.match(close, /background:[^;]*var\(--iso-teal-dark\);/, 'the Shape the build order card sits on dark cyan');
+
+  // No background grid on /working-capital: only the landing Platform keeps one (D14).
+  const rule = (text, sel) => text.match(new RegExp(`\\${sel} \\{([^}]*)\\}`))?.[1] ?? '';
+  assert.doesNotMatch(rule(css, '.wc-mechanics'), /1px, transparent 1px/);
+  assert.doesNotMatch(rule(read('styles/cinematic.css'), '.iso-supply'), /1px, transparent 1px/);
 });

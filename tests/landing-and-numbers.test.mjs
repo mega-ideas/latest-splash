@@ -297,10 +297,11 @@ test('the comparison table shows no competitor figure without a named, dated sou
   // days beside them, and none of it sourced. A competitor figure comes
   // from a named, dated dataset (lib/fx/comparison-baselines.ts), or no
   // figure is shown.
+  // Since v2 Phase 4 step B the rows live in lib/landing/comparison.ts.
   const landing = await source('components/IsometricLanding.tsx');
-  const rows = landing.slice(landing.indexOf('const comparisonRowsFor'), landing.indexOf('type YieldBenchmarks'));
-  assert.ok(rows.length > 100, 'the comparison rows are found');
-  const typed = [...rows.matchAll(/\b(bank|broker|wise):\s*(['`])([^'`]*\d[^'`]*)\2/g)].map((m) => `${m[1]}: ${m[3]}`);
+  const rows = await source('lib/landing/comparison.ts');
+  assert.match(landing, /comparisonRows\(pricing, COMPARISON_BASELINE\)/, 'the landing renders those rows');
+  const typed = [...rows.matchAll(/\b(bank|broker|fintech|wise):\s*(['`])([^'`]*\d[^'`]*)\2/g)].map((m) => `${m[1]}: ${m[3]}`);
   assert.deepEqual(typed, [], 'no competitor figure is typed into a row');
   assert.match(landing, /getComparisonBaseline\('PHP'\)/, "the bank column's figures come from the reviewed dataset");
   assert.match(landing, /COMPARISON_BASELINE\.dataset\.name/, 'the table names its source');
@@ -323,11 +324,11 @@ test('the comparison table names no competitor, and its fintech column is the da
   // components/landing already does. The column is the dataset's
   // digital-provider category instead, with that category's own figures.
   const landing = await source('components/IsometricLanding.tsx');
-  const table = landing.slice(landing.indexOf('const comparisonRowsFor'), landing.indexOf('type YieldBenchmarks'));
+  const table = await source('lib/landing/comparison.ts');
   assert.doesNotMatch(table, /\bWise\b/, 'no Wise in the rows');
   assert.doesNotMatch(table, /Mid-market/, 'no mid-market claim the dataset contradicts');
   const head = landing.slice(landing.indexOf('<table className="iso-comparison-table">'), landing.indexOf('</thead>'));
   assert.doesNotMatch(head, /\bWise\b/, 'no Wise column');
   assert.match(head, /Fintech app/, 'the column is the category');
-  assert.match(landing, /COMPARISON_BASELINE\?\.fintech/, "the fintech column's figures come from the dataset");
+  assert.match(table, /baseline\?\.fintech/, "the fintech column's figures come from the dataset");
 });

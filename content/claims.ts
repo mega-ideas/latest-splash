@@ -83,3 +83,22 @@ export const claims = {
     status: 'modeled',
   },
 } satisfies Record<string, Claim>;
+
+/**
+ * The footer's compliance text (v2 brief section 6, D3): what Splash is,
+ * what it does not do, and who pays out. No licence is claimed, and no
+ * Labuan line is shown: that application comes later.
+ *
+ * The entity line renders only once `BRAND.legalEntity` holds the SSM
+ * registration (SPLASH MY SDN BHD, number pending). Until then the caller
+ * passes null and there is no entity line at all.
+ */
+export function saasCompliance(legalEntity: string | null): string[] {
+  const lines = [
+    'Splash is a software (SaaS) provider operating under Malaysian law (BNM/SC).',
+    'Splash does not hold customer funds: money stays in your Splash Wallet, and Splash has no key to it.',
+    'Local-currency payouts are made by partners of record.',
+  ];
+  if (legalEntity) lines.push(legalEntity);
+  return lines;
+}
