@@ -1196,6 +1196,27 @@ fun recipients_are_keyed_by_domain_and_address() {
 }
 
 #[test]
+#[expected_failure(abort_code = 1061, location = spend_policy)]
+/// Review A2-A4: a spending rule pays only on Sui. A recipient on another
+/// chain could only be paid by handing the business's raw coin to the
+/// spender's transaction, so the policy refuses to verify one at all.
+/// Cross-chain payments stay on the owners' multisig.
+fun a_recipient_on_another_domain_cannot_be_verified() {
+    let (mut s, id) = begin_with_policy();
+    verify_recipient_as(&mut s, id, h::wallet(), ETHEREUM, SUPPLIER);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 1061, location = spend_policy)]
+/// Solana neither.
+fun a_recipient_on_solana_cannot_be_verified() {
+    let (mut s, id) = begin_with_policy();
+    verify_recipient_as(&mut s, id, h::wallet(), SOLANA, SUPPLIER);
+    s.end();
+}
+
+#[test]
 #[expected_failure(abort_code = spend_policy::E_ALREADY_VERIFIED)]
 /// Verifying the same destination twice is refused, so the count stays true.
 fun verify_recipient_twice_aborts() {
