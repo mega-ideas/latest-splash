@@ -17,20 +17,17 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
 import { MultiSigPublicKey } from '@mysten/sui/multisig';
 import { Transaction } from '@mysten/sui/transactions';
 import { fromBase64, toBase58, toBase64 } from '@mysten/sui/utils';
 import { isValidTransactionSignature } from '@mysten/sui/verify';
 
-import { migratedDb } from './helpers/store-db.mjs';
 import { softPasskey } from './fixtures/soft-passkey.mjs';
 import * as schema from '../lib/db/schema.ts';
 import { buildBusinessMultisig } from '../lib/wallet/business-multisig.ts';
 import { describeWalletTransaction } from '../lib/wallet/wallet-tx-describe.ts';
 import { nominateWalletTx } from '../lib/server/sui-v2-builders.ts';
 import {
-  continueWalletSteps,
   detectMemberFunds,
   requestMigrationTransfer,
   requestWalletPayment,
@@ -44,103 +41,7 @@ import {
 } from '../lib/server/wallet-signing.ts';
 import { countLingeringSignaturesForStaff, expireSigningRequestsForStaff } from '../lib/server/wallet-signing-store.ts';
 
-const CORE = '0x' + 'c0'.repeat(32);
-const ACCOUNT = '0x' + 'ac'.repeat(32);
-const OTHER_ACCOUNT = '0x' + 'ad'.repeat(32);
-const CONFIG = '0x' + 'cf'.repeat(32);
-const FEES = '0x' + 'fe'.repeat(32);
-const REGISTRY = '0x' + 'ee'.repeat(32);
-const USDC = '0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC';
-const CHAIN_ID = toBase58(new Uint8Array(32).fill(7));
-
-const chainCfg = {
-  corePackageId: CORE,
-  complianceConfig: { objectId: CONFIG, initialSharedVersion: 3 },
-  feeConfig: { objectId: FEES, initialSharedVersion: 4 },
-  registry: { objectId: REGISTRY, initialSharedVersion: 5 },
-  usdcType: USDC,
-};
-const expect = { corePackageId: CORE, accountId: ACCOUNT, complianceConfigId: CONFIG, feeConfigId: FEES, registryId: REGISTRY, usdcType: USDC };
-
-const T0 = new Date('2026-10-25T08:00:00Z');
-
-async function world({ simulateOk = true, sponsor: withSponsor = true } = {}) {
-  const { client, db } = await migratedDb();
-  for (const [id, email, org] of [
-    ['u-founder', 'founder@acme.test', 'acme'],
-    ['u-two', 'two@acme.test', 'acme'],
-    ['u-three', 'three@acme.test', 'acme'],
-    ['u-north', 'north@northwind.test', 'northwind'],
-  ]) {
-    await db.insert(schema.users).values({ id, email, name: id });
-    await db.insert(schema.memberships).values({ id: `m-${id}`, userId: id, orgId: org, role: 'admin' });
-  }
-  const keys = { founder: softPasskey(), two: softPasskey(), three: softPasskey(), north: softPasskey() };
-
-  const sponsorKey = Ed25519Keypair.fromSecretKey(new Uint8Array(32).fill(0x5a));
-  let nonce = 1;
-  const sponsor = {
-    address: sponsorKey.toSuiAddress(),
-    gasFor: async () => ({ owner: sponsorKey.toSuiAddress(), price: 1000n, budget: 20_000_000n, epoch: 900n, chain: CHAIN_ID, nonce: nonce++ }),
-    sign: async (bytes) => (await sponsorKey.signTransaction(bytes)).signature,
-  };
-
-  const executed = [];
-  const simulated = [];
-  const chain = {
-    simulate: async (bytes) => {
-      simulated.push(bytes);
-      return simulateOk ? { success: true, balanceChanges: [{ address: '0x1', coinType: USDC, amount: '-5' }] } : { success: false, error: 'MoveAbort(E_NOT_THE_FOUNDER)' };
-    },
-    execute: async (bytes, signatures) => {
-      executed.push({ bytes, signatures });
-      const { TransactionDataBuilder } = await import('@mysten/sui/transactions');
-      return { digest: TransactionDataBuilder.getDigestFromBytes(bytes), success: true };
-    },
-  };
-
-  let now = T0;
-  const notices = [];
-  const signing = {
-    db,
-    chain,
-    sponsor: withSponsor ? sponsor : null,
-    expect,
-    now: () => now,
-    notifier: { notify: async (n) => (notices.push(n), { delivered: n.userIds, unreachable: [] }) },
-  };
-  const ctx = {
-    signing,
-    chain: chainCfg,
-    account: { objectId: ACCOUNT, initialSharedVersion: 9 },
-    validity: async () => ({ epoch: 900n, chain: CHAIN_ID, nonce: nonce++ }),
-  };
-  signing.onExecuted = async (request) => {
-    await continueWalletSteps(ctx, request);
-  };
-  const owners = [
-    { userId: 'u-founder', publicKey: keys.founder.publicKey },
-    { userId: 'u-two', publicKey: keys.two.publicKey },
-    { userId: 'u-three', publicKey: keys.three.publicKey },
-  ];
-  return {
-    client,
-    db,
-    keys,
-    sponsor,
-    sponsorKey,
-    chain,
-    executed,
-    simulated,
-    signing,
-    ctx,
-    owners,
-    notices,
-    setNow: (d) => {
-      now = d;
-    },
-  };
-}
+import { ACCOUNT, chainCfg, expect, OTHER_ACCOUNT, T0, USDC, world } from './fixtures/wallet-world.mjs';
 
 async function sign(passkey, view) {
   return (await passkey.keypair.signTransaction(fromBase64(view.transactionBytes))).signature;
@@ -208,7 +109,11 @@ test('combine: the founder nominates, two of three members register, and the ser
   assert.equal(w.executed.length, 1);
   assert.equal(w.executed[0].signatures.length, 2);
   assert.equal(await isValidTransactionSignature(w.executed[0].bytes, w.executed[0].signatures[1], { address: w.sponsor.address }), true);
-  const nominated = nominate.description.actions[0];
+  // The founder first makes the two other members on-chain owners (Move's
+  // register_wallet refuses a member who is not one), then nominates.
+  assert.deepEqual(nominate.description.actions.map((a) => a.type), ['add_owner', 'add_owner', 'nominate_wallet']);
+  assert.deepEqual(nominate.description.actions.slice(0, 2).map((a) => a.address).sort(), [w.keys.two.address, w.keys.three.address].sort());
+  const nominated = nominate.description.actions.at(-1);
   assert.equal(nominated.type, 'nominate_wallet');
 
   // The registration names the same wallet the founder nominated, and it is the sender.
@@ -475,8 +380,15 @@ test('one open wallet creation per org at a time', async () => {
 
 /* ── Payments: the screen comes from the PTB ─────────────────────────── */
 
+/** The founder nominates, two members register: the model chain now names the wallet. */
 async function registeredWallet(w) {
+  const { register } = await nominateAndOpenRegistration(w);
+  await submitPartialSignature(w.signing, { orgId: 'acme', userId: 'u-two', id: register.id, signature: await sign(w.keys.two, register), digest: register.digest });
+  const done = await submitPartialSignature(w.signing, { orgId: 'acme', userId: 'u-three', id: register.id, signature: await sign(w.keys.three, register), digest: register.digest });
+  assert.equal(done.request.status, 'executed', JSON.stringify(done));
+  w.notices.length = 0;
   const wallet = buildBusinessMultisig({ members: w.owners });
+  assert.equal((await w.ctx.readAccount()).wallet, wallet.address, 'the chain names the registered wallet');
   return { wallet, members: { multisigPublicKey: wallet.multisigPublicKey, members: wallet.members.map((m) => ({ userId: m.userId, publicKey: m.suiPublicKey, weight: m.weight })) } };
 }
 
@@ -619,7 +531,9 @@ test('the WhatsApp request says what the bytes do and carries no link, code or b
     now: T0,
   });
   assert.match(text, /register the business wallet 0x[0-9a-f]{4}…[0-9a-f]{4}: 2 of 3 owners sign/);
-  assert.match(text, new RegExp(register.bytesHash.slice(0, 8)));
+  // 16 hex characters (64 bits) of the hash, in four groups: not 32 bits a
+  // brute force could match.
+  assert.match(text, new RegExp(register.bytesHash.slice(0, 16).match(/.{4}/g).join(' ')));
   assert.doesNotMatch(text, /https?:\/\//);
   assert.ok(!text.includes(register.transactionBytes.slice(0, 24)), 'no transaction bytes');
   assert.match(text, /expires in 24 hours/);
@@ -632,6 +546,9 @@ test('every wallet route takes the org from the session, never the request', asy
   assert.match(front, /requireSessionAccount\(auth\.session\)/);
   for (const route of [
     'app/api/wallet/business/route.ts',
+    'app/api/wallet/business/consent/route.ts',
+    'app/api/wallet/business/rotation/route.ts',
+    'app/api/wallet/business/members/route.ts',
     'app/api/wallet/signing-requests/route.ts',
     'app/api/wallet/signing-requests/[id]/route.ts',
     'app/api/wallet/signing-requests/[id]/signatures/route.ts',
