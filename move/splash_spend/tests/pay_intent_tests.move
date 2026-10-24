@@ -56,10 +56,18 @@ const JUNIOR: address = @0x7A1;
 /// Splash's KMS operator: pays only, and only with an approval naming it.
 const EXECUTOR: address = @0xE0E0;
 const STRANGER: address = @0xBAD;
-/// A supplier's verified wallet (kind 1).
+/// A supplier's verified wallet (tagged a wallet, kind 1).
 const SUPPLIER: address = @0x5099;
-/// Another Splash business, verified (kind 0).
+/// Another Splash business: a registered business wallet, which the policy
+/// tags as a wallet (A1 §2.3: core derives the Splash-business kind).
 const BUSINESS: address = @0xB12;
+/// An exchange deposit address (tagged an exchange, kind 2).
+const EXCHANGE: address = @0xE8C4;
+/// An address in Splash's partner registry that the policy has no
+/// beneficiary bound to.
+const SPLASH_PARTNER: address = @0x9A3;
+/// Another account's registered business wallet, not on the policy.
+const OTHER_BUSINESS: address = @0xB13;
 /// A verified Sui recipient that is NOT the beneficiary's partner address.
 const OTHER_PARTNER: address = @0x9A2;
 /// Never verified anywhere.
@@ -225,7 +233,7 @@ fun setup_with(accept_other: bool): (Scenario, Fx) {
         policy.add_spender(&account, JUNIOR, spend_policy::role_staff(), JUNIOR_MAX, ctx);
         policy.add_spender(&account, EXECUTOR, spend_policy::role_executor(), EXECUTOR_MAX, ctx);
         policy.verify_recipient(&account, SUI_DOMAIN, SUPPLIER, payment_intent::kind_wallet(), ctx);
-        policy.verify_recipient(&account, SUI_DOMAIN, BUSINESS, payment_intent::kind_splash_business(), ctx);
+        policy.verify_recipient(&account, SUI_DOMAIN, BUSINESS, payment_intent::kind_wallet(), ctx);
         policy.verify_recipient(&account, SUI_DOMAIN, OTHER_PARTNER, payment_intent::kind_wallet(), ctx);
         // The bank beneficiary is bound to the harness's partner deposit address.
         policy.verify_beneficiary(&account, h::beneficiary(), h::recipient(), ctx);
@@ -490,15 +498,47 @@ fun pay_objects(
         object::id(alw),
         ts::withdraw_balance_from_address<USDC>(from, drawn),
     );
-    // No Splash fee in these tests: a scratch config charging nothing, and a
-    // registry classifying the recipient as the kind the intent declares.
+    // No Splash fee in these tests: a scratch config charging nothing, and
+    // Splash's registries as `spend_registry` describes them.
     let fees = h::scratch_fees(ctx);
-    let reg = h::scratch_registry_for(intent, ctx);
+    let reg = spend_registry(ctx);
     let receipt = splash_spend::pay_intent(
         alw, withdrawal, intent, account, policy, config, &fees, &reg, approval, 0, settle_by_ms, c, ctx,
     );
     h::drop_scratch(fees, reg);
     audit_anchor::anchor(receipt, HASH, BLOB, c, ctx);
+}
+
+/// Splash's registries as these tests see them: BUSINESS and OTHER_BUSINESS
+/// are registered business wallets, and the harness's partner deposit
+/// address and SPLASH_PARTNER are in the partner registry.
+fun spend_registry(ctx: &mut TxContext): address_registry::Registry {
+    let mut reg = address_registry::new_for_testing(ctx);
+    address_registry::add_business_wallet_for_testing(&mut reg, BUSINESS);
+    address_registry::add_business_wallet_for_testing(&mut reg, OTHER_BUSINESS);
+    let cap = address_registry::ops_cap_for_testing(ctx);
+    address_registry::add_partner_address(&cap, &mut reg, h::recipient());
+    address_registry::add_partner_address(&cap, &mut reg, SPLASH_PARTNER);
+    address_registry::destroy_ops_cap_for_testing(cap);
+    reg
+}
+
+/// The wallet tags `addr` as a recipient of `kind`.
+fun tag(s: &mut Scenario, fx: &Fx, addr: address, kind: u8) {
+    let mut p = wallet_policy(s, fx);
+    let account = s.take_shared_by_id<BusinessAccount>(fx.account);
+    p.verify_recipient(&account, SUI_DOMAIN, addr, kind, s.ctx());
+    ts::return_shared(account);
+    ts::return_shared(p);
+}
+
+/// The wallet binds `beneficiary` to `partner`.
+fun bind(s: &mut Scenario, fx: &Fx, beneficiary: vector<u8>, partner: address) {
+    let mut p = wallet_policy(s, fx);
+    let account = s.take_shared_by_id<BusinessAccount>(fx.account);
+    p.verify_beneficiary(&account, beneficiary, partner, s.ctx());
+    ts::return_shared(account);
+    ts::return_shared(p);
 }
 
 /// The wallet signs a transaction on its policy; the caller returns it.
@@ -750,15 +790,82 @@ fun staff_pays_a_bank_payout_to_the_bound_partner_address() {
 }
 
 #[test]
-/// Kind 0, another Splash business, is credited to its address balance,
-/// where its own spending rules draw from; no Coin object is sent.
+/// A1 §2.3: another Splash business is tagged a wallet on the policy, and
+/// core derives the Splash-business kind from the business-wallet registry.
+/// It is credited to its address balance, where its own spending rules draw
+/// from; no Coin object is sent.
 fun a_splash_business_is_credited_to_its_address_balance() {
     let (mut s, fx) = setup();
-    let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_splash_business(), BUSINESS, PAY);
+    let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), BUSINESS, PAY);
     pay(&mut s, &fx, STAFF, fx.staff, intent, false);
     s.next_tx(BUSINESS);
     assert_eq!(ts::settled_balance<USDC>(BUSINESS), PAY);
     assert!(!ts::has_most_recent_for_address<Coin<USDC>>(BUSINESS));
+    s.end();
+}
+
+#[test]
+/// A1 §2.3: the owners tag an exchange deposit address as an exchange.
+/// Staff pay it as one, and it is sent a Coin, which every deposit system
+/// recognises.
+fun staff_pay_an_exchange_tagged_as_one() {
+    let (mut s, fx) = setup();
+    tag(&mut s, &fx, EXCHANGE, payment_intent::kind_exchange());
+    let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_exchange(), EXCHANGE, PAY);
+    pay(&mut s, &fx, STAFF, fx.staff, intent, false);
+    assert_eq!(coin_received(&mut s, EXCHANGE), PAY);
+    s.next_tx(EXCHANGE);
+    assert_eq!(ts::settled_balance<USDC>(EXCHANGE), 0);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = splash_spend::E_WRONG_DELIVERY_KIND)]
+/// The tag is the owners' choice: staff cannot declare an exchange as a
+/// wallet, which Splash charges less.
+fun staff_cannot_declare_an_exchange_a_wallet() {
+    let (mut s, fx) = setup();
+    tag(&mut s, &fx, EXCHANGE, payment_intent::kind_exchange());
+    open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), EXCHANGE, PAY);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = splash_spend::E_PARTNER_DEPOSIT_NOT_BANK_PAYOUT)]
+/// A1 §2.3 with decision 2: an address in Splash's partner registry is paid
+/// only as a bank payout, even when the owners tagged it a wallet on a
+/// policy that binds no beneficiary to it. Core derives a bank payout, and
+/// the spending rule refuses to pay a partner as anything else.
+fun an_address_in_splashs_partner_registry_is_not_paid_as_a_wallet() {
+    let (mut s, fx) = setup();
+    tag(&mut s, &fx, SPLASH_PARTNER, payment_intent::kind_wallet());
+    let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SPLASH_PARTNER, PAY);
+    pay(&mut s, &fx, STAFF, fx.staff, intent, false);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = splash_core::address_registry::E_KIND_MISMATCH)]
+/// A1 §3: a bank payout to an address outside Splash's partner registry
+/// aborts, even with its beneficiary bound to it on the policy.
+fun a_bank_payout_to_an_address_outside_splashs_partner_registry_aborts() {
+    let (mut s, fx) = setup();
+    bind(&mut s, &fx, BENEFICIARY_2, UNLISTED);
+    let intent = open_bank(&mut s, &fx, 1, UNLISTED, BENEFICIARY_2, PAY);
+    pay(&mut s, &fx, STAFF, fx.staff, intent, false);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = splash_spend::E_BANK_PAYOUT_NOT_TO_PARTNER)]
+/// A bank payout's beneficiary bound to a registered business wallet: core
+/// would credit it free, as a Splash business, and no partner would pay
+/// the beneficiary. The spending rule refuses it.
+fun a_bank_payout_to_a_business_wallet_aborts() {
+    let (mut s, fx) = setup();
+    bind(&mut s, &fx, BENEFICIARY_2, OTHER_BUSINESS);
+    let intent = open_bank(&mut s, &fx, 1, OTHER_BUSINESS, BENEFICIARY_2, PAY);
+    pay(&mut s, &fx, STAFF, fx.staff, intent, false);
     s.end();
 }
 
@@ -873,20 +980,24 @@ fun staff_cannot_pay_a_wallet_recipient_as_a_splash_business() {
 }
 
 #[test]
-#[expected_failure(abort_code = splash_spend::E_WRONG_DELIVERY_KIND)]
-/// The mirror: BUSINESS is verified as another Splash business, credited to
-/// its address balance where its own rules draw. Staff cannot send it a
-/// Coin object instead.
-fun staff_cannot_pay_a_splash_business_as_a_wallet() {
+/// The mirror: BUSINESS is tagged a wallet, and core still credits it to
+/// its address balance, because it is a registered business wallet. The
+/// tag cannot make staff send a Splash business a Coin object.
+fun a_splash_business_tagged_a_wallet_is_still_credited_to_its_address_balance() {
     let (mut s, fx) = setup();
-    open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), BUSINESS, PAY);
+    let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), BUSINESS, PAY);
+    pay(&mut s, &fx, STAFF, fx.staff, intent, false);
+    s.next_tx(BUSINESS);
+    assert!(!ts::has_most_recent_for_address<Coin<USDC>>(BUSINESS));
+    assert_eq!(ts::settled_balance<USDC>(BUSINESS), PAY);
     s.end();
 }
 
 #[test]
 #[expected_failure(abort_code = splash_spend::E_WRONG_DELIVERY_KIND)]
 /// The kind is checked again at pay time: a wallet-opened intent of the
-/// wrong kind cannot be paid under the rule.
+/// wrong kind (here a Splash business, which is never a tag) cannot be paid
+/// under the rule.
 fun a_wallet_intent_of_the_wrong_kind_cannot_be_paid_under_the_rule() {
     let (mut s, fx) = setup();
     let intent = open_by_wallet(&mut s, &fx, 1, payment_intent::kind_splash_business(), SUPPLIER, PAY);
@@ -904,7 +1015,7 @@ fun re_verifying_a_recipient_under_another_kind_stops_its_open_intents() {
     let mut p = wallet_policy(&mut s, &fx);
     let account = s.take_shared_by_id<BusinessAccount>(fx.account);
     p.remove_recipient(SUI_DOMAIN, SUPPLIER, s.ctx());
-    p.verify_recipient(&account, SUI_DOMAIN, SUPPLIER, payment_intent::kind_splash_business(), s.ctx());
+    p.verify_recipient(&account, SUI_DOMAIN, SUPPLIER, payment_intent::kind_exchange(), s.ctx());
     ts::return_shared(account);
     ts::return_shared(p);
     pay(&mut s, &fx, STAFF, fx.staff, intent, false);
@@ -1189,7 +1300,7 @@ fun paying_in_another_asset_aborts() {
         let c = s.take_shared<Clock>();
         let w = allowance::new_withdrawal_for_testing(other_alw, ts::withdraw_balance_from_address<OTHER>(h::wallet(), PAY));
         let fees = h::scratch_fees(s.ctx());
-        let reg = h::scratch_registry_for(&intent, s.ctx());
+        let reg = spend_registry(s.ctx());
         let receipt = splash_spend::pay_intent(
             &mut alw,
             w,
@@ -3153,11 +3264,11 @@ fun the_window_is_anchored_at_its_first_payment() {
 fun different_recipients_keep_separate_totals() {
     let (mut s, fx) = setup();
     let a = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, UNDER);
-    let b = open(&mut s, &fx, STAFF, 2, payment_intent::kind_splash_business(), BUSINESS, UNDER);
+    let b = open(&mut s, &fx, STAFF, 2, payment_intent::kind_wallet(), BUSINESS, UNDER);
     pay(&mut s, &fx, STAFF, fx.staff, a, false);
     pay(&mut s, &fx, STAFF, fx.staff, b, false);
     assert_eq!(total_paid(&mut s, &fx, STAFF, payment_intent::kind_wallet(), SUPPLIER), UNDER);
-    assert_eq!(total_paid(&mut s, &fx, STAFF, payment_intent::kind_splash_business(), BUSINESS), UNDER);
+    assert_eq!(total_paid(&mut s, &fx, STAFF, payment_intent::kind_wallet(), BUSINESS), UNDER);
     s.end();
 }
 
@@ -3403,8 +3514,31 @@ fun a_bank_payout_to_a_partner_needs_a_verified_beneficiary() {
 #[test]
 /// Removing the last beneficiary bound to an address clears its partner
 /// flag. The wallet can then verify it as a wallet recipient, and staff pay
-/// it as one.
+/// it as one, as long as Splash's partner registry does not list it either.
 fun once_no_beneficiary_is_bound_an_address_can_be_paid_as_a_wallet() {
+    let (mut s, fx) = setup();
+    {
+        let mut p = wallet_policy(&mut s, &fx);
+        let account = s.take_shared_by_id<BusinessAccount>(fx.account);
+        p.remove_recipient(SUI_DOMAIN, OTHER_PARTNER, s.ctx());
+        p.verify_beneficiary(&account, BENEFICIARY_2, OTHER_PARTNER, s.ctx());
+        p.remove_beneficiary(BENEFICIARY_2, s.ctx());
+        p.verify_recipient(&account, SUI_DOMAIN, OTHER_PARTNER, payment_intent::kind_wallet(), s.ctx());
+        ts::return_shared(account);
+        ts::return_shared(p);
+    };
+    let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), OTHER_PARTNER, PAY);
+    pay(&mut s, &fx, STAFF, fx.staff, intent, false);
+    assert_eq!(coin_received(&mut s, OTHER_PARTNER), PAY);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = splash_spend::E_PARTNER_DEPOSIT_NOT_BANK_PAYOUT)]
+/// The policy's own partner flag clears with its last beneficiary, but
+/// Splash's partner registry still lists the address: the two lists are
+/// checked together, so it is still paid only as a bank payout.
+fun an_address_unbound_on_the_policy_but_in_splashs_partner_registry_is_not_paid_as_a_wallet() {
     let (mut s, fx) = setup();
     {
         let mut p = wallet_policy(&mut s, &fx);
@@ -3416,6 +3550,5 @@ fun once_no_beneficiary_is_bound_an_address_can_be_paid_as_a_wallet() {
     };
     let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), h::recipient(), PAY);
     pay(&mut s, &fx, STAFF, fx.staff, intent, false);
-    assert_eq!(coin_received(&mut s, h::recipient()), PAY);
     s.end();
 }

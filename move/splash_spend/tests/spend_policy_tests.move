@@ -1414,7 +1414,7 @@ fun removing_a_spender_at_the_cap_frees_a_place() {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// Recipients (kinds 0-1, on Sui)
+// Recipients (tagged a wallet or an exchange, on Sui)
 // ════════════════════════════════════════════════════════════════════════════
 
 #[test]
@@ -1467,18 +1467,18 @@ fun a_recipient_on_solana_cannot_be_verified() {
 }
 
 #[test]
-/// Review A1/A3/A10: the owners choose how a recipient is paid when they
-/// verify it, and the policy records it: a Splash business (2), credited to
-/// its address balance, or a wallet (3), sent a Coin.
-fun verify_recipient_records_the_kind_the_owners_chose() {
+/// A1 §2.3: the owners tag a recipient with the kind a payment to it
+/// declares, a wallet (1) or an exchange (2), and the policy records it.
+/// Splash's fee follows the kind core derives from that tag.
+fun verify_recipient_records_the_tag_the_owners_chose() {
     let (mut s, id) = begin_with_policy();
     verify_recipient_kind_as(&mut s, id, h::wallet(), SUI, SUPPLIER, payment_intent::kind_wallet());
-    verify_recipient_kind_as(&mut s, id, h::wallet(), SUI, PARTNER, payment_intent::kind_splash_business());
+    verify_recipient_kind_as(&mut s, id, h::wallet(), SUI, PARTNER, payment_intent::kind_exchange());
     s.next_tx(STRANGER);
     {
         let policy = s.take_shared_by_id<SpendPolicy>(id);
         assert_eq!(spend_policy::recipient_kind(&policy, SUI, SUPPLIER), payment_intent::kind_wallet());
-        assert_eq!(spend_policy::recipient_kind(&policy, SUI, PARTNER), payment_intent::kind_splash_business());
+        assert_eq!(spend_policy::recipient_kind(&policy, SUI, PARTNER), payment_intent::kind_exchange());
         assert_eq!(spend_policy::recipient_count(&policy), 2);
         ts::return_shared(policy);
     };
@@ -1493,6 +1493,18 @@ fun verify_recipient_records_the_kind_the_owners_chose() {
 fun a_recipient_cannot_be_verified_under_a_second_kind() {
     let (mut s, id) = begin_with_policy();
     verify_recipient_kind_as(&mut s, id, h::wallet(), SUI, SUPPLIER, payment_intent::kind_wallet());
+    verify_recipient_kind_as(&mut s, id, h::wallet(), SUI, SUPPLIER, payment_intent::kind_exchange());
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = spend_policy::E_BAD_KIND)]
+/// A1 §2.3: a Splash business is not a tag. Core derives it from the
+/// business-wallet registry, so a payment to a registered business wallet
+/// tagged as a wallet is still free, and no tag can make another address
+/// one.
+fun a_recipient_cannot_be_tagged_as_a_splash_business() {
+    let (mut s, id) = begin_with_policy();
     verify_recipient_kind_as(&mut s, id, h::wallet(), SUI, SUPPLIER, payment_intent::kind_splash_business());
     s.end();
 }
@@ -2137,11 +2149,11 @@ fun verify_recipient_refuses_a_partner_deposit_address() {
 
 #[test]
 #[expected_failure(abort_code = spend_policy::E_PARTNER_DEPOSIT)]
-/// Nor as another Splash business.
-fun verify_recipient_refuses_a_partner_deposit_address_as_a_business() {
+/// Nor as an exchange.
+fun verify_recipient_refuses_a_partner_deposit_address_as_an_exchange() {
     let (mut s, id) = begin_with_policy();
     verify_beneficiary_as(&mut s, id, h::wallet(), BENEFICIARY_A, PARTNER);
-    verify_recipient_kind_as(&mut s, id, h::wallet(), SUI, PARTNER, payment_intent::kind_splash_business());
+    verify_recipient_kind_as(&mut s, id, h::wallet(), SUI, PARTNER, payment_intent::kind_exchange());
     s.end();
 }
 
@@ -2158,10 +2170,10 @@ fun verify_beneficiary_refuses_a_verified_wallet_recipient() {
 
 #[test]
 #[expected_failure(abort_code = spend_policy::E_ALREADY_A_RECIPIENT)]
-/// Nor one verified as a Splash business.
-fun verify_beneficiary_refuses_a_verified_business_recipient() {
+/// Nor one tagged as an exchange.
+fun verify_beneficiary_refuses_a_verified_exchange_recipient() {
     let (mut s, id) = begin_with_policy();
-    verify_recipient_kind_as(&mut s, id, h::wallet(), SUI, SUPPLIER, payment_intent::kind_splash_business());
+    verify_recipient_kind_as(&mut s, id, h::wallet(), SUI, SUPPLIER, payment_intent::kind_exchange());
     verify_beneficiary_as(&mut s, id, h::wallet(), BENEFICIARY_A, SUPPLIER);
     s.end();
 }
