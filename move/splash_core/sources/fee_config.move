@@ -58,6 +58,7 @@
 /// argument. FeeConfig holds no value: the fee is sent on in the same call.
 module splash_core::fee_config;
 
+use splash_core::multisig;
 use sui::balance::{Self, Balance};
 use sui::clock::Clock;
 use sui::event;
@@ -74,7 +75,8 @@ const E_FEE_ABOVE_CEILING: u64 = 1301;
 const E_FEE_PROPOSAL_NOT_READY: u64 = 1302;
 /// There is no pending proposal to apply.
 const E_NO_FEE_PROPOSAL: u64 = 1303;
-/// The fee recipient cannot be the zero address.
+/// The proposed fee recipient is a multisig that one member can sign for
+/// alone (a lone key, or a member whose weight meets the threshold).
 const E_INVALID_FEE_RECIPIENT: u64 = 1304;
 /// The kind is outside 0-4.
 const E_UNKNOWN_KIND: u64 = 1305;
@@ -132,7 +134,8 @@ public struct FeeConfig has key {
     /// One per kind, indexed by kind.
     schedules: vector<Schedule>,
     /// Where every fee leg is sent: the Splash finance multisig, never the
-    /// KMS operator. None at publish, and while it is none Splash's fees are
+    /// KMS operator; `propose_fee_recipient` derives it from the multisig's
+    /// members and refuses one a single member can sign for. None at publish, and while it is none Splash's fees are
     /// off (`splash_fee` is 0). It becomes some only through
     /// `apply_fee_recipient`, after 24 hours' notice.
     fee_recipient: Option<address>,
@@ -353,8 +356,28 @@ public fun apply_schedule(_: &FeeAdminCap, cfg: &mut FeeConfig, kind: u8, clock:
 
 /// Propose a new fee recipient, applicable 24 hours from now. Replaces any
 /// recipient proposal already pending.
-public fun propose_fee_recipient(_: &FeeAdminCap, cfg: &mut FeeConfig, recipient: address, clock: &Clock) {
-    assert!(recipient != @0x0, E_INVALID_FEE_RECIPIENT);
+///
+/// The recipient is proven to be a multisig (Sky, 24 Oct; stricter than A1):
+/// the proposal names its members' keys (`flag || public key`), their
+/// weights and its threshold, and the address is derived from them here
+/// (`multisig::derive_address`), never typed in. A configuration Sui would
+/// refuse to build aborts with multisig's own code, and a multisig any ONE
+/// member can sign for alone (`multisig::is_single_signer`: a 1-of-1, a
+/// 1-of-N, or a member whose weight meets the threshold) aborts with
+/// E_INVALID_FEE_RECIPIENT. So the fee recipient can never be a lone key,
+/// such as the KMS operator. Who the members are is still for the go-live
+/// ceremony to check: the chain only knows that no single one of them can
+/// move the fees.
+public fun propose_fee_recipient(
+    _: &FeeAdminCap,
+    cfg: &mut FeeConfig,
+    keys: vector<vector<u8>>,
+    weights: vector<u8>,
+    threshold: u16,
+    clock: &Clock,
+) {
+    let recipient = multisig::derive_address(&keys, &weights, threshold);
+    assert!(!multisig::is_single_signer(&weights, threshold), E_INVALID_FEE_RECIPIENT);
     let eta = clock.timestamp_ms() + FEE_NOTICE_MS;
     cfg.pending_recipient = option::some(PendingRecipient { recipient, eta_ms: eta });
     event::emit(FeeRecipientProposed { recipient, eta });

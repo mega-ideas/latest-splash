@@ -568,7 +568,7 @@ const ABORT_CODES: Record<number, string> = {
   1301: 'E_FEE_ABOVE_CEILING — a proposed fee rate or a discount is above 100 bps (1%), the ceiling written into the package. Propose 100 or less.',
   1302: 'E_FEE_PROPOSAL_NOT_READY — this fee change was proposed less than 24 hours ago. It can be applied once its notice has run; read its eta.',
   1303: 'E_NO_FEE_PROPOSAL — there is no pending fee schedule or fee recipient proposal to apply. Propose it first; it applies 24 hours later.',
-  1304: 'E_INVALID_FEE_RECIPIENT — the fee recipient cannot be the zero address. Name the Splash finance multisig.',
+  1304: 'E_INVALID_FEE_RECIPIENT — the proposed fee recipient is a multisig one member can sign for alone (a single key, a 1-of-N, or a member whose weight meets the threshold). Propose the Splash finance multisig: its members, weights and threshold, with no member able to sign alone.',
   1305: 'E_UNKNOWN_KIND — a fee was asked for a kind outside 0 to 4 (Splash business, wallet, exchange, cross-chain, bank payout).',
 
   // ── address_registry (splash_core, how a payment is classified, A1 §2.3) ─
