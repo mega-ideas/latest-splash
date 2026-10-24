@@ -25,7 +25,9 @@
  *     off, the fee quoted under it is 0 as `fee_config::splash_fee` returns,
  *     and the cache refreshes on FeeRecipientApplied and at a pending
  *     recipient's eta, when the fees could turn on;
- *   * the module is server-only.
+ *   * the chain reader (lib/fees/fee-config.ts) is server-only, and the
+ *     computation (lib/fees/schedule.ts) is not, so the calculator and the
+ *     fee breakdown in the browser compute with the same code.
  */
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -35,18 +37,20 @@ import {
   BPS_DENOM,
   FEE_CEILING_BPS,
   FEE_KIND,
-  FeeConfigUnavailableError,
   FeeKindMismatchError,
   LAUNCH_SCHEDULE,
-  createFeeConfigCache,
   deriveKind,
   feeUnderConfig,
   settlementKind,
+  splashFee,
+} from '../lib/fees/schedule.ts';
+import {
+  FeeConfigUnavailableError,
+  createFeeConfigCache,
   graphqlDiscountReader,
   graphqlFeeConfigReader,
   parseFeeConfig,
-  splashFee,
-} from '../lib/fees/schedule.ts';
+} from '../lib/fees/fee-config.ts';
 
 const U64_MAX = 18_446_744_073_709_551_615n;
 const vectors = JSON.parse(readFileSync('lib/fees/vectors.json', 'utf8'));
@@ -467,6 +471,8 @@ test('a pending schedule shortens the cache to its eta, and to seconds once it c
   assert.equal(reads, 3);
 });
 
-test('the module is server-only', () => {
-  assert.match(readFileSync('lib/fees/schedule.ts', 'utf8'), /^import 'server-only';$/m);
+test('the chain reader is server-only and the computation is not', () => {
+  assert.match(readFileSync('lib/fees/fee-config.ts', 'utf8'), /^import 'server-only';$/m);
+  const schedule = readFileSync('lib/fees/schedule.ts', 'utf8');
+  assert.doesNotMatch(schedule, /server-only|process.env|fetch(/, 'the computation reads neither the chain nor the environment');
 });
