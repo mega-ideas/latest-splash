@@ -8,8 +8,9 @@
 ///   * business wallets: every account's current business wallet, written by
 ///     `business_account::register_wallet` and by a confirmed rotation
 ///     (`confirm_wallet_rotation`), which clears the old wallet. Nothing else
-///     writes it. A payment to one is a Splash-business payment, free inside
-///     the network, whatever it declared.
+///     writes it. A payment to one declared a Splash business, a wallet or
+///     an exchange is a Splash-business payment, free inside the network; a
+///     declared bank payout to one is refused at settlement.
 ///   * partner deposit addresses: the payout partners' fixed deposit
 ///     addresses, managed by Splash's ops capability (`OpsCap`). A change
 ///     takes effect at once and emits an event. `derive_kind` classifies a
@@ -21,10 +22,11 @@
 ///
 /// The registries only classify. They hold no address any payment is sent
 /// to: every settle path pays the intent's own recipient, so the worst a
-/// stolen OpsCap can do is change which schedule a payment is charged on
-/// (still under the 100 bps ceiling and the payer's `max_fee`) or make a
-/// declared bank payout to a removed address abort. It can never redirect
-/// funds.
+/// stolen OpsCap can do is make payments abort: a declared bank payout to an
+/// address it removed, or a wallet or exchange payment to an address it
+/// added, which `assert_kind_fits` then refuses rather than charging it the
+/// bank fee. Whatever it does, no payment pays more than the payer's
+/// `max_fee` and the 100 bps ceiling. It can never redirect funds.
 ///
 /// One `Registry`, shared at publish. Settlement reads it (`&`), so payments
 /// do not contend on it; only registrations, rotations and ops changes write.
