@@ -393,6 +393,55 @@ test('(4) the migration route moves USDC only and asks for the sign-off before b
   }
 });
 
+/* ── Offboarding: the authority goes with the membership ──────────────── */
+
+test('(4) a person in charge made a viewer, removed, or removed and re-added, no longer has the highest authority', async () => {
+  const w = await world();
+  const { staff, pic } = await withStaff(w);
+  const now = () => T0;
+  const { revokeRole } = await import('../lib/server/memberships.ts');
+  await appointPersonInCharge(w.db, { orgId: 'acme', actorUserId: 'u-founder', userId: 'u-pic', now });
+  assert.equal((await signOff(w, { by: 'u-pic', passkey: pic, member: 'u-staff', from: staff.address })).ok, true);
+  const clear = () => migrationClearance(w.db, { orgId: 'acme', userId: 'u-staff', fromAddress: staff.address, toWallet: WALLET, now });
+  assert.equal((await clear()).ok, true);
+
+  // A viewer has no authority, whatever the appointment table says.
+  await w.db.update(schema.memberships).set({ role: 'viewer' }).where(eq(schema.memberships.userId, 'u-pic'));
+  assert.equal(await highestAuthority(w.db, 'acme', 'u-pic'), null, 'a viewer is never the highest authority');
+  assert.equal((await clear()).ok, false, "a viewer's sign-off does not count");
+  await w.db.update(schema.memberships).set({ role: 'checker' }).where(eq(schema.memberships.userId, 'u-pic'));
+
+  // Removing the membership revokes the appointment and voids what they signed.
+  await revokeRole(w.db, { email: 'pic@acme.test', by: 'operator:ops@splash.test' });
+  assert.equal(await highestAuthority(w.db, 'acme', 'u-pic'), null);
+  await w.db.insert(schema.memberships).values({ id: 'm-u-pic-2', userId: 'u-pic', orgId: 'acme', role: 'checker' });
+  assert.equal(await highestAuthority(w.db, 'acme', 'u-pic'), null, 're-hired, they are not in charge again until an owner appoints them');
+  assert.equal((await clear()).ok, false, 'their old sign-off stays void');
+  assert.deepEqual(await listPersonsInCharge(w.db, 'acme'), []);
+
+  const events = (await listAuthorityEvents(w.db, 'acme')).filter((e) => e.subjectUserId === 'u-pic');
+  assert.deepEqual(events.map((e) => [e.action, e.actorUserId]).slice(-3), [
+    ['member_offboarded', 'operator:ops@splash.test'],
+    ['person_in_charge_revoked', 'operator:ops@splash.test'],
+    ['migration_sign_off_voided', 'operator:ops@splash.test'],
+  ]);
+  await w.client.close();
+});
+
+test('the audit trail outlives the people in it: a user with authority events can be deleted', async () => {
+  const w = await world();
+  const { staff, pic } = await withStaff(w);
+  await appointPersonInCharge(w.db, { orgId: 'acme', actorUserId: 'u-founder', userId: 'u-pic', now: () => T0 });
+  await signOff(w, { by: 'u-pic', passkey: pic, member: 'u-staff', from: staff.address });
+  w.model.addIntent(intentBy(staff.address));
+  await askOwnersToApprove({ db: w.db, ctx: w.ctx }, { orgId: 'acme', userId: 'u-staff', intentId: INTENT, contentHash: HASH, walrusBlobId: BLOB, requesterAddresses: [staff.address] });
+  await w.client.exec(`DELETE FROM users WHERE id IN ('u-pic', 'u-staff')`);
+  const events = await listAuthorityEvents(w.db, 'acme');
+  assert.ok(events.some((e) => e.subjectUserId === 'u-pic' && e.action === 'person_in_charge_appointed'), 'the trail keeps the ids of people who are gone');
+  assert.ok(events.some((e) => e.actorUserId === 'u-staff' && e.action === 'approval_requested'));
+  await w.client.close();
+});
+
 /* ── (1) One approver runs the hardware check on testnet ──────────────── */
 
 test('(1) the runbook and the mainnet gate say one approver runs the hardware 2-of-3 on testnet', async () => {

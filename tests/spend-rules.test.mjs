@@ -638,6 +638,44 @@ test("a staff member's payment above the threshold gets one owner's second appro
   await w.client.close();
 });
 
+/* ── Offboarding: a rule outlives its membership until the owners act ─── */
+
+async function passkeyFor(w, userId, address) {
+  await w.db.insert(schema.passkeyCredentials).values({ id: `pk-${userId}`, userId, credentialId: `cred-${userId}`, publicKey: 'AA==', suiAddress: address, rpId: 'localhost' });
+}
+
+test('removing a member, or making them a viewer, flags their live rule, and the owners take it back in one request', async () => {
+  const w = await spendWorld();
+  const { members } = await withPolicy(w);
+  await passkeyFor(w, 'u-staff', STAFF);
+  await passkeyFor(w, 'u-staff2', STAFF2);
+  await giveRule(w, members);
+  await giveRule(w, members, rule({ spender: STAFF2, cap: { period: 'day', limitMinor: 100n * USDC_1 } }));
+  let { view } = await readSpendingRules(w.sc);
+  assert.deepEqual(view.rules.map((r) => [r.spender, r.standing]), [[STAFF, 'member'], [STAFF2, 'member']]);
+  assert.deepEqual(view.orphaned, []);
+
+  const { revokeRole } = await import('../lib/server/memberships.ts');
+  await revokeRole(w.db, { email: 'staff@acme.test', by: 'operator:ops@splash.test' });
+  await w.db.update(schema.memberships).set({ role: 'viewer' }).where(eq(schema.memberships.userId, 'u-staff2'));
+  ({ view } = await readSpendingRules(w.sc));
+  assert.deepEqual(view.rules.map((r) => [r.spender, r.standing]), [[STAFF, 'removed'], [STAFF2, 'viewer']], 'neither may still pay under a rule');
+  assert.deepEqual(view.orphaned, [STAFF, STAFF2]);
+  // Re-hired, the old rule is still flagged until an owner deals with it.
+  await w.db.insert(schema.memberships).values({ id: 'm-u-staff-2', userId: 'u-staff', orgId: 'acme', role: 'maker' });
+  assert.equal((await readSpendingRules(w.sc)).view.rules[0].standing, 'removed');
+
+  const { revokeOrphanedRules } = await import('../lib/server/spend-rules.ts');
+  const revoke = await revokeOrphanedRules(w.sc, { orgId: 'acme', requestedBy: 'u-founder', wallet: members });
+  assert.equal(revoke.ok, true, JSON.stringify(revoke));
+  assert.deepEqual(revoke.request.description.actions.map((a) => a.type), ['revoke_allowance', 'remove_spender', 'revoke_allowance', 'remove_spender']);
+  assert.equal((await signBy(w, revoke.request, 'founder', 'two')).status, 'executed');
+  ({ view } = await readSpendingRules(w.sc));
+  assert.deepEqual([view.rules.length, view.orphaned.length], [0, 0]);
+  assert.equal((await revokeOrphanedRules(w.sc, { orgId: 'acme', requestedBy: 'u-founder', wallet: members })).code, 'nothing_orphaned');
+  await w.client.close();
+});
+
 /* ── Sky's example: a payment over the rule, asked for with a draft ───── */
 
 const bytes32hex = (b) => b.toString(16).padStart(2, '0').repeat(32);
@@ -739,7 +777,7 @@ test('two owners accepting one ask at once: one signing request opens, and the a
 /* ── Routes and configuration ─────────────────────────────────────────── */
 
 test('every spending-rule route takes the org from the session, and only owners change rules', async () => {
-  const routes = ['route.ts', '[staffUserId]/route.ts', 'policy/route.ts', 'recipients/route.ts', 'reissue/route.ts'];
+  const routes = ['route.ts', '[staffUserId]/route.ts', 'policy/route.ts', 'recipients/route.ts', 'reissue/route.ts', 'orphaned/route.ts'];
   for (const r of routes) {
     const source = await readFile(new URL(`../app/api/wallet/spending-rules/${r}`, import.meta.url), 'utf8');
     assert.match(source, /spendRoute\(request\)/, `${r}: the wallet route, the org from the session`);
