@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { resolveFundingSelection } from '@/lib/funding/registry';
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { ingestStablecoinDeposit } from '@/lib/server/funding-intake';
-import { readFundingSession } from '@/lib/server/funding-sessions';
+import { readFundingSession, withoutDepositAddressOnMainnet } from '@/lib/server/funding-sessions';
 import { readJsonBody } from '@/lib/server/http';
 import { refuseOutsideLaunchScope } from '@/lib/server/launch-scope';
 
@@ -16,8 +16,10 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
 
   const { id } = await context.params;
   const session = await readFundingSession(id);
+  // A session stored with a deposit address (on testnet, or before mainnet
+  // refused them) is never shown with it on mainnet (D1, D3).
   return session
-    ? NextResponse.json({ session })
+    ? NextResponse.json({ session: withoutDepositAddressOnMainnet(session) })
     : NextResponse.json({ error: 'Funding session not found' }, { status: 404 });
 }
 
@@ -55,7 +57,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       sourceOfFundsTraced: true,
       cctpMessageStatus: session.selection.rail === 'CCTP' ? 'minted' : undefined,
     });
-    return NextResponse.json({ session: credited });
+    return NextResponse.json({ session: withoutDepositAddressOnMainnet(credited) });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Deposit could not be processed' },

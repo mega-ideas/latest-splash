@@ -512,6 +512,25 @@ function productionIssues(env: Env): Issue[] {
         issues.push({ key, message: 'names the retired custody path; splash_custody and splash_meter do not publish to mainnet in v2 (docs/v2/phase1-move-design.md §8) — remove it from the host' });
       }
     }
+    /* D1 and D3: Splash holds no key to client funds and owns no account that
+       receives client money. A funding session's deposit address was derived
+       from the first key, so whoever holds it can rebuild the address's
+       private key, or read from the second, an address the operator chose.
+       On mainnet funding sessions give out no deposit address at all
+       (lib/server/funding-sessions.ts), so either key configures a path that
+       must not exist there. */
+    if (env.FUNDING_DEPOSIT_DERIVATION_SECRET !== undefined) {
+      issues.push({
+        key: 'FUNDING_DEPOSIT_DERIVATION_SECRET',
+        message: 'derives the private key of every Sui deposit address from a Splash secret, so Splash would hold a key to client funds (D1, D3); funding sessions give out no deposit address on mainnet — remove it from the host',
+      });
+    }
+    if (env.FUNDING_CCTP_DEPOSIT_ADDRESSES_JSON !== undefined) {
+      issues.push({
+        key: 'FUNDING_CCTP_DEPOSIT_ADDRESSES_JSON',
+        message: 'names CCTP deposit addresses the operator chose, an account between the business and its own wallet (D3); funding sessions give out no deposit address on mainnet — remove it from the host',
+      });
+    }
   }
 
   /* Email: a grant requires a verified mailbox, and verification is a link
