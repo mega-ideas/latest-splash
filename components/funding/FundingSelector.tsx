@@ -206,10 +206,6 @@ export default function FundingSelector({
             </p>
           </div>
         </div>
-        <div className="rounded-xl border border-[#326273]/10 bg-[#F6F0ED] px-3 py-2 text-left sm:text-right">
-          <span className="block text-[12px] font-bold uppercase tracking-[0.14em] text-[#326273]/90">Applied fee</span>
-          <span className="mt-0.5 block text-xs font-bold text-[#0C3E48]">{selection.feeTier}</span>
-        </div>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2" role="group" aria-label="Transfer funding method">
@@ -220,7 +216,7 @@ export default function FundingSelector({
           label="USD"
           title="Pay in USD"
           detail="Bank transfer with Stripe or Airwallex"
-          meta={bankSource?.unavailableReason ?? 'STANDARD fee'}
+          meta={bankSource?.unavailableReason ?? 'Same Splash fee, shown in the quote'}
           onClick={() => selectPrimary('USD')}
         />
         <PrimaryFundingButton
