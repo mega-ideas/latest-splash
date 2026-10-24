@@ -4,6 +4,7 @@ import { FeeConfigUnavailableError } from '@/lib/fees/fee-config';
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { readJsonBody } from '@/lib/server/http';
 import { calculateQuote } from '@/lib/server/quote';
+import { requireSessionAccount } from '@/lib/server/session-account';
 
 /**
  * A quote for a local-currency payout: A1 §4's { splashFee, partnerFee,
@@ -27,12 +28,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'A positive source amount is required' }, { status: 400 });
   }
 
+  // The business is the session's, resolved as authorize resolves it, so its
+  // discount is in this quote too. The funding session is opened for this
+  // quote's total, and authorize refuses a session whose amount differs from
+  // its own re-quote, so the two must price the same business.
+  const accountCheck = await requireSessionAccount(auth.session);
+  if (accountCheck.response) return accountCheck.response;
+  const businessAccountId = accountCheck.account.accountId;
+
   try {
-    // No business discount is read here: the session names no on-chain
-    // account, and quoting without a discount can only over-quote, never
-    // under (the chain returns the unused max_fee to the business wallet).
-    // The authorize route quotes again with the account it resolves.
-    const quote = await calculateQuote(fromAmountSen, recipientId, targetCurrency, feeTier);
+    const quote = await calculateQuote(fromAmountSen, recipientId, targetCurrency, feeTier, { businessId: businessAccountId });
     return NextResponse.json(quote);
   } catch (error) {
     if (error instanceof FeeConfigUnavailableError) {
