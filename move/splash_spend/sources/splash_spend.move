@@ -22,7 +22,11 @@
 /// package's `SettleWitness` because it is on that config's settlement-app
 /// registry, and pays the intent's recipient in the same call.
 ///
-/// A spending rule pays only on Sui (kinds 0, 1 and 4). A cross-chain payment
+/// A spending rule pays only on Sui: to a recipient the owners tagged a wallet
+/// or an exchange, or as a bank payout to a beneficiary bound to its partner
+/// deposit address. Core derives the kind it charges from that declared kind
+/// and Splash's registries (A1 §2.3), so a registered business wallet is a
+/// free Splash-business payment whatever its tag. A cross-chain payment
 /// would have to hand the business's coin to the spender's transaction for
 /// a bridge to burn, so it stays on the owners' multisig
 /// (`payment_intent::confirm_cross_chain_from_business_wallet`).
@@ -55,7 +59,7 @@
 /// fails if a `Coin` could.
 module splash_spend::splash_spend;
 
-use splash_core::address_registry::Registry;
+use splash_core::address_registry::{Self, Registry};
 use splash_core::business_account::{Self, BusinessAccount};
 use splash_core::compliance_config::{Self, ComplianceConfig};
 use splash_core::fee_config::FeeConfig;
@@ -126,8 +130,9 @@ const E_WRONG_PAY_PATH: u64 = 1022;
 const E_ALLOWANCE_NOT_FOR_POLICY: u64 = 1023;
 /// Only the business wallet delegates execution. A staff member cannot.
 const E_ONLY_THE_WALLET_DELEGATES: u64 = 1024;
-/// The recipient is verified, but to be paid as another kind: the owners
-/// chose how it is delivered (address balance or Coin) when they verified it.
+/// The recipient is verified, but tagged another kind: the owners chose the
+/// kind its payments declare (a wallet or an exchange) when they verified
+/// it, and an intent to it must declare that kind.
 const E_WRONG_DELIVERY_KIND: u64 = 1025;
 /// An approval's `settle_by_ms` must be in the future and no later than the
 /// intent's expiry.
@@ -136,9 +141,14 @@ const E_BAD_SETTLE_BY: u64 = 1026;
 const E_SETTLE_BY_AFTER_APPROVAL: u64 = 1027;
 /// The compliance config is not the one this policy was created against.
 const E_WRONG_CONFIG: u64 = 1028;
-/// The recipient is a partner deposit address (decision 2). It is paid only
-/// as a bank payout (kind 4) for a verified beneficiary bound to it.
+/// The recipient is a partner deposit address (decision 2): one the policy
+/// binds a beneficiary to, or one in Splash's partner registry. It is paid
+/// only as a bank payout (kind 4) for a verified beneficiary bound to it.
 const E_PARTNER_DEPOSIT_NOT_BANK_PAYOUT: u64 = 1029;
+/// A bank payout's partner deposit address is a registered business wallet,
+/// so core would credit it as a free Splash-business payment that no
+/// partner pays out. A bank payout goes only to Splash's partner registry.
+const E_BANK_PAYOUT_NOT_TO_PARTNER: u64 = 1030;
 
 /// What an allowance accepted under a policy must be named: this prefix and
 /// the policy's id. The allowance module never reads its name, so this module
@@ -453,8 +463,9 @@ public fun discard_approval(approval: PayoutApproval) {
 /// policy was created against. The intent lands on Sui, and core pays its
 /// recipient in this call; a cross-chain intent is refused.
 ///
-/// The declared kind core derives from is the intent's kind, which `draw`
-/// has checked is the recipient's tag in the policy.
+/// The kind declared to core is the recipient's tag in the policy, or a bank
+/// payout for a beneficiary bound to its partner deposit address (A1 §2.3);
+/// `draw` has checked that the intent declares the same.
 public fun pay_intent<C>(
     allowance: &mut Allowance<Balance<C>>,
     withdrawal: AllowanceWithdrawal<Balance<C>>,
@@ -471,8 +482,8 @@ public fun pay_intent<C>(
     ctx: &mut TxContext,
 ): SettleReceipt {
     assert!(payment_intent::kind(intent) != payment_intent::kind_cross_chain(), E_WRONG_PAY_PATH);
-    let funds = draw(allowance, withdrawal, intent, account, policy, config, approval, settle_by_ms, clock, ctx);
-    let declared = payment_intent::kind(intent);
+    let funds = draw(allowance, withdrawal, intent, account, policy, config, registry, approval, settle_by_ms, clock, ctx);
+    let declared = declared_kind(policy, intent);
     let (receipt, _kind, _fee) = payment_intent::settle_from_app<C, SettleWitness>(
         SettleWitness {},
         intent,
@@ -499,6 +510,7 @@ fun draw<C>(
     account: &BusinessAccount,
     policy: &mut SpendPolicy,
     config: &ComplianceConfig,
+    registry: &Registry,
     approval: Option<PayoutApproval>,
     settle_by_ms: u64,
     clock: &Clock,
@@ -527,6 +539,15 @@ fun draw<C>(
     let recipient = payment_intent::recipient(intent);
     let beneficiary_ref = payment_intent::beneficiary_ref(intent);
     assert_sui_destination(policy, kind, recipient, beneficiary_ref);
+    // What core will charge it as (A1 §2.3). A partner deposit address in
+    // Splash's registry is paid only as a bank payout, even when the policy
+    // tags it otherwise; a bank payout goes only to such an address.
+    let derived = address_registry::derive_kind(registry, recipient, declared_kind(policy, intent), false);
+    if (kind == payment_intent::kind_bank_payout()) {
+        assert!(derived == payment_intent::kind_bank_payout(), E_BANK_PAYOUT_NOT_TO_PARTNER);
+    } else {
+        assert!(derived != payment_intent::kind_bank_payout(), E_PARTNER_DEPOSIT_NOT_BANK_PAYOUT);
+    };
 
     // How much: the policy's ceiling, the payer's, and the maker's. Each
     // applies to the principal; the fee is Splash's, bounded by the config.
@@ -628,15 +649,16 @@ fun consume(
 }
 
 /// A Sui destination is verified for this kind: a bank beneficiary bound to
-/// this partner deposit address, or a recipient on domain 8 verified as
-/// exactly this kind, so core delivers it in the form the owners chose.
+/// this partner deposit address, or a recipient on domain 8 tagged exactly
+/// this kind, so the kind declared to core is the one the owners chose.
 ///
 /// Decision 2: a partner deposit address is paid only as a bank payout whose
 /// beneficiary is verified and bound to it, so the partner can match the
 /// deposit (sender, amount, intent) to the payout instruction it was sent.
-/// The policy keeps partner addresses off its recipient list, and this
-/// refuses any other kind to one first, with its own code, at opening and at
-/// the draw.
+/// The policy keeps the addresses it binds beneficiaries to off its
+/// recipient list, and this refuses any other kind to one first, with its
+/// own code, at opening and at the draw. Splash's own partner registry is
+/// read at the draw, where `derive_kind` classifies the recipient.
 fun assert_sui_destination(policy: &SpendPolicy, kind: u8, recipient: address, beneficiary_ref: vector<u8>) {
     if (kind == payment_intent::kind_bank_payout()) {
         assert!(spend_policy::is_beneficiary_bound_to(policy, beneficiary_ref, recipient), E_BENEFICIARY_NOT_VERIFIED);
@@ -646,6 +668,15 @@ fun assert_sui_destination(policy: &SpendPolicy, kind: u8, recipient: address, b
         assert!(spend_policy::is_recipient_verified(policy, domain, recipient), E_RECIPIENT_NOT_VERIFIED);
         assert!(spend_policy::recipient_kind(policy, domain, recipient) == kind, E_WRONG_DELIVERY_KIND);
     };
+}
+
+/// The kind a payment under the policy declares (A1 §2.3): a bank payout,
+/// or the recipient's tag. Called once `assert_sui_destination` has passed,
+/// so a recipient that is not a bank payout is verified, with that tag.
+fun declared_kind(policy: &SpendPolicy, intent: &PaymentIntent): u8 {
+    let kind = payment_intent::kind(intent);
+    if (kind == payment_intent::kind_bank_payout()) kind
+    else spend_policy::recipient_kind(policy, payment_intent::sui_domain(), payment_intent::recipient(intent))
 }
 
 fun assert_within_limits(policy: &SpendPolicy, amount: u64, spender: address) {

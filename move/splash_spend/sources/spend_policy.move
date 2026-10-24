@@ -82,8 +82,9 @@ const E_UNKNOWN_ROLE: u64 = 1060;
 /// A spending rule pays only on Sui (domain 8). A recipient on another chain
 /// is paid from the wallet.
 const E_NOT_ON_SUI: u64 = 1061;
-/// A recipient is verified as a Splash business (kind 0) or a wallet
-/// (kind 1). Bank payouts (kind 4) go through `verify_beneficiary`.
+/// A recipient is tagged a wallet (kind 1) or an exchange (kind 2). A
+/// Splash business (kind 0) is derived by core, never tagged; bank payouts
+/// (kind 4) go through `verify_beneficiary`.
 const E_BAD_KIND: u64 = 1062;
 /// The compliance config does not accept `T` as a settlement asset. A policy
 /// in it could never pay, and its wallet generation's one slot would be gone.
@@ -100,7 +101,7 @@ const E_BAD_WINDOW: u64 = 1066;
 /// The address is a partner deposit address (a verified beneficiary is bound
 /// to it). It is paid only as a bank payout, so it is not also a recipient.
 const E_PARTNER_DEPOSIT: u64 = 1067;
-/// The address is a verified recipient (kind 0 or 1). It cannot also be a
+/// The address is a verified recipient (a wallet or an exchange). It cannot also be a
 /// partner deposit address; remove it as a recipient first.
 const E_ALREADY_A_RECIPIENT: u64 = 1068;
 
@@ -197,10 +198,12 @@ public struct SpendPolicy has key {
     owners: vector<address>,
     spenders: Table<address, Spender>,
     spender_count: u64,
-    /// Kinds 0–1: verified destinations on Sui, each with the one kind it is
-    /// paid as, which is how core delivers it: a Splash business (2) is
-    /// credited to its address balance, a wallet (3) receives a Coin. Never
-    /// a partner deposit address.
+    /// Verified destinations on Sui, each with its tag: the kind a payment
+    /// to it declares (A1 §2.3), a wallet (1) or an exchange (2). Core
+    /// derives the kind it charges and delivers from the tag and Splash's
+    /// registries: a registered business wallet is a Splash business,
+    /// credited to its address balance, whatever its tag; anything else
+    /// receives a Coin. Never a partner deposit address.
     recipients: Table<Destination, u8>,
     recipient_count: u64,
     /// Kind 4: each bank beneficiary (by 32-byte commitment) bound to the one
@@ -395,13 +398,18 @@ public fun remove_spender(policy: &mut SpendPolicy, spender: address, ctx: &TxCo
     changed(policy, b"remove_spender");
 }
 
-/// Verify a destination on Sui, and how it is paid: `kind` 0 for another
-/// Splash business (credited to its address balance, where its own rules
-/// draw) or 1 for a supplier's wallet or an exchange deposit address (sent a
-/// Coin, which every deposit system recognises). Payments to it under the
-/// policy must be of that kind, so a spender cannot choose the delivery
-/// form. To change it, the wallet removes the recipient and verifies it
-/// again.
+/// Verify a destination on Sui, with its tag (A1 §2.3): `kind` 1 for a
+/// wallet the business has proved belongs to the payee, or 2 for an
+/// exchange deposit address. The tag is the kind every payment to it under
+/// the policy declares, so a spender cannot choose it, and Splash's fee
+/// follows the kind core derives from it: a registered business wallet is
+/// charged and delivered as a Splash business whatever its tag, and an
+/// address in Splash's partner registry is refused as anything but a bank
+/// payout when it is paid. A Splash business is never a tag. To change a
+/// tag, the wallet removes the recipient and verifies it again.
+///
+/// The ownership proof behind a wallet tag is checked off chain before the
+/// wallet signs this; the chain only knows that the wallet chose the tag.
 ///
 /// A recipient on any other domain is refused: no spending rule could pay
 /// it, because a cross-chain payment would hand the business's coin to the
@@ -421,10 +429,7 @@ public fun verify_recipient(
     assert_can_grow(policy, account);
     assert!(addr != @0x0, E_INVALID_ADDRESS);
     assert!(domain == SUI_DOMAIN, E_NOT_ON_SUI);
-    assert!(
-        kind == payment_intent::kind_splash_business() || kind == payment_intent::kind_wallet(),
-        E_BAD_KIND,
-    );
+    assert!(kind == payment_intent::kind_wallet() || kind == payment_intent::kind_exchange(), E_BAD_KIND);
     assert!(!policy.partner_deposits.contains(addr), E_PARTNER_DEPOSIT);
     let key = Destination { domain, addr };
     assert!(!policy.recipients.contains(key), E_ALREADY_VERIFIED);
@@ -454,7 +459,7 @@ public fun remove_recipient(policy: &mut SpendPolicy, domain: u32, addr: address
 /// business (ideally the business's own sub-account there), verified once
 /// off chain by a test deposit. Binding a beneficiary makes it a partner
 /// deposit address, paid only as a bank payout for a beneficiary bound to
-/// it. An address already verified as a recipient (kind 0 or 1) is refused,
+/// it. An address already verified as a recipient (either tag) is refused,
 /// so the two lists never overlap; the wallet removes the recipient first.
 public fun verify_beneficiary(
     policy: &mut SpendPolicy,
@@ -616,8 +621,8 @@ public fun spender_count(policy: &SpendPolicy): u64 { policy.spender_count }
 public fun is_recipient_verified(policy: &SpendPolicy, domain: u32, addr: address): bool {
     policy.recipients.contains(Destination { domain, addr })
 }
-/// The kind a verified recipient is paid as: 0 (a Splash business) or 1 (a
-/// wallet). Aborts if it is not verified.
+/// A verified recipient's tag, the kind payments to it declare: 1 (a
+/// wallet) or 2 (an exchange). Aborts if it is not verified.
 public fun recipient_kind(policy: &SpendPolicy, domain: u32, addr: address): u8 {
     let key = Destination { domain, addr };
     assert!(policy.recipients.contains(key), E_NOT_VERIFIED);
