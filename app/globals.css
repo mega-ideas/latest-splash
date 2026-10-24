@@ -7220,8 +7220,8 @@ button.iso-product-row {
   place-items: center;
   overflow: hidden;
   padding: 24px;
-  background: linear-gradient(rgba(16, 63, 72, .055) 1px, transparent 1px), linear-gradient(90deg, rgba(16, 63, 72, .055) 1px, transparent 1px), #f7eddb;
-  background-size: 30px 30px;
+  /* No grid: the sign-in-to-dashboard screen is plain paper (v2 D14). */
+  background: #f7eddb;
 }
 
 .splash-loading-panel {
