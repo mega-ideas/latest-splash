@@ -56,7 +56,7 @@ const RP_ID = 'localhost';
 const ORIGIN = 'http://localhost:3000';
 const DAY_MS = 86_400_000;
 const REGISTRY_SETTLEMENT_APP = 2;
-// Amendment A1's kinds (payment_intent::KIND_*).
+// Amendment A1's kinds (fee_config::KIND_*).
 const KIND_SPLASH_BUSINESS = 0;
 const KIND_WALLET = 1;
 const SUI_DOMAIN = 8;

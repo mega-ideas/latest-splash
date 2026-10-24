@@ -158,6 +158,24 @@ test('the payment lifecycle events carry the commitment and what an indexer need
   assert.match(table, /^\s*804: 'E_BAD_COMMITMENT — /m);
 });
 
+test("the fee events carry Splash's own terms, and FeeCharged the fee and nothing about the payment", async () => {
+  const fee = eventStructs(await source('move/splash_core/sources/fee_config.move'));
+  const byName = Object.fromEntries(fee.map((e) => [e.name, e.fields]));
+  // A1 §2.9. The fee is Splash revenue; the principal is not on the event.
+  assert.deepEqual(byName.FeeCharged, ['intent_id', 'business', 'derived_kind', 'fee', 'fee_recipient'], 'FeeCharged');
+  assert.deepEqual(byName.FeeScheduleProposed, ['kind', 'tiers', 'min_minor', 'max_minor', 'eta'], 'FeeScheduleProposed');
+  assert.deepEqual(byName.FeeScheduleApplied, ['kind'], 'FeeScheduleApplied');
+  assert.deepEqual(byName.FeeRecipientProposed, ['recipient', 'eta'], 'FeeRecipientProposed');
+  assert.deepEqual(byName.FeeRecipientApplied, ['recipient'], 'FeeRecipientApplied');
+  assert.deepEqual(byName.FeeDiscountSet, ['business', 'discount_bps'], 'FeeDiscountSet');
+  assert.deepEqual(Object.keys(byName).sort(), Object.keys(byName).filter((n) => n.startsWith('Fee')).sort(), 'fee_config emits only Fee* events');
+  // The three allowed exceptions are exactly the fields these events carry.
+  for (const where of Object.keys(ALLOWED)) {
+    const [, event, field] = /::(\w+)\.(\w+)$/.exec(where);
+    assert.ok(byName[event]?.includes(field), `${where} is a real field`);
+  }
+});
+
 /* ── 2. The commitment ────────────────────────────────────────────────── */
 
 const PAYLOAD = {

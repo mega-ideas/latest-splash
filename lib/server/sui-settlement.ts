@@ -554,6 +554,14 @@ const ABORT_CODES: Record<number, string> = {
   1207: 'E_BAD_KEY_LENGTH — a wallet key has the wrong length for its scheme. Pass flag || public key, as publicKey.toSuiBytes() returns it; zkLogin keys need the padded 32-byte address seed.',
   1208: 'E_NOT_THIS_MULTISIG — the sender is not the multisig these members derive.',
   1209: 'E_NOT_A_QUORUM — this multisig lets one member sign alone, so it cannot act for governance.',
+
+  // ── fee_config (splash_core, Splash's fee, Amendment A1) ─────────────────
+  1300: 'E_INVALID_SCHEDULE — the proposed fee schedule is malformed: it needs 1 to 8 tiers with upper bounds strictly ascending and the last one u64::MAX, as many rates as bounds, a minimum no higher than the maximum, and a kind from 0 to 4.',
+  1301: 'E_FEE_ABOVE_CEILING — a proposed fee rate or a discount is above 100 bps (1%), the ceiling written into the package. Propose 100 or less.',
+  1302: 'E_FEE_PROPOSAL_NOT_READY — this fee change was proposed less than 24 hours ago. It can be applied once its notice has run; read its eta.',
+  1303: 'E_NO_FEE_PROPOSAL — there is no pending fee schedule or fee recipient proposal to apply. Propose it first; it applies 24 hours later.',
+  1304: 'E_INVALID_FEE_RECIPIENT — the fee recipient cannot be the zero address. Name the Splash finance multisig.',
+  1305: 'E_UNKNOWN_KIND — a fee was asked for a kind outside 0 to 4 (Splash business, wallet, exchange, cross-chain, bank payout).',
 };
 
 /**
@@ -567,6 +575,7 @@ const OUR_MODULES = new Set([
   'business_account',
   'cap_registry',
   'compliance_config',
+  'fee_config',
   'multisig',
   'payment_intent',
   'peg_monitor',

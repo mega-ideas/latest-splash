@@ -322,7 +322,7 @@ test('the payment runs as the business wallet with the operator paying gas, and 
   // The constants the checks rely on are the source's.
   const kind = /\nconst KIND_WALLET = (\d+);/.exec(script);
   assert.ok(kind, 'the script names KIND_WALLET');
-  assert.equal(Number(kind[1]), await moveConstant('payment_intent', 'KIND_WALLET'));
+  assert.equal(Number(kind[1]), await moveConstant('fee_config', 'KIND_WALLET'));
   const notWallet = /\nconst E_NOT_THE_WALLET = (\d+);/.exec(script);
   assert.ok(notWallet, 'the script names E_NOT_THE_WALLET');
   assert.equal(Number(notWallet[1]), await moveConstant('business_account', 'E_NOT_THE_WALLET'));

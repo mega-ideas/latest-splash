@@ -106,7 +106,7 @@ const CLOCK = '0x6';
 const PAYMENT_MINOR = 10_000;
 // A wallet payment in USDC pays USDC: one to one, scaled 1e6.
 const FX_RATE_SCALED = 1_000_000;
-// payment_intent::KIND_WALLET, and business_account::E_NOT_THE_WALLET.
+// fee_config::KIND_WALLET, and business_account::E_NOT_THE_WALLET.
 // tests/e2e-verify-abi.test.mjs holds both to the source.
 const KIND_WALLET = 1;
 const E_NOT_THE_WALLET = 50;
