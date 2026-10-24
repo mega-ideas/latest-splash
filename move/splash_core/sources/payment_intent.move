@@ -37,7 +37,10 @@
 /// is not in this package. See docs/v2/phase1-move-design.md.
 ///
 /// Every path checks that settlement is not paused, that the asset is still
-/// accepted, and the account's KYB, freeze flags and ceilings. An intent lives
+/// accepted, and the account's KYB, freeze flags and ceilings. A bank payout
+/// on a v2 path must also reach its floor, the larger of 99 USDC and
+/// `ComplianceConfig.min_settlement_amount`, when it opens and when it
+/// settles; the legacy path keeps its fixed 99 USDC floor. An intent lives
 /// at most 30 days. The v2 settle paths take `settle_by_ms`, the quote's own
 /// deadline, so a transaction signed against a quote cannot be submitted after
 /// the quote lapsed.
@@ -116,6 +119,9 @@ const E_LEGACY_CLOSED: u64 = 431;
 const E_WRONG_BRIDGE_COIN: u64 = 432;
 /// The CCTP fee ceiling would take the whole payment.
 const E_BAD_BRIDGE_FEE: u64 = 433;
+/// A bank payout is below its floor: the larger of the 99 USDC platform
+/// minimum and `ComplianceConfig.min_settlement_amount`.
+const E_BELOW_SETTLEMENT_FLOOR: u64 = 434;
 
 /// The only module permitted to destroy a `SettleReceipt`. Bound by module name
 /// because Move forbids the circular import that naming the type would require —
@@ -357,6 +363,19 @@ fun assert_lands_on_sui(intent: &PaymentIntent) {
 fun assert_cross_chain(intent: &PaymentIntent) {
     assert!(intent.kind == KIND_CROSS_CHAIN_WALLET, E_NOT_CROSS_CHAIN);
     assert!(intent.destination_domain != SUI_DOMAIN, E_NOT_CROSS_CHAIN);
+}
+
+/// The least a bank payout (kind 1) may be on the v2 paths: the larger of the
+/// platform minimum (`business_account::min_transfer_minor`, 99 USDC) and the
+/// compliance floor (`ComplianceConfig.min_settlement_amount`), which
+/// `ComplianceCap` can only raise and `AdminCap` can lower. Wallet transfers,
+/// Splash-business and cross-chain payments carry no floor beyond
+/// `amount > 0`: they have none of a partner payout's fixed costs.
+fun assert_bank_payout_floor(config: &ComplianceConfig, amount: u64) {
+    let platform = business_account::min_transfer_minor();
+    let compliance = compliance_config::min_settlement_amount(config);
+    let floor = if (compliance > platform) compliance else platform;
+    assert!(amount >= floor, E_BELOW_SETTLEMENT_FLOOR);
 }
 
 // ─── Legacy (DEPRECATED): intents opened by an owner or approver ───────────
@@ -706,6 +725,12 @@ fun open<T>(
     // which is the case a spending rule checks it against.
     if (kind == KIND_BANK_PAYOUT) {
         assert!(beneficiary_ref.length() == COMMITMENT_BYTES, E_BENEFICIARY_REQUIRED);
+        // Checked again at settlement. Refused here as well because a bank
+        // payout that can never settle would otherwise be opened, possibly
+        // shared, and its payment reference claimed for good: the business
+        // could never open that invoice's payout again.
+        assert_bank_payout_floor(config, amount);
+        business_account::assert_within_per_transfer_cap(account, amount);
     } else {
         assert!(beneficiary_ref.is_empty(), E_BENEFICIARY_REQUIRED);
     };
@@ -913,9 +938,10 @@ public fun discharge_bridge_obligation<W: drop, T>(
 ///
 /// The account named is the account the intent is bound to; the intent is
 /// pending, unexpired and in this coin; the quote it was signed against has
-/// not lapsed; settlement is not paused and the asset is still accepted; and
-/// the account passes KYB, both freeze flags and its ceilings, which are
-/// charged here (the 99 USDC floor on bank payouts only).
+/// not lapsed; settlement is not paused and the asset is still accepted; a
+/// bank payout still reaches its floor, which compliance may have raised
+/// since the intent opened; and the account passes KYB, both freeze flags and
+/// its ceilings, which are charged here.
 fun settle_for_account<T>(
     intent: &mut PaymentIntent,
     account: &mut BusinessAccount,
@@ -933,7 +959,11 @@ fun settle_for_account<T>(
     assert!(compliance_config::type_string<T>() == intent.settlement_asset, E_WRONG_SETTLEMENT_ASSET);
     compliance_config::assert_active(config);
     compliance_config::assert_asset_accepted(config, &intent.settlement_asset);
-    business_account::charge_payout(account, intent.amount_usd, intent.kind == KIND_BANK_PAYOUT, clock);
+    let bank_payout = intent.kind == KIND_BANK_PAYOUT;
+    if (bank_payout) assert_bank_payout_floor(config, intent.amount_usd);
+    // `charge_payout`'s own 99 USDC floor is kept for bank payouts as a second
+    // check; the floor above is never lower, so it is the one that refuses.
+    business_account::charge_payout(account, intent.amount_usd, bank_payout, clock);
 
     intent.status = STATUS_CONFIRMED;
     emit_confirmed(intent, path, now);

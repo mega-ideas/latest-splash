@@ -401,8 +401,8 @@ const ABORT_CODES: Record<number, string> = {
   39: 'E_NO_PENDING_RECOVERY — there is no recovery to cancel or execute; an owner may already have cancelled it.',
   40: 'E_RECOVERY_NOT_DUE — the 72-hour recovery notice has not elapsed. The delay is what makes it a defence rather than a countdown: any owner can cancel during it.',
   41: 'E_WRONG_INTENT — the approval was minted for a different payment intent.',
-  42: 'E_OVER_PER_TRANSFER_CAP — the payout is larger than this account’s tier allows in a single transfer. Tier 3 permits 20,000, Tier 2 permits 200,000, Tier 1 permits 1,000,000 (USD, six-decimal minor units). Split the payment or request a tier increase.',
-  43: 'E_BELOW_MINIMUM — the payout is under the 99 USD platform floor. Below that the fixed costs of settling, anchoring and screening exceed the payment, and the partners’ own corridor minimums start there.',
+  42: 'E_OVER_PER_TRANSFER_CAP — the payout is larger than this account’s tier allows in a single transfer. Tier 3 permits 20,000, Tier 2 permits 200,000, Tier 1 permits 1,000,000 (USD, six-decimal minor units). Split the payment or request a tier increase. A bank payout over it is refused when its intent opens, as well as at settlement.',
+  43: 'E_BELOW_MINIMUM — the payout is under the 99 USD platform floor, which the legacy approval path applies to every payout. Below that the fixed costs of settling, anchoring and screening exceed the payment, and the partners’ own corridor minimums start there. On the v2 paths a bank payout under its floor aborts with 434 instead.',
   44: 'E_UNKNOWN_TIER — a tier other than 1, 2 or 3, or a limit-increase request that is not actually an increase (tier numbers descend as limits rise).',
 
   415: 'E_APPROVAL_REQUIRED (v1 testnet package only) — this intent is bound to a business account, so it settles only through confirm_with_approval. confirm_payment_intent would bypass the approver, the freeze flags and the 24h ceiling.',
@@ -479,6 +479,7 @@ const ABORT_CODES: Record<number, string> = {
   431: 'E_LEGACY_CLOSED — this account has a business wallet, so the legacy approval path is closed for it. Pay from the wallet or under a spending rule.',
   432: 'E_WRONG_BRIDGE_COIN — the coin handed to the bridge adapter is not the coin the settlement released, or not its type or amount.',
   433: 'E_BAD_BRIDGE_FEE — the cross-chain fee ceiling would take the whole payment.',
+  434: 'E_BELOW_SETTLEMENT_FLOOR — this bank payout is below its floor: the larger of the 99 USDC platform minimum and ComplianceConfig.min_settlement_amount. It is checked when the intent opens and again when it settles, so an intent opened before compliance raised the floor no longer settles. Wallet, Splash-business and cross-chain payments have no floor.',
 
   // ── splash_spend (spending rules) ────────────────────────────────────────
   1000: 'E_WRONG_FUNDER — the allowance is not funded by this spending rule wallet.',

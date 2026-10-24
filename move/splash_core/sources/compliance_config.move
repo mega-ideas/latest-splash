@@ -92,6 +92,12 @@ public struct ComplianceConfig has key {
     /// coin: $100 is 100_000_000 for 6-decimal USDC but a different figure for
     /// any other decimals. Zero is rejected by `assert_valid`, so the floor can
     /// never be silently disabled.
+    ///
+    /// On the v2 paths it is the floor of a BANK PAYOUT (kind 1), together
+    /// with the 99 USDC platform minimum: whichever is larger, checked when
+    /// the intent opens and again when it settles (`payment_intent`). Wallet,
+    /// Splash-business and cross-chain payments have no floor, and the legacy
+    /// approval path keeps its fixed 99 USDC one.
     min_settlement_amount: u64,
     /// S-12 fix. Object IDs of the DeepBook pools the liquidity guard is
     /// allowed to read. Without this, `assert_deepbook_liquidity` trusts a
@@ -402,14 +408,14 @@ public fun pause(config: &mut ComplianceConfig, cap: &ComplianceCap, registry: &
 /// `ComplianceCap` is `key` with no `store`, is minted once by `create`, and can
 /// move only via `transfer_cap` called BY ITS HOLDER. There is no recovery path.
 /// In an immutable package, losing that cap while `paused == true` deadlocks
-/// `assert_pegged` — and therefore every settlement path — permanently, with no
+/// `assert_active` — and therefore every settlement path — permanently, with no
 /// way back.
 ///
 /// Yes, this weakens the two-key pause: `AdminCap` can now unpause unilaterally.
 /// That is the smaller harm. A permanent, unrecoverable liveness brick is
 /// strictly worse than a cold-multisig quorum being able to resume, and
-/// everything downstream of an unpause is still gated by the peg, the DeepBook
-/// guard, the minimum and the venue whitelist.
+/// everything downstream of an unpause is still gated by the asset registry,
+/// the bank-payout floor and each account's own KYB, freezes and ceilings.
 public fun admin_set_paused(_admin: &AdminCap, config: &mut ComplianceConfig, paused: bool) {
     config.paused = paused;
     emit_update(config);

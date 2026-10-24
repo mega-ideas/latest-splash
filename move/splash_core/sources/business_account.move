@@ -1369,6 +1369,11 @@ public(package) fun consume_approval(
 ///
 /// `public(package)`. Exposing it would let anyone burn a tenant's daily room
 /// without settling anything.
+///
+/// The v2 paths also hold a bank payout to `ComplianceConfig.
+/// min_settlement_amount` where it is higher than 99 USDC. That check lives
+/// in `payment_intent`, which can read the config; this module cannot import
+/// `compliance_config`, which imports it.
 public(package) fun charge_payout(account: &mut BusinessAccount, amount: u64, with_floor: bool, clock: &Clock) {
     assert!(account.is_verified, E_NOT_VERIFIED);
     assert!(!account.frozen && !account.admin_frozen, E_FROZEN);
@@ -1378,9 +1383,18 @@ public(package) fun charge_payout(account: &mut BusinessAccount, amount: u64, wi
     // aborts with its own code so the answer to "why was this refused?" is not
     // a guess.
     assert!(!with_floor || amount >= MIN_TRANSFER_MINOR, E_BELOW_MINIMUM);
-    assert!(amount <= account.per_transfer_cap_minor, E_OVER_PER_TRANSFER_CAP);
+    assert_within_per_transfer_cap(account, amount);
     spend_window::charge(&mut account.daily, amount, clock);
     spend_window::charge(&mut account.monthly, amount, clock);
+}
+
+/// This tier's single-transfer ceiling, with the code `charge_payout` uses.
+/// `payment_intent` also checks it when a bank payout opens, so an intent the
+/// tier could never settle is refused before it claims its payment reference.
+/// The tier can still move after that (`set_tier`), so settlement checks it
+/// again.
+public(package) fun assert_within_per_transfer_cap(account: &BusinessAccount, amount: u64) {
+    assert!(amount <= account.per_transfer_cap_minor, E_OVER_PER_TRANSFER_CAP);
 }
 
 /// Discard an approval that was never used. Callable by whoever holds it,
