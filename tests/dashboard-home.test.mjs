@@ -491,9 +491,10 @@ test('Home has quick actions to pay, batch, open Wallet and ask Zeke', async () 
   }
 });
 
-test('the seeded accounts show no “Demo” in the header or on a business address', async () => {
-  // D14: no "Demo" text in the UI. The header prints the seeded person's name,
-  // so the seed is where the word has to go.
+test('the seeded accounts carry no “Demo” in a person’s name or a business address', async () => {
+  // D14: no "Demo" text in the UI. Screens that print users.name or the
+  // originator address read these seeds. (The header's name is built from
+  // the email's local part, lib/auth/customer-session.ts, not from these.)
   for (const script of ['scripts/dev-db.mjs', 'scripts/seed-demo-user.mjs']) {
     const text = await source(script);
     // assert.ok, not doesNotMatch: a failure must not print the seed file.
