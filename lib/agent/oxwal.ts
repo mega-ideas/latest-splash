@@ -2022,7 +2022,13 @@ const SPLASH_ANSWERS: Array<{ test: RegExp; reply: string | (() => string); skip
   {
     // Volume / bulk pricing
     test: /\b(volume|bulk pricing|discount|cheaper|high volume|monthly volume|enterprise pricing)\b/,
-    reply: 'Corridor pricing tightens with volume: a batch run quotes one blended rate, typically 15-30 bps inside single-transfer pricing, and the 2.00% on-chain fee ceiling always applies. Tell me your monthly volume and I can model the rate.',
+    // Rendered from the fee schedule and the ceiling, never typed in (A1
+    // §2.7, §2.8). There is no batch or corridor rate: the fee comes from
+    // where each payment goes and its size.
+    reply: () => 'Splash has no volume or batch rate: each payment is priced on its own, by where it goes and how large it is. '
+      + `${pricingLine(lastPublishedFeeSchedule())} `
+      + 'A business discount, when Splash agrees one, only ever lowers the fee, and your quote shows it before you approve. '
+      + `No fee can exceed ${formatRate(FEE_CEILING_BPS)} of the amount: the network refuses one above it.`,
   },
   {
     // Data privacy / residency
