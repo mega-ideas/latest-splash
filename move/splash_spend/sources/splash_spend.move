@@ -5,13 +5,14 @@
 /// `SPLASH_SPEND`, and accepting it here in the same transaction:
 ///
 ///     allowance::propose_for_app<Balance<USDC>, SPLASH_SPEND>(…)   // the wallet signs
-///     splash_spend::accept(proposal, policy)
+///     splash_spend::accept(proposal, policy, account)
 ///
 /// Inside the rule, a STAFF spender then opens and pays alone. The allowance
 /// enforces its own caps, expiry and spender, and draws from the wallet's
 /// address balance. This module adds the business's `SpendPolicy`: the payer
 /// and the maker are on the policy, the destination is verified (a bank
-/// beneficiary together with its partner deposit address), the amount is
+/// beneficiary together with its partner deposit address, or a recipient
+/// verified for exactly this kind of delivery), the amount is
 /// within the policy's and the spender's ceilings, and above the
 /// second-approval threshold a different owner has approved this exact
 /// payment. Then `splash_core` settles it, accepting this package's
@@ -42,11 +43,13 @@
 /// is called in exactly two places: inside `accept`, passed straight through
 /// `settings_permit` to `allowance::issue`; and inside the private `draw`,
 /// passed straight through `spend_permit` to `allowance::app_balance_spend`.
-/// No function returns a permit, a witness, a `Balance` or a `Coin`, and there is no
-/// `rotate_spender`: a holder of `SettingsPermit<SPLASH_SPEND>` could move
-/// every allowance bound to this app to a new spender. The package publishes
-/// immutable, so none of that can be added later. `scripts/check-spend-
-/// permits.mjs` fails the build if any of it stops being true.
+/// No function returns a permit, a witness, a `Balance` or a `Coin`, and
+/// there is no `rotate_spender`: a holder of `SettingsPermit<SPLASH_SPEND>`
+/// could move every allowance bound to this app to a new spender. The
+/// package publishes immutable, so none of that can be added later.
+/// `scripts/check-spend-permits.mjs` fails the build if a permit, a witness
+/// or a `Balance` could escape, and `tests/spend-rules-sui-only.test.mjs`
+/// fails if a `Coin` could.
 module splash_spend::splash_spend;
 
 use splash_core::business_account::{Self, BusinessAccount};
@@ -220,11 +223,13 @@ public struct PaidUnderPolicy has copy, drop {
 /// Accept a spending rule the business wallet proposed, in the same
 /// transaction as `allowance::propose_for_app<Balance<T>, SPLASH_SPEND>`.
 ///
-/// The proposal is checked before it is issued: its funder must be this
-/// policy's wallet (which also means the wallet signed this transaction, since
-/// `propose_for_app` records the sender as funder), its spender must be on
-/// the policy, `T` must be the policy's asset, and its name must be this
-/// policy's `allowance_name`. `issue` checks the app.
+/// The proposal is checked before it is issued: the policy must be its
+/// account's current one and the account not frozen (a new rule grows the
+/// policy), its funder must be this policy's wallet (which also means the
+/// wallet signed this transaction, since `propose_for_app` records the
+/// sender as funder), its spender must be on the policy, `T` must be the
+/// policy's asset, and its name must be this policy's `allowance_name`.
+/// `issue` checks the app.
 ///
 /// The name is the binding. `allowance::issue` returns nothing, so this
 /// module cannot record which allowance it accepted; instead every allowance
@@ -235,8 +240,10 @@ public struct PaidUnderPolicy has copy, drop {
 public fun accept<T>(
     proposal: AllowanceProposal<Balance<T>>,
     policy: &SpendPolicy,
+    account: &BusinessAccount,
     ctx: &mut TxContext,
 ) {
+    spend_policy::assert_can_grow(policy, account);
     assert!(compliance_config::type_string<T>() == spend_policy::asset(policy), E_WRONG_ASSET);
     let settings = allowance::allowance_proposal_settings(&proposal);
     let funder = allowance::funder(settings);

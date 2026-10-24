@@ -6,6 +6,14 @@
 /// to who may spend, where, how much, or above what amount a second owner must
 /// approve is itself an owners' decision, enforced by the protocol.
 ///
+/// A policy GROWS (a spender, a recipient, a beneficiary, looser limits, a
+/// new spending rule) only while it is its account's current one and the
+/// account is not frozen, by an owner or by compliance, as core refuses
+/// membership growth under a freeze. So a wallet rotated away from (often
+/// because a signer was compromised) cannot keep writing to its old policy,
+/// and nobody is ready to pay the moment a freeze lifts. Removals and
+/// tightening stay open in every state, so the owners can always cut back.
+///
 /// It lives in this package, not in `splash_core`, so no upgrade of
 /// `splash_core` can reach it. Everything that matters (the wallet, its
 /// generation, the asset, the owners, the lists, the limits) is copied in at
@@ -59,12 +67,19 @@ const E_BAD_KIND: u64 = 1062;
 /// The compliance config does not accept `T` as a settlement asset. A policy
 /// in it could never pay, and its wallet generation's one slot would be gone.
 const E_ASSET_NOT_ACCEPTED: u64 = 1063;
+/// The policy is not its account's current one: the account has rotated to
+/// another wallet generation, or this is another account. It can only be
+/// cut back.
+const E_POLICY_NOT_CURRENT: u64 = 1064;
+/// The account is frozen. The policy can be cut back, not grown, until it
+/// thaws.
+const E_ACCOUNT_FROZEN: u64 = 1065;
 
 // ─── Constants ─────────────────────────────────────────────────────────────
 /// Staff open intents and pay them.
 const ROLE_STAFF: u8 = 1;
-/// The KMS operator: pays only intents someone else opened, and only with an
-/// approval naming it as the payer.
+/// The KMS operator: opens nothing, and pays only with the owners' approval
+/// naming it as the payer (an owner's, or the wallet's delegation).
 const ROLE_EXECUTOR: u8 = 2;
 const MAX_SPENDERS: u64 = 64;
 /// D2: a second owner approval above 10,000 USDC, in minor units (6 decimals).
@@ -229,6 +244,17 @@ fun changed(policy: &SpendPolicy, change: vector<u8>) {
     event::emit(PolicyChanged { policy_id: object::id(policy), change });
 }
 
+/// Growth needs the account: this policy is its current one (same account,
+/// wallet and wallet generation) and the account is not frozen. Also used by
+/// `splash_spend::accept`, since a new spending rule grows the policy too.
+public(package) fun assert_can_grow(policy: &SpendPolicy, account: &BusinessAccount) {
+    assert!(object::id(account) == policy.account, E_POLICY_NOT_CURRENT);
+    assert!(business_account::has_wallet(account), E_POLICY_NOT_CURRENT);
+    assert!(business_account::wallet(account) == policy.wallet, E_POLICY_NOT_CURRENT);
+    assert!(business_account::wallet_epoch(account) == policy.wallet_epoch, E_POLICY_NOT_CURRENT);
+    assert!(!business_account::is_frozen(account), E_ACCOUNT_FROZEN);
+}
+
 /// A removal withdraws the owners' trust in someone or somewhere. Every
 /// approval given before it, to anyone, dies with it, so that re-adding the
 /// same entry never revives one; the owners approve again.
@@ -237,15 +263,17 @@ fun retire_approvals(policy: &mut SpendPolicy) {
 }
 
 /// Add a spender: STAFF, who open and pay, or EXECUTOR (Splash's KMS
-/// operator), who only pays what someone else opened and approved.
+/// operator), who only pays what the owners approved for it.
 public fun add_spender(
     policy: &mut SpendPolicy,
+    account: &BusinessAccount,
     spender: address,
     role: u8,
     per_payment_max: u64,
     ctx: &TxContext,
 ) {
     assert_wallet(policy, ctx);
+    assert_can_grow(policy, account);
     assert!(spender != @0x0 && spender != policy.wallet, E_INVALID_ADDRESS);
     assert!(role == ROLE_STAFF || role == ROLE_EXECUTOR, E_UNKNOWN_ROLE);
     assert!(per_payment_max > 0, E_BAD_LIMIT);
@@ -285,12 +313,14 @@ public fun remove_spender(policy: &mut SpendPolicy, spender: address, ctx: &TxCo
 /// spender's transaction. The owners pay those from the wallet.
 public fun verify_recipient(
     policy: &mut SpendPolicy,
+    account: &BusinessAccount,
     domain: u32,
     addr: address,
     kind: u8,
     ctx: &TxContext,
 ) {
     assert_wallet(policy, ctx);
+    assert_can_grow(policy, account);
     assert!(addr != @0x0, E_INVALID_ADDRESS);
     assert!(domain == SUI_DOMAIN, E_NOT_ON_SUI);
     assert!(
@@ -322,11 +352,13 @@ public fun remove_recipient(policy: &mut SpendPolicy, domain: u32, addr: address
 /// paired with any other verified address.
 public fun verify_beneficiary(
     policy: &mut SpendPolicy,
+    account: &BusinessAccount,
     commitment: vector<u8>,
     partner_deposit: address,
     ctx: &TxContext,
 ) {
     assert_wallet(policy, ctx);
+    assert_can_grow(policy, account);
     assert!(commitment.length() == COMMITMENT_BYTES, E_BAD_BENEFICIARY);
     assert!(partner_deposit != @0x0, E_INVALID_ADDRESS);
     assert!(!policy.beneficiaries.contains(commitment), E_ALREADY_VERIFIED);
@@ -348,14 +380,21 @@ public fun remove_beneficiary(policy: &mut SpendPolicy, commitment: vector<u8>, 
 
 /// Set the per-payment maximum and the second-approval threshold, in minor
 /// units. A threshold of zero means every payment needs a second approval.
+/// Raising either grows the policy, so it needs the policy current and the
+/// account not frozen; lowering them is always open.
 public fun set_limits(
     policy: &mut SpendPolicy,
+    account: &BusinessAccount,
     per_payment_max: u64,
     second_approval_threshold: u64,
     ctx: &TxContext,
 ) {
     assert_wallet(policy, ctx);
+    assert!(object::id(account) == policy.account, E_POLICY_NOT_CURRENT);
     assert!(per_payment_max > 0, E_BAD_LIMIT);
+    let loosens =
+        per_payment_max > policy.per_payment_max || second_approval_threshold > policy.second_approval_threshold;
+    if (loosens) assert_can_grow(policy, account);
     policy.per_payment_max = per_payment_max;
     policy.second_approval_threshold = second_approval_threshold;
     changed(policy, b"set_limits");

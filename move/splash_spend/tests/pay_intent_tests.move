@@ -217,15 +217,17 @@ fun setup_with(accept_other: bool): (Scenario, Fx) {
     s.next_tx(h::wallet());
     {
         let mut policy = s.take_shared_by_id<SpendPolicy>(policy_id);
+        let account = s.take_shared_by_id<BusinessAccount>(spend_policy::account(&policy));
         let ctx = s.ctx();
-        policy.add_spender(STAFF, spend_policy::role_staff(), STAFF_MAX, ctx);
-        policy.add_spender(JUNIOR, spend_policy::role_staff(), JUNIOR_MAX, ctx);
-        policy.add_spender(EXECUTOR, spend_policy::role_executor(), EXECUTOR_MAX, ctx);
-        policy.verify_recipient(SUI_DOMAIN, SUPPLIER, payment_intent::kind_wallet(), ctx);
-        policy.verify_recipient(SUI_DOMAIN, BUSINESS, payment_intent::kind_splash_business(), ctx);
-        policy.verify_recipient(SUI_DOMAIN, OTHER_PARTNER, payment_intent::kind_wallet(), ctx);
+        policy.add_spender(&account, STAFF, spend_policy::role_staff(), STAFF_MAX, ctx);
+        policy.add_spender(&account, JUNIOR, spend_policy::role_staff(), JUNIOR_MAX, ctx);
+        policy.add_spender(&account, EXECUTOR, spend_policy::role_executor(), EXECUTOR_MAX, ctx);
+        policy.verify_recipient(&account, SUI_DOMAIN, SUPPLIER, payment_intent::kind_wallet(), ctx);
+        policy.verify_recipient(&account, SUI_DOMAIN, BUSINESS, payment_intent::kind_splash_business(), ctx);
+        policy.verify_recipient(&account, SUI_DOMAIN, OTHER_PARTNER, payment_intent::kind_wallet(), ctx);
         // The bank beneficiary is bound to the harness's partner deposit address.
-        policy.verify_beneficiary(h::beneficiary(), h::recipient(), ctx);
+        policy.verify_beneficiary(&account, h::beneficiary(), h::recipient(), ctx);
+        ts::return_shared(account);
         ts::return_shared(policy);
     };
 
@@ -241,6 +243,7 @@ fun grant(s: &mut Scenario, policy: ID, spender: address, lifetime_cap: u256): I
     s.next_tx(h::wallet());
     {
         let policy = s.take_shared_by_id<SpendPolicy>(policy);
+        let account = s.take_shared_by_id<BusinessAccount>(spend_policy::account(&policy));
         let proposal = allowance::propose_for_app<Balance<USDC>, SPLASH_SPEND>(
             splash_spend::allowance_name(&policy),
             spender,
@@ -250,7 +253,8 @@ fun grant(s: &mut Scenario, policy: ID, spender: address, lifetime_cap: u256): I
             option::none(),
             s.ctx(),
         );
-        splash_spend::accept(proposal, &policy, s.ctx());
+        splash_spend::accept(proposal, &policy, &account, s.ctx());
+        ts::return_shared(account);
         ts::return_shared(policy);
     };
     let effects = s.next_tx(h::wallet());
@@ -595,8 +599,10 @@ fun second_business(s: &mut Scenario): (ID, ID) {
     s.next_tx(h::wallet());
     {
         let mut policy = s.take_shared_by_id<SpendPolicy>(policy2);
-        policy.add_spender(STAFF, spend_policy::role_staff(), STAFF_MAX, s.ctx());
-        policy.verify_recipient(SUI_DOMAIN, SUPPLIER, payment_intent::kind_wallet(), s.ctx());
+        let account = s.take_shared_by_id<BusinessAccount>(spend_policy::account(&policy));
+        policy.add_spender(&account, STAFF, spend_policy::role_staff(), STAFF_MAX, s.ctx());
+        policy.verify_recipient(&account, SUI_DOMAIN, SUPPLIER, payment_intent::kind_wallet(), s.ctx());
+        ts::return_shared(account);
         ts::return_shared(policy);
     };
     (account2, policy2)
@@ -883,8 +889,10 @@ fun re_verifying_a_recipient_under_another_kind_stops_its_open_intents() {
     let (mut s, fx) = setup();
     let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
     let mut p = wallet_policy(&mut s, &fx);
+    let account = s.take_shared_by_id<BusinessAccount>(fx.account);
     p.remove_recipient(SUI_DOMAIN, SUPPLIER, s.ctx());
-    p.verify_recipient(SUI_DOMAIN, SUPPLIER, payment_intent::kind_splash_business(), s.ctx());
+    p.verify_recipient(&account, SUI_DOMAIN, SUPPLIER, payment_intent::kind_splash_business(), s.ctx());
+    ts::return_shared(account);
     ts::return_shared(p);
     pay(&mut s, &fx, STAFF, fx.staff, intent, false);
     s.end();
@@ -947,7 +955,9 @@ fun lowering_the_threshold_applies_to_open_intents() {
     let (mut s, fx) = setup();
     let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
     let mut p = wallet_policy(&mut s, &fx);
-    p.set_limits(POLICY_MAX, PAY - 1, s.ctx());
+    let account = s.take_shared_by_id<BusinessAccount>(fx.account);
+    p.set_limits(&account, POLICY_MAX, PAY - 1, s.ctx());
+    ts::return_shared(account);
     ts::return_shared(p);
     pay(&mut s, &fx, STAFF, fx.staff, intent, false);
     s.end();
@@ -1025,7 +1035,9 @@ fun lowering_the_policy_maximum_applies_to_open_intents() {
     let (mut s, fx) = setup();
     let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
     let mut p = wallet_policy(&mut s, &fx);
-    p.set_limits(PAY - 1, THRESHOLD, s.ctx());
+    let account = s.take_shared_by_id<BusinessAccount>(fx.account);
+    p.set_limits(&account, PAY - 1, THRESHOLD, s.ctx());
+    ts::return_shared(account);
     ts::return_shared(p);
     pay(&mut s, &fx, STAFF, fx.staff, intent, false);
     s.end();
@@ -1117,6 +1129,7 @@ fun an_allowance_in_another_asset_cannot_be_accepted() {
     let (mut s, fx) = setup();
     s.next_tx(h::wallet());
     let policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
+    let account = s.take_shared_by_id<BusinessAccount>(spend_policy::account(&policy));
     let proposal = allowance::propose_for_app<Balance<OTHER>, SPLASH_SPEND>(
         splash_spend::allowance_name(&policy),
         STAFF,
@@ -1126,7 +1139,8 @@ fun an_allowance_in_another_asset_cannot_be_accepted() {
         option::none(),
         s.ctx(),
     );
-    splash_spend::accept(proposal, &policy, s.ctx());
+    splash_spend::accept(proposal, &policy, &account, s.ctx());
+    ts::return_shared(account);
     ts::return_shared(policy);
     s.end();
 }
@@ -1313,6 +1327,7 @@ fun a_proposal_from_another_funder_cannot_be_accepted() {
     let (mut s, fx) = setup();
     s.next_tx(h::owner_2());
     let policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
+    let account = s.take_shared_by_id<BusinessAccount>(spend_policy::account(&policy));
     let proposal = allowance::propose_for_app<Balance<USDC>, SPLASH_SPEND>(
         splash_spend::allowance_name(&policy),
         STAFF,
@@ -1322,7 +1337,8 @@ fun a_proposal_from_another_funder_cannot_be_accepted() {
         option::none(),
         s.ctx(),
     );
-    splash_spend::accept(proposal, &policy, s.ctx());
+    splash_spend::accept(proposal, &policy, &account, s.ctx());
+    ts::return_shared(account);
     ts::return_shared(policy);
     s.end();
 }
@@ -1477,7 +1493,9 @@ fun drawing_one_unit_less_than_the_intent_aborts() {
 fun the_maker_cannot_approve_their_own_intent() {
     let (mut s, fx) = setup();
     let mut p = wallet_policy(&mut s, &fx);
-    p.add_spender(h::owner_2(), spend_policy::role_staff(), STAFF_MAX, s.ctx());
+    let account = s.take_shared_by_id<BusinessAccount>(fx.account);
+    p.add_spender(&account, h::owner_2(), spend_policy::role_staff(), STAFF_MAX, s.ctx());
+    ts::return_shared(account);
     ts::return_shared(p);
     let intent = open(&mut s, &fx, h::owner_2(), 1, payment_intent::kind_wallet(), SUPPLIER, THRESHOLD + 1);
     approve(&mut s, &fx, h::owner_2(), intent, STAFF);
@@ -1491,7 +1509,9 @@ fun the_maker_cannot_approve_their_own_intent() {
 fun the_payer_cannot_approve_their_own_payment() {
     let (mut s, fx) = setup();
     let mut p = wallet_policy(&mut s, &fx);
-    p.add_spender(h::owner_3(), spend_policy::role_staff(), STAFF_MAX, s.ctx());
+    let account = s.take_shared_by_id<BusinessAccount>(fx.account);
+    p.add_spender(&account, h::owner_3(), spend_policy::role_staff(), STAFF_MAX, s.ctx());
+    ts::return_shared(account);
     ts::return_shared(p);
     let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, THRESHOLD + 1);
     approve(&mut s, &fx, h::owner_3(), intent, h::owner_3());
@@ -1506,7 +1526,9 @@ fun the_payer_cannot_approve_their_own_payment() {
 fun an_owner_maker_cannot_self_approve_by_delegating() {
     let (mut s, fx) = setup();
     let mut p = wallet_policy(&mut s, &fx);
-    p.add_spender(h::owner_2(), spend_policy::role_staff(), STAFF_MAX, s.ctx());
+    let account = s.take_shared_by_id<BusinessAccount>(fx.account);
+    p.add_spender(&account, h::owner_2(), spend_policy::role_staff(), STAFF_MAX, s.ctx());
+    ts::return_shared(account);
     ts::return_shared(p);
     let intent = open(&mut s, &fx, h::owner_2(), 1, payment_intent::kind_wallet(), SUPPLIER, THRESHOLD + 1);
     delegate(&mut s, &fx, h::owner_2(), intent, EXECUTOR);
@@ -1682,8 +1704,10 @@ fun re_adding_a_spender_does_not_revive_an_approval() {
     let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, THRESHOLD + 1);
     approve(&mut s, &fx, h::owner_2(), intent, STAFF);
     let mut p = wallet_policy(&mut s, &fx);
+    let account = s.take_shared_by_id<BusinessAccount>(fx.account);
     p.remove_spender(STAFF, s.ctx());
-    p.add_spender(STAFF, spend_policy::role_staff(), STAFF_MAX - 1, s.ctx());
+    p.add_spender(&account, STAFF, spend_policy::role_staff(), STAFF_MAX - 1, s.ctx());
+    ts::return_shared(account);
     ts::return_shared(p);
     pay(&mut s, &fx, STAFF, fx.staff, intent, true);
     s.end();
@@ -1698,8 +1722,10 @@ fun re_adding_the_executor_does_not_revive_a_delegation() {
     let intent = open_by_wallet(&mut s, &fx, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
     delegate(&mut s, &fx, h::wallet(), intent, EXECUTOR);
     let mut p = wallet_policy(&mut s, &fx);
+    let account = s.take_shared_by_id<BusinessAccount>(fx.account);
     p.remove_spender(EXECUTOR, s.ctx());
-    p.add_spender(EXECUTOR, spend_policy::role_executor(), EXECUTOR_MAX, s.ctx());
+    p.add_spender(&account, EXECUTOR, spend_policy::role_executor(), EXECUTOR_MAX, s.ctx());
+    ts::return_shared(account);
     ts::return_shared(p);
     pay(&mut s, &fx, EXECUTOR, fx.executor, intent, true);
     s.end();
@@ -1714,8 +1740,10 @@ fun re_verifying_a_recipient_does_not_revive_an_approval() {
     let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, THRESHOLD + 1);
     approve(&mut s, &fx, h::owner_2(), intent, STAFF);
     let mut p = wallet_policy(&mut s, &fx);
+    let account = s.take_shared_by_id<BusinessAccount>(fx.account);
     p.remove_recipient(SUI_DOMAIN, SUPPLIER, s.ctx());
-    p.verify_recipient(SUI_DOMAIN, SUPPLIER, payment_intent::kind_wallet(), s.ctx());
+    p.verify_recipient(&account, SUI_DOMAIN, SUPPLIER, payment_intent::kind_wallet(), s.ctx());
+    ts::return_shared(account);
     ts::return_shared(p);
     pay(&mut s, &fx, STAFF, fx.staff, intent, true);
     s.end();
@@ -1729,8 +1757,10 @@ fun re_binding_a_beneficiary_does_not_revive_an_approval() {
     let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_bank_payout(), h::recipient(), THRESHOLD + 1);
     approve(&mut s, &fx, h::owner_2(), intent, STAFF);
     let mut p = wallet_policy(&mut s, &fx);
+    let account = s.take_shared_by_id<BusinessAccount>(fx.account);
     p.remove_beneficiary(h::beneficiary(), s.ctx());
-    p.verify_beneficiary(h::beneficiary(), h::recipient(), s.ctx());
+    p.verify_beneficiary(&account, h::beneficiary(), h::recipient(), s.ctx());
+    ts::return_shared(account);
     ts::return_shared(p);
     pay(&mut s, &fx, STAFF, fx.staff, intent, true);
     s.end();
@@ -1759,10 +1789,12 @@ fun additions_and_limit_changes_leave_approvals_alive() {
     let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, THRESHOLD + 1);
     approve(&mut s, &fx, h::owner_2(), intent, STAFF);
     let mut p = wallet_policy(&mut s, &fx);
-    p.add_spender(STRANGER, spend_policy::role_staff(), PAY, s.ctx());
-    p.verify_recipient(SUI_DOMAIN, UNLISTED, payment_intent::kind_wallet(), s.ctx());
-    p.set_limits(POLICY_MAX, THRESHOLD - 1, s.ctx());
+    let account = s.take_shared_by_id<BusinessAccount>(fx.account);
+    p.add_spender(&account, STRANGER, spend_policy::role_staff(), PAY, s.ctx());
+    p.verify_recipient(&account, SUI_DOMAIN, UNLISTED, payment_intent::kind_wallet(), s.ctx());
+    p.set_limits(&account, POLICY_MAX, THRESHOLD - 1, s.ctx());
     assert_eq!(spend_policy::generation(&p), 0);
+    ts::return_shared(account);
     ts::return_shared(p);
     pay(&mut s, &fx, STAFF, fx.staff, intent, true);
     assert_eq!(coin_received(&mut s, SUPPLIER), THRESHOLD + 1);
@@ -2068,7 +2100,9 @@ const TINY_PAY: u64 = 1_000_000_000;
 /// The wallet lists TINY as staff and grants TINY's own rule.
 fun add_tiny(s: &mut Scenario, fx: &Fx): ID {
     let mut p = wallet_policy(s, fx);
-    p.add_spender(TINY, spend_policy::role_staff(), TINY_PAY, s.ctx());
+    let account = s.take_shared_by_id<BusinessAccount>(fx.account);
+    p.add_spender(&account, TINY, spend_policy::role_staff(), TINY_PAY, s.ctx());
+    ts::return_shared(account);
     ts::return_shared(p);
     grant(s, fx.policy, TINY, TINY_CAP)
 }
@@ -2286,8 +2320,10 @@ fun demoting_the_maker_to_executor_stops_their_intents() {
     let (mut s, fx) = setup();
     let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
     let mut p = wallet_policy(&mut s, &fx);
+    let account = s.take_shared_by_id<BusinessAccount>(fx.account);
     p.remove_spender(STAFF, s.ctx());
-    p.add_spender(STAFF, spend_policy::role_executor(), STAFF_MAX, s.ctx());
+    p.add_spender(&account, STAFF, spend_policy::role_executor(), STAFF_MAX, s.ctx());
+    ts::return_shared(account);
     ts::return_shared(p);
     pay(&mut s, &fx, JUNIOR, fx.junior, intent, false);
     s.end();
@@ -2412,8 +2448,10 @@ fun a_new_policy_for_the_new_generation_pays() {
     s.next_tx(h::wallet());
     {
         let mut policy = s.take_shared_by_id<SpendPolicy>(policy3);
-        policy.add_spender(STAFF, spend_policy::role_staff(), STAFF_MAX, s.ctx());
-        policy.verify_recipient(SUI_DOMAIN, SUPPLIER, payment_intent::kind_wallet(), s.ctx());
+        let account = s.take_shared_by_id<BusinessAccount>(spend_policy::account(&policy));
+        policy.add_spender(&account, STAFF, spend_policy::role_staff(), STAFF_MAX, s.ctx());
+        policy.verify_recipient(&account, SUI_DOMAIN, SUPPLIER, payment_intent::kind_wallet(), s.ctx());
+        ts::return_shared(account);
         ts::return_shared(policy);
     };
     let alw = grant(&mut s, policy3, STAFF, ALLOWANCE_CAP);
@@ -2678,8 +2716,10 @@ fun an_old_generations_allowance_does_not_pay_under_a_new_policy() {
     s.next_tx(h::wallet());
     {
         let mut policy = s.take_shared_by_id<SpendPolicy>(policy3);
-        policy.add_spender(STAFF, spend_policy::role_staff(), STAFF_MAX, s.ctx());
-        policy.verify_recipient(SUI_DOMAIN, SUPPLIER, payment_intent::kind_wallet(), s.ctx());
+        let account = s.take_shared_by_id<BusinessAccount>(spend_policy::account(&policy));
+        policy.add_spender(&account, STAFF, spend_policy::role_staff(), STAFF_MAX, s.ctx());
+        policy.verify_recipient(&account, SUI_DOMAIN, SUPPLIER, payment_intent::kind_wallet(), s.ctx());
+        ts::return_shared(account);
         ts::return_shared(policy);
     };
     let fx3 = Fx { account: fx.account, policy: policy3, staff: fx.staff, junior: fx.junior, executor: fx.executor };
@@ -2696,6 +2736,7 @@ fun a_proposal_not_named_for_the_policy_cannot_be_accepted() {
     let (mut s, fx) = setup();
     s.next_tx(h::wallet());
     let policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
+    let account = s.take_shared_by_id<BusinessAccount>(spend_policy::account(&policy));
     let proposal = allowance::propose_for_app<Balance<USDC>, SPLASH_SPEND>(
         b"spending rule".to_string(),
         STAFF,
@@ -2705,7 +2746,8 @@ fun a_proposal_not_named_for_the_policy_cannot_be_accepted() {
         option::none(),
         s.ctx(),
     );
-    splash_spend::accept(proposal, &policy, s.ctx());
+    splash_spend::accept(proposal, &policy, &account, s.ctx());
+    ts::return_shared(account);
     ts::return_shared(policy);
     s.end();
 }

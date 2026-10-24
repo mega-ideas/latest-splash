@@ -280,7 +280,9 @@ fun register<X>(s: &mut Scenario, registry: u8) {
 fun add_spender_as(s: &mut Scenario, id: ID, sender: address, spender: address, role: u8, max: u64) {
     s.next_tx(sender);
     let mut policy = s.take_shared_by_id<SpendPolicy>(id);
-    spend_policy::add_spender(&mut policy, spender, role, max, s.ctx());
+    let account = s.take_shared_by_id<BusinessAccount>(spend_policy::account(&policy));
+    spend_policy::add_spender(&mut policy, &account, spender, role, max, s.ctx());
+    ts::return_shared(account);
     ts::return_shared(policy);
 }
 
@@ -299,7 +301,9 @@ fun verify_recipient_as(s: &mut Scenario, id: ID, sender: address, domain: u32, 
 fun verify_recipient_kind_as(s: &mut Scenario, id: ID, sender: address, domain: u32, addr: address, kind: u8) {
     s.next_tx(sender);
     let mut policy = s.take_shared_by_id<SpendPolicy>(id);
-    spend_policy::verify_recipient(&mut policy, domain, addr, kind, s.ctx());
+    let account = s.take_shared_by_id<BusinessAccount>(spend_policy::account(&policy));
+    spend_policy::verify_recipient(&mut policy, &account, domain, addr, kind, s.ctx());
+    ts::return_shared(account);
     ts::return_shared(policy);
 }
 
@@ -313,7 +317,9 @@ fun remove_recipient_as(s: &mut Scenario, id: ID, sender: address, domain: u32, 
 fun verify_beneficiary_as(s: &mut Scenario, id: ID, sender: address, commitment: vector<u8>, partner: address) {
     s.next_tx(sender);
     let mut policy = s.take_shared_by_id<SpendPolicy>(id);
-    spend_policy::verify_beneficiary(&mut policy, commitment, partner, s.ctx());
+    let account = s.take_shared_by_id<BusinessAccount>(spend_policy::account(&policy));
+    spend_policy::verify_beneficiary(&mut policy, &account, commitment, partner, s.ctx());
+    ts::return_shared(account);
     ts::return_shared(policy);
 }
 
@@ -327,7 +333,9 @@ fun remove_beneficiary_as(s: &mut Scenario, id: ID, sender: address, commitment:
 fun set_limits_as(s: &mut Scenario, id: ID, sender: address, per_payment_max: u64, threshold: u64) {
     s.next_tx(sender);
     let mut policy = s.take_shared_by_id<SpendPolicy>(id);
-    spend_policy::set_limits(&mut policy, per_payment_max, threshold, s.ctx());
+    let account = s.take_shared_by_id<BusinessAccount>(spend_policy::account(&policy));
+    spend_policy::set_limits(&mut policy, &account, per_payment_max, threshold, s.ctx());
+    ts::return_shared(account);
     ts::return_shared(policy);
 }
 
@@ -344,11 +352,13 @@ fun filler(i: u64): address { sui::address::from_u256(0x10000 + (i as u256)) }
 fun fill_spenders(s: &mut Scenario, id: ID, n: u64) {
     s.next_tx(h::wallet());
     let mut policy = s.take_shared_by_id<SpendPolicy>(id);
+    let account = s.take_shared_by_id<BusinessAccount>(spend_policy::account(&policy));
     let mut i = 0;
     while (i < n) {
-        spend_policy::add_spender(&mut policy, filler(i), spend_policy::role_staff(), STAFF_MAX, s.ctx());
+        spend_policy::add_spender(&mut policy, &account, filler(i), spend_policy::role_staff(), STAFF_MAX, s.ctx());
         i = i + 1;
     };
+    ts::return_shared(account);
     ts::return_shared(policy);
 }
 
@@ -372,8 +382,10 @@ fun propose<T>(spender: address, name: std::string::String, ctx: &TxContext): Al
 fun accept_as(s: &mut Scenario, id: ID, funder: address, spender: address) {
     s.next_tx(funder);
     let policy = s.take_shared_by_id<SpendPolicy>(id);
+    let account = s.take_shared_by_id<BusinessAccount>(spend_policy::account(&policy));
     let proposal = propose<USDC>(spender, splash_spend::allowance_name(&policy), s.ctx());
-    splash_spend::accept(proposal, &policy, s.ctx());
+    splash_spend::accept(proposal, &policy, &account, s.ctx());
+    ts::return_shared(account);
     ts::return_shared(policy);
 }
 
@@ -880,7 +892,7 @@ fun admin_freezes(s: &mut Scenario) {
 }
 
 #[test]
-#[expected_failure(abort_code = 1064, location = spend_policy)]
+#[expected_failure(abort_code = spend_policy::E_POLICY_NOT_CURRENT)]
 /// Review A1/A4: a rotation is often done because a signer was compromised.
 /// The old wallet must not keep writing to its old policy: its additions
 /// are stale rules an indexer could show as the account's.
@@ -892,7 +904,7 @@ fun a_retired_wallet_cannot_add_a_spender_to_its_old_policy() {
 }
 
 #[test]
-#[expected_failure(abort_code = 1064, location = spend_policy)]
+#[expected_failure(abort_code = spend_policy::E_POLICY_NOT_CURRENT)]
 /// Nor verify a recipient on it.
 fun a_retired_wallet_cannot_verify_a_recipient_on_its_old_policy() {
     let (mut s, old_id) = begin_with_policy();
@@ -902,7 +914,7 @@ fun a_retired_wallet_cannot_verify_a_recipient_on_its_old_policy() {
 }
 
 #[test]
-#[expected_failure(abort_code = 1064, location = spend_policy)]
+#[expected_failure(abort_code = spend_policy::E_POLICY_NOT_CURRENT)]
 /// Nor issue a spending rule under it, even for a spender it listed before.
 fun a_retired_wallet_cannot_issue_a_rule_under_its_old_policy() {
     let (mut s, old_id) = begin_with_policy();
@@ -913,7 +925,7 @@ fun a_retired_wallet_cannot_issue_a_rule_under_its_old_policy() {
 }
 
 #[test]
-#[expected_failure(abort_code = 1065, location = spend_policy)]
+#[expected_failure(abort_code = spend_policy::E_ACCOUNT_FROZEN)]
 /// Core refuses membership growth under a freeze, so that a spender is not
 /// ready to pay the moment it lifts. A policy cannot take a new spender
 /// under a compliance freeze either.
@@ -925,7 +937,7 @@ fun a_policy_cannot_take_a_spender_under_a_compliance_freeze() {
 }
 
 #[test]
-#[expected_failure(abort_code = 1065, location = spend_policy)]
+#[expected_failure(abort_code = spend_policy::E_ACCOUNT_FROZEN)]
 /// Nor a new beneficiary.
 fun a_policy_cannot_bind_a_beneficiary_under_a_compliance_freeze() {
     let (mut s, id) = begin_with_policy();
@@ -935,7 +947,7 @@ fun a_policy_cannot_bind_a_beneficiary_under_a_compliance_freeze() {
 }
 
 #[test]
-#[expected_failure(abort_code = 1065, location = spend_policy)]
+#[expected_failure(abort_code = spend_policy::E_ACCOUNT_FROZEN)]
 /// Nor loosen its limits.
 fun a_policy_cannot_raise_its_limits_under_a_compliance_freeze() {
     let (mut s, id) = begin_with_policy();
@@ -945,7 +957,7 @@ fun a_policy_cannot_raise_its_limits_under_a_compliance_freeze() {
 }
 
 #[test]
-#[expected_failure(abort_code = 1065, location = spend_policy)]
+#[expected_failure(abort_code = spend_policy::E_ACCOUNT_FROZEN)]
 /// And no spending rule is issued under a freeze.
 fun no_rule_is_issued_under_a_compliance_freeze() {
     let (mut s, id) = begin_with_policy();
@@ -956,7 +968,7 @@ fun no_rule_is_issued_under_a_compliance_freeze() {
 }
 
 #[test]
-#[expected_failure(abort_code = 1065, location = spend_policy)]
+#[expected_failure(abort_code = spend_policy::E_ACCOUNT_FROZEN)]
 /// An owner's own freeze counts too, as it does for core's membership.
 fun a_policy_cannot_take_a_spender_while_an_owner_has_frozen_the_account() {
     let (mut s, id) = begin_with_policy();
@@ -967,6 +979,80 @@ fun a_policy_cannot_take_a_spender_while_an_owner_has_frozen_the_account() {
         ts::return_shared(account);
     };
     add_spender_as(&mut s, id, h::wallet(), STAFF, spend_policy::role_staff(), STAFF_MAX);
+    s.end();
+}
+
+#[test]
+/// Cutting back is always open. After a rotation the old wallet can still
+/// remove what its old policy lists and lower its limits; nothing pays
+/// under that policy any more, so this only tidies it.
+fun a_retired_wallet_can_still_cut_back_its_old_policy() {
+    let (mut s, old_id) = begin_with_policy();
+    staff_up(&mut s, old_id, h::wallet());
+    verify_recipient_as(&mut s, old_id, h::wallet(), SUI, SUPPLIER);
+    verify_beneficiary_as(&mut s, old_id, h::wallet(), BENEFICIARY_A, PARTNER);
+    rotate_to_b(&mut s);
+    remove_spender_as(&mut s, old_id, h::wallet(), STAFF);
+    remove_recipient_as(&mut s, old_id, h::wallet(), SUI, SUPPLIER);
+    remove_beneficiary_as(&mut s, old_id, h::wallet(), BENEFICIARY_A);
+    set_limits_as(&mut s, old_id, h::wallet(), POLICY_MAX - 1, TEN_THOUSAND_USDC - 1);
+    s.next_tx(STRANGER);
+    {
+        let policy = s.take_shared_by_id<SpendPolicy>(old_id);
+        assert!(!spend_policy::is_spender(&policy, STAFF));
+        assert_eq!(spend_policy::recipient_count(&policy), 0);
+        assert_eq!(spend_policy::beneficiary_count(&policy), 0);
+        assert_eq!(spend_policy::per_payment_max(&policy), POLICY_MAX - 1);
+        assert_eq!(spend_policy::second_approval_threshold(&policy), TEN_THOUSAND_USDC - 1);
+        ts::return_shared(policy);
+    };
+    s.end();
+}
+
+#[test]
+/// And under a freeze the owners can still cut back, so a policy can be
+/// tightened before the account thaws. Once it thaws, it grows again.
+fun a_frozen_account_can_cut_back_its_policy_and_grow_it_after_the_thaw() {
+    let (mut s, id) = begin_with_policy();
+    staff_up(&mut s, id, h::wallet());
+    admin_freezes(&mut s);
+    remove_spender_as(&mut s, id, h::wallet(), STAFF);
+    set_limits_as(&mut s, id, h::wallet(), STAFF_MAX, 0);
+    s.next_tx(STRANGER);
+    {
+        let mut account = s.take_shared<BusinessAccount>();
+        let admin = business_account::admin_cap_for_testing(s.ctx());
+        business_account::admin_unfreeze(&admin, &mut account, s.ctx());
+        business_account::destroy_admin_cap_for_testing(admin);
+        ts::return_shared(account);
+    };
+    add_spender_as(&mut s, id, h::wallet(), STAFF_2, spend_policy::role_staff(), STAFF_MAX);
+    set_limits_as(&mut s, id, h::wallet(), POLICY_MAX, TEN_THOUSAND_USDC);
+    s.next_tx(STRANGER);
+    {
+        let policy = s.take_shared_by_id<SpendPolicy>(id);
+        assert!(!spend_policy::is_spender(&policy, STAFF));
+        assert!(spend_policy::is_staff(&policy, STAFF_2));
+        assert_eq!(spend_policy::per_payment_max(&policy), POLICY_MAX);
+        ts::return_shared(policy);
+    };
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = spend_policy::E_POLICY_NOT_CURRENT)]
+/// A policy grows only with its own account: another business's account,
+/// however healthy, is refused.
+fun a_policy_cannot_grow_against_another_account() {
+    let mut s = begin();
+    let (first, second, _) = add_second_business(&mut s);
+    let id = create_for(&mut s, first, h::wallet(), h::keys(), h::weights(), h::threshold());
+    s.next_tx(h::wallet());
+    let mut policy = s.take_shared_by_id<SpendPolicy>(id);
+    let other = s.take_shared_by_id<BusinessAccount>(second);
+    spend_policy::add_spender(&mut policy, &other, STAFF, spend_policy::role_staff(), STAFF_MAX, s.ctx());
+    ts::return_shared(other);
+    ts::return_shared(policy);
     s.end();
 }
 
@@ -1630,21 +1716,23 @@ fun every_mutation_emits_one_policy_changed() {
     s.next_tx(h::wallet());
     {
         let mut policy = s.take_shared_by_id<SpendPolicy>(id);
+        let account = s.take_shared_by_id<BusinessAccount>(spend_policy::account(&policy));
         let n = changes();
-        spend_policy::add_spender(&mut policy, STAFF, spend_policy::role_staff(), STAFF_MAX, s.ctx());
+        spend_policy::add_spender(&mut policy, &account, STAFF, spend_policy::role_staff(), STAFF_MAX, s.ctx());
         assert_eq!(changes(), n + 1);
         spend_policy::remove_spender(&mut policy, STAFF, s.ctx());
         assert_eq!(changes(), n + 2);
-        spend_policy::verify_recipient(&mut policy, SUI, SUPPLIER, payment_intent::kind_wallet(), s.ctx());
+        spend_policy::verify_recipient(&mut policy, &account, SUI, SUPPLIER, payment_intent::kind_wallet(), s.ctx());
         assert_eq!(changes(), n + 3);
         spend_policy::remove_recipient(&mut policy, SUI, SUPPLIER, s.ctx());
         assert_eq!(changes(), n + 4);
-        spend_policy::verify_beneficiary(&mut policy, BENEFICIARY_A, PARTNER, s.ctx());
+        spend_policy::verify_beneficiary(&mut policy, &account, BENEFICIARY_A, PARTNER, s.ctx());
         assert_eq!(changes(), n + 5);
         spend_policy::remove_beneficiary(&mut policy, BENEFICIARY_A, s.ctx());
         assert_eq!(changes(), n + 6);
-        spend_policy::set_limits(&mut policy, POLICY_MAX, TEN_THOUSAND_USDC, s.ctx());
+        spend_policy::set_limits(&mut policy, &account, POLICY_MAX, TEN_THOUSAND_USDC, s.ctx());
         assert_eq!(changes(), n + 7);
+        ts::return_shared(account);
         ts::return_shared(policy);
     };
     s.end();
@@ -1658,11 +1746,12 @@ fun every_removal_and_only_a_removal_moves_the_generation() {
     s.next_tx(h::wallet());
     {
         let mut policy = s.take_shared_by_id<SpendPolicy>(id);
+        let account = s.take_shared_by_id<BusinessAccount>(spend_policy::account(&policy));
         assert_eq!(spend_policy::generation(&policy), 0);
-        spend_policy::add_spender(&mut policy, STAFF, spend_policy::role_staff(), STAFF_MAX, s.ctx());
-        spend_policy::verify_recipient(&mut policy, SUI, SUPPLIER, payment_intent::kind_wallet(), s.ctx());
-        spend_policy::verify_beneficiary(&mut policy, BENEFICIARY_A, PARTNER, s.ctx());
-        spend_policy::set_limits(&mut policy, POLICY_MAX, 0, s.ctx());
+        spend_policy::add_spender(&mut policy, &account, STAFF, spend_policy::role_staff(), STAFF_MAX, s.ctx());
+        spend_policy::verify_recipient(&mut policy, &account, SUI, SUPPLIER, payment_intent::kind_wallet(), s.ctx());
+        spend_policy::verify_beneficiary(&mut policy, &account, BENEFICIARY_A, PARTNER, s.ctx());
+        spend_policy::set_limits(&mut policy, &account, POLICY_MAX, 0, s.ctx());
         assert_eq!(spend_policy::generation(&policy), 0);
         spend_policy::remove_spender(&mut policy, STAFF, s.ctx());
         assert_eq!(spend_policy::generation(&policy), 1);
@@ -1670,6 +1759,7 @@ fun every_removal_and_only_a_removal_moves_the_generation() {
         assert_eq!(spend_policy::generation(&policy), 2);
         spend_policy::remove_beneficiary(&mut policy, BENEFICIARY_A, s.ctx());
         assert_eq!(spend_policy::generation(&policy), 3);
+        ts::return_shared(account);
         ts::return_shared(policy);
     };
     s.end();
@@ -1690,10 +1780,12 @@ fun accept_issues_a_rule_funded_by_the_wallet_for_a_listed_spender() {
     s.next_tx(h::wallet());
     {
         let policy = s.take_shared_by_id<SpendPolicy>(id);
+        let account = s.take_shared_by_id<BusinessAccount>(spend_policy::account(&policy));
         let before = event::events_by_type<SpendingRuleAccepted>().length();
         let proposal = propose<USDC>(STAFF, splash_spend::allowance_name(&policy), s.ctx());
-        splash_spend::accept(proposal, &policy, s.ctx());
+        splash_spend::accept(proposal, &policy, &account, s.ctx());
         assert_eq!(event::events_by_type<SpendingRuleAccepted>().length(), before + 1);
+        ts::return_shared(account);
         ts::return_shared(policy);
     };
     s.next_tx(STRANGER);
@@ -1795,8 +1887,10 @@ fun accept_a_proposal_in_another_coin_type_aborts() {
     staff_up(&mut s, id, h::wallet());
     s.next_tx(h::wallet());
     let policy = s.take_shared_by_id<SpendPolicy>(id);
+    let account = s.take_shared_by_id<BusinessAccount>(spend_policy::account(&policy));
     let proposal = propose<USDT>(STAFF, splash_spend::allowance_name(&policy), s.ctx());
-    splash_spend::accept(proposal, &policy, s.ctx());
+    splash_spend::accept(proposal, &policy, &account, s.ctx());
+    ts::return_shared(account);
     ts::return_shared(policy);
     s.end();
 }
@@ -1811,6 +1905,7 @@ fun accept_a_proposal_bound_to_another_app_aborts() {
     staff_up(&mut s, id, h::wallet());
     s.next_tx(h::wallet());
     let policy = s.take_shared_by_id<SpendPolicy>(id);
+    let account = s.take_shared_by_id<BusinessAccount>(spend_policy::account(&policy));
     let proposal = allowance::propose_for_app<Balance<USDC>, OTHER_APP>(
         splash_spend::allowance_name(&policy),
         STAFF,
@@ -1820,7 +1915,8 @@ fun accept_a_proposal_bound_to_another_app_aborts() {
         option::none(),
         s.ctx(),
     );
-    splash_spend::accept(proposal, &policy, s.ctx());
+    splash_spend::accept(proposal, &policy, &account, s.ctx());
+    ts::return_shared(account);
     ts::return_shared(policy);
     s.end();
 }
