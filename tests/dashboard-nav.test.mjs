@@ -184,9 +184,10 @@ test('the shell is keyboard and screen-reader navigable, with a real phone drawe
   assert.match(shell, /Locked:/);
 });
 
-test('the rail says Sui mainnet and carries no coral or testnet copy', async () => {
+test('the rail names the configured network and carries no coral or testnet copy', async () => {
   const shell = await source('components/dashboard/DashboardShell.tsx');
-  assert.match(shell, /Sui mainnet/);
+  // "Sui mainnet" only on mainnet: tests/dashboard-review.test.mjs.
+  assert.match(shell, /\{network\.label\}/);
   assert.doesNotMatch(shell, /testnet/i);
   assert.doesNotMatch(shell, /E39774|coral/i);
   // Colours come from the tokens wherever one exists.
