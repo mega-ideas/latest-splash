@@ -90,6 +90,32 @@ test('production on mainnet refuses the retired custody path (v2, D11); testnet 
   assert.equal(parseEnv({ ...PROD_OK, SUI_NETWORK: 'testnet', ...custody }).SPLASH_CUSTODY_PACKAGE_ID, OBJ, 'testnet keeps the code path');
 });
 
+test('production on mainnet refuses the funding deposit-address keys and says why (D1, D3); testnet still accepts them', () => {
+  // A funding session's deposit address is derived from this secret, so
+  // whoever holds it can rebuild the address's private key; or it is an
+  // address the operator configured, an account between the business and its
+  // own wallet. Neither may exist on mainnet.
+  const cases = [
+    ['FUNDING_DEPOSIT_DERIVATION_SECRET', 'x'.repeat(32), /private key/],
+    ['FUNDING_CCTP_DEPOSIT_ADDRESSES_JSON', JSON.stringify({ acct: { ETHEREUM: '0x' + '11'.repeat(20) } }), /between the business and its own wallet/],
+  ];
+  for (const [key, value, why] of cases) {
+    let issues;
+    try {
+      parseEnv({ ...PROD_OK, SUI_NETWORK: 'mainnet', [key]: value });
+    } catch (e) {
+      assert.ok(e instanceof EnvValidationError, `${key}: expected EnvValidationError, got ${e?.message}`);
+      issues = e.issues;
+    }
+    assert.ok(issues, `${key}: production on mainnet must refuse to boot`);
+    const issue = issues.find((i) => i.key === key);
+    assert.ok(issue, `${key} is named; got ${issues.map((i) => i.key).join(', ')}`);
+    assert.match(issue.message, why, `${key}: the reason is given`);
+    assert.match(issue.message, /no deposit address on mainnet/, `${key}: and what replaces it`);
+    assert.equal(parseEnv({ ...PROD_OK, SUI_NETWORK: 'testnet', [key]: value })[key], value, `${key}: testnet keeps today's behaviour`);
+  }
+});
+
 test('production: live settlement requires the signer; simulate does not', () => {
   // WS4: the production signer is the KMS key. A raw key is refused outright
   // (tests/operator-custody.test.mjs), so it is not what is asked for here.
