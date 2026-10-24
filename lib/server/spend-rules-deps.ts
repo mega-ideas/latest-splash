@@ -165,7 +165,7 @@ export async function liveSpendContext(route: Pick<WalletRoute, 'ctx' | 'db'> & 
       read: liveSpendReader(ids.spendPackageId, ctx.chain.usdcType),
       ownership: dbOwnershipGate(db),
       db,
-      ...(route.orgId ? { standing: () => readSpenderStanding(db, route.orgId as string) } : {}),
+      ...(route.orgId ? { orgId: route.orgId, standing: () => readSpenderStanding(db, route.orgId as string) } : {}),
     },
   };
 }

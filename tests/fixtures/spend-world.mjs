@@ -262,7 +262,7 @@ export async function spendWorld(opts = {}) {
     readAllowances: async (ids) => ids.map((i) => state.allowances.get(normalizeSuiAddress(i))).filter(Boolean).map((a) => ({ ...a })),
     listRuleSpends: async (policyId) => spends.filter((e) => e.policyId === normalizeSuiAddress(policyId)),
   };
-  const sc = { wallet: w.ctx, chain: spendChainCfg, read: reader, ownership: dbOwnershipGate(w.db), db: w.db, standing: () => readSpenderStanding(w.db, 'acme') };
+  const sc = { wallet: w.ctx, chain: spendChainCfg, read: reader, ownership: dbOwnershipGate(w.db), db: w.db, orgId: 'acme', standing: () => readSpenderStanding(w.db, 'acme') };
   w.signing.onExecuted = async (request) => {
     await continueWalletSteps(w.ctx, request);
     await continueSpendSteps(sc, request);

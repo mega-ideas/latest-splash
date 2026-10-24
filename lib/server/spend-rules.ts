@@ -53,7 +53,7 @@ import { approvePayoutTx, createSpendPolicyTx, RECIPIENT_TAG, SPEND_ROLE, spendR
 import { buildSpendView, boundTo, DAY_MS, type HeldAllowance, type PolicyState, type SpendView } from './spend-rules-index.ts';
 import { V2_KIND } from './sui-v2-builders.ts';
 import { openSigningRequest, type RequestView, type SigningFailure } from './wallet-signing.ts';
-import type { DrizzleDb, StoredRequest } from './wallet-signing-store.ts';
+import { listSigningRequests, type DrizzleDb, type StoredRequest } from './wallet-signing-store.ts';
 import { resolveOffboardedSpenders, type StandingOf } from './spend-standing.ts';
 import { recordAuthorityEvent } from './wallet-authority.ts';
 
@@ -75,7 +75,18 @@ export type SpendContext = {
   db: DrizzleDb;
   /** Who each spender address is to this business now (lib/server/spend-standing.ts). */
   standing?: () => Promise<StandingOf>;
+  /** The org this context is for, where the caller knows it: Postgres reads (the reissue record) take it. */
+  orgId?: string;
 };
+
+const reissueKey = (epoch: bigint) => `spend:reissue:${epoch}`;
+
+/** Has this wallet generation's reissue executed? It runs once. */
+async function reissuedFor(sc: SpendContext, orgId: string | undefined, epoch: bigint): Promise<boolean> {
+  if (!orgId) return false;
+  const done = await listSigningRequests(sc.db, orgId, ['executed']);
+  return done.some((r) => r.purpose === 'spend_rule' && r.dedupeKey === reissueKey(epoch));
+}
 
 type Result = { ok: true; request: RequestView } | SigningFailure;
 export type SpendFailure = SigningFailure & { details?: Record<string, unknown> };
@@ -198,9 +209,10 @@ export async function readSpendingRules(sc: SpendContext): Promise<{ ok: true; v
     }
   }
   const standing = sc.standing ? await sc.standing() : undefined;
+  const reissued = await reissuedFor(sc, sc.orgId, l.walletEpoch);
   return {
     ok: true,
-    view: buildSpendView({ now: l.now, wallet: l.wallet, walletEpoch: l.walletEpoch, policy: l.policy, earlierPolicies: l.earlier, allowances: l.held, spends, appName: l.appName, standing }),
+    view: buildSpendView({ now: l.now, wallet: l.wallet, walletEpoch: l.walletEpoch, policy: l.policy, earlierPolicies: l.earlier, allowances: l.held, spends, appName: l.appName, standing, reissued }),
   };
 }
 
@@ -603,16 +615,26 @@ function capOf(a: AllowanceState): RuleCap | null {
  * policy's limits, window, recipients (a WALLET tag only while its ownership
  * proof still holds), beneficiaries, spenders, and each unexpired rule's
  * allowance with the same cap and expiry (a lifetime cap carries what is left
- * of it). What could not be carried is listed in `skipped`.
+ * of it). What could not be carried is listed in `skipped`. Only the rules
+ * of current members who may pay are carried (a removed member's, a
+ * viewer's, an address nobody here holds are skipped), and the copy runs
+ * once per wallet generation: after it executes, `reissueNeeded` is false
+ * and a second call is refused, so a rule the owners took back since does
+ * not come back.
  */
 export async function reissueAfterRotation(
   sc: SpendContext,
   input: { orgId: string; requestedBy: string; wallet: WalletMembers },
 ): Promise<(Result & { skipped?: string[] }) | SpendFailure> {
+  if (!sc.standing) return refuse(503, 'no_standing', 'who holds each rule cannot be read, so nothing was built');
   const l = await load(sc, { wallet: input.wallet });
   if (isFailure(l)) return l;
   const source = l.earlier.find((p) => p.spenders.length > 0 || p.recipients.length > 0 || p.beneficiaries.length > 0);
   if (!source) return refuse(404, 'nothing_to_reissue', 'no earlier spending rules to carry over');
+  // Once per wallet generation: afterwards the owners change rules one by
+  // one, and a rule they took back must not be copied over again.
+  if (await reissuedFor(sc, input.orgId, l.walletEpoch)) return refuse(409, 'nothing_to_reissue', 'the rules were already carried over to this wallet');
+  const standing = await sc.standing();
   if (!l.policy) {
     const step: ReissueStep = { purpose: 'spend_reissue' };
     return startSpendPolicy(sc, { orgId: input.orgId, requestedBy: input.requestedBy, wallet: input.wallet, perPaymentMaxMinor: source.perPaymentMax, nextStep: step });
@@ -648,6 +670,11 @@ export async function reissueAfterRotation(
       skipped.push(`spender ${sp.spender}: the operator's rule is set up again by Splash`);
       continue;
     }
+    const who = standing(sp.spender);
+    if (who !== 'member') {
+      skipped.push(`spender ${sp.spender}: not a current member who may pay (${who.replace(/_/g, ' ')})`);
+      continue;
+    }
     ops.push({ op: 'add_spender', spender: sp.spender, role: sp.role, perPaymentMaxMinor: sp.perPaymentMax });
     spenders.add(sp.spender);
     const old = l.held.filter((a) => a.spender === sp.spender && boundTo(a, source, l.appName));
@@ -667,7 +694,7 @@ export async function reissueAfterRotation(
     }
   }
   if (ops.length === 0) return refuse(409, 'nothing_to_reissue', 'the rules are already carried over', { skipped });
-  const opened = await openRule(sc, l, { ...input, policy, ops, dedupeKey: 'spend:reissue', walletTagAllowed: proven });
+  const opened = await openRule(sc, l, { ...input, policy, ops, dedupeKey: reissueKey(l.walletEpoch), walletTagAllowed: proven });
   return opened.ok ? { ...opened, skipped } : opened;
 }
 

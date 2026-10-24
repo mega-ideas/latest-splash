@@ -198,6 +198,8 @@ export function buildSpendView(input: {
   appName: string;
   /** Who each spender is to Splash now; without it, standing is null and nothing is listed as orphaned. */
   standing?: StandingOf;
+  /** The reissue for the current wallet generation has executed: it runs once, and does not prompt again. */
+  reissued?: boolean;
 }): SpendView {
   const { now, policy } = input;
   const ours = input.allowances.filter((a) => a.app === input.appName);
@@ -252,7 +254,11 @@ export function buildSpendView(input: {
   }
 
   const carried = new Set(current ? current.spenders.map((x) => x.spender) : []);
-  const reissueNeeded = input.earlierPolicies.some((p) => p.spenders.some((x) => !carried.has(x.spender)));
+  // Only staff rules are reissued (the operator's executor rule is Splash's
+  // to set up again), only for current members, and only once per wallet
+  // generation: a rule the owners took back since must not prompt it again.
+  const carriable = (x: { spender: string; role: number }) => x.role !== 2 && !carried.has(x.spender) && (!input.standing || input.standing(x.spender) === 'member');
+  const reissueNeeded = !input.reissued && input.earlierPolicies.some((p) => p.spenders.some(carriable));
   return {
     walletEpoch: s(input.walletEpoch),
     wallet: input.wallet ? normalizeSuiAddress(input.wallet) : null,

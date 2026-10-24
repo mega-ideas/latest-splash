@@ -538,6 +538,7 @@ test('running totals toward the second approval are shown per recipient, with wh
 test('after a rotation the old policy is stale; the rules are reissued under the new wallet, and the old wallet revokes its own', async () => {
   const w = await spendWorld();
   const { members, wallet: old } = await withPolicy(w);
+  await passkeyFor(w, 'u-staff', STAFF);
   await recordOwnershipProof(w.db, { orgId: 'acme', address: SUPPLIER, method: 'signed_message', evidence: 'sig', now: T0 });
   const recipients = await changeRecipients(w.sc, { orgId: 'acme', requestedBy: 'u-founder', wallet: members, change: { add: [{ address: SUPPLIER, tag: 'wallet' }, { address: EXCHANGE, tag: 'exchange' }] } });
   await signBy(w, recipients.request, 'founder', 'two');
