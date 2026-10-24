@@ -21,6 +21,7 @@ import { canApprove } from '@/lib/membership-roles';
 import { formatMinor, parseMinor, USD_DECIMALS } from '@/lib/money';
 import type { UnsignedProposal } from '@/lib/agent/types';
 import type { WalletAction, WalletTxDescription } from '@/lib/wallet/wallet-tx-describe';
+import { transactionCode } from '@/lib/wallet/review-on-device';
 import type { SigningNotifier } from '@/lib/server/wallet-signing';
 import type { SigningPurpose } from '@/lib/server/wallet-signing-store';
 import { listApprovers, type Approver } from '@/lib/server/approver-channels';
@@ -209,11 +210,19 @@ export function walletRequestHeadline(purpose: SigningPurpose, d: WalletTxDescri
       const open = a.find((x) => x.type === 'open_intent') as Extract<WalletAction, { type: 'open_intent' }> | undefined;
       const pay = a.find((x) => x.type === 'pay_intent') as Extract<WalletAction, { type: 'pay_intent' }>;
       const fee = BigInt(pay.maxFeeMinor) > 0n ? `, Splash fee at most ${usdc(pay.maxFeeMinor)}` : '';
-      return open ? `pay ${usdc(open.amountMinor)} to ${shortAddress(open.recipient)}${fee}` : `pay an open payment${fee}`;
+      if (open) return `pay ${usdc(open.amountMinor)} to ${shortAddress(open.recipient)}${fee}`;
+      // An existing intent: its payee and principal were read from the chain
+      // and bound into the request (the describer refuses it otherwise).
+      if (pay.intent) return `pay ${usdc(pay.intent.amountMinor)} to ${shortAddress(pay.intent.recipient)}, a payment a team member prepared${fee}`;
+      return `pay a payment whose payee could not be read${fee}`;
     }
     case 'migration_transfer': {
       const s = a.find((x) => x.type === 'send_funds') as Extract<WalletAction, { type: 'send_funds' }>;
       return `move ${s.amountMinor ? usdc(s.amountMinor) : 'your USDC'} from your own wallet to the business wallet ${shortAddress(s.recipient)}`;
+    }
+    case 'rotation_transfer': {
+      const s = a.find((x) => x.type === 'send_funds') as Extract<WalletAction, { type: 'send_funds' }>;
+      return `move ${s.amountMinor ? usdc(s.amountMinor) : 'the USDC'} from the old business wallet to the new one, ${shortAddress(s.recipient)}`;
     }
   }
 }
@@ -225,7 +234,7 @@ export function walletSignatureMessage(input: { orgName: string; purpose: Signin
     `Splash: your signature is needed\n\n` +
     `${input.orgName} asks you to ${walletRequestHeadline(input.purpose, input.description)}.\n` +
     `${who} Splash pays the network fee.\n\n` +
-    `Open Splash, check the details and the transaction code ${input.description.bytesHash.slice(0, 8)}, and sign with your passkey. ` +
+    `Open Splash, check the details and the transaction code ${transactionCode(input.description.bytesHash)}, and sign with your passkey. ` +
     `This request expires in ${hours} hour${hours === 1 ? '' : 's'}.\n\n` +
     `If you did not expect this, do not sign it.`
   );

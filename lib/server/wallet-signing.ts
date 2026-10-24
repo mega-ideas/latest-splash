@@ -7,9 +7,10 @@
  *
  *   open     The server builds the exact bytes (lib/server/sui-v2-builders.ts),
  *            decodes them (lib/wallet/wallet-tx-describe.ts), checks they are
- *            the shape the purpose allows, that the sponsor will pay for them,
- *            and that they SIMULATE, and only then stores them with their
- *            digest and asks each signer (WhatsApp and the in-app inbox,
+ *            the shape the purpose allows, that the sponsor will pay for them
+ *            and the org is inside its daily sponsored-gas budget, and that
+ *            they SIMULATE, and only then stores them with their digest and
+ *            asks each signer (WhatsApp and the in-app inbox,
  *            lib/server/approval-requests.ts). Nothing is signed before the
  *            simulation passes.
  *   sign     Each signer fetches the request, sees what the bytes do (decoded
@@ -19,14 +20,25 @@
  *            signer who is not on the request, a second signature from the
  *            same signer, a signature that does not verify over the stored
  *            bytes under that signer's own key, and any request that has
- *            expired or closed.
+ *            expired or closed. A signer may instead decline: that is
+ *            recorded and the request stays open for the others, unless the
+ *            remaining signers can no longer reach the threshold. Only the
+ *            person who asked can withdraw a request, so no one signer has a
+ *            veto over the quorum.
  *   submit   When the signed weight reaches the threshold, one caller claims
- *            the submission, the partial signatures are combined
- *            (MultiSigPublicKey.combinePartialSignatures) and the result is
- *            verified against the multisig key, the bytes are checked and
- *            simulated again, the sponsor signs as gas owner, and the
- *            transaction is executed. Executed, failed or expired, every
- *            partial signature is cleared in the statement that closes it.
+ *            the submission (and the time it did), the partial signatures are
+ *            combined (MultiSigPublicKey.combinePartialSignatures) and the
+ *            result is verified against the multisig key, the bytes are
+ *            checked and simulated again, the sponsor signs as gas owner, and
+ *            the transaction is executed.
+ *   outcome  Executed or failed on chain, the request closes. If the network
+ *            does not answer (a timeout, a crash, a redeploy), the request is
+ *            `unknown`: it keeps its digest and its dedupe key, holds no
+ *            partial signature, and the cron (`reconcileSigningRequestsForStaff`)
+ *            reads the digest until it is final, running the follow-up step
+ *            if it executed. Bytes whose ValidDuring window has passed can no
+ *            longer land, so an unknown request past it closes as failed.
+ *            A request still `submitting` past the lease is treated the same.
  *
  * Tenant isolation: every read takes the caller's org, and a request from
  * another org reads as absent (404, not 403).
@@ -46,6 +58,7 @@ import { multisigFromBase64 } from '@/lib/wallet/business-multisig';
 import {
   describeWalletTransaction,
   WalletTxRefused,
+  type OpenIntentExpectation,
   type WalletAction,
   type WalletTxDescription,
   type WalletTxExpectations,
@@ -56,15 +69,29 @@ import {
   closeSigningRequest,
   insertSigningRequest,
   listInboxForSigner,
+  listInFlightForStaff,
+  markOutcomeUnknown,
   OpenRequestExists,
   readSigningRequest,
+  recordDecline,
   recordPartialSignature,
+  sponsoredBudgetSince,
   type DrizzleDb,
   type SigningPurpose,
   type StoredRequest,
 } from '@/lib/server/wallet-signing-store';
 
 export const MAX_REQUEST_TTL_MS = 24 * 60 * 60 * 1000;
+/** How long a claimed submission may stay `submitting` before the cron asks the chain. */
+export const SUBMISSION_LEASE_MS = 5 * 60 * 1000;
+/**
+ * The most gas, in MIST, the sponsor agrees to pay for one org's wallet
+ * requests in any 24 hours: 1 SUI, twenty requests at the per-transaction
+ * cap. A registration or a payment uses a small fraction of its cap, so this
+ * bounds what one org (or one person in a single-signer org) can drain from
+ * the operator's hot balance, not ordinary use.
+ */
+export const WALLET_SPONSOR_DAILY_BUDGET_MIST = 1_000_000_000n;
 /** A multisig signature's flag. A signer sends their own part, never a whole. */
 const MULTISIG_FLAG = 0x03;
 
@@ -93,6 +120,8 @@ export type SigningDeps = {
   /** Called after a request executes (the wallet-creation sequence uses it). */
   onExecuted?: (request: StoredRequest) => Promise<void>;
   now?: () => Date;
+  /** Override of WALLET_SPONSOR_DAILY_BUDGET_MIST (tests). */
+  sponsorDailyBudgetMist?: bigint;
 };
 
 export type SignerSpec =
@@ -114,28 +143,40 @@ function kinds(actions: WalletAction[]): string {
   return actions.map((a) => a.type).join(',');
 }
 
+export type ShapeContext = {
+  /** The wallet's member addresses (register, nominate). */
+  members?: string[];
+  /** The address a transfer must pay (migration, rotation transfer). */
+  recipient?: string;
+};
+
 /** The shapes each purpose allows. Anything else is refused before it is stored. */
-export function assertPurposeShape(
-  purpose: SigningPurpose,
-  d: WalletTxDescription,
-  context: { members?: string[]; recipient?: string } = {},
-): void {
+export function assertPurposeShape(purpose: SigningPurpose, d: WalletTxDescription, context: ShapeContext = {}): void {
   const shape = kinds(d.actions);
-  const bad = (why: string) => {
+  const bad = (why: string): never => {
     throw new WalletTxRefused(`this transaction is not a ${purpose.replace(/_/g, ' ')}: ${why}`, 'wrong_shape');
   };
+  const sameSet = (a: string[], b: string[]) => [...a].sort().join() === [...b].sort().join();
   switch (purpose) {
-    case 'nominate_wallet':
-      if (shape !== 'nominate_wallet') bad(shape);
+    case 'nominate_wallet': {
+      // The founder first makes every wallet member an on-chain owner (Move's
+      // register_wallet refuses a member who is not one), then nominates.
+      const last = d.actions[d.actions.length - 1];
+      if (last?.type !== 'nominate_wallet') bad(shape);
+      const added = d.actions.slice(0, -1);
+      if (!added.every((x) => x.type === 'add_owner')) bad(shape);
+      if (added.length > 0) {
+        if (!context.members) bad('it adds owners, and no wallet members were named');
+        const allowed = new Set((context.members ?? []).map((m) => normalizeSuiAddress(m)));
+        for (const x of added) if (!allowed.has((x as unknown as { address: string }).address)) bad('it adds an owner who is not a wallet member');
+      }
       return;
+    }
     case 'register_wallet': {
       if (shape !== 'register_wallet') bad(shape);
       const a = d.actions[0] as Extract<WalletAction, { type: 'register_wallet' }>;
       if (a.wallet !== d.sender) bad('the wallet must register itself');
-      if (context.members) {
-        const listed = [...a.members.map((m) => m.address)].sort().join();
-        if (listed !== [...context.members].sort().join()) bad('the members are not the signers');
-      }
+      if (context.members && !sameSet(a.members.map((m) => m.address), context.members)) bad('the members are not the signers');
       return;
     }
     case 'rotate_wallet':
@@ -155,16 +196,30 @@ export function assertPurposeShape(
         if (BigInt(p.settleByMs) > BigInt(o.expiresAtMs)) bad('the quote outlives the intent');
         return;
       }
-      if (shape === 'withdraw,pay_intent,anchor_receipt') return;
+      if (shape === 'withdraw,pay_intent,anchor_receipt') {
+        const w = d.actions[0] as Extract<WalletAction, { type: 'withdraw' }>;
+        const p = d.actions[1] as Extract<WalletAction, { type: 'pay_intent' }>;
+        // The describer only accepts an existing intent whose fields were read
+        // from the chain; the withdrawal must be exactly its principal plus
+        // the fee bound the signers see, and the quote cannot outlive it.
+        if (!p.intent) bad('the intent paid was not read from the chain');
+        const intent = p.intent as OpenIntentExpectation;
+        if (BigInt(w.amountMinor) !== BigInt(intent.amountMinor) + BigInt(p.maxFeeMinor)) bad('the withdrawal is not the amount plus the maximum fee');
+        if (BigInt(p.settleByMs) > BigInt(intent.expiresAtMs)) bad('the quote outlives the intent');
+        return;
+      }
       bad(shape);
       return;
     }
-    case 'migration_transfer': {
+    case 'migration_transfer':
+    case 'rotation_transfer': {
       const last = d.actions[d.actions.length - 1];
       const gathering = d.actions.slice(0, -1).every((x) => FUNDS_GATHERING.has(x.type));
       if (last.type !== 'send_funds' || !gathering || d.actions.length < 2) bad(shape);
+      if (purpose === 'rotation_transfer' && shape !== 'withdraw,send_funds') bad('a wallet moves its address balance in one withdrawal');
       const s = last as Extract<WalletAction, { type: 'send_funds' }>;
-      if (context.recipient && s.recipient !== normalizeSuiAddress(context.recipient)) bad('the transfer is not to the business wallet');
+      if (!context.recipient) bad('no destination wallet was named');
+      if (s.recipient !== normalizeSuiAddress(context.recipient as string)) bad('the transfer is not to the business wallet');
       return;
     }
   }
@@ -179,6 +234,15 @@ function assertGasless(d: WalletTxDescription) {
   }
 }
 
+/** What a request's bytes are decoded against: the org's ids, plus any existing intent read when it opened. */
+function expectationsFor(request: StoredRequest, expect: WalletTxExpectations): WalletTxExpectations {
+  const openIntent = (request.summary as { openIntent?: OpenIntentExpectation } | null)?.openIntent;
+  return openIntent ? { ...expect, openIntent } : expect;
+}
+
+/** The public ids a device needs to decode a request's bytes itself. */
+export type PublicExpectations = WalletTxExpectations;
+
 /** The view a signer is shown: the bytes and what they do, read from the bytes now. */
 export type RequestView = {
   id: string;
@@ -188,13 +252,23 @@ export type RequestView = {
   transactionBytes: string;
   digest: string;
   bytesHash: string;
-  description: WalletTxDescription;
+  /** Null when the bytes no longer decode against this org's configuration. */
+  description: WalletTxDescription | null;
+  /** False when the bytes no longer decode: the request cannot be signed. */
+  valid: boolean;
+  invalidReason: string | null;
+  /**
+   * What a signer's device decodes the bytes against
+   * (lib/wallet/review-on-device.ts): public object ids only. The device
+   * renders its own decoding of `transactionBytes`, never `description`.
+   */
+  expect: PublicExpectations;
   threshold: number;
   signedWeight: number;
   expiresAt: string;
   gasMode: 'sponsored' | 'gasless';
-  signers: Array<{ userId: string; address: string; weight: number; signed: boolean }>;
-  you: { mustSign: boolean; signed: boolean };
+  signers: Array<{ userId: string; address: string; weight: number; signed: boolean; declined: boolean }>;
+  you: { mustSign: boolean; signed: boolean; declined: boolean; requested: boolean };
   executedDigest: string | null;
   /** What the dry run of these exact bytes moved, when the request opened. */
   simulatedBalanceChanges: BalanceChange[];
@@ -204,8 +278,23 @@ function signedWeight(request: StoredRequest): number {
   return request.signers.filter((s) => s.signedAt !== null).reduce((a, s) => a + s.weight, 0);
 }
 
-function viewOf(request: StoredRequest, description: WalletTxDescription, userId: string): RequestView {
+function reachableWeight(request: StoredRequest): number {
+  return request.signers.filter((s) => s.declinedAt === null).reduce((a, s) => a + s.weight, 0);
+}
+
+function viewOf(request: StoredRequest, expect: WalletTxExpectations, userId: string): RequestView {
   const me = request.signers.find((s) => s.userId === userId);
+  const expectations = expectationsFor(request, expect);
+  let description: WalletTxDescription | null = null;
+  let invalidReason: string | null = null;
+  try {
+    description = describeWalletTransaction(request.txBytes, expectations);
+  } catch (error) {
+    // One request that no longer decodes (a configuration id changed) must
+    // not take the whole inbox down: it is shown as no longer valid.
+    invalidReason = error instanceof WalletTxRefused ? error.message : 'these bytes could not be read';
+  }
+  const valid = description !== null;
   return {
     id: request.id,
     purpose: request.purpose,
@@ -215,12 +304,20 @@ function viewOf(request: StoredRequest, description: WalletTxDescription, userId
     digest: request.txDigest,
     bytesHash: request.bytesHash,
     description,
+    valid,
+    invalidReason,
+    expect: expectations,
     threshold: request.threshold,
     signedWeight: signedWeight(request),
     expiresAt: request.expiresAt.toISOString(),
     gasMode: request.gasMode,
-    signers: request.signers.map((s) => ({ userId: s.userId, address: s.address, weight: s.weight, signed: s.signedAt !== null })),
-    you: { mustSign: Boolean(me && me.signedAt === null && request.status === 'collecting'), signed: Boolean(me?.signedAt) },
+    signers: request.signers.map((s) => ({ userId: s.userId, address: s.address, weight: s.weight, signed: s.signedAt !== null, declined: s.declinedAt !== null })),
+    you: {
+      mustSign: Boolean(valid && me && me.signedAt === null && me.declinedAt === null && request.status === 'collecting'),
+      signed: Boolean(me?.signedAt),
+      declined: Boolean(me?.declinedAt),
+      requested: request.requestedBy === userId,
+    },
     executedDigest: request.executedDigest,
     simulatedBalanceChanges: ((request.summary as { simulatedBalanceChanges?: BalanceChange[] } | null)?.simulatedBalanceChanges ?? []).map((c) => ({
       address: String(c.address),
@@ -245,8 +342,12 @@ export async function openSigningRequest(
     signer: SignerSpec;
     gasMode: 'sponsored' | 'gasless';
     ttlMs?: number;
-    /** For a migration transfer: the business wallet it must pay. */
+    /** For a migration or rotation transfer: the business wallet it must pay. */
     recipient?: string;
+    /** For a nomination: the wallet's member addresses it may add as owners. */
+    members?: string[];
+    /** For paying an existing intent: its fields, as the server read them from the chain. */
+    openIntent?: OpenIntentExpectation;
     /** Opened by `onExecuted` once this request executes. Keys and weights only. */
     nextStep?: unknown;
   },
@@ -277,11 +378,13 @@ export async function openSigningRequest(
     return fail(400, 'bad_signer', 'a signer key could not be read');
   }
 
+  const expectations: WalletTxExpectations = input.openIntent ? { ...deps.expect, openIntent: input.openIntent } : deps.expect;
   let description: WalletTxDescription;
   try {
-    description = describeWalletTransaction(input.transactionBytes, deps.expect);
+    description = describeWalletTransaction(input.transactionBytes, expectations);
     if (description.sender !== normalizeSuiAddress(sender)) return fail(400, 'wrong_sender', 'the transaction is not sent by the signer this request names');
-    assertPurposeShape(input.purpose, description, { members: signers.map((s) => s.address), recipient: input.recipient });
+    const members = input.purpose === 'register_wallet' ? signers.map((s) => s.address) : input.members;
+    assertPurposeShape(input.purpose, description, { members, recipient: input.recipient });
     if (input.gasMode === 'sponsored') {
       if (!deps.sponsor) return fail(503, 'no_sponsor', 'business wallet transactions need a gas sponsor, and none is configured');
       assertSponsorable(description, { sponsor: deps.sponsor.address, senders: [sender] });
@@ -291,6 +394,13 @@ export async function openSigningRequest(
   } catch (error) {
     if (error instanceof WalletTxRefused || error instanceof SponsorRefused) return fail(400, error.code, error.message);
     throw error;
+  }
+
+  if (input.gasMode === 'sponsored') {
+    const used = await sponsoredBudgetSince(deps.db, input.orgId, new Date(now.getTime() - 24 * 60 * 60 * 1000));
+    if (used + BigInt(description.gas.budget) > (deps.sponsorDailyBudgetMist ?? WALLET_SPONSOR_DAILY_BUDGET_MIST)) {
+      return fail(429, 'sponsor_budget', 'this business has used its network-fee allowance for the last 24 hours; try again later');
+    }
   }
 
   const simulated = await deps.chain.simulate(input.transactionBytes);
@@ -316,7 +426,11 @@ export async function openSigningRequest(
     txBytes: toBase64(input.transactionBytes),
     txDigest: description.digest,
     bytesHash: description.bytesHash,
-    summary: { description, simulatedBalanceChanges: simulated.balanceChanges ?? [] },
+    summary: {
+      description,
+      simulatedBalanceChanges: simulated.balanceChanges ?? [],
+      ...(input.openIntent ? { openIntent: input.openIntent } : {}),
+    },
     nextStep: input.nextStep ?? null,
     requestedBy: input.requestedBy,
     expiresAt: new Date(now.getTime() + ttl),
@@ -339,14 +453,14 @@ export async function openSigningRequest(
       // in every signer's inbox in the app.
     }
   }
-  return { ok: true, request: viewOf(stored, description, input.requestedBy) };
+  return { ok: true, request: viewOf(stored, deps.expect, input.requestedBy) };
 }
 
 /** Requests waiting on this person's signature, in this org. */
 export async function signingInbox(deps: Pick<SigningDeps, 'db' | 'expect' | 'now'>, input: { orgId: string; userId: string }): Promise<RequestView[]> {
   const now = (deps.now ?? (() => new Date()))();
   const rows = await listInboxForSigner(deps.db, input.orgId, input.userId, now);
-  return rows.map((r) => viewOf(r, describeWalletTransaction(r.txBytes, deps.expect), input.userId));
+  return rows.map((r) => viewOf(r, deps.expect, input.userId));
 }
 
 /** One request, for a signer or the person who asked. Another org's reads as absent. */
@@ -360,7 +474,7 @@ export async function readRequestForSigner(
     return fail(404, 'not_found', 'no such request');
   }
   // Decoded again from the stored bytes, so the view can never drift from them.
-  return { ok: true, request: viewOf(request, describeWalletTransaction(request.txBytes, deps.expect), input.userId) };
+  return { ok: true, request: viewOf(request, deps.expect, input.userId) };
 }
 
 /**
@@ -386,6 +500,12 @@ export async function submitPartialSignature(
     return fail(409, 'digest_mismatch', 'the transaction you reviewed is not the one waiting for signatures; reload it and review again');
   }
   if (signer.signedAt) return fail(409, 'already_signed', 'you have already signed this request');
+  if (signer.declinedAt) return fail(409, 'declined', 'you declined this request');
+  try {
+    describeWalletTransaction(request.txBytes, expectationsFor(request, deps.expect));
+  } catch {
+    return fail(409, 'no_longer_valid', 'this request no longer matches the business account; ask for it again');
+  }
 
   const bytes = fromBase64(request.txBytes);
   let valid = false;
@@ -405,13 +525,38 @@ export async function submitPartialSignature(
     await submitWhenReady(deps, updated, now);
   }
   const final = (await readSigningRequest(deps.db, input.orgId, request.id)) as StoredRequest;
-  return { ok: true, request: viewOf(final, describeWalletTransaction(final.txBytes, deps.expect), input.userId) };
+  return { ok: true, request: viewOf(final, deps.expect, input.userId) };
+}
+
+/** Close an in-flight request on the chain's answer, and run its follow-up once. */
+async function settleOutcome(
+  deps: Pick<SigningDeps, 'db' | 'onExecuted'>,
+  request: StoredRequest,
+  result: ChainResult,
+  now: Date,
+): Promise<'executed' | 'failed' | 'raced'> {
+  const status = result.success ? 'executed' : 'failed';
+  const closed = await closeSigningRequest(deps.db, {
+    orgId: request.orgId,
+    id: request.id,
+    status,
+    from: ['submitting', 'unknown'],
+    now,
+    executedDigest: result.digest || request.txDigest,
+    error: result.success ? null : (result.error ?? 'execution failed'),
+  });
+  if (!closed) return 'raced';
+  if (result.success && deps.onExecuted) {
+    const executed = await readSigningRequest(deps.db, request.orgId, request.id);
+    if (executed) await deps.onExecuted(executed).catch(() => undefined);
+  }
+  return status;
 }
 
 async function submitWhenReady(deps: SigningDeps, request: StoredRequest, now: Date): Promise<void> {
   if (!(await claimSubmission(deps.db, request.orgId, request.id, now))) return;
-  const close = (status: 'executed' | 'failed', extra: { executedDigest?: string | null; error?: string | null }) =>
-    closeSigningRequest(deps.db, { orgId: request.orgId, id: request.id, status, from: ['submitting'], now, ...extra });
+  const close = (status: 'failed', extra: { error: string }) =>
+    closeSigningRequest(deps.db, { orgId: request.orgId, id: request.id, status, from: ['submitting', 'unknown'], now, ...extra });
 
   const bytes = fromBase64(request.txBytes);
   const signed = request.signers.filter((s) => s.signature);
@@ -438,7 +583,7 @@ async function submitWhenReady(deps: SigningDeps, request: StoredRequest, now: D
 
   const signatures = [walletSignature];
   try {
-    const description = describeWalletTransaction(bytes, deps.expect);
+    const description = describeWalletTransaction(bytes, expectationsFor(request, deps.expect));
     if (request.gasMode === 'sponsored') {
       if (!deps.sponsor) throw new SponsorRefused('no gas sponsor is configured', 'no_sponsor');
       assertSponsorable(description, { sponsor: deps.sponsor.address, senders: [request.senderAddress] });
@@ -458,23 +603,99 @@ async function submitWhenReady(deps: SigningDeps, request: StoredRequest, now: D
   try {
     result = await deps.chain.execute(bytes, signatures);
   } catch {
-    // Timeout ambiguity: ask the chain what happened to this digest.
+    // Timeout ambiguity: the bytes may have landed. Ask the chain; if it has
+    // not seen them, the outcome is unknown, not failed. The request keeps
+    // its digest and dedupe key, and the cron reads the digest until it is
+    // final (reconcileSigningRequestsForStaff).
     result = deps.chain.read ? await deps.chain.read(request.txDigest).catch(() => null) : null;
     if (!result) {
-      await close('failed', { executedDigest: request.txDigest, error: 'the network did not confirm the submission; check the digest before trying again' });
+      await markOutcomeUnknown(deps.db, {
+        orgId: request.orgId,
+        id: request.id,
+        from: ['submitting'],
+        error: 'sent to the network, which has not confirmed it yet; Splash checks the digest until it does',
+        now,
+      });
       return;
     }
   }
-  if (result.success) {
-    await close('executed', { executedDigest: result.digest });
-    const executed = await readSigningRequest(deps.db, request.orgId, request.id);
-    if (executed && deps.onExecuted) await deps.onExecuted(executed).catch(() => undefined);
-  } else {
-    await close('failed', { executedDigest: result.digest || null, error: result.error ?? 'execution failed' });
-  }
+  await settleOutcome(deps, request, result, now);
 }
 
-/** The requester (or any signer) withdraws a request nobody needs any more. */
+/**
+ * The cron's reconcile (cross-tenant, close only): every request still
+ * submitting past the lease, and every unknown one, is read on chain by its
+ * digest. Executed or failed there, it closes, and an executed one runs its
+ * follow-up step (`onExecuted`, with the request's own org). Not seen: a
+ * stuck submission becomes unknown (its partial signatures are cleared),
+ * and an unknown request whose ValidDuring window has passed closes as
+ * failed, because those bytes can never land now. Its dedupe key is released
+ * only then.
+ */
+export async function reconcileSigningRequestsForStaff(deps: {
+  db: DrizzleDb;
+  chain: { read(digest: string): Promise<ChainResult | null>; currentEpoch(): Promise<bigint> };
+  onExecuted?: (request: StoredRequest) => Promise<void>;
+  now?: () => Date;
+  leaseMs?: number;
+}): Promise<{ executed: number; failed: number; unknown: number; errors: number }> {
+  const now = (deps.now ?? (() => new Date()))();
+  const cutoff = new Date(now.getTime() - (deps.leaseMs ?? SUBMISSION_LEASE_MS));
+  const tally = { executed: 0, failed: 0, unknown: 0, errors: 0 };
+  let epoch: bigint | null = null;
+  for (const request of await listInFlightForStaff(deps.db, cutoff)) {
+    let result: ChainResult | null;
+    try {
+      result = await deps.chain.read(request.txDigest);
+    } catch {
+      tally.errors += 1;
+      continue;
+    }
+    if (result) {
+      const outcome = await settleOutcome(deps, request, result, now);
+      if (outcome !== 'raced') tally[outcome] += 1;
+      continue;
+    }
+    if (request.status === 'submitting') {
+      await markOutcomeUnknown(deps.db, {
+        orgId: request.orgId,
+        id: request.id,
+        from: ['submitting'],
+        error: 'the submission did not finish; Splash checks the digest until the network answers',
+        now,
+      });
+    }
+    const maxEpoch = (request.summary as { description?: WalletTxDescription } | null)?.description?.validity?.maxEpoch ?? null;
+    try {
+      epoch ??= await deps.chain.currentEpoch();
+    } catch {
+      tally.errors += 1;
+      tally.unknown += 1;
+      continue;
+    }
+    if (maxEpoch !== null && epoch > BigInt(maxEpoch)) {
+      const closed = await closeSigningRequest(deps.db, {
+        orgId: request.orgId,
+        id: request.id,
+        status: 'failed',
+        from: ['unknown'],
+        now,
+        executedDigest: null,
+        error: 'it never reached the chain, and its validity window has passed, so it never will; nothing moved',
+      });
+      if (closed) tally.failed += 1;
+      continue;
+    }
+    tally.unknown += 1;
+  }
+  return tally;
+}
+
+/**
+ * The person who asked withdraws a request nobody needs any more. A signer
+ * who did not ask cannot: one key must not veto the quorum (a member being
+ * rotated out would block their own removal). They decline instead.
+ */
 export async function cancelSigningRequest(
   deps: Pick<SigningDeps, 'db' | 'now'>,
   input: { orgId: string; userId: string; id: string },
@@ -484,6 +705,42 @@ export async function cancelSigningRequest(
   if (!request || (!request.signers.some((s) => s.userId === input.userId) && request.requestedBy !== input.userId)) {
     return fail(404, 'not_found', 'no such request');
   }
+  if (request.requestedBy !== input.userId) {
+    return fail(403, 'not_requester', 'only the person who asked can withdraw this request; you can decline to sign it');
+  }
   const closed = await closeSigningRequest(deps.db, { orgId: input.orgId, id: input.id, status: 'cancelled', from: ['collecting'], now });
   return closed ? { ok: true } : fail(409, 'closed', `this request is ${request.status}`);
+}
+
+/**
+ * A signer declines to sign. It is recorded and the request stays open for
+ * the others; it closes only when the signers who have not declined can no
+ * longer reach the threshold.
+ */
+export async function declineSigningRequest(
+  deps: Pick<SigningDeps, 'db' | 'now'>,
+  input: { orgId: string; userId: string; id: string },
+): Promise<{ ok: true; closed: boolean } | SigningFailure> {
+  const now = (deps.now ?? (() => new Date()))();
+  const request = await readSigningRequest(deps.db, input.orgId, input.id);
+  if (!request) return fail(404, 'not_found', 'no such request');
+  if (!request.signers.some((s) => s.userId === input.userId)) {
+    return request.requestedBy === input.userId ? fail(403, 'not_a_signer', 'you are not a signer of this request') : fail(404, 'not_found', 'no such request');
+  }
+  if (request.status !== 'collecting') return fail(409, 'closed', `this request is ${request.status}`);
+  const recorded = await recordDecline(deps.db, { orgId: input.orgId, requestId: input.id, userId: input.userId, now });
+  if (!recorded) return fail(409, 'already_answered', 'you have already signed or declined this request');
+  const updated = (await readSigningRequest(deps.db, input.orgId, input.id)) as StoredRequest;
+  if (reachableWeight(updated) < updated.threshold) {
+    const closed = await closeSigningRequest(deps.db, {
+      orgId: input.orgId,
+      id: input.id,
+      status: 'cancelled',
+      from: ['collecting'],
+      now,
+      error: 'enough signers declined that it can no longer be signed',
+    });
+    return { ok: true, closed };
+  }
+  return { ok: true, closed: false };
 }

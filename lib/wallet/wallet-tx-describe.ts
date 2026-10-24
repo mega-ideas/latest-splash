@@ -15,9 +15,11 @@
  * `splash_core` wallet and payment calls, `0x2::balance::redeem_funds` and
  * `0x2::balance::send_funds`. Anything else (another package, any
  * `0x2::address_alias` call, Publish, Upgrade, TransferObjects, SplitCoins,
- * MergeCoins, MakeMoveVec), any use of the gas coin, any withdrawal from the
- * sponsor's address balance, and any object argument that is not the
- * expected account or config is refused with WalletTxRefused. A wallet
+ * MakeMoveVec), any use of the gas coin, any withdrawal from the sponsor's
+ * address balance, and any object argument that is not the expected account,
+ * a config, or the one existing intent whose fields the server read from the
+ * chain (`expect.openIntent`) is refused with WalletTxRefused. MergeCoins is
+ * allowed only over the sender's own coins (a migration transfer). A wallet
  * signer is shown every command, and there is nothing it could be shown that
  * this reader does not understand.
  *
@@ -49,6 +51,28 @@ export type WalletTxExpectations = {
   registryId?: string;
   /** Native USDC's type: the only asset a payment may move (D6). */
   usdcType?: string;
+  /**
+   * The one existing intent a transaction may pay, as the server read it
+   * from the chain before building the bytes. A shared intent object is
+   * refused unless it is this one: the bytes name only the object, so what
+   * the signer is shown (payee, principal, rate, expiry) has to come from the
+   * intent itself, read by the server, bound to its id here, and stored with
+   * the request.
+   */
+  openIntent?: OpenIntentExpectation;
+};
+
+/** An existing intent's fields, read from the chain (payment_intent::PaymentIntent). */
+export type OpenIntentExpectation = {
+  intentId: string;
+  recipient: string;
+  amountMinor: string;
+  kind: number;
+  targetCurrency: string;
+  fxRateUsdLocal: string;
+  expiresAtMs: string;
+  /** The intent's settlement asset, a full type tag. */
+  asset: string;
 };
 
 type Arg =
@@ -85,7 +109,17 @@ export type WalletAction =
       beneficiaryRef: string;
       expiresAtMs: string;
     }
-  | { type: 'pay_intent'; asset: string; maxFeeMinor: string; settleByMs: string; paysFromCommand: number; intentFromCommand: number | null }
+  | {
+      type: 'pay_intent';
+      asset: string;
+      maxFeeMinor: string;
+      settleByMs: string;
+      paysFromCommand: number;
+      intentFromCommand: number | null;
+      /** The existing intent this pays, its fields as read from the chain;
+       *  null when the intent is opened in this same transaction. */
+      intent: OpenIntentExpectation | null;
+    }
   | { type: 'anchor_receipt' }
   | { type: 'delete_intent' };
 
@@ -353,11 +387,20 @@ export function describeWalletTransaction(input: Uint8Array | string, expect: Wa
         const t = asset(call.typeArguments);
         const intent = a[0];
         let intentFromCommand: number | null = null;
+        let existing: OpenIntentExpectation | null = null;
         if (intent.kind === 'result') {
           if (actions[intent.command]?.type !== 'open_intent') refuse('the intent paid must be the one opened in this transaction', 'bad_argument');
           intentFromCommand = intent.command;
-        } else if (intent.kind !== 'object' || intent.mutable !== true) {
-          refuse('the intent must be passed mutably', 'bad_argument');
+        } else if (intent.kind !== 'object' || intent.owned || intent.mutable !== true) {
+          refuse('the intent must be a shared object passed mutably', 'bad_argument');
+        } else {
+          // The bytes name only an object id. Without the intent's own fields,
+          // read from the chain and bound to this id, the quorum would sign a
+          // withdrawal to a payee nobody showed them.
+          const expected = expect.openIntent ?? refuse('an existing intent is paid only once its payee and amount have been read from the chain', 'open_intent_unchecked');
+          if (intent.objectId !== normalizeSuiAddress(expected.intentId)) refuse('the intent paid is not the one that was read', 'wrong_object');
+          if (normalizeStructTag(expected.asset) !== t) refuse("the intent's asset is not the one paid", 'wrong_asset');
+          existing = { ...expected, intentId: normalizeSuiAddress(expected.intentId), recipient: normalizeSuiAddress(expected.recipient), asset: t };
         }
         account(a[1]);
         object(a[2], expect.complianceConfigId, 'the compliance config', false);
@@ -370,7 +413,7 @@ export function describeWalletTransaction(input: Uint8Array | string, expect: Wa
         const maxFee = pure(a[6], bcs.u64(), 'the maximum fee');
         const settleBy = pure(a[7], bcs.u64(), 'the settle-by time');
         clock(a[8]);
-        actions.push({ type: 'pay_intent', asset: t, maxFeeMinor: String(maxFee), settleByMs: String(settleBy), paysFromCommand: funds.command, intentFromCommand });
+        actions.push({ type: 'pay_intent', asset: t, maxFeeMinor: String(maxFee), settleByMs: String(settleBy), paysFromCommand: funds.command, intentFromCommand, intent: existing });
         return;
       }
       case 'audit_anchor::anchor': {

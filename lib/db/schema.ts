@@ -1499,8 +1499,12 @@ export const walletSigningRequests = pgTable('wallet_signing_requests', {
   summary: jsonb('summary').notNull(),
   /** The request to open once this one executes: public keys and weights only. */
   nextStep: jsonb('next_step'),
-  /** collecting | submitting | executed | failed | expired | cancelled */
+  /** collecting | submitting | unknown | executed | failed | expired | cancelled.
+   *  unknown: sent to the network with no answer yet; the cron reads the
+   *  digest until it is final (migration 0034). */
   status: text('status').notNull(),
+  /** When one caller claimed the submission (status submitting). */
+  claimedAt: timestamp('claimed_at', { withTimezone: true }),
   requestedBy: text('requested_by').notNull().references(() => users.id),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
   executedDigest: text('executed_digest'),
@@ -1511,7 +1515,7 @@ export const walletSigningRequests = pgTable('wallet_signing_requests', {
   uniqueIndex('wallet_signing_requests_digest_unique').on(table.txDigest),
   uniqueIndex('wallet_signing_requests_open_unique')
     .on(table.orgId, table.dedupeKey)
-    .where(sql`${table.status} in ('collecting', 'submitting')`),
+    .where(sql`${table.status} in ('collecting', 'submitting', 'unknown')`),
   index('wallet_signing_requests_org_status_idx').on(table.orgId, table.status),
 ]);
 
@@ -1530,6 +1534,8 @@ export const walletSigningSigners = pgTable('wallet_signing_signers', {
   signature: text('signature'),
   signatureSha256: text('signature_sha256'),
   signedAt: timestamp('signed_at', { withTimezone: true }),
+  /** This signer declined. The request stays open for the others. */
+  declinedAt: timestamp('declined_at', { withTimezone: true }),
   notifiedAt: timestamp('notified_at', { withTimezone: true }),
   notifiedBy: text('notified_by'),
   ...timestamps,
@@ -1537,4 +1543,20 @@ export const walletSigningSigners = pgTable('wallet_signing_signers', {
   primaryKey({ columns: [table.requestId, table.userId] }),
   uniqueIndex('wallet_signing_signers_request_address_unique').on(table.requestId, table.address),
   index('wallet_signing_signers_user_idx').on(table.userId, table.orgId),
+]);
+
+/**
+ * An owner's consent to a single-signer business wallet (D1: "1-of-1 only if
+ * the business explicitly chooses it"). In a business with several owners, a
+ * wallet one member can sign alone is built only once every other owner has
+ * agreed to that exact wallet address, which the member keys and threshold
+ * determine (migration 0034).
+ */
+export const walletSingleSignerConsents = pgTable('wallet_single_signer_consents', {
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  walletAddress: text('wallet_address').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  primaryKey({ columns: [table.orgId, table.userId, table.walletAddress] }),
 ]);
