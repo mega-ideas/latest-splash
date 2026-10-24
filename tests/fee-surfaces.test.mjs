@@ -262,6 +262,21 @@ test('the quote engine prices the destination it is given, and refuses one no fl
   }
 });
 
+test('the quote engine prices nothing without a destination: no caller is quoted as a bank by default', async () => {
+  // The A1 review: the route refused a missing destination, but the engine
+  // still priced one as BANK_PAYOUT.
+  const { calculateQuote, QuoteDestinationError } = await import('../lib/server/quote.ts');
+  for (const options of [undefined, {}, { businessId: null }, { destination: undefined }, { destination: null }]) {
+    await assert.rejects(
+      calculateQuote(100_000, undefined, 'PHP', 'STANDARD', options),
+      (error) => error instanceof QuoteDestinationError && /needs a destination/.test(error.message),
+      JSON.stringify(options),
+    );
+  }
+  const source = readFileSync('lib/server/quote.ts', 'utf8');
+  assert.doesNotMatch(source, /destination\s*\?\?\s*BANK_DESTINATION/, 'no fallback to a bank payout');
+});
+
 test('the quote route takes the destination from the request, and the transfer flow sends it', () => {
   const route = read('app/api/quotes/route.ts');
   assert.match(route, /parseDestination\(body\.destination\)/, 'the route reads where the payment goes');
