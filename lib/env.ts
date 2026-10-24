@@ -158,6 +158,12 @@ export const envSchema = z.object({
   STABLECOIN_ANCHOR_FEE: opt(z.enum(['on', 'off'])),
   /* Unset or 'on': wallet transfers go gasless. 'off': the sending wallet pays gas in SUI. */
   STABLECOIN_GASLESS: opt(z.enum(['on', 'off'])),
+  /* v2 Business Splash Wallet: who pays gas for its Move calls (register,
+     rotate, membership, payments), which Sui's gasless lane does not cover.
+     'operator': Splash's operator signer (KMS in production) sponsors them
+     from its SUI address balance (lib/server/wallet-sponsor.ts). Unset or
+     'off': no wallet transaction is built, and the request says why. */
+  WALLET_GAS_SPONSOR: opt(z.enum(['operator', 'off'])),
   /** Chainalysis's free sanctions-screening API. Unset: wallet recipients
    *  are saved unscreened, and reach mainnet only through a named admin's
    *  attestation (lib/server/wallet-screening.ts). */
@@ -590,6 +596,9 @@ function productionIssues(env: Env): Issue[] {
   }
   if (env.TREASURY_EXECUTION_ENABLED) {
     signerNeededBecause ??= 'TREASURY_EXECUTION_ENABLED moves treasury funds';
+  }
+  if (env.WALLET_GAS_SPONSOR === 'operator') {
+    signerNeededBecause ??= 'WALLET_GAS_SPONSOR=operator sponsors gas for business wallet transactions';
   }
 
   /* WS4 — the operator signer is a KMS key, and only a KMS key. A raw key in
