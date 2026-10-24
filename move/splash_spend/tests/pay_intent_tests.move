@@ -798,6 +798,59 @@ fun removing_a_beneficiary_stops_its_open_bank_payouts() {
 }
 
 #[test]
+#[expected_failure(abort_code = 1025, location = splash_spend)]
+/// Review A1/A3/A10: the owners verified SUPPLIER (an exchange deposit
+/// address, say) as a wallet, to be paid a Coin. Staff must not be able to
+/// open a payment to it as a Splash business, which core would credit to
+/// its address balance, a form the exchange may never credit.
+fun staff_cannot_pay_a_wallet_recipient_as_a_splash_business() {
+    let (mut s, fx) = setup();
+    let intent = open(&mut s, &fx, STAFF, 70, payment_intent::kind_splash_business(), SUPPLIER, PAY);
+    pay(&mut s, &fx, STAFF, fx.staff, intent, false);
+    s.next_tx(SUPPLIER);
+    assert_eq!(ts::settled_balance<USDC>(SUPPLIER), PAY);
+    assert!(!ts::has_most_recent_for_address<Coin<USDC>>(SUPPLIER));
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 1025, location = splash_spend)]
+/// The mirror: BUSINESS is verified as another Splash business, credited to
+/// its address balance where its own rules draw. Staff cannot send it a
+/// Coin object instead.
+fun staff_cannot_pay_a_splash_business_as_a_wallet() {
+    let (mut s, fx) = setup();
+    open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), BUSINESS, PAY);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 1025, location = splash_spend)]
+/// The kind is checked again at pay time: a wallet-opened intent of the
+/// wrong kind cannot be paid under the rule.
+fun a_wallet_intent_of_the_wrong_kind_cannot_be_paid_under_the_rule() {
+    let (mut s, fx) = setup();
+    let intent = open_by_wallet(&mut s, &fx, 1, payment_intent::kind_splash_business(), SUPPLIER, PAY);
+    pay(&mut s, &fx, STAFF, fx.staff, intent, false);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 1025, location = splash_spend)]
+/// And it is read at pay time: when the owners re-verify a recipient under
+/// another kind, an intent opened under the old kind stops.
+fun re_verifying_a_recipient_under_another_kind_stops_its_open_intents() {
+    let (mut s, fx) = setup();
+    let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    let mut p = wallet_policy(&mut s, &fx);
+    p.remove_recipient(SUI_DOMAIN, SUPPLIER, s.ctx());
+    p.verify_recipient(SUI_DOMAIN, SUPPLIER, s.ctx());
+    ts::return_shared(p);
+    pay(&mut s, &fx, STAFF, fx.staff, intent, false);
+    s.end();
+}
+
+#[test]
 #[expected_failure(abort_code = splash_spend::E_RECIPIENT_NOT_VERIFIED)]
 /// A partner deposit address is verified only for its beneficiary's bank
 /// payouts. It is not a wallet recipient (kinds 2–3), so a plain transfer to
