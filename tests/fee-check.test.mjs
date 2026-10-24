@@ -417,6 +417,34 @@ test('(d) a test-only setter is allowed: it never publishes', () => {
   );
 });
 
+test('(d) only an exact #[test_only] or #[test] exempts a function: an attribute that merely mentions test still publishes', () => {
+  // The A1 review: rule (d) skipped any function whose attribute contained
+  // the word `test`, so this immediate setter passed under #[ext(test)] and
+  // compiled into the published bytecode.
+  const setter = (attribute) =>
+    plant(`${attribute}\npublic fun set_fee_recipient_now(_: &FeeAdminCap, cfg: &mut FeeConfig, r: address) {\n    cfg.fee_recipient = option::some(r);\n}`);
+  for (const attribute of ['#[ext(test)]', '#[ext(test_only)]', '#[allow(unused), ext(test)]', '#[ext(test)]\n#[allow(unused)]']) {
+    withRoot({ edits: { [FEE_CONFIG]: setter(attribute) } }, (root) => {
+      const failures = checkFeeConfigSetters(root);
+      caught(failures, /`set_fee_recipient_now` takes a FeeConfig mutably/);
+      caught(failures, /`set_fee_recipient_now` writes fee_recipient; only `apply_fee_recipient` may/);
+    });
+  }
+});
+
+test('(d) the exact test attributes still exempt, alone or in a list', () => {
+  const setter = (attribute, name) => `${attribute}\npublic fun ${name}(cfg: &mut FeeConfig) { cfg.fee_recipient = option::none() }`;
+  const planted = [
+    setter('#[test_only]', 'a_for_testing'),
+    setter('#[test_only, allow(unused)]', 'b_for_testing'),
+    setter('#[allow(unused)]\n#[test_only]', 'c_for_testing'),
+    '#[test]\nfun d() { }',
+    "#[test(alice = @0xA)]\nfun e(alice: address) { let _ = alice; }",
+    '#[test, expected_failure(abort_code = 1)]\nfun f() { abort 1 }',
+  ].join('\n\n');
+  withRoot({ edits: { [FEE_CONFIG]: plant(planted) } }, (root) => assert.deepEqual(checkFeeConfigSetters(root), []));
+});
+
 test('(d) a renamed change function is caught, so the check is revisited', () => {
   withRoot({ edits: { [FEE_CONFIG]: (s) => s.replaceAll('apply_schedule', 'enact_schedule') } }, (root) => {
     const failures = checkFeeConfigSetters(root);
