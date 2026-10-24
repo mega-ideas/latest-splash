@@ -101,12 +101,23 @@ test('a public function returning a Balance is caught', () => {
   assert.match(r.output, /returns a Balance/);
 });
 
-test('returning a Coin without a bridge obligation is caught', () => {
+test('returning a Coin is caught', () => {
   const r = runWith(
     plant(`public fun out<C>(c: sui::coin::Coin<C>): sui::coin::Coin<C> { c }`),
   );
   assert.equal(r.exitCode, 1);
-  assert.match(r.output, /returns a Coin without a BridgeObligation/);
+  assert.match(r.output, /returns a Coin/);
+});
+
+// v2 review: the spending-rule path pays only on Sui, so no function may hand
+// the business's coin back, not even beside a BridgeObligation (the removed
+// pay_intent_cross_chain did, and a by-reference adapter could keep it).
+test('returning a Coin beside a BridgeObligation is caught too', () => {
+  const r = runWith(
+    plant(`public fun out2<C>(c: sui::coin::Coin<C>, o: splash_core::payment_intent::BridgeObligation): (sui::coin::Coin<C>, splash_core::payment_intent::BridgeObligation) { (c, o) }`),
+  );
+  assert.equal(r.exitCode, 1, r.output);
+  assert.match(r.output, /out2/);
 });
 
 test('handing out the settlement witness is caught', () => {
