@@ -1666,6 +1666,30 @@ fun an_app_cannot_vouch_for_the_zero_address() {
 // ═══ Cancelling ════════════════════════════════════════════════════════════
 
 #[test]
+/// `cancel` stamps its event with the clock, as every other lifecycle event
+/// does, not with the start of the epoch, which can be up to a day earlier.
+/// Opened and cancelled in one transaction, the two events carry the same
+/// time, so nothing that orders events by time shows the cancel first.
+fun cancel_stamps_its_event_with_the_clock() {
+    let mut s = h::setup();
+    s.next_tx(h::wallet());
+    let (mut account, config, c) = take(&s);
+    let intent = by_wallet(&mut account, &config, bank(1, &c), &c, s.ctx());
+    payment_intent::cancel(intent, s.ctx());
+    let created = event::events_by_type<payment_intent::IntentCreated>();
+    let canceled = event::events_by_type<payment_intent::IntentCanceled>();
+    assert_eq!(created.length(), 1);
+    assert_eq!(canceled.length(), 1);
+    let (_, _, _, _, _, _, _, created_at) = payment_intent::unpack_intent_created_for_testing(created[0]);
+    let (_, _, _, _, _, status, canceled_at) = payment_intent::unpack_intent_canceled_for_testing(canceled[0]);
+    assert_eq!(status, STATUS_CANCELED);
+    assert_eq!(created_at, c.timestamp_ms());
+    assert_eq!(canceled_at, c.timestamp_ms());
+    give(account, config, c);
+    s.end();
+}
+
+#[test]
 /// The owners can stop any pending payment in their account's name, including
 /// one a staff member opened.
 fun the_wallet_cancels_a_staff_intent() {
