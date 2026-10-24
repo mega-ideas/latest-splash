@@ -278,6 +278,19 @@ test('the quote route returns the quote and answers 503 when the fee cannot be r
   assert.match(route, /status: 503/);
 });
 
+test("the quote route quotes the session's own business, with its discount, as authorize does", () => {
+  // The funding session is opened for the quote's total and authorize
+  // refuses one that differs from its own re-quote by more than a micro-USDC,
+  // so the two must quote the same business. A quote without the discount
+  // made every bank- or coin-funded transfer by a discounted business 409.
+  const route = readFileSync('app/api/quotes/route.ts', 'utf8');
+  assert.match(route, /requireSessionAccount\(auth\.session\)/, 'the account comes from the session');
+  assert.match(route, /calculateQuote\([^)]*\{ businessId: [^}]+\}\)/, 'and is passed to the quote');
+  assert.doesNotMatch(route, /can only over-quote/, 'over-quoting is not harmless here');
+  const authorize = readFileSync('app/api/transfers/authorize/route.ts', 'utf8');
+  assert.match(authorize, /calculateQuote\([^)]*\{ businessId: businessAccountId \}\)/);
+});
+
 // ─── max_fee into the PTB ──────────────────────────────────────────────────
 
 test('the payment the server builds carries maxFeeMinor, and the shown fee bounds it', () => {
