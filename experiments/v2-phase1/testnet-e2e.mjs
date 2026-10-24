@@ -907,17 +907,36 @@ if (!done('applyFeeRecipient')) {
 await walletPays('feesOnWalletPays', KIND_WALLET, RECIPIENT, 500_000, [bizKeys[0], bizKeys[1]], { feesOn: true });
 // A bank payout to the partner's deposit address, at the 99 USDC floor: 0.30%,
 // 0.297 USDC; the rest of the 0.99 max_fee goes back to the business wallet.
+// The leg needs BANK_AMOUNT + its max_fee in the wallet's address balance.
+// The funder sends only what the wallet lacks, and if the funder holds less
+// than that, the run stops first with the exact amount to add.
 if (!done('fundBankLeg')) {
-  const tx = new Transaction();
-  const coin = tx.coin({ type: USDC, balance: BANK_AMOUNT + maxFeeOf(BANK_AMOUNT) });
-  tx.moveCall({ target: '0x2::coin::send_funds', typeArguments: [USDC], arguments: [coin, tx.pure.address(W.toSuiAddress())] });
-  let t;
-  try {
-    t = await runAs('coin::send_funds: the bank leg (99.99 USDC) into the business wallet', funder, tx);
-  } catch (error) {
-    throw new Error(`The funder ${funder.toSuiAddress()} needs ${(BANK_AMOUNT + maxFeeOf(BANK_AMOUNT)) / 1e6} testnet USDC for the bank-payout leg (faucet.circle.com), then rerun: ${error.message}`);
+  const need = BigInt(BANK_AMOUNT + maxFeeOf(BANK_AMOUNT));
+  const usdc = (minor) => (Number(minor) / 1e6).toFixed(6).replace(/\.?0+$/, '');
+  const walletHas = BigInt((await client.getBalance({ owner: W.toSuiAddress(), coinType: USDC })).balance.addressBalance);
+  const shortfall = need > walletHas ? need - walletHas : 0n;
+  let digest = null;
+  if (shortfall > 0n) {
+    const funderHas = BigInt((await client.getBalance({ owner: funder.toSuiAddress(), coinType: USDC })).balance.balance);
+    if (funderHas < shortfall) {
+      throw new Error(
+        `The bank-payout leg needs ${usdc(need)} USDC in the business wallet, which holds ${usdc(walletHas)}. ` +
+          `The funder ${funder.toSuiAddress()} holds ${usdc(funderHas)} testnet USDC and must send ${usdc(shortfall)}: ` +
+          `add at least ${usdc(shortfall - funderHas)} testnet USDC to it (faucet.circle.com), then rerun.`,
+      );
+    }
+    const tx = new Transaction();
+    const coin = tx.coin({ type: USDC, balance: Number(shortfall) });
+    tx.moveCall({ target: '0x2::coin::send_funds', typeArguments: [USDC], arguments: [coin, tx.pure.address(W.toSuiAddress())] });
+    let t;
+    try {
+      t = await runAs(`coin::send_funds: ${usdc(shortfall)} USDC into the business wallet for the bank leg`, funder, tx);
+    } catch (error) {
+      throw new Error(`The funder ${funder.toSuiAddress()} could not send ${usdc(shortfall)} testnet USDC for the bank-payout leg (faucet.circle.com), then rerun: ${error.message}`);
+    }
+    digest = t.digest;
   }
-  results.steps.fundBankLeg = { digest: t.digest };
+  results.steps.fundBankLeg = { digest, sent: String(shortfall), walletHeld: String(walletHas) };
   save();
 }
 await walletPays('feesOnBankPays', KIND_BANK_PAYOUT, PARTNER, BANK_AMOUNT, [bizKeys[1], bizKeys[2]], { beneficiary: ref32('feesOnBankPays:beneficiary'), feesOn: true });
