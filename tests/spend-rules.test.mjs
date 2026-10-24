@@ -598,6 +598,49 @@ test('after a rotation the old policy is stale; the rules are reissued under the
   await w.client.close();
 });
 
+async function rotateTo3of3(w, members) {
+  const rotate = await startWalletRotation(w.ctx, { orgId: 'acme', requestedBy: 'u-two', current: members, owners: w.owners, threshold: 3 });
+  assert.equal(rotate.ok, true, JSON.stringify(rotate));
+  await signBy(w, rotate.request, 'two', 'founder');
+  const [confirm] = (await signingInbox(w.signing, { orgId: 'acme', userId: 'u-three' })).filter((r) => r.purpose === 'confirm_wallet_rotation');
+  await signBy(w, confirm, 'founder', 'two', 'three');
+  return membersOf(buildBusinessMultisig({ members: w.owners, threshold: 3 }));
+}
+
+test('the reissue after a rotation carries current members only, runs once, and a rule revoked since does not come back', async () => {
+  const w = await spendWorld();
+  const { members } = await withPolicy(w);
+  await passkeyFor(w, 'u-staff', STAFF);
+  await passkeyFor(w, 'u-staff2', STAFF2);
+  await giveRule(w, members);
+  await giveRule(w, members, rule({ spender: STAFF2 }));
+  // The operator's executor rule is set up by Splash, never reissued, and never prompts one.
+  const OPERATOR = normalizeSuiAddress('0x' + '0e'.repeat(32));
+  w.spend.policies.values().next().value.spenders.push({ spender: OPERATOR, role: 2, perPaymentMax: USDC_1 });
+  const { revokeRole } = await import('../lib/server/memberships.ts');
+  await revokeRole(w.db, { email: 'staff2@acme.test', by: 'operator:ops@splash.test' });
+
+  const next = await rotateTo3of3(w, members);
+  assert.equal((await readSpendingRules(w.sc)).view.reissueNeeded, true);
+  const first = await reissueAfterRotation(w.sc, { orgId: 'acme', requestedBy: 'u-founder', wallet: next });
+  await signBy(w, first.request, 'founder', 'two', 'three');
+  const [copy] = (await signingInbox(w.signing, { orgId: 'acme', userId: 'u-two' })).filter((r) => r.purpose === 'spend_rule');
+  assert.deepEqual(copy.description.actions.filter((a) => a.type === 'add_spender').map((a) => a.spender), [STAFF], 'a removed member is not carried, nor the operator');
+  await signBy(w, copy, 'founder', 'two', 'three');
+  assert.equal((await readSpendingRules(w.sc)).view.reissueNeeded, false);
+
+  // The owners take STAFF's rule back on the new policy.
+  const revoked = await revokeSpendingRule(w.sc, { orgId: 'acme', requestedBy: 'u-founder', wallet: next, spender: STAFF });
+  await signBy(w, revoked.request, 'founder', 'two', 'three');
+  const { view } = await readSpendingRules(w.sc);
+  assert.equal(view.rules.length, 0);
+  assert.equal(view.reissueNeeded, false, 'the earlier policy still lists STAFF, but the reissue for this wallet is done');
+  const again = await reissueAfterRotation(w.sc, { orgId: 'acme', requestedBy: 'u-founder', wallet: next });
+  assert.equal(again.ok, false);
+  assert.equal(again.code, 'nothing_to_reissue', 'a revoked rule does not come back');
+  await w.client.close();
+});
+
 /* ── A second approval, asked for by staff ────────────────────────────── */
 
 test("a staff member's payment above the threshold gets one owner's second approval through the ask", async () => {
