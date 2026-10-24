@@ -29,6 +29,9 @@ import RoadmapChip from '@/components/supply/RoadmapChip';
 import { claims, lockedCopy } from '@/content/claims';
 import { pricingSummary, type PricingSummary } from '@/lib/fees/copy';
 import { LAUNCH_SCHEDULE } from '@/lib/fees/schedule';
+import { formatBps } from '@/lib/fx/calculator';
+import { getComparisonBaseline } from '@/lib/fx/comparison-baselines';
+import { formatMinor } from '@/lib/money';
 import { BRAND } from '@/content/brand';
 import { CUSTODY_LICENCE } from '@/lib/custody-phase-rules';
 
@@ -161,19 +164,33 @@ function PartnerBadge({ src, name, role, logoClass }: (typeof partnerRail)[numbe
   );
 }
 
+/* The comparison's competitor figures (the A1 review). The bank column is
+   the reviewed category midpoint for USD to PHP from a named, dated dataset
+   (lib/fx/comparison-baselines.ts): a correspondent wire with its FX
+   margin, never a named bank. No broker or Wise figure has a source, so
+   their cells show none rather than a number nobody can check. */
+const COMPARISON_BASELINE = getComparisonBaseline('PHP');
+const UNSOURCED = 'Varies';
+const BANK_WIRE = COMPARISON_BASELINE?.bankWire ?? null;
+const BANK_WIRE_DELIVERY = BANK_WIRE?.delivery ?? UNSOURCED;
+const BANK_WIRE_COST = BANK_WIRE ? `US$${formatMinor(BANK_WIRE.flatUsdMinor, 2)} + ${formatBps(BANK_WIRE.marginBps)} FX margin` : UNSOURCED;
+const BASELINE_DATE = COMPARISON_BASELINE
+  ? new Date(`${COMPARISON_BASELINE.dataset.asOf}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })
+  : '';
+
 const comparisonRowsFor = (pricing: PricingSummary) => [
   {
     feature: 'Settlement speed',
-    bank: '2-5 days',
-    broker: '1-3 days',
-    wise: '1-2 days',
+    bank: BANK_WIRE_DELIVERY,
+    broker: UNSOURCED,
+    wise: UNSOURCED,
     splash: lockedCopy.speed,
   },
   {
     feature: 'Fee to a bank',
-    bank: '3-5%',
-    broker: '2-4%',
-    wise: '0.5-1.5%',
+    bank: BANK_WIRE_COST,
+    broker: UNSOURCED,
+    wise: UNSOURCED,
     // The schedule once fees are on; until then, none is charged.
     splash: pricing.feesOn ? pricing.bank : pricing.bankFeePhrase,
   },
@@ -235,21 +252,28 @@ const comparisonRowsFor = (pricing: PricingSummary) => [
   },
 ];
 
+/** Each benchmark as its source published it, read live by /api/market/yields; null when it could not be read. */
 type YieldBenchmarks = {
-  bank: number;
-  broker: number;
-  wise: number;
-  splash: number;
+  bank: number | null;
+  broker: number | null;
+  wise: number | null;
+  splash: number | null;
   asOf: string;
 };
 
-const fallbackYieldBenchmarks: YieldBenchmarks = {
-  bank: 0.38,
-  broker: 3.12,
-  wise: 3.14,
-  splash: 0,
+/** Nothing is shown until a source has been read: no remembered rate stands in for a reading. */
+const unreadYieldBenchmarks: YieldBenchmarks = {
+  bank: null,
+  broker: null,
+  wise: null,
+  splash: null,
   asOf: '',
 };
+
+/** A benchmark rate for a table cell, or "No reading" when its source could not be read. */
+function yieldCell(value: number | null, suffix: string) {
+  return value === null ? 'No reading' : `${formatPercent(value)} ${suffix}`;
+}
 
 const percentFormatter = new Intl.NumberFormat('en-US', {
   minimumFractionDigits: 2,
@@ -402,7 +426,7 @@ export default function IsometricLanding({ isPhone = false, pricing = LAUNCH_PRI
   // The control plane reveals below the copilot on demand — a credit-roll,
   // not a second section.
   const [ctrlOpen, setCtrlOpen] = useState(false);
-  const [yieldBenchmarks, setYieldBenchmarks] = useState(fallbackYieldBenchmarks);
+  const [yieldBenchmarks, setYieldBenchmarks] = useState(unreadYieldBenchmarks);
   const [showBackToTop, setShowBackToTop] = useState(false);
 
   useEffect(() => {
@@ -469,10 +493,10 @@ export default function IsometricLanding({ isPhone = false, pricing = LAUNCH_PRI
     ...comparisonRowsFor(pricing),
     {
       feature: 'Yield on idle USD',
-      bank: `${formatPercent(yieldBenchmarks.bank)} APY`,
-      broker: `${formatPercent(yieldBenchmarks.broker)} APY`,
-      wise: `${formatPercent(yieldBenchmarks.wise)} APY`,
-      splash: `${formatPercent(yieldBenchmarks.splash)} projected variable APY`,
+      bank: yieldCell(yieldBenchmarks.bank, 'APY'),
+      broker: yieldCell(yieldBenchmarks.broker, 'APY'),
+      wise: yieldCell(yieldBenchmarks.wise, 'APY'),
+      splash: yieldCell(yieldBenchmarks.splash, 'projected variable APY'),
     },
   ];
 
@@ -754,6 +778,15 @@ export default function IsometricLanding({ isPhone = false, pricing = LAUNCH_PRI
               <strong>Splash pricing</strong>
               <span>{pricing.line}</span>
             </p>
+            {COMPARISON_BASELINE ? (
+              <p className="iso-pricing-line">
+                <strong>Bank figures</strong>
+                <span>
+                  Category midpoints for a transfer of US$1,000 or more, from{' '}
+                  <a href={COMPARISON_BASELINE.dataset.url} rel="noopener noreferrer" target="_blank">{COMPARISON_BASELINE.dataset.name}</a>, as of {BASELINE_DATE}: a correspondent wire with its FX margin, not a named bank. No broker or Wise figure is shown without a source.
+                </span>
+              </p>
+            ) : null}
             <div className="iso-yield-live is-demoted">
               <i aria-hidden="true" />
               <strong>Reference yield benchmark</strong>
