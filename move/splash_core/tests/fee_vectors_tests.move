@@ -5,8 +5,12 @@
 /// Splash's fee vectors (Amendment A1 §3), one #[test] per row of
 /// lib/fees/vectors.json. Each derives the kind with
 /// `address_registry::derive_kind` and charges it with `fee_config::splash_fee`
-/// on the launch schedule, exactly as the settle paths do. The same rows run
-/// through the server mirror in tests/fee-schedule.test.mjs.
+/// on the launch schedule, as the settle paths do. A settle path then also
+/// refuses a derived kind that does not fit the declared one
+/// (`address_registry::assert_kind_fits`), so the partner-address row, which
+/// derives a bank payout from a declared wallet, pins `derive_kind` and
+/// `splash_fee`, not a payment that settles. The same rows run through the
+/// server mirror in tests/fee-schedule.test.mjs.
 #[test_only]
 module splash_core::fee_vectors_tests;
 
