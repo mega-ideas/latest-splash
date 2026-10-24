@@ -12,7 +12,14 @@
  *     the FAQ, the calculator, the batch, treasury and queue previews, the
  *     landing's callouts and the delivery step. The schedule API and
  *     publishedFeeSchedule carry whether the fees are on, and no surface
- *     computes a fee as if they were (L7a).
+ *     computes a fee as if they were (L7a);
+ *   * a quote is priced by where the payment goes, through the settle
+ *     paths' own kind rules (settlementKind): a bank, a Sui wallet, an
+ *     exchange, a Splash business or another chain. The transfer flow
+ *     says where (its recipient is a bank account), the quote route
+ *     refuses a quote that does not say, and a destination no flow can
+ *     pay yet is refused by name, with the delivery step saying which
+ *     routes are priced when they open in Phase 2 (L7d).
  */
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
@@ -194,4 +201,96 @@ test("the audit record's funding line names the method and asset, not a retired 
   const audit = read('app/dashboard/audit/[intentId]/page.tsx');
   assert.doesNotMatch(audit, /funding\.feeTier/, 'the record does not print the tier');
   assert.doesNotMatch(audit, /Legacy USD \/ STANDARD/, 'nor a tier for a legacy record');
+});
+
+// ─── L7d: the quote is priced by where the payment goes ────────────────────
+
+const ADDRESS = `0x${'b'.repeat(64)}`;
+const plain = { isBusinessWallet: false, isPartnerAddress: false };
+
+test("a destination's kind is the settle paths' own: settlementKind on what the registry holds", async () => {
+  const { BANK_DESTINATION, destinationKind } = await import('../lib/fees/destination.ts');
+  const { FeeKindMismatchError } = await import('../lib/fees/schedule.ts');
+  // A bank payout goes to the payout partner's registered deposit address.
+  assert.equal(destinationKind(BANK_DESTINATION), FEE_KIND.BANK_PAYOUT);
+  assert.equal(destinationKind({ type: 'cross_chain' }), FEE_KIND.CROSS_CHAIN);
+  assert.equal(destinationKind({ type: 'sui_wallet', address: ADDRESS }, plain), FEE_KIND.WALLET);
+  assert.equal(destinationKind({ type: 'exchange', address: ADDRESS }, plain), FEE_KIND.EXCHANGE);
+  // A wallet or an exchange address that is a Splash business's wallet is a free Splash-business payment.
+  const business = { isBusinessWallet: true, isPartnerAddress: false };
+  assert.equal(destinationKind({ type: 'sui_wallet', address: ADDRESS }, business), FEE_KIND.SPLASH_BUSINESS);
+  assert.equal(destinationKind({ type: 'exchange', address: ADDRESS }, business), FEE_KIND.SPLASH_BUSINESS);
+  assert.equal(destinationKind({ type: 'splash_business', address: ADDRESS }, business), FEE_KIND.SPLASH_BUSINESS);
+  // What the settle paths refuse, the quote refuses.
+  assert.throws(() => destinationKind({ type: 'splash_business', address: ADDRESS }, plain), FeeKindMismatchError, 'an unregistered "Splash business"');
+  const partner = { isBusinessWallet: false, isPartnerAddress: true };
+  assert.throws(() => destinationKind({ type: 'sui_wallet', address: ADDRESS }, partner), FeeKindMismatchError, 'a partner deposit address paid as a wallet');
+  assert.throws(() => destinationKind({ type: 'sui_wallet', address: ADDRESS }), /registry/, 'an address is classified, never assumed');
+});
+
+test('a destination is read from a request body, or refused', async () => {
+  const { parseDestination } = await import('../lib/fees/destination.ts');
+  assert.deepEqual(parseDestination({ type: 'bank' }), { type: 'bank' });
+  assert.deepEqual(parseDestination({ type: 'cross_chain' }), { type: 'cross_chain' });
+  assert.deepEqual(parseDestination({ type: 'sui_wallet', address: ADDRESS.toUpperCase().replace('0X', '0x') }), { type: 'sui_wallet', address: ADDRESS });
+  for (const bad of [undefined, null, 'bank', {}, { type: 'iban' }, { type: 'sui_wallet' }, { type: 'exchange', address: '0x12' }]) {
+    assert.equal(parseDestination(bad), null, JSON.stringify(bad));
+  }
+});
+
+test('the quote engine prices the destination it is given, and refuses one no flow can pay yet', async () => {
+  const { calculateQuote, QuoteDestinationError } = await import('../lib/server/quote.ts');
+  const saved = { id: process.env.SPLASH_FEE_CONFIG_ID, net: process.env.SUI_NETWORK };
+  delete process.env.SPLASH_FEE_CONFIG_ID;
+  process.env.SUI_NETWORK = 'testnet';
+  try {
+    const bank = await calculateQuote(100_000, undefined, 'PHP', 'STANDARD', { destination: { type: 'bank' } });
+    assert.equal(bank.splashFee.kind, FEE_KIND.BANK_PAYOUT);
+    assert.deepEqual(bank.destination, { type: 'bank' });
+    for (const destination of [{ type: 'sui_wallet', address: ADDRESS }, { type: 'exchange', address: ADDRESS }, { type: 'splash_business', address: ADDRESS }, { type: 'cross_chain' }]) {
+      await assert.rejects(
+        calculateQuote(100_000, undefined, 'PHP', 'STANDARD', { destination }),
+        (error) => error instanceof QuoteDestinationError && /Phase 2/.test(error.message),
+        destination.type,
+      );
+    }
+  } finally {
+    if (saved.id === undefined) delete process.env.SPLASH_FEE_CONFIG_ID;
+    else process.env.SPLASH_FEE_CONFIG_ID = saved.id;
+    if (saved.net === undefined) delete process.env.SUI_NETWORK;
+    else process.env.SUI_NETWORK = saved.net;
+  }
+});
+
+test('the quote route takes the destination from the request, and the transfer flow sends it', () => {
+  const route = read('app/api/quotes/route.ts');
+  assert.match(route, /parseDestination\(body\.destination\)/, 'the route reads where the payment goes');
+  assert.match(route, /destination_required/, 'and refuses a quote that does not say');
+  assert.match(route, /QuoteDestinationError/, 'and names a destination it cannot price yet');
+  assert.match(route, /calculateQuote\([^)]*\{ businessId: businessAccountId, destination \}\)/);
+  const step = read('components/transfer/StepQuote.tsx');
+  assert.match(step, /destination: destinationForRecipient\(state\.recipient\)/, 'the review says where its payment goes');
+  const authorize = read('app/api/transfers/authorize/route.ts');
+  assert.match(authorize, /calculateQuote\([^)]*\{ businessId: businessAccountId, destination: BANK_DESTINATION \}\)/, 'authorize re-quotes the bank payout it sends');
+});
+
+test('no surface quotes Splash fee on a kind it typed in: every quote goes through destinationKind', () => {
+  const offenders = [];
+  for (const root of ['app', 'components', 'lib']) {
+    for (const file of sources(root)) {
+      if (file.startsWith('lib/fees/')) continue;
+      read(file).split(/\r?\n/).forEach((line, i) => {
+        if (/buildFeeQuote\(\{\s*kind:\s*FEE_KIND\./.test(line) || /^\s*kind:\s*FEE_KIND\./.test(line)) offenders.push(`${file}:${i + 1}: ${line.trim().slice(0, 140)}`);
+      });
+    }
+  }
+  assert.deepEqual(offenders, []);
+});
+
+test('the delivery step prices the route it knows, and says which are priced when they open in Phase 2', () => {
+  const step = read('components/transfer/StepDelivery.tsx');
+  assert.doesNotMatch(step, /crypto wallet/i, 'this flow pays a bank account; a Sui wallet is paid from Send USDC');
+  assert.match(step, /Send USDC/);
+  assert.match(step, /PHASE_2_FEE_NOTE/, 'the Phase 2 routes say their fee is set when they open');
+  assert.match(step, /option\.tier === 'PAYOUT_ONLY' \? pricing\.bankFeePhrase : PHASE_2_FEE_NOTE/);
 });

@@ -314,7 +314,7 @@ test("the quote route quotes the session's own business, with its discount, as a
   assert.match(route, /calculateQuote\([^)]*\{ businessId: [^}]+\}\)/, 'and is passed to the quote');
   assert.doesNotMatch(route, /can only over-quote/, 'over-quoting is not harmless here');
   const authorize = readFileSync('app/api/transfers/authorize/route.ts', 'utf8');
-  assert.match(authorize, /calculateQuote\([^)]*\{ businessId: businessAccountId \}\)/);
+  assert.match(authorize, /calculateQuote\([^)]*\{ businessId: businessAccountId[ ,][^)]*\}\)/);
 });
 
 // ─── max_fee into the PTB ──────────────────────────────────────────────────
