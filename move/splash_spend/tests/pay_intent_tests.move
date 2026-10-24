@@ -4150,6 +4150,33 @@ fun a_rule_payment_to_a_splash_business_has_no_fee_leg() {
 }
 
 #[test]
+/// Sky, 24 Oct (FIXUP 1): until the first fee recipient change has been
+/// applied, Splash's fees are off. A rule payment's fee is 0 in splash_spend
+/// as in core, since both read `splash_fee`: RuleSpend says 0, core sends no
+/// fee leg and emits no FeeCharged, and all of max_fee goes back to the
+/// wallet, none of it to the staff sender.
+fun with_fees_off_a_rule_payment_charges_nothing() {
+    let (mut s, fx) = fee_setup();
+    h::turn_fees_off(&mut s);
+    let staff_before = settled(&mut s, STAFF);
+    let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    s.next_tx(STAFF);
+    let fees = s.take_shared<FeeConfig>();
+    pay_fee_with(&mut s, &fx, fx.staff, intent, option::none(), &fees, PAY + MAX_FEE, MAX_FEE);
+    ts::return_shared(fees);
+    let (_, _, _, _, _, _, kind, fee) =
+        splash_spend::unpack_rule_spend_for_testing(event::events_by_type<RuleSpend>()[0]);
+    assert_eq!(kind, payment_intent::kind_wallet());
+    assert_eq!(fee, 0);
+    assert_eq!(event::events_by_type<FeeCharged>().length(), 0);
+    assert_eq!(coin_received(&mut s, SUPPLIER), PAY);
+    assert_eq!(settled(&mut s, h::fee_recipient()), 0);
+    assert_eq!(settled(&mut s, h::wallet()), FUNDS - PAY);
+    assert_eq!(settled(&mut s, STAFF), staff_before);
+    s.end();
+}
+
+#[test]
 #[expected_failure(abort_code = splash_spend::E_FEE_ABOVE_MAX)]
 /// A1 §2.6 and §3: the fee is above the max_fee the spender signed for (the
 /// schedule changed after the quote, say). The payment aborts.

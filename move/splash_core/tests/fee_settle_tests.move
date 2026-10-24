@@ -395,6 +395,91 @@ fun a_schedule_raised_after_the_quote_aborts_the_payment() {
     s.end();
 }
 
+// ─── Fees are off until the first recipient change (FIXUP 1) ───────────────
+
+#[test]
+/// While no fee recipient has been applied, Splash's fees are off: the
+/// owners' coin path settles a bank payout with max_fee 0, sends no fee leg,
+/// makes no zero coin, emits no FeeCharged, and the whole remainder goes to
+/// the business wallet.
+fun with_fees_off_the_owners_path_charges_nothing() {
+    let mut s = setup();
+    h::turn_fees_off(&mut s);
+    tx!(&mut s, h::wallet(), |account, config, fees, reg, c, ctx| {
+        let mut intent = open(account, config, 1, bank(), PARTNER, PRINCIPAL, c, ctx);
+        pay(&mut intent, account, config, fees, reg, PRINCIPAL + BANK_FEE, 0, c, ctx);
+        assert_eq!(event::events_by_type<FeeCharged>().length(), 0);
+        payment_intent::delete_finalized(intent);
+    });
+    s.next_tx(h::owner_1());
+    assert_eq!(ts::settled_balance<USDC>(h::fee_recipient()), 0);
+    assert!(!ts::has_most_recent_for_address<Coin<USDC>>(h::fee_recipient()));
+    assert_eq!(ts::settled_balance<USDC>(h::wallet()), BANK_FEE);
+    assert_coin_at(&mut s, PARTNER, PRINCIPAL);
+    s.end();
+}
+
+#[test]
+/// The balance path and the cross-chain path charge nothing either.
+fun with_fees_off_the_balance_and_cross_chain_paths_charge_nothing() {
+    let mut s = setup();
+    h::turn_fees_off(&mut s);
+    tx!(&mut s, h::wallet(), |account, config, fees, reg, c, ctx| {
+        let mut intent = open(account, config, 1, bank(), PARTNER, PRINCIPAL, c, ctx);
+        pay_balance(&mut intent, account, config, fees, reg, PRINCIPAL, 0, c, ctx);
+        payment_intent::delete_finalized(intent);
+        let mut intent = payment_intent::create_cross_chain_for_wallet<USDC>(
+            account, config, h::payment_ref(2), SOLANA, MINT_RECIPIENT, PRINCIPAL, h::commitment(), h::rail(),
+            50_000, 1_000, c.timestamp_ms() + QUOTE_MS, c, ctx,
+        );
+        let payment = h::usdc(PRINCIPAL + USD, ctx);
+        let (receipt, to_bridge, obligation) = payment_intent::confirm_cross_chain_from_business_wallet(
+            &mut intent, account, config, fees, reg, payment, 0, h::settle_by(c), c, ctx,
+        );
+        audit_anchor::anchor(receipt, HASH, BLOB, c, ctx);
+        assert_eq!(coin::value(&to_bridge), PRINCIPAL);
+        let (_, _, _, _, _, _, _, _) = payment_intent::unpack_bridge_obligation_for_testing(obligation);
+        coin::burn_for_testing(to_bridge);
+        assert_eq!(event::events_by_type<FeeCharged>().length(), 0);
+        payment_intent::delete_finalized(intent);
+    });
+    s.next_tx(h::owner_1());
+    assert_eq!(ts::settled_balance<USDC>(h::fee_recipient()), 0);
+    assert_eq!(ts::settled_balance<USDC>(h::wallet()), USD);
+    s.end();
+}
+
+#[test]
+/// The first recipient change, applied after its 24 hours, turns the fees
+/// on: the next payment pays the schedule's fee to that recipient.
+fun the_first_applied_recipient_turns_the_fees_on() {
+    let mut s = setup();
+    h::turn_fees_off(&mut s);
+    open_and_pay(&mut s, 1, bank(), PARTNER, PRINCIPAL, PRINCIPAL, 0);
+    h::change_fee_recipient(&mut s, @0xF1A4CE);
+    open_and_pay(&mut s, 2, bank(), PARTNER, PRINCIPAL, PRINCIPAL + BANK_FEE, BANK_FEE);
+    s.next_tx(h::owner_1());
+    assert_eq!(ts::settled_balance<USDC>(@0xF1A4CE), BANK_FEE);
+    s.end();
+}
+
+#[test]
+/// A settlement app's path charges nothing too, and tells the app the fee
+/// was 0; all of max_fee goes back to the business wallet.
+fun with_fees_off_the_app_path_charges_nothing() {
+    let mut s = setup();
+    register_app(&mut s);
+    h::turn_fees_off(&mut s);
+    let (kind, fee) = app_pays(&mut s, PRINCIPAL + BANK_FEE, BANK_FEE, bank());
+    assert_eq!(kind, bank());
+    assert_eq!(fee, 0);
+    assert_eq!(event::events_by_type<FeeCharged>().length(), 0);
+    s.next_tx(h::owner_1());
+    assert_eq!(ts::settled_balance<USDC>(h::fee_recipient()), 0);
+    assert_eq!(ts::settled_balance<USDC>(h::wallet()), BANK_FEE);
+    s.end();
+}
+
 // ─── Cross-chain ───────────────────────────────────────────────────────────
 
 #[test]

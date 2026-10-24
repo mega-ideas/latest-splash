@@ -376,6 +376,15 @@ public fun set_discount(s: &mut Scenario, business: ID, discount_bps: u16) {
     ts::return_shared(fees);
 }
 
+/// Put the shared FeeConfig back in its state at publish: no fee recipient
+/// applied, so Splash's fees are off (FIXUP 1). The schedule is untouched.
+public fun turn_fees_off(s: &mut Scenario) {
+    s.next_tx(OWNER_1);
+    let mut fees = s.take_shared<FeeConfig>();
+    fee_config::clear_fee_recipient_for_testing(&mut fees);
+    ts::return_shared(fees);
+}
+
 /// Governance changes the fee recipient through the 24-hour path. Moves the
 /// clock on 24 hours.
 public fun change_fee_recipient(s: &mut Scenario, recipient: address) {

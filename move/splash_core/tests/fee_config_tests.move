@@ -86,16 +86,17 @@ macro fun gov($s: &mut Scenario, $body: |&FeeAdminCap, &mut FeeConfig, &mut Cloc
 // ─── Publish ───────────────────────────────────────────────────────────────
 
 #[test]
-/// At publish the config is shared at the launch schedule, paying the
-/// publisher until a 24-hour change names the finance multisig, and the one
+/// At publish the config is shared at the launch schedule with NO fee
+/// recipient, so Splash's fees are off (FIXUP 1, below), and the one
 /// FeeAdminCap goes to the publisher, to be transferred to the governance
-/// multisig.
+/// multisig. Nothing pays the publisher.
 fun publish_shares_the_launch_schedule_and_mints_one_cap() {
     let mut s = published();
     {
         assert!(ts::has_most_recent_for_sender<FeeAdminCap>(&s));
         let cfg = s.take_shared<FeeConfig>();
-        assert_eq!(fee_config::fee_recipient(&cfg), PUBLISHER);
+        assert_eq!(fee_config::fee_recipient(&cfg), option::none());
+        assert_eq!(fee_config::fees_on(&cfg), false);
         assert_eq!(fee_config::tier_count(&cfg, bank()), 5);
         assert_eq!(fee_config::has_pending_recipient(&cfg), false);
         let mut k = 0;
@@ -474,6 +475,55 @@ fun an_unknown_kind_aborts() {
     try_propose(5, vector[U64_MAX], vector[2], 0, 0);
 }
 
+// ─── Fees are off until the first recipient change (FIXUP 1) ───────────────
+
+#[test]
+/// Sky, 24 Oct (FIXUP 1): at publish Splash's fees are OFF. With no fee
+/// recipient applied, `splash_fee` is 0 on every kind and principal, so
+/// every settle path charges 0 and sends no fee leg. A proposal alone does
+/// not turn them on; the first recipient change, once its 24 hours have run
+/// and it is applied, does, and from then on the schedule applies.
+fun fees_are_off_until_the_first_recipient_change_is_applied() {
+    let mut s = published();
+    gov!(&mut s, |cap, cfg, c| {
+        let mut k = 0;
+        while (k < 5) {
+            assert_eq!(fee(cfg, k, 5_000 * USD), 0);
+            assert_eq!(fee(cfg, k, U64_MAX), 0);
+            k = k + 1;
+        };
+        // A schedule change still waits its 24 hours, and still charges
+        // nothing while there is no recipient.
+        fee_config::propose_schedule(cap, cfg, bank(), vector[U64_MAX], vector[25], 0, U64_MAX, c);
+        fee_config::propose_fee_recipient(cap, cfg, FINANCE, c);
+        assert_eq!(fee_config::fees_on(cfg), false);
+        assert_eq!(fee(cfg, bank(), 5_000 * USD), 0);
+        c.set_for_testing(2 * DAY - 1);
+        assert_eq!(fee(cfg, bank(), 5_000 * USD), 0);
+        c.set_for_testing(2 * DAY);
+        fee_config::apply_schedule(cap, cfg, bank(), c);
+        // Applied schedule, still no recipient: still nothing.
+        assert_eq!(fee(cfg, bank(), 5_000 * USD), 0);
+        fee_config::apply_fee_recipient(cap, cfg, c);
+        assert_eq!(fee_config::fees_on(cfg), true);
+        assert_eq!(fee(cfg, bank(), 5_000 * USD), 12_500_000);
+        assert_eq!(fee(cfg, wallet(), 10_000 * USD), 2_000_000);
+    });
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = fee_config::E_UNKNOWN_KIND)]
+/// An unknown kind still aborts while fees are off: the kind is checked
+/// before the recipient.
+fun an_unknown_kind_aborts_while_fees_are_off() {
+    let mut s = published();
+    gov!(&mut s, |_cap, cfg, _c| {
+        fee(cfg, 5, 5_000 * USD);
+    });
+    s.end();
+}
+
 // ─── The fee recipient ─────────────────────────────────────────────────────
 
 #[test]
@@ -486,7 +536,7 @@ fun the_fee_recipient_changes_after_24_hours() {
         assert_eq!(fee_config::has_pending_recipient(cfg), true);
         assert_eq!(fee_config::pending_recipient(cfg), FINANCE);
         assert_eq!(fee_config::pending_recipient_eta_ms(cfg), 2 * DAY);
-        assert_eq!(fee_config::fee_recipient(cfg), PUBLISHER);
+        assert_eq!(fee_config::fee_recipient(cfg), option::none());
     });
     {
         let proposed = event::events_by_type<fee_config::FeeRecipientProposed>();
@@ -498,7 +548,7 @@ fun the_fee_recipient_changes_after_24_hours() {
     gov!(&mut s, |cap, cfg, c| {
         c.set_for_testing(2 * DAY);
         fee_config::apply_fee_recipient(cap, cfg, c);
-        assert_eq!(fee_config::fee_recipient(cfg), FINANCE);
+        assert_eq!(fee_config::fee_recipient(cfg), option::some(FINANCE));
         assert_eq!(fee_config::has_pending_recipient(cfg), false);
     });
     {
