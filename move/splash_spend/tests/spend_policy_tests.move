@@ -2066,3 +2066,119 @@ fun lengthening_the_running_window_is_always_open() {
     assert_eq!(window_of(&mut s, id), 2 * DAY_MS);
     s.end();
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// Partner deposit addresses (decision 2)
+// ════════════════════════════════════════════════════════════════════════════
+
+fun is_partner(s: &mut Scenario, id: ID, addr: address): bool {
+    s.next_tx(STRANGER);
+    let policy = s.take_shared_by_id<SpendPolicy>(id);
+    let flagged = spend_policy::is_partner_deposit(&policy, addr);
+    ts::return_shared(policy);
+    flagged
+}
+
+fun beneficiaries_at(s: &mut Scenario, id: ID, addr: address): u64 {
+    s.next_tx(STRANGER);
+    let policy = s.take_shared_by_id<SpendPolicy>(id);
+    let n = spend_policy::beneficiaries_bound_to(&policy, addr);
+    ts::return_shared(policy);
+    n
+}
+
+#[test]
+/// Decision 2: an address bound to a verified beneficiary is a partner
+/// deposit address, for as long as at least one beneficiary is bound to it.
+/// Removing the last one clears the flag.
+fun an_address_is_a_partner_deposit_while_a_beneficiary_is_bound_to_it() {
+    let (mut s, id) = begin_with_policy();
+    assert!(!is_partner(&mut s, id, PARTNER));
+    verify_beneficiary_as(&mut s, id, h::wallet(), BENEFICIARY_A, PARTNER);
+    verify_beneficiary_as(&mut s, id, h::wallet(), BENEFICIARY_B, PARTNER);
+    assert!(is_partner(&mut s, id, PARTNER));
+    assert_eq!(beneficiaries_at(&mut s, id, PARTNER), 2);
+    remove_beneficiary_as(&mut s, id, h::wallet(), BENEFICIARY_A);
+    assert!(is_partner(&mut s, id, PARTNER));
+    assert_eq!(beneficiaries_at(&mut s, id, PARTNER), 1);
+    remove_beneficiary_as(&mut s, id, h::wallet(), BENEFICIARY_B);
+    assert!(!is_partner(&mut s, id, PARTNER));
+    assert_eq!(beneficiaries_at(&mut s, id, PARTNER), 0);
+    s.end();
+}
+
+#[test]
+/// The flag is per address: each partner's own beneficiaries keep it.
+fun partner_deposit_flags_are_per_address() {
+    let (mut s, id) = begin_with_policy();
+    verify_beneficiary_as(&mut s, id, h::wallet(), BENEFICIARY_A, PARTNER);
+    verify_beneficiary_as(&mut s, id, h::wallet(), BENEFICIARY_B, OTHER_PARTNER);
+    remove_beneficiary_as(&mut s, id, h::wallet(), BENEFICIARY_A);
+    assert!(!is_partner(&mut s, id, PARTNER));
+    assert!(is_partner(&mut s, id, OTHER_PARTNER));
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = spend_policy::E_PARTNER_DEPOSIT)]
+/// A partner deposit address is paid only as a bank payout for a beneficiary
+/// bound to it, so it cannot also be verified as a wallet recipient: a
+/// spender could then send it money the partner cannot match to a payout.
+fun verify_recipient_refuses_a_partner_deposit_address() {
+    let (mut s, id) = begin_with_policy();
+    verify_beneficiary_as(&mut s, id, h::wallet(), BENEFICIARY_A, PARTNER);
+    verify_recipient_as(&mut s, id, h::wallet(), SUI, PARTNER);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = spend_policy::E_PARTNER_DEPOSIT)]
+/// Nor as another Splash business.
+fun verify_recipient_refuses_a_partner_deposit_address_as_a_business() {
+    let (mut s, id) = begin_with_policy();
+    verify_beneficiary_as(&mut s, id, h::wallet(), BENEFICIARY_A, PARTNER);
+    verify_recipient_kind_as(&mut s, id, h::wallet(), SUI, PARTNER, payment_intent::kind_splash_business());
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = spend_policy::E_ALREADY_A_RECIPIENT)]
+/// The other way round: an address already verified as a wallet recipient
+/// cannot become a partner deposit address, so the two lists never overlap.
+fun verify_beneficiary_refuses_a_verified_wallet_recipient() {
+    let (mut s, id) = begin_with_policy();
+    verify_recipient_as(&mut s, id, h::wallet(), SUI, SUPPLIER);
+    verify_beneficiary_as(&mut s, id, h::wallet(), BENEFICIARY_A, SUPPLIER);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = spend_policy::E_ALREADY_A_RECIPIENT)]
+/// Nor one verified as a Splash business.
+fun verify_beneficiary_refuses_a_verified_business_recipient() {
+    let (mut s, id) = begin_with_policy();
+    verify_recipient_kind_as(&mut s, id, h::wallet(), SUI, SUPPLIER, payment_intent::kind_splash_business());
+    verify_beneficiary_as(&mut s, id, h::wallet(), BENEFICIARY_A, SUPPLIER);
+    s.end();
+}
+
+#[test]
+/// Moving an address from one list to the other is remove, then verify,
+/// both by the wallet, in either direction.
+fun an_address_moves_between_the_lists_only_by_removal() {
+    let (mut s, id) = begin_with_policy();
+    verify_recipient_as(&mut s, id, h::wallet(), SUI, SUPPLIER);
+    remove_recipient_as(&mut s, id, h::wallet(), SUI, SUPPLIER);
+    verify_beneficiary_as(&mut s, id, h::wallet(), BENEFICIARY_A, SUPPLIER);
+    assert!(is_partner(&mut s, id, SUPPLIER));
+    remove_beneficiary_as(&mut s, id, h::wallet(), BENEFICIARY_A);
+    verify_recipient_as(&mut s, id, h::wallet(), SUI, SUPPLIER);
+    s.next_tx(STRANGER);
+    {
+        let policy = s.take_shared_by_id<SpendPolicy>(id);
+        assert!(spend_policy::is_recipient_verified(&policy, SUI, SUPPLIER));
+        assert!(!spend_policy::is_partner_deposit(&policy, SUPPLIER));
+        ts::return_shared(policy);
+    };
+    s.end();
+}

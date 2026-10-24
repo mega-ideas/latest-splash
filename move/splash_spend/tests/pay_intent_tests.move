@@ -902,10 +902,10 @@ fun re_verifying_a_recipient_under_another_kind_stops_its_open_intents() {
 }
 
 #[test]
-#[expected_failure(abort_code = splash_spend::E_RECIPIENT_NOT_VERIFIED)]
+#[expected_failure(abort_code = splash_spend::E_PARTNER_DEPOSIT_NOT_BANK_PAYOUT)]
 /// A partner deposit address is verified only for its beneficiary's bank
-/// payouts. It is not a wallet recipient (kinds 2–3), so a plain transfer to
-/// it under the policy aborts.
+/// payouts. Decision 2: it is paid only as a bank payout, so a plain
+/// transfer to it under the policy aborts, even one the wallet opened.
 fun a_partner_deposit_address_is_not_a_wallet_recipient() {
     let (mut s, fx) = setup();
     let intent = open_by_wallet(&mut s, &fx, 1, payment_intent::kind_wallet(), h::recipient(), PAY);
@@ -3290,5 +3290,76 @@ fun approved_parts_still_stop_at_the_allowance_cap() {
         advance(&mut s, spend_policy::default_running_window_ms());
         n = n + 1;
     };
+    s.end();
+}
+
+// ═══ Partner deposit addresses (decision 2) ═════════════════════════════════
+
+#[test]
+#[expected_failure(abort_code = splash_spend::E_PARTNER_DEPOSIT_NOT_BANK_PAYOUT)]
+/// Decision 2: a partner deposit address is paid only as a bank payout.
+/// Staff cannot open a wallet payment to one.
+fun staff_cannot_open_a_wallet_payment_to_a_partner_deposit_address() {
+    let (mut s, fx) = setup();
+    open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), h::recipient(), PAY);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = splash_spend::E_PARTNER_DEPOSIT_NOT_BANK_PAYOUT)]
+/// Nor a Splash-business payment to one.
+fun staff_cannot_open_a_business_payment_to_a_partner_deposit_address() {
+    let (mut s, fx) = setup();
+    open(&mut s, &fx, STAFF, 1, payment_intent::kind_splash_business(), h::recipient(), PAY);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = splash_spend::E_PARTNER_DEPOSIT_NOT_BANK_PAYOUT)]
+/// Checked again at the draw: an address bound to a beneficiary after a
+/// wallet payment to it was opened stops that payment.
+fun binding_a_beneficiary_to_an_address_stops_its_open_wallet_payments() {
+    let (mut s, fx) = setup();
+    let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), OTHER_PARTNER, PAY);
+    {
+        let mut p = wallet_policy(&mut s, &fx);
+        let account = s.take_shared_by_id<BusinessAccount>(fx.account);
+        p.remove_recipient(SUI_DOMAIN, OTHER_PARTNER, s.ctx());
+        p.verify_beneficiary(&account, BENEFICIARY_2, OTHER_PARTNER, s.ctx());
+        ts::return_shared(account);
+        ts::return_shared(p);
+    };
+    pay(&mut s, &fx, STAFF, fx.staff, intent, false);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = splash_spend::E_BENEFICIARY_NOT_VERIFIED)]
+/// A bank payout to a partner deposit address must name a beneficiary that
+/// is verified and bound to it. A beneficiary the owners never verified is
+/// refused, even at the right partner.
+fun a_bank_payout_to_a_partner_needs_a_verified_beneficiary() {
+    let (mut s, fx) = setup();
+    open_bank(&mut s, &fx, 1, h::recipient(), BENEFICIARY_2, PAY);
+    s.end();
+}
+
+#[test]
+/// Removing the last beneficiary bound to an address clears its partner
+/// flag. The wallet can then verify it as a wallet recipient, and staff pay
+/// it as one.
+fun once_no_beneficiary_is_bound_an_address_can_be_paid_as_a_wallet() {
+    let (mut s, fx) = setup();
+    {
+        let mut p = wallet_policy(&mut s, &fx);
+        let account = s.take_shared_by_id<BusinessAccount>(fx.account);
+        p.remove_beneficiary(h::beneficiary(), s.ctx());
+        p.verify_recipient(&account, SUI_DOMAIN, h::recipient(), payment_intent::kind_wallet(), s.ctx());
+        ts::return_shared(account);
+        ts::return_shared(p);
+    };
+    let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), h::recipient(), PAY);
+    pay(&mut s, &fx, STAFF, fx.staff, intent, false);
+    assert_eq!(coin_received(&mut s, h::recipient()), PAY);
     s.end();
 }
