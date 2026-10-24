@@ -35,6 +35,7 @@ import test from 'node:test';
 
 import {
   BPS_DENOM,
+  FEE_APPLY_WINDOW_MS,
   FEE_CEILING_BPS,
   FEE_KIND,
   FeeKindMismatchError,
@@ -469,6 +470,59 @@ test('a pending schedule shortens the cache to its eta, and to seconds once it c
   c.advance(1);
   await cache.get();
   assert.equal(reads, 3);
+});
+
+test('a fee proposal applies only within seven days of its eta, as fee_config says', () => {
+  // The A1 review: apply_schedule and apply_fee_recipient abort
+  // E_FEE_PROPOSAL_LAPSED from eta + FEE_APPLY_WINDOW_MS on.
+  assert.equal(FEE_APPLY_WINDOW_MS, 7n * 86_400_000n);
+  const move = readFileSync('move/splash_core/sources/fee_config.move', 'utf8');
+  const m = /\bconst FEE_APPLY_WINDOW_MS: u64 = ([0-9_]+);/.exec(move);
+  assert.ok(m, 'fee_config.move defines FEE_APPLY_WINDOW_MS');
+  assert.equal(BigInt(m[1].replace(/_/g, '')), FEE_APPLY_WINDOW_MS);
+});
+
+test('a lapsed proposal can never apply, so the cache does not re-read every few seconds for it', async () => {
+  const eta = 1_000_000n;
+  const c = clock(Number(eta + FEE_APPLY_WINDOW_MS)); // the window has just closed
+  let reads = 0;
+  const cache = createFeeConfigCache({
+    id: CONFIG_ID,
+    read: async () => (
+      reads++,
+      stateWith({
+        pendingSchedules: [null, null, { ...LAUNCH_SCHEDULE[2], etaMs: eta }, null, null],
+        pendingRecipient: { recipient: FINANCE, etaMs: eta },
+      })
+    ),
+    ttlMs: 60_000,
+    applicableTtlMs: 5_000,
+    now: c.now,
+  });
+  await cache.get();
+  c.advance(5_000);
+  await cache.get();
+  assert.equal(reads, 1, 'a lapsed proposal kept the short re-read');
+  c.advance(55_000);
+  await cache.get();
+  assert.equal(reads, 2);
+});
+
+test('in the last moments of its window a proposal could still apply, so the cache keeps re-reading', async () => {
+  const eta = 1_000_000n;
+  const c = clock(Number(eta + FEE_APPLY_WINDOW_MS) - 10_000);
+  let reads = 0;
+  const cache = createFeeConfigCache({
+    id: CONFIG_ID,
+    read: async () => (reads++, stateWith({ pendingSchedules: [null, null, { ...LAUNCH_SCHEDULE[2], etaMs: eta }, null, null] })),
+    ttlMs: 60_000,
+    applicableTtlMs: 5_000,
+    now: c.now,
+  });
+  await cache.get();
+  c.advance(5_000);
+  await cache.get();
+  assert.equal(reads, 2);
 });
 
 test('the chain reader is server-only and the computation is not', () => {

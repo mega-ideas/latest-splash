@@ -408,6 +408,75 @@ fun a_replaced_proposal_cannot_apply_at_the_first_eta() {
     s.end();
 }
 
+// ─── A proposal lapses seven days after its notice runs (the A1 review) ────
+//
+// Like a registry addition and a package upgrade, a fee change applies only
+// within [eta, eta + 7 days). One announcement cannot be cashed in months
+// later, once owners have stopped watching: a lapsed proposal must be
+// proposed again, which alerts the owners again.
+
+#[test]
+fun the_apply_window_is_seven_days() {
+    assert_eq!(fee_config::fee_apply_window_ms(), 7 * DAY);
+}
+
+#[test]
+#[expected_failure(abort_code = fee_config::E_FEE_PROPOSAL_LAPSED)]
+/// The review's case: a schedule proposed once and applied a year later.
+fun a_year_old_schedule_proposal_cannot_apply() {
+    let mut s = published_fees_on();
+    gov!(&mut s, |cap, cfg, c| {
+        fee_config::propose_schedule(cap, cfg, wallet(), vector[U64_MAX], vector[100], 0, U64_MAX, c);
+        c.set_for_testing(DAY + 365 * DAY);
+        fee_config::apply_schedule(cap, cfg, wallet(), c);
+    });
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = fee_config::E_FEE_PROPOSAL_LAPSED)]
+/// The window is half-open: at eta + 7 days exactly it has closed.
+fun a_schedule_proposal_lapses_seven_days_after_its_eta() {
+    let mut s = published_fees_on();
+    gov!(&mut s, |cap, cfg, c| {
+        fee_config::propose_schedule(cap, cfg, bank(), vector[U64_MAX], vector[25], 0, U64_MAX, c);
+        c.set_for_testing(2 * DAY + 7 * DAY);
+        fee_config::apply_schedule(cap, cfg, bank(), c);
+    });
+    s.end();
+}
+
+#[test]
+/// One millisecond before it closes, it still applies.
+fun a_schedule_proposal_applies_in_the_last_millisecond_of_its_window() {
+    let mut s = published_fees_on();
+    gov!(&mut s, |cap, cfg, c| {
+        fee_config::propose_schedule(cap, cfg, bank(), vector[U64_MAX], vector[25], 0, U64_MAX, c);
+        c.set_for_testing(2 * DAY + 7 * DAY - 1);
+        fee_config::apply_schedule(cap, cfg, bank(), c);
+        assert_eq!(fee(cfg, bank(), 5_000 * USD), 12_500_000);
+    });
+    s.end();
+}
+
+#[test]
+/// A lapsed schedule is proposed again, with a fresh 24 hours' notice and a
+/// fresh window, and then applies. Until then nothing has changed.
+fun a_lapsed_schedule_is_proposed_again_and_then_applies() {
+    let mut s = published_fees_on();
+    gov!(&mut s, |cap, cfg, c| {
+        fee_config::propose_schedule(cap, cfg, bank(), vector[U64_MAX], vector[25], 0, U64_MAX, c);
+        c.set_for_testing(30 * DAY);
+        assert_eq!(fee(cfg, bank(), 5_000 * USD), 10_000_000);
+        fee_config::propose_schedule(cap, cfg, bank(), vector[U64_MAX], vector[25], 0, U64_MAX, c);
+        assert_eq!(fee_config::pending_schedule_eta_ms(cfg, bank()), 31 * DAY);
+        c.set_for_testing(31 * DAY);
+        fee_config::apply_schedule(cap, cfg, bank(), c);
+        assert_eq!(fee(cfg, bank(), 5_000 * USD), 12_500_000);
+    });
+    s.end();
+}
+
 #[test]
 /// A rate of exactly 100 bps, and eight tiers, are allowed.
 fun the_ceiling_rate_and_eight_tiers_are_allowed() {
@@ -598,6 +667,57 @@ fun applying_the_fee_recipient_before_24_hours_aborts() {
         propose_finance(cap, cfg, c);
         c.set_for_testing(2 * DAY - 1);
         fee_config::apply_fee_recipient(cap, cfg, c);
+    });
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = fee_config::E_FEE_PROPOSAL_LAPSED)]
+/// The A1 review: a fee recipient proposal lapses seven days after its
+/// notice runs, like a schedule. At eta + 7 days exactly it has closed.
+fun a_fee_recipient_proposal_lapses_seven_days_after_its_eta() {
+    let mut s = published();
+    gov!(&mut s, |cap, cfg, c| {
+        propose_finance(cap, cfg, c);
+        c.set_for_testing(2 * DAY + 7 * DAY);
+        fee_config::apply_fee_recipient(cap, cfg, c);
+    });
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = fee_config::E_FEE_PROPOSAL_LAPSED)]
+/// A year later, too: the first recipient, which turns the fees on, cannot
+/// be applied long after the owners were told.
+fun a_year_old_fee_recipient_proposal_cannot_apply() {
+    let mut s = published();
+    gov!(&mut s, |cap, cfg, c| {
+        propose_finance(cap, cfg, c);
+        c.set_for_testing(DAY + 365 * DAY);
+        fee_config::apply_fee_recipient(cap, cfg, c);
+    });
+    s.end();
+}
+
+#[test]
+/// One millisecond before it closes it applies, and a lapsed one proposed
+/// again applies after its own 24 hours.
+fun a_fee_recipient_applies_within_its_window_or_after_proposing_again() {
+    let mut s = published();
+    gov!(&mut s, |cap, cfg, c| {
+        propose_finance(cap, cfg, c);
+        c.set_for_testing(2 * DAY + 7 * DAY - 1);
+        fee_config::apply_fee_recipient(cap, cfg, c);
+        assert_eq!(fee_config::fee_recipient(cfg), option::some(FINANCE));
+    });
+    let three_of_three = multisig::derive_address(&finance_keys(), &finance_weights(), 3);
+    gov!(&mut s, |cap, cfg, c| {
+        fee_config::propose_fee_recipient(cap, cfg, finance_keys(), finance_weights(), 3, c);
+        c.set_for_testing(60 * DAY);
+        fee_config::propose_fee_recipient(cap, cfg, finance_keys(), finance_weights(), 3, c);
+        c.set_for_testing(61 * DAY);
+        fee_config::apply_fee_recipient(cap, cfg, c);
+        assert_eq!(fee_config::fee_recipient(cfg), option::some(three_of_three));
     });
     s.end();
 }
