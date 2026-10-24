@@ -178,16 +178,19 @@ function SetupCard({
       href={setup.href}
       aria-current={current ? 'page' : undefined}
       onClick={onNavigate}
-      className={`mb-3 block min-h-11 rounded-xl border px-3 py-2.5 transition-colors ${
+      className={`mb-2 block min-h-11 rounded-xl border px-3 py-2 transition-colors ${
         current ? 'border-white bg-white text-[var(--ink)]' : 'border-white/15 bg-white/[0.07] text-white hover:bg-white/10'
       }`}
     >
       <span className="flex items-center gap-2 text-sm font-semibold">
         <ListChecks size={16} aria-hidden="true" />
-        {setup.label}
+        <span className="flex-1">{setup.label}</span>
+        <span className={`text-[12px] font-medium tabular-nums ${current ? 'text-[var(--slate)]' : 'text-white'}`}>
+          {setup.done} of {setup.total}
+          <span className="sr-only"> steps done</span>
+        </span>
       </span>
-      <span className={`mt-1 block text-[12px] font-medium ${current ? 'text-[var(--slate)]' : 'text-white'}`}>{progress}</span>
-      <span aria-hidden="true" className={`mt-2 block h-1.5 overflow-hidden rounded-full ${current ? 'bg-[var(--line)]' : 'bg-white/15'}`}>
+      <span aria-hidden="true" className={`mt-1.5 block h-1.5 overflow-hidden rounded-full ${current ? 'bg-[var(--line)]' : 'bg-white/15'}`}>
         <span className="block h-full rounded-full bg-[var(--gold-light)]" style={{ width: `${Math.round((setup.done / Math.max(setup.total, 1)) * 100)}%` }} />
       </span>
     </Link>
@@ -332,7 +335,7 @@ export default function DashboardShell({ children, session, kyb, locks, setup, s
         <button
           type="button"
           onClick={() => setCollapsed((v) => !v)}
-          className={`mb-6 flex min-h-11 items-center rounded-xl transition-colors hover:bg-white/10 ${
+          className={`mb-3 flex min-h-11 items-center rounded-xl transition-colors hover:bg-white/10 ${
             collapsed ? 'mx-auto justify-center p-2' : 'gap-3 px-2 py-2'
           }`}
           aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
@@ -360,21 +363,22 @@ export default function DashboardShell({ children, session, kyb, locks, setup, s
         </button>
 
         <nav id="dashboard-rail" aria-label="Dashboard" className="flex min-h-0 flex-1 flex-col">
-          <div className="flex-1 space-y-4 overflow-y-auto">
+          <div className="flex-1 space-y-3 overflow-y-auto">
             <NavSections view={view} pathname={pathname} collapsed={collapsed} locks={locks} scope={launchScope} idPrefix="rail" />
           </div>
 
-          <div className="pt-4">
+          <div className="pt-3">
             {view.setup ? <SetupCard setup={view.setup} pathname={pathname} collapsed={collapsed} /> : null}
 
             {!collapsed && (
-              <div className="fintech-sidebar-signal">
-                <Image src="/isometric/sui-logo-clean.svg" alt="" width={32} height={42} />
-                <span>
-                  <small>Settlement rail</small>
-                  <strong><i aria-hidden="true" /> Sui mainnet</strong>
-                </span>
-              </div>
+              <p className="mb-2 flex min-h-8 items-center gap-2 rounded-lg border border-white/10 bg-white/[0.07] px-2.5 text-[12px]">
+                <Image src="/isometric/sui-logo-clean.svg" alt="" width={12} height={16} className="h-4 w-3 object-contain" />
+                <span className="whitespace-nowrap font-medium text-white/90">Settlement rail</span>
+                <strong className="ml-auto inline-flex items-center gap-1.5 whitespace-nowrap font-semibold text-white">
+                  <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-[var(--ok)]" />
+                  Sui mainnet
+                </strong>
+              </p>
             )}
 
             <div className="border-t border-white/10 pt-3">
@@ -382,20 +386,9 @@ export default function DashboardShell({ children, session, kyb, locks, setup, s
             </div>
           </div>
         </nav>
-
-        <div className="mt-2 border-t border-white/10 pt-2">
-          <button
-            type="button"
-            onClick={logout}
-            title={collapsed ? 'Log out' : undefined}
-            className={`flex min-h-11 w-full items-center rounded-lg px-2 py-2 text-sm text-white/80 transition-colors hover:bg-white/10 hover:text-[var(--gold-light)] ${
-              collapsed ? 'justify-center' : 'gap-3'
-            }`}
-          >
-            <LogOut size={18} aria-hidden="true" />
-            {collapsed ? <span className="sr-only">Log out</span> : <span className="font-medium">Log out</span>}
-          </button>
-        </div>
+        {/* Log out lives in the profile menu of the header on desktop (and at
+            the foot of the phone drawer); the rail keeps its height for the
+            pages, so all nine fit a 900px window. */}
       </aside>
 
       {/* ── Mobile top header ─────────────────────────────────── */}
