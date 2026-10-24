@@ -1608,6 +1608,24 @@ fun a_consumed_approval_is_gone_and_a_paid_intent_cannot_be_approved_again() {
 }
 
 #[test]
+/// Review A11: an approval thrown away unused leaves a trace. Discarding
+/// emits exactly one event, so an indexer of outstanding approvals sees it
+/// end, as it sees a consumed one end.
+fun discarding_an_approval_is_evented() {
+    let (mut s, fx) = setup();
+    let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, THRESHOLD + 1);
+    approve(&mut s, &fx, h::owner_2(), intent, STAFF);
+    s.next_tx(STAFF);
+    let approval = s.take_from_sender<PayoutApproval>();
+    let before = event::num_events();
+    splash_spend::discard_approval(approval);
+    assert_eq!(event::num_events(), before + 1);
+    s.next_tx(STAFF);
+    assert!(ts::ids_for_address<PayoutApproval>(STAFF).is_empty());
+    s.end();
+}
+
+#[test]
 #[expected_failure(abort_code = splash_core::payment_intent::E_NOT_PENDING)]
 /// The same intent cannot be paid twice under the rule: the second attempt
 /// aborts because the intent is no longer pending.
