@@ -761,6 +761,8 @@ test('a FeeConfig paying, or about to pay, anyone but the finance multisig fails
   assert.match(paysStranger.detail, new RegExp(`${stranger}, not the finance multisig`));
   const pendingStranger = await checkFeeRecipient(a1Node(withFeeConfig({ pending_recipient: { recipient: stranger, eta_ms: '1777000000000' } })), recipientInput());
   assert.equal(pendingStranger.status, 'FAIL', 'a pending change to anyone but the finance multisig fails');
+  // The A1 review: a stray proposal can be withdrawn, not only replaced.
+  assert.match(pendingStranger.detail, /fee_config::cancel_fee_recipient_proposal/);
   const onThenStranger = await checkFeeRecipient(
     a1Node(withFeeConfig({ fee_recipient: FINANCE, pending_recipient: { recipient: stranger, eta_ms: '1777000000000' } })),
     recipientInput(),
