@@ -466,13 +466,13 @@ function Calculator({ schedule, feesOn }: { schedule: FeeSchedule; feesOn: boole
               <dd>{mode === 'bank' ? route?.arrives : 'Seconds, on Sui'}</dd>
             </div>
             <div>
-              <dt><ReceiptText aria-hidden="true" />Splash fee, added to the amount</dt>
+              <dt><ReceiptText aria-hidden="true" /><span>Splash fee<small>added to the amount</small></span></dt>
               <dd className="num">{lines === null ? '-' : feesOn ? `${formatUsdc(lines.splashFeeMinor)} USDC` : 'None yet'}</dd>
             </div>
             {mode === 'bank' ? (
               <>
                 <div>
-                  <dt><Landmark aria-hidden="true" />Partner fee, deducted before conversion</dt>
+                  <dt><Landmark aria-hidden="true" /><span>Partner fee<small>deducted before conversion</small></span></dt>
                   <dd className="num">
                     {lines?.partnerFeeMinor != null ? `${formatUsdc(lines.partnerFeeMinor)} USDC` : 'Not quoted yet'}
                     {lines?.partnerFeeMinor != null && quote ? <small>{quote.partnerFee.source}</small> : null}
