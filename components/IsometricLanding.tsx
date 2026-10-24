@@ -414,6 +414,30 @@ const loopCards = [
 const LAUNCH_PRICING = pricingSummary(LAUNCH_SCHEDULE);
 
 /**
+ * The value on the closing art's Fee row (the A1 review). The receipt in
+ * public/isometric/payments.svg is a raster, and the rate once baked into
+ * it is gone; this writes Splash's bank fee there from the schedule in
+ * force, or "None yet" while the fees are off (PricingSummary.bankFee), so
+ * no rate on the art is one the schedule did not set.
+ *
+ * It is drawn in the art's own coordinates and laid over it in the same box
+ * (globals.css .iso-final-art-fee), so it tracks the art at every width. The
+ * outer matrix is the one payments.svg places its raster with; the inner one
+ * puts the text on the Fee row's isometric baseline (it climbs 0.48 px per
+ * px), condensed to the art's lettering, right-aligned where the old rate
+ * ended. Decorative: the fee is in words on the page itself.
+ */
+function ReceiptArtFee({ value }: { value: string }) {
+  return (
+    <svg className="iso-final-art-fee" viewBox="0 0 1086 814.5" preserveAspectRatio="xMidYMid meet" aria-hidden="true" focusable="false">
+      <g transform="matrix(0.861356 0 0 0.862736 280.465514 -15.590548)">
+        <text transform="matrix(0.72 -0.3456 0 1 507 669)" textAnchor="end">{value}</text>
+      </g>
+    </svg>
+  );
+}
+
+/**
  * `pricing` is Splash's fee schedule in words, from app/page.tsx, which reads
  * the schedule in force (lib/fees/fee-config.ts publishedFeeSchedule). The
  * launch schedule is only the default for a caller that passes none.
@@ -996,6 +1020,7 @@ export default function IsometricLanding({ isPhone = false, pricing = LAUNCH_PRI
               width={1448}
               height={1086}
             />
+            <ReceiptArtFee value={pricing.bankFee} />
           </div>
         </div>
       </section>

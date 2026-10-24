@@ -3983,7 +3983,8 @@ body {
   height: 100%;
 }
 
-.iso-final-art img {
+.iso-final-art img,
+.iso-final-art .iso-final-art-fee {
   position: absolute;
   top: -5%;
   right: -14%;
@@ -3993,6 +3994,22 @@ body {
   object-fit: contain;
   filter: drop-shadow(0 30px 25px rgba(0, 0, 0, .28));
   transform: rotate(-4deg);
+}
+
+/* The Fee row's value, laid over the closing art in the same box, so it
+   moves with it; ReceiptArtFee in IsometricLanding.tsx. The art's own ink,
+   read from its "Fee" label. */
+.iso-final-art .iso-final-art-fee {
+  filter: none;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.iso-final-art-fee text {
+  fill: #36524a;
+  font-family: var(--font-sans), system-ui, sans-serif;
+  font-size: 37px;
+  font-weight: 800;
 }
 
 .iso-footer {
@@ -4218,7 +4235,8 @@ body {
     min-height: 390px;
   }
 
-  .iso-final-art img {
+  .iso-final-art img,
+  .iso-final-art .iso-final-art-fee {
     top: -20%;
     right: -10%;
     width: 90%;
@@ -4733,7 +4751,8 @@ body {
     min-height: 350px;
   }
 
-  .iso-final-art img {
+  .iso-final-art img,
+  .iso-final-art .iso-final-art-fee {
     top: -18%;
     right: -34%;
     width: 135%;
