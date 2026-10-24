@@ -164,16 +164,20 @@ function PartnerBadge({ src, name, role, logoClass }: (typeof partnerRail)[numbe
   );
 }
 
-/* The comparison's competitor figures (the A1 review). The bank column is
-   the reviewed category midpoint for USD to PHP from a named, dated dataset
-   (lib/fx/comparison-baselines.ts): a correspondent wire with its FX
-   margin, never a named bank. No broker or Wise figure has a source, so
-   their cells show none rather than a number nobody can check. */
+/* The comparison's competitor figures (the A1 review). The bank and
+   fintech columns are the reviewed category midpoints for USD to PHP from
+   a named, dated dataset (lib/fx/comparison-baselines.ts): a correspondent
+   wire with its FX margin, and the digital-provider category, never a
+   named provider. No broker figure has a source, so its cells show none
+   rather than a number nobody can check. */
 const COMPARISON_BASELINE = getComparisonBaseline('PHP');
 const UNSOURCED = 'Varies';
 const BANK_WIRE = COMPARISON_BASELINE?.bankWire ?? null;
 const BANK_WIRE_DELIVERY = BANK_WIRE?.delivery ?? UNSOURCED;
 const BANK_WIRE_COST = BANK_WIRE ? `US$${formatMinor(BANK_WIRE.flatUsdMinor, 2)} + ${formatBps(BANK_WIRE.marginBps)} FX margin` : UNSOURCED;
+const FINTECH = COMPARISON_BASELINE?.fintech ?? null;
+const FINTECH_DELIVERY = FINTECH?.delivery ?? UNSOURCED;
+const FINTECH_COST = FINTECH ? `US$${formatMinor(FINTECH.flatUsdMinor, 2)} + ${formatBps(FINTECH.marginBps)} FX margin` : UNSOURCED;
 /** The dataset's ISO date as a reader says it ("31 March 2025"): a calendar
  *  date, not a moment, so it is spelled out the same on server and client. */
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -188,14 +192,14 @@ const comparisonRowsFor = (pricing: PricingSummary) => [
     feature: 'Settlement speed',
     bank: BANK_WIRE_DELIVERY,
     broker: UNSOURCED,
-    wise: UNSOURCED,
+    fintech: FINTECH_DELIVERY,
     splash: lockedCopy.speed,
   },
   {
     feature: 'Fee to a bank',
     bank: BANK_WIRE_COST,
     broker: UNSOURCED,
-    wise: UNSOURCED,
+    fintech: FINTECH_COST,
     // The schedule once fees are on; until then, none is charged.
     splash: pricing.feesOn ? pricing.bank : pricing.bankFeePhrase,
   },
@@ -203,56 +207,56 @@ const comparisonRowsFor = (pricing: PricingSummary) => [
     feature: 'FX transparency',
     bank: 'Hidden markup',
     broker: 'Cash spread',
-    wise: 'Mid-market',
+    fintech: 'Margin in the rate',
     splash: 'Oracle-labeled quote',
   },
   {
     feature: 'Atomic settlement',
     bank: 'No',
     broker: 'No',
-    wise: 'No',
+    fintech: 'No',
     splash: 'Yes',
   },
   {
     feature: 'Batch payments',
     bank: 'Limited',
     broker: 'No',
-    wise: 'Limited',
+    fintech: 'Limited',
     splash: 'Native',
   },
   {
     feature: 'AI treasury copilot',
     bank: 'No',
     broker: 'No',
-    wise: 'No',
+    fintech: 'No',
     splash: lockedCopy.agent,
   },
   {
     feature: 'Early payment on invoices',
     bank: 'Manual factoring',
     broker: 'No',
-    wise: 'No',
+    fintech: 'No',
     splash: 'Buyer-approved discount offer',
   },
   {
     feature: 'Bilateral netting',
     bank: 'Manual',
     broker: 'No',
-    wise: 'No',
+    fintech: 'No',
     splash: 'Modeled in account loop',
   },
   {
     feature: 'Permanent audit trail',
     bank: 'Siloed records',
     broker: 'Manual receipts',
-    wise: 'Platform history',
+    fintech: 'Platform history',
     splash: 'Encrypted and kept',
   },
   {
     feature: 'Recipient account ladder',
     bank: 'Bank account only',
     broker: 'Cash-out only',
-    wise: 'Wise account',
+    fintech: 'Provider account',
     splash: 'Payout, sweep, stored balance',
   },
 ];
@@ -524,7 +528,7 @@ export default function IsometricLanding({ isPhone = false, pricing = LAUNCH_PRI
       feature: 'Yield on idle USD',
       bank: yieldCell(yieldBenchmarks.bank, 'APY'),
       broker: yieldCell(yieldBenchmarks.broker, 'APY'),
-      wise: yieldCell(yieldBenchmarks.wise, 'APY'),
+      fintech: yieldCell(yieldBenchmarks.wise, 'APY'),
       splash: yieldCell(yieldBenchmarks.splash, 'projected variable APY'),
     },
   ];
@@ -787,7 +791,7 @@ export default function IsometricLanding({ isPhone = false, pricing = LAUNCH_PRI
                   <th>Feature</th>
                   <th>Bank</th>
                   <th>Broker</th>
-                  <th>Wise</th>
+                  <th>Fintech app</th>
                   <th className="is-splash">Splash</th>
                 </tr>
               </thead>
@@ -797,7 +801,7 @@ export default function IsometricLanding({ isPhone = false, pricing = LAUNCH_PRI
                     <th scope="row">{row.feature}</th>
                     <td>{row.bank}</td>
                     <td>{row.broker}</td>
-                    <td>{row.wise}</td>
+                    <td>{row.fintech}</td>
                     <td className="is-splash"><span className="iso-splash-cell"><Check aria-hidden="true" /> {row.splash}</span></td>
                   </tr>
                 ))}
@@ -809,10 +813,10 @@ export default function IsometricLanding({ isPhone = false, pricing = LAUNCH_PRI
             </p>
             {COMPARISON_BASELINE ? (
               <p className="iso-pricing-line">
-                <strong>Bank figures</strong>
+                <strong>Bank and fintech figures</strong>
                 <span>
                   Category midpoints for a transfer of US$1,000 or more, from{' '}
-                  <a href={COMPARISON_BASELINE.dataset.url} rel="noopener noreferrer" target="_blank">{COMPARISON_BASELINE.dataset.name}</a>, as of {BASELINE_DATE}: a correspondent wire with its FX margin, not a named bank. No broker or Wise figure is shown without a source.
+                  <a href={COMPARISON_BASELINE.dataset.url} rel="noopener noreferrer" target="_blank">{COMPARISON_BASELINE.dataset.name}</a>, as of {BASELINE_DATE}: a correspondent wire with its FX margin and the digital-provider category, not a named provider. No broker figure is shown without a source.
                 </span>
               </p>
             ) : null}
