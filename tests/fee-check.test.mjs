@@ -351,6 +351,41 @@ test('(d) an apply that writes before it checks the eta is caught', () => {
   );
 });
 
+test('(d) an apply that ignores the seven-day window is caught, so a lapsed proposal cannot apply', () => {
+  // The A1 review: apply_schedule and apply_fee_recipient apply a proposal
+  // only within [eta, eta + 7 days).
+  withRoot({ edits: { [FEE_CONFIG]: replace('    assert!(now < slot.borrow().eta_ms + FEE_APPLY_WINDOW_MS, E_FEE_PROPOSAL_LAPSED);\n', '') } }, (root) =>
+    caught(checkFeeConfigSetters(root), /`apply_schedule` does not assert E_FEE_PROPOSAL_LAPSED against the proposal's eta_ms \+ FEE_APPLY_WINDOW_MS/),
+  );
+  withRoot(
+    { edits: { [FEE_CONFIG]: replace('    assert!(now < cfg.pending_recipient.borrow().eta_ms + FEE_APPLY_WINDOW_MS, E_FEE_PROPOSAL_LAPSED);\n', '') } },
+    (root) => caught(checkFeeConfigSetters(root), /`apply_fee_recipient` does not assert E_FEE_PROPOSAL_LAPSED/),
+  );
+  withRoot(
+    {
+      edits: {
+        [FEE_CONFIG]: replace(
+          '    assert!(now < cfg.pending_recipient.borrow().eta_ms + FEE_APPLY_WINDOW_MS, E_FEE_PROPOSAL_LAPSED);\n',
+          '    cfg.fee_recipient = option::some(cfg.pending_recipient.borrow().recipient);\n    assert!(now < cfg.pending_recipient.borrow().eta_ms + FEE_APPLY_WINDOW_MS, E_FEE_PROPOSAL_LAPSED);\n',
+        ),
+      },
+    },
+    (root) => caught(checkFeeConfigSetters(root), /`apply_fee_recipient` writes fee_recipient before it checks the window/),
+  );
+});
+
+test('(d) a window longer than seven days, or none, is caught', () => {
+  withRoot({ edits: { [FEE_CONFIG]: replace('const FEE_APPLY_WINDOW_MS: u64 = 604_800_000;', 'const FEE_APPLY_WINDOW_MS: u64 = 31_536_000_000;') } }, (root) =>
+    caught(checkFeeConfigSetters(root), /FEE_APPLY_WINDOW_MS is 31536000000 ms; a proposal must lapse within seven days/),
+  );
+  withRoot({ edits: { [FEE_CONFIG]: replace('const FEE_APPLY_WINDOW_MS: u64 = 604_800_000;', 'const FEE_APPLY_WINDOW_MS: u64 = 0;') } }, (root) =>
+    caught(checkFeeConfigSetters(root), /FEE_APPLY_WINDOW_MS is 0 ms/),
+  );
+  withRoot({ edits: { [FEE_CONFIG]: replace('const FEE_APPLY_WINDOW_MS: u64 = 604_800_000;\n', '') } }, (root) =>
+    caught(checkFeeConfigSetters(root), /fee_config defines FEE_APPLY_WINDOW_MS 0 time\(s\)/),
+  );
+});
+
 test('(d) a proposal without the notice, or a notice under 24 hours, is caught', () => {
   withRoot(
     { edits: { [FEE_CONFIG]: replace('    let recipient = multisig::derive_address(&keys, &weights, threshold);\n    assert!(!multisig::is_single_signer(&weights, threshold), E_INVALID_FEE_RECIPIENT);\n    let eta = clock.timestamp_ms() + FEE_NOTICE_MS;', '    let recipient = multisig::derive_address(&keys, &weights, threshold);\n    assert!(!multisig::is_single_signer(&weights, threshold), E_INVALID_FEE_RECIPIENT);\n    let eta = clock.timestamp_ms();') } },
