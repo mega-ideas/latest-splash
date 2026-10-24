@@ -2816,7 +2816,7 @@ fun pay_with_config(s: &mut Scenario, fx: &Fx, config: ID, payer: address, alw: 
 }
 
 #[test]
-#[expected_failure(abort_code = 1028, location = splash_spend)]
+#[expected_failure(abort_code = splash_spend::E_WRONG_CONFIG)]
 /// Review finding (Low, A1/A4): splash_spend reads whichever config the PTB
 /// passes. A staff member cannot open an intent against a config other than
 /// the one the policy was created with.
@@ -2828,7 +2828,7 @@ fun an_intent_cannot_be_opened_against_another_compliance_config() {
 }
 
 #[test]
-#[expected_failure(abort_code = 1028, location = splash_spend)]
+#[expected_failure(abort_code = splash_spend::E_WRONG_CONFIG)]
 /// The reviewer's scenario: compliance pauses the policy's config, and the
 /// staff member pays the intent passing the other, unpaused one.
 fun a_payment_cannot_settle_against_another_compliance_config() {

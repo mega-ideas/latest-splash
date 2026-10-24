@@ -435,8 +435,9 @@ fun ready_for_staff(s: &mut Scenario, id: ID) {
 
 #[test]
 /// The policy copies in what it is: the account, the wallet that created it,
-/// the wallet generation, the asset it pays in, and the owners derived from
-/// the keys that derive the wallet. Nothing is listed yet, and the limits are
+/// the wallet generation, the asset it pays in, the compliance config it was
+/// created against, and the owners derived from the keys that derive the
+/// wallet. Nothing is listed yet, and the limits are
 /// the ones given plus the D2 default threshold. The ID returned is the
 /// shared object's, and one `PolicyCreated` is emitted.
 fun create_policy_records_wallet_generation_asset_and_owners() {
@@ -466,9 +467,11 @@ fun create_policy_records_wallet_generation_asset_and_owners() {
     s.next_tx(STRANGER);
     {
         let account = s.take_shared<BusinessAccount>();
+        let config = s.take_shared<ComplianceConfig>();
         let policy = s.take_shared<SpendPolicy>();
         assert_eq!(object::id(&policy), id);
         assert_eq!(spend_policy::account(&policy), object::id(&account));
+        assert_eq!(spend_policy::config(&policy), object::id(&config));
         assert_eq!(spend_policy::wallet(&policy), h::wallet());
         assert_eq!(spend_policy::wallet_epoch(&policy), business_account::wallet_epoch(&account));
         assert_eq!(spend_policy::wallet_epoch(&policy), 1);
@@ -485,6 +488,7 @@ fun create_policy_records_wallet_generation_asset_and_owners() {
         assert_eq!(spend_policy::recipient_count(&policy), 0);
         assert_eq!(spend_policy::beneficiary_count(&policy), 0);
         ts::return_shared(policy);
+        ts::return_shared(config);
         ts::return_shared(account);
     };
     s.end();

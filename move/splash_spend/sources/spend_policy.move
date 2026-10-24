@@ -16,9 +16,9 @@
 ///
 /// It lives in this package, not in `splash_core`, so no upgrade of
 /// `splash_core` can reach it. Everything that matters (the wallet, its
-/// generation, the asset, the owners, the lists, the limits) is copied in at
-/// creation or set by the wallet, and never read back from core's mutable
-/// state.
+/// generation, the asset, the compliance config, the owners, the lists, the
+/// limits) is copied in at creation or set by the wallet, and never read back
+/// from core's mutable state.
 ///
 /// ─── One policy per wallet generation ───────────────────────────────────────
 ///
@@ -124,6 +124,11 @@ public struct SpendPolicy has key {
     /// The one coin type this policy pays in (USDC). Its limits are minor
     /// units of it.
     asset: String,
+    /// The `ComplianceConfig` this policy was created against.
+    /// `splash_spend` opens and pays only against it, so its pause and
+    /// registries cannot be swapped for another config's: core v1 mints
+    /// one, but an additive core upgrade could add a constructor.
+    config: ID,
     /// The wallet members' own addresses, derived at creation from the keys
     /// that also derive `wallet`. Who may give a second approval.
     owners: vector<address>,
@@ -180,8 +185,9 @@ fun init(ctx: &mut TxContext) {
 /// The keys, weights and threshold must derive the sender, exactly as
 /// `register_wallet` checked, and the sender must be the account's registered
 /// wallet. The owners are derived from the same keys. `T` must be an asset
-/// the compliance config accepts (there is one config), checked before the
-/// generation's one slot is claimed.
+/// the compliance config accepts, checked before the generation's one slot is
+/// claimed, and the policy records that config's ID: `splash_spend` opens and
+/// pays under this policy only against it.
 public fun create_policy<T>(
     registry: &mut PolicyRegistry,
     account: &BusinessAccount,
@@ -211,6 +217,7 @@ public fun create_policy<T>(
         wallet: sender,
         wallet_epoch,
         asset,
+        config: object::id(config),
         owners,
         spenders: table::new(ctx),
         spender_count: 0,
@@ -406,6 +413,8 @@ public fun account(policy: &SpendPolicy): ID { policy.account }
 public fun wallet(policy: &SpendPolicy): address { policy.wallet }
 public fun wallet_epoch(policy: &SpendPolicy): u64 { policy.wallet_epoch }
 public fun asset(policy: &SpendPolicy): String { policy.asset }
+/// The ID of the `ComplianceConfig` this policy was created against.
+public fun config(policy: &SpendPolicy): ID { policy.config }
 public fun owners(policy: &SpendPolicy): vector<address> { policy.owners }
 public fun is_owner(policy: &SpendPolicy, who: address): bool { policy.owners.contains(&who) }
 public fun is_spender(policy: &SpendPolicy, who: address): bool { policy.spenders.contains(who) }

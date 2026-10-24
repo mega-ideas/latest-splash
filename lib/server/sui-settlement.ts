@@ -509,6 +509,7 @@ const ABORT_CODES: Record<number, string> = {
   1025: 'E_WRONG_DELIVERY_KIND — this recipient is verified to be paid another way. The owners chose when they verified it: a business on Splash is credited to its address balance, a wallet or exchange address is sent a coin. Open the payment with that kind.',
   1026: 'E_BAD_SETTLE_BY — an approval or delegation must name a settle-by time in the future and no later than the intent expiry: the quote deadline the approver is agreeing to.',
   1027: 'E_SETTLE_BY_AFTER_APPROVAL — this payment asks to settle later than its approval allows. Pass a settle-by no later than the approval, or approve again against a fresh quote.',
+  1028: 'E_WRONG_CONFIG — the compliance config passed is not the one this spending rule was created against. Pass the rule config (spend_policy::config).',
   1050: 'E_NOT_THE_WALLET — only the business wallet that made this spending rule can change it.',
   1051: 'E_WALLET_MISMATCH — the members do not derive the sender, or the sender is not the account registered business wallet.',
   1052: 'E_TOO_MANY_SPENDERS — this spending rule is at its limit of 64 spenders.',

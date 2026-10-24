@@ -15,9 +15,10 @@
 /// verified for exactly this kind of delivery), the amount is
 /// within the policy's and the spender's ceilings, and above the
 /// second-approval threshold a different owner has approved this exact
-/// payment. Then `splash_core` settles it, accepting this package's
-/// `SettleWitness` because it is on the settlement-app registry, and pays
-/// the intent's recipient in the same call.
+/// payment. Then `splash_core` settles it against the compliance config the
+/// policy recorded at creation (no other is accepted), accepting this
+/// package's `SettleWitness` because it is on that config's settlement-app
+/// registry, and pays the intent's recipient in the same call.
 ///
 /// A spending rule pays only on Sui (kinds 1–3). A cross-chain payment
 /// would have to hand the business's coin to the spender's transaction for
@@ -128,6 +129,8 @@ const E_WRONG_DELIVERY_KIND: u64 = 1025;
 const E_BAD_SETTLE_BY: u64 = 1026;
 /// The payment's `settle_by_ms` is later than the one its approval names.
 const E_SETTLE_BY_AFTER_APPROVAL: u64 = 1027;
+/// The compliance config is not the one this policy was created against.
+const E_WRONG_CONFIG: u64 = 1028;
 
 /// What an allowance accepted under a policy must be named: this prefix and
 /// the policy's id. The allowance module never reads its name, so this module
@@ -264,11 +267,11 @@ public fun accept<T>(
 
 /// Open an intent in the account's name, as STAFF under this policy.
 ///
-/// The destination must already be verified and the amount within the
-/// ceilings, so an intent that could never be paid under this policy is
-/// never opened. `pay_intent` checks everything again, since the policy can
-/// change in between. Returned by value: share it, or pay it in the same
-/// transaction.
+/// The config must be the one the policy was created against, the
+/// destination already verified and the amount within the ceilings, so an
+/// intent that could never be paid under this policy is never opened.
+/// `pay_intent` checks everything again, since the policy can change in
+/// between. Returned by value: share it, or pay it in the same transaction.
 public fun create_intent<T>(
     policy: &SpendPolicy,
     account: &mut BusinessAccount,
@@ -288,6 +291,7 @@ public fun create_intent<T>(
 ): PaymentIntent {
     let maker = ctx.sender();
     assert_current(policy, account);
+    assert_config(policy, config);
     assert!(compliance_config::type_string<T>() == spend_policy::asset(policy), E_WRONG_ASSET);
     assert!(spend_policy::is_staff(policy, maker), E_NOT_STAFF);
     assert_sui_destination(policy, kind, recipient, beneficiary_ref);
@@ -434,8 +438,9 @@ public fun discard_approval(approval: PayoutApproval) {
 ///
 /// `withdrawal` is the allowance withdrawal input for exactly the intent's
 /// amount, from the business wallet's address balance. `settle_by_ms` is the
-/// quote's deadline. The intent lands on Sui, and core pays its recipient in
-/// this call; a cross-chain intent is refused.
+/// quote's deadline. `config` must be the one the policy was created
+/// against. The intent lands on Sui, and core pays its recipient in this
+/// call; a cross-chain intent is refused.
 public fun pay_intent<C>(
     allowance: &mut Allowance<Balance<C>>,
     withdrawal: AllowanceWithdrawal<Balance<C>>,
@@ -449,7 +454,7 @@ public fun pay_intent<C>(
     ctx: &mut TxContext,
 ): SettleReceipt {
     assert!(payment_intent::kind(intent) != payment_intent::kind_cross_chain_wallet(), E_WRONG_PAY_PATH);
-    let funds = draw(allowance, withdrawal, intent, account, policy, approval, settle_by_ms, clock, ctx);
+    let funds = draw(allowance, withdrawal, intent, account, policy, config, approval, settle_by_ms, clock, ctx);
     payment_intent::settle_from_app<C, SettleWitness>(
         SettleWitness {},
         intent,
@@ -470,16 +475,19 @@ fun draw<C>(
     intent: &PaymentIntent,
     account: &BusinessAccount,
     policy: &SpendPolicy,
+    config: &ComplianceConfig,
     approval: Option<PayoutApproval>,
     settle_by_ms: u64,
     clock: &Clock,
     ctx: &TxContext,
 ): Balance<C> {
     let payer = ctx.sender();
-    // The money is this policy's wallet's, in this policy's asset; the policy
-    // is the account's current one; the intent is the account's.
+    // The money is this policy's wallet's, in this policy's asset, under this
+    // policy's compliance config; the policy is the account's current one;
+    // the intent is the account's.
     assert!(allowance::funder(allowance::allowance_settings(allowance)) == spend_policy::wallet(policy), E_WRONG_FUNDER);
     assert!(compliance_config::type_string<C>() == spend_policy::asset(policy), E_WRONG_ASSET);
+    assert_config(policy, config);
     assert_current(policy, account);
     assert_intent_of(policy, intent);
 
@@ -616,6 +624,13 @@ fun assert_current(policy: &SpendPolicy, account: &BusinessAccount) {
     assert!(business_account::has_wallet(account), E_STALE_POLICY);
     assert!(business_account::wallet(account) == spend_policy::wallet(policy), E_STALE_POLICY);
     assert!(business_account::wallet_epoch(account) == spend_policy::wallet_epoch(policy), E_STALE_POLICY);
+}
+
+/// The config is the one the policy was created against. Core reads the
+/// pause and the registries off whatever config it is handed, so this pins
+/// them to that one.
+fun assert_config(policy: &SpendPolicy, config: &ComplianceConfig) {
+    assert!(object::id(config) == spend_policy::config(policy), E_WRONG_CONFIG);
 }
 
 fun assert_intent_of(policy: &SpendPolicy, intent: &PaymentIntent) {
