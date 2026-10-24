@@ -169,7 +169,7 @@ for (const person of firstBoot ? seed : []) {
 //                     every lock.
 const DEMO_PASSWORD = 'SplashDemo!2026';
 const demos = [
-  { email: 'demo@acme.test', name: 'Demo Operator', orgId: 'demo-business', org: 'Acme Manufacturing', kyb: 'ACTIVE', onboarded: true,
+  { email: 'demo@acme.test', name: 'Acme Operator', orgId: 'demo-business', org: 'Acme Manufacturing', kyb: 'ACTIVE', onboarded: true,
     blurb: 'verified - USD in / local-currency out (sandbox), USDC on Sui mainnet (real)' },
   { email: 'live@acme.test', name: 'Live Operator', orgId: 'live-business', org: 'Live Stablecoin Co', kyb: 'REGISTERED', onboarded: true,
     blurb: 'UNVERIFIED - USDC on Sui mainnet only (real), 5,000 USDC / 30 days, fiat locked' },
@@ -182,7 +182,7 @@ for (const d of firstBoot ? demos : []) {
   await client.query(
     `INSERT INTO organizations (id, name, kyb_lifecycle, legal_name, registration_number,
        address_line1, address_city, address_state, address_postal_code, address_country)
-     VALUES ($1, $2, $3, $4, '202401000001', 'Level 8, Menara Demo, Jalan Ampang',
+     VALUES ($1, $2, $3, $4, '202401000001', 'Level 8, Menara Acme, Jalan Ampang',
        'Kuala Lumpur', 'Wilayah Persekutuan', '50450', 'MY')
      ON CONFLICT (id) DO NOTHING`,
     [d.orgId, d.org, d.kyb, `${d.org} Sdn Bhd`],
