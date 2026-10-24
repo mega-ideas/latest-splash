@@ -248,11 +248,13 @@ export function feeBreakdownRows(q: FeeQuoteWire): FeeBreakdownRow[] {
     ? [s.kindLabel, s.tierLabel, formatRate(BigInt(s.bps)), BASIS_NOTE[s.basis]].filter(Boolean).join(' · ')
     : `${s.kindLabel} · Splash's fee is not charged yet`;
   const rows: FeeBreakdownRow[] = [{ key: 'splash', label: 'Splash fee', detail, amount: `${formatUsdc(BigInt(s.minor))} USDC` }];
-  const third = (key: 'partner' | 'circle', label: string, f: { minor: string | null; source: string } | undefined) => {
-    if (f) rows.push({ key, label, detail: f.source, amount: f.minor === null ? 'Not quoted yet' : `${formatUsdc(BigInt(f.minor))} USDC` });
+  // A partner's or Circle's fee is theirs: it comes out of what they pay out
+  // or mint, so the line says so, and the total below does not include it.
+  const third = (key: 'partner' | 'circle', label: string, f: { minor: string | null; source: string } | undefined, where: string) => {
+    if (f) rows.push({ key, label, detail: `${f.source}. ${where}`, amount: f.minor === null ? 'Not quoted yet' : `${formatUsdc(BigInt(f.minor))} USDC` });
   };
-  third('partner', 'Payout-partner fee', q.partnerFee);
-  third('circle', 'Circle fee', q.circleFee);
+  third('partner', 'Payout-partner fee', q.partnerFee, 'Taken from the payout, not debited.');
+  third('circle', 'Circle fee', q.circleFee, 'Taken from the amount minted, not debited.');
   rows.push({ key: 'total', label: 'Total debited', detail: null, amount: `${formatUsdc(BigInt(q.totalDebitMinor))} USDC` });
   return rows;
 }

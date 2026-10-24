@@ -109,7 +109,7 @@ test('the fee breakdown renders the three lines from the quote', async () => {
   const { default: FeeBreakdown } = await import('../components/fees/FeeBreakdown.tsx');
   const out = text(renderToStaticMarkup(createElement(FeeBreakdown, { quote })));
   assert.match(out, /Splash fee Bank payout · 1,000 to under 10,000 USDC · 0\.20% 2\.00 USDC/);
-  assert.match(out, /Payout-partner fee Our Philippines payout partner, live quote 2\.00 USDC/);
+  assert.match(out, /Payout-partner fee Our Philippines payout partner, live quote\. Taken from the payout, not debited\. 2\.00 USDC/);
   assert.match(out, /Total debited 1,002\.00 USDC/);
 });
 
@@ -129,7 +129,7 @@ test('the receipt shows the breakdown it was charged', async () => {
   );
   const out = text(html);
   assert.match(out, /Splash fee Bank payout · 1,000 to under 10,000 USDC · 0\.20% 2\.00 USDC/);
-  assert.match(out, /Payout-partner fee Our Philippines payout partner, live quote 2\.00 USDC/);
+  assert.match(out, /Payout-partner fee Our Philippines payout partner, live quote\. Taken from the payout, not debited\. 2\.00 USDC/);
   assert.match(out, /Total debited 1,002\.00 USDC/);
   assert.doesNotMatch(out, /incl\./, 'the fee is no longer inside the amount');
 });

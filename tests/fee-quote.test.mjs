@@ -210,7 +210,7 @@ test('the fee breakdown is three lines: Splash fee with kind and tier, the partn
   assert.equal(rows[0].detail, 'Bank payout · 1,000 to under 10,000 USDC · 0.20%');
   assert.equal(rows[0].amount, '2.00 USDC');
   assert.equal(rows[1].label, 'Payout-partner fee');
-  assert.equal(rows[1].detail, 'Our Philippines payout partner, live quote');
+  assert.equal(rows[1].detail, 'Our Philippines payout partner, live quote. Taken from the payout, not debited.');
   assert.equal(rows[1].amount, '2.00 USDC');
   assert.equal(rows[2].label, 'Total debited');
   assert.equal(rows[2].amount, '1,002.00 USDC');
