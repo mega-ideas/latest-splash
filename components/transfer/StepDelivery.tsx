@@ -96,7 +96,7 @@ export default function StepDelivery({ state, set, prev, next }: { state: Transf
           </div>
         </div>
       )}
-      <div className="flex gap-3"><button onClick={prev} className="flex-1 rounded-xl border border-foreground/15 py-3 font-bold">Back</button><button onClick={() => { set({ deliveryTier: chosen }); next(); }} className="flex-1 rounded-xl bg-accent py-3 font-bold text-[#073d49]">Review quote</button></div>
+      <div className="flex gap-3"><button onClick={prev} className="flex-1 rounded-xl border border-foreground/15 py-3 font-bold">Back</button><button onClick={() => { set({ deliveryTier: chosen }); next(); }} className="flex-1 rounded-xl bg-[#0C3E48] py-3 font-bold text-white transition-colors hover:bg-[#145D6A] focus-ring">Review quote</button></div>
     </div>
   );
 }
