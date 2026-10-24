@@ -272,7 +272,7 @@ async function withEnv(patch, fn) {
 test('the quote engine prices a local-currency payout as a BANK_PAYOUT, with the partner fee from the partner quote', async () => {
   const { calculateQuote } = await import('../lib/server/quote.ts');
   const quote = await withEnv({ SPLASH_FEE_CONFIG_ID: undefined, SUI_NETWORK: 'testnet', PDAX_API_KEY: undefined }, () =>
-    calculateQuote(100_000, undefined, 'PHP'),
+    calculateQuote(100_000, undefined, 'PHP', 'STANDARD', { destination: { type: 'bank' } }),
   );
   // US$1,000.00 is 1,000 USDC of principal: the 1,000 to 10,000 tier, 0.20%.
   assert.equal(quote.principalMinor, '1000000000');
@@ -294,7 +294,7 @@ test('on mainnet a quote with no FeeConfig configured fails closed', async () =>
   const { calculateQuote } = await import('../lib/server/quote.ts');
   const { FeeConfigUnavailableError } = await import('../lib/fees/fee-config.ts');
   await withEnv({ SPLASH_FEE_CONFIG_ID: undefined, SUI_NETWORK: 'mainnet' }, () =>
-    assert.rejects(calculateQuote(100_000, undefined, 'PHP'), FeeConfigUnavailableError),
+    assert.rejects(calculateQuote(100_000, undefined, 'PHP', 'STANDARD', { destination: { type: 'bank' } }), FeeConfigUnavailableError),
   );
 });
 

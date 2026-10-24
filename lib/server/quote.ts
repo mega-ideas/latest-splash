@@ -3,7 +3,7 @@ import { randomUUID } from 'crypto';
 import { getUsdCorridorByCurrency } from '@/lib/fx/corridors';
 import { applyBps, applyRate, formatMinor, parseRate } from '@/lib/money';
 import { quoteDiscountBps, quoteFeeState, type FeeScheduleSource } from '@/lib/fees/fee-config';
-import { BANK_DESTINATION, destinationKind, destinationLabel, type PaymentDestination } from '@/lib/fees/destination';
+import { destinationKind, destinationLabel, type PaymentDestination } from '@/lib/fees/destination';
 import { buildFeeQuote, feeQuoteToWire, type FeeQuoteWire, type ThirdPartyFee } from '@/lib/fees/quote';
 import { getCachedJson, setCachedJson } from '@/lib/server/redis-cache';
 import { evaluateTransferLimits, type LimitResult } from '@/lib/server/limits';
@@ -140,14 +140,16 @@ async function partnerFeeFor(targetCurrency: string, principalMinor: bigint): Pr
 
 export async function calculateQuote(
   fromAmountCents: number,
-  recipientId?: string,
+  recipientId: string | undefined,
   targetCurrency = 'PHP',
   feeTier: FundingFeeTier = 'STANDARD',
-  options: { businessId?: string | null; destination?: PaymentDestination } = {},
+  options: { businessId?: string | null; destination: PaymentDestination },
 ): Promise<QuoteData> {
   if (!Number.isSafeInteger(fromAmountCents) || fromAmountCents <= 0) throw new RangeError('a quote needs a positive whole number of cents');
-  // A local-currency payout pays a bank: the default for a caller that is one.
-  const destination = options.destination ?? BANK_DESTINATION;
+  // No default: a caller names where the payment goes, so nothing is ever
+  // priced as a bank payout because the destination was forgotten.
+  const destination = options?.destination;
+  if (!destination) throw new QuoteDestinationError('A quote needs a destination: say where the payment goes.');
   if (destination.type !== 'bank') {
     throw new QuoteDestinationError(
       `A payment to ${destinationLabel(destination.type)} is priced when its route opens in Phase 2. Today a quote prices a payout to a bank account; to pay a Sui wallet, use Send USDC.`,
