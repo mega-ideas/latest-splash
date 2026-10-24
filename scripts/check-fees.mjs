@@ -21,11 +21,14 @@
  *     by scripts/move-source.mjs); in schedule.ts only an
  *     `export const NAME = <digits>n;` at the start of a line counts.
  *
- * (c) NO LITERAL FEE RATE IN app/, components/ OR content/. Customer copy is
- *     rendered from the schedule (A1 §2.7), never typed in. Every line of
- *     every .ts .tsx .js .jsx .mjs .cjs .json .md .mdx file under those three
- *     directories is read as text, comments included (a rate in a comment
- *     goes stale the same way). A RATE is a number, or a range of two,
+ * (c) NO LITERAL FEE RATE IN app/, components/, content/, lib/agent/ OR THE
+ *     SEND USDC LANE (lib/payments/stablecoin-lane.ts). Customer copy is
+ *     rendered from the schedule (A1 §2.7), never typed in: the screens, the
+ *     content, Zeke's replies and tools (A1 §2.8 names them), and the lane
+ *     that quotes the WALLET fee on the Send USDC desk. Every line of every
+ *     .ts .tsx .js .jsx .mjs .cjs .json .md .mdx file under those roots is
+ *     read as text, comments included (a rate in a comment goes stale the
+ *     same way). A RATE is a number, or a range of two,
  *     followed by `%`, `bps`, `bp` or `basis point(s)` (`0.30%`, `0.3 %`,
  *     `3–5%`, `30 bps`, `15–30 bps`), but not one inside `[…]`, such as a
  *     Tailwind `w-[60%]`. FEE WORDING is one of the words fee, fees, charge,
@@ -49,8 +52,10 @@
  *     Allowed: a rate that is not Splash's with no fee wording on its line
  *     (`0.5% slippage`, `-12%`); a fee AMOUNT, which is not a rate
  *     (`min 0.25 USDC`); a fee rate rendered from data
- *     (`${formatBps(bps)}`). lib/ is not scanned: lib/fees holds the
- *     schedule, and the rest of lib/ is §2.8's own grep.
+ *     (`${formatBps(bps)}`). The rest of lib/ is not scanned: lib/fees
+ *     holds the schedule, lib/payments/cctp.ts and the partner adapters
+ *     hold Circle's and the partners' own fees (not Splash's, A1 §2.2), and
+ *     abort explanations quote the ceiling; the rest is §2.8's own grep.
  *     PENDING_2_8 below listed, per file and per rate, the literals A1 §2.8
  *     had still to remove; §2.8 emptied it, and it stays empty
  *     (tests/flat-fee-removed.test.mjs). It could only shrink: a count that
@@ -90,7 +95,7 @@
  * Adding a name to an allow-list here is a deliberate act its commit
  * message must justify.
  */
-import { readdirSync, readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -175,9 +180,10 @@ export function checkCeiling(root) {
   return failures;
 }
 
-// ─── (c) no literal fee rate in app/, components/, content/ ─────────────────
+// ─── (c) no literal fee rate in customer copy ──────────────────────────────
 
-export const RATE_ROOTS = ['app', 'components', 'content'];
+/** Directories, or single files, rule (c) reads. */
+export const RATE_ROOTS = ['app', 'components', 'content', 'lib/agent', 'lib/payments/stablecoin-lane.ts'];
 const RATE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.json', '.md', '.mdx']);
 const FEE_WORDS = new Set(['fee', 'fees', 'charge', 'charges', 'charged', 'commission', 'commissions', 'pricing', 'surcharge', 'markup']);
 const RATE_WORDS = new Set(['bps', 'bp', 'rate', 'percent', 'pct', 'percentage']);
@@ -266,11 +272,21 @@ function textFiles(dir) {
   return out.sort();
 }
 
-/** Every literal fee rate under app/, components/ and content/: `{ file, line, rate }`. */
+/** The files under one of RATE_ROOTS: the file itself, or every text file in the directory. */
+function rootFiles(full) {
+  try {
+    if (statSync(full).isFile()) return RATE_EXTENSIONS.has(path.extname(full)) ? [full] : [];
+  } catch {
+    return [];
+  }
+  return textFiles(full);
+}
+
+/** Every literal fee rate under RATE_ROOTS: `{ file, line, rate }`. */
 export function feeRateLiterals(root, rates = splashRates(root)) {
   const out = [];
   for (const dir of RATE_ROOTS) {
-    for (const full of textFiles(path.join(root, dir))) {
+    for (const full of rootFiles(path.join(root, dir))) {
       const file = path.relative(root, full).replace(/\\/g, '/');
       readFileSync(full, 'utf8')
         .split(/\r?\n/)
@@ -483,7 +499,7 @@ function main() {
   const pending = PENDING_2_8.reduce((n, p) => n + p.count, 0);
   console.log(
     `check:fees: the Move vector test is up to date; FEE_CEILING_BPS is ${A1_CEILING_BPS} in splash_core, splash_spend and lib/fees/schedule.ts; ` +
-      `no new literal fee rate in ${RATE_ROOTS.join('/, ')}/ (${pending} still listed for A1 §2.8); fee_config changes only through the 24-hour path, but set_discount.`,
+      `no new literal fee rate in ${RATE_ROOTS.map((r) => (path.extname(r) ? r : `${r}/`)).join(', ')} (${pending} still listed for A1 §2.8); fee_config changes only through the 24-hour path, but set_discount.`,
   );
 }
 

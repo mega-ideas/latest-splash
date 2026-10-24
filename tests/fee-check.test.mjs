@@ -4,7 +4,8 @@
  * The guard holds four claims about Splash's fee: (a) the generated Move
  * vector test is what lib/fees/vectors.json makes; (b) FEE_CEILING_BPS is
  * one number, 100, in splash_core, splash_spend and lib/fees/schedule.ts;
- * (c) app/, components/ and content/ type in no fee rate; (d) fee_config has
+ * (c) app/, components/, content/, lib/agent/ and the Send USDC lane type in
+ * no fee rate; (d) fee_config has
  * no way to change the fee in force at once but set_discount. Each breach
  * below is planted into a scratch copy of the files the rule reads and must
  * be caught; the allowed cases must pass; and the real repository passes,
@@ -207,7 +208,7 @@ test('(c) what counts as a literal fee rate', () => {
   assert.deepEqual(feeRatesInLine('const ok = feeBps === 5;', rates), []);
 });
 
-test('(c) a fee rate typed into app/, components/ or content/ is caught, with its line; lib/ is not scanned', () => {
+test('(c) a fee rate typed into app/, components/ or content/ is caught, with its line; lib/fees is not scanned', () => {
   withRoot(
     {
       extra: {
