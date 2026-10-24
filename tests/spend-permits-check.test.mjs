@@ -320,6 +320,43 @@ public fun settle_from_app<C, W>(_w: W, funds: Balance<C>) {
   assert.match(r.output, /payment_intent/);
 });
 
+// The A1 review: A1 made draw() depend on splash_core::fee_config::splash_fee
+// and splash_core::address_registry::derive_kind, but rule 1 pinned only
+// payment_intent, business_account, compliance_config, audit_anchor and
+// multisig to splash_core. A splash_spend module of either name, or an
+// import of either from another package, passed, and could make draw()'s
+// fee and kind checks vacuous.
+for (const [module, imported, local] of [
+  [
+    'fee_config',
+    'use splash_core::fee_config::{Self, FeeConfig};',
+    `module splash_spend::fee_config;
+public fun splash_fee<C>(_c: &C, _b: ID, _k: u8, _p: u64): u64 { 0 }
+`,
+  ],
+  [
+    'address_registry',
+    'use splash_core::address_registry::{Self, Registry};',
+    `module splash_spend::address_registry;
+public fun derive_kind<R>(_r: &R, _to: address, declared: u8, _cctp: bool): u8 { declared }
+`,
+  ],
+]) {
+  test(`a splash_spend module named ${module}, standing in for core's, is caught`, () => {
+    const kept = imported.replace(`use splash_core::${module}::{Self, `, `use splash_core::${module}::{`).replace('{FeeConfig}', 'FeeConfig').replace('{Registry}', 'Registry');
+    const r = runWith((s) => s.replace(imported, `${kept}\nuse splash_spend::${module};`), { [`${module}.move`]: local });
+    assert.equal(r.exitCode, 1, r.output);
+    assert.match(r.output, new RegExp(`module splash_spend::${module} would stand in for splash_core's \`${module}\``));
+    assert.match(r.output, new RegExp(`\`use splash_spend::${module}\` is not splash_core::${module}`));
+  });
+
+  test(`importing ${module} from a package other than splash_core is caught`, () => {
+    const r = runWith((s) => s.replace(imported, imported.replace('splash_core::', 'other_core::')));
+    assert.equal(r.exitCode, 1, r.output);
+    assert.match(r.output, new RegExp(`\`use other_core::${module}::\\{Self, \\w+\\}\` is not splash_core::${module}`));
+  });
+}
+
 test('reading the drawn amount before returning it is allowed', () => {
   // A check inside draw() that reads the Balance is not a leak; the
   // hardened rules must not push anyone into rewriting a safe draw.
