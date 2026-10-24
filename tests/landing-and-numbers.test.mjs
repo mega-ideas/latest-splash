@@ -311,3 +311,20 @@ test('the comparison table shows no competitor figure without a named, dated sou
   assert.doesNotMatch(yields, /0\.38|3\.12|3\.14/, 'nor in the route');
   assert.doesNotMatch(yields, /fallback/i, 'an unread source is null, not a remembered rate');
 });
+
+test('the comparison table names no competitor, and its fintech column is the dataset category', async () => {
+  // The A1 review: the cinematic landing's table still had a Wise column
+  // with qualitative claims about it ('Mid-market', 'Wise account'), none
+  // sourced. lib/fx/comparison-baselines.ts keeps named competitors off
+  // every surface until a sourced number exists and Sky approves it, as
+  // components/landing already does. The column is the dataset's
+  // digital-provider category instead, with that category's own figures.
+  const landing = await source('components/IsometricLanding.tsx');
+  const table = landing.slice(landing.indexOf('const comparisonRowsFor'), landing.indexOf('type YieldBenchmarks'));
+  assert.doesNotMatch(table, /\bWise\b/, 'no Wise in the rows');
+  assert.doesNotMatch(table, /Mid-market/, 'no mid-market claim the dataset contradicts');
+  const head = landing.slice(landing.indexOf('<table className="iso-comparison-table">'), landing.indexOf('</thead>'));
+  assert.doesNotMatch(head, /\bWise\b/, 'no Wise column');
+  assert.match(head, /Fintech app/, 'the column is the category');
+  assert.match(landing, /COMPARISON_BASELINE\?\.fintech/, "the fintech column's figures come from the dataset");
+});
