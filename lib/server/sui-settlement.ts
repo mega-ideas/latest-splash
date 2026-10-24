@@ -338,7 +338,7 @@ const ABORT_CODES: Record<number, string> = {
   // ── payment_intent ───────────────────────────────────────────────────────
   400: 'E_NOT_PENDING — payment_intent confirm/cancel called on an intent that is not in STATUS_PENDING.',
   401: 'E_EXPIRED — the intent reached its expires_at (the time its creator chose, at most 30 days out) before this settlement. Every settle path refuses it from that moment on; open a new intent.',
-  402: 'E_INSUFFICIENT_PAYMENT — coin value below intent.amount_usd on confirm.',
+  402: 'E_INSUFFICIENT_PAYMENT — the payment is below the intent amount plus the fee this settlement charges (the intent fee_minor, or less if the config fee has been lowered since).',
   403: 'E_NOT_YET_EXPIRED — payment_intent::cancel_payment_intent called before intent.expires_at.',
   404: 'E_UNAUTHORIZED — payment_intent action attempted by an address other than intent.sender.',
   405: 'E_INVALID_AMOUNT — a payment_intent::create* call was given an amount of 0.',
@@ -465,6 +465,13 @@ const ABORT_CODES: Record<number, string> = {
   367: 'E_ADDITION_LAPSED — the addition window closed seven days after its 24-hour notice ran. Propose it again, so owners are alerted again.',
   368: 'E_LAST_ASSET — refused to remove the last accepted asset, which would stop every payment for at least 24 hours. Use pause to halt settlement.',
   369: 'E_LEGACY_DISABLED (earlier v2 testnet package only) — the legacy per-person approval path had been switched off. v2 core does not contain that path: pay from the business wallet or under a spending rule.',
+  370: 'E_FEE_ABOVE_CEILING — a fee change proposed a max_fee_bps above 200 (2%), the ceiling written into the package. Propose 200 or less.',
+  371: 'E_FEE_ADDRESS_SINGLE_SIGNER — the proposed fee address is a multisig one member can sign for alone (a 1-of-1, or weights that let one key meet the threshold). The fee goes only to a Splash finance multisig that needs at least two members, never to a lone key such as the KMS operator.',
+  372: 'E_FEE_CHANGE_PENDING — a fee change is already waiting out its 24-hour notice. Activate it or cancel it before proposing another.',
+  373: 'E_NO_FEE_CHANGE — there is no pending fee change to activate or cancel.',
+  374: 'E_FEE_NOTICE_NOT_RUN — the 24-hour notice for this fee change has not run yet. Read ComplianceConfig.pending_fee_change for its eta.',
+  375: 'E_FEE_CHANGE_LAPSED — the fee change was not activated within seven days of its notice running. Cancel it and propose it again, so it gives notice again.',
+  376: 'E_FEE_CHANGE_MISMATCH — the activation names a fee address, bps ceiling or cap different from the pending fee change. Activate exactly what was proposed.',
 
   // ── payment_intent: v2 ───────────────────────────────────────────────────
   421: 'E_BAD_EXPIRY — expires_at must be in the future and no more than 30 days away.',
@@ -473,7 +480,7 @@ const ABORT_CODES: Record<number, string> = {
   424: 'E_BAD_RAIL_COMMITMENT — the rail commitment is not 32 bytes. It is blake2b256(splash:rail:v1 || bcs(payload) || salt); see docs/commitments.md.',
   425: 'E_CROSS_CHAIN_ONLY — this is a cross-chain intent. It settles only through a _cross_chain path, which hands the coin to a bridge adapter.',
   426: 'E_NOT_CROSS_CHAIN — a _cross_chain path was given an intent that lands on Sui. Use the matching path that pays the recipient address.',
-  427: 'E_EXACT_AMOUNT_REQUIRED — funds drawn under a spending rule must equal the intent amount exactly.',
+  427: 'E_EXACT_AMOUNT_REQUIRED — funds drawn under a spending rule must equal the intent amount plus the fee it recorded (fee_minor) exactly.',
   428: 'E_BENEFICIARY_REQUIRED — a bank payout names its beneficiary by a 32-byte commitment (splash:beneficiary:v1); other kinds name none.',
   429: 'E_BAD_PAYMENT_REF — the payment reference must be a 32-byte commitment over the business own invoice or payment id.',
   430: 'E_SETTLE_BY_PASSED — the quote this transaction was signed against has lapsed. Get a fresh quote and sign again.',
@@ -481,6 +488,8 @@ const ABORT_CODES: Record<number, string> = {
   432: 'E_WRONG_BRIDGE_COIN — the coin handed to the bridge adapter is not the coin the settlement released, or not its type or amount.',
   433: 'E_BAD_BRIDGE_FEE — the cross-chain fee ceiling would take the whole payment.',
   434: 'E_BELOW_SETTLEMENT_FLOOR — this bank payout is below its floor: the larger of the 99 USDC platform minimum and ComplianceConfig.min_settlement_amount. It is checked when the intent opens and again when it settles, so an intent opened before compliance raised the floor no longer settles. Wallet, Splash-business and cross-chain payments have no floor.',
+  435: 'E_FEE_ABOVE_MAX — the intent asks for a fee_bps above ComplianceConfig.max_fee_bps. The business chooses the fee; the config bounds it. Open the intent at or below the ceiling.',
+  436: 'E_NO_FEE_ADDRESS — the intent carries a fee, but no fee address is configured, so the fee would have nowhere to go. Open it with fee_bps 0 until a fee change has been activated.',
 
   // ── splash_spend (spending rules) ────────────────────────────────────────
   1000: 'E_WRONG_FUNDER — the allowance is not funded by this spending rule wallet.',

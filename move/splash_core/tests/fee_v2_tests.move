@@ -355,9 +355,11 @@ fun app_pays(s: &mut Scenario, id: ID, funds: u64) {
 fun intent_fees(s: &mut Scenario, id: ID): (u64, u64, u64) {
     s.next_tx(h::owner_1());
     let intent = s.take_shared_by_id<PaymentIntent>(id);
-    let r = (payment_intent::fee_bps(&intent), payment_intent::fee_minor(&intent), payment_intent::fee_charged_minor(&intent));
+    let bps = payment_intent::fee_bps(&intent);
+    let fee = payment_intent::fee_minor(&intent);
+    let charged = payment_intent::fee_charged_minor(&intent);
     ts::return_shared(intent);
-    r
+    (bps, fee, charged)
 }
 
 fun assert_coin_at(s: &mut Scenario, who: address, value: u64) {

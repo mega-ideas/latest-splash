@@ -41,6 +41,19 @@
 /// be removed once published. Neither is in this package. See
 /// docs/v2/phase1-move-design.md.
 ///
+/// ─── The fee leg (decision 1) ────────────────────────────────────────────────
+///
+/// An intent may carry Splash's fee: `fee_bps`, chosen by the business off
+/// chain and bounded by `ComplianceConfig.max_fee_bps`. The fee is computed
+/// here, when the intent opens (`amount * fee_bps / 10_000`, rounded down,
+/// then capped at `fee_cap_minor`), and recorded on the intent, so the owners
+/// see it before they approve and the receipt can show it. At settlement the
+/// fee charged is the lesser of that and the fee under the config then in
+/// force, so a later rise never charges more than was shown. It is its own
+/// leg, sent to the config's fee address in the same call; the principal
+/// reaches the recipient exactly as it would with no fee, and nothing a PTB
+/// passes in chooses where the fee goes.
+///
 /// Every path checks that settlement is not paused, that the asset is still
 /// accepted, and the account's KYB, freeze flags and ceilings. A bank payout
 /// must also reach its floor, the larger of 99 USDC and
@@ -123,6 +136,10 @@ const E_BAD_BRIDGE_FEE: u64 = 433;
 /// A bank payout is below its floor: the larger of the 99 USDC platform
 /// minimum and `ComplianceConfig.min_settlement_amount`.
 const E_BELOW_SETTLEMENT_FLOOR: u64 = 434;
+/// The intent's `fee_bps` is above the config's `max_fee_bps`.
+const E_FEE_ABOVE_MAX: u64 = 435;
+/// The intent carries a fee, and no fee address is configured to receive it.
+const E_NO_FEE_ADDRESS: u64 = 436;
 
 /// The only module permitted to destroy a `SettleReceipt`. Bound by module name
 /// because Move forbids the circular import that naming the type would require —
@@ -139,6 +156,8 @@ const MAX_INTENT_LIFETIME_MS: u64 = 2_592_000_000;
 const COMMITMENT_BYTES: u64 = 32;
 /// A cross-chain payment is USDC to USDC: no conversion, so its rate is 1.
 const UNIT_FX_RATE: u64 = 1_000_000;
+/// A fee is `amount * fee_bps / BPS_DENOMINATOR`, rounded down.
+const BPS_DENOMINATOR: u128 = 10_000;
 
 // ─── Status constants ──────────────────────────────────────────────────────
 const STATUS_PENDING:   u8 = 0;
@@ -206,6 +225,16 @@ public struct PaymentIntent has key {
     bridge_max_fee: u64,
     /// v2, cross-chain only: the finality CCTP must wait for on Sui.
     bridge_min_finality: u32,
+    /// Decision 1. The fee the business chose for this payment, in basis
+    /// points, no more than the config's `max_fee_bps` when it opened.
+    fee_bps: u64,
+    /// The fee recorded when it opened: `amount * fee_bps / 10_000`, rounded
+    /// down, then capped at the config's `fee_cap_minor`. What the owners are
+    /// shown before they approve, and the most settlement will charge.
+    fee_minor: u64,
+    /// What settlement charged: the recorded fee, or less if the config's fee
+    /// was lowered in between. 0 until the intent settles.
+    fee_charged_minor: u64,
 }
 
 /// A cross-chain payment the coin has been released for but not yet burned.
@@ -384,6 +413,9 @@ fun assert_bank_payout_floor(config: &ComplianceConfig, amount: u64) {
 // for approvals that come later — so the owners sign a whole batch once.
 
 /// Open an intent in an account's name, signed by the account's wallet.
+///
+/// `fee_bps` is Splash's fee on this payment, which the business chose; 0 for
+/// none. See the module header for how it is bounded and charged.
 public fun create_for_wallet<T>(
     account: &mut BusinessAccount,
     config: &ComplianceConfig,
@@ -391,6 +423,7 @@ public fun create_for_wallet<T>(
     recipient: address,
     beneficiary_ref: vector<u8>,
     amount: u64,
+    fee_bps: u64,
     target_currency: String,
     fx_rate_usd_local: u64,
     commitment: vector<u8>,
@@ -403,7 +436,7 @@ public fun create_for_wallet<T>(
     let wallet = business_account::assert_wallet(account, ctx);
     assert_sui_kind(kind);
     open<T>(
-        account, config, wallet, payment_ref, recipient, beneficiary_ref, amount, target_currency,
+        account, config, wallet, payment_ref, recipient, beneficiary_ref, amount, fee_bps, target_currency,
         fx_rate_usd_local, commitment, kind, SUI_DOMAIN, rail_commitment, 0, 0, expires_at, clock, ctx,
     )
 }
@@ -422,6 +455,7 @@ public fun create_cross_chain_for_wallet<T>(
     destination_domain: u32,
     mint_recipient: address,
     amount: u64,
+    fee_bps: u64,
     commitment: vector<u8>,
     rail_commitment: vector<u8>,
     bridge_max_fee: u64,
@@ -433,7 +467,7 @@ public fun create_cross_chain_for_wallet<T>(
     let wallet = business_account::assert_wallet(account, ctx);
     assert!(destination_domain != SUI_DOMAIN, E_BAD_DOMAIN);
     open<T>(
-        account, config, wallet, payment_ref, mint_recipient, vector[], amount, b"USDC".to_string(),
+        account, config, wallet, payment_ref, mint_recipient, vector[], amount, fee_bps, b"USDC".to_string(),
         UNIT_FX_RATE, commitment, KIND_CROSS_CHAIN_WALLET, destination_domain, rail_commitment,
         bridge_max_fee, bridge_min_finality, expires_at, clock, ctx,
     )
@@ -446,7 +480,8 @@ public fun create_cross_chain_for_wallet<T>(
 /// only a type on `ComplianceConfig.settlement_apps` is accepted — an entry
 /// that took 24 hours' public notice to get there. `splash_spend` calls this
 /// after checking that `maker` is one of the business's staff and that the
-/// destination is on its verified list.
+/// destination is on its verified list. `fee_bps` is bounded and recorded as
+/// on the wallet's create.
 public fun create_for_app<T, W: drop>(
     _witness: W,
     account: &mut BusinessAccount,
@@ -456,6 +491,7 @@ public fun create_for_app<T, W: drop>(
     recipient: address,
     beneficiary_ref: vector<u8>,
     amount: u64,
+    fee_bps: u64,
     target_currency: String,
     fx_rate_usd_local: u64,
     commitment: vector<u8>,
@@ -469,7 +505,7 @@ public fun create_for_app<T, W: drop>(
     assert!(maker != @0x0, E_INVALID_RECIPIENT);
     assert_sui_kind(kind);
     open<T>(
-        account, config, maker, payment_ref, recipient, beneficiary_ref, amount, target_currency,
+        account, config, maker, payment_ref, recipient, beneficiary_ref, amount, fee_bps, target_currency,
         fx_rate_usd_local, commitment, kind, SUI_DOMAIN, rail_commitment, 0, 0, expires_at, clock, ctx,
     )
 }
@@ -482,6 +518,7 @@ fun open<T>(
     recipient: address,
     beneficiary_ref: vector<u8>,
     amount: u64,
+    fee_bps: u64,
     target_currency: String,
     fx_rate_usd_local: u64,
     commitment: vector<u8>,
@@ -526,6 +563,12 @@ fun open<T>(
         assert!(bridge_max_fee < amount, E_BAD_BRIDGE_FEE);
     };
 
+    // The fee, fixed now so it can be shown before approval. A fee needs
+    // somewhere to go: before any fee address is configured, none is allowed.
+    if (fee_bps > 0) assert!(compliance_config::fee_address(config).is_some(), E_NO_FEE_ADDRESS);
+    assert!(fee_bps <= compliance_config::max_fee_bps(config), E_FEE_ABOVE_MAX);
+    let fee_minor = fee_of(amount, fee_bps, compliance_config::fee_cap_minor(config));
+
     let now = clock::timestamp_ms(clock);
     assert_lifetime(expires_at, now);
 
@@ -554,6 +597,9 @@ fun open<T>(
         payment_ref,
         bridge_max_fee,
         bridge_min_finality,
+        fee_bps,
+        fee_minor,
+        fee_charged_minor: 0,
     };
     emit_created(&intent, now);
     intent
@@ -572,8 +618,9 @@ public fun share_intent(intent: PaymentIntent) {
 /// The sender must be the account's wallet: the business multisig. Its
 /// signature is the approval, and the protocol enforced it before this ran.
 /// Whoever opened the intent (the wallet, or a staff member under a spending
-/// rule), the owners can pay it themselves. An overpayment goes back to the
-/// wallet's address balance.
+/// rule), the owners can pay it themselves. The payment covers the amount and
+/// the fee (`fee_due`); the fee leg goes to the config's fee address, and an
+/// overpayment goes back to the wallet's address balance.
 public fun confirm_from_business_wallet<T>(
     intent: &mut PaymentIntent,
     account: &mut BusinessAccount,
@@ -585,11 +632,13 @@ public fun confirm_from_business_wallet<T>(
 ): SettleReceipt {
     let wallet = business_account::assert_wallet(account, ctx);
     assert_lands_on_sui(intent);
-    assert!(coin::value(&payment) >= intent.amount_usd, E_INSUFFICIENT_PAYMENT);
-    let now = settle_for_account<T>(intent, account, config, PATH_BUSINESS_WALLET, settle_by_ms, clock);
+    let fee = fee_due(intent, config);
+    assert!(coin::value(&payment) >= intent.amount_usd + fee, E_INSUFFICIENT_PAYMENT);
+    let now = settle_for_account<T>(intent, account, config, fee, PATH_BUSINESS_WALLET, settle_by_ms, clock);
 
     let paid = coin::split(&mut payment, intent.amount_usd, ctx);
     deliver_coin(intent, paid);
+    pay_fee_from_coin(&mut payment, fee, config, ctx);
     refund_coin(payment, wallet);
     receipt(intent, now)
 }
@@ -609,21 +658,25 @@ public fun confirm_from_business_wallet_balance<T>(
 ): SettleReceipt {
     let wallet = business_account::assert_wallet(account, ctx);
     assert_lands_on_sui(intent);
-    assert!(payment.value() >= intent.amount_usd, E_INSUFFICIENT_PAYMENT);
-    let now = settle_for_account<T>(intent, account, config, PATH_BUSINESS_WALLET, settle_by_ms, clock);
+    let fee = fee_due(intent, config);
+    assert!(payment.value() >= intent.amount_usd + fee, E_INSUFFICIENT_PAYMENT);
+    let now = settle_for_account<T>(intent, account, config, fee, PATH_BUSINESS_WALLET, settle_by_ms, clock);
 
     let paid = payment.split(intent.amount_usd);
     deliver_balance(intent, paid, ctx);
+    pay_fee_from_balance(&mut payment, fee, config);
     refund_balance(payment, wallet);
     receipt(intent, now)
 }
 
 /// Pay an account's cross-chain intent from the business wallet.
 ///
-/// Nothing is sent to an address here. The exact amount comes back as a coin,
-/// beside a `BridgeObligation` naming that coin, which only a registered
+/// The principal is sent to no address here. The exact amount comes back as a
+/// coin, beside a `BridgeObligation` naming that coin, which only a registered
 /// bridge adapter can discharge: the same transaction must burn this coin
-/// through CCTP to the intent's domain and recipient, or abort.
+/// through CCTP to the intent's domain and recipient, or abort. The fee leg,
+/// if any, goes to the config's fee address on Sui, and the change to the
+/// wallet's address balance.
 public fun confirm_cross_chain_from_business_wallet<T>(
     intent: &mut PaymentIntent,
     account: &mut BusinessAccount,
@@ -635,10 +688,12 @@ public fun confirm_cross_chain_from_business_wallet<T>(
 ): (SettleReceipt, Coin<T>, BridgeObligation) {
     let wallet = business_account::assert_wallet(account, ctx);
     assert_cross_chain(intent);
-    assert!(coin::value(&payment) >= intent.amount_usd, E_INSUFFICIENT_PAYMENT);
-    let now = settle_for_account<T>(intent, account, config, PATH_BUSINESS_WALLET, settle_by_ms, clock);
+    let fee = fee_due(intent, config);
+    assert!(coin::value(&payment) >= intent.amount_usd + fee, E_INSUFFICIENT_PAYMENT);
+    let now = settle_for_account<T>(intent, account, config, fee, PATH_BUSINESS_WALLET, settle_by_ms, clock);
 
     let to_bridge = coin::split(&mut payment, intent.amount_usd, ctx);
+    pay_fee_from_coin(&mut payment, fee, config, ctx);
     refund_coin(payment, wallet);
     let obligation = obligation(intent, object::id(&to_bridge));
     (receipt(intent, now), to_bridge, obligation)
@@ -649,25 +704,35 @@ public fun confirm_cross_chain_from_business_wallet<T>(
 /// `W` is the app's witness, accepted only from a type on
 /// `ComplianceConfig.settlement_apps`. The app is `splash_spend`, which drew
 /// `funds` under an app-bound allowance from the business wallet and checked
-/// them against the business's `SpendPolicy` before calling this. The amount
-/// must be exact: there is nowhere to "refund" allowance money to without
-/// moving it twice.
+/// them against the business's `SpendPolicy` before calling this. The funds
+/// must be exactly the amount plus the fee the intent recorded (`fee_minor`),
+/// so the app draws a figure the owners saw. If the config's fee has been
+/// lowered since, the fee charged is lower, and the difference goes back to
+/// the account's wallet's address balance: `splash_spend` draws from that
+/// wallet, and pays only under a policy of the account's current one.
 public fun settle_from_app<T, W: drop>(
     _witness: W,
     intent: &mut PaymentIntent,
     account: &mut BusinessAccount,
     config: &ComplianceConfig,
-    funds: Balance<T>,
+    mut funds: Balance<T>,
     settle_by_ms: u64,
     clock: &Clock,
     ctx: &mut TxContext,
 ): SettleReceipt {
     compliance_config::assert_settlement_app<W>(config);
     assert_lands_on_sui(intent);
-    assert!(funds.value() == intent.amount_usd, E_EXACT_AMOUNT_REQUIRED);
-    let now = settle_for_account<T>(intent, account, config, PATH_SETTLEMENT_APP, settle_by_ms, clock);
+    assert!(funds.value() == intent.amount_usd + intent.fee_minor, E_EXACT_AMOUNT_REQUIRED);
+    let fee = fee_due(intent, config);
+    let now = settle_for_account<T>(intent, account, config, fee, PATH_SETTLEMENT_APP, settle_by_ms, clock);
 
-    deliver_balance(intent, funds, ctx);
+    let paid = funds.split(intent.amount_usd);
+    deliver_balance(intent, paid, ctx);
+    pay_fee_from_balance(&mut funds, fee, config);
+    // Only a lowered fee leaves anything here. The wallet is looked up only
+    // then, so an exact settlement never depends on it.
+    if (funds.value() > 0) balance::send_funds(funds, business_account::wallet(account))
+    else funds.destroy_zero();
     receipt(intent, now)
 }
 
@@ -705,11 +770,13 @@ public fun discharge_bridge_obligation<W: drop, T>(
 /// not lapsed; settlement is not paused and the asset is still accepted; a
 /// bank payout still reaches its floor, which compliance may have raised
 /// since the intent opened; and the account passes KYB, both freeze flags and
-/// its ceilings, which are charged here.
+/// its ceilings, which are charged here with the principal. `fee` is what this
+/// settlement charges (`fee_due`), recorded on the intent for the receipt.
 fun settle_for_account<T>(
     intent: &mut PaymentIntent,
     account: &mut BusinessAccount,
     config: &ComplianceConfig,
+    fee: u64,
     path: u8,
     settle_by_ms: u64,
     clock: &Clock,
@@ -730,8 +797,41 @@ fun settle_for_account<T>(
     business_account::charge_payout(account, intent.amount_usd, bank_payout, clock);
 
     intent.status = STATUS_CONFIRMED;
+    intent.fee_charged_minor = fee;
     emit_confirmed(intent, path, now);
     now
+}
+
+/// `amount * fee_bps / 10_000`, rounded down, then capped. Both steps run in
+/// u128: the product of two u64 values always fits, and the result is
+/// narrowed only once it is below the u64 cap, so no input aborts.
+fun fee_of(amount: u64, fee_bps: u64, cap_minor: u64): u64 {
+    let fee = ((amount as u128) * (fee_bps as u128)) / BPS_DENOMINATOR;
+    if (fee < (cap_minor as u128)) (fee as u64) else cap_minor
+}
+
+/// The fee this settlement charges: the lesser of the fee the intent recorded
+/// and the fee under the config in force now (its bps ceiling and cap), so a
+/// fee raised after the owners saw it never charges more than they saw. With
+/// no fee address configured there is nowhere to send one, and the fee is 0.
+fun fee_due(intent: &PaymentIntent, config: &ComplianceConfig): u64 {
+    if (intent.fee_minor == 0 || compliance_config::fee_address(config).is_none()) return 0;
+    let max_bps = compliance_config::max_fee_bps(config);
+    let bps = if (intent.fee_bps < max_bps) intent.fee_bps else max_bps;
+    let now = fee_of(intent.amount_usd, bps, compliance_config::fee_cap_minor(config));
+    if (now < intent.fee_minor) now else intent.fee_minor
+}
+
+/// The fee leg: `fee` out of `payment`, to the fee address the config names
+/// now, credited to its address balance. Nothing when the fee is 0.
+fun pay_fee_from_coin<T>(payment: &mut Coin<T>, fee: u64, config: &ComplianceConfig, ctx: &mut TxContext) {
+    if (fee == 0) return;
+    coin::send_funds(coin::split(payment, fee, ctx), *compliance_config::fee_address(config).borrow())
+}
+
+fun pay_fee_from_balance<T>(payment: &mut Balance<T>, fee: u64, config: &ComplianceConfig) {
+    if (fee == 0) return;
+    balance::send_funds(payment.split(fee), *compliance_config::fee_address(config).borrow())
 }
 
 /// Hand the funds to the recipient, in the form the recipient can use.
@@ -875,6 +975,9 @@ fun destroy(intent: PaymentIntent) {
         payment_ref: _,
         bridge_max_fee: _,
         bridge_min_finality: _,
+        fee_bps: _,
+        fee_minor: _,
+        fee_charged_minor: _,
     } = intent;
     id.delete();
 }
@@ -902,6 +1005,21 @@ public fun payment_ref(intent: &PaymentIntent): vector<u8>  { intent.payment_ref
 public fun bridge_max_fee(intent: &PaymentIntent): u64      { intent.bridge_max_fee }
 public fun bridge_min_finality(intent: &PaymentIntent): u32 { intent.bridge_min_finality }
 public fun is_pending(intent: &PaymentIntent): bool         { intent.status == STATUS_PENDING }
+/// The fee the business chose, in basis points.
+public fun fee_bps(intent: &PaymentIntent): u64             { intent.fee_bps }
+/// The fee recorded at opening: what the owners are shown before approving,
+/// and what a settlement app must draw on top of the amount.
+public fun fee_minor(intent: &PaymentIntent): u64           { intent.fee_minor }
+/// The fee settlement charged, for the receipt. 0 until settled.
+public fun fee_charged_minor(intent: &PaymentIntent): u64   { intent.fee_charged_minor }
+
+/// The fee an intent of `amount` at `fee_bps` would record under `config`
+/// now: `amount * fee_bps / 10_000`, rounded down, capped at the config's
+/// `fee_cap_minor`. For quoting before the intent opens; it does not check
+/// `fee_bps` against the ceiling or the fee address, which opening does.
+public fun fee_for(config: &ComplianceConfig, amount: u64, fee_bps: u64): u64 {
+    fee_of(amount, fee_bps, compliance_config::fee_cap_minor(config))
+}
 
 /// Whether a payment reference has already opened an intent on this account.
 public fun payment_ref_used(account: &BusinessAccount, payment_ref: vector<u8>): bool {

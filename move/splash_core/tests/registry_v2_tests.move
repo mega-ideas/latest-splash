@@ -301,6 +301,7 @@ fun app_intent(s: &mut Scenario, n: u8) {
         h::recipient(),
         h::beneficiary(),
         h::amount(),
+        0,
         b"PHP".to_string(),
         56_000_000,
         h::commitment(),

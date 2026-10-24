@@ -490,7 +490,7 @@ async function walletPays(step, kind, to, amount, pair) {
     typeArguments: [USDC],
     arguments: [
       tx.object(ACCOUNT), tx.object(CONFIG), tx.pure.vector('u8', ref32(step)), tx.pure.address(to), tx.pure.vector('u8', []),
-      tx.pure.u64(amount), tx.pure.string('USDC'), tx.pure.u64(1_000_000), tx.pure.vector('u8', ref32(`${step}:commitment`)),
+      tx.pure.u64(amount), tx.pure.u64(0), tx.pure.string('USDC'), tx.pure.u64(1_000_000), tx.pure.vector('u8', ref32(`${step}:commitment`)),
       tx.pure.u8(kind), tx.pure.vector('u8', ref32(`${step}:rail`)), tx.pure.u64(now + 3_600_000), tx.object(CLOCK),
     ],
   });
@@ -521,7 +521,7 @@ if (!done('duplicateRefRefused')) {
     typeArguments: [USDC],
     arguments: [
       tx.object(ACCOUNT), tx.object(CONFIG), tx.pure.vector('u8', ref32('walletPaysWallet')), tx.pure.address(RECIPIENT), tx.pure.vector('u8', []),
-      tx.pure.u64(1), tx.pure.string('USDC'), tx.pure.u64(1_000_000), tx.pure.vector('u8', ref32('dup')),
+      tx.pure.u64(1), tx.pure.u64(0), tx.pure.string('USDC'), tx.pure.u64(1_000_000), tx.pure.vector('u8', ref32('dup')),
       tx.pure.u8(KIND_WALLET), tx.pure.vector('u8', ref32('dup:rail')), tx.pure.u64(now + 3_600_000), tx.object(CLOCK),
     ],
   });
@@ -591,7 +591,7 @@ if (!done('spendBeforeActivationRefused')) {
     typeArguments: [USDC],
     arguments: [
       tx.object(POLICY), tx.object(ACCOUNT), tx.object(CONFIG), tx.pure.vector('u8', ref32('early')), tx.pure.address(OWNERS[2]), tx.pure.vector('u8', []),
-      tx.pure.u64(200_000), tx.pure.string('USDC'), tx.pure.u64(1_000_000), tx.pure.vector('u8', ref32('early:c')), tx.pure.u8(KIND_WALLET),
+      tx.pure.u64(200_000), tx.pure.u64(0), tx.pure.string('USDC'), tx.pure.u64(1_000_000), tx.pure.vector('u8', ref32('early:c')), tx.pure.u8(KIND_WALLET),
       tx.pure.vector('u8', ref32('early:r')), tx.pure.u64(now + 3_600_000), tx.object(CLOCK),
     ],
   });
@@ -640,7 +640,7 @@ function staffIntent(tx, step, amount) {
     typeArguments: [USDC],
     arguments: [
       tx.object(POLICY), tx.object(ACCOUNT), tx.object(CONFIG), tx.pure.vector('u8', ref32(step)), tx.pure.address(OWNERS[2]), tx.pure.vector('u8', []),
-      tx.pure.u64(amount), tx.pure.string('USDC'), tx.pure.u64(1_000_000), tx.pure.vector('u8', ref32(`${step}:c`)), tx.pure.u8(KIND_WALLET),
+      tx.pure.u64(amount), tx.pure.u64(0), tx.pure.string('USDC'), tx.pure.u64(1_000_000), tx.pure.vector('u8', ref32(`${step}:c`)), tx.pure.u8(KIND_WALLET),
       tx.pure.vector('u8', ref32(`${step}:r`)), tx.pure.u64(Date.now() + INTENT_LIFETIME_MS), tx.object(CLOCK),
     ],
   });
@@ -729,7 +729,7 @@ if (!done('delegatedIntent')) {
     typeArguments: [USDC],
     arguments: [
       tx.object(ACCOUNT), tx.object(CONFIG), tx.pure.vector('u8', ref32('delegated')), tx.pure.address(OWNERS[2]), tx.pure.vector('u8', []),
-      tx.pure.u64(200_000), tx.pure.string('USDC'), tx.pure.u64(1_000_000), tx.pure.vector('u8', ref32('delegated:c')), tx.pure.u8(KIND_WALLET),
+      tx.pure.u64(200_000), tx.pure.u64(0), tx.pure.string('USDC'), tx.pure.u64(1_000_000), tx.pure.vector('u8', ref32('delegated:c')), tx.pure.u8(KIND_WALLET),
       tx.pure.vector('u8', ref32('delegated:r')), tx.pure.u64(Date.now() + INTENT_LIFETIME_MS), tx.object(CLOCK),
     ],
   });

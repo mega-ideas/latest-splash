@@ -13,7 +13,7 @@ export const SPLASH_CORE_ABI = {
   'peg_monitor::update_peg':
     '&mut peg_monitor::PegState, &business_account::AnchorCap, &cap_registry::CapRegistry, u64, u64, &clock::Clock',
   'payment_intent::create_for_wallet':
-    '&mut business_account::BusinessAccount, &compliance_config::ComplianceConfig, vector<u8>, address, vector<u8>, u64, string::String, u64, vector<u8>, u8, vector<u8>, u64, &clock::Clock',
+    '&mut business_account::BusinessAccount, &compliance_config::ComplianceConfig, vector<u8>, address, vector<u8>, u64, u64, string::String, u64, vector<u8>, u8, vector<u8>, u64, &clock::Clock',
   'payment_intent::confirm_from_business_wallet_balance':
     '&mut payment_intent::PaymentIntent, &mut business_account::BusinessAccount, &compliance_config::ComplianceConfig, balance::Balance<T0>, u64, &clock::Clock',
   'payment_intent::share_intent': 'payment_intent::PaymentIntent',

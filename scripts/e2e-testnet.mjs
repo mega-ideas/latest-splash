@@ -597,6 +597,7 @@ function openForWallet(tx, { recipient, commitment, rail, paymentRef }) {
       tx.pure.address(recipient),
       tx.pure.vector('u8', []),
       tx.pure.u64(PAYMENT_MINOR),
+      tx.pure.u64(0), // fee_bps 0: no Splash fee on the verify payment
       tx.pure.string('USDC'),
       tx.pure.u64(FX_RATE_SCALED),
       tx.pure.vector('u8', Array.from(commitment)),
