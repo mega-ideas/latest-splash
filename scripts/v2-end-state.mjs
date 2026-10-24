@@ -27,11 +27,19 @@
  *     them cannot hide behind a node that left the type out;
  *   - the package must be version 1 with no later versions.
  *
+ * Amendment A1 adds two capabilities splash_core mints to the publisher and
+ * one object whose state the ceremony sets: FeeAdminCap must be held by the
+ * governance multisig, OpsCap by the ops multisig (or governance), and the
+ * FeeConfig must pay no one until the ceremony applies the finance multisig,
+ * and only it after that (checkCapHolder, checkFeeRecipient).
+ *
  * Every check fails closed: what the node does not return counts against the
  * end state, and an id that is not configured is SKIP, never PASS.
  *
  * It does not compare the on-chain modules with the audited build, check
- * splash_spend's linkage, or read the ComplianceConfig's registries.
+ * splash_spend's linkage, read the ComplianceConfig's registries, or know who
+ * a multisig's members are: a holder is compared with the address configured
+ * for it, and the ceremony checks that address's members.
  */
 import { normalizeSuiAddress } from '@mysten/sui/utils';
 
@@ -335,4 +343,103 @@ export async function checkUpgradeWrapper(node, { wrapperId, delayPackageId, cor
     owner = { check: O, status: 'PASS', detail: `${id} is held by the governance multisig ${holder}.` };
   }
   return [wrapper, owner];
+}
+
+// ─── Amendment A1: the fee's and the registry's authority, and who is paid ───
+
+/**
+ * A capability splash_core mints to the publisher at publish, held now by the
+ * multisig the ceremony moves it to: FeeAdminCap (fee_config) to the
+ * governance multisig, OpsCap (address_registry) to the ops multisig, or the
+ * governance multisig when there is no ops one (the A1 review). The type is
+ * pinned to `corePackageId`'s, so a look-alike of another package is not
+ * passed. A record: { check, status, detail }.
+ */
+export async function checkCapHolder(node, { check, envKey, capId, capType, corePackageId, holder, holderKey, holderName, power, operator }) {
+  const result = (status, detail) => ({ check, status, detail });
+  const name = capType.split('::').pop();
+  if (!capId) return result('SKIP', `skipped: set ${envKey} to the ${name} to check that ${holderName} holds it.`);
+  const id = normalizeSuiAddress(capId);
+  const read = await readObject(node, id);
+  if (!read.object) {
+    return result('FAIL', read.missing ? `${envKey} ${id} does not exist on this chain.` : `${envKey} ${id} could not be read: ${read.error}`);
+  }
+  const core = corePackageId ? normalizeSuiAddress(corePackageId) : '';
+  if (!core) return result('SKIP', `skipped: set SPLASH_CORE_PACKAGE_ID so ${id} is known to be splash_core's ${name} before its holder is checked.`);
+  const expected = `${core}::${capType}`;
+  if (normalizeType(read.object.type) !== expected) {
+    return result('FAIL', `${envKey} ${id} is a ${read.object.type || 'object of no type'}, not ${expected}.`);
+  }
+  const owner = read.object.owner?.$kind === 'AddressOwner' ? normalizeSuiAddress(read.object.owner.AddressOwner) : null;
+  if (!owner) return result('FAIL', `${id} is not owned by an address (${read.object.owner?.$kind ?? 'no owner returned'}), so it cannot be shown to be ${holderName}'s.`);
+  const hot = operator ? normalizeSuiAddress(operator) : '';
+  if (hot && owner === hot) {
+    return result('FAIL', `${id} is held by the operator ${owner}, a single hot key: ${power}. Move it to ${holderName}.`);
+  }
+  const multisig = holder ? normalizeSuiAddress(holder) : '';
+  if (!multisig) return result('SKIP', `skipped: ${id} is held by ${owner}; set ${holderKey} to ${holderName} to check it is that.`);
+  if (owner !== multisig) return result('FAIL', `${id} is held by ${owner}, not ${holderName} ${multisig}: ${power}. Move it to ${holderName}.`);
+  return result('PASS', `${id} is held by ${holderName} ${owner}.`);
+}
+
+/** An Option<address> as the node returns it: null for none, the address for some; null if it is neither. */
+function optionalAddress(value) {
+  if (value === null) return { none: true };
+  if (typeof value === 'string' && /^0x[0-9a-fA-F]{1,64}$/.test(value)) return { address: normalizeSuiAddress(value) };
+  return null;
+}
+
+/**
+ * Whom the FeeConfig pays (A1 §2.5, Sky's FIXUP 1): no one at publish, so
+ * Splash's fees are off, until the ceremony applies the finance multisig
+ * through the 24-hour path; then the finance multisig, and nothing else. A
+ * pending change to anyone but the finance multisig fails. Without the
+ * finance multisig's address to compare, a recipient is skipped, never
+ * passed. One record: 'Fee recipient'.
+ */
+export async function checkFeeRecipient(node, { feeConfigId, corePackageId, finance }) {
+  const result = (status, detail) => ({ check: 'Fee recipient', status, detail });
+  if (!feeConfigId) return result('SKIP', 'skipped: set SPLASH_FEE_CONFIG_ID to check that the FeeConfig pays no one until the ceremony applies the finance multisig.');
+  const id = normalizeSuiAddress(feeConfigId);
+  const read = await readObject(node, id, { json: true });
+  if (!read.object) {
+    return result('FAIL', read.missing ? `SPLASH_FEE_CONFIG_ID ${id} does not exist on this chain.` : `SPLASH_FEE_CONFIG_ID ${id} could not be read: ${read.error}`);
+  }
+  const core = corePackageId ? normalizeSuiAddress(corePackageId) : '';
+  if (!core) return result('SKIP', `skipped: set SPLASH_CORE_PACKAGE_ID so ${id} is known to be splash_core's FeeConfig before its recipient is checked.`);
+  const expected = `${core}::fee_config::FeeConfig`;
+  if (normalizeType(read.object.type) !== expected) {
+    return result('FAIL', `SPLASH_FEE_CONFIG_ID ${id} is a ${read.object.type || 'object of no type'}, not ${expected}.`);
+  }
+  const json = wrapperJson(read.object);
+  if (!json || !('fee_recipient' in json) || !('pending_recipient' in json)) {
+    return result('FAIL', `the node did not return ${id}'s fee recipient, so whom Splash's fees pay cannot be checked.`);
+  }
+  const recipient = optionalAddress(json.fee_recipient);
+  if (!recipient) return result('FAIL', `${id}'s fee recipient is unreadable (${JSON.stringify(json.fee_recipient)}).`);
+  let pending = null;
+  if (json.pending_recipient !== null) {
+    const p = json.pending_recipient;
+    const to = typeof p?.recipient === 'string' ? optionalAddress(p.recipient) : null;
+    if (!to?.address) return result('FAIL', `${id}'s pending fee recipient is unreadable (${JSON.stringify(p)}).`);
+    const eta = asBigInt(p.eta_ms);
+    pending = { address: to.address, when: eta === null ? 'an unreadable eta' : new Date(Number(eta)).toISOString() };
+  }
+  const multisig = finance ? normalizeSuiAddress(finance) : '';
+  const pendingNote = pending ? ` A change to ${pending.address} is pending, applicable from ${pending.when} for seven days.` : '';
+  if (pending && multisig && pending.address !== multisig) {
+    return result(
+      'FAIL',
+      `${id}: a fee recipient change to ${pending.address} is pending, not the finance multisig ${multisig}. Propose the finance multisig (fee_config::propose_fee_recipient), which replaces it.`,
+    );
+  }
+  if (recipient.none) {
+    if (pending && !multisig) {
+      return result('SKIP', `skipped: ${id} has no fee recipient, so Splash's fees are off, but a change to ${pending.address} is pending; set SPLASH_FINANCE_ADDRESS to the finance multisig to check it is that.`);
+    }
+    return result('PASS', `${id} has no fee recipient: Splash's fees are off until the ceremony applies the finance multisig.${pendingNote}`);
+  }
+  if (!multisig) return result('SKIP', `skipped: ${id} pays Splash's fees to ${recipient.address}; set SPLASH_FINANCE_ADDRESS to the finance multisig to check it is that.`);
+  if (recipient.address !== multisig) return result('FAIL', `${id} pays Splash's fees to ${recipient.address}, not the finance multisig ${multisig}.`);
+  return result('PASS', `${id} pays Splash's fees to the finance multisig ${multisig}.${pendingNote}`);
 }

@@ -16,7 +16,13 @@
  *            transaction, so no UpgradeCap for them ever outlived the
  *            publish; core's UpgradeCap is in SPLASH_UPGRADE_WRAPPER_ID, a
  *            DelayedUpgradeCap of that splash_upgrade_delay, policy additive
- *            (128), held by SPLASH_GOVERNANCE_ADDRESS. Each id is optional:
+ *            (128), held by SPLASH_GOVERNANCE_ADDRESS. Amendment A1:
+ *            FeeAdminCap (SPLASH_FEE_ADMIN_CAP_ID) is held by the
+ *            governance multisig, OpsCap (SPLASH_OPS_CAP_ID) by the ops
+ *            multisig (SPLASH_OPS_ADDRESS, else governance), the operator
+ *            holds neither, and the FeeConfig (SPLASH_FEE_CONFIG_ID) pays
+ *            no one until the ceremony applies the finance multisig
+ *            (SPLASH_FINANCE_ADDRESS), then only it. Each id is optional:
  *            unset, its check is reported skipped, never passed.
  *   abi      every function called takes the parameters the current source
  *            declares, so a package published from older source is named.
@@ -62,7 +68,7 @@ import { newSalt, paymentCommitment, paymentRefCommitment, railCommitment, toHex
 import { SUI_USDC_COIN_TYPE } from '../lib/payments/stablecoin-lane.ts';
 import { SUI_NETWORK, SUI_RPC_URL } from '../lib/sui.ts';
 import { SPLASH_CORE_ABI } from './splash-core-abi.mjs';
-import { checkImmutablePackage, checkUpgradeWrapper, isUpgradeCapFor } from './v2-end-state.mjs';
+import { checkCapHolder, checkFeeRecipient, checkImmutablePackage, checkUpgradeWrapper, isUpgradeCapFor } from './v2-end-state.mjs';
 
 const env = (k) => (process.env[k] ?? '').trim();
 
@@ -128,6 +134,14 @@ function objectIdFromEnv(key, { required }) {
   return normalizeSuiAddress(value);
 }
 
+/** An optional Sui address from the environment, normalized; '' when unset. */
+function addressFromEnv(key) {
+  const value = env(key);
+  if (!value) return '';
+  if (!isValidSuiAddress(normalizeSuiAddress(value))) stop(`${key} is not a Sui address: ${value}`);
+  return normalizeSuiAddress(value);
+}
+
 // The core package, as corePackageIdOrThrow resolves it: SPLASH_CORE_PACKAGE_ID,
 // or the legacy SPLASH_PACKAGE_ID alias.
 const CORE_FROM_ENV = env('SPLASH_CORE_PACKAGE_ID');
@@ -174,6 +188,16 @@ if (governanceFromEnv && !isValidSuiAddress(normalizeSuiAddress(governanceFromEn
 }
 // The governance multisig that must hold the wrapper.
 const GOVERNANCE = governanceFromEnv ? normalizeSuiAddress(governanceFromEnv) : '';
+
+// Amendment A1's end state (the A1 review), each optional like the above:
+// FeeAdminCap held by the governance multisig, OpsCap by the ops multisig
+// (SPLASH_OPS_ADDRESS, else the governance multisig), and the FeeConfig
+// (SPLASH_FEE_CONFIG_ID) paying no one until the ceremony applies the finance
+// multisig (SPLASH_FINANCE_ADDRESS), then only it.
+const FEE_ADMIN_CAP = objectIdFromEnv('SPLASH_FEE_ADMIN_CAP_ID', { required: false });
+const OPS_CAP = objectIdFromEnv('SPLASH_OPS_CAP_ID', { required: false });
+const OPS = addressFromEnv('SPLASH_OPS_ADDRESS');
+const FINANCE = addressFromEnv('SPLASH_FINANCE_ADDRESS');
 
 // The coin the app settles in (USDC_TYPE), or Circle's USDC on this network
 // when USDC_TYPE is unset or the development stand-in.
@@ -451,7 +475,21 @@ async function checkIds() {
     'Wrap it in splash_upgrade_delay under the governance multisig (docs/UPGRADE-POLICY.md).',
     (o) => isUpgradeCapFor(o, PACKAGE),
   );
-  if (ADMIN_CAP && (await checkObject('AdminCap', 'SPLASH_ADMIN_CAP_ID', ADMIN_CAP, typeIn('business_account::AdminCap'), { shared: false }))) {
+  // Amendment A1's two capabilities, minted to the publisher: the hot key
+  // must hold neither (checkEndState checks who does).
+  await checkNotHeld(
+    'FeeAdminCap custody',
+    'fee_config::FeeAdminCap',
+    typeIn('fee_config::FeeAdminCap'),
+    'Move it to the governance multisig: with it one key sets any discount at once and proposes any fee schedule or recipient.',
+  );
+  await checkNotHeld(
+    'OpsCap custody',
+    'address_registry::OpsCap',
+    typeIn('address_registry::OpsCap'),
+    'Move it to the ops multisig (or the governance multisig): with it one key adds or removes partner deposit addresses at once.',
+  );
+  if (ADMIN_CAP &&(await checkObject('AdminCap', 'SPLASH_ADMIN_CAP_ID', ADMIN_CAP, typeIn('business_account::AdminCap'), { shared: false }))) {
     record('AdminCap', 'PASS', ADMIN_CAP);
   }
 }
@@ -476,6 +514,32 @@ async function checkEndState() {
       governance: GOVERNANCE,
       operator: OPERATOR,
     })),
+    // Amendment A1 (the A1 review).
+    await checkCapHolder(client, {
+      check: 'FeeAdminCap holder',
+      envKey: 'SPLASH_FEE_ADMIN_CAP_ID',
+      capId: FEE_ADMIN_CAP,
+      capType: 'fee_config::FeeAdminCap',
+      corePackageId: PACKAGE,
+      holder: GOVERNANCE,
+      holderKey: 'SPLASH_GOVERNANCE_ADDRESS',
+      holderName: 'the governance multisig',
+      power: 'it could set any discount at once and propose any fee schedule or recipient alone',
+      operator: OPERATOR,
+    }),
+    await checkCapHolder(client, {
+      check: 'OpsCap holder',
+      envKey: 'SPLASH_OPS_CAP_ID',
+      capId: OPS_CAP,
+      capType: 'address_registry::OpsCap',
+      corePackageId: PACKAGE,
+      holder: OPS || GOVERNANCE,
+      holderKey: OPS ? 'SPLASH_OPS_ADDRESS' : 'SPLASH_OPS_ADDRESS (or SPLASH_GOVERNANCE_ADDRESS)',
+      holderName: OPS ? 'the ops multisig' : 'the governance multisig',
+      power: 'it could add or remove a partner deposit address alone, at once',
+      operator: OPERATOR,
+    }),
+    await checkFeeRecipient(client, { feeConfigId: FEE_CONFIG, corePackageId: PACKAGE, finance: FINANCE }),
   ];
   for (const r of records) record(r.check, r.status, r.detail);
 }
