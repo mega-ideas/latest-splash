@@ -20,6 +20,7 @@ module splash_spend::spend_policy_tests;
 use splash_core::address_registry;
 use splash_core::business_account::{Self, BusinessAccount};
 use splash_core::compliance_config::{Self, ComplianceConfig};
+use splash_core::fee_config::FeeConfig;
 use splash_core::multisig;
 use splash_core::payment_intent;
 use splash_core::v2_harness::{Self as h, USDC};
@@ -112,11 +113,15 @@ fun create_as(
     s.next_tx(sender);
     let mut registry = s.take_shared<PolicyRegistry>();
     let config = s.take_shared<ComplianceConfig>();
+    let fees = s.take_shared<FeeConfig>();
+    let areg = s.take_shared<address_registry::Registry>();
     let account = s.take_shared<BusinessAccount>();
     let id = spend_policy::create_policy<USDC>(
         &mut registry,
         &account,
         &config,
+        &fees,
+        &areg,
         keys,
         weights,
         threshold,
@@ -124,6 +129,8 @@ fun create_as(
         s.ctx(),
     );
     ts::return_shared(account);
+    ts::return_shared(areg);
+    ts::return_shared(fees);
     ts::return_shared(config);
     ts::return_shared(registry);
     id
@@ -141,11 +148,15 @@ fun create_for(
     s.next_tx(sender);
     let mut registry = s.take_shared<PolicyRegistry>();
     let config = s.take_shared<ComplianceConfig>();
+    let fees = s.take_shared<FeeConfig>();
+    let areg = s.take_shared<address_registry::Registry>();
     let account = s.take_shared_by_id<BusinessAccount>(account_id);
     let id = spend_policy::create_policy<USDC>(
         &mut registry,
         &account,
         &config,
+        &fees,
+        &areg,
         keys,
         weights,
         threshold,
@@ -153,6 +164,8 @@ fun create_for(
         s.ctx(),
     );
     ts::return_shared(account);
+    ts::return_shared(areg);
+    ts::return_shared(fees);
     ts::return_shared(config);
     ts::return_shared(registry);
     id
@@ -451,12 +464,16 @@ fun create_policy_records_wallet_generation_asset_and_owners() {
     let id = {
         let mut registry = s.take_shared<PolicyRegistry>();
         let config = s.take_shared<ComplianceConfig>();
+        let fees = s.take_shared<FeeConfig>();
+        let areg = s.take_shared<address_registry::Registry>();
         let account = s.take_shared<BusinessAccount>();
         let before = event::events_by_type<PolicyCreated>().length();
         let id = spend_policy::create_policy<USDC>(
             &mut registry,
             &account,
             &config,
+            &fees,
+            &areg,
             h::keys(),
             h::weights(),
             h::threshold(),
@@ -465,6 +482,8 @@ fun create_policy_records_wallet_generation_asset_and_owners() {
         );
         assert_eq!(event::events_by_type<PolicyCreated>().length(), before + 1);
         ts::return_shared(account);
+        ts::return_shared(areg);
+        ts::return_shared(fees);
         ts::return_shared(config);
         ts::return_shared(registry);
         id
@@ -545,6 +564,25 @@ fun owners_come_from_the_wallet_keys_not_from_the_account() {
         assert!(!spend_policy::is_owner(&policy, STRANGER));
         ts::return_shared(policy);
     };
+    s.end();
+}
+
+#[test]
+/// The policy records Splash's FeeConfig and address Registry, as it records
+/// its compliance config: `splash_spend` pays under it only against those
+/// (A1 §2.6), so no second one an added core constructor could make can
+/// redirect or waive a rule payment's fee, or reclassify its recipient.
+fun create_policy_records_splashs_fee_config_and_address_registry() {
+    let (mut s, id) = begin_with_policy();
+    s.next_tx(STRANGER);
+    let policy = s.take_shared_by_id<SpendPolicy>(id);
+    let fees = s.take_shared<FeeConfig>();
+    let areg = s.take_shared<address_registry::Registry>();
+    assert_eq!(spend_policy::fee_config(&policy), object::id(&fees));
+    assert_eq!(spend_policy::address_registry(&policy), object::id(&areg));
+    ts::return_shared(areg);
+    ts::return_shared(fees);
+    ts::return_shared(policy);
     s.end();
 }
 
@@ -668,11 +706,15 @@ fun second_policy_in_another_asset_for_the_same_generation_aborts() {
     s.next_tx(h::wallet());
     let mut registry = s.take_shared<PolicyRegistry>();
     let config = s.take_shared<ComplianceConfig>();
+    let fees = s.take_shared<FeeConfig>();
+    let areg = s.take_shared<address_registry::Registry>();
     let account = s.take_shared<BusinessAccount>();
     spend_policy::create_policy<USDT>(
         &mut registry,
         &account,
         &config,
+        &fees,
+        &areg,
         h::keys(),
         h::weights(),
         h::threshold(),
@@ -680,6 +722,8 @@ fun second_policy_in_another_asset_for_the_same_generation_aborts() {
         s.ctx(),
     );
     ts::return_shared(account);
+    ts::return_shared(areg);
+    ts::return_shared(fees);
     ts::return_shared(config);
     ts::return_shared(registry);
     s.end();
@@ -696,11 +740,15 @@ fun a_policy_in_an_asset_the_config_does_not_accept_cannot_be_created() {
     s.next_tx(h::wallet());
     let mut registry = s.take_shared<PolicyRegistry>();
     let config = s.take_shared<ComplianceConfig>();
+    let fees = s.take_shared<FeeConfig>();
+    let areg = s.take_shared<address_registry::Registry>();
     let account = s.take_shared<BusinessAccount>();
     spend_policy::create_policy<USDT>(
         &mut registry,
         &account,
         &config,
+        &fees,
+        &areg,
         h::keys(),
         h::weights(),
         h::threshold(),
@@ -708,6 +756,8 @@ fun a_policy_in_an_asset_the_config_does_not_accept_cannot_be_created() {
         s.ctx(),
     );
     ts::return_shared(account);
+    ts::return_shared(areg);
+    ts::return_shared(fees);
     ts::return_shared(config);
     ts::return_shared(registry);
     s.end();

@@ -205,6 +205,8 @@ fun setup_with(accept_other: bool): (Scenario, Fx) {
     {
         let mut registry = s.take_shared<PolicyRegistry>();
         let config = s.take_shared<ComplianceConfig>();
+        let fees = s.take_shared<FeeConfig>();
+        let areg = s.take_shared<address_registry::Registry>();
         let account = s.take_shared<BusinessAccount>();
         account_id = object::id(&account);
         policy_id =
@@ -212,6 +214,8 @@ fun setup_with(accept_other: bool): (Scenario, Fx) {
                 &mut registry,
                 &account,
                 &config,
+                &fees,
+                &areg,
                 h::keys(),
                 h::weights(),
                 h::threshold(),
@@ -220,6 +224,8 @@ fun setup_with(accept_other: bool): (Scenario, Fx) {
             );
         balance::create_for_testing<USDC>(FUNDS).send_funds(h::wallet());
         ts::return_shared(account);
+        ts::return_shared(areg);
+        ts::return_shared(fees);
         ts::return_shared(config);
         ts::return_shared(registry);
     };
@@ -245,7 +251,44 @@ fun setup_with(accept_other: bool): (Scenario, Fx) {
     let staff = grant(&mut s, policy_id, STAFF, ALLOWANCE_CAP);
     let junior = grant(&mut s, policy_id, JUNIOR, ALLOWANCE_CAP);
     let executor = grant(&mut s, policy_id, EXECUTOR, ALLOWANCE_CAP);
+
+    // Splash's registries as these tests see them: BUSINESS and
+    // OTHER_BUSINESS are registered business wallets, and the harness's
+    // partner deposit address and SPLASH_PARTNER are in the partner
+    // registry. The policy pins Splash's one FeeConfig, so the tests that
+    // are not about the fee set it to charge nothing; `fee_setup` puts the
+    // launch schedule back.
+    h::add_business_wallet(&mut s, BUSINESS);
+    h::add_business_wallet(&mut s, OTHER_BUSINESS);
+    h::add_partner(&mut s, h::recipient());
+    h::add_partner(&mut s, SPLASH_PARTNER);
+    charge_nothing(&mut s);
     (s, Fx { account: account_id, policy: policy_id, staff, junior, executor })
+}
+
+/// Splash's FeeConfig charges nothing on any kind (core's test-only setter).
+fun charge_nothing(s: &mut Scenario) {
+    s.next_tx(STRANGER);
+    let mut fees = s.take_shared<FeeConfig>();
+    let mut kind = 0;
+    while (kind < fee_config::kind_count()) {
+        fee_config::set_schedule_unchecked_for_testing(&mut fees, kind, vector[std::u64::max_value!()], vector[0], 0, 0);
+        kind = kind + 1;
+    };
+    ts::return_shared(fees);
+}
+
+/// Splash's FeeConfig back at A1 §2.2's launch schedule.
+fun launch_fees(s: &mut Scenario) {
+    s.next_tx(STRANGER);
+    let mut fees = s.take_shared<FeeConfig>();
+    let max = std::u64::max_value!();
+    let bands = vector[1_000_000_000, 10_000_000_000, 50_000_000_000, 100_000_000_000, max];
+    fee_config::set_schedule_unchecked_for_testing(&mut fees, payment_intent::kind_wallet(), vector[max], vector[2], 250_000, 5_000_000);
+    fee_config::set_schedule_unchecked_for_testing(&mut fees, payment_intent::kind_exchange(), bands, vector[15, 12, 10, 7, 5], 0, max);
+    fee_config::set_schedule_unchecked_for_testing(&mut fees, payment_intent::kind_cross_chain(), bands, vector[30, 20, 12, 7, 5], 0, max);
+    fee_config::set_schedule_unchecked_for_testing(&mut fees, payment_intent::kind_bank_payout(), bands, vector[30, 20, 12, 7, 5], 0, max);
+    ts::return_shared(fees);
 }
 
 /// The wallet proposes an app-bound allowance to `spender` and `splash_spend`
@@ -481,6 +524,8 @@ fun pay_in_tx(s: &mut Scenario, account: ID, policy: ID, alw: ID, intent: ID, ap
     let mut policy = s.take_shared_by_id<SpendPolicy>(policy);
     let config = s.take_shared<ComplianceConfig>();
     let c = s.take_shared<Clock>();
+    let fees = s.take_shared<FeeConfig>();
+    let reg = s.take_shared<address_registry::Registry>();
     let amount = payment_intent::amount_usd(&intent);
     let mut settle_by = h::settle_by(&c);
     approval.do_ref!(|a| settle_by = settle_by.min(splash_spend::approval_settle_by_ms(a)));
@@ -490,6 +535,8 @@ fun pay_in_tx(s: &mut Scenario, account: ID, policy: ID, alw: ID, intent: ID, ap
         &mut account,
         &mut policy,
         &config,
+        &fees,
+        &reg,
         approval,
         h::wallet(),
         amount,
@@ -497,6 +544,8 @@ fun pay_in_tx(s: &mut Scenario, account: ID, policy: ID, alw: ID, intent: ID, ap
         &c,
         s.ctx(),
     );
+    ts::return_shared(reg);
+    ts::return_shared(fees);
     ts::return_shared(c);
     ts::return_shared(config);
     ts::return_shared(policy);
@@ -513,6 +562,8 @@ fun pay_objects(
     account: &mut BusinessAccount,
     policy: &mut SpendPolicy,
     config: &ComplianceConfig,
+    fees: &FeeConfig,
+    reg: &address_registry::Registry,
     approval: Option<PayoutApproval>,
     from: address,
     drawn: u64,
@@ -524,29 +575,11 @@ fun pay_objects(
         object::id(alw),
         ts::withdraw_balance_from_address<USDC>(from, drawn),
     );
-    // No Splash fee in these tests: a scratch config charging nothing, and
-    // Splash's registries as `spend_registry` describes them.
-    let fees = h::scratch_fees(ctx);
-    let reg = spend_registry(ctx);
+    // No Splash fee in these tests (`charge_nothing`), so max_fee is 0.
     let receipt = splash_spend::pay_intent(
-        alw, withdrawal, intent, account, policy, config, &fees, &reg, approval, 0, settle_by_ms, c, ctx,
+        alw, withdrawal, intent, account, policy, config, fees, reg, approval, 0, settle_by_ms, c, ctx,
     );
-    h::drop_scratch(fees, reg);
     audit_anchor::anchor(receipt, HASH, BLOB, c, ctx);
-}
-
-/// Splash's registries as these tests see them: BUSINESS and OTHER_BUSINESS
-/// are registered business wallets, and the harness's partner deposit
-/// address and SPLASH_PARTNER are in the partner registry.
-fun spend_registry(ctx: &mut TxContext): address_registry::Registry {
-    let mut reg = address_registry::new_for_testing(ctx);
-    address_registry::add_business_wallet_for_testing(&mut reg, BUSINESS);
-    address_registry::add_business_wallet_for_testing(&mut reg, OTHER_BUSINESS);
-    let cap = address_registry::ops_cap_for_testing(ctx);
-    address_registry::add_partner_address(&cap, &mut reg, h::recipient());
-    address_registry::add_partner_address(&cap, &mut reg, SPLASH_PARTNER);
-    address_registry::destroy_ops_cap_for_testing(cap);
-    reg
 }
 
 /// The wallet tags `addr` as a recipient of `kind`.
@@ -659,12 +692,16 @@ fun second_business(s: &mut Scenario): (ID, ID) {
     {
         let mut registry = s.take_shared<PolicyRegistry>();
         let config = s.take_shared<ComplianceConfig>();
+        let fees = s.take_shared<FeeConfig>();
+        let areg = s.take_shared<address_registry::Registry>();
         let account = s.take_shared_by_id<BusinessAccount>(account2);
         policy2 =
             spend_policy::create_policy<USDC>(
                 &mut registry,
                 &account,
                 &config,
+                &fees,
+                &areg,
                 h::keys(),
                 h::weights(),
                 h::threshold(),
@@ -672,6 +709,8 @@ fun second_business(s: &mut Scenario): (ID, ID) {
                 s.ctx(),
             );
         ts::return_shared(account);
+        ts::return_shared(areg);
+        ts::return_shared(fees);
         ts::return_shared(config);
         ts::return_shared(registry);
     };
@@ -706,6 +745,8 @@ fun staff_pays_a_verified_wallet_below_the_threshold() {
         let mut policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
         let config = s.take_shared<ComplianceConfig>();
         let c = s.take_shared<Clock>();
+        let fees = s.take_shared<FeeConfig>();
+        let reg = s.take_shared<address_registry::Registry>();
         assert_eq!(allowance::allowance_current_spend(&alw), 0);
         assert_eq!(spend_policy::second_approval_threshold(&policy), THRESHOLD);
 
@@ -715,6 +756,8 @@ fun staff_pays_a_verified_wallet_below_the_threshold() {
             &mut account,
             &mut policy,
             &config,
+            &fees,
+            &reg,
             option::none(),
             h::wallet(),
             PAY,
@@ -740,6 +783,8 @@ fun staff_pays_a_verified_wallet_below_the_threshold() {
         // No approval was involved.
         assert_eq!(event::events_by_type<SpendApprovalConsumed>().length(), 0);
 
+        ts::return_shared(reg);
+        ts::return_shared(fees);
         ts::return_shared(c);
         ts::return_shared(config);
         ts::return_shared(policy);
@@ -765,6 +810,8 @@ fun staff_creates_and_pays_in_the_same_transaction() {
         let mut policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
         let config = s.take_shared<ComplianceConfig>();
         let c = s.take_shared<Clock>();
+        let fees = s.take_shared<FeeConfig>();
+        let reg = s.take_shared<address_registry::Registry>();
         let mut intent = create_now<USDC>(
             &policy,
             &mut account,
@@ -783,6 +830,8 @@ fun staff_creates_and_pays_in_the_same_transaction() {
             &mut account,
             &mut policy,
             &config,
+            &fees,
+            &reg,
             option::none(),
             h::wallet(),
             PAY,
@@ -793,6 +842,8 @@ fun staff_creates_and_pays_in_the_same_transaction() {
         assert_eq!(payment_intent::status(&intent), payment_intent::status_confirmed());
         payment_intent::delete_finalized(intent);
         assert!(payment_intent::payment_ref_used(&account, h::payment_ref(1)));
+        ts::return_shared(reg);
+        ts::return_shared(fees);
         ts::return_shared(c);
         ts::return_shared(config);
         ts::return_shared(policy);
@@ -1328,8 +1379,8 @@ fun paying_in_another_asset_aborts() {
         let config = s.take_shared<ComplianceConfig>();
         let c = s.take_shared<Clock>();
         let w = allowance::new_withdrawal_for_testing(other_alw, ts::withdraw_balance_from_address<OTHER>(h::wallet(), PAY));
-        let fees = h::scratch_fees(s.ctx());
-        let reg = spend_registry(s.ctx());
+        let fees = s.take_shared<FeeConfig>();
+        let reg = s.take_shared<address_registry::Registry>();
         let receipt = splash_spend::pay_intent(
             &mut alw,
             w,
@@ -1345,7 +1396,8 @@ fun paying_in_another_asset_aborts() {
             &c,
             s.ctx(),
         );
-        h::drop_scratch(fees, reg);
+        ts::return_shared(reg);
+        ts::return_shared(fees);
         audit_anchor::anchor(receipt, HASH, BLOB, &c, s.ctx());
         ts::return_shared(c);
         ts::return_shared(config);
@@ -1455,12 +1507,16 @@ fun an_allowance_from_another_funder_aborts() {
         let mut policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
         let config = s.take_shared<ComplianceConfig>();
         let c = s.take_shared<Clock>();
+        let fees = s.take_shared<FeeConfig>();
+        let reg = s.take_shared<address_registry::Registry>();
         pay_objects(
             &mut alw,
             &mut intent,
             &mut account,
             &mut policy,
             &config,
+            &fees,
+            &reg,
             option::none(),
             h::owner_2(),
             PAY,
@@ -1468,6 +1524,8 @@ fun an_allowance_from_another_funder_aborts() {
             &c,
             s.ctx(),
         );
+        ts::return_shared(reg);
+        ts::return_shared(fees);
         ts::return_shared(c);
         ts::return_shared(config);
         ts::return_shared(policy);
@@ -1569,12 +1627,16 @@ fun a_withdrawal_from_another_address_cannot_be_drawn() {
         let mut policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
         let config = s.take_shared<ComplianceConfig>();
         let c = s.take_shared<Clock>();
+        let fees = s.take_shared<FeeConfig>();
+        let reg = s.take_shared<address_registry::Registry>();
         pay_objects(
             &mut alw,
             &mut intent,
             &mut account,
             &mut policy,
             &config,
+            &fees,
+            &reg,
             option::none(),
             h::owner_2(),
             PAY,
@@ -1582,6 +1644,8 @@ fun a_withdrawal_from_another_address_cannot_be_drawn() {
             &c,
             s.ctx(),
         );
+        ts::return_shared(reg);
+        ts::return_shared(fees);
         ts::return_shared(c);
         ts::return_shared(config);
         ts::return_shared(policy);
@@ -1601,12 +1665,16 @@ fun pay_drawing(s: &mut Scenario, fx: &Fx, intent_id: ID, drawn: u64) {
     let mut policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
     let config = s.take_shared<ComplianceConfig>();
     let c = s.take_shared<Clock>();
+    let fees = s.take_shared<FeeConfig>();
+    let reg = s.take_shared<address_registry::Registry>();
     pay_objects(
         &mut alw,
         &mut intent,
         &mut account,
         &mut policy,
         &config,
+        &fees,
+        &reg,
         option::none(),
         h::wallet(),
         drawn,
@@ -1614,6 +1682,8 @@ fun pay_drawing(s: &mut Scenario, fx: &Fx, intent_id: ID, drawn: u64) {
         &c,
         s.ctx(),
     );
+    ts::return_shared(reg);
+    ts::return_shared(fees);
     ts::return_shared(c);
     ts::return_shared(config);
     ts::return_shared(policy);
@@ -2032,6 +2102,8 @@ fun pay_approved_by(s: &mut Scenario, fx: &Fx, payer: address, alw: ID, intent_i
     let mut policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
     let config = s.take_shared<ComplianceConfig>();
     let c = s.take_shared<Clock>();
+    let fees = s.take_shared<FeeConfig>();
+    let reg = s.take_shared<address_registry::Registry>();
     let amount = payment_intent::amount_usd(&intent);
     pay_objects(
         &mut allowance,
@@ -2039,6 +2111,8 @@ fun pay_approved_by(s: &mut Scenario, fx: &Fx, payer: address, alw: ID, intent_i
         &mut account,
         &mut policy,
         &config,
+        &fees,
+        &reg,
         approval,
         h::wallet(),
         amount,
@@ -2046,6 +2120,8 @@ fun pay_approved_by(s: &mut Scenario, fx: &Fx, payer: address, alw: ID, intent_i
         &c,
         s.ctx(),
     );
+    ts::return_shared(reg);
+    ts::return_shared(fees);
     ts::return_shared(c);
     ts::return_shared(config);
     ts::return_shared(policy);
@@ -2588,12 +2664,16 @@ fun a_new_policy_for_the_new_generation_pays() {
     {
         let mut registry = s.take_shared<PolicyRegistry>();
         let config = s.take_shared<ComplianceConfig>();
+        let fees = s.take_shared<FeeConfig>();
+        let areg = s.take_shared<address_registry::Registry>();
         let account = s.take_shared_by_id<BusinessAccount>(fx.account);
         policy3 =
             spend_policy::create_policy<USDC>(
                 &mut registry,
                 &account,
                 &config,
+                &fees,
+                &areg,
                 h::keys(),
                 h::weights(),
                 h::threshold(),
@@ -2601,6 +2681,8 @@ fun a_new_policy_for_the_new_generation_pays() {
                 s.ctx(),
             );
         ts::return_shared(account);
+        ts::return_shared(areg);
+        ts::return_shared(fees);
         ts::return_shared(config);
         ts::return_shared(registry);
     };
@@ -2719,12 +2801,16 @@ fun pay_with_settle_by(s: &mut Scenario, fx: &Fx, intent_id: ID, ahead: u64) {
     let mut policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
     let config = s.take_shared<ComplianceConfig>();
     let c = s.take_shared<Clock>();
+    let fees = s.take_shared<FeeConfig>();
+    let reg = s.take_shared<address_registry::Registry>();
     pay_objects(
         &mut alw,
         &mut intent,
         &mut account,
         &mut policy,
         &config,
+        &fees,
+        &reg,
         option::none(),
         h::wallet(),
         PAY,
@@ -2732,6 +2818,8 @@ fun pay_with_settle_by(s: &mut Scenario, fx: &Fx, intent_id: ID, ahead: u64) {
         &c,
         s.ctx(),
     );
+    ts::return_shared(reg);
+    ts::return_shared(fees);
     ts::return_shared(c);
     ts::return_shared(config);
     ts::return_shared(policy);
@@ -2951,6 +3039,8 @@ fun pay_with_config(s: &mut Scenario, fx: &Fx, config: ID, payer: address, alw: 
     let mut policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
     let config = s.take_shared_by_id<ComplianceConfig>(config);
     let c = s.take_shared<Clock>();
+    let fees = s.take_shared<FeeConfig>();
+    let reg = s.take_shared<address_registry::Registry>();
     let amount = payment_intent::amount_usd(&intent);
     pay_objects(
         &mut allowance,
@@ -2958,6 +3048,8 @@ fun pay_with_config(s: &mut Scenario, fx: &Fx, config: ID, payer: address, alw: 
         &mut account,
         &mut policy,
         &config,
+        &fees,
+        &reg,
         option::none(),
         h::wallet(),
         amount,
@@ -2965,6 +3057,8 @@ fun pay_with_config(s: &mut Scenario, fx: &Fx, config: ID, payer: address, alw: 
         &c,
         s.ctx(),
     );
+    ts::return_shared(reg);
+    ts::return_shared(fees);
     ts::return_shared(c);
     ts::return_shared(config);
     ts::return_shared(policy);
@@ -3035,10 +3129,14 @@ fun an_old_generations_allowance_does_not_pay_under_a_new_policy() {
     {
         let mut registry = s.take_shared<PolicyRegistry>();
         let config = s.take_shared<ComplianceConfig>();
+        let fees = s.take_shared<FeeConfig>();
+        let areg = s.take_shared<address_registry::Registry>();
         let account = s.take_shared_by_id<BusinessAccount>(fx.account);
         policy3 =
-            spend_policy::create_policy<USDC>(&mut registry, &account, &config, h::keys(), h::weights(), h::threshold(), POLICY_MAX, s.ctx());
+            spend_policy::create_policy<USDC>(&mut registry, &account, &config, &fees, &areg, h::keys(), h::weights(), h::threshold(), POLICY_MAX, s.ctx());
         ts::return_shared(account);
+        ts::return_shared(areg);
+        ts::return_shared(fees);
         ts::return_shared(config);
         ts::return_shared(registry);
     };
@@ -3836,13 +3934,10 @@ const BANK_FEE: u64 = 1_500_000;
 /// The fee the spender was shown and signs for, at least each of those.
 const MAX_FEE: u64 = 2_000_000;
 
-/// `setup()`, with Splash's shared registries classifying what the scratch
-/// one does: BUSINESS is a business wallet and the harness's partner deposit
-/// address is a partner. The shared FeeConfig is at A1's launch schedule.
+/// `setup()`, with Splash's FeeConfig back at A1's launch schedule.
 fun fee_setup(): (Scenario, Fx) {
     let (mut s, fx) = setup();
-    h::add_business_wallet(&mut s, BUSINESS);
-    h::add_partner(&mut s, h::recipient());
+    launch_fees(&mut s);
     (s, fx)
 }
 
@@ -3876,12 +3971,28 @@ fun pay_fee_with(
     drawn: u64,
     max_fee: u64,
 ) {
+    let reg = s.take_shared<address_registry::Registry>();
+    pay_against(s, fx, alw, intent, approval, fees, &reg, drawn, max_fee);
+    ts::return_shared(reg);
+}
+
+/// In the current transaction: pay against `fees` and `reg`.
+fun pay_against(
+    s: &mut Scenario,
+    fx: &Fx,
+    alw: ID,
+    intent: ID,
+    approval: Option<PayoutApproval>,
+    fees: &FeeConfig,
+    reg: &address_registry::Registry,
+    drawn: u64,
+    max_fee: u64,
+) {
     let mut allowance = s.take_shared_by_id<Allowance<Balance<USDC>>>(alw);
     let mut intent = s.take_shared_by_id<PaymentIntent>(intent);
     let mut account = s.take_shared_by_id<BusinessAccount>(fx.account);
     let mut policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
     let config = s.take_shared<ComplianceConfig>();
-    let reg = s.take_shared<address_registry::Registry>();
     let c = s.take_shared<Clock>();
     let withdrawal = allowance::new_withdrawal_for_testing(alw, ts::withdraw_balance_from_address<USDC>(h::wallet(), drawn));
     let receipt = splash_spend::pay_intent(
@@ -3892,7 +4003,7 @@ fun pay_fee_with(
         &mut policy,
         &config,
         fees,
-        &reg,
+        reg,
         approval,
         max_fee,
         h::settle_by(&c),
@@ -3901,7 +4012,6 @@ fun pay_fee_with(
     );
     audit_anchor::anchor(receipt, HASH, BLOB, &c, s.ctx());
     ts::return_shared(c);
-    ts::return_shared(reg);
     ts::return_shared(config);
     ts::return_shared(policy);
     ts::return_shared(account);
@@ -4141,8 +4251,8 @@ fun the_executor_cannot_pay_above_the_delegated_total() {
 
 #[test]
 /// A1 §2.6 and §3: splash_spend checks the fee against its own 100 bps
-/// ceiling. Here the FeeConfig stores 200 bps and a 50 USDC minimum, built
-/// through core's test-only constructor that skips validation. The rule
+/// ceiling. Here Splash's FeeConfig stores 200 bps and a 50 USDC minimum,
+/// written through core's test-only setter that skips validation. The rule
 /// payment still pays Splash at most 1% of the principal, and the rest of
 /// the 2% max_fee goes back to the wallet.
 fun splash_spends_own_ceiling_holds_with_a_fee_config_above_100_bps() {
@@ -4150,7 +4260,7 @@ fun splash_spends_own_ceiling_holds_with_a_fee_config_above_100_bps() {
     assert_eq!(splash_spend::fee_ceiling_bps_for_testing(), 100);
     let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
     s.next_tx(STAFF);
-    let mut fees = fee_config::new_for_testing(h::fee_recipient(), s.ctx());
+    let mut fees = s.take_shared<FeeConfig>();
     fee_config::set_schedule_unchecked_for_testing(
         &mut fees,
         payment_intent::kind_wallet(),
@@ -4163,9 +4273,41 @@ fun splash_spends_own_ceiling_holds_with_a_fee_config_above_100_bps() {
     pay_fee_with(&mut s, &fx, fx.staff, intent, option::none(), &fees, PAY + max_fee, max_fee);
     let (_, _, _, _, _, _, _, fee) = splash_spend::unpack_rule_spend_for_testing(event::events_by_type<RuleSpend>()[0]);
     assert_eq!(fee, PAY / 100);
-    fee_config::destroy_for_testing(fees);
+    ts::return_shared(fees);
     assert_eq!(settled(&mut s, h::fee_recipient()), PAY / 100);
     assert_eq!(settled(&mut s, h::wallet()), FUNDS - PAY - PAY / 100);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = splash_spend::E_WRONG_FEE_CONFIG)]
+/// The policy pins Splash's FeeConfig, as it pins its compliance config. A
+/// payment against any other, such as one an added core constructor could
+/// make with a fee recipient of the spender's choosing, aborts.
+fun a_payment_cannot_settle_against_another_fee_config() {
+    let (mut s, fx) = fee_setup();
+    let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    s.next_tx(STAFF);
+    let fees = fee_config::new_for_testing(STAFF, s.ctx());
+    pay_fee_with(&mut s, &fx, fx.staff, intent, option::none(), &fees, PAY + MAX_FEE, MAX_FEE);
+    fee_config::destroy_for_testing(fees);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = splash_spend::E_WRONG_ADDRESS_REGISTRY)]
+/// And Splash's Registry: another one could classify any recipient as a
+/// free Splash business, or a partner as a wallet.
+fun a_payment_cannot_settle_against_another_address_registry() {
+    let (mut s, fx) = fee_setup();
+    let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    s.next_tx(STAFF);
+    let fees = s.take_shared<FeeConfig>();
+    let mut reg = address_registry::new_for_testing(s.ctx());
+    address_registry::add_business_wallet_for_testing(&mut reg, SUPPLIER);
+    pay_against(&mut s, &fx, fx.staff, intent, option::none(), &fees, &reg, PAY + MAX_FEE, MAX_FEE);
+    address_registry::destroy_for_testing(reg);
+    ts::return_shared(fees);
     s.end();
 }
 
