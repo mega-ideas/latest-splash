@@ -174,9 +174,14 @@ const UNSOURCED = 'Varies';
 const BANK_WIRE = COMPARISON_BASELINE?.bankWire ?? null;
 const BANK_WIRE_DELIVERY = BANK_WIRE?.delivery ?? UNSOURCED;
 const BANK_WIRE_COST = BANK_WIRE ? `US$${formatMinor(BANK_WIRE.flatUsdMinor, 2)} + ${formatBps(BANK_WIRE.marginBps)} FX margin` : UNSOURCED;
-const BASELINE_DATE = COMPARISON_BASELINE
-  ? new Date(`${COMPARISON_BASELINE.dataset.asOf}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })
-  : '';
+/** The dataset's ISO date as a reader says it ("31 March 2025"): a calendar
+ *  date, not a moment, so it is spelled out the same on server and client. */
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+function calendarDate(iso: string) {
+  const [year, month, day] = iso.split('-').map(Number);
+  return `${day} ${MONTHS[month - 1]} ${year}`;
+}
+const BASELINE_DATE = COMPARISON_BASELINE ? calendarDate(COMPARISON_BASELINE.dataset.asOf) : '';
 
 const comparisonRowsFor = (pricing: PricingSummary) => [
   {
