@@ -22,6 +22,7 @@ import { readyToSend, type QueueViewer } from '@/lib/queue/ready-to-send';
 import { getCustomerSession } from '@/lib/server/customer-auth';
 import ApprovalCodeCard from '@/components/queue/ApprovalCodeCard';
 import ApprovalQueueBoard, { type QueueItem, type QueueLaneData } from '@/components/queue/ApprovalQueueBoard';
+import QueueExamples from '@/components/queue/QueueExamples';
 import ReadyToSendLane, { type ReadyToSendItem } from '@/components/queue/ReadyToSendLane';
 import StuckPaymentsSection from '@/components/queue/StuckPaymentsSection';
 
@@ -328,11 +329,25 @@ export default async function QueuePage() {
           </nav>
         </header>
 
+        {/* v2 brief 5.3: the code entry, then what waits for this viewer's
+            decision, then the exceptions (payments that may be stuck), then
+            what is approved and waiting to be sent. The examples come last,
+            collapsed. */}
         <ApprovalCodeCard />
+        <ApprovalQueueBoard live={liveProposals} />
         <StuckPaymentsSection viewer={viewer} />
         <ReadyToSendLane items={readyItems} />
 
-        <ApprovalQueueBoard live={liveProposals} examples={{ pending: examplePending, lanes: exampleLanes }} />
+        <QueueExamples pending={examplePending} lanes={exampleLanes} />
+
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          <Link
+            href="/dashboard/zeke"
+            className="inline-flex min-h-11 items-center rounded-md border border-[#326273]/20 px-3 text-sm font-bold text-[#326273] focus-ring"
+          >
+            Back to Zeke
+          </Link>
+        </div>
       </div>
     </main>
   );

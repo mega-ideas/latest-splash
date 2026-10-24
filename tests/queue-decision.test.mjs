@@ -209,14 +209,16 @@ test('the board sends the decision to the submit route and shows the server’s 
 });
 
 test('examples are shown apart and can never be approved', async () => {
-  const board = code(await readFile(new URL('../components/queue/ApprovalQueueBoard.tsx', import.meta.url), 'utf8'));
-  const examples = board.slice(board.indexOf('aria-labelledby="queue-examples-heading"'));
+  // v2 brief 5.3: the examples left the board for their own collapsed
+  // section (components/queue/QueueExamples.tsx), which has no handlers at all.
+  const examples = code(await readFile(new URL('../components/queue/QueueExamples.tsx', import.meta.url), 'utf8'));
   assert.ok(examples.length > 0);
   assert.match(examples, /cannot be approved/);
-  assert.doesNotMatch(examples.slice(0, examples.indexOf('Back to Zeke')), /decide\(|onClick/);
+  assert.doesNotMatch(examples, /decide\(|onClick/);
 
   const page = code(await readFile(new URL('../app/queue/page.tsx', import.meta.url), 'utf8'));
-  assert.match(page, /<ApprovalQueueBoard live=\{liveProposals\} examples=\{\{ pending: examplePending, lanes: exampleLanes \}\} \/>/);
+  assert.match(page, /<ApprovalQueueBoard live=\{liveProposals\} \/>/);
+  assert.match(page, /<QueueExamples pending=\{examplePending\} lanes=\{exampleLanes\} \/>/);
   // The approver signs what they reviewed.
   assert.match(page, /approvalHash: item\.approvalHash,/);
   // Live rows are this workspace's proposals, and only those; the fixtures

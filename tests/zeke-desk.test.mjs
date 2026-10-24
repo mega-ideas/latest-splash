@@ -289,7 +289,7 @@ test('Zeke’s identity accents are teal; gold stays for actions and coral is go
     assert.doesNotMatch(text, /#9A4A2D/i, `${file} uses the old coral ink`);
   }
   const page = await source('app/dashboard/zeke/page.tsx');
-  assert.match(page, /Zeke online/i);
+  assert.match(page, /\{assistantName\} online/,'the name can be changed; the chip follows it');
   assert.match(page, /bg-\[#0d6370\]/, 'the online chip is teal');
 });
 

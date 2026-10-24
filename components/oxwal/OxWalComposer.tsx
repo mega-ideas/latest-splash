@@ -1,8 +1,9 @@
 'use client';
 
 import type { Ref } from 'react';
-import { useRef, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import {
+  ArrowRight,
   ArrowUpRight,
   FileSpreadsheet,
   FileText,
@@ -41,6 +42,16 @@ type OxWalComposerProps = {
   compact?: boolean;
   className?: string;
   inputRef?: Ref<HTMLInputElement>;
+  /**
+   * `bar` is the payment-desk command bar (the invoice loop). `desk` is the
+   * Zeke page's larger composer (board "Zeke page · start"): a three-line
+   * field, the attach button, what Zeke can see, and "Ask Zeke". `reply` is
+   * one line and a send arrow, for a conversation already under way and for
+   * the floating Zeke.
+   */
+  variant?: 'bar' | 'desk' | 'reply';
+  /** `desk` only: the parts of the workspace Zeke reads, shown as plain chips. */
+  canSee?: string[];
 };
 
 const chipIcons = {
@@ -64,7 +75,10 @@ export default function OxWalComposer({
   compact = false,
   className,
   inputRef,
+  variant = 'bar',
+  canSee = [],
 }: OxWalComposerProps) {
+  const fieldId = useId();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [attached, setAttached] = useState<ParsedBatch | null>(null);
   const [parsing, setParsing] = useState(false);
@@ -108,6 +122,190 @@ export default function OxWalComposer({
   }
 
   const primaryLabel = hasBatch ? 'Prepare batch' : 'Prepare';
+
+  const fileInput = (
+    <input
+      ref={fileInputRef}
+      type="file"
+      accept=".csv,.xlsx"
+      className="hidden"
+      onChange={(event) => {
+        const file = event.target.files?.[0];
+        if (file) void handleFile(file);
+      }}
+    />
+  );
+
+  /* Attached-batch pill: filename · N rows · corridor, or why it failed. */
+  const attachment = (hasBatch || parsing || parseError) && (
+    <div className={variant === 'bar' ? 'px-3 pt-2.5' : 'px-3 pt-3'}>
+      {parsing && (
+        <div className="inline-flex items-center gap-2 rounded-[var(--r-md)] border border-[var(--line)] bg-[var(--surface-2)] px-3 py-1.5 text-[13px] font-medium text-[var(--slate)]">
+          <span className="h-3 w-3 animate-spin rounded-full border-2 border-[var(--teal)] border-t-transparent" aria-hidden="true" />
+          Reading file…
+        </div>
+      )}
+      {parseError && !parsing && (
+        <div role="alert" className="rounded-[var(--r-md)] border border-[var(--error)]/40 bg-[var(--error-bg)] px-3 py-1.5 text-[13px] font-medium text-[var(--error)]">
+          {parseError}
+        </div>
+      )}
+      {hasBatch && !parsing && attached && (
+        <div className="inline-flex max-w-full items-center gap-2 rounded-[var(--r-md)] border border-[var(--teal)]/35 bg-[var(--ok-bg)] px-3 py-1.5">
+          <FileSpreadsheet className="h-4 w-4 shrink-0 text-[#326273]" aria-hidden="true" />
+          <span className="truncate text-[13px] font-medium text-[var(--ink)]">{attached.fileName}</span>
+          <span className="shrink-0 font-mono text-[13px] font-semibold text-[var(--slate)]">
+            {attached.rows.length} {attached.rows.length === 1 ? 'row' : 'rows'} · USD→{attached.corridor}
+          </span>
+          <button
+            type="button"
+            aria-label="Remove attached file"
+            onClick={clearAttached}
+            className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-[var(--slate)] transition hover:bg-[var(--teal)]/15 hover:text-[var(--ink)]"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+
+  const attachButton = (size: 'sm' | 'md') => (
+    <button
+      type="button"
+      aria-label="Attach an invoice or payout sheet (CSV or Excel)"
+      title="Attach an invoice or payout sheet"
+      disabled={disabled}
+      onClick={() => fileInputRef.current?.click()}
+      className={cn(
+        'grid shrink-0 place-items-center rounded-[var(--r-md)] border border-[var(--line-strong)] bg-[var(--surface)] text-[var(--slate)] transition hover:border-[#0d6370] hover:text-[var(--ink)] disabled:cursor-not-allowed disabled:opacity-45 focus-ring',
+        size === 'sm' ? 'h-10 w-10' : 'h-11 w-11',
+      )}
+    >
+      <Paperclip className="h-[18px] w-[18px]" aria-hidden="true" />
+    </button>
+  );
+
+  if (variant === 'desk') {
+    return (
+      <div className={cn('w-full', className)}>
+        {fileInput}
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            submit();
+          }}
+          className={cn(
+            'rounded-[14px] border-[1.5px] border-[#0d6370]/45 bg-[var(--surface)] shadow-[0_0_0_4px_rgba(13,99,112,0.07)] transition focus-within:border-[#0d6370]',
+            disabled && 'opacity-75',
+          )}
+        >
+          <label htmlFor={fieldId} className="sr-only">
+            Ask Zeke
+          </label>
+          {attachment}
+          <textarea
+            id={fieldId}
+            rows={3}
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+            onKeyDown={(event) => {
+              // Enter asks; Shift+Enter is a new line, as in any chat.
+              if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                event.preventDefault();
+                if (!disabled && (hasValue || hasBatch)) submit();
+              }
+            }}
+            disabled={disabled}
+            placeholder={hasBatch ? 'Add a note for approval (optional)' : placeholder}
+            className="block w-full resize-none border-0 bg-transparent px-[18px] pb-1.5 pt-4 text-base font-medium text-[var(--ink)] outline-none placeholder:text-[var(--ink-muted)] disabled:cursor-not-allowed"
+          />
+          <div className="flex flex-wrap items-center justify-between gap-3 px-3 pb-3 pt-1">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              {attachButton('sm')}
+              {canSee.length > 0 && (
+                <>
+                  <span id={`${fieldId}-sees`} className="pl-1 text-[12px] font-medium text-[var(--ink-muted)]">
+                    Zeke can see
+                  </span>
+                  <ul aria-labelledby={`${fieldId}-sees`} className="flex flex-wrap gap-1.5">
+                    {canSee.map((item) => (
+                      <li
+                        key={item}
+                        className="rounded-[var(--r-pill)] bg-[var(--zeke-tint)] px-2.5 py-1 text-[12px] font-semibold text-[#0c3e48]"
+                      >
+                        {item}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </div>
+            <button
+              type="submit"
+              disabled={disabled || (!hasValue && !hasBatch)}
+              className="inline-flex h-11 shrink-0 items-center gap-2 rounded-[var(--r-md)] bg-[#0c3e48] px-4 text-sm font-bold text-white transition hover:bg-[#0d6370] active:translate-y-px disabled:cursor-not-allowed disabled:opacity-40 focus-ring"
+            >
+              {hasBatch ? 'Prepare batch' : 'Ask Zeke'}
+              <ArrowRight className="h-4 w-4" aria-hidden="true" />
+            </button>
+          </div>
+        </form>
+      </div>
+    );
+  }
+
+  if (variant === 'reply') {
+    return (
+      <div className={cn('w-full', className)}>
+        {fileInput}
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            submit();
+          }}
+          className={cn(
+            'rounded-[14px] border border-[#0d6370]/35 bg-[var(--surface)] transition focus-within:border-[#0d6370]',
+            disabled && 'opacity-75',
+          )}
+        >
+          {attachment}
+          <div className="flex items-center gap-2 py-1.5 pl-4 pr-1.5">
+            <label htmlFor={fieldId} className="sr-only">
+              {placeholder}
+            </label>
+            <input
+              id={fieldId}
+              ref={inputRef}
+              value={value}
+              onChange={(event) => onChange(event.target.value)}
+              disabled={disabled}
+              placeholder={hasBatch ? 'Add a note for approval (optional)' : placeholder}
+              className="min-w-0 flex-1 bg-transparent py-2 text-[15px] font-medium text-[var(--ink)] outline-none placeholder:text-[var(--ink-muted)] disabled:cursor-not-allowed"
+            />
+            <button
+              type="button"
+              aria-label="Attach an invoice or payout sheet (CSV or Excel)"
+              title="Attach an invoice or payout sheet"
+              disabled={disabled}
+              onClick={() => fileInputRef.current?.click()}
+              className="grid h-10 w-10 shrink-0 place-items-center rounded-[var(--r-md)] text-[var(--slate)] transition hover:bg-[var(--zeke-tint)] hover:text-[var(--ink)] disabled:cursor-not-allowed disabled:opacity-45 focus-ring"
+            >
+              <Paperclip className="h-[18px] w-[18px]" aria-hidden="true" />
+            </button>
+            <button
+              type="submit"
+              aria-label={hasBatch ? 'Prepare batch for approval' : 'Send to Zeke'}
+              disabled={disabled || (!hasValue && !hasBatch)}
+              className="grid h-10 w-10 shrink-0 place-items-center rounded-[var(--r-md)] bg-[#0c3e48] text-white transition hover:bg-[#0d6370] disabled:cursor-not-allowed disabled:opacity-40 focus-ring"
+            >
+              <ArrowRight className="h-[18px] w-[18px]" aria-hidden="true" />
+            </button>
+          </div>
+        </form>
+      </div>
+    );
+  }
 
   return (
     <div className={cn('mx-auto w-full max-w-3xl', compact && 'max-w-none', className)}>

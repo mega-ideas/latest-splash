@@ -160,7 +160,8 @@ test('links into the dashboard point at pages that exist under their new names',
   }
   // "Zeke" and "Back to Zeke" go to Zeke, which is no longer /dashboard.
   assert.match(await source('app/queue/page.tsx'), /href="\/dashboard\/zeke">Zeke</);
-  assert.match(await source('components/queue/ApprovalQueueBoard.tsx'), /href="\/dashboard\/zeke"[\s\S]{0,200}Back to Zeke/);
+  // v2 brief 5.3: "Back to Zeke" moved from the board to the foot of the page.
+  assert.match(await source('app/queue/page.tsx'), /href="\/dashboard\/zeke"[\s\S]{0,200}Back to Zeke/);
   assert.match(await source('components/invoices/InvoiceLoop.tsx'), /href="\/dashboard\/zeke"[\s\S]{0,300}Chat/);
   // The floating Zeke stays out of the way on the Zeke page itself.
   assert.match(await source('components/FloatingCopilot.tsx'), /pathname !== '\/dashboard\/zeke'/);

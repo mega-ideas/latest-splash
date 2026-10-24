@@ -14,6 +14,18 @@
   --gold-light: #efc46f;
   --gold-tint: #fdf3dc;
   --gold-ink: #7a5410;
+  /* The edge under a gold button, its pressed depth. */
+  --gold-edge: #b38a3c;
+
+  /* Zeke (v2 brief 5.3 boards): its cards sit on a warm paper, its accents
+     are teal, its chips and icon wells a pale teal tint, and the mint of
+     D14 marks it online. Zeke's own speech bubble is a warm stone. Words in
+     the muted ink are 5.4:1 on white and 5.1:1 on the paper. */
+  --zeke-paper: #fffaf2;
+  --zeke-tint: #eef5f3;
+  --zeke-mint: #9fcfc7;
+  --zeke-bubble: #f1e9e4;
+  --ink-muted: #4e6f78;
 
   --surface: #FFFFFF;
   --surface-2: #FBF7F5;

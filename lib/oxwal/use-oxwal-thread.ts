@@ -388,6 +388,18 @@ export function useOxwalThread(options: UseOxwalThreadOptions = {}) {
     }
   }, []);
 
+  /**
+   * Start a new conversation: the thread goes back to its welcome, and
+   * in-chat approval windows close. What was prepared stays where it is, in
+   * the approval queue, so nothing waiting is lost by starting over.
+   */
+  const resetThread = useCallback(() => {
+    if (isSending) return;
+    setThread(welcome ? [{ kind: 'assistant', id: 'assistant_welcome', text: welcome }] : []);
+    setChatApprovals({});
+    setStreamingText('');
+  }, [isSending, welcome]);
+
   /** Keep the newest turn in view while the conversation grows or streams. */
   const threadRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -407,5 +419,6 @@ export function useOxwalThread(options: UseOxwalThreadOptions = {}) {
     threadRef,
     submitPrompt,
     approveInChat,
+    resetThread,
   };
 }
