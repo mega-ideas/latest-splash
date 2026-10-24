@@ -3060,6 +3060,48 @@ fun at_the_window_boundary_the_second_half_pays_alone() {
 }
 
 #[test]
+/// The view the backend reads for near-threshold alerts: when the window
+/// counted by `running_total` started. It is the first payment in it, it
+/// stays there while the window runs, and a payment after the window has
+/// run out starts the next one at its own time.
+fun the_window_starts_at_the_first_payment_in_it() {
+    let (mut s, fx) = setup();
+    let start = now(&mut s);
+    let first = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    pay(&mut s, &fx, STAFF, fx.staff, first, false);
+    assert_eq!(window_start(&mut s, &fx), option::some(start));
+    advance(&mut s, spend_policy::default_running_window_ms() - 1);
+    let second = open(&mut s, &fx, STAFF, 2, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    pay(&mut s, &fx, STAFF, fx.staff, second, false);
+    assert_eq!(window_start(&mut s, &fx), option::some(start));
+    advance(&mut s, 1);
+    assert_eq!(window_start(&mut s, &fx), option::none());
+    let later = now(&mut s);
+    let third = open(&mut s, &fx, STAFF, 3, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    pay(&mut s, &fx, STAFF, fx.staff, third, false);
+    assert_eq!(window_start(&mut s, &fx), option::some(later));
+    s.end();
+}
+
+/// When STAFF's current window to SUPPLIER started, if one is running.
+fun window_start(s: &mut Scenario, fx: &Fx): Option<u64> {
+    s.next_tx(STRANGER);
+    let policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
+    let c = s.take_shared<Clock>();
+    let start = spend_policy::running_window_start_ms(
+        &policy,
+        STAFF,
+        payment_intent::kind_wallet(),
+        SUPPLIER,
+        vector[],
+        c.timestamp_ms(),
+    );
+    ts::return_shared(c);
+    ts::return_shared(policy);
+    start
+}
+
+#[test]
 #[expected_failure(abort_code = splash_spend::E_APPROVAL_REQUIRED)]
 /// One millisecond before the boundary the first part still counts.
 fun one_millisecond_before_the_boundary_the_first_half_still_counts() {

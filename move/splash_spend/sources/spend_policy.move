@@ -124,10 +124,9 @@ const DEFAULT_RUNNING_WINDOW_MS: u64 = 86_400_000;
 /// between the parts of a split payment. Zero would switch it off while it
 /// still looks set.
 const MIN_RUNNING_WINDOW_MS: u64 = 3_600_000;
-/// Thirty days: the longest an intent lives and the length of the tier's
-/// monthly window. Longer, the total becomes a lifetime cap per recipient,
-/// which is the allowance's own job, and a payment months old would still
-/// force approvals.
+/// Thirty days: the longest an intent lives. Longer, the total becomes a
+/// lifetime cap per recipient, which is the allowance's own job, and a
+/// payment months old would still force approvals.
 const MAX_RUNNING_WINDOW_MS: u64 = 2_592_000_000;
 
 /// Shared once, at publish. The parent every policy's UID is derived from.
