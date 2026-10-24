@@ -24,6 +24,7 @@ use splash_core::business_account::{Self, BusinessAccount};
 use splash_core::cap_registry;
 use splash_core::compliance_config::{Self, ComplianceConfig};
 use splash_core::fee_config::{Self, FeeConfig};
+use splash_core::multisig;
 use splash_core::payment_intent::{Self, BridgeObligation, PaymentIntent, SettleReceipt};
 use std::string::String;
 use sui::balance::Balance;
@@ -385,21 +386,27 @@ public fun turn_fees_off(s: &mut Scenario) {
     ts::return_shared(fees);
 }
 
-/// Governance changes the fee recipient through the 24-hour path. Moves the
-/// clock on 24 hours.
-public fun change_fee_recipient(s: &mut Scenario, recipient: address) {
+/// A finance multisig for the fee-recipient tests: the three passkeys,
+/// 3-of-3, so its address is not the business wallet's (2-of-3).
+public fun finance_multisig(): address { multisig::derive_address(&keys(), &weights(), 3) }
+
+/// Governance changes the fee recipient to `finance_multisig()` through the
+/// 24-hour path, proposing its members (FIXUP 2). Moves the clock on 24
+/// hours. Returns the new recipient.
+public fun change_fee_recipient(s: &mut Scenario): address {
     s.next_tx(OWNER_1);
     {
         let mut fees = s.take_shared<FeeConfig>();
         let mut c = s.take_shared<Clock>();
         let cap = fee_config::fee_admin_cap_for_testing(s.ctx());
-        fee_config::propose_fee_recipient(&cap, &mut fees, recipient, &c);
+        fee_config::propose_fee_recipient(&cap, &mut fees, keys(), weights(), 3, &c);
         c.increment_for_testing(fee_config::fee_notice_ms());
         fee_config::apply_fee_recipient(&cap, &mut fees, &c);
         fee_config::destroy_fee_admin_cap_for_testing(cap);
         ts::return_shared(c);
         ts::return_shared(fees);
     };
+    finance_multisig()
 }
 
 /// Governance changes `kind`'s schedule through the 24-hour path. Moves the

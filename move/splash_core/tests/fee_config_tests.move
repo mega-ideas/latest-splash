@@ -14,8 +14,13 @@
 ///   * a schedule or a fee recipient changes only by a proposal that waits
 ///     24 hours; applying early aborts; a proposal is validated when it is
 ///     made (1-8 tiers, uppers strictly ascending and ending at u64::MAX,
-///     every rate at most 100 bps, min <= max, a known kind, a recipient
-///     that is not 0x0);
+///     every rate at most 100 bps, min <= max, a known kind);
+///   * Splash's fees are off until the first recipient change is applied
+///     (Sky, 24 Oct, FIXUP 1);
+///   * the fee recipient is proposed as a multisig's members, weights and
+///     threshold, the chain derives its address, and a multisig any one
+///     member can sign for alone is refused, so it is never a lone key such
+///     as the KMS operator (Sky, 24 Oct, FIXUP 2);
 ///   * a discount applies at once, is at most 100 bps, and can never make a
 ///     business pay more than the schedule;
 ///   * a test-only constructor can store rates above the ceiling, for
@@ -26,17 +31,33 @@
 module splash_core::fee_config_tests;
 
 use splash_core::fee_config::{Self, FeeConfig, FeeAdminCap};
+use splash_core::multisig;
 use std::unit_test::assert_eq;
 use sui::clock::{Self, Clock};
 use sui::event;
 use sui::test_scenario::{Self as ts, Scenario};
 
 const PUBLISHER: address = @0x5EED;
-const FINANCE: address = @0xF1A4CE;
+/// The Splash finance multisig: these three passkeys, 2-of-3. Its address
+/// is the one the TS SDK derives for them (the phase0_passkey_2_of_3 vector
+/// in multisig_tests, checked against the SDK by
+/// tests/multisig-vectors.test.mjs).
+const FINANCE: address = @0xafea5352bb6313c6af89594eac518d24049e5bc6dfd4bbc18a14bf191f82b6b5;
+const PASSKEY_1: vector<u8> = x"060355969b344645e48573e045cdbf4cbb0adb4369d411962cfc8a6ae3c33b8acf16";
+const PASSKEY_2: vector<u8> = x"06025cb0f7961afbdc293a3cd22290d86697bcceb402011804a4e72119960f2741f9";
+const PASSKEY_3: vector<u8> = x"060399ca5c2f751fbe57d9e493e174085dee6144965b20fd5895e28902fb1148e04a";
 const GOVERNANCE: address = @0x6000;
 const DAY: u64 = 86_400_000;
 const U64_MAX: u64 = 18_446_744_073_709_551_615;
 const USD: u64 = 1_000_000;
+
+fun finance_keys(): vector<vector<u8>> { vector[PASSKEY_1, PASSKEY_2, PASSKEY_3] }
+fun finance_weights(): vector<u8> { vector[1, 1, 1] }
+
+/// Propose the finance multisig, 2-of-3, as the fee recipient.
+fun propose_finance(cap: &FeeAdminCap, cfg: &mut FeeConfig, c: &Clock) {
+    fee_config::propose_fee_recipient(cap, cfg, finance_keys(), finance_weights(), 2, c);
+}
 
 fun business(): ID { object::id_from_address(@0xB12) }
 fun other_business(): ID { object::id_from_address(@0xB13) }
@@ -505,7 +526,7 @@ fun fees_are_off_until_the_first_recipient_change_is_applied() {
         // A schedule change still waits its 24 hours, and still charges
         // nothing while there is no recipient.
         fee_config::propose_schedule(cap, cfg, bank(), vector[U64_MAX], vector[25], 0, U64_MAX, c);
-        fee_config::propose_fee_recipient(cap, cfg, FINANCE, c);
+        propose_finance(cap, cfg, c);
         assert_eq!(fee_config::fees_on(cfg), false);
         assert_eq!(fee(cfg, bank(), 5_000 * USD), 0);
         c.set_for_testing(2 * DAY - 1);
@@ -542,7 +563,7 @@ fun an_unknown_kind_aborts_while_fees_are_off() {
 fun the_fee_recipient_changes_after_24_hours() {
     let mut s = published();
     gov!(&mut s, |cap, cfg, c| {
-        fee_config::propose_fee_recipient(cap, cfg, FINANCE, c);
+        propose_finance(cap, cfg, c);
         assert_eq!(fee_config::has_pending_recipient(cfg), true);
         assert_eq!(fee_config::pending_recipient(cfg), FINANCE);
         assert_eq!(fee_config::pending_recipient_eta_ms(cfg), 2 * DAY);
@@ -574,7 +595,7 @@ fun the_fee_recipient_changes_after_24_hours() {
 fun applying_the_fee_recipient_before_24_hours_aborts() {
     let mut s = published();
     gov!(&mut s, |cap, cfg, c| {
-        fee_config::propose_fee_recipient(cap, cfg, FINANCE, c);
+        propose_finance(cap, cfg, c);
         c.set_for_testing(2 * DAY - 1);
         fee_config::apply_fee_recipient(cap, cfg, c);
     });
@@ -592,17 +613,72 @@ fun applying_a_fee_recipient_with_nothing_proposed_aborts() {
     s.end();
 }
 
-#[test]
-#[expected_failure(abort_code = fee_config::E_INVALID_FEE_RECIPIENT)]
-fun the_zero_address_cannot_be_the_fee_recipient() {
+/// Propose a recipient of these members outside a scenario, and return the
+/// pending recipient, for the multisig tests.
+fun try_propose_recipient(keys: vector<vector<u8>>, weights: vector<u8>, threshold: u16): address {
     let mut ctx = tx_context::dummy();
     let mut cfg = fresh(&mut ctx);
     let cap = fee_config::fee_admin_cap_for_testing(&mut ctx);
     let c = clock::create_for_testing(&mut ctx);
-    fee_config::propose_fee_recipient(&cap, &mut cfg, @0x0, &c);
+    fee_config::propose_fee_recipient(&cap, &mut cfg, keys, weights, threshold, &c);
+    let pending = fee_config::pending_recipient(&cfg);
     clock::destroy_for_testing(c);
     fee_config::destroy_fee_admin_cap_for_testing(cap);
     fee_config::destroy_for_testing(cfg);
+    pending
+}
+
+#[test]
+/// FIXUP 2: the recipient is not an address the proposer types in. The
+/// proposal names the multisig's members, weights and threshold, and the
+/// chain derives the address (`multisig::derive_address`), the one the SDK
+/// derives for them.
+fun the_fee_recipient_is_the_address_derived_from_its_members() {
+    assert_eq!(try_propose_recipient(finance_keys(), finance_weights(), 2), FINANCE);
+    // Another threshold is another multisig.
+    let three_of_three = multisig::derive_address(&finance_keys(), &finance_weights(), 3);
+    assert_eq!(try_propose_recipient(finance_keys(), finance_weights(), 3), three_of_three);
+    assert!(three_of_three != FINANCE);
+}
+
+#[test]
+#[expected_failure(abort_code = fee_config::E_INVALID_FEE_RECIPIENT)]
+/// A lone key is refused: a 1-of-1 multisig is one key, such as the KMS
+/// operator, signing alone.
+fun a_single_key_cannot_be_the_fee_recipient() {
+    try_propose_recipient(vector[PASSKEY_1], vector[1], 1);
+}
+
+#[test]
+#[expected_failure(abort_code = fee_config::E_INVALID_FEE_RECIPIENT)]
+/// So is a multisig with a member who meets the threshold alone: a 2-of-3
+/// whose first member has weight 2 is a single signer in disguise
+/// (`multisig::is_single_signer`).
+fun a_multisig_one_member_can_sign_alone_cannot_be_the_fee_recipient() {
+    try_propose_recipient(finance_keys(), vector[2, 1, 1], 2);
+}
+
+#[test]
+#[expected_failure(abort_code = fee_config::E_INVALID_FEE_RECIPIENT)]
+/// And a 1-of-N, where every member signs alone.
+fun a_one_of_n_cannot_be_the_fee_recipient() {
+    try_propose_recipient(finance_keys(), finance_weights(), 1);
+}
+
+#[test]
+#[expected_failure(abort_code = multisig::E_UNREACHABLE_THRESHOLD)]
+/// A configuration Sui would refuse to build, here a threshold the weights
+/// cannot reach, aborts with multisig's own code: nobody could ever sign for
+/// it, so no fee sent there could ever be spent.
+fun a_multisig_nobody_can_sign_for_cannot_be_the_fee_recipient() {
+    try_propose_recipient(finance_keys(), finance_weights(), 4);
+}
+
+#[test]
+#[expected_failure(abort_code = multisig::E_DUPLICATE_MEMBER)]
+/// A key listed twice is refused too, as Sui refuses it.
+fun a_duplicate_member_cannot_be_the_fee_recipient() {
+    try_propose_recipient(vector[PASSKEY_1, PASSKEY_1], vector[1, 1], 2);
 }
 
 #[test]
@@ -619,7 +695,8 @@ fun the_cap_works_from_the_governance_multisig() {
         let cap = s.take_from_sender<FeeAdminCap>();
         let mut cfg = s.take_shared<FeeConfig>();
         let c = s.take_shared<Clock>();
-        fee_config::propose_fee_recipient(&cap, &mut cfg, FINANCE, &c);
+        fee_config::propose_fee_recipient(&cap, &mut cfg, finance_keys(), finance_weights(), 2, &c);
+        assert_eq!(fee_config::pending_recipient(&cfg), FINANCE);
         ts::return_shared(c);
         ts::return_shared(cfg);
         s.return_to_sender(cap);

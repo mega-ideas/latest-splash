@@ -375,10 +375,10 @@ fun a_discount_lowers_the_fee_charged() {
 /// change, the fee goes to the new one.
 fun the_fee_goes_to_the_current_fee_recipient() {
     let mut s = setup();
-    h::change_fee_recipient(&mut s, @0xF1A4CE);
+    let finance = h::change_fee_recipient(&mut s);
     open_and_pay(&mut s, 1, bank(), PARTNER, PRINCIPAL, PRINCIPAL + BANK_FEE, BANK_FEE);
     s.next_tx(h::owner_1());
-    assert_eq!(ts::settled_balance<USDC>(@0xF1A4CE), BANK_FEE);
+    assert_eq!(ts::settled_balance<USDC>(finance), BANK_FEE);
     assert_eq!(ts::settled_balance<USDC>(h::fee_recipient()), 0);
     s.end();
 }
@@ -456,10 +456,10 @@ fun the_first_applied_recipient_turns_the_fees_on() {
     let mut s = setup();
     h::turn_fees_off(&mut s);
     open_and_pay(&mut s, 1, bank(), PARTNER, PRINCIPAL, PRINCIPAL, 0);
-    h::change_fee_recipient(&mut s, @0xF1A4CE);
+    let finance = h::change_fee_recipient(&mut s);
     open_and_pay(&mut s, 2, bank(), PARTNER, PRINCIPAL, PRINCIPAL + BANK_FEE, BANK_FEE);
     s.next_tx(h::owner_1());
-    assert_eq!(ts::settled_balance<USDC>(@0xF1A4CE), BANK_FEE);
+    assert_eq!(ts::settled_balance<USDC>(finance), BANK_FEE);
     s.end();
 }
 
