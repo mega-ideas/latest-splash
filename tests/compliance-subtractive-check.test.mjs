@@ -4,7 +4,7 @@
  * That script is what compliance_config.move, tests/compliance_tests.move,
  * SECURITY.md and the key-ceremony runbook point at as the proof that a
  * ComplianceCap can only make settlement controls stricter, and that the
- * fee parameters change only through the 24-hour path. Its first version
+ * v2 registries grow only through the 24-hour path. Its first version
  * matched `&ComplianceCap` and substrings of one function's body. An adversarial
  * review built mutated copies of compliance_config.move with Sui CLI 1.82.3
  * that loosened controls while the check printed "all of them tightening".
@@ -100,55 +100,6 @@ fun set_flag(config: &mut ComplianceConfig) {
   assert.match(r.output, /set_flag/);
 });
 
-// The legacy switch these four used to pin left core with the legacy path
-// (decision 3). The fee parameters are the one-way-by-notice values now:
-// each changes only through propose_fee_change, 24 hours and
-// activate_fee_change (decision 1).
-test('an AdminCap setter that writes the fee ceiling straight from a parameter is caught', () => {
-  const r = runWith(
-    plant(`public fun admin_set_fee(_admin: &AdminCap, config: &mut ComplianceConfig, bps: u64) {
-    config.max_fee_bps = bps;
-    emit_update(config);
-}`),
-  );
-  assert.equal(r.exitCode, 1, r.output);
-  assert.match(r.output, /admin_set_fee/);
-  assert.match(r.output, /fee parameter/);
-});
-
-test('a fee cap or address written without spaces, or filled, is caught', () => {
-  const r = runWith(
-    plant(`public fun admin_set_fee_now(_admin: &AdminCap, config: &mut ComplianceConfig, to: address) {
-    config.fee_cap_minor=0;
-    config.fee_address.fill(to);
-}`),
-  );
-  assert.equal(r.exitCode, 1, r.output);
-  assert.match(r.output, /admin_set_fee_now/);
-});
-
-test('a fee address written through a mutable reference is caught', () => {
-  const r = runWith(
-    plant(`public fun admin_fee_by_ref(_admin: &AdminCap, config: &mut ComplianceConfig, to: address) {
-    let a = &mut config.fee_address;
-    *a = option::some(to);
-}`),
-  );
-  assert.equal(r.exitCode, 1, r.output);
-  assert.match(r.output, /admin_fee_by_ref/);
-});
-
-test('a fee change made pending outside propose_fee_change, so with no notice, is caught', () => {
-  const r = runWith(
-    plant(`public fun admin_pend_now(_admin: &AdminCap, config: &mut ComplianceConfig, p: PendingFeeChange) {
-    config.pending_fee_change = option::some(p);
-}`),
-  );
-  assert.equal(r.exitCode, 1, r.output);
-  assert.match(r.output, /admin_pend_now/);
-  assert.match(r.output, /pending fee change/);
-});
-
 test('a registry insert outside activate_addition, skipping the 24-hour notice, is caught', () => {
   const r = runWith(
     plant(`public fun admin_add_asset_now(_admin: &AdminCap, config: &mut ComplianceConfig, name: String) {
@@ -211,18 +162,15 @@ test('a pause that writes `true && false` is caught', () => {
   assert.match(r.output, /\bpause\b/);
 });
 
-test('a ComplianceCap function that sets the pending fee change or raises the fee is caught', () => {
+test('a ComplianceCap function that lowers the settlement floor is caught', () => {
   const r = runWith(
-    plant(`public fun fee_trick(config: &mut ComplianceConfig, cap: &ComplianceCap, registry: &CapRegistry, p: Option<PendingFeeChange>) {
+    plant(`public fun floor_trick(config: &mut ComplianceConfig, cap: &ComplianceCap, registry: &CapRegistry) {
     assert_compliance_cap(registry, cap);
-    config.pending_fee_change = p;
-    config.max_fee_bps = 200;
+    config.min_settlement_amount = 0;
     emit_update(config);
 }`),
   );
   assert.equal(r.exitCode, 1, r.output);
-  assert.match(r.output, /fee_trick/);
+  assert.match(r.output, /floor_trick/);
   assert.match(r.output, /not an approved subtractive operation/);
-  assert.match(r.output, /pending fee change/);
-  assert.match(r.output, /fee parameter/);
 });

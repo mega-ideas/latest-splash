@@ -8,11 +8,9 @@
  * tolerance, lower a requirement, add a venue, or resume. That is what makes it
  * safe to put in a compliance function's hands rather than the cold multisig's,
  * and what makes a compromise of it a denial-of-service rather than a
- * loosening. Two v2 properties ride on the same check: the fee parameters
- * (the fee address, the bps ceiling and the cap, decision 1) change only
- * through the 24-hour `activate_fee_change` path; and the three v2 registries
- * (accepted assets, settlement apps, bridge adapters) grow only through the
- * 24-hour `activate_addition` path.
+ * loosening. One v2 property rides on the same check: the three v2
+ * registries (accepted assets, settlement apps, bridge adapters) grow only
+ * through the 24-hour `activate_addition` path.
  *
  * A claim like that decays the moment someone adds a convenient setter. So it
  * is enforced on the SIGNATURE and the body together. The first version
@@ -20,8 +18,12 @@
  * compiled `&mut` and by-value cap functions, a loosening helper, a parameter
  * written into a one-way switch and a registry insert past it
  * (tests/compliance-subtractive-check.test.mjs pins each one; the switch,
- * `legacy_enabled`, left core with the legacy path in decision 3, and the
- * fee parameters now take its place in those tests).
+ * `legacy_enabled`, left core with the legacy path in decision 3).
+ *
+ * Splash's fee is not a compliance parameter. Amendment A1 puts it in its own
+ * module, `fee_config`, with its own 24-hour path and its own capability, so
+ * nothing here guards it, and compliance_config holds no fee at all
+ * (tests/fee-previous-design-removed.test.mjs).
  *
  * WHAT THIS CHECKS, on every `.move` file under splash_core's sources/
  * (recursively, as the compiler reads them), with comments and string
@@ -37,13 +39,8 @@
  *      push_back, nothing but `true` written to `paused`, no `&mut` borrow of
  *      it), and call no function of compliance_config except the read-only or
  *      checking HELPERS below, by a plain `name(` or `name<..>(` call.
- *   4. Anywhere in core except `activate_fee_change` (and `create`, which
- *      packs them): no fee parameter (`fee_address`, `max_fee_bps`,
- *      `fee_cap_minor`) is assigned, filled, swapped or borrowed `&mut`
- *      through a field access. Anywhere except `propose_fee_change`:
- *      `pending_fee_change` is assigned nothing but `option::none()`, is
- *      never filled or swapped, and is never borrowed `&mut`, so no fee
- *      change skips its 24 hours' notice.
+ *   4. (Retired. It guarded the legacy switch, then the fee parameters of
+ *      the first fee design; both have left compliance_config.)
  *   5. Anywhere in core except `activate_addition`: no insert in a function
  *      that touches a v2 registry (`accepted_assets`, `settlement_apps`,
  *      `bridge_adapters` or `registry_set_mut`). Except in `create`, no
@@ -53,11 +50,8 @@
  *   - A loosening reached through a function of ANOTHER module that a cap
  *     function calls. Move field privacy means only compliance_config can
  *     write a ComplianceConfig field, so such a path needs a public function
- *     there, which rules 4 and 5 still see if it touches a fee parameter,
- *     the pending fee change or a registry, but not if it, say, resumes
- *     settlement.
- *   - A fee parameter written other than through a field access: a
- *     reference held in a local, as for the registries below.
+ *     there, which rule 5 still sees if it touches a registry, but not if
+ *     it, say, resumes settlement.
  *   - A helper reached other than by a plain call: a macro (`name!(..)`) or a
  *     `use fun` method alias (`config.alias()`).
  *   - A registry written through a reference held in a local:
@@ -130,12 +124,6 @@ const ALLOWED = {
     why: 'withdraws an announced registry addition before it takes effect',
     require: [{ pattern: /\bpending_additions\s*\.\s*remove\s*\(/g, label: 'pending_additions.remove(' }],
   },
-  // Decision 1. A fee change gives 24 hours' notice; withdrawing one before
-  // it takes effect only stops a change.
-  cancel_fee_change: {
-    why: 'withdraws an announced fee change before it takes effect',
-    require: [{ pattern: /\bpending_fee_change\s*\.\s*extract\s*\(/g, label: 'pending_fee_change.extract(' }],
-  },
   // Takes the cap BY VALUE to hand it on (audit fix S-03). It touches nothing
   // else: no &mut parameter, and its body is the transfer.
   transfer_cap: {
@@ -155,13 +143,6 @@ const NEVER = [
   { pattern: /\bpaused\s*=(?!=)(?!\s*true\s*;)/, why: 'anything but `true` written to paused can resume settlement — use admin_set_paused' },
   { pattern: /&\s*mut\s+[\w.]*\bpaused\b/, why: 'a mutable borrow of paused can resume settlement' },
 ];
-
-/** A fee parameter assigned, filled, swapped or borrowed mutably through a field access. */
-const FEE_WRITTEN =
-  /\.\s*(?:fee_address|max_fee_bps|fee_cap_minor)\s*(?:=(?!=)|\.\s*(?:fill|swap|swap_or_fill|borrow_mut|extract)\s*\()|&\s*mut\s+[\w.]*\.\s*(?:fee_address|max_fee_bps|fee_cap_minor)\b/;
-/** The pending fee change given anything but `option::none()`, filled, swapped or borrowed mutably. */
-const PENDING_FEE_WRITTEN =
-  /\.\s*pending_fee_change\s*(?:=(?!=)(?!\s*option\s*::\s*none\s*\(\s*\)\s*;)|\.\s*(?:fill|swap|swap_or_fill|borrow_mut)\s*\()|&\s*mut\s+[\w.]*\.\s*pending_fee_change\b/;
 
 const REGISTRIES = /\b(?:accepted_assets|settlement_apps|bridge_adapters|registry_set_mut)\b/;
 const REGISTRY_ASSIGNED = /\b(?:accepted_assets|settlement_apps|bridge_adapters)\s*=(?!=)|\*\s*registry_set_mut\s*\(/;
@@ -219,16 +200,6 @@ for (const unit of units) {
   for (const fn of unit.fns) {
     const where = at(unit, fn.index);
     const body = fn.body;
-
-    // 4. The fee parameters change only through the 24-hour path.
-    if (fn.name !== 'activate_fee_change' && fn.name !== 'create' && FEE_WRITTEN.test(body)) {
-      failures.push(`${where}: \`${fn.name}\` writes a fee parameter (\`${squash(body.match(FEE_WRITTEN)[0])}\`). The fee address, its bps ceiling and its cap change only through propose_fee_change, 24 hours' notice and activate_fee_change.`);
-    }
-    // The whole right-hand side must be the literal: `option::none() || ..`
-    // starts with none and is not none.
-    if (fn.name !== 'propose_fee_change' && PENDING_FEE_WRITTEN.test(body)) {
-      failures.push(`${where}: \`${fn.name}\` sets the pending fee change (\`${squash(body.match(PENDING_FEE_WRITTEN)[0])}\`). Only propose_fee_change announces one, and it gives 24 hours' notice.`);
-    }
 
     // 5. The v2 registries grow only through the 24-hour path.
     if (fn.name !== 'activate_addition' && fn.name !== 'create' && REGISTRIES.test(body) && /\binsert\s*\(/.test(body)) {
