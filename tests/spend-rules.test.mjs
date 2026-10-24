@@ -414,6 +414,24 @@ test('the WALLET tag needs a verified ownership proof; an exchange address does 
   await w.client.close();
 });
 
+test('withdrawing an ownership proof cancels a waiting request that would tag that address as a wallet', async () => {
+  const w = await spendWorld();
+  const { members } = await withPolicy(w);
+  await recordOwnershipProof(w.db, { orgId: 'acme', address: SUPPLIER, method: 'signed_message', evidence: 'sig', now: T0 });
+  const tagged = await changeRecipients(w.sc, { orgId: 'acme', requestedBy: 'u-founder', wallet: members, change: { add: [{ address: SUPPLIER, tag: 'wallet' }] } });
+  assert.equal(tagged.ok, true, JSON.stringify(tagged));
+  const other = await changeRecipients(w.sc, { orgId: 'acme', requestedBy: 'u-founder', wallet: members, change: { add: [{ address: EXCHANGE, tag: 'exchange' }] } });
+  assert.equal(other.ok, false, 'one recipients request at a time');
+  const { revokeOwnershipProof } = await import('../lib/server/ownership-proofs.ts');
+  await revokeOwnershipProof(w.db, { orgId: 'acme', address: SUPPLIER });
+  const [row] = await w.db.select().from(schema.walletSigningRequests).where(eq(schema.walletSigningRequests.id, tagged.request.id));
+  assert.equal(row.status, 'cancelled', 'the quorum can no longer sign a WALLET tag the proof no longer backs');
+  const late = await submitPartialSignature(w.signing, { orgId: 'acme', userId: 'u-founder', id: tagged.request.id, signature: await sign(w.keys.founder, tagged.request), digest: tagged.request.digest });
+  assert.equal(late.ok, false);
+  assert.equal(w.spend.policies.values().next().value.recipients.length, 0);
+  await w.client.close();
+});
+
 test('changing a rule revokes its allowance and issues the new one in one transaction', async () => {
   const w = await spendWorld();
   const { members } = await withPolicy(w);

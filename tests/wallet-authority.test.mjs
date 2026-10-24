@@ -393,6 +393,57 @@ test('(4) the migration route moves USDC only and asks for the sign-off before b
   }
 });
 
+/* ── Asks reach the owners; authority routes are limited ──────────────── */
+
+test('(3) an ask is sent to every owner but the asker, and the routes that write authority are rate-limited', async () => {
+  const w = await world();
+  const { staff } = await withStaff(w);
+  w.model.addIntent(intentBy(staff.address));
+  const sent = [];
+  const notify = async (n) => {
+    sent.push(n);
+  };
+  const asked = await askOwnersToApprove({ db: w.db, ctx: w.ctx, notify }, { orgId: 'acme', userId: 'u-staff', intentId: INTENT, contentHash: HASH, walrusBlobId: BLOB, requesterAddresses: [staff.address] });
+  assert.equal(asked.ok, true, JSON.stringify(asked));
+  assert.equal(sent.length, 1);
+  assert.deepEqual(sent[0].ownerUserIds, ['u-founder', 'u-three', 'u-two']);
+  assert.equal(sent[0].ask.id, asked.ask.id);
+  // A failing channel never fails the ask.
+  w.model.addIntent(intentBy(staff.address, { id: '0x' + '94'.repeat(32) }));
+  const loud = await askOwnersToApprove({ db: w.db, ctx: w.ctx, notify: async () => { throw new Error('channel down'); } }, { orgId: 'acme', userId: 'u-staff', intentId: '0x' + '94'.repeat(32), contentHash: HASH, walrusBlobId: BLOB, requesterAddresses: [staff.address] });
+  assert.equal(loud.ok, true);
+  await w.client.close();
+
+  const asks = await readFile(new URL('../app/api/wallet/approval-asks/route.ts', import.meta.url), 'utf8');
+  assert.match(asks, /notifyOwnersOfAsk/, 'the live route tells the owners');
+  for (const [file, methods] of [
+    ['app/api/wallet/persons-in-charge/route.ts', ['POST', 'DELETE']],
+    ['app/api/wallet/migration/sign-offs/route.ts', ['POST']],
+    ['app/api/wallet/migration/sign-offs/[id]/route.ts', ['POST']],
+    ['app/api/wallet/approval-asks/[id]/route.ts', ['POST']],
+  ]) {
+    const source = await readFile(new URL(`../${file}`, import.meta.url), 'utf8');
+    for (const method of methods) {
+      const at = source.indexOf(`export async function ${method}(`);
+      const body = source.slice(at, source.indexOf('\n}\n', at));
+      assert.match(body, /limitWalletRequests\(/, `${file} ${method} is rate-limited`);
+      const first = body.search(/cancelApprovalAsk|declineApprovalAsk|appointPersonInCharge|revokePersonInCharge|prepareMigrationSignOff|signMigrationSignOff/);
+      assert.ok(body.indexOf('limitWalletRequests(') < first, `${file} ${method}: limited before it writes anything`);
+    }
+  }
+});
+
+test('customer-facing refusals carry no internal decision codes, and the month window is described as it works', async () => {
+  for (const file of ['lib/server/payment-approval-asks.ts', 'lib/server/business-wallet.ts', 'lib/server/spend-rules.ts', 'lib/server/wallet-authority.ts', 'lib/server/spend-rules-route.ts']) {
+    const source = await readFile(new URL(`../${file}`, import.meta.url), 'utf8');
+    assert.doesNotMatch(source, /'[^'\n]*\((?:D\d+|A\d+ §[\d.]+|§[\d.]+)\)'/, `${file}: no decision code in a message`);
+  }
+  for (const file of ['lib/server/spend-rules.ts', 'lib/server/spend-rules-builders.ts', 'docs/v2/phase2-spending-rules.md']) {
+    const source = await readFile(new URL(`../${file}`, import.meta.url), 'utf8');
+    assert.doesNotMatch(source, /calendar month/i, `${file}: a month runs from the first payment, not the 1st`);
+  }
+});
+
 /* ── Offboarding: the authority goes with the membership ──────────────── */
 
 test('(4) a person in charge made a viewer, removed, or removed and re-added, no longer has the highest authority', async () => {
