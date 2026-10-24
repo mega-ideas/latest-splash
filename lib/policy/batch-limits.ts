@@ -1,7 +1,9 @@
 /**
  * Batch size ceiling and gas sizing (audit finding: unbounded batch).
  *
- * `settlement::settle_batch` loops the caller's `vector<Payment>`, and each
+ * The v1 testnet custody batch (`settlement::settle_batch`, now
+ * `settle_sui_batch_delegated`; custody is retired from mainnet) loops the
+ * caller's `vector<Payment>`, and each
  * iteration emits a `PaymentExecuted` event AND creates a new `Coin` object via
  * `public_transfer`. Sui caps a transaction at 1024 emitted events and 1024
  * programmable-transaction commands, and the server was sending any row count

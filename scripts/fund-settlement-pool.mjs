@@ -1,5 +1,10 @@
 #!/usr/bin/env node
 /**
+ * V1 TESTNET ONLY (whole file). It calls splash_custody's v1 testnet
+ * `settlement::deposit`, which neither v2 core nor the current
+ * splash_custody sources have; custody is retired from mainnet (D11), and
+ * nothing here runs there.
+ *
  * Fund the shared SettlementPool<SUI> that batch payouts pay out of.
  *
  * `settlement::settle_sui_batch` splits each recipient's net + fee straight out

@@ -382,11 +382,13 @@ async function authorize(request: Request, spent: SpentApproval) {
     );
   }
 
-  // The on-chain pause switch does not gate this path: the live transfer PTB is
-  // payment_intent::confirm_payment_intent, which imports neither
-  // compliance_config nor peg_monitor, so `assert_active` never runs. Until the
-  // republished contract carries those guards, refuse here — otherwise ticking
-  // "Pause settlement" halts batches while customer transfers keep executing.
+  // The on-chain pause switch does not gate this path: the transfer PTB here is
+  // the v1 testnet one (payment_intent::confirm_payment_intent, V1 TESTNET
+  // ONLY in lib/server/sui-settlement.ts), which imports neither
+  // compliance_config nor peg_monitor, so `assert_active` never runs. v2's
+  // settle paths check the pause on chain; until Phase 2's builder replaces
+  // this one, refuse here — otherwise ticking "Pause settlement" halts
+  // batches while customer transfers keep executing.
   const controls = await readComplianceControls();
   if (controls.paused) {
     return NextResponse.json(

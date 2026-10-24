@@ -37,7 +37,7 @@ function settlementMode(): 'auto' | 'live' | 'simulate' {
 }
 
 // Batch-only settlement override. `settle_batch` requires live DeepBook order-book
-// depth (peg_monitor::assert_deepbook_liquidity), which testnet pools rarely have,
+// depth (splash_custody's liquidity_guard::assert_deepbook_liquidity), which testnet pools rarely have,
 // so a real batch can abort mid-demo. Setting SUI_BATCH_SETTLEMENT_MODE=simulate
 // keeps batch on a labelled SIM_ receipt while single transfers, treasury, and the
 // composed proof flow still settle for real. Returns null → fall through to the
@@ -874,6 +874,23 @@ function refuseRetiredCustodyPathOnMainnet(path: string): void {
 }
 
 /**
+ * v2 core has no `create_payment_intent` or `confirm_payment_intent`: v2
+ * opens an intent with `create_for_wallet` / `create_for_app` and settles it
+ * through `confirm_from_business_wallet` or `splash_spend::pay_intent`, with
+ * Splash's fee computed on chain and bounded by max_fee (Amendment A1). The
+ * composed builders below call the v1 entry points, which exist only in the
+ * v1 package deployed on testnet. On mainnet, a fresh v2 publish, they refuse
+ * before anything is built or signed. Phase 2's v2 builder replaces them.
+ */
+function refuseV1CoreBuilderOnMainnet(path: string): void {
+  if (!onMainnet()) return;
+  throw new Error(
+    `${path} calls the v1 payment_intent entry points, which v2 core (mainnet) does not have; v2 settles ` +
+      'through confirm_from_business_wallet or splash_spend::pay_intent, built in Phase 2. Nothing was sent.',
+  );
+}
+
+/**
  * Resolve the CUSTODY package, or explain why it does not exist.
  *
  * On mainnet it never exists: v2 retired splash_custody from the mainnet path
@@ -950,6 +967,12 @@ async function requireSdkExecution() {
   }
 }
 
+/**
+ * V1 TESTNET ONLY. Opens an intent with the v1 `payment_intent::
+ * create_payment_intent`, which v2 core does not have; refused on mainnet
+ * (refuseV1CoreBuilderOnMainnet). Phase 2's v2 builder replaces it with
+ * `create_for_wallet` / `create_for_app`.
+ */
 export async function createPaymentIntentOnSui(input: {
   recipient: string;
   amountMist: number;
@@ -963,6 +986,7 @@ export async function createPaymentIntentOnSui(input: {
    */
   commitment: Uint8Array;
 }) {
+  refuseV1CoreBuilderOnMainnet('createPaymentIntentOnSui');
   await requireSdkExecution();
   assertCommitmentBytes(input.commitment);
   const packageId = corePackageIdOrThrow();
@@ -999,6 +1023,14 @@ export async function createPaymentIntentOnSui(input: {
   };
 }
 
+/**
+ * V1 TESTNET ONLY. Settles with the v1 `payment_intent::
+ * confirm_payment_intent`, paid from the operator's gas coin, which v2 core
+ * does not have and the operator-outflow monitor flags; refused on mainnet
+ * (refuseV1CoreBuilderOnMainnet). Phase 2's v2 builder replaces it with
+ * `splash_spend::pay_intent` (or the owners' `confirm_from_business_wallet`),
+ * passing the quote's maxFeeMinor as max_fee.
+ */
 export async function confirmComposedPaymentOnSui(input: {
   intentId: string;
   intentCreateDigest: string;
@@ -1008,6 +1040,7 @@ export async function confirmComposedPaymentOnSui(input: {
   anchorId: string;
   backingBlobId: string;
 }): Promise<ComposedSettlementResult> {
+  refuseV1CoreBuilderOnMainnet('confirmComposedPaymentOnSui');
   await requireSdkExecution();
   const packageId = corePackageIdOrThrow();
   const anchorCapId = anchorCapObjectId();

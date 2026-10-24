@@ -6,7 +6,8 @@
  * ⚠️  THESE ARE REAL RISK CONTROLS. Read before changing anything.
  *
  * `max_slippage_bps` defines the price band used by
- * `peg_monitor::assert_deepbook_liquidity`: settlement only clears if DeepBook
+ * `liquidity_guard::assert_deepbook_liquidity` (splash_custody, testnet only):
+ * settlement only clears if DeepBook
  * holds at least `min_depth_base_units` of BID depth within
  * [mid*(1 - slippage), mid].
  *

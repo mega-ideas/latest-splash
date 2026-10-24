@@ -34,8 +34,8 @@ const LIFECYCLE = [
   '::payment_intent::IntentConfirmed',
   '::payment_intent::IntentCanceled',
   '::audit_anchor::SettlementAnchored',
-  '::business_account::PayoutApproved',
-  '::business_account::PayoutApprovalConsumed',
+  // v2 core emits no PayoutApproved or PayoutApprovalConsumed: the legacy
+  // approval path and its events are gone (tests/legacy-path-removed.test.mjs).
 ];
 const RECEIPT = '::receipt_v2::ReceiptIssued';
 
