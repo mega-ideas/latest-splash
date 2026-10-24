@@ -155,8 +155,10 @@ quorum signs `rotate_wallet`; when that lands, the new wallet's quorum is
 asked to confirm; when the confirmation lands, the old wallet's quorum is
 asked to move its whole USDC address balance to the new wallet (nothing is
 asked if it holds none). `DELETE` withdraws a rotation not yet confirmed.
-Allowances the old wallet funded name it as funder; they are revoked and
-reissued with the spending rules (§4.2), which are not built yet.
+Allowances the old wallet funded name it as funder and cannot pay under
+the new generation; `POST /api/wallet/spending-rules/reissue` reissues the
+rules under the new wallet, and the old wallet's quorum revokes the old
+allowances (`docs/v2/phase2-spending-rules.md`).
 
 Membership: `POST /api/wallet/business/members` (add or remove an owner by
 their membership here, remove an owner or set the recovery party by
@@ -300,7 +302,8 @@ passkeys. Until then, business wallets stay off mainnet (in code, above).
   governance multisig or the operator is not built.
 - **Cross-chain payments from the wallet**: no bridge adapter is registered
   (Phase 1), so the builders refuse kind 3.
-- **Allowances after a rotation**: revoke and reissue with the spending rules
-  (§4.2).
+- **Allowances after a rotation**: built with the spending rules
+  (`docs/v2/phase2-spending-rules.md`, "After a rotation"): reissued under
+  the new wallet's policy, and the old wallet revokes its own.
 - **The UI** (Phase 3): the signing screen must render `reviewOnDevice` on the
   bytes, with full addresses and the transaction code.

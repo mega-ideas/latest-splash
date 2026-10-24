@@ -100,6 +100,18 @@ Design: `docs/v2/phase2-business-wallet.md`.
   the business wallet, a nonce and a 24-hour expiry; nobody signs off their
   own. Migration moves USDC only. Every grant, revocation, sign-off and ask is
   in `wallet_authority_events`, append-only by trigger.
+- **Spending rules (§4.2, `docs/v2/phase2-spending-rules.md`).** A rule is
+  an allowance bound to SPLASH_SPEND and named for the business's current
+  policy, plus the staff member's place on it. Giving, changing (revoke +
+  reissue in one transaction), taking back, recipients and limits are all
+  signed by the wallet's quorum; a second approval by one owner who is
+  neither maker nor payer. The reader refuses an allowance for any other
+  app, `allowance::new`, `rotate_spender`, a dangling proposal, a name for
+  another policy, and any policy, allowance or cap the server did not read
+  as this business's. The WALLET tag only for an address with a live
+  ownership proof of this business. The index rolls each window over as the
+  chain will, so what is shown as left is what the next charge sees. After a
+  rotation the rules are stale until reissued under the new wallet.
 - **Gas sponsor (Sky, 25 Oct).** The KMS operator key is the wallet gas
   sponsor; the cap of 1 SUI per business per 24 hours stands.
 - **Open:** the hardware 2-of-3 passkey check (one approver, Sky, with three

@@ -142,7 +142,9 @@ procedure in [`docs/UPGRADE-POLICY.md`](UPGRADE-POLICY.md).
       fee is quoted and no payment is built; `verify_business` and the
       operator-outflow monitor need the `Registry`), and so is
       `SPLASH_SPEND_PACKAGE_ID` (the operator-outflow monitor's approved
-      path). For the verify step, also `SPLASH_FEE_ADMIN_CAP_ID`,
+      path), with `SPLASH_SPEND_POLICY_REGISTRY_ID`, the `PolicyRegistry`
+      splash_spend shares at publish (spending rules, §4.2: without both no
+      rule is built or read). For the verify step, also `SPLASH_FEE_ADMIN_CAP_ID`,
       `SPLASH_OPS_CAP_ID`, `SPLASH_OPS_ADDRESS` (blank: the governance
       multisig) and `SPLASH_FINANCE_ADDRESS`; unset, those checks are
       reported skipped, never passed.
