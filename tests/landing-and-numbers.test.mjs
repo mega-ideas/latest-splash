@@ -193,7 +193,10 @@ test('the landing is the v1 cinematic: sections in order, supply on its own page
   const landing = await source('components/IsometricLanding.tsx');
 
   const ids = [...landing.matchAll(/id="([a-z-]+)"/g)].map((m) => m[1]);
-  const expected = ['loops', 'how-it-works', 'comparison', 'corridors', 'trust', 'platform', 'copilot', 'control-plane'];
+  // v2 Phase 4 (brief section 6): how it works, routes and comparison, the
+  // three loops, platform, trust, Zeke. The hero, product section and
+  // partners above them are components (tests/landing-v2.test.mjs).
+  const expected = ['how-it-works', 'comparison', 'corridors', 'loops', 'platform', 'trust', 'copilot', 'control-plane'];
   const inOrder = expected.map((id) => ids.indexOf(id));
   assert.ok(inOrder.every((i) => i >= 0), `every section is present; found ${ids.join(', ')}`);
   assert.deepEqual([...inOrder].sort((a, b) => a - b), inOrder, 'in this order');
@@ -206,9 +209,9 @@ test('the landing is the v1 cinematic: sections in order, supply on its own page
   assert.doesNotMatch(landing, /id="supply"/, 'supply must not be a landing section');
   assert.match(landing, /href="\/working-capital"/, 'loop 03 links the supply page');
 
-  // Two ways into a payment: an invoice, or a transfer filled in by hand.
-  assert.match(landing, /Invoice in, or type it in/);
-  assert.match(landing, /Manual transfer branch/);
+  // How it works is its own component since v2 Phase 4: two transfer types
+  // and five steps true for both (tests/landing-v2.test.mjs).
+  assert.match(landing, /<HowItWorks/);
 
   // The control plane reveals inside the copilot section, on demand.
   assert.match(landing, /aria-controls="control-plane"/);
