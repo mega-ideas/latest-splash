@@ -26,34 +26,35 @@
  *     every .ts .tsx .js .jsx .mjs .cjs .json .md .mdx file under those three
  *     directories is read as text, comments included (a rate in a comment
  *     goes stale the same way). A RATE is a number, or a range of two,
- *     followed by `%`, `bps`, `bp` or `basis point(s)` (`0.70%`, `0.7 %`,
- *     `3–5%`, `70 bps`, `15–30 bps`), but not one inside `[…]`, such as a
+ *     followed by `%`, `bps`, `bp` or `basis point(s)` (`0.30%`, `0.3 %`,
+ *     `3–5%`, `30 bps`, `15–30 bps`), but not one inside `[…]`, such as a
  *     Tailwind `w-[60%]`. FEE WORDING is one of the words fee, fees, charge,
  *     charges, charged, commission, commissions, pricing, surcharge or
  *     markup, alone or as one word of an identifier (`corridorFee`,
  *     `fee_bps` and `FEE_LABEL` count; `feedback` and `coffee` do not). A
  *     line holds a literal fee rate when it has:
- *       1. a rate and fee wording (`'Fee to local currency', '0.70%'`);
+ *       1. a rate and fee wording (`'Fee to a bank', '0.30%'`);
  *       2. a rate equal to one of SPLASH'S OWN RATES, with or without fee
  *          wording: any non-zero rate of fee_config's launch schedule (read
  *          from `launch_schedules`, so 2, 5, 7, 10, 12, 15, 20 and 30 bps
- *          today) or the retired flat 70 bps. This is what catches a typed
+ *          today) or the retired flat rate (RETIRED_BPS). This is what catches a typed
  *          pricing line ("0.02% to any Sui wallet") or ticker
- *          (`['0.70%', 'to local currency']`);
+ *          (`['0.30%', 'to a bank']`);
  *       3. fee wording and a decimal fraction as a multiplier
  *          (`const fee = source * 0.007`);
  *       4. a fee-rate identifier given a number: a name with `fee` and one of
  *          bps, bp, rate, percent, pct or percentage among its words, then
- *          `:` or `=`, then a numeric literal (`feeBps: 18`,
+ *          `:` or `=`, then a numeric literal (`fee_bps: 18`,
  *          `"fee_rate": 0.007`).
  *     Allowed: a rate that is not Splash's with no fee wording on its line
  *     (`0.5% slippage`, `-12%`); a fee AMOUNT, which is not a rate
  *     (`min 0.25 USDC`); a fee rate rendered from data
  *     (`${formatBps(bps)}`). lib/ is not scanned: lib/fees holds the
  *     schedule, and the rest of lib/ is §2.8's own grep.
- *     PENDING_2_8 below lists, per file and per rate, the literals A1 §2.8
- *     has still to remove. It can only shrink: a count that no longer
- *     matches, either way, fails, so a new literal cannot hide behind an old
+ *     PENDING_2_8 below listed, per file and per rate, the literals A1 §2.8
+ *     had still to remove; §2.8 emptied it, and it stays empty
+ *     (tests/flat-fee-removed.test.mjs). It could only shrink: a count that
+ *     no longer matches, either way, fails, so a new literal cannot hide behind an old
  *     one and a removed one must come off the list.
  *
  * (d) NO IMMEDIATE SETTER BUT set_discount. In splash_core::fee_config,
@@ -180,11 +181,11 @@ export const RATE_ROOTS = ['app', 'components', 'content'];
 const RATE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.json', '.md', '.mdx']);
 const FEE_WORDS = new Set(['fee', 'fees', 'charge', 'charges', 'charged', 'commission', 'commissions', 'pricing', 'surcharge', 'markup']);
 const RATE_WORDS = new Set(['bps', 'bp', 'rate', 'percent', 'pct', 'percentage']);
-/** The flat rate A1 §1 and §2.8 retire, in bps: 0.70%. Never a Splash rate again. */
+/** The flat rate A1 §1 and §2.8 retired, in bps (lib/fees/legacy.ts names its old field). Never a Splash rate again. */
 export const RETIRED_BPS = Object.freeze([70n]);
-/** `0.70%`, `3–5%`, `70 bps`, `15–30 bps`, `2 basis points`; not `w-[60%]`. */
+/** `0.30%`, `3–5%`, `30 bps`, `15–30 bps`, `2 basis points`; not `w-[60%]`. */
 const RATE = /(?<![\w.[])(\d+(?:[.,]\d+)?)(?:\s?[–-]\s?(\d+(?:[.,]\d+)?))?\s?(%|bps\b|bp\b|basis[\s-]points?\b)(?!\])/gi;
-/** `feeBps: 18`, `"fee_rate": 0.007`. */
+/** `fee_bps: 18`, `"fee_rate": 0.007`. */
 const NAMED = /(?<![\w$])([A-Za-z_][\w$]*)["']?\s*[:=]\s*(-?\d[\d_]*(?:\.\d+)?)/g;
 /** `* 0.007`, `0.014 *`. */
 const FRACTION = /\*\s*(0?\.\d+)(?![\d.])|(?<![\w.])(0?\.\d+)\s*\*/g;
@@ -282,10 +283,11 @@ export function feeRateLiterals(root, rates = splashRates(root)) {
 }
 
 /**
- * The literal fee rates A1 §2.8 has still to remove (with the flat 0.70% and
- * the copy §2.7 renders from the schedule), per file and rate as
- * `feeRatesInLine` writes it, with how many there are. §2.8 empties this
- * list; nothing is ever added to it.
+ * The literal fee rates A1 §2.8 had still to remove (the retired flat rate
+ * and the copy §2.7 renders from the schedule), per file and rate as
+ * `feeRatesInLine` writes it, with how many there were. §2.8 emptied it;
+ * nothing is ever added to it, and tests/flat-fee-removed.test.mjs keeps it
+ * empty.
  */
 export const PENDING_2_8 = Object.freeze([]);
 
