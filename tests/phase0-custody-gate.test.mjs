@@ -134,8 +134,11 @@ test('the overview card and the copilot stop presenting treasury numbers in Phas
   assert.doesNotMatch(overview, /useState\(24500\)/);
   assert.doesNotMatch(overview, /useState\(98\.72\)/);
   assert.doesNotMatch(overview, /\+\$3\.22/, 'no invented daily yield');
-  assert.match(overview, /Treasury arrives with our licence/);
-  assert.match(overview, /custody_not_licensed/);
+  // v2 brief 5.2: Home shows the wallet, approvals, this month's payments and
+  // recent payments. The treasury projection card (and its licence copy, which
+  // D9 made untrue) left Home; treasury figures live on Treasury alone.
+  assert.doesNotMatch(overview, /fetch\('\/api\/treasury'/, 'Home reads no treasury figure');
+  assert.doesNotMatch(overview, /Treasury arrives with our licence/);
 
   // The copilot used to answer treasury questions from a keyword matcher, so
   // this asserted the matcher consulted the phase. v14 deleted the matcher and
