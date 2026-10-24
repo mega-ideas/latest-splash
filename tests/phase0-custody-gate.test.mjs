@@ -122,7 +122,9 @@ test('the treasury page shows no demo balance or transaction as confirmed, and s
   assert.doesNotMatch(page, /'Audited/, 'nothing is described as audited without a source');
   assert.doesNotMatch(page, /earns a floating T-bill rate/, 'no yield promise in the header');
 
-  assert.match(page, /Treasury arrives with our licence/, 'the Phase-0 state is plain about why');
+  // v2 D9: the closed state names no licence (the nav opens Treasury); it says
+  // the page is not open yet and where the USDC is (tests/dashboard-review).
+  assert.match(page, /Treasury isn&rsquo;t open in your workspace yet/, 'the closed state is plain about it');
   assert.match(page, /custody_not_licensed/, 'the page recognises the gate response');
   assert.match(page, /<MoneyPathPanel \/>/, 'the money-path panel still mounts (pinned by tests/money-path.test.mjs)');
 });

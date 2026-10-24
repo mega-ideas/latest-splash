@@ -213,11 +213,11 @@ test('without a model, Zeke recommends review on exactly those grounds, and name
   assert.equal(reviewSentence({ explain: { confidence: null, evidence: [live()], reviewReasons: [reason] } }), ` Review it before approving. ${reason}`);
 
   // Demo data: said, not a review trigger (policy already sends it to a person).
-  assert.equal(reviewSentence({ explain: { confidence: null, evidence: [{ ...live(), status: 'DEMO' }] } }), ' It is built on demo or modeled data.');
-  assert.equal(reviewSentence({ explain: { confidence: null, evidence: [], evidenceQuality: 'CONTAINS_DEMO_DATA' } }), ' It is built on demo or modeled data.', 'keyed off evidenceQuality, as policy is');
+  assert.equal(reviewSentence({ explain: { confidence: null, evidence: [{ ...live(), status: 'DEMO' }] } }), ' It is built on sample or modeled data.');
+  assert.equal(reviewSentence({ explain: { confidence: null, evidence: [], evidenceQuality: 'CONTAINS_DEMO_DATA' } }), ' It is built on sample or modeled data.', 'keyed off evidenceQuality, as policy is');
   assert.equal(
     reviewSentence({ explain: { confidence: null, evidence: [{ ...live(false), status: 'DEMO' }], reviewReasons: [reason] } }),
-    ` Review it before approving: it relies on untrusted evidence (COUNTERPARTY). ${reason} It is built on demo or modeled data.`,
+    ` Review it before approving: it relies on untrusted evidence (COUNTERPARTY). ${reason} It is built on sample or modeled data.`,
   );
 });
 

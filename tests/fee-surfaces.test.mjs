@@ -305,8 +305,8 @@ test('no surface quotes Splash fee on a kind it typed in: every quote goes throu
 
 test('the delivery step prices the route it knows, and says which are priced when they open in Phase 2', () => {
   const step = read('components/transfer/StepDelivery.tsx');
-  assert.doesNotMatch(step, /crypto wallet/i, 'this flow pays a bank account; a Sui wallet is paid from Send USDC');
-  assert.match(step, /Send USDC/);
+  assert.doesNotMatch(step, /crypto wallet/i, 'this flow pays a bank account; a Sui wallet is paid from Wallet');
+  assert.match(step, /use Wallet/);
   assert.match(step, /PHASE_2_FEE_NOTE/, 'the Phase 2 routes say their fee is set when they open');
   assert.match(step, /option\.tier === 'PAYOUT_ONLY' \? pricing\.bankFeePhrase : PHASE_2_FEE_NOTE/);
 });
