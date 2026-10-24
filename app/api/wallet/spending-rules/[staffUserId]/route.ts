@@ -31,7 +31,7 @@ export async function PUT(request: Request, { params }: Params) {
   const members = await walletMembersOr(route);
   if (members.response) return members.response;
   const result = await changeSpendingRule(route.sc, { orgId: route.orgId, requestedBy: route.authority.userId, wallet: members.wallet, rule });
-  return asResponse(result, result.ok ? { request: result.request } : undefined);
+  return asResponse(result, result.ok ? { request: result.request, carried: 'carried' in result ? result.carried : undefined } : undefined);
 }
 
 export async function DELETE(request: Request, { params }: Params) {

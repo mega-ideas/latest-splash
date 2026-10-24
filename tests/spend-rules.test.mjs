@@ -454,18 +454,22 @@ test('changing a rule after a spend keeps what was spent: the lifetime cap and t
   assert.deepEqual([before.spendableNowMinor, before.lifetimeRemainingMinor], ['0', String(5_000n * USDC_1)]);
   const windowEnd = before.window.endsAtMs;
 
+  // A lifetime cap at or below what was spent cannot be issued. (A lifetime
+  // cap is read against the rule as the index shows it: the current
+  // allowance's cap and what has been charged under it.)
+  const used = await changeSpendingRule(w.sc, { orgId: 'acme', requestedBy: 'u-founder', wallet: members, rule: rule({ lifetimeCapMinor: 15_000n * USDC_1 }) });
+  assert.equal(used.code, 'lifetime_used');
+
   // Only the expiry changes. The month is spent out, so the new rule starts when it renews, with 5,000 left for life.
   const extend = await changeSpendingRule(w.sc, { orgId: 'acme', requestedBy: 'u-founder', wallet: members, rule: rule({ lifetimeCapMinor: 20_000n * USDC_1, expiresAtMs: t0 + 180n * DAY }) });
   assert.equal(extend.ok, true, JSON.stringify(extend));
   const proposals = extend.request.description.actions.filter((a) => a.type === 'propose_allowance');
   assert.deepEqual(proposals.map((p) => [p.startsAtMs, p.lifetimeCapMinor, p.expiresAtMs]), [[windowEnd, String(5_000n * USDC_1), String(t0 + 180n * DAY)]]);
   await signBy(w, extend.request, 'founder', 'two');
-  let r = (await readSpendingRules(w.sc)).view.rules[0];
+  const r = (await readSpendingRules(w.sc)).view.rules[0];
   assert.equal(r.allowances.reduce((n, a) => n + BigInt(a.spendableNowMinor), 0n), 0n, 'nothing more this month');
-
-  // A lifetime cap at or below what was spent cannot be issued.
-  const used = await changeSpendingRule(w.sc, { orgId: 'acme', requestedBy: 'u-founder', wallet: members, rule: rule({ lifetimeCapMinor: 15_000n * USDC_1 }) });
-  assert.equal(used.code, 'lifetime_used');
+  assert.deepEqual(r.allowances.map((a) => [a.state, a.lifetimeCapMinor, a.startsAtMs]), [['not_started', String(5_000n * USDC_1), windowEnd]]);
+  assert.equal(extend.carried.lifetimeSpentMinor, String(15_000n * USDC_1), 'the request says what it carried');
   await w.client.close();
 });
 

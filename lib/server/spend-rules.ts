@@ -46,6 +46,7 @@
 import { fromBase64, normalizeSuiAddress, toBase64 } from '@mysten/sui/utils';
 import { PasskeyPublicKey } from '@mysten/sui/keypairs/passkey';
 
+import { liveRateLimit } from '../wallet/allowance-window.ts';
 import { allowanceNameFor, policyIdFor, splashSpendAppName, type AllowanceState, type RuleSpendEvent } from '../wallet/spend-rules-bcs.ts';
 import { recordedWalletMembers, walletRegistration, type AccountState, type IntentState, type WalletContext, type WalletMembers } from './business-wallet.ts';
 import type { OwnershipGate } from './ownership-proofs.ts';
@@ -335,6 +336,64 @@ function issueOp(rule: RuleInput, policyId: string): RuleOp {
   };
 }
 
+/** What a reissued rule carries from the allowances it replaces. */
+export type Carried = { lifetimeSpentMinor: string; windowSpentMinor: string; windowEndsAtMs: string | null };
+
+/**
+ * The allowances that replace `existing` under `rule`, keeping what was
+ * spent. A fresh allowance starts at zero, so:
+ *
+ *   lifetime  the new lifetime cap is the one asked for less everything
+ *             charged so far (`current_spend`); at or below zero it is
+ *             refused.
+ *   window    if the current day or month has spending in it, the new rule
+ *             starts when that window renews; until then a bridge allowance
+ *             gives what is honestly left: the smaller of what the old rule
+ *             had left and (same period) the new cap less the spent amount,
+ *             as its own lifetime cap, expiring at the renewal. The new
+ *             rule's lifetime is reduced by the bridge, so the two together
+ *             never exceed it.
+ */
+function carriedIssue(existing: AllowanceState[], rule: RuleInput, policyId: string, now: bigint): { ops: RuleOp[]; carried: Carried } | SpendFailure {
+  const lifetimeSpent = existing.reduce((n, a) => n + a.currentSpend, 0n);
+  let lifetime: bigint | null = null;
+  if (rule.lifetimeCapMinor != null) {
+    lifetime = rule.lifetimeCapMinor - lifetimeSpent;
+    if (lifetime <= 0n) return refuse(409, 'lifetime_used', 'that lifetime cap is already used up by what this person has spent under the rule', { lifetimeSpentMinor: lifetimeSpent.toString() });
+  }
+  let windowSpent = 0n;
+  let windowRoom = 0n;
+  let windowEnd: bigint | null = null;
+  let samePeriod = true;
+  for (const a of existing) {
+    const live = a.rateLimit ? liveRateLimit(a.rateLimit, now) : null;
+    const active = (a.startMs === null || a.startMs <= now) && (a.expiresAtMs === null || now < a.expiresAtMs);
+    if (!live || !active || live.spentMinor === 0n || live.endsAtMs === null) continue;
+    windowSpent += live.spentMinor;
+    windowRoom += live.remainingMinor;
+    windowEnd = windowEnd === null || live.endsAtMs > windowEnd ? live.endsAtMs : windowEnd;
+    if (capOf(a)?.period !== rule.cap.period) samePeriod = false;
+  }
+  const carried: Carried = { lifetimeSpentMinor: lifetimeSpent.toString(), windowSpentMinor: windowSpent.toString(), windowEndsAtMs: windowEnd === null ? null : windowEnd.toString() };
+  const start = rule.startsAtMs ?? null;
+  if (windowEnd === null || (start !== null && start >= windowEnd)) {
+    return { ops: [issueOp({ ...rule, lifetimeCapMinor: lifetime }, policyId)], carried };
+  }
+  const ops: RuleOp[] = [];
+  const newRoom = samePeriod ? (rule.cap.limitMinor > windowSpent ? rule.cap.limitMinor - windowSpent : 0n) : rule.cap.limitMinor;
+  let bridge = windowRoom < newRoom ? windowRoom : newRoom;
+  if (lifetime !== null && bridge > lifetime) bridge = lifetime;
+  if (bridge > 0n) {
+    ops.push(issueOp({ ...rule, cap: { period: rule.cap.period, limitMinor: bridge }, lifetimeCapMinor: bridge, expiresAtMs: windowEnd < rule.expiresAtMs ? windowEnd : rule.expiresAtMs }, policyId));
+  }
+  const rest = lifetime === null ? null : lifetime - bridge;
+  if (rule.expiresAtMs > windowEnd && (rest === null || rest > 0n)) {
+    ops.push(issueOp({ ...rule, startsAtMs: windowEnd, lifetimeCapMinor: rest }, policyId));
+  }
+  if (ops.length === 0) return refuse(409, 'nothing_left', 'what this person has spent leaves nothing to issue before the rule ends', carried);
+  return { ops, carried };
+}
+
 /** The ops and the gate for a recipient change, or why it is refused. */
 async function recipientOps(sc: SpendContext, orgId: string, policy: PolicyState, change: RecipientChange): Promise<{ ops: RuleOp[]; proven: string[] } | SpendFailure> {
   const ops: RuleOp[] = [];
@@ -400,14 +459,16 @@ export async function issueSpendingRule(
 
 /**
  * Change a rule: revoke its allowance and issue the new one in the same
- * transaction. A changed per-payment maximum removes and re-adds the spender
- * (the only way the policy changes it), which retires every outstanding
- * approval; their running totals stay, since a total is the address's.
+ * transaction, keeping what was spent (carriedIssue: the lifetime cap less
+ * current_spend; a window with spending in it is honoured until it renews).
+ * A changed per-payment maximum removes and re-adds the spender (the only
+ * way the policy changes it), which retires every outstanding approval;
+ * their running totals stay, since a total is the address's.
  */
 export async function changeSpendingRule(
   sc: SpendContext,
   input: { orgId: string; requestedBy: string; wallet: WalletMembers; rule: RuleInput },
-): Promise<Result> {
+): Promise<(Result & { carried?: Carried }) | SpendFailure> {
   const l = await load(sc, { wallet: input.wallet });
   if (isFailure(l)) return l;
   const policy = currentPolicy(l);
@@ -418,11 +479,14 @@ export async function changeSpendingRule(
   const listed = policy.spenders.find((x) => x.spender === spender);
   const existing = l.held.filter((a) => a.spender === spender && boundTo(a, policy, l.appName));
   if (!listed && existing.length === 0) return refuse(404, 'no_rule', 'this person has no rule to change');
+  const issued = carriedIssue(existing, input.rule, policy.id, l.now);
+  if (isFailure(issued)) return issued;
   const ops: RuleOp[] = existing.map((a) => ({ op: 'revoke_allowance', cap: a.cap, allowance: { objectId: a.id, initialSharedVersion: a.initialSharedVersion } }));
   if (listed && listed.perPaymentMax !== input.rule.perPaymentMaxMinor) ops.push({ op: 'remove_spender', spender });
   if (!listed || listed.perPaymentMax !== input.rule.perPaymentMaxMinor) ops.push({ op: 'add_spender', spender, role: SPEND_ROLE.STAFF, perPaymentMaxMinor: input.rule.perPaymentMaxMinor });
-  ops.push(issueOp(input.rule, policy.id));
-  return openRule(sc, l, { ...input, policy, ops, dedupeKey: `spend:rule:${spender}`, walletTagAllowed: [] });
+  ops.push(...issued.ops);
+  const opened = await openRule(sc, l, { ...input, policy, ops, dedupeKey: `spend:rule:${spender}`, walletTagAllowed: [] });
+  return opened.ok ? { ...opened, carried: issued.carried } : opened;
 }
 
 /** Take a rule back: revoke every allowance the wallet gave this person, and remove them from the policy. */
@@ -681,16 +745,28 @@ export async function reissueAfterRotation(
     const alreadyIssued = l.held.some((a) => a.spender === sp.spender && boundTo(a, policy, l.appName));
     for (const a of alreadyIssued ? [] : old) {
       const cap = capOf(a);
-      const remaining = a.lifetimeCap === null ? null : a.lifetimeCap - a.currentSpend;
       if (a.expiresAtMs === null || a.expiresAtMs <= l.now) {
         skipped.push(`rule of ${sp.spender}: expired`);
-      } else if (!cap) {
-        skipped.push(`rule of ${sp.spender}: its cap is not per day or per month`);
-      } else if (remaining !== null && remaining <= 0n) {
-        skipped.push(`rule of ${sp.spender}: its lifetime cap is used up`);
-      } else {
-        ops.push(issueOp({ spender: sp.spender, perPaymentMaxMinor: sp.perPaymentMax, cap, expiresAtMs: a.expiresAtMs, startsAtMs: a.startMs !== null && a.startMs > l.now ? a.startMs : null, lifetimeCapMinor: remaining }, policy.id));
+        continue;
       }
+      if (!cap) {
+        skipped.push(`rule of ${sp.spender}: its cap is not per day or per month`);
+        continue;
+      }
+      // The same rule under the new wallet, carrying what was spent: the
+      // lifetime that is left, and a day or month with spending in it
+      // honoured until it renews (no fresh window in mid-window).
+      const issued = carriedIssue(
+        [a],
+        { spender: sp.spender, perPaymentMaxMinor: sp.perPaymentMax, cap, expiresAtMs: a.expiresAtMs, startsAtMs: a.startMs !== null && a.startMs > l.now ? a.startMs : null, lifetimeCapMinor: a.lifetimeCap },
+        policy.id,
+        l.now,
+      );
+      if (isFailure(issued)) {
+        skipped.push(`rule of ${sp.spender}: ${issued.code === 'lifetime_used' ? 'its lifetime cap is used up' : 'nothing is left of it before it ends'}`);
+        continue;
+      }
+      ops.push(...issued.ops);
     }
   }
   if (ops.length === 0) return refuse(409, 'nothing_to_reissue', 'the rules are already carried over', { skipped });
