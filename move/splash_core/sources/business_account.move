@@ -12,14 +12,23 @@
 ///
 /// It now holds:
 ///
-///   * `owners` — may change membership. Plural, because a company is not a
-///     private key, and a sole owner losing their key was previously terminal.
-///   * `approvers` — may release a payout, and may not be the person who
-///     initiated it. Four eyes, enforced by the chain rather than by a UI.
+///   * `owners` — plural, because a company is not a private key, and a sole
+///     owner losing their key was previously terminal. Before a business
+///     wallet registers, any owner may change membership. Once it has, the
+///     wallet (the owners' quorum) does, and every owner keeps the emergency
+///     brake (`freeze_account`).
+///   * `approvers` — the legacy per-person path: may release a payout, and
+///     may not be the person who initiated it. Four eyes, enforced by the
+///     chain rather than by a UI. Closed once a business wallet registers,
+///     whose own signature is then the approval.
 ///   * `frozen` — two independent flags. An owner can stop their own account;
 ///     compliance can stop it too, and owners cannot lift the compliance one.
-///   * `recovery_party` — a nominated outsider who can restore access after a
-///     72-hour public notice that any owner can cancel.
+///   * `recovery_party` — a nominated outsider who can ADD an owner after a
+///     72-hour public notice that any owner can cancel. That is all it does.
+///     It does not make the new owner the founder, so it cannot nominate a
+///     business wallet for an account whose founder lost their key before
+///     nominating one, and it cannot restore a business wallet whose quorum
+///     is lost: only that wallet can rotate itself.
 ///   * `authority_epoch` — a counter bumped by EVERY membership or freeze
 ///     change. An approval carries the value it was minted at, so revoking an
 ///     approver kills approvals already in flight, and revoke-then-regrant does
@@ -141,6 +150,9 @@ const E_WALLET_MUST_UNFREEZE: u64 = 58;
 /// This owner is a member of the business wallet, or of the wallet a pending
 /// rotation names. Rotate them out of the wallet first.
 const E_OWNER_IS_A_SIGNER: u64 = 59;
+/// The account has a business wallet, so its legacy approver set is closed:
+/// approvers can be neither added nor removed.
+const E_APPROVERS_CLOSED: u64 = 60;
 
 // ─── Bounds ────────────────────────────────────────────────────────────────
 /// `VecSet` membership is a linear scan and an unbounded set is both a gas
@@ -294,7 +306,11 @@ public struct BusinessAccount has key {
     id: UID,
     /// The founding owner. Kept as a stable attribution anchor for events and
     /// for `splash_custody::delegation`, which records it on every delegation;
-    /// it is NOT the authority check. Use `is_owner`.
+    /// it is NOT the authority check. Use `is_owner`. Before a business wallet
+    /// registers, only the founder can remove the founder and only the founder
+    /// nominates the wallet. Once the wallet registers, the wallet may remove
+    /// the founder like any other owner who no longer signs for it, and this
+    /// field keeps naming them.
     owner: address,
     owners: VecSet<address>,
     approvers: VecSet<address>,
@@ -640,7 +656,8 @@ fun assert_owner(account: &BusinessAccount, ctx: &TxContext) {
     assert!(account.owners.contains(&tx_context::sender(ctx)), E_NOT_AN_OWNER);
 }
 
-/// Membership cannot change while the account is stopped.
+/// Before a business wallet registers, membership cannot change while the
+/// account is stopped.
 ///
 /// Without this, an owner watching a freeze land could add a fresh approver
 /// address and be ready the moment it lifts — and a compliance freeze is
@@ -649,9 +666,36 @@ fun assert_thawed(account: &BusinessAccount) {
     assert!(!account.frozen && !account.admin_frozen, E_FROZEN);
 }
 
+/// Who may change the owners and name the recovery party. Returns true when
+/// it is the business wallet.
+///
+/// Before a business wallet registers: any owner, while the account is
+/// thawed, as it always was.
+///
+/// Once the wallet registers: the wallet only, because it is the owners'
+/// quorum (D1) and one owner key must not be able to hold the account. Any
+/// such change bumps `authority_epoch`, which voids every spending-rule
+/// approval in flight, so one owner making it alone could void them at will.
+/// The wallet may act under an OWNER freeze: in the same transaction that
+/// lifts a freeze, it can remove the owner who pulled it, and it can add a
+/// replacement person to rotate into the wallet while the brake is on. It may
+/// not act under a compliance freeze, which only `AdminCap` lifts.
+fun assert_membership_authority(account: &BusinessAccount, ctx: &TxContext): bool {
+    if (account.wallet.is_some()) {
+        assert_wallet(account, ctx);
+        assert!(!account.admin_frozen, E_FROZEN);
+        true
+    } else {
+        assert_owner(account, ctx);
+        assert_thawed(account);
+        false
+    }
+}
+
+/// Add an owner. Before the business wallet registers, any owner; after, the
+/// wallet (see `assert_membership_authority`).
 public fun add_owner(account: &mut BusinessAccount, who: address, ctx: &TxContext) {
-    assert_owner(account, ctx);
-    assert_thawed(account);
+    assert_membership_authority(account, ctx);
     assert!(who != @0x0, E_INVALID_ADDRESS);
     assert!(!account.owners.contains(&who), E_ALREADY_A_MEMBER);
     assert!(account.owners.length() < MAX_MEMBERS, E_TOO_MANY_MEMBERS);
@@ -665,7 +709,9 @@ public fun add_owner(account: &mut BusinessAccount, who: address, ctx: &TxContex
 
 /// Remove an owner.
 ///
-/// The FOUNDING owner (`account.owner`) can only be removed by themselves.
+/// BEFORE a business wallet registers, any owner may remove an owner, except
+/// that the FOUNDING owner (`account.owner`) can only be removed by
+/// themselves.
 ///
 /// Without that rule, one compromised owner key is a complete account
 /// takeover: remove every co-owner, add two addresses you control as
@@ -679,17 +725,23 @@ public fun add_owner(account: &mut BusinessAccount, who: address, ctx: &TxContex
 /// one, they can still remove everyone else. Something has to be the anchor.
 /// Choosing the address that opened the account — the one the KYB file is
 /// against — makes the anchor the party the licence already knows.
+///
+/// AFTER the wallet registers, the anchor is the wallet: the owners' quorum.
+/// Only the wallet removes owners, the founder included, and it may do so
+/// under an owner freeze (see `assert_membership_authority`). Otherwise a
+/// founder the quorum had rotated out of the wallet could never be removed,
+/// and could re-freeze the account after every unfreeze for good.
 public fun remove_owner(account: &mut BusinessAccount, who: address, ctx: &TxContext) {
-    assert_owner(account, ctx);
-    assert_thawed(account);
+    let by_wallet = assert_membership_authority(account, ctx);
     assert!(account.owners.contains(&who), E_NOT_A_MEMBER);
     // The last owner cannot remove themselves. An account with no owners has no
     // path back except the recovery party, and `recovery_party` is optional.
     assert!(account.owners.length() > 1, E_LAST_OWNER);
-    assert!(who != account.owner || tx_context::sender(ctx) == account.owner, E_NOT_AN_OWNER);
-    // v2: every member of the business wallet is an owner, always. Someone
-    // leaving is rotated out of the wallet first (rotate_wallet, then
-    // confirm_wallet_rotation), and removed as an owner after.
+    assert!(by_wallet || who != account.owner || tx_context::sender(ctx) == account.owner, E_NOT_AN_OWNER);
+    // v2: every member of the business wallet is an owner, always, the
+    // founder included. Someone leaving is rotated out of the wallet first
+    // (rotate_wallet, then confirm_wallet_rotation), and removed as an owner
+    // after.
     assert!(!account.wallet_signers.contains(&who), E_OWNER_IS_A_SIGNER);
     assert!(
         account.pending_wallet.is_none() || !account.pending_wallet.borrow().signers.contains(&who),
@@ -700,7 +752,16 @@ public fun remove_owner(account: &mut BusinessAccount, who: address, ctx: &TxCon
     bump(account, b"remove_owner", who, ctx);
 }
 
+/// Add a legacy approver, before a business wallet registers.
+///
+/// Once the wallet registers, the legacy approval path is closed for the
+/// account (`payment_intent::confirm_with_approval` refuses it) and the
+/// wallet's own signature is the approval. The set then has no use, and a
+/// change to it would only let one owner move `authority_epoch` alone, which
+/// voids every spending-rule approval in flight. So it is closed, for the
+/// wallet as for everyone.
 public fun add_approver(account: &mut BusinessAccount, who: address, ctx: &TxContext) {
+    assert!(account.wallet.is_none(), E_APPROVERS_CLOSED);
     assert_owner(account, ctx);
     assert_thawed(account);
     assert!(who != @0x0, E_INVALID_ADDRESS);
@@ -718,11 +779,15 @@ public fun add_approver(account: &mut BusinessAccount, who: address, ctx: &TxCon
 /// increments it. Re-granting the same address increments AGAIN, so the
 /// revoke-then-regrant sequence does not resurrect the approval that was live
 /// across it — which a "is this address currently an approver?" check would.
+///
+/// Closed, like `add_approver`, once a business wallet registers: no approval
+/// from the set can settle anything then, so there is nothing to revoke.
 public fun remove_approver(account: &mut BusinessAccount, who: address, ctx: &TxContext) {
+    assert!(account.wallet.is_none(), E_APPROVERS_CLOSED);
     assert_owner(account, ctx);
-    // Deliberately callable while frozen, unlike every other membership
-    // change: removing authority is always safe, and a freeze is exactly when
-    // you most want to strip a compromised approver.
+    // Deliberately callable while frozen, unlike every other owner's
+    // membership change: removing authority is always safe, and a freeze is
+    // exactly when you most want to strip a compromised approver.
     assert!(account.approvers.contains(&who), E_NOT_A_MEMBER);
 
     account.approvers.remove(&who);
@@ -731,7 +796,9 @@ public fun remove_approver(account: &mut BusinessAccount, who: address, ctx: &Tx
 
 // ─── Freeze ────────────────────────────────────────────────────────────────
 
-/// Owner-initiated stop. Any owner can set it, any owner can lift it.
+/// Owner-initiated stop. Any owner can set it: the emergency brake, which
+/// every owner keeps, before and after a business wallet registers. Who can
+/// lift it is in `unfreeze_account`.
 public fun freeze_account(account: &mut BusinessAccount, ctx: &TxContext) {
     assert_owner(account, ctx);
     assert!(!account.frozen, E_FROZEN);
@@ -785,9 +852,12 @@ fun is_recovery_party(account: &BusinessAccount, who: address): bool {
 /// They must not already be an owner or an approver. A recovery party drawn
 /// from the same set of people is not a recovery path, it is a second copy of
 /// the same failure.
+///
+/// Naming the recovery party names who may later become an owner, and it
+/// bumps `authority_epoch`, so it follows the owner rules: any owner before a
+/// business wallet registers, the wallet after (`assert_membership_authority`).
 public fun set_recovery_party(account: &mut BusinessAccount, who: address, ctx: &TxContext) {
-    assert_owner(account, ctx);
-    assert_thawed(account);
+    assert_membership_authority(account, ctx);
     assert!(who != @0x0, E_INVALID_ADDRESS);
     assert!(!account.owners.contains(&who), E_RECOVERY_IS_INSIDER);
     assert!(!account.approvers.contains(&who), E_RECOVERY_IS_INSIDER);
@@ -852,7 +922,8 @@ public fun cancel_recovery(account: &mut BusinessAccount, ctx: &TxContext) {
 /// It ADDS an owner. It does not remove the existing ones, and it does not
 /// transfer the account. That asymmetry is the containment: a hostile recovery
 /// party who waits out the notice gets co-ownership, not the company, and the
-/// surviving owners can remove them the moment it lands. If the owner keys are
+/// surviving owners (once a business wallet is registered, the wallet) can
+/// remove them the moment it lands. If the owner keys are
 /// genuinely lost there is nobody left to remove, and adding is all that was
 /// needed.
 ///
@@ -898,8 +969,9 @@ public fun execute_recovery(account: &mut BusinessAccount, clock: &Clock, ctx: &
 /// an account that has none. With a nomination any owner could make, one
 /// co-owner could register a 1-of-1 of their own key first, and only the
 /// wallet can rotate the wallet, so nobody could take the slot back. The
-/// founder is already this account's anchor (the one owner the others cannot
-/// remove), so the founder names the wallet AND whether it is a wallet one
+/// founder is already this account's anchor until a wallet registers (the
+/// one owner the others cannot remove), so the founder names the wallet AND
+/// whether it is a wallet one
 /// member can sign for alone. Re-nominating before registration replaces the
 /// earlier choice; after registration, the wallet changes only by rotation.
 public fun nominate_wallet(
@@ -988,8 +1060,11 @@ public fun register_wallet(
 /// owner, as at registration.
 ///
 /// Allowed while the OWNERS have frozen the account: replacing a compromised
-/// signer is exactly what a freeze buys time for. Refused under a compliance
-/// freeze.
+/// signer is exactly what a freeze buys time for. Under an owner freeze the
+/// wallet can add the replacement person as an owner (`add_owner`) and
+/// propose them here in the same transaction; once the new wallet confirms,
+/// it can lift the freeze and remove whoever pulled it in one transaction.
+/// Refused under a compliance freeze.
 public fun rotate_wallet(
     account: &mut BusinessAccount,
     keys: vector<vector<u8>>,

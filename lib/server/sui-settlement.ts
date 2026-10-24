@@ -381,7 +381,7 @@ const ABORT_CODES: Record<number, string> = {
   5: 'E_NOT_VERIFIED_YET — revoke_verification called on an account that was never verified.',
   20: 'E_NOT_AN_OWNER — the signer is not an owner of this business account. Membership is read from the account’s own `owners` set on every call; being a Splash admin does not substitute.',
   21: 'E_NOT_AN_APPROVER — the signer is not in this account’s approver set. Owners are not approvers by default: separation of duties is set membership, not seniority.',
-  22: 'E_FROZEN — the account is stopped. Two independent flags: an owner freeze, which any owner can lift, and a compliance freeze, which only the AdminCap can. Membership cannot change while either is set.',
+  22: 'E_FROZEN — the account is stopped. Two independent flags: an owner freeze, which any owner can pull and (once a business wallet is registered) only the wallet can lift, and a compliance freeze, which only the AdminCap can. Before a wallet registers, membership cannot change while either is set; after, the wallet can change the owners under an owner freeze but not under a compliance freeze.',
   23: 'E_NOT_FROZEN — unfreeze called on an account that is not frozen by that authority. An owner cannot clear a compliance freeze by lifting their own.',
   24: 'E_LAST_OWNER — refused to remove the only owner. An account with no owners has no path back except a recovery party, which is optional.',
   25: 'E_ALREADY_A_MEMBER — that address is already an owner or approver, or a pending recovery has already been performed by the owners themselves.',
@@ -438,7 +438,7 @@ const ABORT_CODES: Record<number, string> = {
   47: 'E_WALLET_MISMATCH — the sender is not the multisig address these members, weights and threshold derive. Pass the members exactly as the wallet was built, in the same order.',
   48: 'E_SINGLE_SIGNER_NOT_ACKNOWLEDGED — one member of this wallet can sign alone. That is allowed only when the wallet says so: pass single_signer_ack = true.',
   49: 'E_NO_WALLET — this account has no business wallet registered yet.',
-  50: 'E_NOT_THE_WALLET — only the account business wallet (the owners multisig) can do this.',
+  50: 'E_NOT_THE_WALLET — only the account business wallet (the owners multisig) can do this. Once the wallet is registered, that includes adding and removing owners and naming the recovery party: one owner cannot change them alone.',
   51: 'E_SAME_WALLET — the rotation names the wallet that is already current.',
   52: 'E_NO_PENDING_ROTATION — there is no wallet rotation waiting to be confirmed or cancelled.',
   53: 'E_NOT_THE_PENDING_WALLET — only the new wallet named in the rotation can confirm it.',
@@ -448,6 +448,7 @@ const ABORT_CODES: Record<number, string> = {
   57: 'E_SIGNER_NOT_AN_OWNER — a wallet member is not an owner of this account. Add the person as an owner first; the signers are the business own people.',
   58: 'E_WALLET_MUST_UNFREEZE — this account has a business wallet, so only the wallet (the owners quorum) can lift an owner freeze.',
   59: 'E_OWNER_IS_A_SIGNER — this owner is a member of the business wallet, or of the wallet a pending rotation names. Rotate them out of the wallet first, then remove them as an owner.',
+  60: 'E_APPROVERS_CLOSED — this account has a business wallet, so its legacy approver set is closed: approvers can be neither added nor removed. The wallet signature is the approval now, and staff pay under spending rules.',
 
   // ── compliance_config: v2 registries (24-hour additions) ─────────────────
   357: 'E_ASSET_NOT_ACCEPTED — the payment asset is not on the accepted-asset registry. Native USDC is the one payment asset; anything else is refused, and a removed asset stops intents already open.',
