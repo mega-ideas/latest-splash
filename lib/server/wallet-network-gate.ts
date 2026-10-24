@@ -4,7 +4,9 @@
  *
  * A passkey multisig has never signed on any network with real
  * authenticators here: the hardware 2-of-3 check owed from Phase 0
- * (docs/v2/phase2-business-wallet.md, runbook) is a human step. Until it has
+ * (docs/v2/phase2-business-wallet.md, runbook) is a human step. On testnet
+ * one approver runs it (Sky, decided 25 Oct) with three of his own
+ * authenticators, one per owner login of a testnet business. Until it has
  * passed, and someone has recorded where its evidence is, no wallet request
  * is built on mainnet:
  *

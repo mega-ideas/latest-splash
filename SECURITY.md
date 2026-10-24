@@ -90,11 +90,24 @@ Design: `docs/v2/phase2-business-wallet.md`.
   (`requireSessionAccount`); every store read takes the org; another org's
   request is a 404. The account a wallet transaction names is the org's own
   `sui_business_account_id`, never the single-tenant fallback.
-- **Open:** the hardware 2-of-3 passkey check (people with devices), the
-  address-alias watcher, zkLogin members, a testnet dry run of a sponsored
-  transaction paying gas from an address balance, routes for payments (they
-  need the audit bundle and quote the Transfer flow composes), and the Phase 3
-  signing screen rendering the device's own decoding.
+- **Who may ask, who signs off (Sky, 25 Oct).** Staff may ask the owners to
+  approve a payment (`wallet_approval_asks`): only about a payment they opened
+  themselves (its on-chain maker is their passkey address), shown to owners
+  as the chain has it, accepted or declined only by an owner, withdrawn only
+  by the asker. A staff member's migration of their own USDC needs a
+  passkey-signed sign-off from an owner or a person in charge (an off-chain
+  role an owner grants and revokes), bound to the member, the source wallet,
+  the business wallet, a nonce and a 24-hour expiry; nobody signs off their
+  own. Migration moves USDC only. Every grant, revocation, sign-off and ask is
+  in `wallet_authority_events`, append-only by trigger.
+- **Gas sponsor (Sky, 25 Oct).** The KMS operator key is the wallet gas
+  sponsor; the cap of 1 SUI per business per 24 hours stands.
+- **Open:** the hardware 2-of-3 passkey check (one approver, Sky, with three
+  of his own authenticators on testnet), the address-alias watcher, zkLogin
+  members, a testnet dry run of a sponsored transaction paying gas from an
+  address balance, routes for new payments (they need the audit bundle and
+  quote the Transfer flow composes), and the Phase 3 signing screen rendering
+  the device's own decoding.
 
 ## v2 Phase 1 — business wallets, spending rules, a delayed upgrade — 2026-10-24
 

@@ -138,6 +138,10 @@ The wallet holds no SUI.
   and the reader accepts the transaction. The sponsor pays gas only, and never
   pays or receives client money (D3).
 
+Decided by Sky on 25 Oct: the KMS operator key is also the wallet gas
+sponsor (no separate sponsor key), and the cap of 1 SUI per business per
+24 hours stands.
+
 The operator's SUI address balance must be funded before the first wallet
 transaction (`docs/MAINNET-CHECKLIST.md`). Whether a sponsored transaction may
 pay gas from the sponsor's address balance is to be confirmed by a testnet
@@ -171,6 +175,64 @@ one `send_funds` to the wallet the BusinessAccount names. They sign it alone
 (Sky's decision: plain signed transfers). Gasless; sponsored only if
 `STABLECOIN_GASLESS=off`.
 
+**USDC only, and staff need a sign-off (Sky, 25 Oct).** Splash accepts USDC
+only for now: no other coin is detected or moved. An owner moves their own
+USDC freely. Anyone else (a staff member, or a person in charge moving their
+own) needs the **highest authority's sign-off** first: an owner, or a person
+in charge an owner appointed. The approver starts it
+(`POST /api/wallet/migration/sign-offs { memberUserId, fromAddress }`), Splash
+writes a statement naming the business, the member, the asset (USDC), the
+wallet the USDC leaves, the business wallet the BusinessAccount names on
+chain, a nonce and an expiry (24 hours), and the approver's own passkey signs
+it as a personal message (`POST /api/wallet/migration/sign-offs/:id
+{ signature }`, verified under the approver's active passkey on this site,
+never a key from the request). Nobody signs off their own move. The sign-off
+covers that one source and destination until it expires (a wallet with many
+coins may take more than one transfer); after a rotation the destination
+differs and a new one is needed. `POST /api/wallet/migration` refuses a staff
+transfer without it (`409 sign_off_needed`) before building anything.
+
+## The person in charge (Sky, 25 Oct)
+
+An off-chain role, per business, that an **owner** grants and revokes
+(`GET/POST/DELETE /api/wallet/persons-in-charge`, table
+`wallet_persons_in_charge`, migration 0035). Any member but a viewer can be
+appointed; an owner already has the authority. A person in charge moves no
+money and signs nothing on chain: with the owners they are the "highest
+authority" who signs off a staff member's migration. Revoking one voids every
+sign-off they gave that is still usable, and a sign-off counts only while its
+signer still holds the authority.
+
+Every appointment, revocation, sign-off (prepared, signed, used, voided) and
+approval ask is written to `wallet_authority_events`, which a trigger keeps
+append-only: the application cannot rewrite or delete it.
+
+## Asking the owners to approve (Sky, 25 Oct)
+
+Staff may ask the owners to approve a payment, not only owners: typically one
+over their spending rule, or above the second-approval threshold. Any member
+but a viewer asks (`POST /api/wallet/approval-asks { intentId, contentHash,
+walrusBlobId, note? }`); a staff member only about a payment they opened (its
+on-chain maker is one of their passkey addresses), an owner about any of the
+business's. The intent is read from the chain: this business's, still
+waiting, unexpired, USDC, not cross-chain, and what the owners are shown is
+that reading, stored with the ask. One open ask per payment.
+
+An **owner** accepts it (`POST /api/wallet/approval-asks/:id { action:
+'accept', mode, maxFeeMinor, settleByMs }`):
+
+- `wallet_pays`: the quorum pays the intent from the business wallet
+  (`requestOpenIntentPayment`, the existing-intent path above, with the payee
+  and amount bound into the request). This covers anything over the rule.
+- `second_approval`: the owner's own `splash_spend::approve_payout` for a
+  payment within the asker's rule but above the threshold (§4.2,
+  `docs/v2/phase2-spending-rules.md`).
+
+When the signing request executes, the ask is approved (also from the cron's
+reconcile). If it fails, expires or is withdrawn, the ask is open again. An
+owner declines an open ask; only the asker withdraws it. Owners and approvers
+see every ask, anyone else their own (`GET /api/wallet/approval-asks`).
+
 ## Mainnet
 
 No wallet request is built on mainnet unless `WALLET_MAINNET_ENABLED=true`
@@ -181,17 +243,27 @@ Production refuses to boot on mainnet with the switch on and no reference.
 ## Runbook: the hardware 2-of-3
 
 Owed from Phase 0 (`docs/mainnet-checks-2026-10.md`): the gate used software
-passkeys. This needs three people, or three authenticators, on the testnet
-deployment. No agent can do it.
+passkeys. Sky decided on 25 Oct that on testnet it is run by **one approver,
+Sky**, with three of his own authenticators: what is being proven is that
+real authenticators produce signatures a Sui multisig accepts, not that three
+different people are reachable. No agent can do it, because it needs the
+devices.
 
-1. Three owners of one testnet business each enrol a passkey on a different
-   kind of device: a phone (iCloud Keychain or Google Password Manager), a
-   laptop (Windows Hello or Touch ID), a security key. Note which is which.
-2. The founder starts the wallet (`POST /api/wallet/business`) and signs the
-   nomination on their device. Record the request digest.
-3. Two of the three sign the registration on their own devices, from the
-   inbox. Before signing, each compares the transaction code in WhatsApp with
-   the one on screen.
+Splash allows one active passkey per person per site (migration 0005), so the
+three authenticators belong to three owner logins of one testnet business,
+all of them Sky's (for example three addresses he controls, each invited as
+an owner and verified).
+
+1. Sky signs in as each of the three testnet owners in turn and enrols a
+   passkey on a different kind of authenticator: a phone (iCloud Keychain or
+   Google Password Manager), a laptop (Windows Hello or Touch ID), a security
+   key. Note which owner login uses which authenticator.
+2. Signed in as the founder, Sky starts the wallet (`POST
+   /api/wallet/business`) and signs the nomination on the founder's
+   authenticator. Record the request digest.
+3. Signed in as two of the other logins, Sky signs the registration from the
+   inbox, each time on that login's own authenticator. Before signing, he
+   compares the transaction code in WhatsApp with the one on screen.
 4. Save the registration's `transactionBytes`, the three public keys and the
    two partial signatures (from `wallet_signing_signers` before the request
    closes, or from the devices' outputs) as `evidence.json`, and run
@@ -199,7 +271,8 @@ deployment. No agent can do it.
    checks each signature, combines them as the server does and asks a testnet
    fullnode to simulate. It never submits.
 5. Let the server submit (it does at the threshold). Record the executed
-   digest, the wallet address, the three device kinds and the script output in
+   digest, the wallet address, the three authenticator kinds, that one approver
+   (Sky) held all three, and the script output in
    `docs/mainnet-checks-2026-10.md` under a `wallet-2-of-3` heading, and set
    `WALLET_HARDWARE_CHECK_REF` to it.
 
@@ -208,7 +281,8 @@ passkeys. Until then, business wallets stay off mainnet (in code, above).
 
 ## Open, not built here
 
-- **The hardware 2-of-3** above: needs people with devices.
+- **The hardware 2-of-3** above: needs Sky's three authenticators (one
+  approver, Sky's decision of 25 Oct).
 - **Testnet dry runs** of a sponsored transaction paying gas from an address
   balance (`gasData.payment = []`, another gas owner) and of the migration PTB
   in the gasless lane. Simulation before signing refuses a request if either
@@ -217,8 +291,8 @@ passkeys. Until then, business wallets stay off mainnet (in code, above).
   are built and tested, but no route calls them yet: a payment needs its
   audit bundle on Walrus (`contentHash`, `walrusBlobId`), its commitments and
   a quote, which the Transfer flow composes (§5.4 step 4) with the payout
-  partners (§4.5). Which roles may ask the owners to sign a payment is Sky's
-  decision.
+  partners (§4.5). Who may ask is decided (Sky, 25 Oct): staff too, through
+  an approval ask (below).
 - **zkLogin members** (the D1 fallback): a zkLogin partial signature needs a
   proof per epoch; `buildBusinessMultisig` takes passkeys only.
 - **The address-alias watcher**: the builder and reader refuse alias commands;

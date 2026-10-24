@@ -2,10 +2,11 @@
  * The hardware 2-of-3 passkey check owed from Phase 0 (docs/mainnet-checks-2026-10.md:
  * "The hardware 2-of-3, through sui-signers.ts, is the first test of Phase 2.1").
  *
- * It cannot be run by an agent: it needs three people (or three authenticators:
- * a phone's platform passkey, a laptop's, a security key) to enrol passkeys on
- * the testnet deployment and two of them to sign one wallet transaction on
- * their own devices. The runbook is docs/v2/phase2-business-wallet.md,
+ * It cannot be run by an agent: it needs three real authenticators (a phone's
+ * platform passkey, a laptop's, a security key). On testnet one approver, Sky,
+ * runs it (his decision of 25 Oct): he enrols one authenticator for each of
+ * three owner logins of a testnet business and signs one wallet transaction
+ * with two of them. The runbook is docs/v2/phase2-business-wallet.md,
  * "Runbook: the hardware 2-of-3". This script is its last step: given what the
  * devices produced, it checks each signature, combines two of them exactly as
  * the server does (lib/server/wallet-signing.ts), verifies the combined
