@@ -374,6 +374,58 @@ test('(d) an apply that ignores the seven-day window is caught, so a lapsed prop
   );
 });
 
+test('(d) a no-op window or notice assert is caught: the assert itself must compare the clock with the eta', () => {
+  // The A1 review: the rule used to look only for the text
+  // `eta_ms + FEE_APPLY_WINDOW_MS` and the code's name somewhere in the body.
+  const LAPSE = '    assert!(now < slot.borrow().eta_ms + FEE_APPLY_WINDOW_MS, E_FEE_PROPOSAL_LAPSED);';
+  const READY = '    assert!(now >= slot.borrow().eta_ms, E_FEE_PROPOSAL_NOT_READY);';
+  const lapse = /`apply_schedule` does not assert E_FEE_PROPOSAL_LAPSED/;
+  const ready = /`apply_schedule` does not assert E_FEE_PROPOSAL_NOT_READY/;
+  withRoot({ edits: { [FEE_CONFIG]: replace(LAPSE, '    assert!(true || now < slot.borrow().eta_ms + FEE_APPLY_WINDOW_MS, E_FEE_PROPOSAL_LAPSED);') } }, (root) =>
+    caught(checkFeeConfigSetters(root), lapse),
+  );
+  withRoot({ edits: { [FEE_CONFIG]: replace(LAPSE, '    assert!(now < slot.borrow().eta_ms + FEE_APPLY_WINDOW_MS || true, E_FEE_PROPOSAL_LAPSED);') } }, (root) =>
+    caught(checkFeeConfigSetters(root), lapse),
+  );
+  withRoot({ edits: { [FEE_CONFIG]: replace(LAPSE, '    let _ = now < slot.borrow().eta_ms + FEE_APPLY_WINDOW_MS; let _ = E_FEE_PROPOSAL_LAPSED;') } }, (root) =>
+    caught(checkFeeConfigSetters(root), lapse),
+  );
+  withRoot({ edits: { [FEE_CONFIG]: replace(READY, '    assert!(now >= slot.borrow().eta_ms || true, E_FEE_PROPOSAL_NOT_READY);') } }, (root) =>
+    caught(checkFeeConfigSetters(root), ready),
+  );
+  withRoot(
+    { edits: { [FEE_CONFIG]: replace('    assert!(slot.is_some(), E_NO_FEE_PROPOSAL);\n    let now = clock.timestamp_ms();', '    assert!(slot.is_some(), E_NO_FEE_PROPOSAL);\n    let now = 0;') } },
+    (root) => caught(checkFeeConfigSetters(root), /`apply_schedule` does not read `now` from the clock/),
+  );
+});
+
+test('(d) the two withdrawals are allowed: each takes the cap and empties only its own slot', () => {
+  withRoot({}, (root) => assert.deepEqual(checkFeeConfigSetters(root), []));
+});
+
+test('(d) a withdrawal that writes what is in force, or the other slot, or skips the cap, is caught', () => {
+  const CANCEL_RECIPIENT = '    let PendingRecipient { recipient: _, eta_ms } = cfg.pending_recipient.extract();\n';
+  withRoot({ edits: { [FEE_CONFIG]: replace(CANCEL_RECIPIENT, `${CANCEL_RECIPIENT}    cfg.fee_recipient = option::none();\n`) } }, (root) =>
+    caught(checkFeeConfigSetters(root), /`cancel_fee_recipient_proposal` writes fee_recipient; only `apply_fee_recipient` may/),
+  );
+  const CANCEL_SCHEDULE = '    let PendingSchedule { schedule: _, eta_ms } = slot.extract();\n';
+  withRoot({ edits: { [FEE_CONFIG]: replace(CANCEL_SCHEDULE, `${CANCEL_SCHEDULE}    cfg.pending_recipient = option::none();\n`) } }, (root) =>
+    caught(checkFeeConfigSetters(root), /`cancel_schedule_proposal` writes pending_recipient; only propose_fee_recipient, apply_fee_recipient or cancel_fee_recipient_proposal may/),
+  );
+  withRoot({ edits: { [FEE_CONFIG]: replace(CANCEL_SCHEDULE, `${CANCEL_SCHEDULE}    *&mut cfg.schedules[kind as u64] = schedule_of(cfg, 0);\n`) } }, (root) =>
+    caught(checkFeeConfigSetters(root), /`cancel_schedule_proposal` writes schedules; only `apply_schedule` may/),
+  );
+  withRoot(
+    { edits: { [FEE_CONFIG]: replace('public fun cancel_fee_recipient_proposal(_: &FeeAdminCap, cfg: &mut FeeConfig)', 'public fun cancel_fee_recipient_proposal(cfg: &mut FeeConfig)') } },
+    (root) => caught(checkFeeConfigSetters(root), /`cancel_fee_recipient_proposal` does not take &FeeAdminCap/),
+  );
+  withRoot({ edits: { [FEE_CONFIG]: (s) => s.replaceAll('cancel_schedule_proposal', 'drop_schedule_proposal') } }, (root) => {
+    const failures = checkFeeConfigSetters(root);
+    caught(failures, /fee_config has no `cancel_schedule_proposal`/);
+    caught(failures, /`drop_schedule_proposal` takes a FeeConfig mutably/);
+  });
+});
+
 test('(d) a window longer than seven days, or none, is caught', () => {
   withRoot({ edits: { [FEE_CONFIG]: replace('const FEE_APPLY_WINDOW_MS: u64 = 604_800_000;', 'const FEE_APPLY_WINDOW_MS: u64 = 31_536_000_000;') } }, (root) =>
     caught(checkFeeConfigSetters(root), /FEE_APPLY_WINDOW_MS is 31536000000 ms; a proposal must lapse within seven days/),
