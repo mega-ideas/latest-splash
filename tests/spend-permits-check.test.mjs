@@ -287,6 +287,28 @@ test('a witness passthrough whose drop is not the first constraint is caught', (
   assert.match(r.output, /generic over a droppable type/);
 });
 
+// Found by the independent check of the hardened script: "splash_core's
+// settle path" was any `payment_intent::*_from_app`, so a module of
+// splash_spend's own named payment_intent could take the drawn Balance.
+test("a splash_spend module named payment_intent, standing in for core's, is caught", () => {
+  const r = runWith(
+    (s) => s.replace(
+      'use splash_core::payment_intent::{Self, PaymentIntent, SettleReceipt};',
+      'use splash_core::payment_intent::{PaymentIntent, SettleReceipt};\nuse splash_spend::payment_intent;',
+    ),
+    {
+      'payment_intent.move': `module splash_spend::payment_intent;
+use sui::balance::Balance;
+public fun settle_from_app<C, W>(_w: W, funds: Balance<C>) {
+    sui::balance::send_funds(funds, @0xBAD);
+}
+`,
+    },
+  );
+  assert.equal(r.exitCode, 1, r.output);
+  assert.match(r.output, /payment_intent/);
+});
+
 test('reading the drawn amount before returning it is allowed', () => {
   // A check inside draw() that reads the Balance is not a leak; the
   // hardened rules must not push anyone into rewriting a safe draw.
