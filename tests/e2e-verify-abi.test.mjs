@@ -627,6 +627,163 @@ test('an UpgradeCap whose contents the node does not return counts as held', asy
   assert.match(script, /\(o\) => isUpgradeCapFor\(o, PACKAGE\)/, 'the UpgradeCap custody check uses it');
 });
 
+// ─── A1: who holds the fee's and the registry's authority, and who is paid ──
+//
+// The A1 review: FeeAdminCap (fee_config) and OpsCap (address_registry) are
+// minted to the publisher, and nothing on chain makes the ceremony move them
+// to the governance multisig (or the ops multisig), nor checks that the
+// FeeConfig pays no one until the ceremony applies the finance multisig.
+
+const FEE_ADMIN_CAP = `0x${'fa'.repeat(32)}`;
+const OPS_CAP = `0x${'0c'.repeat(32)}`;
+const FEE_CONFIG_ID = `0x${'fc'.repeat(32)}`;
+const OPS_MULTISIG = `0x${'09'.repeat(32)}`;
+const FINANCE = `0x${'f1'.repeat(32)}`;
+const PUBLISHER = `0x${'9b'.repeat(32)}`;
+
+/** The mocked node, with A1's two caps and the FeeConfig in the world. */
+function a1Node(change = (w) => w) {
+  return mockNode((w) => {
+    w.objects[FEE_ADMIN_CAP] = { objectId: FEE_ADMIN_CAP, type: `${CORE}::fee_config::FeeAdminCap`, owner: { $kind: 'AddressOwner', AddressOwner: GOVERNANCE } };
+    w.objects[OPS_CAP] = { objectId: OPS_CAP, type: `${CORE}::address_registry::OpsCap`, owner: { $kind: 'AddressOwner', AddressOwner: OPS_MULTISIG } };
+    w.objects[FEE_CONFIG_ID] = {
+      objectId: FEE_CONFIG_ID,
+      type: `${CORE}::fee_config::FeeConfig`,
+      owner: { $kind: 'Shared' },
+      json: { id: FEE_CONFIG_ID, schedules: [], fee_recipient: null, discounts: { id: `0x${'d'.repeat(64)}`, size: '0' }, pending_schedules: [null, null, null, null, null], pending_recipient: null },
+    };
+    return change(w);
+  });
+}
+const feeAdminInput = (over = {}) => ({
+  check: 'FeeAdminCap holder',
+  envKey: 'SPLASH_FEE_ADMIN_CAP_ID',
+  capId: FEE_ADMIN_CAP,
+  capType: 'fee_config::FeeAdminCap',
+  corePackageId: CORE,
+  holder: GOVERNANCE,
+  holderKey: 'SPLASH_GOVERNANCE_ADDRESS',
+  holderName: 'the governance multisig',
+  power: 'it could propose any fee schedule or recipient and set any discount alone',
+  operator: OPERATOR,
+  ...over,
+});
+const opsInput = (over = {}) => ({
+  ...feeAdminInput(),
+  check: 'OpsCap holder',
+  envKey: 'SPLASH_OPS_CAP_ID',
+  capId: OPS_CAP,
+  capType: 'address_registry::OpsCap',
+  holder: OPS_MULTISIG,
+  holderKey: 'SPLASH_OPS_ADDRESS',
+  holderName: 'the ops multisig',
+  power: 'it could add or remove a partner deposit address alone, at once',
+  ...over,
+});
+const recipientInput = (over = {}) => ({ feeConfigId: FEE_CONFIG_ID, corePackageId: CORE, finance: FINANCE, ...over });
+const withFeeConfig = (patch) => (w) => {
+  w.objects[FEE_CONFIG_ID].json = { ...w.objects[FEE_CONFIG_ID].json, ...patch };
+  return w;
+};
+
+test('the verify script checks who holds FeeAdminCap and OpsCap, and whom the FeeConfig pays', async () => {
+  const script = await source('scripts/e2e-testnet.mjs');
+  for (const key of ['SPLASH_FEE_ADMIN_CAP_ID', 'SPLASH_OPS_CAP_ID', 'SPLASH_OPS_ADDRESS', 'SPLASH_FINANCE_ADDRESS', 'SPLASH_FEE_CONFIG_ID']) {
+    assert.ok(script.includes(`'${key}'`), `scripts/e2e-testnet.mjs reads ${key}`);
+  }
+  const endState = functionBody(script, 'checkEndState');
+  assert.match(endState, /checkCapHolder\(client, \{[^}]*capType: 'fee_config::FeeAdminCap'/s);
+  assert.match(endState, /checkCapHolder\(client, \{[^}]*capType: 'address_registry::OpsCap'/s);
+  assert.match(endState, /checkFeeRecipient\(client, \{[^}]*feeConfigId: FEE_CONFIG/s);
+  // The operator must hold neither cap, whether or not their ids are set.
+  assert.match(functionBody(script, 'checkIds'), /checkNotHeld\(\s*'FeeAdminCap custody'/);
+  assert.match(functionBody(script, 'checkIds'), /checkNotHeld\(\s*'OpsCap custody'/);
+});
+
+test('FeeAdminCap and OpsCap held by their multisigs pass; unset ids or holders are skipped, never passed', async () => {
+  const { checkCapHolder } = await import(END_STATE);
+  const node = a1Node();
+  assert.equal((await checkCapHolder(node, feeAdminInput())).status, 'PASS');
+  assert.equal((await checkCapHolder(node, opsInput())).status, 'PASS');
+  // OpsCap with no ops multisig configured is checked against governance.
+  const toGovernance = await checkCapHolder(a1Node((w) => ((w.objects[OPS_CAP].owner = { $kind: 'AddressOwner', AddressOwner: GOVERNANCE }), w)), opsInput({ holder: GOVERNANCE, holderKey: 'SPLASH_OPS_ADDRESS (or SPLASH_GOVERNANCE_ADDRESS)', holderName: 'the governance multisig' }));
+  assert.equal(toGovernance.status, 'PASS', toGovernance.detail);
+
+  const unset = await checkCapHolder(node, feeAdminInput({ capId: '' }));
+  assert.equal(unset.status, 'SKIP');
+  assert.match(unset.detail, /SPLASH_FEE_ADMIN_CAP_ID/);
+  const noHolder = await checkCapHolder(node, feeAdminInput({ holder: '' }));
+  assert.equal(noHolder.status, 'SKIP', 'who holds it is not passed without a multisig to compare');
+  assert.match(noHolder.detail, /SPLASH_GOVERNANCE_ADDRESS/);
+  const noCore = await checkCapHolder(node, feeAdminInput({ corePackageId: '' }));
+  assert.equal(noCore.status, 'SKIP', 'a cap whose type cannot be pinned to splash_core is not passed');
+});
+
+test('FeeAdminCap or OpsCap left with the publisher, a stranger or the operator, or the wrong object, fails', async () => {
+  const { checkCapHolder } = await import(END_STATE);
+  const heldBy = (id, address) => (w) => ((w.objects[id].owner = { $kind: 'AddressOwner', AddressOwner: address }), w);
+  const publisher = await checkCapHolder(a1Node(heldBy(FEE_ADMIN_CAP, PUBLISHER)), feeAdminInput());
+  assert.equal(publisher.status, 'FAIL');
+  assert.match(publisher.detail, new RegExp(`held by ${PUBLISHER}, not the governance multisig`));
+  const opsWithPublisher = await checkCapHolder(a1Node(heldBy(OPS_CAP, PUBLISHER)), opsInput());
+  assert.equal(opsWithPublisher.status, 'FAIL');
+  // The operator is a single hot key: a failure even with no multisig to compare.
+  const hot = await checkCapHolder(a1Node(heldBy(FEE_ADMIN_CAP, OPERATOR)), feeAdminInput({ holder: '' }));
+  assert.equal(hot.status, 'FAIL');
+  assert.match(hot.detail, /operator.*single hot key/);
+  const wrapped = await checkCapHolder(a1Node((w) => ((w.objects[FEE_ADMIN_CAP].owner = { $kind: 'ObjectOwner', ObjectOwner: PUBLISHER }), w)), feeAdminInput());
+  assert.equal(wrapped.status, 'FAIL', 'a cap not owned by an address cannot be shown to be the multisig');
+  const lookalike = await checkCapHolder(a1Node((w) => ((w.objects[FEE_ADMIN_CAP].type = `0x${'e'.repeat(64)}::fee_config::FeeAdminCap`), w)), feeAdminInput());
+  assert.equal(lookalike.status, 'FAIL', "a FeeAdminCap of another package is not splash_core's");
+  const missing = await checkCapHolder(a1Node(), feeAdminInput({ capId: `0x${'7'.repeat(64)}` }));
+  assert.equal(missing.status, 'FAIL');
+});
+
+test('a FeeConfig with no fee recipient passes: fees are off until the ceremony applies the finance multisig', async () => {
+  const { checkFeeRecipient } = await import(END_STATE);
+  const off = await checkFeeRecipient(a1Node(), recipientInput());
+  assert.equal(off.status, 'PASS', off.detail);
+  assert.match(off.detail, /no fee recipient.*fees are off/i);
+  // So does the finance multisig, proposed and pending.
+  const proposed = await checkFeeRecipient(a1Node(withFeeConfig({ pending_recipient: { recipient: FINANCE, eta_ms: '1777000000000' } })), recipientInput());
+  assert.equal(proposed.status, 'PASS', proposed.detail);
+  // And once applied.
+  const on = await checkFeeRecipient(a1Node(withFeeConfig({ fee_recipient: FINANCE })), recipientInput());
+  assert.equal(on.status, 'PASS', on.detail);
+  assert.match(on.detail, /finance multisig/);
+});
+
+test('a FeeConfig paying, or about to pay, anyone but the finance multisig fails; unset ids are skipped, never passed', async () => {
+  const { checkFeeRecipient } = await import(END_STATE);
+  const stranger = `0x${'d'.repeat(64)}`;
+  const paysStranger = await checkFeeRecipient(a1Node(withFeeConfig({ fee_recipient: stranger })), recipientInput());
+  assert.equal(paysStranger.status, 'FAIL');
+  assert.match(paysStranger.detail, new RegExp(`${stranger}, not the finance multisig`));
+  const pendingStranger = await checkFeeRecipient(a1Node(withFeeConfig({ pending_recipient: { recipient: stranger, eta_ms: '1777000000000' } })), recipientInput());
+  assert.equal(pendingStranger.status, 'FAIL', 'a pending change to anyone but the finance multisig fails');
+  const onThenStranger = await checkFeeRecipient(
+    a1Node(withFeeConfig({ fee_recipient: FINANCE, pending_recipient: { recipient: stranger, eta_ms: '1777000000000' } })),
+    recipientInput(),
+  );
+  assert.equal(onThenStranger.status, 'FAIL');
+
+  const unset = await checkFeeRecipient(a1Node(), recipientInput({ feeConfigId: '' }));
+  assert.equal(unset.status, 'SKIP');
+  assert.match(unset.detail, /SPLASH_FEE_CONFIG_ID/);
+  const noFinance = await checkFeeRecipient(a1Node(withFeeConfig({ fee_recipient: stranger })), recipientInput({ finance: '' }));
+  assert.equal(noFinance.status, 'SKIP', 'a recipient is not passed without the finance multisig to compare');
+  assert.match(noFinance.detail, /SPLASH_FINANCE_ADDRESS/);
+  const noCore = await checkFeeRecipient(a1Node(), recipientInput({ corePackageId: '' }));
+  assert.equal(noCore.status, 'SKIP');
+
+  const lookalike = await checkFeeRecipient(a1Node((w) => ((w.objects[FEE_CONFIG_ID].type = `0x${'e'.repeat(64)}::fee_config::FeeConfig`), w)), recipientInput());
+  assert.equal(lookalike.status, 'FAIL');
+  const unread = await checkFeeRecipient(a1Node((w) => ((w.objects[FEE_CONFIG_ID].json = null), w)), recipientInput());
+  assert.equal(unread.status, 'FAIL', 'a FeeConfig whose contents the node does not return fails closed');
+  const garbled = await checkFeeRecipient(a1Node(withFeeConfig({ fee_recipient: { vec: 'nonsense' } })), recipientInput());
+  assert.equal(garbled.status, 'FAIL');
+});
+
 test('the end-state module only reads: no key, no signing, no transaction', async () => {
   const text = await source('scripts/v2-end-state.mjs');
   assert.doesNotMatch(text, /signAndExecuteTransaction|executeTransaction|signTransaction|signPersonalMessage|simulateTransaction/);
