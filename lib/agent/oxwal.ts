@@ -2040,7 +2040,7 @@ const SPLASH_ANSWERS: Array<{ test: RegExp; reply: string | (() => string); skip
     test: /\b(how (do|to) (i|we) (start|begin|use)|get started|onboard|new here|tutorial|guide)\b/,
     reply: scoped(
       'Quick tour: Transfer sends one payout (beneficiary > delivery > locked quote > receipt). Batch Payout screens a CSV payroll and settles it under one authorization. Invoices collects money with Seal-protected pay links. Treasury puts idle USD to work. I sit on top — ask me to read state or prepare any of it, and you approve.',
-      'Quick tour: Send USDC pays a saved Sui wallet recipient in USDC, approved in your workspace and signed in your own wallet, with no Splash fee and no gas. Invoices gives you pay links a payer can settle in USDC on Sui. Recipients holds the wallets you pay. I sit on top: ask me to read state or prepare a USDC transfer, and you approve and sign.',
+      'Quick tour: Send USDC pays a saved Sui wallet recipient in USDC, approved in your workspace and signed in your own wallet, with no gas, and Splash’s fee, if any, shown before you sign. Invoices gives you pay links a payer can settle in USDC on Sui. Recipients holds the wallets you pay. I sit on top: ask me to read state or prepare a USDC transfer, and you approve and sign.',
     ),
   },
   {

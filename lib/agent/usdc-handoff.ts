@@ -1,6 +1,6 @@
 import type { KybLifecycleState } from '../compliance/kyb-state.ts';
+import type { FeeSchedule } from '../fees/schedule.ts';
 import {
-  anchorFeeEnabled,
   formatUsdc,
   gaslessEnabled,
   laneAccess,
@@ -44,11 +44,16 @@ export interface HandoffDeps {
   findRecipient(orgId: string, name: string): Promise<RecipientLookup>;
   /** Unused allowance in the rolling window, or null when it cannot be read. */
   remainingAllowance(orgId: string): Promise<bigint | null>;
-  feeAddressConfigured(): boolean;
+  /** Splash's fee has a recipient to go to: the FeeConfig's. */
+  feeAddressConfigured(): boolean | Promise<boolean>;
   /** 'SPLASH' when the saved recipient's wallet is a Splash user's. */
   destinationOf(orgId: string, recipientId: string): Promise<StablecoinDestination>;
-  /** The audit-anchor fee on transfers out of Splash; off unless switched on. */
-  anchorFeeOn(): boolean;
+  /** Splash's fee on transfers out of Splash; off unless switched on, and
+   *  off while the FeeConfig has no recipient. */
+  anchorFeeOn(): boolean | Promise<boolean>;
+  /** The schedule the fee is charged from (lib/server/stablecoin-fee.ts);
+   *  the launch schedule when absent. */
+  feeSchedule?(): FeeSchedule | Promise<FeeSchedule>;
   /** Wallet transfers carry no network fee while this is on (STABLECOIN_GASLESS). */
   gaslessOn(): boolean;
 }
@@ -148,14 +153,16 @@ export async function prepareUsdcHandoff(
     return { text: `I can't prepare a transfer to ${match.name}: ${match.blockedBecause ?? 'this recipient cannot be paid yet.'}`, handoff: null };
   }
 
-  // Free to a Splash user's wallet; out of Splash, the audit-anchor fee when
-  // it is switched on (free until then). Same rule as the send screen.
+  // Free to a Splash user's wallet; out of Splash, Splash's WALLET fee from
+  // the schedule when it is switched on (free until then). Same rule as the
+  // send screen.
   const quote = quoteStablecoinTransfer(principal, {
     destination: await deps.destinationOf(orgId, match.id),
-    anchorFeeOn: deps.anchorFeeOn(),
+    anchorFeeOn: await deps.anchorFeeOn(),
+    schedule: deps.feeSchedule ? await deps.feeSchedule() : undefined,
   });
-  if (quote.feeMinor > 0n && !deps.feeAddressConfigured()) {
-    return { text: 'Transfers out of Splash are not open yet: Splash’s mainnet fee address is not configured, so nothing can be sent until it is.', handoff: null };
+  if (quote.feeMinor > 0n && !(await deps.feeAddressConfigured())) {
+    return { text: 'Transfers out of Splash are not open yet: Splash’s fee recipient cannot be read from the mainnet FeeConfig, so nothing can be sent until it can.', handoff: null };
   }
 
   const limits = stablecoinLimitsFor(state);
@@ -182,7 +189,7 @@ export async function prepareUsdcHandoff(
         `Amount ${formatUsdc(principal)} USDC`,
         quote.feeMinor === 0n
           ? `Splash fee: free${quote.destination === 'SPLASH' ? ' (to another Splash user)' : ''}`
-          : `Audit-anchor fee ${formatUsdc(quote.feeMinor)} USDC, added on top`,
+          : `Splash fee ${formatUsdc(quote.feeMinor)} USDC, added on top`,
         deps.gaslessOn()
           ? `Leaves your wallet ${formatUsdc(quote.totalDebitMinor)} USDC, with no network fee`
           : `Leaves your wallet ${formatUsdc(quote.totalDebitMinor)} USDC, plus a little SUI for gas`,
@@ -218,8 +225,9 @@ export function liveHandoffDeps(): HandoffDeps {
         return null;
       }
     },
-    feeAddressConfigured() {
-      return Boolean((process.env.SPLASH_FEE_ADDRESS_MAINNET ?? '').trim());
+    async feeAddressConfigured() {
+      const { laneWalletFee } = await import('../server/stablecoin-fee.ts');
+      return Boolean((await laneWalletFee()).recipient);
     },
     async destinationOf(orgId, recipientId) {
       // Without the database there is no saved address to look up: out of
@@ -234,8 +242,13 @@ export function liveHandoffDeps(): HandoffDeps {
       if (!recipient?.walletAddress) return 'EXTERNAL';
       return (await isSplashWallet(getDb(), recipient.walletAddress)) ? 'SPLASH' : 'EXTERNAL';
     },
-    anchorFeeOn() {
-      return anchorFeeEnabled();
+    async anchorFeeOn() {
+      const { laneWalletFee } = await import('../server/stablecoin-fee.ts');
+      return (await laneWalletFee()).on;
+    },
+    async feeSchedule() {
+      const { laneWalletFee } = await import('../server/stablecoin-fee.ts');
+      return (await laneWalletFee()).schedule;
     },
     gaslessOn() {
       return gaslessEnabled();

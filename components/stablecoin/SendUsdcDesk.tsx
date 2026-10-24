@@ -26,14 +26,16 @@ import DashPageHeader from '@/components/dashboard/DashPageHeader';
 import FundingPlanner from '@/components/stablecoin/FundingPlanner';
 import UsdyPreview from '@/components/stablecoin/UsdyPreview';
 import WalletActivity from '@/components/stablecoin/WalletActivity';
+import { scheduleFromWire, type FeeScheduleWire } from '@/lib/fees/copy';
+import type { FeeSchedule } from '@/lib/fees/schedule';
 import {
-  anchorFeeTerms,
   formatUsdc,
   parseUsdcMinor,
   quoteStablecoinTransfer,
   sendNeedsSui,
   shortAddress,
   StablecoinLaneError,
+  walletFeeTerms,
 } from '@/lib/payments/stablecoin-lane';
 import type { RecipientRecord } from '@/lib/server/operations';
 import {
@@ -53,8 +55,9 @@ type Lane = {
   lane: { open: boolean; reason: string };
   x402: { open: boolean; reason: string };
   allowance: { usedMinor: string; remainingMinor: string; windowCapMinor: string; windowDays: number };
-  /** Stablecoin transfers are free; the audit-anchor fee (out of Splash) only when switched on. */
-  pricing: { anchorFeeOn: boolean };
+  /** Stablecoin transfers are free; Splash's wallet fee (out of Splash) only
+   *  when switched on, from the FeeConfig's schedule. */
+  pricing: { anchorFeeOn: boolean; schedule?: FeeScheduleWire };
   /** Wallet transfers carry no network fee while this is on (x402 still needs SUI). */
   gas?: { gasless: boolean };
   /** 'stablecoin' when this launch opens USDC on Sui only. */
@@ -200,20 +203,21 @@ export default function SendUsdcDesk() {
   const senderView = source === 'SPLASH' ? splash : external?.view ?? null;
 
   const anchorFeeOn = lane?.pricing?.anchorFeeOn ?? false;
+  const feeSchedule = useMemo(() => laneSchedule(lane?.pricing?.schedule), [lane?.pricing?.schedule]);
   const gasless = lane?.gas?.gasless ?? false;
   const needsSui = sendNeedsSui({ x402: mode === 'X402', gaslessOn: gasless, asCoin, quoteGas: quote?.gas });
   const preview = useMemo(() => {
     if (!amount.trim()) return null;
     try {
       // An estimate: the server's quote decides whether the recipient is a
-      // Splash user (always free). While the audit-anchor fee is off, every
+      // Splash user (always free). While Splash's wallet fee is off, every
       // stablecoin transfer is free.
-      const q = quoteStablecoinTransfer(parseUsdcMinor(amount.trim()), { destination: 'EXTERNAL', anchorFeeOn });
+      const q = quoteStablecoinTransfer(parseUsdcMinor(amount.trim()), { destination: 'EXTERNAL', anchorFeeOn, schedule: feeSchedule });
       return { ok: true as const, q };
     } catch (err) {
       return { ok: false as const, reason: err instanceof StablecoinLaneError || err instanceof Error ? err.message : 'Invalid amount' };
     }
-  }, [amount, anchorFeeOn]);
+  }, [amount, anchorFeeOn, feeSchedule]);
 
   const remaining = lane?.allowance ? BigInt(lane.allowance.remainingMinor) : 0n;
   const cap = lane?.allowance ? BigInt(lane.allowance.windowCapMinor) : 0n;
@@ -713,7 +717,7 @@ export default function SendUsdcDesk() {
                     <div id="send-amount-help" className="sm:col-span-2" aria-live="polite">
                       {preview?.ok ? (
                         <p className="text-[13px] tabular-nums text-[#326273]/90">
-                          {preview.q.feeMinor === 0n ? 'Splash fee: free' : `Audit-anchor fee ${formatUsdc(preview.q.feeMinor)} USDC (free if the recipient is a Splash user)`} · you send <strong className="text-[#1F4452]">{formatUsdc(preview.q.totalDebitMinor)} USDC</strong>
+                          {preview.q.feeMinor === 0n ? 'Splash fee: free' : `Splash fee ${formatUsdc(preview.q.feeMinor)} USDC (free if the recipient is a Splash user)`} · you send <strong className="text-[#1F4452]">{formatUsdc(preview.q.totalDebitMinor)} USDC</strong>
                           {preview.q.principalMinor > remaining ? <span className="ml-2 font-semibold text-[var(--error)]">— more than your remaining allowance</span> : null}
                         </p>
                       ) : preview ? (
@@ -845,15 +849,25 @@ export default function SendUsdcDesk() {
  * the recipient and Splash's fee together, both from the sending wallet. It is
  * the same arithmetic Splash checks on the dry run and again on chain.
  */
+/** The FeeConfig's schedule the lane sent, or undefined (the launch schedule) if it is missing or malformed. */
+function laneSchedule(wire: FeeScheduleWire | undefined): FeeSchedule | undefined {
+  if (!wire) return undefined;
+  try {
+    return scheduleFromWire(wire);
+  } catch {
+    return undefined;
+  }
+}
+
 function TransactionLegs({ quote }: { quote: Quote }) {
   const legs = quote.kind === 'X402'
     ? [{ to: quote.recipient.name, address: quote.recipient.address, amount: BigInt(quote.principalMinor), note: 'the seller’s price, exactly' }]
     : [
       { to: quote.recipient.name, address: quote.recipient.address, amount: BigInt(quote.principalMinor), note: 'receives exactly this' },
       // A fee leg only when there is a fee: stablecoin transfers are free, and
-      // the audit-anchor fee (out of Splash) is off unless switched on.
+      // Splash's wallet fee (out of Splash) is off unless switched on.
       ...(BigInt(quote.feeMinor) > 0n
-        ? [{ to: 'Audit-anchor fee', address: null, amount: BigInt(quote.feeMinor), note: `${anchorFeeTerms()}, same transaction` }]
+        ? [{ to: 'Splash fee', address: null, amount: BigInt(quote.feeMinor), note: 'Splash’s wallet fee, same transaction' }]
         : []),
     ];
   return (
@@ -920,7 +934,7 @@ function Readiness({
   const checks: Check[] = [
     mode === 'X402'
       ? { key: 'lane', label: 'x402 payments open', state: lane.x402.open ? 'ok' : 'todo', detail: lane.x402.open ? 'No Splash fee on x402.' : lane.x402.reason }
-      : { key: 'lane', label: 'Wallet transfers open', state: lane.lane.open ? 'ok' : 'todo', detail: lane.lane.open ? (lane.pricing?.anchorFeeOn ? `Mainnet. Free to other Splash users; out of Splash, a ${anchorFeeTerms()} audit-anchor fee is added on top.` : 'Mainnet. No Splash fee.') : lane.lane.reason },
+      : { key: 'lane', label: 'Wallet transfers open', state: lane.lane.open ? 'ok' : 'todo', detail: lane.lane.open ? (lane.pricing?.anchorFeeOn ? `Mainnet. Free to other Splash users; out of Splash, Splash’s wallet fee, ${walletFeeTerms(laneSchedule(lane.pricing.schedule))}, is added on top.` : 'Mainnet. No Splash fee.') : lane.lane.reason },
     {
       key: 'approval',
       label: lane.approval.style === 'WHATSAPP_PASSKEY' ? 'Approver reachable on WhatsApp' : 'An approver',

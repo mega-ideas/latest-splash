@@ -153,12 +153,8 @@ export const envSchema = z.object({
   USDT_BUFFER_ID: objectId,
   TREASURY_ADDRESS: suiAddress,
   OPERATOR_SUI_ADDRESS: suiAddress,
-  /** Splash's Sui mainnet fee wallet: receives the audit-anchor fee on USDC
-   *  sent out of Splash, in the same transaction, when STABLECOIN_ANCHOR_FEE
-   *  is on. Stablecoin transfers are otherwise free and do not need it. A real
-   *  fee must have a real, named destination: never defaulted. */
-  SPLASH_FEE_ADDRESS_MAINNET: suiAddress,
-  /* 'on' charges the audit-anchor fee on USDC sent out of Splash (lib/payments/stablecoin-lane.ts). */
+  /* 'on' charges Splash's wallet fee, from the FeeConfig's schedule and paid to
+     its fee recipient, on USDC sent out of Splash (lib/server/stablecoin-fee.ts). */
   STABLECOIN_ANCHOR_FEE: opt(z.enum(['on', 'off'])),
   /* Unset or 'on': wallet transfers go gasless. 'off': the sending wallet pays gas in SUI. */
   STABLECOIN_GASLESS: opt(z.enum(['on', 'off'])),

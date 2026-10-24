@@ -1,6 +1,7 @@
 import { fromBase64, normalizeStructTag, toBase64 } from '@mysten/sui/utils';
 
 import type { UserRole } from '@/lib/agent/types';
+import { LAUNCH_SCHEDULE, type FeeSchedule } from '@/lib/fees/schedule';
 import {
   anchorFeeEnabled,
   explorerTxUrl,
@@ -75,11 +76,17 @@ export interface SendDeps {
   chain: ChainDeps;
   approval: ApprovalDeps;
   readRecipient(orgId: string, recipientId: string): Promise<RecipientRecord | null>;
-  feeAddress(): string | undefined;
+  /** Who receives Splash's fee: the FeeConfig's fee recipient
+   *  (lib/server/stablecoin-fee.ts). Undefined when it cannot be named. */
+  feeAddress(): string | undefined | Promise<string | undefined>;
   /** Is this address a Splash user's wallet? Transfers to one are always free. */
   isSplashWallet(address: string): Promise<boolean>;
-  /** The audit-anchor fee on transfers out of Splash; off unless switched on. */
-  anchorFeeOn?: () => boolean;
+  /** Splash's fee on transfers out of Splash; off unless switched on, and
+   *  off while the FeeConfig has no recipient. */
+  anchorFeeOn?: () => boolean | Promise<boolean>;
+  /** The schedule the fee is charged from: the FeeConfig's. Defaults to the
+   *  launch schedule. */
+  feeSchedule?: () => FeeSchedule | Promise<FeeSchedule>;
   /** Gasless wallet transfers; on unless STABLECOIN_GASLESS=off. */
   gaslessOn?: () => boolean;
   now?: () => number;
@@ -144,12 +151,15 @@ export async function quoteWalletTransfer(
   const recipientAddress = normaliseSuiAddress(recipient.walletAddress);
   if (recipientAddress === sender) return fail(400, 'self_transfer', 'The recipient wallet is the wallet you are sending from.');
 
-  // Free to a Splash user's wallet; to anywhere else, the audit-anchor fee
-  // when it is switched on (free until then). lib/payments/stablecoin-lane.ts.
+  // Free to a Splash user's wallet; to anywhere else, Splash's WALLET fee
+  // from the schedule when it is switched on (free until then).
+  // lib/payments/stablecoin-lane.ts.
   const destination = (await deps.isSplashWallet(recipientAddress)) ? 'SPLASH' as const : 'EXTERNAL' as const;
+  const anchorFeeOn = deps.anchorFeeOn ? await deps.anchorFeeOn() : anchorFeeEnabled();
+  const schedule = deps.feeSchedule ? await deps.feeSchedule() : LAUNCH_SCHEDULE;
   let quote;
   try {
-    quote = quoteStablecoinTransfer(principalMinor, { destination, anchorFeeOn: deps.anchorFeeOn?.() ?? anchorFeeEnabled() });
+    quote = quoteStablecoinTransfer(principalMinor, { destination, anchorFeeOn, schedule });
   } catch (error) {
     if (error instanceof StablecoinLaneError) return fail(400, 'below_minimum', `Amount refused: ${error.message}.`);
     throw error;
@@ -158,9 +168,9 @@ export async function quoteWalletTransfer(
   // A fee needs a real, named destination — never defaulted. No fee, no leg.
   let feeAddress: string | null = null;
   if (quote.feeMinor > 0n) {
-    const configuredFee = deps.feeAddress();
+    const configuredFee = await deps.feeAddress();
     if (!configuredFee) {
-      return fail(503, 'fee_address_missing', 'Transfers out of Splash are not open yet: Splash’s mainnet fee address is not configured.');
+      return fail(503, 'fee_address_missing', 'Transfers out of Splash are not open yet: Splash’s fee recipient cannot be read from the mainnet FeeConfig.');
     }
     feeAddress = normaliseSuiAddress(configuredFee);
     if (feeAddress === recipientAddress || feeAddress === sender) {

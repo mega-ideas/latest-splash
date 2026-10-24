@@ -131,20 +131,20 @@ test('amounts the lane would refuse are refused here too', async () => {
   assert.match(perTransfer.text, /20,000\.00 USDC per transfer/);
 });
 
-test('a closed lane prepares nothing; a missing fee address matters only when the anchor fee is on', async () => {
+test("a closed lane prepares nothing; a missing fee recipient matters only when Splash's wallet fee is on", async () => {
   const suspended = await usdcHandoffFor('org_1', 'send 5 USDC to Manila Parts', deps({ state: 'SUSPENDED' }));
   assert.equal(suspended.handoff, null);
-  // Free transfers need no fee address.
+  // Free transfers need no fee recipient.
   assert.ok((await usdcHandoffFor('org_1', 'send 5 USDC to Manila Parts', deps({ fee: false }))).handoff);
   const noFee = await usdcHandoffFor('org_1', 'send 5 USDC to Manila Parts', deps({ fee: false, anchorFee: true }));
   assert.equal(noFee.handoff, null);
-  assert.match(noFee.text, /fee address is not configured/);
+  assert.match(noFee.text, /fee recipient cannot be read from the mainnet FeeConfig/);
 });
 
-test('the anchor fee, when on, shows on the card; to a Splash user it stays free', async () => {
+test("Splash's wallet fee, when on, shows on the card; to a Splash user it stays free", async () => {
   const out = await usdcHandoffFor('org_1', 'send 500 USDC to Manila Parts', deps({ anchorFee: true }));
-  assert.ok(out.handoff.lines.includes('Audit-anchor fee 0.10 USDC, added on top'));
-  assert.ok(out.handoff.lines.includes('Leaves your wallet 500.10 USDC, with no network fee'));
+  assert.ok(out.handoff.lines.includes('Splash fee 0.25 USDC, added on top'));
+  assert.ok(out.handoff.lines.includes('Leaves your wallet 500.25 USDC, with no network fee'));
   const internal = await usdcHandoffFor('org_1', 'send 500 USDC to Manila Parts', deps({ anchorFee: true, destination: 'SPLASH' }));
   assert.ok(internal.handoff.lines.includes('Splash fee: free (to another Splash user)'));
 });

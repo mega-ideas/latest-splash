@@ -4,14 +4,15 @@ import {
   explorerTxUrl,
   laneAccess,
   MIN_STABLECOIN_TRANSFER_MINOR,
-  anchorFeeEnabled,
   gaslessEnabled,
   STABLECOIN_WINDOW_MS,
   type SuiNetwork,
 } from '@/lib/payments/stablecoin-lane';
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
+import { scheduleToWire } from '@/lib/fees/copy';
 import { launchScope } from '@/lib/server/launch-scope';
 import { requireSessionAccount } from '@/lib/server/session-account';
+import { laneWalletFee } from '@/lib/server/stablecoin-fee';
 import { listOutflows, readAllowance } from '@/lib/server/stablecoin-outflows';
 
 export const dynamic = 'force-dynamic';
@@ -35,10 +36,11 @@ export async function GET(request: Request) {
   const orgId = accountCheck.account.orgId;
   const { state, network, allowance } = await readAllowance(db, orgId);
   const lane = laneAccess(state, 'STABLECOIN_WALLET');
-  // Stablecoin transfers are free; only the audit-anchor fee (out of Splash,
-  // when switched on) needs Splash's fee address.
-  const anchorFeeOn = anchorFeeEnabled();
-  const feeConfigured = !anchorFeeOn || Boolean(process.env.SPLASH_FEE_ADDRESS_MAINNET);
+  // Stablecoin transfers are free; only Splash's wallet fee (out of Splash,
+  // when switched on) needs a recipient, the FeeConfig's.
+  const walletFee = await laneWalletFee();
+  const anchorFeeOn = walletFee.on;
+  const feeConfigured = !anchorFeeOn || Boolean(walletFee.recipient);
   const rows = await listOutflows(db, orgId, 20);
   const { readOrgSettings } = await import('@/lib/server/org-settings');
   const settings = await readOrgSettings(orgId);
@@ -51,8 +53,8 @@ export async function GET(request: Request) {
     network: network as SuiNetwork,
     kybState: state,
     verified: state === 'ACTIVE',
-    lane: { open: lane.allowed && feeConfigured, reason: !lane.allowed ? lane.reason : feeConfigured ? '' : 'Wallet transfers are not open yet: Splash’s mainnet fee address is not configured.' },
-    // x402 carries no Splash fee, so it does not wait on the fee address.
+    lane: { open: lane.allowed && feeConfigured, reason: !lane.allowed ? lane.reason : feeConfigured ? '' : 'Wallet transfers are not open yet: Splash’s fee recipient cannot be read from the mainnet FeeConfig.' },
+    // x402 carries no Splash fee, so it does not wait on the fee recipient.
     x402: { open: laneAccess(state, 'X402').allowed, reason: laneAccess(state, 'X402').reason },
     allowance: {
       usedMinor: allowance.usedMinor.toString(),
@@ -60,7 +62,9 @@ export async function GET(request: Request) {
       windowCapMinor: allowance.windowCapMinor.toString(),
       windowDays: STABLECOIN_WINDOW_MS / 86_400_000,
     },
-    pricing: { anchorFeeOn },
+    // The schedule the fee is charged from, so the screen renders its terms
+    // and its preview from it rather than typing a rate in.
+    pricing: { anchorFeeOn, schedule: scheduleToWire(walletFee.schedule) },
     // Wallet transfers carry no network fee while this is on; each quote
     // still says how its own gas is paid (it can fall back). x402 always
     // needs a little SUI.

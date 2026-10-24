@@ -26,37 +26,41 @@ const TWILIO = {
   TWILIO_WHATSAPP_FROM: '+14155238886',
 };
 
-test('the fee wallet: not needed while transfers are free, required once the anchor fee is on, and never an object id', async () => {
+test("the fee recipient: not needed while transfers are free, the FeeConfig's once the wallet fee is on, and never an object id", async () => {
   const wallet = async () => false;
-  const unset = await checkFeeAddress({}, wallet);
-  assert.equal(unset.status, 'skipped');
-  assert.match(unset.detail, /not needed while stablecoin transfers are free/);
-  const needed = await checkFeeAddress({ STABLECOIN_ANCHOR_FEE: 'on' }, wallet);
-  assert.equal(needed.status, 'fail');
-  assert.match(needed.detail, /USDC transfers out of Splash are closed until the fee wallet is set/);
-  assert.equal((await checkFeeAddress({ SPLASH_FEE_ADDRESS_MAINNET: '0x52908400098527886E0F7030069857D2E4169EE7' }, wallet)).status, 'fail');
+  const ON = { STABLECOIN_ANCHOR_FEE: 'on' };
+  const reads = (fee) => async () => ({ schedule: [], ...fee });
+  const off = await checkFeeAddress({}, wallet, reads({ on: false, recipient: null }));
+  assert.equal(off.status, 'skipped');
+  assert.match(off.detail, /stablecoin transfers are free; when on, it is paid to the mainnet FeeConfig's fee recipient/);
 
-  const set = await checkFeeAddress({ SPLASH_FEE_ADDRESS_MAINNET: `0x${'ab'.repeat(32)}` }, wallet);
+  const unread = await checkFeeAddress(ON, wallet, reads({ on: true, recipient: null, reason: 'SPLASH_FEE_CONFIG_ID is not configured' }));
+  assert.equal(unread.status, 'fail');
+  assert.match(unread.detail, /cannot be read: SPLASH_FEE_CONFIG_ID is not configured\. USDC transfers out of Splash are closed until it can/);
+
+  const feesOff = await checkFeeAddress(ON, wallet, reads({ on: false, recipient: null }));
+  assert.equal(feesOff.status, 'ok');
+  assert.match(feesOff.detail, /the FeeConfig has no fee recipient yet: fees are off/);
+
+  const set = await checkFeeAddress(ON, wallet, reads({ on: true, recipient: `0x${'ab'.repeat(32)}` }));
   assert.equal(set.status, 'ok');
-  assert.match(set.detail, /fee wallet 0xabab…abab is a wallet address on mainnet; the audit-anchor fee is off, so stablecoin transfers are free/);
-  const on = await checkFeeAddress({ SPLASH_FEE_ADDRESS_MAINNET: `0x${'ab'.repeat(32)}`, STABLECOIN_ANCHOR_FEE: 'on' }, wallet);
-  assert.match(on.detail, /the audit-anchor fee is on and goes there/);
+  assert.match(set.detail, /goes to the FeeConfig's fee recipient 0xabab…abab, a wallet address on mainnet/);
 
-  // A coin id copied from an explorer looks exactly like an address.
-  const object = await checkFeeAddress({ SPLASH_FEE_ADDRESS_MAINNET: `0x${'cd'.repeat(32)}` }, async () => true);
+  // An object id looks exactly like an address.
+  const object = await checkFeeAddress(ON, async () => true, reads({ on: true, recipient: `0x${'cd'.repeat(32)}` }));
   assert.equal(object.status, 'fail');
   assert.match(object.detail, /is an object on mainnet, not a wallet/);
 
-  const unreachable = await checkFeeAddress({ SPLASH_FEE_ADDRESS_MAINNET: `0x${'ab'.repeat(32)}` }, async () => { throw new Error('connection reset'); });
+  const unreachable = await checkFeeAddress(ON, async () => { throw new Error('connection reset'); }, reads({ on: true, recipient: `0x${'ab'.repeat(32)}` }));
   assert.equal(unreachable.status, 'fail');
-  for (const c of [unset, needed, set, on, object, unreachable]) consistent(c);
+  for (const c of [off, unread, feesOff, set, object, unreachable]) consistent(c);
 });
 
-test('.env.example keeps the fee address blank: it is a template, and the app never reads it', () => {
-  // 2026-09-26: the real address was typed into .env.example, where the app
-  // did not see it (the lane stayed closed) and a commit would have published it.
+test('.env.example names no single fee address: the fee recipient is the FeeConfig\'s', () => {
+  // 2026-09-26: a real fee address was once typed into .env.example. The lane
+  // no longer reads one from the environment at all (A1 §2.5).
   const example = readFileSync(new URL('../.env.example', import.meta.url), 'utf8');
-  assert.match(example, /^SPLASH_FEE_ADDRESS_MAINNET=\s*$/m);
+  assert.doesNotMatch(example, /SPLASH_FEE_ADDRESS_MAINNET/);
 });
 
 test('without WhatsApp delivery, production refuses WhatsApp approvals instead of locking the workspace', async () => {
