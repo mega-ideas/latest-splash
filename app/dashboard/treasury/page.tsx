@@ -762,7 +762,7 @@ export default function TreasuryPage() {
                 { step: '01', title: 'Prepare recommendation', desc: 'Zeke models an allocation from Operating cash. Your business must approve it.', icon: CreditCard, accent: '#5C9EAD', bg: 'bg-[#5C9EAD]/10', tag: 'Human approval' },
                 { step: '02', title: 'Ondo USDY (T-bills)', desc: 'USDY is backed by short-dated US Treasuries — real, off-chain yield.', icon: Landmark, accent: '#C99A2E', bg: 'bg-[#D9A441]/15', tag: 'T-bill backed' },
                 { step: '03', title: 'Yield accrues', desc: 'USDY redemption price rises daily. Floating net rate — never fixed.', icon: Sprout, accent: '#4F9C88', bg: 'bg-[#6FB4A0]/18', tag: rate.label.replace(' · variable', '') },
-                { step: '04', title: 'Withdraw on notice', desc: `Request a withdrawal; USDY converts back to USD and lands in Operating in ${windowLabel}.`, icon: PiggyBank, accent: '#7a5410', bg: 'bg-[var(--gold-tint)]', tag: 'Notice required' },
+                { step: '04', title: 'Withdraw on notice', desc: `Request a withdrawal; USDY converts back to USD and lands in Operating in ${windowLabel}.`, icon: PiggyBank, accent: '#8b6418', bg: 'bg-[var(--gold-tint)]', tag: 'Notice required' },
               ].map(({ step, title, desc, icon: Icon, accent, bg, tag }, i, arr) => (
                 <div key={step} className={cn('relative px-5 py-4', i < arr.length - 1 && 'border-[#326273]/8 sm:border-r')}>
                   <div className="flex items-center gap-3">
