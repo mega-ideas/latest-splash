@@ -219,7 +219,7 @@ export default function StepBeneficiary({ state, set, next }: { state: TransferS
                 Loading saved recipients…
               </div>
             ) : recipientError ? (
-              <div className="rounded-xl border border-[#E39774]/25 bg-[#E39774]/10 px-4 py-3.5 text-sm font-medium text-[#9b4e32]">
+              <div className="rounded-xl border border-[var(--gold-light)] bg-[var(--gold-tint)] px-4 py-3.5 text-sm font-medium text-[var(--gold-ink)]">
                 {recipientError}. Switch to “New recipient” to continue.
               </div>
             ) : filteredRecipients.length > 0 ? (
@@ -466,7 +466,7 @@ export default function StepBeneficiary({ state, set, next }: { state: TransferS
           </div>
         </div>
         {touchedSubmit && !amountOk && (
-          <p className="mt-2 flex items-center gap-1.5 text-[13px] font-semibold text-[#9b4e32]">
+          <p className="mt-2 flex items-center gap-1.5 text-[13px] font-semibold text-[var(--gold-ink)]">
             <CircleAlert className="h-3.5 w-3.5" /> {minimumCheck.ok ? 'Enter the USD amount to send.' : minimumCheck.message}
           </p>
         )}
@@ -512,7 +512,7 @@ function Field({ label, hint, error, children, className = '' }: {
       </div>
       <div className="mt-1.5">{children}</div>
       {error && (
-        <p className="mt-1.5 flex items-center gap-1.5 text-[13px] font-semibold text-[#9b4e32]">
+        <p className="mt-1.5 flex items-center gap-1.5 text-[13px] font-semibold text-[var(--gold-ink)]">
           <CircleAlert className="h-3.5 w-3.5" /> {error}
         </p>
       )}

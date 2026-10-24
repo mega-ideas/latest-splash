@@ -310,7 +310,7 @@ export default function RecipientsPage() {
                           <span className="flex items-center gap-1"><Globe2 className="h-3 w-3" /> {r.country}</span>
                           <span className="font-mono">{r.walletAddress ? `${r.walletAddress.slice(0, 8)}…${r.walletAddress.slice(-6)}` : ''}</span>
                           <span>{r.walletProvider === 'METAMASK_SUI_SNAP' ? 'MetaMask (Sui Snap)' : 'Slush'}</span>
-                          <span className={`rounded-full px-2 py-0.5 font-semibold ${r.screeningVerdict === 'CLEAR' || r.screeningVerdict === 'ATTESTED' ? 'bg-[#6FB4A0]/15 text-[#1F4452]' : 'bg-[#E39774]/15 text-[#9F5839]'}`}>
+                          <span className={`rounded-full px-2 py-0.5 font-semibold ${r.screeningVerdict === 'CLEAR' || r.screeningVerdict === 'ATTESTED' ? 'bg-[#6FB4A0]/15 text-[#1F4452]' : 'bg-[var(--gold-tint)] text-[var(--gold-ink)]'}`}>
                             {r.screeningVerdict === 'CLEAR' ? 'Screened' : r.screeningVerdict === 'ATTESTED' ? 'Attested by admin' : r.screeningVerdict === 'ERROR' ? 'Screening failed' : 'Not screened'}
                           </span>
                           <span className="rounded-full bg-[#5C9EAD]/10 px-2 py-0.5 font-semibold text-[var(--info)]">USDC · Sui mainnet</span>
@@ -325,7 +325,7 @@ export default function RecipientsPage() {
                       )}
                     </div>
                   </div>
-                  <button onClick={() => removeRecipient(r.id)} className="rounded-lg p-2 text-[#9f5839] hover:bg-[#E39774]/10" aria-label="Remove recipient">
+                  <button onClick={() => removeRecipient(r.id)} className="rounded-lg p-2 text-[var(--gold-ink)] hover:bg-[var(--gold-tint)]" aria-label="Remove recipient">
                     <Trash2 className="h-4 w-4" />
                   </button>
                 </div>
@@ -379,7 +379,7 @@ export default function RecipientsPage() {
                 <h2 className="text-sm font-semibold text-[#326273]">Quick actions</h2>
                 <p className="mt-0.5 text-[13px] text-[#326273]/90">Move money to these recipients.</p>
               </div>
-              <Sparkles className="text-[#9f5839]" size={16} />
+              <Sparkles className="text-[var(--gold-ink)]" size={16} />
             </div>
             <QuickLinksCard
               className="mt-3"

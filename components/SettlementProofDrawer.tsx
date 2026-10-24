@@ -107,7 +107,7 @@ export default function SettlementProofDrawer({ transferIntentId, fallback }: Se
               <ExternalLink className="h-3.5 w-3.5" />
             </a>
           )}
-          {independent?.error && <div className="mt-3 font-semibold text-[#9A4A2D]">{independent.error}</div>}
+          {independent?.error && <div className="mt-3 font-semibold text-[var(--gold-ink)]">{independent.error}</div>}
         </div>
       </div>
     </details>
@@ -125,10 +125,10 @@ function ProofRow({ label, value, mono }: { label: string; value: string; mono?:
 
 function CheckTile({ label, ok, icon: Icon, detail }: { label: string; ok: boolean; icon: typeof ShieldCheck; detail: string }) {
   return (
-    <div className={`rounded-md border p-3 ${ok ? 'border-[#5C9EAD]/35 bg-[#5C9EAD]/10' : 'border-[#E39774]/40 bg-[#E39774]/10'}`}>
+    <div className={`rounded-md border p-3 ${ok ? 'border-[#5C9EAD]/35 bg-[#5C9EAD]/10' : 'border-[var(--gold-light)] bg-[var(--gold-tint)]'}`}>
       <div className="flex items-center justify-between gap-2">
-        <Icon className={`h-4 w-4 ${ok ? 'text-[var(--info)]' : 'text-[#9f5839]'}`} />
-        {ok ? <CheckCircle2 className="h-4 w-4 text-[var(--info)]" /> : <XCircle className="h-4 w-4 text-[#9f5839]" />}
+        <Icon className={`h-4 w-4 ${ok ? 'text-[var(--info)]' : 'text-[var(--gold-ink)]'}`} />
+        {ok ? <CheckCircle2 className="h-4 w-4 text-[var(--info)]" /> : <XCircle className="h-4 w-4 text-[var(--gold-ink)]" />}
       </div>
       <div className="mt-2 text-sm font-bold text-[#326273]">{label}</div>
       <div className="mt-1 break-all font-mono text-[13px] text-[#326273]/90">{detail}</div>
@@ -138,7 +138,7 @@ function CheckTile({ label, ok, icon: Icon, detail }: { label: string; ok: boole
 
 function StatusPill({ ok, label }: { ok: boolean; label: string }) {
   return (
-    <span className={`rounded-full px-2.5 py-1 text-[13px] font-bold ${ok ? 'bg-[#5C9EAD]/15 text-[#326273]' : 'bg-[#E39774]/15 text-[#9A4A2D]'}`}>
+    <span className={`rounded-full px-2.5 py-1 text-[13px] font-bold ${ok ? 'bg-[#5C9EAD]/15 text-[#326273]' : 'bg-[var(--gold-tint)] text-[var(--gold-ink)]'}`}>
       {label}
     </span>
   );

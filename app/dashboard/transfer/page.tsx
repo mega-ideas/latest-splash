@@ -228,7 +228,7 @@ export default function TransferPage() {
                   <div className="truncate text-xl font-bold text-white">{currentStepLabel}</div>
                   <div className="mt-1 text-[13px] font-medium text-white/80">Step {state.step} of 5</div>
                 </div>
-                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[#E39774] text-sm font-bold text-[#073d49]">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[var(--gold-light)] text-sm font-bold text-[#073d49]">
                   {state.step}/5
                 </div>
               </div>
@@ -399,13 +399,13 @@ function Stepper({ current }: { current: number }) {
               className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[13px] font-bold transition-all ${done
                 ? 'bg-[#237284] text-white shadow-md shadow-[#5C9EAD]/30'
                 : active
-                ? 'bg-[#E39774] text-[#073d49] shadow-md shadow-[#E39774]/30'
+                ? 'bg-[var(--gold-light)] text-[#073d49] shadow-md shadow-[var(--gold-light)]/30'
                 : 'bg-[#326273]/10 text-[#326273]/90'}`}
             >
               {done ? <Check className="h-4 w-4" /> : step}
             </span>
             <div className="min-w-0 flex-1">
-              <div className={`text-[12px] font-semibold uppercase tracking-[0.18em] ${active ? 'text-[#9f5839]' : done ? 'text-[var(--info)]' : 'text-[#326273]/90'}`}>
+              <div className={`text-[12px] font-semibold uppercase tracking-[0.18em] ${active ? 'text-[var(--gold-ink)]' : done ? 'text-[var(--info)]' : 'text-[#326273]/90'}`}>
                 Step {step}
               </div>
               <div className={`mt-0.5 truncate text-sm font-bold leading-tight ${active || done ? 'text-[#326273]' : 'text-[#326273]/90'}`}>
@@ -413,7 +413,7 @@ function Stepper({ current }: { current: number }) {
               </div>
             </div>
             {active && (
-              <span className="absolute inset-y-0 left-0 w-[3px] bg-[#E39774] sm:inset-x-0 sm:inset-y-auto sm:bottom-0 sm:h-[3px] sm:w-auto" aria-hidden="true" />
+              <span className="absolute inset-y-0 left-0 w-[3px] bg-[var(--gold-light)] sm:inset-x-0 sm:inset-y-auto sm:bottom-0 sm:h-[3px] sm:w-auto" aria-hidden="true" />
             )}
             {done && (
               <span className="absolute inset-y-0 left-0 w-[3px] bg-[#5C9EAD] sm:inset-x-0 sm:inset-y-auto sm:bottom-0 sm:h-[3px] sm:w-auto" aria-hidden="true" />

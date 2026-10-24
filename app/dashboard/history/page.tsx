@@ -59,9 +59,9 @@ function StateIcon({ state }: { state: TransferIntentState }) {
     return <XCircle className="text-red-500" size={18} />;
   }
   if (state === 'REFUNDING') {
-    return <AlertTriangle className="text-[#9f5839]" size={18} />;
+    return <AlertTriangle className="text-[var(--gold-ink)]" size={18} />;
   }
-  return <Loader2 className="animate-spin text-[#9f5839]" size={18} />;
+  return <Loader2 className="animate-spin text-[var(--gold-ink)]" size={18} />;
 }
 
 function StateBadge({ state }: { state: TransferIntentState }) {
@@ -81,7 +81,7 @@ function StateBadge({ state }: { state: TransferIntentState }) {
   }
   if (state === 'REFUNDING' || state === 'REFUNDED') {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-[#E39774]/10 px-2.5 py-0.5 text-[13px] font-medium text-[#9f5839]">
+      <span className="inline-flex items-center gap-1 rounded-full bg-[var(--gold-tint)] px-2.5 py-0.5 text-[13px] font-medium text-[var(--gold-ink)]">
         <AlertTriangle size={11} /> {state}
       </span>
     );
@@ -306,7 +306,7 @@ export default function HistoryPage() {
       {/* Stats */}
       <div className="grid grid-cols-2 gap-3 dash-reveal-stagger md:grid-cols-4">
         <DashStat label="Total" value={String(data?.total ?? 0)} valueClassName="text-[#326273]" />
-        <DashStat label="Pending" value={String(counts.pending)} valueClassName="text-[#9f5839]" />
+        <DashStat label="Pending" value={String(counts.pending)} valueClassName="text-[var(--gold-ink)]" />
         <DashStat label="Settled" value={String(counts.successful)} valueClassName="text-[var(--info)]" />
         <DashStat label="Failed" value={String(counts.failed)} valueClassName="text-red-500" />
       </div>

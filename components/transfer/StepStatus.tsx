@@ -213,7 +213,7 @@ export default function StepStatus({ state, set, next }: { state: TransferState;
           <div className="mt-4 grid gap-3 md:grid-cols-3">
             {state.composedActions.map((action, index) => (
               <div key={`${action.kind}-${action.eventType}`} className="rounded-2xl border border-[#326273]/10 bg-white p-4">
-                <div className="text-[13px] font-bold text-[#9f5839]">0{index + 1}</div>
+                <div className="text-[13px] font-bold text-[var(--gold-ink)]">0{index + 1}</div>
                 <div className="mt-1 text-sm font-semibold text-[#326273]">{action.label}</div>
                 <div className="mt-2 break-all font-mono text-[13px] text-[#326273]/90">{action.eventType}</div>
               </div>

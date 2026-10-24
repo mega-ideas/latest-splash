@@ -551,7 +551,7 @@ export default function StepQuote({
           <div className="w-full max-w-2xl rounded-3xl bg-white p-6 text-[#326273] shadow-2xl">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <div className="mb-2 inline-flex rounded-full bg-[#E39774]/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-[#9f5839]">{selection.type === 'fiat' ? 'Provider deposit' : 'USDC deposit'}</div>
+                <div className="mb-2 inline-flex rounded-full bg-[var(--gold-tint)] px-3 py-1 text-xs font-semibold uppercase tracking-wide text-[var(--gold-ink)]">{selection.type === 'fiat' ? 'Provider deposit' : 'USDC deposit'}</div>
                 <h3 className="text-2xl font-semibold">{selection.type === 'fiat' ? `Continue with ${selection.provider}` : selection.type === 'stablecoin' ? `Deposit ${selection.asset}` : 'Settle from Splash balance'}</h3>
                 <p className="mt-1 text-sm text-[#326273]/90">{selection.type === 'fiat' ? 'Provider funding is confirmed before settlement.' : 'Send USDC over the selected rail using the push-only deposit address.'}</p>
               </div>

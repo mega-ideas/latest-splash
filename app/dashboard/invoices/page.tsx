@@ -18,7 +18,7 @@ const statusStyle: Record<InvoiceStatusV2, string> = {
   draft: 'bg-foreground/10 text-foreground/90',
   sent: 'bg-primary/10 text-foreground',
   viewed: 'bg-primary/10 text-foreground',
-  paid: 'bg-accent/15 text-[#9f5839]',
+  paid: 'bg-accent/15 text-[var(--gold-ink)]',
   settled: 'bg-primary/15 text-foreground',
   overdue: 'bg-destructive/10 text-[#1F4452]',
 };

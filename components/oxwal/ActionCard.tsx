@@ -10,8 +10,8 @@ const actionLabels = {
   reject: 'Reject',
 } as const;
 
-/* Risk states use semantic tokens (W9.0 coral rule): coral is brand accent
-   only — never a risk/error signal. high=error, medium=warn, low=ok. */
+/* Risk states use semantic tokens (W9.0 rule), never the brand
+   accent. high=error, medium=warn, low=ok. */
 function riskClass(tone: ReturnType<typeof buildActionCardModel>['riskTone']) {
   if (tone === 'high') return 'border-[var(--error)] bg-[var(--error-bg)] text-[var(--error)]';
   if (tone === 'medium') return 'border-[var(--warn)] bg-[var(--warn-bg)] text-[#8b6418]';
@@ -50,11 +50,11 @@ export default function ActionCard({ proposal, readOnly = false }: ActionCardPro
                 Untrusted data
               </span>
             )}
-            {/* WS2 truth chip — evidence built on DEMO/MODELED sources says so. */}
+            {/* WS2 truth chip: evidence built on sample or modeled sources says so. */}
             {model.containsDemoData && (
               <span className="inline-flex items-center gap-1 rounded-md border border-[var(--warn)] bg-[var(--warn-bg)] px-2 py-1 text-[12px] font-semibold uppercase tracking-[0.16em] text-[#8b6418]">
                 <AlertTriangle className="h-3.5 w-3.5" />
-                Contains demo data
+                Contains sample data
               </span>
             )}
           </div>
