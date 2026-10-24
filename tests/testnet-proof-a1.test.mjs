@@ -44,3 +44,15 @@ test('the script turns the fees on through the 24-hour path and pays a wallet an
   // The recipient is a multisig no one member signs for alone (Sky's FIXUP 2).
   assert.match(SCRIPT, /const FINANCE = multisigOf\(financeKeys\)/);
 });
+
+test("the bank leg sends only what the business wallet lacks, and says how much the funder must add before it tries", () => {
+  // The A1 review: day two's bank payout needs 99.99 testnet USDC in the
+  // wallet. The script sent all of it from the funder, ignoring what the
+  // wallet already held, and named the need only after the send failed.
+  const leg = SCRIPT.slice(SCRIPT.indexOf("if (!done('fundBankLeg'))"), SCRIPT.indexOf("await walletPays('feesOnBankPays'"));
+  assert.ok(leg.length > 0, 'the fundBankLeg step is where it was');
+  assert.match(leg, /client\.getBalance\(\{ owner: W\.toSuiAddress\(\), coinType: USDC \}\)/, "reads the wallet's USDC");
+  assert.match(leg, /client\.getBalance\(\{ owner: funder\.toSuiAddress\(\), coinType: USDC \}\)/, "reads the funder's USDC");
+  assert.match(leg, /tx\.coin\(\{ type: USDC, balance: Number\(shortfall\) \}\)/, 'sends the shortfall, not the whole leg');
+  assert.ok(leg.indexOf('funderHas < shortfall') < leg.indexOf('tx.coin('), 'refuses with the amount to add before it builds the send');
+});
