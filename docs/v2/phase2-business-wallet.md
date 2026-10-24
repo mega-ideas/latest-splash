@@ -203,32 +203,65 @@ appointed; an owner already has the authority. A person in charge moves no
 money and signs nothing on chain: with the owners they are the "highest
 authority" who signs off a staff member's migration. Revoking one voids every
 sign-off they gave that is still usable, and a sign-off counts only while its
-signer still holds the authority.
+signer still holds the authority. The authority counts only while their role
+is maker or checker: a viewer is never in charge.
 
-Every appointment, revocation, sign-off (prepared, signed, used, voided) and
-approval ask is written to `wallet_authority_events`, which a trigger keeps
-append-only: the application cannot rewrite or delete it.
+**Offboarding.** Removing a membership (`revokeRole`; a role change is a
+removal and a new grant) revokes the appointment, voids every usable sign-off
+they gave or were given, and records their passkey addresses
+(`wallet_offboarded_spenders`, migration 0037). Re-hired, they are not in
+charge again until an owner appoints them. Their spending rule is handled in
+§4.2 (`docs/v2/phase2-spending-rules.md`, "Offboarding").
+
+Every appointment, revocation, sign-off (prepared, signed, used, voided),
+approval ask and offboarding is written to `wallet_authority_events`, which a
+trigger keeps append-only: the application cannot rewrite or delete it. Its
+ids (actor, subject; also the appointment's granted_by and revoked_by, a
+sign-off's signed_by, an ask's requested_by and decided_by) carry no foreign
+key since migration 0037: the trail outlives the users in it, a user can be
+deleted, and an actor may be a Splash operator (`operator:<email>`). The
+routes that write it are rate-limited.
 
 ## Asking the owners to approve (Sky, 25 Oct)
 
-Staff may ask the owners to approve a payment, not only owners: typically one
-over their spending rule, or above the second-approval threshold. Any member
-but a viewer asks (`POST /api/wallet/approval-asks { intentId, contentHash,
-walrusBlobId, note? }`); a staff member only about a payment they opened (its
-on-chain maker is one of their passkey addresses), an owner about any of the
-business's. The intent is read from the chain: this business's, still
-waiting, unexpired, USDC, not cross-chain, and what the owners are shown is
-that reading, stored with the ask. One open ask per payment.
+Staff may ask the owners to approve a payment, not only owners. Any member
+but a viewer asks, in one of two ways:
+
+- **A draft** (`POST /api/wallet/approval-asks { draft, contentHash,
+  walrusBlobId, note? }`) for a payment the rule does not allow at all: over
+  the asker's or the business's per-payment maximum, or to a payee the policy
+  does not list. `splash_spend::create_intent` refuses those, so no intent
+  can exist. The draft is the payment as the staff member's device composed
+  it (payment reference, payee, beneficiary reference on a bank payout,
+  amount, kind, currency, rate, commitments, expiry). Splash checks its shape
+  and stores, from the current policy, why it came to the owners
+  (`checks: { recipientVerified, overPerPaymentMax, makerPerPaymentMaxMinor }`);
+  it never refuses on those, since the owners decide. Sky's example, a staff
+  payment over their rule, is this path.
+- **An open intent** (`{ intentId, ... }`) opened under the rule that still
+  needs the owners: its cap is used up, or it is above the second-approval
+  threshold. Only about a payment the asker opened (its on-chain maker is one
+  of their passkey addresses); an owner may ask about any of the business's.
+  The intent is read from the chain: this business's, still waiting,
+  unexpired, USDC, not cross-chain, and what the owners are shown is that
+  reading.
+
+One open ask per payment (per intent, or per draft's payment reference). The
+owners are messaged on their approver channels when an ask arrives (WhatsApp
+where the business has it on); the ask is in their inbox either way.
 
 An **owner** accepts it (`POST /api/wallet/approval-asks/:id { action:
-'accept', mode, maxFeeMinor, settleByMs }`):
+'accept', mode, maxFeeMinor, settleByMs }`). The ask is claimed before
+anything is built, so two owners accepting at once open one request:
 
-- `wallet_pays`: the quorum pays the intent from the business wallet
-  (`requestOpenIntentPayment`, the existing-intent path above, with the payee
-  and amount bound into the request). This covers anything over the rule.
-- `second_approval`: the owner's own `splash_spend::approve_payout` for a
-  payment within the asker's rule but above the threshold (§4.2,
-  `docs/v2/phase2-spending-rules.md`).
+- `wallet_pays`: the quorum pays it from the business wallet. A draft:
+  `requestWalletPayment` (`create_for_wallet` +
+  `confirm_from_business_wallet_balance` in one transaction). An intent:
+  `requestOpenIntentPayment`, the existing-intent path above, with the payee
+  and amount bound into the request.
+- `second_approval`: the owner's own `splash_spend::approve_payout` for an
+  intent within the asker's rule but above the threshold (§4.2,
+  `docs/v2/phase2-spending-rules.md`). Not for a draft (`no_intent`).
 
 When the signing request executes, the ask is approved (also from the cron's
 reconcile). If it fails, expires or is withdrawn, the ask is open again. An

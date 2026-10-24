@@ -91,15 +91,29 @@ Design: `docs/v2/phase2-business-wallet.md`.
   request is a 404. The account a wallet transaction names is the org's own
   `sui_business_account_id`, never the single-tenant fallback.
 - **Who may ask, who signs off (Sky, 25 Oct).** Staff may ask the owners to
-  approve a payment (`wallet_approval_asks`): only about a payment they opened
-  themselves (its on-chain maker is their passkey address), shown to owners
-  as the chain has it, accepted or declined only by an owner, withdrawn only
-  by the asker. A staff member's migration of their own USDC needs a
+  approve a payment (`wallet_approval_asks`). A payment over the rule cannot
+  be opened on chain (`create_intent` refuses it), so it is asked for as a
+  draft: its shape is checked, the owners are shown from the policy why it
+  came to them, and only the quorum can pay it (`create_for_wallet` +
+  `confirm_from_business_wallet_balance`). An ask about an open intent is
+  only about one the asker opened (its on-chain maker is their passkey
+  address), shown to owners as the chain has it. Asks are accepted or
+  declined only by an owner (claimed first, so two owners open one request)
+  and withdrawn only by the asker; the owners are messaged when one arrives.
+  A staff member's migration of their own USDC needs a
   passkey-signed sign-off from an owner or a person in charge (an off-chain
   role an owner grants and revokes), bound to the member, the source wallet,
   the business wallet, a nonce and a 24-hour expiry; nobody signs off their
-  own. Migration moves USDC only. Every grant, revocation, sign-off and ask is
-  in `wallet_authority_events`, append-only by trigger.
+  own. A viewer is never in charge. Migration moves USDC only. Every grant,
+  revocation, sign-off and ask is in `wallet_authority_events`, append-only
+  by trigger; its ids carry no foreign key, so it outlives the users in it,
+  and the routes that write it are rate-limited.
+- **Offboarding.** Removing a membership (a role change included) revokes a
+  person-in-charge appointment and voids every usable sign-off at once.
+  A spending rule lives on chain and still pays until the quorum revokes
+  it, so the index flags every rule whose holder was removed, is a viewer,
+  or is nobody here as `orphaned`, and the owners take them all back in one
+  request (`POST /api/wallet/spending-rules/orphaned`).
 - **Spending rules (§4.2, `docs/v2/phase2-spending-rules.md`).** A rule is
   an allowance bound to SPLASH_SPEND and named for the business's current
   policy, plus the staff member's place on it. Giving, changing (revoke +
@@ -109,9 +123,13 @@ Design: `docs/v2/phase2-business-wallet.md`.
   app, `allowance::new`, `rotate_spender`, a dangling proposal, a name for
   another policy, and any policy, allowance or cap the server did not read
   as this business's. The WALLET tag only for an address with a live
-  ownership proof of this business. The index rolls each window over as the
-  chain will, so what is shown as left is what the next charge sees. After a
-  rotation the rules are stale until reissued under the new wallet.
+  ownership proof of this business; withdrawing the proof cancels a waiting
+  request that would tag it. The index rolls each window over as the
+  chain will, so what is shown as left is what the next charge sees. A
+  change or a reissue keeps what was spent: the lifetime cap less
+  `current_spend`, and a window with spending in it honoured until it
+  renews. After a rotation the rules are stale until reissued under the new
+  wallet, once per wallet generation and only for current members.
 - **Gas sponsor (Sky, 25 Oct).** The KMS operator key is the wallet gas
   sponsor; the cap of 1 SUI per business per 24 hours stands.
 - **Open:** the hardware 2-of-3 passkey check (one approver, Sky, with three

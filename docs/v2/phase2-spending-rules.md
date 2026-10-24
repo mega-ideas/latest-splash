@@ -67,7 +67,8 @@ signers. A second approval is signed by one owner's own passkey.
 | `POST /api/wallet/spending-rules/policy { perPaymentMaxMinor }` | owner | Create the policy for the current wallet generation (`spend_policy`). Once per generation. |
 | `PATCH /api/wallet/spending-rules/policy { perPaymentMaxMinor?, secondApprovalThresholdMinor?, runningWindowMs? }` | owner | `set_limits`, `set_running_window`. |
 | `POST /api/wallet/spending-rules { staffUserId, perPaymentMaxMinor, cap: { period, limitMinor }, expiresAtMs, startsAtMs?, lifetimeCapMinor?, recipients? }` | owner | Give a rule: `add_spender` (STAFF) and `propose_for_app` + `accept`, with any recipient changes, in one transaction. The address is the staff member's own active passkey here, never one from the request. Refused: a viewer, someone of another business, a per-payment maximum above the business's, a zero cap, an expiry in the past or more than a year away, a second rule for the same person. |
-| `PUT /api/wallet/spending-rules/:staffUserId` | owner | **Change = revoke + reissue**: the rule's allowance is revoked and a new one issued in the same transaction. A changed per-payment maximum also removes and re-adds the spender (Move's only way), which retires every outstanding approval (`generation`); an unchanged one leaves the spender alone. Running totals stay: they are the address's. |
+| `PUT /api/wallet/spending-rules/:staffUserId` | owner | **Change = revoke + reissue**: the rule's allowance is revoked and a new one issued in the same transaction, **keeping what was spent** (below, and `carried` in the answer). A changed per-payment maximum also removes and re-adds the spender (Move's only way), which retires every outstanding approval (`generation`); an unchanged one leaves the spender alone. Running totals stay: they are the address's. |
+| `POST /api/wallet/spending-rules/orphaned {}` | owner | **Offboarding** (below): take back every rule whose holder may no longer pay, in one transaction. |
 | `DELETE /api/wallet/spending-rules/:staffUserId` | owner | **Revoke**: every allowance the current wallet gave this person is revoked (`allowance::revoke`, which destroys it with its cap) and they are removed from the policy, which also stops their open intents at once. |
 | `POST /api/wallet/spending-rules/recipients { add, remove, addBeneficiaries, removeBeneficiaries }` | owner | Verify or remove recipients and bank beneficiaries. |
 | `POST /api/wallet/spending-rules/reissue {}` | owner | After a rotation (below). |
@@ -83,7 +84,9 @@ gate: an address may be verified with the WALLET tag only while
 `wallet_ownership_proofs` holds a live row for this business (another
 business's proof does not count). Refused before anything is built
 (`409 ownership_not_proven`, with the addresses), and again by the signing
-flow's shape check if bytes tagging an unproven address are put to it. An
+flow's shape check if bytes tagging an unproven address are put to it.
+Withdrawing a proof (`revokeOwnershipProof`) cancels any spending-rule
+request still collecting signatures that would tag that address WALLET. An
 EXCHANGE tag needs no proof.
 
 ## The index
@@ -127,6 +130,37 @@ An allowance of the current wallet whose spender is no longer on the policy
 is `unattached` (it cannot pay; revoke it). One funded by an earlier wallet
 or named for an earlier generation's policy is `stale`.
 
+### A change keeps what was spent
+
+A fresh allowance starts with `current_spend` and the window's spent at
+zero, so a change (and a reissue after a rotation) carries the old figures:
+
+- **Lifetime.** The new lifetime cap is the one asked for less everything
+  charged under the current allowances. At or below zero it is refused
+  (`lifetime_used`). The cap is read against the rule as the index shows it:
+  the current allowance's cap and its spend.
+- **Window.** If the current day or month has spending in it, the new rule
+  starts when that window renews. Until then a bridge allowance gives what is
+  honestly left: the smaller of what the old rule had left and (for the same
+  period) the new cap less what was spent, carried as its own lifetime cap
+  and expiring at the renewal. The new rule's lifetime cap is reduced by the
+  bridge, so the two together never exceed it.
+
+Example: 15,000 a month, 6,000 spent; the cap is lowered to 10,000. Until
+the month renews: 4,000 (the bridge). From the renewal: 10,000 a month.
+
+### Offboarding
+
+A rule lives on chain. Removing a member, or making them a viewer, does not
+stop it: `create_intent` and `pay_intent` are public, and their own device
+can call them. So the index gives each staff rule a `standing`
+(`lib/server/spend-standing.ts`): `member`, `viewer`, `removed` (their
+membership was removed; it stays so after a re-hire until the owners act) or
+`not_a_member`, and lists every rule that is not `member` in `orphaned`.
+`POST /api/wallet/spending-rules/orphaned` revokes their allowances and
+removes them from the policy in one quorum-signed transaction; when a change
+that removes a spender executes, its offboarding record is resolved.
+
 ## After a rotation
 
 A rotation moves the account to a new wallet generation. The earlier
@@ -139,12 +173,18 @@ the new wallet has its policy.
 (with the earlier per-payment maximum), and once that lands it opens, by
 itself, one request that copies the earlier generation's limits, window,
 recipients (a WALLET tag only while its proof still holds), beneficiaries,
-staff spenders, and each unexpired rule's allowance with the same cap and
-expiry (a lifetime cap carries what is left of it). What could not be
-carried is listed in `skipped`: an expired rule, a cap that is neither daily
-nor monthly, a used-up lifetime cap, a WALLET recipient whose proof was
-withdrawn, the operator's executor rule. The old wallet's own quorum then
-revokes the stale allowances (`{ revokeStaleFrom }`); nothing else moves.
+staff spenders who are still members who may pay, and each unexpired rule's
+allowance with the same cap and expiry, keeping what was spent (a lifetime
+cap carries what is left of it; a day or month with spending in it is
+honoured until it renews). What could not be carried is listed in `skipped`:
+an expired rule, a cap that is neither daily nor monthly, a used-up lifetime
+cap, a WALLET recipient whose proof was withdrawn, the operator's executor
+rule, a removed member, a viewer, an address nobody here holds. The copy
+runs **once per wallet generation** (`spend:reissue:<epoch>`): once it has
+executed, `reissueNeeded` is false and a second reissue is refused, so a rule
+the owners took back on the new policy does not come back. The old wallet's
+own quorum then revokes the stale allowances (`{ revokeStaleFrom }`);
+nothing else moves.
 
 ## Open, not built here
 
