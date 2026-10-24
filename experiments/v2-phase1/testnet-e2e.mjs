@@ -885,6 +885,14 @@ if (Date.now() < feeEta) {
   save();
   process.exit(0);
 }
+// fee_config::FEE_APPLY_WINDOW_MS: a proposal lapses seven days after its eta.
+const FEE_APPLY_WINDOW_MS = 604_800_000;
+if (!done('applyFeeRecipient') && Date.now() >= feeEta + FEE_APPLY_WINDOW_MS) {
+  throw new Error(
+    `The fee recipient proposal lapsed at ${new Date(feeEta + FEE_APPLY_WINDOW_MS).toISOString()}, seven days after its notice ran ` +
+      `(fee_config::E_FEE_PROPOSAL_LAPSED). Remove steps.proposeFeeRecipient from ${RESULTS} and rerun to propose it again.`,
+  );
+}
 if (!done('applyFeeRecipient')) {
   const tx = new Transaction();
   tx.moveCall({

@@ -44,6 +44,10 @@ export const FEE_CEILING_BPS = 100n;
 export const BPS_DENOM = 10_000n;
 export const FEE_MAX_TIERS = 8;
 export const U64_MAX = 18_446_744_073_709_551_615n;
+/** A schedule or fee recipient proposal applies only within this long after
+ *  its eta; from eta + FEE_APPLY_WINDOW_MS it has lapsed and can never apply
+ *  (fee_config's E_FEE_PROPOSAL_LAPSED). Seven days, as fee_config.move. */
+export const FEE_APPLY_WINDOW_MS = 604_800_000n;
 const U16_MAX = 65_535;
 
 /** A1's kind numbers, the same on chain, in the vectors and here. */

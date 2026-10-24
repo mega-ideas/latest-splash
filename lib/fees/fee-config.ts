@@ -6,7 +6,8 @@
  * expires, when the server sees a FeeScheduleApplied event from the config's
  * own package (`observeFeeEvent`; a look-alike event from another package is
  * ignored), and early when a proposed schedule reaches its eta, after which
- * it could be applied at any moment.
+ * it could be applied at any moment, until its seven-day apply window closes
+ * and it lapses (FEE_APPLY_WINDOW_MS).
  *
  * Splash's fees are off until the first fee recipient change has been
  * applied (Sky, 24 Oct): a FeeConfig is published with no fee recipient. A
@@ -30,6 +31,7 @@
 import 'server-only';
 
 import {
+  FEE_APPLY_WINDOW_MS,
   FEE_CEILING_BPS,
   FEE_KIND_COUNT,
   FEE_MAX_TIERS,
@@ -320,6 +322,9 @@ export function createFeeConfigCache({
     if (s.pendingRecipient) etas.push(s.pendingRecipient.etaMs);
     for (const etaMs of etas) {
       const eta = Number(etaMs);
+      // From eta + the apply window on, the proposal has lapsed and can never
+      // apply (E_FEE_PROPOSAL_LAPSED), so it no longer shortens the cache.
+      if (t >= eta + Number(FEE_APPLY_WINDOW_MS)) continue;
       at = Math.min(at, eta <= t ? t + applicableTtlMs : eta);
     }
     return at;

@@ -29,12 +29,16 @@
 /// charges 0, sends no fee leg and emits no FeeCharged; the payer's whole
 /// `max_fee` comes back to the business wallet. Nothing is ever paid to the
 /// publisher. Once a recipient has been applied there is always one: a later
-/// change replaces it, and nothing clears it. A schedule or the fee recipient changes only by a proposal that
-/// waits 24 hours (`FEE_NOTICE_MS`) and is then applied; applying early
-/// aborts. A new proposal for the same thing replaces the pending one and
-/// starts its own 24 hours, so nothing is ever applied with less notice than
-/// it gave. Every proposal is validated when it is made, and every proposal
-/// and application is an event owners are alerted to.
+/// change replaces it, and nothing clears it.
+///
+/// A schedule or the fee recipient changes only by a proposal that waits 24
+/// hours (`FEE_NOTICE_MS`) and is then applied within seven days
+/// (`FEE_APPLY_WINDOW_MS`); applying early aborts, and so does applying
+/// after the window, when the proposal has lapsed and must be made again. A
+/// new proposal for the same thing replaces the pending one and starts its
+/// own 24 hours, so nothing is ever applied with less notice than it gave,
+/// nor long after it. Every proposal is validated when it is made, and every
+/// proposal and application is an event owners are alerted to.
 ///
 /// The one immediate change is a business's discount (`set_discount`), at
 /// most 100 bps. A discount only lowers the rate the schedule gives, never
@@ -80,6 +84,9 @@ const E_NO_FEE_PROPOSAL: u64 = 1303;
 const E_INVALID_FEE_RECIPIENT: u64 = 1304;
 /// The kind is outside 0-4.
 const E_UNKNOWN_KIND: u64 = 1305;
+/// The proposal's window closed seven days after its 24-hour notice ran.
+/// Propose it again, so owners are alerted again.
+const E_FEE_PROPOSAL_LAPSED: u64 = 1306;
 
 // ─── Constants ─────────────────────────────────────────────────────────────
 /// The most any fee may be, in basis points of the principal: 1%. Written
@@ -88,6 +95,10 @@ const FEE_CEILING_BPS: u64 = 100;
 const BPS_DENOM: u64 = 10_000;
 /// Every schedule and recipient change gives this much notice: 24 hours.
 const FEE_NOTICE_MS: u64 = 86_400_000;
+/// After its notice, a proposal must be applied within seven days or it
+/// lapses, as a registry addition and a package upgrade do. One alert
+/// cannot be cashed in months later, once owners have stopped watching.
+const FEE_APPLY_WINDOW_MS: u64 = 604_800_000;
 const MAX_TIERS: u64 = 8;
 const U64_MAX: u64 = 18_446_744_073_709_551_615;
 
@@ -343,12 +354,16 @@ public fun propose_schedule(
     event::emit(FeeScheduleProposed { kind, tiers, min_minor, max_minor, eta });
 }
 
-/// Put the schedule proposed for `kind` into force, once its notice has run.
+/// Put the schedule proposed for `kind` into force, once its notice has run
+/// and before its window closes, seven days later. A lapsed proposal stays
+/// pending and never applies; propose it again.
 public fun apply_schedule(_: &FeeAdminCap, cfg: &mut FeeConfig, kind: u8, clock: &Clock) {
     assert!(kind < KIND_COUNT, E_UNKNOWN_KIND);
     let slot = &mut cfg.pending_schedules[kind as u64];
     assert!(slot.is_some(), E_NO_FEE_PROPOSAL);
-    assert!(clock.timestamp_ms() >= slot.borrow().eta_ms, E_FEE_PROPOSAL_NOT_READY);
+    let now = clock.timestamp_ms();
+    assert!(now >= slot.borrow().eta_ms, E_FEE_PROPOSAL_NOT_READY);
+    assert!(now < slot.borrow().eta_ms + FEE_APPLY_WINDOW_MS, E_FEE_PROPOSAL_LAPSED);
     let PendingSchedule { schedule, eta_ms: _ } = slot.extract();
     *&mut cfg.schedules[kind as u64] = schedule;
     event::emit(FeeScheduleApplied { kind });
@@ -383,11 +398,14 @@ public fun propose_fee_recipient(
     event::emit(FeeRecipientProposed { recipient, eta });
 }
 
-/// Put the proposed fee recipient into force, once its notice has run. The
-/// first time, this turns Splash's fees on.
+/// Put the proposed fee recipient into force, once its notice has run and
+/// before its window closes, seven days later. The first time, this turns
+/// Splash's fees on.
 public fun apply_fee_recipient(_: &FeeAdminCap, cfg: &mut FeeConfig, clock: &Clock) {
     assert!(cfg.pending_recipient.is_some(), E_NO_FEE_PROPOSAL);
-    assert!(clock.timestamp_ms() >= cfg.pending_recipient.borrow().eta_ms, E_FEE_PROPOSAL_NOT_READY);
+    let now = clock.timestamp_ms();
+    assert!(now >= cfg.pending_recipient.borrow().eta_ms, E_FEE_PROPOSAL_NOT_READY);
+    assert!(now < cfg.pending_recipient.borrow().eta_ms + FEE_APPLY_WINDOW_MS, E_FEE_PROPOSAL_LAPSED);
     let PendingRecipient { recipient, eta_ms: _ } = cfg.pending_recipient.extract();
     cfg.fee_recipient = option::some(recipient);
     event::emit(FeeRecipientApplied { recipient });
@@ -447,6 +465,7 @@ public fun pending_recipient_eta_ms(cfg: &FeeConfig): u64 {
 public fun fee_ceiling_bps(): u64 { FEE_CEILING_BPS }
 public fun bps_denom(): u64 { BPS_DENOM }
 public fun fee_notice_ms(): u64 { FEE_NOTICE_MS }
+public fun fee_apply_window_ms(): u64 { FEE_APPLY_WINDOW_MS }
 public fun max_tiers(): u64 { MAX_TIERS }
 
 public fun kind_splash_business(): u8 { KIND_SPLASH_BUSINESS }
