@@ -227,6 +227,28 @@ test('(c) a fee rate typed into app/, components/ or content/ is caught, with it
   );
 });
 
+test("(c) a fee rate typed into Zeke's replies (lib/agent/) or the Send USDC lane is caught", () => {
+  // A1 §2.8 names Zeke's reply copy; the desk's lane quotes the WALLET fee.
+  // Both were outside the scan, and a 2.00% ceiling and a typed
+  // "(0.02%, min 0.05, max 5)" survived there.
+  withRoot(
+    {
+      extra: {
+        'lib/agent/oxwal.ts': "export const reply = 'Batches get a blended rate, typically 15-30 bps inside single-transfer pricing, and the 2.00% fee ceiling applies.';\n",
+        'lib/agent/tools/pricing.ts': "export const line = ['0.30%', 'to a bank'];\n",
+        'lib/payments/stablecoin-lane.ts': "export const terms = 'Audit-anchor fee (0.02%, min 0.05, max 5)';\n",
+      },
+    },
+    (root) => {
+      const failures = checkFeeRates(root, []);
+      caught(failures, /\(c\) lib\/agent\/oxwal\.ts:1: `15-30bps`/);
+      caught(failures, /\(c\) lib\/agent\/oxwal\.ts:1: `2\.00%`/);
+      caught(failures, /\(c\) lib\/agent\/tools\/pricing\.ts:1: `0\.30%`/);
+      caught(failures, /\(c\) lib\/payments\/stablecoin-lane\.ts:1: `0\.02%`/);
+    },
+  );
+});
+
 test('(c) a rate rendered from the schedule is allowed', () => {
   withRoot(
     {
