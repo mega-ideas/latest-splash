@@ -1638,6 +1638,71 @@ fun an_approval_given_before_a_freeze_and_thaw_is_stale() {
 }
 
 #[test]
+#[expected_failure(abort_code = splash_spend::E_STALE_APPROVAL)]
+/// Review A3/A4, the reviewers' proof: an owner approves STAFF's payment
+/// above the threshold; the wallet removes STAFF (to suspend them, or to
+/// change their limit, which is remove then add) and adds them back. The
+/// approval the owners believed died with the removal must not pay.
+fun re_adding_a_spender_does_not_revive_an_approval() {
+    let (mut s, fx) = setup();
+    let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, THRESHOLD + 1);
+    approve(&mut s, &fx, h::owner_2(), intent, STAFF);
+    let mut p = wallet_policy(&mut s, &fx);
+    p.remove_spender(STAFF, s.ctx());
+    p.add_spender(STAFF, spend_policy::role_staff(), STAFF_MAX - 1, s.ctx());
+    ts::return_shared(p);
+    pay(&mut s, &fx, STAFF, fx.staff, intent, true);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = splash_spend::E_STALE_APPROVAL)]
+/// The same for the executor: removing and re-adding Splash's operator
+/// kills the wallet's delegations to it.
+fun re_adding_the_executor_does_not_revive_a_delegation() {
+    let (mut s, fx) = setup();
+    let intent = open_by_wallet(&mut s, &fx, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    delegate(&mut s, &fx, h::wallet(), intent, EXECUTOR);
+    let mut p = wallet_policy(&mut s, &fx);
+    p.remove_spender(EXECUTOR, s.ctx());
+    p.add_spender(EXECUTOR, spend_policy::role_executor(), EXECUTOR_MAX, s.ctx());
+    ts::return_shared(p);
+    pay(&mut s, &fx, EXECUTOR, fx.executor, intent, true);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = splash_spend::E_STALE_APPROVAL)]
+/// Removing a recipient withdraws the owners' trust in it; verifying it
+/// again does not bring back an approval given before.
+fun re_verifying_a_recipient_does_not_revive_an_approval() {
+    let (mut s, fx) = setup();
+    let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, THRESHOLD + 1);
+    approve(&mut s, &fx, h::owner_2(), intent, STAFF);
+    let mut p = wallet_policy(&mut s, &fx);
+    p.remove_recipient(SUI_DOMAIN, SUPPLIER, s.ctx());
+    p.verify_recipient(SUI_DOMAIN, SUPPLIER, payment_intent::kind_wallet(), s.ctx());
+    ts::return_shared(p);
+    pay(&mut s, &fx, STAFF, fx.staff, intent, true);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = splash_spend::E_STALE_APPROVAL)]
+/// Nor does binding a removed beneficiary again.
+fun re_binding_a_beneficiary_does_not_revive_an_approval() {
+    let (mut s, fx) = setup();
+    let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_bank_payout(), h::recipient(), THRESHOLD + 1);
+    approve(&mut s, &fx, h::owner_2(), intent, STAFF);
+    let mut p = wallet_policy(&mut s, &fx);
+    p.remove_beneficiary(h::beneficiary(), s.ctx());
+    p.verify_beneficiary(h::beneficiary(), h::recipient(), s.ctx());
+    ts::return_shared(p);
+    pay(&mut s, &fx, STAFF, fx.staff, intent, true);
+    s.end();
+}
+
+#[test]
 #[expected_failure(abort_code = splash_core::business_account::E_FROZEN)]
 /// A freeze stops every Splash path, including staff allowances.
 fun a_frozen_account_cannot_pay_under_a_spending_rule() {
