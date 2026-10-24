@@ -98,7 +98,7 @@ fun a_31_byte_commitment_is_refused() {
     let mut s = h::setup();
     as_wallet!(&mut s, |account, config, c, ctx| {
         let intent = wallet_intent_with(account, config, 1, SHORT, c, ctx);
-        payment_intent::cancel(intent, ctx);
+        payment_intent::cancel(intent, c, ctx);
     });
     s.end();
 }
@@ -110,7 +110,7 @@ fun a_33_byte_commitment_is_refused() {
     let mut s = h::setup();
     as_wallet!(&mut s, |account, config, c, ctx| {
         let intent = wallet_intent_with(account, config, 1, LONG, c, ctx);
-        payment_intent::cancel(intent, ctx);
+        payment_intent::cancel(intent, c, ctx);
     });
     s.end();
 }

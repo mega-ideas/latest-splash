@@ -386,7 +386,7 @@ fun staff_opens_intent(s: &mut Scenario, id: ID) {
         s.ctx(),
     );
     assert_eq!(payment_intent::sender(&intent), STAFF);
-    payment_intent::cancel(intent, s.ctx());
+    payment_intent::cancel(intent, &c, s.ctx());
     ts::return_shared(c);
     ts::return_shared(config);
     ts::return_shared(account);

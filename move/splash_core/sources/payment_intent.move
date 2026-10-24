@@ -1036,11 +1036,15 @@ public fun cancel_by_wallet(
 }
 
 /// Consume an owned pending intent without settlement. The maker only.
-public fun cancel(intent: PaymentIntent, ctx: &mut TxContext) {
+///
+/// The event is stamped with the clock, like every other lifecycle event, so
+/// an intent opened and cancelled in one transaction never shows its cancel
+/// before its create.
+public fun cancel(intent: PaymentIntent, clock: &Clock, ctx: &mut TxContext) {
     assert!(tx_context::sender(ctx) == intent.sender, E_UNAUTHORIZED);
     assert!(intent.status == STATUS_PENDING, E_NOT_PENDING);
 
-    emit_canceled(&intent, STATUS_CANCELED, ctx.epoch_timestamp_ms());
+    emit_canceled(&intent, STATUS_CANCELED, clock::timestamp_ms(clock));
     destroy(intent);
 }
 

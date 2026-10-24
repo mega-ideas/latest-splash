@@ -62,7 +62,7 @@ fun create_returns_intent_only_and_settles_nothing() {
         // STATUS_PENDING — creating an intent settles nothing.
         assert_eq!(payment_intent::status(&intent), 0);
 
-        payment_intent::cancel(intent, s.ctx());
+        payment_intent::cancel(intent, &c, s.ctx());
         test_scenario::return_shared(c);
         test_scenario::return_shared(config);
         test_scenario::return_shared(account);
@@ -241,7 +241,7 @@ fun settlement_asset_is_recorded_and_matches() {
             *payment_intent::settlement_asset(&intent),
             splash_core::compliance_config::type_string<USDC>(),
         );
-        payment_intent::cancel(intent, s.ctx());
+        payment_intent::cancel(intent, &c, s.ctx());
         test_scenario::return_shared(c);
         test_scenario::return_shared(config);
         test_scenario::return_shared(account);

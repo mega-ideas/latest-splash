@@ -1247,7 +1247,7 @@ fun a_payment_ref_cannot_reopen_after_cancel() {
     {
         let (mut account, config, c) = take(&s);
         let intent = by_wallet(&mut account, &config, bank(1, &c), &c, s.ctx());
-        payment_intent::cancel(intent, s.ctx());
+        payment_intent::cancel(intent, &c, s.ctx());
         give(account, config, c);
     };
     wallet_opens(&mut s, 1);
@@ -1675,7 +1675,7 @@ fun cancel_stamps_its_event_with_the_clock() {
     s.next_tx(h::wallet());
     let (mut account, config, c) = take(&s);
     let intent = by_wallet(&mut account, &config, bank(1, &c), &c, s.ctx());
-    payment_intent::cancel(intent, s.ctx());
+    payment_intent::cancel(intent, &c, s.ctx());
     let created = event::events_by_type<payment_intent::IntentCreated>();
     let canceled = event::events_by_type<payment_intent::IntentCanceled>();
     assert_eq!(created.length(), 1);
