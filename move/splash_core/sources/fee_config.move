@@ -37,8 +37,11 @@
 /// after the window, when the proposal has lapsed and must be made again. A
 /// new proposal for the same thing replaces the pending one and starts its
 /// own 24 hours, so nothing is ever applied with less notice than it gave,
-/// nor long after it. Every proposal is validated when it is made, and every
-/// proposal and application is an event owners are alerted to.
+/// nor long after it. A pending proposal, lapsed or not, can be withdrawn
+/// (`cancel_schedule_proposal`, `cancel_fee_recipient_proposal`), which
+/// empties its slot and changes nothing in force. Every proposal is
+/// validated when it is made, and every proposal, application and
+/// withdrawal is an event owners are alerted to.
 ///
 /// The one immediate change is a business's discount (`set_discount`), at
 /// most 100 bps. A discount only lowers the rate the schedule gives, never
@@ -195,6 +198,19 @@ public struct FeeRecipientProposed has copy, drop {
 
 public struct FeeRecipientApplied has copy, drop {
     recipient: address,
+}
+
+/// A pending schedule proposal was withdrawn; the schedule in force is
+/// unchanged.
+public struct FeeScheduleProposalCancelled has copy, drop {
+    kind: u8,
+    eta: u64,
+}
+
+/// The pending fee recipient proposal was withdrawn; the recipient in force,
+/// or none, is unchanged.
+public struct FeeRecipientProposalCancelled has copy, drop {
+    eta: u64,
 }
 
 public struct FeeDiscountSet has copy, drop {
@@ -355,8 +371,8 @@ public fun propose_schedule(
 }
 
 /// Put the schedule proposed for `kind` into force, once its notice has run
-/// and before its window closes, seven days later. A lapsed proposal stays
-/// pending and never applies; propose it again.
+/// and before its window closes, seven days later. A lapsed proposal never
+/// applies: propose it again, or withdraw it (`cancel_schedule_proposal`).
 public fun apply_schedule(_: &FeeAdminCap, cfg: &mut FeeConfig, kind: u8, clock: &Clock) {
     assert!(kind < KIND_COUNT, E_UNKNOWN_KIND);
     let slot = &mut cfg.pending_schedules[kind as u64];
@@ -409,6 +425,28 @@ public fun apply_fee_recipient(_: &FeeAdminCap, cfg: &mut FeeConfig, clock: &Clo
     let PendingRecipient { recipient, eta_ms: _ } = cfg.pending_recipient.extract();
     cfg.fee_recipient = option::some(recipient);
     event::emit(FeeRecipientApplied { recipient });
+}
+
+// ─── Withdrawing a proposal ────────────────────────────────────────────────
+
+/// Withdraw the schedule proposal pending for `kind`, lapsed or not. It
+/// empties the slot and nothing else: the schedule in force is unchanged,
+/// so this needs no notice. Aborts if nothing is pending for the kind.
+public fun cancel_schedule_proposal(_: &FeeAdminCap, cfg: &mut FeeConfig, kind: u8) {
+    assert!(kind < KIND_COUNT, E_UNKNOWN_KIND);
+    let slot = &mut cfg.pending_schedules[kind as u64];
+    assert!(slot.is_some(), E_NO_FEE_PROPOSAL);
+    let PendingSchedule { schedule: _, eta_ms } = slot.extract();
+    event::emit(FeeScheduleProposalCancelled { kind, eta: eta_ms });
+}
+
+/// Withdraw the pending fee recipient proposal, lapsed or not. The
+/// recipient in force, or none while the fees are off, is unchanged.
+/// Aborts if nothing is pending.
+public fun cancel_fee_recipient_proposal(_: &FeeAdminCap, cfg: &mut FeeConfig) {
+    assert!(cfg.pending_recipient.is_some(), E_NO_FEE_PROPOSAL);
+    let PendingRecipient { recipient: _, eta_ms } = cfg.pending_recipient.extract();
+    event::emit(FeeRecipientProposalCancelled { eta: eta_ms });
 }
 
 // ─── The one immediate change: a discount ──────────────────────────────────
@@ -595,6 +633,18 @@ public fun unpack_fee_recipient_proposed_for_testing(e: FeeRecipientProposed): (
 public fun unpack_fee_recipient_applied_for_testing(e: FeeRecipientApplied): address {
     let FeeRecipientApplied { recipient } = e;
     recipient
+}
+
+#[test_only]
+public fun unpack_fee_schedule_proposal_cancelled_for_testing(e: FeeScheduleProposalCancelled): (u8, u64) {
+    let FeeScheduleProposalCancelled { kind, eta } = e;
+    (kind, eta)
+}
+
+#[test_only]
+public fun unpack_fee_recipient_proposal_cancelled_for_testing(e: FeeRecipientProposalCancelled): u64 {
+    let FeeRecipientProposalCancelled { eta } = e;
+    eta
 }
 
 #[test_only]
