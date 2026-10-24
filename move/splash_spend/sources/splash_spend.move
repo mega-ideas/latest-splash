@@ -21,11 +21,14 @@
 ///
 /// Scheduled payments and batches run later under Splash's KMS operator, with
 /// its own tightly capped allowance. The operator cannot open an intent, and
-/// cannot pay one without an approval naming it as the payer: an owner's
-/// approval, or the maker's own delegation (for an amount the maker could
-/// have paid alone). So the operator can only ever pay approved intents to
-/// verified recipients within caps, and a stolen operator key can start
-/// nothing.
+/// cannot pay one without an approval the OWNERS gave naming it as the payer:
+/// an owner's `approve_payout`, or the wallet's own `delegate_execution` of an
+/// intent the wallet itself opened. A staff member cannot hand a payment to
+/// the operator: the operator pays from its own allowance, so a staff
+/// delegation would let that person spend past their own rule's caps, expiry
+/// and revocation. So the operator can only ever pay intents the owners
+/// approved, to verified recipients within caps, and a stolen operator key
+/// can start nothing.
 ///
 /// ─── The permits never leave ────────────────────────────────────────────────
 ///
@@ -91,9 +94,8 @@ const E_NOT_STAFF: u64 = 1015;
 const E_MAKER_NOT_A_SPENDER: u64 = 1016;
 /// The coin type is not the policy's asset.
 const E_WRONG_ASSET: u64 = 1017;
-/// Above the threshold, the approval must be an owner's, not a delegation.
-const E_OWNER_APPROVAL_REQUIRED: u64 = 1018;
-/// Only the intent's maker can delegate its execution.
+// 1018 is retired with the staff delegation it refused above the threshold.
+/// The wallet delegates only an intent it opened itself.
 const E_NOT_THE_MAKER: u64 = 1019;
 /// Execution can be delegated only to an executor.
 const E_NOT_AN_EXECUTOR: u64 = 1020;
@@ -105,6 +107,8 @@ const E_WRONG_PAY_PATH: u64 = 1022;
 /// The allowance was not issued for this policy: its name is not this
 /// policy's `allowance_name`.
 const E_ALLOWANCE_NOT_FOR_POLICY: u64 = 1023;
+/// Only the business wallet delegates execution. A staff member cannot.
+const E_ONLY_THE_WALLET_DELEGATES: u64 = 1024;
 
 /// What an allowance accepted under a policy must be named: this prefix and
 /// the policy's id. The allowance module never reads its name, so this module
@@ -120,13 +124,14 @@ public struct SPLASH_SPEND() has drop;
 /// `splash_core`; never returned.
 public struct SettleWitness has drop {}
 
-/// Approval to pay ONE intent: this policy, this intent, this amount, by this
-/// payer, while the account's authority is unchanged and the intent is open.
+/// The owners' approval to pay ONE intent: this policy, this intent, this
+/// amount, by this payer, while the account's authority is unchanged and the
+/// intent is open.
 ///
-/// `owner_approval` is true for an owner's second approval, and for a
-/// delegation by the wallet itself. It is false for a staff maker's
-/// delegation of their own payment to an executor, which authorises the
-/// executor only for an amount the maker could have paid alone.
+/// It is one of two things, and both are the owners' decision: an owner's
+/// second approval (`approve_payout`; the approver is a wallet member), or
+/// the wallet's delegation of an intent it opened itself to an executor
+/// (`delegate_execution`; the approver is the wallet).
 ///
 /// `key` only, so it cannot be wrapped or `public_transfer`red, and consumed
 /// by value when used, so it cannot be replayed.
@@ -137,7 +142,6 @@ public struct PayoutApproval has key {
     amount: u64,
     approver: address,
     payer: address,
-    owner_approval: bool,
     authority_epoch: u64,
     expires_at_ms: u64,
 }
@@ -156,7 +160,6 @@ public struct SpendApproved has copy, drop {
     intent_id: ID,
     approver: address,
     payer: address,
-    owner_approval: bool,
     commitment: vector<u8>,
 }
 
@@ -334,14 +337,16 @@ public fun approve_payout(
     assert!(approver != payment_intent::sender(intent), E_SELF_APPROVAL);
     assert!(approver != payer, E_SELF_APPROVAL);
     assert!(spend_policy::is_spender(policy, payer), E_NOT_A_SPENDER);
-    mint(policy, account, intent, approver, payer, true, clock, ctx);
+    mint(policy, account, intent, approver, payer, clock, ctx);
 }
 
-/// Let an executor run this intent later: the maker's own delegation.
+/// Let an executor run this intent later: the wallet's delegation of an
+/// intent the wallet itself opened.
 ///
-/// A staff maker can delegate a payment they could have made alone; it does
-/// not count as a second approval. A delegation by the wallet (the owners'
-/// quorum, as maker) counts as an owner approval at any amount.
+/// The sender must be the wallet, so the owners' quorum signs it; it counts
+/// as their approval at any amount. A staff member cannot delegate, even a
+/// payment they could make alone: for staff payments the operator needs an
+/// owner's `approve_payout` naming it as the payer.
 public fun delegate_execution(
     policy: &SpendPolicy,
     account: &BusinessAccount,
@@ -350,12 +355,11 @@ public fun delegate_execution(
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
-    let maker = ctx.sender();
-    assert!(maker == payment_intent::sender(intent), E_NOT_THE_MAKER);
-    let by_wallet = maker == spend_policy::wallet(policy);
-    assert!(by_wallet || spend_policy::is_staff(policy, maker), E_MAKER_NOT_A_SPENDER);
+    let wallet = ctx.sender();
+    assert!(wallet == spend_policy::wallet(policy), E_ONLY_THE_WALLET_DELEGATES);
+    assert!(payment_intent::sender(intent) == wallet, E_NOT_THE_MAKER);
     assert!(spend_policy::is_executor(policy, executor), E_NOT_AN_EXECUTOR);
-    mint(policy, account, intent, maker, executor, by_wallet, clock, ctx);
+    mint(policy, account, intent, wallet, executor, clock, ctx);
 }
 
 fun mint(
@@ -364,7 +368,6 @@ fun mint(
     intent: &PaymentIntent,
     approver: address,
     payer: address,
-    owner_approval: bool,
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
@@ -380,7 +383,6 @@ fun mint(
         amount: payment_intent::amount_usd(intent),
         approver,
         payer,
-        owner_approval,
         authority_epoch: business_account::authority_epoch(account),
         expires_at_ms: payment_intent::expires_at(intent),
     };
@@ -390,7 +392,6 @@ fun mint(
         intent_id: object::id(intent),
         approver,
         payer,
-        owner_approval,
         commitment: payment_intent::commitment(intent),
     });
     transfer::transfer(approval, payer);
@@ -405,7 +406,6 @@ public fun discard_approval(approval: PayoutApproval) {
         amount: _,
         approver: _,
         payer: _,
-        owner_approval: _,
         authority_epoch: _,
         expires_at_ms: _,
     } = approval;
@@ -517,18 +517,19 @@ fun draw<C>(
     assert_within_limits(policy, amount, payer);
     if (!by_wallet) assert_within_limits(policy, amount, maker);
 
-    // Approvals. Above the threshold, an owner's. For an executor, always one.
-    let needs_owner = amount > spend_policy::second_approval_threshold(policy);
-    let needs_any = needs_owner || spend_policy::is_executor(policy, payer);
+    // Approvals: the owners', above the threshold and for an executor always.
+    // Every approval is the owners' (an owner's, or the wallet's delegation),
+    // and any approval passed must match and is consumed.
+    let needs_approval =
+        amount > spend_policy::second_approval_threshold(policy) || spend_policy::is_executor(policy, payer);
     let approval_id = if (approval.is_some()) {
         let approval = approval.destroy_some();
         let id = object::id(&approval);
-        let owner_approval = consume(approval, policy, account, intent, payer, clock);
-        assert!(!needs_owner || owner_approval, E_OWNER_APPROVAL_REQUIRED);
+        consume(approval, policy, account, intent, payer, clock);
         option::some(id)
     } else {
         approval.destroy_none();
-        assert!(!needs_any, E_APPROVAL_REQUIRED);
+        assert!(!needs_approval, E_APPROVAL_REQUIRED);
         option::none()
     };
 
@@ -553,8 +554,7 @@ fun draw<C>(
     funds
 }
 
-/// Check an approval against this payment and consume it. Returns whether it
-/// was an owner approval.
+/// Check an approval against this payment and consume it.
 fun consume(
     approval: PayoutApproval,
     policy: &SpendPolicy,
@@ -562,7 +562,7 @@ fun consume(
     intent: &PaymentIntent,
     payer: address,
     clock: &Clock,
-): bool {
+) {
     let PayoutApproval {
         id,
         policy: policy_id,
@@ -570,7 +570,6 @@ fun consume(
         amount,
         approver,
         payer: named_payer,
-        owner_approval,
         authority_epoch,
         expires_at_ms,
     } = approval;
@@ -580,23 +579,22 @@ fun consume(
     assert!(named_payer == payer, E_APPROVAL_MISMATCH);
     assert!(authority_epoch == business_account::authority_epoch(account), E_STALE_APPROVAL);
     assert!(clock.timestamp_ms() < expires_at_ms, E_APPROVAL_EXPIRED);
-    // Checked again at use, not trusted from minting.
+    // Who approved, checked again at use, not trusted from minting.
     let maker = payment_intent::sender(intent);
     if (approver == spend_policy::wallet(policy)) {
-        // The wallet delegated its own intent: the quorum itself approved.
-        assert!(owner_approval && maker == approver, E_APPROVAL_MISMATCH);
-    } else if (owner_approval) {
+        // The wallet delegated an intent it opened itself to an executor:
+        // the owners' quorum approved.
+        assert!(maker == approver, E_NOT_THE_MAKER);
+        assert!(spend_policy::is_executor(policy, payer), E_NOT_AN_EXECUTOR);
+    } else {
+        // An owner's second approval: a wallet member, neither the maker nor
+        // the payer.
         assert!(spend_policy::is_owner(policy, approver), E_NOT_AN_OWNER);
         assert!(approver != payer && approver != maker, E_SELF_APPROVAL);
-    } else {
-        // A staff maker's delegation to an executor.
-        assert!(approver == maker && spend_policy::is_staff(policy, maker), E_NOT_THE_MAKER);
-        assert!(spend_policy::is_executor(policy, payer), E_NOT_AN_EXECUTOR);
     };
 
     event::emit(SpendApprovalConsumed { approval_id: id.to_inner(), policy_id, intent_id, approver });
     id.delete();
-    owner_approval
 }
 
 /// A Sui destination is verified for this kind: a bank beneficiary bound to
@@ -644,5 +642,4 @@ public fun approval_intent(a: &PayoutApproval): ID { a.intent }
 public fun approval_amount(a: &PayoutApproval): u64 { a.amount }
 public fun approval_approver(a: &PayoutApproval): address { a.approver }
 public fun approval_payer(a: &PayoutApproval): address { a.payer }
-public fun approval_is_owner_approval(a: &PayoutApproval): bool { a.owner_approval }
 public fun approval_expires_at_ms(a: &PayoutApproval): u64 { a.expires_at_ms }

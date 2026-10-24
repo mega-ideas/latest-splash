@@ -377,9 +377,10 @@ fun approve(s: &mut Scenario, fx: &Fx, owner: address, intent: ID, payer: addres
     ts::return_shared(policy);
 }
 
-/// `maker` delegates the execution of `intent` to `executor`.
-fun delegate(s: &mut Scenario, fx: &Fx, maker: address, intent: ID, executor: address) {
-    s.next_tx(maker);
+/// `sender` delegates the execution of `intent` to `executor`. Only the
+/// wallet can, and only for an intent it opened.
+fun delegate(s: &mut Scenario, fx: &Fx, sender: address, intent: ID, executor: address) {
+    s.next_tx(sender);
     let policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
     let account = s.take_shared_by_id<BusinessAccount>(fx.account);
     let intent = s.take_shared_by_id<PaymentIntent>(intent);
@@ -958,7 +959,6 @@ fun above_the_threshold_with_an_owner_approval_passes() {
         assert_eq!(splash_spend::approval_amount(&approval), amount);
         assert_eq!(splash_spend::approval_approver(&approval), h::owner_2());
         assert_eq!(splash_spend::approval_payer(&approval), STAFF);
-        assert!(splash_spend::approval_is_owner_approval(&approval));
         // It carries the intent's expiry: opened at day 2, for one day.
         assert_eq!(splash_spend::approval_expires_at_ms(&approval), 2 * h::day() + INTENT_LIFE);
         pay_in_tx(&mut s, fx.account, fx.policy, fx.staff, intent_id, option::some(approval));
@@ -1486,7 +1486,7 @@ fun the_payer_cannot_approve_their_own_payment() {
 }
 
 #[test]
-#[expected_failure(abort_code = 1024, location = splash_spend)]
+#[expected_failure(abort_code = splash_spend::E_ONLY_THE_WALLET_DELEGATES)]
 /// An owner who opened an intent above the threshold cannot get round the
 /// four-eyes rule by delegating it to the executor: an owner who is staff
 /// opens as staff, and staff cannot delegate at all.
@@ -1736,7 +1736,7 @@ fun the_executor_cannot_pay_a_wallet_intent_without_an_approval() {
 }
 
 #[test]
-#[expected_failure(abort_code = 1024, location = splash_spend)]
+#[expected_failure(abort_code = splash_spend::E_ONLY_THE_WALLET_DELEGATES)]
 /// Review A3: a staff maker cannot hand their own payment to the executor,
 /// even one they could have made alone. The executor pays from its own
 /// allowance, so a staff delegation would let the staff member spend past
@@ -1785,7 +1785,7 @@ fun a_staff_member_cannot_pay_past_their_own_lifetime_cap() {
 }
 
 #[test]
-#[expected_failure(abort_code = 1024, location = splash_spend)]
+#[expected_failure(abort_code = splash_spend::E_ONLY_THE_WALLET_DELEGATES)]
 /// Review A3, the reviewer's proof: with its own rule used up, TINY opened
 /// another payment and handed it to the executor, which paid it from ITS
 /// allowance, five times over. TINY's rule was never charged. Now the
@@ -1803,7 +1803,7 @@ fun a_staff_member_cannot_pay_past_their_own_cap_through_the_executor() {
 }
 
 #[test]
-#[expected_failure(abort_code = 1024, location = splash_spend)]
+#[expected_failure(abort_code = splash_spend::E_ONLY_THE_WALLET_DELEGATES)]
 /// Review A3: the owners revoke JUNIOR's rule (D2's "revoke the allowance"),
 /// but JUNIOR is still listed as staff. JUNIOR must not keep paying by
 /// handing each payment to the executor.
@@ -1832,18 +1832,6 @@ fun a_staff_member_whose_rule_is_revoked_cannot_pay_through_the_executor() {
 }
 
 #[test]
-#[expected_failure(abort_code = splash_spend::E_OWNER_APPROVAL_REQUIRED)]
-/// Above the threshold, the maker's delegation is not enough: the executor
-/// needs an owner's approval.
-fun the_executor_cannot_pay_above_the_threshold_with_only_a_delegation() {
-    let (mut s, fx) = setup();
-    let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, THRESHOLD + 1);
-    delegate(&mut s, &fx, STAFF, intent, EXECUTOR);
-    pay(&mut s, &fx, EXECUTOR, fx.executor, intent, true);
-    s.end();
-}
-
-#[test]
 /// With an owner's approval naming it, the executor pays above the
 /// threshold.
 fun the_executor_pays_above_the_threshold_with_an_owner_approval() {
@@ -1856,25 +1844,57 @@ fun the_executor_pays_above_the_threshold_with_an_owner_approval() {
 }
 
 #[test]
-/// A delegation from the wallet counts as an owner approval: the owners'
-/// quorum opened the intent and handed it to the executor, at any amount.
-fun the_wallets_delegation_counts_as_an_owner_approval() {
+/// A staff member's payment reaches the executor only through an owner's
+/// approval, at any amount. The executor's own allowance is charged, by
+/// exactly the payment, and the maker's is not touched: the owners approved
+/// this one payment, so it does not count against the maker's rule.
+fun the_executor_pays_a_staff_intent_below_the_threshold_with_an_owner_approval() {
+    let (mut s, fx) = setup();
+    let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    approve(&mut s, &fx, h::owner_3(), intent, EXECUTOR);
+    pay(&mut s, &fx, EXECUTOR, fx.executor, intent, true);
+    assert_eq!(coin_received(&mut s, SUPPLIER), PAY);
+    assert_eq!(alw_spend(&mut s, fx.executor), PAY as u256);
+    assert_eq!(alw_spend(&mut s, fx.staff), 0);
+    s.end();
+}
+
+#[test]
+/// The wallet's delegation of an intent it opened itself is the owners'
+/// approval: the quorum opened the intent and handed it to the executor, at
+/// any amount. The approval names the wallet as approver and the executor
+/// as payer.
+fun the_wallets_delegation_of_its_own_intent_pays_at_any_amount() {
     let (mut s, fx) = setup();
     let intent = open_by_wallet(&mut s, &fx, 1, payment_intent::kind_wallet(), SUPPLIER, THRESHOLD + 1);
     delegate(&mut s, &fx, h::wallet(), intent, EXECUTOR);
     s.next_tx(EXECUTOR);
     {
         let approval = s.take_from_sender<PayoutApproval>();
-        assert!(splash_spend::approval_is_owner_approval(&approval));
         assert_eq!(splash_spend::approval_approver(&approval), h::wallet());
+        assert_eq!(splash_spend::approval_payer(&approval), EXECUTOR);
         pay_in_tx(&mut s, fx.account, fx.policy, fx.executor, intent, option::some(approval));
     };
+    s.next_tx(EXECUTOR);
+    assert!(ts::ids_for_address<PayoutApproval>(EXECUTOR).is_empty());
     assert_eq!(coin_received(&mut s, SUPPLIER), THRESHOLD + 1);
     s.end();
 }
 
 #[test]
-#[expected_failure(abort_code = 1024, location = splash_spend)]
+#[expected_failure(abort_code = splash_spend::E_NOT_THE_MAKER)]
+/// The wallet delegates only what it opened itself. A staff member's intent
+/// reaches the executor through an owner's approval, which is four-eyes and
+/// names the payment, not through the wallet's delegation.
+fun the_wallet_cannot_delegate_an_intent_staff_opened() {
+    let (mut s, fx) = setup();
+    let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    delegate(&mut s, &fx, h::wallet(), intent, EXECUTOR);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = splash_spend::E_ONLY_THE_WALLET_DELEGATES)]
 /// Only the wallet delegates. Another staff member cannot delegate an
 /// intent either.
 fun another_staff_member_cannot_delegate_an_intent() {
@@ -1885,7 +1905,7 @@ fun another_staff_member_cannot_delegate_an_intent() {
 }
 
 #[test]
-#[expected_failure(abort_code = 1024, location = splash_spend)]
+#[expected_failure(abort_code = splash_spend::E_ONLY_THE_WALLET_DELEGATES)]
 /// Nor can staff delegate an intent the wallet opened, which would turn a
 /// staff key into the owners' approval.
 fun staff_cannot_delegate_an_intent_the_wallet_opened() {
@@ -1897,11 +1917,11 @@ fun staff_cannot_delegate_an_intent_the_wallet_opened() {
 
 #[test]
 #[expected_failure(abort_code = splash_spend::E_NOT_AN_EXECUTOR)]
-/// A delegation goes to an executor only, not to another staff member.
+/// A delegation goes to an executor only, not to a staff member.
 fun delegating_to_a_staff_member_aborts() {
     let (mut s, fx) = setup();
-    let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
-    delegate(&mut s, &fx, STAFF, intent, JUNIOR);
+    let intent = open_by_wallet(&mut s, &fx, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    delegate(&mut s, &fx, h::wallet(), intent, JUNIOR);
     s.end();
 }
 
@@ -1910,8 +1930,8 @@ fun delegating_to_a_staff_member_aborts() {
 /// And not to an address off the policy.
 fun delegating_to_a_stranger_aborts() {
     let (mut s, fx) = setup();
-    let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
-    delegate(&mut s, &fx, STAFF, intent, STRANGER);
+    let intent = open_by_wallet(&mut s, &fx, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    delegate(&mut s, &fx, h::wallet(), intent, STRANGER);
     s.end();
 }
 
@@ -1933,11 +1953,12 @@ fun removing_the_maker_stops_another_spender_paying_their_intent() {
 
 #[test]
 #[expected_failure(abort_code = splash_spend::E_MAKER_NOT_A_SPENDER)]
-/// Including through a delegation the maker gave before being removed.
-fun removing_the_maker_kills_their_delegation_to_the_executor() {
+/// Including through an owner's approval naming the executor, given before
+/// the maker was removed.
+fun removing_the_maker_kills_an_approval_naming_the_executor() {
     let (mut s, fx) = setup();
     let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
-    delegate(&mut s, &fx, STAFF, intent, EXECUTOR);
+    approve(&mut s, &fx, h::owner_2(), intent, EXECUTOR);
     let mut p = wallet_policy(&mut s, &fx);
     p.remove_spender(STAFF, s.ctx());
     ts::return_shared(p);
