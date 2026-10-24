@@ -157,6 +157,32 @@ test('the quote says which bound set the fee: the rate, the minimum, the maximum
   assert.equal(free.bps, 0n);
 });
 
+test('the breakdown labels the bound that set the fee, not the tier rate it overrode (the A1 review)', () => {
+  // The review rendered a 10 USDC wallet payment as "0.02% · capped at the 1%
+  // ceiling" beside a 0.10 USDC fee: a 0.02% rate cannot be capped at 1%. The
+  // 0.25 USDC minimum set the fee, and the 1% ceiling then lowered it.
+  const line = (kind, principalMinor) =>
+    feeBreakdownRows(feeQuoteToWire(buildFeeQuote({ kind, principalMinor, state: ON })))[0];
+
+  const ceiling = line(FEE_KIND.WALLET, 10_000_000n);
+  assert.equal(ceiling.amount, '0.10 USDC');
+  assert.equal(ceiling.detail, 'Sui wallet · Any amount · 1% ceiling, lower than the minimum');
+  assert.doesNotMatch(ceiling.detail, /0\.02%/, 'the tier rate did not set this fee');
+
+  const minimum = line(FEE_KIND.WALLET, 25_000_000n);
+  assert.equal(minimum.amount, '0.25 USDC');
+  assert.equal(minimum.detail, 'Sui wallet · Any amount · minimum 0.25 USDC');
+
+  const rate = line(FEE_KIND.WALLET, 10_000_000_000n);
+  assert.equal(rate.amount, '2.00 USDC');
+  assert.equal(rate.detail, 'Sui wallet · Any amount · 0.02%');
+
+  const maximum = line(FEE_KIND.WALLET, 1_000_000_000_000n);
+  assert.equal(maximum.amount, '5.00 USDC');
+  assert.equal(maximum.detail, 'Sui wallet · Any amount · maximum 5 USDC');
+  assert.doesNotMatch(maximum.detail, /0\.02%/, 'the tier rate did not set this fee');
+});
+
 test('a discount lowers the rate the quote shows, as it lowers the fee', () => {
   const q = buildFeeQuote({ kind: FEE_KIND.BANK_PAYOUT, principalMinor: 5_000_000_000n, discountBps: 10, state: ON });
   assert.equal(q.splashFee.bps, 10n);
