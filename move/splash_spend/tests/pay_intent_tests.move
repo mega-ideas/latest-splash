@@ -3396,11 +3396,44 @@ fun the_executor_still_needs_an_approval_inside_its_total() {
     s.end();
 }
 
+/// The wallet removes STAFF and adds them back with `per_payment_max`: the
+/// only way to change a spender's limit or role.
+fun re_add_staff(s: &mut Scenario, fx: &Fx, per_payment_max: u64) {
+    let mut p = wallet_policy(s, fx);
+    let account = s.take_shared_by_id<BusinessAccount>(fx.account);
+    p.remove_spender(STAFF, s.ctx());
+    p.add_spender(&account, STAFF, spend_policy::role_staff(), per_payment_max, s.ctx());
+    ts::return_shared(account);
+    ts::return_shared(p);
+}
+
 #[test]
-/// Removing a spender ends their grant; the wallet adding them back is a new
-/// one. What they paid under the old grant no longer counts, while they are
-/// off the policy or after they return.
-fun a_removed_and_re_added_spender_starts_a_new_total() {
+#[expected_failure(abort_code = splash_spend::E_APPROVAL_REQUIRED)]
+/// Review finding (MEDIUM): the owners tighten a staff member's limit a
+/// minute after they paid one unit under the threshold. Removing them and
+/// adding them back is the only way to change a limit, and it must not hand
+/// them a fresh threshold's room: two minutes after the first part, the
+/// second part to the same recipient still needs an owner's approval.
+fun tightening_a_spenders_limit_keeps_their_running_total() {
+    let (mut s, fx) = setup();
+    let first = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, UNDER);
+    pay(&mut s, &fx, STAFF, fx.staff, first, false);
+    advance(&mut s, 60_000);
+    re_add_staff(&mut s, &fx, THRESHOLD);
+    advance(&mut s, 60_000);
+    assert_eq!(total_paid(&mut s, &fx, STAFF, payment_intent::kind_wallet(), SUPPLIER), UNDER);
+    let second = open(&mut s, &fx, STAFF, 2, payment_intent::kind_wallet(), SUPPLIER, UNDER);
+    pay(&mut s, &fx, STAFF, fx.staff, second, false);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = splash_spend::E_APPROVAL_REQUIRED)]
+/// A running total is what an address has paid a recipient in the window,
+/// whatever happens to its grant. It still shows while the spender is off
+/// the policy, and still counts once the wallet adds them back inside the
+/// window, so the second half of a split payment needs an approval.
+fun a_removed_and_re_added_spender_keeps_their_total() {
     let (mut s, fx) = setup();
     let first = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, UNDER);
     pay(&mut s, &fx, STAFF, fx.staff, first, false);
@@ -3409,7 +3442,7 @@ fun a_removed_and_re_added_spender_starts_a_new_total() {
         p.remove_spender(STAFF, s.ctx());
         ts::return_shared(p);
     };
-    assert_eq!(total_paid(&mut s, &fx, STAFF, payment_intent::kind_wallet(), SUPPLIER), 0);
+    assert_eq!(total_paid(&mut s, &fx, STAFF, payment_intent::kind_wallet(), SUPPLIER), UNDER);
     {
         let mut p = wallet_policy(&mut s, &fx);
         let account = s.take_shared_by_id<BusinessAccount>(fx.account);
@@ -3417,10 +3450,27 @@ fun a_removed_and_re_added_spender_starts_a_new_total() {
         ts::return_shared(account);
         ts::return_shared(p);
     };
-    assert_eq!(total_paid(&mut s, &fx, STAFF, payment_intent::kind_wallet(), SUPPLIER), 0);
+    assert_eq!(total_paid(&mut s, &fx, STAFF, payment_intent::kind_wallet(), SUPPLIER), UNDER);
     let second = open(&mut s, &fx, STAFF, 2, payment_intent::kind_wallet(), SUPPLIER, UNDER);
     pay(&mut s, &fx, STAFF, fx.staff, second, false);
-    assert_eq!(total_paid(&mut s, &fx, STAFF, payment_intent::kind_wallet(), SUPPLIER), UNDER);
+    s.end();
+}
+
+#[test]
+/// With the owner's approval the second part pays, and it adds to the
+/// window that started before the spender was re-added.
+fun a_re_added_spenders_approved_payment_adds_to_the_same_window() {
+    let (mut s, fx) = setup();
+    let start = now(&mut s);
+    let first = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, UNDER);
+    pay(&mut s, &fx, STAFF, fx.staff, first, false);
+    advance(&mut s, 60_000);
+    re_add_staff(&mut s, &fx, STAFF_MAX);
+    let second = open(&mut s, &fx, STAFF, 2, payment_intent::kind_wallet(), SUPPLIER, UNDER);
+    approve(&mut s, &fx, h::owner_2(), second, STAFF);
+    pay(&mut s, &fx, STAFF, fx.staff, second, true);
+    assert_eq!(total_paid(&mut s, &fx, STAFF, payment_intent::kind_wallet(), SUPPLIER), 2 * UNDER);
+    assert_eq!(window_start(&mut s, &fx), option::some(start));
     s.end();
 }
 
@@ -3456,6 +3506,75 @@ fun a_shorter_window_lapses_sooner() {
     s.end();
 }
 
+/// When the window counted by `running_total` ends, if there is one.
+fun window_end(s: &mut Scenario, fx: &Fx): Option<u64> {
+    s.next_tx(STRANGER);
+    let policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
+    let c = s.take_shared<Clock>();
+    let end = spend_policy::running_window_end_ms(
+        &policy,
+        STAFF,
+        payment_intent::kind_wallet(),
+        SUPPLIER,
+        vector[],
+        c.timestamp_ms(),
+    );
+    ts::return_shared(c);
+    ts::return_shared(policy);
+    end
+}
+
+#[test]
+/// Review finding (LOW): a window's end is fixed at its first payment, at
+/// the window length then in force. It ends a day after the first part,
+/// even when the wallet lengthens the window in between.
+fun a_windows_end_is_fixed_at_its_first_payment() {
+    let (mut s, fx) = setup();
+    let start = now(&mut s);
+    let first = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, UNDER);
+    pay(&mut s, &fx, STAFF, fx.staff, first, false);
+    assert_eq!(window_end(&mut s, &fx), option::some(start + spend_policy::default_running_window_ms()));
+    set_window(&mut s, &fx, 2 * spend_policy::default_running_window_ms());
+    assert_eq!(window_end(&mut s, &fx), option::some(start + spend_policy::default_running_window_ms()));
+    advance(&mut s, spend_policy::default_running_window_ms());
+    assert_eq!(window_end(&mut s, &fx), option::none());
+    let second = open(&mut s, &fx, STAFF, 2, payment_intent::kind_wallet(), SUPPLIER, UNDER);
+    pay(&mut s, &fx, STAFF, fx.staff, second, false);
+    s.end();
+}
+
+#[test]
+/// Review finding (LOW): lengthening the window does not bring back a total
+/// that already lapsed. A day and a millisecond after the first part, the
+/// wallet doubles the window, and the second part still pays alone.
+fun lengthening_the_window_does_not_revive_a_lapsed_total() {
+    let (mut s, fx) = setup();
+    let first = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, UNDER);
+    pay(&mut s, &fx, STAFF, fx.staff, first, false);
+    advance(&mut s, spend_policy::default_running_window_ms() + 1);
+    assert_eq!(total_paid(&mut s, &fx, STAFF, payment_intent::kind_wallet(), SUPPLIER), 0);
+    set_window(&mut s, &fx, 2 * spend_policy::default_running_window_ms());
+    assert_eq!(total_paid(&mut s, &fx, STAFF, payment_intent::kind_wallet(), SUPPLIER), 0);
+    let second = open(&mut s, &fx, STAFF, 2, payment_intent::kind_wallet(), SUPPLIER, UNDER);
+    pay(&mut s, &fx, STAFF, fx.staff, second, false);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = splash_spend::E_APPROVAL_REQUIRED)]
+/// Nor does shortening it cut a window already open: set to an hour after
+/// the first part, the day it started with still counts two hours on.
+fun shortening_the_window_does_not_cut_an_open_one() {
+    let (mut s, fx) = setup();
+    let first = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, UNDER);
+    pay(&mut s, &fx, STAFF, fx.staff, first, false);
+    set_window(&mut s, &fx, spend_policy::min_running_window_ms());
+    advance(&mut s, 2 * spend_policy::min_running_window_ms());
+    let second = open(&mut s, &fx, STAFF, 2, payment_intent::kind_wallet(), SUPPLIER, UNDER);
+    pay(&mut s, &fx, STAFF, fx.staff, second, false);
+    s.end();
+}
+
 #[test]
 #[expected_failure(abort_code = splash_spend::E_APPROVAL_REQUIRED)]
 /// A longer window keeps counting past a day.
@@ -3486,6 +3605,129 @@ fun approved_parts_still_stop_at_the_allowance_cap() {
         advance(&mut s, spend_policy::default_running_window_ms());
         n = n + 1;
     };
+    s.end();
+}
+
+// ═══ Pruning running totals (review finding, LOW) ════════════════════════════
+
+/// How many running-total entries the policy holds.
+fun entries(s: &mut Scenario, fx: &Fx): u64 {
+    s.next_tx(STRANGER);
+    let policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
+    let n = spend_policy::running_total_count(&policy);
+    ts::return_shared(policy);
+    n
+}
+
+/// `sender` prunes up to `max_entries` expired entries. Returns how many went.
+fun prune(s: &mut Scenario, fx: &Fx, sender: address, max_entries: u64): u64 {
+    s.next_tx(sender);
+    let mut policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
+    let c = s.take_shared<Clock>();
+    let n = policy.prune_running_totals(max_entries, &c, s.ctx());
+    ts::return_shared(c);
+    ts::return_shared(policy);
+    n
+}
+
+#[test]
+/// An expired entry is replaced in place when its payer pays its recipient
+/// again: the table does not grow.
+fun an_expired_entry_is_replaced_when_touched() {
+    let (mut s, fx) = setup();
+    let first = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    pay(&mut s, &fx, STAFF, fx.staff, first, false);
+    assert_eq!(entries(&mut s, &fx), 1);
+    advance(&mut s, spend_policy::default_running_window_ms());
+    let second = open(&mut s, &fx, STAFF, 2, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    pay(&mut s, &fx, STAFF, fx.staff, second, false);
+    assert_eq!(entries(&mut s, &fx), 1);
+    assert_eq!(total_paid(&mut s, &fx, STAFF, payment_intent::kind_wallet(), SUPPLIER), PAY);
+    s.end();
+}
+
+#[test]
+/// Every payment also removes expired entries from the front of the list,
+/// up to two: entries for other recipients whose windows ended go without
+/// anyone asking.
+fun a_payment_prunes_expired_entries_for_other_recipients() {
+    let (mut s, fx) = setup();
+    let a = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    let b = open(&mut s, &fx, STAFF, 2, payment_intent::kind_wallet(), OTHER_PARTNER, PAY);
+    let c = open(&mut s, &fx, JUNIOR, 3, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    pay(&mut s, &fx, STAFF, fx.staff, a, false);
+    pay(&mut s, &fx, STAFF, fx.staff, b, false);
+    pay(&mut s, &fx, JUNIOR, fx.junior, c, false);
+    assert_eq!(entries(&mut s, &fx), 3);
+    advance(&mut s, spend_policy::default_running_window_ms());
+    let d = open(&mut s, &fx, STAFF, 4, payment_intent::kind_wallet(), BUSINESS, PAY);
+    pay(&mut s, &fx, STAFF, fx.staff, d, false);
+    // The new entry, and the one expired entry left behind the two pruned.
+    assert_eq!(entries(&mut s, &fx), 2);
+    s.end();
+}
+
+#[test]
+/// The wallet prunes expired entries itself, up to the number it asks for,
+/// and is told how many went.
+fun the_wallet_prunes_expired_entries() {
+    let (mut s, fx) = setup();
+    let a = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    let b = open(&mut s, &fx, STAFF, 2, payment_intent::kind_wallet(), OTHER_PARTNER, PAY);
+    let c = open(&mut s, &fx, STAFF, 3, payment_intent::kind_wallet(), BUSINESS, PAY);
+    pay(&mut s, &fx, STAFF, fx.staff, a, false);
+    pay(&mut s, &fx, STAFF, fx.staff, b, false);
+    pay(&mut s, &fx, STAFF, fx.staff, c, false);
+    advance(&mut s, spend_policy::default_running_window_ms());
+    assert_eq!(prune(&mut s, &fx, h::wallet(), 2), 2);
+    assert_eq!(entries(&mut s, &fx), 1);
+    assert_eq!(prune(&mut s, &fx, h::wallet(), 10), 1);
+    assert_eq!(entries(&mut s, &fx), 0);
+    assert_eq!(prune(&mut s, &fx, h::wallet(), 10), 0);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = splash_spend::E_APPROVAL_REQUIRED)]
+/// Pruning never removes a live entry, so it can never loosen a total: the
+/// wallet prunes right after the first part, and the second still needs an
+/// approval.
+fun pruning_never_removes_a_live_total() {
+    let (mut s, fx) = setup();
+    let first = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, UNDER);
+    pay(&mut s, &fx, STAFF, fx.staff, first, false);
+    assert_eq!(prune(&mut s, &fx, h::wallet(), 10), 0);
+    assert_eq!(entries(&mut s, &fx), 1);
+    let second = open(&mut s, &fx, STAFF, 2, payment_intent::kind_wallet(), SUPPLIER, UNDER);
+    pay(&mut s, &fx, STAFF, fx.staff, second, false);
+    s.end();
+}
+
+#[test]
+/// A removed spender's total ends with its window, not with the removal,
+/// and is then pruned like any other.
+fun a_removed_spenders_total_is_pruned_once_its_window_ends() {
+    let (mut s, fx) = setup();
+    let first = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    pay(&mut s, &fx, STAFF, fx.staff, first, false);
+    {
+        let mut p = wallet_policy(&mut s, &fx);
+        p.remove_spender(STAFF, s.ctx());
+        ts::return_shared(p);
+    };
+    assert_eq!(prune(&mut s, &fx, h::wallet(), 10), 0);
+    advance(&mut s, spend_policy::default_running_window_ms());
+    assert_eq!(prune(&mut s, &fx, h::wallet(), 10), 1);
+    assert_eq!(entries(&mut s, &fx), 0);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = spend_policy::E_NOT_THE_WALLET)]
+/// Only the wallet prunes.
+fun a_spender_cannot_prune() {
+    let (mut s, fx) = setup();
+    prune(&mut s, &fx, STAFF, 10);
     s.end();
 }
 
