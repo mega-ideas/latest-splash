@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
   ArrowRight,
@@ -21,6 +21,7 @@ import {
   approvalNote,
   businessWalletFrom,
   formatUsdcMinor,
+  ownRequestsNote,
   type HomePaymentRow,
   type HomeSummary,
   type PaymentStatus,
@@ -49,10 +50,17 @@ const KYB_COPY: Record<string, { value: string; status: Status }> = {
   SUSPENDED: { value: 'Suspended. Contact compliance.', status: 'failed' },
 };
 
+/**
+ * The Splash Wallet card. Only `unavailable` (a failed read) offers Try
+ * again: no wallet yet, one being set up, wallets switched off on this
+ * server and no access each stay true until something else changes, and a
+ * retry would only show the same thing.
+ */
 type WalletState =
   | { kind: 'loading' }
   | { kind: 'business'; usdcMinor: string }
-  | { kind: 'none'; passkeyUsdcMinor: string | null }
+  | { kind: 'none' | 'pending' | 'off'; passkeyUsdcMinor: string | null }
+  | { kind: 'no_access' }
   | { kind: 'unavailable' };
 
 function minorFrom(body: unknown): string | null {
@@ -68,16 +76,19 @@ function minorFrom(body: unknown): string | null {
  * own passkey wallet is shown as theirs, never as the business's.
  */
 async function readWallet(): Promise<WalletState> {
+  let kind: 'none' | 'pending' | 'off';
   try {
     const res = await fetch('/api/wallet/business', { cache: 'no-store' });
     const body = await res.json().catch(() => null);
-    const where = businessWalletFrom(res.status, body);
-    if (where.kind === 'error') return { kind: 'unavailable' };
-    if (where.kind === 'address') {
-      const balance = await fetch(`/api/stablecoin/wallet?address=${encodeURIComponent(where.address)}`, { cache: 'no-store' });
+    const source = businessWalletFrom(res.status, body);
+    if (source.kind === 'error') return { kind: 'unavailable' };
+    if (source.kind === 'no_access') return { kind: 'no_access' };
+    if (source.kind === 'address') {
+      const balance = await fetch(`/api/stablecoin/wallet?address=${encodeURIComponent(source.address)}`, { cache: 'no-store' });
       const minor = balance.ok ? minorFrom(await balance.json().catch(() => null)) : null;
       return minor === null ? { kind: 'unavailable' } : { kind: 'business', usdcMinor: minor };
     }
+    kind = source.kind;
   } catch {
     return { kind: 'unavailable' };
   }
@@ -88,7 +99,7 @@ async function readWallet(): Promise<WalletState> {
   } catch {
     /* the business figure is what matters here; the passkey line just stays off */
   }
-  return { kind: 'none', passkeyUsdcMinor };
+  return { kind, passkeyUsdcMinor };
 }
 
 const STATUS_STYLE: Record<PaymentStatus, { label: string; className: string }> = {
@@ -107,14 +118,6 @@ function PaymentPill({ status }: { status: PaymentStatus }) {
   );
 }
 
-function SampleChip() {
-  return (
-    <span className="ml-2 inline-flex rounded-full bg-[#326273]/10 px-2 py-0.5 align-middle text-[12px] font-semibold text-[#1F4452]">
-      Sample
-    </span>
-  );
-}
-
 function FigureSkeleton() {
   return (
     <div aria-hidden="true" className="mt-3 space-y-2">
@@ -124,12 +127,47 @@ function FigureSkeleton() {
   );
 }
 
+/** A figure card whose summary did not load: said aloud, and retryable. */
+function FigureError({ onRetry }: { onRetry: () => void }) {
+  return (
+    <p className="mt-2 flex flex-wrap items-center gap-x-2 text-[13px] font-medium text-[#326273]" role="status">
+      Couldn&rsquo;t load.
+      <button
+        type="button"
+        onClick={onRetry}
+        className="inline-flex min-h-11 items-center gap-1 font-semibold text-[#145d6a] underline decoration-1 underline-offset-2"
+      >
+        <RefreshCw size={13} aria-hidden="true" />
+        Try again
+      </button>
+    </p>
+  );
+}
+
 function Figure({ value, unit }: { value: string; unit?: string }) {
   return (
     <p className="dash-num mt-2 text-[28px] font-extrabold leading-tight tracking-[-0.02em] text-[#0c3e48]">
       {value}
       {unit ? <span className="ml-1.5 text-[13px] font-semibold tracking-normal text-[#326273]">{unit}</span> : null}
     </p>
+  );
+}
+
+/** "Your own passkey wallet holds 12.50 USDC." Theirs, never the business's. */
+function PasskeyLine({ minor }: { minor: string | null }) {
+  if (minor === null) return null;
+  return (
+    <>
+      Your own passkey wallet holds <span className="dash-num font-semibold text-[#1F4452]">{formatUsdcMinor(minor)} USDC</span>.{' '}
+    </>
+  );
+}
+
+function OpenWalletLink() {
+  return (
+    <Link href="/dashboard/wallet" className="font-semibold text-[#145d6a] underline decoration-1 underline-offset-2">
+      Open Wallet
+    </Link>
   );
 }
 
@@ -203,6 +241,19 @@ export default function DashboardHome() {
   }, []);
 
   const note = summary && nowMs !== null ? approvalNote(summary.needsApproval, nowMs) : null;
+  const ownNote = summary ? ownRequestsNote(summary.needsApproval) : null;
+
+  // The soonest approval lapsed while the page was open: fetch the count
+  // again rather than keep counting it. Once per summary, so a page clock
+  // ahead of the server's cannot loop.
+  const refetchedFor = useRef<string | null>(null);
+  const stale = Boolean(note?.stale);
+  useEffect(() => {
+    if (!stale || !summary || refetchedFor.current === summary.generatedAt) return;
+    refetchedFor.current = summary.generatedAt;
+    void loadSummary();
+  }, [stale, summary, loadSummary]);
+
   const kybCopy = kyb ? KYB_COPY[kyb.state] ?? { value: kyb.state, status: 'pending' as Status } : null;
 
   return (
@@ -258,20 +309,36 @@ export default function DashboardHome() {
             <>
               <p className="mt-2 text-lg font-bold text-[#0c3e48]">No business wallet yet</p>
               <p className="mt-1 text-[13px] font-medium text-[#326273]">
-                {wallet.passkeyUsdcMinor !== null ? (
+                <PasskeyLine minor={wallet.passkeyUsdcMinor} />
+                <OpenWalletLink />
+              </p>
+            </>
+          ) : wallet.kind === 'pending' ? (
+            <>
+              <p className="mt-2 text-lg font-bold text-[#0c3e48]">Wallet being set up</p>
+              <p className="mt-1 text-[13px] font-medium text-[#326273]">
+                Waiting for the owners to sign. <PasskeyLine minor={wallet.passkeyUsdcMinor} />
+                <OpenWalletLink />
+              </p>
+            </>
+          ) : wallet.kind === 'off' || wallet.kind === 'no_access' ? (
+            <>
+              <p className="mt-2 text-lg font-bold text-[#0c3e48]">Business wallet not available</p>
+              <p className="mt-1 text-[13px] font-medium text-[#326273]">
+                {wallet.kind === 'off' ? (
                   <>
-                    Your own passkey wallet holds <span className="dash-num font-semibold text-[#1F4452]">{formatUsdcMinor(wallet.passkeyUsdcMinor)} USDC</span>.{' '}
+                    Splash hasn&rsquo;t switched business wallets on for this workspace. <PasskeyLine minor={wallet.passkeyUsdcMinor} />
                   </>
-                ) : null}
-                <Link href="/dashboard/wallet" className="font-semibold text-[#145d6a] underline decoration-1 underline-offset-2">
-                  Open Wallet
-                </Link>
+                ) : (
+                  <>Your membership doesn&rsquo;t cover this business&rsquo;s wallet. Ask an owner. </>
+                )}
+                <OpenWalletLink />
               </p>
             </>
           ) : (
             <>
               <p className="mt-2 text-lg font-bold text-[#0c3e48]">Balance unavailable</p>
-              <p className="mt-1 flex flex-wrap items-center gap-x-2 text-[13px] font-medium text-[#326273]">
+              <p className="mt-1 flex flex-wrap items-center gap-x-2 text-[13px] font-medium text-[#326273]" role="status">
                 We couldn&rsquo;t read it from Sui.
                 <button
                   type="button"
@@ -304,15 +371,16 @@ export default function DashboardHome() {
                   {note.text}
                 </p>
               ) : null}
-              {summary.needsApproval.count > 0 ? (
+              {ownNote ? <p className="mt-1 text-[13px] font-medium text-[#326273]">{ownNote}</p> : null}
+              {summary.needsApproval.count > 0 || ownNote ? (
                 <Link href="/queue" className="mt-2 inline-flex min-h-11 items-center gap-1 text-[13px] font-semibold text-[#145d6a]">
-                  Review approvals
+                  {summary.needsApproval.count > 0 ? 'Review approvals' : 'See your requests'}
                   <ArrowRight size={13} aria-hidden="true" />
                 </Link>
               ) : null}
             </>
           ) : summaryFailed ? (
-            <p className="mt-2 text-[13px] font-medium text-[#326273]">Couldn&rsquo;t load.</p>
+            <FigureError onRetry={() => void loadSummary()} />
           ) : (
             <FigureSkeleton />
           )}
@@ -336,9 +404,14 @@ export default function DashboardHome() {
                   {summary.sentThisMonth.notCounted} paid in another stablecoin {summary.sentThisMonth.notCounted === 1 ? 'is' : 'are'} not counted.
                 </p>
               ) : null}
+              {summary.sentThisMonth.unreadable > 0 ? (
+                <p className="mt-1 text-[12px] font-medium text-[#326273]">
+                  {summary.sentThisMonth.unreadable} with an amount we couldn&rsquo;t read {summary.sentThisMonth.unreadable === 1 ? 'is' : 'are'} not counted.
+                </p>
+              ) : null}
             </>
           ) : summaryFailed ? (
-            <p className="mt-2 text-[13px] font-medium text-[#326273]">Couldn&rsquo;t load.</p>
+            <FigureError onRetry={() => void loadSummary()} />
           ) : (
             <FigureSkeleton />
           )}
@@ -407,10 +480,7 @@ export default function DashboardHome() {
                 {summary.recent.map((row: HomePaymentRow) => (
                   <li key={row.id} className="flex items-start justify-between gap-3 px-4 py-3">
                     <div className="min-w-0">
-                      <p className="truncate text-[14px] font-semibold text-[#1F4452]">
-                        {row.recipient}
-                        {row.sample ? <SampleChip /> : null}
-                      </p>
+                      <p className="truncate text-[14px] font-semibold text-[#1F4452]">{row.recipient}</p>
                       <p className="mt-0.5 text-[12px] text-[#326273]">
                         {row.type} ·{' '}
                         <LocalTime value={row.createdAt} format="date" locale="en-GB" options={{ day: 'numeric', month: 'short' }} />
@@ -439,10 +509,7 @@ export default function DashboardHome() {
                   <tbody>
                     {summary.recent.map((row: HomePaymentRow) => (
                       <tr key={row.id} className="border-b border-[#326273]/6 last:border-b-0">
-                        <td className="px-4 py-2.5 font-medium text-[#1F4452]">
-                          {row.recipient}
-                          {row.sample ? <SampleChip /> : null}
-                        </td>
+                        <td className="px-4 py-2.5 font-medium text-[#1F4452]">{row.recipient}</td>
                         <td className="px-4 py-2.5 text-[#326273]">{row.type}</td>
                         <td className="money px-4 py-2.5 font-medium text-[#1F4452]">{row.amount}</td>
                         <td className="px-4 py-2.5"><PaymentPill status={row.status} /></td>
