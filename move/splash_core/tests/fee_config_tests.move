@@ -733,6 +733,147 @@ fun applying_a_fee_recipient_with_nothing_proposed_aborts() {
     s.end();
 }
 
+// ─── A pending proposal can be withdrawn (the A1 review) ───────────────────
+//
+// Governance can take back a proposal it no longer means to apply, with its
+// own event, instead of leaving it in its slot until a new proposal replaces
+// it. Withdrawing changes nothing in force: it only empties the slot.
+
+#[test]
+/// A withdrawn schedule proposal empties its slot, is evented with the kind
+/// and the eta it had, and leaves the schedule in force and every other
+/// kind's proposal alone.
+fun a_schedule_proposal_is_withdrawn_with_its_own_event() {
+    let mut s = published_fees_on();
+    gov!(&mut s, |cap, cfg, c| {
+        fee_config::propose_schedule(cap, cfg, bank(), vector[U64_MAX], vector[25], 0, U64_MAX, c);
+        fee_config::propose_schedule(cap, cfg, wallet(), vector[U64_MAX], vector[5], 0, U64_MAX, c);
+        c.set_for_testing(DAY + DAY / 2);
+        fee_config::cancel_schedule_proposal(cap, cfg, bank());
+        assert_eq!(fee_config::has_pending_schedule(cfg, bank()), false);
+        assert_eq!(fee_config::has_pending_schedule(cfg, wallet()), true);
+        assert_eq!(fee(cfg, bank(), 5_000 * USD), 10_000_000);
+    });
+    {
+        let cancelled = event::events_by_type<fee_config::FeeScheduleProposalCancelled>();
+        assert_eq!(cancelled.length(), 1);
+        let (kind, eta) = fee_config::unpack_fee_schedule_proposal_cancelled_for_testing(cancelled[0]);
+        assert_eq!(kind, bank());
+        assert_eq!(eta, 2 * DAY);
+    };
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = fee_config::E_NO_FEE_PROPOSAL)]
+/// Once withdrawn, a schedule proposal cannot be applied, even inside the
+/// window it had.
+fun a_withdrawn_schedule_proposal_cannot_apply() {
+    let mut s = published_fees_on();
+    gov!(&mut s, |cap, cfg, c| {
+        fee_config::propose_schedule(cap, cfg, bank(), vector[U64_MAX], vector[25], 0, U64_MAX, c);
+        fee_config::cancel_schedule_proposal(cap, cfg, bank());
+        c.set_for_testing(2 * DAY);
+        fee_config::apply_schedule(cap, cfg, bank(), c);
+    });
+    s.end();
+}
+
+#[test]
+/// A lapsed proposal can be withdrawn too, so it stops showing as pending.
+fun a_lapsed_schedule_proposal_can_be_withdrawn() {
+    let mut s = published_fees_on();
+    gov!(&mut s, |cap, cfg, c| {
+        fee_config::propose_schedule(cap, cfg, bank(), vector[U64_MAX], vector[25], 0, U64_MAX, c);
+        c.set_for_testing(30 * DAY);
+        fee_config::cancel_schedule_proposal(cap, cfg, bank());
+        assert_eq!(fee_config::has_pending_schedule(cfg, bank()), false);
+    });
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = fee_config::E_NO_FEE_PROPOSAL)]
+fun withdrawing_a_schedule_with_nothing_pending_aborts() {
+    let mut s = published();
+    gov!(&mut s, |cap, cfg, _c| {
+        fee_config::cancel_schedule_proposal(cap, cfg, wallet());
+    });
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = fee_config::E_UNKNOWN_KIND)]
+fun withdrawing_a_schedule_of_an_unknown_kind_aborts() {
+    let mut s = published();
+    gov!(&mut s, |cap, cfg, _c| {
+        fee_config::cancel_schedule_proposal(cap, cfg, 5);
+    });
+    s.end();
+}
+
+#[test]
+/// A withdrawn first recipient leaves the fees off, and is evented with the
+/// eta it had.
+fun a_fee_recipient_proposal_is_withdrawn_and_the_fees_stay_off() {
+    let mut s = published();
+    gov!(&mut s, |cap, cfg, c| {
+        propose_finance(cap, cfg, c);
+        c.set_for_testing(2 * DAY);
+        fee_config::cancel_fee_recipient_proposal(cap, cfg);
+        assert_eq!(fee_config::has_pending_recipient(cfg), false);
+        assert_eq!(fee_config::fee_recipient(cfg), option::none());
+        assert_eq!(fee_config::fees_on(cfg), false);
+    });
+    {
+        let cancelled = event::events_by_type<fee_config::FeeRecipientProposalCancelled>();
+        assert_eq!(cancelled.length(), 1);
+        assert_eq!(fee_config::unpack_fee_recipient_proposal_cancelled_for_testing(cancelled[0]), 2 * DAY);
+    };
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = fee_config::E_NO_FEE_PROPOSAL)]
+fun a_withdrawn_fee_recipient_proposal_cannot_apply() {
+    let mut s = published();
+    gov!(&mut s, |cap, cfg, c| {
+        propose_finance(cap, cfg, c);
+        fee_config::cancel_fee_recipient_proposal(cap, cfg);
+        c.set_for_testing(2 * DAY);
+        fee_config::apply_fee_recipient(cap, cfg, c);
+    });
+    s.end();
+}
+
+#[test]
+/// Withdrawing a later recipient change keeps the recipient in force: the
+/// fees stay on, paid where they were.
+fun withdrawing_a_recipient_change_keeps_the_recipient_in_force() {
+    let mut s = published();
+    gov!(&mut s, |cap, cfg, c| {
+        propose_finance(cap, cfg, c);
+        c.set_for_testing(2 * DAY);
+        fee_config::apply_fee_recipient(cap, cfg, c);
+        fee_config::propose_fee_recipient(cap, cfg, finance_keys(), finance_weights(), 3, c);
+        fee_config::cancel_fee_recipient_proposal(cap, cfg);
+        assert_eq!(fee_config::fee_recipient(cfg), option::some(FINANCE));
+        assert_eq!(fee_config::fees_on(cfg), true);
+        assert_eq!(fee_config::has_pending_recipient(cfg), false);
+    });
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = fee_config::E_NO_FEE_PROPOSAL)]
+fun withdrawing_a_fee_recipient_with_nothing_pending_aborts() {
+    let mut s = published();
+    gov!(&mut s, |cap, cfg, _c| {
+        fee_config::cancel_fee_recipient_proposal(cap, cfg);
+    });
+    s.end();
+}
+
 /// Propose a recipient of these members outside a scenario, and return the
 /// pending recipient, for the multisig tests.
 fun try_propose_recipient(keys: vector<vector<u8>>, weights: vector<u8>, threshold: u16): address {

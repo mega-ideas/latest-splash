@@ -178,6 +178,9 @@ test("the fee events carry Splash's own terms, and FeeCharged the fee and nothin
   assert.deepEqual(byName.FeeRecipientProposed, ['recipient', 'eta'], 'FeeRecipientProposed');
   assert.deepEqual(byName.FeeRecipientApplied, ['recipient'], 'FeeRecipientApplied');
   assert.deepEqual(byName.FeeDiscountSet, ['business', 'discount_bps'], 'FeeDiscountSet');
+  // The A1 review: a withdrawn proposal is named by its kind and eta only.
+  assert.deepEqual(byName.FeeScheduleProposalCancelled, ['kind', 'eta'], 'FeeScheduleProposalCancelled');
+  assert.deepEqual(byName.FeeRecipientProposalCancelled, ['eta'], 'FeeRecipientProposalCancelled');
   assert.deepEqual(Object.keys(byName).sort(), Object.keys(byName).filter((n) => n.startsWith('Fee')).sort(), 'fee_config emits only Fee* events');
   // The allowed exceptions are exactly fields these events carry.
   for (const where of Object.keys(ALLOWED)) {
