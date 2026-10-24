@@ -163,7 +163,7 @@ const FEE_WRITTEN =
 const PENDING_FEE_WRITTEN =
   /\.\s*pending_fee_change\s*(?:=(?!=)(?!\s*option\s*::\s*none\s*\(\s*\)\s*;)|\.\s*(?:fill|swap|swap_or_fill|borrow_mut)\s*\()|&\s*mut\s+[\w.]*\.\s*pending_fee_change\b/;
 
-const REGISTRIES =/\b(?:accepted_assets|settlement_apps|bridge_adapters|registry_set_mut)\b/;
+const REGISTRIES = /\b(?:accepted_assets|settlement_apps|bridge_adapters|registry_set_mut)\b/;
 const REGISTRY_ASSIGNED = /\b(?:accepted_assets|settlement_apps|bridge_adapters)\s*=(?!=)|\*\s*registry_set_mut\s*\(/;
 
 const failures = [];
