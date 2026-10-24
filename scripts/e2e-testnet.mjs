@@ -3,12 +3,21 @@
  * e2e-testnet — check a splash_core publish against the chain.
  *
  * The verify step of docs/KEY-CEREMONY-RUNBOOK.md §3.8. It checks the v2 core
- * package only (splash_custody is not on the mainnet path), and that the
- * configured ids, the AnchorCap, the CapRegistry and the ComplianceConfig work
- * together:
+ * package (splash_custody is not on the mainnet path), that the configured
+ * ids, the AnchorCap, the CapRegistry and the ComplianceConfig work together,
+ * and D11's end state around it:
  *
  *   ids      every configured object exists and belongs to this package; the
  *            AnchorCap is held by the operator address.
+ *   end      D11, read from the chain by scripts/v2-end-state.mjs:
+ *            splash_spend (SPLASH_SPEND_PACKAGE_ID) and splash_upgrade_delay
+ *            (SPLASH_UPGRADE_DELAY_PACKAGE_ID) are version 1 with no later
+ *            version, and were published and made immutable in one
+ *            transaction, so no UpgradeCap for them ever outlived the
+ *            publish; core's UpgradeCap is in SPLASH_UPGRADE_WRAPPER_ID, a
+ *            DelayedUpgradeCap of that splash_upgrade_delay, policy additive
+ *            (128), held by SPLASH_GOVERNANCE_ADDRESS. Each id is optional:
+ *            unset, its check is reported skipped, never passed.
  *   abi      every function called takes the parameters the current source
  *            declares, so a package published from older source is named.
  *   peg      peg_monitor::update_peg on the AnchorCap and CapRegistry
@@ -53,6 +62,7 @@ import { newSalt, paymentCommitment, paymentRefCommitment, railCommitment, toHex
 import { SUI_USDC_COIN_TYPE } from '../lib/payments/stablecoin-lane.ts';
 import { SUI_NETWORK, SUI_RPC_URL } from '../lib/sui.ts';
 import { SPLASH_CORE_ABI } from './splash-core-abi.mjs';
+import { checkImmutablePackage, checkUpgradeWrapper, isUpgradeCapFor } from './v2-end-state.mjs';
 
 const env = (k) => (process.env[k] ?? '').trim();
 
@@ -143,6 +153,19 @@ if (recipientFromEnv && !isValidSuiAddress(normalizeSuiAddress(recipientFromEnv)
 }
 // Without one, the simulated payment goes back to the wallet that makes it.
 const RECIPIENT_FROM_ENV = recipientFromEnv ? normalizeSuiAddress(recipientFromEnv) : '';
+
+// D11's end state. Each is optional: unset, its check is reported skipped,
+// never passed. SPLASH_CORE_PACKAGE_ID above is the core's ORIGINAL id, which
+// the wrapper records.
+const SPEND_PACKAGE = objectIdFromEnv('SPLASH_SPEND_PACKAGE_ID', { required: false });
+const DELAY_PACKAGE = objectIdFromEnv('SPLASH_UPGRADE_DELAY_PACKAGE_ID', { required: false });
+const UPGRADE_WRAPPER = objectIdFromEnv('SPLASH_UPGRADE_WRAPPER_ID', { required: false });
+const governanceFromEnv = env('SPLASH_GOVERNANCE_ADDRESS');
+if (governanceFromEnv && !isValidSuiAddress(normalizeSuiAddress(governanceFromEnv))) {
+  stop(`SPLASH_GOVERNANCE_ADDRESS is not a Sui address: ${governanceFromEnv}`);
+}
+// The governance multisig that must hold the wrapper.
+const GOVERNANCE = governanceFromEnv ? normalizeSuiAddress(governanceFromEnv) : '';
 
 // The coin the app settles in (USDC_TYPE), or Circle's USDC on this network
 // when USDC_TYPE is unset or the development stand-in.
@@ -399,7 +422,8 @@ async function checkIds() {
   // so it is checked whether or not the ids are configured. The AdminCap and
   // the TreasuryCap go to the cold multisig (runbook §3.6) and have no
   // break-glass; in v2 the UpgradeCap goes into the splash_upgrade_delay
-  // wrapper (docs/UPGRADE-POLICY.md).
+  // wrapper (docs/UPGRADE-POLICY.md), which checkEndState reads. An
+  // UpgradeCap whose package the node does not return counts as core's.
   await checkNotHeld('AdminCap custody', 'business_account::AdminCap', typeIn('business_account::AdminCap'), 'Move it to the cold multisig (runbook §3.6).');
   await checkNotHeld('TreasuryCap custody', 'business_account::TreasuryCap', typeIn('business_account::TreasuryCap'), 'Move it to the cold multisig (runbook §3.6).');
   await checkNotHeld(
@@ -407,11 +431,35 @@ async function checkIds() {
     'UpgradeCap for this package',
     '0x2::package::UpgradeCap',
     'Wrap it in splash_upgrade_delay under the governance multisig (docs/UPGRADE-POLICY.md).',
-    (o) => typeof o.json?.package === 'string' && normalizeSuiAddress(o.json.package) === PACKAGE,
+    (o) => isUpgradeCapFor(o, PACKAGE),
   );
   if (ADMIN_CAP && (await checkObject('AdminCap', 'SPLASH_ADMIN_CAP_ID', ADMIN_CAP, typeIn('business_account::AdminCap'), { shared: false }))) {
     record('AdminCap', 'PASS', ADMIN_CAP);
   }
+}
+
+/**
+ * D11's end state (scripts/v2-end-state.mjs): splash_spend and
+ * splash_upgrade_delay can never be upgraded, and core's UpgradeCap is in the
+ * canonical wrapper, additive, held by the governance multisig. Reads only.
+ */
+async function checkEndState() {
+  const records = [
+    await checkImmutablePackage(client, { label: 'splash_spend immutable', envKey: 'SPLASH_SPEND_PACKAGE_ID', packageId: SPEND_PACKAGE }),
+    await checkImmutablePackage(client, {
+      label: 'upgrade_delay immutable',
+      envKey: 'SPLASH_UPGRADE_DELAY_PACKAGE_ID',
+      packageId: DELAY_PACKAGE,
+    }),
+    ...(await checkUpgradeWrapper(client, {
+      wrapperId: UPGRADE_WRAPPER,
+      delayPackageId: DELAY_PACKAGE,
+      corePackageId: PACKAGE,
+      governance: GOVERNANCE,
+      operator: OPERATOR,
+    })),
+  ];
+  for (const r of records) record(r.check, r.status, r.detail);
 }
 
 /** Everything of `type` the operator owns, every page. */
@@ -692,6 +740,7 @@ async function main() {
 
   checkPublishedToml(chainId);
   await checkIds();
+  await checkEndState();
   await checkAbi();
   await gated('Peg refresh (simulated)', ['peg_monitor::update_peg'], checkPeg);
   if (BUSINESS) {
