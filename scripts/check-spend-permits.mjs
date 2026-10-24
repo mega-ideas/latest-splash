@@ -49,7 +49,8 @@
  *      nowhere else but its declaration and those calls' type arguments, so it
  *      is never bound, returned, stored or taken as a parameter.
  *   8. No `public`, `public(package)` or `entry` function returns a `Balance`;
- *      no function returns a `Coin` except beside a `BridgeObligation`; no
+ *      no function returns a `Coin` (the spending-rule path pays only on Sui,
+ *      so nothing hands the business's coin back to a transaction); no
  *      function takes `&mut` of anything holding a `Balance` or a `Coin` except
  *      the `Allowance` itself.
  *   9. `SPLASH_SPEND` and `SettleWitness` are each declared once with exactly
@@ -371,8 +372,8 @@ for (const unit of units) {
     if (exposed && /\bBalance\s*</.test(fn.returns)) {
       fail(unit, fn.index, `\`${fn.name}\` is ${[fn.visibility, fn.entry ? 'entry' : ''].filter(Boolean).join(' ')} and returns a Balance (${fn.returns}).`);
     }
-    if (/\bCoin\s*</.test(fn.returns) && !/\bBridgeObligation\b/.test(fn.returns)) {
-      fail(unit, fn.index, `\`${fn.name}\` returns a Coin without a BridgeObligation (${fn.returns}).`);
+    if (/\bCoin\s*</.test(fn.returns)) {
+      fail(unit, fn.index, `\`${fn.name}\` returns a Coin (${fn.returns}). Spending rules pay only on Sui; no coin goes back to the caller.`);
     }
     for (const p of parameters(fn.params)) {
       const type = p.type.replace(/\s+/g, ' ');
