@@ -16,7 +16,11 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-import { multisigVectors } from './fixtures/multisig-vectors.mjs';
+import { Secp256r1PublicKey } from '@mysten/sui/keypairs/secp256r1';
+import { MultiSigPublicKey } from '@mysten/sui/multisig';
+import { toHex } from '@mysten/sui/utils';
+
+import { memberKeys, multisigVectors } from './fixtures/multisig-vectors.mjs';
 
 const MOVE_TESTS = new URL('../move/splash_core/tests/multisig_tests.move', import.meta.url);
 
@@ -43,6 +47,34 @@ test('every SDK vector appears in the Move tests, byte for byte', async () => {
       assert.ok(move.includes(`@0x${full(m.signerAddress)}`), `${v.name}: signer address ${m.signerAddress} is missing`);
     }
   }
+});
+
+test('one P-256 key under two schemes is one member: the SDK refuses it, and so does Move', async () => {
+  // The A1 review: a passkey's P-256 key listed again as a raw secp256r1
+  // member is one person counted twice. Sui's protocol compares whole keys
+  // and would accept it; the SDK compares raw key bytes and refuses it, and
+  // splash_core::multisig::assert_valid refuses it the same way.
+  const [passkey] = memberKeys().passkeys;
+  const asSecp256r1 = new Secp256r1PublicKey(passkey.toRawBytes());
+  assert.throws(
+    () =>
+      MultiSigPublicKey.fromPublicKeys({
+        threshold: 2,
+        publicKeys: [
+          { publicKey: asSecp256r1, weight: 1 },
+          { publicKey: passkey, weight: 1 },
+        ],
+      }),
+    /duplicate public keys/,
+  );
+  const move = await readFile(MOVE_TESTS, 'utf8');
+  assert.ok(
+    move.includes(`const PASSKEY_1_AS_SECP256R1: vector<u8> = x"${toHex(asSecp256r1.toSuiBytes())}";`),
+    'the Move tests do not carry PASSKEY_1 as a secp256r1 member',
+  );
+  const at = move.indexOf('fun one_p256_key_as_secp256r1_and_as_a_passkey_is_refused()');
+  assert.ok(at > 0, 'no Move test refuses one P-256 key under two schemes');
+  assert.match(move.slice(0, at), /#\[expected_failure\(abort_code = multisig::E_DUPLICATE_MEMBER\)\]\s*$/);
 });
 
 test('each Move vector test passes the weights and threshold the SDK used', async () => {

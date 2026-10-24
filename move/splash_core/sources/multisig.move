@@ -37,7 +37,21 @@
 /// protocol would reject — a threshold no quorum can reach, a duplicate member,
 /// a key with the wrong length — would be an address nobody can ever sign for.
 /// Every rule below is one of Sui's own `MultiSigPublicKey::new` rules, so this
-/// module refuses exactly what the protocol would.
+/// module refuses what the protocol would, with one rule stricter than it.
+///
+/// ─── One key is one member, whatever its scheme ─────────────────────────────
+///
+/// Two members are the same member when their public key bytes are the same,
+/// whatever their flags. A passkey's key is a P-256 key: listed once as a raw
+/// secp256r1 member (0x02) and once as a passkey (0x06), it is one person
+/// counted twice, since whoever holds the private key can make both a raw
+/// secp256r1 signature and a passkey assertion. Sui's protocol compares whole
+/// keys, scheme included, and would accept such a multisig; the TS SDK's
+/// `MultiSigPublicKey`, which Splash builds every wallet with, compares the
+/// raw key bytes and refuses it ("Multisig does not support duplicate public
+/// keys"). This module refuses it as the SDK does (E_DUPLICATE_MEMBER), so a
+/// wallet, a governance quorum or the fee recipient can never count one
+/// person twice (the A1 review).
 ///
 /// zkLogin members are accepted in the padded form only (a 32-byte address
 /// seed). That is the form the SDK puts into a multisig, and the derivation
@@ -60,7 +74,7 @@ const E_ZERO_WEIGHT: u64 = 1202;
 const E_ZERO_THRESHOLD: u64 = 1203;
 /// The weights cannot add up to the threshold, so no quorum can ever sign.
 const E_UNREACHABLE_THRESHOLD: u64 = 1204;
-/// The same key appears twice.
+/// The same key appears twice, under the same scheme or under two.
 const E_DUPLICATE_MEMBER: u64 = 1205;
 /// A key's first byte is not a scheme Sui accepts in a multisig.
 const E_UNKNOWN_SCHEME: u64 = 1206;
@@ -171,12 +185,26 @@ public fun assert_valid(keys: &vector<vector<u8>>, weights: &vector<u8>, thresho
         assert_key(&keys[i]);
         let mut j = i + 1;
         while (j < n) {
-            assert!(keys[i] != keys[j], E_DUPLICATE_MEMBER);
+            assert!(!same_public_key(&keys[i], &keys[j]), E_DUPLICATE_MEMBER);
             j = j + 1;
         };
         i = i + 1;
     };
     assert!(total >= threshold, E_UNREACHABLE_THRESHOLD);
+}
+
+/// The two members carry the same public key bytes: everything after the
+/// flag byte is equal, whatever the flags. Called once `a` has passed
+/// `assert_key`, so it is not empty.
+fun same_public_key(a: &vector<u8>, b: &vector<u8>): bool {
+    let len = a.length();
+    if (len != b.length()) return false;
+    let mut k = 1;
+    while (k < len) {
+        if (a[k] != b[k]) return false;
+        k = k + 1;
+    };
+    true
 }
 
 /// A key is `flag || public key`, with the length its scheme requires.

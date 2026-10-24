@@ -559,7 +559,7 @@ const ABORT_CODES: Record<number, string> = {
   1202: 'E_ZERO_WEIGHT — a wallet member has weight zero, which Sui refuses in a multisig.',
   1203: 'E_ZERO_THRESHOLD — the wallet threshold is zero, which Sui refuses in a multisig.',
   1204: 'E_UNREACHABLE_THRESHOLD — the member weights cannot add up to the threshold, so no quorum could ever sign for this wallet.',
-  1205: 'E_DUPLICATE_MEMBER — the same key appears twice in the wallet, which Sui refuses in a multisig.',
+  1205: 'E_DUPLICATE_MEMBER — the same key appears twice in the wallet, which Sui refuses in a multisig, or one key is listed under two schemes (a P-256 key as both secp256r1 and a passkey), which is one person counted twice. List each member once.',
   1206: 'E_UNKNOWN_SCHEME — a wallet key does not start with a scheme flag Sui accepts in a multisig (Ed25519, Secp256k1, Secp256r1, zkLogin or passkey).',
   1207: 'E_BAD_KEY_LENGTH — a wallet key has the wrong length for its scheme. Pass flag || public key, as publicKey.toSuiBytes() returns it; zkLogin keys need the padded 32-byte address seed.',
   1208: 'E_NOT_THIS_MULTISIG — the sender is not the multisig these members derive.',
