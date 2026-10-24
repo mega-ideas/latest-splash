@@ -62,7 +62,6 @@ fun wallet_intent_with(
         RECIPIENT,
         h::beneficiary(),
         h::amount(),
-        0,
         b"PHP".to_string(),
         56_000_000,
         commitment,

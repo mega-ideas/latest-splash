@@ -405,7 +405,6 @@ fun staff_opens_intent(s: &mut Scenario, id: ID) {
         h::recipient(),
         h::beneficiary(),
         h::amount(),
-        0,
         b"PHP".to_string(),
         56_000_000,
         h::commitment(),

@@ -278,11 +278,6 @@ public fun accept<T>(
 /// intent that could never be paid under this policy is never opened.
 /// `pay_intent` checks everything again, since the policy can change in
 /// between. Returned by value: share it, or pay it in the same transaction.
-///
-/// `fee_bps` is Splash's fee on the payment (decision 1), passed through to
-/// core, which bounds it by the config and records the fee on the intent.
-/// The policy's limits apply to the amount; the allowance pays the amount
-/// and the fee, so its own caps bound both.
 public fun create_intent<T>(
     policy: &SpendPolicy,
     account: &mut BusinessAccount,
@@ -291,7 +286,6 @@ public fun create_intent<T>(
     recipient: address,
     beneficiary_ref: vector<u8>,
     amount: u64,
-    fee_bps: u64,
     target_currency: String,
     fx_rate_usd_local: u64,
     commitment: vector<u8>,
@@ -318,7 +312,6 @@ public fun create_intent<T>(
         recipient,
         beneficiary_ref,
         amount,
-        fee_bps,
         target_currency,
         fx_rate_usd_local,
         commitment,
@@ -450,10 +443,7 @@ public fun discard_approval(approval: PayoutApproval) {
 /// Pay an intent under a spending rule. The sender is the allowance's spender.
 ///
 /// `withdrawal` is the allowance withdrawal input for exactly the intent's
-/// amount plus the fee it recorded (`payment_intent::fee_minor`), from the
-/// business wallet's address balance; core sends the fee leg to the config's
-/// fee address, and back to the wallet any part of it a lowered fee no longer
-/// charges. `settle_by_ms` is the
+/// amount, from the business wallet's address balance. `settle_by_ms` is the
 /// quote's deadline. `config` must be the one the policy was created
 /// against. The intent lands on Sui, and core pays its recipient in this
 /// call; a cross-chain intent is refused.

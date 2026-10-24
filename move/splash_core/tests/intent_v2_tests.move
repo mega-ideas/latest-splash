@@ -117,7 +117,6 @@ fun by_wallet(
         h::recipient(),
         d.beneficiary_ref,
         h::amount(),
-        0,
         b"PHP".to_string(),
         FX,
         d.commitment,
@@ -146,7 +145,6 @@ fun by_app(
         h::recipient(),
         d.beneficiary_ref,
         h::amount(),
-        0,
         b"PHP".to_string(),
         FX,
         d.commitment,
@@ -174,7 +172,6 @@ fun cross_chain_by_wallet(
         domain,
         MINT_RECIPIENT,
         h::amount(),
-        0,
         h::commitment(),
         h::rail(),
         BRIDGE_FEE,
@@ -1199,7 +1196,7 @@ fun an_asset_off_the_registry_is_refused_at_create() {
     let (mut account, config, c) = take(&s);
     let d = bank(1, &c);
     let intent = payment_intent::create_for_wallet<SCAM>(
-        &mut account, &config, d.payment_ref, h::recipient(), d.beneficiary_ref, h::amount(), 0,
+        &mut account, &config, d.payment_ref, h::recipient(), d.beneficiary_ref, h::amount(),
         b"PHP".to_string(), FX, d.commitment, d.kind, d.rail, d.expires_at, &c, s.ctx(),
     );
     payment_intent::share_intent(intent);
@@ -1219,7 +1216,7 @@ fun a_removed_asset_is_refused_at_create() {
         let (mut account, config, c) = take(&s);
         let d = bank(1, &c);
         let intent = payment_intent::create_for_wallet<SCAM>(
-            &mut account, &config, d.payment_ref, h::recipient(), d.beneficiary_ref, h::amount(), 0,
+            &mut account, &config, d.payment_ref, h::recipient(), d.beneficiary_ref, h::amount(),
             b"PHP".to_string(), FX, d.commitment, d.kind, d.rail, d.expires_at, &c, s.ctx(),
         );
         assert_eq!(*payment_intent::settlement_asset(&intent), compliance_config::type_string<SCAM>());
@@ -1433,7 +1430,7 @@ fun an_unregistered_app_is_refused() {
     let d = bank(1, &c);
     let intent = payment_intent::create_for_app<USDC, OtherApp>(
         OtherApp {}, &mut account, &config, STAFF, d.payment_ref, h::recipient(), d.beneficiary_ref,
-        h::amount(), 0, b"PHP".to_string(), FX, d.commitment, d.kind, d.rail, d.expires_at, &c, s.ctx(),
+        h::amount(), b"PHP".to_string(), FX, d.commitment, d.kind, d.rail, d.expires_at, &c, s.ctx(),
     );
     payment_intent::share_intent(intent);
     give(account, config, c);

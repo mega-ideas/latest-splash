@@ -132,8 +132,7 @@ public fun register_wallet(s: &mut Scenario) {
     };
 }
 
-/// The wallet opens a bank payout for `amount`, with no fee (`fee_bps` 0), and
-/// returns it by value. The fee leg is tested in `fee_v2_tests`.
+/// The wallet opens a bank payout for `amount` and returns it by value.
 public fun wallet_intent(
     account: &mut BusinessAccount,
     config: &ComplianceConfig,
@@ -149,7 +148,6 @@ public fun wallet_intent(
         RECIPIENT,
         BENEFICIARY,
         amount,
-        0,
         b"PHP".to_string(),
         56_000_000,
         COMMITMENT,
@@ -161,7 +159,7 @@ public fun wallet_intent(
     )
 }
 
-/// The wallet opens an intent of any Sui kind to `to`, with no fee.
+/// The wallet opens an intent of any Sui kind to `to`.
 public fun wallet_intent_of_kind(
     account: &mut BusinessAccount,
     config: &ComplianceConfig,
@@ -181,7 +179,6 @@ public fun wallet_intent_of_kind(
         to,
         beneficiary,
         amount,
-        0,
         currency,
         56_000_000,
         COMMITMENT,

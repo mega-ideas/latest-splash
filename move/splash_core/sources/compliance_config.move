@@ -37,10 +37,6 @@ const REGISTRY_ASSET: u8 = 1;
 const REGISTRY_SETTLEMENT_APP: u8 = 2;
 const REGISTRY_BRIDGE_ADAPTER: u8 = 3;
 
-/// The most any intent may ever be charged, in basis points: 2%. Written into
-/// the package, so no governance change can raise `max_fee_bps` past it.
-const MAX_FEE_BPS_CEILING: u64 = 200;
-
 const E_INVALID_CONFIG: u64 = 350;
 const E_INVALID_CAP: u64 = 351;
 const E_SETTLEMENT_PAUSED: u64 = 352;
@@ -85,22 +81,6 @@ const E_LAST_ASSET: u64 = 368;
 // 369 is retired with the legacy approval path's one-way switch
 // (E_LEGACY_DISABLED, raised only by the earlier v2 testnet package).
 
-// ─── The fee (decision 1) ──────────────────────────────────────────────────
-/// The proposed `max_fee_bps` is above `MAX_FEE_BPS_CEILING` (2%).
-const E_FEE_ABOVE_CEILING: u64 = 370;
-/// The proposed fee address is a multisig one member can sign for alone.
-const E_FEE_ADDRESS_SINGLE_SIGNER: u64 = 371;
-/// A fee change is already waiting. Activate or cancel it first.
-const E_FEE_CHANGE_PENDING: u64 = 372;
-/// There is no pending fee change to activate or cancel.
-const E_NO_FEE_CHANGE: u64 = 373;
-/// The 24-hour notice for the fee change has not run yet.
-const E_FEE_NOTICE_NOT_RUN: u64 = 374;
-/// The fee change's window closed seven days after its notice ran.
-const E_FEE_CHANGE_LAPSED: u64 = 375;
-/// The activation names a different fee change from the one pending.
-const E_FEE_CHANGE_MISMATCH: u64 = 376;
-
 public struct ComplianceConfig has key {
     id: UID,
     max_deviation_ppm: u64,
@@ -140,18 +120,6 @@ public struct ComplianceConfig has key {
     bridge_adapters: VecSet<String>,
     /// Additions waiting out their 24-hour notice.
     pending_additions: vector<PendingAddition>,
-    /// Decision 1. Where Splash's fee leg is paid: a Splash finance multisig,
-    /// derived on chain from its members and never one any member can sign
-    /// for alone. `none` until the first fee change activates. Read at
-    /// settlement; never a PTB argument.
-    fee_address: Option<address>,
-    /// The most an intent may carry, in basis points, at most
-    /// `MAX_FEE_BPS_CEILING`. 0 at creation: the fee starts off.
-    max_fee_bps: u64,
-    /// The most one payment's fee may be, in the asset's minor units.
-    fee_cap_minor: u64,
-    /// A fee change waiting out its 24-hour notice. One at a time.
-    pending_fee_change: Option<PendingFeeChange>,
 }
 
 /// The single right to create the config, minted once at publish.
@@ -166,14 +134,6 @@ public struct ConfigTicket has key {
 }
 
 /// An addition to one of the v2 registries, announced and not yet in force.
-public struct PendingFeeChange has store, drop, copy {
-    fee_address: address,
-    max_fee_bps: u64,
-    fee_cap_minor: u64,
-    proposed_at_ms: u64,
-    eta_ms: u64,
-}
-
 public struct PendingAddition has store, drop, copy {
     registry: u8,
     type_name: String,
@@ -185,8 +145,7 @@ public struct PendingAddition has store, drop, copy {
 ///
 /// Every function in this package that takes `&ComplianceCap` can only make
 /// the controls stricter: lower the tolerated peg deviation, staleness or
-/// slippage; raise the required depth or the settlement floor; remove a venue
-/// or a registry entry; withdraw a pending registry addition or fee change;
+/// slippage; raise the required depth or the settlement floor; remove a venue;
 /// pause. There is no function taking this cap that loosens anything, and
 /// `scripts/check-compliance-subtractive.mjs` fails the build if one appears.
 ///
@@ -261,32 +220,6 @@ public struct RegistryEntryRemoved has copy, drop {
     type_name: String,
 }
 
-/// A change to Splash's fee parameters was announced. These are Splash's own
-/// terms (where the fee goes, the most bps an intent may carry, the cap per
-/// payment), never any client's payment.
-public struct FeeChangeProposed has copy, drop {
-    config_id: address,
-    fee_address: address,
-    max_fee_bps: u64,
-    fee_cap_minor: u64,
-    proposed_at_ms: u64,
-    eta_ms: u64,
-}
-
-public struct FeeChangeActivated has copy, drop {
-    config_id: address,
-    fee_address: address,
-    max_fee_bps: u64,
-    fee_cap_minor: u64,
-}
-
-public struct FeeChangeCancelled has copy, drop {
-    config_id: address,
-    fee_address: address,
-    max_fee_bps: u64,
-    fee_cap_minor: u64,
-}
-
 /// Mint the one `ConfigTicket`, to the publisher.
 fun init(ctx: &mut TxContext) {
     transfer::transfer(ConfigTicket { id: object::new(ctx) }, ctx.sender());
@@ -333,11 +266,6 @@ public fun create<SettlementAsset>(
         settlement_apps: vec_set::empty(),
         bridge_adapters: vec_set::empty(),
         pending_additions: vector[],
-        // The fee starts off: nowhere to send it, and no intent may carry one.
-        fee_address: option::none(),
-        max_fee_bps: 0,
-        fee_cap_minor: 0,
-        pending_fee_change: option::none(),
     };
     let config_id = object::id(&config);
     let cap = ComplianceCap {
@@ -663,142 +591,6 @@ public fun admin_remove_registry_entry(
 ) {
     drop_entry(config, registry, type_name);
 }
-
-// ─── The fee (decision 1): every change gives 24 hours' notice ─────────────
-//
-// Splash may take a fee on a payment, as its own leg in the same transaction;
-// the principal never passes through it. Each intent records its fee when it
-// opens (`payment_intent`), bounded by the parameters here, so the owners see
-// it before they approve. At settlement it is charged at no more than that,
-// to the fee address in force then.
-//
-// The parameters are where the fee goes and how large it may be, so they
-// change like a registry addition: the governance quorum proposes, every
-// change waits 24 hours, and the quorum activates it within seven days or it
-// lapses. Lowering the fee follows the same path; there is no fast path in
-// either direction. Withdrawing a pending change only stops a change, so the
-// compliance key may do it too.
-
-/// Announce a fee change: the fee address `fee_keys`/`fee_weights`/
-/// `fee_threshold` derive, the most bps an intent may carry, and the cap per
-/// payment. The sender is the governance quorum (`keys`/`weights`/
-/// `threshold`, which must derive it and not be single-signer).
-///
-/// The fee address is derived here from its members, never taken as a bare
-/// address, and must not be a multisig any one member can sign for alone, so
-/// a lone hot key such as the KMS operator can never receive the fee.
-public fun propose_fee_change(
-    _admin: &AdminCap,
-    config: &mut ComplianceConfig,
-    keys: vector<vector<u8>>,
-    weights: vector<u8>,
-    threshold: u16,
-    fee_keys: vector<vector<u8>>,
-    fee_weights: vector<u8>,
-    fee_threshold: u16,
-    max_fee_bps: u64,
-    fee_cap_minor: u64,
-    clock: &Clock,
-    ctx: &TxContext,
-) {
-    multisig::assert_quorum_sender(&keys, &weights, threshold, ctx);
-    assert!(max_fee_bps <= MAX_FEE_BPS_CEILING, E_FEE_ABOVE_CEILING);
-    let fee_address = multisig::derive_address(&fee_keys, &fee_weights, fee_threshold);
-    assert!(!multisig::is_single_signer(&fee_weights, fee_threshold), E_FEE_ADDRESS_SINGLE_SIGNER);
-    assert!(config.pending_fee_change.is_none(), E_FEE_CHANGE_PENDING);
-
-    let now = clock.timestamp_ms();
-    let eta_ms = now + ADDITION_NOTICE_MS;
-    config.pending_fee_change = option::some(PendingFeeChange {
-        fee_address,
-        max_fee_bps,
-        fee_cap_minor,
-        proposed_at_ms: now,
-        eta_ms,
-    });
-    event::emit(FeeChangeProposed {
-        config_id: object::id_address(config),
-        fee_address,
-        max_fee_bps,
-        fee_cap_minor,
-        proposed_at_ms: now,
-        eta_ms,
-    });
-}
-
-/// Put the pending fee change into force, once its notice has run and before
-/// its window closes. The quorum signs again, and names the change it is
-/// activating, so a signed activation cannot apply some other change.
-public fun activate_fee_change(
-    _admin: &AdminCap,
-    config: &mut ComplianceConfig,
-    keys: vector<vector<u8>>,
-    weights: vector<u8>,
-    threshold: u16,
-    fee_address: address,
-    max_fee_bps: u64,
-    fee_cap_minor: u64,
-    clock: &Clock,
-    ctx: &TxContext,
-) {
-    multisig::assert_quorum_sender(&keys, &weights, threshold, ctx);
-    assert!(config.pending_fee_change.is_some(), E_NO_FEE_CHANGE);
-    let pending = *config.pending_fee_change.borrow();
-    assert!(
-        pending.fee_address == fee_address && pending.max_fee_bps == max_fee_bps && pending.fee_cap_minor == fee_cap_minor,
-        E_FEE_CHANGE_MISMATCH,
-    );
-    let now = clock.timestamp_ms();
-    assert!(now >= pending.eta_ms, E_FEE_NOTICE_NOT_RUN);
-    assert!(now < pending.eta_ms + ADDITION_WINDOW_MS, E_FEE_CHANGE_LAPSED);
-
-    let PendingFeeChange { fee_address, max_fee_bps, fee_cap_minor, proposed_at_ms: _, eta_ms: _ } =
-        config.pending_fee_change.extract();
-    config.fee_address = option::some(fee_address);
-    config.max_fee_bps = max_fee_bps;
-    config.fee_cap_minor = fee_cap_minor;
-    event::emit(FeeChangeActivated { config_id: object::id_address(config), fee_address, max_fee_bps, fee_cap_minor });
-}
-
-/// Withdraw the pending fee change. Subtractive: it stops a change and makes
-/// none, so the compliance key may do it.
-public fun cancel_fee_change(config: &mut ComplianceConfig, cap: &ComplianceCap, registry_caps: &CapRegistry) {
-    assert_compliance_cap(registry_caps, cap);
-    assert!(cap.config_id == object::id(config), E_INVALID_CAP);
-    // Written out here, not in a helper, so check-compliance-subtractive sees
-    // the withdrawal in the body of the function that takes the cap.
-    assert!(config.pending_fee_change.is_some(), E_NO_FEE_CHANGE);
-    let PendingFeeChange { fee_address, max_fee_bps, fee_cap_minor, proposed_at_ms: _, eta_ms: _ } =
-        config.pending_fee_change.extract();
-    event::emit(FeeChangeCancelled { config_id: object::id_address(config), fee_address, max_fee_bps, fee_cap_minor });
-}
-
-/// The same withdrawal, by the governance quorum.
-public fun admin_cancel_fee_change(
-    _admin: &AdminCap,
-    config: &mut ComplianceConfig,
-    keys: vector<vector<u8>>,
-    weights: vector<u8>,
-    threshold: u16,
-    ctx: &TxContext,
-) {
-    multisig::assert_quorum_sender(&keys, &weights, threshold, ctx);
-    assert!(config.pending_fee_change.is_some(), E_NO_FEE_CHANGE);
-    let PendingFeeChange { fee_address, max_fee_bps, fee_cap_minor, proposed_at_ms: _, eta_ms: _ } =
-        config.pending_fee_change.extract();
-    event::emit(FeeChangeCancelled { config_id: object::id_address(config), fee_address, max_fee_bps, fee_cap_minor });
-}
-
-/// Where the fee leg is paid now. `none` until the first fee change activates.
-public fun fee_address(config: &ComplianceConfig): Option<address> { config.fee_address }
-public fun max_fee_bps(config: &ComplianceConfig): u64 { config.max_fee_bps }
-public fun fee_cap_minor(config: &ComplianceConfig): u64 { config.fee_cap_minor }
-public fun pending_fee_change(config: &ComplianceConfig): Option<PendingFeeChange> { config.pending_fee_change }
-public fun pending_fee_address(p: &PendingFeeChange): address { p.fee_address }
-public fun pending_fee_bps(p: &PendingFeeChange): u64 { p.max_fee_bps }
-public fun pending_fee_cap_minor(p: &PendingFeeChange): u64 { p.fee_cap_minor }
-public fun pending_fee_eta_ms(p: &PendingFeeChange): u64 { p.eta_ms }
-public fun max_fee_bps_ceiling(): u64 { MAX_FEE_BPS_CEILING }
 
 public fun addition_window_ms(): u64 { ADDITION_WINDOW_MS }
 
