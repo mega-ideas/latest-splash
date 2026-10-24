@@ -130,3 +130,35 @@ test('IntentConfirmed.path has two values: the business wallet (1) and a settlem
   const spend = await readFile(path.join('move', 'splash_spend', 'sources', 'splash_spend.move'), 'utf8');
   assert.match(spend, /public fun approve_payout\(/);
 });
+
+// The A1 review: the operator monitor's own comments still named the removed
+// path as the approved one ("a value-moving transaction ... that was not an
+// approved `confirm_with_approval`"), though v2 core has no such function and
+// the monitor approves splash_spend::pay_intent with audit_anchor::anchor.
+const OPERATOR_MONITOR = [
+  'lib/server/operator-alerts.ts',
+  'lib/server/operator-outflows.ts',
+  'lib/server/operator-outflow-monitor.ts',
+  'app/api/cron/operator-outflows/route.ts',
+];
+
+test("the operator monitor's comments name confirm_with_approval only as retired", async () => {
+  const { readFile } = await import('node:fs/promises');
+  const live = [];
+  for (const file of OPERATOR_MONITOR) {
+    const lines = (await readFile(file, 'utf8')).split(/\r?\n/);
+    lines.forEach((line, i) => {
+      if (!/\bconfirm_with_approval\b/.test(line)) return;
+      const around = lines.slice(Math.max(0, i - 1), i + 2).join(' ');
+      if (!/\bretired\b|\bremoved\b|\bv1\b|has none|no longer/i.test(around)) live.push(`${file}:${i + 1}: ${line.trim()}`);
+    });
+  }
+  assert.deepEqual(live, [], `confirm_with_approval named as if it were live:\n  ${live.join('\n  ')}`);
+});
+
+test('the operator alerts say which path is approved in v2', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const header = (await readFile('lib/server/operator-alerts.ts', 'utf8')).split('*/')[0];
+  assert.match(header, /splash_spend::pay_intent/);
+  assert.match(header, /audit_anchor::anchor/);
+});
