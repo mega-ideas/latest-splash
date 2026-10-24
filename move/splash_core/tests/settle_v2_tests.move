@@ -64,11 +64,11 @@ const BELOW_SETTLEMENT_FLOOR: u64 = 434;
 /// A staff member, the maker an app vouches for.
 const STAFF: address = @0x57AFF;
 const STRANGER: address = @0xBADBAD;
-/// Kind 3: a supplier's own wallet.
+/// Kind 1: a supplier's own wallet.
 const SUPPLIER_WALLET: address = @0x5011D;
-/// Kind 2: another Splash business.
+/// Kind 0: another Splash business.
 const OTHER_BUSINESS: address = @0xB12B12;
-/// Kind 4: an EVM address, left-padded to 32 bytes.
+/// Kind 3 (cross-chain): an EVM address, left-padded to 32 bytes.
 const MINT_RECIPIENT: address = @0x000000000000000000000000d8da6bf26964af9d7eed9e03e53415d37aa96045;
 /// CCTP domain 5 (Solana). Anything but 8.
 const SOLANA: u32 = 5;
@@ -1529,7 +1529,7 @@ fun a_bank_payout_of_exactly_99_usdc_settles() {
 
 #[test]
 #[expected_failure(abort_code = payment_intent::E_CROSS_CHAIN_ONLY)]
-/// A kind-4 intent's recipient is a CCTP `mint_recipient` on another chain,
+/// A cross-chain intent's recipient is a CCTP `mint_recipient` on another chain,
 /// not a Sui address. Paying it by coin would send USDC to the wrong place.
 fun a_cross_chain_intent_cannot_take_the_coin_path() {
     let mut s = h::setup();
@@ -1560,12 +1560,12 @@ fun a_cross_chain_intent_cannot_take_the_balance_path() {
 /// a coin of exactly the amount, and an obligation whose every field is the
 /// intent's: the intent, that coin's ID, the asset, the amount, the domain,
 /// the mint recipient, the fee ceiling and the finality. The event reports
-/// the wallet path and kind 4.
+/// the wallet path and the cross-chain kind.
 fun cross_chain_release_returns_the_coin_and_a_matching_obligation() {
     let mut s = h::setup();
     tx!(&mut s, h::wallet(), |account, config, c, ctx| {
         let mut intent = cross_chain_intent(account, config, 1, h::amount(), c, ctx);
-        assert_eq!(payment_intent::kind(&intent), payment_intent::kind_cross_chain_wallet());
+        assert_eq!(payment_intent::kind(&intent), payment_intent::kind_cross_chain());
         let (coin, obligation) = release(&mut intent, account, config, h::amount(), h::settle_by(c), c, ctx);
         assert_eq!(coin.value(), h::amount());
         assert_eq!(payment_intent::status(&intent), payment_intent::status_confirmed());
@@ -1591,7 +1591,7 @@ fun cross_chain_release_returns_the_coin_and_a_matching_obligation() {
         assert_eq!(confirmed.length(), 1);
         let (id, _, _, _, kind, status, path, _) = payment_intent::unpack_intent_confirmed_for_testing(confirmed[0]);
         assert_eq!(id, object::id(&intent));
-        assert_eq!(kind, payment_intent::kind_cross_chain_wallet());
+        assert_eq!(kind, payment_intent::kind_cross_chain());
         assert_eq!(status, payment_intent::status_confirmed());
         assert_eq!(path, payment_intent::path_business_wallet());
 
@@ -1710,8 +1710,8 @@ fun a_bank_payout_cannot_take_the_cross_chain_path() {
 
 #[test]
 #[expected_failure(abort_code = compliance_config::E_NOT_A_BRIDGE_ADAPTER)]
-/// Phase 1 registers no bridge adapter, so kind 4 cannot settle yet: the
-/// obligation is a hot potato and nothing can discharge it.
+/// Phase 1 registers no bridge adapter, so a cross-chain intent cannot settle
+/// yet: the obligation is a hot potato and nothing can discharge it.
 fun with_no_adapter_registered_the_obligation_cannot_be_discharged() {
     let mut s = h::setup();
     tx!(&mut s, h::wallet(), |account, config, c, ctx| {

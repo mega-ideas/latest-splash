@@ -93,7 +93,7 @@ public struct ComplianceConfig has key {
     /// any other decimals. Zero is rejected by `assert_valid`, so the floor can
     /// never be silently disabled.
     ///
-    /// On the v2 paths it is the floor of a BANK PAYOUT (kind 1), together
+    /// On the v2 paths it is the floor of a BANK PAYOUT (kind 4), together
     /// with the 99 USDC platform minimum: whichever is larger, checked when
     /// the intent opens and again when it settles (`payment_intent`). Wallet,
     /// Splash-business and cross-chain payments have no floor.

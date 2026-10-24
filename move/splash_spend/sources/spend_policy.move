@@ -82,8 +82,8 @@ const E_UNKNOWN_ROLE: u64 = 1060;
 /// A spending rule pays only on Sui (domain 8). A recipient on another chain
 /// is paid from the wallet.
 const E_NOT_ON_SUI: u64 = 1061;
-/// A recipient is verified as a Splash business (kind 2) or a wallet
-/// (kind 3). Bank payouts (kind 1) go through `verify_beneficiary`.
+/// A recipient is verified as a Splash business (kind 0) or a wallet
+/// (kind 1). Bank payouts (kind 4) go through `verify_beneficiary`.
 const E_BAD_KIND: u64 = 1062;
 /// The compliance config does not accept `T` as a settlement asset. A policy
 /// in it could never pay, and its wallet generation's one slot would be gone.
@@ -100,7 +100,7 @@ const E_BAD_WINDOW: u64 = 1066;
 /// The address is a partner deposit address (a verified beneficiary is bound
 /// to it). It is paid only as a bank payout, so it is not also a recipient.
 const E_PARTNER_DEPOSIT: u64 = 1067;
-/// The address is a verified recipient (kind 2 or 3). It cannot also be a
+/// The address is a verified recipient (kind 0 or 1). It cannot also be a
 /// partner deposit address; remove it as a recipient first.
 const E_ALREADY_A_RECIPIENT: u64 = 1068;
 
@@ -197,13 +197,13 @@ public struct SpendPolicy has key {
     owners: vector<address>,
     spenders: Table<address, Spender>,
     spender_count: u64,
-    /// Kinds 2–3: verified destinations on Sui, each with the one kind it is
+    /// Kinds 0–1: verified destinations on Sui, each with the one kind it is
     /// paid as, which is how core delivers it: a Splash business (2) is
     /// credited to its address balance, a wallet (3) receives a Coin. Never
     /// a partner deposit address.
     recipients: Table<Destination, u8>,
     recipient_count: u64,
-    /// Kind 1: each bank beneficiary (by 32-byte commitment) bound to the one
+    /// Kind 4: each bank beneficiary (by 32-byte commitment) bound to the one
     /// partner deposit destination allowed to receive payouts for it.
     beneficiaries: Table<vector<u8>, Destination>,
     beneficiary_count: u64,
@@ -395,9 +395,9 @@ public fun remove_spender(policy: &mut SpendPolicy, spender: address, ctx: &TxCo
     changed(policy, b"remove_spender");
 }
 
-/// Verify a destination on Sui, and how it is paid: `kind` 2 for another
+/// Verify a destination on Sui, and how it is paid: `kind` 0 for another
 /// Splash business (credited to its address balance, where its own rules
-/// draw) or 3 for a supplier's wallet or an exchange deposit address (sent a
+/// draw) or 1 for a supplier's wallet or an exchange deposit address (sent a
 /// Coin, which every deposit system recognises). Payments to it under the
 /// policy must be of that kind, so a spender cannot choose the delivery
 /// form. To change it, the wallet removes the recipient and verifies it
@@ -454,7 +454,7 @@ public fun remove_recipient(policy: &mut SpendPolicy, domain: u32, addr: address
 /// business (ideally the business's own sub-account there), verified once
 /// off chain by a test deposit. Binding a beneficiary makes it a partner
 /// deposit address, paid only as a bank payout for a beneficiary bound to
-/// it. An address already verified as a recipient (kind 2 or 3) is refused,
+/// it. An address already verified as a recipient (kind 0 or 1) is refused,
 /// so the two lists never overlap; the wallet removes the recipient first.
 public fun verify_beneficiary(
     policy: &mut SpendPolicy,
@@ -616,7 +616,7 @@ public fun spender_count(policy: &SpendPolicy): u64 { policy.spender_count }
 public fun is_recipient_verified(policy: &SpendPolicy, domain: u32, addr: address): bool {
     policy.recipients.contains(Destination { domain, addr })
 }
-/// The kind a verified recipient is paid as: 2 (a Splash business) or 3 (a
+/// The kind a verified recipient is paid as: 0 (a Splash business) or 1 (a
 /// wallet). Aborts if it is not verified.
 public fun recipient_kind(policy: &SpendPolicy, domain: u32, addr: address): u8 {
     let key = Destination { domain, addr };
@@ -654,7 +654,7 @@ public fun max_running_window_ms(): u64 { MAX_RUNNING_WINDOW_MS }
 /// The principal `payer` has paid this recipient in the window that is
 /// current at `now_ms`: 0 if there is none, it has run out, or `payer` is no
 /// longer (or no longer the same) spender. The recipient is named as an
-/// intent names it: for a bank payout (kind 1) by `beneficiary_ref`, the
+/// intent names it: for a bank payout (kind 4) by `beneficiary_ref`, the
 /// recipient address being ignored; otherwise by `recipient`.
 public fun running_total(
     policy: &SpendPolicy,

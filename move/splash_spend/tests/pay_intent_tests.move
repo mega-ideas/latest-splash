@@ -55,9 +55,9 @@ const JUNIOR: address = @0x7A1;
 /// Splash's KMS operator: pays only, and only with an approval naming it.
 const EXECUTOR: address = @0xE0E0;
 const STRANGER: address = @0xBAD;
-/// A supplier's verified wallet (kind 3).
+/// A supplier's verified wallet (kind 1).
 const SUPPLIER: address = @0x5099;
-/// Another Splash business, verified (kind 2).
+/// Another Splash business, verified (kind 0).
 const BUSINESS: address = @0xB12;
 /// A verified Sui recipient that is NOT the beneficiary's partner address.
 const OTHER_PARTNER: address = @0x9A2;
@@ -613,7 +613,7 @@ fun second_business(s: &mut Scenario): (ID, ID) {
 
 #[test]
 /// The basic spending rule: a staff member pays a verified supplier below the
-/// threshold, alone. The supplier gets a Coin (kind 3), the intent is
+/// threshold, alone. The supplier gets a Coin (kind 1), the intent is
 /// CONFIRMED on path 2 (settlement app), `PaidUnderPolicy` says which rule
 /// paid it, the allowance's running spend goes up by exactly the amount, and
 /// the money left the business wallet's own address balance and nowhere else.
@@ -738,7 +738,7 @@ fun staff_pays_a_bank_payout_to_the_bound_partner_address() {
 }
 
 #[test]
-/// Kind 2, another Splash business, is credited to its address balance,
+/// Kind 0, another Splash business, is credited to its address balance,
 /// where its own spending rules draw from; no Coin object is sent.
 fun a_splash_business_is_credited_to_its_address_balance() {
     let (mut s, fx) = setup();

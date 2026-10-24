@@ -293,7 +293,7 @@ fun remove_spender_as(s: &mut Scenario, id: ID, sender: address, spender: addres
     ts::return_shared(policy);
 }
 
-/// `sender` verifies `addr` on `domain` as a wallet recipient (kind 3).
+/// `sender` verifies `addr` on `domain` as a wallet recipient (kind 1).
 fun verify_recipient_as(s: &mut Scenario, id: ID, sender: address, domain: u32, addr: address) {
     verify_recipient_kind_as(s, id, sender, domain, addr, payment_intent::kind_wallet());
 }
@@ -1409,7 +1409,7 @@ fun removing_a_spender_at_the_cap_frees_a_place() {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// Recipients (kinds 2-3, on Sui)
+// Recipients (kinds 0-1, on Sui)
 // ════════════════════════════════════════════════════════════════════════════
 
 #[test]
@@ -1507,16 +1507,16 @@ fun a_recipient_cannot_be_verified_as_a_bank_payout() {
 /// Nor as a cross-chain wallet, which no spending rule pays.
 fun a_recipient_cannot_be_verified_as_cross_chain() {
     let (mut s, id) = begin_with_policy();
-    verify_recipient_kind_as(&mut s, id, h::wallet(), SUI, SUPPLIER, payment_intent::kind_cross_chain_wallet());
+    verify_recipient_kind_as(&mut s, id, h::wallet(), SUI, SUPPLIER, payment_intent::kind_cross_chain());
     s.end();
 }
 
 #[test]
 #[expected_failure(abort_code = spend_policy::E_BAD_KIND)]
-/// Zero is never a kind.
-fun a_recipient_cannot_be_verified_as_kind_zero() {
+/// Five is past the last kind (A1 numbers them 0 to 4).
+fun a_recipient_cannot_be_verified_as_kind_five() {
     let (mut s, id) = begin_with_policy();
-    verify_recipient_kind_as(&mut s, id, h::wallet(), SUI, SUPPLIER, 0);
+    verify_recipient_kind_as(&mut s, id, h::wallet(), SUI, SUPPLIER, 5);
     s.end();
 }
 
@@ -1564,7 +1564,7 @@ fun remove_recipient_on_another_domain_aborts() {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// Beneficiaries (kind 1)
+// Beneficiaries (kind 4)
 // ════════════════════════════════════════════════════════════════════════════
 
 #[test]

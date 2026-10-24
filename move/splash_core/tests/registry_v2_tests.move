@@ -1007,8 +1007,8 @@ fun no_settlement_app_is_registered_at_bootstrap() {
 
 #[test]
 #[expected_failure(abort_code = compliance_config::E_NOT_A_BRIDGE_ADAPTER)]
-/// At bootstrap no bridge adapter is registered, so kind 4 cannot settle
-/// (spec section 3: "No bridge adapter is registered in Phase 1").
+/// At bootstrap no bridge adapter is registered, so a cross-chain intent cannot
+/// settle (spec section 3: "No bridge adapter is registered in Phase 1").
 fun no_bridge_adapter_is_registered_at_bootstrap() {
     let mut s = h::setup();
     s.next_tx(h::owner_1());

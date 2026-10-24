@@ -56,8 +56,9 @@ const RP_ID = 'localhost';
 const ORIGIN = 'http://localhost:3000';
 const DAY_MS = 86_400_000;
 const REGISTRY_SETTLEMENT_APP = 2;
-const KIND_SPLASH_BUSINESS = 2;
-const KIND_WALLET = 3;
+// Amendment A1's kinds (payment_intent::KIND_*).
+const KIND_SPLASH_BUSINESS = 0;
+const KIND_WALLET = 1;
 const SUI_DOMAIN = 8;
 const ROLE_STAFF = 1;
 const ROLE_EXECUTOR = 2;
@@ -551,7 +552,7 @@ if (!done('policyRules')) {
   const tx = new Transaction();
   tx.moveCall({ target: `${SPEND}::spend_policy::add_spender`, arguments: [tx.object(POLICY), tx.object(ACCOUNT), tx.pure.address(staff.toSuiAddress()), tx.pure.u8(ROLE_STAFF), tx.pure.u64(1_000_000)] });
   tx.moveCall({ target: `${SPEND}::spend_policy::add_spender`, arguments: [tx.object(POLICY), tx.object(ACCOUNT), tx.pure.address(executor.toSuiAddress()), tx.pure.u8(ROLE_EXECUTOR), tx.pure.u64(1_000_000)] });
-  // Verified with its delivery kind: OWNERS[2] is paid as a wallet, by Coin (kind 3).
+  // Verified with its delivery kind: OWNERS[2] is paid as a wallet, by Coin (kind 1).
   tx.moveCall({ target: `${SPEND}::spend_policy::verify_recipient`, arguments: [tx.object(POLICY), tx.object(ACCOUNT), tx.pure.u32(SUI_DOMAIN), tx.pure.address(OWNERS[2]), tx.pure.u8(KIND_WALLET)] });
   // 0.5 USDC: a payment above it needs a second approval, so the approval path runs on chain with test amounts.
   tx.moveCall({ target: `${SPEND}::spend_policy::set_limits`, arguments: [tx.object(POLICY), tx.object(ACCOUNT), tx.pure.u64(2_000_000), tx.pure.u64(500_000)] });

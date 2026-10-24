@@ -91,8 +91,8 @@ const E_BAD_COMMITMENT:        u64 = 420;
 // ─── v2 ────────────────────────────────────────────────────────────────────
 /// `expires_at` is not in the future, or is more than 30 days away.
 const E_BAD_EXPIRY: u64 = 421;
-/// `kind` is not BANK_PAYOUT, SPLASH_BUSINESS or WALLET (or CROSS_CHAIN_WALLET
-/// on a cross-chain path), or this path does not take that kind.
+/// `kind` is not SPLASH_BUSINESS, WALLET, EXCHANGE or BANK_PAYOUT (or
+/// CROSS_CHAIN on a cross-chain path), or this path does not take that kind.
 const E_INVALID_KIND: u64 = 422;
 /// The destination domain does not fit: a cross-chain payment lands anywhere
 /// but domain 8 (Sui).
@@ -146,11 +146,17 @@ const STATUS_CONFIRMED: u8 = 1;
 const STATUS_EXPIRED:   u8 = 2;
 const STATUS_CANCELED:  u8 = 3;
 
-// ─── Kinds (v2). Zero is never a kind, so a missing value cannot read as one.
-const KIND_BANK_PAYOUT: u8 = 1;
-const KIND_SPLASH_BUSINESS: u8 = 2;
-const KIND_WALLET: u8 = 3;
-const KIND_CROSS_CHAIN_WALLET: u8 = 4;
+// ─── Kinds (Amendment A1). Splash's fee schedule is indexed by them. ─────────
+/// Another Splash business: a registered business wallet.
+const KIND_SPLASH_BUSINESS: u8 = 0;
+/// A wallet on Sui the business has shown it owns.
+const KIND_WALLET: u8 = 1;
+/// A supported exchange's deposit address on Sui.
+const KIND_EXCHANGE: u8 = 2;
+/// USDC burned through CCTP to another chain.
+const KIND_CROSS_CHAIN: u8 = 3;
+/// A payout partner's deposit address, for a bank beneficiary.
+const KIND_BANK_PAYOUT: u8 = 4;
 
 /// Sui's CCTP domain. Every payment that is not cross-chain lands here.
 const SUI_DOMAIN: u32 = 8;
@@ -192,7 +198,8 @@ public struct PaymentIntent has key {
     /// carries: blake2b256(tag || bcs(payload) || salt), computed off-chain.
     /// The payload and the salt live in the Seal bundle, never here.
     commitment: vector<u8>,
-    /// v2. BANK_PAYOUT, SPLASH_BUSINESS, WALLET or CROSS_CHAIN_WALLET.
+    /// v2. SPLASH_BUSINESS (0), WALLET (1), EXCHANGE (2), CROSS_CHAIN (3) or
+    /// BANK_PAYOUT (4), as the intent declares it.
     kind: u8,
     /// v2. The CCTP domain the funds land on: 8 for Sui.
     destination_domain: u32,
@@ -348,23 +355,24 @@ fun assert_lifetime(expires_at: u64, now: u64) {
     assert!(expires_at - now <= MAX_INTENT_LIFETIME_MS, E_BAD_EXPIRY);
 }
 
-/// A kind that lands on Sui: bank payout, Splash business or wallet.
+/// A kind that lands on Sui: Splash business, wallet, exchange or bank
+/// payout. Every kind but cross-chain.
 fun assert_sui_kind(kind: u8) {
-    assert!(kind >= KIND_BANK_PAYOUT && kind <= KIND_WALLET, E_INVALID_KIND);
+    assert!(kind <= KIND_BANK_PAYOUT && kind != KIND_CROSS_CHAIN, E_INVALID_KIND);
 }
 
 /// Paying an address on Sui needs an intent that lands on Sui.
 fun assert_lands_on_sui(intent: &PaymentIntent) {
-    assert!(intent.kind != KIND_CROSS_CHAIN_WALLET, E_CROSS_CHAIN_ONLY);
+    assert!(intent.kind != KIND_CROSS_CHAIN, E_CROSS_CHAIN_ONLY);
     assert!(intent.destination_domain == SUI_DOMAIN, E_CROSS_CHAIN_ONLY);
 }
 
 fun assert_cross_chain(intent: &PaymentIntent) {
-    assert!(intent.kind == KIND_CROSS_CHAIN_WALLET, E_NOT_CROSS_CHAIN);
+    assert!(intent.kind == KIND_CROSS_CHAIN, E_NOT_CROSS_CHAIN);
     assert!(intent.destination_domain != SUI_DOMAIN, E_NOT_CROSS_CHAIN);
 }
 
-/// The least a bank payout (kind 1) may be on the v2 paths: the larger of the
+/// The least a bank payout (kind 4) may be on the v2 paths: the larger of the
 /// platform minimum (`business_account::min_transfer_minor`, 99 USDC) and the
 /// compliance floor (`ComplianceConfig.min_settlement_amount`), which
 /// `ComplianceCap` can only raise and `AdminCap` can lower. Wallet transfers,
@@ -434,7 +442,7 @@ public fun create_cross_chain_for_wallet<T>(
     assert!(destination_domain != SUI_DOMAIN, E_BAD_DOMAIN);
     open<T>(
         account, config, wallet, payment_ref, mint_recipient, vector[], amount, b"USDC".to_string(),
-        UNIT_FX_RATE, commitment, KIND_CROSS_CHAIN_WALLET, destination_domain, rail_commitment,
+        UNIT_FX_RATE, commitment, KIND_CROSS_CHAIN, destination_domain, rail_commitment,
         bridge_max_fee, bridge_min_finality, expires_at, clock, ctx,
     )
 }
@@ -522,7 +530,7 @@ fun open<T>(
     };
     // Nothing but a cross-chain intent carries bridge parameters, and its fee
     // ceiling must leave something to arrive.
-    if (kind == KIND_CROSS_CHAIN_WALLET) {
+    if (kind == KIND_CROSS_CHAIN) {
         assert!(bridge_max_fee < amount, E_BAD_BRIDGE_FEE);
     };
 
@@ -736,11 +744,11 @@ fun settle_for_account<T>(
 
 /// Hand the funds to the recipient, in the form the recipient can use.
 ///
-/// Another Splash business (kind 2) is credited to its address balance, where
-/// its own spending rules draw from. A partner or exchange deposit address,
-/// or a wallet (kinds 1 and 3), receives a coin object, which every deposit
-/// system recognises; address-balance deposit detection is not confirmed for
-/// them.
+/// Another Splash business (kind 0) is credited to its address balance, where
+/// its own spending rules draw from. A wallet, an exchange or a partner
+/// deposit address (kinds 1, 2 and 4) receives a coin object, which every
+/// deposit system recognises; address-balance deposit detection is not
+/// confirmed for them.
 fun deliver_coin<T>(intent: &PaymentIntent, paid: Coin<T>) {
     if (intent.kind == KIND_SPLASH_BUSINESS) coin::send_funds(paid, intent.recipient)
     else transfer::public_transfer(paid, intent.recipient)
@@ -912,10 +920,11 @@ public fun is_expired(intent: &PaymentIntent, clock: &Clock): bool {
     clock::timestamp_ms(clock) >= intent.expires_at
 }
 
-public fun kind_bank_payout(): u8          { KIND_BANK_PAYOUT }
 public fun kind_splash_business(): u8      { KIND_SPLASH_BUSINESS }
 public fun kind_wallet(): u8               { KIND_WALLET }
-public fun kind_cross_chain_wallet(): u8   { KIND_CROSS_CHAIN_WALLET }
+public fun kind_exchange(): u8             { KIND_EXCHANGE }
+public fun kind_cross_chain(): u8          { KIND_CROSS_CHAIN }
+public fun kind_bank_payout(): u8          { KIND_BANK_PAYOUT }
 public fun sui_domain(): u32               { SUI_DOMAIN }
 public fun max_intent_lifetime_ms(): u64   { MAX_INTENT_LIFETIME_MS }
 public fun path_business_wallet(): u8      { PATH_BUSINESS_WALLET }

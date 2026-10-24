@@ -468,7 +468,7 @@ const ABORT_CODES: Record<number, string> = {
 
   // ── payment_intent: v2 ───────────────────────────────────────────────────
   421: 'E_BAD_EXPIRY — expires_at must be in the future and no more than 30 days away.',
-  422: 'E_INVALID_KIND — kind must be 1 (bank payout), 2 (Splash business), 3 (wallet) or 4 (cross-chain wallet), and a path that pays an address on Sui does not take kind 4.',
+  422: 'E_INVALID_KIND — kind must be 0 (Splash business), 1 (wallet), 2 (exchange), 3 (cross-chain) or 4 (bank payout), and a path that pays an address on Sui does not take kind 3.',
   423: 'E_BAD_DOMAIN — the destination domain does not fit the kind: a payment on Sui lands on CCTP domain 8, a cross-chain one on any other domain.',
   424: 'E_BAD_RAIL_COMMITMENT — the rail commitment is not 32 bytes. It is blake2b256(splash:rail:v1 || bcs(payload) || salt); see docs/commitments.md.',
   425: 'E_CROSS_CHAIN_ONLY — this is a cross-chain intent. It settles only through a _cross_chain path, which hands the coin to a bridge adapter.',
@@ -524,7 +524,7 @@ const ABORT_CODES: Record<number, string> = {
   1059: 'E_BAD_LIMIT — a per-payment maximum of zero would refuse every payment.',
   1060: 'E_UNKNOWN_ROLE — a spender role is 1 (staff) or 2 (scheduled-payment operator).',
   1061: 'E_NOT_ON_SUI — a spending rule pays only on Sui (CCTP domain 8). A recipient on another chain is paid from the business wallet, not verified on the rule.',
-  1062: 'E_BAD_KIND — a recipient on a spending rule is verified as 2 (a business on Splash) or 3 (a wallet or exchange address). A bank payout partner is bound to its beneficiary with verify_beneficiary.',
+  1062: 'E_BAD_KIND — a recipient on a spending rule is verified as 0 (a business on Splash) or 1 (a wallet or exchange address). A bank payout partner is bound to its beneficiary with verify_beneficiary.',
   1063: 'E_ASSET_NOT_ACCEPTED — a spending rule can be made only in an asset the compliance config accepts (USDC). Nothing was created, so the wallet can make its rule in USDC.',
   1064: 'E_POLICY_NOT_CURRENT — this spending rule is not the account current one: the business wallet has rotated, or another account was passed. An old rule can only be cut back; the new wallet sets up its own.',
   1065: 'E_ACCOUNT_FROZEN — the account is frozen, so its spending rule can be cut back but not widened, and no new allowance is issued, until it thaws.',

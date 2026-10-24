@@ -22,7 +22,7 @@
 /// package's `SettleWitness` because it is on that config's settlement-app
 /// registry, and pays the intent's recipient in the same call.
 ///
-/// A spending rule pays only on Sui (kinds 1–3). A cross-chain payment
+/// A spending rule pays only on Sui (kinds 0, 1 and 4). A cross-chain payment
 /// would have to hand the business's coin to the spender's transaction for
 /// a bridge to burn, so it stays on the owners' multisig
 /// (`payment_intent::confirm_cross_chain_from_business_wallet`).
@@ -135,7 +135,7 @@ const E_SETTLE_BY_AFTER_APPROVAL: u64 = 1027;
 /// The compliance config is not the one this policy was created against.
 const E_WRONG_CONFIG: u64 = 1028;
 /// The recipient is a partner deposit address (decision 2). It is paid only
-/// as a bank payout (kind 1) for a verified beneficiary bound to it.
+/// as a bank payout (kind 4) for a verified beneficiary bound to it.
 const E_PARTNER_DEPOSIT_NOT_BANK_PAYOUT: u64 = 1029;
 
 /// What an allowance accepted under a policy must be named: this prefix and
@@ -394,7 +394,7 @@ fun mint(
     assert!(payment_intent::is_pending(intent), E_NOT_PAYABLE);
     assert!(clock.timestamp_ms() < payment_intent::expires_at(intent), E_NOT_PAYABLE);
     // An approval that no spending rule could ever use is refused, not minted.
-    assert!(payment_intent::kind(intent) != payment_intent::kind_cross_chain_wallet(), E_WRONG_PAY_PATH);
+    assert!(payment_intent::kind(intent) != payment_intent::kind_cross_chain(), E_WRONG_PAY_PATH);
     assert!(settle_by_ms > clock.timestamp_ms(), E_BAD_SETTLE_BY);
     assert!(settle_by_ms <= payment_intent::expires_at(intent), E_BAD_SETTLE_BY);
 
@@ -459,7 +459,7 @@ public fun pay_intent<C>(
     clock: &Clock,
     ctx: &mut TxContext,
 ): SettleReceipt {
-    assert!(payment_intent::kind(intent) != payment_intent::kind_cross_chain_wallet(), E_WRONG_PAY_PATH);
+    assert!(payment_intent::kind(intent) != payment_intent::kind_cross_chain(), E_WRONG_PAY_PATH);
     let funds = draw(allowance, withdrawal, intent, account, policy, config, approval, settle_by_ms, clock, ctx);
     payment_intent::settle_from_app<C, SettleWitness>(
         SettleWitness {},

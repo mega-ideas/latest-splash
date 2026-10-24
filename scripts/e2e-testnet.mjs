@@ -108,7 +108,7 @@ const PAYMENT_MINOR = 10_000;
 const FX_RATE_SCALED = 1_000_000;
 // payment_intent::KIND_WALLET, and business_account::E_NOT_THE_WALLET.
 // tests/e2e-verify-abi.test.mjs holds both to the source.
-const KIND_WALLET = 3;
+const KIND_WALLET = 1;
 const E_NOT_THE_WALLET = 50;
 const INTENT_LIFETIME_MS = 3_600_000;
 const SETTLE_WINDOW_MS = 1_800_000;
@@ -584,7 +584,7 @@ function intentValues(wallet, recipient) {
   return { commitment, rail, paymentRef };
 }
 
-/** payment_intent::create_for_wallet<USDC>, a kind-3 (wallet) intent. */
+/** payment_intent::create_for_wallet<USDC>, a kind-1 (wallet) intent. */
 function openForWallet(tx, { recipient, commitment, rail, paymentRef }) {
   const now = Date.now();
   const [intent] = tx.moveCall({
