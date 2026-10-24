@@ -743,6 +743,46 @@ public fun settle_from_app<T, W: drop>(
     (receipt(intent, now), kind, fee)
 }
 
+/// Test builds only; never publishes (the A1 review). `settle_from_app`,
+/// exactly, but handing back `reported_fee` in place of the fee it
+/// charged. A published core cannot hand back a fee above its own 1%
+/// clamp, so this stands in for one that did: splash_spend's tests use it
+/// to show that splash_spend's own ceiling, checked on the fee core hands
+/// back, refuses it. Named `…_from_app` so check:spend reads it as a
+/// settle call and holds it to the same rules.
+#[test_only]
+public fun settle_reporting_fee_from_app<T, W: drop>(
+    witness: W,
+    intent: &mut PaymentIntent,
+    account: &mut BusinessAccount,
+    config: &ComplianceConfig,
+    fee_cfg: &FeeConfig,
+    registry: &Registry,
+    declared_kind: u8,
+    funds: Balance<T>,
+    max_fee: u64,
+    settle_by_ms: u64,
+    reported_fee: u64,
+    clock: &Clock,
+    ctx: &mut TxContext,
+): (SettleReceipt, u8, u64) {
+    let (receipt, kind, _charged) = settle_from_app<T, W>(
+        witness,
+        intent,
+        account,
+        config,
+        fee_cfg,
+        registry,
+        declared_kind,
+        funds,
+        max_fee,
+        settle_by_ms,
+        clock,
+        ctx,
+    );
+    (receipt, kind, reported_fee)
+}
+
 /// Discharge a bridge obligation. Only a registered bridge adapter can, and
 /// only with the very coin the settlement released, in its type and amount.
 /// It gets back exactly what it must burn: the amount, the domain, the

@@ -511,14 +511,14 @@ public fun discard_approval(approval: PayoutApproval) {
 /// Splash's. The intent lands on Sui, and core pays its recipient in this
 /// call; a cross-chain intent is refused.
 ///
-/// The fee (A1 §2.6). `draw` derives the kind and computes the fee, and
-/// refuses it above `max_fee`, above this package's own 1% ceiling, or with
-/// the principal above an approval's `max_total`. Core charges the same fee
-/// to its fee recipient inside its settle path, and sends the unused part
-/// of `max_fee` to `business_account::wallet(account)`, which `draw` has
-/// checked is this policy's wallet; never to the spender. The fee core
-/// actually charged is checked against the ceiling again here, and
-/// `RuleSpend` records it.
+/// The fee (A1 §2.6). `draw` refuses a `max_fee` above this package's own
+/// 1% ceiling, derives the kind and computes the fee, and refuses it above
+/// `max_fee` or with the principal above an approval's `max_total`. Core
+/// charges the same fee to its fee recipient inside its settle path, and
+/// sends the unused part of `max_fee` to `business_account::wallet(account)`,
+/// which `draw` has checked is this policy's wallet; never to the spender.
+/// `close_rule_payment` then checks the fee core hands back against this
+/// package's own ceiling, and `RuleSpend` records it.
 ///
 /// The kind declared to core is the recipient's tag in the policy, or a bank
 /// payout for a beneficiary bound to its partner deposit address (A1 §2.3);
@@ -570,7 +570,25 @@ public fun pay_intent<C>(
         clock,
         ctx,
     );
-    // This package's own ceiling, on what core charged.
+    close_rule_payment(policy, intent, allowance, approval_id, derived_kind, fee, ctx);
+    receipt
+}
+
+/// Once core has settled a rule payment: the fee core hands back as the fee
+/// it charged is checked against this package's own ceiling, 1% of the
+/// principal (A1 §2.6), and the payment is recorded in `RuleSpend`. This
+/// is the check that holds whatever a later core does, since it uses this
+/// package's own constant. `pay_intent` and its test-only twin both end
+/// here, so the check the tests show biting is the one that runs.
+fun close_rule_payment<C>(
+    policy: &SpendPolicy,
+    intent: &PaymentIntent,
+    allowance: &Allowance<Balance<C>>,
+    approval_id: Option<ID>,
+    derived_kind: u8,
+    fee: u64,
+    ctx: &TxContext,
+) {
     assert!(fee <= fee_ceiling(payment_intent::amount_usd(intent)), E_FEE_ABOVE_CEILING);
     event::emit(RuleSpend {
         policy_id: object::id(policy),
@@ -582,6 +600,65 @@ public fun pay_intent<C>(
         derived_kind,
         fee,
     });
+}
+
+/// Test builds only; never publishes (the A1 review). `pay_intent`, line for
+/// line, but settling through core's test-only
+/// `payment_intent::settle_reporting_fee_from_app`, which hands back
+/// `reported_fee` as the fee it charged. No published core can hand back a
+/// fee above its own 1% clamp; this stands in for one that did, so a test
+/// can show `close_rule_payment` refusing it.
+#[test_only]
+public fun pay_intent_reporting_fee_for_testing<C>(
+    allowance: &mut Allowance<Balance<C>>,
+    withdrawal: AllowanceWithdrawal<Balance<C>>,
+    intent: &mut PaymentIntent,
+    account: &mut BusinessAccount,
+    policy: &mut SpendPolicy,
+    config: &ComplianceConfig,
+    fee_cfg: &FeeConfig,
+    registry: &Registry,
+    approval: Option<PayoutApproval>,
+    max_fee: u64,
+    settle_by_ms: u64,
+    reported_fee: u64,
+    clock: &Clock,
+    ctx: &mut TxContext,
+): SettleReceipt {
+    assert!(payment_intent::kind(intent) != payment_intent::kind_cross_chain(), E_WRONG_PAY_PATH);
+    let approval_id = if (approval.is_some()) option::some(object::id(approval.borrow())) else option::none();
+    let funds = draw(
+        allowance,
+        withdrawal,
+        intent,
+        account,
+        policy,
+        config,
+        fee_cfg,
+        registry,
+        approval,
+        max_fee,
+        settle_by_ms,
+        clock,
+        ctx,
+    );
+    let declared = declared_kind(policy, intent);
+    let (receipt, derived_kind, fee) = payment_intent::settle_reporting_fee_from_app<C, SettleWitness>(
+        SettleWitness {},
+        intent,
+        account,
+        config,
+        fee_cfg,
+        registry,
+        declared,
+        funds,
+        max_fee,
+        settle_by_ms,
+        reported_fee,
+        clock,
+        ctx,
+    );
+    close_rule_payment(policy, intent, allowance, approval_id, derived_kind, fee, ctx);
     receipt
 }
 
@@ -648,11 +725,12 @@ fun draw<C>(
     // from the same FeeConfig, in this transaction. max_fee itself is
     // within that ceiling first (the A1 review): the allowance counts all
     // of the principal and max_fee, so a spender cannot use up a rule's
-    // caps on fee headroom that comes back to the wallet.
+    // caps on fee headroom that comes back to the wallet. A fee within
+    // max_fee is then within the ceiling too; `close_rule_payment` checks
+    // the fee core hands back against it once more.
     assert!(max_fee <= fee_ceiling(amount), E_MAX_FEE_ABOVE_CEILING);
     let fee = fee_config::splash_fee(fee_cfg, object::id(account), derived, amount);
     assert!(fee <= max_fee, E_FEE_ABOVE_MAX);
-    assert!(fee <= fee_ceiling(amount), E_FEE_ABOVE_CEILING);
 
     // Approvals: the owners', when this payment takes what the payer has
     // paid this recipient above the threshold (decision 4), and for an
@@ -830,6 +908,11 @@ public fun approval_settle_by_ms(a: &PayoutApproval): u64 { a.settle_by_ms }
 
 #[test_only]
 public fun fee_ceiling_bps_for_testing(): u64 { FEE_CEILING_BPS }
+
+#[test_only]
+/// This package's own ceiling on `principal`, as `draw` and
+/// `close_rule_payment` compute it.
+public fun fee_ceiling_for_testing(principal: u64): u64 { fee_ceiling(principal) }
 
 #[test_only]
 /// Lets a test read what `RuleSpend` carries.
