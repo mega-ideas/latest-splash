@@ -445,7 +445,7 @@ fun pay_in_tx(s: &mut Scenario, account: ID, policy: ID, alw: ID, intent: ID, ap
     let mut allowance = s.take_shared_by_id<Allowance<Balance<USDC>>>(alw);
     let mut intent = s.take_shared_by_id<PaymentIntent>(intent);
     let mut account = s.take_shared_by_id<BusinessAccount>(account);
-    let policy = s.take_shared_by_id<SpendPolicy>(policy);
+    let mut policy = s.take_shared_by_id<SpendPolicy>(policy);
     let config = s.take_shared<ComplianceConfig>();
     let c = s.take_shared<Clock>();
     let amount = payment_intent::amount_usd(&intent);
@@ -455,7 +455,7 @@ fun pay_in_tx(s: &mut Scenario, account: ID, policy: ID, alw: ID, intent: ID, ap
         &mut allowance,
         &mut intent,
         &mut account,
-        &policy,
+        &mut policy,
         &config,
         approval,
         h::wallet(),
@@ -478,7 +478,7 @@ fun pay_objects(
     alw: &mut Allowance<Balance<USDC>>,
     intent: &mut PaymentIntent,
     account: &mut BusinessAccount,
-    policy: &SpendPolicy,
+    policy: &mut SpendPolicy,
     config: &ComplianceConfig,
     approval: Option<PayoutApproval>,
     from: address,
@@ -627,7 +627,7 @@ fun staff_pays_a_verified_wallet_below_the_threshold() {
         let mut alw = s.take_shared_by_id<Allowance<Balance<USDC>>>(fx.staff);
         let mut intent = s.take_shared_by_id<PaymentIntent>(intent_id);
         let mut account = s.take_shared_by_id<BusinessAccount>(fx.account);
-        let policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
+        let mut policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
         let config = s.take_shared<ComplianceConfig>();
         let c = s.take_shared<Clock>();
         assert_eq!(allowance::allowance_current_spend(&alw), 0);
@@ -637,7 +637,7 @@ fun staff_pays_a_verified_wallet_below_the_threshold() {
             &mut alw,
             &mut intent,
             &mut account,
-            &policy,
+            &mut policy,
             &config,
             option::none(),
             h::wallet(),
@@ -686,7 +686,7 @@ fun staff_creates_and_pays_in_the_same_transaction() {
     {
         let mut alw = s.take_shared_by_id<Allowance<Balance<USDC>>>(fx.staff);
         let mut account = s.take_shared_by_id<BusinessAccount>(fx.account);
-        let policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
+        let mut policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
         let config = s.take_shared<ComplianceConfig>();
         let c = s.take_shared<Clock>();
         let mut intent = create_now<USDC>(
@@ -705,7 +705,7 @@ fun staff_creates_and_pays_in_the_same_transaction() {
             &mut alw,
             &mut intent,
             &mut account,
-            &policy,
+            &mut policy,
             &config,
             option::none(),
             h::wallet(),
@@ -1174,7 +1174,7 @@ fun paying_in_another_asset_aborts() {
         let mut alw = s.take_shared_by_id<Allowance<Balance<OTHER>>>(other_alw);
         let mut intent = s.take_shared_by_id<PaymentIntent>(intent_id);
         let mut account = s.take_shared_by_id<BusinessAccount>(fx.account);
-        let policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
+        let mut policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
         let config = s.take_shared<ComplianceConfig>();
         let c = s.take_shared<Clock>();
         let w = allowance::new_withdrawal_for_testing(other_alw, ts::withdraw_balance_from_address<OTHER>(h::wallet(), PAY));
@@ -1183,7 +1183,7 @@ fun paying_in_another_asset_aborts() {
             w,
             &mut intent,
             &mut account,
-            &policy,
+            &mut policy,
             &config,
             option::none(),
             h::settle_by(&c),
@@ -1297,14 +1297,14 @@ fun an_allowance_from_another_funder_aborts() {
         let mut alw = s.take_shared_by_id<Allowance<Balance<USDC>>>(foreign);
         let mut intent = s.take_shared_by_id<PaymentIntent>(intent_id);
         let mut account = s.take_shared_by_id<BusinessAccount>(fx.account);
-        let policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
+        let mut policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
         let config = s.take_shared<ComplianceConfig>();
         let c = s.take_shared<Clock>();
         pay_objects(
             &mut alw,
             &mut intent,
             &mut account,
-            &policy,
+            &mut policy,
             &config,
             option::none(),
             h::owner_2(),
@@ -1411,14 +1411,14 @@ fun a_withdrawal_from_another_address_cannot_be_drawn() {
         let mut alw = s.take_shared_by_id<Allowance<Balance<USDC>>>(fx.staff);
         let mut intent = s.take_shared_by_id<PaymentIntent>(intent_id);
         let mut account = s.take_shared_by_id<BusinessAccount>(fx.account);
-        let policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
+        let mut policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
         let config = s.take_shared<ComplianceConfig>();
         let c = s.take_shared<Clock>();
         pay_objects(
             &mut alw,
             &mut intent,
             &mut account,
-            &policy,
+            &mut policy,
             &config,
             option::none(),
             h::owner_2(),
@@ -1443,14 +1443,14 @@ fun pay_drawing(s: &mut Scenario, fx: &Fx, intent_id: ID, drawn: u64) {
     let mut alw = s.take_shared_by_id<Allowance<Balance<USDC>>>(fx.staff);
     let mut intent = s.take_shared_by_id<PaymentIntent>(intent_id);
     let mut account = s.take_shared_by_id<BusinessAccount>(fx.account);
-    let policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
+    let mut policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
     let config = s.take_shared<ComplianceConfig>();
     let c = s.take_shared<Clock>();
     pay_objects(
         &mut alw,
         &mut intent,
         &mut account,
-        &policy,
+        &mut policy,
         &config,
         option::none(),
         h::wallet(),
@@ -1874,7 +1874,7 @@ fun pay_approved_by(s: &mut Scenario, fx: &Fx, payer: address, alw: ID, intent_i
     let mut allowance = s.take_shared_by_id<Allowance<Balance<USDC>>>(alw);
     let mut intent = s.take_shared_by_id<PaymentIntent>(intent_id);
     let mut account = s.take_shared_by_id<BusinessAccount>(fx.account);
-    let policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
+    let mut policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
     let config = s.take_shared<ComplianceConfig>();
     let c = s.take_shared<Clock>();
     let amount = payment_intent::amount_usd(&intent);
@@ -1882,7 +1882,7 @@ fun pay_approved_by(s: &mut Scenario, fx: &Fx, payer: address, alw: ID, intent_i
         &mut allowance,
         &mut intent,
         &mut account,
-        &policy,
+        &mut policy,
         &config,
         approval,
         h::wallet(),
@@ -2561,14 +2561,14 @@ fun pay_with_settle_by(s: &mut Scenario, fx: &Fx, intent_id: ID, ahead: u64) {
     let mut alw = s.take_shared_by_id<Allowance<Balance<USDC>>>(fx.staff);
     let mut intent = s.take_shared_by_id<PaymentIntent>(intent_id);
     let mut account = s.take_shared_by_id<BusinessAccount>(fx.account);
-    let policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
+    let mut policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
     let config = s.take_shared<ComplianceConfig>();
     let c = s.take_shared<Clock>();
     pay_objects(
         &mut alw,
         &mut intent,
         &mut account,
-        &policy,
+        &mut policy,
         &config,
         option::none(),
         h::wallet(),
@@ -2793,7 +2793,7 @@ fun pay_with_config(s: &mut Scenario, fx: &Fx, config: ID, payer: address, alw: 
     let mut allowance = s.take_shared_by_id<Allowance<Balance<USDC>>>(alw);
     let mut intent = s.take_shared_by_id<PaymentIntent>(intent);
     let mut account = s.take_shared_by_id<BusinessAccount>(fx.account);
-    let policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
+    let mut policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
     let config = s.take_shared_by_id<ComplianceConfig>(config);
     let c = s.take_shared<Clock>();
     let amount = payment_intent::amount_usd(&intent);
@@ -2801,7 +2801,7 @@ fun pay_with_config(s: &mut Scenario, fx: &Fx, config: ID, payer: address, alw: 
         &mut allowance,
         &mut intent,
         &mut account,
-        &policy,
+        &mut policy,
         &config,
         option::none(),
         h::wallet(),
@@ -2938,6 +2938,357 @@ fun the_allowance_name_is_the_policy_id() {
         expected.append(fx.policy.to_address().to_string());
         assert_eq!(splash_spend::allowance_name(&policy), expected);
         ts::return_shared(policy);
+    };
+    s.end();
+}
+
+// ═══ Running totals (decision 4) ════════════════════════════════════════════
+
+/// One unit under the threshold: alone, a payment a staff member makes
+/// without a second approval.
+const UNDER: u64 = 9_999_999_999;
+/// A second bank beneficiary, bound to the same partner deposit address as
+/// the harness's.
+const BENEFICIARY_2: vector<u8> = x"2222222222222222222222222222222222222222222222222222222222222222";
+
+/// What `payer` has paid `to` (for a bank payout, the harness beneficiary)
+/// in the policy's current window, as of now.
+fun total_paid(s: &mut Scenario, fx: &Fx, payer: address, kind: u8, to: address): u64 {
+    let bank = kind == payment_intent::kind_bank_payout();
+    total_paid_to(s, fx, payer, kind, to, if (bank) h::beneficiary() else vector[])
+}
+
+fun total_paid_to(s: &mut Scenario, fx: &Fx, payer: address, kind: u8, to: address, beneficiary: vector<u8>): u64 {
+    s.next_tx(STRANGER);
+    let policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
+    let c = s.take_shared<Clock>();
+    let total = spend_policy::running_total(&policy, payer, kind, to, beneficiary, c.timestamp_ms());
+    ts::return_shared(c);
+    ts::return_shared(policy);
+    total
+}
+
+/// STAFF opens a bank payout to `to` for `beneficiary` and shares it.
+fun open_bank(s: &mut Scenario, fx: &Fx, n: u8, to: address, beneficiary: vector<u8>, amount: u64): ID {
+    s.next_tx(STAFF);
+    let policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
+    let mut account = s.take_shared_by_id<BusinessAccount>(fx.account);
+    let config = s.take_shared<ComplianceConfig>();
+    let c = s.take_shared<Clock>();
+    let intent = splash_spend::create_intent<USDC>(
+        &policy,
+        &mut account,
+        &config,
+        h::payment_ref(n),
+        to,
+        beneficiary,
+        amount,
+        0,
+        b"PHP".to_string(),
+        56_000_000,
+        h::commitment(),
+        payment_intent::kind_bank_payout(),
+        h::rail(),
+        c.timestamp_ms() + INTENT_LIFE,
+        &c,
+        s.ctx(),
+    );
+    let id = object::id(&intent);
+    payment_intent::share_intent(intent);
+    ts::return_shared(c);
+    ts::return_shared(config);
+    ts::return_shared(account);
+    ts::return_shared(policy);
+    id
+}
+
+/// The wallet sets the policy's running-total window.
+fun set_window(s: &mut Scenario, fx: &Fx, window_ms: u64) {
+    let mut p = wallet_policy(s, fx);
+    let account = s.take_shared_by_id<BusinessAccount>(fx.account);
+    p.set_running_window(&account, window_ms, s.ctx());
+    ts::return_shared(account);
+    ts::return_shared(p);
+}
+
+#[test]
+#[expected_failure(abort_code = splash_spend::E_APPROVAL_REQUIRED)]
+/// Decision 4, Sky's first case: one invoice split in two. Each part is one
+/// unit under the threshold, to the same recipient, by the same staff member,
+/// in the same window. Alone each would pass; together they are above the
+/// threshold, so the second part needs an owner's approval.
+fun the_second_half_of_a_split_payment_needs_an_approval() {
+    let (mut s, fx) = setup();
+    let first = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, UNDER);
+    let second = open(&mut s, &fx, STAFF, 2, payment_intent::kind_wallet(), SUPPLIER, UNDER);
+    pay(&mut s, &fx, STAFF, fx.staff, first, false);
+    pay(&mut s, &fx, STAFF, fx.staff, second, false);
+    s.end();
+}
+
+#[test]
+/// With an owner's approval the second part goes through, and the window
+/// now holds both parts.
+fun an_owner_approval_lets_the_second_half_through() {
+    let (mut s, fx) = setup();
+    let first = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, UNDER);
+    let second = open(&mut s, &fx, STAFF, 2, payment_intent::kind_wallet(), SUPPLIER, UNDER);
+    pay(&mut s, &fx, STAFF, fx.staff, first, false);
+    assert_eq!(total_paid(&mut s, &fx, STAFF, payment_intent::kind_wallet(), SUPPLIER), UNDER);
+    approve(&mut s, &fx, h::owner_2(), second, STAFF);
+    pay(&mut s, &fx, STAFF, fx.staff, second, true);
+    assert_eq!(total_paid(&mut s, &fx, STAFF, payment_intent::kind_wallet(), SUPPLIER), 2 * UNDER);
+    assert_eq!(intent_status(&mut s, second), payment_intent::status_confirmed());
+    s.end();
+}
+
+#[test]
+/// Decision 4, Sky's second case: the window is fixed and anchored at the
+/// first payment in it. Exactly a window after that payment, at the
+/// boundary, the window restarts at the new payment, so the second part pays
+/// alone and the new window holds only it.
+fun at_the_window_boundary_the_second_half_pays_alone() {
+    let (mut s, fx) = setup();
+    let first = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, UNDER);
+    pay(&mut s, &fx, STAFF, fx.staff, first, false);
+    advance(&mut s, spend_policy::default_running_window_ms());
+    assert_eq!(total_paid(&mut s, &fx, STAFF, payment_intent::kind_wallet(), SUPPLIER), 0);
+    let second = open(&mut s, &fx, STAFF, 2, payment_intent::kind_wallet(), SUPPLIER, UNDER);
+    pay(&mut s, &fx, STAFF, fx.staff, second, false);
+    assert_eq!(total_paid(&mut s, &fx, STAFF, payment_intent::kind_wallet(), SUPPLIER), UNDER);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = splash_spend::E_APPROVAL_REQUIRED)]
+/// One millisecond before the boundary the first part still counts.
+fun one_millisecond_before_the_boundary_the_first_half_still_counts() {
+    let (mut s, fx) = setup();
+    let first = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, UNDER);
+    let second = open(&mut s, &fx, STAFF, 2, payment_intent::kind_wallet(), SUPPLIER, UNDER);
+    pay(&mut s, &fx, STAFF, fx.staff, first, false);
+    advance(&mut s, spend_policy::default_running_window_ms() - 1);
+    assert_eq!(total_paid(&mut s, &fx, STAFF, payment_intent::kind_wallet(), SUPPLIER), UNDER);
+    pay(&mut s, &fx, STAFF, fx.staff, second, false);
+    s.end();
+}
+
+#[test]
+/// The window does not slide: it is anchored at its first payment, not at
+/// the latest. A second payment late in the window does not carry the first
+/// one's amount into the next window.
+fun the_window_is_anchored_at_its_first_payment() {
+    let (mut s, fx) = setup();
+    let first = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    pay(&mut s, &fx, STAFF, fx.staff, first, false);
+    advance(&mut s, spend_policy::default_running_window_ms() - 1);
+    let second = open(&mut s, &fx, STAFF, 2, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    pay(&mut s, &fx, STAFF, fx.staff, second, false);
+    assert_eq!(total_paid(&mut s, &fx, STAFF, payment_intent::kind_wallet(), SUPPLIER), 2 * PAY);
+    advance(&mut s, 1);
+    assert_eq!(total_paid(&mut s, &fx, STAFF, payment_intent::kind_wallet(), SUPPLIER), 0);
+    s.end();
+}
+
+#[test]
+/// Decision 4, Sky's third case: different recipients are independent. The
+/// same staff member pays a supplier's wallet and another Splash business
+/// one unit under the threshold each, in the same window, alone.
+fun different_recipients_keep_separate_totals() {
+    let (mut s, fx) = setup();
+    let a = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, UNDER);
+    let b = open(&mut s, &fx, STAFF, 2, payment_intent::kind_splash_business(), BUSINESS, UNDER);
+    pay(&mut s, &fx, STAFF, fx.staff, a, false);
+    pay(&mut s, &fx, STAFF, fx.staff, b, false);
+    assert_eq!(total_paid(&mut s, &fx, STAFF, payment_intent::kind_wallet(), SUPPLIER), UNDER);
+    assert_eq!(total_paid(&mut s, &fx, STAFF, payment_intent::kind_splash_business(), BUSINESS), UNDER);
+    s.end();
+}
+
+#[test]
+/// For a bank payout the recipient is the beneficiary, not the partner
+/// deposit address: two beneficiaries paid through the same partner keep
+/// separate totals.
+fun two_beneficiaries_at_one_partner_keep_separate_totals() {
+    let (mut s, fx) = setup();
+    {
+        let mut p = wallet_policy(&mut s, &fx);
+        let account = s.take_shared_by_id<BusinessAccount>(fx.account);
+        p.verify_beneficiary(&account, BENEFICIARY_2, h::recipient(), s.ctx());
+        ts::return_shared(account);
+        ts::return_shared(p);
+    };
+    let a = open_bank(&mut s, &fx, 1, h::recipient(), h::beneficiary(), UNDER);
+    let b = open_bank(&mut s, &fx, 2, h::recipient(), BENEFICIARY_2, UNDER);
+    pay(&mut s, &fx, STAFF, fx.staff, a, false);
+    pay(&mut s, &fx, STAFF, fx.staff, b, false);
+    let bank = payment_intent::kind_bank_payout();
+    assert_eq!(total_paid_to(&mut s, &fx, STAFF, bank, h::recipient(), h::beneficiary()), UNDER);
+    assert_eq!(total_paid_to(&mut s, &fx, STAFF, bank, h::recipient(), BENEFICIARY_2), UNDER);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = splash_spend::E_APPROVAL_REQUIRED)]
+/// And the same beneficiary twice in the window is a split payment.
+fun the_same_beneficiary_twice_in_the_window_needs_an_approval() {
+    let (mut s, fx) = setup();
+    let a = open(&mut s, &fx, STAFF, 1, payment_intent::kind_bank_payout(), h::recipient(), UNDER);
+    let b = open(&mut s, &fx, STAFF, 2, payment_intent::kind_bank_payout(), h::recipient(), UNDER);
+    pay(&mut s, &fx, STAFF, fx.staff, a, false);
+    pay(&mut s, &fx, STAFF, fx.staff, b, false);
+    s.end();
+}
+
+#[test]
+/// A total exactly at the threshold is not above it: the parts may add up to
+/// the threshold without an approval.
+fun parts_adding_up_to_exactly_the_threshold_need_no_approval() {
+    let (mut s, fx) = setup();
+    let a = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, THRESHOLD - PAY);
+    let b = open(&mut s, &fx, STAFF, 2, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    pay(&mut s, &fx, STAFF, fx.staff, a, false);
+    pay(&mut s, &fx, STAFF, fx.staff, b, false);
+    assert_eq!(total_paid(&mut s, &fx, STAFF, payment_intent::kind_wallet(), SUPPLIER), THRESHOLD);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = splash_spend::E_APPROVAL_REQUIRED)]
+/// An approved payment still counts toward the total. After a payment above
+/// the threshold, paid with an owner's approval, even a small payment to the
+/// same recipient in the same window needs an approval of its own.
+fun an_approved_payment_still_counts_toward_the_total() {
+    let (mut s, fx) = setup();
+    let big = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, THRESHOLD + 1);
+    let small = open(&mut s, &fx, STAFF, 2, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    approve(&mut s, &fx, h::owner_2(), big, STAFF);
+    pay(&mut s, &fx, STAFF, fx.staff, big, true);
+    assert_eq!(total_paid(&mut s, &fx, STAFF, payment_intent::kind_wallet(), SUPPLIER), THRESHOLD + 1);
+    pay(&mut s, &fx, STAFF, fx.staff, small, false);
+    s.end();
+}
+
+#[test]
+/// The executor's payments count too, in its own total. It always needs the
+/// owners' approval anyway; what it pays is kept per payer, so it does not
+/// use up a staff member's room to the same recipient.
+fun the_executors_payments_count_in_its_own_total() {
+    let (mut s, fx) = setup();
+    let scheduled = open_by_wallet(&mut s, &fx, 1, payment_intent::kind_wallet(), SUPPLIER, UNDER);
+    delegate(&mut s, &fx, h::wallet(), scheduled, EXECUTOR);
+    pay(&mut s, &fx, EXECUTOR, fx.executor, scheduled, true);
+    assert_eq!(total_paid(&mut s, &fx, EXECUTOR, payment_intent::kind_wallet(), SUPPLIER), UNDER);
+    assert_eq!(total_paid(&mut s, &fx, STAFF, payment_intent::kind_wallet(), SUPPLIER), 0);
+    let by_staff = open(&mut s, &fx, STAFF, 2, payment_intent::kind_wallet(), SUPPLIER, UNDER);
+    pay(&mut s, &fx, STAFF, fx.staff, by_staff, false);
+    assert_eq!(total_paid(&mut s, &fx, STAFF, payment_intent::kind_wallet(), SUPPLIER), UNDER);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = splash_spend::E_APPROVAL_REQUIRED)]
+/// Below the threshold, with room left in its total, the executor still
+/// needs the owners' approval for every payment.
+fun the_executor_still_needs_an_approval_inside_its_total() {
+    let (mut s, fx) = setup();
+    let scheduled = open_by_wallet(&mut s, &fx, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    delegate(&mut s, &fx, h::wallet(), scheduled, EXECUTOR);
+    pay(&mut s, &fx, EXECUTOR, fx.executor, scheduled, true);
+    let next = open_by_wallet(&mut s, &fx, 2, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    pay(&mut s, &fx, EXECUTOR, fx.executor, next, false);
+    s.end();
+}
+
+#[test]
+/// Removing a spender ends their grant; the wallet adding them back is a new
+/// one. What they paid under the old grant no longer counts, while they are
+/// off the policy or after they return.
+fun a_removed_and_re_added_spender_starts_a_new_total() {
+    let (mut s, fx) = setup();
+    let first = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, UNDER);
+    pay(&mut s, &fx, STAFF, fx.staff, first, false);
+    {
+        let mut p = wallet_policy(&mut s, &fx);
+        p.remove_spender(STAFF, s.ctx());
+        ts::return_shared(p);
+    };
+    assert_eq!(total_paid(&mut s, &fx, STAFF, payment_intent::kind_wallet(), SUPPLIER), 0);
+    {
+        let mut p = wallet_policy(&mut s, &fx);
+        let account = s.take_shared_by_id<BusinessAccount>(fx.account);
+        p.add_spender(&account, STAFF, spend_policy::role_staff(), STAFF_MAX, s.ctx());
+        ts::return_shared(account);
+        ts::return_shared(p);
+    };
+    assert_eq!(total_paid(&mut s, &fx, STAFF, payment_intent::kind_wallet(), SUPPLIER), 0);
+    let second = open(&mut s, &fx, STAFF, 2, payment_intent::kind_wallet(), SUPPLIER, UNDER);
+    pay(&mut s, &fx, STAFF, fx.staff, second, false);
+    assert_eq!(total_paid(&mut s, &fx, STAFF, payment_intent::kind_wallet(), SUPPLIER), UNDER);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = splash_spend::E_APPROVAL_REQUIRED)]
+/// Removing someone else leaves a spender's total alone: only their own
+/// removal ends it.
+fun removing_another_spender_leaves_a_total_alone() {
+    let (mut s, fx) = setup();
+    let first = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, UNDER);
+    let second = open(&mut s, &fx, STAFF, 2, payment_intent::kind_wallet(), SUPPLIER, UNDER);
+    pay(&mut s, &fx, STAFF, fx.staff, first, false);
+    {
+        let mut p = wallet_policy(&mut s, &fx);
+        p.remove_spender(JUNIOR, s.ctx());
+        ts::return_shared(p);
+    };
+    pay(&mut s, &fx, STAFF, fx.staff, second, false);
+    s.end();
+}
+
+#[test]
+/// A shorter window, set by the wallet, lapses sooner: an hour after the
+/// first part, the second pays alone.
+fun a_shorter_window_lapses_sooner() {
+    let (mut s, fx) = setup();
+    set_window(&mut s, &fx, spend_policy::min_running_window_ms());
+    let first = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, UNDER);
+    let second = open(&mut s, &fx, STAFF, 2, payment_intent::kind_wallet(), SUPPLIER, UNDER);
+    pay(&mut s, &fx, STAFF, fx.staff, first, false);
+    advance(&mut s, spend_policy::min_running_window_ms());
+    pay(&mut s, &fx, STAFF, fx.staff, second, false);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = splash_spend::E_APPROVAL_REQUIRED)]
+/// A longer window keeps counting past a day.
+fun a_longer_window_keeps_counting() {
+    let (mut s, fx) = setup();
+    set_window(&mut s, &fx, 2 * spend_policy::default_running_window_ms());
+    let first = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, UNDER);
+    pay(&mut s, &fx, STAFF, fx.staff, first, false);
+    advance(&mut s, spend_policy::default_running_window_ms());
+    let second = open(&mut s, &fx, STAFF, 2, payment_intent::kind_wallet(), SUPPLIER, UNDER);
+    pay(&mut s, &fx, STAFF, fx.staff, second, false);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = sui::allowance::EExceedsLifetimeCap)]
+/// The allowance cap stays the hard ceiling. Approvals lift the threshold,
+/// never the allowance: with every part approved, a day apart, the parts
+/// still stop at the allowance's 50,000 USDC lifetime cap.
+fun approved_parts_still_stop_at_the_allowance_cap() {
+    let (mut s, fx) = setup();
+    let mut n = 1;
+    // Five approved payments of 10,000 USDC and one unit exceed the cap.
+    while (n <= 5) {
+        let id = open(&mut s, &fx, STAFF, n, payment_intent::kind_wallet(), SUPPLIER, THRESHOLD + 1);
+        approve(&mut s, &fx, h::owner_2(), id, STAFF);
+        pay(&mut s, &fx, STAFF, fx.staff, id, true);
+        advance(&mut s, spend_policy::default_running_window_ms());
+        n = n + 1;
     };
     s.end();
 }

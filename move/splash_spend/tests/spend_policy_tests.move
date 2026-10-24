@@ -1925,3 +1925,144 @@ fun accept_a_proposal_bound_to_another_app_aborts() {
     ts::return_shared(policy);
     s.end();
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// The running-total window (decision 4)
+// ════════════════════════════════════════════════════════════════════════════
+
+/// One hour, one day and thirty days, in milliseconds.
+const HOUR_MS: u64 = 3_600_000;
+const DAY_MS: u64 = 86_400_000;
+const THIRTY_DAYS_MS: u64 = 2_592_000_000;
+
+fun set_window_as(s: &mut Scenario, id: ID, sender: address, window_ms: u64) {
+    s.next_tx(sender);
+    let mut policy = s.take_shared_by_id<SpendPolicy>(id);
+    let account = s.take_shared_by_id<BusinessAccount>(spend_policy::account(&policy));
+    spend_policy::set_running_window(&mut policy, &account, window_ms, s.ctx());
+    ts::return_shared(account);
+    ts::return_shared(policy);
+}
+
+fun window_of(s: &mut Scenario, id: ID): u64 {
+    s.next_tx(STRANGER);
+    let policy = s.take_shared_by_id<SpendPolicy>(id);
+    let window = spend_policy::running_window_ms(&policy);
+    ts::return_shared(policy);
+    window
+}
+
+#[test]
+/// Decision 4: a running total is kept over 24 hours unless the owners choose
+/// otherwise. The bounds are an hour and thirty days.
+fun the_running_window_starts_at_a_day() {
+    let (mut s, id) = begin_with_policy();
+    assert_eq!(window_of(&mut s, id), DAY_MS);
+    assert_eq!(spend_policy::default_running_window_ms(), DAY_MS);
+    assert_eq!(spend_policy::min_running_window_ms(), HOUR_MS);
+    assert_eq!(spend_policy::max_running_window_ms(), THIRTY_DAYS_MS);
+    s.end();
+}
+
+#[test]
+/// The wallet sets the window anywhere in its bounds, both ends included,
+/// and each change emits one `PolicyChanged`.
+fun the_wallet_sets_the_running_window_within_its_bounds() {
+    let (mut s, id) = begin_with_policy();
+    set_window_as(&mut s, id, h::wallet(), HOUR_MS);
+    assert_eq!(window_of(&mut s, id), HOUR_MS);
+    set_window_as(&mut s, id, h::wallet(), THIRTY_DAYS_MS);
+    assert_eq!(window_of(&mut s, id), THIRTY_DAYS_MS);
+    s.next_tx(h::wallet());
+    {
+        let mut policy = s.take_shared_by_id<SpendPolicy>(id);
+        let account = s.take_shared_by_id<BusinessAccount>(spend_policy::account(&policy));
+        let n = changes();
+        spend_policy::set_running_window(&mut policy, &account, DAY_MS, s.ctx());
+        assert_eq!(changes(), n + 1);
+        ts::return_shared(account);
+        ts::return_shared(policy);
+    };
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = spend_policy::E_BAD_WINDOW)]
+/// Under an hour the rule would barely hold: a spender waits a few minutes
+/// between the parts of a split payment. Refused.
+fun a_running_window_under_an_hour_is_refused() {
+    let (mut s, id) = begin_with_policy();
+    set_window_as(&mut s, id, h::wallet(), HOUR_MS - 1);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = spend_policy::E_BAD_WINDOW)]
+/// A window of zero would turn the rule off while it still looks set.
+fun a_running_window_of_zero_is_refused() {
+    let (mut s, id) = begin_with_policy();
+    set_window_as(&mut s, id, h::wallet(), 0);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = spend_policy::E_BAD_WINDOW)]
+/// Over thirty days the total becomes a lifetime cap per recipient, which is
+/// the allowance's own job. Refused.
+fun a_running_window_over_thirty_days_is_refused() {
+    let (mut s, id) = begin_with_policy();
+    set_window_as(&mut s, id, h::wallet(), THIRTY_DAYS_MS + 1);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = spend_policy::E_NOT_THE_WALLET)]
+/// The mechanism is fixed; its window is the owners' decision, so only the
+/// wallet changes it. One owner alone cannot.
+fun an_owner_alone_cannot_set_the_running_window() {
+    let (mut s, id) = begin_with_policy();
+    set_window_as(&mut s, id, h::owner_2(), HOUR_MS);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = spend_policy::E_NOT_THE_WALLET)]
+/// Nor a spender, who would shorten it to split a payment.
+fun a_spender_cannot_set_the_running_window() {
+    let (mut s, id) = begin_with_policy();
+    staff_up(&mut s, id, h::wallet());
+    set_window_as(&mut s, id, STAFF, HOUR_MS);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = spend_policy::E_ACCOUNT_FROZEN)]
+/// A shorter window lets totals lapse sooner, so it loosens the policy: not
+/// under a freeze.
+fun shortening_the_running_window_under_a_freeze_aborts() {
+    let (mut s, id) = begin_with_policy();
+    admin_freezes(&mut s);
+    set_window_as(&mut s, id, h::wallet(), HOUR_MS);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = spend_policy::E_POLICY_NOT_CURRENT)]
+/// Nor on a policy its account has rotated away from.
+fun a_retired_wallet_cannot_shorten_its_old_running_window() {
+    let (mut s, old_id) = begin_with_policy();
+    rotate_to_b(&mut s);
+    set_window_as(&mut s, old_id, h::wallet(), HOUR_MS);
+    s.end();
+}
+
+#[test]
+/// A longer window only tightens, so it is open under a freeze, like every
+/// other cut back.
+fun lengthening_the_running_window_is_always_open() {
+    let (mut s, id) = begin_with_policy();
+    admin_freezes(&mut s);
+    set_window_as(&mut s, id, h::wallet(), 2 * DAY_MS);
+    assert_eq!(window_of(&mut s, id), 2 * DAY_MS);
+    s.end();
+}
