@@ -62,7 +62,7 @@ module splash_spend::splash_spend;
 use splash_core::address_registry::{Self, Registry};
 use splash_core::business_account::{Self, BusinessAccount};
 use splash_core::compliance_config::{Self, ComplianceConfig};
-use splash_core::fee_config::FeeConfig;
+use splash_core::fee_config::{Self, FeeConfig};
 use splash_core::payment_intent::{Self, PaymentIntent, SettleReceipt};
 use splash_spend::spend_policy::{Self, SpendPolicy};
 use std::internal;
@@ -149,6 +149,23 @@ const E_PARTNER_DEPOSIT_NOT_BANK_PAYOUT: u64 = 1029;
 /// so core would credit it as a free Splash-business payment that no
 /// partner pays out. A bank payout goes only to Splash's partner registry.
 const E_BANK_PAYOUT_NOT_TO_PARTNER: u64 = 1030;
+/// Splash's fee on this payment is above the `max_fee` the spender signed
+/// for (A1 §2.6): the schedule changed after the quote.
+const E_FEE_ABOVE_MAX: u64 = 1031;
+/// Splash's fee is above this package's own ceiling, 1% of the principal.
+const E_FEE_ABOVE_CEILING: u64 = 1032;
+/// The principal and Splash's fee are above the `max_total` the approval
+/// names (A1 §2.6): the owners approved less. Approve again.
+const E_FEE_ABOVE_APPROVED: u64 = 1033;
+/// An approval's `max_total` must be at least the intent's principal.
+const E_BAD_MAX_TOTAL: u64 = 1034;
+
+/// A1 §2.6: the most Splash's fee may be on a rule payment, in basis points
+/// of the principal. This package's own constant, checked on what core
+/// actually charged, so neither a later core nor a FeeConfig it writes can
+/// make a spending rule pay Splash more. splash_spend publishes immutable.
+const FEE_CEILING_BPS: u64 = 100;
+const BPS_DENOM: u64 = 10_000;
 
 /// What an allowance accepted under a policy must be named: this prefix and
 /// the policy's id. The allowance module never reads its name, so this module
@@ -165,9 +182,9 @@ public struct SPLASH_SPEND() has drop;
 public struct SettleWitness has drop {}
 
 /// The owners' approval to pay ONE intent: this policy, this intent, this
-/// amount, by this payer, while the account's authority and the policy's
-/// generation are unchanged, and against a quote that holds until
-/// `settle_by_ms`.
+/// amount, by this payer, at most `max_total` in all with Splash's fee,
+/// while the account's authority and the policy's generation are
+/// unchanged, and against a quote that holds until `settle_by_ms`.
 ///
 /// It is one of two things, and both are the owners' decision: an owner's
 /// second approval (`approve_payout`; the approver is a wallet member), or
@@ -184,6 +201,10 @@ public struct PayoutApproval has key {
     policy_generation: u64,
     intent: ID,
     amount: u64,
+    /// A1 §2.6: the principal and the Splash fee the approver was shown.
+    /// The payment aborts if the principal and the fee charged are above
+    /// it, for example when the schedule rose after approval.
+    max_total: u64,
     approver: address,
     payer: address,
     authority_epoch: u64,
@@ -228,15 +249,21 @@ public struct SpendApprovalDiscarded has copy, drop {
     approver: address,
 }
 
-/// Which rule paid an intent: the policy, the allowance, the approval if any,
-/// and the spender. The controls-evidence export reads this. The amount is
-/// not here; the intent's commitment is, in `IntentConfirmed`.
-public struct PaidUnderPolicy has copy, drop {
+/// A1 §2.9: a payment under a spending rule. Which rule paid which intent
+/// (the policy, the allowance, the approval if any), who paid whom (the
+/// spender and the recipient address), the kind core charged it as, and
+/// Splash's fee on it. The controls-evidence export and Phase 2's
+/// near-threshold alerts read it. The principal is not here; the intent's
+/// commitment is, in `IntentConfirmed`.
+public struct RuleSpend has copy, drop {
     policy_id: ID,
     intent_id: ID,
     allowance_id: ID,
     approval_id: Option<ID>,
     spender: address,
+    recipient: address,
+    derived_kind: u8,
+    fee: u64,
 }
 
 // ─── Spending rules ────────────────────────────────────────────────────────
@@ -344,14 +371,17 @@ public fun create_intent<T>(
 /// different people (or at least two different addresses; the chain cannot
 /// tell people apart). The approval goes to `payer`, who must be a spender.
 ///
-/// `settle_by_ms` is the deadline of the quote the owner is approving: the
-/// payment cannot settle after it, whatever deadline the payer passes. It
-/// must be in the future and no later than the intent's expiry.
+/// `max_total` is the principal and the Splash fee the owner was shown
+/// (A1 §2.6), at least the principal. `settle_by_ms` is the deadline of the
+/// quote the owner is approving: the payment cannot settle after it,
+/// whatever deadline the payer passes. It must be in the future and no
+/// later than the intent's expiry.
 public fun approve_payout(
     policy: &SpendPolicy,
     account: &BusinessAccount,
     intent: &PaymentIntent,
     payer: address,
+    max_total: u64,
     settle_by_ms: u64,
     clock: &Clock,
     ctx: &mut TxContext,
@@ -361,7 +391,7 @@ public fun approve_payout(
     assert!(approver != payment_intent::sender(intent), E_SELF_APPROVAL);
     assert!(approver != payer, E_SELF_APPROVAL);
     assert!(spend_policy::is_spender(policy, payer), E_NOT_A_SPENDER);
-    mint(policy, account, intent, approver, payer, settle_by_ms, clock, ctx);
+    mint_approval(policy, account, intent, approver, payer, max_total, settle_by_ms, clock, ctx);
 }
 
 /// Let an executor run this intent later: the wallet's delegation of an
@@ -372,14 +402,16 @@ public fun approve_payout(
 /// payment they could make alone: for staff payments the operator needs an
 /// owner's `approve_payout` naming it as the payer.
 ///
-/// `settle_by_ms` is the end of the window the executor may run it in (a
-/// quote's deadline, or the scheduled window's end), in the future and no
-/// later than the intent's expiry.
+/// `max_total` is the principal and the Splash fee the wallet was shown,
+/// at least the principal. `settle_by_ms` is the end of the window the
+/// executor may run it in (a quote's deadline, or the scheduled window's
+/// end), in the future and no later than the intent's expiry.
 public fun delegate_execution(
     policy: &SpendPolicy,
     account: &BusinessAccount,
     intent: &PaymentIntent,
     executor: address,
+    max_total: u64,
     settle_by_ms: u64,
     clock: &Clock,
     ctx: &mut TxContext,
@@ -388,15 +420,16 @@ public fun delegate_execution(
     assert!(wallet == spend_policy::wallet(policy), E_ONLY_THE_WALLET_DELEGATES);
     assert!(payment_intent::sender(intent) == wallet, E_NOT_THE_MAKER);
     assert!(spend_policy::is_executor(policy, executor), E_NOT_AN_EXECUTOR);
-    mint(policy, account, intent, wallet, executor, settle_by_ms, clock, ctx);
+    mint_approval(policy, account, intent, wallet, executor, max_total, settle_by_ms, clock, ctx);
 }
 
-fun mint(
+fun mint_approval(
     policy: &SpendPolicy,
     account: &BusinessAccount,
     intent: &PaymentIntent,
     approver: address,
     payer: address,
+    max_total: u64,
     settle_by_ms: u64,
     clock: &Clock,
     ctx: &mut TxContext,
@@ -409,13 +442,16 @@ fun mint(
     assert!(payment_intent::kind(intent) != payment_intent::kind_cross_chain(), E_WRONG_PAY_PATH);
     assert!(settle_by_ms > clock.timestamp_ms(), E_BAD_SETTLE_BY);
     assert!(settle_by_ms <= payment_intent::expires_at(intent), E_BAD_SETTLE_BY);
+    let amount = payment_intent::amount_usd(intent);
+    assert!(max_total >= amount, E_BAD_MAX_TOTAL);
 
     let approval = PayoutApproval {
         id: object::new(ctx),
         policy: object::id(policy),
         policy_generation: spend_policy::generation(policy),
         intent: object::id(intent),
-        amount: payment_intent::amount_usd(intent),
+        amount,
+        max_total,
         approver,
         payer,
         authority_epoch: business_account::authority_epoch(account),
@@ -441,6 +477,7 @@ public fun discard_approval(approval: PayoutApproval) {
         policy_generation: _,
         intent: intent_id,
         amount: _,
+        max_total: _,
         approver,
         payer: _,
         authority_epoch: _,
@@ -456,12 +493,20 @@ public fun discard_approval(approval: PayoutApproval) {
 ///
 /// `withdrawal` is the allowance withdrawal input for exactly the intent's
 /// amount plus `max_fee` (A1 §2.6: the Splash fee the spender was shown),
-/// from the business wallet's address balance. Core derives the kind, charges
-/// the fee (at most `max_fee`) to the fee recipient, and returns the unused
-/// part of `max_fee` to the business wallet, never to the spender.
-/// `settle_by_ms` is the quote's deadline. `config` must be the one the
-/// policy was created against. The intent lands on Sui, and core pays its
-/// recipient in this call; a cross-chain intent is refused.
+/// from the business wallet's address balance, so the allowance's caps
+/// cover both. `settle_by_ms` is the quote's deadline. `config` must be the
+/// one the policy was created against, and `fee_cfg` and `registry` are
+/// Splash's. The intent lands on Sui, and core pays its recipient in this
+/// call; a cross-chain intent is refused.
+///
+/// The fee (A1 §2.6). `draw` derives the kind and computes the fee, and
+/// refuses it above `max_fee`, above this package's own 1% ceiling, or with
+/// the principal above an approval's `max_total`. Core charges the same fee
+/// to its fee recipient inside its settle path, and sends the unused part
+/// of `max_fee` to `business_account::wallet(account)`, which `draw` has
+/// checked is this policy's wallet; never to the spender. The fee core
+/// actually charged is checked against the ceiling again here, and
+/// `RuleSpend` records it.
 ///
 /// The kind declared to core is the recipient's tag in the policy, or a bank
 /// payout for a beneficiary bound to its partner deposit address (A1 §2.3);
@@ -482,9 +527,24 @@ public fun pay_intent<C>(
     ctx: &mut TxContext,
 ): SettleReceipt {
     assert!(payment_intent::kind(intent) != payment_intent::kind_cross_chain(), E_WRONG_PAY_PATH);
-    let funds = draw(allowance, withdrawal, intent, account, policy, config, registry, approval, settle_by_ms, clock, ctx);
+    let approval_id = if (approval.is_some()) option::some(object::id(approval.borrow())) else option::none();
+    let funds = draw(
+        allowance,
+        withdrawal,
+        intent,
+        account,
+        policy,
+        config,
+        fee_cfg,
+        registry,
+        approval,
+        max_fee,
+        settle_by_ms,
+        clock,
+        ctx,
+    );
     let declared = declared_kind(policy, intent);
-    let (receipt, _kind, _fee) = payment_intent::settle_from_app<C, SettleWitness>(
+    let (receipt, derived_kind, fee) = payment_intent::settle_from_app<C, SettleWitness>(
         SettleWitness {},
         intent,
         account,
@@ -498,6 +558,18 @@ public fun pay_intent<C>(
         clock,
         ctx,
     );
+    // This package's own ceiling, on what core charged.
+    assert!(fee <= fee_ceiling(payment_intent::amount_usd(intent)), E_FEE_ABOVE_CEILING);
+    event::emit(RuleSpend {
+        policy_id: object::id(policy),
+        intent_id: object::id(intent),
+        allowance_id: object::id(allowance),
+        approval_id,
+        spender: ctx.sender(),
+        recipient: payment_intent::recipient(intent),
+        derived_kind,
+        fee,
+    });
     receipt
 }
 
@@ -510,8 +582,10 @@ fun draw<C>(
     account: &BusinessAccount,
     policy: &mut SpendPolicy,
     config: &ComplianceConfig,
+    fee_cfg: &FeeConfig,
     registry: &Registry,
     approval: Option<PayoutApproval>,
+    max_fee: u64,
     settle_by_ms: u64,
     clock: &Clock,
     ctx: &TxContext,
@@ -550,10 +624,17 @@ fun draw<C>(
     };
 
     // How much: the policy's ceiling, the payer's, and the maker's. Each
-    // applies to the principal; the fee is Splash's, bounded by the config.
+    // applies to the principal.
     let amount = payment_intent::amount_usd(intent);
     assert_within_limits(policy, amount, payer);
     if (!by_wallet) assert_within_limits(policy, amount, maker);
+
+    // Splash's fee (A1 §2.6), for the derived kind: within what the spender
+    // signed for and this package's own ceiling. Core charges exactly this,
+    // from the same FeeConfig, in this transaction.
+    let fee = fee_config::splash_fee(fee_cfg, object::id(account), derived, amount);
+    assert!(fee <= max_fee, E_FEE_ABOVE_MAX);
+    assert!(fee <= fee_ceiling(amount), E_FEE_ABOVE_CEILING);
 
     // Approvals: the owners', when this payment takes what the payer has
     // paid this recipient in the current window above the threshold
@@ -565,20 +646,15 @@ fun draw<C>(
     let threshold = spend_policy::second_approval_threshold(policy);
     let over_threshold = paid_so_far > threshold || amount > threshold - paid_so_far;
     let needs_approval = over_threshold || spend_policy::is_executor(policy, payer);
-    let approval_id = if (approval.is_some()) {
-        let approval = approval.destroy_some();
-        let id = object::id(&approval);
-        consume(approval, policy, account, intent, payer, settle_by_ms, clock);
-        option::some(id)
+    if (approval.is_some()) {
+        consume(approval.destroy_some(), policy, account, intent, payer, fee, settle_by_ms, clock);
     } else {
         approval.destroy_none();
         assert!(!needs_approval, E_APPROVAL_REQUIRED);
-        option::none()
     };
     // Every payment counts toward the total, approved or not.
     spend_policy::record_payment(policy, payer, kind, recipient, beneficiary_ref, amount, now);
 
-    let allowance_id = object::id(allowance);
     let funds = allowance::app_balance_spend(
         allowance,
         allowance::spend_permit(internal::permit<SPLASH_SPEND>()),
@@ -589,25 +665,20 @@ fun draw<C>(
     // The allowance belongs to this policy. Checked last, so every earlier
     // refusal keeps its own code; the transaction aborts as a whole either way.
     assert!(*allowance::name(allowance::allowance_settings(allowance)) == allowance_name(policy), E_ALLOWANCE_NOT_FOR_POLICY);
-    event::emit(PaidUnderPolicy {
-        policy_id: object::id(policy),
-        intent_id: object::id(intent),
-        allowance_id,
-        approval_id,
-        spender: payer,
-    });
     funds
 }
 
-/// Check an approval against this payment and consume it. `settle_by_ms` is
-/// the deadline this payment passes to core, which must not be later than
-/// the one the approval names.
+/// Check an approval against this payment and consume it. `fee` is Splash's
+/// fee on it, which with the principal must be within the approval's
+/// `max_total`. `settle_by_ms` is the deadline this payment passes to core,
+/// which must not be later than the one the approval names.
 fun consume(
     approval: PayoutApproval,
     policy: &SpendPolicy,
     account: &BusinessAccount,
     intent: &PaymentIntent,
     payer: address,
+    fee: u64,
     settle_by_ms: u64,
     clock: &Clock,
 ) {
@@ -617,6 +688,7 @@ fun consume(
         policy_generation,
         intent: intent_id,
         amount,
+        max_total,
         approver,
         payer: named_payer,
         authority_epoch,
@@ -625,6 +697,9 @@ fun consume(
     assert!(policy_id == object::id(policy), E_APPROVAL_MISMATCH);
     assert!(intent_id == object::id(intent), E_APPROVAL_MISMATCH);
     assert!(amount == payment_intent::amount_usd(intent), E_APPROVAL_MISMATCH);
+    // A1 §2.6: principal + fee <= max_total. `max_total >= amount` since it
+    // was minted, so this cannot underflow.
+    assert!(fee <= max_total - amount, E_FEE_ABOVE_APPROVED);
     assert!(named_payer == payer, E_APPROVAL_MISMATCH);
     assert!(authority_epoch == business_account::authority_epoch(account), E_STALE_APPROVAL);
     assert!(policy_generation == spend_policy::generation(policy), E_STALE_APPROVAL);
@@ -679,6 +754,13 @@ fun declared_kind(policy: &SpendPolicy, intent: &PaymentIntent): u8 {
     else spend_policy::recipient_kind(policy, payment_intent::sui_domain(), payment_intent::recipient(intent))
 }
 
+/// `principal * FEE_CEILING_BPS / BPS_DENOM`, rounded down, without an
+/// intermediate that could overflow: the whole multiples of `BPS_DENOM`
+/// and the rest are scaled separately.
+fun fee_ceiling(principal: u64): u64 {
+    principal / BPS_DENOM * FEE_CEILING_BPS + principal % BPS_DENOM * FEE_CEILING_BPS / BPS_DENOM
+}
+
 fun assert_within_limits(policy: &SpendPolicy, amount: u64, spender: address) {
     assert!(amount <= spend_policy::per_payment_max(policy), E_OVER_PER_PAYMENT_MAX);
     assert!(amount <= spend_policy::spender_per_payment_max(policy, spender), E_OVER_PER_PAYMENT_MAX);
@@ -720,9 +802,20 @@ public fun approval_policy(a: &PayoutApproval): ID { a.policy }
 public fun approval_policy_generation(a: &PayoutApproval): u64 { a.policy_generation }
 public fun approval_intent(a: &PayoutApproval): ID { a.intent }
 public fun approval_amount(a: &PayoutApproval): u64 { a.amount }
+public fun approval_max_total(a: &PayoutApproval): u64 { a.max_total }
 public fun approval_approver(a: &PayoutApproval): address { a.approver }
 public fun approval_payer(a: &PayoutApproval): address { a.payer }
 public fun approval_settle_by_ms(a: &PayoutApproval): u64 { a.settle_by_ms }
+
+#[test_only]
+public fun fee_ceiling_bps_for_testing(): u64 { FEE_CEILING_BPS }
+
+#[test_only]
+/// Lets a test read what `RuleSpend` carries.
+public fun unpack_rule_spend_for_testing(e: RuleSpend): (ID, ID, ID, Option<ID>, address, address, u8, u64) {
+    let RuleSpend { policy_id, intent_id, allowance_id, approval_id, spender, recipient, derived_kind, fee } = e;
+    (policy_id, intent_id, allowance_id, approval_id, spender, recipient, derived_kind, fee)
+}
 
 #[test_only]
 /// Event fields are private to this module: lets a test read what

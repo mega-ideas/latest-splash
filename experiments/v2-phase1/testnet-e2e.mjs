@@ -697,7 +697,7 @@ if (!done('staffPays')) {
   const intent = staffIntent(tx, 'staffPays', 300_000);
   payAndClose(tx, 'staffPays', intent, results.steps.staffAllowance.allowance, 300_000, none(tx));
   const t = await runSponsored('staff: create_intent + pay_intent + anchor + delete (0.3 USDC, no approval)', [staff], staff.toSuiAddress(), tx);
-  results.steps.staffPays = { digest: t.digest, paidUnderPolicy: eventsOf(t, '::splash_spend::PaidUnderPolicy')[0]?.json ?? null };
+  results.steps.staffPays = { digest: t.digest, ruleSpend: eventsOf(t, '::splash_spend::RuleSpend')[0]?.json ?? null };
   save();
 }
 
@@ -719,7 +719,8 @@ if (!done('ownerApproves')) {
   const tx = new Transaction();
   tx.moveCall({
     target: `${SPEND}::splash_spend::approve_payout`,
-    arguments: [tx.object(POLICY), tx.object(ACCOUNT), tx.object(results.steps.approvedIntent.intent), tx.pure.address(staff.toSuiAddress()), tx.pure.u64(Date.now() + APPROVAL_WINDOW_MS), tx.object(CLOCK)],
+    // A1 §2.6: max_total is the principal and the most Splash's fee may be, as the owner was shown.
+    arguments: [tx.object(POLICY), tx.object(ACCOUNT), tx.object(results.steps.approvedIntent.intent), tx.pure.address(staff.toSuiAddress()), tx.pure.u64(700_000 + maxFeeOf(700_000)), tx.pure.u64(Date.now() + APPROVAL_WINDOW_MS), tx.object(CLOCK)],
   });
   const t = await runSponsored('owner 2 approves, alone, with their own passkey', [bizKeys[1]], OWNERS[1], tx);
   results.steps.ownerApproves = { digest: t.digest, approval: one(t, '::splash_spend::PayoutApproval') };
@@ -742,7 +743,7 @@ if (!done('staffDelegationRefused')) {
   const intent = staffIntent(tx, 'staffDelegates', 200_000);
   tx.moveCall({
     target: `${SPEND}::splash_spend::delegate_execution`,
-    arguments: [tx.object(POLICY), tx.object(ACCOUNT), intent, tx.pure.address(executor.toSuiAddress()), tx.pure.u64(Date.now() + APPROVAL_WINDOW_MS), tx.object(CLOCK)],
+    arguments: [tx.object(POLICY), tx.object(ACCOUNT), intent, tx.pure.address(executor.toSuiAddress()), tx.pure.u64(200_000 + maxFeeOf(200_000)), tx.pure.u64(Date.now() + APPROVAL_WINDOW_MS), tx.object(CLOCK)],
   });
   tx.moveCall({ target: `${CORE}::payment_intent::share_intent`, arguments: [intent] });
   results.steps.staffDelegationRefused = { refused: await expectAbort('staff delegating a payment to the operator (dry run)', staff.toSuiAddress(), tx) };
@@ -774,7 +775,7 @@ if (!done('delegate')) {
   const tx = new Transaction();
   tx.moveCall({
     target: `${SPEND}::splash_spend::delegate_execution`,
-    arguments: [tx.object(POLICY), tx.object(ACCOUNT), tx.object(results.steps.delegatedIntent.intent), tx.pure.address(executor.toSuiAddress()), tx.pure.u64(Date.now() + APPROVAL_WINDOW_MS), tx.object(CLOCK)],
+    arguments: [tx.object(POLICY), tx.object(ACCOUNT), tx.object(results.steps.delegatedIntent.intent), tx.pure.address(executor.toSuiAddress()), tx.pure.u64(200_000 + maxFeeOf(200_000)), tx.pure.u64(Date.now() + APPROVAL_WINDOW_MS), tx.object(CLOCK)],
   });
   const t = await runMultisig('the wallet delegates execution to the operator, with a quote deadline', W, [bizKeys[1], bizKeys[2]], tx);
   results.steps.delegate = { digest: t.digest, approval: one(t, '::splash_spend::PayoutApproval') };

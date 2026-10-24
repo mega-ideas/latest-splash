@@ -83,6 +83,16 @@ const ALLOWED = {
     "Splash's own fee address, announced 24 hours ahead (A1 §2.5, §2.9)",
   'move/splash_core/sources/fee_config.move::FeeRecipientApplied.recipient':
     "Splash's own fee address, now in force (A1 §2.5, §2.9)",
+  // A1 §2.9: RuleSpend, splash_spend's record of a payment under a spending
+  // rule, carries the recipient address and Splash's fee, because Phase 2's
+  // near-threshold alerts aggregate what one spender pays one recipient and
+  // reconcile the fee from it. The principal is still not on it. What the
+  // recipient field adds is little: the base-layer transfer of the same
+  // payment already shows the recipient, and the fee its rough size.
+  'move/splash_spend/sources/splash_spend.move::RuleSpend.recipient':
+    'who a spending rule paid, for the Phase 2 near-threshold alerts (A1 §2.9); the transfer already shows it',
+  'move/splash_spend/sources/splash_spend.move::RuleSpend.fee':
+    'Splash revenue on a rule payment (A1 §2.9), matching FeeCharged',
 };
 
 /* ── 1. The meta-test ─────────────────────────────────────────────────── */
@@ -169,11 +179,24 @@ test("the fee events carry Splash's own terms, and FeeCharged the fee and nothin
   assert.deepEqual(byName.FeeRecipientApplied, ['recipient'], 'FeeRecipientApplied');
   assert.deepEqual(byName.FeeDiscountSet, ['business', 'discount_bps'], 'FeeDiscountSet');
   assert.deepEqual(Object.keys(byName).sort(), Object.keys(byName).filter((n) => n.startsWith('Fee')).sort(), 'fee_config emits only Fee* events');
-  // The three allowed exceptions are exactly the fields these events carry.
+  // The allowed exceptions are exactly fields these events carry.
   for (const where of Object.keys(ALLOWED)) {
-    const [, event, field] = /::(\w+)\.(\w+)$/.exec(where);
-    assert.ok(byName[event]?.includes(field), `${where} is a real field`);
+    const [, file, event, field] = /^(.+\.move)::(\w+)\.(\w+)$/.exec(where);
+    const fields = Object.fromEntries(eventStructs(await source(file)).map((e) => [e.name, e.fields]));
+    assert.ok(fields[event]?.includes(field), `${where} is a real field`);
   }
+});
+
+test("RuleSpend carries who paid whom under which rule, the kind core charged and Splash's fee, and not the principal", async () => {
+  const spend = eventStructs(await source('move/splash_spend/sources/splash_spend.move'));
+  const byName = Object.fromEntries(spend.map((e) => [e.name, e.fields]));
+  // A1 §2.9. It replaces PaidUnderPolicy, which carried the first five.
+  assert.deepEqual(
+    byName.RuleSpend,
+    ['policy_id', 'intent_id', 'allowance_id', 'approval_id', 'spender', 'recipient', 'derived_kind', 'fee'],
+    'RuleSpend',
+  );
+  assert.equal(byName.PaidUnderPolicy, undefined, 'PaidUnderPolicy is gone: one event per rule payment');
 });
 
 /* ── 2. The commitment ────────────────────────────────────────────────── */
