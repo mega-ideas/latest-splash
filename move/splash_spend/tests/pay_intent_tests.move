@@ -3690,6 +3690,45 @@ fun a_longer_window_keeps_counting() {
 }
 
 #[test]
+#[expected_failure(abort_code = splash_spend::E_APPROVAL_REQUIRED)]
+/// Review finding (MEDIUM): a window primed with one unit cannot double the
+/// threshold across its boundary. STAFF pays 1 unit, then, a millisecond
+/// before the window ends, the threshold less one unit (the total is the
+/// threshold, not above it), then the full threshold a millisecond later,
+/// in a new window. What was paid in the millisecond before still counts:
+/// the last payment needs an owner's approval.
+fun priming_a_window_does_not_double_the_threshold() {
+    let (mut s, fx) = setup();
+    let prime = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, 1);
+    pay(&mut s, &fx, STAFF, fx.staff, prime, false);
+    advance(&mut s, spend_policy::default_running_window_ms() - 2);
+    let a = open(&mut s, &fx, STAFF, 2, payment_intent::kind_wallet(), SUPPLIER, THRESHOLD - 1);
+    let b = open(&mut s, &fx, STAFF, 3, payment_intent::kind_wallet(), SUPPLIER, THRESHOLD);
+    advance(&mut s, 1);
+    pay(&mut s, &fx, STAFF, fx.staff, a, false);
+    advance(&mut s, 1);
+    pay(&mut s, &fx, STAFF, fx.staff, b, false);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = splash_spend::E_APPROVAL_REQUIRED)]
+/// The same for a bank payout, keyed by its beneficiary: a part paid late
+/// in one window counts against the first part of the next.
+fun a_part_paid_late_in_a_window_counts_in_the_next() {
+    let (mut s, fx) = setup();
+    let prime = open(&mut s, &fx, STAFF, 1, payment_intent::kind_bank_payout(), h::recipient(), PAY);
+    pay(&mut s, &fx, STAFF, fx.staff, prime, false);
+    advance(&mut s, spend_policy::default_running_window_ms() - 1);
+    let a = open(&mut s, &fx, STAFF, 2, payment_intent::kind_bank_payout(), h::recipient(), PAY);
+    pay(&mut s, &fx, STAFF, fx.staff, a, false);
+    advance(&mut s, 1);
+    let b = open(&mut s, &fx, STAFF, 3, payment_intent::kind_bank_payout(), h::recipient(), THRESHOLD);
+    pay(&mut s, &fx, STAFF, fx.staff, b, false);
+    s.end();
+}
+
+#[test]
 #[expected_failure(abort_code = sui::allowance::EExceedsLifetimeCap)]
 /// The allowance cap stays the hard ceiling. Approvals lift the threshold,
 /// never the allowance: with every part approved, a day apart, the parts
