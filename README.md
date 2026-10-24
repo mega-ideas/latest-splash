@@ -87,7 +87,8 @@ summary — check the tail says `upgraded 1/1 packages`, not `0/0`.
 - CSV batch payout flow with PapaParse and server-side batch authorization.
 - KYB upload API that records encrypted-storage metadata, document SHA-256 hashes, and a KYB case ID.
 - Separate staff admin console for KYB approvals, support replies, and complaint management.
-- Two Move packages: `splash_core` (mainnet, holds no client value) and `splash_custody` (publishes on the Labuan e-money licence). See STATUS.md.
+- Move packages: `splash_core` (mainnet, holds no client value, upgradeable additive-only behind a 24-hour delay), `splash_spend` and `splash_upgrade_delay` (mainnet, immutable), and `splash_custody` and `splash_meter` (retired from the mainnet path in v2, testnet only). See STATUS.md.
+- Splash's fee is computed on chain from where a payment goes and how much it is, with a 1% ceiling, and is off until governance applies a fee recipient. See [`docs/v2/fees.md`](./docs/v2/fees.md).
 
 ## Environment
 
@@ -105,6 +106,13 @@ SPLASH_CUSTODY_PACKAGE_ID=
 # Legacy single-package id, still honoured for pre-split deployments.
 SPLASH_PACKAGE_ID=0x...
 SPLASH_TREASURY_ID=0x...
+# v2 (Amendment A1): the shared FeeConfig and address Registry from the
+# splash_core publish, and the splash_spend package. The quote API reads the
+# fee from SPLASH_FEE_CONFIG_ID; off mainnet, unset, a quote uses the launch
+# schedule and says so.
+SPLASH_FEE_CONFIG_ID=
+SPLASH_ADDRESS_REGISTRY_ID=
+SPLASH_SPEND_PACKAGE_ID=
 USDC_TYPE=0x2::sui::SUI
 ENOKI_API_KEY=
 OPERATOR_SUI_ADDRESS=0x...
@@ -157,14 +165,21 @@ sui move build
 
 ## Move publish flow
 
-There is no `move/Move.toml` — `move/` holds three packages, each built from its
-own directory:
+There is no `move/Move.toml` — `move/` holds five packages, each built from its
+own directory with Sui CLI `mainnet-v1.82.3`:
 
 ```bash
-cd move/splash_core   && sui move build && sui move test   # 14 tests
-cd move/splash_meter  && sui move build && sui move test   # 22 tests
-cd move/splash_custody && sui move build && sui move test  # 16 tests
+cd move/splash_core          && sui move build && sui move test
+cd move/splash_spend         && sui move build && sui move test
+cd move/splash_upgrade_delay && sui move build && sui move test
+cd move/splash_meter         && sui move build && sui move test
+cd move/splash_custody       && sui move build && sui move test
 ```
+
+`npm run lint` chains fourteen `check:*` invariants before ESLint, among them
+`check:core` (no value-bearing struct in core), `check:spend` and
+`check:fees` (one 100 bps fee ceiling across core, `splash_spend` and
+`lib/fees/`, and the generated fee-vector test up to date).
 
 **Phase 0 publishes `splash_core` ONLY.** `splash_custody` holds every
 `Balance` in the system, and v2 retires it from the mainnet path for good

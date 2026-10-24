@@ -46,6 +46,7 @@ move/
     business_account.move  payment_intent.move  compliance_config.move
     multisig.move          audit_anchor.move    receipt_v2.move
     peg_monitor.move       cap_registry.move    spend_window.move
+    fee_config.move        address_registry.move        (Amendment A1)
 
   splash_spend/         ← mainnet, IMMUTABLE. The only spender of app-bound allowances (D2).
     splash_spend.move      spend_policy.move
@@ -189,6 +190,38 @@ change, so every package and object ID is new.
 
 ---
 
+## Splash's fee — v2 (Amendment A1, 24 Oct 2026)
+
+[`docs/v2/fees.md`](docs/v2/fees.md) has the rules; the design record is
+revision R5 of [`docs/v2/phase1-move-design.md`](docs/v2/phase1-move-design.md).
+
+- **Computed on chain.** No intent carries a fee. `splash_core::fee_config`
+  computes it at settlement from the kind the chain derives
+  (`address_registry`) and the principal: free between Splash businesses,
+  0.02% to a Sui wallet (0.25 to 5 USDC), 0.05–0.15% to an exchange and
+  0.05–0.30% to a bank or another chain, lower for larger payments. No fee
+  is ever above 1% of the principal, a ceiling written into `splash_core`
+  and, separately, into the immutable `splash_spend`.
+- **Off until the ceremony turns it on.** `FeeConfig` publishes with no fee
+  recipient, so every fee is 0 until governance applies the finance
+  multisig as recipient after 24 hours' notice.
+- **The payer bounds it.** Every money path takes `max_fee`, the fee shown,
+  and aborts above it. The fee leg is split inside Move; every remainder goes
+  to the business wallet, never to the sender.
+- **The legacy approval path is gone** (decision 3), so there are two money
+  paths, not three. The second-approval threshold counts a running total per
+  payer and recipient (decision 4), and partner deposit addresses are fixed
+  per business and paid only as bank payouts (decision 2).
+- **Gates.** `npm run lint` chains fourteen `check:*` scripts, `check:fees`
+  among them. Phase 2: subscription billing (`FEATURE_SUBSCRIPTION_BILLING`,
+  not built), owner alerts for fee proposals, near-threshold alerts, and the
+  partner payout-instruction API.
+- **Testnet proof.** `experiments/v2-phase1/testnet-e2e.mjs` proves fees off
+  on day one and proposes a finance multisig as recipient; on day two, once
+  it is applied, it runs a wallet payment and a 99 USDC bank payout with the
+  fee on. The bank leg needs 99.99 USDC (the payout and a `max_fee` of 1%) in
+  the business wallet, and the funder sends only the shortfall.
+
 ## Phase 0 vs Phase 2 — what the server does
 
 `SPLASH_CORE_PACKAGE_ID` names the core package and falls back to
@@ -225,7 +258,10 @@ when it is the design working.
 ## Out of scope for mainnet, scheduled immediately after
 
 **Event privacy.** Every event publishes sender, recipient, amount, corridor and
-fee in cleartext, and B2B counterparties use stable addresses. This does not
+fee in cleartext, and B2B counterparties use stable addresses. (Since WS5,
+v2's events carry a commitment instead of the payment; the exceptions, among
+them Splash's fee on `FeeCharged` and `RuleSpend`, are listed in
+`docs/commitments.md`. This paragraph describes the custody-era package.) This does not
 block mainnet. It **does** block the anchor buyer — no exporter puts their
 supplier list on a public chain.
 

@@ -39,7 +39,7 @@ nobody else learns anything from the 32 bytes.
 
 | Tag | Family | Carried by |
 |---|---|---|
-| `splash:payment:v1` | one payment intent | `IntentCreated`, `IntentConfirmed`, `IntentCanceled`, `SettlementAnchored`, `PayoutApproved`, `PayoutApprovalConsumed` |
+| `splash:payment:v1` | one payment intent | `IntentCreated`, `IntentConfirmed`, `IntentCanceled`, `SettlementAnchored`, and `splash_spend`'s `SpendApproved` |
 | `splash:receipt:v1` | one minted receipt | `ReceiptIssued` |
 | `splash:rail:v1` | the rail and partner reference of one payment (v2) | `IntentCreated`, `IntentConfirmed`, `IntentCanceled` (as `rail_commitment`) |
 | `splash:beneficiary:v1` | one bank beneficiary, stable across payments (v2) | the intent's `beneficiary_ref`; `SpendPolicy` beneficiaries |
@@ -135,11 +135,10 @@ UID is derived from it (`derived_object::claim` under the account).
 | Event | Fields |
 |---|---|
 | `IntentCreated` | `intent_id: ID`, `commitment`, `rail_commitment`, `settlement_asset: String`, `kind: u8`, `status: u8`, `expires_at_ms`, `timestamp_ms` |
-| `IntentConfirmed` | the same first six, plus `path: u8` (1 business wallet, 2 spending rule, 3 legacy approval) and `timestamp_ms` |
+| `IntentConfirmed` | the same first six, plus `path: u8` (1 business wallet, 2 spending rule) and `timestamp_ms`. There is no path 3: the legacy approval path is not in v2 core |
 | `IntentCanceled` | the same first six, plus `timestamp_ms` |
 | `SettlementAnchored` | `intent_id`, `commitment`, `status`, `timestamp_ms`, plus `content_hash` and `walrus_blob_id`: a ciphertext hash and a Walrus blob id, which bind the settlement to its evidence |
-| `PayoutApproved` | `approval_id`, `business_account_id`, `intent_id`, `approver`, `maker`, `commitment`, `authority_epoch`, `expires_at_ms` |
-| `PayoutApprovalConsumed` | `approval_id`, `business_account_id`, `intent_id`, `approver`, `commitment`, `consumed_at_ms` |
+| `SpendApproved` (`splash_spend`) | `approval_id`, `policy_id`, `intent_id`, `approver`, `payer`, `commitment` |
 | `ReceiptIssued` | `receipt_object`, `receipt_id`, `commitment`, `settled_at`, `tx_digest`, `business_account_id`, `minter` |
 
 `status` is the intent's status constant: pending 0, confirmed 1, expired 2,
@@ -148,8 +147,13 @@ canceled 3. A canceled event's status is its reason.
 **v2 additions, decided once because the schema freezes at publish.**
 `settlement_asset` is the coin's type name, e.g. `…::usdc::USDC`. It is the
 one deliberate exception to "no currency": the brief (§3.1) requires it, and
-it is the coin type the base-layer transfer already shows. `kind` is 1 bank
-payout, 2 Splash business, 3 wallet, 4 cross-chain wallet. On a cross-chain
+it is the coin type the base-layer transfer already shows. `kind` is the kind
+the intent declares, in Amendment A1's numbering: 0 Splash business, 1
+wallet, 2 exchange, 3 cross-chain, 4 bank payout. (Before A1 the numbers were
+1 bank payout, 2 Splash business, 3 wallet, 4 cross-chain; none of those
+packages is on the mainnet path.) The kind Splash's fee is charged as is
+derived at settlement and is on `FeeCharged` and `RuleSpend` as
+`derived_kind`. On a cross-chain
 intent, CONFIRMED means burned for CCTP; the mint completes on the other
 chain. None of the v2 fields of the intent events is an amount, an address or
 the account.
@@ -185,6 +189,8 @@ text an owner supplies, and it is published as given.
 
 | Module | Event | Address fields | Other fields |
 |---|---|---|---|
+| `address_registry` | `PartnerAddressAdded` | `partner_address` | none |
+| `address_registry` | `PartnerAddressRemoved` | `partner_address` | none |
 | `audit_anchor` | `AuditAnchored` | `anchor_object`, `anchorer`, `business_account_id` | `audit_hash`, `anchor_id`, `backing_blob`, `anchored_at` |
 | `audit_anchor` | `VerificationChecked` | `anchor_object`, `checker` | `matched`, `timestamp_ms` |
 | `audit_anchor` | `SettlementAnchored` | none | `intent_id`, `commitment`, `status`, `timestamp_ms`, `content_hash`, `walrus_blob_id` |
@@ -196,8 +202,6 @@ text an owner supplies, and it is published as given.
 | `business_account` | `RecoveryCancelled` | `business_account_id`, `cancelled_by` | none |
 | `business_account` | `TierChanged` | `business_account_id`, `by` | `tier`, `per_transfer_cap_minor`, `daily_cap_minor`, `monthly_cap_minor` |
 | `business_account` | `LimitIncreaseRequested` | `business_account_id`, `requested_by` | `current_tier`, `requested_tier`, `justification` (free text) |
-| `business_account` | `PayoutApproved` | `approval_id`, `business_account_id`, `approver`, `maker` | `intent_id`, `commitment`, `authority_epoch`, `expires_at_ms` |
-| `business_account` | `PayoutApprovalConsumed` | `approval_id`, `business_account_id`, `approver` | `intent_id`, `commitment`, `consumed_at_ms` |
 | `business_account` | `AnchorCapRotated` | `retired_cap_id`, `new_cap_id`, `holder` | none |
 | `business_account` | `AnchorCapDestroyed` | `anchor_cap_id` | none |
 | `business_account` | `WalletNominated` | `business_account_id`, `wallet`, `by` | none |
@@ -215,7 +219,14 @@ text an owner supplies, and it is published as given.
 | `compliance_config` | `RegistryAdditionActivated` | `config_id` | `registry`, `type_name` |
 | `compliance_config` | `RegistryAdditionCancelled` | `config_id` | `registry`, `type_name` |
 | `compliance_config` | `RegistryEntryRemoved` | `config_id` | `registry`, `type_name` |
-| `compliance_config` | `LegacyDisabled` | `config_id` | none |
+| `fee_config` | `FeeCharged` | `fee_recipient` | `intent_id`, `business` (an `ID`), `derived_kind`, `fee` |
+| `fee_config` | `FeeScheduleProposed` | none | `kind`, `tiers` (each `upper_minor`, `bps`), `min_minor`, `max_minor`, `eta` |
+| `fee_config` | `FeeScheduleApplied` | none | `kind` |
+| `fee_config` | `FeeScheduleProposalCancelled` | none | `kind`, `eta` |
+| `fee_config` | `FeeRecipientProposed` | `recipient` | `eta` |
+| `fee_config` | `FeeRecipientApplied` | `recipient` | none |
+| `fee_config` | `FeeRecipientProposalCancelled` | none | `eta` |
+| `fee_config` | `FeeDiscountSet` | none | `business` (an `ID`), `discount_bps` |
 | `payment_intent` | `IntentCreated` | none | `intent_id`, `commitment`, `rail_commitment`, `settlement_asset`, `kind`, `status`, `expires_at_ms`, `timestamp_ms` |
 | `payment_intent` | `IntentConfirmed` | none | `intent_id`, `commitment`, `rail_commitment`, `settlement_asset`, `kind`, `status`, `path`, `timestamp_ms` |
 | `payment_intent` | `IntentCanceled` | none | `intent_id`, `commitment`, `rail_commitment`, `settlement_asset`, `kind`, `status`, `timestamp_ms` |
@@ -233,7 +244,7 @@ text an owner supplies, and it is published as given.
 | `splash_spend` | `SpendApproved` | `approver`, `payer` | `approval_id`, `policy_id`, `intent_id`, `commitment` |
 | `splash_spend` | `SpendApprovalConsumed` | `approver` | `approval_id`, `policy_id`, `intent_id` |
 | `splash_spend` | `SpendApprovalDiscarded` | `approver` | `approval_id`, `policy_id`, `intent_id` |
-| `splash_spend` | `PaidUnderPolicy` | `spender` | `policy_id`, `intent_id`, `allowance_id`, `approval_id` (optional) |
+| `splash_spend` | `RuleSpend` | `spender`, `recipient` | `policy_id`, `intent_id`, `allowance_id`, `approval_id` (optional), `derived_kind`, `fee` |
 
 **`splash_upgrade_delay`**
 
@@ -249,9 +260,48 @@ text an owner supplies, and it is published as given.
 | `upgrade_delay` | `OwnerChanged` | `new_owner` | `wrapper_id` |
 | `upgrade_delay` | `MadeImmutable` | none | `wrapper_id`, `package` |
 
-No event carries a payment's amount. The governance alert monitor does not read these
+No event carries a payment's principal. Two carry Splash's fee on a payment,
+for the reasons below. The governance alert monitor does not read these
 events; it reads the wrapper's and the config's state
-(`docs/v2/phase1-move-design.md` §7).
+(`docs/v2/phase1-move-design.md` §7). The legacy approval events
+(`PayoutApproved`, `PayoutApprovalConsumed`) and `LegacyDisabled` are gone
+with the legacy path, and `PaidUnderPolicy` is replaced by `RuleSpend`.
+
+## The fee events (Amendment A1 §2.9), and why a fee may be on one
+
+`tests/event-privacy.test.mjs` forbids `fee` and `principal` on every event,
+like `amount`: a fee is computed from the principal by a public schedule, so
+a fee says roughly how much was paid, and a principal says it exactly. The
+test allows exactly these exceptions, by file, event and field:
+
+- **`FeeCharged.fee`.** The fee is Splash's revenue, Splash's own money, not a
+  client's payment, and the Phase 2 revenue and reconciliation listeners read
+  it from the event. The principal is not on it; it follows the commitment
+  rule above. `FeeCharged` is emitted only when a fee leg is paid: never for a
+  fee of 0, and never while `FeeConfig` has no fee recipient.
+- **`FeeCharged.fee_recipient`, `FeeRecipientProposed.recipient`,
+  `FeeRecipientApplied.recipient`.** Splash's own finance multisig, not a
+  client's counterparty. The two `recipient` fields are allowed by name;
+  `fee_recipient` is not on the forbidden list, and is listed here so a
+  reviewer sees it. The recipient is announced 24 hours ahead, so owners can
+  be alerted to a change (Phase 2), and the address has to be on the event
+  for that.
+- **`RuleSpend.recipient` and `RuleSpend.fee`.** `splash_spend`'s record of a
+  payment under a spending rule. Phase 2's near-threshold alerts add up what
+  one spender paid one recipient, and the fee reconciles with `FeeCharged`.
+  The principal is still not on it. What the recipient adds is little: the
+  base-layer transfer of the same payment already shows it.
+
+The other fee events carry no client data. `FeeScheduleProposed` carries the
+proposed schedule itself (public prices) and its `eta`;
+`FeeScheduleApplied`, the two `…ProposalCancelled` events and
+`FeeDiscountSet` carry a kind, an eta, or a business account's `ID` and its
+discount. `derived_kind` on `FeeCharged` and `RuleSpend` is the kind the
+chain charged, which with the fee bounds the principal to a band of the
+schedule; that is the accepted cost of putting Splash's revenue on chain.
+`PartnerAddressAdded` and `PartnerAddressRemoved` carry a payout partner's
+deposit address, a Splash classification that is public by design, since
+every payment to it is a bank payout.
 
 ## Where the salt lives
 

@@ -201,7 +201,11 @@ shared object from the old package is unusable by the new one.
 Record from the publish output: the new **package id**; the **AdminCap**,
 **TreasuryCap** and **AnchorCap** object ids (all three minted to the publisher by
 `business_account::init`); the shared **CapRegistry** id (shared by
-`cap_registry::init` in the same transaction); and the **UpgradeCap**.
+`cap_registry::init` in the same transaction); and the **UpgradeCap**. v2
+(Amendment A1) adds four more from the same publish: the shared **FeeConfig**
+(`fee_config::init`, the launch schedule and no fee recipient, so Splash's
+fees are off), the shared address **Registry** (`address_registry::init`),
+and the **FeeAdminCap** and **OpsCap**, both minted to the publisher.
 
 > **Superseded in v2 (D11).** Core upgrades additive-only through
 > `splash_upgrade_delay`; see the note at the top of this step. The v1 decision
@@ -238,7 +242,8 @@ and record ids for:
   `min_depth_base_units`, `min_settlement_amount`, `allowed_deepbook_pools`.
   The last two need care:
   **`min_settlement_amount`** — the v2 bank-payout floor, in the settled
-  coin's MINOR UNITS: `payment_intent` holds every bank payout (kind 1) to the
+  coin's MINOR UNITS: `payment_intent` holds every bank payout (kind 4 since
+  Amendment A1; kind 1 before) to the
   larger of this and 99 USDC, at creation and at settlement (abort 434).
   100_000_000 makes the v2 bank-payout floor 100 USDC. Wallet,
   Splash-business and cross-chain payments have no floor. Zero is rejected,
@@ -254,7 +259,10 @@ and record ids for:
   `assert_pegged` until the first real `update_peg`;
 `business_account::submit_application` (`ssm_number`, `kyb_cid`, clock `0x6`)
   → shared `BusinessAccount`, then `verify_business` (`AdminCap`, the account,
-  `risk_score`).
+  the address `Registry`, `risk_score`). The `Registry` comes after the
+  account: verification enters a registered business wallet in it, so a
+  payment to that wallet from another business is a free Splash-business
+  payment.
 
 **Testnet only.** These live in `splash_custody`, which v2 retires from the
 mainnet path for good (D11). Skip them on mainnet:
@@ -306,6 +314,16 @@ publisher key holds no money authority when custody publishes. §0 puts
 runbook creates one multisig in 3.1; if governance gets its own, send `AdminCap`
 there instead.
 
+**v2: FeeAdminCap, OpsCap and the fee recipient.** Move `FeeAdminCap` and
+`OpsCap` (both `key, store`) the same way, to the governance multisig; `OpsCap`
+may go to a separate Splash ops multisig instead. Never leave either with the
+publisher or the operator. Then, from the governance multisig,
+`fee_config::propose_fee_recipient` with the finance multisig's member keys,
+weights and threshold, and `apply_fee_recipient` after 24 hours and within
+seven days; and, from the `OpsCap` holder, `address_registry::add_partner_address`
+for each signed partner's deposit address. The order and the checks are
+`docs/MAINNET-CHECKLIST.md` steps 6a to 6d.
+
 Then **prove you can use it**: execute one trivial `AdminCap`-gated call signed 2-of-3
 (e.g. a no-op `verify_business` on a throwaway account) *before* you rely on this in
 production. An unrehearsed multisig is an untested backup.
@@ -330,6 +348,13 @@ SPLASH_COMPLIANCE_CONFIG_ID=<new>
 SPLASH_COMPLIANCE_CAP_ID=<new>              # unchanged by transfer_cap in 3.5
 SPLASH_BUSINESS_ACCOUNT_ID=<new>
 DEEPBOOK_POOL_ID=<the pool passed to compliance_config::create>
+SPLASH_FEE_CONFIG_ID=<from 3.2>             # A1: the quote API reads the fee schedule and recipient here
+SPLASH_ADDRESS_REGISTRY_ID=<from 3.2>       # A1: verify_business and the operator-outflow monitor
+SPLASH_SPEND_PACKAGE_ID=<splash_spend>      # the operator-outflow monitor's approved path, and the verify step
+SPLASH_FEE_ADMIN_CAP_ID=<from 3.2>          # verify step only: must be held by the governance multisig
+SPLASH_OPS_CAP_ID=<from 3.2>                # verify step only: must be held by SPLASH_OPS_ADDRESS
+SPLASH_OPS_ADDRESS=<ops multisig, or blank> # verify step only: blank means the governance multisig
+SPLASH_FINANCE_ADDRESS=<finance multisig>   # verify step only: the only fee recipient FeeConfig may have
 ```
 Testnet custody only, blank on mainnet (v2 retires `splash_custody` from the
 mainnet path, D11): `SPLASH_TREASURY_ID` (`SettlementPool<SUI>`),
@@ -389,6 +414,16 @@ ids below, and checks:
   by `SPLASH_GOVERNANCE_ADDRESS`. An unset id is reported skipped, never
   passed. It does not read the `ComplianceConfig` registries; check those by
   hand (`docs/MAINNET-CHECKLIST.md`);
+- Amendment A1's end state, through the same script: `SPLASH_FEE_CONFIG_ID`
+  is splash_core's shared `FeeConfig`, and so is `SPLASH_ADDRESS_REGISTRY_ID`
+  its `Registry`; `FeeAdminCap` (`SPLASH_FEE_ADMIN_CAP_ID`) is held by
+  `SPLASH_GOVERNANCE_ADDRESS`, and `OpsCap` (`SPLASH_OPS_CAP_ID`) by
+  `SPLASH_OPS_ADDRESS`, or by the governance multisig when that is blank; the
+  operator holds neither; and `FeeConfig` pays no one until the finance
+  multisig (`SPLASH_FINANCE_ADDRESS`) is applied, and then only it. A pending
+  recipient change to any other address fails the check, which names
+  `cancel_fee_recipient_proposal`. An unset id is reported skipped. It does
+  not read the schedule; check that by hand (checklist step 6b);
 - `peg_monitor::update_peg` on the AnchorCap and CapRegistry emits `PegUpdated`;
 - `audit_anchor::anchor_audit_hash` on its own emits `AuditAnchored`;
 - the v2 wallet path, in one transaction sent as the registered wallet of
@@ -396,9 +431,12 @@ ids below, and checks:
   wallet's USDC address balance redeemed, `payment_intent::create_for_wallet<USDC>`,
   `confirm_from_business_wallet_balance<USDC>`, `audit_anchor::anchor` on its
   receipt and `delete_finalized` emit `IntentCreated`, `IntentConfirmed` and
-  `SettlementAnchored`, and no `TreasuryDeposited`. The wallet must hold at
-  least 0.01 USDC in its address balance. A simulation checks no signatures,
-  so no wallet signer is needed;
+  `SettlementAnchored`, and no `TreasuryDeposited`. The confirm passes
+  `FeeConfig` and the `Registry` with a `max_fee` of 1% of the payment, and
+  the payment goes back to the wallet itself unless
+  `SPLASH_TEST_RECIPIENT_ADDRESS` names another address. The wallet must hold
+  at least 0.0101 USDC in its address balance (0.01 and that `max_fee`). A
+  simulation checks no signatures, so no wallet signer is needed;
 - the same `create_for_wallet` sent as the operator aborts with
   `business_account::E_NOT_THE_WALLET` (50): the operator key cannot open, or
   pay, a business's intent.
@@ -429,7 +467,10 @@ pay on a business's behalf, which is what the old option did.
   hot-key attacker can assert a healthy peg. They still cannot move funds, but they can
   remove one safety check on transactions someone else authorises. Consider whether the
   peg belongs behind its own oracle attestation rather than a plain hot cap.
-- **Gas key** holds only SUI, and the **fee wallet** is a plain address, not a signer.
+- **Gas key** holds only SUI. The **fee recipient** is no longer a plain fee wallet:
+  in v2 it is `FeeConfig`'s, the Splash finance multisig, which the chain proves no
+  single member can sign for, changed only after 24 hours' notice. That notice
+  alerts no owner yet (Phase 2).
 - **Phase-0 honesty:** the operator key carries no customer funds today (settlement is
   demo-denominated). This is key *hygiene* now — but the object model you publish decides
   whether the Phase-1 custody posture is a config change or a rewrite.

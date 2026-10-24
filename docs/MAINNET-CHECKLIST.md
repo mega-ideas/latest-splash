@@ -14,13 +14,22 @@ procedure in [`docs/UPGRADE-POLICY.md`](UPGRADE-POLICY.md).
 **Before any publish**
 
 - [ ] Sui CLI `mainnet-v1.82.3`. Every package passes `sui move build &&
-      sui move test`, and `npm run lint` passes, including `check:core` and
-      `check:spend`.
+      sui move test`, and `npm run lint` passes, including `check:core`,
+      `check:spend` and `check:fees` (the generated fee-vector test is up to
+      date, the 100 bps ceiling is the same in `splash_core`, `splash_spend`
+      and `lib/fees/schedule.ts`, no literal fee rate in customer copy, and
+      no immediate fee setter but `set_discount`).
 - [ ] The independent Move review (OtterSec, or Zellic as backup) has signed
       off on this exact source commit. Record the commit.
 - [ ] **The governance multisig exists**: Sky, Sebastian and the cold backup,
       2-of-3, with no single member able to sign alone. Record its address and
       the three public keys. It never signs `0x2::address_alias`.
+- [ ] **The Splash finance multisig exists**, the fee recipient: no single
+      member able to sign alone, and no member key the KMS operator's. Record
+      its address and its members' keys (`flag || public key`), weights and
+      threshold: the fee recipient proposal names exactly these. If Splash
+      ops gets its own multisig for `OpsCap`, record it too
+      (`SPLASH_OPS_ADDRESS`).
 - [ ] The previously exposed operator and API keys are rotated, and the
       operator signs only through AWS KMS (`OPERATOR_KMS_KEY_ID`; production
       refuses a raw key at boot).
@@ -29,7 +38,11 @@ procedure in [`docs/UPGRADE-POLICY.md`](UPGRADE-POLICY.md).
 
 1. [ ] Publish `splash_core`. Record the package ID, `AdminCap`,
        `TreasuryCap`, `AnchorCap`, `CapRegistry`, the `ConfigTicket` and
-       the `UpgradeCap`.
+       the `UpgradeCap`, and from Amendment A1 the shared `FeeConfig` and
+       address `Registry` and the `FeeAdminCap` and `OpsCap` (both minted to
+       the publisher). `FeeConfig` starts with the launch schedule and **no
+       fee recipient**, so Splash's fees are off and nothing is ever paid to
+       the publisher.
 2. [ ] `compliance_config::create<USDC>`, consuming the `ConfigTicket`, with
        native mainnet USDC
        (`0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC`).
@@ -54,6 +67,33 @@ procedure in [`docs/UPGRADE-POLICY.md`](UPGRADE-POLICY.md).
        multisig.
 6. [ ] Transfer `AdminCap` to the governance multisig. Transfer the
        `ComplianceCap` to a third address (2-of-3), never the operator's.
+6a. [ ] **The fee ceremony.** Transfer `FeeAdminCap` and `OpsCap` to the
+       governance multisig (`OpsCap` may go to a separate Splash ops multisig
+       instead), never the operator's. Both have `store`, so a plain transfer
+       works. With `FeeAdminCap` one key could set any discount at once and
+       propose any schedule or recipient alone.
+6b. [ ] Read `FeeConfig`'s schedules and check each kind against A1 §2.2
+       (`docs/v2/fees.md`): Splash business free; wallet 2 bps, minimum
+       250,000 and maximum 5,000,000 minor units; exchange 15/12/10/7/5 bps
+       and cross-chain and bank payout 30/20/12/7/5 bps, on upper bounds of
+       1,000, 10,000, 50,000 and 100,000 USDC and `u64::MAX`, minimum 0,
+       maximum `u64::MAX`. The verify step does not read the schedule, so
+       this is a manual read; record the output.
+6c. [ ] The governance multisig calls `fee_config::propose_fee_recipient`
+       with the finance multisig's member keys, weights and threshold. The
+       chain derives the address and refuses a multisig one member can sign
+       for (1304). Check that the `FeeRecipientProposed` event names the
+       finance multisig's recorded address. Wait 24 hours. Then call
+       `apply_fee_recipient`, no later than seven days after the notice ran
+       out (1306 after that: propose again). Splash's fees are on from then.
+       Until then every fee is 0, which is a valid state to onboard in; do
+       not leave a proposal for any other address pending (withdraw it with
+       `cancel_fee_recipient_proposal`).
+6d. [ ] Splash ops (the `OpsCap` holder) registers each signed payout
+       partner's deposit addresses with `address_registry::add_partner_address`,
+       and checks each `PartnerAddressAdded` event. A payment to a
+       registered address is charged and settled only as a bank payout.
+       Business wallets need no step: verification enters them.
 7. [ ] The governance multisig calls
        `compliance_config::propose_addition<splash_spend::splash_spend::SettleWitness>`
        for the settlement-app registry (2). Wait 24 hours. Then call
@@ -65,7 +105,10 @@ procedure in [`docs/UPGRADE-POLICY.md`](UPGRADE-POLICY.md).
        and check them exactly.** `settlement_apps` is exactly
        `[<published splash_spend>::splash_spend::SettleWitness]`,
        `bridge_adapters` is `[]`, `accepted_assets` is exactly native mainnet
-       USDC, and `pending_additions` is `[]`. On-chain governance checks prove
+       USDC, and `pending_additions` is `[]`. Read `FeeConfig` too: no
+       schedule proposal is pending for any kind, and either no fee recipient
+       is set and none but the finance multisig is pending, or the finance
+       multisig is the recipient. On-chain governance checks prove
        only that the sender holds `AdminCap` and is a multisig no single
        member can sign for, not that it is the governance multisig, and a
        proposal made before the alert cron runs reaches no owner.
@@ -76,13 +119,16 @@ procedure in [`docs/UPGRADE-POLICY.md`](UPGRADE-POLICY.md).
        bank-payout floor and the 10,000 USDC second-approval threshold are
        6-decimal minor units, and `activate_addition` does not check
        decimals.
-9. [ ] **Decision for Sky: when the legacy approver path closes.** A fresh
-       config starts with `legacy_enabled` on, so a business with no wallet
-       can still pay through one person's `PayoutApproval`. Closing it is
-       one-way: `compliance_config::admin_disable_legacy` (governance
-       multisig) or `disable_legacy` (`ComplianceCap`), and nothing can turn
-       it back on. Recommended: close it before the first business onboards,
-       because on a fresh mainnet every business starts with a wallet.
+9. [ ] ~~Decision for Sky: when the legacy approver path closes.~~ **Gone:
+       there is no legacy path to close.** This step used to ask when to
+       switch off `legacy_enabled` (`admin_disable_legacy` or
+       `disable_legacy`). Sky decided (decision 3, 24 Oct 2026) not to
+       publish the legacy approval path at all, because a public function,
+       however firmly closed, can never be removed once published. So v2 core
+       has no `legacy_enabled`, no approver set and no
+       `confirm_with_approval`, and none of those functions exists to call.
+       The check is now only that `tests/legacy-path-removed.test.mjs` passes
+       on the audited commit.
 
 **Environment (mainnet)**
 
@@ -91,6 +137,17 @@ procedure in [`docs/UPGRADE-POLICY.md`](UPGRADE-POLICY.md).
       `SPLASH_ANCHOR_CAP_ID` are set to the new IDs, as are the governance
       alert IDs `SPLASH_UPGRADE_DELAY_PACKAGE_ID` and
       `SPLASH_UPGRADE_WRAPPER_ID`.
+- [ ] `SPLASH_FEE_CONFIG_ID` and `SPLASH_ADDRESS_REGISTRY_ID` are set (the
+      quote API reads the fee from `FeeConfig`, and on mainnet without it no
+      fee is quoted and no payment is built; `verify_business` and the
+      operator-outflow monitor need the `Registry`), and so is
+      `SPLASH_SPEND_PACKAGE_ID` (the operator-outflow monitor's approved
+      path). For the verify step, also `SPLASH_FEE_ADMIN_CAP_ID`,
+      `SPLASH_OPS_CAP_ID`, `SPLASH_OPS_ADDRESS` (blank: the governance
+      multisig) and `SPLASH_FINANCE_ADDRESS`; unset, those checks are
+      reported skipped, never passed.
+- [ ] Know the gap: no owner is alerted to a fee proposal yet, because the
+      governance alert cron does not read `FeeConfig` (Phase 2).
 - [ ] `SPLASH_CUSTODY_PACKAGE_ID` and `SPLASH_PAYOUT_DELEGATION_ID` are
       **unset**. Production on mainnet refuses to boot with either, because
       custody and the meter are retired in v2. On mainnet the
@@ -119,7 +176,11 @@ procedure in [`docs/UPGRADE-POLICY.md`](UPGRADE-POLICY.md).
 - [ ] Legal sign-off on Treasury, including the Halogen referral wording,
       before Treasury is enabled.
 - [ ] Each partner confirms its deposit-address model (Phase 0 check 6). Is
-      the address fixed per business, or issued per payout?
+      the address fixed per business, or issued per payout? **Decided by Sky
+      (decision 2, 24 Oct 2026):** fixed per business per partner, verified
+      once by a test deposit and bound to its beneficiaries by the business
+      wallet. Each partner still confirms it can work that way, and on which
+      networks it deposits.
 
 ## Shipped (in review)
 - [x] W9.0 type & color discipline · W9.1 quote comparison card ·

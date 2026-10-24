@@ -1,16 +1,19 @@
 # Splash Key Policy
 
-Status: v2 (decisions D1, D2, D11), 24 Oct 2026. Design:
-`docs/v2/phase1-move-design.md`.
+Status: v2 (decisions D1, D2, D11), 24 Oct 2026; Amendment A1 (Splash's fee),
+25 Oct 2026. Design: `docs/v2/phase1-move-design.md`; the fee:
+`docs/v2/fees.md`.
 
 ## Roles
 
 | Role | Purpose | Target custody |
 | --- | --- | --- |
-| Governance multisig | Holds `AdminCap` and the `DelayedUpgradeCap` wrapping `splash_core`'s `UpgradeCap`; proposes and activates upgrades and registry additions | Sui multisig, 2-of-3 (Sky, Sebastian, cold backup); proved on chain to be a quorum at every governance call |
-| `ComplianceCap` holder | Subtractive only: pause, tighten, remove a registry entry, cancel an addition, switch the legacy path off | Sui multisig, 2-of-3 minimum, at a third address |
+| Governance multisig | Holds `AdminCap` and the `DelayedUpgradeCap` wrapping `splash_core`'s `UpgradeCap`; proposes and activates upgrades and registry additions. Also holds `FeeAdminCap`: proposes, applies and withdraws fee schedule and fee recipient changes (24 hours' notice, then a seven-day window) and sets per-business discounts (immediate, at most 100 bps) | Sui multisig, 2-of-3 (Sky, Sebastian, cold backup); proved on chain to be a quorum where a call checks it (registry additions, `upgrade_delay::wrap`, owner changes). The `fee_config` calls check only the `FeeAdminCap`, not the sender, so whoever holds the cap can make them; that is why it must sit with the multisig |
+| `OpsCap` holder (Splash ops) | Adds and removes payout partners' deposit addresses in Splash's address `Registry`, at once and with an event. It only classifies addresses: it cannot redirect funds or raise a fee, only make payments to an address it changed abort | The governance multisig, or a separate Splash ops multisig (`SPLASH_OPS_ADDRESS`). Never the KMS operator |
+| Splash finance multisig | Receives every Splash fee leg as `FeeConfig`'s fee recipient. Holds no capability | Sui multisig that no single member can sign for (the chain refuses one, 1304); its members are checked at the ceremony |
+| `ComplianceCap` holder | Subtractive only: pause, tighten, remove a registry entry, cancel an addition. (The legacy path it could once switch off is not in v2 core) | Sui multisig, 2-of-3 minimum, at a third address |
 | `AnchorCap` holder | Audit-anchor and peg attestations; moves no money | KMS-backed operator signer |
-| KMS operator | An EXECUTOR on businesses' spending rules: runs scheduled payments and batches only with the owners' approval naming it (an owner's `approve_payout`, or the wallet's `delegate_execution` of an intent the wallet opened), under its own tightly capped allowance | AWS KMS (WS4) |
+| KMS operator | An EXECUTOR on businesses' spending rules: runs scheduled payments and batches only with the owners' approval naming it (an owner's `approve_payout`, or the wallet's `delegate_execution` of an intent the wallet opened; each names `max_total`, the principal plus the Splash fee shown), under its own tightly capped allowance. Holds neither `FeeAdminCap` nor `OpsCap`, and is never the fee recipient | AWS KMS (WS4) |
 | Business wallet | The business's own Sui multisig of its owners' passkeys (zkLogin as fallback). Pays, funds spending rules, changes its rules | The business. **Splash holds no key to it** (D1) |
 | Development signer | Local and testnet smoke tests only | Raw key allowed only when `NODE_ENV !== 'production'` |
 
@@ -22,8 +25,10 @@ non-mutating multisig dry run.
 
 1. No production service loads a raw operator key. The operator signs only
    through KMS (`lib/env.ts` refuses `OPERATOR_SUI_PRIVATE_KEY` at boot).
-2. `AdminCap` and the `DelayedUpgradeCap` are never held by the service that
-   submits transactions.
+2. `AdminCap`, the `DelayedUpgradeCap`, `FeeAdminCap` and `OpsCap` are never
+   held by the service that submits transactions. The verify step
+   (`scripts/e2e-testnet.mjs`) checks who holds `FeeAdminCap` and `OpsCap`
+   and whom `FeeConfig` pays.
 3. Emergency pause authority stays available even if the operator service is
    down.
 4. **No governance or business multisig signs `0x2::address_alias`.** An alias
@@ -35,9 +40,15 @@ non-mutating multisig dry run.
    object IDs, transaction digests, and the rollback decision.
 6. Changing a governance signer gives the multisig a new address, so the
    `DelayedUpgradeCap` moves to it with `propose_owner_change` and then
-   `complete_owner_change`, after the same 24-hour notice. `AdminCap` (which
-   has `store`) is transferred to the new address in the same ceremony.
-7. The loss of one signer is tolerated by the 2-of-3. The loss of two signers
+   `complete_owner_change`, after the same 24-hour notice. `AdminCap`,
+   `FeeAdminCap` and, if governance holds it, `OpsCap` (all with `store`) are
+   transferred to the new address in the same ceremony.
+7. Changing a finance multisig signer gives it a new address too. Governance
+   proposes the new one with `fee_config::propose_fee_recipient` (its keys,
+   weights and threshold) and applies it after 24 hours and within seven
+   days. Until then fees keep going to the old address, so its signers must
+   stay able to sign.
+8. The loss of one signer is tolerated by the 2-of-3. The loss of two signers
    triggers an emergency governance review before anything is moved.
 
 ## Business wallets
@@ -77,6 +88,9 @@ The old rules stop paying as soon as the rotation is confirmed.
 
 ## Current gap log
 
-- The governance multisig, `ComplianceCap` rotation and the KMS operator key
-  are provisioned in the mainnet ceremony, which is a human step (brief §9).
+- The governance multisig, `ComplianceCap` rotation, the finance multisig, the
+  `FeeAdminCap` and `OpsCap` transfers and the KMS operator key are
+  provisioned in the mainnet ceremony, which is a human step (brief §9).
   Until then, testnet uses development signers.
+- No owner is alerted to a fee schedule or fee recipient proposal yet: the
+  governance alert cron does not read `FeeConfig` (Phase 2).

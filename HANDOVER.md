@@ -4,6 +4,13 @@ Supersedes `HANDOVERSEBASTIAN.md`, which is stale in four measurable ways
 recorded below. Written after deploying `v2.splashz.xyz` for the MUBA Hack
 demo.
 
+> **Later state (25 Oct 2026).** This handover records 5 September. Since
+> then v2 Phase 1 replaced the contract design, and Amendment A1 put Splash's
+> fee on chain. The current records are `STATUS.md`,
+> `docs/v2/phase1-move-design.md` (revision R5) and `docs/v2/fees.md`. In
+> particular the `owners` / `approvers` notes below describe code v2 core no
+> longer has: there is no approver set and no legacy approval path.
+
 Protocol unchanged: **Move changes are confirmed by the CTO. No
 self-approval.** No Move source was changed in this work — `splash_core` was
 published as-is.
@@ -281,7 +288,7 @@ ssh splash@$SPLASH_HOST 'journalctl -u splash-an -n 50 --no-pager'
 
 # full gate (from /home/splash/splashAN, PATH=/opt/node24/bin:$PATH)
 npm run doctor        # 0 failures expected
-npm run lint          # chains the six check:* invariants
+npm run lint          # chains fourteen check:* invariants (six when this was written), check:fees among them
 npm run build
 
 # turn zkLogin off in ~10s

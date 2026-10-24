@@ -1,8 +1,8 @@
 # Splash Upgrade Policy
 
-Status: v2 (decision D11, `SPLASH_SUI_V2_PROMPT.md`), 24 Oct 2026. Design:
-`docs/v2/phase1-move-design.md`. This replaces the earlier plan to publish
-`splash_core` immutable.
+Status: v2 (decision D11, `SPLASH_SUI_V2_PROMPT.md`), 24 Oct 2026; the fee
+section is Amendment A1, 25 Oct 2026. Design: `docs/v2/phase1-move-design.md`.
+This replaces the earlier plan to publish `splash_core` immutable.
 
 ## Which package can change, and how
 
@@ -68,6 +68,35 @@ that a policy is bound for life to that config: replacing the config would
 mean every business rotating its wallet to make a new policy. That residual
 risk is why every proposal alerts every owner, and the alert says so.
 
+## Splash's fee is data, not an upgrade (Amendment A1)
+
+A fee change is never a package upgrade. `splash_core::fee_config` holds the
+schedule and the fee recipient as data in the shared `FeeConfig`, and
+`FeeAdminCap`, held by the governance multisig, changes them through their
+own 24-hour path: `propose_schedule` or `propose_fee_recipient`, then
+`apply_schedule` or `apply_fee_recipient` no sooner than 24 hours later and no
+later than seven days after that, or a withdrawal with
+`cancel_schedule_proposal` or `cancel_fee_recipient_proposal`. The one
+immediate change is `set_discount`, which can only lower what a business
+pays. `docs/v2/fees.md` has the rules.
+
+The computation is frozen. `splash_spend` is immutable and stays linked to the
+core version it was published against, so it runs that version's
+`fee_config::splash_fee` for ever, and `FeeConfig` has no version gate that
+would make those calls abort. Only the schedule data changes later.
+
+What an upgrade could still do to the fee: an added `fee_config` function
+could rewrite `FeeConfig`, its fee recipient for example. A spending rule is
+still bounded by `splash_spend`'s own 100 bps ceiling, checked on `max_fee`
+and on the fee core charged, and each policy pins Splash's `FeeConfig` and
+`Registry`. On the owners' path the payer's `max_fee` bounds it. The
+upgrade alert is therefore the owners' warning here too.
+
+Unlike an upgrade or a registry addition, **a fee proposal alerts no owner
+yet**: the governance alert cron does not read `FeeConfig`. Owner alerts for
+`FeeScheduleProposed`, `FeeRecipientProposed`, their application and their
+withdrawal are Phase 2.
+
 ## Registry additions
 
 Adding an accepted asset, a settlement app (`splash_spend`'s `SettleWitness`)
@@ -103,7 +132,11 @@ Before any proposal:
 4. Confirm `compliance_config::assert_active` is wired into any new money-moving
    function.
 5. `npm run lint` passes, including `check:core` (no value-bearing field in
-   core) and `check:spend` (no spender rotation, no permit leak).
+   core), `check:spend` (no spender rotation, no permit leak, and `fee_config` and
+   `address_registry` imported only from `splash_core`) and `check:fees` (one 100
+   bps ceiling in core, `splash_spend` and `lib/fees/schedule.ts`; the
+   generated fee-vector test up to date; no immediate fee setter but
+   `set_discount`).
 6. Publish the source commit for the digest, for reviewers. The backend does
    not rebuild it. Owners are shown what the chain shows: the bytecode digest,
    the upgrade policy and when it can take effect.
