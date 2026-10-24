@@ -21,10 +21,14 @@
 ///   * `confirm_from_business_wallet` (and `_balance`, and the cross-chain
 ///     form): the business multisig signs. Its signature IS the approval; the
 ///     protocol enforces it before this module runs.
-///   * `settle_from_app` (and the cross-chain form): a registered settlement
-///     app, which is `splash_spend`, settles funds it drew under an app-bound
-///     allowance from the business wallet and checked against the business's
-///     `SpendPolicy`.
+///   * `settle_from_app`: a registered settlement app, which is
+///     `splash_spend`, settles funds it drew under an app-bound allowance from
+///     the business wallet and checked against the business's `SpendPolicy`,
+///     and the recipient is paid in the same call. An app opens and settles
+///     intents that land on Sui only: a cross-chain settlement hands a coin
+///     back to the transaction for a bridge to burn, and only the owners'
+///     own transaction may hold the business's coin, so cross-chain intents
+///     are opened and paid by the business wallet alone.
 ///   * `confirm_with_approval`: the legacy per-person approval path,
 ///     DEPRECATED. It closes for an account once that account registers a
 ///     business wallet, and for everyone once governance or compliance turns
@@ -660,34 +664,6 @@ public fun create_for_app<T, W: drop>(
     )
 }
 
-/// The cross-chain form of `create_for_app`.
-public fun create_cross_chain_for_app<T, W: drop>(
-    _witness: W,
-    account: &mut BusinessAccount,
-    config: &ComplianceConfig,
-    maker: address,
-    payment_ref: vector<u8>,
-    destination_domain: u32,
-    mint_recipient: address,
-    amount: u64,
-    commitment: vector<u8>,
-    rail_commitment: vector<u8>,
-    bridge_max_fee: u64,
-    bridge_min_finality: u32,
-    expires_at: u64,
-    clock: &Clock,
-    ctx: &mut TxContext,
-): PaymentIntent {
-    compliance_config::assert_settlement_app<W>(config);
-    assert!(maker != @0x0, E_INVALID_RECIPIENT);
-    assert!(destination_domain != SUI_DOMAIN, E_BAD_DOMAIN);
-    open<T>(
-        account, config, maker, payment_ref, mint_recipient, vector[], amount, b"USDC".to_string(),
-        UNIT_FX_RATE, commitment, KIND_CROSS_CHAIN_WALLET, destination_domain, rail_commitment,
-        bridge_max_fee, bridge_min_finality, expires_at, clock, ctx,
-    )
-}
-
 fun open<T>(
     account: &mut BusinessAccount,
     config: &ComplianceConfig,
@@ -883,28 +859,6 @@ public fun settle_from_app<T, W: drop>(
 
     deliver_balance(intent, funds, ctx);
     receipt(intent, now)
-}
-
-/// The cross-chain form of `settle_from_app`: the coin comes back for a
-/// registered bridge adapter to burn, beside the obligation that names it.
-public fun settle_cross_chain_from_app<T, W: drop>(
-    _witness: W,
-    intent: &mut PaymentIntent,
-    account: &mut BusinessAccount,
-    config: &ComplianceConfig,
-    funds: Balance<T>,
-    settle_by_ms: u64,
-    clock: &Clock,
-    ctx: &mut TxContext,
-): (SettleReceipt, Coin<T>, BridgeObligation) {
-    compliance_config::assert_settlement_app<W>(config);
-    assert_cross_chain(intent);
-    assert!(funds.value() == intent.amount_usd, E_EXACT_AMOUNT_REQUIRED);
-    let now = settle_for_account<T>(intent, account, config, PATH_SETTLEMENT_APP, settle_by_ms, clock);
-
-    let to_bridge = coin::from_balance(funds, ctx);
-    let obligation = obligation(intent, object::id(&to_bridge));
-    (receipt(intent, now), to_bridge, obligation)
 }
 
 /// Discharge a bridge obligation. Only a registered bridge adapter can, and

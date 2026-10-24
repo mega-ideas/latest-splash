@@ -49,6 +49,9 @@ const E_BAD_BENEFICIARY: u64 = 1058;
 const E_BAD_LIMIT: u64 = 1059;
 /// A spender's role is STAFF (1) or EXECUTOR (2).
 const E_UNKNOWN_ROLE: u64 = 1060;
+/// A spending rule pays only on Sui (domain 8). A recipient on another chain
+/// is paid from the wallet.
+const E_NOT_ON_SUI: u64 = 1061;
 
 // ─── Constants ─────────────────────────────────────────────────────────────
 /// Staff open intents and pay them.
@@ -60,7 +63,8 @@ const MAX_SPENDERS: u64 = 64;
 /// D2: a second owner approval above 10,000 USDC, in minor units (6 decimals).
 const DEFAULT_SECOND_APPROVAL_THRESHOLD: u64 = 10_000_000_000;
 const COMMITMENT_BYTES: u64 = 32;
-/// A bank payout's partner deposit address is on Sui.
+/// Every destination a policy verifies is on Sui: a bank payout's partner
+/// deposit address, another Splash business, a wallet.
 const SUI_DOMAIN: u32 = 8;
 
 /// Shared once, at publish. The parent every policy's UID is derived from.
@@ -74,7 +78,8 @@ public struct PolicyKey has copy, drop, store {
     wallet_epoch: u64,
 }
 
-/// Where a payment lands: a CCTP domain (8 is Sui) and an address there.
+/// Where a payment lands: a CCTP domain and an address there. The domain is
+/// always 8 (Sui): a spending rule pays nowhere else.
 public struct Destination has copy, drop, store {
     domain: u32,
     addr: address,
@@ -102,7 +107,7 @@ public struct SpendPolicy has key {
     owners: vector<address>,
     spenders: Table<address, Spender>,
     spender_count: u64,
-    /// Kinds 2–4: verified destinations.
+    /// Kinds 2–3: verified destinations on Sui.
     recipients: Table<Destination, bool>,
     recipient_count: u64,
     /// Kind 1: each bank beneficiary (by 32-byte commitment) bound to the one
@@ -236,11 +241,15 @@ public fun remove_spender(policy: &mut SpendPolicy, spender: address, ctx: &TxCo
     changed(policy, b"remove_spender");
 }
 
-/// Verify a destination for kinds 2–4: another Splash business, a supplier's
-/// wallet, or a cross-chain recipient on another domain.
+/// Verify a destination for kinds 2–3: another Splash business or a
+/// supplier's wallet, on Sui. A recipient on any other domain is refused:
+/// no spending rule could pay it, because a cross-chain payment would hand
+/// the business's coin to the spender's transaction. The owners pay those
+/// from the wallet.
 public fun verify_recipient(policy: &mut SpendPolicy, domain: u32, addr: address, ctx: &TxContext) {
     assert_wallet(policy, ctx);
     assert!(addr != @0x0, E_INVALID_ADDRESS);
+    assert!(domain == SUI_DOMAIN, E_NOT_ON_SUI);
     let key = Destination { domain, addr };
     assert!(!policy.recipients.contains(key), E_ALREADY_VERIFIED);
     policy.recipients.add(key, true);

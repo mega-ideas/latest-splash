@@ -1721,45 +1721,6 @@ fun a_bank_payout_cannot_take_the_cross_chain_path() {
     s.end();
 }
 
-#[test]
-/// A cross-chain intent a staff member opened under a spending rule is
-/// payable by the owners too, on the wallet path (1).
-fun the_wallet_releases_a_cross_chain_intent_an_app_opened() {
-    let mut s = h::setup();
-    register<TestApp>(&mut s, compliance_config::registry_settlement_app());
-    tx!(&mut s, h::wallet(), |account, config, c, ctx| {
-        let mut intent = payment_intent::create_cross_chain_for_app<USDC, TestApp>(
-            TestApp {},
-            account,
-            config,
-            STAFF,
-            h::payment_ref(1),
-            SOLANA,
-            MINT_RECIPIENT,
-            h::amount(),
-            h::commitment(),
-            h::rail(),
-            MAX_FEE,
-            MIN_FINALITY,
-            c.timestamp_ms() + QUOTE_MS,
-            c,
-            ctx,
-        );
-        assert_eq!(payment_intent::sender(&intent), STAFF);
-        let (coin, obligation) = release(&mut intent, account, config, h::amount(), h::settle_by(c), c, ctx);
-        let confirmed = event::events_by_type<payment_intent::IntentConfirmed>();
-        let (_, _, _, _, _, _, path, _) = payment_intent::unpack_intent_confirmed_for_testing(confirmed[0]);
-        assert_eq!(path, payment_intent::path_business_wallet());
-        let (intent_id, coin_id, _, amount, _, _, _, _) = payment_intent::unpack_bridge_obligation_for_testing(obligation);
-        assert_eq!(intent_id, object::id(&intent));
-        assert_eq!(coin_id, object::id(&coin));
-        assert_eq!(amount, h::amount());
-        coin::burn_for_testing(coin);
-        payment_intent::delete_finalized(intent);
-    });
-    s.end();
-}
-
 // ─── Cross-chain: discharge ────────────────────────────────────────────────
 
 #[test]

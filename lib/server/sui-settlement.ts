@@ -503,7 +503,7 @@ const ABORT_CODES: Record<number, string> = {
   1019: 'E_NOT_THE_MAKER — the business wallet hands only a payment it opened itself to the scheduled-payment operator. For a staff member payment, an owner approves it with the operator as payer.',
   1020: 'E_NOT_AN_EXECUTOR — execution can be handed only to the scheduled-payment operator on the rule.',
   1021: 'E_STALE_APPROVAL — the account authority changed (a freeze, a membership or wallet change) after this approval was given. Approve again.',
-  1022: 'E_WRONG_PAY_PATH — a cross-chain intent is paid with pay_intent_cross_chain and only it; any other with pay_intent.',
+  1022: 'E_WRONG_PAY_PATH — a cross-chain payment is not paid, approved or delegated under a spending rule. The owners pay it from the business wallet.',
   1023: 'E_ALLOWANCE_NOT_FOR_POLICY — this allowance was not issued for this spending rule. Its name must be the rule allowance_name (splash-policy: and the rule id); an allowance from an earlier wallet never pays under a later rule.',
   1024: 'E_ONLY_THE_WALLET_DELEGATES — only the business wallet can hand a payment to the scheduled-payment operator. A staff member cannot; an owner approves the payment with the operator as payer instead.',
   1050: 'E_NOT_THE_WALLET — only the business wallet that made this spending rule can change it.',
@@ -517,6 +517,7 @@ const ABORT_CODES: Record<number, string> = {
   1058: 'E_BAD_BENEFICIARY — a beneficiary is named by its 32-byte commitment (splash:beneficiary:v1).',
   1059: 'E_BAD_LIMIT — a per-payment maximum of zero would refuse every payment.',
   1060: 'E_UNKNOWN_ROLE — a spender role is 1 (staff) or 2 (scheduled-payment operator).',
+  1061: 'E_NOT_ON_SUI — a spending rule pays only on Sui (CCTP domain 8). A recipient on another chain is paid from the business wallet, not verified on the rule.',
 
   // ── upgrade_delay (splash_upgrade_delay, the 24-hour upgrade notice) ─────
   1100: 'E_BAD_DIGEST — upgrade_delay::propose was given a digest that is not 32 bytes. Pass the digest the build prints for the new bytecode.',

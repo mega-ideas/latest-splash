@@ -184,34 +184,6 @@ fun cross_chain_by_wallet(
     )
 }
 
-fun cross_chain_by_app(
-    account: &mut BusinessAccount,
-    config: &ComplianceConfig,
-    n: u8,
-    domain: u32,
-    expires_at: u64,
-    c: &Clock,
-    ctx: &mut TxContext,
-): PaymentIntent {
-    payment_intent::create_cross_chain_for_app<USDC, TestApp>(
-        TestApp {},
-        account,
-        config,
-        STAFF,
-        h::payment_ref(n),
-        domain,
-        MINT_RECIPIENT,
-        h::amount(),
-        h::commitment(),
-        h::rail(),
-        BRIDGE_FEE,
-        BRIDGE_FINALITY,
-        expires_at,
-        c,
-        ctx,
-    )
-}
-
 fun take(s: &Scenario): (BusinessAccount, ComplianceConfig, Clock) {
     (s.take_shared<BusinessAccount>(), s.take_shared<ComplianceConfig>(), s.take_shared<Clock>())
 }
@@ -615,21 +587,6 @@ fun app_create_enforces_the_thirty_day_ceiling() {
 
 #[test]
 #[expected_failure(abort_code = payment_intent::E_BAD_EXPIRY)]
-/// And on the cross-chain app path, at the lower bound.
-fun cross_chain_app_create_refuses_expiry_at_now() {
-    let mut s = h::setup();
-    register_app(&mut s);
-    s.next_tx(STAFF);
-    let (mut account, config, c) = take(&s);
-    let now = c.timestamp_ms();
-    let intent = cross_chain_by_app(&mut account, &config, 1, BASE_DOMAIN, now, &c, s.ctx());
-    payment_intent::share_intent(intent);
-    give(account, config, c);
-    s.end();
-}
-
-#[test]
-#[expected_failure(abort_code = payment_intent::E_BAD_EXPIRY)]
 /// The legacy create obeys the same ceiling: the 5-minute constant it used to
 /// hard-code is gone, and a caller-chosen deadline must not exceed 30 days.
 fun legacy_create_enforces_the_thirty_day_ceiling() {
@@ -737,6 +694,37 @@ fun app_settle_at_exactly_expires_at_is_refused() {
     register_app(&mut s);
     let id = staff_opens(&mut s, 1);
     advance(&mut s, FIVE_MINUTES);
+    s.next_tx(STAFF);
+    let (mut account, config, c) = take(&s);
+    let mut intent = s.take_shared_by_id<PaymentIntent>(id);
+    let funds = balance::create_for_testing<USDC>(h::amount());
+    let receipt = payment_intent::settle_from_app<USDC, TestApp>(
+        TestApp {}, &mut intent, &mut account, &config, funds, h::settle_by(&c), &c, s.ctx(),
+    );
+    audit_anchor::anchor(receipt, HASH, BLOB, &c, s.ctx());
+    ts::return_shared(intent);
+    give(account, config, c);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = payment_intent::E_CROSS_CHAIN_ONLY)]
+/// A settlement app cannot settle a cross-chain intent the wallet opened:
+/// its one settle path pays an address on Sui, and no app path hands a coin
+/// back for a bridge. Cross-chain intents are the owners' to pay.
+fun an_app_cannot_settle_a_cross_chain_intent() {
+    let mut s = h::setup();
+    register_app(&mut s);
+    s.next_tx(h::wallet());
+    let id;
+    {
+        let (mut account, config, c) = take(&s);
+        let expires_at = c.timestamp_ms() + FIVE_MINUTES;
+        let intent = cross_chain_by_wallet(&mut account, &config, 1, BASE_DOMAIN, expires_at, &c, s.ctx());
+        id = object::id(&intent);
+        payment_intent::share_intent(intent);
+        give(account, config, c);
+    };
     s.next_tx(STAFF);
     let (mut account, config, c) = take(&s);
     let mut intent = s.take_shared_by_id<PaymentIntent>(id);
@@ -938,21 +926,6 @@ fun cross_chain_wallet_create_refuses_the_sui_domain() {
     let (mut account, config, c) = take(&s);
     let expires_at = c.timestamp_ms() + FIVE_MINUTES;
     let intent = cross_chain_by_wallet(&mut account, &config, 1, 8, expires_at, &c, s.ctx());
-    payment_intent::share_intent(intent);
-    give(account, config, c);
-    s.end();
-}
-
-#[test]
-#[expected_failure(abort_code = payment_intent::E_BAD_DOMAIN)]
-/// The same on the app path.
-fun cross_chain_app_create_refuses_the_sui_domain() {
-    let mut s = h::setup();
-    register_app(&mut s);
-    s.next_tx(STAFF);
-    let (mut account, config, c) = take(&s);
-    let expires_at = c.timestamp_ms() + FIVE_MINUTES;
-    let intent = cross_chain_by_app(&mut account, &config, 1, 8, expires_at, &c, s.ctx());
     payment_intent::share_intent(intent);
     give(account, config, c);
     s.end();
@@ -1636,20 +1609,6 @@ fun a_removed_app_is_refused() {
 }
 
 #[test]
-#[expected_failure(abort_code = compliance_config::E_NOT_A_SETTLEMENT_APP)]
-/// The cross-chain app create checks the registry too.
-fun an_unregistered_app_cannot_create_cross_chain() {
-    let mut s = h::setup();
-    s.next_tx(STAFF);
-    let (mut account, config, c) = take(&s);
-    let expires_at = c.timestamp_ms() + FIVE_MINUTES;
-    let intent = cross_chain_by_app(&mut account, &config, 1, BASE_DOMAIN, expires_at, &c, s.ctx());
-    payment_intent::share_intent(intent);
-    give(account, config, c);
-    s.end();
-}
-
-#[test]
 #[expected_failure(abort_code = payment_intent::E_INVALID_RECIPIENT)]
 /// An app must vouch for someone. An intent made by @0x0 could never be
 /// cancelled by its maker.
@@ -2079,26 +2038,6 @@ fun the_last_accepted_asset_cannot_be_removed() {
 fun legacy_create_refuses_the_cross_chain_kind() {
     let mut s = legacy_setup();
     legacy_open(&mut s, payment_intent::kind_cross_chain_wallet(), FIVE_MINUTES);
-    s.end();
-}
-
-#[test]
-#[expected_failure(abort_code = payment_intent::E_CROSS_CHAIN_ONLY)]
-/// The legacy path refuses cross-chain intents even where one can exist on an
-/// account without a wallet: a registered app opened it. An approver must not
-/// be able to release a CCTP payment to the maker's own address on Sui.
-fun legacy_approve_refuses_a_cross_chain_intent() {
-    let mut s = legacy_setup();
-    register_app(&mut s);
-    s.next_tx(STAFF);
-    {
-        let (mut account, config, c) = take(&s);
-        let expires_at = c.timestamp_ms() + FIVE_MINUTES;
-        let intent = cross_chain_by_app(&mut account, &config, 1, BASE_DOMAIN, expires_at, &c, s.ctx());
-        payment_intent::share_intent(intent);
-        give(account, config, c);
-    };
-    legacy_approve(&mut s);
     s.end();
 }
 

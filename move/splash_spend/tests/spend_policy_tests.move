@@ -1165,11 +1165,10 @@ fun removing_a_spender_at_the_cap_frees_a_place() {
 // ════════════════════════════════════════════════════════════════════════════
 
 #[test]
-/// A recipient is a destination: a CCTP domain AND an address. The same
-/// address on another chain is someone else entirely (or no one), so
-/// verifying it on Sui verifies nothing on Solana or Ethereum, and removing
-/// one leaves the other.
-fun recipients_are_keyed_by_domain_and_address() {
+/// A recipient is a destination: a CCTP domain AND an address, and only Sui
+/// (8) can be verified. Verifying an address on Sui verifies nothing on
+/// Solana or Ethereum, and removing it leaves the list empty.
+fun recipients_are_keyed_by_domain_and_address_on_sui_only() {
     let (mut s, id) = begin_with_policy();
     verify_recipient_as(&mut s, id, h::wallet(), SUI, SUPPLIER);
     s.next_tx(STRANGER);
@@ -1182,21 +1181,19 @@ fun recipients_are_keyed_by_domain_and_address() {
         assert_eq!(spend_policy::recipient_count(&policy), 1);
         ts::return_shared(policy);
     };
-    verify_recipient_as(&mut s, id, h::wallet(), SOLANA, SUPPLIER);
     remove_recipient_as(&mut s, id, h::wallet(), SUI, SUPPLIER);
     s.next_tx(STRANGER);
     {
         let policy = s.take_shared_by_id<SpendPolicy>(id);
         assert!(!spend_policy::is_recipient_verified(&policy, SUI, SUPPLIER));
-        assert!(spend_policy::is_recipient_verified(&policy, SOLANA, SUPPLIER));
-        assert_eq!(spend_policy::recipient_count(&policy), 1);
+        assert_eq!(spend_policy::recipient_count(&policy), 0);
         ts::return_shared(policy);
     };
     s.end();
 }
 
 #[test]
-#[expected_failure(abort_code = 1061, location = spend_policy)]
+#[expected_failure(abort_code = spend_policy::E_NOT_ON_SUI)]
 /// Review A2-A4: a spending rule pays only on Sui. A recipient on another
 /// chain could only be paid by handing the business's raw coin to the
 /// spender's transaction, so the policy refuses to verify one at all.
@@ -1208,7 +1205,7 @@ fun a_recipient_on_another_domain_cannot_be_verified() {
 }
 
 #[test]
-#[expected_failure(abort_code = 1061, location = spend_policy)]
+#[expected_failure(abort_code = spend_policy::E_NOT_ON_SUI)]
 /// Solana neither.
 fun a_recipient_on_solana_cannot_be_verified() {
     let (mut s, id) = begin_with_policy();

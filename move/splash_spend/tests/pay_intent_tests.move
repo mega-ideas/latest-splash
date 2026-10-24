@@ -220,7 +220,6 @@ fun setup_with(accept_other: bool): (Scenario, Fx) {
         policy.verify_recipient(SUI_DOMAIN, SUPPLIER, ctx);
         policy.verify_recipient(SUI_DOMAIN, BUSINESS, ctx);
         policy.verify_recipient(SUI_DOMAIN, OTHER_PARTNER, ctx);
-        policy.verify_recipient(ETH_DOMAIN, EVM_RECIPIENT, ctx);
         // The bank beneficiary is bound to the harness's partner deposit address.
         policy.verify_beneficiary(h::beneficiary(), h::recipient(), ctx);
         ts::return_shared(policy);
@@ -315,15 +314,14 @@ fun create_now<T>(
     )
 }
 
-/// STAFF opens a cross-chain intent to `to` on `domain` and shares it.
-fun open_cross_chain(s: &mut Scenario, fx: &Fx, n: u8, domain: u32, to: address, amount: u64): ID {
-    s.next_tx(STAFF);
-    let policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
+/// The wallet opens a cross-chain intent to `to` on `domain` and shares it.
+/// Only the wallet can: no spending-rule path opens one.
+fun open_cross_chain_by_wallet(s: &mut Scenario, fx: &Fx, n: u8, domain: u32, to: address, amount: u64): ID {
+    s.next_tx(h::wallet());
     let mut account = s.take_shared_by_id<BusinessAccount>(fx.account);
     let config = s.take_shared<ComplianceConfig>();
     let c = s.take_shared<Clock>();
-    let intent = splash_spend::create_cross_chain_intent<USDC>(
-        &policy,
+    let intent = payment_intent::create_cross_chain_for_wallet<USDC>(
         &mut account,
         &config,
         h::payment_ref(n),
@@ -343,7 +341,6 @@ fun open_cross_chain(s: &mut Scenario, fx: &Fx, n: u8, domain: u32, to: address,
     ts::return_shared(c);
     ts::return_shared(config);
     ts::return_shared(account);
-    ts::return_shared(policy);
     id
 }
 
@@ -812,84 +809,6 @@ fun a_partner_deposit_address_is_not_a_wallet_recipient() {
     s.end();
 }
 
-#[test]
-#[expected_failure(abort_code = splash_spend::E_RECIPIENT_NOT_VERIFIED)]
-/// A destination is a (domain, address) pair. An address verified on
-/// Ethereum is not thereby verified on Sui: the Sui key is built with 8.
-fun an_address_verified_on_another_domain_is_not_verified_on_sui() {
-    let (mut s, fx) = setup();
-    let intent = open_by_wallet(&mut s, &fx, 1, payment_intent::kind_wallet(), EVM_RECIPIENT, PAY);
-    pay(&mut s, &fx, STAFF, fx.staff, intent, false);
-    s.end();
-}
-
-#[test]
-#[expected_failure(abort_code = splash_spend::E_RECIPIENT_NOT_VERIFIED)]
-/// The other direction: a supplier verified on Sui is not verified as a
-/// cross-chain mint recipient on Ethereum. The wallet opened the cross-chain
-/// intent; the policy refuses to pay it.
-fun a_sui_recipient_is_not_verified_on_another_domain() {
-    let (mut s, fx) = setup();
-    s.next_tx(h::wallet());
-    let intent_id;
-    {
-        let mut account = s.take_shared_by_id<BusinessAccount>(fx.account);
-        let config = s.take_shared<ComplianceConfig>();
-        let c = s.take_shared<Clock>();
-        let intent = payment_intent::create_cross_chain_for_wallet<USDC>(
-            &mut account,
-            &config,
-            h::payment_ref(1),
-            ETH_DOMAIN,
-            SUPPLIER,
-            PAY,
-            h::commitment(),
-            h::rail(),
-            BRIDGE_FEE,
-            BRIDGE_FINALITY,
-            c.timestamp_ms() + INTENT_LIFE,
-            &c,
-            s.ctx(),
-        );
-        intent_id = object::id(&intent);
-        payment_intent::share_intent(intent);
-        ts::return_shared(c);
-        ts::return_shared(config);
-        ts::return_shared(account);
-    };
-    s.next_tx(STAFF);
-    {
-        let mut alw = s.take_shared_by_id<Allowance<Balance<USDC>>>(fx.staff);
-        let mut intent = s.take_shared_by_id<PaymentIntent>(intent_id);
-        let mut account = s.take_shared_by_id<BusinessAccount>(fx.account);
-        let policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
-        let config = s.take_shared<ComplianceConfig>();
-        let c = s.take_shared<Clock>();
-        let w = allowance::new_withdrawal_for_testing(fx.staff, ts::withdraw_balance_from_address<USDC>(h::wallet(), PAY));
-        let (receipt, coin, obligation) = splash_spend::pay_intent_cross_chain(
-            &mut alw,
-            w,
-            &mut intent,
-            &mut account,
-            &policy,
-            &config,
-            option::none(),
-            h::settle_by(&c),
-            &c,
-            s.ctx(),
-        );
-        audit_anchor::anchor(receipt, HASH, BLOB, &c, s.ctx());
-        payment_intent::unpack_bridge_obligation_for_testing(obligation);
-        coin.burn_for_testing();
-        ts::return_shared(c);
-        ts::return_shared(config);
-        ts::return_shared(policy);
-        ts::return_shared(account);
-        ts::return_shared(intent);
-        ts::return_shared(alw);
-    };
-    s.end();
-}
 
 // ═══ Amounts ═══════════════════════════════════════════════════════════════
 
@@ -2113,115 +2032,86 @@ fun a_new_policy_for_the_new_generation_pays() {
 
 #[test]
 #[expected_failure(abort_code = splash_spend::E_WRONG_PAY_PATH)]
-/// A cross-chain intent goes through `pay_intent_cross_chain` and only it:
-/// `pay_intent` would hand its coin to an address on Sui.
-fun a_cross_chain_intent_cannot_go_through_pay_intent() {
+/// Review A2-A4: a spending rule pays only on Sui. A cross-chain intent the
+/// wallet opened, to a recipient no policy can verify, cannot be paid under
+/// a rule: there is no spending-rule path that hands the business's coin to
+/// a bridge. The owners pay it from the wallet.
+fun a_cross_chain_intent_cannot_be_paid_under_a_spending_rule() {
     let (mut s, fx) = setup();
-    let intent = open_cross_chain(&mut s, &fx, 1, ETH_DOMAIN, EVM_RECIPIENT, PAY);
+    let intent = open_cross_chain_by_wallet(&mut s, &fx, 1, ETH_DOMAIN, EVM_RECIPIENT, PAY);
     pay(&mut s, &fx, STAFF, fx.staff, intent, false);
     s.end();
 }
 
 #[test]
 #[expected_failure(abort_code = splash_spend::E_WRONG_PAY_PATH)]
-/// And a Sui intent cannot go through `pay_intent_cross_chain`, which would
-/// release its coin to the caller beside an obligation.
-fun a_sui_intent_cannot_go_through_pay_intent_cross_chain() {
+/// Not even to a supplier the policy verified on Sui: the intent's domain,
+/// not the address, decides.
+fun a_cross_chain_intent_to_a_verified_sui_address_cannot_be_paid_under_a_spending_rule() {
     let (mut s, fx) = setup();
-    let intent_id = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
-    s.next_tx(STAFF);
-    let mut alw = s.take_shared_by_id<Allowance<Balance<USDC>>>(fx.staff);
-    let mut intent = s.take_shared_by_id<PaymentIntent>(intent_id);
-    let mut account = s.take_shared_by_id<BusinessAccount>(fx.account);
-    let policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
-    let config = s.take_shared<ComplianceConfig>();
-    let c = s.take_shared<Clock>();
-    let w = allowance::new_withdrawal_for_testing(fx.staff, ts::withdraw_balance_from_address<USDC>(h::wallet(), PAY));
-    let (receipt, coin, obligation) = splash_spend::pay_intent_cross_chain(
-        &mut alw,
-        w,
-        &mut intent,
-        &mut account,
-        &policy,
-        &config,
-        option::none(),
-        h::settle_by(&c),
-        &c,
-        s.ctx(),
-    );
-    audit_anchor::anchor(receipt, HASH, BLOB, &c, s.ctx());
-    payment_intent::unpack_bridge_obligation_for_testing(obligation);
-    coin.burn_for_testing();
-    ts::return_shared(c);
-    ts::return_shared(config);
-    ts::return_shared(policy);
-    ts::return_shared(account);
-    ts::return_shared(intent);
-    ts::return_shared(alw);
+    let intent = open_cross_chain_by_wallet(&mut s, &fx, 1, ETH_DOMAIN, SUPPLIER, PAY);
+    pay(&mut s, &fx, STAFF, fx.staff, intent, false);
     s.end();
 }
 
 #[test]
-/// A cross-chain payment under the rule returns the exact coin beside an
-/// obligation that names that coin by ID and carries the intent's domain,
-/// mint recipient, fee ceiling and finality, for a bridge adapter to burn.
-/// (This test stands in for the adapter.)
-fun a_cross_chain_payment_returns_the_coin_its_obligation_names() {
+#[expected_failure(abort_code = splash_spend::E_WRONG_PAY_PATH)]
+/// Nor can an owner approve one for the executor: an approval no spending
+/// rule could ever use is refused, not minted.
+fun a_cross_chain_intent_cannot_be_approved_for_a_spending_rule() {
     let (mut s, fx) = setup();
-    let intent_id = open_cross_chain(&mut s, &fx, 1, ETH_DOMAIN, EVM_RECIPIENT, PAY);
-    s.next_tx(STAFF);
+    let intent = open_cross_chain_by_wallet(&mut s, &fx, 1, ETH_DOMAIN, EVM_RECIPIENT, PAY);
+    approve(&mut s, &fx, h::owner_2(), intent, EXECUTOR);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = splash_spend::E_WRONG_PAY_PATH)]
+/// And the wallet cannot delegate one to the executor.
+fun a_cross_chain_intent_cannot_be_delegated_to_the_executor() {
+    let (mut s, fx) = setup();
+    let intent = open_cross_chain_by_wallet(&mut s, &fx, 1, ETH_DOMAIN, EVM_RECIPIENT, PAY);
+    delegate(&mut s, &fx, h::wallet(), intent, EXECUTOR);
+    s.end();
+}
+
+#[test]
+/// The owners' own path still pays it: the wallet releases the exact coin
+/// beside the obligation naming it, in the owners' own transaction. (This
+/// test stands in for the bridge adapter's burn.)
+fun the_wallet_still_pays_a_cross_chain_intent_itself() {
+    let (mut s, fx) = setup();
+    let intent_id = open_cross_chain_by_wallet(&mut s, &fx, 1, ETH_DOMAIN, EVM_RECIPIENT, PAY);
+    s.next_tx(h::wallet());
     {
-        let mut alw = s.take_shared_by_id<Allowance<Balance<USDC>>>(fx.staff);
         let mut intent = s.take_shared_by_id<PaymentIntent>(intent_id);
         let mut account = s.take_shared_by_id<BusinessAccount>(fx.account);
-        let policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
         let config = s.take_shared<ComplianceConfig>();
         let c = s.take_shared<Clock>();
-        let w = allowance::new_withdrawal_for_testing(fx.staff, ts::withdraw_balance_from_address<USDC>(h::wallet(), PAY));
-        let (receipt, coin, obligation) = splash_spend::pay_intent_cross_chain(
-            &mut alw,
-            w,
+        let (receipt, coin, obligation) = payment_intent::confirm_cross_chain_from_business_wallet(
             &mut intent,
             &mut account,
-            &policy,
             &config,
-            option::none(),
+            h::usdc(PAY, s.ctx()),
             h::settle_by(&c),
             &c,
             s.ctx(),
         );
         audit_anchor::anchor(receipt, HASH, BLOB, &c, s.ctx());
-        let (o_intent, o_coin, o_asset, o_amount, o_domain, o_recipient, o_fee, o_finality) =
+        let (o_intent, o_coin, _, o_amount, o_domain, o_recipient, _, _) =
             payment_intent::unpack_bridge_obligation_for_testing(obligation);
         assert_eq!(o_intent, intent_id);
         assert_eq!(o_coin, object::id(&coin));
-        assert_eq!(o_asset, compliance_config::type_string<USDC>());
         assert_eq!(o_amount, PAY);
-        assert_eq!(coin.value(), PAY);
         assert_eq!(o_domain, ETH_DOMAIN);
         assert_eq!(o_recipient, EVM_RECIPIENT);
-        assert_eq!(o_fee, BRIDGE_FEE);
-        assert_eq!(o_finality, BRIDGE_FINALITY);
         assert_eq!(payment_intent::status(&intent), payment_intent::status_confirmed());
-        assert_eq!(allowance::allowance_current_spend(&alw), PAY as u256);
         coin.burn_for_testing();
         ts::return_shared(c);
         ts::return_shared(config);
-        ts::return_shared(policy);
         ts::return_shared(account);
         ts::return_shared(intent);
-        ts::return_shared(alw);
     };
-    s.end();
-}
-
-#[test]
-#[expected_failure(abort_code = splash_spend::E_RECIPIENT_NOT_VERIFIED)]
-/// Staff cannot open a cross-chain intent to a recipient not verified on
-/// that domain.
-fun staff_cannot_open_a_cross_chain_intent_to_an_unverified_recipient() {
-    let (mut s, fx) = setup();
-    open_cross_chain(&mut s, &fx, 1, ETH_DOMAIN, SUPPLIER, PAY);
     s.end();
 }
 

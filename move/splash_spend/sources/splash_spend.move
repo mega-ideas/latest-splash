@@ -15,7 +15,13 @@
 /// within the policy's and the spender's ceilings, and above the
 /// second-approval threshold a different owner has approved this exact
 /// payment. Then `splash_core` settles it, accepting this package's
-/// `SettleWitness` because it is on the settlement-app registry.
+/// `SettleWitness` because it is on the settlement-app registry, and pays
+/// the intent's recipient in the same call.
+///
+/// A spending rule pays only on Sui (kinds 1–3). A cross-chain payment
+/// would have to hand the business's coin to the spender's transaction for
+/// a bridge to burn, so it stays on the owners' multisig
+/// (`payment_intent::confirm_cross_chain_from_business_wallet`).
 ///
 /// ─── Splash's operator is an EXECUTOR, not staff ───────────────────────────
 ///
@@ -36,7 +42,7 @@
 /// is called in exactly two places: inside `accept`, passed straight through
 /// `settings_permit` to `allowance::issue`; and inside the private `draw`,
 /// passed straight through `spend_permit` to `allowance::app_balance_spend`.
-/// No function returns a permit, a witness or a `Balance`, and there is no
+/// No function returns a permit, a witness, a `Balance` or a `Coin`, and there is no
 /// `rotate_spender`: a holder of `SettingsPermit<SPLASH_SPEND>` could move
 /// every allowance bound to this app to a new spender. The package publishes
 /// immutable, so none of that can be added later. `scripts/check-spend-
@@ -45,14 +51,13 @@ module splash_spend::splash_spend;
 
 use splash_core::business_account::{Self, BusinessAccount};
 use splash_core::compliance_config::{Self, ComplianceConfig};
-use splash_core::payment_intent::{Self, BridgeObligation, PaymentIntent, SettleReceipt};
+use splash_core::payment_intent::{Self, PaymentIntent, SettleReceipt};
 use splash_spend::spend_policy::{Self, SpendPolicy};
 use std::internal;
 use std::string::String;
 use sui::allowance::{Self, Allowance, AllowanceProposal, AllowanceWithdrawal};
 use sui::balance::Balance;
 use sui::clock::Clock;
-use sui::coin::Coin;
 use sui::event;
 
 // ─── Abort codes ───────────────────────────────────────────────────────────
@@ -102,7 +107,8 @@ const E_NOT_AN_EXECUTOR: u64 = 1020;
 /// The account's authority changed (a freeze, a membership change, a wallet
 /// change) after this approval was given.
 const E_STALE_APPROVAL: u64 = 1021;
-/// A cross-chain intent goes through `pay_intent_cross_chain`, and only it.
+/// A cross-chain intent is not paid under a spending rule. The owners pay it
+/// from the wallet.
 const E_WRONG_PAY_PATH: u64 = 1022;
 /// The allowance was not issued for this policy: its name is not this
 /// policy's `allowance_name`.
@@ -272,50 +278,6 @@ public fun create_intent<T>(
     )
 }
 
-/// Open a cross-chain intent in the account's name, as STAFF.
-public fun create_cross_chain_intent<T>(
-    policy: &SpendPolicy,
-    account: &mut BusinessAccount,
-    config: &ComplianceConfig,
-    payment_ref: vector<u8>,
-    destination_domain: u32,
-    mint_recipient: address,
-    amount: u64,
-    commitment: vector<u8>,
-    rail_commitment: vector<u8>,
-    bridge_max_fee: u64,
-    bridge_min_finality: u32,
-    expires_at: u64,
-    clock: &Clock,
-    ctx: &mut TxContext,
-): PaymentIntent {
-    let maker = ctx.sender();
-    assert_current(policy, account);
-    assert!(compliance_config::type_string<T>() == spend_policy::asset(policy), E_WRONG_ASSET);
-    assert!(spend_policy::is_staff(policy, maker), E_NOT_STAFF);
-    assert!(destination_domain != payment_intent::sui_domain(), E_RECIPIENT_NOT_VERIFIED);
-    assert!(spend_policy::is_recipient_verified(policy, destination_domain, mint_recipient), E_RECIPIENT_NOT_VERIFIED);
-    assert_within_limits(policy, amount, maker);
-
-    payment_intent::create_cross_chain_for_app<T, SettleWitness>(
-        SettleWitness {},
-        account,
-        config,
-        maker,
-        payment_ref,
-        destination_domain,
-        mint_recipient,
-        amount,
-        commitment,
-        rail_commitment,
-        bridge_max_fee,
-        bridge_min_finality,
-        expires_at,
-        clock,
-        ctx,
-    )
-}
-
 // ─── Approvals ─────────────────────────────────────────────────────────────
 
 /// A second approval, by an owner, for one payment, to be paid by `payer`.
@@ -375,6 +337,8 @@ fun mint(
     assert_intent_of(policy, intent);
     assert!(payment_intent::is_pending(intent), E_NOT_PAYABLE);
     assert!(clock.timestamp_ms() < payment_intent::expires_at(intent), E_NOT_PAYABLE);
+    // An approval that no spending rule could ever use is refused, not minted.
+    assert!(payment_intent::kind(intent) != payment_intent::kind_cross_chain_wallet(), E_WRONG_PAY_PATH);
 
     let approval = PayoutApproval {
         id: object::new(ctx),
@@ -418,7 +382,8 @@ public fun discard_approval(approval: PayoutApproval) {
 ///
 /// `withdrawal` is the allowance withdrawal input for exactly the intent's
 /// amount, from the business wallet's address balance. `settle_by_ms` is the
-/// quote's deadline.
+/// quote's deadline. The intent lands on Sui, and core pays its recipient in
+/// this call; a cross-chain intent is refused.
 public fun pay_intent<C>(
     allowance: &mut Allowance<Balance<C>>,
     withdrawal: AllowanceWithdrawal<Balance<C>>,
@@ -434,36 +399,6 @@ public fun pay_intent<C>(
     assert!(payment_intent::kind(intent) != payment_intent::kind_cross_chain_wallet(), E_WRONG_PAY_PATH);
     let funds = draw(allowance, withdrawal, intent, account, policy, approval, clock, ctx);
     payment_intent::settle_from_app<C, SettleWitness>(
-        SettleWitness {},
-        intent,
-        account,
-        config,
-        funds,
-        settle_by_ms,
-        clock,
-        ctx,
-    )
-}
-
-/// Pay a cross-chain intent under a spending rule. The coin comes back beside
-/// the obligation naming it, which a registered bridge adapter must discharge
-/// in the same transaction by burning that coin through CCTP to the intent's
-/// domain and recipient.
-public fun pay_intent_cross_chain<C>(
-    allowance: &mut Allowance<Balance<C>>,
-    withdrawal: AllowanceWithdrawal<Balance<C>>,
-    intent: &mut PaymentIntent,
-    account: &mut BusinessAccount,
-    policy: &SpendPolicy,
-    config: &ComplianceConfig,
-    approval: Option<PayoutApproval>,
-    settle_by_ms: u64,
-    clock: &Clock,
-    ctx: &mut TxContext,
-): (SettleReceipt, Coin<C>, BridgeObligation) {
-    assert!(payment_intent::kind(intent) == payment_intent::kind_cross_chain_wallet(), E_WRONG_PAY_PATH);
-    let funds = draw(allowance, withdrawal, intent, account, policy, approval, clock, ctx);
-    payment_intent::settle_cross_chain_from_app<C, SettleWitness>(
         SettleWitness {},
         intent,
         account,
@@ -502,15 +437,14 @@ fun draw<C>(
     let by_wallet = maker == spend_policy::wallet(policy);
     assert!(by_wallet || spend_policy::is_staff(policy, maker), E_MAKER_NOT_A_SPENDER);
 
-    // Where. The destination key is built here, not read whole off the intent.
-    let kind = payment_intent::kind(intent);
-    if (kind == payment_intent::kind_cross_chain_wallet()) {
-        let domain = payment_intent::destination_domain(intent);
-        assert!(domain != payment_intent::sui_domain(), E_RECIPIENT_NOT_VERIFIED);
-        assert!(spend_policy::is_recipient_verified(policy, domain, payment_intent::recipient(intent)), E_RECIPIENT_NOT_VERIFIED);
-    } else {
-        assert_sui_destination(policy, kind, payment_intent::recipient(intent), payment_intent::beneficiary_ref(intent));
-    };
+    // Where. The destination key is built here, on domain 8, not read whole
+    // off the intent.
+    assert_sui_destination(
+        policy,
+        payment_intent::kind(intent),
+        payment_intent::recipient(intent),
+        payment_intent::beneficiary_ref(intent),
+    );
 
     // How much: the policy's ceiling, the payer's, and the maker's.
     let amount = payment_intent::amount_usd(intent);
