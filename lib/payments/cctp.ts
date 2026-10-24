@@ -59,7 +59,13 @@ import { formatUsdc, parseUsdcMinor } from './stablecoin-lane.ts';
  *   source chain and nothing is burned, and that a fast transfer may be
  *   attested as standard instead.
  * - Some TokenMessengerV2 deployments carry a standard-transfer fee switch
- *   that can enforce a minimum fee at mint (Sei, today).
+ *   that enforces a minimum onchain fee, collected at mint. Sei is the only
+ *   chain the page lists with it. There depositForBurn reverts unless maxFee
+ *   covers getMinFeeAmount(amount), a minimum set on chain and changeable
+ *   (circlefin/evm-cctp-contracts commit 2f9a2ba, linked from the page), so
+ *   the 0 bps in the standard table does not make maxFee 0 safe. This
+ *   planner works offline, cannot read that minimum, and so does not plan a
+ *   burn from such a chain (FEE_SWITCH_SOURCES).
  *
  * Fast transfer INTO Sui: every chain is a destination, so fast transfer from
  * a chain Circle marks as a fast source appears available into Sui. Confirm
@@ -173,6 +179,13 @@ export const FUNDING_CHAINS: Record<CctpPeerChain, ChainFacts> = {
   X_LAYER: { label: 'X Layer', cctpDomain: 37, addressFormat: 'EVM', standardWait: 'about 15–19 minutes', standardFeeDeciBps: 0, fast: fast('about 8 seconds', 13) },
   XDC: { label: 'XDC', cctpDomain: 18, addressFormat: 'EVM', standardWait: 'about 10 seconds', standardFeeDeciBps: 0, fast: null },
 };
+
+/**
+ * Source chains whose TokenMessengerV2 carries Circle's standard-transfer fee
+ * switch (Circle's fees page, read 24 Oct 2026): a standard burn with maxFee
+ * 0 reverts there, and the minimum is read on chain, so they are not planned.
+ */
+const FEE_SWITCH_SOURCES: ReadonlySet<CctpPeerChain> = new Set<CctpPeerChain>(['SEI']);
 
 export interface FundingStep {
   where: string;
@@ -377,6 +390,18 @@ export function planFunding(input: {
 
   const chain = FUNDING_CHAINS[input.source];
   if (!chain) throw new FundingPlanError('Circle does not list that chain for CCTP V2 with USDC.');
+  if (FEE_SWITCH_SOURCES.has(input.source)) {
+    return {
+      available: false,
+      source: input.source,
+      asset: input.asset,
+      reason: `CCTP V2 on ${chain.label} enforces a minimum fee on standard transfers: the burn reverts unless its maxFee covers getMinFeeAmount for the amount, a minimum set on chain. Splash plans offline and cannot read it, so it does not plan this route.`,
+      alternatives: [
+        'Send native USDC on Sui straight to the Splash wallet address.',
+        'Fund from another chain Circle lists for CCTP V2.',
+      ],
+    };
+  }
   const where = `${chain.label} · your wallet`;
   const steps: FundingStep[] = [];
   const warnings: string[] = [];
