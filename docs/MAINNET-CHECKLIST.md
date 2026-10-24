@@ -167,14 +167,19 @@ procedure in [`docs/UPGRADE-POLICY.md`](UPGRADE-POLICY.md).
 - [ ] **The hardware 2-of-3 passkey check has passed on testnet** (owed from
       Phase 0): three people on three kinds of device, the runbook in
       `docs/v2/phase2-business-wallet.md`, `scripts/wallet-hardware-check.mjs`
-      output and the executed registration digest recorded. No business
-      wallet is created on mainnet before it.
+      output and the executed registration digest recorded under a
+      `wallet-2-of-3` heading in `docs/mainnet-checks-2026-10.md`. No business
+      wallet is created on mainnet before it: the code refuses every wallet
+      request on mainnet until `WALLET_MAINNET_ENABLED=true` and
+      `WALLET_HARDWARE_CHECK_REF=docs/mainnet-checks-2026-10.md#wallet-2-of-3`
+      are both set, and production will not boot with only the first.
 - [ ] A testnet dry run shows a transaction sponsored from the operator's SUI
       **address balance** (no gas coin) is accepted, before
       `WALLET_GAS_SPONSOR=operator` is set. The operator's SUI address balance
       is funded, within `OPERATOR_HOT_BALANCE_CEILING_MICRO`'s intent.
 - [ ] The wallet signature sweep (`/api/cron/wallet-signing`) is scheduled
-      hourly and answers 200.
+      every five minutes and answers 200 (it also reconciles submissions whose
+      outcome is unknown, and answers 502 while any is stuck).
 
 **Partners and legal**
 

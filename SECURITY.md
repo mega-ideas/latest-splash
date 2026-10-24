@@ -48,10 +48,37 @@ Design: `docs/v2/phase2-business-wallet.md`.
   from the sponsor's or an allowance's balance, and any object other than the
   org's own account and the configured config objects are refused before
   anything is stored or signed.
-- **Partial signatures** live in Postgres only while a request collects, and
-  are cleared in the statement that closes it (executed, failed, expired,
-  cancelled); an hourly sweep closes expired requests. Requests last at most
-  24 hours and never past a payment's quote. Nothing logs a signature.
+- **An existing intent is paid only as read from the chain.** Its bytes name
+  just an object id, so the reader refuses it unless the server read the
+  intent first and bound its payee, principal, rate, expiry and asset into
+  the request; the withdrawal must be exactly principal plus max_fee, and
+  every signer is shown the payee and amount.
+- **The signer's device decodes the bytes itself** (`lib/wallet/review-on-device.ts`)
+  and checks their digest and hash; the transaction code compared with
+  WhatsApp is 16 hex characters (64 bits).
+- **Partial signatures** live in Postgres only while a request collects or is
+  being submitted, and are cleared in the statement that closes it (executed,
+  failed, expired, cancelled) or marks its outcome unknown. Requests last at
+  most 24 hours and never past a payment's quote. Nothing logs a signature.
+- **No answer is not a failure.** A submission the network did not confirm is
+  `unknown`: it keeps its digest and dedupe key until the cron reads the
+  digest on chain, or its ValidDuring window passes, so a transaction that
+  landed is never recorded as failed and nothing like it is asked for twice.
+  A submission stuck past a 5-minute lease is reconciled the same way.
+- **No single-key veto.** Only the requester withdraws a request; another
+  signer declines, and the request stays open for the rest.
+- **The chain is the source of truth** for the founder (the account's
+  `owner`), the owners and the current wallet. Every wallet member is made an
+  on-chain owner in the founder's nomination. An owner without a passkey
+  blocks the wallet until named as excluded; a single-signer wallet with
+  co-owners needs each one's consent to that wallet.
+- **Mainnet is gated in code** (`lib/server/wallet-network-gate.ts`): no
+  wallet request until `WALLET_MAINNET_ENABLED=true` and
+  `WALLET_HARDWARE_CHECK_REF` names the hardware check's evidence; production
+  will not boot with the first and not the second.
+- **Abuse bounds.** Wallet routes are rate-limited per person and per
+  business, and the sponsor pays at most 1 SUI of gas per business per 24
+  hours on top of the 0.05 SUI per-transaction cap.
 - **Simulate before sign.** No request is opened for bytes that do not
   simulate, and the bytes are simulated again before they are submitted.
 - **Gas.** Plain transfers go gasless. Move calls are sponsored by the
@@ -64,8 +91,10 @@ Design: `docs/v2/phase2-business-wallet.md`.
   request is a 404. The account a wallet transaction names is the org's own
   `sui_business_account_id`, never the single-tenant fallback.
 - **Open:** the hardware 2-of-3 passkey check (people with devices), the
-  address-alias watcher, zkLogin members, and a testnet dry run of a
-  sponsored transaction paying gas from an address balance.
+  address-alias watcher, zkLogin members, a testnet dry run of a sponsored
+  transaction paying gas from an address balance, routes for payments (they
+  need the audit bundle and quote the Transfer flow composes), and the Phase 3
+  signing screen rendering the device's own decoding.
 
 ## v2 Phase 1 — business wallets, spending rules, a delayed upgrade — 2026-10-24
 
