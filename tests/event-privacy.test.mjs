@@ -59,7 +59,31 @@ const FORBIDDEN = [
   'fx_rate_usd_local', 'target_currency', 'currency', 'corridor',
   'ssm_number', 'kyb_cid', 'risk_score',
   'cap_minor', 'daily_cap', 'daily_spent_after',
+  // Amendment A1. A fee is computed from the principal by a public schedule,
+  // so a fee on an event says roughly how much was paid, and a principal
+  // says it exactly. Neither appears on an event except where ALLOWED says.
+  'fee', 'principal',
 ];
+
+/**
+ * The only exceptions, each by package file, event and field, with the reason.
+ * Adding one is a deliberate act: what an event carries freezes at publish.
+ */
+const ALLOWED = {
+  // A1 §2.9: FeeCharged carries the fee because the fee is Splash's revenue,
+  // Splash's own money, and the Phase 2 revenue and reconciliation listeners
+  // read it from the event. The principal is not on it; it follows
+  // docs/commitments.md as before.
+  'move/splash_core/sources/fee_config.move::FeeCharged.fee':
+    'the fee is Splash revenue (A1 §2.9), not a client payment',
+  // A1 §2.9: the fee recipient is Splash's own finance multisig, not a
+  // client's counterparty. Owners are alerted to a change of it (Phase 2),
+  // so the address has to be on the event.
+  'move/splash_core/sources/fee_config.move::FeeRecipientProposed.recipient':
+    "Splash's own fee address, announced 24 hours ahead (A1 §2.5, §2.9)",
+  'move/splash_core/sources/fee_config.move::FeeRecipientApplied.recipient':
+    "Splash's own fee address, now in force (A1 §2.5, §2.9)",
+};
 
 /* ── 1. The meta-test ─────────────────────────────────────────────────── */
 
@@ -79,7 +103,8 @@ test('no event struct in splash_core, splash_spend or splash_upgrade_delay carri
       for (const { name, fields } of eventStructs(text)) {
         events += 1;
         for (const field of fields) {
-          if (FORBIDDEN.includes(field)) violations.push(`${pkg}${file}::${name}.${field}`);
+          const where = `${pkg}${file}::${name}.${field}`;
+          if (FORBIDDEN.includes(field) && !ALLOWED[where]) violations.push(where);
         }
       }
     }
