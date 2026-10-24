@@ -82,7 +82,8 @@ const E_APPROVAL_MISMATCH: u64 = 1007;
 const E_SELF_APPROVAL: u64 = 1008;
 /// The approver is not one of the wallet's members.
 const E_NOT_AN_OWNER: u64 = 1009;
-/// The approval has expired with its intent.
+/// The approval's `settle_by_ms` has passed: the quote it was given against
+/// has lapsed (at the latest, with its intent).
 const E_APPROVAL_EXPIRED: u64 = 1010;
 /// The account has rotated to a new wallet generation; this policy belongs to
 /// an old one.
@@ -118,6 +119,11 @@ const E_ONLY_THE_WALLET_DELEGATES: u64 = 1024;
 /// The recipient is verified, but to be paid as another kind: the owners
 /// chose how it is delivered (address balance or Coin) when they verified it.
 const E_WRONG_DELIVERY_KIND: u64 = 1025;
+/// An approval's `settle_by_ms` must be in the future and no later than the
+/// intent's expiry.
+const E_BAD_SETTLE_BY: u64 = 1026;
+/// The payment's `settle_by_ms` is later than the one its approval names.
+const E_SETTLE_BY_AFTER_APPROVAL: u64 = 1027;
 
 /// What an allowance accepted under a policy must be named: this prefix and
 /// the policy's id. The allowance module never reads its name, so this module
@@ -134,8 +140,8 @@ public struct SPLASH_SPEND() has drop;
 public struct SettleWitness has drop {}
 
 /// The owners' approval to pay ONE intent: this policy, this intent, this
-/// amount, by this payer, while the account's authority is unchanged and the
-/// intent is open.
+/// amount, by this payer, while the account's authority is unchanged, and
+/// against a quote that holds until `settle_by_ms`.
 ///
 /// It is one of two things, and both are the owners' decision: an owner's
 /// second approval (`approve_payout`; the approver is a wallet member), or
@@ -152,7 +158,12 @@ public struct PayoutApproval has key {
     approver: address,
     payer: address,
     authority_epoch: u64,
-    expires_at_ms: u64,
+    /// The latest moment the payment may settle, chosen by the approver: the
+    /// deadline of the quote (or of the scheduled window) they approved. No
+    /// later than the intent's expiry. The payer's own `settle_by_ms` must
+    /// not exceed it, so the approval binds the rate hold it was given
+    /// against, not a deadline the payer picks.
+    settle_by_ms: u64,
 }
 
 // ─── Events ────────────────────────────────────────────────────────────────
@@ -289,11 +300,16 @@ public fun create_intent<T>(
 /// They may not be the intent's maker or its payer: four eyes means two
 /// different people (or at least two different addresses; the chain cannot
 /// tell people apart). The approval goes to `payer`, who must be a spender.
+///
+/// `settle_by_ms` is the deadline of the quote the owner is approving: the
+/// payment cannot settle after it, whatever deadline the payer passes. It
+/// must be in the future and no later than the intent's expiry.
 public fun approve_payout(
     policy: &SpendPolicy,
     account: &BusinessAccount,
     intent: &PaymentIntent,
     payer: address,
+    settle_by_ms: u64,
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
@@ -302,7 +318,7 @@ public fun approve_payout(
     assert!(approver != payment_intent::sender(intent), E_SELF_APPROVAL);
     assert!(approver != payer, E_SELF_APPROVAL);
     assert!(spend_policy::is_spender(policy, payer), E_NOT_A_SPENDER);
-    mint(policy, account, intent, approver, payer, clock, ctx);
+    mint(policy, account, intent, approver, payer, settle_by_ms, clock, ctx);
 }
 
 /// Let an executor run this intent later: the wallet's delegation of an
@@ -312,11 +328,16 @@ public fun approve_payout(
 /// as their approval at any amount. A staff member cannot delegate, even a
 /// payment they could make alone: for staff payments the operator needs an
 /// owner's `approve_payout` naming it as the payer.
+///
+/// `settle_by_ms` is the end of the window the executor may run it in (a
+/// quote's deadline, or the scheduled window's end), in the future and no
+/// later than the intent's expiry.
 public fun delegate_execution(
     policy: &SpendPolicy,
     account: &BusinessAccount,
     intent: &PaymentIntent,
     executor: address,
+    settle_by_ms: u64,
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
@@ -324,7 +345,7 @@ public fun delegate_execution(
     assert!(wallet == spend_policy::wallet(policy), E_ONLY_THE_WALLET_DELEGATES);
     assert!(payment_intent::sender(intent) == wallet, E_NOT_THE_MAKER);
     assert!(spend_policy::is_executor(policy, executor), E_NOT_AN_EXECUTOR);
-    mint(policy, account, intent, wallet, executor, clock, ctx);
+    mint(policy, account, intent, wallet, executor, settle_by_ms, clock, ctx);
 }
 
 fun mint(
@@ -333,6 +354,7 @@ fun mint(
     intent: &PaymentIntent,
     approver: address,
     payer: address,
+    settle_by_ms: u64,
     clock: &Clock,
     ctx: &mut TxContext,
 ) {
@@ -342,6 +364,8 @@ fun mint(
     assert!(clock.timestamp_ms() < payment_intent::expires_at(intent), E_NOT_PAYABLE);
     // An approval that no spending rule could ever use is refused, not minted.
     assert!(payment_intent::kind(intent) != payment_intent::kind_cross_chain_wallet(), E_WRONG_PAY_PATH);
+    assert!(settle_by_ms > clock.timestamp_ms(), E_BAD_SETTLE_BY);
+    assert!(settle_by_ms <= payment_intent::expires_at(intent), E_BAD_SETTLE_BY);
 
     let approval = PayoutApproval {
         id: object::new(ctx),
@@ -351,7 +375,7 @@ fun mint(
         approver,
         payer,
         authority_epoch: business_account::authority_epoch(account),
-        expires_at_ms: payment_intent::expires_at(intent),
+        settle_by_ms,
     };
     event::emit(SpendApproved {
         approval_id: object::id(&approval),
@@ -374,7 +398,7 @@ public fun discard_approval(approval: PayoutApproval) {
         approver: _,
         payer: _,
         authority_epoch: _,
-        expires_at_ms: _,
+        settle_by_ms: _,
     } = approval;
     id.delete();
 }
@@ -400,7 +424,7 @@ public fun pay_intent<C>(
     ctx: &mut TxContext,
 ): SettleReceipt {
     assert!(payment_intent::kind(intent) != payment_intent::kind_cross_chain_wallet(), E_WRONG_PAY_PATH);
-    let funds = draw(allowance, withdrawal, intent, account, policy, approval, clock, ctx);
+    let funds = draw(allowance, withdrawal, intent, account, policy, approval, settle_by_ms, clock, ctx);
     payment_intent::settle_from_app<C, SettleWitness>(
         SettleWitness {},
         intent,
@@ -422,6 +446,7 @@ fun draw<C>(
     account: &BusinessAccount,
     policy: &SpendPolicy,
     approval: Option<PayoutApproval>,
+    settle_by_ms: u64,
     clock: &Clock,
     ctx: &TxContext,
 ): Balance<C> {
@@ -462,7 +487,7 @@ fun draw<C>(
     let approval_id = if (approval.is_some()) {
         let approval = approval.destroy_some();
         let id = object::id(&approval);
-        consume(approval, policy, account, intent, payer, clock);
+        consume(approval, policy, account, intent, payer, settle_by_ms, clock);
         option::some(id)
     } else {
         approval.destroy_none();
@@ -491,13 +516,16 @@ fun draw<C>(
     funds
 }
 
-/// Check an approval against this payment and consume it.
+/// Check an approval against this payment and consume it. `settle_by_ms` is
+/// the deadline this payment passes to core, which must not be later than
+/// the one the approval names.
 fun consume(
     approval: PayoutApproval,
     policy: &SpendPolicy,
     account: &BusinessAccount,
     intent: &PaymentIntent,
     payer: address,
+    settle_by_ms: u64,
     clock: &Clock,
 ) {
     let PayoutApproval {
@@ -508,14 +536,15 @@ fun consume(
         approver,
         payer: named_payer,
         authority_epoch,
-        expires_at_ms,
+        settle_by_ms: approved_settle_by_ms,
     } = approval;
     assert!(policy_id == object::id(policy), E_APPROVAL_MISMATCH);
     assert!(intent_id == object::id(intent), E_APPROVAL_MISMATCH);
     assert!(amount == payment_intent::amount_usd(intent), E_APPROVAL_MISMATCH);
     assert!(named_payer == payer, E_APPROVAL_MISMATCH);
     assert!(authority_epoch == business_account::authority_epoch(account), E_STALE_APPROVAL);
-    assert!(clock.timestamp_ms() < expires_at_ms, E_APPROVAL_EXPIRED);
+    assert!(clock.timestamp_ms() < approved_settle_by_ms, E_APPROVAL_EXPIRED);
+    assert!(settle_by_ms <= approved_settle_by_ms, E_SETTLE_BY_AFTER_APPROVAL);
     // Who approved, checked again at use, not trusted from minting.
     let maker = payment_intent::sender(intent);
     if (approver == spend_policy::wallet(policy)) {
@@ -582,4 +611,4 @@ public fun approval_intent(a: &PayoutApproval): ID { a.intent }
 public fun approval_amount(a: &PayoutApproval): u64 { a.amount }
 public fun approval_approver(a: &PayoutApproval): address { a.approver }
 public fun approval_payer(a: &PayoutApproval): address { a.payer }
-public fun approval_expires_at_ms(a: &PayoutApproval): u64 { a.expires_at_ms }
+public fun approval_settle_by_ms(a: &PayoutApproval): u64 { a.settle_by_ms }

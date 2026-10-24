@@ -360,33 +360,62 @@ fun open_by_wallet(s: &mut Scenario, fx: &Fx, n: u8, kind: u8, to: address, amou
     id
 }
 
-/// `owner` gives the second approval for `intent`, to be paid by `payer`.
+/// `owner` gives the second approval for `intent`, to be paid by `payer`,
+/// good until the intent expires.
 fun approve(s: &mut Scenario, fx: &Fx, owner: address, intent: ID, payer: address) {
+    let until = intent_expiry(s, intent);
+    approve_until(s, fx, owner, intent, payer, until);
+}
+
+/// `owner` approves `intent` for `payer` against a quote that holds until
+/// `settle_by_ms`.
+fun approve_until(s: &mut Scenario, fx: &Fx, owner: address, intent: ID, payer: address, settle_by_ms: u64) {
     s.next_tx(owner);
     let policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
     let account = s.take_shared_by_id<BusinessAccount>(fx.account);
     let intent = s.take_shared_by_id<PaymentIntent>(intent);
     let c = s.take_shared<Clock>();
-    splash_spend::approve_payout(&policy, &account, &intent, payer, &c, s.ctx());
+    splash_spend::approve_payout(&policy, &account, &intent, payer, settle_by_ms, &c, s.ctx());
     ts::return_shared(c);
     ts::return_shared(intent);
     ts::return_shared(account);
     ts::return_shared(policy);
 }
 
-/// `sender` delegates the execution of `intent` to `executor`. Only the
-/// wallet can, and only for an intent it opened.
+/// `sender` delegates the execution of `intent` to `executor`, until the
+/// intent expires. Only the wallet can, and only for an intent it opened.
 fun delegate(s: &mut Scenario, fx: &Fx, sender: address, intent: ID, executor: address) {
+    let until = intent_expiry(s, intent);
+    delegate_until(s, fx, sender, intent, executor, until);
+}
+
+fun delegate_until(s: &mut Scenario, fx: &Fx, sender: address, intent: ID, executor: address, settle_by_ms: u64) {
     s.next_tx(sender);
     let policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
     let account = s.take_shared_by_id<BusinessAccount>(fx.account);
     let intent = s.take_shared_by_id<PaymentIntent>(intent);
     let c = s.take_shared<Clock>();
-    splash_spend::delegate_execution(&policy, &account, &intent, executor, &c, s.ctx());
+    splash_spend::delegate_execution(&policy, &account, &intent, executor, settle_by_ms, &c, s.ctx());
     ts::return_shared(c);
     ts::return_shared(intent);
     ts::return_shared(account);
     ts::return_shared(policy);
+}
+
+fun intent_expiry(s: &mut Scenario, intent: ID): u64 {
+    s.next_tx(STRANGER);
+    let i = s.take_shared_by_id<PaymentIntent>(intent);
+    let expiry = payment_intent::expires_at(&i);
+    ts::return_shared(i);
+    expiry
+}
+
+fun now(s: &mut Scenario): u64 {
+    s.next_tx(STRANGER);
+    let c = s.take_shared<Clock>();
+    let t = c.timestamp_ms();
+    ts::return_shared(c);
+    t
 }
 
 /// `payer` pays the shared intent under allowance `alw`, passing the
@@ -398,7 +427,9 @@ fun pay(s: &mut Scenario, fx: &Fx, payer: address, alw: ID, intent: ID, with_app
 }
 
 /// In the current transaction: pay the shared intent under `alw`, drawing
-/// exactly its amount from the wallet's address balance.
+/// exactly its amount from the wallet's address balance. The quote deadline
+/// is five minutes from now, or the approval's, whichever is earlier, as a
+/// PTB builder sets it.
 fun pay_in_tx(s: &mut Scenario, account: ID, policy: ID, alw: ID, intent: ID, approval: Option<PayoutApproval>) {
     let mut allowance = s.take_shared_by_id<Allowance<Balance<USDC>>>(alw);
     let mut intent = s.take_shared_by_id<PaymentIntent>(intent);
@@ -407,6 +438,8 @@ fun pay_in_tx(s: &mut Scenario, account: ID, policy: ID, alw: ID, intent: ID, ap
     let config = s.take_shared<ComplianceConfig>();
     let c = s.take_shared<Clock>();
     let amount = payment_intent::amount_usd(&intent);
+    let mut settle_by = h::settle_by(&c);
+    approval.do_ref!(|a| settle_by = settle_by.min(splash_spend::approval_settle_by_ms(a)));
     pay_objects(
         &mut allowance,
         &mut intent,
@@ -416,7 +449,7 @@ fun pay_in_tx(s: &mut Scenario, account: ID, policy: ID, alw: ID, intent: ID, ap
         approval,
         h::wallet(),
         amount,
-        h::settle_by(&c),
+        settle_by,
         &c,
         s.ctx(),
     );
@@ -931,8 +964,9 @@ fun above_the_threshold_with_an_owner_approval_passes() {
         assert_eq!(splash_spend::approval_amount(&approval), amount);
         assert_eq!(splash_spend::approval_approver(&approval), h::owner_2());
         assert_eq!(splash_spend::approval_payer(&approval), STAFF);
-        // It carries the intent's expiry: opened at day 2, for one day.
-        assert_eq!(splash_spend::approval_expires_at_ms(&approval), 2 * h::day() + INTENT_LIFE);
+        // It carries the deadline the owner chose, here the intent's expiry:
+        // opened at day 2, for one day.
+        assert_eq!(splash_spend::approval_settle_by_ms(&approval), 2 * h::day() + INTENT_LIFE);
         pay_in_tx(&mut s, fx.account, fx.policy, fx.staff, intent_id, option::some(approval));
         assert_eq!(event::events_by_type<SpendApprovalConsumed>().length(), 1);
         assert_eq!(event::events_by_type<PaidUnderPolicy>().length(), 1);
@@ -1681,7 +1715,7 @@ fun pay_approved_by(s: &mut Scenario, fx: &Fx, payer: address, alw: ID, intent_i
 }
 
 #[test]
-#[expected_failure(abort_code = 1027, location = splash_spend)]
+#[expected_failure(abort_code = splash_spend::E_SETTLE_BY_AFTER_APPROVAL)]
 /// Review A3/A8/B5, the reviewer's proof: an owner approves a bank payout
 /// against a quote that holds for five minutes, and the payer settles it
 /// with a deadline of its own choosing. The approval must bind the deadline
@@ -1689,26 +1723,115 @@ fun pay_approved_by(s: &mut Scenario, fx: &Fx, payer: address, alw: ID, intent_i
 fun a_payer_cannot_settle_later_than_the_approval_allows() {
     let (mut s, fx) = setup();
     let intent = open(&mut s, &fx, STAFF, 80, payment_intent::kind_bank_payout(), h::recipient(), THRESHOLD + 1);
-    approve(&mut s, &fx, h::owner_2(), intent, STAFF);
+    let quote_ends = now(&mut s) + QUOTE_HOLD;
+    approve_until(&mut s, &fx, h::owner_2(), intent, STAFF, quote_ends);
     pay_approved_by(&mut s, &fx, STAFF, fx.staff, intent, std::u64::max_value!());
     s.end();
 }
 
 #[test]
-#[expected_failure(abort_code = 1010, location = splash_spend)]
+#[expected_failure(abort_code = splash_spend::E_SETTLE_BY_AFTER_APPROVAL)]
+/// One millisecond later than the approval names is already too late.
+fun a_settle_by_one_millisecond_after_the_approvals_aborts() {
+    let (mut s, fx) = setup();
+    let intent = open(&mut s, &fx, STAFF, 80, payment_intent::kind_bank_payout(), h::recipient(), THRESHOLD + 1);
+    let quote_ends = now(&mut s) + QUOTE_HOLD;
+    approve_until(&mut s, &fx, h::owner_2(), intent, STAFF, quote_ends);
+    pay_approved_by(&mut s, &fx, STAFF, fx.staff, intent, quote_ends + 1);
+    s.end();
+}
+
+#[test]
+/// With the approval's own deadline, the payment lands up to the last
+/// millisecond of the quote.
+fun an_approved_payment_lands_up_to_the_approved_deadline() {
+    let (mut s, fx) = setup();
+    let intent = open(&mut s, &fx, STAFF, 80, payment_intent::kind_bank_payout(), h::recipient(), THRESHOLD + 1);
+    let quote_ends = now(&mut s) + QUOTE_HOLD;
+    approve_until(&mut s, &fx, h::owner_2(), intent, STAFF, quote_ends);
+    advance(&mut s, QUOTE_HOLD - 1);
+    pay_approved_by(&mut s, &fx, STAFF, fx.staff, intent, quote_ends);
+    assert_eq!(coin_received(&mut s, h::recipient()), THRESHOLD + 1);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = splash_spend::E_APPROVAL_EXPIRED)]
 /// The operator, running a payment an owner approved, cannot settle it
 /// after the quote the owner approved has lapsed, whatever deadline it
 /// passes itself.
 fun the_executor_cannot_pay_after_the_approved_quote_lapsed() {
     let (mut s, fx) = setup();
     let intent = open(&mut s, &fx, STAFF, 81, payment_intent::kind_bank_payout(), h::recipient(), THRESHOLD + 1);
-    approve(&mut s, &fx, h::owner_2(), intent, EXECUTOR);
+    let quote_ends = now(&mut s) + QUOTE_HOLD;
+    approve_until(&mut s, &fx, h::owner_2(), intent, EXECUTOR, quote_ends);
     advance(&mut s, QUOTE_HOLD + 60_000);
-    s.next_tx(STRANGER);
-    let c = s.take_shared<Clock>();
-    let settle_by = c.timestamp_ms() + QUOTE_HOLD;
-    ts::return_shared(c);
+    let settle_by = now(&mut s) + QUOTE_HOLD;
     pay_approved_by(&mut s, &fx, EXECUTOR, fx.executor, intent, settle_by);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = splash_spend::E_APPROVAL_EXPIRED)]
+/// At exactly the approved deadline the approval is spent.
+fun an_approval_cannot_be_used_at_its_deadline() {
+    let (mut s, fx) = setup();
+    let intent = open(&mut s, &fx, STAFF, 81, payment_intent::kind_bank_payout(), h::recipient(), THRESHOLD + 1);
+    let quote_ends = now(&mut s) + QUOTE_HOLD;
+    approve_until(&mut s, &fx, h::owner_2(), intent, STAFF, quote_ends);
+    advance(&mut s, QUOTE_HOLD);
+    pay_approved_by(&mut s, &fx, STAFF, fx.staff, intent, quote_ends);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = splash_spend::E_APPROVAL_EXPIRED)]
+/// The wallet's delegation binds its window the same way: the executor
+/// cannot run the payment after the window the wallet gave it.
+fun the_executor_cannot_run_a_delegation_after_its_window() {
+    let (mut s, fx) = setup();
+    let intent = open_by_wallet(&mut s, &fx, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    // The wallet's intent lives five minutes; the window is the first two.
+    let window_ends = now(&mut s) + 120_000;
+    delegate_until(&mut s, &fx, h::wallet(), intent, EXECUTOR, window_ends);
+    advance(&mut s, 120_000);
+    let settle_by = now(&mut s) + QUOTE_HOLD;
+    pay_approved_by(&mut s, &fx, EXECUTOR, fx.executor, intent, settle_by);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = splash_spend::E_BAD_SETTLE_BY)]
+/// An approval's deadline must be in the future: one that has already
+/// passed could never be used, and is refused rather than minted.
+fun an_approval_cannot_name_a_deadline_that_has_passed() {
+    let (mut s, fx) = setup();
+    let intent = open(&mut s, &fx, STAFF, 82, payment_intent::kind_wallet(), SUPPLIER, THRESHOLD + 1);
+    let t = now(&mut s);
+    approve_until(&mut s, &fx, h::owner_2(), intent, STAFF, t);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = splash_spend::E_BAD_SETTLE_BY)]
+/// Nor may it outlive its intent: one millisecond past the intent's expiry
+/// is refused. (Exactly the expiry is what `approve` gives by default.)
+fun an_approval_cannot_outlive_its_intent() {
+    let (mut s, fx) = setup();
+    let intent = open(&mut s, &fx, STAFF, 83, payment_intent::kind_wallet(), SUPPLIER, THRESHOLD + 1);
+    let expiry = intent_expiry(&mut s, intent);
+    approve_until(&mut s, &fx, h::owner_2(), intent, STAFF, expiry + 1);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = splash_spend::E_BAD_SETTLE_BY)]
+/// The same for the wallet's delegation.
+fun a_delegation_cannot_outlive_its_intent() {
+    let (mut s, fx) = setup();
+    let intent = open_by_wallet(&mut s, &fx, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    let expiry = intent_expiry(&mut s, intent);
+    delegate_until(&mut s, &fx, h::wallet(), intent, EXECUTOR, expiry + 1);
     s.end();
 }
 
