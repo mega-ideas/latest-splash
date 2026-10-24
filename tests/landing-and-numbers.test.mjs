@@ -285,3 +285,29 @@ test('the copy lint gives a reason for every rule, fails on a planted "licensed 
   const lint = await source('scripts/check-copy.mjs');
   assert.match(lint, /copy-rules\.mjs/, 'the lint uses the rules module');
 });
+
+/* ── The comparison table's competitor figures (the A1 review, L8) ─────── */
+
+test('the comparison table shows no competitor figure without a named, dated source', async () => {
+  // The review found the cinematic landing's comparison table quoting a
+  // bank at 3-5%, a broker at 2-4% and Wise at 0.5-1.5%, with settlement
+  // days beside them, and none of it sourced. A competitor figure comes
+  // from a named, dated dataset (lib/fx/comparison-baselines.ts), or no
+  // figure is shown.
+  const landing = await source('components/IsometricLanding.tsx');
+  const rows = landing.slice(landing.indexOf('const comparisonRowsFor'), landing.indexOf('type YieldBenchmarks'));
+  assert.ok(rows.length > 100, 'the comparison rows are found');
+  const typed = [...rows.matchAll(/\b(bank|broker|wise):\s*(['`])([^'`]*\d[^'`]*)\2/g)].map((m) => `${m[1]}: ${m[3]}`);
+  assert.deepEqual(typed, [], 'no competitor figure is typed into a row');
+  assert.match(landing, /getComparisonBaseline\('PHP'\)/, "the bank column's figures come from the reviewed dataset");
+  assert.match(landing, /COMPARISON_BASELINE\.dataset\.name/, 'the table names its source');
+  assert.match(landing, /COMPARISON_BASELINE\.dataset\.asOf/, 'and its date');
+
+  // The yield row's competitor rates are the sources' own, read live, and
+  // nothing when a source could not be read: no hard-coded fallback rate
+  // shown as if it were a reading.
+  assert.doesNotMatch(landing, /bank:\s*0\.38|broker:\s*3\.12|wise:\s*3\.14/, 'no typed yield on the page');
+  const yields = await source('app/api/market/yields/route.ts');
+  assert.doesNotMatch(yields, /0\.38|3\.12|3\.14/, 'nor in the route');
+  assert.doesNotMatch(yields, /fallback/i, 'an unread source is null, not a remembered rate');
+});
