@@ -62,7 +62,7 @@ export default async function AdminOverviewPage() {
         <Link href={adminConsolePath('/support', hostname)} className="dash-block dash-block-interactive group p-6">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#E39774]/10 text-[#9f5839]"><Headphones className="h-6 w-6" /></div>
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--gold-tint)] text-[var(--gold-ink)]"><Headphones className="h-6 w-6" /></div>
               <h2 className="mt-5 text-2xl font-black text-[#1f4350]">Feedback and complaints</h2>
               <p className="mt-2 text-sm leading-6 text-[#326273]/90">Triage support tickets from the customer dashboard, assign ownership, reply manually, and close resolved complaints.</p>
             </div>

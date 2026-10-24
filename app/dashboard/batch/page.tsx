@@ -108,7 +108,7 @@ function strongestResult(checks: ComplianceCheck[]): ComplianceResult {
   return "PASS";
 }
 
-// Screening results are STATES — semantic tokens only (W9.0 coral rule).
+// Screening results are STATES — semantic tokens only (W9.0 rule).
 function badgeClass(result: ComplianceResult) {
   if (result === "PASS") return "border-[var(--ok)] bg-[var(--ok-bg)] text-[#1F4452]";
   if (result === "REVIEW") return "border-[var(--warn)] bg-[var(--warn-bg)] text-[#8b6418]";
@@ -531,7 +531,7 @@ ${sampleCsvRows.map((row) => `${row.name},${row.address},${row.country},${row.pu
                     className="w-32 rounded-lg border border-[#326273]/20 bg-[#F6F0ED] px-3 py-3 text-center font-mono tracking-[0.25em] text-[#326273] focus:border-[#5C9EAD] focus:outline-none"
                     placeholder="000000"
                   />
-                  <button type="submit" disabled={busy || acceptedRows.length === 0 || (totp.length !== 6 && !whatsappApproved)} className="flex-1 rounded-lg bg-[#E39774] px-6 py-3 font-semibold text-[#073d49] hover:bg-[#E39774]/85 disabled:opacity-50">
+                  <button type="submit" disabled={busy || acceptedRows.length === 0 || (totp.length !== 6 && !whatsappApproved)} className="flex-1 rounded-lg bg-[var(--gold-light)] px-6 py-3 font-semibold text-[#073d49] hover:bg-[var(--gold)] disabled:opacity-50">
                     {busy ? <span className="inline-flex items-center gap-2"><Loader2 className="animate-spin" size={16} /> Queueing…</span> : "Authorize cleared rows"}
                   </button>
                 </form>

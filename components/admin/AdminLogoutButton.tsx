@@ -24,8 +24,8 @@ export default function AdminLogoutButton({ variant = 'dark' }: { variant?: 'dar
       className={cn(
         'flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold transition',
         variant === 'dark'
-          ? 'border-white/10 text-white/75 hover:bg-white/10 hover:text-[#E39774]'
-          : 'border-[#326273]/10 bg-white text-[#326273] hover:border-[#E39774]/40 hover:text-[#E39774]',
+          ? 'border-white/10 text-white/75 hover:bg-white/10 hover:text-[var(--gold-light)]'
+          : 'border-[#326273]/10 bg-white text-[#326273] hover:border-[var(--gold-light)] hover:text-[var(--gold-ink)]',
       )}
     >
       <LogOut className="h-4 w-4" />

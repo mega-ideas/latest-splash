@@ -376,7 +376,7 @@ export default function KybSettings() {
           </div>
         </div>
         <div id="sumsub-websdk-container" className="min-h-0 overflow-hidden rounded-2xl border border-[#326273]/10 bg-[#F6F0ED]" />
-        <button disabled={submitting} className="w-full rounded-lg bg-[#E39774] py-3 font-bold text-white hover:bg-[#cd825f] disabled:opacity-50">
+        <button disabled={submitting} className="w-full rounded-lg bg-[var(--gold-light)] py-3 font-bold text-[var(--ink)] hover:bg-[var(--gold)] disabled:opacity-50">
           {submitting ? <span className="inline-flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" /> Submitting…</span> : 'Submit KYB application'}
         </button>
       </form>

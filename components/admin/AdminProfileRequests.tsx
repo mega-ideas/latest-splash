@@ -122,7 +122,7 @@ export default function AdminProfileRequests({ initialRequests }: { initialReque
                     <div className="text-xs text-[#1F4452]/90">{request.email} · {TIER_LABELS[request.currentProfile.tier] ?? request.currentProfile.tier}</div>
                   </div>
                 </div>
-                <div className="flex items-center gap-2 text-xs font-bold text-[#9b4e32]">
+                <div className="flex items-center gap-2 text-xs font-bold text-[var(--gold-ink)]">
                   <Clock3 className="h-3.5 w-3.5" />
                   <LocalTime value={request.submittedAt} />
                 </div>
@@ -132,7 +132,7 @@ export default function AdminProfileRequests({ initialRequests }: { initialReque
                 {Object.entries(request.changes).map(([field, next]) => (
                   <div key={field} className="grid items-center gap-2 rounded-lg bg-[#EEF4F5] px-3 py-2.5 text-sm sm:grid-cols-[130px_1fr_auto_1fr]">
                     <span className="text-[12px] font-black uppercase tracking-[0.12em] text-[#1F4452]/90">{FIELD_LABELS[field] ?? field}</span>
-                    <span className="font-semibold text-[#1F4452]/90 line-through decoration-[#E39774]/70">{display(field, request.before[field])}</span>
+                    <span className="font-semibold text-[#1F4452]/90 line-through decoration-[var(--gold-light)]">{display(field, request.before[field])}</span>
                     <span aria-hidden="true" className="hidden text-[#237284] sm:block">→</span>
                     <span className="font-black text-[#1F4452]">{display(field, next)}</span>
                   </div>
@@ -162,7 +162,7 @@ export default function AdminProfileRequests({ initialRequests }: { initialReque
                   type="button"
                   disabled={busyId === request.id}
                   onClick={() => void decide(request.id, 'reject')}
-                  className="inline-flex items-center gap-2 rounded-lg border border-[#E39774]/50 bg-[#E39774]/10 px-4 py-2 text-xs font-black text-[#9b4e32] transition-colors hover:bg-[#E39774]/20 disabled:opacity-50"
+                  className="inline-flex items-center gap-2 rounded-lg border border-[var(--gold-light)] bg-[var(--gold-tint)] px-4 py-2 text-xs font-black text-[var(--gold-ink)] transition-colors hover:bg-[var(--gold-tint)] disabled:opacity-50"
                 >
                   <XCircle className="h-3.5 w-3.5" />
                   Reject
@@ -197,7 +197,7 @@ export default function AdminProfileRequests({ initialRequests }: { initialReque
 
 function StateBadge({ state }: { state: AdminProfileRequest['state'] }) {
   const map = {
-    PENDING: ['bg-[#E39774]/15 text-[#9b4e32]', Clock3],
+    PENDING: ['bg-[var(--gold-tint)] text-[var(--gold-ink)]', Clock3],
     APPROVED: ['bg-[#5C9EAD]/15 text-[#0d6370]', BadgeCheck],
     REJECTED: ['bg-red-100 text-red-700', XCircle],
     CANCELLED: ['bg-[#326273]/10 text-[#326273]/90', Undo2],

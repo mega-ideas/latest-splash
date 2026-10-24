@@ -22,7 +22,7 @@ const stateLabels: Record<KybReviewState, string> = {
 function stateClass(state: KybReviewState) {
   if (state === 'APPROVED') return 'border-[#5C9EAD]/30 bg-[#5C9EAD]/10 text-[#326273]';
   if (state === 'REJECTED') return 'border-red-500/30 bg-red-500/10 text-red-700';
-  if (state === 'NEEDS_INFORMATION') return 'border-[#E39774]/40 bg-[#E39774]/10 text-[#9a4a2d]';
+  if (state === 'NEEDS_INFORMATION') return 'border-[var(--gold-light)] bg-[var(--gold-tint)] text-[var(--gold-ink)]';
   return 'border-[#326273]/15 bg-white text-[#326273]';
 }
 
@@ -171,7 +171,7 @@ export default function AdminKybConsole({ initialCases }: Props) {
               </div>
 
               <div className="rounded-2xl border border-[#326273]/10 bg-white p-5 shadow-sm">
-                <div className="mb-4 flex items-center gap-2 font-bold text-[#1f4350]"><ShieldAlert className="h-5 w-5 text-[#9f5839]" /> Manual decision</div>
+                <div className="mb-4 flex items-center gap-2 font-bold text-[#1f4350]"><ShieldAlert className="h-5 w-5 text-[var(--gold-ink)]" /> Manual decision</div>
                 <textarea value={note} onChange={(event) => setNote(event.target.value)} rows={5} placeholder="Add approval rationale, missing-info request, or rejection reason" className="w-full resize-none rounded-xl border border-[#326273]/70 bg-[#F6F0ED] px-4 py-3 text-sm outline-none focus:border-[#5C9EAD]" />
                 <div className="mt-4 grid gap-2 sm:grid-cols-2">
                   <ActionButton state="IN_REVIEW" label="Start review" loadingAction={loadingAction} onClick={updateCase} />
@@ -179,8 +179,8 @@ export default function AdminKybConsole({ initialCases }: Props) {
                   <ActionButton state="APPROVED" label="Approve KYB" loadingAction={loadingAction} onClick={updateCase} />
                   <ActionButton state="REJECTED" label="Reject KYB" loadingAction={loadingAction} onClick={updateCase} />
                 </div>
-                <div className="mt-4 rounded-xl border border-[#E39774]/20 bg-[#E39774]/10 p-3 text-xs leading-5 text-[#326273]/90">
-                  <AlertTriangle className="mr-2 inline h-4 w-4 text-[#9f5839]" /> Approval unlocks off-chain customer access. Settlement contracts still enforce transfer execution separately.
+                <div className="mt-4 rounded-xl border border-[var(--gold-light)] bg-[var(--gold-tint)] p-3 text-xs leading-5 text-[#326273]/90">
+                  <AlertTriangle className="mr-2 inline h-4 w-4 text-[var(--gold-ink)]" /> Approval unlocks off-chain customer access. Settlement contracts still enforce transfer execution separately.
                 </div>
               </div>
             </section>

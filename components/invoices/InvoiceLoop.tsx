@@ -608,7 +608,7 @@ function ExtractionPanel({
           type="button"
           disabled={!selected || extracting}
           onClick={onExtract}
-          className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-lg bg-[#E39774] px-4 py-2 text-sm font-bold text-[#073d49] shadow-[0_12px_24px_rgba(227,151,116,0.24)] transition hover:bg-[#E39774]/85 focus-ring disabled:cursor-not-allowed disabled:opacity-50"
+          className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-lg bg-[var(--gold-light)] px-4 py-2 text-sm font-bold text-[#073d49] shadow-[0_12px_24px_rgba(239,196,111,0.24)] transition hover:bg-[var(--gold)] focus-ring disabled:cursor-not-allowed disabled:opacity-50"
         >
           {extracting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
           {extracting ? 'Inspecting...' : 'Extract and recommend route'}
@@ -644,15 +644,15 @@ function ExtractionPanel({
               </div>
             </div>
           ) : (
-            <div className="rounded-lg border border-[#E39774]/28 bg-[#E39774]/10 p-4">
+            <div className="rounded-lg border border-[var(--gold-light)] bg-[var(--gold-tint)] p-4">
               <div className="flex items-start gap-3">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white text-[#9F5839]">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white text-[var(--gold-ink)]">
                   <Route className="h-4 w-4" />
                 </span>
                 <div>
                   <strong className="text-[#1F4452]">{suggestion.title}</strong>
                   <p className="mt-2 text-sm font-medium leading-6 text-[#326273]/90">{suggestion.description}</p>
-                  <span className="mt-3 inline-flex rounded-md border border-[#E39774]/25 bg-white/70 px-2.5 py-1 text-[12px] font-semibold uppercase tracking-[0.14em] text-[#9F5839]">
+                  <span className="mt-3 inline-flex rounded-md border border-[var(--gold-light)] bg-white/70 px-2.5 py-1 text-[12px] font-semibold uppercase tracking-[0.14em] text-[var(--gold-ink)]">
                     Approval required
                   </span>
                 </div>

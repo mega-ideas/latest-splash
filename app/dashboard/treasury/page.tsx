@@ -351,7 +351,7 @@ export default function TreasuryPage() {
         <div className="flex flex-wrap items-center gap-2">
           <span className="rounded-full border border-[#D9A441]/40 bg-[#D9A441]/12 px-3 py-1.5 text-sm font-semibold text-[#1F4452]">{rate.label}</span>
           {rate.introductory && (
-            <span className="rounded-full border border-[#E39774]/40 bg-[#E39774]/12 px-3 py-1.5 text-[13px] font-semibold text-[#1F4452]">Introductory rate</span>
+            <span className="rounded-full border border-[var(--gold-light)] bg-[var(--gold-tint)] px-3 py-1.5 text-[13px] font-semibold text-[#1F4452]">Introductory rate</span>
           )}
         </div>
       </header>
@@ -488,7 +488,7 @@ export default function TreasuryPage() {
                 <div className="flex justify-between border-t border-[#326273]/10 pt-1.5"><span className="font-medium text-[#326273]/90">After</span><span className="dash-num font-semibold text-[#1F4452]">${fmtUsd(previewSource)}</span></div>
               )}
               {!toTreasury && (
-                <div className="flex items-center gap-1.5 text-[13px] text-[#9f5839]"><Clock size={10} /> Lands in Operating in {windowLabel}</div>
+                <div className="flex items-center gap-1.5 text-[13px] text-[var(--gold-ink)]"><Clock size={10} /> Lands in Operating in {windowLabel}</div>
               )}
             </div>
 
@@ -684,7 +684,7 @@ export default function TreasuryPage() {
                 <label className="mt-6 block">
                   <span className="flex items-center justify-between text-[13px] font-semibold text-[#326273]">
                     <span>Netting ratio</span>
-                    <span className="font-mono text-[#9f5839]">{nettingRatio}%</span>
+                    <span className="font-mono text-[var(--gold-ink)]">{nettingRatio}%</span>
                   </span>
                   <input
                     type="range"
@@ -692,7 +692,7 @@ export default function TreasuryPage() {
                     max="100"
                     value={nettingRatio}
                     onChange={(event) => setNettingRatio(Number(event.target.value))}
-                    className="mt-3 h-2 w-full cursor-pointer accent-[#E39774]"
+                    className="mt-3 h-2 w-full cursor-pointer accent-[var(--gold-light)]"
                   />
                   <span className="mt-2 flex justify-between text-[12px] font-semibold uppercase tracking-wide text-[#326273]/90"><span>Full sweep</span><span>Full hold</span></span>
                 </label>
@@ -704,13 +704,13 @@ export default function TreasuryPage() {
                     <div className="dash-num mt-2 text-2xl font-semibold text-[#0c3e48]">{feesDeleted === null ? '—' : `$${feesDeleted.toFixed(2)}`}</div>
                     <p className="mt-1 text-[13px] leading-4 text-[#326273]/90">Avoided while value stays netted inside the operating loop.</p>
                   </div>
-                  <div className="rounded-2xl border border-[#E39774]/20 bg-white p-4">
-                    <div className="text-[12px] font-semibold uppercase tracking-[0.14em] text-[#9f5839]">Fees relocated</div>
+                  <div className="rounded-2xl border border-[var(--gold-light)] bg-white p-4">
+                    <div className="text-[12px] font-semibold uppercase tracking-[0.14em] text-[var(--gold-ink)]">Fees relocated</div>
                     <div className="dash-num mt-2 text-2xl font-semibold text-[#0c3e48]">{feesRelocated === null ? '—' : `$${feesRelocated.toFixed(2)}`}</div>
                     <p className="mt-1 text-[13px] leading-4 text-[#326273]/90">Still paid when the remaining value reaches a local cash-out rail.</p>
                   </div>
                 </div>
-                <div className="mt-4 overflow-hidden rounded-full bg-[#E39774]/25">
+                <div className="mt-4 overflow-hidden rounded-full bg-[var(--gold-tint)]">
                   <div className="h-3 rounded-full bg-[#5C9EAD] transition-all" style={{ width: `${nettingRatio}%` }} />
                 </div>
                 <div className="mt-3 flex items-start gap-2 rounded-xl bg-white p-3 text-[13px] leading-4 text-[#326273]/90">
@@ -757,12 +757,12 @@ export default function TreasuryPage() {
               <span className="rounded-full bg-[#D9A441]/12 px-2 py-0.5 text-[12px] font-semibold uppercase tracking-wide text-[#8b6418]">T-bill yield</span>
             </div>
             <div className="relative grid gap-0 sm:grid-cols-4">
-              <div className="pointer-events-none absolute left-5 right-5 top-[3.25rem] hidden h-px bg-gradient-to-r from-[#5C9EAD]/0 via-[#D9A441] to-[#E39774]/40 sm:block" />
+              <div className="pointer-events-none absolute left-5 right-5 top-[3.25rem] hidden h-px bg-gradient-to-r from-[#5C9EAD]/0 via-[#D9A441] to-[var(--gold-light)]/40 sm:block" />
               {[
                 { step: '01', title: 'Prepare recommendation', desc: 'Zeke models an allocation from Operating cash. Your business must approve it.', icon: CreditCard, accent: '#5C9EAD', bg: 'bg-[#5C9EAD]/10', tag: 'Human approval' },
                 { step: '02', title: 'Ondo USDY (T-bills)', desc: 'USDY is backed by short-dated US Treasuries — real, off-chain yield.', icon: Landmark, accent: '#C99A2E', bg: 'bg-[#D9A441]/15', tag: 'T-bill backed' },
                 { step: '03', title: 'Yield accrues', desc: 'USDY redemption price rises daily. Floating net rate — never fixed.', icon: Sprout, accent: '#4F9C88', bg: 'bg-[#6FB4A0]/18', tag: rate.label.replace(' · variable', '') },
-                { step: '04', title: 'Withdraw on notice', desc: `Request a withdrawal; USDY converts back to USD and lands in Operating in ${windowLabel}.`, icon: PiggyBank, accent: '#E39774', bg: 'bg-[#E39774]/10', tag: 'Notice required' },
+                { step: '04', title: 'Withdraw on notice', desc: `Request a withdrawal; USDY converts back to USD and lands in Operating in ${windowLabel}.`, icon: PiggyBank, accent: '#7a5410', bg: 'bg-[var(--gold-tint)]', tag: 'Notice required' },
               ].map(({ step, title, desc, icon: Icon, accent, bg, tag }, i, arr) => (
                 <div key={step} className={cn('relative px-5 py-4', i < arr.length - 1 && 'border-[#326273]/8 sm:border-r')}>
                   <div className="flex items-center gap-3">
@@ -794,7 +794,7 @@ export default function TreasuryPage() {
           {notices.length > 0 && (
             <div className="dash-block p-4">
               <div className="flex items-center gap-2">
-                <Clock size={14} className="text-[#9f5839]" />
+                <Clock size={14} className="text-[var(--gold-ink)]" />
                 <h2 className="text-sm font-semibold text-[#1F4452]">Pending withdrawals</h2>
               </div>
               <div className="mt-3 space-y-2">
@@ -802,11 +802,11 @@ export default function TreasuryPage() {
                   const confirming = confirmCancelId === n.id;
                   const busy = cancelingId === n.id;
                   return (
-                    <div key={n.id} className="rounded-lg bg-[#E39774]/10 px-3 py-2 text-[13px]">
+                    <div key={n.id} className="rounded-lg bg-[var(--gold-tint)] px-3 py-2 text-[13px]">
                       <div className="flex items-center justify-between gap-2">
                         <span className="dash-num font-semibold text-[#1F4452]">${fmtUsd(n.amount)}</span>
                         <div className="flex items-center gap-2">
-                          <span className="text-[#9f5839]">by <LocalTime value={n.availableAt} format="date" locale="en-US" options={{ month: 'short', day: 'numeric' }} /></span>
+                          <span className="text-[var(--gold-ink)]">by <LocalTime value={n.availableAt} format="date" locale="en-US" options={{ month: 'short', day: 'numeric' }} /></span>
                           {!confirming && (
                             <button
                               type="button"
@@ -819,14 +819,14 @@ export default function TreasuryPage() {
                         </div>
                       </div>
                       {confirming && (
-                        <div className="mt-2 flex items-center justify-between gap-2 border-t border-[#E39774]/25 pt-2">
+                        <div className="mt-2 flex items-center justify-between gap-2 border-t border-[var(--gold-light)] pt-2">
                           <span className="text-[13px] text-[#326273]/90">Cancel and return to Treasury?</span>
                           <div className="flex items-center gap-1.5">
                             <button
                               type="button"
                               disabled={busy}
                               onClick={() => cancelWithdrawal(n.id)}
-                              className="rounded-md bg-[#9f5839] px-2 py-1 text-[13px] font-semibold text-white transition-colors hover:bg-[#9a4a2d] disabled:opacity-50"
+                              className="rounded-md bg-[var(--gold-ink)] px-2 py-1 text-[13px] font-semibold text-white transition-colors hover:bg-[var(--gold-ink)] disabled:opacity-50"
                             >
                               {busy ? 'Cancelling…' : 'Yes, cancel'}
                             </button>

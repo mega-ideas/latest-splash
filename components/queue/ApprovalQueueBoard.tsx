@@ -55,8 +55,8 @@ export type QueueLaneData = { key: QueueLaneKey; label: string; items: QueueItem
 
 type Decided = QueueItem & { outcome: DecisionOutcome };
 
-/* Lane tones + risk pills use semantic state tokens (W9.0 coral rule) —
-   coral stays a brand accent, never a risk/error signal. */
+/* Lane tones + risk pills use semantic state tokens (W9.0 rule): a
+   brand accent is never a risk/error signal. */
 const laneMeta: Record<QueueLaneKey, { label: string; icon: LucideIcon; tone: string }> = {
   PENDING_APPROVALS: { label: 'Pending approvals', icon: ShieldCheck, tone: 'text-[var(--info)]' },
   COMPLIANCE_HOLDS: { label: 'Compliance holds', icon: ShieldAlert, tone: 'text-[var(--warn)]' },

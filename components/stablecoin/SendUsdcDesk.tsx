@@ -468,7 +468,7 @@ export default function SendUsdcDesk() {
                 <span className="ml-2 text-sm font-medium text-[#326273]/90">left of {lane ? formatUsdc(cap) : '—'}</span>
               </div>
             </div>
-            <span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${lane?.verified ? 'bg-[#6FB4A0]/15 text-[#1F4452]' : 'bg-[#E39774]/15 text-[#9F5839]'}`}>
+            <span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${lane?.verified ? 'bg-[#6FB4A0]/15 text-[#1F4452]' : 'bg-[var(--gold-tint)] text-[var(--gold-ink)]'}`}>
               {lane ? (lane.verified ? 'Verified business' : 'Not yet verified') : '…'}
             </span>
           </div>
@@ -1073,7 +1073,7 @@ function WalletBalances({ view, source, needsSui }: { view: WalletView | null | 
         </div>
       )}
       {view.gasLow && needsSui ? (
-        <p className="mt-2 text-[12px] leading-5 text-[#9F5839]">Add a little SUI (about 0.05) to pay network fees — without it this wallet can hold USDC but not send it.</p>
+        <p className="mt-2 text-[12px] leading-5 text-[var(--gold-ink)]">Add a little SUI (about 0.05) to pay network fees — without it this wallet can hold USDC but not send it.</p>
       ) : null}
       {source === 'SPLASH' ? (
         <>

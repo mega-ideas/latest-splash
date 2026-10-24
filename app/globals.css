@@ -59,7 +59,7 @@
   --splash-page-bg: #ece3de;
   --splash-page-bg-deep: #e5d8d1;
   /* Named slate/cream aliases consumed by the surface-brightness overrides
-     below. Accent colors come from styles/tokens.css (--teal/--coral/--gold);
+     below. Accent colors come from styles/tokens.css (--teal/--gold/--gold-light);
      the old --splash-gold/mint/indigo aliases were dead and removed. */
   --ink-panel: #264e5b;
   --ink-panel-deep: #1f4350;
@@ -78,8 +78,9 @@
   --secondary-foreground: #326273;
   --muted: #d9cbc4;
   --muted-foreground: #6d7f86;
-  --accent: #e39774;
-  --accent-foreground: #fffaf6;
+  /* Gold, not coral (v2 D14): ink words on it, 6.4:1. */
+  --accent: #efc46f;
+  --accent-foreground: #1f4452;
   --destructive: oklch(0.577 0.245 27.325);
   --border: color-mix(in srgb, #326273 16%, transparent);
   --input: color-mix(in srgb, #326273 18%, transparent);
@@ -94,8 +95,8 @@
   --sidebar-foreground: #326273;
   --sidebar-primary: #5c9ead;
   --sidebar-primary-foreground: #fffaf6;
-  --sidebar-accent: #e39774;
-  --sidebar-accent-foreground: #fffaf6;
+  --sidebar-accent: #efc46f;
+  --sidebar-accent-foreground: #1f4452;
   --sidebar-border: color-mix(in srgb, #326273 16%, transparent);
   --sidebar-ring: #5c9ead;
 }
@@ -5442,7 +5443,9 @@ body {
 
 /* Fixed to the window, so any word on the page can scroll under the top
    glow's brightest point: at .2 the page's #326273 read 4.2:1 there. The
-   lower glow sits where the mask fades the layer out. */
+   lower glow sits where the mask fades the layer out. No hairline grid
+   behind the dashboard (v2 D14: the landing's Platform section is the only
+   place a grid is drawn), and the lower glow is gold, not coral. */
 .fintech-dashboard-shell::before {
   position: fixed;
   z-index: -1;
@@ -5450,10 +5453,7 @@ body {
   pointer-events: none;
   background:
     radial-gradient(circle at 76% 6%, rgba(92, 158, 173, .08), transparent 24%),
-    radial-gradient(circle at 28% 82%, rgba(227, 151, 116, .05), transparent 27%),
-    linear-gradient(rgba(18, 63, 73, .035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(18, 63, 73, .035) 1px, transparent 1px);
-  background-size: auto, auto, 28px 28px, 28px 28px;
+    radial-gradient(circle at 28% 82%, rgba(239, 196, 111, .05), transparent 27%);
   content: "";
   mask-image: linear-gradient(to bottom, black, transparent 82%);
 }
