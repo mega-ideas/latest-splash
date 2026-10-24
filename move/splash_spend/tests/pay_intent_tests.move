@@ -19,6 +19,7 @@
 module splash_spend::pay_intent_tests;
 
 use splash_core::audit_anchor;
+use splash_core::address_registry;
 use splash_core::business_account::{Self, BusinessAccount};
 use splash_core::cap_registry::CapRegistry;
 use splash_core::compliance_config::{Self, ComplianceConfig};
@@ -543,7 +544,9 @@ fun rotate(s: &mut Scenario, fx: &Fx, from: address, keys: vector<vector<u8>>, w
     s.next_tx(to);
     {
         let mut account = s.take_shared_by_id<BusinessAccount>(fx.account);
-        business_account::confirm_wallet_rotation(&mut account, s.ctx());
+        let mut reg = s.take_shared<address_registry::Registry>();
+        business_account::confirm_wallet_rotation(&mut account, &mut reg, s.ctx());
+        ts::return_shared(reg);
         ts::return_shared(account);
     };
 }
@@ -573,7 +576,9 @@ fun second_business(s: &mut Scenario): (ID, ID) {
     s.next_tx(h::wallet());
     {
         let mut account = s.take_shared_by_id<BusinessAccount>(account2);
-        business_account::register_wallet(&mut account, h::keys(), h::weights(), h::threshold(), false, s.ctx());
+        let mut reg = s.take_shared<address_registry::Registry>();
+        business_account::register_wallet(&mut account, &mut reg, h::keys(), h::weights(), h::threshold(), false, s.ctx());
+        ts::return_shared(reg);
         ts::return_shared(account);
     };
     s.next_tx(h::wallet());

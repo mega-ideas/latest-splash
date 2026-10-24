@@ -18,6 +18,7 @@
 #[allow(implicit_const_copy)]
 module splash_core::wallet_v2_tests;
 
+use splash_core::address_registry;
 use splash_core::business_account::{Self, BusinessAccount};
 use splash_core::multisig;
 use splash_core::v2_harness as h;
@@ -105,7 +106,9 @@ fun register(
 ) {
     s.next_tx(by);
     let mut account = s.take_shared<BusinessAccount>();
-    business_account::register_wallet(&mut account, keys, weights, threshold, single_signer_ack, s.ctx());
+    let mut reg = s.take_shared<address_registry::Registry>();
+    business_account::register_wallet(&mut account, &mut reg, keys, weights, threshold, single_signer_ack, s.ctx());
+    ts::return_shared(reg);
     ts::return_shared(account);
 }
 
@@ -131,7 +134,9 @@ fun rotate_to_b(s: &mut Scenario) {
 fun confirm(s: &mut Scenario, by: address) {
     s.next_tx(by);
     let mut account = s.take_shared<BusinessAccount>();
-    business_account::confirm_wallet_rotation(&mut account, s.ctx());
+    let mut reg = s.take_shared<address_registry::Registry>();
+    business_account::confirm_wallet_rotation(&mut account, &mut reg, s.ctx());
+    ts::return_shared(reg);
     ts::return_shared(account);
 }
 
@@ -1457,7 +1462,9 @@ fun after_rotating_them_out_a_former_signer_can_be_removed() {
     s.next_tx(b);
     {
         let mut account = s.take_shared<BusinessAccount>();
-        business_account::confirm_wallet_rotation(&mut account, s.ctx());
+        let mut reg = s.take_shared<address_registry::Registry>();
+        business_account::confirm_wallet_rotation(&mut account, &mut reg, s.ctx());
+        ts::return_shared(reg);
         ts::return_shared(account);
     };
     s.next_tx(b);

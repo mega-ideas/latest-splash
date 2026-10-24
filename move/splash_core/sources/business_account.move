@@ -61,6 +61,7 @@
 /// than discovered.
 module splash_core::business_account;
 
+use splash_core::address_registry::{Self, Registry};
 use splash_core::cap_registry::{Self, CapRegistry};
 use splash_core::multisig;
 use splash_core::spend_window::{Self, SpendWindow};
@@ -900,8 +901,13 @@ public fun nominate_wallet(
 /// status comes from `multisig::is_single_signer`, from the weights, not from
 /// `threshold < 2`: weights `[2, 1, 1]` under threshold 2 are a one-person
 /// wallet as surely as a 1-of-1 is.
+///
+/// The wallet is entered in the business-wallet registry (A1 §2.3), so a
+/// payment to it from another business is charged as a Splash-business
+/// payment: free inside the network.
 public fun register_wallet(
     account: &mut BusinessAccount,
+    registry: &mut Registry,
     keys: vector<vector<u8>>,
     weights: vector<u8>,
     threshold: u16,
@@ -928,6 +934,7 @@ public fun register_wallet(
     account.single_signer = single_signer;
     account.wallet_epoch = account.wallet_epoch + 1;
     account.nominated_wallet = option::none();
+    address_registry::add_business_wallet(registry, sender);
     bump(account, b"register_wallet", sender, ctx);
 
     event::emit(WalletRegistered {
@@ -1001,7 +1008,11 @@ public fun rotate_wallet(
 /// wallet's address balance, and every allowance the old wallet funded names
 /// the old wallet as funder, until the owners move the balance and revoke and
 /// re-propose from the new wallet. The dashboard runs that as a one-time flow.
-public fun confirm_wallet_rotation(account: &mut BusinessAccount, ctx: &TxContext) {
+///
+/// The business-wallet registry (A1 §2.3) moves with it: the old wallet is
+/// cleared and the new one entered, so the old address is charged as an
+/// ordinary wallet from now on.
+public fun confirm_wallet_rotation(account: &mut BusinessAccount, registry: &mut Registry, ctx: &TxContext) {
     assert!(!account.admin_frozen, E_FROZEN);
     assert!(account.pending_wallet.is_some(), E_NO_PENDING_ROTATION);
     let sender = tx_context::sender(ctx);
@@ -1016,6 +1027,8 @@ public fun confirm_wallet_rotation(account: &mut BusinessAccount, ctx: &TxContex
     account.wallet_signers = signers;
     account.single_signer = single_signer;
     account.wallet_epoch = account.wallet_epoch + 1;
+    address_registry::remove_business_wallet(registry, old_wallet);
+    address_registry::add_business_wallet(registry, wallet);
     bump(account, b"rotate_wallet", wallet, ctx);
 
     event::emit(WalletRotated {

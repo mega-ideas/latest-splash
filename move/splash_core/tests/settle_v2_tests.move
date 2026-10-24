@@ -19,6 +19,7 @@
 module splash_core::settle_v2_tests;
 
 use splash_core::audit_anchor;
+use splash_core::address_registry;
 use splash_core::business_account::{Self, BusinessAccount};
 use splash_core::cap_registry::CapRegistry;
 use splash_core::compliance_config::{Self, ComplianceConfig, ComplianceCap};
@@ -542,11 +543,7 @@ fun rotate_to_3_of_3(s: &mut Scenario, confirm: bool): address {
     tx!(s, h::wallet(), |account, _config, _c, ctx| {
         business_account::rotate_wallet(account, h::keys(), vector[1, 1, 1], 3, false, ctx);
     });
-    if (confirm) {
-        tx!(s, new_wallet, |account, _config, _c, ctx| {
-            business_account::confirm_wallet_rotation(account, ctx);
-        });
-    };
+    if (confirm) h::confirm_rotation(s, new_wallet);
     new_wallet
 }
 
@@ -629,7 +626,9 @@ fun the_same_wallet_cannot_charge_another_account() {
     s.next_tx(h::wallet());
     {
         let mut account_b = s.take_shared_by_id<BusinessAccount>(b);
-        business_account::register_wallet(&mut account_b, h::keys(), h::weights(), h::threshold(), false, s.ctx());
+        let mut reg = s.take_shared<address_registry::Registry>();
+        business_account::register_wallet(&mut account_b, &mut reg, h::keys(), h::weights(), h::threshold(), false, s.ctx());
+        ts::return_shared(reg);
         ts::return_shared(account_b);
     };
     s.next_tx(h::wallet());

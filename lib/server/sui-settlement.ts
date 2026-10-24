@@ -562,6 +562,12 @@ const ABORT_CODES: Record<number, string> = {
   1303: 'E_NO_FEE_PROPOSAL — there is no pending fee schedule or fee recipient proposal to apply. Propose it first; it applies 24 hours later.',
   1304: 'E_INVALID_FEE_RECIPIENT — the fee recipient cannot be the zero address. Name the Splash finance multisig.',
   1305: 'E_UNKNOWN_KIND — a fee was asked for a kind outside 0 to 4 (Splash business, wallet, exchange, cross-chain, bank payout).',
+
+  // ── address_registry (splash_core, how a payment is classified, A1 §2.3) ─
+  1400: 'E_KIND_MISMATCH — the kind this payment declares does not fit where it goes: a bank payout must go to a payout partner deposit address, a Splash business payment to a registered business wallet, a cross-chain payment through CCTP, and anything else is declared a wallet or an exchange. Open it as the kind its recipient is.',
+  1401: 'E_ALREADY_A_PARTNER_ADDRESS — that address is already registered as a payout partner deposit address.',
+  1402: 'E_NOT_A_PARTNER_ADDRESS — that address is not a registered payout partner deposit address, so there is nothing to remove.',
+  1403: 'E_INVALID_ADDRESS — the zero address cannot be a payout partner deposit address.',
 };
 
 /**
@@ -571,6 +577,7 @@ const ABORT_CODES: Record<number, string> = {
  */
 const OUR_MODULES = new Set([
   // splash_core
+  'address_registry',
   'audit_anchor',
   'business_account',
   'cap_registry',

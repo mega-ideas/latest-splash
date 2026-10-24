@@ -10,6 +10,7 @@
 #[allow(implicit_const_copy)]
 module splash_core::v2_harness;
 
+use splash_core::address_registry::{Self, Registry};
 use splash_core::business_account::{Self, BusinessAccount};
 use splash_core::cap_registry;
 use splash_core::compliance_config::{Self, ComplianceConfig};
@@ -66,7 +67,8 @@ public fun payment_ref(n: u8): vector<u8> {
 }
 
 /// Clock at day one; the account submitted by the founder, verified, with
-/// owners 2 and 3 added; the config created; NO wallet yet.
+/// owners 2 and 3 added; the config and the address registry created; NO
+/// wallet yet.
 public fun setup_without_wallet(): Scenario {
     let mut s = ts::begin(OWNER_1);
     {
@@ -103,6 +105,7 @@ public fun setup_without_wallet(): Scenario {
             ctx,
         );
         cap_registry::share_for_testing(registry);
+        address_registry::share_for_testing(address_registry::new_for_testing(ctx));
         business_account::destroy_admin_cap_for_testing(admin);
         ts::return_shared(account);
     };
@@ -127,9 +130,21 @@ public fun register_wallet(s: &mut Scenario) {
     s.next_tx(WALLET);
     {
         let mut account = s.take_shared<BusinessAccount>();
-        business_account::register_wallet(&mut account, keys(), weights(), threshold(), false, s.ctx());
+        let mut reg = s.take_shared<Registry>();
+        business_account::register_wallet(&mut account, &mut reg, keys(), weights(), threshold(), false, s.ctx());
+        ts::return_shared(reg);
         ts::return_shared(account);
     };
+}
+
+/// `new_wallet` confirms the pending rotation of the (most recent) account.
+public fun confirm_rotation(s: &mut Scenario, new_wallet: address) {
+    s.next_tx(new_wallet);
+    let mut account = s.take_shared<BusinessAccount>();
+    let mut reg = s.take_shared<Registry>();
+    business_account::confirm_wallet_rotation(&mut account, &mut reg, s.ctx());
+    ts::return_shared(reg);
+    ts::return_shared(account);
 }
 
 /// The wallet opens a bank payout for `amount` and returns it by value.

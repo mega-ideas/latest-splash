@@ -93,7 +93,7 @@ fun w12e(): address {
 fun rotate_to_pair(s: &mut Scenario, from: address, i: u64, j: u64) {
     let keys = vector[h::passkey(i), h::passkey(j)];
     act!(s, from, |a, ctx| business_account::rotate_wallet(a, keys, vector[1, 1], 2, false, ctx));
-    act!(s, pair(i, j), |a, ctx| business_account::confirm_wallet_rotation(a, ctx));
+    h::confirm_rotation(s, pair(i, j));
 }
 
 /// No wallet yet; the founder adds the Ed25519 newcomer as a fourth owner, who
@@ -145,7 +145,7 @@ fun the_wallet_adds_a_replacement_owner_under_an_owner_freeze_and_rotates_them_i
             a, vector[h::passkey(0), h::passkey(1), ED25519], vector[1, 1, 1], 2, false, ctx,
         );
     });
-    act!(&mut s, w12e(), |a, ctx| business_account::confirm_wallet_rotation(a, ctx));
+    h::confirm_rotation(&mut s, w12e());
     act!(&mut s, w12e(), |a, ctx| {
         business_account::unfreeze_account(a, ctx);
         business_account::remove_owner(a, h::owner_3(), ctx);

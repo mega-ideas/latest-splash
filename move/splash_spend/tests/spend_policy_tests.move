@@ -17,6 +17,7 @@
 #[allow(implicit_const_copy)]
 module splash_spend::spend_policy_tests;
 
+use splash_core::address_registry;
 use splash_core::business_account::{Self, BusinessAccount};
 use splash_core::compliance_config::{Self, ComplianceConfig};
 use splash_core::multisig;
@@ -175,7 +176,9 @@ fun rotate(s: &mut Scenario, from: address, keys: vector<vector<u8>>, weights: v
     s.next_tx(to);
     {
         let mut account = s.take_shared<BusinessAccount>();
-        business_account::confirm_wallet_rotation(&mut account, s.ctx());
+        let mut reg = s.take_shared<address_registry::Registry>();
+        business_account::confirm_wallet_rotation(&mut account, &mut reg, s.ctx());
+        ts::return_shared(reg);
         ts::return_shared(account);
     };
     to
@@ -218,7 +221,9 @@ fun add_second_business(s: &mut Scenario): (ID, ID, address) {
     s.next_tx(wallet_c);
     {
         let mut account = s.take_shared_by_id<BusinessAccount>(second);
-        business_account::register_wallet(&mut account, keys_c, vector[1, 1], 2, false, s.ctx());
+        let mut reg = s.take_shared<address_registry::Registry>();
+        business_account::register_wallet(&mut account, &mut reg, keys_c, vector[1, 1], 2, false, s.ctx());
+        ts::return_shared(reg);
         ts::return_shared(account);
     };
     (first, second, wallet_c)

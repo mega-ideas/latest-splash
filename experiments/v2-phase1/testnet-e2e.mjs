@@ -328,10 +328,17 @@ if (!done('publishCore')) {
     anchorCap: one(t, '::business_account::AnchorCap'),
     capRegistry: one(t, '::cap_registry::CapRegistry'),
     configTicket: one(t, '::compliance_config::ConfigTicket'),
+    // Amendment A1: the fee config and its cap, and the address registry
+    // (business wallets and partner deposit addresses) and Splash's ops cap.
+    feeConfig: one(t, '::fee_config::FeeConfig'),
+    feeAdminCap: one(t, '::fee_config::FeeAdminCap'),
+    addressRegistry: one(t, '::address_registry::Registry'),
+    opsCap: one(t, '::address_registry::OpsCap'),
   };
   save();
 }
 const CORE = results.steps.publishCore.packageId;
+const ADDRESS_REGISTRY = results.steps.publishCore.addressRegistry;
 recordPublished(path.join(move, 'splash_core'), CORE, results.steps.publishCore.upgradeCap);
 
 // 2. splash_spend and splash_upgrade_delay, each made immutable in its publish transaction.
@@ -462,7 +469,7 @@ if (!done('register')) {
   const tx = new Transaction();
   tx.moveCall({
     target: `${CORE}::business_account::register_wallet`,
-    arguments: [tx.object(ACCOUNT), tx.pure.vector('vector<u8>', memberBytes(bizKeys)), tx.pure.vector('u8', [1, 1, 1]), tx.pure.u16(2), tx.pure.bool(false)],
+    arguments: [tx.object(ACCOUNT), tx.object(ADDRESS_REGISTRY), tx.pure.vector('vector<u8>', memberBytes(bizKeys)), tx.pure.vector('u8', [1, 1, 1]), tx.pure.u16(2), tx.pure.bool(false)],
   });
   const t = await runMultisig('register_wallet, signed by the business wallet (passkeys 1+2)', W, [bizKeys[0], bizKeys[1]], tx);
   results.steps.register = { digest: t.digest, event: eventsOf(t, '::business_account::WalletRegistered')[0]?.json ?? null };

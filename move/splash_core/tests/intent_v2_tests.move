@@ -23,6 +23,7 @@
 module splash_core::intent_v2_tests;
 
 use splash_core::audit_anchor;
+use splash_core::address_registry;
 use splash_core::business_account::{Self, BusinessAccount};
 use splash_core::cap_registry::CapRegistry;
 use splash_core::compliance_config::{Self, ComplianceConfig, ComplianceCap};
@@ -321,7 +322,9 @@ fun second_account(s: &mut Scenario): (ID, ID, address) {
     s.next_tx(wallet_b);
     {
         let mut account = s.take_shared_by_id<BusinessAccount>(b);
-        business_account::register_wallet(&mut account, h::keys(), h::weights(), 3, false, s.ctx());
+        let mut reg = s.take_shared<address_registry::Registry>();
+        business_account::register_wallet(&mut account, &mut reg, h::keys(), h::weights(), 3, false, s.ctx());
+        ts::return_shared(reg);
         assert_eq!(business_account::wallet(&account), wallet_b);
         ts::return_shared(account);
     };
@@ -342,7 +345,9 @@ fun propose_rotation(s: &mut Scenario): address {
 fun confirm_rotation(s: &mut Scenario, new_wallet: address) {
     s.next_tx(new_wallet);
     let mut account = s.take_shared<BusinessAccount>();
-    business_account::confirm_wallet_rotation(&mut account, s.ctx());
+    let mut reg = s.take_shared<address_registry::Registry>();
+    business_account::confirm_wallet_rotation(&mut account, &mut reg, s.ctx());
+    ts::return_shared(reg);
     assert_eq!(business_account::wallet(&account), new_wallet);
     ts::return_shared(account);
 }
