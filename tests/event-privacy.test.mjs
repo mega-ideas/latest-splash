@@ -112,12 +112,10 @@ test('the payment lifecycle events carry the commitment and what an indexer need
     'SettlementAnchored adds only the evidence pointers, which are a hash and a blob id',
   );
 
-  const account = eventStructs(await source('move/splash_core/sources/business_account.move'));
-  const approved = account.find((e) => e.name === 'PayoutApproved');
-  const consumed = account.find((e) => e.name === 'PayoutApprovalConsumed');
-  assert.ok(approved.fields.includes('commitment') && !approved.fields.includes('amount'), 'PayoutApproved commits, never amounts');
-  assert.ok(consumed.fields.includes('commitment'), 'PayoutApprovalConsumed commits');
-  for (const f of ['amount', 'daily_spent_after', 'daily_cap']) assert.ok(!consumed.fields.includes(f), `PayoutApprovalConsumed drops ${f}`);
+  // The legacy approval events (PayoutApproved, PayoutApprovalConsumed) left
+  // core with the legacy path (decision 3; tests/legacy-path-removed.test.mjs).
+  // splash_spend's own approval events carry no amount, and the meta-test
+  // above holds every event in all three packages to the same rule.
 
   const receipt = eventStructs(await source('move/splash_core/sources/receipt_v2.move'));
   const issued = receipt.find((e) => e.name === 'ReceiptIssued');
