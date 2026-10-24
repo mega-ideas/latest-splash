@@ -70,6 +70,16 @@ fun published(): Scenario {
     s
 }
 
+/// `published`, with the fees on, paying `FINANCE`, for tests about the
+/// schedule or a discount rather than the recipient.
+fun published_fees_on(): Scenario {
+    let mut s = published();
+    let mut cfg = s.take_shared<FeeConfig>();
+    fee_config::set_fee_recipient_for_testing(&mut cfg, FINANCE);
+    ts::return_shared(cfg);
+    s
+}
+
 /// Run `$body` as the cap holder, with the shared config and clock.
 macro fun gov($s: &mut Scenario, $body: |&FeeAdminCap, &mut FeeConfig, &mut Clock|) {
     let s = $s;
@@ -287,7 +297,7 @@ fun mul_div_floor_rounds_down_in_u128() {
 /// A schedule change waits 24 hours: applying a millisecond before its eta
 /// aborts (next test), and at the eta it applies and is what splash_fee uses.
 fun a_schedule_applies_after_24_hours() {
-    let mut s = published();
+    let mut s = published_fees_on();
     gov!(&mut s, |cap, cfg, c| {
         fee_config::propose_schedule(cap, cfg, bank(), vector[U64_MAX], vector[25], 0, U64_MAX, c);
         assert_eq!(fee_config::has_pending_schedule(cfg, bank()), true);
@@ -350,7 +360,7 @@ fun applying_a_schedule_with_nothing_proposed_aborts() {
 /// A second proposal for the same kind replaces the first and starts its own
 /// 24 hours, so no change is ever applied with less notice than it gave.
 fun a_new_proposal_replaces_the_pending_one_and_restarts_the_notice() {
-    let mut s = published();
+    let mut s = published_fees_on();
     gov!(&mut s, |cap, cfg, c| {
         fee_config::propose_schedule(cap, cfg, bank(), vector[U64_MAX], vector[25], 0, U64_MAX, c);
         c.set_for_testing(DAY + DAY / 2);
@@ -624,7 +634,7 @@ fun the_cap_works_from_the_governance_multisig() {
 /// rate takes the rate to 0, never below, and the kind's minimum and the
 /// ceiling still apply after it, so it never makes a business pay more.
 fun a_discount_applies_at_once_and_only_lowers() {
-    let mut s = published();
+    let mut s = published_fees_on();
     gov!(&mut s, |cap, cfg, _c| {
         fee_config::set_discount(cap, cfg, business(), 100);
         assert_eq!(fee(cfg, bank(), 5_000 * USD), 0);

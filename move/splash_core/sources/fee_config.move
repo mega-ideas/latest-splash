@@ -19,9 +19,17 @@
 /// ─── How it changes ─────────────────────────────────────────────────────────
 ///
 /// One shared `FeeConfig`, created at publish with the launch schedule of A1
-/// §2.2, paying the publisher until the first recipient change. One
-/// `FeeAdminCap`, minted at publish for transfer to the 2-of-3 governance
-/// multisig. A schedule or the fee recipient changes only by a proposal that
+/// §2.2 and NO fee recipient. One `FeeAdminCap`, minted at publish for
+/// transfer to the 2-of-3 governance multisig.
+///
+/// Splash's fees are OFF until the first fee recipient change has been
+/// applied through the 24-hour path (Sky, 24 Oct). While no recipient has
+/// been applied, `splash_fee` itself returns 0 for every kind and principal,
+/// so every settle path, and splash_spend, which calls the same function,
+/// charges 0, sends no fee leg and emits no FeeCharged; the payer's whole
+/// `max_fee` comes back to the business wallet. Nothing is ever paid to the
+/// publisher. Once a recipient has been applied there is always one: a later
+/// change replaces it, and nothing clears it. A schedule or the fee recipient changes only by a proposal that
 /// waits 24 hours (`FEE_NOTICE_MS`) and is then applied; applying early
 /// aborts. A new proposal for the same thing replaces the pending one and
 /// starts its own 24 hours, so nothing is ever applied with less notice than
@@ -124,9 +132,10 @@ public struct FeeConfig has key {
     /// One per kind, indexed by kind.
     schedules: vector<Schedule>,
     /// Where every fee leg is sent: the Splash finance multisig, never the
-    /// KMS operator. The chain cannot tell whose address it is; the go-live
-    /// ceremony checks it, and every change of it gives 24 hours' notice.
-    fee_recipient: address,
+    /// KMS operator. None at publish, and while it is none Splash's fees are
+    /// off (`splash_fee` is 0). It becomes some only through
+    /// `apply_fee_recipient`, after 24 hours' notice.
+    fee_recipient: Option<address>,
     /// Per business account: basis points taken off the schedule's rate.
     discounts: Table<ID, u16>,
     /// One slot per kind.
@@ -181,21 +190,20 @@ public struct FeeDiscountSet has copy, drop {
 
 // ─── Publish ───────────────────────────────────────────────────────────────
 
-/// Share the one FeeConfig at the launch schedule, paying the publisher until
-/// the first 24-hour recipient change, and mint the one FeeAdminCap to the
-/// publisher, for transfer to the governance multisig.
+/// Share the one FeeConfig at the launch schedule with no fee recipient, so
+/// Splash's fees are off until the first 24-hour recipient change is applied,
+/// and mint the one FeeAdminCap to the publisher, for transfer to the
+/// governance multisig.
 fun init(ctx: &mut TxContext) {
-    let publisher = ctx.sender();
-    transfer::share_object(new(publisher, launch_schedules(), ctx));
-    transfer::transfer(FeeAdminCap { id: object::new(ctx) }, publisher);
+    transfer::share_object(new(launch_schedules(), ctx));
+    transfer::transfer(FeeAdminCap { id: object::new(ctx) }, ctx.sender());
 }
 
-fun new(fee_recipient: address, schedules: vector<Schedule>, ctx: &mut TxContext): FeeConfig {
-    assert!(fee_recipient != @0x0, E_INVALID_FEE_RECIPIENT);
+fun new(schedules: vector<Schedule>, ctx: &mut TxContext): FeeConfig {
     FeeConfig {
         id: object::new(ctx),
         schedules,
-        fee_recipient,
+        fee_recipient: option::none(),
         discounts: table::new(ctx),
         pending_schedules: vector[option::none(), option::none(), option::none(), option::none(), option::none()],
         pending_recipient: option::none(),
@@ -243,15 +251,18 @@ fun build(kind: u8, uppers: vector<u64>, rates: vector<u64>, min_minor: u64, max
 
 /// Splash's fee on `principal` of `kind` for the business account `business`.
 ///
-/// In this order: the tier's rate (the first tier whose upper bound is above
-/// the principal, else the last), less the business's discount, floored at
-/// 0; the principal times that rate over 10,000, rounded down in u128; raised
-/// to the kind's minimum and lowered to its maximum; and lowered last to the
-/// ceiling, 1% of the principal, which beats the minimum. A wallet payment
-/// under 25 USDC therefore pays 1% rather than 0.25 USDC. Nothing aborts but
-/// an unknown kind.
+/// 0 while Splash's fees are off: no fee recipient has been applied yet.
+///
+/// Otherwise, in this order: the tier's rate (the first tier whose upper
+/// bound is above the principal, else the last), less the business's
+/// discount, floored at 0; the principal times that rate over 10,000, rounded
+/// down in u128; raised to the kind's minimum and lowered to its maximum; and
+/// lowered last to the ceiling, 1% of the principal, which beats the minimum.
+/// A wallet payment under 25 USDC therefore pays 1% rather than 0.25 USDC.
+/// Nothing aborts but an unknown kind, which is checked first, fees on or off.
 public fun splash_fee(cfg: &FeeConfig, business: ID, kind: u8, principal: u64): u64 {
     let s = schedule(cfg, kind);
+    if (cfg.fee_recipient.is_none()) return 0;
     let mut bps = tier_bps_of(s, principal);
     let discount = discount_bps(cfg, business) as u64;
     bps = bps - if (discount < bps) discount else bps;
@@ -288,8 +299,11 @@ fun tier_bps_of(s: &Schedule, principal: u64): u64 {
 
 /// Split `fee` out of `funds` and send it to the fee recipient's address
 /// balance, and record it. Nothing at all when the fee is 0: no transfer and
-/// no zero coin. `public(package)`: only core's settle paths pay a fee leg,
-/// and they read the recipient from here, never from a PTB argument.
+/// no zero coin. A fee is 0 whenever there is no recipient (`splash_fee`);
+/// should one ever reach here without a recipient, it is left in `funds`,
+/// which every caller returns to the business wallet. `public(package)`: only
+/// core's settle paths pay a fee leg, and they read the recipient from here,
+/// never from a PTB argument.
 public(package) fun take_fee<T>(
     cfg: &FeeConfig,
     funds: &mut Balance<T>,
@@ -298,9 +312,10 @@ public(package) fun take_fee<T>(
     business: ID,
     derived_kind: u8,
 ) {
-    if (fee == 0) return;
-    balance::send_funds(funds.split(fee), cfg.fee_recipient);
-    event::emit(FeeCharged { intent_id, business, derived_kind, fee, fee_recipient: cfg.fee_recipient });
+    if (fee == 0 || cfg.fee_recipient.is_none()) return;
+    let fee_recipient = *cfg.fee_recipient.borrow();
+    balance::send_funds(funds.split(fee), fee_recipient);
+    event::emit(FeeCharged { intent_id, business, derived_kind, fee, fee_recipient });
 }
 
 // ─── Changes: 24 hours' notice ─────────────────────────────────────────────
@@ -345,12 +360,13 @@ public fun propose_fee_recipient(_: &FeeAdminCap, cfg: &mut FeeConfig, recipient
     event::emit(FeeRecipientProposed { recipient, eta });
 }
 
-/// Put the proposed fee recipient into force, once its notice has run.
+/// Put the proposed fee recipient into force, once its notice has run. The
+/// first time, this turns Splash's fees on.
 public fun apply_fee_recipient(_: &FeeAdminCap, cfg: &mut FeeConfig, clock: &Clock) {
     assert!(cfg.pending_recipient.is_some(), E_NO_FEE_PROPOSAL);
     assert!(clock.timestamp_ms() >= cfg.pending_recipient.borrow().eta_ms, E_FEE_PROPOSAL_NOT_READY);
     let PendingRecipient { recipient, eta_ms: _ } = cfg.pending_recipient.extract();
-    cfg.fee_recipient = recipient;
+    cfg.fee_recipient = option::some(recipient);
     event::emit(FeeRecipientApplied { recipient });
 }
 
@@ -372,7 +388,11 @@ public fun set_discount(_: &FeeAdminCap, cfg: &mut FeeConfig, business: ID, disc
 
 // ─── Views ─────────────────────────────────────────────────────────────────
 
-public fun fee_recipient(cfg: &FeeConfig): address { cfg.fee_recipient }
+/// The fee recipient in force; none while Splash's fees are off.
+public fun fee_recipient(cfg: &FeeConfig): Option<address> { cfg.fee_recipient }
+/// False until the first fee recipient change has been applied; while it is
+/// false every fee is 0.
+public fun fees_on(cfg: &FeeConfig): bool { cfg.fee_recipient.is_some() }
 public fun discount_bps(cfg: &FeeConfig, business: ID): u16 {
     if (cfg.discounts.contains(business)) *cfg.discounts.borrow(business) else 0
 }
@@ -418,10 +438,13 @@ public fun kind_count(): u8 { KIND_COUNT }
 #[test_only]
 public fun init_for_testing(ctx: &mut TxContext) { init(ctx) }
 
-/// A config at the launch schedule paying `fee_recipient`, not shared.
+/// A config at the launch schedule paying `fee_recipient`, as if its first
+/// recipient change had been applied, so its fees are on. Not shared.
 #[test_only]
 public fun new_for_testing(fee_recipient: address, ctx: &mut TxContext): FeeConfig {
-    new(fee_recipient, launch_schedules(), ctx)
+    let mut cfg = new(launch_schedules(), ctx);
+    cfg.fee_recipient = option::some(fee_recipient);
+    cfg
 }
 
 /// A config that charges nothing on any kind, for tests that are not about
@@ -434,7 +457,21 @@ public fun zero_for_testing(fee_recipient: address, ctx: &mut TxContext): FeeCon
         schedules.push_back(build(k, vector[U64_MAX], vector[0], 0, 0));
         k = k + 1;
     };
-    new(fee_recipient, schedules, ctx)
+    let mut cfg = new(schedules, ctx);
+    cfg.fee_recipient = option::some(fee_recipient);
+    cfg
+}
+
+/// Put a config back in its state at publish: no fee recipient applied, so
+/// its fees are off. The schedules are untouched.
+#[test_only]
+public fun clear_fee_recipient_for_testing(cfg: &mut FeeConfig) { cfg.fee_recipient = option::none() }
+
+/// Set the fee recipient without the 24-hour path, turning the fees on, for
+/// tests about something else (the schedule, a discount).
+#[test_only]
+public fun set_fee_recipient_for_testing(cfg: &mut FeeConfig, recipient: address) {
+    cfg.fee_recipient = option::some(recipient)
 }
 
 /// Store a schedule WITHOUT validating it: rates above the ceiling, any
