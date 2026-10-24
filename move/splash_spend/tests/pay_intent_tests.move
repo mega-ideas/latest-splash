@@ -4482,8 +4482,8 @@ fun the_executor_cannot_pay_above_the_delegated_total() {
 /// A1 §2.6 and §3: splash_spend checks the fee against its own 100 bps
 /// ceiling. Here Splash's FeeConfig stores 200 bps and a 50 USDC minimum,
 /// written through core's test-only setter that skips validation. The rule
-/// payment still pays Splash at most 1% of the principal, and the rest of
-/// the 2% max_fee goes back to the wallet.
+/// payment still pays Splash at most 1% of the principal, the most max_fee
+/// may be, so nothing is left over.
 fun splash_spends_own_ceiling_holds_with_a_fee_config_above_100_bps() {
     let (mut s, fx) = fee_setup();
     assert_eq!(splash_spend::fee_ceiling_bps_for_testing(), 100);
@@ -4498,7 +4498,7 @@ fun splash_spends_own_ceiling_holds_with_a_fee_config_above_100_bps() {
         50_000_000,
         std::u64::max_value!(),
     );
-    let max_fee = PAY / 50;
+    let max_fee = PAY / 100;
     pay_fee_with(&mut s, &fx, fx.staff, intent, option::none(), &fees, PAY + max_fee, max_fee);
     let (_, _, _, _, _, _, _, fee) = splash_spend::unpack_rule_spend_for_testing(event::events_by_type<RuleSpend>()[0]);
     assert_eq!(fee, PAY / 100);

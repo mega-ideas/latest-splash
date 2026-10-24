@@ -164,6 +164,11 @@ const E_BAD_MAX_TOTAL: u64 = 1034;
 const E_WRONG_FEE_CONFIG: u64 = 1035;
 /// The address Registry is not Splash's one, which the policy recorded.
 const E_WRONG_ADDRESS_REGISTRY: u64 = 1036;
+/// `max_fee` is above this package's own ceiling, 1% of the principal: more
+/// than Splash's fee can ever be. The allowance counts the whole principal
+/// plus `max_fee`, so headroom above any possible fee would use up the
+/// rule's caps on money that comes straight back.
+const E_MAX_FEE_ABOVE_CEILING: u64 = 1037;
 
 /// A1 §2.6: the most Splash's fee may be on a rule payment, in basis points
 /// of the principal. This package's own constant, checked on what core
@@ -499,7 +504,9 @@ public fun discard_approval(approval: PayoutApproval) {
 /// `withdrawal` is the allowance withdrawal input for exactly the intent's
 /// amount plus `max_fee` (A1 §2.6: the Splash fee the spender was shown),
 /// from the business wallet's address balance, so the allowance's caps
-/// cover both. `settle_by_ms` is the quote's deadline. `config` must be the
+/// cover both. `max_fee` is at most 1% of the amount, this package's own
+/// ceiling (E_MAX_FEE_ABOVE_CEILING), so what a rule payment draws is never
+/// more than the principal and 1%. `settle_by_ms` is the quote's deadline. `config` must be the
 /// one the policy was created against, and `fee_cfg` and `registry` are
 /// Splash's. The intent lands on Sui, and core pays its recipient in this
 /// call; a cross-chain intent is refused.
@@ -638,7 +645,11 @@ fun draw<C>(
 
     // Splash's fee (A1 §2.6), for the derived kind: within what the spender
     // signed for and this package's own ceiling. Core charges exactly this,
-    // from the same FeeConfig, in this transaction.
+    // from the same FeeConfig, in this transaction. max_fee itself is
+    // within that ceiling first (the A1 review): the allowance counts all
+    // of the principal and max_fee, so a spender cannot use up a rule's
+    // caps on fee headroom that comes back to the wallet.
+    assert!(max_fee <= fee_ceiling(amount), E_MAX_FEE_ABOVE_CEILING);
     let fee = fee_config::splash_fee(fee_cfg, object::id(account), derived, amount);
     assert!(fee <= max_fee, E_FEE_ABOVE_MAX);
     assert!(fee <= fee_ceiling(amount), E_FEE_ABOVE_CEILING);
