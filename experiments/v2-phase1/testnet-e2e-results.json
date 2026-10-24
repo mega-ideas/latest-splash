@@ -2,68 +2,68 @@
   "network": "testnet",
   "steps": {
     "publishCore": {
-      "digest": "GnXD6vuudpVfps2uA6TZh593TzNMWnT1oekgjdhPGL13",
-      "packageId": "0x993736cefd0df038b62126ddfceade1a45db5f45b93106ee220eec20437d9db2",
-      "upgradeCap": "0x43599013c394675788158e0af688403628471393785d454be90e212ecf423a67",
-      "adminCap": "0xeb3a8e89d317e1eb01895bb48613d1478c86b00429dc6c5b0404dc1c9e7bc625",
-      "anchorCap": "0x649182fb21820f7179e85a624cab8be9c4d4b5046373d96441c449617efa93d6",
-      "capRegistry": "0x5b431dfe8ca757d1bb157833a137ce0fd3c66cefed1fd3cdab4b0e6c7501a587",
-      "configTicket": "0x532375356d7736191197be28999a3f8c84847a88a431d95b2d95ba7283a9d0b6"
+      "digest": "qs2VXH7qZ6c6h3mFrVW5iR6s6rysJTpcmVezZAUAWvY",
+      "packageId": "0xa4ca639d961905500f4f71cb5e5deeb509a0b217d76571d5f09cc83fe7e14014",
+      "upgradeCap": "0x0a827b9fc50db57aa51a7eada0dc12667e5afcc1bb2ad00ad1ee4a8ebedeba8f",
+      "adminCap": "0xbf951f13a15310081ca39a89c1d4ba6fae2b0cc81195828db5559e3cbfc1dad1",
+      "anchorCap": "0xd2bbfade07f8c49203300367ca14901198899129e53ae82edfd51716b3207c5b",
+      "capRegistry": "0x1f76305e7f994903565eda6068bd71a8f88fc6bfb870eb705cad14d982ebaa98",
+      "configTicket": "0xd0e386df3be64a6f56cf39c49bd859e5bb350a31201a9d818e78a820708139d4"
     },
     "publishSpend": {
-      "digest": "GRPprq4YCeqMDbeJVEVhNvruz1pfwMCtZDfxhPn5ApTG",
-      "packageId": "0xc69ab1af37da3c0b15b9f692e893aee5b4aeb56e2fafdb2291cde1ab6857025a",
+      "digest": "GSx83X3rQUfMsvGnu8xoVyamScpSEEpT1MZ63NJ3JyH5",
+      "packageId": "0x68fa14bac75dcd70b41e5e5853f225af2b821efd6349596b33a5c345ae698db3",
       "upgradeCapCreated": 0,
-      "policyRegistry": "0x30768d8fef1de7892e2b795826a22ded300e7dac5c8fae11cc9eb441caed47dd"
+      "policyRegistry": "0x9529d72c6254ee64be2642d5e231858ffc6dd81ebffb1f52085ae61517c8b524"
     },
     "publishDelay": {
-      "digest": "65YAqL4ZznMCJcpDPjnKyF9qRqw4gBED3xJJdECbzZqm",
-      "packageId": "0xc8ea66e425577c26a4bde76185f3d68b869f23e65de7f8e4de2aa1db608cc0a0",
+      "digest": "4qkqhmZm73PsHBwXMCvfvAhcDMJN9QZFmQ9dvVWDon7V",
+      "packageId": "0xd8325fd140f5a442929ea5074172d6c85e4c908b764a85687e9ab6a33a6277dd",
       "upgradeCapCreated": 0
     },
     "createConfig": {
-      "digest": "8D82M8THnrpwYv9Mg9oaxRfwoCqJEsU9UN6EZKxZSHEC",
-      "config": "0x271897e5ab3ab8ba391f777860bd4aabb9ae403c581e36eeebebd41defd3327d",
-      "complianceCap": "0x105923818d6d61406a3639f67c545ec239db7e6f01209e2b3706ef0f567eb152"
+      "digest": "9zESUKPu2mg8rZfZSNtjd25Pd4JXQidW3CvkAUUXAu6S",
+      "config": "0x9885a609f4a25d83dbc606f39dde1c6baa3fc189a06ecfd8243614103781efc2",
+      "complianceCap": "0x56e8d717f2e50c4e2ef0cb055ae76c7987df7ae9723a1e7546b2c1fc57a73896"
     },
     "handToGovernance": {
-      "digest": "CjyMrUVJVxAEBVFdkbgV3mfTTwVQWiMTLc8xTJTGXC1x"
+      "digest": "G1QJwWWqeJ5XoLoTYvpA6vMpN9hxcPs41ovtgzcc1WT6"
     },
     "wrap": {
-      "digest": "3SJ69wfSzx8LDTTh8wiAYmxTEM8b1ZasszkUjSKQwLgY",
-      "wrapper": "0x34ec5a523b809c442f91f916596bf79ca30c49f6ce239989928737e7b12ceecb",
+      "digest": "FQRCkXBvRouCzSs9LtjtRUWQKwsJkqozFmERJPkg6ffC",
+      "wrapper": "0x284cccc97028c5671c80b3b749210b0bfab725f41d5b6201b8a6fadad0b5067c",
       "event": {
         "owner": "0xafea5352bb6313c6af89594eac518d24049e5bc6dfd4bbc18a14bf191f82b6b5",
-        "package": "0x993736cefd0df038b62126ddfceade1a45db5f45b93106ee220eec20437d9db2",
+        "package": "0xa4ca639d961905500f4f71cb5e5deeb509a0b217d76571d5f09cc83fe7e14014",
         "policy": 128,
-        "wrapper_id": "0x34ec5a523b809c442f91f916596bf79ca30c49f6ce239989928737e7b12ceecb"
+        "wrapper_id": "0x284cccc97028c5671c80b3b749210b0bfab725f41d5b6201b8a6fadad0b5067c"
       }
     },
     "proposeWitness": {
-      "digest": "4AhJTE7V6jgxBPg6hsCW6KK7Nowwdca4oF9p2Rk6YiNu",
+      "digest": "7tNjU43kxxBDuSH1a65w8RzzpX9TezMAmxKM2qd5MRzu",
       "event": {
-        "config_id": "0x271897e5ab3ab8ba391f777860bd4aabb9ae403c581e36eeebebd41defd3327d",
-        "eta_ms": "1792877373810",
-        "proposed_at_ms": "1792790973810",
+        "config_id": "0x9885a609f4a25d83dbc606f39dde1c6baa3fc189a06ecfd8243614103781efc2",
+        "eta_ms": "1792909212816",
+        "proposed_at_ms": "1792822812816",
         "registry": 2,
-        "type_name": "c69ab1af37da3c0b15b9f692e893aee5b4aeb56e2fafdb2291cde1ab6857025a::splash_spend::SettleWitness"
+        "type_name": "68fa14bac75dcd70b41e5e5853f225af2b821efd6349596b33a5c345ae698db3::splash_spend::SettleWitness"
       }
     },
     "apply": {
-      "digest": "Fds8PrKek1sz6wCxdHZ8xJtExg7V3bwabLLTNL9J28T1",
-      "account": "0x8af790d664c316ee32ef333210e6eba223653e676cbc5d72342eb2ce268460e6"
+      "digest": "AaMo8mAANJpZmaStGuo27BptQdYb2iYFaKfyoqEGEnGP",
+      "account": "0x910cf9dc1cb2d86218ae3a86c6bec7c095e81ad1e92319ca06d82ad6f8f1b199"
     },
     "verify": {
-      "digest": "DmtHC8xPCPM2uXZWoyHCbBe7zpdJLi4MiWHGoBBbQmYR"
+      "digest": "6fVQesRt2VSJPHV5xv9GfaVBf9UqjMijdfdRPgZLzSk2"
     },
     "owners": {
-      "digest": "3X1KAbxCueJGQWcBVAhmbP9RSsXVzrzbeSxvTpeyBG5P"
+      "digest": "9D8Gc8WL8mphuJRFSgFzCPgugZCnL8ad9o5qrtDWMQxM"
     },
     "register": {
-      "digest": "341EgeRePnMJXbarLJijwrnZTLysrhmZA1J7bSWhHUai",
+      "digest": "s5PX58K7zqzCJyaftLadssoebBhYb4ex6AZX8fUu1Fe",
       "event": {
         "authority_epoch": "3",
-        "business_account_id": "0x8af790d664c316ee32ef333210e6eba223653e676cbc5d72342eb2ce268460e6",
+        "business_account_id": "0x910cf9dc1cb2d86218ae3a86c6bec7c095e81ad1e92319ca06d82ad6f8f1b199",
         "signer_count": "3",
         "single_signer": false,
         "threshold": 2,
@@ -71,19 +71,19 @@
       }
     },
     "fundWallet": {
-      "digest": "CNenK9ncBX7RY9cUZCa1djLXUecHDDhUFhLWmCcndoNa"
+      "digest": "8EUnAGmrT8jCjZyYCbHTXpabieaE7Fxj4YXGkWTR9PS8"
     },
     "walletPaysWallet": {
-      "digest": "HXPhGj65g6bVCXTeVaRbf9rcAygjuEnbjXTXNP6nUV7d",
+      "digest": "4KPh3EPBXb5Zdksgr2UmGWt2HMn5dNgKCfahVkjy3RVP",
       "confirmed": {
         "commitment": "Gcw5Z2FJGwtyyj6JFDftlZRTEHYvcMi/gszAouaOf3E=",
-        "intent_id": "0xb01f74403d087a6f162272078dd5ccd75facb1bad439f751ea9002acf9d9f9ad",
+        "intent_id": "0xabd43d898c18d75082c1a157638378101fa4c7eee85f4b02a55f136b774239e3",
         "kind": 3,
         "path": 1,
         "rail_commitment": "W524xeiA/6sPRmVMiX1Wh4v38pn6qKpgFhqg7/HNIaQ=",
         "settlement_asset": "a1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29::usdc::USDC",
         "status": 1,
-        "timestamp_ms": "1792790984771"
+        "timestamp_ms": "1792822823764"
       },
       "balanceChanges": [
         {
@@ -104,16 +104,16 @@
       ]
     },
     "walletPaysSplashBusiness": {
-      "digest": "5VRCuRJADTBZQ2B8BPZUBESeoSH3u9yAEPcvLE2i23ui",
+      "digest": "3kQgwN5uniBdFhk1HmJy3uJdKmYaJukkk7H39D4f1AkK",
       "confirmed": {
         "commitment": "qMZS70uH1rqyRglTeXkFUjKel0snOfQ8Rk235HfVOxU=",
-        "intent_id": "0x072ceaf49e20fb25bc5bb4327a037bf4d41d3963ca63f241764ee9dc75fd0531",
+        "intent_id": "0x1ba86a6cbbf887790e862ebe4697710e3305d207ed81fd0983fc2719e3d9574d",
         "kind": 2,
         "path": 1,
         "rail_commitment": "P9ufFw3Y5h931g4HFYECemQReioxZSiYmc1d07Bm3ik=",
         "settlement_asset": "a1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29::usdc::USDC",
         "status": 1,
-        "timestamp_ms": "1792790987293"
+        "timestamp_ms": "1792822825915"
       },
       "balanceChanges": [
         {
@@ -137,24 +137,24 @@
       "refused": "MoveAbort in 1st command, 'EObjectAlreadyExists': Derived object is already claimed., in '0x0000000000000000000000000000000000000000000000000000000000000002::derived_object::claim' (line 41)"
     },
     "policy": {
-      "digest": "9HNqqw7wurNrkQJgzqhabef74qqaUkRVoS71d5wT2EXe",
-      "policy": "0x1605aa474c152feaa9f258d93ef31d91733e1fb158801b4f03f5fd13facb95b5"
+      "digest": "H3dLWjDxR4gwnpeAfPFmPeXZ3kyz24m3o24b9tSftdst",
+      "policy": "0xf35f6cf2f416843d78f425523b613e9f1d14a9d8c8edc895c639b39e8c9a55cf"
     },
     "policyRules": {
-      "digest": "8Lg2syoupv9JzYDGXmhvrRbMBeUqwTDWyzTR8rSU8N2A"
+      "digest": "EzctTeEkbrzHKv9JrSiCPDuX6XEtqGdyF135gdJNqpKp"
     },
     "staffAllowance": {
-      "digest": "4WZjXLcUBgWs4oYWdr7yj3UqmuHTm5HU5GDj3fHJTsn9",
-      "allowance": "0xef1c5bbbc004457a52a630f69d739bb05adb38dd705be012ec52160a573b78c3",
-      "cap": "0x60c615d0973cf9aae0b92530f30175477b22fb5f497f495535175cc8e99e0ee3"
+      "digest": "d7XAFgNh6FHZhoR5swAPjWcdwvpZmSCLFTrPHwgkaZ9",
+      "allowance": "0x0b873e295fafd2c2da2c15c1ba12981bf179705b725560c0642730ea16da8c0d",
+      "cap": "0x89101034aa45329b48503e7b12b287c2c68a2df92eb90f4802b64741c73e6213"
     },
     "executorAllowance": {
-      "digest": "7kqPvRJZMmwfQZ8SencB6rTWUpdwSrcTAiFDLZNPL2QW",
-      "allowance": "0xe1d657cf72ab5c64758f0d82bb003aa16e86461c46f22cce06031fb16097fb88",
-      "cap": "0x4b58479be57a2a2b8dd98e43afae68261f1e80433fc3a2264479b79c863e7125"
+      "digest": "4DtgSnVDMT9RrAyJ2Femb6wBgPCrAVu3QfZ84YrG7b2W",
+      "allowance": "0x3b436b9babe6edc053c971ed2e507f662316e6ecbd6772c1020e2dc7b3aa234f",
+      "cap": "0x6479a4e4271be66715c2943c8faaeecd7e9628037b0bfa9ec48d6671b98c3e7f"
     },
     "spendBeforeActivationRefused": {
-      "refused": "MoveAbort in 1st command, abort code: 358, in '0x993736cefd0df038b62126ddfceade1a45db5f45b93106ee220eec20437d9db2::compliance_config::assert_settlement_app' (instruction 11)"
+      "refused": "MoveAbort in 1st command, abort code: 358, in '0xa4ca639d961905500f4f71cb5e5deeb509a0b217d76571d5f09cc83fe7e14014::compliance_config::assert_settlement_app' (instruction 11)"
     }
   },
   "signers": {
@@ -169,5 +169,5 @@
     "staff": "0xca404d6dafcc35b88efb309f7cdf70d7662bfc36d7e8578f61aa9787295106a9",
     "executor": "0xb57a729ce249cdaf99545c510efc0b50125b359ae04ae6ca5297e07d007b1cf7"
   },
-  "waitingUntil": "2026-10-24T21:29:33.810Z"
+  "waitingUntil": "2026-10-25T06:20:12.816Z"
 }
