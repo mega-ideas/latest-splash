@@ -7,13 +7,13 @@ import { ArrowRight, Check } from 'lucide-react';
 import {
   motion,
   useMotionValue,
-  useReducedMotion,
   useSpring,
   useTransform,
   type MotionValue,
 } from 'framer-motion';
 
 import WaitlistCta from '@/components/landing/WaitlistCta';
+import { useHydratedReducedMotion } from '@/components/useHydratedReducedMotion';
 import { lockedCopy } from '@/content/claims';
 import { pricingSummary, type PricingSummary } from '@/lib/fees/copy';
 import { LAUNCH_SCHEDULE } from '@/lib/fees/schedule';
@@ -332,7 +332,7 @@ const LAUNCH_PRICING = pricingSummary(LAUNCH_SCHEDULE);
 export default function SettlementCinematic({ isPhone = false, pricing = LAUNCH_PRICING }: { isPhone?: boolean; pricing?: PricingSummary }) {
   const telemetry = telemetryFor(pricing);
   const containerRef = useRef<HTMLElement>(null);
-  const reducedMotion = useReducedMotion();
+  const reducedMotion = useHydratedReducedMotion();
   const [compact, setCompact] = useState(false);
   const [artLoaded, setArtLoaded] = useState(false);
   // Phones (and narrow viewports) get the non-pinned static hero: same art,

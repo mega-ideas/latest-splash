@@ -1,13 +1,14 @@
 'use client';
 
 import { useRef } from 'react';
-import { motion, useReducedMotion } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { ArrowRight, Landmark, ReceiptText, Sprout } from 'lucide-react';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import { useGSAP } from '@gsap/react';
 
 import RoadmapChip from '@/components/supply/RoadmapChip';
+import { useHydratedReducedMotion } from '@/components/useHydratedReducedMotion';
 
 gsap.registerPlugin(ScrollTrigger, useGSAP);
 
@@ -73,7 +74,7 @@ const HANDOFFS = ['settlement history feeds', 'freed cash returns'];
  * /working-capital hero diagram.
  */
 export default function WorkingCapitalFlywheel({ variant = 'band' }: { variant?: 'band' | 'full' }) {
-  const reducedMotion = useReducedMotion();
+  const reducedMotion = useHydratedReducedMotion();
   const rootRef = useRef<HTMLDivElement>(null);
   const pathRef = useRef<SVGPathElement>(null);
 
