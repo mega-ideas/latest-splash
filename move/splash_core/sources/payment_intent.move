@@ -125,7 +125,7 @@ const E_BELOW_SETTLEMENT_FLOOR: u64 = 434;
 
 /// The only module permitted to destroy a `SettleReceipt`. Bound by module name
 /// because Move forbids the circular import that naming the type would require —
-/// see `unpack_settle_receipt`.
+/// see `unpack_settle_receipt` for what that name check does and does not bind.
 const ANCHOR_MODULE: vector<u8> = b"audit_anchor";
 
 // ─── Constants ─────────────────────────────────────────────────────────────
@@ -1168,16 +1168,19 @@ public fun path_legacy_approval(): u8      { PATH_LEGACY_APPROVAL }
 /// module in this package could unpack a receipt and discard the fields without
 /// ever emitting an anchor event, silently breaking the audit trail.
 ///
-/// The witness closes that. `audit_anchor::AnchorWitness` can only be
+/// The witness narrows that. `audit_anchor::AnchorWitness` can only be
 /// constructed inside `audit_anchor` (Move permits struct construction only in
-/// the defining module), so holding one proves the caller IS the anchoring path.
+/// the defining module), so a caller holding one IS the anchoring path.
 ///
 /// Why the witness is generic + checked at runtime rather than named directly:
 /// `audit_anchor` already depends on `payment_intent`, and Move forbids circular
 /// module dependencies, so this module cannot import `AnchorWitness` by name.
-/// Binding on the module identity of the witness type achieves the same
-/// restriction — the assert cannot be satisfied by any type outside
-/// `audit_anchor`, because no other module can construct one.
+/// The assert binds the witness type's module NAME, not its package: a type
+/// in a module called `audit_anchor` in any package would pass it. What
+/// confines it is the visibility. `public(package)` means only `splash_core`
+/// code can call this, its one caller is `audit_anchor::anchor`, which passes
+/// its own `AnchorWitness`, and any new caller arrives through a governed
+/// core upgrade, which could equally add a function to `audit_anchor` itself.
 public(package) fun unpack_settle_receipt<W: drop>(
     _witness: W,
     receipt: SettleReceipt,
