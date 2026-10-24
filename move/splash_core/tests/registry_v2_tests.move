@@ -1543,6 +1543,62 @@ fun nothing_turns_legacy_back_on() {
 }
 
 #[test]
+/// Switching legacy off says so on the event stream. ComplianceConfigUpdated
+/// carries no field for the switch, so it reads the same before and after;
+/// a second event, `LegacyDisabled`, marks the one-way change. The switch is
+/// idempotent and marks it once: a second call by either cap emits no
+/// second `LegacyDisabled`.
+fun switching_legacy_off_emits_its_own_event_once() {
+    let mut s = h::setup_without_wallet();
+    s.next_tx(h::owner_1());
+    {
+        let mut config = s.take_shared<ComplianceConfig>();
+        let cap = s.take_from_sender<ComplianceCap>();
+        let caps = s.take_shared<CapRegistry>();
+        compliance_config::disable_legacy(&mut config, &cap, &caps);
+        assert_eq!(event::events_by_type<compliance_config::ComplianceConfigUpdated>().length(), 1);
+        assert_eq!(event::num_events(), 2);
+        ts::return_shared(caps);
+        s.return_to_sender(cap);
+        ts::return_shared(config);
+    };
+    s.next_tx(h::owner_1());
+    {
+        let mut config = s.take_shared<ComplianceConfig>();
+        let cap = s.take_from_sender<ComplianceCap>();
+        let caps = s.take_shared<CapRegistry>();
+        compliance_config::disable_legacy(&mut config, &cap, &caps);
+        let admin = business_account::admin_cap_for_testing(s.ctx());
+        compliance_config::admin_disable_legacy(&admin, &mut config);
+        business_account::destroy_admin_cap_for_testing(admin);
+        // Only the two ComplianceConfigUpdated: nothing changed.
+        assert_eq!(event::num_events(), 2);
+        assert!(!compliance_config::legacy_enabled(&config));
+        ts::return_shared(caps);
+        s.return_to_sender(cap);
+        ts::return_shared(config);
+    };
+    s.end();
+}
+
+#[test]
+/// The cold multisig's switch marks it the same way.
+fun the_admin_switching_legacy_off_emits_its_own_event() {
+    let mut s = h::setup_without_wallet();
+    s.next_tx(h::owner_1());
+    {
+        let mut config = s.take_shared<ComplianceConfig>();
+        let admin = business_account::admin_cap_for_testing(s.ctx());
+        compliance_config::admin_disable_legacy(&admin, &mut config);
+        assert_eq!(event::events_by_type<compliance_config::ComplianceConfigUpdated>().length(), 1);
+        assert_eq!(event::num_events(), 2);
+        business_account::destroy_admin_cap_for_testing(admin);
+        ts::return_shared(config);
+    };
+    s.end();
+}
+
+#[test]
 #[expected_failure(abort_code = cap_registry::E_STALE_GENERATION)]
 /// A revoked compliance key cannot flip the switch.
 fun a_revoked_compliance_cap_cannot_disable_legacy() {
