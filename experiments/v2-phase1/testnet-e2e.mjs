@@ -537,7 +537,7 @@ if (!done('policy')) {
     target: `${SPEND}::spend_policy::create_policy`,
     typeArguments: [USDC],
     arguments: [
-      tx.object(results.steps.publishSpend.policyRegistry), tx.object(ACCOUNT),
+      tx.object(results.steps.publishSpend.policyRegistry), tx.object(ACCOUNT), tx.object(CONFIG),
       tx.pure.vector('vector<u8>', memberBytes(bizKeys)), tx.pure.vector('u8', [1, 1, 1]), tx.pure.u16(2), tx.pure.u64(2_000_000),
     ],
   });
@@ -549,11 +549,12 @@ if (!done('policy')) {
 const POLICY = results.steps.policy.policy;
 if (!done('policyRules')) {
   const tx = new Transaction();
-  tx.moveCall({ target: `${SPEND}::spend_policy::add_spender`, arguments: [tx.object(POLICY), tx.pure.address(staff.toSuiAddress()), tx.pure.u8(ROLE_STAFF), tx.pure.u64(1_000_000)] });
-  tx.moveCall({ target: `${SPEND}::spend_policy::add_spender`, arguments: [tx.object(POLICY), tx.pure.address(executor.toSuiAddress()), tx.pure.u8(ROLE_EXECUTOR), tx.pure.u64(1_000_000)] });
-  tx.moveCall({ target: `${SPEND}::spend_policy::verify_recipient`, arguments: [tx.object(POLICY), tx.pure.u32(SUI_DOMAIN), tx.pure.address(OWNERS[2])] });
+  tx.moveCall({ target: `${SPEND}::spend_policy::add_spender`, arguments: [tx.object(POLICY), tx.object(ACCOUNT), tx.pure.address(staff.toSuiAddress()), tx.pure.u8(ROLE_STAFF), tx.pure.u64(1_000_000)] });
+  tx.moveCall({ target: `${SPEND}::spend_policy::add_spender`, arguments: [tx.object(POLICY), tx.object(ACCOUNT), tx.pure.address(executor.toSuiAddress()), tx.pure.u8(ROLE_EXECUTOR), tx.pure.u64(1_000_000)] });
+  // Verified with its delivery kind: OWNERS[2] is paid as a wallet, by Coin (kind 3).
+  tx.moveCall({ target: `${SPEND}::spend_policy::verify_recipient`, arguments: [tx.object(POLICY), tx.object(ACCOUNT), tx.pure.u32(SUI_DOMAIN), tx.pure.address(OWNERS[2]), tx.pure.u8(KIND_WALLET)] });
   // 0.5 USDC: a payment above it needs a second approval, so the approval path runs on chain with test amounts.
-  tx.moveCall({ target: `${SPEND}::spend_policy::set_limits`, arguments: [tx.object(POLICY), tx.pure.u64(2_000_000), tx.pure.u64(500_000)] });
+  tx.moveCall({ target: `${SPEND}::spend_policy::set_limits`, arguments: [tx.object(POLICY), tx.object(ACCOUNT), tx.pure.u64(2_000_000), tx.pure.u64(500_000)] });
   const t = await runMultisig('policy rules: staff, executor, a verified recipient, a 0.5 USDC approval threshold', W, [bizKeys[1], bizKeys[2]], tx);
   results.steps.policyRules = { digest: t.digest };
   save();
@@ -573,7 +574,7 @@ async function allowanceFor(step, spender, cap) {
       tx.pure.option('u64', null), tx.pure.option('u64', BigInt(Date.now() + 14 * DAY_MS)), noRateLimit(tx),
     ],
   });
-  tx.moveCall({ target: `${SPEND}::splash_spend::accept`, typeArguments: [USDC], arguments: [proposal, tx.object(POLICY)] });
+  tx.moveCall({ target: `${SPEND}::splash_spend::accept`, typeArguments: [USDC], arguments: [proposal, tx.object(POLICY), tx.object(ACCOUNT)] });
   const t = await runMultisig(`${step}: propose_for_app + splash_spend::accept`, W, [bizKeys[0], bizKeys[2]], tx);
   results.steps[step] = { digest: t.digest, allowance: one(t, '::allowance::Allowance<'), cap: one(t, '::allowance::AllowanceCap<') };
   save();
@@ -626,6 +627,11 @@ if (!done('activateWitness')) {
 }
 
 const APPROVAL_TYPE = `${SPEND}::splash_spend::PayoutApproval`;
+/** Intents live six hours here; an approval's quote deadline is two hours
+ *  after it is given, and a payment's settle_by is thirty minutes, so every
+ *  payment below settles inside the deadline its approval names. */
+const INTENT_LIFETIME_MS = 6 * 3_600_000;
+const APPROVAL_WINDOW_MS = 2 * 3_600_000;
 
 /** A staff-made intent to the verified recipient, created in `tx`. */
 function staffIntent(tx, step, amount) {
@@ -635,7 +641,7 @@ function staffIntent(tx, step, amount) {
     arguments: [
       tx.object(POLICY), tx.object(ACCOUNT), tx.object(CONFIG), tx.pure.vector('u8', ref32(step)), tx.pure.address(OWNERS[2]), tx.pure.vector('u8', []),
       tx.pure.u64(amount), tx.pure.string('USDC'), tx.pure.u64(1_000_000), tx.pure.vector('u8', ref32(`${step}:c`)), tx.pure.u8(KIND_WALLET),
-      tx.pure.vector('u8', ref32(`${step}:r`)), tx.pure.u64(Date.now() + 3_600_000), tx.object(CLOCK),
+      tx.pure.vector('u8', ref32(`${step}:r`)), tx.pure.u64(Date.now() + INTENT_LIFETIME_MS), tx.object(CLOCK),
     ],
   });
   return intent;
@@ -687,7 +693,7 @@ if (!done('ownerApproves')) {
   const tx = new Transaction();
   tx.moveCall({
     target: `${SPEND}::splash_spend::approve_payout`,
-    arguments: [tx.object(POLICY), tx.object(ACCOUNT), tx.object(results.steps.approvedIntent.intent), tx.pure.address(staff.toSuiAddress()), tx.object(CLOCK)],
+    arguments: [tx.object(POLICY), tx.object(ACCOUNT), tx.object(results.steps.approvedIntent.intent), tx.pure.address(staff.toSuiAddress()), tx.pure.u64(Date.now() + APPROVAL_WINDOW_MS), tx.object(CLOCK)],
   });
   const t = await runSponsored('owner 2 approves, alone, with their own passkey', [bizKeys[1]], OWNERS[1], tx);
   results.steps.ownerApproves = { digest: t.digest, approval: one(t, '::splash_spend::PayoutApproval') };
@@ -701,11 +707,34 @@ if (!done('approvedPays')) {
   save();
 }
 
-// 14. The KMS operator runs a payment the staff member made and delegated to it.
+// 14. The KMS operator runs only what the owners approved. A staff member
+//     cannot hand a payment to it (v2 review: that would let staff spend past
+//     their own rule on the operator's allowance); the wallet can, for an
+//     intent the wallet itself opened.
+if (!done('staffDelegationRefused')) {
+  const tx = new Transaction();
+  const intent = staffIntent(tx, 'staffDelegates', 200_000);
+  tx.moveCall({
+    target: `${SPEND}::splash_spend::delegate_execution`,
+    arguments: [tx.object(POLICY), tx.object(ACCOUNT), intent, tx.pure.address(executor.toSuiAddress()), tx.pure.u64(Date.now() + APPROVAL_WINDOW_MS), tx.object(CLOCK)],
+  });
+  tx.moveCall({ target: `${CORE}::payment_intent::share_intent`, arguments: [intent] });
+  results.steps.staffDelegationRefused = { refused: await expectAbort('staff delegating a payment to the operator (dry run)', staff.toSuiAddress(), tx) };
+  save();
+}
 if (!done('delegatedIntent')) {
   const tx = new Transaction();
-  tx.moveCall({ target: `${CORE}::payment_intent::share_intent`, arguments: [staffIntent(tx, 'delegated', 200_000)] });
-  const t = await runSponsored('staff opens a 0.2 USDC intent for the operator to run', [staff], staff.toSuiAddress(), tx);
+  const [intent] = tx.moveCall({
+    target: `${CORE}::payment_intent::create_for_wallet`,
+    typeArguments: [USDC],
+    arguments: [
+      tx.object(ACCOUNT), tx.object(CONFIG), tx.pure.vector('u8', ref32('delegated')), tx.pure.address(OWNERS[2]), tx.pure.vector('u8', []),
+      tx.pure.u64(200_000), tx.pure.string('USDC'), tx.pure.u64(1_000_000), tx.pure.vector('u8', ref32('delegated:c')), tx.pure.u8(KIND_WALLET),
+      tx.pure.vector('u8', ref32('delegated:r')), tx.pure.u64(Date.now() + INTENT_LIFETIME_MS), tx.object(CLOCK),
+    ],
+  });
+  tx.moveCall({ target: `${CORE}::payment_intent::share_intent`, arguments: [intent] });
+  const t = await runMultisig('the wallet opens a 0.2 USDC intent for the operator to run', W, [bizKeys[0], bizKeys[1]], tx);
   results.steps.delegatedIntent = { digest: t.digest, intent: one(t, '::payment_intent::PaymentIntent') };
   save();
 }
@@ -719,16 +748,16 @@ if (!done('delegate')) {
   const tx = new Transaction();
   tx.moveCall({
     target: `${SPEND}::splash_spend::delegate_execution`,
-    arguments: [tx.object(POLICY), tx.object(ACCOUNT), tx.object(results.steps.delegatedIntent.intent), tx.pure.address(executor.toSuiAddress()), tx.object(CLOCK)],
+    arguments: [tx.object(POLICY), tx.object(ACCOUNT), tx.object(results.steps.delegatedIntent.intent), tx.pure.address(executor.toSuiAddress()), tx.pure.u64(Date.now() + APPROVAL_WINDOW_MS), tx.object(CLOCK)],
   });
-  const t = await runSponsored('staff delegates execution to the operator', [staff], staff.toSuiAddress(), tx);
+  const t = await runMultisig('the wallet delegates execution to the operator, with a quote deadline', W, [bizKeys[1], bizKeys[2]], tx);
   results.steps.delegate = { digest: t.digest, approval: one(t, '::splash_spend::PayoutApproval') };
   save();
 }
 if (!done('executorPays')) {
   const tx = new Transaction();
   payAndClose(tx, 'executorPays', tx.object(results.steps.delegatedIntent.intent), results.steps.executorAllowance.allowance, 200_000, some(tx, results.steps.delegate.approval));
-  const t = await runSponsored('the operator pays under its own allowance, with the delegation', [executor], executor.toSuiAddress(), tx);
+  const t = await runSponsored("the operator pays under its own allowance, with the wallet's delegation", [executor], executor.toSuiAddress(), tx);
   results.steps.executorPays = { digest: t.digest };
   save();
 }
