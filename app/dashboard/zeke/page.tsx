@@ -208,7 +208,7 @@ export default function OxwalDeskPage() {
                 Ask about your money, prepare payments for approval, and check what needs a decision.
               </p>
             </div>
-            <div className="grid w-full grid-cols-3 overflow-hidden rounded-xl border border-[#326273]/14 bg-white text-center md:w-auto md:min-w-[300px]">
+            <div className="grid w-full grid-cols-3 overflow-hidden rounded-xl border border-[#326273]/14 bg-white text-center md:w-auto md:min-w-[340px]">
               <DeskStat label="Drafts" value={snapshot?.known ? snapshot.drafts : null} />
               <DeskStat label="To approve" value={snapshot?.known ? snapshot.waiting : null} caution />
               <DeskStat label="Alerts" value={notices} caution />
@@ -294,7 +294,7 @@ function DeskStat({ label, value, caution = false }: { label: string; value: num
         {value === null ? <span title="Not read">-</span> : value}
         <span className="sr-only"> {label}</span>
       </p>
-      <p aria-hidden="true" className="mt-0.5 font-mono text-[12px] font-semibold uppercase tracking-[0.1em] text-[#326273]">{label}</p>
+      <p aria-hidden="true" className="mt-0.5 whitespace-nowrap font-mono text-[12px] font-semibold uppercase tracking-[0.08em] text-[#326273]">{label}</p>
     </div>
   );
 }
