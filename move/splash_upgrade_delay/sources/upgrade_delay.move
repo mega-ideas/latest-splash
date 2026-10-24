@@ -4,9 +4,10 @@
 /// out. From then on the only way to upgrade is:
 ///
 ///   1. `propose(digest)` — records the digest of the new bytecode and the time,
-///      and emits `UpgradeProposed`. The backend turns that event into an alert
-///      to every business owner: what is changing, and a link to review their
-///      spending rules and revoke allowances.
+///      in `pending`, and emits `UpgradeProposed`. The backend reads `pending`
+///      and alerts every business owner with the bytecode digest, the policy
+///      and when it can take effect, plus a link to review their spending
+///      rules and revoke allowances.
 ///   2. wait 24 hours.
 ///   3. `authorize_upgrade(digest)` — only for the digest proposed, only once
 ///      the delay has passed and within seven days of it. The validators then

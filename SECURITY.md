@@ -42,7 +42,7 @@ Exactly three paths move a business's funds to a third party.
 | Path | Function | Who authorises |
 |---|---|---|
 | The owners' multisig | `payment_intent::confirm_from_business_wallet`, `_balance`, `confirm_cross_chain_from_business_wallet` | The protocol: the business wallet signed the transaction |
-| Spending rules | `splash_spend::pay_intent`, `pay_intent_cross_chain` | An app-bound allowance from the business wallet, plus its `SpendPolicy` |
+| Spending rules | `splash_spend::pay_intent` (Sui intents only) | An app-bound allowance from the business wallet, plus its `SpendPolicy` |
 | Legacy approvals | `payment_intent::confirm_with_approval` | **DEPRECATED.** It closes for an account once that account registers a wallet, and for everyone once `ComplianceConfig.legacy_enabled` is switched off. It honours the pause and the asset registry |
 
 The unbound path (`create_payment_intent`, `create`, `confirm_payment_intent`)
@@ -57,22 +57,51 @@ it again.
   recomputed in Move from its members, and every member must be an owner.
   If one member can meet the threshold alone, the founder must have chosen
   that and the wallet must acknowledge it (D1).
+- **Membership after registration.** The business wallet adds and removes
+  owners and names the recovery party. It may do so under an owner freeze,
+  never under a compliance freeze, and it may remove the founder once the
+  founder no longer signs. The legacy approver set is closed (abort 60). Any
+  one owner can still freeze.
+- **Recovery only adds an owner.** If the founder loses their key before
+  `nominate_wallet`, no wallet can ever be registered for that account:
+  nomination is founder-only and the founder anchor never moves. The business
+  applies again (`submit_application`, then KYB). If a wallet's quorum is
+  lost, nobody can rotate it, and an owner freeze it does not lift stays; the
+  business opens a new account. Its funds stay in its own wallet.
+- **Bank-payout floor.** A bank payout must be at least the larger of 99 USDC
+  and `ComplianceConfig.min_settlement_amount`, checked when the intent opens
+  and again when it settles (abort 434). Other kinds have no floor.
 - **Wallet rotation** takes two steps: the current wallet proposes, and the new
   wallet confirms. `wallet_epoch` goes up, so spending rules made under the old
   wallet stop paying, even after a rotation back to the same address.
 - **`splash_spend` is immutable.** Nothing in it can rotate a spender or let a
   permit or a `Balance` escape (`npm run check:spend`, in CI).
 - **Every `SpendPolicy` mutation is signed by the business wallet.** The policy
-  lives outside core, so no core upgrade can reach it.
+  lives outside core, so no core upgrade can reach it. A policy grows (a
+  spender, a recipient, a beneficiary, a higher limit, a new spending rule)
+  only while it is the account's current one and the account is not frozen.
+  Cutting back is always open.
+- **Spending rules pay on Sui only.** A cross-chain payment is the owners'
+  multisig alone (`confirm_cross_chain_from_business_wallet`). No spending
+  rule can open, approve or pay one.
 - **Splash's KMS operator is an EXECUTOR.** It cannot open an intent, and it
-  pays only with an approval naming it: an owner's, or the maker's own
-  delegation for an amount the maker could have paid alone.
+  pays only with an approval naming it: an owner's `approve_payout` naming
+  it, or the wallet's `delegate_execution` of an intent the wallet itself
+  opened. Staff cannot hand a payment to it. Each approval names the quote's
+  deadline (`settle_by_ms`) and dies when the policy removes anything.
 - **One `ComplianceConfig`**, created by consuming a ticket minted once at
-  publish. A PTB cannot pick a laxer config.
+  publish. A PTB cannot pick a laxer config, and each spending policy pins its
+  config's ID (`E_WRONG_CONFIG`, 1028).
 - **Registry additions** (assets, settlement apps, bridge adapters) need
   `AdminCap` and on-chain proof that the sender is a quorum multisig. Each one
   gives 24 hours' notice, with every owner alerted, and lapses after 7 days.
-  Removals are immediate. The last asset cannot be removed.
+  Removals are immediate. The last asset cannot be removed. "Never by a single
+  key" means what the chain can prove: the sender holds `AdminCap` and is a
+  multisig that no single member can sign for. It does not prove that this is
+  the governance multisig, so the mainnet ceremony checks the registries
+  before the first business onboards (`docs/MAINNET-CHECKLIST.md`). Every
+  accepted asset is assumed to have 6 decimals; nothing on chain checks it,
+  so governance verifies it before proposing an asset.
 - **The upgrade delay.** `splash_core` upgrades additive-only through
   `splash_upgrade_delay`, which holds the `UpgradeCap`. An upgrade gives 24
   hours' notice, must be authorised within 7 days of it, and the wrapper itself
@@ -90,6 +119,10 @@ and cannot freeze the business's own wallet.** The business holds its keys
 (D1) and can always move its own funds directly. Copy, evidence exports and
 partner material must never describe a freeze as a funds freeze.
 
+Once a wallet is registered, only the wallet lifts an owner freeze, and in the
+same transaction it can remove the owner who pulled it or add a replacement
+owner. Only `AdminCap` lifts a compliance freeze.
+
 ### Accepted limits, stated plainly
 
 - **Address aliases.** `address_aliases` is on mainnet, and Move cannot see
@@ -99,13 +132,22 @@ partner material must never describe a freeze as a funds freeze.
   appears for a wallet, the governance multisig or the operator (Phase 2).
 - **What an additive core upgrade can still do.** It could add a function that
   writes an intent's fields, and so make a spender pay a verified recipient
-  twice, within caps. It cannot add a recipient, raise a limit or create an
-  allowance. This is why every proposal alerts every owner 24 hours ahead.
+  twice, within caps. It can also change what core keeps: the tier ceilings,
+  the KYB flag and the freeze flags. It cannot change a spending rule
+  (spenders, recipients, beneficiaries, the policy's limits), point a policy
+  at another config, or create an allowance. This is why every proposal
+  alerts every owner 24 hours ahead. The alert gives the bytecode digest, the
+  upgrade policy and the eta; nothing rebuilds the source to show what
+  changes.
 - **Fixed windows.** Allowance rate limits are fixed windows, so a limit can
   move twice its size across a window boundary.
-- **Split payments.** The second-approval threshold is per payment. The
-  backend flags payments to the same beneficiary that together exceed it in 24
-  hours.
+- **Split payments.** The second-approval threshold is per payment, so one
+  invoice can be paid as several payments at or below it, each without a
+  second approval. The bound is the allowance's own caps (its lifetime cap or
+  rate limit, set by the owners) and the account's tier ceilings; nothing ties
+  those caps to the threshold. No backend flag exists today. Detecting splits
+  is a Phase 2 item, and it can only detect them: a staff member can submit
+  the whole transaction without Splash's backend.
 - **Bank payouts.** The chain proves the funds reached the partner deposit
   address bound to a verified beneficiary. The partner then pays the bank
   account in the instruction; Phase 2 recomputes the beneficiary commitment
@@ -748,7 +790,8 @@ on chain.
 (business_account, payment_intent, audit_anchor, receipt_v2, compliance_config,
 peg_monitor) publishes to mainnet; `splash_custody` (settlement, smart_treasury,
 dual_treasury, liquidity_guard) publishes only when the Labuan e-money licence is
-granted. Non-custody stops being an assert someone can forget and becomes a
+granted (superseded in v2: D11 retires `splash_custody` from the mainnet path
+for good; testnet only). Non-custody stops being an assert someone can forget and becomes a
 property of the type system: **no struct in `splash_core` holds a `Balance<T>`**,
 enforced by `scripts/check-core-no-balance.mjs` in CI
 (`.github/workflows/core-invariant.yml`) and in `npm run lint`.

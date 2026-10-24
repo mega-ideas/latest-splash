@@ -19,8 +19,8 @@
 # `grep -rn 'Balance<' move/splash_core/sources/` returning nothing, which
 # scripts/check-core-no-balance.mjs enforces on every build.
 #
-# Custody lives in ../splash_custody and publishes only when the Labuan e-money
-# licence is granted.
+# Custody lives in ../splash_custody, which v2 retires from mainnet for good
+# (D11): allowances and address balances replace it. It stays for testnet.
 [package]
 name = "splash_core"
 version = "0.0.1"

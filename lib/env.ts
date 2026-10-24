@@ -205,15 +205,17 @@ export const envSchema = z.object({
    *  monitor. Unset: Mysten's public endpoint for SUI_NETWORK. */
   SUI_GRAPHQL_URL: url,
   /* v2 upgrade governance (brief 3.5). lib/server/governance-alert-monitor.ts
-     tells every business owner when the canonical wrapper announces a core
-     upgrade or a new governance owner, and when the canonical compliance
-     config announces a registry addition. These ids are what make an event
-     canonical: `wrap` is public, so anyone can emit an UpgradeProposed from a
-     wrapper of their own. Read from the environment only, never from
+     reads the on-chain state of the canonical upgrade wrapper and the
+     canonical compliance config (SPLASH_COMPLIANCE_CONFIG_ID), and tells every
+     business owner when a core upgrade, a new governance owner or a registry
+     addition is pending, and when one takes effect. It reads no event feed:
+     `wrap` is public, so anyone can emit an UpgradeProposed from a wrapper of
+     their own. These ids name the two objects, whose Move types the monitor
+     checks on chain. Read from the environment only, never from
      data/contract-config.json, so a file staff can edit at runtime cannot
-     widen what counts as canonical. Unset, the cron answers 502 rather than
-     watch nothing. SPLASH_CORE_PACKAGE_ID (above) is read there as the core's
-     ORIGINAL id, the one its event types carry. */
+     widen what counts as canonical. Unset or mismatched, the cron answers 502
+     rather than watch nothing. Core's original id is read from the wrapper's
+     original_package; SPLASH_CORE_PACKAGE_ID is not read by the monitor. */
   /** The published, immutable splash_upgrade_delay package. */
   SPLASH_UPGRADE_DELAY_PACKAGE_ID: objectId,
   /** The one DelayedUpgradeCap that wraps splash_core's UpgradeCap. */

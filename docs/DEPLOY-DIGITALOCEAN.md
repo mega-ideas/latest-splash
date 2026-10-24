@@ -164,10 +164,15 @@ new build refuses to install or start on the old runtime and environment.
    Schedule `https://<domain>/api/cron/governance-alerts` every 15 minutes in
    every scope too (v2): it tells every business owner when a core upgrade,
    a governance owner change or a registry addition is announced, inside the
-   24-hour notice. It needs `SPLASH_UPGRADE_DELAY_PACKAGE_ID`,
-   `SPLASH_UPGRADE_WRAPPER_ID`, `SPLASH_CORE_PACKAGE_ID` (core's original
-   id) and `SPLASH_COMPLIANCE_CONFIG_ID`; without them, or when it cannot
-   read the chain, it answers 502, which is again an alert in itself.
+   24-hour notice. It reads the state of the canonical upgrade wrapper and
+   compliance config, not the event feed. It needs
+   `SPLASH_UPGRADE_DELAY_PACKAGE_ID`, `SPLASH_UPGRADE_WRAPPER_ID` and
+   `SPLASH_COMPLIANCE_CONFIG_ID`. Core's original id is read from the
+   wrapper, so `SPLASH_CORE_PACKAGE_ID` may name the core version the app
+   calls. It answers 502 without those ids; when either id is not the
+   canonical object of the canonical type (that case also pages through
+   `OPERATOR_ALERT_WEBHOOK_URL`); or when it cannot read both objects in
+   full. A 502 is again an alert in itself.
 
 **Redeploys**: push to `main` → App Platform rebuilds, runs the pre-deploy
 migration job, then deploys. Deleted files disappear from the server because

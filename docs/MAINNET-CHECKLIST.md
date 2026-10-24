@@ -33,10 +33,20 @@ procedure in [`docs/UPGRADE-POLICY.md`](UPGRADE-POLICY.md).
 2. [ ] `compliance_config::create<USDC>`, consuming the `ConfigTicket`, with
        native mainnet USDC
        (`0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC`).
-       Exactly one config can ever exist. Record its ID.
-3. [ ] Publish `splash_spend`, then `package::make_immutable` its
-       `UpgradeCap` in the next transaction. Record both digests.
-4. [ ] Publish `splash_upgrade_delay`, then make it immutable the same way.
+       Exactly one config can ever exist. Record its ID. Every
+       `spend_policy::create_policy` must pass this config, and each policy
+       records its ID: `splash_spend` then opens and pays only against it.
+3. [ ] Publish `splash_spend` and make it immutable **in the same
+       transaction**: one PTB with `Publish`, then
+       `0x2::package::make_immutable` on the `UpgradeCap` the publish
+       returned, and nothing else. A separate transaction leaves a window in
+       which one key holds the `UpgradeCap`, and the verify step fails such a
+       publish. Record the digest.
+4. [ ] Publish `splash_upgrade_delay` the same way: `Publish` and
+       `make_immutable` in one transaction. Record the digest.
+       `scripts/e2e-testnet.mjs` (through `scripts/v2-end-state.mjs`) checks
+       both publishes: each must be exactly those two commands, leave no
+       `UpgradeCap` behind, and be version 1 with no later versions.
 5. [ ] Transfer core's `UpgradeCap` to the governance multisig. The multisig
        calls `upgrade_delay::wrap(cap, keys, weights, threshold)` itself,
        which makes the policy additive. Record the `DelayedUpgradeCap` ID.
@@ -51,6 +61,21 @@ procedure in [`docs/UPGRADE-POLICY.md`](UPGRADE-POLICY.md).
        Spending rules work from then on.
 8. [ ] Do not register any bridge adapter until the CCTP V2 adapter has been
        reviewed and published **immutable**.
+8a. [ ] **Before the first business onboards, read the config's registries
+       and check them exactly.** `settlement_apps` is exactly
+       `[<published splash_spend>::splash_spend::SettleWitness]`,
+       `bridge_adapters` is `[]`, `accepted_assets` is exactly native mainnet
+       USDC, and `pending_additions` is `[]`. On-chain governance checks prove
+       only that the sender holds `AdminCap` and is a multisig no single
+       member can sign for, not that it is the governance multisig, and a
+       proposal made before the alert cron runs reaches no owner.
+       `scripts/v2-end-state.mjs` does not read the registries, so this is a
+       manual read; record the output.
+8b. [ ] **Before any asset addition:** confirm the asset has 6 decimals
+       (`coin_registry::decimals` on its `Currency`). Tier ceilings, the
+       bank-payout floor and the 10,000 USDC second-approval threshold are
+       6-decimal minor units, and `activate_addition` does not check
+       decimals.
 9. [ ] **Decision for Sky: when the legacy approver path closes.** A fresh
        config starts with `legacy_enabled` on, so a business with no wallet
        can still pay through one person's `PayoutApproval`. Closing it is
@@ -68,9 +93,20 @@ procedure in [`docs/UPGRADE-POLICY.md`](UPGRADE-POLICY.md).
       `SPLASH_UPGRADE_WRAPPER_ID`.
 - [ ] `SPLASH_CUSTODY_PACKAGE_ID` and `SPLASH_PAYOUT_DELEGATION_ID` are
       **unset**. Production on mainnet refuses to boot with either, because
-      custody and the meter are retired in v2.
+      custody and the meter are retired in v2. On mainnet the
+      `splash_custody` settlement paths (single transfer, delegated batch,
+      Smart Treasury allocation) refuse in every `SUI_SETTLEMENT_MODE`, so
+      `SUI_SETTLEMENT_MODE=simulate` or `SUI_BATCH_SETTLEMENT_MODE=simulate`
+      cannot mark a batch SETTLED.
+- [ ] `FUNDING_DEPOSIT_DERIVATION_SECRET` and
+      `FUNDING_CCTP_DEPOSIT_ADDRESSES_JSON` are **unset**. Production on
+      mainnet refuses to boot with either: on mainnet funding sessions give
+      out no deposit address (D1, D3), and a stablecoin funding session is
+      refused with `no_deposit_address_on_mainnet`.
 - [ ] The governance alert cron (`/api/cron/governance-alerts`) is scheduled,
-      and a test proposal on testnet reached every test owner.
+      and a test proposal on testnet reached every test owner. Against the
+      mainnet ids it answers 200. A 502 naming `SPLASH_UPGRADE_WRAPPER_ID` or
+      `SPLASH_COMPLIANCE_CONFIG_ID` means that id is not the canonical object.
 
 **Partners and legal**
 

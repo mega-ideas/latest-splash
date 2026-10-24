@@ -274,8 +274,8 @@ function main() {
       console.error(`    -> ${v.why}\n`);
     }
     console.error('  splash_core publishes to mainnet, and Splash holds no licence that would');
-    console.error('  permit holding client funds. Move this to move/splash_custody, which');
-    console.error('  publishes only when the e-money licence is granted.\n');
+    console.error('  permit holding client funds. Value-holding code belongs in');
+    console.error('  move/splash_custody, which v2 retired from the mainnet path for good (D11).\n');
     console.error('  Do not add an exception to this script. The check passing IS the');
     console.error('  regulatory claim.\n');
     process.exit(1);

@@ -151,13 +151,107 @@ one deliberate exception to "no currency": the brief (§3.1) requires it, and
 it is the coin type the base-layer transfer already shows. `kind` is 1 bank
 payout, 2 Splash business, 3 wallet, 4 cross-chain wallet. On a cross-chain
 intent, CONFIRMED means burned for CCTP; the mint completes on the other
-chain. None of the v2 fields is an amount, an address or the account.
+chain. None of the v2 fields of the intent events is an amount, an address or
+the account.
 
 Three more events lost a field for the same reason, found by the meta-test
 rather than named in the prompt: `ApplicationReceived` no longer carries the
 company registration number or the KYB pointer, `BusinessVerified` no longer
 carries the risk score, and `DailyCapChanged` no longer carries the ceiling.
-All three values stay on the object.
+All three values stay on the object. `DailyCapChanged` has since been
+replaced by `TierChanged`, which does carry the tier's three ceilings. They
+are the fixed values `business_account::tier_limits(tier)` returns for that
+tier, so they say nothing the tier number does not.
+
+## Every event in `splash_core`, `splash_spend` and `splash_upgrade_delay`
+
+All three packages' events freeze at publish: `splash_spend` and
+`splash_upgrade_delay` publish immutable, and an additive upgrade of
+`splash_core` cannot change an existing struct. The table lists every event
+struct in their sources, and which of its fields are of type `address`. An
+`ID` field names an object; some IDs link to an account through another event
+(a `policy_id` links to `business_account_id` through `PolicyCreated`). The
+addresses here are also visible in transaction inputs and object ownership,
+so the events add little; they are listed so that a reviewer can check the
+specification against the code.
+
+`tests/event-privacy.test.mjs` refuses a field by exact name (`sender`,
+`recipient`, `amount`, `cap_minor` and the rest of its list). It does not
+match name classes, so `TierChanged`'s `*_cap_minor` fields and
+`LimitIncreaseRequested.justification` pass it. `justification` is free
+text an owner supplies, and it is published as given.
+
+**`splash_core`**
+
+| Module | Event | Address fields | Other fields |
+|---|---|---|---|
+| `audit_anchor` | `AuditAnchored` | `anchor_object`, `anchorer`, `business_account_id` | `audit_hash`, `anchor_id`, `backing_blob`, `anchored_at` |
+| `audit_anchor` | `VerificationChecked` | `anchor_object`, `checker` | `matched`, `timestamp_ms` |
+| `audit_anchor` | `SettlementAnchored` | none | `intent_id`, `commitment`, `status`, `timestamp_ms`, `content_hash`, `walrus_blob_id` |
+| `business_account` | `ApplicationReceived` | `business_account_id`, `owner` | none |
+| `business_account` | `BusinessUnverified` | `business_account_id`, `owner` | none |
+| `business_account` | `BusinessVerified` | `business_account_id`, `owner` | none |
+| `business_account` | `AuthorityChanged` | `business_account_id`, `subject`, `by` | `change`, `authority_epoch` |
+| `business_account` | `RecoveryRequested` | `business_account_id`, `new_owner`, `requested_by` | `effective_at_ms` |
+| `business_account` | `RecoveryCancelled` | `business_account_id`, `cancelled_by` | none |
+| `business_account` | `TierChanged` | `business_account_id`, `by` | `tier`, `per_transfer_cap_minor`, `daily_cap_minor`, `monthly_cap_minor` |
+| `business_account` | `LimitIncreaseRequested` | `business_account_id`, `requested_by` | `current_tier`, `requested_tier`, `justification` (free text) |
+| `business_account` | `PayoutApproved` | `approval_id`, `business_account_id`, `approver`, `maker` | `intent_id`, `commitment`, `authority_epoch`, `expires_at_ms` |
+| `business_account` | `PayoutApprovalConsumed` | `approval_id`, `business_account_id`, `approver` | `intent_id`, `commitment`, `consumed_at_ms` |
+| `business_account` | `AnchorCapRotated` | `retired_cap_id`, `new_cap_id`, `holder` | none |
+| `business_account` | `AnchorCapDestroyed` | `anchor_cap_id` | none |
+| `business_account` | `WalletNominated` | `business_account_id`, `wallet`, `by` | none |
+| `business_account` | `WalletRegistered` | `business_account_id`, `wallet` | `threshold`, `signer_count`, `single_signer`, `authority_epoch` |
+| `business_account` | `WalletRotationProposed` | `business_account_id`, `wallet`, `new_wallet` | `threshold`, `signer_count`, `single_signer` |
+| `business_account` | `WalletRotated` | `business_account_id`, `old_wallet`, `new_wallet` | `authority_epoch` |
+| `business_account` | `WalletRotationCancelled` | `business_account_id`, `cancelled_wallet` | none |
+| `cap_registry` | `BreakGlassArmed` | `registry_id`, `holder`, `armed_by` | `kind`, `reason`, `expires_at_ms` |
+| `cap_registry` | `BreakGlassCleared` | `registry_id`, `armed_by` | `kind`, `expired` |
+| `cap_registry` | `CapabilityRevoked` | `registry_id`, `holder`, `revoked_by` | `kind`, `previous_generation`, `generation`, `reason` |
+| `compliance_config` | `ComplianceConfigUpdated` | `config_id` | `max_deviation_ppm`, `max_staleness_ms`, `max_slippage_bps`, `min_depth_base_units`, `min_settlement_amount`, `allowed_deepbook_pools`, `paused` |
+| `compliance_config` | `DeepbookPoolAllowed` | `config_id` | `pool_id` |
+| `compliance_config` | `DeepbookPoolDisallowed` | `config_id` | `pool_id` |
+| `compliance_config` | `RegistryAdditionProposed` | `config_id` | `registry`, `type_name`, `proposed_at_ms`, `eta_ms` |
+| `compliance_config` | `RegistryAdditionActivated` | `config_id` | `registry`, `type_name` |
+| `compliance_config` | `RegistryAdditionCancelled` | `config_id` | `registry`, `type_name` |
+| `compliance_config` | `RegistryEntryRemoved` | `config_id` | `registry`, `type_name` |
+| `compliance_config` | `LegacyDisabled` | `config_id` | none |
+| `payment_intent` | `IntentCreated` | none | `intent_id`, `commitment`, `rail_commitment`, `settlement_asset`, `kind`, `status`, `expires_at_ms`, `timestamp_ms` |
+| `payment_intent` | `IntentConfirmed` | none | `intent_id`, `commitment`, `rail_commitment`, `settlement_asset`, `kind`, `status`, `path`, `timestamp_ms` |
+| `payment_intent` | `IntentCanceled` | none | `intent_id`, `commitment`, `rail_commitment`, `settlement_asset`, `kind`, `status`, `timestamp_ms` |
+| `peg_monitor` | `PegUpdated` | `state_id` | `sequence`, `usdc_deviation_ppm`, `usdt_deviation_ppm`, `timestamp_ms` |
+| `receipt_v2` | `ReceiptIssued` | `receipt_object`, `business_account_id`, `minter` | `receipt_id`, `commitment`, `settled_at`, `tx_digest` |
+| `receipt_v2` | `ReceiptVerificationChecked` | `receipt_object`, `checker` | `matched`, `timestamp_ms` |
+
+**`splash_spend`**
+
+| Module | Event | Address fields | Other fields |
+|---|---|---|---|
+| `spend_policy` | `PolicyCreated` | `wallet` | `policy_id`, `business_account_id` (an `ID`), `wallet_epoch`, `owner_count` |
+| `spend_policy` | `PolicyChanged` | none | `policy_id`, `change` (which kind of change; the entry is read off the object) |
+| `splash_spend` | `SpendingRuleAccepted` | `funder`, `spender` | `policy_id` |
+| `splash_spend` | `SpendApproved` | `approver`, `payer` | `approval_id`, `policy_id`, `intent_id`, `commitment` |
+| `splash_spend` | `SpendApprovalConsumed` | `approver` | `approval_id`, `policy_id`, `intent_id` |
+| `splash_spend` | `SpendApprovalDiscarded` | `approver` | `approval_id`, `policy_id`, `intent_id` |
+| `splash_spend` | `PaidUnderPolicy` | `spender` | `policy_id`, `intent_id`, `allowance_id`, `approval_id` (optional) |
+
+**`splash_upgrade_delay`**
+
+| Module | Event | Address fields | Other fields |
+|---|---|---|---|
+| `upgrade_delay` | `UpgradeProposed` | none | `wrapper_id`, `package`, `digest`, `proposed_at_ms`, `eta_ms`, `policy` |
+| `upgrade_delay` | `UpgradeCancelled` | none | `wrapper_id`, `package`, `digest` |
+| `upgrade_delay` | `UpgradeAuthorized` | none | `wrapper_id`, `package`, `digest`, `policy` |
+| `upgrade_delay` | `UpgradeCommitted` | none | `wrapper_id`, `package`, `latest_package`, `version` |
+| `upgrade_delay` | `CapWrapped` | `owner` | `wrapper_id`, `package`, `policy` |
+| `upgrade_delay` | `OwnerChangeProposed` | `new_owner` | `wrapper_id`, `eta_ms` |
+| `upgrade_delay` | `OwnerChangeCancelled` | `new_owner` | `wrapper_id` |
+| `upgrade_delay` | `OwnerChanged` | `new_owner` | `wrapper_id` |
+| `upgrade_delay` | `MadeImmutable` | none | `wrapper_id`, `package` |
+
+No event carries a payment's amount. The governance alert monitor does not read these
+events; it reads the wrapper's and the config's state
+(`docs/v2/phase1-move-design.md` §7).
 
 ## Where the salt lives
 

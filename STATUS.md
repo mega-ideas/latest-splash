@@ -31,9 +31,10 @@ or under one of its spending rules. There is no object to accumulate into.
 >
 > Package-split answer: `npm run check:core`. Twelve seconds, no trust required.
 
-`splash_custody` — every `Balance<T>` in the system — publishes **only when the
-e-money licence is granted**. Under Phase 0 the bytecode does not exist on chain,
-so there is no flag to flip and no assert to forget.
+`splash_custody` — every `Balance<T>` in the system — is **retired from the
+mainnet path for good in v2 (D11)**: app-bound allowances and address balances
+replace pooled settlement. It runs on testnet only. On mainnet the bytecode
+does not exist on chain, so there is no flag to flip and no assert to forget.
 
 ---
 
@@ -127,7 +128,8 @@ Do not publish `splash_core` until every line is checked.
       so one signer suffices and attribution stays chain-enforced.
 - [x] **A-11 built**: `move/splash_meter` (spend meters + guardian, **22 tests
       passing**), per-tenant credit segregation, tenant delegations with a
-      30-day TTL, fixed fee recipient. Publishes with custody in Phase 2.
+      30-day TTL, fixed fee recipient. Retired from the mainnet path with
+      custody in v2 (D11); testnet only.
 - [x] **Both treasuries metered.** `allocate` and `redeem` deleted; the
       operating floor, the withdrawal allowlist, the USDT sweep destination and
       the KYC threshold are all STORED rather than caller-supplied. Every value
@@ -190,19 +192,33 @@ change, so every package and object ID is new.
 ## Phase 0 vs Phase 2 — what the server does
 
 `SPLASH_CORE_PACKAGE_ID` names the core package and falls back to
-`SPLASH_PACKAGE_ID`, which production requires at boot. Set both: with only
-`SPLASH_PACKAGE_ID`, the app treats it as a pre-split package that also holds
-custody, and the refusal below does not fire (`custodyPackageIdOrThrow` in
-`lib/server/sui-settlement.ts`). `SPLASH_CUSTODY_PACKAGE_ID` is
-**absent in Phase 0**, and any code path needing custody fails with:
+`SPLASH_PACKAGE_ID`, which production requires at boot.
 
-> Batch settlement requires the splash_custody package, which publishes when the
-> Labuan e-money licence is granted. Phase 0 settles through payment_intent,
-> which holds no balance. See STATUS.md.
+**On mainnet** every custody path (single transfer, delegated batch, Smart
+Treasury allocation) refuses first, in every settlement mode, whatever is set,
+with:
 
-The error names the licence rather than reporting a missing environment
-variable, because "not configured" reads as a deployment mistake when it is
-actually the regulatory posture working correctly.
+> `<path>` runs on splash_custody, which v2 retired from the mainnet path
+> (D11): app-bound allowances and address balances replace pooled settlement
+> and the delegated batch. Nothing was sent.
+
+Production on mainnet also refuses to boot with `SPLASH_CUSTODY_PACKAGE_ID` or
+`SPLASH_PAYOUT_DELEGATION_ID` set.
+
+**On testnet**, set both package ids: with only `SPLASH_PACKAGE_ID`, the app
+treats it as a pre-split package that also holds custody, and the refusal below
+does not fire (`custodyPackageIdOrThrow` in `lib/server/sui-settlement.ts`).
+With `SPLASH_CUSTODY_PACKAGE_ID` absent, any code path needing custody fails
+with:
+
+> Batch settlement requires the splash_custody package, which is not published
+> here. v2 retired it from the mainnet path for good (D11); on testnet it needs
+> SPLASH_CUSTODY_PACKAGE_ID. Phase 0 settles through payment_intent, which
+> holds no balance. See STATUS.md.
+
+The error names the retirement rather than only reporting a missing
+environment variable, because "not configured" reads as a deployment mistake
+when it is the design working.
 
 ---
 

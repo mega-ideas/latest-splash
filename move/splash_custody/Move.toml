@@ -1,4 +1,4 @@
-# splash_custody — publishes ONLY when the Labuan e-money licence is granted.
+# splash_custody — retired from mainnet in v2 (D11); testnet and the record only.
 #
 # Every struct that holds a `Balance<T>` lives here: `SettlementPool`,
 # `SmartTreasury`, `UsdtBuffer`. With no e-money licence held, this package is

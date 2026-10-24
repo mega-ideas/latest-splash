@@ -10,7 +10,7 @@ Status: v2 (decisions D1, D2, D11), 24 Oct 2026. Design:
 | Governance multisig | Holds `AdminCap` and the `DelayedUpgradeCap` wrapping `splash_core`'s `UpgradeCap`; proposes and activates upgrades and registry additions | Sui multisig, 2-of-3 (Sky, Sebastian, cold backup); proved on chain to be a quorum at every governance call |
 | `ComplianceCap` holder | Subtractive only: pause, tighten, remove a registry entry, cancel an addition, switch the legacy path off | Sui multisig, 2-of-3 minimum, at a third address |
 | `AnchorCap` holder | Audit-anchor and peg attestations; moves no money | KMS-backed operator signer |
-| KMS operator | An EXECUTOR on businesses' spending rules: runs scheduled payments and batches only with an approval naming it, under its own tightly capped allowance | AWS KMS (WS4) |
+| KMS operator | An EXECUTOR on businesses' spending rules: runs scheduled payments and batches only with the owners' approval naming it (an owner's `approve_payout`, or the wallet's `delegate_execution` of an intent the wallet opened), under its own tightly capped allowance | AWS KMS (WS4) |
 | Business wallet | The business's own Sui multisig of its owners' passkeys (zkLogin as fallback). Pays, funds spending rules, changes its rules | The business. **Splash holds no key to it** (D1) |
 | Development signer | Local and testnet smoke tests only | Raw key allowed only when `NODE_ENV !== 'production'` |
 
@@ -50,7 +50,24 @@ A business wallet changes signers by rotation:
 
 The founder nominates the first wallet. Every member must be an owner of the
 account. A wallet in which one member can sign alone must say so at
-registration. After a rotation the business must also:
+registration.
+
+After registration, owners are added and removed by the wallet, which also
+names the recovery party. To replace a signer, even under an owner freeze, the
+wallet adds the person as an owner and then rotates them in. Once the new
+wallet confirms, it lifts the freeze and removes the old owner in one
+transaction. Any one owner can still freeze; only the wallet lifts an owner
+freeze, and only `AdminCap` lifts a compliance one.
+
+What recovery cannot do. A recovery only adds an owner. If the founder loses
+their key before `nominate_wallet`, no wallet can ever be registered for that
+account, because nomination is founder-only and the founder anchor never
+moves; the business applies again (`submit_application`, then KYB). If a
+wallet's quorum is lost, nobody can rotate it, and an owner freeze it does not
+lift stays; the business opens a new account. Its funds stay in its own
+wallet.
+
+After a rotation the business must also:
 
 - move the balance from the old address;
 - revoke the old wallet's allowances;

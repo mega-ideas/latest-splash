@@ -102,9 +102,14 @@ fresh publish and fresh object ids for everything below.
 
 ## 1 · ⚠️ The one decision this runbook cannot make for you
 
-**Custody phase only.** Batch settlement lives in `splash_custody`, which does
-not publish in Phase 0. Without `SPLASH_CUSTODY_PACKAGE_ID` the app refuses
-batches (`custodyPackageIdOrThrow` in `lib/server/sui-settlement.ts`). The
+**Testnet only.** Batch settlement lives in `splash_custody`, which v2 retires
+from the mainnet path for good (D11): app-bound allowances and address
+balances replace pooled settlement and the delegated batch. On mainnet every
+custody path refuses in every settlement mode, and production refuses to boot
+with `SPLASH_CUSTODY_PACKAGE_ID` set. On testnet, without
+`SPLASH_CUSTODY_PACKAGE_ID`, the app refuses batches
+(`custodyPackageIdOrThrow` in `lib/server/sui-settlement.ts`). This section
+is kept for testnet and for the record. The
 custody source has also moved on since this section was written: batches now
 settle through `settlement::settle_sui_batch_delegated` against a
 `PayoutDelegation` (`move/splash_custody/sources/settlement.move`), which takes
@@ -165,7 +170,11 @@ same public keys — if the address differs, stop.
 
 ⚠️ **v2 (24 Oct 2026) changes this step.** Mainnet publishes three packages, in
 order: `splash_core`, then `splash_spend` and `splash_upgrade_delay`, each of
-the last two made immutable in the next transaction. Core's `UpgradeCap` is
+the last two made immutable **in its own publish transaction**: one PTB with
+`Publish`, then `0x2::package::make_immutable` on the `UpgradeCap` it
+returned. Making it immutable in a later transaction leaves a window in which
+one key can upgrade the package, and the verify step (§3.8, through
+`scripts/v2-end-state.mjs`) fails such a publish. Core's `UpgradeCap` is
 not burned; it goes into the `splash_upgrade_delay` wrapper, which allows only
 additive upgrades after 24 hours' public notice. The order and every step are
 in `docs/MAINNET-CHECKLIST.md` ("v2 mainnet steps") and `docs/UPGRADE-POLICY.md`.
@@ -182,8 +191,9 @@ sui client publish --gas-budget 500000000
 
 **Do NOT publish `splash_custody`.** It holds every `Balance<T>` in the system, and the
 Splash holds no licence permitting it to hold client funds. Leaving it unpublished is the
-control: there is no flag to flip, because the bytecode does not exist on chain. It
-publishes when the e-money licence is granted — see `STATUS.md`.
+control: there is no flag to flip, because the bytecode does not exist on chain. v2
+retires it from the mainnet path for good (D11); it runs on testnet only — see
+`STATUS.md`.
 
 The current combined package is **immutable**, so this mints a NEW package id and every
 shared object from the old package is unusable by the new one.
@@ -227,9 +237,12 @@ and record ids for:
   `max_deviation_ppm`, `max_staleness_ms`, `max_slippage_bps`,
   `min_depth_base_units`, `min_settlement_amount`, `allowed_deepbook_pools`.
   The last two need care:
-  **`min_settlement_amount`** — the $100 floor, in the settled coin's MINOR
-  UNITS (100_000_000 for 6-decimal USDC). Zero is rejected, so the floor cannot
-  be disabled by accident;
+  **`min_settlement_amount`** — the v2 bank-payout floor, in the settled
+  coin's MINOR UNITS: `payment_intent` holds every bank payout (kind 1) to the
+  larger of this and 99 USDC, at creation and at settlement (abort 434).
+  100_000_000 makes the v2 bank-payout floor 100 USDC. Wallet,
+  Splash-business and cross-chain payments have no floor. Zero is rejected,
+  so the floor cannot be disabled by accident;
   **`allowed_deepbook_pools: vector<ID>`** — the venue whitelist (audit
   S-12). Must be non-empty: pass the DeepBook pool id you intend to run against,
   i.e. exactly what `DEEPBOOK_POOL_ID` will hold. An empty vector aborts (355)
@@ -243,8 +256,8 @@ and record ids for:
   → shared `BusinessAccount`, then `verify_business` (`AdminCap`, the account,
   `risk_score`).
 
-**Custody phase only.** These live in `splash_custody`, which does not publish
-in Phase 0. Skip them now:
+**Testnet only.** These live in `splash_custody`, which v2 retires from the
+mainnet path for good (D11). Skip them on mainnet:
 `settlement` pool → `SettlementPool<SUI>`;
 `smart_treasury::init_treasury` → `SmartTreasury<SUI>`;
 `dual_treasury` buffer if USDT is in use.
@@ -307,7 +320,7 @@ remove that file too if it exists.
 ```
 SPLASH_CORE_PACKAGE_ID=<new core package id>
 SPLASH_PACKAGE_ID=<same core package id>    # legacy alias: production refuses to boot without it; the health check and the scripts read it
-SPLASH_CUSTODY_PACKAGE_ID=                  # EMPTY in Phase 0
+SPLASH_CUSTODY_PACKAGE_ID=                  # EMPTY: retired in v2 (D11); production on mainnet refuses to boot with it
 SPLASH_ADMIN_CAP_ID=<from 3.2>              # now owned by the multisig
 SPLASH_TREASURY_CAP_ID=<from 3.2>           # cold multisig; recorded, not read by the app
 SPLASH_ANCHOR_CAP_ID=<new_cap_id from 3.4>  # hot server
@@ -318,9 +331,10 @@ SPLASH_COMPLIANCE_CAP_ID=<new>              # unchanged by transfer_cap in 3.5
 SPLASH_BUSINESS_ACCOUNT_ID=<new>
 DEEPBOOK_POOL_ID=<the pool passed to compliance_config::create>
 ```
-Custody phase only, leave blank in Phase 0: `SPLASH_TREASURY_ID`
-(`SettlementPool<SUI>`), `SPLASH_SMART_TREASURY_SUI_ID`,
-`SPLASH_PAYOUT_DELEGATION_ID`.
+Testnet custody only, blank on mainnet (v2 retires `splash_custody` from the
+mainnet path, D11): `SPLASH_TREASURY_ID` (`SettlementPool<SUI>`),
+`SPLASH_SMART_TREASURY_SUI_ID`, `SPLASH_PAYOUT_DELEGATION_ID`. Production on
+mainnet refuses to boot with `SPLASH_PAYOUT_DELEGATION_ID` set.
 
 Rules the app enforces:
 - `SPLASH_ANCHOR_CAP_ID` and `SPLASH_CAP_REGISTRY_ID` are required. Every call the
@@ -351,8 +365,8 @@ falling back to `SPLASH_PACKAGE_ID`; `SPLASH_ANCHOR_CAP_ID`;
 `SPLASH_CAP_REGISTRY_ID`; `SPLASH_PEG_STATE_ID`; `SPLASH_COMPLIANCE_CONFIG_ID`;
 `SPLASH_BUSINESS_ACCOUNT_ID`; `SPLASH_ADMIN_CAP_ID` when set; `USDC_TYPE`, or
 Circle's USDC on the network when it is unset), plus
-`SPLASH_VERIFY_BUSINESS_ACCOUNT_ID` for the payment check, and checks, on the
-core package only:
+`SPLASH_VERIFY_BUSINESS_ACCOUNT_ID` for the payment check and the end-state
+ids below, and checks:
 - the package id matches `move/splash_core/Published.toml` for the chain (a
   failure if it names another package, a warning if the file has no record
   for this chain);
@@ -366,6 +380,15 @@ core package only:
   failure here means the package was published from different source: publish
   the current `splash_core` (§3.2). The checks that call a mismatched function
   report that instead of running;
+- D11's end state, through `scripts/v2-end-state.mjs`: `splash_spend`
+  (`SPLASH_SPEND_PACKAGE_ID`) and `splash_upgrade_delay`
+  (`SPLASH_UPGRADE_DELAY_PACKAGE_ID`) are version 1 with no later version,
+  and each publish transaction was exactly `Publish` then
+  `0x2::package::make_immutable`, so no `UpgradeCap` for them outlived it;
+  core's `UpgradeCap` is in `SPLASH_UPGRADE_WRAPPER_ID`, additive (128), held
+  by `SPLASH_GOVERNANCE_ADDRESS`. An unset id is reported skipped, never
+  passed. It does not read the `ComplianceConfig` registries; check those by
+  hand (`docs/MAINNET-CHECKLIST.md`);
 - `peg_monitor::update_peg` on the AnchorCap and CapRegistry emits `PegUpdated`;
 - `audit_anchor::anchor_audit_hash` on its own emits `AuditAnchored`;
 - the v2 wallet path, in one transaction sent as the registered wallet of
@@ -460,7 +483,8 @@ book's spread is ~43 bps and a mainnet-grade 30 bps band captures zero bids.
 mainnet.
 
 **After this publish**, prove a batch settles for real. That needs
-`splash_custody`, which publishes only with the licence, and
+`splash_custody`, which v2 retires from the mainnet path for good (D11), so
+this is a testnet proof only, and
 `scripts/e2e-testnet.mjs` no longer runs a batch: since 2026-09-26 it checks the
 core package only (§3.8). Its last batch flow (`testBatch` in
 `git show 248137e:scripts/e2e-testnet.mjs`) is stale too: its `update_peg`
@@ -482,7 +506,7 @@ Enforced at four layers so no single bypass opens a sub-minimum payout:
 | UI | transfer step + batch authorization summary (blocks before a TOTP is spent) |
 | API | `transfers/authorize`, `batches/authorize` → 400 `below_minimum` |
 | Policy engine | `evaluatePolicy` → `BLOCK` — the choke point in-chat approval, the queue and submit-time re-evaluation all share |
-| Contract | `settlement::settle_payment` and `settle_batch` → abort 107 `E_BELOW_MINIMUM` against `ComplianceConfig.min_settlement_amount` |
+| Contract | v2: `payment_intent::create_for_wallet` / `create_for_app` and every settle path → abort 434 `E_BELOW_SETTLEMENT_FLOOR` for a bank payout below max(99 USDC, `min_settlement_amount`). Per payout, not per batch total. The retired `splash_custody` path (`settlement::settle_payment`, `settle_batch`) aborts 107 `E_BELOW_MINIMUM` |
 
 The floor applies to a single transfer and to a batch **TOTAL** (not per row — a
 payroll run legitimately contains small rows). Internal transfers and treasury
@@ -494,4 +518,7 @@ non-positive override falls back to $100 rather than disabling the rule.
 On-chain it is `min_settlement_amount` in **minor units**, set at
 `compliance_config::create` and changeable with
 `scripts/set-compliance-config.mjs --min-settlement <minor units>` (that script
-auto-detects whether the deployed contract has the field yet).
+auto-detects whether the deployed contract has the field yet). On v2 it binds
+bank payouts only. `ComplianceCap` can only raise it (`tighten`); lowering it
+is `AdminCap` (`admin_set_parameters`). An intent opened before a raise no
+longer settles if it is below the new floor.

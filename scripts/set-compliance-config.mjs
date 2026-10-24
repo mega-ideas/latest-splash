@@ -172,7 +172,8 @@ if (NETWORK === 'mainnet' && next.slippageBps > 50) {
 console.log('applying:', next);
 
 // ABI straddle: the package deployed today has a 4-parameter `update`. The
-// republished package adds `min_settlement_amount` (the on-chain $100 floor).
+// republished package adds `min_settlement_amount`. On v2 it is the bank-payout
+// floor: payment_intent holds every bank payout to max(99 USDC, this value).
 // Detect which one we are talking to from the config object itself rather than
 // guessing, so this script keeps working across the publish.
 const hasMinSettlement = current.min_settlement_amount !== undefined;

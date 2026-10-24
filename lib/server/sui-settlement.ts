@@ -853,11 +853,13 @@ function refuseRetiredCustodyPathOnMainnet(path: string): void {
  * Elsewhere: Splash cannot hold client funds — enforced structurally rather
  * than by a licence condition, and a precondition for operating before an
  * e-money licence exists. So
- * splash_custody — every struct that holds a `Balance<T>` — is NOT PUBLISHED.
- * This is not a feature flag: the bytecode is absent, so there is nothing to
- * flip and nothing to bypass. The error names the licence rather than reporting
- * a missing environment variable, because "not configured" would read as a
- * deployment mistake when it is in fact the regulatory posture working.
+ * splash_custody — every struct that holds a `Balance<T>` — is NOT PUBLISHED
+ * on mainnet, and v2 retired it from that path for good (D11); it runs on
+ * testnet only. This is not a feature flag: the bytecode is absent, so there
+ * is nothing to flip and nothing to bypass. The error names the retirement
+ * rather than only reporting a missing environment variable, because "not
+ * configured" would read as a deployment mistake when it is the design
+ * working.
  */
 function custodyPackageIdOrThrow(): string {
   refuseRetiredCustodyPathOnMainnet('Custody settlement');
@@ -870,8 +872,9 @@ function custodyPackageIdOrThrow(): string {
   if (legacy && !(getContractConfig().corePackageId ?? '').trim()) return legacy;
 
   throw new Error(
-    'Batch settlement requires the splash_custody package, which publishes when the Labuan ' +
-      'e-money licence is granted. Phase 0 settles through payment_intent, which holds no balance. See STATUS.md.',
+    'Batch settlement requires the splash_custody package, which is not published here. v2 retired it ' +
+      'from the mainnet path for good (D11); on testnet it needs SPLASH_CUSTODY_PACKAGE_ID. Phase 0 settles ' +
+      'through payment_intent, which holds no balance. See STATUS.md.',
   );
 }
 
@@ -1025,10 +1028,9 @@ export async function confirmComposedPaymentOnSui(input: {
     // composed path, which otherwise holds no balance. It must resolve through custody
     // package, not the core one: addressing a custody module with the core
     // package id is not a compile error, it is a runtime failure deep inside a
-    // PTB. On mainnet this throws the retired-path error (D11); elsewhere, in
-    // Phase 0, the licence-named one, which is the honest outcome — the
-    // treasury allocation is a custodial operation and the licence does not
-    // permit it yet.
+    // PTB. On mainnet this throws the retired-path error (D11); on testnet
+    // without a custody package, the not-published one, which is the honest
+    // outcome — the treasury allocation is a custodial operation.
     const custodyPackageId = custodyPackageIdOrThrow();
     const [treasuryCoin] = tx.splitCoins(tx.gas, [treasuryAmountMist]);
     tx.moveCall({
@@ -1634,9 +1636,9 @@ export async function recordBatchSettlementOnSui(input: {
   }
   const cfg = getContractConfig();
   // Core modules (peg_monitor) and custody modules (settlement) now live in
-  // SEPARATE packages. Under Phase 0 the custody package is not published, so
-  // this resolution is what turns 'the licence does not permit custody' into a
-  // clear error instead of an ObjectNotFound deep inside a PTB.
+  // SEPARATE packages. The custody package is not published on mainnet (v2
+  // retired it, D11), so this resolution is what turns 'there is no custody
+  // here' into a clear error instead of an ObjectNotFound deep inside a PTB.
   const SPLASH_PACKAGE_ID = corePackageIdOrThrow();
   const SPLASH_CUSTODY_PACKAGE_ID = custodyPackageIdOrThrow();
   const SPLASH_TREASURY_ID = configIdOrThrow('treasuryId', 'SPLASH_TREASURY_ID');
