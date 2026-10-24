@@ -180,3 +180,28 @@ test('a ComplianceCap that gains store, declared with postfix abilities, is caug
   assert.equal(r.exitCode, 1, r.output);
   assert.match(r.output, /store/);
 });
+
+// Found by the independent check of the hardened script: an expression that
+// starts with the allowed literal is not that literal.
+test('a pause that writes `true && false` is caught', () => {
+  const r = runWith((s) => {
+    const edited = s.replace(
+      /(public fun pause\(config: &mut ComplianceConfig[^{]*\{[\s\S]*?)config\.paused = true;/,
+      '$1config.paused = true && false;',
+    );
+    assert.notEqual(edited, s, 'the fixture edits the real pause');
+    return edited;
+  });
+  assert.equal(r.exitCode, 1, r.output);
+  assert.match(r.output, /\bpause\b/);
+});
+
+test('a legacy switch that writes `false || on` is caught', () => {
+  const r = runWith(
+    plant(`public fun legacy_trick(config: &mut ComplianceConfig, _admin: &AdminCap, on: bool) {
+    config.legacy_enabled = false || on;
+}`),
+  );
+  assert.equal(r.exitCode, 1, r.output);
+  assert.match(r.output, /legacy_trick/);
+});
