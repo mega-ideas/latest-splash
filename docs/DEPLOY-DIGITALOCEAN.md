@@ -175,6 +175,11 @@ new build refuses to install or start on the old runtime and environment.
    `OPERATOR_ALERT_WEBHOOK_URL`); or when it cannot read both objects in
    full. A 502 is again an alert in itself. It does not read `FeeConfig`:
    owner alerts for fee schedule and fee recipient proposals are Phase 2.
+   Schedule `https://<domain>/api/cron/wallet-signing` hourly (v2 §4.1): it
+   closes Business Splash Wallet signature requests past their expiry and
+   clears the partial signatures they held. It answers 502 without a
+   database, and when any partial signature is still held for a closed
+   request.
 
 **Redeploys**: push to `main` → App Platform rebuilds, runs the pre-deploy
 migration job, then deploys. Deleted files disappear from the server because

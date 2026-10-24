@@ -164,6 +164,17 @@ procedure in [`docs/UPGRADE-POLICY.md`](UPGRADE-POLICY.md).
       and a test proposal on testnet reached every test owner. Against the
       mainnet ids it answers 200. A 502 naming `SPLASH_UPGRADE_WRAPPER_ID` or
       `SPLASH_COMPLIANCE_CONFIG_ID` means that id is not the canonical object.
+- [ ] **The hardware 2-of-3 passkey check has passed on testnet** (owed from
+      Phase 0): three people on three kinds of device, the runbook in
+      `docs/v2/phase2-business-wallet.md`, `scripts/wallet-hardware-check.mjs`
+      output and the executed registration digest recorded. No business
+      wallet is created on mainnet before it.
+- [ ] A testnet dry run shows a transaction sponsored from the operator's SUI
+      **address balance** (no gas coin) is accepted, before
+      `WALLET_GAS_SPONSOR=operator` is set. The operator's SUI address balance
+      is funded, within `OPERATOR_HOT_BALANCE_CEILING_MICRO`'s intent.
+- [ ] The wallet signature sweep (`/api/cron/wallet-signing`) is scheduled
+      hourly and answers 200.
 
 **Partners and legal**
 

@@ -30,6 +30,43 @@ The remaining four modules (`smart_treasury`, `payment_intent`, `audit_anchor`, 
 
 ---
 
+## v2 Phase 2 §4.1 — the Business Splash Wallet backend — 2026-10-25
+
+Design: `docs/v2/phase2-business-wallet.md`.
+
+- **Signers sign exactly what they see (review B10).** A signature request
+  stores the exact transaction bytes and their digest. What a signer is shown
+  (payee, amount, asset, fee bound, quote deadline, new wallet members) is
+  decoded from those bytes on the server (`lib/wallet/wallet-tx-describe.ts`),
+  never from client state, and the same decoder runs on a signer's device.
+  A partial signature is accepted only if it verifies over the stored bytes
+  under that signer's own key, with the digest the signer reviewed. Tampered
+  bytes, a borrowed key and a replayed signature all fail there.
+- **The reader is also a refusal.** A wallet transaction may contain only the
+  v2 core wallet and payment calls and the plain USDC balance calls. Every
+  `0x2::address_alias` call, any other package, gas-coin use, a withdrawal
+  from the sponsor's or an allowance's balance, and any object other than the
+  org's own account and the configured config objects are refused before
+  anything is stored or signed.
+- **Partial signatures** live in Postgres only while a request collects, and
+  are cleared in the statement that closes it (executed, failed, expired,
+  cancelled); an hourly sweep closes expired requests. Requests last at most
+  24 hours and never past a payment's quote. Nothing logs a signature.
+- **Simulate before sign.** No request is opened for bytes that do not
+  simulate, and the bytes are simulated again before they are submitted.
+- **Gas.** Plain transfers go gasless. Move calls are sponsored by the
+  operator signer (KMS) from its SUI address balance, with no gas coin in the
+  transaction, a 0.05 SUI budget cap, and the sponsor's own check of the
+  bytes before it signs. The sponsor pays gas and never pays or receives
+  client money (D3). Off unless `WALLET_GAS_SPONSOR=operator`.
+- **Tenant isolation.** Every route takes the org from the session
+  (`requireSessionAccount`); every store read takes the org; another org's
+  request is a 404. The account a wallet transaction names is the org's own
+  `sui_business_account_id`, never the single-tenant fallback.
+- **Open:** the hardware 2-of-3 passkey check (people with devices), the
+  address-alias watcher, zkLogin members, and a testnet dry run of a
+  sponsored transaction paying gas from an address balance.
+
 ## v2 Phase 1 — business wallets, spending rules, a delayed upgrade — 2026-10-24
 
 Brief: `SPLASH_SUI_V2_PROMPT.md` §3. Design and its two reviews:
