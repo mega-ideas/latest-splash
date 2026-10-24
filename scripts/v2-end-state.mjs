@@ -430,7 +430,7 @@ export async function checkFeeRecipient(node, { feeConfigId, corePackageId, fina
   if (pending && multisig && pending.address !== multisig) {
     return result(
       'FAIL',
-      `${id}: a fee recipient change to ${pending.address} is pending, not the finance multisig ${multisig}. Propose the finance multisig (fee_config::propose_fee_recipient), which replaces it.`,
+      `${id}: a fee recipient change to ${pending.address} is pending, not the finance multisig ${multisig}. Withdraw it (fee_config::cancel_fee_recipient_proposal), or propose the finance multisig (fee_config::propose_fee_recipient), which replaces it.`,
     );
   }
   if (recipient.none) {
