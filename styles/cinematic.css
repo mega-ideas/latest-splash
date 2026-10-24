@@ -20,7 +20,7 @@
   --cin-line: rgba(12, 62, 72, .16);
   position: relative;
   order: 1; /* .iso-landing lays sections out with flex order */
-  height: 520vh;
+  height: 440vh;
   color: var(--cin-ink);
   background: linear-gradient(180deg, #fffdf8 0%, var(--cin-paper) 30%, #fbf3e7 70%, var(--cin-paper-deep) 100%);
 }

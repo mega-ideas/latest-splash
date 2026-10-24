@@ -160,13 +160,16 @@ test('landing is the v1 cinematic: hero district, five steps with manual entry, 
   const invoiceLoop = await readFile(new URL('../components/invoices/InvoiceLoop.tsx', import.meta.url), 'utf8');
 
   assert.match(claims, /headline: 'Collect USD\. Pay Southeast Asia\. Keep cash working\.'/);
-  // The hero art is still the versioned district raster, owned by the
-  // cinematic; the landing keeps the loops and copilot sections and offers
-  // both ways into a payment — an invoice, or a hand-filled transfer.
-  assert.match(cinematic, /hero-district-v\d+\.png/);
+  // The hero art is the versioned district, owned by the cinematic and
+  // shipped as WebP through the image pipeline since v2 Phase 4 (the PNG is
+  // never requested); the landing keeps the loops and copilot sections, and
+  // how it works offers both ways into a payment: from an invoice, or typed
+  // in by hand.
+  assert.match(cinematic, /landingImage\('hero'\)/);
   assert.match(landing, /id="loops"/);
-  assert.match(landing, /Five steps/);
-  assert.match(landing, /Invoice in, or type it in/);
+  const how = await readFile(new URL('../components/landing/HowItWorks.tsx', import.meta.url), 'utf8');
+  assert.match(how, /Five steps/);
+  assert.match(how, /from an invoice or typed in by hand/);
   assert.doesNotMatch(landing, /Early Pay|id="supply"/);
   assert.match(page, /<IsometricLanding/);
   assert.match(page, /landingFaq\(/, 'the FAQ JSON-LD is generated from the page copy, not duplicated');

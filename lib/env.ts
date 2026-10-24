@@ -358,6 +358,8 @@ export const envSchema = z.object({
   QUOTE_TTL_SECONDS: int(30, 1),
   FUNDING_DISCOUNT_BPS: int(0),
   PHP_PER_USDC: num(56.5),
+  /** The sandbox Indonesia partner's rate (lib/server/durianpay.ts); never used in production. */
+  IDR_PER_USDC: num(16250),
   MYR_TO_USD_RATE: opt(z.coerce.number().positive()),
   FALLBACK_MYR_USD_RATE: opt(z.coerce.number().positive()),
   RATE_HOLD_HOURS: int(48, 1),
@@ -404,6 +406,8 @@ export const envSchema = z.object({
   /* Payout and settlement partners. Mocked when USE_MOCK_APIS or unset. */
   PDAX_API_BASE_URL: url,
   PDAX_API_KEY: optional,
+  /** Indonesia payout partner (lib/server/durianpay.ts). Unset: sandbox off production, no quote on it. */
+  DURIANPAY_API_KEY: optional,
   LABUAN_API_BASE_URL: withDefault(str.url(), 'https://settlement.splash-labuan.internal'),
   LABUAN_API_KEY: optional,
   LABUAN_OTC_MIN_USD: int(10_000),

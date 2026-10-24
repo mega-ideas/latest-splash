@@ -1,0 +1,46 @@
+{
+  "hero": {
+    "source": "cinematic/hero-district-v5.png",
+    "sourceSha256": "03696a894020f071",
+    "recolouredPixels": 3924,
+    "variants": [
+      {
+        "src": "/cinematic/landing/hero-1600.webp",
+        "width": 1600,
+        "height": 896,
+        "bytes": 126854
+      },
+      {
+        "src": "/cinematic/landing/hero-2400.webp",
+        "width": 2400,
+        "height": 1344,
+        "bytes": 210240
+      }
+    ],
+    "phone": {
+      "src": "/cinematic/landing/hero-phone.webp",
+      "width": 900,
+      "height": 672,
+      "bytes": 96740
+    }
+  },
+  "liquidity-pools": {
+    "source": "cinematic/liquidity-pools.png",
+    "sourceSha256": "fdce574e303e4079",
+    "recolouredPixels": 0,
+    "variants": [
+      {
+        "src": "/cinematic/landing/liquidity-pools-1200.webp",
+        "width": 1200,
+        "height": 896,
+        "bytes": 55884
+      }
+    ],
+    "phone": {
+      "src": "/cinematic/landing/liquidity-pools-phone.webp",
+      "width": 900,
+      "height": 884,
+      "bytes": 61932
+    }
+  }
+}

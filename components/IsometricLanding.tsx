@@ -21,27 +21,34 @@ import {
 } from 'lucide-react';
 
 import FloatingToken from '@/components/landing/FloatingToken';
+import HowItWorks from '@/components/landing/HowItWorks';
+import PartnersRail, { type SignedPartner } from '@/components/landing/PartnersRail';
+import ProductSection from '@/components/landing/ProductSection';
 import SettlementCinematic from '@/components/landing/SettlementCinematic';
 import WaitlistCta from '@/components/landing/WaitlistCta';
 import LocalTime from '@/components/LocalTime';
 import ControlPlaneExplainer from '@/components/oxwal/ControlPlaneExplainer';
 import RoadmapChip from '@/components/supply/RoadmapChip';
 import { claims, lockedCopy } from '@/content/claims';
-import { pricingSummary, type PricingSummary } from '@/lib/fees/copy';
+import { pricingSummary, scheduleToWire, type FeeScheduleWire, type PricingSummary } from '@/lib/fees/copy';
 import { LAUNCH_SCHEDULE } from '@/lib/fees/schedule';
 import { formatBps } from '@/lib/fx/calculator';
 import { getComparisonBaseline } from '@/lib/fx/comparison-baselines';
 import { formatMinor } from '@/lib/money';
+import { landingImage, type LandingImage } from '@/lib/landing/images';
 import { BRAND } from '@/content/brand';
 import { CUSTODY_LICENCE } from '@/lib/custody-phase-rules';
 
-const operatingLayers = [
+const LIQUIDITY_ART = landingImage('liquidity-pools');
+
+const operatingLayers: Array<{ number: string; label: string; title: string; copy: string; image: string; art?: LandingImage; imageAlt: string; meta: string }> = [
   {
     number: '01',
     label: 'Liquidity',
     title: 'Keep USD productive.',
     copy: 'Keep payout inventory ready while treasury projections model how excess USD could remain productive.',
-    image: '/cinematic/liquidity-pools.png',
+    image: LIQUIDITY_ART.src,
+    art: LIQUIDITY_ART,
     imageAlt: 'Tiered isometric liquidity pools with gold coin reserves flowing between basins',
     meta: 'Available cash - projected treasury',
   },
@@ -64,105 +71,6 @@ const operatingLayers = [
     meta: 'Simulation - human approval',
   },
 ];
-
-/** The five steps. Delivery quotes Splash's bank fee from the schedule (A1 §2.7). */
-const flowStepsFor = (pricing: PricingSummary) => [
-  {
-    id: 'intake',
-    number: '01',
-    title: 'Invoice in, or type it in',
-    description:
-      'Two ways in: collect through a pay link or upload an accepted invoice — or start a manual transfer and fill in the recipient, bank details, amount, and purpose yourself.',
-    image: '/cinematic/flow-collect-v4.png',
-    imageAlt: 'Collect isometric typography with an invoice, pay link, and dollar coins',
-    stat: 'Invoice or manual entry',
-  },
-  {
-    id: 'review',
-    number: '02',
-    title: 'Review quotes',
-    description: 'KYB, recipient status, route, fee, treasury floor, and evidence labels appear before signature.',
-    image: '/cinematic/flow-review-quotes-v4.png',
-    imageAlt: 'Review quotes isometric typography with FX quote cards, checklist, and approval stamp',
-    stat: 'Human approval',
-  },
-  {
-    id: 'settle',
-    number: '03',
-    title: 'Settle in one signature',
-    description: 'The prepared payment either completes as approved or stops safely before funds move.',
-    image: '/cinematic/flow-settle-v4.png',
-    imageAlt: 'Settle isometric typography with a coin passing an approval gate and a signing pen',
-    stat: lockedCopy.speed,
-  },
-  {
-    id: 'deliver',
-    number: '04',
-    title: 'Deliver locally',
-    description: 'Pay a verified supplier or sweep value into the recipient ladder where the corridor allows it.',
-    image: '/cinematic/flow-deliver-v4.png',
-    imageAlt: 'Deliver isometric typography with a truck bringing a peso coin to a local shop',
-    stat: pricing.bankFeePhrase,
-  },
-  {
-    id: 'proof',
-    number: '05',
-    title: 'Anchor the proof',
-    description: 'Receipts, encrypted documents, and daily audit evidence remain available for review.',
-    image: '/cinematic/flow-proof-v4.png',
-    imageAlt: 'Proof isometric typography with an archive vault, sealed certificate, and shield badge',
-    stat: 'A record that lasts',
-  },
-];
-
-/* Metrics ticker: the moving bridge band at the bottom of the hero. Splash's
-   fees are the schedule's (A1 §2.7): free between Splash businesses, a rate
-   to a bank, and "None yet" while FeeConfig's fees are off. */
-const marqueeFor = (pricing: PricingSummary) => [
-  ['1 live testnet', 'MY to PH corridor'],
-  ['Modeled routes', 'expand with controls'],
-  ['~400ms', 'Sui settlement finality'],
-  [pricing.business, 'between Splash businesses'],
-  [pricing.bankFee, 'Splash fee to a bank'],
-  ['Human approved', 'AI recommendations'],
-  ['Stored proof', 'A record that lasts'],
-];
-
-const partnerRail: Array<{ src: string; name: string; role: string; logoClass?: string }> = [
-  { src: '/stripe-logo.svg', name: 'Stripe', role: 'USD collection' },
-  { src: '/partners/airwallex.png', name: 'Airwallex', role: 'bank rails', logoClass: 'iso-airwallex-logo' },
-  { src: '/partners/pyth.png', name: 'Pyth', role: 'FX and peg data' },
-  { src: '/deepbook-mark.png', name: 'DeepBook', role: 'amount-sized liquidity', logoClass: 'iso-deepbook-logo' },
-  { src: '/sumsub-logo.png', name: 'Sumsub', role: 'KYB and KYC' },
-  { src: '/sui-logo-blue.svg', name: 'Sui', role: 'settlement network' },
-];
-
-/** Partner badge: logo only at rest. Hover (or focus) dims the logo and
-    reveals the centred name + role. Click still balloon-pops the logo. */
-function PartnerBadge({ src, name, role, logoClass }: (typeof partnerRail)[number]) {
-  const [popping, setPopping] = useState(false);
-  return (
-    <button
-      type="button"
-      className="iso-partner-item cin-partner"
-      onClick={() => setPopping(true)}
-      aria-label={`${name} — ${role}`}
-    >
-      <span
-        className={`cin-partner-logo ${popping ? 'is-popping' : ''}`}
-        onAnimationEnd={(event) => {
-          if (event.animationName === 'cin-balloon') setPopping(false);
-        }}
-      >
-        <Image src={src} alt={`${name} logo`} width={240} height={140} className={logoClass} />
-      </span>
-      <span className="cin-partner-reveal" aria-hidden="true">
-        <strong>{name}</strong>
-        <small>{role}</small>
-      </span>
-    </button>
-  );
-}
 
 /* The comparison's competitor figures (the A1 review). The bank and
    fintech columns are the reviewed category midpoints for USD to PHP from
@@ -381,7 +289,7 @@ const headerNavItems = [
   { href: '#how-it-works', label: 'How it works', detail: '5 steps' },
   { href: '#platform', label: 'Platform', detail: 'Pay + treasury' },
   { href: '/working-capital', label: 'Working capital', detail: 'Supply loop' },
-  { href: '#corridors', label: 'Routes', detail: 'MY-PH testnet' },
+  { href: '#corridors', label: 'Routes', detail: 'PH and ID' },
   { href: '#comparison', label: 'Compare', detail: 'Fees + speed' },
   { href: '#copilot', label: 'Zeke', detail: 'Prepare + approve' },
 ];
@@ -395,7 +303,7 @@ const loopCards = [
     copy: 'Collect USD, pay Southeast Asia. Every approved payout builds verified counterparties and settlement history.',
     image: '/isometric/loop-settle-v3.png',
     imageAlt: 'Isometric settlement: a USD coin crossing an approved rail in minutes to arrive as a PHP coin',
-    meta: 'USD → PHP · live on testnet',
+    meta: 'USDC → PHP and IDR',
     roadmap: false,
   },
   {
@@ -451,11 +359,22 @@ function ReceiptArtFee({ value }: { value: string }) {
  * the schedule in force (lib/fees/fee-config.ts publishedFeeSchedule). The
  * launch schedule is only the default for a caller that passes none.
  */
-export default function IsometricLanding({ isPhone = false, pricing = LAUNCH_PRICING }: { isPhone?: boolean; pricing?: PricingSummary }) {
-  const flowSteps = flowStepsFor(pricing);
-  const marqueeItems = marqueeFor(pricing);
-  const [activeFlowId, setActiveFlowId] = useState(flowSteps[0].id);
-  const activeFlow = flowSteps.find((step) => step.id === activeFlowId) ?? flowSteps[0];
+export default function IsometricLanding({
+  isPhone = false,
+  pricing = LAUNCH_PRICING,
+  fees,
+  signedPartners = [],
+  fundingPartners = [],
+}: {
+  isPhone?: boolean;
+  pricing?: PricingSummary;
+  /** The published schedule and whether its fees are on, for the calculator. */
+  fees: { schedule: FeeScheduleWire; feesOn: boolean };
+  /** Partners whose agreements are signed (SIGNED_PARTNERS), read on the server. */
+  signedPartners?: readonly SignedPartner[];
+  /** The signed funding providers' names, for the Splash Wallet card. */
+  fundingPartners?: readonly string[];
+}) {
   // The control plane reveals below the copilot on demand — a credit-roll,
   // not a second section.
   const [ctrlOpen, setCtrlOpen] = useState(false);
@@ -502,7 +421,7 @@ export default function IsometricLanding({ isPhone = false, pricing = LAUNCH_PRI
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 
     const targets = document.querySelectorAll(
-      '.iso-section > .iso-shell, .iso-partner-rail > .iso-shell',
+      '.iso-section > .iso-shell',
     );
     const observer = new IntersectionObserver(
       (entries) => {
@@ -554,10 +473,6 @@ export default function IsometricLanding({ isPhone = false, pricing = LAUNCH_PRI
           </nav>
 
           <div className="iso-header-actions">
-            <span className="iso-header-status">
-              <small>Sandbox</small>
-              <strong>MY-PH testnet</strong>
-            </span>
             <Link href="/signup" className="iso-button iso-button-small">
               Start sending
               <ArrowDownRight aria-hidden="true" />
@@ -568,158 +483,12 @@ export default function IsometricLanding({ isPhone = false, pricing = LAUNCH_PRI
 
       <SettlementCinematic isPhone={isPhone} pricing={pricing} />
 
-      <div className="iso-marquee is-static" aria-label="Platform metrics">
-        <div className="iso-marquee-track">
-          {[...marqueeItems, ...marqueeItems].map(([value, label], index) => (
-            <div className="iso-marquee-item" key={`${value}-${index}`}>
-              <strong>{value}</strong>
-              <span>{label}</span>
-              <i aria-hidden="true">◆</i>
-            </div>
-          ))}
-        </div>
-      </div>
+      <ProductSection fees={fees} />
 
-      <section id="loops" className="iso-section iso-loops">
-        <div className="cin-drop" style={{ top: 28, right: '4%' }} aria-hidden="true">
-          <FloatingToken src="/cinematic/token-usd.png" alt="US dollar token" size={104} float="cin-float-slow" />
-        </div>
-        <div className="iso-shell">
-          <div className="iso-section-heading iso-heading-split">
-            <div>
-              <p className="iso-kicker">The three loops</p>
-              <h2 className="iso-section-title">
-                Move it. Grow it.
-                <span>Finance it.</span>
-              </h2>
-            </div>
-            <p>
-              Idle dollars on Sui already move for free — Splash&apos;s job is what the transfer
-              alone can&apos;t do. Settle in minutes. Save while it waits. Supply turns invoices
-              into working capital.
-            </p>
-          </div>
+      <PartnersRail signed={signedPartners} />
 
-          <div className="iso-loops-grid">
-            {loopCards.map((loop, index) => (
-              <article className={`iso-loops-card iso-loops-card-${index + 1}`} key={loop.number}>
-                <div className="iso-loops-meta">
-                  <span>{loop.number}</span>
-                  <p>{loop.label}</p>
-                  {loop.roadmap ? <RoadmapChip /> : <em className="iso-loops-live"><i aria-hidden="true" /> Live</em>}
-                </div>
-                <div className="iso-loops-art">
-                  <Image src={loop.image} alt={loop.imageAlt} width={640} height={480} />
-                </div>
-                <div className="iso-loops-copy">
-                  <h3>{loop.title}</h3>
-                  <p>{loop.copy}</p>
-                  <small>{loop.meta}</small>
-                  {loop.roadmap ? (
-                    <Link href="/working-capital" className="iso-inline-link iso-loops-more">
-                      Learn more
-                      <ArrowRight aria-hidden="true" />
-                    </Link>
-                  ) : null}
-                </div>
-              </article>
-            ))}
-          </div>
-
-          <div className="iso-loops-foot">
-            <p className="iso-gasless-note">
-              <strong>Where the fees live:</strong> simple USD payouts ride Sui&apos;s zero-fee
-              rail; programmable settlement is gas-sponsored. You never hold SUI.
-            </p>
-            <Link href="/working-capital" className="iso-button iso-button-small">
-              Explore the Supply loop
-              <ArrowRight aria-hidden="true" />
-            </Link>
-          </div>
-        </div>
-      </section>
-
-      <section className="iso-partner-rail" aria-label="Infrastructure partners and benchmarks">
-        <div className="iso-shell">
-          <div className="iso-partner-intro">
-            <span>Infrastructure &amp; Partners</span>
-            <p>Partners of record on the outside. Settlement and the record inside.</p>
-          </div>
-          <div className="iso-partner-grid">
-            {partnerRail.map((partner) => (
-              <PartnerBadge key={partner.name} {...partner} />
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section id="how-it-works" className="iso-section iso-flow">
-        <div className="cin-drop" style={{ top: 34, right: '5%' }} aria-hidden="true">
-          <FloatingToken src="/cinematic/token-sgd.png" alt="Singapore dollar token" size={112} float="cin-float-drift" />
-        </div>
-        <div className="iso-shell iso-flow-layout">
-          <div className="iso-flow-copy">
-            <p className="iso-kicker">How it works</p>
-            <h2 className="iso-section-title iso-section-title-light">
-              Five steps.
-              <span>No limbo.</span>
-            </h2>
-            <div className="iso-flow-tabs" role="tablist" aria-label="Settlement flow">
-              {flowSteps.map((step) => {
-                const active = activeFlow.id === step.id;
-                return (
-                  <button
-                    key={step.id}
-                    type="button"
-                    role="tab"
-                    aria-selected={active}
-                    className={active ? 'is-active' : ''}
-                    onClick={() => setActiveFlowId(step.id)}
-                  >
-                    <span>{step.number}</span>
-                    <strong>{step.title}</strong>
-                    <ChevronRight aria-hidden="true" />
-                  </button>
-                );
-              })}
-            </div>
-            <div className="iso-flow-branch">
-              <strong>Manual transfer branch</strong>
-              <span>
-                No invoice needed: recipient, bank details, amount, and purpose typed by hand, and
-                checked against KYB before anything is signed.
-              </span>
-            </div>
-            <div className="iso-flow-branch">
-              <strong>Working-capital branch</strong>
-              <span>Accepted invoice to supplier discount offer to buyer approval to settlement proof.</span>
-            </div>
-          </div>
-
-          <div className="iso-flow-visual" role="tabpanel" aria-live="polite">
-            <div className="iso-flow-stat">
-              <small>Current checkpoint</small>
-              <strong>{activeFlow.stat}</strong>
-            </div>
-            <div className="iso-flow-image">
-              <Image
-                key={activeFlow.id}
-                src={activeFlow.image}
-                alt={activeFlow.imageAlt}
-                width={1448}
-                height={1086}
-                priority={activeFlow.id === 'settle'}
-              />
-            </div>
-            <div className="iso-flow-caption">
-              <span>{activeFlow.number}</span>
-              <div>
-                <strong>{activeFlow.title}</strong>
-                <p>{activeFlow.description}</p>
-              </div>
-            </div>
-          </div>
-        </div>
+      <section id="how-it-works" className="iso-section iso-flow" aria-labelledby="how-title">
+        <HowItWorks fundingPartners={fundingPartners} />
       </section>
 
       <section id="comparison" className="iso-section iso-comparison">
@@ -743,7 +512,7 @@ export default function IsometricLanding({ isPhone = false, pricing = LAUNCH_PRI
 
           <div id="corridors" className="iso-corridor-layout iso-corridor-embed">
           <div className="iso-corridor-copy">
-            <p className="iso-kicker">One testnet corridor. Modeled expansion routes.</p>
+            <p className="iso-kicker">PH and ID first. Four more under pilot access.</p>
             <h2 className="iso-section-title">
               USD in.
               <span>Local out.</span>
@@ -753,8 +522,8 @@ export default function IsometricLanding({ isPhone = false, pricing = LAUNCH_PRI
               and regulatory controls are ready market by market.
             </p>
             <div className="iso-route-list">
-              <span className="is-live">PHP testnet</span><span>MYR</span><span>IDR</span><span>VND</span>
-              <span>THB</span><span>SGD</span><span>EUR</span><span>GBP</span>
+              <span className="is-live">PHP</span><span className="is-live">IDR</span><span>MYR</span><span>VND</span>
+              <span>THB</span><span>SGD</span>
             </div>
             <div className="iso-recipient-ladder">
               {recipientLadder.map((step) => (
@@ -833,6 +602,109 @@ export default function IsometricLanding({ isPhone = false, pricing = LAUNCH_PRI
         </div>
       </section>
 
+      <section id="loops" className="iso-section iso-loops">
+        <div className="cin-drop" style={{ top: 28, right: '4%' }} aria-hidden="true">
+          <FloatingToken src="/cinematic/token-usd.png" alt="US dollar token" size={104} float="cin-float-slow" />
+        </div>
+        <div className="iso-shell">
+          <div className="iso-section-heading iso-heading-split">
+            <div>
+              <p className="iso-kicker">The three loops</p>
+              <h2 className="iso-section-title">
+                Move it. Grow it.
+                <span>Finance it.</span>
+              </h2>
+            </div>
+            <p>
+              Idle dollars on Sui already move for free — Splash&apos;s job is what the transfer
+              alone can&apos;t do. Settle in minutes. Save while it waits. Supply turns invoices
+              into working capital.
+            </p>
+          </div>
+
+          <div className="iso-loops-grid">
+            {loopCards.map((loop, index) => (
+              <article className={`iso-loops-card iso-loops-card-${index + 1}`} key={loop.number}>
+                <div className="iso-loops-meta">
+                  <span>{loop.number}</span>
+                  <p>{loop.label}</p>
+                  {loop.roadmap ? <RoadmapChip /> : <em className="iso-loops-live"><i aria-hidden="true" /> Live</em>}
+                </div>
+                <div className="iso-loops-art">
+                  <Image src={loop.image} alt={loop.imageAlt} width={640} height={480} />
+                </div>
+                <div className="iso-loops-copy">
+                  <h3>{loop.title}</h3>
+                  <p>{loop.copy}</p>
+                  <small>{loop.meta}</small>
+                  {loop.roadmap ? (
+                    <Link href="/working-capital" className="iso-inline-link iso-loops-more">
+                      Learn more
+                      <ArrowRight aria-hidden="true" />
+                    </Link>
+                  ) : null}
+                </div>
+              </article>
+            ))}
+          </div>
+
+          <div className="iso-loops-foot">
+            <p className="iso-gasless-note">
+              <strong>Where the fees live:</strong> simple USD payouts ride Sui&apos;s zero-fee
+              rail; programmable settlement is gas-sponsored. You never hold SUI.
+            </p>
+            <Link href="/working-capital" className="iso-button iso-button-small">
+              Explore the Supply loop
+              <ArrowRight aria-hidden="true" />
+            </Link>
+          </div>
+        </div>
+      </section>
+
+      <section id="platform" className="iso-section iso-operating">
+        <div className="cin-drop" style={{ top: 30, right: '5%' }} aria-hidden="true">
+          <FloatingToken src="/cinematic/token-idr-v1.png" alt="Indonesian rupiah token" size={108} float="cin-float-slow" />
+        </div>
+        <div className="iso-shell">
+          <div className="iso-section-heading iso-heading-split">
+            <div>
+              <p className="iso-kicker">The platform</p>
+              <h2 className="iso-section-title">
+                Everything between invoice
+                <span>and settlement.</span>
+              </h2>
+            </div>
+            <p>
+              One approval-gated desk for liquidity, settlement, and treasury. Funding, payout,
+              receivables, and treasury actions stay sandboxed until those rails are active.
+            </p>
+          </div>
+
+          <div className="iso-layer-grid">
+            {operatingLayers.map((layer, index) => (
+              <article className={`iso-layer-card iso-layer-card-${index + 1}`} key={layer.number}>
+                <div className="iso-layer-meta">
+                  <span>{layer.number}</span>
+                  <p>{layer.label}</p>
+                </div>
+                <div className="iso-layer-art">
+                  {layer.art ? (
+                    <Image src={layer.art.src} loader={layer.art.loader} alt={layer.imageAlt} width={layer.art.width} height={layer.art.height} sizes="(max-width: 900px) 92vw, 440px" />
+                  ) : (
+                    <Image src={layer.image} alt={layer.imageAlt} width={1448} height={1086} />
+                  )}
+                </div>
+                <div className="iso-layer-copy">
+                  <h3>{layer.title}</h3>
+                  <p>{layer.copy}</p>
+                  <small>{layer.meta}</small>
+                </div>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+
       <section id="trust" className="iso-section iso-trust">
         <div className="cin-drop" style={{ top: 30, right: '5%' }} aria-hidden="true">
           <FloatingToken src="/cinematic/token-sui.png" alt="Sui token" size={104} float="cin-float-slow" />
@@ -876,46 +748,6 @@ export default function IsometricLanding({ isPhone = false, pricing = LAUNCH_PRI
           <p className="iso-trust-foot">
             Sandbox environment · Not yet a licensed money-services business · No real money moves
           </p>
-        </div>
-      </section>
-
-      <section id="platform" className="iso-section iso-operating">
-        <div className="cin-drop" style={{ top: 30, right: '5%' }} aria-hidden="true">
-          <FloatingToken src="/cinematic/token-idr-v1.png" alt="Indonesian rupiah token" size={108} float="cin-float-slow" />
-        </div>
-        <div className="iso-shell">
-          <div className="iso-section-heading iso-heading-split">
-            <div>
-              <p className="iso-kicker">The platform</p>
-              <h2 className="iso-section-title">
-                Everything between invoice
-                <span>and settlement.</span>
-              </h2>
-            </div>
-            <p>
-              One approval-gated desk for liquidity, settlement, and treasury. Funding, payout,
-              receivables, and treasury actions stay sandboxed until those rails are active.
-            </p>
-          </div>
-
-          <div className="iso-layer-grid">
-            {operatingLayers.map((layer, index) => (
-              <article className={`iso-layer-card iso-layer-card-${index + 1}`} key={layer.number}>
-                <div className="iso-layer-meta">
-                  <span>{layer.number}</span>
-                  <p>{layer.label}</p>
-                </div>
-                <div className="iso-layer-art">
-                  <Image src={layer.image} alt={layer.imageAlt} width={1448} height={1086} />
-                </div>
-                <div className="iso-layer-copy">
-                  <h3>{layer.title}</h3>
-                  <p>{layer.copy}</p>
-                  <small>{layer.meta}</small>
-                </div>
-              </article>
-            ))}
-          </div>
         </div>
       </section>
 
@@ -1043,7 +875,7 @@ export default function IsometricLanding({ isPhone = false, pricing = LAUNCH_PRI
             </span>
             <p>USD-first settlement infrastructure for Southeast Asian finance teams.</p>
             <div className="cin-footer-status" aria-label="Network status">
-              <span><i aria-hidden="true" /> Sandbox · MY-PH testnet</span>
+              <span><i aria-hidden="true" /> Payouts to PH and ID</span>
               <span><i aria-hidden="true" /> {lockedCopy.speed}</span>
               <span><i aria-hidden="true" /> {lockedCopy.agent}</span>
             </div>

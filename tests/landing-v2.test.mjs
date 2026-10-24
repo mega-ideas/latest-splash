@@ -47,7 +47,7 @@ test('the sections run in section 6 order, and the stats marquee is gone', () =>
   const landing = code('components/IsometricLanding.tsx');
   assert.doesNotMatch(landing, /iso-marquee/, 'no stats marquee');
 
-  const markers = ['<SettlementCinematic', '<ProductSection', '<PartnersRail', 'id="how-it-works"', 'id="comparison"', 'id="loops"', 'id="platform"', 'id="trust"', 'id="copilot"', 'iso-final', '<footer'];
+  const markers = ['<SettlementCinematic', '<ProductSection', '<PartnersRail', 'id="how-it-works"', 'id="comparison"', 'id="loops"', 'id="platform"', 'id="trust"', 'id="copilot"', 'className="iso-section iso-final"', '<footer'];
   const at = markers.map((m) => landing.indexOf(m));
   assert.ok(at.every((i) => i >= 0), `every section is present: ${markers.filter((_, i) => at[i] < 0).join(', ')} missing`);
   assert.deepEqual([...at].sort((a, b) => a - b), at, 'in the order of section 6');

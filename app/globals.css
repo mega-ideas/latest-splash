@@ -5,6 +5,7 @@
 @import "../styles/cinematic.css";
 @import "../styles/mobile-landing.css";
 @import "../styles/landing.css";
+@import "../styles/landing-v2.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -2500,18 +2501,6 @@ body {
     linear-gradient(155deg, #0b424c 0%, #062b33 64%, #041f25 100%);
 }
 
-.iso-flow::before {
-  position: absolute;
-  inset: 0;
-  opacity: .13;
-  content: "";
-  background-image:
-    linear-gradient(rgba(255, 250, 241, .34) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 250, 241, .34) 1px, transparent 1px);
-  background-size: 72px 72px;
-  mask-image: linear-gradient(90deg, transparent, #000 55%, transparent);
-  transform: perspective(700px) rotateX(55deg) scale(1.4);
-}
 
 .iso-flow-layout {
   position: relative;
@@ -6294,24 +6283,25 @@ th.money { text-align: right; }
   .iso-trust-card { transition: none; }
 }
 
-/* CANONICAL section order (founder-approved 2026-07-09; #trust added
-   2026-07-10) — the single source of truth for the landing flex order. The
-   JSX mirrors this sequence for DOM/reading order; .cin-section and
-   .iso-marquee share order 1 in cinematic.css (hero then marquee by DOM
-   order). Do not add a second order map elsewhere. */
+/* CANONICAL section order: v2 brief section 6 (Phase 4, 25 Oct 2026). The
+   single source of truth for the landing flex order; the JSX mirrors it for
+   reading order, and tests/landing-v2.test.mjs holds the two together. The
+   stats marquee is gone. Do not add a second order map elsewhere. */
 .iso-header { order: 0; }
+.cin-section { order: 1; }
 .iso-hero { order: 1; }
-.iso-loops { order: 2; }
+.iso-product { order: 2; }
 .iso-partner-rail { order: 3; }
-.iso-flow { order: 4; }
+.iso-flow { order: 4; } /* #how-it-works */
 .iso-corridors { order: 5; }
-.iso-comparison { order: 6; }
-.iso-trust { order: 7; } /* #trust — dark control-plane fold after the table's claims */
-.iso-operating { order: 8; } /* #platform (merged operating-layer + operations) */
+.iso-comparison { order: 5; } /* routes and comparison, one section */
+.iso-loops { order: 6; }
+.iso-operating { order: 7; } /* #platform */
+.iso-trust { order: 8; }
 .iso-supply { order: 9; }
-.iso-copilot { order: 10; }
-.iso-final { order: 11; }
-.iso-footer { order: 12; }
+.iso-copilot { order: 9; } /* Zeke */
+.iso-final { order: 10; }
+.iso-footer { order: 11; }
 .iso-back-to-top { order: 99; }
 /* Removed 2026-07-10 (mainnet-ready pruning): marquee, #walrus, #readiness,
    #operations tool grid + modal, and the fabricated client-proof section. */
