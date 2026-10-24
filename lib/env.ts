@@ -124,6 +124,10 @@ export const envSchema = z.object({
   SPLASH_ATTESTATION_CAP_ID: renamedAnchorCap,
   SPLASH_PEG_STATE_ID: objectId,
   SPLASH_COMPLIANCE_CONFIG_ID: objectId,
+  /** Amendment A1: the shared fee_config::FeeConfig, Splash's fee schedule.
+   *  lib/fees/schedule.ts reads it over SUI_GRAPHQL_URL to quote the fee;
+   *  unset, no fee is quoted and no payment is built. */
+  SPLASH_FEE_CONFIG_ID: objectId,
   SPLASH_COMPLIANCE_CAP_ID: objectId,
   SPLASH_BUSINESS_ACCOUNT_ID: objectId,
   SPLASH_TRANSFER_COIN_ID: objectId,
