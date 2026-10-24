@@ -217,9 +217,9 @@ fun setup_with(accept_other: bool): (Scenario, Fx) {
         policy.add_spender(STAFF, spend_policy::role_staff(), STAFF_MAX, ctx);
         policy.add_spender(JUNIOR, spend_policy::role_staff(), JUNIOR_MAX, ctx);
         policy.add_spender(EXECUTOR, spend_policy::role_executor(), EXECUTOR_MAX, ctx);
-        policy.verify_recipient(SUI_DOMAIN, SUPPLIER, ctx);
-        policy.verify_recipient(SUI_DOMAIN, BUSINESS, ctx);
-        policy.verify_recipient(SUI_DOMAIN, OTHER_PARTNER, ctx);
+        policy.verify_recipient(SUI_DOMAIN, SUPPLIER, payment_intent::kind_wallet(), ctx);
+        policy.verify_recipient(SUI_DOMAIN, BUSINESS, payment_intent::kind_splash_business(), ctx);
+        policy.verify_recipient(SUI_DOMAIN, OTHER_PARTNER, payment_intent::kind_wallet(), ctx);
         // The bank beneficiary is bound to the harness's partner deposit address.
         policy.verify_beneficiary(h::beneficiary(), h::recipient(), ctx);
         ts::return_shared(policy);
@@ -556,7 +556,7 @@ fun second_business(s: &mut Scenario): (ID, ID) {
     {
         let mut policy = s.take_shared_by_id<SpendPolicy>(policy2);
         policy.add_spender(STAFF, spend_policy::role_staff(), STAFF_MAX, s.ctx());
-        policy.verify_recipient(SUI_DOMAIN, SUPPLIER, s.ctx());
+        policy.verify_recipient(SUI_DOMAIN, SUPPLIER, payment_intent::kind_wallet(), s.ctx());
         ts::return_shared(policy);
     };
     (account2, policy2)
@@ -798,7 +798,7 @@ fun removing_a_beneficiary_stops_its_open_bank_payouts() {
 }
 
 #[test]
-#[expected_failure(abort_code = 1025, location = splash_spend)]
+#[expected_failure(abort_code = splash_spend::E_WRONG_DELIVERY_KIND)]
 /// Review A1/A3/A10: the owners verified SUPPLIER (an exchange deposit
 /// address, say) as a wallet, to be paid a Coin. Staff must not be able to
 /// open a payment to it as a Splash business, which core would credit to
@@ -814,7 +814,7 @@ fun staff_cannot_pay_a_wallet_recipient_as_a_splash_business() {
 }
 
 #[test]
-#[expected_failure(abort_code = 1025, location = splash_spend)]
+#[expected_failure(abort_code = splash_spend::E_WRONG_DELIVERY_KIND)]
 /// The mirror: BUSINESS is verified as another Splash business, credited to
 /// its address balance where its own rules draw. Staff cannot send it a
 /// Coin object instead.
@@ -825,7 +825,7 @@ fun staff_cannot_pay_a_splash_business_as_a_wallet() {
 }
 
 #[test]
-#[expected_failure(abort_code = 1025, location = splash_spend)]
+#[expected_failure(abort_code = splash_spend::E_WRONG_DELIVERY_KIND)]
 /// The kind is checked again at pay time: a wallet-opened intent of the
 /// wrong kind cannot be paid under the rule.
 fun a_wallet_intent_of_the_wrong_kind_cannot_be_paid_under_the_rule() {
@@ -836,7 +836,7 @@ fun a_wallet_intent_of_the_wrong_kind_cannot_be_paid_under_the_rule() {
 }
 
 #[test]
-#[expected_failure(abort_code = 1025, location = splash_spend)]
+#[expected_failure(abort_code = splash_spend::E_WRONG_DELIVERY_KIND)]
 /// And it is read at pay time: when the owners re-verify a recipient under
 /// another kind, an intent opened under the old kind stops.
 fun re_verifying_a_recipient_under_another_kind_stops_its_open_intents() {
@@ -844,7 +844,7 @@ fun re_verifying_a_recipient_under_another_kind_stops_its_open_intents() {
     let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
     let mut p = wallet_policy(&mut s, &fx);
     p.remove_recipient(SUI_DOMAIN, SUPPLIER, s.ctx());
-    p.verify_recipient(SUI_DOMAIN, SUPPLIER, s.ctx());
+    p.verify_recipient(SUI_DOMAIN, SUPPLIER, payment_intent::kind_splash_business(), s.ctx());
     ts::return_shared(p);
     pay(&mut s, &fx, STAFF, fx.staff, intent, false);
     s.end();
@@ -2070,7 +2070,7 @@ fun a_new_policy_for_the_new_generation_pays() {
     {
         let mut policy = s.take_shared_by_id<SpendPolicy>(policy3);
         policy.add_spender(STAFF, spend_policy::role_staff(), STAFF_MAX, s.ctx());
-        policy.verify_recipient(SUI_DOMAIN, SUPPLIER, s.ctx());
+        policy.verify_recipient(SUI_DOMAIN, SUPPLIER, payment_intent::kind_wallet(), s.ctx());
         ts::return_shared(policy);
     };
     let alw = grant(&mut s, policy3, STAFF, ALLOWANCE_CAP);
@@ -2334,7 +2334,7 @@ fun an_old_generations_allowance_does_not_pay_under_a_new_policy() {
     {
         let mut policy = s.take_shared_by_id<SpendPolicy>(policy3);
         policy.add_spender(STAFF, spend_policy::role_staff(), STAFF_MAX, s.ctx());
-        policy.verify_recipient(SUI_DOMAIN, SUPPLIER, s.ctx());
+        policy.verify_recipient(SUI_DOMAIN, SUPPLIER, payment_intent::kind_wallet(), s.ctx());
         ts::return_shared(policy);
     };
     let fx3 = Fx { account: fx.account, policy: policy3, staff: fx.staff, junior: fx.junior, executor: fx.executor };

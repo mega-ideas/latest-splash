@@ -279,10 +279,15 @@ fun remove_spender_as(s: &mut Scenario, id: ID, sender: address, spender: addres
     ts::return_shared(policy);
 }
 
+/// `sender` verifies `addr` on `domain` as a wallet recipient (kind 3).
 fun verify_recipient_as(s: &mut Scenario, id: ID, sender: address, domain: u32, addr: address) {
+    verify_recipient_kind_as(s, id, sender, domain, addr, payment_intent::kind_wallet());
+}
+
+fun verify_recipient_kind_as(s: &mut Scenario, id: ID, sender: address, domain: u32, addr: address, kind: u8) {
     s.next_tx(sender);
     let mut policy = s.take_shared_by_id<SpendPolicy>(id);
-    spend_policy::verify_recipient(&mut policy, domain, addr, s.ctx());
+    spend_policy::verify_recipient(&mut policy, domain, addr, kind, s.ctx());
     ts::return_shared(policy);
 }
 
@@ -1161,7 +1166,7 @@ fun removing_a_spender_at_the_cap_frees_a_place() {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// Recipients (kinds 2-4)
+// Recipients (kinds 2-3, on Sui)
 // ════════════════════════════════════════════════════════════════════════════
 
 #[test]
@@ -1210,6 +1215,78 @@ fun a_recipient_on_another_domain_cannot_be_verified() {
 fun a_recipient_on_solana_cannot_be_verified() {
     let (mut s, id) = begin_with_policy();
     verify_recipient_as(&mut s, id, h::wallet(), SOLANA, SUPPLIER);
+    s.end();
+}
+
+#[test]
+/// Review A1/A3/A10: the owners choose how a recipient is paid when they
+/// verify it, and the policy records it: a Splash business (2), credited to
+/// its address balance, or a wallet (3), sent a Coin.
+fun verify_recipient_records_the_kind_the_owners_chose() {
+    let (mut s, id) = begin_with_policy();
+    verify_recipient_kind_as(&mut s, id, h::wallet(), SUI, SUPPLIER, payment_intent::kind_wallet());
+    verify_recipient_kind_as(&mut s, id, h::wallet(), SUI, PARTNER, payment_intent::kind_splash_business());
+    s.next_tx(STRANGER);
+    {
+        let policy = s.take_shared_by_id<SpendPolicy>(id);
+        assert_eq!(spend_policy::recipient_kind(&policy, SUI, SUPPLIER), payment_intent::kind_wallet());
+        assert_eq!(spend_policy::recipient_kind(&policy, SUI, PARTNER), payment_intent::kind_splash_business());
+        assert_eq!(spend_policy::recipient_count(&policy), 2);
+        ts::return_shared(policy);
+    };
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = spend_policy::E_ALREADY_VERIFIED)]
+/// One address, one kind: it cannot be verified a second time under the
+/// other kind, which would let a spender pick again. Changing it is remove
+/// then verify.
+fun a_recipient_cannot_be_verified_under_a_second_kind() {
+    let (mut s, id) = begin_with_policy();
+    verify_recipient_kind_as(&mut s, id, h::wallet(), SUI, SUPPLIER, payment_intent::kind_wallet());
+    verify_recipient_kind_as(&mut s, id, h::wallet(), SUI, SUPPLIER, payment_intent::kind_splash_business());
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = spend_policy::E_BAD_KIND)]
+/// A bank payout is not a plain recipient: its partner deposit address is
+/// bound to a beneficiary with `verify_beneficiary`.
+fun a_recipient_cannot_be_verified_as_a_bank_payout() {
+    let (mut s, id) = begin_with_policy();
+    verify_recipient_kind_as(&mut s, id, h::wallet(), SUI, PARTNER, payment_intent::kind_bank_payout());
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = spend_policy::E_BAD_KIND)]
+/// Nor as a cross-chain wallet, which no spending rule pays.
+fun a_recipient_cannot_be_verified_as_cross_chain() {
+    let (mut s, id) = begin_with_policy();
+    verify_recipient_kind_as(&mut s, id, h::wallet(), SUI, SUPPLIER, payment_intent::kind_cross_chain_wallet());
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = spend_policy::E_BAD_KIND)]
+/// Zero is never a kind.
+fun a_recipient_cannot_be_verified_as_kind_zero() {
+    let (mut s, id) = begin_with_policy();
+    verify_recipient_kind_as(&mut s, id, h::wallet(), SUI, SUPPLIER, 0);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = spend_policy::E_NOT_VERIFIED)]
+/// An address that is not verified has no kind: asking aborts rather than
+/// answering with one.
+fun the_kind_of_an_unverified_recipient_aborts() {
+    let (mut s, id) = begin_with_policy();
+    s.next_tx(STRANGER);
+    let policy = s.take_shared_by_id<SpendPolicy>(id);
+    spend_policy::recipient_kind(&policy, SUI, SUPPLIER);
+    ts::return_shared(policy);
     s.end();
 }
 
@@ -1405,7 +1482,7 @@ fun every_mutation_emits_one_policy_changed() {
         assert_eq!(changes(), n + 1);
         spend_policy::remove_spender(&mut policy, STAFF, s.ctx());
         assert_eq!(changes(), n + 2);
-        spend_policy::verify_recipient(&mut policy, SUI, SUPPLIER, s.ctx());
+        spend_policy::verify_recipient(&mut policy, SUI, SUPPLIER, payment_intent::kind_wallet(), s.ctx());
         assert_eq!(changes(), n + 3);
         spend_policy::remove_recipient(&mut policy, SUI, SUPPLIER, s.ctx());
         assert_eq!(changes(), n + 4);

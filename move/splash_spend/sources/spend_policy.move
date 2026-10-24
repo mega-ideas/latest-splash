@@ -25,6 +25,7 @@ module splash_spend::spend_policy;
 use splash_core::business_account::{Self, BusinessAccount};
 use splash_core::compliance_config;
 use splash_core::multisig;
+use splash_core::payment_intent;
 use std::string::String;
 use sui::derived_object;
 use sui::event;
@@ -52,6 +53,9 @@ const E_UNKNOWN_ROLE: u64 = 1060;
 /// A spending rule pays only on Sui (domain 8). A recipient on another chain
 /// is paid from the wallet.
 const E_NOT_ON_SUI: u64 = 1061;
+/// A recipient is verified as a Splash business (kind 2) or a wallet
+/// (kind 3). Bank payouts (kind 1) go through `verify_beneficiary`.
+const E_BAD_KIND: u64 = 1062;
 
 // ─── Constants ─────────────────────────────────────────────────────────────
 /// Staff open intents and pay them.
@@ -107,8 +111,10 @@ public struct SpendPolicy has key {
     owners: vector<address>,
     spenders: Table<address, Spender>,
     spender_count: u64,
-    /// Kinds 2–3: verified destinations on Sui.
-    recipients: Table<Destination, bool>,
+    /// Kinds 2–3: verified destinations on Sui, each with the one kind it is
+    /// paid as, which is how core delivers it: a Splash business (2) is
+    /// credited to its address balance, a wallet (3) receives a Coin.
+    recipients: Table<Destination, u8>,
     recipient_count: u64,
     /// Kind 1: each bank beneficiary (by 32-byte commitment) bound to the one
     /// partner deposit destination allowed to receive payouts for it.
@@ -241,18 +247,34 @@ public fun remove_spender(policy: &mut SpendPolicy, spender: address, ctx: &TxCo
     changed(policy, b"remove_spender");
 }
 
-/// Verify a destination for kinds 2–3: another Splash business or a
-/// supplier's wallet, on Sui. A recipient on any other domain is refused:
-/// no spending rule could pay it, because a cross-chain payment would hand
-/// the business's coin to the spender's transaction. The owners pay those
-/// from the wallet.
-public fun verify_recipient(policy: &mut SpendPolicy, domain: u32, addr: address, ctx: &TxContext) {
+/// Verify a destination on Sui, and how it is paid: `kind` 2 for another
+/// Splash business (credited to its address balance, where its own rules
+/// draw) or 3 for a supplier's wallet or an exchange deposit address (sent a
+/// Coin, which every deposit system recognises). Payments to it under the
+/// policy must be of that kind, so a spender cannot choose the delivery
+/// form. To change it, the wallet removes the recipient and verifies it
+/// again.
+///
+/// A recipient on any other domain is refused: no spending rule could pay
+/// it, because a cross-chain payment would hand the business's coin to the
+/// spender's transaction. The owners pay those from the wallet.
+public fun verify_recipient(
+    policy: &mut SpendPolicy,
+    domain: u32,
+    addr: address,
+    kind: u8,
+    ctx: &TxContext,
+) {
     assert_wallet(policy, ctx);
     assert!(addr != @0x0, E_INVALID_ADDRESS);
     assert!(domain == SUI_DOMAIN, E_NOT_ON_SUI);
+    assert!(
+        kind == payment_intent::kind_splash_business() || kind == payment_intent::kind_wallet(),
+        E_BAD_KIND,
+    );
     let key = Destination { domain, addr };
     assert!(!policy.recipients.contains(key), E_ALREADY_VERIFIED);
-    policy.recipients.add(key, true);
+    policy.recipients.add(key, kind);
     policy.recipient_count = policy.recipient_count + 1;
     changed(policy, b"verify_recipient");
 }
@@ -331,6 +353,13 @@ public fun spender_per_payment_max(policy: &SpendPolicy, who: address): u64 {
 public fun spender_count(policy: &SpendPolicy): u64 { policy.spender_count }
 public fun is_recipient_verified(policy: &SpendPolicy, domain: u32, addr: address): bool {
     policy.recipients.contains(Destination { domain, addr })
+}
+/// The kind a verified recipient is paid as: 2 (a Splash business) or 3 (a
+/// wallet). Aborts if it is not verified.
+public fun recipient_kind(policy: &SpendPolicy, domain: u32, addr: address): u8 {
+    let key = Destination { domain, addr };
+    assert!(policy.recipients.contains(key), E_NOT_VERIFIED);
+    *policy.recipients.borrow(key)
 }
 /// The beneficiary is verified AND bound to this partner deposit address.
 public fun is_beneficiary_bound_to(policy: &SpendPolicy, commitment: vector<u8>, partner_deposit: address): bool {

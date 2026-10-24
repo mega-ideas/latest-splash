@@ -115,6 +115,9 @@ const E_WRONG_PAY_PATH: u64 = 1022;
 const E_ALLOWANCE_NOT_FOR_POLICY: u64 = 1023;
 /// Only the business wallet delegates execution. A staff member cannot.
 const E_ONLY_THE_WALLET_DELEGATES: u64 = 1024;
+/// The recipient is verified, but to be paid as another kind: the owners
+/// chose how it is delivered (address balance or Coin) when they verified it.
+const E_WRONG_DELIVERY_KIND: u64 = 1025;
 
 /// What an allowance accepted under a policy must be named: this prefix and
 /// the policy's id. The allowance module never reads its name, so this module
@@ -532,12 +535,15 @@ fun consume(
 }
 
 /// A Sui destination is verified for this kind: a bank beneficiary bound to
-/// this partner deposit address, or a verified recipient on domain 8.
+/// this partner deposit address, or a recipient on domain 8 verified as
+/// exactly this kind, so core delivers it in the form the owners chose.
 fun assert_sui_destination(policy: &SpendPolicy, kind: u8, recipient: address, beneficiary_ref: vector<u8>) {
     if (kind == payment_intent::kind_bank_payout()) {
         assert!(spend_policy::is_beneficiary_bound_to(policy, beneficiary_ref, recipient), E_BENEFICIARY_NOT_VERIFIED);
     } else {
-        assert!(spend_policy::is_recipient_verified(policy, payment_intent::sui_domain(), recipient), E_RECIPIENT_NOT_VERIFIED);
+        let domain = payment_intent::sui_domain();
+        assert!(spend_policy::is_recipient_verified(policy, domain, recipient), E_RECIPIENT_NOT_VERIFIED);
+        assert!(spend_policy::recipient_kind(policy, domain, recipient) == kind, E_WRONG_DELIVERY_KIND);
     };
 }
 
