@@ -30,6 +30,14 @@
  * proposed schedule reaches its eta, after which it could be applied at any
  * moment.
  *
+ * Splash's fees are off until the first fee recipient change has been
+ * applied (Sky, 24 Oct): a FeeConfig is published with no fee recipient, and
+ * while it has none the chain's `splash_fee` returns 0 on every kind. A
+ * config read with no recipient is therefore valid and reads as fees off
+ * (`feesOn: false`), and `feeUnderConfig`, which every quote goes through,
+ * returns 0 under it. The cache also refreshes on FeeRecipientApplied and
+ * at a pending recipient's eta, when the fees could turn on.
+ *
  * It fails closed. An object that is missing, of another type, or not a
  * valid FeeConfig in every field is refused, never defaulted to the launch
  * schedule; a failed read clears the cache rather than serving the old one.
@@ -167,6 +175,27 @@ export function splashFee({
   return fee;
 }
 
+/**
+ * Splash's fee under a whole FeeConfig: the chain's `fee_config::splash_fee`
+ * with its config argument. 0 while the config's fees are off (no fee
+ * recipient applied yet); otherwise `splashFee` on the config's schedule. An
+ * unknown kind throws either way, as the chain checks it first.
+ */
+export function feeUnderConfig({
+  config,
+  kind,
+  principalMinor,
+  discountBps,
+}: {
+  config: Pick<FeeConfigState, 'feesOn' | 'schedule'>;
+  kind: FeeKind | number;
+  principalMinor: bigint;
+  discountBps: number | bigint;
+}): bigint {
+  const fee = splashFee({ kind, principalMinor, discountBps, schedule: config.schedule });
+  return config.feesOn ? fee : 0n;
+}
+
 // ─── The kind (A1 §2.3) ─────────────────────────────────────────────────────
 
 /**
@@ -211,7 +240,10 @@ export type FeeConfigState = {
   /** The package that defines `fee_config::FeeConfig` (core's original id). */
   readonly packageId: string;
   readonly schedule: FeeSchedule;
-  readonly feeRecipient: string;
+  /** The fee recipient in force; null until the first change is applied. */
+  readonly feeRecipient: string | null;
+  /** False while no fee recipient has been applied: every fee is then 0. */
+  readonly feesOn: boolean;
   /** The Table<ID, u16> of per-business discounts, and how many it holds. */
   readonly discountsTableId: string;
   readonly discountCount: bigint;
@@ -222,7 +254,9 @@ export type FeeConfigState = {
 
 const HEX_ADDRESS = /^(?:0x)?([0-9a-fA-F]{1,64})$/;
 const FEE_CONFIG_TYPE = /^(?:0x)?([0-9a-fA-F]{1,64})::fee_config::FeeConfig$/;
-const SCHEDULE_APPLIED_TYPE = /^(?:0x)?([0-9a-fA-F]{1,64})::fee_config::FeeScheduleApplied$/;
+/** The events after which the fee the chain charges can differ: a schedule
+ *  applied, or a recipient applied (the first one turns the fees on). */
+const REFRESHING_EVENT_TYPE = /^(?:0x)?([0-9a-fA-F]{1,64})::fee_config::(?:FeeScheduleApplied|FeeRecipientApplied)$/;
 const WHOLE = /^(0|[1-9]\d*)$/;
 
 /** `0x` + 64 lower-case hex, or null if `value` is not a Sui address. */
@@ -302,7 +336,8 @@ export function parseFeeConfig(read: FeeConfigObjectRead | undefined, expectedId
   if (!Array.isArray(json.schedules) || json.schedules.length !== FEE_KIND_COUNT) refuse(`it does not hold one schedule for each of the ${FEE_KIND_COUNT} kinds`);
   const schedule = freezeSchedule(json.schedules.map((s: unknown, k: number) => parseKindSchedule(s, `kind ${k}'s schedule`)));
 
-  const feeRecipient = address(json.fee_recipient, 'fee_recipient');
+  // Option<address>: null until the first recipient change is applied.
+  const feeRecipient = json.fee_recipient === null ? null : address(json.fee_recipient, 'fee_recipient');
   if (!isObject(json.discounts)) refuse('it has no discounts table');
   const discountsTableId = address(json.discounts.id, 'the discounts table id');
   const discountCount = u64(json.discounts.size, 'the discounts table size');
@@ -327,6 +362,7 @@ export function parseFeeConfig(read: FeeConfigObjectRead | undefined, expectedId
     packageId,
     schedule,
     feeRecipient,
+    feesOn: feeRecipient !== null,
     discountsTableId,
     discountCount,
     pendingSchedules: Object.freeze(pendingSchedules),
@@ -424,8 +460,9 @@ export type FeeConfigCache = {
   get(): Promise<FeeConfigState>;
   /** Drop the cache; the next get reads the chain. */
   invalidate(): void;
-  /** Tell the cache an event was seen. A FeeScheduleApplied from the config's
-   *  own package refreshes it (returns true); anything else is ignored. */
+  /** Tell the cache an event was seen. A FeeScheduleApplied or
+   *  FeeRecipientApplied from the config's own package refreshes it (returns
+   *  true); anything else is ignored. */
   observeEvent(eventType: string): boolean;
 };
 
@@ -452,9 +489,10 @@ export function createFeeConfigCache({
 
   const expiryFor = (s: FeeConfigState, t: number): number => {
     let at = t + ttlMs;
-    for (const p of s.pendingSchedules) {
-      if (!p) continue;
-      const eta = Number(p.etaMs);
+    const etas = s.pendingSchedules.filter((p) => p !== null).map((p) => p.etaMs);
+    if (s.pendingRecipient) etas.push(s.pendingRecipient.etaMs);
+    for (const etaMs of etas) {
+      const eta = Number(etaMs);
       at = Math.min(at, eta <= t ? t + applicableTtlMs : eta);
     }
     return at;
@@ -494,7 +532,7 @@ export function createFeeConfigCache({
     },
     invalidate,
     observeEvent(eventType) {
-      const m = SCHEDULE_APPLIED_TYPE.exec(eventType.trim());
+      const m = REFRESHING_EVENT_TYPE.exec(eventType.trim());
       if (!m || !packageId || normalizeAddress(m[1]) !== packageId) return false;
       invalidate();
       return true;
@@ -528,7 +566,8 @@ export function getFeeConfig(): Promise<FeeConfigState> {
 }
 
 /** For the event listener: pass every event type seen; a FeeScheduleApplied
- *  from the configured FeeConfig's package refreshes the schedule. */
+ *  or FeeRecipientApplied from the configured FeeConfig's package refreshes
+ *  the cached config. */
 export function observeFeeEvent(eventType: string): boolean {
   return configured ? configured.observeEvent(eventType) : false;
 }
@@ -536,7 +575,8 @@ export function observeFeeEvent(eventType: string): boolean {
 /**
  * The fee the chain would charge now on a payment, from the live schedule and
  * the business's live discount: what a quote shows and bounds `max_fee` by.
- * Throws FeeConfigUnavailableError rather than guess.
+ * 0 while the config's fees are off (`feesOn` false). Throws
+ * FeeConfigUnavailableError rather than guess.
  */
 export async function currentSplashFee({
   businessId,
@@ -546,10 +586,18 @@ export async function currentSplashFee({
   businessId: string;
   kind: FeeKind;
   principalMinor: bigint;
-}): Promise<{ kind: FeeKind; tierIndex: number; rateBps: bigint; discountBps: number; feeMinor: bigint; configVersion: number }> {
+}): Promise<{
+  kind: FeeKind;
+  feesOn: boolean;
+  tierIndex: number;
+  rateBps: bigint;
+  discountBps: number;
+  feeMinor: bigint;
+  configVersion: number;
+}> {
   const cfg = await getFeeConfig();
   const discountBps = cfg.discountCount === 0n ? 0 : await graphqlDiscountReader()(cfg.discountsTableId, businessId);
-  const feeMinor = splashFee({ kind, principalMinor, discountBps, schedule: cfg.schedule });
+  const feeMinor = feeUnderConfig({ config: cfg, kind, principalMinor, discountBps });
   const tier = tierOf(cfg.schedule[kind], principalMinor);
-  return { kind, tierIndex: tier.index, rateBps: tier.bps, discountBps, feeMinor, configVersion: cfg.version };
+  return { kind, feesOn: cfg.feesOn, tierIndex: tier.index, rateBps: tier.bps, discountBps, feeMinor, configVersion: cfg.version };
 }
