@@ -27,6 +27,8 @@ import LocalTime from '@/components/LocalTime';
 import ControlPlaneExplainer from '@/components/oxwal/ControlPlaneExplainer';
 import RoadmapChip from '@/components/supply/RoadmapChip';
 import { claims, lockedCopy } from '@/content/claims';
+import { pricingSummary, type PricingSummary } from '@/lib/fees/copy';
+import { LAUNCH_SCHEDULE } from '@/lib/fees/schedule';
 import { BRAND } from '@/content/brand';
 import { CUSTODY_LICENCE } from '@/lib/custody-phase-rules';
 
@@ -60,7 +62,8 @@ const operatingLayers = [
   },
 ];
 
-const flowSteps = [
+/** The five steps. Delivery quotes Splash's bank fee from the schedule (A1 §2.7). */
+const flowStepsFor = (pricing: PricingSummary) => [
   {
     id: 'intake',
     number: '01',
@@ -96,7 +99,7 @@ const flowSteps = [
     description: 'Pay a verified supplier or sweep value into the recipient ladder where the corridor allows it.',
     image: '/cinematic/flow-deliver-v4.png',
     imageAlt: 'Deliver isometric typography with a truck bringing a peso coin to a local shop',
-    stat: lockedCopy.fee,
+    stat: `${pricing.bankRange} Splash fee to a bank`,
   },
   {
     id: 'proof',
@@ -109,13 +112,15 @@ const flowSteps = [
   },
 ];
 
-/* Metrics ticker: the moving bridge band at the bottom of the hero. */
-const marqueeItems = [
+/* Metrics ticker: the moving bridge band at the bottom of the hero. Splash's
+   fees are the schedule's (A1 §2.7): free between Splash businesses, a rate
+   to a bank. */
+const marqueeFor = (pricing: PricingSummary) => [
   ['1 live testnet', 'MY to PH corridor'],
   ['Modeled routes', 'expand with controls'],
   ['~400ms', 'Sui settlement finality'],
-  ['Free', 'USDC transfers'],
-  ['0.70%', 'to local currency'],
+  [pricing.business, 'between Splash businesses'],
+  [pricing.bankRange, 'Splash fee to a bank'],
   ['Human approved', 'AI recommendations'],
   ['Stored proof', 'A record that lasts'],
 ];
@@ -156,7 +161,7 @@ function PartnerBadge({ src, name, role, logoClass }: (typeof partnerRail)[numbe
   );
 }
 
-const comparisonRows = [
+const comparisonRowsFor = (pricing: PricingSummary) => [
   {
     feature: 'Settlement speed',
     bank: '2-5 days',
@@ -165,11 +170,11 @@ const comparisonRows = [
     splash: lockedCopy.speed,
   },
   {
-    feature: 'Starting fee',
+    feature: 'Fee to a bank',
     bank: '3-5%',
     broker: '2-4%',
     wise: '0.5-1.5%',
-    splash: lockedCopy.fee,
+    splash: pricing.bank,
   },
   {
     feature: 'FX transparency',
@@ -381,8 +386,18 @@ const loopCards = [
   },
 ];
 
-export default function IsometricLanding({ isPhone = false }: { isPhone?: boolean }) {
-  const [activeFlow, setActiveFlow] = useState(flowSteps[0]);
+const LAUNCH_PRICING = pricingSummary(LAUNCH_SCHEDULE);
+
+/**
+ * `pricing` is Splash's fee schedule in words, from app/page.tsx, which reads
+ * the schedule in force (lib/fees/fee-config.ts publishedFeeSchedule). The
+ * launch schedule is only the default for a caller that passes none.
+ */
+export default function IsometricLanding({ isPhone = false, pricing = LAUNCH_PRICING }: { isPhone?: boolean; pricing?: PricingSummary }) {
+  const flowSteps = flowStepsFor(pricing);
+  const marqueeItems = marqueeFor(pricing);
+  const [activeFlowId, setActiveFlowId] = useState(flowSteps[0].id);
+  const activeFlow = flowSteps.find((step) => step.id === activeFlowId) ?? flowSteps[0];
   // The control plane reveals below the copilot on demand — a credit-roll,
   // not a second section.
   const [ctrlOpen, setCtrlOpen] = useState(false);
@@ -450,7 +465,7 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
   }, []);
 
   const liveComparisonRows = [
-    ...comparisonRows,
+    ...comparisonRowsFor(pricing),
     {
       feature: 'Yield on idle USD',
       bank: `${formatPercent(yieldBenchmarks.bank)} APY`,
@@ -493,7 +508,7 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
         </div>
       </header>
 
-      <SettlementCinematic isPhone={isPhone} />
+      <SettlementCinematic isPhone={isPhone} pricing={pricing} />
 
       <div className="iso-marquee is-static" aria-label="Platform metrics">
         <div className="iso-marquee-track">
@@ -601,7 +616,7 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
                     role="tab"
                     aria-selected={active}
                     className={active ? 'is-active' : ''}
-                    onClick={() => setActiveFlow(step)}
+                    onClick={() => setActiveFlowId(step.id)}
                   >
                     <span>{step.number}</span>
                     <strong>{step.title}</strong>
@@ -734,6 +749,10 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
                 ))}
               </tbody>
             </table>
+            <p className="iso-pricing-line">
+              <strong>Splash pricing</strong>
+              <span>{pricing.line}</span>
+            </p>
             <div className="iso-yield-live is-demoted">
               <i aria-hidden="true" />
               <strong>Reference yield benchmark</strong>
@@ -989,7 +1008,7 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
           <div className="iso-shell cin-footer-bar-inner">
             <span>{BRAND.copyright()}</span>
             <span className="cin-footer-tick">
-              USDC transfers carry no Splash fee · {lockedCopy.speed} · {lockedCopy.fee}
+              {pricing.parts[0]} · {lockedCopy.speed} · {pricing.bankRange} Splash fee to a bank
             </span>
           </div>
         </div>

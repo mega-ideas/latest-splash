@@ -12,6 +12,7 @@ import HoverPopup from '@/components/HoverPopup';
 import LocalTime from '@/components/LocalTime';
 import { SourceBadge } from '@/components/SourceBadge';
 import MoneyPathPanel from '@/components/compliance/MoneyPathPanel';
+import FeeBreakdown from '@/components/fees/FeeBreakdown';
 import { baselineCostMinor, getComparisonBaseline } from '@/lib/fx/comparison-baselines';
 import { formatMinor as formatBaselineMinor, parseMinor as parseBaselineMinor } from '@/lib/money';
 import { lockedCopy } from '@/content/claims';
@@ -194,7 +195,15 @@ export default function StepQuote({
         }),
       });
       if (!response.ok) {
-        const body = (await response.json()) as { error?: string; code?: string };
+        const body = (await response.json()) as { error?: string; code?: string; quote?: FeeQuoteWire };
+        if (body.code === 'fee_above_shown' && body.quote) {
+          // Splash's fee rose after this quote was shown. Nothing was sent:
+          // show the new fee, and the payer sends again against it.
+          const fresh = feeQuoteFromWire(body.quote);
+          set({ quote: { ...state.quote!, fees: feeQuoteToWire(fresh), maxFeeMinor: fresh.maxFeeMinor.toString() } });
+          setAgree(false);
+          throw new Error(body.error ?? "Splash's fee changed. Review the new quote and send again.");
+        }
         if (body.code === 'approval_required') {
           // Expired or already used: show the approval again, fresh.
           setApprovedKey(null);
@@ -205,8 +214,10 @@ export default function StepQuote({
         throw new Error(body.error ?? 'Send request failed');
       }
 
-      const body = (await response.json()) as { transferIntentId: string };
-      set({ transferIntentId: body.transferIntentId, txStatus: 'pending' });
+      const body = (await response.json()) as { transferIntentId: string; quote?: FeeQuoteWire };
+      // The receipt shows what this payment was charged: the server's quote.
+      const charged = body.quote ? feeQuoteToWire(feeQuoteFromWire(body.quote)) : state.quote?.fees ?? null;
+      set({ transferIntentId: body.transferIntentId, txStatus: 'pending', quote: state.quote ? { ...state.quote, fees: charged } : state.quote });
       toast.success(selection.type === 'held' ? 'Splash balance debited' : selection.type === 'fiat' ? 'Provider deposit confirmed' : 'Coin source normalized to USDC');
       setDepositOpen(false);
       setIsSending(false);
@@ -324,10 +335,6 @@ export default function StepQuote({
 
   // Everything below derives from the live quote object — no duplicated math.
   const sendAmountUsd = Number.parseFloat(state.amount.value || '0');
-  const quoteFeeUsd = state.quote.fees ? Number(formatBaselineMinor(BigInt(state.quote.fees.splashFee.minor), 6)) : 0;
-  const allInFeePct = sendAmountUsd > 0 && Number.isFinite(quoteFeeUsd)
-    ? (quoteFeeUsd / sendAmountUsd) * 100
-    : 0;
   const lockRemainingLabel = holdActive && state.rateHold
     ? formatLockRemaining(new Date(state.rateHold.holdUntil).getTime() - lockNowMs)
     : null;
@@ -360,8 +367,9 @@ export default function StepQuote({
       />
 
       {/* Comparison card (W9.1 mockup 1): recipient → display amount → rate
-          lock → all-in fee → supplier receives. All figures derive from the
-          live quote object. */}
+          lock → fee breakdown → supplier receives. All figures derive from the
+          live quote object; the breakdown is A1 §2.7's (Splash fee with kind
+          and tier, the partner fee with its source, the total debited). */}
       <div className="rounded-xl bg-[#F6F0ED] p-5 text-sm">
         <HoverPopup title="Recipient" content="The business receiving this payment. Verify the name matches your records.">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -400,13 +408,18 @@ export default function StepQuote({
 
         <div className="mt-4 h-px bg-[#326273]/10" />
 
-        <div className="mt-3 flex items-center justify-between gap-4">
-          <span className="text-[#326273]/90">All-in fee ({selection.feeTier})</span>
-          <span className="money inline-flex items-center gap-2 font-medium text-[#326273]">
-            {feeValue}
-            {sendAmountUsd > 0 ? <span className="text-[13px] text-[#326273]/90">({allInFeePct.toFixed(2)}%)</span> : null}
-            {isQuoteRefreshing ? <Loader2 className="size-3.5 animate-spin text-[var(--info)]" aria-label="Refreshing quote" /> : null}
-          </span>
+        <div className="mt-4">
+          {state.quote.fees ? (
+            <div aria-busy={isQuoteRefreshing}>
+              <FeeBreakdown quote={state.quote.fees} label="Fees on this payment" />
+            </div>
+          ) : sendAmountUsd > 0 && !isQuoteRefreshing ? (
+            <p role="alert" className="rounded-lg bg-white px-3 py-2.5 text-[13px] font-medium leading-5 text-[#1F4452]">
+              Splash&apos;s fee could not be quoted just now, so this payment cannot be sent yet. Nothing has moved. Change the amount or wait a moment to quote again.
+            </p>
+          ) : (
+            <p className="text-[13px] text-[#326273]">Enter an amount to see the fee.</p>
+          )}
         </div>
 
         <div className="mt-3 flex items-baseline justify-between gap-4">
@@ -436,7 +449,7 @@ export default function StepQuote({
           </div>
           <div className="divide-y divide-[#326273]/8 text-sm">
             <div className="grid grid-cols-[1.2fr_1fr_1fr] items-center px-4 py-2.5 bg-[var(--ok-bg)]/50">
-              <span className="font-semibold text-[#1F4452]">Splash</span>
+              <span className="font-semibold text-[#1F4452]">Splash fee</span>
               <span className="money text-right font-semibold text-[#1F4452]">{feeValue}</span>
               <span className="text-right text-[13px] font-medium text-[#326273]/90">{lockedCopy.speed}</span>
             </div>
@@ -453,7 +466,7 @@ export default function StepQuote({
           </div>
           <div className="flex flex-wrap items-center gap-2 border-t border-[#326273]/10 bg-[#F6F0ED]/50 px-4 py-2 text-[12px] font-medium text-[#326273]/90">
             <SourceBadge state="modeled" />
-            Illustrative, mid-market baseline · reviewed {baseline.lastReviewed}
+            Illustrative, mid-market baseline · reviewed {baseline.lastReviewed}. Splash&apos;s row is Splash&apos;s fee alone; the payout partner&apos;s fee is its own line above.
           </div>
         </div>
       ) : null}
@@ -505,7 +518,7 @@ export default function StepQuote({
           <ArrowLeft className="size-4" aria-hidden="true" />
           Back
         </button>
-        <button type="button" disabled={!agree || awaitingApproval || isQuoteRefreshing || creatingSession || isSending} onClick={() => void startDeposit()} className={primaryActionClass}>
+        <button type="button" disabled={!agree || awaitingApproval || !state.quote.fees || isQuoteRefreshing || creatingSession || isSending} onClick={() => void startDeposit()} className={primaryActionClass}>
           {creatingSession || isSending || isQuoteRefreshing ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : <Send className="size-4" aria-hidden="true" />}
           {isQuoteRefreshing ? 'Updating quote...' : creatingSession || isSending ? 'Preparing...' : awaitingApproval ? 'Approve to send' : 'Send'}
         </button>
@@ -543,8 +556,9 @@ export default function StepQuote({
             </div>
 
             <div className="mt-5 rounded-2xl bg-[#1F4452] p-5 text-white">
-              <div className="flex items-center justify-between"><span className="text-sm text-white/80">Transfer amount</span><span className="text-2xl font-semibold">${state.amount.value}</span></div>
-              <div className="mt-3 flex items-center justify-between text-sm"><span className="text-white/80">Fee tier</span><span className="font-medium">{selection.feeTier}</span></div>
+              <div className="flex items-center justify-between"><span className="text-sm text-white/80">Total to fund</span><span className="money text-2xl font-semibold">{state.quote.fees ? `${formatUsdc(BigInt(state.quote.fees.totalDebitMinor))} USDC` : '—'}</span></div>
+              <div className="mt-3 flex items-center justify-between text-sm"><span className="text-white/80">Amount sent</span><span className="money font-medium">${state.amount.value}</span></div>
+              <div className="mt-2 flex items-center justify-between text-sm"><span className="text-white/80">Splash fee</span><span className="money font-medium">{feeValue}</span></div>
             </div>
 
             {selection.type === 'stablecoin' ? (

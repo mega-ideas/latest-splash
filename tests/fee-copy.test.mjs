@@ -82,7 +82,7 @@ test('the landing renders its pricing from the schedule app/page.tsx reads', () 
 });
 
 test("the FAQ's cost answer is the pricing line", async () => {
-  const { landingFaq } = await import('../components/landing/Landing.tsx');
+  const { landingFaq } = await import('../content/landing-faq.ts');
   const faq = landingFaq(LAUNCH_SCHEDULE);
   const cost = faq.find((item) => /cost/i.test(item.q));
   assert.ok(cost, 'there is a cost question');

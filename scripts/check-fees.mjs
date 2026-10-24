@@ -302,13 +302,7 @@ export const PENDING_2_8 = Object.freeze([
   { file: 'app/queue/page.tsx', rate: 'feeBps=9', count: 1 },
   // The flat 0.70%, and the comparison table beside it.
   { file: 'components/funding/FundingSelector.tsx', rate: '0.70%', count: 1 },
-  { file: 'components/IsometricLanding.tsx', rate: '0.70%', count: 1 },
-  { file: 'components/mobile/MobileLanding.tsx', rate: '0.70%', count: 2 },
-  { file: 'components/mobile/MobileLanding.tsx', rate: '3–5%', count: 1 },
   { file: 'components/transfer/StepDelivery.tsx', rate: '0.00%', count: 1 },
-  { file: 'content/claims.ts', rate: '0.70%', count: 1 },
-  { file: 'content/claims.ts', rate: '70bps', count: 1 },
-  { file: 'content/sea-numbers.ts', rate: '0.70%', count: 1 },
   // The first fee design's audit-anchor fee, 0.02% (min 0.05, max 5 USDC).
   { file: 'components/stablecoin/SendUsdcDesk.tsx', rate: '0.02%', count: 2 },
 ]);

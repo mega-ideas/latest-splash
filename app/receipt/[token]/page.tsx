@@ -48,6 +48,7 @@ export default async function SharedReceiptPage({ params }: { params: Promise<{ 
           recipientName={intent.recipientName}
           amount={intent.sourceAmountUsd}
           currency="USD"
+          fees={intent.fees}
           fee={display.fee ?? '—'}
           fundingSource={intent.fundingMethod === 'BANK_USD' ? 'Bank USD' : intent.fundingMethod === 'HELD_BALANCE' ? 'Splash balance' : undefined}
           status={settled ? 'Settled' : 'Pending'}

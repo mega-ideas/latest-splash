@@ -166,7 +166,7 @@ test('landing is the v1 cinematic: hero district, five steps with manual entry, 
   assert.match(landing, /Invoice in, or type it in/);
   assert.doesNotMatch(landing, /Early Pay|id="supply"/);
   assert.match(page, /<IsometricLanding/);
-  assert.match(page, /LANDING_FAQ/, 'the FAQ JSON-LD is generated from the page copy, not duplicated');
+  assert.match(page, /landingFaq\(/, 'the FAQ JSON-LD is generated from the page copy, not duplicated');
   // Composer is now a payment-desk command bar (not a ChatGPT pill): no
   // "High" effort dropdown, a branded "Prepare" action, and a functional
   // file-attach that prepares a batch for human approval.

@@ -256,3 +256,34 @@ export function feeBreakdownRows(q: FeeQuoteWire): FeeBreakdownRow[] {
   rows.push({ key: 'total', label: 'Total debited', detail: null, amount: `${formatUsdc(BigInt(q.totalDebitMinor))} USDC` });
   return rows;
 }
+
+// ─── The landing's pricing, as data a client component can take ────────────
+
+/** Splash's prices in the phrases the landing uses, all from one schedule. */
+export type PricingSummary = {
+  /** A1 §2.7's pricing line. */
+  line: string;
+  /** Its phrases, one per kind (or bank and chain together). */
+  parts: string[];
+  /** Each kind's price alone, for a table cell: "Free", "0.02% (min 0.25 USDC)". */
+  business: string;
+  wallet: string;
+  exchange: string;
+  bank: string;
+  chain: string;
+  /** The bank schedule's range alone: "0.05–0.30%". */
+  bankRange: string;
+};
+
+export function pricingSummary(schedule: FeeSchedule): PricingSummary {
+  return {
+    line: pricingLine(schedule),
+    parts: pricingParts(schedule),
+    business: kindPrice(schedule, FEE_KIND.SPLASH_BUSINESS),
+    wallet: kindPrice(schedule, FEE_KIND.WALLET),
+    exchange: kindPrice(schedule, FEE_KIND.EXCHANGE),
+    bank: kindPrice(schedule, FEE_KIND.BANK_PAYOUT),
+    chain: kindPrice(schedule, FEE_KIND.CROSS_CHAIN),
+    bankRange: rateRange(schedule[FEE_KIND.BANK_PAYOUT]),
+  };
+}

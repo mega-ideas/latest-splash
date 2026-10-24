@@ -1,9 +1,11 @@
 import { headers } from "next/headers";
 
 import IsometricLanding from "@/components/IsometricLanding";
-import { LANDING_FAQ } from "@/components/landing/Landing";
+import { landingFaq } from "@/content/landing-faq";
 import { BRAND } from "@/content/brand";
 import { isPhoneUserAgent } from "@/lib/device";
+import { pricingSummary } from "@/lib/fees/copy";
+import { publishedFeeSchedule } from "@/lib/fees/fee-config";
 
 /**
  * The landing route.
@@ -36,16 +38,19 @@ const organizationJsonLd = {
 };
 
 // The same questions the product answers elsewhere, so search results and the
-// site agree. Shared with components/landing/Landing.tsx.
-const faqJsonLd = {
-  "@context": "https://schema.org",
-  "@type": "FAQPage",
-  mainEntity: LANDING_FAQ.map((item) => ({
-    "@type": "Question",
-    name: item.q,
-    acceptedAnswer: { "@type": "Answer", text: item.a },
-  })),
-};
+// site agree. Shared with content/landing-faq.ts, and priced from the
+// same schedule as the page (A1 §2.7).
+function faqJsonLd(faq: ReturnType<typeof landingFaq>) {
+  return {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    mainEntity: faq.map((item) => ({
+      "@type": "Question",
+      name: item.q,
+      acceptedAnswer: { "@type": "Answer", text: item.a },
+    })),
+  };
+}
 
 export default async function Home() {
   // Every device gets the isometric cinematic — the desktop identity — but
@@ -55,6 +60,11 @@ export default async function Home() {
   // the first byte (no flash), and CSS width queries handle the reflow.
   const headerStore = await headers();
   const isPhone = isPhoneUserAgent(headerStore.get("user-agent"));
+  // Splash's prices, in words, from the fee schedule in force: the live
+  // FeeConfig when it can be read, the launch schedule when it cannot
+  // (lib/fees/fee-config.ts). Never typed into the page.
+  const { schedule } = await publishedFeeSchedule();
+  const pricing = pricingSummary(schedule);
 
   return (
     <>
@@ -64,9 +74,9 @@ export default async function Home() {
       />
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd).replace(/</g, "\\u003c") }}
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd(landingFaq(schedule))).replace(/</g, "\\u003c") }}
       />
-      <IsometricLanding isPhone={isPhone} />
+      <IsometricLanding isPhone={isPhone} pricing={pricing} />
     </>
   );
 }

@@ -46,28 +46,32 @@ async function filesUnder(dir) {
 /* ── Calculator ────────────────────────────────────────────────────────── */
 
 test('the calculator prices the one leg Splash prices, in minor units, and fails closed without a rate', async () => {
-  const { SPLASH_USD_PHP, splashCostMinor, estimatePayment } = await calculator();
+  const { SPLASH_LEG, splashQuote, estimatePayment } = await calculator();
 
-  // 0.70%, nothing fixed (2026-09-26) — the same numbers lib/server/quote.ts applies.
-  assert.equal(SPLASH_USD_PHP.flatUsdMinor, 0n);
-  assert.equal(SPLASH_USD_PHP.marginBps, 70);
-  assert.equal(SPLASH_USD_PHP.label, 'Illustrative');
-  assert.equal(splashCostMinor(100_000n), 700n, '$1,000 costs $7.00');
-  assert.equal(typeof splashCostMinor(1n), 'bigint');
+  // Splash's fee is the bank-payout schedule's (A1 §2.2), on top of the
+  // amount, the same computation lib/server/quote.ts and the chain apply:
+  // US$1,000 is 1,000 USDC, the 1,000 to 10,000 band, 0.20%, 2 USDC.
+  assert.equal(SPLASH_LEG.label, 'Illustrative');
+  const q = splashQuote(100_000n);
+  assert.equal(q.splashFee.kind, 4, 'a payout to a bank');
+  assert.equal(q.splashFee.minor, 2_000_000n);
+  assert.equal(q.totalDebitMinor, 1_002_000_000n);
+  assert.equal(q.partnerFee?.minor, null, "the partner's fee is the partner's own quote, never guessed");
 
   // No exchange rate: no PHP figure. Never a substituted default.
   const estimate = estimatePayment({ amountUsdMinor: 100_000n, baseline: null, fxRate: null });
   assert.equal(estimate.phpReceivedMinor, null);
   assert.equal(estimate.bankWire, null, 'no dataset, no bank row');
-  assert.equal(estimate.splash.costMinor, 700n);
+  assert.equal(estimate.splash.quote.splashFee.minor, 2_000_000n);
 
-  // With a dated rate the received amount is exact integer arithmetic.
+  // With a dated rate the received amount is exact integer arithmetic. The
+  // fee is on top, so the whole amount is converted.
   const withRate = estimatePayment({
     amountUsdMinor: 100_000n,
     baseline: null,
     fxRate: { phpPerUsd: '56.00', asOf: '2026-09-01' },
   });
-  assert.equal(withRate.phpReceivedMinor, (100_000n - 700n) * 56n, 'PHP centavos on the net amount');
+  assert.equal(withRate.phpReceivedMinor, 100_000n * 56n, 'PHP centavos on the amount sent');
 
   // The Splash row never carries a leg Splash does not price: no MYR anywhere
   // near it, and no Wise anywhere at all.
