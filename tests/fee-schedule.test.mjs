@@ -474,5 +474,5 @@ test('a pending schedule shortens the cache to its eta, and to seconds once it c
 test('the chain reader is server-only and the computation is not', () => {
   assert.match(readFileSync('lib/fees/fee-config.ts', 'utf8'), /^import 'server-only';$/m);
   const schedule = readFileSync('lib/fees/schedule.ts', 'utf8');
-  assert.doesNotMatch(schedule, /server-only|process.env|fetch(/, 'the computation reads neither the chain nor the environment');
+  assert.doesNotMatch(schedule, /server-only|process\.env|fetch\(/, 'the computation reads neither the chain nor the environment');
 });

@@ -1,3 +1,4 @@
+import type { FeeQuoteWire } from '@/lib/fees/quote';
 import { suiScanTxUrl, suiVisionTxUrl } from '@/lib/explorer';
 import { getContractConfig } from '@/lib/server/contract-config';
 import { rememberForOrg } from '@/lib/server/memwal';
@@ -60,6 +61,14 @@ export type TransferIntentRecord = {
   fundingKytStatus?: string;
   fundingNormalizeVenue?: string;
   fundingEffectiveSlippageBps?: number;
+  /**
+   * Splash's fee on this payment, as quoted when it was authorized
+   * (Amendment A1 §4): the breakdown the receipt shows (Splash fee with its
+   * kind and tier, the payout partner's fee with its source, the total
+   * debited) and `maxFeeMinor`, the max_fee the payment is bounded by.
+   * Absent on a transfer authorized before A1.
+   */
+  fees?: FeeQuoteWire;
   verificationReference: string | null;
   receiptObjectId: string | null;
   suiTxDigest: string | null;

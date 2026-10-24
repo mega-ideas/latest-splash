@@ -1,28 +1,43 @@
 import { randomUUID } from 'crypto';
 
-import {
-  CONTRACT_MAX_FEE_BPS,
-  FALLBACK_FEE_BPS,
-  getCorridorFeeBps,
-  getUsdCorridorByCurrency,
-} from '@/lib/fx/corridors';
+import { getUsdCorridorByCurrency } from '@/lib/fx/corridors';
+import { applyBps, applyRate, formatMinor, parseRate } from '@/lib/money';
+import { quoteDiscountBps, quoteFeeState, type FeeScheduleSource } from '@/lib/fees/fee-config';
+import { buildFeeQuote, feeQuoteToWire, type FeeQuoteWire, type ThirdPartyFee } from '@/lib/fees/quote';
+import { FEE_KIND } from '@/lib/fees/schedule';
 import { getCachedJson, setCachedJson } from '@/lib/server/redis-cache';
 import { evaluateTransferLimits, type LimitResult } from '@/lib/server/limits';
+import { pdaxAdapter, mockPdaxAdapter } from '@/lib/server/pdax';
+import { labelFor } from '@/lib/server/signed-partners';
 import type { FundingFeeTier } from '@/lib/funding/registry';
 
 /**
- * Default platform fee — used as a floor only when corridor-specific fee
- * isn't known. Per-corridor fees come from lib/fx/corridors.ts so the
- * quote engine and the smart contract agree on what the user is charged.
- * Clamped to CONTRACT_MAX_FEE_BPS so the contract will never reject.
+ * The quote for a local-currency payout (Amendment A1 §4).
+ *
+ * A payout to a supplier's bank in local currency goes to the payout
+ * partner's deposit address, so on chain it is a BANK_PAYOUT: Splash's fee is
+ * the bank schedule's, on the principal, from lib/fees/schedule.ts under the
+ * FeeConfig in force (lib/fees/fee-config.ts `quoteFeeState`), and charged on
+ * top. The partner's fee is the partner's, from its own quote, and comes out
+ * of what it pays out; Splash neither collects nor marks it up. There is no
+ * flat rate, no fixed fee and no funding-source discount any more: a
+ * business's discount lives in FeeConfig.
+ *
+ * The principal is the amount entered, in USD cents, as USDC minor units
+ * (one cent is 10,000 minor units; the funding rails deliver USDC one to one).
+ *
+ * The response is A1 §4's shape, at the top level: `splashFee`,
+ * `partnerFee`, `totalDebitMinor` and `maxFeeMinor`, every amount a decimal
+ * string of USDC minor units. The review screen shows it and sends
+ * `maxFeeMinor` back with the payment, which bounds what the payment may be
+ * charged.
+ *
+ * Throws FeeConfigUnavailableError when the fee cannot be read (the route
+ * answers 503): no fee is shown and no payment is built on a guess.
  */
-const DEFAULT_PLATFORM_FEE_BPS = Math.min(
-  Number.parseInt(process.env.PLATFORM_FEE_BPS ?? String(FALLBACK_FEE_BPS), 10),
-  CONTRACT_MAX_FEE_BPS,
-);
-// No fixed fee since 2026-09-26: local-currency payouts are 0.70% of the amount, nothing more.
-const FIXED_FEE_CENTS = Number.parseInt(process.env.FIXED_FEE_CENTS ?? '0', 10);
+
 const QUOTE_TTL_SECONDS = Number.parseInt(process.env.QUOTE_TTL_SECONDS ?? '30', 10);
+const CENT_IN_USDC_MINOR = 10_000n;
 
 const fallbackRates: Record<string, number> = {
   USD: 1,
@@ -36,21 +51,21 @@ const fallbackRates: Record<string, number> = {
   GBP: 0.789,
 };
 
-export type QuoteData = {
+export type QuoteData = FeeQuoteWire & {
   quoteId: string;
+  /** The amount entered, in USD cents: the principal. */
   fromAmount: number;
+  /** What the supplier receives, in the target currency. */
   toAmount: number;
   exchangeRate: string;
-  platformFee: number;
-  /** Effective fee in basis points actually applied to this quote. */
-  feeBps: number;
-  networkFee: number;
-  fixedFee: number;
   expiresAt: string;
   ttl: number;
   recipientId?: string;
   targetCurrency: string;
+  /** Where the exchange rate came from. */
   source: 'corridor' | 'fallback';
+  /** Where Splash's fee schedule came from: the live FeeConfig, or A1's launch schedule off mainnet. */
+  scheduleSource: FeeScheduleSource;
   feeTier: FundingFeeTier;
   /** Rail + KYB-tier + AML evaluation (no MYR monthly cap). */
   limit: LimitResult;
@@ -83,49 +98,67 @@ export async function getLiveUsdToTargetRate(targetCurrency = 'PHP'): Promise<{ 
   return fallback;
 }
 
+/**
+ * The payout partner's fee on `principalMinor`, from the partner's own
+ * quote. PHP is the only corridor with a partner adapter today; elsewhere
+ * there is no quote, and the line says the partner quotes at payout.
+ */
+async function partnerFeeFor(targetCurrency: string, principalMinor: bigint): Promise<ThirdPartyFee> {
+  if (targetCurrency !== 'PHP') {
+    return { minor: null, source: 'Quoted by the payout partner when this corridor opens' };
+  }
+  const label = labelFor('pdax');
+  const who = label.charAt(0).toUpperCase() + label.slice(1);
+  try {
+    const quote = await pdaxAdapter.quote(targetCurrency, Number(principalMinor));
+    const bps = quote.partnerFeeBps;
+    if (!Number.isInteger(bps) || bps < 0) throw new Error('the partner quoted no fee');
+    const sandbox = pdaxAdapter === mockPdaxAdapter;
+    return { minor: applyBps(principalMinor, bps, 'floor'), source: `${who}, ${sandbox ? 'sandbox quote' : 'live quote'}` };
+  } catch {
+    return { minor: null, source: `${who} quotes its fee at payout` };
+  }
+}
+
 export async function calculateQuote(
   fromAmountCents: number,
   recipientId?: string,
   targetCurrency = 'PHP',
   feeTier: FundingFeeTier = 'STANDARD',
+  options: { businessId?: string | null } = {},
 ): Promise<QuoteData> {
-  const { rate, source } = await getLiveUsdToTargetRate(targetCurrency);
-  // Per-corridor fee from the single source of truth. Already clamped to
-  // CONTRACT_MAX_FEE_BPS in getCorridorFeeBps, so it will pass the
-  // settlement.move E_FEE_EXCEEDED assertion every time.
-  const corridorFeeBps = source === 'corridor'
-    ? getCorridorFeeBps(targetCurrency)
-    : DEFAULT_PLATFORM_FEE_BPS;
-  // The DISCOUNT tier (payouts funded from held USDC) is priced like every
-  // other since 2026-09-26: 0.70% flat. The tier label stays — it is part of
-  // the funding record and of approvals already given — and the discount is 0.
-  const discountBps = feeTier === 'DISCOUNT'
-    ? Math.max(0, Number.parseInt(process.env.FUNDING_DISCOUNT_BPS ?? '0', 10) || 0)
-    : 0;
-  const appliedFeeBps = Math.max(0, corridorFeeBps - discountBps);
-  const percentageFee = Math.floor((fromAmountCents * appliedFeeBps) / 10_000);
-  const platformFee = percentageFee + FIXED_FEE_CENTS;
-  const netCents = Math.max(fromAmountCents - platformFee, 0);
-  const toAmount = Math.floor((netCents / 100) * rate * 100) / 100;
+  if (!Number.isSafeInteger(fromAmountCents) || fromAmountCents <= 0) throw new RangeError('a quote needs a positive whole number of cents');
+  const currency = targetCurrency.toUpperCase();
+  const principalMinor = BigInt(fromAmountCents) * CENT_IN_USDC_MINOR;
+
+  const state = await quoteFeeState();
+  const discountBps = await quoteDiscountBps(state, options.businessId);
+  const { rate, source } = await getLiveUsdToTargetRate(currency);
+  const partnerFee = await partnerFeeFor(currency, principalMinor);
+
+  const fees = buildFeeQuote({ kind: FEE_KIND.BANK_PAYOUT, principalMinor, discountBps, state, partnerFee });
+
+  // What the supplier receives: the principal, less the partner's own fee,
+  // at the corridor rate. Splash's fee is on top and does not reduce it.
+  const convertedMinor = principalMinor - (partnerFee.minor ?? 0n);
+  const targetMinor = convertedMinor > 0n ? applyRate(convertedMinor, parseRate(rate), 'floor', 6, 2) : 0n;
   const expiresAt = new Date(Date.now() + QUOTE_TTL_SECONDS * 1000).toISOString();
 
   // Limits: rail max + KYB-tier cap + AML review threshold. No MYR monthly cap.
   const limit = evaluateTransferLimits({ amountUsd: fromAmountCents / 100 });
 
   return {
+    ...feeQuoteToWire(fees),
     quoteId: randomUUID(),
     fromAmount: fromAmountCents,
-    toAmount,
+    toAmount: Number(formatMinor(targetMinor, 2)),
     exchangeRate: rate.toFixed(4),
-    platformFee,
-    feeBps: appliedFeeBps,
-    networkFee: 0,
-    fixedFee: FIXED_FEE_CENTS,
     expiresAt,
     ttl: QUOTE_TTL_SECONDS,
     recipientId,
-    targetCurrency: targetCurrency.toUpperCase(),
+    targetCurrency: currency,
     source,
+    scheduleSource: state.source,
     feeTier,
     limit,
   };

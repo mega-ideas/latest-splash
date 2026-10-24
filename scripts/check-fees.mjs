@@ -305,8 +305,6 @@ export const PENDING_2_8 = Object.freeze([
   { file: 'components/IsometricLanding.tsx', rate: '0.70%', count: 1 },
   { file: 'components/mobile/MobileLanding.tsx', rate: '0.70%', count: 2 },
   { file: 'components/mobile/MobileLanding.tsx', rate: '3–5%', count: 1 },
-  { file: 'components/transfer/StepQuote.tsx', rate: '0.70%', count: 1 },
-  { file: 'components/transfer/StepQuote.tsx', rate: '*0.007', count: 1 },
   { file: 'components/transfer/StepDelivery.tsx', rate: '0.00%', count: 1 },
   { file: 'content/claims.ts', rate: '0.70%', count: 1 },
   { file: 'content/claims.ts', rate: '70bps', count: 1 },

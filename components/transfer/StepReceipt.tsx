@@ -7,6 +7,7 @@ import { FileText, Link2, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import Receipt from '@/components/Receipt';
+import { formatUsdc } from '@/lib/fees/copy';
 import SettlementProofDrawer from '@/components/SettlementProofDrawer';
 import { receiptNetworkLine } from '@/lib/network-label';
 import type { TransferState } from '@/app/dashboard/transfer/page';
@@ -60,7 +61,7 @@ export default function StepReceipt({ state, reset }: { state: TransferState; re
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           transferIntentId: state.transferIntentId,
-          fee: state.quote?.fee,
+          fee: state.quote?.fees ? formatUsdc(BigInt(state.quote.fees.splashFee.minor)) : undefined,
           reference,
           issuedAt,
         }),
@@ -87,7 +88,7 @@ export default function StepReceipt({ state, reset }: { state: TransferState; re
         recipientName={state.recipient.name}
         amount={state.amount.value}
         currency="USD"
-        fee={state.quote?.fee ?? '0.00'}
+        fee={state.quote?.fees ? formatUsdc(BigInt(state.quote.fees.splashFee.minor)) : '0.00'}
         feeTier={state.funding.selection.feeTier}
         fundingSource={selectionLabel(state.funding.selection)}
         status={digest ? 'Settled' : 'Pending'}

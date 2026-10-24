@@ -18,7 +18,9 @@ import { proposeForApproval } from '@/lib/server/dual-approval';
 import { resolveApprovalClaim } from '@/lib/server/approved-proposal';
 import { resolveAuthorityForSession } from '@/lib/auth/authority';
 import { getPegStatus } from '@/lib/server/peg';
-import { calculateQuote } from '@/lib/server/quote';
+import { calculateQuote, type QuoteData } from '@/lib/server/quote';
+import { FeeConfigUnavailableError } from '@/lib/fees/fee-config';
+import { feeQuoteFromWire, feeQuoteToWire } from '@/lib/fees/quote';
 import { completeDeliveryForTransfer } from '@/lib/server/sweep';
 import { confirmUsdFunding } from '@/lib/server/funding-intake';
 import { readFundingSession, recordLastUsedFundingSource, updateFundingSession } from '@/lib/server/funding-sessions';
@@ -64,7 +66,12 @@ const authorizeSchema = z.object({
   }),
   travelRulePayment: z.record(z.string(), z.unknown()).optional(),
   amount: z.object({ value: z.string(), targetCurrency: z.string().length(3) }),
-  quote: z.object({ netReceived: z.string() }).optional(),
+  /** What the review showed. `maxFeeMinor` is the Splash fee the payer saw:
+   *  the payment's max_fee, and a fee above it is refused (A1 §2.6, §4). */
+  quote: z.object({
+    netReceived: z.string().optional(),
+    maxFeeMinor: z.string().regex(/^(0|[1-9]\d*)$/).optional(),
+  }).optional(),
   deliveryTier: z.enum(['PAYOUT_ONLY', 'SWEEP_ACCOUNT', 'STORED_BALANCE']).default('PAYOUT_ONLY'),
   invoiceId: z.string().optional(),
   paymentRail: z.string().optional(),
@@ -390,6 +397,42 @@ async function authorize(request: Request, spent: SpentApproval) {
 
   const sourceAmountCents = Math.round(sourceAmount * 100);
   const sourceAmountMicro = Math.round(sourceAmount * 1_000_000);
+  if (!Number.isSafeInteger(sourceAmountMicro) || sourceAmountMicro <= 0) {
+    return NextResponse.json({ error: 'A positive source amount is required' }, { status: 400 });
+  }
+
+  // Splash's fee, quoted again now (A1 §4): the bank schedule on the
+  // principal, charged on top. The payer was shown a fee; that fee is this
+  // payment's max_fee, and a fee above it is refused here, before anything
+  // moves, as the chain would refuse it (EFeeAboveMax). A body without the
+  // shown fee (an approved proposal carried out from the queue) is bounded by
+  // the fee quoted now.
+  let serverQuote: QuoteData;
+  try {
+    serverQuote = await calculateQuote(sourceAmountCents, undefined, body.amount.targetCurrency, 'STANDARD', { businessId: businessAccountId });
+  } catch (error) {
+    if (error instanceof FeeConfigUnavailableError) {
+      return NextResponse.json(
+        { error: "Splash's fee cannot be read from the network right now. Nothing was sent; try again shortly.", code: 'fee_unavailable' },
+        { status: 503 },
+      );
+    }
+    throw error;
+  }
+  const quotedFees = feeQuoteFromWire(serverQuote);
+  const shownMaxFee = body.quote?.maxFeeMinor === undefined ? null : BigInt(body.quote.maxFeeMinor);
+  if (shownMaxFee !== null && quotedFees.maxFeeMinor > shownMaxFee) {
+    return NextResponse.json(
+      {
+        error: "Splash's fee for this payment is now higher than the fee you were shown. Nothing was sent; review the new quote and send again.",
+        code: 'fee_above_shown',
+        quote: serverQuote,
+      },
+      { status: 409 },
+    );
+  }
+  const maxFeeMinor = shownMaxFee ?? quotedFees.maxFeeMinor;
+  const totalDebitMicro = Number(quotedFees.totalDebitMinor);
   let fundingSession = body.fundingSessionId ? await readFundingSession(body.fundingSessionId) : null;
   if (body.fundingSessionId && !fundingSession) {
     return NextResponse.json({ error: 'Funding session not found' }, { status: 404 });
@@ -403,8 +446,10 @@ async function authorize(request: Request, spent: SpentApproval) {
   if (fundingSession?.transferIntentId) {
     return NextResponse.json({ error: 'Funding session is already bound to a transfer' }, { status: 409 });
   }
-  if (fundingSession && Math.abs(fundingSession.amountExpectedMicro - Math.round(sourceAmount * 1_000_000)) > 1) {
-    return NextResponse.json({ error: 'Funding session amount does not match the transfer' }, { status: 409 });
+  // A funding session is opened for the total debited: the principal plus
+  // Splash's fee.
+  if (fundingSession && Math.abs(fundingSession.amountExpectedMicro - totalDebitMicro) > 1) {
+    return NextResponse.json({ error: 'Funding session amount does not match the total for this transfer' }, { status: 409 });
   }
   let fundingSelection: FundingSelection | null = fundingSession?.selection ?? (body.fundingSelection as FundingSelection | undefined) ?? null;
   if (!fundingSelection) {
@@ -418,9 +463,6 @@ async function authorize(request: Request, spent: SpentApproval) {
       { status: error instanceof FundingRegistryError ? 400 : 503 },
     );
   }
-  if (!Number.isSafeInteger(sourceAmountMicro) || sourceAmountMicro <= 0) {
-    return NextResponse.json({ error: 'A positive source amount is required' }, { status: 400 });
-  }
   if (!fundingSession && fundingSelection.type !== 'held') {
     return NextResponse.json({ error: 'Bank and coin sources require a funding session before settlement' }, { status: 409 });
   }
@@ -430,7 +472,7 @@ async function authorize(request: Request, spent: SpentApproval) {
   // figure the ledger does not hold.
   if (
     fundingSelection.type === 'held'
-    && (await accountBalance(orgId)) < BigInt(sourceAmountMicro)
+    && (await accountBalance(orgId)) < quotedFees.totalDebitMinor
   ) {
     return NextResponse.json({ error: 'Splash balance is insufficient for this payment source' }, { status: 409 });
   }
@@ -449,9 +491,6 @@ async function authorize(request: Request, spent: SpentApproval) {
     return NextResponse.json({ error: `Coin source is ${fundingSession?.status ?? 'not ready'}; settlement cannot start` }, { status: 409 });
   }
   const feeTier = fundingSelection.feeTier;
-  const serverQuote = sourceAmountCents > 0
-    ? await calculateQuote(sourceAmountCents, undefined, body.amount.targetCurrency, feeTier)
-    : null;
   const pegStatus = await getPegStatus();
   if (!pegStatus.pegged) {
     // No live price at all is its own answer, not a "deviation": this used to
@@ -472,11 +511,14 @@ async function authorize(request: Request, spent: SpentApproval) {
     );
   }
 
+  // What reaches the supplier's side: the principal. A coin deposit was
+  // sized for the total, so Splash's fee comes out of what it normalized to.
+  const splashFeeMicro = Number(quotedFees.splashFee.minor);
   const stablecoinAmountMicro = fundingSelection.type === 'stablecoin'
-    ? fundingSession!.normalizedAmountUsdcMicro ?? 0
+    ? Math.max(0, (fundingSession!.normalizedAmountUsdcMicro ?? 0) - splashFeeMicro)
     : fundingSelection.type === 'held'
       ? sourceAmountMicro
-    : sourceAmountCents > 0 ? await usdCentsToUsdcMicro(sourceAmountCents) : 0;
+    : await usdCentsToUsdcMicro(sourceAmountCents);
   const conversion = fundingSelection.type === 'stablecoin' || fundingSelection.type === 'held'
     ? null
     : sourceAmount > 0 ? await convertUsdToUsdc(sourceAmount) : null;
@@ -489,11 +531,11 @@ async function authorize(request: Request, spent: SpentApproval) {
     recipientId: recipient.id,
     invoiceId: body.invoiceId,
     deliveryTier: body.deliveryTier,
-    targetCurrency: serverQuote?.targetCurrency ?? body.amount.targetCurrency,
-    targetAmount: serverQuote ? serverQuote.toAmount.toFixed(2) : body.quote?.netReceived ?? '0.00',
+    targetCurrency: serverQuote.targetCurrency,
+    targetAmount: serverQuote.toAmount.toFixed(2),
     sourceAmountUsd: Number.isFinite(sourceAmount) ? sourceAmount.toFixed(2) : '0.00',
-    quoteId: serverQuote?.quoteId ?? null,
-    exchangeRate: serverQuote?.exchangeRate ?? null,
+    quoteId: serverQuote.quoteId,
+    exchangeRate: serverQuote.exchangeRate,
     sourceStablecoin,
     stablecoinAmountMicro,
     daxTier: conversion?.tier ?? null,
@@ -518,6 +560,9 @@ async function authorize(request: Request, spent: SpentApproval) {
   // silently rewrite the record of a payment already sent. It rides in the
   // settlement metadata, which is where `travel_rule_snapshot` lands.
   Object.assign(intent, {
+    // The fee breakdown the receipt shows, and the max_fee the payment is
+    // bounded by (A1 §4): what the payer was charged, from this quote.
+    fees: { ...feeQuoteToWire(quotedFees), maxFeeMinor: maxFeeMinor.toString() },
     travelRuleSnapshot: travelRuleSnapshot({
       destinationCountry: body.recipient.country,
       beneficiary: travelRuleBeneficiary,
@@ -541,9 +586,10 @@ async function authorize(request: Request, spent: SpentApproval) {
   // transfer AND a second 5,000 transfer from the balance it left behind.
   // (`completeDeliveryForTransfer` does write a DEBIT, but against the
   // RECIPIENT's account, so it never offsets the payer's credit.)
+  // The total debited: the principal and Splash's fee (A1 §4).
   const debitedAmountMicro = fundingSelection.type === 'stablecoin'
-    ? fundingSession?.normalizedAmountUsdcMicro ?? sourceAmountMicro
-    : sourceAmountMicro;
+    ? fundingSession?.normalizedAmountUsdcMicro ?? totalDebitMicro
+    : totalDebitMicro;
   const payerDebit = await recordMovement({
     orgId,
     direction: 'DEBIT',
@@ -592,8 +638,9 @@ async function authorize(request: Request, spent: SpentApproval) {
         recipientAddress: '',
         recipientLabel: intent.recipientName,
         amountMist: Math.max(1_000_000, stablecoinAmountMicro),
-        targetCurrency: serverQuote?.targetCurrency ?? body.amount.targetCurrency,
-        fxRate: serverQuote?.exchangeRate ?? intent.exchangeRate,
+        targetCurrency: serverQuote.targetCurrency,
+        fxRate: serverQuote.exchangeRate,
+        maxFeeMinor,
         funding: {
           sessionId: intent.fundingSessionId,
           source: intent.fundingSource,

@@ -15,6 +15,8 @@ import MoneyPathPanel from '@/components/compliance/MoneyPathPanel';
 import { baselineCostMinor, getComparisonBaseline } from '@/lib/fx/comparison-baselines';
 import { formatMinor as formatBaselineMinor, parseMinor as parseBaselineMinor } from '@/lib/money';
 import { lockedCopy } from '@/content/claims';
+import { formatUsdc } from '@/lib/fees/copy';
+import { feeQuoteFromWire, feeQuoteToWire, type FeeQuoteWire } from '@/lib/fees/quote';
 
 const BASE_RATES: Record<TransferState['amount']['targetCurrency'], number> = {
   MYR: 4.71,
@@ -99,7 +101,7 @@ export default function StepQuote({
     async function fetchQuote() {
       const source = Number.parseFloat(state.amount.value || '0');
       if (!Number.isFinite(source) || source <= 0) {
-        set({ quote: { fxRate: 0, fee: '0.00', netReceived: '0.00' } });
+        set({ quote: { fxRate: 0, netReceived: '0.00', fees: null } });
         setSettledQuoteKey(quoteRequestKey);
         setLoading(false);
         return;
@@ -117,7 +119,8 @@ export default function StepQuote({
           }),
         });
         if (!response.ok) throw new Error('Quote unavailable');
-        const body = (await response.json()) as { exchangeRate: string; platformFee: number; toAmount: number };
+        const body = (await response.json()) as FeeQuoteWire & { exchangeRate: string; toAmount: number };
+        const fees = feeQuoteFromWire(body);
         if (cancelled) return;
 
         const quotedFx = Number.parseFloat(body.exchangeRate);
@@ -127,16 +130,13 @@ export default function StepQuote({
         const fx = heldFx ?? quotedFx;
         const netReceived = heldFx && quotedFx > 0 ? (body.toAmount / quotedFx) * heldFx : body.toAmount;
         setLiveRate(fx);
-        set({ quote: { fxRate: fx, fee: (body.platformFee / 100).toFixed(2), netReceived: netReceived.toFixed(2) } });
+        set({ quote: { fxRate: fx, netReceived: netReceived.toFixed(2), fees: feeQuoteToWire(fees), maxFeeMinor: fees.maxFeeMinor.toString() } });
         setSettledQuoteKey(quoteRequestKey);
       } catch {
         if (cancelled) return;
-        // Offline estimate only; the server quote decides. 0.70% of the
-        // amount, every corridor, nothing fixed (lib/fx/corridors.ts).
-        const fee = source * 0.007;
-        const net = source - fee;
-        const fx = BASE_RATES[state.amount.targetCurrency];
-        set({ quote: { fxRate: fx, fee: fee.toFixed(2), netReceived: (net * fx).toFixed(2) } });
+        // No quote, no fee shown and nothing to send: Splash's fee is the
+        // server's, read from the FeeConfig, never estimated here.
+        set({ quote: { fxRate: BASE_RATES[state.amount.targetCurrency], netReceived: '0.00', fees: null } });
         setSettledQuoteKey(quoteRequestKey);
       } finally {
         if (!cancelled) setLoading(false);
@@ -228,7 +228,7 @@ export default function StepQuote({
   }, [isSending, createTransferIntent]);
 
   async function startDeposit() {
-    if (!agree || !state.quote || awaitingApproval) return;
+    if (!agree || !state.quote?.fees || awaitingApproval) return;
     if (state.funding.selection.type === 'held') {
       setProgress(18);
       setIsSending(true);
@@ -240,8 +240,10 @@ export default function StepQuote({
       const response = await fetch('/api/funding/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        // The session is opened for the total debited: the amount plus
+        // Splash's fee, charged on top (A1 §4).
         body: JSON.stringify({
-          amountUsd: Number.parseFloat(state.amount.value),
+          amountUsd: Number(formatBaselineMinor(BigInt(state.quote.fees?.totalDebitMinor ?? '0'), 6)),
           selection: state.funding.selection,
         }),
       });
@@ -318,11 +320,11 @@ export default function StepQuote({
   const selection = state.funding.selection;
   const isQuoteRefreshing = loading || settledQuoteKey !== quoteRequestKey;
   const selectedFundingLabel = selectionLabel(selection);
-  const feeValue = state.deliveryTier === 'STORED_BALANCE' ? '$0.00 transfer fee' : `$${state.quote.fee}`;
+  const feeValue = state.quote.fees ? `${formatUsdc(BigInt(state.quote.fees.splashFee.minor))} USDC` : 'No quote';
 
   // Everything below derives from the live quote object — no duplicated math.
   const sendAmountUsd = Number.parseFloat(state.amount.value || '0');
-  const quoteFeeUsd = Number.parseFloat(state.quote.fee || '0');
+  const quoteFeeUsd = state.quote.fees ? Number(formatBaselineMinor(BigInt(state.quote.fees.splashFee.minor), 6)) : 0;
   const allInFeePct = sendAmountUsd > 0 && Number.isFinite(quoteFeeUsd)
     ? (quoteFeeUsd / sendAmountUsd) * 100
     : 0;

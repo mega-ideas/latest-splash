@@ -25,6 +25,7 @@ import StepStatus from '@/components/transfer/StepStatus';
 import StepDelivery from '@/components/transfer/StepDelivery';
 import type { RecipientTier } from '@/lib/server/operations';
 import type { FundingSelection } from '@/lib/funding/registry';
+import type { FeeQuoteWire } from '@/lib/fees/quote';
 
 // Target-currency display metadata for the settlement-flow corridor node.
 const CURRENCY_META: Record<string, { flag: string; country: string }> = {
@@ -54,7 +55,10 @@ export type TransferState = {
    *  purpose, source of funds, relationship. */
   travelRulePayment?: TravelRulePayment;
   amount: { value: string; sourceCurrency: 'USD'; targetCurrency: 'MYR' | 'PHP' | 'IDR' | 'SGD' | 'VND' | 'THB' | 'EUR' | 'GBP' };
-  quote?: { fxRate: number; netReceived: string; fee: string };
+  /** The live quote. `fees` is A1 §4's breakdown from /api/quotes; its
+   *  `maxFeeMinor` goes back with the payment as the fee the payer was shown.
+   *  No fees means no quote: nothing can be sent. */
+  quote?: { fxRate: number; netReceived: string; fees: FeeQuoteWire | null; maxFeeMinor?: string };
   funding: {
     selection: FundingSelection;
     sessionId?: string;
