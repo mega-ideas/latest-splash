@@ -18,7 +18,13 @@
 ///   * a cross-chain payment pays Splash's fee in USDC on Sui, before the
 ///     burn, and the coin handed to the bridge is exactly the principal;
 ///   * FeeCharged carries the intent, the business account, the derived kind,
-///     the fee and the recipient.
+///     the fee and the recipient;
+///   * a payment whose derived kind differs from its declared kind is
+///     refused (EKindMismatch), on the owners' paths and a settlement app's,
+///     except a declared wallet or exchange payment to a registered business
+///     wallet, which is free (Sky, 24 Oct, FIXUP 3). So a payment to a
+///     partner deposit address is always a declared bank payout, with its
+///     floor and its beneficiary.
 #[test_only]
 #[allow(implicit_const_copy)]
 module splash_core::fee_settle_tests;
@@ -281,27 +287,73 @@ fun the_balance_path_refuses_a_fee_above_max_fee() {
 }
 
 #[test]
-/// A partner deposit address declared as a wallet is charged as the bank
-/// payout it is (A1 §3: 5,000 USDC pays 10 USDC, not the wallet's 1 USDC).
-fun a_partner_address_declared_as_a_wallet_pays_the_bank_fee() {
+#[expected_failure(abort_code = address_registry::E_KIND_MISMATCH)]
+/// FIXUP 3: a partner deposit address declared as a wallet is refused, not
+/// charged as a bank payout, so it can never skip the bank payout's floor
+/// and its beneficiary. The payer offered the bank fee; it still aborts.
+fun a_partner_address_declared_as_a_wallet_is_refused() {
+    let mut s = setup();
+    open_and_pay(&mut s, 1, wallet_kind(), PARTNER, PRINCIPAL, PRINCIPAL + BANK_FEE, BANK_FEE);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = address_registry::E_KIND_MISMATCH)]
+/// So is one declared as an exchange.
+fun a_partner_address_declared_as_an_exchange_is_refused() {
+    let mut s = setup();
+    open_and_pay(&mut s, 1, payment_intent::kind_exchange(), PARTNER, PRINCIPAL, PRINCIPAL + BANK_FEE, BANK_FEE);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = address_registry::E_KIND_MISMATCH)]
+/// And on the balance path.
+fun the_balance_path_refuses_a_partner_address_declared_as_a_wallet() {
     let mut s = setup();
     tx!(&mut s, h::wallet(), |account, config, fees, reg, c, ctx| {
         let mut intent = open(account, config, 1, wallet_kind(), PARTNER, PRINCIPAL, c, ctx);
-        pay(&mut intent, account, config, fees, reg, PRINCIPAL + BANK_FEE, BANK_FEE, c, ctx);
-        let (_, _, kind, fee, _) = charged();
-        assert_eq!(kind, bank());
-        assert_eq!(fee, BANK_FEE);
+        pay_balance(&mut intent, account, config, fees, reg, PRINCIPAL + BANK_FEE, BANK_FEE, c, ctx);
         payment_intent::delete_finalized(intent);
     });
     s.end();
 }
 
 #[test]
-#[expected_failure(abort_code = payment_intent::E_FEE_ABOVE_MAX)]
-/// And a payer who bounded it at the wallet fee is refused, not overcharged.
-fun a_partner_address_declared_as_a_wallet_with_the_wallet_fee_as_max_aborts() {
+#[expected_failure(abort_code = address_registry::E_KIND_MISMATCH)]
+/// A declared bank payout to a registered business wallet is refused rather
+/// than settled free: only a declared wallet or exchange payment becomes a
+/// Splash-business payment.
+fun a_declared_bank_payout_to_a_business_wallet_is_refused() {
     let mut s = setup();
-    open_and_pay(&mut s, 1, wallet_kind(), PARTNER, PRINCIPAL, PRINCIPAL + BANK_FEE, USD);
+    let other = h::add_business_wallet(&mut s, @0xB12B12);
+    open_and_pay(&mut s, 1, bank(), other, PRINCIPAL, PRINCIPAL + BANK_FEE, BANK_FEE);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = address_registry::E_KIND_MISMATCH)]
+/// A declared Splash-business payment to a partner deposit address is
+/// refused.
+fun a_declared_splash_business_payment_to_a_partner_address_is_refused() {
+    let mut s = setup();
+    open_and_pay(&mut s, 1, sb(), PARTNER, PRINCIPAL, PRINCIPAL + BANK_FEE, BANK_FEE);
+    s.end();
+}
+
+#[test]
+/// The one documented exception: a declared wallet or exchange payment to a
+/// registered business wallet is a free Splash-business payment, and so is
+/// one declared as a Splash business.
+fun a_declared_wallet_exchange_or_splash_business_payment_to_a_business_wallet_is_free() {
+    let mut s = setup();
+    let other = h::add_business_wallet(&mut s, @0xB12B12);
+    open_and_pay(&mut s, 1, payment_intent::kind_exchange(), other, PRINCIPAL, PRINCIPAL, 0);
+    open_and_pay(&mut s, 2, wallet_kind(), other, PRINCIPAL, PRINCIPAL, 0);
+    open_and_pay(&mut s, 3, sb(), other, PRINCIPAL, PRINCIPAL, 0);
+    s.next_tx(h::owner_1());
+    assert_eq!(ts::settled_balance<USDC>(other), 3 * PRINCIPAL);
+    assert_eq!(ts::settled_balance<USDC>(h::fee_recipient()), 0);
     s.end();
 }
 
@@ -638,6 +690,71 @@ fun the_app_path_requires_exactly_principal_plus_max_fee() {
     let mut s = setup();
     register_app(&mut s);
     app_pays(&mut s, PRINCIPAL + BANK_FEE + 1, BANK_FEE, bank());
+    s.end();
+}
+
+/// STAFF opens an intent of `kind` to `to` through the app and settles it
+/// declaring `declared`, with the bank fee as max_fee.
+fun app_pays_kind(s: &mut Scenario, kind: u8, to: address, declared: u8) {
+    s.next_tx(STAFF);
+    let mut account = s.take_shared<BusinessAccount>();
+    let config = s.take_shared<ComplianceConfig>();
+    let fees = s.take_shared<FeeConfig>();
+    let reg = s.take_shared<Registry>();
+    let c = s.take_shared<Clock>();
+    let beneficiary = if (kind == bank()) h::beneficiary() else vector[];
+    let mut intent = payment_intent::create_for_app<USDC, TestApp>(
+        TestApp {}, &mut account, &config, STAFF, h::payment_ref(1), to, beneficiary, PRINCIPAL,
+        b"PHP".to_string(), 56_000_000, h::commitment(), kind, h::rail(), c.timestamp_ms() + QUOTE_MS, &c, s.ctx(),
+    );
+    let funds = balance::create_for_testing<USDC>(PRINCIPAL + BANK_FEE);
+    let (receipt, _, _) = payment_intent::settle_from_app<USDC, TestApp>(
+        TestApp {}, &mut intent, &mut account, &config, &fees, &reg, declared, funds, BANK_FEE, h::settle_by(&c), &c, s.ctx(),
+    );
+    audit_anchor::anchor(receipt, HASH, BLOB, &c, s.ctx());
+    payment_intent::delete_finalized(intent);
+    ts::return_shared(c);
+    ts::return_shared(reg);
+    ts::return_shared(fees);
+    ts::return_shared(config);
+    ts::return_shared(account);
+}
+
+#[test]
+#[expected_failure(abort_code = address_registry::E_KIND_MISMATCH)]
+/// FIXUP 3 on the app path, as splash_spend already refuses it: an intent
+/// opened as a wallet payment to a partner deposit address, with a wallet
+/// tag, is refused in core too.
+fun the_app_path_refuses_a_partner_address_declared_as_a_wallet() {
+    let mut s = setup();
+    register_app(&mut s);
+    app_pays_kind(&mut s, wallet_kind(), PARTNER, wallet_kind());
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = address_registry::E_KIND_MISMATCH)]
+/// And a bank payout the app declares with a wallet tag: the tag must fit
+/// the derived kind as the intent's kind must.
+fun the_app_path_refuses_a_tag_that_does_not_fit() {
+    let mut s = setup();
+    register_app(&mut s);
+    app_pays_kind(&mut s, bank(), PARTNER, wallet_kind());
+    s.end();
+}
+
+#[test]
+/// A wallet-tagged payment to a registered business wallet is free on the
+/// app path too.
+fun the_app_path_pays_a_business_wallet_tagged_a_wallet_free() {
+    let mut s = setup();
+    register_app(&mut s);
+    let other = h::add_business_wallet(&mut s, @0xB12B12);
+    app_pays_kind(&mut s, wallet_kind(), other, wallet_kind());
+    s.next_tx(h::owner_1());
+    assert_eq!(ts::settled_balance<USDC>(other), PRINCIPAL);
+    assert_eq!(ts::settled_balance<USDC>(h::fee_recipient()), 0);
+    assert_eq!(ts::settled_balance<USDC>(h::wallet()), BANK_FEE);
     s.end();
 }
 

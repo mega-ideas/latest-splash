@@ -16,6 +16,10 @@
  *     caches, refreshes when it sees FeeScheduleApplied from the config's own
  *     package and not from a look-alike, and never serves a cache past its
  *     expiry when a read fails;
+ *   * `settlementKind` is what a settle path charges (Sky, 24 Oct, FIXUP 3):
+ *     the derived kind, refused when it differs from the declared kind,
+ *     except a declared WALLET or EXCHANGE to a business wallet, which is
+ *     free; so a partner deposit address declared WALLET is refused;
  *   * Splash's fees are off until the first fee recipient change has been
  *     applied (Sky, 24 Oct): a FeeConfig with no recipient reads as fees
  *     off, the fee quoted under it is 0 as `fee_config::splash_fee` returns,
@@ -37,6 +41,7 @@ import {
   createFeeConfigCache,
   deriveKind,
   feeUnderConfig,
+  settlementKind,
   graphqlDiscountReader,
   graphqlFeeConfigReader,
   parseFeeConfig,
@@ -152,6 +157,30 @@ test('the kind is derived as on chain, and a mismatch is refused', () => {
   assert.throws(() => deriveKind({ ...base, declared: FEE_KIND.SPLASH_BUSINESS }), FeeKindMismatchError);
   assert.throws(() => deriveKind({ ...base, declared: FEE_KIND.CROSS_CHAIN }), FeeKindMismatchError);
   assert.throws(() => deriveKind({ ...base, viaCctp: true, declared: FEE_KIND.WALLET }), FeeKindMismatchError);
+});
+
+test('a settle path refuses a derived kind that differs from the declared one, but for a business wallet', () => {
+  const base = { recipientIsBusinessWallet: false, recipientIsPartnerAddress: false, viaCctp: false };
+  const partner = { ...base, recipientIsPartnerAddress: true };
+  const business = { ...base, recipientIsBusinessWallet: true };
+  // the kinds that fit
+  assert.equal(settlementKind({ ...base, declared: FEE_KIND.WALLET }), FEE_KIND.WALLET);
+  assert.equal(settlementKind({ ...base, declared: FEE_KIND.EXCHANGE }), FEE_KIND.EXCHANGE);
+  assert.equal(settlementKind({ ...partner, declared: FEE_KIND.BANK_PAYOUT }), FEE_KIND.BANK_PAYOUT);
+  assert.equal(settlementKind({ ...base, viaCctp: true, declared: FEE_KIND.CROSS_CHAIN }), FEE_KIND.CROSS_CHAIN);
+  // the one exception: a declared wallet or exchange to a business wallet is free
+  assert.equal(settlementKind({ ...business, declared: FEE_KIND.WALLET }), FEE_KIND.SPLASH_BUSINESS);
+  assert.equal(settlementKind({ ...business, declared: FEE_KIND.EXCHANGE }), FEE_KIND.SPLASH_BUSINESS);
+  assert.equal(settlementKind({ ...business, declared: FEE_KIND.SPLASH_BUSINESS }), FEE_KIND.SPLASH_BUSINESS);
+  // a partner deposit address is only ever a declared bank payout
+  assert.throws(() => settlementKind({ ...partner, declared: FEE_KIND.WALLET }), FeeKindMismatchError);
+  assert.throws(() => settlementKind({ ...partner, declared: FEE_KIND.EXCHANGE }), FeeKindMismatchError);
+  assert.throws(() => settlementKind({ ...partner, declared: FEE_KIND.SPLASH_BUSINESS }), FeeKindMismatchError);
+  // a declared bank payout is never quietly made free
+  assert.throws(() => settlementKind({ ...business, declared: FEE_KIND.BANK_PAYOUT }), FeeKindMismatchError);
+  // and what deriveKind itself refuses stays refused
+  assert.throws(() => settlementKind({ ...base, declared: FEE_KIND.BANK_PAYOUT }), FeeKindMismatchError);
+  assert.throws(() => settlementKind({ ...base, viaCctp: true, declared: FEE_KIND.WALLET }), FeeKindMismatchError);
 });
 
 // ─── Reading the on-chain FeeConfig ─────────────────────────────────────────
