@@ -101,6 +101,9 @@ const SPEND_PERMIT = 'allowance::spend_permit(internal::permit<SPLASH_SPEND>())'
 const CORE_APP = String.raw`(?:\w+\s*::\s*)?payment_intent\s*::\s*\w+_(?:for|from)_app`;
 const CORE_SETTLE = String.raw`(?:\w+\s*::\s*)?payment_intent\s*::\s*\w+_from_app`;
 const PERMIT_TYPES = ['Permit', 'SettingsPermit', 'SpendPermit'];
+/** splash_core's modules: splash_spend may import them only from splash_core,
+ *  and may not declare a module of the same name a call could resolve to. */
+const CORE_MODULES = ['payment_intent', 'business_account', 'compliance_config', 'audit_anchor', 'multisig'];
 /** `let x =` or `let mut x: T =` at the end of the text before a call. */
 const LET_BINDING = /\blet\s+(?:mut\s+)?([A-Za-z_]\w*)\s*(?::[^=;]*)?=\s*$/d;
 
@@ -151,10 +154,16 @@ for (const unit of units) {
     const [address, module] = u.path.split('::');
     if (module === 'allowance' && !/^(?:sui|0x0*2)$/.test(address)) fail(unit, u.index, `\`use ${u.path}\` is not sui::allowance.`);
     if (module === 'internal' && !/^(?:std|0x0*1)$/.test(address)) fail(unit, u.index, `\`use ${u.path}\` is not std::internal.`);
+    if (CORE_MODULES.includes(module) && address !== 'splash_core') {
+      fail(unit, u.index, `\`use ${u.path}\` is not splash_core::${module}: core's settle path must be core's.`);
+    }
   }
   for (const m of modules(unit.code)) {
     if (m.name === 'allowance' || m.name === 'internal') {
       fail(unit, m.index, `module ${m.address}::${m.name} would shadow the framework's \`${m.name}\`.`);
+    }
+    if (CORE_MODULES.includes(m.name)) {
+      fail(unit, m.index, `module ${m.address}::${m.name} would stand in for splash_core's \`${m.name}\`, which the money must reach.`);
     }
   }
 }
