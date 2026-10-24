@@ -26,7 +26,7 @@ import test from 'node:test';
  */
 
 const page = () =>
-  readFile(new URL('../app/dashboard/overview/page.tsx', import.meta.url), 'utf8');
+  readFile(new URL('../app/dashboard/page.tsx', import.meta.url), 'utf8');
 
 /** Comments describe what was removed, so assertions run against code only. */
 const codeOnly = (text) => text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*/g, '');

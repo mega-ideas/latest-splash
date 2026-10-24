@@ -113,7 +113,7 @@ test('renaming cannot hide that this is an AI', async () => {
   assert.match(floating, /<Sparkles size=\{9\} \/> AI/);
 
   const page = await readFile(
-    new URL('../app/dashboard/copilot/page.tsx', import.meta.url),
+    new URL('../app/dashboard/zeke/page.tsx', import.meta.url),
     'utf8',
   );
   assert.match(page, /AI assistant/);
