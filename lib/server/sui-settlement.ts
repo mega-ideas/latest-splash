@@ -593,7 +593,7 @@ const DEPENDENCY_ABORT_CODES: Record<string, Record<number, string>> = {
   },
 };
 
-function humanizeSuiError(rawError: string | undefined | null, stderr: string): string {
+export function humanizeSuiError(rawError: string | undefined | null, stderr: string): string {
   const error = [rawError, stderr].filter(Boolean).join('\n') || 'Unknown Sui error';
   if (/No managed addresses|no active managed address/i.test(error)) {
     return 'The Sui CLI has no managed operator address. Configure OPERATOR_SUI_PRIVATE_KEY for server-side settlement, or create and fund a persistent CLI address.';
