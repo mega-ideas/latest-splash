@@ -136,6 +136,11 @@ export const envSchema = z.object({
   /** The splash_spend package, whose pay_intent is the v2 executor path the
    *  operator-outflow monitor approves. */
   SPLASH_SPEND_PACKAGE_ID: objectId,
+  /** splash_spend's PolicyRegistry, shared at its publish: each business's
+   *  SpendPolicy id is derived under it (v2 §4.2). With
+   *  SPLASH_SPEND_PACKAGE_ID, needed for spending rules; without both, none
+   *  is built or read. */
+  SPLASH_SPEND_POLICY_REGISTRY_ID: objectId,
   SPLASH_COMPLIANCE_CAP_ID: objectId,
   SPLASH_BUSINESS_ACCOUNT_ID: objectId,
   SPLASH_TRANSFER_COIN_ID: objectId,

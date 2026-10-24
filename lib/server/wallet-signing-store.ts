@@ -38,7 +38,13 @@ export type SigningPurpose =
   | 'wallet_membership'
   | 'wallet_payment'
   | 'migration_transfer'
-  | 'rotation_transfer';
+  | 'rotation_transfer'
+  /** v2 §4.2: the wallet creates its SpendPolicy for the current wallet generation. */
+  | 'spend_policy'
+  /** v2 §4.2: the wallet gives, changes or takes back spending rules, or changes its policy. */
+  | 'spend_rule'
+  /** v2 §4.2: one owner's second approval (`splash_spend::approve_payout`). */
+  | 'spend_approval';
 
 export type SigningStatus = 'collecting' | 'submitting' | 'unknown' | 'executed' | 'failed' | 'expired' | 'cancelled';
 

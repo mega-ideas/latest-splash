@@ -108,6 +108,9 @@ function applyGas(tx: Transaction, sender: string, gas: SponsoredGas) {
   });
 }
 
+/** The same sponsored gas, for the spending-rule builders (lib/server/spend-rules-builders.ts). */
+export const applySponsoredGas = applyGas;
+
 async function build(tx: Transaction): Promise<Uint8Array> {
   return tx.build();
 }

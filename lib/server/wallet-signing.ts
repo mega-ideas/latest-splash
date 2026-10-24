@@ -148,7 +148,31 @@ export type ShapeContext = {
   members?: string[];
   /** The address a transfer must pay (migration, rotation transfer). */
   recipient?: string;
+  /**
+   * Spending rules: addresses whose ownership proof is verified, the only
+   * ones a WALLET tag may be given (A1 §2.3; the proof itself is §4.7).
+   */
+  walletTagAllowed?: string[];
+  /** A second approval: the payer it must name. */
+  payer?: string;
 };
+
+/** What a spending-rule transaction (`spend_rule`) may do, and nothing else. */
+const SPEND_RULE_ACTIONS: ReadonlySet<string> = new Set([
+  'add_spender',
+  'remove_spender',
+  'verify_recipient',
+  'remove_recipient',
+  'verify_beneficiary',
+  'remove_beneficiary',
+  'set_limits',
+  'set_running_window',
+  'rate_limit',
+  'wrap_rate_limit',
+  'propose_allowance',
+  'accept_allowance',
+  'revoke_allowance',
+]);
 
 /** The shapes each purpose allows. Anything else is refused before it is stored. */
 export function assertPurposeShape(purpose: SigningPurpose, d: WalletTxDescription, context: ShapeContext = {}): void {
@@ -211,6 +235,33 @@ export function assertPurposeShape(purpose: SigningPurpose, d: WalletTxDescripti
       bad(shape);
       return;
     }
+    case 'spend_policy': {
+      if (shape !== 'create_spend_policy') bad(shape);
+      const a = d.actions[0] as Extract<WalletAction, { type: 'create_spend_policy' }>;
+      if (a.wallet !== d.sender) bad('the policy is created by the wallet whose keys it names');
+      return;
+    }
+    case 'spend_rule': {
+      if (!d.actions.every((x) => SPEND_RULE_ACTIONS.has(x.type))) bad(shape);
+      const policies = new Set(d.actions.flatMap((x) => ('policy' in x ? [x.policy] : [])));
+      if (policies.size > 1) bad('it changes more than one policy');
+      const proven = new Set((context.walletTagAllowed ?? []).map((a) => normalizeSuiAddress(a)));
+      for (const x of d.actions) {
+        // A1 §2.3: the WALLET tag (2 bps) only after the ownership proof.
+        if (x.type === 'verify_recipient' && x.kind === 1 && !proven.has(x.address)) bad(`${x.address} is tagged a wallet without a verified ownership proof`);
+        if (x.type === 'propose_allowance' && x.rateLimit === null) bad('a rule always has its recurring cap');
+        if (x.type === 'propose_allowance' && x.expiresAtMs === null) bad('a rule always has an expiry');
+      }
+      return;
+    }
+    case 'spend_approval': {
+      if (shape !== 'approve_payout') bad(shape);
+      const a = d.actions[0] as Extract<WalletAction, { type: 'approve_payout' }>;
+      if (context.payer && a.payer !== normalizeSuiAddress(context.payer)) bad('the approval names another payer');
+      if (BigInt(a.maxTotalMinor) < BigInt(a.intent.amountMinor)) bad('the approved total is below the principal');
+      if (BigInt(a.settleByMs) > BigInt(a.intent.expiresAtMs)) bad('the approval outlives the payment');
+      return;
+    }
     case 'migration_transfer':
     case 'rotation_transfer': {
       const last = d.actions[d.actions.length - 1];
@@ -236,8 +287,12 @@ function assertGasless(d: WalletTxDescription) {
 
 /** What a request's bytes are decoded against: the org's ids, plus any existing intent read when it opened. */
 function expectationsFor(request: StoredRequest, expect: WalletTxExpectations): WalletTxExpectations {
-  const openIntent = (request.summary as { openIntent?: OpenIntentExpectation } | null)?.openIntent;
-  return openIntent ? { ...expect, openIntent } : expect;
+  const summary = request.summary as { openIntent?: OpenIntentExpectation; spend?: WalletTxExpectations['spend'] } | null;
+  return {
+    ...expect,
+    ...(summary?.openIntent ? { openIntent: summary.openIntent } : {}),
+    ...(summary?.spend ? { spend: summary.spend } : {}),
+  };
 }
 
 /** The public ids a device needs to decode a request's bytes itself. */
@@ -348,6 +403,12 @@ export async function openSigningRequest(
     members?: string[];
     /** For paying an existing intent: its fields, as the server read them from the chain. */
     openIntent?: OpenIntentExpectation;
+    /** For a spending-rule request: the org's policies, allowances and caps it may touch, read from the chain. */
+    spend?: WalletTxExpectations['spend'];
+    /** For a spending-rule request: addresses with a verified ownership proof (the WALLET tag). */
+    walletTagAllowed?: string[];
+    /** For a second approval: the payer it must name. */
+    payer?: string;
     /** Opened by `onExecuted` once this request executes. Keys and weights only. */
     nextStep?: unknown;
   },
@@ -378,13 +439,17 @@ export async function openSigningRequest(
     return fail(400, 'bad_signer', 'a signer key could not be read');
   }
 
-  const expectations: WalletTxExpectations = input.openIntent ? { ...deps.expect, openIntent: input.openIntent } : deps.expect;
+  const expectations: WalletTxExpectations = {
+    ...deps.expect,
+    ...(input.openIntent ? { openIntent: input.openIntent } : {}),
+    ...(input.spend ? { spend: input.spend } : {}),
+  };
   let description: WalletTxDescription;
   try {
     description = describeWalletTransaction(input.transactionBytes, expectations);
     if (description.sender !== normalizeSuiAddress(sender)) return fail(400, 'wrong_sender', 'the transaction is not sent by the signer this request names');
     const members = input.purpose === 'register_wallet' ? signers.map((s) => s.address) : input.members;
-    assertPurposeShape(input.purpose, description, { members, recipient: input.recipient });
+    assertPurposeShape(input.purpose, description, { members, recipient: input.recipient, walletTagAllowed: input.walletTagAllowed, payer: input.payer });
     if (input.gasMode === 'sponsored') {
       if (!deps.sponsor) return fail(503, 'no_sponsor', 'business wallet transactions need a gas sponsor, and none is configured');
       assertSponsorable(description, { sponsor: deps.sponsor.address, senders: [sender] });
@@ -411,6 +476,9 @@ export async function openSigningRequest(
   let ttl = Math.min(input.ttlMs ?? MAX_REQUEST_TTL_MS, MAX_REQUEST_TTL_MS);
   const pay = description.actions.find((a) => a.type === 'pay_intent');
   if (pay && pay.type === 'pay_intent') ttl = Math.min(ttl, Number(BigInt(pay.settleByMs) - BigInt(now.getTime())));
+  // A second approval is useless once its settle-by time has passed.
+  const approval = description.actions.find((a) => a.type === 'approve_payout');
+  if (approval && approval.type === 'approve_payout') ttl = Math.min(ttl, Number(BigInt(approval.settleByMs) - BigInt(now.getTime())));
   if (ttl <= 0) return fail(422, 'quote_expired', 'the quote behind this payment has already expired');
 
   const request = {
@@ -430,6 +498,7 @@ export async function openSigningRequest(
       description,
       simulatedBalanceChanges: simulated.balanceChanges ?? [],
       ...(input.openIntent ? { openIntent: input.openIntent } : {}),
+      ...(input.spend ? { spend: input.spend } : {}),
     },
     nextStep: input.nextStep ?? null,
     requestedBy: input.requestedBy,

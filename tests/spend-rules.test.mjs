@@ -340,7 +340,9 @@ test("the reader refuses another app, rotate_spender, a plain allowance, another
   // A recipient off Sui.
   await refused(await build((tx) => tx.moveCall({ target: `${SPEND}::spend_policy::remove_recipient`, arguments: [pol(tx), tx.pure.u32(5), tx.pure.address(SUPPLIER)] })), 'bad_argument');
   // Without splash_spend configured, none of it is understood.
-  const { spendPackageId: _p, policyRegistryId: _r, ...bare } = expect;
+  const bare = { ...expect };
+  delete bare.spendPackageId;
+  delete bare.policyRegistryId;
   await refused(foreignPolicy, 'package_not_allowed', bare);
   await w.client.close();
 });

@@ -1562,6 +1562,22 @@ export const walletSingleSignerConsents = pgTable('wallet_single_signer_consents
 ]);
 
 /**
+ * An address the business proved belongs to its payee (§4.7 builds the
+ * proof). A1 §2.3: only such an address may be tagged WALLET on a
+ * SpendPolicy (migration 0036). Evidence is kept as a hash.
+ */
+export const walletOwnershipProofs = pgTable('wallet_ownership_proofs', {
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  address: text('address').notNull(),
+  method: text('method').notNull(),
+  evidenceSha256: text('evidence_sha256').notNull(),
+  verifiedAt: timestamp('verified_at', { withTimezone: true }).notNull(),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+}, (table) => [
+  primaryKey({ columns: [table.orgId, table.address] }),
+]);
+
+/**
  * Who did what with the Business Splash Wallet's off-chain authority: an
  * owner appointing or revoking a person in charge, a migration sign-off, a
  * staff member's approval ask and what became of it (migration 0035).

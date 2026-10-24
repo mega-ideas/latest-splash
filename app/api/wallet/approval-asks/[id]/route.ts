@@ -44,8 +44,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     if (!current.ok) return asResponse(current);
     wallet = current.members;
   }
+  const { spendSecondApprovalOpener } = await import('@/lib/server/spend-rules-deps');
   const result = await acceptApprovalAsk(
-    { db, ctx },
+    { db, ctx, secondApproval: mode === 'second_approval' ? await spendSecondApprovalOpener(route) : undefined },
     { orgId, userId: authority.userId, askId: id, mode, wallet, maxFeeMinor, settleByMs },
   );
   return asResponse(result, result.ok ? { ask: result.ask, request: result.request } : undefined);

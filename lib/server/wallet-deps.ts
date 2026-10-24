@@ -143,6 +143,7 @@ export function parseBusinessAccount(json: Json): AccountState {
     wallet: wallet === null ? null : address(wallet, 'the wallet'),
     nominatedWallet: isObject(nominated) ? address(nominated.wallet, 'the nominated wallet') : null,
     pendingWallet: isObject(pending) ? address(pending.wallet, 'the pending wallet') : null,
+    ...(json.wallet_epoch !== undefined ? { walletEpoch: u64(json.wallet_epoch, 'the wallet generation') } : {}),
   };
 }
 
@@ -203,6 +204,8 @@ export async function liveWalletContext(orgId: string): Promise<{ ok: true; ctx:
 
   const sponsor = await walletSponsorFromEnv();
   const usdcType = walletUsdcType();
+  const { spendIdsFromEnv } = await import('@/lib/server/spend-rules-env');
+  const spendIds = spendIdsFromEnv();
   const signing: SigningDeps = {
     db,
     chain: liveChain(),
@@ -214,6 +217,8 @@ export async function liveWalletContext(orgId: string): Promise<{ ok: true; ctx:
       feeConfigId: ids.ids.feeConfigId,
       registryId: ids.ids.registryId,
       usdcType,
+      // Spending rules (§4.2): without both ids, no splash_spend command is understood.
+      ...(spendIds.ok ? { spendPackageId: spendIds.spendPackageId, policyRegistryId: spendIds.policyRegistryId } : {}),
     },
     notifier: walletSigningNotifier({ orgName: async () => org?.name ?? 'Your business', channels: listApprovers }),
   };
@@ -245,6 +250,14 @@ export async function liveWalletContext(orgId: string): Promise<{ ok: true; ctx:
   signing.onExecuted = async (request) => {
     await settleApprovalAsks(db, request);
     await continueWalletSteps(ctx, request);
+    if (request.purpose === 'spend_policy') {
+      // A new policy opened as part of reissuing the rules after a rotation
+      // is followed by the reissue itself (§4.2).
+      const { liveSpendContext } = await import('@/lib/server/spend-rules-deps');
+      const { continueSpendSteps } = await import('@/lib/server/spend-rules');
+      const spend = await liveSpendContext({ ctx, db });
+      if (spend.ok) await continueSpendSteps(spend.sc, request);
+    }
   };
   return { ok: true, ctx, db };
 }

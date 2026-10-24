@@ -224,7 +224,39 @@ export function walletRequestHeadline(purpose: SigningPurpose, d: WalletTxDescri
       const s = a.find((x) => x.type === 'send_funds') as Extract<WalletAction, { type: 'send_funds' }>;
       return `move ${s.amountMinor ? usdc(s.amountMinor) : 'the USDC'} from the old business wallet to the new one, ${shortAddress(s.recipient)}`;
     }
+    case 'spend_policy': {
+      const p = a[0] as Extract<WalletAction, { type: 'create_spend_policy' }>;
+      return `set up spending rules for the business wallet, at most ${usdc(p.perPaymentMaxMinor)} a payment`;
+    }
+    case 'spend_rule':
+      return spendRuleHeadline(a);
+    case 'spend_approval': {
+      const p = a[0] as Extract<WalletAction, { type: 'approve_payout' }>;
+      return `approve ${usdc(p.intent.amountMinor)} to ${shortAddress(p.intent.recipient)}, paid by ${shortAddress(p.payer)}, at most ${usdc(p.maxTotalMinor)} with Splash's fee`;
+    }
   }
+}
+
+/** A spending-rule change in a line: each rule given, changed or taken back, and recipient changes. */
+function spendRuleHeadline(a: WalletAction[]): string {
+  const parts: string[] = [];
+  const revoked = new Set(a.filter((x) => x.type === 'revoke_allowance').map((x) => (x as { allowance: string }).allowance));
+  for (const x of a) {
+    if (x.type === 'propose_allowance') {
+      const cap = x.rateLimit ? `${usdc(x.rateLimit.limitMinor)} a ${x.rateLimit.window.kind === 'calendar' ? 'month' : 'day'}` : 'no recurring cap';
+      const until = x.expiresAtMs ? ` until ${new Date(Number(x.expiresAtMs)).toISOString().slice(0, 10)}` : '';
+      parts.push(`${revoked.size ? 'change' : 'give'} ${shortAddress(x.spender)} a spending rule of ${cap}${until}`);
+    }
+  }
+  const takenBack = a.filter((x) => x.type === 'remove_spender' && !a.some((y) => y.type === 'add_spender' && y.spender === x.spender));
+  for (const x of takenBack) parts.push(`take back ${shortAddress((x as { spender: string }).spender)}'s spending rule`);
+  const added = a.filter((x) => x.type === 'verify_recipient' || x.type === 'verify_beneficiary').length;
+  const removed = a.filter((x) => x.type === 'remove_recipient' || x.type === 'remove_beneficiary').length;
+  if (added) parts.push(`verify ${added} recipient${added === 1 ? '' : 's'}`);
+  if (removed) parts.push(`remove ${removed} recipient${removed === 1 ? '' : 's'}`);
+  if (a.some((x) => x.type === 'set_limits' || x.type === 'set_running_window')) parts.push('change the spending limits');
+  if (parts.length === 0 && revoked.size) parts.push(`revoke ${revoked.size} spending rule${revoked.size === 1 ? '' : 's'}`);
+  return parts.join('; ') || 'change the spending rules';
 }
 
 export function walletSignatureMessage(input: { orgName: string; purpose: SigningPurpose; description: WalletTxDescription; threshold: number; signerCount: number; expiresAt: Date; now: Date }): string {

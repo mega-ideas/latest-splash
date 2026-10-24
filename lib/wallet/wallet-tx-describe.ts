@@ -23,6 +23,16 @@
  * signer is shown every command, and there is nothing it could be shown that
  * this reader does not understand.
  *
+ * Spending rules (v2 §4.2), only when `expect.spendPackageId` and
+ * `expect.policyRegistryId` are set: splash_spend's `create_policy`, the
+ * policy's wallet-only mutators, `accept` and `approve_payout`, and from the
+ * framework `allowance::{periodic_rate_limit, monthly_rate_limit,
+ * propose_for_app, revoke}` and `0x1::option::some<RateLimit>`. A proposal
+ * must be bound to Splash's SPLASH_SPEND, draw USDC, be accepted in the same
+ * transaction under the policy its name names; a policy, allowance or cap
+ * must be one the server read as this business's (`expect.spend`). Never
+ * `allowance::new`, `rotate_spender`, `issue` or any spend.
+ *
  * The address-alias rule is Phase 0 finding 6 (docs/v2/phase1-move-design.md
  * §1): if a wallet's quorum ever signed `0x2::address_alias::enable`, one
  * aliased key could then send as the whole multisig, and Move cannot see it.
@@ -60,7 +70,22 @@ export type WalletTxExpectations = {
    * the request.
    */
   openIntent?: OpenIntentExpectation;
+  /** splash_spend's package (v2 §4.2). Without it, no spending-rule command is understood. */
+  spendPackageId?: string;
+  /** splash_spend's `PolicyRegistry`, shared at its publish. */
+  policyRegistryId?: string;
+  /**
+   * The spending-rule objects of this org a transaction may touch, as the
+   * server read them from the chain before building the bytes: its
+   * `SpendPolicy` ids (the current one, and an old one being cleaned up after
+   * a rotation), and the allowances and caps its wallet holds. Any other
+   * policy, allowance or cap is refused.
+   */
+  spend?: { policyIds: string[]; allowanceIds?: string[]; capIds?: string[] };
 };
+
+/** A recurring cap as a rule's allowance carries it. */
+export type DescribedRateLimit = { window: { kind: 'periodic'; periodMs: string } | { kind: 'calendar'; months: number }; limitMinor: string };
 
 /** An existing intent's fields, read from the chain (payment_intent::PaymentIntent). */
 export type OpenIntentExpectation = {
@@ -121,7 +146,32 @@ export type WalletAction =
       intent: OpenIntentExpectation | null;
     }
   | { type: 'anchor_receipt' }
-  | { type: 'delete_intent' };
+  | { type: 'delete_intent' }
+  // ─── Spending rules (v2 §4.2) ────────────────────────────────────────────
+  | { type: 'create_spend_policy'; wallet: string; threshold: number; members: Array<{ address: string; weight: number }>; perPaymentMaxMinor: string }
+  | { type: 'add_spender'; policy: string; spender: string; role: 'staff' | 'executor'; perPaymentMaxMinor: string }
+  | { type: 'remove_spender'; policy: string; spender: string }
+  | { type: 'verify_recipient'; policy: string; address: string; kind: number }
+  | { type: 'remove_recipient'; policy: string; address: string }
+  | { type: 'verify_beneficiary'; policy: string; commitment: string; partnerDeposit: string }
+  | { type: 'remove_beneficiary'; policy: string; commitment: string }
+  | { type: 'set_limits'; policy: string; perPaymentMaxMinor: string; secondApprovalThresholdMinor: string }
+  | { type: 'set_running_window'; policy: string; windowMs: string }
+  | ({ type: 'rate_limit' } & DescribedRateLimit)
+  | { type: 'wrap_rate_limit'; rateLimitFromCommand: number }
+  | {
+      type: 'propose_allowance';
+      asset: string;
+      name: string;
+      spender: string;
+      lifetimeCapMinor: string | null;
+      startsAtMs: string | null;
+      expiresAtMs: string | null;
+      rateLimit: DescribedRateLimit | null;
+    }
+  | { type: 'accept_allowance'; policy: string; proposalFromCommand: number }
+  | { type: 'revoke_allowance'; allowance: string; cap: string }
+  | { type: 'approve_payout'; policy: string; intent: OpenIntentExpectation; payer: string; maxTotalMinor: string; settleByMs: string };
 
 export type WalletTxDescription = {
   /** What the chain will call this transaction. */
@@ -137,6 +187,8 @@ export type WalletTxDescription = {
 const ZERO = '0x0000000000000000000000000000000000000000000000000000000000000000';
 const SUI_FRAMEWORK = normalizeSuiAddress('0x2');
 const CLOCK = normalizeSuiAddress('0x6');
+const MOVE_STDLIB = normalizeSuiAddress('0x1');
+const RATE_LIMIT_TYPE = normalizeStructTag('0x2::allowance::RateLimit');
 
 /** The digest and the content hash a signer is shown, from bytes alone. */
 export function walletTxDigest(bytes: Uint8Array): { digest: string; bytesHash: string } {
@@ -235,6 +287,246 @@ export function describeWalletTransaction(input: Uint8Array | string, expect: Wa
     refuse(`${what} must be one of the sender's own coins`, 'bad_argument');
   };
 
+  // ─── Spending rules (v2 §4.2) ─────────────────────────────────────────────
+  const spendPkg = expect.spendPackageId ? normalizeSuiAddress(expect.spendPackageId) : null;
+  /** Results already taken by a later command (a rate limit, a proposal): each is used once. */
+  const consumed = new Set<number>();
+  const usdcBalance = () => {
+    if (!expect.usdcType) refuse('no USDC type is configured', 'bad_type');
+    return normalizeStructTag(`0x2::balance::Balance<${normalizeStructTag(expect.usdcType as string)}>`);
+  };
+  const policyArg = (arg: Arg): string => {
+    if (arg.kind !== 'object' || arg.owned) refuse('the spending policy must be a shared object', 'bad_argument');
+    const allowed = new Set((expect.spend?.policyIds ?? []).map((p) => normalizeSuiAddress(p)));
+    const id = (arg as { objectId: string }).objectId;
+    if (!allowed.has(id)) refuse("the spending policy is not this business's", 'wrong_object');
+    return id;
+  };
+  // The account is only ever read by a spending-rule command, so it may come
+  // in with either mutability (a mutable input satisfies `&`); its id is what matters.
+  const accountRef = (arg: Arg) => {
+    if (arg.kind !== 'object' || arg.owned) refuse('the business account must be a shared object', 'bad_argument');
+    if ((arg as { objectId: string }).objectId !== normalizeSuiAddress(expect.accountId)) refuse('the business account is not the expected object', 'wrong_object');
+  };
+  const needN = (target: string, a: Arg[], n: number) => {
+    if (a.length !== n) refuse(`${target} takes ${n} arguments`, 'bad_argument');
+  };
+
+  function describeAllowanceCall(target: string, a: Arg[], typeArgs: string[]): void {
+    if (!spendPkg) refuse('spending rules are not configured here', 'command_not_allowed');
+    switch (target) {
+      case 'allowance::periodic_rate_limit': {
+        needN(target, a, 2);
+        if (typeArgs.length !== 0) refuse('a rate limit takes no type', 'bad_type');
+        const period = pure(a[0], bcs.u64(), 'the period');
+        const limit = pure(a[1], bcs.u256(), 'the limit');
+        actions.push({ type: 'rate_limit', window: { kind: 'periodic', periodMs: String(period) }, limitMinor: String(limit) });
+        return;
+      }
+      case 'allowance::monthly_rate_limit': {
+        needN(target, a, 1);
+        if (typeArgs.length !== 0) refuse('a rate limit takes no type', 'bad_type');
+        const limit = pure(a[0], bcs.u256(), 'the limit');
+        actions.push({ type: 'rate_limit', window: { kind: 'calendar', months: 1 }, limitMinor: String(limit) });
+        return;
+      }
+      case 'allowance::propose_for_app': {
+        needN(target, a, 6);
+        if (typeArgs.length !== 2) refuse('a proposal names the balance and the app', 'bad_type');
+        if (normalizeStructTag(typeArgs[0]) !== usdcBalance()) refuse('a spending rule draws USDC only (D6)', 'wrong_asset');
+        // The app must be Splash's own splash_spend, the only code that can
+        // ever spend under it. A proposal for any other app is refused.
+        if (normalizeStructTag(typeArgs[1]) !== normalizeStructTag(`${spendPkg}::splash_spend::SPLASH_SPEND`)) refuse('the allowance is not bound to Splash’s spending rules', 'wrong_app');
+        const name = pure(a[0], bcs.string(), 'the name');
+        const spender = normalizeSuiAddress(pure(a[1], bcs.Address, 'the spender'));
+        if (spender === ZERO) refuse('a rule for the zero address', 'bad_argument');
+        const lifetime = pure(a[2], bcs.option(bcs.u256()), 'the lifetime cap');
+        const start = pure(a[3], bcs.option(bcs.u64()), 'the start');
+        const expiry = pure(a[4], bcs.option(bcs.u64()), 'the expiry');
+        const rate = a[5];
+        if (rate.kind !== 'result' || actions[rate.command]?.type !== 'wrap_rate_limit' || consumed.has(rate.command)) {
+          refuse("the rule's recurring cap must be made in this transaction, once", 'bad_argument');
+        }
+        const r = rate as { command: number };
+        consumed.add(r.command);
+        const wrapped = actions[r.command] as Extract<WalletAction, { type: 'wrap_rate_limit' }>;
+        const limit = actions[wrapped.rateLimitFromCommand] as Extract<WalletAction, { type: 'rate_limit' }>;
+        actions.push({
+          type: 'propose_allowance',
+          asset: normalizeStructTag(expect.usdcType as string),
+          name,
+          spender,
+          lifetimeCapMinor: lifetime === null ? null : String(lifetime),
+          startsAtMs: start === null ? null : String(start),
+          expiresAtMs: expiry === null ? null : String(expiry),
+          rateLimit: { window: limit.window, limitMinor: limit.limitMinor },
+        });
+        return;
+      }
+      case 'allowance::revoke': {
+        needN(target, a, 2);
+        if (typeArgs.length !== 1 || normalizeStructTag(typeArgs[0]) !== usdcBalance()) refuse('only a USDC rule is revoked here', 'wrong_asset');
+        const cap = a[0];
+        const allowance = a[1];
+        if (cap.kind !== 'object' || !cap.owned) refuse("the revocation needs the wallet's own cap", 'bad_argument');
+        if (allowance.kind !== 'object' || allowance.owned || allowance.mutable !== true) refuse('the allowance must be a shared object passed mutably', 'bad_argument');
+        const capId = (cap as { objectId: string }).objectId;
+        const allowanceId = (allowance as { objectId: string }).objectId;
+        if (!(expect.spend?.capIds ?? []).map((x) => normalizeSuiAddress(x)).includes(capId)) refuse("the cap is not one this business's wallet holds", 'wrong_object');
+        if (!(expect.spend?.allowanceIds ?? []).map((x) => normalizeSuiAddress(x)).includes(allowanceId)) refuse("the allowance is not one of this business's rules", 'wrong_object');
+        actions.push({ type: 'revoke_allowance', allowance: allowanceId, cap: capId });
+        return;
+      }
+      default:
+        // `new` (an allowance no app polices), `rotate_spender`, `issue`, the
+        // spend paths: a wallet never signs any of them.
+        refuse(`0x2::${target} is not a wallet command`, 'command_not_allowed');
+    }
+  }
+
+  function describeSpendCall(target: string, a: Arg[], typeArgs: string[]): void {
+    const noTypes = () => {
+      if (typeArgs.length !== 0) refuse(`${target} takes no type`, 'bad_type');
+    };
+    const usdcOnly = () => {
+      if (typeArgs.length !== 1) refuse(`${target} names one asset`, 'bad_type');
+      return asset(typeArgs);
+    };
+    const u64s = (arg: Arg, what: string) => String(pure(arg, bcs.u64(), what));
+    switch (target) {
+      case 'spend_policy::create_policy': {
+        needN(target, a, 9);
+        usdcOnly();
+        if (!expect.policyRegistryId || !expect.complianceConfigId || !expect.feeConfigId || !expect.registryId) refuse('spending rules are not configured here', 'command_not_allowed');
+        object(a[0], expect.policyRegistryId, 'the policy registry', true);
+        accountRef(a[1]);
+        object(a[2], expect.complianceConfigId, 'the compliance config', false);
+        object(a[3], expect.feeConfigId, 'the fee config', false);
+        object(a[4], expect.registryId, 'the address registry', false);
+        const keys = pure(a[5], bcs.vector(bcs.vector(bcs.u8())), 'the member keys');
+        const weights = pure(a[6], bcs.vector(bcs.u8()), 'the weights');
+        const threshold = pure(a[7], bcs.u16(), 'the threshold');
+        actions.push({ type: 'create_spend_policy', wallet: derive(keys, weights, threshold), threshold, members: members(keys, weights), perPaymentMaxMinor: u64s(a[8], 'the per-payment maximum') });
+        return;
+      }
+      case 'spend_policy::add_spender': {
+        needN(target, a, 5);
+        noTypes();
+        const policy = policyArg(a[0]);
+        accountRef(a[1]);
+        const spender = normalizeSuiAddress(pure(a[2], bcs.Address, 'the spender'));
+        const role = pure(a[3], bcs.u8(), 'the role');
+        if (role !== 1 && role !== 2) refuse('a spender is staff or the executor', 'bad_argument');
+        actions.push({ type: 'add_spender', policy, spender, role: role === 1 ? 'staff' : 'executor', perPaymentMaxMinor: u64s(a[4], 'the per-payment maximum') });
+        return;
+      }
+      case 'spend_policy::remove_spender': {
+        needN(target, a, 2);
+        noTypes();
+        actions.push({ type: 'remove_spender', policy: policyArg(a[0]), spender: normalizeSuiAddress(pure(a[1], bcs.Address, 'the spender')) });
+        return;
+      }
+      case 'spend_policy::verify_recipient':
+      case 'spend_policy::remove_recipient': {
+        const verify = target.endsWith('verify_recipient');
+        needN(target, a, verify ? 5 : 3);
+        noTypes();
+        const policy = policyArg(a[0]);
+        let i = 1;
+        if (verify) accountRef(a[i++]);
+        const domain = pure(a[i++], bcs.u32(), 'the domain');
+        if (domain !== 8) refuse('a spending rule pays only on Sui', 'bad_argument');
+        const address = normalizeSuiAddress(pure(a[i++], bcs.Address, 'the recipient'));
+        if (verify) {
+          const kind = pure(a[i++], bcs.u8(), 'the tag');
+          if (kind !== 1 && kind !== 2) refuse('a recipient is tagged a wallet or an exchange', 'bad_argument');
+          actions.push({ type: 'verify_recipient', policy, address, kind });
+        } else {
+          actions.push({ type: 'remove_recipient', policy, address });
+        }
+        return;
+      }
+      case 'spend_policy::verify_beneficiary': {
+        needN(target, a, 4);
+        noTypes();
+        const policy = policyArg(a[0]);
+        accountRef(a[1]);
+        const commitment = pure(a[2], bcs.vector(bcs.u8()), 'the beneficiary');
+        if (commitment.length !== 32) refuse('a beneficiary is named by its 32-byte commitment', 'bad_argument');
+        actions.push({ type: 'verify_beneficiary', policy, commitment: toHex(new Uint8Array(commitment)), partnerDeposit: normalizeSuiAddress(pure(a[3], bcs.Address, 'the partner deposit address')) });
+        return;
+      }
+      case 'spend_policy::remove_beneficiary': {
+        needN(target, a, 2);
+        noTypes();
+        const policy = policyArg(a[0]);
+        actions.push({ type: 'remove_beneficiary', policy, commitment: toHex(new Uint8Array(pure(a[1], bcs.vector(bcs.u8()), 'the beneficiary'))) });
+        return;
+      }
+      case 'spend_policy::set_limits': {
+        needN(target, a, 4);
+        noTypes();
+        const policy = policyArg(a[0]);
+        accountRef(a[1]);
+        actions.push({ type: 'set_limits', policy, perPaymentMaxMinor: u64s(a[2], 'the per-payment maximum'), secondApprovalThresholdMinor: u64s(a[3], 'the threshold') });
+        return;
+      }
+      case 'spend_policy::set_running_window': {
+        needN(target, a, 3);
+        noTypes();
+        const policy = policyArg(a[0]);
+        accountRef(a[1]);
+        actions.push({ type: 'set_running_window', policy, windowMs: u64s(a[2], 'the window') });
+        return;
+      }
+      case 'splash_spend::accept': {
+        needN(target, a, 3);
+        usdcOnly();
+        const proposal = a[0];
+        if (proposal.kind !== 'result' || actions[proposal.command]?.type !== 'propose_allowance' || consumed.has(proposal.command)) {
+          refuse('the proposal accepted must be made in this transaction, once', 'bad_argument');
+        }
+        const p = proposal as { command: number };
+        consumed.add(p.command);
+        const policy = policyArg(a[1]);
+        accountRef(a[2]);
+        const proposed = actions[p.command] as Extract<WalletAction, { type: 'propose_allowance' }>;
+        // `pay_intent` spends an allowance only under the policy its name
+        // names; checked here too, so a mismatch is never signed.
+        if (proposed.name !== `splash-policy:${policy.slice(2)}`) refuse('the rule is not named for the policy that accepts it', 'bad_argument');
+        actions.push({ type: 'accept_allowance', policy, proposalFromCommand: p.command });
+        return;
+      }
+      case 'splash_spend::approve_payout': {
+        needN(target, a, 7);
+        noTypes();
+        const policy = policyArg(a[0]);
+        accountRef(a[1]);
+        const intent = a[2];
+        if (intent.kind !== 'object' || intent.owned) refuse('the intent must be a shared object', 'bad_argument');
+        const expected = expect.openIntent ?? refuse('a payment is approved only once its payee and amount have been read from the chain', 'open_intent_unchecked');
+        if ((intent as { objectId: string }).objectId !== normalizeSuiAddress(expected.intentId)) refuse('the intent approved is not the one that was read', 'wrong_object');
+        const payer = normalizeSuiAddress(pure(a[3], bcs.Address, 'the payer'));
+        const maxTotal = u64s(a[4], 'the approved total');
+        const settleBy = u64s(a[5], 'the settle-by time');
+        clock(a[6]);
+        actions.push({
+          type: 'approve_payout',
+          policy,
+          intent: { ...expected, intentId: normalizeSuiAddress(expected.intentId), recipient: normalizeSuiAddress(expected.recipient), asset: normalizeStructTag(expected.asset) },
+          payer,
+          maxTotalMinor: maxTotal,
+          settleByMs: settleBy,
+        });
+        return;
+      }
+      default:
+        // create_intent, pay_intent, delegate_execution, discard_approval,
+        // prune: none is a business wallet transaction Splash asks for.
+        refuse(`${target} is not a wallet command`, 'command_not_allowed');
+    }
+  }
+
   data.commands.forEach((command, index) => {
     if (command.$kind === 'MergeCoins') {
       const dest = resolve(command.MergeCoins.destination);
@@ -298,7 +590,31 @@ export function describeWalletTransaction(input: Uint8Array | string, expect: Wa
         actions.push({ type: 'send_funds', asset: t, recipient, amountMinor: exact ? source.amountMinor : null });
         return;
       }
+      if (call.module === 'allowance') {
+        describeAllowanceCall(target, a, call.typeArguments);
+        return;
+      }
       refuse(`0x2::${target} is not a wallet command`, 'command_not_allowed');
+    }
+
+    if (pkg === MOVE_STDLIB) {
+      // Only wrapping a rule's rate limit, which is a Move value, in an Option.
+      if (target !== 'option::some' && target !== 'option::none') refuse(`0x1::${target} is not a wallet command`, 'command_not_allowed');
+      if (call.typeArguments.length !== 1 || normalizeStructTag(call.typeArguments[0]) !== RATE_LIMIT_TYPE) refuse('only a rate limit is wrapped here', 'bad_type');
+      if (target === 'option::none') refuse('a spending rule always has its recurring cap', 'bad_argument');
+      need(1);
+      const source = a[0];
+      if (source.kind !== 'result' || actions[source.command]?.type !== 'rate_limit' || consumed.has(source.command)) {
+        refuse('the rate limit wrapped must be made in this transaction, once', 'bad_argument');
+      }
+      consumed.add((source as { command: number }).command);
+      actions.push({ type: 'wrap_rate_limit', rateLimitFromCommand: (source as { command: number }).command });
+      return;
+    }
+
+    if (spendPkg && pkg === spendPkg) {
+      describeSpendCall(target, a, call.typeArguments);
+      return;
     }
 
     if (pkg !== core) refuse(`command ${index + 1} calls a package that is not Splash's core`, 'package_not_allowed');
@@ -439,6 +755,13 @@ export function describeWalletTransaction(input: Uint8Array | string, expect: Wa
   });
 
   if (actions.length === 0) refuse('the transaction does nothing', 'empty');
+  // A rate limit, its Option and a proposal exist only to be used by the
+  // next step; one left over is a rule nobody accepted.
+  actions.forEach((x, i) => {
+    if ((x.type === 'rate_limit' || x.type === 'wrap_rate_limit' || x.type === 'propose_allowance') && !consumed.has(i)) {
+      refuse('a proposed rule is never accepted in this transaction', 'dangling_proposal');
+    }
+  });
 
   const expiration = data.expiration;
   const validity =

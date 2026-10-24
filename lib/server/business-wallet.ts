@@ -71,6 +71,8 @@ export type AccountState = {
   /** A rotation proposed and not yet confirmed. */
   pendingWallet: string | null;
   nominatedWallet: string | null;
+  /** How many times a wallet registered or rotated: each SpendPolicy belongs to one generation (§4.2). */
+  walletEpoch?: bigint;
 };
 
 /** An existing intent, read from the chain (payment_intent::PaymentIntent). */
@@ -172,6 +174,7 @@ async function accountNow(ctx: WalletContext): Promise<AccountState | PlanFailur
       wallet: a.wallet ? normalizeSuiAddress(a.wallet) : null,
       pendingWallet: a.pendingWallet ? normalizeSuiAddress(a.pendingWallet) : null,
       nominatedWallet: a.nominatedWallet ? normalizeSuiAddress(a.nominatedWallet) : null,
+      ...(a.walletEpoch !== undefined ? { walletEpoch: BigInt(a.walletEpoch) } : {}),
     };
   } catch {
     return refuse(502, 'account_unreadable', 'the business account could not be read from the chain, so nothing was built');
@@ -320,7 +323,8 @@ export async function startBusinessWallet(
  */
 export async function continueWalletSteps(ctx: WalletContext, executed: StoredRequest): Promise<Result | null> {
   const next = executed.nextStep as NextStep | null;
-  if (!next) return null;
+  // Other follow-ups (a spending-rule reissue, §4.2) are not the wallet's.
+  if (!next || !['register_wallet', 'confirm_wallet_rotation', 'rotation_transfer'].includes(next.purpose)) return null;
   if (next.purpose === 'rotation_transfer') {
     return requestRotationTransfer(ctx, { orgId: executed.orgId, requestedBy: executed.requestedBy, from: next.from, to: next.to });
   }
@@ -380,6 +384,24 @@ export async function currentWalletMembers(
   const members = source ? membersOf(source) : null;
   if (!members) return refuse(409, 'wallet_unknown', 'the business account names a wallet Splash has no record of setting up, so nothing is built for it');
   return { ok: true, address: account.wallet, members, account };
+}
+
+/** A wallet's keys, weights, threshold and address, from its stored members. */
+export function walletRegistration(members: WalletMembers) {
+  return registration(members);
+}
+
+/**
+ * The members of a wallet Splash set up at `address` (the current one, or an
+ * earlier one after a rotation), from the executed registration or
+ * confirmation that made it the business's. Null if Splash has no record.
+ */
+export async function recordedWalletMembers(db: DrizzleDb, orgId: string, address: string): Promise<WalletMembers | null> {
+  const executed = await listSigningRequests(db, orgId, ['executed']);
+  const source = executed.find(
+    (r) => (r.purpose === 'register_wallet' || r.purpose === 'confirm_wallet_rotation') && r.senderAddress === normalizeSuiAddress(address),
+  );
+  return source ? membersOf(source) : null;
 }
 
 /** Propose new signers. The current wallet signs; the new one confirms after. */
