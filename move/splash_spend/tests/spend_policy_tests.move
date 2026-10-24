@@ -866,6 +866,111 @@ fun new_policy_refuses_a_rule_funded_by_the_old_wallet() {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+// A policy grows only while it is current and the account is not frozen
+// ════════════════════════════════════════════════════════════════════════════
+
+/// Splash's compliance desk freezes the account (AdminCap).
+fun admin_freezes(s: &mut Scenario) {
+    s.next_tx(STRANGER);
+    let mut account = s.take_shared<BusinessAccount>();
+    let admin = business_account::admin_cap_for_testing(s.ctx());
+    business_account::admin_freeze(&admin, &mut account, s.ctx());
+    business_account::destroy_admin_cap_for_testing(admin);
+    ts::return_shared(account);
+}
+
+#[test]
+#[expected_failure(abort_code = 1064, location = spend_policy)]
+/// Review A1/A4: a rotation is often done because a signer was compromised.
+/// The old wallet must not keep writing to its old policy: its additions
+/// are stale rules an indexer could show as the account's.
+fun a_retired_wallet_cannot_add_a_spender_to_its_old_policy() {
+    let (mut s, old_id) = begin_with_policy();
+    rotate_to_b(&mut s);
+    add_spender_as(&mut s, old_id, h::wallet(), STRANGER, spend_policy::role_staff(), POLICY_MAX);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 1064, location = spend_policy)]
+/// Nor verify a recipient on it.
+fun a_retired_wallet_cannot_verify_a_recipient_on_its_old_policy() {
+    let (mut s, old_id) = begin_with_policy();
+    rotate_to_b(&mut s);
+    verify_recipient_as(&mut s, old_id, h::wallet(), SUI, STRANGER);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 1064, location = spend_policy)]
+/// Nor issue a spending rule under it, even for a spender it listed before.
+fun a_retired_wallet_cannot_issue_a_rule_under_its_old_policy() {
+    let (mut s, old_id) = begin_with_policy();
+    staff_up(&mut s, old_id, h::wallet());
+    rotate_to_b(&mut s);
+    accept_as(&mut s, old_id, h::wallet(), STAFF);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 1065, location = spend_policy)]
+/// Core refuses membership growth under a freeze, so that a spender is not
+/// ready to pay the moment it lifts. A policy cannot take a new spender
+/// under a compliance freeze either.
+fun a_policy_cannot_take_a_spender_under_a_compliance_freeze() {
+    let (mut s, id) = begin_with_policy();
+    admin_freezes(&mut s);
+    add_spender_as(&mut s, id, h::wallet(), STAFF, spend_policy::role_staff(), STAFF_MAX);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 1065, location = spend_policy)]
+/// Nor a new beneficiary.
+fun a_policy_cannot_bind_a_beneficiary_under_a_compliance_freeze() {
+    let (mut s, id) = begin_with_policy();
+    admin_freezes(&mut s);
+    verify_beneficiary_as(&mut s, id, h::wallet(), BENEFICIARY_A, PARTNER);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 1065, location = spend_policy)]
+/// Nor loosen its limits.
+fun a_policy_cannot_raise_its_limits_under_a_compliance_freeze() {
+    let (mut s, id) = begin_with_policy();
+    admin_freezes(&mut s);
+    set_limits_as(&mut s, id, h::wallet(), POLICY_MAX * 2, TEN_THOUSAND_USDC);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 1065, location = spend_policy)]
+/// And no spending rule is issued under a freeze.
+fun no_rule_is_issued_under_a_compliance_freeze() {
+    let (mut s, id) = begin_with_policy();
+    staff_up(&mut s, id, h::wallet());
+    admin_freezes(&mut s);
+    accept_as(&mut s, id, h::wallet(), STAFF);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 1065, location = spend_policy)]
+/// An owner's own freeze counts too, as it does for core's membership.
+fun a_policy_cannot_take_a_spender_while_an_owner_has_frozen_the_account() {
+    let (mut s, id) = begin_with_policy();
+    s.next_tx(h::owner_2());
+    {
+        let mut account = s.take_shared<BusinessAccount>();
+        business_account::freeze_account(&mut account, s.ctx());
+        ts::return_shared(account);
+    };
+    add_spender_as(&mut s, id, h::wallet(), STAFF, spend_policy::role_staff(), STAFF_MAX);
+    s.end();
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 // Every mutation is the wallet's alone
 // ════════════════════════════════════════════════════════════════════════════
 
