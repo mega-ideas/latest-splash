@@ -226,6 +226,14 @@ public struct RegistryEntryRemoved has copy, drop {
     type_name: String,
 }
 
+/// The deprecated per-person approval path was switched off, for good.
+/// Emitted once, by whichever of `disable_legacy` and `admin_disable_legacy`
+/// ran first. `ComplianceConfigUpdated` has no field for the switch, so
+/// without this the one-way change would not show on the event stream.
+public struct LegacyDisabled has copy, drop {
+    config_id: address,
+}
+
 /// Mint the one `ConfigTicket`, to the publisher.
 fun init(ctx: &mut TxContext) {
     transfer::transfer(ConfigTicket { id: object::new(ctx) }, ctx.sender());
@@ -601,16 +609,27 @@ public fun admin_remove_registry_entry(
 
 /// Switch the deprecated per-person approval path off, for good.
 /// Subtractive: it stops a way of moving money and adds none.
+///
+/// Idempotent. The first call that finds it on emits `LegacyDisabled`; a
+/// call that finds it already off changes nothing and emits no second one.
 public fun disable_legacy(config: &mut ComplianceConfig, cap: &ComplianceCap, registry_caps: &CapRegistry) {
     assert_compliance_cap(registry_caps, cap);
     assert!(cap.config_id == object::id(config), E_INVALID_CAP);
-    config.legacy_enabled = false;
+    // Written out here, not in a helper, so check-compliance-subtractive sees
+    // the switch in the body of the function that takes the cap.
+    if (config.legacy_enabled) {
+        config.legacy_enabled = false;
+        event::emit(LegacyDisabled { config_id: object::id_address(config) });
+    };
     emit_update(config);
 }
 
 /// The same switch, by the cold multisig.
 public fun admin_disable_legacy(_admin: &AdminCap, config: &mut ComplianceConfig) {
-    config.legacy_enabled = false;
+    if (config.legacy_enabled) {
+        config.legacy_enabled = false;
+        event::emit(LegacyDisabled { config_id: object::id_address(config) });
+    };
     emit_update(config);
 }
 
