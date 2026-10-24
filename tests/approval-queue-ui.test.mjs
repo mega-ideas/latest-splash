@@ -165,9 +165,10 @@ test('the queue lists ready-to-send for the viewer’s workspace and offers the 
   assert.match(page, /<ApprovalCodeCard \/>/);
   assert.match(page, /<ReadyToSendLane items=\{readyItems\} \/>/);
 
-  // The code entry and the lane come before the board, where the eye lands.
+  // v2 brief 5.3: the code entry first, then "Waiting for your decision",
+  // then what is approved and waiting to be sent.
   const cardAt = page.indexOf('<ApprovalCodeCard />');
   const laneAt = page.indexOf('<ReadyToSendLane');
   const boardAt = page.indexOf('<ApprovalQueueBoard');
-  assert.ok(cardAt > 0 && cardAt < laneAt && laneAt < boardAt);
+  assert.ok(cardAt > 0 && cardAt < boardAt && boardAt < laneAt);
 });
