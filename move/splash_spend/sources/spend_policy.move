@@ -97,6 +97,12 @@ const E_POLICY_NOT_CURRENT: u64 = 1064;
 const E_ACCOUNT_FROZEN: u64 = 1065;
 /// A running-total window is at least an hour and at most thirty days.
 const E_BAD_WINDOW: u64 = 1066;
+/// The address is a partner deposit address (a verified beneficiary is bound
+/// to it). It is paid only as a bank payout, so it is not also a recipient.
+const E_PARTNER_DEPOSIT: u64 = 1067;
+/// The address is a verified recipient (kind 2 or 3). It cannot also be a
+/// partner deposit address; remove it as a recipient first.
+const E_ALREADY_A_RECIPIENT: u64 = 1068;
 
 // ─── Constants ─────────────────────────────────────────────────────────────
 /// Staff open intents and pay them.
@@ -194,13 +200,20 @@ public struct SpendPolicy has key {
     spender_count: u64,
     /// Kinds 2–3: verified destinations on Sui, each with the one kind it is
     /// paid as, which is how core delivers it: a Splash business (2) is
-    /// credited to its address balance, a wallet (3) receives a Coin.
+    /// credited to its address balance, a wallet (3) receives a Coin. Never
+    /// a partner deposit address.
     recipients: Table<Destination, u8>,
     recipient_count: u64,
     /// Kind 1: each bank beneficiary (by 32-byte commitment) bound to the one
     /// partner deposit destination allowed to receive payouts for it.
     beneficiaries: Table<vector<u8>, Destination>,
     beneficiary_count: u64,
+    /// Decision 2: every partner deposit address (an address at least one
+    /// verified beneficiary is bound to), with how many are bound to it. It
+    /// is paid only as a bank payout for one of them, and never appears in
+    /// `recipients`: the two lists do not overlap. Removing the last
+    /// beneficiary bound to an address removes its entry.
+    partner_deposits: Table<address, u64>,
     per_payment_max: u64,
     /// A payment needs a second approval from an owner when it takes what
     /// its payer has paid its recipient in the current window above this.
@@ -293,6 +306,7 @@ public fun create_policy<T>(
         recipient_count: 0,
         beneficiaries: table::new(ctx),
         beneficiary_count: 0,
+        partner_deposits: table::new(ctx),
         per_payment_max,
         second_approval_threshold: DEFAULT_SECOND_APPROVAL_THRESHOLD,
         generation: 0,
@@ -392,7 +406,10 @@ public fun remove_spender(policy: &mut SpendPolicy, spender: address, ctx: &TxCo
 ///
 /// A recipient on any other domain is refused: no spending rule could pay
 /// it, because a cross-chain payment would hand the business's coin to the
-/// spender's transaction. The owners pay those from the wallet.
+/// spender's transaction. The owners pay those from the wallet. So is a
+/// partner deposit address (decision 2): it is paid only as a bank payout for
+/// a beneficiary bound to it, where the partner can match the deposit to a
+/// payout instruction.
 public fun verify_recipient(
     policy: &mut SpendPolicy,
     account: &BusinessAccount,
@@ -409,6 +426,7 @@ public fun verify_recipient(
         kind == payment_intent::kind_splash_business() || kind == payment_intent::kind_wallet(),
         E_BAD_KIND,
     );
+    assert!(!policy.partner_deposits.contains(addr), E_PARTNER_DEPOSIT);
     let key = Destination { domain, addr };
     assert!(!policy.recipients.contains(key), E_ALREADY_VERIFIED);
     policy.recipients.add(key, kind);
@@ -432,6 +450,13 @@ public fun remove_recipient(policy: &mut SpendPolicy, domain: u32, addr: address
 /// `splash:beneficiary:v1`) together with the one partner deposit address on
 /// Sui that payouts to it may go to. A verified beneficiary cannot then be
 /// paired with any other verified address.
+///
+/// Decision 2: the address is the partner's fixed deposit address for this
+/// business (ideally the business's own sub-account there), verified once
+/// off chain by a test deposit. Binding a beneficiary makes it a partner
+/// deposit address, paid only as a bank payout for a beneficiary bound to
+/// it. An address already verified as a recipient (kind 2 or 3) is refused,
+/// so the two lists never overlap; the wallet removes the recipient first.
 public fun verify_beneficiary(
     policy: &mut SpendPolicy,
     account: &BusinessAccount,
@@ -444,18 +469,35 @@ public fun verify_beneficiary(
     assert!(commitment.length() == COMMITMENT_BYTES, E_BAD_BENEFICIARY);
     assert!(partner_deposit != @0x0, E_INVALID_ADDRESS);
     assert!(!policy.beneficiaries.contains(commitment), E_ALREADY_VERIFIED);
+    assert!(
+        !policy.recipients.contains(Destination { domain: SUI_DOMAIN, addr: partner_deposit }),
+        E_ALREADY_A_RECIPIENT,
+    );
     policy.beneficiaries.add(commitment, Destination { domain: SUI_DOMAIN, addr: partner_deposit });
     policy.beneficiary_count = policy.beneficiary_count + 1;
+    if (policy.partner_deposits.contains(partner_deposit)) {
+        let bound = policy.partner_deposits.borrow_mut(partner_deposit);
+        *bound = *bound + 1;
+    } else {
+        policy.partner_deposits.add(partner_deposit, 1);
+    };
     changed(policy, b"verify_beneficiary");
 }
 
 /// Removing a beneficiary stops its open bank payouts at once, and retires
-/// every approval given so far.
+/// every approval given so far. Removing the last beneficiary bound to a
+/// partner deposit address clears its partner flag, so the wallet may then
+/// verify it as a recipient.
 public fun remove_beneficiary(policy: &mut SpendPolicy, commitment: vector<u8>, ctx: &TxContext) {
     assert_wallet(policy, ctx);
     assert!(policy.beneficiaries.contains(commitment), E_NOT_VERIFIED);
-    policy.beneficiaries.remove(commitment);
+    let Destination { domain: _, addr } = policy.beneficiaries.remove(commitment);
     policy.beneficiary_count = policy.beneficiary_count - 1;
+    let bound = policy.partner_deposits.borrow_mut(addr);
+    *bound = *bound - 1;
+    if (*bound == 0) {
+        policy.partner_deposits.remove(addr);
+    };
     retire_approvals(policy);
     changed(policy, b"remove_beneficiary");
 }
@@ -586,6 +628,16 @@ public fun recipient_kind(policy: &SpendPolicy, domain: u32, addr: address): u8 
 public fun is_beneficiary_bound_to(policy: &SpendPolicy, commitment: vector<u8>, partner_deposit: address): bool {
     policy.beneficiaries.contains(commitment) &&
         *policy.beneficiaries.borrow(commitment) == Destination { domain: SUI_DOMAIN, addr: partner_deposit }
+}
+/// Decision 2: at least one verified beneficiary is bound to `addr`, so it is
+/// paid only as a bank payout for one of them.
+public fun is_partner_deposit(policy: &SpendPolicy, addr: address): bool {
+    policy.partner_deposits.contains(addr)
+}
+/// How many verified beneficiaries are bound to `addr` (0 if it is not a
+/// partner deposit address).
+public fun beneficiaries_bound_to(policy: &SpendPolicy, addr: address): u64 {
+    if (policy.partner_deposits.contains(addr)) *policy.partner_deposits.borrow(addr) else 0
 }
 public fun recipient_count(policy: &SpendPolicy): u64 { policy.recipient_count }
 public fun beneficiary_count(policy: &SpendPolicy): u64 { policy.beneficiary_count }

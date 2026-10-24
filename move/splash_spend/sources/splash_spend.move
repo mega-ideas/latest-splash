@@ -134,6 +134,9 @@ const E_BAD_SETTLE_BY: u64 = 1026;
 const E_SETTLE_BY_AFTER_APPROVAL: u64 = 1027;
 /// The compliance config is not the one this policy was created against.
 const E_WRONG_CONFIG: u64 = 1028;
+/// The recipient is a partner deposit address (decision 2). It is paid only
+/// as a bank payout (kind 1) for a verified beneficiary bound to it.
+const E_PARTNER_DEPOSIT_NOT_BANK_PAYOUT: u64 = 1029;
 
 /// What an allowance accepted under a policy must be named: this prefix and
 /// the policy's id. The allowance module never reads its name, so this module
@@ -620,10 +623,18 @@ fun consume(
 /// A Sui destination is verified for this kind: a bank beneficiary bound to
 /// this partner deposit address, or a recipient on domain 8 verified as
 /// exactly this kind, so core delivers it in the form the owners chose.
+///
+/// Decision 2: a partner deposit address is paid only as a bank payout whose
+/// beneficiary is verified and bound to it, so the partner can match the
+/// deposit (sender, amount, intent) to the payout instruction it was sent.
+/// The policy keeps partner addresses off its recipient list, and this
+/// refuses any other kind to one first, with its own code, at opening and at
+/// the draw.
 fun assert_sui_destination(policy: &SpendPolicy, kind: u8, recipient: address, beneficiary_ref: vector<u8>) {
     if (kind == payment_intent::kind_bank_payout()) {
         assert!(spend_policy::is_beneficiary_bound_to(policy, beneficiary_ref, recipient), E_BENEFICIARY_NOT_VERIFIED);
     } else {
+        assert!(!spend_policy::is_partner_deposit(policy, recipient), E_PARTNER_DEPOSIT_NOT_BANK_PAYOUT);
         let domain = payment_intent::sui_domain();
         assert!(spend_policy::is_recipient_verified(policy, domain, recipient), E_RECIPIENT_NOT_VERIFIED);
         assert!(spend_policy::recipient_kind(policy, domain, recipient) == kind, E_WRONG_DELIVERY_KIND);

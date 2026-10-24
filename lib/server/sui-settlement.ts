@@ -520,6 +520,7 @@ const ABORT_CODES: Record<number, string> = {
   1026: 'E_BAD_SETTLE_BY — an approval or delegation must name a settle-by time in the future and no later than the intent expiry: the quote deadline the approver is agreeing to.',
   1027: 'E_SETTLE_BY_AFTER_APPROVAL — this payment asks to settle later than its approval allows. Pass a settle-by no later than the approval, or approve again against a fresh quote.',
   1028: 'E_WRONG_CONFIG — the compliance config passed is not the one this spending rule was created against. Pass the rule config (spend_policy::config).',
+  1029: 'E_PARTNER_DEPOSIT_NOT_BANK_PAYOUT — this address is a payout partner deposit address on the spending rule, so it is paid only as a bank payout for a beneficiary bound to it. Open a bank payout for that beneficiary instead.',
   1050: 'E_NOT_THE_WALLET — only the business wallet that made this spending rule can change it.',
   1051: 'E_WALLET_MISMATCH — the members do not derive the sender, or the sender is not the account registered business wallet.',
   1052: 'E_TOO_MANY_SPENDERS — this spending rule is at its limit of 64 spenders.',
@@ -537,6 +538,8 @@ const ABORT_CODES: Record<number, string> = {
   1064: 'E_POLICY_NOT_CURRENT — this spending rule is not the account current one: the business wallet has rotated, or another account was passed. An old rule can only be cut back; the new wallet sets up its own.',
   1065: 'E_ACCOUNT_FROZEN — the account is frozen, so its spending rule can be cut back but not widened, and no new allowance is issued, until it thaws.',
   1066: 'E_BAD_WINDOW — the running-total window of a spending rule is at least one hour and at most thirty days.',
+  1067: 'E_PARTNER_DEPOSIT — that address is a payout partner deposit address on this rule (a beneficiary is bound to it), so it cannot also be verified as a recipient. Remove its beneficiaries first.',
+  1068: 'E_ALREADY_A_RECIPIENT — that address is already a verified recipient on this rule, so it cannot also be a payout partner deposit address. Remove it as a recipient first.',
 
   // ── upgrade_delay (splash_upgrade_delay, the 24-hour upgrade notice) ─────
   1100: 'E_BAD_DIGEST — upgrade_delay::propose was given a digest that is not 32 bytes. Pass the digest the build prints for the new bytecode.',
