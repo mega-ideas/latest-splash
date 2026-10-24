@@ -552,21 +552,34 @@ const ABORT_CODES: Record<number, string> = {
   1209: 'E_NOT_A_QUORUM — this multisig lets one member sign alone, so it cannot act for governance.',
 };
 
-/** The modules ABORT_CODES actually describes. Anything else is a dependency. */
+/**
+ * The modules ABORT_CODES actually describes. Anything else is a dependency.
+ * scripts/check-abort-codes.mjs fails the lint when a module that declares an
+ * abort code is missing here.
+ */
 const OUR_MODULES = new Set([
-  'settlement',
-  'business_account',
-  'peg_monitor',
-  'compliance_config',
-  'payment_intent',
+  // splash_core
   'audit_anchor',
-  'dual_treasury',
-  'smart_treasury',
-  'receipt_v2',
+  'business_account',
+  'cap_registry',
+  'compliance_config',
   'multisig',
-  'upgrade_delay',
+  'payment_intent',
+  'peg_monitor',
+  'receipt_v2',
+  'spend_window',
+  // splash_custody and splash_meter (off the mainnet path, still explained)
+  'delegation',
+  'dual_treasury',
+  'liquidity_guard',
+  'settlement',
+  'smart_treasury',
+  'guardian',
+  'spend_meter',
+  // splash_spend and splash_upgrade_delay
   'splash_spend',
   'spend_policy',
+  'upgrade_delay',
 ]);
 
 /**
@@ -577,7 +590,7 @@ const OUR_MODULES = new Set([
  * today — but nothing stops a future dependency from aborting with, say, 100,
  * which our table would confidently mislabel as `E_NOT_VERIFIED`. So the code
  * table is only consulted when the abort actually came from a splash module
- * (splash_core or splash_custody).
+ * (OUR_MODULES).
  */
 const DEPENDENCY_ABORT_CODES: Record<string, Record<number, string>> = {
   book: {
