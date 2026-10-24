@@ -6,9 +6,21 @@
  *   node experiments/v2-phase1/testnet-e2e.mjs
  *
  * Idempotent: each step records its result in testnet-e2e-results.json and is
- * skipped on the next run. Two steps cannot run on day one, because activating
- * the settlement-app registry gives 24 hours' notice on testnet exactly as on
- * mainnet; rerun after the notice and the spending-rule steps complete.
+ * skipped on the next run. Some steps cannot run on day one, because
+ * activating the settlement-app registry and applying Splash's fee recipient
+ * each give 24 hours' notice on testnet exactly as on mainnet; rerun after the
+ * notice and the spending-rule and fees-on steps complete. A results file
+ * recorded on packages published before Amendment A1 is refused, not resumed
+ * (`assertA1Results`); the pre-A1 day-one run is kept beside this script as
+ * testnet-e2e-results-pre-a1.json.
+ *
+ * Fees are off at publish (FeeConfig has no recipient until the first change
+ * is applied), so day one proves fees off. On day one governance also
+ * proposes a 2-of-3 finance multisig as the fee recipient, and on day two,
+ * once applied, a wallet payment and a bank payout run with the fee on:
+ * FeeCharged, the fee leg to the finance multisig, the unused max_fee back to
+ * the business wallet. The bank payout meets the 99 USDC floor, so the funder
+ * needs about 100 testnet USDC for it (faucet.circle.com).
  *
  * It publishes from a SCRATCH COPY of move/, so the repository's
  * Published.toml files stay untouched until the Move change is reviewed.
@@ -19,7 +31,9 @@
  *   - governance: the Phase 0 2-of-3 software-passkey multisig;
  *   - the business: three new software passkeys. Passkey 1 is the founder, all
  *     three are owners, and their 2-of-3 is the business wallet;
- *   - a staff spender and the "KMS operator" executor: two new Ed25519 keys.
+ *   - a staff spender and the "KMS operator" executor: two new Ed25519 keys;
+ *   - Splash's finance multisig, the fee recipient: a 2-of-3 of three new
+ *     Ed25519 keys; and a payout partner's deposit address, one more.
  *
  * Passkeys are SOFTWARE WebAuthn authenticators (P-256), as in Phase 0
  * (docs/mainnet-checks-2026-10.md, check 3). The script refuses to run against
@@ -38,7 +52,7 @@ import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
 import { PasskeyKeypair } from '@mysten/sui/keypairs/passkey';
 import { MultiSigPublicKey } from '@mysten/sui/multisig';
 import { Transaction } from '@mysten/sui/transactions';
-import { toHex } from '@mysten/sui/utils';
+import { normalizeSuiAddress, toHex } from '@mysten/sui/utils';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..', '..');
@@ -59,6 +73,9 @@ const REGISTRY_SETTLEMENT_APP = 2;
 // Amendment A1's kinds (fee_config::KIND_*).
 const KIND_SPLASH_BUSINESS = 0;
 const KIND_WALLET = 1;
+const KIND_BANK_PAYOUT = 4;
+/** The bank-payout floor: business_account::min_transfer_minor, 99 USDC. */
+const BANK_AMOUNT = 99_000_000;
 const SUI_DOMAIN = 8;
 const ROLE_STAFF = 1;
 const ROLE_EXECUTOR = 2;
@@ -73,6 +90,25 @@ const funder = Ed25519Keypair.fromSecretKey(secrets.secretKey);
 if (funder.toSuiAddress() !== secrets.address) throw new Error('Key file address does not match its key.');
 
 const results = existsSync(RESULTS) ? JSON.parse(readFileSync(RESULTS, 'utf8')) : { network: NETWORK, steps: {} };
+
+/**
+ * A results file from a splash_core published before Amendment A1 has no
+ * FeeConfig, FeeAdminCap, address Registry or OpsCap. Resuming it would skip
+ * the publish and call A1's argument lists against the old packages, so it is
+ * refused; move it aside for a fresh run.
+ */
+function assertA1Results(r) {
+  const publish = r.steps?.publishCore;
+  if (!publish) return;
+  const missing = ['feeConfig', 'feeAdminCap', 'addressRegistry', 'opsCap'].filter((key) => !publish[key]);
+  if (missing.length > 0) {
+    throw new Error(
+      `${RESULTS} was recorded on a splash_core published before Amendment A1 (its publishCore has no ${missing.join(', ')}). ` +
+        "Resuming it would call A1's functions on the old packages. Move it aside and run again for a fresh publish. Refusing.",
+    );
+  }
+}
+assertA1Results(results);
 const save = () => writeFileSync(RESULTS, `${JSON.stringify(results, null, 2)}\n`);
 const log = (...a) => console.log(...a);
 const done = (name) => Boolean(results.steps[name]);
@@ -296,7 +332,10 @@ const govKeys = await passkeySet('passkeys'); // Phase 0's three
 const bizKeys = await passkeySet('v2BusinessPasskeys');
 const staff = ed25519('v2StaffSecretKey');
 const executor = ed25519('v2ExecutorSecretKey');
+const financeKeys = [ed25519('v2FinanceSecretKey1'), ed25519('v2FinanceSecretKey2'), ed25519('v2FinanceSecretKey3')];
+const PARTNER = ed25519('v2PartnerSecretKey').toSuiAddress();
 const G = multisigOf(govKeys);
+const FINANCE = multisigOf(financeKeys);
 const W = multisigOf(bizKeys);
 const OWNERS = bizKeys.map((k) => k.getPublicKey().toSuiAddress());
 const RECIPIENT = staff.toSuiAddress(); // a wallet the business pays; any address would do
@@ -307,6 +346,8 @@ results.signers = {
   owners: OWNERS,
   staff: staff.toSuiAddress(),
   executor: executor.toSuiAddress(),
+  finance: FINANCE.toSuiAddress(),
+  partner: PARTNER,
 };
 save();
 log('Governance multisig', G.toSuiAddress());
@@ -416,6 +457,40 @@ if (!done('wrap')) {
   save();
 }
 
+// 4b. Governance proposes Splash's finance multisig as the fee recipient (A1
+// §2.5). Fees stay off until it is applied, 24 hours from now. The recipient
+// is proven a multisig no one member signs for alone (Sky's FIXUP 2).
+if (!done('proposeFeeRecipient')) {
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${CORE}::fee_config::propose_fee_recipient`,
+    arguments: [
+      tx.object(results.steps.publishCore.feeAdminCap), tx.object(FEE_CONFIG),
+      tx.pure.vector('vector<u8>', memberBytes(financeKeys)), tx.pure.vector('u8', [1, 1, 1]), tx.pure.u16(2), tx.object(CLOCK),
+    ],
+  });
+  const t = await runMultisig('fee_config::propose_fee_recipient (the finance 2-of-3), signed by governance (passkeys 1+3)', G, [govKeys[0], govKeys[2]], tx);
+  const ev = eventsOf(t, '::fee_config::FeeRecipientProposed')[0]?.json ?? null;
+  if (!ev || normalizeSuiAddress(ev.recipient) !== normalizeSuiAddress(FINANCE.toSuiAddress())) {
+    throw new Error(`FeeRecipientProposed names ${ev?.recipient}, not the finance multisig ${FINANCE.toSuiAddress()}`);
+  }
+  results.steps.proposeFeeRecipient = { digest: t.digest, event: ev };
+  save();
+}
+
+// 4c. Splash ops registers a payout partner's deposit address (A1 §2.3): a
+// payment to it is a bank payout, whatever it declares.
+if (!done('addPartner')) {
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${CORE}::address_registry::add_partner_address`,
+    arguments: [tx.object(results.steps.publishCore.opsCap), tx.object(ADDRESS_REGISTRY), tx.pure.address(PARTNER)],
+  });
+  const t = await runAs('address_registry::add_partner_address, with the OpsCap', funder, tx);
+  results.steps.addPartner = { digest: t.digest, event: eventsOf(t, '::address_registry::PartnerAddressAdded')[0]?.json ?? null };
+  save();
+}
+
 // 5. Governance announces SettleWitness as a settlement app. 24 hours' notice.
 if (!done('proposeWitness')) {
   const tx = new Transaction();
@@ -493,10 +568,12 @@ if (!done('fundWallet')) {
 /**
  * A wallet-path payment: withdrawal → redeem → create_for_wallet → confirm_balance → anchor → delete, one PTB.
  * The withdrawal covers the payment and the most its fee can be; core charges the derived kind's fee and
- * returns the rest to the wallet's address balance.
+ * returns the rest to the wallet's address balance. A bank payout names its beneficiary. With
+ * `feesOn`, the payment must emit FeeCharged with a fee above zero paid to the finance multisig.
  */
-async function walletPays(step, kind, to, amount, pair) {
+async function walletPays(step, kind, to, amount, pair, { beneficiary = [], feesOn = false } = {}) {
   if (done(step)) return;
+  const bank = kind === KIND_BANK_PAYOUT;
   const tx = new Transaction();
   const maxFee = maxFeeOf(amount);
   const withdrawal = tx.withdrawal({ amount: amount + maxFee, type: USDC });
@@ -506,8 +583,8 @@ async function walletPays(step, kind, to, amount, pair) {
     target: `${CORE}::payment_intent::create_for_wallet`,
     typeArguments: [USDC],
     arguments: [
-      tx.object(ACCOUNT), tx.object(CONFIG), tx.pure.vector('u8', ref32(step)), tx.pure.address(to), tx.pure.vector('u8', []),
-      tx.pure.u64(amount), tx.pure.string('USDC'), tx.pure.u64(1_000_000), tx.pure.vector('u8', ref32(`${step}:commitment`)),
+      tx.object(ACCOUNT), tx.object(CONFIG), tx.pure.vector('u8', ref32(step)), tx.pure.address(to), tx.pure.vector('u8', beneficiary),
+      tx.pure.u64(amount), tx.pure.string(bank ? 'PHP' : 'USDC'), tx.pure.u64(bank ? 56_000_000 : 1_000_000), tx.pure.vector('u8', ref32(`${step}:commitment`)),
       tx.pure.u8(kind), tx.pure.vector('u8', ref32(`${step}:rail`)), tx.pure.u64(now + 3_600_000), tx.object(CLOCK),
     ],
   });
@@ -522,9 +599,16 @@ async function walletPays(step, kind, to, amount, pair) {
   tx.moveCall({ target: `${CORE}::audit_anchor::anchor`, arguments: [receipt, tx.pure.vector('u8', ref32(`${step}:hash`)), tx.pure.vector('u8', Array.from(new TextEncoder().encode('walrus-testnet'))), tx.object(CLOCK)] });
   tx.moveCall({ target: `${CORE}::payment_intent::delete_finalized`, arguments: [intent] });
   const t = await runMultisig(`${step}: the wallet pays from its address balance (create, confirm, anchor, delete in one PTB)`, W, pair, tx);
+  const feeCharged = eventsOf(t, '::fee_config::FeeCharged')[0]?.json ?? null;
+  if (feesOn && (!feeCharged || BigInt(feeCharged.fee) <= 0n || normalizeSuiAddress(feeCharged.fee_recipient) !== normalizeSuiAddress(FINANCE.toSuiAddress()))) {
+    throw new Error(`${step}: expected FeeCharged with a fee to the finance multisig, got ${JSON.stringify(feeCharged)}. Digest ${t.digest}`);
+  }
+  if (!feesOn && feeCharged) throw new Error(`${step}: fees are off, yet FeeCharged was emitted. Digest ${t.digest}`);
   results.steps[step] = {
     digest: t.digest,
+    maxFee: String(maxFee),
     confirmed: eventsOf(t, '::payment_intent::IntentConfirmed')[0]?.json ?? null,
+    feeCharged,
     balanceChanges: (t.balanceChanges ?? []).map((b) => ({ owner: b.address ?? b.owner, coinType: b.coinType, amount: String(b.amount) })),
   };
   save();
@@ -791,4 +875,43 @@ if (!done('executorPays')) {
   save();
 }
 
-log('\nEvery v2 path ran on testnet. Results:', RESULTS);
+// 15. Fees on: the finance multisig's 24-hour notice has run; governance
+//     applies it, and a wallet payment and a bank payout pay Splash's fee.
+const feeEta = Number(results.steps.proposeFeeRecipient.event?.eta ?? 0);
+if (Date.now() < feeEta) {
+  log(`\nThe fee recipient can be applied at ${new Date(feeEta).toISOString()} (24 hours after it was proposed).`);
+  log('Rerun this script after that to turn the fees on and run the fees-on payments.');
+  results.waitingUntil = new Date(feeEta).toISOString();
+  save();
+  process.exit(0);
+}
+if (!done('applyFeeRecipient')) {
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${CORE}::fee_config::apply_fee_recipient`,
+    arguments: [tx.object(results.steps.publishCore.feeAdminCap), tx.object(FEE_CONFIG), tx.object(CLOCK)],
+  });
+  const t = await runMultisig('fee_config::apply_fee_recipient: fees on, signed by governance (passkeys 2+3)', G, [govKeys[1], govKeys[2]], tx);
+  results.steps.applyFeeRecipient = { digest: t.digest, event: eventsOf(t, '::fee_config::FeeRecipientApplied')[0]?.json ?? null };
+  save();
+}
+// A wallet payment under the WALLET schedule: 0.5 USDC pays the 1% ceiling, 0.005.
+await walletPays('feesOnWalletPays', KIND_WALLET, RECIPIENT, 500_000, [bizKeys[0], bizKeys[1]], { feesOn: true });
+// A bank payout to the partner's deposit address, at the 99 USDC floor: 0.30%,
+// 0.297 USDC; the rest of the 0.99 max_fee goes back to the business wallet.
+if (!done('fundBankLeg')) {
+  const tx = new Transaction();
+  const coin = tx.coin({ type: USDC, balance: BANK_AMOUNT + maxFeeOf(BANK_AMOUNT) });
+  tx.moveCall({ target: '0x2::coin::send_funds', typeArguments: [USDC], arguments: [coin, tx.pure.address(W.toSuiAddress())] });
+  let t;
+  try {
+    t = await runAs('coin::send_funds: the bank leg (99.99 USDC) into the business wallet', funder, tx);
+  } catch (error) {
+    throw new Error(`The funder ${funder.toSuiAddress()} needs ${(BANK_AMOUNT + maxFeeOf(BANK_AMOUNT)) / 1e6} testnet USDC for the bank-payout leg (faucet.circle.com), then rerun: ${error.message}`);
+  }
+  results.steps.fundBankLeg = { digest: t.digest };
+  save();
+}
+await walletPays('feesOnBankPays', KIND_BANK_PAYOUT, PARTNER, BANK_AMOUNT, [bizKeys[1], bizKeys[2]], { beneficiary: ref32('feesOnBankPays:beneficiary'), feesOn: true });
+
+log('\nEvery v2 path ran on testnet, with the fees off and then on. Results:', RESULTS);

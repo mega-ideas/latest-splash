@@ -387,7 +387,9 @@ test('the verify script never calls process.exit once the chain has answered: on
 
 const END_STATE = '../scripts/v2-end-state.mjs';
 const UPGRADE_CAP = '0x2::package::UpgradeCap';
-const results = JSON.parse(await source('experiments/v2-phase1/testnet-e2e-results.json'));
+// The ids of the archived pre-A1 testnet run: what these checks read (the
+// immutable packages and the wrapped cap) did not change with A1.
+const results = JSON.parse(await source('experiments/v2-phase1/testnet-e2e-results-pre-a1.json'));
 const CORE = results.steps.publishCore.packageId;
 const SPEND = results.steps.publishSpend.packageId;
 const DELAY = results.steps.publishDelay.packageId;
