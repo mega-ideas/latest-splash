@@ -54,6 +54,8 @@ import { buildSpendView, boundTo, DAY_MS, type HeldAllowance, type PolicyState, 
 import { V2_KIND } from './sui-v2-builders.ts';
 import { openSigningRequest, type RequestView, type SigningFailure } from './wallet-signing.ts';
 import type { DrizzleDb, StoredRequest } from './wallet-signing-store.ts';
+import { resolveOffboardedSpenders, type StandingOf } from './spend-standing.ts';
+import { recordAuthorityEvent } from './wallet-authority.ts';
 
 /** What the chain says, read for one business. */
 export interface SpendReader {
@@ -71,6 +73,8 @@ export type SpendContext = {
   read: SpendReader;
   ownership: OwnershipGate;
   db: DrizzleDb;
+  /** Who each spender address is to this business now (lib/server/spend-standing.ts). */
+  standing?: () => Promise<StandingOf>;
 };
 
 type Result = { ok: true; request: RequestView } | SigningFailure;
@@ -193,9 +197,10 @@ export async function readSpendingRules(sc: SpendContext): Promise<{ ok: true; v
       spends = [];
     }
   }
+  const standing = sc.standing ? await sc.standing() : undefined;
   return {
     ok: true,
-    view: buildSpendView({ now: l.now, wallet: l.wallet, walletEpoch: l.walletEpoch, policy: l.policy, earlierPolicies: l.earlier, allowances: l.held, spends, appName: l.appName }),
+    view: buildSpendView({ now: l.now, wallet: l.wallet, walletEpoch: l.walletEpoch, policy: l.policy, earlierPolicies: l.earlier, allowances: l.held, spends, appName: l.appName, standing }),
   };
 }
 
@@ -426,6 +431,46 @@ export async function revokeSpendingRule(
   const ops: RuleOp[] = theirs.map((a) => ({ op: 'revoke_allowance', cap: a.cap, allowance: { objectId: a.id, initialSharedVersion: a.initialSharedVersion } }));
   if (listed) ops.push({ op: 'remove_spender', spender });
   return openRule(sc, l, { ...input, policy, ops, dedupeKey: `spend:rule:${spender}`, walletTagAllowed: [] });
+}
+
+/**
+ * Take back, in one transaction, every staff rule whose holder may no longer
+ * pay under one: a member who was removed, a viewer, or an address nobody
+ * here holds (lib/server/spend-standing.ts). Each spender's allowances from
+ * the current wallet are revoked and the spender is removed from the policy,
+ * which stops them at once. The wallet's quorum signs it.
+ */
+export async function revokeOrphanedRules(
+  sc: SpendContext,
+  input: { orgId: string; requestedBy: string; wallet: WalletMembers },
+): Promise<Result> {
+  if (!sc.standing) return refuse(503, 'no_standing', 'who holds each rule cannot be read, so nothing was built');
+  const l = await load(sc, { wallet: input.wallet });
+  if (isFailure(l)) return l;
+  const policy = currentPolicy(l);
+  if (isFailure(policy)) return policy;
+  const standing = await sc.standing();
+  const orphaned = policy.spenders.filter((x) => x.role === SPEND_ROLE.STAFF && standing(x.spender) !== 'member').map((x) => x.spender);
+  if (orphaned.length === 0) return refuse(404, 'nothing_orphaned', 'every rule belongs to a current member');
+  const ops: RuleOp[] = [];
+  for (const spender of orphaned) {
+    for (const a of l.held.filter((h) => h.spender === spender && h.funder === l.wallet && h.app === l.appName)) {
+      ops.push({ op: 'revoke_allowance', cap: a.cap, allowance: { objectId: a.id, initialSharedVersion: a.initialSharedVersion } });
+    }
+    ops.push({ op: 'remove_spender', spender });
+  }
+  const opened = await openRule(sc, l, { ...input, policy, ops, dedupeKey: 'spend:offboard', walletTagAllowed: [] });
+  if (opened.ok) {
+    await recordAuthorityEvent(sc.db, {
+      orgId: input.orgId,
+      actorUserId: input.requestedBy,
+      action: 'spending_rules_revoke_opened',
+      ref: opened.request.id,
+      detail: { spenders: orphaned.map((a) => ({ address: a, standing: standing(a) })) },
+      now: () => new Date(Number(l.now)),
+    });
+  }
+  return opened;
 }
 
 /** Verify or remove recipients and beneficiaries. */
@@ -668,6 +713,7 @@ export async function revokeStaleAllowances(
 
 /** After a spending-rule request executes: the step that follows it (the reissue after a new policy). */
 export async function continueSpendSteps(sc: SpendContext, executed: StoredRequest): Promise<Result | SpendFailure | null> {
+  await resolveOffboardedSpenders(sc.db, executed);
   const next = executed.nextStep as ReissueStep | null;
   if (!next || next.purpose !== 'spend_reissue' || executed.purpose !== 'spend_policy') return null;
   const wallet = await recordedWalletMembers(sc.db, executed.orgId, executed.senderAddress);

@@ -33,6 +33,7 @@ import { windowIndexAt } from '../../lib/wallet/allowance-window.ts';
 import { continueWalletSteps } from '../../lib/server/business-wallet.ts';
 import { continueSpendSteps } from '../../lib/server/spend-rules.ts';
 import { dbOwnershipGate } from '../../lib/server/ownership-proofs.ts';
+import { readSpenderStanding } from '../../lib/server/spend-standing.ts';
 
 export const SPEND = '0x' + '5e'.repeat(32);
 export const POLICY_REGISTRY = '0x' + '9e'.repeat(32);
@@ -261,7 +262,7 @@ export async function spendWorld(opts = {}) {
     readAllowances: async (ids) => ids.map((i) => state.allowances.get(normalizeSuiAddress(i))).filter(Boolean).map((a) => ({ ...a })),
     listRuleSpends: async (policyId) => spends.filter((e) => e.policyId === normalizeSuiAddress(policyId)),
   };
-  const sc = { wallet: w.ctx, chain: spendChainCfg, read: reader, ownership: dbOwnershipGate(w.db), db: w.db };
+  const sc = { wallet: w.ctx, chain: spendChainCfg, read: reader, ownership: dbOwnershipGate(w.db), db: w.db, standing: () => readSpenderStanding(w.db, 'acme') };
   w.signing.onExecuted = async (request) => {
     await continueWalletSteps(w.ctx, request);
     await continueSpendSteps(sc, request);

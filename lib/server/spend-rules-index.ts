@@ -33,6 +33,7 @@ import { normalizeSuiAddress } from '@mysten/sui/utils';
 
 import { liveRateLimit, thresholdCounted } from '../wallet/allowance-window.ts';
 import { allowanceNameFor, type AllowanceState, type RuleSpendEvent, type RunningEntry, type SpendPolicyHead } from '../wallet/spend-rules-bcs.ts';
+import type { Standing, StandingOf } from './spend-standing.ts';
 
 /** A policy with its tables read. */
 export type PolicyState = SpendPolicyHead & {
@@ -96,6 +97,13 @@ export type RunningTotalView = {
 export type RuleView = {
   spender: string;
   role: 'staff' | 'executor';
+  /**
+   * Who holds it now (lib/server/spend-standing.ts): a current member, a
+   * viewer, someone removed, or nobody here. Anything but 'member' is
+   * orphaned: the rule still pays on chain until the owners revoke it. Null
+   * for the operator's executor rule, or when Splash could not tell.
+   */
+  standing: Standing | null;
   perPaymentMaxMinor: string;
   status: 'active' | 'not_started' | 'expired' | 'no_allowance';
   allowances: AllowanceView[];
@@ -122,6 +130,8 @@ export type SpendView = {
   stale: AllowanceView[];
   /** An earlier generation's policy had rules this one does not: reissue after the rotation. */
   reissueNeeded: boolean;
+  /** Staff spenders on the current policy who may no longer pay under a rule (removed, a viewer, or nobody here): revoke them now. */
+  orphaned: string[];
 };
 
 const s = (v: bigint) => v.toString();
@@ -186,6 +196,8 @@ export function buildSpendView(input: {
   spends: RuleSpendEvent[];
   /** The SPLASH_SPEND type name as the chain records it. */
   appName: string;
+  /** Who each spender is to Splash now; without it, standing is null and nothing is listed as orphaned. */
+  standing?: StandingOf;
 }): SpendView {
   const { now, policy } = input;
   const ours = input.allowances.filter((a) => a.app === input.appName);
@@ -223,9 +235,11 @@ export function buildSpendView(input: {
       const recentSpends = input.spends
         .filter((e) => e.policyId === current.id && e.spender === sp.spender)
         .map((e) => ({ intentId: e.intentId, allowanceId: e.allowanceId, approvalId: e.approvalId, recipient: e.recipient, derivedKind: e.derivedKind, feeMinor: s(e.fee) }));
+      const role = sp.role === 2 ? ('executor' as const) : ('staff' as const);
       rules.push({
         spender: sp.spender,
-        role: sp.role === 2 ? 'executor' : 'staff',
+        role,
+        standing: role === 'staff' && input.standing ? input.standing(sp.spender) : null,
         perPaymentMaxMinor: s(sp.perPaymentMax),
         status,
         allowances: mine,
@@ -257,5 +271,6 @@ export function buildSpendView(input: {
     unattached,
     stale,
     reissueNeeded,
+    orphaned: rules.filter((r) => r.standing !== null && r.standing !== 'member').map((r) => r.spender),
   };
 }

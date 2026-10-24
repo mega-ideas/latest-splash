@@ -26,11 +26,11 @@
  */
 import { randomBytes, randomUUID } from 'node:crypto';
 
-import { and, desc, eq, gt, isNotNull, isNull } from 'drizzle-orm';
+import { and, desc, eq, gt, isNotNull, isNull, or } from 'drizzle-orm';
 import { normalizeSuiAddress } from '@mysten/sui/utils';
 import { verifyPersonalMessageSignature } from '@mysten/sui/verify';
 
-import { memberships, walletAuthorityEvents, walletMigrationSignoffs, walletPersonsInCharge } from '../db/schema.ts';
+import { memberships, passkeyCredentials, walletAuthorityEvents, walletMigrationSignoffs, walletOffboardedSpenders, walletPersonsInCharge } from '../db/schema.ts';
 import type { DrizzleDb } from './wallet-signing-store.ts';
 
 export type AuthorityAction =
@@ -44,7 +44,9 @@ export type AuthorityAction =
   | 'approval_accepted'
   | 'approval_declined'
   | 'approval_withdrawn'
-  | 'approval_completed';
+  | 'approval_completed'
+  | 'member_offboarded'
+  | 'spending_rules_revoke_opened';
 
 export type AuthorityFailure = { ok: false; status: number; code: string; error: string };
 const fail = (status: number, code: string, error: string): AuthorityFailure => ({ ok: false, status, code, error });
@@ -104,6 +106,9 @@ export async function highestAuthority(db: DrizzleDb, orgId: string, userId: str
   const role = await memberRole(db, orgId, userId);
   if (role === null) return null;
   if (role === 'admin') return 'owner';
+  // Only someone who makes or approves payments can be in charge: a viewer
+  // never, whatever the appointment table still says.
+  if (role !== 'maker' && role !== 'checker') return null;
   const [pic] = await db
     .select({ id: walletPersonsInCharge.id })
     .from(walletPersonsInCharge)
@@ -167,6 +172,61 @@ export async function revokePersonInCharge(
     await recordAuthorityEvent(db, { orgId: input.orgId, actorUserId: input.actorUserId, action: 'migration_sign_off_voided', subjectUserId: input.userId, ref: v.id, now: input.now });
   }
   return { ok: true, voided: voided.length };
+}
+
+// ─── Offboarding ────────────────────────────────────────────────────────────
+
+/** Every Sui address a user has a passkey wallet at, active or retired: who an address on chain is. */
+export async function passkeyAddressesOf(db: DrizzleDb, userId: string): Promise<string[]> {
+  const rows = await db.select({ address: passkeyCredentials.suiAddress }).from(passkeyCredentials).where(eq(passkeyCredentials.userId, userId));
+  return [...new Set(rows.map((r) => normalizeSuiAddress(r.address)))];
+}
+
+/**
+ * A member leaves a business (their membership is removed; a role change is
+ * a removal and a new grant). What Splash holds goes at once: an
+ * appointment as person in charge is revoked, and every sign-off they gave
+ * or were given that is still usable is voided. What the chain holds cannot
+ * be taken back from here: each of their addresses is recorded, so the
+ * spending-rule index shows any rule it still has as orphaned until the
+ * owners' quorum revokes it (lib/server/spend-rules.ts revokeOrphanedRules).
+ * `by` is the actor: an owner's user id, or `operator:<email>`.
+ */
+export async function offboardMember(
+  db: DrizzleDb,
+  input: { orgId: string; userId: string; by: string; addresses: string[]; now?: Clock },
+): Promise<{ revokedInCharge: boolean; voidedSignOffs: number; addresses: string[] }> {
+  const now = clock(input.now);
+  const at = () => now;
+  const addresses = [...new Set(input.addresses.map((a) => normalizeSuiAddress(a)))];
+  await recordAuthorityEvent(db, { orgId: input.orgId, actorUserId: input.by, action: 'member_offboarded', subjectUserId: input.userId, detail: { addresses }, now: at });
+  const revoked = await db
+    .update(walletPersonsInCharge)
+    .set({ revokedAt: now, revokedBy: input.by })
+    .where(and(eq(walletPersonsInCharge.orgId, input.orgId), eq(walletPersonsInCharge.userId, input.userId), isNull(walletPersonsInCharge.revokedAt)))
+    .returning({ id: walletPersonsInCharge.id });
+  if (revoked.length > 0) {
+    await recordAuthorityEvent(db, { orgId: input.orgId, actorUserId: input.by, action: 'person_in_charge_revoked', subjectUserId: input.userId, detail: { reason: 'membership_removed' }, now: at });
+  }
+  const voided = await db
+    .update(walletMigrationSignoffs)
+    .set({ voidedAt: now })
+    .where(
+      and(
+        eq(walletMigrationSignoffs.orgId, input.orgId),
+        or(eq(walletMigrationSignoffs.signedBy, input.userId), eq(walletMigrationSignoffs.memberUserId, input.userId)),
+        isNull(walletMigrationSignoffs.voidedAt),
+        gt(walletMigrationSignoffs.expiresAt, now),
+      ),
+    )
+    .returning({ id: walletMigrationSignoffs.id });
+  for (const v of voided) {
+    await recordAuthorityEvent(db, { orgId: input.orgId, actorUserId: input.by, action: 'migration_sign_off_voided', subjectUserId: input.userId, ref: v.id, detail: { reason: 'membership_removed' }, now: at });
+  }
+  for (const address of addresses) {
+    await db.insert(walletOffboardedSpenders).values({ id: `wofs_${randomUUID()}`, orgId: input.orgId, userId: input.userId, address, reason: 'removed', offboardedBy: input.by, offboardedAt: now });
+  }
+  return { revokedInCharge: revoked.length > 0, voidedSignOffs: voided.length, addresses };
 }
 
 // ─── Migration sign-off ─────────────────────────────────────────────────────

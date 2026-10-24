@@ -250,12 +250,16 @@ export async function liveWalletContext(orgId: string): Promise<{ ok: true; ctx:
   signing.onExecuted = async (request) => {
     await settleApprovalAsks(db, request);
     await continueWalletSteps(ctx, request);
+    // A spending-rule change that took a removed member off the policy
+    // closes that offboarding to-do (Postgres only).
+    const { resolveOffboardedSpenders } = await import('@/lib/server/spend-standing');
+    await resolveOffboardedSpenders(db, request);
     if (request.purpose === 'spend_policy') {
       // A new policy opened as part of reissuing the rules after a rotation
       // is followed by the reissue itself (§4.2).
       const { liveSpendContext } = await import('@/lib/server/spend-rules-deps');
       const { continueSpendSteps } = await import('@/lib/server/spend-rules');
-      const spend = await liveSpendContext({ ctx, db });
+      const spend = await liveSpendContext({ ctx, db, orgId: request.orgId });
       if (spend.ok) await continueSpendSteps(spend.sc, request);
     }
   };

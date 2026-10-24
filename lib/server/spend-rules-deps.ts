@@ -31,6 +31,7 @@ import {
   type RuleSpendEvent,
 } from '@/lib/wallet/spend-rules-bcs';
 import { dbOwnershipGate } from '@/lib/server/ownership-proofs';
+import { readSpenderStanding } from '@/lib/server/spend-standing';
 import type { SecondApprovalOpener } from '@/lib/server/payment-approval-asks';
 import { balanceType } from '@/lib/server/spend-rules-builders';
 import type { PolicyState } from '@/lib/server/spend-rules-index';
@@ -143,7 +144,7 @@ export function liveSpendReader(spendPackageId: string, usdcType: string): Spend
 }
 
 /** The spending-rule context for the route's org, or why it cannot run. */
-export async function liveSpendContext(route: Pick<WalletRoute, 'ctx' | 'db'>): Promise<{ ok: true; sc: SpendContext } | { ok: false; status: number; error: string }> {
+export async function liveSpendContext(route: Pick<WalletRoute, 'ctx' | 'db'> & { orgId?: string }): Promise<{ ok: true; sc: SpendContext } | { ok: false; status: number; error: string }> {
   const ids = spendIdsFromEnv();
   if (!ids.ok) return { ok: false, status: 503, error: ids.reason };
   let policyRegistry: { objectId: string; initialSharedVersion: string };
@@ -164,6 +165,7 @@ export async function liveSpendContext(route: Pick<WalletRoute, 'ctx' | 'db'>): 
       read: liveSpendReader(ids.spendPackageId, ctx.chain.usdcType),
       ownership: dbOwnershipGate(db),
       db,
+      ...(route.orgId ? { standing: () => readSpenderStanding(db, route.orgId as string) } : {}),
     },
   };
 }

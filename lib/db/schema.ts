@@ -1588,9 +1588,10 @@ export const walletAuthorityEvents = pgTable('wallet_authority_events', {
   /** The order events happened in, even within one clock tick. */
   seq: bigserial('seq', { mode: 'number' }).notNull(),
   orgId: text('org_id').notNull().references(() => organizations.id),
-  actorUserId: text('actor_user_id').notNull().references(() => users.id),
+  /** A user id, or `operator:<email>` for a Splash operator. No foreign key: the trail outlives the user (0037). */
+  actorUserId: text('actor_user_id').notNull(),
   action: text('action').notNull(),
-  subjectUserId: text('subject_user_id').references(() => users.id),
+  subjectUserId: text('subject_user_id'),
   ref: text('ref'),
   detail: jsonb('detail').notNull().default({}),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -1607,9 +1608,10 @@ export const walletPersonsInCharge = pgTable('wallet_persons_in_charge', {
   id: text('id').primaryKey(),
   orgId: text('org_id').notNull().references(() => organizations.id),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  grantedBy: text('granted_by').notNull().references(() => users.id),
+  grantedBy: text('granted_by').notNull(),
   grantedAt: timestamp('granted_at', { withTimezone: true }).notNull(),
-  revokedBy: text('revoked_by').references(() => users.id),
+  /** An owner's user id, or `operator:<email>` when a membership was removed (0037). */
+  revokedBy: text('revoked_by'),
   revokedAt: timestamp('revoked_at', { withTimezone: true }),
 }, (table) => [
   uniqueIndex('wallet_persons_in_charge_active_unique').on(table.orgId, table.userId).where(sql`${table.revokedAt} is null`),
@@ -1625,7 +1627,7 @@ export const walletMigrationSignoffs = pgTable('wallet_migration_signoffs', {
   memberUserId: text('member_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   fromAddress: text('from_address').notNull(),
   toWallet: text('to_wallet').notNull(),
-  signedBy: text('signed_by').notNull().references(() => users.id),
+  signedBy: text('signed_by').notNull(),
   message: text('message').notNull(),
   nonce: text('nonce').notNull().unique(),
   signature: text('signature'),
@@ -1647,7 +1649,8 @@ export const walletApprovalAsks = pgTable('wallet_approval_asks', {
   id: text('id').primaryKey(),
   orgId: text('org_id').notNull().references(() => organizations.id),
   intentId: text('intent_id').notNull(),
-  requestedBy: text('requested_by').notNull().references(() => users.id),
+  /** No foreign key: the ask outlives the user (0037). */
+  requestedBy: text('requested_by').notNull(),
   intent: jsonb('intent').notNull(),
   note: text('note'),
   contentHash: text('content_hash').notNull(),
@@ -1655,7 +1658,7 @@ export const walletApprovalAsks = pgTable('wallet_approval_asks', {
   /** open | signing | approved | declined | withdrawn */
   status: text('status').notNull(),
   signingRequestId: text('signing_request_id').references(() => walletSigningRequests.id),
-  decidedBy: text('decided_by').references(() => users.id),
+  decidedBy: text('decided_by'),
   decidedAt: timestamp('decided_at', { withTimezone: true }),
   decisionNote: text('decision_note'),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
@@ -1663,4 +1666,24 @@ export const walletApprovalAsks = pgTable('wallet_approval_asks', {
 }, (table) => [
   uniqueIndex('wallet_approval_asks_open_unique').on(table.orgId, table.intentId).where(sql`${table.status} in ('open', 'signing')`),
   index('wallet_approval_asks_org_idx').on(table.orgId, table.status),
+]);
+
+/**
+ * Each address of a member who was removed from a business (migration 0037).
+ * Their spending rule lives on chain, beyond Splash's reach: until the
+ * owners' quorum takes it back the index shows it as orphaned. Resolved when
+ * an executed spending-rule change removes that spender from the policy.
+ */
+export const walletOffboardedSpenders = pgTable('wallet_offboarded_spenders', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  userId: text('user_id').notNull(),
+  address: text('address').notNull(),
+  /** removed */
+  reason: text('reason').notNull(),
+  offboardedBy: text('offboarded_by').notNull(),
+  offboardedAt: timestamp('offboarded_at', { withTimezone: true }).notNull(),
+  resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+}, (table) => [
+  index('wallet_offboarded_spenders_org_idx').on(table.orgId, table.address).where(sql`${table.resolvedAt} is null`),
 ]);
