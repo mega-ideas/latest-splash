@@ -159,6 +159,10 @@ const E_FEE_ABOVE_CEILING: u64 = 1032;
 const E_FEE_ABOVE_APPROVED: u64 = 1033;
 /// An approval's `max_total` must be at least the intent's principal.
 const E_BAD_MAX_TOTAL: u64 = 1034;
+/// The FeeConfig is not Splash's one, which the policy recorded at creation.
+const E_WRONG_FEE_CONFIG: u64 = 1035;
+/// The address Registry is not Splash's one, which the policy recorded.
+const E_WRONG_ADDRESS_REGISTRY: u64 = 1036;
 
 /// A1 §2.6: the most Splash's fee may be on a rule payment, in basis points
 /// of the principal. This package's own constant, checked on what core
@@ -592,11 +596,13 @@ fun draw<C>(
 ): Balance<C> {
     let payer = ctx.sender();
     // The money is this policy's wallet's, in this policy's asset, under this
-    // policy's compliance config; the policy is the account's current one;
-    // the intent is the account's.
+    // policy's compliance config, Splash's fee config and address registry;
+    // the policy is the account's current one; the intent is the account's.
     assert!(allowance::funder(allowance::allowance_settings(allowance)) == spend_policy::wallet(policy), E_WRONG_FUNDER);
     assert!(compliance_config::type_string<C>() == spend_policy::asset(policy), E_WRONG_ASSET);
     assert_config(policy, config);
+    assert!(object::id(fee_cfg) == spend_policy::fee_config(policy), E_WRONG_FEE_CONFIG);
+    assert!(object::id(registry) == spend_policy::address_registry(policy), E_WRONG_ADDRESS_REGISTRY);
     assert_current(policy, account);
     assert_intent_of(policy, intent);
 

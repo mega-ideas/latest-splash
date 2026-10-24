@@ -518,6 +518,8 @@ const ABORT_CODES: Record<number, string> = {
   1032: 'E_FEE_ABOVE_CEILING — Splash’s fee on this payment would be above 1% of the amount, the most a spending rule ever pays Splash. Nothing was paid; tell Splash support.',
   1033: 'E_FEE_ABOVE_APPROVED — the amount and Splash’s fee together are above the total the owner approved. The fee schedule may have risen since the approval: an owner approves again against a fresh quote.',
   1034: 'E_BAD_MAX_TOTAL — an approval names the most the payment may cost in all, the amount and Splash’s fee, so it cannot be less than the amount.',
+  1035: 'E_WRONG_FEE_CONFIG — the fee config passed is not Splash’s, the one this spending rule recorded when it was created. Pass the rule fee config (spend_policy::fee_config).',
+  1036: 'E_WRONG_ADDRESS_REGISTRY — the address registry passed is not Splash’s, the one this spending rule recorded when it was created. Pass the rule registry (spend_policy::address_registry).',
   1050: 'E_NOT_THE_WALLET — only the business wallet that made this spending rule can change it.',
   1051: 'E_WALLET_MISMATCH — the members do not derive the sender, or the sender is not the account registered business wallet.',
   1052: 'E_TOO_MANY_SPENDERS — this spending rule is at its limit of 64 spenders.',

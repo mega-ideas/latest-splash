@@ -16,9 +16,10 @@
 ///
 /// It lives in this package, not in `splash_core`, so no upgrade of
 /// `splash_core` can reach it. Everything that matters (the wallet, its
-/// generation, the asset, the compliance config, the owners, the lists, the
-/// limits) is copied in at creation or set by the wallet, and never read back
-/// from core's mutable state.
+/// generation, the asset, the compliance config, Splash's fee config and
+/// address registry, the owners, the lists, the limits) is copied in at
+/// creation or set by the wallet, and never read back from core's mutable
+/// state.
 ///
 /// ─── One policy per wallet generation ───────────────────────────────────────
 ///
@@ -68,8 +69,10 @@
 /// plus expired entries that each later payment, or the wallet, clears.
 module splash_spend::spend_policy;
 
+use splash_core::address_registry::Registry;
 use splash_core::business_account::{Self, BusinessAccount};
 use splash_core::compliance_config::{Self, ComplianceConfig};
+use splash_core::fee_config::FeeConfig;
 use splash_core::multisig;
 use splash_core::payment_intent;
 use std::string::String;
@@ -213,6 +216,13 @@ public struct SpendPolicy has key {
     /// registries cannot be swapped for another config's: core v1 mints
     /// one, but an additive core upgrade could add a constructor.
     config: ID,
+    /// Splash's `FeeConfig` and address `Registry` when this policy was
+    /// created (A1 §2.3, §2.6), pinned for the same reason: `splash_spend`
+    /// pays only against them, so a second FeeConfig cannot redirect or
+    /// waive a rule payment's fee, and a second Registry cannot reclassify
+    /// its recipient.
+    fee_config: ID,
+    address_registry: ID,
     /// The wallet members' own addresses, derived at creation from the keys
     /// that also derive `wallet`. Who may give a second approval.
     owners: vector<address>,
@@ -291,11 +301,15 @@ fun init(ctx: &mut TxContext) {
 /// wallet. The owners are derived from the same keys. `T` must be an asset
 /// the compliance config accepts, checked before the generation's one slot is
 /// claimed, and the policy records that config's ID: `splash_spend` opens and
-/// pays under this policy only against it.
+/// pays under this policy only against it. It records the IDs of Splash's
+/// `FeeConfig` and address `Registry` passed too, and pays only against
+/// those.
 public fun create_policy<T>(
     registry: &mut PolicyRegistry,
     account: &BusinessAccount,
     config: &ComplianceConfig,
+    fee_cfg: &FeeConfig,
+    addresses: &Registry,
     keys: vector<vector<u8>>,
     weights: vector<u8>,
     threshold: u16,
@@ -322,6 +336,8 @@ public fun create_policy<T>(
         wallet_epoch,
         asset,
         config: object::id(config),
+        fee_config: object::id(fee_cfg),
+        address_registry: object::id(addresses),
         owners,
         spenders: table::new(ctx),
         spender_count: 0,
@@ -649,6 +665,10 @@ public fun wallet_epoch(policy: &SpendPolicy): u64 { policy.wallet_epoch }
 public fun asset(policy: &SpendPolicy): String { policy.asset }
 /// The ID of the `ComplianceConfig` this policy was created against.
 public fun config(policy: &SpendPolicy): ID { policy.config }
+/// The ID of Splash's `FeeConfig` this policy pays against.
+public fun fee_config(policy: &SpendPolicy): ID { policy.fee_config }
+/// The ID of Splash's address `Registry` this policy pays against.
+public fun address_registry(policy: &SpendPolicy): ID { policy.address_registry }
 public fun owners(policy: &SpendPolicy): vector<address> { policy.owners }
 public fun is_owner(policy: &SpendPolicy, who: address): bool { policy.owners.contains(&who) }
 public fun is_spender(policy: &SpendPolicy, who: address): bool { policy.spenders.contains(who) }

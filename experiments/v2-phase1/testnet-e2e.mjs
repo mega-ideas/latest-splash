@@ -561,6 +561,8 @@ if (!done('policy')) {
     typeArguments: [USDC],
     arguments: [
       tx.object(results.steps.publishSpend.policyRegistry), tx.object(ACCOUNT), tx.object(CONFIG),
+      // The policy pins Splash's FeeConfig and address Registry, as it pins the config.
+      tx.object(FEE_CONFIG), tx.object(ADDRESS_REGISTRY),
       tx.pure.vector('vector<u8>', memberBytes(bizKeys)), tx.pure.vector('u8', [1, 1, 1]), tx.pure.u16(2), tx.pure.u64(2_000_000),
     ],
   });
