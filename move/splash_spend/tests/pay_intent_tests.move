@@ -4508,6 +4508,109 @@ fun splash_spends_own_ceiling_holds_with_a_fee_config_above_100_bps() {
     s.end();
 }
 
+// ─── splash_spend's own ceiling, on the fee core hands back ─────────────────
+//
+// The A1 review (L1): removing splash_spend's own ceiling check left every
+// test green, because core's splash_fee clamps to its own ceiling first, so
+// no fee above 1% ever reached it. `pay_intent_reporting_fee_for_testing`
+// is `pay_intent` settling through core's test-only
+// `settle_reporting_fee_from_app`, which hands back `reported` as the fee
+// it charged. No published core can do that; it stands in for one that
+// did, and these tests fail if splash_spend's own check is removed.
+
+/// STAFF pays `intent` under `alw` against the shared FeeConfig and Registry,
+/// signing for `max_fee`, with core reporting `reported` as its fee.
+fun pay_reporting(s: &mut Scenario, fx: &Fx, alw: ID, intent: ID, max_fee: u64, reported: u64) {
+    s.next_tx(STAFF);
+    let fees = s.take_shared<FeeConfig>();
+    let reg = s.take_shared<address_registry::Registry>();
+    let mut allowance = s.take_shared_by_id<Allowance<Balance<USDC>>>(alw);
+    let mut intent = s.take_shared_by_id<PaymentIntent>(intent);
+    let mut account = s.take_shared_by_id<BusinessAccount>(fx.account);
+    let mut policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
+    let config = s.take_shared<ComplianceConfig>();
+    let c = s.take_shared<Clock>();
+    let amount = payment_intent::amount_usd(&intent);
+    let withdrawal = allowance::new_withdrawal_for_testing(alw, ts::withdraw_balance_from_address<USDC>(h::wallet(), amount + max_fee));
+    let receipt = splash_spend::pay_intent_reporting_fee_for_testing(
+        &mut allowance,
+        withdrawal,
+        &mut intent,
+        &mut account,
+        &mut policy,
+        &config,
+        &fees,
+        &reg,
+        option::none(),
+        max_fee,
+        h::settle_by(&c),
+        reported,
+        &c,
+        s.ctx(),
+    );
+    audit_anchor::anchor(receipt, HASH, BLOB, &c, s.ctx());
+    ts::return_shared(c);
+    ts::return_shared(config);
+    ts::return_shared(policy);
+    ts::return_shared(account);
+    ts::return_shared(intent);
+    ts::return_shared(allowance);
+    ts::return_shared(reg);
+    ts::return_shared(fees);
+}
+
+#[test]
+#[expected_failure(abort_code = splash_spend::E_FEE_ABOVE_CEILING)]
+/// Core hands back a fee one unit above 1% of the principal. splash_spend's
+/// own ceiling refuses it, and the whole payment aborts.
+fun splash_spend_refuses_a_fee_core_hands_back_one_unit_above_one_percent() {
+    let (mut s, fx) = fee_setup();
+    let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    pay_reporting(&mut s, &fx, fx.staff, intent, PAY / 100, PAY / 100 + 1);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = splash_spend::E_FEE_ABOVE_CEILING)]
+/// Far above it too: a core reporting 2% of the principal.
+fun splash_spend_refuses_a_fee_core_hands_back_at_two_percent() {
+    let (mut s, fx) = fee_setup();
+    let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    pay_reporting(&mut s, &fx, fx.staff, intent, PAY / 100, PAY / 50);
+    s.end();
+}
+
+#[test]
+/// A fee core hands back at exactly 1% passes, and `RuleSpend` records the
+/// fee core reported. The hook changes only what core reports: the fee
+/// actually charged is the schedule's, and the rest goes to the wallet.
+fun a_fee_core_hands_back_at_exactly_one_percent_passes_the_ceiling() {
+    let (mut s, fx) = fee_setup();
+    let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    pay_reporting(&mut s, &fx, fx.staff, intent, PAY / 100, PAY / 100);
+    let (_, _, _, _, _, _, _, fee) = splash_spend::unpack_rule_spend_for_testing(event::events_by_type<RuleSpend>()[0]);
+    assert_eq!(fee, PAY / 100);
+    assert_eq!(coin_received(&mut s, SUPPLIER), PAY);
+    assert_eq!(settled(&mut s, h::fee_recipient()), WALLET_FEE);
+    assert_eq!(settled(&mut s, h::wallet()), FUNDS - PAY - WALLET_FEE);
+    s.end();
+}
+
+#[test]
+/// The ceiling itself: floor(principal * 100 / 10,000), computed without an
+/// intermediate that could overflow, at the edges.
+fun splash_spends_own_ceiling_is_one_percent_rounded_down() {
+    assert_eq!(splash_spend::fee_ceiling_for_testing(0), 0);
+    assert_eq!(splash_spend::fee_ceiling_for_testing(99), 0);
+    assert_eq!(splash_spend::fee_ceiling_for_testing(100), 1);
+    assert_eq!(splash_spend::fee_ceiling_for_testing(9_999), 99);
+    assert_eq!(splash_spend::fee_ceiling_for_testing(10_000), 100);
+    assert_eq!(splash_spend::fee_ceiling_for_testing(PAY), PAY / 100);
+    let max = std::u64::max_value!();
+    assert_eq!(splash_spend::fee_ceiling_for_testing(max), max / 100);
+    assert_eq!(splash_spend::fee_ceiling_for_testing(max), 184_467_440_737_095_516);
+}
+
 #[test]
 #[expected_failure(abort_code = splash_spend::E_WRONG_FEE_CONFIG)]
 /// The policy pins Splash's FeeConfig, as it pins its compliance config. A
