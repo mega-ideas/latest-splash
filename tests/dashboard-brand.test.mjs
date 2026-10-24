@@ -55,6 +55,19 @@ test('no "Demo" or "DEMO" in product text', () => {
   assert.deepEqual(found, [], `\n  ${found.join('\n  ')}\n`);
 });
 
+test('the dashboard says Sui mainnet, not testnet, and its loading screen draws no grid', () => {
+  // The Zeke composer's context tag and the Transfer country list are what a
+  // signed-in customer reads; the brief bans "testnet" on customer surfaces.
+  for (const file of ['components/oxwal/OxWalComposer.tsx', 'components/transfer/StepBeneficiary.tsx', 'components/dashboard/DashboardShell.tsx']) {
+    const found = hits([file], /testnet/i);
+    assert.deepEqual(found, [], `\n  ${found.join('\n  ')}\n`);
+  }
+  const css = readFileSync(join(ROOT, 'app/globals.css'), 'utf8');
+  const start = css.indexOf('.splash-loading-shell {');
+  const rule = css.slice(start, css.indexOf('}', start));
+  assert.doesNotMatch(rule, /1px, transparent 1px/, '"Loading your dashboard" sits on plain paper');
+});
+
 test('the gold that replaces coral is a token, with its pale tint', () => {
   const tokens = readFileSync(join(ROOT, 'styles/tokens.css'), 'utf8');
   assert.match(tokens, /--gold-light:\s*#efc46f;/i, 'solid accent: gold #efc46f, ink text on it');
