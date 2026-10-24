@@ -9,9 +9,12 @@ export const dynamic = 'force-dynamic';
  * One approval ask.
  *
  * POST { action: 'accept', mode, maxFeeMinor, settleByMs }   an owner opens the
- *      signing request that approves it: `wallet_pays` (the quorum pays the
- *      intent from the business wallet) or `second_approval` (the owner's own
- *      second approval, for a payment within the asker's spending rule).
+ *      signing request that approves it: `wallet_pays` (the quorum pays it
+ *      from the business wallet: the open intent, or for a draft a new intent
+ *      opened and paid in one transaction) or `second_approval` (the owner's
+ *      own second approval, for an intent within the asker's spending rule;
+ *      not for a draft). The ask is claimed first, so two owners accepting
+ *      at once open one request.
  * POST { action: 'decline', reason? }                        an owner declines it.
  * POST { action: 'withdraw' }                                the asker withdraws it.
  */

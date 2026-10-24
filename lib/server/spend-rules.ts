@@ -199,6 +199,18 @@ export async function readSpendingRules(sc: SpendContext): Promise<{ ok: true; v
   };
 }
 
+/**
+ * The current wallet generation's policy, or null when there is none (or it
+ * cannot be read). For an approval ask: what it shows the owners about the
+ * payee and the asker's own per-payment maximum.
+ */
+export async function readCurrentPolicy(sc: SpendContext): Promise<PolicyState | null> {
+  const l = await load(sc);
+  if (isFailure(l) || !l.policy) return null;
+  const p = currentPolicy(l);
+  return isFailure(p) ? null : p;
+}
+
 function currentPolicy(l: Loaded): PolicyState | SpendFailure {
   if (!l.policy) return refuse(409, 'no_policy', 'set up spending rules for this wallet first (its spending policy)');
   if (l.policy.wallet !== l.wallet || l.policy.walletEpoch !== l.walletEpoch) return refuse(409, 'stale_policy', 'the spending policy belongs to an earlier wallet; reissue the rules');
