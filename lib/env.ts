@@ -164,6 +164,13 @@ export const envSchema = z.object({
      from its SUI address balance (lib/server/wallet-sponsor.ts). Unset or
      'off': no wallet transaction is built, and the request says why. */
   WALLET_GAS_SPONSOR: opt(z.enum(['operator', 'off'])),
+  /* v2 Business Splash Wallet on mainnet (lib/server/wallet-network-gate.ts).
+     Off: no wallet request is built on mainnet. On requires
+     WALLET_HARDWARE_CHECK_REF, where the hardware 2-of-3 passkey check's
+     evidence is recorded (docs/v2/phase2-business-wallet.md runbook), and
+     production refuses to boot without it. */
+  WALLET_MAINNET_ENABLED: flag('false'),
+  WALLET_HARDWARE_CHECK_REF: opt(str.regex(/^docs\/[A-Za-z0-9._/-]+\.md#[A-Za-z0-9_-]+$/, 'must name the evidence, e.g. docs/mainnet-checks-2026-10.md#wallet-2-of-3')),
   /** Chainalysis's free sanctions-screening API. Unset: wallet recipients
    *  are saved unscreened, and reach mainnet only through a named admin's
    *  attestation (lib/server/wallet-screening.ts). */
@@ -523,6 +530,15 @@ function productionIssues(env: Env): Issue[] {
      payout delegation is configured for a path that no longer exists. The code
      stays, for testnet and for the record. */
   if (env.SUI_NETWORK === 'mainnet') {
+    /* Review B4: a custody path nobody has proven fails closed. Business
+       wallets on mainnet need the hardware 2-of-3 passkey check recorded
+       first (lib/server/wallet-network-gate.ts). */
+    if (env.WALLET_MAINNET_ENABLED && env.WALLET_HARDWARE_CHECK_REF === undefined) {
+      issues.push({
+        key: 'WALLET_HARDWARE_CHECK_REF',
+        message: 'is unset while WALLET_MAINNET_ENABLED=true: business wallets go on mainnet only after the hardware 2-of-3 passkey check passes, and this names where its evidence is recorded',
+      });
+    }
     for (const key of ['SPLASH_CUSTODY_PACKAGE_ID', 'SPLASH_PAYOUT_DELEGATION_ID'] as const) {
       if (env[key] !== undefined) {
         issues.push({ key, message: 'names the retired custody path; splash_custody and splash_meter do not publish to mainnet in v2 (docs/v2/phase1-move-design.md §8) — remove it from the host' });
