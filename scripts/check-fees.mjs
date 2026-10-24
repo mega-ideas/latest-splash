@@ -63,7 +63,9 @@
  *     one and a removed one must come off the list.
  *
  * (d) NO IMMEDIATE SETTER BUT set_discount. In splash_core::fee_config,
- *     outside `#[test_only]` and `#[test]` functions (they never publish):
+ *     outside `#[test_only]` and `#[test]` functions (they never publish;
+ *     only an attribute item that is exactly `test_only`, `test` or
+ *     `test(…)` counts, so `#[ext(test)]` exempts nothing):
  *       1. Only the five changes below take a FeeConfig mutably or by value,
  *          and each takes `&FeeAdminCap`. A sixth, private or public, fails.
  *       2. The in-force fields are written only by their own change:
@@ -378,7 +380,31 @@ function attributesBefore(code, start) {
   }
 }
 
-const isTestOnly = (code, fn) => attributesBefore(code, fn.start).some((a) => /\btest(?:_only)?\b/.test(a));
+/** The top-level items of one attribute's text: `test, expected_failure(a, b)` is two. */
+function attributeItems(text) {
+  const items = [];
+  let depth = 0;
+  let from = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    if (text[i] === '(') depth += 1;
+    else if (text[i] === ')') depth -= 1;
+    else if (text[i] === ',' && depth === 0) {
+      items.push(text.slice(from, i).trim());
+      from = i + 1;
+    }
+  }
+  items.push(text.slice(from).trim());
+  return items.filter(Boolean);
+}
+
+/**
+ * A function the compiler leaves out of the published package: one with an
+ * attribute item that is exactly `test_only`, `test` or `test(…)`. An
+ * attribute that merely mentions the word, such as `#[ext(test)]`, does not
+ * exempt it: that function publishes (the A1 review).
+ */
+const TEST_ITEM = /^(?:test_only|test(?:\s*\([\s\S]*\))?)$/;
+const isTestOnly = (code, fn) => attributesBefore(code, fn.start).some((a) => attributeItems(a).some((item) => TEST_ITEM.test(item)));
 
 /** Offsets in `body` where `field` is written: assigned, borrowed `&mut`, or called with a non-read method. */
 export function fieldWrites(body, field) {
