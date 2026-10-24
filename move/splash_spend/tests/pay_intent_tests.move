@@ -30,7 +30,8 @@ use splash_spend::splash_spend::{
     PayoutApproval,
     SPLASH_SPEND,
     SettleWitness,
-    SpendApprovalConsumed
+    SpendApprovalConsumed,
+    SpendApprovalDiscarded
 };
 use splash_spend::spend_policy::{Self, PolicyRegistry, SpendPolicy};
 use std::unit_test::assert_eq;
@@ -1617,9 +1618,18 @@ fun discarding_an_approval_is_evented() {
     approve(&mut s, &fx, h::owner_2(), intent, STAFF);
     s.next_tx(STAFF);
     let approval = s.take_from_sender<PayoutApproval>();
+    let approval_id = object::id(&approval);
     let before = event::num_events();
     splash_spend::discard_approval(approval);
     assert_eq!(event::num_events(), before + 1);
+    let discarded = event::events_by_type<SpendApprovalDiscarded>();
+    assert_eq!(discarded.length(), 1);
+    let (e_approval, e_policy, e_intent, e_approver) =
+        splash_spend::unpack_spend_approval_discarded_for_testing(discarded[0]);
+    assert_eq!(e_approval, approval_id);
+    assert_eq!(e_policy, fx.policy);
+    assert_eq!(e_intent, intent);
+    assert_eq!(e_approver, h::owner_2());
     s.next_tx(STAFF);
     assert!(ts::ids_for_address<PayoutApproval>(STAFF).is_empty());
     s.end();

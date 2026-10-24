@@ -195,6 +195,15 @@ public struct SpendApprovalConsumed has copy, drop {
     approver: address,
 }
 
+/// An approval thrown away unused, so an indexer of outstanding approvals
+/// sees it end as it sees a consumed one end.
+public struct SpendApprovalDiscarded has copy, drop {
+    approval_id: ID,
+    policy_id: ID,
+    intent_id: ID,
+    approver: address,
+}
+
 /// Which rule paid an intent: the policy, the allowance, the approval if any,
 /// and the spender. The controls-evidence export reads this. The amount is
 /// not here; the intent's commitment is, in `IntentConfirmed`.
@@ -394,19 +403,21 @@ fun mint(
     transfer::transfer(approval, payer);
 }
 
-/// Throw away an approval that will not be used.
+/// Throw away an approval that will not be used. Emits
+/// `SpendApprovalDiscarded`.
 public fun discard_approval(approval: PayoutApproval) {
     let PayoutApproval {
         id,
-        policy: _,
+        policy: policy_id,
         policy_generation: _,
-        intent: _,
+        intent: intent_id,
         amount: _,
-        approver: _,
+        approver,
         payer: _,
         authority_epoch: _,
         settle_by_ms: _,
     } = approval;
+    event::emit(SpendApprovalDiscarded { approval_id: id.to_inner(), policy_id, intent_id, approver });
     id.delete();
 }
 
@@ -622,3 +633,11 @@ public fun approval_amount(a: &PayoutApproval): u64 { a.amount }
 public fun approval_approver(a: &PayoutApproval): address { a.approver }
 public fun approval_payer(a: &PayoutApproval): address { a.payer }
 public fun approval_settle_by_ms(a: &PayoutApproval): u64 { a.settle_by_ms }
+
+#[test_only]
+/// Event fields are private to this module: lets a test read what
+/// `SpendApprovalDiscarded` carries.
+public fun unpack_spend_approval_discarded_for_testing(e: SpendApprovalDiscarded): (ID, ID, ID, address) {
+    let SpendApprovalDiscarded { approval_id, policy_id, intent_id, approver } = e;
+    (approval_id, policy_id, intent_id, approver)
+}
