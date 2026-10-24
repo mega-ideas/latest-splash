@@ -66,18 +66,25 @@
  *     outside `#[test_only]` and `#[test]` functions (they never publish;
  *     only an attribute item that is exactly `test_only`, `test` or
  *     `test(…)` counts, so `#[ext(test)]` exempts nothing):
- *       1. Only the five changes below take a FeeConfig mutably or by value,
- *          and each takes `&FeeAdminCap`. A sixth, private or public, fails.
+ *       1. Only the seven changes below take a FeeConfig mutably or by
+ *          value, and each takes `&FeeAdminCap`: the two propose_*, the two
+ *          apply_*, the two cancel_* withdrawals and set_discount. An
+ *          eighth, private or public, fails.
  *       2. The in-force fields are written only by their own change:
  *          `schedules` by apply_schedule, `fee_recipient` by
  *          apply_fee_recipient, `discounts` by set_discount; the pending
- *          slots only by their propose_* and apply_*. A write is an
+ *          slots only by their own propose_*, apply_* and cancel_*, so a
+ *          withdrawal empties its slot and touches nothing in force. A
+ *          write is an
  *          assignment (`.f = `, `.f[i] = `), a `&mut` borrow of the field, or
  *          a method call on it other than a read (borrow, contains, length,
  *          is_some, is_none, is_empty).
- *       3. Each apply_* asserts E_FEE_PROPOSAL_NOT_READY against `eta_ms`,
- *          and E_FEE_PROPOSAL_LAPSED against `eta_ms + FEE_APPLY_WINDOW_MS`,
- *          before it writes the in-force field; each propose_* sets its eta
+ *       3. Each apply_* reads `let now = clock.timestamp_ms();`, then
+ *          asserts exactly `assert!(now >= <…>.eta_ms,
+ *          E_FEE_PROPOSAL_NOT_READY)` and `assert!(now < <…>.eta_ms +
+ *          FEE_APPLY_WINDOW_MS, E_FEE_PROPOSAL_LAPSED)`, with nothing else
+ *          in either condition (`true || …` and `… || true` fail), before
+ *          it writes the in-force field; each propose_* sets its eta
  *          as `+ FEE_NOTICE_MS`; FEE_NOTICE_MS is at least 24 hours;
  *          FEE_APPLY_WINDOW_MS is more than 0 and at most seven days, so a
  *          proposal lapses rather than waits to be cashed in months later;
@@ -351,16 +358,25 @@ const NOTICE_MIN_MS = 86_400_000n;
 const WINDOW_MAX_MS = 604_800_000n;
 const IN_FORCE = { schedules: 'apply_schedule', fee_recipient: 'apply_fee_recipient', discounts: 'set_discount' };
 const PENDING_FIELDS = {
-  pending_schedules: ['propose_schedule', 'apply_schedule'],
-  pending_recipient: ['propose_fee_recipient', 'apply_fee_recipient'],
+  pending_schedules: ['propose_schedule', 'apply_schedule', 'cancel_schedule_proposal'],
+  pending_recipient: ['propose_fee_recipient', 'apply_fee_recipient', 'cancel_fee_recipient_proposal'],
 };
+/** The cancel_* withdrawals (the A1 review) may only empty their own pending slot; rule 2 holds them to it. */
 export const CHANGES = {
   propose_schedule: { notice: true },
   apply_schedule: { applies: 'schedules' },
+  cancel_schedule_proposal: {},
   propose_fee_recipient: { notice: true },
   apply_fee_recipient: { applies: 'fee_recipient' },
+  cancel_fee_recipient_proposal: {},
   set_discount: {},
 };
+/** A proposal's eta, read from it: `slot.borrow().eta_ms`, `cfg.pending_recipient.borrow().eta_ms`. */
+const ETA = String.raw`[A-Za-z_]\w*(?:\s*\.\s*[A-Za-z_]\w*(?:\s*\(\s*\))?)*\s*\.\s*eta_ms`;
+const NOW_FROM_CLOCK = /\blet\s+now\s*=\s*clock\s*\.\s*timestamp_ms\s*\(\s*\)\s*;/;
+/** The whole assert, so a condition with anything else in it (`true || …`, `… || true`) does not count. */
+const READY_ASSERT = new RegExp(String.raw`\bassert!\s*\(\s*now\s*>=\s*${ETA}\s*,\s*E_FEE_PROPOSAL_NOT_READY\s*\)`);
+const LAPSE_ASSERT = new RegExp(String.raw`\bassert!\s*\(\s*now\s*<\s*${ETA}\s*\+\s*FEE_APPLY_WINDOW_MS\s*,\s*E_FEE_PROPOSAL_LAPSED\s*\)`);
 const READS = new Set(['borrow', 'contains', 'length', 'is_some', 'is_none', 'is_empty']);
 
 /** The attributes written just before `start` in masked code, innermost last. */
@@ -479,15 +495,19 @@ export function checkFeeConfigSetters(root) {
       failures.push(`(d) ${where(fn.index)}: \`${name}\` does not set its eta as \`+ FEE_NOTICE_MS\`. A proposal waits 24 hours.`);
     }
     if (shape.applies) {
-      const gate = fn.body.search(/\bE_FEE_PROPOSAL_NOT_READY\b/);
+      const gate = fn.body.search(READY_ASSERT);
       const writes = fieldWrites(fn.body, shape.applies);
-      if (gate === -1 || !/\beta_ms\b/.test(fn.body)) {
+      const clock = fn.body.search(NOW_FROM_CLOCK);
+      if (clock === -1 || (gate !== -1 && clock > gate)) {
+        failures.push(`(d) ${where(fn.index)}: \`${name}\` does not read \`now\` from the clock (\`let now = clock.timestamp_ms();\`) before its eta checks.`);
+      }
+      if (gate === -1) {
         failures.push(`(d) ${where(fn.index)}: \`${name}\` does not assert E_FEE_PROPOSAL_NOT_READY against the proposal's eta_ms. Applying early must abort.`);
       } else if (writes.length && writes[0] < gate) {
         failures.push(`(d) ${where(fn.bodyStart + writes[0])}: \`${name}\` writes ${shape.applies} before it checks the eta.`);
       }
-      const lapse = fn.body.search(/\bE_FEE_PROPOSAL_LAPSED\b/);
-      if (lapse === -1 || !/\beta_ms\s*\+\s*FEE_APPLY_WINDOW_MS\b/.test(fn.body)) {
+      const lapse = fn.body.search(LAPSE_ASSERT);
+      if (lapse === -1) {
         failures.push(`(d) ${where(fn.index)}: \`${name}\` does not assert E_FEE_PROPOSAL_LAPSED against the proposal's eta_ms + FEE_APPLY_WINDOW_MS. A proposal lapses seven days after its notice runs; applying it later must abort.`);
       } else if (writes.length && writes[0] < lapse) {
         failures.push(`(d) ${where(fn.bodyStart + writes[0])}: \`${name}\` writes ${shape.applies} before it checks the window.`);
@@ -509,7 +529,7 @@ export function checkFeeConfigSetters(root) {
     }
     for (const [field, owners] of Object.entries(PENDING_FIELDS)) {
       for (const w of fieldWrites(fn.body, field)) {
-        if (!owners.includes(fn.name)) failures.push(`(d) ${where(fn.bodyStart + w)}: \`${fn.name}\` writes ${field}; only ${owners.join(' and ')} may.`);
+        if (!owners.includes(fn.name)) failures.push(`(d) ${where(fn.bodyStart + w)}: \`${fn.name}\` writes ${field}; only ${owners.slice(0, -1).join(', ')} or ${owners.at(-1)} may.`);
       }
     }
     for (const m of fn.body.matchAll(/\.\s*eta_ms\s*=(?!=)/g)) {
@@ -542,7 +562,7 @@ function main() {
   const pending = PENDING_2_8.reduce((n, p) => n + p.count, 0);
   console.log(
     `check:fees: the Move vector test is up to date; FEE_CEILING_BPS is ${A1_CEILING_BPS} in splash_core, splash_spend and lib/fees/schedule.ts; ` +
-      `no new literal fee rate in ${RATE_ROOTS.map((r) => (path.extname(r) ? r : `${r}/`)).join(', ')} (${pending} still listed for A1 §2.8); fee_config changes only through the 24-hour path, applied within seven days, but set_discount.`,
+      `no new literal fee rate in ${RATE_ROOTS.map((r) => (path.extname(r) ? r : `${r}/`)).join(', ')} (${pending} still listed for A1 §2.8); fee_config changes only through the 24-hour path, applied within seven days or withdrawn, but set_discount.`,
   );
 }
 
