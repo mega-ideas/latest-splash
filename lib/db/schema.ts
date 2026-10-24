@@ -1469,3 +1469,72 @@ export const governanceAlertDeliveries = pgTable('governance_alert_deliveries', 
   uniqueIndex('governance_alert_deliveries_alert_user_channel_unique').on(table.alertId, table.userId, table.channel),
   index('governance_alert_deliveries_user_channel_idx').on(table.userId, table.channel),
 ]);
+
+/**
+ * Business Splash Wallet signature collection (v2 §4.1; migration 0033).
+ *
+ * One row per transaction a wallet, its founder or a member must sign: the
+ * exact bytes, their digest, and what they do as decoded from those bytes
+ * (lib/wallet/wallet-tx-describe.ts). `summary` is the server's decoding, not
+ * anything a client sent. Scoped by `org_id` on every read
+ * (lib/server/wallet-signing-store.ts).
+ */
+export const walletSigningRequests = pgTable('wallet_signing_requests', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  /** nominate_wallet | register_wallet | rotate_wallet | confirm_wallet_rotation |
+   *  cancel_wallet_rotation | wallet_membership | wallet_payment | migration_transfer */
+  purpose: text('purpose').notNull(),
+  dedupeKey: text('dedupe_key').notNull(),
+  senderAddress: text('sender_address').notNull(),
+  /** single | multisig */
+  signerKind: text('signer_kind').notNull(),
+  multisigPublicKey: text('multisig_public_key'),
+  threshold: integer('threshold').notNull(),
+  /** sponsored | gasless */
+  gasMode: text('gas_mode').notNull(),
+  txBytes: text('tx_bytes').notNull(),
+  txDigest: text('tx_digest').notNull(),
+  bytesHash: text('bytes_hash').notNull(),
+  summary: jsonb('summary').notNull(),
+  /** The request to open once this one executes: public keys and weights only. */
+  nextStep: jsonb('next_step'),
+  /** collecting | submitting | executed | failed | expired | cancelled */
+  status: text('status').notNull(),
+  requestedBy: text('requested_by').notNull().references(() => users.id),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  executedDigest: text('executed_digest'),
+  error: text('error'),
+  closedAt: timestamp('closed_at', { withTimezone: true }),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('wallet_signing_requests_digest_unique').on(table.txDigest),
+  uniqueIndex('wallet_signing_requests_open_unique')
+    .on(table.orgId, table.dedupeKey)
+    .where(sql`${table.status} in ('collecting', 'submitting')`),
+  index('wallet_signing_requests_org_status_idx').on(table.orgId, table.status),
+]);
+
+/**
+ * Who must sign a request, with what key and weight, and the partial
+ * signature while the request is open. `signature` is cleared when the
+ * request closes; `signature_sha256` stays as evidence.
+ */
+export const walletSigningSigners = pgTable('wallet_signing_signers', {
+  requestId: text('request_id').notNull().references(() => walletSigningRequests.id, { onDelete: 'cascade' }),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  address: text('address').notNull(),
+  publicKey: text('public_key').notNull(),
+  weight: integer('weight').notNull(),
+  signature: text('signature'),
+  signatureSha256: text('signature_sha256'),
+  signedAt: timestamp('signed_at', { withTimezone: true }),
+  notifiedAt: timestamp('notified_at', { withTimezone: true }),
+  notifiedBy: text('notified_by'),
+  ...timestamps,
+}, (table) => [
+  primaryKey({ columns: [table.requestId, table.userId] }),
+  uniqueIndex('wallet_signing_signers_request_address_unique').on(table.requestId, table.address),
+  index('wallet_signing_signers_user_idx').on(table.userId, table.orgId),
+]);

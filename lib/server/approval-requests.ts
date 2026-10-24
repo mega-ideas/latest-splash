@@ -18,8 +18,11 @@
 import 'server-only';
 
 import { canApprove } from '@/lib/membership-roles';
-import { parseMinor, USD_DECIMALS } from '@/lib/money';
+import { formatMinor, parseMinor, USD_DECIMALS } from '@/lib/money';
 import type { UnsignedProposal } from '@/lib/agent/types';
+import type { WalletAction, WalletTxDescription } from '@/lib/wallet/wallet-tx-describe';
+import type { SigningNotifier } from '@/lib/server/wallet-signing';
+import type { SigningPurpose } from '@/lib/server/wallet-signing-store';
 import { listApprovers, type Approver } from '@/lib/server/approver-channels';
 import { issueTokens, recordDecision, tally, type Tally } from '@/lib/server/approval-tokens';
 import { readOrgSettings } from '@/lib/server/org-settings';
@@ -152,6 +155,125 @@ export async function requestApprovals(input: {
   }
 
   return { approversAsked: approvers.length, delivered, channel, unreachable };
+}
+
+// ─── Business Splash Wallet signatures (v2 §4.1) ────────────────────────────
+//
+// A wallet signature request is not a vote, and it is not answered on
+// WhatsApp: the answer is a passkey signature over exact transaction bytes,
+// which only the signer's own device can make, in Splash. So the message
+// says what the transaction does, read from its bytes on the server
+// (lib/wallet/wallet-tx-describe.ts), who else must sign, and when it
+// expires, and asks the person to open Splash. It carries no code, no
+// link and no transaction bytes. The in-app inbox (lib/server/wallet-signing.ts,
+// `signingInbox`) is the other channel, and the one that always works.
+
+const USDC_DECIMALS_V2 = 6;
+
+function shortAddress(address: string): string {
+  return `${address.slice(0, 6)}…${address.slice(-4)}`;
+}
+
+function usdc(minor: string): string {
+  const [whole, frac] = formatMinor(BigInt(minor), USDC_DECIMALS_V2).split('.');
+  const trimmed = frac.replace(/0+$/, '').padEnd(2, '0');
+  return `${BigInt(whole).toLocaleString('en-US')}.${trimmed} USDC`;
+}
+
+/** One line on what the bytes do, for a person about to sign them. */
+export function walletRequestHeadline(purpose: SigningPurpose, d: WalletTxDescription): string {
+  const a = d.actions;
+  switch (purpose) {
+    case 'nominate_wallet': {
+      const n = a[0] as Extract<WalletAction, { type: 'nominate_wallet' }>;
+      return `name ${shortAddress(n.wallet)} as the business wallet${n.singleSigner ? ' (one owner can sign alone)' : ''}`;
+    }
+    case 'register_wallet': {
+      const r = a[0] as Extract<WalletAction, { type: 'register_wallet' }>;
+      return `register the business wallet ${shortAddress(r.wallet)}: ${r.threshold} of ${r.members.length} owners sign`;
+    }
+    case 'rotate_wallet': {
+      const r = a[0] as Extract<WalletAction, { type: 'rotate_wallet' }>;
+      return `move the business wallet to ${shortAddress(r.newWallet)}: ${r.threshold} of ${r.members.length} owners sign`;
+    }
+    case 'confirm_wallet_rotation':
+      return 'confirm the new business wallet';
+    case 'cancel_wallet_rotation':
+      return 'cancel the business wallet change';
+    case 'wallet_membership': {
+      const m = a[0] as Extract<WalletAction, { type: 'add_owner' | 'remove_owner' | 'set_recovery_party' }>;
+      const verb = m.type === 'add_owner' ? 'add an owner' : m.type === 'remove_owner' ? 'remove an owner' : 'set the recovery party';
+      return `${verb}: ${shortAddress(m.address)}`;
+    }
+    case 'wallet_payment': {
+      const open = a.find((x) => x.type === 'open_intent') as Extract<WalletAction, { type: 'open_intent' }> | undefined;
+      const pay = a.find((x) => x.type === 'pay_intent') as Extract<WalletAction, { type: 'pay_intent' }>;
+      const fee = BigInt(pay.maxFeeMinor) > 0n ? `, Splash fee at most ${usdc(pay.maxFeeMinor)}` : '';
+      return open ? `pay ${usdc(open.amountMinor)} to ${shortAddress(open.recipient)}${fee}` : `pay an open payment${fee}`;
+    }
+    case 'migration_transfer': {
+      const s = a.find((x) => x.type === 'send_funds') as Extract<WalletAction, { type: 'send_funds' }>;
+      return `move ${s.amountMinor ? usdc(s.amountMinor) : 'your USDC'} from your own wallet to the business wallet ${shortAddress(s.recipient)}`;
+    }
+  }
+}
+
+export function walletSignatureMessage(input: { orgName: string; purpose: SigningPurpose; description: WalletTxDescription; threshold: number; signerCount: number; expiresAt: Date; now: Date }): string {
+  const hours = Math.max(1, Math.round((input.expiresAt.getTime() - input.now.getTime()) / 3_600_000));
+  const who = input.signerCount > 1 ? `${input.threshold} of ${input.signerCount} owners must sign.` : 'Only you can sign this.';
+  return (
+    `Splash: your signature is needed\n\n` +
+    `${input.orgName} asks you to ${walletRequestHeadline(input.purpose, input.description)}.\n` +
+    `${who} Splash pays the network fee.\n\n` +
+    `Open Splash, check the details and the transaction code ${input.description.bytesHash.slice(0, 8)}, and sign with your passkey. ` +
+    `This request expires in ${hours} hour${hours === 1 ? '' : 's'}.\n\n` +
+    `If you did not expect this, do not sign it.`
+  );
+}
+
+/**
+ * Tell each signer, on WhatsApp where they have a verified number. Never
+ * throws, like requestApprovals: the inbox in the app is always there.
+ */
+export function walletSigningNotifier(deps: { orgName: (orgId: string) => Promise<string>; channels: (orgId: string) => Promise<Approver[]> }): SigningNotifier {
+  return {
+    async notify({ orgId, request, description, userIds, now }) {
+      const delivered: string[] = [];
+      const unreachable: string[] = [];
+      let orgName = 'Your business';
+      let people: Approver[] = [];
+      try {
+        [orgName, people] = await Promise.all([deps.orgName(orgId), deps.channels(orgId)]);
+      } catch {
+        return { delivered, unreachable: [...userIds] };
+      }
+      const settings = await readOrgSettings(orgId).catch(() => null);
+      const body = walletSignatureMessage({
+        orgName,
+        purpose: request.purpose,
+        description,
+        threshold: request.threshold,
+        signerCount: request.signers.length,
+        expiresAt: request.expiresAt,
+        now,
+      });
+      for (const userId of userIds) {
+        if (userId === request.requestedBy && request.signers.length > 1) {
+          // The person who asked is in the app already; they are not messaged.
+          continue;
+        }
+        const person = people.find((p) => p.userId === userId);
+        if (!settings?.whatsappEnabled || !whatsappConfigured() || !person?.whatsappE164) {
+          unreachable.push(userId);
+          continue;
+        }
+        const result = await sendWhatsApp(person.whatsappE164, body).catch(() => ({ sent: false as const }));
+        if (result.sent) delivered.push(userId);
+        else unreachable.push(userId);
+      }
+      return { delivered, unreachable };
+    },
+  };
 }
 
 export type DecisionResult =

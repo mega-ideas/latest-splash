@@ -232,6 +232,13 @@
       "when": 1791331200000,
       "tag": "0032_governance_alerts",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1791417600000,
+      "tag": "0033_wallet_signing_requests",
+      "breakpoints": true
     }
   ]
 }
