@@ -140,7 +140,7 @@ export default function ThreadRow({
   if (item.kind === 'notice') {
     return (
       <div className="flex flex-wrap items-center gap-2 pl-8">
-        <span className="inline-flex items-center gap-1.5 rounded-md border border-[var(--gold-light)] bg-[var(--gold-tint)] px-2.5 py-1.5 text-[13px] font-semibold leading-5 text-[var(--gold-ink)]">
+        <span className="inline-flex items-center gap-1.5 rounded-md border border-[var(--warn)] bg-[var(--warn-bg)] px-2.5 py-1.5 text-[13px] font-semibold leading-5 text-[var(--warn-ink)]">
           <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
           {item.text}
         </span>
@@ -161,7 +161,7 @@ export default function ThreadRow({
   if (item.kind === 'session-expired') {
     return (
       <div className="flex flex-wrap items-center gap-2 pl-8">
-        <span className="inline-flex items-center gap-1.5 rounded-md border border-[var(--gold-light)] bg-[var(--gold-tint)] px-2.5 py-1.5 text-[13px] font-semibold leading-5 text-[var(--gold-ink)]">
+        <span className="inline-flex items-center gap-1.5 rounded-md border border-[var(--warn)] bg-[var(--warn-bg)] px-2.5 py-1.5 text-[13px] font-semibold leading-5 text-[var(--warn-ink)]">
           <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
           Your session ended, so Zeke paused. Sign in again to pick up where you left off.
         </span>
@@ -176,9 +176,10 @@ export default function ThreadRow({
   }
 
   if (item.kind === 'handoff') {
-    // Only ever a link into Send USDC. The server builds it; this refuses to
+    // Only ever a link into Wallet (or the old Send USDC path, which
+    // redirects there with its query). The server builds it; this refuses to
     // render anything else, so a stream cannot turn the card into a link out.
-    const safe = item.handoff.href.startsWith('/dashboard/send-usdc?');
+    const safe = item.handoff.href.startsWith('/dashboard/wallet?') || item.handoff.href.startsWith('/dashboard/send-usdc?');
     return (
       <div className={compact ? 'pl-7' : 'pl-8'}>
         <div className="rounded-lg border border-[#5C9EAD]/40 bg-white px-3 py-2.5">
@@ -315,7 +316,7 @@ export default function ThreadRow({
       )}
 
       {approval?.state === 'blocked' && (
-        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--gold-light)] bg-[var(--gold-tint)] px-3 py-2.5 text-[13px] font-semibold text-[var(--gold-ink)]">
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--warn)] bg-[var(--warn-bg)] px-3 py-2.5 text-[13px] font-semibold text-[var(--warn-ink)]">
           <AlertTriangle className="h-4 w-4 shrink-0" />
           {approval.note ?? 'Policy requires this one to go through the approval queue.'}
           <Link

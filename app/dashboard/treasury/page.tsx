@@ -2,6 +2,7 @@
 
 import { suiScanBaseUrl } from '@/lib/explorer';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import {
   AlertCircle,
   ArrowDownLeft,
@@ -117,7 +118,7 @@ function smoothPath(pts: Array<[number, number]>) {
 const CH = { W: 560, H: 160, PL: 10, PR: 10, PT: 16, PB: 10 };
 
 function HistIcon({ type }: { type: TxType }) {
-  if (type === 'deposit')  return <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#D9A441]/15"><ArrowUpRight size={14} className="text-[#8b6418]" /></div>;
+  if (type === 'deposit')  return <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#D9A441]/15"><ArrowUpRight size={14} className="text-[var(--gold-ink)]" /></div>;
   if (type === 'withdraw') return <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#5C9EAD]/10"><ArrowDownLeft size={14} className="text-[var(--info)]" /></div>;
   return <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#6FB4A0]/18"><Sparkles size={14} className="text-[var(--ok)]" /></div>;
 }
@@ -310,16 +311,25 @@ export default function TreasuryPage() {
         </header>
         {phase === 'gated' ? (
           <section className="dash-block p-6">
-            <h2 className="text-base font-semibold text-[#1F4452]">Treasury arrives with our licence</h2>
+            {/* v2 D9: the treasury is USDY held in the business's own Splash
+                Wallet, so it waits on no custody and the nav does not lock it.
+                The ledger behind this page still answers custody_not_licensed
+                until brief 5.7 rebuilds it on the wallet; until then it says
+                what is true about the treasury and where the USDC is. */}
+            <h2 className="text-base font-semibold text-[#1F4452]">Treasury isn&rsquo;t open in your workspace yet</h2>
             <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[#326273]/90">
-              Holding your funds — a treasury balance, a stored balance, a sweep account — is a Phase 2 capability that
-              needs a money-broking licence Splash does not hold yet. Today Splash pays out only: what you send is
-              delivered to the recipient, and nothing is kept on your behalf.
+              Treasury holds USDY in your own Splash Wallet, swapped and redeemed from there, so Splash never holds
+              your funds. Until it opens here this page shows no balances and no projections.
             </p>
             <p className="mt-3 max-w-2xl text-sm leading-relaxed text-[#326273]/90">
-              Until then this page shows no balances and no projections. When the licence and the custody package are in
-              place, the treasury opens here — every move approval-gated, every withdrawal on a cancellable notice.
+              Your USDC is in Wallet today.
             </p>
+            <Link
+              href="/dashboard/wallet"
+              className="mt-4 inline-flex min-h-11 items-center rounded-lg bg-[var(--ink)] px-4 text-sm font-semibold text-white transition hover:bg-[var(--slate)]"
+            >
+              Open Wallet
+            </Link>
           </section>
         ) : (
           <section className="dash-block p-6 text-sm text-[#326273]/90">Loading the ledger…</section>
@@ -513,7 +523,7 @@ export default function TreasuryPage() {
             toTreasury && 'tr-vessel-dest',
           )}>
             <div className="flex items-center justify-between">
-              <span className="text-[12px] font-semibold uppercase tracking-[0.12em] text-[#8b6418]">Smart Treasury</span>
+              <span className="text-[12px] font-semibold uppercase tracking-[0.12em] text-[var(--gold-ink)]">Smart Treasury</span>
               <div className="flex items-center gap-1.5">
                 <span className={cn(
                   'rounded-full px-2 py-0.5 text-[12px] font-semibold uppercase tracking-[0.14em] transition-colors',
@@ -523,12 +533,12 @@ export default function TreasuryPage() {
                 )}>
                   {toTreasury ? 'To' : 'From'}
                 </span>
-                <div className="rounded-lg bg-[#D9A441]/18 p-1.5"><TrendingUp size={14} className="text-[#8b6418]" /></div>
+                <div className="rounded-lg bg-[#D9A441]/18 p-1.5"><TrendingUp size={14} className="text-[var(--gold-ink)]" /></div>
               </div>
             </div>
             <div className="dash-num mt-2 text-3xl font-semibold text-[#0c3e48]">${fmtUsd(balance)}</div>
             <div className="mt-1 flex flex-wrap items-center gap-2 text-[13px] font-medium">
-              <span className="rounded-full bg-[#D9A441]/10 px-2 py-0.5 text-[#8b6418]">Ondo USDY</span>
+              <span className="rounded-full bg-[#D9A441]/10 px-2 py-0.5 text-[var(--gold-ink)]">Ondo USDY</span>
               <span className="text-[#326273]/90">{rate.label}</span>
             </div>
             <div className="mt-2 flex items-center gap-1.5 text-[13px] font-medium text-[var(--ok)]">
@@ -553,7 +563,7 @@ export default function TreasuryPage() {
               <div>
                 <div className="flex items-center gap-2">
                   <h2 className="text-sm font-semibold text-[#1F4452]">USDY daily yield</h2>
-                  <span className="inline-flex items-center gap-1 rounded-full bg-[#D9A441]/15 px-1.5 py-0.5 text-[13px] font-semibold text-[#8b6418]">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-[#D9A441]/15 px-1.5 py-0.5 text-[13px] font-semibold text-[var(--gold-ink)]">
                     variable
                   </span>
                 </div>
@@ -565,7 +575,7 @@ export default function TreasuryPage() {
               </div>
               <div className="flex flex-col items-end gap-2">
                 <div className="text-right">
-                  <div className="text-lg font-semibold text-[#8b6418]">
+                  <div className="text-lg font-semibold text-[var(--gold-ink)]">
                     +${focusBar ? focusBar.amount.toFixed(3) : dailyYield.toFixed(3)}
                   </div>
                   <div className="text-[13px] text-[#326273]/90">{focusBar ? 'that day' : 'estimated today'}</div>
@@ -654,8 +664,8 @@ export default function TreasuryPage() {
 
             <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
               <div className="rounded-lg border border-[#D9A441]/20 bg-[#D9A441]/8 p-3">
-                <div className="flex items-center gap-1 text-[12px] font-medium uppercase tracking-wide text-[#8b6418]"><Sparkles size={10} /> Daily yield</div>
-                <div className="dash-num mt-1 font-mono text-sm font-semibold text-[#8b6418]">+${dailyYield.toFixed(3)}</div>
+                <div className="flex items-center gap-1 text-[12px] font-medium uppercase tracking-wide text-[var(--gold-ink)]"><Sparkles size={10} /> Daily yield</div>
+                <div className="dash-num mt-1 font-mono text-sm font-semibold text-[var(--gold-ink)]">+${dailyYield.toFixed(3)}</div>
               </div>
               <div className="rounded-lg bg-[#F6F0ED] p-3">
                 <div className="flex items-center gap-1 text-[12px] font-medium uppercase tracking-wide text-[#326273]/90"><CalendarDays size={10} /> Period total</div>
@@ -739,8 +749,8 @@ export default function TreasuryPage() {
                     </div>
                   </div>
                   <div className="text-right">
-                    <div className={cn('dash-num text-sm font-semibold', tx.type === 'withdraw' ? 'text-[var(--info)]' : tx.type === 'yield' ? 'text-[var(--ok)]' : 'text-[#8b6418]')}>{tx.amount}</div>
-                    <div className={cn('text-[13px]', tx.status === 'confirmed' ? 'text-[var(--ok)]' : 'text-[#8b6418]')}>{tx.status}</div>
+                    <div className={cn('dash-num text-sm font-semibold', tx.type === 'withdraw' ? 'text-[var(--info)]' : tx.type === 'yield' ? 'text-[var(--ok)]' : 'text-[var(--gold-ink)]')}>{tx.amount}</div>
+                    <div className={cn('text-[13px]', tx.status === 'confirmed' ? 'text-[var(--ok)]' : 'text-[var(--gold-ink)]')}>{tx.status}</div>
                   </div>
                 </div>
               ))}
@@ -754,7 +764,7 @@ export default function TreasuryPage() {
                 <Sprout size={14} className="text-[var(--ok)]" />
                 <h2 className="text-sm font-semibold text-[#1F4452]">How the treasury works</h2>
               </div>
-              <span className="rounded-full bg-[#D9A441]/12 px-2 py-0.5 text-[12px] font-semibold uppercase tracking-wide text-[#8b6418]">T-bill yield</span>
+              <span className="rounded-full bg-[#D9A441]/12 px-2 py-0.5 text-[12px] font-semibold uppercase tracking-wide text-[var(--gold-ink)]">T-bill yield</span>
             </div>
             <div className="relative grid gap-0 sm:grid-cols-4">
               <div className="pointer-events-none absolute left-5 right-5 top-[3.25rem] hidden h-px bg-gradient-to-r from-[#5C9EAD]/0 via-[#D9A441] to-[var(--gold-light)]/40 sm:block" />
@@ -762,7 +772,7 @@ export default function TreasuryPage() {
                 { step: '01', title: 'Prepare recommendation', desc: 'Zeke models an allocation from Operating cash. Your business must approve it.', icon: CreditCard, accent: '#5C9EAD', bg: 'bg-[#5C9EAD]/10', tag: 'Human approval' },
                 { step: '02', title: 'Ondo USDY (T-bills)', desc: 'USDY is backed by short-dated US Treasuries — real, off-chain yield.', icon: Landmark, accent: '#C99A2E', bg: 'bg-[#D9A441]/15', tag: 'T-bill backed' },
                 { step: '03', title: 'Yield accrues', desc: 'USDY redemption price rises daily. Floating net rate — never fixed.', icon: Sprout, accent: '#4F9C88', bg: 'bg-[#6FB4A0]/18', tag: rate.label.replace(' · variable', '') },
-                { step: '04', title: 'Withdraw on notice', desc: `Request a withdrawal; USDY converts back to USD and lands in Operating in ${windowLabel}.`, icon: PiggyBank, accent: '#8b6418', bg: 'bg-[var(--gold-tint)]', tag: 'Notice required' },
+                { step: '04', title: 'Withdraw on notice', desc: `Request a withdrawal; USDY converts back to USD and lands in Operating in ${windowLabel}.`, icon: PiggyBank, accent: 'var(--gold-ink)', bg: 'bg-[var(--gold-tint)]', tag: 'Notice required' },
               ].map(({ step, title, desc, icon: Icon, accent, bg, tag }, i, arr) => (
                 <div key={step} className={cn('relative px-5 py-4', i < arr.length - 1 && 'border-[#326273]/8 sm:border-r')}>
                   <div className="flex items-center gap-3">
@@ -773,7 +783,7 @@ export default function TreasuryPage() {
                   </div>
                   <div className="mt-3 text-[13px] font-semibold text-[#1F4452]">{title}</div>
                   <div className="mt-1 text-[13px] leading-[1.125rem] text-[#326273]/90">{desc}</div>
-                  <div className="mt-2.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-semibold uppercase tracking-wider" style={{ backgroundColor: `${accent}15`, color: accent }}>
+                  <div className="mt-2.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-semibold uppercase tracking-wider" style={{ backgroundColor: `color-mix(in srgb, ${accent} 8%, transparent)`, color: accent }}>
                     <CheckCircle2 size={9} />{tag}
                   </div>
                 </div>
@@ -826,7 +836,7 @@ export default function TreasuryPage() {
                               type="button"
                               disabled={busy}
                               onClick={() => cancelWithdrawal(n.id)}
-                              className="rounded-md bg-[var(--gold-ink)] px-2 py-1 text-[13px] font-semibold text-white transition-colors hover:bg-[var(--gold-ink)] disabled:opacity-50"
+                              className="rounded-md bg-[var(--error)] px-2 py-1 text-[13px] font-semibold text-white transition hover:brightness-90 disabled:opacity-50"
                             >
                               {busy ? 'Cancelling…' : 'Yes, cancel'}
                             </button>

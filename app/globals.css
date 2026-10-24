@@ -4797,22 +4797,6 @@ body {
   box-sizing: border-box;
 }
 
-.iso-auth-grid {
-  position: absolute;
-  z-index: 0;
-  right: -15%;
-  bottom: -35%;
-  width: 85%;
-  height: 100%;
-  opacity: .18;
-  background-image:
-    linear-gradient(rgba(12, 62, 72, .45) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(12, 62, 72, .45) 1px, transparent 1px);
-  background-size: 48px 48px;
-  mask-image: radial-gradient(circle, #000 20%, transparent 68%);
-  transform: rotateX(65deg) rotateZ(-34deg);
-}
-
 .iso-auth-header {
   position: absolute;
   z-index: 10;
@@ -4892,18 +4876,6 @@ body {
   background:
     radial-gradient(circle at 55% 42%, rgba(159, 207, 199, .23), transparent 30%),
     linear-gradient(150deg, #0b4a56 0%, #07343e 60%, #05262d 100%);
-}
-
-.iso-auth-visual::before {
-  position: absolute;
-  inset: 0;
-  opacity: .1;
-  content: "";
-  background-image:
-    linear-gradient(rgba(255, 250, 241, .45) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 250, 241, .45) 1px, transparent 1px);
-  background-size: 54px 54px;
-  transform: rotate(8deg) scale(1.2);
 }
 
 .iso-auth-visual-copy,
@@ -5005,10 +4977,7 @@ body {
   justify-content: center;
   padding: 54px clamp(28px, 5vw, 72px);
   background:
-    linear-gradient(rgba(12, 62, 72, .03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(12, 62, 72, .03) 1px, transparent 1px),
     #ffffff;
-  background-size: 58px 58px;
   flex-direction: column;
 }
 
@@ -5466,10 +5435,7 @@ body {
   pointer-events: none;
   background:
     radial-gradient(circle at 76% 6%, rgba(92, 158, 173, .08), transparent 24%),
-    radial-gradient(circle at 28% 82%, rgba(111, 121, 164, .05), transparent 27%),
-    linear-gradient(rgba(18, 63, 73, .035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(18, 63, 73, .035) 1px, transparent 1px);
-  background-size: auto, auto, 28px 28px, 28px 28px;
+    radial-gradient(circle at 28% 82%, rgba(111, 121, 164, .05), transparent 27%);
   content: "";
   mask-image: linear-gradient(to bottom, black, transparent 82%);
 }
@@ -5984,8 +5950,7 @@ th.money { text-align: right; }
 }
 
 .fintech-context-copy span,
-.fintech-admin-trust small,
-.fintech-sidebar-signal small {
+.fintech-admin-trust small {
   color: rgba(18, 63, 73, .85);
   font-size: 12px;
   font-weight: 850;
@@ -6030,8 +5995,7 @@ th.money { text-align: right; }
   text-transform: uppercase;
 }
 
-.fintech-context-signals i,
-.fintech-sidebar-signal i {
+.fintech-context-signals i {
   width: 6px;
   height: 6px;
   border-radius: 50%;
@@ -6039,7 +6003,6 @@ th.money { text-align: right; }
   box-shadow: 0 0 0 3px rgba(53, 166, 111, .13);
 }
 
-.fintech-sidebar-signal,
 .fintech-admin-trust {
   position: relative;
   z-index: 1;
@@ -6055,27 +6018,16 @@ th.money { text-align: right; }
   background: rgba(255, 255, 255, .07);
 }
 
-.fintech-sidebar-signal img {
-  width: 30px;
-  height: 38px;
-  margin-inline: auto;
-  object-fit: contain;
-  transform: scale(2.25);
-}
-
-.fintech-sidebar-signal span,
 .fintech-admin-trust span {
   display: grid;
   gap: 2px;
 }
 
-.fintech-sidebar-signal small,
 .fintech-admin-trust small {
   color: rgba(255, 255, 255, .85);
   font-size: 12px;
 }
 
-.fintech-sidebar-signal strong,
 .fintech-admin-trust strong {
   display: inline-flex;
   align-items: center;
@@ -6797,10 +6749,6 @@ button.iso-product-row {
   transform: scale(2.5);
 }
 
-.fintech-sidebar-signal img {
-  transform: scale(1.15);
-}
-
 .fintech-dashboard-main .dash-card,
 .fintech-dashboard-main .dash-card-raised {
   border-color: rgba(16, 63, 72, .13);
@@ -6874,8 +6822,7 @@ button.iso-product-row {
   justify-content: space-between;
   overflow: hidden;
   padding: clamp(34px, 5vw, 72px);
-  background: linear-gradient(rgba(125, 224, 208, .07) 1px, transparent 1px), linear-gradient(90deg, rgba(125, 224, 208, .07) 1px, transparent 1px), radial-gradient(circle at 70% 45%, #185c66 0%, #0e3e47 44%, #082b32 100%);
-  background-size: 32px 32px, 32px 32px, auto;
+  background: radial-gradient(circle at 70% 45%, #185c66 0%, #0e3e47 44%, #082b32 100%);
   color: #fff9ed;
 }
 
@@ -7077,8 +7024,7 @@ button.iso-product-row {
   display: grid;
   place-items: center;
   padding: 40px;
-  background: linear-gradient(rgba(16, 63, 72, .045) 1px, transparent 1px), linear-gradient(90deg, rgba(16, 63, 72, .045) 1px, transparent 1px), #f7eddb;
-  background-size: 28px 28px;
+  background: #f7eddb;
 }
 
 .admin-login-form {
@@ -7597,10 +7543,7 @@ button.iso-product-row {
 
 .admin-login-form-wrap {
   background:
-    linear-gradient(rgba(16, 63, 72, .038) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(16, 63, 72, .038) 1px, transparent 1px),
     #edf4f2;
-  background-size: 28px 28px;
 }
 
 .admin-login-form {

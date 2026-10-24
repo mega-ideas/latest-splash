@@ -122,7 +122,7 @@ function TxPill({ status }: { status: TxStatus }) {
   // Transaction states = semantic tokens (W9.0), never palette one-offs.
   const styles = {
     settled: 'bg-[var(--ok-bg)] text-[#1F4452]',
-    pending: 'bg-[var(--warn-bg)] text-[#8b6418]',
+    pending: 'bg-[var(--warn-bg)] text-[var(--warn-ink)]',
     failed: 'bg-[var(--error-bg)] text-[var(--error)]',
   };
   const dots = {
@@ -482,7 +482,7 @@ export default function DashboardOverview() {
                               ? 'text-[var(--ok)]'
                               : c.success >= 98
                               ? 'text-[var(--info)]'
-                              : 'text-[#8b6418]'
+                              : 'text-[var(--warn-ink)]'
                           )}
                         >
                           {c.success.toFixed(1)}%
@@ -586,7 +586,7 @@ export default function DashboardOverview() {
                 </div>
               </div>
               {treasuryPhase === 'live' ? (
-                <span className="rounded-full bg-[#D9A441]/10 px-2 py-0.5 text-[13px] font-semibold text-[#8b6418]">
+                <span className="rounded-full bg-[#D9A441]/10 px-2 py-0.5 text-[13px] font-semibold text-[var(--warn-ink)]">
                   {treasuryRateLabel}
                 </span>
               ) : null}
@@ -703,18 +703,18 @@ export default function DashboardOverview() {
           {/* Pending actions */}
           <div className="dash-block p-4">
             <div className="flex items-center gap-2">
-              <AlertTriangle size={16} className="text-[#8b6418]" />
+              <AlertTriangle size={16} className="text-[var(--warn-ink)]" />
               <h2 className="text-sm font-semibold text-[#1F4452]">Pending Actions</h2>
             </div>
             <div className="mt-3 space-y-2">
               <div className="flex items-center justify-between rounded-lg bg-[var(--warn-bg)] px-3 py-2.5">
                 <div>
-                  <div className="text-[13px] font-medium text-[#8b6418]">Batch TOTP authorization</div>
-                  <div className="text-[13px] text-[#8b6418]">12 transfers · $6,670</div>
+                  <div className="text-[13px] font-medium text-[var(--warn-ink)]">Batch TOTP authorization</div>
+                  <div className="text-[13px] text-[var(--warn-ink)]">12 transfers · $6,670</div>
                 </div>
                 <Link
                   href="/dashboard/batch"
-                  className="shrink-0 rounded-md bg-[#8b6418] px-2.5 py-1 text-[13px] font-semibold text-white transition-colors hover:opacity-90"
+                  className="shrink-0 rounded-md bg-[var(--warn-ink)] px-2.5 py-1 text-[13px] font-semibold text-white transition-colors hover:opacity-90"
                 >
                   Authorize
                 </Link>

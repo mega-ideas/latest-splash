@@ -74,7 +74,7 @@ export default function UsdyPreview() {
         <h2 id="usdy-title" className="flex items-center gap-2 text-sm font-semibold text-[#326273]">
           <TrendingUp className="h-4 w-4 text-[var(--info)]" /> Treasury · Ondo USDY
         </h2>
-        {quote?.mode === 'SANDBOX' ? <span className="rounded-full bg-[var(--warn-bg)] px-2 py-0.5 text-[12px] font-semibold text-[#8b6418]">Preview</span> : null}
+        {quote?.mode === 'SANDBOX' ? <span className="rounded-full bg-[var(--warn-bg)] px-2 py-0.5 text-[12px] font-semibold text-[var(--warn-ink)]">Preview</span> : null}
       </div>
       <p className="mt-1 text-[12px] leading-5 text-[#326273]/90">
         Swap USDC for USDY in your own Splash wallet. USDY is priced above $1 and its price moves; the figures below are a projection at a variable modeled rate, not a promise. Verified, non-US businesses only.
@@ -101,7 +101,7 @@ export default function UsdyPreview() {
                     <div className="flex justify-between gap-3 tabular-nums">
                       <span className="flex items-center gap-1.5 font-semibold">
                         {quote.fillable === false
-                          ? <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-[#8b6418]" aria-hidden />
+                          ? <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-[var(--warn-ink)]" aria-hidden />
                           : <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-[var(--ok)]" aria-hidden />}
                         On Sui right now
                       </span>
@@ -125,7 +125,7 @@ export default function UsdyPreview() {
                 <div className="text-[12px] text-[#326273]/90">{quote.apyLabel}</div>
               </>
             ) : null}
-            {quote.reasons.map((r) => <p key={r} className="text-[12px] leading-5 text-[#8b6418]">{r}</p>)}
+            {quote.reasons.map((r) => <p key={r} className="text-[12px] leading-5 text-[var(--warn-ink)]">{r}</p>)}
           </div>
         )
       ) : null}

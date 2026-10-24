@@ -36,7 +36,7 @@ import { useOxwalThread } from '@/lib/oxwal/use-oxwal-thread';
  */
 
 const quickPrompts: OxWalComposerChip[] = [
-  { label: 'Review invoice', prompt: 'Pay invoice inv_demo_acme_5000 to cp_acme_ph', icon: 'file' },
+  { label: 'Review invoice', prompt: 'Review my latest invoice', icon: 'file' },
   { label: 'Allocate treasury', prompt: 'Allocate idle treasury for MY_PH', icon: 'write' },
   { label: 'Look up tools', prompt: 'What can you read and prepare?', icon: 'search' },
 ];

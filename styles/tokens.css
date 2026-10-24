@@ -24,6 +24,10 @@
   --ok-bg: #E4F1ED;
   --warn: #B4690E;
   --warn-bg: #FBEFDD;
+  /* Words that need attention: --warn itself is 3.7:1 on --warn-bg and 4.2:1
+     on white, so a warning's words take this darker amber (4.7:1 on
+     --warn-bg, 5.3:1 on white). A state colour, not the gold accent. */
+  --warn-ink: #8b6418;
   --error: #B3402F;
   --error-bg: #F9E7E3;
   --info: #326273;

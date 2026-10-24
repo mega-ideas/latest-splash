@@ -26,6 +26,7 @@ import StepDelivery from '@/components/transfer/StepDelivery';
 import type { RecipientTier } from '@/lib/server/operations';
 import type { FundingSelection } from '@/lib/funding/registry';
 import type { FeeQuoteWire } from '@/lib/fees/quote';
+import { activeRateHolds, holdTimeLeft, type RateHoldRow } from '@/lib/dashboard/rate-holds';
 
 // Target-currency display metadata for the settlement-flow corridor node.
 const CURRENCY_META: Record<string, { flag: string; country: string }> = {
@@ -133,6 +134,31 @@ export default function TransferPage() {
   const go = useCallback((step: TransferState['step']) => {
     set({ step });
   }, [set]);
+  // Quote holds made at the quote step, listed here so one can be used
+  // later (the Rate holds page is gone; the list is the same org-scoped read).
+  const [holds, setHolds] = useState<RateHoldRow[]>([]);
+  const [now, setNow] = useState(0);
+
+  useEffect(() => {
+    void fetch('/api/rate-holds')
+      .then((response) => (response.ok ? response.json() : { items: [] }))
+      .then((body: { items?: RateHoldRow[] }) => setHolds(body.items ?? []))
+      .catch(() => setHolds([]));
+    const first = window.setTimeout(() => setNow(Date.now()), 0);
+    const tick = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => {
+      window.clearTimeout(first);
+      window.clearInterval(tick);
+    };
+  }, []);
+
+  const applyHold = useCallback((hold: RateHoldRow) => {
+    setState((current) => ({
+      ...current,
+      rateHold: hold,
+      amount: { ...current.amount, targetCurrency: hold.corridorCurrency as TransferState['amount']['targetCurrency'] },
+    }));
+  }, []);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -295,6 +321,15 @@ export default function TransferPage() {
             <RouteLine source="USD" target={state.amount.targetCurrency} />
           </div>
 
+          <ActiveRateHolds
+            holds={state.rateHold && !holds.some((hold) => hold.id === state.rateHold?.id)
+              ? [{ createdAt: new Date(now).toISOString(), ...state.rateHold }, ...holds]
+              : holds}
+            now={now}
+            inUse={state.rateHold?.id}
+            onUse={applyHold}
+          />
+
           {sidePanels.map((panel) => (
             <SignalRow key={panel.title} {...panel} />
           ))}
@@ -377,6 +412,64 @@ function SignalRow({ icon: Icon, title, metric, body }: { icon: LucideIcon; titl
         </div>
       </div>
     </div>
+  );
+}
+
+/** Active quote holds. Hidden when there are none, and before the clock is
+ *  read on the client, so the server and first render agree. */
+function ActiveRateHolds({
+  holds,
+  now,
+  inUse,
+  onUse,
+}: {
+  holds: RateHoldRow[];
+  now: number;
+  inUse?: string;
+  onUse: (hold: RateHoldRow) => void;
+}) {
+  const active = now === 0 ? [] : activeRateHolds(holds, now);
+  if (active.length === 0) return null;
+  return (
+    <section aria-labelledby="rate-holds-heading" className="dash-block p-4">
+      <div className="flex items-center gap-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#5C9EAD]/10 text-[#326273]">
+          <Clock3 className="h-4 w-4" aria-hidden="true" />
+        </div>
+        <div className="min-w-0">
+          <h2 id="rate-holds-heading" className="text-sm font-bold text-[#326273]">Your rate holds</h2>
+          <p className="text-[13px] text-[#326273]/90">Held at the quote step, for 48 hours.</p>
+        </div>
+      </div>
+      <ul className="mt-3 space-y-2">
+        {active.map((hold) => {
+          const using = hold.id === inUse;
+          return (
+            <li key={hold.id} className="flex items-center justify-between gap-3 rounded-lg border border-[#326273]/12 bg-white px-3 py-2.5">
+              <div className="min-w-0">
+                <div className="font-mono text-sm font-bold text-[#1F4452]">
+                  USD → {hold.corridorCurrency} {Number(hold.rate).toLocaleString('en-US', { maximumFractionDigits: 4 })}
+                </div>
+                <div className="text-[13px] text-[#326273]/90">{holdTimeLeft(hold.holdUntil, now)} left</div>
+              </div>
+              {using ? (
+                <span className="inline-flex min-h-11 shrink-0 items-center gap-1 text-[13px] font-semibold text-[var(--ok)]">
+                  <Check className="h-4 w-4" aria-hidden="true" /> In use
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onUse(hold)}
+                  className="inline-flex min-h-11 shrink-0 items-center rounded-lg bg-[var(--ink)] px-3 text-[13px] font-semibold text-white transition hover:bg-[var(--slate)]"
+                >
+                  Use hold
+                </button>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }
 

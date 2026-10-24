@@ -27,7 +27,7 @@ export default function GovernanceAlertBanner({ alerts }: { alerts: GovernanceBa
       {/* A 16rem basis, so on a phone the link wraps below the text instead
           of squeezing it to a sliver. */}
       <div className="min-w-0 flex-1 basis-64">
-        <p id="governance-alert-heading" className="text-[13px] font-bold text-[#8b6418]">
+        <p id="governance-alert-heading" className="text-[13px] font-bold text-[var(--warn-ink)]">
           Payment contract {alerts.length === 1 ? 'change' : 'changes'}
         </p>
         <ul className="mt-1 space-y-2">

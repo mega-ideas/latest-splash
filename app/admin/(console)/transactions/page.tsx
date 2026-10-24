@@ -72,7 +72,7 @@ export default async function AdminTransactionsPage() {
                 {fundingSessions.map((session) => (
                   <tr key={session.id} className="border-t border-[#326273]/5">
                     <td className="p-3 font-mono text-xs text-[#326273]">{session.id}</td>
-                    <td><span className={`rounded-full px-2.5 py-1 text-xs font-bold ${session.status === 'QUARANTINED' ? 'bg-[var(--gold-tint)] text-[var(--gold-ink)]' : session.status === 'CREDITED' || session.status === 'CLEARED' ? 'bg-[#5C9EAD]/15 text-[#326273]' : 'bg-[#F6F0ED] text-[#326273]'}`}>{session.status}</span></td>
+                    <td><span className={`rounded-full px-2.5 py-1 text-xs font-bold ${session.status === 'QUARANTINED' ? 'bg-[var(--warn-bg)] text-[var(--warn-ink)]' : session.status === 'CREDITED' || session.status === 'CLEARED' ? 'bg-[#5C9EAD]/15 text-[#326273]' : 'bg-[#F6F0ED] text-[#326273]'}`}>{session.status}</span></td>
                     <td className="font-semibold text-[#326273]">{session.selection.source}</td>
                     <td className="text-[#326273]">{describeFundingSelection(session.selection)}</td>
                     <td className="text-[#326273]">{session.kytPolicy ?? '-'}{session.sourceType ? ` / ${session.sourceType}` : ''}</td>

@@ -408,7 +408,7 @@ export default function StepQuote({
               Quote valid for 30 seconds
             </span>
           )}
-          {rateDirection !== 'neutral' ? <TrendingUp className={rateDirection === 'up' ? 'text-[var(--info)]' : 'rotate-180 text-[#8b6418]'} /> : null}
+          {rateDirection !== 'neutral' ? <TrendingUp className={rateDirection === 'up' ? 'text-[var(--info)]' : 'rotate-180 text-[var(--warn-ink)]'} /> : null}
         </div>
 
         <div className="mt-4 h-px bg-[#326273]/10" />

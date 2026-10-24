@@ -106,7 +106,7 @@ export default function ZekeSuggestions({
             "could not look" are different facts, and an operator planning
             around the first should not be shown it when it was the second. */}
         {suggestState === 'error' && (
-          <p className="rounded-lg border border-[var(--gold-light)] bg-[var(--gold-tint)] px-3 py-2.5 text-[13px] font-semibold leading-5 text-[var(--gold-ink)]">
+          <p className="rounded-lg border border-[var(--warn)] bg-[var(--warn-bg)] px-3 py-2.5 text-[13px] font-semibold leading-5 text-[var(--warn-ink)]">
             Suggestions could not be loaded. Ask directly in the chat instead.
           </p>
         )}
