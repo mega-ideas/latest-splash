@@ -165,8 +165,8 @@ test('the invoice-batch card states the fact it follows and invents neither a sc
   assert.match(route, /confidence: null,/);
 });
 
-test('the copilot page labels the score for what it is, and its empty state claims nothing it did not check', async () => {
-  const page = await source('app/dashboard/copilot/page.tsx');
+test('the Zeke suggestions label the score for what it is, and its empty state claims nothing it did not check', async () => {
+  const page = await source('components/oxwal/ZekeSuggestions.tsx');
   assert.doesNotMatch(page, /\?\?\s*0\.6/, 'no 60% for a missing score');
   assert.match(page, /confidence: confidencePercent\(s\.confidence\)/);
   assert.match(page, /\{suggestion\.confidence !== null && \(/, 'the label renders only with a score');

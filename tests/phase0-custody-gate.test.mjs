@@ -128,7 +128,7 @@ test('the treasury page shows no demo balance or transaction as confirmed, and s
 });
 
 test('the overview card and the copilot stop presenting treasury numbers in Phase 0', async () => {
-  const overview = await source('app/dashboard/overview/page.tsx');
+  const overview = await source('app/dashboard/page.tsx');
   assert.doesNotMatch(overview, /useState\(24500\)/);
   assert.doesNotMatch(overview, /useState\(98\.72\)/);
   assert.doesNotMatch(overview, /\+\$3\.22/, 'no invented daily yield');

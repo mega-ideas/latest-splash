@@ -137,17 +137,24 @@ test('migration 0019 backfills intent=pay only for orgs with payment history', a
 
 test('the shell locks from a server-resolved prop and reroutes to setup — it invents no gate', async () => {
   const shell = await readFile(new URL('../components/dashboard/DashboardShell.tsx', import.meta.url), 'utf8');
-  assert.match(shell, /locks\?: \{ termsDone: boolean; moneyBlocked: boolean; custodyOn: boolean; reason: string \}/);
-  assert.match(shell, /function lockReasonFor\(/);
+  // The lock table moved into the nav data (lib/dashboard/nav.ts), which the
+  // shell ships to the browser; it is tested as behaviour in
+  // tests/dashboard-nav.test.mjs and pinned here as text.
+  const nav = await readFile(new URL('../lib/dashboard/nav.ts', import.meta.url), 'utf8');
+  assert.match(shell, /locks\?: NavLocks/);
+  assert.match(nav, /export type NavLocks = \{ termsDone: boolean; moneyBlocked: boolean; custodyOn: boolean; reason: string \}/);
+  assert.match(nav, /function lockReasonFor\(/);
   // A KYB or terms lock sends the link to setup; the launch scope (which no
-  // setup step opens) sends it to Send USDC instead.
-  assert.match(shell, /href: '\/dashboard\/setup', action: 'Finish account setup'/);
-  assert.match(shell, /href: '\/dashboard\/send-usdc', action: 'Send USDC'/);
-  assert.match(shell, /href=\{lock \? lock\.href : href\}/);
-  assert.doesNotMatch(shell, /kybGateEnabled|readOrgKybState|getDb/, 'the client shell must not reach the DB or the gate itself');
+  // setup step opens) sends it to Wallet instead.
+  assert.match(nav, /href: '\/dashboard\/setup', action: 'Finish account setup'/);
+  assert.match(nav, /href: '\/dashboard\/wallet', action: 'Open Wallet'/);
+  assert.match(shell, /href=\{lock \? lock\.href : item\.href\}/);
+  for (const text of [shell, nav]) {
+    assert.doesNotMatch(text, /kybGateEnabled|readOrgKybState|getDb/, 'the client shell must not reach the DB or the gate itself');
+  }
   // Parity: the spend routes require the terms AND KYB, so the padlock must too
   // — otherwise an ACTIVE org without terms sees Transfer open and gets a 412.
-  const spendBlock = shell.slice(shell.indexOf('if (spend.includes(href))'), shell.indexOf('if (spend.includes(href))') + 200);
+  const spendBlock = nav.slice(nav.indexOf('if (SPEND.includes(href))'), nav.indexOf('if (SPEND.includes(href))') + 200);
   assert.match(spendBlock, /locks\.moneyBlocked/);
   assert.match(spendBlock, /locks\.termsDone/);
 
