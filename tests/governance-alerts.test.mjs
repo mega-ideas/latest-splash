@@ -87,7 +87,7 @@ test('a pending upgrade in the canonical wrapper is one alert: its bytecode dige
   assert.equal(formatUtc(ETA), '25 October 2026, 08:00 UTC');
   assert.match(alert.detail, new RegExp(`^The update's bytecode digest is ${DIGEST_HEX}\\. Upgrade policy: additive \\(128\\)\\. `));
   assert.match(alert.detail, /only if it adds to the contract: existing functions stay as they are/);
-  assert.match(alert.detail, /cannot add a recipient, raise a spending limit or create an allowance/);
+  assert.match(alert.detail, /cannot change a spending rule \(who may spend, to whom, or how much\) or create an allowance/);
   assert.doesNotMatch(alert.summary + alert.detail, /[—–]/, 'plain punctuation: no dashes as separators');
   assert.doesNotMatch(alert.detail, /source|rebuil|verified/i, 'nothing about the code the chain does not show');
   assert.equal(alert.activeUntilMs, ETA + 7 * DAY, 'shown until the chain would refuse it as lapsed');

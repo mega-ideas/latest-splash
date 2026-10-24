@@ -29,8 +29,9 @@
  * A 15-minute poll of this state cannot miss a change that can take effect.
  * An upgrade, an owner change and a registry addition each sit in it, readable,
  * for at least 24 hours before the chain will put them into force
- * (`upgrade_delay::DELAY_MS` and `compliance_config::ADDITION_NOTICE_MS`, both
- * in code no one can change), and for up to seven days after, so each is read
+ * (`upgrade_delay::DELAY_MS`, in a package published immutable, and
+ * `compliance_config::ADDITION_NOTICE_MS`, which only a core upgrade could
+ * route around, and a core upgrade itself waits 24 hours on the wrapper), and for up to seven days after, so each is read
  * on many polls first. All a poll can miss is a proposal made and withdrawn
  * between two polls, which could never have taken effect.
  *
@@ -381,7 +382,7 @@ function policyLine(policy: number): string {
  */
 function policyMeaning(policy: number): string {
   if (policy === 128) {
-    return 'The network accepts an update under this policy only if it adds to the contract: existing functions stay as they are. Added code could still change a payment that has not been made yet, but it cannot add a recipient, raise a spending limit or create an allowance. Spending rules live in a separate contract that cannot be updated, and only your wallet can grant an allowance.';
+    return 'The network accepts an update under this policy only if it adds to the contract: existing functions stay as they are. Added code could still change a payment that has not been made yet, or the account limits and freezes the payment contract keeps, but it cannot change a spending rule (who may spend, to whom, or how much) or create an allowance. Spending rules live in a separate contract that cannot be updated, and only your wallet can grant an allowance.';
   }
   if (policy === 192) return 'The network accepts an update under this policy only if it changes nothing but the code the contract depends on.';
   if (policy === 0) return 'Under this policy an update may change how existing functions work.';

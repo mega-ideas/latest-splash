@@ -238,6 +238,10 @@ export async function runGovernanceAlertMonitor(deps: {
   }
 
   const now = deps.now ?? Date.now();
+  /** The time of each claim, not of the run: a run that sends to many owners
+   *  lasts long enough that measuring the lease from its start would hand a
+   *  live claim to the next run. */
+  const clock = () => deps.now ?? Date.now();
   const readState = deps.readState ?? graphqlGovernanceStateReader();
   const appUrl = deps.appUrl ?? process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
   const alertSink = deps.alert ?? sendOperatorAlert;
@@ -314,11 +318,11 @@ export async function runGovernanceAlertMonitor(deps: {
             deliveries.in_app[recordedNow ? 'sent' : 'skipped'] += 1;
             continue;
           }
-          if (state && !deliveryClaimable(state, now)) {
+          if (state && !deliveryClaimable(state, clock())) {
             deliveries[channel].skipped += 1;
             continue;
           }
-          const claim = await claimGovernanceDelivery(db, { alertId: alert.id, userId: owner.userId, orgId: owner.orgId, channel, nowMs: now });
+          const claim = await claimGovernanceDelivery(db, { alertId: alert.id, userId: owner.userId, orgId: owner.orgId, channel, nowMs: clock() });
           if (!claim) {
             deliveries[channel].skipped += 1;
             continue;
@@ -329,7 +333,7 @@ export async function runGovernanceAlertMonitor(deps: {
           } catch (error) {
             outcome = { ok: false, error: error instanceof Error ? error.message : String(error) };
           }
-          await finishGovernanceDelivery(db, claim, outcome, now);
+          await finishGovernanceDelivery(db, claim, outcome, clock());
           deliveries[channel][outcome.ok ? 'sent' : 'failed'] += 1;
         }
       }

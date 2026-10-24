@@ -60,10 +60,12 @@ export type DeliveryChannel = 'in_app' | 'email' | 'whatsapp';
 export const MAX_DELIVERY_ATTEMPTS = 3;
 
 /**
- * How long a `sending` claim is honoured. Far longer than any run lasts (the
- * route's maxDuration is 60 seconds, the email transport gives up after 10),
- * so a claim this old belongs to a run that was killed, redeployed or lost
- * its database mid-send, and is claimed again. Whether that send arrived is
+ * How long a `sending` claim is honoured, measured from the claim itself
+ * (each claim is stamped when it is made, not when its run began). One send
+ * takes seconds (the email transport gives up after 10), so a claim this old
+ * belongs to a run that was killed, redeployed or lost its database
+ * mid-send, and is claimed again. The route's maxDuration does not bound a
+ * run on a long-lived host such as App Platform; the per-claim stamp does. Whether that send arrived is
  * unknown; the cost of not knowing is one possible repeat, against an owner
  * never being told.
  */
