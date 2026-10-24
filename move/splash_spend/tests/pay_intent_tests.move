@@ -438,9 +438,9 @@ fun pay(s: &mut Scenario, fx: &Fx, payer: address, alw: ID, intent: ID, with_app
 }
 
 /// In the current transaction: pay the shared intent under `alw`, drawing
-/// exactly its amount from the wallet's address balance. The quote deadline
-/// is five minutes from now, or the approval's, whichever is earlier, as a
-/// PTB builder sets it.
+/// exactly its amount and the fee it recorded from the wallet's address
+/// balance. The quote deadline is five minutes from now, or the approval's,
+/// whichever is earlier, as a PTB builder sets it.
 fun pay_in_tx(s: &mut Scenario, account: ID, policy: ID, alw: ID, intent: ID, approval: Option<PayoutApproval>) {
     let mut allowance = s.take_shared_by_id<Allowance<Balance<USDC>>>(alw);
     let mut intent = s.take_shared_by_id<PaymentIntent>(intent);
@@ -448,7 +448,7 @@ fun pay_in_tx(s: &mut Scenario, account: ID, policy: ID, alw: ID, intent: ID, ap
     let mut policy = s.take_shared_by_id<SpendPolicy>(policy);
     let config = s.take_shared<ComplianceConfig>();
     let c = s.take_shared<Clock>();
-    let amount = payment_intent::amount_usd(&intent);
+    let amount = payment_intent::amount_usd(&intent) + payment_intent::fee_minor(&intent);
     let mut settle_by = h::settle_by(&c);
     approval.do_ref!(|a| settle_by = settle_by.min(splash_spend::approval_settle_by_ms(a)));
     pay_objects(
@@ -3361,5 +3361,253 @@ fun once_no_beneficiary_is_bound_an_address_can_be_paid_as_a_wallet() {
     let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), h::recipient(), PAY);
     pay(&mut s, &fx, STAFF, fx.staff, intent, false);
     assert_eq!(coin_received(&mut s, h::recipient()), PAY);
+    s.end();
+}
+
+// ═══ Splash's fee (decision 1) ══════════════════════════════════════════════
+
+/// The config's fee ceiling in these tests: 2%, the most the package allows,
+/// capped at 1,000 USDC.
+const FEE_CEILING_BPS: u64 = 200;
+const FEE_CAP: u64 = 1_000_000_000;
+/// 0.5% of PAY (500 USDC): 2.5 USDC.
+const HALF_PERCENT: u64 = 50;
+const FEE_ON_PAY: u64 = 2_500_000;
+
+/// Splash's finance multisig, as the fee address: the 3-of-3 of the harness
+/// keys. Not single-signer, as core requires.
+fun fee_address(): address { multisig::derive_address(&h::keys(), &vector[1, 1, 1], 3) }
+
+/// The harness 2-of-3, as the governance quorum, proposes a fee change to
+/// the finance multisig.
+fun propose_fee(s: &mut Scenario, bps: u64, cap: u64) {
+    s.next_tx(h::wallet());
+    let mut config = s.take_shared<ComplianceConfig>();
+    let c = s.take_shared<Clock>();
+    let admin = business_account::admin_cap_for_testing(s.ctx());
+    compliance_config::propose_fee_change(
+        &admin,
+        &mut config,
+        h::keys(),
+        h::weights(),
+        h::threshold(),
+        h::keys(),
+        vector[1, 1, 1],
+        3,
+        bps,
+        cap,
+        &c,
+        s.ctx(),
+    );
+    business_account::destroy_admin_cap_for_testing(admin);
+    ts::return_shared(c);
+    ts::return_shared(config);
+}
+
+fun activate_fee(s: &mut Scenario, bps: u64, cap: u64) {
+    s.next_tx(h::wallet());
+    let mut config = s.take_shared<ComplianceConfig>();
+    let c = s.take_shared<Clock>();
+    let admin = business_account::admin_cap_for_testing(s.ctx());
+    compliance_config::activate_fee_change(
+        &admin,
+        &mut config,
+        h::keys(),
+        h::weights(),
+        h::threshold(),
+        fee_address(),
+        bps,
+        cap,
+        &c,
+        s.ctx(),
+    );
+    business_account::destroy_admin_cap_for_testing(admin);
+    ts::return_shared(c);
+    ts::return_shared(config);
+}
+
+/// The whole 24-hour path. Moves the clock on by the notice.
+fun set_fee(s: &mut Scenario, bps: u64, cap: u64) {
+    propose_fee(s, bps, cap);
+    advance(s, compliance_config::addition_notice_ms());
+    activate_fee(s, bps, cap);
+}
+
+/// `maker` opens a wallet payment to SUPPLIER through `create_intent`,
+/// asking for `fee_bps`, and shares it.
+fun open_with_fee(s: &mut Scenario, fx: &Fx, maker: address, n: u8, amount: u64, fee_bps: u64): ID {
+    s.next_tx(maker);
+    let policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
+    let mut account = s.take_shared_by_id<BusinessAccount>(fx.account);
+    let config = s.take_shared<ComplianceConfig>();
+    let c = s.take_shared<Clock>();
+    let intent = splash_spend::create_intent<USDC>(
+        &policy,
+        &mut account,
+        &config,
+        h::payment_ref(n),
+        SUPPLIER,
+        vector[],
+        amount,
+        fee_bps,
+        b"USDC".to_string(),
+        1_000_000,
+        h::commitment(),
+        payment_intent::kind_wallet(),
+        h::rail(),
+        c.timestamp_ms() + INTENT_LIFE,
+        &c,
+        s.ctx(),
+    );
+    let id = object::id(&intent);
+    payment_intent::share_intent(intent);
+    ts::return_shared(c);
+    ts::return_shared(config);
+    ts::return_shared(account);
+    ts::return_shared(policy);
+    id
+}
+
+fun fee_recorded(s: &mut Scenario, intent: ID): u64 {
+    s.next_tx(STRANGER);
+    let i = s.take_shared_by_id<PaymentIntent>(intent);
+    let fee = payment_intent::fee_minor(&i);
+    ts::return_shared(i);
+    fee
+}
+
+fun allowance_spent(s: &mut Scenario, alw: ID): u256 {
+    s.next_tx(STRANGER);
+    let a = s.take_shared_by_id<Allowance<Balance<USDC>>>(alw);
+    let spent = allowance::allowance_current_spend(&a);
+    ts::return_shared(a);
+    spent
+}
+
+#[test]
+/// Decision 1, under a spending rule: staff's `create_intent` passes the fee
+/// through to core, which records it. The draw takes the amount and the fee
+/// from the allowance, so the allowance's caps bound both; the recipient gets
+/// the amount and Splash's fee multisig the fee, in the same transaction.
+fun the_allowance_pays_the_amount_and_the_fee() {
+    let (mut s, fx) = setup();
+    set_fee(&mut s, FEE_CEILING_BPS, FEE_CAP);
+    let intent = open_with_fee(&mut s, &fx, STAFF, 1, PAY, HALF_PERCENT);
+    assert_eq!(fee_recorded(&mut s, intent), FEE_ON_PAY);
+    pay(&mut s, &fx, STAFF, fx.staff, intent, false);
+    assert_eq!(allowance_spent(&mut s, fx.staff), (PAY + FEE_ON_PAY) as u256);
+    assert_eq!(coin_received(&mut s, SUPPLIER), PAY);
+    s.next_tx(STRANGER);
+    assert_eq!(ts::settled_balance<USDC>(fee_address()), FEE_ON_PAY);
+    assert_eq!(ts::settled_balance<USDC>(h::wallet()), FUNDS - PAY - FEE_ON_PAY);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = splash_core::payment_intent::E_EXACT_AMOUNT_REQUIRED)]
+/// Drawing the amount alone does not settle an intent that carries a fee:
+/// core takes exactly the amount and the recorded fee.
+fun drawing_only_the_amount_of_an_intent_with_a_fee_aborts() {
+    let (mut s, fx) = setup();
+    set_fee(&mut s, FEE_CEILING_BPS, FEE_CAP);
+    let intent = open_with_fee(&mut s, &fx, STAFF, 1, PAY, HALF_PERCENT);
+    pay_drawing(&mut s, &fx, intent, PAY);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = sui::allowance::EExceedsLifetimeCap)]
+/// The allowance cap includes the fee: a rule capped one unit below the
+/// amount and the fee cannot pay the intent.
+fun the_allowance_cap_includes_the_fee() {
+    let (mut s, fx) = setup();
+    set_fee(&mut s, FEE_CEILING_BPS, FEE_CAP);
+    let tight = grant(&mut s, fx.policy, STAFF, ((PAY + FEE_ON_PAY - 1) as u256));
+    let intent = open_with_fee(&mut s, &fx, STAFF, 1, PAY, HALF_PERCENT);
+    pay(&mut s, &fx, STAFF, tight, intent, false);
+    s.end();
+}
+
+#[test]
+/// And a rule capped at exactly the amount and the fee pays it.
+fun an_allowance_cap_of_exactly_the_amount_and_the_fee_pays() {
+    let (mut s, fx) = setup();
+    set_fee(&mut s, FEE_CEILING_BPS, FEE_CAP);
+    let exact = grant(&mut s, fx.policy, STAFF, ((PAY + FEE_ON_PAY) as u256));
+    let intent = open_with_fee(&mut s, &fx, STAFF, 1, PAY, HALF_PERCENT);
+    pay(&mut s, &fx, STAFF, exact, intent, false);
+    assert_eq!(allowance_spent(&mut s, exact), (PAY + FEE_ON_PAY) as u256);
+    s.end();
+}
+
+#[test]
+/// The second-approval threshold and the running total count the principal
+/// only: a payment of exactly the threshold with a 2% fee needs no approval,
+/// and the window holds the threshold, not the threshold and the fee.
+fun the_threshold_and_the_running_total_count_the_principal_only() {
+    let (mut s, fx) = setup();
+    set_fee(&mut s, FEE_CEILING_BPS, FEE_CAP);
+    let intent = open_with_fee(&mut s, &fx, STAFF, 1, THRESHOLD, FEE_CEILING_BPS);
+    let fee = fee_recorded(&mut s, intent);
+    assert_eq!(fee, THRESHOLD / 50);
+    pay(&mut s, &fx, STAFF, fx.staff, intent, false);
+    assert_eq!(total_paid(&mut s, &fx, STAFF, payment_intent::kind_wallet(), SUPPLIER), THRESHOLD);
+    assert_eq!(allowance_spent(&mut s, fx.staff), (THRESHOLD + fee) as u256);
+    s.end();
+}
+
+#[test]
+/// So do the per-payment maximums: the junior pays exactly their own
+/// 1,000 USDC ceiling with a 2% fee on top.
+fun the_per_payment_maximum_counts_the_principal_only() {
+    let (mut s, fx) = setup();
+    set_fee(&mut s, FEE_CEILING_BPS, FEE_CAP);
+    let intent = open_with_fee(&mut s, &fx, JUNIOR, 1, JUNIOR_MAX, FEE_CEILING_BPS);
+    pay(&mut s, &fx, JUNIOR, fx.junior, intent, false);
+    assert_eq!(allowance_spent(&mut s, fx.junior), (JUNIOR_MAX + JUNIOR_MAX / 50) as u256);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = splash_core::payment_intent::E_FEE_ABOVE_MAX)]
+/// A staff member cannot ask for a fee above the config's ceiling: core
+/// refuses it when the intent opens.
+fun staff_cannot_ask_for_a_fee_above_the_configs_ceiling() {
+    let (mut s, fx) = setup();
+    set_fee(&mut s, HALF_PERCENT, FEE_CAP);
+    open_with_fee(&mut s, &fx, STAFF, 1, PAY, HALF_PERCENT + 1);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = splash_core::payment_intent::E_NO_FEE_ADDRESS)]
+/// Nor any fee before a fee address is configured.
+fun staff_cannot_ask_for_a_fee_before_a_fee_address_is_set() {
+    let (mut s, fx) = setup();
+    open_with_fee(&mut s, &fx, STAFF, 1, PAY, 1);
+    s.end();
+}
+
+#[test]
+/// A fee lowered between opening and paying: the allowance still pays the
+/// amount and the fee recorded at opening, core charges the lower fee, and
+/// the difference goes back to the wallet's address balance. The
+/// allowance's spend is not credited back.
+fun a_lowered_fee_is_returned_to_the_wallet() {
+    let (mut s, fx) = setup();
+    set_fee(&mut s, FEE_CEILING_BPS, FEE_CAP);
+    propose_fee(&mut s, 0, FEE_CAP);
+    advance(&mut s, compliance_config::addition_notice_ms() - 3_600_000);
+    let intent = open_with_fee(&mut s, &fx, STAFF, 1, PAY, FEE_CEILING_BPS);
+    let fee = fee_recorded(&mut s, intent);
+    assert_eq!(fee, PAY / 50);
+    advance(&mut s, 3_600_000);
+    activate_fee(&mut s, 0, FEE_CAP);
+    pay(&mut s, &fx, STAFF, fx.staff, intent, false);
+    assert_eq!(allowance_spent(&mut s, fx.staff), (PAY + fee) as u256);
+    assert_eq!(coin_received(&mut s, SUPPLIER), PAY);
+    s.next_tx(STRANGER);
+    assert_eq!(ts::settled_balance<USDC>(fee_address()), 0);
+    assert_eq!(ts::settled_balance<USDC>(h::wallet()), FUNDS - PAY);
     s.end();
 }
