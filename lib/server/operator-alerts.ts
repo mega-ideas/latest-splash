@@ -3,8 +3,15 @@
  *
  * Three things page someone: the hot balance is above its ceiling (sweep the
  * excess to cold), the hot balance cannot cover a payout (top it up), and a
- * value-moving transaction left the operator address that was not an approved
- * `confirm_with_approval` (treat as a compromise until shown otherwise).
+ * value-moving transaction left the operator address that was not the v2
+ * approved path (treat as a compromise until shown otherwise). That path is
+ * `splash_spend::pay_intent` in our splash_spend package, paid from the
+ * business wallet's allowance with the owners' approval naming the operator,
+ * its receipt consumed by `audit_anchor::anchor` in our core package, to an
+ * allowlisted beneficiary, a registered partner deposit address or business
+ * wallet, or FeeConfig's fee recipient (lib/server/operator-outflows.ts). The
+ * legacy `confirm_with_approval` was removed from v2 core and approves
+ * nothing.
  *
  * Delivery is the server log, always, plus OPERATOR_ALERT_WEBHOOK_URL when it
  * is set — the same shape as the Seal health alert. A failed delivery is
