@@ -339,6 +339,9 @@ if (!done('publishCore')) {
 }
 const CORE = results.steps.publishCore.packageId;
 const ADDRESS_REGISTRY = results.steps.publishCore.addressRegistry;
+const FEE_CONFIG = results.steps.publishCore.feeConfig;
+/** The payer's bound on Splash's fee (A1 §2.6): the 100 bps ceiling, which no fee can exceed. */
+const maxFeeOf = (amount) => Math.floor(amount / 100);
 recordPublished(path.join(move, 'splash_core'), CORE, results.steps.publishCore.upgradeCap);
 
 // 2. splash_spend and splash_upgrade_delay, each made immutable in its publish transaction.
@@ -387,12 +390,13 @@ if (!done('createConfig')) {
 }
 const CONFIG = results.steps.createConfig.config;
 
-// 4. Governance takes AdminCap and the core UpgradeCap; it wraps the cap itself.
+// 4. Governance takes AdminCap, the core UpgradeCap and (A1 §2.5) the FeeAdminCap; it wraps the
+// upgrade cap itself. The OpsCap stays with the funder, standing in for Splash ops.
 if (!done('handToGovernance')) {
   const s = results.steps.publishCore;
   const tx = new Transaction();
-  tx.transferObjects([tx.object(s.adminCap), tx.object(s.upgradeCap)], G.toSuiAddress());
-  const t = await runAs('transfer AdminCap and UpgradeCap to the governance multisig', funder, tx);
+  tx.transferObjects([tx.object(s.adminCap), tx.object(s.upgradeCap), tx.object(s.feeAdminCap)], G.toSuiAddress());
+  const t = await runAs('transfer AdminCap, UpgradeCap and FeeAdminCap to the governance multisig', funder, tx);
   results.steps.handToGovernance = { digest: t.digest };
   save();
 }
@@ -486,11 +490,16 @@ if (!done('fundWallet')) {
   save();
 }
 
-/** A wallet-path payment: withdrawal → redeem → create_for_wallet → confirm_balance → anchor → delete, one PTB. */
+/**
+ * A wallet-path payment: withdrawal → redeem → create_for_wallet → confirm_balance → anchor → delete, one PTB.
+ * The withdrawal covers the payment and the most its fee can be; core charges the derived kind's fee and
+ * returns the rest to the wallet's address balance.
+ */
 async function walletPays(step, kind, to, amount, pair) {
   if (done(step)) return;
   const tx = new Transaction();
-  const withdrawal = tx.withdrawal({ amount, type: USDC });
+  const maxFee = maxFeeOf(amount);
+  const withdrawal = tx.withdrawal({ amount: amount + maxFee, type: USDC });
   const [balance] = tx.moveCall({ target: '0x2::balance::redeem_funds', typeArguments: [USDC], arguments: [withdrawal] });
   const now = Date.now();
   const [intent] = tx.moveCall({
@@ -505,7 +514,10 @@ async function walletPays(step, kind, to, amount, pair) {
   const [receipt] = tx.moveCall({
     target: `${CORE}::payment_intent::confirm_from_business_wallet_balance`,
     typeArguments: [USDC],
-    arguments: [intent, tx.object(ACCOUNT), tx.object(CONFIG), balance, tx.pure.u64(now + 1_800_000), tx.object(CLOCK)],
+    arguments: [
+      intent, tx.object(ACCOUNT), tx.object(CONFIG), tx.object(FEE_CONFIG), tx.object(ADDRESS_REGISTRY), balance,
+      tx.pure.u64(maxFee), tx.pure.u64(now + 1_800_000), tx.object(CLOCK),
+    ],
   });
   tx.moveCall({ target: `${CORE}::audit_anchor::anchor`, arguments: [receipt, tx.pure.vector('u8', ref32(`${step}:hash`)), tx.pure.vector('u8', Array.from(new TextEncoder().encode('walrus-testnet'))), tx.object(CLOCK)] });
   tx.moveCall({ target: `${CORE}::payment_intent::delete_finalized`, arguments: [intent] });
@@ -518,7 +530,10 @@ async function walletPays(step, kind, to, amount, pair) {
   save();
 }
 await walletPays('walletPaysWallet', KIND_WALLET, RECIPIENT, 250_000, [bizKeys[1], bizKeys[2]]);
-await walletPays('walletPaysSplashBusiness', KIND_SPLASH_BUSINESS, G.toSuiAddress(), 150_000, [bizKeys[0], bizKeys[2]]);
+// A1 §2.3: a Splash-business payment must go to a registered business wallet,
+// or it aborts with E_KIND_MISMATCH. The business wallet is the only one this
+// run registers, so it pays itself: delivered to its own address balance, free.
+await walletPays('walletPaysSplashBusiness', KIND_SPLASH_BUSINESS, W.toSuiAddress(), 150_000, [bizKeys[0], bizKeys[2]]);
 
 // 8. A second create with the same payment reference is refused for ever.
 if (!done('duplicateRefRefused')) {
@@ -657,12 +672,15 @@ function staffIntent(tx, step, amount) {
 
 /** pay_intent, then anchor and delete, in `tx`. `approval` is an Option<PayoutApproval> argument. */
 function payAndClose(tx, step, intent, allowanceId, amount, approval) {
-  const w = tx.withdrawal({ amount, type: USDC, from: 'allowance', allowance: allowanceId, funder: W.toSuiAddress() });
+  // A1 §2.6: the allowance draws the principal and max_fee; core returns the unused part to the wallet.
+  const maxFee = maxFeeOf(amount);
+  const w = tx.withdrawal({ amount: amount + maxFee, type: USDC, from: 'allowance', allowance: allowanceId, funder: W.toSuiAddress() });
   const [receipt] = tx.moveCall({
     target: `${SPEND}::splash_spend::pay_intent`,
     typeArguments: [USDC],
     arguments: [
-      tx.object(allowanceId), w, intent, tx.object(ACCOUNT), tx.object(POLICY), tx.object(CONFIG), approval,
+      tx.object(allowanceId), w, intent, tx.object(ACCOUNT), tx.object(POLICY), tx.object(CONFIG),
+      tx.object(FEE_CONFIG), tx.object(ADDRESS_REGISTRY), approval, tx.pure.u64(maxFee),
       tx.pure.u64(Date.now() + 1_800_000), tx.object(CLOCK),
     ],
   });

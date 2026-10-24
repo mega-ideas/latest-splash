@@ -141,7 +141,7 @@ fun lifecycle_events_carry_the_commitment_and_nothing_else() {
 
         c.set_for_testing(DAY + 1_000);
         let payment = h::usdc(h::amount(), ctx);
-        let receipt = payment_intent::confirm_from_business_wallet(
+        let receipt = h::confirm(
             &mut intent, account, config, payment, DAY + EXPIRY_WINDOW, c, ctx,
         );
 

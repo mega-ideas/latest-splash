@@ -15,7 +15,7 @@ export const SPLASH_CORE_ABI = {
   'payment_intent::create_for_wallet':
     '&mut business_account::BusinessAccount, &compliance_config::ComplianceConfig, vector<u8>, address, vector<u8>, u64, string::String, u64, vector<u8>, u8, vector<u8>, u64, &clock::Clock',
   'payment_intent::confirm_from_business_wallet_balance':
-    '&mut payment_intent::PaymentIntent, &mut business_account::BusinessAccount, &compliance_config::ComplianceConfig, balance::Balance<T0>, u64, &clock::Clock',
+    '&mut payment_intent::PaymentIntent, &mut business_account::BusinessAccount, &compliance_config::ComplianceConfig, &fee_config::FeeConfig, &address_registry::Registry, balance::Balance<T0>, u64, u64, &clock::Clock',
   'payment_intent::share_intent': 'payment_intent::PaymentIntent',
   'payment_intent::delete_finalized': 'payment_intent::PaymentIntent',
   'audit_anchor::anchor': 'payment_intent::SettleReceipt, vector<u8>, vector<u8>, &clock::Clock',

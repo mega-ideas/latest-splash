@@ -11,7 +11,9 @@
 ///     transaction's sender, or the maker a registered settlement app vouches
 ///     for.
 ///   * Expiration uses `&Clock` (real wall-clock ms), not epoch boundaries.
-///   * Overpay is refunded to whoever paid it.
+///   * Splash's fee is computed on chain from the derived kind and the
+///     principal, bounded by the payer's `max_fee`, and paid as its own leg;
+///     every remainder goes to the account's business wallet (A1).
 ///   * Named abort codes registered in `lib/server/sui-settlement.ts`.
 ///   * Events carry a 32-byte commitment, never the payment (WS5). What an
 ///     event carries freezes at publish; see docs/commitments.md.
@@ -41,6 +43,13 @@
 /// be removed once published. Neither is in this package. See
 /// docs/v2/phase1-move-design.md.
 ///
+/// ─── Splash's fee (Amendment A1) ─────────────────────────────────────────────
+///
+/// No intent carries a fee. Each settle path derives the payment's kind from
+/// where it goes (`address_registry`), computes the fee from that kind and the
+/// principal (`fee_config::splash_fee`), refuses it above the payer's
+/// `max_fee`, and splits it inside Move to `FeeConfig.fee_recipient`.
+///
 /// Every path checks that settlement is not paused, that the asset is still
 /// accepted, and the account's KYB, freeze flags and ceilings. A bank payout
 /// must also reach its floor, the larger of 99 USDC and
@@ -50,9 +59,10 @@
 /// a quote cannot be submitted after the quote lapsed.
 module splash_core::payment_intent;
 
+use splash_core::address_registry::{Self, Registry};
 use splash_core::business_account::{Self, BusinessAccount};
 use splash_core::compliance_config::{Self, ComplianceConfig};
-use splash_core::fee_config;
+use splash_core::fee_config::{Self, FeeConfig};
 use std::string::String;
 use std::type_name;
 use sui::balance::{Self, Balance};
@@ -105,7 +115,8 @@ const E_BAD_RAIL_COMMITMENT: u64 = 424;
 const E_CROSS_CHAIN_ONLY: u64 = 425;
 /// A cross-chain path was given an intent that lands on Sui.
 const E_NOT_CROSS_CHAIN: u64 = 426;
-/// Funds drawn under a spending rule must equal the intent exactly.
+/// Funds drawn under a spending rule must be exactly the principal plus
+/// `max_fee`.
 const E_EXACT_AMOUNT_REQUIRED: u64 = 427;
 /// A bank payout names its beneficiary by a 32-byte commitment; other kinds
 /// name none.
@@ -124,6 +135,9 @@ const E_BAD_BRIDGE_FEE: u64 = 433;
 /// A bank payout is below its floor: the larger of the 99 USDC platform
 /// minimum and `ComplianceConfig.min_settlement_amount`.
 const E_BELOW_SETTLEMENT_FLOOR: u64 = 434;
+/// A1 §2.6. Splash's fee on this payment is above `max_fee`, the most the
+/// payer was shown and signed for.
+const E_FEE_ABOVE_MAX: u64 = 435;
 
 /// The only module permitted to destroy a `SettleReceipt`. Bound by module name
 /// because Move forbids the circular import that naming the type would require —
@@ -568,31 +582,50 @@ public fun share_intent(intent: PaymentIntent) {
 }
 
 // ─── v2 settlement ─────────────────────────────────────────────────────────
+//
+// Amendment A1 §2.6. Every path computes Splash's fee from the DERIVED kind
+// (`address_registry::derive_kind`) and the principal (`fee_config::
+// splash_fee`); nothing the intent or the PTB says sets it. The payer bounds
+// it: `max_fee` is the fee the UI showed, and a higher fee aborts
+// (E_FEE_ABOVE_MAX), so a schedule raised after the quote was rendered cannot
+// charge the signer more. The fee leg is split here, inside Move, and sent to
+// `FeeConfig.fee_recipient` (`fee_config::take_fee`); a fee of 0 sends
+// nothing. The principal reaches the recipient as before, and every remainder
+// (an overpayment, the unused part of `max_fee`) goes to the account's
+// business wallet, never to the transaction's sender.
 
 /// Pay an account's intent from the business wallet, in a coin.
 ///
 /// The sender must be the account's wallet: the business multisig. Its
 /// signature is the approval, and the protocol enforced it before this ran.
 /// Whoever opened the intent (the wallet, or a staff member under a spending
-/// rule), the owners can pay it themselves. An overpayment goes back to the
-/// wallet's address balance.
+/// rule), the owners can pay it themselves. The kind is derived from the
+/// intent's kind and recipient; `payment` must cover the principal and the
+/// fee; the fee leg goes to the fee recipient and the rest to the wallet.
 public fun confirm_from_business_wallet<T>(
     intent: &mut PaymentIntent,
     account: &mut BusinessAccount,
     config: &ComplianceConfig,
-    mut payment: Coin<T>,
+    fee_cfg: &FeeConfig,
+    registry: &Registry,
+    payment: Coin<T>,
+    max_fee: u64,
     settle_by_ms: u64,
     clock: &Clock,
     ctx: &mut TxContext,
 ): SettleReceipt {
-    let wallet = business_account::assert_wallet(account, ctx);
+    business_account::assert_wallet(account, ctx);
     assert_lands_on_sui(intent);
-    assert!(coin::value(&payment) >= intent.amount_usd, E_INSUFFICIENT_PAYMENT);
+    let declared = intent.kind;
+    let (kind, fee) = kind_and_fee(intent, account, fee_cfg, registry, declared, false, max_fee);
+    assert_covers(coin::value(&payment), intent.amount_usd, fee);
     let now = settle_for_account<T>(intent, account, config, PATH_BUSINESS_WALLET, settle_by_ms, clock);
 
-    let paid = coin::split(&mut payment, intent.amount_usd, ctx);
-    deliver_coin(intent, paid);
-    refund_coin(payment, wallet);
+    let mut funds = payment.into_balance();
+    let paid = funds.split(intent.amount_usd);
+    deliver(kind, intent.recipient, paid, ctx);
+    fee_config::take_fee(fee_cfg, &mut funds, fee, object::id(intent), object::id(account), kind);
+    to_wallet(funds, account);
     receipt(intent, now)
 }
 
@@ -600,48 +633,65 @@ public fun confirm_from_business_wallet<T>(
 ///
 /// Takes the `Balance<T>` a funds-withdrawal input redeems to
 /// (`balance::redeem_funds`), so the transaction needs no coin selection.
+/// The fee leg and the remainder as on the coin path.
 public fun confirm_from_business_wallet_balance<T>(
     intent: &mut PaymentIntent,
     account: &mut BusinessAccount,
     config: &ComplianceConfig,
+    fee_cfg: &FeeConfig,
+    registry: &Registry,
     mut payment: Balance<T>,
+    max_fee: u64,
     settle_by_ms: u64,
     clock: &Clock,
     ctx: &mut TxContext,
 ): SettleReceipt {
-    let wallet = business_account::assert_wallet(account, ctx);
+    business_account::assert_wallet(account, ctx);
     assert_lands_on_sui(intent);
-    assert!(payment.value() >= intent.amount_usd, E_INSUFFICIENT_PAYMENT);
+    let declared = intent.kind;
+    let (kind, fee) = kind_and_fee(intent, account, fee_cfg, registry, declared, false, max_fee);
+    assert_covers(payment.value(), intent.amount_usd, fee);
     let now = settle_for_account<T>(intent, account, config, PATH_BUSINESS_WALLET, settle_by_ms, clock);
 
     let paid = payment.split(intent.amount_usd);
-    deliver_balance(intent, paid, ctx);
-    refund_balance(payment, wallet);
+    deliver(kind, intent.recipient, paid, ctx);
+    fee_config::take_fee(fee_cfg, &mut payment, fee, object::id(intent), object::id(account), kind);
+    to_wallet(payment, account);
     receipt(intent, now)
 }
 
 /// Pay an account's cross-chain intent from the business wallet.
 ///
-/// Nothing is sent to an address here. The exact amount comes back as a coin,
-/// beside a `BridgeObligation` naming that coin, which only a registered
-/// bridge adapter can discharge: the same transaction must burn this coin
-/// through CCTP to the intent's domain and recipient, or abort.
+/// The principal is sent to no address here. Exactly the principal comes back
+/// as a coin, beside a `BridgeObligation` naming that coin, which only a
+/// registered bridge adapter can discharge: the same transaction must burn
+/// this coin through CCTP to the intent's domain and recipient, or abort.
+/// Splash's fee is the cross-chain kind's, paid here in the asset on Sui
+/// before the burn; CCTP's own fee is the intent's `bridge_max_fee`, shown
+/// separately. The rest goes to the wallet.
 public fun confirm_cross_chain_from_business_wallet<T>(
     intent: &mut PaymentIntent,
     account: &mut BusinessAccount,
     config: &ComplianceConfig,
-    mut payment: Coin<T>,
+    fee_cfg: &FeeConfig,
+    registry: &Registry,
+    payment: Coin<T>,
+    max_fee: u64,
     settle_by_ms: u64,
     clock: &Clock,
     ctx: &mut TxContext,
 ): (SettleReceipt, Coin<T>, BridgeObligation) {
-    let wallet = business_account::assert_wallet(account, ctx);
+    business_account::assert_wallet(account, ctx);
     assert_cross_chain(intent);
-    assert!(coin::value(&payment) >= intent.amount_usd, E_INSUFFICIENT_PAYMENT);
+    let declared = intent.kind;
+    let (kind, fee) = kind_and_fee(intent, account, fee_cfg, registry, declared, true, max_fee);
+    assert_covers(coin::value(&payment), intent.amount_usd, fee);
     let now = settle_for_account<T>(intent, account, config, PATH_BUSINESS_WALLET, settle_by_ms, clock);
 
-    let to_bridge = coin::split(&mut payment, intent.amount_usd, ctx);
-    refund_coin(payment, wallet);
+    let mut funds = payment.into_balance();
+    let to_bridge = coin::from_balance(funds.split(intent.amount_usd), ctx);
+    fee_config::take_fee(fee_cfg, &mut funds, fee, object::id(intent), object::id(account), kind);
+    to_wallet(funds, account);
     let obligation = obligation(intent, object::id(&to_bridge));
     (receipt(intent, now), to_bridge, obligation)
 }
@@ -651,26 +701,46 @@ public fun confirm_cross_chain_from_business_wallet<T>(
 /// `W` is the app's witness, accepted only from a type on
 /// `ComplianceConfig.settlement_apps`. The app is `splash_spend`, which drew
 /// `funds` under an app-bound allowance from the business wallet and checked
-/// them against the business's `SpendPolicy` before calling this. The amount
-/// must be exact: there is nowhere to "refund" allowance money to without
-/// moving it twice.
+/// them against the business's `SpendPolicy` before calling this.
+///
+/// `declared_kind` is what the app says the recipient is (in `splash_spend`,
+/// the recipient's tag in the policy), and goes through `derive_kind` like
+/// the intent's kind on the owners' path. `funds` must be exactly the
+/// principal plus `max_fee`, the fee the spender was shown: the fee charged
+/// is at most `max_fee`, and the unused part goes to the account's business
+/// wallet's address balance, which is the wallet the allowance drew from, and
+/// never to the spender. Returns the receipt, the derived kind and the fee
+/// charged, so the app can check the fee against its own ceiling and report
+/// both.
 public fun settle_from_app<T, W: drop>(
     _witness: W,
     intent: &mut PaymentIntent,
     account: &mut BusinessAccount,
     config: &ComplianceConfig,
-    funds: Balance<T>,
+    fee_cfg: &FeeConfig,
+    registry: &Registry,
+    declared_kind: u8,
+    mut funds: Balance<T>,
+    max_fee: u64,
     settle_by_ms: u64,
     clock: &Clock,
     ctx: &mut TxContext,
-): SettleReceipt {
+): (SettleReceipt, u8, u64) {
     compliance_config::assert_settlement_app<W>(config);
     assert_lands_on_sui(intent);
-    assert!(funds.value() == intent.amount_usd, E_EXACT_AMOUNT_REQUIRED);
+    let drawn = funds.value();
+    assert!(drawn >= intent.amount_usd && drawn - intent.amount_usd == max_fee, E_EXACT_AMOUNT_REQUIRED);
+    let (kind, fee) = kind_and_fee(intent, account, fee_cfg, registry, declared_kind, false, max_fee);
     let now = settle_for_account<T>(intent, account, config, PATH_SETTLEMENT_APP, settle_by_ms, clock);
 
-    deliver_balance(intent, funds, ctx);
-    receipt(intent, now)
+    let paid = funds.split(intent.amount_usd);
+    deliver(kind, intent.recipient, paid, ctx);
+    fee_config::take_fee(fee_cfg, &mut funds, fee, object::id(intent), object::id(account), kind);
+    // Only an unused part of max_fee is left. The wallet is looked up only
+    // then, so an exact settlement never depends on it.
+    if (funds.value() > 0) balance::send_funds(funds, business_account::wallet(account))
+    else funds.destroy_zero();
+    (receipt(intent, now), kind, fee)
 }
 
 /// Discharge a bridge obligation. Only a registered bridge adapter can, and
@@ -736,21 +806,43 @@ fun settle_for_account<T>(
     now
 }
 
-/// Hand the funds to the recipient, in the form the recipient can use.
-///
-/// Another Splash business (kind 0) is credited to its address balance, where
-/// its own spending rules draw from. A wallet, an exchange or a partner
-/// deposit address (kinds 1, 2 and 4) receives a coin object, which every
-/// deposit system recognises; address-balance deposit detection is not
-/// confirmed for them.
-fun deliver_coin<T>(intent: &PaymentIntent, paid: Coin<T>) {
-    if (intent.kind == fee_config::kind_splash_business()) coin::send_funds(paid, intent.recipient)
-    else transfer::public_transfer(paid, intent.recipient)
+/// The derived kind and Splash's fee for this settlement, refused above the
+/// payer's `max_fee`. `declared` is the intent's kind on the owners' paths
+/// and the app's tag on the app path; `via_cctp` is the cross-chain path.
+/// The business a discount is looked up for is the account the intent is
+/// bound to, which `settle_for_account` checks is this one.
+fun kind_and_fee(
+    intent: &PaymentIntent,
+    account: &BusinessAccount,
+    fee_cfg: &FeeConfig,
+    registry: &Registry,
+    declared: u8,
+    via_cctp: bool,
+    max_fee: u64,
+): (u8, u64) {
+    let kind = address_registry::derive_kind(registry, intent.recipient, declared, via_cctp);
+    let fee = fee_config::splash_fee(fee_cfg, object::id(account), kind, intent.amount_usd);
+    assert!(fee <= max_fee, E_FEE_ABOVE_MAX);
+    (kind, fee)
 }
 
-fun deliver_balance<T>(intent: &PaymentIntent, paid: Balance<T>, ctx: &mut TxContext) {
-    if (intent.kind == fee_config::kind_splash_business()) balance::send_funds(paid, intent.recipient)
-    else transfer::public_transfer(coin::from_balance(paid, ctx), intent.recipient)
+/// `paid` covers the principal and the fee, written so it cannot overflow.
+fun assert_covers(paid: u64, principal: u64, fee: u64) {
+    assert!(paid >= principal && paid - principal >= fee, E_INSUFFICIENT_PAYMENT);
+}
+
+/// Hand the principal to the recipient, in the form the recipient can use,
+/// by the DERIVED kind.
+///
+/// Another Splash business (kind 0: a registered business wallet, whatever
+/// the intent declared) is credited to its address balance, where its own
+/// spending rules draw from. A wallet, an exchange or a partner deposit
+/// address (kinds 1, 2 and 4) receives a coin object, which every deposit
+/// system recognises; address-balance deposit detection is not confirmed for
+/// them.
+fun deliver<T>(kind: u8, recipient: address, paid: Balance<T>, ctx: &mut TxContext) {
+    if (kind == fee_config::kind_splash_business()) balance::send_funds(paid, recipient)
+    else transfer::public_transfer(coin::from_balance(paid, ctx), recipient)
 }
 
 fun receipt(intent: &PaymentIntent, settled_at: u64): SettleReceipt {
@@ -770,14 +862,11 @@ fun obligation(intent: &PaymentIntent, coin_id: ID): BridgeObligation {
     }
 }
 
-/// Change goes to the payer's address balance, where a business wallet keeps
-/// its funds (D1) and its spending rules can reach them.
-fun refund_coin<T>(rest: Coin<T>, to: address) {
-    if (coin::value(&rest) > 0) coin::send_funds(rest, to) else coin::destroy_zero(rest)
-}
-
-fun refund_balance<T>(rest: Balance<T>, to: address) {
-    if (rest.value() > 0) balance::send_funds(rest, to) else rest.destroy_zero()
+/// Every remainder goes to the account's business wallet's address balance,
+/// where it keeps its funds (D1) and its spending rules can reach them, and
+/// never to the transaction's sender. Nothing at all when there is none.
+fun to_wallet<T>(rest: Balance<T>, account: &BusinessAccount) {
+    if (rest.value() > 0) balance::send_funds(rest, business_account::wallet(account)) else rest.destroy_zero()
 }
 
 // ─── Cancelling and cleaning up ────────────────────────────────────────────

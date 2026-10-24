@@ -104,7 +104,7 @@ fun pay(scenario: &mut Scenario, n: u8, amount: u64) {
     let c = scenario.take_shared<Clock>();
     let mut intent = h::wallet_intent(&mut account, &config, n, amount, &c, scenario.ctx());
     let payment = h::usdc(amount, scenario.ctx());
-    let receipt = payment_intent::confirm_from_business_wallet(
+    let receipt = h::confirm(
         &mut intent,
         &mut account,
         &config,

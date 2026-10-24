@@ -104,6 +104,11 @@ const CHAIN_IDS = { testnet: '4c78adac', mainnet: '35834a8a' };
 const CLOCK = '0x6';
 // 0.01 USDC. Enough to prove the wallet can pay; a simulation moves nothing.
 const PAYMENT_MINOR = 10_000;
+// The payer's bound on Splash's fee (A1 §2.6): fee_config's 100 bps ceiling
+// of the payment, which no fee can exceed. Core charges the fee the derived
+// kind's schedule gives (0 to the wallet's own address, a Splash business)
+// and returns the unused part to the wallet's address balance.
+const MAX_FEE_MINOR = PAYMENT_MINOR / 100;
 // A wallet payment in USDC pays USDC: one to one, scaled 1e6.
 const FX_RATE_SCALED = 1_000_000;
 // fee_config::KIND_WALLET, and business_account::E_NOT_THE_WALLET.
@@ -135,6 +140,9 @@ const ANCHOR_CAP = objectIdFromEnv('SPLASH_ANCHOR_CAP_ID', { required: true });
 const CAP_REGISTRY = objectIdFromEnv('SPLASH_CAP_REGISTRY_ID', { required: true });
 const PEG_STATE = objectIdFromEnv('SPLASH_PEG_STATE_ID', { required: false });
 const COMPLIANCE_CONFIG = objectIdFromEnv('SPLASH_COMPLIANCE_CONFIG_ID', { required: false });
+// Amendment A1: the fee config and the address registry the settle paths read.
+const FEE_CONFIG = objectIdFromEnv('SPLASH_FEE_CONFIG_ID', { required: false });
+const ADDRESS_REGISTRY = objectIdFromEnv('SPLASH_ADDRESS_REGISTRY_ID', { required: false });
 const BUSINESS = objectIdFromEnv('SPLASH_BUSINESS_ACCOUNT_ID', { required: false });
 const ADMIN_CAP = objectIdFromEnv('SPLASH_ADMIN_CAP_ID', { required: false });
 // A business account with a registered wallet that holds USDC in its address
@@ -414,6 +422,16 @@ async function checkIds() {
   ) {
     record('ComplianceConfig', 'PASS', COMPLIANCE_CONFIG);
   }
+  if (await checkObject('FeeConfig', 'SPLASH_FEE_CONFIG_ID', FEE_CONFIG, typeIn('fee_config::FeeConfig'), { shared: true })) {
+    record('FeeConfig', 'PASS', FEE_CONFIG);
+  }
+  if (
+    await checkObject('Registry', 'SPLASH_ADDRESS_REGISTRY_ID', ADDRESS_REGISTRY, typeIn('address_registry::Registry'), {
+      shared: true,
+    })
+  ) {
+    record('Registry', 'PASS', ADDRESS_REGISTRY);
+  }
   if (await checkObject('BusinessAccount', 'SPLASH_BUSINESS_ACCOUNT_ID', BUSINESS, typeIn('business_account::BusinessAccount'), { shared: true })) {
     record('BusinessAccount', 'PASS', BUSINESS);
   }
@@ -617,16 +635,16 @@ function openForWallet(tx, { recipient, commitment, rail, paymentRef }) {
  * the intent is opened and paid in the same transaction, as the app does.
  */
 async function checkWalletPaymentSimulated() {
-  if (!COMPLIANCE_CONFIG) {
-    record('Wallet payment (simulated)', 'FAIL', 'needs SPLASH_COMPLIANCE_CONFIG_ID.');
+  if (!COMPLIANCE_CONFIG || !FEE_CONFIG || !ADDRESS_REGISTRY) {
+    record('Wallet payment (simulated)', 'FAIL', 'needs SPLASH_COMPLIANCE_CONFIG_ID, SPLASH_FEE_CONFIG_ID and SPLASH_ADDRESS_REGISTRY_ID.');
     return;
   }
   const wallet = await verifyWallet();
   const recipient = RECIPIENT_FROM_ENV || wallet;
   const { balance } = await client.core.getBalance({ owner: wallet, coinType: USDC });
-  if (BigInt(balance.addressBalance ?? 0) < BigInt(PAYMENT_MINOR)) {
+  if (BigInt(balance.addressBalance ?? 0) < BigInt(PAYMENT_MINOR + MAX_FEE_MINOR)) {
     throw new Error(
-      `the wallet ${wallet} has ${balance.addressBalance ?? 0} of ${USDC} in its address balance; the check pays ${PAYMENT_MINOR}. Send it some with coin::send_funds.`,
+      `the wallet ${wallet} has ${balance.addressBalance ?? 0} of ${USDC} in its address balance; the check draws ${PAYMENT_MINOR + MAX_FEE_MINOR} (the payment and the most its fee can be). Send it some with coin::send_funds.`,
     );
   }
 
@@ -634,7 +652,7 @@ async function checkWalletPaymentSimulated() {
   const { auditHash, blobId } = auditValues(values.commitment);
   const tx = new Transaction();
   tx.setGasBudget(50_000_000);
-  const withdrawal = tx.withdrawal({ amount: PAYMENT_MINOR, type: USDC });
+  const withdrawal = tx.withdrawal({ amount: PAYMENT_MINOR + MAX_FEE_MINOR, type: USDC });
   const [payment] = tx.moveCall({ target: '0x2::balance::redeem_funds', typeArguments: [USDC], arguments: [withdrawal] });
   const intent = openForWallet(tx, { recipient, ...values });
   const [receipt] = tx.moveCall({
@@ -644,7 +662,10 @@ async function checkWalletPaymentSimulated() {
       intent,
       tx.object(VERIFY_ACCOUNT),
       tx.object(COMPLIANCE_CONFIG),
+      tx.object(FEE_CONFIG),
+      tx.object(ADDRESS_REGISTRY),
       payment,
+      tx.pure.u64(MAX_FEE_MINOR),
       tx.pure.u64(Date.now() + SETTLE_WINDOW_MS),
       tx.object(CLOCK),
     ],

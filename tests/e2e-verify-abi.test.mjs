@@ -263,6 +263,8 @@ test('the verify script reads the ids the app reads, with no AdminCap stand-in f
     'SPLASH_ANCHOR_CAP_ID',
     'SPLASH_CAP_REGISTRY_ID',
     'SPLASH_COMPLIANCE_CONFIG_ID',
+    'SPLASH_FEE_CONFIG_ID',
+    'SPLASH_ADDRESS_REGISTRY_ID',
     'SPLASH_VERIFY_BUSINESS_ACCOUNT_ID',
   ]) {
     assert.ok(script.includes(`'${key}'`), `scripts/e2e-testnet.mjs reads ${key}`);
@@ -332,7 +334,12 @@ test('the payment runs as the business wallet with the operator paying gas, and 
   const payment = functionBody(script, 'checkWalletPaymentSimulated');
   assert.match(payment, /const wallet = await verifyWallet\(\);/);
   assert.match(payment, /simulate\('the wallet payment', tx, \{ sender: wallet, gasOwner: OPERATOR \}\)/);
-  assert.match(payment, /tx\.withdrawal\(\{ amount: PAYMENT_MINOR, type: USDC \}\)/);
+  // A1 §2.6: the wallet draws the payment and the most its fee can be, and
+  // passes that bound as max_fee; core returns the unused part to the wallet.
+  assert.match(payment, /tx\.withdrawal\(\{ amount: PAYMENT_MINOR \+ MAX_FEE_MINOR, type: USDC \}\)/);
+  assert.match(payment, /tx\.object\(FEE_CONFIG\),\s*tx\.object\(ADDRESS_REGISTRY\),\s*payment,\s*tx\.pure\.u64\(MAX_FEE_MINOR\),/);
+  assert.match(script, /\nconst MAX_FEE_MINOR = PAYMENT_MINOR \/ 100;\n/);
+  assert.equal(await moveConstant('fee_config', 'FEE_CEILING_BPS'), 100, 'MAX_FEE_MINOR is the 100 bps ceiling');
   for (const event of ['payment_intent::IntentCreated', 'payment_intent::IntentConfirmed', 'audit_anchor::SettlementAnchored']) {
     assert.ok(payment.includes(`'${event}'`), `the payment check expects ${event}`);
   }

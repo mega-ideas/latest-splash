@@ -338,7 +338,7 @@ const ABORT_CODES: Record<number, string> = {
   // ── payment_intent ───────────────────────────────────────────────────────
   400: 'E_NOT_PENDING — payment_intent confirm/cancel called on an intent that is not in STATUS_PENDING.',
   401: 'E_EXPIRED — the intent reached its expires_at (the time its creator chose, at most 30 days out) before this settlement. Every settle path refuses it from that moment on; open a new intent.',
-  402: 'E_INSUFFICIENT_PAYMENT — coin value below intent.amount_usd on confirm.',
+  402: 'E_INSUFFICIENT_PAYMENT — the payment is below the intent amount plus Splash’s fee for this payment. The fee is computed on chain from the kind and the amount; pay at least both.',
   403: 'E_NOT_YET_EXPIRED — payment_intent::cancel_payment_intent called before intent.expires_at.',
   404: 'E_UNAUTHORIZED — payment_intent action attempted by an address other than intent.sender.',
   405: 'E_INVALID_AMOUNT — a payment_intent::create* call was given an amount of 0.',
@@ -473,7 +473,7 @@ const ABORT_CODES: Record<number, string> = {
   424: 'E_BAD_RAIL_COMMITMENT — the rail commitment is not 32 bytes. It is blake2b256(splash:rail:v1 || bcs(payload) || salt); see docs/commitments.md.',
   425: 'E_CROSS_CHAIN_ONLY — this is a cross-chain intent. It settles only through a _cross_chain path, which hands the coin to a bridge adapter.',
   426: 'E_NOT_CROSS_CHAIN — a _cross_chain path was given an intent that lands on Sui. Use the matching path that pays the recipient address.',
-  427: 'E_EXACT_AMOUNT_REQUIRED — funds drawn under a spending rule must equal the intent amount exactly.',
+  427: 'E_EXACT_AMOUNT_REQUIRED — funds drawn under a spending rule must be exactly the intent amount plus max_fee, the most Splash’s fee may be. Core returns the part of max_fee the fee did not use to the business wallet.',
   428: 'E_BENEFICIARY_REQUIRED — a bank payout names its beneficiary by a 32-byte commitment (splash:beneficiary:v1); other kinds name none.',
   429: 'E_BAD_PAYMENT_REF — the payment reference must be a 32-byte commitment over the business own invoice or payment id.',
   430: 'E_SETTLE_BY_PASSED — the quote this transaction was signed against has lapsed. Get a fresh quote and sign again.',
@@ -481,6 +481,7 @@ const ABORT_CODES: Record<number, string> = {
   432: 'E_WRONG_BRIDGE_COIN — the coin handed to the bridge adapter is not the coin the settlement released, or not its type or amount.',
   433: 'E_BAD_BRIDGE_FEE — the cross-chain fee ceiling would take the whole payment.',
   434: 'E_BELOW_SETTLEMENT_FLOOR — this bank payout is below its floor: the larger of the 99 USDC platform minimum and ComplianceConfig.min_settlement_amount. It is checked when the intent opens and again when it settles, so an intent opened before compliance raised the floor no longer settles. Wallet, Splash-business and cross-chain payments have no floor.',
+  435: 'E_FEE_ABOVE_MAX — Splash’s fee on this payment is above max_fee, the fee you were shown and signed for. The fee schedule may have changed since the quote: get a fresh quote and approve again.',
 
   // ── splash_spend (spending rules) ────────────────────────────────────────
   1000: 'E_WRONG_FUNDER — the allowance is not funded by this spending rule wallet.',

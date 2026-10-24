@@ -143,7 +143,7 @@ fun pay_in<T>(
     ctx: &mut TxContext,
 ) {
     let payment = coin::mint_for_testing<T>(paid, ctx);
-    let receipt = payment_intent::confirm_from_business_wallet(intent, account, config, payment, settle_by, c, ctx);
+    let receipt = h::confirm(intent, account, config, payment, settle_by, c, ctx);
     audit_anchor::anchor(receipt, HASH, BLOB, c, ctx);
 }
 
@@ -171,7 +171,7 @@ fun pay_balance_in<T>(
     ctx: &mut TxContext,
 ) {
     let funds = balance::create_for_testing<T>(paid);
-    let receipt = payment_intent::confirm_from_business_wallet_balance(intent, account, config, funds, settle_by, c, ctx);
+    let receipt = h::confirm_balance(intent, account, config, funds, settle_by, c, ctx);
     audit_anchor::anchor(receipt, HASH, BLOB, c, ctx);
 }
 
@@ -225,7 +225,7 @@ fun release(
     ctx: &mut TxContext,
 ): (Coin<USDC>, BridgeObligation) {
     let payment = h::usdc(paid, ctx);
-    let (receipt, coin, obligation) = payment_intent::confirm_cross_chain_from_business_wallet(
+    let (receipt, coin, obligation) = h::confirm_cross_chain(
         intent,
         account,
         config,
@@ -407,7 +407,7 @@ fun the_wallet_pays_from_a_redeemed_withdrawal() {
         assert_eq!(ts::settled_balance<USDC>(h::wallet()), h::amount() + 7);
         let mut intent = h::wallet_intent(account, config, 1, h::amount(), c, ctx);
         let funds = balance::redeem_funds(ts::withdraw_balance_from_address<USDC>(h::wallet(), h::amount()));
-        let receipt = payment_intent::confirm_from_business_wallet_balance(
+        let receipt = h::confirm_balance(
             &mut intent,
             account,
             config,
@@ -1434,7 +1434,7 @@ fun a_bank_payout_opened_before_the_floor_rose_cannot_settle_through_an_app() {
     raise_floor(&mut s, 150 * USD);
     with_intent!(&mut s, STAFF, |intent, account, config, c, ctx| {
         let funds = balance::create_for_testing<USDC>(120 * USD);
-        let receipt = payment_intent::settle_from_app<USDC, TestApp>(
+        let receipt = h::settle_app<USDC, TestApp>(
             TestApp {}, intent, account, config, funds, h::settle_by(c), c, ctx,
         );
         audit_anchor::anchor(receipt, HASH, BLOB, c, ctx);
@@ -1644,7 +1644,7 @@ fun cross_chain_in_another_coin_aborts() {
     tx!(&mut s, h::wallet(), |account, config, c, ctx| {
         let mut intent = cross_chain_intent(account, config, 1, h::amount(), c, ctx);
         let payment = coin::mint_for_testing<SCAM>(h::amount(), ctx);
-        let (receipt, coin, obligation) = payment_intent::confirm_cross_chain_from_business_wallet(
+        let (receipt, coin, obligation) = h::confirm_cross_chain(
             &mut intent,
             account,
             config,

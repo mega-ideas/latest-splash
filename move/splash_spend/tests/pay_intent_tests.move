@@ -490,7 +490,14 @@ fun pay_objects(
         object::id(alw),
         ts::withdraw_balance_from_address<USDC>(from, drawn),
     );
-    let receipt = splash_spend::pay_intent(alw, withdrawal, intent, account, policy, config, approval, settle_by_ms, c, ctx);
+    // No Splash fee in these tests: a scratch config charging nothing, and a
+    // registry classifying the recipient as the kind the intent declares.
+    let fees = h::scratch_fees(ctx);
+    let reg = h::scratch_registry_for(intent, ctx);
+    let receipt = splash_spend::pay_intent(
+        alw, withdrawal, intent, account, policy, config, &fees, &reg, approval, 0, settle_by_ms, c, ctx,
+    );
+    h::drop_scratch(fees, reg);
     audit_anchor::anchor(receipt, HASH, BLOB, c, ctx);
 }
 
@@ -1181,6 +1188,8 @@ fun paying_in_another_asset_aborts() {
         let config = s.take_shared<ComplianceConfig>();
         let c = s.take_shared<Clock>();
         let w = allowance::new_withdrawal_for_testing(other_alw, ts::withdraw_balance_from_address<OTHER>(h::wallet(), PAY));
+        let fees = h::scratch_fees(s.ctx());
+        let reg = h::scratch_registry_for(&intent, s.ctx());
         let receipt = splash_spend::pay_intent(
             &mut alw,
             w,
@@ -1188,11 +1197,15 @@ fun paying_in_another_asset_aborts() {
             &mut account,
             &mut policy,
             &config,
+            &fees,
+            &reg,
             option::none(),
+            0,
             h::settle_by(&c),
             &c,
             s.ctx(),
         );
+        h::drop_scratch(fees, reg);
         audit_anchor::anchor(receipt, HASH, BLOB, &c, s.ctx());
         ts::return_shared(c);
         ts::return_shared(config);
@@ -2528,7 +2541,7 @@ fun the_wallet_still_pays_a_cross_chain_intent_itself() {
         let mut account = s.take_shared_by_id<BusinessAccount>(fx.account);
         let config = s.take_shared<ComplianceConfig>();
         let c = s.take_shared<Clock>();
-        let (receipt, coin, obligation) = payment_intent::confirm_cross_chain_from_business_wallet(
+        let (receipt, coin, obligation) = h::confirm_cross_chain(
             &mut intent,
             &mut account,
             &config,
@@ -2657,7 +2670,7 @@ fun removing_the_settlement_app_leaves_the_owners_path_working() {
         let mut account = s.take_shared_by_id<BusinessAccount>(fx.account);
         let config = s.take_shared<ComplianceConfig>();
         let c = s.take_shared<Clock>();
-        let receipt = payment_intent::confirm_from_business_wallet(
+        let receipt = h::confirm(
             &mut intent,
             &mut account,
             &config,

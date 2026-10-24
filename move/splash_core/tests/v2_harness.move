@@ -1,6 +1,15 @@
 /// Shared set-up for the v2 tests: a verified account whose owners are the
 /// three Phase 0 passkeys, its 2-of-3 business wallet registered, the one
-/// `ComplianceConfig` accepting a test USDC, and a shared clock.
+/// `ComplianceConfig` accepting a test USDC, the `FeeConfig` at A1's launch
+/// schedule paying `fee_recipient()`, the address `Registry`, and a shared
+/// clock.
+///
+/// Tests that are not about Splash's fee settle through `confirm`,
+/// `confirm_balance`, `confirm_cross_chain` and `settle_app` below: each
+/// passes a scratch FeeConfig that charges nothing and a scratch Registry that
+/// classifies the intent's recipient as the kind it declares, so the
+/// settlement under test is exactly the one it was before the fee. The fee
+/// tests (`fee_settle_tests`) use the shared FeeConfig and Registry.
 ///
 /// Move tests do not check signatures, so a test acts as the multisig simply
 /// by sending as its address. What the chain would check (that the sender is
@@ -14,8 +23,10 @@ use splash_core::address_registry::{Self, Registry};
 use splash_core::business_account::{Self, BusinessAccount};
 use splash_core::cap_registry;
 use splash_core::compliance_config::{Self, ComplianceConfig};
-use splash_core::payment_intent::{Self, PaymentIntent};
+use splash_core::fee_config::{Self, FeeConfig};
+use splash_core::payment_intent::{Self, BridgeObligation, PaymentIntent, SettleReceipt};
 use std::string::String;
+use sui::balance::Balance;
 use sui::clock::{Self, Clock};
 use sui::coin::{Self, Coin};
 use sui::test_scenario::{Self as ts, Scenario};
@@ -41,6 +52,8 @@ const BENEFICIARY: vector<u8> = x"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 /// 100 USDC: above the 99 USDC bank-payout floor, under every Tier 3 ceiling.
 const AMOUNT: u64 = 100_000_000;
 const QUOTE_MS: u64 = 300_000;
+/// Where the shared FeeConfig sends Splash's fee: the finance multisig.
+const FEE_RECIPIENT: address = @0xFEE5;
 
 public fun owner_1(): address { OWNER_1 }
 public fun owner_2(): address { OWNER_2 }
@@ -57,6 +70,7 @@ public fun keys(): vector<vector<u8>> { vector[PASSKEY_1, PASSKEY_2, PASSKEY_3] 
 public fun passkey(i: u64): vector<u8> { keys()[i] }
 public fun weights(): vector<u8> { vector[1, 1, 1] }
 public fun threshold(): u16 { 2 }
+public fun fee_recipient(): address { FEE_RECIPIENT }
 
 /// A distinct 32-byte payment reference for each `n`.
 public fun payment_ref(n: u8): vector<u8> {
@@ -106,6 +120,7 @@ public fun setup_without_wallet(): Scenario {
         );
         cap_registry::share_for_testing(registry);
         address_registry::share_for_testing(address_registry::new_for_testing(ctx));
+        fee_config::share_for_testing(fee_config::new_for_testing(FEE_RECIPIENT, ctx));
         business_account::destroy_admin_cap_for_testing(admin);
         ts::return_shared(account);
     };
@@ -211,3 +226,193 @@ public fun usdc(amount: u64, ctx: &mut TxContext): Coin<USDC> {
 
 /// Settle-by a little in the future of `clock`: the quote is still good.
 public fun settle_by(clock: &Clock): u64 { clock.timestamp_ms() + QUOTE_MS }
+
+// ─── Settling with no fee (tests not about the fee) ────────────────────────
+
+/// A FeeConfig that charges nothing on any kind.
+public fun scratch_fees(ctx: &mut TxContext): FeeConfig { fee_config::zero_for_testing(FEE_RECIPIENT, ctx) }
+
+/// A Registry in which `recipient` is what `kind` says it is: a partner
+/// deposit address for a bank payout, a business wallet for a Splash-business
+/// payment, and nothing for the rest.
+public fun scratch_registry(kind: u8, recipient: address, ctx: &mut TxContext): Registry {
+    let mut reg = address_registry::new_for_testing(ctx);
+    if (kind == payment_intent::kind_bank_payout()) {
+        let cap = address_registry::ops_cap_for_testing(ctx);
+        address_registry::add_partner_address(&cap, &mut reg, recipient);
+        address_registry::destroy_ops_cap_for_testing(cap);
+    } else if (kind == payment_intent::kind_splash_business()) {
+        address_registry::add_business_wallet_for_testing(&mut reg, recipient);
+    };
+    reg
+}
+
+/// The scratch Registry for `intent`.
+public fun scratch_registry_for(intent: &PaymentIntent, ctx: &mut TxContext): Registry {
+    scratch_registry(payment_intent::kind(intent), payment_intent::recipient(intent), ctx)
+}
+
+public fun drop_scratch(fees: FeeConfig, reg: Registry) {
+    fee_config::destroy_for_testing(fees);
+    address_registry::destroy_for_testing(reg);
+}
+
+/// `confirm_from_business_wallet` with no fee (max_fee 0).
+public fun confirm<T>(
+    intent: &mut PaymentIntent,
+    account: &mut BusinessAccount,
+    config: &ComplianceConfig,
+    payment: Coin<T>,
+    settle_by_ms: u64,
+    clock: &Clock,
+    ctx: &mut TxContext,
+): SettleReceipt {
+    let fees = scratch_fees(ctx);
+    let reg = scratch_registry_for(intent, ctx);
+    let receipt = payment_intent::confirm_from_business_wallet(
+        intent, account, config, &fees, &reg, payment, 0, settle_by_ms, clock, ctx,
+    );
+    drop_scratch(fees, reg);
+    receipt
+}
+
+/// `confirm_from_business_wallet_balance` with no fee (max_fee 0).
+public fun confirm_balance<T>(
+    intent: &mut PaymentIntent,
+    account: &mut BusinessAccount,
+    config: &ComplianceConfig,
+    payment: Balance<T>,
+    settle_by_ms: u64,
+    clock: &Clock,
+    ctx: &mut TxContext,
+): SettleReceipt {
+    let fees = scratch_fees(ctx);
+    let reg = scratch_registry_for(intent, ctx);
+    let receipt = payment_intent::confirm_from_business_wallet_balance(
+        intent, account, config, &fees, &reg, payment, 0, settle_by_ms, clock, ctx,
+    );
+    drop_scratch(fees, reg);
+    receipt
+}
+
+/// `confirm_cross_chain_from_business_wallet` with no fee (max_fee 0).
+public fun confirm_cross_chain<T>(
+    intent: &mut PaymentIntent,
+    account: &mut BusinessAccount,
+    config: &ComplianceConfig,
+    payment: Coin<T>,
+    settle_by_ms: u64,
+    clock: &Clock,
+    ctx: &mut TxContext,
+): (SettleReceipt, Coin<T>, BridgeObligation) {
+    let fees = scratch_fees(ctx);
+    let reg = scratch_registry_for(intent, ctx);
+    let (receipt, coin, obligation) = payment_intent::confirm_cross_chain_from_business_wallet(
+        intent, account, config, &fees, &reg, payment, 0, settle_by_ms, clock, ctx,
+    );
+    drop_scratch(fees, reg);
+    (receipt, coin, obligation)
+}
+
+/// `settle_from_app` with no fee: the app declares the intent's own kind and
+/// draws exactly the principal (max_fee 0).
+public fun settle_app<T, W: drop>(
+    witness: W,
+    intent: &mut PaymentIntent,
+    account: &mut BusinessAccount,
+    config: &ComplianceConfig,
+    funds: Balance<T>,
+    settle_by_ms: u64,
+    clock: &Clock,
+    ctx: &mut TxContext,
+): SettleReceipt {
+    let fees = scratch_fees(ctx);
+    let reg = scratch_registry_for(intent, ctx);
+    let declared = payment_intent::kind(intent);
+    let (receipt, _, _) = payment_intent::settle_from_app<T, W>(
+        witness, intent, account, config, &fees, &reg, declared, funds, 0, settle_by_ms, clock, ctx,
+    );
+    drop_scratch(fees, reg);
+    receipt
+}
+
+// ─── The shared FeeConfig and Registry (the fee tests) ─────────────────────
+
+/// Splash ops registers `addr` as a payout partner's deposit address.
+public fun add_partner(s: &mut Scenario, addr: address) {
+    s.next_tx(OWNER_1);
+    let mut reg = s.take_shared<Registry>();
+    let cap = address_registry::ops_cap_for_testing(s.ctx());
+    address_registry::add_partner_address(&cap, &mut reg, addr);
+    address_registry::destroy_ops_cap_for_testing(cap);
+    ts::return_shared(reg);
+}
+
+public fun remove_partner(s: &mut Scenario, addr: address) {
+    s.next_tx(OWNER_1);
+    let mut reg = s.take_shared<Registry>();
+    let cap = address_registry::ops_cap_for_testing(s.ctx());
+    address_registry::remove_partner_address(&cap, &mut reg, addr);
+    address_registry::destroy_ops_cap_for_testing(cap);
+    ts::return_shared(reg);
+}
+
+/// `addr` counts as another account's business wallet. Returns it.
+public fun add_business_wallet(s: &mut Scenario, addr: address): address {
+    s.next_tx(OWNER_1);
+    let mut reg = s.take_shared<Registry>();
+    address_registry::add_business_wallet_for_testing(&mut reg, addr);
+    ts::return_shared(reg);
+    addr
+}
+
+/// Governance gives `business` a discount, at once.
+public fun set_discount(s: &mut Scenario, business: ID, discount_bps: u16) {
+    s.next_tx(OWNER_1);
+    let mut fees = s.take_shared<FeeConfig>();
+    let cap = fee_config::fee_admin_cap_for_testing(s.ctx());
+    fee_config::set_discount(&cap, &mut fees, business, discount_bps);
+    fee_config::destroy_fee_admin_cap_for_testing(cap);
+    ts::return_shared(fees);
+}
+
+/// Governance changes the fee recipient through the 24-hour path. Moves the
+/// clock on 24 hours.
+public fun change_fee_recipient(s: &mut Scenario, recipient: address) {
+    s.next_tx(OWNER_1);
+    {
+        let mut fees = s.take_shared<FeeConfig>();
+        let mut c = s.take_shared<Clock>();
+        let cap = fee_config::fee_admin_cap_for_testing(s.ctx());
+        fee_config::propose_fee_recipient(&cap, &mut fees, recipient, &c);
+        c.increment_for_testing(fee_config::fee_notice_ms());
+        fee_config::apply_fee_recipient(&cap, &mut fees, &c);
+        fee_config::destroy_fee_admin_cap_for_testing(cap);
+        ts::return_shared(c);
+        ts::return_shared(fees);
+    };
+}
+
+/// Governance changes `kind`'s schedule through the 24-hour path. Moves the
+/// clock on 24 hours.
+public fun change_schedule(
+    s: &mut Scenario,
+    kind: u8,
+    uppers: vector<u64>,
+    rates: vector<u64>,
+    min_minor: u64,
+    max_minor: u64,
+) {
+    s.next_tx(OWNER_1);
+    {
+        let mut fees = s.take_shared<FeeConfig>();
+        let mut c = s.take_shared<Clock>();
+        let cap = fee_config::fee_admin_cap_for_testing(s.ctx());
+        fee_config::propose_schedule(&cap, &mut fees, kind, uppers, rates, min_minor, max_minor, &c);
+        c.increment_for_testing(fee_config::fee_notice_ms());
+        fee_config::apply_schedule(&cap, &mut fees, kind, &c);
+        fee_config::destroy_fee_admin_cap_for_testing(cap);
+        ts::return_shared(c);
+        ts::return_shared(fees);
+    };
+}

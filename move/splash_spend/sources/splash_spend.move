@@ -55,8 +55,10 @@
 /// fails if a `Coin` could.
 module splash_spend::splash_spend;
 
+use splash_core::address_registry::Registry;
 use splash_core::business_account::{Self, BusinessAccount};
 use splash_core::compliance_config::{Self, ComplianceConfig};
+use splash_core::fee_config::FeeConfig;
 use splash_core::payment_intent::{Self, PaymentIntent, SettleReceipt};
 use splash_spend::spend_policy::{Self, SpendPolicy};
 use std::internal;
@@ -443,10 +445,16 @@ public fun discard_approval(approval: PayoutApproval) {
 /// Pay an intent under a spending rule. The sender is the allowance's spender.
 ///
 /// `withdrawal` is the allowance withdrawal input for exactly the intent's
-/// amount, from the business wallet's address balance. `settle_by_ms` is the
-/// quote's deadline. `config` must be the one the policy was created
-/// against. The intent lands on Sui, and core pays its recipient in this
-/// call; a cross-chain intent is refused.
+/// amount plus `max_fee` (A1 §2.6: the Splash fee the spender was shown),
+/// from the business wallet's address balance. Core derives the kind, charges
+/// the fee (at most `max_fee`) to the fee recipient, and returns the unused
+/// part of `max_fee` to the business wallet, never to the spender.
+/// `settle_by_ms` is the quote's deadline. `config` must be the one the
+/// policy was created against. The intent lands on Sui, and core pays its
+/// recipient in this call; a cross-chain intent is refused.
+///
+/// The declared kind core derives from is the intent's kind, which `draw`
+/// has checked is the recipient's tag in the policy.
 public fun pay_intent<C>(
     allowance: &mut Allowance<Balance<C>>,
     withdrawal: AllowanceWithdrawal<Balance<C>>,
@@ -454,23 +462,32 @@ public fun pay_intent<C>(
     account: &mut BusinessAccount,
     policy: &mut SpendPolicy,
     config: &ComplianceConfig,
+    fee_cfg: &FeeConfig,
+    registry: &Registry,
     approval: Option<PayoutApproval>,
+    max_fee: u64,
     settle_by_ms: u64,
     clock: &Clock,
     ctx: &mut TxContext,
 ): SettleReceipt {
     assert!(payment_intent::kind(intent) != payment_intent::kind_cross_chain(), E_WRONG_PAY_PATH);
     let funds = draw(allowance, withdrawal, intent, account, policy, config, approval, settle_by_ms, clock, ctx);
-    payment_intent::settle_from_app<C, SettleWitness>(
+    let declared = payment_intent::kind(intent);
+    let (receipt, _kind, _fee) = payment_intent::settle_from_app<C, SettleWitness>(
         SettleWitness {},
         intent,
         account,
         config,
+        fee_cfg,
+        registry,
+        declared,
         funds,
+        max_fee,
         settle_by_ms,
         clock,
         ctx,
-    )
+    );
+    receipt
 }
 
 /// Every check the policy adds, then the withdrawal. Private: the `Balance`

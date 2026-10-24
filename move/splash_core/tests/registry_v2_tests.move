@@ -337,7 +337,7 @@ fun pay_shared_intent_from_wallet(s: &mut Scenario) {
     let config = s.take_shared<ComplianceConfig>();
     let c = s.take_shared<Clock>();
     let payment = h::usdc(h::amount(), s.ctx());
-    let receipt = payment_intent::confirm_from_business_wallet(
+    let receipt = h::confirm(
         &mut intent, &mut account, &config, payment, h::settle_by(&c), &c, s.ctx(),
     );
     audit_anchor::anchor(receipt, HASH, BLOB, &c, s.ctx());

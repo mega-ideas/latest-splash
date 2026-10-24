@@ -80,7 +80,7 @@ fun pay_from_wallet<T>(s: &mut test_scenario::Scenario, paid: u64, hash: vector<
     let ctx = s.ctx();
     let mut intent = h::wallet_intent(&mut account, &config, 1, h::amount(), &c, ctx);
     let payment = coin::mint_for_testing<T>(paid, ctx);
-    let receipt = payment_intent::confirm_from_business_wallet(
+    let receipt = h::confirm(
         &mut intent,
         &mut account,
         &config,
@@ -179,7 +179,7 @@ fun third_party_cannot_confirm() {
         let mut intent = s.take_shared<payment_intent::PaymentIntent>();
         let ctx = s.ctx();
         let payment = coin::mint_for_testing<USDC>(h::amount(), ctx);
-        let receipt = payment_intent::confirm_from_business_wallet(
+        let receipt = h::confirm(
             &mut intent, &mut account, &config, payment, h::settle_by(&c), &c, ctx,
         );
         audit_anchor::anchor(receipt, HASH, BLOB, &c, ctx);

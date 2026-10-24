@@ -229,7 +229,7 @@ fun wallet_pays(s: &mut Scenario, id: ID) {
     let (mut account, config, c) = take(s);
     let mut intent = s.take_shared_by_id<PaymentIntent>(id);
     let payment = h::usdc(h::amount(), s.ctx());
-    let receipt = payment_intent::confirm_from_business_wallet(
+    let receipt = h::confirm(
         &mut intent, &mut account, &config, payment, h::settle_by(&c), &c, s.ctx(),
     );
     audit_anchor::anchor(receipt, HASH, BLOB, &c, s.ctx());
@@ -538,7 +538,7 @@ fun wallet_balance_settle_at_exactly_expires_at_is_refused() {
     let (mut account, config, c) = take(&s);
     let mut intent = s.take_shared_by_id<PaymentIntent>(id);
     let funds = balance::create_for_testing<USDC>(h::amount());
-    let receipt = payment_intent::confirm_from_business_wallet_balance(
+    let receipt = h::confirm_balance(
         &mut intent, &mut account, &config, funds, h::settle_by(&c), &c, s.ctx(),
     );
     audit_anchor::anchor(receipt, HASH, BLOB, &c, s.ctx());
@@ -559,7 +559,7 @@ fun app_settles_one_ms_before_expiry() {
     let (mut account, config, c) = take(&s);
     let mut intent = s.take_shared_by_id<PaymentIntent>(id);
     let funds = balance::create_for_testing<USDC>(h::amount());
-    let receipt = payment_intent::settle_from_app<USDC, TestApp>(
+    let receipt = h::settle_app<USDC, TestApp>(
         TestApp {}, &mut intent, &mut account, &config, funds, h::settle_by(&c), &c, s.ctx(),
     );
     audit_anchor::anchor(receipt, HASH, BLOB, &c, s.ctx());
@@ -581,7 +581,7 @@ fun app_settle_at_exactly_expires_at_is_refused() {
     let (mut account, config, c) = take(&s);
     let mut intent = s.take_shared_by_id<PaymentIntent>(id);
     let funds = balance::create_for_testing<USDC>(h::amount());
-    let receipt = payment_intent::settle_from_app<USDC, TestApp>(
+    let receipt = h::settle_app<USDC, TestApp>(
         TestApp {}, &mut intent, &mut account, &config, funds, h::settle_by(&c), &c, s.ctx(),
     );
     audit_anchor::anchor(receipt, HASH, BLOB, &c, s.ctx());
@@ -612,7 +612,7 @@ fun an_app_cannot_settle_a_cross_chain_intent() {
     let (mut account, config, c) = take(&s);
     let mut intent = s.take_shared_by_id<PaymentIntent>(id);
     let funds = balance::create_for_testing<USDC>(h::amount());
-    let receipt = payment_intent::settle_from_app<USDC, TestApp>(
+    let receipt = h::settle_app<USDC, TestApp>(
         TestApp {}, &mut intent, &mut account, &config, funds, h::settle_by(&c), &c, s.ctx(),
     );
     audit_anchor::anchor(receipt, HASH, BLOB, &c, s.ctx());
@@ -641,7 +641,7 @@ fun cross_chain_settle_at_exactly_expires_at_is_refused() {
     let (mut account, config, c) = take(&s);
     let mut intent = s.take_shared_by_id<PaymentIntent>(id);
     let payment = h::usdc(h::amount(), s.ctx());
-    let (receipt, to_bridge, obligation) = payment_intent::confirm_cross_chain_from_business_wallet(
+    let (receipt, to_bridge, obligation) = h::confirm_cross_chain(
         &mut intent, &mut account, &config, payment, h::settle_by(&c), &c, s.ctx(),
     );
     audit_anchor::anchor(receipt, HASH, BLOB, &c, s.ctx());
@@ -1044,7 +1044,7 @@ fun a_payment_ref_stays_used_after_settle_and_delete() {
     let (mut account, config, c) = take(&s);
     let mut intent = by_wallet(&mut account, &config, bank(1, &c), &c, s.ctx());
     let payment = h::usdc(h::amount(), s.ctx());
-    let receipt = payment_intent::confirm_from_business_wallet(
+    let receipt = h::confirm(
         &mut intent, &mut account, &config, payment, h::settle_by(&c), &c, s.ctx(),
     );
     audit_anchor::anchor(receipt, HASH, BLOB, &c, s.ctx());
@@ -1067,7 +1067,7 @@ fun a_payment_ref_cannot_reopen_after_settle_and_delete() {
         let (mut account, config, c) = take(&s);
         let mut intent = by_wallet(&mut account, &config, bank(1, &c), &c, s.ctx());
         let payment = h::usdc(h::amount(), s.ctx());
-        let receipt = payment_intent::confirm_from_business_wallet(
+        let receipt = h::confirm(
             &mut intent, &mut account, &config, payment, h::settle_by(&c), &c, s.ctx(),
         );
         audit_anchor::anchor(receipt, HASH, BLOB, &c, s.ctx());
