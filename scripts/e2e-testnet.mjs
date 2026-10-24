@@ -489,7 +489,7 @@ async function checkIds() {
     typeIn('address_registry::OpsCap'),
     'Move it to the ops multisig (or the governance multisig): with it one key adds or removes partner deposit addresses at once.',
   );
-  if (ADMIN_CAP &&(await checkObject('AdminCap', 'SPLASH_ADMIN_CAP_ID', ADMIN_CAP, typeIn('business_account::AdminCap'), { shared: false }))) {
+  if (ADMIN_CAP && (await checkObject('AdminCap', 'SPLASH_ADMIN_CAP_ID', ADMIN_CAP, typeIn('business_account::AdminCap'), { shared: false }))) {
     record('AdminCap', 'PASS', ADMIN_CAP);
   }
 }
