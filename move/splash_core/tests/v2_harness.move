@@ -103,7 +103,8 @@ public fun setup_without_wallet(): Scenario {
         let mut account = s.take_shared<BusinessAccount>();
         let ctx = s.ctx();
         let admin = business_account::admin_cap_for_testing(ctx);
-        business_account::verify_business(&admin, &mut account, 20);
+        let mut areg = address_registry::new_for_testing(ctx);
+        business_account::verify_business(&admin, &mut account, &mut areg, 20);
         business_account::add_owner(&mut account, OWNER_2, ctx);
         business_account::add_owner(&mut account, OWNER_3, ctx);
         let registry = cap_registry::new_for_testing(ctx);
@@ -120,7 +121,7 @@ public fun setup_without_wallet(): Scenario {
             ctx,
         );
         cap_registry::share_for_testing(registry);
-        address_registry::share_for_testing(address_registry::new_for_testing(ctx));
+        address_registry::share_for_testing(areg);
         fee_config::share_for_testing(fee_config::new_for_testing(FEE_RECIPIENT, ctx));
         business_account::destroy_admin_cap_for_testing(admin);
         ts::return_shared(account);

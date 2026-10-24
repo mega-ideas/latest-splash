@@ -13,6 +13,7 @@
 #[test_only]
 module splash_core::authority_tests;
 
+use splash_core::address_registry;
 use splash_core::audit_anchor;
 use splash_core::business_account::{Self, BusinessAccount};
 use splash_core::cap_registry;
@@ -68,7 +69,9 @@ fun setup(): Scenario {
         let mut account = scenario.take_shared<BusinessAccount>();
         let ctx = scenario.ctx();
         let admin = business_account::admin_cap_for_testing(ctx);
-        business_account::verify_business(&admin, &mut account, 20);
+        let mut areg = address_registry::new_for_testing(ctx);
+        business_account::verify_business(&admin, &mut account, &mut areg, 20);
+        address_registry::destroy_for_testing(areg);
         let registry = cap_registry::new_for_testing(ctx);
         compliance_config::create<SUI>(
             compliance_config::ticket_for_testing(ctx),
@@ -164,7 +167,9 @@ fun an_owner_cannot_lift_a_compliance_freeze() {
         let mut account = scenario.take_shared<BusinessAccount>();
         let ctx = scenario.ctx();
         let admin = business_account::admin_cap_for_testing(ctx);
-        business_account::admin_freeze(&admin, &mut account, ctx);
+        let mut areg = address_registry::new_for_testing(ctx);
+        business_account::admin_freeze(&admin, &mut account, &mut areg, ctx);
+        address_registry::destroy_for_testing(areg);
         business_account::destroy_admin_cap_for_testing(admin);
         assert_eq!(business_account::is_frozen(&account), true);
         // `frozen` (the owner flag) was never set, so this aborts with

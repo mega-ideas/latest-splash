@@ -455,7 +455,7 @@ if (!done('verify')) {
   const tx = new Transaction();
   tx.moveCall({
     target: `${CORE}::business_account::verify_business`,
-    arguments: [tx.object(results.steps.publishCore.adminCap), tx.object(ACCOUNT), tx.pure.u8(20)],
+    arguments: [tx.object(results.steps.publishCore.adminCap), tx.object(ACCOUNT), tx.object(ADDRESS_REGISTRY), tx.pure.u8(20)],
   });
   const t = await runMultisig('verify_business, signed by governance (passkeys 1+3)', G, [govKeys[0], govKeys[2]], tx);
   results.steps.verify = { digest: t.digest };

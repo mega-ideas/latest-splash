@@ -1210,6 +1210,11 @@ export async function anchorAuditHashOnSui(input: {
  * `businessAccountId` is resolved per-org (organizations.sui_business_account_id)
  * rather than from the single global env value, so verifying one tenant can
  * never flip another's account.
+ *
+ * It passes Splash's address Registry (SPLASH_ADDRESS_REGISTRY_ID): a
+ * verified account's business wallet is entered there, which makes a
+ * payment to it a free Splash-business payment (A1 §2.3). An unverified
+ * account's wallet is never in it.
  */
 export async function verifyBusinessOnSui(input: {
   businessAccountId: string;
@@ -1218,6 +1223,11 @@ export async function verifyBusinessOnSui(input: {
   await requireSdkExecution();
   const packageId = corePackageIdOrThrow();
   const adminCapId = configIdOrThrow('adminCapId', 'SPLASH_ADMIN_CAP_ID');
+  const addressRegistryId = (process.env.SPLASH_ADDRESS_REGISTRY_ID ?? '').trim();
+  if (!addressRegistryId) {
+    throw new Error("SPLASH_ADDRESS_REGISTRY_ID is not configured: verify_business enters the business wallet in Splash's address Registry, so it needs that Registry's id.");
+  }
+  const registryId = requireSuiObjectId(addressRegistryId, 'SPLASH_ADDRESS_REGISTRY_ID');
   const businessAccountId = requireSuiObjectId(input.businessAccountId, 'businessAccountId');
 
   const riskScore = Math.max(0, Math.min(255, Math.round(input.riskScore)));
@@ -1229,6 +1239,7 @@ export async function verifyBusinessOnSui(input: {
     arguments: [
       tx.object(adminCapId),
       tx.object(businessAccountId),
+      tx.object(registryId),
       tx.pure.u8(riskScore),
     ],
   });

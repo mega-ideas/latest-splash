@@ -672,7 +672,9 @@ fun second_business(s: &mut Scenario): (ID, ID) {
     {
         let mut account = s.take_shared_by_id<BusinessAccount>(account2);
         let admin = business_account::admin_cap_for_testing(s.ctx());
-        business_account::verify_business(&admin, &mut account, 20);
+        let mut areg = s.take_shared<address_registry::Registry>();
+        business_account::verify_business(&admin, &mut account, &mut areg, 20);
+        ts::return_shared(areg);
         business_account::destroy_admin_cap_for_testing(admin);
         business_account::add_owner(&mut account, h::owner_2(), s.ctx());
         business_account::add_owner(&mut account, h::owner_3(), s.ctx());

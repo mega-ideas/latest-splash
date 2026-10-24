@@ -312,7 +312,9 @@ fun second_account(s: &mut Scenario): (ID, ID, address) {
     {
         let mut account = s.take_shared_by_id<BusinessAccount>(b);
         let admin = business_account::admin_cap_for_testing(s.ctx());
-        business_account::verify_business(&admin, &mut account, 20);
+        let mut areg = s.take_shared<address_registry::Registry>();
+        business_account::verify_business(&admin, &mut account, &mut areg, 20);
+        ts::return_shared(areg);
         business_account::add_owner(&mut account, h::owner_2(), s.ctx());
         business_account::add_owner(&mut account, h::owner_3(), s.ctx());
         business_account::nominate_wallet(&mut account, wallet_b, false, s.ctx());
@@ -1255,7 +1257,9 @@ fun an_admin_frozen_account_is_refused_at_create() {
     {
         let mut account = s.take_shared<BusinessAccount>();
         let admin = business_account::admin_cap_for_testing(s.ctx());
-        business_account::admin_freeze(&admin, &mut account, s.ctx());
+        let mut areg = s.take_shared<address_registry::Registry>();
+        business_account::admin_freeze(&admin, &mut account, &mut areg, s.ctx());
+        ts::return_shared(areg);
         business_account::destroy_admin_cap_for_testing(admin);
         ts::return_shared(account);
     };
@@ -1272,7 +1276,9 @@ fun an_unverified_account_is_refused_at_create() {
     {
         let mut account = s.take_shared<BusinessAccount>();
         let admin = business_account::admin_cap_for_testing(s.ctx());
-        business_account::revoke_verification(&admin, &mut account, s.ctx());
+        let mut areg = s.take_shared<address_registry::Registry>();
+        business_account::revoke_verification(&admin, &mut account, &mut areg, s.ctx());
+        ts::return_shared(areg);
         business_account::destroy_admin_cap_for_testing(admin);
         ts::return_shared(account);
     };

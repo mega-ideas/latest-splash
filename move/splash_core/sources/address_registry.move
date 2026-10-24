@@ -5,12 +5,17 @@
 /// from where the money goes, not taken from what the intent declares. Two
 /// registries classify addresses:
 ///
-///   * business wallets: every account's current business wallet, written by
-///     `business_account::register_wallet` and by a confirmed rotation
-///     (`confirm_wallet_rotation`), which clears the old wallet. Nothing else
-///     writes it. A payment to one declared a Splash business, a wallet or
-///     an exchange is a Splash-business payment, free inside the network; a
-///     declared bank payout to one is refused at settlement.
+///   * business wallets: the current business wallet of every account that
+///     is inside the network, meaning Splash has verified it (KYB) and
+///     compliance has not frozen it. Written only by `business_account`:
+///     `register_wallet` and a confirmed rotation (`confirm_wallet_rotation`,
+///     which clears the old wallet) for a verified account;
+///     `verify_business` and `admin_unfreeze`, which enter an existing
+///     wallet; `revoke_verification` and `admin_freeze`, which clear it. An
+///     unverified account's wallet is an ordinary address. A payment to a
+///     business wallet declared a Splash business, a wallet or an exchange
+///     is a Splash-business payment, free inside the network; a declared
+///     bank payout to one is refused at settlement.
 ///   * partner deposit addresses: the payout partners' fixed deposit
 ///     addresses, managed by Splash's ops capability (`OpsCap`). A change
 ///     takes effect at once and emits an event. `derive_kind` classifies a
@@ -55,8 +60,9 @@ const E_INVALID_ADDRESS: u64 = 1403;
 
 public struct Registry has key {
     id: UID,
-    /// Each address that is some account's current business wallet, with the
-    /// number of accounts it is the wallet of (one, in practice).
+    /// Each address that is the current business wallet of some account
+    /// inside the network, with the number of such accounts (one, in
+    /// practice).
     business_wallets: Table<address, u64>,
     /// The payout partners' deposit addresses.
     partner_addresses: Table<address, bool>,
@@ -138,7 +144,7 @@ public fun remove_partner_address(_: &OpsCap, reg: &mut Registry, partner_addres
 
 // ─── Business wallets: written only by business_account ────────────────────
 
-/// `wallet` became an account's business wallet.
+/// `wallet` became the business wallet of an account inside the network.
 public(package) fun add_business_wallet(reg: &mut Registry, wallet: address) {
     if (reg.business_wallets.contains(wallet)) {
         let n = reg.business_wallets.borrow_mut(wallet);
@@ -148,9 +154,10 @@ public(package) fun add_business_wallet(reg: &mut Registry, wallet: address) {
     }
 }
 
-/// `wallet` stopped being an account's business wallet. An address not in
-/// the registry is left alone rather than aborting, so a rotation can never
-/// be blocked here.
+/// `wallet` stopped being the business wallet of an account inside the
+/// network. An address not in the registry is left alone rather than
+/// aborting, so a rotation, a revocation or a freeze can never be blocked
+/// here.
 public(package) fun remove_business_wallet(reg: &mut Registry, wallet: address) {
     if (!reg.business_wallets.contains(wallet)) return;
     let n = *reg.business_wallets.borrow(wallet);

@@ -165,7 +165,9 @@ fun admin_freeze(s: &mut Scenario) {
     s.next_tx(GOVERNANCE);
     let mut account = s.take_shared<BusinessAccount>();
     let admin = business_account::admin_cap_for_testing(s.ctx());
-    business_account::admin_freeze(&admin, &mut account, s.ctx());
+    let mut areg = s.take_shared<address_registry::Registry>();
+    business_account::admin_freeze(&admin, &mut account, &mut areg, s.ctx());
+    ts::return_shared(areg);
     business_account::destroy_admin_cap_for_testing(admin);
     ts::return_shared(account);
 }
@@ -174,7 +176,9 @@ fun admin_unfreeze(s: &mut Scenario) {
     s.next_tx(GOVERNANCE);
     let mut account = s.take_shared<BusinessAccount>();
     let admin = business_account::admin_cap_for_testing(s.ctx());
-    business_account::admin_unfreeze(&admin, &mut account, s.ctx());
+    let mut areg = s.take_shared<address_registry::Registry>();
+    business_account::admin_unfreeze(&admin, &mut account, &mut areg, s.ctx());
+    ts::return_shared(areg);
     business_account::destroy_admin_cap_for_testing(admin);
     ts::return_shared(account);
 }

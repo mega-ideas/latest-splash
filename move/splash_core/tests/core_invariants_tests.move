@@ -13,6 +13,7 @@
 #[test_only]
 module splash_core::core_invariants_tests;
 
+use splash_core::address_registry;
 use splash_core::audit_anchor;
 use splash_core::business_account::{Self, BusinessAccount};
 use splash_core::cap_registry;
@@ -271,21 +272,23 @@ fun verification_can_be_revoked_and_regranted() {
         let mut account = scenario.take_shared<business_account::BusinessAccount>();
         let ctx = scenario.ctx();
         let admin = business_account::admin_cap_for_testing(ctx);
+        let mut areg = address_registry::new_for_testing(ctx);
 
-        business_account::verify_business(&admin, &mut account, 20);
+        business_account::verify_business(&admin, &mut account, &mut areg, 20);
         assert_eq!(business_account::is_verified(&account), true);
 
-        business_account::revoke_verification(&admin, &mut account, ctx);
+        business_account::revoke_verification(&admin, &mut account, &mut areg, ctx);
         assert_eq!(business_account::is_verified(&account), false);
         // The stale score goes too — leaving it invites a later reader to treat
         // an unverified account as still assessed.
         assert_eq!(business_account::risk_score(&account), 0);
 
         // And the account can be re-verified after remediation.
-        business_account::verify_business(&admin, &mut account, 35);
+        business_account::verify_business(&admin, &mut account, &mut areg, 35);
         assert_eq!(business_account::is_verified(&account), true);
         assert_eq!(business_account::risk_score(&account), 35);
 
+        address_registry::destroy_for_testing(areg);
         business_account::destroy_admin_cap_for_testing(admin);
         test_scenario::return_shared(account);
     };
@@ -309,7 +312,9 @@ fun revoking_an_unverified_account_aborts() {
         let mut account = scenario.take_shared<business_account::BusinessAccount>();
         let ctx = scenario.ctx();
         let admin = business_account::admin_cap_for_testing(ctx);
-        business_account::revoke_verification(&admin, &mut account, ctx);
+        let mut areg = address_registry::new_for_testing(ctx);
+        business_account::revoke_verification(&admin, &mut account, &mut areg, ctx);
+        address_registry::destroy_for_testing(areg);
         business_account::destroy_admin_cap_for_testing(admin);
         test_scenario::return_shared(account);
     };
@@ -376,7 +381,9 @@ fun business_is_unverified_until_admin_verifies() {
 
         let ctx = scenario.ctx();
         let admin = business_account::admin_cap_for_testing(ctx);
-        business_account::verify_business(&admin, &mut account, 20);
+        let mut areg = address_registry::new_for_testing(ctx);
+        business_account::verify_business(&admin, &mut account, &mut areg, 20);
+        address_registry::destroy_for_testing(areg);
         assert_eq!(business_account::is_verified(&account), true);
         assert_eq!(business_account::risk_score(&account), 20);
 

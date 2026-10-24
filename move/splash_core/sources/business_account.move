@@ -541,10 +541,15 @@ public fun submit_application(
 
 // ─── KYB ───────────────────────────────────────────────────────────────────
 
-public fun verify_business(_: &AdminCap, account: &mut BusinessAccount, risk_score: u8) {
+///
+/// An account that already has a business wallet, and that compliance has
+/// not frozen, enters it in the business-wallet registry here (A1 §2.3): a
+/// payment to it is free inside the network from now on.
+public fun verify_business(_: &AdminCap, account: &mut BusinessAccount, registry: &mut Registry, risk_score: u8) {
     assert!(!account.is_verified, E_ALREADY_VERIFIED);
     account.is_verified = true;
     account.risk_score = risk_score;
+    join_network(account, registry);
 
     event::emit(BusinessVerified {
         business_account_id: object::uid_to_address(&account.id),
@@ -562,8 +567,13 @@ public fun verify_business(_: &AdminCap, account: &mut BusinessAccount, risk_sco
 /// unverified account invites a later reader to treat it as still assessed —
 /// and bumps the authority epoch, so approvals already in flight against this
 /// account die with the verification rather than settling after it.
-public fun revoke_verification(_: &AdminCap, account: &mut BusinessAccount, ctx: &TxContext) {
+///
+/// The business wallet leaves the business-wallet registry (A1 §2.3): an
+/// account Splash no longer verifies is not inside the network, so a payment
+/// to its wallet is charged as an ordinary wallet payment.
+public fun revoke_verification(_: &AdminCap, account: &mut BusinessAccount, registry: &mut Registry, ctx: &TxContext) {
     assert!(account.is_verified, E_NOT_VERIFIED_YET);
+    leave_network(account, registry);
     account.is_verified = false;
     account.risk_score = 0;
     let founder = account.owner;
@@ -723,16 +733,24 @@ public fun unfreeze_account(account: &mut BusinessAccount, ctx: &TxContext) {
 
 /// Compliance stop. Separate flag, `AdminCap`-only in both directions, so an
 /// owner cannot lift it by lifting their own.
-public fun admin_freeze(_: &AdminCap, account: &mut BusinessAccount, ctx: &TxContext) {
+///
+/// While it stands, the business wallet is out of the business-wallet
+/// registry (A1 §2.3): a business compliance has stopped is not inside the
+/// network. `admin_unfreeze` puts it back. An OWNER freeze changes nothing
+/// here: it is the owners' own brake on paying out, and says nothing about
+/// whether Splash still verifies the business that is paid.
+public fun admin_freeze(_: &AdminCap, account: &mut BusinessAccount, registry: &mut Registry, ctx: &TxContext) {
     assert!(!account.admin_frozen, E_FROZEN);
+    leave_network(account, registry);
     account.admin_frozen = true;
     let founder = account.owner;
     bump(account, b"admin_freeze", founder, ctx);
 }
 
-public fun admin_unfreeze(_: &AdminCap, account: &mut BusinessAccount, ctx: &TxContext) {
+public fun admin_unfreeze(_: &AdminCap, account: &mut BusinessAccount, registry: &mut Registry, ctx: &TxContext) {
     assert!(account.admin_frozen, E_NOT_FROZEN);
     account.admin_frozen = false;
+    join_network(account, registry);
     let founder = account.owner;
     bump(account, b"admin_unfreeze", founder, ctx);
 }
@@ -902,9 +920,10 @@ public fun nominate_wallet(
 /// `threshold < 2`: weights `[2, 1, 1]` under threshold 2 are a one-person
 /// wallet as surely as a 1-of-1 is.
 ///
-/// The wallet is entered in the business-wallet registry (A1 §2.3), so a
-/// payment to it from another business is charged as a Splash-business
-/// payment: free inside the network.
+/// Once the account is verified, the wallet is in the business-wallet
+/// registry (A1 §2.3), so a payment to it from another business is charged
+/// as a Splash-business payment: free inside the network. Registering before
+/// KYB is verified enters nothing; `verify_business` enters the wallet then.
 public fun register_wallet(
     account: &mut BusinessAccount,
     registry: &mut Registry,
@@ -934,7 +953,7 @@ public fun register_wallet(
     account.single_signer = single_signer;
     account.wallet_epoch = account.wallet_epoch + 1;
     account.nominated_wallet = option::none();
-    address_registry::add_business_wallet(registry, sender);
+    join_network(account, registry);
     bump(account, b"register_wallet", sender, ctx);
 
     event::emit(WalletRegistered {
@@ -1010,8 +1029,8 @@ public fun rotate_wallet(
 /// re-propose from the new wallet. The dashboard runs that as a one-time flow.
 ///
 /// The business-wallet registry (A1 §2.3) moves with it: the old wallet is
-/// cleared and the new one entered, so the old address is charged as an
-/// ordinary wallet from now on.
+/// cleared and, if the account is verified, the new one entered, so the old
+/// address is charged as an ordinary wallet from now on.
 public fun confirm_wallet_rotation(account: &mut BusinessAccount, registry: &mut Registry, ctx: &TxContext) {
     assert!(!account.admin_frozen, E_FROZEN);
     assert!(account.pending_wallet.is_some(), E_NO_PENDING_ROTATION);
@@ -1022,13 +1041,13 @@ public fun confirm_wallet_rotation(account: &mut BusinessAccount, registry: &mut
     let PendingWallet { wallet, threshold, signers, single_signer } = account.pending_wallet.extract();
     // Checked again: an owner removed since the proposal must not become a signer.
     assert_signers_are_owners(account, &signers);
+    leave_network(account, registry);
     account.wallet = option::some(wallet);
     account.wallet_threshold = threshold;
     account.wallet_signers = signers;
     account.single_signer = single_signer;
     account.wallet_epoch = account.wallet_epoch + 1;
-    address_registry::remove_business_wallet(registry, old_wallet);
-    address_registry::add_business_wallet(registry, wallet);
+    join_network(account, registry);
     bump(account, b"rotate_wallet", wallet, ctx);
 
     event::emit(WalletRotated {
@@ -1049,6 +1068,28 @@ public fun cancel_wallet_rotation(account: &mut BusinessAccount, ctx: &TxContext
         business_account_id: object::uid_to_address(&account.id),
         cancelled_wallet: wallet,
     });
+}
+
+// ─── Inside the network (A1 §2.3) ──────────────────────────────────────────
+
+/// The account's wallet counts in the business-wallet registry: it has one,
+/// Splash has verified the business (KYB), and compliance has not frozen it.
+/// Each account adds its wallet to the registry exactly while this holds:
+/// every change to any of the three leaves the registry first
+/// (`leave_network`) and joins it after (`join_network`), so the registry's
+/// count for an address is the number of such accounts whose wallet it is.
+fun in_network(account: &BusinessAccount): bool {
+    account.wallet.is_some() && account.is_verified && !account.admin_frozen
+}
+
+/// Before a change: take this account's wallet out, if it was in.
+fun leave_network(account: &BusinessAccount, registry: &mut Registry) {
+    if (in_network(account)) address_registry::remove_business_wallet(registry, *account.wallet.borrow());
+}
+
+/// After a change: put this account's wallet in, if it now counts.
+fun join_network(account: &BusinessAccount, registry: &mut Registry) {
+    if (in_network(account)) address_registry::add_business_wallet(registry, *account.wallet.borrow());
 }
 
 /// The sender is this account's registered wallet. Returns it.

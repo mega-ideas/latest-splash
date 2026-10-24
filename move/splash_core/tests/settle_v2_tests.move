@@ -616,7 +616,9 @@ fun the_same_wallet_cannot_charge_another_account() {
     {
         let mut account_b = s.take_shared_by_id<BusinessAccount>(b);
         let admin = business_account::admin_cap_for_testing(s.ctx());
-        business_account::verify_business(&admin, &mut account_b, 20);
+        let mut areg = s.take_shared<address_registry::Registry>();
+        business_account::verify_business(&admin, &mut account_b, &mut areg, 20);
+        ts::return_shared(areg);
         business_account::add_owner(&mut account_b, h::owner_2(), s.ctx());
         business_account::add_owner(&mut account_b, h::owner_3(), s.ctx());
         business_account::nominate_wallet(&mut account_b, h::wallet(), false, s.ctx());
@@ -925,11 +927,16 @@ fun an_owner_freeze_stops_the_wallet_path() {
 fun an_admin_freeze_stops_the_balance_path() {
     let mut s = h::setup();
     open_shared(&mut s, 1, payment_intent::kind_bank_payout(), h::recipient(), h::amount());
-    tx!(&mut s, h::owner_1(), |account, _config, _c, ctx| {
-        let admin = business_account::admin_cap_for_testing(ctx);
-        business_account::admin_freeze(&admin, account, ctx);
+    s.next_tx(h::owner_1());
+    {
+        let mut account = s.take_shared<BusinessAccount>();
+        let mut areg = s.take_shared<address_registry::Registry>();
+        let admin = business_account::admin_cap_for_testing(s.ctx());
+        business_account::admin_freeze(&admin, &mut account, &mut areg, s.ctx());
         business_account::destroy_admin_cap_for_testing(admin);
-    });
+        ts::return_shared(areg);
+        ts::return_shared(account);
+    };
     pay_shared_from_balance(&mut s, h::wallet(), h::amount());
     s.end();
 }
@@ -958,11 +965,16 @@ fun an_owner_freeze_stops_the_cross_chain_path() {
 fun an_unverified_account_cannot_settle() {
     let mut s = h::setup();
     open_shared(&mut s, 1, payment_intent::kind_wallet(), SUPPLIER_WALLET, h::amount());
-    tx!(&mut s, h::owner_1(), |account, _config, _c, ctx| {
-        let admin = business_account::admin_cap_for_testing(ctx);
-        business_account::revoke_verification(&admin, account, ctx);
+    s.next_tx(h::owner_1());
+    {
+        let mut account = s.take_shared<BusinessAccount>();
+        let mut areg = s.take_shared<address_registry::Registry>();
+        let admin = business_account::admin_cap_for_testing(s.ctx());
+        business_account::revoke_verification(&admin, &mut account, &mut areg, s.ctx());
         business_account::destroy_admin_cap_for_testing(admin);
-    });
+        ts::return_shared(areg);
+        ts::return_shared(account);
+    };
     pay_shared(&mut s, h::wallet(), h::amount());
     s.end();
 }
