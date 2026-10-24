@@ -1486,10 +1486,10 @@ fun the_payer_cannot_approve_their_own_payment() {
 }
 
 #[test]
-#[expected_failure(abort_code = splash_spend::E_OWNER_APPROVAL_REQUIRED)]
+#[expected_failure(abort_code = 1024, location = splash_spend)]
 /// An owner who opened an intent above the threshold cannot get round the
-/// four-eyes rule by delegating it to the executor: a staff maker's
-/// delegation is not an owner approval.
+/// four-eyes rule by delegating it to the executor: an owner who is staff
+/// opens as staff, and staff cannot delegate at all.
 fun an_owner_maker_cannot_self_approve_by_delegating() {
     let (mut s, fx) = setup();
     let mut p = wallet_policy(&mut s, &fx);
@@ -1736,24 +1736,98 @@ fun the_executor_cannot_pay_a_wallet_intent_without_an_approval() {
 }
 
 #[test]
-/// With the staff maker's own delegation, the executor runs a payment the
-/// maker could have made alone, up to and including the threshold. The
-/// delegation names the executor and is not an owner approval.
-fun the_executor_pays_at_the_threshold_with_the_makers_delegation() {
+#[expected_failure(abort_code = 1024, location = splash_spend)]
+/// Review A3: a staff maker cannot hand their own payment to the executor,
+/// even one they could have made alone. The executor pays from its own
+/// allowance, so a staff delegation would let the staff member spend past
+/// their own rule's caps, expiry and revocation.
+fun a_staff_maker_cannot_delegate_their_payment_to_the_executor() {
     let (mut s, fx) = setup();
     let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, THRESHOLD);
     delegate(&mut s, &fx, STAFF, intent, EXECUTOR);
-    s.next_tx(EXECUTOR);
+    s.end();
+}
+
+/// A staff member with a 1,000 USDC rule for life, and a ceiling to match.
+const TINY: address = @0x71AE;
+const TINY_CAP: u256 = 1_000_000_000;
+const TINY_PAY: u64 = 1_000_000_000;
+
+/// The wallet lists TINY as staff and grants TINY's own rule.
+fun add_tiny(s: &mut Scenario, fx: &Fx): ID {
+    let mut p = wallet_policy(s, fx);
+    p.add_spender(TINY, spend_policy::role_staff(), TINY_PAY, s.ctx());
+    ts::return_shared(p);
+    grant(s, fx.policy, TINY, TINY_CAP)
+}
+
+/// What allowance `alw` has spent so far.
+fun alw_spend(s: &mut Scenario, alw: ID): u256 {
+    s.next_tx(STRANGER);
+    let a = s.take_shared_by_id<Allowance<Balance<USDC>>>(alw);
+    let v = allowance::allowance_current_spend(&a);
+    ts::return_shared(a);
+    v
+}
+
+#[test]
+#[expected_failure(abort_code = sui::allowance::EExceedsLifetimeCap)]
+/// The control for the next test: TINY cannot pay a second 1,000 USDC under
+/// its own 1,000 USDC rule.
+fun a_staff_member_cannot_pay_past_their_own_lifetime_cap() {
+    let (mut s, fx) = setup();
+    let tiny = add_tiny(&mut s, &fx);
+    let first = open(&mut s, &fx, TINY, 41, payment_intent::kind_wallet(), SUPPLIER, TINY_PAY);
+    pay(&mut s, &fx, TINY, tiny, first, false);
+    let second = open(&mut s, &fx, TINY, 42, payment_intent::kind_wallet(), SUPPLIER, TINY_PAY);
+    pay(&mut s, &fx, TINY, tiny, second, false);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 1024, location = splash_spend)]
+/// Review A3, the reviewer's proof: with its own rule used up, TINY opened
+/// another payment and handed it to the executor, which paid it from ITS
+/// allowance, five times over. TINY's rule was never charged. Now the
+/// hand-over itself is refused.
+fun a_staff_member_cannot_pay_past_their_own_cap_through_the_executor() {
+    let (mut s, fx) = setup();
+    let tiny = add_tiny(&mut s, &fx);
+    let first = open(&mut s, &fx, TINY, 41, payment_intent::kind_wallet(), SUPPLIER, TINY_PAY);
+    pay(&mut s, &fx, TINY, tiny, first, false);
+    assert_eq!(alw_spend(&mut s, tiny), TINY_CAP);
+    let next = open(&mut s, &fx, TINY, 50, payment_intent::kind_wallet(), SUPPLIER, TINY_PAY);
+    delegate(&mut s, &fx, TINY, next, EXECUTOR);
+    pay(&mut s, &fx, EXECUTOR, fx.executor, next, true);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 1024, location = splash_spend)]
+/// Review A3: the owners revoke JUNIOR's rule (D2's "revoke the allowance"),
+/// but JUNIOR is still listed as staff. JUNIOR must not keep paying by
+/// handing each payment to the executor.
+fun a_staff_member_whose_rule_is_revoked_cannot_pay_through_the_executor() {
+    let (mut s, fx) = setup();
+    s.next_tx(h::wallet());
     {
-        let approval = s.take_from_sender<PayoutApproval>();
-        assert_eq!(splash_spend::approval_payer(&approval), EXECUTOR);
-        assert_eq!(splash_spend::approval_approver(&approval), STAFF);
-        assert!(!splash_spend::approval_is_owner_approval(&approval));
-        pay_in_tx(&mut s, fx.account, fx.policy, fx.executor, intent, option::some(approval));
+        let ids = ts::ids_for_sender<allowance::AllowanceCap<Balance<USDC>>>(&s);
+        let mut found = false;
+        ids.do!(|id| {
+            let cap = s.take_from_sender_by_id<allowance::AllowanceCap<Balance<USDC>>>(id);
+            if (!found && allowance::allowance_cap_allowance(&cap) == fx.junior) {
+                found = true;
+                let alw = s.take_shared_by_id<Allowance<Balance<USDC>>>(fx.junior);
+                allowance::revoke(cap, alw);
+            } else {
+                s.return_to_sender(cap);
+            };
+        });
+        assert!(found);
     };
-    s.next_tx(EXECUTOR);
-    assert!(ts::ids_for_address<PayoutApproval>(EXECUTOR).is_empty());
-    assert_eq!(coin_received(&mut s, SUPPLIER), THRESHOLD);
+    let intent = open(&mut s, &fx, JUNIOR, 60, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    delegate(&mut s, &fx, JUNIOR, intent, EXECUTOR);
+    pay(&mut s, &fx, EXECUTOR, fx.executor, intent, true);
     s.end();
 }
 
@@ -1800,8 +1874,9 @@ fun the_wallets_delegation_counts_as_an_owner_approval() {
 }
 
 #[test]
-#[expected_failure(abort_code = splash_spend::E_NOT_THE_MAKER)]
-/// Only the intent's maker can delegate it. Another staff member cannot.
+#[expected_failure(abort_code = 1024, location = splash_spend)]
+/// Only the wallet delegates. Another staff member cannot delegate an
+/// intent either.
 fun another_staff_member_cannot_delegate_an_intent() {
     let (mut s, fx) = setup();
     let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
@@ -1810,7 +1885,7 @@ fun another_staff_member_cannot_delegate_an_intent() {
 }
 
 #[test]
-#[expected_failure(abort_code = splash_spend::E_NOT_THE_MAKER)]
+#[expected_failure(abort_code = 1024, location = splash_spend)]
 /// Nor can staff delegate an intent the wallet opened, which would turn a
 /// staff key into the owners' approval.
 fun staff_cannot_delegate_an_intent_the_wallet_opened() {
