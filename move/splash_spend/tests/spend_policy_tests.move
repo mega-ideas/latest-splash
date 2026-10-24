@@ -481,14 +481,15 @@ fun default_second_approval_threshold_is_ten_thousand_usdc() {
 /// never read back from core's mutable state.
 fun owners_come_from_the_wallet_keys_not_from_the_account() {
     let mut s = begin();
-    s.next_tx(h::owner_1());
+    // Once the wallet is registered, the wallet adds owners.
+    s.next_tx(h::wallet());
     {
         let mut account = s.take_shared<BusinessAccount>();
         business_account::add_owner(&mut account, FOURTH_OWNER, s.ctx());
         ts::return_shared(account);
     };
     let id = create(&mut s);
-    s.next_tx(h::owner_1());
+    s.next_tx(h::wallet());
     {
         let mut account = s.take_shared<BusinessAccount>();
         business_account::add_owner(&mut account, STRANGER, s.ctx());

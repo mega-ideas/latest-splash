@@ -176,15 +176,21 @@ fun admin_unfreeze(s: &mut Scenario) {
     ts::return_shared(account);
 }
 
-/// The founder adds `who` as an owner.
+/// Adds `who` as an owner: the founder before the business wallet registers,
+/// the wallet once it has, since from then on the wallet governs membership.
 fun add_owner(s: &mut Scenario, who: address) {
-    s.next_tx(h::founder());
+    let account = take(s);
+    let by = if (business_account::has_wallet(&account)) business_account::wallet(&account)
+    else h::founder();
+    ts::return_shared(account);
+    s.next_tx(by);
     let mut account = s.take_shared<BusinessAccount>();
     business_account::add_owner(&mut account, who, s.ctx());
     ts::return_shared(account);
 }
 
-/// The founder adds `who` as a legacy approver.
+/// The founder adds `who` as a legacy approver. Only before the wallet
+/// registers: after, the legacy approver set is closed.
 fun add_approver(s: &mut Scenario, who: address) {
     s.next_tx(h::founder());
     let mut account = s.take_shared<BusinessAccount>();
@@ -837,8 +843,9 @@ fun a_stranger_cannot_rotate() {
 #[expected_failure(abort_code = business_account::E_NOT_THE_WALLET)]
 /// A legacy approver has no rotation path.
 fun an_approver_cannot_rotate() {
-    let mut s = h::setup();
+    let mut s = h::setup_without_wallet();
     add_approver(&mut s, APPROVER);
+    h::register_wallet(&mut s);
     rotate(&mut s, APPROVER, b_keys(), b_weights(), b_threshold(), false);
     s.end();
 }
@@ -1380,8 +1387,9 @@ fun after_registration_a_stranger_cannot_unfreeze() {
 #[expected_failure(abort_code = business_account::E_WALLET_MUST_UNFREEZE)]
 /// Nor a legacy approver.
 fun after_registration_an_approver_cannot_unfreeze() {
-    let mut s = h::setup();
+    let mut s = h::setup_without_wallet();
     add_approver(&mut s, APPROVER);
+    h::register_wallet(&mut s);
     freeze_as(&mut s, h::owner_3());
     unfreeze_as(&mut s, APPROVER);
     s.end();
@@ -1488,12 +1496,12 @@ fun the_current_wallet_unfreezes_while_a_rotation_is_pending() {
 
 #[test]
 #[expected_failure(abort_code = business_account::E_OWNER_IS_A_SIGNER)]
-/// A member of the business wallet cannot be removed as an owner. If they
-/// could, the wallet would keep a signer who no longer belongs to the
-/// business; they are rotated out of the wallet first.
+/// A member of the business wallet cannot be removed as an owner, not even by
+/// the wallet. If they could, the wallet would keep a signer who no longer
+/// belongs to the business; they are rotated out of the wallet first.
 fun a_wallet_signer_cannot_be_removed_as_an_owner() {
     let mut s = h::setup();
-    s.next_tx(h::founder());
+    s.next_tx(h::wallet());
     {
         let mut account = s.take_shared<BusinessAccount>();
         business_account::remove_owner(&mut account, h::owner_3(), s.ctx());
@@ -1504,7 +1512,7 @@ fun a_wallet_signer_cannot_be_removed_as_an_owner() {
 
 #[test]
 /// Rotated out of the wallet (to a 2-of-2 of owners 1 and 2), owner 3 can be
-/// removed as an owner.
+/// removed as an owner, by the new wallet.
 fun after_rotating_them_out_a_former_signer_can_be_removed() {
     let mut s = h::setup();
     let keys = vector[h::passkey(0), h::passkey(1)];
@@ -1521,7 +1529,7 @@ fun after_rotating_them_out_a_former_signer_can_be_removed() {
         business_account::confirm_wallet_rotation(&mut account, s.ctx());
         ts::return_shared(account);
     };
-    s.next_tx(h::founder());
+    s.next_tx(b);
     {
         let mut account = s.take_shared<BusinessAccount>();
         business_account::remove_owner(&mut account, h::owner_3(), s.ctx());
@@ -1537,7 +1545,7 @@ fun after_rotating_them_out_a_former_signer_can_be_removed() {
 /// removed: confirming would then make a non-owner a signer.
 fun a_member_of_a_pending_rotation_cannot_be_removed() {
     let mut s = h::setup();
-    s.next_tx(h::founder());
+    s.next_tx(h::wallet());
     {
         let mut account = s.take_shared<BusinessAccount>();
         business_account::add_owner(&mut account, ED25519_ADDRESS, s.ctx());
@@ -1549,7 +1557,7 @@ fun a_member_of_a_pending_rotation_cannot_be_removed() {
         business_account::rotate_wallet(&mut account, vector[h::passkey(0), ED25519], vector[1, 1], 2, false, s.ctx());
         ts::return_shared(account);
     };
-    s.next_tx(h::founder());
+    s.next_tx(h::wallet());
     {
         let mut account = s.take_shared<BusinessAccount>();
         business_account::remove_owner(&mut account, ED25519_ADDRESS, s.ctx());
