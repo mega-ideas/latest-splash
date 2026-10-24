@@ -228,24 +228,40 @@ export type FeeBreakdownRow = {
   amount: string;
 };
 
-const BASIS_NOTE: Record<FeeQuoteWire['splashFee']['basis'], string | null> = {
-  rate: null,
-  minimum: 'minimum applies',
-  maximum: 'maximum applies',
-  ceiling: 'capped at the 1% ceiling',
-  off: null,
-};
+/** The ceiling as a reader says it: "1%". */
+const CEILING_WORDS = `${formatRate(FEE_CEILING_BPS).replace(/\.00%$/, '%')}`;
+
+/**
+ * What set Splash's fee, in words (the A1 review). Only the bound that set it
+ * is named: the tier's rate ("0.20%"), the kind's minimum or maximum, which
+ * is then the fee itself ("minimum 0.25 USDC"), or the ceiling, which only
+ * ever lowers a minimum above 1% of the amount ("1% ceiling, lower than the
+ * minimum"). A rate the minimum or maximum overrode is not shown beside a
+ * fee it did not set.
+ */
+function basisWords(s: FeeQuoteWire['splashFee']): string {
+  switch (s.basis) {
+    case 'minimum':
+      return `minimum ${formatUsdcBound(BigInt(s.minor))} USDC`;
+    case 'maximum':
+      return `maximum ${formatUsdcBound(BigInt(s.minor))} USDC`;
+    case 'ceiling':
+      return `${CEILING_WORDS} ceiling, lower than the minimum`;
+    default:
+      return formatRate(BigInt(s.bps));
+  }
+}
 
 /**
  * The lines a fee breakdown shows, the same on every surface: Splash's fee
- * with its kind, tier and rate; the payout partner's or Circle's fee with
- * its source; the total debited. While the fees are off Splash's line says
- * so and shows 0.
+ * with its kind, tier and the bound that set it; the payout partner's or
+ * Circle's fee with its source; the total debited. While the fees are off
+ * Splash's line says so and shows 0.
  */
 export function feeBreakdownRows(q: FeeQuoteWire): FeeBreakdownRow[] {
   const s = q.splashFee;
   const detail = q.feesOn
-    ? [s.kindLabel, s.tierLabel, formatRate(BigInt(s.bps)), BASIS_NOTE[s.basis]].filter(Boolean).join(' · ')
+    ? [s.kindLabel, s.tierLabel, basisWords(s)].join(' · ')
     : `${s.kindLabel} · Splash's fee is not charged yet`;
   const rows: FeeBreakdownRow[] = [{ key: 'splash', label: 'Splash fee', detail, amount: `${formatUsdc(BigInt(s.minor))} USDC` }];
   // A partner's or Circle's fee is theirs: it comes out of what they pay out
