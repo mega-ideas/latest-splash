@@ -479,6 +479,10 @@ test('the verify script checks D11 end state with the v2 ids, and reports an uns
   const untyped = byCheck(await checkUpgradeWrapper(node, wrapperInput({ delayPackageId: '' })));
   assert.equal(untyped['Upgrade wrapper'].status, 'SKIP', 'the wrapper is not passed without the canonical package to pin its type to');
   assert.match(untyped['Upgrade wrapper'].detail, /SPLASH_UPGRADE_DELAY_PACKAGE_ID/);
+  // Untyped, the object may be a look-alike from any package, so who holds it
+  // is not passed either.
+  assert.equal(untyped['Upgrade wrapper owner'].status, 'SKIP', 'the owner of an unpinned wrapper is not passed');
+  assert.match(untyped['Upgrade wrapper owner'].detail, /SPLASH_UPGRADE_DELAY_PACKAGE_ID/);
 });
 
 test("the testnet run's packages and wrapper pass the end-state checks", async () => {
