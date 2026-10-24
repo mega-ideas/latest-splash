@@ -189,26 +189,6 @@ fun remove_by_admin(s: &mut Scenario, registry: u8, type_name: String) {
     ts::return_shared(config);
 }
 
-fun disable_by_compliance(s: &mut Scenario) {
-    s.next_tx(h::owner_1());
-    let mut config = s.take_shared<ComplianceConfig>();
-    let cap = s.take_from_sender<ComplianceCap>();
-    let caps = s.take_shared<CapRegistry>();
-    compliance_config::disable_legacy(&mut config, &cap, &caps);
-    ts::return_shared(caps);
-    s.return_to_sender(cap);
-    ts::return_shared(config);
-}
-
-fun disable_by_admin(s: &mut Scenario) {
-    s.next_tx(h::owner_1());
-    let mut config = s.take_shared<ComplianceConfig>();
-    let admin = business_account::admin_cap_for_testing(s.ctx());
-    compliance_config::admin_disable_legacy(&admin, &mut config);
-    business_account::destroy_admin_cap_for_testing(admin);
-    ts::return_shared(config);
-}
-
 /// Break-glass the compliance cap: owner 1's cap dies, `NEW_HOLDER` gets the
 /// replacement.
 fun revoke_compliance_cap(s: &mut Scenario) {
@@ -289,14 +269,6 @@ fun pending(s: &mut Scenario): vector<PendingAddition> {
     v
 }
 
-fun legacy(s: &mut Scenario): bool {
-    s.next_tx(h::owner_1());
-    let config = s.take_shared<ComplianceConfig>();
-    let v = compliance_config::legacy_enabled(&config);
-    ts::return_shared(config);
-    v
-}
-
 /// BCS of `{ config_id, registry, type_name }`: the shape of the Activated,
 /// Cancelled and EntryRemoved events.
 fun entry_bcs(config_id: address, registry: u8, type_name: String): vector<u8> {
@@ -312,31 +284,6 @@ fun proposed_bcs(config_id: address, registry: u8, type_name: String, at: u64, e
     b.append(bcs::to_bytes(&at));
     b.append(bcs::to_bytes(&eta));
     b
-}
-
-/// The founder opens an intent on the legacy path (account with no wallet).
-fun legacy_create(s: &mut Scenario) {
-    s.next_tx(h::founder());
-    let account = s.take_shared<BusinessAccount>();
-    let config = s.take_shared<ComplianceConfig>();
-    let c = s.take_shared<Clock>();
-    payment_intent::create_payment_intent_for_account<USDC>(
-        &account,
-        &config,
-        h::recipient(),
-        h::amount(),
-        b"PHP".to_string(),
-        56_000_000,
-        h::commitment(),
-        payment_intent::kind_bank_payout(),
-        h::rail(),
-        c.timestamp_ms() + 300_000,
-        &c,
-        s.ctx(),
-    );
-    ts::return_shared(c);
-    ts::return_shared(config);
-    ts::return_shared(account);
 }
 
 /// The app opens a bank payout for owner 2, vouched for by `SpendWitness`.
@@ -470,8 +417,8 @@ fun create_consumes_the_only_ticket() {
 
 #[test]
 /// `create<T>` seeds the accepted-asset registry with exactly `T` and nothing
-/// else; the app and adapter registries and the pending list start empty, the
-/// legacy switch starts on, and settlement is not paused.
+/// else; the app and adapter registries and the pending list start empty,
+/// and settlement is not paused.
 fun create_seeds_accepted_assets_with_exactly_t() {
     let mut s = h::setup();
     s.next_tx(h::owner_1());
@@ -480,7 +427,6 @@ fun create_seeds_accepted_assets_with_exactly_t() {
     assert_eq!(compliance_config::settlement_apps(&config), vector[]);
     assert_eq!(compliance_config::bridge_adapters(&config), vector[]);
     assert_eq!(compliance_config::pending_additions(&config).length(), 0);
-    assert_eq!(compliance_config::legacy_enabled(&config), true);
     assert_eq!(compliance_config::paused(&config), false);
     assert!(compliance_config::is_asset_accepted(&config, &name<USDC>()));
     assert!(!compliance_config::is_asset_accepted(&config, &name<EURC>()));
@@ -1448,179 +1394,5 @@ fun re_adding_a_removed_entry_takes_the_full_notice() {
     // `add` activated at ETA, so this proposal was made at ETA.
     set_time(&mut s, ETA + NOTICE - 1);
     activate<SpendWitness>(&mut s, app());
-    s.end();
-}
-
-// ═══ The legacy switch ══════════════════════════════════════════════════════
-
-#[test]
-/// The legacy approval path starts on, and the legacy create path works on
-/// an account that has not registered a wallet.
-fun legacy_starts_enabled() {
-    let mut s = h::setup_without_wallet();
-    assert_eq!(legacy(&mut s), true);
-    s.next_tx(h::owner_1());
-    let config = s.take_shared<ComplianceConfig>();
-    compliance_config::assert_legacy_enabled(&config);
-    ts::return_shared(config);
-    legacy_create(&mut s);
-    s.next_tx(h::owner_1());
-    assert!(ts::has_most_recent_shared<PaymentIntent>());
-    s.end();
-}
-
-#[test]
-/// The compliance key turns legacy off. It is subtractive, so it needs no
-/// cold multisig.
-fun compliance_cap_disables_legacy() {
-    let mut s = h::setup_without_wallet();
-    disable_by_compliance(&mut s);
-    assert_eq!(legacy(&mut s), false);
-    s.end();
-}
-
-#[test]
-/// The cold multisig turns legacy off too.
-fun admin_cap_disables_legacy() {
-    let mut s = h::setup_without_wallet();
-    disable_by_admin(&mut s);
-    assert_eq!(legacy(&mut s), false);
-    s.end();
-}
-
-#[test]
-#[expected_failure(abort_code = compliance_config::E_LEGACY_DISABLED)]
-/// Once off, the guard aborts.
-fun the_guard_refuses_once_legacy_is_off() {
-    let mut s = h::setup_without_wallet();
-    disable_by_compliance(&mut s);
-    s.next_tx(h::owner_1());
-    let config = s.take_shared<ComplianceConfig>();
-    compliance_config::assert_legacy_enabled(&config);
-    ts::return_shared(config);
-    s.end();
-}
-
-#[test]
-#[expected_failure(abort_code = compliance_config::E_LEGACY_DISABLED)]
-/// And the legacy create path stops, even for an account that never migrated.
-fun the_legacy_path_stops_once_admin_disables_it() {
-    let mut s = h::setup_without_wallet();
-    disable_by_admin(&mut s);
-    legacy_create(&mut s);
-    s.end();
-}
-
-#[test]
-/// Nothing turns legacy back on. After it is off, every power the cold
-/// multisig holds over the config (unpause, loosen parameters, add a venue,
-/// add and remove registry entries, cancel) and a second disable by either
-/// cap leave it off.
-fun nothing_turns_legacy_back_on() {
-    let mut s = h::setup_without_wallet();
-    disable_by_compliance(&mut s);
-
-    s.next_tx(h::owner_1());
-    {
-        let mut config = s.take_shared<ComplianceConfig>();
-        let admin = business_account::admin_cap_for_testing(s.ctx());
-        compliance_config::admin_set_paused(&admin, &mut config, true);
-        compliance_config::admin_set_paused(&admin, &mut config, false);
-        compliance_config::admin_set_parameters(&admin, &mut config, 10_000, 600_000, 1_000, 1, 1);
-        compliance_config::admin_allow_pool(&admin, &mut config, object::id_from_address(@0xF002));
-        compliance_config::admin_disable_legacy(&admin, &mut config);
-        assert_eq!(compliance_config::legacy_enabled(&config), false);
-        business_account::destroy_admin_cap_for_testing(admin);
-        ts::return_shared(config);
-    };
-    disable_by_compliance(&mut s);
-    add<EURC>(&mut s, asset());
-    remove_by_admin(&mut s, asset(), name<EURC>());
-    propose<SpendWitness>(&mut s, app());
-    cancel_by_admin(&mut s, app(), name<SpendWitness>());
-    assert_eq!(legacy(&mut s), false);
-    s.end();
-}
-
-#[test]
-/// Switching legacy off says so on the event stream. ComplianceConfigUpdated
-/// carries no field for the switch, so it reads the same before and after;
-/// a second event, `LegacyDisabled`, marks the one-way change. The switch is
-/// idempotent and marks it once: a second call by either cap emits no
-/// second `LegacyDisabled`.
-fun switching_legacy_off_emits_its_own_event_once() {
-    let mut s = h::setup_without_wallet();
-    s.next_tx(h::owner_1());
-    {
-        let mut config = s.take_shared<ComplianceConfig>();
-        let cap = s.take_from_sender<ComplianceCap>();
-        let caps = s.take_shared<CapRegistry>();
-        compliance_config::disable_legacy(&mut config, &cap, &caps);
-        assert_eq!(event::events_by_type<compliance_config::ComplianceConfigUpdated>().length(), 1);
-        assert_eq!(event::num_events(), 2);
-        ts::return_shared(caps);
-        s.return_to_sender(cap);
-        ts::return_shared(config);
-    };
-    s.next_tx(h::owner_1());
-    {
-        let mut config = s.take_shared<ComplianceConfig>();
-        let cap = s.take_from_sender<ComplianceCap>();
-        let caps = s.take_shared<CapRegistry>();
-        compliance_config::disable_legacy(&mut config, &cap, &caps);
-        let admin = business_account::admin_cap_for_testing(s.ctx());
-        compliance_config::admin_disable_legacy(&admin, &mut config);
-        business_account::destroy_admin_cap_for_testing(admin);
-        // Only the two ComplianceConfigUpdated: nothing changed.
-        assert_eq!(event::num_events(), 2);
-        assert!(!compliance_config::legacy_enabled(&config));
-        ts::return_shared(caps);
-        s.return_to_sender(cap);
-        ts::return_shared(config);
-    };
-    s.end();
-}
-
-#[test]
-/// The cold multisig's switch marks it the same way.
-fun the_admin_switching_legacy_off_emits_its_own_event() {
-    let mut s = h::setup_without_wallet();
-    s.next_tx(h::owner_1());
-    {
-        let mut config = s.take_shared<ComplianceConfig>();
-        let admin = business_account::admin_cap_for_testing(s.ctx());
-        compliance_config::admin_disable_legacy(&admin, &mut config);
-        assert_eq!(event::events_by_type<compliance_config::ComplianceConfigUpdated>().length(), 1);
-        assert_eq!(event::num_events(), 2);
-        business_account::destroy_admin_cap_for_testing(admin);
-        ts::return_shared(config);
-    };
-    s.end();
-}
-
-#[test]
-#[expected_failure(abort_code = cap_registry::E_STALE_GENERATION)]
-/// A revoked compliance key cannot flip the switch.
-fun a_revoked_compliance_cap_cannot_disable_legacy() {
-    let mut s = h::setup_without_wallet();
-    revoke_compliance_cap(&mut s);
-    disable_by_compliance(&mut s);
-    s.end();
-}
-
-#[test]
-#[expected_failure(abort_code = compliance_config::E_INVALID_CAP)]
-/// A compliance key bound to another config cannot flip this one's switch.
-fun a_cap_for_another_config_cannot_disable_legacy() {
-    let mut s = h::setup_without_wallet();
-    let canonical = second_config(&mut s);
-    s.next_tx(STRANGER);
-    let mut config = s.take_shared_by_id<ComplianceConfig>(canonical);
-    let cap = s.take_from_sender<ComplianceCap>();
-    let caps = s.take_shared<CapRegistry>();
-    compliance_config::disable_legacy(&mut config, &cap, &caps);
-    ts::return_shared(caps);
-    s.return_to_sender(cap);
-    ts::return_shared(config);
     s.end();
 }

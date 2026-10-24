@@ -450,26 +450,11 @@ fun a_stranger_cannot_pay_from_the_balance_path() {
 #[test]
 #[expected_failure(abort_code = business_account::E_NO_WALLET)]
 /// An account that has not registered a wallet has no wallet path at all:
-/// a legacy intent on it cannot be paid by anyone claiming to be the wallet.
+/// nothing can be opened in its name by anyone claiming to be the wallet,
+/// and with the legacy create gone there is no other way to open one.
 fun an_account_without_a_wallet_has_no_wallet_path() {
     let mut s = h::setup_without_wallet();
-    tx!(&mut s, h::founder(), |account, config, c, ctx| {
-        payment_intent::create_payment_intent_for_account<USDC>(
-            account,
-            config,
-            h::recipient(),
-            h::amount(),
-            b"PHP".to_string(),
-            56_000_000,
-            h::commitment(),
-            payment_intent::kind_bank_payout(),
-            h::rail(),
-            c.timestamp_ms() + QUOTE_MS,
-            c,
-            ctx,
-        );
-    });
-    pay_shared(&mut s, h::wallet(), h::amount());
+    open_shared(&mut s, 1, payment_intent::kind_bank_payout(), h::recipient(), h::amount());
     s.end();
 }
 

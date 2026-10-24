@@ -368,10 +368,11 @@ fun business_is_unverified_until_admin_verifies() {
         let mut account = scenario.take_shared<business_account::BusinessAccount>();
         assert_eq!(business_account::is_verified(&account), false);
         assert_eq!(business_account::owner(&account), SENDER);
-        // The founder is an owner. They are NOT an approver — an account that
-        // arrives able to approve its own payouts has no four-eyes rule.
+        // The founder is an owner, and the only one. No business wallet yet,
+        // so nothing can be paid from the account until the owners register one.
         assert_eq!(business_account::is_owner(&account, SENDER), true);
-        assert_eq!(business_account::is_approver(&account, SENDER), false);
+        assert_eq!(business_account::owners(&account), vector[SENDER]);
+        assert_eq!(business_account::has_wallet(&account), false);
 
         let ctx = scenario.ctx();
         let admin = business_account::admin_cap_for_testing(ctx);

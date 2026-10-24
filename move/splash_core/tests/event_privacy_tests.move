@@ -14,7 +14,7 @@
 module splash_core::event_privacy_tests;
 
 use splash_core::audit_anchor;
-use splash_core::business_account::{Self, BusinessAccount, PayoutApproval};
+use splash_core::business_account::{Self, BusinessAccount};
 use splash_core::cap_registry;
 use splash_core::compliance_config::{Self, ComplianceConfig};
 use splash_core::payment_intent::{Self, PaymentIntent};
@@ -29,8 +29,6 @@ use sui::test_scenario::{Self as ts, Scenario};
 
 const SENDER: address = @0xA11CE;
 const RECIPIENT: address = @0xB0B;
-const OWNER: address = @0xA11CE;
-const APPROVER: address = @0xBEEF;
 
 const HASH: vector<u8> = b"0123456789abcdef0123456789abcdef";
 const BLOB: vector<u8> = b"walrus-blob-id";
@@ -215,148 +213,6 @@ fun cancel_and_expiry_emit_the_stored_commitment() {
         payment_intent::delete_finalized(expired);
     });
     s.end();
-}
-
-// ── Approvals (the legacy path) ─────────────────────────────────────────────
-
-/// A shared clock, a verified account owned by OWNER with APPROVER approving,
-/// and the config accepting SUI. No business wallet, so the legacy path is open.
-fun account_scenario(): Scenario {
-    let mut scenario = ts::begin(OWNER);
-    {
-        let ctx = scenario.ctx();
-        let mut c = clock::create_for_testing(ctx);
-        c.set_for_testing(DAY);
-        clock::share_for_testing(c);
-    };
-    scenario.next_tx(OWNER);
-    {
-        let c = scenario.take_shared<Clock>();
-        let ctx = scenario.ctx();
-        business_account::submit_application(
-            b"SSM-202401012345".to_string(),
-            b"bafy-kyb-cid".to_string(),
-            &c,
-            ctx,
-        );
-        ts::return_shared(c);
-    };
-    scenario.next_tx(OWNER);
-    {
-        let mut account = scenario.take_shared<BusinessAccount>();
-        let ctx = scenario.ctx();
-        let admin = business_account::admin_cap_for_testing(ctx);
-        business_account::verify_business(&admin, &mut account, 20);
-        business_account::add_approver(&mut account, APPROVER, ctx);
-        let registry = cap_registry::new_for_testing(ctx);
-        compliance_config::create<SUI>(
-            compliance_config::ticket_for_testing(ctx),
-            &admin,
-            &registry,
-            5_000,
-            60_000,
-            50,
-            1_000_000,
-            1_000_000,
-            vector[object::id_from_address(@0xF001)],
-            ctx,
-        );
-        cap_registry::share_for_testing(registry);
-        business_account::destroy_admin_cap_for_testing(admin);
-        ts::return_shared(account);
-    };
-    scenario
-}
-
-#[test]
-/// The approval events carry the commitment, not the amount, and the payout
-/// is over the platform floor: `min_transfer_minor()` (abort 43). The floor is
-/// well inside a new account's tier-three ceilings, per transfer, per day and
-/// per month.
-fun approval_events_carry_the_commitment_not_the_amount() {
-    let mut scenario = account_scenario();
-    let amount = business_account::min_transfer_minor();
-
-    scenario.next_tx(OWNER);
-    {
-        let account = scenario.take_shared<BusinessAccount>();
-        let config = scenario.take_shared<ComplianceConfig>();
-        let c = scenario.take_shared<Clock>();
-        let ctx = scenario.ctx();
-        payment_intent::create_payment_intent_for_account<SUI>(
-            &account,
-            &config,
-            RECIPIENT,
-            amount,
-            b"PHP".to_string(),
-            56_000_000,
-            COMMITMENT,
-            payment_intent::kind_bank_payout(),
-            RAIL_COMMITMENT,
-            c.timestamp_ms() + EXPIRY_WINDOW,
-            &c,
-            ctx,
-        );
-        ts::return_shared(c);
-        ts::return_shared(config);
-        ts::return_shared(account);
-    };
-
-    scenario.next_tx(APPROVER);
-    {
-        let account = scenario.take_shared<BusinessAccount>();
-        let config = scenario.take_shared<ComplianceConfig>();
-        let intent = scenario.take_shared<PaymentIntent>();
-        let c = scenario.take_shared<Clock>();
-        let ctx = scenario.ctx();
-        payment_intent::approve_payout(&intent, &account, &config, &c, ctx);
-
-        let approved = event::events_by_type<business_account::PayoutApproved>();
-        assert_eq!(approved.length(), 1);
-        let (_approval, account_id, intent_id, approver, maker, commitment, epoch, expires) =
-            business_account::unpack_payout_approved_for_testing(approved[0]);
-        assert_eq!(account_id, object::id_address(&account));
-        assert_eq!(intent_id, object::id(&intent));
-        assert_eq!(approver, APPROVER);
-        assert_eq!(maker, OWNER);
-        assert_eq!(commitment, COMMITMENT);
-        assert_eq!(epoch, business_account::authority_epoch(&account));
-        assert_eq!(expires, DAY + 900_000);
-
-        ts::return_shared(c);
-        ts::return_shared(intent);
-        ts::return_shared(config);
-        ts::return_shared(account);
-    };
-
-    scenario.next_tx(OWNER);
-    {
-        let mut account = scenario.take_shared<BusinessAccount>();
-        let config = scenario.take_shared<ComplianceConfig>();
-        let mut intent = scenario.take_shared<PaymentIntent>();
-        let c = scenario.take_shared<Clock>();
-        let approval = scenario.take_from_sender<PayoutApproval>();
-        let ctx = scenario.ctx();
-        let payment = coin::mint_for_testing<SUI>(amount, ctx);
-        let receipt = payment_intent::confirm_with_approval(&mut intent, &mut account, &config, approval, payment, &c, ctx);
-        audit_anchor::anchor(receipt, HASH, BLOB, &c, ctx);
-
-        let consumed = event::events_by_type<business_account::PayoutApprovalConsumed>();
-        assert_eq!(consumed.length(), 1);
-        let (_approval, account_id, intent_id, approver, commitment, at) =
-            business_account::unpack_payout_approval_consumed_for_testing(consumed[0]);
-        assert_eq!(account_id, object::id_address(&account));
-        assert_eq!(intent_id, object::id(&intent));
-        assert_eq!(approver, APPROVER);
-        assert_eq!(commitment, COMMITMENT);
-        assert_eq!(at, DAY);
-
-        ts::return_shared(c);
-        ts::return_shared(intent);
-        ts::return_shared(config);
-        ts::return_shared(account);
-    };
-    scenario.end();
 }
 
 // ── Receipts ────────────────────────────────────────────────────────────────

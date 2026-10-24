@@ -16,7 +16,7 @@
 ///   * Events carry a 32-byte commitment, never the payment (WS5). What an
 ///     event carries freezes at publish; see docs/commitments.md.
 ///
-/// ─── v2: the three paths that pay an account's intent ───────────────────────
+/// ─── v2: the two paths that pay an account's intent ─────────────────────────
 ///
 ///   * `confirm_from_business_wallet` (and `_balance`, and the cross-chain
 ///     form): the business multisig signs. Its signature IS the approval; the
@@ -29,28 +29,28 @@
 ///     back to the transaction for a bridge to burn, and only the owners'
 ///     own transaction may hold the business's coin, so cross-chain intents
 ///     are opened and paid by the business wallet alone.
-///   * `confirm_with_approval`: the legacy per-person approval path,
-///     DEPRECATED. It closes for an account once that account registers a
-///     business wallet, and for everyone once governance or compliance turns
-///     `legacy_enabled` off.
 ///
-/// There is no fourth. The unbound path (`create_payment_intent`, `create`,
+/// There is no third. The unbound path (`create_payment_intent`, `create`,
 /// `confirm_payment_intent`) let any signer pay a recipient out of its own
 /// coin; on the testnet flow that signer was Splash's operator, which D3 rules
-/// out, and an additive upgrade policy could never take it away again. So it
-/// is not in this package. See docs/v2/phase1-move-design.md.
+/// out, and an additive upgrade policy could never take it away again. The
+/// legacy per-person approval path (`create_payment_intent_for_account`,
+/// `approve_payout`, `confirm_with_approval`) let one maker and one approver
+/// pay out of the maker's own coin; it is not published to mainnet either
+/// (decision 3), because a public function, however firmly closed, can never
+/// be removed once published. Neither is in this package. See
+/// docs/v2/phase1-move-design.md.
 ///
 /// Every path checks that settlement is not paused, that the asset is still
 /// accepted, and the account's KYB, freeze flags and ceilings. A bank payout
-/// on a v2 path must also reach its floor, the larger of 99 USDC and
+/// must also reach its floor, the larger of 99 USDC and
 /// `ComplianceConfig.min_settlement_amount`, when it opens and when it
-/// settles; the legacy path keeps its fixed 99 USDC floor. An intent lives
-/// at most 30 days. The v2 settle paths take `settle_by_ms`, the quote's own
-/// deadline, so a transaction signed against a quote cannot be submitted after
-/// the quote lapsed.
+/// settles. An intent lives at most 30 days. The settle paths take
+/// `settle_by_ms`, the quote's own deadline, so a transaction signed against
+/// a quote cannot be submitted after the quote lapsed.
 module splash_core::payment_intent;
 
-use splash_core::business_account::{Self, BusinessAccount, PayoutApproval};
+use splash_core::business_account::{Self, BusinessAccount};
 use splash_core::compliance_config::{Self, ComplianceConfig};
 use std::string::String;
 use std::type_name;
@@ -75,12 +75,11 @@ const E_STILL_PENDING:         u64 = 412;
 const E_UNAUTHORIZED_RECEIPT_CONSUMER: u64 = 413;
 /// The coin type offered does not match the asset the intent was created for.
 const E_WRONG_SETTLEMENT_ASSET: u64 = 414;
-/// `confirm_with_approval` on an intent that is not bound to any account.
+/// A settle or cancel path was given an intent bound to no account.
 const E_NOT_ACCOUNT_BOUND: u64 = 416;
 /// The account passed is not the account the intent was opened against.
 const E_WRONG_BUSINESS_ACCOUNT: u64 = 417;
-/// The initiator is neither an owner nor an approver of the account.
-const E_NOT_A_MEMBER: u64 = 418;
+// 418 (E_NOT_A_MEMBER) is retired with the legacy create, its only user.
 /// The account is frozen, or not KYB-verified.
 const E_ACCOUNT_NOT_PAYABLE: u64 = 419;
 /// WS5. A commitment is thirty-two bytes, computed off-chain as
@@ -115,9 +114,7 @@ const E_BENEFICIARY_REQUIRED: u64 = 428;
 const E_BAD_PAYMENT_REF: u64 = 429;
 /// The quote this transaction was signed against has lapsed.
 const E_SETTLE_BY_PASSED: u64 = 430;
-/// This account has a business wallet, so the legacy approval path is closed
-/// for it.
-const E_LEGACY_CLOSED: u64 = 431;
+// 431 (E_LEGACY_CLOSED) is retired with the legacy approval path.
 /// The coin handed to the bridge adapter is not the coin the settlement
 /// released, or not its type or amount.
 const E_WRONG_BRIDGE_COIN: u64 = 432;
@@ -161,13 +158,12 @@ const SUI_DOMAIN: u32 = 8;
 // ─── Settlement paths, as `IntentConfirmed.path` reports them ──────────────
 const PATH_BUSINESS_WALLET: u8 = 1;
 const PATH_SETTLEMENT_APP: u8 = 2;
-const PATH_LEGACY_APPROVAL: u8 = 3;
 
 public struct PaymentIntent has key {
     id: UID,
-    /// The business account this intent draws authority from. `none` only
-    /// on an intent no v2 or legacy path can settle; every create in this
-    /// package binds one.
+    /// The business account this intent draws authority from. Every create
+    /// in this package binds one; an intent with `none` could not be settled
+    /// or cancelled by any path here.
     account: Option<ID>,
     /// The maker: who opened the intent.
     sender: address,
@@ -205,7 +201,6 @@ public struct PaymentIntent has key {
     rail_commitment: vector<u8>,
     /// v2. The business's own reference for the payment, 32 bytes. The
     /// intent's UID is derived from it, so one reference opens one intent.
-    /// Empty on a legacy intent.
     payment_ref: vector<u8>,
     /// v2, cross-chain only: the most CCTP may take as its fee, in minor units.
     bridge_max_fee: u64,
@@ -275,8 +270,8 @@ public struct IntentCreated has copy, drop {
 }
 
 /// `path` is which settlement path released it: 1 business wallet,
-/// 2 settlement app (a spending rule), 3 legacy approval. On a cross-chain
-/// intent, CONFIRMED means burned for CCTP; the mint completes off Sui.
+/// 2 settlement app (a spending rule). On a cross-chain intent, CONFIRMED
+/// means burned for CCTP; the mint completes off Sui.
 public struct IntentConfirmed has copy, drop {
     intent_id: ID,
     commitment: vector<u8>,
@@ -380,191 +375,6 @@ fun assert_bank_payout_floor(config: &ComplianceConfig, amount: u64) {
     let compliance = compliance_config::min_settlement_amount(config);
     let floor = if (compliance > platform) compliance else platform;
     assert!(amount >= floor, E_BELOW_SETTLEMENT_FLOOR);
-}
-
-// ─── Legacy (DEPRECATED): intents opened by an owner or approver ───────────
-
-/// The legacy path is open only while compliance has not switched it off, the
-/// account has no business wallet (registering one is migrating), and
-/// settlement is not paused. Its create, approve and confirm all check it.
-fun assert_legacy_open(account: &BusinessAccount, config: &ComplianceConfig) {
-    compliance_config::assert_legacy_enabled(config);
-    assert!(!business_account::has_wallet(account), E_LEGACY_CLOSED);
-    compliance_config::assert_active(config);
-}
-
-/// Create an intent that draws its authority from a business account, on
-/// the DEPRECATED per-person path.
-///
-/// The initiator must be an owner or an approver of that account — a shared
-/// object anyone can name would otherwise let a stranger open intents in a
-/// tenant's name, and even though they could never be approved, the tenant's
-/// event stream would fill with payments they did not propose.
-///
-/// Verification and both freeze flags are checked HERE as well as at approval
-/// and at settlement. That is deliberate redundancy on the cheapest step: a
-/// frozen account should not accumulate a queue of intents waiting for the
-/// thaw.
-public fun create_payment_intent_for_account<T>(
-    account: &BusinessAccount,
-    config: &ComplianceConfig,
-    recipient: address,
-    amount_usd: u64,
-    target_currency: String,
-    fx_rate_usd_local: u64,
-    commitment: vector<u8>,
-    kind: u8,
-    rail_commitment: vector<u8>,
-    expires_at: u64,
-    clock: &Clock,
-    ctx: &mut TxContext,
-) {
-    assert_legacy_open(account, config);
-    let maker = tx_context::sender(ctx);
-    assert!(
-        business_account::is_owner(account, maker) || business_account::is_approver(account, maker),
-        E_NOT_A_MEMBER,
-    );
-    assert!(business_account::is_verified(account), E_ACCOUNT_NOT_PAYABLE);
-    assert!(!business_account::is_frozen(account), E_ACCOUNT_NOT_PAYABLE);
-    let asset = compliance_config::type_string<T>();
-    compliance_config::assert_asset_accepted(config, &asset);
-    assert!(amount_usd > 0, E_INVALID_AMOUNT);
-    assert!(recipient != @0x0, E_INVALID_RECIPIENT);
-    assert!(std::string::length(&target_currency) > 0, E_EMPTY_TARGET_CURRENCY);
-    assert!(fx_rate_usd_local > 0, E_INVALID_FX_RATE);
-    assert_commitment(&commitment);
-    assert_rail_commitment(&rail_commitment);
-    assert_sui_kind(kind);
-
-    let now = clock::timestamp_ms(clock);
-    assert_lifetime(expires_at, now);
-
-    let intent = PaymentIntent {
-        id: object::new(ctx),
-        account: option::some(object::id(account)),
-        sender: maker,
-        recipient,
-        beneficiary_ref: vector[],
-        amount_usd,
-        target_currency,
-        settlement_asset: asset,
-        fx_rate_usd_local,
-        created_at: now,
-        created_epoch: ctx.epoch(),
-        expires_at,
-        status: STATUS_PENDING,
-        commitment,
-        kind,
-        destination_domain: SUI_DOMAIN,
-        rail_commitment,
-        payment_ref: vector[],
-        bridge_max_fee: 0,
-        bridge_min_finality: 0,
-    };
-
-    emit_created(&intent, now);
-
-    transfer::share_object(intent);
-}
-
-/// Approve a payout, as an approver of the account the intent is bound to.
-/// DEPRECATED, with the rest of the legacy path.
-///
-/// Everything the approval binds to is read off the intent: its id, its
-/// amount, and the maker — so an approver cannot be handed a transaction that
-/// approves one invoice while naming another's number, and cannot mis-address
-/// the approval to someone who was not the intent's opener. The four-eyes
-/// check, the approver-set check, verification and the freeze flags are in
-/// `business_account::mint_approval`, which owns those sets.
-///
-/// The intent's own state is checked here, where it is visible: approving a
-/// cancelled or expired intent produces an approval that can never settle, and
-/// silently minting one is worse than refusing.
-public fun approve_payout(
-    intent: &PaymentIntent,
-    account: &BusinessAccount,
-    config: &ComplianceConfig,
-    clock: &Clock,
-    ctx: &mut TxContext,
-) {
-    assert_legacy_open(account, config);
-    assert!(intent.account.is_some(), E_NOT_ACCOUNT_BOUND);
-    assert!(*intent.account.borrow() == object::id(account), E_WRONG_BUSINESS_ACCOUNT);
-    assert!(intent.status == STATUS_PENDING, E_NOT_PENDING);
-    assert!(clock::timestamp_ms(clock) < intent.expires_at, E_EXPIRED);
-    assert_lands_on_sui(intent);
-
-    business_account::mint_approval(
-        account,
-        object::id(intent),
-        intent.sender,
-        intent.amount_usd,
-        intent.commitment,
-        clock,
-        ctx,
-    );
-}
-
-/// Confirm an intent bound to a business account, releasing an approval.
-///
-/// DEPRECATED (v2). This is the legacy per-person path: the maker pays out of
-/// their own coin with an approver's approval. It now honours the pause and
-/// the asset registry, refuses cross-chain intents, and closes for an account
-/// once it registers a business wallet, and for everyone once
-/// `legacy_enabled` is off. See SECURITY.md.
-///
-/// The approval carries its own account, intent, amount and authority epoch,
-/// and `business_account::consume_approval` checks every one of them plus the
-/// freeze flags, KYB status and the 24h ceiling. This function's own job is
-/// narrow: prove the caller is the maker the intent was opened by, and prove
-/// the account passed is the account the intent named.
-public fun confirm_with_approval<T>(
-    intent: &mut PaymentIntent,
-    account: &mut BusinessAccount,
-    config: &ComplianceConfig,
-    approval: PayoutApproval,
-    mut payment: Coin<T>,
-    clock: &Clock,
-    ctx: &mut TxContext,
-): SettleReceipt {
-    assert_legacy_open(account, config);
-    assert!(intent.account.is_some(), E_NOT_ACCOUNT_BOUND);
-    assert!(*intent.account.borrow() == object::id(account), E_WRONG_BUSINESS_ACCOUNT);
-    // The maker. The approval is transferred to an address named by the
-    // APPROVER, and an approver naming the wrong address must not be able to
-    // hand release authority to someone the intent never authorised.
-    let caller = tx_context::sender(ctx);
-    assert!(caller == intent.sender, E_UNAUTHORIZED);
-
-    // The approval first, as before v2, so its own refusals (stale, expired,
-    // wrong intent) keep their codes.
-    business_account::consume_approval(
-        account,
-        approval,
-        object::id(intent),
-        intent.amount_usd,
-        intent.commitment,
-        clock,
-    );
-
-    assert!(intent.status == STATUS_PENDING, E_NOT_PENDING);
-    let now = clock::timestamp_ms(clock);
-    assert!(now < intent.expires_at, E_EXPIRED);
-    assert_lands_on_sui(intent);
-    assert!(compliance_config::type_string<T>() == intent.settlement_asset, E_WRONG_SETTLEMENT_ASSET);
-    compliance_config::assert_active(config);
-    compliance_config::assert_asset_accepted(config, &intent.settlement_asset);
-    assert!(coin::value(&payment) >= intent.amount_usd, E_INSUFFICIENT_PAYMENT);
-
-    let paid = coin::split(&mut payment, intent.amount_usd, ctx);
-    deliver_coin(intent, paid);
-    // The legacy refund goes back to the maker, who paid it.
-    refund_coin(payment, caller);
-
-    intent.status = STATUS_CONFIRMED;
-    emit_confirmed(intent, PATH_LEGACY_APPROVAL, now);
-    receipt(intent, now)
 }
 
 // ─── v2: intents opened by the business wallet or a registered app ─────────
@@ -1110,7 +920,6 @@ public fun sui_domain(): u32               { SUI_DOMAIN }
 public fun max_intent_lifetime_ms(): u64   { MAX_INTENT_LIFETIME_MS }
 public fun path_business_wallet(): u8      { PATH_BUSINESS_WALLET }
 public fun path_settlement_app(): u8       { PATH_SETTLEMENT_APP }
-public fun path_legacy_approval(): u8      { PATH_LEGACY_APPROVAL }
 
 /// Consume a settlement receipt. THE ONLY function that destroys a
 /// `SettleReceipt`, and it may only be called from `audit_anchor`.

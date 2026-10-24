@@ -12,9 +12,10 @@
 ///     add a replacement person to rotate in), never under a compliance one;
 ///   * the wallet may remove the founder too, once the founder is not a
 ///     current or pending signer;
-///   * the dead legacy approver set is closed, and naming the recovery party
-///     is the wallet's, so the only epoch change one owner can still make
-///     alone is the emergency brake, which every owner keeps.
+///   * naming the recovery party is the wallet's, and there is no approver
+///     set any more (the legacy path is not in core), so the only epoch
+///     change one owner can still make alone is the emergency brake, which
+///     every owner keeps.
 ///
 /// Before registration the owner rules are unchanged.
 #[test_only]
@@ -32,13 +33,9 @@ use sui::test_scenario::{Self as ts, Scenario};
 const ED25519: vector<u8> = x"00d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737";
 const ED25519_ADDRESS: address = @0x0881c07520943bbf13989b92892093c1b50672156fa5f873c22892701cb2e207;
 
-const APPROVER: address = @0xBEEF;
 const RESCUER: address = @0xEC0;
 const GOVERNANCE: address = @0xAD;
 const OBSERVER: address = @0x0B5;
-
-/// `business_account::E_APPROVERS_CLOSED`, which this change introduces.
-const APPROVERS_CLOSED: u64 = 60;
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -247,37 +244,6 @@ fun after_registration_the_wallet_removes_a_non_signing_owner() {
     let account = read(&mut s);
     assert!(!business_account::is_owner(&account, ED25519_ADDRESS));
     ts::return_shared(account);
-    s.end();
-}
-
-#[test]
-#[expected_failure(abort_code = APPROVERS_CLOSED, location = splash_core::business_account)]
-/// The legacy approver set has no use once a wallet exists (the legacy path is
-/// closed for the account). Adding to it is refused, so one owner cannot use
-/// it to move the authority epoch.
-fun after_registration_no_owner_can_add_an_approver() {
-    let mut s = h::setup();
-    act!(&mut s, h::owner_3(), |a, ctx| business_account::add_approver(a, APPROVER, ctx));
-    s.end();
-}
-
-#[test]
-#[expected_failure(abort_code = APPROVERS_CLOSED, location = splash_core::business_account)]
-/// Removing from it is refused too.
-fun after_registration_no_owner_can_remove_an_approver() {
-    let mut s = h::setup_without_wallet();
-    act!(&mut s, h::founder(), |a, ctx| business_account::add_approver(a, APPROVER, ctx));
-    h::register_wallet(&mut s);
-    act!(&mut s, h::owner_3(), |a, ctx| business_account::remove_approver(a, APPROVER, ctx));
-    s.end();
-}
-
-#[test]
-#[expected_failure(abort_code = APPROVERS_CLOSED, location = splash_core::business_account)]
-/// The set is closed for the wallet as well: it releases payments itself.
-fun after_registration_the_wallet_cannot_add_an_approver_either() {
-    let mut s = h::setup();
-    act!(&mut s, h::wallet(), |a, ctx| business_account::add_approver(a, APPROVER, ctx));
     s.end();
 }
 

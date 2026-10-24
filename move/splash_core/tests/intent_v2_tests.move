@@ -1,4 +1,4 @@
-/// v2 intent creation, and the closing of the legacy path.
+/// v2 intent creation.
 ///
 /// Written from docs/v2/phase1-move-design.md (revision 2), section 3 and
 /// "The money paths", not from the code. What is pinned here:
@@ -13,16 +13,16 @@
 ///   * one payment reference opens one intent per account, for ever, even
 ///     after that intent is settled and deleted;
 ///   * only the wallet, or a settlement app that took the 24-hour path, opens
-///     a v2 intent, and only for a payable account in an accepted asset;
-///   * the legacy approval path closes for an account that registers a
-///     wallet, closes for everyone when its one-way switch is turned off, and
-///     honours the pause and the asset registry.
+///     a v2 intent, and only for a payable account in an accepted asset.
+///
+/// The legacy approval path and its tests are gone: core is published without
+/// it (decision 3; tests/legacy-path-removed.test.mjs checks the source).
 #[test_only]
 #[allow(implicit_const_copy)]
 module splash_core::intent_v2_tests;
 
 use splash_core::audit_anchor;
-use splash_core::business_account::{Self, BusinessAccount, PayoutApproval};
+use splash_core::business_account::{Self, BusinessAccount};
 use splash_core::cap_registry::CapRegistry;
 use splash_core::compliance_config::{Self, ComplianceConfig, ComplianceCap};
 use splash_core::multisig;
@@ -48,8 +48,6 @@ public struct SCAM has drop {}
 
 /// A staff spender a registered app vouches for.
 const STAFF: address = @0x57AFF;
-/// A legacy approver.
-const APPROVER: address = @0xA99;
 const STRANGER: address = @0xBADBAD;
 /// CCTP's 32-byte mint recipient on another chain.
 const MINT_RECIPIENT: address = @0xE7E7;
@@ -294,37 +292,6 @@ fun admin_removes<X>(s: &mut Scenario, registry: u8) {
     ts::return_shared(config);
 }
 
-fun compliance_pauses(s: &mut Scenario) {
-    s.next_tx(h::founder());
-    let mut config = s.take_shared<ComplianceConfig>();
-    let cap = s.take_from_sender<ComplianceCap>();
-    let caps = s.take_shared<CapRegistry>();
-    compliance_config::pause(&mut config, &cap, &caps);
-    ts::return_shared(caps);
-    s.return_to_sender(cap);
-    ts::return_shared(config);
-}
-
-fun compliance_disables_legacy(s: &mut Scenario) {
-    s.next_tx(h::founder());
-    let mut config = s.take_shared<ComplianceConfig>();
-    let cap = s.take_from_sender<ComplianceCap>();
-    let caps = s.take_shared<CapRegistry>();
-    compliance_config::disable_legacy(&mut config, &cap, &caps);
-    ts::return_shared(caps);
-    s.return_to_sender(cap);
-    ts::return_shared(config);
-}
-
-fun admin_disables_legacy(s: &mut Scenario) {
-    s.next_tx(h::founder());
-    let mut config = s.take_shared<ComplianceConfig>();
-    let admin = business_account::admin_cap_for_testing(s.ctx());
-    compliance_config::admin_disable_legacy(&admin, &mut config);
-    business_account::destroy_admin_cap_for_testing(admin);
-    ts::return_shared(config);
-}
-
 /// A second verified account with the same three owners, whose wallet is the
 /// 3-of-3 of the same passkeys: a different business wallet. Returns
 /// (account A, account B, wallet B).
@@ -377,68 +344,6 @@ fun confirm_rotation(s: &mut Scenario, new_wallet: address) {
     business_account::confirm_wallet_rotation(&mut account, s.ctx());
     assert_eq!(business_account::wallet(&account), new_wallet);
     ts::return_shared(account);
-}
-
-// ─── Legacy harness ────────────────────────────────────────────────────────
-
-/// No wallet yet, and APPROVER in the approver set.
-fun legacy_setup(): Scenario {
-    let mut s = h::setup_without_wallet();
-    s.next_tx(h::founder());
-    {
-        let mut account = s.take_shared<BusinessAccount>();
-        business_account::add_approver(&mut account, APPROVER, s.ctx());
-        ts::return_shared(account);
-    };
-    s
-}
-
-/// The founder opens a legacy intent of `kind`, expiring at `now + lifetime`.
-fun legacy_open(s: &mut Scenario, kind: u8, lifetime: u64) {
-    s.next_tx(h::founder());
-    let (account, config, c) = take(s);
-    payment_intent::create_payment_intent_for_account<USDC>(
-        &account,
-        &config,
-        h::recipient(),
-        h::amount(),
-        b"PHP".to_string(),
-        FX,
-        h::commitment(),
-        kind,
-        h::rail(),
-        c.timestamp_ms() + lifetime,
-        &c,
-        s.ctx(),
-    );
-    give(account, config, c);
-}
-
-fun legacy_open_bank(s: &mut Scenario) {
-    legacy_open(s, payment_intent::kind_bank_payout(), FIVE_MINUTES);
-}
-
-fun legacy_approve(s: &mut Scenario) {
-    s.next_tx(APPROVER);
-    let (account, config, c) = take(s);
-    let intent = s.take_shared<PaymentIntent>();
-    payment_intent::approve_payout(&intent, &account, &config, &c, s.ctx());
-    ts::return_shared(intent);
-    give(account, config, c);
-}
-
-fun legacy_confirm(s: &mut Scenario) {
-    s.next_tx(h::founder());
-    let (mut account, config, c) = take(s);
-    let mut intent = s.take_shared<PaymentIntent>();
-    let approval = s.take_from_sender<PayoutApproval>();
-    let payment = h::usdc(h::amount(), s.ctx());
-    let receipt = payment_intent::confirm_with_approval(
-        &mut intent, &mut account, &config, approval, payment, &c, s.ctx(),
-    );
-    audit_anchor::anchor(receipt, HASH, BLOB, &c, s.ctx());
-    ts::return_shared(intent);
-    give(account, config, c);
 }
 
 // ═══ Lifetime at creation: now < expires_at <= now + 30 days ═══════════════
@@ -582,34 +487,6 @@ fun app_create_enforces_the_thirty_day_ceiling() {
     d.expires_at = c.timestamp_ms() + THIRTY_DAYS + 1;
     payment_intent::share_intent(by_app(&mut account, &config, STAFF, d, &c, s.ctx()));
     give(account, config, c);
-    s.end();
-}
-
-#[test]
-#[expected_failure(abort_code = payment_intent::E_BAD_EXPIRY)]
-/// The legacy create obeys the same ceiling: the 5-minute constant it used to
-/// hard-code is gone, and a caller-chosen deadline must not exceed 30 days.
-fun legacy_create_enforces_the_thirty_day_ceiling() {
-    let mut s = legacy_setup();
-    legacy_open(&mut s, payment_intent::kind_bank_payout(), THIRTY_DAYS + 1);
-    s.end();
-}
-
-#[test]
-/// The legacy create accepts the ceiling itself.
-fun legacy_create_accepts_exactly_thirty_days() {
-    let mut s = legacy_setup();
-    legacy_open(&mut s, payment_intent::kind_bank_payout(), THIRTY_DAYS);
-    s.next_tx(h::founder());
-    {
-        let intent = s.take_shared<PaymentIntent>();
-        let c = s.take_shared<Clock>();
-        assert_eq!(payment_intent::expires_at(&intent), c.timestamp_ms() + THIRTY_DAYS);
-        // A legacy intent carries no v2 payment reference.
-        assert_eq!(payment_intent::payment_ref(&intent), vector[]);
-        ts::return_shared(c);
-        ts::return_shared(intent);
-    };
     s.end();
 }
 
@@ -766,18 +643,6 @@ fun cross_chain_settle_at_exactly_expires_at_is_refused() {
     coin::burn_for_testing(to_bridge);
     ts::return_shared(intent);
     give(account, config, c);
-    s.end();
-}
-
-#[test]
-#[expected_failure(abort_code = payment_intent::E_EXPIRED)]
-/// The legacy path has the same boundary, with a still-valid approval in hand.
-fun legacy_confirm_at_exactly_expires_at_is_refused() {
-    let mut s = legacy_setup();
-    legacy_open_bank(&mut s);
-    legacy_approve(&mut s);
-    advance(&mut s, FIVE_MINUTES);
-    legacy_confirm(&mut s);
     s.end();
 }
 
@@ -1062,7 +927,7 @@ fun a_33_byte_rail_commitment_is_refused() {
 #[test]
 #[expected_failure(abort_code = payment_intent::E_BAD_PAYMENT_REF)]
 /// An empty reference would make every untagged create collide with the
-/// first, or worse, give legacy-shaped intents a v2 identity.
+/// first, or worse, give an intent no reference at all to be idempotent on.
 fun an_empty_payment_ref_is_refused() {
     let mut s = h::setup();
     s.next_tx(h::wallet());
@@ -1826,226 +1691,15 @@ fun the_wallet_is_not_the_maker_of_a_staff_intent() {
     s.end();
 }
 
-// ═══ The legacy path, and how it closes ════════════════════════════════════
-
-#[test]
-/// Before migration the deprecated path still works: maker opens, approver
-/// approves, maker settles, and the confirmation says which path released it.
-/// Without this, every legacy refusal below could pass for the wrong reason.
-fun the_legacy_path_settles_before_migration() {
-    let mut s = legacy_setup();
-    legacy_open_bank(&mut s);
-    legacy_approve(&mut s);
-    legacy_confirm(&mut s);
-    let confirmed = event::events_by_type<payment_intent::IntentConfirmed>();
-    assert_eq!(confirmed.length(), 1);
-    let (_, _, _, _, _, status, path, _) = payment_intent::unpack_intent_confirmed_for_testing(confirmed[0]);
-    assert_eq!(status, STATUS_CONFIRMED);
-    assert_eq!(path, payment_intent::path_legacy_approval());
-    assert_eq!(path, 3);
-    s.next_tx(h::recipient());
-    {
-        let paid = s.take_from_sender<Coin<USDC>>();
-        assert_eq!(coin::value(&paid), h::amount());
-        s.return_to_sender(paid);
-        let intent = s.take_shared<PaymentIntent>();
-        assert_eq!(payment_intent::status(&intent), STATUS_CONFIRMED);
-        ts::return_shared(intent);
-    };
-    s.end();
-}
-
-#[test]
-#[expected_failure(abort_code = payment_intent::E_LEGACY_CLOSED)]
-/// Registering a wallet is migrating: the account can no longer open legacy
-/// intents.
-fun legacy_create_is_refused_once_a_wallet_is_registered() {
-    let mut s = legacy_setup();
-    h::register_wallet(&mut s);
-    legacy_open_bank(&mut s);
-    s.end();
-}
-
-#[test]
-#[expected_failure(abort_code = payment_intent::E_LEGACY_CLOSED)]
-/// An approver cannot approve a legacy intent opened before migration.
-fun legacy_approve_is_refused_once_a_wallet_is_registered() {
-    let mut s = legacy_setup();
-    legacy_open_bank(&mut s);
-    h::register_wallet(&mut s);
-    legacy_approve(&mut s);
-    s.end();
-}
-
-#[test]
-#[expected_failure(abort_code = payment_intent::E_LEGACY_CLOSED)]
-/// And an approval minted before migration cannot be cashed after it: once the
-/// owners' multisig exists, one maker and one approver no longer move money.
-fun legacy_confirm_is_refused_once_a_wallet_is_registered() {
-    let mut s = legacy_setup();
-    legacy_open_bank(&mut s);
-    legacy_approve(&mut s);
-    h::register_wallet(&mut s);
-    legacy_confirm(&mut s);
-    s.end();
-}
-
-#[test]
-#[expected_failure(abort_code = compliance_config::E_LEGACY_DISABLED)]
-/// Compliance may switch the legacy path off (subtractive). No new intents.
-fun legacy_create_is_refused_after_compliance_disables_it() {
-    let mut s = legacy_setup();
-    compliance_disables_legacy(&mut s);
-    legacy_open_bank(&mut s);
-    s.end();
-}
-
-#[test]
-#[expected_failure(abort_code = compliance_config::E_LEGACY_DISABLED)]
-/// So may the cold multisig. No new approvals.
-fun legacy_approve_is_refused_after_admin_disables_it() {
-    let mut s = legacy_setup();
-    legacy_open_bank(&mut s);
-    admin_disables_legacy(&mut s);
-    legacy_approve(&mut s);
-    s.end();
-}
-
-#[test]
-#[expected_failure(abort_code = compliance_config::E_LEGACY_DISABLED)]
-/// And an approval already in hand cannot settle once the switch is off.
-fun legacy_confirm_is_refused_after_compliance_disables_it() {
-    let mut s = legacy_setup();
-    legacy_open_bank(&mut s);
-    legacy_approve(&mut s);
-    compliance_disables_legacy(&mut s);
-    legacy_confirm(&mut s);
-    s.end();
-}
-
-#[test]
-#[expected_failure(abort_code = compliance_config::E_LEGACY_DISABLED)]
-/// The cold multisig's switch closes settlement too.
-fun legacy_confirm_is_refused_after_admin_disables_it() {
-    let mut s = legacy_setup();
-    legacy_open_bank(&mut s);
-    legacy_approve(&mut s);
-    admin_disables_legacy(&mut s);
-    legacy_confirm(&mut s);
-    s.end();
-}
-
-#[test]
-/// The switch is one-way. After it is off, every loosening the cold multisig
-/// has (unpausing, relaxing parameters, adding an asset) leaves it off, and
-/// switching it off again changes nothing. Migration, once declared complete,
-/// stays complete.
-fun the_legacy_switch_never_turns_back_on() {
-    let mut s = legacy_setup();
-    s.next_tx(h::founder());
-    {
-        let config = s.take_shared<ComplianceConfig>();
-        assert!(compliance_config::legacy_enabled(&config));
-        ts::return_shared(config);
-    };
-    compliance_disables_legacy(&mut s);
-    s.next_tx(h::founder());
-    {
-        let mut config = s.take_shared<ComplianceConfig>();
-        let admin = business_account::admin_cap_for_testing(s.ctx());
-        assert!(!compliance_config::legacy_enabled(&config));
-        compliance_config::admin_set_paused(&admin, &mut config, true);
-        compliance_config::admin_set_paused(&admin, &mut config, false);
-        compliance_config::admin_set_parameters(&admin, &mut config, 10_000, 600_000, 1_000, 1, 1);
-        compliance_config::admin_disable_legacy(&admin, &mut config);
-        assert!(!compliance_config::legacy_enabled(&config));
-        business_account::destroy_admin_cap_for_testing(admin);
-        ts::return_shared(config);
-    };
-    register<SCAM>(&mut s, compliance_config::registry_asset());
-    s.next_tx(h::founder());
-    {
-        let config = s.take_shared<ComplianceConfig>();
-        assert!(!compliance_config::legacy_enabled(&config));
-        ts::return_shared(config);
-    };
-    s.end();
-}
-
-#[test]
-#[expected_failure(abort_code = compliance_config::E_SETTLEMENT_PAUSED)]
-/// `confirm_with_approval` takes the config so it honours the pause: a pause
-/// that stopped the v2 paths but not the deprecated one would stop nothing.
-fun legacy_confirm_is_refused_while_paused() {
-    let mut s = legacy_setup();
-    legacy_open_bank(&mut s);
-    legacy_approve(&mut s);
-    compliance_pauses(&mut s);
-    legacy_confirm(&mut s);
-    s.end();
-}
-
-#[test]
-#[expected_failure(abort_code = compliance_config::E_SETTLEMENT_PAUSED)]
-/// The legacy create has "the same closing rules as `confirm_with_approval`",
-/// and the first of those is the pause.
-fun legacy_create_is_refused_while_paused() {
-    let mut s = legacy_setup();
-    compliance_pauses(&mut s);
-    legacy_open_bank(&mut s);
-    s.end();
-}
-
-#[test]
-#[expected_failure(abort_code = compliance_config::E_ASSET_NOT_ACCEPTED)]
-/// The legacy path honours the asset registry: an approval for a USDC intent
-/// cannot settle once USDC is off the list.
-fun legacy_confirm_is_refused_once_the_asset_is_removed() {
-    let mut s = legacy_setup();
-    register<SCAM>(&mut s, compliance_config::registry_asset());
-    legacy_open_bank(&mut s);
-    legacy_approve(&mut s);
-    admin_removes<USDC>(&mut s, compliance_config::registry_asset());
-    legacy_confirm(&mut s);
-    s.end();
-}
-
-#[test]
-#[expected_failure(abort_code = compliance_config::E_ASSET_NOT_ACCEPTED)]
-/// Nor can a legacy intent be opened in a removed asset.
-fun legacy_create_is_refused_once_the_asset_is_removed() {
-    let mut s = legacy_setup();
-    register<SCAM>(&mut s, compliance_config::registry_asset());
-    compliance_removes<USDC>(&mut s, compliance_config::registry_asset());
-    legacy_open_bank(&mut s);
-    s.end();
-}
+// ═══ The last accepted asset ═══════════════════════════════════════════════
 
 #[test]
 #[expected_failure(abort_code = compliance_config::E_LAST_ASSET)]
-/// Why the tests above add a second asset first: the last accepted asset
-/// cannot be removed, because `pause` is the halt and an empty list could only
-/// be refilled after 24 hours.
+/// Why the tests that remove USDC add a second asset first: the last accepted
+/// asset cannot be removed, because `pause` is the halt and an empty list could
+/// only be refilled after 24 hours.
 fun the_last_accepted_asset_cannot_be_removed() {
-    let mut s = legacy_setup();
+    let mut s = h::setup();
     admin_removes<USDC>(&mut s, compliance_config::registry_asset());
-    s.end();
-}
-
-#[test]
-#[expected_failure(abort_code = payment_intent::E_INVALID_KIND)]
-/// The legacy path refuses cross-chain intents, so it cannot even open one.
-fun legacy_create_refuses_the_cross_chain_kind() {
-    let mut s = legacy_setup();
-    legacy_open(&mut s, payment_intent::kind_cross_chain_wallet(), FIVE_MINUTES);
-    s.end();
-}
-
-#[test]
-#[expected_failure(abort_code = payment_intent::E_INVALID_KIND)]
-/// Nor an intent of no kind.
-fun legacy_create_refuses_kind_zero() {
-    let mut s = legacy_setup();
-    legacy_open(&mut s, 0, FIVE_MINUTES);
     s.end();
 }

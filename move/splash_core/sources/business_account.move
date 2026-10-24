@@ -17,10 +17,6 @@
 ///     wallet registers, any owner may change membership. Once it has, the
 ///     wallet (the owners' quorum) does, and every owner keeps the emergency
 ///     brake (`freeze_account`).
-///   * `approvers` — the legacy per-person path: may release a payout, and
-///     may not be the person who initiated it. Four eyes, enforced by the
-///     chain rather than by a UI. Closed once a business wallet registers,
-///     whose own signature is then the approval.
 ///   * `frozen` — two independent flags. An owner can stop their own account;
 ///     compliance can stop it too, and owners cannot lift the compliance one.
 ///   * `recovery_party` — a nominated outsider who can ADD an owner after a
@@ -30,18 +26,25 @@
 ///     nominating one, and it cannot restore a business wallet whose quorum
 ///     is lost: only that wallet can rotate itself.
 ///   * `authority_epoch` — a counter bumped by EVERY membership or freeze
-///     change. An approval carries the value it was minted at, so revoking an
-///     approver kills approvals already in flight, and revoke-then-regrant does
-///     not resurrect them: the second change bumps again.
-///   * a 24h payout ceiling (`daily_limit`), so a stolen approver credential
-///     has a bound and not just an alarm.
+///     change. A spending-rule approval (`splash_spend`) carries the value it
+///     was given at, so any such change kills approvals already in flight, and
+///     a change and its reversal do not resurrect them: the second one bumps
+///     again.
+///   * the tier's ceilings: one transfer, a rolling day and a rolling month,
+///     charged on every payout whichever path releases it.
+///   * the business wallet (v2, D1): the owners' multisig, whose signature
+///     pays and which funds the spending rules.
+///
+/// v2 has no per-person approver set. The legacy path it served
+/// (`payment_intent::confirm_with_approval`) is not published to mainnet
+/// (decision 3): a public function can never be removed once published.
 ///
 /// ─── The object is now SHARED ───────────────────────────────────────────────
 ///
 /// It has to be. Owned means "nameable only by its owner's transactions", and
-/// an object several owners and several approvers must all touch cannot be
-/// owned by one of them. This is also SECURITY.md's own recommendation at the
-/// end of the audit.
+/// an object several owners, the business wallet and the settlement apps must
+/// all touch cannot be owned by one of them. This is also SECURITY.md's own
+/// recommendation at the end of the audit.
 ///
 /// The consequence is that anybody can pass `&mut BusinessAccount` into any
 /// function here, so authority is never inferred from possession — every
@@ -50,13 +53,6 @@
 /// nothing.
 ///
 /// ─── What this does not do ──────────────────────────────────────────────────
-///
-/// Four eyes is a check on ADDRESSES. One person holding two approver keys, or
-/// an owner key and an approver key, satisfies it — the chain cannot tell them
-/// apart, and no on-chain rule can. What the chain does give is that the two
-/// addresses are named, the approval names one of them, and the event stream
-/// records which. Detecting that they are the same person is a KYB and an
-/// operations question, and belongs to the console, not here.
 ///
 /// An account whose owner set is full (`MAX_MEMBERS`) cannot be recovered,
 /// because `execute_recovery` has nowhere to add the new owner. Sixteen owners
@@ -82,8 +78,11 @@ const E_INVALID_HOLDER: u64 = 4;
 const E_NOT_VERIFIED_YET: u64 = 5;
 
 // ─── Phase 6 authority (20-block) ──────────────────────────────────────────
+//
+// 21, 29–33, 41 and 60 are retired with the legacy approver set and its
+// `PayoutApproval` (decision 3). They are not reused: the earlier testnet
+// packages raise them with their old meanings.
 const E_NOT_AN_OWNER: u64 = 20;
-const E_NOT_AN_APPROVER: u64 = 21;
 const E_FROZEN: u64 = 22;
 const E_NOT_FROZEN: u64 = 23;
 /// Removing this owner would leave the account with none, which is a brick.
@@ -92,23 +91,15 @@ const E_ALREADY_A_MEMBER: u64 = 25;
 const E_NOT_A_MEMBER: u64 = 26;
 const E_NOT_RECOVERY_PARTY: u64 = 27;
 const E_INVALID_ADDRESS: u64 = 28;
-/// The approver is the same address that initiated the payment.
-const E_SELF_APPROVAL: u64 = 29;
-/// The approval was minted under an authority set that has since changed.
-const E_STALE_AUTHORITY: u64 = 30;
-const E_WRONG_ACCOUNT: u64 = 31;
-const E_APPROVAL_EXPIRED: u64 = 32;
-const E_AMOUNT_MISMATCH: u64 = 33;
 const E_TOO_MANY_MEMBERS: u64 = 34;
-/// A recovery party that is already an owner or approver is not a recovery
-/// party, it is a second key held by the same people.
+/// A recovery party that is already an owner is not a recovery party, it is
+/// a second key held by the same people.
 const E_RECOVERY_IS_INSIDER: u64 = 35;
 const E_NOT_VERIFIED: u64 = 36;
 const E_NO_RECOVERY_PARTY: u64 = 37;
 const E_RECOVERY_PENDING: u64 = 38;
 const E_NO_PENDING_RECOVERY: u64 = 39;
 const E_RECOVERY_NOT_DUE: u64 = 40;
-const E_WRONG_INTENT: u64 = 41;
 /// The payout is larger than this tier's single-transfer ceiling.
 const E_OVER_PER_TRANSFER_CAP: u64 = 42;
 /// The payout is below the platform minimum.
@@ -150,21 +141,12 @@ const E_WALLET_MUST_UNFREEZE: u64 = 58;
 /// This owner is a member of the business wallet, or of the wallet a pending
 /// rotation names. Rotate them out of the wallet first.
 const E_OWNER_IS_A_SIGNER: u64 = 59;
-/// The account has a business wallet, so its legacy approver set is closed:
-/// approvers can be neither added nor removed.
-const E_APPROVERS_CLOSED: u64 = 60;
 
 // ─── Bounds ────────────────────────────────────────────────────────────────
 /// `VecSet` membership is a linear scan and an unbounded set is both a gas
-/// cliff and an object-size risk. Sixteen owners or sixteen approvers is well
-/// past any real finance team.
+/// cliff and an object-size risk. Sixteen owners is well past any real
+/// finance team.
 const MAX_MEMBERS: u64 = 16;
-
-/// A legacy approval is good for fifteen minutes. An intent can stay open for
-/// up to 30 days, so this, not the intent, is what stops an approval being
-/// cashed long after it was given; it is also the backstop for an approval
-/// minted against an intent that is then cancelled and never used.
-const APPROVAL_TTL_MS: u64 = 900_000;
 
 /// Recovery is announced 72 hours before it can execute. The delay is a
 /// DETECTION window: it is worthless if nobody watches, which is why
@@ -221,9 +203,10 @@ const MIN_TRANSFER_MINOR: u64 = 99_000_000;
 /// (see the key-ceremony runbook).
 ///
 /// What it is NOT, since Phase 6: a money key. Value movement in
-/// `splash_custody` is gated by `TreasuryCap`, and payouts from a business
-/// account require an approver in that account's own set — `AdminCap` cannot
-/// approve one. The cold multisig can stop a tenant and cannot spend from one.
+/// `splash_custody` is gated by `TreasuryCap`, and a payout from a business
+/// account needs that account's own wallet to sign it, or a spending rule the
+/// wallet funded — `AdminCap` can do neither. The cold multisig can stop a
+/// tenant and cannot spend from one.
 public struct AdminCap has key, store {
     id: UID,
 }
@@ -314,15 +297,15 @@ public struct BusinessAccount has key {
     /// field keeps naming them.
     owner: address,
     owners: VecSet<address>,
-    approvers: VecSet<address>,
     /// Set by an owner. An owner can lift it.
     frozen: bool,
     /// Set by `AdminCap`. An owner CANNOT lift it — that is the point.
     admin_frozen: bool,
     recovery_party: Option<address>,
     pending_recovery: Option<PendingRecovery>,
-    /// Bumped by every membership change, freeze, unfreeze, recovery and
-    /// verification withdrawal. Approvals carry the value they were minted at.
+    /// Bumped by every membership change, freeze, unfreeze, recovery, wallet
+    /// registration or rotation, and verification withdrawal. A spending-rule
+    /// approval (`splash_spend`) carries the value it was given at.
     authority_epoch: u64,
     ssm_number: String,
     kyb_cid: String,
@@ -358,25 +341,6 @@ public struct BusinessAccount has key {
     pending_wallet: Option<PendingWallet>,
 }
 
-/// Authority to release ONE payout, from ONE account, for ONE intent, at ONE
-/// amount, for fifteen minutes, under the authority set that existed when it
-/// was minted.
-///
-/// `key` only — no `store` — so it cannot be `public_transfer`red onward,
-/// wrapped or sold. It is consumed by value on use, so it cannot be replayed.
-public struct PayoutApproval has key {
-    id: UID,
-    account: ID,
-    intent: ID,
-    approver: address,
-    /// The account's `authority_epoch` at the moment of approval. Compared on
-    /// use; any change in between makes this approval dead.
-    authority_epoch: u64,
-    amount: u64,
-    approved_at_ms: u64,
-    expires_at_ms: u64,
-}
-
 // ─── Events ────────────────────────────────────────────────────────────────
 
 /// WS5: the registration number and the KYB pointer stay on the object, off
@@ -402,10 +366,10 @@ public struct BusinessVerified has copy, drop {
 /// authority change it did not initiate.
 public struct AuthorityChanged has copy, drop {
     business_account_id: address,
-    /// `b"add_owner"`, `b"remove_owner"`, `b"add_approver"`,
-    /// `b"remove_approver"`, `b"freeze"`, `b"unfreeze"`, `b"admin_freeze"`,
-    /// `b"admin_unfreeze"`, `b"recovery_party"`, `b"recovered"`,
-    /// `b"verification_revoked"`.
+    /// `b"add_owner"`, `b"remove_owner"`, `b"freeze"`, `b"unfreeze"`,
+    /// `b"admin_freeze"`, `b"admin_unfreeze"`, `b"recovery_party"`,
+    /// `b"recovered"`, `b"verification_revoked"`, `b"register_wallet"`,
+    /// `b"rotate_wallet"`.
     change: vector<u8>,
     subject: address,
     by: address,
@@ -441,29 +405,6 @@ public struct LimitIncreaseRequested has copy, drop {
     requested_tier: u8,
     justification: vector<u8>,
     requested_by: address,
-}
-
-/// WS5: the payment's commitment where the amount used to be. The approver
-/// reads the amount off the intent object they are shown; the event stream
-/// gets thirty-two bytes only the Seal policy's allowlist can open.
-public struct PayoutApproved has copy, drop {
-    approval_id: address,
-    business_account_id: address,
-    intent_id: ID,
-    approver: address,
-    maker: address,
-    commitment: vector<u8>,
-    authority_epoch: u64,
-    expires_at_ms: u64,
-}
-
-public struct PayoutApprovalConsumed has copy, drop {
-    approval_id: address,
-    business_account_id: address,
-    intent_id: ID,
-    approver: address,
-    commitment: vector<u8>,
-    consumed_at_ms: u64,
 }
 
 /// Emitted whenever anchor authority moves. Security-critical: off-chain
@@ -565,10 +506,6 @@ public fun submit_application(
         id: object::new(ctx),
         owner,
         owners,
-        // Deliberately EMPTY. An account that arrives with its founder already
-        // able to approve their own payouts has no four-eyes rule on day one,
-        // and day one is when nobody is watching.
-        approvers: vec_set::empty<address>(),
         frozen: false,
         admin_frozen: false,
         recovery_party: option::none(),
@@ -641,7 +578,7 @@ public fun revoke_verification(_: &AdminCap, account: &mut BusinessAccount, ctx:
 
 /// Every authority change goes through here, so no path can change membership
 /// without invalidating in-flight approvals. A change that forgets to bump is
-/// a change that lets a revoked approver's signature still settle.
+/// a change that lets an approval given before it still pay.
 fun bump(account: &mut BusinessAccount, change: vector<u8>, subject: address, ctx: &TxContext) {
     account.authority_epoch = account.authority_epoch + 1;
     event::emit(AuthorityChanged {
@@ -660,7 +597,7 @@ fun assert_owner(account: &BusinessAccount, ctx: &TxContext) {
 /// Before a business wallet registers, membership cannot change while the
 /// account is stopped.
 ///
-/// Without this, an owner watching a freeze land could add a fresh approver
+/// Without this, an owner watching a freeze land could add a fresh owner
 /// address and be ready the moment it lifts — and a compliance freeze is
 /// exactly the situation where the people with owner keys may be the problem.
 fun assert_thawed(account: &BusinessAccount) {
@@ -714,13 +651,12 @@ public fun add_owner(account: &mut BusinessAccount, who: address, ctx: &TxContex
 /// that the FOUNDING owner (`account.owner`) can only be removed by
 /// themselves.
 ///
-/// Without that rule, one compromised owner key is a complete account
-/// takeover: remove every co-owner, add two addresses you control as
-/// approvers, and the four-eyes check is satisfied by two halves of the same
-/// person. The 24h ceiling bounds what that is worth and `admin_freeze` stops
-/// it — but both of those are recovery, and this is prevention. Pinning the
-/// founder means a co-owner compromise leaves someone standing who can freeze,
-/// revoke and re-grant.
+/// Without that rule, one compromised owner key could remove every co-owner,
+/// the founder among them, and with the founder gone nobody could ever
+/// nominate the business wallet (`nominate_wallet` is founder-only, and a
+/// founder who has left the owners no longer speaks for the account).
+/// Pinning the founder means a co-owner compromise leaves someone standing
+/// who can freeze, remove the intruder and go on to nominate the wallet.
 ///
 /// It is not symmetric and cannot be: if the FOUNDER's key is the compromised
 /// one, they can still remove everyone else. Something has to be the anchor.
@@ -751,48 +687,6 @@ public fun remove_owner(account: &mut BusinessAccount, who: address, ctx: &TxCon
 
     account.owners.remove(&who);
     bump(account, b"remove_owner", who, ctx);
-}
-
-/// Add a legacy approver, before a business wallet registers.
-///
-/// Once the wallet registers, the legacy approval path is closed for the
-/// account (`payment_intent::confirm_with_approval` refuses it) and the
-/// wallet's own signature is the approval. The set then has no use, and a
-/// change to it would only let one owner move `authority_epoch` alone, which
-/// voids every spending-rule approval in flight. So it is closed, for the
-/// wallet as for everyone.
-public fun add_approver(account: &mut BusinessAccount, who: address, ctx: &TxContext) {
-    assert!(account.wallet.is_none(), E_APPROVERS_CLOSED);
-    assert_owner(account, ctx);
-    assert_thawed(account);
-    assert!(who != @0x0, E_INVALID_ADDRESS);
-    assert!(!account.approvers.contains(&who), E_ALREADY_A_MEMBER);
-    assert!(account.approvers.length() < MAX_MEMBERS, E_TOO_MANY_MEMBERS);
-    assert!(!is_recovery_party(account, who), E_RECOVERY_IS_INSIDER);
-
-    account.approvers.insert(who);
-    bump(account, b"add_approver", who, ctx);
-}
-
-/// Remove an approver. THIS is the revocation that must kill work in flight.
-///
-/// The bump does it: an approval carries the epoch it was minted at, and this
-/// increments it. Re-granting the same address increments AGAIN, so the
-/// revoke-then-regrant sequence does not resurrect the approval that was live
-/// across it — which a "is this address currently an approver?" check would.
-///
-/// Closed, like `add_approver`, once a business wallet registers: no approval
-/// from the set can settle anything then, so there is nothing to revoke.
-public fun remove_approver(account: &mut BusinessAccount, who: address, ctx: &TxContext) {
-    assert!(account.wallet.is_none(), E_APPROVERS_CLOSED);
-    assert_owner(account, ctx);
-    // Deliberately callable while frozen, unlike every other owner's
-    // membership change: removing authority is always safe, and a freeze is
-    // exactly when you most want to strip a compromised approver.
-    assert!(account.approvers.contains(&who), E_NOT_A_MEMBER);
-
-    account.approvers.remove(&who);
-    bump(account, b"remove_approver", who, ctx);
 }
 
 // ─── Freeze ────────────────────────────────────────────────────────────────
@@ -850,9 +744,9 @@ fun is_recovery_party(account: &BusinessAccount, who: address): bool {
 
 /// Nominate an outsider who can restore access if the owner keys are lost.
 ///
-/// They must not already be an owner or an approver. A recovery party drawn
-/// from the same set of people is not a recovery path, it is a second copy of
-/// the same failure.
+/// They must not already be an owner. A recovery party drawn from the same
+/// set of people is not a recovery path, it is a second copy of the same
+/// failure.
 ///
 /// Naming the recovery party names who may later become an owner, and it
 /// bumps `authority_epoch`, so it follows the owner rules: any owner before a
@@ -861,7 +755,6 @@ public fun set_recovery_party(account: &mut BusinessAccount, who: address, ctx: 
     assert_membership_authority(account, ctx);
     assert!(who != @0x0, E_INVALID_ADDRESS);
     assert!(!account.owners.contains(&who), E_RECOVERY_IS_INSIDER);
-    assert!(!account.approvers.contains(&who), E_RECOVERY_IS_INSIDER);
     // Changing the nominee while a recovery is running would let an owner swap
     // in their own address mid-notice and execute immediately.
     assert!(account.pending_recovery.is_none(), E_RECOVERY_PENDING);
@@ -928,9 +821,9 @@ public fun cancel_recovery(account: &mut BusinessAccount, ctx: &TxContext) {
 /// genuinely lost there is nobody left to remove, and adding is all that was
 /// needed.
 ///
-/// Approvers are cleared, because a recovery means the account's people have
-/// changed and every existing release authority should be re-granted
-/// deliberately rather than inherited.
+/// The authority epoch moves, because a recovery means the account's people
+/// have changed: every spending-rule approval given before it dies, and the
+/// owners give again what they still want paid.
 public fun execute_recovery(account: &mut BusinessAccount, clock: &Clock, ctx: &TxContext) {
     assert!(is_recovery_party(account, tx_context::sender(ctx)), E_NOT_RECOVERY_PARTY);
     assert!(account.pending_recovery.is_some(), E_NO_PENDING_RECOVERY);
@@ -943,14 +836,14 @@ public fun execute_recovery(account: &mut BusinessAccount, clock: &Clock, ctx: &
     let new_owner = account.pending_recovery.borrow().new_owner;
     // If the surviving owners added this address themselves during the notice
     // period, the recovery has already happened and there is nothing to do.
-    // Aborting rather than proceeding matters: `execute_recovery` also clears
-    // the approver set, and a rescuer who can force that on an account that
-    // did not need rescuing holds a 72-hour delayed denial-of-service.
+    // Aborting rather than proceeding matters: `execute_recovery` bumps the
+    // authority epoch, which voids every spending-rule approval in flight, and
+    // a rescuer who can force that on an account that did not need rescuing
+    // holds a 72-hour delayed denial-of-service.
     assert!(!account.owners.contains(&new_owner), E_ALREADY_A_MEMBER);
 
     let _ = account.pending_recovery.extract();
     account.owners.insert(new_owner);
-    account.approvers = vec_set::empty<address>();
 
     bump(account, b"recovered", new_owner, ctx);
 }
@@ -961,8 +854,8 @@ public fun execute_recovery(account: &mut BusinessAccount, clock: &Clock, ctx: &
 // record WHICH multisig it is, and the only party that can write that record
 // is the multisig itself: every write below asserts that the transaction's
 // sender is the address the members derive, so it carries the protocol's proof
-// that a quorum of exactly those members signed. The operator, `AdminCap` and
-// the approver set have no path in here at all.
+// that a quorum of exactly those members signed. The operator and `AdminCap`
+// have no path in here at all.
 
 /// Name the wallet that may register for this account. FOUNDER only.
 ///
@@ -1244,118 +1137,7 @@ public fun request_limit_increase(
     });
 }
 
-// ─── Approval ──────────────────────────────────────────────────────────────
-
-/// Mint one approval: one account, one intent, one amount, fifteen minutes.
-///
-/// `public(package)`, and the only caller is `payment_intent::approve_payout`.
-/// That indirection is the point. This module cannot import `payment_intent`
-/// (that module imports this one, and Move forbids the cycle), so an approval
-/// minted here could only ever be bound to an intent id and an amount the
-/// CALLER supplied — and an approver who is handed a PTB has no way to check
-/// that the amount beside the id is the amount in the intent.
-///
-/// Moving the entry point into `payment_intent`, which can see both objects,
-/// makes the amount and the maker DERIVED from the intent rather than asserted
-/// about it. The mismatch is then unrepresentable instead of merely checked.
-public(package) fun mint_approval(
-    account: &BusinessAccount,
-    intent: ID,
-    maker: address,
-    amount: u64,
-    commitment: vector<u8>,
-    clock: &Clock,
-    ctx: &mut TxContext,
-) {
-    let approver = tx_context::sender(ctx);
-    assert!(account.approvers.contains(&approver), E_NOT_AN_APPROVER);
-    assert!(account.is_verified, E_NOT_VERIFIED);
-    assert!(!account.frozen && !account.admin_frozen, E_FROZEN);
-    assert!(amount > 0, E_AMOUNT_MISMATCH);
-    assert!(maker != @0x0, E_INVALID_ADDRESS);
-    assert!(maker != approver, E_SELF_APPROVAL);
-
-    let now = clock::timestamp_ms(clock);
-    let approval = PayoutApproval {
-        id: object::new(ctx),
-        account: object::id(account),
-        intent,
-        approver,
-        authority_epoch: account.authority_epoch,
-        amount,
-        approved_at_ms: now,
-        expires_at_ms: now + APPROVAL_TTL_MS,
-    };
-
-    event::emit(PayoutApproved {
-        approval_id: object::uid_to_address(&approval.id),
-        business_account_id: object::uid_to_address(&account.id),
-        intent_id: intent,
-        approver,
-        maker,
-        commitment,
-        authority_epoch: approval.authority_epoch,
-        expires_at_ms: approval.expires_at_ms,
-    });
-
-    transfer::transfer(approval, maker);
-}
-
-/// Consume an approval and charge the account's window.
-///
-/// `public(package)` so that `payment_intent` — which holds the coin and the
-/// intent — is the only caller. Exposing this publicly would let anyone burn a
-/// tenant's daily allowance by consuming approvals without settling anything.
-///
-/// Every check here is a check something else could have been trusted to do,
-/// and is not:
-///   * the account, so an approval for tenant A cannot release tenant B's money
-///   * the intent, so an approval for a $10 invoice cannot release a $10,000 one
-///   * the amount, for the same reason, independently of the intent id
-///   * the epoch, so a revoked approver's approval is dead even though the
-///     object still exists in their counterparty's wallet
-///   * membership again, which the epoch already implies — kept because a
-///     future membership path that forgets to bump would otherwise be silently
-///     exploitable
-///   * expiry, verification, and both freeze flags
-public(package) fun consume_approval(
-    account: &mut BusinessAccount,
-    approval: PayoutApproval,
-    intent: ID,
-    amount: u64,
-    commitment: vector<u8>,
-    clock: &Clock,
-) {
-    assert!(approval.account == object::id(account), E_WRONG_ACCOUNT);
-    assert!(approval.intent == intent, E_WRONG_INTENT);
-    assert!(approval.amount == amount, E_AMOUNT_MISMATCH);
-    assert!(approval.authority_epoch == account.authority_epoch, E_STALE_AUTHORITY);
-    assert!(account.approvers.contains(&approval.approver), E_NOT_AN_APPROVER);
-    assert!(clock::timestamp_ms(clock) < approval.expires_at_ms, E_APPROVAL_EXPIRED);
-    // The legacy path keeps the platform floor on every payout, as before.
-    charge_payout(account, amount, true, clock);
-
-    let PayoutApproval {
-        id,
-        account: account_id,
-        intent: intent_id,
-        approver,
-        authority_epoch: _,
-        amount: _,
-        approved_at_ms: _,
-        expires_at_ms: _,
-    } = approval;
-
-    event::emit(PayoutApprovalConsumed {
-        approval_id: object::uid_to_address(&id),
-        business_account_id: object::id_to_address(&account_id),
-        intent_id,
-        approver,
-        commitment,
-        consumed_at_ms: clock::timestamp_ms(clock),
-    });
-    object::delete(id);
-}
+// ─── Charging a payout ─────────────────────────────────────────────────────
 
 /// The checks every payout from an account passes, whichever path released
 /// it: KYB, both freeze flags, this tier's per-transfer ceiling, and the
@@ -1364,14 +1146,13 @@ public(package) fun consume_approval(
 /// The floor exists because a partner payout's fixed costs (settling,
 /// anchoring, screening, the corridor minimums) exceed a smaller payment. A
 /// USDC transfer to a wallet or to another Splash business has none of those
-/// costs and a product minimum of 1 USDC, so the v2 paths apply the floor to
-/// bank payouts only. The legacy path applies it to everything, as it always
-/// has.
+/// costs and a product minimum of 1 USDC, so `payment_intent` asks for the
+/// floor on bank payouts only.
 ///
 /// `public(package)`. Exposing it would let anyone burn a tenant's daily room
 /// without settling anything.
 ///
-/// The v2 paths also hold a bank payout to `ComplianceConfig.
+/// `payment_intent` also holds a bank payout to `ComplianceConfig.
 /// min_settlement_amount` where it is higher than 99 USDC. That check lives
 /// in `payment_intent`, which can read the config; this module cannot import
 /// `compliance_config`, which imports it.
@@ -1396,23 +1177,6 @@ public(package) fun charge_payout(account: &mut BusinessAccount, amount: u64, wi
 /// again.
 public(package) fun assert_within_per_transfer_cap(account: &BusinessAccount, amount: u64) {
     assert!(amount <= account.per_transfer_cap_minor, E_OVER_PER_TRANSFER_CAP);
-}
-
-/// Discard an approval that was never used. Callable by whoever holds it,
-/// which is the maker — an unused approval is otherwise an owned object that
-/// lives forever.
-public fun discard_approval(approval: PayoutApproval) {
-    let PayoutApproval {
-        id,
-        account: _,
-        intent: _,
-        approver: _,
-        authority_epoch: _,
-        amount: _,
-        approved_at_ms: _,
-        expires_at_ms: _,
-    } = approval;
-    object::delete(id);
 }
 
 // ─── Anchor cap custody ────────────────────────────────────────────────────
@@ -1542,11 +1306,7 @@ public fun anchor_cap_generation(cap: &AnchorCap): u64 { cap.generation }
 
 public fun owner(account: &BusinessAccount): address { account.owner }
 public fun owners(account: &BusinessAccount): vector<address> { *account.owners.keys() }
-public fun approvers(account: &BusinessAccount): vector<address> { *account.approvers.keys() }
 public fun is_owner(account: &BusinessAccount, who: address): bool { account.owners.contains(&who) }
-public fun is_approver(account: &BusinessAccount, who: address): bool {
-    account.approvers.contains(&who)
-}
 public fun is_frozen(account: &BusinessAccount): bool { account.frozen || account.admin_frozen }
 public fun frozen_by_owner(account: &BusinessAccount): bool { account.frozen }
 public fun frozen_by_admin(account: &BusinessAccount): bool { account.admin_frozen }
@@ -1587,7 +1347,6 @@ public fun monthly_remaining(account: &BusinessAccount, clock: &Clock): u64 {
 public fun min_transfer_minor(): u64 { MIN_TRANSFER_MINOR }
 public fun starting_tier(): u8 { TIER_3 }
 public fun max_members(): u64 { MAX_MEMBERS }
-public fun approval_ttl_ms(): u64 { APPROVAL_TTL_MS }
 public fun recovery_delay_ms(): u64 { RECOVERY_DELAY_MS }
 
 public fun has_wallet(account: &BusinessAccount): bool { account.wallet.is_some() }
@@ -1615,13 +1374,6 @@ public fun pending_wallet(account: &BusinessAccount): address {
     assert!(account.pending_wallet.is_some(), E_NO_PENDING_ROTATION);
     account.pending_wallet.borrow().wallet
 }
-
-public fun approval_account(approval: &PayoutApproval): ID { approval.account }
-public fun approval_intent(approval: &PayoutApproval): ID { approval.intent }
-public fun approval_approver(approval: &PayoutApproval): address { approval.approver }
-public fun approval_amount(approval: &PayoutApproval): u64 { approval.amount }
-public fun approval_epoch(approval: &PayoutApproval): u64 { approval.authority_epoch }
-public fun approval_expires_at_ms(approval: &PayoutApproval): u64 { approval.expires_at_ms }
 
 // ─── Test helpers ──────────────────────────────────────────────────────────
 
@@ -1660,48 +1412,4 @@ public fun anchor_cap_at_generation_for_testing(generation: u64, ctx: &mut TxCon
 public fun destroy_admin_cap_for_testing(cap: AdminCap) {
     let AdminCap { id } = cap;
     object::delete(id);
-}
-
-#[test_only]
-public fun consume_approval_for_testing(
-    account: &mut BusinessAccount,
-    approval: PayoutApproval,
-    intent: ID,
-    amount: u64,
-    commitment: vector<u8>,
-    clock: &Clock,
-) {
-    consume_approval(account, approval, intent, amount, commitment, clock)
-}
-
-#[test_only]
-public fun unpack_payout_approved_for_testing(
-    e: PayoutApproved,
-): (address, address, ID, address, address, vector<u8>, u64, u64) {
-    let PayoutApproved {
-        approval_id,
-        business_account_id,
-        intent_id,
-        approver,
-        maker,
-        commitment,
-        authority_epoch,
-        expires_at_ms,
-    } = e;
-    (approval_id, business_account_id, intent_id, approver, maker, commitment, authority_epoch, expires_at_ms)
-}
-
-#[test_only]
-public fun unpack_payout_approval_consumed_for_testing(
-    e: PayoutApprovalConsumed,
-): (address, address, ID, address, vector<u8>, u64) {
-    let PayoutApprovalConsumed {
-        approval_id,
-        business_account_id,
-        intent_id,
-        approver,
-        commitment,
-        consumed_at_ms,
-    } = e;
-    (approval_id, business_account_id, intent_id, approver, commitment, consumed_at_ms)
 }

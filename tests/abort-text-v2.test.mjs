@@ -60,11 +60,21 @@ test('the payment_intent sentences name only functions v2 still has', async () =
   assert.deepEqual(wrong, [], `sentences naming functions v2 does not have:\n  ${wrong.join('\n  ')}`);
 });
 
-test('the approval TTL comment describes a v2 intent, which lives up to 30 days', async () => {
-  const move = (await source('move/splash_core/sources/business_account.move')).replace(/\r\n/g, '\n');
-  const at = move.indexOf('const APPROVAL_TTL_MS');
-  assert.ok(at > 0, 'APPROVAL_TTL_MS is declared');
-  const comment = move.slice(move.lastIndexOf('\n\n', at), at);
-  assert.doesNotMatch(comment, /five-minute window/);
-  assert.match(comment, /30 days/);
+// The legacy approval path is not in v2 core (decision 3), and its fifteen-
+// minute approval TTL went with it. A sentence that still describes it must
+// say it is about an earlier testnet package, so an operator reading a v2
+// abort is never sent to a path v2 core does not have.
+test('only sentences marked as earlier-testnet-only describe the legacy approval path', async () => {
+  const table = await abortTable();
+  const marked = /\((?:v1 testnet package|earlier testnet packages|earlier v2 testnet package) only\)/;
+  const legacy = /\blegacy approv|\bapprover set\b|\bconfirm_with_approval\b|\bfifteen-minute\b|\bdisable_legacy\b/;
+  const wrong = [];
+  for (const [code, text] of table) {
+    if (code >= 1000) continue; // splash_spend and later: their approvals are v2's own.
+    if (legacy.test(text) && !marked.test(text)) wrong.push(`${code}: ${text.slice(0, 80)}…`);
+  }
+  assert.deepEqual(wrong, [], `unmarked sentences about the legacy path:\n  ${wrong.join('\n  ')}`);
+  for (const code of [21, 29, 30, 31, 32, 33, 41, 60, 369, 418, 431]) {
+    assert.match(table.get(code) ?? '', marked, `${code} is marked as an earlier testnet package's code`);
+  }
 });

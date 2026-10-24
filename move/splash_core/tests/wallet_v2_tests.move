@@ -8,7 +8,7 @@
 /// not from the code: the founder names the wallet, the wallet registers
 /// itself with members who are all owners, single-signer wallets are chosen
 /// by the founder and acknowledged by the wallet, rotation takes two
-/// signatures (the old wallet and the new one), and no approver, stranger or
+/// signatures (the old wallet and the new one), and no stranger or
 /// `AdminCap` holder has any path in.
 ///
 /// Move tests do not check signatures, so a test acts as a multisig by sending
@@ -46,8 +46,6 @@ const MIXED_PASSKEY_ZKLOGIN_ED25519_2_OF_3: address = @0x017a504ea8bd39eba683e03
 // ─── Parties with no wallet authority ──────────────────────────────────────
 
 const STRANGER: address = @0xBAD;
-/// In the account's legacy approver set, and nothing else.
-const APPROVER: address = @0xBEEF;
 /// Holds `AdminCap`: governance, which can stop an account but must never be
 /// able to choose who pays from it.
 const GOVERNANCE: address = @0xAD;
@@ -189,15 +187,6 @@ fun add_owner(s: &mut Scenario, who: address) {
     ts::return_shared(account);
 }
 
-/// The founder adds `who` as a legacy approver. Only before the wallet
-/// registers: after, the legacy approver set is closed.
-fun add_approver(s: &mut Scenario, who: address) {
-    s.next_tx(h::founder());
-    let mut account = s.take_shared<BusinessAccount>();
-    business_account::add_approver(&mut account, who, s.ctx());
-    ts::return_shared(account);
-}
-
 /// The shared account, for reading. The caller returns it.
 fun take(s: &mut Scenario): BusinessAccount {
     s.next_tx(OBSERVER);
@@ -289,16 +278,6 @@ fun the_founder_nominates_the_wallet() {
 fun a_co_owner_cannot_nominate() {
     let mut s = h::setup_without_wallet();
     nominate(&mut s, h::owner_2(), h::wallet(), false);
-    s.end();
-}
-
-#[test]
-#[expected_failure(abort_code = business_account::E_NOT_THE_FOUNDER)]
-/// A legacy approver releases payouts; it has no say in who the wallet is.
-fun an_approver_cannot_nominate() {
-    let mut s = h::setup_without_wallet();
-    add_approver(&mut s, APPROVER);
-    nominate(&mut s, APPROVER, h::wallet(), false);
     s.end();
 }
 
@@ -504,17 +483,6 @@ fun the_founder_alone_cannot_register_the_wallet() {
 
 #[test]
 #[expected_failure(abort_code = business_account::E_WALLET_NOT_NOMINATED)]
-/// A legacy approver has no registration path.
-fun an_approver_cannot_register_the_wallet() {
-    let mut s = h::setup_without_wallet();
-    add_approver(&mut s, APPROVER);
-    nominate(&mut s, h::founder(), h::wallet(), false);
-    register(&mut s, APPROVER, h::keys(), h::weights(), h::threshold(), false);
-    s.end();
-}
-
-#[test]
-#[expected_failure(abort_code = business_account::E_WALLET_NOT_NOMINATED)]
 /// Holding `AdminCap` confers nothing here: no wallet function takes it, and
 /// the holder's address is not the wallet.
 fun the_admin_cap_holder_cannot_register_the_wallet() {
@@ -592,20 +560,6 @@ fun a_wallet_in_another_order_records_its_members_in_that_order() {
 /// cannot be slipped into the quorum, even with the founder's nomination.
 fun a_non_owner_member_is_refused() {
     let mut s = h::setup_without_wallet();
-    let keys = vector[p1(), p2(), ED25519];
-    let wallet = multisig::derive_address(&keys, &h::weights(), h::threshold());
-    nominate(&mut s, h::founder(), wallet, false);
-    register(&mut s, wallet, keys, h::weights(), h::threshold(), false);
-    s.end();
-}
-
-#[test]
-#[expected_failure(abort_code = business_account::E_SIGNER_NOT_AN_OWNER)]
-/// Being a legacy approver is not being an owner. An approver key is exactly
-/// the kind of operator-held key D1 keeps out of the wallet.
-fun an_approver_member_is_refused() {
-    let mut s = h::setup_without_wallet();
-    add_approver(&mut s, ED25519_ADDRESS);
     let keys = vector[p1(), p2(), ED25519];
     let wallet = multisig::derive_address(&keys, &h::weights(), h::threshold());
     nominate(&mut s, h::founder(), wallet, false);
@@ -836,17 +790,6 @@ fun the_founder_cannot_rotate() {
 fun a_stranger_cannot_rotate() {
     let mut s = h::setup();
     rotate(&mut s, STRANGER, b_keys(), b_weights(), b_threshold(), false);
-    s.end();
-}
-
-#[test]
-#[expected_failure(abort_code = business_account::E_NOT_THE_WALLET)]
-/// A legacy approver has no rotation path.
-fun an_approver_cannot_rotate() {
-    let mut s = h::setup_without_wallet();
-    add_approver(&mut s, APPROVER);
-    h::register_wallet(&mut s);
-    rotate(&mut s, APPROVER, b_keys(), b_weights(), b_threshold(), false);
     s.end();
 }
 
@@ -1380,18 +1323,6 @@ fun after_registration_a_stranger_cannot_unfreeze() {
     let mut s = h::setup();
     freeze_as(&mut s, h::owner_3());
     unfreeze_as(&mut s, STRANGER);
-    s.end();
-}
-
-#[test]
-#[expected_failure(abort_code = business_account::E_WALLET_MUST_UNFREEZE)]
-/// Nor a legacy approver.
-fun after_registration_an_approver_cannot_unfreeze() {
-    let mut s = h::setup_without_wallet();
-    add_approver(&mut s, APPROVER);
-    h::register_wallet(&mut s);
-    freeze_as(&mut s, h::owner_3());
-    unfreeze_as(&mut s, APPROVER);
     s.end();
 }
 

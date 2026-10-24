@@ -78,8 +78,8 @@ const E_ADDITION_LAPSED: u64 = 367;
 /// Removing the last accepted asset would stop every payment until a 24-hour
 /// addition runs. Use `pause` to halt.
 const E_LAST_ASSET: u64 = 368;
-/// The legacy per-person approval path has been switched off for good.
-const E_LEGACY_DISABLED: u64 = 369;
+// 369 is retired with the legacy approval path's one-way switch
+// (E_LEGACY_DISABLED, raised only by the earlier v2 testnet package).
 
 public struct ComplianceConfig has key {
     id: UID,
@@ -96,8 +96,7 @@ public struct ComplianceConfig has key {
     /// On the v2 paths it is the floor of a BANK PAYOUT (kind 1), together
     /// with the 99 USDC platform minimum: whichever is larger, checked when
     /// the intent opens and again when it settles (`payment_intent`). Wallet,
-    /// Splash-business and cross-chain payments have no floor, and the legacy
-    /// approval path keeps its fixed 99 USDC one.
+    /// Splash-business and cross-chain payments have no floor.
     min_settlement_amount: u64,
     /// S-12 fix. Object IDs of the DeepBook pools the liquidity guard is
     /// allowed to read. Without this, `assert_deepbook_liquidity` trusts a
@@ -121,11 +120,6 @@ public struct ComplianceConfig has key {
     bridge_adapters: VecSet<String>,
     /// Additions waiting out their 24-hour notice.
     pending_additions: vector<PendingAddition>,
-    /// v2. Whether the deprecated per-person approval path
-    /// (`payment_intent::confirm_with_approval`) still runs. It starts on and
-    /// can only be turned off, by `ComplianceCap` or `AdminCap`. Nothing turns
-    /// it back on, so migration, once declared complete, stays complete.
-    legacy_enabled: bool,
 }
 
 /// The single right to create the config, minted once at publish.
@@ -226,14 +220,6 @@ public struct RegistryEntryRemoved has copy, drop {
     type_name: String,
 }
 
-/// The deprecated per-person approval path was switched off, for good.
-/// Emitted once, by whichever of `disable_legacy` and `admin_disable_legacy`
-/// ran first. `ComplianceConfigUpdated` has no field for the switch, so
-/// without this the one-way change would not show on the event stream.
-public struct LegacyDisabled has copy, drop {
-    config_id: address,
-}
-
 /// Mint the one `ConfigTicket`, to the publisher.
 fun init(ctx: &mut TxContext) {
     transfer::transfer(ConfigTicket { id: object::new(ctx) }, ctx.sender());
@@ -280,7 +266,6 @@ public fun create<SettlementAsset>(
         settlement_apps: vec_set::empty(),
         bridge_adapters: vec_set::empty(),
         pending_additions: vector[],
-        legacy_enabled: true,
     };
     let config_id = object::id(&config);
     let cap = ComplianceCap {
@@ -607,38 +592,6 @@ public fun admin_remove_registry_entry(
     drop_entry(config, registry, type_name);
 }
 
-/// Switch the deprecated per-person approval path off, for good.
-/// Subtractive: it stops a way of moving money and adds none.
-///
-/// Idempotent. The first call that finds it on emits `LegacyDisabled`; a
-/// call that finds it already off changes nothing and emits no second one.
-public fun disable_legacy(config: &mut ComplianceConfig, cap: &ComplianceCap, registry_caps: &CapRegistry) {
-    assert_compliance_cap(registry_caps, cap);
-    assert!(cap.config_id == object::id(config), E_INVALID_CAP);
-    // Written out here, not in a helper, so check-compliance-subtractive sees
-    // the switch in the body of the function that takes the cap.
-    if (config.legacy_enabled) {
-        config.legacy_enabled = false;
-        event::emit(LegacyDisabled { config_id: object::id_address(config) });
-    };
-    emit_update(config);
-}
-
-/// The same switch, by the cold multisig.
-public fun admin_disable_legacy(_admin: &AdminCap, config: &mut ComplianceConfig) {
-    if (config.legacy_enabled) {
-        config.legacy_enabled = false;
-        event::emit(LegacyDisabled { config_id: object::id_address(config) });
-    };
-    emit_update(config);
-}
-
-/// Hot-path guard for the legacy approval path.
-public fun assert_legacy_enabled(config: &ComplianceConfig) {
-    assert!(config.legacy_enabled, E_LEGACY_DISABLED);
-}
-
-public fun legacy_enabled(config: &ComplianceConfig): bool { config.legacy_enabled }
 public fun addition_window_ms(): u64 { ADDITION_WINDOW_MS }
 
 fun drop_pending(config: &mut ComplianceConfig, registry: u8, type_name: String) {
