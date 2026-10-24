@@ -73,8 +73,15 @@ test('Sui is domain 8, and every chain domain matches Circle’s table', () => {
   assert.deepEqual(fastSources.sort(), [...CIRCLE_FAST_SOURCES].sort());
 });
 
-test('every listed chain reaches Sui over a CCTP V2 standard transfer at the 0 bps Circle lists', () => {
-  for (const source of Object.keys(CIRCLE_V2_DOMAINS)) {
+// Circle's fees page, read 24 Oct 2026, "TokenMessenger contracts with fee
+// switch support": Sei is the only chain listed. Its depositForBurn requires
+// maxFee >= getMinFeeAmount(amount), a minimum set on chain
+// (circlefin/evm-cctp-contracts 2f9a2ba), so a standard burn with maxFee 0
+// reverts there, whatever the standard table's 0 bps says.
+const CIRCLE_FEE_SWITCH_SOURCES = ['SEI'];
+
+test('every listed chain without a fee switch reaches Sui over a CCTP V2 standard transfer at the 0 bps Circle lists', () => {
+  for (const source of Object.keys(CIRCLE_V2_DOMAINS).filter((chain) => !CIRCLE_FEE_SWITCH_SOURCES.includes(chain))) {
     const plan = planFunding({ source, asset: 'USDC', amount: '1000', destination: WALLET });
     assert.equal(plan.available, true, source);
     assert.equal(plan.route, 'CCTP_V2');
@@ -89,6 +96,23 @@ test('every listed chain reaches Sui over a CCTP V2 standard transfer at the 0 b
     assert.ok(plan.warnings.some((w) => /maxFee 0/.test(w)), `${source}: the fee caveat is stated`);
     assert.ok(!plan.warnings.some((w) => /no fee/i.test(w)), `${source}: never claims "no fee"`);
   }
+});
+
+test('a standard burn from Sei is not planned with maxFee 0: Sei enforces a minimum fee the offline planner cannot read', () => {
+  for (const [label, input] of [
+    ['USDC', { source: 'SEI', asset: 'USDC', amount: '100', destination: WALLET }],
+    ['USDC, fast asked for (Sei has none)', { source: 'SEI', asset: 'USDC', amount: '100', destination: WALLET, speed: 'FAST' }],
+    ['USDT, swapped first', { source: 'SEI', asset: 'USDT', amount: '100', destination: WALLET }],
+  ]) {
+    const plan = planFunding(input);
+    assert.equal(plan.available, false, `${label}: planned with maxFee ${plan.cctp?.maxFeeMinor} and ${plan.arrivesMinor} of ${plan.amountMinor} arriving, which reverts on Sei`);
+    assert.equal(plan.source, 'SEI', label);
+    assert.match(plan.reason, /minimum fee/, `${label}: the reason is given`);
+    assert.match(plan.reason, /getMinFeeAmount/, `${label}: and where the fee is read`);
+    assert.ok(plan.alternatives.length >= 1, `${label}: with somewhere else to go`);
+  }
+  const switched = Object.keys(FUNDING_CHAINS).filter((chain) => !planFunding({ source: chain, asset: 'USDC', amount: '100', destination: WALLET }).available);
+  assert.deepEqual(switched, CIRCLE_FEE_SWITCH_SOURCES, 'only the chains Circle lists with a fee switch are refused');
 });
 
 test('Aptos, unreachable over the legacy protocol, now reaches Sui', () => {
