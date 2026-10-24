@@ -45,7 +45,9 @@ function withRoot({ edits = {}, extra = {}, drop = [] }, fn) {
     }
     for (const [rel, edit] of Object.entries(edits)) {
       const file = path.join(root, rel);
-      const before = readFileSync(file, 'utf8');
+      // LF, whatever the checkout wrote: every planted edit is written with
+      // \n, and a Windows checkout (core.autocrlf) has \r\n on disk.
+      const before = readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
       const after = edit(before);
       assert.notEqual(after, before, `the planted edit did not change ${rel}`);
       writeFileSync(file, after);
