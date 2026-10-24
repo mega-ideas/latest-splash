@@ -129,6 +129,13 @@ export const envSchema = z.object({
    *  Unset on mainnet, no fee is quoted and no payment is built; unset
    *  elsewhere, a quote uses A1's launch schedule and says so. */
   SPLASH_FEE_CONFIG_ID: objectId,
+  /** splash_core::address_registry::Registry: the partner deposit addresses
+   *  and business wallets. The operator-outflow monitor reads it to clear a
+   *  v2 executor payment to one of them. */
+  SPLASH_ADDRESS_REGISTRY_ID: objectId,
+  /** The splash_spend package, whose pay_intent is the v2 executor path the
+   *  operator-outflow monitor approves. */
+  SPLASH_SPEND_PACKAGE_ID: objectId,
   SPLASH_COMPLIANCE_CAP_ID: objectId,
   SPLASH_BUSINESS_ACCOUNT_ID: objectId,
   SPLASH_TRANSFER_COIN_ID: objectId,

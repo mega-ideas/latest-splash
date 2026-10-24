@@ -200,3 +200,30 @@ test('a monitor that cannot read the fee recipient or the registry fails closed'
     assert.match(noRegistry.reason, /registry unreadable/);
   });
 });
+
+// ─── The registry reader ───────────────────────────────────────────────────
+
+test('the registry reader finds partner deposit addresses and business wallets, and refuses a foreign object', async () => {
+  const { graphqlRegistryReader } = await import('../lib/server/address-registry-reader.ts');
+  const REGISTRY = '0x' + 'ab'.repeat(32);
+  const PARTNER_TABLE = '0x' + '11'.repeat(32);
+  const WALLET_TABLE = '0x' + '22'.repeat(32);
+  const BUSINESS = '0x' + '33'.repeat(32);
+  const b64 = (addr) => Buffer.from(addr.slice(2), 'hex').toString('base64');
+  const members = { [PARTNER_TABLE]: new Set([b64(PARTNER)]), [WALLET_TABLE]: new Set([b64(BUSINESS)]) };
+  const registry = (repr) => ({
+    data: { object: { asMoveObject: { contents: { type: { repr }, json: { partner_addresses: { id: PARTNER_TABLE }, business_wallets: { id: WALLET_TABLE } } } } } },
+  });
+  const fetcherFor = (repr) => async (_url, init) => {
+    const { variables } = JSON.parse(init.body);
+    const body = variables.id
+      ? registry(repr)
+      : { data: { table: { dynamicField: members[variables.table]?.has(variables.name) ? { __typename: 'DynamicField' } : null } } };
+    return { ok: true, status: 200, json: async () => body };
+  };
+  const read = graphqlRegistryReader(REGISTRY, fetcherFor(`${CORE}::address_registry::Registry`), 'https://graphql.example/graphql');
+  assert.deepEqual([...(await read([PARTNER, BUSINESS, STRANGER]))].sort(), [PARTNER, BUSINESS].sort());
+  assert.deepEqual([...(await read([]))], []);
+  const foreign = graphqlRegistryReader(REGISTRY, fetcherFor(`${OTHER}::fake::Registry`), 'https://graphql.example/graphql');
+  await assert.rejects(foreign([PARTNER]), /not an address_registry::Registry/);
+});
