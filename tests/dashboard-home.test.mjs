@@ -193,6 +193,23 @@ test('recent payments merge bank payouts and wallet payments, newest first, with
   );
 });
 
+test('a payout amount shows its currency’s decimals however it was stored', async () => {
+  const { buildHomeSummary } = await home();
+  // Postgres hands targetAmount back without trailing zeros ("57400").
+  const summary = buildHomeSummary({
+    orgId: ORG,
+    now: NOW,
+    transfers: [
+      transfer({ id: 'a', targetAmount: '57400', createdAt: '2026-10-24T03:00:00.000Z' }),
+      transfer({ id: 'b', targetAmount: '57400.5', createdAt: '2026-10-23T03:00:00.000Z' }),
+      transfer({ id: 'c', targetCurrency: 'IDR', targetAmount: '81450000.00', createdAt: '2026-10-22T03:00:00.000Z' }),
+    ],
+    walletPayments: [],
+    proposals: [],
+  });
+  assert.deepEqual(summary.recent.map((r) => r.amount), ['PHP 57,400.00', 'PHP 57,400.50', 'IDR 81,450,000']);
+});
+
 test('recent payments stop at six', async () => {
   const { buildHomeSummary } = await home();
   const transfers = Array.from({ length: 9 }, (_, i) => transfer({ id: `ti_${i}`, createdAt: `2026-10-0${i + 1}T00:00:00.000Z` }));
