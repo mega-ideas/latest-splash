@@ -33,7 +33,7 @@
  *   3. Those functions loosen nothing written in their own body (no insert or
  *      push_back, nothing but `true` written to `paused`, no `&mut` borrow of
  *      it), and call no function of compliance_config except the read-only or
- *      checking HELPERS below. A loosening cannot hide one call away.
+ *      checking HELPERS below, by a plain `name(` or `name<..>(` call.
  *   4. Anywhere in core: nothing but the literal `false` is ever assigned to
  *      `legacy_enabled`, and it is never borrowed `&mut`.
  *   5. Anywhere in core except `activate_addition`: no insert in a function
@@ -47,9 +47,18 @@
  *     write a ComplianceConfig field, so such a path needs a public function
  *     there, which rules 4 and 5 still see if it touches legacy_enabled or a
  *     registry, but not if it, say, resumes settlement.
+ *   - A helper reached other than by a plain call: a macro (`name!(..)`) or a
+ *     `use fun` method alias (`config.alias()`).
+ *   - A registry written through a reference held in a local:
+ *     `let s = registry_set_mut(..); *s = ..`, or `let a = &mut
+ *     config.settlement_apps; *a = ..`. Rule 5 sees the field name and
+ *     `*registry_set_mut(`, not where a borrowed reference goes next.
  *   - Whether the asserts in an ALLOWED function compare the right way round
  *     (the Move tests in tests/compliance_tests.move do that).
  *   - A difference between this source and the bytecode published.
+ * These are why it is a tripwire for honest mistakes, not the boundary: the
+ * boundary is review of the exact source commit before the fresh publish,
+ * and after it the 24-hour notice on every core upgrade.
  * If a legitimate change trips it, restructure the change; adding a name to
  * ALLOWED or HELPERS is a deliberate act that the commit message must justify.
  *
@@ -130,7 +139,7 @@ const HELPERS = new Set(['assert_compliance_cap', 'find_pending', 'registry_set'
 const NEVER = [
   { pattern: /\binsert\s*\(/, why: 'adding a venue or a registry entry is a loosening — admin_allow_pool, or the 24-hour activate_addition' },
   { pattern: /\bpush_back\s*\(/, why: 'adding to a list is a loosening' },
-  { pattern: /\bpaused\s*=(?!=)(?!\s*true\b)/, why: 'anything but `true` written to paused can resume settlement — use admin_set_paused' },
+  { pattern: /\bpaused\s*=(?!=)(?!\s*true\s*;)/, why: 'anything but `true` written to paused can resume settlement — use admin_set_paused' },
   { pattern: /&\s*mut\s+[\w.]*\bpaused\b/, why: 'a mutable borrow of paused can resume settlement' },
 ];
 
@@ -192,7 +201,9 @@ for (const unit of units) {
     const body = fn.body;
 
     // 4. legacy_enabled is one-way, everywhere.
-    if (/\blegacy_enabled\s*=(?!=)(?!\s*false\b)/.test(body)) {
+    // The whole right-hand side must be the literal: `false || on` starts
+    // with false and is not false.
+    if (/\blegacy_enabled\s*=(?!=)(?!\s*false\s*;)/.test(body)) {
       failures.push(`${where}: \`${fn.name}\` assigns legacy_enabled something other than \`false\` — the legacy approval path can only ever be switched off.`);
     }
     if (/&\s*mut\s+[\w.]*\blegacy_enabled\b/.test(body)) {
