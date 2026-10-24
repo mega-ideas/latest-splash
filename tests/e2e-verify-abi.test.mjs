@@ -367,3 +367,256 @@ test('the verify script never calls process.exit once the chain has answered: on
     assert.ok(m.index < firstChainCode, `stop() at offset ${m.index} runs after the chain may have answered; use refuse()`);
   }
 });
+
+// ─── D11's end state (review, Oct 2026) ─────────────────────────────────────
+//
+// D11: splash_spend and splash_upgrade_delay are published immutable, and
+// core's UpgradeCap sits in the 24-hour DelayedUpgradeCap, additive (128),
+// owned by the governance multisig. The verify script checked none of it:
+// it reported "UpgradeCap custody" PASS whenever the operator did not hold
+// the cap, and its filter passed a cap whose contents the node did not
+// return. The checks live in scripts/v2-end-state.mjs, read-only, so they can
+// be run here against a mocked node.
+
+const END_STATE = '../scripts/v2-end-state.mjs';
+const UPGRADE_CAP = '0x2::package::UpgradeCap';
+const results = JSON.parse(await source('experiments/v2-phase1/testnet-e2e-results.json'));
+const CORE = results.steps.publishCore.packageId;
+const SPEND = results.steps.publishSpend.packageId;
+const DELAY = results.steps.publishDelay.packageId;
+const WRAPPER = results.steps.wrap.wrapper;
+const GOVERNANCE = results.signers.governance;
+const OPERATOR = `0x${'5'.repeat(64)}`;
+
+/**
+ * A node that answers the three reads the end-state checks make, built from
+ * the testnet run (testnet-e2e.mjs published both packages with
+ * make_immutable in the publish transaction, and governance wrapped the core
+ * cap). `change` edits the world before it is served.
+ */
+function mockNode(change = (w) => w) {
+  const publish = (digest, pkg, created = []) => ({
+    digest,
+    effects: {
+      changedObjects: [
+        { objectId: pkg, idOperation: 'Created', outputState: 'PackageWrite' },
+        ...created.map((o) => ({ objectId: o.id, idOperation: 'Created', outputState: 'ObjectWrite' })),
+      ],
+    },
+    objectTypes: Object.fromEntries(created.map((o) => [o.id, o.type])),
+    transaction: {
+      commands: [
+        { $kind: 'Publish', Publish: {} },
+        { $kind: 'MoveCall', MoveCall: { package: '0x2', module: 'package', function: 'make_immutable' } },
+      ],
+    },
+  });
+  const world = change({
+    objects: {
+      [SPEND]: { objectId: SPEND, type: 'package', owner: { $kind: 'Immutable' }, previousTransaction: results.steps.publishSpend.digest },
+      [DELAY]: { objectId: DELAY, type: 'package', owner: { $kind: 'Immutable' }, previousTransaction: results.steps.publishDelay.digest },
+      [WRAPPER]: {
+        objectId: WRAPPER,
+        type: `${DELAY}::upgrade_delay::DelayedUpgradeCap`,
+        owner: { $kind: 'AddressOwner', AddressOwner: GOVERNANCE },
+        json: { id: WRAPPER, cap: { id: results.steps.publishCore.upgradeCap, package: CORE, version: '1', policy: 128 }, original_package: CORE, pending: null, pending_owner: null },
+      },
+    },
+    versions: { [SPEND]: [{ packageId: SPEND, version: 1n }], [DELAY]: [{ packageId: DELAY, version: 1n }] },
+    transactions: {
+      [results.steps.publishSpend.digest]: publish(results.steps.publishSpend.digest, SPEND, [
+        { id: results.steps.publishSpend.policyRegistry, type: `${SPEND}::spend_policy::PolicyRegistry` },
+      ]),
+      [results.steps.publishDelay.digest]: publish(results.steps.publishDelay.digest, DELAY),
+    },
+  });
+  const notFound = (what) => Object.assign(new Error(`${what} not found`), { code: 'NOT_FOUND' });
+  return {
+    core: {
+      async getObject({ objectId, include = {} }) {
+        const o = world.objects[objectId];
+        if (!o) throw notFound(objectId);
+        return { object: { ...o, json: include.json ? (o.json ?? null) : undefined } };
+      },
+      async getTransaction({ digest }) {
+        const t = world.transactions[digest];
+        if (!t) throw notFound(digest);
+        return { $kind: 'Transaction', Transaction: t };
+      },
+    },
+    movePackageService: {
+      async listPackageVersions({ packageId }) {
+        return { response: { versions: world.versions[packageId] ?? [] } };
+      },
+    },
+  };
+}
+
+const wrapperInput = (over = {}) => ({ wrapperId: WRAPPER, delayPackageId: DELAY, corePackageId: CORE, governance: GOVERNANCE, operator: OPERATOR, ...over });
+const byCheck = (records) => Object.fromEntries(records.map((r) => [r.check, r]));
+
+test('the verify script checks D11 end state with the v2 ids, and reports an unset id skipped, never passed', async () => {
+  const script = await source('scripts/e2e-testnet.mjs');
+  for (const key of ['SPLASH_SPEND_PACKAGE_ID', 'SPLASH_UPGRADE_DELAY_PACKAGE_ID', 'SPLASH_UPGRADE_WRAPPER_ID', 'SPLASH_GOVERNANCE_ADDRESS']) {
+    assert.ok(script.includes(`'${key}'`), `scripts/e2e-testnet.mjs reads ${key}`);
+  }
+  const main = functionBody(script, 'main');
+  assert.ok(main.includes('await checkEndState()'), 'main checks the end state');
+  assert.ok(main.indexOf('await checkIds()') < main.indexOf('await checkEndState()'));
+  assert.ok(main.indexOf('await checkEndState()') < main.indexOf('await checkAbi()'), 'before anything is simulated');
+
+  const { checkImmutablePackage, checkUpgradeWrapper } = await import(END_STATE);
+  const node = mockNode();
+  const spend = await checkImmutablePackage(node, { label: 'splash_spend immutable', envKey: 'SPLASH_SPEND_PACKAGE_ID', packageId: '' });
+  assert.equal(spend.status, 'SKIP');
+  assert.match(spend.detail, /SPLASH_SPEND_PACKAGE_ID/);
+  for (const r of await checkUpgradeWrapper(node, wrapperInput({ wrapperId: '' }))) {
+    assert.equal(r.status, 'SKIP', `${r.check} is skipped without SPLASH_UPGRADE_WRAPPER_ID`);
+  }
+  const owner = byCheck(await checkUpgradeWrapper(node, wrapperInput({ governance: '' })));
+  assert.equal(owner['Upgrade wrapper owner'].status, 'SKIP', 'the owner is not passed without the governance address to compare');
+  assert.match(owner['Upgrade wrapper owner'].detail, /SPLASH_GOVERNANCE_ADDRESS/);
+  const untyped = byCheck(await checkUpgradeWrapper(node, wrapperInput({ delayPackageId: '' })));
+  assert.equal(untyped['Upgrade wrapper'].status, 'SKIP', 'the wrapper is not passed without the canonical package to pin its type to');
+  assert.match(untyped['Upgrade wrapper'].detail, /SPLASH_UPGRADE_DELAY_PACKAGE_ID/);
+});
+
+test("the testnet run's packages and wrapper pass the end-state checks", async () => {
+  const { checkImmutablePackage, checkUpgradeWrapper } = await import(END_STATE);
+  const node = mockNode();
+  for (const [label, envKey, packageId] of [
+    ['splash_spend immutable', 'SPLASH_SPEND_PACKAGE_ID', SPEND],
+    ['splash_upgrade_delay immutable', 'SPLASH_UPGRADE_DELAY_PACKAGE_ID', DELAY],
+  ]) {
+    const r = await checkImmutablePackage(node, { label, envKey, packageId });
+    assert.equal(r.status, 'PASS', `${label}: ${r.detail}`);
+  }
+  const wrapper = byCheck(await checkUpgradeWrapper(node, wrapperInput()));
+  assert.equal(wrapper['Upgrade wrapper'].status, 'PASS', wrapper['Upgrade wrapper'].detail);
+  assert.match(wrapper['Upgrade wrapper'].detail, /128/);
+  assert.equal(wrapper['Upgrade wrapper owner'].status, 'PASS', wrapper['Upgrade wrapper owner'].detail);
+});
+
+test('a splash_spend that has a later version fails', async () => {
+  const { checkImmutablePackage } = await import(END_STATE);
+  const later = `0x${'7'.repeat(64)}`;
+  const node = mockNode((w) => ({ ...w, versions: { ...w.versions, [SPEND]: [{ packageId: SPEND, version: 1n }, { packageId: later, version: 2n }] } }));
+  const r = await checkImmutablePackage(node, { label: 'splash_spend immutable', envKey: 'SPLASH_SPEND_PACKAGE_ID', packageId: SPEND });
+  assert.equal(r.status, 'FAIL');
+  assert.match(r.detail, new RegExp(later));
+});
+
+test('an UpgradeCap that survived the publish transaction fails, whether or not it still exists', async () => {
+  const { checkImmutablePackage } = await import(END_STATE);
+  const cap = `0x${'c'.repeat(64)}`;
+  const leaveCap = (alive) => (w) => {
+    const t = w.transactions[results.steps.publishSpend.digest];
+    t.effects.changedObjects.push({ objectId: cap, idOperation: 'Created', outputState: 'ObjectWrite' });
+    t.objectTypes[cap] = UPGRADE_CAP;
+    t.transaction.commands = t.transaction.commands.filter((c) => c.$kind !== 'MoveCall');
+    if (alive) w.objects[cap] = { objectId: cap, type: UPGRADE_CAP, owner: { $kind: 'AddressOwner', AddressOwner: OPERATOR } };
+    return w;
+  };
+  const input = { label: 'splash_spend immutable', envKey: 'SPLASH_SPEND_PACKAGE_ID', packageId: SPEND };
+  const alive = await checkImmutablePackage(mockNode(leaveCap(true)), input);
+  assert.equal(alive.status, 'FAIL');
+  assert.match(alive.detail, new RegExp(`${cap}.*exists`));
+  const gone = await checkImmutablePackage(mockNode(leaveCap(false)), input);
+  assert.equal(gone.status, 'FAIL', 'a cap made immutable in a later transaction leaves an upgrade window the chain cannot rule out');
+  assert.match(gone.detail, /one transaction/);
+});
+
+test('a publish transaction whose created objects the node does not type fails closed', async () => {
+  const { checkImmutablePackage } = await import(END_STATE);
+  const node = mockNode((w) => {
+    w.transactions[results.steps.publishSpend.digest].objectTypes = {};
+    return w;
+  });
+  const r = await checkImmutablePackage(node, { label: 'splash_spend immutable', envKey: 'SPLASH_SPEND_PACKAGE_ID', packageId: SPEND });
+  assert.equal(r.status, 'FAIL');
+});
+
+test('a publish transaction that runs anything but Publish then make_immutable fails: it could have kept the cap', async () => {
+  const { checkImmutablePackage } = await import(END_STATE);
+  const input = { label: 'splash_spend immutable', envKey: 'SPLASH_SPEND_PACKAGE_ID', packageId: SPEND };
+  // A cap created and wrapped in the same transaction never shows in its
+  // effects, so only the commands rule that out.
+  const kept = mockNode((w) => {
+    w.transactions[results.steps.publishSpend.digest].transaction.commands[1] = {
+      $kind: 'MoveCall',
+      MoveCall: { package: `0x${'e'.repeat(64)}`, module: 'vault', function: 'keep' },
+    };
+    return w;
+  });
+  const r = await checkImmutablePackage(kept, input);
+  assert.equal(r.status, 'FAIL');
+  assert.match(r.detail, /vault::keep/);
+  const unread = mockNode((w) => {
+    delete w.transactions[results.steps.publishSpend.digest].transaction;
+    return w;
+  });
+  assert.equal((await checkImmutablePackage(unread, input)).status, 'FAIL', 'a publish whose commands the node does not return fails closed');
+});
+
+test('a wrapper with a looser policy, around another package, or held by anyone but governance fails', async () => {
+  const { checkUpgradeWrapper, ADDITIVE_POLICY } = await import(END_STATE);
+  assert.equal(ADDITIVE_POLICY, 128);
+  const withJson = (patch) => (w) => {
+    w.objects[WRAPPER].json = { ...w.objects[WRAPPER].json, ...patch(w.objects[WRAPPER].json) };
+    return w;
+  };
+  const compatible = byCheck(await checkUpgradeWrapper(mockNode(withJson((j) => ({ cap: { ...j.cap, policy: 0 } }))), wrapperInput()));
+  assert.equal(compatible['Upgrade wrapper'].status, 'FAIL');
+  assert.match(compatible['Upgrade wrapper'].detail, /\b0\b.*128|128.*\b0\b/);
+
+  const other = byCheck(await checkUpgradeWrapper(mockNode(withJson(() => ({ original_package: SPEND }))), wrapperInput()));
+  assert.equal(other['Upgrade wrapper'].status, 'FAIL');
+
+  const stranger = `0x${'d'.repeat(64)}`;
+  const heldBy = (address) => (w) => {
+    w.objects[WRAPPER].owner = { $kind: 'AddressOwner', AddressOwner: address };
+    return w;
+  };
+  const elsewhere = byCheck(await checkUpgradeWrapper(mockNode(heldBy(stranger)), wrapperInput()));
+  assert.equal(elsewhere['Upgrade wrapper owner'].status, 'FAIL');
+  assert.match(elsewhere['Upgrade wrapper owner'].detail, new RegExp(stranger));
+  // The operator is a single hot key: a failure even with no governance address to compare.
+  const hot = byCheck(await checkUpgradeWrapper(mockNode(heldBy(OPERATOR)), wrapperInput({ governance: '' })));
+  assert.equal(hot['Upgrade wrapper owner'].status, 'FAIL');
+  const sameKey = byCheck(await checkUpgradeWrapper(mockNode(heldBy(OPERATOR)), wrapperInput({ governance: OPERATOR })));
+  assert.equal(sameKey['Upgrade wrapper owner'].status, 'FAIL', 'the operator is never the governance multisig');
+
+  // Dependency-only (192) is stricter than D11 asks: reported, not failed.
+  const depOnly = byCheck(await checkUpgradeWrapper(mockNode(withJson((j) => ({ cap: { ...j.cap, policy: 192 } }))), wrapperInput()));
+  assert.equal(depOnly['Upgrade wrapper'].status, 'WARN', depOnly['Upgrade wrapper'].detail);
+  // A core upgraded through the wrapper: its cap names the latest version,
+  // the wrapper still names the original.
+  const upgraded = byCheck(
+    await checkUpgradeWrapper(mockNode(withJson((j) => ({ cap: { ...j.cap, package: `0x${'8'.repeat(64)}`, version: '2' } }))), wrapperInput()),
+  );
+  assert.equal(upgraded['Upgrade wrapper'].status, 'PASS', upgraded['Upgrade wrapper'].detail);
+  assert.match(upgraded['Upgrade wrapper'].detail, /version 2/);
+
+  const wrongType = byCheck(await checkUpgradeWrapper(mockNode(), wrapperInput({ delayPackageId: SPEND })));
+  assert.equal(wrongType['Upgrade wrapper'].status, 'FAIL', 'a DelayedUpgradeCap of another package is not the canonical wrapper');
+
+  const unread = byCheck(await checkUpgradeWrapper(mockNode((w) => ({ ...w, objects: { ...w.objects, [WRAPPER]: { ...w.objects[WRAPPER], json: null } } })), wrapperInput()));
+  assert.equal(unread['Upgrade wrapper'].status, 'FAIL', 'a wrapper whose contents the node does not return fails closed');
+});
+
+test('an UpgradeCap whose contents the node does not return counts as held', async () => {
+  const { isUpgradeCapFor } = await import(END_STATE);
+  assert.equal(isUpgradeCapFor({ objectId: '0x1', json: { package: CORE } }, CORE), true);
+  assert.equal(isUpgradeCapFor({ objectId: '0x1', json: { package: SPEND } }, CORE), false);
+  assert.equal(isUpgradeCapFor({ objectId: '0x1', json: null }, CORE), true, 'fail closed: the cap might be core');
+  assert.equal(isUpgradeCapFor({ objectId: '0x1' }, CORE), true);
+  const script = await source('scripts/e2e-testnet.mjs');
+  assert.match(script, /\(o\) => isUpgradeCapFor\(o, PACKAGE\)/, 'the UpgradeCap custody check uses it');
+});
+
+test('the end-state module only reads: no key, no signing, no transaction', async () => {
+  const text = await source('scripts/v2-end-state.mjs');
+  assert.doesNotMatch(text, /signAndExecuteTransaction|executeTransaction|signTransaction|signPersonalMessage|simulateTransaction/);
+  assert.doesNotMatch(text, /@mysten\/sui\/keypairs|decodeSuiPrivateKey|Keypair|new Transaction\(/);
+  assert.doesNotMatch(text, /process\.env|writeFileSync|mkdirSync/);
+});
