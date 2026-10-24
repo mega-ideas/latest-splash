@@ -645,6 +645,31 @@ fun second_policy_in_another_asset_for_the_same_generation_aborts() {
 }
 
 #[test]
+#[expected_failure(abort_code = 1063, location = spend_policy)]
+/// Review A4: the asset is fixed at creation, and the (account, generation)
+/// slot is single-use. A policy in a coin type the compliance config does
+/// not accept would make spending rules impossible for the whole wallet
+/// generation, so it is refused before the slot is claimed.
+fun a_policy_in_an_asset_the_config_does_not_accept_cannot_be_created() {
+    let mut s = begin();
+    s.next_tx(h::wallet());
+    let mut registry = s.take_shared<PolicyRegistry>();
+    let account = s.take_shared<BusinessAccount>();
+    spend_policy::create_policy<USDT>(
+        &mut registry,
+        &account,
+        h::keys(),
+        h::weights(),
+        h::threshold(),
+        POLICY_MAX,
+        s.ctx(),
+    );
+    ts::return_shared(account);
+    ts::return_shared(registry);
+    s.end();
+}
+
+#[test]
 /// The slot is per account: two businesses in their first wallet generation
 /// each get their own policy, bound to their own account and wallet.
 fun each_account_has_its_own_policy_for_the_same_generation() {
