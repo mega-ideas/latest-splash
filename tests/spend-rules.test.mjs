@@ -444,6 +444,70 @@ test('changing a rule revokes its allowance and issues the new one in one transa
   await w.client.close();
 });
 
+test('changing a rule after a spend keeps what was spent: the lifetime cap and the current window carry over', async () => {
+  const w = await spendWorld();
+  const { members } = await withPolicy(w);
+  await giveRule(w, members, rule({ lifetimeCapMinor: 20_000n * USDC_1 }));
+  const allowanceId = [...w.spend.allowances.keys()][0];
+  w.charge(allowanceId, 15_000n * USDC_1, t0 + 1_000n);
+  const before = (await readSpendingRules(w.sc)).view.rules[0].allowances[0];
+  assert.deepEqual([before.spendableNowMinor, before.lifetimeRemainingMinor], ['0', String(5_000n * USDC_1)]);
+  const windowEnd = before.window.endsAtMs;
+
+  // Only the expiry changes. The month is spent out, so the new rule starts when it renews, with 5,000 left for life.
+  const extend = await changeSpendingRule(w.sc, { orgId: 'acme', requestedBy: 'u-founder', wallet: members, rule: rule({ lifetimeCapMinor: 20_000n * USDC_1, expiresAtMs: t0 + 180n * DAY }) });
+  assert.equal(extend.ok, true, JSON.stringify(extend));
+  const proposals = extend.request.description.actions.filter((a) => a.type === 'propose_allowance');
+  assert.deepEqual(proposals.map((p) => [p.startsAtMs, p.lifetimeCapMinor, p.expiresAtMs]), [[windowEnd, String(5_000n * USDC_1), String(t0 + 180n * DAY)]]);
+  await signBy(w, extend.request, 'founder', 'two');
+  let r = (await readSpendingRules(w.sc)).view.rules[0];
+  assert.equal(r.allowances.reduce((n, a) => n + BigInt(a.spendableNowMinor), 0n), 0n, 'nothing more this month');
+
+  // A lifetime cap at or below what was spent cannot be issued.
+  const used = await changeSpendingRule(w.sc, { orgId: 'acme', requestedBy: 'u-founder', wallet: members, rule: rule({ lifetimeCapMinor: 15_000n * USDC_1 }) });
+  assert.equal(used.code, 'lifetime_used');
+  await w.client.close();
+});
+
+test('changing a cap mid-window leaves the smaller of the new rule and what the old one had left, until the window renews', async () => {
+  const w = await spendWorld();
+  const { members } = await withPolicy(w);
+  await giveRule(w, members);
+  w.charge([...w.spend.allowances.keys()][0], 6_000n * USDC_1, t0 + 1_000n);
+  const windowEnd = (await readSpendingRules(w.sc)).view.rules[0].allowances[0].window.endsAtMs;
+  const lower = await changeSpendingRule(w.sc, { orgId: 'acme', requestedBy: 'u-founder', wallet: members, rule: rule({ cap: { period: 'month', limitMinor: 10_000n * USDC_1 } }) });
+  assert.equal(lower.ok, true, JSON.stringify(lower));
+  const proposals = lower.request.description.actions.filter((a) => a.type === 'propose_allowance');
+  assert.deepEqual(
+    proposals.map((p) => [p.rateLimit.limitMinor, p.lifetimeCapMinor, p.startsAtMs, p.expiresAtMs]),
+    [
+      [String(4_000n * USDC_1), String(4_000n * USDC_1), null, windowEnd],
+      [String(10_000n * USDC_1), null, windowEnd, String(t0 + 90n * DAY)],
+    ],
+    'this month: 10,000 less the 6,000 spent; from the renewal: the new rule',
+  );
+  await signBy(w, lower.request, 'founder', 'two');
+  const r = (await readSpendingRules(w.sc)).view.rules[0];
+  assert.equal(r.allowances.reduce((n, a) => n + BigInt(a.spendableNowMinor), 0n), 4_000n * USDC_1);
+  await w.client.close();
+});
+
+test('a rotation mid-window carries the spent amount: the reissued rule renews when the old window would have', async () => {
+  const w = await spendWorld();
+  const { members } = await withPolicy(w);
+  await passkeyFor(w, 'u-staff', STAFF);
+  await giveRule(w, members);
+  w.charge([...w.spend.allowances.keys()][0], 15_000n * USDC_1, t0 + 1_000n);
+  const windowEnd = (await readSpendingRules(w.sc)).view.rules[0].allowances[0].window.endsAtMs;
+  const next = await rotateTo3of3(w, members);
+  const first = await reissueAfterRotation(w.sc, { orgId: 'acme', requestedBy: 'u-founder', wallet: next });
+  await signBy(w, first.request, 'founder', 'two', 'three');
+  const [copy] = (await signingInbox(w.signing, { orgId: 'acme', userId: 'u-two' })).filter((r) => r.purpose === 'spend_rule');
+  const proposals = copy.description.actions.filter((a) => a.type === 'propose_allowance');
+  assert.deepEqual(proposals.map((p) => [p.startsAtMs, p.rateLimit.limitMinor]), [[windowEnd, String(15_000n * USDC_1)]], 'no fresh month in the middle of a spent one');
+  await w.client.close();
+});
+
 test('a revoked rule: its allowance is gone, the spender is off the policy, and the index says so', async () => {
   const w = await spendWorld();
   const { members } = await withPolicy(w);
