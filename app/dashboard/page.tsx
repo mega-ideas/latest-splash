@@ -1,175 +1,181 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   AlertTriangle,
-  ArrowUpRight,
+  ArrowRight,
   Bot,
-  FileText,
-  Globe,
+  CircleCheck,
   Layers,
+  RefreshCw,
   Send,
   ShieldCheck,
-  TrendingUp,
-  Upload,
-  Zap,
+  Wallet,
 } from 'lucide-react';
 import Link from 'next/link';
 
-import HoverPopup from '@/components/HoverPopup';
-import LiveExchangeTicker from '@/components/LiveExchangeTicker';
 import LocalTime from '@/components/LocalTime';
-import DashPageHeader from '@/components/dashboard/DashPageHeader';
-import DashStat from '@/components/dashboard/DashStat';
-import SettlementEngineFlow from '@/components/dashboard/SettlementEngineFlow';
 import StatusBadge, { type Status } from '@/components/StatusBadge';
+import DashPageHeader from '@/components/dashboard/DashPageHeader';
+import {
+  approvalNote,
+  businessWalletFrom,
+  formatUsdcMinor,
+  type HomePaymentRow,
+  type HomeSummary,
+  type PaymentStatus,
+} from '@/lib/dashboard/home';
 import { cn } from '@/lib/utils';
-import { usePublishedPricing } from '@/lib/fees/use-published-pricing';
-import { LAUNCH_SCOPE_CODE } from '@/lib/launch-scope-rules';
 
-// ─── Data ────────────────────────────────────────────────────────────────────
-
-// Treasury projection lives in the right column (single source on this page);
-// deeper treasury detail is the Treasury page's job.
-// Teal accent = Zeke identity (v2 D14 removed the old accent); every other
-// stat uses semantic/info tones from styles/tokens.css.
-const TOP_STATS = [
-  { label: 'Zeke operating scan', value: null, icon: Bot, accent: 'text-[var(--slate)]', bg: 'bg-[var(--teal)]/10', id: '0xwal' },
-  // Value and delta are filled from real settled transfers below. A 30-day
-  // volume is the most quotable number on the page and it was a string literal.
-  { label: 'Volume (30d)', value: null, icon: ArrowUpRight, accent: 'text-[var(--info)]', bg: 'bg-[var(--info-bg)]', id: 'volume' },
-  { label: 'Corridor Coverage', value: '1 live-model', delta: '8 implemented in code', icon: Globe, accent: 'text-[var(--info)]', bg: 'bg-[#5C9EAD]/10', id: 'corridors' },
-  { label: 'Settlement SLA', value: '400ms', delta: 'On target', icon: Zap, accent: 'text-[var(--ok)]', bg: 'bg-[var(--ok-bg)]', id: 'sla' },
-] as const;
-
-// Corridor display rows. A corridor carries no fee: Splash's fee is the
-// bank-payout schedule's (A1 §2.2), the same on every corridor, read from the
-// schedule in force (usePublishedPricing).
-const INITIAL_CORRIDORS = [
-  { pair: 'USD → PHP', flag: '🇵🇭', rate: 56.42, volume: '$4.2M', sla: '4.2m', success: 99.8, currency: 'PHP', dec: 2 },
-  { pair: 'USD → MYR', flag: '🇲🇾', rate: 4.71,  volume: '$1.8M', sla: '5.1m', success: 98.9, currency: 'MYR', dec: 2 },
-  { pair: 'USD → IDR', flag: '🇮🇩', rate: 16284,  volume: '$2.1M', sla: '3.0m', success: 99.5, currency: 'IDR', dec: 0 },
-  { pair: 'USD → VND', flag: '🇻🇳', rate: 25385,  volume: '$0.9M', sla: '4.8m', success: 98.2, currency: 'VND', dec: 0 },
-  { pair: 'USD → THB', flag: '🇹🇭', rate: 35.82,  volume: '$0.7M', sla: '5.5m', success: 97.8, currency: 'THB', dec: 2 },
-  { pair: 'USD → SGD', flag: '🇸🇬', rate: 1.345,  volume: '$0.4M', sla: '6.1m', success: 99.1, currency: 'SGD', dec: 3 },
-  { pair: 'USD → EUR', flag: '🇪🇺', rate: 0.924,  volume: '$0.3M', sla: '6.4m', success: 97.6, currency: 'EUR', dec: 3 },
-  { pair: 'USD → GBP', flag: '🇬🇧', rate: 0.789,  volume: '$0.2M', sla: '7.2m', success: 97.1, currency: 'GBP', dec: 3 },
-];
-
-/**
- * The transfer states, grouped the way an operator reads them.
+/*
+ * Home (v2 brief 5.2): the first screen after sign-in, laid out as the board
+ * (docs/design/v2-previews/boards/Main.dc.html): Splash Wallet, Needs
+ * approval and Sent this month over Recent payments, with quick actions.
  *
- * What was here: three hard-coded pairs under a heading that says "Settlement
- * Pipeline" — 8 authorized / $4,540, 19 settled today / $14,640 — plus six
- * invented transactions carrying ids shaped exactly like real ones
- * (`ti_m8q4_9b21fa`), and a Compliance panel asserting "KYB status: Approved ·
- * Sumsub verified" and "Risk tier: Tier 1 · Low risk" to every reader.
- *
- * The compliance panel is the one that mattered. It rendered identically for an
- * organisation sitting in REGISTERED that cannot move a dollar, and a panel on
- * a dashboard is read as a reading. Telling a customer their KYB is approved
- * when nothing has been checked is a statement about our own regulatory
- * posture, in the place they are most likely to believe it.
- *
- * All of it now comes from /api/transfers, /api/kyb/state and /api/settings,
- * and each panel says so when it has nothing to show.
+ * Every figure is read. The settlement-engine container, the roadmap cards,
+ * the corridor table of model volumes and test success, "Settlement SLA
+ * 400ms", the sine-wave FX ticker, a hard-coded "Batch TOTP authorization ·
+ * 12 transfers" and the treasury projection were all deleted: none of them
+ * came from this business's records. A figure that cannot be read says so.
  */
-const SETTLED_STATES = new Set(['SETTLED', 'DISBURSED', 'CREDITED']);
-const FAILED_STATES = new Set(['FAILED', 'REFUNDED', 'REFUNDING']);
-
-type TxStatus = 'settled' | 'pending' | 'failed';
-
-type TransferItem = {
-  id: string;
-  state: string;
-  recipientName: string;
-  targetCurrency: string;
-  targetAmount: string;
-  sourceAmountUsd: string;
-  createdAt: string;
-};
-
-function txStatusOf(state: string): TxStatus {
-  if (SETTLED_STATES.has(state)) return 'settled';
-  if (FAILED_STATES.has(state)) return 'failed';
-  return 'pending';
-}
 
 /** KYB lifecycle, in the words a customer needs rather than the enum. */
 const KYB_COPY: Record<string, { value: string; status: Status }> = {
-  REGISTERED: { value: 'Not started — complete business verification', status: 'pending' },
-  KYB_SUBMITTED: { value: 'Submitted — under review', status: 'pending' },
-  KYB_PROVIDER_APPROVED: { value: 'Provider approved — awaiting Splash sign-off', status: 'pending' },
-  ACTIVE: { value: 'Approved — verified and active', status: 'verified' },
-  REJECTED: { value: 'Rejected — contact compliance', status: 'failed' },
-  SUSPENDED: { value: 'Suspended — contact compliance', status: 'failed' },
+  REGISTERED: { value: 'Not started. Finish business verification to send money.', status: 'pending' },
+  KYB_SUBMITTED: { value: 'Submitted. We are reviewing your business.', status: 'pending' },
+  KYB_PROVIDER_APPROVED: { value: 'Checks passed. Waiting for Splash sign-off.', status: 'pending' },
+  ACTIVE: { value: 'Approved. Your business is verified.', status: 'verified' },
+  REJECTED: { value: 'Not approved. Contact compliance.', status: 'failed' },
+  SUSPENDED: { value: 'Suspended. Contact compliance.', status: 'failed' },
 };
 
-const NETWORK_STATUS = [
-  { label: 'Pay', status: 'Live-model', copy: 'MY-to-PH payout path' },
-  { label: 'Get paid', status: 'Built', copy: 'Invoice and pay links' },
-  { label: 'Sweep', status: 'Launch product', copy: 'Recipient account loop' },
-  { label: 'Keep', status: 'Corridor gated', copy: 'Stored balance by approval' },
-] as const;
+type WalletState =
+  | { kind: 'loading' }
+  | { kind: 'business'; usdcMinor: string }
+  | { kind: 'none'; passkeyUsdcMinor: string | null }
+  | { kind: 'unavailable' };
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function fmt(n: number) {
-  return n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+function minorFrom(body: unknown): string | null {
+  const value = (body as { usdcMinor?: unknown } | null)?.usdcMinor;
+  if (typeof value === 'string' && /^\d+$/.test(value)) return value;
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) return String(value);
+  return null;
 }
 
-function TxPill({ status }: { status: TxStatus }) {
-  // Transaction states = semantic tokens (W9.0), never palette one-offs.
-  const styles = {
-    settled: 'bg-[var(--ok-bg)] text-[#1F4452]',
-    pending: 'bg-[var(--warn-bg)] text-[var(--warn-ink)]',
-    failed: 'bg-[var(--error-bg)] text-[var(--error)]',
-  };
-  const dots = {
-    settled: 'bg-[var(--ok)]',
-    pending: 'bg-[var(--warn)]',
-    failed: 'bg-[var(--error)]',
-  };
-  const labels = { settled: 'Settled', pending: 'Pending', failed: 'Failed' };
+/**
+ * The Splash Wallet balance, from the chain. The business wallet is the
+ * Phase 2 API's (GET /api/wallet/business); until there is one, the person's
+ * own passkey wallet is shown as theirs, never as the business's.
+ */
+async function readWallet(): Promise<WalletState> {
+  try {
+    const res = await fetch('/api/wallet/business', { cache: 'no-store' });
+    const body = await res.json().catch(() => null);
+    const where = businessWalletFrom(res.status, body);
+    if (where.kind === 'error') return { kind: 'unavailable' };
+    if (where.kind === 'address') {
+      const balance = await fetch(`/api/stablecoin/wallet?address=${encodeURIComponent(where.address)}`, { cache: 'no-store' });
+      const minor = balance.ok ? minorFrom(await balance.json().catch(() => null)) : null;
+      return minor === null ? { kind: 'unavailable' } : { kind: 'business', usdcMinor: minor };
+    }
+  } catch {
+    return { kind: 'unavailable' };
+  }
+  let passkeyUsdcMinor: string | null = null;
+  try {
+    const own = await fetch('/api/stablecoin/wallet', { cache: 'no-store' });
+    if (own.ok) passkeyUsdcMinor = minorFrom(await own.json().catch(() => null));
+  } catch {
+    /* the business figure is what matters here; the passkey line just stays off */
+  }
+  return { kind: 'none', passkeyUsdcMinor };
+}
+
+const STATUS_STYLE: Record<PaymentStatus, { label: string; className: string }> = {
+  settled: { label: 'Settled', className: 'bg-[var(--ok-bg)] text-[#1F4452]' },
+  on_the_way: { label: 'On the way', className: 'bg-[var(--info-bg)] text-[#1F4452]' },
+  failed: { label: 'Failed', className: 'bg-[var(--error-bg)] text-[var(--error)]' },
+  expired: { label: 'Expired', className: 'bg-[var(--warn-bg)] text-[var(--warn-ink)]' },
+};
+
+function PaymentPill({ status }: { status: PaymentStatus }) {
+  const style = STATUS_STYLE[status];
   return (
-    <span className={cn('inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[13px] font-medium', styles[status])}>
-      <span className={cn('h-1.5 w-1.5 rounded-full', dots[status])} />
-      {labels[status]}
+    <span className={cn('inline-flex items-center rounded-full px-2.5 py-0.5 text-[12px] font-semibold', style.className)}>
+      {style.label}
     </span>
   );
 }
 
-// ─── Page ────────────────────────────────────────────────────────────────────
+function SampleChip() {
+  return (
+    <span className="ml-2 inline-flex rounded-full bg-[#326273]/10 px-2 py-0.5 align-middle text-[12px] font-semibold text-[#1F4452]">
+      Sample
+    </span>
+  );
+}
 
-export default function DashboardOverview() {
-  const [corridors] = useState(INITIAL_CORRIDORS);
-  const pricing = usePublishedPricing();
-  // No number is shown until the ledger answers; the card used to render
-  // $24,500 and $98.72 from constants, and "+$3.22" a day from nowhere.
-  const [treasuryPhase, setTreasuryPhase] = useState<'loading' | 'gated' | 'scoped' | 'live'>('loading');
-  const [yieldEarned, setYield]   = useState(0);
-  const [treasuryPrincipal, setTreasuryPrincipal] = useState(0);
-  const [treasuryApy, setTreasuryApy] = useState(0);
-  const [walSummary, setWalSummary] = useState({ detected: 0, batchable: 0, needsApproval: 0 });
-  const [treasuryRateLabel, setTreasuryRateLabel] = useState('USDY · variable');
-  const [transfers, setTransfers] = useState<TransferItem[] | null>(null);
+function FigureSkeleton() {
+  return (
+    <div aria-hidden="true" className="mt-3 space-y-2">
+      <div className="h-7 w-40 rounded-md bg-[#326273]/10 motion-safe:animate-pulse" />
+      <div className="h-4 w-28 rounded-md bg-[#326273]/10 motion-safe:animate-pulse" />
+    </div>
+  );
+}
+
+function Figure({ value, unit }: { value: string; unit?: string }) {
+  return (
+    <p className="dash-num mt-2 text-[28px] font-extrabold leading-tight tracking-[-0.02em] text-[#0c3e48]">
+      {value}
+      {unit ? <span className="ml-1.5 text-[13px] font-semibold tracking-normal text-[#326273]">{unit}</span> : null}
+    </p>
+  );
+}
+
+const QUICK_ACTIONS = [
+  { href: '/dashboard/transfer', label: 'Pay someone', help: 'A bank account, a business on Splash or a wallet', icon: Send },
+  { href: '/dashboard/batch', label: 'Batch payout', help: 'Pay many suppliers from one sheet', icon: Layers },
+  { href: '/dashboard/wallet', label: 'Open Wallet', help: 'Balances and your wallet address', icon: Wallet },
+  { href: '/dashboard/zeke', label: 'Ask Zeke', help: 'Draft a payment or find a receipt', icon: Bot },
+] as const;
+
+export default function DashboardHome() {
+  const [summary, setSummary] = useState<HomeSummary | null>(null);
+  const [summaryFailed, setSummaryFailed] = useState(false);
+  const [wallet, setWallet] = useState<WalletState>({ kind: 'loading' });
   const [kyb, setKyb] = useState<{ state: string; blocked: boolean } | null>(null);
-  const [limits, setLimits] = useState<{ dailyLimitUsd: number; perTransferLimitUsd: number } | null>(null);
   const [workspace, setWorkspace] = useState<string | null>(null);
+  // The clock the expiry note counts down from. Read when the summary lands,
+  // and once a minute after, so "expires in 3 min" does not go stale.
+  const [nowMs, setNowMs] = useState<number | null>(null);
 
-  // This organisation's own transfers. Everything below — the pipeline counts,
-  // the recent list and the 30-day volume — is derived from this one read, so
-  // three panels cannot disagree about the same transfers.
+  const loadSummary = useCallback(async () => {
+    setSummaryFailed(false);
+    try {
+      const res = await fetch('/api/home', { cache: 'no-store' });
+      if (!res.ok) throw new Error(String(res.status));
+      setSummary((await res.json()) as HomeSummary);
+      setNowMs(Date.now());
+    } catch {
+      setSummaryFailed(true);
+    }
+  }, []);
+
+  const loadWallet = useCallback(async () => {
+    setWallet({ kind: 'loading' });
+    setWallet(await readWallet());
+  }, []);
+
   useEffect(() => {
-    let active = true;
-    void fetch('/api/transfers?filter=all', { cache: 'no-store' })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d: { items?: TransferItem[] } | null) => {
-        if (!active) return;
-        setTransfers(Array.isArray(d?.items) ? d.items : []);
-      })
-      .catch(() => { if (active) setTransfers([]); });
-    return () => { active = false; };
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch on mount; state is set when it answers
+    void loadSummary();
+    void loadWallet();
+  }, [loadSummary, loadWallet]);
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNowMs(Date.now()), 60_000);
+    return () => window.clearInterval(id);
   }, []);
 
   // Compliance standing, read rather than asserted.
@@ -187,19 +193,6 @@ export default function DashboardOverview() {
 
   useEffect(() => {
     let active = true;
-    void fetch('/api/settings', { cache: 'no-store' })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d: { dailyLimitUsd?: number; perTransferLimitUsd?: number } | null) => {
-        if (!active || typeof d?.dailyLimitUsd !== 'number') return;
-        setLimits({ dailyLimitUsd: d.dailyLimitUsd, perTransferLimitUsd: d.perTransferLimitUsd ?? 0 });
-      })
-      .catch(() => {});
-    return () => { active = false; };
-  }, []);
-
-  // The header used to read "Acme Trading Sdn Bhd" for everybody.
-  useEffect(() => {
-    let active = true;
     void fetch('/api/auth/session', { cache: 'no-store' })
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { organization?: string } | null) => {
@@ -209,555 +202,261 @@ export default function DashboardOverview() {
     return () => { active = false; };
   }, []);
 
-  // Memoised so the three derivations below do not see a new array identity on
-  // every render.
-  const rows = useMemo(() => transfers ?? [], [transfers]);
-
-  // Read once, on mount. `Date.now()` during render is impure and the window
-  // does not need to move while somebody is looking at the page.
-  const [mountedAt] = useState(() => Date.now());
-
-  const pipeline = useMemo(() => {
-    const bucket = (match: (t: TransferItem) => boolean) => {
-      const picked = rows.filter(match);
-      const total = picked.reduce((sum, t) => sum + (Number.parseFloat(t.sourceAmountUsd) || 0), 0);
-      return { count: picked.length, amount: total };
-    };
-    return [
-      { label: 'Authorized', dot: 'bg-[var(--pending)]', ...bucket((t) => t.state === 'AUTHORIZED') },
-      {
-        label: 'On the way',
-        dot: 'bg-[var(--info)]',
-        ...bucket((t) => !SETTLED_STATES.has(t.state) && !FAILED_STATES.has(t.state) && t.state !== 'AUTHORIZED'),
-      },
-      { label: 'Settled', dot: 'bg-[var(--ok)]', ...bucket((t) => SETTLED_STATES.has(t.state)) },
-    ];
-  }, [rows]);
-
-  // Thirty days, counted from settled transfers only — an authorized transfer
-  // is money that has not moved, and counting it as volume overstates it.
-  const volume30d = useMemo(() => {
-    const since = mountedAt - 30 * 24 * 60 * 60 * 1000;
-    return rows
-      .filter((t) => SETTLED_STATES.has(t.state) && new Date(t.createdAt).getTime() >= since)
-      .reduce((sum, t) => sum + (Number.parseFloat(t.sourceAmountUsd) || 0), 0);
-  }, [rows, mountedAt]);
-
-  const recent = useMemo(
-    () =>
-      [...rows]
-        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-        .slice(0, 6),
-    [rows],
-  );
-
-  // Real two-bucket balances from the treasury ledger.
-  useEffect(() => {
-    let active = true;
-    fetch('/api/treasury')
-      .then(async (r) => {
-        if (!active) return;
-        if (!r.ok) {
-          // Phase 0: the treasury is not a feature yet. Say when it arrives.
-          const body = await r.json().catch(() => ({}));
-          if (r.status === 403 && body?.code === 'custody_not_licensed') setTreasuryPhase('gated');
-          // A USDC-only launch: the treasury is not part of it at all.
-          else if (r.status === 403 && body?.code === LAUNCH_SCOPE_CODE) setTreasuryPhase('scoped');
-          return;
-        }
-        const d = await r.json();
-        if (typeof d.treasuryPrincipal === 'number') setTreasuryPrincipal(d.treasuryPrincipal);
-        if (typeof d.treasuryYield === 'number') setYield(d.treasuryYield);
-        if (d.rate?.label) setTreasuryRateLabel(d.rate.label);
-        if (typeof d.rate?.apy === 'number') setTreasuryApy(d.rate.apy);
-        setTreasuryPhase('live');
-      })
-      .catch(() => {});
-    return () => { active = false; };
-  }, []);
-
-  useEffect(() => {
-    void fetch('/api/copilot/summary')
-      .then((response) => response.json())
-      .then((summary: { detected?: number; batchable?: number; needsApproval?: number }) => {
-        setWalSummary({
-          detected: summary.detected ?? 0,
-          batchable: summary.batchable ?? 0,
-          needsApproval: summary.needsApproval ?? 0,
-        });
-      })
-      .catch(() => {});
-  }, []);
+  const note = summary && nowMs !== null ? approvalNote(summary.needsApproval, nowMs) : null;
+  const kybCopy = kyb ? KYB_COPY[kyb.state] ?? { value: kyb.state, status: 'pending' as Status } : null;
 
   return (
     <div className="space-y-5">
-      {/* Live FX ticker */}
-      <LiveExchangeTicker />
-
-      {/* Page header */}
       <DashPageHeader
-        className="mt-5"
         kicker="Operating desk"
-        title="Overview"
-        description={workspace ? `${workspace} · Updated just now` : 'Updated just now'}
-        actions={
+        title="Home"
+        description={
           <>
-            {/* Was always "verified", on every account, including one that
-                cannot move a dollar. */}
-            <StatusBadge status={kyb ? (kyb.blocked ? 'pending' : 'verified') : 'pending'} />
-            <Link href="/dashboard/transfer" className="dash-btn">
-              <Send size={14} />
-              New Transfer
-            </Link>
-            <Link href="/dashboard/batch" className="dash-btn dash-btn-ghost">
-              <Layers size={14} />
-              Batch Payout
-            </Link>
+            {workspace ?? 'Your workspace'}
+            {summary ? (
+              <>
+                {' · Updated '}
+                <LocalTime value={summary.generatedAt} format="time" locale="en-GB" options={{ hour: '2-digit', minute: '2-digit' }} />
+              </>
+            ) : null}
           </>
         }
+        actions={<StatusBadge status={kyb ? (kyb.blocked ? 'pending' : 'verified') : 'pending'} />}
       />
 
-      {/* Signature: animated settlement-engine flow */}
-      <SettlementEngineFlow variant="settlement" className="dash-reveal" />
-
-      <section className="grid gap-3 dash-reveal-stagger sm:grid-cols-2 xl:grid-cols-4" aria-label="Network build status">
-        {NETWORK_STATUS.map((item, index) => (
-          <div key={item.label} className="dash-block dash-block-interactive p-4">
-            <div className="flex items-center justify-between gap-3">
-              <span className="dash-kicker">0{index + 1} · {item.status}</span>
-              <span className={cn('h-2 w-2 rounded-full', index === 0 ? 'bg-[var(--ok)]' : 'bg-[var(--pending)]')} />
-            </div>
-            <strong className="mt-2 block text-lg font-semibold text-[#0c3e48]">{item.label}</strong>
-            <small className="mt-1 block text-[13px] font-medium text-[#326273]/90">{item.copy}</small>
-          </div>
-        ))}
-      </section>
-
-      {/* Top stats row */}
-      <section className="grid grid-cols-2 gap-3 dash-reveal-stagger xl:grid-cols-4">
-        {TOP_STATS.map(({ label, value, icon: Icon, accent, bg, id }) => {
-          if (id === '0xwal') {
-            return (
-              <Link key={label} href="/dashboard/0xwal" className="dash-block dash-block-interactive p-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-[12px] font-semibold uppercase tracking-[0.12em] text-[#326273]/90">{label}</span>
-                  <div className={cn('rounded-lg p-1.5', bg)}>
-                    <Icon size={14} className={accent} />
-                  </div>
-                </div>
-                <div className="mt-2 text-sm font-semibold leading-5 text-[#0c3e48]">
-                  {walSummary.detected} invoices detected · {walSummary.batchable} batchable · {walSummary.needsApproval} needs approval
-                </div>
-                <div className="mt-1 text-[13px] font-medium text-[var(--slate)]">Open Zeke →</div>
-              </Link>
-            );
-          }
-          // "$39,120 · +12.4%" was a string literal on the most quotable
-          // number on the page. It is now settled transfers over 30 days, and
-          // an em dash while it is still being read.
-          const resolved =
-            id === 'volume'
-              ? transfers === null
-                ? '…'
-                : `$${fmt(volume30d)}`
-              : value ?? '—';
-          const delta =
-            id === 'volume'
-              ? transfers === null
-                ? ''
-                : 'Settled, last 30 days'
-              : (TOP_STATS.find((s) => s.id === id) as { delta?: string })?.delta ?? '';
-          return (
-            <DashStat
-              key={label}
-              label={label}
-              value={resolved}
-              delta={delta}
-              deltaClassName="text-[var(--ok)]"
-              icon={Icon}
-              iconClassName={accent}
-              iconWrapClassName={bg}
-              valueClassName="text-xl"
-            />
-          );
-        })}
-      </section>
-
-      {/* Main 2-col layout */}
-      <div className="mt-5 grid gap-5 lg:grid-cols-[1fr_300px]">
-
-        {/* ── LEFT COLUMN ── */}
-        {/* AI recommendations live on the Zeke desk and Copilot pages; this
-            column stays focused on operating state. */}
-        <div className="min-w-0 space-y-5">
-
-          {/* Settlement pipeline */}
-          <div className="dash-surface p-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h2 className="text-sm font-semibold text-[#1F4452]">Settlement Pipeline</h2>
-              {/* "Next window: 16:30 MYT · 13 transfers · $7,510" was a string.
-                  There is no batching window in the product, so there is
-                  nothing to replace it with — the count that IS real goes here
-                  instead. */}
-              <span className="rounded-full bg-[#326273]/8 px-2.5 py-1 text-[13px] font-medium text-[#326273]/90">
-                {transfers === null
-                  ? 'Loading…'
-                  : `${rows.length} ${rows.length === 1 ? 'transfer' : 'transfers'} on record`}
-              </span>
-            </div>
-            <div className="mt-3 grid grid-cols-3 gap-3">
-              {pipeline.map((item) => (
-                <div key={item.label} className="rounded-xl bg-[#F6F0ED] p-3">
-                  <div className="flex items-center gap-1.5">
-                    <span className={cn('h-2 w-2 rounded-full', item.dot)} />
-                    <span className="text-[13px] text-[#326273]/90">{item.label}</span>
-                  </div>
-                  <div className="money mt-2 text-2xl font-medium text-[#1F4452]">
-                    {transfers === null ? '—' : item.count}
-                  </div>
-                  <div className="money mt-0.5 text-[13px] font-medium text-[var(--info)]">
-                    {transfers === null ? '' : `$${fmt(item.amount)}`}
-                  </div>
-                </div>
-              ))}
+      {kyb?.blocked && kybCopy ? (
+        <div className="dash-surface flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between" role="status">
+          <div className="flex items-start gap-3">
+            <ShieldCheck size={18} className="mt-0.5 shrink-0 text-[var(--warn-ink)]" aria-hidden="true" />
+            <div>
+              <p className="text-sm font-semibold text-[#1F4452]">Business verification</p>
+              <p className="text-[13px] text-[#326273]">{kybCopy.value}</p>
             </div>
           </div>
-
-          {/* Live corridors table */}
-          <div className="dash-surface overflow-hidden">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#326273]/8 px-4 py-3">
-              <h2 className="text-sm font-semibold text-[#1F4452]">Corridor Readiness</h2>
-              <div className="flex items-center gap-1.5 text-[13px] font-medium text-[#326273]/90">
-                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--ok)]" />
-                1 live-model · 8 implemented in code
-              </div>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-[13px]">
-                <thead>
-                  <tr className="border-b border-[#326273]/8 bg-[#F6F0ED]/60">
-                    <th className="px-4 py-2 text-left font-medium text-[#326273]/90">Corridor</th>
-                    <th className="px-4 py-2 text-right font-medium text-[#326273]/90">Reference rate</th>
-                    <th className="hidden px-4 py-2 text-right font-medium text-[#326273]/90 sm:table-cell">Model volume</th>
-                    <th className="hidden px-4 py-2 text-right font-medium text-[#326273]/90 md:table-cell">Splash fee to a bank</th>
-                    <th className="px-4 py-2 text-right font-medium text-[#326273]/90">Test success</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {corridors.map((c, i) => (
-                    <tr
-                      key={c.pair}
-                      className={cn(
-                        'border-b border-[#326273]/5 transition-colors hover:bg-[#F6F0ED]/50',
-                        i === corridors.length - 1 && 'border-b-0'
-                      )}
-                    >
-                      <td className="px-4 py-2.5">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm leading-none">{c.flag}</span>
-                          <span className="font-medium text-[#1F4452]">{c.pair}</span>
-                          <span className={cn(
-                            'hidden rounded-full px-1.5 py-0.5 text-[13px] font-semibold sm:inline',
-                            i === 0 ? 'bg-[var(--ok-bg)] text-[#1F4452]' : 'bg-[#5C9EAD]/10 text-[#326273]',
-                          )}>
-                            {i === 0 ? 'Live-model' : 'In code'}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="money px-4 py-2.5 font-medium text-[#1F4452]">
-                        {c.rate.toLocaleString('en-US', {
-                          maximumFractionDigits: c.dec,
-                          minimumFractionDigits: c.dec,
-                        })}
-                      </td>
-                      <td className="money hidden px-4 py-2.5 font-medium text-[#326273]/90 sm:table-cell">{c.volume}</td>
-                      <td className="hidden px-4 py-2.5 text-right md:table-cell">
-                        <span className="money rounded-full bg-[var(--ok-bg)] px-2 py-0.5 text-[13px] font-medium text-[#1F4452]">{pricing ? pricing.bankFee : '—'}</span>
-                      </td>
-                      <td className="px-4 py-2.5 text-right">
-                        <span
-                          className={cn(
-                            'money font-medium',
-                            c.success >= 99
-                              ? 'text-[var(--ok)]'
-                              : c.success >= 98
-                              ? 'text-[var(--info)]'
-                              : 'text-[var(--warn-ink)]'
-                          )}
-                        >
-                          {c.success.toFixed(1)}%
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* Recent transactions table */}
-          <div className="dash-surface overflow-hidden">
-            <div className="flex items-center justify-between border-b border-[#326273]/8 px-4 py-3">
-              <h2 className="text-sm font-semibold text-[#1F4452]">Recent Transactions</h2>
-              <Link
-                href="/dashboard/history"
-                className="text-[13px] font-medium text-[var(--info)] transition-colors hover:text-[#326273]"
-              >
-                View all →
-              </Link>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-[13px]">
-                <thead>
-                  <tr className="border-b border-[#326273]/8 bg-[#F6F0ED]/60">
-                    <th className="px-4 py-2 text-left font-medium text-[#326273]/90">Description</th>
-                    <th className="hidden px-4 py-2 text-left font-medium text-[#326273]/90 sm:table-cell">Corridor</th>
-                    <th className="px-4 py-2 text-right font-medium text-[#326273]/90">USD</th>
-                    <th className="hidden px-4 py-2 text-right font-medium text-[#326273]/90 md:table-cell">Local</th>
-                    <th className="px-4 py-2 text-right font-medium text-[#326273]/90">Status</th>
-                    <th className="hidden px-4 py-2 text-right font-medium text-[#326273]/90 sm:table-cell">Time</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {recent.map((t, i) => (
-                    <tr
-                      key={t.id}
-                      className={cn(
-                        'border-b border-[#326273]/5 transition-colors hover:bg-[#F6F0ED]/50',
-                        i === recent.length - 1 && 'border-b-0'
-                      )}
-                    >
-                      <td className="px-4 py-2.5">
-                        <div className="font-medium text-[#1F4452]">{t.recipientName}</div>
-                        <div className="mt-0.5 text-[13px] text-[#326273]/90">{t.id}</div>
-                      </td>
-                      <td className="hidden px-4 py-2.5 text-[#326273]/90 sm:table-cell">
-                        USD&rarr;{t.targetCurrency}
-                      </td>
-                      <td className="money px-4 py-2.5 font-medium text-[#1F4452]">
-                        ${fmt(Number.parseFloat(t.sourceAmountUsd) || 0)}
-                      </td>
-                      <td className="money hidden px-4 py-2.5 text-[#326273]/90 md:table-cell">
-                        {t.targetCurrency} {t.targetAmount}
-                      </td>
-                      <td className="px-4 py-2.5 text-right">
-                        <TxPill status={txStatusOf(t.state)} />
-                      </td>
-                      <td className="hidden px-4 py-2.5 text-right text-[#326273]/90 sm:table-cell">
-                        <LocalTime value={t.createdAt} format="time" locale="en-GB" options={{ hour: '2-digit', minute: '2-digit' }} />
-                      </td>
-                    </tr>
-                  ))}
-                  {/* An empty desk says so. Six invented transactions carrying
-                      ids shaped like real ones is how a demo becomes a claim. */}
-                  {transfers !== null && recent.length === 0 && (
-                    <tr>
-                      <td colSpan={6} className="px-4 py-8 text-center text-[13px] font-medium text-[#326273]/90">
-                        No transfers yet. Your first one will appear here.
-                      </td>
-                    </tr>
-                  )}
-                  {transfers === null && (
-                    <tr>
-                      <td colSpan={6} className="px-4 py-8 text-center text-[13px] font-medium text-[#326273]/90">
-                        Loading transfers…
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          <Link href="/dashboard/setup" className="dash-btn dash-btn-ghost min-h-11 shrink-0">
+            Continue setup
+          </Link>
         </div>
+      ) : null}
 
-        {/* ── RIGHT COLUMN ── */}
-        <aside className="space-y-4">
-
-          {/* Approval-gated treasury projection */}
-          <div className="dash-block dash-block-accent dash-block-interactive p-4">
-            <div className="flex items-start justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="rounded-lg bg-[var(--ok-bg)] p-2">
-                  <TrendingUp size={16} className="text-[var(--ok)]" />
-                </div>
-                <div>
-                  <h2 className="text-sm font-semibold text-[#1F4452]">Treasury Projection</h2>
-                  <p className="text-[13px] text-[#326273]/90">Ondo USDY · simulation only</p>
-                </div>
-              </div>
-              {treasuryPhase === 'live' ? (
-                <span className="rounded-full bg-[#D9A441]/10 px-2 py-0.5 text-[13px] font-semibold text-[var(--warn-ink)]">
-                  {treasuryRateLabel}
-                </span>
-              ) : null}
-            </div>
-
-            {treasuryPhase === 'live' ? (
-              <>
-                <div className="mt-3">
-                  <p className="text-[12px] uppercase tracking-wide text-[#326273]/90">Modeled allocation</p>
-                  <p className="money mt-0.5 text-2xl font-medium text-[#1F4452]">${fmt(treasuryPrincipal)}</p>
-                  <p className="money mt-1 flex items-center gap-1 text-[13px] font-medium text-[var(--ok)]">
-                    <TrendingUp size={11} />
-                    +${yieldEarned.toFixed(2)} modeled this month
-                  </p>
-                </div>
-
-                <div className="mt-3 space-y-1 rounded-lg bg-white/70 p-3 text-[13px]">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[#326273]/90">Modeled daily yield</span>
-                    <span className="money font-medium text-[var(--ok)]">
-                      +${((treasuryPrincipal * treasuryApy) / 100 / 365).toFixed(2)}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-[#326273]/90">Status</span>
-                    <span className="flex items-center gap-1 font-medium text-[var(--ok)]">
-                      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--ok)]" />
-                      Approval gated
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-[#326273]/90">Protocol</span>
-                    <span className="font-medium text-[#326273]">Ondo USDY · T-bill</span>
-                  </div>
-                </div>
-              </>
-            ) : (
-              <div className="mt-3 rounded-lg bg-white/70 p-3 text-[13px] leading-relaxed text-[#326273]/90">
-                <p className="font-semibold text-[#1F4452]">{treasuryPhase === 'scoped' ? 'Treasury is not open yet' : 'Treasury arrives with our licence'}</p>
-                <p className="mt-1">
-                  {treasuryPhase === 'gated'
-                    ? 'Holding funds is a Phase 2 capability that needs a money-broking licence Splash does not hold yet. Today Splash pays out only.'
-                    : treasuryPhase === 'scoped'
-                      ? 'Splash is open for USDC on Sui only for now. Send USDC from Wallet.'
-                      : 'Checking the ledger…'}
-                </p>
-              </div>
-            )}
-
-            {treasuryPhase === 'scoped' ? null : <div className="mt-3 flex gap-2">
-              <Link
-                href="/dashboard/treasury"
-                className="flex-1 rounded-lg bg-[var(--ok)] py-1.5 text-center text-[13px] font-semibold text-white transition-colors hover:opacity-90"
-              >
-                {treasuryPhase === 'live' ? 'View projection' : 'When it arrives'}
-              </Link>
-              <Link
-                href="/dashboard/treasury"
-                className="flex-1 rounded-lg border border-[var(--ok)] py-1.5 text-center text-[13px] font-semibold text-[var(--ok)] transition-colors hover:bg-[var(--ok-bg)]"
-              >
-                Review controls
-              </Link>
-            </div>}
+      {/* The three figures */}
+      <section aria-label="This business at a glance" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[1.25fr_1fr_1fr]">
+        {/* Splash Wallet */}
+        <article className="dash-block dash-block-accent p-4 sm:col-span-2 lg:col-span-1" aria-labelledby="home-wallet" aria-busy={wallet.kind === 'loading'}>
+          <div className="flex items-center justify-between gap-2">
+            <h2 id="home-wallet" className="dash-kicker">Splash Wallet</h2>
+            <Wallet size={16} className="text-[#145d6a]" aria-hidden="true" />
           </div>
-
-          {/* Compliance posture */}
-          <div className="dash-block p-4">
-            <div className="flex items-center gap-2">
-              <ShieldCheck size={16} className="text-[var(--info)]" />
-              <h2 className="text-sm font-semibold text-[#1F4452]">Compliance</h2>
-            </div>
-            <div className="mt-3 space-y-2">
-              {[
-                {
-                  label: 'KYB status',
-                  ...(kyb
-                    ? KYB_COPY[kyb.state] ?? { value: kyb.state, status: 'pending' as Status }
-                    : { value: 'Reading…', status: 'pending' as Status }),
-                },
-                {
-                  label: 'Money movement',
-                  value: kyb
-                    ? kyb.blocked
-                      ? 'Blocked until verification completes'
-                      : 'Unlocked'
-                    : 'Reading…',
-                  status: (kyb && !kyb.blocked ? 'verified' : 'pending') as Status,
-                },
-                {
-                  label: 'Daily limit',
-                  // The limit is a real setting. How much of it has been used
-                  // today is not computed anywhere, and "43% used · $12,100
-                  // remaining" was invented — so the limit is stated and the
-                  // usage is not.
-                  value: limits
-                    ? `$${limits.dailyLimitUsd.toLocaleString('en-US')} per day`
-                    : 'Reading…',
-                  status: 'verified' as Status,
-                },
-              ].map((item) => (
-                <HoverPopup key={item.label} title={item.label} content={item.value}>
-                  <div className="flex cursor-pointer items-center justify-between rounded-lg bg-[#F6F0ED] px-3 py-2 transition-colors hover:bg-[#ede8e4]">
-                    <div>
-                      <div className="text-[13px] font-medium text-[#1F4452]">{item.label}</div>
-                      <div className="text-[13px] text-[#326273]/90">{item.value}</div>
-                    </div>
-                    <StatusBadge status={item.status} />
-                  </div>
-                </HoverPopup>
-              ))}
-            </div>
-          </div>
-
-          {/* Pending actions */}
-          <div className="dash-block p-4">
-            <div className="flex items-center gap-2">
-              <AlertTriangle size={16} className="text-[var(--warn-ink)]" />
-              <h2 className="text-sm font-semibold text-[#1F4452]">Pending Actions</h2>
-            </div>
-            <div className="mt-3 space-y-2">
-              <div className="flex items-center justify-between rounded-lg bg-[var(--warn-bg)] px-3 py-2.5">
-                <div>
-                  <div className="text-[13px] font-medium text-[var(--warn-ink)]">Batch TOTP authorization</div>
-                  <div className="text-[13px] text-[var(--warn-ink)]">12 transfers · $6,670</div>
-                </div>
-                <Link
-                  href="/dashboard/batch"
-                  className="shrink-0 rounded-md bg-[var(--warn-ink)] px-2.5 py-1 text-[13px] font-semibold text-white transition-colors hover:opacity-90"
-                >
-                  Authorize
+          {wallet.kind === 'loading' ? (
+            <FigureSkeleton />
+          ) : wallet.kind === 'business' ? (
+            <>
+              <Figure value={formatUsdcMinor(wallet.usdcMinor)} unit="USDC" />
+              <p className="mt-1 text-[13px] font-medium text-[#326273]">Held by your business</p>
+            </>
+          ) : wallet.kind === 'none' ? (
+            <>
+              <p className="mt-2 text-lg font-bold text-[#0c3e48]">No business wallet yet</p>
+              <p className="mt-1 text-[13px] font-medium text-[#326273]">
+                {wallet.passkeyUsdcMinor !== null ? (
+                  <>
+                    Your own passkey wallet holds <span className="dash-num font-semibold text-[#1F4452]">{formatUsdcMinor(wallet.passkeyUsdcMinor)} USDC</span>.{' '}
+                  </>
+                ) : null}
+                <Link href="/dashboard/wallet" className="font-semibold text-[#145d6a] underline decoration-1 underline-offset-2">
+                  Open Wallet
                 </Link>
-              </div>
-              <div className="flex items-center justify-between rounded-lg bg-[#F6F0ED] px-3 py-2.5">
-                <div>
-                  <div className="text-[13px] font-medium text-[#1F4452]">KYB document review</div>
-                  <div className="text-[13px] text-[#326273]/90">Sumsub · in progress</div>
-                </div>
-                <Link
-                  href="/dashboard/settings"
-                  className="shrink-0 rounded-md bg-[#237284] px-2.5 py-1 text-[13px] font-semibold text-white transition-colors hover:bg-[#4a8a99]"
-                >
-                  Review
-                </Link>
-              </div>
-            </div>
-          </div>
-
-          {/* Invoice upload (Walrus) */}
-          <div className="dash-block dash-block-interactive p-4">
-            <div className="flex items-center gap-2">
-              <FileText size={16} className="text-[var(--info)]" />
-              <h2 className="text-sm font-semibold text-[#1F4452]">Upload Invoice</h2>
-            </div>
-            <Link
-              href="/dashboard/invoices"
-              className="mt-3 flex flex-col items-center rounded-lg border-2 border-dashed border-[#326273]/15 bg-[#F6F0ED] p-4 text-center transition-colors hover:border-[#5C9EAD]/40 hover:bg-[#5C9EAD]/5"
-            >
-              <Upload size={22} className="text-[#326273]/90" />
-              <p className="mt-2 text-[13px] font-medium text-[#326273]/90">Go to Invoice Vault</p>
-              <p className="mt-1 text-[13px] text-[#326273]/90">
-                Access-controlled · stored on Walrus · 7-yr retention
               </p>
-            </Link>
-            <Link
-              href="/dashboard/invoices"
-              className="mt-2 block text-center text-[13px] font-medium text-[var(--info)] transition-colors hover:text-[#326273]"
-            >
-              View invoice vault →
+            </>
+          ) : (
+            <>
+              <p className="mt-2 text-lg font-bold text-[#0c3e48]">Balance unavailable</p>
+              <p className="mt-1 flex flex-wrap items-center gap-x-2 text-[13px] font-medium text-[#326273]">
+                We couldn&rsquo;t read it from Sui.
+                <button
+                  type="button"
+                  onClick={() => void loadWallet()}
+                  className="inline-flex min-h-11 items-center gap-1 font-semibold text-[#145d6a] underline decoration-1 underline-offset-2"
+                >
+                  <RefreshCw size={13} aria-hidden="true" />
+                  Try again
+                </button>
+              </p>
+            </>
+          )}
+        </article>
+
+        {/* Needs approval */}
+        <article className="dash-block p-4" aria-labelledby="home-approvals" aria-busy={!summary && !summaryFailed}>
+          <div className="flex items-center justify-between gap-2">
+            <h2 id="home-approvals" className="dash-kicker">Needs approval</h2>
+            <CircleCheck size={16} className="text-[#145d6a]" aria-hidden="true" />
+          </div>
+          {summary ? (
+            <>
+              <Figure
+                value={String(summary.needsApproval.count)}
+                unit={summary.needsApproval.count === 1 ? 'payment' : 'payments'}
+              />
+              {note ? (
+                <p className={cn('mt-1 flex items-center gap-1.5 text-[13px] font-medium', note.warn ? 'text-[var(--warn-ink)]' : 'text-[#326273]')}>
+                  {note.warn ? <AlertTriangle size={13} aria-hidden="true" /> : null}
+                  {note.text}
+                </p>
+              ) : null}
+              {summary.needsApproval.count > 0 ? (
+                <Link href="/queue" className="mt-2 inline-flex min-h-11 items-center gap-1 text-[13px] font-semibold text-[#145d6a]">
+                  Review approvals
+                  <ArrowRight size={13} aria-hidden="true" />
+                </Link>
+              ) : null}
+            </>
+          ) : summaryFailed ? (
+            <p className="mt-2 text-[13px] font-medium text-[#326273]">Couldn&rsquo;t load.</p>
+          ) : (
+            <FigureSkeleton />
+          )}
+        </article>
+
+        {/* Sent this month */}
+        <article className="dash-block p-4" aria-labelledby="home-sent" aria-busy={!summary && !summaryFailed}>
+          <div className="flex items-center justify-between gap-2">
+            <h2 id="home-sent" className="dash-kicker">Sent this month</h2>
+            <Send size={16} className="text-[#145d6a]" aria-hidden="true" />
+          </div>
+          {summary ? (
+            <>
+              <Figure value={formatUsdcMinor(summary.sentThisMonth.usdcMinor)} unit="USDC" />
+              <p className="mt-1 text-[13px] font-medium text-[#326273]">
+                {summary.sentThisMonth.payments} settled {summary.sentThisMonth.payments === 1 ? 'payment' : 'payments'} since{' '}
+                <LocalTime value={summary.sentThisMonth.since} format="date" locale="en-GB" options={{ day: 'numeric', month: 'short', timeZone: 'UTC' }} /> (UTC)
+              </p>
+              {summary.sentThisMonth.notCounted > 0 ? (
+                <p className="mt-1 text-[12px] font-medium text-[#326273]">
+                  {summary.sentThisMonth.notCounted} paid in another stablecoin {summary.sentThisMonth.notCounted === 1 ? 'is' : 'are'} not counted.
+                </p>
+              ) : null}
+            </>
+          ) : summaryFailed ? (
+            <p className="mt-2 text-[13px] font-medium text-[#326273]">Couldn&rsquo;t load.</p>
+          ) : (
+            <FigureSkeleton />
+          )}
+        </article>
+      </section>
+
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
+        {/* Quick actions: first on a phone, the right column on a desktop. */}
+        <nav aria-labelledby="home-actions" className="dash-surface p-4 lg:order-2 lg:self-start">
+          <h2 id="home-actions" className="text-sm font-semibold text-[#1F4452]">Quick actions</h2>
+          <ul className="mt-3 grid grid-cols-2 gap-2 lg:grid-cols-1">
+            {QUICK_ACTIONS.map(({ href, label, help, icon: Icon }) => (
+              <li key={href}>
+                <Link
+                  href={href}
+                  className="group flex min-h-11 h-full items-start gap-3 rounded-xl border border-[#326273]/12 bg-white/70 p-3 transition-colors hover:border-[#0d6370]/45 hover:bg-white"
+                >
+                  <span className="rounded-lg bg-[#0d6370]/10 p-1.5 text-[#0d6370]">
+                    <Icon size={15} aria-hidden="true" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-[13px] font-semibold text-[#1F4452]">{label}</span>
+                    <span className="mt-0.5 hidden text-[12px] text-[#326273] sm:block">{help}</span>
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </nav>
+
+        {/* Recent payments */}
+        <section aria-labelledby="home-recent" className="dash-surface min-w-0 overflow-hidden lg:order-1">
+          <div className="flex items-center justify-between gap-2 border-b border-[#326273]/10 px-4 py-3">
+            <h2 id="home-recent" className="text-sm font-semibold text-[#1F4452]">Recent payments</h2>
+            <Link href="/dashboard/history" className="inline-flex min-h-11 items-center gap-1 text-[13px] font-semibold text-[#145d6a]">
+              View all
+              <ArrowRight size={13} aria-hidden="true" />
             </Link>
           </div>
-        </aside>
+
+          {summary === null ? (
+            <p className="px-4 py-8 text-center text-[13px] font-medium text-[#326273]" role="status">
+              {summaryFailed ? (
+                <>
+                  Couldn&rsquo;t load your payments.{' '}
+                  <button type="button" onClick={() => void loadSummary()} className="min-h-11 font-semibold text-[#145d6a] underline decoration-1 underline-offset-2">
+                    Try again
+                  </button>
+                </>
+              ) : (
+                'Loading payments…'
+              )}
+            </p>
+          ) : summary.recent.length === 0 ? (
+            <div className="px-4 py-8 text-center">
+              <p className="text-[13px] font-semibold text-[#1F4452]">No payments yet.</p>
+              <p className="mt-1 text-[13px] text-[#326273]">Your first payment and its receipt will appear here.</p>
+              <Link href="/dashboard/transfer" className="dash-btn mt-4 min-h-11">
+                Pay someone
+              </Link>
+            </div>
+          ) : (
+            <>
+              {/* Phone: one row per payment. */}
+              <ul className="divide-y divide-[#326273]/8 sm:hidden">
+                {summary.recent.map((row: HomePaymentRow) => (
+                  <li key={row.id} className="flex items-start justify-between gap-3 px-4 py-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-[14px] font-semibold text-[#1F4452]">
+                        {row.recipient}
+                        {row.sample ? <SampleChip /> : null}
+                      </p>
+                      <p className="mt-0.5 text-[12px] text-[#326273]">
+                        {row.type} ·{' '}
+                        <LocalTime value={row.createdAt} format="date" locale="en-GB" options={{ day: 'numeric', month: 'short' }} />
+                      </p>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <p className="money text-[13px] font-semibold text-[#1F4452]">{row.amount}</p>
+                      <div className="mt-1"><PaymentPill status={row.status} /></div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+
+              {/* Tablet and desktop: the board's table. */}
+              <div className="hidden overflow-x-auto sm:block">
+                <table className="w-full text-[13px]">
+                  <thead>
+                    <tr className="border-b border-[#326273]/10 bg-[#F6F0ED]/60 text-left">
+                      <th scope="col" className="px-4 py-2 font-medium text-[#326273]">Recipient</th>
+                      <th scope="col" className="px-4 py-2 font-medium text-[#326273]">Type</th>
+                      <th scope="col" className="money px-4 py-2 font-medium text-[#326273]">They get</th>
+                      <th scope="col" className="px-4 py-2 font-medium text-[#326273]">Status</th>
+                      <th scope="col" className="hidden px-4 py-2 text-right font-medium text-[#326273] md:table-cell">Date</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {summary.recent.map((row: HomePaymentRow) => (
+                      <tr key={row.id} className="border-b border-[#326273]/6 last:border-b-0">
+                        <td className="px-4 py-2.5 font-medium text-[#1F4452]">
+                          {row.recipient}
+                          {row.sample ? <SampleChip /> : null}
+                        </td>
+                        <td className="px-4 py-2.5 text-[#326273]">{row.type}</td>
+                        <td className="money px-4 py-2.5 font-medium text-[#1F4452]">{row.amount}</td>
+                        <td className="px-4 py-2.5"><PaymentPill status={row.status} /></td>
+                        <td className="hidden px-4 py-2.5 text-right text-[#326273] md:table-cell">
+                          <LocalTime value={row.createdAt} format="date" locale="en-GB" options={{ day: 'numeric', month: 'short' }} />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </section>
       </div>
     </div>
   );
