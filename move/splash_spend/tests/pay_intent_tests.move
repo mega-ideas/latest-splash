@@ -23,13 +23,14 @@ use splash_core::address_registry;
 use splash_core::business_account::{Self, BusinessAccount};
 use splash_core::cap_registry::CapRegistry;
 use splash_core::compliance_config::{Self, ComplianceConfig};
+use splash_core::fee_config::{Self, FeeCharged, FeeConfig};
 use splash_core::multisig;
 use splash_core::payment_intent::{Self, IntentConfirmed, PaymentIntent};
 use splash_core::v2_harness::{Self as h, USDC};
 use splash_spend::splash_spend::{
     Self,
-    PaidUnderPolicy,
     PayoutApproval,
+    RuleSpend,
     SPLASH_SPEND,
     SettleWitness,
     SpendApprovalConsumed,
@@ -386,14 +387,30 @@ fun approve(s: &mut Scenario, fx: &Fx, owner: address, intent: ID, payer: addres
 }
 
 /// `owner` approves `intent` for `payer` against a quote that holds until
-/// `settle_by_ms`.
+/// `settle_by_ms`. These tests charge no fee, so the owner approves a total
+/// of exactly the principal.
 fun approve_until(s: &mut Scenario, fx: &Fx, owner: address, intent: ID, payer: address, settle_by_ms: u64) {
+    let total = intent_amount(s, intent);
+    approve_with(s, fx, owner, intent, payer, total, settle_by_ms);
+}
+
+/// `owner` approves `intent` for `payer`, for at most `max_total` (the
+/// principal and the fee the owner was shown), until `settle_by_ms`.
+fun approve_with(
+    s: &mut Scenario,
+    fx: &Fx,
+    owner: address,
+    intent: ID,
+    payer: address,
+    max_total: u64,
+    settle_by_ms: u64,
+) {
     s.next_tx(owner);
     let policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
     let account = s.take_shared_by_id<BusinessAccount>(fx.account);
     let intent = s.take_shared_by_id<PaymentIntent>(intent);
     let c = s.take_shared<Clock>();
-    splash_spend::approve_payout(&policy, &account, &intent, payer, settle_by_ms, &c, s.ctx());
+    splash_spend::approve_payout(&policy, &account, &intent, payer, max_total, settle_by_ms, &c, s.ctx());
     ts::return_shared(c);
     ts::return_shared(intent);
     ts::return_shared(account);
@@ -408,16 +425,25 @@ fun delegate(s: &mut Scenario, fx: &Fx, sender: address, intent: ID, executor: a
 }
 
 fun delegate_until(s: &mut Scenario, fx: &Fx, sender: address, intent: ID, executor: address, settle_by_ms: u64) {
+    let total = intent_amount(s, intent);
     s.next_tx(sender);
     let policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
     let account = s.take_shared_by_id<BusinessAccount>(fx.account);
     let intent = s.take_shared_by_id<PaymentIntent>(intent);
     let c = s.take_shared<Clock>();
-    splash_spend::delegate_execution(&policy, &account, &intent, executor, settle_by_ms, &c, s.ctx());
+    splash_spend::delegate_execution(&policy, &account, &intent, executor, total, settle_by_ms, &c, s.ctx());
     ts::return_shared(c);
     ts::return_shared(intent);
     ts::return_shared(account);
     ts::return_shared(policy);
+}
+
+fun intent_amount(s: &mut Scenario, intent: ID): u64 {
+    s.next_tx(STRANGER);
+    let i = s.take_shared_by_id<PaymentIntent>(intent);
+    let amount = payment_intent::amount_usd(&i);
+    ts::return_shared(i);
+    amount
 }
 
 fun intent_expiry(s: &mut Scenario, intent: ID): u64 {
@@ -666,7 +692,7 @@ fun second_business(s: &mut Scenario): (ID, ID) {
 #[test]
 /// The basic spending rule: a staff member pays a verified supplier below the
 /// threshold, alone. The supplier gets a Coin (kind 1), the intent is
-/// CONFIRMED on path 2 (settlement app), `PaidUnderPolicy` says which rule
+/// CONFIRMED on path 2 (settlement app), `RuleSpend` says which rule
 /// paid it, the allowance's running spend goes up by exactly the amount, and
 /// the money left the business wallet's own address balance and nowhere else.
 fun staff_pays_a_verified_wallet_below_the_threshold() {
@@ -710,7 +736,7 @@ fun staff_pays_a_verified_wallet_below_the_threshold() {
         assert_eq!(kind, payment_intent::kind_wallet());
         assert_eq!(status, payment_intent::status_confirmed());
         assert_eq!(path, payment_intent::path_settlement_app());
-        assert_eq!(event::events_by_type<PaidUnderPolicy>().length(), 1);
+        assert_eq!(event::events_by_type<RuleSpend>().length(), 1);
         // No approval was involved.
         assert_eq!(event::events_by_type<SpendApprovalConsumed>().length(), 0);
 
@@ -1105,12 +1131,15 @@ fun above_the_threshold_with_an_owner_approval_passes() {
         assert_eq!(splash_spend::approval_amount(&approval), amount);
         assert_eq!(splash_spend::approval_approver(&approval), h::owner_2());
         assert_eq!(splash_spend::approval_payer(&approval), STAFF);
+        // A1 §2.6: the most the owner agreed to pay in all, here the
+        // principal, since these tests charge no fee.
+        assert_eq!(splash_spend::approval_max_total(&approval), amount);
         // It carries the deadline the owner chose, here the intent's expiry:
         // opened at day 2, for one day.
         assert_eq!(splash_spend::approval_settle_by_ms(&approval), 2 * h::day() + INTENT_LIFE);
         pay_in_tx(&mut s, fx.account, fx.policy, fx.staff, intent_id, option::some(approval));
         assert_eq!(event::events_by_type<SpendApprovalConsumed>().length(), 1);
-        assert_eq!(event::events_by_type<PaidUnderPolicy>().length(), 1);
+        assert_eq!(event::events_by_type<RuleSpend>().length(), 1);
     };
     s.next_tx(STAFF);
     assert!(ts::ids_for_address<PayoutApproval>(STAFF).is_empty());
@@ -3550,5 +3579,389 @@ fun an_address_unbound_on_the_policy_but_in_splashs_partner_registry_is_not_paid
     };
     let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), h::recipient(), PAY);
     pay(&mut s, &fx, STAFF, fx.staff, intent, false);
+    s.end();
+}
+
+// ═══ Splash's fee under a spending rule (A1 §2.6, §2.9) ═════════════════════
+
+/// The launch schedule's fee on PAY (500 USDC) to a wallet: 2 bps is 0.10
+/// USDC, raised to the 0.25 USDC minimum.
+const WALLET_FEE: u64 = 250_000;
+/// To an exchange: 0.15% of 500 USDC.
+const EXCHANGE_FEE: u64 = 750_000;
+/// A bank payout: 0.30% of 500 USDC.
+const BANK_FEE: u64 = 1_500_000;
+/// The fee the spender was shown and signs for, at least each of those.
+const MAX_FEE: u64 = 2_000_000;
+
+/// `setup()`, with Splash's shared registries classifying what the scratch
+/// one does: BUSINESS is a business wallet and the harness's partner deposit
+/// address is a partner. The shared FeeConfig is at A1's launch schedule.
+fun fee_setup(): (Scenario, Fx) {
+    let (mut s, fx) = setup();
+    h::add_business_wallet(&mut s, BUSINESS);
+    h::add_partner(&mut s, h::recipient());
+    (s, fx)
+}
+
+/// `payer` pays `intent` under `alw` against the shared FeeConfig and
+/// Registry, drawing `drawn` from the wallet and signing for `max_fee`.
+fun pay_fee(
+    s: &mut Scenario,
+    fx: &Fx,
+    payer: address,
+    alw: ID,
+    intent: ID,
+    with_approval: bool,
+    drawn: u64,
+    max_fee: u64,
+) {
+    s.next_tx(payer);
+    let approval = if (with_approval) option::some(s.take_from_sender<PayoutApproval>()) else option::none();
+    let fees = s.take_shared<FeeConfig>();
+    pay_fee_with(s, fx, alw, intent, approval, &fees, drawn, max_fee);
+    ts::return_shared(fees);
+}
+
+/// In the current transaction: pay against `fees` and the shared Registry.
+fun pay_fee_with(
+    s: &mut Scenario,
+    fx: &Fx,
+    alw: ID,
+    intent: ID,
+    approval: Option<PayoutApproval>,
+    fees: &FeeConfig,
+    drawn: u64,
+    max_fee: u64,
+) {
+    let mut allowance = s.take_shared_by_id<Allowance<Balance<USDC>>>(alw);
+    let mut intent = s.take_shared_by_id<PaymentIntent>(intent);
+    let mut account = s.take_shared_by_id<BusinessAccount>(fx.account);
+    let mut policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
+    let config = s.take_shared<ComplianceConfig>();
+    let reg = s.take_shared<address_registry::Registry>();
+    let c = s.take_shared<Clock>();
+    let withdrawal = allowance::new_withdrawal_for_testing(alw, ts::withdraw_balance_from_address<USDC>(h::wallet(), drawn));
+    let receipt = splash_spend::pay_intent(
+        &mut allowance,
+        withdrawal,
+        &mut intent,
+        &mut account,
+        &mut policy,
+        &config,
+        fees,
+        &reg,
+        approval,
+        max_fee,
+        h::settle_by(&c),
+        &c,
+        s.ctx(),
+    );
+    audit_anchor::anchor(receipt, HASH, BLOB, &c, s.ctx());
+    ts::return_shared(c);
+    ts::return_shared(reg);
+    ts::return_shared(config);
+    ts::return_shared(policy);
+    ts::return_shared(account);
+    ts::return_shared(intent);
+    ts::return_shared(allowance);
+}
+
+/// The wallet delegates `intent` to `executor` for at most `max_total`.
+fun delegate_with(s: &mut Scenario, fx: &Fx, intent: ID, executor: address, max_total: u64) {
+    let until = intent_expiry(s, intent);
+    s.next_tx(h::wallet());
+    let policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
+    let account = s.take_shared_by_id<BusinessAccount>(fx.account);
+    let intent = s.take_shared_by_id<PaymentIntent>(intent);
+    let c = s.take_shared<Clock>();
+    splash_spend::delegate_execution(&policy, &account, &intent, executor, max_total, until, &c, s.ctx());
+    ts::return_shared(c);
+    ts::return_shared(intent);
+    ts::return_shared(account);
+    ts::return_shared(policy);
+}
+
+fun settled(s: &mut Scenario, who: address): u64 {
+    s.next_tx(STRANGER);
+    ts::settled_balance<USDC>(who)
+}
+
+#[test]
+/// A1 §2.6 and §3: the spender draws exactly the principal and max_fee.
+/// Core charges the fee for the derived kind to Splash's fee recipient, the
+/// supplier receives the principal, and the part of max_fee the fee did not
+/// use goes back to the business wallet, never to the staff sender, whose
+/// balance is unchanged. The allowance counts everything it released.
+fun the_unused_max_fee_goes_to_the_wallet_and_the_staff_balance_is_unchanged() {
+    let (mut s, fx) = fee_setup();
+    let staff_before = settled(&mut s, STAFF);
+    let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    pay_fee(&mut s, &fx, STAFF, fx.staff, intent, false, PAY + MAX_FEE, MAX_FEE);
+    assert_eq!(coin_received(&mut s, SUPPLIER), PAY);
+    assert_eq!(settled(&mut s, h::fee_recipient()), WALLET_FEE);
+    assert_eq!(settled(&mut s, h::wallet()), FUNDS - PAY - WALLET_FEE);
+    assert_eq!(settled(&mut s, STAFF), staff_before);
+    assert!(!ts::has_most_recent_for_address<Coin<USDC>>(STAFF));
+    assert_eq!(alw_spend(&mut s, fx.staff), (PAY + MAX_FEE) as u256);
+    s.end();
+}
+
+#[test]
+/// When max_fee is exactly the fee there is nothing left over: the wallet
+/// pays the principal and the fee, and nothing comes back.
+fun a_max_fee_of_exactly_the_fee_leaves_no_remainder() {
+    let (mut s, fx) = fee_setup();
+    let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    pay_fee(&mut s, &fx, STAFF, fx.staff, intent, false, PAY + WALLET_FEE, WALLET_FEE);
+    assert_eq!(settled(&mut s, h::fee_recipient()), WALLET_FEE);
+    assert_eq!(settled(&mut s, h::wallet()), FUNDS - PAY - WALLET_FEE);
+    s.end();
+}
+
+#[test]
+/// The fee follows the kind core derives from the declared kind: an
+/// exchange pays the exchange schedule, a bank payout the bank schedule,
+/// and a Splash business tagged a wallet nothing.
+fun the_fee_follows_the_derived_kind() {
+    let (mut s, fx) = fee_setup();
+    tag(&mut s, &fx, EXCHANGE, payment_intent::kind_exchange());
+    let to_exchange = open(&mut s, &fx, STAFF, 1, payment_intent::kind_exchange(), EXCHANGE, PAY);
+    let to_bank = open(&mut s, &fx, STAFF, 2, payment_intent::kind_bank_payout(), h::recipient(), PAY);
+    let to_business = open(&mut s, &fx, STAFF, 3, payment_intent::kind_wallet(), BUSINESS, PAY);
+    pay_fee(&mut s, &fx, STAFF, fx.staff, to_exchange, false, PAY + MAX_FEE, MAX_FEE);
+    pay_fee(&mut s, &fx, STAFF, fx.staff, to_bank, false, PAY + MAX_FEE, MAX_FEE);
+    pay_fee(&mut s, &fx, STAFF, fx.staff, to_business, false, PAY + MAX_FEE, MAX_FEE);
+    assert_eq!(settled(&mut s, h::fee_recipient()), EXCHANGE_FEE + BANK_FEE);
+    assert_eq!(settled(&mut s, h::wallet()), FUNDS - 3 * PAY - EXCHANGE_FEE - BANK_FEE);
+    assert_eq!(settled(&mut s, BUSINESS), PAY);
+    s.end();
+}
+
+#[test]
+/// A1 §2.9: `RuleSpend` says which rule paid which intent, who paid whom,
+/// the kind core charged and Splash's fee, which the Phase 2 near-threshold
+/// alerts read. It agrees with core's `FeeCharged`.
+fun rule_spend_carries_the_spender_recipient_derived_kind_and_fee() {
+    let (mut s, fx) = fee_setup();
+    tag(&mut s, &fx, EXCHANGE, payment_intent::kind_exchange());
+    let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_exchange(), EXCHANGE, PAY);
+    s.next_tx(STAFF);
+    let fees = s.take_shared<FeeConfig>();
+    pay_fee_with(&mut s, &fx, fx.staff, intent, option::none(), &fees, PAY + MAX_FEE, MAX_FEE);
+    ts::return_shared(fees);
+    let spends = event::events_by_type<RuleSpend>();
+    assert_eq!(spends.length(), 1);
+    let (policy, intent_id, allowance_id, approval, spender, recipient, kind, fee) =
+        splash_spend::unpack_rule_spend_for_testing(spends[0]);
+    assert_eq!(policy, fx.policy);
+    assert_eq!(intent_id, intent);
+    assert_eq!(allowance_id, fx.staff);
+    assert!(approval.is_none());
+    assert_eq!(spender, STAFF);
+    assert_eq!(recipient, EXCHANGE);
+    assert_eq!(kind, payment_intent::kind_exchange());
+    assert_eq!(fee, EXCHANGE_FEE);
+    let charged = event::events_by_type<FeeCharged>();
+    assert_eq!(charged.length(), 1);
+    let (charged_intent, business, charged_kind, charged_fee, fee_recipient) =
+        fee_config::unpack_fee_charged_for_testing(charged[0]);
+    assert_eq!(charged_intent, intent);
+    assert_eq!(business, fx.account);
+    assert_eq!(charged_kind, kind);
+    assert_eq!(charged_fee, fee);
+    assert_eq!(fee_recipient, h::fee_recipient());
+    s.end();
+}
+
+#[test]
+/// A1 §3: no fee transfer when the fee is 0. A rule payment to a Splash
+/// business emits `RuleSpend` with the Splash-business kind and a zero fee,
+/// and core charges nothing: no `FeeCharged`, nothing to the fee recipient,
+/// and all of max_fee back to the wallet.
+fun a_rule_payment_to_a_splash_business_has_no_fee_leg() {
+    let (mut s, fx) = fee_setup();
+    let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), BUSINESS, PAY);
+    s.next_tx(STAFF);
+    let fees = s.take_shared<FeeConfig>();
+    pay_fee_with(&mut s, &fx, fx.staff, intent, option::none(), &fees, PAY + MAX_FEE, MAX_FEE);
+    ts::return_shared(fees);
+    let (_, _, _, _, _, recipient, kind, fee) =
+        splash_spend::unpack_rule_spend_for_testing(event::events_by_type<RuleSpend>()[0]);
+    assert_eq!(recipient, BUSINESS);
+    assert_eq!(kind, payment_intent::kind_splash_business());
+    assert_eq!(fee, 0);
+    assert_eq!(event::events_by_type<FeeCharged>().length(), 0);
+    assert_eq!(settled(&mut s, h::fee_recipient()), 0);
+    assert_eq!(settled(&mut s, h::wallet()), FUNDS - PAY);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = splash_spend::E_FEE_ABOVE_MAX)]
+/// A1 §2.6 and §3: the fee is above the max_fee the spender signed for (the
+/// schedule changed after the quote, say). The payment aborts.
+fun a_fee_above_max_fee_aborts() {
+    let (mut s, fx) = fee_setup();
+    let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    pay_fee(&mut s, &fx, STAFF, fx.staff, intent, false, PAY + WALLET_FEE - 1, WALLET_FEE - 1);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = splash_core::payment_intent::E_EXACT_AMOUNT_REQUIRED)]
+/// The spender draws the principal and max_fee, exactly: drawing only the
+/// principal while signing for a fee aborts in core.
+fun drawing_only_the_principal_with_a_max_fee_aborts() {
+    let (mut s, fx) = fee_setup();
+    let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    pay_fee(&mut s, &fx, STAFF, fx.staff, intent, false, PAY, MAX_FEE);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = splash_spend::E_FEE_ABOVE_APPROVED)]
+/// A1 §2.6 and §3: an approval names the most the owner agreed to pay in
+/// all, the principal and the fee they were shown. A fee that takes the
+/// total above it aborts, and the payment needs a fresh approval.
+fun an_approval_whose_max_total_is_below_principal_plus_fee_aborts() {
+    let (mut s, fx) = fee_setup();
+    let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    let until = intent_expiry(&mut s, intent);
+    approve_with(&mut s, &fx, h::owner_2(), intent, STAFF, PAY + WALLET_FEE - 1, until);
+    pay_fee(&mut s, &fx, STAFF, fx.staff, intent, true, PAY + MAX_FEE, MAX_FEE);
+    s.end();
+}
+
+#[test]
+/// Above the threshold, an approval of exactly the principal and the fee
+/// pays, with max_fee above it.
+fun an_approval_of_exactly_principal_plus_fee_pays() {
+    let (mut s, fx) = fee_setup();
+    let amount = THRESHOLD + 1;
+    // 2 bps of 10,000.000001 USDC, rounded down: 2 USDC.
+    let fee = 2_000_000;
+    let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, amount);
+    let until = intent_expiry(&mut s, intent);
+    approve_with(&mut s, &fx, h::owner_2(), intent, STAFF, amount + fee, until);
+    pay_fee(&mut s, &fx, STAFF, fx.staff, intent, true, amount + 2 * fee, 2 * fee);
+    assert_eq!(coin_received(&mut s, SUPPLIER), amount);
+    assert_eq!(settled(&mut s, h::fee_recipient()), fee);
+    assert_eq!(settled(&mut s, h::wallet()), FUNDS - amount - fee);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = splash_spend::E_BAD_MAX_TOTAL)]
+/// An approval whose total is below the principal could never be used. It
+/// is refused when given, not minted.
+fun an_approval_cannot_name_a_max_total_below_the_principal() {
+    let (mut s, fx) = fee_setup();
+    let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    let until = intent_expiry(&mut s, intent);
+    approve_with(&mut s, &fx, h::owner_2(), intent, STAFF, PAY - 1, until);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = splash_spend::E_BAD_MAX_TOTAL)]
+/// Nor a delegation.
+fun a_delegation_cannot_name_a_max_total_below_the_principal() {
+    let (mut s, fx) = fee_setup();
+    let intent = open_by_wallet(&mut s, &fx, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    delegate_with(&mut s, &fx, intent, EXECUTOR, PAY - 1);
+    s.end();
+}
+
+#[test]
+/// The wallet's delegation carries its own total: the executor pays the
+/// principal and the fee within it.
+fun the_executor_pays_within_the_delegated_total() {
+    let (mut s, fx) = fee_setup();
+    let intent = open_by_wallet(&mut s, &fx, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    delegate_with(&mut s, &fx, intent, EXECUTOR, PAY + WALLET_FEE);
+    pay_fee(&mut s, &fx, EXECUTOR, fx.executor, intent, true, PAY + MAX_FEE, MAX_FEE);
+    assert_eq!(coin_received(&mut s, SUPPLIER), PAY);
+    assert_eq!(settled(&mut s, h::wallet()), FUNDS - PAY - WALLET_FEE);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = splash_spend::E_FEE_ABOVE_APPROVED)]
+/// And not above it.
+fun the_executor_cannot_pay_above_the_delegated_total() {
+    let (mut s, fx) = fee_setup();
+    let intent = open_by_wallet(&mut s, &fx, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    delegate_with(&mut s, &fx, intent, EXECUTOR, PAY + WALLET_FEE - 1);
+    pay_fee(&mut s, &fx, EXECUTOR, fx.executor, intent, true, PAY + MAX_FEE, MAX_FEE);
+    s.end();
+}
+
+#[test]
+/// A1 §2.6 and §3: splash_spend checks the fee against its own 100 bps
+/// ceiling. Here the FeeConfig stores 200 bps and a 50 USDC minimum, built
+/// through core's test-only constructor that skips validation. The rule
+/// payment still pays Splash at most 1% of the principal, and the rest of
+/// the 2% max_fee goes back to the wallet.
+fun splash_spends_own_ceiling_holds_with_a_fee_config_above_100_bps() {
+    let (mut s, fx) = fee_setup();
+    assert_eq!(splash_spend::fee_ceiling_bps_for_testing(), 100);
+    let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    s.next_tx(STAFF);
+    let mut fees = fee_config::new_for_testing(h::fee_recipient(), s.ctx());
+    fee_config::set_schedule_unchecked_for_testing(
+        &mut fees,
+        payment_intent::kind_wallet(),
+        vector[std::u64::max_value!()],
+        vector[200],
+        50_000_000,
+        std::u64::max_value!(),
+    );
+    let max_fee = PAY / 50;
+    pay_fee_with(&mut s, &fx, fx.staff, intent, option::none(), &fees, PAY + max_fee, max_fee);
+    let (_, _, _, _, _, _, _, fee) = splash_spend::unpack_rule_spend_for_testing(event::events_by_type<RuleSpend>()[0]);
+    assert_eq!(fee, PAY / 100);
+    fee_config::destroy_for_testing(fees);
+    assert_eq!(settled(&mut s, h::fee_recipient()), PAY / 100);
+    assert_eq!(settled(&mut s, h::wallet()), FUNDS - PAY - PAY / 100);
+    s.end();
+}
+
+#[test]
+/// The policy's limits, the threshold and the running total count the
+/// principal only; Splash's fee is bounded by max_fee and the ceiling. A
+/// junior pays exactly their own maximum with the fee on top, and STAFF
+/// pays exactly the threshold to one recipient, alone.
+fun the_limits_and_the_running_total_count_the_principal_only() {
+    let (mut s, fx) = fee_setup();
+    let junior = open(&mut s, &fx, JUNIOR, 1, payment_intent::kind_wallet(), SUPPLIER, JUNIOR_MAX);
+    pay_fee(&mut s, &fx, JUNIOR, fx.junior, junior, false, JUNIOR_MAX + MAX_FEE, MAX_FEE);
+    let staff = open(&mut s, &fx, STAFF, 2, payment_intent::kind_wallet(), OTHER_PARTNER, THRESHOLD);
+    pay_fee(&mut s, &fx, STAFF, fx.staff, staff, false, THRESHOLD + MAX_FEE, MAX_FEE);
+    assert_eq!(total_paid(&mut s, &fx, JUNIOR, payment_intent::kind_wallet(), SUPPLIER), JUNIOR_MAX);
+    assert_eq!(total_paid(&mut s, &fx, STAFF, payment_intent::kind_wallet(), OTHER_PARTNER), THRESHOLD);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = sui::allowance::EExceedsLifetimeCap)]
+/// The allowance's cap is the hard ceiling on what leaves the wallet under
+/// a rule: it covers the principal and the max_fee the spender draws.
+fun the_allowance_cap_covers_the_principal_and_max_fee() {
+    let (mut s, fx) = fee_setup();
+    let small = grant(&mut s, fx.policy, STAFF, ((PAY + MAX_FEE - 1) as u256));
+    let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    pay_fee(&mut s, &fx, STAFF, small, intent, false, PAY + MAX_FEE, MAX_FEE);
+    s.end();
+}
+
+#[test]
+/// A cap of exactly the principal and max_fee pays.
+fun an_allowance_cap_of_exactly_the_principal_and_max_fee_pays() {
+    let (mut s, fx) = fee_setup();
+    let exact = grant(&mut s, fx.policy, STAFF, ((PAY + MAX_FEE) as u256));
+    let intent = open(&mut s, &fx, STAFF, 1, payment_intent::kind_wallet(), SUPPLIER, PAY);
+    pay_fee(&mut s, &fx, STAFF, exact, intent, false, PAY + MAX_FEE, MAX_FEE);
+    assert_eq!(alw_spend(&mut s, exact), (PAY + MAX_FEE) as u256);
     s.end();
 }
