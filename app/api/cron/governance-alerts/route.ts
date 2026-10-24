@@ -1,20 +1,23 @@
 /**
  * Governance alert monitor (v2, brief 3.5).
  *
- * Reads the recent upgrade, owner-change and registry-addition events, keeps
- * only those from the canonical wrapper and the canonical compliance config,
- * records each once, and tells every business owner in the app, by email, and
- * on WhatsApp where they have a verified number. The rule lives in
+ * Reads the state of the canonical upgrade wrapper and the canonical
+ * compliance config on chain (a pending upgrade, a pending owner change,
+ * pending registry additions, and what took effect since the last run),
+ * records each alert once, and tells every business owner in the app, by
+ * email, and on WhatsApp where they have a verified number. The rule lives in
  * lib/server/governance-events.ts; the I/O in
  * lib/server/governance-alert-monitor.ts; this route is the schedule's entry
- * point. Every fifteen minutes is the intended cadence: the notice is 24 hours,
- * and owners need most of it.
+ * point. Every fifteen minutes is the intended cadence: every change it warns
+ * about sits on chain for at least 24 hours before it can take effect, and
+ * owners need most of that.
  *
- * Fails closed. Unconfigured canonical ids, an unreadable indexer or database,
- * or a genuine wrapper event naming a core package the configuration does not
- * list all answer 502, so the scheduler's own failure alerting sees it. A
- * monitor that quietly stopped telling owners is the failure this route must
- * not have.
+ * Fails closed. Unconfigured canonical ids, an id that is not the canonical
+ * object of the canonical type on chain, a read of the chain that is not
+ * complete, or an unreadable database all answer 502, so the scheduler's own
+ * failure alerting sees it (a configured id that does not check out also
+ * pages a person). A monitor that quietly stopped telling owners is the
+ * failure this route must not have.
  */
 import { timingSafeEqual } from 'node:crypto';
 import { NextResponse } from 'next/server';
@@ -42,24 +45,15 @@ async function handle(request: Request) {
     console.error('[cron/governance-alerts] monitor did not run:', result.reason);
     return NextResponse.json({ success: false, error: result.reason }, { status: 502 });
   }
-  const body = {
-    scanned: result.scanned,
-    alerts: result.report.alerts.map((a) => ({ digest: a.digest, eventSeq: a.eventSeq, kind: a.kind })),
-    ignored: result.report.ignored.map((i) => ({ digest: i.digest, eventSeq: i.eventSeq, reason: i.reason })),
+  return NextResponse.json({
+    success: true,
+    observed: result.observed,
+    alerts: result.alerts.map((a) => ({ kind: a.kind, key: a.key })),
     recorded: result.recorded,
     active: result.active,
     owners: result.owners,
     deliveries: result.deliveries,
-    drift: result.drift.map((d) => ({ digest: d.digest, eventSeq: d.eventSeq, note: d.note ?? null })),
-  };
-  if (result.drift.length > 0) {
-    const error =
-      'the canonical upgrade wrapper emitted an event naming a core package other than the configured one, so owners were not told about it; ' +
-      "set SPLASH_CORE_PACKAGE_ID to core's original id, the one the wrapper records";
-    console.error('[cron/governance-alerts]', error, body.drift);
-    return NextResponse.json({ success: false, error, ...body }, { status: 502 });
-  }
-  return NextResponse.json({ success: true, ...body });
+  });
 }
 
 export async function GET(request: Request) {

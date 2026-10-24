@@ -9,24 +9,21 @@ registerHooks({
 });
 
 import { attachDb, migratedDb } from './helpers/store-db.mjs';
-import {
-  REVIEW_PATH,
-  classifyGovernanceEvents,
-  configurationDrift,
-  formatUtc,
-  watchedEventTypes,
-} from '../lib/server/governance-events.ts';
+import { REVIEW_PATH, deriveGovernanceAlerts, formatUtc, parseGovernanceState } from '../lib/server/governance-events.ts';
 
 /* v2 brief 3.5, review checklist A.7: "check the listener, not just the event".
 
-   The Move side emits UpgradeProposed and friends; this file tests what the
-   backend does with them. `wrap` is public, so anyone can emit a well-formed
-   UpgradeProposed from a wrapper of their own, or publish a look-alike
-   `upgrade_delay` module. The classifier must alert on the canonical events
-   and nothing else; the monitor must record each once and tell every owner
-   once per channel, however often it runs. Nothing here reaches a network:
-   the events, the email transport and WhatsApp are injected, and the database
-   is PGlite with every migration applied. */
+   The Move side holds a pending upgrade in the DelayedUpgradeCap and pending
+   registry additions in the ComplianceConfig, for at least 24 hours each;
+   this file tests what the backend does with that state. `wrap` is public, so
+   anyone can emit events of the canonical types from a wrapper of their own,
+   which is why the monitor reads the two canonical objects and never an event
+   feed. It must alert on what those objects hold and nothing else, refuse an
+   object it cannot verify, record each alert once and tell every owner once
+   per channel, however often it runs. Nothing here reaches a network: the
+   chain, the email transport and WhatsApp are injected or faked, and the
+   database is PGlite with every migration applied. The object fixtures
+   (wrapperObject, configObject) are in section 4. */
 
 const UD = '0x' + 'd1'.repeat(32);
 const WRAP = '0x' + 'a1'.repeat(32);
@@ -35,58 +32,49 @@ const CORE_V2 = '0x' + 'c2'.repeat(32);
 const CONFIG = '0x' + 'cf'.repeat(32);
 const ATTACKER = '0x' + '99'.repeat(32);
 
-const POLICY = { upgradeDelayPackageId: UD, wrapperId: WRAP, corePackageId: CORE, complianceConfigId: CONFIG };
+const POLICY = { upgradeDelayPackageId: UD, wrapperId: WRAP, complianceConfigId: CONFIG };
 const ENV = {
   NODE_ENV: 'test',
   SPLASH_UPGRADE_DELAY_PACKAGE_ID: UD,
   SPLASH_UPGRADE_WRAPPER_ID: WRAP,
-  SPLASH_CORE_PACKAGE_ID: CORE,
   SPLASH_COMPLIANCE_CONFIG_ID: CONFIG,
 };
 
 const NOW = Date.UTC(2026, 9, 24, 9, 0);
 const PROPOSED = NOW - 60 * 60 * 1000;
 const ETA = PROPOSED + 86_400_000;
-const BYTECODE = Buffer.alloc(32, 7);
+const DAY = 86_400_000;
+const NO_HISTORY = { wrapper: null, config: null };
 
-function upgradeProposed(over = {}) {
-  return {
-    digest: over.digest ?? 'TxUpgradeProposed1',
-    eventSeq: over.eventSeq ?? 0,
-    type: `${over.typePackage ?? UD}::upgrade_delay::UpgradeProposed`,
-    timestampMs: PROPOSED,
-    json: {
-      wrapper_id: over.wrapper ?? WRAP,
-      package: over.package ?? CORE,
-      digest: BYTECODE.toString('base64'),
-      proposed_at_ms: String(PROPOSED),
-      eta_ms: String(ETA),
-      policy: 128,
-    },
-  };
+const pendingUpgrade = (over = {}) => ({
+  digest: over.digest ?? Buffer.alloc(32, 7).toString('base64'),
+  proposed_at_ms: String(over.proposed ?? PROPOSED),
+  eta_ms: String(over.eta ?? ETA),
+});
+
+/** A read of both objects; each side takes wrapperObject / configObject overrides. */
+function chainRead({ wrapper = {}, config = {} } = {}) {
+  return { wrapper: wrapperObject(wrapper), config: configObject(config) };
 }
 
-function registryEvent(name, over = {}) {
-  const json = { config_id: over.config ?? CONFIG, registry: over.registry ?? 2, type_name: over.typeName ?? `${'ab'.repeat(32)}::payroll_app::PAYROLL_APP` };
-  if (name === 'RegistryAdditionProposed') Object.assign(json, { proposed_at_ms: String(PROPOSED), eta_ms: String(ETA) });
-  return {
-    digest: over.digest ?? `Tx${name}`,
-    eventSeq: over.eventSeq ?? 0,
-    type: `${over.typePackage ?? CORE}::compliance_config::${name}`,
-    timestampMs: PROPOSED,
-    json,
-  };
+function stateOf(read) {
+  const parsed = parseGovernanceState(read, POLICY);
+  assert.equal(parsed.ok, true, parsed.reason);
+  return parsed.state;
 }
 
-// ─── 1. The classifier: canonical events in, alerts out ────────────────────
+// ─── 1. The decision: canonical state in, alerts out ───────────────────────
 
-test('a genuine UpgradeProposed produces exactly one alert, with its eta, the review link and the diff summary', () => {
-  const report = classifyGovernanceEvents([upgradeProposed(), upgradeProposed()], POLICY);
-  assert.equal(report.alerts.length, 1, 'the same event twice is one alert');
-  const [alert] = report.alerts;
+test('a pending upgrade in the canonical wrapper is one alert: its bytecode digest, policy and eta, keyed by its content', () => {
+  const read = chainRead({ wrapper: { pending: pendingUpgrade() } });
+  const { alerts, snapshots } = deriveGovernanceAlerts(stateOf(read), NO_HISTORY, NOW);
+  assert.equal(alerts.length, 1);
+  const [alert] = alerts;
   assert.equal(alert.kind, 'upgrade_proposed');
-  assert.equal(alert.digest, 'TxUpgradeProposed1');
-  assert.equal(alert.eventSeq, 0);
+  assert.equal(alert.subjectId, WRAP);
+  assert.equal(alert.key, `upgrade_proposed|${WRAP}|${DIGEST_HEX}|${ETA}`);
+  assert.equal(alert.bytecodeDigest, DIGEST_HEX);
+  assert.equal(alert.upgradePolicy, 128);
   assert.equal(alert.etaMs, ETA);
   assert.equal(alert.proposedAtMs, PROPOSED);
   assert.equal(alert.reviewPath, '/dashboard/settings/spending-rules');
@@ -97,123 +85,207 @@ test('a genuine UpgradeProposed produces exactly one alert, with its eta, the re
       'Review your spending rules and revoke any allowance you are not comfortable with before then.',
   );
   assert.equal(formatUtc(ETA), '25 October 2026, 08:00 UTC');
-  assert.equal(alert.bytecodeDigest, `0x${'07'.repeat(32)}`);
-  assert.match(alert.detail, /can only add to the contract/);
+  assert.match(alert.detail, new RegExp(`^The update's bytecode digest is ${DIGEST_HEX}\\. Upgrade policy: additive \\(128\\)\\. `));
+  assert.match(alert.detail, /only if it adds to the contract: existing functions stay as they are/);
   assert.match(alert.detail, /cannot add a recipient, raise a spending limit or create an allowance/);
-  assert.match(alert.detail, new RegExp(`Code fingerprint: 0x${'07'.repeat(32)}`));
   assert.doesNotMatch(alert.summary + alert.detail, /[—–]/, 'plain punctuation: no dashes as separators');
-  assert.ok(alert.activeUntilMs >= ETA + 7 * 86_400_000, 'shown until seven days after it can take effect');
-  assert.deepEqual(report.ignored, []);
+  assert.doesNotMatch(alert.detail, /source|rebuil|verified/i, 'nothing about the code the chain does not show');
+  assert.equal(alert.activeUntilMs, ETA + 7 * DAY, 'shown until the chain would refuse it as lapsed');
+  assert.deepEqual(snapshots.wrapper.pendingKeys, [alert.key]);
+
+  // The same state, read again or by a second instance, is the same alert.
+  assert.equal(deriveGovernanceAlerts(stateOf(read), NO_HISTORY, NOW + 15 * 60_000).alerts[0].key, alert.key);
+  // Nothing pending, nothing to say.
+  assert.deepEqual(deriveGovernanceAlerts(stateOf(chainRead()), NO_HISTORY, NOW).alerts, []);
 });
 
-test('a spoofed wrapper id is ignored: anyone can wrap a cap of their own and emit the same event', () => {
-  const report = classifyGovernanceEvents([upgradeProposed({ wrapper: '0x' + 'ee'.repeat(32) })], POLICY);
-  assert.deepEqual(report.alerts, []);
-  assert.equal(report.ignored[0].reason, 'wrapper_not_canonical');
-});
+test('a pending owner change and pending registry additions alert, naming what the chain names', () => {
+  const state = stateOf(chainRead({
+    wrapper: { pendingOwner: { new_owner: NEW_GOVERNANCE, eta_ms: String(ETA) } },
+    config: {
+      pending: [
+        { registry: 1, typeName: `${'ab'.repeat(32)}::usdt::USDT`, proposedAtMs: PROPOSED, etaMs: ETA },
+        { registry: 2, typeName: APP_TYPE, proposedAtMs: PROPOSED, etaMs: ETA },
+        { registry: 3, typeName: `${'ab'.repeat(32)}::cctp_adapter::CCTP`, proposedAtMs: PROPOSED, etaMs: ETA },
+      ],
+    },
+  }));
+  const { alerts, snapshots } = deriveGovernanceAlerts(state, NO_HISTORY, NOW);
+  const by = Object.fromEntries(alerts.map((a) => [a.registry ?? a.kind, a]));
+  assert.equal(alerts.length, 4);
 
-test('a look-alike upgrade_delay module in another package is ignored, even with every field copied', () => {
-  const report = classifyGovernanceEvents([upgradeProposed({ typePackage: ATTACKER })], POLICY);
-  assert.deepEqual(report.alerts, []);
-  assert.equal(report.ignored[0].reason, 'type_not_canonical');
-  // And for the registry events: a compliance_config::RegistryAdditionProposed
-  // that splash_core did not define.
-  const registry = classifyGovernanceEvents([registryEvent('RegistryAdditionProposed', { typePackage: ATTACKER })], POLICY);
-  assert.deepEqual(registry.alerts, []);
-  assert.equal(registry.ignored[0].reason, 'type_not_canonical');
-});
+  const owner = by.owner_change_proposed;
+  assert.equal(owner.key, `owner_change_proposed|${WRAP}|${NEW_GOVERNANCE}|${ETA}`);
+  assert.equal(owner.newOwner, NEW_GOVERNANCE);
+  assert.match(owner.summary, /^Splash has announced a change to who can update its payment contract\. It can take effect from 25 October 2026, 08:00 UTC\./);
+  assert.match(owner.detail, new RegExp(`would move from ${GOVERNANCE} to ${NEW_GOVERNANCE}, a multisig account: no single key can sign for it alone\\.`));
 
-test('an event for another package id is ignored, and reported as configuration drift', () => {
-  const report = classifyGovernanceEvents([upgradeProposed({ package: ATTACKER })], POLICY);
-  assert.deepEqual(report.alerts, []);
-  assert.equal(report.ignored[0].reason, 'package_not_canonical');
-  assert.equal(configurationDrift(report).length, 1, 'a genuine wrapper naming an unknown package is drift, not noise');
-
-  // The wrapper records core's original id at wrap and every event names
-  // it, so a later core version in `package` is drift too: it means
-  // SPLASH_CORE_PACKAGE_ID was set to that version, not the original.
-  const later = classifyGovernanceEvents([upgradeProposed({ package: CORE_V2 })], POLICY);
-  assert.deepEqual(later.alerts, []);
-  assert.equal(configurationDrift(later).length, 1);
-});
-
-test('a registry event for any other config id is ignored', () => {
-  const report = classifyGovernanceEvents([registryEvent('RegistryAdditionProposed', { config: '0x' + 'ce'.repeat(32) })], POLICY);
-  assert.deepEqual(report.alerts, []);
-  assert.equal(report.ignored[0].reason, 'config_not_canonical');
-});
-
-test('ids compare in canonical form: short, upper-case or unpadded still match, and only exactly', () => {
-  const report = classifyGovernanceEvents(
-    [upgradeProposed({ wrapper: WRAP.toUpperCase().replace('0X', '0x'), typePackage: UD.toUpperCase().replace('0X', '0x') })],
-    POLICY,
+  assert.match(by[1].summary, /^Splash has announced a new payment asset \(usdt::USDT\)\. It can take effect from /);
+  assert.match(by[2].summary, /^Splash has announced a new settlement app \(payroll_app::PAYROLL_APP\)\./);
+  assert.equal(
+    by[2].detail,
+    "Once it takes effect, this app can open payment requests in your account's name and settle them. " +
+      `It can spend from your wallet only under an allowance you grant to this app. Full type: ${APP_TYPE}.`,
   );
-  assert.equal(report.alerts.length, 1);
-  const short = '0x2';
-  assert.equal(classifyGovernanceEvents([upgradeProposed({ typePackage: short })], POLICY).ignored[0].reason, 'type_not_canonical');
+  assert.match(by[3].summary, /^Splash has announced a new cross-chain bridge adapter \(cctp_adapter::CCTP\)\./);
+  assert.equal(by[2].key, `registry_addition_proposed|${CONFIG}|2|${APP_TYPE}|${ETA}`);
+  assert.equal(snapshots.config.pendingKeys.length, 3);
+  for (const alert of alerts) assert.equal(alert.reviewPath, REVIEW_PATH);
 });
 
-test('registry additions name what is being added; authorisation and activation say it has taken effect; owner changes alert', () => {
-  const report = classifyGovernanceEvents(
-    [
-      registryEvent('RegistryAdditionProposed', { registry: 1, typeName: `${'ab'.repeat(32)}::usdt::USDT`, digest: 'TxAsset' }),
-      registryEvent('RegistryAdditionProposed', { registry: 2, digest: 'TxApp' }),
-      registryEvent('RegistryAdditionProposed', { registry: 3, typeName: `${'ab'.repeat(32)}::cctp_adapter::CCTP`, digest: 'TxBridge' }),
-      registryEvent('RegistryAdditionActivated', { registry: 2, digest: 'TxAppLive' }),
-      {
-        digest: 'TxAuthorized',
-        eventSeq: 1,
-        type: `${UD}::upgrade_delay::UpgradeAuthorized`,
-        timestampMs: ETA + 1000,
-        json: { wrapper_id: WRAP, package: CORE, digest: BYTECODE.toString('base64'), policy: 128 },
-      },
-      {
-        digest: 'TxOwner',
-        eventSeq: 0,
-        type: `${UD}::upgrade_delay::OwnerChangeProposed`,
-        timestampMs: PROPOSED,
-        json: { wrapper_id: WRAP, new_owner: '0x' + '0b'.repeat(32), eta_ms: String(ETA) },
-      },
-    ],
-    POLICY,
-  );
-  assert.deepEqual(report.ignored, []);
-  const by = Object.fromEntries(report.alerts.map((a) => [a.digest, a]));
-  assert.match(by.TxAsset.summary, /^Splash has announced a new payment asset \(usdt::USDT\)\. It can take effect from /);
-  assert.match(by.TxApp.summary, /^Splash has announced a new app that can pay under spending rules \(payroll_app::PAYROLL_APP\)\./);
-  assert.match(by.TxBridge.summary, /^Splash has announced a new cross-chain bridge adapter \(cctp_adapter::CCTP\)\./);
-  assert.match(by.TxApp.detail, new RegExp(`Full type: ${'ab'.repeat(32)}::payroll_app::PAYROLL_APP\\.`));
-  assert.match(by.TxAppLive.summary, /^Splash has added a new app that can pay under spending rules \(payroll_app::PAYROLL_APP\)\. It has now taken effect\./);
-  assert.equal(by.TxAuthorized.kind, 'upgrade_authorized');
-  assert.match(by.TxAuthorized.summary, /has now taken effect\. Review your spending rules/);
-  assert.equal(by.TxOwner.kind, 'owner_change_proposed');
-  assert.match(by.TxOwner.summary, /^Splash has announced a change to who can update its payment contract\./);
-  for (const alert of report.alerts) assert.equal(alert.reviewPath, REVIEW_PATH);
+test('a proposal past its window has lapsed on chain and is not alerted; one past its eta but inside the window still is', () => {
+  const lapsedEta = NOW - 7 * DAY - 1;
+  const lapsed = stateOf(chainRead({
+    wrapper: { pending: pendingUpgrade({ proposed: lapsedEta - DAY, eta: lapsedEta }), pendingOwner: { new_owner: NEW_GOVERNANCE, eta_ms: String(lapsedEta) } },
+    config: { pending: [{ registry: 2, typeName: APP_TYPE, proposedAtMs: lapsedEta - DAY, etaMs: lapsedEta }] },
+  }));
+  const none = deriveGovernanceAlerts(lapsed, NO_HISTORY, NOW);
+  assert.deepEqual(none.alerts, [], 'the chain would refuse every one of them now');
+  assert.deepEqual(none.snapshots.wrapper.pendingKeys, []);
+  assert.deepEqual(none.snapshots.config.pendingKeys, []);
+
+  const dueEta = NOW - 60_000;
+  const due = stateOf(chainRead({ wrapper: { pending: pendingUpgrade({ proposed: dueEta - DAY, eta: dueEta }) } }));
+  const [alert] = deriveGovernanceAlerts(due, NO_HISTORY, NOW).alerts;
+  assert.equal(alert.kind, 'upgrade_proposed', 'its notice has run: it can be put into force now');
+  assert.ok(alert.activeUntilMs > NOW);
 });
 
-test('malformed and unwatched events are ignored with a reason, never alerted', () => {
-  const missingEta = upgradeProposed({ digest: 'TxNoEta' });
-  delete missingEta.json.eta_ms;
-  const report = classifyGovernanceEvents(
-    [
-      missingEta,
-      { digest: 'TxCancel', eventSeq: 0, type: `${UD}::upgrade_delay::UpgradeCancelled`, timestampMs: NOW, json: { wrapper_id: WRAP } },
-      { digest: 'TxJunk', eventSeq: 0, type: 'not a type', timestampMs: NOW, json: {} },
-    ],
-    POLICY,
-  );
-  assert.deepEqual(report.alerts, []);
-  assert.deepEqual(report.ignored.map((i) => [i.digest, i.reason]), [['TxNoEta', 'malformed'], ['TxCancel', 'not_watched'], ['TxJunk', 'malformed']]);
+test('what took effect is told only against an older stored state: a committed upgrade and an activated addition; the first state stored is a baseline', () => {
+  // First run ever: core is already at version 2 and an app is registered.
+  // Nothing says when those happened, so neither is announced.
+  const already = stateOf(chainRead({ wrapper: { capVersion: 2, latest: CORE_V2 }, config: { apps: [APP_TYPE] } }));
+  assert.deepEqual(deriveGovernanceAlerts(already, NO_HISTORY, NOW).alerts, []);
+
+  const before = deriveGovernanceAlerts(stateOf(chainRead({ wrapper: { version: 40 }, config: { version: 900 } })), NO_HISTORY, NOW).snapshots;
+  const after = stateOf(chainRead({ wrapper: { version: 41, capVersion: 2, latest: CORE_V2 }, config: { version: 901, apps: [APP_TYPE] } }));
+  const { alerts, snapshots } = deriveGovernanceAlerts(after, before, NOW);
+  const by = Object.fromEntries(alerts.map((a) => [a.kind, a]));
+  assert.deepEqual(Object.keys(by).sort(), ['registry_addition_activated', 'upgrade_committed']);
+  assert.equal(by.upgrade_committed.key, `upgrade_committed|${WRAP}|2|${CORE_V2}`);
+  assert.equal(by.upgrade_committed.packageId, CORE_V2);
+  assert.equal(by.upgrade_committed.packageVersion, 2);
+  assert.match(by.upgrade_committed.summary, /^An update to Splash's payment contract has taken effect\./);
+  assert.match(by.upgrade_committed.detail, new RegExp(`^The contract is now at version 2, package ${CORE_V2}\\. Upgrade policy: additive \\(128\\)\\.`));
+  assert.equal(by.upgrade_committed.activeUntilMs, NOW + 8 * DAY);
+  assert.equal(by.registry_addition_activated.key, `registry_addition_activated|${CONFIG}|2|${APP_TYPE}|900`);
+  assert.match(by.registry_addition_activated.summary, /^Splash has added a new settlement app \(payroll_app::PAYROLL_APP\)\. It has now taken effect\./);
+  assert.match(by.registry_addition_activated.detail, /^This app can now open payment requests in your account's name/);
+
+  // A lagging read (older object versions than what is stored) can never
+  // make an entry look new, or an upgrade look committed.
+  assert.deepEqual(deriveGovernanceAlerts(stateOf(chainRead({ wrapper: { version: 40 }, config: { version: 900 } })), snapshots, NOW).alerts, []);
+
+  // Removed, then added again later: a new alert, under a new key.
+  const removed = deriveGovernanceAlerts(stateOf(chainRead({ wrapper: { version: 41, capVersion: 2, latest: CORE_V2 }, config: { version: 905 } })), snapshots, NOW).snapshots;
+  const readded = deriveGovernanceAlerts(stateOf(chainRead({ wrapper: { version: 41, capVersion: 2, latest: CORE_V2 }, config: { version: 990, apps: [APP_TYPE] } })), removed, NOW);
+  assert.deepEqual(readded.alerts.map((a) => a.key), [`registry_addition_activated|${CONFIG}|2|${APP_TYPE}|905`]);
 });
 
-test('the listener asks the indexer for exactly the five watched types, under each known core version', () => {
-  assert.deepEqual(watchedEventTypes(POLICY).sort(), [
-    `${CORE}::compliance_config::RegistryAdditionActivated`,
-    `${CORE}::compliance_config::RegistryAdditionProposed`,
-    `${UD}::upgrade_delay::OwnerChangeProposed`,
-    `${UD}::upgrade_delay::UpgradeAuthorized`,
-    `${UD}::upgrade_delay::UpgradeProposed`,
-  ]);
+test('only the canonical objects are read: a missing object, a look-alike type, or a config not of core\'s original package is refused, naming the setting', () => {
+  const refused = (read, objectId, names) => {
+    const parsed = parseGovernanceState(read, POLICY);
+    assert.equal(parsed.ok, false);
+    assert.equal(parsed.objectId, objectId);
+    assert.match(parsed.reason, names);
+    return parsed.reason;
+  };
+  refused({ wrapper: null, config: configObject() }, WRAP, /SPLASH_UPGRADE_WRAPPER_ID .* names no object on chain/);
+  refused(chainRead({ wrapper: { type: `${ATTACKER}::upgrade_delay::DelayedUpgradeCap` } }), WRAP, /SPLASH_UPGRADE_WRAPPER_ID .* is a 0x9{2}.*::upgrade_delay::DelayedUpgradeCap, not a 0xd1d1/);
+  refused(chainRead({ wrapper: { type: `${UD}::upgrade_delay::DelayedUpgradeCap<u8>` } }), WRAP, /SPLASH_UPGRADE_WRAPPER_ID/);
+  refused(chainRead({ wrapper: { address: STRANGER_WRAP } }), WRAP, /not the one asked for/);
+  refused({ wrapper: { ...wrapperObject(), owner: { __typename: 'Shared' } }, config: configObject() }, WRAP, /not owned by an address/);
+  refused({ wrapper: wrapperObject(), config: null }, CONFIG, /SPLASH_COMPLIANCE_CONFIG_ID .* names no object on chain/);
+  refused(chainRead({ config: { type: `${ATTACKER}::compliance_config::ComplianceConfig` } }), CONFIG, /SPLASH_COMPLIANCE_CONFIG_ID/);
+  // Core's original id is the wrapper's record, not whichever version the
+  // app calls: a config typed under the latest id is not core's.
+  refused(chainRead({ wrapper: { original: CORE, latest: CORE_V2, capVersion: 2 }, config: { type: `${CORE_V2}::compliance_config::ComplianceConfig` } }), CONFIG, /its original_package/);
+  assert.equal(stateOf(chainRead({ wrapper: { original: CORE, latest: CORE_V2, capVersion: 2 } })).wrapper.originalPackage, CORE);
+});
+
+test('ids compare in canonical form: upper-case or unpadded still match, and only exactly', () => {
+  const upper = (id) => id.toUpperCase().replace('0X', '0x');
+  const state = stateOf(chainRead({ wrapper: { type: `${upper(UD)}::upgrade_delay::DelayedUpgradeCap`, original: upper(CORE) } }));
+  assert.equal(state.wrapper.originalPackage, CORE);
+  const short = parseGovernanceState(chainRead({ wrapper: { type: '0x2::upgrade_delay::DelayedUpgradeCap' } }), POLICY);
+  assert.equal(short.ok, false);
+});
+
+test('every field the alerts depend on must parse, or the whole read is refused', () => {
+  const wrapperJson = wrapperObject({ pending: pendingUpgrade() }).asMoveObject.contents.json;
+  const configJson = configObject().asMoveObject.contents.json;
+  const cases = [
+    ['no pending_owner field', { wrapper: { json: { ...wrapperJson, pending_owner: undefined } } }],
+    ['a 31-byte digest', { wrapper: { pending: { ...pendingUpgrade(), digest: Buffer.alloc(31, 7).toString('base64') } } }],
+    ['an eta that is not a time', { wrapper: { pending: { ...pendingUpgrade(), eta_ms: '1e12' } } }],
+    ['a new owner that is not an address', { wrapper: { pendingOwner: { new_owner: 'governance', eta_ms: String(ETA) } } }],
+    ['no cap version', { wrapper: { json: { ...wrapperJson, cap: { ...wrapperJson.cap, version: undefined } } } }],
+    ['an original_package that is not an id', { wrapper: { json: { ...wrapperJson, original_package: 'core' } } }],
+    ['no settlement_apps', { config: { json: { ...configJson, settlement_apps: undefined } } }],
+    ['an addition to registry 4', { config: { pending: [{ registry: 4, typeName: APP_TYPE, proposedAtMs: PROPOSED, etaMs: ETA }] } }],
+    ['an addition with no type', { config: { pending: [{ registry: 2, typeName: ' ', proposedAtMs: PROPOSED, etaMs: ETA }] } }],
+    ['a config id that is not the configured one', { config: { json: { ...configJson, id: '0x' + 'ce'.repeat(32) } } }],
+  ];
+  for (const [label, over] of cases) {
+    const parsed = parseGovernanceState(chainRead(over), POLICY);
+    assert.equal(parsed.ok, false, label);
+    assert.match(parsed.reason, /could not be read in full/, label);
+  }
+  const noVersion = chainRead();
+  delete noVersion.wrapper.version;
+  assert.equal(parseGovernanceState(noVersion, POLICY).ok, false, 'no object version');
+});
+
+test('the objects parse exactly as Sui testnet GraphQL rendered them (24 October 2026)', () => {
+  // Read with the monitor's own query from https://graphql.testnet.sui.io on
+  // 24 October 2026: the v2 Phase 1 wrapper and config (experiments/v2-phase1).
+  const ids = {
+    upgradeDelayPackageId: '0xc8ea66e425577c26a4bde76185f3d68b869f23e65de7f8e4de2aa1db608cc0a0',
+    wrapperId: '0x34ec5a523b809c442f91f916596bf79ca30c49f6ce239989928737e7b12ceecb',
+    complianceConfigId: '0x271897e5ab3ab8ba391f777860bd4aabb9ae403c581e36eeebebd41defd3327d',
+  };
+  const core = '0x993736cefd0df038b62126ddfceade1a45db5f45b93106ee220eec20437d9db2';
+  const read = {
+    wrapper: {
+      address: ids.wrapperId,
+      version: 4,
+      owner: { __typename: 'AddressOwner', address: { address: '0xafea5352bb6313c6af89594eac518d24049e5bc6dfd4bbc18a14bf191f82b6b5' } },
+      asMoveObject: { contents: { type: { repr: `${ids.upgradeDelayPackageId}::upgrade_delay::DelayedUpgradeCap` }, json: {
+        id: ids.wrapperId,
+        cap: { id: '0x43599013c394675788158e0af688403628471393785d454be90e212ecf423a67', package: core, version: '1', policy: 128 },
+        original_package: core,
+        pending: null,
+        pending_owner: null,
+      } } },
+    },
+    config: {
+      address: ids.complianceConfigId,
+      version: 1064231216,
+      owner: { __typename: 'Shared' },
+      asMoveObject: { contents: { type: { repr: `${core}::compliance_config::ComplianceConfig` }, json: {
+        id: ids.complianceConfigId,
+        max_deviation_ppm: '5000',
+        max_staleness_ms: '60000',
+        max_slippage_bps: '50',
+        min_depth_base_units: '1000000',
+        min_settlement_amount: '1000000',
+        allowed_deepbook_pools: { contents: ['0x5b431dfe8ca757d1bb157833a137ce0fd3c66cefed1fd3cdab4b0e6c7501a587'] },
+        paused: false,
+        accepted_assets: { contents: ['a1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29::usdc::USDC'] },
+        settlement_apps: { contents: [] },
+        bridge_adapters: { contents: [] },
+        pending_additions: [{ registry: 2, type_name: 'c69ab1af37da3c0b15b9f692e893aee5b4aeb56e2fafdb2291cde1ab6857025a::splash_spend::SettleWitness', proposed_at_ms: '1792790973810', eta_ms: '1792877373810' }],
+        legacy_enabled: true,
+      } } },
+    },
+  };
+  const parsed = parseGovernanceState(read, ids);
+  assert.equal(parsed.ok, true, parsed.reason);
+  assert.equal(parsed.state.wrapper.originalPackage, core);
+  assert.equal(parsed.state.config.objectVersion, 1064231216);
+  const { alerts } = deriveGovernanceAlerts(parsed.state, NO_HISTORY, 1792877373810 - DAY + 60_000);
+  assert.deepEqual(alerts.map((a) => [a.kind, a.typeName]), [['registry_addition_proposed', 'c69ab1af37da3c0b15b9f692e893aee5b4aeb56e2fafdb2291cde1ab6857025a::splash_spend::SettleWitness']]);
+  assert.match(alerts[0].summary, /^Splash has announced a new settlement app \(splash_spend::SettleWitness\)\./);
 });
 
 // ─── 2. Configuration fails closed ─────────────────────────────────────────
@@ -222,21 +294,22 @@ test('unconfigured or malformed canonical ids fail closed, naming every key', as
   const { readGovernanceConfig, runGovernanceAlertMonitor } = await import('../lib/server/governance-alert-monitor.ts');
   const none = readGovernanceConfig({});
   assert.equal(none.ok, false);
-  for (const key of ['SPLASH_UPGRADE_DELAY_PACKAGE_ID', 'SPLASH_UPGRADE_WRAPPER_ID', 'SPLASH_CORE_PACKAGE_ID', 'SPLASH_COMPLIANCE_CONFIG_ID']) {
+  for (const key of ['SPLASH_UPGRADE_DELAY_PACKAGE_ID', 'SPLASH_UPGRADE_WRAPPER_ID', 'SPLASH_COMPLIANCE_CONFIG_ID']) {
     assert.match(none.reason, new RegExp(key));
   }
-  const bad = readGovernanceConfig({ ...ENV, SPLASH_UPGRADE_WRAPPER_ID: '0x123', SPLASH_CORE_PACKAGE_ID: 'nope' });
+  assert.doesNotMatch(none.reason, /SPLASH_CORE_PACKAGE_ID/, "core's original id is read from the wrapper, not configured");
+  const bad = readGovernanceConfig({ ...ENV, SPLASH_UPGRADE_WRAPPER_ID: '0x123', SPLASH_COMPLIANCE_CONFIG_ID: 'nope' });
   assert.equal(bad.ok, false);
-  assert.match(bad.reason, /SPLASH_UPGRADE_WRAPPER_ID, SPLASH_CORE_PACKAGE_ID are not a 0x \+ 64 hex id/);
-  const good = readGovernanceConfig(ENV);
-  assert.equal(good.policy.corePackageId, CORE);
+  assert.match(bad.reason, /SPLASH_UPGRADE_WRAPPER_ID, SPLASH_COMPLIANCE_CONFIG_ID are not a 0x \+ 64 hex id/);
+  const good = readGovernanceConfig({ ...ENV, SPLASH_UPGRADE_WRAPPER_ID: WRAP.toUpperCase().replace('0X', '0x') });
+  assert.deepEqual(good.policy, POLICY);
 
-  // The monitor refuses before it reads a single event.
+  // The monitor refuses before it reads anything.
   let read = false;
-  const result = await runGovernanceAlertMonitor({ env: {}, readEvents: async () => { read = true; return []; } });
+  const result = await runGovernanceAlertMonitor({ env: {}, readState: async () => { read = true; return chainRead(); } });
   assert.equal(result.ok, false);
   assert.match(result.reason, /not configured/);
-  assert.equal(read, false, 'no canonical ids, no listening: nothing could be told apart from a spoof');
+  assert.equal(read, false, 'no canonical ids, no reading: there would be nothing to check the objects against');
 });
 
 test('the cron route refuses without CRON_SECRET, and answers 502 when the ids are not configured', async () => {
@@ -308,11 +381,13 @@ async function seedOwners(client) {
   `);
 }
 
-function harness(events, over = {}) {
+/** `read` may be changed between runs: the harness reads it each time. */
+function harness(read, over = {}) {
   const emails = [];
   const whatsapps = [];
   const pages = [];
-  return {
+  const h = {
+    read,
     emails,
     whatsapps,
     pages,
@@ -321,36 +396,39 @@ function harness(events, over = {}) {
       db,
       now: NOW,
       appUrl: 'https://v1.splashz.xyz',
-      readEvents: async () => events,
+      readState: async () => h.read,
       sendEmail: over.sendEmail ?? (async (message) => { emails.push(message); return { providerRef: `em_${emails.length}` }; }),
       sendWhatsApp: async (to, body) => { whatsapps.push({ to, body }); return { sent: true, providerRef: `wa_${whatsapps.length}` }; },
       alert: async (a) => { pages.push(a); },
       ...extra,
     }),
   };
+  return h;
 }
 
 const deliveryRows = async (client) =>
   (await client.query(`SELECT user_id, channel, status, attempts, error FROM governance_alert_deliveries ORDER BY channel, user_id`)).rows;
 
-test('a genuine announcement is recorded once and reaches every owner of every org: in-app and email each, WhatsApp only if verified', async () => {
+const pendingRead = () => chainRead({ wrapper: { pending: pendingUpgrade() } });
+
+test('a pending announcement is recorded once and reaches every owner of every org: in-app and email each, WhatsApp only if verified', async () => {
   await withDb(async ({ client, db }) => {
     await seedOwners(client);
     const { runGovernanceAlertMonitor } = await import('../lib/server/governance-alert-monitor.ts');
-    const spoofs = [
-      upgradeProposed({ digest: 'TxSpoofWrapper', wrapper: '0x' + 'ee'.repeat(32) }),
-      upgradeProposed({ digest: 'TxSpoofType', typePackage: ATTACKER }),
-      registryEvent('RegistryAdditionProposed', { digest: 'TxSpoofConfig', config: '0x' + 'ce'.repeat(32) }),
-    ];
-    const h = harness([upgradeProposed(), ...spoofs]);
+    const h = harness(pendingRead());
     const result = await runGovernanceAlertMonitor(h.deps(db));
     assert.equal(result.ok, true, result.reason);
     assert.equal(result.recorded.length, 1);
     assert.equal(result.owners, 4, 'alice, bob, dave and erin; carol is a checker, not an owner');
+    assert.equal(result.observed.wrapper.corePackage, CORE);
+    assert.equal(result.observed.wrapper.pendingUpgrade, true);
 
-    const alerts = (await client.query(`SELECT digest, event_seq, kind, review_path, eta_at FROM governance_alerts`)).rows;
-    assert.equal(alerts.length, 1, 'no spoof was recorded');
-    assert.equal(alerts[0].digest, 'TxUpgradeProposed1');
+    const alerts = (await client.query(`SELECT content_key, subject_id, kind, bytecode_digest, upgrade_policy, review_path, eta_at FROM governance_alerts`)).rows;
+    assert.equal(alerts.length, 1);
+    assert.equal(alerts[0].content_key, `upgrade_proposed|${WRAP}|${DIGEST_HEX}|${ETA}`);
+    assert.equal(alerts[0].subject_id, WRAP);
+    assert.equal(alerts[0].bytecode_digest, DIGEST_HEX);
+    assert.equal(alerts[0].upgrade_policy, 128);
     assert.equal(alerts[0].review_path, REVIEW_PATH);
     assert.equal(new Date(alerts[0].eta_at).getTime(), ETA);
 
@@ -365,12 +443,14 @@ test('a genuine announcement is recorded once and reaches every owner of every o
     const email = h.emails[0];
     assert.equal(email.subject, 'An update to the Splash payment contract has been announced');
     assert.match(email.text, /^Splash has announced an update to its payment contract\./);
+    assert.match(email.text, new RegExp(`bytecode digest is ${DIGEST_HEX}`));
     assert.match(email.text, /https:\/\/v1\.splashz\.xyz\/dashboard\/settings\/spending-rules/);
     assert.equal(email.link, 'https://v1.splashz.xyz/dashboard/settings/spending-rules');
-    assert.match(email.text, /transaction TxUpgradeProposed1/, 'checkable without trusting the message');
+    assert.match(email.text, new RegExp(`any Sui explorer: object ${WRAP} holds the pending update`), 'checkable without trusting the message');
     assert.deepEqual(h.whatsapps.map((w) => w.to), ['+60102651678']);
+    assert.match(h.whatsapps[0].body, new RegExp(DIGEST_HEX));
     assert.match(h.whatsapps[0].body, /Review your spending rules and allowances: https:\/\/v1\.splashz\.xyz\/dashboard\/settings\/spending-rules$/);
-    assert.deepEqual(h.pages, [], 'no drift, no page');
+    assert.deepEqual(h.pages, [], 'the objects checked out: no page');
   });
 });
 
@@ -378,7 +458,7 @@ test('re-running, even two instances racing on the first run, never records an a
   await withDb(async ({ client, db }) => {
     await seedOwners(client);
     const { runGovernanceAlertMonitor } = await import('../lib/server/governance-alert-monitor.ts');
-    const h = harness([upgradeProposed()]);
+    const h = harness(pendingRead());
 
     // Two instances at the same moment, both seeing nothing recorded yet.
     const [a, b] = await Promise.all([runGovernanceAlertMonitor(h.deps(db)), runGovernanceAlertMonitor(h.deps(db))]);
@@ -389,13 +469,14 @@ test('re-running, even two instances racing on the first run, never records an a
     const before = await deliveryRows(client);
     assert.equal(before.length, 9, 'four in-app, four email, one WhatsApp');
 
-    const again = await runGovernanceAlertMonitor(h.deps(db));
+    const again = await runGovernanceAlertMonitor(h.deps(db, { now: NOW + 15 * 60_000 }));
     assert.equal(again.ok, true);
     assert.deepEqual(again.recorded, []);
     assert.equal((await client.query(`SELECT count(*)::int AS n FROM governance_alerts`)).rows[0].n, 1);
     assert.deepEqual(await deliveryRows(client), before, 'the same rows, untouched');
     assert.equal(h.emails.length + h.whatsapps.length, 5, 'nothing sent again');
     assert.deepEqual(again.deliveries.email, { sent: 0, failed: 0, skipped: 4 });
+    assert.deepEqual(again.deliveries.in_app, { sent: 0, failed: 0, skipped: 4 });
   });
 });
 
@@ -410,7 +491,7 @@ test('a failed delivery is recorded, does not stop the others, and is retried a 
       delivered.push(message.to);
       return { providerRef: null };
     };
-    const h = harness([upgradeProposed()], { sendEmail: flaky });
+    const h = harness(pendingRead(), { sendEmail: flaky });
     const first = await runGovernanceAlertMonitor(h.deps(db));
     assert.equal(first.ok, true);
     assert.deepEqual(first.deliveries.email, { sent: 3, failed: 1, skipped: 0 });
@@ -421,7 +502,7 @@ test('a failed delivery is recorded, does not stop the others, and is retried a 
     const bobInApp = (await deliveryRows(client)).find((r) => r.user_id === 'u_bob' && r.channel === 'in_app');
     assert.equal(bobInApp.status, 'sent', 'his banner does not depend on his email');
 
-    for (let run = 2; run <= MAX_DELIVERY_ATTEMPTS + 2; run += 1) await runGovernanceAlertMonitor(h.deps(db));
+    for (let run = 2; run <= MAX_DELIVERY_ATTEMPTS + 2; run += 1) await runGovernanceAlertMonitor(h.deps(db, { now: NOW + run * 15 * 60_000 }));
     const retried = (await deliveryRows(client)).find((r) => r.user_id === 'u_bob' && r.channel === 'email');
     assert.equal(retried.attempts, MAX_DELIVERY_ATTEMPTS, 'retried, then left alone');
     assert.equal(retried.status, 'failed');
@@ -429,79 +510,185 @@ test('a failed delivery is recorded, does not stop the others, and is retried a 
   });
 });
 
-test('an owner added during the notice is told on the next run; an expired alert is not fanned out', async () => {
+test('an owner added during the notice is told on the next run; nobody is told about a proposal once it has lapsed', async () => {
   await withDb(async ({ client, db }) => {
     await seedOwners(client);
     const { runGovernanceAlertMonitor } = await import('../lib/server/governance-alert-monitor.ts');
-    const h = harness([upgradeProposed()]);
+    const h = harness(pendingRead());
     await runGovernanceAlertMonitor(h.deps(db));
     await client.exec(`
       INSERT INTO users (id, email, name, email_verified_at) VALUES ('u_fay', 'fay@northwind.example', 'Fay Goh', now());
       INSERT INTO memberships (id, user_id, org_id, role) VALUES ('m_fay', 'u_fay', 'northwind', 'admin');
     `);
-    const next = await runGovernanceAlertMonitor(h.deps(db, { readEvents: async () => [] }));
-    assert.deepEqual(next.deliveries.email, { sent: 1, failed: 0, skipped: 4 }, 'the alert came from the database, not this run\'s events');
+    const next = await runGovernanceAlertMonitor(h.deps(db, { now: NOW + 15 * 60_000 }));
+    assert.deepEqual(next.deliveries.email, { sent: 1, failed: 0, skipped: 4 });
     assert.equal(h.emails.at(-1).to, 'fay@northwind.example');
 
+    // Still pending on chain, but past its window: the chain would refuse it.
     await client.exec(`INSERT INTO users (id, email, name, email_verified_at) VALUES ('u_gus', 'gus@acme.example', 'Gus Tay', now());
       INSERT INTO memberships (id, user_id, org_id, role) VALUES ('m_gus', 'u_gus', 'acme', 'admin');`);
-    const late = await runGovernanceAlertMonitor(h.deps(db, { now: ETA + 30 * 86_400_000, readEvents: async () => [] }));
+    const late = await runGovernanceAlertMonitor(h.deps(db, { now: ETA + 7 * DAY + 1 }));
+    assert.equal(late.ok, true);
+    assert.deepEqual(late.alerts, []);
     assert.deepEqual(late.active, []);
-    assert.equal(h.emails.some((m) => m.to === 'gus@acme.example'), false, 'nobody is emailed about a change long past');
+    assert.equal(h.emails.some((m) => m.to === 'gus@acme.example'), false, 'nobody is emailed about a change that can no longer happen');
   });
 });
 
-test('the dashboard banner reads the signed-in owner\'s own in-app deliveries, and only while the alert is active', async () => {
+test('a cancelled proposal is no longer fanned out or shown, and a lagging read cannot bring it back', async () => {
   await withDb(async ({ client, db }) => {
     await seedOwners(client);
     const { runGovernanceAlertMonitor } = await import('../lib/server/governance-alert-monitor.ts');
     const { readGovernanceBannerForSession } = await import('../lib/server/governance-alerts-store.ts');
-    await runGovernanceAlertMonitor(harness([upgradeProposed()]).deps(db));
+    const h = harness(chainRead({ wrapper: { version: 40, pending: pendingUpgrade() } }));
+    await runGovernanceAlertMonitor(h.deps(db));
+    assert.equal((await readGovernanceBannerForSession({ email: 'alice@acme.example' }, NOW)).length, 1);
+
+    // Cancelled on chain (the wrapper's version moves on), then a new owner.
+    h.read = chainRead({ wrapper: { version: 41 } });
+    await client.exec(`INSERT INTO users (id, email, name, email_verified_at) VALUES ('u_fay', 'fay@northwind.example', 'Fay Goh', now());
+      INSERT INTO memberships (id, user_id, org_id, role) VALUES ('m_fay', 'u_fay', 'northwind', 'admin');`);
+    const after = await runGovernanceAlertMonitor(h.deps(db, { now: NOW + 15 * 60_000 }));
+    assert.deepEqual(after.active, []);
+    assert.equal(h.emails.some((m) => m.to === 'fay@northwind.example'), false, 'fay is not told about a withdrawn update');
+    assert.deepEqual(await readGovernanceBannerForSession({ email: 'alice@acme.example' }, NOW + 15 * 60_000), []);
+
+    // A lagging indexer still serves the old version, proposal and all. The
+    // stored state is newer, so nothing changes.
+    h.read = chainRead({ wrapper: { version: 40, pending: pendingUpgrade() } });
+    const lagging = await runGovernanceAlertMonitor(h.deps(db, { now: NOW + 30 * 60_000 }));
+    assert.deepEqual(lagging.active, []);
+    assert.deepEqual(await readGovernanceBannerForSession({ email: 'alice@acme.example' }, NOW + 30 * 60_000), []);
+    const stored = (await client.query(`SELECT object_version FROM governance_watch_state WHERE subject_id = $1`, [WRAP])).rows[0];
+    assert.equal(Number(stored.object_version), 41);
+  });
+});
+
+test('what took effect reaches every owner once: an upgrade committed after its notice', async () => {
+  await withDb(async ({ client, db }) => {
+    await seedOwners(client);
+    const { runGovernanceAlertMonitor } = await import('../lib/server/governance-alert-monitor.ts');
+    const h = harness(chainRead({ wrapper: { version: 40, pending: pendingUpgrade() } }));
+    await runGovernanceAlertMonitor(h.deps(db));
+    assert.equal(h.emails.length, 4);
+
+    // Authorised, run and committed in one transaction after the eta.
+    h.read = chainRead({ wrapper: { version: 41, capVersion: 2, latest: CORE_V2 } });
+    const done = await runGovernanceAlertMonitor(h.deps(db, { now: ETA + 60_000 }));
+    assert.deepEqual(done.alerts.map((a) => a.kind), ['upgrade_committed']);
+    assert.equal(done.active.length, 1, 'the announcement is no longer pending; what took effect is shown');
+    const committed = h.emails.slice(4);
+    assert.equal(committed.length, 4);
+    assert.equal(committed[0].subject, 'An update to the Splash payment contract has taken effect');
+    assert.match(committed[0].text, new RegExp(`now at version 2, package ${CORE_V2}`));
+    assert.match(committed[0].text, new RegExp(`object ${WRAP} shows the contract's current version and package`));
+
+    await runGovernanceAlertMonitor(h.deps(db, { now: ETA + 16 * 60_000 }));
+    assert.equal(h.emails.length, 8, 'told once');
+    const kinds = (await client.query(`SELECT kind FROM governance_alerts ORDER BY kind`)).rows.map((r) => r.kind);
+    assert.deepEqual(kinds, ['upgrade_committed', 'upgrade_proposed']);
+  });
+});
+
+test('the dashboard banner reads the signed-in owner\'s own in-app deliveries, and only while the alert is shown', async () => {
+  await withDb(async ({ client, db }) => {
+    await seedOwners(client);
+    const { runGovernanceAlertMonitor } = await import('../lib/server/governance-alert-monitor.ts');
+    const { readGovernanceBannerForSession } = await import('../lib/server/governance-alerts-store.ts');
+    await runGovernanceAlertMonitor(harness(pendingRead()).deps(db));
 
     const alice = await readGovernanceBannerForSession({ email: 'Alice@Acme.example' }, NOW);
     assert.equal(alice.length, 1);
     assert.equal(alice[0].kind, 'upgrade_proposed');
     assert.equal(alice[0].reviewPath, REVIEW_PATH);
     assert.match(alice[0].summary, /^Splash has announced an update to its payment contract\./);
+    assert.match(alice[0].detail, new RegExp(DIGEST_HEX));
     assert.deepEqual(await readGovernanceBannerForSession({ email: 'carol@acme.example' }, NOW), [], 'not an owner, no banner');
     assert.deepEqual(await readGovernanceBannerForSession({ email: 'nobody@else.example' }, NOW), []);
-    assert.deepEqual(await readGovernanceBannerForSession({ email: 'alice@acme.example' }, ETA + 30 * 86_400_000), [], 'gone once the window closes');
+    assert.deepEqual(await readGovernanceBannerForSession({ email: 'alice@acme.example' }, ETA + 7 * DAY), [], 'gone once it has lapsed');
   });
 });
 
-test('a genuine wrapper event naming another core package is not alerted, and pages a person instead', async () => {
+test('a configured id that does not check out records nothing, tells no owner, and pages a person once per process', async () => {
   await withDb(async ({ client, db }) => {
     await seedOwners(client);
     const { runGovernanceAlertMonitor } = await import('../lib/server/governance-alert-monitor.ts');
-    const h = harness([upgradeProposed({ package: CORE_V2 })]);
-    const result = await runGovernanceAlertMonitor(h.deps(db));
-    assert.equal(result.ok, true);
-    assert.equal(result.drift.length, 1);
+    const h = harness(chainRead({ wrapper: { type: `${UD}::upgrade_delay::CapWrapped`, pending: pendingUpgrade() } }));
+    const first = await runGovernanceAlertMonitor(h.deps(db));
+    assert.equal(first.ok, false);
+    assert.match(first.reason, /SPLASH_UPGRADE_WRAPPER_ID .* is a 0xd1d1.*::upgrade_delay::CapWrapped/);
+    const second = await runGovernanceAlertMonitor(h.deps(db));
+    assert.equal(second.ok, false, 'every run refuses; the route answers 502 each time');
+    assert.deepEqual(h.pages.map((p) => [p.kind, p.severity, p.objectId]), [['governance_config_mismatch', 'critical', WRAP]]);
     assert.equal((await client.query(`SELECT count(*)::int AS n FROM governance_alerts`)).rows[0].n, 0);
+    assert.equal((await client.query(`SELECT count(*)::int AS n FROM governance_watch_state`)).rows[0].n, 0);
     assert.equal(h.emails.length, 0);
-    assert.deepEqual(h.pages.map((p) => [p.kind, p.severity, p.digest]), [['governance_config_drift', 'critical', 'TxUpgradeProposed1']]);
+
+    let threw = 0;
+    const down = await runGovernanceAlertMonitor(h.deps(db, { readState: async () => { threw += 1; throw new Error('the Sui indexer answered HTTP 503'); } }));
+    assert.equal(down.ok, false);
+    assert.match(down.reason, /could not read the governance objects: the Sui indexer answered HTTP 503/);
+    assert.equal(threw, 1);
   });
 });
 
-test('the GraphQL reader parses indexer nodes into classifier input and stops at the window', async () => {
-  const { graphqlGovernanceReader } = await import('../lib/server/governance-alert-monitor.ts');
+test('a claim older than the lease is claimed again, by exactly one of two racing runs, and only its own finish counts', async () => {
+  await withDb(async ({ client, db }) => {
+    await seedOwners(client);
+    const store = await import('../lib/server/governance-alerts-store.ts');
+    const [alert] = deriveGovernanceAlerts(stateOf(pendingRead()), NO_HISTORY, NOW).alerts;
+    const { alert: stored } = await store.recordGovernanceAlert(db, alert);
+    const input = (nowMs) => ({ alertId: stored.id, userId: 'u_alice', orgId: 'acme', channel: 'email', nowMs });
+
+    // A run claims at NOW and dies.
+    const dead = await store.claimGovernanceDelivery(db, input(NOW));
+    assert.deepEqual(dead.attempts, 1);
+    assert.equal(await store.claimGovernanceDelivery(db, input(NOW + store.DELIVERY_LEASE_MS - 1)), null, 'inside the lease the claim is honoured');
+
+    // After the lease, two runs race: one wins.
+    const later = NOW + store.DELIVERY_LEASE_MS + 1;
+    const [x, y] = await Promise.all([store.claimGovernanceDelivery(db, input(later)), store.claimGovernanceDelivery(db, input(later))]);
+    assert.equal([x, y].filter(Boolean).length, 1);
+    const winner = x ?? y;
+    assert.equal(winner.attempts, 2);
+
+    // The dead run wakes up and reports: ignored, the claim is not its own.
+    await store.finishGovernanceDelivery(db, dead, { ok: false, error: 'late' }, later);
+    const row = async () => (await client.query(`SELECT status, attempts, error FROM governance_alert_deliveries WHERE user_id = 'u_alice' AND channel = 'email'`)).rows[0];
+    assert.deepEqual(await row(), { status: 'sending', attempts: 2, error: null });
+    await store.finishGovernanceDelivery(db, winner, { ok: true, providerRef: 'em_1' }, later);
+    assert.deepEqual(await row(), { status: 'sent', attempts: 2, error: null });
+    assert.equal(await store.claimGovernanceDelivery(db, input(later + 30 * DAY)), null, 'a sent delivery is never claimed again');
+  });
+});
+
+test('the GraphQL reader asks for the two configured objects in one query, and refuses anything but a complete answer', async () => {
+  const { graphqlGovernanceStateReader } = await import('../lib/server/governance-alert-monitor.ts');
   const asked = [];
-  const fetcher = async (_url, init) => {
-    const { variables } = JSON.parse(init.body);
-    asked.push(variables.type);
-    const nodes = variables.type.endsWith('::UpgradeProposed')
-      ? [
-          { sequenceNumber: 0, timestamp: new Date(NOW - 20 * 86_400_000).toISOString(), transaction: { digest: 'TxOld' }, contents: { type: { repr: variables.type }, json: {} } },
-          { sequenceNumber: 2, timestamp: new Date(PROPOSED).toISOString(), transaction: { digest: 'TxNew' }, contents: { type: { repr: variables.type }, json: upgradeProposed().json } },
-          { sequenceNumber: 3, timestamp: null, transaction: null, contents: { type: { repr: variables.type }, json: {} } },
-        ]
-      : [];
-    return new Response(JSON.stringify({ data: { events: { pageInfo: { hasPreviousPage: nodes.length > 0, startCursor: 'c' }, nodes } } }), { status: 200 });
+  const reply = { current: () => Response.json({ data: { wrapper: wrapperObject(), config: configObject() } }) };
+  const fetcher = async (url, init) => {
+    asked.push({ url, ...JSON.parse(init.body) });
+    return reply.current();
   };
-  const events = await graphqlGovernanceReader(fetcher, 'https://graphql.invalid')(watchedEventTypes(POLICY), NOW - 9 * 86_400_000);
-  assert.equal(asked.length, 5, 'one query per watched type; the old event ended the walk back');
-  assert.deepEqual(events.map((e) => [e.digest, e.eventSeq]), [['TxNew', 2]], 'too old and not yet indexed are both dropped');
-  assert.equal(classifyGovernanceEvents(events, POLICY).alerts.length, 1);
+  const read = graphqlGovernanceStateReader(fetcher, 'https://graphql.invalid');
+  const got = await read(POLICY);
+  assert.equal(parseGovernanceState(got, POLICY).ok, true);
+  assert.equal(asked.length, 1, 'one query for both objects');
+  assert.match(asked[0].query, /query GovernanceState/);
+  assert.doesNotMatch(asked[0].query, /events\s*\(/, 'never the event feed');
+  assert.deepEqual(asked[0].variables, { wrapper: WRAP, config: CONFIG });
+
+  reply.current = () => Response.json({ data: { wrapper: null, config: configObject() } });
+  assert.equal((await read(POLICY)).wrapper, null, 'no such object is an answer, which the parser refuses');
+
+  for (const [label, current, message] of [
+    ['HTTP 500', () => new Response('no', { status: 500 }), /HTTP 500/],
+    ['a GraphQL error', () => Response.json({ errors: [{ message: 'timeout' }] }), /refused the query: timeout/],
+    ['no config field', () => Response.json({ data: { wrapper: wrapperObject() } }), /without the wrapper and the config/],
+  ]) {
+    reply.current = current;
+    await assert.rejects(read(POLICY), message, label);
+  }
 });
 
 // ─── 4. Review (v2 Phase 1): the chain's state is the source, not a feed ───

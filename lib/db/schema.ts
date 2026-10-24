@@ -1370,62 +1370,83 @@ export const dailyAuditBatches = pgTable('daily_audit_batches', {
 ]);
 
 /**
- * A governance event every business owner is told about (v2, brief 3.5): a
- * core upgrade or a new governance owner announced by the canonical wrapper,
- * or a registry addition announced by the canonical compliance config.
- * lib/server/governance-events.ts decides what counts; only canonical events
- * ever become a row.
+ * A governance change every business owner is told about (v2, brief 3.5): an
+ * upgrade or a new governance owner pending in the canonical upgrade wrapper,
+ * a registry addition pending in the canonical compliance config, or one of
+ * those having taken effect. lib/server/governance-events.ts decides what
+ * counts, from the two objects' on-chain state; only the canonical objects
+ * ever produce a row.
  *
  * No `org_id`, like `daily_audit_batches`: one announcement concerns every
  * tenant at once. Who sees it is decided per person, by
  * `governance_alert_deliveries`.
  *
- * One row per on-chain event. Sui identifies an event by its transaction
- * digest and its position in that transaction, and the unique index on both
- * is what lets every cron run re-read the same events without recording one
- * twice.
+ * One row per content key: what the alert says (wrapper + bytecode digest +
+ * eta, and so on). Every cron run reads the same state again and derives the
+ * same keys, and the unique index is why none is recorded twice.
  */
 export const governanceAlerts = pgTable('governance_alerts', {
-  /** `gov_<digest>_<event seq>`. */
+  /** `gov_` + 40 hex of sha256(content key). */
   id: text('id').primaryKey(),
-  digest: text('digest').notNull(),
-  eventSeq: integer('event_seq').notNull(),
-  /** upgrade_proposed | upgrade_authorized | owner_change_proposed |
-   *  registry_addition_proposed | registry_addition_activated. */
+  contentKey: text('content_key').notNull(),
+  /** The wrapper or config the alert was read from. */
+  subjectId: text('subject_id').notNull(),
+  /** upgrade_proposed | owner_change_proposed | registry_addition_proposed |
+   *  upgrade_committed | registry_addition_activated. */
   kind: text('kind').notNull(),
-  eventType: text('event_type').notNull(),
-  /** The announced bytecode digest, 0x + 64 hex (upgrade events). */
+  /** The announced bytecode digest, 0x + 64 hex (upgrade_proposed). */
   bytecodeDigest: text('bytecode_digest'),
   upgradePolicy: integer('upgrade_policy'),
-  /** 1 asset, 2 settlement app, 3 bridge adapter (registry events). */
+  /** Core's current package and version (upgrade_committed). */
+  packageId: text('package_id'),
+  packageVersion: bigint('package_version', { mode: 'number' }),
+  /** 1 asset, 2 settlement app, 3 bridge adapter (registry alerts). */
   registry: integer('registry'),
   typeName: text('type_name'),
   newOwner: text('new_owner'),
   proposedAt: timestamp('proposed_at', { withTimezone: true }),
   /** When the change can take effect. */
   etaAt: timestamp('eta_at', { withTimezone: true }),
-  /** When the transaction was finalized. */
-  occurredAt: timestamp('occurred_at', { withTimezone: true }),
-  /** The dashboard shows it until then. */
+  /** Shown until then at the latest; a proposal until it lapses on chain. */
   activeUntil: timestamp('active_until', { withTimezone: true }).notNull(),
   summary: text('summary').notNull(),
   detail: text('detail').notNull(),
   reviewPath: text('review_path').notNull(),
   ...timestamps,
 }, (table) => [
-  uniqueIndex('governance_alerts_digest_seq_unique').on(table.digest, table.eventSeq),
+  uniqueIndex('governance_alerts_content_key_unique').on(table.contentKey),
   index('governance_alerts_active_until_idx').on(table.activeUntil),
 ]);
+
+/**
+ * The last state the governance monitor read of each watched object (the
+ * upgrade wrapper, the compliance config), at the highest object version seen.
+ * Written only when a read is newer than what is stored, so a lagging read
+ * never replaces a newer one. The next run compares with it to see what took
+ * effect, and its `pendingKeys` decide which proposal alerts are still shown.
+ */
+export const governanceWatchState = pgTable('governance_watch_state', {
+  subjectId: text('subject_id').primaryKey(),
+  /** wrapper | config. */
+  subjectKind: text('subject_kind').notNull(),
+  objectVersion: bigint('object_version', { mode: 'number' }).notNull(),
+  /** WrapperSnapshot | ConfigSnapshot (lib/server/governance-events.ts). */
+  snapshot: jsonb('snapshot').notNull(),
+  observedAt: timestamp('observed_at', { withTimezone: true }).notNull(),
+  ...timestamps,
+});
 
 /**
  * One owner told about one governance alert on one channel.
  *
  * The unique index on (alert, user, channel) is the idempotency: a cron run
- * claims a delivery by inserting its row first and sends only if the insert
- * won, so a re-run, a retry or a second instance never sends twice. A send
- * that failed is recorded as `failed` and may be claimed again, a bounded
- * number of times; one left in `sending` (the process died mid-send) is not,
- * because whether it arrived is unknown and sending twice is the worse error.
+ * claims an email or WhatsApp delivery by writing its row as `sending` first
+ * and sends only if that write won, so a re-run, a retry or a second instance
+ * cannot both send. A send that failed is recorded as `failed` and may be
+ * claimed again, a bounded number of times. A claim left in `sending` longer
+ * than the lease (lib/server/governance-alerts-store.ts) belongs to a run that
+ * died, and may be claimed again too; a `sent` row never is. In-app rows are
+ * written `sent` at once: nothing leaves the process.
  */
 export const governanceAlertDeliveries = pgTable('governance_alert_deliveries', {
   id: text('id').primaryKey(),

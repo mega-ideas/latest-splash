@@ -1,41 +1,70 @@
 /**
- * Which governance events every business owner must be told about (v2, brief
- * 3.5; docs/v2/phase1-move-design.md §7).
+ * What every business owner must be told about upgrade governance (v2, brief
+ * 3.5; docs/v2/phase1-move-design.md §7), decided from the chain's STATE.
  *
- * Pure: events in, alerts out. The cron route (app/api/cron/governance-alerts)
- * reads recent events from Sui GraphQL and hands them here; the tests hand it
- * synthetic ones. Nothing here touches the network or the database.
+ * Pure: two objects in, alerts out. lib/server/governance-alert-monitor.ts
+ * reads them from Sui GraphQL and records what this decides; the tests hand
+ * it synthetic ones. Nothing here touches the network or the database.
  *
- * ─── Anti-spoofing is the whole job ─────────────────────────────────────────
+ * ─── State, not a feed ──────────────────────────────────────────────────────
  *
- * `upgrade_delay::wrap` is public. Anyone can wrap an UpgradeCap of their own
- * and emit a perfectly formed `UpgradeProposed`, and anyone can publish a
- * package with a module called `upgrade_delay` and a struct called
- * `UpgradeProposed`. An alert built from either would put a fake "review your
- * allowances" message, with our link in it, in front of every owner. So an
- * event becomes an alert only when ALL of these hold:
+ * `upgrade_delay::wrap` is public, so anyone can wrap an UpgradeCap of their
+ * own and emit UpgradeProposed, OwnerChangeProposed and the rest of exactly
+ * the canonical Move types, a thousand to a transaction. Any bounded walk back
+ * through the global event feed for those types can be flooded until the
+ * genuine announcement is out of view. So no feed is read. Every run reads the
+ * two objects that ARE the governance state, and alerts from their fields:
  *
- *   1. its Move type is defined in the canonical package: splash_upgrade_delay
- *      for the upgrade and owner events, splash_core for the registry events
- *      (address compared in canonical 64-hex form, module and name exactly);
- *   2. upgrade and owner events: `wrapper_id` is the canonical wrapper, and
- *      `package` (where the event has one) is splash_core's original id;
- *   3. registry events: `config_id` is the canonical compliance config.
+ *   - the canonical DelayedUpgradeCap (SPLASH_UPGRADE_WRAPPER_ID): `pending`
+ *     (the announced upgrade's bytecode digest, when it was announced, when it
+ *     can take effect), `pending_owner` (an announced move to a new governance
+ *     multisig), and its cap's version, latest package and policy;
+ *   - the canonical ComplianceConfig (SPLASH_COMPLIANCE_CONFIG_ID):
+ *     `pending_additions` and its three registries.
  *
- * Everything else is reported in `ignored`, with its reason, and never alerts.
- * The indexer query already filters by type; that filter is not trusted.
+ * Only the wrapper's owner can change the wrapper, and only Splash's own keys
+ * can change the config (an addition needs governance), so nobody else can
+ * add to, or crowd out, what is read.
  *
- * ─── One core id, the original, for good ────────────────────────────────────
+ * A 15-minute poll of this state cannot miss a change that can take effect.
+ * An upgrade, an owner change and a registry addition each sit in it, readable,
+ * for at least 24 hours before the chain will put them into force
+ * (`upgrade_delay::DELAY_MS` and `compliance_config::ADDITION_NOTICE_MS`, both
+ * in code no one can change), and for up to seven days after, so each is read
+ * on many polls first. All a poll can miss is a proposal made and withdrawn
+ * between two polls, which could never have taken effect.
  *
- * `upgrade_delay::wrap` records `package::upgrade_package(&cap)` once, while
- * the cap is still at version 1, and every event after that carries that
- * recorded id, not the cap's current package. The watched registry types are
- * all defined in the first v2 publish, so their type address is the original
- * id too, after any number of upgrades. A canonical-wrapper event naming any
- * other package therefore means SPLASH_CORE_PACKAGE_ID is not the original id
- * (set to a later version, say). It is ignored as `package_not_canonical`, and
- * the monitor treats it as configuration drift: the route answers 502 so a
- * person fixes the id, instead of owners silently missing an announcement.
+ * ─── Canonical means type-checked against the chain ─────────────────────────
+ *
+ * The wrapper's Move type must be exactly
+ * `<SPLASH_UPGRADE_DELAY_PACKAGE_ID>::upgrade_delay::DelayedUpgradeCap`; only
+ * that immutable package can make one. Its `original_package` was recorded at
+ * `wrap` from the cap itself, while the cap was at version 1, so it is core's
+ * ORIGINAL id, after any number of upgrades. That is where core's original id
+ * comes from here, never from SPLASH_CORE_PACKAGE_ID, which the app sets to
+ * whichever core version it calls. The config's type must then be exactly
+ * `<original_package>::compliance_config::ComplianceConfig` (a struct's type
+ * always carries the id of the package that first defined it).
+ *
+ * A configured id that names no object, an object of any other type, or a
+ * field that does not parse: the read is refused whole (`ok: false`), so the
+ * route answers 502 and a person is paged. Nothing is alerted from a read
+ * that could not be trusted, and nothing is silently skipped.
+ *
+ * ─── Proposals, and what took effect ────────────────────────────────────────
+ *
+ * Each alert is keyed by its content: wrapper + bytecode digest + eta for an
+ * upgrade, wrapper + new owner + eta for an owner change, config + registry +
+ * type + eta for an addition. A re-run or a second instance derives the same
+ * key, and the store records each key once.
+ *
+ * A proposal is shown while the latest state read still holds it and it has
+ * not lapsed; cancelled or lapsed, it is no longer shown as something that can
+ * take effect. What took effect is seen by comparing with the state the
+ * monitor stored on its previous run: the cap's version rising (an upgrade was
+ * committed) or a registry gaining an entry (an addition was activated). The
+ * first state a monitor ever stores is a baseline and raises neither, because
+ * nothing in it says when those things happened.
  */
 import { normalizeSuiAddress } from './operator-outflows.ts';
 
@@ -43,82 +72,98 @@ import { normalizeSuiAddress } from './operator-outflows.ts';
 export const REVIEW_PATH = '/dashboard/settings/spending-rules';
 
 const DAY_MS = 86_400_000;
-/** An alert stays on the dashboard for eight days after it was announced… */
-const SHOW_AFTER_ANNOUNCE_MS = 8 * DAY_MS;
-/** …or seven days after it could take effect, when that is later. That is
- *  the window in which the change can still be put into force on chain. */
-const SHOW_AFTER_ETA_MS = 7 * DAY_MS;
-
-export type GovernanceEvent = {
-  /** The transaction digest. */
-  digest: string;
-  /** The event's position among its transaction's events. */
-  eventSeq: number;
-  /** The event's Move type as the indexer reports it: `0xPKG::module::Name`. */
-  type: string;
-  /** The checkpoint timestamp; null when the indexer gave none. */
-  timestampMs: number | null;
-  /** The event's fields as Sui GraphQL renders them (`MoveValue.json`). */
-  json: Record<string, unknown> | null;
-};
+/** `upgrade_delay::WINDOW_MS`: an upgrade or owner change not put into force
+ *  within seven days of its eta lapses (E_PROPOSAL_LAPSED). */
+const PROPOSAL_WINDOW_MS = 7 * DAY_MS;
+/** `compliance_config::ADDITION_WINDOW_MS`, the same for a registry addition. */
+const ADDITION_WINDOW_MS = 7 * DAY_MS;
+/** How long something that took effect stays on the dashboard. */
+const SHOW_EFFECT_MS = 8 * DAY_MS;
 
 export type GovernancePolicy = {
   upgradeDelayPackageId: string;
   wrapperId: string;
-  /** splash_core's original id: the one its first publish created. */
-  corePackageId: string;
   complianceConfigId: string;
 };
 
-export type GovernanceAlertKind =
-  | 'upgrade_proposed'
-  | 'upgrade_authorized'
-  | 'owner_change_proposed'
-  | 'registry_addition_proposed'
-  | 'registry_addition_activated';
+/** One object as Sui GraphQL renders `object(address) { address version owner
+ *  { __typename … on AddressOwner { address { address } } } asMoveObject {
+ *  contents { type { repr } json } } }`. Untrusted until parsed. */
+export type ChainObject = {
+  address?: unknown;
+  version?: unknown;
+  owner?: { __typename?: unknown; address?: { address?: unknown } | null } | null;
+  asMoveObject?: { contents?: { type?: { repr?: unknown } | null; json?: unknown } | null } | null;
+};
+
+/** What one read of the chain returned: null where no object exists. */
+export type GovernanceChainRead = { wrapper: ChainObject | null; config: ChainObject | null };
 
 /** 1 accepted asset, 2 settlement app, 3 bridge adapter (compliance_config). */
 export type RegistryKind = 1 | 2 | 3;
+const REGISTRIES: RegistryKind[] = [1, 2, 3];
+
+export type WrapperState = {
+  id: string;
+  objectVersion: number;
+  owner: string;
+  /** Core's original id, recorded at `wrap`. */
+  originalPackage: string;
+  /** The id of core's current version. */
+  latestPackage: string;
+  capVersion: number;
+  /** 0 compatible, 128 additive, 192 dependency-only. */
+  policy: number;
+  pending: { digest: string; proposedAtMs: number; etaMs: number } | null;
+  pendingOwner: { newOwner: string; etaMs: number } | null;
+};
+
+export type ConfigState = {
+  id: string;
+  objectVersion: number;
+  registries: Record<RegistryKind, string[]>;
+  pending: Array<{ registry: RegistryKind; typeName: string; proposedAtMs: number; etaMs: number }>;
+};
+
+export type GovernanceState = { wrapper: WrapperState; config: ConfigState };
+
+export type GovernanceAlertKind =
+  | 'upgrade_proposed'
+  | 'owner_change_proposed'
+  | 'registry_addition_proposed'
+  | 'upgrade_committed'
+  | 'registry_addition_activated';
+
+/** Shown only while the latest state read still holds them (see the store). */
+export const PROPOSAL_KINDS: GovernanceAlertKind[] = ['upgrade_proposed', 'owner_change_proposed', 'registry_addition_proposed'];
 
 export type GovernanceAlert = {
+  /** What the alert says, as a key: the same change always derives the same one. */
+  key: string;
   kind: GovernanceAlertKind;
-  digest: string;
-  eventSeq: number;
-  /** The event's type, normalized. */
-  eventType: string;
-  /** When the transaction was finalized. */
-  occurredAtMs: number | null;
-  /** When it was announced on chain (proposals only). */
-  proposedAtMs: number | null;
-  /** When it can take effect (proposals only). */
-  etaMs: number | null;
-  /** The dashboard shows it until then. */
-  activeUntilMs: number;
-  /** The bytecode digest of the announced upgrade, 0x + 64 hex. */
+  /** The object it was read from: the wrapper or the config. */
+  subjectId: string;
+  /** The announced upgrade's bytecode digest, 0x + 64 hex. */
   bytecodeDigest: string | null;
-  /** The upgrade policy the cap enforces: 0 compatible, 128 additive, 192 dependency-only. */
   upgradePolicy: number | null;
+  /** The package of core's current version (upgrade_committed). */
+  packageId: string | null;
+  packageVersion: number | null;
   registry: RegistryKind | null;
   typeName: string | null;
   newOwner: string | null;
+  /** When it was announced on chain (proposals). */
+  proposedAtMs: number | null;
+  /** When it can take effect (proposals). */
+  etaMs: number | null;
+  /** Shown until then, at the latest: a proposal until it lapses on chain. */
+  activeUntilMs: number;
   /** Plain sentences, sentence case: what happened, when, what to do. */
   summary: string;
-  /** What kind of change it is: the diff summary owners are given. */
+  /** What the chain shows about the change, and what that allows. */
   detail: string;
   reviewPath: string;
 };
-
-export type IgnoredReason =
-  | 'not_watched'
-  | 'type_not_canonical'
-  | 'wrapper_not_canonical'
-  | 'package_not_canonical'
-  | 'config_not_canonical'
-  | 'malformed';
-
-export type IgnoredEvent = { digest: string; eventSeq: number; type: string; reason: IgnoredReason; note?: string };
-
-export type GovernanceReport = { alerts: GovernanceAlert[]; ignored: IgnoredEvent[] };
 
 /** What the dashboard banner shows. Crosses the server/client boundary. */
 export type GovernanceBannerAlert = {
@@ -129,25 +174,12 @@ export type GovernanceBannerAlert = {
   reviewPath: string;
 };
 
-type Source = 'upgrade_delay' | 'core';
+/** What the monitor stores per object between runs. JSON (a jsonb column). */
+export type WrapperSnapshot = { objectVersion: number; capVersion: number; pendingKeys: string[] };
+export type ConfigSnapshot = { objectVersion: number; registries: Record<'1' | '2' | '3', string[]>; pendingKeys: string[] };
+export type GovernanceSnapshots = { wrapper: WrapperSnapshot | null; config: ConfigSnapshot | null };
 
-const WATCHED: Record<string, { module: string; source: Source; kind: GovernanceAlertKind }> = {
-  UpgradeProposed: { module: 'upgrade_delay', source: 'upgrade_delay', kind: 'upgrade_proposed' },
-  UpgradeAuthorized: { module: 'upgrade_delay', source: 'upgrade_delay', kind: 'upgrade_authorized' },
-  OwnerChangeProposed: { module: 'upgrade_delay', source: 'upgrade_delay', kind: 'owner_change_proposed' },
-  RegistryAdditionProposed: { module: 'compliance_config', source: 'core', kind: 'registry_addition_proposed' },
-  RegistryAdditionActivated: { module: 'compliance_config', source: 'core', kind: 'registry_addition_activated' },
-};
-
-/** The fully qualified types the monitor asks the indexer for. */
-export function watchedEventTypes(policy: GovernancePolicy): string[] {
-  const types: string[] = [];
-  for (const [name, spec] of Object.entries(WATCHED)) {
-    const pkg = spec.source === 'upgrade_delay' ? policy.upgradeDelayPackageId : policy.corePackageId;
-    types.push(`${normalizeSuiAddress(pkg)}::${spec.module}::${name}`);
-  }
-  return [...new Set(types)];
-}
+// ─── Parsing: every field, or nothing ─────────────────────────────────────────
 
 const HEX_ID = /^0x[0-9a-fA-F]{1,64}$/;
 
@@ -156,20 +188,27 @@ function canonicalId(value: unknown): string | null {
   return typeof value === 'string' && HEX_ID.test(value.trim()) ? normalizeSuiAddress(value) : null;
 }
 
-function parseType(repr: string): { address: string; module: string; name: string } | null {
+/** `0xPKG::module::Name`, address canonical. Generic types do not parse. */
+function canonicalType(repr: unknown): string | null {
+  if (typeof repr !== 'string') return null;
   const parts = repr.trim().split('::');
-  if (parts.length !== 3) return null;
+  if (parts.length !== 3 || !/^[A-Za-z_]\w*$/.test(parts[1]) || !/^[A-Za-z_]\w*$/.test(parts[2])) return null;
   const address = canonicalId(parts[0]);
-  if (!address || !parts[1] || !parts[2]) return null;
-  return { address, module: parts[1], name: parts[2] };
+  return address ? `${address}::${parts[1]}::${parts[2]}` : null;
 }
 
-/** u64 fields arrive as decimal strings; milliseconds fit a JS number. */
+/** u64 milliseconds arrive as decimal strings; they fit a JS number. */
 function millis(value: unknown): number | null {
   const text = typeof value === 'number' ? String(value) : value;
   if (typeof text !== 'string' || !/^\d{1,16}$/.test(text)) return null;
   const n = Number(text);
   return Number.isSafeInteger(n) ? n : null;
+}
+
+/** An object or cap version: a safe non-negative integer, number or string. */
+function version(value: unknown): number | null {
+  if (typeof value === 'number') return Number.isSafeInteger(value) && value >= 0 ? value : null;
+  return millis(value);
 }
 
 function smallInt(value: unknown): number | null {
@@ -190,6 +229,130 @@ function bytes32Hex(value: unknown): string | null {
   return hex && hex.length === 64 ? `0x${hex}` : null;
 }
 
+function record(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+const has = (o: Record<string, unknown>, key: string) => Object.prototype.hasOwnProperty.call(o, key);
+
+class Unreadable extends Error {}
+
+function need<T>(value: T | null, what: string): T {
+  if (value == null) throw new Unreadable(what);
+  return value;
+}
+
+/** A `VecSet<String>`: `{ contents: [ "…", … ] }`. */
+function stringSet(value: unknown, what: string): string[] {
+  const contents = record(value)?.contents;
+  if (!Array.isArray(contents)) throw new Unreadable(`${what} is not a set`);
+  return contents.map((entry, i) => {
+    if (typeof entry !== 'string' || !entry.trim()) throw new Unreadable(`${what}[${i}] is not a type name`);
+    return entry.trim();
+  });
+}
+
+export type ParsedState = { ok: true; state: GovernanceState } | { ok: false; reason: string; objectId: string };
+
+/**
+ * Check the two objects are the canonical ones and read every field the
+ * alerts depend on. Any doubt is a refusal naming the setting to check.
+ */
+export function parseGovernanceState(read: GovernanceChainRead, policy: GovernancePolicy): ParsedState {
+  const upgradeDelay = normalizeSuiAddress(policy.upgradeDelayPackageId);
+  const wrapperId = normalizeSuiAddress(policy.wrapperId);
+  const configId = normalizeSuiAddress(policy.complianceConfigId);
+  const wrapperType = `${upgradeDelay}::upgrade_delay::DelayedUpgradeCap`;
+
+  // ── The wrapper ──
+  const w = read.wrapper;
+  if (!w) {
+    return { ok: false, objectId: wrapperId, reason: `SPLASH_UPGRADE_WRAPPER_ID (${wrapperId}) names no object on chain, so there is no upgrade wrapper to watch. Set it to the DelayedUpgradeCap that wraps splash_core's UpgradeCap.` };
+  }
+  const wType = canonicalType(w.asMoveObject?.contents?.type?.repr);
+  if (wType !== wrapperType) {
+    return { ok: false, objectId: wrapperId, reason: `SPLASH_UPGRADE_WRAPPER_ID (${wrapperId}) is ${wType ? `a ${wType}` : 'not a Move object of a type this monitor can read'}, not a ${wrapperType}. Only the canonical wrapper's state can alert owners.` };
+  }
+  let wrapper: WrapperState;
+  try {
+    if (canonicalId(w.address) !== wrapperId) throw new Unreadable('the object returned is not the one asked for');
+    const json = need(record(w.asMoveObject?.contents?.json), 'it has no fields');
+    if (canonicalId(json.id) !== wrapperId) throw new Unreadable('its id is not the configured id');
+    if (w.owner?.__typename !== 'AddressOwner') throw new Unreadable('it is not owned by an address');
+    const cap = need(record(json.cap), 'cap is missing');
+    if (!has(json, 'pending') || !has(json, 'pending_owner')) throw new Unreadable('pending or pending_owner is missing');
+    const pendingJson = json.pending === null ? null : need(record(json.pending), 'pending is not a proposal');
+    const ownerJson = json.pending_owner === null ? null : need(record(json.pending_owner), 'pending_owner is not an owner change');
+    wrapper = {
+      id: wrapperId,
+      objectVersion: need(version(w.version), 'its object version is not a number'),
+      owner: need(canonicalId(w.owner?.address?.address), 'its owner is not an address'),
+      originalPackage: need(canonicalId(json.original_package), 'original_package is not an id'),
+      latestPackage: need(canonicalId(cap.package), 'cap.package is not an id'),
+      capVersion: need(version(cap.version), 'cap.version is not a number'),
+      policy: need(smallInt(cap.policy), 'cap.policy is not a policy'),
+      pending: pendingJson && {
+        digest: need(bytes32Hex(pendingJson.digest), 'pending.digest is not 32 bytes'),
+        proposedAtMs: need(millis(pendingJson.proposed_at_ms), 'pending.proposed_at_ms is not a time'),
+        etaMs: need(millis(pendingJson.eta_ms), 'pending.eta_ms is not a time'),
+      },
+      pendingOwner: ownerJson && {
+        newOwner: need(canonicalId(ownerJson.new_owner), 'pending_owner.new_owner is not an address'),
+        etaMs: need(millis(ownerJson.eta_ms), 'pending_owner.eta_ms is not a time'),
+      },
+    };
+  } catch (error) {
+    if (!(error instanceof Unreadable)) throw error;
+    return { ok: false, objectId: wrapperId, reason: `the upgrade wrapper ${wrapperId} could not be read in full (${error.message}), so nothing from it is trusted.` };
+  }
+
+  // ── The config, checked against the wrapper's own record of core ──
+  const configType = `${wrapper.originalPackage}::compliance_config::ComplianceConfig`;
+  const c = read.config;
+  if (!c) {
+    return { ok: false, objectId: configId, reason: `SPLASH_COMPLIANCE_CONFIG_ID (${configId}) names no object on chain, so there are no registry additions to watch.` };
+  }
+  const cType = canonicalType(c.asMoveObject?.contents?.type?.repr);
+  if (cType !== configType) {
+    return { ok: false, objectId: configId, reason: `SPLASH_COMPLIANCE_CONFIG_ID (${configId}) is ${cType ? `a ${cType}` : 'not a Move object of a type this monitor can read'}, not a ${configType}, the config of the core package the upgrade wrapper guards (its original_package).` };
+  }
+  let config: ConfigState;
+  try {
+    if (canonicalId(c.address) !== configId) throw new Unreadable('the object returned is not the one asked for');
+    const json = need(record(c.asMoveObject?.contents?.json), 'it has no fields');
+    if (canonicalId(json.id) !== configId) throw new Unreadable('its id is not the configured id');
+    if (c.owner?.__typename !== 'Shared') throw new Unreadable('it is not shared');
+    if (!Array.isArray(json.pending_additions)) throw new Unreadable('pending_additions is not a list');
+    config = {
+      id: configId,
+      objectVersion: need(version(c.version), 'its object version is not a number'),
+      registries: {
+        1: stringSet(json.accepted_assets, 'accepted_assets'),
+        2: stringSet(json.settlement_apps, 'settlement_apps'),
+        3: stringSet(json.bridge_adapters, 'bridge_adapters'),
+      },
+      pending: json.pending_additions.map((entry, i) => {
+        const p = need(record(entry), `pending_additions[${i}] is not an addition`);
+        const registry = smallInt(p.registry);
+        if (registry !== 1 && registry !== 2 && registry !== 3) throw new Unreadable(`pending_additions[${i}].registry is not 1, 2 or 3`);
+        const typeName = typeof p.type_name === 'string' && p.type_name.trim() ? p.type_name.trim() : null;
+        return {
+          registry,
+          typeName: need(typeName, `pending_additions[${i}].type_name is missing`),
+          proposedAtMs: need(millis(p.proposed_at_ms), `pending_additions[${i}].proposed_at_ms is not a time`),
+          etaMs: need(millis(p.eta_ms), `pending_additions[${i}].eta_ms is not a time`),
+        };
+      }),
+    };
+  } catch (error) {
+    if (!(error instanceof Unreadable)) throw error;
+    return { ok: false, objectId: configId, reason: `the compliance config ${configId} could not be read in full (${error.message}), so nothing from it is trusted.` };
+  }
+  return { ok: true, state: { wrapper, config } };
+}
+
+// ─── Words ────────────────────────────────────────────────────────────────────
+
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
 /** `26 October 2026, 14:05 UTC`. Fixed, so every channel says the same. */
@@ -202,195 +365,203 @@ export function formatUtc(ms: number): string {
 
 const ACT = 'Review your spending rules and revoke any allowance you are not comfortable with';
 
+const POLICY_NAME: Record<number, string> = { 0: 'compatible', 128: 'additive', 192: 'dependency-only' };
+
+function policyLine(policy: number): string {
+  return `Upgrade policy: ${POLICY_NAME[policy] ?? 'unrecognised'} (${policy}).`;
+}
+
 /**
- * What the update is allowed to change, in an owner's words. The additive
- * sentence is the design's own limit (phase1-move-design.md §5): an added core
- * function could still alter a payment waiting to be made, but SpendPolicy is
- * not in splash_core, so no core upgrade can add a recipient, raise a limit or
- * create an allowance.
+ * What the policy the cap enforces lets an update change. The network checks
+ * the policy when it runs an upgrade. The additive sentence is the design's
+ * own limit (phase1-move-design.md §5): an added core function could still
+ * alter a payment waiting to be made, but spending rules live in the
+ * immutable splash_spend, and only the business's wallet can grant an
+ * allowance.
  */
-function policySentence(policy: number): string {
+function policyMeaning(policy: number): string {
   if (policy === 128) {
-    return 'This update can only add to the contract. Existing functions stay as they are. Added code could still change a payment that has not been made yet, but it cannot add a recipient, raise a spending limit or create an allowance.';
+    return 'The network accepts an update under this policy only if it adds to the contract: existing functions stay as they are. Added code could still change a payment that has not been made yet, but it cannot add a recipient, raise a spending limit or create an allowance. Spending rules live in a separate contract that cannot be updated, and only your wallet can grant an allowance.';
   }
-  if (policy === 192) return 'This update can only change the code the contract depends on.';
-  if (policy === 0) return 'This update may change how existing functions work.';
-  return `This update uses upgrade policy ${policy}.`;
+  if (policy === 192) return 'The network accepts an update under this policy only if it changes nothing but the code the contract depends on.';
+  if (policy === 0) return 'Under this policy an update may change how existing functions work.';
+  return '';
 }
 
 const REGISTRY_NOUN: Record<RegistryKind, string> = {
   1: 'a new payment asset',
-  2: 'a new app that can pay under spending rules',
+  2: 'a new settlement app',
   3: 'a new cross-chain bridge adapter',
 };
 
-const REGISTRY_DETAIL: Record<RegistryKind, string> = {
-  1: 'Once it takes effect, payments can be made in this asset.',
-  2: 'Once it takes effect, this app can pay from an allowance within your spending rules.',
-  3: 'Once it takes effect, this adapter can carry payments to another blockchain.',
+/** What a registered entry can do, from compliance_config and payment_intent:
+ *  an app opens and settles intents in an account's name (`create_for_app`,
+ *  `settle_from_app`); it can draw on a wallet only under an allowance bound
+ *  to its own type, which only the wallet can grant. */
+const REGISTRY_POWER: Record<RegistryKind, { proposed: string; activated: string }> = {
+  1: {
+    proposed: 'Once it takes effect, payments can be made in this asset.',
+    activated: 'Payments can now be made in this asset.',
+  },
+  2: {
+    proposed: "Once it takes effect, this app can open payment requests in your account's name and settle them. It can spend from your wallet only under an allowance you grant to this app.",
+    activated: "This app can now open payment requests in your account's name and settle them. It can spend from your wallet only under an allowance you grant to this app.",
+  },
+  3: {
+    proposed: 'Once it takes effect, this adapter can carry payments to another blockchain.',
+    activated: 'This adapter can now carry payments to another blockchain.',
+  },
 };
 
-/** `0x…::usdc::USDC` → `usdc::USDC`: the readable part of a type name. */
+/** `0x…::usdc::USDC` or `…::usdc::USDC` → `usdc::USDC`: the readable part. */
 function shortType(typeName: string): string {
   const parts = typeName.split('::');
   return parts.length >= 3 ? parts.slice(1).join('::') : typeName;
 }
 
-function activeUntil(announcedMs: number | null, etaMs: number | null): number | null {
-  const candidates = [
-    announcedMs != null ? announcedMs + SHOW_AFTER_ANNOUNCE_MS : null,
-    etaMs != null ? etaMs + SHOW_AFTER_ETA_MS : null,
-  ].filter((v): v is number => v != null);
-  return candidates.length ? Math.max(...candidates) : null;
-}
+// ─── Deriving alerts ──────────────────────────────────────────────────────────
 
-export function classifyGovernanceEvents(events: GovernanceEvent[], policy: GovernancePolicy): GovernanceReport {
-  const upgradeDelay = normalizeSuiAddress(policy.upgradeDelayPackageId);
-  const wrapper = normalizeSuiAddress(policy.wrapperId);
-  const core = normalizeSuiAddress(policy.corePackageId);
-  const config = normalizeSuiAddress(policy.complianceConfigId);
-  const report: GovernanceReport = { alerts: [], ignored: [] };
-  const seen = new Set<string>();
+const empty = {
+  bytecodeDigest: null,
+  upgradePolicy: null,
+  packageId: null,
+  packageVersion: null,
+  registry: null,
+  typeName: null,
+  newOwner: null,
+  proposedAtMs: null,
+  etaMs: null,
+  reviewPath: REVIEW_PATH,
+} satisfies Partial<GovernanceAlert>;
 
-  for (const event of events) {
-    const key = `${event.digest}|${event.eventSeq}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const ignore = (reason: IgnoredReason, note?: string) =>
-      report.ignored.push({ digest: event.digest, eventSeq: event.eventSeq, type: event.type, reason, ...(note ? { note } : {}) });
+export type DerivedGovernance = {
+  alerts: GovernanceAlert[];
+  /** What to store for the next run's comparison. */
+  snapshots: { wrapper: WrapperSnapshot; config: ConfigSnapshot };
+};
 
-    const type = parseType(event.type ?? '');
-    if (!type) { ignore('malformed', 'the event type is not 0xPKG::module::Name'); continue; }
-    const spec = WATCHED[type.name];
-    if (!spec || spec.module !== type.module) { ignore('not_watched'); continue; }
+/**
+ * The alerts this state calls for. `previous` is what the monitor stored on
+ * an earlier run; it is compared only when this read is newer than it (a
+ * higher object version), so a lagging read can never make an old entry look
+ * new.
+ */
+export function deriveGovernanceAlerts(state: GovernanceState, previous: GovernanceSnapshots, nowMs: number): DerivedGovernance {
+  const { wrapper, config } = state;
+  const alerts: GovernanceAlert[] = [];
+  const wrapperPending: string[] = [];
+  const configPending: string[] = [];
 
-    // 1. The type's own package. A look-alike module in anyone else's package
-    //    stops here, whatever its fields say.
-    const fromCanonical = type.address === (spec.source === 'upgrade_delay' ? upgradeDelay : core);
-    if (!fromCanonical) { ignore('type_not_canonical', `defined in ${type.address}`); continue; }
+  // The announced upgrade, while it can still be put into force.
+  if (wrapper.pending && nowMs < wrapper.pending.etaMs + PROPOSAL_WINDOW_MS) {
+    const { digest, proposedAtMs, etaMs } = wrapper.pending;
+    const key = `upgrade_proposed|${wrapper.id}|${digest}|${etaMs}`;
+    wrapperPending.push(key);
+    alerts.push({
+      ...empty,
+      key,
+      kind: 'upgrade_proposed',
+      subjectId: wrapper.id,
+      bytecodeDigest: digest,
+      upgradePolicy: wrapper.policy,
+      proposedAtMs,
+      etaMs,
+      activeUntilMs: etaMs + PROPOSAL_WINDOW_MS,
+      summary: `Splash has announced an update to its payment contract. It can take effect from ${formatUtc(etaMs)}. ${ACT} before then.`,
+      detail: [`The update's bytecode digest is ${digest}.`, policyLine(wrapper.policy), policyMeaning(wrapper.policy)].filter(Boolean).join(' '),
+    });
+  }
 
-    const json = event.json ?? {};
-    if (!event.digest || !Number.isInteger(event.eventSeq) || event.eventSeq < 0) { ignore('malformed', 'no transaction digest or event position'); continue; }
-    const eventType = `${type.address}::${type.module}::${type.name}`;
-    const base = {
-      kind: spec.kind,
-      digest: event.digest,
-      eventSeq: event.eventSeq,
-      eventType,
-      occurredAtMs: event.timestampMs ?? null,
-      reviewPath: REVIEW_PATH,
-      bytecodeDigest: null,
-      upgradePolicy: null,
-      registry: null,
-      typeName: null,
-      newOwner: null,
-    } satisfies Partial<GovernanceAlert>;
+  // The announced move to a new governance multisig, likewise.
+  if (wrapper.pendingOwner && nowMs < wrapper.pendingOwner.etaMs + PROPOSAL_WINDOW_MS) {
+    const { newOwner, etaMs } = wrapper.pendingOwner;
+    const key = `owner_change_proposed|${wrapper.id}|${newOwner}|${etaMs}`;
+    wrapperPending.push(key);
+    alerts.push({
+      ...empty,
+      key,
+      kind: 'owner_change_proposed',
+      subjectId: wrapper.id,
+      newOwner,
+      etaMs,
+      activeUntilMs: etaMs + PROPOSAL_WINDOW_MS,
+      summary: `Splash has announced a change to who can update its payment contract. It can take effect from ${formatUtc(etaMs)}. ${ACT} before then.`,
+      detail: `The key that can announce updates would move from ${wrapper.owner} to ${newOwner}, a multisig account: no single key can sign for it alone. Whoever holds that key can announce updates, each with 24 hours of notice.`,
+    });
+  }
 
-    if (spec.source === 'upgrade_delay') {
-      // 2. The canonical wrapper, naming core's original id.
-      if (canonicalId(json.wrapper_id) !== wrapper) { ignore('wrapper_not_canonical'); continue; }
-      if (spec.kind !== 'owner_change_proposed') {
-        const pkg = canonicalId(json.package);
-        if (pkg !== core) { ignore('package_not_canonical', `package ${pkg ?? 'missing'}`); continue; }
-      }
+  // Each announced registry addition, likewise.
+  for (const p of config.pending) {
+    if (nowMs >= p.etaMs + ADDITION_WINDOW_MS) continue;
+    const key = `registry_addition_proposed|${config.id}|${p.registry}|${p.typeName}|${p.etaMs}`;
+    configPending.push(key);
+    alerts.push({
+      ...empty,
+      key,
+      kind: 'registry_addition_proposed',
+      subjectId: config.id,
+      registry: p.registry,
+      typeName: p.typeName,
+      proposedAtMs: p.proposedAtMs,
+      etaMs: p.etaMs,
+      activeUntilMs: p.etaMs + ADDITION_WINDOW_MS,
+      summary: `Splash has announced ${REGISTRY_NOUN[p.registry]} (${shortType(p.typeName)}). It can take effect from ${formatUtc(p.etaMs)}. ${ACT} before then.`,
+      detail: `${REGISTRY_POWER[p.registry].proposed} Full type: ${p.typeName}.`,
+    });
+  }
 
-      if (spec.kind === 'owner_change_proposed') {
-        const newOwner = canonicalId(json.new_owner);
-        const etaMs = millis(json.eta_ms);
-        const until = activeUntil(event.timestampMs, etaMs);
-        if (!newOwner || etaMs == null || until == null) { ignore('malformed', 'new_owner or eta_ms missing'); continue; }
-        report.alerts.push({
-          ...base,
-          newOwner,
-          proposedAtMs: event.timestampMs,
-          etaMs,
-          activeUntilMs: until,
-          summary: `Splash has announced a change to who can update its payment contract. It can take effect from ${formatUtc(etaMs)}. ${ACT} before then.`,
-          detail: `The new owner of the update key would be ${newOwner}, a shared account no single person can sign for. Whoever holds the key can announce updates, each with 24 hours of notice.`,
+  // What took effect since the stored state: only against an older one.
+  const prevWrapper = previous.wrapper;
+  if (prevWrapper && wrapper.objectVersion > prevWrapper.objectVersion && wrapper.capVersion > prevWrapper.capVersion) {
+    alerts.push({
+      ...empty,
+      key: `upgrade_committed|${wrapper.id}|${wrapper.capVersion}|${wrapper.latestPackage}`,
+      kind: 'upgrade_committed',
+      subjectId: wrapper.id,
+      upgradePolicy: wrapper.policy,
+      packageId: wrapper.latestPackage,
+      packageVersion: wrapper.capVersion,
+      activeUntilMs: nowMs + SHOW_EFFECT_MS,
+      summary: `An update to Splash's payment contract has taken effect. ${ACT}.`,
+      detail: [
+        `The contract is now at version ${wrapper.capVersion}, package ${wrapper.latestPackage}.`,
+        policyLine(wrapper.policy),
+        'Every update to it is announced on chain 24 hours before it can take effect.',
+      ].join(' '),
+    });
+  }
+  const prevConfig = previous.config;
+  if (prevConfig && config.objectVersion > prevConfig.objectVersion) {
+    for (const registry of REGISTRIES) {
+      const before = new Set(prevConfig.registries[String(registry) as '1' | '2' | '3'] ?? []);
+      for (const typeName of config.registries[registry]) {
+        if (before.has(typeName)) continue;
+        alerts.push({
+          ...empty,
+          // The stored version both racing runs compared against, so they
+          // derive one key; a later re-addition compares against a later one.
+          key: `registry_addition_activated|${config.id}|${registry}|${typeName}|${prevConfig.objectVersion}`,
+          kind: 'registry_addition_activated',
+          subjectId: config.id,
+          registry,
+          typeName,
+          activeUntilMs: nowMs + SHOW_EFFECT_MS,
+          summary: `Splash has added ${REGISTRY_NOUN[registry]} (${shortType(typeName)}). It has now taken effect. ${ACT}.`,
+          detail: `${REGISTRY_POWER[registry].activated} Full type: ${typeName}.`,
         });
-        continue;
       }
-
-      const bytecodeDigest = bytes32Hex(json.digest);
-      const upgradePolicy = smallInt(json.policy);
-      if (!bytecodeDigest || upgradePolicy == null) { ignore('malformed', 'digest or policy missing'); continue; }
-      const diff = `${policySentence(upgradePolicy)} Code fingerprint: ${bytecodeDigest}.`;
-
-      if (spec.kind === 'upgrade_proposed') {
-        const proposedAtMs = millis(json.proposed_at_ms);
-        const etaMs = millis(json.eta_ms);
-        const until = activeUntil(proposedAtMs, etaMs);
-        if (proposedAtMs == null || etaMs == null || until == null) { ignore('malformed', 'proposed_at_ms or eta_ms missing'); continue; }
-        report.alerts.push({
-          ...base,
-          bytecodeDigest,
-          upgradePolicy,
-          proposedAtMs,
-          etaMs,
-          activeUntilMs: until,
-          summary: `Splash has announced an update to its payment contract. It can take effect from ${formatUtc(etaMs)}. ${ACT} before then.`,
-          detail: diff,
-        });
-      } else {
-        const until = activeUntil(event.timestampMs, null);
-        if (until == null) { ignore('malformed', 'no timestamp'); continue; }
-        report.alerts.push({
-          ...base,
-          bytecodeDigest,
-          upgradePolicy,
-          proposedAtMs: null,
-          etaMs: null,
-          activeUntilMs: until,
-          summary: `The announced update to Splash's payment contract has now taken effect. ${ACT}.`,
-          detail: diff,
-        });
-      }
-      continue;
-    }
-
-    // 3. Registry events: the one canonical compliance config.
-    if (canonicalId(json.config_id) !== config) { ignore('config_not_canonical'); continue; }
-    const registry = smallInt(json.registry);
-    const typeName = typeof json.type_name === 'string' && json.type_name.trim() ? json.type_name.trim() : null;
-    if ((registry !== 1 && registry !== 2 && registry !== 3) || !typeName) { ignore('malformed', 'registry or type_name invalid'); continue; }
-    const noun = REGISTRY_NOUN[registry];
-    const detail = `${REGISTRY_DETAIL[registry]} Full type: ${typeName}.`;
-
-    if (spec.kind === 'registry_addition_proposed') {
-      const proposedAtMs = millis(json.proposed_at_ms);
-      const etaMs = millis(json.eta_ms);
-      const until = activeUntil(proposedAtMs, etaMs);
-      if (proposedAtMs == null || etaMs == null || until == null) { ignore('malformed', 'proposed_at_ms or eta_ms missing'); continue; }
-      report.alerts.push({
-        ...base,
-        registry,
-        typeName,
-        proposedAtMs,
-        etaMs,
-        activeUntilMs: until,
-        summary: `Splash has announced ${noun} (${shortType(typeName)}). It can take effect from ${formatUtc(etaMs)}. ${ACT} before then.`,
-        detail,
-      });
-    } else {
-      const until = activeUntil(event.timestampMs, null);
-      if (until == null) { ignore('malformed', 'no timestamp'); continue; }
-      report.alerts.push({
-        ...base,
-        registry,
-        typeName,
-        proposedAtMs: null,
-        etaMs: null,
-        activeUntilMs: until,
-        summary: `Splash has added ${noun} (${shortType(typeName)}). It has now taken effect. ${ACT}.`,
-        detail,
-      });
     }
   }
-  return report;
-}
 
-/** Ignored events that came from the canonical wrapper itself: genuine, and
- *  unalerted only because configuration lags the chain. */
-export function configurationDrift(report: GovernanceReport): IgnoredEvent[] {
-  return report.ignored.filter((event) => event.reason === 'package_not_canonical');
+  return {
+    alerts,
+    snapshots: {
+      wrapper: { objectVersion: wrapper.objectVersion, capVersion: wrapper.capVersion, pendingKeys: wrapperPending },
+      config: {
+        objectVersion: config.objectVersion,
+        registries: { 1: config.registries[1], 2: config.registries[2], 3: config.registries[3] },
+        pendingKeys: configPending,
+      },
+    },
+  };
 }

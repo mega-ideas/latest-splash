@@ -4,52 +4,62 @@
  * gathers its inputs, records what it decided, and tells the owners.
  *
  *   - the canonical ids: SPLASH_UPGRADE_DELAY_PACKAGE_ID,
- *     SPLASH_UPGRADE_WRAPPER_ID, SPLASH_CORE_PACKAGE_ID (the core's ORIGINAL
- *     id; every governance event names it, after any number of upgrades) and
- *     SPLASH_COMPLIANCE_CONFIG_ID. From the environment only (lib/env.ts says
- *     why). Any one missing and the monitor does not run: it answers
- *     `ok: false`, the route answers 502, and the scheduler's failure alerting
- *     sees a watchman who is not watching;
- *   - the events: Sui GraphQL, by type, the same endpoint the operator outflow
- *     monitor reads. The type filter narrows the query; the classifier checks
- *     every event again and does not trust it;
+ *     SPLASH_UPGRADE_WRAPPER_ID and SPLASH_COMPLIANCE_CONFIG_ID. From the
+ *     environment only (lib/env.ts says why). Any one missing or malformed and
+ *     the monitor does not run: it answers `ok: false`, the route answers 502,
+ *     and the scheduler's failure alerting sees a watchman who is not
+ *     watching. Core's original id is not configured here at all: it is read
+ *     from the wrapper's own `original_package` on every run, so
+ *     SPLASH_CORE_PACKAGE_ID stays free to name whichever core version the app
+ *     calls;
+ *   - the state: ONE Sui GraphQL query for the two objects, the same endpoint
+ *     the operator outflow monitor reads. Not the event feed: anyone can fill
+ *     that with look-alikes of the canonical types (governance-events.ts says
+ *     why, and why a 15-minute poll of state cannot miss a change that can
+ *     take effect). An object that is missing, of another type, or not
+ *     readable in full is `ok: false`, and a person is paged, because owners
+ *     are not being told anything until it is fixed;
+ *   - the previous state: governance_watch_state, so what took effect since
+ *     the last run can be told too;
  *   - the owners: every `admin` membership (lib/server/governance-alerts-store.ts);
  *   - delivery: in-app (the row the dashboard banner reads), email through the
  *     existing transport (lib/auth/email-transport.ts), and WhatsApp through
  *     lib/server/whatsapp.ts, only to a verified number.
  *
- * Idempotent across runs and instances: alerts are unique on (digest, event
- * seq) and deliveries on (alert, owner, channel), and a delivery is claimed
- * before it is sent. Every active alert is fanned out on every run, so an
- * owner added during the notice window is told on the next run. Channels go
- * in order, in-app for everyone first, so a run cut short by its time limit
- * still leaves every owner the banner.
+ * Idempotent across runs and instances: alerts are unique on their content
+ * key, deliveries on (alert, owner, channel), and an email or WhatsApp
+ * delivery is claimed before it is sent. Every alert still shown is fanned out
+ * on every run, so an owner added during the notice is told on the next run.
+ * Channels go in order, in-app for everyone first, so a run cut short by its
+ * time limit still leaves every owner the banner.
  *
  * A failed send is recorded and the next one is tried; it is claimed again on
- * a later run, up to MAX_DELIVERY_ATTEMPTS.
+ * a later run, up to MAX_DELIVERY_ATTEMPTS. So is a claim whose run died
+ * before finishing it, once DELIVERY_LEASE_MS has passed.
  */
 import 'server-only';
 
 import { resolveEmailTransport, type EmailMessage } from '../auth/email-transport.ts';
 import { sendOperatorAlert, type OperatorAlertSink } from './operator-alerts.ts';
 import {
-  classifyGovernanceEvents,
-  configurationDrift,
-  watchedEventTypes,
-  type GovernanceEvent,
+  deriveGovernanceAlerts,
+  parseGovernanceState,
+  type GovernanceAlert,
+  type GovernanceChainRead,
   type GovernancePolicy,
-  type GovernanceReport,
-  type IgnoredEvent,
 } from './governance-events.ts';
 import {
-  MAX_DELIVERY_ATTEMPTS,
   claimGovernanceDelivery,
+  deliveryClaimable,
   deliveryStateFor,
   finishGovernanceDelivery,
   listActiveGovernanceAlertsForStaff,
   listBusinessOwnersForStaff,
   readDeliveryStatesForStaff,
+  readWatchStateForStaff,
   recordGovernanceAlert,
+  recordInAppDelivery,
+  saveWatchStateForStaff,
   type BusinessOwner,
   type DeliveryChannel,
   type StoredGovernanceAlert,
@@ -57,19 +67,14 @@ import {
 import { normalizeSuiAddress } from './operator-outflows.ts';
 import { sendWhatsApp } from './whatsapp.ts';
 
-const PAGE = 50;
-const MAX_PAGES = 4;
 const TIMEOUT_MS = 8_000;
-/** Look back as far as an alert can stay on the dashboard, so a monitor that
- *  was down for days still records what it missed while it still matters. */
-const DEFAULT_WINDOW_MS = 9 * 24 * 60 * 60 * 1000;
 const OBJECT_ID = /^0x[0-9a-fA-F]{64}$/;
 
 type Fetcher = (url: string, init?: RequestInit) => Promise<Response>;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = any;
 
-export type GovernanceEventReader = (types: string[], sinceMs: number) => Promise<GovernanceEvent[]>;
+export type GovernanceStateReader = (policy: GovernancePolicy) => Promise<GovernanceChainRead>;
 export type EmailSender = (message: EmailMessage) => Promise<{ providerRef: string | null }>;
 export type WhatsAppSender = (to: string, body: string) => Promise<{ sent: true; providerRef: string } | { sent: false; reason: string }>;
 
@@ -78,16 +83,19 @@ export type DeliveryTally = { sent: number; failed: number; skipped: number };
 export type GovernanceMonitorResult =
   | {
       ok: true;
-      scanned: number;
-      report: GovernanceReport;
+      /** What the chain showed, in brief. */
+      observed: {
+        wrapper: { id: string; objectVersion: number; corePackage: string; latestPackage: string; capVersion: number; policy: number; pendingUpgrade: boolean; pendingOwnerChange: boolean };
+        config: { id: string; objectVersion: number; pendingAdditions: number };
+      };
+      /** Every alert this state calls for. */
+      alerts: GovernanceAlert[];
       /** Alerts this run recorded for the first time. */
       recorded: string[];
-      /** Alerts still active, which this run fanned out. */
+      /** Alerts still shown, which this run fanned out. */
       active: string[];
       owners: number;
       deliveries: Record<DeliveryChannel, DeliveryTally>;
-      /** Genuine wrapper events the configuration does not cover. */
-      drift: IgnoredEvent[];
     }
   | { ok: false; reason: string };
 
@@ -98,7 +106,6 @@ export function readGovernanceConfig(
   const required = {
     SPLASH_UPGRADE_DELAY_PACKAGE_ID: (env.SPLASH_UPGRADE_DELAY_PACKAGE_ID ?? '').trim(),
     SPLASH_UPGRADE_WRAPPER_ID: (env.SPLASH_UPGRADE_WRAPPER_ID ?? '').trim(),
-    SPLASH_CORE_PACKAGE_ID: (env.SPLASH_CORE_PACKAGE_ID ?? '').trim(),
     SPLASH_COMPLIANCE_CONFIG_ID: (env.SPLASH_COMPLIANCE_CONFIG_ID ?? '').trim(),
   };
   const missing = Object.entries(required).filter(([, v]) => !v).map(([k]) => k);
@@ -110,7 +117,7 @@ export function readGovernanceConfig(
     ].filter(Boolean);
     return {
       ok: false,
-      reason: `governance alerts are not configured: ${parts.join('; ')}. Without the canonical ids no event can be told apart from a spoof, so none is alerted.`,
+      reason: `governance alerts are not configured: ${parts.join('; ')}. Without the canonical ids there is no governance state to read, so nothing is alerted.`,
     };
   }
   return {
@@ -118,47 +125,26 @@ export function readGovernanceConfig(
     policy: {
       upgradeDelayPackageId: normalizeSuiAddress(required.SPLASH_UPGRADE_DELAY_PACKAGE_ID),
       wrapperId: normalizeSuiAddress(required.SPLASH_UPGRADE_WRAPPER_ID),
-      corePackageId: normalizeSuiAddress(required.SPLASH_CORE_PACKAGE_ID),
       complianceConfigId: normalizeSuiAddress(required.SPLASH_COMPLIANCE_CONFIG_ID),
     },
   };
 }
 
-const QUERY = `query GovernanceEvents($type: String!, $last: Int!, $before: String) {
-  events(last: $last, before: $before, filter: { type: $type }) {
-    pageInfo { hasPreviousPage startCursor }
-    nodes {
-      sequenceNumber
-      timestamp
-      transaction { digest }
-      contents { type { repr } json }
-    }
+/** Both objects in one query, so they are read at the same checkpoint. */
+const STATE_QUERY = `query GovernanceState($wrapper: SuiAddress!, $config: SuiAddress!) {
+  wrapper: object(address: $wrapper) {
+    address
+    version
+    owner { __typename ... on AddressOwner { address { address } } }
+    asMoveObject { contents { type { repr } json } }
+  }
+  config: object(address: $config) {
+    address
+    version
+    owner { __typename ... on AddressOwner { address { address } } }
+    asMoveObject { contents { type { repr } json } }
   }
 }`;
-
-type GqlEventNode = {
-  sequenceNumber?: number | null;
-  timestamp?: string | null;
-  transaction?: { digest?: string | null } | null;
-  contents?: { type?: { repr?: string | null } | null; json?: unknown } | null;
-};
-
-/** One GraphQL node as the classifier's input, or null when the indexer has
- *  not tied it to a transaction yet. */
-export function toGovernanceEvent(node: GqlEventNode): GovernanceEvent | null {
-  const digest = node.transaction?.digest ?? '';
-  const type = node.contents?.type?.repr ?? '';
-  if (!digest || !type || typeof node.sequenceNumber !== 'number') return null;
-  const timestamp = node.timestamp ? Date.parse(node.timestamp) : NaN;
-  const json = node.contents?.json;
-  return {
-    digest,
-    eventSeq: node.sequenceNumber,
-    type,
-    timestampMs: Number.isFinite(timestamp) ? timestamp : null,
-    json: json && typeof json === 'object' && !Array.isArray(json) ? (json as Record<string, unknown>) : null,
-  };
-}
 
 function defaultEndpoint(): string {
   const configured = process.env.SUI_GRAPHQL_URL?.trim();
@@ -166,60 +152,54 @@ function defaultEndpoint(): string {
   return process.env.SUI_NETWORK === 'mainnet' ? 'https://graphql.mainnet.sui.io/graphql' : 'https://graphql.testnet.sui.io/graphql';
 }
 
-export function graphqlGovernanceReader(fetcher: Fetcher = fetch, endpoint = defaultEndpoint()): GovernanceEventReader {
-  async function readType(type: string, sinceMs: number): Promise<GovernanceEvent[]> {
-    const out: GovernanceEvent[] = [];
-    let before: string | null = null;
-    for (let page = 0; page < MAX_PAGES; page += 1) {
-      const res = await fetcher(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ query: QUERY, variables: { type, last: PAGE, before } }),
-        signal: AbortSignal.timeout(TIMEOUT_MS),
-        cache: 'no-store',
-      });
-      if (!res.ok) throw new Error(`the Sui indexer answered HTTP ${res.status}`);
-      const body = (await res.json()) as {
-        data?: { events?: { pageInfo?: { hasPreviousPage?: boolean; startCursor?: string | null }; nodes?: GqlEventNode[] } | null };
-        errors?: Array<{ message?: string }>;
-      };
-      if (body.errors?.length) throw new Error(`the Sui indexer refused the query: ${body.errors[0]?.message ?? 'unknown error'}`);
-      const events = body.data?.events;
-      if (!events) break;
-      let reachedWindowStart = false;
-      // `last` returns the page oldest-first; walk it newest-first.
-      for (const node of [...(events.nodes ?? [])].reverse()) {
-        const parsed = toGovernanceEvent(node);
-        if (!parsed) continue;
-        if (parsed.timestampMs != null && parsed.timestampMs < sinceMs) {
-          reachedWindowStart = true;
-          break;
-        }
-        out.push(parsed);
-      }
-      if (reachedWindowStart || !events.pageInfo?.hasPreviousPage) break;
-      before = events.pageInfo?.startCursor ?? null;
-      if (!before) break;
+/**
+ * Read the wrapper and the config. Throws on anything but a complete answer:
+ * an HTTP error, a GraphQL error, or a reply without both fields. A field
+ * that is present and null means the chain has no such object, which the
+ * parser refuses with the setting to check.
+ */
+export function graphqlGovernanceStateReader(fetcher: Fetcher = fetch, endpoint = defaultEndpoint()): GovernanceStateReader {
+  return async (policy) => {
+    const res = await fetcher(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ query: STATE_QUERY, variables: { wrapper: policy.wrapperId, config: policy.complianceConfigId } }),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+      cache: 'no-store',
+    });
+    if (!res.ok) throw new Error(`the Sui indexer answered HTTP ${res.status}`);
+    const body = (await res.json()) as { data?: Record<string, unknown> | null; errors?: Array<{ message?: string }> };
+    if (body.errors?.length) throw new Error(`the Sui indexer refused the query: ${body.errors[0]?.message ?? 'unknown error'}`);
+    const data = body.data;
+    if (!data || typeof data !== 'object' || !('wrapper' in data) || !('config' in data)) {
+      throw new Error('the Sui indexer answered without the wrapper and the config');
     }
-    return out;
-  }
-  return async (types, sinceMs) => (await Promise.all(types.map((type) => readType(type, sinceMs)))).flat();
+    return { wrapper: (data.wrapper ?? null) as GovernanceChainRead['wrapper'], config: (data.config ?? null) as GovernanceChainRead['config'] };
+  };
 }
 
 const SUBJECTS: Record<StoredGovernanceAlert['kind'], string> = {
   upgrade_proposed: 'An update to the Splash payment contract has been announced',
-  upgrade_authorized: 'An update to the Splash payment contract has taken effect',
   owner_change_proposed: 'A change to who can update the Splash payment contract has been announced',
   registry_addition_proposed: 'An addition to the Splash payment contract has been announced',
+  upgrade_committed: 'An update to the Splash payment contract has taken effect',
   registry_addition_activated: 'An addition to the Splash payment contract has taken effect',
+};
+
+/** Where an owner can see the same thing on any Sui explorer, without
+ *  trusting this message, or us. */
+const ON_CHAIN: Record<StoredGovernanceAlert['kind'], string> = {
+  upgrade_proposed: 'holds the pending update, its bytecode digest and when it can take effect',
+  owner_change_proposed: 'holds the pending change of owner and when it can take effect',
+  registry_addition_proposed: 'lists it under its pending additions, with when it can take effect',
+  upgrade_committed: "shows the contract's current version and package",
+  registry_addition_activated: 'lists it in its registries',
 };
 
 function reviewUrl(appUrl: string, alert: StoredGovernanceAlert): string {
   return `${appUrl.replace(/\/+$/, '')}${alert.reviewPath}`;
 }
 
-/** The email. The digest is there so an owner can check the announcement on
- *  any Sui explorer without trusting this message, or us. */
 export function governanceEmail(alert: StoredGovernanceAlert, to: string, appUrl: string): EmailMessage {
   const link = reviewUrl(appUrl, alert);
   const text = [
@@ -227,23 +207,24 @@ export function governanceEmail(alert: StoredGovernanceAlert, to: string, appUrl
     alert.detail,
     'Review your spending rules and allowances here:',
     link,
-    `You can check this announcement yourself on any Sui explorer: transaction ${alert.digest}.`,
+    `You can check this yourself on any Sui explorer: object ${alert.subjectId} ${ON_CHAIN[alert.kind]}.`,
   ].join('\n\n');
   return { to, subject: SUBJECTS[alert.kind], text, link };
 }
 
+/** The same words as the email, the digest and full type included. */
 export function governanceWhatsApp(alert: StoredGovernanceAlert, appUrl: string): string {
-  return `${alert.summary} Review your spending rules and allowances: ${reviewUrl(appUrl, alert)}`;
+  return `${alert.summary} ${alert.detail} Review your spending rules and allowances: ${reviewUrl(appUrl, alert)}`;
 }
 
-const driftAlerted = new Set<string>();
+/** Each distinct refusal pages once per process; the 502 repeats every run. */
+const paged = new Set<string>();
 
 export async function runGovernanceAlertMonitor(deps: {
   now?: number;
-  windowMs?: number;
   env?: NodeJS.ProcessEnv;
   db?: Db;
-  readEvents?: GovernanceEventReader;
+  readState?: GovernanceStateReader;
   sendEmail?: EmailSender;
   sendWhatsApp?: WhatsAppSender;
   alert?: OperatorAlertSink;
@@ -257,17 +238,25 @@ export async function runGovernanceAlertMonitor(deps: {
   }
 
   const now = deps.now ?? Date.now();
-  const sinceMs = now - (deps.windowMs ?? DEFAULT_WINDOW_MS);
-  const readEvents = deps.readEvents ?? graphqlGovernanceReader();
+  const readState = deps.readState ?? graphqlGovernanceStateReader();
   const appUrl = deps.appUrl ?? process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
+  const alertSink = deps.alert ?? sendOperatorAlert;
 
-  let events: GovernanceEvent[];
+  let read: GovernanceChainRead;
   try {
-    events = await readEvents(watchedEventTypes(config.policy), sinceMs);
+    read = await readState(config.policy);
   } catch (error) {
-    return { ok: false, reason: `the monitor could not read its inputs: ${error instanceof Error ? error.message : String(error)}` };
+    return { ok: false, reason: `the monitor could not read the governance objects: ${error instanceof Error ? error.message : String(error)}` };
   }
-  const report = classifyGovernanceEvents(events, config.policy);
+  const parsed = parseGovernanceState(read, config.policy);
+  if (!parsed.ok) {
+    if (!paged.has(parsed.reason)) {
+      paged.add(parsed.reason);
+      await alertSink({ kind: 'governance_config_mismatch', severity: 'critical', objectId: parsed.objectId, reason: parsed.reason });
+    }
+    return { ok: false, reason: parsed.reason };
+  }
+  const { wrapper, config: complianceConfig } = parsed.state;
 
   // The transport is resolved once, lazily: a misconfigured one fails each
   // email delivery (recorded, retried later) rather than the whole run.
@@ -280,11 +269,18 @@ export async function runGovernanceAlertMonitor(deps: {
 
   try {
     const db = deps.db ?? (await import('../db/client.ts')).getDb();
+    const previous = await readWatchStateForStaff(db, { wrapperId: wrapper.id, configId: complianceConfig.id });
+    const derived = deriveGovernanceAlerts(parsed.state, previous, now);
+
+    // Record first, then the state: a run that dies in between leaves the
+    // stored state older, so the next run derives the same keys again.
     const recorded: string[] = [];
-    for (const alert of report.alerts) {
+    for (const alert of derived.alerts) {
       const { alert: stored, created } = await recordGovernanceAlert(db, alert);
       if (created) recorded.push(stored.id);
     }
+    await saveWatchStateForStaff(db, { subjectId: wrapper.id, subjectKind: 'wrapper', snapshot: derived.snapshots.wrapper, nowMs: now });
+    await saveWatchStateForStaff(db, { subjectId: complianceConfig.id, subjectKind: 'config', snapshot: derived.snapshots.config, nowMs: now });
 
     const active = await listActiveGovernanceAlertsForStaff(db, now);
     const owners = await listBusinessOwnersForStaff(db);
@@ -295,9 +291,7 @@ export async function runGovernanceAlertMonitor(deps: {
       whatsapp: { sent: 0, failed: 0, skipped: 0 },
     };
 
-    const send: Record<DeliveryChannel, (alert: StoredGovernanceAlert, owner: BusinessOwner) => Promise<{ ok: true; providerRef?: string | null } | { ok: false; error: string }>> = {
-      // The row is the delivery: the dashboard banner reads it.
-      in_app: async () => ({ ok: true }),
+    const send: Record<'email' | 'whatsapp', (alert: StoredGovernanceAlert, owner: BusinessOwner) => Promise<{ ok: true; providerRef?: string | null } | { ok: false; error: string }>> = {
       email: async (alert, owner) => ({ ok: true, ...(await sendEmail(governanceEmail(alert, owner.email, appUrl))) }),
       whatsapp: async (alert, owner) => {
         const result = await whatsapp(owner.whatsappE164!, governanceWhatsApp(alert, appUrl));
@@ -312,11 +306,19 @@ export async function runGovernanceAlertMonitor(deps: {
           // no channel to deliver on.
           if (channel === 'whatsapp' && !owner.whatsappE164) continue;
           const state = deliveryStateFor(states, alert.id, owner.userId, channel);
-          if (state && (state.status !== 'failed' || state.attempts >= MAX_DELIVERY_ATTEMPTS)) {
+          if (channel === 'in_app') {
+            // The row is the delivery: the banner reads it.
+            const recordedNow = state?.status === 'sent'
+              ? false
+              : await recordInAppDelivery(db, { alertId: alert.id, userId: owner.userId, orgId: owner.orgId, nowMs: now });
+            deliveries.in_app[recordedNow ? 'sent' : 'skipped'] += 1;
+            continue;
+          }
+          if (state && !deliveryClaimable(state, now)) {
             deliveries[channel].skipped += 1;
             continue;
           }
-          const claim = await claimGovernanceDelivery(db, { alertId: alert.id, userId: owner.userId, orgId: owner.orgId, channel });
+          const claim = await claimGovernanceDelivery(db, { alertId: alert.id, userId: owner.userId, orgId: owner.orgId, channel, nowMs: now });
           if (!claim) {
             deliveries[channel].skipped += 1;
             continue;
@@ -327,36 +329,32 @@ export async function runGovernanceAlertMonitor(deps: {
           } catch (error) {
             outcome = { ok: false, error: error instanceof Error ? error.message : String(error) };
           }
-          await finishGovernanceDelivery(db, claim.id, outcome);
+          await finishGovernanceDelivery(db, claim, outcome, now);
           deliveries[channel][outcome.ok ? 'sent' : 'failed'] += 1;
         }
       }
     }
 
-    const drift = configurationDrift(report);
-    const alertSink = deps.alert ?? sendOperatorAlert;
-    for (const event of drift) {
-      const key = `${event.digest}|${event.eventSeq}`;
-      if (driftAlerted.has(key)) continue;
-      driftAlerted.add(key);
-      await alertSink({
-        kind: 'governance_config_drift',
-        severity: 'critical',
-        digest: event.digest,
-        reason: event.note ?? event.reason,
-        detail: { eventSeq: event.eventSeq, type: event.type },
-      });
-    }
-
     return {
       ok: true,
-      scanned: events.length,
-      report,
+      observed: {
+        wrapper: {
+          id: wrapper.id,
+          objectVersion: wrapper.objectVersion,
+          corePackage: wrapper.originalPackage,
+          latestPackage: wrapper.latestPackage,
+          capVersion: wrapper.capVersion,
+          policy: wrapper.policy,
+          pendingUpgrade: wrapper.pending != null,
+          pendingOwnerChange: wrapper.pendingOwner != null,
+        },
+        config: { id: complianceConfig.id, objectVersion: complianceConfig.objectVersion, pendingAdditions: complianceConfig.pending.length },
+      },
+      alerts: derived.alerts,
       recorded,
       active: active.map((a) => a.id),
       owners: owners.length,
       deliveries,
-      drift,
     };
   } catch (error) {
     return { ok: false, reason: `the monitor could not record or deliver its alerts: ${error instanceof Error ? error.message : String(error)}` };

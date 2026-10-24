@@ -43,15 +43,15 @@ export type OperatorAlert =
       detail: unknown;
     }
   | {
-      /** The canonical upgrade wrapper emitted an event naming a core package
-       *  other than SPLASH_CORE_PACKAGE_ID, which must be core's original id
-       *  (lib/server/governance-alert-monitor.ts). Owners were NOT told; fix
-       *  the id so they are. */
-      kind: 'governance_config_drift';
+      /** A configured governance id (SPLASH_UPGRADE_WRAPPER_ID or
+       *  SPLASH_COMPLIANCE_CONFIG_ID) does not resolve on chain to the
+       *  canonical object of the canonical type, or the object could not be
+       *  read in full (lib/server/governance-alert-monitor.ts). Owners are NOT
+       *  being told about governance changes until a person fixes it. */
+      kind: 'governance_config_mismatch';
       severity: 'critical';
-      digest: string;
+      objectId: string;
       reason: string;
-      detail: unknown;
     };
 
 export type OperatorAlertSink = (alert: OperatorAlert) => Promise<void>;
