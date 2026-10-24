@@ -301,7 +301,7 @@ export default function StepBeneficiary({ state, set, next }: { state: TransferS
                         <span className="block truncate text-[13px] font-bold">{country.name}</span>
                         <span className={`block font-mono text-[13px] font-semibold ${active ? 'text-[#8FD7C7]' : 'text-[#326273]/90'}`}>
                           {COUNTRY_TO_CURRENCY[country.code]}
-                          {country.live ? ' · testnet live' : ''}
+                          {country.live ? ' · live' : ''}
                         </span>
                       </span>
                     </button>
