@@ -24,7 +24,11 @@ import {
   recallAssistantName,
   rememberAssistantName,
 } from './assistant-name.ts';
-import { estimateNettingSavedUsd, getCorridorFeeBps, getUsdCorridorByCurrency } from '../fx/corridors.ts';
+import { estimateNettingSavedUsd, getUsdCorridorByCurrency } from '../fx/corridors.ts';
+import { formatRate, pricingLine } from '../fees/copy.ts';
+import { lastPublishedFeeSchedule, quoteFeeState } from '../fees/fee-config.ts';
+import { buildFeeQuote } from '../fees/quote.ts';
+import { FEE_CEILING_BPS, FEE_KIND } from '../fees/schedule.ts';
 import { getUsdyNetApyPct } from '../server/usdy.ts';
 import { checkMinimumSettlement } from '../policy/limits.ts';
 import { InMemoryProposalStore } from '../queue/proposal-state.ts';
@@ -726,6 +730,20 @@ function requireAmount(input: Record<string, unknown>, key: string): number {
   return amount;
 }
 
+/**
+ * Splash's fee on a payout to a bank of `principalMicro`, from the schedule in
+ * force (A1 §4), for the proposal card. Undefined when the fee cannot be read:
+ * the card then shows no fee, and the payment's own quote decides.
+ */
+async function splashFeeForPayout(principalMicro: bigint): Promise<bigint | undefined> {
+  try {
+    const state = await quoteFeeState();
+    return buildFeeQuote({ kind: FEE_KIND.BANK_PAYOUT, principalMinor: principalMicro, state }).splashFee.minor;
+  } catch {
+    return undefined;
+  }
+}
+
 function usdMicro(amountUsd: number): bigint {
   return BigInt(Math.round(amountUsd * 1_000_000));
 }
@@ -837,7 +855,8 @@ async function createDraftProposal(input: {
   amountOut?: bigint;
   currencyIn?: string;
   currencyOut?: string;
-  feeBps?: number;
+  /** Splash's fee on the payout, in USDC minor units, from the schedule (A1 §4). */
+  splashFeeMinor?: bigint;
   /** New proposals name their quote (`quoteRef`); only stored ones carry the legacy field. */
   fxRate?: { value: string; quoteRef: string; observedAt: string };
   yieldDeltaBps?: number;
@@ -880,7 +899,7 @@ async function createDraftProposal(input: {
         amountOut: input.amountOut,
         currencyIn: input.currencyIn,
         currencyOut: input.currencyOut,
-        feeBps: input.feeBps,
+        splashFeeMinor: input.splashFeeMinor,
         fxRate: input.fxRate,
         yieldDeltaBps: input.yieldDeltaBps,
         nettingSaved: input.nettingSaved,
@@ -1116,7 +1135,7 @@ export async function proposePayment(input: unknown): Promise<UnsignedProposal> 
     currencyIn: 'USD',
     amountOut: toMicro(targetAmount),
     currencyOut: currency,
-    feeBps: getCorridorFeeBps(currency),
+    splashFeeMinor: await splashFeeForPayout(usdMicro(amountUsd)),
     fxRate: fx?.fxRate,
     yieldDeltaBps: treasuryYieldBps(),
     nettingSaved: usdMicro(estimateNettingSavedUsd(amountUsd)),
@@ -1207,7 +1226,7 @@ async function proposeFxConvert(input: unknown): Promise<UnsignedProposal> {
     amountOut: toMicro(targetAmount),
     currencyIn: 'USD',
     currencyOut,
-    feeBps: getCorridorFeeBps(currencyOut),
+    splashFeeMinor: await splashFeeForPayout(usdMicro(amountUsd)),
     fxRate: fx?.fxRate,
     nettingSaved: usdMicro(estimateNettingSavedUsd(amountUsd)),
     // A rate is evidence only when one resolved (not for USDC, which needs
@@ -1849,7 +1868,11 @@ const SPLASH_ANSWERS: Array<{ test: RegExp; reply: string | (() => string); skip
     // Fees / pricing / cost
     test: /\b(fee|fees|pricing|price|cost|charge|commission|how much (do|does|will) (it|you|this) cost)\b/,
     skipIf: /\b(gas|sponsor|network fee|hold sui|fund (a|my)? ?wallet|top ?up)\b/, // gas/sponsorship gets the dedicated answer below
-    reply: 'Sending USDC is free: Splash charges nothing on stablecoin transfers. Payouts to local currency are 0.70% of the amount on every corridor, with no fixed fee — live on the USD to PHP testnet path; MYR, SGD, IDR, VND, THB, EUR and GBP stay modeled until partner rails activate. Batch runs quote one blended rate, typically 15-30 bps tighter. A hard on-chain ceiling caps any settlement fee at 2.00% — the contract aborts above it.',
+    // Rendered from the fee schedule, never typed in (A1 §2.7).
+    reply: () => `Splash's fee depends on where the payment goes. ${pricingLine(lastPublishedFeeSchedule())} `
+      + 'Your quote shows the exact fee, its band and the total debited before you approve; Splash charges it on top, and the payment is refused if the fee would be higher than the one you were shown. '
+      + `No fee can exceed ${formatRate(FEE_CEILING_BPS)} of the amount: the network refuses one above it. `
+      + 'Payouts to local currency are live on the USD to PHP testnet path; MYR, SGD, IDR, VND, THB, EUR and GBP stay modeled until partner rails activate.',
   },
   {
     // Corridors / countries / currencies
@@ -1986,7 +2009,7 @@ const SPLASH_ANSWERS: Array<{ test: RegExp; reply: string | (() => string); skip
   {
     // Who pays gas / sponsored
     test: /\b(gas|who pays|network fee|do i need sui|hold sui|wallet funding|top ?up)\b/,
-    reply: () => 'For local-currency payouts, Splash settles on Sui and pays the network fee itself: you see the 0.70% fee, never a separate gas charge. '
+    reply: () => 'For local-currency payouts, Splash settles on Sui and pays the network fee itself: you see Splash’s fee in the quote, never a separate gas charge. '
       + (gaslessEnabled()
         ? 'A USDC transfer from your wallet has no network fee at all: Sui carries USDC between wallets without gas, so the wallet needs no SUI to send it. Paying an x402 API, or claiming USDC bridged in from another chain, still takes a little SUI for gas.'
         : 'For USDC you send from your own wallet, that wallet pays the Sui network fee in SUI, a few thousandths of a SUI a transfer.'),

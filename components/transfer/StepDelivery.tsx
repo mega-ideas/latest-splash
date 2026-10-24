@@ -5,7 +5,7 @@ import { Building2, Check, Landmark, Lock, Zap } from 'lucide-react';
 import type { TransferState } from '@/app/dashboard/transfer/page';
 import { useCustodyPhaseOn, useSweepSwitchOn } from '@/components/dashboard/CustodyPhaseContext';
 import { CUSTODY_PHASE_WHY, deliveryTierOpen } from '@/lib/custody-phase-rules';
-import { getCorridorFeeBps } from '@/lib/fx/corridors';
+import { usePublishedPricing } from '@/lib/fees/use-published-pricing';
 import type { RecipientTier } from '@/lib/server/operations';
 
 const options: Array<{ tier: RecipientTier; icon: typeof Building2; title: string; body: (currency: string) => string; eta: string }> = [
@@ -39,7 +39,10 @@ export default function StepDelivery({ state, set, prev, next }: { state: Transf
   const sweepOn = useSweepSwitchOn();
   const storedCurrencies = (process.env.NEXT_PUBLIC_STORED_BALANCE_CORRIDORS ?? '').split(',').map((value) => value.trim().toUpperCase());
   const storedOpen = process.env.NEXT_PUBLIC_DEMO_MODE === 'true' || storedCurrencies.includes(state.amount.targetCurrency);
-  const feeBps = getCorridorFeeBps(state.amount.targetCurrency);
+  // Splash's fee is the schedule's, not the corridor's (A1 §2.8): a payout to
+  // a bank pays the bank-payout range, a Splash balance is between Splash
+  // businesses. The quote on the next step shows this payment's own fee.
+  const pricing = usePublishedPricing();
   // A tier already in state that is locked here (chosen before the target
   // currency changed, or prefilled under a different phase) is not one the
   // operator can keep: show and continue with PAYOUT_ONLY, always open.
@@ -67,7 +70,7 @@ export default function StepDelivery({ state, set, prev, next }: { state: Transf
               <span className={`flex h-11 w-11 items-center justify-center rounded-xl ${selected ? 'bg-[#237284] text-card' : 'bg-muted text-[#1F4452]'} ${lock ? 'opacity-50' : ''}`}><Icon className="h-5 w-5" /></span>
               <span>
                 {/* Only the offer dims; the reason below stays at full contrast. */}
-                <span className={`block ${lock ? 'opacity-55' : ''}`}><strong className="block">{option.title}</strong><small className="mt-1 block leading-5 text-foreground/90">{option.body(state.amount.targetCurrency)}</small><small className="mt-2 block font-semibold text-foreground">ETA {option.eta} · {option.tier === 'STORED_BALANCE' ? '0.00% transfer' : `${(feeBps / 100).toFixed(2)}% corridor fee`}</small>{option.tier === 'SWEEP_ACCOUNT' && <small className="mt-1 block text-foreground/90">Pass-through account; funds rest for seconds.</small>}{option.tier === 'STORED_BALANCE' && <small className="mt-1 block text-foreground/90">Off-ramp fees apply when leaving the network.</small>}</span>
+                <span className={`block ${lock ? 'opacity-55' : ''}`}><strong className="block">{option.title}</strong><small className="mt-1 block leading-5 text-foreground/90">{option.body(state.amount.targetCurrency)}</small><small className="mt-2 block font-semibold text-foreground">ETA {option.eta} · {!pricing ? 'Splash fee shown in the quote' : option.tier === 'STORED_BALANCE' ? `Splash fee: ${pricing.business.toLowerCase()} between Splash businesses` : `Splash fee ${pricing.bankRange} to a bank`}</small>{option.tier === 'SWEEP_ACCOUNT' && <small className="mt-1 block text-foreground/90">Pass-through account; funds rest for seconds.</small>}{option.tier === 'STORED_BALANCE' && <small className="mt-1 block text-foreground/90">Off-ramp fees apply when leaving the network.</small>}</span>
                 {lock && (
                   <small className="mt-3 flex items-start gap-1.5 text-[13px] font-semibold leading-5 text-foreground">
                     <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />

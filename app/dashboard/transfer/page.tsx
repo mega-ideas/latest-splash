@@ -86,7 +86,6 @@ export type TransferState = {
     id: string;
     corridorCurrency: string;
     rate: string;
-    feeBps: number;
     holdUntil: string;
     state: 'ACTIVE' | 'EXECUTED' | 'EXPIRED' | 'CANCELLED';
   };

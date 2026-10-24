@@ -6,11 +6,7 @@ import { promisify } from 'node:util';
 import { Transaction } from '@mysten/sui/transactions';
 
 import { assertCommitmentBytes } from '@/lib/evidence/commitment';
-import {
-  CONTRACT_MAX_FEE_BPS,
-  FALLBACK_FEE_BPS,
-  getCorridorFeeBps,
-} from '@/lib/fx/corridors';
+import { FEE_KIND, LAUNCH_SCHEDULE, tierOf } from '@/lib/fees/schedule';
 import { batchGasBudgetMist, checkBatchSize } from '@/lib/policy/batch-limits';
 import {
   checkPoolAllowed,
@@ -245,18 +241,23 @@ function anchorCapObjectId(): string {
 }
 
 /**
- * Resolve the fee in bps to pass to settlement.move. Always clamped to
- * CONTRACT_MAX_FEE_BPS so the on-chain E_FEE_EXCEEDED assertion will pass.
+ * The rate the v1 testnet custody settlement (`settlement::settle_payment`,
+ * `settle_sui_batch_delegated`) is handed, in bps of each payment.
+ *
+ * splash_custody takes a rate as an argument; v2 takes none, and computes
+ * Splash's fee on chain from the kind and the amount (Amendment A1). So this
+ * retired path is handed what v2 would charge a payout to a bank: the A1
+ * bank-payout tier for the amount, from the launch schedule
+ * (lib/fees/schedule.ts), which is never above the 100 bps ceiling and so
+ * always inside custody's own limit. For a batch, one rate covers every row,
+ * so it is the lowest of the rows' tiers: no row pays more than its own tier.
+ * Testnet only; refused on mainnet with the rest of the custody path.
  */
-function resolveFeeBps(input: { feeBps?: number; targetCurrency?: string }): number {
-  const explicit = input.feeBps;
-  if (typeof explicit === 'number' && Number.isFinite(explicit) && explicit >= 0) {
-    return Math.min(Math.floor(explicit), CONTRACT_MAX_FEE_BPS);
-  }
-  if (input.targetCurrency) {
-    return getCorridorFeeBps(input.targetCurrency);
-  }
-  return FALLBACK_FEE_BPS;
+function custodyRateBps(principalsMicro: readonly bigint[]): number {
+  const bank = LAUNCH_SCHEDULE[FEE_KIND.BANK_PAYOUT];
+  const rates = principalsMicro.map((p) => tierOf(bank, p < 0n ? 0n : p).bps);
+  if (rates.length === 0) return Number(tierOf(bank, 0n).bps);
+  return Number(rates.reduce((a, b) => (b < a ? b : a)));
 }
 
 /**
@@ -285,7 +286,7 @@ const ABORT_CODES: Record<number, string> = {
   100: 'E_NOT_VERIFIED — BusinessAccount is not KYB-verified. Call verify_business with AdminCap first.',
   101: 'E_INSUFFICIENT_FUNDS — Coin value too small (fee > payment). Send a larger coin.',
   102: 'E_EMPTY_BATCH — Empty payments vector. Add at least one payment.',
-  103: 'E_FEE_EXCEEDED — fee_bps passed to settle_payment/settle_batch is above MAX_FEE_BPS (200). Check the corridor fee in lib/fx/corridors.ts.',
+  103: 'E_FEE_EXCEEDED (v1 testnet custody only) — the rate passed to settle_payment/settle_batch is above the custody package ceiling of 200 bps. The rate comes from the A1 bank-payout schedule (lib/fees/schedule.ts), which never exceeds 100 bps.',
   104: 'E_INVALID_RECIPIENT — settlement recipient is the zero address.',
   105: 'E_INVALID_AMOUNT — settlement amount or deposit coin value is zero.',
   106: 'E_NOT_ACCOUNT_OWNER — BusinessAccount object was transferred away from its recorded owner; verified status is not transferable (audit S-01).',
@@ -1451,8 +1452,6 @@ export async function recordSingleTransferOnSui(input: {
   stablecoinAmountMicro: number;
   /** ISO 4217 code of the destination corridor (e.g. 'PHP'). */
   targetCurrency?: string;
-  /** Override the corridor fee. Bounded to CONTRACT_MAX_FEE_BPS. */
-  feeBps?: number;
 }) {
   // settlement::settle_payment is a splash_custody function: refused on
   // mainnet in every mode, simulate included.
@@ -1480,11 +1479,10 @@ export async function recordSingleTransferOnSui(input: {
   const recipientAddress = resolvePayoutRecipient(input.recipient, 'Transfer recipient');
   requireSuiAddress(recipientAddress, 'Transfer recipient');
 
-  const feeBps = resolveFeeBps({ feeBps: input.feeBps, targetCurrency: input.targetCurrency });
-
-  // Use at least 1_000_000 MIST so the fee calc (≤ MAX_FEE_BPS = 200 bps)
-  // leaves a positive net amount per the contract's E_INSUFFICIENT_FUNDS check.
+  // Use at least 1_000_000 MIST so the custody fee calc (at most its 200 bps
+  // limit) leaves a positive net amount per the contract's E_INSUFFICIENT_FUNDS check.
   const paymentMist = Math.max(1_000_000, input.stablecoinAmountMicro);
+  const rateBps = custodyRateBps([BigInt(paymentMist)]);
 
   // Peg refresh is bundled into the same PTB below — no separate tx, no staleness race.
   // settle_payment takes no capability, so the only cap this PTB needs is the
@@ -1537,7 +1535,7 @@ export async function recordSingleTransferOnSui(input: {
         tx.object(DEEPBOOK_POOL_ID),
         payment,
         tx.pure.address(recipientAddress),
-        tx.pure.u64(feeBps),
+        tx.pure.u64(rateBps),
         tx.object('0x6'),
       ],
     });
@@ -1593,7 +1591,7 @@ export async function recordSingleTransferOnSui(input: {
     `@${DEEPBOOK_POOL_ID}`,
     'payment.0',
     `@${recipientAddress}`,
-    feeBps.toString(),
+    rateBps.toString(),
     '@0x6',
     '--gas-coin', `@${primaryId}`,
     '--gas-budget', gasBudget,
@@ -1605,7 +1603,7 @@ export async function recordSingleTransferOnSui(input: {
     usdcType: USDC_TYPE,
     function: 'settle_payment',
     paymentMist,
-    feeBps,
+    rateBps,
     targetCurrency: input.targetCurrency,
     recipient: recipientAddress,
     gasCoin: primaryId,
@@ -1646,10 +1644,8 @@ export async function recordBatchSettlementOnSui(input: {
   batchId: string;
   rows: SettlementBatchRow[];
   totalUsd: number;
-  /** ISO 4217 code of the destination corridor (e.g. 'PHP'). One fee per batch. */
+  /** ISO 4217 code of the destination corridor (e.g. 'PHP'). */
   targetCurrency?: string;
-  /** Override the corridor fee. Bounded to CONTRACT_MAX_FEE_BPS. */
-  feeBps?: number;
 }) {
   // settle_sui_batch_delegated is a splash_custody function: refused on
   // mainnet in every mode, simulate and SUI_BATCH_SETTLEMENT_MODE included,
@@ -1685,8 +1681,6 @@ export async function recordBatchSettlementOnSui(input: {
     throw new Error('DEEPBOOK_QUOTE_TYPE is not configured — settle_sui_batch<QuoteAsset> needs the DeepBook quote type. Set it in admin → Contract config (or .env.local), or run batches in simulate mode.');
   }
   const DEEPBOOK_QUOTE_TYPE = cfg.deepbookQuoteType;
-  const feeBps = resolveFeeBps({ feeBps: input.feeBps, targetCurrency: input.targetCurrency });
-
   // Peg refresh is bundled into the same PTB below — no separate tx, no staleness race.
   //
   // NOTE (cap split, spec §5): this PTB needs BOTH caps — the attestation cap
@@ -1775,7 +1769,7 @@ export async function recordBatchSettlementOnSui(input: {
         tx.object(SPLASH_COMPLIANCE_CONFIG_ID),
         tx.object(DEEPBOOK_POOL_ID),
         paymentVector,
-        tx.pure.u64(feeBps),
+        tx.pure.u64(custodyRateBps(paymentObjects.map((p) => p.amount))),
         tx.object('0x6'),
       ],
     });
@@ -1833,7 +1827,7 @@ export async function recordBatchSettlementOnSui(input: {
     `@${SPLASH_COMPLIANCE_CONFIG_ID}`,
     `@${DEEPBOOK_POOL_ID}`,
     'payments',
-    feeBps.toString(),
+    custodyRateBps(paymentObjects.map((p) => p.amount)).toString(),
     '@0x6',
     '--gas-budget',
     gasBudget,
@@ -1844,7 +1838,7 @@ export async function recordBatchSettlementOnSui(input: {
     package: SPLASH_PACKAGE_ID,
     module: 'settlement',
     function: 'settle_sui_batch',
-    feeBps,
+    rateBps: custodyRateBps(paymentObjects.map((p) => p.amount)),
     targetCurrency: input.targetCurrency,
     args: ptbArgs,
   });

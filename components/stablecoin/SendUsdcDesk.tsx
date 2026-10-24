@@ -27,6 +27,7 @@ import FundingPlanner from '@/components/stablecoin/FundingPlanner';
 import UsdyPreview from '@/components/stablecoin/UsdyPreview';
 import WalletActivity from '@/components/stablecoin/WalletActivity';
 import {
+  anchorFeeTerms,
   formatUsdc,
   parseUsdcMinor,
   quoteStablecoinTransfer,
@@ -852,7 +853,7 @@ function TransactionLegs({ quote }: { quote: Quote }) {
       // A fee leg only when there is a fee: stablecoin transfers are free, and
       // the audit-anchor fee (out of Splash) is off unless switched on.
       ...(BigInt(quote.feeMinor) > 0n
-        ? [{ to: 'Audit-anchor fee', address: null, amount: BigInt(quote.feeMinor), note: '0.02% (min 0.05, max 5 USDC), same transaction' }]
+        ? [{ to: 'Audit-anchor fee', address: null, amount: BigInt(quote.feeMinor), note: `${anchorFeeTerms()}, same transaction` }]
         : []),
     ];
   return (
@@ -919,7 +920,7 @@ function Readiness({
   const checks: Check[] = [
     mode === 'X402'
       ? { key: 'lane', label: 'x402 payments open', state: lane.x402.open ? 'ok' : 'todo', detail: lane.x402.open ? 'No Splash fee on x402.' : lane.x402.reason }
-      : { key: 'lane', label: 'Wallet transfers open', state: lane.lane.open ? 'ok' : 'todo', detail: lane.lane.open ? (lane.pricing?.anchorFeeOn ? 'Mainnet. Free to other Splash users; out of Splash, a 0.02% audit-anchor fee (min 0.05, max 5 USDC) is added on top.' : 'Mainnet. No Splash fee.') : lane.lane.reason },
+      : { key: 'lane', label: 'Wallet transfers open', state: lane.lane.open ? 'ok' : 'todo', detail: lane.lane.open ? (lane.pricing?.anchorFeeOn ? `Mainnet. Free to other Splash users; out of Splash, a ${anchorFeeTerms()} audit-anchor fee is added on top.` : 'Mainnet. No Splash fee.') : lane.lane.reason },
     {
       key: 'approval',
       label: lane.approval.style === 'WHATSAPP_PASSKEY' ? 'Approver reachable on WhatsApp' : 'An approver',

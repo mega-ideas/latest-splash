@@ -3,6 +3,12 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
 import type { ProposalExplain, SimulationResult, UnsignedProposal } from '@/lib/agent/types';
+import { buildFeeQuote } from '@/lib/fees/quote';
+import { FEE_KIND, LAUNCH_SCHEDULE } from '@/lib/fees/schedule';
+
+/** The preview's Splash fee: the launch schedule's bank-payout fee on the amount (A1 §2.2), never a typed rate. */
+const previewFee = (principalMicro: bigint) =>
+  buildFeeQuote({ kind: FEE_KIND.BANK_PAYOUT, principalMinor: principalMicro, state: { feesOn: true, schedule: LAUNCH_SCHEDULE } }).splashFee.minor;
 import { getOxwalProposalStore } from '@/lib/agent/oxwal';
 import { resolveAuthorityForSession, UnauthorizedError } from '@/lib/auth/authority';
 import { ensureProposalStoreHydrated } from '@/lib/queue/proposal-persistence';
@@ -29,7 +35,7 @@ const baseExplain: ProposalExplain = {
   financialImpact: {
     amountOut: BigInt(420_000_000_000),
     currencyOut: 'USD',
-    feeBps: 18,
+    splashFeeMinor: previewFee(BigInt(420_000_000_000)),
   },
   evidence: [
     { source: 'COUNTERPARTY', ref: 'cp_acme_ph', observedAt: generatedAt.toISOString(), trusted: true },
@@ -83,7 +89,7 @@ const demoProposals: UnsignedProposal[] = [
       recommendation: 'Approve dual-control supplier payout',
       // Micro units, like a real proposal. These were display-scale, which is
       // what hid the formatting bug above.
-      financialImpact: { amountOut: BigInt(1_250_000_000_000), currencyOut: 'USD', feeBps: 14 },
+      financialImpact: { amountOut: BigInt(1_250_000_000_000), currencyOut: 'USD', splashFeeMinor: previewFee(BigInt(1_250_000_000_000)) },
       requiredApprovers: 2,
       risk: 'MEDIUM',
       confidence: 0.86,
@@ -95,7 +101,7 @@ const demoProposals: UnsignedProposal[] = [
     expiresAt: minutesFromNow(11),
     explain: {
       recommendation: 'Convert corridor float before quote expiry',
-      financialImpact: { amountIn: BigInt(300_000_000_000), amountOut: BigInt(299_240_000_000), currencyIn: 'USD', currencyOut: 'USD', feeBps: 9 },
+      financialImpact: { amountIn: BigInt(300_000_000_000), amountOut: BigInt(299_240_000_000), currencyIn: 'USD', currencyOut: 'USD', splashFeeMinor: previewFee(BigInt(300_000_000_000)) },
       requiredApprovers: 1,
       risk: 'LOW',
     },

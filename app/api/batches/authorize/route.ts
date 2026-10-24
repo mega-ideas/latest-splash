@@ -289,7 +289,9 @@ export async function POST(request: Request) {
         batchId: batch.id,
         rows: acceptedRows,
         totalUsd: total,
-        // Per-corridor fee — contract enforces fee_bps ≤ MAX_FEE_BPS (200).
+        // The v1 testnet custody batch is handed the A1 bank-payout rate for
+        // its rows (lib/server/sui-settlement.ts custodyRateBps); a corridor
+        // carries no fee.
         targetCurrency,
       });
       // Batch may run in labelled-simulate mode (SUI_BATCH_SETTLEMENT_MODE=simulate):

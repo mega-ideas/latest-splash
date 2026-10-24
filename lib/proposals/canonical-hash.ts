@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 
 import type { ProposalFxRate, UnsignedProposal } from '../agent/types.ts';
+import { RETIRED_FLAT_RATE_FIELD, retiredFlatRate } from '../fees/legacy.ts';
 
 /**
  * Track A §1.4 — canonical approval hash.
@@ -13,7 +14,19 @@ import type { ProposalFxRate, UnsignedProposal } from '../agent/types.ts';
  * recomputes from the stored row and compares before accepting.
  */
 
-export interface ApprovalCanon {
+/**
+ * The canon, in one of two shapes. A proposal that carries Splash's fee
+ * (`splashFeeMinor`, A1 §4) hashes it under that name. Every other proposal,
+ * among them every one stored before A1, hashes exactly the fields it always
+ * did, the retired flat rate included (lib/fees/legacy.ts), so a stored
+ * approval still verifies.
+ */
+export type ApprovalCanon = ApprovalCanonFields & (
+  | { splashFeeMinor: string }
+  | { [RETIRED_FLAT_RATE_FIELD]: string }
+);
+
+interface ApprovalCanonFields {
   proposalId: string;
   proposalVersion: number;
   orgId: string;
@@ -25,7 +38,6 @@ export interface ApprovalCanon {
   currencyOut: string;
   routeId: string;
   quoteId: string;
-  feeBps: string;
   expiresAt: string;
 }
 
@@ -56,9 +68,11 @@ export function canonFromProposal(proposal: UnsignedProposal): ApprovalCanon {
     currencyOut: impact.currencyOut ?? '',
     routeId: proposal.corridor ?? '',
     quoteId: impact.fxRate ? `${fxQuoteRef(impact.fxRate)}@${impact.fxRate.observedAt}` : '',
-    feeBps: impact.feeBps?.toString() ?? '',
+    ...(impact.splashFeeMinor !== undefined
+      ? { splashFeeMinor: impact.splashFeeMinor.toString() }
+      : { [RETIRED_FLAT_RATE_FIELD]: retiredFlatRate(impact)?.toString() ?? '' }),
     expiresAt: proposal.expiresAt,
-  };
+  } as ApprovalCanon;
 }
 
 export function canonicalApprovalHash(canon: ApprovalCanon): string {

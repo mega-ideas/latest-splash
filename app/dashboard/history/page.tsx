@@ -22,7 +22,7 @@ import ExplorerLinks from '@/components/dashboard/ExplorerLinks';
 import LocalTime from '@/components/LocalTime';
 import StatusBadge from '@/components/StatusBadge';
 import type { TransferIntentRecord, TransferIntentState } from '@/lib/server/operations';
-import { getCorridorFeeBps } from '@/lib/fx/corridors';
+import { formatUsdc } from '@/lib/fees/copy';
 
 type FilterType = 'all' | 'pending' | 'successful' | 'failed';
 
@@ -240,14 +240,15 @@ export default function HistoryPage() {
     const body = (await response.json()) as ApiResponse;
     const rows = body.items.map((record) => {
       const grossUsd = Number(record.sourceAmountUsd) || 0;
-      const feeUsd = record.deliveryTier === 'STORED_BALANCE'
-        ? 0
-        : grossUsd * (getCorridorFeeBps(record.targetCurrency) / 10_000) + 4.5;
+      // Splash's fee as it was charged, from the transfer's own record
+      // (A1 §4). A transfer from before A1 carries none; its cell is blank
+      // rather than an estimate.
       return {
         date: record.createdAt,
         counterparty: record.recipientName,
         grossUsd: Number(grossUsd.toFixed(2)),
-        feeUsd: Number(feeUsd.toFixed(2)),
+        splashFeeUsdc: record.fees ? formatUsdc(BigInt(record.fees.splashFee.minor)) : '',
+        totalDebitedUsdc: record.fees ? formatUsdc(BigInt(record.fees.totalDebitMinor)) : '',
         fxRate: Number(record.exchangeRate ?? 0),
         targetAmount: Number(record.targetAmount) || 0,
         reference: record.invoiceId ?? record.id,

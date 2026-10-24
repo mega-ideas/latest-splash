@@ -10,7 +10,6 @@ import { copilotModel } from '../ai/model.ts';
  * authorize execution. Never invents PII/account numbers.
  */
 
-import { getCorridorFeeBps } from '@/lib/fx/corridors';
 import { custodyPhaseEnabled } from '@/lib/server/custody-phase';
 import { recallForOrg, rememberForOrg, type RecalledMemory } from '@/lib/server/memwal';
 import { getTreasuryRate } from '@/lib/server/usdy';
@@ -166,12 +165,12 @@ export async function optimizeBatch(
   // row. Approximate the saved spread as ~6 bps per row collapsed into a group.
   const SAVED_BPS_PER_COLLAPSED_ROW = Number(process.env.BATCH_SAVED_BPS_PER_ROW ?? 6);
   let savings = 0;
-  for (const [currency, idxs] of Object.entries(groups)) {
+  for (const idxs of Object.values(groups)) {
     if (idxs.length < 2) continue;
-    const feeBps = getCorridorFeeBps(currency);
     const groupTotal = idxs.reduce((s, i) => s + rows[i].amount, 0);
-    // collapsing (n-1) rows of spread; scaled by the corridor's fee weight.
-    savings += (groupTotal * (SAVED_BPS_PER_COLLAPSED_ROW / 10_000)) * ((idxs.length - 1) / idxs.length) * Math.max(0.5, feeBps / 100);
+    // Collapsing (n-1) rows of spread. It used to be scaled by the corridor's
+    // flat fee; a corridor carries no fee any more (A1 §2.8).
+    savings += (groupTotal * (SAVED_BPS_PER_COLLAPSED_ROW / 10_000)) * ((idxs.length - 1) / idxs.length);
   }
   return {
     suggestedGrouping: Object.values(groups),

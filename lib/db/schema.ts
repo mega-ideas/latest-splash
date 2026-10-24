@@ -1170,7 +1170,9 @@ export const rateHolds = pgTable('rate_holds', {
   corridorCurrency: text('corridor_currency').notNull(),
   /** A ratio, not money: exact decimal, string in JS. */
   rate: numeric('rate').notNull(),
-  feeBps: integer('fee_bps').notNull(),
+  /** Retired with the flat fee (A1 §2.8): a hold carries no fee, and every
+   *  new row writes 0. The column stays so no migration rewrites old rows. */
+  retiredFlatFeeRate: integer('fee_bps').notNull(),
   holdUntil: timestamp('hold_until', { withTimezone: true }).notNull(),
   scheduledExecuteAt: timestamp('scheduled_execute_at', { withTimezone: true }),
   alertRule: jsonb('alert_rule'),

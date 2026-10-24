@@ -84,8 +84,8 @@ export function explorerTxUrl(network: SuiNetwork, digest: string): string {
  *   x402                         no Splash fee (the seller sets the price).
  *
  * Network gas is separate, and on a wallet transfer there is none: see Gas
- * below. Local-currency payouts are priced elsewhere (lib/fx/corridors.ts,
- * 0.70%).
+ * below. Local-currency payouts are priced elsewhere: Splash's fee schedule
+ * (lib/fees/, Amendment A1), computed on chain from the kind and the amount.
  *
  * A fee, when there is one, is charged ON TOP: the recipient receives exactly
  * the amount the business entered, and the business's wallet is debited
@@ -98,6 +98,15 @@ export const ANCHOR_FEE_BPS = 2;
 export const ANCHOR_FEE_MIN_MINOR = 50_000n;
 /** 5 USDC: keeps large treasury moves cheap. */
 export const ANCHOR_FEE_CAP_MINOR = 5_000_000n;
+
+/**
+ * The audit-anchor fee's terms in words, from the three constants above, so
+ * no screen types them in: "0.02% (min 0.05, max 5.00 USDC)".
+ */
+export function anchorFeeTerms(): string {
+  const pct = `${Math.trunc(ANCHOR_FEE_BPS / 100)}.${String(ANCHOR_FEE_BPS % 100).padStart(2, '0')}%`;
+  return `${pct} (min ${formatUsdc(ANCHOR_FEE_MIN_MINOR)}, max ${formatUsdc(ANCHOR_FEE_CAP_MINOR)} USDC)`;
+}
 
 /** Where the USDC goes: to a Splash user's wallet, or out of Splash. */
 export type StablecoinDestination = 'SPLASH' | 'EXTERNAL';

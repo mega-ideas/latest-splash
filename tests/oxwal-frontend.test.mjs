@@ -33,7 +33,7 @@ function sampleProposal(overrides = {}) {
       financialImpact: {
         amountOut: '5000000000',
         currencyOut: 'PHP',
-        feeBps: 80,
+        splashFeeMinor: 2_000_000n,
         fxRate: { value: '56.4200', pythPriceId: 'pyth_usdc_usd', observedAt: now },
         nettingSaved: '125000',
       },
@@ -56,7 +56,7 @@ test('ActionCard model exposes full proposal anatomy and trust treatment', () =>
   assert.deepEqual(model.impactRows.map((row) => row.label), [
     'Amount in',
     'Amount out',
-    'Fee',
+    'Splash fee',
     'FX',
     'Yield delta',
     'Netting saved',

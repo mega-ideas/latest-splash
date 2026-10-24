@@ -27,6 +27,10 @@ import {
 import { cn } from '../../../lib/utils';
 import MoneyPathPanel from '@/components/compliance/MoneyPathPanel';
 import LocalTime from '@/components/LocalTime';
+import { buildFeeQuote } from '@/lib/fees/quote';
+import { FEE_KIND, LAUNCH_SCHEDULE } from '@/lib/fees/schedule';
+import { usePublishedFees } from '@/lib/fees/use-published-pricing';
+import { formatMinor } from '@/lib/money';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -281,8 +285,15 @@ export default function TreasuryPage() {
   }
 
   const previewSource = validAmount ? Math.max(0, sourceBalance - parsedAmount) : null;
-  const simulationPrincipal = 5_000;
-  const simulationFee = simulationPrincipal * 0.014 + 4.5;
+  // The simulation's fee is Splash's fee on a 5,000 USDC payout to a bank,
+  // from the schedule in force (the launch schedule until it has loaded):
+  // no flat rate and no fixed fee (A1 §2.8).
+  const publishedFees = usePublishedFees();
+  const simulationPrincipalMicro = 5_000_000_000n;
+  const simulationFee = Number(formatMinor(
+    buildFeeQuote({ kind: FEE_KIND.BANK_PAYOUT, principalMinor: simulationPrincipalMicro, state: { feesOn: true, schedule: publishedFees?.schedule ?? LAUNCH_SCHEDULE } }).splashFee.minor,
+    6,
+  ));
   const feesDeleted = simulationFee * (nettingRatio / 100);
   const feesRelocated = simulationFee - feesDeleted;
 

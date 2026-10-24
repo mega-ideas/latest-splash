@@ -287,25 +287,7 @@ export function feeRateLiterals(root, rates = splashRates(root)) {
  * `feeRatesInLine` writes it, with how many there are. §2.8 empties this
  * list; nothing is ever added to it.
  */
-export const PENDING_2_8 = Object.freeze([
-  // Demo numbers: a "1.5% headline" fee estimate.
-  { file: 'app/admin/(console)/transactions/page.tsx', rate: '*0.015', count: 1 },
-  { file: 'app/admin/(console)/transactions/page.tsx', rate: '1.5%', count: 1 },
-  // "15–30 bps cheaper FX": an FX-spread claim, not a fee, but in Splash's
-  // own rates; §2.8 removes the same claim from Zeke's reply.
-  { file: 'app/dashboard/batch/page.tsx', rate: '15–30bps', count: 1 },
-  { file: 'app/dashboard/batch/page.tsx', rate: '*0.014', count: 1 },
-  { file: 'app/dashboard/treasury/page.tsx', rate: '*0.014', count: 1 },
-  // Seed and demo data.
-  { file: 'app/queue/page.tsx', rate: 'feeBps=18', count: 1 },
-  { file: 'app/queue/page.tsx', rate: 'feeBps=14', count: 1 },
-  { file: 'app/queue/page.tsx', rate: 'feeBps=9', count: 1 },
-  // The flat 0.70%, and the comparison table beside it.
-  { file: 'components/funding/FundingSelector.tsx', rate: '0.70%', count: 1 },
-  { file: 'components/transfer/StepDelivery.tsx', rate: '0.00%', count: 1 },
-  // The first fee design's audit-anchor fee, 0.02% (min 0.05, max 5 USDC).
-  { file: 'components/stablecoin/SendUsdcDesk.tsx', rate: '0.02%', count: 2 },
-]);
+export const PENDING_2_8 = Object.freeze([]);
 
 export function checkFeeRates(root, pending = PENDING_2_8) {
   let found;

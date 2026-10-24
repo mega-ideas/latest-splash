@@ -277,8 +277,9 @@ export type RateHold = {
    *  would have merged two tenants' holds back together. */
   orgId?: string;
   corridorCurrency: string;
+  /** The exchange rate held. A hold carries no fee: Splash's fee is the
+   *  schedule's on the payment it is used for (A1 §2.8). */
   rate: string;
-  feeBps: number;
   holdUntil: string;
   scheduledExecuteAt?: string;
   alertRule?: { direction: 'STRENGTHENS_PAST' | 'WEAKENS_PAST'; threshold: string };
@@ -996,7 +997,7 @@ function seedDemoData() {
   });
   Object.assign(invoice, { transferIntentId: transfer.id });
   createLedgerEntry({ accountId: cebu.id, direction: 'CREDIT', amountUsdcMicro: 5_000_000_000n, refType: 'SEED', refId: 'demo_seed', demo: true });
-  const hold = buildRateHold({ corridorCurrency: 'PHP', rate: '56.5', feeBps: 80, demo: true });
+  const hold = buildRateHold({ corridorCurrency: 'PHP', rate: '56.5', demo: true });
   operations.rateHolds.set(hold.id, hold);
 }
 

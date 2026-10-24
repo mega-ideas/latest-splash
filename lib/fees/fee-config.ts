@@ -389,7 +389,22 @@ function configuredCache(): FeeConfigCache {
 
 /** The live FeeConfig named by SPLASH_FEE_CONFIG_ID. Throws FeeConfigUnavailableError. */
 export function getFeeConfig(): Promise<FeeConfigState> {
-  return configuredCache().get();
+  return configuredCache().get().then((cfg) => {
+    lastReadSchedule = cfg.schedule;
+    return cfg;
+  });
+}
+
+/** The schedule of the last FeeConfig this process read, for copy that cannot wait for a read. */
+let lastReadSchedule: FeeSchedule | null = null;
+
+/**
+ * The schedule copy renders from when it cannot await a read (Zeke's canned
+ * answers): the last live FeeConfig this process read, else the launch
+ * schedule. A quote never uses it.
+ */
+export function lastPublishedFeeSchedule(): FeeSchedule {
+  return lastReadSchedule ?? LAUNCH_SCHEDULE;
 }
 
 /** For the event listener: pass every event type seen; a FeeScheduleApplied

@@ -8,7 +8,6 @@ type RateHold = {
   id: string;
   corridorCurrency: string;
   rate: string;
-  feeBps: number;
   holdUntil: string;
   state: 'ACTIVE' | 'EXECUTED' | 'EXPIRED' | 'CANCELLED';
   demo?: boolean;

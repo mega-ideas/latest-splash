@@ -175,7 +175,7 @@ export const envSchema = z.object({
   SPLASH_PEG_USDC_DEVIATION_PPM: int(0),
   SPLASH_PEG_USDT_DEVIATION_PPM: int(0),
 
-  /* Settlement. lib/server/sui-settlement.ts, lib/sui/gas.ts. */
+  /* Settlement. lib/server/sui-settlement.ts. */
   SUI_SETTLEMENT_MODE: withDefault(z.enum(['auto', 'live', 'simulate']), 'auto'),
   SUI_BATCH_SETTLEMENT_MODE: optional,
   /** Raw operator keys: development and testnet only. Production refuses
