@@ -12,9 +12,12 @@
 ///     the network, whatever it declared.
 ///   * partner deposit addresses: the payout partners' fixed deposit
 ///     addresses, managed by Splash's ops capability (`OpsCap`). A change
-///     takes effect at once and emits an event. A payment to one is a bank
-///     payout whatever it declared, so the bank fee cannot be dodged by
-///     declaring a wallet.
+///     takes effect at once and emits an event. `derive_kind` classifies a
+///     payment to one as a bank payout whatever it declared, so the bank fee
+///     cannot be dodged by declaring a wallet; and every settle path refuses
+///     such a payment unless it was declared a bank payout
+///     (`assert_kind_fits`), so it cannot skip the bank floor and the
+///     beneficiary either.
 ///
 /// The registries only classify. They hold no address any payment is sent
 /// to: every settle path pays the intent's own recipient, so the worst a
@@ -35,7 +38,11 @@ use sui::table::{Self, Table};
 /// The kind the payment declares does not fit where it goes: a CCTP payment
 /// that is not cross-chain, a bank payout to an address that is not a partner
 /// deposit address, a Splash-business payment to an address that is not a
-/// business wallet, or a cross-chain kind outside CCTP.
+/// business wallet, or a cross-chain kind outside CCTP; or, at settlement,
+/// the derived kind differs from the declared one other than a wallet or
+/// exchange payment to a business wallet (`assert_kind_fits`): a wallet or
+/// exchange payment to a partner deposit address, a bank payout to a
+/// business wallet, a Splash-business payment to a partner deposit address.
 const E_KIND_MISMATCH: u64 = 1400;
 /// The address is already a partner deposit address.
 const E_ALREADY_A_PARTNER_ADDRESS: u64 = 1401;
@@ -94,6 +101,22 @@ public fun derive_kind(reg: &Registry, recipient: address, declared: u8, via_cct
     if (is_partner_address(reg, recipient)) return fee_config::kind_bank_payout();
     assert!(declared == fee_config::kind_wallet() || declared == fee_config::kind_exchange(), E_KIND_MISMATCH);
     declared
+}
+
+/// A settle path charges only a kind that fits what was declared (Sky, 24
+/// Oct): the derived kind must be the declared kind, with one documented
+/// exception, a declared wallet or exchange payment to a registered business
+/// wallet, which `derive_kind` makes a free Splash-business payment.
+/// Anything else aborts E_KIND_MISMATCH. In particular a declared wallet or
+/// exchange payment to a partner deposit address, which `derive_kind`
+/// classifies as a bank payout, is refused rather than settled, so it can
+/// never skip the bank payout's floor and beneficiary, which go with the
+/// declared kind. splash_spend refuses the same cases with its own codes.
+public(package) fun assert_kind_fits(declared: u8, derived: u8) {
+    if (derived == declared) return;
+    let to_business = derived == fee_config::kind_splash_business();
+    let wallet_or_exchange = declared == fee_config::kind_wallet() || declared == fee_config::kind_exchange();
+    assert!(to_business && wallet_or_exchange, E_KIND_MISMATCH);
 }
 
 // ─── Partner deposit addresses: Splash ops, immediate, evented ─────────────

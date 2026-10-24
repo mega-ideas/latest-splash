@@ -811,6 +811,15 @@ fun settle_for_account<T>(
 /// and the app's tag on the app path; `via_cctp` is the cross-chain path.
 /// The business a discount is looked up for is the account the intent is
 /// bound to, which `settle_for_account` checks is this one.
+///
+/// The derived kind must fit what was declared, and the intent's own kind
+/// (`address_registry::assert_kind_fits`): equal to it, or a free
+/// Splash-business payment declared a wallet or an exchange. On the owners'
+/// paths the two are the same; on the app path both the app's tag and the
+/// intent's kind must fit. So a payment to a partner deposit address is
+/// always an intent opened as a bank payout, which carries a beneficiary
+/// commitment and met the bank floor at opening, and meets it again in
+/// `settle_for_account`.
 fun kind_and_fee(
     intent: &PaymentIntent,
     account: &BusinessAccount,
@@ -821,6 +830,8 @@ fun kind_and_fee(
     max_fee: u64,
 ): (u8, u64) {
     let kind = address_registry::derive_kind(registry, intent.recipient, declared, via_cctp);
+    address_registry::assert_kind_fits(declared, kind);
+    if (declared != intent.kind) address_registry::assert_kind_fits(intent.kind, kind);
     let fee = fee_config::splash_fee(fee_cfg, object::id(account), kind, intent.amount_usd);
     assert!(fee <= max_fee, E_FEE_ABOVE_MAX);
     (kind, fee)
@@ -834,8 +845,8 @@ fun assert_covers(paid: u64, principal: u64, fee: u64) {
 /// Hand the principal to the recipient, in the form the recipient can use,
 /// by the DERIVED kind.
 ///
-/// Another Splash business (kind 0: a registered business wallet, whatever
-/// the intent declared) is credited to its address balance, where its own
+/// Another Splash business (kind 0: a registered business wallet, declared a
+/// Splash business, a wallet or an exchange) is credited to its address balance, where its own
 /// spending rules draw from. A wallet, an exchange or a partner deposit
 /// address (kinds 1, 2 and 4) receives a coin object, which every deposit
 /// system recognises; address-balance deposit detection is not confirmed for

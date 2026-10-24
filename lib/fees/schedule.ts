@@ -13,6 +13,10 @@
  * `address_registry::derive_kind`. Both are held to the chain by the same
  * vectors (lib/fees/vectors.json, tests/fee-schedule.test.mjs, and the Move
  * tests scripts/gen-fee-tests.mjs generates from that file).
+ * `settlementKind` adds what every settle path then refuses: a derived kind
+ * that does not fit the declared one (`address_registry::assert_kind_fits`);
+ * a quote should use it, since a vector's kind can be one the settle paths
+ * refuse to pay (a partner address declared WALLET).
  *
  * The number shown to a payer is a quote, not the charge: the chain computes
  * the fee itself at settlement and checks it against the `max_fee` the payer
@@ -226,6 +230,29 @@ export function deriveKind({
     throw new FeeKindMismatchError(`kind ${declared} needs a recipient the registries classify as it; this one is a plain address (WALLET or EXCHANGE)`);
   }
   return declared;
+}
+
+/**
+ * The kind a settle path charges, and so the kind to quote: `deriveKind`,
+ * then `address_registry::assert_kind_fits` (Sky, 24 Oct). The derived kind
+ * must be the declared one, except a declared WALLET or EXCHANGE to a
+ * business wallet, which is a free SPLASH_BUSINESS payment. Anything else
+ * throws as the chain aborts (EKindMismatch): in particular a partner
+ * deposit address is only ever paid as a declared BANK_PAYOUT, never as a
+ * WALLET or EXCHANGE that would skip the bank floor and the beneficiary.
+ */
+export function settlementKind(args: {
+  declared: FeeKind | number;
+  viaCctp: boolean;
+  recipientIsBusinessWallet: boolean;
+  recipientIsPartnerAddress: boolean;
+}): FeeKind {
+  const derived = deriveKind(args);
+  const { declared } = args;
+  if (derived === declared) return derived;
+  const toBusiness = derived === FEE_KIND.SPLASH_BUSINESS;
+  if (toBusiness && (declared === FEE_KIND.WALLET || declared === FEE_KIND.EXCHANGE)) return derived;
+  throw new FeeKindMismatchError(`a payment declared kind ${declared} goes to a recipient the registries classify as kind ${derived}; open it as kind ${derived}`);
 }
 
 // ─── Reading the on-chain FeeConfig ─────────────────────────────────────────
