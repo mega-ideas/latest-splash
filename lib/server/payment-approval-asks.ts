@@ -48,7 +48,7 @@ import { randomUUID } from 'node:crypto';
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { normalizeStructTag, normalizeSuiAddress } from '@mysten/sui/utils';
 
-import { walletApprovalAsks, walletSigningRequests } from '../db/schema.ts';
+import { memberships, walletApprovalAsks, walletSigningRequests } from '../db/schema.ts';
 import { MAX_INTENT_LIFETIME_MS, V2_KIND } from './sui-v2-builders.ts';
 import { memberRole, recordAuthorityEvent } from './wallet-authority.ts';
 import type { IntentState, WalletContext, WalletMembers } from './business-wallet.ts';
@@ -266,7 +266,7 @@ async function draftChecks(policy: (() => Promise<AskPolicy | null>) | undefined
  * own passkey addresses, read by the caller from Postgres.
  */
 export async function askOwnersToApprove(
-  deps: { db: DrizzleDb; ctx: WalletContext; now?: Clock; policy?: () => Promise<AskPolicy | null> },
+  deps: { db: DrizzleDb; ctx: WalletContext; now?: Clock; policy?: () => Promise<AskPolicy | null>; notify?: AskNotifier },
   input: { orgId: string; userId: string; intentId?: string; draft?: AskDraft; contentHash: string; walrusBlobId: string; requesterAddresses: string[]; note?: string | null },
 ): Promise<{ ok: true; ask: ApprovalAsk } | AskFailure> {
   const now = (deps.now ?? deps.ctx.signing.now ?? (() => new Date()))();
@@ -283,7 +283,7 @@ export async function askOwnersToApprove(
     const shown = readDraft(input.draft, now);
     if ('ok' in shown) return shown;
     shown.checks = await draftChecks(deps.policy, shown, input.requesterAddresses);
-    return storeAsk(deps.db, { orgId: input.orgId, userId: input.userId, shown, note, contentHash, blob, now });
+    return storeAsk(deps.db, deps.notify, { orgId: input.orgId, userId: input.userId, shown, note, contentHash, blob, now });
   }
   if (!deps.ctx.readIntent) return fail(503, 'no_chain', 'the payment cannot be read from the chain');
 
@@ -304,7 +304,7 @@ export async function askOwnersToApprove(
   }
   if (intent.status !== 0) return fail(409, 'intent_not_open', 'this payment is no longer waiting to be paid');
   if (intent.expiresAtMs <= BigInt(now.getTime())) return fail(409, 'intent_expired', 'this payment has expired');
-  if (normalizeStructTag(intent.asset) !== normalizeStructTag(deps.ctx.chain.usdcType)) return fail(400, 'wrong_asset', 'a payment may move USDC only (D6)');
+  if (normalizeStructTag(intent.asset) !== normalizeStructTag(deps.ctx.chain.usdcType)) return fail(400, 'wrong_asset', 'a payment may move USDC only');
   if (intent.kind === V2_KIND.CROSS_CHAIN) return fail(400, 'cross_chain_not_built', 'a cross-chain payment is paid through a bridge adapter, which is not registered yet');
 
   const shown: AskIntent = {
@@ -318,10 +318,37 @@ export async function askOwnersToApprove(
     fxRateUsdLocal: intent.fxRateUsdLocal.toString(),
     expiresAtMs: intent.expiresAtMs.toString(),
   };
-  return storeAsk(deps.db, { orgId: input.orgId, userId: input.userId, shown, note, contentHash, blob, now });
+  return storeAsk(deps.db, deps.notify, { orgId: input.orgId, userId: input.userId, shown, note, contentHash, blob, now });
+}
+
+/**
+ * Tells the owners an ask is waiting (the live route sends it on their
+ * approver channels). Best effort: the ask stands whatever the channel does.
+ */
+export type AskNotifier = (n: { orgId: string; ask: ApprovalAsk; ownerUserIds: string[] }) => Promise<void>;
+
+async function ownersBut(db: DrizzleDb, orgId: string, userId: string): Promise<string[]> {
+  const rows = await db.select({ userId: memberships.userId }).from(memberships).where(and(eq(memberships.orgId, orgId), eq(memberships.role, 'admin')));
+  return rows.map((r) => r.userId).filter((u) => u !== userId).sort();
 }
 
 async function storeAsk(
+  db: DrizzleDb,
+  notify: AskNotifier | undefined,
+  a: { orgId: string; userId: string; shown: AskIntent; note: string | null; contentHash: string; blob: string; now: Date },
+): Promise<{ ok: true; ask: ApprovalAsk } | AskFailure> {
+  const stored = await insertAsk(db, a);
+  if (stored.ok && notify) {
+    try {
+      await notify({ orgId: a.orgId, ask: stored.ask, ownerUserIds: await ownersBut(db, a.orgId, a.userId) });
+    } catch {
+      // The ask is in the owners' inbox in the app either way.
+    }
+  }
+  return stored;
+}
+
+async function insertAsk(
   db: DrizzleDb,
   a: { orgId: string; userId: string; shown: AskIntent; note: string | null; contentHash: string; blob: string; now: Date },
 ): Promise<{ ok: true; ask: ApprovalAsk } | AskFailure> {

@@ -14,9 +14,10 @@ A **spending rule** is two things on chain:
    one staff member's address, bound to `splash_spend::SPLASH_SPEND`, named
    `splash-policy:<policy id>` (64 hex digits). It carries the rule's
    **recurring cap** (per day: `periodic_rate_limit(86_400_000, cap)`, a
-   24-hour window from the first charge; or per calendar month:
-   `monthly_rate_limit(cap)`, renewing on the first charge's day at 00:00 UTC,
-   clamped to short months), its **expiry** (required here), optionally a
+   24-hour window from the first charge; or per month:
+   `monthly_rate_limit(cap)`, a month from the first charge, renewing on that
+   day at 00:00 UTC, clamped to short months, not on the 1st; the index shows
+   the next renewal as `window.endsAtMs`), its **expiry** (required here), optionally a
    start and a **lifetime cap**. The allowance charges what each payment
    withdraws: the principal **plus the fee bound** the spender signed for
    (A1 §2.6, at most 1% of the principal). The unused part of the fee goes

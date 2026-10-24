@@ -53,7 +53,7 @@ export const RECIPIENT_TAG = Object.freeze({ WALLET: 1, EXCHANGE: 2 });
 /** Every destination a policy verifies is on Sui (CCTP domain 8). */
 export const SUI_DOMAIN = 8;
 
-/** A rule's recurring cap: per day (a fixed 24-hour window) or per calendar month (UTC). */
+/** A rule's recurring cap: per day (24 hours from the first payment) or per month (from the first payment, renewing on that day at 00:00 UTC). */
 export type RuleCap = { period: 'day'; limitMinor: bigint } | { period: 'month'; limitMinor: bigint };
 
 export type RuleOp =

@@ -20,7 +20,7 @@ import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { normalizeSuiAddress } from '@mysten/sui/utils';
 
 import { walletOwnershipProofs } from '../db/schema.ts';
-import type { DrizzleDb } from './wallet-signing-store.ts';
+import { closeSigningRequest, listSigningRequests, type DrizzleDb } from './wallet-signing-store.ts';
 
 export interface OwnershipGate {
   /** Which of these addresses the business has a live ownership proof for. */
@@ -66,12 +66,30 @@ export async function recordOwnershipProof(
     });
 }
 
-/** Withdraw a proof: the address may no longer be tagged WALLET (already-verified recipients stay until the owners remove them). */
+/**
+ * Withdraw a proof: the address may no longer be tagged WALLET (already-
+ * verified recipients stay until the owners remove them). A spending-rule
+ * request still collecting signatures that would tag it WALLET was allowed
+ * on the proof when it opened; it is cancelled now, so the quorum cannot
+ * sign a tag the proof no longer backs.
+ */
 export async function revokeOwnershipProof(db: DrizzleDb, input: { orgId: string; address: string; now?: Date }): Promise<boolean> {
+  const now = input.now ?? new Date();
+  const address = normalizeSuiAddress(input.address);
   const done = await db
     .update(walletOwnershipProofs)
-    .set({ revokedAt: input.now ?? new Date() })
-    .where(and(eq(walletOwnershipProofs.orgId, input.orgId), eq(walletOwnershipProofs.address, normalizeSuiAddress(input.address)), isNull(walletOwnershipProofs.revokedAt)))
+    .set({ revokedAt: now })
+    .where(and(eq(walletOwnershipProofs.orgId, input.orgId), eq(walletOwnershipProofs.address, address), isNull(walletOwnershipProofs.revokedAt)))
     .returning({ address: walletOwnershipProofs.address });
+  const waiting = await listSigningRequests(db, input.orgId, ['collecting']);
+  for (const r of waiting) {
+    if (r.purpose !== 'spend_rule') continue;
+    const actions = (r.summary as { description?: { actions?: Array<{ type: string; address?: string; kind?: number }> } } | null)?.description?.actions ?? [];
+    if (!actions.some((a) => a.type === 'verify_recipient' && a.kind === WALLET_TAG && a.address && normalizeSuiAddress(a.address) === address)) continue;
+    await closeSigningRequest(db, { orgId: input.orgId, id: r.id, status: 'cancelled', from: ['collecting'], error: 'the ownership proof behind a WALLET tag in it was withdrawn', now });
+  }
   return done.length > 0;
 }
+
+/** spend_policy's WALLET tag (KIND_WALLET). */
+const WALLET_TAG = 1;

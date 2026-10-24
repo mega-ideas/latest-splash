@@ -17,9 +17,11 @@
  *              (`spend_policy`). One per generation; a rotation needs a new
  *              one, and the rules are reissued under it.
  *   issue      add_spender (STAFF, their per-payment maximum) and
- *              propose_for_app + accept: the cap per day (a 24-hour window)
- *              or per calendar month (UTC), an expiry, optionally a start and
- *              a lifetime cap (`spend_rule`).
+ *              propose_for_app + accept: the cap per day (24 hours from the
+ *              first payment) or per month (a month from the first payment,
+ *              renewing on that day at 00:00 UTC; the index shows the next
+ *              renewal), an expiry, optionally a start and a lifetime cap
+ *              (`spend_rule`).
  *   change     revoke the rule's allowance and issue a new one in the same
  *              transaction; a new per-payment maximum also removes and
  *              re-adds the spender, which retires outstanding approvals.

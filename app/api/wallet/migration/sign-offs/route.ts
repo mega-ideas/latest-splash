@@ -1,7 +1,7 @@
 import { readJsonBody } from '@/lib/server/http';
 import { prepareMigrationSignOff } from '@/lib/server/wallet-authority';
 import { orgMemberWalletAddresses } from '@/lib/server/wallet-deps';
-import { asResponse, refusal, walletRoute } from '@/lib/server/wallet-route';
+import { asResponse, limitWalletRequests, refusal, walletRoute } from '@/lib/server/wallet-route';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,6 +16,9 @@ export const dynamic = 'force-dynamic';
 export async function POST(request: Request) {
   const gate = await walletRoute(request);
   if (gate.response) return gate.response;
+  // Each sign-off writes a row and an append-only event.
+  const limited = await limitWalletRequests(gate.route);
+  if (limited) return limited;
   const { orgId, authority, ctx, db } = gate.route;
   const body = await readJsonBody(request);
   const memberUserId = String(body.memberUserId ?? '').trim();

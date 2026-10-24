@@ -22,6 +22,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const gate = await walletRoute(request);
   if (gate.response) return gate.response;
   const route = gate.route;
+  // Every action writes to the append-only trail.
+  const limited = await limitWalletRequests(route);
+  if (limited) return limited;
   const { orgId, authority, ctx, db } = route;
   const { id } = await params;
   const body = await readJsonBody(request);
@@ -33,8 +36,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   }
   if (action !== 'accept') return refusal(400, 'Say whether you accept, decline or withdraw this.');
 
-  const limited = await limitWalletRequests(route);
-  if (limited) return limited;
   const maxFeeMinor = bigintField(body.maxFeeMinor);
   const settleByMs = bigintField(body.settleByMs);
   if (maxFeeMinor === null || settleByMs === null) return refusal(400, 'The fee shown and the quote deadline are needed.');

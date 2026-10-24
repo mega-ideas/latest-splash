@@ -584,7 +584,7 @@ export async function requestOpenIntentPayment(
   const now = BigInt(((ctx.signing.now ?? (() => new Date()))()).getTime());
   if (intent.status !== 0) return refuse(409, 'intent_not_open', 'this payment is no longer waiting to be paid');
   if (intent.expiresAtMs <= now) return refuse(409, 'intent_expired', 'this payment has expired');
-  if (normalizeStructTag(intent.asset) !== normalizeStructTag(ctx.chain.usdcType)) return refuse(400, 'wrong_asset', 'a payment may move USDC only (D6)');
+  if (normalizeStructTag(intent.asset) !== normalizeStructTag(ctx.chain.usdcType)) return refuse(400, 'wrong_asset', 'a payment may move USDC only');
   if (intent.kind === V2_KIND.CROSS_CHAIN) {
     return refuse(400, 'cross_chain_not_built', 'a cross-chain payment is paid through a bridge adapter, which is not registered yet');
   }

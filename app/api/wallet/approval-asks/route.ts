@@ -1,4 +1,7 @@
-import { askOwnersToApprove, listApprovalAsks, type AskDraft } from '@/lib/server/payment-approval-asks';
+import { eq } from 'drizzle-orm';
+
+import { organizations } from '@/lib/db/schema';
+import { askOwnersToApprove, listApprovalAsks, type AskDraft, type AskNotifier } from '@/lib/server/payment-approval-asks';
 import { readJsonBody } from '@/lib/server/http';
 import { orgMemberWalletAddresses } from '@/lib/server/wallet-deps';
 import { asResponse, limitWalletRequests, NO_STORE, walletRoute } from '@/lib/server/wallet-route';
@@ -66,8 +69,14 @@ export async function POST(request: Request) {
     const live = await liveSpendContext(route);
     if (live.ok) policy = () => readCurrentPolicy(live.sc);
   }
+  // The owners hear of it on their approver channels; the ask stands either way.
+  const notify: AskNotifier = async ({ ask, ownerUserIds }) => {
+    const { notifyOwnersOfAsk } = await import('@/lib/server/approval-requests');
+    const [org] = await db.select({ name: organizations.name }).from(organizations).where(eq(organizations.id, orgId)).limit(1);
+    await notifyOwnersOfAsk({ orgId, orgName: org?.name ?? 'Your business', ownerUserIds, amountMinor: ask.intent.amountMinor, recipient: ask.intent.recipient });
+  };
   const result = await askOwnersToApprove(
-    { db, ctx, policy },
+    { db, ctx, policy, notify },
     {
       orgId,
       userId: authority.userId,

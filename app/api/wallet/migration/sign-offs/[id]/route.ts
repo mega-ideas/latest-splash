@@ -1,7 +1,7 @@
 import { readJsonBody } from '@/lib/server/http';
 import { signMigrationSignOff } from '@/lib/server/wallet-authority';
 import { orgMemberWalletAddresses } from '@/lib/server/wallet-deps';
-import { asResponse, refusal, walletRoute } from '@/lib/server/wallet-route';
+import { asResponse, limitWalletRequests, refusal, walletRoute } from '@/lib/server/wallet-route';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,6 +13,8 @@ export const dynamic = 'force-dynamic';
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const gate = await walletRoute(request);
   if (gate.response) return gate.response;
+  const limited = await limitWalletRequests(gate.route);
+  if (limited) return limited;
   const { orgId, authority, db } = gate.route;
   const { id } = await params;
   const body = await readJsonBody(request);
