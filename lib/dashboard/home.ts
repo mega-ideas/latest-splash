@@ -142,10 +142,20 @@ export function formatUsdcMinor(minor: bigint | string | number): string {
   return `${negative ? '-' : ''}${groupDigits((abs / unit).toString())}.${cents}`;
 }
 
-/** "PHP 287,000.00" from the amount as recorded; verbatim if it is not a number. */
+/** Currencies paid out in whole units. Everything else shows two places. */
+const ZERO_DECIMAL_CURRENCIES = new Set(['IDR', 'VND']);
+
+/**
+ * "PHP 287,000.00" from the amount as recorded, in the currency's own
+ * decimals: Postgres hands "57400" back for 57,400.00. Extra places are
+ * truncated, never rounded up. Verbatim if it is not a number.
+ */
 function formatLocal(currency: string, amount: string): string {
-  const match = /^(\d+)(\.\d+)?$/.exec(amount.trim());
-  return match ? `${currency} ${groupDigits(match[1])}${match[2] ?? ''}` : `${currency} ${amount}`;
+  const match = /^(\d+)(?:\.(\d*))?$/.exec(amount.trim());
+  if (!match) return `${currency} ${amount}`;
+  const decimals = ZERO_DECIMAL_CURRENCIES.has(currency) ? 0 : 2;
+  const frac = decimals === 0 ? '' : `.${((match[2] ?? '') + '00').slice(0, decimals)}`;
+  return `${currency} ${groupDigits(match[1])}${frac}`;
 }
 
 function shortAddress(address: string): string {
