@@ -336,11 +336,11 @@ const ABORT_CODES: Record<number, string> = {
 
   // ── payment_intent ───────────────────────────────────────────────────────
   400: 'E_NOT_PENDING — payment_intent confirm/cancel called on an intent that is not in STATUS_PENDING.',
-  401: 'E_EXPIRED — payment_intent::confirm_payment_intent called past intent.expires_at.',
+  401: 'E_EXPIRED — the intent reached its expires_at (the time its creator chose, at most 30 days out) before this settlement or legacy approval. Every settle path refuses it from that moment on; open a new intent.',
   402: 'E_INSUFFICIENT_PAYMENT — coin value below intent.amount_usd on confirm.',
   403: 'E_NOT_YET_EXPIRED — payment_intent::cancel_payment_intent called before intent.expires_at.',
   404: 'E_UNAUTHORIZED — payment_intent action attempted by an address other than intent.sender.',
-  405: 'E_INVALID_AMOUNT — payment_intent::create_payment_intent called with amount_usd = 0.',
+  405: 'E_INVALID_AMOUNT — a payment_intent::create* call was given an amount of 0.',
   406: 'E_INVALID_RECIPIENT — payment_intent recipient is the zero address.',
   407: 'E_EMPTY_TARGET_CURRENCY — payment_intent target currency is empty.',
   408: 'E_INVALID_FX_RATE — payment_intent FX rate must be greater than zero.',
@@ -434,7 +434,7 @@ const ABORT_CODES: Record<number, string> = {
 
   // ── business_account: the v2 business wallet ─────────────────────────────
   45: 'E_WALLET_ALREADY_REGISTERED — this account already has a business wallet. A wallet changes only by rotation (rotate_wallet, then confirm_wallet_rotation from the new wallet).',
-  46: 'E_WALLET_NOT_NOMINATED — the wallet registering is not the one an owner nominated for this account. An owner calls nominate_wallet first.',
+  46: 'E_WALLET_NOT_NOMINATED — the wallet registering is not the one the founder nominated for this account. The founding owner calls nominate_wallet first; no other owner can.',
   47: 'E_WALLET_MISMATCH — the sender is not the multisig address these members, weights and threshold derive. Pass the members exactly as the wallet was built, in the same order.',
   48: 'E_SINGLE_SIGNER_NOT_ACKNOWLEDGED — one member of this wallet can sign alone. That is allowed only when the wallet says so: pass single_signer_ack = true.',
   49: 'E_NO_WALLET — this account has no business wallet registered yet.',

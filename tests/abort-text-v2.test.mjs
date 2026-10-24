@@ -61,7 +61,7 @@ test('the payment_intent sentences name only functions v2 still has', async () =
 });
 
 test('the approval TTL comment describes a v2 intent, which lives up to 30 days', async () => {
-  const move = await source('move/splash_core/sources/business_account.move');
+  const move = (await source('move/splash_core/sources/business_account.move')).replace(/\r\n/g, '\n');
   const at = move.indexOf('const APPROVAL_TTL_MS');
   assert.ok(at > 0, 'APPROVAL_TTL_MS is declared');
   const comment = move.slice(move.lastIndexOf('\n\n', at), at);

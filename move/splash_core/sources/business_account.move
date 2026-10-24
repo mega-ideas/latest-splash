@@ -118,7 +118,7 @@ const E_UNKNOWN_TIER: u64 = 44;
 // ─── v2 business wallet (45-block) ─────────────────────────────────────────
 /// The account already has a wallet. A wallet changes only by rotation.
 const E_WALLET_ALREADY_REGISTERED: u64 = 45;
-/// The sender is not the wallet an owner nominated for this account.
+/// The sender is not the wallet the founder nominated for this account.
 const E_WALLET_NOT_NOMINATED: u64 = 46;
 /// The sender is not the multisig address these members derive.
 const E_WALLET_MISMATCH: u64 = 47;
@@ -160,9 +160,10 @@ const E_APPROVERS_CLOSED: u64 = 60;
 /// past any real finance team.
 const MAX_MEMBERS: u64 = 16;
 
-/// An approval is good for fifteen minutes. In practice the intent's own
-/// five-minute window binds first; this is the backstop for an approval minted
-/// against an intent that is then cancelled and never used.
+/// A legacy approval is good for fifteen minutes. An intent can stay open for
+/// up to 30 days, so this, not the intent, is what stops an approval being
+/// cashed long after it was given; it is also the backstop for an approval
+/// minted against an intent that is then cancelled and never used.
 const APPROVAL_TTL_MS: u64 = 900_000;
 
 /// Recovery is announced 72 hours before it can execute. The delay is a
