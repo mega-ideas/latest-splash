@@ -20,6 +20,7 @@ module splash_spend::pay_intent_tests;
 
 use splash_core::audit_anchor;
 use splash_core::business_account::{Self, BusinessAccount};
+use splash_core::cap_registry::CapRegistry;
 use splash_core::compliance_config::{Self, ComplianceConfig};
 use splash_core::multisig;
 use splash_core::payment_intent::{Self, IntentConfirmed, PaymentIntent};
@@ -2685,6 +2686,176 @@ fun a_paused_config_stops_spending_rules() {
         ts::return_shared(config);
     };
     pay(&mut s, &fx, STAFF, fx.staff, intent, false);
+    s.end();
+}
+
+// ═══ The policy's own compliance config ════════════════════════════════════
+
+/// A second `ComplianceConfig`: unpaused, accepting USDC, and with
+/// `SettleWitness` on its settlement-app registry through the 24-hour path.
+/// Core v1 mints only one (its `ConfigTicket`); this is what an additive core
+/// upgrade adding a second constructor would let someone make. Returns the
+/// harness's config and the second one.
+fun second_config(s: &mut Scenario): (ID, ID) {
+    s.next_tx(STRANGER);
+    let first;
+    {
+        let config = s.take_shared<ComplianceConfig>();
+        first = object::id(&config);
+        ts::return_shared(config);
+    };
+    s.next_tx(h::wallet());
+    {
+        let registry = s.take_shared<CapRegistry>();
+        let admin = business_account::admin_cap_for_testing(s.ctx());
+        compliance_config::create<USDC>(
+            compliance_config::ticket_for_testing(s.ctx()),
+            &admin,
+            &registry,
+            5_000,
+            60_000,
+            50,
+            1_000_000,
+            1_000_000,
+            vector[object::id_from_address(@0xF001)],
+            s.ctx(),
+        );
+        business_account::destroy_admin_cap_for_testing(admin);
+        ts::return_shared(registry);
+    };
+    let effects = s.next_tx(h::wallet());
+    let second = new_shared(&effects);
+    {
+        let mut config = s.take_shared_by_id<ComplianceConfig>(second);
+        let c = s.take_shared<Clock>();
+        let admin = business_account::admin_cap_for_testing(s.ctx());
+        compliance_config::propose_addition<SettleWitness>(
+            &admin,
+            &mut config,
+            compliance_config::registry_settlement_app(),
+            h::keys(),
+            h::weights(),
+            h::threshold(),
+            &c,
+            s.ctx(),
+        );
+        business_account::destroy_admin_cap_for_testing(admin);
+        ts::return_shared(c);
+        ts::return_shared(config);
+    };
+    s.next_tx(h::wallet());
+    {
+        let mut config = s.take_shared_by_id<ComplianceConfig>(second);
+        let mut c = s.take_shared<Clock>();
+        c.increment_for_testing(compliance_config::addition_notice_ms());
+        let admin = business_account::admin_cap_for_testing(s.ctx());
+        compliance_config::activate_addition<SettleWitness>(
+            &admin,
+            &mut config,
+            compliance_config::registry_settlement_app(),
+            h::keys(),
+            h::weights(),
+            h::threshold(),
+            &c,
+            s.ctx(),
+        );
+        business_account::destroy_admin_cap_for_testing(admin);
+        ts::return_shared(c);
+        ts::return_shared(config);
+    };
+    (first, second)
+}
+
+/// `maker` opens a wallet intent to SUPPLIER through `create_intent`,
+/// passing the config `config`, and shares it.
+fun open_with_config(s: &mut Scenario, fx: &Fx, config: ID, maker: address, n: u8, amount: u64): ID {
+    s.next_tx(maker);
+    let policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
+    let mut account = s.take_shared_by_id<BusinessAccount>(fx.account);
+    let config = s.take_shared_by_id<ComplianceConfig>(config);
+    let c = s.take_shared<Clock>();
+    let intent = create_now<USDC>(&policy, &mut account, &config, n, payment_intent::kind_wallet(), SUPPLIER, amount, &c, s.ctx());
+    let id = object::id(&intent);
+    payment_intent::share_intent(intent);
+    ts::return_shared(c);
+    ts::return_shared(config);
+    ts::return_shared(account);
+    ts::return_shared(policy);
+    id
+}
+
+/// `payer` pays the shared intent under `alw`, passing the config `config`.
+fun pay_with_config(s: &mut Scenario, fx: &Fx, config: ID, payer: address, alw: ID, intent: ID) {
+    s.next_tx(payer);
+    let mut allowance = s.take_shared_by_id<Allowance<Balance<USDC>>>(alw);
+    let mut intent = s.take_shared_by_id<PaymentIntent>(intent);
+    let mut account = s.take_shared_by_id<BusinessAccount>(fx.account);
+    let policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
+    let config = s.take_shared_by_id<ComplianceConfig>(config);
+    let c = s.take_shared<Clock>();
+    let amount = payment_intent::amount_usd(&intent);
+    pay_objects(
+        &mut allowance,
+        &mut intent,
+        &mut account,
+        &policy,
+        &config,
+        option::none(),
+        h::wallet(),
+        amount,
+        h::settle_by(&c),
+        &c,
+        s.ctx(),
+    );
+    ts::return_shared(c);
+    ts::return_shared(config);
+    ts::return_shared(policy);
+    ts::return_shared(account);
+    ts::return_shared(intent);
+    ts::return_shared(allowance);
+}
+
+#[test]
+#[expected_failure(abort_code = 1028, location = splash_spend)]
+/// Review finding (Low, A1/A4): splash_spend reads whichever config the PTB
+/// passes. A staff member cannot open an intent against a config other than
+/// the one the policy was created with.
+fun an_intent_cannot_be_opened_against_another_compliance_config() {
+    let (mut s, fx) = setup();
+    let (_, second) = second_config(&mut s);
+    open_with_config(&mut s, &fx, second, STAFF, 1, PAY);
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 1028, location = splash_spend)]
+/// The reviewer's scenario: compliance pauses the policy's config, and the
+/// staff member pays the intent passing the other, unpaused one.
+fun a_payment_cannot_settle_against_another_compliance_config() {
+    let (mut s, fx) = setup();
+    let (first, second) = second_config(&mut s);
+    let intent = open_with_config(&mut s, &fx, first, STAFF, 1, PAY);
+    s.next_tx(h::wallet());
+    {
+        let mut config = s.take_shared_by_id<ComplianceConfig>(first);
+        let admin = business_account::admin_cap_for_testing(s.ctx());
+        compliance_config::admin_set_paused(&admin, &mut config, true);
+        business_account::destroy_admin_cap_for_testing(admin);
+        ts::return_shared(config);
+    };
+    pay_with_config(&mut s, &fx, second, STAFF, fx.staff, intent);
+    s.end();
+}
+
+#[test]
+/// The control: beside a second config, the policy's own still opens and
+/// pays.
+fun the_policys_own_config_still_pays_beside_another() {
+    let (mut s, fx) = setup();
+    let (first, _) = second_config(&mut s);
+    let intent = open_with_config(&mut s, &fx, first, STAFF, 1, PAY);
+    pay_with_config(&mut s, &fx, first, STAFF, fx.staff, intent);
+    assert_eq!(coin_received(&mut s, SUPPLIER), PAY);
     s.end();
 }
 
