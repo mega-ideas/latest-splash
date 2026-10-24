@@ -346,12 +346,13 @@ test('14.15 envelope — evidenceQualityOf is ALL_LIVE only when every item is L
   assert.equal(evidenceQualityOf([]), 'CONTAINS_DEMO_DATA');
 });
 
-test('14.15 envelope — the agent chat answer about balances says the figures are demo data', async () => {
+test('14.15 envelope — the agent chat answer about balances says the figures are sample data', async () => {
   let text = '';
   for await (const event of runOxwalAgent({ message: 'What is my balance?', forceLocal: true })) {
     if (event.type === 'delta') text += event.text;
   }
-  assert.match(text, /demo data/i);
+  // "Sample", not "demo": v2 D14 keeps "Demo" out of what a person reads.
+  assert.match(text, /sample data/i);
 });
 
 // ── 14.16 MAKER ≠ CHECKER (regression) ──────────────────────────────────────

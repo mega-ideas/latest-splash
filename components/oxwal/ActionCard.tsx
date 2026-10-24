@@ -14,7 +14,7 @@ const actionLabels = {
    accent. high=error, medium=warn, low=ok. */
 function riskClass(tone: ReturnType<typeof buildActionCardModel>['riskTone']) {
   if (tone === 'high') return 'border-[var(--error)] bg-[var(--error-bg)] text-[var(--error)]';
-  if (tone === 'medium') return 'border-[var(--warn)] bg-[var(--warn-bg)] text-[#8b6418]';
+  if (tone === 'medium') return 'border-[var(--warn)] bg-[var(--warn-bg)] text-[var(--warn-ink)]';
   return 'border-[var(--ok)] bg-[var(--ok-bg)] text-[#1F4452]';
 }
 
@@ -45,14 +45,14 @@ export default function ActionCard({ proposal, readOnly = false }: ActionCardPro
               {proposal.explain.risk} risk
             </span>
             {model.hasUntrustedEvidence && (
-              <span className="inline-flex items-center gap-1 rounded-md border border-[var(--warn)] bg-[var(--warn-bg)] px-2 py-1 text-[12px] font-semibold uppercase tracking-[0.16em] text-[#8b6418]">
+              <span className="inline-flex items-center gap-1 rounded-md border border-[var(--warn)] bg-[var(--warn-bg)] px-2 py-1 text-[12px] font-semibold uppercase tracking-[0.16em] text-[var(--warn-ink)]">
                 <AlertTriangle className="h-3.5 w-3.5" />
                 Untrusted data
               </span>
             )}
             {/* WS2 truth chip: evidence built on sample or modeled sources says so. */}
             {model.containsDemoData && (
-              <span className="inline-flex items-center gap-1 rounded-md border border-[var(--warn)] bg-[var(--warn-bg)] px-2 py-1 text-[12px] font-semibold uppercase tracking-[0.16em] text-[#8b6418]">
+              <span className="inline-flex items-center gap-1 rounded-md border border-[var(--warn)] bg-[var(--warn-bg)] px-2 py-1 text-[12px] font-semibold uppercase tracking-[0.16em] text-[var(--warn-ink)]">
                 <AlertTriangle className="h-3.5 w-3.5" />
                 Contains sample data
               </span>
@@ -71,7 +71,7 @@ export default function ActionCard({ proposal, readOnly = false }: ActionCardPro
               {/* Ink, not --warn, for the label: --warn on --warn-bg is under
                   4.5:1 at this size. The icon carries the caution, not colour alone. */}
               <p className="flex items-center gap-1.5 text-[12px] font-semibold uppercase tracking-[0.16em] text-[#1F4452]">
-                <AlertTriangle className="h-3.5 w-3.5 text-[#8b6418]" aria-hidden="true" />
+                <AlertTriangle className="h-3.5 w-3.5 text-[var(--warn-ink)]" aria-hidden="true" />
                 Check before approving
               </p>
               <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[13px] font-medium leading-5 text-[#1F4452]">
@@ -135,7 +135,7 @@ export default function ActionCard({ proposal, readOnly = false }: ActionCardPro
             {model.simulationRows.map((item) => (
               <div key={`${item.label}-${item.value}`} className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 px-3 py-2 text-sm">
                 <span className="min-w-0 truncate font-medium text-[#326273]/90">{item.label}</span>
-                <span className={item.status === 'warning' ? 'money font-bold text-[#8b6418]' : 'money font-bold text-[#1F4452]'}>
+                <span className={item.status === 'warning' ? 'money font-bold text-[var(--warn-ink)]' : 'money font-bold text-[#1F4452]'}>
                   {item.value}
                 </span>
               </div>
@@ -151,7 +151,7 @@ export default function ActionCard({ proposal, readOnly = false }: ActionCardPro
             <span
               key={`${item.source}-${item.ref}`}
               className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[13px] font-bold ${item.tone === 'untrusted'
-                ? 'border-[var(--warn)] bg-[var(--warn-bg)] text-[#8b6418]'
+                ? 'border-[var(--warn)] bg-[var(--warn-bg)] text-[var(--warn-ink)]'
                 : 'border-[var(--ok)] bg-[var(--ok-bg)] text-[#1F4452]'}`}
             >
               {item.source} - {item.trustLabel}
@@ -160,9 +160,9 @@ export default function ActionCard({ proposal, readOnly = false }: ActionCardPro
               <span
                 className={item.statusTone === 'live'
                   ? 'rounded border border-[var(--ok)] px-1.5 py-0.5 text-[12px] font-semibold uppercase tracking-[0.12em] text-[#1F4452]'
-                  : 'rounded border border-[var(--warn)] bg-[var(--warn-bg)] px-1.5 py-0.5 text-[12px] font-semibold uppercase tracking-[0.12em] text-[#8b6418]'}
+                  : 'rounded border border-[var(--warn)] bg-[var(--warn-bg)] px-1.5 py-0.5 text-[12px] font-semibold uppercase tracking-[0.12em] text-[var(--warn-ink)]'}
               >
-                {item.statusLabel}
+                {item.statusText}
               </span>
             </span>
           ))}

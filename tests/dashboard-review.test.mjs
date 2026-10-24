@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { readFile, readdir, stat } from 'node:fs/promises';
-import { join } from 'node:path';
 import test from 'node:test';
 
 /**
@@ -90,7 +89,10 @@ function sentences(text) {
 }
 
 test('Zeke names pages that exist and says "sample", not "demo"', async () => {
-  const banned = /\bdemo\b|\bDEMO\b|Rate holds|Send USDC page|in Send USDC|Overview( and| page)/;
+  // "DEMO" in capitals is the truth envelope's status value, which the system
+  // prompt has to name for the model to read tool results; what a person is
+  // told it means is "sample" (asserted below), and no reply says DEMO label.
+  const banned = /\b[Dd]emo\b|DEMO label|Rate holds|Send USDC page|in Send USDC|Overview( and| page)/;
   const found = [];
   for (const file of AGENT_FILES) {
     for (const sentence of sentences(await source(file))) {
@@ -128,8 +130,9 @@ test('an evidence chip reads Sample, never DEMO', async () => {
     status: 'PROPOSED',
     approvals: [],
     explain: {
-      financialImpact: null,
+      financialImpact: { amountIn: '100', currencyIn: 'USD', amountOut: null, currencyOut: null },
       requiredApprovers: 1,
+      risk: 'LOW',
       confidence: null,
       evidence: [
         { source: 'fixture.balances', ref: 'b1', trusted: true, status: 'DEMO' },
@@ -219,7 +222,8 @@ test('active quote holds are listed on Transfer, newest first, expired ones left
 
 test('Treasury does not say it is waiting for a licence while the nav opens it', async () => {
   const treasury = await source('app/dashboard/treasury/page.tsx');
-  assert.doesNotMatch(treasury, /licen[cs]e/i);
+  // The word, not the API code custody_not_licensed the page still reads.
+  assert.doesNotMatch(treasury, /\blicen[cs]e\b/i);
 });
 
 /* ── The smaller findings ──────────────────────────────────────────── */

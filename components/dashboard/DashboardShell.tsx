@@ -9,6 +9,7 @@ import GovernanceAlertBanner from '@/components/dashboard/GovernanceAlertBanner'
 import type { CustomerSession } from '@/lib/auth/customer-session';
 import type { GovernanceBannerAlert } from '@/lib/server/governance-events';
 import type { LaunchScope } from '@/lib/launch-scope-rules';
+import { networkChip } from '@/lib/network-label';
 import {
   dashboardNav,
   isCurrent,
@@ -256,10 +257,16 @@ function UtilityLinks({ view, pathname, collapsed, locks, scope, onNavigate }: L
 
 export default function DashboardShell({ children, session, kyb, locks, setup, sweepOn, launchScope, governanceAlerts }: DashboardShellProps) {
   const [collapsed,  setCollapsed]  = useState(false);
-  const [mobileOpen, setMobileOpen] = useState(false);
   const router   = useRouter();
   const pathname = usePathname();
+  // The phone drawer is open on the page it was opened on. Navigating (a
+  // link, back or forward) changes the path and so closes it, with no effect
+  // that has to notice.
+  const [openOn, setOpenOn] = useState<string | null>(null);
+  const mobileOpen = openOn === pathname;
+  const setMobileOpen = (open: boolean) => setOpenOn(open ? pathname : null);
   const view = dashboardNav(setup);
+  const network = networkChip();
   const drawerRef = useRef<HTMLDivElement>(null);
   const toggleRef = useRef<HTMLButtonElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -277,21 +284,32 @@ export default function DashboardShell({ children, session, kyb, locks, setup, s
 
   // The phone menu is a modal dialog: focus moves in, Escape closes it, the
   // page behind does not scroll, and focus returns to the menu button.
+  // The drawer only exists below md (768px). Rotating a phone to landscape or
+  // widening the window hides it with CSS, so it is closed here too, or the
+  // body would stay locked under a desktop layout with nothing to close.
   useEffect(() => {
     if (!mobileOpen) return;
+    const wide = window.matchMedia('(min-width: 768px)');
+    // The menu button is md:hidden, so the drawer only opens below md.
+    if (wide.matches) return;
     closeRef.current?.focus();
     const { overflow } = document.body.style;
     document.body.style.overflow = 'hidden';
     function onKey(event: KeyboardEvent) {
       if (event.key === 'Escape') {
-        setMobileOpen(false);
+        setOpenOn(null);
         toggleRef.current?.focus();
       }
     }
+    function onWide(event: MediaQueryListEvent) {
+      if (event.matches) setOpenOn(null);
+    }
     document.addEventListener('keydown', onKey);
+    wide.addEventListener('change', onWide);
     return () => {
       document.body.style.overflow = overflow;
       document.removeEventListener('keydown', onKey);
+      wide.removeEventListener('change', onWide);
     };
   }, [mobileOpen]);
 
@@ -374,9 +392,11 @@ export default function DashboardShell({ children, session, kyb, locks, setup, s
               <p className="mb-2 flex min-h-8 items-center gap-2 rounded-lg border border-white/10 bg-white/[0.07] px-2.5 text-[12px]">
                 <Image src="/isometric/sui-logo-clean.svg" alt="" width={12} height={16} className="h-4 w-3 object-contain" />
                 <span className="whitespace-nowrap font-medium text-white/90">Settlement rail</span>
+                {/* The configured network, never a claim: "Sui mainnet" with
+                    the ok dot only on mainnet (lib/network-label.ts). */}
                 <strong className="ml-auto inline-flex items-center gap-1.5 whitespace-nowrap font-semibold text-white">
-                  <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-[var(--ok)]" />
-                  Sui mainnet
+                  <span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${network.live ? 'bg-[var(--ok)]' : 'bg-white/60'}`} />
+                  {network.label}
                 </strong>
               </p>
             )}
@@ -481,6 +501,7 @@ export default function DashboardShell({ children, session, kyb, locks, setup, s
       {/* ── Main content ──────────────────────────────────────── */}
       {/* Mobile top pad = 60 px (mobile header); desktop = 76 px (desktop header + gap) */}
       <main
+        inert={mobileOpen}
         id="dashboard-content"
         tabIndex={-1}
         className={`fintech-dashboard-main relative z-0 min-w-0 flex-1 overflow-x-hidden outline-none transition-all duration-300 p-4 pt-[76px] pb-16 md:px-8 md:pb-8 md:pt-[76px] ${
@@ -497,7 +518,7 @@ export default function DashboardShell({ children, session, kyb, locks, setup, s
           >
             <ShieldAlert aria-hidden="true" className="h-4 w-4 shrink-0 text-[var(--warn)]" />
             <div className="min-w-0 flex-1">
-              <p className="text-[13px] font-bold text-[#8b6418]">Read-only workspace</p>
+              <p className="text-[13px] font-bold text-[var(--warn-ink)]">Read-only workspace</p>
               <p className="mt-0.5 text-[13px] font-medium text-[var(--slate)]">{kyb.reason}</p>
             </div>
             <Link
@@ -533,7 +554,11 @@ export default function DashboardShell({ children, session, kyb, locks, setup, s
       </main>
 
       {/* ── Floating AI Copilot widget ────────────────────────── */}
-      <FloatingCopilot />
+      {/* Outside the phone drawer, so inert and hidden while it is open: it
+          used to sit above the scrim, clickable beside Log out. */}
+      <div inert={mobileOpen} className={mobileOpen ? 'hidden' : undefined}>
+        <FloatingCopilot />
+      </div>
     </div>
   );
 }

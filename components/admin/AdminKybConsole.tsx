@@ -179,8 +179,8 @@ export default function AdminKybConsole({ initialCases }: Props) {
                   <ActionButton state="APPROVED" label="Approve KYB" loadingAction={loadingAction} onClick={updateCase} />
                   <ActionButton state="REJECTED" label="Reject KYB" loadingAction={loadingAction} onClick={updateCase} />
                 </div>
-                <div className="mt-4 rounded-xl border border-[var(--gold-light)] bg-[var(--gold-tint)] p-3 text-xs leading-5 text-[#326273]/90">
-                  <AlertTriangle className="mr-2 inline h-4 w-4 text-[var(--gold-ink)]" /> Approval unlocks off-chain customer access. Settlement contracts still enforce transfer execution separately.
+                <div className="mt-4 rounded-xl border border-[var(--warn)] bg-[var(--warn-bg)] p-3 text-xs leading-5 text-[#326273]/90">
+                  <AlertTriangle className="mr-2 inline h-4 w-4 text-[var(--warn)]" /> Approval unlocks off-chain customer access. Settlement contracts still enforce transfer execution separately.
                 </div>
               </div>
             </section>

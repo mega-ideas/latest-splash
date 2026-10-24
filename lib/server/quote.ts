@@ -152,7 +152,7 @@ export async function calculateQuote(
   if (!destination) throw new QuoteDestinationError('A quote needs a destination: say where the payment goes.');
   if (destination.type !== 'bank') {
     throw new QuoteDestinationError(
-      `A payment to ${destinationLabel(destination.type)} is priced when its route opens in Phase 2. Today a quote prices a payout to a bank account; to pay a Sui wallet, use Send USDC.`,
+      `A payment to ${destinationLabel(destination.type)} is priced when its route opens in Phase 2. Today a quote prices a payout to a bank account; to pay a Sui wallet, use Wallet.`,
     );
   }
   const kind = destinationKind(destination);

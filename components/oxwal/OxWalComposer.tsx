@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 
 import { parseBatchFile, type ParsedBatch } from '@/lib/batch-parse';
+import { networkChip } from '@/lib/network-label';
 import { cn } from '@/lib/utils';
 
 export type OxWalComposerChip = {
@@ -35,7 +36,7 @@ type OxWalComposerProps = {
   disabled?: boolean;
   title?: string;
   placeholder?: string;
-  /** Mono desk context tag, e.g. "Sui mainnet". */
+  /** Mono desk context tag, the configured network (lib/network-label.ts). */
   deskTag?: string;
   compact?: boolean;
   className?: string;
@@ -59,7 +60,7 @@ export default function OxWalComposer({
   disabled = false,
   title,
   placeholder = 'Ask Zeke, or attach an invoice or payout sheet',
-  deskTag = 'Sui mainnet',
+  deskTag = networkChip().label,
   compact = false,
   className,
   inputRef,

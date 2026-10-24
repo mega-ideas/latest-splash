@@ -59,9 +59,9 @@ function StateIcon({ state }: { state: TransferIntentState }) {
     return <XCircle className="text-red-500" size={18} />;
   }
   if (state === 'REFUNDING') {
-    return <AlertTriangle className="text-[var(--gold-ink)]" size={18} />;
+    return <AlertTriangle className="text-[var(--warn)]" size={18} />;
   }
-  return <Loader2 className="animate-spin text-[var(--gold-ink)]" size={18} />;
+  return <Loader2 className="animate-spin text-[var(--info)]" size={18} />;
 }
 
 function StateBadge({ state }: { state: TransferIntentState }) {
@@ -81,7 +81,7 @@ function StateBadge({ state }: { state: TransferIntentState }) {
   }
   if (state === 'REFUNDING' || state === 'REFUNDED') {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-[var(--gold-tint)] px-2.5 py-0.5 text-[13px] font-medium text-[var(--gold-ink)]">
+      <span className="inline-flex items-center gap-1 rounded-full bg-[var(--warn-bg)] px-2.5 py-0.5 text-[13px] font-medium text-[var(--warn-ink)]">
         <AlertTriangle size={11} /> {state}
       </span>
     );

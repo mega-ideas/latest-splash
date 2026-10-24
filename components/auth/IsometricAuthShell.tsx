@@ -32,7 +32,6 @@ export default function IsometricAuthShell({
 }: IsometricAuthShellProps) {
   return (
     <main className="iso-auth">
-      <div className="iso-auth-grid" aria-hidden="true" />
       <header className="iso-auth-header">
         <Link href="/" className="iso-auth-back">
           <ArrowLeft aria-hidden="true" />
