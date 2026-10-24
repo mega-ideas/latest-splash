@@ -55,7 +55,9 @@ import {
   revokeStaleAllowances,
   startSpendPolicy,
 } from '../lib/server/spend-rules.ts';
-import { acceptApprovalAsk, askOwnersToApprove } from '../lib/server/payment-approval-asks.ts';
+import { acceptApprovalAsk, askOwnersToApprove, listApprovalAsks, settleApprovalAsks } from '../lib/server/payment-approval-asks.ts';
+import * as schema from '../lib/db/schema.ts';
+import { eq } from 'drizzle-orm';
 import { openSigningRequest, signingInbox, submitPartialSignature } from '../lib/server/wallet-signing.ts';
 
 const DAY = 86_400_000n;
@@ -633,6 +635,104 @@ test("a staff member's payment above the threshold gets one owner's second appro
   // The maker cannot approve their own payment, even as an owner.
   w.model.addIntent({ id: '0x' + '97'.repeat(32), initialSharedVersion: 7, account: ACCOUNT, maker: w.keys.three.address, recipient: SUPPLIER, amountMinor: 1n, kind: 1, targetCurrency: 'USDC', fxRateUsdLocal: 1n, expiresAtMs: t0 + DAY, status: 0, asset: USDC });
   assert.equal((await openSecondApproval(w.sc, { orgId: 'acme', ownerUserId: 'u-three', ownerPasskeyPublicKey: w.keys.three.publicKey, intentId: '0x' + '97'.repeat(32), payer: STAFF, maxFeeMinor: 0n, settleByMs: t0 + 1_000n })).code, 'self_approval');
+  await w.client.close();
+});
+
+/* ── Sky's example: a payment over the rule, asked for with a draft ───── */
+
+const bytes32hex = (b) => b.toString(16).padStart(2, '0').repeat(32);
+
+function draft(overrides = {}) {
+  return {
+    paymentRef: bytes32hex(0x31),
+    recipient: SUPPLIER,
+    beneficiaryRef: '',
+    amountMinor: 5_000n * USDC_1,
+    kind: 1,
+    targetCurrency: 'USDC',
+    fxRateUsdLocal: 1_000_000n,
+    commitment: bytes32hex(0x32),
+    railCommitment: bytes32hex(0x33),
+    expiresAtMs: t0 + 3n * DAY,
+    ...overrides,
+  };
+}
+
+test('(3) a staff payment over the rule cannot be opened on chain, so staff ask with a draft and the quorum pays it', async () => {
+  const w = await spendWorld();
+  const { members } = await withPolicy(w);
+  const ex = await changeRecipients(w.sc, { orgId: 'acme', requestedBy: 'u-founder', wallet: members, change: { add: [{ address: EXCHANGE, tag: 'exchange' }] } });
+  await signBy(w, ex.request, 'founder', 'two');
+  await giveRule(w, members);
+
+  // create_intent refuses both of Sky's cases, so no intent exists to ask about.
+  assert.throws(() => w.createStaffIntent(STAFF, { id: '0x' + '41'.repeat(32), recipient: EXCHANGE, amountMinor: 5_000n * USDC_1, kind: 2, expiresAtMs: t0 + DAY }), /E_OVER_PER_PAYMENT_MAX/);
+  assert.throws(() => w.createStaffIntent(STAFF, { id: '0x' + '42'.repeat(32), recipient: SUPPLIER, amountMinor: 100n * USDC_1, kind: 1, expiresAtMs: t0 + DAY }), /E_UNVERIFIED_DESTINATION/);
+  const byIntent = await askOwnersToApprove({ db: w.db, ctx: w.ctx }, { orgId: 'acme', userId: 'u-staff', intentId: '0x' + '41'.repeat(32), contentHash: '04'.repeat(32), walrusBlobId: 'aa', requesterAddresses: [STAFF] });
+  assert.equal(byIntent.status, 404, 'the intent path has nothing to ask about');
+
+  const { readCurrentPolicy } = await import('../lib/server/spend-rules.ts');
+  assert.equal(typeof readCurrentPolicy, 'function', 'the current policy can be read for an ask');
+  const deps = { db: w.db, ctx: w.ctx, policy: () => readCurrentPolicy(w.sc) };
+  const asked = await askOwnersToApprove(deps, { orgId: 'acme', userId: 'u-staff', draft: draft(), contentHash: '04'.repeat(32), walrusBlobId: 'aa', requesterAddresses: [STAFF], note: 'Supplier invoice, 5,000 USDC' });
+  assert.equal(asked.ok, true, JSON.stringify(asked));
+  assert.equal(asked.ask.intent.source, 'draft');
+  assert.deepEqual([asked.ask.intent.recipient, asked.ask.intent.amountMinor, asked.ask.intent.kind], [SUPPLIER, String(5_000n * USDC_1), 1]);
+  assert.deepEqual(asked.ask.intent.checks, { recipientVerified: false, overPerPaymentMax: true, makerPerPaymentMaxMinor: String(2_000n * USDC_1) }, 'owners see why it came to them');
+
+  // One open ask per payment reference; malformed or impossible drafts are refused before anything is stored.
+  assert.equal((await askOwnersToApprove(deps, { orgId: 'acme', userId: 'u-staff', draft: draft(), contentHash: '04'.repeat(32), walrusBlobId: 'aa', requesterAddresses: [STAFF] })).code, 'ask_open');
+  for (const [bad, code] of [
+    [draft({ paymentRef: 'zz' }), 'bad_draft'],
+    [draft({ paymentRef: bytes32hex(0x34), kind: 3 }), 'cross_chain_not_built'],
+    [draft({ paymentRef: bytes32hex(0x35), amountMinor: 0n }), 'bad_draft'],
+    [draft({ paymentRef: bytes32hex(0x36), expiresAtMs: t0 }), 'bad_draft'],
+    [draft({ paymentRef: bytes32hex(0x37), kind: 4, beneficiaryRef: '' }), 'bad_draft'],
+  ]) {
+    const r = await askOwnersToApprove(deps, { orgId: 'acme', userId: 'u-staff', draft: bad, contentHash: '04'.repeat(32), walrusBlobId: 'aa', requesterAddresses: [STAFF] });
+    assert.equal(r.code, code, JSON.stringify(bad, (k, v) => (typeof v === 'bigint' ? v.toString() : v)));
+  }
+  assert.equal((await w.db.select().from(schema.walletApprovalAsks)).length, 1);
+
+  // A second approval needs an intent on chain; the quorum pays a draft from the wallet.
+  const opener = (input) => openSecondApproval(w.sc, { ...input, ownerPasskeyPublicKey: w.keys.two.publicKey });
+  const second = await acceptApprovalAsk({ ...deps, secondApproval: opener }, { orgId: 'acme', userId: 'u-two', askId: asked.ask.id, mode: 'second_approval', maxFeeMinor: 0n, settleByMs: t0 + 300_000n });
+  assert.equal(second.code, 'no_intent');
+  const accepted = await acceptApprovalAsk(deps, { orgId: 'acme', userId: 'u-two', askId: asked.ask.id, mode: 'wallet_pays', wallet: members, maxFeeMinor: 250_000n, settleByMs: t0 + 300_000n });
+  assert.equal(accepted.ok, true, JSON.stringify(accepted));
+  const d = accepted.request.description;
+  assert.deepEqual(d.actions.map((a) => a.type), ['withdraw', 'open_intent', 'pay_intent', 'anchor_receipt', 'delete_intent'], 'create_for_wallet + confirm_from_business_wallet');
+  assert.deepEqual([d.actions[1].recipient, d.actions[1].amountMinor], [SUPPLIER, String(5_000n * USDC_1)]);
+  const done = await signBy(w, accepted.request, 'two', 'three');
+  assert.equal(done.status, 'executed');
+  const [row] = await w.db.select().from(schema.walletSigningRequests).where(eq(schema.walletSigningRequests.id, accepted.request.id));
+  await settleApprovalAsks(w.db, row);
+  const [after] = await listApprovalAsks(w.db, { orgId: 'acme', userId: 'u-staff' });
+  assert.equal(after.status, 'approved');
+  await w.client.close();
+});
+
+test('two owners accepting one ask at once: one signing request opens, and the ask follows it', async () => {
+  const w = await spendWorld();
+  const { members } = await withPolicy(w);
+  const ex = await changeRecipients(w.sc, { orgId: 'acme', requestedBy: 'u-founder', wallet: members, change: { add: [{ address: EXCHANGE, tag: 'exchange' }] } });
+  await signBy(w, ex.request, 'founder', 'two');
+  await giveRule(w, members);
+  const id = w.createStaffIntent(STAFF, { id: '0x' + '43'.repeat(32), recipient: EXCHANGE, amountMinor: 1_500n * USDC_1, kind: 2, expiresAtMs: t0 + 3n * DAY });
+  const deps = { db: w.db, ctx: w.ctx, secondApproval: (input) => openSecondApproval(w.sc, { ...input, ownerPasskeyPublicKey: w.keys.three.publicKey }) };
+  const asked = await askOwnersToApprove(deps, { orgId: 'acme', userId: 'u-staff', intentId: id, contentHash: '04'.repeat(32), walrusBlobId: 'aa', requesterAddresses: [STAFF] });
+  assert.equal(asked.ok, true, JSON.stringify(asked));
+  const [a, b] = await Promise.all([
+    acceptApprovalAsk(deps, { orgId: 'acme', userId: 'u-two', askId: asked.ask.id, mode: 'wallet_pays', wallet: members, maxFeeMinor: 250_000n, settleByMs: t0 + 300_000n }),
+    acceptApprovalAsk(deps, { orgId: 'acme', userId: 'u-three', askId: asked.ask.id, mode: 'second_approval', maxFeeMinor: 250_000n, settleByMs: t0 + 300_000n }),
+  ]);
+  const won = [a, b].filter((r) => r.ok);
+  assert.equal(won.length, 1, JSON.stringify([a.code ?? 'ok', b.code ?? 'ok']));
+  assert.equal([a, b].find((r) => !r.ok).code, 'not_open');
+  const opened = (await w.db.select().from(schema.walletSigningRequests)).filter((r) => r.purpose === 'wallet_payment' || r.purpose === 'spend_approval');
+  assert.equal(opened.length, 1, 'only the winner built a request');
+  const [ask] = await listApprovalAsks(w.db, { orgId: 'acme', userId: 'u-staff' });
+  assert.equal(ask.signingRequestId, won[0].request.id);
   await w.client.close();
 });
 

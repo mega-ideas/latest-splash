@@ -291,5 +291,26 @@ export async function spendWorld(opts = {}) {
     state.allowances.set(stored.id, a);
   }
 
-  return { ...w, chain, spend: state, spends, sc, reader, charge };
+  /**
+   * A staff member opens an intent as `splash_spend::create_intent` does: the
+   * policy is current, the maker is STAFF on it, the destination is verified
+   * (a recipient, or a bank beneficiary), and the amount is within both the
+   * business's and the maker's per-payment maximum. Anything else aborts, so
+   * an intent over the rule never exists.
+   */
+  function createStaffIntent(maker, i) {
+    const p = [...state.policies.values()].find((x) => x.wallet === w.model.state.wallet && x.walletEpoch === state.epoch);
+    if (!p) throw new Error('MoveAbort(E_STALE_POLICY)');
+    const who = normalizeSuiAddress(maker);
+    const sp = p.spenders.find((x) => x.spender === who && x.role === 1);
+    if (!sp) throw new Error('MoveAbort(E_NOT_STAFF)');
+    const bank = i.kind === 4;
+    const verified = bank ? p.beneficiaries.some((b) => b.commitment === i.beneficiaryRef) : p.recipients.some((r) => r.address === normalizeSuiAddress(i.recipient));
+    if (!verified) throw new Error('MoveAbort(E_UNVERIFIED_DESTINATION)');
+    if (i.amountMinor > p.perPaymentMax || i.amountMinor > sp.perPaymentMax) throw new Error('MoveAbort(E_OVER_PER_PAYMENT_MAX)');
+    w.model.addIntent({ initialSharedVersion: 7, account: ACCOUNT, beneficiaryRef: '', targetCurrency: 'USDC', fxRateUsdLocal: 1_000_000n, status: 0, asset: USDC, ...i, maker: who });
+    return normalizeSuiAddress(i.id);
+  }
+
+  return { ...w, chain, spend: state, spends, sc, reader, charge, createStaffIntent };
 }
