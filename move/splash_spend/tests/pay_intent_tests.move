@@ -1644,6 +1644,74 @@ fun an_approval_pays_one_millisecond_before_its_expiry() {
     s.end();
 }
 
+/// A quote's rate hold: five minutes.
+const QUOTE_HOLD: u64 = 300_000;
+
+/// `payer` pays the shared intent with the approval it holds, passing
+/// `settle_by_ms` as the quote's deadline.
+fun pay_approved_by(s: &mut Scenario, fx: &Fx, payer: address, alw: ID, intent_id: ID, settle_by_ms: u64) {
+    s.next_tx(payer);
+    let approval = option::some(s.take_from_sender<PayoutApproval>());
+    let mut allowance = s.take_shared_by_id<Allowance<Balance<USDC>>>(alw);
+    let mut intent = s.take_shared_by_id<PaymentIntent>(intent_id);
+    let mut account = s.take_shared_by_id<BusinessAccount>(fx.account);
+    let policy = s.take_shared_by_id<SpendPolicy>(fx.policy);
+    let config = s.take_shared<ComplianceConfig>();
+    let c = s.take_shared<Clock>();
+    let amount = payment_intent::amount_usd(&intent);
+    pay_objects(
+        &mut allowance,
+        &mut intent,
+        &mut account,
+        &policy,
+        &config,
+        approval,
+        h::wallet(),
+        amount,
+        settle_by_ms,
+        &c,
+        s.ctx(),
+    );
+    ts::return_shared(c);
+    ts::return_shared(config);
+    ts::return_shared(policy);
+    ts::return_shared(account);
+    ts::return_shared(intent);
+    ts::return_shared(allowance);
+}
+
+#[test]
+#[expected_failure(abort_code = 1027, location = splash_spend)]
+/// Review A3/A8/B5, the reviewer's proof: an owner approves a bank payout
+/// against a quote that holds for five minutes, and the payer settles it
+/// with a deadline of its own choosing. The approval must bind the deadline
+/// the approver saw: a later `settle_by_ms` than the approval names aborts.
+fun a_payer_cannot_settle_later_than_the_approval_allows() {
+    let (mut s, fx) = setup();
+    let intent = open(&mut s, &fx, STAFF, 80, payment_intent::kind_bank_payout(), h::recipient(), THRESHOLD + 1);
+    approve(&mut s, &fx, h::owner_2(), intent, STAFF);
+    pay_approved_by(&mut s, &fx, STAFF, fx.staff, intent, std::u64::max_value!());
+    s.end();
+}
+
+#[test]
+#[expected_failure(abort_code = 1010, location = splash_spend)]
+/// The operator, running a payment an owner approved, cannot settle it
+/// after the quote the owner approved has lapsed, whatever deadline it
+/// passes itself.
+fun the_executor_cannot_pay_after_the_approved_quote_lapsed() {
+    let (mut s, fx) = setup();
+    let intent = open(&mut s, &fx, STAFF, 81, payment_intent::kind_bank_payout(), h::recipient(), THRESHOLD + 1);
+    approve(&mut s, &fx, h::owner_2(), intent, EXECUTOR);
+    advance(&mut s, QUOTE_HOLD + 60_000);
+    s.next_tx(STRANGER);
+    let c = s.take_shared<Clock>();
+    let settle_by = c.timestamp_ms() + QUOTE_HOLD;
+    ts::return_shared(c);
+    pay_approved_by(&mut s, &fx, EXECUTOR, fx.executor, intent, settle_by);
+    s.end();
+}
+
 #[test]
 #[expected_failure(abort_code = splash_spend::E_NOT_PAYABLE)]
 /// An expired intent cannot be approved.
