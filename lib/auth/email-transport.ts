@@ -23,9 +23,21 @@ export type SendVerificationInput = {
   kind: VerificationEmailKind;
 };
 
+/** Any other message: a notice whose words the caller has already written. */
+export type EmailMessage = {
+  to: string;
+  subject: string;
+  /** Plain text. Paragraphs are separated by a blank line. */
+  text: string;
+  /** A paragraph of `text` that is exactly this URL becomes a link in HTML. */
+  link?: string;
+};
+
 export interface EmailTransport {
   readonly name: 'console' | 'resend';
   sendVerification(input: SendVerificationInput): Promise<void>;
+  /** Resolves with the provider's message id when it gives one. */
+  sendMessage(message: EmailMessage): Promise<{ providerRef: string | null }>;
 }
 
 /** The keys this module reads. A parameter, so tests pass literal objects. */
@@ -67,9 +79,9 @@ export function messageFor(input: SendVerificationInput): { subject: string; tex
   return { subject: 'Confirm your email address', text, html: htmlFor(text, input.url) };
 }
 
-function htmlFor(text: string, url: string): string {
+function htmlFor(text: string, url: string | null): string {
   const paragraphs = text.split('\n\n').map((paragraph) => {
-    if (paragraph === url) {
+    if (url !== null && paragraph === url) {
       const safe = escapeHtml(url);
       return `<p><a href="${safe}">${safe}</a></p>`;
     }
@@ -93,25 +105,38 @@ export function createConsoleTransport(env: TransportEnv = process.env): EmailTr
     async sendVerification(input) {
       console.info(`[email:console] ${input.kind} for ${input.to}\n  ${input.url}`);
     },
+    async sendMessage(message) {
+      console.info(`[email:console] "${message.subject}" for ${message.to}\n  ${message.text.split('\n')[0]}`);
+      return { providerRef: null };
+    },
   };
 }
 
 /** Resend over plain HTTPS. No SDK: one endpoint, one bearer token. */
 export function createResendTransport(input: { apiKey: string; from: string; fetch?: typeof fetch }): EmailTransport {
   const doFetch = input.fetch ?? globalThis.fetch;
+  async function post(to: string, subject: string, text: string, html: string, what: string) {
+    const response = await doFetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${input.apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: input.from, to: [to], subject, text, html }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) {
+      throw new EmailDeliveryError(`resend returned HTTP ${response.status} for a ${what} message`);
+    }
+    return response;
+  }
   return {
     name: 'resend',
     async sendVerification(message) {
       const { subject, text, html } = messageFor(message);
-      const response = await doFetch('https://api.resend.com/emails', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${input.apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ from: input.from, to: [message.to], subject, text, html }),
-        signal: AbortSignal.timeout(10_000),
-      });
-      if (!response.ok) {
-        throw new EmailDeliveryError(`resend returned HTTP ${response.status} for a ${message.kind} message`);
-      }
+      await post(message.to, subject, text, html, message.kind);
+    },
+    async sendMessage(message) {
+      const response = await post(message.to, message.subject, message.text, htmlFor(message.text, message.link ?? null), 'notice');
+      const body = (await response.json().catch(() => null)) as { id?: unknown } | null;
+      return { providerRef: typeof body?.id === 'string' ? body.id : null };
     },
   };
 }

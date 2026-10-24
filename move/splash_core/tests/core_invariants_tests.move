@@ -14,14 +14,14 @@
 module splash_core::core_invariants_tests;
 
 use splash_core::audit_anchor;
-use splash_core::business_account;
+use splash_core::business_account::{Self, BusinessAccount};
 use splash_core::cap_registry;
+use splash_core::compliance_config::ComplianceConfig;
 use splash_core::payment_intent;
+use splash_core::v2_harness::{Self as h, USDC};
 use std::unit_test::assert_eq;
-use sui::clock;
+use sui::clock::{Self, Clock};
 use sui::coin::{Self, Coin};
-use sui::sui::SUI;
-
 use sui::test_scenario;
 
 /// A second coin type, used to prove an intent cannot be settled in the wrong
@@ -29,29 +29,15 @@ use sui::test_scenario;
 public struct SCAM has drop {}
 
 const SENDER: address = @0xA11CE;
-const RECIPIENT: address = @0xB0B;
 
 const HASH: vector<u8> = b"0123456789abcdef0123456789abcdef";
 const BLOB: vector<u8> = b"walrus-blob-id";
-/// A 32-byte commitment, as lib/evidence/commitment.ts computes it off-chain.
-const COMMITMENT: vector<u8> = x"00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
-
-fun new_intent(c: &clock::Clock, ctx: &mut TxContext): payment_intent::PaymentIntent {
-    payment_intent::create<SUI>(
-        RECIPIENT,
-        b"counterparty:vendor-001",
-        1_000,
-        b"USD",
-        b"MY-PH",
-        b"PHP".to_string(),
-        56_000_000,
-        COMMITMENT,
-        c,
-        ctx,
-    )
-}
 
 // ── M1: no receipt without a consumed coin ─────────────────────────────────
+//
+// v2: these properties ran on the unbound path, which is no longer in the
+// package (docs/v2/phase1-move-design.md). They are pinned here on the path
+// that replaced it for a business's own payments: the business wallet's.
 
 #[test]
 /// M1. `create` used to return `(PaymentIntent, SettleReceipt)`, minting the
@@ -59,25 +45,57 @@ fun new_intent(c: &clock::Clock, ctx: &mut TxContext): payment_intent::PaymentIn
 /// function. The type asserted a settlement that had not happened, and
 /// `audit_anchor` would then anchor that assertion on chain as proof of payment.
 ///
-/// That this test COMPILES is half the assertion: `create` returns exactly one
-/// value. Reinstating the receipt mint stops this file building.
+/// That this test COMPILES is half the assertion: `create_for_wallet` returns
+/// exactly one value. Reinstating a receipt mint stops this file building.
 fun create_returns_intent_only_and_settles_nothing() {
-    let mut scenario = test_scenario::begin(SENDER);
-    let ctx = scenario.ctx();
-    let mut c = clock::create_for_testing(ctx);
-    c.set_for_testing(1_000_000);
+    let mut s = h::setup();
+    s.next_tx(h::wallet());
+    {
+        let mut account = s.take_shared<BusinessAccount>();
+        let config = s.take_shared<ComplianceConfig>();
+        let c = s.take_shared<Clock>();
+        let intent = h::wallet_intent(&mut account, &config, 1, h::amount(), &c, s.ctx());
 
-    let intent = new_intent(&c, ctx);
+        assert_eq!(payment_intent::sender(&intent), h::wallet());
+        assert_eq!(payment_intent::recipient(&intent), h::recipient());
+        assert_eq!(payment_intent::amount_usd(&intent), h::amount());
+        // STATUS_PENDING — creating an intent settles nothing.
+        assert_eq!(payment_intent::status(&intent), 0);
 
-    assert_eq!(payment_intent::sender(&intent), SENDER);
-    assert_eq!(payment_intent::recipient(&intent), RECIPIENT);
-    assert_eq!(payment_intent::amount_usd(&intent), 1_000);
-    // STATUS_PENDING — creating an intent settles nothing.
-    assert_eq!(payment_intent::status(&intent), 0);
+        payment_intent::cancel(intent, &c, s.ctx());
+        test_scenario::return_shared(c);
+        test_scenario::return_shared(config);
+        test_scenario::return_shared(account);
+    };
+    s.end();
+}
 
-    payment_intent::cancel(intent, ctx);
-    c.destroy_for_testing();
-    scenario.end();
+/// Open a bank payout from the wallet and pay it with `paid` units, anchoring
+/// the receipt, in one transaction.
+fun pay_from_wallet<T>(s: &mut test_scenario::Scenario, paid: u64, hash: vector<u8>, blob: vector<u8>) {
+    s.next_tx(h::wallet());
+    let mut account = s.take_shared<BusinessAccount>();
+    let config = s.take_shared<ComplianceConfig>();
+    let c = s.take_shared<Clock>();
+    let ctx = s.ctx();
+    let mut intent = h::wallet_intent(&mut account, &config, 1, h::amount(), &c, ctx);
+    let payment = coin::mint_for_testing<T>(paid, ctx);
+    let receipt = h::confirm(
+        &mut intent,
+        &mut account,
+        &config,
+        payment,
+        h::settle_by(&c),
+        &c,
+        ctx,
+    );
+    assert_eq!(payment_intent::status(&intent), 1); // STATUS_CONFIRMED
+    // The ONLY way to dispose of a receipt.
+    audit_anchor::anchor(receipt, hash, blob, &c, ctx);
+    payment_intent::delete_finalized(intent);
+    test_scenario::return_shared(c);
+    test_scenario::return_shared(config);
+    test_scenario::return_shared(account);
 }
 
 #[test]
@@ -85,129 +103,92 @@ fun create_returns_intent_only_and_settles_nothing() {
 /// potato — no `drop`, no `store`, no `key` — so the PTB must anchor it or
 /// abort. "Every settlement is anchored" is enforced by the type system.
 fun receipt_requires_a_consumed_coin_and_must_be_anchored() {
-    let mut scenario = test_scenario::begin(SENDER);
-    let ctx = scenario.ctx();
-    let mut c = clock::create_for_testing(ctx);
-    c.set_for_testing(1_000_000);
-
-    let mut intent = new_intent(&c, ctx);
-    let payment = coin::mint_for_testing<SUI>(1_000, ctx);
-
-    let receipt = payment_intent::confirm_payment_intent(&mut intent, payment, &c, ctx);
-    assert_eq!(payment_intent::status(&intent), 1); // STATUS_CONFIRMED
-
-    // The ONLY way to dispose of a receipt.
-    audit_anchor::anchor(receipt, HASH, BLOB, &c, ctx);
-
-    payment_intent::delete_finalized(intent);
-    c.destroy_for_testing();
-    scenario.end();
+    let mut s = h::setup();
+    pay_from_wallet<USDC>(&mut s, h::amount(), HASH, BLOB);
+    s.end();
 }
 
 #[test]
 #[expected_failure(abort_code = 402, location = splash_core::payment_intent)]
 /// Underpayment aborts — no receipt can be minted for less than the intent.
 fun underpayment_aborts() {
-    let mut scenario = test_scenario::begin(SENDER);
-    let ctx = scenario.ctx();
-    let mut c = clock::create_for_testing(ctx);
-    c.set_for_testing(1_000_000);
-
-    let mut intent = new_intent(&c, ctx);
-    let short = coin::mint_for_testing<SUI>(999, ctx);
-
-    let receipt = payment_intent::confirm_payment_intent(&mut intent, short, &c, ctx);
-    audit_anchor::anchor(receipt, HASH, BLOB, &c, ctx);
-    payment_intent::delete_finalized(intent);
-    c.destroy_for_testing();
-    scenario.end();
+    let mut s = h::setup();
+    pay_from_wallet<USDC>(&mut s, h::amount() - 1, HASH, BLOB);
+    s.end();
 }
 
 #[test]
-/// Overpay is refunded to the payer EXACTLY: the recipient gets the intent
-/// amount and not a unit more, and nothing is stranded in the module. H-03.
+/// Overpay goes back EXACTLY: the recipient gets the intent amount and not a
+/// unit more, the change lands in the wallet's address balance (where a
+/// business wallet keeps its funds, D1), and nothing is stranded in the module.
+/// H-03.
 fun overpayment_refunded_exactly() {
-    let mut scenario = test_scenario::begin(SENDER);
-    {
-        let ctx = scenario.ctx();
-        let mut c = clock::create_for_testing(ctx);
-        c.set_for_testing(1_000_000);
-        let mut intent = new_intent(&c, ctx);
-        let over = coin::mint_for_testing<SUI>(1_500, ctx);
-        let receipt = payment_intent::confirm_payment_intent(&mut intent, over, &c, ctx);
-        audit_anchor::anchor(receipt, HASH, BLOB, &c, ctx);
-        payment_intent::delete_finalized(intent);
-        c.destroy_for_testing();
-    };
+    let mut s = h::setup();
+    pay_from_wallet<USDC>(&mut s, h::amount() + 500, HASH, BLOB);
 
-    scenario.next_tx(SENDER);
+    s.next_tx(h::recipient());
     {
-        let refund = scenario.take_from_sender<Coin<SUI>>();
-        assert_eq!(coin::value(&refund), 500);
-        scenario.return_to_sender(refund);
+        let paid = s.take_from_sender<Coin<USDC>>();
+        assert_eq!(coin::value(&paid), h::amount());
+        s.return_to_sender(paid);
     };
-
-    scenario.next_tx(RECIPIENT);
-    {
-        let paid = scenario.take_from_sender<Coin<SUI>>();
-        assert_eq!(coin::value(&paid), 1_000);
-        scenario.return_to_sender(paid);
-    };
-    scenario.end();
+    assert_eq!(test_scenario::settled_balance<USDC>(h::wallet()), 500);
+    s.end();
 }
 
 #[test]
-/// Exact payment leaves no refund coin at all — `destroy_zero` on a provably
-/// zero coin, so no dust object is created.
+/// Exact payment leaves no change at all: `destroy_zero` on a provably zero
+/// coin, so neither a dust object nor a zero credit is created.
 fun exact_payment_creates_no_refund() {
-    let mut scenario = test_scenario::begin(SENDER);
+    let mut s = h::setup();
+    pay_from_wallet<USDC>(&mut s, h::amount(), HASH, BLOB);
+    s.next_tx(h::recipient());
     {
-        let ctx = scenario.ctx();
-        let mut c = clock::create_for_testing(ctx);
-        c.set_for_testing(1_000_000);
-        let mut intent = new_intent(&c, ctx);
-        let exact = coin::mint_for_testing<SUI>(1_000, ctx);
-        let receipt = payment_intent::confirm_payment_intent(&mut intent, exact, &c, ctx);
-        audit_anchor::anchor(receipt, HASH, BLOB, &c, ctx);
-        payment_intent::delete_finalized(intent);
-        c.destroy_for_testing();
+        let paid = s.take_from_sender<Coin<USDC>>();
+        assert_eq!(coin::value(&paid), h::amount());
+        s.return_to_sender(paid);
     };
-    scenario.next_tx(RECIPIENT);
-    {
-        let paid = scenario.take_from_sender<Coin<SUI>>();
-        assert_eq!(coin::value(&paid), 1_000);
-        scenario.return_to_sender(paid);
-    };
-    scenario.end();
+    assert_eq!(test_scenario::settled_balance<USDC>(h::wallet()), 0);
+    s.next_tx(h::wallet());
+    assert!(!test_scenario::has_most_recent_for_sender<Coin<USDC>>(&s));
+    s.end();
 }
 
 #[test]
-#[expected_failure(abort_code = 404, location = splash_core::payment_intent)]
-/// Only the intent's own sender may confirm it (H-02). A third party holding a
-/// shared intent object cannot push it through.
+#[expected_failure(abort_code = 50, location = splash_core::business_account)]
+/// Only the account's wallet may pay from the wallet path (H-02). A third party
+/// holding the shared intent cannot push it through, even with its own coin.
 fun third_party_cannot_confirm() {
-    let mut scenario = test_scenario::begin(SENDER);
-    let mut intent;
+    let mut s = h::setup();
+    s.next_tx(h::wallet());
     {
-        let ctx = scenario.ctx();
-        let mut c = clock::create_for_testing(ctx);
-        c.set_for_testing(1_000_000);
-        intent = new_intent(&c, ctx);
-        c.destroy_for_testing();
+        let mut account = s.take_shared<BusinessAccount>();
+        let config = s.take_shared<ComplianceConfig>();
+        let c = s.take_shared<Clock>();
+        let intent = h::wallet_intent(&mut account, &config, 1, h::amount(), &c, s.ctx());
+        payment_intent::share_intent(intent);
+        test_scenario::return_shared(c);
+        test_scenario::return_shared(config);
+        test_scenario::return_shared(account);
     };
-
-    scenario.next_tx(@0xBADBAD);
+    s.next_tx(@0xBADBAD);
     {
-        let ctx = scenario.ctx();
-        let mut c = clock::create_for_testing(ctx);
-        c.set_for_testing(1_000_000);
-        let payment = coin::mint_for_testing<SUI>(1_000, ctx);
-        let receipt = payment_intent::confirm_payment_intent(&mut intent, payment, &c, ctx);
+        let mut account = s.take_shared<BusinessAccount>();
+        let config = s.take_shared<ComplianceConfig>();
+        let c = s.take_shared<Clock>();
+        let mut intent = s.take_shared<payment_intent::PaymentIntent>();
+        let ctx = s.ctx();
+        let payment = coin::mint_for_testing<USDC>(h::amount(), ctx);
+        let receipt = h::confirm(
+            &mut intent, &mut account, &config, payment, h::settle_by(&c), &c, ctx,
+        );
         audit_anchor::anchor(receipt, HASH, BLOB, &c, ctx);
-        c.destroy_for_testing();
+        test_scenario::return_shared(intent);
+        test_scenario::return_shared(c);
+        test_scenario::return_shared(config);
+        test_scenario::return_shared(account);
     };
-    payment_intent::delete_finalized(intent);
-    scenario.end();
+    s.end();
 }
 
 // ── Anchor validation ──────────────────────────────────────────────────────
@@ -216,85 +197,56 @@ fun third_party_cannot_confirm() {
 #[expected_failure(abort_code = 500, location = splash_core::audit_anchor)]
 /// An anchor with no content hash is not evidence of anything.
 fun anchor_rejects_empty_digest() {
-    let mut scenario = test_scenario::begin(SENDER);
-    let ctx = scenario.ctx();
-    let mut c = clock::create_for_testing(ctx);
-    c.set_for_testing(1_000_000);
-
-    let mut intent = new_intent(&c, ctx);
-    let payment = coin::mint_for_testing<SUI>(1_000, ctx);
-    let receipt = payment_intent::confirm_payment_intent(&mut intent, payment, &c, ctx);
-
-    audit_anchor::anchor(receipt, b"", BLOB, &c, ctx);
-    payment_intent::delete_finalized(intent);
-    c.destroy_for_testing();
-    scenario.end();
+    let mut s = h::setup();
+    pay_from_wallet<USDC>(&mut s, h::amount(), b"", BLOB);
+    s.end();
 }
 
 #[test]
 #[expected_failure(abort_code = 502, location = splash_core::audit_anchor)]
 /// An anchor pointing at no blob cannot be verified off chain.
 fun anchor_rejects_empty_blob() {
-    let mut scenario = test_scenario::begin(SENDER);
-    let ctx = scenario.ctx();
-    let mut c = clock::create_for_testing(ctx);
-    c.set_for_testing(1_000_000);
-
-    let mut intent = new_intent(&c, ctx);
-    let payment = coin::mint_for_testing<SUI>(1_000, ctx);
-    let receipt = payment_intent::confirm_payment_intent(&mut intent, payment, &c, ctx);
-
-    audit_anchor::anchor(receipt, HASH, b"", &c, ctx);
-    payment_intent::delete_finalized(intent);
-    c.destroy_for_testing();
-    scenario.end();
+    let mut s = h::setup();
+    pay_from_wallet<USDC>(&mut s, h::amount(), HASH, b"");
+    s.end();
 }
 
 #[test]
 #[expected_failure(abort_code = 414, location = splash_core::payment_intent)]
-/// An intent opened in SUI cannot be discharged with a different coin type.
+/// An intent opened in USDC cannot be discharged with a different coin type.
 ///
-/// This is why `confirm_payment_intent` binds the asset rather than just being
+/// This is why every settle path binds the asset rather than just being
 /// generic. The only amount check is `coin::value(&payment) >= amount_usd`, and
 /// unit counts mean nothing across assets — so an unbound generic would let a
-/// payer settle a 1,000-unit obligation with 1,000 units of a worthless token
-/// and the recipient would receive exactly that. Strictly worse than the
-/// hardcoded `Coin<SUI>` it replaces.
+/// payer settle a 100 USDC obligation with 100 units of a worthless token and
+/// the recipient would receive exactly that.
 fun intent_cannot_be_settled_in_the_wrong_asset() {
-    let mut scenario = test_scenario::begin(SENDER);
-    let ctx = scenario.ctx();
-    let mut c = clock::create_for_testing(ctx);
-    c.set_for_testing(1_000_000);
-
-    let mut intent = new_intent(&c, ctx);           // opened in SUI
-    let wrong = coin::mint_for_testing<SCAM>(1_000_000, ctx);  // paid in SCAM
-
-    let receipt = payment_intent::confirm_payment_intent(&mut intent, wrong, &c, ctx);
-    audit_anchor::anchor(receipt, HASH, BLOB, &c, ctx);
-    payment_intent::delete_finalized(intent);
-    c.destroy_for_testing();
-    scenario.end();
+    let mut s = h::setup();
+    pay_from_wallet<SCAM>(&mut s, 1_000_000_000_000, HASH, BLOB);
+    s.end();
 }
 
 #[test]
 /// The asset the intent records is the asset it settles in, and it is readable
 /// on chain so an auditor can confirm the denomination without guessing.
 fun settlement_asset_is_recorded_and_matches() {
-    let mut scenario = test_scenario::begin(SENDER);
-    let ctx = scenario.ctx();
-    let mut c = clock::create_for_testing(ctx);
-    c.set_for_testing(1_000_000);
-
-    let mut intent = new_intent(&c, ctx);
-    let recorded = *payment_intent::settlement_asset(&intent);
-    assert!(std::string::length(&recorded) > 0, 0);
-
-    let payment = coin::mint_for_testing<SUI>(1_000, ctx);
-    let receipt = payment_intent::confirm_payment_intent(&mut intent, payment, &c, ctx);
-    audit_anchor::anchor(receipt, HASH, BLOB, &c, ctx);
-    payment_intent::delete_finalized(intent);
-    c.destroy_for_testing();
-    scenario.end();
+    let mut s = h::setup();
+    s.next_tx(h::wallet());
+    {
+        let mut account = s.take_shared<BusinessAccount>();
+        let config = s.take_shared<ComplianceConfig>();
+        let c = s.take_shared<Clock>();
+        let intent = h::wallet_intent(&mut account, &config, 1, h::amount(), &c, s.ctx());
+        assert_eq!(
+            *payment_intent::settlement_asset(&intent),
+            splash_core::compliance_config::type_string<USDC>(),
+        );
+        payment_intent::cancel(intent, &c, s.ctx());
+        test_scenario::return_shared(c);
+        test_scenario::return_shared(config);
+        test_scenario::return_shared(account);
+    };
+    s.end();
 }
 
 #[test]
@@ -416,10 +368,11 @@ fun business_is_unverified_until_admin_verifies() {
         let mut account = scenario.take_shared<business_account::BusinessAccount>();
         assert_eq!(business_account::is_verified(&account), false);
         assert_eq!(business_account::owner(&account), SENDER);
-        // The founder is an owner. They are NOT an approver — an account that
-        // arrives able to approve its own payouts has no four-eyes rule.
+        // The founder is an owner, and the only one. No business wallet yet,
+        // so nothing can be paid from the account until the owners register one.
         assert_eq!(business_account::is_owner(&account, SENDER), true);
-        assert_eq!(business_account::is_approver(&account, SENDER), false);
+        assert_eq!(business_account::owners(&account), vector[SENDER]);
+        assert_eq!(business_account::has_wallet(&account), false);
 
         let ctx = scenario.ctx();
         let admin = business_account::admin_cap_for_testing(ctx);

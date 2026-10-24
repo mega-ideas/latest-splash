@@ -9,8 +9,8 @@ application is in preparation with counsel. Splash **cannot hold client funds** 
 a constraint that is self-imposed rather than licence-derived, and not a runtime
 flag either: it is a property of the type system. `splash_core`, the package
 that publishes to mainnet, contains no struct that can hold a `Balance`. Every
-struct that can lives in `splash_custody`, which is **not published** until the
-e-money licence is granted.
+struct that can lives in `splash_custody`, which v2 retires from the mainnet
+path for good (D11). It runs on testnet only.
 
 ```mermaid
 flowchart LR
@@ -167,10 +167,13 @@ cd move/splash_custody && sui move build && sui move test  # 16 tests
 ```
 
 **Phase 0 publishes `splash_core` ONLY.** `splash_custody` holds every
-`Balance` in the system and publishes when the Labuan e-money licence is
-granted — leaving it unpublished is the control, not an oversight. `splash_core`
-publishes **immutable** (UpgradeCap burned); see
-[`docs/KEY-CEREMONY-RUNBOOK.md`](./docs/KEY-CEREMONY-RUNBOOK.md).
+`Balance` in the system, and v2 retires it from the mainnet path for good
+(D11): app-bound allowances and address balances replace pooled settlement.
+Leaving it unpublished is the control, not an oversight. In v2 `splash_core`
+upgrades additive-only behind the 24-hour `splash_upgrade_delay` wrapper, and
+`splash_spend` and `splash_upgrade_delay` publish immutable; see
+[`docs/UPGRADE-POLICY.md`](./docs/UPGRADE-POLICY.md) and
+[`docs/MAINNET-CHECKLIST.md`](./docs/MAINNET-CHECKLIST.md).
 
 When you are ready to publish to testnet, run only after explicit confirmation:
 

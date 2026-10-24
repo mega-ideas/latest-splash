@@ -178,17 +178,28 @@ transfer, but the **seller's facilitator** broadcasts the payment, not Splash.
 
 The simplest route is also the recommended one: send **native USDC on Sui**
 to the Splash wallet address. The planner (Send USDC → "Fund this wallet
-from another chain") plans the rest. It moves nothing. Facts, from Circle's
-developer docs as of 2026-09-24:
+from another chain") plans the rest over **CCTP V2**. It moves nothing.
+Facts from Circle's developer docs, read 24 Oct 2026:
+[Supported blockchains and domains](https://developers.circle.com/cctp/concepts/supported-chains-and-domains),
+[Finality and block confirmations](https://developers.circle.com/cctp/concepts/finality-and-block-confirmations)
+and [CCTP fees](https://developers.circle.com/cctp/concepts/fees).
+The Sui package and state IDs are in `docs/mainnet-checks-2026-10.md`, section 5.
 
-- **CCTP carries USDC only.** USDT is swapped to USDC on the source chain first, with a slippage floor.
-- **Sui is on CCTP V1 (legacy) only**, domain 8. V1 has been in a manual phase-out since **31 July 2026**, ending in a full contract pause.
-- **Ethereum (0), Arbitrum (3), Base (6) and Solana (5)** still reach Sui over V1, for now. The planner warns on every plan.
-- **Aptos has no CCTP route to Sui.** Aptos is V2-only, and V1 and V2 do not interoperate. The planner says so and offers alternatives.
-- **V1 waits for source-chain finality:** about 13–20 minutes from Ethereum and its rollups, under a minute from Solana.
-- **Fees:** Circle charges no fee on V1, but each side's gas is paid by the person. Claiming the mint on Sui needs SUI.
+- **Sui is on CCTP V2, domain 8.** The legacy CCTP is not used anywhere in Splash (decision D13; Circle shuts it down 31 Oct → 1 Dec 2026). Circle's site still carries one line saying Sui needs the legacy version; the Sui packages page and the chain say V2.
+- **29 USDC chains besides Sui are listed, and the planner plans 28.** Circle lists 31 CCTP V2 chains, all of them destinations. BNB Smart Chain carries USYC, not USDC, so it is left out. Sei is listed but not planned: its TokenMessengerV2 carries Circle's standard-transfer fee switch, so a burn reverts unless `maxFee` covers `getMinFeeAmount`, a minimum set on chain that the offline planner cannot read (`planFunding` returns the route as unavailable, with alternatives). The rest, Aptos included, can fund a Splash wallet. Noble is on the legacy version only and is not listed.
+- **CCTP carries USDC only.** USDT is swapped to USDC on the source chain first, with a slippage floor. There is no native USDT on Sui.
+- **Standard transfer** is the default. Circle attests after hard finality on the source chain: about 15–19 minutes from Ethereum and most of its rollups, 6–32 hours from Linea, 2–4 hours from Starknet, seconds from Sui, Aptos, Solana and most other chains. Circle's fee table lists **0 bps** for a standard transfer from every chain except Stellar, which it does not list. Sei is the exception in practice: its TokenMessengerV2 enforces an on-chain minimum standard fee, so no burn from Sei is planned. Fees can change, so the burn sets `maxFee` 0: a fee above it makes the burn revert, and nothing is burned.
+- **Fast transfer** is offered from 15 chains (Ethereum, Arbitrum, Base, Solana and others), at **1–13 bps** by source, taken from the amount at mint, in seconds. Into Sui it appears available, because every chain is a destination; **confirm with Circle before relying on it.** The planner's fast fees are for planning only: fetch the live fee from Circle before a burn. Circle does not offer fast transfer where standard is already fast, Sui included.
+- **Gas:** each side's gas is paid by the person, in that chain's native token. Claiming the mint on Sui needs SUI.
 
-Executing CCTP (the source-chain burn and the Sui claim) is not built. The planner gives the exact parameters: domains, and the 32-byte `mintRecipient`.
+**Cross-chain recipients** (D5(c)) run the other way: burn USDC on Sui, mint it on the recipient's chain. `planCrossChainPayout` plans it, standard only (about 0.5 seconds from Sui, 0 bps listed). The 32-byte `mint_recipient` is:
+
+- **EVM chains:** the 20-byte address left-padded with zeros. A mixed-case address must pass its checksum.
+- **Solana:** the recipient's **USDC token account** (associated token account), never the wallet address. It must exist when the mint is submitted. The caller derives it and confirms it, because Splash cannot tell the two apart offline.
+- **Aptos:** the 64-hex account address.
+- **Starknet and Stellar:** not planned. Circle does not state Starknet's recipient encoding, and Stellar needs Circle's forwarder contract and hook data, where a wrong value strands the funds.
+
+Executing CCTP (the burn, the attestation fetch and the mint, in either direction) is not built. The planner gives the exact parameters: domains, the 32-byte `mintRecipient`, `destinationCaller`, `maxFee` and `minFinalityThreshold`.
 
 ## Treasury: Ondo USDY in the business's own wallet (lib/payments/treasury-usdy.ts)
 

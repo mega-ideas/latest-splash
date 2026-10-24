@@ -4,6 +4,123 @@ Status snapshot 2026-07-18, the day before demo day. Source of truth for
 "what's left": the mainnet-readiness prompt (W1–W8) + the W9/W10 addendum.
 Order of work: W1 → W2 → (W3 ∥ W4) → W5 → W6 → W7 → W8; W10 alongside.
 
+## v2 mainnet steps — human only (brief §9, 24 Oct 2026)
+
+Claude Code writes these steps and does not perform them. Nothing here is
+done by a script that holds a mainnet key. The design is in
+[`docs/v2/phase1-move-design.md`](v2/phase1-move-design.md) and the
+procedure in [`docs/UPGRADE-POLICY.md`](UPGRADE-POLICY.md).
+
+**Before any publish**
+
+- [ ] Sui CLI `mainnet-v1.82.3`. Every package passes `sui move build &&
+      sui move test`, and `npm run lint` passes, including `check:core` and
+      `check:spend`.
+- [ ] The independent Move review (OtterSec, or Zellic as backup) has signed
+      off on this exact source commit. Record the commit.
+- [ ] **The governance multisig exists**: Sky, Sebastian and the cold backup,
+      2-of-3, with no single member able to sign alone. Record its address and
+      the three public keys. It never signs `0x2::address_alias`.
+- [ ] The previously exposed operator and API keys are rotated, and the
+      operator signs only through AWS KMS (`OPERATOR_KMS_KEY_ID`; production
+      refuses a raw key at boot).
+
+**Publish order (fresh packages; v2 core is not an upgrade of anything)**
+
+1. [ ] Publish `splash_core`. Record the package ID, `AdminCap`,
+       `TreasuryCap`, `AnchorCap`, `CapRegistry`, the `ConfigTicket` and
+       the `UpgradeCap`.
+2. [ ] `compliance_config::create<USDC>`, consuming the `ConfigTicket`, with
+       native mainnet USDC
+       (`0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC`).
+       Exactly one config can ever exist. Record its ID. Every
+       `spend_policy::create_policy` must pass this config, and each policy
+       records its ID: `splash_spend` then opens and pays only against it.
+3. [ ] Publish `splash_spend` and make it immutable **in the same
+       transaction**: one PTB with `Publish`, then
+       `0x2::package::make_immutable` on the `UpgradeCap` the publish
+       returned, and nothing else. A separate transaction leaves a window in
+       which one key holds the `UpgradeCap`, and the verify step fails such a
+       publish. Record the digest.
+4. [ ] Publish `splash_upgrade_delay` the same way: `Publish` and
+       `make_immutable` in one transaction. Record the digest.
+       `scripts/e2e-testnet.mjs` (through `scripts/v2-end-state.mjs`) checks
+       both publishes: each must be exactly those two commands, leave no
+       `UpgradeCap` behind, and be version 1 with no later versions.
+5. [ ] Transfer core's `UpgradeCap` to the governance multisig. The multisig
+       calls `upgrade_delay::wrap(cap, keys, weights, threshold)` itself,
+       which makes the policy additive. Record the `DelayedUpgradeCap` ID.
+       Confirm on chain that the policy is 128 (additive) and the owner is the
+       multisig.
+6. [ ] Transfer `AdminCap` to the governance multisig. Transfer the
+       `ComplianceCap` to a third address (2-of-3), never the operator's.
+7. [ ] The governance multisig calls
+       `compliance_config::propose_addition<splash_spend::splash_spend::SettleWitness>`
+       for the settlement-app registry (2). Wait 24 hours. Then call
+       `activate_addition`, no later than 7 days after the notice ran out.
+       Spending rules work from then on.
+8. [ ] Do not register any bridge adapter until the CCTP V2 adapter has been
+       reviewed and published **immutable**.
+8a. [ ] **Before the first business onboards, read the config's registries
+       and check them exactly.** `settlement_apps` is exactly
+       `[<published splash_spend>::splash_spend::SettleWitness]`,
+       `bridge_adapters` is `[]`, `accepted_assets` is exactly native mainnet
+       USDC, and `pending_additions` is `[]`. On-chain governance checks prove
+       only that the sender holds `AdminCap` and is a multisig no single
+       member can sign for, not that it is the governance multisig, and a
+       proposal made before the alert cron runs reaches no owner.
+       `scripts/v2-end-state.mjs` does not read the registries, so this is a
+       manual read; record the output.
+8b. [ ] **Before any asset addition:** confirm the asset has 6 decimals
+       (`coin_registry::decimals` on its `Currency`). Tier ceilings, the
+       bank-payout floor and the 10,000 USDC second-approval threshold are
+       6-decimal minor units, and `activate_addition` does not check
+       decimals.
+9. [ ] **Decision for Sky: when the legacy approver path closes.** A fresh
+       config starts with `legacy_enabled` on, so a business with no wallet
+       can still pay through one person's `PayoutApproval`. Closing it is
+       one-way: `compliance_config::admin_disable_legacy` (governance
+       multisig) or `disable_legacy` (`ComplianceCap`), and nothing can turn
+       it back on. Recommended: close it before the first business onboards,
+       because on a fresh mainnet every business starts with a wallet.
+
+**Environment (mainnet)**
+
+- [ ] `SPLASH_CORE_PACKAGE_ID`, `SPLASH_PACKAGE_ID`,
+      `SPLASH_COMPLIANCE_CONFIG_ID`, `SPLASH_CAP_REGISTRY_ID` and
+      `SPLASH_ANCHOR_CAP_ID` are set to the new IDs, as are the governance
+      alert IDs `SPLASH_UPGRADE_DELAY_PACKAGE_ID` and
+      `SPLASH_UPGRADE_WRAPPER_ID`.
+- [ ] `SPLASH_CUSTODY_PACKAGE_ID` and `SPLASH_PAYOUT_DELEGATION_ID` are
+      **unset**. Production on mainnet refuses to boot with either, because
+      custody and the meter are retired in v2. On mainnet the
+      `splash_custody` settlement paths (single transfer, delegated batch,
+      Smart Treasury allocation) refuse in every `SUI_SETTLEMENT_MODE`, so
+      `SUI_SETTLEMENT_MODE=simulate` or `SUI_BATCH_SETTLEMENT_MODE=simulate`
+      cannot mark a batch SETTLED.
+- [ ] `FUNDING_DEPOSIT_DERIVATION_SECRET` and
+      `FUNDING_CCTP_DEPOSIT_ADDRESSES_JSON` are **unset**. Production on
+      mainnet refuses to boot with either: on mainnet funding sessions give
+      out no deposit address (D1, D3), and a stablecoin funding session is
+      refused with `no_deposit_address_on_mainnet`.
+- [ ] The governance alert cron (`/api/cron/governance-alerts`) is scheduled,
+      and a test proposal on testnet reached every test owner. Against the
+      mainnet ids it answers 200. A 502 naming `SPLASH_UPGRADE_WRAPPER_ID` or
+      `SPLASH_COMPLIANCE_CONFIG_ID` means that id is not the canonical object.
+
+**Partners and legal**
+
+- [ ] Sumsub, Elliptic and every payout partner contract is signed before its
+      flag is switched on.
+- [ ] `SIGNED_PARTNERS` lists exactly the partners whose agreements are
+      signed. It is empty by default, and nobody is named until then.
+- [ ] The SSM registration number is entered in `BRAND.legalEntity`
+      (`content/brand.ts`). The footer carries no entity until it is.
+- [ ] Legal sign-off on Treasury, including the Halogen referral wording,
+      before Treasury is enabled.
+- [ ] Each partner confirms its deposit-address model (Phase 0 check 6). Is
+      the address fixed per business, or issued per payout?
+
 ## Shipped (in review)
 - [x] W9.0 type & color discipline · W9.1 quote comparison card ·
       W9.2 receipt + proof layer + share link · W9.4 money-path panel

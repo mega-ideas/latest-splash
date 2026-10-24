@@ -45,7 +45,8 @@ function settlementMode(): 'auto' | 'live' | 'simulate' {
 // so a real batch can abort mid-demo. Setting SUI_BATCH_SETTLEMENT_MODE=simulate
 // keeps batch on a labelled SIM_ receipt while single transfers, treasury, and the
 // composed proof flow still settle for real. Returns null → fall through to the
-// global mode.
+// global mode. Never reached on mainnet: the batch path is refused there before
+// any mode is read (refuseRetiredCustodyPathOnMainnet).
 function batchExecutionOverride(): SettlementExecution | null {
   const mode = (process.env.SUI_BATCH_SETTLEMENT_MODE ?? '').trim().toLowerCase();
   return mode === 'simulate' ? 'simulate' : null;
@@ -270,6 +271,9 @@ function resolveFeeBps(input: { feeBps?: number; targetCurrency?: string }): num
  *   600–699 dual_treasury
  *   700–799 smart_treasury
  *   800–899 receipt_v2
+ *   1000–1099 splash_spend
+ *   1100–1199 splash_upgrade_delay
+ *   1200–1249 multisig
  */
 const ABORT_CODES: Record<number, string> = {
   // ── business_account ──────────────────────────────────────────────────────
@@ -333,17 +337,17 @@ const ABORT_CODES: Record<number, string> = {
 
   // ── payment_intent ───────────────────────────────────────────────────────
   400: 'E_NOT_PENDING — payment_intent confirm/cancel called on an intent that is not in STATUS_PENDING.',
-  401: 'E_EXPIRED — payment_intent::confirm_payment_intent called past intent.expires_at.',
-  402: 'E_INSUFFICIENT_PAYMENT — coin value below intent.amount_usd on confirm.',
+  401: 'E_EXPIRED — the intent reached its expires_at (the time its creator chose, at most 30 days out) before this settlement. Every settle path refuses it from that moment on; open a new intent.',
+  402: 'E_INSUFFICIENT_PAYMENT — the payment is below the intent amount plus Splash’s fee for this payment. The fee is computed on chain from the kind and the amount; pay at least both.',
   403: 'E_NOT_YET_EXPIRED — payment_intent::cancel_payment_intent called before intent.expires_at.',
   404: 'E_UNAUTHORIZED — payment_intent action attempted by an address other than intent.sender.',
-  405: 'E_INVALID_AMOUNT — payment_intent::create_payment_intent called with amount_usd = 0.',
+  405: 'E_INVALID_AMOUNT — a payment_intent::create* call was given an amount of 0.',
   406: 'E_INVALID_RECIPIENT — payment_intent recipient is the zero address.',
   407: 'E_EMPTY_TARGET_CURRENCY — payment_intent target currency is empty.',
   408: 'E_INVALID_FX_RATE — payment_intent FX rate must be greater than zero.',
-  409: 'E_EMPTY_BENEFICIARY_REF — payment_intent::create called without a verified counterparty reference hash.',
-  410: 'E_EMPTY_CURRENCY — payment_intent::create called without a currency tag.',
-  411: 'E_EMPTY_CORRIDOR — payment_intent::create called without a corridor tag.',
+  409: 'E_EMPTY_BENEFICIARY_REF (v1 testnet package only) — payment_intent::create called without a verified counterparty reference hash.',
+  410: 'E_EMPTY_CURRENCY (v1 testnet package only) — payment_intent::create called without a currency tag.',
+  411: 'E_EMPTY_CORRIDOR (v1 testnet package only) — payment_intent::create called without a corridor tag.',
   413: 'E_UNAUTHORIZED_RECEIPT_CONSUMER — a module other than audit_anchor tried to unpack a SettleReceipt. Only the anchoring path can construct the witness, which is what makes “every settlement is anchored” a type-system guarantee.',
   414: 'E_WRONG_SETTLEMENT_ASSET — the coin type offered does not match the asset the intent was opened in. The intent binds its settlement asset at creation; check SPLASH_SETTLEMENT_COIN_TYPE and how the payment coin is sourced.',
   412: 'E_STILL_PENDING — payment_intent::delete_finalized called on a pending intent; confirm or cancel it first.',
@@ -377,35 +381,35 @@ const ABORT_CODES: Record<number, string> = {
   4: 'E_INVALID_HOLDER — business_account::rotate_anchor_cap called with holder = 0x0.',
   5: 'E_NOT_VERIFIED_YET — revoke_verification called on an account that was never verified.',
   20: 'E_NOT_AN_OWNER — the signer is not an owner of this business account. Membership is read from the account’s own `owners` set on every call; being a Splash admin does not substitute.',
-  21: 'E_NOT_AN_APPROVER — the signer is not in this account’s approver set. Owners are not approvers by default: separation of duties is set membership, not seniority.',
-  22: 'E_FROZEN — the account is stopped. Two independent flags: an owner freeze, which any owner can lift, and a compliance freeze, which only the AdminCap can. Membership cannot change while either is set.',
+  21: 'E_NOT_AN_APPROVER (earlier testnet packages only) — the signer is not in the account’s legacy approver set. v2 core has no approver set: an owner’s second approval is splash_spend::approve_payout, which refuses a non-member with 1009.',
+  22: 'E_FROZEN — the account is stopped. Two independent flags: an owner freeze, which any owner can pull and (once a business wallet is registered) only the wallet can lift, and a compliance freeze, which only the AdminCap can. Before a wallet registers, membership cannot change while either is set; after, the wallet can change the owners under an owner freeze but not under a compliance freeze.',
   23: 'E_NOT_FROZEN — unfreeze called on an account that is not frozen by that authority. An owner cannot clear a compliance freeze by lifting their own.',
   24: 'E_LAST_OWNER — refused to remove the only owner. An account with no owners has no path back except a recovery party, which is optional.',
-  25: 'E_ALREADY_A_MEMBER — that address is already an owner or approver, or a pending recovery has already been performed by the owners themselves.',
+  25: 'E_ALREADY_A_MEMBER — that address is already an owner, or a pending recovery has already been performed by the owners themselves.',
   26: 'E_NOT_A_MEMBER — that address is not in the set you are removing it from.',
   27: 'E_NOT_RECOVERY_PARTY — only the nominated recovery party can request, execute or cancel a recovery.',
-  28: 'E_INVALID_ADDRESS — an owner, approver, recovery party or maker was given as 0x0.',
-  29: 'E_SELF_APPROVAL — the approver is the maker. Four eyes is enforced on chain: whoever initiated a payment cannot release it.',
-  30: 'E_STALE_AUTHORITY — the approval was minted under an authority set that has since changed. Every membership change, freeze, recovery and KYB withdrawal bumps the account’s authority epoch, so a revoked approver’s approval is dead even though the object still exists — and re-granting the same address does not revive it. Ask for a fresh approval.',
-  31: 'E_WRONG_ACCOUNT — the approval belongs to a different business account than the one passed.',
-  32: 'E_APPROVAL_EXPIRED — the approval is past its fifteen-minute TTL.',
-  33: 'E_AMOUNT_MISMATCH — the approval’s amount does not match the intent’s, or an approval was requested for zero.',
-  34: 'E_TOO_MANY_MEMBERS — the owner or approver set is at its cap (16). An unbounded set is a gas cliff and an object-size risk.',
-  35: 'E_RECOVERY_IS_INSIDER — the recovery party cannot also be an owner or approver. A recovery party drawn from the same people is not a recovery path.',
-  36: 'E_NOT_VERIFIED — the business account is not KYB-verified, so no payout can be approved or released from it.',
+  28: 'E_INVALID_ADDRESS — an owner, a recovery party, a recovered owner or a nominated wallet was given as 0x0.',
+  29: 'E_SELF_APPROVAL (earlier testnet packages only) — the legacy approver was the maker. Under v2 the same four-eyes rule is splash_spend’s 1008.',
+  30: 'E_STALE_AUTHORITY (earlier testnet packages only) — a legacy approval was minted under an authority set that has since changed. Under v2 a spending-rule approval dies the same way, with splash_spend’s 1021.',
+  31: 'E_WRONG_ACCOUNT (earlier testnet packages only) — a legacy approval belonged to a different business account than the one passed.',
+  32: 'E_APPROVAL_EXPIRED (earlier testnet packages only) — a legacy approval was past its fifteen-minute TTL. Under v2 a spending-rule approval lapses at the settle_by_ms its approver chose (1010).',
+  33: 'E_AMOUNT_MISMATCH (earlier testnet packages only) — a legacy approval’s amount did not match the intent’s.',
+  34: 'E_TOO_MANY_MEMBERS — the owner set is at its cap (16). An unbounded set is a gas cliff and an object-size risk.',
+  35: 'E_RECOVERY_IS_INSIDER — the recovery party cannot also be an owner. A recovery party drawn from the same people is not a recovery path.',
+  36: 'E_NOT_VERIFIED — the business account is not KYB-verified, so no payout can be released from it.',
   37: 'E_NO_RECOVERY_PARTY — no recovery party has been nominated on this account.',
   38: 'E_RECOVERY_PENDING — a recovery is already running. It cannot be replaced, and the nominee cannot be changed mid-notice.',
   39: 'E_NO_PENDING_RECOVERY — there is no recovery to cancel or execute; an owner may already have cancelled it.',
   40: 'E_RECOVERY_NOT_DUE — the 72-hour recovery notice has not elapsed. The delay is what makes it a defence rather than a countdown: any owner can cancel during it.',
-  41: 'E_WRONG_INTENT — the approval was minted for a different payment intent.',
-  42: 'E_OVER_PER_TRANSFER_CAP — the payout is larger than this account’s tier allows in a single transfer. Tier 3 permits 20,000, Tier 2 permits 200,000, Tier 1 permits 1,000,000 (USD, six-decimal minor units). Split the payment or request a tier increase.',
-  43: 'E_BELOW_MINIMUM — the payout is under the 99 USD platform floor. Below that the fixed costs of settling, anchoring and screening exceed the payment, and the partners’ own corridor minimums start there.',
+  41: 'E_WRONG_INTENT (earlier testnet packages only) — a legacy approval was minted for a different payment intent.',
+  42: 'E_OVER_PER_TRANSFER_CAP — the payout is larger than this account’s tier allows in a single transfer. Tier 3 permits 20,000, Tier 2 permits 200,000, Tier 1 permits 1,000,000 (USD, six-decimal minor units). Split the payment or request a tier increase. A bank payout over it is refused when its intent opens, as well as at settlement.',
+  43: 'E_BELOW_MINIMUM — a bank payout under the 99 USD platform floor reached the account’s ceiling check. The v2 paths refuse it first, with 434, so this is the backstop behind that check. On the earlier testnet packages it refused every payout under 99 USD, of any kind.',
   44: 'E_UNKNOWN_TIER — a tier other than 1, 2 or 3, or a limit-increase request that is not actually an increase (tier numbers descend as limits rise).',
 
-  415: 'E_APPROVAL_REQUIRED — this intent is bound to a business account, so it settles only through confirm_with_approval. confirm_payment_intent would bypass the approver, the freeze flags and the 24h ceiling.',
-  416: 'E_NOT_ACCOUNT_BOUND — confirm_with_approval or approve_payout called on an intent that is not bound to any business account.',
+  415: 'E_APPROVAL_REQUIRED (v1 testnet package only) — this intent is bound to a business account, so it settles only through confirm_with_approval. confirm_payment_intent would bypass the approver, the freeze flags and the 24h ceiling.',
+  416: 'E_NOT_ACCOUNT_BOUND — a settle or cancel path was given an intent that is not bound to any business account.',
   417: 'E_WRONG_BUSINESS_ACCOUNT — the account passed is not the account the intent was opened against.',
-  418: 'E_NOT_A_MEMBER — the signer is neither an owner nor an approver of the account, so cannot open an intent in its name.',
+  418: 'E_NOT_A_MEMBER (earlier testnet packages only) — the legacy create was signed by someone who was neither an owner nor an approver. v2 core opens an intent only from the business wallet or a registered settlement app.',
   419: 'E_ACCOUNT_NOT_PAYABLE — the account is frozen or not KYB-verified.',
   420: 'E_BAD_COMMITMENT — the commitment passed to payment_intent::create* is not 32 bytes. It is blake2b256(tag || bcs(payload) || salt), computed by lib/evidence/commitment.ts; see docs/commitments.md.',
 
@@ -428,19 +432,182 @@ const ABORT_CODES: Record<number, string> = {
   802: 'E_RECEIPT_ZERO_AMOUNT — receipt_v2::create_receipt called with amount_usd = 0.',
   803: 'E_RECEIPT_INVALID_RECIPIENT — receipt_v2::create_receipt called with recipient = 0x0.',
   804: 'E_BAD_COMMITMENT — receipt_v2::create_receipt called with a commitment that is not 32 bytes.',
+
+  // ── business_account: the v2 business wallet ─────────────────────────────
+  45: 'E_WALLET_ALREADY_REGISTERED — this account already has a business wallet. A wallet changes only by rotation (rotate_wallet, then confirm_wallet_rotation from the new wallet).',
+  46: 'E_WALLET_NOT_NOMINATED — the wallet registering is not the one the founder nominated for this account. The founding owner calls nominate_wallet first; no other owner can.',
+  47: 'E_WALLET_MISMATCH — the sender is not the multisig address these members, weights and threshold derive. Pass the members exactly as the wallet was built, in the same order.',
+  48: 'E_SINGLE_SIGNER_NOT_ACKNOWLEDGED — one member of this wallet can sign alone. That is allowed only when the wallet says so: pass single_signer_ack = true.',
+  49: 'E_NO_WALLET — this account has no business wallet registered yet.',
+  50: 'E_NOT_THE_WALLET — only the account business wallet (the owners multisig) can do this. Once the wallet is registered, that includes adding and removing owners and naming the recovery party: one owner cannot change them alone.',
+  51: 'E_SAME_WALLET — the rotation names the wallet that is already current.',
+  52: 'E_NO_PENDING_ROTATION — there is no wallet rotation waiting to be confirmed or cancelled.',
+  53: 'E_NOT_THE_PENDING_WALLET — only the new wallet named in the rotation can confirm it.',
+  54: 'E_ROTATION_PENDING — a wallet rotation is already waiting. Cancel it before proposing another.',
+  55: 'E_NOT_THE_FOUNDER — only the founding owner nominates the account business wallet.',
+  56: 'E_NOMINATION_MISMATCH — the wallet registering is not the one the founder nominated, or its single-signer status is not what the founder chose.',
+  57: 'E_SIGNER_NOT_AN_OWNER — a wallet member is not an owner of this account. Add the person as an owner first; the signers are the business own people.',
+  58: 'E_WALLET_MUST_UNFREEZE — this account has a business wallet, so only the wallet (the owners quorum) can lift an owner freeze.',
+  59: 'E_OWNER_IS_A_SIGNER — this owner is a member of the business wallet, or of the wallet a pending rotation names. Rotate them out of the wallet first, then remove them as an owner.',
+  60: 'E_APPROVERS_CLOSED (earlier v2 testnet package only) — the legacy approver set was closed for an account with a business wallet. v2 core has no approver set: the wallet signature is the approval, and staff pay under spending rules.',
+
+  // ── compliance_config: v2 registries (24-hour additions) ─────────────────
+  357: 'E_ASSET_NOT_ACCEPTED — the payment asset is not on the accepted-asset registry. Native USDC is the one payment asset; anything else is refused, and a removed asset stops intents already open.',
+  358: 'E_NOT_A_SETTLEMENT_APP — the app tried to open or settle an intent but is not a registered settlement app. Registration takes 24 hours public notice (propose_addition, then activate_addition).',
+  359: 'E_NOT_A_BRIDGE_ADAPTER — only a registered bridge adapter can discharge a cross-chain obligation, and none is registered yet. Cross-chain payments settle once the CCTP V2 adapter is registered.',
+  360: 'E_UNKNOWN_REGISTRY — registry kind must be 1 (asset), 2 (settlement app) or 3 (bridge adapter).',
+  361: 'E_ALREADY_REGISTERED — that type is already on this registry.',
+  362: 'E_ALREADY_PROPOSED — that addition is already waiting out its 24-hour notice.',
+  363: 'E_NOT_PROPOSED — there is no such pending addition to activate or cancel.',
+  364: 'E_NOTICE_NOT_RUN — the 24-hour notice for this addition has not run yet. Read pending_additions for its eta.',
+  365: 'E_NOT_REGISTERED — that type is not on this registry, so there is nothing to remove.',
+  366: 'E_REGISTRY_FULL — the registry, or the list of pending additions, is at its limit of eight.',
+  367: 'E_ADDITION_LAPSED — the addition window closed seven days after its 24-hour notice ran. Propose it again, so owners are alerted again.',
+  368: 'E_LAST_ASSET — refused to remove the last accepted asset, which would stop every payment for at least 24 hours. Use pause to halt settlement.',
+  369: 'E_LEGACY_DISABLED (earlier v2 testnet package only) — the legacy per-person approval path had been switched off. v2 core does not contain that path: pay from the business wallet or under a spending rule.',
+
+  // ── payment_intent: v2 ───────────────────────────────────────────────────
+  421: 'E_BAD_EXPIRY — expires_at must be in the future and no more than 30 days away.',
+  422: 'E_INVALID_KIND — kind must be 0 (Splash business), 1 (wallet), 2 (exchange), 3 (cross-chain) or 4 (bank payout), and a path that pays an address on Sui does not take kind 3.',
+  423: 'E_BAD_DOMAIN — the destination domain does not fit the kind: a payment on Sui lands on CCTP domain 8, a cross-chain one on any other domain.',
+  424: 'E_BAD_RAIL_COMMITMENT — the rail commitment is not 32 bytes. It is blake2b256(splash:rail:v1 || bcs(payload) || salt); see docs/commitments.md.',
+  425: 'E_CROSS_CHAIN_ONLY — this is a cross-chain intent. It settles only through a _cross_chain path, which hands the coin to a bridge adapter.',
+  426: 'E_NOT_CROSS_CHAIN — a _cross_chain path was given an intent that lands on Sui. Use the matching path that pays the recipient address.',
+  427: 'E_EXACT_AMOUNT_REQUIRED — funds drawn under a spending rule must be exactly the intent amount plus max_fee, the most Splash’s fee may be. Core returns the part of max_fee the fee did not use to the business wallet.',
+  428: 'E_BENEFICIARY_REQUIRED — a bank payout names its beneficiary by a 32-byte commitment (splash:beneficiary:v1); other kinds name none.',
+  429: 'E_BAD_PAYMENT_REF — the payment reference must be a 32-byte commitment over the business own invoice or payment id.',
+  430: 'E_SETTLE_BY_PASSED — the quote this transaction was signed against has lapsed. Get a fresh quote and sign again.',
+  431: 'E_LEGACY_CLOSED (earlier v2 testnet package only) — the legacy approval path was closed for an account with a business wallet. v2 core does not contain that path: pay from the wallet or under a spending rule.',
+  432: 'E_WRONG_BRIDGE_COIN — the coin handed to the bridge adapter is not the coin the settlement released, or not its type or amount.',
+  433: 'E_BAD_BRIDGE_FEE — the cross-chain fee ceiling would take the whole payment.',
+  434: 'E_BELOW_SETTLEMENT_FLOOR — this bank payout is below its floor: the larger of the 99 USDC platform minimum and ComplianceConfig.min_settlement_amount. It is checked when the intent opens and again when it settles, so an intent opened before compliance raised the floor no longer settles. Wallet, Splash-business and cross-chain payments have no floor.',
+  435: 'E_FEE_ABOVE_MAX — Splash’s fee on this payment is above max_fee, the fee you were shown and signed for. The fee schedule may have changed since the quote: get a fresh quote and approve again.',
+
+  // ── splash_spend (spending rules) ────────────────────────────────────────
+  1000: 'E_WRONG_FUNDER — the allowance is not funded by this spending rule wallet.',
+  1001: 'E_NOT_A_SPENDER — the payer is not a spender under this spending rule, or was removed from it.',
+  1002: 'E_WRONG_ACCOUNT — the spending rule, the account and the intent do not all belong to the same business.',
+  1003: 'E_RECIPIENT_NOT_VERIFIED — the destination is not on this spending rule verified list. The owners verify it first.',
+  1004: 'E_BENEFICIARY_NOT_VERIFIED — the bank beneficiary is not verified for this partner deposit address.',
+  1005: 'E_OVER_PER_PAYMENT_MAX — the payment is above the spending rule per-payment maximum, or the spender own.',
+  1006: 'E_APPROVAL_REQUIRED — this payment needs an approval and carries none: together with what this payer has already paid this recipient in the current window (24 hours by default, from the first of those payments), it is above the second-approval threshold, or the payer is the scheduled-payment operator. An owner approves it, or it waits for the window to end.',
+  1007: 'E_APPROVAL_MISMATCH — the approval is for a different rule, intent, amount or payer.',
+  1008: 'E_SELF_APPROVAL — the approver opened this payment or is paying it. A second approval needs a second person.',
+  1009: 'E_NOT_AN_OWNER — the approver is not a member of the business wallet.',
+  1010: 'E_APPROVAL_EXPIRED — the deadline the approver set has passed (the quote they approved has lapsed, or the intent expired). Approve again against a fresh quote.',
+  1011: 'E_STALE_POLICY — the business wallet has changed since this spending rule was made. The new wallet sets up its rules again.',
+  1012: 'E_PROPOSAL_FUNDER — the allowance proposal is funded by someone other than the spending rule wallet.',
+  1013: 'E_PROPOSAL_SPENDER — the allowance proposal names a spender who is not on the spending rule. Add them first.',
+  1014: 'E_NOT_PAYABLE — the intent is no longer pending, or has expired.',
+  1015: 'E_NOT_STAFF — only staff open payments. The scheduled-payment operator only pays what someone else opened and approved.',
+  1016: 'E_MAKER_NOT_A_SPENDER — the person who opened this payment is no longer a spender, so it cannot be paid under the rule.',
+  1017: 'E_WRONG_ASSET — the coin is not the asset this spending rule pays in (USDC).',
+  1019: 'E_NOT_THE_MAKER — the business wallet hands only a payment it opened itself to the scheduled-payment operator. For a staff member payment, an owner approves it with the operator as payer.',
+  1020: 'E_NOT_AN_EXECUTOR — execution can be handed only to the scheduled-payment operator on the rule.',
+  1021: 'E_STALE_APPROVAL — the account authority changed (a freeze, a membership or wallet change), or the spending rule removed a spender, recipient or beneficiary, after this approval was given. Approve again.',
+  1022: 'E_WRONG_PAY_PATH — a cross-chain payment is not paid, approved or delegated under a spending rule. The owners pay it from the business wallet.',
+  1023: 'E_ALLOWANCE_NOT_FOR_POLICY — this allowance was not issued for this spending rule. Its name must be the rule allowance_name (splash-policy: and the rule id); an allowance from an earlier wallet never pays under a later rule.',
+  1024: 'E_ONLY_THE_WALLET_DELEGATES — only the business wallet can hand a payment to the scheduled-payment operator. A staff member cannot; an owner approves the payment with the operator as payer instead.',
+  1025: 'E_WRONG_DELIVERY_KIND — this recipient is tagged another kind on the spending rule. The owners chose when they verified it: a wallet or an exchange, and Splash’s fee follows that tag. Open the payment with that kind.',
+  1026: 'E_BAD_SETTLE_BY — an approval or delegation must name a settle-by time in the future and no later than the intent expiry: the quote deadline the approver is agreeing to.',
+  1027: 'E_SETTLE_BY_AFTER_APPROVAL — this payment asks to settle later than its approval allows. Pass a settle-by no later than the approval, or approve again against a fresh quote.',
+  1028: 'E_WRONG_CONFIG — the compliance config passed is not the one this spending rule was created against. Pass the rule config (spend_policy::config).',
+  1029: 'E_PARTNER_DEPOSIT_NOT_BANK_PAYOUT — this address is a payout partner deposit address, on the spending rule or in Splash’s partner registry, so it is paid only as a bank payout for a beneficiary bound to it. Open a bank payout for that beneficiary instead.',
+  1030: 'E_BANK_PAYOUT_NOT_TO_PARTNER — the beneficiary of this bank payout is bound to a registered Splash business wallet, not to a payout partner deposit address, so no partner would pay it out. Bind the beneficiary to the partner’s deposit address.',
+  1031: 'E_FEE_ABOVE_MAX — Splash’s fee on this payment is above max_fee, the fee the spender was shown and signed for. The fee schedule may have changed since the quote: get a fresh quote and pay again.',
+  1032: 'E_FEE_ABOVE_CEILING — Splash’s fee on this payment would be above 1% of the amount, the most a spending rule ever pays Splash. Nothing was paid; tell Splash support.',
+  1033: 'E_FEE_ABOVE_APPROVED — the amount and Splash’s fee together are above the total the owner approved. The fee schedule may have risen since the approval: an owner approves again against a fresh quote.',
+  1034: 'E_BAD_MAX_TOTAL — an approval names the most the payment may cost in all, the amount and Splash’s fee, so it cannot be less than the amount.',
+  1035: 'E_WRONG_FEE_CONFIG — the fee config passed is not Splash’s, the one this spending rule recorded when it was created. Pass the rule fee config (spend_policy::fee_config).',
+  1036: 'E_WRONG_ADDRESS_REGISTRY — the address registry passed is not Splash’s, the one this spending rule recorded when it was created. Pass the rule registry (spend_policy::address_registry).',
+  1050: 'E_NOT_THE_WALLET — only the business wallet that made this spending rule can change it.',
+  1051: 'E_WALLET_MISMATCH — the members do not derive the sender, or the sender is not the account registered business wallet.',
+  1052: 'E_TOO_MANY_SPENDERS — this spending rule is at its limit of 64 spenders.',
+  1053: 'E_ALREADY_A_SPENDER — that address is already a spender on this rule. Remove it first to change its role or limit.',
+  1054: 'E_NOT_A_SPENDER — that address is not a spender on this rule.',
+  1055: 'E_INVALID_ADDRESS — zero, or the business wallet itself, which pays through its own path.',
+  1056: 'E_ALREADY_VERIFIED — that destination or beneficiary is already verified.',
+  1057: 'E_NOT_VERIFIED — that destination or beneficiary is not on the list.',
+  1058: 'E_BAD_BENEFICIARY — a beneficiary is named by its 32-byte commitment (splash:beneficiary:v1).',
+  1059: 'E_BAD_LIMIT — a per-payment maximum of zero would refuse every payment.',
+  1060: 'E_UNKNOWN_ROLE — a spender role is 1 (staff) or 2 (scheduled-payment operator).',
+  1061: 'E_NOT_ON_SUI — a spending rule pays only on Sui (CCTP domain 8). A recipient on another chain is paid from the business wallet, not verified on the rule.',
+  1062: 'E_BAD_KIND — a recipient on a spending rule is tagged 1 (a wallet) or 2 (an exchange). A business on Splash is recognised from its registered wallet, whatever its tag, and a bank payout partner is bound to its beneficiary with verify_beneficiary.',
+  1063: 'E_ASSET_NOT_ACCEPTED — a spending rule can be made only in an asset the compliance config accepts (USDC). Nothing was created, so the wallet can make its rule in USDC.',
+  1064: 'E_POLICY_NOT_CURRENT — this spending rule is not the account current one: the business wallet has rotated, or another account was passed. An old rule can only be cut back; the new wallet sets up its own.',
+  1065: 'E_ACCOUNT_FROZEN — the account is frozen, so its spending rule can be cut back but not widened, and no new allowance is issued, until it thaws.',
+  1066: 'E_BAD_WINDOW — the running-total window of a spending rule is at least one hour and at most thirty days.',
+  1067: 'E_PARTNER_DEPOSIT — that address is a payout partner deposit address on this rule (a beneficiary is bound to it), so it cannot also be verified as a recipient. Remove its beneficiaries first.',
+  1068: 'E_ALREADY_A_RECIPIENT — that address is already a verified recipient on this rule, so it cannot also be a payout partner deposit address. Remove it as a recipient first.',
+
+  // ── upgrade_delay (splash_upgrade_delay, the 24-hour upgrade notice) ─────
+  1100: 'E_BAD_DIGEST — upgrade_delay::propose was given a digest that is not 32 bytes. Pass the digest the build prints for the new bytecode.',
+  1101: 'E_ALREADY_PROPOSED — an upgrade is already announced. Cancel it first; every proposal owners are alerted to gets its own full 24 hours.',
+  1102: 'E_NOTHING_PROPOSED — upgrade_delay authorize or cancel with no upgrade announced. Announce it with propose and wait 24 hours.',
+  1103: 'E_DIGEST_MISMATCH — the digest being authorised is not the one announced to owners. Only the announced bytecode can run.',
+  1104: 'E_TOO_EARLY — the 24-hour notice has not run yet. Read pending_eta_ms and try again after it.',
+  1105: 'E_INVALID_OWNER — the new governance owner would be a multisig one member can sign for alone. The upgrade cap moves only to a real quorum.',
+  1107: 'E_PROPOSAL_LAPSED — the proposal window closed seven days after its 24-hour notice ran. Propose it again, so owners are alerted again.',
+  1108: 'E_CAP_ALREADY_USED — this upgrade cap was already used for an upgrade outside the delay wrapper, so the wrapper cannot vouch for the package history. Wrap a cap at version 1.',
+  1106: 'E_UPGRADE_IN_PROGRESS — the upgrade cap is between authorise and commit. Finish the upgrade in the same transaction.',
+
+  // ── multisig (splash_core, business wallet address derivation) ────────────
+  1200: 'E_BAD_MEMBER_COUNT — a business wallet needs between 1 and 10 members, the Sui multisig limit.',
+  1201: 'E_LENGTH_MISMATCH — the wallet registration passed a different number of weights and keys.',
+  1202: 'E_ZERO_WEIGHT — a wallet member has weight zero, which Sui refuses in a multisig.',
+  1203: 'E_ZERO_THRESHOLD — the wallet threshold is zero, which Sui refuses in a multisig.',
+  1204: 'E_UNREACHABLE_THRESHOLD — the member weights cannot add up to the threshold, so no quorum could ever sign for this wallet.',
+  1205: 'E_DUPLICATE_MEMBER — the same key appears twice in the wallet, which Sui refuses in a multisig.',
+  1206: 'E_UNKNOWN_SCHEME — a wallet key does not start with a scheme flag Sui accepts in a multisig (Ed25519, Secp256k1, Secp256r1, zkLogin or passkey).',
+  1207: 'E_BAD_KEY_LENGTH — a wallet key has the wrong length for its scheme. Pass flag || public key, as publicKey.toSuiBytes() returns it; zkLogin keys need the padded 32-byte address seed.',
+  1208: 'E_NOT_THIS_MULTISIG — the sender is not the multisig these members derive.',
+  1209: 'E_NOT_A_QUORUM — this multisig lets one member sign alone, so it cannot act for governance.',
+
+  // ── fee_config (splash_core, Splash's fee, Amendment A1) ─────────────────
+  1300: 'E_INVALID_SCHEDULE — the proposed fee schedule is malformed: it needs 1 to 8 tiers with upper bounds strictly ascending and the last one u64::MAX, as many rates as bounds, a minimum no higher than the maximum, and a kind from 0 to 4.',
+  1301: 'E_FEE_ABOVE_CEILING — a proposed fee rate or a discount is above 100 bps (1%), the ceiling written into the package. Propose 100 or less.',
+  1302: 'E_FEE_PROPOSAL_NOT_READY — this fee change was proposed less than 24 hours ago. It can be applied once its notice has run; read its eta.',
+  1303: 'E_NO_FEE_PROPOSAL — there is no pending fee schedule or fee recipient proposal to apply. Propose it first; it applies 24 hours later.',
+  1304: 'E_INVALID_FEE_RECIPIENT — the fee recipient cannot be the zero address. Name the Splash finance multisig.',
+  1305: 'E_UNKNOWN_KIND — a fee was asked for a kind outside 0 to 4 (Splash business, wallet, exchange, cross-chain, bank payout).',
+
+  // ── address_registry (splash_core, how a payment is classified, A1 §2.3) ─
+  1400: 'E_KIND_MISMATCH — the kind this payment declares does not fit where it goes: a bank payout must go to a payout partner deposit address, a Splash business payment to a registered business wallet, a cross-chain payment through CCTP, and anything else is declared a wallet or an exchange. Open it as the kind its recipient is.',
+  1401: 'E_ALREADY_A_PARTNER_ADDRESS — that address is already registered as a payout partner deposit address.',
+  1402: 'E_NOT_A_PARTNER_ADDRESS — that address is not a registered payout partner deposit address, so there is nothing to remove.',
+  1403: 'E_INVALID_ADDRESS — the zero address cannot be a payout partner deposit address.',
 };
 
-/** The modules ABORT_CODES actually describes. Anything else is a dependency. */
+/**
+ * The modules ABORT_CODES actually describes. Anything else is a dependency.
+ * scripts/check-abort-codes.mjs fails the lint when a module that declares an
+ * abort code is missing here.
+ */
 const OUR_MODULES = new Set([
-  'settlement',
-  'business_account',
-  'peg_monitor',
-  'compliance_config',
-  'payment_intent',
+  // splash_core
+  'address_registry',
   'audit_anchor',
-  'dual_treasury',
-  'smart_treasury',
+  'business_account',
+  'cap_registry',
+  'compliance_config',
+  'fee_config',
+  'multisig',
+  'payment_intent',
+  'peg_monitor',
   'receipt_v2',
+  'spend_window',
+  // splash_custody and splash_meter (off the mainnet path, still explained)
+  'delegation',
+  'dual_treasury',
+  'liquidity_guard',
+  'settlement',
+  'smart_treasury',
+  'guardian',
+  'spend_meter',
+  // splash_spend and splash_upgrade_delay
+  'splash_spend',
+  'spend_policy',
+  'upgrade_delay',
 ]);
 
 /**
@@ -451,7 +618,7 @@ const OUR_MODULES = new Set([
  * today — but nothing stops a future dependency from aborting with, say, 100,
  * which our table would confidently mislabel as `E_NOT_VERIFIED`. So the code
  * table is only consulted when the abort actually came from a splash module
- * (splash_core or splash_custody).
+ * (OUR_MODULES).
  */
 const DEPENDENCY_ABORT_CODES: Record<string, Record<number, string>> = {
   book: {
@@ -467,7 +634,7 @@ const DEPENDENCY_ABORT_CODES: Record<string, Record<number, string>> = {
   },
 };
 
-function humanizeSuiError(rawError: string | undefined | null, stderr: string): string {
+export function humanizeSuiError(rawError: string | undefined | null, stderr: string): string {
   const error = [rawError, stderr].filter(Boolean).join('\n') || 'Unknown Sui error';
   if (/No managed addresses|no active managed address/i.test(error)) {
     return 'The Sui CLI has no managed operator address. Configure OPERATOR_SUI_PRIVATE_KEY for server-side settlement, or create and fund a persistent CLI address.';
@@ -683,29 +850,59 @@ function corePackageIdOrThrow(): string {
   return configIdOrThrow('packageId', 'SPLASH_PACKAGE_ID');
 }
 
+/** The same test resolvePayoutRecipient makes for SUI_NETWORK. */
+function onMainnet(): boolean {
+  return (process.env.SUI_NETWORK ?? '').trim().toLowerCase() === 'mainnet';
+}
+
+/**
+ * v2 (D11): splash_custody and splash_meter are retired from the mainnet path.
+ * App-bound allowances and address balances replace pooled settlement and the
+ * spend meter, so on mainnet every path built on splash_custody refuses, and
+ * it refuses first: before the settlement mode is read, so simulate cannot
+ * report a SIM_ settlement for a path that does not exist there, and before
+ * any package id is resolved, so the legacy single package is never taken
+ * for the custody one. Testnet keeps the paths.
+ */
+function refuseRetiredCustodyPathOnMainnet(path: string): void {
+  if (!onMainnet()) return;
+  throw new Error(
+    `${path} runs on splash_custody, which v2 retired from the mainnet path (D11): app-bound allowances and ` +
+      'address balances replace pooled settlement and the delegated batch. Nothing was sent.',
+  );
+}
+
 /**
  * Resolve the CUSTODY package, or explain why it does not exist.
  *
- * Splash cannot hold client funds — enforced structurally rather than by a
- * licence condition, and a precondition for operating before an e-money
- * licence exists. So
- * splash_custody — every struct that holds a `Balance<T>` — is NOT PUBLISHED.
- * This is not a feature flag: the bytecode is absent, so there is nothing to
- * flip and nothing to bypass. The error names the licence rather than reporting
- * a missing environment variable, because "not configured" would read as a
- * deployment mistake when it is in fact the regulatory posture working.
+ * On mainnet it never exists: v2 retired splash_custody from the mainnet path
+ * (refuseRetiredCustodyPathOnMainnet), so this throws there, with no fallback.
+ *
+ * Elsewhere: Splash cannot hold client funds — enforced structurally rather
+ * than by a licence condition, and a precondition for operating before an
+ * e-money licence exists. So
+ * splash_custody — every struct that holds a `Balance<T>` — is NOT PUBLISHED
+ * on mainnet, and v2 retired it from that path for good (D11); it runs on
+ * testnet only. This is not a feature flag: the bytecode is absent, so there
+ * is nothing to flip and nothing to bypass. The error names the retirement
+ * rather than only reporting a missing environment variable, because "not
+ * configured" would read as a deployment mistake when it is the design
+ * working.
  */
 function custodyPackageIdOrThrow(): string {
+  refuseRetiredCustodyPathOnMainnet('Custody settlement');
   const custody = (getContractConfig().custodyPackageId ?? '').trim();
   if (custody) return requireSuiObjectId(custody, 'SPLASH_CUSTODY_PACKAGE_ID');
 
   // Pre-split deployments carried custody modules inside the single package.
+  // Testnet only: on mainnet the refusal above has already thrown.
   const legacy = (getContractConfig().packageId ?? '').trim();
   if (legacy && !(getContractConfig().corePackageId ?? '').trim()) return legacy;
 
   throw new Error(
-    'Batch settlement requires the splash_custody package, which publishes when the Labuan ' +
-      'e-money licence is granted. Phase 0 settles through payment_intent, which holds no balance. See STATUS.md.',
+    'Batch settlement requires the splash_custody package, which is not published here. v2 retired it ' +
+      'from the mainnet path for good (D11); on testnet it needs SPLASH_CUSTODY_PACKAGE_ID. Phase 0 settles ' +
+      'through payment_intent, which holds no balance. See STATUS.md.',
   );
 }
 
@@ -859,9 +1056,9 @@ export async function confirmComposedPaymentOnSui(input: {
     // composed path, which otherwise holds no balance. It must resolve through custody
     // package, not the core one: addressing a custody module with the core
     // package id is not a compile error, it is a runtime failure deep inside a
-    // PTB. In Phase 0 this throws the licence-named error instead, which is the
-    // honest outcome — the treasury allocation is a custodial operation and the
-    // licence does not permit it yet.
+    // PTB. On mainnet this throws the retired-path error (D11); on testnet
+    // without a custody package, the not-published one, which is the honest
+    // outcome — the treasury allocation is a custodial operation.
     const custodyPackageId = custodyPackageIdOrThrow();
     const [treasuryCoin] = tx.splitCoins(tx.gas, [treasuryAmountMist]);
     tx.moveCall({
@@ -1257,6 +1454,9 @@ export async function recordSingleTransferOnSui(input: {
   /** Override the corridor fee. Bounded to CONTRACT_MAX_FEE_BPS. */
   feeBps?: number;
 }) {
+  // settlement::settle_payment is a splash_custody function: refused on
+  // mainnet in every mode, simulate included.
+  refuseRetiredCustodyPathOnMainnet('Single-transfer settlement');
   const execution = await resolveSettlementExecution();
   if (execution === 'simulate') {
     const sim = simulatedSettlement(input.transferId);
@@ -1451,6 +1651,11 @@ export async function recordBatchSettlementOnSui(input: {
   /** Override the corridor fee. Bounded to CONTRACT_MAX_FEE_BPS. */
   feeBps?: number;
 }) {
+  // settle_sui_batch_delegated is a splash_custody function: refused on
+  // mainnet in every mode, simulate and SUI_BATCH_SETTLEMENT_MODE included,
+  // so the batch route records FAILED rather than SETTLED for a payout that
+  // never happened.
+  refuseRetiredCustodyPathOnMainnet('Batch settlement');
   const execution = batchExecutionOverride() ?? await resolveSettlementExecution();
   if (execution === 'simulate') {
     const sim = simulatedSettlement(input.batchId);
@@ -1459,9 +1664,9 @@ export async function recordBatchSettlementOnSui(input: {
   }
   const cfg = getContractConfig();
   // Core modules (peg_monitor) and custody modules (settlement) now live in
-  // SEPARATE packages. Under Phase 0 the custody package is not published, so
-  // this resolution is what turns 'the licence does not permit custody' into a
-  // clear error instead of an ObjectNotFound deep inside a PTB.
+  // SEPARATE packages. The custody package is not published on mainnet (v2
+  // retired it, D11), so this resolution is what turns 'there is no custody
+  // here' into a clear error instead of an ObjectNotFound deep inside a PTB.
   const SPLASH_PACKAGE_ID = corePackageIdOrThrow();
   const SPLASH_CUSTODY_PACKAGE_ID = custodyPackageIdOrThrow();
   const SPLASH_TREASURY_ID = configIdOrThrow('treasuryId', 'SPLASH_TREASURY_ID');

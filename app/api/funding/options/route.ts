@@ -9,7 +9,7 @@ import {
 } from '@/lib/funding/registry';
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { accountBalance } from '@/lib/server/ledger-store';
-import { readLastUsedFundingSource } from '@/lib/server/funding-sessions';
+import { readLastUsedFundingSource, withDepositSourcesClosedOnMainnet } from '@/lib/server/funding-sessions';
 import { isForeignAccountId, requireSessionAccount } from '@/lib/server/session-account';
 import { refuseOutsideLaunchScope } from '@/lib/server/launch-scope';
 
@@ -35,7 +35,9 @@ export async function GET(request: Request) {
   }
   const registry = getEnabledFundingOptions();
   const heldBalanceMicro = Number(await accountBalance(accountCheck.account.orgId));
-  const sources = buildFundingSources({ registry, heldBalanceMicro, amountDueMicro });
+  // On mainnet a USDC deposit would need a deposit address Splash holds the
+  // key to or chose, so it is listed, with the reason, but not offered (D1, D3).
+  const sources = withDepositSourcesClosedOnMainnet(buildFundingSources({ registry, heldBalanceMicro, amountDueMicro }));
   const lastUsedSource = await readLastUsedFundingSource(accountCheck.account.orgId, businessAccountId);
   const countryCode = request.headers.get('x-vercel-ip-country')
     ?? request.headers.get('cf-ipcountry')

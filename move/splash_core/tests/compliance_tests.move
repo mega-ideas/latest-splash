@@ -12,6 +12,7 @@ use splash_core::business_account;
 use splash_core::cap_registry::{Self, CapRegistry};
 use splash_core::compliance_config::{Self, ComplianceConfig, ComplianceCap};
 use std::unit_test::assert_eq;
+use sui::sui::SUI;
 use sui::test_scenario::{Self as ts, Scenario};
 
 const ADMIN: address = @0xA11CE;
@@ -32,7 +33,8 @@ fun setup(): Scenario {
         cap_registry::init_for_testing(ctx);
         let admin = business_account::admin_cap_for_testing(ctx);
         let registry = cap_registry::new_for_testing(ctx);
-        compliance_config::create(
+        compliance_config::create<SUI>(
+        compliance_config::ticket_for_testing(ctx),
             &admin,
             &registry,
             DEVIATION,

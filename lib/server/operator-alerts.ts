@@ -41,6 +41,17 @@ export type OperatorAlert =
       digest: string;
       reason: string;
       detail: unknown;
+    }
+  | {
+      /** A configured governance id (SPLASH_UPGRADE_WRAPPER_ID or
+       *  SPLASH_COMPLIANCE_CONFIG_ID) does not resolve on chain to the
+       *  canonical object of the canonical type, or the object could not be
+       *  read in full (lib/server/governance-alert-monitor.ts). Owners are NOT
+       *  being told about governance changes until a person fixes it. */
+      kind: 'governance_config_mismatch';
+      severity: 'critical';
+      objectId: string;
+      reason: string;
     };
 
 export type OperatorAlertSink = (alert: OperatorAlert) => Promise<void>;

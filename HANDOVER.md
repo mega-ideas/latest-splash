@@ -107,6 +107,12 @@ setting core is what *disables* the fallback and makes batch settlement throw
 the licence-named error instead of silently targeting a `settlement` module
 that does not exist in `splash_core`.
 
+That is now true on testnet only. On mainnet there is no fallback in any
+configuration: `custodyPackageIdOrThrow`, `recordSingleTransferOnSui` and
+`recordBatchSettlementOnSui` throw the retired-path error (D11) first, in
+every settlement mode. On testnet the error without a custody package now
+names the v2 retirement rather than a licence.
+
 That error is the demo's best beat: non-custody is enforced by absent
 bytecode, not by a flag anyone could flip.
 
@@ -182,6 +188,8 @@ happy path:
 - The demo posture uses mock Seal, **and** a deployment with no demo flags
   still fails closed. Both directions, not just the convenient one.
 - The licence-named custody refusal is present in the compiled server bundle.
+  (That build predates v2. The testnet refusal now names the D11 retirement,
+  and mainnet refuses every custody path with the retired-path error.)
 
 **zkLogin is confirmed working with real data, not by assertion.** A sign-in
 completed at 14:27 UTC on 5 September 2026: a `wallet_identities` row exists

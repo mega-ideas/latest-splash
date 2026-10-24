@@ -59,38 +59,86 @@ const FORBIDDEN = [
   'fx_rate_usd_local', 'target_currency', 'currency', 'corridor',
   'ssm_number', 'kyb_cid', 'risk_score',
   'cap_minor', 'daily_cap', 'daily_spent_after',
+  // Amendment A1. A fee is computed from the principal by a public schedule,
+  // so a fee on an event says roughly how much was paid, and a principal
+  // says it exactly. Neither appears on an event except where ALLOWED says.
+  'fee', 'principal',
 ];
+
+/**
+ * The only exceptions, each by package file, event and field, with the reason.
+ * Adding one is a deliberate act: what an event carries freezes at publish.
+ */
+const ALLOWED = {
+  // A1 §2.9: FeeCharged carries the fee because the fee is Splash's revenue,
+  // Splash's own money, and the Phase 2 revenue and reconciliation listeners
+  // read it from the event. The principal is not on it; it follows
+  // docs/commitments.md as before.
+  'move/splash_core/sources/fee_config.move::FeeCharged.fee':
+    'the fee is Splash revenue (A1 §2.9), not a client payment',
+  // A1 §2.9: the fee recipient is Splash's own finance multisig, not a
+  // client's counterparty. Owners are alerted to a change of it (Phase 2),
+  // so the address has to be on the event.
+  'move/splash_core/sources/fee_config.move::FeeRecipientProposed.recipient':
+    "Splash's own fee address, announced 24 hours ahead (A1 §2.5, §2.9)",
+  'move/splash_core/sources/fee_config.move::FeeRecipientApplied.recipient':
+    "Splash's own fee address, now in force (A1 §2.5, §2.9)",
+  // A1 §2.9: RuleSpend, splash_spend's record of a payment under a spending
+  // rule, carries the recipient address and Splash's fee, because Phase 2's
+  // near-threshold alerts aggregate what one spender pays one recipient and
+  // reconcile the fee from it. The principal is still not on it. What the
+  // recipient field adds is little: the base-layer transfer of the same
+  // payment already shows the recipient, and the fee its rough size.
+  'move/splash_spend/sources/splash_spend.move::RuleSpend.recipient':
+    'who a spending rule paid, for the Phase 2 near-threshold alerts (A1 §2.9); the transfer already shows it',
+  'move/splash_spend/sources/splash_spend.move::RuleSpend.fee':
+    'Splash revenue on a rule payment (A1 §2.9), matching FeeCharged',
+};
 
 /* ── 1. The meta-test ─────────────────────────────────────────────────── */
 
-test('no event struct in splash_core carries a forbidden field: what is emitted freezes at the immutable publish', async () => {
-  const dir = new URL('move/splash_core/sources/', root);
-  const files = (await readdir(dir)).filter((f) => f.endsWith('.move')).sort();
-  assert.ok(files.length >= 8, 'the package has its modules');
-
+test('no event struct in splash_core, splash_spend or splash_upgrade_delay carries a forbidden field: what is emitted freezes at publish', async () => {
+  // v2: splash_spend and splash_upgrade_delay publish immutable, so their
+  // events freeze too and are held to the same rule.
+  const packages = ['move/splash_core/sources/', 'move/splash_spend/sources/', 'move/splash_upgrade_delay/sources/'];
   const violations = [];
   let events = 0;
-  for (const file of files) {
-    const text = await readFile(new URL(file, dir), 'utf8');
-    for (const { name, fields } of eventStructs(text)) {
-      events += 1;
-      for (const field of fields) {
-        if (FORBIDDEN.includes(field)) violations.push(`${file}::${name}.${field}`);
+  let modules = 0;
+  for (const pkg of packages) {
+    const dir = new URL(pkg, root);
+    const files = (await readdir(dir)).filter((f) => f.endsWith('.move')).sort();
+    modules += files.length;
+    for (const file of files) {
+      const text = await readFile(new URL(file, dir), 'utf8');
+      for (const { name, fields } of eventStructs(text)) {
+        events += 1;
+        for (const field of fields) {
+          const where = `${pkg}${file}::${name}.${field}`;
+          if (FORBIDDEN.includes(field) && !ALLOWED[where]) violations.push(where);
+        }
       }
     }
   }
-  assert.ok(events >= 20, `the scan found the package's events (${events})`);
+  assert.ok(modules >= 12, `the scan found every package's modules (${modules})`);
+  assert.ok(events >= 40, `the scan found the packages' events (${events})`);
   assert.deepEqual(violations, [], `events carrying business metadata:\n  ${violations.join('\n  ')}`);
 });
 
-test('the payment lifecycle events carry intent_id, commitment, status and timestamp_ms, and nothing else', async () => {
+test('the payment lifecycle events carry the commitment and what an indexer needs, and nothing about the payment', async () => {
   const intent = eventStructs(await source('move/splash_core/sources/payment_intent.move'));
   const byName = Object.fromEntries(intent.map((e) => [e.name, e.fields]));
-  const SHAPE = ['intent_id', 'commitment', 'status', 'timestamp_ms'];
-  assert.deepEqual(byName.IntentCreated, SHAPE, 'IntentCreated');
-  assert.deepEqual(byName.IntentConfirmed, SHAPE, 'IntentConfirmed');
-  assert.deepEqual(byName.IntentCanceled, SHAPE, 'IntentCanceled: the reason is the status');
+  // v2 (brief §3.1): the schema freezes at publish, so it carries what an
+  // indexer needs once `delete_finalized` has removed the intent: the rail
+  // commitment, the settlement asset's type name and the kind. The asset type
+  // is the one deliberate exception to WS5's "no currency" rule; the brief
+  // requires it, and it is the coin type, which the base-layer transfer
+  // already shows. Still no amount, no address, no account.
+  const CORE = ['intent_id', 'commitment', 'rail_commitment', 'settlement_asset', 'kind', 'status'];
+  assert.deepEqual(byName.IntentCreated, [...CORE, 'expires_at_ms', 'timestamp_ms'], 'IntentCreated');
+  assert.deepEqual(byName.IntentConfirmed, [...CORE, 'path', 'timestamp_ms'], 'IntentConfirmed: path is which settlement path released it');
+  assert.deepEqual(byName.IntentCanceled, [...CORE, 'timestamp_ms'], 'IntentCanceled: the reason is the status');
 
+  const SHAPE = ['intent_id', 'commitment', 'status', 'timestamp_ms'];
   const anchor = eventStructs(await source('move/splash_core/sources/audit_anchor.move'));
   const anchored = anchor.find((e) => e.name === 'SettlementAnchored');
   assert.deepEqual(
@@ -99,12 +147,10 @@ test('the payment lifecycle events carry intent_id, commitment, status and times
     'SettlementAnchored adds only the evidence pointers, which are a hash and a blob id',
   );
 
-  const account = eventStructs(await source('move/splash_core/sources/business_account.move'));
-  const approved = account.find((e) => e.name === 'PayoutApproved');
-  const consumed = account.find((e) => e.name === 'PayoutApprovalConsumed');
-  assert.ok(approved.fields.includes('commitment') && !approved.fields.includes('amount'), 'PayoutApproved commits, never amounts');
-  assert.ok(consumed.fields.includes('commitment'), 'PayoutApprovalConsumed commits');
-  for (const f of ['amount', 'daily_spent_after', 'daily_cap']) assert.ok(!consumed.fields.includes(f), `PayoutApprovalConsumed drops ${f}`);
+  // The legacy approval events (PayoutApproved, PayoutApprovalConsumed) left
+  // core with the legacy path (decision 3; tests/legacy-path-removed.test.mjs).
+  // splash_spend's own approval events carry no amount, and the meta-test
+  // above holds every event in all three packages to the same rule.
 
   const receipt = eventStructs(await source('move/splash_core/sources/receipt_v2.move'));
   const issued = receipt.find((e) => e.name === 'ReceiptIssued');
@@ -120,6 +166,37 @@ test('the payment lifecycle events carry intent_id, commitment, status and times
   const table = await source('lib/server/sui-settlement.ts');
   assert.match(table, /^\s*420: 'E_BAD_COMMITMENT — /m);
   assert.match(table, /^\s*804: 'E_BAD_COMMITMENT — /m);
+});
+
+test("the fee events carry Splash's own terms, and FeeCharged the fee and nothing about the payment", async () => {
+  const fee = eventStructs(await source('move/splash_core/sources/fee_config.move'));
+  const byName = Object.fromEntries(fee.map((e) => [e.name, e.fields]));
+  // A1 §2.9. The fee is Splash revenue; the principal is not on the event.
+  assert.deepEqual(byName.FeeCharged, ['intent_id', 'business', 'derived_kind', 'fee', 'fee_recipient'], 'FeeCharged');
+  assert.deepEqual(byName.FeeScheduleProposed, ['kind', 'tiers', 'min_minor', 'max_minor', 'eta'], 'FeeScheduleProposed');
+  assert.deepEqual(byName.FeeScheduleApplied, ['kind'], 'FeeScheduleApplied');
+  assert.deepEqual(byName.FeeRecipientProposed, ['recipient', 'eta'], 'FeeRecipientProposed');
+  assert.deepEqual(byName.FeeRecipientApplied, ['recipient'], 'FeeRecipientApplied');
+  assert.deepEqual(byName.FeeDiscountSet, ['business', 'discount_bps'], 'FeeDiscountSet');
+  assert.deepEqual(Object.keys(byName).sort(), Object.keys(byName).filter((n) => n.startsWith('Fee')).sort(), 'fee_config emits only Fee* events');
+  // The allowed exceptions are exactly fields these events carry.
+  for (const where of Object.keys(ALLOWED)) {
+    const [, file, event, field] = /^(.+\.move)::(\w+)\.(\w+)$/.exec(where);
+    const fields = Object.fromEntries(eventStructs(await source(file)).map((e) => [e.name, e.fields]));
+    assert.ok(fields[event]?.includes(field), `${where} is a real field`);
+  }
+});
+
+test("RuleSpend carries who paid whom under which rule, the kind core charged and Splash's fee, and not the principal", async () => {
+  const spend = eventStructs(await source('move/splash_spend/sources/splash_spend.move'));
+  const byName = Object.fromEntries(spend.map((e) => [e.name, e.fields]));
+  // A1 §2.9. It replaces PaidUnderPolicy, which carried the first five.
+  assert.deepEqual(
+    byName.RuleSpend,
+    ['policy_id', 'intent_id', 'allowance_id', 'approval_id', 'spender', 'recipient', 'derived_kind', 'fee'],
+    'RuleSpend',
+  );
+  assert.equal(byName.PaidUnderPolicy, undefined, 'PaidUnderPolicy is gone: one event per rule payment');
 });
 
 /* ── 2. The commitment ────────────────────────────────────────────────── */
@@ -338,10 +415,52 @@ test('docs/commitments.md carries the field order and test vectors the library r
   assert.ok(block, 'a fenced json block with "vectors"');
   const { vectors } = JSON.parse(block[1]);
   assert.ok(vectors.length >= 3, 'at least three vectors');
-  const { paymentCommitment, receiptCommitment, fromHex, toHex } = await lib();
+  const c = await lib();
+  // Every family the library knows has a vector, and every vector's family is
+  // one the library knows: a tag nobody can reproduce is not a specification.
+  const byTag = {
+    'splash:payment:v1': [c.paymentCommitment, c.encodePaymentPayload],
+    'splash:receipt:v1': [c.receiptCommitment, c.encodeReceiptPayload],
+    'splash:rail:v1': [c.railCommitment, c.encodeRailPayload],
+    'splash:beneficiary:v1': [c.beneficiaryCommitment, c.encodeBeneficiaryPayload],
+    'splash:payment-ref:v1': [c.paymentRefCommitment, c.encodePaymentRefPayload],
+  };
+  assert.deepEqual(Object.keys(byTag).sort(), Object.values(c.DOMAIN_TAGS).sort(), 'one reproducer per domain tag');
+  const covered = new Set();
   for (const v of vectors) {
-    const salt = fromHex(v.saltHex);
-    const got = v.tag === 'splash:receipt:v1' ? receiptCommitment(v.payload, salt) : paymentCommitment(v.payload, salt);
-    assert.equal(toHex(got), v.commitmentHex, `${v.name} reproduces`);
+    const family = byTag[v.tag];
+    assert.ok(family, `${v.name}: unknown tag ${v.tag}`);
+    covered.add(v.tag);
+    const [commit, encode] = family;
+    if (v.payloadBcsHex) assert.equal(c.toHex(encode(v.payload)), v.payloadBcsHex, `${v.name}: field order`);
+    assert.equal(c.toHex(commit(v.payload, c.fromHex(v.saltHex))), v.commitmentHex, `${v.name} reproduces`);
   }
+  assert.deepEqual([...covered].sort(), Object.keys(byTag).sort(), 'every tag has at least one vector');
+  for (const tag of ['splash:rail:v1', 'splash:beneficiary:v1', 'splash:payment-ref:v1']) {
+    assert.match(doc, new RegExp(tag.replace(/[-:]/g, (m) => `\\${m}`)), `the doc specifies ${tag}`);
+  }
+});
+
+test('no domain tag is a prefix of another, so two families can never collide', async () => {
+  const { DOMAIN_TAGS } = await lib();
+  const tags = Object.values(DOMAIN_TAGS);
+  for (const a of tags) for (const b of tags) if (a !== b) assert.ok(!b.startsWith(a), `${a} is a prefix of ${b}`);
+});
+
+test('the stable v2 commitments are stable: same record and secret, same bytes; another secret, other bytes', async () => {
+  const c = await lib();
+  const record = { partner: 'pdax', country: 'PH', bankCode: 'BDO', accountNumber: '001234567890', holderName: 'Dela Cruz Trading Corp' };
+  const secret = new Uint8Array(32).fill(0x33);
+  assert.equal(c.toHex(c.beneficiaryCommitment(record, secret)), c.toHex(c.beneficiaryCommitment({ ...record }, secret)));
+  assert.notEqual(c.toHex(c.beneficiaryCommitment(record, secret)), c.toHex(c.beneficiaryCommitment(record, new Uint8Array(32).fill(0x34))));
+  assert.notEqual(
+    c.toHex(c.beneficiaryCommitment(record, secret)),
+    c.toHex(c.beneficiaryCommitment({ ...record, accountNumber: '001234567891' }, secret)),
+    'one digit of the account number changes the commitment',
+  );
+  const ref = { businessAccountId: '0x' + 'c0'.repeat(32), paymentId: 'INV-2026-0042' };
+  const bizSecret = new Uint8Array(32).fill(0x44);
+  assert.equal(c.toHex(c.paymentRefCommitment(ref, bizSecret)), c.toHex(c.paymentRefCommitment({ ...ref }, bizSecret)), 'a retry derives the same payment_ref');
+  assert.throws(() => c.beneficiaryCommitment({ ...record, holderName: '' }, secret), /holderName/);
+  assert.throws(() => c.paymentRefCommitment({ ...ref, paymentId: '' }, bizSecret), /payment id/);
 });
