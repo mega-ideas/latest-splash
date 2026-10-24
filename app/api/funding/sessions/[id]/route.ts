@@ -7,15 +7,21 @@ import { ingestStablecoinDeposit } from '@/lib/server/funding-intake';
 import { readFundingSession, withoutDepositAddressOnMainnet } from '@/lib/server/funding-sessions';
 import { readJsonBody } from '@/lib/server/http';
 import { refuseOutsideLaunchScope } from '@/lib/server/launch-scope';
+import { requireSessionAccount } from '@/lib/server/session-account';
 
 const actionSchema = z.object({ action: z.literal('SIMULATE_DEPOSIT') });
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   const auth = await requireCustomerRequest(request);
   if (auth.response) return auth.response;
+  const accountCheck = await requireSessionAccount(auth.session);
+  if (accountCheck.response) return accountCheck.response;
 
   const { id } = await context.params;
-  const session = await readFundingSession(id);
+  const found = await readFundingSession(id);
+  // Read through the caller's org: another org's session is answered exactly
+  // like a missing one, so the answer does not confirm the id exists (WS2).
+  const session = !found || found.orgId !== accountCheck.account.orgId ? null : found;
   // A session stored with a deposit address (on testnet, or before mainnet
   // refused them) is never shown with it on mainnet (D1, D3).
   return session
@@ -34,9 +40,13 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   }
   const parsed = actionSchema.safeParse(await readJsonBody(request));
   if (!parsed.success) return NextResponse.json({ error: 'Invalid funding action' }, { status: 400 });
+  const accountCheck = await requireSessionAccount(auth.session);
+  if (accountCheck.response) return accountCheck.response;
   const { id } = await context.params;
   const session = await readFundingSession(id);
-  if (!session) return NextResponse.json({ error: 'Funding session not found' }, { status: 404 });
+  if (!session || session.orgId !== accountCheck.account.orgId) {
+    return NextResponse.json({ error: 'Funding session not found' }, { status: 404 });
+  }
   if (session.selection.type !== 'stablecoin') {
     return NextResponse.json({ error: 'Only stablecoin deposits can be simulated' }, { status: 400 });
   }
