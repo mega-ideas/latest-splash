@@ -22,7 +22,9 @@
  *   1. No renaming. No `use … as …` and no `use fun`, so every name below is
  *      the name the code calls. `allowance` is only ever sui::allowance and
  *      `internal` only std::internal, and the package declares no module with
- *      either name.
+ *      either name. splash_core's modules that splash_spend uses (CORE_MODULES,
+ *      fee_config and address_registry among them) come only from
+ *      splash_core, and the package declares none of their names.
  *   2. `rotate_spender` appears nowhere: not qualified, not imported, not as a
  *      method call.
  *   3. No permit type is named anywhere: `Permit`, `SettingsPermit` and
@@ -103,8 +105,18 @@ const CORE_APP = String.raw`(?:\w+\s*::\s*)?payment_intent\s*::\s*\w+_(?:for|fro
 const CORE_SETTLE = String.raw`(?:\w+\s*::\s*)?payment_intent\s*::\s*\w+_from_app`;
 const PERMIT_TYPES = ['Permit', 'SettingsPermit', 'SpendPermit'];
 /** splash_core's modules: splash_spend may import them only from splash_core,
- *  and may not declare a module of the same name a call could resolve to. */
-const CORE_MODULES = ['payment_intent', 'business_account', 'compliance_config', 'audit_anchor', 'multisig'];
+ *  and may not declare a module of the same name a call could resolve to.
+ *  fee_config and address_registry since A1: draw() computes Splash's fee
+ *  with fee_config::splash_fee and the kind with address_registry::derive_kind. */
+const CORE_MODULES = [
+  'payment_intent',
+  'business_account',
+  'compliance_config',
+  'audit_anchor',
+  'multisig',
+  'fee_config',
+  'address_registry',
+];
 /** `let x =` or `let mut x: T =` at the end of the text before a call. */
 const LET_BINDING = /\blet\s+(?:mut\s+)?([A-Za-z_]\w*)\s*(?::[^=;]*)?=\s*$/d;
 

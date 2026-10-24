@@ -353,7 +353,7 @@ public fun derive_kind<R>(_r: &R, _to: address, declared: u8, _cctp: bool): u8 {
   test(`importing ${module} from a package other than splash_core is caught`, () => {
     const r = runWith((s) => s.replace(imported, imported.replace('splash_core::', 'other_core::')));
     assert.equal(r.exitCode, 1, r.output);
-    assert.match(r.output, new RegExp(`\`use other_core::${module}::\\{Self, \\w+\\}\` is not splash_core::${module}`));
+    assert.match(r.output, new RegExp(`\`use other_core::${module}\` is not splash_core::${module}`));
   });
 }
 
