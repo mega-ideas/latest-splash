@@ -24,10 +24,10 @@ export const LAUNCH_SCOPE_WHY =
   'are not open yet.';
 
 /** Shown when a request is refused before anything happened. */
-export const LAUNCH_SCOPE_REASON = `${LAUNCH_SCOPE_WHY} Nothing was sent or recorded. Send USDC from Send USDC.`;
+export const LAUNCH_SCOPE_REASON = `${LAUNCH_SCOPE_WHY} Nothing was sent or recorded. Send USDC from Wallet.`;
 
 /** Shown where an approval was recorded but its payment is not carried out. */
-export const LAUNCH_SCOPE_NOT_SENT = `${LAUNCH_SCOPE_WHY} Nothing was sent. Send USDC from Send USDC.`;
+export const LAUNCH_SCOPE_NOT_SENT = `${LAUNCH_SCOPE_WHY} Nothing was sent. Send USDC from Wallet.`;
 
 /** Read a raw setting: anything but "stablecoin" is the full scope. */
 export function parseLaunchScope(raw: string | undefined | null): LaunchScope {

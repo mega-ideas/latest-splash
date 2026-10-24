@@ -457,7 +457,7 @@ export default function ApprovalQueueBoard({
 
       <div className="flex flex-wrap items-center gap-2 pt-1">
         <Link
-          href="/dashboard"
+          href="/dashboard/zeke"
           className="rounded-md border border-[#326273]/20 px-3 py-2 text-sm font-bold text-[#326273] focus-ring"
         >
           Back to Zeke

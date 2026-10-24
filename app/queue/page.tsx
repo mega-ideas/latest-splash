@@ -323,7 +323,7 @@ export default async function QueuePage() {
             </div>
           </div>
           <nav className="flex flex-wrap items-center gap-2 text-sm font-semibold">
-            <Link className="rounded-md border border-[#326273]/20 px-3 py-2 text-[#326273]" href="/dashboard">Zeke</Link>
+            <Link className="rounded-md border border-[#326273]/20 px-3 py-2 text-[#326273]" href="/dashboard/zeke">Zeke</Link>
             <Link className="rounded-md bg-[#1F4452] px-3 py-2 text-white" href="/dashboard">Dashboard</Link>
           </nav>
         </header>

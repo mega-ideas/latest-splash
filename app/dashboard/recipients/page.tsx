@@ -384,7 +384,7 @@ export default function RecipientsPage() {
             <QuickLinksCard
               className="mt-3"
               links={[
-                { label: 'Send USDC to a wallet', href: '/dashboard/send-usdc', icon: Wallet },
+                { label: 'Send USDC to a wallet', href: '/dashboard/wallet', icon: Wallet },
                 { label: 'Single transfer', href: '/dashboard/transfer', icon: Send },
                 { label: 'Batch CSV payout', href: '/dashboard/batch', icon: Layers },
               ]}

@@ -31,9 +31,14 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   // nothing redirects, mirroring how the gates themselves behave in dev.
   let locks: { termsDone: boolean; moneyBlocked: boolean; custodyOn: boolean; reason: string } | undefined;
   let needsIntent = false;
+  // Account setup sits on the rail until its required steps (1-4) are done,
+  // then under Settings (v2 brief 5.1). Unreadable means no nudge.
+  let setup: { done: number; total: number; complete: boolean } | undefined;
   try {
     const onboarding = await readOnboardingState(session);
     needsIntent = onboarding.intent === null;
+    const required = onboarding.steps.slice(0, 4);
+    setup = { done: required.filter((step) => step.done).length, total: required.length, complete: onboarding.complete };
     locks = {
       termsDone: onboarding.steps[0].done,
       moneyBlocked: kyb.blocked,
@@ -42,6 +47,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
     };
   } catch {
     locks = undefined;
+    setup = undefined;
   }
   if (needsIntent) redirect('/onboarding/intent');
 
@@ -54,5 +60,5 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   // One line on purpose: tests/oxwal-frontend.test.mjs pins the shape
   // {children}</DashboardShell> as the no-second-wrapper contract.
   // sweepOn needs no database, so it is resolved even when `locks` is not.
-  return <DashboardShell session={session} kyb={kyb} locks={locks} sweepOn={sweepAccountEnabled()} launchScope={launchScope()} governanceAlerts={governanceAlerts}>{children}</DashboardShell>;
+  return <DashboardShell session={session} kyb={kyb} locks={locks} setup={setup} sweepOn={sweepAccountEnabled()} launchScope={launchScope()} governanceAlerts={governanceAlerts}>{children}</DashboardShell>;
 }
