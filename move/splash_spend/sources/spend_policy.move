@@ -28,6 +28,27 @@
 /// one, and a "replaced" policy would stay live. Rotating the wallet moves the
 /// account to a new generation: the old policy stops paying (`splash_spend`
 /// checks the generation) and the new wallet creates its own.
+///
+/// ─── Running totals (decision 4) ────────────────────────────────────────────
+///
+/// The second-approval threshold applies to what a payer has paid one
+/// recipient in a window, not to each payment alone, so an invoice split into
+/// parts under the threshold still needs an owner's approval for the part
+/// that takes the total above it. The policy keeps, per (payer, recipient),
+/// the start of the current window and the principal paid in it. The window
+/// is fixed and anchored at the first payment in it: once `running_window_ms`
+/// has passed since that payment, the next payment starts a new window at its
+/// own time with a total of zero. The recipient is the beneficiary commitment
+/// for a bank payout and the recipient address otherwise. Every payment,
+/// approved or not, adds its principal. The mechanism is fixed; the wallet
+/// sets the window (an hour to thirty days) and the threshold.
+///
+/// The totals live in a `Table`, so each payment touches one entry and the
+/// policy object does not grow. Entries are written only by a successful
+/// payment under the policy, so only the wallet's own spenders, paying the
+/// wallet's verified destinations, create them. There is at most one per
+/// (payer address, destination); a lapsed window, or a spender removed and
+/// added back, overwrites its entry in place rather than adding one.
 module splash_spend::spend_policy;
 
 use splash_core::business_account::{Self, BusinessAccount};
@@ -74,6 +95,8 @@ const E_POLICY_NOT_CURRENT: u64 = 1064;
 /// The account is frozen. The policy can be cut back, not grown, until it
 /// thaws.
 const E_ACCOUNT_FROZEN: u64 = 1065;
+/// A running-total window is at least an hour and at most thirty days.
+const E_BAD_WINDOW: u64 = 1066;
 
 // ─── Constants ─────────────────────────────────────────────────────────────
 /// Staff open intents and pay them.
@@ -88,6 +111,18 @@ const COMMITMENT_BYTES: u64 = 32;
 /// Every destination a policy verifies is on Sui: a bank payout's partner
 /// deposit address, another Splash business, a wallet.
 const SUI_DOMAIN: u32 = 8;
+/// Decision 4: a running total is kept over 24 hours unless the wallet
+/// chooses otherwise.
+const DEFAULT_RUNNING_WINDOW_MS: u64 = 86_400_000;
+/// Under an hour, the rule barely holds: a spender waits a few minutes
+/// between the parts of a split payment. Zero would switch it off while it
+/// still looks set.
+const MIN_RUNNING_WINDOW_MS: u64 = 3_600_000;
+/// Thirty days: the longest an intent lives and the length of the tier's
+/// monthly window. Longer, the total becomes a lifetime cap per recipient,
+/// which is the allowance's own job, and a payment months old would still
+/// force approvals.
+const MAX_RUNNING_WINDOW_MS: u64 = 2_592_000_000;
 
 /// Shared once, at publish. The parent every policy's UID is derived from.
 public struct PolicyRegistry has key {
@@ -111,6 +146,29 @@ public struct Spender has copy, drop, store {
     role: u8,
     /// This spender's own ceiling per payment, inside the policy's.
     per_payment_max: u64,
+    /// Which grant this is: a number the policy hands out once, when the
+    /// spender is added. A running total records it, so a spender removed
+    /// and added back starts a new total.
+    serial: u64,
+}
+
+/// Whose running total, to whom. For a bank payout `beneficiary` is the
+/// beneficiary commitment and `recipient` is zero; otherwise `beneficiary`
+/// is empty and `recipient` is the recipient address. So a bank beneficiary
+/// and an address never share a total.
+public struct RunningKey has copy, drop, store {
+    payer: address,
+    beneficiary: vector<u8>,
+    recipient: address,
+}
+
+/// The principal a payer has paid one recipient in the current window.
+public struct RunningTotal has copy, drop, store {
+    /// The payer's `Spender.serial` when the window started.
+    spender_serial: u64,
+    /// The first payment in the window.
+    window_start_ms: u64,
+    total: u64,
 }
 
 public struct SpendPolicy has key {
@@ -144,12 +202,20 @@ public struct SpendPolicy has key {
     beneficiaries: Table<vector<u8>, Destination>,
     beneficiary_count: u64,
     per_payment_max: u64,
-    /// Above this amount a payment needs a second approval from an owner.
+    /// A payment needs a second approval from an owner when it takes what
+    /// its payer has paid its recipient in the current window above this.
     second_approval_threshold: u64,
     /// Moves on every removal (a spender, a recipient, a beneficiary). Each
     /// approval records the generation it was given under and dies when it
     /// moves, so adding back what was removed never brings an approval back.
     generation: u64,
+    /// The next `Spender.serial` to hand out.
+    next_spender_serial: u64,
+    /// How long a running total's window lasts, from its first payment.
+    running_window_ms: u64,
+    /// Decision 4: per (payer, recipient), the principal paid in the current
+    /// window. Written only by `record_payment`, from `splash_spend`'s draw.
+    running_totals: Table<RunningKey, RunningTotal>,
 }
 
 // ─── Events ────────────────────────────────────────────────────────────────
@@ -167,7 +233,9 @@ public struct PolicyCreated has copy, drop {
 
 /// `change` is one of `add_spender`, `remove_spender`, `verify_recipient`,
 /// `remove_recipient`, `verify_beneficiary`, `remove_beneficiary`,
-/// `set_limits`. Which entry changed is read off the object, not the event.
+/// `set_limits`, `set_running_window`. Which entry changed is read off the
+/// object, not the event. A payment's running total is not a change to the
+/// rules and emits nothing here.
 public struct PolicyChanged has copy, drop {
     policy_id: ID,
     change: vector<u8>,
@@ -228,6 +296,9 @@ public fun create_policy<T>(
         per_payment_max,
         second_approval_threshold: DEFAULT_SECOND_APPROVAL_THRESHOLD,
         generation: 0,
+        next_spender_serial: 0,
+        running_window_ms: DEFAULT_RUNNING_WINDOW_MS,
+        running_totals: table::new(ctx),
     };
     let policy_id = object::id(&policy);
     event::emit(PolicyCreated {
@@ -286,7 +357,9 @@ public fun add_spender(
     assert!(per_payment_max > 0, E_BAD_LIMIT);
     assert!(!policy.spenders.contains(spender), E_ALREADY_A_SPENDER);
     assert!(policy.spender_count < MAX_SPENDERS, E_TOO_MANY_SPENDERS);
-    policy.spenders.add(spender, Spender { role, per_payment_max });
+    let serial = policy.next_spender_serial;
+    policy.next_spender_serial = serial + 1;
+    policy.spenders.add(spender, Spender { role, per_payment_max, serial });
     policy.spender_count = policy.spender_count + 1;
     changed(policy, b"add_spender");
 }
@@ -298,6 +371,8 @@ public fun add_spender(
 /// adding the spender back (for example with a new limit) revives none of
 /// them. Their open intents do become payable again if they are added
 /// back; the wallet cancels any it does not want with `cancel_by_wallet`.
+/// Their running totals end with the grant: added back, they start new ones
+/// (each old entry is overwritten by their next payment to that recipient).
 public fun remove_spender(policy: &mut SpendPolicy, spender: address, ctx: &TxContext) {
     assert_wallet(policy, ctx);
     assert!(policy.spenders.contains(spender), E_NOT_A_SPENDER);
@@ -407,6 +482,73 @@ public fun set_limits(
     changed(policy, b"set_limits");
 }
 
+/// Set how long a running total's window lasts, in milliseconds: at least
+/// an hour, at most thirty days. It applies at once, to windows already open
+/// too, since a window lapses when this long has passed since its first
+/// payment. A shorter window lets totals lapse sooner, so shortening grows
+/// the policy and needs it current and the account not frozen; lengthening
+/// is always open.
+public fun set_running_window(
+    policy: &mut SpendPolicy,
+    account: &BusinessAccount,
+    window_ms: u64,
+    ctx: &TxContext,
+) {
+    assert_wallet(policy, ctx);
+    assert!(object::id(account) == policy.account, E_POLICY_NOT_CURRENT);
+    assert!(window_ms >= MIN_RUNNING_WINDOW_MS && window_ms <= MAX_RUNNING_WINDOW_MS, E_BAD_WINDOW);
+    if (window_ms < policy.running_window_ms) assert_can_grow(policy, account);
+    policy.running_window_ms = window_ms;
+    changed(policy, b"set_running_window");
+}
+
+// ─── Running totals: written by splash_spend's draw only ───────────────────
+
+fun running_key(payer: address, kind: u8, recipient: address, beneficiary_ref: vector<u8>): RunningKey {
+    if (kind == payment_intent::kind_bank_payout()) {
+        RunningKey { payer, beneficiary: beneficiary_ref, recipient: @0x0 }
+    } else {
+        RunningKey { payer, beneficiary: vector[], recipient }
+    }
+}
+
+/// The entry still counts at `now_ms`: it belongs to the payer's current
+/// grant and its window has not run out.
+fun is_live(policy: &SpendPolicy, key: &RunningKey, now_ms: u64): bool {
+    if (!policy.running_totals.contains(*key)) return false;
+    if (!policy.spenders.contains(key.payer)) return false;
+    let entry = policy.running_totals.borrow(*key);
+    if (entry.spender_serial != policy.spenders.borrow(key.payer).serial) return false;
+    // `now_ms` before the start only happens in a view asked about the past.
+    now_ms < entry.window_start_ms || now_ms - entry.window_start_ms < policy.running_window_ms
+}
+
+/// Add `amount` of principal to what `payer` has paid this recipient in the
+/// current window, starting a new window at `now_ms` if the last one has run
+/// out (or belonged to an earlier grant). Saturates rather than aborts: a
+/// total that large is already far above any threshold.
+public(package) fun record_payment(
+    policy: &mut SpendPolicy,
+    payer: address,
+    kind: u8,
+    recipient: address,
+    beneficiary_ref: vector<u8>,
+    amount: u64,
+    now_ms: u64,
+) {
+    let serial = policy.spenders.borrow(payer).serial;
+    let key = running_key(payer, kind, recipient, beneficiary_ref);
+    if (is_live(policy, &key, now_ms)) {
+        let entry = policy.running_totals.borrow_mut(key);
+        entry.total = if (entry.total > std::u64::max_value!() - amount) std::u64::max_value!()
+        else entry.total + amount;
+        return
+    };
+    let fresh = RunningTotal { spender_serial: serial, window_start_ms: now_ms, total: amount };
+    if (policy.running_totals.contains(key)) *policy.running_totals.borrow_mut(key) = fresh
+    else policy.running_totals.add(key, fresh);
+}
+
 // ─── Views ─────────────────────────────────────────────────────────────────
 
 public fun account(policy: &SpendPolicy): ID { policy.account }
@@ -453,6 +595,40 @@ public fun second_approval_threshold(policy: &SpendPolicy): u64 { policy.second_
 /// the generation it was given in.
 public fun generation(policy: &SpendPolicy): u64 { policy.generation }
 public fun default_second_approval_threshold(): u64 { DEFAULT_SECOND_APPROVAL_THRESHOLD }
+/// How long a running total's window lasts, from its first payment.
+public fun running_window_ms(policy: &SpendPolicy): u64 { policy.running_window_ms }
+public fun default_running_window_ms(): u64 { DEFAULT_RUNNING_WINDOW_MS }
+public fun min_running_window_ms(): u64 { MIN_RUNNING_WINDOW_MS }
+public fun max_running_window_ms(): u64 { MAX_RUNNING_WINDOW_MS }
+/// The principal `payer` has paid this recipient in the window that is
+/// current at `now_ms`: 0 if there is none, it has run out, or `payer` is no
+/// longer (or no longer the same) spender. The recipient is named as an
+/// intent names it: for a bank payout (kind 1) by `beneficiary_ref`, the
+/// recipient address being ignored; otherwise by `recipient`.
+public fun running_total(
+    policy: &SpendPolicy,
+    payer: address,
+    kind: u8,
+    recipient: address,
+    beneficiary_ref: vector<u8>,
+    now_ms: u64,
+): u64 {
+    let key = running_key(payer, kind, recipient, beneficiary_ref);
+    if (is_live(policy, &key, now_ms)) policy.running_totals.borrow(key).total else 0
+}
+/// When the window counted by `running_total` started, if there is one.
+public fun running_window_start_ms(
+    policy: &SpendPolicy,
+    payer: address,
+    kind: u8,
+    recipient: address,
+    beneficiary_ref: vector<u8>,
+    now_ms: u64,
+): Option<u64> {
+    let key = running_key(payer, kind, recipient, beneficiary_ref);
+    if (is_live(policy, &key, now_ms)) option::some(policy.running_totals.borrow(key).window_start_ms)
+    else option::none()
+}
 public fun max_spenders(): u64 { MAX_SPENDERS }
 public fun role_staff(): u8 { ROLE_STAFF }
 public fun role_executor(): u8 { ROLE_EXECUTOR }

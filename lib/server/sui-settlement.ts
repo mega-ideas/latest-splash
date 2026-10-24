@@ -498,7 +498,7 @@ const ABORT_CODES: Record<number, string> = {
   1003: 'E_RECIPIENT_NOT_VERIFIED — the destination is not on this spending rule verified list. The owners verify it first.',
   1004: 'E_BENEFICIARY_NOT_VERIFIED — the bank beneficiary is not verified for this partner deposit address.',
   1005: 'E_OVER_PER_PAYMENT_MAX — the payment is above the spending rule per-payment maximum, or the spender own.',
-  1006: 'E_APPROVAL_REQUIRED — this payment needs an approval and carries none: it is above the second-approval threshold, or the payer is the scheduled-payment operator.',
+  1006: 'E_APPROVAL_REQUIRED — this payment needs an approval and carries none: together with what this payer has already paid this recipient in the current window (24 hours by default, from the first of those payments), it is above the second-approval threshold, or the payer is the scheduled-payment operator. An owner approves it, or it waits for the window to end.',
   1007: 'E_APPROVAL_MISMATCH — the approval is for a different rule, intent, amount or payer.',
   1008: 'E_SELF_APPROVAL — the approver opened this payment or is paying it. A second approval needs a second person.',
   1009: 'E_NOT_AN_OWNER — the approver is not a member of the business wallet.',
@@ -536,6 +536,7 @@ const ABORT_CODES: Record<number, string> = {
   1063: 'E_ASSET_NOT_ACCEPTED — a spending rule can be made only in an asset the compliance config accepts (USDC). Nothing was created, so the wallet can make its rule in USDC.',
   1064: 'E_POLICY_NOT_CURRENT — this spending rule is not the account current one: the business wallet has rotated, or another account was passed. An old rule can only be cut back; the new wallet sets up its own.',
   1065: 'E_ACCOUNT_FROZEN — the account is frozen, so its spending rule can be cut back but not widened, and no new allowance is issued, until it thaws.',
+  1066: 'E_BAD_WINDOW — the running-total window of a spending rule is at least one hour and at most thirty days.',
 
   // ── upgrade_delay (splash_upgrade_delay, the 24-hour upgrade notice) ─────
   1100: 'E_BAD_DIGEST — upgrade_delay::propose was given a digest that is not 32 bytes. Pass the digest the build prints for the new bytecode.',

@@ -13,10 +13,12 @@
 /// and the maker are on the policy, the destination is verified (a bank
 /// beneficiary together with its partner deposit address, or a recipient
 /// verified for exactly this kind of delivery), the amount is
-/// within the policy's and the spender's ceilings, and above the
-/// second-approval threshold a different owner has approved this exact
-/// payment. Then `splash_core` settles it against the compliance config the
-/// policy recorded at creation (no other is accepted), accepting this
+/// within the policy's and the spender's ceilings, and when the amount, with
+/// what the payer has already paid that recipient in the current window
+/// (decision 4), is above the second-approval threshold, a different owner
+/// has approved this exact payment. Then `splash_core` settles it against
+/// the compliance config the policy recorded at creation (no other is
+/// accepted), accepting this
 /// package's `SettleWitness` because it is on that config's settlement-app
 /// registry, and pays the intent's recipient in the same call.
 ///
@@ -77,7 +79,8 @@ const E_RECIPIENT_NOT_VERIFIED: u64 = 1003;
 const E_BENEFICIARY_NOT_VERIFIED: u64 = 1004;
 /// The payment is above the policy's or the spender's per-payment maximum.
 const E_OVER_PER_PAYMENT_MAX: u64 = 1005;
-/// The payment needs an approval and carries none: it is above the
+/// The payment needs an approval and carries none: with what its payer has
+/// already paid its recipient in the current window, it is above the
 /// second-approval threshold, or the payer is an executor.
 const E_APPROVAL_REQUIRED: u64 = 1006;
 /// The approval is for a different policy, intent, amount or payer.
@@ -456,7 +459,7 @@ public fun pay_intent<C>(
     withdrawal: AllowanceWithdrawal<Balance<C>>,
     intent: &mut PaymentIntent,
     account: &mut BusinessAccount,
-    policy: &SpendPolicy,
+    policy: &mut SpendPolicy,
     config: &ComplianceConfig,
     approval: Option<PayoutApproval>,
     settle_by_ms: u64,
@@ -484,7 +487,7 @@ fun draw<C>(
     withdrawal: AllowanceWithdrawal<Balance<C>>,
     intent: &PaymentIntent,
     account: &BusinessAccount,
-    policy: &SpendPolicy,
+    policy: &mut SpendPolicy,
     config: &ComplianceConfig,
     approval: Option<PayoutApproval>,
     settle_by_ms: u64,
@@ -510,23 +513,27 @@ fun draw<C>(
 
     // Where. The destination key is built here, on domain 8, not read whole
     // off the intent.
-    assert_sui_destination(
-        policy,
-        payment_intent::kind(intent),
-        payment_intent::recipient(intent),
-        payment_intent::beneficiary_ref(intent),
-    );
+    let kind = payment_intent::kind(intent);
+    let recipient = payment_intent::recipient(intent);
+    let beneficiary_ref = payment_intent::beneficiary_ref(intent);
+    assert_sui_destination(policy, kind, recipient, beneficiary_ref);
 
-    // How much: the policy's ceiling, the payer's, and the maker's.
+    // How much: the policy's ceiling, the payer's, and the maker's. Each
+    // applies to the principal; the fee is Splash's, bounded by the config.
     let amount = payment_intent::amount_usd(intent);
     assert_within_limits(policy, amount, payer);
     if (!by_wallet) assert_within_limits(policy, amount, maker);
 
-    // Approvals: the owners', above the threshold and for an executor always.
-    // Every approval is the owners' (an owner's, or the wallet's delegation),
-    // and any approval passed must match and is consumed.
-    let needs_approval =
-        amount > spend_policy::second_approval_threshold(policy) || spend_policy::is_executor(policy, payer);
+    // Approvals: the owners', when this payment takes what the payer has
+    // paid this recipient in the current window above the threshold
+    // (decision 4), and for an executor always. Every approval is the
+    // owners' (an owner's, or the wallet's delegation), and any approval
+    // passed must match and is consumed.
+    let now = clock.timestamp_ms();
+    let paid_so_far = spend_policy::running_total(policy, payer, kind, recipient, beneficiary_ref, now);
+    let threshold = spend_policy::second_approval_threshold(policy);
+    let over_threshold = paid_so_far > threshold || amount > threshold - paid_so_far;
+    let needs_approval = over_threshold || spend_policy::is_executor(policy, payer);
     let approval_id = if (approval.is_some()) {
         let approval = approval.destroy_some();
         let id = object::id(&approval);
@@ -537,6 +544,8 @@ fun draw<C>(
         assert!(!needs_approval, E_APPROVAL_REQUIRED);
         option::none()
     };
+    // Every payment counts toward the total, approved or not.
+    spend_policy::record_payment(policy, payer, kind, recipient, beneficiary_ref, amount, now);
 
     let allowance_id = object::id(allowance);
     let funds = allowance::app_balance_spend(
