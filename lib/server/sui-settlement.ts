@@ -45,7 +45,8 @@ function settlementMode(): 'auto' | 'live' | 'simulate' {
 // so a real batch can abort mid-demo. Setting SUI_BATCH_SETTLEMENT_MODE=simulate
 // keeps batch on a labelled SIM_ receipt while single transfers, treasury, and the
 // composed proof flow still settle for real. Returns null → fall through to the
-// global mode.
+// global mode. Never reached on mainnet: the batch path is refused there before
+// any mode is read (refuseRetiredCustodyPathOnMainnet).
 function batchExecutionOverride(): SettlementExecution | null {
   const mode = (process.env.SUI_BATCH_SETTLEMENT_MODE ?? '').trim().toLowerCase();
   return mode === 'simulate' ? 'simulate' : null;
@@ -808,12 +809,37 @@ function corePackageIdOrThrow(): string {
   return configIdOrThrow('packageId', 'SPLASH_PACKAGE_ID');
 }
 
+/** The same test resolvePayoutRecipient makes for SUI_NETWORK. */
+function onMainnet(): boolean {
+  return (process.env.SUI_NETWORK ?? '').trim().toLowerCase() === 'mainnet';
+}
+
+/**
+ * v2 (D11): splash_custody and splash_meter are retired from the mainnet path.
+ * App-bound allowances and address balances replace pooled settlement and the
+ * spend meter, so on mainnet every path built on splash_custody refuses, and
+ * it refuses first: before the settlement mode is read, so simulate cannot
+ * report a SIM_ settlement for a path that does not exist there, and before
+ * any package id is resolved, so the legacy single package is never taken
+ * for the custody one. Testnet keeps the paths.
+ */
+function refuseRetiredCustodyPathOnMainnet(path: string): void {
+  if (!onMainnet()) return;
+  throw new Error(
+    `${path} runs on splash_custody, which v2 retired from the mainnet path (D11): app-bound allowances and ` +
+      'address balances replace pooled settlement and the delegated batch. Nothing was sent.',
+  );
+}
+
 /**
  * Resolve the CUSTODY package, or explain why it does not exist.
  *
- * Splash cannot hold client funds — enforced structurally rather than by a
- * licence condition, and a precondition for operating before an e-money
- * licence exists. So
+ * On mainnet it never exists: v2 retired splash_custody from the mainnet path
+ * (refuseRetiredCustodyPathOnMainnet), so this throws there, with no fallback.
+ *
+ * Elsewhere: Splash cannot hold client funds — enforced structurally rather
+ * than by a licence condition, and a precondition for operating before an
+ * e-money licence exists. So
  * splash_custody — every struct that holds a `Balance<T>` — is NOT PUBLISHED.
  * This is not a feature flag: the bytecode is absent, so there is nothing to
  * flip and nothing to bypass. The error names the licence rather than reporting
@@ -821,10 +847,12 @@ function corePackageIdOrThrow(): string {
  * deployment mistake when it is in fact the regulatory posture working.
  */
 function custodyPackageIdOrThrow(): string {
+  refuseRetiredCustodyPathOnMainnet('Custody settlement');
   const custody = (getContractConfig().custodyPackageId ?? '').trim();
   if (custody) return requireSuiObjectId(custody, 'SPLASH_CUSTODY_PACKAGE_ID');
 
   // Pre-split deployments carried custody modules inside the single package.
+  // Testnet only: on mainnet the refusal above has already thrown.
   const legacy = (getContractConfig().packageId ?? '').trim();
   if (legacy && !(getContractConfig().corePackageId ?? '').trim()) return legacy;
 
@@ -984,9 +1012,10 @@ export async function confirmComposedPaymentOnSui(input: {
     // composed path, which otherwise holds no balance. It must resolve through custody
     // package, not the core one: addressing a custody module with the core
     // package id is not a compile error, it is a runtime failure deep inside a
-    // PTB. In Phase 0 this throws the licence-named error instead, which is the
-    // honest outcome — the treasury allocation is a custodial operation and the
-    // licence does not permit it yet.
+    // PTB. On mainnet this throws the retired-path error (D11); elsewhere, in
+    // Phase 0, the licence-named one, which is the honest outcome — the
+    // treasury allocation is a custodial operation and the licence does not
+    // permit it yet.
     const custodyPackageId = custodyPackageIdOrThrow();
     const [treasuryCoin] = tx.splitCoins(tx.gas, [treasuryAmountMist]);
     tx.moveCall({
@@ -1382,6 +1411,9 @@ export async function recordSingleTransferOnSui(input: {
   /** Override the corridor fee. Bounded to CONTRACT_MAX_FEE_BPS. */
   feeBps?: number;
 }) {
+  // settlement::settle_payment is a splash_custody function: refused on
+  // mainnet in every mode, simulate included.
+  refuseRetiredCustodyPathOnMainnet('Single-transfer settlement');
   const execution = await resolveSettlementExecution();
   if (execution === 'simulate') {
     const sim = simulatedSettlement(input.transferId);
@@ -1576,6 +1608,11 @@ export async function recordBatchSettlementOnSui(input: {
   /** Override the corridor fee. Bounded to CONTRACT_MAX_FEE_BPS. */
   feeBps?: number;
 }) {
+  // settle_sui_batch_delegated is a splash_custody function: refused on
+  // mainnet in every mode, simulate and SUI_BATCH_SETTLEMENT_MODE included,
+  // so the batch route records FAILED rather than SETTLED for a payout that
+  // never happened.
+  refuseRetiredCustodyPathOnMainnet('Batch settlement');
   const execution = batchExecutionOverride() ?? await resolveSettlementExecution();
   if (execution === 'simulate') {
     const sim = simulatedSettlement(input.batchId);
