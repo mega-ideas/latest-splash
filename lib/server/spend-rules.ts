@@ -425,6 +425,17 @@ async function recipientOps(sc: SpendContext, orgId: string, policy: PolicyState
     }
     ops.push({ op: 'verify_recipient', address: r.address, kind: r.tag === 'wallet' ? RECIPIENT_TAG.WALLET : RECIPIENT_TAG.EXCHANGE });
   }
+  // Sky (24 Oct 2026): a partner deposit address is verified once, by a test
+  // deposit the partner confirmed (v2 §4.4), before the wallet binds any
+  // beneficiary to it.
+  if ((change.addBeneficiaries ?? []).length > 0) {
+    const { verifiedDepositAddresses } = await import('./withdrawals-store.ts');
+    const verified = new Set((await verifiedDepositAddresses(sc.db, orgId)).map((a) => normalizeSuiAddress(a)));
+    const unverified = [...new Set((change.addBeneficiaries ?? []).map((b) => normalizeSuiAddress(b.partnerDeposit)))].filter((a) => !verified.has(a));
+    if (unverified.length) {
+      return refuse(409, 'partner_address_unverified', 'a beneficiary is bound only to a partner deposit address this business verified with a test deposit', { addresses: unverified });
+    }
+  }
   for (const b of change.addBeneficiaries ?? []) {
     const commitment = b.commitment.toLowerCase();
     if (!/^[0-9a-f]{64}$/.test(commitment)) return refuse(400, 'bad_commitment', 'a beneficiary is named by its 32-byte commitment');

@@ -117,6 +117,15 @@ export async function depositAddressByTestRequest(db: DrizzleDb, orgId: string, 
   return row ?? null;
 }
 
+/** This business's partner deposit addresses that passed their test deposit. */
+export async function verifiedDepositAddresses(db: DrizzleDb, orgId: string): Promise<string[]> {
+  const rows = await db
+    .select({ address: partnerDepositAddresses.address })
+    .from(partnerDepositAddresses)
+    .where(and(eq(partnerDepositAddresses.orgId, orgId), eq(partnerDepositAddresses.status, 'verified')));
+  return rows.map((r) => r.address);
+}
+
 /** For a partner webhook: the live address the partner's account ref names, with its org. */
 export async function depositAddressForWebhook(db: DrizzleDb, partner: string, accountRef: string): Promise<DepositAddressRow | null> {
   const [row] = await db
