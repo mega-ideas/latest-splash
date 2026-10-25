@@ -4,6 +4,8 @@ import { assertCleanBody, ProvenanceViolationError, provenanceViolationResponse 
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { readJsonBody } from '@/lib/server/http';
 import { RATE_LIMITS, clientIp, enforceRateLimit } from '@/lib/server/rate-limit';
+import { requireSessionAccount } from '@/lib/server/session-account';
+import { zekeSessionKey } from '@/lib/server/zeke-session-notices';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -36,6 +38,10 @@ export async function POST(request: Request) {
     throw error;
   }
   const body = rawBody as OxwalRouteBody;
+  // The org every tool acts for, from the session (WS2): a signed-in person
+  // with no membership is answered, not crashed.
+  const accountCheck = await requireSessionAccount(auth.session);
+  if (accountCheck.response) return accountCheck.response;
   const ctx = await resolveAuthorityForSession(auth.session);
 
   const message = (body.message ?? '').trim();
@@ -52,8 +58,11 @@ export async function POST(request: Request) {
 
       for await (const event of runOxwalAgent({
         message,
-        orgId: ctx.orgId,
+        orgId: accountCheck.account.orgId,
         actorId: ctx.userId,
+        // What Zeke says once per sign-in (v2 §4.8) is keyed on the verified
+        // session, never on anything the body says.
+        sessionKey: zekeSessionKey(auth.session),
         history: Array.isArray(body.history) ? body.history.slice(-12) : [],
       })) {
         send(event);

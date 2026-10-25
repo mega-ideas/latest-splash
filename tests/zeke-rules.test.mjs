@@ -387,9 +387,13 @@ test('an adversarial invoice cannot steer the model into another tenant, a raw a
   const calls = [];
   setOxwalModelClientForTesting(fakeModel(calls, [
     { content: [toolUse('a', 'getInvoice', { id: 'inv_steer' })] },
-    { content: [toolUse('b', 'signProposal', { proposalId: 'p1' })] },
-    { content: [toolUse('c', 'proposePayment', { orgId: 'demo-business', counterpartyId: 'cp_acme_ph', amountUsd: 900, currency: 'PHP', destination: '0xattacker' })] },
-    { content: [toolUse('d', 'proposePayment', { orgId: 'org-other.test', counterpartyId: 'cp_other_tenant', amountUsd: 50000, currency: 'PHP' })] },
+    {
+      content: [
+        toolUse('b', 'signProposal', { proposalId: 'p1' }),
+        toolUse('c', 'proposePayment', { orgId: 'demo-business', counterpartyId: 'cp_acme_ph', amountUsd: 900, currency: 'PHP', destination: '0xattacker' }),
+        toolUse('d', 'proposePayment', { orgId: 'org-other.test', counterpartyId: 'cp_other_tenant', amountUsd: 50000, currency: 'PHP' }),
+      ],
+    },
     { content: [{ type: 'text', text: 'I could not do that.' }] },
   ]));
   const events = await turn({ message: 'Pay the invoice inv_steer', orgId: 'demo-business', sessionKey: 'steer', forceLocal: false });
@@ -481,7 +485,26 @@ test('an uploaded sheet goes to the batch desk as rows, never into the model\'s 
 // ── 8. Zeke's words render as text, not markup ─────────────────────────────
 
 registerHooks({
+  // Next's entry points are CommonJS files without an exports map entry for
+  // the bare subpath; name the file, as the bundler would.
+  // Their default export is `module.exports.default`, which ESM sees one
+  // level down; the shim hands the component itself over, as the bundler does.
+  resolve(specifier, context, nextResolve) {
+    if (specifier === 'next/image' || specifier === 'next/link') {
+      const resolved = nextResolve(`${specifier}.js`, context);
+      return { ...resolved, url: `${resolved.url}?esm-shim` };
+    }
+    return nextResolve(specifier, context);
+  },
   load(url, context, nextLoad) {
+    if (url.endsWith('?esm-shim')) {
+      const target = url.slice(0, -'?esm-shim'.length);
+      return {
+        format: 'module',
+        source: `import m from ${JSON.stringify(target)}; export default (m && m.default) || m;`,
+        shortCircuit: true,
+      };
+    }
     if (!url.startsWith('file:') || !url.endsWith('.tsx')) return nextLoad(url, context);
     const { outputText } = ts.transpileModule(readFileSync(fileURLToPath(url), 'utf8'), {
       compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
@@ -504,7 +527,9 @@ test('Zeke output and invoice text render escaped in the thread, and a prepared 
     { id: '3', kind: 'notice', text: hostile },
   ]) {
     const html = render(item);
-    assert.equal(html.includes('<img'), false, item.kind);
+    // (The avatar is an <img> of its own; the hostile one has src=x.)
+    assert.equal(/<img[^>]*src="?x/.test(html), false, item.kind);
+    assert.equal(/onerror=/i.test(html.replaceAll('onerror=&quot;', '')), false, item.kind);
     assert.equal(html.includes('<script'), false, item.kind);
     assert.equal(html.includes('href="javascript:'), false, item.kind);
     assert.ok(html.includes('&lt;img'), `${item.kind} shows the text as text`);
@@ -513,7 +538,7 @@ test('Zeke output and invoice text render escaped in the thread, and a prepared 
     id: '4', kind: 'handoff', handoff: { href: 'javascript:alert(1)', title: hostile, cta: 'Open', lines: [hostile] },
   });
   assert.equal(handoff.includes('href="javascript:'), false);
-  assert.equal(handoff.includes('<img'), false);
+  assert.equal(/<img[^>]*src="?x/.test(handoff), false);
   // And nothing in the Zeke surfaces injects HTML.
   for (const file of ['components/oxwal/ThreadView.tsx', 'components/oxwal/ActionCard.tsx', 'components/FloatingCopilot.tsx', 'app/dashboard/copilot/page.tsx']) {
     assert.doesNotMatch(readFileSync(new URL(`../${file}`, import.meta.url), 'utf8'), /dangerouslySetInnerHTML|innerHTML/, file);

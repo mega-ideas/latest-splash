@@ -344,6 +344,13 @@
       "when": 1792713600000,
       "tag": "0048_wallet_recipient_controls",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1792800000000,
+      "tag": "0049_zeke_session_notices",
+      "breakpoints": true
     }
   ]
 }

@@ -30,6 +30,32 @@ The remaining four modules (`smart_treasury`, `payment_intent`, `audit_anchor`, 
 
 ---
 
+## v2 Phase 2 §4.8 — Zeke's rules — 2026-10-25
+
+Design: `docs/v2/phase2-zeke.md`. Tests: `tests/zeke-rules.test.mjs`.
+Migration 0049.
+
+- **D-0004 traced.** Every tool the model is offered is a READ or a draft;
+  the test checks the registry, the implementations and that no agent module
+  imports a signer, keypair, KMS client or approval call.
+- **The limitation statement is code, not prompt.** A deterministic intent
+  classifier states the limit before every money-moving turn acts, and before
+  any money tool the model calls on a turn the classifier did not foresee; a
+  read-only turn hears it once per sign-in session.
+- **Once per session is a primary key** on `zeke_session_notices` (org,
+  session hash, notice), keyed on a hash of the verified session; production
+  without a database fails closed (limit stated, nudge skipped).
+- **Cross-tenant reads closed (Medium).** `getInvoice` and `getCounterparty`
+  took only an id, so a model told by an invoice to read or pay another
+  tenant's record could; and the batch and netting drafts accepted any
+  counterparty id, verified or not. Both now take the session org (another
+  tenant's record is "not found"), and every draft names only this org's
+  verified, clear counterparties. The seeded sample workspace stays visible
+  to all, DEMO-labelled.
+- **The chat route** resolves the org through `requireSessionAccount`, so a
+  signed-in person with no membership gets an answer, not a 500.
+- **The model client test hook** refuses to be set in production.
+
 ## v2 Phase 2 §4.7 — wallet recipients: exchange accounts, proven wallets, CCTP — 2026-10-25
 
 Design: `docs/v2/phase2-wallet-recipients.md`. Tests:

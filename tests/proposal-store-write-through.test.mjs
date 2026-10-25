@@ -191,9 +191,15 @@ test('the org is the session’s for every org-scoped tool, and only for those',
     oxwal.scopeToolInputToOrg('findSavedRecipient', { orgId: 'org-somebody-else-test', name: 'Acme' }, ORG),
     { orgId: ORG, name: 'Acme' },
   );
+  // Invoices and counterparties are read under the session org too (v2 §4.8):
+  // an invoice that names another tenant's record is not a way to read it.
+  assert.deepEqual(
+    oxwal.scopeToolInputToOrg('getInvoice', { orgId: 'org-somebody-else-test', id: 'inv_demo_acme_5000' }, ORG),
+    { orgId: ORG, id: 'inv_demo_acme_5000' },
+  );
   // A tool that takes no org is left exactly as the model wrote it.
-  const invoiceInput = { id: 'inv_demo_acme_5000' };
-  assert.equal(oxwal.scopeToolInputToOrg('getInvoice', invoiceInput, ORG), invoiceInput);
+  const corridorInput = { corridor: 'MY_PH' };
+  assert.equal(oxwal.scopeToolInputToOrg('getCorridorLiquidity', corridorInput, ORG), corridorInput);
   // No session org: an org-scoped tool refuses rather than trusting the model.
   assert.throws(
     () => oxwal.scopeToolInputToOrg('proposePayment', { orgId: ORG }, undefined),

@@ -2207,3 +2207,23 @@ export const travelRuleTransfers = pgTable('travel_rule_transfers', {
   uniqueIndex('travel_rule_transfers_payment_unique').on(table.orgId, table.paymentRef),
   uniqueIndex('travel_rule_transfers_provider_ref_unique').on(table.provider, table.providerRef).where(sql`${table.providerRef} is not null`),
 ]);
+
+/**
+ * What Zeke has already said once in a sign-in session (v2 §4.8): the
+ * read-only limitation statement and the first-recipient nudge. One row per
+ * org, session and notice; the primary key is the "once" — a claim is an
+ * insert that either lands or conflicts, so two tabs, two instances or a
+ * retried request cannot say it twice. `session_key` is a hash of the signed
+ * session (lib/server/zeke-session-notices.ts), never the email. The
+ * money-moving statement is not here: it is said every time.
+ */
+export const zekeSessionNotices = pgTable('zeke_session_notices', {
+  orgId: text('org_id').notNull(),
+  sessionKey: text('session_key').notNull(),
+  /** READ_LIMIT | FIRST_RECIPIENT */
+  notice: text('notice').notNull(),
+  shownAt: timestamp('shown_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  primaryKey({ columns: [table.orgId, table.sessionKey, table.notice] }),
+  index('zeke_session_notices_shown_at_idx').on(table.shownAt),
+]);

@@ -322,7 +322,9 @@ test('each MemWal caller takes the org from the session, never the request', asy
   // …and request.orgId is the session's: the route derives it, and refuses a
   // body that tries to send one.
   const route = await source('app/api/oxwal/route.ts');
-  assert.match(route, /const ctx = await resolveAuthorityForSession\(auth\.session\);/);
-  assert.match(route, /orgId: ctx\.orgId,/);
+  // v2 §4.8: through requireSessionAccount, which answers a person with no
+  // membership instead of crashing; the org is the same resolver's.
+  assert.match(route, /const accountCheck = await requireSessionAccount\(auth\.session\);/);
+  assert.match(route, /orgId: accountCheck\.account\.orgId,/);
   assert.match(route, /assertCleanBody\(rawBody, 'oxwal'\)/);
 });
