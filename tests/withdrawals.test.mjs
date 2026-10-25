@@ -51,6 +51,11 @@ import {
 import { buildBusinessMultisig } from '../lib/wallet/business-multisig.ts';
 import { requestWalletPayment } from '../lib/server/business-wallet.ts';
 import { assertPurposeShape, cancelSigningRequest, submitPartialSignature } from '../lib/server/wallet-signing.ts';
+import { readSigningRequest } from '../lib/server/wallet-signing-store.ts';
+import { walletRequestHeadline, walletSignatureMessage } from '../lib/server/approval-requests.ts';
+import * as W from '../lib/server/withdrawals.ts';
+import * as R from '../lib/payouts/withdrawal-rules.ts';
+import * as O from '../lib/server/onboarding.ts';
 import {
   addWithdrawalDestination,
   createWithdrawal,
@@ -109,7 +114,7 @@ function recorded(base, overrides = {}) {
   };
 }
 
-async function setup({ env = ENV, overrides = {}, fee } = {}) {
+async function setup({ env = ENV, overrides = {}, fee, intentEvents } = {}) {
   const w = await world();
   await w.db.update(schema.organizations).set({ legalName: 'Acme Trading Sdn. Bhd.' }).where(eq(schema.organizations.id, 'acme'));
   await w.db.update(schema.organizations).set({ legalName: 'Northwind Pte Ltd' }).where(eq(schema.organizations.id, 'northwind'));
@@ -129,6 +134,15 @@ async function setup({ env = ENV, overrides = {}, fee } = {}) {
 
   const partner = recorded(payoutPartner('hata_fiuu', env), overrides);
   const chainTxs = new Map();
+  // The chain as it reads an executed withdrawal: the intent it created is the
+  // one the server derived, unless a test says otherwise (`intentEvents`).
+  const chainRead = async (d) => {
+    if (chainTxs.has(d)) return chainTxs.get(d);
+    const [row] = await w.db.select().from(schema.withdrawals).where(eq(schema.withdrawals.suiDigest, d));
+    if (!row) return null;
+    const ids = intentEvents ? intentEvents(row) : [row.intentId];
+    return { digest: d, success: true, sender: row.walletAddress, balanceChanges: [], events: ids.map((id) => ({ packageId: CORE, eventType: `${CORE}::payment_intent::IntentCreated`, json: { intent_id: id } })) };
+  };
   let scope = 'full';
   const feeFn = fee ?? (async (p) => ({ feeMinor: splashFee({ kind: 4, principalMinor: p, discountBps: 0, schedule: LAUNCH_SCHEDULE }), feesOn: true }));
   const deps = (orgId = 'acme', more = {}) => ({
@@ -140,18 +154,21 @@ async function setup({ env = ENV, overrides = {}, fee } = {}) {
     walletMembers: async () => (orgId === 'acme' ? { ok: true, address: wallet.address, members } : { ok: false, status: 409, code: 'no_wallet', error: 'register the business wallet first' }),
     partner: () => partner,
     companyName: async () => (orgId === 'acme' ? 'Acme Trading Sdn. Bhd.' : 'Northwind Pte Ltd'),
-    splashAddresses: [OPERATOR, w.sponsor.address],
+    splashAddresses: async () => [OPERATOR, w.sponsor.address],
+    isBusinessWallet: async () => false,
     bankPayoutFee: feeFn,
-    readTransaction: async (d) => chainTxs.get(d) ?? null,
+    readTransaction: chainRead,
     corePackageOriginalId: CORE,
     fiatOutOpen: () => scope === 'full',
     signedPartners: new Set(),
     ...more,
   });
-  const executedHook = { db: w.db, now: () => w.signing.now(), partner: () => partner };
+  const executedHook = { db: w.db, now: () => w.signing.now(), partner: () => partner, readTransaction: chainRead, corePackageOriginalId: CORE };
   w.signing.onExecuted = async (request) => {
     await withdrawalSigningExecuted(executedHook, request);
   };
+  if (W.withdrawalBeforeSign) w.signing.beforeSign = (request) => W.withdrawalBeforeSign({ db: w.db }, request);
+  const reconcile = () => W.reconcileWithdrawals({ db: w.db, now: () => w.signing.now(), partner: () => partner, readTransaction: chainRead, corePackageOriginalId: CORE });
   const webhook = (body, { at = w.signing.now(), secret = SECRET, adapter = partner, envOverride = env } = {}) => {
     const rawBody = JSON.stringify(body);
     return handlePayoutWebhook({
@@ -166,7 +183,7 @@ async function setup({ env = ENV, overrides = {}, fee } = {}) {
       adapter,
     });
   };
-  return { w, wallet, members, partner, deps, chainTxs, webhook, setScope: (s) => (scope = s) };
+  return { w, wallet, members, partner, deps, chainTxs, webhook, reconcile, setScope: (s) => (scope = s) };
 }
 
 async function signBoth(t, request) {
@@ -440,7 +457,7 @@ test('a withdrawal instructs the partner first, keyed by its intent id, and the 
   assert.equal(openIntent.targetCurrency, 'MYR');
   assert.equal(d.actions[2].maxFeeMinor, q.maxFeeMinor, 'the fee shown is the max_fee');
   assert.equal(d.actions[0].amountMinor, String(1_000_000_000n + BigInt(q.maxFeeMinor)));
-  assert.ok(BigInt(d.actions[2].settleByMs) <= BigInt(new Date(q.expiresAt).getTime()), 'the chain refuses it once the quote lapses');
+  assert.equal(BigInt(d.actions[2].settleByMs), BigInt(T0.getTime() + R.WITHDRAWAL_SIGNING_WINDOW_MS), 'settle_by is the signing deadline, not the five-minute quote');
 
   // Signed and executed: sent, and the digest goes to the partner.
   const executed = await signBoth(t, request);
@@ -576,11 +593,12 @@ test('a failed payout asks the partner to return the USDC to the business wallet
   assert.equal((await t.webhook(body)).status, 503, 'not on chain yet: retry');
   t.chainTxs.set(returnDigest, { digest: returnDigest, success: true, sender: wd.depositAddress, balanceChanges: [{ address: OPERATOR, coinType: USDC, amount: '1000000000' }] });
   assert.equal((await t.webhook(body)).body.ignored, 'the chain does not show the return', 'USDC that went anywhere but the business wallet is no return');
-  t.chainTxs.set(returnDigest, { digest: returnDigest, success: true, sender: wd.depositAddress, balanceChanges: [{ address: t.wallet.address, coinType: USDC, amount: '999000000' }] });
+  t.chainTxs.set(returnDigest, { digest: returnDigest, success: true, sender: wd.depositAddress, balanceChanges: [{ address: t.wallet.address, coinType: USDC, amount: '1000000000' }] });
   assert.equal((await t.webhook({ ...body, eventId: 'evt_return_02' })).status, 200);
   const view = (await getWithdrawal(t.deps(), wd.id)).withdrawal;
   assert.equal(view.status, 'returned');
   assert.equal(view.returnDigest, returnDigest);
+  assert.equal(view.returnedMinor, '1000000000');
   await t.w.client.close();
 });
 
@@ -590,6 +608,7 @@ test('a withdrawal whose signing request is cancelled is cancelled, and its inst
   const { r } = await created(t, destination.id);
   const c = await cancelSigningRequest(t.w.signing, { orgId: 'acme', userId: 'u-founder', id: r.request.id });
   assert.equal(c.ok, true, JSON.stringify(c));
+  await t.reconcile();
   const [view] = await listWithdrawals(t.deps());
   assert.equal(view.status, 'cancelled');
   const [rev] = t.partner.called('returnOrReverse').map((x) => x.input);
@@ -697,7 +716,9 @@ test('every withdrawal route takes the org from the session, owners alone change
       const at = source.indexOf(`export async function ${method}(`);
       if (at < 0) continue;
       const body = source.slice(at, source.indexOf('\n}\n', at));
-      assert.match(body, /requireOwner\(gate\.route,/, `${r} ${method}: owners only`);
+      // Staff may ask the owners to approve a withdrawal (Sky's decision); only owners change the bank accounts or the deposit address.
+      if ((r === 'route.ts' || r === 'quotes/route.ts') && method === 'POST') assert.match(body, /requireWithdrawalRequester\(gate\.route\)/, `${r} ${method}: a member who may ask`);
+      else assert.match(body, /requireOwner\(gate\.route,/, `${r} ${method}: owners only`);
       assert.match(body, /limitWalletRequests\(gate\.route\)/, `${r} ${method}: rate-limited`);
     }
   }
@@ -708,4 +729,290 @@ test('every withdrawal route takes the org from the session, owners alone change
   assert.match(hook, /request\.text\(\)/, 'the raw body is what is verified');
   const deps = await readFile(new URL('../lib/server/wallet-deps.ts', import.meta.url), 'utf8');
   assert.match(deps, /withdrawalSigningExecuted/, 'an executed owners’ request moves its withdrawal on');
+  assert.match(deps, /withdrawalBeforeSign/, 'a withdrawal signature is checked against its bank account when it is given');
+  const cron = await readFile(new URL('../app/api/cron/withdrawals/route.ts', import.meta.url), 'utf8');
+  assert.match(cron, /CRON_SECRET/, 'the withdrawal sweep is the cron’s alone');
+  assert.match(cron, /reconcileWithdrawals\(/, 'it posts unposted settlements and closes lapsed requests');
+  const profile = await readFile(new URL('../app/api/onboarding/profile/route.ts', import.meta.url), 'utf8');
+  assert.match(profile, /role: auth\.authority\.role|resolveAuthorityForSession|saveBusinessProfile\(auth\.session/, 'the profile route passes the session, whose role the service checks');
+  assert.match(profile, /result\.ok/, 'a refused profile change is answered as refused');
+});
+
+/* ── Review fixes (p2-4.4) ───────────────────────────────────────────── */
+
+const PROFILE = { legalName: 'Acme Trading Sdn. Bhd.', registrationNumber: '202601000001', addressCountry: 'MY' };
+
+test('a bank account is checked against the KYB-verified registered name, which only an owner sets and which is fixed once KYB is under way', async () => {
+  assert.equal(W.verifiedLegalName({ legalName: 'Acme Trading Sdn. Bhd.', kybStatus: 'none' }), null, 'a name nobody verified is no registered name');
+  assert.equal(W.verifiedLegalName({ legalName: 'Acme Trading Sdn. Bhd.', kybStatus: 'pending' }), null);
+  assert.equal(W.verifiedLegalName({ legalName: 'Acme Trading Sdn. Bhd.', kybStatus: 'basic' }), 'Acme Trading Sdn. Bhd.');
+  assert.equal(W.verifiedLegalName({ legalName: ' Acme Trading Sdn. Bhd. ', kybStatus: 'full' }), 'Acme Trading Sdn. Bhd.');
+  assert.equal(W.verifiedLegalName({ legalName: '', kybStatus: 'full' }), null);
+
+  const t = await setup();
+  const readName = async () => (await t.w.db.select().from(schema.organizations).where(eq(schema.organizations.id, 'acme')))[0].legalName;
+  const staff = await O.saveBusinessProfileFor(t.w.db, { orgId: 'acme', userId: 'u-two', role: 'APPROVER' }, { ...PROFILE, legalName: 'Mule Holdings Sdn Bhd' });
+  assert.equal(staff.ok, false);
+  assert.equal(staff.code, 'owner_only');
+  assert.equal(await readName(), 'Acme Trading Sdn. Bhd.', 'a staff member cannot rewrite the registered name');
+
+  await t.w.db.update(schema.organizations).set({ kybLifecycle: 'ACTIVE', kybStatus: 'full' }).where(eq(schema.organizations.id, 'acme'));
+  const locked = await O.saveBusinessProfileFor(t.w.db, { orgId: 'acme', userId: 'u-founder', role: 'OWNER' }, { ...PROFILE, legalName: 'Mule Holdings Sdn Bhd' });
+  assert.equal(locked.code, 'legal_name_locked', 'not even an owner, once KYB is under way');
+  assert.equal(await readName(), 'Acme Trading Sdn. Bhd.');
+  const same = await O.saveBusinessProfileFor(t.w.db, { orgId: 'acme', userId: 'u-founder', role: 'OWNER' }, { ...PROFILE, addressCountry: 'my' });
+  assert.equal(same.ok, true, 'the same name may be saved again');
+  await t.w.client.close();
+});
+
+test('a change of the registered name revokes every bank account and cancels a withdrawal in flight', async () => {
+  const t = await setup();
+  const { destination } = await readyToWithdraw(t);
+  const { r } = await created(t, destination.id);
+  const changed = await O.saveBusinessProfileFor(t.w.db, { orgId: 'acme', userId: 'u-founder', role: 'OWNER' }, { ...PROFILE, legalName: 'Mule Holdings Sdn Bhd' }, { partner: () => t.partner });
+  assert.equal(changed.ok, true, JSON.stringify(changed));
+  assert.equal(changed.destinationsRevoked, 1);
+  assert.deepEqual(await listWithdrawalDestinations(t.deps()), []);
+  assert.equal((await getWithdrawal(t.deps(), r.withdrawal.id)).withdrawal.status, 'cancelled');
+  assert.equal((await readSigningRequest(t.w.db, 'acme', r.request.id)).status, 'cancelled', 'nobody can sign it any more');
+  assert.equal(t.partner.called('returnOrReverse').at(-1).input.reason, 'destination_revoked');
+  // A bank account checked against an earlier name is not paid, whatever path changed the name.
+  const t2 = await setup();
+  const ready2 = await readyToWithdraw(t2);
+  const mule = t2.deps('acme', { companyName: async () => 'Mule Holdings Sdn Bhd' });
+  assert.equal((await quoteWithdrawal(mule, { destinationId: ready2.destination.id, amountMinor: '1000000000' })).code, 'destination_name_changed');
+  assert.deepEqual(await listWithdrawalDestinations(t2.deps()), [], 'and it is revoked');
+  await t.w.client.close();
+  await t2.w.client.close();
+});
+
+test('a return counts only from the deposit address, once, and closes a withdrawal only for its whole amount', async () => {
+  const t = await setup();
+  const { destination, depositAddress } = await readyToWithdraw(t);
+  const one = await created(t, destination.id);
+  await signBoth(t, one.r.request);
+  const two = await created(t, destination.id);
+  await signBoth(t, two.r.request);
+  const fail = (wd, id) => t.webhook({ type: 'payout.status', eventId: id, partnerRef: wd.partnerRef, intentId: wd.intentId, status: 'failed', occurredAt: T0.toISOString() });
+  assert.equal((await fail(one.r.withdrawal, 'evt_fail_one')).status, 200);
+  assert.equal((await fail(two.r.withdrawal, 'evt_fail_two')).status, 200);
+  const ret = (wd, id, returnDigest) => t.webhook({ type: 'payout.status', eventId: id, partnerRef: wd.partnerRef, intentId: wd.intentId, status: 'returned', returnDigest, occurredAt: T0.toISOString() });
+
+  // A stranger's 1 micro-USDC payment into the wallet is no return.
+  const stranger = digest();
+  t.chainTxs.set(stranger, { digest: stranger, success: true, sender: `0x${'5e'.repeat(32)}`, balanceChanges: [{ address: t.wallet.address, coinType: USDC, amount: '1' }] });
+  assert.equal((await ret(one.r.withdrawal, 'evt_strange1', stranger)).body.ignored, 'the chain does not show the return');
+  assert.equal((await ret(two.r.withdrawal, 'evt_strange2', stranger)).body.ignored, 'the chain does not show the return');
+  assert.equal((await getWithdrawal(t.deps(), one.r.withdrawal.id)).withdrawal.status, 'failed');
+
+  // The whole amount back from the deposit address closes it.
+  const back = digest();
+  t.chainTxs.set(back, { digest: back, success: true, sender: depositAddress.address, balanceChanges: [{ address: t.wallet.address, coinType: USDC, amount: '1000000000' }] });
+  assert.equal((await ret(one.r.withdrawal, 'evt_back_one', back)).status, 200);
+  const closed = (await getWithdrawal(t.deps(), one.r.withdrawal.id)).withdrawal;
+  assert.equal(closed.status, 'returned');
+  assert.equal(closed.returnedMinor, '1000000000');
+  // The same return cannot close a second withdrawal.
+  assert.equal((await ret(two.r.withdrawal, 'evt_back_two', back)).body.ignored, 'that return was already counted');
+  assert.equal((await getWithdrawal(t.deps(), two.r.withdrawal.id)).withdrawal.status, 'failed');
+
+  // A short return is recorded for review, and the withdrawal stays open.
+  const short = digest();
+  t.chainTxs.set(short, { digest: short, success: true, sender: depositAddress.address, balanceChanges: [{ address: t.wallet.address, coinType: USDC, amount: '999000000' }] });
+  const shortAnswer = await ret(two.r.withdrawal, 'evt_short_two', short);
+  assert.equal(shortAnswer.status, 200);
+  assert.equal(shortAnswer.body.short, true);
+  const open2 = (await getWithdrawal(t.deps(), two.r.withdrawal.id)).withdrawal;
+  assert.equal(open2.status, 'failed', 'not final: ops must look at a short return');
+  assert.equal(open2.returnedMinor, '999000000');
+  const trail = await t.w.db.select().from(schema.withdrawalEvents);
+  assert.ok(trail.some((e) => e.action === 'return_short' && e.subjectId === two.r.withdrawal.id));
+  await t.w.client.close();
+});
+
+test('the owners see which bank account they pay, what it receives and by when, and a revoked account cancels its withdrawal', async () => {
+  const t = await setup();
+  const { destination } = await readyToWithdraw(t);
+  const { q, r } = await created(t, destination.id);
+  const details = r.request.withdrawal;
+  assert.ok(details, 'the request carries the bank account it pays');
+  assert.deepEqual([details.bankCode, details.last4, details.holderName, details.currency], ['MBBEMYKL', '5678', 'ACME TRADING SENDIRIAN BERHAD', 'MYR']);
+  assert.equal(details.receiveMinor, q.receiveMinor);
+  assert.equal(details.minReceiveMinor, q.receiveMinor);
+  assert.equal(details.rateMicro, q.rateMicro);
+  assert.equal(details.settleByMs, String(T0.getTime() + R.WITHDRAWAL_SIGNING_WINDOW_MS));
+  const headline = walletRequestHeadline('withdrawal', r.request.description, details);
+  for (const part of ['ending 5678', 'MBBEMYKL', 'ACME TRADING SENDIRIAN BERHAD', 'MYR', 'sign by']) assert.ok(headline.includes(part), `${part} in: ${headline}`);
+  const message = walletSignatureMessage({ orgName: 'Acme', purpose: 'withdrawal', description: r.request.description, withdrawal: details, threshold: 2, signerCount: 3, expiresAt: new Date(T0.getTime() + 3600_000), now: T0 });
+  assert.ok(message.includes('ending 5678'), message);
+  const notice = t.w.notices.at(-1);
+  assert.equal(notice.request.summary.withdrawal.last4, '5678', 'the signers are told which account');
+
+  const revoked = await revokeWithdrawalDestination(t.deps(), 'u-founder', destination.id);
+  assert.equal(revoked.ok, true);
+  assert.equal(revoked.cancelled, 1);
+  assert.equal((await getWithdrawal(t.deps(), r.withdrawal.id)).withdrawal.status, 'cancelled');
+  assert.equal((await readSigningRequest(t.w.db, 'acme', r.request.id)).status, 'cancelled');
+  assert.equal(t.partner.called('returnOrReverse').at(-1).input.reason, 'destination_revoked');
+  await t.w.client.close();
+});
+
+test('a signature is refused once the bank account behind the withdrawal is no longer the one the bytes commit to', async () => {
+  const t = await setup();
+  const { destination } = await readyToWithdraw(t);
+  const { r } = await created(t, destination.id);
+  await t.w.db.update(schema.withdrawalDestinations).set({ beneficiaryRef: hex32() }).where(eq(schema.withdrawalDestinations.id, destination.id));
+  const refused = await submitPartialSignature(t.w.signing, { orgId: 'acme', userId: 'u-two', id: r.request.id, signature: await sign(t.w.keys.two, r.request), digest: r.request.digest });
+  assert.equal(refused.ok, false);
+  assert.equal(refused.code, 'withdrawal_changed');
+  await t.w.client.close();
+});
+
+test('a quorum that signs after the quote’s five minutes still settles, and the partner is told the least the account must receive', async () => {
+  const t = await setup();
+  const { destination } = await readyToWithdraw(t);
+  const q = await quoted(t, destination.id);
+  const accepted = String(BigInt(q.receiveMinor) - 500n);
+  const r = await createWithdrawal(t.deps(), 'u-founder', { clientKey: 'ck_late_sign', destinationId: destination.id, amountMinor: '1000000000', acceptedReceiveMinor: accepted, maxFeeMinor: q.maxFeeMinor, ...bundle() });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  const [instruction] = t.partner.called('createPayout').map((c) => c.input);
+  assert.equal(instruction.minReceiveMinor, BigInt(accepted), 'the partner pays at least what the owners accepted, or returns the USDC');
+  assert.equal(instruction.settleByMs, BigInt(T0.getTime() + R.WITHDRAWAL_SIGNING_WINDOW_MS));
+  assert.ok(new Date(r.request.expiresAt).getTime() > T0.getTime() + 5 * 60_000, 'the signing window is not the quote’s');
+  t.w.setNow(new Date(T0.getTime() + 6 * 60_000));
+  await signBoth(t, r.request);
+  assert.equal((await getWithdrawal(t.deps(), r.withdrawal.id)).withdrawal.status, 'sent');
+  await t.w.client.close();
+});
+
+test('the intent id: production names the original package, the derivation is pinned, and a settlement is posted only once the chain shows that intent', async () => {
+  const pkg = `0x${'c1'.repeat(32)}`;
+  const orig = `0x${'c0'.repeat(32)}`;
+  assert.equal(R.corePackageOriginalIdFor({ NODE_ENV: 'production', SPLASH_CORE_PACKAGE_ID: pkg }), null, 'no silent fallback in production');
+  assert.equal(R.corePackageOriginalIdFor({ NODE_ENV: 'production', SPLASH_CORE_PACKAGE_ID: pkg, SPLASH_CORE_ORIGINAL_PACKAGE_ID: orig }), orig);
+  assert.equal(R.corePackageOriginalIdFor({ NODE_ENV: 'development', SPLASH_CORE_PACKAGE_ID: pkg }), pkg);
+  assert.equal(R.corePackageOriginalIdFor({ NODE_ENV: 'development' }), null);
+  // The same pair is pinned in move/splash_core/tests/intent_v2_tests.move against derived_object.
+  assert.equal(withdrawalIntentId({ accountId: `0x${'ac'.repeat(32)}`, corePackageId: '0x0', paymentRef: new Uint8Array(32).fill(9) }), '0x6afec1d4e2a1c073d83ef4f577f11f1ece7c50fcc5c4b9ffcf12892bab5500e0');
+
+  const t = await setup({ intentEvents: () => [`0x${'99'.repeat(32)}`] });
+  const { destination } = await readyToWithdraw(t);
+  const { r } = await created(t, destination.id);
+  await signBoth(t, r.request);
+  const view = (await getWithdrawal(t.deps(), r.withdrawal.id)).withdrawal;
+  assert.equal(view.status, 'sent');
+  assert.equal(view.settlementPosted, false, 'the partner is not told a digest whose intent is not the one it was instructed for');
+  assert.equal(view.settlementHold, 'intent_id_mismatch');
+  assert.equal(t.partner.called('postSettlement').length, 0);
+  await t.reconcile();
+  assert.equal(t.partner.called('postSettlement').length, 0, 'nor by the sweep');
+  const trail = await t.w.db.select().from(schema.withdrawalEvents);
+  assert.ok(trail.some((e) => e.action === 'intent_id_mismatch'));
+  await t.w.client.close();
+});
+
+test('reads never call the partner; the sweep posts settlements, reverses lapsed instructions and frees a lapsed test deposit', async () => {
+  let down = true;
+  const t = await setup({ overrides: { postSettlement: async () => { if (down) throw new Error('partner down'); } } });
+  const { destination } = await readyToWithdraw(t);
+  const { r } = await created(t, destination.id);
+  await signBoth(t, r.request);
+  assert.equal((await getWithdrawal(t.deps(), r.withdrawal.id)).withdrawal.settlementPosted, false);
+  const calls = t.partner.calls.length;
+  await getWithdrawal(t.deps(), r.withdrawal.id);
+  await listWithdrawals(t.deps());
+  await listWithdrawals(t.deps());
+  assert.equal(t.partner.calls.length, calls, 'a GET by any member calls the partner for nothing');
+  down = false;
+  await t.reconcile();
+  assert.equal(t.partner.calls.length, calls + 1, 'the sweep retries the post');
+  assert.equal((await getWithdrawal(t.deps(), r.withdrawal.id)).withdrawal.settlementPosted, true);
+  await t.w.client.close();
+
+  // A test deposit whose request lapsed is freed by the sweep, without a read.
+  const t2 = await setup();
+  await requestPartnerDepositAddress(t2.deps(), 'u-founder');
+  const first = await requestTestDeposit(t2.deps(), 'u-founder');
+  await cancelSigningRequest(t2.w.signing, { orgId: 'acme', userId: 'u-founder', id: first.request.id });
+  await t2.reconcile();
+  const [row] = await t2.w.db.select().from(schema.partnerDepositAddresses);
+  assert.equal(row.status, 'pending_test');
+  await t2.w.client.close();
+});
+
+test('a deposit address is never Splash’s fee recipient, a pending one, the operator or another business’s wallet', async () => {
+  const feeRecipient = `0x${'fe'.repeat(32)}`;
+  const pending = `0x${'fd'.repeat(32)}`;
+  const listed = R.splashControlledAddresses({
+    env: { OPERATOR_SUI_ADDRESS: `0x${'0e'.repeat(32)}`, TREASURY_ADDRESS: 'not an address' },
+    sponsor: `0x${'5a'.repeat(32)}`,
+    feeConfig: { feeRecipient, pendingRecipient: { recipient: pending, etaMs: 1n } },
+  });
+  for (const a of [feeRecipient, pending, `0x${'0e'.repeat(32)}`, `0x${'5a'.repeat(32)}`]) assert.ok(listed.includes(a), a);
+  assert.equal(listed.length, 4);
+
+  const toFee = await setup({ overrides: { depositAddress: async () => ({ address: feeRecipient, network: 'sui', accountRef: 'acct_fee', sandbox: true }) } });
+  assert.equal((await requestPartnerDepositAddress(toFee.deps('acme', { splashAddresses: async () => [feeRecipient] }), 'u-founder')).code, 'splash_address');
+  assert.equal((await requestPartnerDepositAddress(toFee.deps('acme', { splashAddresses: async () => { throw new Error('FeeConfig unreadable'); } }), 'u-founder')).code, 'splash_addresses_unreadable', 'fails closed');
+  assert.equal((await requestPartnerDepositAddress(toFee.deps('acme', { isBusinessWallet: async () => true }), 'u-founder')).code, 'business_wallet');
+  await toFee.w.client.close();
+});
+
+test('the sandbox partner runs only off mainnet, and an unconfirmed instruction is reversed', async () => {
+  for (const env of [{ NODE_ENV: 'development', SUI_NETWORK: 'mainnet' }, { NODE_ENV: 'development', NEXT_PUBLIC_SUI_NETWORK: 'mainnet' }, { NODE_ENV: 'development', SUI_RPC_URL: 'https://fullnode.mainnet.sui.io:443' }]) {
+    assert.throws(() => payoutPartner('hata_fiuu', env), (e) => e instanceof PayoutPartnerUnavailable && e.code === 'partner_not_configured', JSON.stringify(env));
+  }
+  assert.equal(payoutPartner('hata_fiuu', { NODE_ENV: 'development', SUI_NETWORK: 'testnet' }).mode, 'sandbox');
+
+  const t = await setup({ overrides: { createPayout: async () => { throw new Error('timed out'); } } });
+  const { destination } = await readyToWithdraw(t);
+  const q = await quoted(t, destination.id);
+  const r = await createWithdrawal(t.deps(), 'u-founder', { clientKey: 'ck_timeout_1', destinationId: destination.id, amountMinor: '1000000000', acceptedReceiveMinor: q.receiveMinor, maxFeeMinor: q.maxFeeMinor, ...bundle() });
+  assert.equal(r.code, 'partner_error');
+  const [rev] = t.partner.called('returnOrReverse').map((c) => c.input);
+  assert.ok(rev, 'an instruction the partner may have taken is reversed');
+  assert.equal(rev.reason, 'instruction_unconfirmed');
+  await t.w.client.close();
+});
+
+test('the partner can check the on-chain beneficiary commitment against the account it pays', async () => {
+  const t = await setup();
+  const { destination } = await readyToWithdraw(t);
+  await created(t, destination.id);
+  const [instruction] = t.partner.called('createPayout').map((c) => c.input);
+  assert.match(String(instruction.beneficiarySalt), /^[0-9a-f]{64}$/);
+  assert.equal(beneficiaryRefOf('hata_fiuu', instruction.beneficiary, Buffer.from(instruction.beneficiarySalt, 'hex')), instruction.beneficiaryRef);
+  await t.w.client.close();
+});
+
+test('staff may ask the owners to approve a withdrawal; the owners alone sign it', async () => {
+  assert.equal(R.canAskForWithdrawal?.('OWNER'), true);
+  assert.equal(R.canAskForWithdrawal('APPROVER'), true);
+  assert.equal(R.canAskForWithdrawal('MAKER'), true);
+  assert.equal(R.canAskForWithdrawal('VIEWER'), false);
+  const t = await setup();
+  const { destination } = await readyToWithdraw(t);
+  const q = await quoted(t, destination.id);
+  const r = await createWithdrawal(t.deps(), 'u-staff', { clientKey: 'ck_staff_ask', destinationId: destination.id, amountMinor: '1000000000', acceptedReceiveMinor: q.receiveMinor, maxFeeMinor: q.maxFeeMinor, ...bundle() });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  const stored = await readSigningRequest(t.w.db, 'acme', r.request.id);
+  assert.equal(stored.requestedBy, 'u-staff');
+  assert.deepEqual(stored.signers.map((s) => s.userId).sort(), ['u-founder', 'u-three', 'u-two'], 'the owners sign it');
+  await t.w.client.close();
+});
+
+test('the account key can be rotated: an account sealed under the previous key still pays, and is sealed again under the new one', async () => {
+  const oldKey = toHex(randomBytes(24));
+  const newKey = toHex(randomBytes(24));
+  const t = await setup({ env: { ...ENV, WITHDRAWAL_ACCOUNT_KEY: oldKey } });
+  const { destination } = await readyToWithdraw(t);
+  const rotated = { ...ENV, WITHDRAWAL_ACCOUNT_KEY: newKey, WITHDRAWAL_ACCOUNT_KEY_PREVIOUS: oldKey };
+  assert.equal(R.accountKeys?.(rotated).all.length, 2);
+  const q = await quoted(t, destination.id);
+  const r = await createWithdrawal(t.deps('acme', { env: rotated }), 'u-founder', { clientKey: 'ck_rotated_1', destinationId: destination.id, amountMinor: '1000000000', acceptedReceiveMinor: q.receiveMinor, maxFeeMinor: q.maxFeeMinor, ...bundle() });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  const [row] = await t.w.db.select().from(schema.withdrawalDestinations);
+  assert.equal(open(row.accountSealed, accountKey(rotated), destinationAad('acme', row.id, 'account')).toString(), '514012345678', 'sealed again under the new key');
+  assert.equal((await addWithdrawalDestination(t.deps('acme', { env: { ...ENV, WITHDRAWAL_ACCOUNT_KEY: newKey } }), 'u-founder', ACME_BANK)).created, false);
+  await t.w.client.close();
 });

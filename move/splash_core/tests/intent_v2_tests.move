@@ -1058,6 +1058,42 @@ fun a_payment_ref_stays_used_after_settle_and_delete() {
 }
 
 #[test]
+/// The id `create_for_wallet` gives an intent is the one derived from the
+/// account and the payment reference. A withdrawal's payout instruction is
+/// keyed by that id before the intent exists (lib/payouts/withdrawal-rules.ts,
+/// `withdrawalIntentId`), so the two must agree.
+fun the_intent_id_is_derived_from_the_account_and_the_payment_ref() {
+    let mut s = h::setup();
+    s.next_tx(h::wallet());
+    let (mut account, config, c) = take(&s);
+    let account_id = object::id(&account);
+    let intent = by_wallet(&mut account, &config, bank(7, &c), &c, s.ctx());
+    assert_eq!(
+        object::id(&intent).to_address(),
+        payment_intent::derived_intent_id_for_testing(account_id, h::payment_ref(7)),
+    );
+    payment_intent::share_intent(intent);
+    give(account, config, c);
+    s.end();
+}
+
+#[test]
+/// The derivation pinned to the value the server computes for the same pair:
+/// account 0xacac…ac, payment reference 32 bytes of 0x09, splash_core at 0x0
+/// (tests/withdrawals.test.mjs pins the same value).
+fun the_intent_id_derivation_matches_the_server() {
+    let account_id = object::id_from_address(
+        @0xacacacacacacacacacacacacacacacacacacacacacacacacacacacacacacacac,
+    );
+    let mut payment_ref = vector[];
+    32u64.do!(|_| payment_ref.push_back(9u8));
+    assert_eq!(
+        payment_intent::derived_intent_id_for_testing(account_id, payment_ref),
+        @0x6afec1d4e2a1c073d83ef4f577f11f1ece7c50fcc5c4b9ffcf12892bab5500e0,
+    );
+}
+
+#[test]
 #[expected_failure(abort_code = derived_object::EObjectAlreadyExists)]
 /// And a create after that settle-and-delete aborts. Create, settle, anchor and
 /// delete in one transaction is the batch shape (R2); repeating the batch must
