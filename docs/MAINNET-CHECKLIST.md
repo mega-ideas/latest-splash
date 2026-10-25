@@ -158,9 +158,12 @@ procedure in [`docs/UPGRADE-POLICY.md`](UPGRADE-POLICY.md).
       businesses whose spending rules could not be read).
 - [ ] The governance alert cron reads `FeeConfig` too: with
       `SPLASH_FEE_CONFIG_ID` unset it answers 502, and a 502 naming it means
-      the id is not the canonical `FeeConfig` of core's original package. A
-      test fee proposal on testnet (a schedule and a recipient) reached every
-      test owner.
+      the id is not the canonical `FeeConfig` of core's original package
+      (the upgrade and owner-change alerts are still delivered, and the run
+      still answers 502). Before the cron is scheduled, its GraphQL read has
+      run once against the testnet `FeeConfig` and parsed (the parser is
+      tested on fixtures only). A test fee proposal on testnet (a schedule and
+      a recipient) reached every test owner, and so did its withdrawal.
 - [ ] `SPLASH_CUSTODY_PACKAGE_ID` and `SPLASH_PAYOUT_DELEGATION_ID` are
       **unset**. Production on mainnet refuses to boot with either, because
       custody and the meter are retired in v2. On mainnet the

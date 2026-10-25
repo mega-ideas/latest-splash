@@ -35,12 +35,16 @@ The remaining four modules (`smart_treasury`, `payment_intent`, `audit_anchor`, 
 Designs: `docs/v2/fees.md` (Phase 2 list), `docs/v2/phase2-spending-rules.md`
 ("Near-threshold alerts"), `docs/v2/phase2-subscription-billing.md`. Tests:
 `tests/fee-governance-alerts.test.mjs`, `tests/near-threshold-alerts.test.mjs`,
-`tests/subscription-billing.test.mjs`. Migrations 0050 to 0053.
+`tests/subscription-billing.test.mjs`. Migrations 0050 to 0054.
 
 - **Fee proposals alert every owner.** The governance cron reads the
   canonical `FeeConfig` by state (pending schedules, pending recipient), type
   checked against core's original package and shared; see the v2 Phase 1
-  section below. `SPLASH_FEE_CONFIG_ID` is required.
+  section below. `SPLASH_FEE_CONFIG_ID` is required. A withdrawn proposal is
+  told to every owner too (migration 0054). A fee config that cannot be
+  trusted no longer silences the upgrade and owner-change alerts: those are
+  still delivered from the wrapper and the config, nothing from the fee
+  config is used or stored, the refusal is paged and the cron answers 502.
 - **Near-threshold alerts are detective only.** They block nothing: a staff
   member can build a payment alone. Each business's rules are read with its
   own context; an alert is recorded and emailed per business, to that

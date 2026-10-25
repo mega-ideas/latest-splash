@@ -157,7 +157,8 @@ export type FeeGovernanceState = {
   pendingRecipient: { recipient: string; etaMs: number } | null;
 };
 
-export type GovernanceState = { wrapper: WrapperState; config: ConfigState; feeConfig: FeeGovernanceState };
+/** `feeConfig` is null only when the monitor read the wrapper and the config but could not trust the fee config (see `parseGovernanceState`'s `feeOptional`). */
+export type GovernanceState = { wrapper: WrapperState; config: ConfigState; feeConfig: FeeGovernanceState | null };
 
 export type GovernanceAlertKind =
   | 'upgrade_proposed'
@@ -168,13 +169,15 @@ export type GovernanceAlertKind =
   | 'fee_schedule_proposed'
   | 'fee_recipient_proposed'
   | 'fee_schedule_applied'
-  | 'fee_recipient_applied';
+  | 'fee_recipient_applied'
+  | 'fee_schedule_withdrawn'
+  | 'fee_recipient_withdrawn';
 
 /** Shown only while the latest state read still holds them (see the store). */
 export const PROPOSAL_KINDS: GovernanceAlertKind[] = ['upgrade_proposed', 'owner_change_proposed', 'registry_addition_proposed', 'fee_schedule_proposed', 'fee_recipient_proposed'];
 
 /** The alerts about Splash's fee, which send the owner to Settings. */
-export const FEE_KINDS: GovernanceAlertKind[] = ['fee_schedule_proposed', 'fee_recipient_proposed', 'fee_schedule_applied', 'fee_recipient_applied'];
+export const FEE_KINDS: GovernanceAlertKind[] = ['fee_schedule_proposed', 'fee_recipient_proposed', 'fee_schedule_applied', 'fee_recipient_applied', 'fee_schedule_withdrawn', 'fee_recipient_withdrawn'];
 
 export type GovernanceAlert = {
   /** What the alert says, as a key: the same change always derives the same one. */
@@ -297,13 +300,15 @@ function stringSet(value: unknown, what: string): string[] {
   });
 }
 
-export type ParsedState = { ok: true; state: GovernanceState } | { ok: false; reason: string; objectId: string };
+export type ParsedState =
+  | { ok: true; state: GovernanceState; /** Only with `feeOptional`: why the fee config was not trusted (state.feeConfig is then null). */ feeRefusal?: { reason: string; objectId: string } }
+  | { ok: false; reason: string; objectId: string };
 
 /**
  * Check the two objects are the canonical ones and read every field the
  * alerts depend on. Any doubt is a refusal naming the setting to check.
  */
-export function parseGovernanceState(read: GovernanceChainRead, policy: GovernancePolicy): ParsedState {
+export function parseGovernanceState(read: GovernanceChainRead, policy: GovernancePolicy, opts: { feeOptional?: boolean } = {}): ParsedState {
   const upgradeDelay = normalizeSuiAddress(policy.upgradeDelayPackageId);
   const wrapperId = normalizeSuiAddress(policy.wrapperId);
   const configId = normalizeSuiAddress(policy.complianceConfigId);
@@ -395,6 +400,19 @@ export function parseGovernanceState(read: GovernanceChainRead, policy: Governan
   }
 
   // ── The fee config, checked against the wrapper's own record of core ──
+  // By default any doubt about it refuses the whole read. With `feeOptional`
+  // (the monitor) the wrapper and the config, which checked out, are still
+  // returned, so their alerts reach the owners while the fee config's
+  // refusal is paged; nothing from the fee config is used.
+  const fee = parseFeePart(read, policy, wrapper);
+  if (!fee.ok) {
+    if (!opts.feeOptional) return fee;
+    return { ok: true, state: { wrapper, config, feeConfig: null }, feeRefusal: { reason: fee.reason, objectId: fee.objectId } };
+  }
+  return { ok: true, state: { wrapper, config, feeConfig: fee.feeConfig } };
+}
+
+function parseFeePart(read: GovernanceChainRead, policy: GovernancePolicy, wrapper: WrapperState): { ok: true; feeConfig: FeeGovernanceState } | { ok: false; reason: string; objectId: string } {
   const feeId = normalizeSuiAddress(policy.feeConfigId);
   const feeType = `${wrapper.originalPackage}::fee_config::FeeConfig`;
   const f = read.feeConfig;
@@ -426,7 +444,7 @@ export function parseGovernanceState(read: GovernanceChainRead, policy: Governan
     if (!(error instanceof Unreadable) && !(error instanceof FeeConfigUnavailableError)) throw error;
     return { ok: false, objectId: feeId, reason: `the fee config ${feeId} could not be read in full (${error.message}), so nothing from it is trusted.` };
   }
-  return { ok: true, state: { wrapper, config, feeConfig } };
+  return { ok: true, feeConfig };
 }
 
 // ─── Words ────────────────────────────────────────────────────────────────────
@@ -550,7 +568,8 @@ const empty = {
 export type DerivedGovernance = {
   alerts: GovernanceAlert[];
   /** What to store for the next run's comparison. */
-  snapshots: { wrapper: WrapperSnapshot; config: ConfigSnapshot; feeConfig: FeeConfigSnapshot };
+  /** feeConfig is null when the fee config was not read: the stored one is then kept as it was. */
+  snapshots: { wrapper: WrapperSnapshot; config: ConfigSnapshot; feeConfig: FeeConfigSnapshot | null };
 };
 
 /**
@@ -667,8 +686,26 @@ export function deriveGovernanceAlerts(state: GovernanceState, previous: Governa
   }
 
   // ── Fees: each pending schedule and the pending recipient, while it can
-  // still be applied; then what took effect against the stored state.
-  const fee = state.feeConfig;
+  // still be applied; then what took effect, or was withdrawn, against the
+  // stored state. Skipped when the fee config was not read.
+  const feeSnapshot = state.feeConfig ? deriveFeeAlerts(state.feeConfig, previous, nowMs, alerts) : null;
+
+  return {
+    alerts,
+    snapshots: {
+      wrapper: { objectVersion: wrapper.objectVersion, capVersion: wrapper.capVersion, pendingKeys: wrapperPending },
+      config: {
+        objectVersion: config.objectVersion,
+        registries: { 1: config.registries[1], 2: config.registries[2], 3: config.registries[3] },
+        pendingKeys: configPending,
+      },
+      feeConfig: feeSnapshot,
+    },
+  };
+}
+
+/** The fee config's alerts, pushed onto `alerts`; returns what to store for the next run. */
+function deriveFeeAlerts(fee: FeeGovernanceState, previous: GovernanceSnapshots, nowMs: number, alerts: GovernanceAlert[]): FeeConfigSnapshot {
   const feePending: string[] = [];
   const feeBase = { ...empty, subjectId: fee.id, reviewPath: FEE_REVIEW_PATH };
   const offNote = fee.feeRecipient === null ? ' No Splash fee is charged yet: this schedule would apply once fees start.' : '';
@@ -738,18 +775,49 @@ export function deriveGovernanceAlerts(state: GovernanceState, previous: Governa
           : `Fees are now paid to ${fee.feeRecipient} instead of ${prevFee.feeRecipient}.`,
       });
     }
+
+    // Withdrawn (FeeScheduleProposalCancelled, FeeRecipientProposalCancelled),
+    // told from state like the rest: a proposal the stored state held is gone
+    // at a newer version, was not put in force, was not replaced by another
+    // proposal, and had not lapsed (a lapsed one being cleared is not news).
+    for (const prevKey of prevFee.pendingKeys) {
+      const parts = prevKey.split('|');
+      if (parts[0] === 'fee_schedule_proposed' && parts[1] === fee.id && parts.length === 5) {
+        const kind = Number(parts[2]);
+        const sched = parts[3];
+        const eta = Number(parts[4]);
+        if (!Number.isInteger(kind) || !fee.schedules[kind] || !Number.isFinite(eta)) continue;
+        if (feePending.includes(prevKey) || fee.pendingSchedules[kind] || scheduleKey(fee.schedules[kind]) === sched || nowMs >= eta + PROPOSAL_WINDOW_MS) continue;
+        alerts.push({
+          ...feeBase,
+          key: `fee_schedule_withdrawn|${fee.id}|${kind}|${sched}|${eta}`,
+          kind: 'fee_schedule_withdrawn',
+          feeKind: kind,
+          activeUntilMs: nowMs + SHOW_EFFECT_MS,
+          summary: `Splash has withdrawn the change it announced to its fee for ${FEE_WHERE[kind]}. The fee in force is unchanged.`,
+          detail: `In force: ${scheduleWords(fee.schedules[kind])}.${fee.feeRecipient === null ? ` ${FEES_OFF}` : ''}`,
+        });
+      }
+      if (parts[0] === 'fee_recipient_proposed' && parts[1] === fee.id && parts.length === 4) {
+        const recipient = parts[2];
+        const eta = Number(parts[3]);
+        if (!Number.isFinite(eta)) continue;
+        if (feePending.includes(prevKey) || fee.pendingRecipient || fee.feeRecipient === recipient || nowMs >= eta + PROPOSAL_WINDOW_MS) continue;
+        const neverOn = fee.feeRecipient === null;
+        alerts.push({
+          ...feeBase,
+          key: `fee_recipient_withdrawn|${fee.id}|${recipient}|${eta}`,
+          kind: 'fee_recipient_withdrawn',
+          feeRecipient: recipient,
+          activeUntilMs: nowMs + SHOW_EFFECT_MS,
+          summary: neverOn
+            ? 'Splash has withdrawn its announcement that its fees start. No Splash fee is charged.'
+            : 'Splash has withdrawn the change it announced to the account its fees are paid to. Fees are still paid to the same account.',
+          detail: neverOn ? `The withdrawn proposal named ${recipient}.` : `The withdrawn proposal named ${recipient}. Fees are paid to ${fee.feeRecipient}.`,
+        });
+      }
+    }
   }
 
-  return {
-    alerts,
-    snapshots: {
-      wrapper: { objectVersion: wrapper.objectVersion, capVersion: wrapper.capVersion, pendingKeys: wrapperPending },
-      config: {
-        objectVersion: config.objectVersion,
-        registries: { 1: config.registries[1], 2: config.registries[2], 3: config.registries[3] },
-        pendingKeys: configPending,
-      },
-      feeConfig: { objectVersion: fee.objectVersion, schedules: fee.schedules.map(scheduleKey), feeRecipient: fee.feeRecipient, pendingKeys: feePending },
-    },
-  };
+  return { objectVersion: fee.objectVersion, schedules: fee.schedules.map(scheduleKey), feeRecipient: fee.feeRecipient, pendingKeys: feePending };
 }

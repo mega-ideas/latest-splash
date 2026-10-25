@@ -336,8 +336,14 @@ each and whom `FeeConfig` pays.
   WhatsApp), with the proposed schedule against the one in force in words
   rendered by `lib/fees/copy.ts`; an applied schedule or recipient is told
   against the stored state, and the first recipient says the fees start. A
-  withdrawn or lapsed proposal stops being shown (as an upgrade's does); the
-  withdrawal is not a message of its own. Migration 0050. Tests:
+  withdrawn proposal (`FeeScheduleProposalCancelled`,
+  `FeeRecipientProposalCancelled`) is told too, from state: a proposal the
+  stored state held is gone at a newer version, was not applied, not
+  replaced by another proposal, and had not lapsed (`fee_schedule_withdrawn`,
+  `fee_recipient_withdrawn`). A lapsed proposal just stops being shown. If
+  the fee config cannot be trusted, the upgrade and owner-change alerts are
+  still delivered, the refusal is paged and the cron answers 502.
+  Migrations 0050 and 0054. Tests:
   `tests/fee-governance-alerts.test.mjs`.
 - **Near-threshold alerts: built (Phase 2).** Read from the policy's
   running totals and `RuleSpend`, detective only, owner-facing

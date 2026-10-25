@@ -1430,7 +1430,8 @@ export const governanceAlerts = pgTable('governance_alerts', {
   subjectId: text('subject_id').notNull(),
   /** upgrade_proposed | owner_change_proposed | registry_addition_proposed |
    *  upgrade_committed | registry_addition_activated | fee_schedule_proposed |
-   *  fee_recipient_proposed | fee_schedule_applied | fee_recipient_applied. */
+   *  fee_recipient_proposed | fee_schedule_applied | fee_recipient_applied |
+   *  fee_schedule_withdrawn | fee_recipient_withdrawn (migration 0054). */
   kind: text('kind').notNull(),
   /** The announced bytecode digest, 0x + 64 hex (upgrade_proposed). */
   bytecodeDigest: text('bytecode_digest'),

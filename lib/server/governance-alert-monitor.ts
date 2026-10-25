@@ -203,6 +203,8 @@ const SUBJECTS: Record<StoredGovernanceAlert['kind'], string> = {
   fee_recipient_proposed: 'A change to the account Splash fees are paid to has been announced',
   fee_schedule_applied: 'A change to the Splash fee schedule has taken effect',
   fee_recipient_applied: 'A change to the account Splash fees are paid to has taken effect',
+  fee_schedule_withdrawn: 'A change to the Splash fee schedule has been withdrawn',
+  fee_recipient_withdrawn: 'A change to the account Splash fees are paid to has been withdrawn',
 };
 
 /** Where an owner can see the same thing on any Sui explorer, without
@@ -217,6 +219,8 @@ const ON_CHAIN: Record<StoredGovernanceAlert['kind'], string> = {
   fee_recipient_proposed: 'holds the proposed fee recipient, with when it can take effect',
   fee_schedule_applied: 'shows the fee schedule in force',
   fee_recipient_applied: 'shows the fee recipient in force',
+  fee_schedule_withdrawn: 'shows no pending schedule for it, and the fee schedule in force',
+  fee_recipient_withdrawn: 'shows no pending fee recipient, and the fee recipient in force',
 };
 
 /** Where the link goes, in words: the fees, or the spending rules. */
@@ -282,14 +286,17 @@ export async function runGovernanceAlertMonitor(deps: {
   } catch (error) {
     return { ok: false, reason: `the monitor could not read the governance objects: ${error instanceof Error ? error.message : String(error)}` };
   }
-  const parsed = parseGovernanceState(read, config.policy);
-  if (!parsed.ok) {
-    if (!paged.has(parsed.reason)) {
-      paged.add(parsed.reason);
-      await alertSink({ kind: 'governance_config_mismatch', severity: 'critical', objectId: parsed.objectId, reason: parsed.reason });
-    }
-    return { ok: false, reason: parsed.reason };
+  // The fee config is optional to the parse here: if it cannot be trusted,
+  // the wrapper's and the config's alerts are still delivered, the refusal
+  // is paged, and the run still answers as failed (502). Nothing from the
+  // fee config is used or stored.
+  const parsed = parseGovernanceState(read, config.policy, { feeOptional: true });
+  const refusal = !parsed.ok ? parsed : parsed.feeRefusal ?? null;
+  if (refusal && !paged.has(refusal.reason)) {
+    paged.add(refusal.reason);
+    await alertSink({ kind: 'governance_config_mismatch', severity: 'critical', objectId: refusal.objectId, reason: refusal.reason });
   }
+  if (!parsed.ok) return { ok: false, reason: parsed.reason };
   const { wrapper, config: complianceConfig, feeConfig } = parsed.state;
 
   // The transport is resolved once, lazily: a misconfigured one fails each
@@ -303,7 +310,7 @@ export async function runGovernanceAlertMonitor(deps: {
 
   try {
     const db = deps.db ?? (await import('../db/client.ts')).getDb();
-    const previous = await readWatchStateForStaff(db, { wrapperId: wrapper.id, configId: complianceConfig.id, feeConfigId: feeConfig.id });
+    const previous = await readWatchStateForStaff(db, { wrapperId: wrapper.id, configId: complianceConfig.id, feeConfigId: config.policy.feeConfigId });
     const derived = deriveGovernanceAlerts(parsed.state, previous, now);
 
     // Record first, then the state: a run that dies in between leaves the
@@ -315,7 +322,7 @@ export async function runGovernanceAlertMonitor(deps: {
     }
     await saveWatchStateForStaff(db, { subjectId: wrapper.id, subjectKind: 'wrapper', snapshot: derived.snapshots.wrapper, nowMs: now });
     await saveWatchStateForStaff(db, { subjectId: complianceConfig.id, subjectKind: 'config', snapshot: derived.snapshots.config, nowMs: now });
-    await saveWatchStateForStaff(db, { subjectId: feeConfig.id, subjectKind: 'fee_config', snapshot: derived.snapshots.feeConfig, nowMs: now });
+    if (feeConfig && derived.snapshots.feeConfig) await saveWatchStateForStaff(db, { subjectId: feeConfig.id, subjectKind: 'fee_config', snapshot: derived.snapshots.feeConfig, nowMs: now });
 
     const active = await listActiveGovernanceAlertsForStaff(db, now);
     const owners = await listBusinessOwnersForStaff(db);
@@ -370,6 +377,7 @@ export async function runGovernanceAlertMonitor(deps: {
       }
     }
 
+    if (!feeConfig) return { ok: false, reason: `${parsed.feeRefusal?.reason ?? 'the fee config could not be read'} The upgrade wrapper's and the config's alerts were delivered.` };
     return {
       ok: true,
       observed: {

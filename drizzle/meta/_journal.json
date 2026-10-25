@@ -379,6 +379,13 @@
       "when": 1793145600000,
       "tag": "0053_billing_pull_supersede",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1793232000000,
+      "tag": "0054_fee_withdrawal_alerts",
+      "breakpoints": true
     }
   ]
 }
