@@ -168,7 +168,7 @@ test('every route that spends something is limited before it does the work', asy
     'app/api/copilot/suggest/route.ts': ['getCopilotSuggestions('],
     'app/api/copilot/summary/route.ts': ['listInvoicesFor('],
     'app/api/seal/access/route.ts': ['sealAdapter.canDecrypt('],
-    'app/api/invoices/route.ts': ['persistInvoice('],
+    'app/api/invoices/route.ts': ['readInvoiceByCreateKey('],
     'app/api/recipients/route.ts': ['persistRecipient('],
   };
   for (const [route, work] of Object.entries(routes)) {
