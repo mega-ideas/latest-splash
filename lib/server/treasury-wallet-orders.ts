@@ -12,6 +12,10 @@
  * with a different direction or amount it is refused, because that is a
  * different order under a reused key, not a retry.
  *
+ * Binding (migration 0056): every order names the business wallet, resolved
+ * on the server, as both its source and its only recipient, with both coin
+ * types. The database keeps the recipient equal to the source.
+ *
  * Status: `awaiting_signatures` until it closes as executed, failed, expired
  * or cancelled. A closed order never reopens and never changes to another
  * closed state: every transition is a guarded UPDATE on the open status.
@@ -54,6 +58,11 @@ export type TreasuryOrder = {
   providerRef: string | null;
   txDigest: string | null;
   requestedBy: string;
+  /** The business wallet: where the coin comes from, and the only place the output goes. */
+  sourceAddress: string;
+  recipientAddress: string;
+  inCoinType: string;
+  outCoinType: string;
   expiresAt: Date;
   closedAt: Date | null;
   createdAt: Date;
@@ -79,6 +88,10 @@ function toOrder(row: typeof treasuryWalletOrders.$inferSelect): TreasuryOrder {
     providerRef: row.providerRef,
     txDigest: row.txDigest,
     requestedBy: row.requestedBy,
+    sourceAddress: row.sourceAddress,
+    recipientAddress: row.recipientAddress,
+    inCoinType: row.inCoinType,
+    outCoinType: row.outCoinType,
     expiresAt: row.expiresAt,
     closedAt: row.closedAt,
     createdAt: row.createdAt,
@@ -96,7 +109,17 @@ export async function readTreasuryOrderByIntent(db: DrizzleDb, orgId: string, in
 
 export type CreateOrderResult =
   | { ok: true; order: TreasuryOrder; replayed: boolean }
-  | { ok: false; code: 'intent_reused'; order: TreasuryOrder };
+  | { ok: false; code: 'intent_reused' | 'in_progress'; order: TreasuryOrder };
+
+/**
+ * An open order with no provider reference is one another request has
+ * claimed and is still handing to the signers. It is not an answer yet: it may
+ * still fail and be removed, so a replay that meets it is told to wait, never
+ * that it was sent.
+ */
+export function orderInProgress(order: TreasuryOrder): boolean {
+  return order.status === 'awaiting_signatures' && order.providerRef === null;
+}
 
 /**
  * Record an order, once per (org, intent id). `prepare` runs only for a new
@@ -115,6 +138,10 @@ export async function createTreasuryOrder(
     priceMicros: bigint;
     sandbox: boolean;
     requestedBy: string;
+    /** The business wallet, resolved on the server. It is the source and the recipient. */
+    walletAddress: string;
+    inCoinType: string;
+    outCoinType: string;
     now?: Date;
   },
   prepare: (order: TreasuryOrder) => Promise<{ providerRef: string }>,
@@ -137,6 +164,10 @@ export async function createTreasuryOrder(
       status: 'awaiting_signatures',
       sandbox: input.sandbox,
       requestedBy: input.requestedBy,
+      sourceAddress: input.walletAddress,
+      recipientAddress: input.walletAddress,
+      inCoinType: input.inCoinType,
+      outCoinType: input.outCoinType,
       expiresAt: new Date(now.getTime() + ORDER_TTL_MS),
       createdAt: now,
       updatedAt: now,
@@ -153,6 +184,7 @@ export async function createTreasuryOrder(
       .where(eq(treasuryWalletOrders.id, existing.id))
       .limit(1);
     if (row?.requestHash !== requestHash) return { ok: false, code: 'intent_reused', order: existing };
+    if (orderInProgress(existing)) return { ok: false, code: 'in_progress', order: existing };
     return { ok: true, order: existing, replayed: true };
   }
 
@@ -216,6 +248,10 @@ export function orderView(order: TreasuryOrder) {
     quotedOutMinor: order.quotedOutMinor.toString(),
     status: order.status,
     sandbox: order.sandbox,
+    sourceAddress: order.sourceAddress,
+    recipientAddress: order.recipientAddress,
+    inCoinType: order.inCoinType,
+    outCoinType: order.outCoinType,
     txDigest: order.txDigest,
     expiresAt: order.expiresAt.toISOString(),
     createdAt: order.createdAt.toISOString(),

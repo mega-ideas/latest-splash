@@ -2422,6 +2422,11 @@ export const treasuryWalletOrders = pgTable('treasury_wallet_orders', {
   txDigest: text('tx_digest'),
   requestedBy: text('requested_by').notNull(),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  /** The business wallet the order is bound to (migration 0056): its source, and the only recipient. */
+  sourceAddress: text('source_address').notNull(),
+  recipientAddress: text('recipient_address').notNull(),
+  inCoinType: text('in_coin_type').notNull(),
+  outCoinType: text('out_coin_type').notNull(),
   closedAt: timestamp('closed_at', { withTimezone: true }),
   ...timestamps,
 }, (table) => [
@@ -2442,7 +2447,31 @@ export const treasuryFundReferrals = pgTable('treasury_fund_referrals', {
   linkedReference: text('linked_reference'),
   linkedBy: text('linked_by'),
   linkedAt: timestamp('linked_at', { withTimezone: true }),
+  /** When the fund manager confirmed the reference is this business's (migration 0056). */
+  linkConfirmedAt: timestamp('link_confirmed_at', { withTimezone: true }),
+  /** The latest row of treasuryFundReferralHistory with kind 'assessed'. */
+  latestAssessmentId: text('latest_assessment_id').notNull(),
   ...timestamps,
 }, (table) => [
   uniqueIndex('treasury_fund_referrals_linked_reference_unique').on(table.linkedReference).where(sql`${table.linkedReference} IS NOT NULL`),
+]);
+
+/** Everything that happened to a fund referral, append-only (migration 0056). lib/server/fund-referral-store.ts. */
+export const treasuryFundReferralHistory = pgTable('treasury_fund_referral_history', {
+  id: text('id').primaryKey(),
+  /** The order things happened in, even within one millisecond. */
+  seq: bigserial('seq', { mode: 'number' }).notNull(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  /** assessed | linked | released. */
+  kind: text('kind').notNull(),
+  actor: text('actor').notNull(),
+  at: timestamp('at', { withTimezone: true }).notNull(),
+  answers: jsonb('answers'),
+  outcome: text('outcome'),
+  category: text('category'),
+  reference: text('reference'),
+  reason: text('reason'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index('treasury_fund_referral_history_org_seq_idx').on(table.orgId, table.seq),
 ]);

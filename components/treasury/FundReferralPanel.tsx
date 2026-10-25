@@ -22,6 +22,8 @@ import { cn } from '@/lib/utils';
 type Referral = {
   label: string;
   assessment: { outcome: 'eligible' | 'not_eligible'; categoryLabel: string | null; reason: string; assessedAt: string } | null;
+  /** Every time the business answered, newest first. Answering again never hides an earlier answer. */
+  assessments?: Array<{ outcome: 'eligible' | 'not_eligible'; categoryLabel: string | null; assessedAt: string }>;
   referralUrl: string | null;
   referralOpenedAt?: string | null;
   linked: boolean;
@@ -110,6 +112,18 @@ export default function FundReferralPanel({ label, canAnswer }: { label: string;
             </p>
             {assessment.outcome !== 'eligible' && <p className="mt-0.5 text-[#326273]">{assessment.reason}</p>}
             <p className="mt-0.5 text-[12px] text-[#326273]">Answered <LocalTime value={assessment.assessedAt} format="date" /></p>
+            {(referral.assessments?.length ?? 0) > 1 && (
+              <div className="mt-1.5 border-t border-[#326273]/10 pt-1.5 text-[12px] text-[#326273]">
+                <p className="font-semibold">Earlier answers, kept on record</p>
+                <ul className="mt-0.5 space-y-0.5">
+                  {referral.assessments!.slice(1).map((a) => (
+                    <li key={a.assessedAt}>
+                      {a.outcome === 'eligible' ? `Eligible: ${a.categoryLabel}` : 'Not eligible'}, <LocalTime value={a.assessedAt} format="date" />
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {canAnswer && !referral.linked && (
               <button type="button" onClick={() => { setEditing(true); setAnswers({}); }} className="mt-1 inline-flex min-h-11 items-center text-[13px] font-semibold text-[#145d6a] underline decoration-1 underline-offset-2">
                 Answer again

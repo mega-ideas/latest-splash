@@ -34,9 +34,8 @@ import 'server-only';
 
 import type { UnsignedProposal } from '@/lib/agent/types';
 import { x402SettlementAvailability } from '@/lib/agent/x402';
-import { CUSTODY_PHASE_WHY } from '@/lib/custody-phase-rules';
 import { closeApprovalClaim } from '@/lib/server/approved-proposal';
-import { custodyPhaseEnabled } from '@/lib/server/custody-phase';
+import { CUSTODIAL_TREASURY_RETIRED_REASON } from '@/lib/server/custodial-treasury';
 import { kindInScope, launchScope, LAUNCH_SCOPE_NOT_SENT } from '@/lib/server/launch-scope';
 
 export type ExecutionOutcome =
@@ -131,16 +130,11 @@ async function carryOut(
         };
       case 'TREASURY_ALLOCATE':
       case 'TREASURY_REDEEM':
-        // Same honesty in Phase 0: /api/treasury refuses every treasury move,
-        // so no "own path" exists to settle this one.
-        if (!custodyPhaseEnabled()) {
-          return { state: 'SKIPPED', detail: `Approved and recorded, not executed. ${CUSTODY_PHASE_WHY}` };
-        }
-        // With custody on, /api/treasury IS that path: these proposals come
-        // from its approval branch, and are replayed through it as a payment
-        // is through the transfer route. They used to be proposed as PAYMENT,
-        // and replayed into the transfer route, which refused them.
-        return await executeTreasuryMove(proposal, payload, context);
+        // v2 D9: the custodial Smart Treasury ledger is retired, custody phase or
+        // not (lib/server/custodial-treasury.ts). An approval for it is recorded
+        // and moves nothing into a Splash-held position: Treasury is USDY in the
+        // business's own wallet, signed by its owners there.
+        return { state: 'SKIPPED', detail: `Approved and recorded, not executed. ${CUSTODIAL_TREASURY_RETIRED_REASON}` };
       default:
         // An agent-drafted FX, netting or internal-transfer proposal has its
         // own settlement path and is not replayed through the money routes.
@@ -201,33 +195,4 @@ async function executeBatch(
   return result.ok
     ? { state: 'EXECUTED', detail: 'Payout run started.', ref: result.ref }
     : { state: 'FAILED', detail: result.error };
-}
-
-/**
- * Replay a treasury move through `/api/treasury`. The route resolves the
- * approval under the treasury kind for the move's direction and amount, and it
- * stands in for the second factor and the second approver
- * (lib/server/treasury-approval.ts); the pause and the ceilings run again as
- * they would for any move.
- */
-async function executeTreasuryMove(
-  proposal: UnsignedProposal,
-  payload: Record<string, unknown>,
-  context: ExecutionContext,
-): Promise<ExecutionOutcome> {
-  const { authorizeTreasuryForApproval } = await import('./approval-replay.ts');
-  const result = await authorizeTreasuryForApproval({
-    orgId: proposal.orgId,
-    approvedProposalId: proposal.id,
-    body: payload,
-    ...context,
-  });
-  if (!result.ok) return { state: 'FAILED', detail: result.error };
-  return {
-    state: 'EXECUTED',
-    detail:
-      proposal.kind === 'TREASURY_REDEEM'
-        ? 'Withdrawal from Smart Treasury requested. It reaches Available after the notice window.'
-        : 'Moved into Smart Treasury.',
-  };
 }

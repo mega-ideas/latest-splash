@@ -350,10 +350,10 @@ test('answering again keeps the earlier declaration: assessments are appended, a
   const yes = await handleFundReferralWrite(db, OWNER, { action: 'assess', answers: ELIGIBLE }, f.deps);
   assert.equal(yes.body.assessment.outcome, 'eligible');
 
-  const { rows } = await client.query(`SELECT outcome, answers, assessed_by FROM treasury_fund_referral_history WHERE org_id = 'acme' AND kind = 'assessed' ORDER BY at, id`);
+  const { rows } = await client.query(`SELECT outcome, answers, actor FROM treasury_fund_referral_history WHERE org_id = 'acme' AND kind = 'assessed' ORDER BY seq`);
   assert.deepEqual(rows.map((r) => r.outcome), ['not_eligible', 'eligible']);
   assert.equal(rows[0].answers.net_assets, false, 'the first answers are kept as given');
-  assert.equal(rows[0].assessed_by ?? 'u_owner', 'u_owner');
+  assert.equal(rows[0].actor, 'u_owner', 'who answered is kept');
   const current = await client.query(`SELECT r.latest_assessment_id, h.outcome FROM treasury_fund_referrals r JOIN treasury_fund_referral_history h ON h.id = r.latest_assessment_id WHERE r.org_id = 'acme'`);
   assert.equal(current.rows[0].outcome, 'eligible');
 
@@ -423,6 +423,7 @@ test('swap slippage has one default and a ceiling, read through the env module',
   assert.equal(parseEnv({ NODE_ENV: 'test' }).USDY_SWAP_SLIPPAGE_BPS, 30);
   assert.equal(parseEnv({ NODE_ENV: 'test', USDY_SWAP_SLIPPAGE_BPS: '100' }).USDY_SWAP_SLIPPAGE_BPS, 100);
   assert.throws(() => parseEnv({ NODE_ENV: 'test', USDY_SWAP_SLIPPAGE_BPS: '1000' }), /USDY_SWAP_SLIPPAGE_BPS/);
+  assert.throws(() => parseEnv({ NODE_ENV: 'test', USDY_SWAP_SLIPPAGE_BPS: String(MAX_SWAP_SLIPPAGE_BPS + 1) }), /USDY_SWAP_SLIPPAGE_BPS/);
   for (const file of ['lib/server/treasury-deps.ts', 'lib/server/usdy.ts']) {
     const text = await source(file);
     assert.doesNotMatch(text, /process\.env\.USDY_SWAP_SLIPPAGE_BPS/, file);
@@ -459,7 +460,7 @@ test('Settings and the stocks card name no licence and no unsigned partner', asy
   assert.doesNotMatch(settings, /Smart Treasury holds customer funds/);
   assert.match(settings, /USDY in your own Splash Wallet/);
   const page = await source('app/dashboard/treasury/page.tsx');
-  assert.doesNotMatch(page, /Circle/);
+  assert.doesNotMatch(page, /\bCircle\b/, 'Circle is named by role (the icons AlertCircle and CheckCircle2 are not names)');
 });
 
 test('the Max button is a full-size target with a name that says what it does', async () => {

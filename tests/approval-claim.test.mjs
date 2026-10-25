@@ -592,7 +592,8 @@ test('the replay closes what it presented, whatever the route did', async () => 
   assert.match(replay, /finally \{\s*await closeApprovalClaim\(input\.approvedProposalId, input\.orgId\);\s*\}/);
   assert.match(replay, /return replayThroughRoute\(POST, '\/api\/transfers\/authorize', input\)/);
   assert.match(replay, /return replayThroughRoute\(POST, '\/api\/batches\/authorize', input\)/);
-  assert.match(replay, /return replayThroughRoute\(POST, '\/api\/treasury', input\)/);
+  // The custodial treasury ledger is retired (v2 D9): nothing replays into it.
+  assert.doesNotMatch(replay, /'\/api\/treasury'/);
 
   // And the executor closes the ones no route saw: a Phase 0 treasury SKIP, a
   // failure before the replay ran.

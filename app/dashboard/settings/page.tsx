@@ -7,7 +7,6 @@ import ApprovalsInbox from '@/components/approvals/ApprovalsInbox';
 import ApprovalChannelCard from '@/components/settings/ApprovalChannelCard';
 import LocalTime from '@/components/LocalTime';
 import { useCustodyPhaseOn } from '@/components/dashboard/CustodyPhaseContext';
-import { CUSTODY_LICENCE } from '@/lib/custody-phase-rules';
 import {
   BadgeCheck,
   Building2,
@@ -38,10 +37,12 @@ type Settings = {
   updatedAt: string;
 };
 
-// Treasury, and the sweep and stored-balance rungs, hold customer funds: Phase
-// 2, behind the custody gate the money routes enforce. Until the phase is on
-// these say so, rather than describing them as running.
-const TREASURY_PHASE0 = `Phase 2 · Smart Treasury holds customer funds, which needs ${CUSTODY_LICENCE}`;
+// Treasury is USDY in the business's own Splash Wallet (v2 D9): Splash holds
+// none of it, so nothing here waits on custody and no licence is cited. The
+// issuer is described by its role (lib/partners/signed-partners.ts), and no
+// allocation happens automatically: every swap is the wallet owners' own.
+const TREASURY_NOTE = 'USDY in your own Splash Wallet, from a tokenized treasury issuer, quoted on the Treasury page. Splash holds none of it. USDY is not Shariah-compliant.';
+const AUTO_ALLOCATE_NOTE = 'Not offered: every Treasury swap is made from your Splash Wallet by its owners, never automatically.';
 
 const INFORMATION = [
   {
@@ -57,8 +58,7 @@ const INFORMATION = [
   {
     icon: Building2,
     label: 'Treasury',
-    text: (custodyOn: boolean) =>
-      custodyOn ? 'Smart Treasury models projected Ondo USDY yield; execution gated; projected, not promised' : TREASURY_PHASE0,
+    text: TREASURY_NOTE,
   },
   {
     icon: Database,
@@ -164,7 +164,7 @@ export default function DashboardSettingsPage() {
             <NumberControl label="Per-transfer limit" value={settings.perTransferLimitUsd} suffix="USD" onChange={(value) => update('perTransferLimitUsd', value)} />
             <NumberControl label="Daily limit" value={settings.dailyLimitUsd} suffix="USD" onChange={(value) => update('dailyLimitUsd', value)} />
             <NumberControl label="Approval threshold" value={settings.approvalThresholdUsd} suffix="USD" onChange={(value) => update('approvalThresholdUsd', value)} />
-            <NumberControl label="Auto-allocate to treasury" value={settings.autoAllocateTreasuryPct} suffix="%" onChange={(value) => update('autoAllocateTreasuryPct', value)} disabled={!custodyOn} note={custodyOn ? undefined : TREASURY_PHASE0} />
+            <NumberControl label="Auto-allocate to treasury" value={settings.autoAllocateTreasuryPct} suffix="%" onChange={(value) => update('autoAllocateTreasuryPct', value)} disabled note={AUTO_ALLOCATE_NOTE} />
           </div>
         </div>
 

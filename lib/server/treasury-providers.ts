@@ -65,14 +65,31 @@ export type FundHolding = {
   sandbox: boolean;
 };
 
+/**
+ * Who is asking, so the fund manager can refuse a reference that is not
+ * theirs: the account reference never stands alone (the 5.7 review).
+ */
+export type FundAccountQuery = { reference: string; orgId: string; registrationNumber: string };
+
 export interface FundHoldingSource {
   kind: 'sandbox' | 'live';
-  read(reference: string): Promise<{ ok: true; holding: FundHolding } | Unavailable>;
+  /**
+   * Ask the fund manager whether this account reference belongs to this
+   * business. Nothing is linked unless it says yes; `not_this_business` is its
+   * no, anything else is that it could not answer.
+   */
+  confirmLink(query: FundAccountQuery): Promise<{ ok: true } | (Unavailable & { code?: 'not_this_business' })>;
+  read(query: FundAccountQuery): Promise<{ ok: true; holding: FundHolding } | Unavailable>;
 }
 
 const SANDBOX_FUND_SOURCE: FundHoldingSource = {
   kind: 'sandbox',
-  async read(reference) {
+  // The sandbox has no register of accounts, so it confirms every reference.
+  // It exists only outside production.
+  async confirmLink() {
+    return { ok: true };
+  },
+  async read({ reference }) {
     return {
       ok: true,
       holding: { reference, units: '1000.0000', value: '1032.40', currency: 'MYR', asOf: new Date().toISOString(), sandbox: true },

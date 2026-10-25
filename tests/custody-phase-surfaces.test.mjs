@@ -127,18 +127,21 @@ test('the landing ladder puts both fund-holding rungs in Phase 2, in the licence
 
 /* ── Settings ──────────────────────────────────────────────────────────── */
 
-test('the settings page stops presenting Treasury and the fund-holding rungs as running in Phase 0', async () => {
+test('the settings page stops presenting the fund-holding rungs as running in Phase 0, and Treasury as custodial at all', async () => {
   const page = await source('app/dashboard/settings/page.tsx');
   assert.match(page, /const custodyOn = useCustodyPhaseOn\(\);/, 'the phase the shell resolved');
   // Nothing reads autoAllocateTreasuryPct, so "applied to treasury allocation" was never true.
   assert.doesNotMatch(page, /treasury allocation, and account security/);
-  assert.match(page, /Phase 2 · Smart Treasury holds customer funds, which needs \$\{CUSTODY_LICENCE\}/);
+  // v2 D9: Treasury is USDY in the business's own wallet, in any phase. No
+  // licence is cited for it and no issuer is named (the 5.7 review).
+  assert.doesNotMatch(page, /Smart Treasury holds customer funds|CUSTODY_LICENCE|Ondo/);
+  assert.match(page, /USDY in your own Splash Wallet/);
   assert.match(page, /custodyOn \? 'payout\/sweep\/stored' : 'payout today · sweep and stored balance in Phase 2/);
   assert.match(page, /text\(custodyOn\)/, 'the phase-dependent cards are rendered with the phase');
   assert.match(
     page,
-    /label="Auto-allocate to treasury"[^\n]*disabled=\{!custodyOn\} note=\{custodyOn \? undefined : TREASURY_PHASE0\}/,
-    'the treasury control is not offered in Phase 0',
+    /label="Auto-allocate to treasury"[^\n]*disabled note=\{AUTO_ALLOCATE_NOTE\}/,
+    'no allocation is offered automatically, in any phase: every swap is the wallet owners\' own',
   );
 });
 
@@ -288,14 +291,15 @@ test('the delivery executor refuses a fund-holding tier itself, before any ledge
   }
 });
 
-test('an approved treasury proposal records that nothing settles it in Phase 0', async () => {
+test('an approved treasury proposal records that nothing settles it, because the custodial ledger is retired', async () => {
   const { executeApprovedProposal } = await execution();
-  const { CUSTODY_PHASE_WHY } = await rules();
+  const { CUSTODIAL_TREASURY_RETIRED_REASON } = await import('../lib/server/custodial-treasury.ts');
   for (const kind of ['TREASURY_ALLOCATE', 'TREASURY_REDEEM']) {
     const outcome = await executeApprovedProposal({ kind }, {}, { cookie: '', origin: 'http://localhost' });
     assert.equal(outcome.state, 'SKIPPED');
     assert.match(outcome.detail, /not executed/);
-    assert.ok(outcome.detail.includes(CUSTODY_PHASE_WHY), 'with the licence-named reason');
+    assert.ok(outcome.detail.includes(CUSTODIAL_TREASURY_RETIRED_REASON), 'with where Treasury is now (v2 D9)');
+    assert.doesNotMatch(outcome.detail, /licen[cs]/i);
     assert.doesNotMatch(outcome.detail, /own path/, 'not the Phase 2 wording');
   }
 });

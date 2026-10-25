@@ -24,7 +24,6 @@ import { cn } from '../../../lib/utils';
 import MoneyPathPanel from '@/components/compliance/MoneyPathPanel';
 import LocalTime from '@/components/LocalTime';
 import FundReferralPanel from '@/components/treasury/FundReferralPanel';
-import { businessWalletFrom } from '@/lib/dashboard/home';
 import { FEES_OFF_NOTICE } from '@/lib/fees/copy';
 import { buildFeeQuote } from '@/lib/fees/quote';
 import { BANK_DESTINATION, destinationKind } from '@/lib/fees/destination';
@@ -73,6 +72,10 @@ type Overview = {
   issuer: string;
   fundManager: string;
   role: Role;
+  /** Whether this member may hand a swap to the signers: the server's role list, not the page's. */
+  canOrder: boolean;
+  /** The business wallet as the server resolved it from the org's own account. */
+  wallet: 'address' | 'none' | 'off' | 'error';
   price: { status: 'LIVE' | 'STALE' | 'UNAVAILABLE'; priceMicros: string | null; asOf: string | null };
   apyPct: number;
   address: string | null;
@@ -176,25 +179,20 @@ export default function TreasuryPage() {
 
   const load = useCallback(async () => {
     setOverviewError(null);
-    let address: string | null = null;
+    // The server resolves the business wallet from the org's own account; the
+    // page names no address, so what it shows is always the business's.
     try {
-      const res = await fetch('/api/wallet/business', { cache: 'no-store' });
-      const body = await res.json().catch(() => null);
-      const source = businessWalletFrom(res.status, body);
-      if (source.kind === 'address') address = source.address;
-      setWalletSource(source.kind);
-    } catch {
-      setWalletSource('error');
-    }
-    try {
-      const res = await fetch(`/api/treasury/wallet${address ? `?address=${encodeURIComponent(address)}` : ''}`, { cache: 'no-store' });
+      const res = await fetch('/api/treasury/wallet', { cache: 'no-store' });
       const body = await res.json().catch(() => null);
       if (!res.ok || !body) {
+        setWalletSource(res.status === 403 ? 'no_access' : 'error');
         setOverviewError((body as { error?: string } | null)?.error ?? 'Treasury could not be loaded.');
         return;
       }
       setOverview(body as Overview);
+      setWalletSource((body as Overview).wallet);
     } catch {
+      setWalletSource('error');
       setOverviewError('Treasury could not be loaded.');
     }
   }, []);
@@ -219,7 +217,7 @@ export default function TreasuryPage() {
   const amountMinor = parseAmountMinor(amount);
   const sourceMinor = toTreasury ? usdcMinor : usdyMinor;
   const overBalance = amountMinor !== null && sourceMinor !== null && amountMinor > sourceMinor;
-  const canOrder = overview?.role !== 'VIEWER';
+  const canOrder = overview?.canOrder === true;
 
   function showToast(msg: string) {
     setToast(msg);
@@ -347,7 +345,7 @@ export default function TreasuryPage() {
     : !overview.flags.walletSwaps
       ? 'Swaps are not switched on on this server.'
       : !canOrder
-        ? 'A viewer cannot ask the wallet to swap.'
+        ? 'Your role does not include asking the wallet to swap. An owner, finance admin, approver or maker can.'
         : quote && !quote.error && !quote.orderable
           ? 'This quote cannot be sent to your signers.'
           : null;
@@ -515,7 +513,8 @@ export default function TreasuryPage() {
                   <button
                     type="button"
                     onClick={() => { setAmount(formatMinor(sourceMinor, 6)); setQuote(null); setIntentId(null); }}
-                    className="shrink-0 rounded-md bg-[#326273]/10 px-2 py-1 text-[13px] font-semibold text-[#326273] transition-colors hover:bg-[#326273]/20"
+                    aria-label={`Use the full ${unit.in} balance`}
+                    className="-my-2 inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md bg-[#326273]/10 px-3 text-[13px] font-semibold text-[#326273] transition-colors hover:bg-[#326273]/20"
                   >
                     Max
                   </button>
@@ -841,7 +840,7 @@ export default function TreasuryPage() {
             <section className="dash-surface p-5" aria-labelledby="stocks-title">
               <h2 id="stocks-title" className="text-sm font-semibold text-[#1F4452]">Tokenized stocks and ETFs</h2>
               <p className="mt-1 max-w-2xl text-[13px] leading-5 text-[#326273]">
-                Held in a multisig of your own on Solana, with the same signers as your Splash Wallet. USDC moves there through Circle&rsquo;s CCTP, and back the same way.
+                Held in a multisig of your own on Solana, with the same signers as your Splash Wallet. USDC moves there by a cross-chain USDC transfer, and back the same way.
               </p>
               <Link href="/dashboard/customer-service" className="mt-3 inline-flex min-h-11 items-center gap-1 text-[13px] font-semibold text-[#145d6a] underline decoration-1 underline-offset-2">
                 Ask about access <ChevronRight size={13} aria-hidden="true" />

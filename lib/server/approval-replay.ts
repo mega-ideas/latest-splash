@@ -21,7 +21,7 @@
  * screening, and the daily ceiling can be consumed by other payments. An
  * approval says "this payment is authorised". It does not say "skip the
  * checks". It removes the second-approver requirement, because that is
- * exactly what it supplied, and on the batch and treasury routes the maker's
+ * exactly what it supplied, and on the batch route the maker's
  * second factor, which was single-use and spent making the proposal.
  *
  * ─── The header is a claim, not a credential ────────────────────────────────
@@ -119,9 +119,4 @@ export async function authorizeTransferForApproval(input: ReplayInput): Promise<
 export async function authorizeBatchForApproval(input: ReplayInput): Promise<ReplayResult> {
   const { POST } = await import('@/app/api/batches/authorize/route');
   return replayThroughRoute(POST, '/api/batches/authorize', input);
-}
-
-export async function authorizeTreasuryForApproval(input: ReplayInput): Promise<ReplayResult> {
-  const { POST } = await import('@/app/api/treasury/route');
-  return replayThroughRoute(POST, '/api/treasury', input);
 }

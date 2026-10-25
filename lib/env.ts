@@ -555,7 +555,9 @@ export const envSchema = z.object({
   ETHEREUM_RPC_URL: url,
   USDY_ORACLE: opt(z.enum(['on', 'off'])),
   USDY_REDEMPTION_AS_OF: optional,
-  USDY_SWAP_SLIPPAGE_BPS: int(30, 0),
+  /** The swap floor's slippage. One default (30), and no more than 100, which is
+   *  MAX_SWAP_SLIPPAGE_BPS in lib/payments/treasury-usdy.ts (tests hold the two together). */
+  USDY_SWAP_SLIPPAGE_BPS: withDefault(z.coerce.number().int().min(0).max(100), 30),
   USDY_SWAP_VENUE: withDefault(z.enum(['cetus', 'aftermath']), 'cetus'),
   USDY_WITHDRAWAL_DAYS: int(2, 0),
   /* Treasury in the business's own wallet (v2 D9, brief 5.7). */

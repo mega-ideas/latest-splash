@@ -1,7 +1,7 @@
 import type { KybLifecycleState } from '../compliance/kyb-state.ts';
 import { laneAccess, type Lane } from '../payments/stablecoin-lane.ts';
-import { custodyPhaseEnabled } from '../server/custody-phase.ts';
 import { kindInScope, launchScope, laneInScope, LAUNCH_SCOPE_REASON } from '../server/launch-scope.ts';
+import { resolveTreasurySwapRoute } from '../server/treasury-providers.ts';
 
 /**
  * What Zeke may prepare for a business, given how far through verification it
@@ -108,26 +108,41 @@ export async function assertZekeLane(orgId: string, lane: Lane, currency: string
 }
 
 /**
- * Zeke's tools for Treasury (proposeTreasuryAllocation / Redeem, and the
- * balance and treasury reads) act on the custodial Smart Treasury ledger,
- * which /api/treasury still gates on the custody phase
- * (lib/server/custody-phase.ts). Without the custody phase, Zeke drafts none
- * of them.
+ * Zeke's Treasury answer (v2 D9, brief 5.7; the 5.7 review).
  *
- * What is true instead (v2 D9, brief 5.7): Treasury is USDY in the
- * business's own Splash Wallet, quoted on the Treasury page and signed by the
- * wallet's owners there. So the refusal says where Treasury is and how to use
- * it, and cites no licence, because none is involved. Worded for a question
- * as well as a request, since "what's the treasury yield?" reaches it too.
+ * Treasury is USDY in the business's own Splash Wallet, quoted on the
+ * Treasury page and, when this server has a swap route, sent from there to
+ * the wallet's owners to sign. Zeke prepares none of it: its custodial
+ * Treasury tools (proposeTreasuryAllocation / Redeem, and the balance and
+ * treasury reads) acted on the Smart Treasury ledger Splash held, which D9
+ * retired (lib/server/custodial-treasury.ts). So this answer stands whatever
+ * the custody phase is, and turning the custody phase on never brings those
+ * tools back.
+ *
+ * It opens with the limitation statement every money-moving intent gets
+ * (brief 4.8), says only what this server can do (signing is mentioned only
+ * when a swap route exists here: TREASURY_WALLET_SWAPS on, and not
+ * production, which has no live route in this build), and cites no licence,
+ * because none is involved. Worded for a question as well as a request,
+ * since "what's the treasury yield?" reaches it too.
  */
-export const TREASURY_CUSTODY_REFUSAL =
-  "I don't move money into or out of Treasury. Treasury is USDY held in your business's own Splash Wallet, " +
-  "so Splash holds nothing for you: get a quote on the Treasury page, and your wallet's owners sign the swap there. " +
-  'USDY is backed by US Treasury bills, its yield is variable and not promised, and it is not Shariah-compliant.';
+export function treasuryRefusalText(env: NodeJS.ProcessEnv = process.env): string {
+  const where = resolveTreasurySwapRoute(env).ok
+    ? "You can get a USDY quote on the Treasury page and send the swap to your wallet's owners; the owners sign it there."
+    : 'You can get a USDY quote on the Treasury page; swaps from the wallet are not switched on yet.';
+  return (
+    "I can't prepare, approve or send a Treasury swap. Treasury is USDY held in your business's own Splash Wallet, so Splash holds nothing for you. " +
+    `${where} ` +
+    'USDY is backed by US Treasury bills, its yield is variable and not promised, and it is not Shariah-compliant.'
+  );
+}
 
-/** Zeke's Treasury answer, or null once the custodial ledger's phase is on. */
-export function treasuryCustodyRefusal(): string | null {
-  return custodyPhaseEnabled() ? null : TREASURY_CUSTODY_REFUSAL;
+/** The answer on a server with no swap route: the default, and what tests compare against. */
+export const TREASURY_CUSTODY_REFUSAL = treasuryRefusalText({ NODE_ENV: 'development' });
+
+/** Zeke's Treasury answer on this server. Never null: the custodial ledger is retired. */
+export function treasuryCustodyRefusal(): string {
+  return treasuryRefusalText(process.env);
 }
 
 // ─── Reading a message ──────────────────────────────────────────────────────

@@ -414,6 +414,13 @@
       "when": 1793577600000,
       "tag": "0058_treasury_wallet",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1793404800000,
+      "tag": "0056_treasury_wallet_binding",
+      "breakpoints": true
     }
   ]
 }

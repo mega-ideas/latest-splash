@@ -66,6 +66,14 @@ export function projectValue(principalMinor: bigint, apyPct: number, days: numbe
  */
 export const MAX_MARKET_SHORTFALL_BPS = 100;
 
+/**
+ * The most slippage a swap's floor may allow (USDY_SWAP_SLIPPAGE_BPS, read
+ * through lib/env.ts, which refuses more). The same as the market shortfall
+ * ceiling: a floor looser than the loss Splash already calls unfillable would
+ * let a swap the quote refused through at signing.
+ */
+export const MAX_SWAP_SLIPPAGE_BPS = MAX_MARKET_SHORTFALL_BPS;
+
 /** A Sui DEX quote for the same USDC (lib/server/usdy-liquidity.ts), or why there is none. */
 export type MarketInput =
   | { usdyOutMinor: bigint; providers: string[]; asOf: string }

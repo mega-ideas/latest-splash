@@ -25,6 +25,7 @@ import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { assertCleanBody, ProvenanceViolationError, provenanceViolationResponse } from '@/lib/auth/provenance-guard';
 import { requireActiveOrg } from '@/lib/server/kyb-gate';
 import { custodyPhaseEnabled, custodyPhaseResponse } from '@/lib/server/custody-phase';
+import { CUSTODIAL_TREASURY_LEDGER_ON, custodialTreasuryRetiredResponse } from '@/lib/server/custodial-treasury';
 import { readJsonBody } from '@/lib/server/http';
 import { requireSessionAccount } from '@/lib/server/session-account';
 import { readOrgSettings } from '@/lib/server/org-settings';
@@ -88,6 +89,8 @@ export async function GET(request: Request) {
   if (auth.response) return auth.response;
   const outOfScope = refuseOutsideLaunchScope();
   if (outOfScope) return outOfScope;
+  // v2 D9: the custodial ledger is retired, custody phase or not.
+  if (!CUSTODIAL_TREASURY_LEDGER_ON) return custodialTreasuryRetiredResponse();
   if (!custodyPhaseEnabled()) return custodyPhaseResponse();
 
   const accountCheck = await requireSessionAccount(auth.session);
@@ -100,6 +103,8 @@ export async function POST(request: Request) {
   if (auth.response) return auth.response;
   const outOfScope = refuseOutsideLaunchScope();
   if (outOfScope) return outOfScope;
+  // v2 D9: the custodial ledger is retired, custody phase or not.
+  if (!CUSTODIAL_TREASURY_LEDGER_ON) return custodialTreasuryRetiredResponse();
   if (!custodyPhaseEnabled()) return custodyPhaseResponse();
 
   if (process.env.TREASURY_EXECUTION_ENABLED !== 'true') {

@@ -1032,38 +1032,25 @@ async function createDraftProposal(input: {
   return composed;
 }
 
+/**
+ * What Zeke says about balances: Splash holds none (v2 D9). The business's
+ * USDC and USDY are in its own Splash Wallet and read from Sui on the Wallet
+ * and Treasury pages, so Zeke has no figure of its own to show, and says so
+ * rather than reading out a fixture.
+ */
+export const NO_SPLASH_BALANCE =
+  "Splash holds no balance for your business, so I have no figure of my own to show. Your USDC and USDY are in your business's own Splash Wallet, read from Sui on the Wallet and Treasury pages.";
+
 export function getBalances(input: unknown) {
   const orgId = requireString(objectInput(input), 'orgId');
-  // Phase 0 holds nothing for anyone, so there is no Splash-held balance to
-  // report. The fixture below would read as money Splash is keeping.
-  const custodyRefusal = treasuryCustodyRefusal();
-  if (custodyRefusal) return { orgId, observedAt: nowIso(), balances: [], note: custodyRefusal };
-  return {
-    orgId,
-    observedAt: nowIso(),
-    balances: [
-      { account: 'AVAILABLE_USDC', amount: '11140000000', currency: 'USDC', source: 'ledger' },
-      { account: 'SMART_TREASURY_USDY', amount: '24598720000', currency: 'USDY', source: 'ledger' },
-    ],
-  };
+  return { orgId, observedAt: nowIso(), balances: [], note: NO_SPLASH_BALANCE };
 }
 
 export function getTreasuryState(input: unknown) {
   const orgId = requireString(objectInput(input), 'orgId');
-  // No principal, yield or floor to show in Phase 0: the fixture numbers are
-  // the ones the treasury page stopped showing as a balance.
-  const custodyRefusal = treasuryCustodyRefusal();
-  if (custodyRefusal) return { orgId, observedAt: nowIso(), open: false, note: custodyRefusal };
-  return {
-    orgId,
-    observedAt: nowIso(),
-    availableMicro: '11140000000',
-    treasuryPrincipalMicro: '24500000000',
-    treasuryYieldMicro: '98720000',
-    operatingMinimumByCorridor: { MY_PH: '5000000000' },
-    yieldSource: 'Ondo USDY',
-    settlementWindow: 'T+1 to T+3',
-  };
+  // No Splash-held principal, yield or floor exists to show (v2 D9): the
+  // custodial ledger is retired, and USDY sits in the business's own wallet.
+  return { orgId, observedAt: nowIso(), open: false, note: treasuryCustodyRefusal() };
 }
 
 export function getCorridorLiquidity(input: unknown) {
@@ -2137,12 +2124,12 @@ const SPLASH_ANSWERS: Array<{ test: RegExp; reply: string | (() => string); skip
     // Treasury / yield — QUESTIONS only; allocate/sweep actions flow to the planner
     test: /\b(treasury|yield|apy|earn|interest|idle cash|usdy|t-?bill)\b/,
     skipIf: /\b(allocate|sweep|deploy|move|put|redeem|withdraw)\b/,
-    reply: () => treasuryCustodyRefusal() ?? 'Smart Treasury earns a variable Ondo USDY (T-bill backed) yield; your Available balance stays instant at 0%. Withdrawals from Smart Treasury take 1-3 business days and every movement is approval-gated. Ask me to "allocate idle treasury" and I will draft an unsigned proposal for you to sign.',
+    reply: () => treasuryCustodyRefusal(),
   },
   {
     // Balances
     test: /\b(balance|balances|how much (do|have) (i|we)|available funds|float)\b/,
-    reply: () => treasuryCustodyRefusal() ?? 'Your Available (instant) and Smart Treasury balances live on the Home and Treasury pages. From here I can read balances into a proposal — say "allocate idle treasury" or start a transfer and I will pull the numbers with evidence attached. Heads up: desk balance figures are sample data today, and every evidence item says whether it is Live or Sample.',
+    reply: () => NO_SPLASH_BALANCE,
   },
   {
     // Compliance / KYB / AML / limits
@@ -2842,8 +2829,9 @@ async function laneRefusalFor(orgId: string, message: string, known?: KybLifecyc
   const scoped = launchScopeRefusal(intent.lane);
   if (scoped) return scoped;
   const state = known ?? await zekeLaneState(orgId);
-  // Verified is not enough for Treasury: it holds funds, so it also waits for
-  // the custody phase. The propose tools refuse the same way underneath.
+  // Verified is not enough for Treasury: Zeke prepares no Treasury swap at all
+  // (v2 D9), it points to the Treasury page. The propose tools refuse the same
+  // way underneath.
   if (laneAccess(state, intent.lane).allowed) return intent.lane === 'TREASURY' ? treasuryCustodyRefusal() : null;
   const text = laneRefusalText(intent.lane, state, intent.currency);
   if (!isOnboarding(state) || !process.env.DATABASE_URL) return text;

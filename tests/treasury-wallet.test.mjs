@@ -38,6 +38,12 @@ const VIEWER = { orgId: 'acme', userId: 'u_viewer', role: 'VIEWER' };
 const OTHER_OWNER = { orgId: 'northwind', userId: 'u_nw', role: 'OWNER' };
 const INTENT = '1b4e28ba-2fa1-11d2-883f-0016d3cca427';
 const INTENT_2 = '2c5f39cb-3fb2-42e3-994a-1127e4ddb538';
+const WALLET = '0x' + 'ab'.repeat(32);
+const COINS = {
+  walletAddress: WALLET,
+  inCoinType: '0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC',
+  outCoinType: '0x960b531667636f39e85867775f52f6b1f220a058c4de786905bdf761e06a56bb::usdy::USDY',
+};
 
 async function source(relative) {
   return readFile(new URL(`../${relative}`, import.meta.url), 'utf8');
@@ -60,6 +66,8 @@ function quoteDeps(over = {}) {
     },
     issuerEligibilityConfirmed: false,
     slippageBps: 50,
+    resolveWallet: async () => ({ ok: true, address: WALLET }),
+    readWalletBalance: async () => usdc('1000000'),
     ...over,
   };
   return { deps, calls };
@@ -304,7 +312,7 @@ test('an order only moves forward: once closed it never changes again, and a lap
   const { createTreasuryOrder, closeTreasuryOrder, listTreasuryOrders, ORDER_TTL_MS } = await import('../lib/server/treasury-wallet-orders.ts');
   const made = await createTreasuryOrder(db, {
     orgId: 'acme', intentId: INTENT, direction: 'swap', amountInMinor: usdc('10'), minOutMinor: usdc('9'), quotedOutMinor: usdc('9.09'),
-    priceMicros: 1_100_000n, sandbox: true, requestedBy: 'u_owner',
+    priceMicros: 1_100_000n, sandbox: true, requestedBy: 'u_owner', ...COINS,
   }, async () => ({ providerRef: 'sandbox_x' }));
   const executed = await closeTreasuryOrder(db, 'acme', made.order.id, 'executed', { txDigest: 'DIGEST1' });
   assert.equal(executed.status, 'executed');
@@ -315,7 +323,7 @@ test('an order only moves forward: once closed it never changes again, and a lap
 
   const old = await createTreasuryOrder(db, {
     orgId: 'acme', intentId: INTENT_2, direction: 'redeem', amountInMinor: usdc('5'), minOutMinor: usdc('5'), quotedOutMinor: usdc('5.5'),
-    priceMicros: 1_100_000n, sandbox: true, requestedBy: 'u_owner', now: new Date(Date.now() - ORDER_TTL_MS - 1000),
+    priceMicros: 1_100_000n, sandbox: true, requestedBy: 'u_owner', ...COINS, now: new Date(Date.now() - ORDER_TTL_MS - 1000),
   }, async () => ({ providerRef: 'sandbox_y' }));
   const listed = (await listTreasuryOrders(db, 'acme')).find((o) => o.id === old.order.id);
   assert.equal(listed.status, 'expired');
@@ -412,7 +420,7 @@ function fundDeps(over = {}) {
     enabled: true,
     label: 'a fund manager',
     referralUrl: 'https://fund.example/ref',
-    resolveHolding: () => ({ ok: true, source: { kind: 'sandbox', read: async (reference) => ({ ok: true, holding: { reference, units: '10.0000', value: '10.32', currency: 'MYR', asOf: NAV.asOf, sandbox: true } }) } }),
+    resolveHolding: () => ({ ok: true, source: { kind: 'sandbox', confirmLink: async () => ({ ok: true }), read: async ({ reference }) => ({ ok: true, holding: { reference, units: '10.0000', value: '10.32', currency: 'MYR', asOf: NAV.asOf, sandbox: true } }) } }),
     ...over,
   };
 }
@@ -452,6 +460,7 @@ test('only an owner answers; an eligible business gets the link, one that is not
 
 test('a linked account is read-only, one per business, and never another business\'s', async () => {
   const { client, db } = await migratedDb();
+  await client.query(`UPDATE organizations SET registration_number = 'REG-' || id`);
   const { handleFundReferralRead, handleFundReferralWrite } = await import('../lib/server/treasury-wallet.ts');
   await handleFundReferralWrite(db, OWNER, { action: 'assess', answers: ELIGIBLE }, fundDeps());
   await handleFundReferralWrite(db, OTHER_OWNER, { action: 'assess', answers: ELIGIBLE }, fundDeps());
