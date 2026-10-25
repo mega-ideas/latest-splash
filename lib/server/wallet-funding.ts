@@ -36,7 +36,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 
 import { normalizeStructTag, normalizeSuiAddress, fromBase58, fromBase64, fromHex } from '@mysten/sui/utils';
 
-import type { KytProvider, KytScreening } from '../compliance/kyt.ts';
+import { asProviderAnswer, isProviderAnswer, type KytProvider, type KytScreening } from '../compliance/kyt.ts';
 import {
   bankAccountIdentity,
   canAdvanceIntent,
@@ -704,7 +704,7 @@ async function firstUseCheck(
   let result: { result: 'passed' | 'failed'; detail: string; promote: boolean } | null = null;
   if (source.kind === 'wallet') {
     if (source.status !== 'verified') return source; // an unproven wallet waits for its signature
-    const s = await deps.kyt.screen({ chain: source.chain ?? 'SUI', address: source.address ?? '', direction: 'deposit' });
+    const s = asProviderAnswer(await deps.kyt.screen({ chain: source.chain ?? 'SUI', address: source.address ?? '', direction: 'deposit' }), deps.env);
     if (s.verdict === null) return source; // no answer: check again next time
     result = { result: s.verdict === 'CLEAR' ? 'passed' : 'failed', detail: `screened ${s.provider}: ${s.verdict}`, promote: false };
   } else {
@@ -903,7 +903,8 @@ async function recordTransaction(
       : { provider: deps.kyt.id, verdict: null, reference: null, detail: 'There was no sender to screen.', screenedAt: null };
     const decision = decideDeposit({
       source: source ? { status: source.status as 'pending' | 'verified' | 'rejected' | 'revoked', firstUse: (source.firstUseResult as 'passed' | 'failed' | null) ?? null } : null,
-      screening,
+      // Only a provider's answer here decides (never the sandbox's in production).
+      screening: asProviderAnswer(screening, deps.env),
       payerMatches: p.payerMatchesFor?.(source),
       originConfirmed: p.originConfirmed,
       mintUnattributable: p.mintUnattributable,
@@ -991,13 +992,15 @@ export async function recheckDeposit(deps: FundingDeps, id: string) {
   }
   if (source && !source.firstUseAt) source = await firstUseCheck(deps, source, { originChain: row.originChain, originAddress: row.originAddress });
   const prev = row.screening as KytScreening;
-  const screening = prev.verdict === 'CLEAR' || prev.verdict === 'BLOCK' || !row.originAddress
+  // A kept CLEAR or BLOCK stands only as a provider's answer here: a sandbox
+  // one kept by a non-production server is asked again in production.
+  const screening = ((prev.verdict === 'CLEAR' || prev.verdict === 'BLOCK') && isProviderAnswer(prev, deps.env)) || !row.originAddress
     ? prev
     : await deps.kyt.screen({ chain: row.originChain ?? 'SUI', address: row.originAddress, direction: 'deposit', txRef: row.suiDigest });
   const keptMismatch = (row.holdReasons as HoldReason[]).includes('payer_mismatch') ? false : undefined;
   const decision = decideDeposit({
     source: source ? { status: source.status as 'pending' | 'verified', firstUse: (source.firstUseResult as 'passed' | 'failed' | null) ?? null } : null,
-    screening,
+    screening: asProviderAnswer(screening, deps.env),
     payerMatches: keptMismatch,
     originConfirmed: row.channel === 'swap' ? false : undefined,
     // Kept for good: no later fact ties it to one burn.

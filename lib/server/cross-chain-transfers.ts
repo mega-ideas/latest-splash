@@ -41,7 +41,9 @@ import { normalizeSuiAddress } from '@mysten/sui/utils';
 import { crossChainTransfers, suppliers, walletSigningRequests } from '../db/schema.ts';
 import { FUNDING_CHAINS, SUI_CCTP_DOMAIN } from '../payments/cctp.ts';
 import { irisMessagesOf, isEvmTxHash, messageTransmitterV2, readBurn, readEvmMint, type EvmReceipt, type IrisMessage } from '../payments/cctp-receipts.ts';
-import { isCrossChainChain, moveDeliveryOf, type CrossChainChain } from '../recipients/wallet-recipients.ts';
+import type { KytProvider } from '../compliance/kyt.ts';
+import { CROSS_CHAIN_CHAINS, isCrossChainChain, moveDeliveryOf, type CrossChainChain } from '../recipients/wallet-recipients.ts';
+import { crossChainRecipientGate } from './kyt-screenings.ts';
 import { isProductionRuntime } from './runtime-mode.ts';
 import type { DrizzleDb } from './wallet-signing-store.ts';
 
@@ -127,9 +129,26 @@ export type CrossChainDeps = {
   now: () => Date;
 };
 
-/** Open the receipt for one owners' cross-chain payment to a saved CROSS_CHAIN recipient. Idempotent on the payment reference. */
+/** Opening a receipt also reads the destination's screening: a stale CLEAR is asked again of the server's provider. */
+export type CrossChainOpenDeps = CrossChainDeps & {
+  kyt?: KytProvider | null;
+  maxAgeMs?: number;
+  /** Who opens it, kept on a screening asked for here. */
+  requestedBy?: string;
+  env?: NodeJS.ProcessEnv;
+};
+
+/**
+ * Open the receipt for one owners' cross-chain payment to a saved
+ * CROSS_CHAIN recipient. Idempotent on the payment reference: a retry with
+ * the same recipient, amount and fee bound answers the receipt already
+ * opened. A new one is opened only when this business's newest screening of
+ * the destination address, on its own chain, is a fresh CLEAR (v2 §4.6,
+ * lib/server/kyt-screenings.ts crossChainRecipientGate); nothing is kept
+ * for a refused payment.
+ */
 export async function openCrossChainTransfer(
-  deps: CrossChainDeps,
+  deps: CrossChainOpenDeps,
   input: { paymentRef: string; recipientId: string; amountMinor: bigint; maxBridgeFeeMinor: bigint },
 ): Promise<{ ok: true; transfer: CrossChainRow; created: boolean } | Refusal> {
   let paymentRef: string;
@@ -150,7 +169,16 @@ export async function openCrossChainTransfer(
   });
   if (!move || move.kind !== 3) return refuse(409, 'not_cross_chain', 'That recipient is not paid on another chain.');
   const now = deps.now();
-  const inserted = await deps.db
+  const opened = await readCrossChainTransfer(deps.db, deps.orgId, paymentRef);
+  if (!opened) {
+    const screened = await crossChainRecipientGate(
+      { db: deps.db, orgId: deps.orgId, now, kyt: deps.kyt ?? null, ...(deps.maxAgeMs ? { maxAgeMs: deps.maxAgeMs } : {}), requestedBy: deps.requestedBy ?? 'splash:cross-chain-open', ...(deps.env ? { env: deps.env } : {}) },
+      CROSS_CHAIN_CHAINS[move.chain],
+      recipient.destinationAddress ?? '',
+    );
+    if (screened) return refuse(screened.status, screened.code, screened.error);
+  }
+  const inserted = opened ? [] : await deps.db
     .insert(crossChainTransfers)
     .values({
       id: `cct_${randomUUID()}`,

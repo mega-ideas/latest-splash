@@ -22,8 +22,9 @@ Code:
   `POST /api/wallet/payments/[ref]/sender-declaration`.
 
 Tests: `tests/compliance-kyt.test.mjs`, `tests/compliance-sumsub.test.mjs`,
-`tests/controls-evidence.test.mjs` (PGlite, no network), and the source
-checks in `tests/kyb-lifecycle.test.mjs`.
+`tests/controls-evidence.test.mjs`, `tests/compliance-payment-gates.test.mjs`,
+`tests/compliance-provider-answers.test.mjs` (PGlite, no network), and the
+source checks in `tests/kyb-lifecycle.test.mjs`.
 
 ## The rule every adapter follows
 
@@ -38,6 +39,19 @@ brings a sandbox back, and a provider without its credentials refuses:
 | KYT | `ELLIPTIC_API_KEY` + `ELLIPTIC_API_SECRET`, or `CHAINALYSIS_SANCTIONS_API_KEY` | provider `none`: every verdict is null |
 
 No session, verdict, Travel Rule reference or screening result is made up.
+
+**A provider's answer.** A screening verdict counts only with the
+provider's own reference and the time it answered, and the sandbox's never
+counts in production (`isProviderAnswer`, lib/compliance/kyt.ts; only the
+runtime mode decides). This matters for what is already on file: a sandbox
+CLEAR kept by a non-production server writing to the same database does
+not open or sign a production payment, send a Travel Rule message, or
+clear a held deposit. The address is screened again by the live provider,
+or the payment is refused (`recipient_not_screened`, `not_screened`) and
+the deposit stays held (`not_screened`). A sandbox BLOCK still blocks.
+Production keeps no sandbox verdict, and a sandbox Travel Rule message
+does not let an exchange payment be signed in production
+(`travel_rule_missing`).
 
 ## KYB and KYC (Sumsub)
 
@@ -191,6 +205,15 @@ reads them.
   screened away by this check. Nothing is stored for a refused payment. A
   bank payout pays the business's verified partner deposit address and goes
   through the payout route (§4.4, §4.5).
+- **Cross-chain.** A cross-chain payment's CCTP receipt
+  (`openCrossChainTransfer`, lib/server/cross-chain-transfers.ts) is opened
+  only when this business's newest screening of the destination address,
+  on its own chain (BASE, SOLANA, …), is a fresh CLEAR
+  (`crossChainRecipientGate`): the same codes as above, and another
+  business's CLEAR, or a CLEAR of the same address on another chain, does
+  not count. A retry of a receipt already opened answers it as before. The
+  owners' cross-chain pay path itself is not built yet
+  (`cross_chain_not_built`); when it is, it opens this receipt first.
 - **Signing.** Before every signature on a wallet payment or a second
   approval (the signing layer's `beforeSign`,
   lib/server/payment-compliance-gate.ts) the same check runs again, so a
@@ -218,7 +241,7 @@ both formats, the JSON's SHA-256 in `X-Content-SHA256` and on the PDF:
 | payment | the payout row or the signing request's decoded bytes: kind, status, amount, the `max_fee` bound, paid to, from wallet |
 | kyb | the business's newest KYB case: id, state, the provider's applicant reference, the lifecycle |
 | approvedAt | when the payment was approved: the signature that completed its quorum (null while it is not) |
-| screenings | this business's screenings of the address paid that were on file when it was approved: provider, reference, verdict, score, time |
+| screenings | this business's screenings of the address paid that were on file when it was approved: provider, reference, verdict, score, time; for a cross-chain payment also those of its destination address on its own chain (`subject: cross_chain_recipient`) |
 | screeningsAfterApproval | screenings made after it was approved, listed apart: not the check that applied to it |
 | travelRule | the Travel Rule transfer for the payment |
 | approval | the signing request: purpose, status, threshold, each signer's address, weight and time; the spending rule's allowance and policy ids; a second approval's policy and payer |
@@ -226,7 +249,7 @@ both formats, the JSON's SHA-256 in `X-Content-SHA256` and on the PDF:
 | partner | the route, the partner's reference, the bank's reference, the account's last four |
 | iso20022 | the masked pacs.008 copy the partner was sent |
 | chain | the Sui digest; read from the chain, the intent created (under splash_core's original package id), and the SettlementAnchored event's Walrus blob and content hash; the receipt as `<digest>#<event index>` |
-| gaps | what is not on file, in words: among them no CLEAR as the newest screening before approval, a KYB case changed after approval (it is shown as it is now), and an exchange payment with no Travel Rule message the provider took |
+| gaps | what is not on file, in words: among them no CLEAR as the newest screening before approval (of the cross-chain recipient, for a cross-chain payment), a KYB case changed after approval (it is shown as it is now), an exchange payment with no Travel Rule message the provider took, and in production a screening or Travel Rule message on file that is the sandbox's |
 
 No secret, signature, sealed value, salt, transaction bytes or account
 number is ever in it: `assertEvidenceClean` refuses a document with such a

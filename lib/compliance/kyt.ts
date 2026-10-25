@@ -111,6 +111,27 @@ export function normalizeScreeningSubject(chainInput: unknown, addressInput: unk
   return { chain: chain as ScreeningChain, address: raw.toLowerCase() };
 }
 
+/**
+ * Is this screening a provider's answer here? Only with a verdict, the
+ * provider's own reference and the time it answered; and the labelled
+ * sandbox's never is in production, whatever else is set (a sandbox CLEAR
+ * kept by a non-production server writing to the same database is not an
+ * answer about anyone). Only the runtime mode decides.
+ */
+export function isProviderAnswer(
+  s: { provider: string; verdict: KytVerdict | string | null; reference: string | null; screenedAt: string | Date | null } | null | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (!s || s.verdict === null || !s.reference || !s.screenedAt) return false;
+  return !(s.provider === 'sandbox' && isProductionRuntime(env));
+}
+
+/** The screening as a decision may read it: anything that is not a provider's answer here has no verdict. */
+export function asProviderAnswer(s: KytScreening, env: NodeJS.ProcessEnv = process.env): KytScreening {
+  if (isProviderAnswer(s, env) || s.verdict === null) return s;
+  return { ...s, verdict: null, detail: `${s.detail} This is not a provider's answer here, so it was not taken as screened.`.slice(0, 500) };
+}
+
 /** A payment to this screening may go ahead: CLEAR only. REVIEW waits for a person; null is unscreened. */
 export function screeningPermitsPayment(s: Pick<KytScreening, 'verdict'> | null | undefined): boolean {
   return s?.verdict === 'CLEAR';

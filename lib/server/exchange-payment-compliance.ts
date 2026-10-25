@@ -38,7 +38,7 @@ import { senderDeclaration } from '../compliance/sender-declaration.ts';
 import type { PartnerId } from '../partners/signed-partners.ts';
 import type { WalletTxDescription } from '../wallet/wallet-tx-describe.ts';
 import { paymentOfDescription } from './controls-evidence.ts';
-import { latestScreening } from './kyt-screenings.ts';
+import { latestScreening, rowIsProviderAnswer } from './kyt-screenings.ts';
 import { sendTravelRule } from './travel-rule-transfers.ts';
 import { readSigningRequest, type DrizzleDb } from './wallet-signing-store.ts';
 
@@ -68,6 +68,8 @@ export type ExchangePaymentDeps = {
   orgId: string;
   now: () => Date;
   recipientAt: (orgId: string, address: string) => Promise<SavedRecipient | AmbiguousRecipient | null>;
+  /** The runtime: in production a sandbox screening on file is no answer. Default: this process. */
+  env?: NodeJS.ProcessEnv;
 };
 
 /**
@@ -185,8 +187,9 @@ export async function travelRuleForPayment(
   const p = await walletPayment(deps, input.requestId);
   if (!p.ok) return p;
   const screening = await latestScreening(deps.db, deps.orgId, 'SUI', p.recipient);
-  if (!screening || screening.verdict === null) return refuse(409, 'not_screened', 'Screen the recipient address first.');
-  if (screening.verdict === 'BLOCK') return refuse(403, 'screening_blocked', 'This address was refused by screening. Splash will not pay it.');
+  if (screening?.verdict === 'BLOCK') return refuse(403, 'screening_blocked', 'This address was refused by screening. Splash will not pay it.');
+  // Only a provider's answer here counts: never the sandbox's in production.
+  if (!screening || !rowIsProviderAnswer(screening, deps.env)) return refuse(409, 'not_screened', 'Screen the recipient address first.');
   if (screening.verdict !== 'CLEAR') return refuse(409, 'screening_review', 'A person reviews this address before it is paid.');
   const saved = await oneRecipientAt(deps, p.recipient);
   if (!saved.ok) return saved;

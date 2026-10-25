@@ -16,6 +16,7 @@ import { and, desc, eq } from 'drizzle-orm';
 
 import { kytScreenings } from '../db/schema.ts';
 import {
+  isProviderAnswer,
   isScreeningKind,
   normalizeScreeningSubject,
   ScreeningSubjectError,
@@ -36,6 +37,8 @@ export type ScreeningRecordInput = {
   txRef?: string | null;
   screening: KytScreening;
   requestedBy: string;
+  /** The runtime: production keeps no sandbox verdict. Default: this process. */
+  env?: NodeJS.ProcessEnv;
 };
 
 /**
@@ -45,7 +48,9 @@ export type ScreeningRecordInput = {
  */
 export async function recordScreening(db: DrizzleDb, input: ScreeningRecordInput): Promise<KytScreeningRow> {
   const s = input.screening;
-  const verdict = s.verdict !== null && s.reference && s.screenedAt ? s.verdict : null;
+  // Only a provider's answer here is kept as a verdict: its reference and
+  // time, and never the sandbox's in production.
+  const verdict = isProviderAnswer(s, input.env) ? s.verdict : null;
   const row = {
     id: `kyt_${randomUUID()}`,
     orgId: input.orgId,
@@ -153,12 +158,19 @@ export type ScreeningGateDeps = {
   kyt?: KytProvider | null;
   maxAgeMs?: number;
   requestedBy: string;
+  /** The runtime: in production a sandbox screening on file is no answer. Default: this process. */
+  env?: NodeJS.ProcessEnv;
 };
 
 export type ScreeningGateRefusal = { status: 403 | 409; code: string; error: string };
 
-function freshAnswer(row: KytScreeningRow, now: Date, maxAgeMs: number): boolean {
-  if (!row.verdict || !row.screenedAt) return false;
+/** A kept screening is a provider's answer here (lib/compliance/kyt.ts isProviderAnswer). */
+export function rowIsProviderAnswer(row: KytScreeningRow | null | undefined, env: NodeJS.ProcessEnv = process.env): boolean {
+  return Boolean(row) && isProviderAnswer({ provider: row!.provider, verdict: row!.verdict, reference: row!.reference, screenedAt: row!.screenedAt }, env);
+}
+
+function freshAnswer(row: KytScreeningRow, now: Date, maxAgeMs: number, env: NodeJS.ProcessEnv): boolean {
+  if (!rowIsProviderAnswer(row, env) || !row.screenedAt) return false;
   const age = now.getTime() - row.screenedAt.getTime();
   // Dated ahead of the clock (by more than a minute) is not taken as fresh either.
   return age <= maxAgeMs && age >= -60_000;
@@ -170,7 +182,8 @@ function freshAnswer(row: KytScreeningRow, now: Date, maxAgeMs: number): boolean
  * away; REVIEW waits for a person (409); nothing on file, or no answer, is
  * 409 (screen it first). A stale CLEAR, or an unanswered newest attempt, is
  * screened again when the server's provider is at hand, and that answer is
- * kept and decides. Null lets the payment through.
+ * kept and decides. In production a sandbox screening on file is no answer
+ * (a sandbox BLOCK still blocks). Null lets the payment through.
  */
 export async function recipientScreeningGate(deps: ScreeningGateDeps, recipient: string): Promise<ScreeningGateRefusal | null> {
   let address: string;
@@ -179,20 +192,47 @@ export async function recipientScreeningGate(deps: ScreeningGateDeps, recipient:
   } catch {
     return { status: 409, code: 'recipient_not_screened', error: 'The recipient address cannot be screened, so it is not paid.' };
   }
-  const maxAgeMs = deps.maxAgeMs ?? screeningMaxAgeMs();
-  let row = await latestScreening(deps.db, deps.orgId, 'SUI', address);
-  if (row && row.verdict !== 'BLOCK' && !freshAnswer(row, deps.now, maxAgeMs) && deps.kyt) {
-    const kind = isScreeningKind(row.subjectKind) && row.subjectKind !== 'deposit' ? row.subjectKind : 'wallet_recipient';
-    const screening = await deps.kyt.screen({ chain: 'SUI', address, direction: 'recipient' }).catch(() => null);
-    // A provider that throws leaves the old row to decide (stale: refused).
-    if (screening) row = await recordScreening(deps.db, { orgId: deps.orgId, kind, chain: 'SUI', address, screening, requestedBy: deps.requestedBy });
+  return screeningGate(deps, { chain: 'SUI', address, defaultKind: 'wallet_recipient' });
+}
+
+/**
+ * May this business pay this cross-chain USDC recipient now (D5c)? The same
+ * rule as a Sui recipient, on the destination address's own chain (as
+ * screening names it: SOLANA, BASE, ETHEREUM, …): only this business's
+ * newest screening of that address there, a fresh CLEAR. A chain Splash
+ * does not screen, or an address not in its chain's format, is refused.
+ */
+export async function crossChainRecipientGate(deps: ScreeningGateDeps, chain: string, address: string): Promise<ScreeningGateRefusal | null> {
+  let subject: { chain: string; address: string };
+  try {
+    subject = normalizeScreeningSubject(chain, address, 'cross_chain_recipient');
+  } catch {
+    return { status: 409, code: 'recipient_not_screened', error: 'The recipient address cannot be screened on its chain, so it is not paid.' };
   }
-  if (!row || row.verdict === null) {
+  return screeningGate(deps, { ...subject, defaultKind: 'cross_chain_recipient' });
+}
+
+async function screeningGate(
+  deps: ScreeningGateDeps,
+  subject: { chain: string; address: string; defaultKind: Exclude<ScreeningKind, 'deposit'> },
+): Promise<ScreeningGateRefusal | null> {
+  const { chain, address } = subject;
+  const env = deps.env ?? process.env;
+  const maxAgeMs = deps.maxAgeMs ?? screeningMaxAgeMs(env);
+  let row = await latestScreening(deps.db, deps.orgId, chain, address);
+  if (row && row.verdict !== 'BLOCK' && !freshAnswer(row, deps.now, maxAgeMs, env) && deps.kyt) {
+    const kind = isScreeningKind(row.subjectKind) && row.subjectKind !== 'deposit' ? row.subjectKind : subject.defaultKind;
+    const screening = await deps.kyt.screen({ chain, address, direction: 'recipient' }).catch(() => null);
+    // A provider that throws leaves the old row to decide (stale: refused).
+    if (screening) row = await recordScreening(deps.db, { orgId: deps.orgId, kind, chain, address, screening, requestedBy: deps.requestedBy, env });
+  }
+  // A BLOCK blocks whoever gave it; anything else counts only as a provider's answer here.
+  if (!row || (row.verdict !== 'BLOCK' && !rowIsProviderAnswer(row, env))) {
     return { status: 409, code: 'recipient_not_screened', error: 'Screen this recipient address first. An address with no screening answer is not paid.' };
   }
   if (row.verdict === 'BLOCK') return { status: 403, code: 'recipient_blocked', error: 'This address was refused by screening. Splash will not pay it.' };
   if (row.verdict !== 'CLEAR') return { status: 409, code: 'recipient_in_review', error: 'A person reviews this address before it is paid.' };
-  if (!freshAnswer(row, deps.now, maxAgeMs)) {
+  if (!freshAnswer(row, deps.now, maxAgeMs, env)) {
     return { status: 409, code: 'recipient_screening_stale', error: 'This address was last screened too long ago. Screen it again before paying it.' };
   }
   return null;

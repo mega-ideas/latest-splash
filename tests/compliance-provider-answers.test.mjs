@@ -40,7 +40,7 @@ import { openCrossChainTransfer } from '../lib/server/cross-chain-transfers.ts';
 import { travelRuleForPayment } from '../lib/server/exchange-payment-compliance.ts';
 import { crossChainRecipientGate, latestScreening, recipientScreeningGate, recordScreening } from '../lib/server/kyt-screenings.ts';
 import { travelRuleHold } from '../lib/server/payment-compliance-gate.ts';
-import { addFundingSource, listWalletDeposits, recordDeposit, verifyWalletSource, walletSourceChallenge } from '../lib/server/wallet-funding.ts';
+import { addFundingSource, listWalletDeposits, recheckDeposit, recordDeposit, verifyWalletSource, walletSourceChallenge } from '../lib/server/wallet-funding.ts';
 import { createWalletRecipient } from '../lib/server/wallet-recipients.ts';
 
 import { migratedDb } from './helpers/store-db.mjs';
@@ -54,6 +54,7 @@ const INTENT = normalizeSuiAddress(`0x${'a1'.repeat(32)}`);
 const WALLET = normalizeSuiAddress(`0x${'b2'.repeat(32)}`);
 const CORE = normalizeSuiAddress(`0x${'c0'.repeat(32)}`);
 const BASE_ADDRESS = '0x52908400098527886e0f7030069857d2e4169ee7';
+const BASE_CHECKSUMMED = '0x52908400098527886E0F7030069857D2E4169EE7';
 
 /** A screening kept for `orgId`, by `provider`. */
 const kept = (address, { provider = 'elliptic', verdict = 'CLEAR', at = T0, kind = 'wallet_recipient', chain = 'SUI', orgId = 'acme', env = TEST } = {}) => ({
@@ -62,7 +63,7 @@ const kept = (address, { provider = 'elliptic', verdict = 'CLEAR', at = T0, kind
 });
 
 /** A live provider that answers `verdict` with its own reference, and counts the times it was asked. */
-function liveProvider(verdict = 'CLEAR') {
+function liveProvider(verdict = 'CLEAR', answeredAt = new Date(T0.getTime() + 1000)) {
   const asked = [];
   return {
     asked,
@@ -70,13 +71,14 @@ function liveProvider(verdict = 'CLEAR') {
       id: 'elliptic',
       async screen(subject) {
         asked.push(subject);
-        return { provider: 'elliptic', verdict, reference: `elliptic:${randomUUID()}`, detail: 'live', screenedAt: new Date(T0.getTime() + 1000).toISOString(), riskScore: 1 };
+        return { provider: 'elliptic', verdict, reference: `elliptic:${randomUUID()}`, detail: 'live', screenedAt: answeredAt.toISOString(), riskScore: 1 };
       },
     },
   };
 }
 
 const pause = () => new Promise((r) => setTimeout(r, 5));
+const show = (x) => JSON.stringify(x, (_, v) => (typeof v === 'bigint' ? v.toString() : v));
 
 /* 1 ── What a provider's answer is ─────────────────────────────────────── */
 
@@ -192,6 +194,8 @@ test('in production a held deposit is not cleared by a sandbox screening kept fr
   // Proven in production, where no provider is configured: still held, as unscreened.
   const added = await addFundingSource(prod, 'u-owner', { kind: 'wallet', chain: 'SUI', address: sender });
   assert.equal(added.ok, true, JSON.stringify(added));
+  const linked = await recheckDeposit(prod, r.deposits[0].id);
+  assert.deepEqual([linked.deposit.status, linked.deposit.holdReasons.includes('not_screened')], ['held', true], JSON.stringify(linked));
   const ch = await walletSourceChallenge(prod, added.source.id);
   const { signature } = await kp.signPersonalMessage(new TextEncoder().encode(ch.challenge.message));
   const v = await verifyWalletSource(prod, { userId: 'u-owner', sourceId: added.source.id, challengeId: ch.challenge.id, signature });
@@ -210,7 +214,7 @@ async function crossChainWorld() {
   const supplier = { name: 'Dela Cruz', legalName: 'Dela Cruz Trading Corp', registrationNumber: 'CS201912345', country: 'PH', addressLine1: '1 Ayala Ave', addressCity: 'Makati', email: 'ap@delacruz.test' };
   const saved = await createWalletRecipient(
     { db, orgId: 'acme', now: () => T0, kyt: kytProviderFromEnv(TEST, { now: () => T0 }) },
-    { body: { ...supplier, deliveryKind: 'CROSS_CHAIN', chain: 'BASE', address: BASE_ADDRESS }, requestedBy: 'u-owner', requestedRole: 'OWNER' },
+    { body: { ...supplier, deliveryKind: 'CROSS_CHAIN', chain: 'BASE', address: BASE_CHECKSUMMED }, requestedBy: 'u-owner', requestedRole: 'OWNER' },
   );
   assert.equal(saved.ok, true, JSON.stringify(saved));
   return { db, client, recipientId: saved.recipient.id };
@@ -225,7 +229,7 @@ test('a cross-chain payment is opened only when the destination address is a fre
   const at = (ms) => () => new Date(T0.getTime() + ms);
   // The screening on save is a fresh CLEAR: it opens. (Below, other payments.)
   const first = await open({}, { paymentRef: normalizeSuiAddress(`0x${'e1'.repeat(32)}`) });
-  assert.equal(first.ok, true, JSON.stringify(first));
+  assert.equal(first.ok, true, show(first));
 
   await pause();
   await recordScreening(w.db, kept(BASE_ADDRESS, { chain: 'BASE', kind: 'cross_chain_recipient', verdict: 'REVIEW' }));
@@ -247,9 +251,9 @@ test('a cross-chain payment is opened only when the destination address is a fre
   await pause();
   await recordScreening(w.db, kept(BASE_ADDRESS, { chain: 'BASE', kind: 'cross_chain_recipient' }));
   assert.equal((await open({ now: at(25 * HOUR) })).code, 'recipient_screening_stale');
-  const live = liveProvider('CLEAR');
+  const live = liveProvider('CLEAR', at(25 * HOUR)());
   const reopened = await open({ now: at(25 * HOUR), kyt: live.provider });
-  assert.equal(reopened.ok, true, JSON.stringify(reopened));
+  assert.equal(reopened.ok, true, show(reopened));
   assert.deepEqual([live.asked[0].chain, live.asked[0].address], ['BASE', BASE_ADDRESS]);
   const newest = await latestScreening(w.db, 'acme', 'BASE', BASE_ADDRESS);
   assert.deepEqual([newest.provider, newest.subjectKind], ['elliptic', 'cross_chain_recipient']);
@@ -289,7 +293,7 @@ async function signedRequest(db, summary) {
 test("a cross-chain payment's evidence lists the screenings of its destination address, and says when none was CLEAR before approval", async () => {
   const w = await crossChainWorld();
   const opened = await openCrossChainTransfer({ db: w.db, orgId: 'acme', now: () => T0, requestedBy: 'u-owner', env: TEST }, { paymentRef: INTENT, recipientId: w.recipientId, amountMinor: 1_000_000_000n, maxBridgeFeeMinor: 0n });
-  assert.equal(opened.ok, true, JSON.stringify(opened));
+  assert.equal(opened.ok, true, show(opened));
   const intent = { intentId: INTENT, recipient: PAYEE, amountMinor: '1000000000', kind: 3, targetCurrency: 'USDC', fxRateUsdLocal: '1000000', expiresAtMs: '9', asset: 'USDC' };
   const requestId = await signedRequest(w.db, { description: { actions: [{ type: 'pay_intent', asset: 'USDC', maxFeeMinor: '0', settleByMs: '2', paysFromCommand: 0, intentFromCommand: null, intent }] } });
   const deps = { db: w.db, orgId: 'acme', now: () => T0, readTransaction: async () => null, corePackageOriginalId: CORE, env: TEST };

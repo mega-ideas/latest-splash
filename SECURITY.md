@@ -324,6 +324,23 @@ Design: `docs/v2/phase2-compliance.md`. Tests:
   refuses account-shaped values and more account keys, and copies partner
   fee lines field by field; production refuses SHA-1 webhooks unless
   `SUMSUB_WEBHOOK_ALLOW_SHA1`; only an owner opens a KYB session.
+- **Second pass (p2-4.6, 26 Oct).** Medium: a screening or Travel Rule
+  message the sandbox wrote was taken as the provider's in production when
+  it was already on file (a non-production server writing to the same
+  database): a sandbox CLEAR opened and signed a payment, sent a Travel Rule
+  message, and cleared a held deposit once its source was proven; a sandbox
+  Travel Rule message let an exchange payment be signed. Now a verdict
+  counts only with the provider's reference and time and never the
+  sandbox's in production (`isProviderAnswer`): the address is screened
+  again or the payment refused, the deposit stays held, and production keeps
+  no sandbox verdict; a sandbox BLOCK still blocks. Medium: a cross-chain
+  payment's CCTP receipt was opened without reading the destination
+  address's screening. It now needs this business's fresh CLEAR of that
+  address on its own chain (`crossChainRecipientGate`). Low: the evidence of
+  a cross-chain payment lists the destination address's screenings and
+  names a missing CLEAR before approval; in production it names a sandbox
+  screening or Travel Rule message as not the provider's. Test:
+  `tests/compliance-provider-answers.test.mjs`.
 - **Open:** supplier name screening (the recipient screening on save and
   the exchange taken from the recipient record are closed by §4.7, above);
   a staff member's own in-limit rule payment

@@ -22,14 +22,16 @@
 import { and, desc, eq } from 'drizzle-orm';
 import { normalizeSuiAddress } from '@mysten/sui/utils';
 
-import { kybCases, organizations, withdrawals } from '../db/schema.ts';
+import { kybCases, organizations, suppliers, withdrawals } from '../db/schema.ts';
 import type { ControlsEvidence, EvidencePaymentKind } from '../compliance/controls-evidence.ts';
 import { assertEvidenceClean } from '../compliance/controls-evidence.ts';
 import type { Pacs008Evidence } from '../payments/iso20022.ts';
 import { createdIntentIds } from '../payouts/withdrawal-rules.ts';
 import type { WalletAction, WalletTxDescription } from '../wallet/wallet-tx-describe.ts';
 import { readCrossChainTransfer } from './cross-chain-transfers.ts';
-import { screeningsOf } from './kyt-screenings.ts';
+import { CROSS_CHAIN_CHAINS, isCrossChainChain } from '../recipients/wallet-recipients.ts';
+import { rowIsProviderAnswer, screeningsOf } from './kyt-screenings.ts';
+import { isProductionRuntime } from './runtime-mode.ts';
 import { readTravelRuleTransfer } from './travel-rule-transfers.ts';
 import { recipientControlsAt } from './wallet-recipients.ts';
 import { readSigningRequest, type DrizzleDb, type StoredRequest } from './wallet-signing-store.ts';
@@ -43,6 +45,8 @@ export type EvidenceDeps = {
   readTransaction: (digest: string) => Promise<WithdrawalChainTx | null>;
   /** splash_core's original package id; null when this server does not know it (the chain fields are then not read). */
   corePackageOriginalId: string | null;
+  /** The runtime: in production a sandbox screening or Travel Rule message on file is named as not the provider's. Default: this process. */
+  env?: NodeJS.ProcessEnv;
 };
 
 type Refusal = { ok: false; status: number; code: string; error: string };
@@ -203,9 +207,38 @@ export async function controlsEvidenceFor(deps: EvidenceDeps, ref: string, gener
     gaps.push('The KYB case changed after the payment was approved; it is shown as it is now, not as it was then.');
   }
 
+  const env = deps.env ?? process.env;
+  const production = isProductionRuntime(env);
+  const cct = intentId ? await readCrossChainTransfer(deps.db, deps.orgId, normalizeSuiAddress(intentId)) : null;
+
+  type ScreeningRow = Awaited<ReturnType<typeof screeningsOf>>[number];
+  // An unanswered attempt is placed by when it was asked.
+  const at = (s: ScreeningRow) => (s.screenedAt ?? s.createdAt).getTime();
+  const split = (rows: ScreeningRow[], subject: 'paid_address' | 'cross_chain_recipient') => {
+    const view = (s: ScreeningRow) => ({
+      subject,
+      chain: s.chain,
+      address: s.address,
+      provider: s.provider,
+      reference: s.reference,
+      verdict: s.verdict,
+      riskScore: s.riskScore,
+      screenedAt: s.screenedAt ? s.screenedAt.toISOString() : null,
+    });
+    const before = approvedAt ? rows.filter((s) => at(s) <= approvedAt.getTime()) : rows;
+    const after = approvedAt ? rows.filter((s) => at(s) > approvedAt.getTime()) : [];
+    return { before, after: after.slice(0, 5).map(view), beforeView: before.slice(0, 5).map(view) };
+  };
+  /** The newest screening before approval was a CLEAR, and a provider's answer here. */
+  const clearBefore = (before: ScreeningRow[]) => before[0]?.verdict === 'CLEAR' && rowIsProviderAnswer(before[0], env);
+  const sandboxNote = (before: ScreeningRow[], what: string) => {
+    if (production && before[0] && before[0].provider === 'sandbox') gaps.push(`The newest screening of ${what} on file is the sandbox's, not a provider's answer.`);
+  };
+
   let screenings: ControlsEvidence['screenings'] = [];
   let screeningsAfterApproval: ControlsEvidence['screeningsAfterApproval'] = [];
   let screenedAsExchange = false;
+  let paidBefore: ScreeningRow[] = [];
   if (paidTo) {
     let address = paidTo;
     try {
@@ -215,25 +248,40 @@ export async function controlsEvidenceFor(deps: EvidenceDeps, ref: string, gener
     }
     const rows = await screeningsOf(deps.db, deps.orgId, 'SUI', address, 50);
     screenedAsExchange = rows.some((s) => s.subjectKind === 'exchange_recipient');
-    const view = (s: (typeof rows)[number]) => ({
-      subject: 'paid_address' as const,
-      chain: s.chain,
-      address: s.address,
-      provider: s.provider,
-      reference: s.reference,
-      verdict: s.verdict,
-      riskScore: s.riskScore,
-      screenedAt: s.screenedAt ? s.screenedAt.toISOString() : null,
-    });
-    // An unanswered attempt is placed by when it was asked.
-    const at = (s: (typeof rows)[number]) => (s.screenedAt ?? s.createdAt).getTime();
-    const before = approvedAt ? rows.filter((s) => at(s) <= approvedAt.getTime()) : rows;
-    const after = approvedAt ? rows.filter((s) => at(s) > approvedAt.getTime()) : [];
-    screenings = before.slice(0, 5).map(view);
-    screeningsAfterApproval = after.slice(0, 5).map(view);
+    const s = split(rows, 'paid_address');
+    paidBefore = s.before;
+    screenings = s.beforeView;
+    screeningsAfterApproval = s.after;
   }
-  if (kind === 'wallet_payment') {
-    if (screenings[0]?.verdict !== 'CLEAR') {
+  // A cross-chain payment's recipient is its destination address, on its own chain (D5c).
+  let destination: { chain: string; address: string } | null = null;
+  if (cct) {
+    const [saved] = cct.recipientId
+      ? await deps.db.select({ address: suppliers.destinationAddress }).from(suppliers).where(and(eq(suppliers.id, cct.recipientId), eq(suppliers.orgId, deps.orgId))).limit(1)
+      : [];
+    const chain = isCrossChainChain(cct.destinationChain) ? CROSS_CHAIN_CHAINS[cct.destinationChain] : null;
+    // Without the saved recipient, an EVM address is the mint recipient's last 20 bytes.
+    const address = saved?.address ?? (chain && chain !== 'SOLANA' && /^0x0{24}[0-9a-f]{40}$/i.test(cct.mintRecipient) ? `0x${cct.mintRecipient.slice(-40).toLowerCase()}` : null);
+    if (chain && address) destination = { chain, address };
+  }
+  if (cct) {
+    if (!destination) gaps.push("The cross-chain recipient's address could not be read, so its screening is not shown.");
+    else {
+      const s = split(await screeningsOf(deps.db, deps.orgId, destination.chain, destination.address, 50), 'cross_chain_recipient');
+      screenings = [...s.beforeView, ...screenings];
+      screeningsAfterApproval = [...s.after, ...screeningsAfterApproval];
+      sandboxNote(s.before, 'the cross-chain recipient');
+      if (!clearBefore(s.before)) {
+        gaps.push(
+          approvedAt
+            ? 'No CLEAR screening of the cross-chain recipient was the newest on file before the payment was approved.'
+            : 'No CLEAR screening of the cross-chain recipient is the newest on file.',
+        );
+      }
+    }
+  } else if (kind === 'wallet_payment') {
+    sandboxNote(paidBefore, 'the recipient address');
+    if (!clearBefore(paidBefore)) {
       gaps.push(
         approvedAt
           ? 'No CLEAR screening of the recipient address was the newest on file before the payment was approved.'
@@ -246,14 +294,15 @@ export async function controlsEvidenceFor(deps: EvidenceDeps, ref: string, gener
 
   const tr = await readTravelRuleTransfer(deps.db, deps.orgId, intentId ?? request?.id ?? '');
   const travelRule = tr ? { provider: tr.provider, sandbox: tr.sandbox, reference: tr.providerRef, status: tr.status, exchange: tr.exchange } : null;
-  if (kind === 'wallet_payment' && (kindOf(summary?.description) === EXCHANGE_KIND || screenedAsExchange || tr) && !(tr?.providerRef && ['submitted', 'awaiting_counterparty', 'approved'].includes(tr.status))) {
+  const trSandboxHere = Boolean(tr?.sandbox) && production;
+  if (trSandboxHere) gaps.push("The Travel Rule message on file is the sandbox's, not the provider's.");
+  if (kind === 'wallet_payment' && (kindOf(summary?.description) === EXCHANGE_KIND || screenedAsExchange || tr) && !(!trSandboxHere && tr?.providerRef && ['submitted', 'awaiting_counterparty', 'approved'].includes(tr.status))) {
     gaps.push('This payment goes to an exchange, and no Travel Rule message accepted by the provider is on file for it.');
   }
 
   // The saved recipient's controls (v2 §4.7), and a cross-chain payment's receipt.
   const recipient: ControlsEvidence['recipient'] = kind === 'wallet_payment' && paidTo ? await recipientControlsAt(deps.db, deps.orgId, paidTo) : null;
   if (recipient && !recipient.approvedBy) gaps.push('No owner approved the recipient this payment went to.');
-  const cct = intentId ? await readCrossChainTransfer(deps.db, deps.orgId, normalizeSuiAddress(intentId)) : null;
   const crossChain: ControlsEvidence['crossChain'] = cct
     ? {
         status: cct.status,

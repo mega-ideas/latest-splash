@@ -37,6 +37,7 @@ import type { KytProvider } from '../compliance/kyt.ts';
 import type { WalletTxDescription } from '../wallet/wallet-tx-describe.ts';
 import { paymentOfDescription } from './controls-evidence.ts';
 import { recipientScreeningGate } from './kyt-screenings.ts';
+import { isProductionRuntime } from './runtime-mode.ts';
 import { walletDeliveryGate } from './wallet-recipients.ts';
 import { readTravelRuleTransfer } from './travel-rule-transfers.ts';
 import type { DrizzleDb, StoredRequest } from './wallet-signing-store.ts';
@@ -50,6 +51,8 @@ export type PaymentGateDeps = {
   /** The server's screening provider: a stale CLEAR is screened again. */
   kyt?: KytProvider | null;
   maxAgeMs?: number;
+  /** The runtime: in production a sandbox screening or Travel Rule message on file is no answer. Default: this process. */
+  env?: NodeJS.ProcessEnv;
 };
 
 type GateRefusal = { code: string; error: string };
@@ -83,7 +86,7 @@ async function screenedAsExchange(db: DrizzleDb, orgId: string, address: string)
 }
 
 /** Whether this payment goes to an exchange, by what the server holds. */
-export async function paysAnExchange(db: DrizzleDb, request: StoredRequest, payment: { recipient: string; kind: number | null; paymentRef: string }): Promise<boolean> {
+export async function paysAnExchange(db: DrizzleDb, request: Pick<StoredRequest, 'orgId'>, payment: { recipient: string; kind: number | null; paymentRef: string }): Promise<boolean> {
   if (payment.kind === EXCHANGE_KIND) return true;
   if (await screenedAsExchange(db, request.orgId, payment.recipient)) return true;
   return Boolean(await readTravelRuleTransfer(db, request.orgId, payment.paymentRef));
@@ -91,10 +94,21 @@ export async function paysAnExchange(db: DrizzleDb, request: StoredRequest, paym
 
 const ACCEPTED = new Set(['submitted', 'awaiting_counterparty', 'approved']);
 
-/** The Travel Rule half: null when the payment may be signed. */
-export async function travelRuleHold(db: DrizzleDb, request: StoredRequest, payment: { recipient: string; kind: number | null; paymentRef: string }): Promise<GateRefusal | null> {
+/**
+ * The Travel Rule half: null when the payment may be signed. In production
+ * a sandbox message is not the provider's, so it does not count as sent.
+ */
+export async function travelRuleHold(
+  db: DrizzleDb,
+  request: Pick<StoredRequest, 'orgId'>,
+  payment: { recipient: string; kind: number | null; paymentRef: string },
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<GateRefusal | null> {
   if (!(await paysAnExchange(db, request, payment))) return null;
   const row = await readTravelRuleTransfer(db, request.orgId, payment.paymentRef);
+  if (row?.sandbox && isProductionRuntime(env)) {
+    return { code: 'travel_rule_missing', error: "The Travel Rule message on file is the sandbox's, not the provider's. Send it through the provider, then sign." };
+  }
   if (row && row.providerRef && ACCEPTED.has(row.status)) return null;
   if (row?.status === 'rejected') return { code: 'travel_rule_rejected', error: "The exchange's Travel Rule check rejected this payment. It will not be signed." };
   if (row?.status === 'on_hold') return { code: 'travel_rule_on_hold', error: "The exchange's Travel Rule check has put this payment on hold. It can be signed once the hold is lifted." };
@@ -107,7 +121,7 @@ export async function paymentBeforeSign(deps: PaymentGateDeps, request: StoredRe
   const payment = paymentOfRequest(request);
   if (!payment) return { code: 'not_a_payment', error: 'The request does not describe a payment Splash can check, so it is not signed.' };
   const screened = await recipientScreeningGate(
-    { db: deps.db, orgId: request.orgId, now: deps.now(), kyt: deps.kyt ?? null, ...(deps.maxAgeMs ? { maxAgeMs: deps.maxAgeMs } : {}), requestedBy: 'splash:before-sign' },
+    { db: deps.db, orgId: request.orgId, now: deps.now(), kyt: deps.kyt ?? null, ...(deps.maxAgeMs ? { maxAgeMs: deps.maxAgeMs } : {}), requestedBy: 'splash:before-sign', ...(deps.env ? { env: deps.env } : {}) },
     payment.recipient,
   );
   if (screened) return { code: screened.code, error: screened.error };
@@ -118,6 +132,6 @@ export async function paymentBeforeSign(deps: PaymentGateDeps, request: StoredRe
     if (delivery) return { code: delivery.code, error: delivery.error };
   }
   // A rule payment's message is not a signing request of its own yet; only wallet payments carry one.
-  if (request.purpose === 'wallet_payment') return travelRuleHold(deps.db, request, payment);
+  if (request.purpose === 'wallet_payment') return travelRuleHold(deps.db, request, payment, deps.env);
   return null;
 }

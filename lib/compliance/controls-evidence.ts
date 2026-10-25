@@ -36,7 +36,8 @@ import { renderTextPdf, type PdfLine } from './pdf-text.ts';
 export type EvidencePaymentKind = 'withdrawal' | 'supplier_payout' | 'wallet_payment';
 
 export type EvidenceScreening = {
-  subject: 'paid_address';
+  /** The Sui address the USDC went to, or a cross-chain payment's destination address on its own chain. */
+  subject: 'paid_address' | 'cross_chain_recipient';
   chain: string;
   address: string;
   provider: string;
