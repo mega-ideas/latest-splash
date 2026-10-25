@@ -24,7 +24,7 @@ type Props = {
 
 function roleClass(role: MembershipRole) {
   // Only two of the four can release a payment. They look different.
-  if (canApprove(role)) return 'border-[#E39774]/45 bg-[#E39774]/12 text-[#9a4a2d]';
+  if (canApprove(role)) return 'border-[var(--gold-light)] bg-[var(--gold-tint)] text-[var(--gold-ink)]';
   if (role === 'maker') return 'border-[#5C9EAD]/30 bg-[#5C9EAD]/10 text-[#326273]';
   return 'border-[#326273]/15 bg-white text-[#326273]/90';
 }
@@ -164,7 +164,7 @@ export default function AdminMemberships({ initialAccounts, organizations }: Pro
           <p
             className={`mt-4 flex items-start gap-2 rounded-lg border px-3.5 py-3 text-sm ${
               canApprove(role)
-                ? 'border-[#E39774]/45 bg-[#E39774]/10 text-[#9a4a2d]'
+                ? 'border-[var(--gold-light)] bg-[var(--gold-tint)] text-[var(--gold-ink)]'
                 : 'border-[#326273]/15 bg-[#326273]/[0.03] text-[#326273]/90'
             }`}
           >

@@ -45,8 +45,8 @@ export default function AppError({
 
   return (
     <div className="mx-auto flex min-h-[70vh] w-full max-w-xl flex-col items-center justify-center gap-4 px-6 text-center">
-      <div className="grid h-12 w-12 place-items-center rounded-full bg-[#E39774]/15 ring-1 ring-[#E39774]/40">
-        <AlertTriangle className="h-6 w-6 text-[#9A4A2D]" />
+      <div className="grid h-12 w-12 place-items-center rounded-full bg-[var(--error-bg)] ring-1 ring-[var(--error)]/30">
+        <AlertTriangle className="h-6 w-6 text-[var(--error)]" />
       </div>
 
       <h1 className="text-2xl font-bold tracking-tight text-[#0c3e48]">

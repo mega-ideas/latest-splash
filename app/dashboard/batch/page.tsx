@@ -108,10 +108,10 @@ function strongestResult(checks: ComplianceCheck[]): ComplianceResult {
   return "PASS";
 }
 
-// Screening results are STATES — semantic tokens only (W9.0 coral rule).
+// Screening results are STATES — semantic tokens only (W9.0 rule).
 function badgeClass(result: ComplianceResult) {
   if (result === "PASS") return "border-[var(--ok)] bg-[var(--ok-bg)] text-[#1F4452]";
-  if (result === "REVIEW") return "border-[var(--warn)] bg-[var(--warn-bg)] text-[#8b6418]";
+  if (result === "REVIEW") return "border-[var(--warn)] bg-[var(--warn-bg)] text-[var(--warn-ink)]";
   return "border-[var(--error)] bg-[var(--error-bg)] text-[var(--error)]";
 }
 
@@ -371,7 +371,7 @@ export default function BatchPage() {
           <SummaryCard icon={ShieldCheck} label="Rows cleared" value={String(acceptedRows.length)} tone="text-[var(--info)]" />
         </HoverPopup>
         <HoverPopup title="Manual review" content="Rows requiring manual attention. Usually missing purpose codes or above Tier 1 limits. These will not be included until resolved.">
-          <SummaryCard icon={AlertTriangle} label="Manual review" value={String(reviewRows.length)} tone="text-[#8b6418]" />
+          <SummaryCard icon={AlertTriangle} label="Manual review" value={String(reviewRows.length)} tone="text-[var(--warn-ink)]" />
         </HoverPopup>
         <HoverPopup title="Blocked" content="Rows that failed compliance checks. Common reasons: sanctions/PEP hits, unsupported corridors, or invalid amounts.">
           <SummaryCard icon={XCircle} label="Blocked" value={String(blockedRows.length)} tone="text-red-700" />
@@ -512,7 +512,7 @@ ${sampleCsvRows.map((row) => `${row.name},${row.address},${row.country},${row.pu
                   <Row label="Minimum batch total" value={formatUsd(minSettlementUsd())} />
                 </div>
                 {acceptedTotal > 0 && acceptedTotal < minSettlementUsd() ? (
-                  <p className="mt-3 rounded-lg border border-[var(--warn)] bg-[var(--warn-bg)] px-3 py-2 text-[13px] font-semibold text-[#8b6418]">
+                  <p className="mt-3 rounded-lg border border-[var(--warn)] bg-[var(--warn-bg)] px-3 py-2 text-[13px] font-semibold text-[var(--warn-ink)]">
                     Cleared total is below the {formatUsd(minSettlementUsd())} minimum — add rows or increase the amounts before authorizing.
                   </p>
                 ) : null}
@@ -531,7 +531,7 @@ ${sampleCsvRows.map((row) => `${row.name},${row.address},${row.country},${row.pu
                     className="w-32 rounded-lg border border-[#326273]/20 bg-[#F6F0ED] px-3 py-3 text-center font-mono tracking-[0.25em] text-[#326273] focus:border-[#5C9EAD] focus:outline-none"
                     placeholder="000000"
                   />
-                  <button type="submit" disabled={busy || acceptedRows.length === 0 || (totp.length !== 6 && !whatsappApproved)} className="flex-1 rounded-lg bg-[#E39774] px-6 py-3 font-semibold text-[#073d49] hover:bg-[#E39774]/85 disabled:opacity-50">
+                  <button type="submit" disabled={busy || acceptedRows.length === 0 || (totp.length !== 6 && !whatsappApproved)} className="flex-1 rounded-lg bg-[var(--gold-light)] px-6 py-3 font-semibold text-[#073d49] hover:bg-[var(--gold)] disabled:opacity-50">
                     {busy ? <span className="inline-flex items-center gap-2"><Loader2 className="animate-spin" size={16} /> Queueing…</span> : "Authorize cleared rows"}
                   </button>
                 </form>
@@ -565,7 +565,7 @@ ${sampleCsvRows.map((row) => `${row.name},${row.address},${row.country},${row.pu
           {(reviewRows.length > 0 || blockedRows.length > 0) && (
             <section className="rounded-2xl border border-[var(--warn)] bg-[var(--warn-bg)] p-5">
               <div className="flex gap-3">
-                <FileWarning className="mt-0.5 text-[#8b6418]" />
+                <FileWarning className="mt-0.5 text-[var(--warn-ink)]" />
                 <div>
                   <h2 className="font-semibold text-[#326273]">Exceptions require review</h2>
                   <p className="mt-1 text-sm text-[#326273]/90">Rows marked REVIEW need a purpose-code, limit, or KYT review. Rows marked BLOCK are excluded until compliance clears the beneficiary or corridor.</p>
@@ -637,7 +637,7 @@ function BatchStatusPanel({ status }: { status: BatchStatus }) {
             {isSimulated ? (
               <span className="inline-flex items-center gap-2">
                 <StatusBadge status="demo" />
-                <span className="text-[13px] font-medium text-[#8b6418]">Simulated batch — no on-chain transaction</span>
+                <span className="text-[13px] font-medium text-[var(--warn-ink)]">Simulated batch — no on-chain transaction</span>
               </span>
             ) : (
               <ExplorerLinks digest={status.digest} />

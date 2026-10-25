@@ -321,7 +321,7 @@ export default function CustomerServicePage() {
             </div>
           </div>
 
-          <div className="rounded-2xl border border-[#E39774]/30 bg-[#E39774]/10 p-4 text-[13px] text-[#1F4452]">
+          <div className="rounded-2xl border border-[var(--gold-light)] bg-[var(--gold-tint)] p-4 text-[13px] text-[#1F4452]">
             <div className="font-semibold uppercase tracking-[0.16em] text-[#1F4452]">Priority support</div>
             <p className="mt-2 leading-5">
               Tier 1 KYB-approved customers get priority response. Mention your Splash organization ID in the message for fastest routing.

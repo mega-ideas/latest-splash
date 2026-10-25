@@ -54,8 +54,8 @@ export default function LiveExchangeTicker() {
         <div className="flex items-center gap-8">
           <div className="flex shrink-0 items-center gap-2 border-r border-white/10 px-5 text-sm font-semibold text-white/80">
             <span className="relative flex h-2.5 w-2.5">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#E39774] opacity-60" />
-              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[#E39774]" />
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--gold-light)] opacity-60" />
+              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[var(--gold-light)]" />
             </span>
             <Activity className="h-4 w-4 text-[#bfe6ee]" />
             <span>USD INDICATIVE FX</span>
@@ -70,7 +70,7 @@ export default function LiveExchangeTicker() {
                   <div key={`${item.pair}-${index}`} className="flex items-center gap-2 whitespace-nowrap">
                     <span className="text-sm font-medium text-white">{item.pair}</span>
                     <span className="font-mono text-sm text-[#bfe6ee]">{item.rate.toFixed(item.precision)}</span>
-                    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[13px] font-mono ${positive ? 'bg-[#5C9EAD]/10 text-[#d8fff4]' : 'bg-[#E39774]/10 text-[#ffd9c9]'}`}>
+                    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[13px] font-mono ${positive ? 'bg-[#5C9EAD]/10 text-[#d8fff4]' : 'bg-[var(--gold-light)]/10 text-[var(--gold-tint)]'}`}>
                       {positive ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
                       {positive ? '+' : ''}{item.change.toFixed(item.precision)}
                     </span>

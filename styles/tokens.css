@@ -3,8 +3,17 @@
   --ink: #1F4452;
   --slate: #326273;
   --teal: #5C9EAD;
+  /* Coral is retired (v2 D14). Only the landing still reads it, until
+     Phase 4 rebuilds the landing; nothing a signed-in person sees uses it
+     (tests/dashboard-brand.test.mjs). */
   --coral: #E39774;
   --gold: #D9A441;
+  /* What replaces coral: a solid gold fill with --ink words on it, the pale
+     gold tint where a peach tint was, and --gold-ink for words on the tint
+     (6.1:1 on --gold-tint, 6.8:1 on white). */
+  --gold-light: #efc46f;
+  --gold-tint: #fdf3dc;
+  --gold-ink: #7a5410;
 
   --surface: #FFFFFF;
   --surface-2: #FBF7F5;
@@ -15,6 +24,10 @@
   --ok-bg: #E4F1ED;
   --warn: #B4690E;
   --warn-bg: #FBEFDD;
+  /* Words that need attention: --warn itself is 3.7:1 on --warn-bg and 4.2:1
+     on white, so a warning's words take this darker amber (4.7:1 on
+     --warn-bg, 5.3:1 on white). A state colour, not the gold accent. */
+  --warn-ink: #8b6418;
   --error: #B3402F;
   --error-bg: #F9E7E3;
   --info: #326273;

@@ -72,13 +72,13 @@ export default async function AdminTransactionsPage() {
                 {fundingSessions.map((session) => (
                   <tr key={session.id} className="border-t border-[#326273]/5">
                     <td className="p-3 font-mono text-xs text-[#326273]">{session.id}</td>
-                    <td><span className={`rounded-full px-2.5 py-1 text-xs font-bold ${session.status === 'QUARANTINED' ? 'bg-[#E39774]/20 text-[#9b4e32]' : session.status === 'CREDITED' || session.status === 'CLEARED' ? 'bg-[#5C9EAD]/15 text-[#326273]' : 'bg-[#F6F0ED] text-[#326273]'}`}>{session.status}</span></td>
+                    <td><span className={`rounded-full px-2.5 py-1 text-xs font-bold ${session.status === 'QUARANTINED' ? 'bg-[var(--warn-bg)] text-[var(--warn-ink)]' : session.status === 'CREDITED' || session.status === 'CLEARED' ? 'bg-[#5C9EAD]/15 text-[#326273]' : 'bg-[#F6F0ED] text-[#326273]'}`}>{session.status}</span></td>
                     <td className="font-semibold text-[#326273]">{session.selection.source}</td>
                     <td className="text-[#326273]">{describeFundingSelection(session.selection)}</td>
                     <td className="text-[#326273]">{session.kytPolicy ?? '-'}{session.sourceType ? ` / ${session.sourceType}` : ''}</td>
                     <td className="font-mono text-xs text-[#326273]">{session.normalizeVenue ?? '-'}{session.effectiveSlippageBps !== undefined ? ` / ${session.effectiveSlippageBps} bps` : ''}</td>
                     <td className="font-bold text-[#326273]">{session.feeTier}</td>
-                    <td className="max-w-64 text-xs text-[#9b4e32]">{session.adminFlag ?? session.kytReasons?.join('; ') ?? '-'}</td>
+                    <td className="max-w-64 text-xs text-[var(--gold-ink)]">{session.adminFlag ?? session.kytReasons?.join('; ') ?? '-'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -132,7 +132,7 @@ export default async function AdminTransactionsPage() {
                     <td>
                       <div className="flex items-center gap-2">
                         {transfer.state === 'SETTLED' && <CheckCircle2 className="text-[#237284]" size={14} />}
-                        {transfer.state === 'SETTLING' && <Loader2 className="animate-spin text-[#9f5839]" size={14} />}
+                        {transfer.state === 'SETTLING' && <Loader2 className="animate-spin text-[var(--gold-ink)]" size={14} />}
                         {transfer.state === 'QUEUED' && <Loader2 className="animate-spin text-[#326273]/90" size={14} />}
                         {transfer.state === 'FAILED' && <XCircle className="text-red-500" size={14} />}
                         <span className="font-semibold text-[#326273]">{transfer.state}</span>
@@ -194,7 +194,7 @@ export default async function AdminTransactionsPage() {
                     <td>
                       <div className="flex items-center gap-2">
                         {batch.state === 'SETTLED' && <CheckCircle2 className="text-[#237284]" size={14} />}
-                        {batch.state === 'SETTLING' && <Loader2 className="animate-spin text-[#9f5839]" size={14} />}
+                        {batch.state === 'SETTLING' && <Loader2 className="animate-spin text-[var(--gold-ink)]" size={14} />}
                         {batch.state === 'QUEUED' && <Loader2 className="animate-spin text-[#326273]/90" size={14} />}
                         {batch.state === 'FAILED' && <XCircle className="text-red-500" size={14} />}
                         <span className="font-semibold text-[#326273]">{batch.state}</span>
@@ -259,7 +259,7 @@ export default async function AdminTransactionsPage() {
                     <td>
                       <div className="flex items-center gap-2">
                         {tx.state === 'SETTLED' && <CheckCircle2 className="text-[#237284]" size={14} />}
-                        {tx.state === 'SETTLING' && <Loader2 className="animate-spin text-[#9f5839]" size={14} />}
+                        {tx.state === 'SETTLING' && <Loader2 className="animate-spin text-[var(--gold-ink)]" size={14} />}
                         {tx.state === 'QUEUED' && <Loader2 className="animate-spin text-[#326273]/90" size={14} />}
                         {tx.state === 'FAILED' && <XCircle className="text-red-500" size={14} />}
                         <span className="font-semibold text-[#326273]">{tx.state}</span>

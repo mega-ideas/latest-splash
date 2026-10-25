@@ -21,7 +21,7 @@ const statusLabels: Record<SupportTicketStatus, string> = {
 
 function statusClass(status: SupportTicketStatus) {
   if (status === 'REPLIED' || status === 'CLOSED') return 'border-[#5C9EAD]/30 bg-[#5C9EAD]/10 text-[#326273]';
-  if (status === 'IN_REVIEW') return 'border-[var(--warn)] bg-[var(--warn-bg)] text-[#8b6418]';
+  if (status === 'IN_REVIEW') return 'border-[var(--warn)] bg-[var(--warn-bg)] text-[var(--warn-ink)]';
   return 'border-red-500/20 bg-red-500/10 text-red-700';
 }
 
@@ -92,7 +92,7 @@ export default function AdminSupportConsole({ initialTickets }: Props) {
     <div className="space-y-6">
       <header className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
         <div>
-          <div className="mb-2 inline-flex rounded-full bg-[#E39774]/10 px-3 py-1 text-xs font-bold uppercase tracking-wide text-[#9a4a2d]">Customer Operations</div>
+          <div className="mb-2 inline-flex rounded-full bg-[var(--gold-tint)] px-3 py-1 text-xs font-bold uppercase tracking-wide text-[var(--gold-ink)]">Customer Operations</div>
           <h1 className="text-3xl font-black tracking-[-0.03em] text-[#1f4350]">Feedback and complaint management</h1>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-[#326273]/90">Staff can triage incoming bugs, feature requests, complaints, and general support tickets separately from the customer dashboard.</p>
         </div>
@@ -159,7 +159,7 @@ export default function AdminSupportConsole({ initialTickets }: Props) {
                   {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                   Send reply
                 </button>
-                <button type="button" disabled={loading} onClick={() => void updateTicket('CLOSED')} className="rounded-xl bg-[#E39774] px-4 py-3 text-sm font-bold text-[#073d49] transition hover:bg-[#E39774]/85 disabled:opacity-60">Close ticket</button>
+                <button type="button" disabled={loading} onClick={() => void updateTicket('CLOSED')} className="rounded-xl bg-[var(--gold-light)] px-4 py-3 text-sm font-bold text-[#073d49] transition hover:bg-[var(--gold)] disabled:opacity-60">Close ticket</button>
               </div>
             </section>
 

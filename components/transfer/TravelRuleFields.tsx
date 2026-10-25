@@ -167,8 +167,8 @@ export default function TravelRuleFields({
 
       {/* The payer's own half. Not asked for here — fixed once, in the profile. */}
       {check && !check.originator.complete && (
-        <div className="rounded-xl border border-[#9b4e32]/25 bg-[#9b4e32]/6 px-3.5 py-3">
-          <p className="flex items-center gap-1.5 text-[13px] font-semibold text-[#9b4e32]">
+        <div className="rounded-xl border border-[var(--warn)] bg-[var(--warn-bg)] px-3.5 py-3">
+          <p className="flex items-center gap-1.5 text-[13px] font-semibold text-[var(--warn-ink)]">
             <CircleAlert className="h-3.5 w-3.5" aria-hidden="true" />
             Your own business details are incomplete
           </p>
@@ -522,7 +522,7 @@ function TrField({
       </div>
       <div className="mt-1.5">{children}</div>
       {error && (
-        <p className="mt-1.5 flex items-center gap-1.5 text-[13px] font-semibold text-[#9b4e32]">
+        <p className="mt-1.5 flex items-center gap-1.5 text-[13px] font-semibold text-[var(--error)]">
           <CircleAlert className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /> {error}
         </p>
       )}

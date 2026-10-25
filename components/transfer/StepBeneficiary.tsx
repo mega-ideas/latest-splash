@@ -219,7 +219,7 @@ export default function StepBeneficiary({ state, set, next }: { state: TransferS
                 Loading saved recipients…
               </div>
             ) : recipientError ? (
-              <div className="rounded-xl border border-[#E39774]/25 bg-[#E39774]/10 px-4 py-3.5 text-sm font-medium text-[#9b4e32]">
+              <div className="rounded-xl border border-[var(--error)] bg-[var(--error-bg)] px-4 py-3.5 text-sm font-medium text-[var(--error)]">
                 {recipientError}. Switch to “New recipient” to continue.
               </div>
             ) : filteredRecipients.length > 0 ? (
@@ -301,7 +301,7 @@ export default function StepBeneficiary({ state, set, next }: { state: TransferS
                         <span className="block truncate text-[13px] font-bold">{country.name}</span>
                         <span className={`block font-mono text-[13px] font-semibold ${active ? 'text-[#8FD7C7]' : 'text-[#326273]/90'}`}>
                           {COUNTRY_TO_CURRENCY[country.code]}
-                          {country.live ? ' · testnet live' : ''}
+                          {country.live ? ' · live' : ''}
                         </span>
                       </span>
                     </button>
@@ -466,7 +466,7 @@ export default function StepBeneficiary({ state, set, next }: { state: TransferS
           </div>
         </div>
         {touchedSubmit && !amountOk && (
-          <p className="mt-2 flex items-center gap-1.5 text-[13px] font-semibold text-[#9b4e32]">
+          <p className="mt-2 flex items-center gap-1.5 text-[13px] font-semibold text-[var(--error)]">
             <CircleAlert className="h-3.5 w-3.5" /> {minimumCheck.ok ? 'Enter the USD amount to send.' : minimumCheck.message}
           </p>
         )}
@@ -512,7 +512,7 @@ function Field({ label, hint, error, children, className = '' }: {
       </div>
       <div className="mt-1.5">{children}</div>
       {error && (
-        <p className="mt-1.5 flex items-center gap-1.5 text-[13px] font-semibold text-[#9b4e32]">
+        <p className="mt-1.5 flex items-center gap-1.5 text-[13px] font-semibold text-[var(--error)]">
           <CircleAlert className="h-3.5 w-3.5" /> {error}
         </p>
       )}

@@ -76,12 +76,12 @@ export default function ZkLoginCallbackPage() {
         // Identity is established. Authority is not — and neither is the
         // business verification that authority depends on.
         //
-        // This used to land on /dashboard, which showed an empty workspace and
-        // a banner. A banner is not an onboarding step: it tells someone
-        // something is wrong and leaves them to find the screen that fixes it.
-        // Business verification is the next thing that has to happen, so it is
-        // the next thing they see.
-        router.replace('/settings/kyb?from=signin');
+        // Home is the first screen after every sign-in (v2 D14). This used to
+        // go straight to /settings/kyb, because a banner alone is not an
+        // onboarding step. The step is on Home now: Account setup stays on the
+        // rail, with its progress, until setup is complete, and the read-only
+        // banner links to verification.
+        router.replace('/dashboard');
       } catch {
         if (!cancelled) setError('Sign-in could not be completed. Check your connection and try again.');
       }

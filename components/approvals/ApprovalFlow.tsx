@@ -176,7 +176,7 @@ export default function ApprovalFlow({
       <div className="flex flex-wrap items-center gap-2 text-[12px] font-semibold uppercase tracking-[0.12em] text-[#326273]/90">
         {whatsapp ? <MessageCircle className="h-3.5 w-3.5" /> : <MousePointerClick className="h-3.5 w-3.5" />}
         {whatsapp ? 'WhatsApp code + passkey' : 'Click to approve'}
-        {!whatsapp && status.secondPersonRequired ? <span className="rounded-full bg-[#E39774]/15 px-2 py-0.5 text-[#9F5839]">second person required</span> : null}
+        {!whatsapp && status.secondPersonRequired ? <span className="rounded-full bg-[var(--gold-tint)] px-2 py-0.5 text-[var(--gold-ink)]">second person required</span> : null}
       </div>
       {status.summary ? <p className="text-sm leading-6 text-[#1F4452]">{status.summary}</p> : null}
 
@@ -200,8 +200,8 @@ export default function ApprovalFlow({
         <p className="flex items-start gap-2 text-[13px] leading-5 text-[#326273]/90">
           <Hourglass className="mt-0.5 h-4 w-4 shrink-0" />
           {status.secondPersonRequired && status.youAreRequester
-            ? 'Waiting for a second approver. An admin or checker other than you approves it on their Send USDC page; this updates when they do.'
-            : 'Waiting for an admin or checker to approve it on their Send USDC page; this updates when they do.'}
+            ? 'Waiting for a second approver. An admin or checker other than you approves it in their Wallet; this updates when they do.'
+            : 'Waiting for an admin or checker to approve it in their Wallet; this updates when they do.'}
         </p>
       ) : (
         <button type="button" onClick={approveClick} disabled={busy !== null} className="dash-btn !px-4 !py-2 !text-[13px] disabled:cursor-not-allowed disabled:opacity-50">

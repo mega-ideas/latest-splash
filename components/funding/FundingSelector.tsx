@@ -288,7 +288,7 @@ function PrimaryFundingButton({
     >
       <span className={cn(
         'flex size-10 shrink-0 items-center justify-center rounded-xl',
-        active ? 'bg-white/12 text-white' : icon === 'USD' ? 'bg-[#5C9EAD]/14 text-[#326273]' : 'bg-[#E39774]/14 text-[#9F5839]',
+        active ? 'bg-white/12 text-white' : icon === 'USD' ? 'bg-[#5C9EAD]/14 text-[#326273]' : 'bg-[var(--gold-tint)] text-[var(--gold-ink)]',
       )}
       >
         {icon === 'USD' ? <Landmark className="size-5" aria-hidden="true" /> : <Coins className="size-5" aria-hidden="true" />}

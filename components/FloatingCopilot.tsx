@@ -87,7 +87,7 @@ export default function FloatingCopilot() {
 
   // The desk records unsigned proposals; remind the operator whenever they are
   // anywhere else in the app.
-  const awayFromDesk = pathname !== '/dashboard' && pathname !== '/queue';
+  const awayFromDesk = pathname !== '/dashboard/zeke' && pathname !== '/queue';
   const hasReminder = pending.count > 0 && awayFromDesk;
 
   useEffect(() => {
@@ -241,7 +241,7 @@ export default function FloatingCopilot() {
             onClick={() => setOpen(false)}
             className="flex shrink-0 items-center gap-2.5 border-b border-[#efc46f]/50 bg-[#efc46f]/15 px-4 py-2.5 transition-colors hover:bg-[#efc46f]/25"
           >
-            <BellRing size={14} className="shrink-0 text-[#9A4A2D]" />
+            <BellRing size={14} className="shrink-0 text-[var(--gold-ink)]" />
             <span className="min-w-0 flex-1 text-[13px] font-semibold leading-4 text-[#0c3e48]">
               {pending.count === 1
                 ? '1 unsigned proposal waits'
@@ -354,7 +354,7 @@ export default function FloatingCopilot() {
           {/* Closed-state indicator: approval count when work is waiting,
               otherwise the ambient pulse dot */}
           {!open && hasReminder && (
-            <span className="absolute -right-0.5 -top-0.5 grid h-5 min-w-5 place-items-center rounded-full bg-[#E39774] px-1 font-mono text-[13px] font-bold text-[#073d49] ring-2 ring-white/80">
+            <span className="absolute -right-0.5 -top-0.5 grid h-5 min-w-5 place-items-center rounded-full bg-[var(--gold-light)] px-1 font-mono text-[13px] font-bold text-[#073d49] ring-2 ring-white/80">
               {pending.count > 9 ? '9+' : pending.count}
             </span>
           )}

@@ -19,7 +19,7 @@ import type { RecipientLookup } from './recipient-tools.ts';
  * Deterministic and before the model, like the lane refusal: the message is
  * read by a fixed pattern, the recipient is resolved among SAVED wallet
  * recipients, and the fee and the 30-day allowance come from the lane's own
- * functions. The answer is a card that opens Send USDC with the recipient and
+ * functions. The answer is a card that opens Wallet with the recipient and
  * the amount filled in.
  *
  * What Zeke does NOT do, by construction: quote (a quote reserves allowance),
@@ -180,7 +180,7 @@ export async function prepareUsdcHandoff(
   const params = new URLSearchParams({ to: match.id, amount: plainAmount(principal), from: 'zeke' });
   return {
     text:
-      `I've prepared it — ${formatUsdc(principal)} USDC to ${match.name}. I can't send it: open it in Send USDC, ` +
+      `I've prepared it — ${formatUsdc(principal)} USDC to ${match.name}. I can't send it: open it in Wallet, ` +
       'check it, get it approved your workspace’s way, and sign it with your wallet.',
     handoff: {
       title: 'Prepared, not sent',
@@ -195,8 +195,8 @@ export async function prepareUsdcHandoff(
           : `Leaves your wallet ${formatUsdc(quote.totalDebitMinor)} USDC, plus a little SUI for gas`,
         ...(remaining !== null ? [`${formatUsdc(remaining - principal)} USDC of your 30-day allowance left after`] : []),
       ],
-      href: `/dashboard/send-usdc?${params.toString()}`,
-      cta: 'Review in Send USDC',
+      href: `/dashboard/wallet?${params.toString()}`,
+      cta: 'Review in Wallet',
     },
   };
 }

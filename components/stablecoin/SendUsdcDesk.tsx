@@ -435,7 +435,7 @@ export default function SendUsdcDesk() {
   if (lane?.error) {
     return (
       <div className="mx-auto w-full max-w-6xl space-y-5">
-        <DashPageHeader kicker="USDC on Sui · mainnet" title="Send USDC" />
+        <DashPageHeader kicker="USDC on Sui · mainnet" title="Wallet" />
         <p role="alert" className="dash-surface p-4 text-sm text-[var(--error)]">{lane.error}</p>
       </div>
     );
@@ -445,7 +445,7 @@ export default function SendUsdcDesk() {
     <div className="mx-auto w-full max-w-6xl space-y-5">
       <DashPageHeader
         kicker="USDC on Sui · mainnet"
-        title="Send USDC"
+        title="Wallet"
         description={`Real USDC on Sui mainnet — to a wallet recipient you have saved, or to an API that asks for payment over x402. A recipient receives exactly what you enter, and Splash charges nothing on stablecoin transfers. ${gasless
           ? 'Sui carries a wallet transfer of USDC without a network fee, so the sending wallet needs no SUI; an x402 payment still takes a little SUI for gas.'
           : 'The network fee (gas) is paid in SUI by the sending wallet.'}`}
@@ -453,7 +453,7 @@ export default function SendUsdcDesk() {
 
       {lane && !lane.lane.open ? (
         <div role="alert" className="flex items-start gap-3 rounded-xl border border-[var(--warn)] bg-[var(--warn-bg)] p-4 text-sm text-[#1F4452]">
-          <Lock className="mt-0.5 h-4 w-4 shrink-0 text-[#8b6418]" />
+          <Lock className="mt-0.5 h-4 w-4 shrink-0 text-[var(--warn-ink)]" />
           <span>{lane.lane.reason}</span>
         </div>
       ) : null}
@@ -468,7 +468,7 @@ export default function SendUsdcDesk() {
                 <span className="ml-2 text-sm font-medium text-[#326273]/90">left of {lane ? formatUsdc(cap) : '—'}</span>
               </div>
             </div>
-            <span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${lane?.verified ? 'bg-[#6FB4A0]/15 text-[#1F4452]' : 'bg-[#E39774]/15 text-[#9F5839]'}`}>
+            <span className={`rounded-full px-2.5 py-1 text-[12px] font-semibold ${lane?.verified ? 'bg-[#6FB4A0]/15 text-[#1F4452]' : 'bg-[var(--gold-tint)] text-[var(--gold-ink)]'}`}>
               {lane ? (lane.verified ? 'Verified business' : 'Not yet verified') : '…'}
             </span>
           </div>
@@ -805,7 +805,7 @@ export default function SendUsdcDesk() {
                   </div>
                 ) : null}
                 <p className="mt-2 flex items-start gap-2 text-[12px] leading-5 text-[#326273]/90">
-                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#8b6418]" />
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--warn-ink)]" />
                   A transfer on Sui is final. Check the recipient address before you sign.
                 </p>
                 <button
@@ -1014,7 +1014,7 @@ function Readiness({
 
 function CheckMark({ state }: { state: Check['state'] }) {
   if (state === 'ok') return <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-[var(--ok)]" aria-label="Done" />;
-  if (state === 'todo') return <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[#8b6418]" aria-label="To do" />;
+  if (state === 'todo') return <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[var(--warn-ink)]" aria-label="To do" />;
   if (state === 'note') return <Info className="mt-0.5 h-4 w-4 shrink-0 text-[var(--info)]" aria-label="Note" />;
   return <Circle className="mt-0.5 h-4 w-4 shrink-0 text-[#326273]/90" aria-label="Waiting" />;
 }
@@ -1073,7 +1073,7 @@ function WalletBalances({ view, source, needsSui }: { view: WalletView | null | 
         </div>
       )}
       {view.gasLow && needsSui ? (
-        <p className="mt-2 text-[12px] leading-5 text-[#9F5839]">Add a little SUI (about 0.05) to pay network fees — without it this wallet can hold USDC but not send it.</p>
+        <p className="mt-2 text-[12px] leading-5 text-[var(--gold-ink)]">Add a little SUI (about 0.05) to pay network fees — without it this wallet can hold USDC but not send it.</p>
       ) : null}
       {source === 'SPLASH' ? (
         <>

@@ -228,7 +228,7 @@ export default function InvoiceLoop() {
 
     const lower = text.toLowerCase();
     if (lower.includes('open action') || lower.includes('chat')) {
-      router.push('/dashboard');
+      router.push('/dashboard/zeke');
       return;
     }
 
@@ -287,7 +287,7 @@ export default function InvoiceLoop() {
                 </div>
               </div>
               <Link
-                href="/dashboard"
+                href="/dashboard/zeke"
                 className="inline-flex shrink-0 items-center gap-2 rounded-md border border-white/20 bg-white/10 px-3 py-2 text-[13px] font-bold text-white transition hover:bg-white/15 focus-ring"
               >
                 <Bot className="h-4 w-4" />
@@ -608,7 +608,7 @@ function ExtractionPanel({
           type="button"
           disabled={!selected || extracting}
           onClick={onExtract}
-          className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-lg bg-[#E39774] px-4 py-2 text-sm font-bold text-[#073d49] shadow-[0_12px_24px_rgba(227,151,116,0.24)] transition hover:bg-[#E39774]/85 focus-ring disabled:cursor-not-allowed disabled:opacity-50"
+          className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-lg bg-[var(--gold-light)] px-4 py-2 text-sm font-bold text-[#073d49] shadow-[0_12px_24px_rgba(239,196,111,0.24)] transition hover:bg-[var(--gold)] focus-ring disabled:cursor-not-allowed disabled:opacity-50"
         >
           {extracting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
           {extracting ? 'Inspecting...' : 'Extract and recommend route'}
@@ -631,28 +631,28 @@ function ExtractionPanel({
           {suggestion.blocked ? (
             <div role="status" className="rounded-lg border border-[var(--warn)] bg-[var(--warn-bg)] p-4">
               <div className="flex items-start gap-3">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white text-[#8b6418]">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white text-[var(--warn-ink)]">
                   <Lock className="h-4 w-4" />
                 </span>
                 <div>
                   <strong className="text-[#1F4452]">{suggestion.title}</strong>
                   <p className="mt-2 whitespace-pre-line text-sm font-medium leading-6 text-[#326273]/90">{suggestion.description}</p>
-                  <span className="mt-3 inline-flex rounded-md border border-[var(--warn)] bg-white/70 px-2.5 py-1 text-[12px] font-semibold uppercase tracking-[0.14em] text-[#8b6418]">
+                  <span className="mt-3 inline-flex rounded-md border border-[var(--warn)] bg-white/70 px-2.5 py-1 text-[12px] font-semibold uppercase tracking-[0.14em] text-[var(--warn-ink)]">
                     Locked until verified
                   </span>
                 </div>
               </div>
             </div>
           ) : (
-            <div className="rounded-lg border border-[#E39774]/28 bg-[#E39774]/10 p-4">
+            <div className="rounded-lg border border-[var(--gold-light)] bg-[var(--gold-tint)] p-4">
               <div className="flex items-start gap-3">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white text-[#9F5839]">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white text-[var(--gold-ink)]">
                   <Route className="h-4 w-4" />
                 </span>
                 <div>
                   <strong className="text-[#1F4452]">{suggestion.title}</strong>
                   <p className="mt-2 text-sm font-medium leading-6 text-[#326273]/90">{suggestion.description}</p>
-                  <span className="mt-3 inline-flex rounded-md border border-[#E39774]/25 bg-white/70 px-2.5 py-1 text-[12px] font-semibold uppercase tracking-[0.14em] text-[#9F5839]">
+                  <span className="mt-3 inline-flex rounded-md border border-[var(--gold-light)] bg-white/70 px-2.5 py-1 text-[12px] font-semibold uppercase tracking-[0.14em] text-[var(--gold-ink)]">
                     Approval required
                   </span>
                 </div>
@@ -705,7 +705,7 @@ function IntentPanel({ selected, suggestion, href }: { selected: InvoiceRecord |
     return (
       <section className="rounded-lg border border-[#326273]/15 bg-white/80 p-4 shadow-sm">
         <div className="flex items-start gap-3">
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--warn-bg)] text-[#8b6418]">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--warn-bg)] text-[var(--warn-ink)]">
             <Lock className="h-5 w-5" />
           </span>
           <div className="min-w-0">
@@ -714,10 +714,10 @@ function IntentPanel({ selected, suggestion, href }: { selected: InvoiceRecord |
           </div>
         </div>
         <Link
-          href={suggestion.blocked.lane === 'LAUNCH_SCOPE' ? '/dashboard/send-usdc' : '/dashboard/setup'}
+          href={suggestion.blocked.lane === 'LAUNCH_SCOPE' ? '/dashboard/wallet' : '/dashboard/setup'}
           className="mt-4 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-[#0C3E48] px-4 py-2 text-sm font-bold text-white shadow-[0_12px_24px_rgba(12,62,72,0.2)] transition hover:bg-[#145D6A] focus-ring"
         >
-          {suggestion.blocked.lane === 'LAUNCH_SCOPE' ? 'Send USDC' : 'Finish verification'}
+          {suggestion.blocked.lane === 'LAUNCH_SCOPE' ? 'Open Wallet' : 'Finish verification'}
           <ArrowRight className="h-4 w-4" />
         </Link>
       </section>
@@ -776,7 +776,7 @@ function EmptyState({ title, body }: { title: string; body: ReactNode }) {
 function gateTone(state: GateState) {
   if (state === 'complete') return 'border-[#6FB4A0]/35 bg-[#6FB4A0]/18 text-[#D8FFF4]';
   if (state === 'active') return 'border-[#D9A441]/45 bg-[#D9A441]/18 text-[#FFE6A4]';
-  if (state === 'warning') return 'border-[var(--warn)] bg-[var(--warn-bg)] text-[#8b6418]';
+  if (state === 'warning') return 'border-[var(--warn)] bg-[var(--warn-bg)] text-[var(--warn-ink)]';
   return 'border-white/12 bg-white/8 text-white/80';
 }
 

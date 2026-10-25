@@ -75,15 +75,21 @@ test('zkLogin files the identity under that workspace, not the demo org', async 
   assert.doesNotMatch(code(route), /DEFAULT_ORG_ID/);
 });
 
-test('sign-in lands on business verification, not a dashboard with a banner', async () => {
+test('sign-in lands on Home, where Account setup leads to verification', async () => {
   const callback = await readFile(
     new URL('../app/login/zklogin/callback/page.tsx', import.meta.url),
     'utf8',
   );
-  // A banner is not an onboarding step: it says something is wrong and leaves
-  // the person to find the screen that fixes it.
-  assert.match(callback, /router\.replace\('\/settings\/kyb\?from=signin'\)/);
-  assert.doesNotMatch(callback, /router\.replace\('\/dashboard'\)/);
+  // v2 D14: Home is the first screen after login, for every sign-in. It used
+  // to send zkLogin straight to /settings/kyb, because a banner alone is not
+  // an onboarding step. The step is now in the nav: Account setup stays on
+  // the rail, with its progress, until setup is complete (brief 5.1), and the
+  // read-only banner links to verification.
+  assert.match(callback, /router\.replace\('\/dashboard'\)/);
+  assert.doesNotMatch(callback, /router\.replace\('\/settings\/kyb/);
+  const shell = await readFile(new URL('../components/dashboard/DashboardShell.tsx', import.meta.url), 'utf8');
+  assert.match(shell, /view\.setup \?/, 'the setup step is on the rail until it is done');
+  assert.match(shell, /href="\/settings\/kyb"/, 'the read-only banner links to verification');
 });
 
 test('the KYB gate fails closed', async () => {

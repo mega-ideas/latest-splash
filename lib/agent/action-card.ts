@@ -57,6 +57,8 @@ export type ActionCardEvidence = EvidenceItem & {
   tone: 'trusted' | 'untrusted';
   /** WS2 truth chip: LIVE renders default; STALE/MODELED/DEMO use caution. */
   statusLabel: DataStatus;
+  /** The words on that chip: Live, Stale, Modeled or Sample. */
+  statusText: string;
   statusTone: 'live' | 'caution';
 };
 
@@ -125,6 +127,8 @@ function fxSourceLabel(fxRate: ProposalFxRate): string {
   return ref;
 }
 
+const STATUS_TEXT: Record<DataStatus, string> = { LIVE: 'Live', STALE: 'Stale', MODELED: 'Modeled', DEMO: 'Sample' };
+
 export function buildActionCardModel(proposal: ActionCardProposal): ActionCardModel {
   const impact = proposal.explain.financialImpact;
   const requiredApprovers = Math.max(0, proposal.explain.requiredApprovers);
@@ -141,6 +145,9 @@ export function buildActionCardModel(proposal: ActionCardProposal): ActionCardMo
       trustLabel: item.trusted ? 'Trusted' as const : 'Untrusted' as const,
       tone: item.trusted ? 'trusted' as const : 'untrusted' as const,
       statusLabel,
+      // What the chip says. The envelope's DEMO stays an internal status; a
+      // person reads "Sample" (v2 D14: no "Demo" text in the UI).
+      statusText: STATUS_TEXT[statusLabel],
       statusTone: statusLabel === 'LIVE' ? 'live' as const : 'caution' as const,
     };
   });

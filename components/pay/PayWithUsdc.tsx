@@ -88,11 +88,11 @@ export default function PayWithUsdc({ slug, issuer, usdc }: { slug: string; issu
                 <strong className="font-mono text-lg tabular-nums">
                   {/* The cents, then the four digits that identify this invoice, set apart. */}
                   {usdc.terms.amount.slice(0, -4)}
-                  <span className="rounded bg-accent/20 px-0.5 text-accent underline decoration-dotted underline-offset-4">{usdc.terms.amount.slice(-4)}</span> USDC
+                  <span className="rounded bg-accent/20 px-0.5 text-[var(--gold-ink)] underline decoration-dotted underline-offset-4">{usdc.terms.amount.slice(-4)}</span> USDC
                 </strong>
                 <small className="mt-0.5 block text-foreground/55">The highlighted digits identify this invoice — send every one of them.</small>
               </span>
-              <Copy className="h-4 w-4 shrink-0 text-accent" aria-hidden="true" />
+              <Copy className="h-4 w-4 shrink-0 text-[var(--gold-ink)]" aria-hidden="true" />
               <span className="sr-only">Copy amount</span>
             </button>
             <button type="button" onClick={() => void copy(usdc.terms!.address, 'Address')} className="flex w-full items-center justify-between gap-3 rounded-xl bg-muted/50 p-3 text-left">

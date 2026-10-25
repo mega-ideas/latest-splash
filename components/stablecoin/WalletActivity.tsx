@@ -133,7 +133,7 @@ export default function WalletActivity({
                   aria-hidden
                   className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${m.direction === 'IN' ? 'bg-[var(--ok-bg)] text-[var(--ok)]' : 'bg-[#0C3E48]/8 text-[#0C3E48]'}`}
                 >
-                  {noRecord ? <AlertTriangle className="h-3.5 w-3.5 text-[#8b6418]" /> : m.direction === 'IN' ? <ArrowDownLeft className="h-3.5 w-3.5" /> : <ArrowUpRight className="h-3.5 w-3.5" />}
+                  {noRecord ? <AlertTriangle className="h-3.5 w-3.5 text-[var(--warn-ink)]" /> : m.direction === 'IN' ? <ArrowDownLeft className="h-3.5 w-3.5" /> : <ArrowUpRight className="h-3.5 w-3.5" />}
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline justify-between gap-2">
@@ -160,7 +160,7 @@ export default function WalletActivity({
         </ul>
       )}
 
-      {movements.length > 0 && notice ? <p className="mt-2 text-[12px] text-[#8b6418]" role="alert">{notice}</p> : null}
+      {movements.length > 0 && notice ? <p className="mt-2 text-[12px] text-[var(--warn-ink)]" role="alert">{notice}</p> : null}
       {olderCursor ? (
         <button type="button" onClick={() => void loadOlder()} disabled={busy !== null} className="dash-btn-ghost mt-3 inline-flex min-h-10 items-center gap-1.5 !px-3 !py-1.5 !text-[13px] disabled:opacity-50">
           {busy === 'older' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null} Show older

@@ -186,7 +186,7 @@ function StepHeading({ n, title, done, pending }: { n: number; title: string; do
         {done ? <Check className="h-4 w-4" /> : n}
       </span>
       {title}
-      {pending ? <span className="text-[12px] font-semibold text-[#8b6418]">In review</span> : null}
+      {pending ? <span className="text-[12px] font-semibold text-[var(--warn-ink)]">In review</span> : null}
     </h2>
   );
 }
