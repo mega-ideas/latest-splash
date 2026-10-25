@@ -65,6 +65,7 @@ export type HoldReason =
   | 'first_use_failed'
   | 'payer_mismatch'
   | 'origin_unconfirmed'
+  | 'mint_unattributable'
   | 'not_screened'
   | 'screening_review';
 
@@ -74,6 +75,7 @@ export const HOLD_REASON_TEXT: Record<HoldReason, string> = {
   first_use_failed: 'The first payment from this source did not match your business.',
   payer_mismatch: 'The payer the provider reported is not the source this top-up named.',
   origin_unconfirmed: 'It came through a swap route, and which wallet sent it on the other chain is not confirmed yet.',
+  mint_unattributable: 'It arrived with a CCTP mint that could not be matched to one transfer to this wallet, so who sent it is not confirmed.',
   not_screened: 'It has not been screened yet. It is screened again when you ask.',
   screening_review: 'Screening asked for a closer look before it can be used.',
 };
@@ -144,6 +146,12 @@ export function decideDeposit(input: {
   payerMatches?: boolean;
   /** False when the origin cannot be seen on chain (a swap route's delivery). */
   originConfirmed?: boolean;
+  /**
+   * True when the transaction carried Circle's mint but no single burn to
+   * this wallet accounts for it (two mints, an unreadable body, another
+   * recipient): the USDC cannot be the sender's own on the sender's word.
+   */
+  mintUnattributable?: boolean;
 }): { status: DepositStatus; reasons: HoldReason[] } {
   if (input.screening.verdict === 'BLOCK') return { status: 'blocked', reasons: [] };
   const reasons: HoldReason[] = [];
@@ -154,6 +162,7 @@ export function decideDeposit(input: {
   }
   if (input.payerMatches === false) reasons.push('payer_mismatch');
   if (input.originConfirmed === false) reasons.push('origin_unconfirmed');
+  if (input.mintUnattributable === true) reasons.push('mint_unattributable');
   if (input.screening.verdict === null) reasons.push('not_screened');
   if (input.screening.verdict === 'REVIEW') reasons.push('screening_review');
   return { status: reasons.length ? 'held' : 'cleared', reasons };

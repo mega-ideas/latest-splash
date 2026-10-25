@@ -742,6 +742,8 @@ type Part = {
   lookup: () => Promise<store.SourceRow | null>;
   payerMatchesFor?: (source: store.SourceRow | null) => boolean | undefined;
   originConfirmed?: boolean;
+  /** USDC beside a Circle mint that credits nobody: held, whoever sent the transaction. */
+  mintUnattributable?: boolean;
   forIntent: boolean;
 };
 
@@ -861,6 +863,11 @@ async function recordTransaction(
           });
         }
         if (amount > minted) parts.push(senderPart(coinType, asset, amount - minted, minted > 0n ? 'remainder' : 'arrival', minted === 0n));
+      } else if (mint.kind === 'unattributable' && coinType === usdc) {
+        // Circle minted in this transaction, but no single burn to this
+        // wallet accounts for it, so no burner was screened. The sender's
+        // word (even a proven wallet's) does not make it the sender's money.
+        parts.push({ ...senderPart(coinType, asset, amount, 'arrival', true), mintUnattributable: true });
       } else {
         parts.push(senderPart(coinType, asset, amount, 'arrival', intent?.channel !== 'cctp'));
       }
@@ -899,6 +906,7 @@ async function recordTransaction(
       screening,
       payerMatches: p.payerMatchesFor?.(source),
       originConfirmed: p.originConfirmed,
+      mintUnattributable: p.mintUnattributable,
     });
     const attach = intent && p.forIntent ? intent.id : null;
     const { row, created } = await store.insertDeposit(deps.db, {
@@ -992,6 +1000,8 @@ export async function recheckDeposit(deps: FundingDeps, id: string) {
     screening,
     payerMatches: keptMismatch,
     originConfirmed: row.channel === 'swap' ? false : undefined,
+    // Kept for good: no later fact ties it to one burn.
+    mintUnattributable: (row.holdReasons as HoldReason[]).includes('mint_unattributable') || undefined,
   });
   let out: store.DepositRow | null;
   if (decision.status === row.status) {
@@ -1088,11 +1098,16 @@ export async function walletFundsWithheld(deps: FundingDeps, balanceMinor: bigin
   const held = await store.heldUsdcMinor(deps.db, { orgId: deps.orgId, usdcType });
   const row = await store.syncRow(deps.db, { orgId: deps.orgId, walletAddress: sync.wallet, usdcType });
   const unreconciled = balanceMinor > row.netUsdcMinor ? balanceMinor - row.netUsdcMinor : 0n;
+  // A read that stopped before the newest transaction has not screened what
+  // lies beyond it, and the net so far says nothing about it (an unscreened
+  // arrival and a later outflow cancel out). Nothing is spendable until the
+  // watcher has caught up; each call reads on from where the last stopped.
+  const withheld = sync.complete ? held + unreconciled : balanceMinor > held + unreconciled ? balanceMinor : held + unreconciled;
   return {
     ok: true as const,
     heldMinor: held.toString(),
     unreconciledMinor: unreconciled.toString(),
-    withheldMinor: (held + unreconciled).toString(),
+    withheldMinor: withheld.toString(),
     complete: sync.complete,
   };
 }

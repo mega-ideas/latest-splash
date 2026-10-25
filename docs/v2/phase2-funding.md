@@ -141,7 +141,12 @@ real mints. A mint credits its burner only when the transaction carries
 exactly one, its burn names the business wallet, and its body reads, and only
 up to what Circle minted (`amount - feeExecuted`). Any other USDC the
 transaction moved in is a separate `remainder` deposit, the sender's, screened
-as the sender's: a relayer cannot pass its own money off as the burner's. The
+as the sender's: a relayer cannot pass its own money off as the burner's.
+When the transaction carries Circle's event but no single burn to this wallet
+accounts for it (two mints, an unreadable body, a burn naming another
+recipient), its USDC is recorded against the sender and **held**
+(`mint_unattributable`), even when the sender is a proven wallet of the
+business, because no burner was screened; a recheck keeps that hold. The
 relayer of a pure mint is recorded, not screened against the mint: anyone can
 relay a business's mint (`destinationCaller` is zero), and holding the
 business's money for the relayer's listing would let any listed address
@@ -160,8 +165,11 @@ cursor from where it read it, so concurrent runs count each transaction once.
 payment from the wallet, it reads the wallet's USDC, runs the watcher, and
 withholds every held or blocked USDC deposit of the business plus anything the
 balance shows beyond the net the watcher has seen (an arrival the indexer has
-not listed yet). If the watcher cannot read the chain, nothing is built
-(`holds_unreadable`). `requestWalletPayment`, `requestOpenIntentPayment` and
+not listed yet). One run reads at most 40 pages; until a run reaches the
+newest transaction, the **whole balance** is withheld (what lies beyond the
+pages read is unscreened, and an arrival there can be cancelled out in the net
+by a later outflow), and the next run reads on from there. If the watcher
+cannot read the chain, nothing is built (`holds_unreadable`). `requestWalletPayment`, `requestOpenIntentPayment` and
 the owners' second approval of a rule payment (`openSecondApproval`) refuse
 (`funds_on_hold`) when the rest does not cover principal plus the fee bound.
 Holds count by **business**, not address: after a rotation the held USDC that

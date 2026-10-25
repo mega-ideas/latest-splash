@@ -229,6 +229,8 @@ plus the second-approval case in `tests/spend-rules.test.mjs`. Migration
 | F-9 | Low | The accepted quote was optional, USDT variants skipped the peg guard, slippage was not part of the idempotent request. **Fixed** (`accepted_quote_required`; any symbol naming USDT is guarded; slippage and the accepted floor are in the fingerprint). | Fixed |
 | F-10 | Low | Source changes left no trail; revocation was permanent. **Fixed**: append-only `funding_source_events` (trigger refuses UPDATE/DELETE); a revoked source can be added again as a new pending row. | Fixed |
 | — | Missing | With Elliptic and Chainalysis both set, Chainalysis's CLEAR was taken as the verdict. **Fixed**: Elliptic decides; a sanctions listing still blocks. | Fixed |
+| F-11 | High | (Second pass.) USDC beside a Circle mint that credits nobody (two mints, an unreadable body, another recipient) was attributed to the transaction sender alone, so the business's own proven wallet relaying two mints cleared them with neither burner screened. **Fixed**: that USDC is held as `mint_unattributable`, whoever sent it, and a recheck keeps the hold. | Fixed |
+| F-12 | High | (Second pass.) A watcher run that stopped at its page limit left the balance minus recorded holds spendable, although transactions beyond the pages read were unscreened (an arrival and a later outflow cancel out in the net). **Fixed**: until a run reaches the newest transaction, `walletFundsWithheld` withholds the whole balance; the next run reads on. | Fixed |
 
 A CCTP relayer (the transaction sender of a pure mint) is recorded but not
 screened against the minted part: `destinationCaller` is zero, so anyone can
