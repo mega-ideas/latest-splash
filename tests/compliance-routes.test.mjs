@@ -44,12 +44,12 @@ test('the Travel Rule route refuses in production without Sumsub before it reads
   assert.ok(text.indexOf('limitWalletRequests(') > 0 && text.indexOf('limitWalletRequests(') < provider, 'the rate limit comes first');
 });
 
-test('the evidence and the sender declaration read the chain and write a PDF, so each is rate limited for its person', async () => {
-  for (const file of [WALLET_ROUTES[0], WALLET_ROUTES[2]]) {
+test('the evidence and the sender declaration read the chain and write a PDF, so each is rate limited for its person, in its own bucket', async () => {
+  for (const [file, rule] of [[WALLET_ROUTES[0], 'controlsEvidenceUser'], [WALLET_ROUTES[2], 'complianceReadUser']]) {
     const text = await read(file);
-    assert.match(text, /enforceRateLimit\(\{ rule: RATE_LIMITS\.complianceReadUser, key: gate\.route\.authority\.userId \}\)/, file);
+    assert.ok(text.includes(`enforceRateLimit({ rule: RATE_LIMITS.${rule}, key: gate.route.authority.userId })`), file);
     const handler = text.slice(text.indexOf('export async function'));
-    assert.ok(handler.indexOf('requirePayoutReader(') < handler.indexOf('RATE_LIMITS.complianceReadUser'), `${file}: role first, then the limit`);
+    assert.ok(handler.indexOf('requirePayoutReader(') < handler.indexOf(`RATE_LIMITS.${rule}`), `${file}: role first, then the limit`);
   }
 });
 
