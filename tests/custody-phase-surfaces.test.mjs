@@ -159,9 +159,11 @@ test('a verified business still cannot get a treasury proposal in Phase 0', asyn
     await assert.doesNotReject(() => assertZekeLane(orgId, 'FIAT_OUT_LOCAL', 'PHP'));
   });
 
-  assert.match(TREASURY_CUSTODY_REFUSAL, /money-broking licence/);
-  assert.match(TREASURY_CUSTODY_REFUSAL, /does not hold/);
-  assert.doesNotMatch(TREASURY_CUSTODY_REFUSAL, /\blicensed\b/i);
+  // v2 D9: Treasury is USDY in the business's own wallet, so the refusal
+  // points there and cites no licence (brief 5.7).
+  assert.match(TREASURY_CUSTODY_REFUSAL, /own Splash Wallet/);
+  assert.match(TREASURY_CUSTODY_REFUSAL, /Treasury page/);
+  assert.doesNotMatch(TREASURY_CUSTODY_REFUSAL, /licen[cs]/i);
 });
 
 test('Zeke reads no Splash-held balance or treasury position in Phase 0', async () => {
@@ -176,12 +178,13 @@ test('Zeke reads no Splash-held balance or treasury position in Phase 0', async 
     for (const result of [balances, treasury]) {
       const json = JSON.stringify(result);
       for (const amount of FIXTURE_AMOUNTS) assert.ok(!json.includes(amount), `no fixture ${amount}`);
-      assert.match(json, /money-broking licence/, 'the read says why it is empty');
+      assert.match(json, /own Splash Wallet/, 'the read says where the treasury is');
+      assert.doesNotMatch(json, /licen[cs]/i, 'and cites no licence');
     }
   });
 });
 
-test('asking Zeke to move cash into Treasury is refused with the licence reason, before any proposal', async () => {
+test('asking Zeke to move cash into Treasury is refused, pointing at the wallet, before any proposal', async () => {
   const { resetOxwalFixtures, resetOxwalProposalStore } = await agent();
   resetOxwalFixtures();
   resetOxwalProposalStore();
@@ -192,7 +195,8 @@ test('asking Zeke to move cash into Treasury is refused with the licence reason,
       const events = await run({ message, orgId: 'org-verified' });
       assert.ok(events.some((e) => e.type === 'warning' && e.warning.code === 'LANE_LOCKED'), message);
       assert.equal(events.filter((e) => e.type === 'proposal').length, 0, message);
-      assert.match(text(events), /money-broking licence Splash does not hold yet/, message);
+      assert.match(text(events), /own Splash Wallet/, message);
+      assert.doesNotMatch(text(events), /licen[cs]/i, message);
     }
   });
 });
@@ -206,7 +210,8 @@ test('asking about treasury yield or balances gets the Phase 0 answer, not a Sma
       const events = await run({ message, orgId: 'org-verified' });
       const reply = text(events);
       assert.equal(events.filter((e) => e.type === 'proposal').length, 0, message);
-      assert.match(reply, /money-broking licence Splash does not hold yet/, message);
+      assert.match(reply, /own Splash Wallet/, message);
+      assert.doesNotMatch(reply, /licen[cs]/i, message);
       assert.doesNotMatch(reply, /Smart Treasury earns|allocate idle treasury|balances live on/, message);
     }
   });

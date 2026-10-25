@@ -228,11 +228,9 @@ test('Treasury does not say it is waiting for a licence while the nav opens it',
 
 /* ── The smaller findings ──────────────────────────────────────────── */
 
-test('cancelling a Treasury withdrawal is an error-toned button that reacts to hover', async () => {
+test('Treasury has no notice withdrawals to cancel: USDY is redeemed from the wallet (brief 5.7)', async () => {
   const treasury = await source('app/dashboard/treasury/page.tsx');
-  const button = treasury.slice(treasury.lastIndexOf('className', treasury.indexOf("'Yes, cancel'")), treasury.indexOf("'Yes, cancel'"));
-  assert.match(button, /bg-\[var\(--error\)\]/);
-  assert.match(button, /hover:brightness-90/);
+  assert.doesNotMatch(treasury, /'Yes, cancel'|Pending withdrawals|Withdraw on notice/);
 });
 
 test('the shell and header use tokens, not a peach hover or the old gold ink', async () => {
