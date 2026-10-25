@@ -1634,6 +1634,12 @@ export async function handlePayoutWebhook(input: WebhookInput): Promise<WebhookA
       const shortSet = { returnedMinor: total, failure: `short return: ${total} of ${row.amountMinor} USDC minor units came back`, updatedAt: at };
       // Straight back with no failure first: it did not pay out, so it is failed (forward only).
       const movedToFailed = from === 'failed' ? null : await store.moveWithdrawal(input.db, row.orgId, row.id, [from], { ...shortSet, status: 'failed' });
+      if (from !== 'failed' && !movedToFailed) {
+        // Another event moved the payout while this one read the chain: nothing is kept, and the retry counts.
+        await store.releaseReturn(input.db, row.orgId, row.id, returnDigest);
+        await store.releasePartnerEvent(input.db, adapter.id, event.eventId);
+        return { status: 503, body: { error: 'the payout moved while this return was read; retry' } };
+      }
       if (from === 'failed') await store.patchWithdrawal(input.db, row.orgId, row.id, shortSet);
       await store.recordWithdrawalEvent(input.db, { orgId: row.orgId, subject: 'withdrawal', subjectId: row.id, actor: `partner:${adapter.id}`, action: 'return_short', detail: { eventId: event.eventId, returnDigest, creditedMinor: credited.toString(), returnedMinor: total.toString(), amountMinor: row.amountMinor.toString() }, at });
       if (movedToFailed && row.partnerRef) {
@@ -1657,7 +1663,15 @@ export async function handlePayoutWebhook(input: WebhookInput): Promise<WebhookA
     }
     throw error;
   }
-  if (!moved) return { status: 200, body: { ignored: 'the withdrawal moved meanwhile' } };
+  if (!moved) {
+    // Another event moved the payout after this one read it. Nothing is kept
+    // (neither the event nor a return claim), so the partner's retry is read
+    // against the new status: a return after a failure still closes it, and
+    // a status that no longer moves anything is ignored then.
+    if (set.returnDigest) await store.releaseReturn(input.db, row.orgId, row.id, set.returnDigest);
+    await store.releasePartnerEvent(input.db, adapter.id, event.eventId);
+    return { status: 503, body: { error: 'the payout moved while this event was read; retry' } };
+  }
   await store.recordWithdrawalEvent(input.db, { orgId: row.orgId, subject: 'withdrawal', subjectId: row.id, actor: `partner:${adapter.id}`, action: to, detail: { eventId: event.eventId, ...(set.bankRef ? { bankRef: set.bankRef } : {}), ...(set.returnDigest ? { returnDigest: set.returnDigest } : {}) }, at });
   if (to === 'failed' && row.partnerRef) {
     // The USDC reached the partner and the bank payout failed: ask for it back, to the business wallet (asked again until accepted).

@@ -226,6 +226,11 @@ lib/payouts/partner.ts).
     would go backwards is ignored.
   - An event before the deposit is recorded answers 503, and the retry
     counts.
+  - An event that loses a race (another event moved the payout after this
+    one read it, for example a return still being read from the chain when
+    the failure lands) answers 503 and keeps nothing: neither its event id
+    nor a claim on a return digest. The retry is read against the new
+    status, so a return after a failure still closes the payout.
   - A failure asks the partner to return the USDC to the business wallet.
   - A return counts only when the chain shows the transaction sent by the
     deposit address, it is not the withdrawal's own digest, and it puts
