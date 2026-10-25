@@ -867,6 +867,23 @@ test("a webhook signed for one partner's route does not verify at another's", as
   }
 });
 
+test('the least-received amount stays within a small tolerance of the quote, so staff cannot tell the partner to pay at any rate', async () => {
+  const t = await setup();
+  const { beneficiary } = await readyToPay(t);
+  const q = await P.quotePartnerPayout(t.deps(), { beneficiaryId: beneficiary.id, amountMinor: '1000000000' });
+  assert.equal(q.ok, true, JSON.stringify(q));
+  const send = (acceptedReceiveMinor) => P.createPartnerPayout(t.deps(), 'u-founder', { clientKey: `ck_${hex32().slice(0, 16)}`, beneficiaryId: beneficiary.id, amountMinor: '1000000000', acceptedReceiveMinor, maxFeeMinor: q.quote.maxFeeMinor, purposeCode: 'SUPP', sourceOfFunds: 'business_revenue', remittanceInfo: 'INV-2026-0042', ...bundle() });
+  const quoted = BigInt(q.quote.receiveMinor);
+  for (const low of ['1', String(quoted / 2n), String((quoted * 95n) / 100n)]) {
+    const refused = await send(low);
+    assert.equal(refused.code, 'accepted_below_quote', `${low}: ${JSON.stringify(refused)}`);
+  }
+  assert.equal(t.partners.pdax.called('createPayout').length, 0, 'the partner was not instructed');
+  const ok = await send(String((quoted * 99n) / 100n));
+  assert.equal(ok.ok, true, JSON.stringify(ok));
+  await t.w.client.close();
+});
+
 test('a payout left in preparing (the flow died after the insert) is cancelled by the sweep and its instruction reversed by intent id', async () => {
   const t = await setup();
   const { beneficiary } = await readyToPay(t);
