@@ -65,8 +65,34 @@ Design: `docs/v2/phase2-funding.md`.
   `requireSessionAccount`); every store call takes the org; another org's
   ids read as 404. Owners alone change funding sources; viewers only read.
 - **Open:** live partner, route and Elliptic APIs; the conversion signing
-  request; EVM wallet proofs; a deposit watcher; holds do not bind a staff
-  member's own allowance spend.
+  request; EVM wallet proofs; holds do not bind a staff member's own
+  allowance spend.
+
+### Independent review of §4.3 — 2026-10-25
+
+Regression tests: `tests/wallet-funding-review.test.mjs` (red commit first),
+plus the second-approval case in `tests/spend-rules.test.mjs`. Migration
+`0039_wallet_funding_review`.
+
+| # | Severity | Finding | Status |
+|---|---|---|---|
+| F-1 | Critical | A CCTP mint credited the whole transaction's USDC inflow to the verified burner, so USDC a sanctioned relayer added in the same PTB cleared. **Fixed**: `cctpMint` credits the burner only from exactly one Circle `MessageReceived`, only when the burn's `mintRecipient` is the wallet, and only up to `amount - feeExecuted`; the rest is a separate `remainder` deposit attributed to the transaction sender and screened as the sender's. Two mints, another recipient or an unreadable body credit no burner. | Fixed |
+| F-2 | High | Holds failed open: a deposit nobody reported counted as spendable. **Fixed**: a deposit watcher (`syncWalletDeposits`) reads every transaction that touched the wallet (Sui GraphQL, oldest first, cursor and net USDC in `wallet_deposit_sync`) and records each arrival, screened and held or cleared. Before a payment, `walletFundsWithheld` runs it and withholds held + blocked USDC plus any balance beyond the net the watcher has seen; if the watcher cannot read the chain, no payment is built (`holds_unreadable`). | Fixed |
+| F-3 | High | Rotation moved held funds to an address with no holds, and the owners' second approval was built over held funds. **Fixed**: holds count by business, not address; the rotation transfer (sender = an earlier wallet of the business) is refused as a deposit (`own_wallet_transfer`) and only counted in the watcher's net; `openSecondApproval` runs the same hold check (`fundsOnHold`) as wallet and open-intent payments. | Fixed |
+| F-4 | High | Sandbox webhooks verified with a public fallback secret on any non-production deployment, and the order reference was the intent id's hash. **Fixed**: no fallback; a sandbox webhook needs `FUNDING_SANDBOX_WEBHOOKS_ENABLED=true` and a random `FUNDING_SANDBOX_WEBHOOK_SECRET` of at least 32 characters; the reference is an HMAC under a per-process key. | Fixed |
+| F-5 | Medium | Any deposit, dust or held, made a top-up `arrived`. **Fixed**: `arrived` only when cleared USDC for the top-up covers its quote's floor; otherwise `arriving`. A wallet top-up that named a source accepts only that source's money (`not_from_named_source`). | Fixed |
+| F-6 | Medium | Partner deliveries were not tied to the partner's address or the order amount. **Fixed**: a provider-channel deposit needs the transaction sender to be one of `FUNDING_PROVIDER_<ID>_SUI_SENDERS` (none configured, none accepted: `not_partner_delivery`); a webhook re-reads an earlier row only when it is held, was first read as a plain transfer or this partner's delivery, and covers the order. | Fixed |
+| F-7 | Medium | Bank fingerprints were unsalted SHA-256 of low-entropy data. **Fixed**: HMAC-SHA256 under `FUNDING_SOURCE_FINGERPRINT_KEY` (previous keys still matched); without a key no bank account is added. Partners report the paying account itself; Splash keys it on receipt and keeps neither number nor body. | Fixed |
+| F-8 | Low | Circle's event was matched by the emitting package, which on testnet is TokenMessengerMinter, so real mints were missed. **Fixed**: matched by the event type's original package and `receive_message::MessageReceived`, read from testnet. | Fixed |
+| F-9 | Low | The accepted quote was optional, USDT variants skipped the peg guard, slippage was not part of the idempotent request. **Fixed** (`accepted_quote_required`; any symbol naming USDT is guarded; slippage and the accepted floor are in the fingerprint). | Fixed |
+| F-10 | Low | Source changes left no trail; revocation was permanent. **Fixed**: append-only `funding_source_events` (trigger refuses UPDATE/DELETE); a revoked source can be added again as a new pending row. | Fixed |
+| — | Missing | With Elliptic and Chainalysis both set, Chainalysis's CLEAR was taken as the verdict. **Fixed**: Elliptic decides; a sanctions listing still blocks. | Fixed |
+
+A CCTP relayer (the transaction sender of a pure mint) is recorded but not
+screened against the minted part: `destinationCaller` is zero, so anyone can
+relay a business's mint, and blocking the business's own money for the
+relayer's listing would let any sanctioned address freeze it. What the
+relayer adds is the remainder, screened as theirs.
 
 ## v2 Phase 2 §4.1 — the Business Splash Wallet backend — 2026-10-25
 

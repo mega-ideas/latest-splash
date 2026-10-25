@@ -50,6 +50,51 @@ async function readFundingTransaction(digest: string): Promise<FundingChainTx | 
   };
 }
 
+const DIGESTS_QUERY = `query WalletDepositDigests($a: SuiAddress!, $first: Int!, $after: String) {
+  address(address: $a) {
+    transactions(first: $first, after: $after, relation: AFFECTED) {
+      pageInfo { hasNextPage endCursor }
+      nodes { digest }
+    }
+  }
+}`;
+const DIGESTS_PAGE = 50;
+
+/**
+ * Every transaction that touched `wallet`, oldest first, from Sui GraphQL
+ * (SUI_GRAPHQL_URL, else Mysten's endpoint for SUI_NETWORK). Checked against
+ * testnet on 25 Oct 2026. Throws on anything but a complete answer: the
+ * watcher then counts nothing as spendable.
+ */
+async function listWalletDigests(env: NodeJS.ProcessEnv, wallet: string, after: string | null) {
+  const { defaultGraphqlEndpoint } = await import('@/lib/fees/fee-config');
+  const res = await fetch(defaultGraphqlEndpoint(env), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ query: DIGESTS_QUERY, variables: { a: wallet, first: DIGESTS_PAGE, after } }),
+    signal: AbortSignal.timeout(8_000),
+    cache: 'no-store',
+  });
+  if (!res.ok) throw new Error(`the Sui indexer answered HTTP ${res.status}`);
+  const body = (await res.json()) as { data?: { address?: { transactions?: { pageInfo?: { hasNextPage?: boolean; endCursor?: string | null }; nodes?: Array<{ digest?: string }> } } | null }; errors?: unknown[] };
+  if (body.errors?.length) throw new Error('the Sui indexer refused the query');
+  const t = body.data?.address?.transactions;
+  if (!t) return { digests: [], cursor: after, hasMore: false };
+  const digests = (t.nodes ?? []).map((n) => n.digest).filter((d): d is string => typeof d === 'string' && d.length > 0);
+  return { digests, cursor: t.pageInfo?.endCursor ?? (digests.length ? null : after), hasMore: Boolean(t.pageInfo?.hasNextPage) };
+}
+
+/** The business's earlier wallets: every wallet Splash registered or confirmed for it, except the current one. */
+async function earlierWallets(db: DrizzleDb, orgId: string, current: () => Promise<string | null>): Promise<string[]> {
+  const { listSigningRequests } = await import('@/lib/server/wallet-signing-store');
+  const now = await current();
+  const executed = await listSigningRequests(db, orgId, ['executed']);
+  const all = executed
+    .filter((r) => (r.purpose === 'register_wallet' || r.purpose === 'confirm_wallet_rotation') && r.senderAddress)
+    .map((r) => normalizeSuiAddress(String(r.senderAddress)));
+  return [...new Set(all)].filter((a) => !now || a !== normalizeSuiAddress(now));
+}
+
 export function fundingDepsFor(input: { orgId: string; ctx: WalletContext; db: DrizzleDb }, env: NodeJS.ProcessEnv = process.env): FundingDeps {
   const { orgId, ctx, db } = input;
   const splash = [env.OPERATOR_SUI_ADDRESS, env.TREASURY_ADDRESS, env.SPLASH_TEST_RECIPIENT_ADDRESS, ctx.signing.sponsor?.address]
@@ -73,6 +118,8 @@ export function fundingDepsFor(input: { orgId: string; ctx: WalletContext; db: D
     coinTypes: { USDC: normalizeStructTag(walletUsdcType(env)), USDT: usdt, USDSUI: usdsui },
     splashAddresses: splash,
     signedPartners: parseSignedPartners(env.SIGNED_PARTNERS),
+    listWalletDigests: (wallet, after) => listWalletDigests(env, wallet, after),
+    earlierWallets: () => earlierWallets(db, orgId, async () => (await ctx.readAccount()).wallet),
   };
 }
 

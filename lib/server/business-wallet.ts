@@ -109,11 +109,13 @@ export type WalletContext = {
   /** USDC held at an address: in coin objects and in its address balance. */
   readUsdc?: (address: string) => Promise<{ coinMinor: bigint; addressBalanceMinor: bigint }>;
   /**
-   * USDC in deposits held or blocked at this wallet (v2 §4.3): funds from an
-   * unverified source, unscreened or flagged. A payment Splash builds never
-   * spends them.
+   * USDC a payment from this wallet may not use (v2 §4.3), given the balance
+   * just read: every held or blocked deposit of the business (at any of its
+   * wallets, so holds survive a rotation) plus anything the balance shows
+   * beyond what the deposit watcher has accounted for. The live context runs
+   * the watcher first. A payment Splash builds never spends it.
    */
-  heldUsdc?: (wallet: string) => Promise<bigint>;
+  heldUsdc?: (wallet: string, balanceMinor: bigint) => Promise<bigint>;
   /** Whether plain USDC transfers go through the gasless lane (STABLECOIN_GASLESS). */
   gasless?: () => boolean;
   /** Epoch and chain id for a gasless transfer's ValidDuring window. */
@@ -470,6 +472,9 @@ export async function cancelWalletRotation(ctx: WalletContext, input: { orgId: s
  * one plain transfer (gasless when STABLECOIN_GASLESS is on). Nothing is
  * asked for when it holds nothing. Allowances the old wallet funded name it
  * as funder and are revoked and reissued with the spending rules (§4.2).
+ * Held and blocked USDC moves with the rest, and stays held: holds count by
+ * business, not by address (lib/server/wallet-funding-store.ts heldUsdcMinor),
+ * and the transfer itself is never recorded as a new deposit.
  */
 export async function requestRotationTransfer(
   ctx: WalletContext,
@@ -529,22 +534,17 @@ export async function changeWalletMembership(
 }
 
 /**
- * Held funds are not spent (v2 §4.3). When any USDC at the wallet is held,
- * a payment is built only if the wallet's USDC less the held amount covers
- * principal plus the fee bound. Splash cannot freeze a wallet it has no key
- * to; it refuses to build, sponsor or route a payment that would use held
- * funds.
+ * Held funds are not spent (v2 §4.3). The wallet's USDC is read first, then
+ * what of it is withheld (held, blocked, or not yet accounted for by the
+ * deposit watcher, for that same balance); a payment is built only if the
+ * rest covers principal plus the fee bound. Splash cannot freeze a wallet it
+ * has no key to; it refuses to build, sponsor or route a payment that would
+ * use held funds. Every Splash-built spend path calls this: wallet payments,
+ * open-intent payments and the owners' second approval of a rule payment.
  */
-async function holdsAllow(ctx: WalletContext, wallet: string, needMinor: bigint): Promise<PlanFailure | null> {
+export async function fundsOnHold(ctx: WalletContext, wallet: string, needMinor: bigint): Promise<PlanFailure | null> {
   if (!ctx.heldUsdc) return null;
-  let held: bigint;
-  try {
-    held = await ctx.heldUsdc(wallet);
-  } catch {
-    return refuse(503, 'holds_unreadable', 'held deposits could not be read, so no payment was built');
-  }
-  if (held <= 0n) return null;
-  if (!ctx.readUsdc) return refuse(409, 'funds_on_hold', 'some funds in this wallet are on hold, and its balance could not be read, so no payment was built');
+  if (!ctx.readUsdc) return refuse(503, 'balance_unreadable', 'the wallet balance cannot be read here, so what is on hold cannot be checked and no payment was built');
   let balance: bigint;
   try {
     const b = await ctx.readUsdc(wallet);
@@ -552,6 +552,13 @@ async function holdsAllow(ctx: WalletContext, wallet: string, needMinor: bigint)
   } catch {
     return refuse(502, 'balance_unreadable', 'the wallet balance could not be read, so no payment was built');
   }
+  let held: bigint;
+  try {
+    held = await ctx.heldUsdc(wallet, balance);
+  } catch {
+    return refuse(503, 'holds_unreadable', 'held deposits could not be read, so no payment was built');
+  }
+  if (held <= 0n) return null;
   const spendable = balance > held ? balance - held : 0n;
   if (needMinor > spendable) {
     return refuse(409, 'funds_on_hold', 'this payment would use funds that are on hold until their source is verified and screened', { heldMinor: held.toString(), spendableMinor: spendable.toString() });
@@ -564,7 +571,7 @@ export async function requestWalletPayment(
   ctx: WalletContext,
   input: { orgId: string; requestedBy: string; wallet: WalletMembers; payment: Omit<WalletPayment, 'wallet' | 'account' | 'gas'> },
 ): Promise<Result> {
-  const onHold = await holdsAllow(ctx, registration(input.wallet).address, input.payment.amountMinor + input.payment.maxFeeMinor);
+  const onHold = await fundsOnHold(ctx, registration(input.wallet).address, input.payment.amountMinor + input.payment.maxFeeMinor);
   if (onHold) return onHold;
   const gas = await sponsoredGas(ctx);
   if (!gas) return refuse(503, 'no_sponsor', 'business wallet transactions need a gas sponsor, and none is configured');
@@ -627,7 +634,7 @@ export async function requestOpenIntentPayment(
   if (intent.kind === V2_KIND.CROSS_CHAIN) {
     return refuse(400, 'cross_chain_not_built', 'a cross-chain payment is paid through a bridge adapter, which is not registered yet');
   }
-  const onHold = await holdsAllow(ctx, registration(input.wallet).address, intent.amountMinor + input.maxFeeMinor);
+  const onHold = await fundsOnHold(ctx, registration(input.wallet).address, intent.amountMinor + input.maxFeeMinor);
   if (onHold) return onHold;
   const gas = await sponsoredGas(ctx);
   if (!gas) return refuse(503, 'no_sponsor', 'business wallet transactions need a gas sponsor, and none is configured');

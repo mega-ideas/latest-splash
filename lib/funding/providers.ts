@@ -20,12 +20,19 @@
  * Fees: a partner's fee is the partner's, from the partner's quote, shown as
  * its own line and never marked up. Splash adds no line to a top-up.
  *
- * Idempotency: the funding intent's id is the order's idempotency key (and
- * the sandbox's order reference is derived from it), so a retried create
- * makes the same order, never a second one.
+ * Idempotency: the funding intent's id is the order's idempotency key (the
+ * sandbox's order reference is an HMAC of it under a per-process key, so it
+ * cannot be worked out from the id), so a retried create makes the same
+ * order, never a second one.
+ *
+ * Deliveries: a partner delivers from its own Sui addresses
+ * (`providerDeliveryAddresses`); a transfer from anywhere else is not the
+ * partner's, whatever a webhook says.
  */
 
-import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+
+import { normalizeSuiAddress } from '@mysten/sui/utils';
 
 import { isProductionRuntime } from '../server/runtime-mode.ts';
 import type { PartnerId } from '../partners/signed-partners.ts';
@@ -68,14 +75,19 @@ export type ProviderOrder = {
   sandbox: boolean;
 };
 
-/** Who paid, as the partner reports it. Never the full account or card number. */
-export type ReportedPayer = {
-  kind: 'bank_account' | 'card';
-  /** For a bank account: its fingerprint from bankAccountIdentity. For a card: the partner's card fingerprint. */
-  fingerprint: string;
-  holderName: string;
-  last4: string;
-};
+/**
+ * Who paid, as the partner reports it (the payer-matching contract, per
+ * partner, docs/v2/phase2-funding.md):
+ *   bank_account  the paying account itself (country, bank code, number) as
+ *                 the partner received it. Splash turns it into its keyed
+ *                 fingerprint on receipt and keeps neither the number nor
+ *                 the webhook body.
+ *   card          the partner's own card fingerprint and last four digits,
+ *                 the same values the business added the card with.
+ */
+export type ReportedPayer =
+  | { kind: 'bank_account'; country: string; bankCode: string; accountNumber: string; holderName: string; last4: string }
+  | { kind: 'card'; fingerprint: string; holderName: string; last4: string };
 
 export type ProviderEvent = {
   eventId: string;
@@ -119,13 +131,27 @@ export interface FundingProviderAdapter {
   verifyWebhook(input: { rawBody: string; signature: string | null; now: Date }): ProviderEvent;
 }
 
-const PROVIDERS: Record<FundingProviderId, { partner: PartnerId; methods: readonly FundingMethod[]; credentials: readonly string[]; enabledFlag: string; enabledByDefault: boolean }> = {
-  halliday: { partner: 'halliday', methods: ['bank', 'card'], credentials: ['HALLIDAY_API_KEY', 'HALLIDAY_WEBHOOK_SECRET'], enabledFlag: 'FUNDING_PROVIDER_HALLIDAY_ENABLED', enabledByDefault: true },
-  stripe: { partner: 'stripe', methods: ['card', 'bank'], credentials: ['STRIPE_SECRET_KEY', 'STRIPE_FUNDING_WEBHOOK_SECRET'], enabledFlag: 'FUNDING_PROVIDER_STRIPE_ENABLED', enabledByDefault: true },
-  transfi: { partner: 'transfi', methods: ['bank', 'card'], credentials: ['TRANSFI_API_KEY', 'TRANSFI_WEBHOOK_SECRET'], enabledFlag: 'FUNDING_PROVIDER_TRANSFI_ENABLED', enabledByDefault: true },
+const PROVIDERS: Record<FundingProviderId, { partner: PartnerId; methods: readonly FundingMethod[]; credentials: readonly string[]; enabledFlag: string; enabledByDefault: boolean; sendersEnv: string }> = {
+  halliday: { partner: 'halliday', methods: ['bank', 'card'], credentials: ['HALLIDAY_API_KEY', 'HALLIDAY_WEBHOOK_SECRET'], enabledFlag: 'FUNDING_PROVIDER_HALLIDAY_ENABLED', enabledByDefault: true, sendersEnv: 'FUNDING_PROVIDER_HALLIDAY_SUI_SENDERS' },
+  stripe: { partner: 'stripe', methods: ['card', 'bank'], credentials: ['STRIPE_SECRET_KEY', 'STRIPE_FUNDING_WEBHOOK_SECRET'], enabledFlag: 'FUNDING_PROVIDER_STRIPE_ENABLED', enabledByDefault: true, sendersEnv: 'FUNDING_PROVIDER_STRIPE_SUI_SENDERS' },
+  transfi: { partner: 'transfi', methods: ['bank', 'card'], credentials: ['TRANSFI_API_KEY', 'TRANSFI_WEBHOOK_SECRET'], enabledFlag: 'FUNDING_PROVIDER_TRANSFI_ENABLED', enabledByDefault: true, sendersEnv: 'FUNDING_PROVIDER_TRANSFI_SUI_SENDERS' },
   // In talks (D7): the adapter exists so the interface is whole; off by default.
-  bridge: { partner: 'bridge', methods: ['bank'], credentials: ['BRIDGE_API_KEY', 'BRIDGE_WEBHOOK_SECRET'], enabledFlag: 'FUNDING_PROVIDER_BRIDGE_ENABLED', enabledByDefault: false },
+  bridge: { partner: 'bridge', methods: ['bank'], credentials: ['BRIDGE_API_KEY', 'BRIDGE_WEBHOOK_SECRET'], enabledFlag: 'FUNDING_PROVIDER_BRIDGE_ENABLED', enabledByDefault: false, sendersEnv: 'FUNDING_PROVIDER_BRIDGE_SUI_SENDERS' },
 };
+
+/**
+ * The Sui addresses a partner delivers USDC from (FUNDING_PROVIDER_<ID>_SUI_SENDERS,
+ * comma-separated, from the partner's own documentation or contract). A
+ * delivery is the partner's only when the transaction's sender is one of
+ * them; with none configured, nothing is the partner's (fails closed).
+ */
+export function providerDeliveryAddresses(id: FundingProviderId, env: NodeJS.ProcessEnv = process.env): string[] {
+  return (env[PROVIDERS[id].sendersEnv] ?? '')
+    .split(',')
+    .map((a) => a.trim())
+    .filter((a) => /^0x[0-9a-fA-F]{1,64}$/.test(a))
+    .map((a) => normalizeSuiAddress(a));
+}
 
 function flag(env: NodeJS.ProcessEnv, key: string, fallback: boolean): boolean {
   const v = (env[key] ?? '').trim().toLowerCase();
@@ -185,34 +211,51 @@ function parseEvent(id: FundingProviderId, rawBody: string): ProviderEvent {
     throw new WebhookRejected('The webhook is missing its event, order or intent id.', 'bad_body');
   }
   const digest = str('suiDigest');
-  const payer = body.payer as Record<string, unknown> | undefined;
+  const raw = body.payer as Record<string, unknown> | undefined;
   const occurredAt = new Date(str('occurredAt'));
+  let payer: ReportedPayer | undefined;
+  if (raw && typeof raw === 'object') {
+    const field = (k: string) => String(raw[k] ?? '');
+    payer = raw.kind === 'card'
+      ? { kind: 'card', fingerprint: field('fingerprint'), holderName: field('holderName'), last4: field('last4') }
+      : { kind: 'bank_account', country: field('country'), bankCode: field('bankCode'), accountNumber: field('accountNumber'), holderName: field('holderName'), last4: field('last4') };
+  }
   return {
     eventId,
     providerRef,
     intentId,
     status: status as ProviderEvent['status'],
     ...(digest ? { suiDigest: digest } : {}),
-    ...(payer && typeof payer === 'object'
-      ? {
-          payer: {
-            kind: payer.kind === 'card' ? 'card' : 'bank_account',
-            fingerprint: String(payer.fingerprint ?? ''),
-            holderName: String(payer.holderName ?? ''),
-            last4: String(payer.last4 ?? ''),
-          },
-        }
-      : {}),
+    ...(payer ? { payer } : {}),
     occurredAt: Number.isNaN(occurredAt.getTime()) ? new Date(0) : occurredAt,
   };
 }
 
 // ─── Sandbox ────────────────────────────────────────────────────────────────
 
-/** The sandbox's webhook secret: FUNDING_SANDBOX_WEBHOOK_SECRET, or a fixed one. Outside production only. */
+/** The least length of the sandbox webhook secret: 32 characters, random. */
+export const SANDBOX_WEBHOOK_SECRET_MIN_LENGTH = 32;
+
+/**
+ * The sandbox's webhook secret, or '' (no sandbox webhook is accepted).
+ * Only when FUNDING_SANDBOX_WEBHOOKS_ENABLED is true and
+ * FUNDING_SANDBOX_WEBHOOK_SECRET is a random value of at least 32
+ * characters. There is no fallback: no string in the repository signs
+ * anything, on any deployment. Outside production only (the live adapter
+ * never reads it).
+ */
 export function sandboxWebhookSecret(env: NodeJS.ProcessEnv = process.env): string {
-  return env.FUNDING_SANDBOX_WEBHOOK_SECRET || 'splash-sandbox-funding-webhook';
+  if ((env.FUNDING_SANDBOX_WEBHOOKS_ENABLED ?? '').trim().toLowerCase() !== 'true') return '';
+  const secret = (env.FUNDING_SANDBOX_WEBHOOK_SECRET ?? '').trim();
+  return secret.length >= SANDBOX_WEBHOOK_SECRET_MIN_LENGTH ? secret : '';
 }
+
+/**
+ * The key the sandbox's order references are made with: random per process,
+ * so a reference cannot be worked out from an intent id (a webhook must name
+ * both). The intent stores the reference it got.
+ */
+const SANDBOX_ORDER_KEY = randomBytes(32);
 
 /** The sandbox's fixed order fee: one USDC, whatever the size. A sandbox number, never a partner's. */
 const SANDBOX_ORDER_FEE_MINOR = 1_000_000n;
@@ -247,8 +290,10 @@ function sandboxAdapter(id: FundingProviderId, env: NodeJS.ProcessEnv): FundingP
     },
     async createOrder({ intentId, method }) {
       assertMethod(method);
-      // Derived from the intent id: the same intent always names the same order.
-      const providerRef = `sb_${id}_${createHash('sha256').update(intentId).digest('hex').slice(0, 20)}`;
+      // Keyed by the intent id under a key nobody outside this process knows:
+      // the same intent names the same order, and the reference cannot be
+      // worked out from the intent id.
+      const providerRef = `sb_${id}_${createHmac('sha256', SANDBOX_ORDER_KEY).update(intentId).digest('hex').slice(0, 24)}`;
       const next: ProviderNextAction = method === 'card'
         ? { kind: 'redirect', url: `/dashboard/wallet?sandbox-checkout=${encodeURIComponent(providerRef)}` }
         : { kind: 'bank_transfer', reference: providerRef, note: 'Sandbox: no bank transfer is made. Nothing arrives until a sandbox delivery is recorded.' };

@@ -12,5 +12,5 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
   const limited = await limitFunding(gate.funding);
   if (limited) return limited;
   const { id } = await params;
-  return fundingResponse(await revokeFundingSource(gate.funding.deps, id));
+  return fundingResponse(await revokeFundingSource(gate.funding.deps, id, gate.funding.route.authority.userId));
 }

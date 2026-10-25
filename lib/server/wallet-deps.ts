@@ -240,9 +240,13 @@ export async function liveWalletContext(orgId: string): Promise<{ ok: true; ctx:
       const { balance } = await suiClient.core.getBalance({ owner, coinType: usdcType });
       return { coinMinor: BigInt(balance.coinBalance), addressBalanceMinor: BigInt(balance.addressBalance) };
     },
-    heldUsdc: async (wallet) => {
-      const { heldUsdcMinor } = await import('@/lib/server/wallet-funding-store');
-      return heldUsdcMinor(db, { orgId, walletAddress: normalizeSuiAddress(wallet), usdcType: normalizeStructTag(usdcType) });
+    // Holds fail closed (v2 §4.3): the deposit watcher reads every transaction
+    // to the wallet first, then held, blocked and unaccounted USDC is withheld.
+    heldUsdc: async (wallet, balanceMinor) => {
+      const [{ fundingDepsFor }, { walletFundsWithheld }] = await Promise.all([import('@/lib/server/wallet-funding-deps'), import('@/lib/server/wallet-funding')]);
+      const withheld = await walletFundsWithheld(fundingDepsFor({ orgId, ctx, db }), balanceMinor, normalizeSuiAddress(wallet));
+      if (!withheld.ok) throw new Error(withheld.error);
+      return BigInt(withheld.withheldMinor);
     },
     gasless: () => gaslessEnabled(),
     validity: async () => {

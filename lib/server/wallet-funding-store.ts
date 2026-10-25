@@ -6,9 +6,11 @@
  * before it knows whose order it is (`intentForWebhook`, the event ledger),
  * and both return the row's own org for the caller to act within.
  */
-import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 
-import { fundingIntents, fundingProviderEvents, fundingSourceChallenges, fundingSources, walletDeposits } from '../db/schema.ts';
+import { randomUUID } from 'node:crypto';
+
+import { fundingIntents, fundingProviderEvents, fundingSourceChallenges, fundingSourceEvents, fundingSources, walletDepositSync, walletDeposits } from '../db/schema.ts';
 import type { DepositStatus, FundingChannel, FundingSourceKind, HoldReason, IntentStatus, SourceStatus } from '../funding/wallet-funding.ts';
 import type { KytScreening } from '../compliance/kyt.ts';
 import type { DrizzleDb } from './wallet-signing-store.ts';
@@ -29,22 +31,54 @@ export async function getSource(db: DrizzleDb, orgId: string, id: string): Promi
   return row ?? null;
 }
 
-export async function sourceByFingerprint(db: DrizzleDb, orgId: string, kind: FundingSourceKind, fingerprint: string): Promise<SourceRow | null> {
+/**
+ * The source with this fingerprint (any of several, for a bank account
+ * fingerprinted under a current and a previous key): the live row when
+ * there is one, else the newest revoked one, so a deposit from a revoked
+ * source is still seen as revoked.
+ */
+export async function sourceByFingerprint(db: DrizzleDb, orgId: string, kind: FundingSourceKind, fingerprint: string | string[]): Promise<SourceRow | null> {
+  const fps = Array.isArray(fingerprint) ? fingerprint : [fingerprint];
+  if (fps.length === 0) return null;
   const [row] = await db
     .select()
     .from(fundingSources)
-    .where(and(eq(fundingSources.orgId, orgId), eq(fundingSources.kind, kind), eq(fundingSources.fingerprint, fingerprint)))
+    .where(and(eq(fundingSources.orgId, orgId), eq(fundingSources.kind, kind), inArray(fundingSources.fingerprint, fps)))
+    .orderBy(sql`(${fundingSources.status} = 'revoked')`, desc(fundingSources.createdAt))
     .limit(1);
   return row ?? null;
 }
 
-/** Insert a source once; the existing row when it is already there. */
+/** Insert a source once (one live row per fingerprint); the live row when it is already there. */
 export async function insertSource(db: DrizzleDb, row: typeof fundingSources.$inferInsert): Promise<{ row: SourceRow; created: boolean }> {
   const [inserted] = await db.insert(fundingSources).values(row).onConflictDoNothing().returning();
   if (inserted) return { row: inserted, created: true };
   const existing = await sourceByFingerprint(db, row.orgId, row.kind as FundingSourceKind, row.fingerprint);
-  if (!existing) throw new Error('the funding source could not be stored');
+  if (!existing || existing.status === 'revoked') throw new Error('the funding source could not be stored');
   return { row: existing, created: false };
+}
+
+/** One entry in a source's append-only trail. */
+export async function recordSourceEvent(
+  db: DrizzleDb,
+  e: { orgId: string; sourceId: string; actorUserId: string; action: 'added' | 'verified' | 'revoked' | 'first_use_passed' | 'first_use_failed'; evidenceSha256?: string | null; detail?: Record<string, unknown>; at: Date },
+): Promise<void> {
+  await db.insert(fundingSourceEvents).values({
+    id: `fse_${randomUUID()}`,
+    orgId: e.orgId,
+    sourceId: e.sourceId,
+    actorUserId: e.actorUserId,
+    action: e.action,
+    evidenceSha256: e.evidenceSha256 ?? null,
+    detail: e.detail ?? {},
+    createdAt: e.at,
+  });
+}
+
+export async function listSourceEvents(db: DrizzleDb, orgId: string, sourceId?: string) {
+  const where = [eq(fundingSourceEvents.orgId, orgId)];
+  if (sourceId) where.push(eq(fundingSourceEvents.sourceId, sourceId));
+  return db.select().from(fundingSourceEvents).where(and(...where)).orderBy(asc(fundingSourceEvents.seq));
 }
 
 export async function updateSource(
@@ -180,16 +214,18 @@ export type NewDeposit = {
   screening: KytScreening;
   firstUse: boolean;
   arrivedAt: Date | null;
+  /** arrival, or the remainder of a mixed CCTP transaction. */
+  part: 'arrival' | 'remainder';
 };
 
-/** Record a deposit once per (digest, wallet, coin type); the existing row on a repeat. */
+/** Record a deposit once per (digest, wallet, coin type, part); the existing row on a repeat. */
 export async function insertDeposit(db: DrizzleDb, row: NewDeposit): Promise<{ row: DepositRow; created: boolean }> {
   const [inserted] = await db.insert(walletDeposits).values(row).onConflictDoNothing().returning();
   if (inserted) return { row: inserted, created: true };
   const [existing] = await db
     .select()
     .from(walletDeposits)
-    .where(and(eq(walletDeposits.suiDigest, row.suiDigest), eq(walletDeposits.walletAddress, row.walletAddress), eq(walletDeposits.coinType, row.coinType)))
+    .where(and(eq(walletDeposits.suiDigest, row.suiDigest), eq(walletDeposits.walletAddress, row.walletAddress), eq(walletDeposits.coinType, row.coinType), eq(walletDeposits.part, row.part)))
     .limit(1);
   if (!existing) throw new Error('the deposit could not be stored');
   if (existing.orgId !== row.orgId) throw new Error('that deposit belongs to another business');
@@ -234,20 +270,98 @@ export async function reattributeDeposit(
   return row ?? null;
 }
 
-/** USDC in held or blocked deposits still counted against this wallet. */
-export async function heldUsdcMinor(db: DrizzleDb, input: { orgId: string; walletAddress: string; usdcType: string }): Promise<bigint> {
+/** Name the top-up a deposit recorded without one was for. Only while it names none. */
+export async function attachDepositIntent(db: DrizzleDb, input: { orgId: string; id: string; intentId: string; now: Date }): Promise<DepositRow | null> {
+  const [row] = await db
+    .update(walletDeposits)
+    .set({ intentId: input.intentId, updatedAt: input.now })
+    .where(and(eq(walletDeposits.orgId, input.orgId), eq(walletDeposits.id, input.id), isNull(walletDeposits.intentId)))
+    .returning();
+  return row ?? null;
+}
+
+/**
+ * USDC in held or blocked deposits of this business, at ANY of its wallets:
+ * a rotation moves the old wallet's funds to the new one, and the holds go
+ * with them. (A held deposit still sitting at an old address is counted
+ * against the new wallet too, which only ever withholds more.)
+ */
+export async function heldUsdcMinor(db: DrizzleDb, input: { orgId: string; usdcType: string; walletAddress?: string }): Promise<bigint> {
   const [row] = await db
     .select({ total: sql<string>`coalesce(sum(${walletDeposits.amountMinor}), 0)::text` })
     .from(walletDeposits)
     .where(
       and(
         eq(walletDeposits.orgId, input.orgId),
-        eq(walletDeposits.walletAddress, input.walletAddress),
         eq(walletDeposits.coinType, input.usdcType),
         inArray(walletDeposits.status, ['held', 'blocked']),
       ),
     );
   return BigInt(row?.total ?? '0');
+}
+
+/** A top-up's USDC deposits so far, cleared and not (held or blocked). */
+export async function intentUsdcTotals(db: DrizzleDb, input: { orgId: string; intentId: string; usdcType: string }): Promise<{ clearedMinor: bigint; heldMinor: bigint; count: number }> {
+  const rows = await db
+    .select({ status: walletDeposits.status, total: sql<string>`coalesce(sum(${walletDeposits.amountMinor}), 0)::text`, n: sql<number>`count(*)::int` })
+    .from(walletDeposits)
+    .where(and(eq(walletDeposits.orgId, input.orgId), eq(walletDeposits.intentId, input.intentId), eq(walletDeposits.coinType, input.usdcType)))
+    .groupBy(walletDeposits.status);
+  let clearedMinor = 0n;
+  let heldMinor = 0n;
+  let count = 0;
+  for (const r of rows) {
+    count += Number(r.n);
+    if (r.status === 'cleared') clearedMinor += BigInt(r.total);
+    else heldMinor += BigInt(r.total);
+  }
+  return { clearedMinor, heldMinor, count };
+}
+
+/** Whether any deposit (of any coin) was recorded for this top-up. */
+export async function intentHasDeposits(db: DrizzleDb, orgId: string, intentId: string): Promise<boolean> {
+  const [row] = await db.select({ id: walletDeposits.id }).from(walletDeposits).where(and(eq(walletDeposits.orgId, orgId), eq(walletDeposits.intentId, intentId))).limit(1);
+  return Boolean(row);
+}
+
+// ─── The deposit watcher's place in each wallet's history ──────────────────
+
+export type SyncRow = typeof walletDepositSync.$inferSelect;
+
+/** The watcher's row for this wallet, made at the start of its history when there is none. */
+export async function syncRow(db: DrizzleDb, input: { orgId: string; walletAddress: string; usdcType: string }): Promise<SyncRow> {
+  await db.insert(walletDepositSync).values({ orgId: input.orgId, walletAddress: input.walletAddress, usdcType: input.usdcType }).onConflictDoNothing();
+  const [row] = await db.select().from(walletDepositSync).where(and(eq(walletDepositSync.orgId, input.orgId), eq(walletDepositSync.walletAddress, input.walletAddress))).limit(1);
+  if (!row) throw new Error('the deposit watcher could not be stored');
+  return row;
+}
+
+/**
+ * Move the watcher past one page: only from the cursor it read, so two
+ * watchers running at once count each transaction once (the loser re-reads).
+ */
+export async function advanceSync(
+  db: DrizzleDb,
+  input: { orgId: string; walletAddress: string; fromCursor: string | null; toCursor: string | null; netDeltaMinor: bigint; txs: number; now: Date },
+): Promise<boolean> {
+  const where = [eq(walletDepositSync.orgId, input.orgId), eq(walletDepositSync.walletAddress, input.walletAddress)];
+  where.push(input.fromCursor === null ? isNull(walletDepositSync.cursor) : eq(walletDepositSync.cursor, input.fromCursor));
+  const rows = await db
+    .update(walletDepositSync)
+    .set({
+      cursor: input.toCursor,
+      netUsdcMinor: sql`${walletDepositSync.netUsdcMinor} + ${input.netDeltaMinor.toString()}::bigint`,
+      txCount: sql`${walletDepositSync.txCount} + ${input.txs}`,
+      syncedAt: input.now,
+      updatedAt: input.now,
+    })
+    .where(and(...where))
+    .returning({ cursor: walletDepositSync.cursor });
+  return rows.length > 0;
+}
+
+export async function touchSync(db: DrizzleDb, input: { orgId: string; walletAddress: string; now: Date }): Promise<void> {
+  await db.update(walletDepositSync).set({ syncedAt: input.now, updatedAt: input.now }).where(and(eq(walletDepositSync.orgId, input.orgId), eq(walletDepositSync.walletAddress, input.walletAddress)));
 }
 
 // ─── Partner webhooks, once each ────────────────────────────────────────────

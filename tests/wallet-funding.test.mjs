@@ -35,7 +35,7 @@ import { migratedDb } from './helpers/store-db.mjs';
 import { softPasskey } from './fixtures/soft-passkey.mjs';
 import * as schema from '../lib/db/schema.ts';
 import { kytProviderFromEnv } from '../lib/compliance/kyt.ts';
-import { bankAccountIdentity, decideDeposit, canAdvanceIntent, canMoveDeposit, sameCompany, normalizeCompanyName, spendableAfterHolds, walletProofMessage } from '../lib/funding/wallet-funding.ts';
+import { decideDeposit, canAdvanceIntent, canMoveDeposit, sameCompany, normalizeCompanyName, spendableAfterHolds, walletProofMessage } from '../lib/funding/wallet-funding.ts';
 import { fundingProvider, sandboxWebhookSecret, signWebhook, verifySignedWebhook, FundingProviderUnavailable, WEBHOOK_TOLERANCE_SECONDS } from '../lib/funding/providers.ts';
 import { swapRoute, SwapRouteUnavailable } from '../lib/funding/swap-routes.ts';
 import { CCTP_SUI_MESSAGE_TRANSMITTER, decodeBurnMessageV2, burnerAddress } from '../lib/payments/cctp.ts';
@@ -68,7 +68,13 @@ const USDSUI = normalizeStructTag('0x44f838219cf67b058f3b37907b655f226153c18e33d
 const ACME_WALLET = normalizeSuiAddress(`0x${'a1'.repeat(32)}`);
 const NORTH_WALLET = normalizeSuiAddress(`0x${'b2'.repeat(32)}`);
 const OPERATOR = normalizeSuiAddress(`0x${'0e'.repeat(32)}`);
+/** The partner's own Sui delivery address (screens clear in the sandbox). */
+const STRIPE_SENDER = normalizeSuiAddress(`0x${'57'.repeat(30)}c1ea`);
 const T0 = new Date('2026-10-25T08:00:00Z');
+const FP_KEY = toHex(randomBytes(24));
+const SANDBOX_SECRET = toHex(randomBytes(32));
+/** The test server: a fingerprint key, sandbox webhooks on with a random secret, the partner's sending address. */
+const ENV = { NODE_ENV: 'test', FUNDING_SOURCE_FINGERPRINT_KEY: FP_KEY, FUNDING_SANDBOX_WEBHOOKS_ENABLED: 'true', FUNDING_SANDBOX_WEBHOOK_SECRET: SANDBOX_SECRET, FUNDING_PROVIDER_STRIPE_SUI_SENDERS: STRIPE_SENDER };
 
 const digest = () => toBase58(randomBytes(32));
 /** An address the sandbox screens as clear / a sanctions hit / needing review. */
@@ -86,7 +92,7 @@ async function world() {
   const deps = (orgId, overrides = {}) => ({
     db,
     orgId,
-    env: { NODE_ENV: 'test' },
+    env: ENV,
     now: () => clock,
     network: 'testnet',
     readWallet: async () => wallets[orgId],
@@ -240,7 +246,7 @@ test('a fresh quote worse than the accepted one is refused and nothing is made',
 
 test('a top-up is idempotent by its client key, and the partner order by the intent id', async () => {
   const w = await world();
-  const ask = { channel: 'provider', provider: 'halliday', method: 'bank', amount: '500', userId: 'u-maker', clientKey: 'k-idem-0001' };
+  const ask = { channel: 'provider', provider: 'halliday', method: 'bank', amount: '500', userId: 'u-maker', clientKey: 'k-idem-0001', acceptedArrivesMinMinor: '500000000' };
   assert.equal((await createFundingIntent(w.deps('acme'), { ...ask, clientKey: undefined })).code, 'idempotency_key_required');
   const [a, b] = await Promise.all([createFundingIntent(w.deps('acme'), ask), createFundingIntent(w.deps('acme'), ask)]);
   assert.equal(a.ok && b.ok, true, JSON.stringify([a, b]));
@@ -253,7 +259,7 @@ test('a top-up is idempotent by its client key, and the partner order by the int
   // The same key in another business is another business's key.
   const north = await createFundingIntent(w.deps('northwind'), ask);
   assert.notEqual(north.intent.id, a.intent.id);
-  // The partner reference is derived from the intent id: a retried order is the same order.
+  // The partner reference is keyed by the intent id (under a per-process key): a retried order is the same order.
   const order1 = await fundingProvider('halliday', { NODE_ENV: 'test' }).createOrder({ intentId: a.intent.id, method: 'bank', deliverMinor: 1n, walletAddress: ACME_WALLET, quoteRef: 'x', now: T0 });
   const order2 = await fundingProvider('halliday', { NODE_ENV: 'test' }).createOrder({ intentId: a.intent.id, method: 'bank', deliverMinor: 1n, walletAddress: ACME_WALLET, quoteRef: 'y', now: T0 });
   assert.equal(order1.providerRef, order2.providerRef);
@@ -344,7 +350,7 @@ test('a digest is recorded once, whoever reports it and however often', async ()
   assert.equal(results.filter((r) => r.deposits[0].created).length, 1);
   assert.equal(new Set(results.map((r) => r.deposits[0].id)).size, 1);
   assert.equal((await listWalletDeposits(w.deps('acme'))).length, 1);
-  assert.equal((await getFundingIntent(w.deps('acme'), intent.intent.id)).intent.status, 'arrived');
+  assert.equal((await getFundingIntent(w.deps('acme'), intent.intent.id)).intent.status, 'arriving', 'it came, from no known source, so it is held: arriving, not arrived');
 });
 
 test('nothing arrives unless the chain says so: failed, unknown, other coins, other wallets', async () => {
@@ -373,7 +379,7 @@ test("another business's top-ups, deposits and sources read as absent", async ()
   assert.equal((await recheckDeposit(north, dep.deposits[0].id)).status, 404);
   assert.equal((await walletSourceChallenge(north, src.source.id)).status, 404);
   assert.equal((await verifyWalletSource(north, { userId: 'x', sourceId: src.source.id, challengeId: 'fch_x', signature: 'x' })).status, 404);
-  assert.equal((await revokeFundingSource(north, src.source.id)).status, 404);
+  assert.equal((await revokeFundingSource(north, src.source.id, 'u-x')).status, 404);
   assert.equal((await recordDeposit(north, { digest: w.deliver({ to: NORTH_WALLET }), intentId: intent.intent.id })).status, 404);
   assert.equal((await createFundingIntent(north, { channel: 'wallet', amount: '1', userId: 'u', clientKey: 'k-tenant-002', sourceId: src.source.id })).status, 404);
   assert.deepEqual(await listWalletDeposits(north), []);
@@ -403,9 +409,12 @@ test('a bank account or card must be in the company’s name; no full number is 
   assert.equal((await addFundingSource(w.deps('acme'), 'u-owner', { kind: 'card', provider: 'stripe', providerFingerprint: 'fp_card_123456', last4: '4242', holderName: 'Someone Else' })).code, 'not_company_name');
   assert.equal((await addFundingSource(w.deps('acme'), 'u-owner', { kind: 'wallet', chain: 'SUI', address: ACME_WALLET })).code, 'own_wallet');
   assert.equal((await addFundingSource(w.deps('acme'), 'u-owner', { kind: 'wallet', chain: 'SUI', address: OPERATOR })).code, 'splash_address');
-  // A removed source is not added back.
-  await revokeFundingSource(w.deps('acme'), ok.source.id);
-  assert.equal((await addFundingSource(w.deps('acme'), 'u-owner', { kind: 'bank_account', holderName: 'Acme Trading Sdn Bhd', country: 'MY', bankCode: 'MBBEMYKL', accountNumber: '514012345678' })).code, 'source_closed');
+  // A removed source can be added back, as a new source waiting for its first use again.
+  await revokeFundingSource(w.deps('acme'), ok.source.id, 'u-owner');
+  const back = await addFundingSource(w.deps('acme'), 'u-owner', { kind: 'bank_account', holderName: 'Acme Trading Sdn Bhd', country: 'MY', bankCode: 'MBBEMYKL', accountNumber: '514012345678' });
+  assert.equal(back.created, true);
+  assert.notEqual(back.source.id, ok.source.id);
+  assert.equal(back.source.status, 'pending');
 });
 
 test('a wallet proof names the business, chain, address, nonce and expiry, and is single-use', async () => {
@@ -480,7 +489,7 @@ test("a CCTP V2 mint is attributed to the burner Circle's own event names", asyn
   assert.equal(burnerAddress('ETHEREUM', `0x${'ff'.repeat(32)}`), null, 'a 32-byte value that is not a padded EVM address is no burner');
 
   const added = await addFundingSource(w.deps('acme'), 'u-owner', { kind: 'wallet', chain: 'EVM', address: burner });
-  const circle = { packageId: CCTP_SUI_MESSAGE_TRANSMITTER.testnet, eventType: `${CCTP_SUI_MESSAGE_TRANSMITTER.testnet}::message_transmitter::MessageReceived`, json: { source_domain: 0, message_body: toBase64(body) } };
+  const circle = { packageId: CCTP_SUI_MESSAGE_TRANSMITTER.testnet, eventType: `${CCTP_SUI_MESSAGE_TRANSMITTER.testnet}::receive_message::MessageReceived`, json: { source_domain: 0, message_body: toBase64(body) } };
   const r = await recordDeposit(w.deps('acme'), { digest: w.deliver({ amount: 5_000_000n, events: [circle] }) });
   assert.equal(r.deposits[0].channel, 'cctp');
   assert.equal(r.deposits[0].originChain, 'ETHEREUM');
@@ -489,7 +498,7 @@ test("a CCTP V2 mint is attributed to the burner Circle's own event names", asyn
   assert.deepEqual(r.deposits[0].holdReasons, ['source_unverified'], 'an EVM wallet is not proven, so it is held');
 
   // The same event from any other package is not Circle's.
-  const fake = { ...circle, packageId: `0x${'99'.repeat(32)}`, eventType: `0x${'99'.repeat(32)}::message_transmitter::MessageReceived` };
+  const fake = { ...circle, packageId: `0x${'99'.repeat(32)}`, eventType: `0x${'99'.repeat(32)}::receive_message::MessageReceived` };
   const intent = await createFundingIntent(w.deps('acme'), { channel: 'cctp', amount: '5', sourceChain: 'ETHEREUM', userId: 'u', clientKey: 'k-cctp-0001' });
   assert.equal((await recordDeposit(w.deps('acme'), { digest: w.deliver({ events: [fake] }), intentId: intent.intent.id })).code, 'not_a_cctp_mint');
   const plain = await recordDeposit(w.deps('acme'), { digest: w.deliver({ events: [fake] }) });
@@ -502,21 +511,22 @@ async function providerWorld() {
   const w = await world();
   const bank = { holderName: 'Acme Trading Sdn Bhd', country: 'MY', bankCode: 'MBBEMYKL', accountNumber: '514012345678' };
   const src = await addFundingSource(w.deps('acme'), 'u-owner', { kind: 'bank_account', ...bank });
-  const intent = await createFundingIntent(w.deps('acme'), { channel: 'provider', provider: 'stripe', method: 'bank', amount: '250', userId: 'u', clientKey: 'k-hook-00001', sourceId: src.source.id });
+  const intent = await createFundingIntent(w.deps('acme'), { channel: 'provider', provider: 'stripe', method: 'bank', amount: '250', userId: 'u', clientKey: 'k-hook-00001', sourceId: src.source.id, acceptedArrivesMinMinor: '250000000' });
   assert.equal(intent.ok, true, JSON.stringify(intent));
   const ref = intent.intent.instructions.next.reference;
-  const env = { NODE_ENV: 'test' };
+  const env = ENV;
   const send = async (body, { at = w.now(), secret = sandboxWebhookSecret(env), provider = 'stripe' } = {}) => {
     const raw = JSON.stringify(body);
     return handleProviderWebhook({ provider, rawBody: raw, signature: signWebhook(raw, secret, at), env, now: w.now(), db: w.db }, async (orgId) => w.deps(orgId));
   };
-  const payer = { kind: 'bank_account', fingerprint: bankAccountIdentity(bank).fingerprint, holderName: 'ACME TRADING SDN. BHD.', last4: '5678' };
+  // The partner reports the paying account itself; Splash keys it and keeps nothing of the number.
+  const payer = { kind: 'bank_account', country: 'MY', bankCode: 'MBBEMYKL', accountNumber: '5140 1234 5678', holderName: 'ACME TRADING SDN. BHD.', last4: '5678' };
   return { ...w, src, intent: intent.intent, ref, send, payer, env };
 }
 
 test('a partner delivery is recorded from the chain; the first use verifies the bank account', async () => {
   const w = await providerWorld();
-  const d = w.deliver({ amount: 250_000_000n, sender: clearAddr() });
+  const d = w.deliver({ amount: 250_000_000n, sender: STRIPE_SENDER });
   const ev = { eventId: 'evt_000001', providerRef: w.ref, intentId: w.intent.id, status: 'delivered', suiDigest: d, payer: w.payer, occurredAt: w.now().toISOString() };
   const r = await w.send(ev);
   assert.equal(r.status, 200, JSON.stringify(r));
@@ -557,7 +567,7 @@ test('a webhook must be signed, fresh, and for its own order; a payer not in the
   const d = digest();
   const ev = { ...base, eventId: 'evt_100005', status: 'delivered', suiDigest: d, payer: { ...w.payer, holderName: 'A Different Company Ltd' } };
   assert.equal((await w.send(ev)).status, 503);
-  w.chain.set(d, { digest: d, success: true, sender: clearAddr(), timestampMs: 1, balanceChanges: [{ address: ACME_WALLET, coinType: USDC, amount: '250000000' }], events: [] });
+  w.chain.set(d, { digest: d, success: true, sender: STRIPE_SENDER, timestampMs: 1, balanceChanges: [{ address: ACME_WALLET, coinType: USDC, amount: '250000000' }], events: [] });
   assert.equal((await w.send(ev)).status, 200);
   const [dep] = await listWalletDeposits(w.deps('acme'));
   assert.equal(dep.status, 'held');
@@ -566,7 +576,7 @@ test('a webhook must be signed, fresh, and for its own order; a payer not in the
 
 test('a delivery someone recorded before the webhook is re-read with the partner’s facts', async () => {
   const w = await providerWorld();
-  const d = w.deliver({ amount: 250_000_000n });
+  const d = w.deliver({ amount: 250_000_000n, sender: STRIPE_SENDER });
   const early = await recordDeposit(w.deps('acme'), { digest: d });
   assert.equal(early.deposits[0].status, 'held');
   assert.deepEqual(early.deposits[0].holdReasons, ['source_unknown']);
@@ -586,7 +596,7 @@ test('a swap delivery is held: naming a proven wallet does not clear money the c
   const added = await addFundingSource(w.deps('acme'), 'u-owner', { kind: 'wallet', chain: 'SOLANA', address });
   const ch = await walletSourceChallenge(w.deps('acme'), added.source.id);
   await verifyWalletSource(w.deps('acme'), { userId: 'u', sourceId: added.source.id, challengeId: ch.challenge.id, signature: toBase58(await kp.sign(new TextEncoder().encode(ch.challenge.message))) });
-  const intent = await createFundingIntent(w.deps('acme'), { channel: 'swap', route: 'lifi', sourceChain: 'SOLANA', fromToken: 'SOL', fromDecimals: 9, amountIn: '10000000000', sourceId: added.source.id, userId: 'u', clientKey: 'k-swap-00001' });
+  const intent = await createFundingIntent(w.deps('acme'), { channel: 'swap', route: 'lifi', sourceChain: 'SOLANA', fromToken: 'SOL', fromDecimals: 9, amountIn: '10000000000', sourceId: added.source.id, userId: 'u', clientKey: 'k-swap-00001', acceptedArrivesMinMinor: '1' });
   assert.equal(intent.ok, true, JSON.stringify(intent));
   const r = await recordDeposit(w.deps('acme'), { digest: w.deliver({ amount: 9_000_000n }), intentId: intent.intent.id });
   assert.equal(r.deposits[0].status, 'held');
@@ -598,7 +608,7 @@ test('a CCTP mint reported against a plain wallet top-up is still read as a CCTP
   const w = await world();
   const intent = await createFundingIntent(w.deps('acme'), { channel: 'wallet', amount: '5', userId: 'u', clientKey: 'k-cctpw-0001' });
   const body = burnMessage({ sender20: '0x2222222222222222222222222222222222222222', recipient: ACME_WALLET, amount: 5_000_000n });
-  const circle = { packageId: CCTP_SUI_MESSAGE_TRANSMITTER.testnet, eventType: `${CCTP_SUI_MESSAGE_TRANSMITTER.testnet}::message_transmitter::MessageReceived`, json: { source_domain: 6, message_body: Array.from(body) } };
+  const circle = { packageId: CCTP_SUI_MESSAGE_TRANSMITTER.testnet, eventType: `${CCTP_SUI_MESSAGE_TRANSMITTER.testnet}::receive_message::MessageReceived`, json: { source_domain: 6, message_body: Array.from(body) } };
   const r = await recordDeposit(w.deps('acme'), { digest: w.deliver({ amount: 5_000_000n, events: [circle] }), intentId: intent.intent.id });
   assert.equal(r.deposits[0].channel, 'cctp');
   assert.equal(r.deposits[0].originChain, 'BASE');
@@ -609,8 +619,8 @@ test('a payer other than the source the top-up named is held', async () => {
   const w = await providerWorld();
   const other = { holderName: 'Acme Trading Sdn Bhd', country: 'MY', bankCode: 'CIBBMYKL', accountNumber: '800012349999' };
   await addFundingSource(w.deps('acme'), 'u-owner', { kind: 'bank_account', ...other });
-  const d = w.deliver({ amount: 250_000_000n });
-  await w.send({ eventId: 'evt_200001', providerRef: w.ref, intentId: w.intent.id, status: 'delivered', suiDigest: d, payer: { ...w.payer, fingerprint: bankAccountIdentity(other).fingerprint }, occurredAt: w.now().toISOString() });
+  const d = w.deliver({ amount: 250_000_000n, sender: STRIPE_SENDER });
+  await w.send({ eventId: 'evt_200001', providerRef: w.ref, intentId: w.intent.id, status: 'delivered', suiDigest: d, payer: { ...w.payer, bankCode: other.bankCode, accountNumber: other.accountNumber, last4: '9999' }, occurredAt: w.now().toISOString() });
   const [dep] = await listWalletDeposits(w.deps('acme'));
   assert.ok(dep.holdReasons.includes('payer_mismatch'), JSON.stringify(dep));
 });
@@ -641,6 +651,9 @@ test('statuses never go backwards', () => {
   assert.equal(canAdvanceIntent('arrived', 'failed'), false);
   assert.equal(canAdvanceIntent('provider_pending', 'awaiting_funds'), false);
   assert.equal(canAdvanceIntent('failed', 'arrived'), true, 'the chain beats a reported failure');
+  assert.equal(canAdvanceIntent('arriving', 'arrived'), true);
+  assert.equal(canAdvanceIntent('arriving', 'failed'), false, 'money that came is not undone by a reported failure');
+  assert.equal(canAdvanceIntent('arrived', 'arriving'), false);
   assert.equal(canAdvanceIntent('cancelled', 'provider_pending'), false);
   assert.equal(canMoveDeposit('blocked', 'cleared'), false);
   assert.equal(canMoveDeposit('cleared', 'held'), false);
@@ -657,7 +670,7 @@ test('an intent lapses after a day, and money that still arrives is recorded', a
   assert.equal((await getFundingIntent(w.deps('acme'), intent.intent.id)).intent.status, 'expired');
   assert.equal((await cancelFundingIntent(w.deps('acme'), intent.intent.id)).code, 'not_cancellable');
   await recordDeposit(w.deps('acme'), { digest: w.deliver({ amount: 2_000_000n }), intentId: intent.intent.id });
-  assert.equal((await getFundingIntent(w.deps('acme'), intent.intent.id)).intent.status, 'arrived');
+  assert.equal((await getFundingIntent(w.deps('acme'), intent.intent.id)).intent.status, 'arriving', 'recorded (from no known source, so held) after it lapsed');
 });
 
 /* ── Production fails closed ───────────────────────────────────────────── */
@@ -692,7 +705,7 @@ test('in production every partner and route refuses without credentials, and sti
 
   // Through the service: nothing is stored when a partner refuses.
   const w = await world();
-  const r = await createFundingIntent(w.deps('acme', { env: prod }), { channel: 'provider', provider: 'halliday', method: 'bank', amount: '10', userId: 'u', clientKey: 'k-prod-00001' });
+  const r = await createFundingIntent(w.deps('acme', { env: prod }), { channel: 'provider', provider: 'halliday', method: 'bank', amount: '10', userId: 'u', clientKey: 'k-prod-00001', acceptedArrivesMinMinor: '10000000' });
   assert.equal(r.status, 503);
   assert.equal(r.code, 'provider_not_configured');
   assert.deepEqual(await listFundingIntents(w.deps('acme')), []);

@@ -29,7 +29,7 @@
  * (`spendableAfterHolds`). A sanctions hit BLOCKS it for good.
  */
 
-import { createHash } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 
 import { fromBase58, normalizeSuiAddress } from '@mysten/sui/utils';
 
@@ -44,7 +44,12 @@ export type FundingSourceKind = (typeof SOURCE_KINDS)[number];
 /** pending: added, not yet verified. verified: usable. rejected / revoked: never again. */
 export type SourceStatus = 'pending' | 'verified' | 'rejected' | 'revoked';
 
-export type IntentStatus = 'awaiting_funds' | 'provider_pending' | 'arrived' | 'failed' | 'expired' | 'cancelled';
+/**
+ * arriving: money came for the top-up, but cleared USDC does not yet cover
+ * the least it promised (some is held, or it fell short). arrived: cleared
+ * USDC covers it, so Transfer step 3 may go on.
+ */
+export type IntentStatus = 'awaiting_funds' | 'provider_pending' | 'arriving' | 'arrived' | 'failed' | 'expired' | 'cancelled';
 
 export type DepositStatus = 'held' | 'cleared' | 'blocked';
 
@@ -76,19 +81,22 @@ export const HOLD_REASON_TEXT: Record<HoldReason, string> = {
 // ─── State machines: no status ever goes backwards ─────────────────────────
 
 /**
- * `arrived` is proven on chain (a transaction delivered to the wallet), so
- * it is reachable from every other status: money that came after a partner
- * said "failed", after the intent lapsed or after it was cancelled is still
- * there, and still screened. Nothing leaves `arrived`, and a reported status
- * (pending, failed) never overrides it.
+ * `arriving` and `arrived` are proven on chain (a transaction delivered to
+ * the wallet), so they are reachable from every status before them: money
+ * that came after a partner said "failed", after the intent lapsed or after
+ * it was cancelled is still there, and still screened. `arrived` needs
+ * cleared USDC covering the least the top-up promised; anything less is
+ * `arriving`. Nothing leaves `arrived`, `arriving` only moves on to it, and a
+ * reported status (pending, failed) never overrides either.
  */
 const INTENT_NEXT: Record<IntentStatus, readonly IntentStatus[]> = {
-  awaiting_funds: ['provider_pending', 'arrived', 'failed', 'expired', 'cancelled'],
-  provider_pending: ['arrived', 'failed', 'expired'],
+  awaiting_funds: ['provider_pending', 'arriving', 'arrived', 'failed', 'expired', 'cancelled'],
+  provider_pending: ['arriving', 'arrived', 'failed', 'expired'],
+  arriving: ['arrived'],
   arrived: [],
-  failed: ['arrived'],
-  expired: ['arrived'],
-  cancelled: ['arrived'],
+  failed: ['arriving', 'arrived'],
+  expired: ['arriving', 'arrived'],
+  cancelled: ['arriving', 'arrived'],
 };
 
 export function canAdvanceIntent(from: IntentStatus, to: IntentStatus): boolean {
@@ -206,19 +214,42 @@ export class FundingSourceError extends Error {
   }
 }
 
+/** The least length of a fingerprint key: 32 characters, random. */
+export const FINGERPRINT_KEY_MIN_LENGTH = 32;
+
 /**
- * A bank account's identity without the account number: the number is
- * hashed with its country and bank code, and only the last four digits are
- * kept. The full number is never stored.
+ * The server keys bank-account fingerprints are made with:
+ * FUNDING_SOURCE_FINGERPRINT_KEY (current, used for new rows) and
+ * FUNDING_SOURCE_FINGERPRINT_KEY_PREVIOUS (comma-separated, still matched
+ * after a rotation). A key shorter than 32 characters is no key.
  */
-export function bankAccountIdentity(input: { country: string; bankCode: string; accountNumber: string }): { fingerprint: string; last4: string } {
-  const country = input.country.trim().toUpperCase();
-  const bankCode = input.bankCode.replace(/\s+/g, '').toUpperCase();
-  const number = input.accountNumber.replace(/[\s-]+/g, '').toUpperCase();
+export function fingerprintKeys(env: NodeJS.ProcessEnv): { current: string | null; all: string[] } {
+  const ok = (k: string) => k.length >= FINGERPRINT_KEY_MIN_LENGTH;
+  const current = (env.FUNDING_SOURCE_FINGERPRINT_KEY ?? '').trim();
+  const previous = (env.FUNDING_SOURCE_FINGERPRINT_KEY_PREVIOUS ?? '').split(',').map((k) => k.trim()).filter(ok);
+  const cur = ok(current) ? current : null;
+  return { current: cur, all: [...(cur ? [cur] : []), ...previous.filter((k) => k !== cur)] };
+}
+
+/**
+ * A bank account's identity without the account number: an HMAC-SHA256 of
+ * its country, bank code and number under a server key, and the last four
+ * digits. The full number is never stored, and without the key a stored
+ * fingerprint cannot be brute-forced back to it (an account number has too
+ * few candidates for a plain hash to hide it). A partner reports the payer's
+ * account itself; Splash computes the fingerprint on receipt and discards
+ * the number.
+ */
+export function bankAccountIdentity(input: { country: string; bankCode: string; accountNumber: string }, key: string): { fingerprint: string; last4: string } {
+  if (!key || key.length < FINGERPRINT_KEY_MIN_LENGTH) throw new FundingSourceError('No bank-account fingerprint key is configured on this server.', 'fingerprint_key_missing');
+  const country = String(input.country ?? '').trim().toUpperCase();
+  const bankCode = String(input.bankCode ?? '').replace(/\s+/g, '').toUpperCase();
+  const number = String(input.accountNumber ?? '').replace(/[\s-]+/g, '').toUpperCase();
   if (!/^[A-Z]{2}$/.test(country)) throw new FundingSourceError('The bank country must be a two-letter code.');
   if (!/^[A-Z0-9]{2,20}$/.test(bankCode)) throw new FundingSourceError('The bank code is not valid.');
   if (!/^[A-Z0-9]{4,34}$/.test(number)) throw new FundingSourceError('The account number is not valid.');
-  return { fingerprint: sha256(`bank:${country}:${bankCode}:${number}`), last4: number.slice(-4) };
+  const mac = createHmac('sha256', key).update(`bank:${country}:${bankCode}:${number}`).digest('hex');
+  return { fingerprint: `h1:${mac}`, last4: number.slice(-4) };
 }
 
 /** A card, by the fingerprint its provider gives it (never the card number). */

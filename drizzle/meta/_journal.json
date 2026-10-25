@@ -274,6 +274,13 @@
       "when": 1791849600000,
       "tag": "0038_wallet_funding",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1791936000000,
+      "tag": "0039_wallet_funding_review",
+      "breakpoints": true
     }
   ]
 }

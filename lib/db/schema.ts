@@ -1725,7 +1725,8 @@ export const fundingSources = pgTable('funding_sources', {
   createdBy: text('created_by').notNull(),
   ...timestamps,
 }, (table) => [
-  uniqueIndex('funding_sources_org_fingerprint_unique').on(table.orgId, table.kind, table.fingerprint),
+  // One live row per source: a revoked one may be added again (0039).
+  uniqueIndex('funding_sources_org_fingerprint_live_unique').on(table.orgId, table.kind, table.fingerprint).where(sql`${table.status} <> 'revoked'`),
   index('funding_sources_wallet_idx').on(table.orgId, table.chain, table.address),
 ]);
 
@@ -1800,10 +1801,48 @@ export const walletDeposits = pgTable('wallet_deposits', {
   screening: jsonb('screening').notNull(),
   firstUse: boolean('first_use').notNull().default(false),
   arrivedAt: timestamp('arrived_at', { withTimezone: true }),
+  /** arrival: what the transaction delivered (or a CCTP mint, up to what Circle minted). remainder: the rest of a mixed CCTP transaction, the sender's (0039). */
+  part: text('part').notNull().default('arrival'),
   ...timestamps,
 }, (table) => [
-  uniqueIndex('wallet_deposits_arrival_unique').on(table.suiDigest, table.walletAddress, table.coinType),
+  uniqueIndex('wallet_deposits_arrival_part_unique').on(table.suiDigest, table.walletAddress, table.coinType, table.part),
   index('wallet_deposits_org_idx').on(table.orgId, table.status),
+  index('wallet_deposits_intent_idx').on(table.orgId, table.intentId),
+]);
+
+/**
+ * The deposit watcher's place in a business wallet's history (0039): the
+ * indexer's cursor, and the net USDC every transaction it has read moved in
+ * or out. USDC the balance shows beyond that is unaccounted and withheld.
+ */
+export const walletDepositSync = pgTable('wallet_deposit_sync', {
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  walletAddress: text('wallet_address').notNull(),
+  usdcType: text('usdc_type').notNull(),
+  cursor: text('cursor'),
+  netUsdcMinor: bigint('net_usdc_minor', { mode: 'bigint' }).notNull().default(0n),
+  txCount: integer('tx_count').notNull().default(0),
+  syncedAt: timestamp('synced_at', { withTimezone: true }),
+  ...timestamps,
+}, (table) => [
+  primaryKey({ columns: [table.orgId, table.walletAddress] }),
+]);
+
+/** Every funding-source change, append-only (0039): who, what, with what evidence. */
+export const fundingSourceEvents = pgTable('funding_source_events', {
+  id: text('id').primaryKey(),
+  seq: bigserial('seq', { mode: 'number' }).notNull(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  sourceId: text('source_id').notNull().references(() => fundingSources.id),
+  /** A user id, or `system` for a first-use check run on a deposit. */
+  actorUserId: text('actor_user_id').notNull(),
+  /** added | verified | revoked | first_use_passed | first_use_failed */
+  action: text('action').notNull(),
+  evidenceSha256: text('evidence_sha256'),
+  detail: jsonb('detail').notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index('funding_source_events_org_idx').on(table.orgId, table.createdAt),
 ]);
 
 /** Each funding-partner webhook, once. */

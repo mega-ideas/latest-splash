@@ -100,14 +100,35 @@ function none(): KytProvider {
 }
 
 /**
- * The provider this server screens with. Chainalysis's sanctions list is the
- * fallback while Elliptic is not connected; with neither, production answers
- * no verdict and development uses the sandbox.
+ * Elliptic decides, and Chainalysis's sanctions list can only make it
+ * stricter: a listed address is BLOCK whatever Elliptic says, and anything
+ * else is Elliptic's verdict. A sanctions-list CLEAR ("not listed") is never
+ * taken for the contracted provider's answer.
+ */
+function ellipticWithSanctionsList(elliptic: KytProvider, list: KytProvider): KytProvider {
+  return {
+    id: 'elliptic',
+    async screen(subject) {
+      const listed = await list.screen(subject);
+      if (listed.verdict === 'BLOCK') return listed;
+      const answer = await elliptic.screen(subject);
+      return { ...answer, detail: `${answer.detail} Sanctions list: ${listed.verdict ?? 'no answer'}.` };
+    },
+  };
+}
+
+/**
+ * The provider this server screens with. Elliptic, the contracted provider
+ * (D8), decides when it is configured; with Chainalysis's sanctions list also
+ * configured, a listing still blocks. Chainalysis alone is the fallback until
+ * Elliptic is contracted. With neither, production answers no verdict and
+ * development uses the sandbox.
  */
 export function kytProviderFromEnv(env: NodeJS.ProcessEnv = process.env, deps: { fetcher?: Fetcher; now?: () => Date } = {}): KytProvider {
   const elliptic = Boolean((env.ELLIPTIC_API_KEY ?? '').trim() && (env.ELLIPTIC_API_SECRET ?? '').trim());
   const chainalysis = (env.CHAINALYSIS_SANCTIONS_API_KEY ?? '').trim();
-  if (chainalysis) return chainalysisSanctions(chainalysis, deps.fetcher, deps.now);
+  if (elliptic && chainalysis) return ellipticWithSanctionsList(ellipticNotConnected(), chainalysisSanctions(chainalysis, deps.fetcher, deps.now));
   if (elliptic) return ellipticNotConnected();
+  if (chainalysis) return chainalysisSanctions(chainalysis, deps.fetcher, deps.now);
   return isProductionRuntime(env) ? none() : sandbox(deps.now);
 }

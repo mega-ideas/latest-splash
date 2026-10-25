@@ -427,8 +427,22 @@ export const envSchema = z.object({
   TRANSFI_WEBHOOK_SECRET: optional,
   BRIDGE_API_KEY: optional,
   BRIDGE_WEBHOOK_SECRET: optional,
-  /** The sandbox partners' webhook secret, outside production only. */
+  /** The sandbox partners' webhook secret, outside production only: random, at
+   *  least 32 characters, and only read when FUNDING_SANDBOX_WEBHOOKS_ENABLED
+   *  is true. There is no fallback secret. */
   FUNDING_SANDBOX_WEBHOOK_SECRET: optional,
+  FUNDING_SANDBOX_WEBHOOKS_ENABLED: flag('false'),
+  /** The Sui addresses each partner delivers USDC from (comma-separated, from
+   *  the partner). A delivery from anywhere else is not the partner's. */
+  FUNDING_PROVIDER_HALLIDAY_SUI_SENDERS: optional,
+  FUNDING_PROVIDER_STRIPE_SUI_SENDERS: optional,
+  FUNDING_PROVIDER_TRANSFI_SUI_SENDERS: optional,
+  FUNDING_PROVIDER_BRIDGE_SUI_SENDERS: optional,
+  /** The HMAC key for bank-account fingerprints (random, at least 32
+   *  characters); without it no bank account can be added. The previous
+   *  keys (comma-separated) are still matched after a rotation. */
+  FUNDING_SOURCE_FINGERPRINT_KEY: optional,
+  FUNDING_SOURCE_FINGERPRINT_KEY_PREVIOUS: optional,
   FUNDING_SWAP_LIFI_ENABLED: flag('true'),
   FUNDING_SWAP_DEBRIDGE_ENABLED: flag('true'),
   LIFI_API_KEY: optional,

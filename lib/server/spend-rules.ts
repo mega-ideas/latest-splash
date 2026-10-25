@@ -50,7 +50,7 @@ import { PasskeyPublicKey } from '@mysten/sui/keypairs/passkey';
 
 import { liveRateLimit } from '../wallet/allowance-window.ts';
 import { allowanceNameFor, policyIdFor, splashSpendAppName, type AllowanceState, type RuleSpendEvent } from '../wallet/spend-rules-bcs.ts';
-import { recordedWalletMembers, walletRegistration, type AccountState, type IntentState, type WalletContext, type WalletMembers } from './business-wallet.ts';
+import { fundsOnHold, recordedWalletMembers, walletRegistration, type AccountState, type IntentState, type WalletContext, type WalletMembers } from './business-wallet.ts';
 import type { OwnershipGate } from './ownership-proofs.ts';
 import { approvePayoutTx, createSpendPolicyTx, RECIPIENT_TAG, SPEND_ROLE, spendRuleTx, type OwnedRef, type RuleCap, type RuleOp, type SpendChain } from './spend-rules-builders.ts';
 import { buildSpendView, boundTo, DAY_MS, type HeldAllowance, type PolicyState, type SpendView } from './spend-rules-index.ts';
@@ -627,6 +627,9 @@ export async function openSecondApproval(
   if (!policy.spenders.some((x) => x.spender === payer)) return refuse(409, 'payer_not_a_spender', 'the person paying has no spending rule');
   if (input.maxFeeMinor < 0n || input.maxFeeMinor > feeCeiling(intent.amountMinor)) return refuse(400, 'bad_fee', "the fee shown is above Splash's 1% ceiling");
   if (input.settleByMs <= l.now || input.settleByMs > intent.expiresAtMs) return refuse(400, 'bad_deadline', "the quote's deadline must be in the future and no later than the payment's expiry");
+  // The approval lets the staff member's rule pay this from the wallet: not over funds on hold (v2 §4.3).
+  const onHold = await fundsOnHold(sc.wallet, l.wallet, intent.amountMinor + input.maxFeeMinor);
+  if (onHold) return onHold;
   const g = await gas(sc);
   if (!g) return refuse(503, 'no_sponsor', 'business wallet transactions need a gas sponsor, and none is configured');
   const bytes = await approvePayoutTx(sc.chain, {

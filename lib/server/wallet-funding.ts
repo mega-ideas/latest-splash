@@ -15,6 +15,12 @@
  *                         (amount, coin and sender from the transaction, never
  *                         from the caller), screened, attributed to a source
  *                         and held or cleared
+ *   syncWalletDeposits    the deposit watcher: every transaction that touched
+ *                         the wallet is read and its arrivals recorded, so
+ *                         nobody has to report a deposit for it to be
+ *                         screened and held
+ *   walletFundsWithheld   what a payment may not use: held, blocked, and
+ *                         anything the watcher has not accounted for
  *   handleProviderWebhook a partner's signed status update; status never
  *                         goes backwards and each event counts once
  *   sources               add a bank account or card in the company's name,
@@ -37,6 +43,7 @@ import {
   canMoveDeposit,
   cardIdentity,
   decideDeposit,
+  fingerprintKeys,
   FundingSourceError,
   intentIsOpen,
   MAX_TOP_UP_MINOR,
@@ -58,6 +65,7 @@ import {
   fundingProvider,
   FundingProviderUnavailable,
   isFundingProviderId,
+  providerDeliveryAddresses,
   providerEnabled,
   providerFacts,
   FUNDING_PROVIDER_IDS,
@@ -71,11 +79,12 @@ import { isSwapRouteId, isUsdcSymbol, swapRoute, swapRouteEnabled, swapRouteLabe
 import { partnerLabel, type PartnerId } from '../partners/signed-partners.ts';
 import {
   burnerAddress,
-  CCTP_SUI_MESSAGE_TRANSMITTER,
   chainForDomain,
   decodeBurnMessageV2,
   FUNDING_CHAINS,
   FundingPlanError,
+  isCircleMessageReceived,
+  mintedAmount,
   planFunding,
   type CctpPeerChain,
   type CctpTransfer,
@@ -116,6 +125,15 @@ export type FundingDeps = {
   bookReader?: BookReader;
   /** Verifies a Sui personal-message signature by `address` (tests inject one). */
   verifySuiSignature?: (message: Uint8Array, signature: string, address: string) => Promise<boolean>;
+  /**
+   * The deposit watcher's source: every transaction that touched `wallet`,
+   * oldest first, a page at a time after `after` (the indexer's cursor; null
+   * for the start of the wallet's history). Without it nothing is spendable
+   * that the watcher would have to account for.
+   */
+  listWalletDigests?: (wallet: string, after: string | null) => Promise<{ digests: string[]; cursor: string | null; hasMore: boolean }>;
+  /** The business's earlier wallets (before a rotation): a transfer from one is the business's own money moving, not a deposit. */
+  earlierWallets?: () => Promise<string[]>;
 };
 
 export type Refusal = { ok: false; status: number; code: string; error: string };
@@ -322,7 +340,7 @@ export async function quoteFunding(deps: FundingDeps, input: QuoteInput): Promis
         const fromToken = String(input.fromToken ?? '');
         if (isUsdcSymbol(fromToken)) return refuse(400, 'bad_swap', 'USDC needs no swap: send it by CCTP or straight to the wallet.');
         const amountIn = /^\d{1,40}$/.test(String(input.amountIn ?? '')) ? BigInt(String(input.amountIn)) : 0n;
-        if (/^usdt$/i.test(fromToken)) {
+        if (isUsdtLike(fromToken)) {
           const scaled = scaleTo6(amountIn, Number(input.fromDecimals ?? 6));
           const peg = await quoteConversion({ asset: 'USDT', amountInMinor: scaled > 0n ? scaled : 1n, now }, deps.bookReader);
           if (!peg.ok) return peg;
@@ -374,6 +392,16 @@ function amountOrRefuse(value: unknown): { ok: true; minor: bigint } | Refusal {
   return { ok: true, minor };
 }
 
+/**
+ * Whether a source-chain token is a USDT, for the peg guard: any symbol
+ * naming USDT (USDT0, USDT.e, USDt0, axlUSDT, USD₮), not only the exact
+ * "USDT". A route's own token list carries no peg, so a wrapped or bridged
+ * USDT is guarded like USDT itself.
+ */
+export function isUsdtLike(symbol: string): boolean {
+  return /usd[t₮]/i.test(symbol.normalize('NFKC'));
+}
+
 function scaleTo6(amount: bigint, decimals: number): bigint {
   if (!Number.isInteger(decimals) || decimals < 0 || decimals > 24) return 0n;
   return decimals >= 6 ? amount / 10n ** BigInt(decimals - 6) : amount * 10n ** BigInt(6 - decimals);
@@ -393,8 +421,22 @@ export type IntentInput = QuoteInput & {
 };
 
 function requestFingerprint(input: IntentInput): string {
-  const fields = [input.channel, input.amount, input.provider, input.method, input.asset, input.sourceChain, input.speed, input.fromToken, input.fromDecimals, input.amountIn, input.route, input.sourceId, input.purpose, input.transferRef];
+  const fields = [input.channel, input.amount, input.provider, input.method, input.asset, input.sourceChain, input.speed, input.fromToken, input.fromDecimals, input.amountIn, input.route, input.sourceId, input.purpose, input.transferRef, input.slippageBps ?? null, input.acceptedArrivesMinMinor ?? null];
   return createHash('sha256').update(JSON.stringify(fields)).digest('hex');
+}
+
+/**
+ * Where the rate can move between the quote and the order (a partner, a swap
+ * route, a USDT or USDsui conversion, USDT over CCTP), the business must send
+ * the least it accepted when it saw the quote: the server never prices an
+ * intent at a quote nobody was shown.
+ */
+function acceptedQuoteRequired(input: IntentInput): boolean {
+  const asset = String(input.asset ?? 'USDC').toUpperCase();
+  if (input.channel === 'provider' || input.channel === 'swap') return true;
+  if (input.channel === 'wallet') return asset !== 'USDC';
+  if (input.channel === 'cctp') return asset !== 'USDC';
+  return false;
 }
 
 export async function createFundingIntent(deps: FundingDeps, input: IntentInput) {
@@ -403,6 +445,9 @@ export async function createFundingIntent(deps: FundingDeps, input: IntentInput)
   const fingerprint = requestFingerprint(input);
   const existing = await store.intentByClientKey(deps.db, deps.orgId, clientKey);
   if (existing) return sameRequestOr409(existing, fingerprint);
+  if (acceptedQuoteRequired(input) && (input.acceptedArrivesMinMinor === undefined || input.acceptedArrivesMinMinor === null || input.acceptedArrivesMinMinor === '')) {
+    return refuse(400, 'accepted_quote_required', 'Show the quote first, and send the least that arrives as you accepted it.');
+  }
 
   const purpose = input.purpose === 'transfer_top_up' ? 'transfer_top_up' : 'top_up';
   if (purpose === 'transfer_top_up' && !/^[A-Za-z0-9_:-]{4,80}$/.test(input.transferRef ?? '')) {
@@ -498,7 +543,31 @@ function instructionsFor(quote: FundingQuote): Record<string, unknown> {
 
 export async function getFundingIntent(deps: FundingDeps, id: string) {
   const row = await expireIfLapsed(deps, await store.getIntent(deps.db, deps.orgId, id));
-  return row ? { ok: true as const, intent: intentView(row) } : refuse(404, 'not_found', 'No such top-up.');
+  if (!row) return refuse(404, 'not_found', 'No such top-up.');
+  const totals = await store.intentUsdcTotals(deps.db, { orgId: deps.orgId, intentId: row.id, usdcType: normalizeStructTag(deps.coinTypes.USDC) });
+  return { ok: true as const, intent: { ...intentView(row), progress: { expectedMinMinor: expectedMin(row).toString(), clearedMinor: totals.clearedMinor.toString(), heldMinor: totals.heldMinor.toString() } } };
+}
+
+/** The least USDC a top-up promised: its quote's floor, else its amount. */
+function expectedMin(row: store.IntentRow): bigint {
+  const q = (row.quote as { arrivesMinMinor?: string } | null)?.arrivesMinMinor;
+  return q && /^\d+$/.test(q) ? BigInt(q) : row.amountMinor;
+}
+
+/**
+ * Where a top-up stands after a deposit for it moved: `arrived` once cleared
+ * USDC covers the least it promised, `arriving` while anything less (held,
+ * blocked, short, or not USDC) has come. Never backwards.
+ */
+async function refreshIntent(deps: FundingDeps, intentId: string, depositId: string | null): Promise<void> {
+  const intent = await store.getIntent(deps.db, deps.orgId, intentId);
+  if (!intent) return;
+  const totals = await store.intentUsdcTotals(deps.db, { orgId: deps.orgId, intentId, usdcType: normalizeStructTag(deps.coinTypes.USDC) });
+  if (totals.count === 0 && !(await store.intentHasDeposits(deps.db, deps.orgId, intentId))) return;
+  const target = expectedMin(intent);
+  const to: IntentStatus = target > 0n && totals.clearedMinor >= target ? 'arrived' : 'arriving';
+  const from = (['awaiting_funds', 'provider_pending', 'arriving', 'failed', 'expired', 'cancelled'] as IntentStatus[]).filter((s) => canAdvanceIntent(s, to));
+  await store.advanceIntent(deps.db, { orgId: deps.orgId, id: intentId, from, to, patch: to === 'arrived' && depositId ? { arrivedDepositId: depositId } : {}, now: deps.now() });
 }
 
 export async function listFundingIntents(deps: FundingDeps) {
@@ -545,21 +614,40 @@ function bytesOf(v: unknown): Uint8Array | null {
   return null;
 }
 
-/** The CCTP V2 burn behind a mint in this transaction, from Circle's own MessageReceived event only. */
-export function cctpOrigin(tx: FundingChainTx, network: 'mainnet' | 'testnet'): { chain: CctpPeerChain; address: string | null } | null {
-  const transmitter = normalizeSuiAddress(CCTP_SUI_MESSAGE_TRANSMITTER[network]);
-  for (const e of tx.events) {
-    if (normalizeSuiAddress(e.packageId) !== transmitter) continue;
-    if (!/::MessageReceived$/.test(e.eventType)) continue;
-    const json = e.json ?? {};
-    const domain = Number(json.source_domain ?? json.sourceDomain);
-    const chain = Number.isInteger(domain) ? chainForDomain(domain) : null;
-    if (!chain) return null;
-    const body = bytesOf(json.message_body ?? json.messageBody);
-    const burn = body ? decodeBurnMessageV2(body) : null;
-    return { chain, address: burn ? burnerAddress(chain, burn.messageSender) : null };
+export type CctpMint =
+  | { kind: 'none' }
+  /** Exactly one of Circle's mints, to this wallet: who burned, and what Circle minted. */
+  | { kind: 'mint'; chain: CctpPeerChain; burner: string | null; mintedMinor: bigint }
+  /** Circle's event is there, but it credits nobody: two mints, another recipient, or a body that cannot be read. */
+  | { kind: 'unattributable'; reason: string };
+
+/**
+ * The CCTP V2 mint in this transaction, from Circle's own MessageReceived
+ * only (by the event TYPE's original package, lib/payments/cctp.ts). A mint
+ * credits its burner only when there is exactly one, its burn names this
+ * wallet as the recipient, and its body reads; it credits at most what
+ * Circle minted (amount less feeExecuted). Anything else the transaction
+ * moved in is not the burner's.
+ */
+export function cctpMint(tx: FundingChainTx, network: 'mainnet' | 'testnet', wallet: string): CctpMint {
+  const received = tx.events.filter((e) => isCircleMessageReceived(e.eventType, network));
+  if (received.length === 0) return { kind: 'none' };
+  if (received.length > 1) return { kind: 'unattributable', reason: 'more than one CCTP mint in one transaction' };
+  const json = received[0].json ?? {};
+  const domain = Number(json.source_domain ?? json.sourceDomain);
+  const chain = Number.isInteger(domain) ? chainForDomain(domain) : null;
+  if (!chain) return { kind: 'unattributable', reason: 'a source domain Splash does not fund from' };
+  const body = bytesOf(json.message_body ?? json.messageBody);
+  const burn = body ? decodeBurnMessageV2(body) : null;
+  if (!burn) return { kind: 'unattributable', reason: 'the burn message could not be read' };
+  let recipient: string;
+  try {
+    recipient = normalizeSuiAddress(burn.mintRecipient);
+  } catch {
+    return { kind: 'unattributable', reason: 'the burn names no Sui recipient' };
   }
-  return null;
+  if (recipient !== wallet) return { kind: 'unattributable', reason: 'the burn names another recipient' };
+  return { kind: 'mint', chain, burner: burnerAddress(chain, burn.messageSender), mintedMinor: mintedAmount(burn) };
 }
 
 function sourceChainOf(chain: CctpPeerChain): SourceChain | null {
@@ -578,13 +666,28 @@ async function walletSourceFor(deps: FundingDeps, chain: SourceChain, address: s
   return store.sourceByFingerprint(deps.db, deps.orgId, 'wallet', fp);
 }
 
+/** The bank account's fingerprints under every configured key (current and previous). Empty without a key. */
+function bankFingerprints(deps: FundingDeps, account: { country: string; bankCode: string; accountNumber: string }): string[] {
+  const out: string[] = [];
+  for (const key of fingerprintKeys(deps.env).all) {
+    try {
+      out.push(bankAccountIdentity(account, key).fingerprint);
+    } catch {
+      return [];
+    }
+  }
+  return out;
+}
+
 async function payerSourceFor(deps: FundingDeps, intent: store.IntentRow | null, payer: ReportedPayer | undefined): Promise<store.SourceRow | null> {
   if (!payer) return null;
   try {
-    const fingerprint = payer.kind === 'card'
-      ? cardIdentity({ provider: intent?.provider ?? '', providerFingerprint: payer.fingerprint, last4: payer.last4 }).fingerprint
-      : payer.fingerprint;
-    return store.sourceByFingerprint(deps.db, deps.orgId, payer.kind, fingerprint);
+    if (payer.kind === 'card') {
+      const fingerprint = cardIdentity({ provider: intent?.provider ?? '', providerFingerprint: payer.fingerprint, last4: payer.last4 }).fingerprint;
+      return store.sourceByFingerprint(deps.db, deps.orgId, 'card', fingerprint);
+    }
+    // The partner reports the account; Splash keys it here and keeps nothing of the number.
+    return store.sourceByFingerprint(deps.db, deps.orgId, 'bank_account', bankFingerprints(deps, payer));
   } catch {
     return null;
   }
@@ -598,20 +701,25 @@ async function firstUseCheck(
 ): Promise<store.SourceRow> {
   if (source.firstUseAt || source.status === 'rejected' || source.status === 'revoked') return source;
   const at = deps.now();
+  let result: { result: 'passed' | 'failed'; detail: string; promote: boolean } | null = null;
   if (source.kind === 'wallet') {
     if (source.status !== 'verified') return source; // an unproven wallet waits for its signature
     const s = await deps.kyt.screen({ chain: source.chain ?? 'SUI', address: source.address ?? '', direction: 'deposit' });
     if (s.verdict === null) return source; // no answer: check again next time
-    const passed = s.verdict === 'CLEAR';
-    return (await store.recordFirstUse(deps.db, deps.orgId, source.id, { result: passed ? 'passed' : 'failed', detail: `screened ${s.provider}: ${s.verdict}`, at, promote: false })) ?? source;
+    result = { result: s.verdict === 'CLEAR' ? 'passed' : 'failed', detail: `screened ${s.provider}: ${s.verdict}`, promote: false };
+  } else {
+    // A bank account or card: the partner's reported payer must be this source, in the company's name.
+    const payer = facts.payer;
+    if (!payer) return source;
+    const nameOk = sameCompany(payer.holderName, await deps.companyName());
+    result = { result: nameOk ? 'passed' : 'failed', detail: nameOk ? 'the payer is the business' : 'the payer’s name is not the business’s', promote: nameOk && source.status === 'pending' };
   }
-  // A bank account or card: the partner's reported payer must be this source, in the company's name.
-  const company = await deps.companyName();
-  const payer = facts.payer;
-  const nameOk = Boolean(payer && sameCompany(payer.holderName, company));
-  const detail = !payer ? 'the partner reported no payer' : nameOk ? 'the payer is the business' : 'the payer’s name is not the business’s';
-  if (!payer) return source;
-  return (await store.recordFirstUse(deps.db, deps.orgId, source.id, { result: nameOk ? 'passed' : 'failed', detail, at, promote: nameOk && source.status === 'pending' })) ?? source;
+  const before = source.firstUseAt;
+  const row = (await store.recordFirstUse(deps.db, deps.orgId, source.id, { ...result, at })) ?? source;
+  if (!before && row.firstUseAt && row.firstUseAt.getTime() === at.getTime()) {
+    await store.recordSourceEvent(deps.db, { orgId: deps.orgId, sourceId: source.id, actorUserId: 'system', action: result.result === 'passed' ? 'first_use_passed' : 'first_use_failed', detail: { detail: result.detail, promoted: result.promote }, at });
+  }
+  return row;
 }
 
 export type RecordDepositInput = {
@@ -621,10 +729,36 @@ export type RecordDepositInput = {
   payer?: ReportedPayer;
 };
 
+/** One deposit row a transaction makes: who it is attributed to and how much. */
+type Part = {
+  part: 'arrival' | 'remainder';
+  coinType: string;
+  asset: ArrivalAsset;
+  amount: bigint;
+  channel: FundingChannel;
+  originChain: string | null;
+  originAddress: string | null;
+  /** The source the deposit is attributed to, looked up below. */
+  lookup: () => Promise<store.SourceRow | null>;
+  payerMatchesFor?: (source: store.SourceRow | null) => boolean | undefined;
+  originConfirmed?: boolean;
+  forIntent: boolean;
+};
+
+/** The wallet's net change in one coin type in this transaction. */
+function netChange(tx: FundingChainTx, wallet: string, coinType: string): bigint {
+  let net = 0n;
+  for (const bc of tx.balanceChanges) {
+    if (normalizeSuiAddress(bc.address) !== wallet || !/^-?\d+$/.test(bc.amount)) continue;
+    if (normalizeStructTag(bc.coinType) === coinType) net += BigInt(bc.amount);
+  }
+  return net;
+}
+
 /**
  * Record what a Sui transaction delivered to the business wallet. The
  * caller names a digest; everything else comes from the chain. Each
- * (transaction, coin type) is recorded once.
+ * (transaction, coin type, part) is recorded once.
  */
 export async function recordDeposit(deps: FundingDeps, input: RecordDepositInput) {
   if (!DIGEST.test(input.digest)) return refuse(400, 'bad_digest', 'That is not a Sui transaction digest.');
@@ -645,97 +779,166 @@ export async function recordDeposit(deps: FundingDeps, input: RecordDepositInput
   }
   if (!tx) return refuse(404, 'not_on_chain', 'The chain does not know that transaction yet.');
   if (!tx.success) return refuse(409, 'failed_transaction', 'That transaction failed on chain; nothing arrived.');
+  return recordTransaction(deps, { tx, wallet: dest.wallet, intent, payer: input.payer });
+}
+
+async function recordTransaction(
+  deps: FundingDeps,
+  input: { tx: FundingChainTx; wallet: string; intent: store.IntentRow | null; payer?: ReportedPayer },
+) {
+  const { tx, wallet, intent } = input;
+  const sender = tx.sender ? normalizeSuiAddress(tx.sender) : null;
+  const earlier = new Set(((await deps.earlierWallets?.()) ?? []).map((a) => normalizeSuiAddress(a)));
+  if (sender && earlier.has(sender)) {
+    // The business's own earlier wallet moving its funds over after a
+    // rotation: not a deposit. Its holds already count (by business).
+    return refuse(409, 'own_wallet_transfer', 'That is your earlier wallet moving its funds to this one, not a deposit. Funds on hold stay on hold.');
+  }
 
   const arrivals = new Map<string, { asset: ArrivalAsset; amount: bigint }>();
   for (const bc of tx.balanceChanges) {
-    if (normalizeSuiAddress(bc.address) !== dest.wallet) continue;
+    if (normalizeSuiAddress(bc.address) !== wallet) continue;
     const asset = assetFor(deps, bc.coinType);
     if (!asset || !/^-?\d+$/.test(bc.amount)) continue;
     const key = normalizeStructTag(bc.coinType);
-    const prev = arrivals.get(key)?.amount ?? 0n;
-    arrivals.set(key, { asset, amount: prev + BigInt(bc.amount) });
+    arrivals.set(key, { asset, amount: (arrivals.get(key)?.amount ?? 0n) + BigInt(bc.amount) });
   }
   const positive = [...arrivals.entries()].filter(([, v]) => v.amount > 0n);
   if (positive.length === 0) return refuse(409, 'nothing_arrived', 'That transaction delivered no USDC, USDT or USDsui to your wallet.');
 
-  // Where it came from.
-  const cctp = cctpOrigin(tx, deps.network);
-  // A mint from Circle is a CCTP arrival whatever plain top-up it was reported against.
-  const channel: FundingChannel = cctp && (!intent || intent.channel === 'wallet' || intent.channel === 'cctp')
-    ? 'cctp'
-    : intent ? (intent.channel as FundingChannel) : 'wallet';
-  let originChain: string | null = 'SUI';
-  let originAddress: string | null = tx.sender ? normalizeSuiAddress(tx.sender) : null;
-  let source: store.SourceRow | null = null;
-  let payerMatches: boolean | undefined;
-  let originConfirmed: boolean | undefined;
-  if (channel === 'provider') {
-    source = await payerSourceFor(deps, intent, input.payer);
-    if (intent?.sourceId) payerMatches = Boolean(source && source.id === intent.sourceId);
-  } else if (channel === 'cctp') {
-    if (!cctp) return refuse(409, 'not_a_cctp_mint', 'That transaction is not a CCTP mint from Circle.');
-    originChain = cctp.chain;
-    originAddress = cctp.address;
-    const sc = sourceChainOf(cctp.chain);
-    source = sc ? await walletSourceFor(deps, sc, originAddress) : null;
-  } else if (channel === 'swap') {
+  const mint = cctpMint(tx, deps.network, wallet);
+  // The sender's own deposit: a plain transfer, or what is left of a mixed CCTP transaction.
+  const senderPart = (coinType: string, asset: ArrivalAsset, amount: bigint, part: Part['part'], forIntent: boolean): Part => ({
+    part, coinType, asset, amount, channel: 'wallet', originChain: 'SUI', originAddress: sender, lookup: () => walletSourceFor(deps, 'SUI', sender), forIntent,
+  });
+
+  const parts: Part[] = [];
+  if (intent?.channel === 'provider') {
+    // A partner delivers from its own Sui address, or it is not the partner's delivery.
+    const senders = isFundingProviderId(intent.provider) ? providerDeliveryAddresses(intent.provider, deps.env) : [];
+    if (!sender || !senders.includes(sender)) {
+      return refuse(409, 'not_partner_delivery', "That transaction was not sent from the funding partner's own address, so it is not this top-up's delivery.");
+    }
+    for (const [coinType, { asset, amount }] of positive) {
+      parts.push({
+        part: 'arrival', coinType, asset, amount, channel: 'provider', originChain: 'SUI', originAddress: sender,
+        lookup: () => payerSourceFor(deps, intent, input.payer),
+        payerMatchesFor: (s) => (intent.sourceId ? Boolean(s && s.id === intent.sourceId) : undefined),
+        forIntent: true,
+      });
+    }
+  } else if (intent?.channel === 'swap') {
     // A route's solver delivers on Sui, so the Sui sender is not the business,
     // and the chain cannot show which wallet paid on the other side. The
     // source the top-up named is recorded, but the deposit is held until the
     // route confirms the origin: naming a proven wallet must not be enough to
     // clear money anyone could have sent.
-    source = intent?.sourceId ? await store.getSource(deps.db, deps.orgId, intent.sourceId) : null;
-    originConfirmed = false;
+    for (const [coinType, { asset, amount }] of positive) {
+      parts.push({
+        part: 'arrival', coinType, asset, amount, channel: 'swap', originChain: 'SUI', originAddress: sender,
+        lookup: async () => (intent.sourceId ? store.getSource(deps.db, deps.orgId, intent.sourceId) : null),
+        originConfirmed: false,
+        forIntent: true,
+      });
+    }
   } else {
-    source = await walletSourceFor(deps, 'SUI', originAddress);
+    // A plain report, a wallet top-up or a CCTP top-up: Circle's mint, if
+    // there is one, is the burner's up to what Circle minted; the rest is
+    // the sender's.
+    if (intent?.channel === 'cctp' && mint.kind !== 'mint') {
+      return refuse(409, 'not_a_cctp_mint', mint.kind === 'none' ? 'That transaction is not a CCTP mint from Circle.' : `That CCTP mint cannot be attributed: ${mint.reason}.`);
+    }
+    const usdc = normalizeStructTag(deps.coinTypes.USDC);
+    for (const [coinType, { asset, amount }] of positive) {
+      if (mint.kind === 'mint' && coinType === usdc) {
+        const minted = amount < mint.mintedMinor ? amount : mint.mintedMinor;
+        const sc = sourceChainOf(mint.chain);
+        if (minted > 0n) {
+          parts.push({
+            part: 'arrival', coinType, asset, amount: minted, channel: 'cctp', originChain: mint.chain, originAddress: mint.burner,
+            lookup: () => (sc ? walletSourceFor(deps, sc, mint.burner) : Promise.resolve(null)),
+            forIntent: true,
+          });
+        }
+        if (amount > minted) parts.push(senderPart(coinType, asset, amount - minted, minted > 0n ? 'remainder' : 'arrival', minted === 0n));
+      } else {
+        parts.push(senderPart(coinType, asset, amount, 'arrival', intent?.channel !== 'cctp'));
+      }
+    }
+    if (intent?.channel === 'wallet' && intent.sourceId) {
+      // A top-up that named its source accepts only that source's money.
+      const named = await store.getSource(deps.db, deps.orgId, intent.sourceId);
+      const intentParts = parts.filter((p) => p.forIntent);
+      const fits = named && intentParts.length > 0 && intentParts.every((p) => {
+        if (!p.originAddress || !named.address) return false;
+        const chain = p.channel === 'cctp' ? sourceChainOf(p.originChain as CctpPeerChain) : 'SUI';
+        if (chain !== named.chain) return false;
+        try {
+          return walletIdentity(chain as SourceChain, p.originAddress).address === named.address;
+        } catch {
+          return false;
+        }
+      });
+      if (!fits) return refuse(409, 'not_from_named_source', 'That transaction did not come from the funding source this top-up named.');
+    }
   }
-  let firstUse = false;
-  if (source && !source.firstUseAt) {
-    firstUse = true;
-    source = await firstUseCheck(deps, source, { payer: input.payer, originChain, originAddress });
-  }
 
-  const screening: KytScreening = originAddress
-    ? await deps.kyt.screen({ chain: originChain ?? 'SUI', address: originAddress, direction: 'deposit', txRef: input.digest })
-    : { provider: deps.kyt.id, verdict: null, reference: null, detail: 'There was no sender to screen.', screenedAt: null };
-
-  const decision = decideDeposit({
-    source: source ? { status: source.status as 'pending' | 'verified' | 'rejected' | 'revoked', firstUse: (source.firstUseResult as 'passed' | 'failed' | null) ?? null } : null,
-    screening,
-    payerMatches,
-    originConfirmed,
-  });
-
-  const recorded = [];
-  for (const [coinType, { asset, amount }] of positive) {
+  const recorded: Array<{ row: store.DepositRow; created: boolean; reattributed: boolean }> = [];
+  for (const p of parts) {
+    let source = await p.lookup();
+    let firstUse = false;
+    if (source && !source.firstUseAt) {
+      firstUse = true;
+      source = await firstUseCheck(deps, source, { payer: input.payer, originChain: p.originChain, originAddress: p.originAddress });
+    }
+    const screening: KytScreening = p.originAddress
+      ? await deps.kyt.screen({ chain: p.originChain ?? 'SUI', address: p.originAddress, direction: 'deposit', txRef: tx.digest })
+      : { provider: deps.kyt.id, verdict: null, reference: null, detail: 'There was no sender to screen.', screenedAt: null };
+    const decision = decideDeposit({
+      source: source ? { status: source.status as 'pending' | 'verified' | 'rejected' | 'revoked', firstUse: (source.firstUseResult as 'passed' | 'failed' | null) ?? null } : null,
+      screening,
+      payerMatches: p.payerMatchesFor?.(source),
+      originConfirmed: p.originConfirmed,
+    });
+    const attach = intent && p.forIntent ? intent.id : null;
     const { row, created } = await store.insertDeposit(deps.db, {
       id: `dep_${randomUUID()}`,
       orgId: deps.orgId,
-      walletAddress: dest.wallet,
-      suiDigest: input.digest,
-      coinType,
-      asset,
-      amountMinor: amount,
-      channel,
-      intentId: intent?.id ?? null,
+      walletAddress: wallet,
+      suiDigest: tx.digest,
+      coinType: p.coinType,
+      asset: p.asset,
+      amountMinor: p.amount,
+      channel: p.channel,
+      intentId: attach,
       sourceId: source?.id ?? null,
-      sender: tx.sender ? normalizeSuiAddress(tx.sender) : null,
-      originChain,
-      originAddress,
+      sender,
+      originChain: p.originChain,
+      originAddress: p.originAddress,
       status: decision.status,
       holdReasons: decision.reasons,
       screening,
       firstUse,
       arrivedAt: tx.timestampMs ? new Date(tx.timestampMs) : null,
+      part: p.part,
     });
-    // Recorded before the partner's verified webhook said who paid (someone
-    // named the digest first): the webhook's facts replace the guess, only
-    // while the deposit is held and only for this top-up.
-    if (!created && row.status === 'held' && input.payer && intent && (row.intentId === null || row.intentId === intent.id)) {
+    if (created || !intent || !attach || row.intentId === intent.id || row.intentId !== null) {
+      recorded.push({ row, created, reattributed: false });
+      continue;
+    }
+    // Recorded before the top-up was named (by the watcher, or someone who
+    // reported the digest first): the top-up is attached now. A partner's
+    // verified facts (who paid) replace the first reading only while the
+    // deposit is held, only for a delivery already shown to come from the
+    // partner's own address (above), only for a row first read as a plain
+    // transfer or as this partner's delivery, and only when it covers the
+    // order: a webhook cannot turn an arbitrary inflow into verified money.
+    const covers = p.asset === 'USDC' && row.amountMinor >= expectedMin(intent);
+    if (p.channel === 'provider' && input.payer && row.status === 'held' && (row.channel === 'wallet' || row.channel === 'provider') && covers) {
       const redone = await store.reattributeDeposit(deps.db, {
         orgId: deps.orgId,
         id: row.id,
-        channel,
+        channel: p.channel,
         intentId: intent.id,
         sourceId: source?.id ?? null,
         status: decision.status,
@@ -747,13 +950,17 @@ export async function recordDeposit(deps: FundingDeps, input: RecordDepositInput
       recorded.push({ row: redone ?? row, created: false, reattributed: Boolean(redone) });
       continue;
     }
-    recorded.push({ row, created, reattributed: false });
+    if (row.channel === p.channel) {
+      const attached = await store.attachDepositIntent(deps.db, { orgId: deps.orgId, id: row.id, intentId: intent.id, now: deps.now() });
+      recorded.push({ row: attached ?? row, created: false, reattributed: Boolean(attached) });
+      continue;
+    }
+    recorded.push({ row, created: false, reattributed: false });
   }
 
-  if (intent && recorded.some((r) => r.created || r.reattributed)) {
-    const from = (['awaiting_funds', 'provider_pending', 'failed', 'expired', 'cancelled'] as IntentStatus[]).filter((s) => canAdvanceIntent(s, 'arrived'));
-    // The chain says it arrived, whatever was reported before.
-    await store.advanceIntent(deps.db, { orgId: deps.orgId, id: intent.id, from, to: 'arrived', patch: { arrivedDepositId: recorded[0].row.id }, now: deps.now() });
+  if (intent && recorded.some((r) => r.row.intentId === intent.id)) {
+    const cleared = recorded.find((r) => r.row.intentId === intent.id && r.row.status === 'cleared');
+    await refreshIntent(deps, intent.id, cleared?.row.id ?? null);
   }
   return { ok: true as const, deposits: recorded.map((r) => ({ ...depositView(r.row), created: r.created })) };
 }
@@ -786,17 +993,108 @@ export async function recheckDeposit(deps: FundingDeps, id: string) {
     payerMatches: keptMismatch,
     originConfirmed: row.channel === 'swap' ? false : undefined,
   });
+  let out: store.DepositRow | null;
   if (decision.status === row.status) {
-    const same = await store.moveDeposit(deps.db, { orgId: deps.orgId, id, from: ['held'], to: 'held', holdReasons: decision.reasons, screening, sourceId: source?.id ?? null, now: deps.now() });
-    return { ok: true as const, deposit: depositView(same ?? row) };
+    out = await store.moveDeposit(deps.db, { orgId: deps.orgId, id, from: ['held'], to: 'held', holdReasons: decision.reasons, screening, sourceId: source?.id ?? null, now: deps.now() });
+  } else if (!canMoveDeposit(row.status as 'held', decision.status)) {
+    out = row;
+  } else {
+    out = await store.moveDeposit(deps.db, { orgId: deps.orgId, id, from: ['held'], to: decision.status, holdReasons: decision.reasons, screening, sourceId: source?.id ?? null, now: deps.now() });
   }
-  if (!canMoveDeposit(row.status as 'held', decision.status)) return { ok: true as const, deposit: depositView(row) };
-  const moved = await store.moveDeposit(deps.db, { orgId: deps.orgId, id, from: ['held'], to: decision.status, holdReasons: decision.reasons, screening, sourceId: source?.id ?? null, now: deps.now() });
-  return { ok: true as const, deposit: depositView(moved ?? row) };
+  const final = out ?? row;
+  if (final.intentId && final.status !== row.status) await refreshIntent(deps, final.intentId, final.status === 'cleared' ? final.id : null);
+  return { ok: true as const, deposit: depositView(final) };
 }
 
 export async function listWalletDeposits(deps: FundingDeps) {
   return (await store.listDeposits(deps.db, deps.orgId)).map(depositView);
+}
+
+// ─── The deposit watcher: holds fail closed ─────────────────────────────────
+
+/** Pages one sync reads before it stops (the next sync goes on from there). */
+const SYNC_MAX_PAGES = 40;
+
+/**
+ * Read every transaction that touched the business wallet since the last
+ * sync, oldest first, and record each arrival as a deposit (screened and
+ * held or cleared, exactly as if someone had reported it). Nobody has to
+ * report a deposit for it to be screened and, if it must be, held. Also
+ * counts the net USDC each transaction moved, so the balance can be checked
+ * against what the watcher has accounted for (`walletFundsWithheld`).
+ *
+ * Safe to run concurrently: a page counts only for the watcher that moves
+ * the cursor from where it read it.
+ */
+export async function syncWalletDeposits(deps: FundingDeps, opts: { wallet?: string } = {}) {
+  if (!deps.listWalletDigests) return refuse(503, 'deposits_unreadable', 'Deposits to the wallet cannot be read on this server, so nothing is counted as spendable.');
+  let wallet: string;
+  if (opts.wallet) wallet = normalizeSuiAddress(opts.wallet);
+  else {
+    const dest = await fundingDestination(deps);
+    if (!dest.ok) return dest;
+    wallet = dest.wallet;
+  }
+  const usdcType = normalizeStructTag(deps.coinTypes.USDC);
+  let scanned = 0;
+  let recorded = 0;
+  for (let page = 0; page < SYNC_MAX_PAGES; page++) {
+    const row = await store.syncRow(deps.db, { orgId: deps.orgId, walletAddress: wallet, usdcType });
+    let listed: { digests: string[]; cursor: string | null; hasMore: boolean };
+    try {
+      listed = await deps.listWalletDigests(wallet, row.cursor);
+    } catch {
+      return refuse(503, 'deposits_unreadable', 'The wallet’s transactions could not be read from the chain, so nothing is counted as spendable.');
+    }
+    if (listed.digests.length === 0) {
+      await store.touchSync(deps.db, { orgId: deps.orgId, walletAddress: wallet, now: deps.now() });
+      return { ok: true as const, wallet, scanned, recorded, complete: true };
+    }
+    if (!listed.cursor) return refuse(503, 'deposits_unreadable', 'The indexer gave no place to continue from, so nothing is counted as spendable.');
+    let delta = 0n;
+    for (const digest of listed.digests) {
+      let tx: FundingChainTx | null;
+      try {
+        tx = await deps.readTransaction(digest);
+      } catch {
+        tx = null;
+      }
+      // Listed by the indexer but not readable from the node yet: stop here, and try again later.
+      if (!tx) return refuse(503, 'deposits_unreadable', 'A transaction of the wallet could not be read yet, so nothing is counted as spendable.');
+      delta += netChange(tx, wallet, usdcType);
+      if (!tx.success) continue;
+      const r = await recordTransaction(deps, { tx, wallet, intent: null });
+      if (r.ok) recorded += r.deposits.filter((d) => d.created).length;
+    }
+    const moved = await store.advanceSync(deps.db, { orgId: deps.orgId, walletAddress: wallet, fromCursor: row.cursor, toCursor: listed.cursor, netDeltaMinor: delta, txs: listed.digests.length, now: deps.now() });
+    if (!moved) continue; // another watcher counted this page; read on from where it left off
+    scanned += listed.digests.length;
+    if (!listed.hasMore) return { ok: true as const, wallet, scanned, recorded, complete: true };
+  }
+  return { ok: true as const, wallet, scanned, recorded, complete: false };
+}
+
+/**
+ * What a payment out of the wallet may not use, with the balance it read:
+ * every held or blocked USDC deposit of the business (at any of its wallets,
+ * so a rotation does not release them), plus any USDC the balance shows
+ * beyond what the watcher has accounted for (an arrival nobody reported and
+ * the indexer has not listed yet is withheld like held money, never spent).
+ */
+export async function walletFundsWithheld(deps: FundingDeps, balanceMinor: bigint, wallet?: string) {
+  const sync = await syncWalletDeposits(deps, { wallet });
+  if (!sync.ok) return sync;
+  const usdcType = normalizeStructTag(deps.coinTypes.USDC);
+  const held = await store.heldUsdcMinor(deps.db, { orgId: deps.orgId, usdcType });
+  const row = await store.syncRow(deps.db, { orgId: deps.orgId, walletAddress: sync.wallet, usdcType });
+  const unreconciled = balanceMinor > row.netUsdcMinor ? balanceMinor - row.netUsdcMinor : 0n;
+  return {
+    ok: true as const,
+    heldMinor: held.toString(),
+    unreconciledMinor: unreconciled.toString(),
+    withheldMinor: (held + unreconciled).toString(),
+    complete: sync.complete,
+  };
 }
 
 // ─── Partner webhooks ───────────────────────────────────────────────────────
@@ -806,7 +1104,8 @@ export async function listWalletDeposits(deps: FundingDeps) {
  * before anything is read; matched to its intent by id AND the partner's own
  * order reference; counted once per event id; never moves a status
  * backwards. A delivery is recorded only from the chain, by the digest the
- * partner reports.
+ * partner reports, and only when that transaction was sent from the
+ * partner's own Sui address.
  */
 export async function handleProviderWebhook(
   input: { provider: string; rawBody: string; signature: string | null; env: NodeJS.ProcessEnv; now: Date; db: DrizzleDb },
@@ -872,7 +1171,14 @@ export async function addFundingSource(deps: FundingDeps, userId: string, input:
     let row: Parameters<typeof store.insertSource>[1];
     const base = { id: `fsrc_${randomUUID()}`, orgId: deps.orgId, status: 'pending', createdBy: userId };
     if (input.kind === 'bank_account') {
-      const id = bankAccountIdentity(input);
+      const keys = fingerprintKeys(deps.env);
+      if (!keys.current) return refuse(503, 'fingerprint_key_missing', 'Bank accounts cannot be added on this server yet: its fingerprint key is not configured.');
+      const id = bankAccountIdentity(input, keys.current);
+      // The same account added under an earlier key is the same source.
+      const known = await store.sourceByFingerprint(deps.db, deps.orgId, 'bank_account', bankFingerprints(deps, input));
+      if (known && known.status !== 'revoked') {
+        return known.status === 'rejected' ? refuse(409, 'source_closed', 'That funding source was rejected and cannot be used.') : { ok: true as const, source: sourceView(known), created: false };
+      }
       row = { ...base, kind: 'bank_account', fingerprint: id.fingerprint, last4: id.last4, holderName: input.holderName.trim(), label: cleanLabel(input.label) ?? `Bank account ending ${id.last4}`, method: 'company_name' };
     } else if (input.kind === 'card') {
       if (!isFundingProviderId(input.provider)) return refuse(400, 'bad_provider', 'A card is added through a funding partner.');
@@ -889,9 +1195,13 @@ export async function addFundingSource(deps: FundingDeps, userId: string, input:
     } else {
       return refuse(400, 'bad_kind', 'A funding source is a bank account, a card or a wallet.');
     }
+    // A revoked source may be added again: a new pending row, needing fresh proof.
     const { row: stored, created } = await store.insertSource(deps.db, row);
-    if (!created && (stored.status === 'revoked' || stored.status === 'rejected')) {
-      return refuse(409, 'source_closed', 'That funding source was removed and cannot be added again.');
+    if (!created && stored.status === 'rejected') {
+      return refuse(409, 'source_closed', 'That funding source was rejected and cannot be used.');
+    }
+    if (created) {
+      await store.recordSourceEvent(deps.db, { orgId: deps.orgId, sourceId: stored.id, actorUserId: userId, action: 'added', detail: { kind: stored.kind, label: stored.label, chain: stored.chain, last4: stored.last4 }, at: deps.now() });
     }
     return { ok: true as const, source: sourceView(stored), created };
   } catch (error) {
@@ -965,22 +1275,26 @@ export async function verifyWalletSource(deps: FundingDeps, input: { userId: str
     valid = false;
   }
   if (!valid) return refuse(400, 'bad_signature', 'The signature does not match this wallet and message.');
+  const evidenceSha256 = createHash('sha256').update(`${challenge.message}\n${input.signature}`).digest('hex');
   const verified = await store.updateSource(
     deps.db,
     deps.orgId,
     source.id,
-    { status: 'verified', method: 'wallet_signature', verifiedAt: deps.now(), verifiedBy: input.userId, evidenceSha256: createHash('sha256').update(`${challenge.message}\n${input.signature}`).digest('hex') },
+    { status: 'verified', method: 'wallet_signature', verifiedAt: deps.now(), verifiedBy: input.userId, evidenceSha256 },
     ['pending'],
   );
   if (!verified) return refuse(409, 'not_pending', 'This wallet changed while it was being verified.');
+  await store.recordSourceEvent(deps.db, { orgId: deps.orgId, sourceId: source.id, actorUserId: input.userId, action: 'verified', evidenceSha256, detail: { method: 'wallet_signature', challengeId: challenge.id }, at: deps.now() });
   // Deposits it already sent, held as unverified, are looked at again.
   for (const d of await store.heldDepositsFromSource(deps.db, deps.orgId, source.id)) await recheckDeposit(deps, d.id);
   return { ok: true as const, source: sourceView(verified) };
 }
 
-export async function revokeFundingSource(deps: FundingDeps, sourceId: string) {
+export async function revokeFundingSource(deps: FundingDeps, sourceId: string, userId: string) {
   const done = await store.updateSource(deps.db, deps.orgId, sourceId, { status: 'revoked', revokedAt: deps.now() }, ['pending', 'verified']);
-  return done ? { ok: true as const, source: sourceView(done) } : refuse(404, 'not_found', 'No such funding source.');
+  if (!done) return refuse(404, 'not_found', 'No such funding source.');
+  await store.recordSourceEvent(deps.db, { orgId: deps.orgId, sourceId, actorUserId: userId, action: 'revoked', at: deps.now() });
+  return { ok: true as const, source: sourceView(done) };
 }
 
 export async function listFundingSources(deps: FundingDeps) {

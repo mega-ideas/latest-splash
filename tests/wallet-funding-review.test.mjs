@@ -38,8 +38,9 @@ import { softPasskey } from './fixtures/soft-passkey.mjs';
 import * as schema from '../lib/db/schema.ts';
 import { kytProviderFromEnv } from '../lib/compliance/kyt.ts';
 import { bankAccountIdentity } from '../lib/funding/wallet-funding.ts';
-import { fundingProvider, sandboxWebhookSecret, signWebhook } from '../lib/funding/providers.ts';
+import { sandboxWebhookSecret, signWebhook } from '../lib/funding/providers.ts';
 import { CCTP_SUI_MESSAGE_TRANSMITTER } from '../lib/payments/cctp.ts';
+import { parseRate } from '../lib/money.ts';
 import { buildBusinessMultisig } from '../lib/wallet/business-multisig.ts';
 import { requestWalletPayment } from '../lib/server/business-wallet.ts';
 import {
@@ -61,7 +62,7 @@ const USDT = normalizeStructTag('0x375f70cf2ae4c00bf37117d0c85a2c71545e6ee05c4a5
 const ACME_WALLET = normalizeSuiAddress(`0x${'a1'.repeat(32)}`);
 const ACME_NEW_WALLET = normalizeSuiAddress(`0x${'a2'.repeat(32)}`);
 const OPERATOR = normalizeSuiAddress(`0x${'0e'.repeat(32)}`);
-const STRIPE_SENDER = normalizeSuiAddress(`0x${'57'.repeat(31)}c1ea`);
+const STRIPE_SENDER = normalizeSuiAddress(`0x${'57'.repeat(30)}c1ea`);
 const TRANSMITTER = CCTP_SUI_MESSAGE_TRANSMITTER.testnet;
 /** Circle's TokenMessengerMinter on testnet: the package whose module emits MessageReceived (read from a real mint, 25 Oct 2026). */
 const TOKEN_MESSENGER = '0x267d3c0cb776eace2840f27e4d33da9c6d952f9749403f1fe6579f4962ed3c64';
@@ -113,7 +114,7 @@ async function world({ env = ENV } = {}) {
     coinTypes: { USDC, USDT, USDSUI: null },
     splashAddresses: [OPERATOR],
     signedPartners: new Set(),
-    bookReader: async () => ({ pair: 'USDT_USDC', bid: 999_800n, ask: 1_000_200n, mid: 1_000_000n, deviationBps: 0n, source: 'deepbook', asOf: clock.toISOString() }),
+    bookReader: async () => ({ pair: 'USDT_USDC', bid: parseRate('0.9998'), ask: parseRate('1.0002'), mid: parseRate('1'), deviationBps: 0n, source: 'deepbook', asOf: clock.toISOString() }),
     ...overrides,
   });
   const record = (tx) => {
@@ -393,8 +394,9 @@ test("a partner delivery must come from the partner's own Sui address, and cover
 
   // From the partner, but short of the order: recorded, not cleared into "arrived".
   const short = w.deliver({ sender: STRIPE_SENDER, amount: 1_000_000n });
-  await w.send({ eventId: 'evt_pin_0002', providerRef: w.ref, intentId: w.intent.id, status: 'delivered', suiDigest: short, payer: w.payer, occurredAt: w.now().toISOString() });
-  assert.notEqual((await getFundingIntent(w.deps('acme'), w.intent.id)).intent.status, 'arrived');
+  assert.deepEqual((await w.send({ eventId: 'evt_pin_0002', providerRef: w.ref, intentId: w.intent.id, status: 'delivered', suiDigest: short, payer: w.payer, occurredAt: w.now().toISOString() })).body, { ok: true });
+  assert.ok((await listWalletDeposits(w.deps('acme'))).some((x) => x.digest === short && x.intentId === w.intent.id), 'the short delivery is recorded for the top-up');
+  assert.equal((await getFundingIntent(w.deps('acme'), w.intent.id)).intent.status, 'arriving');
 
   // From the partner, covering it, with the account the business added: cleared and arrived.
   const full = w.deliver({ sender: STRIPE_SENDER, amount: 250_000_000n });
@@ -446,7 +448,7 @@ test('where the rate moves, the accepted quote is required; USDT variants get th
   // Plain USDC needs none: what is sent is what arrives.
   assert.equal((await createFundingIntent(w.deps('acme'), { channel: 'wallet', amount: '10', userId: 'u', clientKey: 'k-acc-000004' })).ok, true);
 
-  const off = async () => ({ pair: 'USDT_USDC', bid: 990_000n, ask: 1_000_000n, mid: 995_000n, deviationBps: 50n, source: 'deepbook', asOf: '' });
+  const off = async () => ({ pair: 'USDT_USDC', bid: parseRate('0.99'), ask: parseRate('1'), mid: parseRate('0.995'), deviationBps: 50n, source: 'deepbook', asOf: '' });
   for (const fromToken of ['USDT0', 'USDT.e', 'USDt0', 'axlUSDT']) {
     const q = await createFundingIntent(w.deps('acme', { bookReader: off }), { channel: 'swap', route: 'debridge', sourceChain: 'ETHEREUM', fromToken, fromDecimals: 6, amountIn: '50000000', userId: 'u', clientKey: `k-peg-${fromToken.replace(/\W/g, '')}-01`, acceptedArrivesMinMinor: '1' });
     assert.equal(q.code, 'off_peg', fromToken);
@@ -468,7 +470,7 @@ test('adding, proving and revoking a source leaves an append-only trail; a revok
   const verified = trail.find((e) => e.action === 'verified');
   assert.match(verified.evidenceSha256 ?? '', /^[0-9a-f]{64}$/);
   assert.equal(verified.actorUserId, 'u-owner');
-  await assert.rejects(w.db.update(schema.fundingSourceEvents).set({ action: 'x' }), /append-only/);
+  await assert.rejects(w.db.update(schema.fundingSourceEvents).set({ action: 'x' }), (e) => /append-only/.test(String(e?.cause?.message ?? e?.message)));
 
   const back = await addFundingSource(w.deps('acme'), 'u-owner', { kind: 'wallet', chain: 'SOLANA', address: source.address });
   assert.equal(back.ok, true, JSON.stringify(back));
