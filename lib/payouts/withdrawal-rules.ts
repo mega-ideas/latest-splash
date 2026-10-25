@@ -53,6 +53,8 @@ export function withdrawalIsFinal(status: WithdrawalStatus): boolean {
 export const TEST_DEPOSIT_MINOR = 1_000_000n;
 /** At most 1,000,000 USDC in one withdrawal; the tier ceilings on chain bind first. */
 export const MAX_WITHDRAWAL_MINOR = 1_000_000n * 1_000_000n;
+/** The least the bank account receives may sit at most this far under the fresh quote (2%): a wider gap lets the partner convert at any rate. */
+export const MAX_RECEIVE_SLIPPAGE_BPS = 200n;
 /** A withdrawal intent lives a day. */
 export const WITHDRAWAL_INTENT_TTL_MS = 24 * 60 * 60 * 1000;
 /**

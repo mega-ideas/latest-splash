@@ -315,6 +315,19 @@ export async function withdrawalsToReconcileForStaff(db: DrizzleDb): Promise<Wit
 }
 
 /**
+ * Payouts still `preparing` after `before` (every org): the flow that opened
+ * them died between the insert and the signing request, so an instruction
+ * keyed by their intent id may be live at the partner. The sweep cancels them
+ * and reverses by intent id.
+ */
+export async function stalePreparingForStaff(db: DrizzleDb, before: Date): Promise<WithdrawalRow[]> {
+  return db
+    .select()
+    .from(withdrawals)
+    .where(sql`${withdrawals.status} = 'preparing' and ${withdrawals.signingRequestId} is null and ${withdrawals.updatedAt} < ${before}`);
+}
+
+/**
  * Failed payouts (withdrawals and supplier payouts, every org) whose USDC the
  * partner has not yet agreed to send back: the sweep asks again.
  */

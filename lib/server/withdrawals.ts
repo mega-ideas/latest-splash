@@ -73,6 +73,7 @@ import {
   beneficiaryRefOf,
   canAdvanceWithdrawal,
   destinationAad,
+  MAX_RECEIVE_SLIPPAGE_BPS,
   MAX_WITHDRAWAL_MINOR,
   normalizeBeneficiary,
   openWithAny,
@@ -874,6 +875,10 @@ export async function openBankPayout(
   if (q.receiveMinor < accepted) {
     return refuse(409, 'quote_changed', 'The rate moved below the one you accepted. Nothing was sent; look at the new quote.', { quote: quoteWire(deps, r.adapter, q, fee) });
   }
+  // The partner may convert at any rate down to this figure when the deposit lands: it stays within a small tolerance of the quote.
+  if (accepted * 10_000n < q.receiveMinor * (10_000n - MAX_RECEIVE_SLIPPAGE_BPS)) {
+    return refuse(400, 'accepted_below_quote', `The least the bank account receives can be at most ${Number(MAX_RECEIVE_SLIPPAGE_BPS) / 100}% under the quote. Nothing was sent.`, { quote: quoteWire(deps, r.adapter, q, fee) });
+  }
   if (q.expiresAt.getTime() <= now.getTime()) return refuse(409, 'quote_expired', 'The quote has expired. Nothing was sent.');
 
   // The instruction names exactly the account the intent commits to.
@@ -1141,7 +1146,8 @@ async function reverseInstructionAnswer(deps: Pick<WithdrawalDeps, 'now'>, adapt
     return { accepted: false, answer: error instanceof PayoutPartnerUnavailable ? error.code : 'no_answer' };
   }
 }
-
+/** A payout still preparing after this long was left by a flow that died; the sweep cancels it. */
+export const PREPARING_STALE_MS = 10 * 60 * 1000;
 /** After this many asks a return still owed is an alert for ops (the sweep keeps asking). */
 export const RETURN_ASKS_BEFORE_ALERT = 5;
 
@@ -1419,6 +1425,19 @@ export async function reconcileWithdrawals(deps: SettlementDeps): Promise<SweepR
     }
     out.returnsAsked += 1;
     if (!accepted) out.returnsPending += 1;
+  }
+  // A payout whose opening flow died after the insert: cancelled, and any instruction it may have
+  // sent is reversed by its intent id (the loop below keeps asking until the partner takes it).
+  const staleBefore = new Date(deps.now().getTime() - PREPARING_STALE_MS);
+  for (const row of await store.stalePreparingForStaff(deps.db, staleBefore)) {
+    try {
+      const done = await cancel({ db: deps.db, now: deps.now, orgId: row.orgId }, row.id, 'system', 'instruction_unconfirmed', ['preparing']);
+      if (!done) continue;
+      out.cancelled += 1;
+      await reverseCancelled({ ...deps, orgId: row.orgId }, () => deps.partner(row.partner as PayoutPartnerId), done, 'instruction_unconfirmed', { via: 'sweep' }, { byIntentOnly: true });
+    } catch {
+      out.errors += 1;
+    }
   }
   // Cancelled payouts whose instruction is still live at the partner: ask again until it reverses it.
   for (const row of await store.reversalsOwedForStaff(deps.db)) {
