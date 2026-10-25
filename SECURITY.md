@@ -30,6 +30,48 @@ The remaining four modules (`smart_treasury`, `payment_intent`, `audit_anchor`, 
 
 ---
 
+## v2 Phase 2 §4.5 — payout partners behind one interface — 2026-10-25
+
+Design: `docs/v2/phase2-payout-partners.md`. Tests:
+`tests/payout-partners.test.mjs`, `tests/partner-payouts.test.mjs`.
+
+- **One interface, four routes.** `pdax` (PH), `durianpay` (ID, with its
+  exchange partner), `hata_fiuu` (MY own bank) and `cctp_wallet` (USDC to
+  another chain over CCTP V2) each have quote, createPayout (keyed by the
+  intent id), status, handleWebhook and returnOrReverse. The sandbox runs
+  outside production only; in production each refuses without its
+  credentials and, with them, until its API is wired. `cctp_wallet` refuses
+  in production with credentials too: no bridge adapter is registered on
+  chain, so no cross-chain intent can settle.
+- **Fixed before this section:** `lib/server/pdax.ts` chose its mock
+  whenever `PDAX_API_KEY` was unset, in production too, and the mock made a
+  `DEMO_PDAX_…` payout reference. The v1 sweep could therefore record a
+  fabricated payout in production. The selection is now the runtime mode
+  alone; the v1 sweep refuses in production and names a `sandbox_pdax_…`
+  reference outside it. The quote engine's partner fee comes from the same
+  adapter and is null in production until the partner quotes.
+- **Supplier payouts ride the withdrawal rails.** The same composed PTB
+  (kind 4, straight to the business's verified deposit address with that
+  partner, one per business per partner), the same instruction before
+  money, the same digest-after-settlement check, webhooks, return rules,
+  unique indexes and sweep. The owners sign under `partner_payout` and are
+  shown the supplier; the server re-checks the account and holder before
+  every signature.
+- **The supplier's account.** Stored only when the bank's own holder name
+  is the name given; the business's own name is refused (that is a
+  withdrawal). The account, the salt and the supplier's ISO 20022 party
+  (structured address, registration number) are sealed, bound to the org
+  and row. A supplier and an own account are never paid through each
+  other's path.
+- **ISO 20022.** Every bank instruction carries a pacs.008-style message
+  built from the very account the intent commits to; each adapter refuses
+  one that names another intent, amount, account, holder, bank, deposit,
+  commitment or purpose. The row keeps the masked evidence form only (last
+  four digits; town and country of the address). A supplier payout needs
+  the payer's KYB profile complete (`originator_incomplete` otherwise).
+- **Open:** name screening of a supplier (§4.6); the live partner APIs;
+  Circle's fee API and the bridge adapter for `cctp_wallet`.
+
 ## v2 Phase 2 §4.4 — withdrawals to the business's own bank — 2026-10-25
 
 Design: `docs/v2/phase2-withdrawals.md`. Tests: `tests/withdrawals.test.mjs`.

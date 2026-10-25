@@ -37,8 +37,9 @@ bank-transfer partner".
 
 ## The payout-partner interface (§4.5)
 
-One interface for every payout route. pdax, durianpay and cctp_wallet move
-onto it in §4.5; until then they answer `partner_not_built`.
+One interface for every payout route; pdax, durianpay and cctp_wallet joined
+it in §4.5 (`docs/v2/phase2-payout-partners.md`), and supplier payouts share
+these rails.
 
 | Method | What it does |
 |---|---|
@@ -48,7 +49,7 @@ onto it in §4.5; until then they answer `partner_not_built`.
 | `createPayout` | The instruction, before any deposit. The idempotency key is the intent id. It carries the least receive amount, the deadline and the beneficiary salt. |
 | `postSettlement` | The Sui digest, after settlement. |
 | `status` | The partner's view of a payout. |
-| `verifyWebhook` | HMAC over the raw body, 5-minute window, then parse. |
+| `handleWebhook` | HMAC over the raw body, 5-minute window, then parse. |
 | `returnOrReverse` | Cancel an instruction no deposit followed, or ask for a return to the business wallet. |
 
 Outside production every adapter is a labelled sandbox (`sandbox: true`).
@@ -257,4 +258,4 @@ stored accounts; the owners then add them again.
   executed transaction's event is checked before every post.
 - The UI for withdrawals (and its copy, accessibility and 390px layout) is
   not built in this section.
-- §4.5 moves pdax, durianpay and cctp_wallet onto the interface.
+- §4.5 put pdax, durianpay and cctp_wallet on the interface (docs/v2/phase2-payout-partners.md).
