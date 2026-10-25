@@ -98,13 +98,22 @@ function toOrder(row: typeof treasuryWalletOrders.$inferSelect): TreasuryOrder {
   };
 }
 
-export async function readTreasuryOrderByIntent(db: DrizzleDb, orgId: string, intentId: string): Promise<TreasuryOrder | null> {
+/**
+ * An order as it stands at `now`: an open order past its expiry reads as
+ * expired. Every read applies it, so a replay and the list never disagree
+ * about whether the signers can still act (the second 5.7 review).
+ */
+export function asOf(order: TreasuryOrder, now: Date = new Date()): TreasuryOrder {
+  return order.status === 'awaiting_signatures' && order.expiresAt <= now ? { ...order, status: 'expired' } : order;
+}
+
+export async function readTreasuryOrderByIntent(db: DrizzleDb, orgId: string, intentId: string, now: Date = new Date()): Promise<TreasuryOrder | null> {
   const [row] = await db
     .select()
     .from(treasuryWalletOrders)
     .where(and(eq(treasuryWalletOrders.orgId, orgId), eq(treasuryWalletOrders.intentId, intentId)))
     .limit(1);
-  return row ? toOrder(row) : null;
+  return row ? asOf(toOrder(row), now) : null;
 }
 
 export type CreateOrderResult =
@@ -212,7 +221,7 @@ export async function listTreasuryOrders(db: DrizzleDb, orgId: string, limit = 2
     .where(eq(treasuryWalletOrders.orgId, orgId))
     .orderBy(desc(treasuryWalletOrders.createdAt))
     .limit(Math.max(1, Math.min(limit, 100)));
-  return rows.map(toOrder).map((o) => (o.status === 'awaiting_signatures' && o.expiresAt <= now ? { ...o, status: 'expired' as const } : o));
+  return rows.map(toOrder).map((o) => asOf(o, now));
 }
 
 /**

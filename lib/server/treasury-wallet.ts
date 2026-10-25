@@ -127,7 +127,10 @@ export async function quoteTreasury(orgId: string, direction: TreasuryDirection,
       allowed: q.allowed,
       mode: q.mode,
       reasons: q.reasons,
-      orderable: q.allowed && q.fillable === true && outMinor !== null && q.priceMicros !== null,
+      // A swap in is not ordered on a stale price: the fillable check values
+      // the market against it. A redemption stays open (a business can always
+      // get out), bound by the market figure and its floor.
+      orderable: q.allowed && q.fillable === true && outMinor !== null && q.priceMicros !== null && q.priceStatus !== 'STALE',
       inMinor: amountMinor,
       outMinor,
       minOutMinor: q.minUsdyOutMinor,
@@ -284,8 +287,14 @@ export async function handleTreasuryOrder(db: Db, caller: TreasuryCaller, body: 
   if (!q.orderable || q.outMinor === null || q.priceMicros === null) {
     return { status: 409, body: { error: q.reasons[q.reasons.length - 1] ?? 'This amount cannot be swapped right now.', code: 'not_orderable', reasons: q.reasons } };
   }
-  if (q.mode === 'SANDBOX' && resolved.route.kind === 'live') {
-    return { status: 409, body: { error: 'Issuer eligibility for this business is not confirmed, so nothing is sent to your signers.', code: 'issuer_unconfirmed' } };
+  // A preview quote says nothing is swapped, so it is never an order, on any
+  // route: an order made from it would sit "awaiting signatures" for owners
+  // who were never asked (the second 5.7 review).
+  if (q.mode === 'SANDBOX') {
+    return {
+      status: 409,
+      body: { error: 'Preview only: issuer eligibility for this business is not confirmed yet, so nothing is recorded and your owners are not asked.', code: 'issuer_unconfirmed' },
+    };
   }
   if (q.outMinor < agreedMin) {
     const unit = direction === 'swap' ? 'USDY' : 'USDC';
@@ -331,6 +340,8 @@ export async function handleTreasuryOrder(db: Db, caller: TreasuryCaller, body: 
 /* ── The overview ───────────────────────────────────────────────────── */
 
 export type OverviewDeps = {
+  /** The same resolver an order uses, so the page and the order never disagree about whether swaps reach signers. */
+  resolveRoute: () => { ok: true; route: TreasurySwapRoute } | Unavailable;
   flags: { walletSwaps: boolean; fundReferral: boolean; tokenizedStocks: boolean; issuerEligibilityConfirmed: boolean };
   issuer: string;
   fundManager: string;
@@ -343,11 +354,30 @@ export type OverviewDeps = {
 };
 
 /** What the page shows about the wallet, in the words lib/dashboard/home.ts uses. */
-function walletState(read: WalletRead): 'address' | 'none' | 'off' | 'error' {
+function walletState(read: WalletRead): 'address' | 'none' | 'off' | 'network' | 'error' {
   if (read.ok) return 'address';
   if (read.code === 'no_wallet') return 'none';
   if (read.code === 'wallets_off') return 'off';
+  if (read.code === 'network_mismatch') return 'network';
   return 'error';
+}
+
+/**
+ * USDY exists only on the network STABLECOIN_NETWORK names, so Treasury reads
+ * balances there. A wallet resolved from a BusinessAccount on another network
+ * (SUI_NETWORK) is not that wallet's balance, and its policy does not govern
+ * a swap there, so Treasury refuses instead of showing one network's coins
+ * for another network's wallet (the second 5.7 review). The sentence names
+ * no test network: it is customer copy.
+ */
+export function treasuryNetworkRefusal(walletNetwork: string): WalletRead | null {
+  if (walletNetwork === STABLECOIN_NETWORK) return null;
+  return {
+    ok: false,
+    status: 409,
+    code: 'network_mismatch',
+    error: 'Treasury reads USDY on the Sui network it is issued on, and this server keeps business wallets on another one, so no balance is shown and no swap is sent.',
+  };
 }
 
 /**
@@ -357,6 +387,7 @@ function walletState(read: WalletRead): 'address' | 'none' | 'off' | 'error' {
  */
 export async function handleTreasuryOverview(caller: TreasuryCaller, deps: OverviewDeps): Promise<Answer> {
   const [nav, wallet, orders] = await Promise.all([deps.readNav(), deps.resolveWallet(caller.orgId), deps.listOrders(caller.orgId)]);
+  const route = deps.resolveRoute();
   let balances: { usdcMinor: string; usdyMinor: string } | { error: string } | null = null;
   if (wallet.ok) {
     try {
@@ -371,6 +402,9 @@ export async function handleTreasuryOverview(caller: TreasuryCaller, deps: Overv
     status: 200,
     body: {
       flags: { walletSwaps: deps.flags.walletSwaps, fundReferral: deps.flags.fundReferral, tokenizedStocks: deps.flags.tokenizedStocks },
+      // Whether an order would reach a route, and which: the page's status
+      // line and send button follow this, never the raw flag.
+      swapRoute: route.ok ? { ok: true, kind: route.route.kind } : { ok: false, reason: route.error },
       issuerConfirmed: deps.flags.issuerEligibilityConfirmed,
       issuer: deps.issuer,
       fundManager: deps.fundManager,

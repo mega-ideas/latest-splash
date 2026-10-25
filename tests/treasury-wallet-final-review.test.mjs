@@ -118,7 +118,7 @@ test('the overview says whether a swap route exists and which kind, from the sam
   const deps = await source('lib/server/treasury-deps.ts');
   assert.match(deps, /liveOverviewDeps[\s\S]*resolveRoute: \(\) => resolveTreasurySwapRoute\(\)/);
   const page = await source('app/dashboard/treasury/page.tsx');
-  assert.match(page, /overview\.swapRoute/);
+  assert.match(page, /overview\??\.swapRoute/);
   assert.doesNotMatch(page, /flags\.walletSwaps/, 'the page does not decide from the raw flag');
 });
 
@@ -222,7 +222,7 @@ test('no quote reason has an em dash or an operator setting in it', async () => 
 test('the projection is reachable by keyboard, and the page leaves room for the floating button', async () => {
   const page = await source('app/dashboard/treasury/page.tsx');
   assert.match(page, /tabIndex=\{0\}/);
-  assert.match(page, /ArrowRight'[\s\S]{0,200}ArrowLeft'|ArrowLeft'[\s\S]{0,200}ArrowRight'/);
+  assert.match(page, /ArrowRight[\s\S]{0,200}ArrowLeft/);
   assert.match(page, /onFocus=/);
   assert.match(page, /pb-24 sm:pb-0|pb-28 sm:pb-0/);
 });

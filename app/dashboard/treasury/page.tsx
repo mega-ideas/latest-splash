@@ -67,7 +67,13 @@ type Order = {
 };
 
 type Overview = {
-  flags: { walletSwaps: boolean; fundReferral: boolean; tokenizedStocks: boolean };
+  flags: { fundReferral: boolean; tokenizedStocks: boolean };
+  /**
+   * Whether an order would reach a swap route on this server, and which kind:
+   * the server's own resolver, the one the order uses. The page follows this,
+   * never the raw switch.
+   */
+  swapRoute: { ok: true; kind: 'sandbox' | 'live' } | { ok: false; reason: string };
   issuerConfirmed: boolean;
   issuer: string;
   fundManager: string;
@@ -75,7 +81,7 @@ type Overview = {
   /** Whether this member may hand a swap to the signers: the server's role list, not the page's. */
   canOrder: boolean;
   /** The business wallet as the server resolved it from the org's own account. */
-  wallet: 'address' | 'none' | 'off' | 'error';
+  wallet: 'address' | 'none' | 'off' | 'network' | 'error';
   price: { status: 'LIVE' | 'STALE' | 'UNAVAILABLE'; priceMicros: string | null; asOf: string | null };
   apyPct: number;
   address: string | null;
@@ -98,7 +104,7 @@ type Quote = {
   error?: string;
 };
 
-type WalletSource = 'loading' | 'address' | 'none' | 'pending' | 'off' | 'no_access' | 'error';
+type WalletSource = 'loading' | 'address' | 'none' | 'pending' | 'off' | 'network' | 'no_access' | 'error';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -152,6 +158,7 @@ const WALLET_NOTE: Record<Exclude<WalletSource, 'address' | 'loading'>, string> 
   none: 'Your business has no Splash Wallet yet. Set it up in Wallet, then hold USDY in it here.',
   pending: 'Your business wallet is being set up. Its balances appear here once its owners confirm it.',
   off: 'Business wallets are not available on this server, so no balance is shown. Quotes still work.',
+  network: 'Treasury reads USDY on the Sui network it is issued on, and this server keeps business wallets on another one, so no balance is shown.',
   no_access: 'Your membership does not include the business wallet, so its balances are not shown.',
   error: 'The wallet balance could not be read just now.',
 };
@@ -264,12 +271,13 @@ export default function TreasuryPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ intentId, direction, amount: amount.trim(), minOutMinor: quote.minOutMinor }),
       });
-      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      const body = (await res.json().catch(() => ({}))) as { error?: string; order?: { sandbox?: boolean } };
       if (!res.ok) {
         setSendError(body.error ?? 'It could not be sent to your signers.');
         return;
       }
-      showToast("Sent to your wallet's owners to sign");
+      // Said from the order the server made: a sandbox order reached no one.
+      showToast(body.order?.sandbox === false ? "Sent to your wallet's owners to sign" : 'Recorded in the sandbox. Nothing was sent to your owners.');
       setAmount('');
       setQuote(null);
       setIntentId(null);
@@ -330,28 +338,35 @@ export default function TreasuryPage() {
   const feesRelocated = simulationFee === null || feesDeleted === null ? null : simulationFee - feesDeleted;
 
   const issuer = overview?.issuer ?? 'the issuer';
-  const statusLine = !overview
+  const route = overview?.swapRoute ?? null;
+  const sandboxRoute = route?.ok === true && route.kind === 'sandbox';
+  const statusLine = !overview || !route
     ? null
-    : !overview.flags.walletSwaps
-      ? { tone: 'quiet' as const, title: 'Quotes only on this server', detail: 'Swaps from the wallet are not switched on here, so nothing is sent to your signers. Every quote below is live.' }
+    : !route.ok
+      ? { tone: 'quiet' as const, title: 'Quotes only on this server', detail: `${route.reason} Every quote below is live.` }
       : !overview.issuerConfirmed
-        ? { tone: 'quiet' as const, title: 'Preview', detail: `Eligibility with ${issuer} is not confirmed for your business yet, so swaps are prepared in the sandbox only.` }
-        : { tone: 'ok' as const, title: "Swaps go to your wallet's owners to sign", detail: 'Splash signs nothing and holds nothing. The wallet threshold your owners set applies to every swap.' };
+        ? { tone: 'quiet' as const, title: 'Preview', detail: `Eligibility with ${issuer} is not confirmed for your business yet, so quotes are a preview and nothing is sent to your owners.` }
+        : route.kind === 'sandbox'
+          ? { tone: 'quiet' as const, title: 'Sandbox', detail: 'Orders on this server are recorded in the sandbox. Nothing is sent to your owners and nothing is swapped.' }
+          : { tone: 'ok' as const, title: "Swaps go to your wallet's owners to sign", detail: 'Splash signs nothing and holds nothing. The wallet threshold your owners set applies to every swap.' };
 
   const unit = { in: toTreasury ? 'USDC' : 'USDY', out: toTreasury ? 'USDY' : 'USDC' };
   const walletKnown = walletSource === 'address' && balances !== null;
-  const disabledReason = !overview
+  const disabledReason = !overview || !route
     ? null
-    : !overview.flags.walletSwaps
-      ? 'Swaps are not switched on on this server.'
+    : !route.ok
+      ? 'This server sends no swap to your signers.'
       : !canOrder
         ? 'Your role does not include asking the wallet to swap. An owner, finance admin, approver or maker can.'
-        : quote && !quote.error && !quote.orderable
-          ? 'This quote cannot be sent to your signers.'
-          : null;
+        : quote && !quote.error && quote.mode === 'SANDBOX'
+          ? 'Preview only: nothing is swapped until issuer eligibility is confirmed.'
+          : quote && !quote.error && !quote.orderable
+            ? 'This quote cannot be sent to your signers.'
+            : null;
 
+  // Bottom room at phone width, so the floating Zeke button never covers the last lines.
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
+    <div className="mx-auto max-w-5xl space-y-6 pb-24 sm:pb-0">
 
       {/* Toast */}
       {toast && (
@@ -573,7 +588,7 @@ export default function TreasuryPage() {
               )}
             >
               {sending ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <PenLine size={14} aria-hidden="true" />}
-              Send to owners to sign
+              {sandboxRoute ? 'Record a sandbox order' : 'Send to owners to sign'}
             </button>
             {(disabledReason || sendError) && (
               <p role={sendError ? 'alert' : undefined} className={cn('text-[12px] leading-5', sendError ? 'font-medium text-[var(--error)]' : 'text-[#326273]')}>
@@ -630,7 +645,7 @@ export default function TreasuryPage() {
                   <h2 id="projection-title" className="text-sm font-semibold text-[#1F4452]">Projected value</h2>
                   <span className="rounded-full bg-[#D9A441]/15 px-1.5 py-0.5 text-[12px] font-semibold text-[var(--gold-ink)]">variable</span>
                 </div>
-                <p className="mt-0.5 text-[13px] text-[#326273]">
+                <p className="mt-0.5 text-[13px] text-[#326273]" aria-live="polite">
                   {focus
                     ? <>At <span className="font-medium text-[#1F4452]">{focus.label}</span></>
                     : usdyValueMinor && usdyValueMinor > 0n
@@ -666,7 +681,26 @@ export default function TreasuryPage() {
             {projection && chart ? (
               <>
                 <div
-                  className="relative mt-4 cursor-crosshair select-none"
+                  // Keyboard and touch reach every point: focus the plot, then step with the arrow keys.
+                  tabIndex={0}
+                  role="group"
+                  aria-label="Projected value chart. Use the left and right arrow keys to step through the points."
+                  className="relative mt-4 cursor-crosshair select-none rounded-md outline-none focus-visible:ring-2 focus-visible:ring-[#237284] focus-visible:ring-offset-2"
+                  onFocus={() => setHovered((h) => h ?? projection.length - 1)}
+                  onBlur={() => setHovered(null)}
+                  onKeyDown={(e) => {
+                    const last = projection.length - 1;
+                    const step: Record<string, (h: number) => number> = {
+                      ArrowRight: (h) => Math.min(last, h + 1),
+                      ArrowLeft: (h) => Math.max(0, h - 1),
+                      Home: () => 0,
+                      End: () => last,
+                    };
+                    const move = step[e.key];
+                    if (!move) return;
+                    e.preventDefault();
+                    setHovered((h) => move(h ?? last));
+                  }}
                   onMouseLeave={() => setHovered(null)}
                   onMouseMove={(e) => {
                     const rect = e.currentTarget.getBoundingClientRect();
@@ -769,6 +803,8 @@ export default function TreasuryPage() {
                 {overview.orders.slice(0, 10).map((o) => {
                   const swap = o.direction === 'swap';
                   const style = ORDER_STATUS[o.status];
+                  // A sandbox order was never shown to the signers, so it is not "waiting" for them.
+                  const label = o.sandbox && o.status === 'awaiting_signatures' ? 'Sandbox, not sent' : style.label;
                   return (
                     <li key={o.id} className="flex items-center gap-3 px-4 py-3">
                       <div className={cn('flex h-8 w-8 shrink-0 items-center justify-center rounded-full', swap ? 'bg-[#D9A441]/15' : 'bg-[#5C9EAD]/10')}>
@@ -783,7 +819,7 @@ export default function TreasuryPage() {
                           {o.sandbox ? ' · sandbox' : ''}
                         </div>
                       </div>
-                      <span className={cn('shrink-0 rounded-full px-2.5 py-0.5 text-[12px] font-semibold', style.className)}>{style.label}</span>
+                      <span className={cn('shrink-0 rounded-full px-2.5 py-0.5 text-[12px] font-semibold', style.className)}>{label}</span>
                     </li>
                   );
                 })}

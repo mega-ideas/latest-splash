@@ -94,6 +94,37 @@ The balance check reads the wallet's whole balance; when this merges with
 Phase 2, it should subtract the USDC Phase 2 withholds (`heldUsdc`), and the
 wallet resolver should call Phase 2's `readAccount()`.
 
+What the second 5.7 review changed:
+
+- A preview quote (`mode: 'SANDBOX'`, issuer eligibility not confirmed) is
+  never an order, on any route: the order answers 409 `issuer_unconfirmed`
+  and records nothing. An order on the sandbox route is labelled as one all
+  the way through: the button reads "Record a sandbox order", the toast
+  "Recorded in the sandbox. Nothing was sent to your owners.", and the
+  activity row "Sandbox, not sent". "Sent to your wallet's owners to sign"
+  is shown only for an order the server returned with `sandbox: false`.
+- The overview returns `swapRoute` from `resolveTreasurySwapRoute`, the same
+  resolver the order uses (`{ok, kind}` or `{ok: false, reason}`). The
+  page's status line, send button and its reason follow it, not
+  `TREASURY_WALLET_SWAPS`, so in production with the switch on the page
+  says there is no live route instead of offering a send that answers 503.
+- Every read of an order applies its expiry (`asOf` in
+  `treasury-wallet-orders.ts`), so replaying a lapsed intent id returns it
+  as `expired`, as the list does.
+- A swap in on a STALE price is not orderable (the fillable check values the
+  market against that price). A redemption stays open, bound by the Sui
+  market figure and the floor the person agreed to.
+- `businessAccountWallet` accepts a BusinessAccount only from a configured
+  splash_core package (`corePackageId`, or the legacy `packageId`), and
+  refuses all when none is configured.
+- When `SUI_NETWORK` is not `STABLECOIN_NETWORK` (mainnet, where USDY is),
+  the wallet resolver answers `network_mismatch`: no balance is shown and no
+  order is made, instead of showing mainnet coins for a wallet whose policy
+  lives on another network.
+- The projection chart takes keyboard focus and steps with the arrow keys,
+  Home and End; the value line above it is a polite live region. The page
+  has bottom room at phone width for the floating Zeke button.
+
 Swap slippage is one setting, `USDY_SWAP_SLIPPAGE_BPS`, read through
 `lib/env.ts`: 30 by default, and refused above 100
 (`MAX_SWAP_SLIPPAGE_BPS`, the same as the market shortfall ceiling).

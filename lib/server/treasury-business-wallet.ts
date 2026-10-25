@@ -11,9 +11,12 @@
  * `readAccount()` instead of reading the object itself, so the two can never
  * disagree.
  *
- * Fails closed: no database, no account id, an object of another type, or a
- * read that fails answers a refusal with a code, never a stand-in address.
- * Balances are read from the Sui network USDY lives on (STABLECOIN_NETWORK).
+ * Fails closed: no database, no account id, an object of another type or of
+ * a package other than splash_core, or a read that fails answers a refusal
+ * with a code, never a stand-in address. Balances are read from the Sui
+ * network USDY lives on (STABLECOIN_NETWORK); when the BusinessAccount is
+ * kept on another network (SUI_NETWORK), Treasury refuses with
+ * `network_mismatch` instead of mixing the two.
  */
 import 'server-only';
 
@@ -21,7 +24,8 @@ import { eq } from 'drizzle-orm';
 
 import { organizations } from '@/lib/db/schema';
 import { normaliseSuiAddress } from '@/lib/payments/stablecoin-lane';
-import type { WalletRead } from '@/lib/server/treasury-wallet';
+import { getContractConfig } from '@/lib/server/contract-config';
+import { treasuryNetworkRefusal, type WalletRead } from '@/lib/server/treasury-wallet';
 
 const ACCOUNT_ID = /^0x[0-9a-fA-F]{64}$/;
 const ADDRESS = /^(0x)?[0-9a-fA-F]{1,64}$/;
@@ -38,9 +42,31 @@ function optionAddress(v: unknown): string | null {
   return normaliseSuiAddress('0x' + inner.replace(/^0x/, '').padStart(64, '0'));
 }
 
-/** The `wallet` of a splash_core::business_account::BusinessAccount, or null when it has none yet. */
-export function businessAccountWallet(type: string, json: unknown): string | null {
-  if (!type.endsWith('::business_account::BusinessAccount')) throw new Error('the account id names another kind of object');
+const PACKAGE_ID = /^0x[0-9a-fA-F]{1,64}$/;
+
+/** A package id in one spelling: lowercase, 64 hex digits. */
+function canonicalPackage(id: string): string | null {
+  const raw = id.trim();
+  if (!PACKAGE_ID.test(raw)) return null;
+  return '0x' + raw.slice(2).toLowerCase().padStart(64, '0');
+}
+
+/**
+ * The `wallet` of a splash_core::business_account::BusinessAccount, or null
+ * when it has none yet.
+ *
+ * The type's package must be one of `corePackages` (the configured
+ * splash_core ids, as the operator-outflow monitor reads them): a
+ * BusinessAccount struct from any other package is not Splash's, and its
+ * `wallet` would become the order's source and recipient (the second 5.7
+ * review). With no package configured nothing is accepted.
+ */
+export function businessAccountWallet(type: string, json: unknown, corePackages: readonly string[]): string | null {
+  const known = new Set(corePackages.map(canonicalPackage).filter((p): p is string => p !== null));
+  if (known.size === 0) throw new Error('the splash_core package is not configured on this server');
+  const match = /^(0x[0-9a-fA-F]{1,64})::business_account::BusinessAccount$/.exec(type.trim());
+  const pkg = match ? canonicalPackage(match[1]) : null;
+  if (!pkg || !known.has(pkg)) throw new Error('the account id names another kind of object');
   if (!isObject(json)) throw new Error('the BusinessAccount could not be read');
   return optionAddress(json.wallet);
 }
@@ -49,6 +75,11 @@ export async function resolveTreasuryWallet(orgId: string): Promise<WalletRead> 
   if (!process.env.DATABASE_URL) {
     return { ok: false, status: 503, code: 'wallets_off', error: 'Business wallets are not available on this server.' };
   }
+  // Balances are read where USDY lives; a wallet kept on another network is
+  // not shown as if it held them.
+  const { SUI_NETWORK } = await import('@/lib/sui');
+  const mismatch = treasuryNetworkRefusal(SUI_NETWORK);
+  if (mismatch) return mismatch;
   const { getDb } = await import('@/lib/db/client');
   const [org] = await getDb()
     .select({ accountId: organizations.suiBusinessAccountId })
@@ -64,7 +95,8 @@ export async function resolveTreasuryWallet(orgId: string): Promise<WalletRead> 
     const { object } = (await suiClient.core.getObject({ objectId: accountId, include: { json: true } })) as unknown as {
       object: { type: string; json?: unknown };
     };
-    const wallet = businessAccountWallet(object.type, object.json);
+    const cfg = getContractConfig();
+    const wallet = businessAccountWallet(object.type, object.json, [cfg.corePackageId, cfg.packageId].map((id) => (id ?? '').trim()).filter(Boolean));
     if (!wallet) {
       return { ok: false, status: 409, code: 'no_wallet', error: 'Your business has no Splash Wallet yet. Set it up in Wallet first.' };
     }

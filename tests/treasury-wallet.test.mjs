@@ -73,10 +73,14 @@ function quoteDeps(over = {}) {
   return { deps, calls };
 }
 
+// The sandbox route, for a business whose issuer eligibility is confirmed:
+// a preview (SANDBOX) quote is never an order (the second 5.7 review), so an
+// order test needs a LIVE-mode quote even on the sandbox route.
 const sandboxRoute = () => {
   const prepared = [];
   return {
     prepared,
+    issuerEligibilityConfirmed: true,
     resolveRoute: () => ({ ok: true, route: { kind: 'sandbox', prepare: async (order) => { prepared.push(order.id); return { providerRef: `sandbox_${order.id}` }; } } }),
   };
 };
@@ -338,7 +342,7 @@ test('a failed hand-off to the signers leaves no order behind', async () => {
   const { client, db } = await migratedDb();
   const { handleTreasuryOrder } = await import('../lib/server/treasury-wallet.ts');
   const { deps } = quoteDeps();
-  const failing = { resolveRoute: () => ({ ok: true, route: { kind: 'sandbox', prepare: async () => { throw new Error('signing service down'); } } }) };
+  const failing = { issuerEligibilityConfirmed: true, resolveRoute: () => ({ ok: true, route: { kind: 'sandbox', prepare: async () => { throw new Error('signing service down'); } } }) };
   await assert.rejects(() => handleTreasuryOrder(db, OWNER, { intentId: INTENT, direction: 'swap', amount: '10', minOutMinor: '1' }, { ...deps, ...failing }), /signing service down/);
   const { rows } = await client.query('SELECT count(*)::int AS n FROM treasury_wallet_orders');
   assert.equal(rows[0].n, 0);

@@ -70,7 +70,8 @@ async function deps(over = {}) {
       readOrg: async () => ({ kyb: 'ACTIVE', country: 'MY' }),
       marketIn: async (amount) => ({ available: true, usdcInMinor: amount, usdyOutMinor: (amount * 1_000_000n) / NAV.priceMicros, providers: ['CETUS'], asOf: NAV.asOf, source: 'cetus-aggregator' }),
       marketOut: async (amount) => ({ available: true, usdyInMinor: amount, usdcOutMinor: (amount * NAV.priceMicros) / 1_000_000n, providers: ['CETUS'], asOf: NAV.asOf, source: 'cetus-aggregator' }),
-      issuerEligibilityConfirmed: false,
+      // Confirmed: a preview (SANDBOX) quote is never an order (the second 5.7 review).
+      issuerEligibilityConfirmed: true,
       slippageBps: 30,
       resolveWallet: async () => ({ ok: true, address: WALLET }),
       readWalletBalance: async (address, coinType) => {
@@ -180,6 +181,7 @@ function overviewDeps(over = {}) {
     seen,
     deps: {
       flags: { walletSwaps: true, fundReferral: false, tokenizedStocks: false, issuerEligibilityConfirmed: false },
+      resolveRoute: () => ({ ok: true, route: { kind: 'sandbox', prepare: async () => ({ providerRef: 'sandbox_x' }) } }),
       issuer: 'a tokenized treasury issuer',
       fundManager: 'a fund manager',
       readNav: async () => NAV,

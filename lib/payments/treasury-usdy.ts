@@ -125,7 +125,7 @@ export function treasuryQuote(input: {
   } else if (!input.nav.asOf) {
     // A price with no observation time may be a placeholder (a flat $1.00
     // misprices USDY, which accrues above $1) and cannot be aged at all.
-    reasons.push('The USDY price has no observation time, so it cannot be told apart from a placeholder. Set USDY_REDEMPTION_AS_OF with the price, or connect a feed.');
+    reasons.push('The USDY price has no observation time, so it cannot be told apart from a placeholder and is not used.');
   }
   const allowed = reasons.length === 0;
   const mode: TreasuryQuote['mode'] = input.ondoEligibilityConfirmed ? 'LIVE' : 'SANDBOX';
@@ -135,7 +135,7 @@ export function treasuryQuote(input: {
     reasons.push('Preview only: issuer eligibility for this business is not confirmed yet, so nothing is swapped.');
   }
   if (allowed && input.nav.status === 'STALE') {
-    reasons.push('The USDY price is stale — treat these numbers as indicative, not a quote to act on.');
+    reasons.push('The USDY price is stale, so these numbers are indicative and a swap in is not offered until it updates.');
   }
 
   const priced = allowed && input.nav.priceMicros !== null;
@@ -245,7 +245,7 @@ export function treasuryRedeemQuote(input: {
   const allowed = reasons.length === 0;
   const mode: TreasuryRedeemQuote['mode'] = input.ondoEligibilityConfirmed ? 'LIVE' : 'SANDBOX';
   if (allowed && mode === 'SANDBOX') reasons.push('Preview only: issuer eligibility for this business is not confirmed yet, so nothing is swapped.');
-  if (allowed && input.nav.status === 'STALE') reasons.push('The USDY price is stale. Treat these numbers as indicative, not a quote to act on.');
+  if (allowed && input.nav.status === 'STALE') reasons.push('The USDY price is stale, so the redemption-rate figure is indicative. The Sui market figure and the least you agree to receive are what bind a redemption.');
 
   const price = allowed ? input.nav.priceMicros : null;
   const atRedemption = price !== null ? usdcValueOfUsdy(input.usdyInMinor, price) : null;

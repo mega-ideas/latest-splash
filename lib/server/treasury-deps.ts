@@ -58,6 +58,7 @@ export function liveOrderDeps(): OrderDeps {
 
 export function liveOverviewDeps(): OverviewDeps {
   return {
+    resolveRoute: () => resolveTreasurySwapRoute(),
     flags: treasuryFlags(),
     issuer: labelFor('ondo'),
     fundManager: labelFor('halogen'),

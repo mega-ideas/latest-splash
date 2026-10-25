@@ -25,9 +25,13 @@
  * The questions are answered by an owner for the business, with a
  * declaration that the answers are true. Splash records the answers and the
  * outcome; it checks no financial statement, and the fund manager makes its
- * own assessment before accepting anyone. A "not eligible" result is final
- * for these answers: nothing is shown that would let a business that does
- * not qualify reach the referral.
+ * own assessment before accepting anyone. A "not eligible" result shows no
+ * referral link for those answers, but it is not final: an owner may answer
+ * again, and a changed answer can make the business eligible. Every answer
+ * is kept (treasury_fund_referral_history), so a not-eligible-then-eligible flip
+ * stays visible to staff. Whether a flip should wait for a cooling period
+ * or a staff review is for legal to decide with the wording below; the
+ * fund manager's own checks remain the real gate.
  *
  * The wording here is the part that needs legal sign-off before mainnet
  * (docs/MAINNET-CHECKLIST.md), which is why the whole section is behind
