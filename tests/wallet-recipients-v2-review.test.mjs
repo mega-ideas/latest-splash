@@ -163,7 +163,10 @@ test('a signature that could not be checked does not use up the link', async () 
   const again = await submitOwnershipProof({ db: w.db, now: () => T0, verifySignature }, { token, signature });
   assert.equal(again.ok, true, `the same link still works: ${show(again)}`);
   // A wrong signature, checked, still uses the link up.
-  const second = await requestOwnershipProof({ ...w.deps(), appUrl: 'https://app.splash.test/', sendEmail: async () => {} }, { recipientId: saved.recipient.id, requestedBy: 'u-owner', revealLink: true });
+  const key2 = Ed25519Keypair.generate();
+  const saved2 = await w.save({ deliveryKind: 'SELF_CUSTODY', walletLabel: 'SLUSH', address: key2.toSuiAddress() });
+  const second = await requestOwnershipProof({ ...w.deps(), appUrl: 'https://app.splash.test/', sendEmail: async () => {} }, { recipientId: saved2.recipient.id, requestedBy: 'u-owner', revealLink: true });
+  assert.equal(second.ok, true, show(second));
   const wrong = await submitOwnershipProof({ db: w.db, now: () => T0, verifySignature: async () => false }, { token: second.link.split('/wallet-proof/')[1], signature });
   assert.equal(wrong.code, 'bad_signature');
   const reuse = await submitOwnershipProof({ db: w.db, now: () => T0, verifySignature }, { token: second.link.split('/wallet-proof/')[1], signature });
@@ -198,5 +201,34 @@ test('the receipt route is limited per person and answers a malformed reference 
   const src = readFileSync(new URL('../app/api/wallet/payments/[ref]/cross-chain/route.ts', import.meta.url), 'utf8');
   assert.match(src, /limitWalletRequests\(gate\.route\)/, 'the POST is rate limited');
   assert.match(src, /try\s*\{\s*return decodeURIComponent/, 'a malformed reference is caught');
-  assert.equal(/\bdecodeURIComponent\(ref\)/.test(src), false, 'no bare decode');
+  assert.equal(/=\s*decodeURIComponent\(ref\)/.test(src), false, 'no bare decode');
+});
+
+/* 7 ── The sender declaration says what it could not print, and who controls the wallet ── */
+
+test('the declaration PDF says when a name could not be printed, and words the wallet’s control from its threshold', async () => {
+  const { senderDeclaration } = await import('../lib/compliance/sender-declaration.ts');
+  const input = {
+    payer: { legalName: 'Acme Trading Sdn Bhd', registrationNumber: '201901000001', country: 'MY', address: '1 Jalan Ampang' },
+    walletAddress: sui('b2'),
+    supplier: { name: 'บริษัท เดลา ครูซ จำกัด', exchange: 'pdax', depositAddress: sui('66') },
+    amountMinor: 1_000_000_000n,
+    invoice: { number: 'INV-1', date: '2026-10-01' },
+    paymentRef: INTENT,
+    suiDigest: null,
+    generatedAt: T0,
+    signedPartners: new Set(),
+  };
+  const pdfText = (pack) => Buffer.from(pack.pdf).toString('latin1');
+  const reduced = senderDeclaration(input);
+  assert.match(pdfText(reduced), /could not be printed/, 'a visible note on the PDF');
+  assert.ok(reduced.json.recipient.supplierName.includes('บริษัท'), 'the JSON keeps the full name');
+  const plain = senderDeclaration({ ...input, supplier: { ...input.supplier, name: 'Dela Cruz Trading' } });
+  assert.equal(/could not be printed/.test(pdfText(plain)), false, 'no note when nothing was reduced');
+  const multi = senderDeclaration({ ...input, walletControl: { signerKind: 'multisig', threshold: 2 } });
+  assert.match(multi.json.statement, /owners control together/);
+  assert.match(multi.json.statement, /2 signatures/);
+  const single = senderDeclaration({ ...input, walletControl: { signerKind: 'single', threshold: 1 } });
+  assert.equal(/control together/.test(single.json.statement), false, 'a single-signer wallet is not controlled together');
+  assert.match(single.json.statement, /which the business controls/);
 });
