@@ -42,10 +42,10 @@ Capacitor reels (x40)           1,250.00
 Total due: USD 1,250.00`;
 
 const RECIPIENTS = [
-  { id: 'r_mabuhay', name: 'Mabuhay Components Inc', country: 'PH', payoutMethod: 'WALLET', screeningVerdict: 'CLEAR', walletAddress: '0x' + 'ab'.repeat(32) },
-  { id: 'r_kl', name: 'Klang Packaging Sdn Bhd', country: 'MY', payoutMethod: 'WALLET', screeningVerdict: 'ATTESTED', walletAddress: '0x' + 'ef'.repeat(32) },
-  { id: 'r_sz', name: '深圳华强电子有限公司', country: 'CN', payoutMethod: 'WALLET', screeningVerdict: 'CLEAR', walletAddress: '0x' + '34'.repeat(32) },
-  { id: 'r_op', name: 'Mabuhay Components Treasury', country: 'PH', payoutMethod: 'WALLET', screeningVerdict: 'CLEAR', walletAddress: OPERATOR },
+  { id: 'r_mabuhay', name: 'Mabuhay Components Inc', country: 'PH', payoutMethod: 'WALLET', screeningVerdict: 'CLEAR', walletAddress: '0x' + 'ab'.repeat(32), ownershipProvenAt: '2026-10-01T00:00:00.000Z' },
+  { id: 'r_kl', name: 'Klang Packaging Sdn Bhd', country: 'MY', payoutMethod: 'WALLET', screeningVerdict: 'ATTESTED', walletAddress: '0x' + 'ef'.repeat(32), ownershipProvenAt: '2026-10-01T00:00:00.000Z' },
+  { id: 'r_sz', name: '深圳华强电子有限公司', country: 'CN', payoutMethod: 'WALLET', screeningVerdict: 'CLEAR', walletAddress: '0x' + '34'.repeat(32), ownershipProvenAt: '2026-10-01T00:00:00.000Z' },
+  { id: 'r_op', name: 'Mabuhay Components Treasury', country: 'PH', payoutMethod: 'WALLET', screeningVerdict: 'CLEAR', walletAddress: OPERATOR, ownershipProvenAt: '2026-10-01T00:00:00.000Z' },
 ];
 
 const BUSINESS = { name: 'Acme Trading', legalName: 'Acme Trading Sdn Bhd', registrationNumber: '202001012345', addressLine1: '1 Jalan Ampang', addressCity: 'Kuala Lumpur', addressPostalCode: '50450', addressCountry: 'MY' };

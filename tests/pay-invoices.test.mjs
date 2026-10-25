@@ -53,13 +53,13 @@ Pay to account no: 0012-3456-7890`;
 
 const RECIPIENTS = {
   acme: [
-    { id: 'r_mabuhay', name: 'Mabuhay Components Inc', country: 'PH', payoutMethod: 'WALLET', screeningVerdict: 'CLEAR', walletAddress: '0x' + 'ab'.repeat(32) },
-    { id: 'r_unscreened', name: 'Mabuhay Components Trading', country: 'PH', payoutMethod: 'WALLET', screeningVerdict: null, walletAddress: '0x' + 'cd'.repeat(32) },
+    { id: 'r_mabuhay', name: 'Mabuhay Components Inc', country: 'PH', payoutMethod: 'WALLET', screeningVerdict: 'CLEAR', walletAddress: '0x' + 'ab'.repeat(32), ownershipProvenAt: '2026-10-01T00:00:00.000Z' },
+    { id: 'r_unscreened', name: 'Mabuhay Components Trading', country: 'PH', payoutMethod: 'WALLET', screeningVerdict: null, walletAddress: '0x' + 'cd'.repeat(32), ownershipProvenAt: '2026-10-01T00:00:00.000Z' },
     { id: 'r_bank', name: 'Jakarta Textiles PT', country: 'ID', payoutMethod: 'BANK', screeningVerdict: 'CLEAR', account: '9988776655', bank: 'BCA' },
-    { id: 'r_kl', name: 'Klang Packaging Sdn Bhd', country: 'MY', payoutMethod: 'WALLET', screeningVerdict: 'ATTESTED', walletAddress: '0x' + 'ef'.repeat(32) },
+    { id: 'r_kl', name: 'Klang Packaging Sdn Bhd', country: 'MY', payoutMethod: 'WALLET', screeningVerdict: 'ATTESTED', walletAddress: '0x' + 'ef'.repeat(32), ownershipProvenAt: '2026-10-01T00:00:00.000Z' },
   ],
   northwind: [
-    { id: 'r_nw', name: 'Northwind Supplier', country: 'SG', payoutMethod: 'WALLET', screeningVerdict: 'CLEAR', walletAddress: '0x' + '12'.repeat(32) },
+    { id: 'r_nw', name: 'Northwind Supplier', country: 'SG', payoutMethod: 'WALLET', screeningVerdict: 'CLEAR', walletAddress: '0x' + '12'.repeat(32), ownershipProvenAt: '2026-10-01T00:00:00.000Z' },
   ],
 };
 

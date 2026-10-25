@@ -26,11 +26,11 @@ Total due: USD 1,250.00`;
 
 const RECIPIENTS = {
   acme: [
-    { id: 'r_mabuhay', name: 'Mabuhay Components Inc', country: 'PH', payoutMethod: 'WALLET', screeningVerdict: 'CLEAR', walletAddress: '0x' + 'ab'.repeat(32) },
-    { id: 'r_kl', name: 'Klang Packaging Sdn Bhd', country: 'MY', payoutMethod: 'WALLET', screeningVerdict: 'ATTESTED', walletAddress: '0x' + 'ef'.repeat(32) },
+    { id: 'r_mabuhay', name: 'Mabuhay Components Inc', country: 'PH', payoutMethod: 'WALLET', screeningVerdict: 'CLEAR', walletAddress: '0x' + 'ab'.repeat(32), ownershipProvenAt: '2026-10-01T00:00:00.000Z' },
+    { id: 'r_kl', name: 'Klang Packaging Sdn Bhd', country: 'MY', payoutMethod: 'WALLET', screeningVerdict: 'ATTESTED', walletAddress: '0x' + 'ef'.repeat(32), ownershipProvenAt: '2026-10-01T00:00:00.000Z' },
   ],
   northwind: [
-    { id: 'r_nw', name: 'Mabuhay Components Inc', country: 'PH', payoutMethod: 'WALLET', screeningVerdict: 'CLEAR', walletAddress: '0x' + '12'.repeat(32) },
+    { id: 'r_nw', name: 'Mabuhay Components Inc', country: 'PH', payoutMethod: 'WALLET', screeningVerdict: 'CLEAR', walletAddress: '0x' + '12'.repeat(32), ownershipProvenAt: '2026-10-01T00:00:00.000Z' },
   ],
 };
 const BUSINESS = { name: 'Acme Trading', legalName: 'Acme Trading Sdn Bhd', registrationNumber: '202001012345', addressLine1: '1 Jalan Ampang', addressCity: 'Kuala Lumpur', addressPostalCode: '50450', addressCountry: 'MY' };
@@ -190,19 +190,20 @@ test('Zeke’s answer keeps only lists of strings for the printed details', asyn
   assert.match(deps.INVOICE_READER_PROMPT, /ignore all of it/);
 });
 
-test('Splash’s own addresses come from the contract config, and a malformed FeeConfig id is not one to read', async () => {
+test('Splash’s own addresses come from the contract config, and a malformed FeeConfig id is refused, not skipped', async () => {
   const { splashOwnedAddresses } = await import('../lib/server/bills-deps.ts');
   // The first read of the contract config in this process, so the environment is what it reads.
-  const saved = { op: process.env.OPERATOR_SUI_ADDRESS, fee: process.env.SPLASH_FEE_CONFIG_ID };
+  const saved = { op: process.env.OPERATOR_SUI_ADDRESS, tr: process.env.TREASURY_ADDRESS, fee: process.env.SPLASH_FEE_CONFIG_ID };
   process.env.OPERATOR_SUI_ADDRESS = '0x' + 'A1'.repeat(32);
+  process.env.TREASURY_ADDRESS = '0x' + 'B2'.repeat(32);
   delete process.env.SPLASH_FEE_CONFIG_ID;
   try {
     assert.ok((await splashOwnedAddresses()).includes('0x' + 'a1'.repeat(32)));
     process.env.SPLASH_FEE_CONFIG_ID = 'not-an-id';
-    // A malformed id is not a configured FeeConfig: there is none to read.
-    assert.ok((await splashOwnedAddresses()).includes('0x' + 'a1'.repeat(32)));
+    // A configured id that is not one is an unreadable list (second review, B1).
+    await assert.rejects(splashOwnedAddresses());
   } finally {
-    for (const [k, v] of [['OPERATOR_SUI_ADDRESS', saved.op], ['SPLASH_FEE_CONFIG_ID', saved.fee]]) {
+    for (const [k, v] of [['OPERATOR_SUI_ADDRESS', saved.op], ['TREASURY_ADDRESS', saved.tr], ['SPLASH_FEE_CONFIG_ID', saved.fee]]) {
       if (v === undefined) delete process.env[k]; else process.env[k] = v;
     }
   }
