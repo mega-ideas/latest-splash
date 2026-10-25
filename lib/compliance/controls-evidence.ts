@@ -188,6 +188,33 @@ export function assertEvidenceClean(value: unknown, path = '$', key = ''): void 
   }
 }
 
+/**
+ * A business's own free text (an invoice reference, a party's name): cut to
+ * the ISO field's 140 characters, then any IBAN or run of eight digits or
+ * more is reduced to its last four digits, so a reference such as
+ * INV-2026-0345 is kept as INV-****0345 and an account number typed into a
+ * reference is never exported. What is left can never match the
+ * account-shaped check.
+ */
+export function maskFreeText(value: string | null | undefined): string {
+  if (!value) return '';
+  const last4 = (m: string) => `****${m.replace(/\D/g, '').slice(-4)}`;
+  return value
+    .slice(0, 140)
+    .replace(/\b[A-Z]{2}\d{2}[A-Z0-9]{10,30}\b/g, last4)
+    .replace(/\d(?:[ -]?\d){7,}/g, last4);
+}
+
+/** The ISO copy as exported: its free-text fields masked (copies stored before this was done carry them whole). */
+export function sanitizeIsoEvidence(iso: Pacs008Evidence): Pacs008Evidence {
+  return {
+    ...iso,
+    debtor: { ...iso.debtor, name: maskFreeText(iso.debtor.name) },
+    creditor: { ...iso.creditor, name: maskFreeText(iso.creditor.name), town: maskFreeText(iso.creditor.town) },
+    remittanceInfo: iso.remittanceInfo === null ? null : maskFreeText(iso.remittanceInfo),
+  };
+}
+
 /** Mask anything account-like: keep the last four. */
 export function maskTail(value: string | null | undefined, keep = 4): string | null {
   if (!value) return null;

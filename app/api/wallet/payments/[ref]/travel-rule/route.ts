@@ -26,7 +26,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ ref
   const body = await readJsonBody(request);
   const result = await travelRuleForPayment(
     { ...exchangePaymentDepsFor(gate.route), provider: tr.provider },
-    { requestId: decodeURIComponent(ref), exchange: body.exchange, purpose: body.purpose, createdBy: gate.route.authority.userId },
+    { requestId: ref, exchange: body.exchange, purpose: body.purpose, createdBy: gate.route.authority.userId },
   );
   return complianceResponse(result, result.ok && result.created ? 201 : 200);
 }

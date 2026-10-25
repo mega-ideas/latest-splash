@@ -24,7 +24,7 @@ import { normalizeSuiAddress } from '@mysten/sui/utils';
 
 import { kybCases, organizations, suppliers, withdrawals } from '../db/schema.ts';
 import type { ControlsEvidence, EvidencePaymentKind } from '../compliance/controls-evidence.ts';
-import { assertEvidenceClean } from '../compliance/controls-evidence.ts';
+import { assertEvidenceClean, sanitizeIsoEvidence } from '../compliance/controls-evidence.ts';
 import type { Pacs008Evidence } from '../payments/iso20022.ts';
 import { createdIntentIds } from '../payouts/withdrawal-rules.ts';
 import type { WalletAction, WalletTxDescription } from '../wallet/wallet-tx-describe.ts';
@@ -351,7 +351,8 @@ export async function controlsEvidenceFor(deps: EvidenceDeps, ref: string, gener
     };
   } else gaps.push('No signing request is on file for this payment.');
 
-  const iso = (row?.iso20022 ?? null) as Pacs008Evidence | null;
+  const stored = (row?.iso20022 ?? null) as Pacs008Evidence | null;
+  const iso = stored ? sanitizeIsoEvidence(stored) : null;
   if (row && !iso) gaps.push('This payout was written before its ISO 20022 copy was kept.');
   const q = (row?.quote ?? null) as { partnerFees?: unknown; sandbox?: boolean; splashFeeMinor?: string } | null;
   const quote = row

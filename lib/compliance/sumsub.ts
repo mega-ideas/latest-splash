@@ -124,6 +124,14 @@ function sumsubKyb(config: SumsubConfig, deps: { fetcher?: Fetcher; now?: () => 
       } catch (error) {
         // 409: the applicant exists already (a resumed verification). Anything else is a failure.
         if (!(error instanceof ComplianceProviderUnavailable && error.code === 'provider_conflict')) throw error;
+        // The reference is learned here only, so look the applicant up by the id we gave it: a first
+        // attach that was lost is then repaired by this one. No answer leaves it null (the session still opens).
+        try {
+          const found = await sumsubRequest<{ id?: unknown }>(config, 'GET', `/resources/applicants/-;externalUserId=${encodeURIComponent(externalUserId)}/one`, undefined, deps);
+          applicantId = typeof found.body.id === 'string' && found.body.id ? found.body.id : null;
+        } catch {
+          applicantId = null;
+        }
       }
       const token = await sumsubRequest<{ token?: unknown }>(
         config,

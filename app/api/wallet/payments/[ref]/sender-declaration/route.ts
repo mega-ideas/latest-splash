@@ -28,7 +28,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ ref
   const format = body.format ?? 'pdf';
   if (format !== 'pdf' && format !== 'json') return NextResponse.json({ error: 'format is pdf or json' }, { status: 400, headers: NO_STORE });
   const result = await senderDeclarationFor(exchangePaymentDepsFor(gate.route), {
-    requestId: decodeURIComponent(ref),
+    requestId: ref,
     exchange: body.exchange,
     invoiceNumber: body.invoiceNumber,
     invoiceDate: body.invoiceDate,
