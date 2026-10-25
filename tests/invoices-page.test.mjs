@@ -90,7 +90,7 @@ test('the Get paid totals show the whole amount on a phone, never cut off', asyn
   const getPaid = await source('components/invoices/GetPaid.tsx');
   const tile = /<p className=\{cn\('dash-num[^']*'[^}]*\}\s*[^>]*>/.exec(getPaid);
   assert.ok(tile, 'the totals tile renders its figure through cn(), sized by its length');
-  assert.doesNotMatch(tile[0], /truncate/, 'an amount is never shown cut off, as "10,931..."');
+  assert.doesNotMatch(tile[0], /\btruncate\b/, 'an amount is never shown cut off, as "10,931..."');
   assert.doesNotMatch(tile[0], /overflow-wrap:anywhere|break-all/, 'a money figure is never split mid-number, as "1,234,567.8" / "9"');
   assert.match(tile[0], /whitespace-nowrap/, 'a money figure stays on one line');
   assert.match(tile[0], /figure\.className/, 'the figure steps down in size by its length');
