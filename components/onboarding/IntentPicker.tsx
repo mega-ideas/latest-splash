@@ -81,7 +81,7 @@ export default function IntentPicker() {
             type="button"
             onClick={() => choose(intent)}
             disabled={busy !== null}
-            className="dash-block mt-auto inline-flex min-h-[46px] items-center justify-center gap-2 rounded-lg bg-[#1F4452] px-5 text-sm font-semibold text-white transition hover:bg-[#326273] disabled:opacity-60"
+            className="dash-block mt-auto inline-flex min-h-[46px] items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-[#1F4452] px-4 text-[13px] font-semibold text-white transition hover:bg-[#326273] disabled:opacity-60"
           >
             {busy === intent ? 'Saving…' : `Choose ${title.toLowerCase()}`}
             <ArrowRight aria-hidden="true" className="h-4 w-4" />

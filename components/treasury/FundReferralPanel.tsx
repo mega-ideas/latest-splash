@@ -148,9 +148,10 @@ export default function FundReferralPanel({ label, canAnswer }: { label: string;
             <p className="text-[13px] text-[#326273]">Answer for the business. Every question needs an answer.</p>
             {FUND_QUESTIONS.map((q) => (
               <fieldset key={q.id} className="rounded-lg border border-[#326273]/12 px-3 py-2.5">
-                <legend className="px-1 text-[13px] font-medium text-[#1F4452]">{q.question}</legend>
-                {q.help && <p className="mt-0.5 text-[12px] leading-5 text-[#326273]">{q.help}</p>}
-                <div className="mt-1.5 flex gap-2">
+                {/* A floated legend sits inside the box: a long question no longer straddles the border. */}
+                <legend className="float-left w-full text-[13px] font-medium leading-5 text-[#1F4452]">{q.question}</legend>
+                {q.help && <p className="clear-left pt-1 text-[12px] leading-5 text-[#326273]">{q.help}</p>}
+                <div className="clear-left flex gap-2 pt-2">
                   {([[true, q.id === 'declaration' ? 'I confirm' : 'Yes'], [false, q.id === 'declaration' ? 'I do not' : 'No']] as const).map(([value, text]) => (
                     <label key={String(value)} className={cn(
                       'inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-md border px-3 text-[13px] font-semibold',

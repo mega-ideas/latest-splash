@@ -33,7 +33,7 @@ export default async function IntentPage() {
           How will you use Splash?
         </h1>
         <p className="mt-3 max-w-2xl text-[15px] leading-relaxed text-[#326273]">
-          Pick the flow that matches what you&apos;re doing — it shapes your setup, and you can
+          Pick the flow that matches what you&rsquo;re doing. It shapes your setup, and you can
           change it later in Settings. Verification and approvals work the same whichever you
           choose.
         </p>
