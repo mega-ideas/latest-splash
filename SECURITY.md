@@ -35,7 +35,7 @@ The remaining four modules (`smart_treasury`, `payment_intent`, `audit_anchor`, 
 Designs: `docs/v2/fees.md` (Phase 2 list), `docs/v2/phase2-spending-rules.md`
 ("Near-threshold alerts"), `docs/v2/phase2-subscription-billing.md`. Tests:
 `tests/fee-governance-alerts.test.mjs`, `tests/near-threshold-alerts.test.mjs`,
-`tests/subscription-billing.test.mjs`. Migrations 0050 to 0052.
+`tests/subscription-billing.test.mjs`. Migrations 0050 to 0053.
 
 - **Fee proposals alert every owner.** The governance cron reads the
   canonical `FeeConfig` by state (pending schedules, pending recipient), type
@@ -48,7 +48,7 @@ Designs: `docs/v2/fees.md` (Phase 2 list), `docs/v2/phase2-spending-rules.md`
   reads the session's org only.
 - **Subscription billing is off** (`FEATURE_SUBSCRIPTION_BILLING`). While
   off, every billing route and the cron answer 404 before reading a session
-  or the database; only a live plan can still be cancelled. No payment path
+  or the database; only a live or pending plan can still be cancelled. No payment path
   imports billing (a test walks `lib/`, `app/` and `components/`).
 - **The wallet reader gained one plain-allowance shape, gated.**
   `allowance::new` is understood only when the server sets
@@ -67,8 +67,45 @@ Designs: `docs/v2/fees.md` (Phase 2 list), `docs/v2/phase2-spending-rules.md`
   bytes, and never signs them. The AllowanceCap stays with the business
   wallet; revoking it stops billing at once.
 - **Residual.** A finance multisig quorum could sign a pull Splash did not
-  build; the chain still caps it at the plan price per month under that
-  allowance, and only until the wallet revokes it.
+  build; the chain still caps it at the plan price per monthly window under
+  that allowance, and only until the wallet revokes it.
+- **Review fixes (carried-items review).**
+  - *Untracked allowances (High).* A subscribe whose follow-up missed the new
+    allowance (indexer lag, swallowed error) stayed pending, and a second
+    subscribe opened a signing request before the insert refused it: owners
+    could grant a second billing allowance Splash did not track and could not
+    revoke through Splash. The pending row is now written before the request
+    opens; an executed but unrecorded subscribe is reconciled by the next plan
+    request (which opens nothing until it is, `reconcile_pending`) and by
+    every billing cron run (a 502 until it is); a subscribe or change revokes
+    every billing allowance the wallet holds in the same transaction; and the
+    cron reports any billing allowance no subscription tracks.
+  - *Cancel needed the finance proof (High).* Cancel is now built from the
+    stored subscriptions and what the wallet holds, never from
+    `SPLASH_FINANCE_ADDRESS` or `FeeConfig`, and revokes every billing
+    allowance the wallet holds to any finance multisig the business
+    subscribed to. The `subscription` purpose requires the transaction to
+    revoke exactly the allowances the server named, no fewer and no other.
+  - *Wrong plan on a retried pull (Medium).* A failed or unsigned pull of a
+    replaced plan is `superseded` (invoice void) and the month is billed
+    under the plan in force on a new row; the unique index is partial
+    (migration 0053), so a month is still drawn at most once. A plan change
+    supersedes the old plan's unsigned pulls at once, and a pull of a plan no
+    longer live notices nobody.
+  - *Stuck pulls (Medium).* A pull unsigned past its gas window is rebuilt on
+    the same row; one sent but never seen once its window has passed is made
+    signable again; a submission the network refuses before running it
+    leaves the pull signable (`not_sent`). The same bytes twice are one
+    transaction, so nothing is drawn twice.
+  - *Invoice numbers (Low)* are a per-month sequence, not a 32-bit hash of
+    the org, so two businesses cannot block each other's billing.
+  - *Calendar month (Low, residual).* The chain's `monthly_rate_limit`
+    windows are anchored on the first charge (`sui::allowance` `anchor_ms`),
+    not on the 1st; "per calendar month (UTC)" in A1's Settings line is
+    enforced by Splash's partial unique index. A finance quorum signing
+    outside Splash could draw the price twice in one calendar month (once in
+    each of two windows), and a plan change starts a fresh window. Both are
+    bounded by the plan price per window and end when the wallet revokes.
 
 ## v2 Phase 2 §4.8 — Zeke's rules — 2026-10-25
 

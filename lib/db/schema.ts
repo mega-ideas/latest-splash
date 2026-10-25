@@ -2316,7 +2316,7 @@ export const subscriptionPulls = pgTable('subscription_pulls', {
   /** YYYY-MM, the calendar month (UTC) billed. Unique per org. */
   period: text('period').notNull(),
   amountMinor: bigint('amount_minor', { mode: 'bigint' }).notNull(),
-  /** awaiting_signature | submitted | succeeded | failed */
+  /** awaiting_signature | submitted | succeeded | failed | superseded (never drawn; the month is billed again, migration 0053) */
   status: text('status').notNull(),
   txBytes: text('tx_bytes').notNull(),
   txDigest: text('tx_digest').notNull(),
@@ -2325,7 +2325,7 @@ export const subscriptionPulls = pgTable('subscription_pulls', {
   succeededAt: timestamp('succeeded_at', { withTimezone: true }),
   ...timestamps,
 }, (table) => [
-  uniqueIndex('subscription_pulls_org_period_unique').on(table.orgId, table.period),
+  uniqueIndex('subscription_pulls_org_period_unique').on(table.orgId, table.period).where(sql`status <> 'superseded'`),
   uniqueIndex('subscription_pulls_digest_unique').on(table.txDigest),
 ]);
 
@@ -2338,6 +2338,8 @@ export const subscriptionInvoices = pgTable('subscription_invoices', {
   planName: text('plan_name').notNull(),
   amountMinor: bigint('amount_minor', { mode: 'bigint' }).notNull(),
   issuedAt: timestamp('issued_at', { withTimezone: true }).notNull(),
+  /** Set when its pull was superseded (never drawn): the invoice is void. */
+  voidedAt: timestamp('voided_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   uniqueIndex('subscription_invoices_pull_unique').on(table.pullId),

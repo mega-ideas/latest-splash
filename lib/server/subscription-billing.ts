@@ -4,7 +4,7 @@
  *
  * While the flag is off every entry point here refuses with `not_found`
  * (404) before it reads or writes anything, and the cron does nothing. The
- * one exception is cancelling: a business that has a live subscription can
+ * one exception is cancelling: a business that has a live or pending plan can
  * always revoke it, whatever the flag says (with the flag off and nothing
  * live, cancel is `not_found` too). No payment path imports this module, so
  * no payment is ever blocked because billing failed.
@@ -36,7 +36,7 @@
  * the caller (the routes take it from the session, WS2); the cron's
  * cross-tenant reads say so (`*ForStaff`).
  */
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 
 import { TransactionDataBuilder } from '@mysten/sui/transactions';
 import { normalizeStructTag, normalizeSuiAddress, toBase64, fromBase64 } from '@mysten/sui/utils';
@@ -44,6 +44,7 @@ import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 
 import {
   allowanceCopy,
+  BILLING_ALLOWANCE_PREFIX,
   billingAllowanceName,
   billingPeriod,
   GRACE_PERIOD_MS,
@@ -66,6 +67,7 @@ import { liveRateLimit } from '../wallet/allowance-window.ts';
 import type { AllowanceState } from '../wallet/spend-rules-bcs.ts';
 import type { WalletContext, WalletMembers } from './business-wallet.ts';
 import { billingPullTx, cancelSubscriptionTx, subscribeTx, type OwnGas } from './subscription-builders.ts';
+import type { SponsoredGas } from './sui-v2-builders.ts';
 import { openSigningRequest, type RequestView, type SigningFailure } from './wallet-signing.ts';
 import { IN_FLIGHT, readSigningRequest, type DrizzleDb, type StoredRequest } from './wallet-signing-store.ts';
 
@@ -188,17 +190,32 @@ export async function readSubscription(deps: BillingDeps, orgId: string) {
     ok: true as const,
     subscription: live ? await viewOf(deps.db, live) : null,
     pending: pending ? await viewOf(deps.db, pending) : null,
-    invoices: invoices.map((i: typeof subscriptionInvoices.$inferSelect) => ({ id: i.id, number: i.number, period: i.period, planName: i.planName, amountMinor: i.amountMinor.toString(), issuedAt: i.issuedAt.toISOString() })),
+    invoices: invoices.map((i: typeof subscriptionInvoices.$inferSelect) => ({ id: i.id, number: i.number, period: i.period, planName: i.planName, amountMinor: i.amountMinor.toString(), issuedAt: i.issuedAt.toISOString(), voided: i.voidedAt !== null })),
     receipts: receipts.map((r: typeof subscriptionReceipts.$inferSelect) => ({ id: r.id, invoiceId: r.invoiceId, suiDigest: r.suiDigest, amountMinor: r.amountMinor.toString(), paidAt: r.paidAt.toISOString() })),
   };
 }
 
 type Opened = { ok: true; request: RequestView; subscription: SubscriptionView } | BillingFailure;
 
-/** The billing allowances this wallet holds: plain (no app), to the finance multisig, named for billing. */
-function billingHeld(held: HeldBillingAllowance[], wallet: string, finance: string): HeldBillingAllowance[] {
-  return held.filter((a) => a.app === null && a.funder === wallet && a.spender === finance && a.name.startsWith('splash-billing:'));
+/**
+ * The billing allowances this wallet holds: plain (no app), funded by the
+ * wallet, named for billing, to one of `finances` (every finance multisig
+ * this business ever subscribed to, and the current one).
+ */
+function billingHeld(held: HeldBillingAllowance[], wallet: string, finances: ReadonlySet<string>): HeldBillingAllowance[] {
+  return held.filter((a) => a.app === null && a.funder === wallet && a.spender !== null && finances.has(a.spender) && a.name.startsWith(BILLING_ALLOWANCE_PREFIX));
 }
+
+/** A pending row is written before its signing request opens; this long, a row with no request yet is still being opened. */
+const OPENING_LEASE_MS = 5 * 60 * 1000;
+
+/** Every finance multisig a subscription of this business was signed to. */
+async function financesOf(db: DrizzleDb, orgId: string): Promise<Set<string>> {
+  const rows = await db.select({ f: subscriptions.financeAddress }).from(subscriptions).where(eq(subscriptions.orgId, orgId));
+  return new Set(rows.map((r: { f: string }) => normalizeSuiAddress(r.f)));
+}
+
+const revokeRef = (a: HeldBillingAllowance) => ({ cap: a.cap, allowance: { objectId: a.id, initialSharedVersion: a.initialSharedVersion } });
 
 async function openBilling(
   deps: BillingDeps,
@@ -215,61 +232,63 @@ async function openBilling(
   }
   if (!account.wallet) return refuse(409, 'no_wallet', 'register the business wallet first');
   const wallet = normalizeSuiAddress(account.wallet);
-  const finance = await bw.financeAddress();
-  if (!finance.ok) return refuse(503, 'finance_unconfigured', finance.error);
-  const financeAddress = normalizeSuiAddress(finance.address);
-  if (financeAddress === wallet) return refuse(409, 'finance_unconfigured', 'the finance multisig cannot be the business wallet');
   const sponsor = bw.ctx.signing.sponsor;
   if (!sponsor) return refuse(503, 'no_sponsor', 'business wallet transactions need a gas sponsor, and none is configured');
 
-  // A pending plan whose signing request closed without executing is
-  // abandoned, so it holds nothing back; one still collecting is refused.
+  // Pending plans. One whose signing request closed without executing is
+  // abandoned, so it holds nothing back; one still being opened or collecting
+  // signatures is refused (a cancel goes ahead). One whose request EXECUTED
+  // but whose follow-up did not record its allowance (an indexer that lagged,
+  // a follow-up that failed) is reconciled here; until it is, nothing new is
+  // opened, so no second allowance can be granted that Splash does not track.
   const pendings = await db.select().from(subscriptions).where(and(eq(subscriptions.orgId, input.orgId), eq(subscriptions.status, 'pending')));
   for (const p of pendings as SubRow[]) {
-    const req = p.signingRequestId ? await readSigningRequest(db, input.orgId, p.signingRequestId) : null;
+    if (!p.signingRequestId) {
+      if (now.getTime() - p.createdAt.getTime() < OPENING_LEASE_MS) {
+        if (input.mode !== 'cancel') return refuse(409, 'request_open', 'a plan change for this business is already waiting for signatures');
+        continue;
+      }
+      await db.update(subscriptions).set({ status: 'abandoned', updatedAt: now }).where(and(eq(subscriptions.id, p.id), eq(subscriptions.status, 'pending')));
+      continue;
+    }
+    const req = await readSigningRequest(db, input.orgId, p.signingRequestId);
     if (req && IN_FLIGHT.includes(req.status)) {
       if (input.mode !== 'cancel') return refuse(409, 'request_open', 'a plan change for this business is already waiting for signatures');
       continue;
     }
-    if (req?.status === 'executed') continue;
+    if (req?.status === 'executed') {
+      await continueBillingSteps(deps, bw, req).catch(() => undefined);
+      const [after] = await db.select().from(subscriptions).where(eq(subscriptions.id, p.id)).limit(1);
+      if (after?.status === 'pending' && input.mode !== 'cancel') {
+        return refuse(409, 'reconcile_pending', 'the last plan change has been signed and is still being recorded; try again in a few minutes');
+      }
+      continue;
+    }
     await db.update(subscriptions).set({ status: 'abandoned', updatedAt: now }).where(and(eq(subscriptions.id, p.id), eq(subscriptions.status, 'pending')));
   }
 
   const current = await liveSub(db, input.orgId);
+  if (input.mode === 'cancel') return openCancel(deps, bw, { ...input, wallet: input.wallet, walletAddress: wallet, current, gas: () => sponsor.gasFor() });
+
+  const finance = await bw.financeAddress().catch((e: unknown) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e) }));
+  if (!finance.ok) return refuse(503, 'finance_unconfigured', finance.error);
+  const financeAddress = normalizeSuiAddress(finance.address);
+  if (financeAddress === wallet) return refuse(409, 'finance_unconfigured', 'the finance multisig cannot be the business wallet');
+
+  const finances = await financesOf(db, input.orgId);
+  finances.add(financeAddress);
   let held: HeldBillingAllowance[];
   try {
-    held = billingHeld(await bw.readHeldAllowances(wallet), wallet, financeAddress);
+    held = billingHeld(await bw.readHeldAllowances(wallet), wallet, finances);
   } catch {
     return refuse(502, 'chain_unreadable', "the wallet's allowances could not be read from the chain");
   }
   const currentHeld = current ? held.find((a) => a.id === current.allowanceId) ?? null : null;
 
   if (input.mode === 'subscribe' && current) return refuse(409, 'already_subscribed', 'this business already has a plan; change it instead');
-  if (input.mode !== 'subscribe') {
+  if (input.mode === 'change') {
     if (!current) return refuse(404, 'not_found', 'this business has no plan');
     if (!currentHeld) return refuse(409, 'allowance_missing', 'the allowance this plan bills under is no longer held by the business wallet');
-  }
-
-  const gas = await sponsor.gasFor();
-  const billingExpect = { financeAddress, allowanceIds: held.map((a) => a.id), capIds: held.map((a) => a.cap.objectId) };
-  const revoke = currentHeld ? { cap: currentHeld.cap, allowance: { objectId: currentHeld.id, initialSharedVersion: currentHeld.initialSharedVersion } } : undefined;
-
-  if (input.mode === 'cancel') {
-    const bytes = await cancelSubscriptionTx({ wallet, usdcType: bw.ctx.chain.usdcType, cap: currentHeld!.cap, allowance: revoke!.allowance, gas });
-    const opened = await openSigningRequest(bw.ctx.signing, {
-      orgId: input.orgId,
-      requestedBy: input.requestedBy,
-      purpose: 'subscription',
-      dedupeKey: 'billing:cancel',
-      transactionBytes: bytes,
-      signer: { kind: 'multisig', ...input.wallet },
-      gasMode: 'sponsored',
-      billing: billingExpect,
-      billingTerms: { revokeAllowances: [currentHeld!.id] },
-    });
-    if (!opened.ok) return opened;
-    await db.update(subscriptions).set({ cancelRequestId: opened.request.id, updatedAt: now }).where(and(eq(subscriptions.id, current!.id), eq(subscriptions.orgId, input.orgId)));
-    return { ok: true, request: opened.request, subscription: await viewOf(db, current!) };
   }
 
   const plan = input.planId ? await planOf(db, input.planId) : null;
@@ -277,27 +296,23 @@ async function openBilling(
   if (input.mode === 'change' && plan.id === current!.planId && plan.priceMinor === current!.priceMinor) return refuse(409, 'same_plan', 'this business is on that plan already');
   const name = billingAllowanceName(plan.id);
   const expiresAtMs = BigInt(termEndUtc(now.getTime(), plan.termMonths));
-  const terms = { revokeAllowances: revoke ? [currentHeld!.id] : [], grant: { name, monthlyLimitMinor: plan.priceMinor, expiresAtMs, lifetimeCapMinor: plan.lifetimeCapMinor } };
+  // Every billing allowance the wallet holds is revoked in the same
+  // transaction (the current plan's, and any stray one), so after it the
+  // wallet holds exactly one: the new plan's.
+  const terms = { revokeAllowances: held.map((a) => a.id), grant: { name, monthlyLimitMinor: plan.priceMinor, expiresAtMs, lifetimeCapMinor: plan.lifetimeCapMinor } };
+  const gas = await sponsor.gasFor();
   let bytes: Uint8Array;
   try {
-    bytes = await subscribeTx({ wallet, usdcType: bw.ctx.chain.usdcType, name, finance: financeAddress, monthlyLimitMinor: plan.priceMinor, expiresAtMs, lifetimeCapMinor: plan.lifetimeCapMinor, ...(revoke ? { revoke } : {}), gas });
+    bytes = await subscribeTx({ wallet, usdcType: bw.ctx.chain.usdcType, name, finance: financeAddress, monthlyLimitMinor: plan.priceMinor, expiresAtMs, lifetimeCapMinor: plan.lifetimeCapMinor, revokes: held.map(revokeRef), gas });
   } catch (error) {
     const e = error as { code?: string; message?: string };
     return refuse(400, e.code ?? 'bad_plan', e.message ?? 'the subscription could not be built');
   }
+
+  // The pending row first, then the request: if the row cannot be written
+  // (another plan change is pending) no request is ever opened, and if the
+  // request cannot be opened the row is abandoned.
   const id = `sub_${randomUUID()}`;
-  const opened = await openSigningRequest(bw.ctx.signing, {
-    orgId: input.orgId,
-    requestedBy: input.requestedBy,
-    purpose: 'subscription',
-    dedupeKey: 'billing:plan',
-    transactionBytes: bytes,
-    signer: { kind: 'multisig', ...input.wallet },
-    gasMode: 'sponsored',
-    billing: billingExpect,
-    billingTerms: terms,
-  });
-  if (!opened.ok) return opened;
   try {
     await db.insert(subscriptions).values({
       id,
@@ -311,7 +326,7 @@ async function openBilling(
       allowanceName: name,
       termStart: now,
       expiresAt: new Date(Number(expiresAtMs)),
-      signingRequestId: opened.request.id,
+      signingRequestId: null,
       replacesId: current?.id ?? null,
       createdAt: now,
       updatedAt: now,
@@ -319,8 +334,81 @@ async function openBilling(
   } catch {
     return refuse(409, 'request_open', 'a plan change for this business is already waiting for signatures');
   }
+  let opened: Awaited<ReturnType<typeof openSigningRequest>>;
+  try {
+    opened = await openSigningRequest(bw.ctx.signing, {
+      orgId: input.orgId,
+      requestedBy: input.requestedBy,
+      purpose: 'subscription',
+      dedupeKey: 'billing:plan',
+      transactionBytes: bytes,
+      signer: { kind: 'multisig', ...input.wallet },
+      gasMode: 'sponsored',
+      billing: { financeAddress, allowanceIds: held.map((a) => a.id), capIds: held.map((a) => a.cap.objectId) },
+      billingTerms: terms,
+    });
+  } catch (error) {
+    await db.update(subscriptions).set({ status: 'abandoned', updatedAt: now }).where(eq(subscriptions.id, id));
+    throw error;
+  }
+  if (!opened.ok) {
+    await db.update(subscriptions).set({ status: 'abandoned', updatedAt: now }).where(eq(subscriptions.id, id));
+    return opened;
+  }
+  await db.update(subscriptions).set({ signingRequestId: opened.request.id, updatedAt: now }).where(eq(subscriptions.id, id));
   const [row] = await db.select().from(subscriptions).where(eq(subscriptions.id, id)).limit(1);
   return { ok: true, request: opened.request, subscription: await viewOf(db, row) };
+}
+
+/**
+ * Cancel = revoke, built from what Splash stored and what the wallet holds,
+ * never from the live finance proof: a revoke moves no money to anyone, so
+ * it works after a finance rotation, with SPLASH_FINANCE_ADDRESS unset and
+ * with FeeConfig unreadable. It revokes every billing allowance the wallet
+ * holds to any finance multisig this business subscribed to, the tracked one
+ * and any stray one, in one transaction.
+ */
+async function openCancel(
+  deps: BillingDeps,
+  bw: BillingWallet,
+  input: { orgId: string; requestedBy: string; wallet: WalletMembers; walletAddress: string; current: SubRow | null; gas: () => Promise<SponsoredGas> },
+): Promise<Opened> {
+  const { db } = deps;
+  const now = nowOf(deps);
+  const wallet = input.walletAddress;
+  const finances = await financesOf(db, input.orgId);
+  if (finances.size === 0) return refuse(404, 'not_found', 'this business has no plan');
+  let held: HeldBillingAllowance[];
+  try {
+    held = billingHeld(await bw.readHeldAllowances(wallet), wallet, finances);
+  } catch {
+    return refuse(502, 'chain_unreadable', "the wallet's allowances could not be read from the chain");
+  }
+  if (held.length === 0) {
+    return input.current
+      ? refuse(409, 'allowance_missing', 'the allowance this plan bills under is no longer held by the business wallet')
+      : refuse(404, 'not_found', 'this business has no plan');
+  }
+  const gas = await input.gas();
+  const bytes = await cancelSubscriptionTx({ wallet, usdcType: bw.ctx.chain.usdcType, revokes: held.map(revokeRef), gas });
+  const opened = await openSigningRequest(bw.ctx.signing, {
+    orgId: input.orgId,
+    requestedBy: input.requestedBy,
+    purpose: 'subscription',
+    dedupeKey: 'billing:cancel',
+    transactionBytes: bytes,
+    signer: { kind: 'multisig', ...input.wallet },
+    gasMode: 'sponsored',
+    // The describer needs a well-formed finance address to read a billing
+    // revoke at all; the revoke itself is checked against the ids listed.
+    billing: { financeAddress: held[0].spender as string, allowanceIds: held.map((a) => a.id), capIds: held.map((a) => a.cap.objectId) },
+    billingTerms: { revokeAllowances: held.map((a) => a.id) },
+  });
+  if (!opened.ok) return opened;
+  const target = input.current;
+  if (target) await db.update(subscriptions).set({ cancelRequestId: opened.request.id, updatedAt: now }).where(and(eq(subscriptions.id, target.id), eq(subscriptions.orgId, input.orgId)));
+  const shown = target ?? ((await db.select().from(subscriptions).where(eq(subscriptions.orgId, input.orgId)).orderBy(desc(subscriptions.createdAt)).limit(1))[0] as SubRow);
+  return { ok: true, request: opened.request, subscription: await viewOf(db, shown) };
 }
 
 export async function subscribe(deps: BillingDeps, bw: BillingWallet, input: { orgId: string; requestedBy: string; wallet: WalletMembers; planId: string }): Promise<Opened> {
@@ -334,30 +422,51 @@ export async function changePlan(deps: BillingDeps, bw: BillingWallet, input: { 
   return openBilling(deps, bw, { ...input, mode: 'change' });
 }
 
-/** Cancel = the wallet revokes the allowance. Possible whenever a plan is live, whatever the flag. */
+/** Cancel = the wallet revokes the allowance. Possible whenever a plan is live or one is pending, whatever the flag. */
 export async function cancelSubscription(deps: BillingDeps, bw: BillingWallet, input: { orgId: string; requestedBy: string; wallet: WalletMembers }): Promise<Opened> {
-  if (!on(deps) && !(await liveSub(deps.db, input.orgId))) return NOT_FOUND();
+  if (!on(deps)) {
+    const [any] = await deps.db.select({ id: subscriptions.id }).from(subscriptions).where(and(eq(subscriptions.orgId, input.orgId), inArray(subscriptions.status, [...LIVE, 'pending']))).limit(1);
+    if (!any) return NOT_FOUND();
+  }
   return openBilling(deps, bw, { ...input, mode: 'cancel' });
 }
 
+/** What reconciling needs: the wallet's billing allowances as the chain shows them. */
+export type ReconcileWallet = Pick<BillingWallet, 'readHeldAllowances'>;
+
 /**
  * After a `subscription` request executes, in its own org: a new allowance
- * makes its subscription active (and the one it replaces `replaced`); a
- * revoke makes the subscription `cancelled`. The allowance is read from the
- * chain, never from the client, and must carry exactly the plan's terms.
+ * makes its subscription active (and the one it replaces `replaced`, with
+ * that plan's unsigned pulls superseded); a revoke makes the subscription
+ * `cancelled`. The allowance is read from the chain, never from the client,
+ * and must carry exactly the plan's terms. Safe to run again: the request
+ * hook runs it once, and an owner's next plan request and the billing cron
+ * run it again until the allowance is recorded.
  */
-export async function continueBillingSteps(deps: BillingDeps, bw: BillingWallet, request: StoredRequest): Promise<void> {
+export async function continueBillingSteps(deps: BillingDeps, bw: ReconcileWallet, request: StoredRequest): Promise<void> {
   if (request.purpose !== 'subscription' || request.status !== 'executed') return;
   const { db } = deps;
   const now = nowOf(deps);
-  const [cancelled] = await db.select().from(subscriptions).where(and(eq(subscriptions.orgId, request.orgId), eq(subscriptions.cancelRequestId, request.id))).limit(1);
-  if (cancelled && (LIVE as readonly string[]).includes(cancelled.status)) {
-    await db.update(subscriptions).set({ status: 'cancelled', updatedAt: now }).where(eq(subscriptions.id, cancelled.id));
+  if (request.dedupeKey === 'billing:cancel') {
+    // The cancel revoked every billing allowance the wallet held when it was
+    // built, so a pending plan whose own request had executed (its allowance
+    // not yet recorded) has nothing left to bill under. One the cancel could
+    // not see is caught by the cron's untracked-allowance check.
+    await db.transaction(async (tx: DrizzleDb) => {
+      await tx.update(subscriptions).set({ status: 'cancelled', updatedAt: now }).where(and(eq(subscriptions.orgId, request.orgId), eq(subscriptions.cancelRequestId, request.id), inArray(subscriptions.status, [...LIVE])));
+      const pendings = await tx.select().from(subscriptions).where(and(eq(subscriptions.orgId, request.orgId), eq(subscriptions.status, 'pending')));
+      for (const p of pendings as SubRow[]) {
+        const req = p.signingRequestId ? await readSigningRequest(tx, request.orgId, p.signingRequestId) : null;
+        if (req?.status === 'executed' && req.createdAt.getTime() <= request.createdAt.getTime()) {
+          await tx.update(subscriptions).set({ status: 'abandoned', updatedAt: now }).where(and(eq(subscriptions.id, p.id), eq(subscriptions.status, 'pending')));
+        }
+      }
+    });
     return;
   }
   const [sub] = await db.select().from(subscriptions).where(and(eq(subscriptions.orgId, request.orgId), eq(subscriptions.signingRequestId, request.id))).limit(1);
   if (!sub || sub.status !== 'pending') return;
-  const held = billingHeld(await bw.readHeldAllowances(sub.wallet), sub.wallet, sub.financeAddress);
+  const held = billingHeld(await bw.readHeldAllowances(sub.wallet), sub.wallet, new Set([sub.financeAddress]));
   const taken = new Set(
     (await db.select({ id: subscriptions.allowanceId }).from(subscriptions).where(eq(subscriptions.orgId, request.orgId))).map((r: { id: string | null }) => r.id).filter(Boolean),
   );
@@ -373,9 +482,28 @@ export async function continueBillingSteps(deps: BillingDeps, bw: BillingWallet,
   );
   if (!match) throw new Error('the executed subscription left no allowance with the plan terms on chain');
   await db.transaction(async (tx: DrizzleDb) => {
-    if (sub.replacesId) await tx.update(subscriptions).set({ status: 'replaced', updatedAt: now }).where(and(eq(subscriptions.id, sub.replacesId), eq(subscriptions.orgId, request.orgId)));
+    if (sub.replacesId) {
+      await tx.update(subscriptions).set({ status: 'replaced', updatedAt: now }).where(and(eq(subscriptions.id, sub.replacesId), eq(subscriptions.orgId, request.orgId)));
+      // Its unsigned pulls draw under an allowance just revoked: they can
+      // never land, and must not be signed or noticed as failures.
+      await supersedePulls(tx, { orgId: request.orgId, subscriptionId: sub.replacesId, statuses: ['awaiting_signature'], now });
+    }
     await tx.update(subscriptions).set({ status: 'active', allowanceId: match.id, allowanceCapId: match.cap.objectId, updatedAt: now }).where(eq(subscriptions.id, sub.id));
   });
+}
+
+/** Void pulls that will never be drawn (and their invoices); the month may then be billed again under the plan in force. */
+async function supersedePulls(db: DrizzleDb, input: { orgId: string; subscriptionId?: string; pullId?: string; statuses: string[]; now: Date }): Promise<number> {
+  const where = and(
+    eq(subscriptionPulls.orgId, input.orgId),
+    inArray(subscriptionPulls.status, input.statuses),
+    ...(input.subscriptionId ? [eq(subscriptionPulls.subscriptionId, input.subscriptionId)] : []),
+    ...(input.pullId ? [eq(subscriptionPulls.id, input.pullId)] : []),
+  );
+  const voided = await db.update(subscriptionPulls).set({ status: 'superseded', updatedAt: input.now }).where(where).returning({ id: subscriptionPulls.id });
+  const ids = voided.map((v: { id: string }) => v.id);
+  if (ids.length) await db.update(subscriptionInvoices).set({ voidedAt: input.now }).where(inArray(subscriptionInvoices.pullId, ids));
+  return ids.length;
 }
 
 // ─── Billing: one pull per calendar month, signed by the finance multisig ──
@@ -434,41 +562,106 @@ export type CycleDeps = BillingDeps & {
   usdcType: string;
   /** What the chain says about a digest, or null if it has not seen it. */
   readDigest: (digest: string) => Promise<{ success: boolean; error?: string | null } | null>;
+  /** Every billing allowance cap a wallet holds, to reconcile executed subscribes and catch untracked ones. Without it neither runs. */
+  readHeldAllowances?: (owner: string) => Promise<HeldBillingAllowance[]>;
+  /** The chain's current epoch, to tell when a pull's gas window has passed. Without it a pull never expires here. */
+  currentEpoch?: () => Promise<bigint>;
   sendEmail?: (message: { to: string; subject: string; text: string; link: string }) => Promise<{ providerRef: string | null }>;
   appUrl?: string;
 };
 
 export type CycleResult =
-  | { ok: true; prepared: number; succeeded: number; failed: number; ended: number; cancelled: number; lapsed: number; notices: number; errors: Array<{ subscriptionId: string; error: string }> }
+  | { ok: true; prepared: number; succeeded: number; failed: number; ended: number; cancelled: number; lapsed: number; notices: number; reconciled: number; errors: Array<{ subscriptionId: string; error: string }> }
   | { ok: false; status: 404; code: 'not_found' };
 
-const invoiceNumber = (orgId: string, period: string) => `SPL-${period.replace('-', '')}-${createHash('sha256').update(orgId).digest('hex').slice(0, 8).toUpperCase()}`;
+/** `SPL-202610-000001`: a sequence per calendar month across Splash, never derived from the org. */
+async function nextInvoiceNumber(tx: DrizzleDb, period: string): Promise<string> {
+  const [row] = await tx.select({ n: sql<number>`count(*)::int` }).from(subscriptionInvoices).where(eq(subscriptionInvoices.period, period));
+  return `SPL-${period.replace('-', '')}-${String((row?.n ?? 0) + 1).padStart(6, '0')}`;
+}
+
+/** The last epoch a pull's bytes can land in (their ValidDuring window), or null when they carry none. */
+function pullMaxEpoch(txBytes: string): bigint | null {
+  try {
+    const exp = TransactionDataBuilder.fromBytes(fromBase64(txBytes)).expiration as { ValidDuring?: { maxEpoch?: string | number | null } } | null | undefined;
+    const max = exp?.ValidDuring?.maxEpoch;
+    return max === null || max === undefined ? null : BigInt(max);
+  } catch {
+    return null;
+  }
+}
+
+const expired = (p: PullRow, epoch: bigint | null) => {
+  const max = pullMaxEpoch(p.txBytes);
+  return epoch !== null && max !== null && epoch > max;
+};
 
 /**
- * One run of billing, cross-tenant (the cron). Off: nothing at all. For each
- * live subscription: settle what a submitted pull did; end it at its term;
- * mark it cancelled if the wallet revoked the allowance outside Splash;
- * lapse it when its grace ran out; and, once per calendar month, when the
- * allowance's own window has room, build the month's pull for the finance
- * multisig to sign, with its invoice. Never more than one pull per business
- * per month: the unique index decides, not this loop.
+ * One run of billing, cross-tenant (the cron). Off: nothing at all. It
+ * settles what each sent pull did on chain; reconciles a subscribe that
+ * executed but whose allowance was not recorded; and for each live
+ * subscription ends it at its term, marks it cancelled if the wallet revoked
+ * the allowance outside Splash, lapses it when its grace ran out, and, once
+ * per calendar month, when the allowance's own window has room, builds the
+ * month's pull for the finance multisig to sign, with its invoice. A pull
+ * whose gas window passed unsigned is rebuilt on the same row. Never more
+ * than one drawn pull per business per month: the partial unique index
+ * decides, not this loop. Finally it reports any billing allowance a wallet
+ * holds that no subscription tracks.
  */
 export async function runBillingCycleForStaff(deps: CycleDeps): Promise<CycleResult> {
   if (!on(deps)) return { ok: false, status: 404, code: 'not_found' };
   const { db } = deps;
   const now = nowOf(deps);
-  const out = { ok: true as const, prepared: 0, succeeded: 0, failed: 0, ended: 0, cancelled: 0, lapsed: 0, notices: 0, errors: [] as Array<{ subscriptionId: string; error: string }> };
+  const out = { ok: true as const, prepared: 0, succeeded: 0, failed: 0, ended: 0, cancelled: 0, lapsed: 0, notices: 0, reconciled: 0, errors: [] as Array<{ subscriptionId: string; error: string }> };
+  let epoch: bigint | null = null;
+  if (deps.currentEpoch) {
+    try {
+      epoch = await deps.currentEpoch();
+    } catch {
+      epoch = null;
+    }
+  }
 
-  // What submitted pulls did on chain.
+  // What sent pulls did on chain. One the chain has not seen once its gas
+  // window has passed can never land: it goes back to be signed again (the
+  // same bytes twice would be one transaction, so nothing is drawn twice).
   const submitted = await db.select().from(subscriptionPulls).where(eq(subscriptionPulls.status, 'submitted'));
-  for (const p of submitted) {
-    const seen = await deps.readDigest(p.txDigest).catch(() => null);
-    if (!seen) continue;
-    const r = await settlePull(deps, p, seen);
-    if (r === 'succeeded') out.succeeded += 1;
-    if (r === 'failed') {
-      out.failed += 1;
-      out.notices += await noticeOwners(deps, p);
+  for (const p of submitted as PullRow[]) {
+    let seen: { success: boolean; error?: string | null } | null = null;
+    let known = true;
+    try {
+      seen = await deps.readDigest(p.txDigest);
+    } catch {
+      known = false;
+    }
+    if (seen) {
+      const r = await settlePull(deps, p, seen);
+      if (r === 'succeeded') out.succeeded += 1;
+      if (r === 'failed') {
+        out.failed += 1;
+        out.notices += await noticeOwners(deps, p);
+      }
+      continue;
+    }
+    if (known && expired(p, epoch)) {
+      await db.update(subscriptionPulls).set({ status: 'awaiting_signature', updatedAt: now }).where(and(eq(subscriptionPulls.id, p.id), eq(subscriptionPulls.status, 'submitted')));
+    }
+  }
+
+  // Subscribes that executed but whose allowance was never recorded.
+  if (deps.readHeldAllowances) {
+    const pending = await db.select().from(subscriptions).where(eq(subscriptions.status, 'pending'));
+    for (const p of pending as SubRow[]) {
+      if (!p.signingRequestId) continue;
+      const req = await readSigningRequest(db, p.orgId, p.signingRequestId);
+      if (req?.status !== 'executed') continue;
+      try {
+        await continueBillingSteps(deps, { readHeldAllowances: deps.readHeldAllowances }, req);
+        out.reconciled += 1;
+      } catch (error) {
+        out.errors.push({ subscriptionId: p.id, error: error instanceof Error ? error.message : String(error) });
+      }
     }
   }
 
@@ -493,8 +686,42 @@ export async function runBillingCycleForStaff(deps: CycleDeps): Promise<CycleRes
         out.lapsed += 1;
       }
       const period = billingPeriod(now.getTime());
-      const [existing] = await db.select().from(subscriptionPulls).where(and(eq(subscriptionPulls.orgId, s.orgId), eq(subscriptionPulls.period, period))).limit(1);
-      if (existing && (existing.status !== 'failed' || existing.attempts >= MAX_PULL_ATTEMPTS)) continue;
+      const [existing] = (await db
+        .select()
+        .from(subscriptionPulls)
+        .where(and(eq(subscriptionPulls.orgId, s.orgId), eq(subscriptionPulls.period, period), sql`${subscriptionPulls.status} <> 'superseded'`))
+        .limit(1)) as PullRow[];
+
+      // What to do with the month's pull row, if there is one.
+      let reuse: { row: PullRow; countsAsAttempt: boolean } | null = null;
+      if (existing && existing.subscriptionId !== s.id) {
+        // Built under a plan since replaced. Drawn or on its way: the month is
+        // billed. Failed or never signed: void it, and bill the plan in force.
+        if (existing.status === 'succeeded' || existing.status === 'submitted') continue;
+        await supersedePulls(db, { orgId: s.orgId, pullId: existing.id, statuses: ['failed', 'awaiting_signature'], now });
+      } else if (existing) {
+        if (existing.status === 'succeeded' || existing.status === 'submitted') continue;
+        if (existing.status === 'failed') {
+          if (existing.attempts >= MAX_PULL_ATTEMPTS) continue;
+          reuse = { row: existing, countsAsAttempt: true };
+        } else if (existing.status === 'awaiting_signature') {
+          if (!expired(existing, epoch)) continue;
+          // Its gas window passed. If it landed after all, settle it; if not,
+          // build it again on the same row (not a failed attempt).
+          const seen = await deps.readDigest(existing.txDigest);
+          if (seen) {
+            const r = await settlePull(deps, existing, seen);
+            if (r === 'succeeded') out.succeeded += 1;
+            if (r === 'failed') {
+              out.failed += 1;
+              out.notices += await noticeOwners(deps, existing);
+            }
+            continue;
+          }
+          reuse = { row: existing, countsAsAttempt: false };
+        } else continue;
+      }
+
       // The chain's own window must have room, or the pull would abort.
       const room = allowance.rateLimit ? liveRateLimit(allowance.rateLimit, BigInt(now.getTime())).remainingMinor : 0n;
       const lifetimeRoom = allowance.lifetimeCap === null ? s.priceMinor : allowance.lifetimeCap - allowance.currentSpend;
@@ -509,12 +736,20 @@ export async function runBillingCycleForStaff(deps: CycleDeps): Promise<CycleRes
       });
       const d = describeBillingPull(bytes, deps.usdcType);
       if (d.funder !== s.wallet || d.allowance !== allowance.id || BigInt(d.amountMinor) !== s.priceMinor || d.sender !== s.financeAddress) throw new Error('the pull built is not this plan’s');
-      if (existing) {
-        // A failed pull, tried again on the same row: still one per month.
+      if (reuse) {
+        // Tried again on the same row, for the same subscription and amount: still one per month.
         const retried = await db
           .update(subscriptionPulls)
-          .set({ status: 'awaiting_signature', txBytes: toBase64(bytes), txDigest: d.digest, attempts: sql`${subscriptionPulls.attempts} + 1`, failureReason: null, updatedAt: now })
-          .where(and(eq(subscriptionPulls.id, existing.id), eq(subscriptionPulls.status, 'failed')))
+          .set({
+            status: 'awaiting_signature',
+            txBytes: toBase64(bytes),
+            txDigest: d.digest,
+            amountMinor: s.priceMinor,
+            ...(reuse.countsAsAttempt ? { attempts: sql`${subscriptionPulls.attempts} + 1` } : {}),
+            failureReason: null,
+            updatedAt: now,
+          })
+          .where(and(eq(subscriptionPulls.id, reuse.row.id), eq(subscriptionPulls.status, reuse.row.status), eq(subscriptionPulls.subscriptionId, s.id)))
           .returning({ id: subscriptionPulls.id });
         if (retried.length) out.prepared += 1;
         continue;
@@ -527,15 +762,42 @@ export async function runBillingCycleForStaff(deps: CycleDeps): Promise<CycleRes
           .values({ id: pullId, orgId: s.orgId, subscriptionId: s.id, period, amountMinor: s.priceMinor, status: 'awaiting_signature', txBytes: toBase64(bytes), txDigest: d.digest, createdAt: now, updatedAt: now })
           // Only the month's pull already existing is "nothing to do"; any
           // other conflict (the same bytes twice) is an error.
-          .onConflictDoNothing({ target: [subscriptionPulls.orgId, subscriptionPulls.period] })
+          .onConflictDoNothing({ target: [subscriptionPulls.orgId, subscriptionPulls.period], where: sql`status <> 'superseded'` })
           .returning({ id: subscriptionPulls.id });
         if (!rows.length) return false;
-        await tx.insert(subscriptionInvoices).values({ id: `inv_${randomUUID()}`, orgId: s.orgId, pullId, number: invoiceNumber(s.orgId, period), period, planName: plan?.name ?? s.planId, amountMinor: s.priceMinor, issuedAt: now });
+        await tx.insert(subscriptionInvoices).values({ id: `inv_${randomUUID()}`, orgId: s.orgId, pullId, number: await nextInvoiceNumber(tx, period), period, planName: plan?.name ?? s.planId, amountMinor: s.priceMinor, issuedAt: now });
         return true;
       });
       if (inserted) out.prepared += 1;
     } catch (error) {
       out.errors.push({ subscriptionId: s.id, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  // Detective: a billing allowance a wallet holds that no subscription
+  // tracks (one granted outside Splash, or one a cancel could not see) can
+  // still be drawn on by the finance multisig. Report it so a person
+  // follows up; the owners can revoke it with Cancel.
+  if (deps.readHeldAllowances) {
+    const rows = (await db.select().from(subscriptions)) as SubRow[];
+    const byWallet = new Map<string, { orgId: string; finances: Set<string>; tracked: Set<string>; pendingExecuted: boolean; subId: string }>();
+    for (const r of rows) {
+      const k = `${r.orgId}|${r.wallet}`;
+      const e = byWallet.get(k) ?? { orgId: r.orgId, finances: new Set<string>(), tracked: new Set<string>(), pendingExecuted: false, subId: r.id };
+      e.finances.add(r.financeAddress);
+      if (r.allowanceId && (LIVE as readonly string[]).includes(r.status)) e.tracked.add(r.allowanceId);
+      if (r.status === 'pending') e.pendingExecuted = true;
+      byWallet.set(k, e);
+    }
+    for (const [k, e] of byWallet) {
+      if (e.pendingExecuted) continue; // reported above, if it could not be reconciled
+      const wallet = k.split('|')[1];
+      try {
+        const stray = billingHeld(await deps.readHeldAllowances(wallet), wallet, e.finances).filter((a) => !e.tracked.has(a.id));
+        for (const a of stray) out.errors.push({ subscriptionId: e.subId, error: `the business wallet holds a billing allowance no subscription tracks (${a.id}); the owners can revoke it with Cancel` });
+      } catch {
+        out.errors.push({ subscriptionId: e.subId, error: "the wallet's billing allowances could not be read" });
+      }
     }
   }
   return out;
@@ -550,12 +812,15 @@ async function settlePull(deps: BillingDeps, p: PullRow, seen: { success: boolea
       const moved = await tx
         .update(subscriptionPulls)
         .set({ status: 'succeeded', succeededAt: now, failureReason: null, updatedAt: now })
-        .where(and(eq(subscriptionPulls.id, p.id), inArray(subscriptionPulls.status, ['awaiting_signature', 'submitted'])))
-        .returning({ id: subscriptionPulls.id });
+        .where(and(eq(subscriptionPulls.id, p.id), eq(subscriptionPulls.txDigest, p.txDigest), inArray(subscriptionPulls.status, ['awaiting_signature', 'submitted'])))
+        .returning();
       if (!moved.length) return false;
+      const row = moved[0] as PullRow;
       const [invoice] = await tx.select().from(subscriptionInvoices).where(eq(subscriptionInvoices.pullId, p.id)).limit(1);
-      await tx.insert(subscriptionReceipts).values({ id: `rcpt_${randomUUID()}`, orgId: p.orgId, pullId: p.id, invoiceId: invoice.id, suiDigest: p.txDigest, amountMinor: p.amountMinor, paidAt: now });
-      await tx.update(subscriptions).set({ status: 'active', graceUntil: null, updatedAt: now }).where(and(eq(subscriptions.id, p.subscriptionId), inArray(subscriptions.status, ['grace', 'lapsed'])));
+      // The receipt is the row as it is now: the amount the drawn bytes carry
+      // (the row and its bytes are always written together).
+      await tx.insert(subscriptionReceipts).values({ id: `rcpt_${randomUUID()}`, orgId: row.orgId, pullId: row.id, invoiceId: invoice.id, suiDigest: row.txDigest, amountMinor: row.amountMinor, paidAt: now });
+      await tx.update(subscriptions).set({ status: 'active', graceUntil: null, updatedAt: now }).where(and(eq(subscriptions.id, row.subscriptionId), inArray(subscriptions.status, ['grace', 'lapsed'])));
       return true;
     });
     return done ? 'succeeded' : null;
@@ -563,7 +828,7 @@ async function settlePull(deps: BillingDeps, p: PullRow, seen: { success: boolea
   const moved = await db
     .update(subscriptionPulls)
     .set({ status: 'failed', failureReason: (seen.error ?? 'the pull failed on chain').slice(0, 300), updatedAt: now })
-    .where(and(eq(subscriptionPulls.id, p.id), inArray(subscriptionPulls.status, ['awaiting_signature', 'submitted'])))
+    .where(and(eq(subscriptionPulls.id, p.id), eq(subscriptionPulls.txDigest, p.txDigest), inArray(subscriptionPulls.status, ['awaiting_signature', 'submitted'])))
     .returning({ id: subscriptionPulls.id });
   if (!moved.length) return null;
   // Grace starts at the first failure and is not extended by later ones.
@@ -579,14 +844,16 @@ async function noticeOwners(deps: CycleDeps, p: PullRow): Promise<number> {
   const { db } = deps;
   const now = nowOf(deps);
   const [s] = await db.select().from(subscriptions).where(eq(subscriptions.id, p.subscriptionId)).limit(1);
-  const plan = s ? await planOf(db, s.planId) : null;
+  // A pull of a plan since replaced or ended tells nobody: the plan in force is billed on its own.
+  if (!s || !(LIVE as readonly string[]).includes(s.status)) return 0;
+  const plan = await planOf(db, s.planId);
   const owners = await db
     .select({ userId: users.id, email: users.email })
     .from(memberships)
     .innerJoin(users, eq(users.id, memberships.userId))
     .where(and(eq(memberships.orgId, p.orgId), eq(memberships.role, 'admin')));
   const link = `${(deps.appUrl ?? process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000').replace(/\/+$/, '')}/dashboard/settings`;
-  const graceUntil = s?.graceUntil ? s.graceUntil.toISOString().slice(0, 10) : null;
+  const graceUntil = s.graceUntil ? s.graceUntil.toISOString().slice(0, 10) : null;
   let sent = 0;
   for (const o of owners as Array<{ userId: string; email: string }>) {
     const claimed = await db
@@ -627,8 +894,16 @@ async function noticeOwners(deps: CycleDeps, p: PullRow): Promise<number> {
 /**
  * The finance multisig's signatures over a pull's stored bytes, sent. Only
  * the exact bytes the server built and described; a pull already sent, or
- * settled, is not sent again. A network that does not answer leaves the pull
- * `submitted`, and the next cycle reads its digest.
+ * settled, is not sent again.
+ *
+ * If the network refuses the transaction before running it (a wrong set of
+ * signatures, bytes past their gas window) and the chain shows no such
+ * digest, the pull goes back to waiting for signatures and the refusal is
+ * returned (`not_sent`): the finance signers can sign and send it again,
+ * and the same bytes twice are one transaction. If neither the network nor
+ * the digest answers, the pull stays `submitted` and the next cycle reads
+ * its digest (and, once its gas window has passed unseen, makes it signable
+ * again).
  */
 export async function submitPullForStaff(
   deps: CycleDeps & { execute: (bytes: Uint8Array, signatures: string[]) => Promise<{ digest: string; success: boolean; error?: string | null }> },
@@ -646,14 +921,32 @@ export async function submitPullForStaff(
   const p = claimed[0] as PullRow;
   const bytes = fromBase64(p.txBytes);
   describeBillingPull(bytes, deps.usdcType);
+  const backToSigning = () =>
+    db.update(subscriptionPulls).set({ status: 'awaiting_signature', updatedAt: nowOf(deps) }).where(and(eq(subscriptionPulls.id, p.id), eq(subscriptionPulls.status, 'submitted')));
+  const settleFrom = async (seen: { success: boolean; error?: string | null }) => {
+    const settled = await settlePull(deps, p, seen);
+    if (settled === 'failed') await noticeOwners(deps, p);
+    return { ok: true as const, status: settled ?? ('submitted' as const) };
+  };
+
   let result: { digest: string; success: boolean; error?: string | null };
   try {
     result = await deps.execute(bytes, input.signatures);
-  } catch {
-    return { ok: true, status: 'submitted' };
+  } catch (error) {
+    let seen: { success: boolean; error?: string | null } | null;
+    try {
+      if (!deps.readDigest) throw new Error('no digest reader');
+      seen = await deps.readDigest(p.txDigest);
+    } catch {
+      return { ok: true, status: 'submitted' };
+    }
+    if (seen) return settleFrom(seen);
+    await backToSigning();
+    return refuse(502, 'not_sent', `the network did not run this pull, so nothing was drawn; sign and send it again: ${error instanceof Error ? error.message.slice(0, 200) : String(error)}`);
   }
-  if (result.digest !== p.txDigest) throw new Error('the chain answered for other bytes');
-  const settled = await settlePull(deps, p, result);
-  if (settled === 'failed') await noticeOwners(deps, p);
-  return { ok: true, status: settled ?? 'submitted' };
+  if (result.digest !== p.txDigest) {
+    await backToSigning();
+    return refuse(502, 'not_sent', 'the network answered for other bytes, so nothing was settled; send the pull again');
+  }
+  return settleFrom(result);
 }

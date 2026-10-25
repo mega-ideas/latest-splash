@@ -7,9 +7,9 @@
  *                        option::some<RateLimit> ->
  *                        allowance::new<Balance<USDC>>(name, finance, lifetime?,
  *                        none, some(end of term), rate)
- *                        and, for a plan change, allowance::revoke of the
- *                        current billing allowance first, in the same PTB
- *   cancelSubscriptionTx the business wallet signs allowance::revoke
+ *                        and allowance::revoke of every billing allowance the
+ *                        wallet holds first, in the same PTB
+ *   cancelSubscriptionTx the business wallet signs allowance::revoke of each
  *   billingPullTx        the finance multisig signs a withdrawal from the
  *                        business wallet under the allowance ->
  *                        allowance::balance_spend<USDC> ->
@@ -46,8 +46,8 @@ export type SubscribeInput = {
   monthlyLimitMinor: bigint;
   expiresAtMs: bigint;
   lifetimeCapMinor: bigint | null;
-  /** A plan change: the current billing allowance, revoked first. */
-  revoke?: { cap: OwnedRef; allowance: SharedRef };
+  /** Every billing allowance the wallet holds (a plan change's current one, any stray one), revoked first. */
+  revokes?: Array<{ cap: OwnedRef; allowance: SharedRef }>;
   gas: SponsoredGas;
 };
 
@@ -60,8 +60,8 @@ export function subscribeTx(input: SubscribeInput): Promise<Uint8Array> {
   if (finance === normalizeSuiAddress(input.wallet)) throw new V2BuildError('the wallet cannot bill itself', 'bad_spender');
   const B = `0x2::balance::Balance<${normalizeStructTag(input.usdcType)}>`;
   const tx = new Transaction();
-  if (input.revoke) {
-    tx.moveCall({ target: '0x2::allowance::revoke', typeArguments: [B], arguments: [tx.objectRef(input.revoke.cap), shared(tx, input.revoke.allowance, true)] });
+  for (const r of input.revokes ?? []) {
+    tx.moveCall({ target: '0x2::allowance::revoke', typeArguments: [B], arguments: [tx.objectRef(r.cap), shared(tx, r.allowance, true)] });
   }
   const [rate] = tx.moveCall({ target: '0x2::allowance::monthly_rate_limit', arguments: [tx.pure.u256(input.monthlyLimitMinor)] });
   const [someRate] = tx.moveCall({ target: '0x1::option::some', typeArguments: ['0x2::allowance::RateLimit'], arguments: [rate] });
@@ -81,10 +81,13 @@ export function subscribeTx(input: SubscribeInput): Promise<Uint8Array> {
   return tx.build();
 }
 
-export function cancelSubscriptionTx(input: { wallet: string; usdcType: string; cap: OwnedRef; allowance: SharedRef; gas: SponsoredGas }): Promise<Uint8Array> {
+export function cancelSubscriptionTx(input: { wallet: string; usdcType: string; revokes: Array<{ cap: OwnedRef; allowance: SharedRef }>; gas: SponsoredGas }): Promise<Uint8Array> {
+  if (input.revokes.length === 0) throw new V2BuildError('a cancel revokes at least one billing allowance', 'bad_cancel');
   const B = `0x2::balance::Balance<${normalizeStructTag(input.usdcType)}>`;
   const tx = new Transaction();
-  tx.moveCall({ target: '0x2::allowance::revoke', typeArguments: [B], arguments: [tx.objectRef(input.cap), shared(tx, input.allowance, true)] });
+  for (const r of input.revokes) {
+    tx.moveCall({ target: '0x2::allowance::revoke', typeArguments: [B], arguments: [tx.objectRef(r.cap), shared(tx, r.allowance, true)] });
+  }
   applySponsoredGas(tx, input.wallet, input.gas);
   return tx.build();
 }

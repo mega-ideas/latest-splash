@@ -577,7 +577,7 @@ test('a plan change revokes the old allowance and grants the new one in one tran
 
 // ─── 7. Review fixes: reconcile, cancel without the finance proof, plan changes and stuck pulls ──
 
-const pulls = (w) => w.client.query(`SELECT * FROM subscription_pulls ORDER BY created_at, id`).then((r) => r.rows);
+const pulls = (w) => w.client.query(`SELECT * FROM subscription_pulls ORDER BY created_at, (status = 'superseded') DESC, id`).then((r) => r.rows);
 const subs = (w) => w.client.query(`SELECT * FROM subscriptions ORDER BY created_at, id`).then((r) => r.rows);
 const succeed = (w) => async (bytes) => {
   const x = describeBillingPull(bytes, USDC);

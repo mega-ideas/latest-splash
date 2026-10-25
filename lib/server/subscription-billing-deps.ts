@@ -12,6 +12,11 @@
  *                     Allowances they point to, as the spending-rule index
  *                     reads them (lib/server/spend-rules-deps.ts).
  *   the pull's gas    the finance multisig's own address balance.
+ *   the epoch         the current epoch, to tell when an unsigned pull's gas
+ *                     window has passed and it must be built again.
+ *
+ * A cancel never consults the finance proof: it is built from the stored
+ * subscriptions and what the wallet holds (lib/server/subscription-billing.ts).
  */
 import 'server-only';
 
@@ -48,22 +53,25 @@ export async function liveFinanceAddress(env: NodeJS.ProcessEnv = process.env): 
   return { ok: true, address };
 }
 
+/** Every AllowanceCap<Balance<USDC>> `owner` holds, with the allowance it points to. */
+async function readHeld(usdcType: string, owner: string): Promise<HeldBillingAllowance[]> {
+  const r = await reader(usdcType);
+  const caps = await r.listAllowanceCaps(owner);
+  const allowances = await r.readAllowances(caps.map((c) => c.allowance));
+  const byId = new Map(allowances.map((a) => [normalizeSuiAddress(a.id), a]));
+  const out: HeldBillingAllowance[] = [];
+  for (const c of caps) {
+    const a = byId.get(normalizeSuiAddress(c.allowance));
+    if (a) out.push({ ...a, cap: { objectId: normalizeSuiAddress(c.objectId), version: String(c.version), digest: c.digest } });
+  }
+  return out;
+}
+
 export function liveBillingWallet(ctx: WalletContext): BillingWallet {
   return {
     ctx,
     financeAddress: () => liveFinanceAddress(),
-    readHeldAllowances: async (owner) => {
-      const r = await reader(ctx.chain.usdcType);
-      const caps = await r.listAllowanceCaps(owner);
-      const allowances = await r.readAllowances(caps.map((c) => c.allowance));
-      const byId = new Map(allowances.map((a) => [normalizeSuiAddress(a.id), a]));
-      const out: HeldBillingAllowance[] = [];
-      for (const c of caps) {
-        const a = byId.get(normalizeSuiAddress(c.allowance));
-        if (a) out.push({ ...a, cap: { objectId: normalizeSuiAddress(c.objectId), version: String(c.version), digest: c.digest } });
-      }
-      return out;
-    },
+    readHeldAllowances: (owner) => readHeld(ctx.chain.usdcType, owner),
   };
 }
 
@@ -92,6 +100,8 @@ export async function liveCycleDeps(db: DrizzleDb): Promise<CycleDeps> {
       return { price: BigInt(referenceGasPrice), budget: PULL_GAS_BUDGET_MIST, epoch: BigInt(systemState.epoch), chain: chainIdentifier, nonce: randomInt(0, 2 ** 32) };
     },
     readDigest: async (digest) => chain.read(digest),
+    readHeldAllowances: (owner) => readHeld(usdcType, owner),
+    currentEpoch: async () => BigInt((await suiClient.core.getCurrentSystemState()).systemState.epoch),
     sendEmail: (m) => resolveEmailTransport().sendMessage(m),
   };
 }
