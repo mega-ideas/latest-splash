@@ -316,6 +316,13 @@
       "when": 1792368000000,
       "tag": "0044_payout_followups",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1792454400000,
+      "tag": "0045_compliance",
+      "breakpoints": true
     }
   ]
 }

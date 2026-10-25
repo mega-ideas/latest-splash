@@ -447,9 +447,21 @@ export const envSchema = z.object({
   FUNDING_SWAP_DEBRIDGE_ENABLED: flag('true'),
   LIFI_API_KEY: optional,
   DEBRIDGE_API_KEY: optional,
-  /** Elliptic (D8): deposit and recipient screening. Configured, not yet connected. */
+  /** Elliptic (D8): deposit and recipient screening (lib/compliance/kyt.ts),
+   *  its AML API's wallet exposure. Both or neither; the secret is the
+   *  base64 one Elliptic issues. */
   ELLIPTIC_API_KEY: optional,
   ELLIPTIC_API_SECRET: optional,
+  ELLIPTIC_BASE_URL: httpsUrl,
+  /** Risk-score thresholds (0 to 10) compliance sets at contract; unset, the
+   *  starting policy in lib/compliance/kyt.ts. */
+  ELLIPTIC_REVIEW_SCORE: optional,
+  ELLIPTIC_BLOCK_SCORE: optional,
+  /** Sumsub's Travel Rule for payments to exchange recipients (v2 §4.6,
+   *  lib/compliance/sumsub.ts). Off: production refuses the VASP message
+   *  rather than pretend one was sent; the sender-declaration pack still
+   *  works. Needs SUMSUB_APP_TOKEN and SUMSUB_SECRET_KEY. */
+  SUMSUB_TRAVEL_RULE_ENABLED: flag('false'),
 
   /* v2 §4.4 and §4.5, payout partners and withdrawals to the business's own
      bank (lib/payouts/, lib/server/withdrawals.ts). A sandbox outside
@@ -742,6 +754,10 @@ function productionIssues(env: Env): Issue[] {
     need('STRIPE_SECRET_KEY', env.CARD_FUNDING_ENABLED ? 'CARD_FUNDING_ENABLED=true' : 'Stripe funding is enabled and mocks are off');
   }
   if (vendorsLive && env.FUNDING_PROVIDER_AIRWALLEX_ENABLED) need('AIRWALLEX_API_KEY', 'Airwallex funding is enabled and mocks are off');
+  if (env.SUMSUB_TRAVEL_RULE_ENABLED) {
+    need('SUMSUB_APP_TOKEN', 'SUMSUB_TRAVEL_RULE_ENABLED=true');
+    need('SUMSUB_SECRET_KEY', 'SUMSUB_TRAVEL_RULE_ENABLED=true');
+  }
   if (env.FEATURE_KYB_GATE) {
     need('SUMSUB_APP_TOKEN', 'FEATURE_KYB_GATE=true');
     need('SUMSUB_SECRET_KEY', 'FEATURE_KYB_GATE=true');

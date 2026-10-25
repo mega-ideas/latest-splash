@@ -2052,3 +2052,64 @@ export const payoutPartnerEvents = pgTable('payout_partner_events', {
 }, (table) => [
   primaryKey({ columns: [table.partner, table.eventId] }),
 ]);
+
+/* ── Compliance (v2 §4.6, migration 0045) ─────────────────────────────── */
+
+/**
+ * Every KYT screening of an address a business pays or is paid from: the
+ * provider, its own reference and its verdict, or null when there was no
+ * answer (an attempt is evidence too). Append-only: a trigger refuses UPDATE
+ * and DELETE. A provider's reference is kept once per business.
+ */
+export const kytScreenings = pgTable('kyt_screenings', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  /** deposit | wallet_recipient | exchange_recipient | cross_chain_recipient */
+  subjectKind: text('subject_kind').notNull(),
+  chain: text('chain').notNull(),
+  address: text('address').notNull(),
+  txRef: text('tx_ref'),
+  /** elliptic | chainalysis_sanctions | sandbox | none */
+  provider: text('provider').notNull(),
+  /** CLEAR | REVIEW | BLOCK, or null: unscreened. */
+  verdict: text('verdict'),
+  reference: text('reference'),
+  riskScore: numeric('risk_score'),
+  detail: text('detail').notNull(),
+  screenedAt: timestamp('screened_at', { withTimezone: true }),
+  requestedBy: text('requested_by').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex('kyt_screenings_reference_unique').on(table.orgId, table.provider, table.reference).where(sql`${table.reference} is not null`),
+  index('kyt_screenings_subject_idx').on(table.orgId, table.chain, table.address, table.createdAt),
+]);
+
+/**
+ * The Travel Rule message for one payment to an exchange recipient
+ * (VASP-to-VASP through Sumsub), once per payment: `payment_ref` is the
+ * on-chain intent id when the intent exists, else the signing request's id,
+ * and it is Sumsub's txnId, so a retry names the same transfer. The status
+ * moves forward only (lib/compliance/sumsub.ts travelRuleAdvances).
+ */
+export const travelRuleTransfers = pgTable('travel_rule_transfers', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  paymentRef: text('payment_ref').notNull(),
+  signingRequestId: text('signing_request_id'),
+  exchange: text('exchange').notNull(),
+  depositAddress: text('deposit_address').notNull(),
+  amountMinor: bigint('amount_minor', { mode: 'bigint' }).notNull(),
+  /** sha256 of the request Splash sent: a retry must send the same one. */
+  requestHash: text('request_hash').notNull(),
+  /** sumsub | sandbox */
+  provider: text('provider').notNull(),
+  sandbox: boolean('sandbox').notNull(),
+  providerRef: text('provider_ref'),
+  /** preparing | submitted | awaiting_counterparty | on_hold | approved | rejected */
+  status: text('status').notNull(),
+  createdBy: text('created_by').notNull(),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('travel_rule_transfers_payment_unique').on(table.orgId, table.paymentRef),
+  uniqueIndex('travel_rule_transfers_provider_ref_unique').on(table.provider, table.providerRef).where(sql`${table.providerRef} is not null`),
+]);
