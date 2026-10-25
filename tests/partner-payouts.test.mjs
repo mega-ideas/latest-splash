@@ -467,6 +467,31 @@ test("partner webhooks move a supplier payout forward only, once each, for its o
   await t.w.client.close();
 });
 
+test('a signed event Splash does not know is acknowledged and changes nothing; an unsigned one is refused first', async () => {
+  const t = await setup();
+  const { beneficiary } = await readyToPay(t);
+  const { r } = await paid(t, beneficiary.id);
+  const p = r.payout;
+  await signBoth(t, r.request);
+  const before = (await t.w.db.select().from(schema.payoutPartnerEvents)).length;
+  for (const body of [
+    { type: 'payout.fx_locked', eventId: 'evt_pp_unknown1', partnerRef: p.partnerRef, intentId: p.intentId, occurredAt: T0.toISOString() },
+    { type: 'payout.status', eventId: 'evt_pp_unknown2', partnerRef: p.partnerRef, intentId: p.intentId, status: 'on_hold', occurredAt: T0.toISOString() },
+  ]) {
+    const answer = await t.webhook('pdax', body);
+    assert.equal(answer.status, 200, `${body.type}/${body.status}: acknowledged, so the partner does not retry it forever`);
+    assert.match(answer.body.ignored, /unknown/);
+    const rawBody = JSON.stringify(body);
+    const forged = await W.handlePayoutWebhook({ partner: 'pdax', rawBody, signature: signWebhook(rawBody, toHex(randomBytes(32)), T0), env: ENV, now: t.w.signing.now(), db: t.w.db, readTransaction: async () => null, usdcType: USDC, adapter: t.partners.pdax });
+    assert.equal(forged.status, 401, 'the signature is checked before the event is read');
+  }
+  assert.equal((await P.getPartnerPayout(t.deps(), p.id)).payout.status, 'sent', 'nothing moved');
+  assert.equal((await t.w.db.select().from(schema.payoutPartnerEvents)).length, before, 'nothing was counted');
+  const broken = await t.webhook('pdax', { type: 'payout.status', eventId: 'x', status: 'paid_out' });
+  assert.equal(broken.status, 400, 'a known event with a broken body is still refused');
+  await t.w.client.close();
+});
+
 test('a failed supplier payout comes back to the business wallet only as the chain shows it', async () => {
   const t = await setup();
   const { beneficiary } = await readyToPay(t);
