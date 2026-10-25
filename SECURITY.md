@@ -30,6 +30,49 @@ The remaining four modules (`smart_treasury`, `payment_intent`, `audit_anchor`, 
 
 ---
 
+## v2 Phase 2 §4.6 — compliance: KYB, Travel Rule, KYT, controls evidence — 2026-10-25
+
+Design: `docs/v2/phase2-compliance.md`. Tests:
+`tests/compliance-kyt.test.mjs`, `tests/compliance-sumsub.test.mjs`,
+`tests/controls-evidence.test.mjs`.
+
+- **Fail closed.** KYB, Travel Rule and KYT each have a labelled sandbox
+  outside production only. In production, decided by the runtime mode
+  alone, KYB and the Travel Rule refuse without Sumsub (503) and KYT
+  answers no verdict; nothing downstream ever sees a made-up session,
+  verdict or reference.
+- **Fixed before this section (High):** `POST /api/kyb/sumsub` took the case
+  id, business name and registration number from the request, did not
+  scope the case to the caller's business, and attached the provider's
+  applicant to any case by id. It now reads the case by the session's org
+  and sends the case's own details. It also created applicants under the
+  case id while the webhook only accepts `org:<orgId>`, so no verdict could
+  reach its business; the applicant is now `org:<orgId>`.
+- **The webhook** verifies the HMAC before reading, in the algorithm Sumsub
+  names (an unknown one is refused), inside a two-day window, and applies
+  each delivery once (`webhook_events`, keyed by the body's SHA-256). Only
+  `externalUserId` names the org. PROVIDER cannot reach ACTIVE; a refused
+  transition is acknowledged and nothing moves back. A RED the applicant may
+  retry no longer rejects. Travel Rule statuses move forward only, for
+  their own reference, txnId and business.
+- **Travel Rule** messages go once per payment (unique per business and
+  payment; Sumsub's txnId is the payment), only to a recipient whose newest
+  screening by this business is CLEAR, with everything read on the server.
+- **KYT.** Elliptic's wallet exposure decides by its risk score (a null
+  score is REVIEW); the sanctions list only makes it stricter. Addresses are
+  checked per chain before screening. Every screening is kept append-only
+  (0045), a verdict needs the provider's reference, and another business's
+  screening does not count. Only CLEAR permits a payment.
+- **Controls evidence** per payment, JSON and PDF, for this business only
+  (another's reads as 404). It carries masked data only and is checked for
+  secret, signature, sealed, salt and account-number fields before it is
+  served.
+- **Open:** supplier name screening; the recipient forms calling the
+  screening route (§4.7); checking Elliptic's and Sumsub's shapes against
+  the contracted sandboxes; who is the originating party for Travel Rule
+  purposes when the sender is the business's own self-hosted wallet
+  (counsel).
+
 ## v2 Phase 2 §4.5 — payout partners behind one interface — 2026-10-25
 
 Design: `docs/v2/phase2-payout-partners.md`. Tests:

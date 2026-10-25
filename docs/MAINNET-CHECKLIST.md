@@ -189,6 +189,15 @@ procedure in [`docs/UPGRADE-POLICY.md`](UPGRADE-POLICY.md).
 
 - [ ] Sumsub, Elliptic and every payout partner contract is signed before its
       flag is switched on.
+- [ ] Compliance (v2 §4.6, `docs/v2/phase2-compliance.md`): Sumsub's webhook
+      is set to `HMAC_SHA256_HEX` and `SUMSUB_WEBHOOK_SECRET` is set; one
+      KYB applicant and one Travel Rule transfer are run in Sumsub's sandbox
+      against this code before `SUMSUB_TRAVEL_RULE_ENABLED=true`; Elliptic's
+      wallet-exposure call is checked against the contracted account's
+      sandbox, and compliance sets `ELLIPTIC_REVIEW_SCORE` and
+      `ELLIPTIC_BLOCK_SCORE`; counsel confirms whose Travel Rule obligation
+      a payment from the business's own self-hosted wallet to an exchange is,
+      and the sender-declaration wording.
 - [ ] `SIGNED_PARTNERS` lists exactly the partners whose agreements are
       signed. It is empty by default, and nobody is named until then.
 - [ ] The SSM registration number is entered in `BRAND.legalEntity`
