@@ -55,6 +55,8 @@ function toRecord(row: repo.InvoiceRow): InvoiceRecord {
     payerReportedName: row.payerReportedName,
     payerReportedEmail: row.payerReportedEmail,
     receivedReference: row.receivedReference,
+    createKey: row.createKey,
+    createFingerprint: row.createFingerprint,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -84,8 +86,64 @@ export async function persistInvoice(record: InvoiceRecord): Promise<InvoiceReco
       documentSha256: record.documentSha256,
       transferIntentId: record.transferIntentId,
       demo: record.demo,
+      createKey: record.createKey,
+      createFingerprint: record.createFingerprint,
     }),
   );
+}
+
+export type CreateOnceResult =
+  | { outcome: 'created'; invoice: InvoiceRecord }
+  | { outcome: 'replay'; invoice: InvoiceRecord }
+  | { outcome: 'conflict'; invoice?: undefined };
+
+/** `orgId`'s invoice made under this create key, or null. */
+export async function readInvoiceByCreateKey(orgId: string, createKey: string): Promise<InvoiceRecord | null> {
+  if (!orgId || !createKey) return null;
+  if (!usingPostgres()) {
+    return [...operations.invoices.values()].find((i) => i.orgId === orgId && i.createKey === createKey) ?? null;
+  }
+  const row = await repo.findInvoiceByCreateKey(await db(), orgId, createKey);
+  return row ? toRecord(row) : null;
+}
+
+function answer(existing: InvoiceRecord, fingerprint: string): CreateOnceResult {
+  return existing.createFingerprint === fingerprint
+    ? { outcome: 'replay', invoice: existing }
+    : { outcome: 'conflict' };
+}
+
+/**
+ * Get paid (v2 brief 5.8): one invoice per create key per org.
+ *
+ * The same key with the same fingerprint is a retry and gets the invoice
+ * already made (one pay link, one exact amount); the same key with another
+ * fingerprint is not the same invoice and is refused. In Postgres the
+ * partial unique index decides a race: the loser reads the winner's row.
+ */
+export async function createInvoiceOnce(
+  record: InvoiceRecord,
+  once: { createKey: string; fingerprint: string },
+): Promise<CreateOnceResult> {
+  const keyed = { ...record, createKey: once.createKey, createFingerprint: once.fingerprint };
+  if (!usingPostgres()) {
+    // Read and write with no await between them, so two requests in this
+    // process cannot both see the key free.
+    const held = [...operations.invoices.values()].find((i) => i.orgId === record.orgId && i.createKey === once.createKey);
+    if (held) return answer(held, once.fingerprint);
+    operations.invoices.set(keyed.id, keyed);
+    return { outcome: 'created', invoice: keyed };
+  }
+
+  const existing = await readInvoiceByCreateKey(record.orgId, once.createKey);
+  if (existing) return answer(existing, once.fingerprint);
+  try {
+    return { outcome: 'created', invoice: await persistInvoice(keyed) };
+  } catch (error) {
+    const winner = await readInvoiceByCreateKey(record.orgId, once.createKey);
+    if (winner) return answer(winner, once.fingerprint);
+    throw error;
+  }
 }
 
 /** One invoice belonging to `orgId`. A foreign id reads as missing. */

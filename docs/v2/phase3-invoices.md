@@ -48,6 +48,17 @@ field.
   name prefilled, a due date 14 days out, a preview of what the payer sees,
   and the pay link ready to copy when the invoice exists. It is a dialog
   (Escape closes it, focus stays inside).
+- An invoice is created once. The dialog makes one create key (a UUID) for
+  the invoice it is creating and keeps it across retries; `POST
+  /api/invoices` requires it (`lib/invoices/create-once.ts`). The key and a
+  fingerprint of the details are kept with the invoice under a partial
+  unique index per org (`invoices_org_create_key_unique`, 0060). The same
+  key with the same details answers 200 `replay: true` with the invoice
+  already made (one pay link, one exact USDC amount), before any document
+  is sealed or stored again; the same key with other details is a 409
+  `create_key_reused`; another org's key is its own. Two creates racing on
+  one key leave one invoice. A dropped connection brings the button back
+  and says a retry will not make the invoice twice.
 - Status moves forward only (`lib/invoices/status.ts`). `PATCH
   /api/invoices/:id` asks `lib/invoices/patch-rules.ts`: only owners,
   finance admins, approvers and makers (the membership's role) change an
@@ -73,7 +84,7 @@ field.
 
 ## Storage
 
-Migrations `0057_payable_invoices`, `0058_invoices_review` and `0059_invoices_review_two` (journalled).
+Migrations `0057_payable_invoices`, `0058_invoices_review`, `0059_invoices_review_two` and `0060_invoices_create_once` (journalled).
 Numbered from 0057 to follow Phase 2's 0033–0054 (they were 0050, 0051 and 0052
 before the branches met).
 `lib/server/bills-store.ts` is the only reader and writer; every query is

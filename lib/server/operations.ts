@@ -246,6 +246,9 @@ export type InvoiceRecord = {
   payerReportedEmail?: string;
   /** The reference on the business's own statement, typed when it marked the invoice paid (0059). */
   receivedReference?: string;
+  /** The create dialog's key and a fingerprint of what it sent (0060): one invoice per key. */
+  createKey?: string;
+  createFingerprint?: string;
   createdAt: string;
   updatedAt: string;
 };

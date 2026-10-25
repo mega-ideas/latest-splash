@@ -61,6 +61,9 @@ export type InvoiceRow = {
   payerReportedEmail?: string;
   /** The reference on the business's statement, typed with "Mark as paid" (0059). */
   receivedReference?: string;
+  /** The create dialog's key and the fingerprint of what it sent (0060). */
+  createKey?: string;
+  createFingerprint?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -117,6 +120,8 @@ function toRow(row: InvoiceSelect): InvoiceRow {
     payerReportedName: row.payerReportedName ?? undefined,
     payerReportedEmail: row.payerReportedEmail ?? undefined,
     receivedReference: row.receivedReference ?? undefined,
+    createKey: row.createKey ?? undefined,
+    createFingerprint: row.createFingerprint ?? undefined,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -147,9 +152,26 @@ export async function insertInvoice(db: DrizzleDb, input: NewInvoice): Promise<I
       documentSha256: input.documentSha256 ?? null,
       transferIntentId: input.transferIntentId ?? null,
       demo: input.demo ?? false,
+      createKey: input.createKey ?? null,
+      createFingerprint: input.createFingerprint ?? null,
     })
     .returning();
   return toRow(row);
+}
+
+/** `orgId`'s invoice made under this create key, or null. Another org's reads as absent. */
+export async function findInvoiceByCreateKey(
+  db: DrizzleDb,
+  orgId: string,
+  createKey: string,
+): Promise<InvoiceRow | null> {
+  if (!orgId || !createKey) return null;
+  const rows = await db
+    .select()
+    .from(invoices)
+    .where(and(eq(invoices.orgId, orgId), eq(invoices.createKey, createKey)))
+    .limit(1);
+  return rows.length > 0 ? toRow(rows[0]) : null;
 }
 
 /** One invoice belonging to `orgId`. A foreign id reads as missing. */

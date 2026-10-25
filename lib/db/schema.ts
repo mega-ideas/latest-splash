@@ -519,6 +519,12 @@ export const invoices = pgTable('invoices', {
   /** The reference on the business's statement, typed with "Mark as paid"
    *  (migration 0059). `paymentReference` stays the one the payer quotes. */
   receivedReference: text('received_reference'),
+  /** One per invoice the create dialog made (migration 0060): a retry with
+   *  the same key is answered with this invoice, never a second one. */
+  createKey: text('create_key'),
+  /** What the payer is asked to pay, hashed (lib/invoices/create-once.ts),
+   *  so a key sent again with other details is refused. */
+  createFingerprint: text('create_fingerprint'),
   ...timestamps,
 }, (table) => [
   index('invoices_org_idx').on(table.orgId),
@@ -526,6 +532,7 @@ export const invoices = pgTable('invoices', {
   index('invoices_supplier_idx').on(table.supplierId),
   uniqueIndex('invoices_pay_link_unique').on(table.payLinkSlug),
   uniqueIndex('invoices_usdc_tx_digest_unique').on(table.usdcTxDigest),
+  uniqueIndex('invoices_org_create_key_unique').on(table.orgId, table.createKey).where(sql`${table.createKey} is not null`),
 ]);
 
 export const paymentIntents = pgTable('payment_intents', {

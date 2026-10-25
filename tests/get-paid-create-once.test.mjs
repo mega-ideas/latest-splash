@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-import { migratedDb } from './helpers/store-db.mjs';
+import { attachDb, migratedDb } from './helpers/store-db.mjs';
 
 /* v2 brief 5.8, Get paid: an invoice is created once.
 
@@ -72,11 +72,11 @@ test('in Postgres, a create key is held once per org by the database', async () 
 async function withStore(useDb, fn) {
   const saved = process.env.DATABASE_URL;
   let client;
+  let detach = () => {};
   if (useDb) {
     const made = await migratedDb();
     client = made.client;
-    globalThis.splashDb = made.db;
-    process.env.DATABASE_URL = 'postgres://pglite.test/splash';
+    detach = attachDb(made.db);
   } else {
     delete process.env.DATABASE_URL;
   }
@@ -86,8 +86,8 @@ async function withStore(useDb, fn) {
     const { createFingerprint } = await createOnce();
     await fn({ store, buildInvoice, createFingerprint });
   } finally {
+    detach();
     if (saved === undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL = saved;
-    delete globalThis.splashDb;
     await client?.close();
   }
 }
@@ -140,7 +140,7 @@ test('the create route needs a create key, checks it before any document work, a
   assert.match(route, /createKey/, 'the body carries the create key');
   assert.match(route, /isCreateKey/, 'and it must be a UUID');
   assert.match(route, /createInvoiceOnce/, 'the invoice is written once per key');
-  assert.match(route, /create_key_reused/, 'the same key with other details is a 409 the client can read');
+  assert.match(route, /create_key_reused|CREATE_KEY_REUSED/, 'the same key with other details is a 409 the client can read');
   assert.match(route, /status: 409/);
   assert.match(route, /replay/, 'a replay is said to be one');
   assert.ok(route.indexOf('findInvoiceByCreateKey') !== -1 || route.indexOf('readInvoiceByCreateKey') !== -1, 'a replay is found before the document is sealed and stored');

@@ -48,6 +48,11 @@ export default function CreateInvoiceDialog({ issuerName, documentsOpen, close, 
   const [documentBase64, setDocumentBase64] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
   const [created, setCreated] = useState<InvoiceRecord | null>(null);
+  // One key for the invoice this dialog is creating, kept across retries, so
+  // a second click or a retry after a dropped connection is answered with
+  // the same invoice and pay link (lib/invoices/create-once.ts).
+  const [createKey] = useState(() => crypto.randomUUID());
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const firstField = useRef<HTMLInputElement>(null);
 
@@ -88,20 +93,33 @@ export default function CreateInvoiceDialog({ issuerName, documentsOpen, close, 
       dialogRef.current?.querySelector<HTMLElement>(`#ci-${first}`)?.focus();
       return;
     }
+    if (submitting) return;
     setSubmitting(true);
-    const response = await fetch('/api/invoices', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...form, payerOrgEmail: form.payerOrgEmail || '', documentBase64 }),
-    });
-    setSubmitting(false);
-    const body = (await response.json().catch(() => ({}))) as { invoice?: InvoiceRecord; error?: string };
-    if (!response.ok || !body.invoice) {
-      toast.error(body.error ?? 'The invoice was not created.');
-      return;
+    setSubmitError(null);
+    try {
+      const response = await fetch('/api/invoices', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...form, payerOrgEmail: form.payerOrgEmail || '', documentBase64, createKey }),
+      });
+      const body = (await response.json().catch(() => ({}))) as { invoice?: InvoiceRecord; error?: string; code?: string };
+      if (!response.ok || !body.invoice) {
+        const message = body.code === 'create_key_reused'
+          ? 'This invoice was already created with other details. Close this form and create a new invoice.'
+          : body.error ?? 'The invoice was not created. Try again.';
+        setSubmitError(message);
+        toast.error(message);
+        return;
+      }
+      setCreated(body.invoice);
+      onCreated();
+    } catch {
+      const message = 'The connection dropped before Splash answered. Try again: the invoice will not be made twice.';
+      setSubmitError(message);
+      toast.error(message);
+    } finally {
+      setSubmitting(false);
     }
-    setCreated(body.invoice);
-    onCreated();
   }
 
   const payLink = created ? `${window.location.origin}/pay/${created.payLinkSlug}` : '';
@@ -200,8 +218,11 @@ export default function CreateInvoiceDialog({ issuerName, documentsOpen, close, 
                 </div>
               </div>
               <button type="submit" disabled={submitting} className="dash-btn mt-4 min-h-11 w-full disabled:opacity-50">
-                {submitting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null} Create invoice and pay link
+                {submitting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null} {submitting ? 'Creating…' : 'Create invoice and pay link'}
               </button>
+              {submitError && (
+                <p role="alert" className="mt-2 text-[13px] font-semibold leading-snug text-[var(--error)]">{submitError}</p>
+              )}
             </aside>
           </form>
         )}
