@@ -35,7 +35,7 @@
  */
 import { randomUUID } from 'node:crypto';
 
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { normalizeSuiAddress } from '@mysten/sui/utils';
 
 import { crossChainTransfers, suppliers, walletSigningRequests } from '../db/schema.ts';
@@ -301,6 +301,43 @@ export async function refreshCrossChainAttestation(deps: CrossChainDeps & { iris
     updatedAt: now,
   });
   return { ok: true, transfer: done ?? (await readCrossChainTransfer(deps.db, deps.orgId, row.paymentRef)) ?? row, pending: false };
+}
+
+/** A burn Circle has not attested, or an attested message not minted, this long after the burn is an alert (review B7). */
+export const CROSS_CHAIN_STUCK_AFTER_MS = 6 * 3_600_000;
+
+/**
+ * The cross-chain sweep (review B7), across every business, each row within
+ * its own org: every burned payment is asked of Circle again, so a lost
+ * refresh does not leave it at `burned`; a payment still burned but not
+ * minted CROSS_CHAIN_STUCK_AFTER_MS after its burn is reported as stuck,
+ * with an ALERT line (ids only), for ops to recover: Circle's message and
+ * attestation are on the receipt, so the mint can be relayed by anyone.
+ * Nothing is signed or sent; it reads Circle and writes forward only.
+ */
+export async function sweepCrossChainTransfers(deps: { db: DrizzleDb; now: () => Date; iris: IrisClient }): Promise<{ asked: number; attested: number; pending: number; errors: number; stuck: Array<{ orgId: string; paymentRef: string; status: string }> }> {
+  const rows = await deps.db.select().from(crossChainTransfers).where(inArray(crossChainTransfers.status, ['burned', 'attested']));
+  const out = { asked: 0, attested: 0, pending: 0, errors: 0, stuck: [] as Array<{ orgId: string; paymentRef: string; status: string }> };
+  const now = deps.now();
+  for (const row of rows) {
+    let status = row.status;
+    if (row.status === 'burned') {
+      out.asked += 1;
+      const r = await refreshCrossChainAttestation({ db: deps.db, orgId: row.orgId, now: deps.now, iris: deps.iris }, { paymentRef: row.paymentRef });
+      if (!r.ok) out.errors += 1;
+      else if (r.pending) out.pending += 1;
+      else {
+        out.attested += 1;
+        status = r.transfer.status;
+      }
+    }
+    const since = row.burnedAt ?? row.createdAt;
+    if (status !== 'minted' && now.getTime() - since.getTime() >= CROSS_CHAIN_STUCK_AFTER_MS) {
+      out.stuck.push({ orgId: row.orgId, paymentRef: row.paymentRef, status });
+      console.error(`[cross-chain] ALERT payment ${row.paymentRef} of ${row.orgId} is ${status}, not minted, ${Math.round((now.getTime() - since.getTime()) / 3_600_000)}h after its burn`);
+    }
+  }
+  return out;
 }
 
 /** Record the mint: believed only from the destination chain's own receipt. */
