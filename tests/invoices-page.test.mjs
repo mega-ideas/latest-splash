@@ -86,6 +86,15 @@ test('Get paid: create with inline errors in a real dialog, a pay link, the stat
   assert.doesNotMatch(getPaid + dialog, /Splash Workspace/, 'the issuer is the business, not a placeholder');
 });
 
+test('the Get paid totals show the whole amount on a phone, never cut off', async () => {
+  const getPaid = await source('components/invoices/GetPaid.tsx');
+  const tile = /<p className="dash-num[^"]*">\{s\.value\}<\/p>/.exec(getPaid);
+  assert.ok(tile, 'the totals tile renders its value');
+  assert.doesNotMatch(tile[0], /\btruncate\b/, 'an amount is never shown cut off, as "10,931..."');
+  assert.match(tile[0], /overflow-wrap:anywhere|break-all|break-words/, 'a long amount wraps inside its tile');
+  assert.match(tile[0], /text-\[15px\] sm:text-lg|text-base sm:text-lg/, 'the figure is smaller on a phone');
+});
+
 test('the invoice pages follow the copy and colour rules', async () => {
   for (const file of [
     'app/dashboard/invoices/page.tsx',
