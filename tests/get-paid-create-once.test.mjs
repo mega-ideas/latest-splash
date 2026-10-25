@@ -169,3 +169,50 @@ test('the migration adds the key with a partial unique index per org, journalled
   assert.match(schema, /createKey: text\('create_key'\)/);
   assert.match(schema, /invoices_org_create_key_unique/);
 });
+
+/* Review of 5.8 (Low findings). The create key and the fingerprint (a hash
+   over the payer email, amount and memo) went to every member who listed
+   invoices; a 409 left the user without the invoice that was made; a failed
+   create was announced twice to screen readers; and a document sealed and
+   stored for a request that lost the race was referenced by nothing, with no
+   trace of its blob id. */
+
+test('the create key and fingerprint stay on the server', async () => {
+  const { withoutCreateKey } = await createOnce();
+  const out = withoutCreateKey({ id: 'inv_a', amountUsd: '5000.00', payLinkSlug: 's', createKey: KEY, createFingerprint: 'f'.repeat(64) });
+  assert.deepEqual(Object.keys(out).sort(), ['amountUsd', 'id', 'payLinkSlug']);
+  assert.equal(withoutCreateKey(null), null);
+
+  const list = await source('app/api/invoices/route.ts');
+  assert.match(list, /invoices:\s*\(await listInvoicesFor\([^)]*\)\)\.map\(withoutCreateKey\)/, 'the list never carries them');
+  assert.doesNotMatch(list, /\{ invoice: (already|made\.invoice)[,\s}]/, 'nor a create reply');
+  const one = await source('app/api/invoices/[id]/route.ts');
+  assert.match(one, /withoutCreateKey\(/, 'nor one invoice, read or updated');
+  const audit = await source('app/api/audit/[intentId]/route.ts');
+  assert.match(audit, /withoutCreateKey\(/, 'nor the audit view');
+});
+
+test('a 409 names the invoice already made under the key, and the dialog offers it', async () => {
+  const route = await source('app/api/invoices/route.ts');
+  assert.match(route, /function keyReused\(existing/, 'the 409 carries the invoice on file');
+  assert.match(route, /existing:\s*\{[^}]*payLinkSlug/, 'with its pay link');
+  assert.match(route, /readInvoiceByCreateKey\(orgId/, 'read for the session org only');
+  const dialog = await source('components/invoices/CreateInvoiceDialog.tsx');
+  assert.match(dialog, /body\.existing/, 'the dialog reads it');
+  assert.match(dialog, /Open the invoice already made/, 'and offers it');
+});
+
+test('a failed create is announced once, next to the button', async () => {
+  const dialog = await source('components/invoices/CreateInvoiceDialog.tsx');
+  const submit = dialog.slice(dialog.indexOf('async function submit'), dialog.indexOf('const payLink'));
+  assert.doesNotMatch(submit, /toast\.error/, 'no toast besides the role=alert line');
+  assert.match(dialog, /role="alert"/);
+  assert.match(dialog, /aria-describedby=\{submitError \? 'ci-submit-error' : undefined\}/, 'the button is described by the error');
+  assert.match(dialog, /id="ci-submit-error"/);
+});
+
+test('a document stored for a create that lost the race is logged by blob id for cleanup', async () => {
+  const route = await source('app/api/invoices/route.ts');
+  assert.match(route, /orphan/i);
+  assert.match(route, /walrusBlobId: document\.walrusBlobId/, 'the blob id is logged, never the document');
+});
