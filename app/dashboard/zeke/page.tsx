@@ -219,7 +219,7 @@ export default function OxwalDeskPage() {
               {/* What this person can approve, not the workspace's count: a
                   payment they asked for is another approver's (maker-checker). */}
               <DeskStat label="To approve" value={snapshot?.forViewer?.waiting ?? null} caution />
-              {/* Their own governance alerts, read on the server; "-" when not read. */}
+              {/* Their own governance alerts, read on the server; an en dash, said as "not read", when not read. */}
               <DeskStat label="Alerts" value={snapshot?.alerts ?? null} caution />
             </div>
           </div>

@@ -248,3 +248,16 @@ export function kindLabel(kind: string): string {
       return kind;
   }
 }
+
+/**
+ * The headline of a proposal's row: a fixed label for its kind, and
+ * "Proposal" for a kind this does not know, never the raw value. A row is
+ * not headed by the proposal's recommendation, which is free text (for an
+ * x402 payment it quotes the seller's own description of the charge), so a
+ * headline is always words Splash wrote. The recommendation stays on the
+ * row as a detail.
+ */
+export function proposalTitle(kind: string): string {
+  const label = kindLabel(kind);
+  return label === kind ? 'Proposal' : label;
+}

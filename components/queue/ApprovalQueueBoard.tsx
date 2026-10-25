@@ -20,6 +20,7 @@ import {
   interpretSubmitResponse,
   isFinal,
   kindLabel,
+  proposalTitle,
   submitPath,
   submitRequestBody,
   type DecisionOutcome,
@@ -157,7 +158,7 @@ export default function ApprovalQueueBoard({
       delete next[item.id];
       return next;
     });
-    setStatus(`${item.recommendation}: ${outcome.message}`);
+    setStatus(`${proposalTitle(item.kind)}: ${outcome.message}`);
 
     if (isFinal(outcome)) {
       setOpenItems((current) => current.filter((row) => row.id !== item.id));
@@ -180,9 +181,9 @@ export default function ApprovalQueueBoard({
       }
     }
 
-    if (outcome.kind === 'executed') toast.success('Payment sent', { description: item.recommendation });
+    if (outcome.kind === 'executed') toast.success('Payment sent', { description: `${proposalTitle(item.kind)}, ${item.amountLabel}` });
     else if (outcome.kind === 'recorded') toast.success('Approval recorded', { description: outcome.message });
-    else if (outcome.kind === 'rejected') toast('Payment rejected', { description: item.recommendation });
+    else if (outcome.kind === 'rejected') toast('Payment rejected', { description: `${proposalTitle(item.kind)}, ${item.amountLabel}` });
     else if (outcome.kind === 'closed') toast(outcomeTone.closed.label, { description: outcome.message });
     else toast.error(outcomeTone[outcome.kind].label, { description: outcome.message });
   }
@@ -239,8 +240,10 @@ export default function ApprovalQueueBoard({
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <FileWarning className="h-4 w-4 shrink-0 text-[var(--pending)]" aria-hidden="true" />
-                      <strong className="text-sm text-[#1F4452]">{item.recommendation}</strong>
+                      <strong className="text-sm text-[#1F4452]">{proposalTitle(item.kind)}</strong>
                     </div>
+                    {/* The recommendation is free text (an x402 one quotes the seller), so it is a detail under a headline Splash wrote. */}
+                    <p className="mt-1 line-clamp-2 text-[13px] font-medium text-[#326273]/90">{item.recommendation}</p>
                     <p className="mt-1 truncate text-[13px] font-medium text-[#326273]/90">
                       {item.id} · maker {item.maker} · {item.expiryLabel}
                     </p>
@@ -257,7 +260,7 @@ export default function ApprovalQueueBoard({
                   {confirming ? (
                     <div
                       role="group"
-                      aria-label={`Confirm rejecting ${item.recommendation}`}
+                      aria-label={`Confirm rejecting this ${proposalTitle(item.kind).toLowerCase()}, ${item.amountLabel}`}
                       className="flex flex-wrap items-center gap-2"
                       onKeyDown={(event) => {
                         if (event.key === 'Escape') setConfirmingReject(null);
@@ -332,7 +335,8 @@ export default function ApprovalQueueBoard({
             {decided.map((item) => (
               <li key={`${item.id}-${item.outcome.kind}`} className="grid gap-2 px-4 py-3 md:grid-cols-[1fr_1.4fr] md:items-start">
                 <div className="min-w-0">
-                  <strong className="text-sm text-[#1F4452]">{item.recommendation}</strong>
+                  <strong className="text-sm text-[#1F4452]">{proposalTitle(item.kind)}</strong>
+                  <p className="mt-0.5 line-clamp-2 text-[13px] font-medium text-[#326273]/90">{item.recommendation}</p>
                   <p className="mt-0.5 truncate text-[13px] font-medium text-[#326273]/90">
                     {item.id} · {item.amountLabel}
                   </p>

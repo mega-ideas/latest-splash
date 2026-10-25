@@ -1,6 +1,6 @@
 import { AGENT_ACTOR_ID } from '@/lib/agent/identity';
 import type { ProposalKind, ProposalStatus, UserRole } from '@/lib/agent/types';
-import { kindLabel } from '@/lib/queue/queue-decision';
+import { proposalTitle } from '@/lib/queue/queue-decision';
 
 /**
  * What the Zeke page and the floating Zeke say before anyone asks anything
@@ -111,8 +111,7 @@ function viewerCanApprove(proposal: DeskProposal, viewer: DeskViewer): boolean {
 
 /** A fixed label per kind. An unknown kind is "Proposal", never the raw value. */
 function titleOf(proposal: DeskProposal): string {
-  const label = kindLabel(String(proposal.kind));
-  return label === proposal.kind ? 'Proposal' : label;
+  return proposalTitle(String(proposal.kind));
 }
 
 function soonest(proposals: readonly DeskProposal[], now: Date): number | null {
