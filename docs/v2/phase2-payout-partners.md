@@ -113,7 +113,8 @@ the same:
    cannot answer counts as a sweep error and is asked again next run.
 6. **Webhooks** (`/api/webhooks/payouts/pdax`, `/durianpay`): signed, in the
    window, each event once, never backwards, for that partner's own payout
-   only. A failure asks for the USDC back to the business wallet; a return
+   only. A signed event of a type or status Splash does not know is
+   acknowledged (200, ignored) and changes nothing; a broken body is 400. A failure asks for the USDC back to the business wallet; a return
    counts only as the chain shows it.
 
 `anchor_audit_hash` is not in this PTB: the `AnchorCap` is the operator's,

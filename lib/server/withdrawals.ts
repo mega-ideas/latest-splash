@@ -1411,7 +1411,11 @@ export async function handlePayoutWebhook(input: WebhookInput): Promise<WebhookA
     event = adapter.handleWebhook({ rawBody: input.rawBody, signature: input.signature, now: input.now });
   } catch (error) {
     if (error instanceof WebhookRejected) {
-      const status = error.code === 'bad_body' || error.code === 'unknown_event' ? 400 : error.code === 'partner_not_configured' || error.code === 'partner_not_connected' ? 503 : 401;
+      // The signature is checked before the body is parsed, so an unknown
+      // event here is the partner's own: acknowledged and ignored (nothing
+      // moves, nothing is counted), never retried forever.
+      if (error.code === 'unknown_event') return { status: 200, body: { ignored: 'unknown event' } };
+      const status = error.code === 'bad_body' ? 400 : error.code === 'partner_not_configured' || error.code === 'partner_not_connected' ? 503 : 401;
       return { status, body: { error: error.message, code: error.code } };
     }
     throw error;
