@@ -1292,3 +1292,102 @@ test('a short return straight from sent asks the partner for the rest, and short
   assert.equal(closed.returnedMinor, '1000000000');
   await t.w.client.close();
 });
+
+/* ── Review of the §4.4 webhooks, 26 Oct 2026: two events at once ────── */
+
+/**
+ * A partner webhook that, while it reads the return from the chain, lets
+ * another event land first: the losing delivery of a race. Signed as the
+ * sandbox signs; the chain as `setup` models it.
+ */
+async function racingWebhook(t, body, during) {
+  const { sandboxWebhookSecretFor } = await import('../lib/payouts/partner.ts');
+  const rawBody = JSON.stringify(body);
+  let ran = false;
+  return handlePayoutWebhook({
+    partner: 'hata_fiuu',
+    rawBody,
+    signature: signWebhook(rawBody, sandboxWebhookSecretFor(ENV, 'hata_fiuu'), t.w.signing.now()),
+    env: ENV,
+    now: t.w.signing.now(),
+    db: t.w.db,
+    readTransaction: async (d) => {
+      if (!ran && t.chainTxs.has(d)) {
+        ran = true;
+        await during();
+      }
+      let tx = t.chainTxs.get(d) ?? null;
+      if (!tx) {
+        const [row] = await t.w.db.select().from(schema.withdrawals).where(eq(schema.withdrawals.suiDigest, d));
+        tx = row ? { digest: d, success: true, sender: row.walletAddress, balanceChanges: [] } : null;
+      }
+      if (!tx) return null;
+      return 'checkpoint' in tx ? tx : { ...tx, checkpoint: t.chainTxs.has(d) ? '200' : '100' };
+    },
+    usdcType: USDC,
+    adapter: t.partner,
+  });
+}
+
+test("a return that lands while a failure is being recorded is retried, never lost: the partner's retry closes the withdrawal", async () => {
+  const t = await setup();
+  const { destination, depositAddress } = await readyToWithdraw(t);
+  const one = await created(t, destination.id);
+  await signBoth(t, one.r.request);
+  const wd = one.r.withdrawal;
+  const back = digest();
+  backTx(t, back, depositAddress.address, '1000000000');
+  const returned = { type: 'payout.status', eventId: 'evt_race_ret', partnerRef: wd.partnerRef, intentId: wd.intentId, status: 'returned', returnDigest: back, occurredAt: T0.toISOString() };
+
+  // The failure lands while the return is read from the chain.
+  const first = await racingWebhook(t, returned, async () => {
+    const failed = await t.webhook({ type: 'payout.status', eventId: 'evt_race_fail', partnerRef: wd.partnerRef, intentId: wd.intentId, status: 'failed', failureReason: 'account closed', occurredAt: T0.toISOString() });
+    assert.equal(failed.status, 200, JSON.stringify(failed));
+  });
+  assert.equal(first.status, 503, `the return was not recorded this time, so the partner must retry: ${JSON.stringify(first)}`);
+  assert.equal((await getWithdrawal(t.deps(), wd.id)).withdrawal.status, 'failed');
+  assert.equal((await t.w.db.select().from(schema.withdrawalReturns)).length, 0, 'no return is held for a payout that did not record it');
+
+  // The partner's retry of the same event counts, and the withdrawal closes.
+  const retry = await t.webhook(returned);
+  assert.equal(retry.status, 200, JSON.stringify(retry));
+  assert.equal(retry.body.ok, true, JSON.stringify(retry.body));
+  const closed = (await getWithdrawal(t.deps(), wd.id)).withdrawal;
+  assert.equal(closed.status, 'returned');
+  assert.equal(closed.returnedMinor, '1000000000');
+  // The sweep no longer asks for USDC that is already back.
+  const asksBefore = t.partner.called('returnOrReverse').length;
+  const swept = await t.reconcile();
+  assert.equal(swept.returnsAsked, 0, JSON.stringify(swept));
+  assert.equal(t.partner.called('returnOrReverse').length, asksBefore);
+  await t.w.client.close();
+});
+
+test('a short return that lands while the payout moves is retried, and what came back is kept on the withdrawal', async () => {
+  const t = await setup();
+  const { destination, depositAddress } = await readyToWithdraw(t);
+  const one = await created(t, destination.id);
+  await signBoth(t, one.r.request);
+  const wd = one.r.withdrawal;
+  const s = digest();
+  backTx(t, s, depositAddress.address, '400000000');
+  const shortEvent = { type: 'payout.status', eventId: 'evt_race_short', partnerRef: wd.partnerRef, intentId: wd.intentId, status: 'returned', returnDigest: s, occurredAt: T0.toISOString() };
+
+  // The partner's "received" lands while the short return is read from the chain.
+  const first = await racingWebhook(t, shortEvent, async () => {
+    const recv = await t.webhook({ type: 'payout.status', eventId: 'evt_race_recv', partnerRef: wd.partnerRef, intentId: wd.intentId, status: 'funds_received', occurredAt: T0.toISOString() });
+    assert.equal(recv.status, 200, JSON.stringify(recv));
+  });
+  assert.equal(first.status, 503, JSON.stringify(first));
+  assert.equal((await t.w.db.select().from(schema.withdrawalReturns)).length, 0);
+  assert.equal((await getWithdrawal(t.deps(), wd.id)).withdrawal.status, 'partner_received');
+
+  const retry = await t.webhook(shortEvent);
+  assert.equal(retry.body.short, true, JSON.stringify(retry.body));
+  const after = (await getWithdrawal(t.deps(), wd.id)).withdrawal;
+  assert.equal(after.status, 'failed');
+  assert.equal(after.returnedMinor, '400000000');
+  const shorts = (await t.w.db.select().from(schema.withdrawalEvents)).filter((e) => e.action === 'return_short' && e.subjectId === wd.id);
+  assert.equal(shorts.length, 1, 'the losing delivery recorded no short return');
+  await t.w.client.close();
+});
