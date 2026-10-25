@@ -50,7 +50,7 @@ import { PasskeyPublicKey } from '@mysten/sui/keypairs/passkey';
 
 import { liveRateLimit } from '../wallet/allowance-window.ts';
 import { allowanceNameFor, policyIdFor, splashSpendAppName, type AllowanceState, type RuleSpendEvent } from '../wallet/spend-rules-bcs.ts';
-import { fundsOnHold, recipientPayable, recordedWalletMembers, walletRegistration, type AccountState, type IntentState, type WalletContext, type WalletMembers } from './business-wallet.ts';
+import { fundsOnHold, payoutRouteOnly, recipientPayable, recordedWalletMembers, walletRegistration, type AccountState, type IntentState, type WalletContext, type WalletMembers } from './business-wallet.ts';
 import type { OwnershipGate } from './ownership-proofs.ts';
 import { approvePayoutTx, createSpendPolicyTx, RECIPIENT_TAG, SPEND_ROLE, spendRuleTx, type OwnedRef, type RuleCap, type RuleOp, type SpendChain } from './spend-rules-builders.ts';
 import { buildSpendView, boundTo, DAY_MS, type HeldAllowance, type PolicyState, type SpendView } from './spend-rules-index.ts';
@@ -654,6 +654,9 @@ export async function openSecondApproval(
   if (intent.status !== 0) return refuse(409, 'intent_not_open', 'this payment is no longer waiting to be paid');
   if (intent.expiresAtMs <= l.now) return refuse(409, 'intent_expired', 'this payment has expired');
   if (intent.kind === V2_KIND.CROSS_CHAIN) return refuse(400, 'wrong_pay_path', 'a cross-chain payment is paid from the wallet, not under a rule');
+  // The partner is told before the money moves (v2 §4.5): a bank payout, or a payment to a partner deposit address, is never approved here.
+  const routed = await payoutRouteOnly(sc.db, input.orgId, { kind: intent.kind, recipient: intent.recipient });
+  if (routed) return routed;
   const payer = normalizeSuiAddress(input.payer);
   if (owner === payer || (intent.maker && owner === normalizeSuiAddress(intent.maker))) {
     return refuse(409, 'self_approval', 'a second approval comes from an owner who neither opened nor pays this payment');
