@@ -15,6 +15,7 @@ import CreateInvoiceDialog from '@/components/invoices/CreateInvoiceDialog';
 import LocalTime from '@/components/LocalTime';
 import { useLaunchScope } from '@/components/dashboard/CustodyPhaseContext';
 import { suiScanTxUrlOn } from '@/lib/explorer';
+import { STABLECOIN_NETWORK } from '@/lib/payments/stablecoin-lane';
 import { INVOICE_STATUS_LABEL, canMoveInvoice, invoiceOpen } from '@/lib/invoices/status';
 import { totalsFigure } from '@/lib/invoices/totals-figure';
 import type { InvoiceRecord, InvoiceStatusV2 } from '@/lib/server/operations';
@@ -352,7 +353,7 @@ function InvoiceReceipt({ invoice, close }: { invoice: InvoiceRecord; close: () 
       </dl>
       <div className="mt-4 flex flex-wrap gap-2">
         {invoice.usdcTxDigest && (
-          <a href={suiScanTxUrlOn('mainnet', invoice.usdcTxDigest)} target="_blank" rel="noreferrer" className="dash-btn dash-btn-ghost min-h-11 !text-[13px]">Verify on Sui <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" /></a>
+          <a href={suiScanTxUrlOn(STABLECOIN_NETWORK, invoice.usdcTxDigest)} target="_blank" rel="noreferrer" className="dash-btn dash-btn-ghost min-h-11 !text-[13px]">Verify on Sui <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" /></a>
         )}
         <button type="button" onClick={() => window.print()} className="dash-btn dash-btn-ghost min-h-11 !text-[13px]">Save as PDF</button>
       </div>

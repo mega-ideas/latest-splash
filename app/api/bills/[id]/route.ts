@@ -8,7 +8,8 @@ export const dynamic = 'force-dynamic';
 /**
  * GET    one of this org's supplier invoices, with the text it was read from.
  * PATCH  { action }: confirm the fields, acknowledge a possible duplicate,
- *        match a verified recipient, schedule, take back to review, cancel.
+ *        match a verified recipient, schedule (with the `revision` the page
+ *        showed), take back to review, cancel.
  *        Another org's invoice is "not found".
  */
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -26,5 +27,5 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const store = await billsDb();
   if (store.response) return store.response;
   const { id } = await params;
-  return answer(await handleBillAction(store.db, gate.caller, id, await readJsonBody(request), liveBillDeps(store.db)));
+  return answer(await handleBillAction(store.db, gate.caller, id, await readJsonBody(request), liveBillDeps(store.db), { requireRevision: true }));
 }

@@ -62,6 +62,11 @@ function pickFields(raw: unknown): ModelReading | null {
   return Object.keys(out).length > 0 ? out : null;
 }
 
+/** The invoice text goes between <invoice> tags: a tag inside it must not close the block early. */
+export function escapeInvoiceText(text: string): string {
+  return text.replace(/<(\/?)\s*invoice\b/gi, '&lt;$1invoice');
+}
+
 export function liveModelReader(): ModelReader | null {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return null;
@@ -73,7 +78,7 @@ export function liveModelReader(): ModelReader | null {
         { type: 'document' as const, source: { type: 'base64' as const, media_type: 'application/pdf' as const, data: pdfBase64 } },
         { type: 'text' as const, text: 'Read this invoice.' },
       ]
-      : [{ type: 'text' as const, text: `<invoice>\n${(text ?? '').slice(0, 20_000)}\n</invoice>` }];
+      : [{ type: 'text' as const, text: `<invoice>\n${escapeInvoiceText((text ?? '').slice(0, 20_000))}\n</invoice>` }];
     const resp = await client.messages.create({
       model: copilotModel(),
       max_tokens: 400,
@@ -92,10 +97,19 @@ export function liveModelReader(): ModelReader | null {
   };
 }
 
+/**
+ * Who a supplier's invoice can be matched to. A recipient made from a payer's
+ * report (createdVia 'invoice_link') is a customer: anyone holding a pay link
+ * can make one under any name, so it never stands for a supplier.
+ */
+export function mayMatchSupplier(r: { demo?: boolean; createdVia?: string }): boolean {
+  return !r.demo && r.createdVia !== 'invoice_link';
+}
+
 async function listRecipients(orgId: string): Promise<RecipientLite[]> {
   const records = await listRecipientsFor(orgId);
   return records
-    .filter((r) => !r.demo)
+    .filter(mayMatchSupplier)
     .map((r) => ({
       id: r.id,
       name: r.name,

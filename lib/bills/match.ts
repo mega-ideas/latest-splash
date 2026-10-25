@@ -94,10 +94,12 @@ export function matchRecipients(payee: string, recipients: RecipientLite[]): Rec
 }
 
 /**
- * True when the invoice prints payment details and none of them is the
- * recipient's on file: the classic changed-bank-details fraud. The payment
- * still goes to the recipient on file; this only says to check with the
- * supplier first.
+ * True when the invoice prints a payment detail that is not the recipient's
+ * on file: the classic changed-bank-details fraud. One printed account that
+ * matches does not excuse another that does not, so a forged invoice cannot
+ * silence the warning by printing the real account beside its own. The
+ * payment still goes to the recipient on file; this only says to check with
+ * the supplier first.
  */
 export function paymentDetailsDiffer(
   printed: { walletAddresses: string[]; accountNumbers: string[] },
@@ -112,11 +114,11 @@ export function paymentDetailsDiffer(
   const masked = /[*xX•]/.test(stored);
   const printedAny = printed.walletAddresses.length > 0 || printed.accountNumbers.length > 0;
   if (!printedAny) return false;
-  const walletOnFile = wallet !== '' && printed.walletAddresses.includes(wallet);
-  const accountOnFile = account.length >= 4 && printed.accountNumbers.some((a) => (
-    masked ? a.length >= 8 && a.endsWith(account) : a === account
+  const walletNotOnFile = printed.walletAddresses.some((w) => w.toLowerCase() !== wallet);
+  const accountNotOnFile = printed.accountNumbers.some((a) => !(
+    account.length >= 4 && (masked ? a.length >= 8 && a.endsWith(account) : a === account)
   ));
-  return !(walletOnFile || accountOnFile);
+  return walletNotOnFile || accountNotOnFile;
 }
 
 /** The last four characters, for showing which account or wallet without showing it. */

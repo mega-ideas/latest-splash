@@ -2,7 +2,7 @@ import { and, asc, eq, gt, isNull, notInArray } from 'drizzle-orm';
 
 import { findCredential } from '../auth/passkey.ts';
 import { invoices } from '../db/schema.ts';
-import { explorerTxUrl, normaliseSuiAddress } from '../payments/stablecoin-lane.ts';
+import { explorerTxUrl, normaliseSuiAddress, STABLECOIN_NETWORK } from '../payments/stablecoin-lane.ts';
 import { findInvoicePayment, invoiceUsdcAmountMinor, PAYMENT_CLOCK_TOLERANCE_MS, type IncomingMovement } from '../payments/usdc-invoice.ts';
 import { mainAdmin } from './step-up.ts';
 import { readUsdcActivity, type ActivityPage } from './wallet-activity.ts';
@@ -126,7 +126,7 @@ function paid(row: { usdcTxDigest: string; usdcPayerAddress: string | null; usdc
     digest: row.usdcTxDigest,
     payer: row.usdcPayerAddress,
     paidAt: (row.usdcPaidAt ?? new Date()).toISOString(),
-    explorerUrl: explorerTxUrl('mainnet', row.usdcTxDigest),
+    explorerUrl: explorerTxUrl(STABLECOIN_NETWORK, row.usdcTxDigest),
   };
 }
 
@@ -215,7 +215,7 @@ export async function publicUsdcForSlug(slug: string) {
   if (!row) return null;
   if (row.usdcTxDigest) {
     return {
-      paid: { digest: row.usdcTxDigest, explorerUrl: explorerTxUrl('mainnet', row.usdcTxDigest), paidAt: row.usdcPaidAt?.toISOString() ?? null },
+      paid: { digest: row.usdcTxDigest, explorerUrl: explorerTxUrl(STABLECOIN_NETWORK, row.usdcTxDigest), paidAt: row.usdcPaidAt?.toISOString() ?? null },
       terms: null,
     };
   }

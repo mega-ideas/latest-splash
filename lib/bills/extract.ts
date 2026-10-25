@@ -18,7 +18,7 @@
  * and `reason` says which. No percentage is shown, because nothing here
  * measures one.
  */
-import { normalizeAmount } from './amount.ts';
+import { isAmbiguousAmount, normalizeAmount } from './amount.ts';
 
 export type Confidence = 'high' | 'medium' | 'low' | 'none';
 export const BILL_FIELDS = ['payee', 'amount', 'currency', 'dueDate', 'invoiceNumber', 'invoiceDate', 'payeeCountry'] as const;
@@ -152,10 +152,6 @@ function readAmountAndCurrency(text: string): { amount: ExtractedField; currency
     const m = re.exec(text);
     if (!m) continue;
     const [, paren, code, symbol, raw, after] = m;
-    const plain = normalizeAmount(raw);
-    if (!plain || plain === '0') continue;
-    const start = m.index + m[0].indexOf(raw, m[0].search(/\d/));
-    const amount = found(plain, name === 'Total due' ? 'high' : 'medium', `Beside “${name}”`, start, raw.length);
     const codeRead = (code ?? after ?? paren)?.toUpperCase();
     let currency: ExtractedField;
     if (codeRead && (ISO_CURRENCIES as readonly string[]).includes(codeRead)) {
@@ -170,6 +166,16 @@ function readAmountAndCurrency(text: string): { amount: ExtractedField; currency
     } else {
       currency = readAnyCurrency(text);
     }
+    // The currency settles "1.234": rupiah group thousands with a dot, dollars do not.
+    const settled = currency.confidence === 'high' || currency.confidence === 'medium' || currency.value === 'USD' ? currency.value : undefined;
+    const plain = normalizeAmount(raw, settled);
+    if (plain === null && isAmbiguousAmount(raw)) {
+      const reason = `“${raw}” could be ${raw} or ${raw.replace('.', ',')}. Type the amount.`;
+      return { amount: { value: '', confidence: 'none', reason, span: null }, currency };
+    }
+    if (!plain || plain === '0') continue;
+    const start = m.index + m[0].indexOf(raw, m[0].search(/\d/));
+    const amount = found(plain, name === 'Total due' ? 'high' : 'medium', `Beside “${name}”`, start, raw.length);
     return { amount, currency };
   }
   return { amount: NONE('No total found'), currency: readAnyCurrency(text) };
@@ -272,7 +278,10 @@ export function normaliseReading(field: BillField, raw: unknown): string {
   const s = typeof raw === 'string' ? raw.trim() : typeof raw === 'number' ? String(raw) : '';
   if (!s || s.length > 120) return '';
   switch (field) {
-    case 'amount': return normalizeAmount(s) ?? '';
+    case 'amount':
+      // A JSON number has no thousands marks: it is a plain decimal or nothing.
+      if (typeof raw === 'number') return /^\d+(\.\d+)?$/.test(s) ? (normalizeAmount(s, 'USD') ?? '') : '';
+      return normalizeAmount(s) ?? '';
     case 'currency': { const c = s.toUpperCase(); return (ISO_CURRENCIES as readonly string[]).includes(c) ? c : ''; }
     case 'dueDate':
     case 'invoiceDate': return readDate(s)?.iso ?? '';

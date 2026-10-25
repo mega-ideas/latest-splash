@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto';
 import { NextResponse } from 'next/server';
-import { z } from 'zod';
 
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { readJsonBody } from '@/lib/server/http';
@@ -8,34 +7,40 @@ import { LAUNCH_SCOPE_CODE, stablecoinOnly } from '@/lib/server/launch-scope';
 import { RATE_LIMITS, enforceRateLimit } from '@/lib/server/rate-limit';
 import { buildInvoice } from '@/lib/server/operations';
 import { createInvoiceOnce, listInvoicesFor, readInvoiceByCreateKey } from '@/lib/server/invoices-store';
-import { CREATE_KEY_REUSED, createFingerprint, isCreateKey, withoutCreateKey } from '@/lib/invoices/create-once';
+import { CREATE_KEY_REUSED, createFingerprint, withoutCreateKey } from '@/lib/invoices/create-once';
+import { createInvoiceSchema } from '@/lib/invoices/create-input';
+import { relyingPartyId } from '@/lib/auth/passkey';
+import { issuerUsdcAddress } from '@/lib/server/usdc-invoice-payments';
 import type { InvoiceRecord } from '@/lib/server/operations';
 import { requireSessionAccount } from '@/lib/server/session-account';
 import { sealAdapter } from '@/lib/server/seal';
 import { storeEncryptedInvoice, WalrusAdapterError } from '@/lib/server/walrus';
 import { requireTermsAccepted } from '@/lib/server/onboarding';
 
-const createInvoiceSchema = z.object({
-  issuerOrg: z.string().trim().min(2),
-  payerOrgName: z.string().trim().min(2).optional(),
-  payerOrgEmail: z.string().email().optional().or(z.literal('')),
-  amountUsd: z.coerce.number().positive(),
-  targetCurrency: z.string().trim().length(3),
-  dueDate: z.string().min(8),
-  memo: z.string().trim().max(500).optional(),
-  documentBase64: z.string().optional(),
-  /** One per invoice the dialog is creating, kept across retries (lib/invoices/create-once.ts). */
-  createKey: z.string().refine(isCreateKey, 'createKey must be a UUID'),
-});
-
 const NO_STORE = { 'Cache-Control': 'no-store' };
+
+/**
+ * Can this business receive USDC on a pay link? The link pays the Splash
+ * Wallet of its main admin (lib/server/usdc-invoice-payments.ts); with no
+ * passkey there, or no database to look in, a payer would find no way to pay.
+ * The dialog says so before the link is offered.
+ */
+async function receiveWallet(orgId: string): Promise<{ ready: boolean }> {
+  if (!process.env.DATABASE_URL) return { ready: false };
+  try {
+    const { getDb } = await import('@/lib/db/client');
+    return { ready: (await issuerUsdcAddress(getDb(), orgId, relyingPartyId())) !== null };
+  } catch {
+    return { ready: false };
+  }
+}
 
 /**
  * The same key came back with other details. The invoice already made under
  * it is named (read for the session org only), so the user can open it
  * rather than send it uncorrected or make a second invoice for one debt.
  */
-function keyReused(existing: InvoiceRecord | null) {
+async function keyReused(orgId: string, existing: InvoiceRecord | null) {
   return NextResponse.json(
     {
       error: 'An invoice was already created from this form, with other details. Open it to check it, or close this form and start a new one.',
@@ -43,14 +48,15 @@ function keyReused(existing: InvoiceRecord | null) {
       existing: existing
         ? { id: existing.id, payerOrgName: existing.payerOrgName ?? null, amountUsd: existing.amountUsd, dueDate: existing.dueDate, status: existing.status, payLinkSlug: existing.payLinkSlug }
         : null,
+      receiveWallet: await receiveWallet(orgId),
     },
     { status: 409, headers: NO_STORE },
   );
 }
 
 /** Created, or a retry answered with the invoice already made. Never the key or fingerprint. */
-function made(invoice: InvoiceRecord, status: 200 | 201, extra: Record<string, unknown>) {
-  return NextResponse.json({ invoice: withoutCreateKey(invoice), ...extra }, { status, headers: NO_STORE });
+async function made(invoice: InvoiceRecord, status: 200 | 201, extra: Record<string, unknown>) {
+  return NextResponse.json({ invoice: withoutCreateKey(invoice), receiveWallet: await receiveWallet(invoice.orgId), ...extra }, { status, headers: NO_STORE });
 }
 
 export async function GET(request: Request) {
@@ -97,7 +103,7 @@ export async function POST(request: Request) {
   // stored again: one invoice, one pay link, one exact amount.
   const already = await readInvoiceByCreateKey(orgId, input.createKey);
   if (already) {
-    if (already.createFingerprint !== fingerprint) return keyReused(already);
+    if (already.createFingerprint !== fingerprint) return keyReused(orgId, already);
     return made(already, 200, { walrus: null, replay: true });
   }
 
@@ -137,7 +143,7 @@ export async function POST(request: Request) {
       issuerOrg: input.issuerOrg,
       payerOrgName: input.payerOrgName,
       payerOrgEmail: input.payerOrgEmail || undefined,
-      amountUsd: input.amountUsd.toFixed(2),
+      amountUsd: input.amountUsd,
       targetCurrency: input.targetCurrency.toUpperCase(),
       dueDate: input.dueDate,
       memo: input.memo,
@@ -157,13 +163,15 @@ export async function POST(request: Request) {
         sealPolicyId: document.sealPolicyId,
       });
     }
-    if (once.outcome === 'conflict') return keyReused(await readInvoiceByCreateKey(orgId, input.createKey));
+    if (once.outcome === 'conflict') return keyReused(orgId, await readInvoiceByCreateKey(orgId, input.createKey));
     if (once.outcome === 'replay') return made(once.invoice, 200, { walrus: null, replay: true });
     return made(once.invoice, 201, { walrus: document?.walrus ?? null });
   } catch (error) {
     if (error instanceof WalrusAdapterError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Invoice creation failed' }, { status: 500 });
+    // Logged, not echoed: an internal error is not an answer for the person.
+    console.error('invoice create failed', { orgId, name: error instanceof Error ? error.name : typeof error });
+    return NextResponse.json({ error: 'The invoice was not created. Try again; it will not be made twice.' }, { status: 500 });
   }
 }

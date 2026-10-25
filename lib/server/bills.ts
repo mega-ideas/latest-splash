@@ -32,7 +32,7 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 
 import type { UserRole } from '../agent/types.ts';
-import { formatMicros, fromMicros, normalizeAmount, toMicros } from '../bills/amount.ts';
+import { formatMicros, fromMicros, isAmbiguousAmount, normalizeAmount, toMicros } from '../bills/amount.ts';
 import { findDuplicates, invoiceNumberKey, payeeKey, type DuplicateCandidate } from '../bills/duplicates.ts';
 import {
   BILL_CURRENCIES,
@@ -179,6 +179,7 @@ export function billView(row: BillRow, ctx: { recipients: RecipientLite[]; other
   return {
     id: row.id,
     status: row.status,
+    revision: billRevision(row),
     statusLabel: BILL_STATUS_LABEL[row.status],
     documentName: row.documentName,
     ...(detail ? { documentText: row.documentText } : {}),
@@ -302,6 +303,21 @@ function recipientRefusal(recipient: RecipientLite | undefined): Answer | null {
  * attempt (an intent closed or withdrawn) or a change to what is paid is a
  * new one (lib/bills/payment-hook.ts).
  */
+/**
+ * A short fingerprint of what Schedule and Send for approval act on: the
+ * supplier, the invoice number, the recipient, the amount, the currency, both
+ * dates, the written reasons and the attempt. The page sends the one it
+ * showed; the server refuses when the invoice no longer has it, so nobody
+ * schedules or sends for approval an invoice someone else has changed since.
+ */
+export function billRevision(row: Pick<BillRow, 'id' | 'status' | 'paymentAttempt' | 'payeeKey' | 'invoiceNumberKey' | 'recipientId' | 'amountMinor' | 'currency' | 'dueDate' | 'scheduledFor' | 'matchReason' | 'duplicateAckAt'>): string {
+  const payload = [
+    row.id, row.status, row.paymentAttempt, row.payeeKey, row.invoiceNumberKey, row.recipientId, String(row.amountMinor),
+    row.currency, row.dueDate, row.scheduledFor, row.matchReason, row.duplicateAckAt?.toISOString() ?? '',
+  ].join('|');
+  return sha256(payload).slice(0, 32);
+}
+
 export function billPaymentKey(row: Pick<BillRow, 'id' | 'paymentAttempt' | 'recipientId' | 'amountMinor' | 'currency' | 'scheduledFor'>): string {
   const payload = [row.id, row.paymentAttempt, row.recipientId, String(row.amountMinor), row.currency, row.scheduledFor].join('|');
   return `${row.id}:${row.paymentAttempt}:${sha256(payload).slice(0, 32)}`;
@@ -433,7 +449,7 @@ const actionSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('confirm'), fields: confirmSchema }),
   z.object({ action: z.literal('acknowledge_duplicate'), reason: z.string().trim().min(8).max(300) }),
   z.object({ action: z.literal('match'), recipientId: z.string().trim().min(1).max(120), reason: z.string().trim().min(8).max(300).optional() }),
-  z.object({ action: z.literal('schedule'), payOn: z.string().trim() }),
+  z.object({ action: z.literal('schedule'), payOn: z.string().trim(), /** The revision the page showed (billRevision). */ revision: z.string().trim().max(64).optional() }),
   z.object({ action: z.literal('unschedule') }),
   z.object({ action: z.literal('withdraw') }),
   z.object({ action: z.literal('cancel'), reason: z.string().trim().max(300).optional() }),
@@ -454,7 +470,15 @@ function changed(result: Awaited<ReturnType<typeof updateBillIf>>, what: string)
   return moved(result, what);
 }
 
-export async function handleBillAction(db: BillsDb, caller: BillCaller, id: string, body: unknown, deps: BillDeps): Promise<Answer> {
+export type RevisionOptions = {
+  /** The routes set this: a schedule or a send for approval with no revision is refused. */
+  requireRevision?: boolean;
+};
+
+const REVISION_REQUIRED = 'Reload the invoice and try again: this request did not say which version of it you were looking at.';
+const REVISION_MOVED = 'This invoice changed since you opened it. Check it again before you go on.';
+
+export async function handleBillAction(db: BillsDb, caller: BillCaller, id: string, body: unknown, deps: BillDeps, options: RevisionOptions = {}): Promise<Answer> {
   if (!mayWriteBills(caller.role)) return forbidden(caller.role);
   const parsed = actionSchema.safeParse(body);
   if (!parsed.success) return refuse(400, 'That is not a change this invoice takes.', { details: parsed.error.flatten().fieldErrors });
@@ -466,9 +490,14 @@ export async function handleBillAction(db: BillsDb, caller: BillCaller, id: stri
   switch (action.action) {
     case 'confirm': {
       const f = action.fields;
-      const amount = normalizeAmount(f.amount);
+      // The currency the person chose settles "1.234": thousands in rupiah, a decimal in dollars.
+      const amount = BILL_CURRENCIES.includes(f.currency) ? normalizeAmount(f.amount, f.currency) : normalizeAmount(f.amount);
       const problems: Record<string, string> = {};
-      if (!amount || amount === '0' || !/^\d+(\.\d{1,6})?$/.test(amount)) problems.amount = 'Enter the amount due, like 1250.00.';
+      if (!amount || amount === '0' || !/^\d+(\.\d{1,6})?$/.test(amount)) {
+        problems.amount = isAmbiguousAmount(f.amount) && !BILL_CURRENCIES.includes(f.currency)
+          ? 'Choose the currency first: a dot before three digits is a thousands mark in some currencies and a decimal point in others.'
+          : 'Enter the amount due, like 1250.00.';
+      }
       if (!BILL_CURRENCIES.includes(f.currency)) problems.currency = 'Choose the invoice’s currency.';
       const due = readDate(f.dueDate);
       if (!due) problems.dueDate = 'Enter the due date as YYYY-MM-DD.';
@@ -533,8 +562,12 @@ export async function handleBillAction(db: BillsDb, caller: BillCaller, id: stri
       if (!nameMatches(row.payeeName, recipient) && !action.reason) {
         return refuse(409, `${recipient.name} is not the name of the supplier on this invoice. Say why this recipient is paid for it.`, { code: 'name_mismatch' });
       }
+      // A "not a duplicate" answer was given with another recipient in view:
+      // a new recipient has its own recent invoices, so it is asked again.
+      const newRecipient = row.recipientId !== recipient.id;
       const result = await updateBillIf(db, caller.orgId, id, ['review'], {
         recipientId: recipient.id, matchedBy: caller.userId, matchedAt: now, matchReason: action.reason ?? null,
+        ...(newRecipient ? { duplicateAckBy: null, duplicateAckReason: null, duplicateAckAt: null } : {}),
       }, entry(caller, now, 'matched', action.reason ? `${recipient.id}: ${action.reason}` : recipient.id), unchangedSince(row.updatedAt));
       return changed(result, 'matched') ?? { status: 200, body: { bill: await viewOf(db, (result as { row: BillRow }).row, deps) } };
     }
@@ -542,6 +575,10 @@ export async function handleBillAction(db: BillsDb, caller: BillCaller, id: stri
       const ctx = await context(db, caller.orgId, deps);
       const facts = billFacts(row, ctx);
       if (row.status !== 'review') return refuse(409, `This invoice is ${BILL_STATUS_LABEL[row.status].toLowerCase()}, so it cannot be scheduled.`, { code: 'status' });
+      if (options.requireRevision && !action.revision) return refuse(400, REVISION_REQUIRED, { code: 'revision_required' });
+      if (action.revision !== undefined && action.revision !== billRevision(row)) {
+        return refuse(409, REVISION_MOVED, { code: 'changed', bill: await viewOf(db, row, deps) });
+      }
       const blockers = scheduleBlockers(facts);
       if (blockers.length > 0) return refuse(409, blockers[0], { code: 'blocked', blockers });
       if (facts.recipient?.payoutMethod === 'BANK' && deps.stablecoinOnly()) {
@@ -596,7 +633,13 @@ export async function handleBillAction(db: BillsDb, caller: BillCaller, id: stri
 
 // ─── Approve: the hand-off to the payment flow ──────────────────────────────
 
-export async function handleBillPay(db: BillsDb, caller: BillCaller, id: string, deps: BillDeps): Promise<Answer> {
+export async function handleBillPay(
+  db: BillsDb,
+  caller: BillCaller,
+  id: string,
+  deps: BillDeps,
+  options: RevisionOptions & { expectedRevision?: string } = {},
+): Promise<Answer> {
   if (!mayWriteBills(caller.role)) return forbidden(caller.role);
   const row = await readBill(db, caller.orgId, id);
   if (!row) return refuse(404, 'Invoice not found.');
@@ -605,6 +648,12 @@ export async function handleBillPay(db: BillsDb, caller: BillCaller, id: string,
     return { status: 200, body: { bill: await viewOf(db, row, deps), replayed: true } };
   }
   if (row.status !== 'scheduled') return refuse(409, 'Schedule the invoice before sending it for approval.', { code: 'status' });
+  // What goes to Transfer is the invoice the person saw. Checked after the
+  // replay above, so a second click on a sent invoice still answers with it.
+  if (options.requireRevision && !options.expectedRevision) return refuse(400, REVISION_REQUIRED, { code: 'revision_required' });
+  if (options.expectedRevision !== undefined && options.expectedRevision !== billRevision(row)) {
+    return refuse(409, REVISION_MOVED, { code: 'changed', bill: await viewOf(db, row, deps) });
+  }
   const recipients = await deps.listRecipients(caller.orgId);
   const recipient = recipients.find((r) => r.id === row.recipientId);
   // Checked again here: screening, the ownership proof and the name can all
@@ -695,11 +744,14 @@ export type SettlementResult =
  * (server side, never from a client route) with the intent it was handed and
  * the digest it settled with. Idempotent: the same intent and digest again is
  * a replay; a different digest for a paid invoice is refused, and a paid
- * invoice never changes.
+ * invoice never changes. `paidAt` is when the chain says it settled; the
+ * history entry, and so the invoice's updatedAt, is the server's own time.
+ * Section 5.4 must also compare the digest's recipient, amount and asset with
+ * this row before it calls this (a digest alone proves only that it exists).
  */
 export async function recordBillSettlement(
   db: BillsDb,
-  input: { orgId: string; paymentIntentId: string; suiDigest: string; paidAt: Date; approvers: string[]; network?: SuiNetworkName },
+  input: { orgId: string; paymentIntentId: string; suiDigest: string; paidAt: Date; approvers: string[]; network?: SuiNetworkName; now?: Date },
 ): Promise<SettlementResult> {
   if (!SUI_DIGEST.test(input.suiDigest) || !input.paymentIntentId) return { ok: false, code: 'invalid' };
   if (input.network !== undefined && input.network !== 'testnet' && input.network !== 'mainnet') return { ok: false, code: 'invalid' };
@@ -718,7 +770,7 @@ export async function recordBillSettlement(
     paidAt: input.paidAt,
     receiptNo,
     approvers: input.approvers.slice(0, 20),
-  }, { at: input.paidAt.toISOString(), by: 'payment-flow', action: 'paid', note: input.suiDigest });
+  }, { at: (input.now ?? new Date()).toISOString(), by: 'payment-flow', action: 'paid', note: input.suiDigest });
   if (!result.ok) {
     if (result.reason === 'unique') return { ok: false, code: 'digest_used' };
     if (result.row?.status === 'paid') {

@@ -6,9 +6,10 @@
  * the field they belong to, a preview of what the payer sees, and the pay
  * link ready to copy the moment the invoice exists.
  */
-import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { CheckCircle2, Copy, ExternalLink, Loader2, Lock, X } from 'lucide-react';
+import Link from 'next/link';
 import { toast } from 'sonner';
 
 import { cn } from '@/lib/utils';
@@ -33,7 +34,7 @@ function validate(form: Form): Errors {
   if (form.issuerOrg.trim().length < 2) e.issuerOrg = 'Enter the name your payer knows you by.';
   if (form.payerOrgName.trim().length < 2) e.payerOrgName = 'Enter who is paying.';
   if (form.payerOrgEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.payerOrgEmail)) e.payerOrgEmail = 'That email address does not look right.';
-  if (!/^\d+(\.\d{1,2})?$/.test(form.amountUsd) || Number(form.amountUsd) <= 0) e.amountUsd = 'Enter an amount like 1250.00.';
+  if (!/^\d{1,12}(\.\d{1,2})?$/.test(form.amountUsd) || !/[1-9]/.test(form.amountUsd)) e.amountUsd = 'Enter an amount above zero with at most two decimals, like 1250.00.';
   if (!form.dueDate) e.dueDate = 'Choose a due date.';
   else if (form.dueDate < new Date().toISOString().slice(0, 10)) e.dueDate = 'The due date is in the past.';
   if (form.memo.length > 500) e.memo = 'Keep the note under 500 characters.';
@@ -51,6 +52,9 @@ export default function CreateInvoiceDialog({ issuerName, documentsOpen, close, 
   const [documentBase64, setDocumentBase64] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
   const [created, setCreated] = useState<InvoiceRecord | null>(null);
+  // Whether the payer would find a wallet to pay: unknown until the server says.
+  const [walletReady, setWalletReady] = useState<boolean | null>(null);
+  const [askDiscard, setAskDiscard] = useState(false);
   // One key for the invoice this dialog is creating, kept across retries, so
   // a second click or a retry after a dropped connection is answered with
   // the same invoice and pay link (lib/invoices/create-once.ts).
@@ -60,12 +64,18 @@ export default function CreateInvoiceDialog({ issuerName, documentsOpen, close, 
   const [existing, setExisting] = useState<ExistingInvoice | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const firstField = useRef<HTMLInputElement>(null);
+  // Typing something in, or attaching a file, is work a stray tap should not throw away.
+  const [initial] = useState(form);
+  const dirty = !created && (documentBase64 !== undefined || (Object.keys(form) as Array<keyof Form>).some((k) => form[k] !== initial[k]));
+  const guard = useRef<() => void>(() => {});
+  useEffect(() => { guard.current = () => { if (dirty) setAskDiscard(true); else close(); }; }, [dirty, close]);
+  const requestClose = useCallback(() => guard.current(), []);
 
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     firstField.current?.focus();
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') { e.preventDefault(); close(); return; }
+      if (e.key === 'Escape') { e.preventDefault(); requestClose(); return; }
       if (e.key !== 'Tab' || !dialogRef.current) return;
       const focusable = [...dialogRef.current.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), input:not([disabled]), select, textarea')];
       if (focusable.length === 0) return;
@@ -76,7 +86,7 @@ export default function CreateInvoiceDialog({ issuerName, documentsOpen, close, 
     }
     document.addEventListener('keydown', onKey);
     return () => { document.removeEventListener('keydown', onKey); previous?.focus?.(); };
-  }, [close]);
+  }, [requestClose]);
 
   const set = (key: keyof Form) => (value: string) => {
     setForm((f) => ({ ...f, [key]: value }));
@@ -108,7 +118,8 @@ export default function CreateInvoiceDialog({ issuerName, documentsOpen, close, 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...form, payerOrgEmail: form.payerOrgEmail || '', documentBase64, createKey }),
       });
-      const body = (await response.json().catch(() => ({}))) as { invoice?: InvoiceRecord; error?: string; code?: string; existing?: ExistingInvoice | null };
+      const body = (await response.json().catch(() => ({}))) as { invoice?: InvoiceRecord; error?: string; code?: string; existing?: ExistingInvoice | null; receiveWallet?: { ready: boolean } };
+      setWalletReady(body.receiveWallet ? body.receiveWallet.ready : null);
       if (!response.ok || !body.invoice) {
         // Shown once, in the role=alert line under the button (no toast, so
         // a screen reader hears it once).
@@ -146,15 +157,25 @@ export default function CreateInvoiceDialog({ issuerName, documentsOpen, close, 
 
   // On document.body, above the floating Zeke button.
   return createPortal(
-    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-[#0c3e48]/40 p-0 backdrop-blur-sm sm:items-center sm:p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) close(); }}>
+    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-[#0c3e48]/40 p-0 backdrop-blur-sm sm:items-center sm:p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) requestClose(); }}>
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="ci-title" className="dash-surface max-h-[92dvh] w-full max-w-4xl overflow-y-auto rounded-b-none p-5 sm:rounded-b-2xl sm:p-6">
         <div className="flex items-start justify-between gap-3">
           <div>
             <h2 id="ci-title" className="text-2xl font-bold tracking-tight text-[#0c3e48]">{created ? 'Your invoice is ready' : 'Create an invoice'}</h2>
             <p className="mt-1 text-sm text-[#326273]">{created ? 'Share the pay link with your payer. It shows the amount, the due date and how to pay.' : 'Your payer gets a pay link to pay you in USDC on Sui.'}</p>
           </div>
-          <button type="button" onClick={close} aria-label="Close" className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-transparent text-[#1f4452] hover:bg-[#326273]/10"><X className="h-5 w-5" aria-hidden="true" /></button>
+          <button type="button" onClick={requestClose} aria-label="Close" className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-transparent text-[#1f4452] hover:bg-[#326273]/10"><X className="h-5 w-5" aria-hidden="true" /></button>
         </div>
+
+        {askDiscard && (
+          <div role="alertdialog" aria-labelledby="ci-discard" className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--warn)]/35 bg-[var(--warn-bg)] p-4 text-sm text-[var(--warn-ink)]">
+            <p id="ci-discard" className="font-semibold">Close without creating this invoice? What you typed is lost.</p>
+            <div className="flex gap-2">
+              <button type="button" autoFocus onClick={() => setAskDiscard(false)} className="dash-btn min-h-11 !text-[13px]">Keep editing</button>
+              <button type="button" onClick={close} className="dash-btn dash-btn-ghost min-h-11 !text-[13px]">Close it</button>
+            </div>
+          </div>
+        )}
 
         {created ? (
           <div className="mt-6 space-y-4">
@@ -162,10 +183,15 @@ export default function CreateInvoiceDialog({ issuerName, documentsOpen, close, 
               <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-[var(--ok)]" aria-hidden="true" />
               <p><strong className="font-semibold">{created.payerOrgName}</strong> owes {Number(created.amountUsd).toLocaleString('en-US', { minimumFractionDigits: 2 })} USDC by {dayLabel(created.dueDate)}.</p>
             </div>
+            {walletReady === false && (
+              <div role="alert" className="rounded-xl border border-[var(--warn)]/35 bg-[var(--warn-bg)] p-4 text-sm leading-6 text-[var(--warn-ink)]">
+                <strong className="font-semibold">Your payer cannot pay this link yet.</strong> USDC arrives in the Splash Wallet of your main admin, and that wallet is not set up. Set up a passkey in <Link href="/dashboard/settings" className="font-semibold underline underline-offset-2">Settings, Security</Link>, then share the link.
+              </div>
+            )}
             <label htmlFor="ci-link" className="block text-[13px] font-semibold text-[#1f4452]">Pay link</label>
             <div className="flex flex-col gap-2 sm:flex-row">
               <input id="ci-link" readOnly value={payLink} onFocus={(e) => e.currentTarget.select()} className="h-11 min-w-0 flex-1 rounded-lg border border-[#326273]/20 bg-white px-3 font-mono text-[13px] text-[#1f4452]" />
-              <button type="button" onClick={() => void copyLink()} className="dash-btn min-h-11"><Copy className="h-4 w-4" aria-hidden="true" /> Copy pay link</button>
+              <button type="button" onClick={() => void copyLink()} disabled={walletReady === false} className="dash-btn min-h-11 disabled:opacity-50"><Copy className="h-4 w-4" aria-hidden="true" /> Copy pay link</button>
               <a href={payLink} target="_blank" rel="noreferrer" className="dash-btn dash-btn-ghost min-h-11 !text-[13px]">Preview <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" /></a>
             </div>
             <div className="flex justify-end"><button type="button" onClick={close} className="dash-btn dash-btn-ghost min-h-11 !text-[13px]">Done</button></div>
@@ -223,7 +249,7 @@ export default function CreateInvoiceDialog({ issuerName, documentsOpen, close, 
                 <div className="space-y-2 p-4 text-[13px] text-[#1f4452]">
                   <p><span className="text-[#326273]">To </span>{form.payerOrgName || 'your payer'}</p>
                   {form.memo && <p className="rounded-lg bg-[#326273]/6 p-2">{form.memo}</p>}
-                  <p className="text-[#326273]">Pays in USDC on Sui, straight to your business’s wallet.</p>
+                  <p className="text-[#326273]">Pays in USDC on Sui, to the Splash Wallet of your main admin.</p>
                 </div>
               </div>
               <button type="submit" disabled={submitting} aria-describedby={submitError ? 'ci-submit-error' : undefined} className="dash-btn mt-4 min-h-11 w-full disabled:opacity-50">
@@ -233,7 +259,7 @@ export default function CreateInvoiceDialog({ issuerName, documentsOpen, close, 
                 <p id="ci-submit-error" role="alert" className="mt-2 text-[13px] font-semibold leading-snug text-[var(--error)]">{submitError}</p>
               )}
               {existing && (
-                <button type="button" onClick={() => setCreated(existing as InvoiceRecord)} className="dash-btn dash-btn-ghost mt-2 min-h-11 w-full !text-[13px]">
+                <button type="button" onClick={() => { setCreated({ ...existing, payerOrgName: existing.payerOrgName ?? form.payerOrgName } as InvoiceRecord); onCreated(); }} className="dash-btn dash-btn-ghost mt-2 min-h-11 w-full !text-[13px]">
                   Open the invoice already made
                 </button>
               )}

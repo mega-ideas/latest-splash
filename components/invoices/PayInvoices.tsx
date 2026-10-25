@@ -149,9 +149,13 @@ export default function PayInvoices({ onCounts }: { onCounts?: (counts: { toRevi
     return () => clearTimeout(t);
   }, [load]);
 
+  // The latest open wins: an answer that lands after a newer click is dropped.
+  const openSeq = useRef(0);
   const open = useCallback(async (id: string, scroll = true) => {
+    const mine = ++openSeq.current;
     setSelectedId(id);
     const r = await call<{ bill: BillView }>(`/api/bills/${encodeURIComponent(id)}`);
+    if (mine !== openSeq.current) return;
     if (r.ok) setDetail(r.body.bill);
     else toast.error(r.body.error ?? 'That invoice could not be opened.');
     if (scroll && window.matchMedia('(max-width: 1023px)').matches) {
@@ -390,6 +394,8 @@ function BillCase({ bill, canWrite, paymentFlowWired, paymentFlowCancels, onChan
     setBusy(null);
     if (!r.ok) {
       toast.error(r.body.error ?? 'That change was not made.');
+      // Someone changed it: show the invoice as it is now, not as it was.
+      if (r.body.code === 'changed' && r.body.bill) onChange(r.body.bill);
       return { ok: false, fields: r.body.fields };
     }
     onChange(r.body.bill);
@@ -807,10 +813,15 @@ function ScheduleStep({ bill, canWrite, paymentFlowWired, paymentFlowCancels, ac
 
   async function approve() {
     setSending(true);
-    const r = await call<{ bill: BillView }>(`/api/bills/${encodeURIComponent(bill.id)}/approve`, { method: 'POST' });
+    // The version of the invoice on screen: a changed one is refused, not paid.
+    const r = await call<{ bill: BillView }>(`/api/bills/${encodeURIComponent(bill.id)}/approve`, { method: 'POST', body: JSON.stringify({ revision: bill.revision }) });
     setSending(false);
     if (r.body.code === 'PAYMENT_FLOW_NOT_WIRED') { setNotWired(r.body.error ?? null); return; }
-    if (!r.ok) { toast.error(r.body.error ?? 'It was not sent for approval.'); return; }
+    if (!r.ok) {
+      toast.error(r.body.error ?? 'It was not sent for approval.');
+      if (r.body.code === 'changed' && r.body.bill) onChange(r.body.bill);
+      return;
+    }
     onChange(r.body.bill);
     toast.success('Sent for approval');
   }
@@ -823,7 +834,7 @@ function ScheduleStep({ bill, canWrite, paymentFlowWired, paymentFlowCancels, ac
             {bill.blockers.map((b) => <li key={b} className="flex gap-2"><span aria-hidden="true" className="text-[#326273]">·</span>{b}</li>)}
           </ul>
         ) : canWrite ? (
-          <form onSubmit={(e) => { e.preventDefault(); void act({ action: 'schedule', payOn }, 'schedule'); }} className="flex flex-wrap items-end gap-3">
+          <form onSubmit={(e) => { e.preventDefault(); void act({ action: 'schedule', payOn, revision: bill.revision }, 'schedule'); }} className="flex flex-wrap items-end gap-3">
             <div>
               <label htmlFor={`payon-${bill.id}`} className="block text-[13px] font-semibold text-[#1f4452]">Pay on</label>
               <input id={`payon-${bill.id}`} type="date" min={today} value={payOn} onChange={(e) => setPayOn(e.target.value)} className="mt-1 h-11 rounded-lg border border-[#326273]/20 bg-white px-3 text-sm focus:border-[#145d6a] focus:outline-none focus:ring-2 focus:ring-[#5c9ead]/30" />

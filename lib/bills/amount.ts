@@ -18,13 +18,31 @@ export function currencyDecimals(currency: string): number {
   return ZERO_DECIMAL.has(currency.toUpperCase()) ? 0 : 2;
 }
 
-/** A printed amount as a plain decimal string ("1250.5"), or null when it is not one. */
-export function normalizeAmount(raw: string): string | null {
+/** Digits, one dot, exactly three digits: a thousands mark or a decimal point, depending on the currency. */
+const ONE_DOT_GROUP = /^[1-9]\d{0,2}\.\d{3}$/;
+
+/** True when the amount can only be read with the currency ("1.234"). */
+export function isAmbiguousAmount(raw: string): boolean {
+  return ONE_DOT_GROUP.test(raw.replace(/[\s ]/g, ''));
+}
+
+/**
+ * A printed amount as a plain decimal string ("1250.5"), or null when it is
+ * not one. `currency` settles "1.234": in a currency with no minor unit it is
+ * 1,234; in any other it is one and 234 thousandths. With no currency it is
+ * not read.
+ */
+export function normalizeAmount(raw: string, currency?: string): string | null {
   const s = raw.replace(/[\s ]/g, '');
   if (!s) return null;
   let plain: string | null = null;
-  if (/^\d{1,3}(,\d{3})+(\.\d+)?$/.test(s)) plain = s.replace(/,/g, '');
-  else if (/^\d{1,3}(\.\d{3})+(,\d{1,2})?$/.test(s)) plain = s.replace(/\./g, '').replace(',', '.');
+  // A thousands group never starts with zero: "0,500" and "0.500" are not 500.
+  if (/^[1-9]\d{0,2}(,\d{3})+(\.\d+)?$/.test(s)) plain = s.replace(/,/g, '');
+  else if (/^[1-9]\d{0,2}(\.\d{3}){2,}(,\d{1,2})?$/.test(s) || /^[1-9]\d{0,2}\.\d{3},\d{1,2}$/.test(s)) plain = s.replace(/\./g, '').replace(',', '.');
+  else if (ONE_DOT_GROUP.test(s)) {
+    if (currency === undefined) return null;
+    plain = currencyDecimals(currency) === 0 ? s.replace('.', '') : s;
+  }
   else if (/^\d+(\.\d+)?$/.test(s)) plain = s;
   else if (/^\d+,\d{1,2}$/.test(s)) plain = s.replace(',', '.');
   if (plain === null) return null;
