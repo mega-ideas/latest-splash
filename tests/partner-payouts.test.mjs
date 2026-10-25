@@ -148,7 +148,8 @@ async function setup({ env = ENV, overrides = {}, debtor = { party: DEBTOR, miss
   const settlement = { db: w.db, now: () => w.signing.now(), partner: (id) => partners[id], readTransaction: chainRead, corePackageOriginalId: CORE };
   w.signing.onExecuted = async (request) => W.withdrawalSigningExecuted(settlement, request);
   w.signing.beforeSign = (request) => W.withdrawalBeforeSign({ db: w.db }, request);
-  const webhook = (partner, body, { at = w.signing.now(), secret = SECRET } = {}) => {
+  const { sandboxWebhookSecretFor } = await import('../lib/payouts/partner.ts');
+  const webhook = (partner, body, { at = w.signing.now(), secret = sandboxWebhookSecretFor ? sandboxWebhookSecretFor(env, partner) : SECRET } = {}) => {
     const rawBody = JSON.stringify(body);
     return W.handlePayoutWebhook({ partner, rawBody, signature: signWebhook(rawBody, secret, at), env, now: w.signing.now(), db: w.db, readTransaction: async (d) => chainTxs.get(d) ?? null, usdcType: USDC, adapter: partners[partner] });
   };
@@ -525,4 +526,122 @@ test('every payout route takes the org from the session; owners alone change sup
   }
   const deps = await readFile(new URL('../lib/server/wallet-deps.ts', import.meta.url), 'utf8');
   assert.match(deps, /'partner_payout'/, 'the signing hooks settle and check supplier payouts too');
+});
+
+/* ── Review fixes (p2-4.5) ───────────────────────────────────────────── */
+
+test('a payment to a partner deposit address goes only through the payout route: no draft, open intent or plain wallet payment pays one', async () => {
+  const t = await setup();
+  const { beneficiary, depositAddress } = await readyToPay(t);
+  const { askOwnersToApprove, acceptApprovalAsk } = await import('../lib/server/payment-approval-asks.ts');
+  const { requestWalletPayment, requestOpenIntentPayment } = await import('../lib/server/business-wallet.ts');
+  const now = BigInt(t.w.signing.now().getTime());
+  const draft = (over = {}) => ({
+    paymentRef: hex32(),
+    recipient: depositAddress.address,
+    beneficiaryRef: beneficiary.beneficiaryRef,
+    amountMinor: 1_000_000_000n,
+    kind: 4,
+    targetCurrency: 'PHP',
+    fxRateUsdLocal: 56_000_000n,
+    commitment: hex32(),
+    railCommitment: hex32(),
+    expiresAtMs: now + 86_400_000n,
+    ...over,
+  });
+  const ask = (d) => askOwnersToApprove({ db: t.w.db, ctx: t.w.ctx }, { orgId: 'acme', userId: 'u-founder', draft: d, ...bundle(), requesterAddresses: [] });
+  assert.equal((await ask(draft())).code, 'use_payout_route', 'a bank payout draft is refused: it is opened through the payout route only');
+  assert.equal((await ask(draft({ kind: 4, recipient: normalizeSuiAddress('0x' + '77'.repeat(32)) }))).code, 'use_payout_route', 'to any address');
+  assert.equal((await ask(draft({ kind: 1, beneficiaryRef: '' }))).code, 'use_payout_route', 'nor any other kind to a deposit address');
+  assert.equal((await ask(draft({ kind: 2, beneficiaryRef: '' }))).code, 'use_payout_route');
+  // A deposit address still waiting for its test deposit is the partner's too.
+  const dp = await W.requestPartnerDepositAddress(t.deps(), 'u-founder', { partner: 'durianpay' });
+  assert.equal((await ask(draft({ kind: 1, beneficiaryRef: '', recipient: dp.depositAddress.address }))).code, 'use_payout_route');
+  assert.equal((await t.w.db.select().from(schema.walletApprovalAsks)).length, 0, 'nothing was stored');
+
+  // An ask stored before this check: an owner accepting it opens nothing.
+  const d = draft();
+  const shown = { source: 'draft', intentId: `draft:${d.paymentRef}`, maker: null, recipient: d.recipient, amountMinor: String(d.amountMinor), kind: 4, targetCurrency: 'PHP', fxRateUsdLocal: String(d.fxRateUsdLocal), expiresAtMs: String(d.expiresAtMs), paymentRef: d.paymentRef, beneficiaryRef: d.beneficiaryRef, commitment: d.commitment, railCommitment: d.railCommitment };
+  await t.w.db.insert(schema.walletApprovalAsks).values({ id: 'wpa_legacy', orgId: 'acme', intentId: shown.intentId, requestedBy: 'u-two', intent: shown, contentHash: hex32(), walrusBlobId: 'aa', status: 'open', expiresAt: new Date(Number(d.expiresAtMs)), createdAt: t.w.signing.now(), updatedAt: t.w.signing.now() });
+  const accepted = await acceptApprovalAsk({ db: t.w.db, ctx: t.w.ctx }, { orgId: 'acme', userId: 'u-three', askId: 'wpa_legacy', mode: 'wallet_pays', wallet: t.members, maxFeeMinor: 3_000_000n, settleByMs: now + 300_000n });
+  assert.equal(accepted.code, 'use_payout_route', JSON.stringify(accepted));
+
+  // The plain wallet payment refuses it too, whoever calls it.
+  const pay = (over) =>
+    requestWalletPayment(t.w.ctx, {
+      orgId: 'acme',
+      requestedBy: 'u-founder',
+      wallet: t.members,
+      payment: { ...draft(over), paymentRef: randomBytes(32), beneficiaryRef: over.kind === 4 ? Buffer.from(beneficiary.beneficiaryRef, 'hex') : new Uint8Array(), commitment: randomBytes(32), railCommitment: randomBytes(32), maxFeeMinor: 3_000_000n, settleByMs: now + 300_000n, contentHash: randomBytes(32), walrusBlobId: new Uint8Array([1]) },
+    });
+  assert.equal((await pay({ kind: 4 })).code, 'use_payout_route');
+  assert.equal((await pay({ kind: 1, recipient: depositAddress.address })).code, 'use_payout_route');
+
+  // An open intent (a staff member's, under a rule) to a deposit address, or of kind 4: the owners do not pay it here.
+  const intentId = normalizeSuiAddress('0x' + '5e'.repeat(32));
+  t.w.model.addIntent({ id: intentId, initialSharedVersion: 9, account: ACCOUNT, maker: normalizeSuiAddress('0x' + '5f'.repeat(32)), recipient: depositAddress.address, beneficiaryRef: beneficiary.beneficiaryRef, amountMinor: 1_000_000_000n, kind: 4, targetCurrency: 'PHP', fxRateUsdLocal: 56_000_000n, expiresAtMs: now + 86_400_000n, status: 0, asset: USDC });
+  const intentPay = await requestOpenIntentPayment(t.w.ctx, { orgId: 'acme', requestedBy: 'u-founder', wallet: t.members, intentId, maxFeeMinor: 3_000_000n, settleByMs: now + 300_000n, contentHash: randomBytes(32), walrusBlobId: new Uint8Array([1]) });
+  assert.equal(intentPay.code, 'use_payout_route');
+  assert.equal((await askOwnersToApprove({ db: t.w.db, ctx: t.w.ctx }, { orgId: 'acme', userId: 'u-founder', intentId, ...bundle(), requesterAddresses: [] })).code, 'use_payout_route');
+  assert.equal((await t.w.db.select().from(schema.walletSigningRequests)).filter((r) => r.purpose === 'wallet_payment').length, 0, 'no wallet payment was opened');
+
+  // And the shape check refuses a kind 4 intent as a plain wallet payment.
+  const { r } = await paid(t, beneficiary.id);
+  assert.throws(() => assertPurposeShape('wallet_payment', r.request.description), /bank payout/);
+  await t.w.client.close();
+});
+
+test('the adapter check binds the receive amount, the rate, the minimum, the originator and the charges', async () => {
+  const t = await setup();
+  const { beneficiary } = await readyToPay(t);
+  await paid(t, beneficiary.id);
+  const [instruction] = t.partners.pdax.called('createPayout').map((c) => c.input);
+  const { assertPacs008Matches } = await import('../lib/payments/iso20022.ts');
+  assert.doesNotThrow(() => assertPacs008Matches(instruction.iso20022, instruction));
+  const edit = (f) => {
+    const m = structuredClone(instruction.iso20022);
+    f(m.CdtTrfTxInf);
+    return m;
+  };
+  for (const [why, f] of [
+    ['settlement amount', (x) => (x.IntrBkSttlmAmt.Amt = '999999.00')],
+    ['rate', (x) => (x.XchgRate = '1.000000')],
+    ['debtor', (x) => (x.Dbtr.Nm = 'Someone Else Ltd')],
+    ['debtor registration', (x) => (x.Dbtr.Id.OrgId.Othr[0].Id = '999999999999')],
+    ['charges', (x) => (x.ChrgsInf = [])],
+  ]) {
+    assert.throws(() => assertPacs008Matches(edit(f), instruction), /does not match/, why);
+  }
+  assert.throws(() => assertPacs008Matches(instruction.iso20022, { ...instruction, minReceiveMinor: instruction.receiveMinor + 1n }), /does not match/, 'a quote below the accepted minimum');
+  await t.w.client.close();
+});
+
+test("a supplier payout row keeps the registration numbers masked, and viewers do not read payouts or suppliers", async () => {
+  const t = await setup();
+  const { beneficiary } = await readyToPay(t);
+  const { r } = await paid(t, beneficiary.id);
+  const [row] = await t.w.db.select().from(schema.withdrawals).where(eq(schema.withdrawals.id, r.payout.id));
+  const stored = JSON.stringify(row.iso20022);
+  assert.ok(!stored.includes('CS201912345') && !stored.includes('202001012345'), stored);
+  assert.match(row.iso20022.creditor.registration, /2345$/, 'the last four only');
+  const { readFile } = await import('node:fs/promises');
+  for (const f of ['route.ts', '[id]/route.ts', 'beneficiaries/route.ts']) {
+    const source = await readFile(new URL(`../app/api/wallet/payouts/${f}`, import.meta.url), 'utf8');
+    const at = source.indexOf('export async function GET(');
+    const body = source.slice(at, source.indexOf('\n}\n', at));
+    assert.match(body, /requirePayoutReader\(gate\.route\)/, `${f} GET: owners and staff only`);
+  }
+  await t.w.client.close();
+});
+
+test("a webhook signed for one partner's route does not verify at another's", async () => {
+  const { sandboxWebhookSecretFor } = await import('../lib/payouts/partner.ts');
+  assert.notEqual(sandboxWebhookSecretFor(ENV, 'pdax'), sandboxWebhookSecretFor(ENV, 'durianpay'));
+  const rawBody = JSON.stringify({ type: 'payout.status', eventId: 'evt_x_partner', partnerRef: 'sb_pdax_x', intentId: ACCOUNT, status: 'paid_out' });
+  const now = new Date();
+  const sig = signWebhook(rawBody, sandboxWebhookSecretFor(ENV, 'pdax'), now);
+  assert.doesNotThrow(() => payoutPartner('pdax', ENV).handleWebhook({ rawBody, signature: sig, now }));
+  for (const other of ['durianpay', 'hata_fiuu', 'cctp_wallet']) {
+    assert.throws(() => payoutPartner(other, ENV).handleWebhook({ rawBody, signature: sig, now }), /signature/i, `${other} refuses pdax's signature`);
+  }
 });

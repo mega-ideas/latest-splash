@@ -169,7 +169,8 @@ async function setup({ env = ENV, overrides = {}, fee, intentEvents } = {}) {
   };
   if (W.withdrawalBeforeSign) w.signing.beforeSign = (request) => W.withdrawalBeforeSign({ db: w.db }, request);
   const reconcile = () => W.reconcileWithdrawals({ db: w.db, now: () => w.signing.now(), partner: () => partner, readTransaction: chainRead, corePackageOriginalId: CORE });
-  const webhook = (body, { at = w.signing.now(), secret = SECRET, adapter = partner, envOverride = env } = {}) => {
+  const { sandboxWebhookSecretFor } = await import('../lib/payouts/partner.ts');
+  const webhook = (body, { at = w.signing.now(), secret = sandboxWebhookSecretFor ? sandboxWebhookSecretFor(env, 'hata_fiuu') : SECRET, adapter = partner, envOverride = env } = {}) => {
     const rawBody = JSON.stringify(body);
     return handlePayoutWebhook({
       partner: 'hata_fiuu',
@@ -1019,5 +1020,65 @@ test('the account key can be rotated: an account sealed under the previous key s
   const [row] = await t.w.db.select().from(schema.withdrawalDestinations);
   assert.equal(open(row.accountSealed, accountKey(rotated), destinationAad('acme', row.id, 'account')).toString(), '514012345678', 'sealed again under the new key');
   assert.equal((await addWithdrawalDestination(t.deps('acme', { env: { ...ENV, WITHDRAWAL_ACCOUNT_KEY: newKey } }), 'u-founder', ACME_BANK)).created, false);
+  await t.w.client.close();
+});
+
+/* ── Review fixes (p2-4.5) ───────────────────────────────────────────── */
+
+test("a business whose registered name has '&' or an accented letter can still withdraw: the message keeps or transliterates it, and says so", async () => {
+  for (const [name, holder] of [
+    ['Maju & Jaya Sdn Bhd', 'MAJU & JAYA SDN BHD'],
+    ['Café Nusantara Sdn Bhd', 'CAFÉ NUSANTARA SDN BHD'],
+  ]) {
+    const t = await setup();
+    await t.w.db.update(schema.organizations).set({ legalName: name }).where(eq(schema.organizations.id, 'acme'));
+    const deps = (more = {}) => t.deps('acme', { companyName: async () => name, ...more });
+    const added = await addWithdrawalDestination(deps(), 'u-founder', { ...ACME_BANK, holderName: holder });
+    assert.equal(added.ok, true, JSON.stringify(added));
+    const got = await requestPartnerDepositAddress(deps(), 'u-founder');
+    const testDep = await requestTestDeposit(deps(), 'u-founder');
+    const testDigest = await signBoth(t, testDep.request);
+    t.chainTxs.set(testDigest, { digest: testDigest, success: true, sender: t.wallet.address, balanceChanges: [{ address: got.depositAddress.address, coinType: USDC, amount: String(TEST_DEPOSIT_MINOR) }] });
+    const accountRef = (await t.w.db.select().from(schema.partnerDepositAddresses))[0].accountRef;
+    assert.equal((await t.webhook({ type: 'test_deposit.received', eventId: `evt_${hex32().slice(0, 12)}`, accountRef, suiDigest: testDigest, occurredAt: T0.toISOString() })).status, 200);
+    const q = await quoteWithdrawal(deps(), { destinationId: added.destination.id, amountMinor: '1000000000' });
+    assert.equal(q.ok, true, JSON.stringify(q));
+    const r = await createWithdrawal(deps(), 'u-founder', { clientKey: `ck_${hex32().slice(0, 16)}`, destinationId: added.destination.id, amountMinor: '1000000000', acceptedReceiveMinor: q.quote.receiveMinor, maxFeeMinor: q.quote.maxFeeMinor, ...bundle() });
+    assert.equal(r.ok, true, `${name}: ${JSON.stringify(r)}`);
+    const [instruction] = t.partner.called('createPayout').map((c) => c.input);
+    const msg = instruction.iso20022.CdtTrfTxInf;
+    if (name.includes('&')) {
+      assert.equal(msg.Dbtr.Nm, 'Maju & Jaya Sdn Bhd', "'&' is in the CBPR+ extended set and kept");
+    } else {
+      assert.equal(msg.Dbtr.Nm, 'Cafe Nusantara Sdn Bhd', 'an accented letter is transliterated for the message');
+      assert.ok(msg.SplmtryData.transliterated.includes('debtor.name'), 'and the message says which fields were');
+      const events = await t.w.db.select().from(schema.withdrawalEvents);
+      assert.ok(events.some((e) => e.action === 'iso20022_transliterated'), 'the trail records it');
+    }
+    await t.w.client.close();
+  }
+});
+
+test("an owner saves the business's structured registered address with its profile, so a payout's originator is complete", async () => {
+  const t = await setup();
+  await t.w.db.update(schema.organizations).set({ kybStatus: 'full' }).where(eq(schema.organizations.id, 'acme'));
+  const bad = await O.saveBusinessProfileFor(t.w.db, { orgId: 'acme', userId: 'u-founder', role: 'OWNER' }, { ...PROFILE, address: { streetName: 'Jalan Ampang' } });
+  assert.equal(bad.ok, false);
+  assert.equal(bad.code, 'bad_address', 'a town is required');
+  const saved = await O.saveBusinessProfileFor(t.w.db, { orgId: 'acme', userId: 'u-founder', role: 'OWNER' }, {
+    ...PROFILE,
+    address: { streetName: '#12-03, Jalan Ampang', buildingName: 'Menara Acme', postCode: '50450', townName: 'Kuala Lumpur', countrySubDivision: 'Wilayah Persekutuan' },
+  });
+  assert.equal(saved.ok, true, JSON.stringify(saved));
+  const [org] = await t.w.db.select().from(schema.organizations).where(eq(schema.organizations.id, 'acme'));
+  assert.deepEqual([org.addressLine1, org.addressLine2, org.addressCity, org.addressState, org.addressPostalCode, org.addressCountry], ['#12-03, Jalan Ampang', 'Menara Acme', 'Kuala Lumpur', 'Wilayah Persekutuan', '50450', 'MY']);
+  const { debtorFromProfile } = await import('../lib/payments/iso20022.ts');
+  const debtor = debtorFromProfile({ ...org, legalName: W.verifiedLegalName(org) });
+  assert.deepEqual(debtor.missing, [], JSON.stringify(debtor));
+  assert.equal(debtor.party.address.streetName, '#12-03, Jalan Ampang', "'#' is in the CBPR+ extended set");
+  assert.equal(debtor.party.address.buildingName, 'Menara Acme');
+  const { readFile } = await import('node:fs/promises');
+  const route = await readFile(new URL('../app/api/onboarding/profile/route.ts', import.meta.url), 'utf8');
+  assert.match(route, /address: z\s*\.object/, 'the profile route takes the structured address');
   await t.w.client.close();
 });

@@ -26,6 +26,7 @@ import test from 'node:test';
 import { signWebhook } from '../lib/funding/providers.ts';
 import * as ISO from '../lib/payments/iso20022.ts';
 import { evmMintRecipient } from '../lib/payments/cctp.ts';
+import * as PARTNER from '../lib/payouts/partner.ts';
 import { PAYOUT_PARTNER_IDS, PayoutPartnerUnavailable, WebhookRejected } from '../lib/payouts/partner.ts';
 import { payoutPartner } from '../lib/payouts/registry.ts';
 
@@ -337,10 +338,22 @@ test('cctp_wallet: USDC only, CCTP V2 standard from Sui, Circle’s fee its own 
   assert.equal((await p.returnOrReverse({ intentId: INTENT, partnerRef: order.partnerRef, returnAddress: WALLET, reason: 'payout_failed', now: NOW })).accepted, false, 'a burn cannot be undone');
 });
 
+test('the legacy sweep quotes through the route that pays its currency, and refuses one no route pays', async () => {
+  const registry = await import('../lib/payouts/registry.ts');
+  assert.equal(typeof registry.bankPartnerForCurrency, 'function');
+  assert.deepEqual(['PHP', 'IDR', 'MYR', 'php'].map((c) => registry.bankPartnerForCurrency(c)), ['pdax', 'durianpay', 'hata_fiuu', 'pdax']);
+  assert.equal(registry.bankPartnerForCurrency('USD'), null);
+  const source = await (await import('node:fs/promises')).readFile(new URL('../lib/server/sweep.ts', import.meta.url), 'utf8');
+  assert.match(source, /bankPartnerForCurrency\(/, 'the sweep picks the adapter by currency');
+  assert.doesNotMatch(source, /pdaxAdapter\(\)\.quote/);
+});
+
 test('webhooks: the signature first, inside the replay window, the sandbox secret only outside production', () => {
   const body = JSON.stringify({ type: 'payout.status', eventId: 'evt_pp_0001', partnerRef: 'sb_pdax_x00000', intentId: INTENT, status: 'paid_out', bankRef: 'INSTAPAY-778899' });
   for (const id of PAYOUT_PARTNER_IDS) {
     const p = payoutPartner(id, SANDBOX);
+    // Each route has its own sandbox secret, derived from the one configured.
+    const SECRET = PARTNER.sandboxWebhookSecretFor ? PARTNER.sandboxWebhookSecretFor(SANDBOX, id) : SANDBOX.PAYOUT_SANDBOX_WEBHOOK_SECRET;
     const ev = p.handleWebhook({ rawBody: body, signature: signWebhook(body, SECRET, NOW), now: NOW });
     assert.equal(ev.kind, 'payout', id);
     assert.equal(ev.intentId, INTENT);

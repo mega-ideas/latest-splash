@@ -402,6 +402,17 @@ test('a bank beneficiary is bound only to a partner deposit address this busines
   await w.db.insert(schema.partnerDepositAddresses).values(row('acme', 'test_sent', 'pda_acme'));
   assert.equal((await bind()).code, 'partner_address_unverified');
   await w.db.update(schema.partnerDepositAddresses).set({ status: 'verified', verifiedAt: T0 }).where(eq(schema.partnerDepositAddresses.id, 'pda_acme'));
+  // p2-4.5 review: the commitment must be one of this business's verified
+  // bank accounts, bound to the deposit address of that account's own partner.
+  const notOurs = await bind();
+  assert.equal(notOurs.code, 'beneficiary_not_a_destination', 'any 32 bytes is no beneficiary');
+  const dest = (id, orgId, partner, ref) => ({ id, orgId, partner, country: partner === 'pdax' ? 'PH' : 'MY', currency: partner === 'pdax' ? 'PHP' : 'MYR', bankCode: 'BANKXXXX', holderName: 'X Co', bankHolderName: 'X Co', nameCheckRef: 'chk', fingerprint: `fp_${id}`, last4: '1234', accountSealed: 's', beneficiarySaltSealed: 's', beneficiaryRef: ref, label: 'x', kind: 'supplier', status: 'verified', verifiedAt: T0, verifiedBy: 'u-founder', createdBy: 'u-founder', createdAt: T0, updatedAt: T0 });
+  await w.db.insert(schema.withdrawalDestinations).values(dest('wdd_north', 'northwind', 'hata_fiuu', '3a'.repeat(32)));
+  assert.equal((await bind()).code, 'beneficiary_not_a_destination', "another business's account is not this one's");
+  await w.db.insert(schema.withdrawalDestinations).values(dest('wdd_ph', 'acme', 'pdax', '3b'.repeat(32)));
+  const mismatch = await changeRecipients(w.sc, { orgId: 'acme', requestedBy: 'u-founder', wallet: members, change: { addBeneficiaries: [{ commitment: '3b'.repeat(32), partnerDeposit: DEPOSIT }] } });
+  assert.equal(mismatch.code, 'beneficiary_partner_mismatch', "a Philippine supplier is not bound to the Malaysian partner's address");
+  await w.db.insert(schema.withdrawalDestinations).values(dest('wdd_my', 'acme', 'hata_fiuu', '3a'.repeat(32)));
   const bound = await bind();
   assert.equal(bound.ok, true, JSON.stringify(bound));
   assert.ok(bound.request.description.actions.some((a) => a.type === 'verify_beneficiary' && a.partnerDeposit === DEPOSIT));
