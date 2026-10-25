@@ -316,9 +316,12 @@ test('a closing tag inside the invoice text cannot end the invoice block', async
   assert.doesNotMatch(out, /<\/invoice>/i);
 });
 
-test('a payer’s report does not add a supplier to the business’s list', async () => {
-  const route = await source('app/api/pay/[slug]/route.ts');
-  assert.doesNotMatch(route, /upsertRecipientFromInvoice\(/);
+test('a recipient made from a payer’s report is not a candidate supplier', async () => {
+  const { mayMatchSupplier } = await import('../lib/server/bills-deps.ts');
+  assert.equal(mayMatchSupplier({ createdVia: 'invoice_link' }), false, 'anyone with a pay link can make one, so it is a payer, never a supplier');
+  assert.equal(mayMatchSupplier({ createdVia: 'manual' }), true);
+  assert.equal(mayMatchSupplier({}), true);
+  assert.equal(mayMatchSupplier({ demo: true }), false);
 });
 
 test('the page ignores an answer to an invoice that is no longer the open one', async () => {
