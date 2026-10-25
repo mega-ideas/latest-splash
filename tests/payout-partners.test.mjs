@@ -352,6 +352,8 @@ test('the sandbox keys an instruction by its intent id and expected amount: a re
   assert.equal((await p.createPayout(instruction(1_000_000_000n))).partnerRef, first.partnerRef, 'the same instruction again names the same order');
   await assert.rejects(p.createPayout(instruction(2_000_000_000n)), (e) => e instanceof PayoutPartnerUnavailable && e.code === 'instruction_conflict', 'the intent id with another amount is another payout');
   await assert.rejects(p.createPayout(instruction(1_000_000_000n, { depositAddress: `0x${'33'.repeat(32)}` })), (e) => e.code === 'instruction_conflict', 'or another deposit address');
+  await assert.rejects(p.createPayout(instruction(1_000_000_000n, { quoteRef: 'sbq_test_111111111111' })), (e) => e.code === 'instruction_conflict', 'or another quote');
+  await assert.rejects(p.createPayout(instruction(1_000_000_000n, { declaration: { purposeCode: 'SUPP', relationship: 'supplier', sourceOfFunds: 'business_revenue', remittanceInfo: 'INV-CHANGED-0001' } })), (e) => e.code === 'instruction_conflict', 'or another ISO 20022 message for the same amounts');
   // Another server instance (a fresh module: a fresh process key and an empty book) names the same order.
   const fresh = await import('../lib/payouts/sandbox-orders.ts?instance=second');
   assert.equal(fresh.placeSandboxOrder('pdax', 'pdax', instruction(1_000_000_000n), SANDBOX).partnerRef, first.partnerRef, 'a retry on another server names the same order');

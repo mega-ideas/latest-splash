@@ -34,6 +34,7 @@ import * as schema from '../lib/db/schema.ts';
 import { signWebhook } from '../lib/funding/providers.ts';
 import { LAUNCH_SCHEDULE, splashFee } from '../lib/fees/schedule.ts';
 import { endToEndIdFor, uetrFor } from '../lib/payments/iso20022.ts';
+import { PayoutPartnerUnavailable } from '../lib/payouts/partner.ts';
 import { payoutPartner } from '../lib/payouts/registry.ts';
 import { accountKey, destinationAad, open, TEST_DEPOSIT_MINOR, withdrawalIntentId } from '../lib/payouts/withdrawal-rules.ts';
 import { buildBusinessMultisig } from '../lib/wallet/business-multisig.ts';
@@ -162,7 +163,7 @@ async function setup({ env = ENV, overrides = {}, debtor = { party: DEBTOR, miss
     return W.handlePayoutWebhook({ partner, rawBody, signature: signWebhook(rawBody, secret, at), env, now: w.signing.now(), db: w.db, readTransaction: checkpointed, usdcType: USDC, adapter: partners[partner] });
   };
   const reconcile = () => W.reconcileWithdrawals(settlement);
-  return { w, wallet, members, partners, deps, chainTxs, webhook, reconcile };
+  return { w, wallet, members, partners, deps, chainTxs, webhook, reconcile, settlement };
 }
 
 async function signBoth(t, request) {
@@ -577,6 +578,137 @@ test("the sweep asks the partner for a payout's status when no webhook came, mov
   const swept = await t.reconcile();
   assert.equal((await P.getPartnerPayout(t.deps(), third.r.payout.id)).payout.status, 'sent');
   assert.equal(swept.advanced, 0);
+  await t.w.client.close();
+});
+
+test('a failed payout keeps asking for its USDC back until the partner accepts, by poll or by webhook, and ops are alerted when it will not', async () => {
+  let answer = 'instructed';
+  let accept = 'down';
+  const returnOrReverse = async () => {
+    if (accept === 'down') throw new Error('partner down');
+    return { accepted: accept === 'yes', sandbox: true };
+  };
+  const t = await setup({ overrides: { pdax: { status: async () => ({ status: answer, sandbox: true }), returnOrReverse } } });
+  const { beneficiary } = await readyToPay(t);
+  const { r } = await paid(t, beneficiary.id);
+  const p = r.payout;
+  await signBoth(t, r.request);
+  const asks = () => t.partners.pdax.called('returnOrReverse').filter((c) => c.input.intentId === p.intentId).length;
+  answer = 'failed';
+  await t.reconcile();
+  assert.equal((await P.getPartnerPayout(t.deps(), p.id)).payout.status, 'failed');
+  assert.equal(asks(), 1, 'the poll found the failure and asked once');
+  const swept = await t.reconcile();
+  assert.equal(asks(), 2, 'the partner was down: the sweep asks again');
+  assert.equal(swept.returnsPending, 1, 'and counts it as a return still owed');
+  accept = 'no';
+  await t.reconcile();
+  assert.equal(asks(), 3, 'a refusal is not an answer either');
+  accept = 'yes';
+  await t.reconcile();
+  assert.equal(asks(), 4);
+  await t.reconcile();
+  assert.equal(asks(), 4, 'accepted: nothing more to ask');
+  const [row] = await t.w.db.select().from(schema.withdrawals).where(eq(schema.withdrawals.id, p.id));
+  assert.equal(row.returnAsks, 4);
+  assert.ok(row.returnAcceptedAt instanceof Date, 'when the partner accepted is kept');
+
+  // The failure webhook path: asked at once, then by the sweep until accepted.
+  accept = 'down';
+  const second = await paid(t, beneficiary.id);
+  await signBoth(t, second.r.request);
+  const p2 = second.r.payout;
+  answer = 'instructed';
+  assert.equal((await t.webhook('pdax', { type: 'payout.status', eventId: 'evt_pp_fail_retry', partnerRef: p2.partnerRef, intentId: p2.intentId, status: 'failed', occurredAt: T0.toISOString() })).status, 200);
+  const asks2 = () => t.partners.pdax.called('returnOrReverse').filter((c) => c.input.intentId === p2.intentId).length;
+  assert.equal(asks2(), 1);
+  for (let i = 0; i < 5; i += 1) await t.reconcile();
+  assert.equal(asks2(), 6, 'asked on every run while the partner cannot answer');
+  const trail = (await t.w.db.select().from(schema.withdrawalEvents)).filter((e) => e.subjectId === p2.id).map((e) => e.action);
+  assert.equal(trail.filter((a) => a === 'return_request_stuck').length, 1, `ops are alerted once: ${trail.join(',')}`);
+  await t.w.client.close();
+});
+
+test("a payout the poll finds paid out keeps the bank's reference, a polled failure keeps the partner's reason, and a later webhook may add a missing reference", async () => {
+  let answer = { status: 'paid_out', bankRef: 'FIUU-0000123456', sandbox: true };
+  const t = await setup({ overrides: { pdax: { status: async () => answer } } });
+  const { beneficiary } = await readyToPay(t);
+  const first = await paid(t, beneficiary.id);
+  await signBoth(t, first.r.request);
+  await t.reconcile();
+  let [row] = await t.w.db.select().from(schema.withdrawals).where(eq(schema.withdrawals.id, first.r.payout.id));
+  assert.equal(row.status, 'paid_out');
+  assert.equal(row.bankRef, 'FIUU-0000123456');
+
+  answer = { status: 'failed', failureReason: 'account closed at the bank', sandbox: true };
+  const second = await paid(t, beneficiary.id);
+  await signBoth(t, second.r.request);
+  await t.reconcile();
+  [row] = await t.w.db.select().from(schema.withdrawals).where(eq(schema.withdrawals.id, second.r.payout.id));
+  assert.equal(row.failure, 'account closed at the bank');
+
+  answer = { status: 'paid_out', bankRef: 'not a ref; <script>', sandbox: true };
+  const third = await paid(t, beneficiary.id);
+  await signBoth(t, third.r.request);
+  await t.reconcile();
+  [row] = await t.w.db.select().from(schema.withdrawals).where(eq(schema.withdrawals.id, third.r.payout.id));
+  assert.equal(row.status, 'paid_out');
+  assert.equal(row.bankRef, null, 'a reference that is not an id is not kept');
+  const p3 = third.r.payout;
+  const late = { type: 'payout.status', eventId: 'evt_pp_lateref', partnerRef: p3.partnerRef, intentId: p3.intentId, status: 'paid_out', bankRef: 'FIUU-0000999999', occurredAt: T0.toISOString() };
+  assert.equal((await t.webhook('pdax', late)).status, 200);
+  [row] = await t.w.db.select().from(schema.withdrawals).where(eq(schema.withdrawals.id, p3.id));
+  assert.equal(row.bankRef, 'FIUU-0000999999', 'a later paid-out webhook fills in the missing reference');
+  assert.equal((await t.webhook('pdax', { ...late, eventId: 'evt_pp_lateref2', bankRef: 'FIUU-0000888888' })).status, 200);
+  [row] = await t.w.db.select().from(schema.withdrawals).where(eq(schema.withdrawals.id, p3.id));
+  assert.equal(row.bankRef, 'FIUU-0000999999', 'but never replaces one already kept');
+  await t.w.client.close();
+});
+
+test('a status poll the partner cannot answer is counted apart and does not fail the sweep; a settlement that cannot be posted still does', async () => {
+  const t = await setup({ overrides: { pdax: { status: async () => { throw new PayoutPartnerUnavailable('The sandbox partner holds no such payout.', 'payout_not_found'); } } } });
+  const { beneficiary } = await readyToPay(t);
+  const { r } = await paid(t, beneficiary.id);
+  await signBoth(t, r.request);
+  let swept = await t.reconcile();
+  assert.equal(swept.errors, 0, JSON.stringify(swept));
+  assert.equal(swept.pollErrors, 1);
+  // A route switched off answers no poll either, and is counted the same way.
+  const off = { ...t.settlement, partner: () => { throw new PayoutPartnerUnavailable('This payout route is switched off.', 'partner_disabled'); } };
+  swept = await W.reconcileWithdrawals(off);
+  assert.equal(swept.errors, 0, JSON.stringify(swept));
+  assert.equal(swept.pollErrors, 1);
+  await t.w.client.close();
+});
+
+test('a signed event Splash does not know is kept for ops (type, status and event id, cut short, no body) and counted once per delivery', async () => {
+  const t = await setup();
+  const body = { type: 'payout.reversed', eventId: 'evt_pp_unknown_kept', partnerRef: 'sb_pdax_whatever', intentId: ACCOUNT, status: 'completed', accountNumber: '0012-3456-7890', occurredAt: T0.toISOString() };
+  assert.equal((await t.webhook('pdax', body)).status, 200);
+  assert.equal((await t.webhook('pdax', body)).status, 200);
+  const long = { type: 'payout.status', eventId: 'evt_pp_unknown_long', status: 'x'.repeat(500) };
+  assert.equal((await t.webhook('pdax', long)).status, 200);
+  const kept = await t.w.db.select().from(schema.payoutPartnerUnknownEvents);
+  assert.equal(kept.length, 2, 'one row per event, however often it is delivered');
+  const reversed = kept.find((k) => k.eventId === 'evt_pp_unknown_kept');
+  assert.equal(reversed.partner, 'pdax');
+  assert.equal(reversed.eventType, 'payout.reversed');
+  assert.equal(reversed.eventStatus, 'completed');
+  assert.equal(reversed.deliveries, 2);
+  assert.ok(!JSON.stringify(kept).includes('3456'), 'nothing from the body beyond type, status and id');
+  assert.ok(kept.find((k) => k.eventId === 'evt_pp_unknown_long').eventStatus.length <= 64, 'cut to a safe length');
+  await t.w.client.close();
+});
+
+test('a new withdrawal row must carry its ISO 20022 message; only a row written before the message was kept may lack it, and says so', async () => {
+  const t = await setup();
+  const { beneficiary } = await readyToPay(t);
+  const { r } = await paid(t, beneficiary.id);
+  const [row] = await t.w.db.select().from(schema.withdrawals).where(eq(schema.withdrawals.id, r.payout.id));
+  const copy = (over) => ({ ...row, id: `wd_${hex32().slice(0, 12)}`, clientKey: `ck_${hex32().slice(0, 12)}`, intentId: `0x${hex32()}`, paymentRef: hex32(), partnerRef: null, suiDigest: null, signingRequestId: null, kind: 'withdrawal', ...over });
+  await assert.rejects(t.w.db.insert(schema.withdrawals).values(copy({ iso20022: null })), 'a withdrawal without its message is refused by the database');
+  await assert.rejects(t.w.db.insert(schema.withdrawals).values(copy({ purposeCode: null })), 'nor without its purpose code');
+  await t.w.db.insert(schema.withdrawals).values(copy({ iso20022: null, purposeCode: null, iso20022Legacy: true }));
   await t.w.client.close();
 });
 
