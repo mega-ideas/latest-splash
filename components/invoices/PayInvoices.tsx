@@ -742,7 +742,7 @@ function RecipientStep({ bill, canWrite, onMatch, busy }: { bill: BillView; canW
                       }}
                       className="mt-3 space-y-2 border-t border-[#326273]/10 pt-3"
                     >
-                      <label htmlFor={`close-why-${m.id}`} className="block text-[13px] font-semibold text-[#1f4452]">{m.name} is not the same name as {supplier}. Why is it paid for this invoice?</label>
+                      <label htmlFor={`close-why-${m.id}`} className="block text-[13px] font-semibold text-[#1f4452]">{m.name} and {supplier} are not the same name. Why is this recipient paid for the invoice?</label>
                       <input id={`close-why-${m.id}`} value={closeReason} onChange={(e) => setCloseReason(e.target.value)} minLength={8} maxLength={300} aria-describedby={`close-why-help-${m.id}`} className="h-11 w-full rounded-lg border border-[#326273]/20 bg-white px-3 text-sm focus:border-[#145d6a] focus:outline-none focus:ring-2 focus:ring-[#5c9ead]/30" />
                       <p id={`close-why-help-${m.id}`} className="text-[12px] text-[#326273]">At least 8 characters, for example: the same company under its registered name.</p>
                       <div className="flex flex-wrap gap-2">

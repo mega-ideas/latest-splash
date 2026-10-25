@@ -329,7 +329,8 @@ function InvoiceReceipt({ invoice, close }: { invoice: InvoiceRecord; close: () 
     ...(invoice.receivedReference
       ? [['Your reference', <span key="rr" className="font-mono break-all">{invoice.receivedReference}</span>] as [string, React.ReactNode]]
       : []),
-    ['Reference asked for', <span key="r" className="font-mono break-all">{invoice.paymentReference ?? 'None'}</span>],
+    // The reference the pay link asked the payer to quote (app/pay/[slug]/page.tsx).
+    ['Reference asked for', <span key="r" className="font-mono break-all">{invoice.paymentReference ?? `SPL-${invoice.payLinkSlug.toUpperCase()}-${invoice.id.slice(-4).toUpperCase()}`}</span>],
     ['Status', INVOICE_STATUS_LABEL[invoice.status]],
   ];
   return (
