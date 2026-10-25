@@ -37,7 +37,18 @@ import ZekeGreeting, { type ZekeGreetingChip } from './oxwal/ZekeGreeting';
  * snapshot (GET /api/oxwal/desk), and asks what to look at. Its suggestions
  * are inside that first message (v2 brief 5.3), not a fixed row of buttons.
  * The fixed "Reads state · prepares proposals · cannot send" strip is gone:
- * Zeke states its limit in the conversation, where it applies.
+ * the limit is said in the conversation instead, in the greeting itself
+ * (ZEKE_LIMIT in lib/agent/zeke-desk.ts), so it is the first thing anyone
+ * reads before asking the panel to pay someone.
+ *
+ * The count on the trigger and on the Approvals chip is what this person can
+ * approve (snapshot.forViewer), not the workspace's: under maker-checker a
+ * payment they asked for waits for someone else, and a badge that nags them
+ * about it points at something they cannot do.
+ *
+ * It is not drawn on the Zeke page, which is the same assistant at full size:
+ * two Zekes on one screen, one sitting on the other's composer, is one too
+ * many. As a dialog it closes on Escape and gives focus back to its trigger.
  *
  * ─── What it deliberately will not do ───────────────────────────────────────
  *
@@ -97,17 +108,43 @@ export default function FloatingCopilot() {
 
   const { snapshot, refresh } = useZekeDesk();
 
-  // What is waiting: the workspace's own count when it was read, and at least
-  // what this tab has seen Zeke prepare since.
-  const waiting = Math.max(snapshot?.known ? snapshot.waiting : 0, pending.count);
-  const awayFromDesk = pathname !== '/dashboard/zeke' && pathname !== '/queue';
+  // What waits for this person: what they could approve when that was read.
+  // Before it is read, what this tab has seen Zeke prepare stands in; once
+  // it is, a new proposal re-reads it (below) rather than being added on.
+  const forViewer = snapshot?.known ? (snapshot?.forViewer ?? null) : null;
+  const waiting = forViewer ? forViewer.waiting : pending.count;
+  const awayFromDesk = pathname !== '/queue';
   const hasReminder = waiting > 0 && awayFromDesk;
 
   const chips = GREETING_CHIPS.map((chip) =>
-    chip.label === 'Approvals' && snapshot?.known && snapshot.waiting > 0
-      ? { ...chip, label: `Approvals (${snapshot.waiting})` }
+    chip.label === 'Approvals' && forViewer && forViewer.waiting > 0
+      ? { ...chip, label: `Approvals (${forViewer.waiting})` }
       : chip,
   );
+
+  // Something new was prepared in this tab: re-read who it waits for.
+  useEffect(() => {
+    if (pending.updatedAt > 0) void refresh();
+  }, [pending.updatedAt, refresh]);
+
+  // A dialog closes on Escape, and focus goes back to what opened it.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open]);
+
+  function closePanel() {
+    setOpen(false);
+    triggerRef.current?.focus();
+  }
 
   useEffect(() => {
     // Hydration-safe initial read, then live subscription.
@@ -122,6 +159,7 @@ export default function FloatingCopilot() {
   const nudgeTimeoutRef = useRef<number | null>(null);
   const dragRef = useRef<{ x: number; y: number; offsetX: number; offsetY: number } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   // Uploaded batch → hand the parsed rows to the batch desk (which reviews and
   // routes to the Action Queue for human approval). Rows travel via
@@ -190,6 +228,8 @@ export default function FloatingCopilot() {
     setInput('');
   }
 
+  if (pathname === '/dashboard/zeke') return null;
+
   return (
     <>
       {/* ── Chat panel (slides up above the button) ── */}
@@ -255,7 +295,7 @@ export default function FloatingCopilot() {
             </Link>
             <button
               type="button"
-              onClick={() => setOpen(false)}
+              onClick={closePanel}
               className="grid h-9 w-9 place-items-center rounded-md text-white/85 transition-colors hover:bg-white/10 hover:text-white focus-ring"
               aria-label={`Close ${assistantName}`}
             >
@@ -305,7 +345,8 @@ export default function FloatingCopilot() {
             onFilePrepared={handleBatchPrepared}
             chips={[]}
             disabled={isSending}
-            placeholder={`Ask ${assistantName}, or attach an invoice`}
+            assistantName={assistantName}
+            placeholder={`Ask ${assistantName}, or attach a payout sheet`}
             inputRef={inputRef}
           />
         </div>
@@ -321,6 +362,7 @@ export default function FloatingCopilot() {
         )}
 
         <button
+          ref={triggerRef}
           type="button"
           onClick={() => {
             setNudge(null);

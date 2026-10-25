@@ -465,6 +465,41 @@ export async function listBannerAlertsForUser(db: DrizzleDb, userId: string, now
 }
 
 /**
+ * How many alerts this person's banner holds, for the Zeke desk's Alerts
+ * stat: the same deliveries `listBannerAlertsForUser` shows, counted. Null
+ * when nothing could be read (no database, or the read failed), so the desk
+ * shows "-" rather than a 0 nobody measured. A signed-in person with no user
+ * row has no deliveries, which is a 0 that was read.
+ */
+export async function readGovernanceAlertCountForSession(session: { email: string }, nowMs = Date.now()): Promise<number | null> {
+  if (!process.env.DATABASE_URL) return null;
+  try {
+    const { getDb } = await import('../db/client.ts');
+    const db = getDb() as unknown as DrizzleDb;
+    const email = session.email.trim().toLowerCase();
+    const found = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
+    if (!found[0]) return 0;
+    const rows = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(governanceAlertDeliveries)
+      .innerJoin(governanceAlerts, eq(governanceAlerts.id, governanceAlertDeliveries.alertId))
+      .where(
+        and(
+          eq(governanceAlertDeliveries.userId, found[0].id),
+          eq(governanceAlertDeliveries.channel, 'in_app'),
+          eq(governanceAlertDeliveries.status, 'sent'),
+          gt(governanceAlerts.activeUntil, new Date(nowMs)),
+          stillShown(),
+        ),
+      );
+    return Number(rows[0]?.count ?? 0);
+  } catch (error) {
+    console.error('[governance-alerts] the alert count could not be read:', error instanceof Error ? error.message : error);
+    return null;
+  }
+}
+
+/**
  * The dashboard layout's reader. The person is the session's own identity,
  * looked up by its email; nothing from the request picks whose alerts these
  * are. Presentation only, so any failure reads as "no banner" rather than

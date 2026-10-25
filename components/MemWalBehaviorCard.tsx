@@ -13,10 +13,13 @@ type Memory = { text: string; confidence: number | null; demo: boolean };
 export default function MemWalBehaviorCard({
   compact = false,
   variant = 'default',
+  assistantName = 'Zeke',
 }: {
   compact?: boolean;
   /** `zeke`: the Zeke page's "What Zeke remembers" card. */
   variant?: 'default' | 'zeke';
+  /** `zeke` only: the assistant's current name, which an owner can change. */
+  assistantName?: string;
 }) {
   const [memories, setMemories] = useState<Memory[]>([]);
   const [loadState, setLoadState] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -77,7 +80,7 @@ export default function MemWalBehaviorCard({
           </span>
           <div className="min-w-0 flex-1">
             <div className="flex items-start justify-between gap-2">
-              <h2 id="zeke-remembers" className="text-[15px] font-bold text-[#0c3e48]">What Zeke remembers</h2>
+              <h2 id="zeke-remembers" className="text-[15px] font-bold text-[#0c3e48]">What {assistantName} remembers</h2>
               {displayMemories.some((memory) => memory.demo) && <StatusBadge status="demo" />}
             </div>
             <p className="mt-0.5 text-[13px] font-medium text-[#326273]">Habits that sharpen suggestions.</p>
@@ -93,7 +96,7 @@ export default function MemWalBehaviorCard({
             </li>
           ))}
         </ul>
-        <p className="mt-3 text-[12px] font-medium text-[#326273]">Habits only. No amounts, account numbers or KYC data.</p>
+        <p className="mt-3 text-[12px] font-medium text-[#326273]">Patterns only. No amounts, account numbers or KYC data.</p>
       </section>
     );
   }

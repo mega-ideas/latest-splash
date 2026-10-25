@@ -14,6 +14,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 
+import { MEMWAL_NEVER_STORED, MEMWAL_STORED } from '@/lib/agent/memwal-disclosure';
 import type { ZekeDeskSnapshot, ZekeRecentState } from '@/lib/agent/zeke-desk';
 import { cn } from '@/lib/utils';
 
@@ -24,6 +25,8 @@ import { cn } from '@/lib/utils';
  * Every number on them is the desk snapshot's (lib/agent/zeke-desk.ts). When
  * the snapshot could not be read, a card says what it would show instead of
  * showing 0: "nothing waiting" and "could not look" are different facts.
+ * The assistant can be renamed (lib/agent/assistant-name.ts), so its name is
+ * passed in, never typed.
  */
 
 export const ZEKE_CARD =
@@ -40,11 +43,11 @@ const CAN_DO: { label: string; answer: 'Yes' | 'Never' }[] = [
   { label: 'Approve or send money', answer: 'Never' },
 ];
 
-export function ZekeCanDo() {
+export function ZekeCanDo({ assistantName }: { assistantName: string }) {
   return (
     <section aria-labelledby="zeke-can-do" className={cn(ZEKE_CARD, 'p-5')}>
       <h2 id="zeke-can-do" className="text-[15px] font-bold text-[#0c3e48]">
-        What Zeke can do
+        What {assistantName} can do
       </h2>
       <dl className="mt-3 space-y-2.5">
         {CAN_DO.map((row) => (
@@ -74,15 +77,39 @@ function closesSoonLine(ms: number | null): string | null {
   return `The soonest closes in ${minutes === 1 ? '1 minute' : `${minutes} minutes`}.`;
 }
 
+function waitingInWorkspace(count: number): string {
+  return count === 1 ? '1 payment is waiting for approval' : `${count} payments are waiting for approval`;
+}
+
+/**
+ * "For you" is what this viewer could approve (snapshot.forViewer): under
+ * maker-checker a payment they asked for is someone else's to approve, so it
+ * is not counted as theirs. The workspace count is said as the workspace's.
+ */
 export function ZekeApprovals({ snapshot }: { snapshot: ZekeDeskSnapshot | null }) {
   const known = Boolean(snapshot?.known);
-  const count = known && snapshot ? snapshot.waiting : 0;
-  const heading = !known ? 'Your approvals' : count === 0 ? 'Nothing waiting' : `${count} waiting for you`;
-  const body = !known
-    ? 'Open the queue to see what needs your decision.'
-    : count === 0
-      ? 'Payments that need your decision appear here, and in the queue.'
-      : (closesSoonLine(snapshot?.soonestCloseMs ?? null) ?? 'Each one shows what it pays, from where, and who approves.');
+  const inWorkspace = known && snapshot ? snapshot.waiting : 0;
+  const forViewer = known ? (snapshot?.forViewer ?? null) : null;
+  const mine = forViewer?.waiting ?? 0;
+
+  let heading: string;
+  let body: string;
+  if (!known) {
+    heading = 'Your approvals';
+    body = 'Open the queue to see what needs your decision.';
+  } else if (forViewer && mine > 0) {
+    heading = `${mine} waiting for you`;
+    body = closesSoonLine(forViewer.soonestCloseMs) ?? 'Each one shows what it pays, from where, and who approves.';
+  } else if (inWorkspace === 0) {
+    heading = 'Nothing waiting';
+    body = 'Payments that need your decision appear here, and in the queue.';
+  } else if (forViewer) {
+    heading = 'Nothing for you';
+    body = `${waitingInWorkspace(inWorkspace)}, for another approver.`;
+  } else {
+    heading = `${inWorkspace} waiting`;
+    body = `${waitingInWorkspace(inWorkspace)} in this workspace.`;
+  }
 
   return (
     <section
@@ -106,8 +133,7 @@ export function ZekeApprovals({ snapshot }: { snapshot: ZekeDeskSnapshot | null 
 
 // ─── What MemWal stores (Sky: back from the old copilot room) ───────────────
 
-const STORED = ['Corridor frequency and timing', 'Batch size patterns', 'Rate sensitivity bands', 'What you call this assistant'];
-const NEVER_STORED = ['Invoice PDFs or their contents', 'Recipient bank details', 'Account numbers', 'KYB documents'];
+// What is written, from the list tied to its writers (lib/agent/memwal-disclosure.ts).
 
 export function MemWalStores() {
   return (
@@ -120,12 +146,12 @@ export function MemWalStores() {
       </div>
       <div className="mt-3 grid gap-3">
         <div>
-          <h3 className="text-[13px] font-bold text-[#0d6370]">Stored: behaviour only</h3>
+          <h3 className="text-[13px] font-bold text-[#0d6370]">Stored</h3>
           <ul className="mt-1.5 space-y-1">
-            {STORED.map((item) => (
-              <li key={item} className="flex items-center gap-2 text-[13px] font-medium text-[#326273]">
-                <Check className="h-3.5 w-3.5 shrink-0 text-[#0d6370]" aria-hidden="true" />
-                {item}
+            {MEMWAL_STORED.map((item) => (
+              <li key={item.label} className="flex items-start gap-2 text-[13px] font-medium text-[#326273]">
+                <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#0d6370]" aria-hidden="true" />
+                {item.label}
               </li>
             ))}
           </ul>
@@ -133,9 +159,9 @@ export function MemWalStores() {
         <div className="border-t border-[#326273]/12 pt-3">
           <h3 className="text-[13px] font-bold text-[var(--error)]">Never stored</h3>
           <ul className="mt-1.5 space-y-1">
-            {NEVER_STORED.map((item) => (
-              <li key={item} className="flex items-center gap-2 text-[13px] font-medium text-[#326273]">
-                <X className="h-3.5 w-3.5 shrink-0 text-[var(--error)]" aria-hidden="true" />
+            {MEMWAL_NEVER_STORED.map((item) => (
+              <li key={item} className="flex items-start gap-2 text-[13px] font-medium text-[#326273]">
+                <X className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--error)]" aria-hidden="true" />
                 {item}
               </li>
             ))}
@@ -197,15 +223,17 @@ function hrefFor(state: ZekeRecentState): string | null {
 export function ZekeRecent({
   snapshot,
   state,
+  assistantName,
 }: {
   snapshot: ZekeDeskSnapshot | null;
   state: 'loading' | 'ready' | 'unavailable';
+  assistantName: string;
 }) {
   const items = snapshot?.known ? snapshot.recent : [];
   return (
     <section aria-labelledby="zeke-recent">
       <h2 id="zeke-recent" className={cn(MONO_LABEL, 'text-[#326273]')}>
-        Recent with Zeke
+        Recent with {assistantName}
       </h2>
       <div className="mt-2.5 overflow-hidden rounded-xl border border-[#326273]/14 bg-white">
         {state === 'loading' && (
@@ -216,12 +244,12 @@ export function ZekeRecent({
         )}
         {state === 'unavailable' && (
           <p className="px-4 py-3 text-[13px] font-medium text-[#326273]">
-            Recent work could not be read just now. What Zeke prepared is still in the approval queue.
+            Recent work could not be read just now. What {assistantName} prepared is still in the approval queue.
           </p>
         )}
         {state === 'ready' && items.length === 0 && (
           <p className="px-4 py-3 text-[13px] font-medium text-[#326273]">
-            Nothing yet. What you ask Zeke to prepare appears here, with where it stands.
+            Nothing yet. What you ask {assistantName} to prepare appears here, with where it stands.
           </p>
         )}
         {items.length > 0 && (

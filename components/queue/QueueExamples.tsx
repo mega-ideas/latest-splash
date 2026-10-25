@@ -13,7 +13,11 @@ import { riskClass, type QueueItem, type QueueLaneData, type QueueLaneKey } from
  * live table, at the same weight, and a sample payment that looks like a real
  * one is read as one. They are never actionable: no approve, no reject.
  *
- * Each lane is a compact card: its count and up to two sample lines.
+ * Each lane is a compact card: its count and up to two sample lines. Every
+ * card says "Sample" on itself as well, because once the panel is open on a
+ * phone the summary has scrolled away, and a card reading "Anomaly halts 1"
+ * with a red icon is otherwise read as a live incident. The expiry stays
+ * visible: when a sample would lapse is part of what it shows.
  */
 
 /* Lane tones use semantic state tokens (W9.0 rule): a brand accent is never a
@@ -51,7 +55,12 @@ export default function QueueExamples({ pending, lanes }: { pending: QueueItem[]
           return (
             <li key={lane.key} className="flex min-w-0 flex-col rounded-lg border border-[#326273]/14 bg-white/60 p-3">
               <div className="flex items-center justify-between gap-2">
-                <Icon className={`h-4 w-4 shrink-0 ${meta.tone}`} aria-hidden="true" />
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <Icon className={`h-4 w-4 shrink-0 ${meta.tone}`} aria-hidden="true" />
+                  <span className="rounded border border-dashed border-[#326273]/40 px-1 text-[12px] font-bold text-[#326273]">
+                    Sample
+                  </span>
+                </span>
                 <span className="text-xl font-bold tabular-nums text-[#1F4452]">{lane.items.length}</span>
               </div>
               <h3 className="mt-2 text-[13px] font-bold text-[#1F4452]">{meta.label}</h3>
@@ -68,8 +77,9 @@ export default function QueueExamples({ pending, lanes }: { pending: QueueItem[]
                         <span className="money">{item.amountLabel}</span>
                         <span className={`rounded border px-1 text-[12px] font-bold ${riskClass(item.risk)}`}>{item.risk}</span>
                       </p>
+                      <p className="mt-0.5 text-[12px] font-medium text-[#326273]">{item.expiryLabel}</p>
                       <p className="sr-only">
-                        {kindLabel(item.kind)}, {item.expiryLabel}
+                        {kindLabel(item.kind)}
                         {item.reason ? `, ${item.reason}` : ''}
                       </p>
                     </li>

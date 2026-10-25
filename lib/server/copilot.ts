@@ -68,11 +68,29 @@ function normaliseAmount(raw: string): { amount: string; amountMinor: bigint } {
  * remembered: a vendor or currency the parser could not read ('') is not a
  * fact to store ("settles in " with nothing after it, or, before, an
  * invented 'USD').
+ *
+ * The name is untrusted text, and a memory is recalled and shown later (the
+ * suggestion cards and the Zeke page print it), so it is cut down to what a
+ * company name is made of: letters, digits, spaces and . , & ' ( ) - at most
+ * 60 characters. Markup, quotes, line breaks and sentence punctuation that
+ * would let a document write an instruction into the memory are dropped. The
+ * Zeke page's "What MemWal stores" card lists this memory
+ * (lib/agent/memwal-disclosure.ts).
  */
+export function invoiceVendorMemory(recipient: string, currency: string): string | null {
+  const vendor = recipient
+    .replace(/[^\p{L}\p{N} .,&'()-]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 60)
+    .trim();
+  if (!/[\p{L}\p{N}]/u.test(vendor) || !currency) return null;
+  return `Invoice vendor ${vendor} settles in ${currency}`;
+}
+
 function rememberInvoiceVendor(orgId: string, recipient: string, currency: string): void {
-  const vendor = recipient.replace(/\s+/g, ' ').trim().slice(0, 80);
-  if (!vendor || !currency) return;
-  void rememberForOrg(orgId, `Invoice vendor ${vendor} settles in ${currency}`);
+  const memory = invoiceVendorMemory(recipient, currency);
+  if (memory) void rememberForOrg(orgId, memory);
 }
 
 export async function parseInvoice(

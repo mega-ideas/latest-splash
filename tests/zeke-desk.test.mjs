@@ -121,7 +121,8 @@ test('recent is what Zeke prepared, newest first, three at most, each with where
     ['rejected', 'rejected', 'Rejected'],
     ['lapsed', 'expired', 'Expired'],
   ]);
-  assert.equal(snapshot.recent[0].title, 'Pay Luzon Components for INV-0142');
+  // A fixed label for the kind, never the agent's recommendation text.
+  assert.equal(snapshot.recent[0].title, 'Payment');
 
   const states = (status) =>
     buildZekeDeskSnapshot({ proposals: [proposal({ status })], orgId: 'org_acme', now: NOW, displayName: null }).recent[0].label;
@@ -153,24 +154,25 @@ test('the first name is the first word of the display name, and never an email a
 
 // ── What the page and the widget say ────────────────────────────────────────
 
-const snap = (overrides = {}) => ({ known: true, firstName: 'Nadia', waiting: 0, drafts: 0, soonestCloseMs: null, recent: [], ...overrides });
+const snap = (overrides = {}) => ({ known: true, firstName: 'Nadia', waiting: 0, forViewer: null, alerts: null, drafts: 0, soonestCloseMs: null, recent: [], ...overrides });
+const LIMIT = 'I can prepare payments for approval, but I can’t approve or send them.';
 
 test('the floating greeting says what is waiting, and when the soonest closes, from the snapshot', () => {
   assert.equal(
     zekeGreeting(snap({ waiting: 2, soonestCloseMs: 3 * 60_000 })),
-    'Hi Nadia. 2 payments are waiting for approval, and one closes in 3 minutes. What would you like to look at?',
+    `Hi Nadia. 2 payments are waiting for approval, and one closes in 3 minutes. ${LIMIT} What would you like to look at?`,
   );
   assert.equal(
     zekeGreeting(snap({ waiting: 1, soonestCloseMs: 5 * 60 * 60_000 })),
-    'Hi Nadia. 1 payment is waiting for approval. What would you like to look at?',
+    `Hi Nadia. 1 payment is waiting for approval. ${LIMIT} What would you like to look at?`,
   );
-  assert.equal(zekeGreeting(snap()), 'Hi Nadia. Nothing is waiting for your approval. What would you like to look at?');
-  assert.equal(zekeGreeting(snap({ firstName: null, waiting: 1, soonestCloseMs: 60_000 })), 'Hi. 1 payment is waiting for approval, and it closes in 1 minute. What would you like to look at?');
+  assert.equal(zekeGreeting(snap()), `Hi Nadia. Nothing is waiting for your approval. ${LIMIT} What would you like to look at?`);
+  assert.equal(zekeGreeting(snap({ firstName: null, waiting: 1, soonestCloseMs: 60_000 })), `Hi. 1 payment is waiting for approval, and it closes in 1 minute. ${LIMIT} What would you like to look at?`);
 });
 
 test('with no snapshot the greeting states no number at all', () => {
-  assert.equal(zekeGreeting(null), 'Hi. What would you like to look at?');
-  assert.equal(zekeGreeting(snap({ known: false, waiting: 0 })), 'Hi Nadia. What would you like to look at?');
+  assert.equal(zekeGreeting(null), `Hi. ${LIMIT} What would you like to look at?`);
+  assert.equal(zekeGreeting(snap({ known: false, waiting: 0 })), `Hi Nadia. ${LIMIT} What would you like to look at?`);
 });
 
 test('the page line under the question states the queue and the wallet only when they were read', () => {
@@ -256,8 +258,8 @@ test('the Zeke page has the larger composer with "Zeke can see", starter cards a
   const composer = await source('components/oxwal/OxWalComposer.tsx');
   assert.match(composer, /variant\?: 'bar' \| 'desk' \| 'reply'/);
   assert.match(composer, /<textarea/);
-  assert.match(composer, /Zeke can see/);
-  assert.match(composer, /Ask Zeke/);
+  assert.match(composer, /\{assistantName\} can see/);
+  assert.match(composer, /`Ask \$\{assistantName\}`/);
 });
 
 test('the Zeke page’s side column: remembers, can do, approvals, what MemWal stores and quick links', async () => {
@@ -266,7 +268,7 @@ test('the Zeke page’s side column: remembers, can do, approvals, what MemWal s
   for (const name of ['<MemWalBehaviorCard', '<ZekeCanDo', '<ZekeApprovals', '<MemWalStores', '<ZekeQuickLinks']) {
     assert.match(page, new RegExp(name));
   }
-  assert.match(cards, /What Zeke can do/);
+  assert.match(cards, /What \{assistantName\} can do/);
   assert.match(cards, /Approve or send money/);
   assert.match(cards, /Never/);
   assert.match(cards, /What MemWal stores/);

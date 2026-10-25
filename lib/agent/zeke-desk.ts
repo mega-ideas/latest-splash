@@ -1,5 +1,6 @@
 import { AGENT_ACTOR_ID } from '@/lib/agent/identity';
-import type { ProposalStatus } from '@/lib/agent/types';
+import type { ProposalKind, ProposalStatus, UserRole } from '@/lib/agent/types';
+import { kindLabel } from '@/lib/queue/queue-decision';
 
 /**
  * What the Zeke page and the floating Zeke say before anyone asks anything
@@ -13,7 +14,11 @@ import type { ProposalStatus } from '@/lib/agent/types';
  * be read would be a number nobody measured.
  *
  * The result is labels and counts only. No amounts, payees, account details,
- * transaction bytes or approval hashes leave the store through it.
+ * transaction bytes or approval hashes leave the store through it. A recent
+ * row's title is a fixed label for its kind ("Payment", "x402 payment"),
+ * never `explain.recommendation`: that is the agent's free text, and it holds
+ * amounts, pay-to addresses, counterparty and org ids, and for an x402
+ * request a description the seller wrote.
  */
 
 /** A proposal as far as the desk needs it. */
@@ -24,8 +29,13 @@ export type DeskProposal = {
   createdBy: string;
   createdAt: string;
   expiresAt: string;
-  explain: { recommendation: string };
+  kind: ProposalKind | string;
+  approvals?: readonly { userId: string }[];
+  explain: { requiredApprovers?: number };
 };
+
+/** The signed-in person, as their membership says. */
+export type DeskViewer = { userId: string; role: UserRole };
 
 export type ZekeRecentState = 'waiting' | 'approved' | 'sent' | 'rejected' | 'expired' | 'failed' | 'draft';
 
@@ -37,6 +47,15 @@ export type ZekeDeskSnapshot = {
   firstName: string | null;
   /** Proposals in this workspace waiting for a decision, whoever made them. */
   waiting: number;
+  /**
+   * Of those, the ones this viewer could approve now: past simulation, not
+   * their own (Zeke's are exempt from maker-checker), not one they already
+   * approved, and only for a role that approves. Null when the membership
+   * could not be read.
+   */
+  forViewer: { waiting: number; soonestCloseMs: number | null } | null;
+  /** This person's active governance alerts; null when they could not be read. */
+  alerts: number | null;
   /** Of those, the ones Zeke prepared. */
   drafts: number;
   /** Milliseconds until the soonest waiting proposal's window closes. */
@@ -70,6 +89,30 @@ function isWaiting(proposal: DeskProposal, now: Date): boolean {
   return WAITING.has(proposal.status) && closesInMs(proposal, now) > 0;
 }
 
+const APPROVER_ROLES: ReadonlySet<UserRole> = new Set(['OWNER', 'FINANCE_ADMIN', 'APPROVER']);
+
+/** The same test the queue's APPROVE applies (lib/queue/approval-queue.ts canActorApprove). */
+function viewerCanApprove(proposal: DeskProposal, viewer: DeskViewer): boolean {
+  if (proposal.status !== 'PENDING_APPROVAL') return false;
+  if (!APPROVER_ROLES.has(viewer.role)) return false;
+  if (proposal.createdBy !== AGENT_ACTOR_ID && proposal.createdBy === viewer.userId) return false;
+  const approvals = proposal.approvals ?? [];
+  if (approvals.some((approval) => approval.userId === viewer.userId)) return false;
+  const required = proposal.explain.requiredApprovers ?? 1;
+  return new Set(approvals.map((approval) => approval.userId)).size < required;
+}
+
+/** A fixed label per kind. An unknown kind is "Proposal", never the raw value. */
+function titleOf(proposal: DeskProposal): string {
+  const label = kindLabel(String(proposal.kind));
+  return label === proposal.kind ? 'Proposal' : label;
+}
+
+function soonest(proposals: readonly DeskProposal[], now: Date): number | null {
+  const closes = proposals.map((proposal) => closesInMs(proposal, now)).filter(Number.isFinite);
+  return closes.length > 0 ? Math.min(...closes) : null;
+}
+
 function stateOf(proposal: DeskProposal, now: Date): ZekeRecentState {
   if (WAITING.has(proposal.status)) return closesInMs(proposal, now) > 0 ? 'waiting' : 'expired';
   if (SENT.has(proposal.status)) return 'sent';
@@ -92,14 +135,20 @@ export function buildZekeDeskSnapshot(input: {
   orgId: string | null;
   now: Date;
   displayName: string | null | undefined;
+  viewer?: DeskViewer | null;
+  alerts?: number | null;
 }): ZekeDeskSnapshot {
   const firstName = firstNameOf(input.displayName);
+  const alerts = input.alerts ?? null;
   const orgId = input.orgId?.trim() ?? '';
-  if (!orgId) return { known: false, firstName, waiting: 0, drafts: 0, soonestCloseMs: null, recent: [] };
+  if (!orgId) {
+    return { known: false, firstName, waiting: 0, forViewer: null, alerts, drafts: 0, soonestCloseMs: null, recent: [] };
+  }
 
   const mine = input.proposals.filter((proposal) => proposal.orgId === orgId);
   const waiting = mine.filter((proposal) => isWaiting(proposal, input.now));
-  const closes = waiting.map((proposal) => closesInMs(proposal, input.now)).filter(Number.isFinite);
+  const viewer = input.viewer ?? null;
+  const viewerWaiting = viewer ? waiting.filter((proposal) => viewerCanApprove(proposal, viewer)) : null;
 
   const recent = mine
     .filter((proposal) => proposal.createdBy === AGENT_ACTOR_ID)
@@ -107,15 +156,17 @@ export function buildZekeDeskSnapshot(input: {
     .slice(0, RECENT_LIMIT)
     .map((proposal) => {
       const state = stateOf(proposal, input.now);
-      return { id: proposal.id, title: proposal.explain.recommendation, state, label: STATE_LABEL[state] };
+      return { id: proposal.id, title: titleOf(proposal), state, label: STATE_LABEL[state] };
     });
 
   return {
     known: true,
     firstName,
     waiting: waiting.length,
+    forViewer: viewerWaiting ? { waiting: viewerWaiting.length, soonestCloseMs: soonest(viewerWaiting, input.now) } : null,
+    alerts,
     drafts: waiting.filter((proposal) => proposal.createdBy === AGENT_ACTOR_ID).length,
-    soonestCloseMs: closes.length > 0 ? Math.min(...closes) : null,
+    soonestCloseMs: soonest(waiting, input.now),
     recent,
   };
 }
@@ -132,10 +183,19 @@ function closesSoon(ms: number | null): string | null {
   return minutes === 1 ? '1 minute' : `${minutes} minutes`;
 }
 
+/**
+ * The limit, in the floating Zeke's first message. The fixed "cannot send"
+ * strip went with the 5.3 board, which moves the sentence into the
+ * conversation; until the intent classifier says it per request, the
+ * greeting does, so nobody can ask the panel to send money without having
+ * been told it cannot.
+ */
+export const ZEKE_LIMIT = 'I can prepare payments for approval, but I can’t approve or send them.';
+
 /** The floating Zeke's first message. Numbers only from a snapshot that was read. */
 export function zekeGreeting(snapshot: ZekeDeskSnapshot | null): string {
   const hello = snapshot?.firstName ? `Hi ${snapshot.firstName}.` : 'Hi.';
-  const ask = 'What would you like to look at?';
+  const ask = `${ZEKE_LIMIT} What would you like to look at?`;
   if (!snapshot?.known) return `${hello} ${ask}`;
   const soon = snapshot.waiting > 0 ? closesSoon(snapshot.soonestCloseMs) : null;
   const closing = soon ? `, and ${snapshot.waiting === 1 ? 'it' : 'one'} closes in ${soon}` : '';

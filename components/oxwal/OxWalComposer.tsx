@@ -52,6 +52,8 @@ type OxWalComposerProps = {
   variant?: 'bar' | 'desk' | 'reply';
   /** `desk` only: the parts of the workspace Zeke reads, shown as plain chips. */
   canSee?: string[];
+  /** The assistant's current name. An owner can rename it (lib/agent/assistant-name.ts). */
+  assistantName?: string;
 };
 
 const chipIcons = {
@@ -70,7 +72,8 @@ export default function OxWalComposer({
   chips = [],
   disabled = false,
   title,
-  placeholder = 'Ask Zeke, or attach an invoice or payout sheet',
+  assistantName = 'Zeke',
+  placeholder,
   deskTag = networkChip().label,
   compact = false,
   className,
@@ -79,6 +82,9 @@ export default function OxWalComposer({
   canSee = [],
 }: OxWalComposerProps) {
   const fieldId = useId();
+  // Only CSV and Excel payout sheets can be attached (accept below), and
+  // nothing here takes a dropped file, so no default copy promises either.
+  const fieldPlaceholder = placeholder ?? `Ask ${assistantName}, or attach a payout sheet`;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [attached, setAttached] = useState<ParsedBatch | null>(null);
   const [parsing, setParsing] = useState(false);
@@ -173,8 +179,8 @@ export default function OxWalComposer({
   const attachButton = (size: 'sm' | 'md') => (
     <button
       type="button"
-      aria-label="Attach an invoice or payout sheet (CSV or Excel)"
-      title="Attach an invoice or payout sheet"
+      aria-label="Attach a payout sheet (CSV or Excel)"
+      title="Attach a payout sheet (CSV or Excel)"
       disabled={disabled}
       onClick={() => fileInputRef.current?.click()}
       className={cn(
@@ -201,7 +207,7 @@ export default function OxWalComposer({
           )}
         >
           <label htmlFor={fieldId} className="sr-only">
-            Ask Zeke
+            Ask {assistantName}
           </label>
           {attachment}
           <textarea
@@ -217,7 +223,7 @@ export default function OxWalComposer({
               }
             }}
             disabled={disabled}
-            placeholder={hasBatch ? 'Add a note for approval (optional)' : placeholder}
+            placeholder={hasBatch ? 'Add a note for approval (optional)' : fieldPlaceholder}
             className="block w-full resize-none border-0 bg-transparent px-[18px] pb-1.5 pt-4 text-base font-medium text-[var(--ink)] outline-none placeholder:text-[var(--ink-muted)] disabled:cursor-not-allowed"
           />
           <div className="flex flex-wrap items-center justify-between gap-3 px-3 pb-3 pt-1">
@@ -226,7 +232,7 @@ export default function OxWalComposer({
               {canSee.length > 0 && (
                 <>
                   <span id={`${fieldId}-sees`} className="pl-1 text-[12px] font-medium text-[var(--ink-muted)]">
-                    Zeke can see
+                    {assistantName} can see
                   </span>
                   <ul aria-labelledby={`${fieldId}-sees`} className="flex flex-wrap gap-1.5">
                     {canSee.map((item) => (
@@ -246,7 +252,7 @@ export default function OxWalComposer({
               disabled={disabled || (!hasValue && !hasBatch)}
               className="inline-flex h-11 shrink-0 items-center gap-2 rounded-[var(--r-md)] bg-[#0c3e48] px-4 text-sm font-bold text-white transition hover:bg-[#0d6370] active:translate-y-px disabled:cursor-not-allowed disabled:opacity-40 focus-ring"
             >
-              {hasBatch ? 'Prepare batch' : 'Ask Zeke'}
+              {hasBatch ? 'Prepare batch' : `Ask ${assistantName}`}
               <ArrowRight className="h-4 w-4" aria-hidden="true" />
             </button>
           </div>
@@ -272,7 +278,7 @@ export default function OxWalComposer({
           {attachment}
           <div className="flex items-center gap-2 py-1.5 pl-4 pr-1.5">
             <label htmlFor={fieldId} className="sr-only">
-              {placeholder}
+              {fieldPlaceholder}
             </label>
             <input
               id={fieldId}
@@ -280,13 +286,13 @@ export default function OxWalComposer({
               value={value}
               onChange={(event) => onChange(event.target.value)}
               disabled={disabled}
-              placeholder={hasBatch ? 'Add a note for approval (optional)' : placeholder}
+              placeholder={hasBatch ? 'Add a note for approval (optional)' : fieldPlaceholder}
               className="min-w-0 flex-1 bg-transparent py-2 text-[15px] font-medium text-[var(--ink)] outline-none placeholder:text-[var(--ink-muted)] disabled:cursor-not-allowed"
             />
             <button
               type="button"
-              aria-label="Attach an invoice or payout sheet (CSV or Excel)"
-              title="Attach an invoice or payout sheet"
+              aria-label="Attach a payout sheet (CSV or Excel)"
+              title="Attach a payout sheet (CSV or Excel)"
               disabled={disabled}
               onClick={() => fileInputRef.current?.click()}
               className="grid h-10 w-10 shrink-0 place-items-center rounded-[var(--r-md)] text-[var(--slate)] transition hover:bg-[var(--zeke-tint)] hover:text-[var(--ink)] disabled:cursor-not-allowed disabled:opacity-45 focus-ring"
@@ -295,7 +301,7 @@ export default function OxWalComposer({
             </button>
             <button
               type="submit"
-              aria-label={hasBatch ? 'Prepare batch for approval' : 'Send to Zeke'}
+              aria-label={hasBatch ? 'Prepare batch for approval' : `Send to ${assistantName}`}
               disabled={disabled || (!hasValue && !hasBatch)}
               className="grid h-10 w-10 shrink-0 place-items-center rounded-[var(--r-md)] bg-[#0c3e48] text-white transition hover:bg-[#0d6370] disabled:cursor-not-allowed disabled:opacity-40 focus-ring"
             >
@@ -344,7 +350,7 @@ export default function OxWalComposer({
             {deskTag}
           </span>
           <span className="font-mono text-[12px] font-medium uppercase tracking-[0.1em] text-[#326273]/90">
-            Zeke prepares · you approve
+            {assistantName} prepares · you approve
           </span>
         </div>
 
@@ -386,8 +392,8 @@ export default function OxWalComposer({
         <div className={cn('flex items-center gap-2 px-2.5 py-2', compact && 'py-1.5')}>
           <button
             type="button"
-            aria-label="Attach an invoice or payout sheet (CSV or Excel)"
-            title="Attach invoice / Excel / CSV"
+            aria-label="Attach a payout sheet (CSV or Excel)"
+            title="Attach a payout sheet (CSV or Excel)"
             disabled={disabled}
             onClick={() => fileInputRef.current?.click()}
             className={cn(
@@ -403,7 +409,7 @@ export default function OxWalComposer({
             value={value}
             onChange={(event) => onChange(event.target.value)}
             disabled={disabled}
-            placeholder={hasBatch ? 'Add a note for approval (optional)' : placeholder}
+            placeholder={hasBatch ? 'Add a note for approval (optional)' : fieldPlaceholder}
             className={cn(
               'min-w-0 flex-1 bg-transparent text-left font-medium text-[var(--ink)] outline-none placeholder:text-[#326273]/90 disabled:cursor-not-allowed',
               compact ? 'text-[13px]' : 'text-sm',
@@ -424,7 +430,7 @@ export default function OxWalComposer({
 
           <button
             type="submit"
-            aria-label={hasBatch ? 'Prepare batch for approval' : 'Prepare request for Zeke'}
+            aria-label={hasBatch ? 'Prepare batch for approval' : `Prepare request for ${assistantName}`}
             disabled={disabled || (!hasValue && !hasBatch)}
             className={cn(
               'inline-flex shrink-0 items-center gap-1.5 rounded-[var(--r-md)] bg-[var(--ink)] px-3.5 font-medium text-[var(--surface)] ring-1 ring-[var(--teal)]/40 shadow-[0_4px_0_var(--slate)] transition hover:bg-[var(--slate)] active:translate-y-0.5 active:shadow-[0_2px_0_var(--slate)] disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none',

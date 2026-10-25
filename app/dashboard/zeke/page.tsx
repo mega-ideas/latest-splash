@@ -49,22 +49,23 @@ type Starter =
   | { title: string; body: string; icon: LucideIcon; prompt: string; href?: never }
   | { title: string; body: string; icon: LucideIcon; href: string; prompt?: never };
 
-const STARTERS: Starter[] = [
+/** The starter cards. The assistant can be renamed, so the name is passed in. */
+const STARTERS = (name: string): Starter[] => [
   {
     title: 'Review an invoice',
-    body: 'Zeke reads the payee, amount and due date.',
+    body: `${name} reads the payee, amount and due date.`,
     icon: FileText,
     prompt: 'Review my latest invoice',
   },
   {
     title: 'Prepare a payment',
-    body: 'Zeke drafts it. Your approver signs.',
+    body: `${name} drafts it. Your approver signs.`,
     icon: Send,
     prompt: 'I want to prepare a payment. What do you need from me?',
   },
   {
     title: 'Build a batch',
-    body: 'Drop a payout sheet. Zeke checks every row.',
+    body: `Upload a payout sheet. ${name} checks every row.`,
     icon: Layers,
     href: '/dashboard/batch',
   },
@@ -97,7 +98,6 @@ export default function OxwalDeskPage() {
   const { snapshot, state, refresh } = useZekeDesk();
   const walletUsdc = useWalletUsdc(formatUsdc);
   const firstName = snapshot?.firstName ?? null;
-  const notices = thread.filter((item) => item.kind === 'notice').length;
   const topic = thread.find((item) => item.kind === 'user');
 
   function ask(prompt: string) {
@@ -182,7 +182,7 @@ export default function OxwalDeskPage() {
 
           <div className="border-t border-[#326273]/12 bg-white/60 px-4 py-3">
             <div className="mx-auto max-w-3xl">
-              <OxWalComposer variant="reply" {...composerProps} placeholder={`Reply to ${assistantName}`} />
+              <OxWalComposer variant="reply" {...composerProps} assistantName={assistantName} placeholder={`Reply to ${assistantName}`} />
             </div>
           </div>
         </section>
@@ -210,8 +210,11 @@ export default function OxwalDeskPage() {
             </div>
             <div className="grid w-full grid-cols-3 overflow-hidden rounded-xl border border-[#326273]/14 bg-white text-center md:w-auto md:min-w-[340px]">
               <DeskStat label="Drafts" value={snapshot?.known ? snapshot.drafts : null} />
-              <DeskStat label="To approve" value={snapshot?.known ? snapshot.waiting : null} caution />
-              <DeskStat label="Alerts" value={notices} caution />
+              {/* What this person can approve, not the workspace's count: a
+                  payment they asked for is another approver's (maker-checker). */}
+              <DeskStat label="To approve" value={snapshot?.forViewer?.waiting ?? null} caution />
+              {/* Their own governance alerts, read on the server; "-" when not read. */}
+              <DeskStat label="Alerts" value={snapshot?.alerts ?? null} caution />
             </div>
           </div>
         </header>
@@ -234,12 +237,13 @@ export default function OxwalDeskPage() {
               variant="desk"
               canSee={CAN_SEE}
               {...composerProps}
-              placeholder="Ask Zeke anything, or drop an invoice or payout sheet here"
+              assistantName={assistantName}
+              placeholder={`Ask ${assistantName} anything, or attach a payout sheet`}
             />
           </div>
 
           <ul className="mt-4 grid gap-3 sm:grid-cols-2" aria-label="Start with">
-            {STARTERS.map((starter) => {
+            {STARTERS(assistantName).map((starter) => {
               const Icon = starter.icon;
               const inner = (
                 <>
@@ -269,14 +273,14 @@ export default function OxwalDeskPage() {
           </ul>
 
           <div className="mt-6">
-            <ZekeRecent snapshot={snapshot} state={state} />
+            <ZekeRecent snapshot={snapshot} state={state} assistantName={assistantName} />
           </div>
         </section>
       </div>
 
       <aside className="space-y-4" aria-label={`About ${assistantName}`}>
-        <MemWalBehaviorCard variant="zeke" />
-        <ZekeCanDo />
+        <MemWalBehaviorCard variant="zeke" assistantName={assistantName} />
+        <ZekeCanDo assistantName={assistantName} />
         <ZekeApprovals snapshot={snapshot} />
         <MemWalStores />
         <ZekeQuickLinks />
