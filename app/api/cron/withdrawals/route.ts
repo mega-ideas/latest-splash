@@ -18,7 +18,11 @@
  *   6. a failed payout whose USDC the partner has not yet agreed to send
  *      back is asked again, every run, until it accepts; after five asks ops
  *      are alerted once (an ALERT log line and a `return_request_stuck`
- *      event).
+ *      event);
+ *   7. a cancelled payout whose instruction the partner has not yet agreed
+ *      to reverse is asked again, every run, until it accepts; after five
+ *      asks ops are alerted once (`reversal_request_stuck`). A reversal
+ *      still owed (`reversalsPending`) is reported like a return still owed.
  *
  * The API's reads never call the partner; this does, once per row per run.
  * Run it every five minutes, after /api/cron/wallet-signing. A 502 (a row

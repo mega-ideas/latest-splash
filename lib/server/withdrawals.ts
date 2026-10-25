@@ -500,14 +500,14 @@ async function cancelInFlightFor(deps: CloseDeps, destinationId: string, actor: 
         if (!request || !['cancelled', 'expired', 'failed'].includes(request.status)) continue;
       }
     }
-    if (row.partnerRef && deps.partner) {
-      try {
-        await reverseInstruction(deps, deps.partner(row.partner as PayoutPartnerId), { intentId: row.intentId, partnerRef: row.partnerRef, returnAddress: row.walletAddress }, reason);
-      } catch {
-        /* the route is off: no deposit was made, so nothing is owed */
-      }
-    }
-    if (await cancel(deps, row.id, actor, reason, ['preparing', 'awaiting_signatures'])) cancelled += 1;
+    // Cancelled first, then reversed: an instruction is reversed only for a
+    // payout that can no longer move money, and a reversal the partner does
+    // not take is asked again by the sweep (reversalsOwedForStaff).
+    const done = await cancel(deps, row.id, actor, reason, ['preparing', 'awaiting_signatures']);
+    if (!done) continue;
+    cancelled += 1;
+    const partnerOf = deps.partner;
+    if (done.partnerRef && partnerOf) await reverseCancelled(deps, () => partnerOf(done.partner as PayoutPartnerId), done, reason);
   }
   return cancelled;
 }
@@ -1080,14 +1080,20 @@ export async function openBankPayout(
     },
   });
   if (!opened.ok) {
-    await reverseInstruction(deps, r.adapter, { intentId, partnerRef, returnAddress: r.wallet.address }, 'not_sent');
-    await cancel(deps, id, 'system', opened.code, ['preparing']);
+    const done = await cancel(deps, id, 'system', opened.code, ['preparing']);
+    if (done) await reverseCancelled(deps, r.adapter, done, 'not_sent');
+    else await cancelledUnder(deps, r.adapter, { id, intentId, partnerRef, returnAddress: r.wallet.address }, noun);
     return refuse(opened.status, opened.code, opened.error);
   }
   const moved = await store.moveWithdrawal(deps.db, deps.orgId, id, ['preparing'], { status: 'awaiting_signatures', signingRequestId: opened.request.id, updatedAt: now });
   if (!moved) {
     // Cancelled while the owners' request was being opened: the request is closed before anyone signs it.
-    await closeSigningRequest(deps.db, { orgId: deps.orgId, id: opened.request.id, status: 'cancelled', from: ['collecting'], now: deps.now() });
+    const closed = await closeSigningRequest(deps.db, { orgId: deps.orgId, id: opened.request.id, status: 'cancelled', from: ['collecting'], now: deps.now() });
+    if (!closed) {
+      // Nobody can sign it meanwhile (beforeSign refuses a withdrawal not awaiting signatures); it lapses, and ops see why.
+      console.error(`[withdrawals] could not close signing request ${opened.request.id} of cancelled payout ${id}; it is refused at signing and lapses`);
+      await store.recordWithdrawalEvent(deps.db, { orgId: deps.orgId, subject: 'withdrawal', subjectId: id, actor: 'system', action: 'request_close_failed', detail: { signingRequestId: opened.request.id }, at: deps.now() });
+    }
     return cancelledUnder(deps, r.adapter, { id, intentId, partnerRef, returnAddress: r.wallet.address }, noun);
   }
   await store.recordWithdrawalEvent(deps.db, { orgId: deps.orgId, subject: 'withdrawal', subjectId: id, actor: userId, action: 'awaiting_signatures', detail: { signingRequestId: opened.request.id }, at: now });
@@ -1096,8 +1102,11 @@ export async function openBankPayout(
 
 /** A bank payout cancelled while it was being opened: its instruction is reversed and the caller told. */
 async function cancelledUnder(deps: WithdrawalDeps, adapter: PayoutPartner, w: { id: string; intentId: string; partnerRef: string; returnAddress: string }, noun: string): Promise<Refusal> {
-  const accepted = await reverseInstruction(deps, adapter, { intentId: w.intentId, partnerRef: w.partnerRef, returnAddress: w.returnAddress }, 'cancelled_while_opening');
-  await store.recordWithdrawalEvent(deps.db, { orgId: deps.orgId, subject: 'withdrawal', subjectId: w.id, actor: 'system', action: 'instruction_reversed', detail: { reason: 'cancelled_while_opening', accepted }, at: deps.now() });
+  const row = await store.getWithdrawalRow(deps.db, deps.orgId, w.id);
+  // The cancel that landed may have reversed it already (it saw the reference): once taken, not asked again.
+  if (row && row.status === 'cancelled' && !row.returnAcceptedAt) {
+    await reverseCancelled(deps, adapter, { ...row, partnerRef: row.partnerRef ?? w.partnerRef }, 'cancelled_while_opening');
+  }
   return refuse(409, 'withdrawal_cancelled', `This ${noun} was cancelled while it was being set up: its bank account was removed meanwhile. Nothing was sent.`);
 }
 
@@ -1144,6 +1153,41 @@ async function askForReturn(
     await store.recordWithdrawalEvent(deps.db, { orgId: deps.orgId, subject: 'withdrawal', subjectId: row.id, actor: 'system', action: 'return_request_stuck', detail: { asks }, at });
     // An alert for ops: ids only, nothing about the bank account.
     console.error(`[withdrawals] ALERT return still owed: payout ${row.id} (intent ${row.intentId}) failed and the partner has not accepted the return after ${asks} asks; the sweep keeps asking`);
+  }
+  return accepted;
+}
+
+/**
+ * Reverse a cancelled payout's instruction and keep the answer on the row:
+ * until the partner accepts, the sweep asks again on every run
+ * (reversalsOwedForStaff), and after RETURN_ASKS_BEFORE_ALERT asks ops are
+ * alerted once. Until then the instruction (keyed by intent id and expected
+ * amount) is live at the partner for a bank account the owners stopped using.
+ * A route switched off counts as not accepted: asked again next run.
+ */
+async function reverseCancelled(
+  deps: { db: DrizzleDb; now: () => Date; orgId: string },
+  adapter: PayoutPartner | (() => PayoutPartner),
+  row: { id: string; intentId: string; partnerRef: string | null; walletAddress: string },
+  reason: string,
+  more: Record<string, unknown> = {},
+): Promise<boolean> {
+  if (!row.partnerRef) return false;
+  const at = deps.now();
+  let accepted = false;
+  try {
+    const a = typeof adapter === 'function' ? adapter() : adapter;
+    accepted = await reverseInstruction(deps, a, { intentId: row.intentId, partnerRef: row.partnerRef, returnAddress: row.walletAddress }, reason);
+  } catch {
+    accepted = false;
+  }
+  const after = await store.recordReversalAsk(deps.db, deps.orgId, row.id, accepted, at);
+  const asks = after?.returnAsks ?? 0;
+  await store.recordWithdrawalEvent(deps.db, { orgId: deps.orgId, subject: 'withdrawal', subjectId: row.id, actor: 'system', action: 'instruction_reversed', detail: { reason, accepted, ask: asks, ...more }, at });
+  if (!accepted && asks === RETURN_ASKS_BEFORE_ALERT) {
+    await store.recordWithdrawalEvent(deps.db, { orgId: deps.orgId, subject: 'withdrawal', subjectId: row.id, actor: 'system', action: 'reversal_request_stuck', detail: { asks }, at });
+    // An alert for ops: ids only, nothing about the bank account.
+    console.error(`[withdrawals] ALERT reversal still owed: payout ${row.id} (intent ${row.intentId}) was cancelled and the partner has not accepted reversing its instruction after ${asks} asks; the sweep keeps asking`);
   }
   return accepted;
 }
@@ -1266,14 +1310,11 @@ async function settleRow(deps: SettlementDeps, row: store.WithdrawalRow): Promis
     if (request?.status === 'executed' && request.executedDigest) {
       current = await markSent(scoped, current, request.executedDigest);
     } else if (request && (request.status === 'expired' || request.status === 'cancelled' || request.status === 'failed')) {
-      if (current.partnerRef) {
-        try {
-          await reverseInstruction(deps, deps.partner(current.partner as PayoutPartnerId), { intentId: current.intentId, partnerRef: current.partnerRef, returnAddress: current.walletAddress }, 'not_sent');
-        } catch {
-          /* the route is off: no deposit was made, so nothing is owed */
-        }
-      }
-      return (await cancel(scoped, current.id, 'system', `signing_${request.status}`, ['awaiting_signatures'])) ? 'cancelled' : 'unchanged';
+      const done = await cancel(scoped, current.id, 'system', `signing_${request.status}`, ['awaiting_signatures']);
+      if (!done) return 'unchanged';
+      // Reversed once cancelled; a reversal not taken is asked again (reversalsOwedForStaff).
+      if (done.partnerRef) await reverseCancelled(scoped, () => deps.partner(done.partner as PayoutPartnerId), done, 'not_sent');
+      return 'cancelled';
     } else {
       return 'unchanged';
     }
@@ -1321,10 +1362,13 @@ export type SweepResult = {
   /** Failed payouts whose return was asked for again this run, and those still owed after it. */
   returnsAsked: number;
   returnsPending: number;
+  /** Cancelled payouts whose instruction reversal was asked for again this run, and those the partner has still not taken. */
+  reversalsAsked: number;
+  reversalsPending: number;
 };
 
 export async function reconcileWithdrawals(deps: SettlementDeps): Promise<SweepResult> {
-  const out: SweepResult = { sent: 0, cancelled: 0, posted: 0, advanced: 0, testDeposits: 0, errors: 0, pollErrors: 0, returnsAsked: 0, returnsPending: 0 };
+  const out: SweepResult = { sent: 0, cancelled: 0, posted: 0, advanced: 0, testDeposits: 0, errors: 0, pollErrors: 0, returnsAsked: 0, returnsPending: 0, reversalsAsked: 0, reversalsPending: 0 };
   // Failed payouts whose USDC is still at the partner: ask again until it accepts.
   // (Before the polls, so a payout found failed this run is asked once, by the poll.)
   for (const row of await store.returnsOwedForStaff(deps.db)) {
@@ -1336,6 +1380,12 @@ export async function reconcileWithdrawals(deps: SettlementDeps): Promise<SweepR
     }
     out.returnsAsked += 1;
     if (!accepted) out.returnsPending += 1;
+  }
+  // Cancelled payouts whose instruction is still live at the partner: ask again until it reverses it.
+  for (const row of await store.reversalsOwedForStaff(deps.db)) {
+    const accepted = await reverseCancelled({ ...deps, orgId: row.orgId }, () => deps.partner(row.partner as PayoutPartnerId), row, 'cancelled', { via: 'sweep' });
+    out.reversalsAsked += 1;
+    if (!accepted) out.reversalsPending += 1;
   }
   for (const row of await store.withdrawalsToReconcileForStaff(deps.db)) {
     try {
@@ -1630,68 +1680,114 @@ export async function handlePayoutWebhook(input: WebhookInput): Promise<WebhookA
     if (returnCheckpoint <= depositCheckpoint) {
       return refuse("that transfer came before this payout's deposit", 'that transfer came before the deposit', 'return_refused', { returnCheckpoint: returnCheckpoint.toString(), depositCheckpoint: depositCheckpoint.toString() });
     }
-    // Every return digest, short or whole, counts for one payout only.
-    const claim = await store.claimReturn(input.db, { digest: returnDigest, withdrawalId: row.id, orgId: row.orgId, creditedMinor: credited, checkpoint: returnCheckpoint, eventId: event.eventId, at });
-    if (!claim.claimed) {
-      if (claim.heldBy === row.id) return { status: 200, body: { duplicate: true } };
+    // Every return digest, short or whole, counts for one payout only, and
+    // the returns of one payout are counted one at a time: the claim, the sum
+    // and the move happen in one transaction holding the withdrawal row's
+    // lock, against the row as it stands then. Two returns that land at once
+    // cannot both read a sum that counts the other and then give a claim
+    // back; a short write cannot land over a close.
+    type Counted =
+      | { kind: 'not_movable'; status: string }
+      | { kind: 'duplicate' }
+      | { kind: 'held_elsewhere' }
+      | { kind: 'over'; total: bigint }
+      | { kind: 'short'; row: store.WithdrawalRow; total: bigint; wasFailed: boolean }
+      | { kind: 'closed'; row: store.WithdrawalRow; total: bigint };
+    let counted: Counted;
+    try {
+      counted = await input.db.transaction(async (tx): Promise<Counted> => {
+        const current = await store.lockWithdrawal(tx, row.orgId, row.id);
+        const now = current?.status as WithdrawalStatus | undefined;
+        if (!current || !now || (now !== 'failed' && !canAdvanceWithdrawal(now, 'returned'))) return { kind: 'not_movable', status: now ?? 'gone' };
+        const claim = await store.claimReturn(tx, { digest: returnDigest, withdrawalId: row.id, orgId: row.orgId, creditedMinor: credited, checkpoint: returnCheckpoint, eventId: event.eventId, at });
+        if (!claim.claimed) return claim.heldBy === row.id ? { kind: 'duplicate' } : { kind: 'held_elsewhere' };
+        const total = await store.returnedTotal(tx, row.orgId, row.id);
+        if (total > current.amountMinor) {
+          // Nothing above what the payout sent is taken for it: an over-return is
+          // some other payout's money, or the partner's mistake, and ops look at
+          // it. The claim is given back so the payout it belongs to can take it.
+          await store.releaseReturn(tx, row.orgId, row.id, returnDigest);
+          return { kind: 'over', total };
+        }
+        if (total < current.amountMinor) {
+          // Short: recorded, and left failed for ops; it closes as returned only when the returns add up.
+          // Straight back with no failure first: it did not pay out, so it is failed (forward only).
+          const shortSet = { status: 'failed' as const, returnedMinor: total, failure: `short return: ${total} of ${current.amountMinor} USDC minor units came back`, updatedAt: at };
+          const moved = await store.moveWithdrawal(tx, row.orgId, row.id, [now], shortSet);
+          if (!moved) throw new Error('a locked withdrawal did not move');
+          await store.recordWithdrawalEvent(tx, { orgId: row.orgId, subject: 'withdrawal', subjectId: row.id, actor: `partner:${adapter.id}`, action: 'return_short', detail: { eventId: event.eventId, returnDigest, creditedMinor: credited.toString(), returnedMinor: total.toString(), amountMinor: current.amountMinor.toString() }, at });
+          return { kind: 'short', row: moved, total, wasFailed: now === 'failed' };
+        }
+        const moved = await store.moveWithdrawal(tx, row.orgId, row.id, [now], { status: 'returned', returnDigest, returnedMinor: total, updatedAt: at });
+        if (!moved) throw new Error('a locked withdrawal did not move');
+        await store.recordWithdrawalEvent(tx, { orgId: row.orgId, subject: 'withdrawal', subjectId: row.id, actor: `partner:${adapter.id}`, action: 'returned', detail: { eventId: event.eventId, returnDigest }, at });
+        return { kind: 'closed', row: moved, total };
+      });
+    } catch (error) {
+      // Nothing in the transaction is kept; the event is given back so the retry counts.
       await store.releasePartnerEvent(input.db, adapter.id, event.eventId);
-      return refuse('that return digest is already counted for another payout', 'that return was already counted');
+      // The unique index on return_digest: a payout closed before every return was claimed (0043) holds it.
+      if (isUniqueViolation(error)) return { status: 200, body: { ignored: 'that return was already counted' } };
+      throw error;
     }
-    const total = await store.returnedTotal(input.db, row.orgId, row.id);
-    if (total > row.amountMinor) {
-      // Nothing above what the payout sent is taken for it: an over-return is
-      // some other payout's money, or the partner's mistake, and ops look at
-      // it. The claim is given back so the payout it belongs to can take it.
-      await store.releaseReturn(input.db, row.orgId, row.id, returnDigest);
-      return refuse('more came back than this payout sent', 'more came back than this payout sent; ops will look at it', 'return_over', { creditedMinor: credited.toString(), alreadyReturnedMinor: (total - credited).toString(), amountMinor: row.amountMinor.toString() });
-    }
-    if (total < row.amountMinor) {
-      // Short: recorded, and left failed for ops; it closes as returned only when the returns add up.
-      const shortSet = { returnedMinor: total, failure: `short return: ${total} of ${row.amountMinor} USDC minor units came back`, updatedAt: at };
-      // Straight back with no failure first: it did not pay out, so it is failed (forward only).
-      const movedToFailed = from === 'failed' ? null : await store.moveWithdrawal(input.db, row.orgId, row.id, [from], { ...shortSet, status: 'failed' });
-      if (from !== 'failed' && !movedToFailed) {
-        // Another event moved the payout while this one read the chain: nothing is kept, and the retry counts.
-        await store.releaseReturn(input.db, row.orgId, row.id, returnDigest);
+    switch (counted.kind) {
+      case 'not_movable':
+        return { status: 200, body: { ignored: `a withdrawal ${counted.status.replace(/_/g, ' ')} does not move to returned` } };
+      case 'duplicate':
+        return { status: 200, body: { duplicate: true } };
+      case 'held_elsewhere':
         await store.releasePartnerEvent(input.db, adapter.id, event.eventId);
-        return { status: 503, body: { error: 'the payout moved while this return was read; retry' } };
-      }
-      if (from === 'failed') await store.patchWithdrawal(input.db, row.orgId, row.id, shortSet);
-      await store.recordWithdrawalEvent(input.db, { orgId: row.orgId, subject: 'withdrawal', subjectId: row.id, actor: `partner:${adapter.id}`, action: 'return_short', detail: { eventId: event.eventId, returnDigest, creditedMinor: credited.toString(), returnedMinor: total.toString(), amountMinor: row.amountMinor.toString() }, at });
-      if (movedToFailed && row.partnerRef) {
-        // The failed path asks for the USDC back; so does this one, for the rest (asked again until accepted).
-        await askForReturn({ db: input.db, now: () => at, orgId: row.orgId }, adapter, movedToFailed, 'short_return', { outstandingMinor: (row.amountMinor - total).toString() });
-      }
-      return { status: 200, body: { ok: true, short: true } };
+        return refuse('that return digest is already counted for another payout', 'that return was already counted');
+      case 'over':
+        return refuse('more came back than this payout sent', 'more came back than this payout sent; ops will look at it', 'return_over', { creditedMinor: credited.toString(), alreadyReturnedMinor: (counted.total - credited).toString(), amountMinor: row.amountMinor.toString() });
+      case 'short':
+        if (!counted.wasFailed && counted.row.partnerRef) {
+          // The failed path asks for the USDC back; so does this one, for the rest (asked again until accepted).
+          await askForReturn({ db: input.db, now: () => at, orgId: row.orgId }, adapter, counted.row, 'short_return', { outstandingMinor: (counted.row.amountMinor - counted.total).toString() });
+        }
+        return { status: 200, body: { ok: true, short: true } };
+      case 'closed':
+        return { status: 200, body: { ok: true } };
     }
-    set.returnDigest = returnDigest;
-    set.returnedMinor = total;
   }
-  let moved: store.WithdrawalRow | null;
-  try {
-    moved = await store.moveWithdrawal(input.db, row.orgId, row.id, [from], set);
-  } catch (error) {
-    // The unique index on return_digest: another withdrawal took this return meanwhile.
-    if (set.returnDigest) {
-      await store.releaseReturn(input.db, row.orgId, row.id, set.returnDigest);
-      await store.releasePartnerEvent(input.db, adapter.id, event.eventId);
-      return { status: 200, body: { ignored: 'that return was already counted' } };
+  // Another event may move the payout after this one read it: the move is
+  // tried again against the row as it then stands (statuses only go
+  // forward), so a lost race needs no retry from the partner. A status that
+  // no longer moves anything is ignored, as a retry would be.
+  let current = row;
+  let moved: store.WithdrawalRow | null = null;
+  for (let attempt = 0; attempt < 3 && !moved; attempt += 1) {
+    moved = await store.moveWithdrawal(input.db, row.orgId, row.id, [current.status as WithdrawalStatus], set);
+    if (moved) break;
+    const reread = await store.getWithdrawalRow(input.db, row.orgId, row.id);
+    if (!reread) return { status: 200, body: { ignored: 'no such payout' } };
+    current = reread;
+    const now = current.status as WithdrawalStatus;
+    if (now === 'paid_out' && to === 'paid_out' && set.bankRef) {
+      // Paid out meanwhile (by a poll) without the bank's reference: added once, never replaced.
+      const patched = await store.patchBankRefIfMissing(input.db, row.orgId, row.id, set.bankRef, at);
+      if (patched) await store.recordWithdrawalEvent(input.db, { orgId: row.orgId, subject: 'withdrawal', subjectId: row.id, actor: `partner:${adapter.id}`, action: 'bank_ref_added', detail: { eventId: event.eventId, bankRef: set.bankRef }, at });
+      return { status: 200, body: { ok: true } };
     }
-    throw error;
+    if (!canAdvanceWithdrawal(now, to)) return { status: 200, body: { ignored: `a withdrawal ${now.replace(/_/g, ' ')} does not move to ${to.replace(/_/g, ' ')}` } };
   }
   if (!moved) {
-    // Another event moved the payout after this one read it. Nothing is kept
-    // (neither the event nor a return claim), so the partner's retry is read
-    // against the new status: a return after a failure still closes it, and
-    // a status that no longer moves anything is ignored then.
-    if (set.returnDigest) await store.releaseReturn(input.db, row.orgId, row.id, set.returnDigest);
+    // Moved under it three times running: nothing is kept, and the partner's retry counts.
     await store.releasePartnerEvent(input.db, adapter.id, event.eventId);
     return { status: 503, body: { error: 'the payout moved while this event was read; retry' } };
   }
-  await store.recordWithdrawalEvent(input.db, { orgId: row.orgId, subject: 'withdrawal', subjectId: row.id, actor: `partner:${adapter.id}`, action: to, detail: { eventId: event.eventId, ...(set.bankRef ? { bankRef: set.bankRef } : {}), ...(set.returnDigest ? { returnDigest: set.returnDigest } : {}) }, at });
+  await store.recordWithdrawalEvent(input.db, { orgId: row.orgId, subject: 'withdrawal', subjectId: row.id, actor: `partner:${adapter.id}`, action: to, detail: { eventId: event.eventId, ...(set.bankRef ? { bankRef: set.bankRef } : {}) }, at });
   if (to === 'failed' && row.partnerRef) {
     // The USDC reached the partner and the bank payout failed: ask for it back, to the business wallet (asked again until accepted).
     await askForReturn({ db: input.db, now: () => at, orgId: row.orgId }, adapter, moved, 'payout_failed');
   }
   return { status: 200, body: { ok: true } };
+}
+
+/** A Postgres unique violation (23505), however the driver wraps it. */
+function isUniqueViolation(error: unknown): boolean {
+  for (let e: unknown = error, depth = 0; e && depth < 4; e = (e as { cause?: unknown }).cause, depth += 1) {
+    if ((e as { code?: unknown }).code === '23505') return true;
+  }
+  return false;
 }

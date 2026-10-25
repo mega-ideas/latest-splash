@@ -178,7 +178,21 @@ test deposit to it would be lost.
   being set up (the partner being instructed, or the owners' request being
   opened) answers `withdrawal_cancelled`: the instruction the partner took
   is reversed and the request, if one was opened, is closed before anyone
-  signs it.
+  signs it (a close that fails is logged and kept in the trail as
+  `request_close_failed`; the request is refused at signing and lapses).
+- A withdrawal is cancelled first and its instruction reversed after, so
+  only a payout that can no longer move money is reversed. Each reversal
+  is kept on the row (`return_asks`, `return_accepted_at`, the same columns
+  as a return ask; only a cancelled row is written). Until the partner
+  accepts, the instruction, keyed by intent id and expected amount, is
+  still live at the partner for a bank account the owners stopped using,
+  so the sweep asks again on every run (`reversalsOwedForStaff`,
+  `reversalsAsked` and `reversalsPending` in its result). After
+  `RETURN_ASKS_BEFORE_ALERT` asks ops are alerted once
+  (`reversal_request_stuck`, ids only). An instruction already reversed is
+  not reversed again by a second path that saw it. The partner contracts
+  should say a deposit is matched only by intent id and the posted digest,
+  never by address and amount.
 - When it executes, the withdrawal is `sent`. The executed transaction is
   read, and the digest is posted to the partner only when its
   `IntentCreated` event (under the original package id) names the
@@ -230,11 +244,23 @@ lib/payouts/partner.ts).
     would go backwards is ignored.
   - An event before the deposit is recorded answers 503, and the retry
     counts.
-  - An event that loses a race (another event moved the payout after this
-    one read it, for example a return still being read from the chain when
-    the failure lands) answers 503 and keeps nothing: neither its event id
-    nor a claim on a return digest. The retry is read against the new
-    status, so a return after a failure still closes the payout.
+  - The returns of one payout are counted one at a time: the claim on the
+    digest, the sum and the move run in one database transaction holding
+    the withdrawal row's lock (`SELECT ... FOR UPDATE`), against the status
+    the row has then. Two returns that land at once (400 and 600 of 1,000)
+    close the payout once, both digests stay claimed by it, and neither can
+    close another payout; a short write cannot land over a close. A return
+    that lands while a failure is recorded is counted against the failed
+    payout, so it still closes it.
+  - Any other event that loses a race (another event moved the payout after
+    this one read it) is tried again against the row as it then stands
+    (statuses only go forward); a status that no longer moves anything is
+    ignored, as its retry would be. Only after three lost races in a row
+    does it answer 503 and keep nothing.
+  - The partner contracts should say every non-2xx delivery is retried on
+    its own: a duplicate delivery answered 200 while the first is still in
+    flight cannot stand in for a 503 the first one later gets (a chain read
+    not ready yet, for example).
   - A failure asks the partner to return the USDC to the business wallet.
   - A return counts only when the chain shows the transaction sent by the
     deposit address, it is not the withdrawal's own digest, and it puts

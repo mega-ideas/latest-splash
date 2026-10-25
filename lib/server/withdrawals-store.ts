@@ -241,6 +241,21 @@ export async function patchWithdrawal(db: DrizzleDb, orgId: string, id: string, 
   return row ?? null;
 }
 
+/**
+ * Inside a transaction: the withdrawal row, locked (SELECT ... FOR UPDATE)
+ * until the transaction ends, so every return for one payout is counted one
+ * at a time against the row as it then stands.
+ */
+export async function lockWithdrawal(tx: DrizzleDb, orgId: string, id: string): Promise<WithdrawalRow | null> {
+  const [row] = await tx
+    .select()
+    .from(withdrawals)
+    .where(and(eq(withdrawals.orgId, orgId), eq(withdrawals.id, id)))
+    .limit(1)
+    .for('update');
+  return row ?? null;
+}
+
 /** For a partner webhook: the withdrawal its intent id names, with its org. */
 export async function withdrawalForWebhook(db: DrizzleDb, partner: string, intentId: string): Promise<WithdrawalRow | null> {
   const [row] = await db.select().from(withdrawals).where(and(eq(withdrawals.partner, partner), eq(withdrawals.intentId, intentId))).limit(1);
@@ -308,6 +323,32 @@ export async function returnsOwedForStaff(db: DrizzleDb): Promise<WithdrawalRow[
     .select()
     .from(withdrawals)
     .where(sql`${withdrawals.status} = 'failed' and ${withdrawals.returnAcceptedAt} is null and ${withdrawals.partnerRef} is not null`);
+}
+
+/**
+ * Cancelled payouts (every org) whose instruction is still live at the
+ * partner: it took an instruction (a partner reference) and has not yet
+ * agreed to reverse it. The sweep asks again.
+ */
+export async function reversalsOwedForStaff(db: DrizzleDb): Promise<WithdrawalRow[]> {
+  return db
+    .select()
+    .from(withdrawals)
+    .where(sql`${withdrawals.status} = 'cancelled' and ${withdrawals.returnAcceptedAt} is null and ${withdrawals.partnerRef} is not null`);
+}
+
+/**
+ * One ask to reverse a cancelled payout's instruction, counted on the same
+ * columns as a return ask; only a cancelled row is touched, so an
+ * acceptance is never kept on a payout that went on to move money.
+ */
+export async function recordReversalAsk(db: DrizzleDb, orgId: string, id: string, accepted: boolean, at: Date): Promise<WithdrawalRow | null> {
+  const [row] = await db
+    .update(withdrawals)
+    .set({ returnAsks: sql`${withdrawals.returnAsks} + 1`, returnAskedAt: at, ...(accepted ? { returnAcceptedAt: at } : {}), updatedAt: at })
+    .where(and(eq(withdrawals.orgId, orgId), eq(withdrawals.id, id), eq(withdrawals.status, 'cancelled')))
+    .returning();
+  return row ?? null;
 }
 
 /** The bank's reference on a payout already paid out without one; a kept reference is never replaced. */
