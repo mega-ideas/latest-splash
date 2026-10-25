@@ -286,7 +286,8 @@ export async function returnedTotal(db: DrizzleDb, orgId: string, withdrawalId: 
 
 /**
  * For the sweep, across every org: withdrawals waiting on their owners'
- * request, and withdrawals sent whose digest is not posted and not held.
+ * request, and withdrawals sent and not held, whose digest is still to be
+ * posted or whose partner has not reported a final status yet.
  */
 export async function withdrawalsToReconcileForStaff(db: DrizzleDb): Promise<WithdrawalRow[]> {
   return db
@@ -294,7 +295,7 @@ export async function withdrawalsToReconcileForStaff(db: DrizzleDb): Promise<Wit
     .from(withdrawals)
     .where(
       sql`(${withdrawals.status} = 'awaiting_signatures' and ${withdrawals.signingRequestId} is not null)
-        or (${withdrawals.status} in ('sent', 'partner_received') and ${withdrawals.suiDigest} is not null and ${withdrawals.settlementPostedAt} is null and ${withdrawals.settlementHold} is null)`,
+        or (${withdrawals.status} in ('sent', 'partner_received') and ${withdrawals.suiDigest} is not null and ${withdrawals.settlementHold} is null)`,
     );
 }
 

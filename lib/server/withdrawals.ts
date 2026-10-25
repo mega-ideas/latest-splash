@@ -55,6 +55,7 @@ import {
   PayoutPartnerUnavailable,
   WebhookRejected,
   type PartnerFeeLine,
+  type PartnerPayoutStatus,
   type PayoutEvent,
   type PayoutPartner,
   type PayoutPartnerId,
@@ -169,7 +170,7 @@ export async function splashAddressSet(deps: Pick<WithdrawalDeps, 'splashAddress
 }
 
 export function unavailable(error: unknown): Refusal | null {
-  if (error instanceof PayoutPartnerUnavailable) return refuse(error.code === 'bad_instruction' ? 409 : error.status, error.code, error.message);
+  if (error instanceof PayoutPartnerUnavailable) return refuse(error.code === 'bad_instruction' || error.code === 'instruction_conflict' ? 409 : error.status, error.code, error.message);
   return null;
 }
 
@@ -1155,6 +1156,43 @@ async function postSettlement(deps: SettlementDeps & { orgId: string }, row: sto
   return patched ?? confirmed;
 }
 
+/**
+ * Ask the partner for a payout's status (the interface's `status` verb) when
+ * the money has gone and the digest is posted but no final webhook came: a
+ * lost webhook must not leave a payout sent forever, nor a failure without
+ * its return asked for. The answer moves the payout forward only, by the
+ * same rules as a webhook, keyed by this row's own intent id and partner
+ * reference. A polled `returned` is not believed: a return counts only from
+ * a digest the chain shows, which only the webhook names. A failed payout is
+ * not polled (it waits for its return), nor a final one.
+ */
+async function pollPartnerStatus(deps: SettlementDeps & { orgId: string }, row: store.WithdrawalRow): Promise<'advanced' | 'unchanged' | 'error'> {
+  if ((row.status !== 'sent' && row.status !== 'partner_received') || !row.partnerRef || !row.settlementPostedAt || row.settlementHold) return 'unchanged';
+  const adapter = deps.partner(row.partner as PayoutPartnerId);
+  let answer: PartnerPayoutStatus;
+  try {
+    answer = (await adapter.status({ intentId: row.intentId, partnerRef: row.partnerRef, now: deps.now() })).status;
+  } catch {
+    return 'error'; // Asked again on the next run; nothing is guessed.
+  }
+  if (answer === 'instructed' || answer === 'returned') return 'unchanged';
+  const to = PARTNER_TO_WITHDRAWAL[answer];
+  const from = row.status as WithdrawalStatus;
+  if (!to || !canAdvanceWithdrawal(from, to)) return 'unchanged';
+  const now = deps.now();
+  const set: Partial<store.WithdrawalInsert> & { status: WithdrawalStatus; updatedAt: Date } = { status: to, updatedAt: now };
+  if (to === 'failed') set.failure = 'the partner reports it could not pay it out';
+  const moved = await store.moveWithdrawal(deps.db, deps.orgId, row.id, [from], set);
+  if (!moved) return 'unchanged'; // A webhook moved it meanwhile.
+  await store.recordWithdrawalEvent(deps.db, { orgId: deps.orgId, subject: 'withdrawal', subjectId: row.id, actor: `partner:${adapter.id}`, action: to, detail: { via: 'status' }, at: now });
+  if (to === 'failed') {
+    // As for a failure webhook: ask for the USDC back, to the business wallet.
+    const accepted = await reverseInstruction(deps, adapter, { intentId: row.intentId, partnerRef: row.partnerRef, returnAddress: row.walletAddress }, 'payout_failed');
+    await store.recordWithdrawalEvent(deps.db, { orgId: deps.orgId, subject: 'withdrawal', subjectId: row.id, actor: 'system', action: 'return_requested', detail: { accepted, returnAddress: row.walletAddress }, at: now });
+  }
+  return 'advanced';
+}
+
 /** One withdrawal against its owners' request and the partner. Runs within the row's own org. */
 async function settleRow(deps: SettlementDeps, row: store.WithdrawalRow): Promise<'sent' | 'cancelled' | 'posted' | 'unchanged'> {
   const scoped = { ...deps, orgId: row.orgId };
@@ -1206,12 +1244,17 @@ async function refreshDepositAddressIn(db: DrizzleDb, now: () => Date, row: stor
  * posted; a test deposit whose request closed is recorded or freed. Reads of
  * the API never call the partner; this does, once per row per run.
  */
-export async function reconcileWithdrawals(deps: SettlementDeps): Promise<{ sent: number; cancelled: number; posted: number; testDeposits: number; errors: number }> {
-  const out = { sent: 0, cancelled: 0, posted: 0, testDeposits: 0, errors: 0 };
+export async function reconcileWithdrawals(deps: SettlementDeps): Promise<{ sent: number; cancelled: number; posted: number; advanced: number; testDeposits: number; errors: number }> {
+  const out = { sent: 0, cancelled: 0, posted: 0, advanced: 0, testDeposits: 0, errors: 0 };
   for (const row of await store.withdrawalsToReconcileForStaff(deps.db)) {
     try {
       const r = await settleRow(deps, row);
       if (r !== 'unchanged') out[r] += 1;
+      // Then, once the digest is posted, the partner's own view of it.
+      const current = (await store.getWithdrawalRow(deps.db, row.orgId, row.id)) ?? row;
+      const polled = await pollPartnerStatus({ ...deps, orgId: row.orgId }, current);
+      if (polled === 'advanced') out.advanced += 1;
+      if (polled === 'error') out.errors += 1;
     } catch {
       out.errors += 1;
     }

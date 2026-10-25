@@ -57,6 +57,7 @@ import {
   type PayoutPartner,
   type PayoutQuote,
 } from './partner.ts';
+import { placeSandboxOrder, sandboxOrderStatus } from './sandbox-orders.ts';
 
 export const CCTP_WALLET_CREDENTIALS = ['CCTP_IRIS_API_URL', 'CCTP_BRIDGE_ADAPTER_TYPE'] as const;
 
@@ -141,13 +142,13 @@ function sandboxAdapter(env: NodeJS.ProcessEnv): PayoutPartner {
     },
     async createPayout(input) {
       checkCrossChainInstruction(input);
-      return { partnerRef: `sb_cctp_${createHmac('sha256', SANDBOX_KEY).update(input.intentId).digest('hex').slice(0, 24)}`, sandbox: true };
+      return placeSandboxOrder('cctp_wallet', 'cctp', input, env);
     },
     async postSettlement() {
       // The sandbox polls no attestation.
     },
-    async status() {
-      return { status: 'instructed', sandbox: true };
+    async status({ intentId, partnerRef }) {
+      return sandboxOrderStatus('cctp_wallet', intentId, partnerRef);
     },
     handleWebhook({ rawBody, signature, now }) {
       return verifyPayoutWebhook(rawBody, signature, sandboxWebhookSecretFor(env, 'cctp_wallet'), now);

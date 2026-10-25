@@ -940,7 +940,7 @@ test('reads never call the partner; the sweep posts settlements, reverses lapsed
   assert.equal(t.partner.calls.length, calls, 'a GET by any member calls the partner for nothing');
   down = false;
   await t.reconcile();
-  assert.equal(t.partner.calls.length, calls + 1, 'the sweep retries the post');
+  assert.deepEqual(t.partner.calls.slice(calls).map((c) => c.name), ['postSettlement', 'status'], 'the sweep retries the post, then asks the partner where the payout is');
   assert.equal((await getWithdrawal(t.deps(), r.withdrawal.id)).withdrawal.settlementPosted, true);
   await t.w.client.close();
 

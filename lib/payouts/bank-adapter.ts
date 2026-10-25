@@ -39,6 +39,7 @@ import {
   type PayoutPartnerId,
   type PayoutQuote,
 } from './partner.ts';
+import { placeSandboxOrder, sandboxOrderStatus } from './sandbox-orders.ts';
 
 /** How long a quote holds. Past it, the rate is refused, never refreshed. */
 export const PAYOUT_QUOTE_TTL_MS = 5 * 60 * 1000;
@@ -135,14 +136,16 @@ export function sandboxBankAdapter(spec: SandboxBankSpec): PayoutPartner {
     },
     async createPayout(input) {
       checkBankInstruction(facts, input);
-      // Idempotent by the intent id: a retry names the same order.
-      return { partnerRef: `sb_${tag}_${createHmac('sha256', SANDBOX_KEY).update(`${tag}:${input.intentId}`).digest('hex').slice(0, 24)}`, sandbox: true };
+      // Keyed by the intent id and the expected amount: a retry names the
+      // same order; another payout under the intent id is refused.
+      return placeSandboxOrder(facts.id, tag, input, spec.env);
     },
     async postSettlement() {
       // The sandbox has nothing to tell.
     },
-    async status() {
-      return { status: 'instructed', sandbox: true };
+    async status({ intentId, partnerRef }) {
+      // Only an order this sandbox took, under its own reference.
+      return sandboxOrderStatus(facts.id, intentId, partnerRef);
     },
     handleWebhook({ rawBody, signature, now }) {
       return verifyPayoutWebhook(rawBody, signature, sandboxWebhookSecretFor(spec.env, facts.id), now);

@@ -28,8 +28,8 @@ database) and `tests/partner-payouts.test.mjs` (the service on PGlite).
 | Verb | Bank routes (pdax, durianpay, hata_fiuu) | cctp_wallet |
 |---|---|---|
 | `quote` | Rate (local per USDC ×1e6), what the account receives after the partner's fees, each fee its own line, 5-minute expiry. | Circle's fee from Sui (a standard transfer) as its own line, and what arrives. |
-| `createPayout` | The instruction, before any deposit, keyed by the intent id and the expected USDC amount, with its ISO 20022 message. Idempotent: a retry names the same order. | Checks chain, domain and the mint recipient (re-derived from the address), keyed by the intent id. Circle takes no instruction before a burn. |
-| `status` | The partner's view of the payout. | The attestation and mint, polled. |
+| `createPayout` | The instruction, before any deposit, keyed by the intent id and the expected USDC amount, with its ISO 20022 message. Idempotent: a retry names the same order; the intent id with another amount, deposit address, account or rate is refused (`instruction_conflict`, 409), and no reversal is sent for it (it would cancel the payout already held). | Checks chain, domain and the mint recipient (re-derived from the address), keyed by the intent id. Circle takes no instruction before a burn. |
+| `status` | The partner's view of the payout, asked by the sweep (below). The sandbox answers only for an order it took, under its own reference (`payout_not_found` otherwise). | The attestation and mint, polled. |
 | `handleWebhook` | HMAC over the raw body, 5-minute window, then parse. | Circle sends none: live refuses every webhook. |
 | `returnOrReverse` | Cancel an instruction no deposit followed, or ask for a return to the business wallet. | Accepted only before the burn; a burn cannot be undone. |
 | `depositAddress`, `checkAccount`, `postSettlement` | The fixed deposit address, the bank's name enquiry, the Sui digest after settlement. | No deposit address and no bank account (`not_on_this_route`); the burn's digest. |
@@ -102,6 +102,15 @@ the same:
 5. **After settlement** the executed transaction is read, and the digest is
    posted only when its `IntentCreated` event names the instructed intent
    id. The sweep retries what did not post.
+   Once the digest is posted, the sweep also asks the partner for the
+   payout's status (`status`, keyed by the row's own intent id and partner
+   reference) on every run until it is final, so a lost webhook does not
+   leave a payout sent forever. The answer moves it forward only, by the
+   webhook's rules (funds received, paid out, failed; a failure asks for the
+   USDC back to the business wallet). A polled `returned` is not believed:
+   a return counts only from the digest a webhook names and the chain shows.
+   A failed payout is not polled (it waits for its return). A route that
+   cannot answer counts as a sweep error and is asked again next run.
 6. **Webhooks** (`/api/webhooks/payouts/pdax`, `/durianpay`): signed, in the
    window, each event once, never backwards, for that partner's own payout
    only. A failure asks for the USDC back to the business wallet; a return

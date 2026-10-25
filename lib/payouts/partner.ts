@@ -219,7 +219,18 @@ export type PayoutEvent =
     };
 
 export class PayoutPartnerUnavailable extends Error {
-  readonly code: 'partner_not_configured' | 'partner_not_connected' | 'partner_disabled' | 'partner_not_built' | 'currency_not_offered' | 'not_on_this_route' | 'bad_instruction';
+  readonly code:
+    | 'partner_not_configured'
+    | 'partner_not_connected'
+    | 'partner_disabled'
+    | 'partner_not_built'
+    | 'currency_not_offered'
+    | 'not_on_this_route'
+    | 'bad_instruction'
+    /** The partner already holds another payout under this intent id. */
+    | 'instruction_conflict'
+    /** The partner holds no payout by this intent id and reference. */
+    | 'payout_not_found';
   readonly status = 503;
   constructor(message: string, code: PayoutPartnerUnavailable['code']) {
     super(message);
