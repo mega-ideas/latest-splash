@@ -108,13 +108,17 @@ Design: `docs/v2/phase2-withdrawals.md`. Tests: `tests/withdrawals.test.mjs`.
   refused. A return goes to the business wallet only. It counts only when
   the chain shows it sent by the deposit address into the wallet, by a
   digest no other withdrawal used (unique index); only the whole amount
-  closes a withdrawal, and a short return is held for review.
+  closes a withdrawal, and a short return is held for review. A return
+  with no failure reported first (the partner did not pay out) is taken the
+  same way, from sent or partner received.
 - **Own account only.** A destination is stored only when the name given
   and the bank's own holder name (the partner's name enquiry) both match
   the registered legal name, and that name counts only once KYB verified it
   (kyb_status basic or full). Only an owner may set it, and it is fixed once
   KYB is under way; a change before that revokes every bank account and
-  cancels withdrawals not yet sent. The trading name is not accepted. The
+  cancels withdrawals not yet sent. The trading name is not accepted.
+  Names fold case, punctuation, Latin accents and legal suffixes only;
+  letters of other scripts are compared, not dropped. The
   account number and the beneficiary salt are AES-256-GCM sealed under
   `WITHDRAWAL_ACCOUNT_KEY` (rotatable through
   `WITHDRAWAL_ACCOUNT_KEY_PREVIOUS`), bound to the org and the row. Views
@@ -150,7 +154,9 @@ Design: `docs/v2/phase2-withdrawals.md`. Tests: `tests/withdrawals.test.mjs`.
   plus fee outside holds. A worse rate (`quote_changed`), a fee above the one
   shown (`fee_above_shown`) or a fee over the 1% ceiling is refused. Partner
   fees are their own lines. Splash's fee is the chain's kind 4 fee, bounded
-  by `max_fee`.
+  by `max_fee`. A quote whose partner fees leave the bank nothing
+  (`below_partner_fees`) and an accepted receive amount of 0
+  (`nothing_received`) are refused before anything is stored or instructed.
 - **Webhooks.** The raw body's HMAC is checked first, inside a 5-minute
   window. Each event id counts once. An event must match the intent id and
   the partner's reference. Statuses never regress.
@@ -168,9 +174,10 @@ Design: `docs/v2/phase2-withdrawals.md`. Tests: `tests/withdrawals.test.mjs`.
   call takes the org; the sweep (`/api/cron/withdrawals`, `CRON_SECRET`)
   acts on each row within its own org. Reads never call the partner.
   Another org's ids read as 404.
-- **Open:** the live Hata and Fiuu APIs and their webhook payloads; a
-  scheduled run that posts unposted digests (today: on the executed hook and
-  on every read); rotation of `WITHDRAWAL_ACCOUNT_KEY`.
+- **Open:** the live Hata and Fiuu APIs and their webhook payloads; no
+  reconciliation of `paid_out` against bank evidence yet. (The sweep,
+  `/api/cron/withdrawals`, posts unposted digests; reads never do. Key
+  rotation is through `WITHDRAWAL_ACCOUNT_KEY_PREVIOUS`.)
 
 ## v2 Phase 2 §4.3 — funding the Business Splash Wallet — 2026-10-25
 

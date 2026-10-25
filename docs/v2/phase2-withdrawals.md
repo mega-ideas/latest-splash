@@ -83,7 +83,8 @@ test deposit to it would be lost.
    (`destination_name_changed`).
 
    Names are folded as for funding sources, so `Sdn. Bhd.` equals
-   `Sendirian Berhad`. The trading name is not accepted. When a check
+   `Sendirian Berhad` and Latin accents fold. Letters of other scripts are
+   compared, not dropped: `ACME 日本` is not `Acme 中文`. The trading name is not accepted. When a check
    fails, nothing about the account is kept; the attempt is recorded with
    the last four digits.
 
@@ -124,14 +125,17 @@ test deposit to it would be lost.
   every hold (`insufficient_funds`, `funds_on_hold`). It shows the
   partner's rate and receive amount, each partner fee as its own line, and
   Splash's kind 4 fee from the live `FeeConfig` (`fee_unavailable` if it
-  cannot be read). `maxFeeMinor` is exactly the fee shown. Refused when
+  cannot be read). `maxFeeMinor` is exactly the fee shown. A quote whose
+  partner fee lines take the whole amount (the bank would receive nothing)
+  is refused (`below_partner_fees`), here and again at create. Refused when
   local-currency payouts are outside the launch scope.
 - `POST / {destinationId, amountMinor, acceptedReceiveMinor, maxFeeMinor,
   contentHash, walrusBlobId}` with `Idempotency-Key`. An owner or a staff
   member (maker or approver) may ask; a viewer may not (Sky's decision:
   staff may ask owners to approve). Asking opens the owners' signing request;
   only their quorum signs. `acceptedReceiveMinor` is the least the owners
-  accept; it may be below the quote. It is refused when:
+  accept; it may be below the quote, but never 0 (`nothing_received`). It
+  is refused when:
   - the fresh quote is worse than the accepted one (`quote_changed`, with
     the new quote);
   - the fee is above the one shown (`fee_above_shown`);
@@ -198,6 +202,8 @@ contracts.
 Statuses:
 - preparing → awaiting_signatures → sent → partner_received → paid_out;
 - sent or partner_received → failed → returned;
+- sent or partner_received → returned, when the partner sends the USDC
+  straight back without reporting a failure first (it did not pay out);
 - preparing or awaiting_signatures → cancelled.
 
 Nothing moves backwards. Paid out, returned and cancelled are final.
@@ -227,7 +233,8 @@ lib/payouts/partner.ts).
     withdrawal (and a unique index holds it). Only the whole amount closes
     the withdrawal as `returned`, with `returned_minor`. A short return is
     recorded (`returned_minor`, `return_short` in the trail) and the
-    withdrawal stays `failed` for ops. A return sent from a partner address
+    withdrawal is left `failed` for ops (moved there from sent or partner
+    received when no failure came first). A return sent from a partner address
     other than the deposit address is not accepted until the contracts name
     one.
 - `test_deposit.received`: as above, in step 3 of setting up.
