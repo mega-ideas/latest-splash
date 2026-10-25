@@ -735,6 +735,17 @@ if (!done('activateWitness')) {
   save();
 }
 
+// Sky's own testnet wallet receives every day-two wallet payment, so they can
+// be seen arriving. The owners verify it first: an owner's change, instant.
+const DAY_TWO_PAYEE = '0x740273f0e25632f975b33262dc8a342f3fa9d97d99371f1213f563a37089e268';
+if (!done('verifyDayTwoPayee')) {
+  const tx = new Transaction();
+  tx.moveCall({ target: `${SPEND}::spend_policy::verify_recipient`, arguments: [tx.object(POLICY), tx.object(ACCOUNT), tx.pure.u32(SUI_DOMAIN), tx.pure.address(DAY_TWO_PAYEE), tx.pure.u8(KIND_WALLET)] });
+  const t = await runMultisig("policy: Sky's testnet wallet becomes a verified recipient", W, [bizKeys[1], bizKeys[2]], tx);
+  results.steps.verifyDayTwoPayee = { digest: t.digest, payee: DAY_TWO_PAYEE };
+  save();
+}
+
 const APPROVAL_TYPE = `${SPEND}::splash_spend::PayoutApproval`;
 /** Intents live six hours here; an approval's quote deadline is two hours
  *  after it is given, and a payment's settle_by is thirty minutes, so every
@@ -742,13 +753,13 @@ const APPROVAL_TYPE = `${SPEND}::splash_spend::PayoutApproval`;
 const INTENT_LIFETIME_MS = 6 * 3_600_000;
 const APPROVAL_WINDOW_MS = 2 * 3_600_000;
 
-/** A staff-made intent to the verified recipient, created in `tx`. */
+/** A staff-made intent to Sky's verified testnet wallet, created in `tx`. */
 function staffIntent(tx, step, amount) {
   const [intent] = tx.moveCall({
     target: `${SPEND}::splash_spend::create_intent`,
     typeArguments: [USDC],
     arguments: [
-      tx.object(POLICY), tx.object(ACCOUNT), tx.object(CONFIG), tx.pure.vector('u8', ref32(step)), tx.pure.address(OWNERS[2]), tx.pure.vector('u8', []),
+      tx.object(POLICY), tx.object(ACCOUNT), tx.object(CONFIG), tx.pure.vector('u8', ref32(step)), tx.pure.address(DAY_TWO_PAYEE), tx.pure.vector('u8', []),
       tx.pure.u64(amount), tx.pure.string('USDC'), tx.pure.u64(1_000_000), tx.pure.vector('u8', ref32(`${step}:c`)), tx.pure.u8(KIND_WALLET),
       tx.pure.vector('u8', ref32(`${step}:r`)), tx.pure.u64(Date.now() + INTENT_LIFETIME_MS), tx.object(CLOCK),
     ],
@@ -841,7 +852,7 @@ if (!done('delegatedIntent')) {
     target: `${CORE}::payment_intent::create_for_wallet`,
     typeArguments: [USDC],
     arguments: [
-      tx.object(ACCOUNT), tx.object(CONFIG), tx.pure.vector('u8', ref32('delegated')), tx.pure.address(OWNERS[2]), tx.pure.vector('u8', []),
+      tx.object(ACCOUNT), tx.object(CONFIG), tx.pure.vector('u8', ref32('delegated')), tx.pure.address(DAY_TWO_PAYEE), tx.pure.vector('u8', []),
       tx.pure.u64(200_000), tx.pure.string('USDC'), tx.pure.u64(1_000_000), tx.pure.vector('u8', ref32('delegated:c')), tx.pure.u8(KIND_WALLET),
       tx.pure.vector('u8', ref32('delegated:r')), tx.pure.u64(Date.now() + INTENT_LIFETIME_MS), tx.object(CLOCK),
     ],
@@ -904,7 +915,7 @@ if (!done('applyFeeRecipient')) {
   save();
 }
 // A wallet payment under the WALLET schedule: 0.5 USDC pays the 1% ceiling, 0.005.
-await walletPays('feesOnWalletPays', KIND_WALLET, RECIPIENT, 500_000, [bizKeys[0], bizKeys[1]], { feesOn: true });
+await walletPays('feesOnWalletPays', KIND_WALLET, DAY_TWO_PAYEE, 500_000, [bizKeys[0], bizKeys[1]], { feesOn: true });
 // A bank payout to the partner's deposit address, at the 99 USDC floor: 0.30%,
 // 0.297 USDC; the rest of the 0.99 max_fee goes back to the business wallet.
 // The leg needs BANK_AMOUNT + its max_fee in the wallet's address balance.
