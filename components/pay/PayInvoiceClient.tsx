@@ -134,8 +134,8 @@ export default function PayInvoiceClient({ slug, invoice }: { slug: string; invo
                 <>
                   <h2 className="text-lg font-black">Already transferred?</h2>
                   <p className="mt-1 text-sm text-foreground/60">Tell the issuer who sent the bank transfer.</p>
-                  <input value={payerOrgName} onChange={(event) => setPayerOrgName(event.target.value)} placeholder="Organisation name" className="mt-5 w-full rounded-xl border border-foreground/15 bg-background px-3 py-3 outline-none focus:border-primary" />
-                  <input value={payerOrgEmail} onChange={(event) => setPayerOrgEmail(event.target.value)} placeholder="Finance email" type="email" className="mt-3 w-full rounded-xl border border-foreground/15 bg-background px-3 py-3 outline-none focus:border-primary" />
+                  <input value={payerOrgName} onChange={(event) => setPayerOrgName(event.target.value)} placeholder="Organisation name" aria-label="Organisation name" maxLength={120} autoComplete="organization" className="mt-5 w-full rounded-xl border border-foreground/15 bg-background px-3 py-3 outline-none focus:border-primary" />
+                  <input value={payerOrgEmail} onChange={(event) => setPayerOrgEmail(event.target.value)} placeholder="Finance email" aria-label="Finance email" type="email" maxLength={254} autoComplete="email" className="mt-3 w-full rounded-xl border border-foreground/15 bg-background px-3 py-3 outline-none focus:border-primary" />
                   <button disabled={submitting || !payerOrgName || !payerOrgEmail} onClick={confirmPaid} className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-accent px-4 py-3 font-black text-accent-foreground disabled:opacity-50">
                     <Check className="h-4 w-4" /> {submitting ? 'Sending...' : 'I sent the transfer'}
                   </button>

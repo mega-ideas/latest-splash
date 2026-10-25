@@ -63,12 +63,12 @@ function deps(over = {}) {
 }
 
 /** A flow that records every request and hands out a new intent each time. */
-function recordingFlow({ cancel } = {}) {
+function recordingFlow({ cancel, prefix = 'pi' } = {}) {
   const requests = [];
   const cancels = [];
   const flow = {
     wired: true,
-    start: async (request) => { requests.push(request); return { ok: true, paymentIntentId: `pi_${requests.length}` }; },
+    start: async (request) => { requests.push(request); return { ok: true, paymentIntentId: `${prefix}_${requests.length}` }; },
   };
   if (cancel !== false) {
     flow.cancel = async (request) => { cancels.push(request); return cancel ?? { ok: true }; };
@@ -81,7 +81,8 @@ const source = (relative) => readFile(new URL(`../${relative}`, import.meta.url)
 
 async function scheduled(db, d, { n = 1, fields = CONFIRMED, recipientId = 'r_mabuhay', reason } = {}) {
   const { handleBillIntake, handleBillAction } = await lib();
-  const made = await handleBillIntake(db, ACME_MAKER, { intakeKey: key(n), text: INVOICE }, d);
+  // Each its own document, or intake answers with the open one already on file.
+  const made = await handleBillIntake(db, ACME_MAKER, { intakeKey: key(n), text: INVOICE.replace('MC-2026-0412', fields.invoiceNumber) }, d);
   const id = made.body.bill.id;
   assert.equal((await handleBillAction(db, ACME_MAKER, id, { action: 'confirm', fields }, d)).status, 200);
   const matched = await handleBillAction(db, ACME_MAKER, id, { action: 'match', recipientId, ...(reason ? { reason } : {}) }, d);
@@ -189,19 +190,20 @@ test('an invoice waiting for approval can be withdrawn through the flow, and onl
   const noCancel = recordingFlow({ cancel: false });
   const d1 = deps({ paymentFlow: noCancel.flow });
   const a = await scheduled(db, d1, { n: 1 });
-  await handleBillPay(db, ACME_MAKER, a, d1);
+  const sentA = await handleBillPay(db, ACME_MAKER, a, d1);
+  assert.equal(sentA.status, 200, JSON.stringify(sentA.body));
   const refused = await handleBillAction(db, ACME_MAKER, a, { action: 'withdraw' }, d1);
   assert.equal(refused.status, 501);
   assert.equal((await client.query('SELECT status FROM payable_invoices WHERE id = $1', [a])).rows[0].status, 'approving');
 
-  const signed = recordingFlow({ cancel: { ok: false, status: 409, error: 'An owner already signed it.' } });
+  const signed = recordingFlow({ prefix: 'pib', cancel: { ok: false, status: 409, error: 'An owner already signed it.' } });
   const d2 = deps({ paymentFlow: signed.flow });
   const b = await scheduled(db, d2, { n: 2, fields: { ...CONFIRMED, invoiceNumber: 'MC-2026-0413', amount: '99.00' } });
   await handleBillPay(db, ACME_MAKER, b, d2);
   assert.equal((await handleBillAction(db, ACME_MAKER, b, { action: 'withdraw' }, d2)).status, 409);
   assert.equal((await client.query('SELECT status FROM payable_invoices WHERE id = $1', [b])).rows[0].status, 'approving');
 
-  const ok = recordingFlow();
+  const ok = recordingFlow({ prefix: 'pic' });
   const d3 = deps({ paymentFlow: ok.flow });
   const c = await scheduled(db, d3, { n: 3, fields: { ...CONFIRMED, invoiceNumber: 'MC-2026-0414', amount: '77.00' } });
   await handleBillPay(db, ACME_MAKER, c, d3);
@@ -209,7 +211,7 @@ test('an invoice waiting for approval can be withdrawn through the flow, and onl
   assert.equal(back.status, 200, JSON.stringify(back.body));
   assert.equal(back.body.bill.status, 'scheduled');
   assert.equal(back.body.bill.approval, null);
-  assert.equal(ok.cancels[0].paymentIntentId, 'pi_1');
+  assert.equal(ok.cancels[0].paymentIntentId, 'pic_1');
   // And cancelling it now is allowed again.
   assert.equal((await handleBillAction(db, ACME_MAKER, c, { action: 'cancel' }, d3)).status, 200);
   await client.close();
@@ -220,7 +222,7 @@ test('an invoice waiting for approval can be withdrawn through the flow, and onl
 test('an invoice changed while the flow took its quote is not marked approving, and the intent is dropped', async () => {
   const { db, client } = await migratedDb();
   const { handleBillPay } = await lib();
-  const ok = recordingFlow();
+  const ok = recordingFlow({ prefix: 'pic' });
   const d = deps({ paymentFlow: ok.flow });
   const id = await scheduled(db, d);
   const racing = {
@@ -238,7 +240,7 @@ test('an invoice changed while the flow took its quote is not marked approving, 
   assert.equal(row.status, 'scheduled');
   assert.equal(row.payment_intent_id, null);
   assert.equal(ok.cancels.length, 1, 'the flow is told to drop the intent');
-  assert.equal(ok.cancels[0].paymentIntentId, 'pi_1');
+  assert.equal(ok.cancels[0].paymentIntentId, 'pic_1');
   await client.close();
 });
 

@@ -457,7 +457,8 @@ test('approve hands the invoice to the payment flow once, keyed by the invoice',
   assert.equal(sent.status, 200);
   assert.equal(sent.body.bill.status, 'approving');
   assert.equal(sent.body.bill.approval.paymentIntentId, 'pi_0001');
-  assert.equal(calls.last.idempotencyKey, id);
+  // Keyed by the invoice, its attempt and what is paid (second review): the invoice id leads it.
+  assert.ok(calls.last.idempotencyKey.startsWith(`${id}:0:`), calls.last.idempotencyKey);
   assert.equal(calls.last.payOn, '2026-11-15');
   const again = await handleBillPay(db, ACME_MAKER, id, d);
   assert.equal(again.body.replayed, true);

@@ -45,6 +45,8 @@ type ListResponse = {
   canWrite: boolean;
   reader: 'zeke' | 'parser';
   paymentFlowWired: boolean;
+  /** The payment flow can drop an intent nobody signed, so an invoice can be withdrawn from approval. */
+  paymentFlowCancels?: boolean;
 };
 
 const FIELD_LABEL: Record<BillField, string> = {
@@ -230,7 +232,7 @@ export default function PayInvoices({ onCounts }: { onCounts?: (counts: { toRevi
         ) : !detail || detail.id !== selectedId ? (
           <div className="dash-surface h-96 animate-pulse" aria-hidden="true" />
         ) : (
-          <BillCase bill={detail} canWrite={canWrite} paymentFlowWired={list?.paymentFlowWired ?? false} onChange={replace} onOpen={(id) => void open(id, false)} />
+          <BillCase bill={detail} canWrite={canWrite} paymentFlowWired={list?.paymentFlowWired ?? false} paymentFlowCancels={list?.paymentFlowCancels ?? false} onChange={replace} onOpen={(id) => void open(id, false)} />
         )}
       </section>
     </div>
@@ -376,8 +378,8 @@ function StepRail({ steps }: { steps: BillView['steps'] }) {
   );
 }
 
-function BillCase({ bill, canWrite, paymentFlowWired, onChange, onOpen }: {
-  bill: BillView; canWrite: boolean; paymentFlowWired: boolean; onChange: (b: BillView) => void; onOpen: (id: string) => void;
+function BillCase({ bill, canWrite, paymentFlowWired, paymentFlowCancels, onChange, onOpen }: {
+  bill: BillView; canWrite: boolean; paymentFlowWired: boolean; paymentFlowCancels: boolean; onChange: (b: BillView) => void; onOpen: (id: string) => void;
 }) {
   const [focusField, setFocusField] = useState<BillField | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -419,11 +421,11 @@ function BillCase({ bill, canWrite, paymentFlowWired, onChange, onOpen }: {
 
       {bill.confirmed && <RecipientStep bill={bill} canWrite={canWrite && bill.status === 'review'} onMatch={(recipientId, reason) => act({ action: 'match', recipientId, ...(reason ? { reason } : {}) }, 'match')} busy={busy} />}
 
-      {bill.confirmed && <ScheduleStep bill={bill} canWrite={canWrite} paymentFlowWired={paymentFlowWired} act={act} busy={busy} onChange={onChange} />}
+      {bill.confirmed && <ScheduleStep bill={bill} canWrite={canWrite} paymentFlowWired={paymentFlowWired} paymentFlowCancels={paymentFlowCancels} act={act} busy={busy} onChange={onChange} />}
 
       {bill.status === 'paid' && <ReceiptStep bill={bill} canWrite={canWrite} onChange={onChange} />}
 
-      {!closed && canWrite && (
+      {!closed && bill.status !== 'approving' && canWrite && (
         <div className="flex justify-start">
           <button type="button" disabled={busy !== null} onClick={() => { if (window.confirm('Cancel this invoice? It stays in the list as cancelled.')) void act({ action: 'cancel' }, 'cancel'); }} className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-[var(--error)]/25 bg-white px-3 text-[13px] font-semibold text-[var(--error)] disabled:opacity-50">
             <XCircle size={14} aria-hidden="true" /> Cancel invoice
@@ -515,6 +517,7 @@ function ReadingStep({ bill, canWrite, focusField, onFocusField, onConfirm, busy
         <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-3">
           {rows.map(([k, v]) => <div key={k}><dt className="text-[12px] text-[#326273]">{k}</dt><dd className="font-medium text-[#1f4452]">{v}</dd></div>)}
         </dl>
+        {bill.needsRateQuote && <RateQuoteNote currency={c.currency} />}
         {bill.documentText && (
           <details className="mt-3">
             <summary className="min-h-11 cursor-pointer py-2 text-[13px] font-semibold text-[#145d6a]">Show the invoice as it was read</summary>
@@ -530,6 +533,7 @@ function ReadingStep({ bill, canWrite, focusField, onFocusField, onConfirm, busy
   return (
     <StepCard id={`read-${bill.id}`} title="Check what Zeke read" icon={Sparkles} state={bill.confirmed ? 'done' : 'open'}>
       <p className="text-[13px] text-[#326273]">{source}. Every value is yours to check; nothing is paid as read.</p>
+      {bill.confirmed && bill.needsRateQuote && <RateQuoteNote currency={bill.confirmed.currency} />}
       <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
         {bill.documentText ? (
           <DocumentSheet text={bill.documentText} extraction={bill.extraction} focusField={focusField} />
@@ -569,6 +573,21 @@ function ReadingStep({ bill, canWrite, focusField, onFocusField, onConfirm, busy
         </form>
       </div>
     </StepCard>
+  );
+}
+
+/**
+ * Said as soon as the currency is confirmed, not at the approve step: USDC
+ * pays USD one for one, and any other currency needs a rate quote, which
+ * Transfer takes and shows. Transfer starts from the recipient there; it
+ * does not take a supplier invoice from this list.
+ */
+function RateQuoteNote({ currency }: { currency: string | null }) {
+  return (
+    <p role="status" className="mt-3 rounded-xl border border-[var(--warn)]/35 bg-[var(--warn-bg)] p-3 text-[13px] leading-5 text-[var(--warn-ink)]">
+      This invoice is in {currency}. It is paid in USDC, so it needs a rate quote, and Invoices does not quote rates.{' '}
+      <Link href="/dashboard/transfer" className="font-semibold underline decoration-1 underline-offset-2">Pay it from Transfer</Link>, where the rate is quoted and shown before anyone signs.
+    </p>
   );
 }
 
@@ -655,6 +674,9 @@ function RecipientStep({ bill, canWrite, onMatch, busy }: { bill: BillView; canW
   const [changing, setChanging] = useState(false);
   const [otherId, setOtherId] = useState('');
   const [otherReason, setOtherReason] = useState('');
+  // A suggested recipient whose name is only close, not the same: chosen with a written reason.
+  const [closeId, setCloseId] = useState<string | null>(null);
+  const [closeReason, setCloseReason] = useState('');
   const showChoices = canWrite && (!bill.recipient || changing);
   const supplier = bill.confirmed?.payee ?? bill.payee;
   return (
@@ -666,7 +688,7 @@ function RecipientStep({ bill, canWrite, onMatch, busy }: { bill: BillView; canW
             <p className="text-[13px] text-[#326273]">{bill.recipient.destination} · {COUNTRY_NAME[bill.recipient.country] ?? bill.recipient.country}</p>
           </div>
           <span className={cn('inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-semibold', bill.recipient.verified ? 'bg-[var(--ok-bg)] text-[#1f4452]' : 'bg-[var(--warn-bg)] text-[var(--warn-ink)]')}>
-            {bill.recipient.verified ? <><ShieldCheck size={12} aria-hidden="true" /> Verified</> : 'Not verified'}
+            {bill.recipient.verified ? <><ShieldCheck size={12} aria-hidden="true" /> Verified</> : bill.recipient.blocked === 'ownership_unproven' ? 'Ownership not proved' : 'Not verified'}
           </span>
           {canWrite && bill.status === 'review' && !changing && (
             <button type="button" onClick={() => setChanging(true)} className="min-h-11 bg-transparent px-1 text-[13px] font-semibold text-[#145d6a] underline decoration-1 underline-offset-2">Change</button>
@@ -697,15 +719,37 @@ function RecipientStep({ bill, canWrite, onMatch, busy }: { bill: BillView; canW
           {bill.matches.length > 0 ? (
             <ul className="space-y-2">
               {bill.matches.map((m) => (
-                <li key={m.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#326273]/10 bg-white/70 p-3">
-                  <div className="min-w-0">
-                    <p className="font-semibold text-[#1f4452]">{m.name}{m.exact && <span className="ml-2 text-[12px] font-medium text-[#326273]">Same name</span>}</p>
-                    <p className="text-[13px] text-[#326273]">{m.destination} · {COUNTRY_NAME[m.country] ?? m.country}</p>
+                <li key={m.id} className="rounded-xl border border-[#326273]/10 bg-white/70 p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-semibold text-[#1f4452]">{m.name}<span className="ml-2 text-[12px] font-medium text-[#326273]">{m.exact ? 'Same name' : 'Similar name'}</span></p>
+                      <p className="text-[13px] text-[#326273]">{m.destination} · {COUNTRY_NAME[m.country] ?? m.country}</p>
+                    </div>
+                    {!m.verified ? (
+                      <span className="inline-flex items-center gap-1 text-[13px] font-medium text-[var(--warn-ink)]"><Lock size={13} aria-hidden="true" /> {m.blocked === 'ownership_unproven' ? 'Ownership not proved yet' : 'Not verified yet'}</span>
+                    ) : m.exact ? (
+                      <button type="button" disabled={busy !== null} onClick={async () => { if ((await onMatch(m.id)).ok) setChanging(false); }} className="dash-btn dash-btn-ghost min-h-11 !py-2 !text-[13px] disabled:opacity-50">Pay this recipient</button>
+                    ) : closeId !== m.id ? (
+                      <button type="button" disabled={busy !== null} onClick={() => { setCloseId(m.id); setCloseReason(''); }} className="dash-btn dash-btn-ghost min-h-11 !py-2 !text-[13px] disabled:opacity-50">Pay this recipient</button>
+                    ) : null}
                   </div>
-                  {m.verified ? (
-                    <button type="button" disabled={busy !== null} onClick={async () => { if ((await onMatch(m.id)).ok) setChanging(false); }} className="dash-btn dash-btn-ghost min-h-11 !py-2 !text-[13px] disabled:opacity-50">Pay this recipient</button>
-                  ) : (
-                    <span className="inline-flex items-center gap-1 text-[13px] font-medium text-[var(--warn-ink)]"><Lock size={13} aria-hidden="true" /> Not verified yet</span>
+                  {m.verified && m.blocked === null && !m.exact && closeId === m.id && (
+                    <form
+                      onSubmit={async (e) => {
+                        e.preventDefault();
+                        if (closeReason.trim().length < 8) return;
+                        if ((await onMatch(m.id, closeReason.trim())).ok) { setChanging(false); setCloseId(null); setCloseReason(''); }
+                      }}
+                      className="mt-3 space-y-2 border-t border-[#326273]/10 pt-3"
+                    >
+                      <label htmlFor={`close-why-${m.id}`} className="block text-[13px] font-semibold text-[#1f4452]">{m.name} is not the same name as {supplier}. Why is it paid for this invoice?</label>
+                      <input id={`close-why-${m.id}`} value={closeReason} onChange={(e) => setCloseReason(e.target.value)} minLength={8} maxLength={300} aria-describedby={`close-why-help-${m.id}`} className="h-11 w-full rounded-lg border border-[#326273]/20 bg-white px-3 text-sm focus:border-[#145d6a] focus:outline-none focus:ring-2 focus:ring-[#5c9ead]/30" />
+                      <p id={`close-why-help-${m.id}`} className="text-[12px] text-[#326273]">At least 8 characters, for example: the same company under its registered name.</p>
+                      <div className="flex flex-wrap gap-2">
+                        <button type="submit" disabled={busy !== null || closeReason.trim().length < 8} className="dash-btn dash-btn-ghost min-h-11 !text-[13px] disabled:opacity-50">Pay this recipient</button>
+                        <button type="button" onClick={() => setCloseId(null)} className="min-h-11 bg-transparent px-2 text-[13px] font-semibold text-[#145d6a] underline decoration-1 underline-offset-2">Not this one</button>
+                      </div>
+                    </form>
                   )}
                 </li>
               ))}
@@ -750,8 +794,8 @@ function RecipientStep({ bill, canWrite, onMatch, busy }: { bill: BillView; canW
   );
 }
 
-function ScheduleStep({ bill, canWrite, paymentFlowWired, act, busy, onChange }: {
-  bill: BillView; canWrite: boolean; paymentFlowWired: boolean;
+function ScheduleStep({ bill, canWrite, paymentFlowWired, paymentFlowCancels, act, busy, onChange }: {
+  bill: BillView; canWrite: boolean; paymentFlowWired: boolean; paymentFlowCancels: boolean;
   act: (body: Record<string, unknown>, label: string) => Promise<{ ok: boolean; fields?: Record<string, string> }>;
   busy: string | null; onChange: (b: BillView) => void;
 }) {
@@ -798,11 +842,7 @@ function ScheduleStep({ bill, canWrite, paymentFlowWired, act, busy, onChange }:
     return (
       <StepCard id={`approve-${bill.id}`} title={BILL_STEP_LABEL.approve} icon={ShieldCheck} state="open">
         <p className="text-sm text-[#1f4452]">Scheduled to pay on <strong className="font-semibold">{dueLabel(bill.scheduledFor)}</strong>. The owners approve it in Transfer, with the fee and the rate shown before anyone signs.</p>
-        {bill.needsRateQuote && (
-          <p role="status" className="mt-3 rounded-xl border border-[var(--warn)]/35 bg-[var(--warn-bg)] p-3 text-[13px] leading-5 text-[var(--warn-ink)]">
-            This invoice is in {bill.confirmed?.currency}. It is paid in USDC, so it needs a rate quote, and Invoices does not quote rates. Pay it from Transfer, where the rate is quoted and shown.
-          </p>
-        )}
+        {bill.needsRateQuote && <RateQuoteNote currency={bill.confirmed?.currency ?? null} />}
         {(!paymentFlowWired || notWired) && (
           <p role="status" className="mt-3 rounded-xl border border-[var(--info)]/25 bg-[var(--info-bg)] p-3 text-[13px] leading-5 text-[var(--info)]">
             {notWired ?? 'Approving from Invoices is not connected to Transfer on this server yet. The invoice stays scheduled; nothing is sent for approval.'}
@@ -824,7 +864,14 @@ function ScheduleStep({ bill, canWrite, paymentFlowWired, act, busy, onChange }:
     return (
       <StepCard id={`approve-${bill.id}`} title={BILL_STEP_LABEL.approve} icon={ShieldCheck} state="open">
         <p className="text-sm text-[#1f4452]">Waiting for the owners’ approval in Transfer. It is marked paid when the payment settles on Sui.</p>
-        {bill.approval && <p className="mt-1 font-mono text-[12px] text-[#326273]">Payment {bill.approval.paymentIntentId}</p>}
+        {bill.approval && <p className="mt-1 break-all font-mono text-[12px] text-[#326273]">Payment {bill.approval.paymentIntentId}</p>}
+        {canWrite && paymentFlowCancels && (
+          <div className="mt-3">
+            <button type="button" disabled={busy !== null} onClick={() => { if (window.confirm('Withdraw this invoice from approval? The payment waiting in Transfer is dropped, and the invoice goes back to scheduled.')) void act({ action: 'withdraw' }, 'withdraw'); }} className="dash-btn dash-btn-ghost min-h-11 !text-[13px] disabled:opacity-50">
+              Withdraw from approval
+            </button>
+          </div>
+        )}
       </StepCard>
     );
   }

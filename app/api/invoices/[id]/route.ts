@@ -15,8 +15,8 @@ const patchSchema = z.object({
   // The business moves its own invoice forward only (lib/invoices/status.ts).
   // "reported" is the payer's, from the pay link, and "viewed" the page's.
   status: z.enum(ISSUER_SETTABLE as [string, ...string[]]).optional(),
-  paymentReference: z.string().trim().optional(),
-  transferIntentId: z.string().trim().optional(),
+  paymentReference: z.string().trim().max(200).optional(),
+  transferIntentId: z.string().trim().max(120).optional(),
 });
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -69,17 +69,29 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   if (!current) return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
   const next = parsed.data.status as typeof current.status | undefined;
   // Forward only; paid by hand needs the reference the business received
-  // (the one on file and the payer's report are not evidence); a transfer
-  // is the business's own and bound once (lib/invoices/patch-rules.ts).
+  // (the one on file and the payer's report are not evidence), given once
+  // with "paid" and never rewritten after; a transfer is the business's own
+  // and bound once (lib/invoices/patch-rules.ts).
   const transferOwned = parsed.data.transferIntentId
     ? (await readTransfer(accountCheck.account.orgId, parsed.data.transferIntentId)) !== null
     : false;
   const refusal = checkInvoicePatch({ role, current, patch: parsed.data, transferOwned });
   if (refusal) return NextResponse.json({ error: refusal.error, code: refusal.code }, { status: refusal.status });
-  const { status: _ignored, ...rest } = parsed.data;
+  // The reference the business received is kept as its own (receivedReference),
+  // beside the one the payer was asked to quote, which stays as it was.
+  const { status: _ignored, paymentReference, ...rest } = parsed.data;
   void _ignored;
-  const invoice = await patchInvoice(accountCheck.account.orgId, id, next ? { ...rest, status: next } : rest);
-  return invoice
-    ? NextResponse.json(invoice)
+  const patch = {
+    ...rest,
+    ...(next ? { status: next } : {}),
+    ...(paymentReference !== undefined ? { receivedReference: paymentReference } : {}),
+  };
+  // Guarded on the status read: a USDC sync that settled the invoice in
+  // between is not overwritten with an older status.
+  const invoice = await patchInvoice(accountCheck.account.orgId, id, patch, { status: current.status });
+  if (invoice) return NextResponse.json(invoice);
+  const now = await readInvoice(accountCheck.account.orgId, id);
+  return now
+    ? NextResponse.json({ error: `The invoice changed while it was being updated; it is ${now.status} now. Check it again.`, code: 'changed' }, { status: 409 })
     : NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
 }

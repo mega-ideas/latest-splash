@@ -56,6 +56,11 @@ export type InvoiceRow = {
    *  issuer's `paymentReference` and never the evidence that it was paid. */
   payerReportedReference?: string;
   payerReportedAt?: string;
+  /** Who the payer said they were (0059). `payerOrgName`/`payerOrgEmail` stay the issuer's. */
+  payerReportedName?: string;
+  payerReportedEmail?: string;
+  /** The reference on the business's statement, typed with "Mark as paid" (0059). */
+  receivedReference?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -109,12 +114,15 @@ function toRow(row: InvoiceSelect): InvoiceRow {
     usdcPaidAt: row.usdcPaidAt ? row.usdcPaidAt.toISOString() : undefined,
     payerReportedReference: row.payerReportedReference ?? undefined,
     payerReportedAt: row.payerReportedAt ? row.payerReportedAt.toISOString() : undefined,
+    payerReportedName: row.payerReportedName ?? undefined,
+    payerReportedEmail: row.payerReportedEmail ?? undefined,
+    receivedReference: row.receivedReference ?? undefined,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
 }
 
-export type NewInvoice = Omit<InvoiceRow, 'createdAt' | 'updatedAt' | 'payerReportedReference' | 'payerReportedAt'>;
+export type NewInvoice = Omit<InvoiceRow, 'createdAt' | 'updatedAt' | 'payerReportedReference' | 'payerReportedAt' | 'payerReportedName' | 'payerReportedEmail' | 'receivedReference'>;
 
 export async function insertInvoice(db: DrizzleDb, input: NewInvoice): Promise<InvoiceRow> {
   const [row] = await db
@@ -217,16 +225,22 @@ export async function listInvoices(
  * `orgId` is in the WHERE clause, not checked beforehand: a read-then-write
  * leaves a window where the row could change owner between the two, and the
  * point of this change is that a write cannot cross the tenant boundary.
+ *
+ * With `expect`, only while the invoice is still in the status the caller
+ * read: a USDC sync that settled it in between is not overwritten with an
+ * older status. Null when nothing changed.
  */
 export async function patchInvoice(
   db: DrizzleDb,
   orgId: string,
   invoiceId: string,
   patch: Partial<InvoiceRow>,
+  expect?: { status: string },
 ): Promise<InvoiceRow | null> {
   const update: Record<string, unknown> = { updatedAt: new Date() };
   if (patch.status !== undefined) update.status = patch.status;
   if (patch.paymentReference !== undefined) update.paymentReference = patch.paymentReference;
+  if (patch.receivedReference !== undefined) update.receivedReference = patch.receivedReference;
   if (patch.transferIntentId !== undefined) update.transferIntentId = patch.transferIntentId;
   if (patch.payerOrgName !== undefined) update.payerName = patch.payerOrgName;
   if (patch.payerOrgEmail !== undefined) update.payerEmail = patch.payerOrgEmail;
@@ -239,7 +253,7 @@ export async function patchInvoice(
   const rows = await db
     .update(invoices)
     .set(update)
-    .where(and(eq(invoices.id, invoiceId), eq(invoices.orgId, orgId)))
+    .where(and(eq(invoices.id, invoiceId), eq(invoices.orgId, orgId), expect ? eq(invoices.status, expect.status) : undefined))
     .returning();
   return rows.length > 0 ? toRow(rows[0]) : null;
 }
@@ -263,7 +277,8 @@ export type PaymentReport = { payerOrgName: string; payerOrgEmail: string; refer
  * `from`: a guarded UPDATE, so a report never lands on an invoice that is
  * already reported, paid or settled, and two reports racing cannot both
  * land. The report is kept in its own columns; the issuer's
- * `payment_reference` is never touched. Null when nothing changed.
+ * `payment_reference`, payer name and payer email are never touched. Null
+ * when nothing changed.
  */
 export async function reportPayment(
   db: DrizzleDb,
@@ -275,8 +290,8 @@ export async function reportPayment(
     .update(invoices)
     .set({
       status: 'reported',
-      payerName: report.payerOrgName,
-      payerEmail: report.payerOrgEmail,
+      payerReportedName: report.payerOrgName,
+      payerReportedEmail: report.payerOrgEmail,
       payerReportedReference: report.reference,
       payerReportedAt: report.at,
       updatedAt: report.at,

@@ -58,6 +58,8 @@ export type BillRow = {
   scheduledBy: string | null;
   scheduledAt: Date | null;
   paymentIntentId: string | null;
+  /** Part of the hand-off key; bumped when an attempt ends (migration 0059). */
+  paymentAttempt: number;
   approvalRequestedBy: string | null;
   approvalRequestedAt: Date | null;
   paidAt: Date | null;

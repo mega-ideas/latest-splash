@@ -15,11 +15,11 @@ self-billed MyInvois e-invoice.
 |---|---|---|
 | Intake | `POST /api/bills` | Pasted text, a text file, or a PDF. The client sends an intake key (a UUID): the idempotency key, unique per org. The same document again (while not cancelled) returns the invoice already on file. A PDF needs Zeke's reader; without `ANTHROPIC_API_KEY` it is refused (`pdf_unreadable`) and nothing is stored. |
 | Reading | `lib/bills/extract.ts` | The parser reads labelled fields; Zeke's reading (when configured) is checked against the document text. Confidence is a level with a reason: **high** beside its own label, **medium** found without a label or read by Zeke and found in the text, **low** read by Zeke but not in the text, **not read**. No percentage, because nothing measures one. The page marks each value where it was found. |
-| Check | `PATCH /api/bills/:id` `confirm` | A person confirms every field (supplier, invoice number, amount, currency, due date, invoice date, supplier country). Nothing is paid as read. |
+| Check | `PATCH /api/bills/:id` `confirm` | A person confirms every field (supplier, invoice number, amount, currency, due date, invoice date, supplier country). Nothing is paid as read. Written only onto the invoice as it was read (`changed` otherwise), so a duplicate answer given for another amount never survives. A currency other than USD or USDC is told here that it needs a rate quote, with a link to Transfer. |
 | Duplicates | `lib/bills/duplicates.ts` | Same document: the same invoice. The same invoice number as another open or paid invoice, from the same supplier (the name as typed, reduced; letters of any script count) or to the same recipient: cannot be scheduled, and two partial unique indexes hold it against a race (`payable_invoices_number_once_unique` by name, `payable_invoices_recipient_number_once_unique` by recipient, 0058). The same amount from the same supplier or to the same recipient within 45 days under another number: a person says why it is not a duplicate (`acknowledge_duplicate`). The check runs again before the hand-off. |
-| Recipient | `match` | Only the business's own recipients, and only verified ones (screening `CLEAR` or admin `ATTESTED`). A USDC-only launch matches no bank recipient. A recipient the supplier's name does not suggest ("Paid under another name") needs a reason of 8 characters or more, kept as `match_reason`; changing the supplier clears the match. A recipient whose wallet is one of Splash's own addresses is refused (`splash_address`), and an unreadable list of them is a 503. When the invoice prints an account or wallet that is not the recipient's, the page warns; for a PDF, Zeke reads them (form-checked, at most 10 of each), and when it did not the page says they were not compared. The payment still goes to the recipient on file. |
+| Recipient | `match` | Only the business's own recipients, and only verified ones (screening `CLEAR` or admin `ATTESTED`, and for a self-custody wallet the owner's signed ownership proof, brief D5 and 4.7: `ownership_unproven` otherwise; nothing on this branch records that proof yet, so no wallet recipient is paid from Invoices until 4.7 lands). A USDC-only launch matches no bank recipient. Only the same name, reduced, needs no reason: a recipient whose name is merely close ("Similar name"), or that the name does not suggest at all ("Paid under another name"), needs a reason of 8 characters or more, kept as `match_reason`, checked again at schedule and approve. Generic words (Global, Trading, Holdings, Electronics, ...) never make two names alike, and a suggestion needs more than half the longer name's words. Changing the supplier clears the match. A recipient whose wallet is one of Splash's own addresses (the operator and the treasury, both required, the test recipient, the FeeConfig fee recipient in force and the one proposed under notice, all normalised) is refused (`splash_address`); a missing or malformed address or FeeConfig id, or an unreadable FeeConfig, is a 503. When the invoice prints an account or wallet that is not the recipient's (accounts compared digit for digit; only an account kept as a mask matches by its ending, and then only a printed number of 8 digits or more), the page warns; for a PDF, Zeke reads them (form-checked, at most 10 of each), and when it did not the page says they were not compared. The payment still goes to the recipient on file. |
 | Schedule | `schedule` | A pay-on date from today to a year out. Only the invoice as it was checked: a change in between is refused (`changed`). `unschedule` takes it back to review; `cancel` closes it. |
-| Approve | `POST /api/bills/:id/approve` | Hands the invoice to the payment flow through `lib/bills/payment-hook.ts`, keyed by the invoice id, with `settlementAsset: 'USDC'` and `feeRule: 'quote_in_transfer_shown_fee_is_max_fee'` (the fee is quoted in Transfer and the fee shown there is the payment's `max_fee`; the invoice carries no fee number). A non-USD invoice is refused with `fx_quote_needed`: Invoices does not quote rates, and the page sends it to Transfer. **The 5.4 payment flow is not on this branch**: the hook answers `501 PAYMENT_FLOW_NOT_WIRED`, nothing changes, and the page says so. When 5.4 lands it calls `registerBillPaymentFlow(flow)`. |
+| Approve | `POST /api/bills/:id/approve` | Hands the invoice to the payment flow through `lib/bills/payment-hook.ts`, keyed by the invoice id, its `payment_attempt` (0059; bumped when an intent closes unpaid, is withdrawn, or the invoice is unscheduled) and a hash of the recipient, amount, currency and date, so a re-approval is never answered with a dead intent and the same key with another payload is a 409 for the flow. Written as approving only onto the invoice it handed off: one changed while the flow took its quote is refused (`changed`) and the flow is told to drop the intent. `withdraw` takes an invoice waiting for approval back to scheduled, only through the flow's `cancel` (501 without it; the flow's refusal, for example once an owner signed, is a 409). The contract asks 5.4 to check the recipient again when it builds and when it signs. With `settlementAsset: 'USDC'` and `feeRule: 'quote_in_transfer_shown_fee_is_max_fee'` (the fee is quoted in Transfer and the fee shown there is the payment's `max_fee`; the invoice carries no fee number). A non-USD invoice is refused with `fx_quote_needed`: Invoices does not quote rates, and the page sends it to Transfer. **The 5.4 payment flow is not on this branch**: the hook answers `501 PAYMENT_FLOW_NOT_WIRED`, nothing changes, and the page says so. When 5.4 lands it calls `registerBillPaymentFlow(flow)`. |
 | Paid | `recordBillSettlement` (server only) | The payment flow reports the intent, the Sui digest and the network it settled on (`testnet` or `mainnet`; without one, the server's), so the receipt links the right explorer. Idempotent: the same pair again is a replay, a different digest is refused, one digest pays one invoice (unique index). `recordBillPaymentClosed` puts an unpaid closed intent back to scheduled. No client route reaches either. |
 | Receipt | the page | Receipt no. (`SPB-YYYYMMDD-…`), paid on, amount, supplier, invoice number, destination (masked), approvers, Sui digest with a verify link, save as PDF. |
 | Self-billed e-invoice | `POST /api/bills/:id/e-invoice` | Only for a paid invoice from a supplier outside Malaysia, for a Malaysian business. Made once (a second request returns the same file; `refresh` remakes one older than 72 hours, for a fresh issue date, and the history keeps the replaced file's SHA-256; two remakes racing leave one). `GET …?download=1` downloads it; the page links the MyInvois portal. |
@@ -52,22 +52,29 @@ field.
   /api/invoices/:id` asks `lib/invoices/patch-rules.ts`: only owners,
   finance admins, approvers and makers (the membership's role) change an
   invoice (403 otherwise); it refuses a regression (409), "paid" without the
-  reference the business received (422; the reference on file and the
-  payer's report do not count), a transfer that is not the org's (404) and
-  a second transfer binding (409).
+  reference the business received (422; 4 to 64 characters; the reference
+  on file and the payer's report do not count), a reference that does not
+  come with "paid" or comes once the invoice is paid or settled (409), a
+  transfer that is not the org's (404) and a second transfer binding (409).
+  The reference typed is kept as `received_reference` (0059); the one the
+  payer was asked to quote stays. The write is guarded on the status read,
+  so a USDC sync that settled the invoice in between is not overwritten
+  (409 `changed`).
 - The public pay link records the payer's report as **reported** ("Payer
   says paid"), never paid, and never overwrites a payment on record. What
   the payer said is kept apart (`payer_reported_reference`,
-  `payer_reported_at`, 0058), shown beside "Mark as paid", and never filled
-  in for the business. Only the business ("Mark as paid", with the reference
+  `payer_reported_at`, 0058; `payer_reported_name`, `payer_reported_email`,
+  0059), never over the payer the business named, bounded (reference 4 to
+  64 in a plain form, name 120, email 254), shown beside "Mark as paid", and
+  never filled in for the business. The payer's email is not logged. Only the business ("Mark as paid", with the reference
   from its statement) or a USDC payment matched on Sui makes it paid.
 - A receipt for each paid invoice: method (USDC on Sui with a verify link, or
   a bank transfer the business confirmed), reference, date.
 
 ## Storage
 
-Migrations `0057_payable_invoices` and `0058_invoices_review` (journalled).
-Numbered from 0057 to follow Phase 2's 0033–0054 (they were 0050 and 0051
+Migrations `0057_payable_invoices`, `0058_invoices_review` and `0059_invoices_review_two` (journalled).
+Numbered from 0057 to follow Phase 2's 0033–0054 (they were 0050, 0051 and 0052
 before the branches met).
 `lib/server/bills-store.ts` is the only reader and writer; every query is
 scoped to the org; every status change is a guarded UPDATE on the status it

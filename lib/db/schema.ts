@@ -512,6 +512,13 @@ export const invoices = pgTable('invoices', {
    *  issuer's `paymentReference` and never the evidence that it was paid. */
   payerReportedReference: text('payer_reported_reference'),
   payerReportedAt: timestamp('payer_reported_at', { withTimezone: true }),
+  /** Who the payer said they were (migration 0059); `payerName` and
+   *  `payerEmail` stay the issuer's. */
+  payerReportedName: text('payer_reported_name'),
+  payerReportedEmail: text('payer_reported_email'),
+  /** The reference on the business's statement, typed with "Mark as paid"
+   *  (migration 0059). `paymentReference` stays the one the payer quotes. */
+  receivedReference: text('received_reference'),
   ...timestamps,
 }, (table) => [
   index('invoices_org_idx').on(table.orgId),
@@ -2530,6 +2537,9 @@ export const payableInvoices = pgTable('payable_invoices', {
   scheduledAt: timestamp('scheduled_at', { withTimezone: true }),
   /** The payment flow's intent for this invoice. One invoice, one intent. */
   paymentIntentId: text('payment_intent_id'),
+  /** Bumped when an intent closes unpaid, is withdrawn, or the invoice goes
+   *  back to review; part of the hand-off key (migration 0059). */
+  paymentAttempt: integer('payment_attempt').notNull().default(0),
   approvalRequestedBy: text('approval_requested_by'),
   approvalRequestedAt: timestamp('approval_requested_at', { withTimezone: true }),
   paidAt: timestamp('paid_at', { withTimezone: true }),

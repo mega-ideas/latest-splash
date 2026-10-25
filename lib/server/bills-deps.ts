@@ -13,9 +13,15 @@
  * read only to warn when they are not the recipient's on file.
  *
  * Splash's own addresses: the operator, the treasury and the test recipient
- * from the contract config, and the fee recipient from the live FeeConfig
- * when one is configured. A FeeConfig that is configured but cannot be read
- * throws, and then Pay invoices matches and hands off nothing.
+ * from the contract config, and the fee recipient in force and the one
+ * proposed under notice from the live FeeConfig when one is configured. A
+ * missing or malformed operator or treasury address, a malformed address or
+ * FeeConfig id, or a FeeConfig that cannot be read throws, and then Pay
+ * invoices matches and hands off nothing.
+ *
+ * A self-custody wallet recipient carries `ownershipProvenAt` once its owner
+ * signed the ownership proof (brief 4.7). Nothing on this branch sets it yet,
+ * so no self-custody wallet is paid from Invoices until 4.7 lands.
  */
 import { eq } from 'drizzle-orm';
 
@@ -24,7 +30,7 @@ import { BILL_FIELDS, type ModelReading } from '@/lib/bills/extract';
 import type { RecipientLite } from '@/lib/bills/match';
 import { billPaymentFlow } from '@/lib/bills/payment-hook';
 import { organizations } from '@/lib/db/schema';
-import { feeConfigIdFromEnv, getFeeConfig } from '@/lib/fees/fee-config';
+import { getFeeConfig, normalizeAddress } from '@/lib/fees/fee-config';
 import { getContractConfig } from '@/lib/server/contract-config';
 import type { BillDeps, BusinessFacts, ModelReader } from '@/lib/server/bills';
 import { stablecoinOnly } from '@/lib/server/launch-scope';
@@ -100,6 +106,7 @@ async function listRecipients(orgId: string): Promise<RecipientLite[]> {
       walletAddress: r.walletAddress ?? null,
       account: r.account ?? null,
       bank: r.bank ?? null,
+      ownershipProvenAt: r.walletOwnershipProvenAt ?? null,
     }));
 }
 
@@ -120,15 +127,53 @@ function businessReader(db: unknown) {
   };
 }
 
-/** Splash's own addresses. Throws when a configured FeeConfig cannot be read. */
-export async function splashOwnedAddresses(): Promise<string[]> {
-  const config = getContractConfig();
-  const out = [config.operatorAddress, config.treasuryAddress, config.testRecipientAddress];
-  if (feeConfigIdFromEnv().ok) {
-    const fees = await getFeeConfig();
-    if (fees.feeRecipient) out.push(fees.feeRecipient);
+export type SplashAddressInputs = {
+  config: { operatorAddress?: string; treasuryAddress?: string; testRecipientAddress?: string };
+  /** SPLASH_FEE_CONFIG_ID as configured, '' when it is not. */
+  feeConfigId: string;
+  readFeeConfig: () => Promise<{ feeRecipient: string | null; pendingRecipient: { recipient: string } | null }>;
+};
+
+/**
+ * Splash's own addresses, normalised (0x + 64 lower-case hex). Fails closed:
+ * the operator and the treasury must both be configured, any configured
+ * address must be one, a configured FeeConfig id must be one and be read,
+ * and the fee recipient proposed under notice is Splash's as much as the one
+ * in force. A list that cannot be read in full throws, and the route answers
+ * 503: an unreadable list is not an empty one.
+ */
+export async function splashOwnedAddressesFrom(input: SplashAddressInputs): Promise<string[]> {
+  const out = new Set<string>();
+  const add = (what: string, value: string | null | undefined, required: boolean) => {
+    const raw = (value ?? '').trim();
+    if (!raw) {
+      if (required) throw new Error(`Splash's ${what} address is not configured`);
+      return;
+    }
+    const address = normalizeAddress(raw);
+    if (!address) throw new Error(`Splash's ${what} address is not a Sui address`);
+    out.add(address);
+  };
+  add('operator', input.config.operatorAddress, true);
+  add('treasury', input.config.treasuryAddress, true);
+  add('test recipient', input.config.testRecipientAddress, false);
+  const feeConfigId = input.feeConfigId.trim();
+  if (feeConfigId) {
+    if (!/^0x[0-9a-fA-F]{64}$/.test(feeConfigId)) throw new Error('SPLASH_FEE_CONFIG_ID is set but is not a FeeConfig id');
+    const fees = await input.readFeeConfig();
+    add('fee recipient', fees.feeRecipient, false);
+    add('proposed fee recipient', fees.pendingRecipient?.recipient, false);
   }
-  return out.map((a) => (a ?? '').trim().toLowerCase()).filter((a) => /^0x[0-9a-f]{64}$/.test(a));
+  return [...out];
+}
+
+/** Splash's own addresses from the contract config and the live FeeConfig. Throws when they cannot all be read. */
+export function splashOwnedAddresses(): Promise<string[]> {
+  return splashOwnedAddressesFrom({
+    config: getContractConfig(),
+    feeConfigId: process.env.SPLASH_FEE_CONFIG_ID ?? '',
+    readFeeConfig: getFeeConfig,
+  });
 }
 
 export function liveBillDeps(db: unknown): BillDeps {

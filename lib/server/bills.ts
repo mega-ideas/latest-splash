@@ -44,7 +44,7 @@ import {
   type ModelReading,
 } from '../bills/extract.ts';
 import { BILL_STATUS_LABEL, billSteps, scheduleBlockers, type BillFacts } from '../bills/flow.ts';
-import { maskDestination, matchRecipients, paymentDetailsDiffer, recipientVerified, type RecipientLite } from '../bills/match.ts';
+import { maskDestination, matchRecipients, paymentDetailsDiffer, recipientBlock, recipientVerified, type RecipientLite } from '../bills/match.ts';
 import { HANDOFF_CURRENCIES, type BillPaymentFlow } from '../bills/payment-hook.ts';
 import { suiScanTxUrlOn, type SuiNetworkName } from '../explorer.ts';
 import {
@@ -164,6 +164,7 @@ export function billFacts(row: BillRow, ctx: { recipients: RecipientLite[]; othe
     duplicateAcknowledged: row.duplicateAckAt !== null,
     recipientMatched: recipient !== null,
     recipientVerified: recipient !== null && recipientVerified(recipient),
+    recipientOwnershipUnproven: recipient !== null && recipientBlock(recipient) === 'ownership_unproven',
     scheduled: row.scheduledFor !== null,
     foreignSupplier: row.payeeCountry !== null && row.payeeCountry !== 'MY',
     eInvoiceMade: row.myinvois !== null,
@@ -203,6 +204,7 @@ export function billView(row: BillRow, ctx: { recipients: RecipientLite[]; other
       country: recipient.country,
       payoutMethod: recipient.payoutMethod,
       verified: recipientVerified(recipient),
+      blocked: recipientBlock(recipient),
       destination: maskDestination(recipient),
     } : null,
     recipientMissing: row.recipientId !== null && recipient === null,
@@ -218,6 +220,7 @@ export function billView(row: BillRow, ctx: { recipients: RecipientLite[]; other
         country: m.recipient.country,
         payoutMethod: m.recipient.payoutMethod,
         verified: m.verified,
+        blocked: recipientBlock(m.recipient),
         exact: m.exact,
         destination: maskDestination(m.recipient),
       }))
@@ -262,20 +265,47 @@ function nameMatches(payee: string, recipient: RecipientLite): boolean {
   return matchRecipients(payee, [recipient]).some((m) => m.exact);
 }
 
-/** The recipient is among the ones the supplier's name suggests (lib/bills/match.ts). */
-function nameResembles(payee: string, recipient: RecipientLite): boolean {
-  return matchRecipients(payee, [recipient]).length > 0;
+/** `0x` + 64 lower-case hex, or null: "0x5" and "0x00…05" are one address. */
+function suiAddress(value: string): string | null {
+  const m = /^(?:0x)?([0-9a-f]{1,64})$/i.exec(value.trim());
+  return m ? `0x${m[1].toLowerCase().padStart(64, '0')}` : null;
 }
 
 /** True when this recipient's wallet is one of Splash's own; throws when they cannot be read. */
 async function paysSplash(recipient: RecipientLite, deps: BillDeps): Promise<boolean> {
   if (!recipient.walletAddress) return false;
-  const own = (await deps.splashOwnedAddresses()).map((a) => a.trim().toLowerCase()).filter(Boolean);
-  return own.includes(recipient.walletAddress.trim().toLowerCase());
+  const own = new Set((await deps.splashOwnedAddresses()).map(suiAddress).filter((a): a is string => a !== null));
+  const wallet = suiAddress(recipient.walletAddress);
+  return wallet !== null && own.has(wallet);
 }
 
 const SPLASH_ADDRESS = 'That recipient’s wallet is one of Splash’s own addresses, and a supplier is never paid there. Check the recipient’s details.';
 const SPLASH_ADDRESSES_UNREAD = 'Splash could not check the recipient’s wallet against its own addresses just now, so nothing was changed. Try again shortly.';
+const UNSCREENED = 'That recipient is not verified yet. Screening must come back clear first.';
+const OWNERSHIP_UNPROVEN = 'The supplier has not proved it owns that wallet yet. A self-custody wallet is paid once the supplier signs the ownership proof.';
+
+/** Why this recipient cannot be paid, as the answer a route gives; null when it can. */
+function recipientRefusal(recipient: RecipientLite | undefined): Answer | null {
+  if (!recipient) return refuse(409, 'The recipient is no longer in your list. Match the invoice again.', { code: 'recipient_unverified' });
+  const block = recipientBlock(recipient);
+  if (block === 'ownership_unproven') return refuse(409, OWNERSHIP_UNPROVEN, { code: 'ownership_unproven' });
+  if (block === 'unscreened') return refuse(409, UNSCREENED, { code: 'recipient_unverified' });
+  if (recipient.payoutMethod === 'WALLET' && !(recipient.walletAddress && suiAddress(recipient.walletAddress))) {
+    return refuse(409, 'The recipient’s wallet on file is not a Sui address. Check it in Recipients.', { code: 'recipient_unverified' });
+  }
+  return null;
+}
+
+/**
+ * The payment flow's idempotency key for this attempt at paying this
+ * invoice: the same attempt at the same payment is the same key; a new
+ * attempt (an intent closed or withdrawn) or a change to what is paid is a
+ * new one (lib/bills/payment-hook.ts).
+ */
+export function billPaymentKey(row: Pick<BillRow, 'id' | 'paymentAttempt' | 'recipientId' | 'amountMinor' | 'currency' | 'scheduledFor'>): string {
+  const payload = [row.id, row.paymentAttempt, row.recipientId, String(row.amountMinor), row.currency, row.scheduledFor].join('|');
+  return `${row.id}:${row.paymentAttempt}:${sha256(payload).slice(0, 32)}`;
+}
 
 async function context(db: BillsDb, orgId: string, deps: BillDeps) {
   const [recipients, others] = await Promise.all([deps.listRecipients(orgId), listBills(db, orgId)]);
@@ -299,6 +329,7 @@ export async function handleBillList(db: BillsDb, caller: BillCaller, deps: Bill
       canWrite: mayWriteBills(caller.role),
       reader: deps.modelReader ? 'zeke' : 'parser',
       paymentFlowWired: deps.paymentFlow.wired,
+      paymentFlowCancels: deps.paymentFlow.wired && typeof deps.paymentFlow.cancel === 'function',
     },
   };
 }
@@ -404,6 +435,7 @@ const actionSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('match'), recipientId: z.string().trim().min(1).max(120), reason: z.string().trim().min(8).max(300).optional() }),
   z.object({ action: z.literal('schedule'), payOn: z.string().trim() }),
   z.object({ action: z.literal('unschedule') }),
+  z.object({ action: z.literal('withdraw') }),
   z.object({ action: z.literal('cancel'), reason: z.string().trim().max(300).optional() }),
 ]);
 
@@ -447,6 +479,9 @@ export async function handleBillAction(db: BillsDb, caller: BillCaller, id: stri
       if (!payeeKey(f.payee)) problems.payee = 'Enter the supplier’s name.';
       if (Object.keys(problems).length > 0) return refuse(422, 'Some fields need a second look.', { fields: problems });
       const amountMinor = toMicros(amount!);
+      // Compared with the invoice as read, and written only onto that
+      // invoice: one changed in between is checked again, so an answer given
+      // for another amount never survives onto this one.
       const changedWhatMatters = row.amountMinor !== amountMinor || row.payeeKey !== payeeKey(f.payee) || row.currency !== f.currency;
       const result = await updateBillIf(db, caller.orgId, id, ['review'], {
         payeeName: f.payee,
@@ -466,8 +501,8 @@ export async function handleBillAction(db: BillsDb, caller: BillCaller, id: stri
         ...(row.payeeKey !== null && row.payeeKey !== payeeKey(f.payee)
           ? { recipientId: null, matchedBy: null, matchedAt: null, matchReason: null }
           : {}),
-      }, entry(caller, now, 'confirmed'));
-      return moved(result, 'changed') ?? { status: 200, body: { bill: await viewOf(db, (result as { row: BillRow }).row, deps) } };
+      }, entry(caller, now, 'confirmed'), unchangedSince(row.updatedAt));
+      return changed(result, 'confirmed') ?? { status: 200, body: { bill: await viewOf(db, (result as { row: BillRow }).row, deps) } };
     }
     case 'acknowledge_duplicate': {
       const facts = billFacts(row, await context(db, caller.orgId, deps));
@@ -482,7 +517,8 @@ export async function handleBillAction(db: BillsDb, caller: BillCaller, id: stri
       const recipient = recipients.find((r) => r.id === action.recipientId);
       // Another org's recipient and a missing one are the same answer.
       if (!recipient) return refuse(404, 'Recipient not found.');
-      if (!recipientVerified(recipient)) return refuse(409, 'That recipient is not verified yet. Screening must come back clear first.', { code: 'recipient_unverified' });
+      const cannotPay = recipientRefusal(recipient);
+      if (cannotPay) return cannotPay;
       if (recipient.payoutMethod === 'BANK' && deps.stablecoinOnly()) {
         return refuse(403, 'Bank payouts are not open in this launch. Choose a recipient paid in USDC.', { code: 'launch_scope' });
       }
@@ -490,11 +526,12 @@ export async function handleBillAction(db: BillsDb, caller: BillCaller, id: stri
       try { splash = await paysSplash(recipient, deps); } catch { return refuse(503, SPLASH_ADDRESSES_UNREAD, { code: 'splash_addresses_unread' }); }
       if (splash) return refuse(409, SPLASH_ADDRESS, { code: 'splash_address' });
       if (!row.payeeName) return refuse(409, 'Check and confirm what Zeke read before choosing who is paid.', { code: 'not_confirmed' });
-      // The name on the invoice picks candidates. A recipient it does not
-      // suggest can still be the right one (a trading name, an agent), and
-      // then a person says why, in words kept with the invoice.
-      if (!nameResembles(row.payeeName, recipient) && !action.reason) {
-        return refuse(409, `${recipient.name} is not the supplier on this invoice. Say why this recipient is paid for it.`, { code: 'name_mismatch' });
+      // The name on the invoice picks candidates. Only the same name needs
+      // no reason: a recipient whose name is merely close, or that the name
+      // does not suggest at all, can still be the right one (a trading name,
+      // an agent), and then a person says why, in words kept with the invoice.
+      if (!nameMatches(row.payeeName, recipient) && !action.reason) {
+        return refuse(409, `${recipient.name} is not the name of the supplier on this invoice. Say why this recipient is paid for it.`, { code: 'name_mismatch' });
       }
       const result = await updateBillIf(db, caller.orgId, id, ['review'], {
         recipientId: recipient.id, matchedBy: caller.userId, matchedAt: now, matchReason: action.reason ?? null,
@@ -510,7 +547,7 @@ export async function handleBillAction(db: BillsDb, caller: BillCaller, id: stri
       if (facts.recipient?.payoutMethod === 'BANK' && deps.stablecoinOnly()) {
         return refuse(403, 'Bank payouts are not open in this launch. Choose a recipient paid in USDC.', { code: 'launch_scope' });
       }
-      if (facts.recipient && !nameResembles(row.payeeName ?? '', facts.recipient) && !row.matchReason) {
+      if (facts.recipient && !nameMatches(row.payeeName ?? '', facts.recipient) && !row.matchReason) {
         return refuse(409, 'Say why this recipient is paid for this supplier’s invoice, or choose another.', { code: 'name_mismatch' });
       }
       const day = readDate(action.payOn);
@@ -527,8 +564,28 @@ export async function handleBillAction(db: BillsDb, caller: BillCaller, id: stri
     case 'unschedule': {
       const result = await updateBillIf(db, caller.orgId, id, ['scheduled'], {
         status: 'review', scheduledFor: null, scheduledBy: null, scheduledAt: null,
+        // Whatever is approved next is another attempt, with its own key.
+        paymentAttempt: row.paymentAttempt + 1,
       }, entry(caller, now, 'unscheduled'));
       return moved(result, 'taken back to review') ?? { status: 200, body: { bill: await viewOf(db, (result as { row: BillRow }).row, deps) } };
+    }
+    case 'withdraw': {
+      // Out of "approving": only through the payment flow, which drops the
+      // intent first. Without that, the intent could still be signed while
+      // the invoice said otherwise.
+      if (row.status !== 'approving' || !row.paymentIntentId) {
+        return refuse(409, `This invoice is ${BILL_STATUS_LABEL[row.status].toLowerCase()}, so there is no approval to withdraw.`, { code: 'status' });
+      }
+      if (!deps.paymentFlow.cancel) {
+        return refuse(501, 'Withdrawing from approval is not connected to Transfer on this server yet. Ask the owners to refuse it in Transfer.', { code: 'PAYMENT_FLOW_NOT_WIRED' });
+      }
+      const cancelled = await deps.paymentFlow.cancel({ orgId: caller.orgId, billId: row.id, paymentIntentId: row.paymentIntentId, requestedBy: { userId: caller.userId, role: caller.role } });
+      if (!cancelled.ok) return refuse(cancelled.status === 501 ? 501 : 409, cancelled.error, { code: 'withdraw_refused' });
+      const result = await updateBillIf(db, caller.orgId, id, ['approving'], {
+        status: 'scheduled', paymentIntentId: null, approvalRequestedBy: null, approvalRequestedAt: null,
+        paymentAttempt: row.paymentAttempt + 1,
+      }, entry(caller, now, 'approval_withdrawn', row.paymentIntentId));
+      return moved(result, 'withdrawn from approval') ?? { status: 200, body: { bill: await viewOf(db, (result as { row: BillRow }).row, deps) } };
     }
     case 'cancel': {
       const result = await updateBillIf(db, caller.orgId, id, ['review', 'scheduled'], { status: 'cancelled' }, entry(caller, now, 'cancelled', action.reason));
@@ -550,8 +607,12 @@ export async function handleBillPay(db: BillsDb, caller: BillCaller, id: string,
   if (row.status !== 'scheduled') return refuse(409, 'Schedule the invoice before sending it for approval.', { code: 'status' });
   const recipients = await deps.listRecipients(caller.orgId);
   const recipient = recipients.find((r) => r.id === row.recipientId);
-  if (!recipient || !recipientVerified(recipient)) {
-    return refuse(409, 'The recipient is no longer verified. Check it in Recipients, then match it again.', { code: 'recipient_unverified' });
+  // Checked again here: screening, the ownership proof and the name can all
+  // change between the match and the approval.
+  const cannotPay = recipientRefusal(recipient);
+  if (cannotPay || !recipient) return cannotPay ?? refuse(409, 'The recipient is no longer in your list.', { code: 'recipient_unverified' });
+  if (!nameMatches(row.payeeName ?? '', recipient) && !row.matchReason) {
+    return refuse(409, 'Say why this recipient is paid for this supplier’s invoice, or choose another.', { code: 'name_mismatch' });
   }
   if (recipient.payoutMethod === 'BANK' && deps.stablecoinOnly()) {
     return refuse(403, 'Bank payouts are not open in this launch.', { code: 'launch_scope' });
@@ -572,7 +633,7 @@ export async function handleBillPay(db: BillsDb, caller: BillCaller, id: string,
   }
   const handoff = await deps.paymentFlow.start({
     orgId: caller.orgId,
-    idempotencyKey: row.id,
+    idempotencyKey: billPaymentKey(row),
     billId: row.id,
     requestedBy: { userId: caller.userId, role: caller.role },
     recipientId: recipient.id,
@@ -588,16 +649,35 @@ export async function handleBillPay(db: BillsDb, caller: BillCaller, id: string,
     return { status: handoff.status, body: { error: handoff.error, code: handoff.code, bill: await viewOf(db, row, deps) } };
   }
   const now = deps.now?.() ?? new Date();
+  // Only onto the invoice that was handed off: one changed while the flow
+  // took its quote (taken back, given another amount, scheduled again) is
+  // not marked approving on an intent that pays what it used to say.
   const result = await updateBillIf(db, caller.orgId, id, ['scheduled'], {
     status: 'approving',
     paymentIntentId: handoff.paymentIntentId,
     approvalRequestedBy: caller.userId,
     approvalRequestedAt: now,
-  }, entry(caller, now, 'sent_for_approval', handoff.paymentIntentId));
+  }, entry(caller, now, 'sent_for_approval', handoff.paymentIntentId), unchangedSince(row.updatedAt));
   if (!result.ok) {
+    // Another request with the same key got there first: its intent is this one.
+    if (result.row && (result.row.status === 'approving' || result.row.status === 'paid') && result.row.paymentIntentId === handoff.paymentIntentId) {
+      return { status: 200, body: { bill: await viewOf(db, result.row, deps), replayed: true } };
+    }
+    // Otherwise the intent pays something this invoice no longer says: drop
+    // it. Its key is spent either way, so a later approval gets a new one.
+    if (deps.paymentFlow.cancel) {
+      try {
+        await deps.paymentFlow.cancel({ orgId: caller.orgId, billId: row.id, paymentIntentId: handoff.paymentIntentId, requestedBy: { userId: caller.userId, role: caller.role } });
+      } catch {
+        // The intent cannot be signed for this invoice: nothing records it as this invoice's.
+      }
+    }
     if (result.reason === 'unique') return refuse(409, 'That payment already belongs to another invoice.', { code: 'intent_used' });
     if (result.row && (result.row.status === 'approving' || result.row.status === 'paid')) {
       return { status: 200, body: { bill: await viewOf(db, result.row, deps), replayed: true } };
+    }
+    if (result.reason === 'status' && result.row && ['scheduled', 'review'].includes(result.row.status)) {
+      return refuse(409, 'The invoice changed while it was being sent for approval. Check it again.', { code: 'changed', bill: await viewOf(db, result.row, deps) });
     }
     return moved(result, 'sent for approval')!;
   }
@@ -658,6 +738,8 @@ export async function recordBillPaymentClosed(
   if (!row || row.status !== 'approving') return { ok: false, bill: row };
   const result = await updateBillIf(db, input.orgId, row.id, ['approving'], {
     status: 'scheduled', paymentIntentId: null, approvalRequestedBy: null, approvalRequestedAt: null,
+    // The next approval is another attempt, with its own key: never answered with this closed intent.
+    paymentAttempt: row.paymentAttempt + 1,
   }, { at: input.at.toISOString(), by: 'payment-flow', action: 'payment_closed', note: input.reason.slice(0, 200) });
   return { ok: result.ok, bill: result.row };
 }

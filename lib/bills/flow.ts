@@ -44,6 +44,8 @@ export type BillFacts = {
   duplicateAcknowledged: boolean;
   recipientMatched: boolean;
   recipientVerified: boolean;
+  /** A self-custody wallet whose owner has not signed the ownership proof (brief 4.7). */
+  recipientOwnershipUnproven?: boolean;
   scheduled: boolean;
   foreignSupplier: boolean;
   eInvoiceMade: boolean;
@@ -56,6 +58,7 @@ export function scheduleBlockers(f: BillFacts): string[] {
   if (f.sameNumber) out.push('This invoice number is already in your list, from this supplier or to this recipient. Cancel one of the two.');
   if (f.sameAmount && !f.duplicateAcknowledged) out.push('Say why this is not a duplicate of the invoice with the same amount.');
   if (!f.recipientMatched) out.push('Choose the verified recipient this invoice pays.');
+  else if (f.recipientOwnershipUnproven) out.push('The supplier has not proved it owns this wallet yet. It is paid once it signs the ownership proof.');
   else if (!f.recipientVerified) out.push('The recipient is not verified yet.');
   return out;
 }

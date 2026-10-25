@@ -953,8 +953,34 @@ owner. Only `AdminCap` lifts a compliance freeze.
 
 Design: [`docs/v2/phase3-invoices.md`](docs/v2/phase3-invoices.md). Tests:
 `tests/pay-invoices.test.mjs`, `tests/invoices-page.test.mjs`,
-`tests/pay-invoices-review.test.mjs` (the independent review's findings) and
-`tests/pay-invoices-review-paths.test.mjs`.
+`tests/pay-invoices-review.test.mjs` (the independent review's findings),
+`tests/pay-invoices-review-paths.test.mjs` and
+`tests/pay-invoices-review-two.test.mjs` (the second review's findings).
+
+Second review (each pinned in `pay-invoices-review-two`):
+
+- **Splash's own addresses fail closed.** The operator and treasury addresses
+  are required; any configured address that is not a Sui address, a set but
+  malformed `SPLASH_FEE_CONFIG_ID`, or an unreadable FeeConfig throws, and
+  match and approve answer 503. The FeeConfig recipient proposed under the
+  24h notice is Splash's too. Addresses are normalised, not filtered.
+- **The hand-off key is versioned.** Invoice id, `payment_attempt` (0059) and
+  a hash of recipient, amount, currency and date; the contract says the same
+  key with another payload is a 409. Approve writes "approving" only onto
+  the invoice it handed off, and otherwise asks the flow to drop the intent.
+  "Approving" has a way out (`withdraw`), only through the flow's `cancel`.
+- **Self-custody wallets need the ownership proof** (D5, 4.7) before match and
+  hand-off (`ownership_unproven`). Nothing on this branch records the proof,
+  so no wallet recipient is paid from Invoices until 4.7 lands. The 5.4
+  contract asks the flow to check screening, the proof and Splash's
+  addresses again when it builds and signs.
+- **Names.** Only the same name needs no reason; generic words do not make
+  two names alike.
+- **Get paid.** The reference is given once, with "paid", kept as
+  `received_reference`; never rewritten after. The PATCH is a guarded UPDATE
+  on the status read (409 `changed`), closing the gap noted below. The pay
+  link's report is bounded, kept in `payer_reported_name`/`_email`, never
+  over the issuer's payer, and its email is not logged.
 
 - **A supplier's invoice is untrusted data.** What it says is a proposal; a
   person confirms every field. The payee picks candidates among the
@@ -989,7 +1015,7 @@ Design: [`docs/v2/phase3-invoices.md`](docs/v2/phase3-invoices.md). Tests:
   (`fx_quote_needed`); no rate is invented.
 - **Approval is not here.** Pay invoices hands a scheduled invoice to the
   payment flow (brief 5.4) through `lib/bills/payment-hook.ts`, keyed by the
-  invoice id. That flow is not on this branch: the hook answers 501
+  invoice id, its attempt and what is paid. That flow is not on this branch: the hook answers 501
   `PAYMENT_FLOW_NOT_WIRED` and nothing changes. Only the server-side
   `recordBillSettlement`, called by that flow, marks an invoice paid; no
   client route reaches it. A paid or cancelled invoice never changes.
@@ -1012,8 +1038,8 @@ Design: [`docs/v2/phase3-invoices.md`](docs/v2/phase3-invoices.md). Tests:
   report is a guarded UPDATE on the statuses a payer may report from. Only
   owners, finance admins, approvers and makers (the membership's role) may
   PATCH an invoice, and a transfer it binds to must be the org's own. The
-  PATCH itself still reads then writes; a concurrent USDC sync between the
-  two is not yet guarded in the database.
+  PATCH's write is guarded on the status it read (second review), so a
+  concurrent USDC sync between the two is not overwritten.
 
 ## WS4 — operator custody, the code half — 2026-10-23
 

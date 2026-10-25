@@ -161,6 +161,13 @@ export type RecipientRecord = {
   walletAddress?: string;
   /** 'SLUSH' | 'METAMASK_SUI_SNAP'. */
   walletProvider?: string;
+  /**
+   * When the supplier signed the ownership proof for `walletAddress` (brief
+   * 4.7: address, business name, nonce, expiry). Absent means not proven,
+   * and a self-custody wallet is not paid from Invoices until it is. Nothing
+   * on this branch sets it yet.
+   */
+  walletOwnershipProvenAt?: string | null;
   /** Sanctions screening outcome; null/absent = never screened. */
   screeningVerdict?: string | null;
   /**
@@ -234,6 +241,11 @@ export type InvoiceRecord = {
   /** What the payer said from the pay link: a report, never the evidence it was paid. */
   payerReportedReference?: string;
   payerReportedAt?: string;
+  /** Who the payer said they were on the pay link (0059); the issuer's payer fields stay the issuer's. */
+  payerReportedName?: string;
+  payerReportedEmail?: string;
+  /** The reference on the business's own statement, typed when it marked the invoice paid (0059). */
+  receivedReference?: string;
   createdAt: string;
   updatedAt: string;
 };

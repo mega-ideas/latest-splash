@@ -250,7 +250,8 @@ test('a recipient whose wallet is a Splash address is never matched or paid', as
   assert.equal(matched.body.code, 'splash_address');
   // Matched before the address became Splash's: the hand-off refuses.
   const early = deps({ splashOwnedAddresses: async () => [] }).d;
-  assert.equal((await handleBillAction(db, ACME_MAKER, id, { action: 'match', recipientId: 'r_op' }, early)).status, 200);
+  // Its name is only close to the supplier's, so it is matched with a reason (second review).
+  assert.equal((await handleBillAction(db, ACME_MAKER, id, { action: 'match', recipientId: 'r_op', reason: 'Mabuhay pays from its treasury' }, early)).status, 200);
   await handleBillAction(db, ACME_MAKER, id, { action: 'schedule', payOn: '2026-11-15' }, d);
   d.paymentFlow = wiredFlow(calls);
   const refused = await handleBillPay(db, ACME_MAKER, id, d);

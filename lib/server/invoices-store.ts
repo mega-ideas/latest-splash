@@ -52,6 +52,9 @@ function toRecord(row: repo.InvoiceRow): InvoiceRecord {
     usdcPaidAt: row.usdcPaidAt,
     payerReportedReference: row.payerReportedReference,
     payerReportedAt: row.payerReportedAt,
+    payerReportedName: row.payerReportedName,
+    payerReportedEmail: row.payerReportedEmail,
+    receivedReference: row.receivedReference,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -138,14 +141,17 @@ export async function patchInvoice(
   orgId: string,
   invoiceId: string,
   patch: Partial<InvoiceRecord>,
+  /** Only while the invoice is still in the status the caller read; null when it is not. */
+  expect?: { status: string },
 ): Promise<InvoiceRecord | null> {
   if (!usingPostgres()) {
     const record = operations.invoices.get(invoiceId);
     if (!record || record.orgId !== orgId) return null;
+    if (expect && record.status !== expect.status) return null;
     Object.assign(record, patch, { updatedAt: new Date().toISOString() });
     return record;
   }
-  const row = await repo.patchInvoice(await db(), orgId, invoiceId, patch);
+  const row = await repo.patchInvoice(await db(), orgId, invoiceId, patch, expect);
   return row ? toRecord(row) : null;
 }
 
@@ -164,8 +170,8 @@ export async function reportInvoicePayment(
     if (!record || !from.includes(record.status)) return null;
     Object.assign(record, {
       status: 'reported',
-      payerOrgName: report.payerOrgName,
-      payerOrgEmail: report.payerOrgEmail,
+      payerReportedName: report.payerOrgName,
+      payerReportedEmail: report.payerOrgEmail,
       payerReportedReference: report.reference,
       payerReportedAt: report.at.toISOString(),
       updatedAt: report.at.toISOString(),
