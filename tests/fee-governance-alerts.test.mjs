@@ -313,11 +313,11 @@ test('a fee proposal reaches every owner of every business once, on every channe
     assert.deepEqual(again.recorded, []);
     assert.equal(sink.emails.length, 4);
 
-    // Withdrawn on chain: no longer shown.
+    // Withdrawn on chain: the proposals are no longer shown; the withdrawals are.
     read = chainRead({ version: 78 });
     const withdrawn = await runGovernanceAlertMonitor(deps(db, () => read, sink, { now: NOW + 30 * 60_000 }));
-    assert.deepEqual(withdrawn.active, []);
-    assert.deepEqual(await readGovernanceBannerForSession({ email: 'alice@acme.example' }, NOW + 30 * 60_000), []);
+    assert.ok(first.recorded.every((id) => !withdrawn.active.includes(id)));
+    assert.deepEqual((await readGovernanceBannerForSession({ email: 'alice@acme.example' }, NOW + 30 * 60_000)).map((a) => a.kind).sort(), ['fee_recipient_withdrawn', 'fee_schedule_withdrawn']);
     const stored = (await client.query(`SELECT subject_kind, object_version FROM governance_watch_state WHERE subject_id = $1`, [FEE])).rows[0];
     assert.deepEqual([stored.subject_kind, Number(stored.object_version)], ['fee_config', 78]);
     assert.deepEqual(sink.pages, []);
@@ -336,5 +336,80 @@ test('a FeeConfig that does not check out records nothing and pages a person', a
     assert.deepEqual(sink.pages.map((p) => [p.kind, p.objectId]), [['governance_config_mismatch', FEE]]);
     assert.equal((await client.query(`SELECT count(*)::int AS n FROM governance_alerts`)).rows[0].n, 0);
     assert.equal(sink.emails.length, 0);
+  });
+});
+
+// ─── 4. Review fixes: withdrawn proposals, and a fee config that cannot be read ──
+
+test('a withdrawn fee proposal is its own alert; a replaced, applied or lapsed one is not a withdrawal', () => {
+  const proposed = stateOf(chainRead({ version: 77, pendingSchedules: { 4: { schedule: DEARER_BANK, eta: ETA } }, pendingRecipient: { recipient: NEW_FINANCE, eta: ETA } }));
+  const before = deriveGovernanceAlerts(proposed, NO_HISTORY, NOW).snapshots;
+
+  const { alerts } = deriveGovernanceAlerts(stateOf(chainRead({ version: 78 })), before, NOW + 60_000);
+  const by = Object.fromEntries(alerts.map((a) => [a.kind, a]));
+  assert.deepEqual(Object.keys(by).sort(), ['fee_recipient_withdrawn', 'fee_schedule_withdrawn']);
+  assert.equal(by.fee_schedule_withdrawn.feeKind, 4);
+  assert.equal(by.fee_schedule_withdrawn.summary, 'Splash has withdrawn the change it announced to its fee for payments to a bank. The fee in force is unchanged.');
+  assert.match(by.fee_schedule_withdrawn.detail, new RegExp(`In force: under 1,000 USDC ${formatRate(30n).replace('.', '\\.')}`));
+  assert.equal(by.fee_recipient_withdrawn.feeRecipient, NEW_FINANCE);
+  assert.equal(by.fee_recipient_withdrawn.summary, 'Splash has withdrawn the change it announced to the account its fees are paid to. Fees are still paid to the same account.');
+  assert.match(by.fee_recipient_withdrawn.detail, new RegExp(`The withdrawn proposal named ${NEW_FINANCE}\\. Fees are paid to ${FINANCE}\\.`));
+  assert.equal(by.fee_schedule_withdrawn.activeUntilMs, NOW + 60_000 + 8 * DAY);
+  assert.doesNotMatch(alerts.map((a) => a.summary + a.detail).join(' '), /[—–]/);
+
+  // Replaced by a new proposal for the same kind: the new proposal is the news.
+  const replaced = deriveGovernanceAlerts(stateOf(chainRead({ version: 78, pendingSchedules: { 4: { schedule: { ...DEARER_BANK, minMinor: 1n }, eta: ETA + DAY } } })), before, NOW + 60_000).alerts;
+  assert.deepEqual(replaced.map((a) => a.kind), ['fee_schedule_proposed', 'fee_recipient_withdrawn']);
+  // Applied: told as applied, not withdrawn.
+  const applied = deriveGovernanceAlerts(stateOf(chainRead({ version: 79, schedules: [...LAUNCH_SCHEDULE.slice(0, 4), DEARER_BANK], recipient: NEW_FINANCE })), before, ETA + 60_000).alerts;
+  assert.deepEqual(applied.map((a) => a.kind).sort(), ['fee_recipient_applied', 'fee_schedule_applied']);
+  // Lapsed on chain and then cleared: nothing to tell.
+  assert.deepEqual(deriveGovernanceAlerts(stateOf(chainRead({ version: 80 })), before, ETA + 7 * DAY + 1).alerts, []);
+  // The first fee recipient withdrawn: fees still off.
+  const offBefore = deriveGovernanceAlerts(stateOf(chainRead({ version: 60, recipient: null, pendingRecipient: { recipient: FINANCE, eta: ETA } })), NO_HISTORY, NOW).snapshots;
+  const [off] = deriveGovernanceAlerts(stateOf(chainRead({ version: 61, recipient: null })), offBefore, NOW).alerts;
+  assert.equal(off.summary, 'Splash has withdrawn its announcement that its fees start. No Splash fee is charged.');
+});
+
+test('a withdrawn fee proposal reaches every owner once', async () => {
+  await withDb(async ({ client, db }) => {
+    await seedOwners(client);
+    const { runGovernanceAlertMonitor } = await import('../lib/server/governance-alert-monitor.ts');
+    const sink = { emails: [], whatsapps: [], pages: [] };
+    let read = chainRead({ pendingSchedules: { 4: { schedule: DEARER_BANK, eta: ETA } } });
+    await runGovernanceAlertMonitor(deps(db, () => read, sink));
+    assert.equal(sink.emails.length, 2);
+    read = chainRead({ version: 78 });
+    const r = await runGovernanceAlertMonitor(deps(db, () => read, sink, { now: NOW + 30 * 60_000 }));
+    assert.equal(r.ok, true, r.reason);
+    assert.equal(r.recorded.length, 1);
+    const mails = sink.emails.slice(2);
+    assert.deepEqual(mails.map((m) => m.to).sort(), ['alice@acme.example', 'dave@northwind.example']);
+    assert.equal(mails[0].subject, 'A change to the Splash fee schedule has been withdrawn');
+    assert.match(mails[0].text, new RegExp(`object ${FEE} shows no pending schedule for it, and the fee schedule in force`));
+    const [row] = (await client.query(`SELECT kind, fee_kind, review_path FROM governance_alerts WHERE kind = 'fee_schedule_withdrawn'`)).rows;
+    assert.deepEqual([row.fee_kind, row.review_path], [4, '/dashboard/settings']);
+    await runGovernanceAlertMonitor(deps(db, () => read, sink, { now: NOW + 45 * 60_000 }));
+    assert.equal(sink.emails.length, 4, 'never twice');
+  });
+});
+
+test('a fee config that cannot be read still lets the upgrade and owner-change alerts through, and still pages and answers 502', async () => {
+  await withDb(async ({ client, db }) => {
+    await seedOwners(client);
+    const { runGovernanceAlertMonitor } = await import('../lib/server/governance-alert-monitor.ts');
+    const sink = { emails: [], whatsapps: [], pages: [] };
+    const wrapper = wrapperObject();
+    wrapper.asMoveObject.contents.json.pending_owner = { new_owner: ATTACKER, eta_ms: String(ETA) };
+    const read = () => ({ wrapper, config: configObject(), feeConfig: feeObject({ json: { id: FEE, schedules: 'not a list' } }) });
+    const result = await runGovernanceAlertMonitor(deps(db, read, sink));
+    assert.equal(result.ok, false, 'the run still fails closed');
+    assert.match(result.reason, /the fee config .* could not be read in full/);
+    assert.deepEqual(sink.pages.map((p) => [p.kind, p.objectId]), [['governance_config_mismatch', FEE]]);
+    const kinds = (await client.query(`SELECT kind FROM governance_alerts`)).rows.map((x) => x.kind);
+    assert.deepEqual(kinds, ['owner_change_proposed'], 'the wrapper alert is recorded');
+    assert.deepEqual(sink.emails.map((m) => m.to).sort(), ['alice@acme.example', 'dave@northwind.example'], 'and delivered');
+    const fee = (await client.query(`SELECT count(*)::int AS n FROM governance_watch_state WHERE subject_id = $1`, [FEE])).rows[0].n;
+    assert.equal(fee, 0, 'nothing from the unreadable fee config is stored');
   });
 });
