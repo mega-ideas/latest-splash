@@ -1687,3 +1687,133 @@ export const walletOffboardedSpenders = pgTable('wallet_offboarded_spenders', {
 }, (table) => [
   index('wallet_offboarded_spenders_org_idx').on(table.orgId, table.address).where(sql`${table.resolvedAt} is null`),
 ]);
+
+/* ── Funding the Business Splash Wallet (v2 §4.3, migration 0038) ───────── */
+
+/**
+ * A bank account in the company's name, a card, or a wallet the business
+ * proved it controls. Identified by `fingerprint`, a SHA-256 of the account,
+ * card or address: no full account or card number is stored.
+ */
+export const fundingSources = pgTable('funding_sources', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  /** bank_account | card | wallet */
+  kind: text('kind').notNull(),
+  label: text('label').notNull(),
+  holderName: text('holder_name'),
+  fingerprint: text('fingerprint').notNull(),
+  last4: text('last4'),
+  /** Wallets: SUI | SOLANA | EVM, and the address in normalized form. */
+  chain: text('chain'),
+  address: text('address'),
+  /** Cards and bank accounts seen through a funding partner. */
+  provider: text('provider'),
+  /** pending | verified | rejected | revoked */
+  status: text('status').notNull(),
+  /** company_name | wallet_signature | first_use */
+  method: text('method'),
+  evidenceSha256: text('evidence_sha256'),
+  verifiedAt: timestamp('verified_at', { withTimezone: true }),
+  verifiedBy: text('verified_by'),
+  rejectedReason: text('rejected_reason'),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  firstUseAt: timestamp('first_use_at', { withTimezone: true }),
+  /** passed | failed */
+  firstUseResult: text('first_use_result'),
+  firstUseDetail: text('first_use_detail'),
+  createdBy: text('created_by').notNull(),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('funding_sources_org_fingerprint_unique').on(table.orgId, table.kind, table.fingerprint),
+  index('funding_sources_wallet_idx').on(table.orgId, table.chain, table.address),
+]);
+
+/** The single-use message a business signs to prove it controls a wallet. */
+export const fundingSourceChallenges = pgTable('funding_source_challenges', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  sourceId: text('source_id').notNull().references(() => fundingSources.id),
+  message: text('message').notNull(),
+  nonce: text('nonce').notNull().unique(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  usedAt: timestamp('used_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * One top-up into the business wallet. `id` is the idempotency key a funding
+ * partner gets; `client_key` makes a retried click open nothing new.
+ */
+export const fundingIntents = pgTable('funding_intents', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  clientKey: text('client_key').notNull(),
+  /** provider | wallet | cctp | swap */
+  channel: text('channel').notNull(),
+  provider: text('provider'),
+  method: text('method'),
+  sourceId: text('source_id').references(() => fundingSources.id),
+  asset: text('asset').notNull(),
+  sourceChain: text('source_chain'),
+  amountMinor: bigint('amount_minor', { mode: 'bigint' }).notNull(),
+  /** The business wallet, read from the chain when the intent was made. */
+  walletAddress: text('wallet_address').notNull(),
+  quote: jsonb('quote'),
+  instructions: jsonb('instructions'),
+  /** awaiting_funds | provider_pending | arrived | failed | expired | cancelled */
+  status: text('status').notNull(),
+  providerRef: text('provider_ref'),
+  /** top_up | transfer_top_up */
+  purpose: text('purpose').notNull(),
+  transferRef: text('transfer_ref'),
+  arrivedDepositId: text('arrived_deposit_id'),
+  failure: text('failure'),
+  createdBy: text('created_by').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('funding_intents_client_key_unique').on(table.orgId, table.clientKey),
+  uniqueIndex('funding_intents_provider_ref_unique').on(table.provider, table.providerRef).where(sql`${table.providerRef} is not null`),
+  index('funding_intents_org_idx').on(table.orgId, table.status),
+]);
+
+/** Money that arrived in the business wallet, as the chain recorded it. */
+export const walletDeposits = pgTable('wallet_deposits', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  walletAddress: text('wallet_address').notNull(),
+  suiDigest: text('sui_digest').notNull(),
+  coinType: text('coin_type').notNull(),
+  /** USDC | USDT | USDSUI */
+  asset: text('asset').notNull(),
+  amountMinor: bigint('amount_minor', { mode: 'bigint' }).notNull(),
+  channel: text('channel').notNull(),
+  intentId: text('intent_id').references(() => fundingIntents.id),
+  sourceId: text('source_id').references(() => fundingSources.id),
+  sender: text('sender'),
+  originChain: text('origin_chain'),
+  originAddress: text('origin_address'),
+  /** held | cleared | blocked */
+  status: text('status').notNull(),
+  holdReasons: jsonb('hold_reasons').notNull().default(sql`'[]'::jsonb`),
+  screening: jsonb('screening').notNull(),
+  firstUse: boolean('first_use').notNull().default(false),
+  arrivedAt: timestamp('arrived_at', { withTimezone: true }),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('wallet_deposits_arrival_unique').on(table.suiDigest, table.walletAddress, table.coinType),
+  index('wallet_deposits_org_idx').on(table.orgId, table.status),
+]);
+
+/** Each funding-partner webhook, once. */
+export const fundingProviderEvents = pgTable('funding_provider_events', {
+  provider: text('provider').notNull(),
+  eventId: text('event_id').notNull(),
+  orgId: text('org_id').references(() => organizations.id),
+  intentId: text('intent_id'),
+  status: text('status').notNull(),
+  receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  primaryKey({ columns: [table.provider, table.eventId] }),
+]);

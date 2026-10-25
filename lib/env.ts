@@ -410,6 +410,32 @@ export const envSchema = z.object({
   FUNDING_CCTP_SOLANA_ENABLED: flag('false'),
   FUNDING_PROVIDER_STRIPE_ENABLED: flag('true'),
   FUNDING_PROVIDER_AIRWALLEX_ENABLED: flag('true'),
+
+  /* v2 §4.3, funding the Business Splash Wallet (lib/funding/providers.ts,
+     swap-routes.ts, lib/compliance/kyt.ts). Every partner and route is a
+     sandbox outside production; in production each refuses without its
+     credentials and, until its API is wired, with them. None is required at
+     boot: a missing key refuses at the request, never a build. */
+  FUNDING_PROVIDER_HALLIDAY_ENABLED: flag('true'),
+  FUNDING_PROVIDER_TRANSFI_ENABLED: flag('true'),
+  /** Bridge is in talks (D7): stubbed and off. */
+  FUNDING_PROVIDER_BRIDGE_ENABLED: flag('false'),
+  HALLIDAY_API_KEY: optional,
+  HALLIDAY_WEBHOOK_SECRET: optional,
+  STRIPE_FUNDING_WEBHOOK_SECRET: optional,
+  TRANSFI_API_KEY: optional,
+  TRANSFI_WEBHOOK_SECRET: optional,
+  BRIDGE_API_KEY: optional,
+  BRIDGE_WEBHOOK_SECRET: optional,
+  /** The sandbox partners' webhook secret, outside production only. */
+  FUNDING_SANDBOX_WEBHOOK_SECRET: optional,
+  FUNDING_SWAP_LIFI_ENABLED: flag('true'),
+  FUNDING_SWAP_DEBRIDGE_ENABLED: flag('true'),
+  LIFI_API_KEY: optional,
+  DEBRIDGE_API_KEY: optional,
+  /** Elliptic (D8): deposit and recipient screening. Configured, not yet connected. */
+  ELLIPTIC_API_KEY: optional,
+  ELLIPTIC_API_SECRET: optional,
   USDC_AVAILABLE_MICRO: opt(z.coerce.number().int().min(0)),
   USDT_AVAILABLE_MICRO: opt(z.coerce.number().int().min(0)),
   USDT_BUFFER_AGE_MS: int(0),

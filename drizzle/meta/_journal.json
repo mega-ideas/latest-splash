@@ -267,6 +267,13 @@
       "when": 1791763200000,
       "tag": "0037_wallet_offboarding",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1791849600000,
+      "tag": "0038_wallet_funding",
+      "breakpoints": true
     }
   ]
 }

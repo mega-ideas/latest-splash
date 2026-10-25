@@ -108,6 +108,12 @@ export type WalletContext = {
   readIntent?: (id: string) => Promise<IntentState | null>;
   /** USDC held at an address: in coin objects and in its address balance. */
   readUsdc?: (address: string) => Promise<{ coinMinor: bigint; addressBalanceMinor: bigint }>;
+  /**
+   * USDC in deposits held or blocked at this wallet (v2 §4.3): funds from an
+   * unverified source, unscreened or flagged. A payment Splash builds never
+   * spends them.
+   */
+  heldUsdc?: (wallet: string) => Promise<bigint>;
   /** Whether plain USDC transfers go through the gasless lane (STABLECOIN_GASLESS). */
   gasless?: () => boolean;
   /** Epoch and chain id for a gasless transfer's ValidDuring window. */
@@ -522,11 +528,44 @@ export async function changeWalletMembership(
   });
 }
 
+/**
+ * Held funds are not spent (v2 §4.3). When any USDC at the wallet is held,
+ * a payment is built only if the wallet's USDC less the held amount covers
+ * principal plus the fee bound. Splash cannot freeze a wallet it has no key
+ * to; it refuses to build, sponsor or route a payment that would use held
+ * funds.
+ */
+async function holdsAllow(ctx: WalletContext, wallet: string, needMinor: bigint): Promise<PlanFailure | null> {
+  if (!ctx.heldUsdc) return null;
+  let held: bigint;
+  try {
+    held = await ctx.heldUsdc(wallet);
+  } catch {
+    return refuse(503, 'holds_unreadable', 'held deposits could not be read, so no payment was built');
+  }
+  if (held <= 0n) return null;
+  if (!ctx.readUsdc) return refuse(409, 'funds_on_hold', 'some funds in this wallet are on hold, and its balance could not be read, so no payment was built');
+  let balance: bigint;
+  try {
+    const b = await ctx.readUsdc(wallet);
+    balance = b.coinMinor + b.addressBalanceMinor;
+  } catch {
+    return refuse(502, 'balance_unreadable', 'the wallet balance could not be read, so no payment was built');
+  }
+  const spendable = balance > held ? balance - held : 0n;
+  if (needMinor > spendable) {
+    return refuse(409, 'funds_on_hold', 'this payment would use funds that are on hold until their source is verified and screened', { heldMinor: held.toString(), spendableMinor: spendable.toString() });
+  }
+  return null;
+}
+
 /** A payment from the business wallet, signed by its quorum. */
 export async function requestWalletPayment(
   ctx: WalletContext,
   input: { orgId: string; requestedBy: string; wallet: WalletMembers; payment: Omit<WalletPayment, 'wallet' | 'account' | 'gas'> },
 ): Promise<Result> {
+  const onHold = await holdsAllow(ctx, registration(input.wallet).address, input.payment.amountMinor + input.payment.maxFeeMinor);
+  if (onHold) return onHold;
   const gas = await sponsoredGas(ctx);
   if (!gas) return refuse(503, 'no_sponsor', 'business wallet transactions need a gas sponsor, and none is configured');
   let bytes: Uint8Array;
@@ -588,6 +627,8 @@ export async function requestOpenIntentPayment(
   if (intent.kind === V2_KIND.CROSS_CHAIN) {
     return refuse(400, 'cross_chain_not_built', 'a cross-chain payment is paid through a bridge adapter, which is not registered yet');
   }
+  const onHold = await holdsAllow(ctx, registration(input.wallet).address, intent.amountMinor + input.maxFeeMinor);
+  if (onHold) return onHold;
   const gas = await sponsoredGas(ctx);
   if (!gas) return refuse(503, 'no_sponsor', 'business wallet transactions need a gas sponsor, and none is configured');
   let bytes: Uint8Array;

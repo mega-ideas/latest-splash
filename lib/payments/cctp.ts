@@ -607,3 +607,70 @@ export function planCrossChainPayout(input: {
     },
   };
 }
+
+// ─── Reading a CCTP V2 mint on Sui: who burned on the other side ────────────
+
+/**
+ * Circle's MessageTransmitterV2 package on Sui (docs/mainnet-checks-2026-10.md
+ * section 5, from Circle's Sui packages page, read 24 Oct 2026). An event
+ * type keeps the package's original id across upgrades, so only events from
+ * these ids are Circle's: anyone can publish a module that emits an event
+ * named MessageReceived.
+ */
+export const CCTP_SUI_MESSAGE_TRANSMITTER = {
+  mainnet: '0x16bcfcfc465f96281663a344641c017de84529370e11aa3879d0dce43ad6db87',
+  testnet: '0xe9678cd42a81886e18e21361088071f275105636a4d3751e1d7f255211f73bbe',
+} as const;
+
+/** The domain → chain table, inverted, for a mint's source. */
+export function chainForDomain(domain: number): CctpPeerChain | null {
+  for (const [chain, facts] of Object.entries(FUNDING_CHAINS) as Array<[CctpPeerChain, ChainFacts]>) {
+    if (facts.cctpDomain === domain) return chain;
+  }
+  return null;
+}
+
+export type BurnMessageV2 = {
+  version: number;
+  burnToken: string;
+  /** 32 bytes, 0x hex. */
+  mintRecipient: string;
+  amount: bigint;
+  /** Who burned on the source chain, 32 bytes, 0x hex (an EVM address is left-padded). */
+  messageSender: string;
+};
+
+/**
+ * CCTP V2's BurnMessage body (Circle's BurnMessageV2): version (uint32),
+ * burnToken (bytes32), mintRecipient (bytes32), amount (uint256),
+ * messageSender (bytes32), then maxFee, feeExecuted, expirationBlock and hook
+ * data, which are not read here. Null when the bytes are too short.
+ *
+ * Verify against a real testnet mint before relying on it: a deposit whose
+ * burner cannot be read is held (source unknown), never credited to a guess.
+ */
+export function decodeBurnMessageV2(body: Uint8Array): BurnMessageV2 | null {
+  if (body.length < 132) return null;
+  const word = (offset: number) => `0x${toHex(body.slice(offset, offset + 32))}`;
+  const version = new DataView(body.buffer, body.byteOffset, body.byteLength).getUint32(0, false);
+  return {
+    version,
+    burnToken: word(4),
+    mintRecipient: word(36),
+    amount: BigInt(word(68)),
+    messageSender: word(100),
+  };
+}
+
+/** A bytes32 burner as the address its chain writes: EVM (last 20 bytes, lowercase), Solana (base58), else null. */
+export function burnerAddress(chain: CctpPeerChain, messageSender: string): string | null {
+  const format = FUNDING_CHAINS[chain]?.addressFormat;
+  const bytes = fromHex(messageSender);
+  if (bytes.length !== 32) return null;
+  if (format === 'EVM') {
+    if (bytes.slice(0, 12).some((b) => b !== 0)) return null;
+    return `0x${toHex(bytes.slice(12))}`;
+  }
+  if (format === 'SOLANA') return toBase58(bytes);
+  return null;
+}

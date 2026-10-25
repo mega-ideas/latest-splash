@@ -240,6 +240,10 @@ export async function liveWalletContext(orgId: string): Promise<{ ok: true; ctx:
       const { balance } = await suiClient.core.getBalance({ owner, coinType: usdcType });
       return { coinMinor: BigInt(balance.coinBalance), addressBalanceMinor: BigInt(balance.addressBalance) };
     },
+    heldUsdc: async (wallet) => {
+      const { heldUsdcMinor } = await import('@/lib/server/wallet-funding-store');
+      return heldUsdcMinor(db, { orgId, walletAddress: normalizeSuiAddress(wallet), usdcType: normalizeStructTag(usdcType) });
+    },
     gasless: () => gaslessEnabled(),
     validity: async () => {
       const { suiClient } = await import('@/lib/sui');
