@@ -2080,7 +2080,7 @@ export const kytScreenings = pgTable('kyt_screenings', {
   requestedBy: text('requested_by').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
-  uniqueIndex('kyt_screenings_reference_unique').on(table.orgId, table.provider, table.reference).where(sql`${table.reference} is not null`),
+  uniqueIndex('kyt_screenings_reference_unique').on(table.orgId, table.provider, table.reference, table.chain, table.address).where(sql`${table.reference} is not null`),
   index('kyt_screenings_subject_idx').on(table.orgId, table.chain, table.address, table.createdAt),
 ]);
 
@@ -2105,7 +2105,7 @@ export const travelRuleTransfers = pgTable('travel_rule_transfers', {
   provider: text('provider').notNull(),
   sandbox: boolean('sandbox').notNull(),
   providerRef: text('provider_ref'),
-  /** preparing | submitted | awaiting_counterparty | on_hold | approved | rejected */
+  /** preparing | sending | unconfirmed | submitted | awaiting_counterparty | on_hold | approved | rejected */
   status: text('status').notNull(),
   createdBy: text('created_by').notNull(),
   ...timestamps,

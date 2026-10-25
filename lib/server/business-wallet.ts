@@ -60,6 +60,8 @@ import {
 } from '@/lib/server/sui-v2-builders';
 import { openSigningRequest, type SigningDeps, type SigningFailure, type RequestView, type WithdrawalSigningDetails } from '@/lib/server/wallet-signing';
 import { listSigningRequests, type DrizzleDb, type StoredRequest } from '@/lib/server/wallet-signing-store';
+import type { KytProvider } from '@/lib/compliance/kyt';
+import { recipientScreeningGate } from '@/lib/server/kyt-screenings';
 
 /** What the BusinessAccount says on chain, read fresh for each flow. */
 export type AccountState = {
@@ -120,6 +122,14 @@ export type WalletContext = {
   gasless?: () => boolean;
   /** Epoch and chain id for a gasless transfer's ValidDuring window. */
   validity?: () => Promise<{ epoch: bigint; chain: string; nonce: number }>;
+  /**
+   * The server's screening provider (v2 §4.6): a recipient's stale CLEAR is
+   * screened again before a payment to it is opened. Absent, a stale CLEAR
+   * is refused. A payment is never opened without a fresh CLEAR either way.
+   */
+  kyt?: KytProvider | null;
+  /** How old that CLEAR may be (KYT_SCREENING_MAX_AGE_HOURS; tests). */
+  screeningMaxAgeMs?: number;
 };
 
 /** A stored wallet: its multisig key and who each member is. */
@@ -137,6 +147,23 @@ type Result = { ok: true; request: RequestView } | SigningFailure;
 export type PlanFailure = SigningFailure & { details?: Record<string, unknown> };
 
 const refuse = (status: number, code: string, error: string, details?: Record<string, unknown>): PlanFailure => ({ ok: false, status, code, error, ...(details ? { details } : {}) });
+
+/**
+ * A payment to a recipient is opened only when this business's newest
+ * screening of it is a fresh CLEAR (v2 §4.6): BLOCK 403, REVIEW and
+ * unscreened 409, a stale CLEAR screened again (ctx.kyt) or refused. The
+ * signing layer checks the same again before each signature
+ * (lib/server/payment-compliance-gate.ts). Every Splash-built payment to a
+ * wallet or exchange recipient calls this; a bank payout pays the business's
+ * verified partner deposit address and goes through the payout route.
+ */
+export async function recipientCleared(ctx: WalletContext, orgId: string, recipient: string, requestedBy: string): Promise<PlanFailure | null> {
+  const refused = await recipientScreeningGate(
+    { db: ctx.signing.db, orgId, now: (ctx.signing.now ?? (() => new Date()))(), kyt: ctx.kyt ?? null, ...(ctx.screeningMaxAgeMs ? { maxAgeMs: ctx.screeningMaxAgeMs } : {}), requestedBy },
+    recipient,
+  );
+  return refused ? refuse(refused.status, refused.code, refused.error) : null;
+}
 
 function passkeySuiKey(compressed: string): { suiKey: string; address: string } {
   const key = new PasskeyPublicKey(fromBase64(compressed));
@@ -634,6 +661,11 @@ export async function requestWalletPayment(
     const e = error as { code?: string; message?: string };
     return refuse(400, e.code ?? 'bad_payment', e.message ?? 'the payment could not be built');
   }
+  if (!input.withdrawal) {
+    // Nothing is stored for a recipient that is not a fresh CLEAR here.
+    const screened = await recipientCleared(ctx, input.orgId, input.payment.recipient, input.requestedBy);
+    if (screened) return screened;
+  }
   return openSigningRequest(ctx.signing, {
     orgId: input.orgId,
     requestedBy: input.requestedBy,
@@ -764,6 +796,8 @@ export async function requestOpenIntentPayment(
     const e = error as { code?: string; message?: string };
     return refuse(400, e.code ?? 'bad_payment', e.message ?? 'the payment could not be built');
   }
+  const screened = await recipientCleared(ctx, input.orgId, intent.recipient, input.requestedBy);
+  if (screened) return screened;
   return openSigningRequest(ctx.signing, {
     orgId: input.orgId,
     requestedBy: input.requestedBy,

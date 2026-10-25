@@ -462,6 +462,14 @@ export const envSchema = z.object({
    *  rather than pretend one was sent; the sender-declaration pack still
    *  works. Needs SUMSUB_APP_TOKEN and SUMSUB_SECRET_KEY. */
   SUMSUB_TRAVEL_RULE_ENABLED: flag('false'),
+  /** Sumsub's SHA-1 webhook signature (its old default, used when the
+   *  algorithm header is missing). Production refuses it unless this is on,
+   *  for the switch-over to HMAC_SHA256_HEX only. */
+  SUMSUB_WEBHOOK_ALLOW_SHA1: flag('false'),
+  /** How old a recipient's CLEAR screening may be when a payment to it is
+   *  opened or signed, in hours (1 to 720; default 24). Older is screened
+   *  again, or refused (lib/server/kyt-screenings.ts). */
+  KYT_SCREENING_MAX_AGE_HOURS: optional,
 
   /* v2 §4.4 and §4.5, payout partners and withdrawals to the business's own
      bank (lib/payouts/, lib/server/withdrawals.ts). A sandbox outside

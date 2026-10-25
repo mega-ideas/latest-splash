@@ -240,7 +240,9 @@ function chainalysisSanctions(apiKey: string, fetcher?: Fetcher, now?: () => Dat
       return {
         provider: 'chainalysis_sanctions',
         verdict,
-        reference: verdict ? result.reference : null,
+        // The list's reference is a time, not an analysis of this address:
+        // the address is added so one answer is never another address's.
+        reference: verdict && result.reference ? `${result.reference}:${subject.chain}:${subject.address}` : null,
         detail: result.detail,
         screenedAt: verdict && result.screenedAt ? result.screenedAt.toISOString() : null,
       };

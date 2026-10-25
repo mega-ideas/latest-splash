@@ -50,7 +50,7 @@ import { PasskeyPublicKey } from '@mysten/sui/keypairs/passkey';
 
 import { liveRateLimit } from '../wallet/allowance-window.ts';
 import { allowanceNameFor, policyIdFor, splashSpendAppName, type AllowanceState, type RuleSpendEvent } from '../wallet/spend-rules-bcs.ts';
-import { fundsOnHold, recordedWalletMembers, walletRegistration, type AccountState, type IntentState, type WalletContext, type WalletMembers } from './business-wallet.ts';
+import { fundsOnHold, recipientCleared, recordedWalletMembers, walletRegistration, type AccountState, type IntentState, type WalletContext, type WalletMembers } from './business-wallet.ts';
 import type { OwnershipGate } from './ownership-proofs.ts';
 import { approvePayoutTx, createSpendPolicyTx, RECIPIENT_TAG, SPEND_ROLE, spendRuleTx, type OwnedRef, type RuleCap, type RuleOp, type SpendChain } from './spend-rules-builders.ts';
 import { buildSpendView, boundTo, DAY_MS, type HeldAllowance, type PolicyState, type SpendView } from './spend-rules-index.ts';
@@ -656,6 +656,9 @@ export async function openSecondApproval(
   // The approval lets the staff member's rule pay this from the wallet: not over funds on hold (v2 §4.3).
   const onHold = await fundsOnHold(sc.wallet, l.wallet, intent.amountMinor + input.maxFeeMinor);
   if (onHold) return onHold;
+  // The approval releases the payment to its recipient: only to a fresh CLEAR here (v2 §4.6).
+  const screened = await recipientCleared(sc.wallet, input.orgId, intent.recipient, input.ownerUserId);
+  if (screened) return screened;
   const g = await gas(sc);
   if (!g) return refuse(503, 'no_sponsor', 'business wallet transactions need a gas sponsor, and none is configured');
   const bytes = await approvePayoutTx(sc.chain, {

@@ -203,6 +203,10 @@ export async function liveWalletContext(orgId: string): Promise<{ ok: true; ctx:
   }
 
   const sponsor = await walletSponsorFromEnv();
+  // v2 §4.6: payments go only to a fresh CLEAR; a stale one is screened again by this provider.
+  const [{ kytProviderFromEnv }, { screeningMaxAgeMs }] = await Promise.all([import('@/lib/compliance/kyt'), import('@/lib/server/kyt-screenings')]);
+  const kyt = kytProviderFromEnv();
+  const maxAgeMs = screeningMaxAgeMs();
   const usdcType = walletUsdcType();
   const { spendIdsFromEnv } = await import('@/lib/server/spend-rules-env');
   const spendIds = spendIdsFromEnv();
@@ -249,6 +253,8 @@ export async function liveWalletContext(orgId: string): Promise<{ ok: true; ctx:
       return BigInt(withheld.withheldMinor);
     },
     gasless: () => gaslessEnabled(),
+    kyt,
+    screeningMaxAgeMs: maxAgeMs,
     validity: async () => {
       const { suiClient } = await import('@/lib/sui');
       const [{ systemState }, { chainIdentifier }] = await Promise.all([suiClient.core.getCurrentSystemState(), suiClient.core.getChainIdentifier()]);
@@ -257,7 +263,14 @@ export async function liveWalletContext(orgId: string): Promise<{ ok: true; ctx:
   };
   // A withdrawal signature is taken only while the bank account and deposit
   // address it pays are still the ones its bytes commit to (v2 §4.4).
+  // A payment to a wallet or exchange recipient is signed only while its
+  // screening is a fresh CLEAR, and an exchange payment only once its Travel
+  // Rule message is with the provider (v2 §4.6).
   signing.beforeSign = async (request) => {
+    if (request.purpose === 'wallet_payment' || request.purpose === 'spend_approval') {
+      const { paymentBeforeSign } = await import('@/lib/server/payment-compliance-gate');
+      return paymentBeforeSign({ db, now: () => new Date(), kyt, maxAgeMs }, request);
+    }
     if (request.purpose !== 'withdrawal' && request.purpose !== 'partner_payout') return null;
     const { withdrawalBeforeSign } = await import('@/lib/server/withdrawals');
     return withdrawalBeforeSign({ db }, request);

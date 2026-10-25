@@ -16,6 +16,7 @@ import { and, desc, eq } from 'drizzle-orm';
 
 import { kytScreenings } from '../db/schema.ts';
 import {
+  isScreeningKind,
   normalizeScreeningSubject,
   ScreeningSubjectError,
   screeningPermitsPayment,
@@ -62,12 +63,23 @@ export async function recordScreening(db: DrizzleDb, input: ScreeningRecordInput
   };
   const [inserted] = await db.insert(kytScreenings).values(row).onConflictDoNothing().returning();
   if (inserted) return inserted;
+  // The same answer offered again: the row kept for THIS address. A
+  // provider's reference shared by two addresses (one sanctions-list answer,
+  // say) is two rows, never one address's row returned for the other.
   const [existing] = await db
     .select()
     .from(kytScreenings)
-    .where(and(eq(kytScreenings.orgId, input.orgId), eq(kytScreenings.provider, s.provider), eq(kytScreenings.reference, row.reference ?? '')))
+    .where(
+      and(
+        eq(kytScreenings.orgId, input.orgId),
+        eq(kytScreenings.provider, s.provider),
+        eq(kytScreenings.reference, row.reference ?? ''),
+        eq(kytScreenings.chain, input.chain),
+        eq(kytScreenings.address, input.address),
+      ),
+    )
     .limit(1);
-  if (!existing) throw new Error('the screening could not be stored');
+  if (!existing || existing.address !== input.address || existing.chain !== input.chain) throw new Error('the screening could not be stored');
   return existing;
 }
 
@@ -123,7 +135,70 @@ export function screeningView(row: KytScreeningRow): ScreeningView {
   };
 }
 
-export type ScreenDeps = { db: DrizzleDb; kyt: KytProvider; orgId: string; now: () => Date };
+// ─── The gate on paying a recipient ──────────────────────────────────────────
+
+/** How old a CLEAR may be when a payment to it is opened or signed: 24 hours, unless KYT_SCREENING_MAX_AGE_HOURS says otherwise (1 to 720). */
+export const DEFAULT_SCREENING_MAX_AGE_MS = 24 * 3_600_000;
+
+export function screeningMaxAgeMs(env: NodeJS.ProcessEnv = process.env): number {
+  const hours = Number((env.KYT_SCREENING_MAX_AGE_HOURS ?? '').trim());
+  return Number.isInteger(hours) && hours >= 1 && hours <= 720 ? hours * 3_600_000 : DEFAULT_SCREENING_MAX_AGE_MS;
+}
+
+export type ScreeningGateDeps = {
+  db: DrizzleDb;
+  orgId: string;
+  now: Date;
+  /** The server's provider: a stale or unanswered screening is asked again. Absent, it is refused. */
+  kyt?: KytProvider | null;
+  maxAgeMs?: number;
+  requestedBy: string;
+};
+
+export type ScreeningGateRefusal = { status: 403 | 409; code: string; error: string };
+
+function freshAnswer(row: KytScreeningRow, now: Date, maxAgeMs: number): boolean {
+  if (!row.verdict || !row.screenedAt) return false;
+  const age = now.getTime() - row.screenedAt.getTime();
+  // Dated ahead of the clock (by more than a minute) is not taken as fresh either.
+  return age <= maxAgeMs && age >= -60_000;
+}
+
+/**
+ * May this business pay this Sui address now? Only when its newest screening
+ * here is CLEAR and fresh. BLOCK is 403, and this check never screens it
+ * away; REVIEW waits for a person (409); nothing on file, or no answer, is
+ * 409 (screen it first). A stale CLEAR, or an unanswered newest attempt, is
+ * screened again when the server's provider is at hand, and that answer is
+ * kept and decides. Null lets the payment through.
+ */
+export async function recipientScreeningGate(deps: ScreeningGateDeps, recipient: string): Promise<ScreeningGateRefusal | null> {
+  let address: string;
+  try {
+    address = normalizeScreeningSubject('SUI', recipient).address;
+  } catch {
+    return { status: 409, code: 'recipient_not_screened', error: 'The recipient address cannot be screened, so it is not paid.' };
+  }
+  const maxAgeMs = deps.maxAgeMs ?? screeningMaxAgeMs();
+  let row = await latestScreening(deps.db, deps.orgId, 'SUI', address);
+  if (row && row.verdict !== 'BLOCK' && !freshAnswer(row, deps.now, maxAgeMs) && deps.kyt) {
+    const kind = isScreeningKind(row.subjectKind) && row.subjectKind !== 'deposit' ? row.subjectKind : 'wallet_recipient';
+    const screening = await deps.kyt.screen({ chain: 'SUI', address, direction: 'recipient' }).catch(() => null);
+    // A provider that throws leaves the old row to decide (stale: refused).
+    if (screening) row = await recordScreening(deps.db, { orgId: deps.orgId, kind, chain: 'SUI', address, screening, requestedBy: deps.requestedBy });
+  }
+  if (!row || row.verdict === null) {
+    return { status: 409, code: 'recipient_not_screened', error: 'Screen this recipient address first. An address with no screening answer is not paid.' };
+  }
+  if (row.verdict === 'BLOCK') return { status: 403, code: 'recipient_blocked', error: 'This address was refused by screening. Splash will not pay it.' };
+  if (row.verdict !== 'CLEAR') return { status: 409, code: 'recipient_in_review', error: 'A person reviews this address before it is paid.' };
+  if (!freshAnswer(row, deps.now, maxAgeMs)) {
+    return { status: 409, code: 'recipient_screening_stale', error: 'This address was last screened too long ago. Screen it again before paying it.' };
+  }
+  return null;
+}
+
+export type ScreenDeps ={ db: DrizzleDb; kyt: KytProvider; orgId: string; now: () => Date };
 
 /**
  * Screen one recipient address for this business and keep the answer. The

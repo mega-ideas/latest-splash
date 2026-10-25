@@ -770,6 +770,7 @@ test("a staff member's payment above the threshold gets one owner's second appro
   await giveRule(w, members);
   const INTENT = normalizeSuiAddress('0x' + '99'.repeat(32));
   w.model.addIntent({ id: INTENT, initialSharedVersion: 7, account: ACCOUNT, maker: STAFF, recipient: SUPPLIER, beneficiaryRef: '', amountMinor: 1_500n * USDC_1, kind: 1, targetCurrency: 'USDC', fxRateUsdLocal: 1_000_000n, expiresAtMs: t0 + 3n * DAY, status: 0, asset: USDC });
+  await w.screenClear(SUPPLIER);
   const asked = await askOwnersToApprove({ db: w.db, ctx: w.ctx }, { orgId: 'acme', userId: 'u-staff', intentId: INTENT, contentHash: '04'.repeat(32), walrusBlobId: 'aa', requesterAddresses: [STAFF] });
   assert.equal(asked.ok, true, JSON.stringify(asked));
   const opener = (ownerKey) => (input) => openSecondApproval(w.sc, { ...input, ownerPasskeyPublicKey: ownerKey.publicKey });
@@ -909,6 +910,7 @@ test('(3) a staff payment over the rule cannot be opened on chain, so staff ask 
   const opener = (input) => openSecondApproval(w.sc, { ...input, ownerPasskeyPublicKey: w.keys.two.publicKey });
   const second = await acceptApprovalAsk({ ...deps, secondApproval: opener }, { orgId: 'acme', userId: 'u-two', askId: asked.ask.id, mode: 'second_approval', maxFeeMinor: 0n, settleByMs: t0 + 300_000n });
   assert.equal(second.code, 'no_intent');
+  await w.screenClear(SUPPLIER);
   const accepted = await acceptApprovalAsk(deps, { orgId: 'acme', userId: 'u-two', askId: asked.ask.id, mode: 'wallet_pays', wallet: members, maxFeeMinor: 250_000n, settleByMs: t0 + 300_000n });
   assert.equal(accepted.ok, true, JSON.stringify(accepted));
   const d = accepted.request.description;
@@ -930,6 +932,7 @@ test('two owners accepting one ask at once: one signing request opens, and the a
   await signBy(w, ex.request, 'founder', 'two');
   await giveRule(w, members);
   const id = w.createStaffIntent(STAFF, { id: '0x' + '43'.repeat(32), recipient: EXCHANGE, amountMinor: 1_500n * USDC_1, kind: 2, expiresAtMs: t0 + 3n * DAY });
+  await w.screenClear(EXCHANGE);
   const deps = { db: w.db, ctx: w.ctx, secondApproval: (input) => openSecondApproval(w.sc, { ...input, ownerPasskeyPublicKey: w.keys.three.publicKey }) };
   const asked = await askOwnersToApprove(deps, { orgId: 'acme', userId: 'u-staff', intentId: id, contentHash: '04'.repeat(32), walrusBlobId: 'aa', requesterAddresses: [STAFF] });
   assert.equal(asked.ok, true, JSON.stringify(asked));

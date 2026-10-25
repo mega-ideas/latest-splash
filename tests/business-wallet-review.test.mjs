@@ -172,6 +172,7 @@ test("1: the owners pay a staff member's intent seeing its payee, amount and rat
   const w = await world();
   const { members } = await registered(w);
   w.model.addIntent(staffIntent());
+  await w.screenClear(PAYEE);
   const opened = await requestOpenIntentPayment(w.ctx, {
     orgId: 'acme', requestedBy: 'u-two', wallet: members, intentId: INTENT, maxFeeMinor: 250_000n, settleByMs: BigInt(T0.getTime() + 5 * 60_000), ...audit,
   });
