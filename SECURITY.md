@@ -106,11 +106,16 @@ Design: `docs/v2/phase2-withdrawals.md`. Tests: `tests/withdrawals.test.mjs`.
   recipient and pending recipient read live, failing closed), the wallet
   itself, another business's wallet or another business's address is
   refused. A return goes to the business wallet only. It counts only when
-  the chain shows it sent by the deposit address into the wallet, by a
-  digest no other withdrawal used (unique index); only the whole amount
-  closes a withdrawal, and a short return is held for review. A return
-  with no failure reported first (the partner did not pay out) is taken the
-  same way, from sent or partner received.
+  the chain shows it sent by the deposit address into the wallet, in a
+  later checkpoint than the payout's own deposit. Every return digest,
+  short or whole, is claimed once in `withdrawal_returns` (primary key) for
+  one withdrawal or supplier payout; the returned amount is the sum of its
+  claims, it closes the payout only when the sum is exactly the amount
+  sent, and a return that would pass the amount is refused for ops
+  (`return_over`). A short sum is held failed for review, and the partner
+  is asked for the rest. A return with no failure reported first (the
+  partner did not pay out) is taken the same way, from sent or partner
+  received.
 - **Own account only.** A destination is stored only when the name given
   and the bank's own holder name (the partner's name enquiry) both match
   the registered legal name, and that name counts only once KYB verified it

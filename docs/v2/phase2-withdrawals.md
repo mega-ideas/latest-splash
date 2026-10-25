@@ -229,12 +229,26 @@ lib/payouts/partner.ts).
   - A failure asks the partner to return the USDC to the business wallet.
   - A return counts only when the chain shows the transaction sent by the
     deposit address, it is not the withdrawal's own digest, and it puts
-    USDC back into the business wallet. A return digest closes one
-    withdrawal (and a unique index holds it). Only the whole amount closes
-    the withdrawal as `returned`, with `returned_minor`. A short return is
-    recorded (`returned_minor`, `return_short` in the trail) and the
-    withdrawal is left `failed` for ops (moved there from sent or partner
-    received when no failure came first). A return sent from a partner address
+    USDC back into the business wallet. It must also sit in a later
+    checkpoint than the withdrawal's own deposit: the deposit address is
+    shared by every payout of the business to that partner, so an older
+    transfer from it (a refund of the test deposit, a return of an earlier
+    payout) is refused. Until both are checkpointed the webhook answers 503.
+  - Every return digest, short or whole, is claimed in `withdrawal_returns`
+    (the digest is the primary key, migration 0043) for the first payout
+    that names it; another withdrawal or supplier payout naming it is
+    refused, and a replay is a duplicate. `returned_minor` is the sum of a
+    payout's claimed returns. The withdrawal closes as `returned` when the
+    sum is exactly the amount it sent. A return that would take the sum
+    above the amount is not claimed: it is recorded as `return_over` for
+    ops, and the payout it belongs to can still claim it. The chain cannot
+    tell payouts at the same deposit address apart, so attribution beyond
+    that rests on the partner's signed event until the contracts give each
+    return a per-intent reference.
+  - A short sum is recorded (`return_short` in the trail) and the
+    withdrawal is left `failed` for ops. When no failure came first (sent or
+    partner received), it moves to failed and the partner is asked for the
+    rest (`return_requested`), as on the failure path. A return sent from a partner address
     other than the deposit address is not accepted until the contracts name
     one.
 - `test_deposit.received`: as above, in step 3 of setting up.
