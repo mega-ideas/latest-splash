@@ -39,7 +39,8 @@ export type DeskViewer = { userId: string; role: UserRole };
 
 export type ZekeRecentState = 'waiting' | 'approved' | 'sent' | 'rejected' | 'expired' | 'failed' | 'draft';
 
-export type ZekeRecentItem = { id: string; title: string; state: ZekeRecentState; label: string };
+/** `when` is how long ago it was prepared ("3 minutes ago"), so rows of one kind can be told apart. */
+export type ZekeRecentItem = { id: string; title: string; state: ZekeRecentState; label: string; when: string };
 
 export type ZekeDeskSnapshot = {
   /** False when the workspace could not be read: then every count is 0 and means nothing. */
@@ -47,6 +48,12 @@ export type ZekeDeskSnapshot = {
   firstName: string | null;
   /** Proposals in this workspace waiting for a decision, whoever made them. */
   waiting: number;
+  /**
+   * Of those, the ones past simulation and policy, at PENDING_APPROVAL: what
+   * "waiting for approval" means. A SIMULATED proposal is not waiting for an
+   * approver yet.
+   */
+  awaitingApproval: { count: number; soonestCloseMs: number | null };
   /**
    * Of those, the ones this viewer could approve now: past simulation, not
    * their own (Zeke's are exempt from maker-checker), not one they already
@@ -142,13 +149,24 @@ export function buildZekeDeskSnapshot(input: {
   const alerts = input.alerts ?? null;
   const orgId = input.orgId?.trim() ?? '';
   if (!orgId) {
-    return { known: false, firstName, waiting: 0, forViewer: null, alerts, drafts: 0, soonestCloseMs: null, recent: [] };
+    return {
+      known: false,
+      firstName,
+      waiting: 0,
+      awaitingApproval: { count: 0, soonestCloseMs: null },
+      forViewer: null,
+      alerts,
+      drafts: 0,
+      soonestCloseMs: null,
+      recent: [],
+    };
   }
 
   const mine = input.proposals.filter((proposal) => proposal.orgId === orgId);
   const waiting = mine.filter((proposal) => isWaiting(proposal, input.now));
   const viewer = input.viewer ?? null;
   const viewerWaiting = viewer ? waiting.filter((proposal) => viewerCanApprove(proposal, viewer)) : null;
+  const awaiting = waiting.filter((proposal) => proposal.status === 'PENDING_APPROVAL');
 
   const recent = mine
     .filter((proposal) => proposal.createdBy === AGENT_ACTOR_ID)
@@ -156,13 +174,14 @@ export function buildZekeDeskSnapshot(input: {
     .slice(0, RECENT_LIMIT)
     .map((proposal) => {
       const state = stateOf(proposal, input.now);
-      return { id: proposal.id, title: titleOf(proposal), state, label: STATE_LABEL[state] };
+      return { id: proposal.id, title: titleOf(proposal), state, label: STATE_LABEL[state], when: agoLabel(proposal.createdAt, input.now) };
     });
 
   return {
     known: true,
     firstName,
     waiting: waiting.length,
+    awaitingApproval: { count: awaiting.length, soonestCloseMs: soonest(awaiting, input.now) },
     forViewer: viewerWaiting ? { waiting: viewerWaiting.length, soonestCloseMs: soonest(viewerWaiting, input.now) } : null,
     alerts,
     drafts: waiting.filter((proposal) => proposal.createdBy === AGENT_ACTOR_ID).length,
@@ -171,9 +190,54 @@ export function buildZekeDeskSnapshot(input: {
   };
 }
 
+/** "3 minutes ago", "1 hour ago", "Yesterday", "4 days ago". An unreadable time is "Earlier". */
+export function agoLabel(at: string, now: Date): string {
+  const ms = now.getTime() - Date.parse(at);
+  if (!Number.isFinite(ms)) return 'Earlier';
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 1) return 'Just now';
+  if (minutes < 60) return minutes === 1 ? '1 minute ago' : `${minutes} minutes ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return hours === 1 ? '1 hour ago' : `${hours} hours ago`;
+  const days = Math.floor(hours / 24);
+  return days === 1 ? 'Yesterday' : `${days} days ago`;
+}
+
+function payments(count: number): string {
+  return count === 1 ? '1 payment' : `${count} payments`;
+}
+
+/** The workspace's count, when whose turn it is could not be read. */
 function waitingSentence(count: number): string {
   if (count === 0) return 'Nothing is waiting for your approval';
-  return count === 1 ? '1 payment is waiting for approval' : `${count} payments are waiting for approval`;
+  return `${payments(count)} ${count === 1 ? 'is' : 'are'} waiting for approval`;
+}
+
+/** What this viewer can approve, then the rest of the workspace's as context. */
+function viewerSentences(mine: number, others: number, closing: string): string {
+  const own = mine === 0 ? 'Nothing is waiting for you.' : `${payments(mine)} ${mine === 1 ? 'is' : 'are'} waiting for you${closing}.`;
+  if (others === 0) return own;
+  const rest = mine === 0 ? payments(others) : `${others} more`;
+  return `${own} ${rest} ${others === 1 ? 'is with another approver' : 'are with other approvers'}.`;
+}
+
+/**
+ * The greeting's and subtitle's count. When the membership was read, it is
+ * what this person can approve, with the soonest of those closing; the
+ * workspace's other approvals are said as someone else's. When it was not,
+ * the workspace's PENDING_APPROVAL count, which is all that can be said.
+ */
+function queueSentence(snapshot: ZekeDeskSnapshot, withClosing: boolean): string {
+  const forViewer = snapshot.forViewer;
+  if (forViewer) {
+    const soon = withClosing && forViewer.waiting > 0 ? closesSoon(forViewer.soonestCloseMs) : null;
+    const closing = soon ? `, and ${forViewer.waiting === 1 ? 'it' : 'one'} closes in ${soon}` : '';
+    return viewerSentences(forViewer.waiting, Math.max(0, snapshot.awaitingApproval.count - forViewer.waiting), closing);
+  }
+  const count = snapshot.awaitingApproval.count;
+  const soon = withClosing && count > 0 ? closesSoon(snapshot.awaitingApproval.soonestCloseMs) : null;
+  const closing = soon ? `, and ${count === 1 ? 'it' : 'one'} closes in ${soon}` : '';
+  return `${waitingSentence(count)}${closing}.`;
 }
 
 /** "3 minutes", for a window under an hour; longer windows are not news. */
@@ -197,15 +261,13 @@ export function zekeGreeting(snapshot: ZekeDeskSnapshot | null): string {
   const hello = snapshot?.firstName ? `Hi ${snapshot.firstName}.` : 'Hi.';
   const ask = `${ZEKE_LIMIT} What would you like to look at?`;
   if (!snapshot?.known) return `${hello} ${ask}`;
-  const soon = snapshot.waiting > 0 ? closesSoon(snapshot.soonestCloseMs) : null;
-  const closing = soon ? `, and ${snapshot.waiting === 1 ? 'it' : 'one'} closes in ${soon}` : '';
-  return `${hello} ${waitingSentence(snapshot.waiting)}${closing}. ${ask}`;
+  return `${hello} ${queueSentence(snapshot, true)} ${ask}`;
 }
 
 /** The line under "What's on the agenda today?": the queue and the wallet, each only if read. */
 export function deskSubtitle(snapshot: ZekeDeskSnapshot | null, walletUsdc: string | null): string {
   const parts: string[] = [];
-  if (snapshot?.known) parts.push(`${waitingSentence(snapshot.waiting)}.`);
+  if (snapshot?.known) parts.push(queueSentence(snapshot, false));
   if (walletUsdc !== null) parts.push(`Your wallet holds ${walletUsdc} USDC.`);
   return parts.length > 0
     ? parts.join(' ')

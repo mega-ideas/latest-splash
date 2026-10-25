@@ -154,7 +154,12 @@ test('the first name is the first word of the display name, and never an email a
 
 // ── What the page and the widget say ────────────────────────────────────────
 
-const snap = (overrides = {}) => ({ known: true, firstName: 'Nadia', waiting: 0, forViewer: null, alerts: null, drafts: 0, soonestCloseMs: null, recent: [], ...overrides });
+// Membership not read (forViewer null): the greeting and the subtitle give the
+// workspace's PENDING_APPROVAL count. With it read, see zeke-desk-review-2.
+const snap = ({ waiting = 0, soonestCloseMs = null, ...overrides } = {}) => ({
+  known: true, firstName: 'Nadia', waiting, awaitingApproval: { count: waiting, soonestCloseMs },
+  forViewer: null, alerts: null, drafts: 0, soonestCloseMs, recent: [], ...overrides,
+});
 const LIMIT = 'I can prepare payments for approval, but I can’t approve or send them.';
 
 test('the floating greeting says what is waiting, and when the soonest closes, from the snapshot', () => {
@@ -279,7 +284,7 @@ test('the Zeke page’s side column: remembers, can do, approvals, what MemWal s
     assert.match(cards, new RegExp(`href: '${href}'`));
   }
   // The approvals card is the snapshot's count, never a typed number.
-  assert.match(cards, /snapshot\.waiting/);
+  assert.match(cards, /snapshot\.awaitingApproval/);
   // Recent work shows an empty state that says what fills it.
   assert.match(cards, /Nothing yet/);
 });

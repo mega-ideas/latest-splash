@@ -16,8 +16,9 @@ import { riskClass, type QueueItem, type QueueLaneData, type QueueLaneKey } from
  * Each lane is a compact card: its count and up to two sample lines. Every
  * card says "Sample" on itself as well, because once the panel is open on a
  * phone the summary has scrolled away, and a card reading "Anomaly halts 1"
- * with a red icon is otherwise read as a live incident. The expiry stays
- * visible: when a sample would lapse is part of what it shows.
+ * with a red icon is otherwise read as a live incident. The expiry and the
+ * reason stay visible: when a sample would lapse, and why it sits in that
+ * lane (a compliance hold, an anomaly halt), are what it is there to show.
  */
 
 /* Lane tones use semantic state tokens (W9.0 rule): a brand accent is never a
@@ -78,10 +79,10 @@ export default function QueueExamples({ pending, lanes }: { pending: QueueItem[]
                         <span className={`rounded border px-1 text-[12px] font-bold ${riskClass(item.risk)}`}>{item.risk}</span>
                       </p>
                       <p className="mt-0.5 text-[12px] font-medium text-[#326273]">{item.expiryLabel}</p>
-                      <p className="sr-only">
-                        {kindLabel(item.kind)}
-                        {item.reason ? `, ${item.reason}` : ''}
-                      </p>
+                      {item.reason && (
+                        <p className="mt-0.5 text-[12px] font-medium leading-4 text-[#1F4452]">{item.reason}</p>
+                      )}
+                      <p className="sr-only">{kindLabel(item.kind)}</p>
                     </li>
                   ))}
                   {lane.items.length > SHOWN_PER_LANE && (

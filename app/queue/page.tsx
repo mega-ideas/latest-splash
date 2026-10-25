@@ -15,6 +15,8 @@ import type { FeeState } from '@/lib/fees/schedule';
 const previewFee = (fees: FeeState, principalMicro: bigint) =>
   buildFeeQuote({ kind: destinationKind(BANK_DESTINATION), principalMinor: principalMicro, state: fees }).splashFee.minor;
 import { getOxwalProposalStore } from '@/lib/agent/oxwal';
+import { recallAssistantName } from '@/lib/agent/assistant-name';
+import { DEFAULT_ASSISTANT_NAME } from '@/lib/agent/assistant-name-shared';
 import { resolveAuthorityForSession, UnauthorizedError } from '@/lib/auth/authority';
 import { ensureProposalStoreHydrated } from '@/lib/queue/proposal-persistence';
 import { buildApprovalQueue, queueLanes, type QueueLane } from '@/lib/queue/approval-queue';
@@ -230,6 +232,9 @@ export default async function QueuePage() {
     if (!(error instanceof UnauthorizedError)) throw error;
   }
 
+  // What this workspace calls the assistant, as everywhere else it is named.
+  const assistantName = orgId ? await recallAssistantName(orgId) : DEFAULT_ASSISTANT_NAME;
+
   // Proposals waiting for a decision: over-threshold payments from the money
   // routes, and what Zeke drafted and nobody approved in the chat. With
   // DATABASE_URL set (W1), the store writes through to Postgres and rehydrates
@@ -319,12 +324,12 @@ export default async function QueuePage() {
           <div className="flex items-center gap-3">
             <Image src="/splash-main-icon.png" alt="Splash" width={40} height={39} className="h-10 w-10 object-contain" />
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--info)]">Zeke control room</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--info)]">{assistantName} control room</p>
               <h1 className="text-3xl font-bold tracking-normal text-[#1F4452]">Approval queue</h1>
             </div>
           </div>
           <nav className="flex flex-wrap items-center gap-2 text-sm font-semibold">
-            <Link className="rounded-md border border-[#326273]/20 px-3 py-2 text-[#326273]" href="/dashboard/zeke">Zeke</Link>
+            <Link className="rounded-md border border-[#326273]/20 px-3 py-2 text-[#326273]" href="/dashboard/zeke">{assistantName}</Link>
             <Link className="rounded-md bg-[#1F4452] px-3 py-2 text-white" href="/dashboard">Dashboard</Link>
           </nav>
         </header>
@@ -345,7 +350,7 @@ export default async function QueuePage() {
             href="/dashboard/zeke"
             className="inline-flex min-h-11 items-center rounded-md border border-[#326273]/20 px-3 text-sm font-bold text-[#326273] focus-ring"
           >
-            Back to Zeke
+            Back to {assistantName}
           </Link>
         </div>
       </div>

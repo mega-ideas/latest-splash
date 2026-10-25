@@ -3,7 +3,7 @@
 import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { ChevronDown, Maximize2, Sparkles, X } from 'lucide-react';
 
 import { cn } from '../lib/utils';
@@ -14,6 +14,7 @@ import {
   subscribePendingProposals,
   type OxwalPendingSnapshot,
 } from '../lib/oxwal-notify';
+import { stashThreadHandoff } from '../lib/oxwal/thread-handoff';
 import { useOxwalThread } from '../lib/oxwal/use-oxwal-thread';
 import { useZekeDesk } from '../lib/oxwal/use-zeke-desk';
 import OxWalComposer from './oxwal/OxWalComposer';
@@ -48,7 +49,14 @@ import ZekeGreeting, { type ZekeGreetingChip } from './oxwal/ZekeGreeting';
  *
  * It is not drawn on the Zeke page, which is the same assistant at full size:
  * two Zekes on one screen, one sitting on the other's composer, is one too
- * many. As a dialog it closes on Escape and gives focus back to its trigger.
+ * many. Its expand button takes the conversation along: the thread is handed
+ * to the Zeke page (lib/oxwal/thread-handoff.ts), which continues it, and
+ * this panel starts clean, so the conversation lives in one place.
+ *
+ * It is a non-modal panel: the page behind it stays usable, so there is no
+ * focus trap. Escape closes it and gives focus back to its trigger, but only
+ * when focus is inside the panel. Another dialog open on the page (the
+ * queue's reject confirmation, the phone nav drawer) keeps its own Escape.
  *
  * ─── What it deliberately will not do ───────────────────────────────────────
  *
@@ -97,6 +105,7 @@ export default function FloatingCopilot() {
     threadRef,
     submitPrompt,
     approveInChat,
+    resetThread,
   } = useOxwalThread({
     // Shorter than the desk: this panel is for quick questions, and a long
     // replayed history on every turn costs latency the desk can absorb and a
@@ -127,19 +136,20 @@ export default function FloatingCopilot() {
     if (pending.updatedAt > 0) void refresh();
   }, [pending.updatedAt, refresh]);
 
-  // A dialog closes on Escape, and focus goes back to what opened it.
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        setOpen(false);
-        triggerRef.current?.focus();
-      }
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [open]);
+  // Escape from inside the panel closes it, and focus goes back to what
+  // opened it. Scoped to the panel, so another dialog's Escape is its own.
+  function onPanelKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.key !== 'Escape' || !open) return;
+    event.stopPropagation();
+    closePanel();
+  }
+
+  // The expand button: the conversation goes with it to the Zeke page.
+  function expandToPage() {
+    stashThreadHandoff({ thread, assistantName });
+    resetThread();
+    setOpen(false);
+  }
 
   function closePanel() {
     setOpen(false);
@@ -236,6 +246,7 @@ export default function FloatingCopilot() {
       <div
         role="dialog"
         aria-label={`${assistantName} chat`}
+        onKeyDown={onPanelKeyDown}
         aria-hidden={!open}
         inert={!open}
         className={cn(
@@ -286,10 +297,10 @@ export default function FloatingCopilot() {
             </span>
             <Link
               href="/dashboard/zeke"
-              onClick={() => setOpen(false)}
+              onClick={expandToPage}
               className="grid h-9 w-9 place-items-center rounded-md text-white/85 transition-colors hover:bg-white/10 hover:text-white focus-ring"
-              aria-label={`Open the ${assistantName} page`}
-              title={`Open the ${assistantName} page`}
+              aria-label={thread.length > 0 ? `Continue on the ${assistantName} page` : `Open the ${assistantName} page`}
+              title={thread.length > 0 ? `Continue on the ${assistantName} page` : `Open the ${assistantName} page`}
             >
               <Maximize2 size={15} aria-hidden="true" />
             </Link>

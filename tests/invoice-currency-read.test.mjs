@@ -89,7 +89,11 @@ test('no invented currency, confidence or placeholder is left in the parser sour
   // A vendor pattern is remembered (for the session's org) only when both
   // halves were read: never "settles in " with nothing, nor an invented USD.
   const remember = text.slice(text.indexOf('function rememberInvoiceVendor('), text.indexOf('export async function parseInvoice('));
-  assert.match(remember, /if \(!vendor \|\| !currency\) return;/);
+  assert.match(remember, /const memory = invoiceVendorMemory\(recipient, currency\);\s*if \(memory\) void rememberForOrg\(orgId, memory\);/);
+  const { invoiceVendorMemory } = await import('../lib/server/copilot.ts');
+  assert.equal(invoiceVendorMemory('Manila Parts Trading', ''), null, 'no currency read: nothing to remember');
+  assert.equal(invoiceVendorMemory('', 'PHP'), null, 'no vendor read: nothing to remember');
+  assert.equal(invoiceVendorMemory('Manila Parts Trading', 'PHP'), 'Invoice vendor Manila Parts Trading settles in PHP');
 });
 
 /* ── The lane question ─────────────────────────────────────────────────── */

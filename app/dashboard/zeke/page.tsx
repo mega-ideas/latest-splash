@@ -18,7 +18,7 @@ import {
   ZekeQuickLinks,
   ZekeRecent,
 } from '@/components/oxwal/ZekeDeskCards';
-import { deskSubtitle } from '@/lib/agent/zeke-desk';
+import { ZEKE_LIMIT, deskSubtitle } from '@/lib/agent/zeke-desk';
 import { stashBatchDraft } from '@/lib/batch-parse';
 import { formatUsdc } from '@/lib/payments/stablecoin-lane';
 import { useOxwalThread } from '@/lib/oxwal/use-oxwal-thread';
@@ -38,8 +38,14 @@ import { cn } from '@/lib/utils';
  *
  * Every number comes from the desk snapshot (GET /api/oxwal/desk) or the
  * wallet route, and is left out when it could not be read. The conversation
- * lives in `useOxwalThread`, shared with the floating Zeke, so the two cannot
- * disagree about what an approval window means.
+ * lives in `useOxwalThread`, the same hook as the floating Zeke, so the two
+ * cannot disagree about what an approval window means; a conversation begun
+ * in the floating panel continues here when its expand button is pressed
+ * (resumeHandoff, lib/oxwal/thread-handoff.ts).
+ *
+ * The limit is said before anything is asked: under the composer on the
+ * start view, and as the first line of every conversation (ZEKE_LIMIT), until
+ * the intent classifier says it per request (brief 4.8, Phase 2).
  */
 
 /** What Zeke reads. True of the tools it has; shown, not clickable. */
@@ -93,7 +99,7 @@ export default function OxwalDeskPage() {
     submitPrompt,
     approveInChat,
     resetThread,
-  } = useOxwalThread();
+  } = useOxwalThread({ welcome: ZEKE_LIMIT, resumeHandoff: true });
 
   const { snapshot, state, refresh } = useZekeDesk();
   const walletUsdc = useWalletUsdc(formatUsdc);
@@ -240,6 +246,7 @@ export default function OxwalDeskPage() {
               assistantName={assistantName}
               placeholder={`Ask ${assistantName} anything, or attach a payout sheet`}
             />
+            <p className="mt-2 text-[13px] font-medium text-[#326273]">{ZEKE_LIMIT}</p>
           </div>
 
           <ul className="mt-4 grid gap-3 sm:grid-cols-2" aria-label="Start with">
@@ -295,7 +302,13 @@ function DeskStat({ label, value, caution = false }: { label: string; value: num
   return (
     <div className="min-w-0 border-r border-[#326273]/12 px-3 py-2.5 last:border-r-0">
       <p className={cn('dash-num text-2xl font-extrabold', flagged ? 'text-[var(--gold-ink)]' : 'text-[#0c3e48]')}>
-        {value === null ? <span title="Not read">-</span> : value}
+        {value === null ? (
+          <>
+            <span aria-hidden="true">–</span><span className="sr-only">not read</span>
+          </>
+        ) : (
+          value
+        )}
         <span className="sr-only"> {label}</span>
       </p>
       <p aria-hidden="true" className="mt-0.5 whitespace-nowrap font-mono text-[12px] font-semibold uppercase tracking-[0.08em] text-[#326273]">{label}</p>

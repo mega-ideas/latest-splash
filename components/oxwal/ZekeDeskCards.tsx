@@ -88,7 +88,8 @@ function waitingInWorkspace(count: number): string {
  */
 export function ZekeApprovals({ snapshot }: { snapshot: ZekeDeskSnapshot | null }) {
   const known = Boolean(snapshot?.known);
-  const inWorkspace = known && snapshot ? snapshot.waiting : 0;
+  // PENDING_APPROVAL only: a proposal still simulating is not waiting for an approver.
+  const inWorkspace = known && snapshot ? (snapshot.awaitingApproval?.count ?? 0) : 0;
   const forViewer = known ? (snapshot?.forViewer ?? null) : null;
   const mine = forViewer?.waiting ?? 0;
 
@@ -258,7 +259,10 @@ export function ZekeRecent({
               const href = hrefFor(item.state);
               const row = (
                 <>
-                  <span className="min-w-0 truncate text-sm font-medium text-[#0c3e48]">{item.title}</span>
+                  <span className="min-w-0 truncate text-sm font-medium text-[#0c3e48]">
+                    {item.title}
+                    <span className="ml-2 text-[12px] font-medium text-[#326273]">{item.when}</span>
+                  </span>
                   <span className={cn('flex shrink-0 items-center gap-1 text-[12px] font-bold', STATE_TONE[item.state])}>
                     {item.label}
                     {href && <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />}

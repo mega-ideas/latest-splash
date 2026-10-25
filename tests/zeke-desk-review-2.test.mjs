@@ -138,7 +138,7 @@ test("the greeting gives the viewer's own count and closing time, and the worksp
   assert.doesNotMatch(greeting, /closes in/, greeting);
   assert.doesNotMatch(greeting, /2 payments are waiting for approval/, greeting);
   assert.match(greeting, /Nothing is waiting for you/, greeting);
-  assert.match(greeting, /1 more is with another approver/, 'his own payment is pending; the simulated one is not waiting for approval yet');
+  assert.match(greeting, /Nothing is waiting for you\. 1 payment is with another approver\./, 'his own payment is pending; the simulated one is not waiting for approval yet');
   assert.doesNotMatch(deskSubtitle(asBen, null), /2 payments/);
 
   const forPriya = buildZekeDeskSnapshot({ proposals: rows, orgId: 'org_acme', now: NOW, displayName: 'Priya', viewer: { userId: 'usr_priya', role: 'APPROVER' }, alerts: null });
@@ -150,30 +150,22 @@ test("the greeting gives the viewer's own count and closing time, and the worksp
 
 // ── 4. Expanding the floating Zeke keeps the conversation ───────────────────
 
-test('the floating Zeke hands its conversation to the Zeke page, once', async () => {
-  const store = new Map();
-  globalThis.sessionStorage = {
-    getItem: (key) => (store.has(key) ? store.get(key) : null),
-    setItem: (key, value) => store.set(key, String(value)),
-    removeItem: (key) => store.delete(key),
-  };
-  try {
-    const { stashThreadHandoff, takeThreadHandoff } = await import('../lib/oxwal/thread-handoff.ts');
-    const thread = [
-      { kind: 'user', id: 'u1', text: 'Pay Luzon 1,200 USDC' },
-      { kind: 'assistant', id: 'a1', text: 'Which wallet?' },
-      { kind: 'session-expired', id: 'x1' },
-    ];
-    stashThreadHandoff({ thread, assistantName: 'Kai' });
-    const taken = takeThreadHandoff();
-    assert.deepEqual(taken?.thread.map((item) => item.id), ['u1', 'a1'], 'a stale sign-in notice is not carried');
-    assert.equal(taken?.assistantName, 'Kai');
-    assert.equal(takeThreadHandoff(), null, 'taken once');
-    store.set('splash.zeke.handoff', '{not json');
-    assert.equal(takeThreadHandoff(), null);
-  } finally {
-    delete globalThis.sessionStorage;
-  }
+test('the floating Zeke hands its conversation to the Zeke page, once, without browser storage', async () => {
+  const { stashThreadHandoff, takeThreadHandoff } = await import('../lib/oxwal/thread-handoff.ts');
+  const thread = [
+    { kind: 'user', id: 'u1', text: 'Pay Luzon 1,200 USDC' },
+    { kind: 'assistant', id: 'a1', text: 'Which wallet?' },
+    { kind: 'session-expired', id: 'x1' },
+  ];
+  stashThreadHandoff({ thread, assistantName: 'Kai' });
+  const taken = takeThreadHandoff();
+  assert.deepEqual(taken?.thread.map((item) => item.id), ['u1', 'a1'], 'a stale sign-in notice is not carried');
+  assert.equal(taken?.assistantName, 'Kai');
+  assert.equal(takeThreadHandoff(), null, 'taken once');
+  stashThreadHandoff({ thread: [{ kind: 'assistant', id: 'a0', text: 'Hi.' }], assistantName: null });
+  assert.equal(takeThreadHandoff(), null, 'nothing asked yet is nothing to continue');
+  // The thread can hold payees and amounts: the desk keeps them out of browser storage.
+  assert.doesNotMatch(await readFile(new URL('lib/oxwal/thread-handoff.ts', ROOT), 'utf8'), /localStorage\.|sessionStorage\.|indexedDB/);
 
   const floating = await source('components/FloatingCopilot.tsx');
   assert.match(floating, /stashThreadHandoff\(/);

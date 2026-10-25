@@ -24,6 +24,13 @@ export interface CopilotSuggestion {
   confidence: number | null;
   requiresAuth: boolean;
   suggestedAction?: string;
+  /**
+   * What tapping the card asks Zeke. Built from fixed words and codes the
+   * server derived (a currency, a count), never from a recalled memory or a
+   * document: the description may quote those for the reader, and the prompt
+   * asks Zeke to prepare, so it must not carry anyone else's words.
+   */
+  prompt?: string;
   /** Set when Zeke read the document and refused: the lane it asks for is
    *  locked for this business. The UI must not offer a route onward. */
   blocked?: { lane: string; reason: string };
@@ -70,21 +77,37 @@ function normaliseAmount(raw: string): { amount: string; amountMinor: bigint } {
  * invented 'USD').
  *
  * The name is untrusted text, and a memory is recalled and shown later (the
- * suggestion cards and the Zeke page print it), so it is cut down to what a
- * company name is made of: letters, digits, spaces and . , & ' ( ) - at most
- * 60 characters. Markup, quotes, line breaks and sentence punctuation that
- * would let a document write an instruction into the memory are dropped. The
- * Zeke page's "What MemWal stores" card lists this memory
- * (lib/agent/memwal-disclosure.ts).
+ * suggestion cards print it), so only a normalised company name is kept:
+ * letters, digits, spaces and &, at most 40 characters, cut at a word.
+ * Everything else, sentence punctuation included, becomes a space, so a
+ * stored name cannot be a sentence. A name that reads as an instruction is
+ * not stored at all: one with a word an instruction needs (ignore, prepare,
+ * approve, pay, send, transfer and the like), a run of three or more digits
+ * (an amount) or a 0x address. Even so, nothing recalled is put into a
+ * prompt: the suggestion cards send one built from fixed words and a
+ * currency code (suggestionsFromMemories). The Zeke page's "What MemWal
+ * stores" card lists this memory (lib/agent/memwal-disclosure.ts).
  */
+const VENDOR_NAME_MAX = 40;
+const INSTRUCTION_WORDS =
+  /\b(ignore|disregard|override|prepare|approve|approved|pay|paid|send|sent|transfer|release|sign|wire|execute|instructions?|rules?)\b/iu;
+const AMOUNT_OR_ADDRESS = /\d{3,}|0x[0-9a-f]+/iu;
+
 export function invoiceVendorMemory(recipient: string, currency: string): string | null {
-  const vendor = recipient
-    .replace(/[^\p{L}\p{N} .,&'()-]+/gu, ' ')
+  if (!currency) return null;
+  if (INSTRUCTION_WORDS.test(recipient) || AMOUNT_OR_ADDRESS.test(recipient)) return null;
+  const words = recipient
+    .replace(/[^\p{L}\p{N} &]+/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, 60)
-    .trim();
-  if (!/[\p{L}\p{N}]/u.test(vendor) || !currency) return null;
+    .split(' ');
+  let vendor = '';
+  for (const word of words) {
+    const next = vendor ? `${vendor} ${word}` : word;
+    if (next.length > VENDOR_NAME_MAX) break;
+    vendor = next;
+  }
+  if (!/[\p{L}\p{N}]/u.test(vendor)) return null;
   return `Invoice vendor ${vendor} settles in ${currency}`;
 }
 
@@ -242,6 +265,7 @@ export function suggestionsFromMemories(memories: RecalledMemory[]): CopilotSugg
         // It used to promise the cheapest corridor and a pre-open lock, which
         // nothing computes.
         description: `Pattern recalled: “${m.text}”. Want me to draft this batch for your approval?`,
+        prompt: 'A recurring batch came up in my payment patterns. Walk me through my recent batches and draft the next one for approval if it holds up.',
         confidence: relevance,
         requiresAuth: true,
       });
@@ -253,6 +277,7 @@ export function suggestionsFromMemories(memories: RecalledMemory[]): CopilotSugg
         // window, which this card used to promise.
         title: `Check USD→${ccy}`,
         description: `Pattern recalled: “${m.text}”. Want me to check the current USD→${ccy} rate?`,
+        prompt: `What is the current USD→${ccy} rate?`,
         confidence: relevance,
         requiresAuth: false,
       });
@@ -279,6 +304,7 @@ export function idleCashSuggestion(custodyOn: boolean, executionOn: boolean): Co
     type: 'treasury',
     title: 'Put idle USDC to work',
     description: `Idle Available cash earns 0%. Smart Treasury (Ondo USDY, T-bill) is ${rate.label}. Move some over?`,
+    prompt: 'What could my idle USDC earn in treasury?',
     confidence: null,
     requiresAuth: true,
   };

@@ -158,13 +158,14 @@ test('links into the dashboard point at pages that exist under their new names',
     const text = await source(file);
     assert.doesNotMatch(text, /href="\/dashboard\/send-usdc"|'\/dashboard\/send-usdc'/, `${file} links the removed Send USDC page`);
   }
-  // "Zeke" and "Back to Zeke" go to Zeke, which is no longer /dashboard.
-  assert.match(await source('app/queue/page.tsx'), /href="\/dashboard\/zeke">Zeke</);
+  // "Zeke" and "Back to Zeke" go to Zeke, which is no longer /dashboard, and
+  // say the name the workspace gave the assistant.
+  assert.match(await source('app/queue/page.tsx'), /href="\/dashboard\/zeke">\{assistantName\}</);
   // v2 brief 5.3: "Back to Zeke" moved from the board to the foot of the page.
-  assert.match(await source('app/queue/page.tsx'), /href="\/dashboard\/zeke"[\s\S]{0,200}Back to Zeke/);
+  assert.match(await source('app/queue/page.tsx'), /href="\/dashboard\/zeke"[\s\S]{0,200}Back to \{assistantName\}/);
   assert.match(await source('components/invoices/InvoiceLoop.tsx'), /href="\/dashboard\/zeke"[\s\S]{0,300}Chat/);
   // The floating Zeke stays out of the way on the Zeke page itself.
-  assert.match(await source('components/FloatingCopilot.tsx'), /pathname !== '\/dashboard\/zeke'/);
+  assert.match(await source('components/FloatingCopilot.tsx'), /if \(pathname === '\/dashboard\/zeke'\) return null;/);
 });
 
 test('the shell is keyboard and screen-reader navigable, with a real phone drawer', async () => {

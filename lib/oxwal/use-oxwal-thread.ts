@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ActionCardProposal } from '@/lib/agent/action-card';
 import { DEFAULT_ASSISTANT_NAME } from '@/lib/agent/assistant-name-shared';
 import { recordPendingProposals } from '@/lib/oxwal-notify';
+import { takeThreadHandoff } from '@/lib/oxwal/thread-handoff';
 
 /**
  * One conversation with Zeke, for every surface that has one.
@@ -132,10 +133,15 @@ export type UseOxwalThreadOptions = {
    * it. That surface links to the queue instead.
    */
   allowInlineApproval?: boolean;
+  /**
+   * Take over a conversation another surface handed over (the floating
+   * Zeke's expand button, lib/oxwal/thread-handoff.ts). The Zeke page sets it.
+   */
+  resumeHandoff?: boolean;
 };
 
 export function useOxwalThread(options: UseOxwalThreadOptions = {}) {
-  const { welcome, historyTurns = 8, allowInlineApproval = true } = options;
+  const { welcome, historyTurns = 8, allowInlineApproval = true, resumeHandoff = false } = options;
 
   const [thread, setThread] = useState<OxwalThreadItem[]>(() =>
     welcome ? [{ kind: 'assistant', id: 'assistant_welcome', text: welcome }] : [],
@@ -147,6 +153,23 @@ export function useOxwalThread(options: UseOxwalThreadOptions = {}) {
   const [assistantName, setAssistantName] = useState(DEFAULT_ASSISTANT_NAME);
 
   const hasStarted = thread.some((item) => item.kind === 'user');
+
+  // A conversation handed over from the floating Zeke continues here. Read
+  // after mount, in the browser only, and taken once.
+  useEffect(() => {
+    if (!resumeHandoff) return;
+    // Taken inside the timeout, not the effect: under Strict Mode the effect
+    // runs twice, and the first run's cleanup cancels its timeout before
+    // anything was taken, so the second run still finds the handover.
+    const timeout = setTimeout(() => {
+      const handoff = takeThreadHandoff();
+      if (!handoff) return;
+      const welcomeRow: OxwalThreadItem[] = welcome ? [{ kind: 'assistant', id: 'assistant_welcome', text: welcome }] : [];
+      setThread([...welcomeRow, ...handoff.thread.filter((item) => item.id !== 'assistant_welcome')]);
+      if (handoff.assistantName) setAssistantName(handoff.assistantName.slice(0, 40));
+    }, 0);
+    return () => clearTimeout(timeout);
+  }, [resumeHandoff, welcome]);
 
   const proposals = useMemo(
     () => thread.flatMap((item) => (item.kind === 'proposal' ? [item.proposal] : [])),
@@ -193,9 +216,12 @@ export function useOxwalThread(options: UseOxwalThreadOptions = {}) {
       const prompt = rawPrompt.trim();
       if (!prompt || isSending) return;
 
+      // The welcome line is the surface's, not a turn the agent took, and a
+      // history that opens with an assistant turn is not a conversation the
+      // model API accepts as one; it stays on screen and out of the history.
       const history = thread
         .flatMap((item) =>
-          item.kind === 'user' || item.kind === 'assistant'
+          (item.kind === 'user' || item.kind === 'assistant') && item.id !== 'assistant_welcome'
             ? [{ role: item.kind, content: item.text }]
             : [],
         )

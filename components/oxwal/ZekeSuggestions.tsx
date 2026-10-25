@@ -31,6 +31,8 @@ type ApiSuggestion = {
   description: string;
   confidence: number | null;
   suggestedAction?: string;
+  /** What to ask Zeke: fixed words and server-derived codes only (lib/server/copilot.ts). */
+  prompt?: string;
 };
 
 function mapSuggestion(s: ApiSuggestion): SuggestionCard {
@@ -41,10 +43,12 @@ function mapSuggestion(s: ApiSuggestion): SuggestionCard {
     title: s.title,
     body: s.description,
     kind,
-    // The suggestion's own words become the question. Zeke then has to go and
-    // read something to answer it, which is the point: a suggestion an
-    // operator cannot interrogate is just a banner.
-    prompt: `${s.title}. ${s.description}. Walk me through this and prepare it if it holds up.`,
+    // The question is the server's fixed prompt, never the description: a
+    // description can quote a recalled memory, and a memory can hold words
+    // an invoice's author wrote. Shown to the reader, they are text; sent to
+    // Zeke inside "prepare it", they would be an instruction. Without a
+    // prompt, the card asks about its title, which the server writes.
+    prompt: s.prompt ?? `${s.title}. Walk me through this.`,
     // No score, no percentage. A missing one used to be shown as 60%.
     confidence: confidencePercent(s.confidence),
   };

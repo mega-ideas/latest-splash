@@ -51,6 +51,7 @@ import {
   type GovernanceSnapshots,
   type WrapperSnapshot,
 } from './governance-events.ts';
+import { safeDbErrorLabel } from './safe-db-error.ts';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type DrizzleDb = PgDatabase<any, typeof schemaModule, any>;
@@ -494,7 +495,7 @@ export async function readGovernanceAlertCountForSession(session: { email: strin
       );
     return Number(rows[0]?.count ?? 0);
   } catch (error) {
-    console.error('[governance-alerts] the alert count could not be read:', error instanceof Error ? error.message : error);
+    console.error('[governance-alerts] the alert count could not be read:', safeDbErrorLabel(error));
     return null;
   }
 }
@@ -515,7 +516,7 @@ export async function readGovernanceBannerForSession(session: { email: string },
     if (!found[0]) return [];
     return await listBannerAlertsForUser(db, found[0].id, nowMs);
   } catch (error) {
-    console.error('[governance-alerts] the banner could not be read:', error instanceof Error ? error.message : error);
+    console.error('[governance-alerts] the banner could not be read:', safeDbErrorLabel(error));
     return [];
   }
 }
