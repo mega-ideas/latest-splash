@@ -2,7 +2,7 @@
 
 import Image from 'next/image';
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type KeyboardEvent } from 'react';
 import {
   Anchor,
   ArrowDownRight,
@@ -21,27 +21,35 @@ import {
 } from 'lucide-react';
 
 import FloatingToken from '@/components/landing/FloatingToken';
+import HowItWorks from '@/components/landing/HowItWorks';
+import LoopCarousel from '@/components/landing/LoopCarousel';
+import PartnersRail, { type SignedPartner } from '@/components/landing/PartnersRail';
+import PhoneStickyCta from '@/components/landing/PhoneStickyCta';
+import ProductSection from '@/components/landing/ProductSection';
 import SettlementCinematic from '@/components/landing/SettlementCinematic';
 import WaitlistCta from '@/components/landing/WaitlistCta';
-import LocalTime from '@/components/LocalTime';
 import ControlPlaneExplainer from '@/components/oxwal/ControlPlaneExplainer';
 import RoadmapChip from '@/components/supply/RoadmapChip';
-import { claims, lockedCopy } from '@/content/claims';
-import { pricingSummary, type PricingSummary } from '@/lib/fees/copy';
+import { lockedCopy, saasCompliance } from '@/content/claims';
+import { pricingSummary, type FeeScheduleWire, type PricingSummary } from '@/lib/fees/copy';
 import { LAUNCH_SCHEDULE } from '@/lib/fees/schedule';
-import { formatBps } from '@/lib/fx/calculator';
 import { getComparisonBaseline } from '@/lib/fx/comparison-baselines';
-import { formatMinor } from '@/lib/money';
+import { comparisonRows, splashToday, SPEED_LINE, type ComparisonRow } from '@/lib/landing/comparison';
+import { landingImage, type LandingImage } from '@/lib/landing/images';
+import { PILOT_ROUTES, QUOTABLE_ROUTES, type QuotableCurrency } from '@/lib/landing/routes';
+import { REQUEST_ACCESS_ID } from '@/components/landing/ProductSection';
 import { BRAND } from '@/content/brand';
-import { CUSTODY_LICENCE } from '@/lib/custody-phase-rules';
 
-const operatingLayers = [
+const LIQUIDITY_ART = landingImage('liquidity-pools');
+
+const operatingLayers: Array<{ number: string; label: string; title: string; copy: string; image: string; art?: LandingImage; imageAlt: string; meta: string }> = [
   {
     number: '01',
     label: 'Liquidity',
     title: 'Keep USD productive.',
     copy: 'Keep payout inventory ready while treasury projections model how excess USD could remain productive.',
-    image: '/cinematic/liquidity-pools.png',
+    image: LIQUIDITY_ART.src,
+    art: LIQUIDITY_ART,
     imageAlt: 'Tiered isometric liquidity pools with gold coin reserves flowing between basins',
     meta: 'Available cash - projected treasury',
   },
@@ -52,7 +60,7 @@ const operatingLayers = [
     copy: 'Every payment settles completely or not at all. It never lands halfway.',
     image: '/cinematic/settlement-machine.png',
     imageAlt: 'Isometric settlement machine turning US dollar coins into local currency through a checkpoint',
-    meta: lockedCopy.speed,
+    meta: SPEED_LINE,
   },
   {
     number: '03',
@@ -65,119 +73,11 @@ const operatingLayers = [
   },
 ];
 
-/** The five steps. Delivery quotes Splash's bank fee from the schedule (A1 §2.7). */
-const flowStepsFor = (pricing: PricingSummary) => [
-  {
-    id: 'intake',
-    number: '01',
-    title: 'Invoice in, or type it in',
-    description:
-      'Two ways in: collect through a pay link or upload an accepted invoice — or start a manual transfer and fill in the recipient, bank details, amount, and purpose yourself.',
-    image: '/cinematic/flow-collect-v4.png',
-    imageAlt: 'Collect isometric typography with an invoice, pay link, and dollar coins',
-    stat: 'Invoice or manual entry',
-  },
-  {
-    id: 'review',
-    number: '02',
-    title: 'Review quotes',
-    description: 'KYB, recipient status, route, fee, treasury floor, and evidence labels appear before signature.',
-    image: '/cinematic/flow-review-quotes-v4.png',
-    imageAlt: 'Review quotes isometric typography with FX quote cards, checklist, and approval stamp',
-    stat: 'Human approval',
-  },
-  {
-    id: 'settle',
-    number: '03',
-    title: 'Settle in one signature',
-    description: 'The prepared payment either completes as approved or stops safely before funds move.',
-    image: '/cinematic/flow-settle-v4.png',
-    imageAlt: 'Settle isometric typography with a coin passing an approval gate and a signing pen',
-    stat: lockedCopy.speed,
-  },
-  {
-    id: 'deliver',
-    number: '04',
-    title: 'Deliver locally',
-    description: 'Pay a verified supplier or sweep value into the recipient ladder where the corridor allows it.',
-    image: '/cinematic/flow-deliver-v4.png',
-    imageAlt: 'Deliver isometric typography with a truck bringing a peso coin to a local shop',
-    stat: pricing.bankFeePhrase,
-  },
-  {
-    id: 'proof',
-    number: '05',
-    title: 'Anchor the proof',
-    description: 'Receipts, encrypted documents, and daily audit evidence remain available for review.',
-    image: '/cinematic/flow-proof-v4.png',
-    imageAlt: 'Proof isometric typography with an archive vault, sealed certificate, and shield badge',
-    stat: 'A record that lasts',
-  },
-];
-
-/* Metrics ticker: the moving bridge band at the bottom of the hero. Splash's
-   fees are the schedule's (A1 §2.7): free between Splash businesses, a rate
-   to a bank, and "None yet" while FeeConfig's fees are off. */
-const marqueeFor = (pricing: PricingSummary) => [
-  ['1 live testnet', 'MY to PH corridor'],
-  ['Modeled routes', 'expand with controls'],
-  ['~400ms', 'Sui settlement finality'],
-  [pricing.business, 'between Splash businesses'],
-  [pricing.bankFee, 'Splash fee to a bank'],
-  ['Human approved', 'AI recommendations'],
-  ['Stored proof', 'A record that lasts'],
-];
-
-const partnerRail: Array<{ src: string; name: string; role: string; logoClass?: string }> = [
-  { src: '/stripe-logo.svg', name: 'Stripe', role: 'USD collection' },
-  { src: '/partners/airwallex.png', name: 'Airwallex', role: 'bank rails', logoClass: 'iso-airwallex-logo' },
-  { src: '/partners/pyth.png', name: 'Pyth', role: 'FX and peg data' },
-  { src: '/deepbook-mark.png', name: 'DeepBook', role: 'amount-sized liquidity', logoClass: 'iso-deepbook-logo' },
-  { src: '/sumsub-logo.png', name: 'Sumsub', role: 'KYB and KYC' },
-  { src: '/sui-logo-blue.svg', name: 'Sui', role: 'settlement network' },
-];
-
-/** Partner badge: logo only at rest. Hover (or focus) dims the logo and
-    reveals the centred name + role. Click still balloon-pops the logo. */
-function PartnerBadge({ src, name, role, logoClass }: (typeof partnerRail)[number]) {
-  const [popping, setPopping] = useState(false);
-  return (
-    <button
-      type="button"
-      className="iso-partner-item cin-partner"
-      onClick={() => setPopping(true)}
-      aria-label={`${name} — ${role}`}
-    >
-      <span
-        className={`cin-partner-logo ${popping ? 'is-popping' : ''}`}
-        onAnimationEnd={(event) => {
-          if (event.animationName === 'cin-balloon') setPopping(false);
-        }}
-      >
-        <Image src={src} alt={`${name} logo`} width={240} height={140} className={logoClass} />
-      </span>
-      <span className="cin-partner-reveal" aria-hidden="true">
-        <strong>{name}</strong>
-        <small>{role}</small>
-      </span>
-    </button>
-  );
-}
-
 /* The comparison's competitor figures (the A1 review). The bank and
    fintech columns are the reviewed category midpoints for USD to PHP from
-   a named, dated dataset (lib/fx/comparison-baselines.ts): a correspondent
-   wire with its FX margin, and the digital-provider category, never a
-   named provider. No broker figure has a source, so its cells show none
-   rather than a number nobody can check. */
+   a named, dated dataset (lib/fx/comparison-baselines.ts); every other
+   competitor cell says "Varies" (lib/landing/comparison.ts). */
 const COMPARISON_BASELINE = getComparisonBaseline('PHP');
-const UNSOURCED = 'Varies';
-const BANK_WIRE = COMPARISON_BASELINE?.bankWire ?? null;
-const BANK_WIRE_DELIVERY = BANK_WIRE?.delivery ?? UNSOURCED;
-const BANK_WIRE_COST = BANK_WIRE ? `US$${formatMinor(BANK_WIRE.flatUsdMinor, 2)} + ${formatBps(BANK_WIRE.marginBps)} FX margin` : UNSOURCED;
-const FINTECH = COMPARISON_BASELINE?.fintech ?? null;
-const FINTECH_DELIVERY = FINTECH?.delivery ?? UNSOURCED;
-const FINTECH_COST = FINTECH ? `US$${formatMinor(FINTECH.flatUsdMinor, 2)} + ${formatBps(FINTECH.marginBps)} FX margin` : UNSOURCED;
 /** The dataset's ISO date as a reader says it ("31 March 2025"): a calendar
  *  date, not a moment, so it is spelled out the same on server and client. */
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -186,112 +86,6 @@ function calendarDate(iso: string) {
   return `${day} ${MONTHS[month - 1]} ${year}`;
 }
 const BASELINE_DATE = COMPARISON_BASELINE ? calendarDate(COMPARISON_BASELINE.dataset.asOf) : '';
-
-const comparisonRowsFor = (pricing: PricingSummary) => [
-  {
-    feature: 'Settlement speed',
-    bank: BANK_WIRE_DELIVERY,
-    broker: UNSOURCED,
-    fintech: FINTECH_DELIVERY,
-    splash: lockedCopy.speed,
-  },
-  {
-    feature: 'Fee to a bank',
-    bank: BANK_WIRE_COST,
-    broker: UNSOURCED,
-    fintech: FINTECH_COST,
-    // The schedule once fees are on; until then, none is charged.
-    splash: pricing.feesOn ? pricing.bank : pricing.bankFeePhrase,
-  },
-  {
-    feature: 'FX transparency',
-    bank: 'Hidden markup',
-    broker: 'Cash spread',
-    fintech: 'Margin in the rate',
-    splash: 'Oracle-labeled quote',
-  },
-  {
-    feature: 'Atomic settlement',
-    bank: 'No',
-    broker: 'No',
-    fintech: 'No',
-    splash: 'Yes',
-  },
-  {
-    feature: 'Batch payments',
-    bank: 'Limited',
-    broker: 'No',
-    fintech: 'Limited',
-    splash: 'Native',
-  },
-  {
-    feature: 'AI treasury copilot',
-    bank: 'No',
-    broker: 'No',
-    fintech: 'No',
-    splash: lockedCopy.agent,
-  },
-  {
-    feature: 'Early payment on invoices',
-    bank: 'Manual factoring',
-    broker: 'No',
-    fintech: 'No',
-    splash: 'Buyer-approved discount offer',
-  },
-  {
-    feature: 'Bilateral netting',
-    bank: 'Manual',
-    broker: 'No',
-    fintech: 'No',
-    splash: 'Modeled in account loop',
-  },
-  {
-    feature: 'Permanent audit trail',
-    bank: 'Siloed records',
-    broker: 'Manual receipts',
-    fintech: 'Platform history',
-    splash: 'Encrypted and kept',
-  },
-  {
-    feature: 'Recipient account ladder',
-    bank: 'Bank account only',
-    broker: 'Cash-out only',
-    fintech: 'Provider account',
-    splash: 'Payout, sweep, stored balance',
-  },
-];
-
-/** Each benchmark as its source published it, read live by /api/market/yields; null when it could not be read. */
-type YieldBenchmarks = {
-  bank: number | null;
-  broker: number | null;
-  wise: number | null;
-  splash: number | null;
-  asOf: string;
-};
-
-/** Nothing is shown until a source has been read: no remembered rate stands in for a reading. */
-const unreadYieldBenchmarks: YieldBenchmarks = {
-  bank: null,
-  broker: null,
-  wise: null,
-  splash: null,
-  asOf: '',
-};
-
-/** A benchmark rate for a table cell, or "No reading" when its source could not be read. */
-function yieldCell(value: number | null, suffix: string) {
-  return value === null ? 'No reading' : `${formatPercent(value)} ${suffix}`;
-}
-
-const percentFormatter = new Intl.NumberFormat('en-US', {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
-
-function formatPercent(value: number) {
-  return `${percentFormatter.format(value)}%`;
-}
 
 const copilotLayers = [
   {
@@ -316,64 +110,66 @@ const copilotLayers = [
   },
 ];
 
-// Rungs 02 and 03 hold customer funds: Phase 2, behind the same custody gate
-// the transfer form and /api/transfers/authorize enforce.
-const recipientLadder = [
+/* Where a payment can land (v2 brief section 6). A bank in local currency
+   through a partner of record, or a wallet in stablecoin; and the money
+   waiting to be sent sits in the business's own Splash Wallet. There is no
+   Splash account that holds anyone's funds (D3). A bank payout says "Live"
+   only once a payout partner is signed (lib/landing/routes.ts routeIsLive). */
+const recipientLadder = (bankLive: boolean) => [
   {
     number: '01',
-    title: 'Payout',
-    status: 'Live-model',
-    copy: 'Deliver local currency to a verified recipient through the current payout rail.',
+    title: 'Bank payout',
+    status: bankLive ? 'Live' : 'Quotes open',
+    copy: 'Local currency to a verified recipient’s bank, paid by a partner of record.',
   },
   {
     number: '02',
-    title: 'Sweep account',
-    status: 'Phase 2',
-    copy: `A Splash account that sweeps to the recipient's bank. It holds funds, which needs ${CUSTODY_LICENCE}.`,
+    title: 'Wallet payout',
+    status: 'Live',
+    copy: 'Stablecoin to another Splash business or a wallet whose owner has proved it.',
   },
   {
     number: '03',
-    title: 'Stored balance',
-    status: 'Phase 2',
-    copy: 'Keep value inside the network where regulation and partner controls permit it.',
+    title: 'Splash Wallet',
+    status: 'Stablecoins only',
+    copy: 'Held by your business. Your owners sign; Splash has no key to it.',
   },
 ];
 
-/* Trust · Four gates — the control sequence every payout passes, in order.
-   Copy stays inside content/claims.ts truth: Sumsub KYB wired, human-final
-   approval, settlement, and the encrypted evidence recorded beside it. */
+/* Trust: four gates, the control sequence every payment passes in order,
+   whether it lands in a bank or a wallet (v2 brief section 6). */
 const trustGates = [
   {
     number: '01',
     label: 'Verify',
     icon: ShieldCheck,
-    title: 'KYB on both sides.',
-    copy: 'A payout only exists between verified businesses. Sumsub gates every counterparty before a quote is even prepared.',
-    meta: 'Sumsub KYB · wired',
+    title: 'Verified before money moves.',
+    copy: 'KYB on your business. KYB or a signed ownership proof on every recipient, before a quote is prepared.',
+    meta: 'Your business and every payee',
   },
   {
     number: '02',
     label: 'Approve',
     icon: PenLine,
-    title: 'A person signs. Always.',
-    copy: 'Zeke prepares. You approve. No payout, batch, or treasury move executes without a human signature.',
-    meta: 'Maker-checker · human-final',
+    title: 'A person signs.',
+    copy: 'Your owners’ multisig signs, or a spending rule they set does. Zeke prepares a payment; it never signs one.',
+    meta: lockedCopy.agent,
   },
   {
     number: '03',
     label: 'Settle',
     icon: Zap,
-    title: 'Atomic or not at all.',
-    copy: 'The prepared payment completes exactly as approved — or stops safely before funds move. No partial states.',
-    meta: lockedCopy.speed,
+    title: 'Exactly as approved.',
+    copy: 'Amount, payee and rate are fixed at approval. The Sui step is all-or-nothing; the bank leg is tracked until the partner confirms.',
+    meta: SPEED_LINE,
   },
   {
     number: '04',
     label: 'Prove',
     icon: Anchor,
-    title: 'Evidence outlives the payment.',
-    copy: 'Receipts and encrypted documents are written where they cannot be quietly changed — a record you can hand to an auditor.',
-    meta: 'Encrypted and recorded',
+    title: 'Proof that outlives the payment.',
+    copy: 'The receipt and encrypted documents are kept where they cannot be quietly changed: a record you can hand to an auditor.',
+    meta: 'Encrypted and kept',
   },
 ];
 
@@ -381,44 +177,126 @@ const headerNavItems = [
   { href: '#how-it-works', label: 'How it works', detail: '5 steps' },
   { href: '#platform', label: 'Platform', detail: 'Pay + treasury' },
   { href: '/working-capital', label: 'Working capital', detail: 'Supply loop' },
-  { href: '#corridors', label: 'Routes', detail: 'MY-PH testnet' },
+  { href: '#corridors', label: 'Routes', detail: 'PH and ID' },
   { href: '#comparison', label: 'Compare', detail: 'Fees + speed' },
   { href: '#copilot', label: 'Zeke', detail: 'Prepare + approve' },
 ];
 
 
-const loopCards = [
+/* Each loop's status chip is what is true today: Settle is "Live" once a
+   payout partner is signed, Save once treasury execution is switched on
+   after legal sign-off (brief section 9), Supply is on the roadmap. */
+type LoopStatus = 'live' | 'quotes' | 'roadmap' | 'signoff';
+
+const loopCards = (status: { settle: LoopStatus; save: LoopStatus }) => [
   {
     number: '01',
     label: 'Settle',
     title: 'Move it in minutes.',
-    copy: 'Collect USD, pay Southeast Asia. Every approved payout builds verified counterparties and settlement history.',
-    image: '/isometric/loop-settle-v3.png',
+    copy: 'Hold USDC, pay Southeast Asia. Every approved payout builds verified counterparties and settlement history.',
+    art: landingImage('loop-settle'),
     imageAlt: 'Isometric settlement: a USD coin crossing an approved rail in minutes to arrive as a PHP coin',
-    meta: 'USD → PHP · live on testnet',
-    roadmap: false,
+    meta: 'USDC → PHP and IDR',
+    status: status.settle,
   },
   {
     number: '02',
     label: 'Save',
     title: 'Grow it while it waits.',
-    copy: 'Idle USD follows a projected, variable treasury posture. Your business approves every move.',
-    image: '/isometric/loop-save-v3.png',
+    copy: 'Zeke models a projected, variable treasury posture for idle USDC. Your business approves every move.',
+    art: landingImage('loop-save'),
     imageAlt: 'Isometric treasury tiers of idle USD growing along a yield curve, gated by an approve control',
     meta: 'Projected · variable · human-approved',
-    roadmap: false,
+    status: status.save,
   },
   {
     number: '03',
     label: 'Supply',
-    title: 'Finance it — the moat.',
+    title: 'Finance it early.',
     copy: 'Invoices would become working capital: your buyer funds early payment against a receivable both sides can verify.',
-    image: '/isometric/loop-supply.png',
+    art: landingImage('loop-supply'),
     imageAlt: 'Isometric supply loop: an invoice financed early and returned as working capital',
     meta: 'Buyer-funded · no third-party lender',
-    roadmap: true,
+    status: 'roadmap' as LoopStatus,
   },
 ];
+
+function LoopChip({ status }: { status: LoopStatus }) {
+  if (status === 'roadmap') return <RoadmapChip />;
+  if (status === 'signoff') return <RoadmapChip detail="after legal sign-off" />;
+  if (status === 'quotes') return <em className="iso-loops-live is-quotes">Quotes open</em>;
+  return <em className="iso-loops-live"><i aria-hidden="true" /> Live</em>;
+}
+
+/* The comparison on a phone (v2 brief D15): Splash beside one alternative at
+   a time, chosen with tabs, instead of the four-column table re-laid as a
+   dozen cards. Same rows as the table (lib/landing/comparison.ts), so a
+   phone and a desktop never say different things. */
+const ALTERNATIVES = [
+  { id: 'bank', label: 'Bank' },
+  { id: 'broker', label: 'Broker' },
+  { id: 'fintech', label: 'Fintech app' },
+] as const;
+type Alternative = (typeof ALTERNATIVES)[number]['id'];
+
+function PhoneComparison({ rows }: { rows: readonly ComparisonRow[] }) {
+  const [alt, setAlt] = useState<Alternative>('bank');
+  const current = ALTERNATIVES.findIndex((a) => a.id === alt);
+
+  function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    const last = ALTERNATIVES.length - 1;
+    const moves: Record<string, number> = {
+      ArrowLeft: current === 0 ? last : current - 1,
+      ArrowRight: current === last ? 0 : current + 1,
+      Home: 0,
+      End: last,
+    };
+    if (!(event.key in moves)) return;
+    event.preventDefault();
+    const next = ALTERNATIVES[moves[event.key]];
+    setAlt(next.id);
+    document.getElementById(`pc-tab-${next.id}`)?.focus();
+  }
+
+  const label = ALTERNATIVES[current].label;
+  return (
+    <div className="pc-compare">
+      <div className="pc-tabs" role="tablist" aria-label="Compare Splash with" onKeyDown={onKeyDown}>
+        {ALTERNATIVES.map((a) => (
+          <button
+            type="button"
+            role="tab"
+            key={a.id}
+            id={`pc-tab-${a.id}`}
+            aria-selected={a.id === alt}
+            aria-controls="pc-panel"
+            tabIndex={a.id === alt ? 0 : -1}
+            onClick={() => setAlt(a.id)}
+          >
+            {a.label}
+          </button>
+        ))}
+      </div>
+      <div className="pc-panel" role="tabpanel" id="pc-panel" aria-labelledby={`pc-tab-${alt}`}>
+        {rows.map((row) => (
+          <div className="pc-row" key={row.feature}>
+            <h4>{row.feature}</h4>
+            <dl>
+              <div className="is-splash">
+                <dt>Splash</dt>
+                <dd><Check aria-hidden="true" /> {row.splash}</dd>
+              </div>
+              <div>
+                <dt>{label}</dt>
+                <dd>{row[alt]}</dd>
+              </div>
+            </dl>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 const LAUNCH_PRICING = pricingSummary(LAUNCH_SCHEDULE);
 
@@ -451,38 +329,32 @@ function ReceiptArtFee({ value }: { value: string }) {
  * the schedule in force (lib/fees/fee-config.ts publishedFeeSchedule). The
  * launch schedule is only the default for a caller that passes none.
  */
-export default function IsometricLanding({ isPhone = false, pricing = LAUNCH_PRICING }: { isPhone?: boolean; pricing?: PricingSummary }) {
-  const flowSteps = flowStepsFor(pricing);
-  const marqueeItems = marqueeFor(pricing);
-  const [activeFlowId, setActiveFlowId] = useState(flowSteps[0].id);
-  const activeFlow = flowSteps.find((step) => step.id === activeFlowId) ?? flowSteps[0];
+export default function IsometricLanding({
+  isPhone = false,
+  pricing = LAUNCH_PRICING,
+  fees,
+  signedPartners = [],
+  fundingPartners = [],
+  livePayouts = [],
+  treasuryLive = false,
+}: {
+  isPhone?: boolean;
+  pricing?: PricingSummary;
+  /** The published schedule and whether its fees are on, for the calculator. */
+  fees: { schedule: FeeScheduleWire; feesOn: boolean };
+  /** Partners whose agreements are signed (SIGNED_PARTNERS), read on the server. */
+  signedPartners?: readonly SignedPartner[];
+  /** The signed funding providers' names, for the Splash Wallet card. */
+  fundingPartners?: readonly string[];
+  /** The quotable routes whose payout partner is signed (lib/landing/routes.ts livePayoutCurrencies). */
+  livePayouts?: readonly QuotableCurrency[];
+  /** Treasury execution is switched on (TREASURY_EXECUTION_ENABLED, after legal sign-off). */
+  treasuryLive?: boolean;
+}) {
   // The control plane reveals below the copilot on demand — a credit-roll,
   // not a second section.
   const [ctrlOpen, setCtrlOpen] = useState(false);
-  const [yieldBenchmarks, setYieldBenchmarks] = useState(unreadYieldBenchmarks);
   const [showBackToTop, setShowBackToTop] = useState(false);
-
-  useEffect(() => {
-    let active = true;
-
-    async function refreshYields() {
-      try {
-        const response = await fetch('/api/market/yields');
-        if (!response.ok) return;
-        const body = await response.json() as YieldBenchmarks;
-        if (active) setYieldBenchmarks(body);
-      } catch {
-        // Keep the latest known benchmarks if a source is temporarily unavailable.
-      }
-    }
-
-    void refreshYields();
-    const interval = window.setInterval(refreshYields, 5 * 60 * 1000);
-    return () => {
-      active = false;
-      window.clearInterval(interval);
-    };
-  }, []);
 
   useEffect(() => {
     function updateHeaderState() {
@@ -502,7 +374,7 @@ export default function IsometricLanding({ isPhone = false, pricing = LAUNCH_PRI
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 
     const targets = document.querySelectorAll(
-      '.iso-section > .iso-shell, .iso-partner-rail > .iso-shell',
+      '.iso-section > .iso-shell',
     );
     const observer = new IntersectionObserver(
       (entries) => {
@@ -522,23 +394,19 @@ export default function IsometricLanding({ isPhone = false, pricing = LAUNCH_PRI
     return () => observer.disconnect();
   }, []);
 
-  const liveComparisonRows = [
-    ...comparisonRowsFor(pricing),
-    {
-      feature: 'Yield on idle USD',
-      bank: yieldCell(yieldBenchmarks.bank, 'APY'),
-      broker: yieldCell(yieldBenchmarks.broker, 'APY'),
-      fintech: yieldCell(yieldBenchmarks.wise, 'APY'),
-      splash: yieldCell(yieldBenchmarks.splash, 'projected variable APY'),
-    },
-  ];
+  const rows = comparisonRows(pricing, COMPARISON_BASELINE);
+  const capabilities = splashToday();
+  const liveRoutes = QUOTABLE_ROUTES.filter((route) => livePayouts.includes(route.currency));
+  const quotingRoutes = QUOTABLE_ROUTES.filter((route) => !livePayouts.includes(route.currency));
+  const ladder = recipientLadder(liveRoutes.length > 0);
+  const loops = loopCards({ settle: liveRoutes.length > 0 ? 'live' : 'quotes', save: treasuryLive ? 'live' : 'signoff' });
 
   return (
     <main className={`iso-landing${isPhone ? ' is-phone' : ''}`}>
       <header className={`iso-header ${showBackToTop ? 'is-scrolled' : ''}`}>
         <div className="iso-shell iso-header-inner">
           <Link href="/" className="iso-brand" aria-label="Splash Finance home">
-            <Image src="/splash-main-icon.png" alt="" width={841} height={823} className="iso-header-brand-icon" priority />
+            <Image src="/splash-main-icon.png" alt="" width={841} height={823} className="iso-header-brand-icon" sizes="40px" priority />
             <span className="iso-header-wordmark">
               <strong>Splash</strong>
             </span>
@@ -554,12 +422,8 @@ export default function IsometricLanding({ isPhone = false, pricing = LAUNCH_PRI
           </nav>
 
           <div className="iso-header-actions">
-            <span className="iso-header-status">
-              <small>Sandbox</small>
-              <strong>MY-PH testnet</strong>
-            </span>
             <Link href="/signup" className="iso-button iso-button-small">
-              Start sending
+              Open payment desk
               <ArrowDownRight aria-hidden="true" />
             </Link>
           </div>
@@ -568,17 +432,173 @@ export default function IsometricLanding({ isPhone = false, pricing = LAUNCH_PRI
 
       <SettlementCinematic isPhone={isPhone} pricing={pricing} />
 
-      <div className="iso-marquee is-static" aria-label="Platform metrics">
-        <div className="iso-marquee-track">
-          {[...marqueeItems, ...marqueeItems].map(([value, label], index) => (
-            <div className="iso-marquee-item" key={`${value}-${index}`}>
-              <strong>{value}</strong>
-              <span>{label}</span>
-              <i aria-hidden="true">◆</i>
-            </div>
-          ))}
+      <ProductSection fees={fees} />
+
+      <PartnersRail signed={signedPartners} />
+
+      <section id="how-it-works" className="iso-section iso-flow" aria-labelledby="how-title">
+        <HowItWorks fundingPartners={fundingPartners} />
+      </section>
+
+      <section id="comparison" className="iso-section iso-comparison" aria-labelledby="routes-title">
+        <div className="cin-drop" style={{ top: 26, right: '4%' }} aria-hidden="true">
+          <FloatingToken src="/cinematic/token-thb.png" alt="Thai baht token" size={104} float="cin-float-slow" />
         </div>
-      </div>
+        <div className="iso-shell">
+          <div id="corridors" className="iso-corridor-layout iso-corridor-embed">
+            <div className="iso-corridor-copy">
+              <p className="iso-kicker">Routes</p>
+              <h2 className="iso-section-title" id="routes-title">
+                One engine.
+                <span>Route by route.</span>
+              </h2>
+              <p>
+                Every payment settles in USDC on Sui first. A partner of record then pays the local bank.
+                A new country is a new partner on the same engine, not a new system to learn.
+              </p>
+
+              <div className="iso-route-groups">
+                {liveRoutes.length > 0 ? (
+                  <div className="iso-route-group">
+                    <h3>
+                      Live <small>{liveRoutes.length} {liveRoutes.length === 1 ? 'route' : 'routes'}</small>
+                    </h3>
+                    <ul>
+                      {liveRoutes.map((route) => (
+                        <li key={route.currency} className="is-live">
+                          <strong>{route.currency}</strong>
+                          <span>{route.country}</span>
+                          <small>{route.arrives}</small>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+                {quotingRoutes.length > 0 ? (
+                  <div className="iso-route-group">
+                    <h3>
+                      Quotes open <small>{quotingRoutes.length} {quotingRoutes.length === 1 ? 'route' : 'routes'}</small>
+                    </h3>
+                    <ul>
+                      {quotingRoutes.map((route) => (
+                        <li key={route.currency} className="is-live">
+                          <strong>{route.currency}</strong>
+                          <span>{route.country}</span>
+                          <small>Payouts once the partner signs</small>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+                <div className="iso-route-group is-pilot">
+                  <h3>
+                    Pilot access <small>{PILOT_ROUTES.length} routes</small>
+                  </h3>
+                  <ul>
+                    {PILOT_ROUTES.map((route) => (
+                      <li key={route.currency}>
+                        <strong>{route.currency}</strong>
+                        <span>{route.country}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <a href={`#${REQUEST_ACCESS_ID}`} className="iso-inline-link">
+                    Request access
+                    <ArrowRight aria-hidden="true" />
+                  </a>
+                </div>
+              </div>
+
+              <ol className="iso-recipient-ladder" aria-label="Where a payment can land">
+                {ladder.map((step) => (
+                  <li key={step.number}>
+                    <span aria-hidden="true">{step.number}</span>
+                    <div>
+                      <small>{step.status}</small>
+                      <strong>{step.title}</strong>
+                      <p>{step.copy}</p>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </div>
+
+            <div className="iso-corridor-stage">
+              <Image
+                src="/cinematic/corridor-bridge-v3.png"
+                alt="Two isometric city platforms connected by a golden bridge of flowing coins"
+                width={2752}
+                height={1536}
+                sizes="(max-width: 900px) 92vw, 620px"
+              />
+            </div>
+          </div>
+
+          <div className="iso-comparison-head">
+            <h3 className="iso-section-title iso-comparison-title">
+              Built for business.
+              <span>Designed to move.</span>
+            </h3>
+            <p>
+              A payment through a bank, a broker or a fintech app, beside the same payment on Splash.
+              Splash&apos;s column is what it does today.
+            </p>
+          </div>
+
+          <div className="iso-comparison-wrap">
+            <PhoneComparison rows={rows} />
+            {/* Explicit roles: on a phone the rows are re-laid as cards, and a
+                browser drops a table's implicit roles once its display changes. */}
+            <table className="iso-comparison-table" role="table">
+              <caption className="sr-only">Splash compared with a bank wire, a broker and a fintech app</caption>
+              <thead role="rowgroup">
+                <tr role="row">
+                  <th scope="col" role="columnheader">Feature</th>
+                  <th scope="col" role="columnheader">Bank</th>
+                  <th scope="col" role="columnheader">Broker</th>
+                  <th scope="col" role="columnheader">Fintech app</th>
+                  <th scope="col" role="columnheader" className="is-splash">Splash</th>
+                </tr>
+              </thead>
+              <tbody role="rowgroup">
+                {rows.map((row) => (
+                  <tr key={row.feature} role="row">
+                    <th scope="row" role="rowheader">{row.feature}</th>
+                    <td role="cell" data-label="Bank">{row.bank}</td>
+                    <td role="cell" data-label="Broker">{row.broker}</td>
+                    <td role="cell" data-label="Fintech app">{row.fintech}</td>
+                    <td role="cell" className="is-splash" data-label="Splash"><span className="iso-splash-cell"><Check aria-hidden="true" /> {row.splash}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="iso-splash-today">
+              <h4>What Splash does today</h4>
+              <dl>
+                {capabilities.map((item) => (
+                  <div key={item.feature}>
+                    <dt>{item.feature}</dt>
+                    <dd><Check aria-hidden="true" /> {item.splash}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+            <p className="iso-pricing-line">
+              <strong>Splash pricing</strong>
+              <span>{pricing.line}</span>
+            </p>
+            {COMPARISON_BASELINE ? (
+              <p className="iso-pricing-line">
+                <strong>Bank and fintech figures</strong>
+                <span>
+                  Category midpoints for a transfer of US$1,000 or more, from{' '}
+                  <a href={COMPARISON_BASELINE.dataset.url} rel="noopener noreferrer" target="_blank">{COMPARISON_BASELINE.dataset.name}</a>, as of {BASELINE_DATE}: a correspondent wire with its FX margin and the digital-provider category, not a named provider. A cell with no published figure says Varies.
+                </span>
+              </p>
+            ) : null}
+          </div>
+        </div>
+      </section>
 
       <section id="loops" className="iso-section iso-loops">
         <div className="cin-drop" style={{ top: 28, right: '4%' }} aria-hidden="true">
@@ -594,28 +614,31 @@ export default function IsometricLanding({ isPhone = false, pricing = LAUNCH_PRI
               </h2>
             </div>
             <p>
-              Idle dollars on Sui already move for free — Splash&apos;s job is what the transfer
-              alone can&apos;t do. Settle in minutes. Save while it waits. Supply turns invoices
-              into working capital.
+              A stablecoin transfer moves the money. Splash does what the transfer alone
+              can&apos;t: settle to a local bank, model what idle cash could do while it waits, and
+              next, turn invoices into working capital.
             </p>
           </div>
 
-          <div className="iso-loops-grid">
-            {loopCards.map((loop, index) => (
-              <article className={`iso-loops-card iso-loops-card-${index + 1}`} key={loop.number}>
+          <LoopCarousel labels={loops.map((loop) => loop.label)}>
+            {loops.map((loop, index) => (
+              <article
+                className={`iso-loops-card iso-loops-card-${index + 1}`}
+                key={loop.number}
+              >
                 <div className="iso-loops-meta">
                   <span>{loop.number}</span>
                   <p>{loop.label}</p>
-                  {loop.roadmap ? <RoadmapChip /> : <em className="iso-loops-live"><i aria-hidden="true" /> Live</em>}
+                  <LoopChip status={loop.status} />
                 </div>
                 <div className="iso-loops-art">
-                  <Image src={loop.image} alt={loop.imageAlt} width={640} height={480} />
+                  <Image src={loop.art.src} loader={loop.art.loader} alt={loop.imageAlt} width={loop.art.width} height={loop.art.height} sizes="(max-width: 900px) 86vw, 400px" />
                 </div>
                 <div className="iso-loops-copy">
                   <h3>{loop.title}</h3>
                   <p>{loop.copy}</p>
                   <small>{loop.meta}</small>
-                  {loop.roadmap ? (
+                  {loop.status === 'roadmap' ? (
                     <Link href="/working-capital" className="iso-inline-link iso-loops-more">
                       Learn more
                       <ArrowRight aria-hidden="true" />
@@ -624,258 +647,18 @@ export default function IsometricLanding({ isPhone = false, pricing = LAUNCH_PRI
                 </div>
               </article>
             ))}
-          </div>
+          </LoopCarousel>
 
           <div className="iso-loops-foot">
             <p className="iso-gasless-note">
-              <strong>Where the fees live:</strong> simple USD payouts ride Sui&apos;s zero-fee
-              rail; programmable settlement is gas-sponsored. You never hold SUI.
+              <strong>Where the fees live:</strong> Splash sponsors the Sui network fee, so you
+              never hold SUI. Splash&apos;s own fee is shown before you approve.
             </p>
             <Link href="/working-capital" className="iso-button iso-button-small">
               Explore the Supply loop
               <ArrowRight aria-hidden="true" />
             </Link>
           </div>
-        </div>
-      </section>
-
-      <section className="iso-partner-rail" aria-label="Infrastructure partners and benchmarks">
-        <div className="iso-shell">
-          <div className="iso-partner-intro">
-            <span>Infrastructure &amp; Partners</span>
-            <p>Partners of record on the outside. Settlement and the record inside.</p>
-          </div>
-          <div className="iso-partner-grid">
-            {partnerRail.map((partner) => (
-              <PartnerBadge key={partner.name} {...partner} />
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section id="how-it-works" className="iso-section iso-flow">
-        <div className="cin-drop" style={{ top: 34, right: '5%' }} aria-hidden="true">
-          <FloatingToken src="/cinematic/token-sgd.png" alt="Singapore dollar token" size={112} float="cin-float-drift" />
-        </div>
-        <div className="iso-shell iso-flow-layout">
-          <div className="iso-flow-copy">
-            <p className="iso-kicker">How it works</p>
-            <h2 className="iso-section-title iso-section-title-light">
-              Five steps.
-              <span>No limbo.</span>
-            </h2>
-            <div className="iso-flow-tabs" role="tablist" aria-label="Settlement flow">
-              {flowSteps.map((step) => {
-                const active = activeFlow.id === step.id;
-                return (
-                  <button
-                    key={step.id}
-                    type="button"
-                    role="tab"
-                    aria-selected={active}
-                    className={active ? 'is-active' : ''}
-                    onClick={() => setActiveFlowId(step.id)}
-                  >
-                    <span>{step.number}</span>
-                    <strong>{step.title}</strong>
-                    <ChevronRight aria-hidden="true" />
-                  </button>
-                );
-              })}
-            </div>
-            <div className="iso-flow-branch">
-              <strong>Manual transfer branch</strong>
-              <span>
-                No invoice needed: recipient, bank details, amount, and purpose typed by hand, and
-                checked against KYB before anything is signed.
-              </span>
-            </div>
-            <div className="iso-flow-branch">
-              <strong>Working-capital branch</strong>
-              <span>Accepted invoice to supplier discount offer to buyer approval to settlement proof.</span>
-            </div>
-          </div>
-
-          <div className="iso-flow-visual" role="tabpanel" aria-live="polite">
-            <div className="iso-flow-stat">
-              <small>Current checkpoint</small>
-              <strong>{activeFlow.stat}</strong>
-            </div>
-            <div className="iso-flow-image">
-              <Image
-                key={activeFlow.id}
-                src={activeFlow.image}
-                alt={activeFlow.imageAlt}
-                width={1448}
-                height={1086}
-                priority={activeFlow.id === 'settle'}
-              />
-            </div>
-            <div className="iso-flow-caption">
-              <span>{activeFlow.number}</span>
-              <div>
-                <strong>{activeFlow.title}</strong>
-                <p>{activeFlow.description}</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section id="comparison" className="iso-section iso-comparison">
-        <div className="cin-drop" style={{ top: 26, right: '4%' }} aria-hidden="true">
-          <FloatingToken src="/cinematic/token-thb.png" alt="Thai baht token" size={104} float="cin-float-slow" />
-        </div>
-        <div className="iso-shell">
-          <div className="iso-section-heading iso-heading-split">
-            <div>
-              <p className="iso-kicker">Comparison</p>
-              <h2 className="iso-section-title">
-                Built for business.
-                <span>Designed to move.</span>
-              </h2>
-            </div>
-            <p>
-              Splash makes internal account movement free, charges when value exits to local rails, and adds
-              programmable settlement, approval-led AI, and private audit proof.
-            </p>
-          </div>
-
-          <div id="corridors" className="iso-corridor-layout iso-corridor-embed">
-          <div className="iso-corridor-copy">
-            <p className="iso-kicker">One testnet corridor. Modeled expansion routes.</p>
-            <h2 className="iso-section-title">
-              USD in.
-              <span>Local out.</span>
-            </h2>
-            <p>
-              The MY-to-PH corridor is the proving ground. Additional routes stay modeled until partner, liquidity,
-              and regulatory controls are ready market by market.
-            </p>
-            <div className="iso-route-list">
-              <span className="is-live">PHP testnet</span><span>MYR</span><span>IDR</span><span>VND</span>
-              <span>THB</span><span>SGD</span><span>EUR</span><span>GBP</span>
-            </div>
-            <div className="iso-recipient-ladder">
-              {recipientLadder.map((step) => (
-                <article key={step.number}>
-                  <span>{step.number}</span>
-                  <div>
-                    <small>{step.status}</small>
-                    <strong>{step.title}</strong>
-                    <p>{step.copy}</p>
-                  </div>
-                </article>
-              ))}
-            </div>
-            <Link href="/signup" className="iso-inline-link">
-              Open the payout desk
-              <ArrowRight aria-hidden="true" />
-            </Link>
-          </div>
-
-          <div className="iso-corridor-stage">
-            <Image
-              src="/cinematic/corridor-bridge-v3.png"
-              alt="Two isometric city platforms, Kuala Lumpur and Manila, connected by a golden bridge of flowing coins"
-              width={2752}
-              height={1536}
-            />
-          </div>
-        </div>
-
-          <div className="iso-comparison-wrap">
-            <table className="iso-comparison-table">
-              <thead>
-                <tr>
-                  <th>Feature</th>
-                  <th>Bank</th>
-                  <th>Broker</th>
-                  <th>Fintech app</th>
-                  <th className="is-splash">Splash</th>
-                </tr>
-              </thead>
-              <tbody>
-                {liveComparisonRows.map((row) => (
-                  <tr key={row.feature}>
-                    <th scope="row">{row.feature}</th>
-                    <td>{row.bank}</td>
-                    <td>{row.broker}</td>
-                    <td>{row.fintech}</td>
-                    <td className="is-splash"><span className="iso-splash-cell"><Check aria-hidden="true" /> {row.splash}</span></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <p className="iso-pricing-line">
-              <strong>Splash pricing</strong>
-              <span>{pricing.line}</span>
-            </p>
-            {COMPARISON_BASELINE ? (
-              <p className="iso-pricing-line">
-                <strong>Bank and fintech figures</strong>
-                <span>
-                  Category midpoints for a transfer of US$1,000 or more, from{' '}
-                  <a href={COMPARISON_BASELINE.dataset.url} rel="noopener noreferrer" target="_blank">{COMPARISON_BASELINE.dataset.name}</a>, as of {BASELINE_DATE}: a correspondent wire with its FX margin and the digital-provider category, not a named provider. No broker figure is shown without a source.
-                </span>
-              </p>
-            ) : null}
-            <div className="iso-yield-live is-demoted">
-              <i aria-hidden="true" />
-              <strong>Reference yield benchmark</strong>
-              <span>
-                FDIC national savings - IBKR Pro cash - Wise USD Interest - Splash treasury projection
-                {yieldBenchmarks.asOf ? <> - refreshed <LocalTime value={yieldBenchmarks.asOf} format="time" options={{ hour: '2-digit', minute: '2-digit' }} /></> : ''}
-                {' '}· Yield is hygiene, not the headline — the working-capital loop is.
-              </span>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section id="trust" className="iso-section iso-trust">
-        <div className="cin-drop" style={{ top: 30, right: '5%' }} aria-hidden="true">
-          <FloatingToken src="/cinematic/token-sui.png" alt="Sui token" size={104} float="cin-float-slow" />
-        </div>
-        <div className="iso-shell">
-          <div className="iso-section-heading iso-heading-split">
-            <div>
-              <p className="iso-kicker">Trust · Four gates</p>
-              <h2 className="iso-section-title iso-section-title-light">
-                Every payout
-                <span>proves itself.</span>
-              </h2>
-            </div>
-            <p>
-              A payment on Splash cannot skip a checkpoint: verified before it&apos;s quoted,
-              approved before it&apos;s signed, atomic when it settles, anchored after it lands.
-            </p>
-          </div>
-
-          <div className="iso-trust-rail" aria-hidden="true">
-            {trustGates.map((gate) => (
-              <span key={gate.number}><i /></span>
-            ))}
-          </div>
-
-          <ol className="iso-trust-grid">
-            {trustGates.map((gate) => (
-              <li className="iso-trust-card" key={gate.number}>
-                <div className="iso-trust-meta">
-                  <span>{gate.number}</span>
-                  <p>{gate.label}</p>
-                  <gate.icon aria-hidden="true" />
-                </div>
-                <h3>{gate.title}</h3>
-                <p>{gate.copy}</p>
-                <small>{gate.meta}</small>
-              </li>
-            ))}
-          </ol>
-
-          <p className="iso-trust-foot">
-            Sandbox environment · Not yet a licensed money-services business · No real money moves
-          </p>
         </div>
       </section>
 
@@ -906,7 +689,16 @@ export default function IsometricLanding({ isPhone = false, pricing = LAUNCH_PRI
                   <p>{layer.label}</p>
                 </div>
                 <div className="iso-layer-art">
-                  <Image src={layer.image} alt={layer.imageAlt} width={1448} height={1086} />
+                  {/* Phones get the art's own phone crop (scripts/landing-images.mjs);
+                      wider screens the WebP widths the loader picks. */}
+                  {layer.art ? (
+                    <picture className="iso-layer-picture">
+                      <source media="(max-width: 700px)" srcSet={layer.art.phone.src} width={layer.art.phone.width} height={layer.art.phone.height} />
+                      <Image src={layer.art.src} loader={layer.art.loader} alt={layer.imageAlt} width={layer.art.width} height={layer.art.height} sizes="(max-width: 900px) 92vw, 440px" />
+                    </picture>
+                  ) : (
+                    <Image src={layer.image} alt={layer.imageAlt} width={1448} height={1086} sizes="(max-width: 900px) 92vw, 440px" />
+                  )}
                 </div>
                 <div className="iso-layer-copy">
                   <h3>{layer.title}</h3>
@@ -919,6 +711,50 @@ export default function IsometricLanding({ isPhone = false, pricing = LAUNCH_PRI
         </div>
       </section>
 
+      <section id="trust" className="iso-section iso-trust" aria-labelledby="trust-title">
+        <div className="cin-drop" style={{ top: 30, right: '5%' }} aria-hidden="true">
+          <FloatingToken src="/cinematic/token-sui.png" alt="Sui token" size={104} float="cin-float-slow" />
+        </div>
+        <div className="iso-shell">
+          <div className="iso-section-heading iso-heading-split">
+            <div>
+              <p className="iso-kicker">Trust · Four gates</p>
+              <h2 className="iso-section-title iso-section-title-light" id="trust-title">
+                Every payment
+                <span>proves itself.</span>
+              </h2>
+            </div>
+            <p>
+              To a bank or to a wallet, a payment on Splash passes the same four gates, in order. None
+              of them can be skipped.
+            </p>
+          </div>
+
+          <div className="iso-trust-rail" aria-hidden="true">
+            {trustGates.map((gate) => (
+              <span key={gate.number}><i /></span>
+            ))}
+          </div>
+
+          <ol className="iso-trust-grid">
+            {trustGates.map((gate) => (
+              <li className="iso-trust-card" key={gate.number}>
+                <div className="iso-trust-meta">
+                  <span>{gate.number}</span>
+                  <p>{gate.label}</p>
+                  <gate.icon aria-hidden="true" />
+                </div>
+                <h3>{gate.title}</h3>
+                <p>{gate.copy}</p>
+                <small>{gate.meta}</small>
+              </li>
+            ))}
+          </ol>
+
+          <p className="iso-trust-foot">Splash is software; it has no key to your Splash Wallet.</p>
+        </div>
+      </section>
+
       <section id="copilot" className="iso-section iso-copilot">
         <div className="iso-shell iso-copilot-layout">
           <div className="iso-copilot-stack">
@@ -928,6 +764,7 @@ export default function IsometricLanding({ isPhone = false, pricing = LAUNCH_PRI
               alt="Zeke, an isometric robot assistant at a desk, presenting suggestion cards"
               width={2172}
               height={1629}
+              sizes="(max-width: 900px) 92vw, 640px"
             />
             <div className="iso-copilot-memory">
               <BrainCircuit aria-hidden="true" />
@@ -1014,7 +851,7 @@ export default function IsometricLanding({ isPhone = false, pricing = LAUNCH_PRI
             </p>
             <div className="iso-hero-actions">
               <Link href="/signup" className="iso-button iso-button-gold">
-                Start sending
+                Open payment desk
                 <ArrowRight aria-hidden="true" />
               </Link>
               <Link href="/login" className="iso-button iso-button-dark-ghost">Log in</Link>
@@ -1038,19 +875,14 @@ export default function IsometricLanding({ isPhone = false, pricing = LAUNCH_PRI
         <div className="iso-shell cin-footer-grid">
           <div className="cin-footer-brand">
             <span className="cin-footer-logo">
-              <Image src="/splash-main-icon.png" alt="" width={841} height={823} />
+              <Image src="/splash-main-icon.png" alt="" width={841} height={823} sizes="48px" />
               <strong>Splash</strong>
             </span>
-            <p>USD-first settlement infrastructure for Southeast Asian finance teams.</p>
-            <div className="cin-footer-status" aria-label="Network status">
-              <span><i aria-hidden="true" /> Sandbox · MY-PH testnet</span>
-              <span><i aria-hidden="true" /> {lockedCopy.speed}</span>
-              <span><i aria-hidden="true" /> {lockedCopy.agent}</span>
-            </div>
+            <p>Stablecoin payments for Southeast Asian businesses, to a bank or a wallet.</p>
           </div>
 
-          <nav className="cin-footer-col" aria-label="Product">
-            <strong>Product</strong>
+          <nav className="cin-footer-col" aria-labelledby="footer-product">
+            <h2 id="footer-product">Product</h2>
             <a href="#how-it-works">How it works</a>
             <a href="#comparison">Compare</a>
             <a href="#platform">Platform</a>
@@ -1058,29 +890,35 @@ export default function IsometricLanding({ isPhone = false, pricing = LAUNCH_PRI
             <a href="#corridors">Routes</a>
           </nav>
 
-          <nav className="cin-footer-col" aria-label="Trust">
-            <strong>Trust</strong>
+          <nav className="cin-footer-col" aria-labelledby="footer-trust">
+            <h2 id="footer-trust">Trust</h2>
             <Link href="/trust">Trust &amp; compliance</Link>
             <a href="#copilot">Zeke control plane</a>
+          </nav>
+
+          <nav className="cin-footer-col" aria-labelledby="footer-start">
+            <h2 id="footer-start">Get started</h2>
             <Link href="/login">Log in</Link>
             <Link href="/signup">Open payment desk</Link>
           </nav>
+        </div>
 
-          <div className="cin-footer-col cin-footer-compliance">
-            <strong>Compliance</strong>
-            <small>{claims.footerLegal.claim}</small>
-          </div>
+        <div className="iso-shell cin-footer-compliance">
+          {saasCompliance(BRAND.legalEntity).map((line) => (
+            <p key={line}>{line}</p>
+          ))}
         </div>
 
         <div className="cin-footer-bar">
           <div className="iso-shell cin-footer-bar-inner">
             <span>{BRAND.copyright()}</span>
             <span className="cin-footer-tick">
-              {pricing.parts[0]} · {lockedCopy.speed} · {pricing.bankFeePhrase}
+              {SPEED_LINE} · {pricing.bankFeePhrase}
             </span>
           </div>
         </div>
       </footer>
+      <PhoneStickyCta />
       <button
         type="button"
         className={`iso-back-to-top ${showBackToTop ? 'is-visible' : ''}`}

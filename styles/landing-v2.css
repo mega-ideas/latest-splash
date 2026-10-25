@@ -1,0 +1,1883 @@
+/* ═══════════════════════════════════════════════════════════════════
+   Landing v2 (Phase 4): the product section, the rails strip and the
+   how-it-works additions. Same material as the rest of the landing:
+   cream paper, ink, teal, gold, Geist, extruded display type. No grid
+   lines (only Platform keeps one, D14). Colours are the landing's own
+   variables (.iso-landing) and styles/tokens.css.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── Product section ─────────────────────────────────────────────── */
+
+.iso-product {
+  overflow: hidden;
+  padding-block: 96px 120px;
+  background:
+    radial-gradient(60% 50% at 85% 20%, rgba(239, 196, 111, .2), transparent 70%),
+    radial-gradient(50% 45% at 8% 70%, rgba(159, 207, 199, .24), transparent 70%),
+    var(--iso-paper);
+}
+
+.pv-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  text-align: center;
+}
+
+.pv-chip-label {
+  padding: 6px 14px;
+  color: var(--iso-ink);
+  background: var(--iso-gold);
+  box-shadow: 3px 3px 0 var(--iso-teal-dark);
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .2em;
+  text-transform: uppercase;
+}
+
+.pv-title {
+  display: flex;
+  flex-direction: column;
+  gap: .14em;
+  margin: 8px 0 0;
+  font-size: clamp(46px, 7vw, 92px);
+  font-weight: 900;
+  letter-spacing: -.055em;
+  line-height: 1;
+  text-wrap: balance;
+}
+
+.pv-title-a {
+  color: var(--iso-paper);
+  -webkit-text-stroke: 2px var(--iso-teal-dark);
+  text-shadow:
+    2px 2px 0 var(--iso-teal),
+    4px 4px 0 var(--iso-teal),
+    6px 6px 0 var(--iso-teal),
+    8px 8px 0 var(--iso-teal-dark),
+    14px 18px 28px rgba(8, 54, 64, .16);
+}
+
+.pv-title-b {
+  color: var(--iso-gold);
+  -webkit-text-stroke: 1.5px var(--iso-teal-dark);
+  text-shadow:
+    2px 2px 0 #c49646,
+    4px 4px 0 #c49646,
+    6px 6px 0 var(--iso-teal-dark),
+    12px 16px 24px rgba(8, 54, 64, .16);
+}
+
+.pv-head > p {
+  max-width: 34em;
+  margin: 10px 0 0;
+  color: var(--iso-text-secondary);
+  font-size: 18px;
+  font-weight: 520;
+  line-height: 1.6;
+}
+
+.pv-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+}
+
+.pv-stage {
+  position: relative;
+  max-width: 1240px;
+  min-height: 680px;
+  margin: 64px auto 0;
+}
+
+/* The desk: a picture of the layout. Figures are bars, on purpose. */
+.pv-desk {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: grid;
+  grid-template-columns: 196px 1fr;
+  width: min(1010px, 82%);
+  height: 620px;
+  overflow: hidden;
+  border: 1px solid rgba(12, 62, 72, .18);
+  border-radius: 18px;
+  background: var(--bg);
+  box-shadow: 0 30px 70px -30px rgba(8, 54, 64, .45), 0 2px 6px rgba(8, 54, 64, .08);
+  user-select: none;
+}
+
+.pv-desk-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px 12px;
+  color: rgba(255, 255, 255, .85);
+  background: var(--ink);
+  font-size: 13px;
+}
+
+.pv-desk-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 2px 6px;
+  color: var(--surface);
+  font-size: 17px;
+}
+
+.pv-desk-rail ul {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pv-desk-rail li {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border-radius: 8px;
+}
+
+.pv-desk-rail li svg {
+  width: 15px;
+  height: 15px;
+}
+
+.pv-desk-rail li.is-active {
+  color: var(--ink);
+  background: var(--surface);
+  box-shadow: inset 3px 0 0 var(--teal);
+  font-weight: 600;
+}
+
+.pv-desk-rail-foot {
+  margin-top: auto;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, .14);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .08);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.pv-desk-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.pv-desk-top {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  height: 52px;
+  padding: 0 18px;
+  border-bottom: 1px solid rgba(50, 98, 115, .1);
+}
+
+.pv-desk-search,
+.pv-desk-user {
+  height: 32px;
+  border: 1px solid rgba(50, 98, 115, .12);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.pv-desk-search { width: 260px; }
+.pv-desk-user { width: 170px; }
+
+.pv-desk-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px 22px;
+  color: var(--iso-ink);
+}
+
+.pv-desk-title {
+  font-size: 26px;
+  font-weight: 900;
+  letter-spacing: -.04em;
+}
+
+.pv-desk-cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.pv-desk-cards > div,
+.pv-desk-table {
+  border: 1px solid rgba(50, 98, 115, .14);
+  border-radius: 13px;
+  background: var(--surface-2);
+}
+
+.pv-desk-cards > div {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+}
+
+.pv-desk-cards small {
+  color: var(--slate);
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.pv-desk-cards em {
+  color: var(--slate);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.pv-bar {
+  display: block;
+  width: 56%;
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, rgba(12, 62, 72, .2), rgba(12, 62, 72, .1));
+}
+
+.pv-bar-lg { width: 72%; height: 18px; }
+.pv-bar-sm { width: 70px; height: 10px; justify-self: end; }
+
+.pv-desk-table-head {
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(50, 98, 115, .1);
+  font-size: 14px;
+}
+
+.pv-desk-table-head span {
+  color: var(--iso-teal);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.pv-desk-row {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr .8fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid rgba(50, 98, 115, .08);
+  font-size: 12px;
+}
+
+.pv-desk-row > span:first-child { font-weight: 600; }
+.pv-desk-row > span:nth-child(2) { color: var(--slate); }
+
+.pv-chip {
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.pv-chip.is-ok { color: var(--ok-ink); background: var(--ok-bg); }
+.pv-chip.is-info { color: var(--info); background: var(--info-bg); }
+/* --gold-ink, not --warn-ink: the chip sits in the faded desk behind the
+   calculator, where --warn-ink came out at 4.1:1. */
+.pv-chip.is-warn { color: var(--gold-ink); background: var(--warn-bg); }
+
+/* The calculator, floating in front of the desk. */
+.pv-calc {
+  position: relative;
+  z-index: 2;
+  margin: 48px 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 430px;
+  padding: 22px 24px 24px;
+  border: 1px solid rgba(12, 62, 72, .12);
+  border-radius: 24px;
+  color: var(--iso-ink);
+  background: #fffdf9;
+  box-shadow: 0 50px 90px -30px rgba(8, 54, 64, .55), 0 10px 24px -10px rgba(8, 54, 64, .25);
+  font-variant-numeric: tabular-nums;
+}
+
+.pv-calc-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.pv-toggle {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--r-pill);
+  background: var(--iso-paper-deep);
+}
+
+.pv-toggle button {
+  min-height: 36px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--r-pill);
+  color: var(--iso-text-secondary);
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--dur-base) var(--ease-standard), color var(--dur-base) var(--ease-standard);
+}
+
+.pv-toggle button.is-on {
+  color: var(--iso-paper);
+  background: var(--iso-ink);
+}
+
+.pv-rate {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 11px;
+  border: 1px solid rgba(12, 62, 72, .14);
+  border-radius: var(--r-pill);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.pv-rate svg { width: 13px; height: 13px; }
+
+.pv-rate-ttl {
+  color: var(--iso-text-secondary);
+  font-weight: 560;
+  font-variant-numeric: tabular-nums;
+}
+
+.pv-rate-refresh {
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid rgba(12, 62, 72, .24);
+  border-radius: var(--r-pill);
+  color: var(--iso-ink);
+  background: var(--iso-paper-deep);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.pv-rate.is-expired { border-color: rgba(139, 100, 24, .4); }
+
+.pv-rate em {
+  padding: 1px 7px;
+  border-radius: var(--r-pill);
+  color: var(--gold-ink);
+  background: var(--gold-tint);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.pv-field {
+  display: grid;
+  gap: 8px;
+}
+
+.pv-field > label,
+.pv-label {
+  color: var(--iso-text-secondary);
+  font-size: 13px;
+  font-weight: 560;
+}
+
+.pv-amount {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.pv-asset {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 12px 0 8px;
+  border: 0;
+  border-radius: var(--r-pill);
+  color: var(--iso-ink);
+  background: var(--iso-paper-deep);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.pv-coin {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--surface);
+  background: var(--slate);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.pv-select {
+  padding-left: 14px;
+  cursor: pointer;
+}
+
+.pv-amount input,
+.pv-figure {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  color: var(--iso-ink);
+  background: transparent;
+  font: inherit;
+  font-size: clamp(28px, 3vw, 40px);
+  font-weight: 800;
+  letter-spacing: -.035em;
+  text-align: right;
+}
+
+.pv-amount input {
+  border-bottom: 2px solid transparent;
+  outline: none;
+}
+
+.pv-amount input:focus-visible {
+  border-bottom-color: var(--iso-teal);
+}
+
+.pv-figure {
+  white-space: nowrap;
+  color: var(--iso-text-muted);
+  font-size: 18px;
+}
+
+.pv-figure.is-quoted {
+  color: var(--iso-teal);
+  font-size: clamp(24px, 2.5vw, 34px);
+}
+
+.pv-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pv-presets button {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid rgba(12, 62, 72, .16);
+  border-radius: var(--r-pill);
+  color: var(--iso-ink);
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.pv-presets button[aria-pressed="true"] {
+  border-color: var(--iso-ink);
+  background: var(--iso-paper-deep);
+}
+
+.pv-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 10px;
+  color: var(--iso-teal-dark);
+  background: var(--ok-bg);
+  font-size: 13px;
+}
+
+.pv-hint svg { width: 14px; height: 14px; flex: none; }
+
+.pv-lines {
+  display: grid;
+  margin: 0;
+  padding: 6px 0;
+  border-block: 1px solid rgba(12, 62, 72, .1);
+}
+
+.pv-lines > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 0;
+}
+
+.pv-lines dt {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--iso-text-secondary);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.pv-lines dt svg { flex: none; }
+.pv-lines dt > span { display: grid; gap: 1px; }
+.pv-lines dt small {
+  color: var(--iso-text-muted);
+  font-size: 11.5px;
+  font-weight: 560;
+}
+.pv-lines dd { flex: 0 1 auto; max-width: 56%; }
+
+.pv-lines dt svg { width: 15px; height: 15px; }
+
+.pv-lines dd {
+  display: grid;
+  justify-items: end;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  text-align: right;
+}
+
+.pv-lines dd small {
+  color: var(--iso-text-muted);
+  font-size: 11.5px;
+  font-weight: 560;
+}
+
+.pv-lines .is-total dt {
+  color: var(--iso-ink);
+  font-weight: 700;
+}
+
+.pv-note {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  color: var(--gold-ink);
+  background: var(--gold-tint);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.pv-send {
+  display: inline-flex;
+  min-height: 52px;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 0;
+  border-radius: 12px;
+  color: var(--iso-ink);
+  background: var(--iso-gold);
+  box-shadow: 0 4px 0 #b98a36;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: transform var(--dur-base) var(--ease-standard), box-shadow var(--dur-base) var(--ease-standard);
+}
+
+.pv-send svg { width: 16px; height: 16px; }
+.pv-send:hover { transform: translateY(-2px); box-shadow: 0 6px 0 #b98a36; }
+.pv-send:active { transform: translateY(2px); box-shadow: 0 1px 0 #b98a36; }
+.pv-send:disabled { opacity: .6; cursor: progress; }
+
+.pv-error {
+  margin: 0;
+  color: var(--error);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.pv-access {
+  display: grid;
+  gap: 8px;
+}
+
+.pv-access-title {
+  display: grid;
+  gap: 4px;
+  margin: 0 0 4px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--iso-paper-deep);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.pv-access-title strong { font-size: 14px; }
+.pv-access-title span { color: var(--iso-text-secondary); }
+
+.pv-access label {
+  color: var(--iso-text-secondary);
+  font-size: 13px;
+  font-weight: 560;
+}
+
+.pv-access input {
+  min-height: 46px;
+  padding: 0 12px;
+  border: 1px solid rgba(12, 62, 72, .28);
+  border-radius: 10px;
+  color: var(--iso-ink);
+  background: var(--surface);
+  font: inherit;
+  font-size: 16px;
+}
+
+.pv-access input[aria-invalid="true"] { border-color: var(--error); }
+.pv-access .pv-send { margin-top: 8px; }
+
+.pv-trap {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.pv-access-done {
+  display: flex;
+  gap: 10px;
+  margin: 0;
+  padding: 14px;
+  border-radius: 12px;
+  color: var(--ok-ink);
+  background: var(--ok-bg);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.pv-access-done svg { width: 18px; height: 18px; flex: none; }
+
+.iso-product :is(button, a, input, select):focus-visible {
+  outline: 2px solid var(--iso-teal);
+  outline-offset: 2px;
+}
+
+@media (max-width: 1100px) {
+  .pv-desk { width: 100%; }
+  .pv-calc { margin-right: 24px; }
+}
+
+/* Phones and narrow tablets: the calculator first, the desk peeking out
+   behind it, not the desktop overlap squeezed. */
+@media (max-width: 860px) {
+  .iso-product { padding-block: 72px 80px; }
+  .pv-head > p { font-size: 16px; }
+  .pv-stage {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    margin-top: 40px;
+  }
+  .pv-calc {
+    width: 100%;
+    margin: 0;
+    padding: 18px 16px 20px;
+    border-radius: 20px;
+  }
+  .pv-desk {
+    position: relative;
+    order: 2;
+    width: 112%;
+    height: 300px;
+    margin: -56px 0 0 -6%;
+    grid-template-columns: 1fr;
+    transform: scale(.92);
+    transform-origin: top center;
+    opacity: .85;
+    -webkit-mask-image: linear-gradient(180deg, #000 55%, transparent);
+    mask-image: linear-gradient(180deg, #000 55%, transparent);
+  }
+  .pv-desk-rail { display: none; }
+  .pv-desk-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pv-desk-cards > div:nth-child(3) { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pv-toggle button,
+  .pv-send { transition: none; }
+  .pv-send:hover,
+  .pv-send:active { transform: none; }
+}
+
+/* ── The rails strip (partners once signed) ──────────────────────── */
+
+.pr-rail > .iso-shell {
+  grid-template-columns: .5fr 1.5fr;
+}
+
+.pr-intro {
+  display: grid;
+  gap: 6px;
+}
+
+.pr-intro h2 {
+  margin: 0;
+  color: var(--iso-teal);
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+
+.pr-intro p {
+  margin: 0;
+  color: var(--iso-text-secondary);
+  font-size: 14px;
+  font-weight: 560;
+  line-height: 1.5;
+}
+
+.pr-list {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pr-list li {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  padding: 14px 16px;
+  border: 1px solid var(--iso-line);
+  border-radius: 12px;
+  background: rgba(255, 253, 249, .9);
+  box-shadow: 0 4px 0 rgba(12, 62, 72, .08);
+}
+
+.pr-list strong {
+  color: var(--iso-ink);
+  font-size: 18px;
+  font-weight: 850;
+  letter-spacing: -.03em;
+}
+
+.pr-list span {
+  color: var(--iso-text-secondary);
+  font-size: 12.5px;
+  font-weight: 560;
+  line-height: 1.4;
+}
+
+@media (max-width: 1000px) {
+  .pr-rail > .iso-shell { grid-template-columns: 1fr; gap: 18px; }
+  .pr-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* Five rails on two columns: the last one takes its row, no empty cell. */
+  .pr-list li:last-child:nth-child(odd) { grid-column: 1 / -1; }
+}
+
+/* ── How it works: the two kinds and the Splash Wallet ───────────── */
+
+.hw-layout { align-items: start; }
+
+.hw-kinds {
+  display: grid;
+  gap: 10px;
+  margin-top: 28px;
+}
+
+.hw-kinds button {
+  display: grid;
+  gap: 4px;
+  padding: 14px 16px;
+  border: 1px solid rgba(255, 250, 241, .18);
+  border-radius: 12px;
+  color: #fffaf1;
+  background: rgba(255, 250, 241, .05);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur-base) var(--ease-standard), border-color var(--dur-base) var(--ease-standard);
+}
+
+.hw-kinds button strong { font-size: 15px; }
+
+.hw-kinds button span {
+  color: rgba(255, 250, 241, .82);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.hw-kinds button.is-on {
+  border-color: var(--iso-gold);
+  background: rgba(239, 196, 111, .12);
+  box-shadow: inset 3px 0 0 var(--iso-gold);
+}
+
+.hw-kinds button:focus-visible,
+.iso-flow .iso-flow-tabs button:focus-visible {
+  outline: 2px solid var(--iso-gold);
+  outline-offset: 2px;
+}
+
+.hw-right {
+  display: grid;
+  gap: 18px;
+}
+
+.hw-wallet {
+  display: grid;
+  gap: 10px;
+  padding: 18px 20px;
+  border: 1px solid rgba(255, 250, 241, .16);
+  border-radius: 16px;
+  color: #fffaf1;
+  background: rgba(255, 250, 241, .06);
+}
+
+.hw-wallet h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 850;
+}
+
+.hw-wallet p {
+  margin: 0;
+  color: rgba(255, 250, 241, .84);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.hw-wallet ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hw-wallet li {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid rgba(239, 196, 111, .45);
+  border-radius: var(--r-pill);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.hw-wallet li svg {
+  width: 15px;
+  height: 15px;
+  color: var(--iso-gold);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hw-kinds button { transition: none; }
+}
+
+/* ── Phone composition (D15) ─────────────────────────────────────────
+   Phones get their own order and shapes, not the desktop stacked: the
+   product section opens on the calculator with the desk peeking out
+   behind it, the five steps are stacked with their words, the loop cards
+   swipe, and a sticky bottom CTA carries the signup action
+   (components/landing/PhoneStickyCta.tsx). Wider screens never see the
+   phone-only pieces. */
+
+.hw-steps-phone,
+.ps-cta { display: none; }
+
+@media (max-width: 700px) {
+  /* Product: the headline, then straight into the calculator. The sticky
+     CTA and the calculator's own button carry the signup action. */
+  .pv-actions { display: none; }
+  .pv-head { gap: 14px; }
+  .pv-head > p { margin-top: 4px; }
+  .iso-product .pv-stage { margin-top: 28px; }
+  /* The desktop desk is not squeezed onto a phone: the phone desk
+     (.pv-phone-desk, step C below) peeks out from behind the calculator. */
+  .iso-product .pv-desk { display: none; }
+  .iso-product .pv-calc { position: relative; z-index: 2; }
+
+  /* How it works: stacked steps instead of tabs and a picture panel. */
+  .iso-flow .hw-layout .iso-flow-tabs,
+  .iso-flow .hw-right .iso-flow-visual { display: none; }
+  .hw-steps-phone {
+    display: grid;
+    gap: 10px;
+    margin: 24px 0 0;
+    padding: 0;
+    list-style: none;
+  }
+  .hw-steps-phone li {
+    display: grid;
+    grid-template-columns: 36px 1fr;
+    gap: 12px;
+    padding: 14px 16px;
+    border: 1px solid rgba(255, 250, 241, .16);
+    border-radius: 14px;
+    color: #fffaf1;
+    background: rgba(255, 250, 241, .05);
+  }
+  .hw-steps-phone li > span {
+    display: grid;
+    width: 32px;
+    height: 32px;
+    place-items: center;
+    border-radius: 8px;
+    color: var(--iso-ink);
+    background: var(--iso-gold);
+    box-shadow: 2px 2px 0 rgba(0, 0, 0, .25);
+    font-weight: 850;
+  }
+  .hw-steps-phone strong { font-size: 15px; line-height: 1.35; }
+  .hw-steps-phone p {
+    margin: 4px 0 0;
+    color: rgba(255, 250, 241, .84);
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  /* Three loops: one card at a time, swiped sideways. */
+  .iso-loops .iso-loops-grid {
+    display: flex;
+    gap: 14px;
+    overflow-x: auto;
+    padding: 4px 4px 18px;
+    scroll-snap-type: x mandatory;
+    scroll-padding-inline: 4px;
+    overscroll-behavior-x: contain;
+  }
+  .iso-loops .iso-loops-card {
+    flex: 0 0 86%;
+    scroll-snap-align: start;
+  }
+
+  /* The sticky bottom CTA. */
+  .ps-cta {
+    position: fixed;
+    right: 12px;
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    left: 12px;
+    z-index: 70;
+    display: flex;
+    gap: 8px;
+    padding: 8px;
+    border: 1px solid rgba(12, 62, 72, .14);
+    border-radius: 16px;
+    background: rgba(255, 253, 249, .96);
+    box-shadow: 0 18px 40px -16px rgba(8, 54, 64, .45);
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(calc(100% + 24px));
+    transition: transform 240ms var(--ease-standard), opacity 200ms var(--ease-standard);
+  }
+  .ps-cta.is-visible {
+    opacity: 1;
+    pointer-events: auto;
+    transform: none;
+  }
+  .ps-cta-button,
+  .ps-cta-login {
+    display: inline-flex;
+    min-height: 48px;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    border-radius: 11px;
+    font-size: 15px;
+    font-weight: 800;
+    text-decoration: none;
+  }
+  .ps-cta-button {
+    flex: 1;
+    color: var(--iso-ink);
+    background: var(--iso-gold);
+    box-shadow: 0 3px 0 #b98a36;
+  }
+  .ps-cta-button svg { width: 16px; height: 16px; }
+  .ps-cta-login {
+    padding: 0 16px;
+    border: 1px solid rgba(12, 62, 72, .2);
+    color: var(--iso-ink);
+    background: var(--surface);
+  }
+  .ps-cta a:focus-visible {
+    outline: 2px solid var(--iso-teal);
+    outline-offset: 2px;
+  }
+  /* The bar replaces the floating back-to-top button on phones, which sat
+     over the calculator's figures; the header logo still goes home. */
+  .iso-landing .iso-back-to-top { display: none; }
+}
+
+@media (max-width: 700px) and (prefers-reduced-motion: reduce) {
+  .ps-cta { transition: none; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Step B: routes and comparison, trust footnote, footer.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── Routes: live and pilot access, read from lib/landing/routes.ts ── */
+
+.iso-route-groups {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-top: 28px;
+}
+
+.iso-route-group {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  border: 1px solid rgba(12, 62, 72, .18);
+  border-radius: 12px;
+  padding: 14px;
+  background: rgba(255, 251, 245, .72);
+  box-shadow: 3px 4px 0 rgba(12, 62, 72, .1);
+}
+
+.iso-route-group h3 {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--iso-teal-dark);
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  font-weight: 850;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+.iso-route-group h3 small {
+  color: var(--iso-text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: none;
+}
+
+.iso-route-group ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.iso-route-group li {
+  display: grid;
+  grid-template-columns: 46px 1fr;
+  align-items: baseline;
+  column-gap: 10px;
+  color: var(--iso-ink);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.iso-route-group li strong {
+  border-radius: 5px;
+  padding: 3px 0;
+  color: var(--iso-teal);
+  background: rgba(13, 99, 112, .08);
+  font-family: var(--font-mono), monospace;
+  font-size: 12px;
+  font-weight: 900;
+  text-align: center;
+}
+
+.iso-route-group li.is-live strong {
+  color: #fffaf1;
+  background: var(--iso-teal);
+  box-shadow: 2px 2px 0 var(--iso-teal-dark);
+}
+
+.iso-route-group li small {
+  grid-column: 2;
+  color: var(--iso-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.iso-route-group .iso-inline-link { margin-top: 4px; }
+
+.iso-landing .iso-recipient-ladder small { color: var(--gold-ink); }
+
+/* The comparison's own heading, under the routes: one section, two parts. */
+.iso-comparison-head {
+  display: grid;
+  gap: 12px;
+  max-width: 640px;
+  margin-bottom: 28px;
+}
+
+.iso-landing .iso-comparison-title { font-size: clamp(30px, 3.4vw, 52px); }
+
+.iso-comparison-head p {
+  color: var(--iso-text-secondary);
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+/* ── Trust: the footnote is a sentence, legible on the dark band ───── */
+
+.iso-landing .iso-trust-foot {
+  color: rgba(255, 250, 241, .82);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* ── Footer: Product · Trust · Get started, then the compliance text ── */
+
+.iso-landing .cin-footer-grid {
+  grid-template-columns: 1.5fr repeat(3, .8fr);
+}
+
+/* Each column is a heading with its links stacked under it (the older
+   .iso-footer nav rule lays links in a row). */
+.iso-landing .iso-footer nav.cin-footer-col {
+  display: grid;
+  align-content: start;
+  justify-items: start;
+  gap: 12px;
+}
+
+.iso-landing .iso-footer nav.cin-footer-col a { font-size: 14px; }
+
+/* The Supply card's roadmap chip wraps under its label rather than run
+   off the card. */
+.iso-landing .iso-loops-meta { flex-wrap: wrap; }
+
+.iso-landing .cin-footer-compliance {
+  display: grid;
+  gap: 6px;
+  padding-bottom: 36px;
+}
+
+.iso-landing .cin-footer-compliance p {
+  max-width: 760px;
+  color: var(--iso-text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.iso-landing .cin-footer-col a:focus-visible,
+.iso-landing .iso-route-group a:focus-visible {
+  outline: 2px solid var(--iso-teal);
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+
+@media (max-width: 980px) {
+  .iso-landing .cin-footer-grid { grid-template-columns: 1fr 1fr; }
+  .iso-landing .cin-footer-brand { grid-column: 1 / -1; }
+}
+
+@media (max-width: 560px) {
+  .iso-route-groups { grid-template-columns: 1fr; }
+  .iso-landing .cin-footer-grid { grid-template-columns: 1fr 1fr; gap: 28px; }
+}
+
+/* ── /working-capital §03: the three-node loop (components/supply/SupplyLoop)
+   Settle, then Supply, then Save, and back. Every line is a border on the
+   page, so the diagram is whole on first paint; nothing is drawn by
+   scrolling. ──────────────────────────────────────────────────────────── */
+
+.wc-flywheel {
+  border-bottom: 1px solid var(--iso-line);
+  background:
+    radial-gradient(circle at 88% 0%, rgba(239, 196, 111, .14), transparent 34%),
+    var(--iso-paper-deep);
+}
+
+.wc-loop {
+  --wc-link: 96px;
+  --wc-line: rgba(12, 62, 72, .42);
+  margin: 40px 0 0;
+}
+
+.wc-loop-track {
+  display: grid;
+  grid-template-columns: 1fr var(--wc-link) 1fr var(--wc-link) 1fr;
+  align-items: stretch;
+}
+
+.wc-loop-station { display: contents; }
+
+.wc-loop-node {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border: 1px solid rgba(12, 62, 72, .2);
+  border-top: 3px solid var(--iso-teal);
+  border-radius: 12px;
+  padding: 20px;
+  background: rgba(255, 251, 245, .92);
+  box-shadow: 7px 8px 0 rgba(12, 62, 72, .08);
+}
+.wc-loop-node.is-supply {
+  border-color: rgba(201, 154, 62, .55);
+  border-top-color: var(--iso-gold);
+  background: linear-gradient(160deg, rgba(239, 196, 111, .16), transparent 50%), #fffbf5;
+  box-shadow: 8px 9px 0 rgba(201, 154, 62, .2);
+}
+.wc-loop-node.is-save { border-top-color: var(--iso-mint); }
+
+.wc-loop-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+
+.wc-loop-icon {
+  display: inline-grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid rgba(12, 62, 72, .18);
+  border-radius: 8px;
+  color: var(--iso-teal);
+  background: #fffdf9;
+}
+.wc-loop-icon svg { width: 17px; height: 17px; }
+.wc-loop-node.is-supply .wc-loop-icon { color: var(--gold-ink); border-color: rgba(201, 154, 62, .5); }
+
+.wc-loop-live {
+  border-radius: 999px;
+  padding: 3px 10px;
+  color: var(--ok-ink);
+  background: var(--ok-bg);
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.wc-loop-node h3 {
+  display: grid;
+  gap: 2px;
+  color: var(--iso-ink);
+  font-size: 22px;
+  font-weight: 900;
+  letter-spacing: -.02em;
+}
+.wc-loop-node h3 span {
+  color: var(--iso-text-label);
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.wc-loop-node p { color: var(--iso-text-secondary); font-size: 14px; line-height: 1.55; }
+.wc-loop-node small {
+  margin-top: auto;
+  color: var(--iso-text-label);
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+/* A connector: what travels, over a line that ends in an arrowhead. */
+.wc-loop-link {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding-inline: 6px;
+  color: var(--iso-text-label);
+}
+.wc-loop-link span {
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: .06em;
+  line-height: 1.3;
+  text-align: center;
+  text-transform: uppercase;
+}
+.wc-loop-link i {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 2px;
+  background: var(--wc-line);
+}
+.wc-loop-link i::after {
+  position: absolute;
+  top: -5px;
+  right: -1px;
+  border-top: 6px solid transparent;
+  border-bottom: 6px solid transparent;
+  border-left: 9px solid var(--wc-line);
+  content: "";
+}
+
+/* The way back: from under Save, along the bottom, up into Settle. Its
+   ends sit under the centres of the outer nodes. */
+.wc-loop-return {
+  position: relative;
+  grid-column: 1 / -1;
+  height: 40px;
+  margin-inline: calc((100% - 2 * var(--wc-link)) / 6);
+  border: 2px solid var(--wc-line);
+  border-top: 0;
+  border-radius: 0 0 18px 18px;
+}
+.wc-loop-return::before {
+  position: absolute;
+  top: -10px;
+  left: -8px;
+  border-right: 6px solid transparent;
+  border-left: 6px solid transparent;
+  border-bottom: 9px solid var(--wc-line);
+  content: "";
+}
+.wc-loop-return span {
+  position: absolute;
+  bottom: -10px;
+  left: 50%;
+  padding: 0 12px;
+  color: var(--iso-text-label);
+  background: var(--iso-paper-deep);
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: .06em;
+  line-height: 18px;
+  text-transform: uppercase;
+  white-space: nowrap;
+  transform: translateX(-50%);
+}
+
+/* Phones: the nodes stack, the connectors turn downward, and the way back
+   runs up the right-hand side from Save to Settle. */
+@media (max-width: 900px) {
+  .wc-loop { --wc-link: 64px; padding-right: 30px; }
+  .wc-loop-track { position: relative; grid-template-columns: 1fr; }
+  .wc-loop-link { flex-direction: row; justify-content: flex-start; height: var(--wc-link); gap: 12px; padding-left: 24px; }
+  .wc-loop-link span { order: 2; text-align: left; }
+  .wc-loop-link i { width: 2px; height: 100%; }
+  .wc-loop-link i::after {
+    top: auto;
+    right: -5px;
+    bottom: -1px;
+    border-top: 9px solid var(--wc-line);
+    border-right: 6px solid transparent;
+    border-bottom: 0;
+    border-left: 6px solid transparent;
+  }
+  .wc-loop-return {
+    position: absolute;
+    top: 48px;
+    right: -30px;
+    bottom: 48px;
+    width: 30px;
+    height: auto;
+    margin: 0;
+    border: 2px solid var(--wc-line);
+    border-left: 0;
+    border-radius: 0 18px 18px 0;
+  }
+  .wc-loop-return::before {
+    top: -7px;
+    left: -6px;
+    border-top: 6px solid transparent;
+    border-right: 9px solid var(--wc-line);
+    border-bottom: 6px solid transparent;
+    border-left: 0;
+  }
+  .wc-loop-return span {
+    bottom: 50%;
+    left: 100%;
+    padding: 4px 0;
+    writing-mode: vertical-rl;
+    transform: translate(-50%, 50%);
+  }
+}
+
+/* The number-badge rule (.iso-loops-meta span) also caught the roadmap
+   chip, squeezing it to a 33 px gold square; the chip keeps its own shape. */
+.iso-landing .iso-loops-meta .iso-roadmap-chip {
+  display: inline-flex;
+  flex: none;
+  width: auto;
+  height: auto;
+  border: 1px solid rgba(239, 196, 111, .7);
+  color: var(--gold-ink);
+  background: var(--gold-tint);
+  box-shadow: none;
+}
+
+/* ── Comparison on a phone: one card per row, Splash first, no sideways
+   scrolling inside the table (D15: phones get their own layout). ───── */
+@media (max-width: 700px) {
+  .iso-landing .iso-comparison-wrap {
+    overflow: visible;
+    margin-right: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+  .iso-landing .iso-comparison-table,
+  .iso-landing .iso-comparison-table tbody,
+  .iso-landing .iso-comparison-table tr,
+  .iso-landing .iso-comparison-table th,
+  .iso-landing .iso-comparison-table td { display: block; }
+  .iso-landing .iso-comparison-table { min-width: 0; }
+  .iso-landing .iso-comparison-table thead { display: none; }
+  .iso-landing .iso-comparison-table tbody { display: grid; gap: 12px; }
+  .iso-landing .iso-comparison-table tr {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid rgba(12, 62, 72, .2);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, .78);
+    box-shadow: 4px 5px 0 rgba(12, 62, 72, .1);
+  }
+  .iso-landing .iso-comparison-table tbody th,
+  .iso-landing .iso-comparison-table tbody td {
+    border-right: 0;
+    border-bottom: 1px solid rgba(12, 62, 72, .1);
+    padding: 10px 14px;
+  }
+  .iso-landing .iso-comparison-table tbody th { order: -2; padding-top: 14px; font-size: 15px; }
+  .iso-landing .iso-comparison-table tbody td {
+    display: grid;
+    grid-template-columns: 96px 1fr;
+    gap: 10px;
+    font-size: 12.5px;
+  }
+  .iso-landing .iso-comparison-table tbody td::before {
+    content: attr(data-label);
+    color: var(--iso-text-label);
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
+  .iso-landing .iso-comparison-table tbody td.is-splash {
+    position: static;
+    order: -1;
+    border-bottom: 0;
+    box-shadow: none;
+  }
+  .iso-landing .iso-comparison-table tbody td.is-splash::before { color: #fffaf1; }
+  .iso-landing .iso-comparison-table tbody tr > :last-child { border-bottom: 0; }
+  .iso-landing .iso-comparison-table tbody tr:last-child > * { border-bottom: 1px solid rgba(12, 62, 72, .1); }
+}
+
+/* ── Step B review ─────────────────────────────────────────────────────── */
+
+/* Footer column titles are headings now (h2), styled as the old labels. */
+.iso-landing .cin-footer-col h2 { margin: 0 0 7px; line-height: 1.3; }
+
+/* "Request access" lands on the calculator below the sticky header. */
+.iso-landing #request-access { scroll-margin-top: 96px; }
+
+/* A route that quotes but has no signed payout partner yet: ink, not green. */
+.iso-landing .iso-loops-live.is-quotes { color: var(--iso-text-secondary); }
+
+/* What Splash does today: Splash's side alone, where no dataset says what
+   the others do. A list of pairs under the two compared rows. */
+.iso-landing .iso-splash-today {
+  position: sticky;
+  left: 0;
+  max-width: min(100%, 1180px);
+  padding: 22px 22px 6px;
+  border-top: 1px solid rgba(12, 62, 72, .11);
+}
+.iso-landing .iso-splash-today h4 {
+  margin: 0 0 14px;
+  color: var(--iso-ink);
+  font-size: 15px;
+  font-weight: 760;
+  letter-spacing: -.01em;
+}
+.iso-landing .iso-splash-today dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px 28px;
+  margin: 0;
+}
+.iso-landing .iso-splash-today dl > div { display: grid; gap: 4px; align-content: start; }
+.iso-landing .iso-splash-today dt {
+  color: var(--iso-text-secondary);
+  font-size: 12.5px;
+  font-weight: 650;
+}
+.iso-landing .iso-splash-today dd {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0;
+  color: var(--iso-ink);
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.45;
+}
+.iso-landing .iso-splash-today dd svg {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  margin-top: 2px;
+  color: var(--iso-teal);
+}
+
+@media (max-width: 700px) {
+  /* The column headers stay in the accessibility tree (visually hidden,
+     not display:none), so a screen reader still names each cell. */
+  .iso-landing .iso-comparison-table thead {
+    display: block;
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .iso-landing .iso-splash-today {
+    position: static;
+    margin-top: 12px;
+    padding: 16px 14px 14px;
+    border: 1px solid rgba(12, 62, 72, .2);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, .78);
+    box-shadow: 4px 5px 0 rgba(12, 62, 72, .1);
+  }
+  .iso-landing .iso-splash-today dl { grid-template-columns: 1fr; gap: 12px; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Step C: the phone landing, its own composition per section (D15).
+   Everything here is hidden above 700 px; the desktop is unchanged.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* The hero's description and proof line sit over the district art's soft
+   wash; at 72% ink they measured 3.9:1 to 4.3:1 against the pixels behind
+   them at 1440x900. 90% ink clears 4.5:1 everywhere on the wash. */
+.iso-landing .cin-copy .iso-hero-description,
+.iso-landing .cin-copy .iso-proof-line span { color: rgba(12, 62, 72, .9); }
+
+.pv-phone-desk { display: none; }
+.lc-controls { display: none; }
+.pc-compare { display: none; }
+
+@media (max-width: 700px) {
+  /* ── Product: the phone desk peeking out from behind the calculator ── */
+  .pv-phone-desk {
+    display: block;
+    position: relative;
+    z-index: 1;
+    width: min(300px, 84%);
+    margin: -44px auto 0;
+    padding: 52px 0 28px;
+    overflow: hidden;
+    border: 1px solid rgba(12, 62, 72, .18);
+    border-radius: 28px;
+    background: #f3ece7;
+    box-shadow: 0 30px 60px -30px rgba(8, 54, 64, .5);
+    /* The fade covers only the bottom padding, so no label in the desk
+       is drawn at less than full contrast. */
+    -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 28px), transparent);
+    mask-image: linear-gradient(180deg, #000 calc(100% - 28px), transparent);
+  }
+  .pv-phone-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 14px;
+    background: var(--iso-teal-dark);
+  }
+  .pv-phone-bar .pv-desk-brand { padding: 0; font-size: 15px; }
+  .pv-phone-menu {
+    width: 18px;
+    height: 12px;
+    border-block: 2px solid var(--iso-paper);
+    background: linear-gradient(var(--iso-paper), var(--iso-paper)) center / 100% 2px no-repeat;
+  }
+  .pv-phone-body {
+    display: grid;
+    gap: 10px;
+    padding: 14px;
+  }
+  .pv-phone-card {
+    display: grid;
+    gap: 8px;
+    padding: 12px;
+    border: 1px solid rgba(50, 98, 115, .14);
+    border-radius: 12px;
+    background: #fffaf2;
+  }
+  .pv-phone-card small {
+    color: var(--iso-teal);
+    font-family: var(--font-mono), monospace;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+  }
+  .pv-phone-card em {
+    color: var(--iso-ink);
+    font-size: 12px;
+    font-style: normal;
+    font-weight: 600;
+  }
+  .pv-phone-approve {
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    color: var(--iso-ink);
+    font-size: 13px;
+    font-weight: 700;
+  }
+  .pv-phone-approve b {
+    padding: 6px 10px;
+    border-radius: 8px;
+    color: var(--iso-paper);
+    background: var(--iso-ink);
+    font-size: 12px;
+  }
+  /* A glimpse, not a second card: only the bar and "Needs approval" show
+     under the calculator (step C review), about 200 px instead of 440. The
+     wallet card and the rows stay in the markup for wider phones later. */
+  .pv-phone-body > .pv-phone-card:not(.pv-phone-approve) { display: none; }
+  .pv-phone-list { gap: 0; padding-block: 4px; }
+  .pv-phone-list > div {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 0;
+  }
+  .pv-phone-list > div + div { border-top: 1px solid rgba(50, 98, 115, .1); }
+  .pv-phone-list span { display: grid; gap: 2px; min-width: 0; }
+  .pv-phone-list strong {
+    overflow: hidden;
+    color: var(--iso-ink);
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .pv-phone-list span small {
+    color: var(--iso-ink);
+    font-family: inherit;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+
+  /* ── Three loops: the controls under the swipeable row ── */
+  .lc .iso-loops-grid:focus-visible {
+    outline: 2px solid var(--iso-teal);
+    outline-offset: 4px;
+    border-radius: 18px;
+  }
+  .lc-controls {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: 6px;
+  }
+  .lc-step {
+    display: grid;
+    flex: 0 0 44px;
+    width: 44px;
+    height: 44px;
+    place-items: center;
+    border: 1px solid rgba(12, 62, 72, .22);
+    border-radius: 50%;
+    color: var(--iso-ink);
+    background: var(--surface);
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  .lc-step svg { width: 20px; height: 20px; }
+  .lc-step:disabled { opacity: .4; cursor: default; }
+  .lc-dots { display: flex; gap: 6px; }
+  .lc-dot {
+    min-height: 44px;
+    padding: 0 14px;
+    border: 1px solid rgba(12, 62, 72, .22);
+    border-radius: var(--r-pill, 999px);
+    color: var(--iso-ink);
+    background: transparent;
+    font-size: 13px;
+    font-weight: 750;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  .lc-dot[aria-current='true'] {
+    border-color: var(--iso-ink);
+    color: var(--iso-paper);
+    background: var(--iso-ink);
+  }
+  .lc-step:focus-visible,
+  .lc-dot:focus-visible {
+    outline: 2px solid var(--iso-teal);
+    outline-offset: 2px;
+  }
+
+  /* ── Comparison: Splash beside one alternative at a time ── */
+  .iso-landing .iso-comparison-wrap .iso-comparison-table { display: none; }
+  .pc-compare {
+    display: grid;
+    gap: 12px;
+  }
+  .pc-tabs {
+    display: flex;
+    padding: 3px;
+    border-radius: 999px;
+    background: #f1ebe3;
+  }
+  .pc-tabs button {
+    flex: 1;
+    min-height: 44px;
+    border: 0;
+    border-radius: 999px;
+    color: var(--iso-ink);
+    background: transparent;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  .pc-tabs button[aria-selected='true'] {
+    color: var(--iso-paper);
+    background: var(--iso-ink);
+  }
+  .pc-tabs button:focus-visible {
+    outline: 2px solid var(--iso-teal);
+    outline-offset: 2px;
+  }
+  .pc-panel { display: grid; gap: 10px; }
+  .pc-row {
+    padding: 14px 14px 12px;
+    border: 1px solid rgba(12, 62, 72, .16);
+    border-radius: 14px;
+    background: rgba(255, 253, 249, .94);
+  }
+  .pc-row h4 {
+    margin: 0 0 10px;
+    color: var(--iso-ink);
+    font-size: 15px;
+    font-weight: 800;
+    letter-spacing: -.01em;
+  }
+  .pc-row dl {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin: 0;
+  }
+  .pc-row dl > div {
+    display: grid;
+    align-content: start;
+    gap: 4px;
+    padding: 10px;
+    border-radius: 10px;
+    background: rgba(12, 62, 72, .04);
+  }
+  .pc-row dl > div.is-splash { background: rgba(13, 99, 112, .09); }
+  .pc-row dt {
+    color: var(--iso-ink);
+    font-family: var(--font-mono), monospace;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+  }
+  .pc-row dd {
+    margin: 0;
+    color: var(--iso-ink);
+    font-size: 13.5px;
+    font-weight: 600;
+    line-height: 1.4;
+    font-variant-numeric: tabular-nums;
+  }
+  .pc-row .is-splash dd { color: var(--iso-teal-dark); font-weight: 750; }
+  .pc-row .is-splash dd svg {
+    display: inline;
+    width: 14px;
+    height: 14px;
+    vertical-align: -2px;
+    color: var(--iso-teal);
+  }
+
+  /* ── Platform: shorter art, so the three layers read as one sequence ── */
+  .iso-landing .iso-layer-art { max-height: 220px; }
+  .iso-layer-picture { display: contents; }
+  .iso-landing .iso-layer-art img { max-height: 220px; object-fit: contain; }
+
+  /* ── Trust: the four gates as one connected sequence, on one rail ── */
+  .iso-landing .iso-trust-grid {
+    position: relative;
+    gap: 0;
+  }
+  .iso-landing .iso-trust-grid::before {
+    content: '';
+    position: absolute;
+    top: 16px;
+    bottom: 24px;
+    left: 15px;
+    width: 2px;
+    border-radius: 2px;
+    background: linear-gradient(180deg, var(--iso-gold), rgba(159, 207, 199, .55));
+  }
+  .iso-landing .iso-trust-card {
+    position: relative;
+    gap: 8px;
+    padding: 0 0 26px;
+    padding-left: 52px;
+    border: 0;
+    border-radius: 0;
+    background: none;
+  }
+  .iso-landing .iso-trust-card:hover { transform: none; }
+  .iso-landing .iso-trust-card:last-child { padding-bottom: 0; }
+  .iso-landing .iso-trust-meta { min-height: 32px; }
+  .iso-landing .iso-trust-meta span {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 32px;
+    height: 32px;
+  }
+  .iso-landing .iso-trust-card h3 { font-size: 19px; }
+  .iso-landing .iso-trust-card > p { font-size: 14px; }
+  .iso-landing .iso-trust-card small { padding-top: 10px; }
+}

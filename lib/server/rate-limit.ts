@@ -89,6 +89,13 @@ export const RATE_LIMITS = {
   stablecoinActivityUser: { bucket: 'stablecoin-activity:user', limit: 60, windowMs: 15 * MINUTE },
   // The records export reads every transfer the workspace ever quoted.
   stablecoinExportUser: { bucket: 'stablecoin-export:user', limit: 20, windowMs: HOUR },
+
+  /* ── The public landing (v2 Phase 4) ───────────────────────────────── */
+  // The calculator's quote asks the payout partner for a rate on every
+  // amount typed; the client waits for typing to pause, this bounds a script.
+  quotePreviewIp: { bucket: 'quote-preview:ip', limit: 120, windowMs: 15 * MINUTE },
+  // A request for pilot access writes a row; a few a day is a real company.
+  accessRequestIp: { bucket: 'access-request:ip', limit: 10, windowMs: HOUR },
 } as const satisfies Record<string, RateLimitRule>;
 
 /**

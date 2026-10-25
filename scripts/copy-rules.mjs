@@ -70,9 +70,30 @@ export const CUSTOMER_RULES = [
   },
 ];
 
+/**
+ * Claims a stranger reads as a price promise. Marketing only: the signed-in
+ * product may say "Splash fee: free" for a transfer between Splash users,
+ * which is Splash's own fee and true.
+ * @type {CopyRule[]}
+ */
+export const MARKETING_CLAIMS = [
+  {
+    pattern: /\bzero[- ]fees?\b|\bfee[- ]free\b|\bfor free\b/i,
+    reason: 'no payment is free end to end: Sui gas is sponsored, not zero, and a payout carries its partner\'s rate; say who pays which fee',
+  },
+];
+
 /** @type {CopyRule[]} */
 export const MARKETING_JARGON = [
-  { pattern: /\bWalrus\b/, reason: 'protocol jargon on a marketing route: a customer buys a payment record, not a storage network' },
+  {
+    pattern: /\bWalrus\b/,
+    // v2 brief section 6: until a partner's agreement is signed, the landing's
+    // partners strip shows the rails and standards Splash runs on instead,
+    // and Walrus is one of them by name. That one list, in content/rails.ts,
+    // may name it; every other marketing line still may not.
+    exceptFiles: ['content/rails.ts'],
+    reason: 'protocol jargon on a marketing route: a customer buys a payment record, not a storage network (only the rails list in content/rails.ts names it)',
+  },
   { pattern: /\bSeal\b/, reason: 'protocol jargon on a marketing route: say "encrypted", not the name of the key server' },
   { pattern: /\bPTBs?\b/, reason: 'protocol jargon on a marketing route: a programmable transaction block is our implementation, not their product' },
   { pattern: /payment intent/i, reason: 'protocol jargon on a marketing route: the customer sends a payment; the intent object is ours' },
@@ -105,7 +126,7 @@ export function copyViolations(relPath, text) {
   const surface = surfaceFor(path);
   if (surface === 'exempt') return [];
 
-  const rules = surface === 'marketing' ? [...CUSTOMER_RULES, ...MARKETING_JARGON] : CUSTOMER_RULES;
+  const rules = surface === 'marketing' ? [...CUSTOMER_RULES, ...MARKETING_CLAIMS, ...MARKETING_JARGON] : CUSTOMER_RULES;
   const found = [];
   const lines = text.split(/\r?\n/);
   for (const rule of rules) {

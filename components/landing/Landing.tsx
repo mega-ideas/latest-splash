@@ -6,6 +6,11 @@ import { BRAND } from '@/content/brand';
 import { publishedNumbers } from '@/content/sea-numbers';
 import { FEES_OFF_NOTICE, pricingParts, scheduleToWire } from '@/lib/fees/copy';
 import { publishedFeeSchedule } from '@/lib/fees/fee-config';
+import imageManifest from '@/lib/landing/images.json';
+import { variantFor } from '@/lib/landing/images';
+
+/** The hero art from scripts/landing-images.mjs, never the PNG original. */
+const HERO_1600 = variantFor(imageManifest.hero.variants, 1600);
 
 /**
  * The landing page, straightforward: what a customer receives, what it
@@ -76,11 +81,12 @@ export default async function Landing() {
             </div>
             <div className="ld-hero-art">
               <Image
-                src="/cinematic/hero-district-v5.png"
+                src={HERO_1600.src}
                 alt="Isometric illustration of the Splash building on a plinth, ringed by a gold delivery route with couriers on it"
-                width={1600}
-                height={1000}
+                width={HERO_1600.width}
+                height={HERO_1600.height}
                 sizes="(min-width: 900px) 48vw, 100vw"
+                unoptimized
                 priority
               />
             </div>
@@ -244,7 +250,7 @@ export default async function Landing() {
               sides.
             </p>
             <p>
-              Sandbox on the Sui testnet. No customer funds move. Support:{' '}
+              Splash is software. It has no key to your Splash Wallet. Support:{' '}
               <a className="ld-link" href={`mailto:${BRAND.supportEmail}`}>
                 {BRAND.supportEmail}
               </a>

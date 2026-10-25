@@ -198,7 +198,7 @@ export default function OpenGraphImage() {
             </div>
           </div>
           <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
-            {['Sandbox', 'Sui testnet', 'No customer funds'].map((item) => (
+            {['USDC on Sui', 'PH and ID', 'No customer funds'].map((item) => (
               <div
                 key={item}
                 style={{
