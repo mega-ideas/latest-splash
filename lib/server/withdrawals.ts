@@ -1121,17 +1121,45 @@ export async function cancel(deps: Pick<WithdrawalDeps, 'db' | 'now' | 'orgId'>,
 }
 
 export async function reverseInstruction(deps: Pick<WithdrawalDeps, 'now'>, adapter: PayoutPartner, w: { intentId: string; partnerRef: string; returnAddress: string }, reason: string): Promise<boolean> {
+  return (await reverseInstructionAnswer(deps, adapter, w, reason)).accepted;
+}
+
+/**
+ * A reversal and what the partner answered when it did not take it (its
+ * refusal code, or `no_answer`), so ops can tell a partner that says it
+ * holds nothing (`payout_not_found`) from one that did not answer. A
+ * `payout_not_found` on a reversal by the intent id alone is never read as
+ * taken: unless the partner keeps the reversal against the intent id, the
+ * instruction could still arrive and go live (PayoutPartner.returnOrReverse).
+ */
+async function reverseInstructionAnswer(deps: Pick<WithdrawalDeps, 'now'>, adapter: PayoutPartner, w: { intentId: string; partnerRef: string; returnAddress: string }, reason: string): Promise<{ accepted: boolean; answer?: string }> {
   try {
     const r = await adapter.returnOrReverse({ ...w, reason, now: deps.now() });
-    return r.accepted;
-  } catch {
+    return r.accepted ? { accepted: true } : { accepted: false, answer: 'refused' };
+  } catch (error) {
     // Nothing was deposited for it: an instruction no deposit follows pays nothing.
-    return false;
+    return { accepted: false, answer: error instanceof PayoutPartnerUnavailable ? error.code : 'no_answer' };
   }
 }
 
 /** After this many asks a return still owed is an alert for ops (the sweep keeps asking). */
 export const RETURN_ASKS_BEFORE_ALERT = 5;
+
+/** The first wait between reversal asks once ops are alerted (one sweep, every five minutes), and the longest. */
+export const REVERSAL_REASK_BASE_MS = 5 * 60 * 1000;
+export const REVERSAL_REASK_MAX_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * How long the sweep waits after the last reversal ask before asking again:
+ * every run until ops are alerted (RETURN_ASKS_BEFORE_ALERT asks), then
+ * doubling from REVERSAL_REASK_BASE_MS up to REVERSAL_REASK_MAX_MS. It never
+ * gives up: a reversal still owed is asked for until the partner takes it.
+ */
+export function reversalReaskDelayMs(asks: number): number {
+  if (asks < RETURN_ASKS_BEFORE_ALERT) return 0;
+  const doublings = Math.min(asks - RETURN_ASKS_BEFORE_ALERT, 30);
+  return Math.min(REVERSAL_REASK_MAX_MS, REVERSAL_REASK_BASE_MS * 2 ** doublings);
+}
 
 /**
  * Ask the partner for a failed payout's USDC back, to the business wallet,
@@ -1183,20 +1211,22 @@ async function reverseCancelled(
 ): Promise<boolean> {
   if (!row.partnerRef && !opts.byIntentOnly) return false;
   const at = deps.now();
-  let accepted = false;
+  let answer: { accepted: boolean; answer?: string } = { accepted: false, answer: 'route_unavailable' };
   try {
     const a = typeof adapter === 'function' ? adapter() : adapter;
-    accepted = await reverseInstruction(deps, a, { intentId: row.intentId, partnerRef: row.partnerRef ?? '', returnAddress: row.walletAddress }, reason);
+    // Always back to the business wallet on the row: never an address from anywhere else.
+    answer = await reverseInstructionAnswer(deps, a, { intentId: row.intentId, partnerRef: row.partnerRef ?? '', returnAddress: row.walletAddress }, reason);
   } catch {
-    accepted = false;
+    answer = { accepted: false, answer: 'route_unavailable' };
   }
+  const accepted = answer.accepted;
   const after = await store.recordReversalAsk(deps.db, deps.orgId, row.id, accepted, at);
   const asks = after?.returnAsks ?? 0;
-  await store.recordWithdrawalEvent(deps.db, { orgId: deps.orgId, subject: 'withdrawal', subjectId: row.id, actor: 'system', action: 'instruction_reversed', detail: { reason, accepted, ask: asks, ...more }, at });
+  await store.recordWithdrawalEvent(deps.db, { orgId: deps.orgId, subject: 'withdrawal', subjectId: row.id, actor: 'system', action: 'instruction_reversed', detail: { reason, accepted, ...(answer.answer ? { answer: answer.answer } : {}), ask: asks, ...more }, at });
   if (!accepted && asks === RETURN_ASKS_BEFORE_ALERT) {
-    await store.recordWithdrawalEvent(deps.db, { orgId: deps.orgId, subject: 'withdrawal', subjectId: row.id, actor: 'system', action: 'reversal_request_stuck', detail: { asks }, at });
-    // An alert for ops: ids only, nothing about the bank account.
-    console.error(`[withdrawals] ALERT reversal still owed: payout ${row.id} (intent ${row.intentId}) was cancelled and the partner has not accepted reversing its instruction after ${asks} asks; the sweep keeps asking`);
+    await store.recordWithdrawalEvent(deps.db, { orgId: deps.orgId, subject: 'withdrawal', subjectId: row.id, actor: 'system', action: 'reversal_request_stuck', detail: { asks, answer: answer.answer ?? null }, at });
+    // An alert for ops: ids and the partner's answer only, nothing about the bank account.
+    console.error(`[withdrawals] ALERT reversal still owed: payout ${row.id} (intent ${row.intentId}) was cancelled and the partner has not accepted reversing its instruction after ${asks} asks (last answer: ${answer.answer ?? 'none'}); the sweep keeps asking, backing off`);
   }
   return accepted;
 }
@@ -1392,6 +1422,11 @@ export async function reconcileWithdrawals(deps: SettlementDeps): Promise<SweepR
   }
   // Cancelled payouts whose instruction is still live at the partner: ask again until it reverses it.
   for (const row of await store.reversalsOwedForStaff(deps.db)) {
+    // Once ops are alerted the asks back off (reversalReaskDelayMs): still owed, not asked this run.
+    if (row.returnAskedAt && deps.now().getTime() - row.returnAskedAt.getTime() < reversalReaskDelayMs(row.returnAsks)) {
+      out.reversalsPending += 1;
+      continue;
+    }
     // A row with no reference is a lost answer already asked once: reversed by its intent id again.
     const byIntentOnly = !row.partnerRef;
     const accepted = await reverseCancelled({ ...deps, orgId: row.orgId }, () => deps.partner(row.partner as PayoutPartnerId), row, byIntentOnly ? 'instruction_unconfirmed' : 'cancelled', { via: 'sweep' }, { byIntentOnly });

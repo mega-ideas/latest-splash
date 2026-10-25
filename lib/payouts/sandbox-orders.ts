@@ -15,6 +15,12 @@
  *     the instruction named (the business wallet); a reversal by the intent
  *     id alone (a lost answer, no reference) is taken whether or not the
  *     order is held. A reversed instruction is not taken again.
+ *   - a reversal by the intent id alone for an order it does not hold (the
+ *     instruction is still on its way) is kept against the intent id, with
+ *     the return address it was asked for: the instruction that arrives
+ *     after it is refused (`instruction_conflict`), never taken live, and
+ *     the kept reversal answers no status and no reference. Live partners
+ *     are held to the same (PayoutPartner.returnOrReverse).
  *
  * References are an HMAC of the route and intent id. With the sandbox
  * webhook secret set, the key is derived from it, so every server instance
@@ -32,6 +38,7 @@ import { payoutSandboxWebhookSecret, PayoutPartnerUnavailable, type PartnerPayou
 
 const PROCESS_KEY = randomBytes(32);
 
+/** An order taken, or (`partnerRef` '') a reversal by intent id kept before any instruction arrived. */
 type Order = { fingerprint: string; partnerRef: string; status: PartnerPayoutStatus; returnAddress: string; reversed: boolean };
 
 const BOOK = new Map<string, Order>();
@@ -92,7 +99,7 @@ export function placeSandboxOrder(route: PayoutPartnerId, tag: string, input: Pa
 /** An order's status, only for one this sandbox took, under its own reference. */
 export function sandboxOrderStatus(route: PayoutPartnerId, intentId: string, partnerRef: string): { status: PartnerPayoutStatus; sandbox: true } {
   const order = BOOK.get(`${route}:${String(intentId ?? '').toLowerCase()}`);
-  if (!order || order.partnerRef !== partnerRef) throw new PayoutPartnerUnavailable('The sandbox partner holds no such payout.', 'payout_not_found');
+  if (!order || !order.partnerRef || order.partnerRef !== partnerRef) throw new PayoutPartnerUnavailable('The sandbox partner holds no such payout.', 'payout_not_found');
   return { status: order.status, sandbox: true };
 }
 
@@ -101,21 +108,27 @@ export function sandboxOrderStatus(route: PayoutPartnerId, intentId: string, par
  * order this sandbox took, under its own reference, and only back to the
  * address the instruction named. `partnerRef` '' is a reversal by the intent
  * id alone, for an instruction whose answer was lost: taken when the order is
- * held (to its own return address) and when nothing is held. `final` false
- * checks the order without reversing it (a route that may refuse the reason).
+ * held (to its own return address) and when nothing is held, and then kept
+ * against the intent id with the address asked for, so the instruction that
+ * arrives later is refused. `final` false checks the order without reversing
+ * it (a route that may refuse the reason).
  */
 export function sandboxReverse(
   route: PayoutPartnerId,
   input: { intentId: string; partnerRef: string; returnAddress: string },
   final = true,
 ): { accepted: true; sandbox: true } {
-  const order = BOOK.get(`${route}:${String(input.intentId ?? '').toLowerCase()}`);
+  const key = `${route}:${String(input.intentId ?? '').toLowerCase()}`;
+  const order = BOOK.get(key);
   const byIntentOnly = input.partnerRef === '';
   if (!order) {
-    if (byIntentOnly) return { accepted: true, sandbox: true };
-    throw new PayoutPartnerUnavailable('The sandbox partner holds no such payout.', 'payout_not_found');
+    if (!byIntentOnly) throw new PayoutPartnerUnavailable('The sandbox partner holds no such payout.', 'payout_not_found');
+    // Nothing held yet: the instruction may still be on its way. The reversal
+    // is kept against the intent id so that instruction is refused when it arrives.
+    if (final) BOOK.set(key, { fingerprint: '', partnerRef: '', status: 'instructed', returnAddress: String(input.returnAddress ?? '').toLowerCase(), reversed: true });
+    return { accepted: true, sandbox: true };
   }
-  if (!byIntentOnly && order.partnerRef !== input.partnerRef) throw new PayoutPartnerUnavailable('The sandbox partner holds no such payout.', 'payout_not_found');
+  if (!byIntentOnly && (!order.partnerRef || order.partnerRef !== input.partnerRef)) throw new PayoutPartnerUnavailable('The sandbox partner holds no such payout.', 'payout_not_found');
   if (String(input.returnAddress ?? '').toLowerCase() !== order.returnAddress) {
     throw new PayoutPartnerUnavailable('A return goes only to the address the instruction named. Nothing was returned.', 'bad_instruction');
   }

@@ -31,7 +31,7 @@ database) and `tests/partner-payouts.test.mjs` (the service on PGlite).
 | `createPayout` | The instruction, before any deposit, keyed by the intent id and the expected USDC amount, with its ISO 20022 message. Idempotent: a retry names the same order; the intent id with another amount, deposit address, account, rate, quote reference or ISO 20022 message is refused (`instruction_conflict`, 409), and no reversal is sent for it (it would cancel the payout already held). | Checks chain, domain and the mint recipient (re-derived from the address), keyed by the intent id. Circle takes no instruction before a burn. |
 | `status` | The partner's view of the payout, asked by the sweep (below): a paid-out answer may carry the bank's reference and a failed one the partner's reason, checked as a webhook's are. The sandbox answers only for an order it took, under its own reference (`payout_not_found` otherwise). | The attestation and mint, polled. |
 | `handleWebhook` | HMAC over the raw body, 5-minute window, then parse. | Circle sends none: live refuses every webhook. |
-| `returnOrReverse` | Cancel an instruction no deposit followed, or ask for a return to the business wallet. Only for the partner's own order under its reference, or by the intent id alone when the answer to the instruction was lost (`partnerRef` ''), and only back to the return address the instruction named. The sandbox answers so: `payout_not_found` for an order it never took, `bad_instruction` for another return address, and a reversed instruction is not taken again (`instruction_conflict`). | Accepted only before the burn; a burn cannot be undone. The same order and address checks. |
+| `returnOrReverse` | Cancel an instruction no deposit followed, or ask for a return to the business wallet. Only for the partner's own order under its reference, or by the intent id alone when the answer to the instruction was lost (`partnerRef` ''), and only back to the return address the instruction named. The sandbox answers so: `payout_not_found` for an order it never took, `bad_instruction` for another return address, and a reversed instruction is not taken again (`instruction_conflict`). A reversal by the intent id alone for an order the partner does not hold is accepted and kept against the intent id with the return address asked for, so an instruction that arrives after it is refused (`instruction_conflict`) and never goes live. Live partners must contract to the same; an adapter never maps a partner's "not found" to accepted. | Accepted only before the burn; a burn cannot be undone. The same order and address checks. |
 | `depositAddress`, `checkAccount`, `postSettlement` | The fixed deposit address, the bank's name enquiry, the Sui digest after settlement. | No deposit address and no bank account (`not_on_this_route`); the burn's digest. |
 
 Every adapter is a labelled sandbox (`sandbox: true`) outside production.
@@ -94,7 +94,9 @@ the same:
    - **the instruction goes to the partner first**, keyed by the intent id
      and the expected amount; a lost answer cancels the payout and reverses
      the instruction by the intent id, asked again by the sweep until the
-     partner takes it;
+     partner takes it (every run until ops are alerted, then backing off up
+     to six hours, never giving up). The partner keeps a reversal for an
+     intent id it does not hold yet, so the late instruction is refused;
    - the owners are asked to sign the canonical composed PTB under purpose
      `partner_payout`: withdraw principal plus `max_fee`, open the intent
      (kind 4, to the deposit address, for that commitment and amount),

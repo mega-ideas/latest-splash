@@ -110,7 +110,9 @@ export function checkCrossChainInstruction(input: PayoutInstruction): CrossChain
 }
 
 /** What the burn's reversal reasons mean: only these come before any burn. */
-const BEFORE_BURN = new Set(['not_sent', 'instruction_unconfirmed', 'destination_revoked', 'legal_name_changed']);
+// A cancelled payout never had its deposit signed, so nothing was burned: 'cancelled' (the sweep) and
+// 'cancelled_while_opening' are reversed like the rest.
+const BEFORE_BURN = new Set(['not_sent', 'instruction_unconfirmed', 'destination_revoked', 'legal_name_changed', 'cancelled', 'cancelled_while_opening']);
 
 function sandboxAdapter(env: NodeJS.ProcessEnv): PayoutPartner {
   return {

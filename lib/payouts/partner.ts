@@ -277,6 +277,18 @@ export interface PayoutPartner {
   /**
    * Cancel an instruction no deposit followed, or ask for funds received to be
    * returned. A return goes to `returnAddress`, the business wallet.
+   *
+   * `partnerRef` '' is a reversal by the intent id alone, for an instruction
+   * whose answer was lost (it may not have reached the partner yet). Every
+   * adapter, and the partner contract behind it, must make that idempotent:
+   * an intent id the partner does not hold is answered accepted, and the
+   * partner keeps the reversal against the intent id with the return address
+   * asked for, so an instruction under that intent id that arrives later is
+   * refused (`instruction_conflict`) and never goes live. An adapter whose
+   * partner answers "not found" instead must not map it to accepted (the
+   * late instruction would be taken); the service keeps asking, backing off
+   * (reversalReaskDelayMs), and ops are alerted with the partner's answer.
+   * The sandbox (sandbox-orders.ts) is the reference behaviour.
    */
   returnOrReverse(input: { intentId: string; partnerRef: string; returnAddress: string; reason: string; now: Date }): Promise<{ accepted: boolean; sandbox: boolean }>;
 }

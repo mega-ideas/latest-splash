@@ -164,7 +164,15 @@ test deposit to it would be lost.
      the instruction reversed by the intent id alone (no reference came
      back, so `partnerRef` is ''). That ask is counted on the row like any
      other reversal, so the sweep asks again, by the intent id, until the
-     partner takes it. A clear refusal owes no reversal.
+     partner takes it. A clear refusal owes no reversal. The instruction
+     may still be on its way when the reversal lands: the partner keeps
+     the reversal against the intent id (the sandbox does; live contracts
+     must say so), so the instruction is refused when it arrives. A partner
+     answer of `payout_not_found` is kept on the `instruction_reversed`
+     event as `answer` and never read as taken. Rows left by the code
+     before this (failure `partner_error`, no reference, nothing counted,
+     a reversal not taken) are counted by migration 0055, so the sweep asks
+     for them too.
   4. The owners are asked to sign the composed PTB under purpose
      `withdrawal`. That purpose accepts only a kind 4 payout to the
      verified deposit address, carrying that `beneficiary_ref`, for that
@@ -192,7 +200,13 @@ test deposit to it would be lost.
   so the sweep asks again on every run (`reversalsOwedForStaff`,
   `reversalsAsked` and `reversalsPending` in its result). After
   `RETURN_ASKS_BEFORE_ALERT` asks ops are alerted once
-  (`reversal_request_stuck`, ids only). An instruction already reversed is
+  (`reversal_request_stuck`, ids and the partner's last answer only), and
+  the sweep then backs off (`reversalReaskDelayMs`: five minutes, doubling,
+  at most six hours) but never stops asking; a row waiting out its delay
+  counts in `reversalsPending`. Every reversal goes back to the wallet
+  address on the row. A cross-chain (`cctp_wallet`) payout cancelled before
+  its deposit was signed is reversed for the reasons `cancelled` and
+  `cancelled_while_opening` too: nothing was burned. An instruction already reversed is
   not reversed again by a second path that saw it. The partner contracts
   should say a deposit is matched only by intent id and the posted digest,
   never by address and amount.
