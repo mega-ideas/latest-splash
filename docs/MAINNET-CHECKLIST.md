@@ -203,8 +203,13 @@ procedure in [`docs/UPGRADE-POLICY.md`](UPGRADE-POLICY.md).
       networks it deposits.
 - [ ] Withdrawals (v2 §4.4, `docs/v2/phase2-withdrawals.md`): set
       `WITHDRAWAL_ACCOUNT_KEY` (random, at least 32 characters, kept like any
-      other secret; losing it makes the stored bank accounts unusable), and
-      `SPLASH_CORE_ORIGINAL_PACKAGE_ID` once splash_core has been upgraded.
+      other secret; to rotate, move the old value to
+      `WITHDRAWAL_ACCOUNT_KEY_PREVIOUS`; losing every key makes the stored bank
+      accounts unusable), and `SPLASH_CORE_ORIGINAL_PACKAGE_ID` (required in
+      production: withdrawals refuse without it). Schedule
+      `/api/cron/withdrawals` every five minutes. Before relying on the
+      derived intent id, dry-run one kind 4 withdrawal on testnet and compare
+      the created intent with `withdrawals.intent_id`.
       The Hata and Fiuu credentials (`HATA_API_KEY`, `HATA_WEBHOOK_SECRET`,
       `FIUU_MERCHANT_ID`, `FIUU_VERIFY_KEY`) are set only once both contracts
       are signed and the adapter is wired. Each partner's deposit address is

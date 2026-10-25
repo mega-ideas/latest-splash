@@ -183,6 +183,13 @@ new build refuses to install or start on the old runtime and environment.
    502 without a database, when any partial signature is still held for a
    closed request, when a submission is still stuck, or when a chain read
    failed.
+   Schedule `https://<domain>/api/cron/withdrawals` every five minutes, after
+   the wallet-signing sweep (v2 §4.4): it marks withdrawals sent whose
+   owners' request executed, posts their digest to the payout partner once
+   the chain shows the instructed intent, reverses the instruction and
+   cancels the withdrawal when the request lapsed, and records or frees a
+   partner test deposit. It answers 502 without a database, without
+   `SPLASH_CORE_ORIGINAL_PACKAGE_ID`, or when a row could not be settled.
 
 **Redeploys**: push to `main` → App Platform rebuilds, runs the pre-deploy
 migration job, then deploys. Deleted files disappear from the server because

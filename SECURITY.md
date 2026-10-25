@@ -38,15 +38,23 @@ Design: `docs/v2/phase2-withdrawals.md`. Tests: `tests/withdrawals.test.mjs`.
   business's own deposit address at Hata → Fiuu → the business's bank. The
   USDC leaves in the canonical composed PTB (open, pay, anchor, delete),
   kind 4, signed by the owners' multisig. A deposit address that is a Splash
-  address, the wallet itself or another business's address is refused. A
-  return goes to the business wallet only, and counts only when the chain
-  shows it there.
+  address (operator, sponsor, treasury, test recipient, and FeeConfig's fee
+  recipient and pending recipient read live, failing closed), the wallet
+  itself, another business's wallet or another business's address is
+  refused. A return goes to the business wallet only. It counts only when
+  the chain shows it sent by the deposit address into the wallet, by a
+  digest no other withdrawal used (unique index); only the whole amount
+  closes a withdrawal, and a short return is held for review.
 - **Own account only.** A destination is stored only when the name given
   and the bank's own holder name (the partner's name enquiry) both match
-  the registered legal name. The trading name is not accepted. The account
-  number and the beneficiary salt are AES-256-GCM sealed under
-  `WITHDRAWAL_ACCOUNT_KEY`, bound to the org and the row. Views and the trail
-  carry the last four digits only.
+  the registered legal name, and that name counts only once KYB verified it
+  (kyb_status basic or full). Only an owner may set it, and it is fixed once
+  KYB is under way; a change before that revokes every bank account and
+  cancels withdrawals not yet sent. The trading name is not accepted. The
+  account number and the beneficiary salt are AES-256-GCM sealed under
+  `WITHDRAWAL_ACCOUNT_KEY` (rotatable through
+  `WITHDRAWAL_ACCOUNT_KEY_PREVIOUS`), bound to the org and the row. Views
+  and the trail carry the last four digits only.
 - **Deposit address verified once.** A 1 USDC test deposit is signed by the
   owners (`partner_test_deposit`, bound to that address and amount). The
   address is verified only when the partner's signed confirmation names that
@@ -58,8 +66,22 @@ Design: `docs/v2/phase2-withdrawals.md`. Tests: `tests/withdrawals.test.mjs`.
   only after its commitment is recomputed and matches the intent's
   `beneficiary_ref` (`beneficiary_mismatch` otherwise). The owners' request
   (`withdrawal`) accepts only a kind 4 payout to that address, for that
-  beneficiary and amount. When the request cannot be opened or closes
-  unsigned, the instruction is reversed.
+  beneficiary and amount. It carries the bank code, last four digits,
+  holder, receive amounts, rate and deadline the signers are shown, and the
+  server checks them against the stored account before every signature
+  (`withdrawal_changed`). Removing the account cancels its withdrawals not
+  yet sent. When the request cannot be opened, closes unsigned, or the
+  partner's answer to the instruction is lost, the instruction is reversed.
+  The partner gets the beneficiary salt, so it can check `beneficiary_ref`
+  against the account it pays.
+- **The intent id.** Production requires `SPLASH_CORE_ORIGINAL_PACKAGE_ID`
+  (no fallback). Two Move tests pin the derivation. The digest is posted to
+  the partner only after the executed transaction's `IntentCreated` event
+  names the instructed intent id; a mismatch is held and alerted, never
+  posted.
+- **The signing window.** `settle_by` is the 24-hour signing deadline, not
+  the 5-minute quote. The partner is told the least the account must
+  receive; below it, it returns the USDC.
 - **Quote and fee.** The quote is given only once the wallet holds principal
   plus fee outside holds. A worse rate (`quote_changed`), a fee above the one
   shown (`fee_above_shown`) or a fee over the 1% ceiling is refused. Partner
@@ -73,11 +95,15 @@ Design: `docs/v2/phase2-withdrawals.md`. Tests: `tests/withdrawals.test.mjs`.
 - **Fail closed.** The partner is a sandbox outside production only
   (`isProductionRuntime`; `USE_MOCK_APIS` does not bring it back). In
   production it refuses without credentials and, until the API is wired,
-  with them. The sandbox webhook secret is random, at least 32 characters,
-  with no fallback.
+  with them. Outside production the sandbox still refuses on a server
+  pointed at mainnet. The sandbox webhook secret is random, at least 32
+  characters, with no fallback.
 - **Tenant isolation.** Routes sit behind `walletRoute` (session org).
-  Owners alone change anything. Every store call takes the org. Another
-  org's ids read as 404.
+  Owners alone change bank accounts and the deposit address; a staff member
+  may ask for a withdrawal, which only the owners' quorum signs. Every store
+  call takes the org; the sweep (`/api/cron/withdrawals`, `CRON_SECRET`)
+  acts on each row within its own org. Reads never call the partner.
+  Another org's ids read as 404.
 - **Open:** the live Hata and Fiuu APIs and their webhook payloads; a
   scheduled run that posts unposted digests (today: on the executed hook and
   on every read); rotation of `WITHDRAWAL_ACCOUNT_KEY`.

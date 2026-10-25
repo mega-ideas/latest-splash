@@ -1,6 +1,7 @@
 # Withdrawals to the business's own bank — v2 Phase 2 §4.4
 
-Status: built 25 Oct 2026 on `v2/phase2-backend`. Brief: `SPLASH_SUI_V2_PROMPT.md`
+Status: built 25 Oct 2026 on `v2/phase2-backend`; revised the same day
+after review (migration 0041). Brief: `SPLASH_SUI_V2_PROMPT.md`
 §4.4 and §4.5. Decisions: D3, D4, D12, and Sky's decisions of 24 Oct 2026
 on partner deposit addresses.
 
@@ -10,12 +11,15 @@ Code:
 - `lib/payouts/registry.ts`: which adapter a server uses.
 - `lib/payouts/withdrawal-rules.ts`: the rules, with no I/O.
 - `lib/server/withdrawals.ts`: the service.
-- `lib/server/withdrawals-store.ts`: the store (migration 0040).
+- `lib/server/withdrawals-store.ts`: the store (migrations 0040 and 0041).
 - `lib/server/withdrawals-deps.ts`: the live wiring.
-- `app/api/wallet/withdrawals/*` and `app/api/webhooks/payouts/[partner]`.
+- `app/api/wallet/withdrawals/*`, `app/api/webhooks/payouts/[partner]` and
+  the sweep, `app/api/cron/withdrawals`.
 
-Tests: `tests/withdrawals.test.mjs`, and one case in
-`tests/spend-rules.test.mjs`.
+Tests: `tests/withdrawals.test.mjs`, one case in
+`tests/spend-rules.test.mjs`, and two Move tests in
+`move/splash_core/tests/intent_v2_tests.move` that pin the intent id
+derivation.
 
 ## The route
 
@@ -41,7 +45,7 @@ onto it in §4.5; until then they answer `partner_not_built`.
 | `depositAddress` | The business's fixed Sui deposit address at the partner, and the partner's account ref. |
 | `checkAccount` | Name enquiry: the holder name the bank itself has for an account. |
 | `quote` | Rate (local per USDC ×1e6), the receive amount after the partner's fees, each fee as its own line, quote ref, 5-minute expiry. |
-| `createPayout` | The instruction, before any deposit. The idempotency key is the intent id. |
+| `createPayout` | The instruction, before any deposit. The idempotency key is the intent id. It carries the least receive amount, the deadline and the beneficiary salt. |
 | `postSettlement` | The Sui digest, after settlement. |
 | `status` | The partner's view of a payout. |
 | `verifyWebhook` | HMAC over the raw body, 5-minute window, then parse. |
@@ -53,7 +57,11 @@ In production, without credentials, the adapter refuses with
 `HATA_WEBHOOK_SECRET`, `FIUU_MERCHANT_ID` and `FIUU_VERIFY_KEY`. With
 credentials it refuses with `partner_not_connected` until the APIs are
 wired. Only `isProductionRuntime` decides which adapter runs, so
-`USE_MOCK_APIS` never brings the sandbox into production.
+`USE_MOCK_APIS` never brings the sandbox into production. The sandbox also
+refuses (`partner_not_configured`) on a server pointed at mainnet
+(`SUI_NETWORK`, `NEXT_PUBLIC_SUI_NETWORK`, or an RPC or GraphQL URL naming
+mainnet): its deposit address is a hash nobody holds a key to, so a real
+test deposit to it would be lost.
 
 ## Setting up
 
@@ -62,6 +70,16 @@ wired. Only `isProductionRuntime` decides which adapter runs, so
    - the holder name given matches the business's registered legal name;
    - the bank's own holder name, from the partner's name enquiry, matches it
      too.
+
+   The registered legal name counts only once KYB has verified it
+   (`kyb_status` basic or full); before that no account can be added
+   (`no_company_name`). Only an owner may save the business profile
+   (`owner_only`), and once KYB is under way (anything but `REGISTERED` or
+   `REJECTED`) the legal name is fixed (`legal_name_locked`; support corrects
+   it). A change of name before that revokes every bank account and cancels
+   any withdrawal to them not yet sent. A bank account whose holder no longer
+   matches the current name is revoked when it is next used
+   (`destination_name_changed`).
 
    Names are folded as for funding sources, so `Sdn. Bhd.` equals
    `Sendirian Berhad`. The trading name is not accepted. When a check
@@ -76,8 +94,13 @@ wired. Only `isProductionRuntime` decides which adapter runs, so
 2. **The deposit address** (`POST /deposit-address {action: 'request'}`).
    The partner gives one fixed address per business. Splash refuses it when
    it is:
-   - an address Splash controls (operator, sponsor, treasury);
+   - an address Splash controls: the operator, the sponsor, the treasury,
+     the test recipient, and `FeeConfig`'s fee recipient and pending
+     recipient, read live (`splash_address`; `splash_addresses_unreadable`
+     when they cannot be read);
    - the wallet itself;
+   - another business's wallet as Splash knows it (the deposit watcher's
+     wallets and the wallets withdrawals came from; `business_wallet`);
    - an address another business already holds (`address_conflict`).
 3. **The test deposit** (`{action: 'test_deposit'}`). The owners sign a
    1 USDC plain transfer to that address. It is sponsored; the gasless lane
@@ -94,7 +117,8 @@ wired. Only `isProductionRuntime` decides which adapter runs, so
 
 ## Withdrawing
 
-- `POST /quotes {destinationId, amountMinor}` (owners only). The quote is
+- `POST /quotes {destinationId, amountMinor}` (an owner, or a staff member
+  about to ask the owners). The quote is
   given only once the wallet holds the principal plus Splash's fee outside
   every hold (`insufficient_funds`, `funds_on_hold`). It shows the
   partner's rate and receive amount, each partner fee as its own line, and
@@ -102,8 +126,11 @@ wired. Only `isProductionRuntime` decides which adapter runs, so
   cannot be read). `maxFeeMinor` is exactly the fee shown. Refused when
   local-currency payouts are outside the launch scope.
 - `POST / {destinationId, amountMinor, acceptedReceiveMinor, maxFeeMinor,
-  contentHash, walrusBlobId}` with `Idempotency-Key` (owners only). It is
-  refused when:
+  contentHash, walrusBlobId}` with `Idempotency-Key`. An owner or a staff
+  member (maker or approver) may ask; a viewer may not (Sky's decision:
+  staff may ask owners to approve). Asking opens the owners' signing request;
+  only their quorum signs. `acceptedReceiveMinor` is the least the owners
+  accept; it may be below the quote. It is refused when:
   - the fresh quote is worse than the accepted one (`quote_changed`, with
     the new quote);
   - the fee is above the one shown (`fee_above_shown`);
@@ -113,24 +140,59 @@ wired. Only `isProductionRuntime` decides which adapter runs, so
   1. A random payment reference is drawn. The intent id is derived from it
      as `create_for_wallet` will claim it: `derived_object` over
      `PaymentRef(payment_ref)` under splash_core's original package id
-     (`SPLASH_CORE_ORIGINAL_PACKAGE_ID`, else `SPLASH_CORE_PACKAGE_ID`).
-  2. The sealed account is opened, its commitment recomputed and compared
-     with the destination's `beneficiary_ref` (`beneficiary_mismatch`).
+     (`SPLASH_CORE_ORIGINAL_PACKAGE_ID`). Production requires it to be set
+     explicitly and refuses withdrawals without it (`no_core_package`).
+     Outside production `SPLASH_CORE_PACKAGE_ID` stands in. The derivation
+     is pinned by two Move tests: the id `create_for_wallet` gives equals
+     `derived_object::derive_address` of the account and reference, and a
+     fixed pair gives the value `withdrawalIntentId` gives.
+  2. The sealed account is opened (with the current key or a previous one),
+     its commitment recomputed and compared with the destination's
+     `beneficiary_ref` (`beneficiary_mismatch`).
   3. **The instruction goes to the partner first** (`createPayout`). It is
-     keyed by the intent id and the expected USDC amount, with the
-     receive amount, the beneficiary, purpose `INTC` and the business
-     wallet as the return address.
+     keyed by the intent id and the expected USDC amount, with the quoted
+     and least receive amounts, the deadline, the beneficiary, the
+     beneficiary salt (so the partner can recompute `beneficiary_ref` from
+     the account it pays), purpose `INTC` and the business wallet as the
+     return address. If the partner's answer is lost (anything but a clear
+     refusal), the instruction is reversed (`instruction_unconfirmed`) and
+     the withdrawal cancelled.
   4. The owners are asked to sign the composed PTB under purpose
      `withdrawal`. That purpose accepts only a kind 4 payout to the
      verified deposit address, carrying that `beneficiary_ref`, for that
-     amount, with `max_fee` the fee shown and `settle_by` the quote's
-     expiry. When the request cannot be opened (for example the dry run
+     amount, with `max_fee` the fee shown and `settle_by` the signing
+     deadline. The request carries what the signers are shown: bank code,
+     last four digits, holder, quoted and least receive amounts, rate and
+     deadline. When the request cannot be opened (for example the dry run
      fails), the instruction is reversed and the withdrawal cancelled.
-- When it executes, the withdrawal is `sent` and the digest is posted to the
-  partner. This runs on the signing layer's executed hook, and again on any
-  read until posted.
-- When the signing request expires, is cancelled or fails, the withdrawal is
-  `cancelled` and its instruction reversed.
+- Before each signature the server checks the withdrawal is still waiting,
+  its bank account and deposit address are still verified, and they are the
+  ones the bytes commit to (`withdrawal_changed` otherwise). Removing a bank
+  account cancels its withdrawals not yet sent: their requests close, and
+  their instructions are reversed.
+- When it executes, the withdrawal is `sent`. The executed transaction is
+  read, and the digest is posted to the partner only when its
+  `IntentCreated` event (under the original package id) names the
+  withdrawal's intent id. A mismatch is held (`settlement_hold =
+  intent_id_mismatch`), logged as an alert and never posted: ops must look.
+- Reads never call the partner. The sweep, `/api/cron/withdrawals` (every
+  five minutes, `CRON_SECRET`), posts digests not posted yet, reverses the
+  instruction and cancels the withdrawal when its signing request expired,
+  was cancelled or failed, and records or frees a test deposit whose request
+  closed.
+
+### The rate and the signing window
+
+The partner's quote holds five minutes; a multisig quorum, or owners in
+other time zones, cannot be held to that. So `settle_by` is the signing
+deadline, 24 hours (`WITHDRAWAL_SIGNING_WINDOW_MS`, the intent's lifetime),
+not the quote's expiry. The quote is a display figure. The owners accept a
+least receive amount (`acceptedReceiveMinor`); the partner is told it
+(`minReceiveMinor`) and the deadline. When the deposit lands, the partner
+converts at its rate then and pays at least that amount, or does not pay
+out and returns the USDC to the business wallet. Whether Hata and Fiuu
+accept this (or hold a rate for the window instead) is a question for their
+contracts.
 
 Statuses:
 - preparing → awaiting_signatures → sent → partner_received → paid_out;
@@ -156,8 +218,15 @@ first, inside a 5-minute window. The sandbox accepts a webhook only with
   - An event before the deposit is recorded answers 503, and the retry
     counts.
   - A failure asks the partner to return the USDC to the business wallet.
-  - A return counts only when the chain shows USDC back in the business
-    wallet.
+  - A return counts only when the chain shows the transaction sent by the
+    deposit address, it is not the withdrawal's own digest, and it puts
+    USDC back into the business wallet. A return digest closes one
+    withdrawal (and a unique index holds it). Only the whole amount closes
+    the withdrawal as `returned`, with `returned_minor`. A short return is
+    recorded (`returned_minor`, `return_short` in the trail) and the
+    withdrawal stays `failed` for ops. A return sent from a partner address
+    other than the deposit address is not accepted until the contracts name
+    one.
 - `test_deposit.received`: as above, in step 3 of setting up.
 
 ## The trail
@@ -166,14 +235,26 @@ first, inside a 5-minute window. The sandbox accepts a webhook only with
 records every destination, deposit-address and withdrawal change: who
 (a user, `system` or `partner:<id>`), what, and references only.
 
+## Key rotation
+
+`WITHDRAWAL_ACCOUNT_KEY` seals; `WITHDRAWAL_ACCOUNT_KEY_PREVIOUS`
+(comma-separated) only opens. To rotate: set the new key, move the old one
+to `_PREVIOUS`. A bank account opened with an old key is sealed again under
+the new one when it is next paid (`resealed` in the trail). Clear
+`_PREVIOUS` once nothing opens with it. Losing every key still strands the
+stored accounts; the owners then add them again.
+
 ## Open
 
 - The live Hata and Fiuu APIs, their webhook payloads and their deposit
-  networks, from their contracts.
-- A scheduled run that posts unposted digests. Today the post happens on the
-  executed hook and on every read.
-- Rotation of `WITHDRAWAL_ACCOUNT_KEY`. Today there is one key, and its loss
-  makes stored accounts unusable, so they are added again.
+  networks, from their contracts; whether they accept a least receive
+  amount over a 24-hour window; a partner return address, if returns do not
+  come from the deposit address.
+- `paid_out` is the partner's signed word (`bankRef` is stored); there is no
+  reconciliation against bank evidence yet.
+- No testnet dry run has compared a created intent with
+  `withdrawals.intent_id`; the Move tests pin the derivation, and the
+  executed transaction's event is checked before every post.
+- The UI for withdrawals (and its copy, accessibility and 390px layout) is
+  not built in this section.
 - §4.5 moves pdax, durianpay and cctp_wallet onto the interface.
-- Every withdrawal is owner-signed. Staff asking owners to withdraw is not
-  wired.
