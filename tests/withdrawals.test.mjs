@@ -179,7 +179,14 @@ async function setup({ env = ENV, overrides = {}, fee, intentEvents } = {}) {
       env: envOverride,
       now: w.signing.now(),
       db: w.db,
-      readTransaction: async (d) => chainTxs.get(d) ?? null,
+      // The chain as a webhook reads it: a withdrawal's own deposit sits at
+      // checkpoint 100, and anything a test puts on the chain lands later
+      // (checkpoint 200) unless the test names its own checkpoint.
+      readTransaction: async (d) => {
+        const tx = await chainRead(d);
+        if (!tx) return null;
+        return 'checkpoint' in tx ? tx : { ...tx, checkpoint: chainTxs.has(d) ? '200' : '100' };
+      },
       usdcType: USDC,
       adapter,
     });
@@ -1182,5 +1189,90 @@ test("a bank account is the business's only when the names match letter for lett
   assert.equal((await t.w.db.select().from(schema.withdrawalDestinations)).length, 0, 'nothing about the account was kept');
   const right = await addWithdrawalDestination(deps, 'u-founder', { ...ACME_BANK, holderName: 'ACME 中文 SDN BHD' });
   assert.equal(right.ok, true, JSON.stringify(right));
+  await t.w.client.close();
+});
+
+/* ── Review of the §4.4 returns, 25 Oct 2026 ─────────────────────────── */
+
+const returnedEvent = (t) => (wd, id, returnDigest) => t.webhook({ type: 'payout.status', eventId: id, partnerRef: wd.partnerRef, intentId: wd.intentId, status: 'returned', returnDigest, occurredAt: T0.toISOString() });
+const backTx = (t, d, from, amount, more = {}) => t.chainTxs.set(d, { digest: d, success: true, sender: from, balanceChanges: [{ address: t.wallet.address, coinType: USDC, amount }], ...more });
+
+test('a short return is counted for one withdrawal only, and a return older than the deposit counts for none', async () => {
+  const t = await setup();
+  const { destination, depositAddress } = await readyToWithdraw(t);
+  const ret = returnedEvent(t);
+  const a = await created(t, destination.id);
+  await signBoth(t, a.r.request);
+  const s = digest();
+  backTx(t, s, depositAddress.address, '400000000');
+  assert.equal((await ret(a.r.withdrawal, 'evt_short_a', s)).body.short, true);
+
+  // Another withdrawal, of exactly what came back, cannot claim the same digest.
+  const b = await created(t, destination.id, { amountMinor: '400000000' });
+  await signBoth(t, b.r.request);
+  const reuse = await ret(b.r.withdrawal, 'evt_reuse_s', s);
+  assert.equal(reuse.body.ignored, 'that return was already counted', JSON.stringify(reuse.body));
+  assert.equal((await getWithdrawal(t.deps(), b.r.withdrawal.id)).withdrawal.status, 'sent');
+  assert.equal((await getWithdrawal(t.deps(), a.r.withdrawal.id)).withdrawal.returnedMinor, '400000000');
+
+  // A transfer from the deposit address that came before this withdrawal's own deposit is no return of it.
+  const old = digest();
+  backTx(t, old, depositAddress.address, '400000000', { checkpoint: '50' });
+  const stale = await ret(b.r.withdrawal, 'evt_stale_old', old);
+  assert.match(String(stale.body.ignored), /before/, JSON.stringify(stale.body));
+  assert.equal((await getWithdrawal(t.deps(), b.r.withdrawal.id)).withdrawal.status, 'sent');
+  await t.w.client.close();
+});
+
+test('a return of more than a withdrawal sent closes none of it, and the withdrawal it belongs to still closes', async () => {
+  const t = await setup();
+  const { destination, depositAddress } = await readyToWithdraw(t);
+  const ret = returnedEvent(t);
+  const c = await created(t, destination.id);
+  await signBoth(t, c.r.request);
+  const d = await created(t, destination.id, { amountMinor: '200000000' });
+  await signBoth(t, d.r.request);
+  const x = digest();
+  backTx(t, x, depositAddress.address, '1000000000');
+  const wrong = await ret(d.r.withdrawal, 'evt_over_d', x);
+  assert.equal(wrong.status, 200);
+  assert.match(String(wrong.body.ignored), /more/, JSON.stringify(wrong.body));
+  assert.equal((await getWithdrawal(t.deps(), d.r.withdrawal.id)).withdrawal.status, 'sent');
+  const trail = await t.w.db.select().from(schema.withdrawalEvents);
+  assert.ok(trail.some((e) => e.action === 'return_over' && e.subjectId === d.r.withdrawal.id), 'ops see the over-return');
+  const right = await ret(c.r.withdrawal, 'evt_over_c', x);
+  assert.equal(right.body.ok, true, JSON.stringify(right.body));
+  assert.equal((await getWithdrawal(t.deps(), c.r.withdrawal.id)).withdrawal.status, 'returned');
+  await t.w.client.close();
+});
+
+test('a short return straight from sent asks the partner for the rest, and short returns add up to close the withdrawal', async () => {
+  const t = await setup();
+  const { destination, depositAddress } = await readyToWithdraw(t);
+  const ret = returnedEvent(t);
+  const one = await created(t, destination.id);
+  await signBoth(t, one.r.request);
+  const s1 = digest();
+  backTx(t, s1, depositAddress.address, '400000000');
+  assert.equal((await ret(one.r.withdrawal, 'evt_sum_s1', s1)).body.short, true);
+  assert.equal(t.partner.called('returnOrReverse').length, 1, 'the rest is asked back');
+  const trail = await t.w.db.select().from(schema.withdrawalEvents);
+  assert.ok(trail.some((e) => e.action === 'return_requested' && e.subjectId === one.r.withdrawal.id));
+
+  // A replay of the first short return is counted once.
+  const again = await ret(one.r.withdrawal, 'evt_sum_s1', s1);
+  assert.equal(again.body.duplicate, true, JSON.stringify(again.body));
+  const shorts = (await t.w.db.select().from(schema.withdrawalEvents)).filter((e) => e.action === 'return_short' && e.subjectId === one.r.withdrawal.id);
+  assert.equal(shorts.length, 1);
+  assert.equal(t.partner.called('returnOrReverse').length, 1);
+
+  // The rest comes back: the two add up to the whole, and it closes.
+  const s2 = digest();
+  backTx(t, s2, depositAddress.address, '600000000');
+  const done = await ret(one.r.withdrawal, 'evt_sum_s2', s2);
+  assert.equal(done.body.ok, true, JSON.stringify(done.body));
+  const closed = (await getWithdrawal(t.deps(), one.r.withdrawal.id)).withdrawal;
+  assert.equal(closed.status, 'returned');
+  assert.equal(closed.returnedMinor, '1000000000');
   await t.w.client.close();
 });
