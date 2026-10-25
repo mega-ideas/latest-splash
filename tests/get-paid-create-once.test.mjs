@@ -138,7 +138,8 @@ test('two creates racing on one key leave one invoice', async () => {
 test('the create route needs a create key, checks it before any document work, and answers a replay and a conflict', async () => {
   const route = await source('app/api/invoices/route.ts');
   assert.match(route, /createKey/, 'the body carries the create key');
-  assert.match(route, /isCreateKey/, 'and it must be a UUID');
+  assert.match(await source('lib/invoices/create-input.ts'), /isCreateKey/, 'and it must be a UUID (the schema moved to lib/invoices/create-input.ts)');
+  assert.match(route, /createInvoiceSchema/);
   assert.match(route, /createInvoiceOnce/, 'the invoice is written once per key');
   assert.match(route, /create_key_reused|CREATE_KEY_REUSED/, 'the same key with other details is a 409 the client can read');
   assert.match(route, /status: 409/);
@@ -194,7 +195,7 @@ test('the create key and fingerprint stay on the server', async () => {
 
 test('a 409 names the invoice already made under the key, and the dialog offers it', async () => {
   const route = await source('app/api/invoices/route.ts');
-  assert.match(route, /function keyReused\(existing/, 'the 409 carries the invoice on file');
+  assert.match(route, /function keyReused\(orgId: string, existing/, 'the 409 carries the invoice on file');
   assert.match(route, /existing:\s*existing\s*\?\s*\{[^}]*payLinkSlug/, 'with its pay link');
   assert.match(route, /readInvoiceByCreateKey\(orgId/, 'read for the session org only');
   const dialog = await source('components/invoices/CreateInvoiceDialog.tsx');

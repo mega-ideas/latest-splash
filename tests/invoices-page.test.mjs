@@ -82,7 +82,7 @@ test('Get paid: create with inline errors in a real dialog, a pay link, the stat
   assert.match(getPaid, /INVOICE_STATUS_LABEL/);
   assert.match(getPaid, /Mark as paid/);
   assert.match(getPaid, /Receipt/);
-  assert.match(getPaid, /suiScanTxUrlOn\('mainnet'/);
+  assert.match(getPaid, /suiScanTxUrlOn\(STABLECOIN_NETWORK/, 'the network the USDC was read on, one constant');
   assert.doesNotMatch(getPaid + dialog, /Splash Workspace/, 'the issuer is the business, not a placeholder');
 });
 
