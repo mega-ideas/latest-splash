@@ -40,11 +40,13 @@ export async function readWithdrawalTransaction(digest: string): Promise<Withdra
     balanceChanges?: Array<{ coinType: string; address: string; amount: string }>;
     transaction?: { sender?: string | null };
     events?: Array<{ packageId: string; eventType: string; json: Record<string, unknown> | null }>;
+    checkpoint?: string | null;
   };
   return {
     digest: t.digest ?? digest,
     success: t.status.success,
     sender: t.transaction?.sender ?? null,
+    checkpoint: t.checkpoint ?? null,
     balanceChanges: t.balanceChanges ?? [],
     events: (t.events ?? []).map((e) => ({ packageId: e.packageId, eventType: e.eventType, json: e.json })),
   };

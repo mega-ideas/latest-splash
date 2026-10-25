@@ -96,6 +96,8 @@ export type WithdrawalChainTx = {
   success: boolean;
   sender: string | null;
   balanceChanges: Array<{ address: string; coinType: string; amount: string }>;
+  /** The checkpoint that holds it; null or absent until it is checkpointed. A return must come after its payout's deposit. */
+  checkpoint?: string | null;
   /** The transaction's events (an executed withdrawal's IntentCreated names its intent id). */
   events?: Array<{ packageId?: string; eventType: string; json: unknown }>;
 };
@@ -1323,6 +1325,12 @@ export function sameAddress(a: string | null | undefined, b: string | null | und
   }
 }
 
+/** The checkpoint a transaction sits in, or null when it is not checkpointed (or unreadable). */
+function checkpointOf(tx: WithdrawalChainTx | null): bigint | null {
+  if (!tx || tx.checkpoint === null || tx.checkpoint === undefined || !/^\d+$/.test(tx.checkpoint)) return null;
+  return BigInt(tx.checkpoint);
+}
+
 function usdcChange(tx: WithdrawalChainTx, address: string, usdcType: string): bigint {
   const t = normalizeStructTag(usdcType);
   let total = 0n;
@@ -1438,24 +1446,67 @@ export async function handlePayoutWebhook(input: WebhookInput): Promise<WebhookA
       await store.recordWithdrawalEvent(input.db, { orgId: row.orgId, subject: 'withdrawal', subjectId: row.id, actor: `partner:${adapter.id}`, action: 'return_refused', detail: { reason: 'the chain does not show USDC from the deposit address back in the business wallet', returnDigest: event.returnDigest }, at });
       return { status: 200, body: { ignored: 'the chain does not show the return' } };
     }
-    const usedBy = await store.withdrawalByReturnDigest(input.db, event.returnDigest as string);
+    const returnDigest = event.returnDigest as string;
+    const refuse = async (reason: string, ignored: string, action = 'return_refused', more: Record<string, unknown> = {}): Promise<WebhookAnswer> => {
+      await store.recordWithdrawalEvent(input.db, { orgId: row.orgId, subject: 'withdrawal', subjectId: row.id, actor: `partner:${adapter.id}`, action, detail: { reason, returnDigest, ...more }, at });
+      return { status: 200, body: { ignored } };
+    };
+    // A digest that closed a payout before every return was claimed (0043).
+    const usedBy = await store.withdrawalByReturnDigest(input.db, returnDigest);
     if (usedBy && usedBy.id !== row.id) {
       await store.releasePartnerEvent(input.db, adapter.id, event.eventId);
-      await store.recordWithdrawalEvent(input.db, { orgId: row.orgId, subject: 'withdrawal', subjectId: row.id, actor: `partner:${adapter.id}`, action: 'return_refused', detail: { reason: 'that return digest already closed another withdrawal', returnDigest: event.returnDigest }, at });
-      return { status: 200, body: { ignored: 'that return was already counted' } };
+      return refuse('that return digest already closed another withdrawal', 'that return was already counted');
     }
-    if (credited < row.amountMinor) {
-      // Short: recorded, and left open for ops; never closed as returned.
+    // The deposit address is shared by every payout of this business to this
+    // partner, so the chain cannot say which payout a transfer returns. It can
+    // say the transfer came after this payout's own deposit: an older one (a
+    // refund of the test deposit, a return of an earlier payout) is not it.
+    let deposit: WithdrawalChainTx | null = null;
+    try {
+      deposit = row.suiDigest ? await input.readTransaction(row.suiDigest) : null;
+    } catch {
+      deposit = null;
+    }
+    const depositCheckpoint = checkpointOf(deposit);
+    const returnCheckpoint = checkpointOf(tx);
+    if (depositCheckpoint === null || returnCheckpoint === null) {
       await store.releasePartnerEvent(input.db, adapter.id, event.eventId);
-      const shortSet = { returnedMinor: credited, failure: `short return: ${credited} of ${row.amountMinor} USDC minor units came back`, updatedAt: at };
-      // Straight back with no failure first: it did not pay out, so it is failed (forward only), and ops look at it.
+      return { status: 503, body: { error: 'the chain has not checkpointed the deposit or the return yet; retry' } };
+    }
+    if (returnCheckpoint <= depositCheckpoint) {
+      return refuse("that transfer came before this payout's deposit", 'that transfer came before the deposit', 'return_refused', { returnCheckpoint: returnCheckpoint.toString(), depositCheckpoint: depositCheckpoint.toString() });
+    }
+    // Every return digest, short or whole, counts for one payout only.
+    const claim = await store.claimReturn(input.db, { digest: returnDigest, withdrawalId: row.id, orgId: row.orgId, creditedMinor: credited, checkpoint: returnCheckpoint, eventId: event.eventId, at });
+    if (!claim.claimed) {
+      if (claim.heldBy === row.id) return { status: 200, body: { duplicate: true } };
+      await store.releasePartnerEvent(input.db, adapter.id, event.eventId);
+      return refuse('that return digest is already counted for another payout', 'that return was already counted');
+    }
+    const total = await store.returnedTotal(input.db, row.orgId, row.id);
+    if (total > row.amountMinor) {
+      // Nothing above what the payout sent is taken for it: an over-return is
+      // some other payout's money, or the partner's mistake, and ops look at
+      // it. The claim is given back so the payout it belongs to can take it.
+      await store.releaseReturn(input.db, row.orgId, row.id, returnDigest);
+      return refuse('more came back than this payout sent', 'more came back than this payout sent; ops will look at it', 'return_over', { creditedMinor: credited.toString(), alreadyReturnedMinor: (total - credited).toString(), amountMinor: row.amountMinor.toString() });
+    }
+    if (total < row.amountMinor) {
+      // Short: recorded, and left failed for ops; it closes as returned only when the returns add up.
+      const shortSet = { returnedMinor: total, failure: `short return: ${total} of ${row.amountMinor} USDC minor units came back`, updatedAt: at };
+      // Straight back with no failure first: it did not pay out, so it is failed (forward only).
+      const movedToFailed = from === 'failed' ? null : await store.moveWithdrawal(input.db, row.orgId, row.id, [from], { ...shortSet, status: 'failed' });
       if (from === 'failed') await store.patchWithdrawal(input.db, row.orgId, row.id, shortSet);
-      else await store.moveWithdrawal(input.db, row.orgId, row.id, [from], { ...shortSet, status: 'failed' });
-      await store.recordWithdrawalEvent(input.db, { orgId: row.orgId, subject: 'withdrawal', subjectId: row.id, actor: `partner:${adapter.id}`, action: 'return_short', detail: { returnDigest: event.returnDigest, returnedMinor: credited.toString(), amountMinor: row.amountMinor.toString() }, at });
+      await store.recordWithdrawalEvent(input.db, { orgId: row.orgId, subject: 'withdrawal', subjectId: row.id, actor: `partner:${adapter.id}`, action: 'return_short', detail: { eventId: event.eventId, returnDigest, creditedMinor: credited.toString(), returnedMinor: total.toString(), amountMinor: row.amountMinor.toString() }, at });
+      if (movedToFailed && row.partnerRef) {
+        // The failed path asks for the USDC back; so does this one, for the rest.
+        const accepted = await reverseInstruction({ now: () => at }, adapter, { intentId: row.intentId, partnerRef: row.partnerRef, returnAddress: row.walletAddress }, 'short_return');
+        await store.recordWithdrawalEvent(input.db, { orgId: row.orgId, subject: 'withdrawal', subjectId: row.id, actor: 'system', action: 'return_requested', detail: { accepted, returnAddress: row.walletAddress, outstandingMinor: (row.amountMinor - total).toString() }, at });
+      }
       return { status: 200, body: { ok: true, short: true } };
     }
-    set.returnDigest = event.returnDigest;
-    set.returnedMinor = credited;
+    set.returnDigest = returnDigest;
+    set.returnedMinor = total;
   }
   let moved: store.WithdrawalRow | null;
   try {
@@ -1463,6 +1514,7 @@ export async function handlePayoutWebhook(input: WebhookInput): Promise<WebhookA
   } catch (error) {
     // The unique index on return_digest: another withdrawal took this return meanwhile.
     if (set.returnDigest) {
+      await store.releaseReturn(input.db, row.orgId, row.id, set.returnDigest);
       await store.releasePartnerEvent(input.db, adapter.id, event.eventId);
       return { status: 200, body: { ignored: 'that return was already counted' } };
     }

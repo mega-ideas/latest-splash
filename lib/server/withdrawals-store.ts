@@ -10,7 +10,7 @@ import { randomUUID } from 'node:crypto';
 
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 
-import { partnerDepositAddresses, payoutPartnerEvents, walletDepositSync, withdrawalDestinations, withdrawalEvents, withdrawals } from '../db/schema.ts';
+import { partnerDepositAddresses, payoutPartnerEvents, walletDepositSync, withdrawalDestinations, withdrawalEvents, withdrawalReturns, withdrawals } from '../db/schema.ts';
 import type { WithdrawalStatus } from '../payouts/withdrawal-rules.ts';
 import type { DrizzleDb } from './wallet-signing-store.ts';
 
@@ -251,6 +251,37 @@ export async function withdrawalForWebhook(db: DrizzleDb, partner: string, inten
 export async function withdrawalByReturnDigest(db: DrizzleDb, digest: string): Promise<WithdrawalRow | null> {
   const [row] = await db.select().from(withdrawals).where(eq(withdrawals.returnDigest, digest)).limit(1);
   return row ?? null;
+}
+
+export type ReturnClaim = { digest: string; withdrawalId: string; orgId: string; creditedMinor: bigint; checkpoint: bigint; eventId: string; at: Date };
+
+/**
+ * Claim a return digest for one payout. `claimed` when this call took it;
+ * otherwise the payout that holds it (this one, on a replay, or another).
+ */
+export async function claimReturn(db: DrizzleDb, c: ReturnClaim): Promise<{ claimed: true } | { claimed: false; heldBy: string }> {
+  const [row] = await db
+    .insert(withdrawalReturns)
+    .values({ digest: c.digest, withdrawalId: c.withdrawalId, orgId: c.orgId, creditedMinor: c.creditedMinor, checkpoint: c.checkpoint, eventId: c.eventId, createdAt: c.at })
+    .onConflictDoNothing()
+    .returning();
+  if (row) return { claimed: true };
+  const [held] = await db.select({ withdrawalId: withdrawalReturns.withdrawalId }).from(withdrawalReturns).where(eq(withdrawalReturns.digest, c.digest)).limit(1);
+  return { claimed: false, heldBy: held?.withdrawalId ?? '' };
+}
+
+/** Give a claim back (the sum would have passed what the payout sent). */
+export async function releaseReturn(db: DrizzleDb, orgId: string, withdrawalId: string, digest: string): Promise<void> {
+  await db.delete(withdrawalReturns).where(and(eq(withdrawalReturns.orgId, orgId), eq(withdrawalReturns.withdrawalId, withdrawalId), eq(withdrawalReturns.digest, digest)));
+}
+
+/** What every counted return of one payout put back in the wallet. */
+export async function returnedTotal(db: DrizzleDb, orgId: string, withdrawalId: string): Promise<bigint> {
+  const rows = await db
+    .select({ credited: withdrawalReturns.creditedMinor })
+    .from(withdrawalReturns)
+    .where(and(eq(withdrawalReturns.orgId, orgId), eq(withdrawalReturns.withdrawalId, withdrawalId)));
+  return rows.reduce((sum, r) => sum + r.credited, 0n);
 }
 
 /**

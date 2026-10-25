@@ -149,9 +149,17 @@ async function setup({ env = ENV, overrides = {}, debtor = { party: DEBTOR, miss
   w.signing.onExecuted = async (request) => W.withdrawalSigningExecuted(settlement, request);
   w.signing.beforeSign = (request) => W.withdrawalBeforeSign({ db: w.db }, request);
   const { sandboxWebhookSecretFor } = await import('../lib/payouts/partner.ts');
+  // The chain as a webhook reads it: a payout's own deposit sits at checkpoint
+  // 100, anything a test adds at 200 unless it names its own (a return must
+  // come after the deposit it returns).
+  const checkpointed = async (d) => {
+    const tx = await chainRead(d);
+    if (!tx) return null;
+    return 'checkpoint' in tx ? tx : { ...tx, checkpoint: chainTxs.has(d) ? '200' : '100' };
+  };
   const webhook = (partner, body, { at = w.signing.now(), secret = sandboxWebhookSecretFor ? sandboxWebhookSecretFor(env, partner) : SECRET } = {}) => {
     const rawBody = JSON.stringify(body);
-    return W.handlePayoutWebhook({ partner, rawBody, signature: signWebhook(rawBody, secret, at), env, now: w.signing.now(), db: w.db, readTransaction: async (d) => chainTxs.get(d) ?? null, usdcType: USDC, adapter: partners[partner] });
+    return W.handlePayoutWebhook({ partner, rawBody, signature: signWebhook(rawBody, secret, at), env, now: w.signing.now(), db: w.db, readTransaction: checkpointed, usdcType: USDC, adapter: partners[partner] });
   };
   const reconcile = () => W.reconcileWithdrawals(settlement);
   return { w, wallet, members, partners, deps, chainTxs, webhook, reconcile };

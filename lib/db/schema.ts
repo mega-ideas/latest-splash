@@ -1981,6 +1981,23 @@ export const withdrawals = pgTable('withdrawals', {
   index('withdrawals_org_kind_idx').on(table.orgId, table.kind, table.status),
 ]);
 
+/**
+ * Every on-chain return counted for a withdrawal or supplier payout, short or
+ * whole (0043). A digest counts for one payout only, the first that claims it;
+ * a payout's returned amount is the sum of its rows.
+ */
+export const withdrawalReturns = pgTable('withdrawal_returns', {
+  digest: text('digest').primaryKey(),
+  withdrawalId: text('withdrawal_id').notNull().references(() => withdrawals.id),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  creditedMinor: bigint('credited_minor', { mode: 'bigint' }).notNull(),
+  checkpoint: bigint('checkpoint', { mode: 'bigint' }).notNull(),
+  eventId: text('event_id').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index('withdrawal_returns_withdrawal_idx').on(table.withdrawalId),
+]);
+
 /** Every withdrawal, destination and deposit-address change, append-only (0040). */
 export const withdrawalEvents = pgTable('withdrawal_events', {
   id: text('id').primaryKey(),
