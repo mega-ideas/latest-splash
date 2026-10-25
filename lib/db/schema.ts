@@ -2270,6 +2270,110 @@ export const spendRuleAlerts = pgTable('spend_rule_alerts', {
   index('spend_rule_alerts_org_active_idx').on(table.orgId, table.activeUntil),
 ]);
 
+/**
+ * Subscription billing (A1 §6; migration 0052), behind
+ * FEATURE_SUBSCRIPTION_BILLING, off. lib/server/subscription-billing.ts is
+ * the only reader and writer, and nothing reaches it while the flag is off.
+ */
+export const subscriptionPlans = pgTable('subscription_plans', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  priceMinor: bigint('price_minor', { mode: 'bigint' }).notNull(),
+  /** calendar_month_utc, the only interval. */
+  interval: text('interval').notNull().default('calendar_month_utc'),
+  termMonths: integer('term_months').notNull().default(12),
+  lifetimeCapMinor: bigint('lifetime_cap_minor', { mode: 'bigint' }),
+  active: boolean('active').notNull().default(true),
+  ...timestamps,
+});
+
+export const subscriptions = pgTable('subscriptions', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  planId: text('plan_id').notNull().references(() => subscriptionPlans.id),
+  /** pending | active | grace | lapsed | cancelled | replaced | ended | abandoned */
+  status: text('status').notNull(),
+  priceMinor: bigint('price_minor', { mode: 'bigint' }).notNull(),
+  lifetimeCapMinor: bigint('lifetime_cap_minor', { mode: 'bigint' }),
+  wallet: text('wallet').notNull(),
+  financeAddress: text('finance_address').notNull(),
+  allowanceName: text('allowance_name').notNull(),
+  allowanceId: text('allowance_id'),
+  allowanceCapId: text('allowance_cap_id'),
+  termStart: timestamp('term_start', { withTimezone: true }).notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  graceUntil: timestamp('grace_until', { withTimezone: true }),
+  signingRequestId: text('signing_request_id'),
+  cancelRequestId: text('cancel_request_id'),
+  replacesId: text('replaces_id'),
+  ...timestamps,
+});
+
+export const subscriptionPulls = pgTable('subscription_pulls', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  subscriptionId: text('subscription_id').notNull().references(() => subscriptions.id),
+  /** YYYY-MM, the calendar month (UTC) billed. Unique per org. */
+  period: text('period').notNull(),
+  amountMinor: bigint('amount_minor', { mode: 'bigint' }).notNull(),
+  /** awaiting_signature | submitted | succeeded | failed */
+  status: text('status').notNull(),
+  txBytes: text('tx_bytes').notNull(),
+  txDigest: text('tx_digest').notNull(),
+  attempts: integer('attempts').notNull().default(1),
+  failureReason: text('failure_reason'),
+  succeededAt: timestamp('succeeded_at', { withTimezone: true }),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('subscription_pulls_org_period_unique').on(table.orgId, table.period),
+  uniqueIndex('subscription_pulls_digest_unique').on(table.txDigest),
+]);
+
+export const subscriptionInvoices = pgTable('subscription_invoices', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  pullId: text('pull_id').notNull().references(() => subscriptionPulls.id),
+  number: text('number').notNull(),
+  period: text('period').notNull(),
+  planName: text('plan_name').notNull(),
+  amountMinor: bigint('amount_minor', { mode: 'bigint' }).notNull(),
+  issuedAt: timestamp('issued_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex('subscription_invoices_pull_unique').on(table.pullId),
+  uniqueIndex('subscription_invoices_number_unique').on(table.number),
+]);
+
+export const subscriptionReceipts = pgTable('subscription_receipts', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  pullId: text('pull_id').notNull().references(() => subscriptionPulls.id),
+  invoiceId: text('invoice_id').notNull().references(() => subscriptionInvoices.id),
+  suiDigest: text('sui_digest').notNull(),
+  amountMinor: bigint('amount_minor', { mode: 'bigint' }).notNull(),
+  paidAt: timestamp('paid_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex('subscription_receipts_pull_unique').on(table.pullId),
+  uniqueIndex('subscription_receipts_digest_unique').on(table.suiDigest),
+]);
+
+export const subscriptionNotices = pgTable('subscription_notices', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  pullId: text('pull_id').notNull().references(() => subscriptionPulls.id),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  /** pull_failed */
+  kind: text('kind').notNull(),
+  /** sending | sent | failed */
+  status: text('status').notNull(),
+  attempts: integer('attempts').notNull().default(1),
+  error: text('error'),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('subscription_notices_pull_user_kind_unique').on(table.pullId, table.userId, table.kind),
+]);
+
 /** One owner emailed about one near-threshold alert; claimed before it is sent. */
 export const spendRuleAlertDeliveries = pgTable('spend_rule_alert_deliveries', {
   id: text('id').primaryKey(),

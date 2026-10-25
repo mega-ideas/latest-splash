@@ -319,12 +319,15 @@ each and whom `FeeConfig` pays.
 
 ## Phase 2, not built
 
-- **Subscription billing**, behind `FEATURE_SUBSCRIPTION_BILLING`, off. No
-  code for it exists yet; the flag is not declared. A1 §6 describes it: plans
-  in the database, a direct `0x2::allowance` from the business wallet to the
-  finance multisig with a monthly rate limit, at most one pull per calendar
-  month, invoices and receipts, a grace period on a failed pull, and payments
-  never blocked by billing.
+- **Subscription billing: built, behind `FEATURE_SUBSCRIPTION_BILLING`, off
+  (Phase 2).** `docs/v2/phase2-subscription-billing.md`: plans in the
+  database, a direct `0x2::allowance` from the business wallet to the finance
+  multisig (FeeConfig's proven fee recipient) with `monthly_rate_limit(price)`
+  and the end of term as expiry, at most one pull per business per calendar
+  month (UTC) signed by the finance multisig, an invoice and a receipt per
+  pull, grace and an owner notice on a failed pull, cancel = revoke, and no
+  payment ever blocked by billing. Nothing is reachable while the flag is
+  off.
 - **Owner alerts for fee proposals: built (Phase 2).**
   `/api/cron/governance-alerts` reads the canonical `FeeConfig`'s state
   with the wrapper and the `ComplianceConfig` (one GraphQL query;
@@ -341,7 +344,12 @@ each and whom `FeeConfig` pays.
   (`docs/v2/phase2-spending-rules.md`, "Near-threshold alerts"). The
   threshold itself is enforced on chain over a running total
   (`docs/v2/phase1-move-design.md`, R5).
-- **The partner payout-instruction API**, keyed by the intent id as the
-  idempotency key. It must build the instruction strictly from the intent's
-  `beneficiary_ref` and refuse when they differ.
+- **The partner payout-instruction API: built in §4.5**
+  (`docs/v2/phase2-payout-partners.md`). The instruction reaches the partner
+  before any deposit, keyed by the intent id (the idempotency key) and the
+  expected amount; a retry with another amount, address, account, rate or
+  message is refused (`instruction_conflict`); it is built from the sealed
+  account whose commitment matches the intent's `beneficiary_ref`; the Sui
+  digest is posted after settlement, only once the chain shows the
+  instructed intent.
 - **KYT attribution** of exchange addresses tagged as wallets.

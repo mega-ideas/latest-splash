@@ -180,7 +180,8 @@ new build refuses to install or start on the old runtime and environment.
    2): it reads every business's spending rules from the chain and emails
    that business's owners about near-threshold patterns (detective only).
    It answers 502 without a database or when any business's rules could not
-   be read.
+   be read. Leave `https://<domain>/api/cron/billing` unscheduled while
+   `FEATURE_SUBSCRIPTION_BILLING` is off (it answers 404).
    Schedule `https://<domain>/api/cron/wallet-signing` every five minutes
    (v2 §4.1): it closes Business Splash Wallet signature requests past their
    expiry and clears the partial signatures they held, and reads on chain

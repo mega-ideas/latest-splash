@@ -290,6 +290,12 @@ export async function liveWalletContext(orgId: string): Promise<{ ok: true; ctx:
       const settlement = withdrawalSettlementDeps(db);
       if (settlement) await withdrawalSigningExecuted(settlement, request);
     }
+    if (request.purpose === 'subscription') {
+      // A1 §6: the billing allowance granted, changed or revoked. Requests of
+      // this purpose exist only once billing was switched on.
+      const [{ continueBillingSteps }, { liveBillingWallet }] = await Promise.all([import('@/lib/server/subscription-billing'), import('@/lib/server/subscription-billing-deps')]);
+      await continueBillingSteps({ db }, liveBillingWallet(ctx), request);
+    }
     if (request.purpose === 'spend_policy') {
       // A new policy opened as part of reissuing the rules after a rotation
       // is followed by the reissue itself (§4.2).

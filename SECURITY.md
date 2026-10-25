@@ -30,6 +30,46 @@ The remaining four modules (`smart_treasury`, `payment_intent`, `audit_anchor`, 
 
 ---
 
+## v2 Phase 2 carried items — fee alerts, near-threshold alerts, subscription billing — 2026-10-25
+
+Designs: `docs/v2/fees.md` (Phase 2 list), `docs/v2/phase2-spending-rules.md`
+("Near-threshold alerts"), `docs/v2/phase2-subscription-billing.md`. Tests:
+`tests/fee-governance-alerts.test.mjs`, `tests/near-threshold-alerts.test.mjs`,
+`tests/subscription-billing.test.mjs`. Migrations 0050 to 0052.
+
+- **Fee proposals alert every owner.** The governance cron reads the
+  canonical `FeeConfig` by state (pending schedules, pending recipient), type
+  checked against core's original package and shared; see the v2 Phase 1
+  section below. `SPLASH_FEE_CONFIG_ID` is required.
+- **Near-threshold alerts are detective only.** They block nothing: a staff
+  member can build a payment alone. Each business's rules are read with its
+  own context; an alert is recorded and emailed per business, to that
+  business's owners only, once (claimed before sending). The owners' route
+  reads the session's org only.
+- **Subscription billing is off** (`FEATURE_SUBSCRIPTION_BILLING`). While
+  off, every billing route and the cron answer 404 before reading a session
+  or the database; only a live plan can still be cancelled. No payment path
+  imports billing (a test walks `lib/`, `app/` and `components/`).
+- **The wallet reader gained one plain-allowance shape, gated.**
+  `allowance::new` is understood only when the server sets
+  `expect.billing`: USDC, named `splash-billing:…`, to exactly the finance
+  multisig, with an end of term and a calendar-month limit; a billing revoke
+  only for an allowance the server read as this wallet's. The `subscription`
+  purpose requires the bytes to carry exactly the plan's price, term, name and
+  lifetime cap. Without `expect.billing` it is refused as before, and the
+  spending-rule purposes never accept it.
+- **Who can draw.** The finance multisig only, and only while it is
+  `FeeConfig`'s fee recipient on chain (proven a multisig no single key signs
+  for); never the operator. At most the plan price per civil month (the
+  chain's `monthly_rate_limit`), and at most one pull per business per
+  calendar month (UTC) by a unique index. The pull is signed by the finance
+  multisig's members; the server builds, describes and stores the exact
+  bytes, and never signs them. The AllowanceCap stays with the business
+  wallet; revoking it stops billing at once.
+- **Residual.** A finance multisig quorum could sign a pull Splash did not
+  build; the chain still caps it at the plan price per month under that
+  allowance, and only until the wallet revokes it.
+
 ## v2 Phase 2 §4.8 — Zeke's rules — 2026-10-25
 
 Design: `docs/v2/phase2-zeke.md`. Tests: `tests/zeke-rules.test.mjs`.

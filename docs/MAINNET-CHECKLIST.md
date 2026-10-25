@@ -148,6 +148,11 @@ procedure in [`docs/UPGRADE-POLICY.md`](UPGRADE-POLICY.md).
       `SPLASH_OPS_CAP_ID`, `SPLASH_OPS_ADDRESS` (blank: the governance
       multisig) and `SPLASH_FINANCE_ADDRESS`; unset, those checks are
       reported skipped, never passed.
+- [ ] `FEATURE_SUBSCRIPTION_BILLING` is **unset or `false`** (A1 §6: built,
+      not enabled). `/api/cron/billing` is not scheduled. Before it is ever
+      enabled: `SPLASH_FINANCE_ADDRESS` is the finance multisig and equals
+      `FeeConfig`'s applied fee recipient, plans are seeded, and a testnet
+      subscribe, pull and revoke has run.
 - [ ] The near-threshold alert cron (`/api/cron/spend-rule-alerts`) is
       scheduled hourly with `CRON_SECRET`, and answers 200 (a 502 lists the
       businesses whose spending rules could not be read).

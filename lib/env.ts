@@ -392,6 +392,15 @@ export const envSchema = z.object({
      airwallex.ts, lib/funding/registry.ts. */
   CARD_FUNDING_ENABLED: flag('false'),
   FEATURE_DUAL_FUNDING: flag('true'),
+  /* Subscription billing (Amendment A1 §6; lib/server/subscription-billing.ts).
+     OFF: built and tested, not enabled. While off, every billing route and
+     the billing cron answer 404 and nothing reads or writes the billing
+     tables; a business with a live plan can still cancel it. No payment ever
+     waits on billing. SPLASH_FINANCE_ADDRESS is the Splash finance multisig,
+     the only spender a billing allowance may name, and only while it is the
+     on-chain FeeConfig's fee recipient (a proven multisig). */
+  FEATURE_SUBSCRIPTION_BILLING: flag('false'),
+  SPLASH_FINANCE_ADDRESS: suiAddress,
   CARD_FUNDING_SURCHARGE_BPS: int(290),
   STRIPE_SECRET_KEY: optional,
   AIRWALLEX_API_KEY: optional,

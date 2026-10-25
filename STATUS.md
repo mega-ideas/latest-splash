@@ -213,9 +213,9 @@ revision R5 of [`docs/v2/phase1-move-design.md`](docs/v2/phase1-move-design.md).
   payer and recipient (decision 4), and partner deposit addresses are fixed
   per business and paid only as bank payouts (decision 2).
 - **Gates.** `npm run lint` chains fourteen `check:*` scripts, `check:fees`
-  among them. Phase 2: subscription billing (`FEATURE_SUBSCRIPTION_BILLING`,
-  not built), owner alerts for fee proposals, near-threshold alerts, and the
-  partner payout-instruction API.
+  among them. Phase 2 (built 25 Oct): owner alerts for fee proposals,
+  near-threshold alerts, the partner payout-instruction API (§4.5), and
+  subscription billing behind `FEATURE_SUBSCRIPTION_BILLING`, which is off.
 - **Testnet proof.** `experiments/v2-phase1/testnet-e2e.mjs` proves fees off
   on day one and proposes a finance multisig as recipient; on day two, once
   it is applied, it runs a wallet payment and a 99 USDC bank payout with the
