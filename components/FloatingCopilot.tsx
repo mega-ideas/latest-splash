@@ -37,7 +37,8 @@ import ZekeGreeting, { type ZekeGreetingChip } from './oxwal/ZekeGreeting';
  * With a greeting that says what is waiting, from the workspace's own desk
  * snapshot (GET /api/oxwal/desk), and asks what to look at. Its suggestions
  * are inside that first message (v2 brief 5.3), not a fixed row of buttons.
- * The fixed "Reads state · prepares proposals · cannot send" strip is gone:
+ * The fixed strip under the header that listed what Zeke reads, prepares and
+ * cannot do is gone:
  * the limit is said in the conversation instead, in the greeting itself
  * (ZEKE_LIMIT in lib/agent/zeke-desk.ts), so it is the first thing anyone
  * reads before asking the panel to pay someone.
