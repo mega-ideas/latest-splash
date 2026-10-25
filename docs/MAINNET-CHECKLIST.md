@@ -201,6 +201,16 @@ procedure in [`docs/UPGRADE-POLICY.md`](UPGRADE-POLICY.md).
       once by a test deposit and bound to its beneficiaries by the business
       wallet. Each partner still confirms it can work that way, and on which
       networks it deposits.
+- [ ] Withdrawals (v2 §4.4, `docs/v2/phase2-withdrawals.md`): set
+      `WITHDRAWAL_ACCOUNT_KEY` (random, at least 32 characters, kept like any
+      other secret; losing it makes the stored bank accounts unusable), and
+      `SPLASH_CORE_ORIGINAL_PACKAGE_ID` once splash_core has been upgraded.
+      The Hata and Fiuu credentials (`HATA_API_KEY`, `HATA_WEBHOOK_SECRET`,
+      `FIUU_MERCHANT_ID`, `FIUU_VERIFY_KEY`) are set only once both contracts
+      are signed and the adapter is wired. Each partner's deposit address is
+      added to the on-chain partner registry (`OpsCap`), or a kind 4 payout
+      to it aborts. `PAYOUT_SANDBOX_WEBHOOKS_ENABLED` stays off in
+      production.
 
 ## Shipped (in review)
 - [x] W9.0 type & color discipline · W9.1 quote comparison card ·

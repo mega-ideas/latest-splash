@@ -30,6 +30,58 @@ The remaining four modules (`smart_treasury`, `payment_intent`, `audit_anchor`, 
 
 ---
 
+## v2 Phase 2 §4.4 — withdrawals to the business's own bank — 2026-10-25
+
+Design: `docs/v2/phase2-withdrawals.md`. Tests: `tests/withdrawals.test.mjs`.
+
+- **No Splash account on the path (D3).** MYR goes business wallet → the
+  business's own deposit address at Hata → Fiuu → the business's bank. The
+  USDC leaves in the canonical composed PTB (open, pay, anchor, delete),
+  kind 4, signed by the owners' multisig. A deposit address that is a Splash
+  address, the wallet itself or another business's address is refused. A
+  return goes to the business wallet only, and counts only when the chain
+  shows it there.
+- **Own account only.** A destination is stored only when the name given
+  and the bank's own holder name (the partner's name enquiry) both match
+  the registered legal name. The trading name is not accepted. The account
+  number and the beneficiary salt are AES-256-GCM sealed under
+  `WITHDRAWAL_ACCOUNT_KEY`, bound to the org and the row. Views and the trail
+  carry the last four digits only.
+- **Deposit address verified once.** A 1 USDC test deposit is signed by the
+  owners (`partner_test_deposit`, bound to that address and amount). The
+  address is verified only when the partner's signed confirmation names that
+  digest and the chain shows that amount from the wallet. A spending rule
+  binds a beneficiary only to a verified address.
+- **Instruction before money, bound to the intent.** The partner is told
+  first. The instruction is keyed by the intent id derived from the payment
+  reference and by the expected amount. It is built from the sealed account
+  only after its commitment is recomputed and matches the intent's
+  `beneficiary_ref` (`beneficiary_mismatch` otherwise). The owners' request
+  (`withdrawal`) accepts only a kind 4 payout to that address, for that
+  beneficiary and amount. When the request cannot be opened or closes
+  unsigned, the instruction is reversed.
+- **Quote and fee.** The quote is given only once the wallet holds principal
+  plus fee outside holds. A worse rate (`quote_changed`), a fee above the one
+  shown (`fee_above_shown`) or a fee over the 1% ceiling is refused. Partner
+  fees are their own lines. Splash's fee is the chain's kind 4 fee, bounded
+  by `max_fee`.
+- **Webhooks.** The raw body's HMAC is checked first, inside a 5-minute
+  window. Each event id counts once. An event must match the intent id and
+  the partner's reference. Statuses never regress.
+- **Idempotency.** Unique client key, intent id, payment reference, partner
+  reference and Sui digest. A key reused for another request is refused.
+- **Fail closed.** The partner is a sandbox outside production only
+  (`isProductionRuntime`; `USE_MOCK_APIS` does not bring it back). In
+  production it refuses without credentials and, until the API is wired,
+  with them. The sandbox webhook secret is random, at least 32 characters,
+  with no fallback.
+- **Tenant isolation.** Routes sit behind `walletRoute` (session org).
+  Owners alone change anything. Every store call takes the org. Another
+  org's ids read as 404.
+- **Open:** the live Hata and Fiuu APIs and their webhook payloads; a
+  scheduled run that posts unposted digests (today: on the executed hook and
+  on every read); rotation of `WITHDRAWAL_ACCOUNT_KEY`.
+
 ## v2 Phase 2 §4.3 — funding the Business Splash Wallet — 2026-10-25
 
 Design: `docs/v2/phase2-funding.md`.
