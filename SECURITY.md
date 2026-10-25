@@ -43,6 +43,12 @@ Design: `docs/v2/phase2-payout-partners.md`. Tests:
   credentials and, with them, until its API is wired. `cctp_wallet` refuses
   in production with credentials too: no bridge adapter is registered on
   chain, so no cross-chain intent can settle.
+- **A failed payout's USDC is asked back until the partner accepts.** Each
+  ask is counted on the row and the acceptance time kept (0044); the sweep
+  asks again every run while it is owed and alerts ops once after five
+  asks. A signed event Splash does not know is acknowledged, changes
+  nothing, and is kept (id, type, status, cut short; no body) in
+  `payout_partner_unknown_events` with an ALERT on its first delivery.
 - **Fixed before this section:** `lib/server/pdax.ts` chose its mock
   whenever `PDAX_API_KEY` was unset, in production too, and the mock made a
   `DEMO_PDAX_…` payout reference. The v1 sweep could therefore record a

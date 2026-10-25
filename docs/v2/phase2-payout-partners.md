@@ -1,6 +1,6 @@
 # Payout partners behind one interface — v2 Phase 2 §4.5
 
-Status: built 25 Oct 2026 on `v2/phase2-backend` (migration 0042). Brief:
+Status: built 25 Oct 2026 on `v2/phase2-backend` (migrations 0042 to 0044). Brief:
 `SPLASH_SUI_V2_PROMPT.md` §4.5. Decisions: D3, D4, D5(c), D12, D13, and
 Sky's decisions of 24 Oct 2026 on partner deposit addresses.
 
@@ -28,8 +28,8 @@ database) and `tests/partner-payouts.test.mjs` (the service on PGlite).
 | Verb | Bank routes (pdax, durianpay, hata_fiuu) | cctp_wallet |
 |---|---|---|
 | `quote` | Rate (local per USDC ×1e6), what the account receives after the partner's fees, each fee its own line, 5-minute expiry. | Circle's fee from Sui (a standard transfer) as its own line, and what arrives. |
-| `createPayout` | The instruction, before any deposit, keyed by the intent id and the expected USDC amount, with its ISO 20022 message. Idempotent: a retry names the same order; the intent id with another amount, deposit address, account or rate is refused (`instruction_conflict`, 409), and no reversal is sent for it (it would cancel the payout already held). | Checks chain, domain and the mint recipient (re-derived from the address), keyed by the intent id. Circle takes no instruction before a burn. |
-| `status` | The partner's view of the payout, asked by the sweep (below). The sandbox answers only for an order it took, under its own reference (`payout_not_found` otherwise). | The attestation and mint, polled. |
+| `createPayout` | The instruction, before any deposit, keyed by the intent id and the expected USDC amount, with its ISO 20022 message. Idempotent: a retry names the same order; the intent id with another amount, deposit address, account, rate, quote reference or ISO 20022 message is refused (`instruction_conflict`, 409), and no reversal is sent for it (it would cancel the payout already held). | Checks chain, domain and the mint recipient (re-derived from the address), keyed by the intent id. Circle takes no instruction before a burn. |
+| `status` | The partner's view of the payout, asked by the sweep (below): a paid-out answer may carry the bank's reference and a failed one the partner's reason, checked as a webhook's are. The sandbox answers only for an order it took, under its own reference (`payout_not_found` otherwise). | The attestation and mint, polled. |
 | `handleWebhook` | HMAC over the raw body, 5-minute window, then parse. | Circle sends none: live refuses every webhook. |
 | `returnOrReverse` | Cancel an instruction no deposit followed, or ask for a return to the business wallet. | Accepted only before the burn; a burn cannot be undone. |
 | `depositAddress`, `checkAccount`, `postSettlement` | The fixed deposit address, the bank's name enquiry, the Sui digest after settlement. | No deposit address and no bank account (`not_on_this_route`); the burn's digest. |
@@ -109,12 +109,30 @@ the same:
    webhook's rules (funds received, paid out, failed; a failure asks for the
    USDC back to the business wallet). A polled `returned` is not believed:
    a return counts only from the digest a webhook names and the chain shows.
-   A failed payout is not polled (it waits for its return). A route that
-   cannot answer counts as a sweep error and is asked again next run.
+   A failed payout is not polled (it waits for its return). A paid-out
+   answer keeps the bank's reference and a failed one the partner's reason
+   (an id of 6 to 128 characters, a reason cut to 200). A route that cannot
+   answer, or is switched off, is counted as `pollErrors` and asked again
+   next run; it does not make the cron answer 502 on its own (only a row
+   that could not be settled does).
+   **A failed payout's return is asked for until the partner accepts.**
+   Every ask (from the failure webhook, the poll, a short return, or the
+   sweep) is counted on the row (`return_asks`, `return_asked_at`), and the
+   time the partner accepted is kept (`return_accepted_at`, 0044). While it
+   is null the sweep asks again on every run (`returnsAsked`,
+   `returnsPending` in its answer); after five asks without an acceptance
+   ops are alerted once (an ALERT log line with ids only, and a
+   `return_request_stuck` event).
 6. **Webhooks** (`/api/webhooks/payouts/pdax`, `/durianpay`): signed, in the
    window, each event once, never backwards, for that partner's own payout
    only. A signed event of a type or status Splash does not know is
-   acknowledged (200, ignored) and changes nothing; a broken body is 400. A failure asks for the USDC back to the business wallet; a return
+   acknowledged (200, ignored) and changes nothing, and it is kept for ops
+   in `payout_partner_unknown_events` (0044): the partner, the event id, the
+   type and status cut to 64 safe characters, and how often it came; nothing
+   else from the body. Its first delivery logs an ALERT line. A later
+   paid-out webhook may add the bank's reference to a payout the poll found
+   paid out without one (once; a kept reference is never replaced). A broken
+   body is 400. A failure asks for the USDC back to the business wallet; a return
    counts only as the chain shows it.
 
 `anchor_audit_hash` is not in this PTB: the `AnchorCap` is the operator's,
@@ -190,8 +208,11 @@ The evidence export (§4.6) takes `pacs008Evidence`: the same message,
 masked to the last four characters of the account and of both registration
 numbers, and the address's town and country. Every bank payout, a supplier
 payout or a withdrawal, stores it on its row with its purpose code
-(`withdrawals.iso20022`, `withdrawals.purpose_code`); rows from before 25 Oct
-2026 that are withdrawals have none. Payouts and suppliers are read by owners
+(`withdrawals.iso20022`, `withdrawals.purpose_code`). The database requires
+both on every row (`withdrawals_iso20022_check`, 0044) except a withdrawal
+written before the copy was kept, which 0044 marks `iso20022_legacy`; the
+view carries `iso20022Legacy`, so the export can say "no ISO 20022 copy
+(written before 25 Oct 2026)" instead of showing an empty message. Payouts and suppliers are read by owners
 and staff only, not viewers (`requirePayoutReader`).
 
 Sandbox webhooks: each route verifies with its own secret,
