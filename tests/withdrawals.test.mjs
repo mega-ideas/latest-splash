@@ -1664,3 +1664,65 @@ test('a bank account removed while the owners\' request is being opened closes t
 function R_ASKS() {
   return W.RETURN_ASKS_BEFORE_ALERT;
 }
+
+test('an instruction whose answer was lost, and whose reversal the partner did not take, is reversed by its intent id by the sweep until taken', async () => {
+  const base = payoutPartner('hata_fiuu', ENV);
+  let refuseReversals = 0;
+  const t = await setup({
+    overrides: {
+      // The partner takes the instruction, and its answer is lost.
+      createPayout: async (input) => {
+        await base.createPayout(input);
+        throw new Error('timed out');
+      },
+      returnOrReverse: async (input) => {
+        if (refuseReversals > 0) {
+          refuseReversals -= 1;
+          throw new Error('partner timed out');
+        }
+        return base.returnOrReverse(input);
+      },
+    },
+  });
+  const { destination } = await readyToWithdraw(t);
+  const q = await quoted(t, destination.id);
+  refuseReversals = 2;
+  const r = await createWithdrawal(t.deps(), 'u-founder', { clientKey: 'ck_lost_answer', destinationId: destination.id, amountMinor: '1000000000', acceptedReceiveMinor: q.receiveMinor, maxFeeMinor: q.maxFeeMinor, ...bundle() });
+  assert.equal(r.code, 'partner_error', JSON.stringify(r));
+  const [row] = await t.w.db.select().from(schema.withdrawals);
+  assert.equal(row.status, 'cancelled');
+  assert.equal(row.partnerRef, null, 'no reference came back');
+  assert.equal(row.returnAcceptedAt, null, 'the reversal was not taken');
+  const reversalsOf = () => t.partner.called('returnOrReverse').filter((c) => c.input.intentId === row.intentId);
+  assert.equal(reversalsOf().length, 1);
+  assert.equal(reversalsOf()[0].input.partnerRef, '', 'asked by the intent id alone');
+  assert.equal(reversalsOf()[0].input.returnAddress, row.walletAddress);
+
+  // The sweep asks again, by the intent id, while the partner still does not take it.
+  let swept = await t.reconcile();
+  assert.equal(swept.reversalsAsked, 1, JSON.stringify(swept));
+  assert.equal(swept.reversalsPending, 1, JSON.stringify(swept));
+  assert.equal(reversalsOf().length, 2);
+  assert.ok(reversalsOf().every((c) => c.input.partnerRef === '' && c.input.reason === 'instruction_unconfirmed'), JSON.stringify(reversalsOf().map((c) => c.input.reason)));
+
+  // Taken: kept on the row, and never asked again.
+  swept = await t.reconcile();
+  assert.equal(swept.reversalsAsked, 1);
+  assert.equal(swept.reversalsPending, 0);
+  const [after] = await t.w.db.select().from(schema.withdrawals);
+  assert.ok(after.returnAcceptedAt, 'the accepted reversal is kept on the row');
+  assert.equal(after.status, 'cancelled');
+  assert.equal((await t.reconcile()).reversalsAsked, 0);
+  assert.equal(reversalsOf().length, 3);
+  await t.w.client.close();
+
+  // A payout refused before any instruction was sent owes no reversal.
+  const t2 = await setup({ overrides: { createPayout: async () => { throw new PayoutPartnerUnavailable('switched off', 'partner_disabled'); } } });
+  const d2 = (await readyToWithdraw(t2)).destination;
+  const q2 = await quoted(t2, d2.id);
+  const r2 = await createWithdrawal(t2.deps(), 'u-founder', { clientKey: 'ck_refused_first', destinationId: d2.id, amountMinor: '1000000000', acceptedReceiveMinor: q2.receiveMinor, maxFeeMinor: q2.maxFeeMinor, ...bundle() });
+  assert.equal(r2.code, 'partner_disabled', JSON.stringify(r2));
+  assert.equal(t2.partner.called('returnOrReverse').length, 0);
+  assert.equal((await t2.reconcile()).reversalsAsked, 0);
+  await t2.w.client.close();
+});

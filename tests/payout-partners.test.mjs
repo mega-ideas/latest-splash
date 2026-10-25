@@ -79,7 +79,7 @@ function bankInstruction(country, over = {}) {
   base.iso20022 =
     over.iso20022 ??
     ISO.pacs008ForInstruction({
-      intentId: INTENT,
+      intentId: base.intentId,
       quoteRef: base.quoteRef,
       expectedUsdcMinor: 1_000_000_000n,
       currency,
@@ -366,6 +366,42 @@ test('the sandbox keys an instruction by its intent id and expected amount: a re
   const cIntent = `0x${'5c'.repeat(32)}`;
   await c.createPayout(cctpInstruction({ intentId: cIntent }));
   await assert.rejects(c.createPayout(cctpInstruction({ intentId: cIntent, expectedUsdcMinor: 300_000_000n, receiveMinor: 300_000_000n, minReceiveMinor: 300_000_000n })), (e) => e.code === 'instruction_conflict');
+});
+
+test('the sandbox takes a reversal or a return only for an order it holds, only back to the address the instruction named, and never revives a reversed instruction', async () => {
+  const SPLASH = `0x${'77'.repeat(32)}`;
+  for (const id of ['pdax', 'durianpay', 'hata_fiuu']) {
+    const p = payoutPartner(id, SANDBOX);
+    const country = id === 'pdax' ? 'PH' : id === 'durianpay' ? 'ID' : 'MY';
+    const intent = `0x${(id === 'pdax' ? '61' : id === 'durianpay' ? '62' : '63').repeat(32)}`;
+    const instruction = () => bankInstruction(country, { intentId: intent });
+    const order = await p.createPayout(instruction());
+    const ask = (over) => p.returnOrReverse({ intentId: intent, partnerRef: order.partnerRef, returnAddress: WALLET, reason: 'not_sent', now: NOW, ...over });
+    await assert.rejects(ask({ intentId: `0x${'64'.repeat(32)}`, partnerRef: 'sb_x_never_taken' }), (e) => e instanceof PayoutPartnerUnavailable && e.code === 'payout_not_found', `${id}: no acceptance is made up for an order it never took`);
+    await assert.rejects(ask({ partnerRef: 'sb_x_someone_else' }), (e) => e.code === 'payout_not_found', `${id}: nor under another reference`);
+    await assert.rejects(ask({ returnAddress: SPLASH }), (e) => e.code === 'bad_instruction', `${id}: a return goes only to the business wallet the instruction named`);
+    assert.deepEqual(await ask({}), { accepted: true, sandbox: true }, `${id}: its own order, back to its own wallet`);
+    assert.deepEqual(await ask({}), { accepted: true, sandbox: true }, `${id}: asking again is the same answer`);
+    await assert.rejects(p.createPayout(instruction()), (e) => e.code === 'instruction_conflict', `${id}: a reversed instruction is not taken again`);
+  }
+  // A lost answer is reversed by the intent id alone: taken when the partner holds it, and when it holds nothing.
+  const p = payoutPartner('pdax', SANDBOX);
+  const held = `0x${'65'.repeat(32)}`;
+  await p.createPayout(bankInstruction('PH', { intentId: held }));
+  await assert.rejects(p.returnOrReverse({ intentId: held, partnerRef: '', returnAddress: SPLASH, reason: 'instruction_unconfirmed', now: NOW }), (e) => e.code === 'bad_instruction');
+  assert.equal((await p.returnOrReverse({ intentId: held, partnerRef: '', returnAddress: WALLET, reason: 'instruction_unconfirmed', now: NOW })).accepted, true);
+  assert.equal((await p.returnOrReverse({ intentId: `0x${'66'.repeat(32)}`, partnerRef: '', returnAddress: WALLET, reason: 'instruction_unconfirmed', now: NOW })).accepted, true, 'nothing held under the intent id: nothing stays live');
+
+  // The cross-chain route: the same checks, and a burn is still never reversed.
+  const c = payoutPartner('cctp_wallet', SANDBOX);
+  const cIntent = `0x${'67'.repeat(32)}`;
+  const cOrder = await c.createPayout(cctpInstruction({ intentId: cIntent }));
+  await assert.rejects(c.returnOrReverse({ intentId: `0x${'68'.repeat(32)}`, partnerRef: 'sb_cctp_never', returnAddress: WALLET, reason: 'not_sent', now: NOW }), (e) => e.code === 'payout_not_found');
+  await assert.rejects(c.returnOrReverse({ intentId: cIntent, partnerRef: cOrder.partnerRef, returnAddress: SPLASH, reason: 'not_sent', now: NOW }), (e) => e.code === 'bad_instruction');
+  assert.equal((await c.returnOrReverse({ intentId: cIntent, partnerRef: cOrder.partnerRef, returnAddress: WALLET, reason: 'payout_failed', now: NOW })).accepted, false, 'a burn cannot be undone');
+  assert.equal((await c.createPayout(cctpInstruction({ intentId: cIntent }))).partnerRef, cOrder.partnerRef, 'a refused reversal leaves the order as it was');
+  assert.equal((await c.returnOrReverse({ intentId: cIntent, partnerRef: cOrder.partnerRef, returnAddress: WALLET, reason: 'not_sent', now: NOW })).accepted, true);
+  await assert.rejects(c.createPayout(cctpInstruction({ intentId: cIntent })), (e) => e.code === 'instruction_conflict');
 });
 
 test("the CBPR+ extended set: '&' and '#' are kept, a bank-checked name with an accent is refused, the business's own text is transliterated", () => {
