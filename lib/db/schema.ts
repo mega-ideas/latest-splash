@@ -508,6 +508,10 @@ export const invoices = pgTable('invoices', {
   usdcPayerAddress: text('usdc_payer_address'),
   /** The wallet the payer was shown, pinned when first shown. */
   usdcReceiveAddress: text('usdc_receive_address'),
+  /** What a payer said from the pay link (migration 0058). A report, never the
+   *  issuer's `paymentReference` and never the evidence that it was paid. */
+  payerReportedReference: text('payer_reported_reference'),
+  payerReportedAt: timestamp('payer_reported_at', { withTimezone: true }),
   ...timestamps,
 }, (table) => [
   index('invoices_org_idx').on(table.orgId),
@@ -2519,6 +2523,8 @@ export const payableInvoices = pgTable('payable_invoices', {
   recipientId: text('recipient_id'),
   matchedBy: text('matched_by'),
   matchedAt: timestamp('matched_at', { withTimezone: true }),
+  /** Why a recipient unlike the confirmed supplier was chosen (migration 0058). */
+  matchReason: text('match_reason'),
   scheduledFor: text('scheduled_for'),
   scheduledBy: text('scheduled_by'),
   scheduledAt: timestamp('scheduled_at', { withTimezone: true }),
@@ -2528,6 +2534,8 @@ export const payableInvoices = pgTable('payable_invoices', {
   approvalRequestedAt: timestamp('approval_requested_at', { withTimezone: true }),
   paidAt: timestamp('paid_at', { withTimezone: true }),
   suiDigest: text('sui_digest'),
+  /** testnet | mainnet: where the digest is (migration 0058). */
+  suiNetwork: text('sui_network'),
   receiptNo: text('receipt_no'),
   approvers: jsonb('approvers'),
   /** The self-billed e-invoice made for it, once (lib/myinvois/self-billed.ts). */
@@ -2544,4 +2552,7 @@ export const payableInvoices = pgTable('payable_invoices', {
   index('payable_invoices_org_created_idx').on(table.orgId, table.createdAt),
   uniqueIndex('payable_invoices_payment_intent_unique').on(table.paymentIntentId),
   uniqueIndex('payable_invoices_sui_digest_unique').on(table.suiDigest),
+  // Partial indexes (WHERE status IN scheduled/approving/paid) live in the SQL:
+  // payable_invoices_number_once_unique (0057, by the typed supplier name) and
+  // payable_invoices_recipient_number_once_unique (0058, by who is paid).
 ]);
