@@ -56,7 +56,8 @@ export function walletRecipientDeps(db: DrizzleDb, orgId: string, env: NodeJS.Pr
     kyt: kytProviderFromEnv(env),
     // Splash's own addresses, read live (FeeConfig's recipient can change).
     splashAddresses: splashAddressSourceFromEnv(env),
-    splashCrossChain: splashCrossChainAddresses(env),
+    // Read when needed: an unreadable value refuses the recipient.
+    splashCrossChain: () => splashCrossChainAddresses(env, { requireConfigured: true }),
     // Solana token accounts are checked on chain; with no RPC, none is saved.
     solana: solanaTokenAccountReaderFromEnv(env),
   };
@@ -80,7 +81,19 @@ export function proofSubmitDeps(db: DrizzleDb): ProofSubmitDeps {
     db,
     now: () => new Date(),
     async verifySignature(message, signature, address) {
-      const [{ isValidPersonalMessageSignature }, { suiClient }] = await Promise.all([import('@mysten/sui/verify'), import('@/lib/sui')]);
+      const [{ isValidPersonalMessageSignature }, { parseSerializedSignature }, { suiClient }] = await Promise.all([
+        import('@mysten/sui/verify'),
+        import('@mysten/sui/cryptography'),
+        import('@/lib/sui'),
+      ]);
+      // Something that is not a signature is a bad signature; an error after
+      // that point (zkLogin and passkey checks read the chain) is the check
+      // failing, which the caller tells apart and does not hold against the link.
+      try {
+        parseSerializedSignature(signature);
+      } catch {
+        return false;
+      }
       return isValidPersonalMessageSignature(message, signature, { address, client: suiClient });
     },
   };

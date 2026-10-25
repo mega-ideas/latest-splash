@@ -165,7 +165,10 @@ it holds it.
    used up first, by a compare-and-set on an unused, unexpired row, so a
    link is good for one try and its nonce for ever; then the signature over
    the stored message is checked against the stored address (any scheme Sui
-   verifies; zkLogin through the chain). Only then, in one transaction, is
+   verifies; zkLogin through the chain). A check that could not be made (the
+   chain was unreadable) is not a bad signature: the link is given back and
+   the answer is 503 `verification_unavailable`; a signature that was checked
+   and is wrong still uses the link up. Only then, in one transaction, is
    the recipient marked `proven` (with the time and the link), the challenge
    `verified`, and the proof recorded in `wallet_ownership_proofs` (the
    evidence kept as a hash), and only if the recipient is still the one the
@@ -278,6 +281,17 @@ otherwise a mismatch. A mint is unique per chain, transaction and message
 nonce (0048), so a relayer that mints several payments' messages in one
 transaction is recorded for each.
 
+Opening a receipt meets the same recipient rules as the Sui kinds, and a
+burn cannot be reversed, so they are checked then: an owner approved the
+recipient (`recipient_not_approved`: a staff member's save waits), the
+supplier's details are on file (`supplier_details_missing`), and neither the
+address nor, on Solana, the wallet that owns the token account is one Splash
+controls (`splash_controlled_address`). Splash's addresses on other chains
+(`FUNDING_CCTP_DEPOSIT_ADDRESSES_JSON`) fail closed like the Sui ones: an
+unreadable value refuses with 503 `splash_addresses_unreadable`, and so does
+production with none set. The burn is recorded after the owners signed it,
+so it is not checked again there.
+
 A mint is checked against Circle's MessageTransmitterV2 on the network the
 receipt's attestation came from: the testnet contract for a sandbox
 attestation, the mainnet one for any other, whatever the server's
@@ -287,7 +301,10 @@ The sweep (`/api/cron/cross-chain`, every ten minutes; review B7) asks
 Circle again for every burned payment, within its own business, so a lost
 refresh does not leave it burned, and reports a payment burned but not
 minted six hours after its burn (an ALERT line by id, and a 502) for ops to
-relay its mint from the message and attestation on the receipt. The receipt
+relay its mint from the message and attestation on the receipt. A Solana
+payment already attested is listed apart (`manualRelay`, a RELAY line) and
+does not make the cron fail, since its mint is not read and waits for a
+hand relay. The receipt
 is also in the payment's controls evidence (`crossChain`). The attestation is kept as Circle gave
 it; the destination chain checks Circle's signatures when it mints.
 
@@ -306,6 +323,16 @@ and the event are from `circlefin/evm-cctp-contracts`
 `src/v2/MessageTransmitterV2.sol`.
 
 ## Not built here
+
+- A per-payment Travel Rule message for a rule payment (an executor paying
+  under a SpendPolicy) to an address tagged EXCHANGE. The tag needs an
+  exchange account the exchange confirmed once (an approved message), but an
+  executor's rule payment does not pass through Splash's signing layer, so no
+  message is made for it. Sky decides whether rule payments to an exchange
+  are allowed at all, or need a message per payment before the tag is set.
+- A mint read at a finalised block: a Base, Ethereum or other EVM mint is
+  read at the latest block, so a reorg could leave a recorded mint that no
+  longer exists.
 
 - The supplier's page at `/wallet-proof/<token>` (Phase 3): the API it calls
   is built.

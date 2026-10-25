@@ -48,6 +48,7 @@ import { irisMessagesOf, isEvmTxHash, messageTransmitterV2, readBurn, readEvmMin
 import type { KytProvider } from '../compliance/kyt.ts';
 import { CROSS_CHAIN_CHAINS, isCrossChainChain, moveDeliveryOf, type CrossChainChain } from '../recipients/wallet-recipients.ts';
 import { crossChainDestinationGate } from './kyt-screenings.ts';
+import { crossChainSplashRefusal, DETAILS_MISSING, hasSupplierDetails } from './wallet-recipients.ts';
 import { isProductionRuntime } from './runtime-mode.ts';
 import type { DrizzleDb } from './wallet-signing-store.ts';
 
@@ -174,6 +175,17 @@ export async function openCrossChainTransfer(
     mintRecipient: recipient.mintRecipient,
   });
   if (!move || move.kind !== 3) return refuse(409, 'not_cross_chain', 'That recipient is not paid on another chain.');
+  // The same checks the Sui kinds meet at their gate, and this kind cannot
+  // be reversed once burned: an owner approved the recipient (maker-checker),
+  // the supplier's details are on file, and neither the address nor the
+  // owner of a Solana token account is one Splash controls (checked again
+  // here, since Splash's addresses can change after the recipient was saved).
+  if (!recipient.approvedBy || !recipient.approvedAt) {
+    return refuse(409, 'recipient_not_approved', 'A staff member saved this recipient. An owner approves it before it is paid.');
+  }
+  if (!hasSupplierDetails(recipient)) return refuse(DETAILS_MISSING.status, DETAILS_MISSING.code, DETAILS_MISSING.error);
+  const splash = crossChainSplashRefusal(undefined, [recipient.destinationAddress, recipient.destinationTokenOwner], deps.env ?? process.env);
+  if (splash) return refuse(splash.status, splash.code, splash.error);
   const now = deps.now();
   const opened = await readCrossChainTransfer(deps.db, deps.orgId, paymentRef);
   // Screened on every call, a retry too: a receipt already opened is kept as
@@ -370,9 +382,10 @@ export const CROSS_CHAIN_STUCK_AFTER_MS = 6 * 3_600_000;
  * attestation are on the receipt, so the mint can be relayed by anyone.
  * Nothing is signed or sent; it reads Circle and writes forward only.
  */
-export async function sweepCrossChainTransfers(deps: { db: DrizzleDb; now: () => Date; iris: IrisClient }): Promise<{ asked: number; attested: number; pending: number; errors: number; stuck: Array<{ orgId: string; paymentRef: string; status: string }> }> {
+export async function sweepCrossChainTransfers(deps: { db: DrizzleDb; now: () => Date; iris: IrisClient }): Promise<{ asked: number; attested: number; pending: number; errors: number; stuck: Array<{ orgId: string; paymentRef: string; status: string }>; manualRelay: Array<{ orgId: string; paymentRef: string; status: string }> }> {
   const rows = await deps.db.select().from(crossChainTransfers).where(inArray(crossChainTransfers.status, ['burned', 'attested']));
-  const out = { asked: 0, attested: 0, pending: 0, errors: 0, stuck: [] as Array<{ orgId: string; paymentRef: string; status: string }> };
+  type Line = { orgId: string; paymentRef: string; status: string };
+  const out = { asked: 0, attested: 0, pending: 0, errors: 0, stuck: [] as Line[], manualRelay: [] as Line[] };
   const now = deps.now();
   for (const row of rows) {
     let status = row.status;
@@ -388,6 +401,14 @@ export async function sweepCrossChainTransfers(deps: { db: DrizzleDb; now: () =>
     }
     const since = row.burnedAt ?? row.createdAt;
     if (status !== 'minted' && now.getTime() - since.getTime() >= CROSS_CHAIN_STUCK_AFTER_MS) {
+      // A Solana mint is not read yet, so an attested Solana payment waits
+      // for ops to relay it by hand and is listed apart: it would otherwise
+      // be "stuck" for ever and keep the cron failing.
+      if (status === 'attested' && row.destinationChain === 'SOLANA') {
+        out.manualRelay.push({ orgId: row.orgId, paymentRef: row.paymentRef, status });
+        console.error(`[cross-chain] RELAY payment ${row.paymentRef} of ${row.orgId} is attested on Solana and waits for its mint to be relayed by hand`);
+        continue;
+      }
       out.stuck.push({ orgId: row.orgId, paymentRef: row.paymentRef, status });
       console.error(`[cross-chain] ALERT payment ${row.paymentRef} of ${row.orgId} is ${status}, not minted, ${Math.round((now.getTime() - since.getTime()) / 3_600_000)}h after its burn`);
     }

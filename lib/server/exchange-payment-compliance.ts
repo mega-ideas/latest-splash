@@ -165,6 +165,7 @@ export async function senderDeclarationFor(
   const pack = senderDeclaration({
     payer: { legalName: kyb.businessName, registrationNumber: kyb.registrationNumber, country: payer.country, address: payer.address },
     walletAddress: p.request.senderAddress,
+    walletControl: { signerKind: p.request.signerKind, threshold: p.request.threshold },
     supplier: { name: supplier.legalName?.trim() || supplier.name, exchange: ex.exchange, depositAddress: p.recipient },
     amountMinor: p.amountMinor,
     invoice: { number: text(input.invoiceNumber), date: text(input.invoiceDate) },

@@ -18,7 +18,7 @@
 import { createHash } from 'node:crypto';
 
 import { partnerLabel, type PartnerId } from '../partners/signed-partners.ts';
-import { renderTextPdf, type PdfLine } from './pdf-text.ts';
+import { renderTextPdf, withReducedNote, type PdfLine } from './pdf-text.ts';
 import type { TravelRuleExchange } from './sumsub.ts';
 
 export type SenderDeclarationInput = {
@@ -30,6 +30,8 @@ export type SenderDeclarationInput = {
   };
   /** The business's own wallet the USDC leaves from. */
   walletAddress: string;
+  /** How the wallet signs, from the payment's own signing request. Without it the statement claims nothing about shared control. */
+  walletControl?: { signerKind: string; threshold: number } | null;
   supplier: { name: string; exchange: TravelRuleExchange; depositAddress: string };
   /** USDC, 6 decimals. */
   amountMinor: bigint;
@@ -59,6 +61,14 @@ const usdc = (minor: bigint) => {
   return `${s.slice(0, -6)}.${s.slice(-6)}`;
 };
 
+/** What the statement says of who controls the sending wallet: shared control only for a multisig wallet, with its threshold. */
+function controlOf(control: SenderDeclarationInput['walletControl']): string {
+  if (control && control.signerKind === 'multisig' && control.threshold >= 2) {
+    return `which its owners control together (${control.threshold} signatures are needed for a payment)`;
+  }
+  return 'which the business controls';
+}
+
 /** Free text from the business: printable, single-line, cut short. */
 function clean(value: string | null, max: number): string | null {
   if (value === null) return null;
@@ -86,7 +96,7 @@ export function senderDeclaration(input: SenderDeclarationInput): { json: Sender
     suiDigest: input.suiDigest,
     statement:
       `${input.payer.legalName} declares that it sends ${usdc(input.amountMinor)} USDC on Sui from its own self-hosted business wallet, ` +
-      'which its owners control together, to the deposit address above, in payment to the supplier named above. ' +
+      `${controlOf(input.walletControl)}, to the deposit address above, in payment to the supplier named above. ` +
       'No exchange or other provider holds the sending wallet, so this declaration carries the sender details the receiving exchange asks for.',
     generatedAt: input.generatedAt.toISOString(),
   };
@@ -117,5 +127,5 @@ export function senderDeclaration(input: SenderDeclarationInput): { json: Sender
     { kind: 'field', label: 'Generated', value: json.generatedAt },
     { kind: 'field', label: 'SHA-256 of the JSON copy', value: sha256 },
   ];
-  return { json, sha256, pdf: renderTextPdf(lines, { footer: `Sender declaration ${json.paymentRef}` }) };
+  return { json, sha256, pdf: renderTextPdf(withReducedNote(lines), { footer: `Sender declaration ${json.paymentRef}` }) };
 }

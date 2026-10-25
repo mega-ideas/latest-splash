@@ -325,6 +325,12 @@ export async function listApprovedWalletAddressesForStaff(db: DrizzleDb): Promis
         eq(suppliers.payoutMethod, 'WALLET'),
         isNotNull(suppliers.walletAddress),
         inArray(suppliers.screeningVerdict, ['CLEAR', 'ATTESTED']),
+        // A wallet recipient counts only once an owner approved it
+        // (maker-checker): a staff member's save is not yet a destination.
+        // Recipients that are Splash's or the business's own addresses are
+        // refused when they are saved and at every payment gate, so none is here.
+        isNotNull(suppliers.approvedBy),
+        isNotNull(suppliers.approvedAt),
         // A wallet the supplier holds counts only once it signed the
         // ownership proof (v2 §4.7); an exchange deposit address needs none.
         or(ne(suppliers.deliveryKind, 'SELF_CUSTODY'), eq(suppliers.ownershipStatus, 'proven')),

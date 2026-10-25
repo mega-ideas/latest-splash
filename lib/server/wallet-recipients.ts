@@ -105,8 +105,12 @@ export type WalletRecipientDeps = {
   kyt: KytProvider;
   /** Splash's own Sui addresses. Default: this server's configuration, read live. */
   splashAddresses?: SplashAddressSource;
-  /** Splash's own addresses on other chains. Default: FUNDING_CCTP_DEPOSIT_ADDRESSES_JSON. */
-  splashCrossChain?: string[];
+  /**
+   * Splash's own addresses on other chains. Default:
+   * FUNDING_CCTP_DEPOSIT_ADDRESSES_JSON, which refuses when unreadable (and
+   * in production when not set). A function is read when it is needed.
+   */
+  splashCrossChain?: string[] | (() => string[]);
   /** Asks Solana whether an address is a USDC token account. Without one, no Solana recipient is saved. */
   solana?: SolanaTokenAccountReader | null;
 };
@@ -180,6 +184,26 @@ async function splashRefusal(source: SplashAddressSource | undefined, address: s
 }
 
 /**
+ * Null when none of `candidates` (a destination address, and on Solana the
+ * wallet that owns the token account) is one of Splash's addresses on other
+ * chains; a refusal when one is, or when the list cannot be read.
+ */
+export function crossChainSplashRefusal(source: WalletRecipientDeps['splashCrossChain'] | undefined, candidates: Array<string | null | undefined>, env: NodeJS.ProcessEnv = process.env): GateRefusal | null {
+  let listed: string[];
+  try {
+    listed = typeof source === 'function' ? source() : (source ?? splashCrossChainAddresses(env, { requireConfigured: true }));
+  } catch {
+    return { status: 503, code: 'splash_addresses_unreadable', error: "Splash's own addresses on other chains could not be read, so this recipient cannot be checked against them." };
+  }
+  const norm = (a: string) => (/^0x[0-9a-fA-F]{40}$/.test(a) ? a.toLowerCase() : a);
+  const theirs = new Set(listed.map(norm));
+  if (candidates.some((c) => typeof c === 'string' && c && theirs.has(norm(c)))) {
+    return { status: 409, code: 'splash_controlled_address', error: 'That address is one Splash controls. Splash never receives client money, so it cannot be a recipient.' };
+  }
+  return null;
+}
+
+/**
  * Whether `address` is the business's own: its wallet (the deposit
  * watcher's, a withdrawal's, a signing request's sender), or a member's
  * passkey or zkLogin address (a signer, a consent, a credential, an
@@ -217,11 +241,11 @@ const OWN_ADDRESS: GateRefusal = {
 };
 
 /** The supplier's business details a wallet is paid only with (D5b): registered name, registration number, address, city. */
-function hasSupplierDetails(r: Pick<SupplierRow, 'legalName' | 'registrationNumber' | 'addressLine1' | 'addressCity'>): boolean {
+export function hasSupplierDetails(r:Pick<SupplierRow, 'legalName' | 'registrationNumber' | 'addressLine1' | 'addressCity'>): boolean {
   return [r.legalName, r.registrationNumber, r.addressLine1, r.addressCity].every((v) => typeof v === 'string' && v.trim().length > 0);
 }
 
-const DETAILS_MISSING: GateRefusal = {
+export const DETAILS_MISSING: GateRefusal = {
   status: 409,
   code: 'supplier_details_missing',
   error: "The supplier's registered name, registration number and address are not on file for this recipient. Save it again with them.",
@@ -263,10 +287,8 @@ export async function createWalletRecipient(
   let tokenOwner: string | null = null;
   let lockKey: string;
   if (parsed.kind === 'CROSS_CHAIN') {
-    const theirs = new Set((deps.splashCrossChain ?? splashCrossChainAddresses()).map((a) => (/^0x[0-9a-fA-F]{40}$/.test(a) ? a.toLowerCase() : a)));
-    if (theirs.has(parsed.address)) {
-      return refuse(409, 'splash_controlled_address', 'That address is one Splash controls. Splash never receives client money, so it cannot be a recipient.');
-    }
+    const splashCc = crossChainSplashRefusal(deps.splashCrossChain, [parsed.address]);
+    if (splashCc) return refuse(splashCc.status, splashCc.code, splashCc.error);
     const [dupe] = await deps.db
       .select({ id: suppliers.id })
       .from(suppliers)
@@ -281,6 +303,10 @@ export async function createWalletRecipient(
         return refuse(status, checked.code, checked.code === 'solana_not_usdc_token_account' ? `${checked.reason} CCTP mints to the supplier's USDC token account (its associated token account).` : checked.reason);
       }
       tokenOwner = checked.tokenOwner;
+      // The wallet that owns the token account is compared too: a token
+      // account a Splash wallet owns is Splash's money.
+      const splashOwner = crossChainSplashRefusal(deps.splashCrossChain, [tokenOwner]);
+      if (splashOwner) return refuse(splashOwner.status, splashOwner.code, splashOwner.error);
     }
     lockKey = `${deps.orgId}:${parsed.chain}:${parsed.address}`;
   } else {
@@ -539,7 +565,12 @@ export async function readOwnershipChallenge(db: DrizzleDb, token: unknown, now:
 export type ProofSubmitDeps = {
   db: DrizzleDb;
   now: () => Date;
-  /** True when `signature` is the address's own signature over the message as a Sui personal message. */
+  /**
+   * True when `signature` is the address's own signature over the message as
+   * a Sui personal message; false when it is not (including one that is not
+   * a signature at all). It THROWS when the check could not be made (the
+   * chain was unreadable), which gives the link back.
+   */
   verifySignature: (message: Uint8Array, signature: string, address: string) => Promise<boolean>;
 };
 
@@ -572,7 +603,14 @@ export async function submitOwnershipProof(deps: ProofSubmitDeps, input: { token
   try {
     valid = await deps.verifySignature(new TextEncoder().encode(claimed.message), signature, claimed.address);
   } catch {
-    valid = false;
+    // The check itself failed (the chain could not be read), which says
+    // nothing about the signature: the link is given back, still good until
+    // it expires, and the supplier is asked to try again.
+    await deps.db
+      .update(recipientOwnershipChallenges)
+      .set({ usedAt: null, outcome: null })
+      .where(and(eq(recipientOwnershipChallenges.id, claimed.id), eq(recipientOwnershipChallenges.outcome, 'bad_signature'), eq(recipientOwnershipChallenges.usedAt, now)));
+    return refuse(503, 'verification_unavailable', 'The signature could not be checked just now. Nothing was recorded and this link still works: try again in a few minutes.');
   }
   if (!valid) return refuse(400, 'bad_signature', 'The signature is not this wallet’s signature of the message. Ask for a new link and sign with the wallet at this address.');
 

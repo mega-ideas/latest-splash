@@ -55,15 +55,26 @@ export function splashAddressSourceFromEnv(env: NodeJS.ProcessEnv = process.env,
   };
 }
 
-/** Splash's CCTP deposit addresses on other chains, lower-case (EVM) or as given (Solana). */
-export function splashCrossChainAddresses(env: NodeJS.ProcessEnv = process.env): string[] {
+/**
+ * Splash's CCTP deposit addresses on other chains, lower-case (EVM) or as
+ * given (Solana). Fails closed like the Sui list: a value that cannot be
+ * parsed throws, and with `requireConfigured` (a cross-chain recipient being
+ * saved or paid) so does production with none set, since an empty list then
+ * means "unknown", not "none".
+ */
+export function splashCrossChainAddresses(env: NodeJS.ProcessEnv = process.env, opts: { requireConfigured?: boolean } = {}): string[] {
   const raw = (env.FUNDING_CCTP_DEPOSIT_ADDRESSES_JSON ?? '').trim();
-  if (!raw) return [];
+  if (!raw) {
+    if (opts.requireConfigured && isProductionRuntime(env)) {
+      throw new SplashAddressesUnavailable("FUNDING_CCTP_DEPOSIT_ADDRESSES_JSON is not set, so Splash's addresses on other chains cannot be named");
+    }
+    return [];
+  }
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return [];
+    throw new SplashAddressesUnavailable("FUNDING_CCTP_DEPOSIT_ADDRESSES_JSON could not be read, so Splash's addresses on other chains cannot be named");
   }
   const out = new Set<string>();
   const visit = (v: unknown) => {

@@ -43,6 +43,27 @@ export function pdfSafeText(value: string): string {
     .replace(/[^\x20-\x7e]/g, '?');
 }
 
+/** Whether printing `value` loses a character to `?` (an accent dropped does not count: the letter is still there). */
+export function losesCharacters(value: string): boolean {
+  return /[^\x20-\x7e]/.test(
+    value
+      .normalize('NFKD')
+      .replace(/[̀-ͯ]/g, '')
+      .replace(/[‘’“”–—]/g, ''),
+  );
+}
+
+/** The lines with a visible note at the end when any text in them could not be printed. */
+export function withReducedNote(lines: PdfLine[]): PdfLine[] {
+  const texts = lines.flatMap((l) => (l.kind === 'field' ? [l.label, l.value] : l.kind === 'gap' ? [] : [l.text]));
+  if (!texts.some(losesCharacters)) return lines;
+  return [
+    ...lines,
+    { kind: 'gap' },
+    { kind: 'text', text: "Some characters in this document could not be printed in this font and appear as '?'. The JSON copy holds the full text, and its SHA-256 above covers it." },
+  ];
+}
+
 function escapePdfString(value: string): string {
   return value.replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
 }

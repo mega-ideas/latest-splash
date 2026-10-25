@@ -281,7 +281,7 @@ test('a cross-chain payment is opened only when the destination address is a fre
 
 test('in production a sandbox screening of a cross-chain recipient does not open its payment', async () => {
   const w = await crossChainWorld();
-  const refused = await openCrossChainTransfer({ db: w.db, orgId: 'acme', now: () => T0, requestedBy: 'u-owner', env: PROD }, { paymentRef: INTENT, recipientId: w.recipientId, amountMinor: 1_000_000n, maxBridgeFeeMinor: 0n });
+  const refused = await openCrossChainTransfer({ db: w.db, orgId: 'acme', now: () => T0, requestedBy: 'u-owner', env: { ...PROD, FUNDING_CCTP_DEPOSIT_ADDRESSES_JSON: JSON.stringify({ BASE: '0x1111111111111111111111111111111111111111' }) } }, { paymentRef: INTENT, recipientId: w.recipientId, amountMinor: 1_000_000n, maxBridgeFeeMinor: 0n });
   assert.deepEqual([refused.status, refused.code], [409, 'recipient_not_screened']);
   const direct = await crossChainRecipientGate({ db: w.db, orgId: 'acme', now: T0, requestedBy: 'u-owner', env: PROD }, 'BASE', BASE_ADDRESS);
   assert.equal(direct.code, 'recipient_not_screened');
