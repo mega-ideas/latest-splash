@@ -49,6 +49,7 @@ import {
   getFundingIntent,
   handleProviderWebhook,
   listWalletDeposits,
+  recheckDeposit,
   recordDeposit,
   revokeFundingSource,
   syncWalletDeposits,
@@ -489,4 +490,60 @@ test('with Elliptic contracted, a Chainalysis CLEAR is not a verdict, and its BL
   assert.equal(a.verdict, null, JSON.stringify(a));
   const b = await kytProviderFromEnv(prod, { fetcher: hit }).screen({ chain: 'SUI', address: clearAddr(), direction: 'deposit' });
   assert.equal(b.verdict, 'BLOCK');
+});
+
+/* 12 ── Second pass: gaps left after the first fix ─────────────────────── */
+
+test('USDC that arrives with an unattributable CCTP mint is held, even when the business’s own proven wallet relays it, and stays held on recheck', async () => {
+  const w = await world();
+  const { address } = await provenSolanaWallet(w);
+  // The business's own proven Sui wallet relays two of Circle's mints in one
+  // transaction. Neither burn can be credited alone, so neither burner is
+  // screened: the USDC must not clear as the relayer's own money.
+  const kp = new Ed25519Keypair();
+  const relayer = normalizeSuiAddress(kp.toSuiAddress());
+  const added = await addFundingSource(w.deps('acme'), 'u-owner', { kind: 'wallet', chain: 'SUI', address: relayer });
+  assert.equal(added.ok, true, JSON.stringify(added));
+  const ch = await walletSourceChallenge(w.deps('acme'), added.source.id);
+  const { signature } = await kp.signPersonalMessage(new TextEncoder().encode(ch.challenge.message));
+  assert.equal((await verifyWalletSource(w.deps('acme'), { userId: 'u-owner', sourceId: added.source.id, challengeId: ch.challenge.id, signature })).ok, true);
+
+  const mine = burnBody({ sender32: solanaSender32(address), recipient: ACME_WALLET, amount: 5_000_000n });
+  const r = await recordDeposit(w.deps('acme'), { digest: w.deliver({ sender: relayer, amount: 10_000_000n, events: [circleEvent(mine), circleEvent(mine)] }) });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.deposits.length, 1);
+  assert.equal(r.deposits[0].status, 'held', JSON.stringify(r.deposits[0]));
+  assert.ok(r.deposits[0].holdReasons.includes('mint_unattributable'), JSON.stringify(r.deposits[0].holdReasons));
+
+  const again = await recheckDeposit(w.deps('acme'), r.deposits[0].id);
+  assert.equal(again.ok, true, JSON.stringify(again));
+  assert.equal(again.deposit.status, 'held', 'a recheck cannot clear what no single burn accounts for');
+  assert.ok(again.deposit.holdReasons.includes('mint_unattributable'));
+});
+
+test('until the watcher has read every transaction, nothing is spendable: a page it has not reached may hold an unscreened arrival', async () => {
+  const w = await world();
+  const OLD = normalizeSuiAddress(`0x${'a0'.repeat(32)}`);
+  w.earlier.acme = [OLD];
+  const SUI = normalizeStructTag('0x2::sui::SUI');
+  // 100 USDC from the business's earlier wallet: accounted for and spendable.
+  w.deliver({ sender: OLD, amount: 100_000_000n });
+  // Enough gas-only transactions to fill every page one sync reads.
+  for (let i = 0; i < 80; i++) {
+    w.record({ digest: digest(), success: true, sender: ACME_WALLET, timestampMs: 1, balanceChanges: [{ address: ACME_WALLET, coinType: SUI, amount: '-1000' }], events: [] });
+  }
+  // Beyond what one sync reads: a sanctioned sender's 50 USDC, then 50 USDC out.
+  w.deliver({ sender: deadAddr(), amount: 50_000_000n });
+  w.record({ digest: digest(), success: true, sender: ACME_WALLET, timestampMs: 1, balanceChanges: [{ address: ACME_WALLET, coinType: USDC, amount: '-50000000' }, { address: clearAddr(), coinType: USDC, amount: '50000000' }], events: [] });
+
+  const first = await walletFundsWithheld(w.deps('acme'), 100_000_000n);
+  assert.equal(first.ok, true, JSON.stringify(first));
+  assert.equal(first.complete, false);
+  assert.equal(first.withheldMinor, '100000000', 'an unfinished read withholds the whole balance');
+
+  const second = await walletFundsWithheld(w.deps('acme'), 100_000_000n);
+  assert.equal(second.ok, true, JSON.stringify(second));
+  assert.equal(second.complete, true);
+  assert.equal(second.heldMinor, '50000000', 'the sanctioned arrival is found and blocked');
+  assert.equal(second.withheldMinor, '50000000');
 });
