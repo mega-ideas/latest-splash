@@ -242,7 +242,16 @@ export function legacyWalletBody(body: Record<string, unknown>): Record<string, 
 export async function createWalletRecipient(
   deps: WalletRecipientDeps,
   input: { body: Record<string, unknown>; requestedBy: string; requestedRole?: string },
-): Promise<{ ok: true; recipient: ReturnType<typeof walletRecipientView>; screening: { verdict: string | null; provider: string; reference: string | null } } | Refusal> {
+): Promise<
+  | {
+      ok: true;
+      recipient: ReturnType<typeof walletRecipientView>;
+      screening: { verdict: string | null; provider: string; reference: string | null };
+      /** Solana only: the screening of the wallet that owns the token account. */
+      ownerScreening?: { address: string; verdict: string | null; provider: string; reference: string | null };
+    }
+  | Refusal
+> {
   let parsed: WalletRecipientInput;
   try {
     parsed = parseWalletRecipient(input.body);
@@ -289,8 +298,20 @@ export async function createWalletRecipient(
   const subject = screeningSubjectOf(parsed);
   const screened = await screenRecipient({ db: deps.db, orgId: deps.orgId, kyt: deps.kyt, now: deps.now }, { kind: subject.kind, chain: subject.chain, address: subject.address, requestedBy: input.requestedBy });
   if (!screened.ok) return screened;
-  const s = screened.screening;
-  if (s.verdict === 'BLOCK') return refuse(403, 'recipient_blocked', 'This address was refused by screening. Splash will not add it as a recipient.');
+  // On Solana the wallet that owns the token account is screened too:
+  // sanctions and KYT lists name wallets, not the token accounts they own.
+  let ownerScreening: Awaited<ReturnType<typeof screenRecipient>> | null = null;
+  if (tokenOwner) {
+    ownerScreening = await screenRecipient({ db: deps.db, orgId: deps.orgId, kyt: deps.kyt, now: deps.now }, { kind: subject.kind, chain: subject.chain, address: tokenOwner, requestedBy: input.requestedBy });
+    if (!ownerScreening.ok) return refuse(409, 'recipient_not_screened', 'The wallet that owns this token account could not be screened, so the recipient is not saved.');
+  }
+  const owner = ownerScreening?.ok ? ownerScreening.screening : null;
+  if (screened.screening.verdict === 'BLOCK') return refuse(403, 'recipient_blocked', 'This address was refused by screening. Splash will not add it as a recipient.');
+  if (owner?.verdict === 'BLOCK') return refuse(403, 'recipient_blocked', 'The wallet that owns this token account was refused by screening. Splash will not add it as a recipient.');
+  // The recipient shows the less favourable of the two answers: REVIEW, or
+  // unscreened, over CLEAR.
+  const rank = (v: string | null) => (v === 'CLEAR' ? 0 : v === 'REVIEW' ? 2 : 1);
+  const s = owner && rank(owner.verdict) > rank(screened.screening.verdict) ? owner : screened.screening;
 
   const supplier = parsed.supplier;
   const base = {
@@ -378,7 +399,13 @@ export async function createWalletRecipient(
   });
   const stored = (await repo.getRecipient(deps.db, deps.orgId, row.id)) ?? row;
   const [raw] = await deps.db.select().from(suppliers).where(and(eq(suppliers.id, row.id), eq(suppliers.orgId, deps.orgId))).limit(1);
-  return { ok: true, recipient: walletRecipientView(stored, raw ?? null, false), screening: { verdict: s.verdict, provider: s.provider, reference: s.reference } };
+  const t = screened.screening;
+  return {
+    ok: true,
+    recipient: walletRecipientView(stored, raw ?? null, false),
+    screening: { verdict: t.verdict, provider: t.provider, reference: t.reference },
+    ...(owner ? { ownerScreening: { address: owner.address, verdict: owner.verdict, provider: owner.provider, reference: owner.reference } } : {}),
+  };
 }
 
 /**

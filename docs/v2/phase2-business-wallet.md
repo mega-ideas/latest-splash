@@ -275,6 +275,16 @@ and `WALLET_HARDWARE_CHECK_REF` names where the hardware check's evidence is
 recorded (for example `docs/mainnet-checks-2026-10.md#wallet-2-of-3`).
 Production refuses to boot on mainnet with the switch on and no reference.
 
+Every process that reaches the production database (web servers, workers,
+cron jobs, one-off scripts) runs with `NODE_ENV=production`, and no
+non-production deployment is given the production `DATABASE_URL`. Whether
+a sandbox screening or Travel Rule message on file counts as an answer is
+decided by `NODE_ENV` alone (docs/v2/phase2-compliance.md, "The runtime
+mode is the only switch"): a process with any other value treats the
+sandbox's CLEAR as an answer and can open and sign a payment on it.
+Nothing in code detects a production database, so this is checked by hand
+before mainnet and after every new process is added.
+
 ## Runbook: the hardware 2-of-3
 
 Owed from Phase 0 (`docs/mainnet-checks-2026-10.md`): the gate used software

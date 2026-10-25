@@ -212,6 +212,31 @@ export async function crossChainRecipientGate(deps: ScreeningGateDeps, chain: st
   return screeningGate(deps, { ...subject, defaultKind: 'cross_chain_recipient' });
 }
 
+/**
+ * The whole destination of a cross-chain payment. On Solana CCTP mints to
+ * a USDC token account, and sanctions and KYT lists name wallets, not the
+ * accounts derived from them: the wallet that owns the token account (as
+ * read on chain when it was saved) must be a fresh CLEAR here as well. Both
+ * are checked; a BLOCK on either decides (403), then any other refusal. A
+ * Solana recipient with no owner on file cannot be screened, so it is not
+ * paid. This is the check for opening the payment and, once the owners'
+ * cross-chain pay path signs, for signing it too.
+ */
+export async function crossChainDestinationGate(
+  deps: ScreeningGateDeps,
+  destination: { chain: string; address: string; tokenOwner: string | null },
+): Promise<ScreeningGateRefusal | null> {
+  const account = await crossChainRecipientGate(deps, destination.chain, destination.address);
+  if (destination.chain !== 'SOLANA') return account;
+  if (account?.status === 403) return account;
+  if (!destination.tokenOwner) {
+    return { status: 409, code: 'recipient_not_screened', error: 'The wallet that owns this Solana token account is not on file, so it cannot be screened and is not paid.' };
+  }
+  const owner = await crossChainRecipientGate(deps, 'SOLANA', destination.tokenOwner);
+  if (owner?.status === 403) return { status: 403, code: 'recipient_blocked', error: 'The wallet that owns this token account was refused by screening. Splash will not pay it.' };
+  return account ?? owner;
+}
+
 async function screeningGate(
   deps: ScreeningGateDeps,
   subject: { chain: string; address: string; defaultKind: Exclude<ScreeningKind, 'deposit'> },

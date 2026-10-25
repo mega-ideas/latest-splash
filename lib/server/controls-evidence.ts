@@ -214,7 +214,7 @@ export async function controlsEvidenceFor(deps: EvidenceDeps, ref: string, gener
   type ScreeningRow = Awaited<ReturnType<typeof screeningsOf>>[number];
   // An unanswered attempt is placed by when it was asked.
   const at = (s: ScreeningRow) => (s.screenedAt ?? s.createdAt).getTime();
-  const split = (rows: ScreeningRow[], subject: 'paid_address' | 'cross_chain_recipient') => {
+  const split = (rows: ScreeningRow[], subject: 'paid_address' | 'cross_chain_recipient' | 'cross_chain_recipient_owner') => {
     const view = (s: ScreeningRow) => ({
       subject,
       chain: s.chain,
@@ -255,10 +255,12 @@ export async function controlsEvidenceFor(deps: EvidenceDeps, ref: string, gener
   }
   // A cross-chain payment's recipient is its destination address, on its own chain (D5c).
   let destination: { chain: string; address: string } | null = null;
+  let tokenOwner: string | null = null;
   if (cct) {
     const [saved] = cct.recipientId
-      ? await deps.db.select({ address: suppliers.destinationAddress }).from(suppliers).where(and(eq(suppliers.id, cct.recipientId), eq(suppliers.orgId, deps.orgId))).limit(1)
+      ? await deps.db.select({ address: suppliers.destinationAddress, tokenOwner: suppliers.destinationTokenOwner }).from(suppliers).where(and(eq(suppliers.id, cct.recipientId), eq(suppliers.orgId, deps.orgId))).limit(1)
       : [];
+    tokenOwner = saved?.tokenOwner ?? null;
     const chain = isCrossChainChain(cct.destinationChain) ? CROSS_CHAIN_CHAINS[cct.destinationChain] : null;
     // Without the saved recipient, an EVM address is the mint recipient's last 20 bytes.
     const address = saved?.address ?? (chain && chain !== 'SOLANA' && /^0x0{24}[0-9a-f]{40}$/i.test(cct.mintRecipient) ? `0x${cct.mintRecipient.slice(-40).toLowerCase()}` : null);
@@ -277,6 +279,23 @@ export async function controlsEvidenceFor(deps: EvidenceDeps, ref: string, gener
             ? 'No CLEAR screening of the cross-chain recipient was the newest on file before the payment was approved.'
             : 'No CLEAR screening of the cross-chain recipient is the newest on file.',
         );
+      }
+      // On Solana the token account's owner wallet is screened as well (sanctions lists name wallets).
+      if (destination.chain === 'SOLANA') {
+        if (!tokenOwner) gaps.push("The wallet that owns the cross-chain recipient's token account is not on file, so it was not screened.");
+        else {
+          const o = split(await screeningsOf(deps.db, deps.orgId, 'SOLANA', tokenOwner, 50), 'cross_chain_recipient_owner');
+          screenings = [...screenings.slice(0, s.beforeView.length), ...o.beforeView, ...screenings.slice(s.beforeView.length)];
+          screeningsAfterApproval = [...screeningsAfterApproval.slice(0, s.after.length), ...o.after, ...screeningsAfterApproval.slice(s.after.length)];
+          sandboxNote(o.before, "the wallet that owns the cross-chain recipient's token account");
+          if (!clearBefore(o.before)) {
+            gaps.push(
+              approvedAt
+                ? "No CLEAR screening of the wallet that owns the cross-chain recipient's token account was the newest on file before the payment was approved."
+                : "No CLEAR screening of the wallet that owns the cross-chain recipient's token account is the newest on file.",
+            );
+          }
+        }
       }
     }
   } else if (kind === 'wallet_payment') {

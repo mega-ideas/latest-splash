@@ -48,10 +48,30 @@ CLEAR kept by a non-production server writing to the same database does
 not open or sign a production payment, send a Travel Rule message, or
 clear a held deposit. The address is screened again by the live provider,
 or the payment is refused (`recipient_not_screened`, `not_screened`) and
-the deposit stays held (`not_screened`). A sandbox BLOCK still blocks.
-Production keeps no sandbox verdict, and a sandbox Travel Rule message
-does not let an exchange payment be signed in production
-(`travel_rule_missing`).
+the deposit stays held (`not_screened`). Production keeps no sandbox
+verdict, and a sandbox Travel Rule message does not let an exchange payment
+be signed in production (`travel_rule_missing`); sending the message
+through the provider replaces it (below).
+
+A sandbox BLOCK on file is treated by what it is attached to. On a
+recipient it still blocks (403, `recipient_blocked`), and the gate never
+screens it away: a person clears it, by screening the address again
+through the live provider (`POST /api/compliance/screenings`), whose newer
+answer then decides. On a deposit it is not the provider's answer, so the
+deposit is held as `not_screened` and screened again by the live provider
+on its next check; a live CLEAR can then release it. Either way nothing
+moves on the sandbox's word: the money stays held, or the recipient
+unpaid, until a provider answers.
+
+**The runtime mode is the only switch.** "Production" here means
+`NODE_ENV=production` (lib/server/runtime-mode.ts), read by each server
+function from the env it is given, which defaults to the process's. Any
+process that reaches the production database (a web server, a worker, a
+cron job, a one-off script) must run with `NODE_ENV=production`; one that
+does not treats sandbox answers on file as answers. This is a line on the
+mainnet checklist (docs/v2/phase2-business-wallet.md, Mainnet), and a
+non-production deployment must never be given the production
+`DATABASE_URL`.
 
 ## KYB and KYC (Sumsub)
 
@@ -137,6 +157,16 @@ exchange (VASP to VASP). `POST /api/wallet/payments/[wsr_…]/travel-rule
   Sumsub's webhook for that txnId and this business (`externalUserId`)
   names its transfer. An answer without Sumsub's transfer id, or naming
   another txnId, is not a submission.
+- A sandbox message on file for the payment (written by a non-production
+  server using the same database) never reached an exchange. Sending
+  through the live provider replaces it in one compare-and-set on that
+  sandbox row: the row takes a new id, the provider, the new request, no
+  reference and `preparing`, and the send goes on as above. The new id means
+  a late answer to the sandbox send, whose updates name the old id, cannot
+  land on the provider's row. The sandbox row's own fields are not kept
+  (there is no archive table); the provider's message is the one that
+  counts. A provider's message is never replaced, and the sandbox meeting it
+  is `travel_rule_conflict`.
 - The payer is `type: company`, paying from an `unhostedWallet` (the
   business's own wallet); the supplier is at a `crypto` (hosted) address
   with the exchange named to Sumsub. Countries go as ISO alpha-3, from a
@@ -209,11 +239,21 @@ reads them.
   (`openCrossChainTransfer`, lib/server/cross-chain-transfers.ts) is opened
   only when this business's newest screening of the destination address,
   on its own chain (BASE, SOLANA, …), is a fresh CLEAR
-  (`crossChainRecipientGate`): the same codes as above, and another
+  (`crossChainDestinationGate`): the same codes as above, and another
   business's CLEAR, or a CLEAR of the same address on another chain, does
-  not count. A retry of a receipt already opened answers it as before. The
+  not count. On Solana CCTP mints to the supplier's USDC token account,
+  while sanctions and KYT lists name wallets, so the wallet that owns that
+  account (read on chain when the recipient is saved,
+  `destination_token_owner`) is screened too: on save (a BLOCK on either is
+  `recipient_blocked` and nothing is saved; the recipient shows the less
+  favourable answer of the two) and when the payment is opened (both must
+  be fresh CLEARs; a BLOCK on either decides; a Solana recipient with no
+  owner on file is `recipient_not_screened`). A retry of a receipt already
+  opened is screened again too: the receipt is kept as it is, and a BLOCK,
+  REVIEW or stale answer since is reported instead of the receipt. The
   owners' cross-chain pay path itself is not built yet
-  (`cross_chain_not_built`); when it is, it opens this receipt first.
+  (`cross_chain_not_built`); when it is, it opens this receipt first, and
+  its signing check calls `crossChainDestinationGate` again.
 - **Signing.** Before every signature on a wallet payment or a second
   approval (the signing layer's `beforeSign`,
   lib/server/payment-compliance-gate.ts) the same check runs again, so a
@@ -241,7 +281,7 @@ both formats, the JSON's SHA-256 in `X-Content-SHA256` and on the PDF:
 | payment | the payout row or the signing request's decoded bytes: kind, status, amount, the `max_fee` bound, paid to, from wallet |
 | kyb | the business's newest KYB case: id, state, the provider's applicant reference, the lifecycle |
 | approvedAt | when the payment was approved: the signature that completed its quorum (null while it is not) |
-| screenings | this business's screenings of the address paid that were on file when it was approved: provider, reference, verdict, score, time; for a cross-chain payment also those of its destination address on its own chain (`subject: cross_chain_recipient`) |
+| screenings | this business's screenings of the address paid that were on file when it was approved: provider, reference, verdict, score, time; for a cross-chain payment also those of its destination address on its own chain (`subject: cross_chain_recipient`), and on Solana those of the wallet that owns that token account (`subject: cross_chain_recipient_owner`) |
 | screeningsAfterApproval | screenings made after it was approved, listed apart: not the check that applied to it |
 | travelRule | the Travel Rule transfer for the payment |
 | approval | the signing request: purpose, status, threshold, each signer's address, weight and time; the spending rule's allowance and policy ids; a second approval's policy and payer |
@@ -249,7 +289,7 @@ both formats, the JSON's SHA-256 in `X-Content-SHA256` and on the PDF:
 | partner | the route, the partner's reference, the bank's reference, the account's last four |
 | iso20022 | the masked pacs.008 copy the partner was sent |
 | chain | the Sui digest; read from the chain, the intent created (under splash_core's original package id), and the SettlementAnchored event's Walrus blob and content hash; the receipt as `<digest>#<event index>` |
-| gaps | what is not on file, in words: among them no CLEAR as the newest screening before approval (of the cross-chain recipient, for a cross-chain payment), a KYB case changed after approval (it is shown as it is now), an exchange payment with no Travel Rule message the provider took, and in production a screening or Travel Rule message on file that is the sandbox's |
+| gaps | what is not on file, in words: among them no CLEAR as the newest screening before approval (of the cross-chain recipient, for a cross-chain payment, and on Solana of the wallet that owns its token account, or that wallet not on file), a KYB case changed after approval (it is shown as it is now), an exchange payment with no Travel Rule message the provider took, and in production a screening or Travel Rule message on file that is the sandbox's |
 
 No secret, signature, sealed value, salt, transaction bytes or account
 number is ever in it: `assertEvidenceClean` refuses a document with such a

@@ -43,7 +43,7 @@ import { FUNDING_CHAINS, SUI_CCTP_DOMAIN } from '../payments/cctp.ts';
 import { irisMessagesOf, isEvmTxHash, messageTransmitterV2, readBurn, readEvmMint, type EvmReceipt, type IrisMessage } from '../payments/cctp-receipts.ts';
 import type { KytProvider } from '../compliance/kyt.ts';
 import { CROSS_CHAIN_CHAINS, isCrossChainChain, moveDeliveryOf, type CrossChainChain } from '../recipients/wallet-recipients.ts';
-import { crossChainRecipientGate } from './kyt-screenings.ts';
+import { crossChainDestinationGate } from './kyt-screenings.ts';
 import { isProductionRuntime } from './runtime-mode.ts';
 import type { DrizzleDb } from './wallet-signing-store.ts';
 
@@ -142,10 +142,12 @@ export type CrossChainOpenDeps = CrossChainDeps & {
  * Open the receipt for one owners' cross-chain payment to a saved
  * CROSS_CHAIN recipient. Idempotent on the payment reference: a retry with
  * the same recipient, amount and fee bound answers the receipt already
- * opened. A new one is opened only when this business's newest screening of
- * the destination address, on its own chain, is a fresh CLEAR (v2 §4.6,
- * lib/server/kyt-screenings.ts crossChainRecipientGate); nothing is kept
- * for a refused payment.
+ * opened, while the destination still screens as below. Opened, or answered
+ * again, only when this business's newest screening of the destination
+ * address, on its own chain, is a fresh CLEAR (v2 §4.6,
+ * lib/server/kyt-screenings.ts crossChainDestinationGate: on Solana the
+ * wallet that owns the token account as well). Nothing is kept for a
+ * refused payment, and a receipt already opened is never deleted.
  */
 export async function openCrossChainTransfer(
   deps: CrossChainOpenDeps,
@@ -170,14 +172,13 @@ export async function openCrossChainTransfer(
   if (!move || move.kind !== 3) return refuse(409, 'not_cross_chain', 'That recipient is not paid on another chain.');
   const now = deps.now();
   const opened = await readCrossChainTransfer(deps.db, deps.orgId, paymentRef);
-  if (!opened) {
-    const screened = await crossChainRecipientGate(
-      { db: deps.db, orgId: deps.orgId, now, kyt: deps.kyt ?? null, ...(deps.maxAgeMs ? { maxAgeMs: deps.maxAgeMs } : {}), requestedBy: deps.requestedBy ?? 'splash:cross-chain-open', ...(deps.env ? { env: deps.env } : {}) },
-      CROSS_CHAIN_CHAINS[move.chain],
-      recipient.destinationAddress ?? '',
-    );
-    if (screened) return refuse(screened.status, screened.code, screened.error);
-  }
+  // Screened on every call, a retry too: a receipt already opened is kept as
+  // it is, but a BLOCK (or REVIEW, or a stale answer) since is reported.
+  const screened = await crossChainDestinationGate(
+    { db: deps.db, orgId: deps.orgId, now, kyt: deps.kyt ?? null, ...(deps.maxAgeMs ? { maxAgeMs: deps.maxAgeMs } : {}), requestedBy: deps.requestedBy ?? 'splash:cross-chain-open', ...(deps.env ? { env: deps.env } : {}) },
+    { chain: CROSS_CHAIN_CHAINS[move.chain], address: recipient.destinationAddress ?? '', tokenOwner: recipient.destinationTokenOwner ?? null },
+  );
+  if (screened) return refuse(screened.status, screened.code, screened.error);
   const inserted = opened ? [] : await deps.db
     .insert(crossChainTransfers)
     .values({

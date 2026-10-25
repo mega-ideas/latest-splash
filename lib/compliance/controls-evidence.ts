@@ -36,8 +36,8 @@ import { renderTextPdf, type PdfLine } from './pdf-text.ts';
 export type EvidencePaymentKind = 'withdrawal' | 'supplier_payout' | 'wallet_payment';
 
 export type EvidenceScreening = {
-  /** The Sui address the USDC went to, or a cross-chain payment's destination address on its own chain. */
-  subject: 'paid_address' | 'cross_chain_recipient';
+  /** The Sui address the USDC went to, or a cross-chain payment's destination address on its own chain, or (Solana) the wallet that owns that token account. */
+  subject: 'paid_address' | 'cross_chain_recipient' | 'cross_chain_recipient_owner';
   chain: string;
   address: string;
   provider: string;
@@ -235,6 +235,7 @@ export function evidencePdf(e: ControlsEvidence): Uint8Array {
   if (e.screenings.length === 0) L.push({ kind: 'text', text: e.approvedAt ? 'No screening of the address paid was on file when it was approved.' : 'No screening on file for the address paid.' });
   const screening = (s: EvidenceScreening) =>
     L.push(
+      { kind: 'field', label: 'Screened as', value: s.subject === 'cross_chain_recipient_owner' ? "Wallet that owns the recipient's token account" : s.subject === 'cross_chain_recipient' ? 'Cross-chain recipient address' : 'Address paid' },
       { kind: 'field', label: 'Address', value: `${s.address} (${s.chain})` },
       { kind: 'field', label: 'Provider', value: s.provider },
       { kind: 'field', label: 'Provider reference', value: or(s.reference, 'None: no answer') },

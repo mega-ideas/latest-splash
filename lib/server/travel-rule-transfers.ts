@@ -12,7 +12,9 @@
  * 409: it may already have that txnId from a send whose answer was lost) is
  * held as `unconfirmed`, never resent and never taken for sent, until
  * Sumsub's webhook for that txnId and this business names its transfer. A
- * retry with any other request is refused (`travel_rule_conflict`).
+ * retry with any other request is refused (`travel_rule_conflict`), except
+ * that a sandbox message on file (it never reached an exchange) is replaced
+ * by the live provider's, never the other way round.
  * Sumsub's webhook moves the status forward only, for its own reference and
  * txnId.
  *
@@ -120,8 +122,37 @@ export async function sendTravelRule(
     })
     .onConflictDoNothing()
     .returning();
-  const row = inserted ?? (await readTravelRuleTransfer(deps.db, deps.orgId, input.intentId));
+  let row = inserted ?? (await readTravelRuleTransfer(deps.db, deps.orgId, input.intentId));
   if (!row) throw new Error('the Travel Rule transfer could not be stored');
+  if (!inserted && row.sandbox && !deps.provider.sandbox) {
+    // A sandbox message on file (a non-production server writing to this
+    // database, say) never reached an exchange. The provider's message
+    // replaces it in one step, under a new id, so a late answer to the
+    // sandbox send (its updates name the old id) cannot land on this row.
+    // Only a sandbox row is replaced; a provider's message never is.
+    const [replaced] = await deps.db
+      .update(travelRuleTransfers)
+      .set({
+        id: `trt_${randomUUID()}`,
+        signingRequestId: input.signingRequestId,
+        exchange: input.beneficiary.exchange,
+        depositAddress: input.beneficiary.depositAddress,
+        amountMinor: input.amountMinor,
+        requestHash,
+        provider: deps.provider.id,
+        sandbox: false,
+        providerRef: null,
+        status: 'preparing',
+        createdBy: input.createdBy,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .where(and(eq(travelRuleTransfers.orgId, deps.orgId), eq(travelRuleTransfers.id, row.id), eq(travelRuleTransfers.sandbox, true)))
+      .returning();
+    // Two callers at once: one replaces it, the other reads what it wrote.
+    row = replaced ?? (await readTravelRuleTransfer(deps.db, deps.orgId, input.intentId));
+    if (!row) throw new Error('the Travel Rule transfer could not be stored');
+  }
   if (row.requestHash !== requestHash || row.provider !== deps.provider.id) {
     return refuse(409, 'travel_rule_conflict', 'A different Travel Rule message was already sent for this payment.');
   }

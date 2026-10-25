@@ -341,6 +341,29 @@ Design: `docs/v2/phase2-compliance.md`. Tests:
   names a missing CLEAR before approval; in production it names a sandbox
   screening or Travel Rule message as not the provider's. Test:
   `tests/compliance-provider-answers.test.mjs`.
+- **Third pass (p2-4.6 review, 26 Oct).** High: a Solana cross-chain
+  recipient was screened by its USDC token account only, never by the
+  wallet that owns it (read on chain and kept as `destination_token_owner`,
+  but never screened). Sanctions and KYT lists name wallets, so the token
+  account of a listed wallet screened CLEAR, was saved, and passed the
+  cross-chain gate; CCTP would then mint to it, which cannot be undone. Now
+  the owner wallet is screened on save and when the payment is opened
+  (`crossChainDestinationGate`): both must be fresh CLEARs, a BLOCK on
+  either decides, and a Solana recipient with no owner on file is not paid.
+  The evidence lists the owner's screenings (`cross_chain_recipient_owner`)
+  and names a missing CLEAR. Medium: in production, a sandbox Travel Rule
+  message on file held the payment with "send it through the provider",
+  but that send was refused (`travel_rule_conflict`) and the payment could
+  never be signed. A send through the live provider now replaces the
+  sandbox row in one compare-and-set, under a new id so the sandbox's late
+  answer cannot land on it. Low: a retry of an opened cross-chain receipt
+  is screened again (the receipt is kept, the refusal reported); the
+  deposit and recipient handling of a sandbox BLOCK is written down; and
+  the production-only sandbox rule rests on `NODE_ENV` alone, now a line on
+  the mainnet checklist (docs/v2/phase2-business-wallet.md, Mainnet). Open:
+  the cross-chain signing check (still to be built; it must call
+  `crossChainDestinationGate`); nothing in code detects a non-production
+  process on the production database.
 - **Open:** supplier name screening (the recipient screening on save and
   the exchange taken from the recipient record are closed by §4.7, above);
   a staff member's own in-limit rule payment

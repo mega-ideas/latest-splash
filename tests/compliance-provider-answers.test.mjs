@@ -17,7 +17,11 @@
  *     newest screening of the destination address, on its own chain, is a
  *     fresh CLEAR: BLOCK 403, REVIEW and unscreened 409, a stale CLEAR
  *     screened again or refused, another business's CLEAR not counted. A
- *     retry of a receipt already opened answers it as before;
+ *     retry of a receipt already opened is screened again (the receipt is
+ *     kept); on Solana the wallet that owns the token account is screened
+ *     too, on save and on open, and a BLOCK on either decides;
+ *   - a sandbox Travel Rule message on file is replaced when the message is
+ *     sent through the provider, so the hold's advice can be followed;
  *   - the evidence of a cross-chain payment lists the screenings of the
  *     destination address and says when none was CLEAR before approval; in
  *     production it says when a screening or a Travel Rule message on file
