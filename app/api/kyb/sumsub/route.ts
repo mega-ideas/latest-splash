@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 
+import { resolveAuthorityForSession } from '@/lib/auth/authority';
 import { ComplianceProviderUnavailable, kybProviderFromEnv } from '@/lib/compliance/sumsub';
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { readJsonBody } from '@/lib/server/http';
@@ -29,6 +30,14 @@ export async function POST(request: Request) {
   const accountCheck = await requireSessionAccount(auth.session);
   if (accountCheck.response) return accountCheck.response;
   const orgId = accountCheck.account.orgId;
+  // Attaching the business's applicant is an owner's act.
+  let authority;
+  try {
+    authority = await resolveAuthorityForSession(auth.session);
+  } catch {
+    return NextResponse.json({ error: 'Only an owner opens the verification.' }, { status: 403, headers: NO_STORE });
+  }
+  if (authority.orgId !== orgId || authority.role !== 'OWNER') return NextResponse.json({ error: 'Only an owner opens the verification.' }, { status: 403, headers: NO_STORE });
 
   const body = await readJsonBody(request);
   const kybCaseId = typeof body.kybCaseId === 'string' ? body.kybCaseId.trim() : '';

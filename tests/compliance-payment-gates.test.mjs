@@ -222,7 +222,8 @@ test('every signature of a wallet payment re-checks the screening, and an exchan
 test('the live wiring runs the payment check before each signature', async () => {
   const deps = await readFile(new URL('../lib/server/wallet-deps.ts', import.meta.url), 'utf8');
   assert.match(deps, /paymentBeforeSign/);
-  assert.match(deps, /kyt: kytProviderFromEnv\(\)/);
+  assert.match(deps, /const kyt = kytProviderFromEnv\(\)/);
+  assert.match(deps, /paymentBeforeSign\(\{ db, now: \(\) => new Date\(\), kyt, maxAgeMs \}, request\)/);
 });
 
 /* 3 ── A KYB verdict is not lost to a failure of ours ───────────────────── */
@@ -275,7 +276,7 @@ test('the webhook route allows SHA-1 outside production or by switch only, and t
   const route = await readFile(new URL('../app/api/webhooks/sumsub/route.ts', import.meta.url), 'utf8');
   assert.match(route, /allowSha1: !isProductionRuntime\(\) \|\| process\.env\.SUMSUB_WEBHOOK_ALLOW_SHA1 === 'true'/);
   const kyb = await readFile(new URL('../app/api/kyb/sumsub/route.ts', import.meta.url), 'utf8');
-  assert.match(kyb, /accountCheck\.account\.role !== 'admin'/);
+  assert.match(kyb, /authority\.orgId !== orgId \|\| authority\.role !== 'OWNER'/);
 });
 
 /* 4 ── A screening kept is the screening of the address asked about ─────── */

@@ -38,6 +38,7 @@ import {
   verifySumsubWebhook,
 } from '../lib/compliance/sumsub.ts';
 import { handleSumsubWebhook } from '../lib/server/sumsub-webhook.ts';
+import { KybTransitionError } from '../lib/compliance/kyb-state.ts';
 import { readTravelRuleTransfer, sendTravelRule } from '../lib/server/travel-rule-transfers.ts';
 
 import { migratedDb } from './helpers/store-db.mjs';
@@ -174,7 +175,7 @@ async function hookWorld({ production = false, withDb = true } = {}) {
     production,
     now: () => T0,
     applyKyb: async (orgId, next) => {
-      if (refuseNext) throw new Error('illegal transition');
+      if (refuseNext) throw new KybTransitionError('ACTIVE', next, 'PROVIDER', 'illegal transition');
       applied.push([orgId, next]);
       return { from: 'KYB_SUBMITTED', to: next };
     },

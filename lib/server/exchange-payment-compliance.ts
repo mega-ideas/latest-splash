@@ -16,12 +16,21 @@
  *
  * The Travel Rule message goes only for a recipient whose newest screening
  * is CLEAR: a REVIEW waits for a person, an unscreened address is screened
- * first, and a BLOCK is never paid.
+ * first. Paying is held back elsewhere: a payment is opened and signed only
+ * for a fresh CLEAR, and an exchange payment is signed only once its
+ * message is with the provider (lib/server/payment-compliance-gate.ts).
+ *
+ * The originator is the business the provider verified: the KYB case's name
+ * and registration number, not the editable profile, and only once the
+ * business's KYB is approved. The beneficiary is the ONE saved recipient at
+ * the address (two saved at one address is refused, not guessed). The
+ * exchange still comes from the request until §4.7 keeps it on the
+ * recipient; a deposit address once named at one exchange keeps it.
  */
-import { desc, eq } from 'drizzle-orm';
+import { and, desc, eq, isNotNull, ne } from 'drizzle-orm';
 import { normalizeSuiAddress } from '@mysten/sui/utils';
 
-import { kybCases, organizations } from '../db/schema.ts';
+import { kybCases, organizations, travelRuleTransfers } from '../db/schema.ts';
 import { isTravelRuleExchange, type TravelRuleExchange, type TravelRuleProvider } from '../compliance/sumsub.ts';
 import { senderDeclaration } from '../compliance/sender-declaration.ts';
 import type { PartnerId } from '../partners/signed-partners.ts';
@@ -45,12 +54,25 @@ export type SavedRecipient = {
   postCode?: string | null;
 };
 
+/** More than one saved recipient at the address: which one is the beneficiary is not guessed. */
+export type AmbiguousRecipient = { ambiguous: true };
+
 export type ExchangePaymentDeps = {
   db: DrizzleDb;
   orgId: string;
   now: () => Date;
-  recipientAt: (orgId: string, address: string) => Promise<SavedRecipient | null>;
+  recipientAt: (orgId: string, address: string) => Promise<SavedRecipient | AmbiguousRecipient | null>;
 };
+
+async function oneRecipientAt(deps: ExchangePaymentDeps, address: string): Promise<{ ok: true; recipient: SavedRecipient } | Refusal> {
+  const found = await deps.recipientAt(deps.orgId, address);
+  if (!found) return refuse(409, 'recipient_not_saved', 'Save the supplier as a recipient at this address first.');
+  if ('ambiguous' in found) return refuse(409, 'recipient_ambiguous', 'More than one saved recipient has this address. Keep one, then try again.');
+  return { ok: true, recipient: found };
+}
+
+/** KYB states in which the provider has verified the business and it is not suspended or rejected. */
+const KYB_VERIFIED = new Set(['KYB_PROVIDER_APPROVED', 'KYB_ADMIN_APPROVED', 'ACTIVE']);
 
 const DEAD = new Set(['failed', 'expired', 'cancelled']);
 
@@ -78,6 +100,7 @@ async function payerOf(db: DrizzleDb, orgId: string) {
       city: organizations.addressCity,
       postCode: organizations.addressPostalCode,
       country: organizations.addressCountry,
+      kybLifecycle: organizations.kybLifecycle,
     })
     .from(organizations)
     .where(eq(organizations.id, orgId))
@@ -86,7 +109,7 @@ async function payerOf(db: DrizzleDb, orgId: string) {
   const legalName = (org.legalName ?? '').trim() || org.name;
   const country = (org.country ?? '').trim().toUpperCase() || null;
   const address = [org.line1, org.city, org.postCode, country].map((v) => (v ?? '').trim()).filter(Boolean).join(', ') || null;
-  return { legalName, registrationNumber: (org.registrationNumber ?? '').trim() || null, country, address, street: org.line1, town: org.city, postCode: org.postCode };
+  return { legalName, registrationNumber: (org.registrationNumber ?? '').trim() || null, country, address, street: org.line1, town: org.city, postCode: org.postCode, kybLifecycle: org.kybLifecycle as string | null };
 }
 
 /** The sender-declaration pack for one wallet payment to an exchange recipient. */
@@ -97,13 +120,22 @@ export async function senderDeclarationFor(
   if (!isTravelRuleExchange(input.exchange)) return refuse(400, 'bad_exchange', 'Choose the exchange the supplier holds this deposit address at.');
   const p = await walletPayment(deps, input.requestId);
   if (!p.ok) return p;
-  const supplier = await deps.recipientAt(deps.orgId, p.recipient);
-  if (!supplier) return refuse(409, 'recipient_not_saved', 'Save the supplier as a recipient at this address first.');
+  const saved = await oneRecipientAt(deps, p.recipient);
+  if (!saved.ok) return saved;
+  const supplier = saved.recipient;
   const payer = await payerOf(deps.db, deps.orgId);
   if (!payer) return refuse(404, 'not_found', 'No such business.');
+  const [kyb] = await deps.db
+    .select({ businessName: kybCases.businessName, registrationNumber: kybCases.registrationNumber })
+    .from(kybCases)
+    .where(eq(kybCases.orgId, deps.orgId))
+    .orderBy(desc(kybCases.updatedAt))
+    .limit(1);
+  // The payer declared is the business the provider verified.
+  if (!kyb || !KYB_VERIFIED.has(payer.kybLifecycle ?? '')) return refuse(409, 'kyb_not_approved', "The business's verification is not approved, so no declaration is made for it.");
   const text = (v: unknown) => (typeof v === 'string' && v.trim() ? v : null);
   const pack = senderDeclaration({
-    payer: { legalName: payer.legalName, registrationNumber: payer.registrationNumber, country: payer.country, address: payer.address },
+    payer: { legalName: kyb.businessName, registrationNumber: kyb.registrationNumber, country: payer.country, address: payer.address },
     walletAddress: p.request.senderAddress,
     supplier: { name: supplier.legalName?.trim() || supplier.name, exchange: input.exchange as TravelRuleExchange, depositAddress: p.recipient },
     amountMinor: p.amountMinor,
@@ -128,17 +160,28 @@ export async function travelRuleForPayment(
   if (!screening || screening.verdict === null) return refuse(409, 'not_screened', 'Screen the recipient address first.');
   if (screening.verdict === 'BLOCK') return refuse(403, 'screening_blocked', 'This address was refused by screening. Splash will not pay it.');
   if (screening.verdict !== 'CLEAR') return refuse(409, 'screening_review', 'A person reviews this address before it is paid.');
-  const supplier = await deps.recipientAt(deps.orgId, p.recipient);
-  if (!supplier) return refuse(409, 'recipient_not_saved', 'Save the supplier as a recipient at this address first.');
+  const saved = await oneRecipientAt(deps, p.recipient);
+  if (!saved.ok) return saved;
+  const supplier = saved.recipient;
   const payer = await payerOf(deps.db, deps.orgId);
   if (!payer?.country) return refuse(409, 'originator_incomplete', "Complete the business's registered address first.");
   const [kyb] = await deps.db
-    .select({ applicant: kybCases.sumsubApplicantId })
+    .select({ applicant: kybCases.sumsubApplicantId, businessName: kybCases.businessName, registrationNumber: kybCases.registrationNumber })
     .from(kybCases)
     .where(eq(kybCases.orgId, deps.orgId))
     .orderBy(desc(kybCases.updatedAt))
     .limit(1);
   if (!kyb?.applicant) return refuse(409, 'kyb_applicant_missing', 'The business has no verification on file with the provider yet.');
+  if (!KYB_VERIFIED.has(payer.kybLifecycle ?? '')) return refuse(409, 'kyb_not_approved', "The business's verification is not approved, so no Travel Rule message is sent for it.");
+  // One deposit address, one exchange: a later payment may not name another.
+  const [earlier] = await deps.db
+    .select({ exchange: travelRuleTransfers.exchange })
+    .from(travelRuleTransfers)
+    .where(and(eq(travelRuleTransfers.orgId, deps.orgId), eq(travelRuleTransfers.depositAddress, p.recipient), ne(travelRuleTransfers.paymentRef, p.paymentRef), isNotNull(travelRuleTransfers.providerRef)))
+    .limit(1);
+  if (earlier && earlier.exchange !== input.exchange) {
+    return refuse(409, 'exchange_mismatch', 'An earlier Travel Rule message named another exchange for this deposit address. Check the recipient.');
+  }
   const purpose = typeof input.purpose === 'string' ? input.purpose.replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 140) || null : null;
   return sendTravelRule(
     { db: deps.db, provider: deps.provider, orgId: deps.orgId, now: deps.now },
@@ -148,7 +191,8 @@ export async function travelRuleForPayment(
       applicantId: kyb.applicant,
       at: deps.now(),
       amountMinor: p.amountMinor,
-      originator: { legalName: payer.legalName, registrationNumber: payer.registrationNumber, country: payer.country, town: payer.town, street: payer.street, postCode: payer.postCode, walletAddress: p.request.senderAddress },
+      // The business the provider verified, not the editable profile.
+      originator: { legalName: kyb.businessName, registrationNumber: kyb.registrationNumber, country: payer.country, town: payer.town, street: payer.street, postCode: payer.postCode, walletAddress: p.request.senderAddress },
       beneficiary: {
         legalName: supplier.legalName?.trim() || supplier.name,
         registrationNumber: supplier.registrationNumber ?? null,

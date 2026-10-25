@@ -21,10 +21,10 @@ import { listRecipientsFor } from '@/lib/server/recipients-store';
 import { NO_STORE, type WalletRoute } from '@/lib/server/wallet-route';
 import { readWithdrawalTransaction } from '@/lib/server/withdrawals-deps';
 
-/** This org's saved WALLET recipient at an address, with its Travel Rule half. */
-export async function savedRecipientAt(orgId: string, address: string): Promise<SavedRecipient | null> {
+/** This org's ONE saved WALLET recipient at an address, with its Travel Rule half; two at one address is ambiguous. */
+export async function savedRecipientAt(orgId: string, address: string): Promise<SavedRecipient | { ambiguous: true } | null> {
   const list = await listRecipientsFor(orgId);
-  const match = list.find((r) => {
+  const matches = list.filter((r) => {
     if (r.payoutMethod !== 'WALLET' || !r.walletAddress) return false;
     try {
       return normalizeSuiAddress(r.walletAddress) === address;
@@ -32,6 +32,8 @@ export async function savedRecipientAt(orgId: string, address: string): Promise<
       return false;
     }
   });
+  if (matches.length > 1) return { ambiguous: true };
+  const match = matches[0];
   if (!match) return null;
   const t = match.travelRule ?? {};
   return {

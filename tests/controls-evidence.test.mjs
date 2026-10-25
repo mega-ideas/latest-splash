@@ -71,7 +71,8 @@ async function world() {
   const { db, client } = await migratedDb();
   await client.exec(`INSERT INTO users (id, email, name) VALUES ('u-owner', 'owner@acme.test', 'Owner'), ('u-owner2', 'owner2@acme.test', 'Owner Two'), ('u-nw', 'owner@northwind.test', 'NW')`);
   await client.exec(`UPDATE organizations SET legal_name = 'Acme Trading Sdn Bhd', registration_number = '202001012345', address_line1 = 'Jalan Ampang', address_city = 'Kuala Lumpur', address_postal_code = '50450', address_country = 'MY', kyb_lifecycle = 'ACTIVE' WHERE id = 'acme'`);
-  await db.insert(schema.kybCases).values({ id: 'kyb_acme_1', orgId: 'acme', businessName: 'Acme Trading Sdn Bhd', registrationNumber: '202001012345', state: 'APPROVED', sumsubApplicantId: 'applicant-001' });
+  // Approved before the payments in these tests (the evidence says so when a case changed after).
+  await db.insert(schema.kybCases).values({ id: 'kyb_acme_1', orgId: 'acme', businessName: 'Acme Trading Sdn Bhd', registrationNumber: '202001012345', state: 'APPROVED', sumsubApplicantId: 'applicant-001', updatedAt: new Date(T0.getTime() - 86_400_000) });
   return { db, client };
 }
 
@@ -223,7 +224,7 @@ test('gaps are named: no KYB case, no screening, nothing sent', async () => {
   assert.equal(r.ok, true);
   assert.equal(r.evidence.kyb, null);
   assert.deepEqual([r.evidence.payment.kind, r.evidence.payment.amountMinor, r.evidence.quote, r.evidence.partner], ['wallet_payment', '5000000', null, null]);
-  for (const re of [/no KYB case/, /No KYT screening of the recipient/, /not been sent to the chain/]) assert.ok(r.evidence.gaps.some((g) => re.test(g)), String(re));
+  for (const re of [/no KYB case/, /No CLEAR screening of the recipient/, /not been sent to the chain/]) assert.ok(r.evidence.gaps.some((g) => re.test(g)), String(re));
 });
 
 test('a payment under a spending rule names its allowance and policy, and a second approval its policy', async () => {

@@ -37,16 +37,24 @@ export async function POST(request: Request) {
     const { getDb } = await import('@/lib/db/client');
     db = getDb() as never;
   }
-  const result = await handleSumsubWebhook(
-    {
-      db,
-      secret: process.env.SUMSUB_WEBHOOK_SECRET,
-      production: isProductionRuntime(),
-      now: () => new Date(),
-      applyKyb: (orgId, next) => setOrgKybState(orgId, next, 'PROVIDER'),
-    },
-    { raw, digest: request.headers.get('x-payload-digest'), alg: request.headers.get('x-payload-digest-alg') },
-  );
+  let result;
+  try {
+    result = await handleSumsubWebhook(
+      {
+        db,
+        secret: process.env.SUMSUB_WEBHOOK_SECRET,
+        production: isProductionRuntime(),
+        now: () => new Date(),
+        applyKyb: (orgId, next) => setOrgKybState(orgId, next, 'PROVIDER'),
+        allowSha1: !isProductionRuntime() || process.env.SUMSUB_WEBHOOK_ALLOW_SHA1 === 'true',
+      },
+      { raw, digest: request.headers.get('x-payload-digest'), alg: request.headers.get('x-payload-digest-alg') },
+    );
+  } catch {
+    // Ours failed; the delivery was released, so Sumsub sends it again.
+    console.error('[sumsub] a webhook could not be applied; released for redelivery');
+    return Response.json({ error: 'not applied' }, { status: 500, headers: NO_STORE });
+  }
   if (result.status === 403) console.warn('[sumsub] refused an unverified webhook');
   return Response.json(result.body, { status: result.status, headers: NO_STORE });
 }

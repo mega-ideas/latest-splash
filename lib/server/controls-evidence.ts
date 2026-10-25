@@ -12,6 +12,12 @@
  * and the SettlementAnchored event the Walrus blob, the content hash and
  * the receipt. A chain that cannot be read leaves those fields empty and
  * says so in `gaps`; nothing is filled in from what the request said.
+ *
+ * The evidence is about the time of the payment: it was approved when the
+ * signature that completed its quorum was taken (the signing layer checks
+ * the screening at every signature, lib/server/payment-compliance-gate.ts).
+ * Screenings after that are listed apart, a payment with no CLEAR before it
+ * says so, and a KYB case changed since is named as changed.
  */
 import { and, desc, eq } from 'drizzle-orm';
 import { normalizeSuiAddress } from '@mysten/sui/utils';
@@ -40,6 +46,25 @@ export type EvidenceDeps = {
 type Refusal = { ok: false; status: number; code: string; error: string };
 
 const PAYMENT_PURPOSES = new Set(['wallet_payment', 'withdrawal', 'partner_payout']);
+/** A request in one of these has had its quorum: its last signature is when it was approved. */
+const APPROVED = new Set(['submitting', 'unknown', 'executed', 'failed']);
+/** splash_core's payment kind for an exchange deposit address. */
+const EXCHANGE_KIND = 2;
+
+/** When the payment was approved: the latest signature of a request whose quorum was met. */
+function approvedAtOf(request: StoredRequest | null): Date | null {
+  if (!request || !APPROVED.has(request.status)) return null;
+  const times = request.signers.map((s) => s.signedAt?.getTime() ?? 0).filter((t) => t > 0);
+  return times.length ? new Date(Math.max(...times)) : request.createdAt;
+}
+
+function kindOf(description: WalletTxDescription | null | undefined): number | null {
+  for (const a of description?.actions ?? []) {
+    if (a.type === 'open_intent') return a.kind;
+    if (a.type === 'pay_intent' && a.intent) return a.intent.kind;
+  }
+  return null;
+}
 
 /** vector<u8> in an event's JSON, as hex: a byte array, a 0x string, or base64. */
 export function bytesHex(value: unknown): string | null {
@@ -138,6 +163,19 @@ async function resolvePayment(deps: EvidenceDeps, ref: string): Promise<{ row: W
   return null;
 }
 
+/**
+ * Each partner fee as its own line, with only the fields a fee line has: the
+ * quote's JSON is not passed through, so nothing else stored beside a fee
+ * reaches the document.
+ */
+function partnerFeeLines(value: unknown): Array<{ partner: string | null; label: string | null; currency: string | null; amountMinor: string | null }> {
+  if (!Array.isArray(value)) return [];
+  const text = (v: unknown) => (typeof v === 'string' ? v.slice(0, 120) : typeof v === 'number' || typeof v === 'bigint' ? String(v) : null);
+  return value
+    .filter((f): f is Record<string, unknown> => Boolean(f) && typeof f === 'object')
+    .map((f) => ({ partner: text(f.partner), label: text(f.label), currency: text(f.currency), amountMinor: text(f.amountMinor) }));
+}
+
 /** One payment's controls evidence, for this org only. */
 export async function controlsEvidenceFor(deps: EvidenceDeps, ref: string, generatedBy: string): Promise<{ ok: true; evidence: ControlsEvidence } | Refusal> {
   const found = await resolvePayment(deps, ref);
@@ -158,7 +196,14 @@ export async function controlsEvidenceFor(deps: EvidenceDeps, ref: string, gener
   if (!kyb) gaps.push('The business has no KYB case on file.');
   else if (!kyb.applicant) gaps.push('The KYB case has no provider applicant reference.');
 
+  const approvedAt = approvedAtOf(request);
+  if (approvedAt && kyb && kyb.updatedAt.getTime() > approvedAt.getTime()) {
+    gaps.push('The KYB case changed after the payment was approved; it is shown as it is now, not as it was then.');
+  }
+
   let screenings: ControlsEvidence['screenings'] = [];
+  let screeningsAfterApproval: ControlsEvidence['screeningsAfterApproval'] = [];
+  let screenedAsExchange = false;
   if (paidTo) {
     let address = paidTo;
     try {
@@ -166,8 +211,10 @@ export async function controlsEvidenceFor(deps: EvidenceDeps, ref: string, gener
     } catch {
       /* kept as given */
     }
-    screenings = (await screeningsOf(deps.db, deps.orgId, 'SUI', address, 5)).map((s) => ({
-      subject: 'paid_address',
+    const rows = await screeningsOf(deps.db, deps.orgId, 'SUI', address, 50);
+    screenedAsExchange = rows.some((s) => s.subjectKind === 'exchange_recipient');
+    const view = (s: (typeof rows)[number]) => ({
+      subject: 'paid_address' as const,
       chain: s.chain,
       address: s.address,
       provider: s.provider,
@@ -175,14 +222,31 @@ export async function controlsEvidenceFor(deps: EvidenceDeps, ref: string, gener
       verdict: s.verdict,
       riskScore: s.riskScore,
       screenedAt: s.screenedAt ? s.screenedAt.toISOString() : null,
-    }));
+    });
+    // An unanswered attempt is placed by when it was asked.
+    const at = (s: (typeof rows)[number]) => (s.screenedAt ?? s.createdAt).getTime();
+    const before = approvedAt ? rows.filter((s) => at(s) <= approvedAt.getTime()) : rows;
+    const after = approvedAt ? rows.filter((s) => at(s) > approvedAt.getTime()) : [];
+    screenings = before.slice(0, 5).map(view);
+    screeningsAfterApproval = after.slice(0, 5).map(view);
   }
-  if (screenings.length === 0) {
-    gaps.push(kind === 'wallet_payment' ? 'No KYT screening of the recipient address is on file.' : "No KYT screening of the partner's deposit address is on file; the supplier's bank account is the partner's to screen.");
+  if (kind === 'wallet_payment') {
+    if (screenings[0]?.verdict !== 'CLEAR') {
+      gaps.push(
+        approvedAt
+          ? 'No CLEAR screening of the recipient address was the newest on file before the payment was approved.'
+          : 'No CLEAR screening of the recipient address is the newest on file.',
+      );
+    }
+  } else if (screenings.length === 0) {
+    gaps.push("No KYT screening of the partner's deposit address is on file; the supplier's bank account is the partner's to screen.");
   }
 
   const tr = await readTravelRuleTransfer(deps.db, deps.orgId, intentId ?? request?.id ?? '');
   const travelRule = tr ? { provider: tr.provider, sandbox: tr.sandbox, reference: tr.providerRef, status: tr.status, exchange: tr.exchange } : null;
+  if (kind === 'wallet_payment' && (kindOf(summary?.description) === EXCHANGE_KIND || screenedAsExchange || tr) && !(tr?.providerRef && ['submitted', 'awaiting_counterparty', 'approved'].includes(tr.status))) {
+    gaps.push('This payment goes to an exchange, and no Travel Rule message accepted by the provider is on file for it.');
+  }
 
   let approval: ControlsEvidence['approval'] = null;
   if (request) {
@@ -210,7 +274,7 @@ export async function controlsEvidenceFor(deps: EvidenceDeps, ref: string, gener
         currency: row.currency,
         rateMicro: row.rateMicro.toString(),
         receiveMinor: row.receiveMinor.toString(),
-        partnerFees: q?.partnerFees ?? [],
+        partnerFees: partnerFeeLines(q?.partnerFees),
         splashFeeMinor: typeof q?.splashFeeMinor === 'string' ? q.splashFeeMinor : null,
         sandbox: q?.sandbox === true,
       }
@@ -252,8 +316,10 @@ export async function controlsEvidenceFor(deps: EvidenceDeps, ref: string, gener
       fromWallet: row?.walletAddress ?? request!.senderAddress,
       createdAt: (row?.createdAt ?? request!.createdAt).toISOString(),
     },
+    approvedAt: approvedAt ? approvedAt.toISOString() : null,
     kyb: kyb ? { caseId: kyb.id, state: kyb.state, provider: kyb.applicant ? 'sumsub' : null, providerApplicantRef: kyb.applicant, lifecycle, updatedAt: kyb.updatedAt.toISOString() } : null,
     screenings,
+    screeningsAfterApproval,
     travelRule,
     approval,
     quote,

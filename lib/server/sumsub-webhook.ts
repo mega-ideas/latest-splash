@@ -27,6 +27,7 @@ import { randomUUID } from 'node:crypto';
 import { and, eq } from 'drizzle-orm';
 
 import { webhookEvents } from '../db/schema.ts';
+import { KybTransitionError } from '../compliance/kyb-state.ts';
 import { kybDecision, orgFromSumsubPayload, travelRuleEventOf, verifySumsubWebhook } from '../compliance/sumsub.ts';
 import { applyTravelRuleEvent } from './travel-rule-transfers.ts';
 import type { DrizzleDb } from './wallet-signing-store.ts';
@@ -37,6 +38,8 @@ export type SumsubWebhookDeps = {
   production: boolean;
   now: () => Date;
   applyKyb: (orgId: string, next: 'KYB_PROVIDER_APPROVED' | 'REJECTED') => Promise<{ from: string; to: string }>;
+  /** Sumsub's old SHA-1 default: refused unless allowed (outside production, or SUMSUB_WEBHOOK_ALLOW_SHA1 for the switch-over). Default allowed. */
+  allowSha1?: boolean;
 };
 
 export type SumsubWebhookResult = { status: number; body: Record<string, unknown> };
@@ -60,7 +63,7 @@ async function release(db: DrizzleDb, replayKey: string) {
 
 export async function handleSumsubWebhook(deps: SumsubWebhookDeps, input: { raw: string; digest: string | null; alg: string | null }): Promise<SumsubWebhookResult> {
   const now = deps.now();
-  const verified = verifySumsubWebhook({ ...input, secret: deps.secret, now });
+  const verified = verifySumsubWebhook({ ...input, secret: deps.secret, now, allowSha1: deps.allowSha1 ?? true });
   if (!verified.ok) {
     return verified.status === 403 ? { status: 403, body: { error: 'forbidden' } } : { status: 400, body: { error: verified.reason } };
   }
@@ -90,10 +93,13 @@ export async function handleSumsubWebhook(deps: SumsubWebhookDeps, input: { raw:
     try {
       const moved = await deps.applyKyb(orgId, decision.next);
       return done(true, decision.reason, { from: moved.from, to: moved.to });
-    } catch {
-      // The state machine refused the move (a duplicate, or an org already
-      // further on). Acknowledged so Sumsub stops; nothing goes backwards.
-      return done(false, 'transition not permitted');
+    } catch (error) {
+      // Only the state machine's own refusal (a duplicate, or an org already
+      // further on) is acknowledged, so Sumsub stops; nothing goes backwards.
+      // Anything else (the database down, a timeout) is ours: it goes to the
+      // outer catch, the claim is released and Sumsub delivers it again.
+      if (error instanceof KybTransitionError) return done(false, 'transition not permitted');
+      throw error;
     }
   } catch (error) {
     // Something of ours failed: let Sumsub deliver it again.

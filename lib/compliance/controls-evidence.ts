@@ -6,7 +6,11 @@
  *   who was verified       the business's KYB case: its id, its state, the
  *                          provider's applicant reference, the lifecycle
  *   what was screened      each KYT screening of the address paid: provider,
- *                          the provider's reference, the verdict (or none)
+ *                          the provider's reference, the verdict (or none);
+ *                          those made before the payment was approved (the
+ *                          quorum's last signature) apart from those after,
+ *                          so a later CLEAR is never read as the control
+ *                          that applied
  *   which rule applied     the signing request, its threshold and signers,
  *                          the spending rule (allowance, policy) and second
  *                          approval when there was one
@@ -31,6 +35,17 @@ import { renderTextPdf, type PdfLine } from './pdf-text.ts';
 
 export type EvidencePaymentKind = 'withdrawal' | 'supplier_payout' | 'wallet_payment';
 
+export type EvidenceScreening = {
+  subject: 'paid_address';
+  chain: string;
+  address: string;
+  provider: string;
+  reference: string | null;
+  verdict: string | null;
+  riskScore: string | null;
+  screenedAt: string | null;
+};
+
 export type ControlsEvidence = {
   schema: 'splash.controls-evidence.v1';
   payment: {
@@ -46,6 +61,8 @@ export type ControlsEvidence = {
     fromWallet: string;
     createdAt: string;
   };
+  /** When the payment was approved: the signature that completed its quorum. Null while it is not. */
+  approvedAt: string | null;
   kyb: {
     caseId: string;
     state: string;
@@ -54,16 +71,10 @@ export type ControlsEvidence = {
     lifecycle: string | null;
     updatedAt: string;
   } | null;
-  screenings: Array<{
-    subject: 'paid_address';
-    chain: string;
-    address: string;
-    provider: string;
-    reference: string | null;
-    verdict: string | null;
-    riskScore: string | null;
-    screenedAt: string | null;
-  }>;
+  /** The screenings on file when the payment was approved (all of them while it is not), newest first. */
+  screenings: EvidenceScreening[];
+  /** Screenings made after the payment was approved: not the control that applied to it. */
+  screeningsAfterApproval: EvidenceScreening[];
   travelRule: { provider: string; sandbox: boolean; reference: string | null; status: string; exchange: string } | null;
   approval: {
     signingRequestId: string;
@@ -99,10 +110,28 @@ export type ControlsEvidence = {
   generatedBy: string;
 };
 
-/** Keys that may never appear in an evidence document. */
-const FORBIDDEN_KEY = /(secret|token|password|passphrase|private|mnemonic|sealed|salt|signature$|^signature|accountNumber|apiKey|txBytes)/i;
+/** Keys that may never appear in an evidence document (an account under any of its usual names; the last four is `…Last4`). */
+const FORBIDDEN_KEY = /(secret|token|password|passphrase|private|mnemonic|sealed|salt|signature$|^signature|accountNumber|apiKey|txBytes|^iban$|^bban$|^account$|accountNo|Account(?!Last4)$)/i;
 /** Values that may never appear: a Sui private key, a PEM key. */
 const FORBIDDEN_VALUE = /(suiprivkey1|BEGIN [A-Z ]*PRIVATE KEY)/;
+/**
+ * Account-shaped values: eight digits or more (spaces or dashes between
+ * allowed), or an IBAN. Amounts, times, scores and counts are numeric by
+ * design and are let through by key; addresses, hashes, digests, ids and
+ * ISO times by their shape.
+ */
+const ACCOUNT_LIKE = /\d(?:[ -]?\d){7,}/;
+const IBAN_LIKE = /\b[A-Z]{2}\d{2}[A-Z0-9]{10,30}\b/;
+const NUMERIC_KEY = /(Minor|Micro|Ms|Score|^value$|^threshold$|^weight$|^exchangeRate$|^amount$)$/;
+/** A provider's or the chain's own reference or id: whatever shape it has, it is theirs, not an account. */
+const REFERENCE_KEY = /(Ref|^ref|reference|Id|^id|Ids|[dD]igest|^uetr|^endToEndId)$/;
+const SAFE_SHAPE = [
+  /^0x[0-9a-fA-F]+$/, // a Sui address or object id
+  /^[0-9a-fA-F]{64}$/, // a hash
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/, // an ISO time
+  /^([a-z]{2,5}_)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/, // a UUID, or a Splash id (wsr_, wdr_, …)
+  /^[1-9A-HJ-NP-Za-km-z]{32,44}(#\d+)?$/, // a Sui digest, or a receipt id <digest>#<index>
+];
 
 export class EvidenceLeak extends Error {
   constructor(path: string) {
@@ -112,19 +141,23 @@ export class EvidenceLeak extends Error {
 }
 
 /** Refuse a document holding a secret, a signature, a sealed value or a raw key. */
-export function assertEvidenceClean(value: unknown, path = '$'): void {
+export function assertEvidenceClean(value: unknown, path = '$', key = ''): void {
   if (typeof value === 'string') {
     if (FORBIDDEN_VALUE.test(value)) throw new EvidenceLeak(path);
+    if (NUMERIC_KEY.test(key) && /^-?\d+(\.\d+)?$/.test(value)) return;
+    if (REFERENCE_KEY.test(key)) return;
+    if (SAFE_SHAPE.some((re) => re.test(value))) return;
+    if (ACCOUNT_LIKE.test(value) || IBAN_LIKE.test(value)) throw new EvidenceLeak(path);
     return;
   }
   if (Array.isArray(value)) {
-    value.forEach((v, i) => assertEvidenceClean(v, `${path}[${i}]`));
+    value.forEach((v, i) => assertEvidenceClean(v, `${path}[${i}]`, key));
     return;
   }
   if (value && typeof value === 'object') {
     for (const [k, v] of Object.entries(value)) {
       if (FORBIDDEN_KEY.test(k)) throw new EvidenceLeak(`${path}.${k}`);
-      assertEvidenceClean(v, `${path}.${k}`);
+      assertEvidenceClean(v, `${path}.${k}`, k);
     }
   }
 }
@@ -172,8 +205,9 @@ export function evidencePdf(e: ControlsEvidence): Uint8Array {
     );
   } else L.push({ kind: 'text', text: 'No KYB case on file.' });
   L.push({ kind: 'heading', text: 'What was screened (KYT)' });
-  if (e.screenings.length === 0) L.push({ kind: 'text', text: 'No screening on file for the address paid.' });
-  for (const s of e.screenings) {
+  L.push({ kind: 'field', label: 'Approved at', value: or(e.approvedAt, 'Not approved yet') });
+  if (e.screenings.length === 0) L.push({ kind: 'text', text: e.approvedAt ? 'No screening of the address paid was on file when it was approved.' : 'No screening on file for the address paid.' });
+  const screening = (s: EvidenceScreening) =>
     L.push(
       { kind: 'field', label: 'Address', value: `${s.address} (${s.chain})` },
       { kind: 'field', label: 'Provider', value: s.provider },
@@ -182,6 +216,10 @@ export function evidencePdf(e: ControlsEvidence): Uint8Array {
       { kind: 'field', label: 'Screened at', value: or(s.screenedAt, 'Not screened') },
       { kind: 'gap' },
     );
+  e.screenings.forEach(screening);
+  if (e.screeningsAfterApproval.length > 0) {
+    L.push({ kind: 'text', text: 'Screened after the payment was approved (not the check that applied to it):' });
+    e.screeningsAfterApproval.forEach(screening);
   }
   L.push({ kind: 'heading', text: 'Travel Rule' });
   if (e.travelRule) {

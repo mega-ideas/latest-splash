@@ -188,7 +188,7 @@ export const SUMSUB_WEBHOOK_MAX_AGE_MS = 48 * 60 * 60 * 1000;
 export const SUMSUB_WEBHOOK_MAX_SKEW_MS = 5 * 60 * 1000;
 
 export type VerifiedSumsubWebhook = { ok: true; payload: Record<string, unknown>; replayKey: string; createdAt: Date };
-export type RefusedSumsubWebhook = { ok: false; status: 400 | 403; reason: 'unsigned' | 'bad_signature' | 'unknown_algorithm' | 'bad_body' | 'undated' | 'stale' | 'future' };
+export type RefusedSumsubWebhook = { ok: false; status: 400 | 403; reason: 'unsigned' | 'bad_signature' | 'unknown_algorithm' | 'weak_algorithm' | 'bad_body' | 'undated' | 'stale' | 'future' };
 
 /** Sumsub's `createdAtMs` ("2026-10-25 08:00:00.123", UTC) or `createdAt` ("2026-10-25 08:00:00+0000"). */
 export function sumsubWebhookDate(payload: Record<string, unknown>): Date | null {
@@ -210,13 +210,17 @@ export function sumsubWebhookDate(payload: Record<string, unknown>): Date | null
  * other name is refused), then the body, then its date inside the window.
  * Unconfigured verifies as false.
  */
-export function verifySumsubWebhook(input: { raw: string; digest: string | null; alg: string | null; secret: string | undefined; now: Date }): VerifiedSumsubWebhook | RefusedSumsubWebhook {
+export function verifySumsubWebhook(input: { raw: string; digest: string | null; alg: string | null; secret: string | undefined; now: Date; allowSha1?: boolean }): VerifiedSumsubWebhook | RefusedSumsubWebhook {
   const secret = (input.secret ?? '').trim();
   if (!secret || !input.digest) return { ok: false, status: 403, reason: 'unsigned' };
   // Sumsub names the algorithm; without the header it is its old default, SHA-1.
   const alg = (input.alg ?? '').trim();
   const algorithm = alg === 'HMAC_SHA512_HEX' ? 'sha512' : alg === 'HMAC_SHA256_HEX' ? 'sha256' : alg === '' || alg === 'HMAC_SHA1_HEX' ? 'sha1' : null;
   if (!algorithm) return { ok: false, status: 403, reason: 'unknown_algorithm' };
+  // SHA-1 is what a sender who leaves the header out gets; production takes
+  // it only while switched on (SUMSUB_WEBHOOK_ALLOW_SHA1), until Sumsub is set
+  // to HMAC_SHA256_HEX.
+  if (algorithm === 'sha1' && input.allowSha1 === false) return { ok: false, status: 403, reason: 'weak_algorithm' };
   const expected = Buffer.from(createHmac(algorithm, secret).update(input.raw, 'utf8').digest('hex'));
   const given = Buffer.from(input.digest.trim().toLowerCase());
   if (expected.length !== given.length || !timingSafeEqual(expected, given)) return { ok: false, status: 403, reason: 'bad_signature' };
