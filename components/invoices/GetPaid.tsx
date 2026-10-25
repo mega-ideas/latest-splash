@@ -16,6 +16,7 @@ import LocalTime from '@/components/LocalTime';
 import { useLaunchScope } from '@/components/dashboard/CustodyPhaseContext';
 import { suiScanTxUrlOn } from '@/lib/explorer';
 import { INVOICE_STATUS_LABEL, canMoveInvoice, invoiceOpen } from '@/lib/invoices/status';
+import { totalsFigure } from '@/lib/invoices/totals-figure';
 import type { InvoiceRecord, InvoiceStatusV2 } from '@/lib/server/operations';
 import { cn } from '@/lib/utils';
 
@@ -151,21 +152,30 @@ export default function GetPaid({ issuerName, onCounts }: { issuerName: string; 
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="dash-block grid grid-cols-3 divide-x divide-[#326273]/10 p-0">
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+        {/* Up to lg, Open has the whole first row and the other two share the
+            next; from lg the three sit in one row, and the buttons join that
+            row from xl, so the tiles are never squeezed. A figure never wraps:
+            it steps down in size to fit (lib/invoices/totals-figure.ts). */}
+        <div className="dash-block grid grid-cols-2 p-0 lg:grid-cols-3 xl:min-w-0 xl:flex-1">
           {[
-            { label: 'Open', value: `${usdc(totals.openAmount)}`, sub: `${totals.openCount} invoice${totals.openCount === 1 ? '' : 's'}` },
-            { label: 'Overdue', value: String(totals.overdue), sub: 'past due' },
-            { label: 'Paid this month', value: usdc(totals.paidMonth), sub: 'USDC' },
-          ].map((s) => (
-            <div key={s.label} className="min-w-0 px-3 py-3 sm:px-4">
-              <p className="text-[12px] font-semibold text-[#326273]">{s.label}</p>
-              <p className="dash-num mt-0.5 font-mono text-[15px] sm:text-lg font-semibold leading-tight text-[#0c3e48] [overflow-wrap:anywhere]">{s.value}</p>
-              <p className="text-[12px] text-[#326273]">{s.sub}</p>
-            </div>
-          ))}
+            { label: 'Open', value: `${usdc(totals.openAmount)}`, sub: `${totals.openCount} invoice${totals.openCount === 1 ? '' : 's'}`, tile: 'col-span-2 border-b lg:col-span-1 lg:border-b-0 lg:border-r' },
+            { label: 'Overdue', value: String(totals.overdue), sub: 'past due', tile: 'border-r' },
+            { label: 'Paid this month', value: usdc(totals.paidMonth), sub: 'USDC', tile: '' },
+          ].map((s) => {
+            const figure = totalsFigure(s.value);
+            return (
+              <div key={s.label} className={cn('min-w-0 border-[#326273]/10 px-3 py-3 sm:px-4', s.tile)}>
+                <p className="text-[12px] font-semibold text-[#326273]">{s.label}</p>
+                <p className={cn('dash-num mt-0.5 whitespace-nowrap font-mono font-semibold leading-tight tabular-nums text-[#0c3e48]', figure.className)} title={figure.full}>
+                  {figure.display === figure.full ? figure.full : <><span aria-hidden="true">{figure.display}</span><span className="sr-only">{figure.full}</span></>}
+                </p>
+                <p className="text-[12px] text-[#326273]">{s.sub}</p>
+              </div>
+            );
+          })}
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex shrink-0 flex-wrap gap-2">
           <button type="button" onClick={() => usdcSync.mutate()} disabled={usdcSync.isPending} className="dash-btn dash-btn-ghost min-h-11 !text-[13px] disabled:opacity-60">
             {usdcSync.isPending ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <RefreshCw className="h-4 w-4" aria-hidden="true" />} Check USDC payments
           </button>
