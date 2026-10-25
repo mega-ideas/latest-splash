@@ -88,11 +88,32 @@ test('Get paid: create with inline errors in a real dialog, a pay link, the stat
 
 test('the Get paid totals show the whole amount on a phone, never cut off', async () => {
   const getPaid = await source('components/invoices/GetPaid.tsx');
-  const tile = /<p className="dash-num[^"]*">\{s\.value\}<\/p>/.exec(getPaid);
-  assert.ok(tile, 'the totals tile renders its value');
-  assert.doesNotMatch(tile[0], /\btruncate\b/, 'an amount is never shown cut off, as "10,931..."');
-  assert.match(tile[0], /overflow-wrap:anywhere|break-all|break-words/, 'a long amount wraps inside its tile');
-  assert.match(tile[0], /text-\[15px\] sm:text-lg|text-base sm:text-lg/, 'the figure is smaller on a phone');
+  const tile = /<p className=\{cn\('dash-num[^']*'[^}]*\}\s*[^>]*>/.exec(getPaid);
+  assert.ok(tile, 'the totals tile renders its figure through cn(), sized by its length');
+  assert.doesNotMatch(tile[0], /truncate/, 'an amount is never shown cut off, as "10,931..."');
+  assert.doesNotMatch(tile[0], /overflow-wrap:anywhere|break-all/, 'a money figure is never split mid-number, as "1,234,567.8" / "9"');
+  assert.match(tile[0], /whitespace-nowrap/, 'a money figure stays on one line');
+  assert.match(tile[0], /totalsFigureClass\(/, 'the figure steps down in size by its length');
+});
+
+test('at 390px every Get paid total of 1,234,567.89 and up fits its tile on one line', async () => {
+  const { TOTALS_PHONE, totalsFigure, figureFits } = await import('../lib/invoices/totals-figure.ts');
+  // The phone tiles: Open has the whole row; Overdue and Paid this month share
+  // the next one. Widths are the measured content boxes at 390x844.
+  for (const value of ['1,234,567.89', '12,345,678.90', '999,999,999.99', '1,234,567,890.12', '999,999,999,999.99']) {
+    for (const width of [TOTALS_PHONE.fullRowPx, TOTALS_PHONE.halfRowPx]) {
+      const fig = totalsFigure(value);
+      assert.ok(figureFits(fig, width), `${value} at ${fig.phonePx}px fits ${width}px on one line`);
+      assert.equal(fig.full, value, 'the full value is always kept, for the title and screen readers');
+    }
+  }
+  // Short figures keep the reading size; long ones step down, never below 12px.
+  assert.equal(totalsFigure('10,931.50').phonePx, 15);
+  assert.ok(totalsFigure('999,999,999,999.99').phonePx >= 12);
+  // Past what a tile can hold at 12px, the figure is shown compact with the full value beside it for assistive tech.
+  const huge = totalsFigure('1,234,567,890,123,456.78');
+  assert.ok(huge.display.length < huge.full.length && figureFits(huge, TOTALS_PHONE.halfRowPx));
+  assert.equal(huge.full, '1,234,567,890,123,456.78');
 });
 
 test('the invoice pages follow the copy and colour rules', async () => {
