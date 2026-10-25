@@ -385,6 +385,29 @@ test('the quorum creates the policy, then gives a staff member a rule; the index
   await w.client.close();
 });
 
+test('a bank beneficiary is bound only to a partner deposit address this business verified by its test deposit', async () => {
+  const w = await spendWorld();
+  const { members } = await withPolicy(w);
+  const DEPOSIT = normalizeSuiAddress('0x' + '54'.repeat(32));
+  const change = { addBeneficiaries: [{ commitment: '3a'.repeat(32), partnerDeposit: DEPOSIT }] };
+  const bind = () => changeRecipients(w.sc, { orgId: 'acme', requestedBy: 'u-founder', wallet: members, change });
+  const unknown = await bind();
+  assert.equal(unknown.code, 'partner_address_unverified');
+  assert.deepEqual(unknown.details.addresses, [DEPOSIT]);
+  const row = (orgId, status, id) => ({ id, orgId, partner: 'hata_fiuu', address: DEPOSIT, accountRef: `acct_${id}`, status, testAmountMinor: 1_000_000n, createdBy: 'u-founder', createdAt: T0, updatedAt: T0 });
+  // Another business's verified address is not this one's; this one's, before its test deposit, is not verified.
+  await w.db.insert(schema.partnerDepositAddresses).values(row('northwind', 'verified', 'pda_north'));
+  assert.equal((await bind()).code, 'partner_address_unverified');
+  await w.db.update(schema.partnerDepositAddresses).set({ status: 'revoked' }).where(eq(schema.partnerDepositAddresses.id, 'pda_north'));
+  await w.db.insert(schema.partnerDepositAddresses).values(row('acme', 'test_sent', 'pda_acme'));
+  assert.equal((await bind()).code, 'partner_address_unverified');
+  await w.db.update(schema.partnerDepositAddresses).set({ status: 'verified', verifiedAt: T0 }).where(eq(schema.partnerDepositAddresses.id, 'pda_acme'));
+  const bound = await bind();
+  assert.equal(bound.ok, true, JSON.stringify(bound));
+  assert.ok(bound.request.description.actions.some((a) => a.type === 'verify_beneficiary' && a.partnerDeposit === DEPOSIT));
+  await w.client.close();
+});
+
 test('the WALLET tag needs a verified ownership proof; an exchange address does not', async () => {
   const w = await spendWorld();
   const { members } = await withPolicy(w);
