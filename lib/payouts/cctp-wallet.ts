@@ -57,7 +57,7 @@ import {
   type PayoutPartner,
   type PayoutQuote,
 } from './partner.ts';
-import { placeSandboxOrder, sandboxOrderStatus } from './sandbox-orders.ts';
+import { placeSandboxOrder, sandboxOrderStatus, sandboxReverse } from './sandbox-orders.ts';
 
 export const CCTP_WALLET_CREDENTIALS = ['CCTP_IRIS_API_URL', 'CCTP_BRIDGE_ADAPTER_TYPE'] as const;
 
@@ -153,8 +153,13 @@ function sandboxAdapter(env: NodeJS.ProcessEnv): PayoutPartner {
     handleWebhook({ rawBody, signature, now }) {
       return verifyPayoutWebhook(rawBody, signature, sandboxWebhookSecretFor(env, 'cctp_wallet'), now);
     },
-    async returnOrReverse({ reason }) {
-      return { accepted: BEFORE_BURN.has(reason), sandbox: true };
+    async returnOrReverse(input) {
+      // Only an order this sandbox took, back to the wallet it named; a burn is never reversed.
+      if (!BEFORE_BURN.has(input.reason)) {
+        sandboxReverse('cctp_wallet', input, false);
+        return { accepted: false, sandbox: true };
+      }
+      return sandboxReverse('cctp_wallet', input);
     },
   };
 }

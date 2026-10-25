@@ -1010,14 +1010,17 @@ export async function openBankPayout(
     partnerRef = order.partnerRef;
   } catch (error) {
     const u = unavailable(error);
-    if (!u) {
-      // The partner may have taken it and the answer was lost: an instruction
-      // keyed by this intent id must not stay live at the partner.
-      const reversed = await reverseInstruction(deps, r.adapter, { intentId, partnerRef: '', returnAddress: r.wallet.address }, 'instruction_unconfirmed');
-      await store.recordWithdrawalEvent(deps.db, { orgId: deps.orgId, subject: 'withdrawal', subjectId: id, actor: 'system', action: 'instruction_reversed', detail: { reason: 'instruction_unconfirmed', accepted: reversed }, at: deps.now() });
+    if (u) {
+      await cancel(deps, id, 'system', u.code, ['preparing']);
+      return u;
     }
-    await cancel(deps, id, 'system', u ? u.code : 'partner_error', ['preparing']);
-    return u ?? refuse(502, 'partner_error', 'The partner did not take the instruction. Nothing was sent.');
+    // The partner may have taken it and the answer was lost: an instruction
+    // keyed by this intent id must not stay live at the partner. It is
+    // reversed by the intent id alone, and the ask is counted on the row, so
+    // the sweep asks again until the partner takes it (reversalsOwedForStaff).
+    await cancel(deps, id, 'system', 'instruction_unconfirmed', ['preparing']);
+    await reverseCancelled(deps, r.adapter, { id, intentId, partnerRef: null, walletAddress: r.wallet.address }, 'instruction_unconfirmed', {}, { byIntentOnly: true });
+    return refuse(502, 'partner_error', 'The partner did not take the instruction. Nothing was sent.');
   }
   const instructed = await store.patchWithdrawal(deps.db, deps.orgId, id, { partnerRef, updatedAt: now });
   await store.recordWithdrawalEvent(deps.db, { orgId: deps.orgId, subject: 'withdrawal', subjectId: id, actor: 'system', action: 'instructed', detail: { partnerRef }, at: now });
@@ -1164,6 +1167,11 @@ async function askForReturn(
  * alerted once. Until then the instruction (keyed by intent id and expected
  * amount) is live at the partner for a bank account the owners stopped using.
  * A route switched off counts as not accepted: asked again next run.
+ *
+ * `byIntentOnly`: an instruction whose answer was lost has no reference, so
+ * it is reversed by the intent id alone (partnerRef ''). Only that path, and
+ * the sweep for a row it already counted, ask without a reference; a payout
+ * cancelled before any instruction owes nothing.
  */
 async function reverseCancelled(
   deps: { db: DrizzleDb; now: () => Date; orgId: string },
@@ -1171,13 +1179,14 @@ async function reverseCancelled(
   row: { id: string; intentId: string; partnerRef: string | null; walletAddress: string },
   reason: string,
   more: Record<string, unknown> = {},
+  opts: { byIntentOnly?: boolean } = {},
 ): Promise<boolean> {
-  if (!row.partnerRef) return false;
+  if (!row.partnerRef && !opts.byIntentOnly) return false;
   const at = deps.now();
   let accepted = false;
   try {
     const a = typeof adapter === 'function' ? adapter() : adapter;
-    accepted = await reverseInstruction(deps, a, { intentId: row.intentId, partnerRef: row.partnerRef, returnAddress: row.walletAddress }, reason);
+    accepted = await reverseInstruction(deps, a, { intentId: row.intentId, partnerRef: row.partnerRef ?? '', returnAddress: row.walletAddress }, reason);
   } catch {
     accepted = false;
   }
@@ -1383,7 +1392,9 @@ export async function reconcileWithdrawals(deps: SettlementDeps): Promise<SweepR
   }
   // Cancelled payouts whose instruction is still live at the partner: ask again until it reverses it.
   for (const row of await store.reversalsOwedForStaff(deps.db)) {
-    const accepted = await reverseCancelled({ ...deps, orgId: row.orgId }, () => deps.partner(row.partner as PayoutPartnerId), row, 'cancelled', { via: 'sweep' });
+    // A row with no reference is a lost answer already asked once: reversed by its intent id again.
+    const byIntentOnly = !row.partnerRef;
+    const accepted = await reverseCancelled({ ...deps, orgId: row.orgId }, () => deps.partner(row.partner as PayoutPartnerId), row, byIntentOnly ? 'instruction_unconfirmed' : 'cancelled', { via: 'sweep' }, { byIntentOnly });
     out.reversalsAsked += 1;
     if (!accepted) out.reversalsPending += 1;
   }

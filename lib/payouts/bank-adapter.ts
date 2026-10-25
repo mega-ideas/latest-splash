@@ -39,7 +39,7 @@ import {
   type PayoutPartnerId,
   type PayoutQuote,
 } from './partner.ts';
-import { placeSandboxOrder, sandboxOrderStatus } from './sandbox-orders.ts';
+import { placeSandboxOrder, sandboxOrderStatus, sandboxReverse } from './sandbox-orders.ts';
 
 /** How long a quote holds. Past it, the rate is refused, never refreshed. */
 export const PAYOUT_QUOTE_TTL_MS = 5 * 60 * 1000;
@@ -150,8 +150,9 @@ export function sandboxBankAdapter(spec: SandboxBankSpec): PayoutPartner {
     handleWebhook({ rawBody, signature, now }) {
       return verifyPayoutWebhook(rawBody, signature, sandboxWebhookSecretFor(spec.env, facts.id), now);
     },
-    async returnOrReverse() {
-      return { accepted: true, sandbox: true };
+    async returnOrReverse(input) {
+      // Only an order this sandbox took, back to the wallet the instruction named.
+      return sandboxReverse(facts.id, input);
     },
   };
 }

@@ -160,8 +160,11 @@ test deposit to it would be lost.
      beneficiary salt (so the partner can recompute `beneficiary_ref` from
      the account it pays), purpose `INTC` and the business wallet as the
      return address. If the partner's answer is lost (anything but a clear
-     refusal), the instruction is reversed (`instruction_unconfirmed`) and
-     the withdrawal cancelled.
+     refusal), the withdrawal is cancelled (`instruction_unconfirmed`) and
+     the instruction reversed by the intent id alone (no reference came
+     back, so `partnerRef` is ''). That ask is counted on the row like any
+     other reversal, so the sweep asks again, by the intent id, until the
+     partner takes it. A clear refusal owes no reversal.
   4. The owners are asked to sign the composed PTB under purpose
      `withdrawal`. That purpose accepts only a kind 4 payout to the
      verified deposit address, carrying that `beneficiary_ref`, for that

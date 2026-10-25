@@ -327,14 +327,16 @@ export async function returnsOwedForStaff(db: DrizzleDb): Promise<WithdrawalRow[
 
 /**
  * Cancelled payouts (every org) whose instruction is still live at the
- * partner: it took an instruction (a partner reference) and has not yet
- * agreed to reverse it. The sweep asks again.
+ * partner: it took an instruction (a partner reference), or may have (its
+ * answer was lost: no reference, and the reversal by intent id already asked
+ * at least once), and has not yet agreed to reverse it. The sweep asks again.
  */
 export async function reversalsOwedForStaff(db: DrizzleDb): Promise<WithdrawalRow[]> {
   return db
     .select()
     .from(withdrawals)
-    .where(sql`${withdrawals.status} = 'cancelled' and ${withdrawals.returnAcceptedAt} is null and ${withdrawals.partnerRef} is not null`);
+    // A reference, or none but an ask already counted: an instruction whose answer was lost, reversed by its intent id.
+    .where(sql`${withdrawals.status} = 'cancelled' and ${withdrawals.returnAcceptedAt} is null and (${withdrawals.partnerRef} is not null or ${withdrawals.returnAsks} > 0)`);
 }
 
 /**

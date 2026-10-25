@@ -9,7 +9,12 @@
  *     or ISO 20022 message) is refused
  *     (`instruction_conflict`), never answered with the first order;
  *   - `status` answers only for an order it took, under its own reference
- *     (`payout_not_found` otherwise): no status is made up.
+ *     (`payout_not_found` otherwise): no status is made up;
+ *   - `returnOrReverse` (`sandboxReverse`) is taken only for an order it
+ *     holds, under its own reference, and only back to the return address
+ *     the instruction named (the business wallet); a reversal by the intent
+ *     id alone (a lost answer, no reference) is taken whether or not the
+ *     order is held. A reversed instruction is not taken again.
  *
  * References are an HMAC of the route and intent id. With the sandbox
  * webhook secret set, the key is derived from it, so every server instance
@@ -27,7 +32,7 @@ import { payoutSandboxWebhookSecret, PayoutPartnerUnavailable, type PartnerPayou
 
 const PROCESS_KEY = randomBytes(32);
 
-type Order = { fingerprint: string; partnerRef: string; status: PartnerPayoutStatus };
+type Order = { fingerprint: string; partnerRef: string; status: PartnerPayoutStatus; returnAddress: string; reversed: boolean };
 
 const BOOK = new Map<string, Order>();
 
@@ -71,13 +76,16 @@ export function placeSandboxOrder(route: PayoutPartnerId, tag: string, input: Pa
   const fingerprint = fingerprintOf(input);
   const existing = BOOK.get(key);
   if (existing) {
+    if (existing.reversed) {
+      throw new PayoutPartnerUnavailable('The partner reversed the instruction for this intent id; it is not taken again. Nothing was sent.', 'instruction_conflict');
+    }
     if (existing.fingerprint !== fingerprint) {
       throw new PayoutPartnerUnavailable('The partner already holds an instruction for this intent id with another amount or destination. Nothing was sent.', 'instruction_conflict');
     }
     return { partnerRef: existing.partnerRef, sandbox: true };
   }
   const partnerRef = `sb_${tag}_${createHmac('sha256', sandboxRefKey(env)).update(`${tag}:${input.intentId.toLowerCase()}`).digest('hex').slice(0, 24)}`;
-  BOOK.set(key, { fingerprint, partnerRef, status: 'instructed' });
+  BOOK.set(key, { fingerprint, partnerRef, status: 'instructed', returnAddress: input.returnAddress.toLowerCase(), reversed: false });
   return { partnerRef, sandbox: true };
 }
 
@@ -86,4 +94,31 @@ export function sandboxOrderStatus(route: PayoutPartnerId, intentId: string, par
   const order = BOOK.get(`${route}:${String(intentId ?? '').toLowerCase()}`);
   if (!order || order.partnerRef !== partnerRef) throw new PayoutPartnerUnavailable('The sandbox partner holds no such payout.', 'payout_not_found');
   return { status: order.status, sandbox: true };
+}
+
+/**
+ * A reversal (no deposit followed) or a return (funds received): only for an
+ * order this sandbox took, under its own reference, and only back to the
+ * address the instruction named. `partnerRef` '' is a reversal by the intent
+ * id alone, for an instruction whose answer was lost: taken when the order is
+ * held (to its own return address) and when nothing is held. `final` false
+ * checks the order without reversing it (a route that may refuse the reason).
+ */
+export function sandboxReverse(
+  route: PayoutPartnerId,
+  input: { intentId: string; partnerRef: string; returnAddress: string },
+  final = true,
+): { accepted: true; sandbox: true } {
+  const order = BOOK.get(`${route}:${String(input.intentId ?? '').toLowerCase()}`);
+  const byIntentOnly = input.partnerRef === '';
+  if (!order) {
+    if (byIntentOnly) return { accepted: true, sandbox: true };
+    throw new PayoutPartnerUnavailable('The sandbox partner holds no such payout.', 'payout_not_found');
+  }
+  if (!byIntentOnly && order.partnerRef !== input.partnerRef) throw new PayoutPartnerUnavailable('The sandbox partner holds no such payout.', 'payout_not_found');
+  if (String(input.returnAddress ?? '').toLowerCase() !== order.returnAddress) {
+    throw new PayoutPartnerUnavailable('A return goes only to the address the instruction named. Nothing was returned.', 'bad_instruction');
+  }
+  if (final) order.reversed = true;
+  return { accepted: true, sandbox: true };
 }
