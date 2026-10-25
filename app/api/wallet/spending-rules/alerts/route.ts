@@ -19,8 +19,8 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: Request) {
   const auth = await requireCustomerRequest(request);
   if (auth.response) return auth.response;
-  const account = await requireSessionAccount(auth.session);
-  if (account.response) return account.response;
+  const accountCheck = await requireSessionAccount(auth.session);
+  if (accountCheck.response) return accountCheck.response;
   let role: string;
   let orgId: string;
   try {
@@ -30,11 +30,11 @@ export async function GET(request: Request) {
   } catch {
     return NextResponse.json({ error: 'no membership' }, { status: 403, headers: NO_STORE });
   }
-  if (orgId !== account.account.orgId) return NextResponse.json({ error: 'no membership' }, { status: 403, headers: NO_STORE });
+  if (orgId !== accountCheck.account.orgId) return NextResponse.json({ error: 'no membership' }, { status: 403, headers: NO_STORE });
   if (role !== 'OWNER') return NextResponse.json({ error: 'Only an owner can see spending-rule alerts.' }, { status: 403, headers: NO_STORE });
   if (!process.env.DATABASE_URL) return NextResponse.json({ error: 'the alerts need the database, and DATABASE_URL is not set' }, { status: 503, headers: NO_STORE });
   const { getDb } = await import('@/lib/db/client');
   const db = getDb() as unknown as DrizzleDb;
-  const alerts = await listSpendRuleAlertsForOrg(db, account.account.orgId, Date.now());
+  const alerts = await listSpendRuleAlertsForOrg(db, accountCheck.account.orgId, Date.now());
   return NextResponse.json({ alerts }, { headers: NO_STORE });
 }

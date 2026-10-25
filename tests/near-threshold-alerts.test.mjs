@@ -286,7 +286,7 @@ test('the owners\' alerts route reads the caller\'s org from the session, owners
   const src = await code('app/api/wallet/spending-rules/alerts/route.ts');
   assert.match(src, /requireSessionAccount\(/);
   assert.match(src, /role\s*!==\s*'OWNER'/);
-  assert.match(src, /listSpendRuleAlertsForOrg\(\s*db,\s*account\.account\.orgId/);
+  assert.match(src, /listSpendRuleAlertsForOrg\(\s*db,\s*accountCheck\.account\.orgId/);
   assert.doesNotMatch(src, /searchParams|request\.json|orgId\s*=\s*body/, 'no org from the request');
 });
 
