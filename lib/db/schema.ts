@@ -2398,3 +2398,51 @@ export const spendRuleAlertDeliveries = pgTable('spend_rule_alert_deliveries', {
 }, (table) => [
   uniqueIndex('spend_rule_alert_deliveries_alert_user_channel_unique').on(table.alertId, table.userId, table.channel),
 ]);
+
+/**
+ * A swap or redemption from the business wallet, handed to its signers
+ * (v2 D9, brief 5.7; migration 0055). Unique on (org, intent id): the
+ * intent id is the idempotency key. lib/server/treasury-wallet-orders.ts.
+ */
+export const treasuryWalletOrders = pgTable('treasury_wallet_orders', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  intentId: text('intent_id').notNull(),
+  /** swap (USDC to USDY) | redeem (USDY to USDC). */
+  direction: text('direction').notNull(),
+  amountInMinor: bigint('amount_in_minor', { mode: 'bigint' }).notNull(),
+  minOutMinor: bigint('min_out_minor', { mode: 'bigint' }).notNull(),
+  quotedOutMinor: bigint('quoted_out_minor', { mode: 'bigint' }).notNull(),
+  priceMicros: bigint('price_micros', { mode: 'bigint' }).notNull(),
+  requestHash: text('request_hash').notNull(),
+  /** awaiting_signatures | executed | failed | expired | cancelled. */
+  status: text('status').notNull(),
+  sandbox: boolean('sandbox').notNull(),
+  providerRef: text('provider_ref'),
+  txDigest: text('tx_digest'),
+  requestedBy: text('requested_by').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  closedAt: timestamp('closed_at', { withTimezone: true }),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('treasury_wallet_orders_org_intent_unique').on(table.orgId, table.intentId),
+  index('treasury_wallet_orders_org_created_idx').on(table.orgId, table.createdAt),
+]);
+
+/** The fund-manager referral for one business (migration 0055). lib/server/fund-referral-store.ts. */
+export const treasuryFundReferrals = pgTable('treasury_fund_referrals', {
+  orgId: text('org_id').primaryKey().references(() => organizations.id),
+  answers: jsonb('answers').notNull(),
+  /** eligible | not_eligible. */
+  outcome: text('outcome').notNull(),
+  category: text('category'),
+  assessedBy: text('assessed_by').notNull(),
+  assessedAt: timestamp('assessed_at', { withTimezone: true }).notNull(),
+  referralOpenedAt: timestamp('referral_opened_at', { withTimezone: true }),
+  linkedReference: text('linked_reference'),
+  linkedBy: text('linked_by'),
+  linkedAt: timestamp('linked_at', { withTimezone: true }),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('treasury_fund_referrals_linked_reference_unique').on(table.linkedReference).where(sql`${table.linkedReference} IS NOT NULL`),
+]);

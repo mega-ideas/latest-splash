@@ -73,23 +73,6 @@ const sandboxRoute = () => {
   };
 };
 
-async function withEnv(vars, fn) {
-  const before = {};
-  for (const [k, v] of Object.entries(vars)) {
-    before[k] = process.env[k];
-    if (v === undefined) delete process.env[k];
-    else process.env[k] = v;
-  }
-  try {
-    return await fn();
-  } finally {
-    for (const [k, v] of Object.entries(before)) {
-      if (v === undefined) delete process.env[k];
-      else process.env[k] = v;
-    }
-  }
-}
-
 // ─── 1. The redemption quote ─────────────────────────────────────────────
 
 test('a redemption is priced at the redemption rate and on Sui, and is never locked by verification or country', async () => {

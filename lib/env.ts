@@ -558,6 +558,19 @@ export const envSchema = z.object({
   USDY_SWAP_SLIPPAGE_BPS: int(30, 0),
   USDY_SWAP_VENUE: withDefault(z.enum(['cetus', 'aftermath']), 'cetus'),
   USDY_WITHDRAWAL_DAYS: int(2, 0),
+  /* Treasury in the business's own wallet (v2 D9, brief 5.7). */
+  /** Swaps and redemptions from the business wallet may be handed to its
+   *  signers. Off: Treasury quotes, and prepares nothing. On in production it
+   *  still needs a live swap route (lib/server/treasury-swap-provider.ts),
+   *  which this build does not have, so it refuses rather than pretend. */
+  TREASURY_WALLET_SWAPS: flag('false'),
+  /** The fund-manager referral section (eligibility questions, referral link,
+   *  read-only holding). Off until legal signs off its wording (docs/MAINNET-CHECKLIST.md). */
+  FEATURE_FUND_REFERRAL: flag('false'),
+  /** The fund manager's referral page for eligible businesses. https only. */
+  FUND_REFERRAL_URL: url,
+  /** Tokenized stocks and ETFs (brief section 7, a later phase). Off: hidden. */
+  FEATURE_ONDO_STOCKS: flag('false'),
   SPLASH_PROMO_APY_PCT: opt(z.coerce.number()),
   SPLASH_PROMO_UNTIL: optional,
   OPERATING_BUFFER_USD: int(5_000),
@@ -779,6 +792,9 @@ function productionIssues(env: Env): Issue[] {
   if (env.SUMSUB_TRAVEL_RULE_ENABLED) {
     need('SUMSUB_APP_TOKEN', 'SUMSUB_TRAVEL_RULE_ENABLED=true');
     need('SUMSUB_SECRET_KEY', 'SUMSUB_TRAVEL_RULE_ENABLED=true');
+  }
+  if (env.FEATURE_FUND_REFERRAL) {
+    need('FUND_REFERRAL_URL', 'FEATURE_FUND_REFERRAL=true shows eligible businesses a referral link');
   }
   if (env.FEATURE_KYB_GATE) {
     need('SUMSUB_APP_TOKEN', 'FEATURE_KYB_GATE=true');

@@ -220,7 +220,14 @@ procedure in [`docs/UPGRADE-POLICY.md`](UPGRADE-POLICY.md).
 - [ ] The SSM registration number is entered in `BRAND.legalEntity`
       (`content/brand.ts`). The footer carries no entity until it is.
 - [ ] Legal sign-off on Treasury, including the Halogen referral wording,
-      before Treasury is enabled.
+      before Treasury is enabled. What waits on it (docs/v2/phase3-treasury.md):
+      `FEATURE_FUND_REFERRAL` (the eligibility questions in
+      `lib/treasury/fund-eligibility.ts`, the referral link `FUND_REFERRAL_URL`
+      and the read-only holding) and `TREASURY_WALLET_SWAPS`. Both are off. The
+      holding needs a contracted read-only API from the fund manager, and swaps
+      need a live swap route that the wallet signing service accepts. Neither is
+      in this build, so production refuses both rather than show a stand-in.
+      `FEATURE_ONDO_STOCKS` stays off until the section 7 phase.
 - [ ] Each partner confirms its deposit-address model (Phase 0 check 6). Is
       the address fixed per business, or issued per payout? **Decided by Sky
       (decision 2, 24 Oct 2026):** fixed per business per partner, verified

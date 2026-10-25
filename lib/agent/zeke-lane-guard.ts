@@ -1,5 +1,4 @@
 import type { KybLifecycleState } from '../compliance/kyb-state.ts';
-import { CUSTODY_PHASE_WHY } from '../custody-phase-rules.ts';
 import { laneAccess, type Lane } from '../payments/stablecoin-lane.ts';
 import { custodyPhaseEnabled } from '../server/custody-phase.ts';
 import { kindInScope, launchScope, laneInScope, LAUNCH_SCOPE_REASON } from '../server/launch-scope.ts';
@@ -109,16 +108,24 @@ export async function assertZekeLane(orgId: string, lane: Lane, currency: string
 }
 
 /**
- * Treasury holds customer funds, so verification alone does not open it: it
- * also needs the custody phase, which /api/treasury enforces
- * (lib/server/custody-phase.ts). Without this a verified business in Phase 0
- * got a treasury proposal the route then refused. Worded for a question as
- * well as a request, since "what's the treasury yield?" reaches it too.
+ * Zeke's tools for Treasury (proposeTreasuryAllocation / Redeem, and the
+ * balance and treasury reads) act on the custodial Smart Treasury ledger,
+ * which /api/treasury still gates on the custody phase
+ * (lib/server/custody-phase.ts). Without the custody phase, Zeke drafts none
+ * of them.
+ *
+ * What is true instead (v2 D9, brief 5.7): Treasury is USDY in the
+ * business's own Splash Wallet, quoted on the Treasury page and signed by the
+ * wallet's owners there. So the refusal says where Treasury is and how to use
+ * it, and cites no licence, because none is involved. Worded for a question
+ * as well as a request, since "what's the treasury yield?" reaches it too.
  */
 export const TREASURY_CUSTODY_REFUSAL =
-  `Treasury isn't open yet. ${CUSTODY_PHASE_WHY} Until then Splash pays out only, and nothing is held for you.`;
+  "I don't move money into or out of Treasury. Treasury is USDY held in your business's own Splash Wallet, " +
+  "so Splash holds nothing for you: get a quote on the Treasury page, and your wallet's owners sign the swap there. " +
+  'USDY is backed by US Treasury bills, its yield is variable and not promised, and it is not Shariah-compliant.';
 
-/** The Phase 0 refusal for Treasury, or null once the custody phase is on. */
+/** Zeke's Treasury answer, or null once the custodial ledger's phase is on. */
 export function treasuryCustodyRefusal(): string | null {
   return custodyPhaseEnabled() ? null : TREASURY_CUSTODY_REFUSAL;
 }

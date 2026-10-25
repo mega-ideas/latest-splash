@@ -407,6 +407,13 @@
       "when": 1793491200000,
       "tag": "0057_partner_account_ref_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1793577600000,
+      "tag": "0058_treasury_wallet",
+      "breakpoints": true
     }
   ]
 }

@@ -110,7 +110,7 @@ export function treasuryQuote(input: {
   const reasons: string[] = [];
   const lane = laneAccess(input.state, 'TREASURY');
   if (!lane.allowed) reasons.push(lane.reason);
-  if ((input.country ?? '').toUpperCase() === 'US') reasons.push('Ondo does not offer USDY to US persons, so it is not available to this business.');
+  if ((input.country ?? '').toUpperCase() === 'US') reasons.push('USDY is not offered to US persons, so it is not available to this business.');
   if (input.usdcInMinor <= 0n) reasons.push('Enter an amount above zero.');
   if (input.nav.status === 'UNAVAILABLE' || input.nav.priceMicros === null) {
     reasons.push('The USDY price is unavailable, so no swap can be priced. Splash will not guess it.');
@@ -122,7 +122,9 @@ export function treasuryQuote(input: {
   const allowed = reasons.length === 0;
   const mode: TreasuryQuote['mode'] = input.ondoEligibilityConfirmed ? 'LIVE' : 'SANDBOX';
   if (allowed && mode === 'SANDBOX') {
-    reasons.push('Preview only: Ondo eligibility for this business is not confirmed yet, so nothing is swapped.');
+    // A reason a customer reads: the issuer by role, never by name, until
+    // its agreement is signed (lib/partners/signed-partners.ts).
+    reasons.push('Preview only: issuer eligibility for this business is not confirmed yet, so nothing is swapped.');
   }
   if (allowed && input.nav.status === 'STALE') {
     reasons.push('The USDY price is stale — treat these numbers as indicative, not a quote to act on.');
@@ -187,4 +189,91 @@ export function treasuryQuote(input: {
 
 function formatBps(bps: number): string {
   return `${(bps / 100).toFixed(bps >= 1000 ? 0 : 1)}%`;
+}
+
+/** A Sui DEX quote for selling USDY back to USDC, or why there is none. */
+export type RedeemMarketInput =
+  | { usdcOutMinor: bigint; providers: string[]; asOf: string }
+  | { unavailable: string };
+
+export interface TreasuryRedeemQuote {
+  allowed: boolean;
+  /** SANDBOX until issuer eligibility is confirmed: numbers, no swap. */
+  mode: 'SANDBOX' | 'LIVE';
+  reasons: string[];
+  usdyInMinor: bigint;
+  priceMicros: bigint | null;
+  priceStatus: 'LIVE' | 'STALE' | 'UNAVAILABLE';
+  /** What the USDY is worth in USDC at the redemption rate. */
+  usdcAtRedemptionMinor: bigint | null;
+  /** What a Sui DEX returns for the USDY right now, and how far below the redemption value. */
+  market: { usdcOutMinor: bigint; shortfallBps: number | null; providers: string[]; asOf: string } | null;
+  fillable: boolean | null;
+  minUsdcOutMinor: bigint | null;
+}
+
+/**
+ * Selling USDY from the business wallet back to USDC.
+ *
+ * Unlike a swap in, a redemption is never locked by verification or by
+ * country: a business that holds USDY can always get out of it. What stops
+ * one is a price Splash cannot read, or a market too thin to pay near the
+ * redemption value, and the reasons say which.
+ */
+export function treasuryRedeemQuote(input: {
+  usdyInMinor: bigint;
+  nav: { status: 'LIVE' | 'STALE' | 'UNAVAILABLE'; priceMicros: bigint | null; asOf?: string | null };
+  slippageBps?: number;
+  ondoEligibilityConfirmed: boolean;
+  market?: RedeemMarketInput | null;
+}): TreasuryRedeemQuote {
+  const reasons: string[] = [];
+  if (input.usdyInMinor <= 0n) reasons.push('Enter an amount above zero.');
+  if (input.nav.status === 'UNAVAILABLE' || input.nav.priceMicros === null) {
+    reasons.push('The USDY price is unavailable, so no redemption can be priced. Splash will not guess it.');
+  } else if (!input.nav.asOf) {
+    reasons.push('The USDY price has no observation time, so it cannot be told apart from a placeholder.');
+  }
+  const allowed = reasons.length === 0;
+  const mode: TreasuryRedeemQuote['mode'] = input.ondoEligibilityConfirmed ? 'LIVE' : 'SANDBOX';
+  if (allowed && mode === 'SANDBOX') reasons.push('Preview only: issuer eligibility for this business is not confirmed yet, so nothing is swapped.');
+  if (allowed && input.nav.status === 'STALE') reasons.push('The USDY price is stale. Treat these numbers as indicative, not a quote to act on.');
+
+  const price = allowed ? input.nav.priceMicros : null;
+  const atRedemption = price !== null ? usdcValueOfUsdy(input.usdyInMinor, price) : null;
+  const slippageBps = input.slippageBps ?? 50;
+
+  let market: TreasuryRedeemQuote['market'] = null;
+  let fillable: boolean | null = null;
+  if (allowed && input.market) {
+    if ('unavailable' in input.market) {
+      fillable = false;
+      reasons.push(input.market.unavailable);
+    } else {
+      const shortfallBps = atRedemption !== null && atRedemption > 0n
+        ? Number(((atRedemption - input.market.usdcOutMinor) * 10_000n) / atRedemption)
+        : null;
+      market = { ...input.market, shortfallBps };
+      fillable = shortfallBps === null ? null : shortfallBps <= MAX_MARKET_SHORTFALL_BPS;
+      if (fillable === false && atRedemption !== null && shortfallBps !== null) {
+        reasons.push(
+          `On Sui right now, ${formatUsdc(input.usdyInMinor)} USDY sells for ${formatUsdc(input.market.usdcOutMinor)} USDC on the best route, ` +
+          `${formatBps(shortfallBps)} below its redemption value of ${formatUsdc(atRedemption)} USDC. ` +
+          'There is not enough liquidity on Sui for this size, so Splash would not route it.',
+        );
+      }
+    }
+  }
+  return {
+    allowed,
+    mode,
+    reasons,
+    usdyInMinor: input.usdyInMinor,
+    priceMicros: input.nav.priceMicros,
+    priceStatus: input.nav.status,
+    usdcAtRedemptionMinor: atRedemption,
+    market,
+    fillable,
+    minUsdcOutMinor: market ? minReceived(market.usdcOutMinor, slippageBps) : atRedemption === null ? null : minReceived(atRedemption, slippageBps),
+  };
 }
