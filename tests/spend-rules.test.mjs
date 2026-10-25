@@ -765,6 +765,15 @@ test("a staff member's payment above the threshold gets one owner's second appro
   // The maker cannot approve their own payment, even as an owner.
   w.model.addIntent({ id: '0x' + '97'.repeat(32), initialSharedVersion: 7, account: ACCOUNT, maker: w.keys.three.address, recipient: SUPPLIER, amountMinor: 1n, kind: 1, targetCurrency: 'USDC', fxRateUsdLocal: 1n, expiresAtMs: t0 + DAY, status: 0, asset: USDC });
   assert.equal((await openSecondApproval(w.sc, { orgId: 'acme', ownerUserId: 'u-three', ownerPasskeyPublicKey: w.keys.three.publicKey, intentId: '0x' + '97'.repeat(32), payer: STAFF, maxFeeMinor: 0n, settleByMs: t0 + 1_000n })).code, 'self_approval');
+  // Held funds (v2 §4.3): no second approval is built that a staff payment would spend them under.
+  w.model.addIntent({ id: '0x' + '96'.repeat(32), initialSharedVersion: 7, account: ACCOUNT, maker: STAFF, recipient: SUPPLIER, amountMinor: 1_500n * USDC_1, kind: 1, targetCurrency: 'USDC', fxRateUsdLocal: 1n, expiresAtMs: t0 + DAY, status: 0, asset: USDC });
+  const readUsdc = w.ctx.readUsdc;
+  w.ctx.readUsdc = async () => ({ coinMinor: 0n, addressBalanceMinor: 2_000n * USDC_1 });
+  w.ctx.heldUsdc = async () => 1_000n * USDC_1;
+  const onHold = await openSecondApproval(w.sc, { orgId: 'acme', ownerUserId: 'u-three', ownerPasskeyPublicKey: w.keys.three.publicKey, intentId: '0x' + '96'.repeat(32), payer: STAFF, maxFeeMinor: 0n, settleByMs: t0 + 1_000n });
+  assert.equal(onHold.code, 'funds_on_hold', JSON.stringify(onHold));
+  delete w.ctx.heldUsdc;
+  w.ctx.readUsdc = readUsdc;
   await w.client.close();
 });
 
