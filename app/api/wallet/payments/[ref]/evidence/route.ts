@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
 
 /**
  * One payment's controls evidence (v2 §4.6): `?format=json` (the default) or
- * `?format=pdf`, the same content. The payment is named by its intent id,
+ * `?format=pdf`, a readable subset (the JSON holds every field). The payment is named by its intent id,
  * its payout id or its signing request id, and only this business's own is
  * found: another business's reads as absent (404). Owners and staff; a
  * viewer does not see payments. No secret, signature, sealed value or
@@ -22,7 +22,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ ref:
   if (gate.response) return gate.response;
   const reader = requirePayoutReader(gate.route);
   if (reader) return reader;
-  const limited = await enforceRateLimit({ rule: RATE_LIMITS.complianceReadUser, key: gate.route.authority.userId });
+  const limited = await enforceRateLimit({ rule: RATE_LIMITS.controlsEvidenceUser, key: gate.route.authority.userId });
   if (limited) return limited;
   const format = new URL(request.url).searchParams.get('format') ?? 'json';
   if (format !== 'json' && format !== 'pdf') return NextResponse.json({ error: 'format is json or pdf' }, { status: 400, headers: NO_STORE });

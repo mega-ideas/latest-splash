@@ -22,7 +22,8 @@ Code:
   `POST /api/wallet/payments/[ref]/sender-declaration`.
 
 Limits: opening a Sumsub verification is 20 an hour per business
-(`kybSessionOrg`), the evidence and the sender declaration 120 an hour per
+(`kybSessionOrg`), the evidence 600 an hour per person (`controlsEvidenceUser`), the sender
+declaration 120 an hour per
 person (`complianceReadUser`), the screening route and the Travel Rule
 message their existing per-person limits. The webhook has no session; its
 signature, date window and one-time claim stand in for one.
@@ -280,8 +281,8 @@ reads them.
 
 `GET /api/wallet/payments/[ref]/evidence?format=json|pdf`, owners and staff.
 `ref` is the intent id, the payout id (`wdr_…`) or the signing request
-(`wsr_…`). Another business's reads as absent (404). The same content in
-both formats, the JSON's SHA-256 in `X-Content-SHA256` and on the PDF:
+(`wsr_…`). Another business's reads as absent (404). The PDF is a readable subset of the JSON; the JSON holds every field.
+The JSON's SHA-256 in `X-Content-SHA256` and on the PDF:
 
 | Section | From |
 |---|---|
@@ -339,3 +340,17 @@ that cannot be read leaves the chain fields empty and says so.
 - The Elliptic request and response shapes and the Sumsub Travel Rule shape
   are from their public documentation; check both against the contracted
   accounts' sandboxes before go-live.
+
+## Review follow-ups (section 4.6)
+
+- A payout's free text (remittance reference, party names, town) is masked at
+  export: cut to 140 characters, any IBAN or run of eight digits or more
+  reduced to its last four digits. The account-shaped check stays on for
+  everything else, and a refused document answers 422 (`evidence_refused`).
+- After a Sumsub 409 the applicant is looked up by its external user id so
+  the case's reference is attached even when the first attach was lost.
+- Decision for compliance: with Elliptic and the sanctions list both
+  configured, an unreachable list leaves Elliptic's verdict standing and the
+  detail says the list gave no answer. Elliptic's score already includes
+  sanctions exposure; failing closed would stop every payment during a list
+  outage. Say which is wanted.

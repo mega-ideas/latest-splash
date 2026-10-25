@@ -92,6 +92,8 @@ export const RATE_LIMITS = {
   // write a PDF (v2 §4.6); per person. Opening a Sumsub verification asks a
   // paid provider for a token; per business.
   complianceReadUser: { bucket: 'compliance-read:user', limit: 120, windowMs: HOUR },
+  // One payment's evidence is a chain read and a PDF; an accountant exports a quarter's at once.
+  controlsEvidenceUser: { bucket: 'controls-evidence:user', limit: 600, windowMs: HOUR },
   kybSessionOrg: { bucket: 'kyb-session:org', limit: 20, windowMs: HOUR },
   // Each request sends a WhatsApp message; the per-subject cooldown stops a
   // double-click, this stops a loop.

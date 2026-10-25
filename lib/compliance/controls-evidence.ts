@@ -1,7 +1,8 @@
 /**
  * The per-payment controls evidence (v2 §4.6, D12): the artefact a bank
  * partner asks for. One payment, one document, in JSON (schema
- * `splash.controls-evidence.v1`) and as a PDF with the same content:
+ * `splash.controls-evidence.v1`) and as a PDF, a readable subset of it (the
+ * JSON carries every field, and the PDF prints its SHA-256):
  *
  *   who was verified       the business's KYB case: its id, its state, the
  *                          provider's applicant reference, the lifecycle
@@ -233,7 +234,7 @@ export function evidenceSha256(e: ControlsEvidence): string {
 
 const or = (v: string | null | undefined, none: string) => (v === null || v === undefined || v === '' ? none : v);
 
-/** The PDF: the same fields as the JSON, in the same order, and the JSON's SHA-256. */
+/** The PDF: a readable subset of the JSON, in the same order (the JSON holds every field), and the JSON's SHA-256. */
 export function evidencePdf(e: ControlsEvidence): Uint8Array {
   const sha = evidenceSha256(e);
   const L: PdfLine[] = [
