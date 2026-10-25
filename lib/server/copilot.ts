@@ -10,9 +10,7 @@ import { copilotModel } from '../ai/model.ts';
  * authorize execution. Never invents PII/account numbers.
  */
 
-import { custodyPhaseEnabled } from '@/lib/server/custody-phase';
 import { recallForOrg, rememberForOrg, type RecalledMemory } from '@/lib/server/memwal';
-import { getTreasuryRate } from '@/lib/server/usdy';
 
 export interface CopilotSuggestion {
   suggestionId: string;
@@ -286,30 +284,6 @@ export function suggestionsFromMemories(memories: RecalledMemory[]): CopilotSugg
   return out;
 }
 
-/**
- * The card shown when memory suggests nothing. It pitches Smart Treasury,
- * which holds customer funds, so it waits for the custody phase like every
- * other treasury surface (lib/server/custody-phase.ts). It also waits for
- * TREASURY_EXECUTION_ENABLED, which /api/treasury requires before it moves
- * anything: "Move some over?" is not an offer to make while that refuses.
- * Otherwise there is no card, and the copilot page says there is nothing to
- * suggest. It is a canned card, so it has no confidence to state: it was
- * shown at an invented 60%.
- */
-export function idleCashSuggestion(custodyOn: boolean, executionOn: boolean): CopilotSuggestion | null {
-  if (!custodyOn || !executionOn) return null;
-  const rate = getTreasuryRate();
-  return {
-    suggestionId: `cop_${Date.now()}`,
-    type: 'treasury',
-    title: 'Put idle USDC to work',
-    description: `Idle Available cash earns 0%. Smart Treasury (Ondo USDY, T-bill) is ${rate.label}. Move some over?`,
-    prompt: 'What could my idle USDC earn in treasury?',
-    confidence: null,
-    requiresAuth: true,
-  };
-}
-
 /** What the cards ask memory for. The copilot page never sent its own. */
 const SUGGESTION_RECALL_QUERY = 'patterns';
 
@@ -317,22 +291,19 @@ const SUGGESTION_RECALL_QUERY = 'patterns';
  * Cards for one org, from that org's memory only. `orgId` is the session's:
  * the route used to take a `?user` query string and recall from a namespace
  * every workspace shared, so the cards could quote another tenant's memory.
+ *
+ * With no memory there is no card. The fallback card pitched the retired
+ * custodial Treasury ledger ("Idle Available cash ... Move some over?"),
+ * named the issuer without the signed-partner check, and offered a
+ * move Splash no longer makes (v2 D9, the 5.7 review). Treasury is USDY in the
+ * business's own wallet, on its own page.
  */
-export async function getCopilotSuggestions(
-  orgId: string,
-  custodyOn: boolean = custodyPhaseEnabled(),
-  // The same reading as app/api/treasury/route.ts.
-  treasuryExecutionOn: boolean = process.env.TREASURY_EXECUTION_ENABLED === 'true',
-): Promise<CopilotSuggestion[]> {
+export async function getCopilotSuggestions(orgId: string): Promise<CopilotSuggestion[]> {
   let out: CopilotSuggestion[] = [];
   try {
     out = suggestionsFromMemories(await recallForOrg(orgId, SUGGESTION_RECALL_QUERY, 6));
   } catch {
-    // memory unavailable — fall back below
-  }
-  if (out.length === 0) {
-    const fallback = idleCashSuggestion(custodyOn, treasuryExecutionOn);
-    if (fallback) out.push(fallback);
+    // memory unavailable: no cards
   }
   return out.slice(0, 5);
 }

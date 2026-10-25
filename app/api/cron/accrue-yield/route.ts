@@ -8,6 +8,7 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { NextResponse } from 'next/server';
 
+import { CUSTODIAL_TREASURY_LEDGER_ON, custodialTreasuryRetiredResponse } from '@/lib/server/custodial-treasury';
 import { custodyPhaseEnabled, custodyPhaseResponse } from '@/lib/server/custody-phase';
 import { sealAdapter } from '@/lib/server/seal';
 import { anchorAuditHashOnSui } from '@/lib/server/sui-settlement';
@@ -33,11 +34,12 @@ async function handleAccrual(request: Request) {
   if (!isAuthorized(request)) {
     return NextResponse.json({ success: false, error: 'unauthorized' }, { status: 401 });
   }
+  // v2 D9: the custodial Smart Treasury ledger is retired, whatever the
+  // custody phase. Treasury is USDY in the business's own wallet, so there is
+  // no ledger to accrue against: 410, as /api/treasury answers.
   const outOfScope = refuseOutsideLaunchScope();
   if (outOfScope) return outOfScope;
-  // Phase 0: there is no treasury to accrue against. Nothing is written and
-  // nothing is anchored; the scheduler sees the same licence-named refusal
-  // a customer would.
+  if (!CUSTODIAL_TREASURY_LEDGER_ON) return custodialTreasuryRetiredResponse();
   if (!custodyPhaseEnabled()) return custodyPhaseResponse();
 
   try {

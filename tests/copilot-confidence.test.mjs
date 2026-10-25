@@ -117,25 +117,12 @@ test('each memory card carries its own measured relevance, and filler makes no c
 
 /* ── The fallback card ─────────────────────────────────────────────────── */
 
-test('the Smart Treasury card waits for custody AND treasury execution, and claims no confidence', async () => {
-  const { idleCashSuggestion } = await copilot();
-  assert.equal(idleCashSuggestion(false, true), null, 'Phase 0: no fund-holding pitch');
-  assert.equal(idleCashSuggestion(true, false), null, '/api/treasury refuses to move anything: no "move some over?"');
-  assert.equal(idleCashSuggestion(false, false), null);
-  const card = idleCashSuggestion(true, true);
-  assert.equal(card.type, 'treasury');
-  assert.equal(card.confidence, null, 'a canned card has no confidence to state');
-  assert.equal(card.requiresAuth, true);
-});
-
-test('with memory unavailable, Phase 0 suggests nothing rather than a treasury pitch', async () => {
-  const { getCopilotSuggestions } = await copilot();
-  assert.deepEqual(await getCopilotSuggestions('org-a'), [], 'the defaults read the phase: this file is Phase 0');
-  assert.deepEqual(await getCopilotSuggestions('org-a', true, false), [], 'custody on, execution off');
-  const open = await getCopilotSuggestions('org-a', true, true);
-  assert.equal(open.length, 1);
-  assert.equal(open[0].type, 'treasury');
-  assert.equal(open[0].confidence, null);
+// The Smart Treasury fallback card is gone with the ledger it pitched (v2 D9,
+// the 5.7 review): tests/treasury-retired-remnants.test.mjs pins that.
+test('with memory unavailable, the copilot suggests nothing rather than a treasury pitch', async () => {
+  const { getCopilotSuggestions, idleCashSuggestion } = await copilot();
+  assert.equal(idleCashSuggestion, undefined, 'no fallback card');
+  assert.deepEqual(await getCopilotSuggestions('org-a'), []);
 });
 
 /* ── The sources ───────────────────────────────────────────────────────── */
@@ -151,8 +138,7 @@ test('copilot.ts has no confidence floors, no invented constants on the cards, a
   assert.match(cards, /const relevance = memoryRelevance\(m\.distance\);/);
   assert.match(cards, /if \(relevance === null \|\| relevance < MIN_MEMORY_RELEVANCE\) continue;/);
   assert.match(cards, /confidence: relevance,/);
-  assert.match(cards, /confidence: null/);
-  assert.match(cards, /if \(!custodyOn \|\| !executionOn\) return null;/);
+  assert.doesNotMatch(cards, /idleCashSuggestion/, 'no canned Smart Treasury card');
 });
 
 test('the invoice-batch card states the fact it follows and invents neither a score, a saving nor a process', async () => {
