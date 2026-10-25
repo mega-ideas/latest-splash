@@ -242,12 +242,16 @@ export function createdIntentIds(events: ReadonlyArray<{ eventType: string; json
 export function splashControlledAddresses(input: {
   env: NodeJS.ProcessEnv;
   sponsor?: string | null;
+  /** Other Splash-owned addresses the caller knows (the Sui-format entries of the cross-chain deposit list). */
+  extra?: string[];
   feeConfig: { feeRecipient: string | null; pendingRecipient: { recipient: string } | null };
 }): string[] {
   const raw = [
     input.env.OPERATOR_SUI_ADDRESS,
     input.env.TREASURY_ADDRESS,
     input.env.SPLASH_TEST_RECIPIENT_ADDRESS,
+    input.env.SPLASH_FINANCE_ADDRESS,
+    ...(input.extra ?? []),
     input.sponsor ?? undefined,
     input.feeConfig.feeRecipient ?? undefined,
     input.feeConfig.pendingRecipient?.recipient,

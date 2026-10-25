@@ -84,7 +84,8 @@ export function withdrawalDepsFor(route: WalletRoute, env: NodeJS.ProcessEnv = p
     splashAddresses: async () => {
       const { getFeeConfig } = await import('@/lib/fees/fee-config');
       const feeConfig = await getFeeConfig();
-      return splashControlledAddresses({ env, sponsor: ctx.signing.sponsor?.address ?? null, feeConfig });
+      const { splashCrossChainAddresses } = await import('@/lib/server/splash-addresses');
+      return splashControlledAddresses({ env, sponsor: ctx.signing.sponsor?.address ?? null, feeConfig, extra: splashCrossChainAddresses(env) });
     },
     isBusinessWallet: (address) => isAnotherBusinessWallet(db, orgId, normalizeSuiAddress(address)),
     bankPayoutFee: async (principalMinor) => {

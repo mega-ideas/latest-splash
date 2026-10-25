@@ -1607,7 +1607,11 @@ export async function handlePayoutWebhook(input: WebhookInput): Promise<WebhookA
   try {
     adapter = input.adapter ?? payoutPartner(input.partner, input.env);
   } catch (error) {
-    if (error instanceof PayoutPartnerUnavailable) return { status: 503, body: { error: error.message, code: error.code } };
+    if (error instanceof PayoutPartnerUnavailable) {
+      // Anyone can reach this route: the detail (which credentials are missing, which route is off) stays in the server log.
+      console.error(`[withdrawals] payout webhook for ${input.partner} refused: ${error.code}: ${error.message}`);
+      return { status: 503, body: { error: 'not available', code: error.code } };
+    }
     throw error;
   }
   let event: PayoutEvent;
@@ -1627,6 +1631,10 @@ export async function handlePayoutWebhook(input: WebhookInput): Promise<WebhookA
         return { status: 200, body: { ignored: 'unknown event' } };
       }
       const status = error.code === 'bad_body' ? 400 : error.code === 'partner_not_configured' || error.code === 'partner_not_connected' ? 503 : 401;
+      if (status === 503) {
+        console.error(`[withdrawals] payout webhook for ${input.partner} refused: ${error.code}: ${error.message}`);
+        return { status, body: { error: 'not available', code: error.code } };
+      }
       return { status, body: { error: error.message, code: error.code } };
     }
     throw error;
@@ -1821,6 +1829,7 @@ export async function handlePayoutWebhook(input: WebhookInput): Promise<WebhookA
   // no longer moves anything is ignored, as a retry would be.
   let current = row;
   let moved: store.WithdrawalRow | null = null;
+  try {
   for (let attempt = 0; attempt < 3 && !moved; attempt += 1) {
     moved = await store.moveWithdrawal(input.db, row.orgId, row.id, [current.status as WithdrawalStatus], set);
     if (moved) break;
@@ -1835,6 +1844,11 @@ export async function handlePayoutWebhook(input: WebhookInput): Promise<WebhookA
       return { status: 200, body: { ok: true } };
     }
     if (!canAdvanceWithdrawal(now, to)) return { status: 200, body: { ignored: `a withdrawal ${now.replace(/_/g, ' ')} does not move to ${to.replace(/_/g, ' ')}` } };
+  }
+  } catch (error) {
+    // A database error between the claim and the move: the claim is given back, so the partner's retry counts.
+    await store.releasePartnerEvent(input.db, adapter.id, event.eventId).catch(() => undefined);
+    throw error;
   }
   if (!moved) {
     // Moved under it three times running: nothing is kept, and the partner's retry counts.

@@ -245,3 +245,25 @@ live adapter refuses.
   name enquiry is not screening.
 - The bridge adapter and Circle's fee API for `cctp_wallet`.
 - The payout UI (Phase 3).
+- A rule spender's own payment below the second-approval threshold is signed
+  by the spender alone on chain, so the server cannot make it wait for a
+  partner instruction. Owners' second approvals and every server-built
+  payment refuse a bank payout (kind 4) and a partner deposit address
+  (`use_payout_route`). Decision needed: whether SpendPolicy should refuse to
+  bind a kind-4 beneficiary or a partner deposit address as a rule
+  recipient. Until then the owners see the recipient list they set.
+- One business could hold the same partner `account_ref` as another if a
+  partner reused one; a unique index on (partner, account_ref) for live rows
+  needs a migration and is still to do.
+
+## Guards added after review
+
+- A payout still `preparing` with no signing request after ten minutes is
+  cancelled (`instruction_unconfirmed`) by the sweep and reversed by intent id.
+- The least received may sit at most 2% under the fresh quote
+  (`accepted_below_quote`).
+- A webhook caller learns only `not available` and a code when a route is not
+  set up; the detail goes to the server log. The body is read with a 64 KB
+  cap.
+- A partner event claimed but not moved because of a database error is
+  released, so the partner's retry counts.

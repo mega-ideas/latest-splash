@@ -755,7 +755,8 @@ test('every withdrawal route takes the org from the session, owners alone change
   assert.match(front, /walletRoute\(request\)/);
   const hook = await readFile(new URL('../app/api/webhooks/payouts/[partner]/route.ts', import.meta.url), 'utf8');
   assert.match(hook, /PAYOUT_SIGNATURE_HEADER/);
-  assert.match(hook, /request\.text\(\)/, 'the raw body is what is verified');
+  assert.match(hook, /readCapped\(request, MAX_BODY_BYTES\)/, 'the raw body, read with a byte cap, is what is verified');
+  assert.match(hook, /content-length/, 'a declared body over the cap is refused before any read');
   const deps = await readFile(new URL('../lib/server/wallet-deps.ts', import.meta.url), 'utf8');
   assert.match(deps, /withdrawalSigningExecuted/, 'an executed owners’ request moves its withdrawal on');
   assert.match(deps, /withdrawalBeforeSign/, 'a withdrawal signature is checked against its bank account when it is given');
@@ -975,12 +976,13 @@ test('a deposit address is never Splash’s fee recipient, a pending one, the op
   const feeRecipient = `0x${'fe'.repeat(32)}`;
   const pending = `0x${'fd'.repeat(32)}`;
   const listed = R.splashControlledAddresses({
-    env: { OPERATOR_SUI_ADDRESS: `0x${'0e'.repeat(32)}`, TREASURY_ADDRESS: 'not an address' },
+    env: { OPERATOR_SUI_ADDRESS: `0x${'0e'.repeat(32)}`, TREASURY_ADDRESS: 'not an address', SPLASH_FINANCE_ADDRESS: `0x${'f1'.repeat(32)}` },
+    extra: [`0x${'c7'.repeat(32)}`],
     sponsor: `0x${'5a'.repeat(32)}`,
     feeConfig: { feeRecipient, pendingRecipient: { recipient: pending, etaMs: 1n } },
   });
-  for (const a of [feeRecipient, pending, `0x${'0e'.repeat(32)}`, `0x${'5a'.repeat(32)}`]) assert.ok(listed.includes(a), a);
-  assert.equal(listed.length, 4);
+  for (const a of [feeRecipient, pending, `0x${'0e'.repeat(32)}`, `0x${'5a'.repeat(32)}`, `0x${'f1'.repeat(32)}`, `0x${'c7'.repeat(32)}`]) assert.ok(listed.includes(a), a);
+  assert.equal(listed.length, 6);
 
   const toFee = await setup({ overrides: { depositAddress: async () => ({ address: feeRecipient, network: 'sui', accountRef: 'acct_fee', sandbox: true }) } });
   assert.equal((await requestPartnerDepositAddress(toFee.deps('acme', { splashAddresses: async () => [feeRecipient] }), 'u-founder')).code, 'splash_address');
