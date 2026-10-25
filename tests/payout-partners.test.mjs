@@ -390,7 +390,18 @@ test('the sandbox takes a reversal or a return only for an order it holds, only 
   await p.createPayout(bankInstruction('PH', { intentId: held }));
   await assert.rejects(p.returnOrReverse({ intentId: held, partnerRef: '', returnAddress: SPLASH, reason: 'instruction_unconfirmed', now: NOW }), (e) => e.code === 'bad_instruction');
   assert.equal((await p.returnOrReverse({ intentId: held, partnerRef: '', returnAddress: WALLET, reason: 'instruction_unconfirmed', now: NOW })).accepted, true);
-  assert.equal((await p.returnOrReverse({ intentId: `0x${'66'.repeat(32)}`, partnerRef: '', returnAddress: WALLET, reason: 'instruction_unconfirmed', now: NOW })).accepted, true, 'nothing held under the intent id: nothing stays live');
+  const unheld = `0x${'66'.repeat(32)}`;
+  assert.equal((await p.returnOrReverse({ intentId: unheld, partnerRef: '', returnAddress: WALLET, reason: 'instruction_unconfirmed', now: NOW })).accepted, true, 'nothing held under the intent id: nothing stays live');
+  // The reversal is kept against the intent id: the delayed instruction that arrives after it is refused, never taken live.
+  await assert.rejects(p.createPayout(bankInstruction('PH', { intentId: unheld })), (e) => e instanceof PayoutPartnerUnavailable && e.code === 'instruction_conflict', 'an instruction reversed before it arrived is not taken');
+  await assert.rejects(p.returnOrReverse({ intentId: unheld, partnerRef: '', returnAddress: SPLASH, reason: 'instruction_unconfirmed', now: NOW }), (e) => e.code === 'bad_instruction', 'the kept reversal names the wallet it was asked for: no other address');
+  assert.equal((await p.returnOrReverse({ intentId: unheld, partnerRef: '', returnAddress: WALLET, reason: 'instruction_unconfirmed', now: NOW })).accepted, true, 'asking again by the intent id is the same answer');
+  await assert.rejects(p.status({ intentId: unheld, partnerRef: '', now: NOW }), (e) => e.code === 'payout_not_found', 'a kept reversal is not an order: no status for it');
+  await assert.rejects(p.returnOrReverse({ intentId: unheld, partnerRef: 'sb_pdax_made_up', returnAddress: WALLET, reason: 'not_sent', now: NOW }), (e) => e.code === 'payout_not_found', 'nor any reference');
+  // A by-intent reversal to another address, with nothing held, is refused too once one was kept; the first one asked names it.
+  const unheldSplash = `0x${'69'.repeat(32)}`;
+  assert.equal((await p.returnOrReverse({ intentId: unheldSplash, partnerRef: '', returnAddress: WALLET, reason: 'instruction_unconfirmed', now: NOW })).accepted, true);
+  await assert.rejects(p.createPayout(bankInstruction('PH', { intentId: unheldSplash, returnAddress: SPLASH })), (e) => e.code === 'instruction_conflict');
 
   // The cross-chain route: the same checks, and a burn is still never reversed.
   const c = payoutPartner('cctp_wallet', SANDBOX);
@@ -402,6 +413,16 @@ test('the sandbox takes a reversal or a return only for an order it holds, only 
   assert.equal((await c.createPayout(cctpInstruction({ intentId: cIntent }))).partnerRef, cOrder.partnerRef, 'a refused reversal leaves the order as it was');
   assert.equal((await c.returnOrReverse({ intentId: cIntent, partnerRef: cOrder.partnerRef, returnAddress: WALLET, reason: 'not_sent', now: NOW })).accepted, true);
   await assert.rejects(c.createPayout(cctpInstruction({ intentId: cIntent })), (e) => e.code === 'instruction_conflict');
+  // A cancelled payout never had its deposit signed, so nothing was burned: the reasons the sweep and a cancel while opening send are reversed.
+  for (const [n, reason] of [['6a', 'cancelled'], ['6b', 'cancelled_while_opening']]) {
+    const id = `0x${n.repeat(32)}`;
+    const o = await c.createPayout(cctpInstruction({ intentId: id }));
+    assert.equal((await c.returnOrReverse({ intentId: id, partnerRef: o.partnerRef, returnAddress: WALLET, reason, now: NOW })).accepted, true, `${reason}: before the burn`);
+  }
+  // A lost cross-chain answer reversed by the intent id before the instruction arrives is kept: the late instruction is refused.
+  const cLate = `0x${'6c'.repeat(32)}`;
+  assert.equal((await c.returnOrReverse({ intentId: cLate, partnerRef: '', returnAddress: WALLET, reason: 'instruction_unconfirmed', now: NOW })).accepted, true);
+  await assert.rejects(c.createPayout(cctpInstruction({ intentId: cLate })), (e) => e.code === 'instruction_conflict');
 });
 
 test("the CBPR+ extended set: '&' and '#' are kept, a bank-checked name with an accent is refused, the business's own text is transliterated", () => {

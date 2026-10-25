@@ -1618,6 +1618,18 @@ test('a reversal the partner did not take when a withdrawal was cancelled under 
   assert.equal(trail.filter((e) => e.action === 'reversal_request_stuck' && e.subjectId === row.id).length, 1, 'ops see the stuck reversal');
   assert.ok(errors.some((e) => e.includes('ALERT') && e.includes(row.id) && !e.includes('5140')), 'an ops alert names the payout and nothing about the account');
 
+  // Once ops are alerted the sweep backs off: the next run does not ask, the reversal is still owed.
+  const held = await t.reconcile();
+  assert.equal(held.reversalsAsked, 0, JSON.stringify(held));
+  assert.equal(held.reversalsPending, 1, JSON.stringify(held));
+  assert.equal(reversalsOf(), R_ASKS());
+  const delay = W.reversalReaskDelayMs(R_ASKS());
+  assert.ok(delay > 0 && delay <= W.REVERSAL_REASK_MAX_MS, String(delay));
+  assert.ok(W.reversalReaskDelayMs(R_ASKS() + 1) > delay, 'each ask after the alert waits longer');
+  assert.equal(W.reversalReaskDelayMs(R_ASKS() + 40), W.REVERSAL_REASK_MAX_MS, 'up to a cap: never given up');
+  assert.equal(W.reversalReaskDelayMs(1), 0, 'before the alert, every run asks');
+  t.w.setNow(new Date(t.w.signing.now().getTime() + delay));
+
   // The partner takes it: recorded, and never asked again.
   const swept = await t.reconcile();
   assert.equal(swept.reversalsAsked, 1);
@@ -1725,4 +1737,94 @@ test('an instruction whose answer was lost, and whose reversal the partner did n
   assert.equal(t2.partner.called('returnOrReverse').length, 0);
   assert.equal((await t2.reconcile()).reversalsAsked, 0);
   await t2.w.client.close();
+});
+
+test('an instruction still in flight when its reversal by intent id lands is refused when it arrives, and a partner that says it holds nothing is recorded as saying so', async () => {
+  const base = payoutPartner('hata_fiuu', ENV);
+  let inFlight = null;
+  let notFound = 0;
+  const t = await setup({
+    overrides: {
+      // The instruction has not reached the partner yet: the answer is lost on the way out.
+      createPayout: async (input) => {
+        inFlight = input;
+        throw new Error('timed out');
+      },
+      returnOrReverse: async (input) => {
+        if (notFound > 0) {
+          notFound -= 1;
+          throw new PayoutPartnerUnavailable('no such payout', 'payout_not_found');
+        }
+        return base.returnOrReverse(input);
+      },
+    },
+  });
+  const { destination } = await readyToWithdraw(t);
+  const q = await quoted(t, destination.id);
+  notFound = 1;
+  const r = await createWithdrawal(t.deps(), 'u-founder', { clientKey: 'ck_in_flight', destinationId: destination.id, amountMinor: '1000000000', acceptedReceiveMinor: q.receiveMinor, maxFeeMinor: q.maxFeeMinor, ...bundle() });
+  assert.equal(r.code, 'partner_error', JSON.stringify(r));
+  const [row] = await t.w.db.select().from(schema.withdrawals);
+  const trail = async () => (await t.w.db.select().from(schema.withdrawalEvents)).filter((e) => e.subjectId === row.id && e.action === 'instruction_reversed');
+  assert.equal((await trail())[0].detail.accepted, false);
+  assert.equal((await trail())[0].detail.answer, 'payout_not_found', 'what the partner said is kept for ops');
+
+  // The sweep asks again; the sandbox keeps the reversal against the intent id.
+  const swept = await t.reconcile();
+  assert.equal(swept.reversalsAsked, 1, JSON.stringify(swept));
+  assert.equal(swept.reversalsPending, 0, JSON.stringify(swept));
+  const calls = t.partner.called('returnOrReverse');
+  assert.ok(calls.every((c) => c.input.returnAddress === row.walletAddress && c.input.intentId === row.intentId), 'every reversal goes back to the business wallet on the row');
+
+  // The delayed instruction arrives at the partner after the reversal: refused, never live.
+  assert.ok(inFlight);
+  await assert.rejects(base.createPayout(inFlight), (e) => e instanceof PayoutPartnerUnavailable && e.code === 'instruction_conflict');
+  await t.w.client.close();
+});
+
+test('a lost answer whose one reversal failed before the sweep counted it is picked up by the backfill migration, and one that was taken is left alone', async () => {
+  const { readFileSync } = await import('node:fs');
+  const base = payoutPartner('hata_fiuu', ENV);
+  let refuse = true;
+  const t = await setup({
+    overrides: {
+      createPayout: async () => { throw new Error('timed out'); },
+      // The first payout's one reversal fails; the second's is taken.
+      returnOrReverse: async (input) => {
+        if (refuse) {
+          refuse = false;
+          throw new Error('partner timed out');
+        }
+        return base.returnOrReverse(input);
+      },
+    },
+  });
+  const { destination } = await readyToWithdraw(t);
+  const ids = [];
+  for (const ck of ['ck_legacy_failed', 'ck_legacy_taken']) {
+    const q = await quoted(t, destination.id);
+    const r = await createWithdrawal(t.deps(), 'u-founder', { clientKey: ck, destinationId: destination.id, amountMinor: '1000000000', acceptedReceiveMinor: q.receiveMinor, maxFeeMinor: q.maxFeeMinor, ...bundle() });
+    assert.equal(r.code, 'partner_error', JSON.stringify(r));
+    const [row] = (await t.w.db.select().from(schema.withdrawals)).filter((w) => w.clientKey === ck);
+    ids.push(row.id);
+  }
+  // As the rows were left before the reversal was counted: failure partner_error and nothing counted (the event trail is append-only, so its one instruction_reversed event each stays).
+  await t.w.db.update(schema.withdrawals).set({ failure: 'partner_error', returnAsks: 0, returnAskedAt: null, returnAcceptedAt: null });
+  const reversedEvents = (await t.w.db.select().from(schema.withdrawalEvents)).filter((e) => e.action === 'instruction_reversed');
+  assert.deepEqual(ids.map((id) => reversedEvents.filter((e) => e.subjectId === id).map((e) => e.detail.accepted)), [[false], [true]]);
+  assert.equal((await t.reconcile()).reversalsAsked, 0, 'before the backfill neither is asked again');
+  const sql = readFileSync(new URL('../drizzle/0055_lost_answer_reversal_backfill.sql', import.meta.url), 'utf8');
+  for (const part of sql.split('--> statement-breakpoint')) if (part.trim()) await t.w.client.exec(part);
+  const rows = await t.w.db.select().from(schema.withdrawals);
+  assert.equal(rows.find((w) => w.id === ids[0]).returnAsks, 1, 'the failed reversal is counted');
+  assert.equal(rows.find((w) => w.id === ids[1]).returnAsks, 0, 'the taken one owes nothing');
+  const swept = await t.reconcile();
+  assert.equal(swept.reversalsAsked, 1, JSON.stringify(swept));
+  const asked = t.partner.called('returnOrReverse').at(-1).input;
+  assert.equal(asked.intentId, rows.find((w) => w.id === ids[0]).intentId);
+  assert.equal(asked.partnerRef, '');
+  // Running it again changes nothing.
+  for (const part of sql.split('--> statement-breakpoint')) if (part.trim()) await t.w.client.exec(part);
+  assert.equal((await t.reconcile()).reversalsAsked, 0);
+  await t.w.client.close();
 });
