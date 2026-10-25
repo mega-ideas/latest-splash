@@ -30,6 +30,44 @@ The remaining four modules (`smart_treasury`, `payment_intent`, `audit_anchor`, 
 
 ---
 
+## v2 Phase 2 §4.3 — funding the Business Splash Wallet — 2026-10-25
+
+Design: `docs/v2/phase2-funding.md`.
+
+- **One destination.** Every channel (funding partner, any Sui wallet, CCTP
+  V2, swap routes) delivers to the wallet the business's `BusinessAccount`
+  names on chain, read per request; the request never names it, and an
+  address Splash controls is refused as destination and as source (D1, D3).
+  The Phase 1 mainnet refusals on the old deposit-address path are unchanged.
+- **Arrivals come from the chain.** A deposit is recorded from a transaction's
+  balance changes to the business wallet, by digest, once per transaction and
+  coin (unique index). A webhook or a request can name a digest, never an
+  amount.
+- **Screened on arrival, held when unverified.** Every deposit's origin is
+  screened (`lib/compliance/kyt.ts`); a sanctions hit is blocked for good; an
+  unknown, unverified, first-use-failed or mismatched source, or no verdict,
+  holds it. Splash builds no wallet payment that would spend held or blocked
+  USDC (`funds_on_hold`).
+- **Sources.** A bank account or card only in the company's registered name;
+  no full account or card number stored. A wallet is proven by a single-use,
+  15-minute signed message naming the business, chain, address and nonce.
+  First use is checked once.
+- **Quote first; peg guard.** A fresh quote below the accepted one is refused.
+  USDT / USDsui convert only within 30 bps (`peg_monitor`'s tolerance) on the
+  coin's own DeepBook pool; no reading refuses.
+- **Fail closed.** Partners, routes and Elliptic are sandboxes outside
+  production and refuse in production (without credentials, and until their
+  APIs are wired, with them). No verdict without a provider's answer.
+- **Webhooks.** HMAC over the raw body, 5-minute replay window, matched by
+  intent id and the partner's order reference, once per event id, no status
+  regressions.
+- **Tenant isolation.** Every route behind `walletRoute` (session org,
+  `requireSessionAccount`); every store call takes the org; another org's
+  ids read as 404. Owners alone change funding sources; viewers only read.
+- **Open:** live partner, route and Elliptic APIs; the conversion signing
+  request; EVM wallet proofs; a deposit watcher; holds do not bind a staff
+  member's own allowance spend.
+
 ## v2 Phase 2 §4.1 — the Business Splash Wallet backend — 2026-10-25
 
 Design: `docs/v2/phase2-business-wallet.md`.
