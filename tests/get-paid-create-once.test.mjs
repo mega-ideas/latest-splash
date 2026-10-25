@@ -195,7 +195,7 @@ test('the create key and fingerprint stay on the server', async () => {
 test('a 409 names the invoice already made under the key, and the dialog offers it', async () => {
   const route = await source('app/api/invoices/route.ts');
   assert.match(route, /function keyReused\(existing/, 'the 409 carries the invoice on file');
-  assert.match(route, /existing:\s*\{[^}]*payLinkSlug/, 'with its pay link');
+  assert.match(route, /existing:\s*existing\s*\?\s*\{[^}]*payLinkSlug/, 'with its pay link');
   assert.match(route, /readInvoiceByCreateKey\(orgId/, 'read for the session org only');
   const dialog = await source('components/invoices/CreateInvoiceDialog.tsx');
   assert.match(dialog, /body\.existing/, 'the dialog reads it');

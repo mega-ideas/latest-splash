@@ -44,5 +44,21 @@ export function createFingerprint(input: CreateFingerprintInput): string {
   return createHash('sha256').update(JSON.stringify(normalised)).digest('hex');
 }
 
+/**
+ * An invoice as a reply carries it: without the create key or the
+ * fingerprint. Neither is needed by a client, and the fingerprint is a hash
+ * over low-entropy details (payer email, amount, memo) that can be confirmed
+ * offline. Both stay on the server.
+ */
+export function withoutCreateKey<T extends { createKey?: unknown; createFingerprint?: unknown }>(
+  invoice: T | null | undefined,
+): Omit<T, 'createKey' | 'createFingerprint'> | null {
+  if (!invoice) return null;
+  const { createKey: _key, createFingerprint: _fingerprint, ...rest } = invoice;
+  void _key;
+  void _fingerprint;
+  return rest;
+}
+
 /** The code a client reads when a key comes back with other details. */
 export const CREATE_KEY_REUSED = 'create_key_reused';

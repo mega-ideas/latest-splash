@@ -40,6 +40,9 @@ function validate(form: Form): Errors {
   return e;
 }
 
+/** What a 409 create_key_reused names: the invoice already made under the key. */
+type ExistingInvoice = Pick<InvoiceRecord, 'id' | 'amountUsd' | 'dueDate' | 'status' | 'payLinkSlug'> & { payerOrgName: string | null };
+
 export default function CreateInvoiceDialog({ issuerName, documentsOpen, close, onCreated }: {
   issuerName: string; documentsOpen: boolean; close: () => void; onCreated: () => void;
 }) {
@@ -53,6 +56,8 @@ export default function CreateInvoiceDialog({ issuerName, documentsOpen, close, 
   // the same invoice and pay link (lib/invoices/create-once.ts).
   const [createKey] = useState(() => crypto.randomUUID());
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // A 409 names the invoice already made under this form's key.
+  const [existing, setExisting] = useState<ExistingInvoice | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const firstField = useRef<HTMLInputElement>(null);
 
@@ -96,27 +101,31 @@ export default function CreateInvoiceDialog({ issuerName, documentsOpen, close, 
     if (submitting) return;
     setSubmitting(true);
     setSubmitError(null);
+    setExisting(null);
     try {
       const response = await fetch('/api/invoices', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...form, payerOrgEmail: form.payerOrgEmail || '', documentBase64, createKey }),
       });
-      const body = (await response.json().catch(() => ({}))) as { invoice?: InvoiceRecord; error?: string; code?: string };
+      const body = (await response.json().catch(() => ({}))) as { invoice?: InvoiceRecord; error?: string; code?: string; existing?: ExistingInvoice | null };
       if (!response.ok || !body.invoice) {
-        const message = body.code === 'create_key_reused'
-          ? 'This invoice was already created with other details. Close this form and create a new invoice.'
-          : body.error ?? 'The invoice was not created. Try again.';
-        setSubmitError(message);
-        toast.error(message);
+        // Shown once, in the role=alert line under the button (no toast, so
+        // a screen reader hears it once).
+        if (body.code === 'create_key_reused') {
+          setExisting(body.existing ?? null);
+          setSubmitError(body.existing
+            ? `An invoice was already created from this form: ${Number(body.existing.amountUsd).toLocaleString('en-US', { minimumFractionDigits: 2 })} USDC${body.existing.payerOrgName ? ` from ${body.existing.payerOrgName}` : ''}, with other details than these. Open it to check it before you send it, or close this form and start a new one.`
+            : 'An invoice was already created from this form, with other details. Close this form and start a new one.');
+        } else {
+          setSubmitError(body.error ?? 'The invoice was not created. Try again.');
+        }
         return;
       }
       setCreated(body.invoice);
       onCreated();
     } catch {
-      const message = 'The connection dropped before Splash answered. Try again: the invoice will not be made twice.';
-      setSubmitError(message);
-      toast.error(message);
+      setSubmitError('The connection dropped before Splash answered. Try again: the invoice will not be made twice.');
     } finally {
       setSubmitting(false);
     }
@@ -217,11 +226,16 @@ export default function CreateInvoiceDialog({ issuerName, documentsOpen, close, 
                   <p className="text-[#326273]">Pays in USDC on Sui, straight to your business’s wallet.</p>
                 </div>
               </div>
-              <button type="submit" disabled={submitting} className="dash-btn mt-4 min-h-11 w-full disabled:opacity-50">
+              <button type="submit" disabled={submitting} aria-describedby={submitError ? 'ci-submit-error' : undefined} className="dash-btn mt-4 min-h-11 w-full disabled:opacity-50">
                 {submitting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null} {submitting ? 'Creating…' : 'Create invoice and pay link'}
               </button>
               {submitError && (
-                <p role="alert" className="mt-2 text-[13px] font-semibold leading-snug text-[var(--error)]">{submitError}</p>
+                <p id="ci-submit-error" role="alert" className="mt-2 text-[13px] font-semibold leading-snug text-[var(--error)]">{submitError}</p>
+              )}
+              {existing && (
+                <button type="button" onClick={() => setCreated(existing as InvoiceRecord)} className="dash-btn dash-btn-ghost mt-2 min-h-11 w-full !text-[13px]">
+                  Open the invoice already made
+                </button>
               )}
             </aside>
           </form>

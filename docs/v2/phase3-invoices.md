@@ -58,7 +58,21 @@ field.
   is sealed or stored again; the same key with other details is a 409
   `create_key_reused`; another org's key is its own. Two creates racing on
   one key leave one invoice. A dropped connection brings the button back
-  and says a retry will not make the invoice twice.
+  and says a retry will not make the invoice twice. The 409 names the
+  invoice already made under the key (id, payer, amount, due date, status,
+  pay-link slug; read for the session org), and the dialog offers "Open the
+  invoice already made". A failed create is said once, in the role=alert
+  line the button is described by, with no toast. The key and fingerprint
+  never leave the server: every reply (list, create, `/api/invoices/:id`,
+  the audit view) goes through `withoutCreateKey`. A request that sealed
+  and stored a document but lost the race on its key logs the orphaned
+  Walrus blob id and Seal policy id (never the document) for cleanup;
+  claiming the key before the document work is left for later.
+- The totals (Open, Overdue, Paid this month) stay on one line at any
+  width (`lib/invoices/totals-figure.ts`): a figure steps down in size by
+  its length to fit the narrowest tile, and past that is shown compact with
+  the full value in the title and for screen readers. Up to lg, Open has
+  its own row; from lg the three share one; the buttons join it from xl.
 - Status moves forward only (`lib/invoices/status.ts`). `PATCH
   /api/invoices/:id` asks `lib/invoices/patch-rules.ts`: only owners,
   finance admins, approvers and makers (the membership's role) change an

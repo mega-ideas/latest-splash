@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { NextResponse } from 'next/server';
 
 import { verifyStoredSettlementEvidence } from '@/lib/evidence/settlement';
+import { withoutCreateKey } from '@/lib/invoices/create-once';
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { readSweepJob } from '@/lib/server/operations';
 import { readInvoiceForStaff } from '@/lib/server/invoices-store';
@@ -61,7 +62,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ inte
   const { intentId } = await params;
   const view = await auditView(accountCheck.account.orgId, intentId);
   return view
-    ? NextResponse.json({ ...view, proof: await settlementProof(view) })
+    ? NextResponse.json({ ...view, invoice: withoutCreateKey(view.invoice), proof: await settlementProof(view) })
     : NextResponse.json({ error: 'Audit receipt not found' }, { status: 404 });
 }
 

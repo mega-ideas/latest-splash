@@ -8,7 +8,8 @@ import { LAUNCH_SCOPE_CODE, stablecoinOnly } from '@/lib/server/launch-scope';
 import { RATE_LIMITS, enforceRateLimit } from '@/lib/server/rate-limit';
 import { buildInvoice } from '@/lib/server/operations';
 import { createInvoiceOnce, listInvoicesFor, readInvoiceByCreateKey } from '@/lib/server/invoices-store';
-import { CREATE_KEY_REUSED, createFingerprint, isCreateKey } from '@/lib/invoices/create-once';
+import { CREATE_KEY_REUSED, createFingerprint, isCreateKey, withoutCreateKey } from '@/lib/invoices/create-once';
+import type { InvoiceRecord } from '@/lib/server/operations';
 import { requireSessionAccount } from '@/lib/server/session-account';
 import { sealAdapter } from '@/lib/server/seal';
 import { storeEncryptedInvoice, WalrusAdapterError } from '@/lib/server/walrus';
@@ -29,11 +30,27 @@ const createInvoiceSchema = z.object({
 
 const NO_STORE = { 'Cache-Control': 'no-store' };
 
-function keyReused() {
+/**
+ * The same key came back with other details. The invoice already made under
+ * it is named (read for the session org only), so the user can open it
+ * rather than send it uncorrected or make a second invoice for one debt.
+ */
+function keyReused(existing: InvoiceRecord | null) {
   return NextResponse.json(
-    { error: 'This invoice was already created with other details. Close the form and start a new invoice.', code: CREATE_KEY_REUSED },
+    {
+      error: 'An invoice was already created from this form, with other details. Open it to check it, or close this form and start a new one.',
+      code: CREATE_KEY_REUSED,
+      existing: existing
+        ? { id: existing.id, payerOrgName: existing.payerOrgName ?? null, amountUsd: existing.amountUsd, dueDate: existing.dueDate, status: existing.status, payLinkSlug: existing.payLinkSlug }
+        : null,
+    },
     { status: 409, headers: NO_STORE },
   );
+}
+
+/** Created, or a retry answered with the invoice already made. Never the key or fingerprint. */
+function made(invoice: InvoiceRecord, status: 200 | 201, extra: Record<string, unknown>) {
+  return NextResponse.json({ invoice: withoutCreateKey(invoice), ...extra }, { status, headers: NO_STORE });
 }
 
 export async function GET(request: Request) {
@@ -45,7 +62,7 @@ export async function GET(request: Request) {
   const accountCheck = await requireSessionAccount(auth.session);
   if (accountCheck.response) return accountCheck.response;
 
-  return NextResponse.json({ invoices: await listInvoicesFor(accountCheck.account.orgId) });
+  return NextResponse.json({ invoices: (await listInvoicesFor(accountCheck.account.orgId)).map(withoutCreateKey) });
 }
 
 export async function POST(request: Request) {
@@ -80,8 +97,8 @@ export async function POST(request: Request) {
   // stored again: one invoice, one pay link, one exact amount.
   const already = await readInvoiceByCreateKey(orgId, input.createKey);
   if (already) {
-    if (already.createFingerprint !== fingerprint) return keyReused();
-    return NextResponse.json({ invoice: already, walrus: null, replay: true }, { status: 200, headers: NO_STORE });
+    if (already.createFingerprint !== fingerprint) return keyReused(already);
+    return made(already, 200, { walrus: null, replay: true });
   }
 
   let document:
@@ -114,7 +131,7 @@ export async function POST(request: Request) {
       };
     }
 
-    const made = await createInvoiceOnce(buildInvoice({
+    const once = await createInvoiceOnce(buildInvoice({
       // From the SESSION, never the request.
       orgId,
       issuerOrg: input.issuerOrg,
@@ -129,11 +146,20 @@ export async function POST(request: Request) {
       sealPolicyId: document?.sealPolicyId,
       documentSha256: document?.documentSha256,
     }), { createKey: input.createKey, fingerprint });
-    if (made.outcome === 'conflict') return keyReused();
-    if (made.outcome === 'replay') {
-      return NextResponse.json({ invoice: made.invoice, walrus: null, replay: true }, { status: 200, headers: NO_STORE });
+    if (once.outcome !== 'created' && document) {
+      // Another request with this key won while this one sealed and stored
+      // the document: this blob is referenced by nothing. Logged by id (never
+      // the document) so it can be cleaned up.
+      console.warn('invoice create: orphaned encrypted document', {
+        orgId,
+        outcome: once.outcome,
+        walrusBlobId: document.walrusBlobId,
+        sealPolicyId: document.sealPolicyId,
+      });
     }
-    return NextResponse.json({ invoice: made.invoice, walrus: document?.walrus ?? null }, { status: 201, headers: NO_STORE });
+    if (once.outcome === 'conflict') return keyReused(await readInvoiceByCreateKey(orgId, input.createKey));
+    if (once.outcome === 'replay') return made(once.invoice, 200, { walrus: null, replay: true });
+    return made(once.invoice, 201, { walrus: document?.walrus ?? null });
   } catch (error) {
     if (error instanceof WalrusAdapterError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

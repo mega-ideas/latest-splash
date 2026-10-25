@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
 import { UnauthorizedError, resolveAuthorityForSession } from '@/lib/auth/authority';
+import { withoutCreateKey } from '@/lib/invoices/create-once';
 import { checkInvoicePatch } from '@/lib/invoices/patch-rules';
 import { ISSUER_SETTABLE } from '@/lib/invoices/status';
 import { invoiceDeliveryTier } from '@/lib/server/custody-phase';
@@ -33,7 +34,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   // It is a client component and cannot read the custody phase, so the server
   // decides — with the same gate the authorize step enforces.
   return invoice
-    ? NextResponse.json({ ...invoice, recommendedDeliveryTier: invoiceDeliveryTier(invoice.targetCurrency) })
+    ? NextResponse.json({ ...withoutCreateKey(invoice), recommendedDeliveryTier: invoiceDeliveryTier(invoice.targetCurrency) })
     : NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
 }
 
@@ -89,7 +90,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   // Guarded on the status read: a USDC sync that settled the invoice in
   // between is not overwritten with an older status.
   const invoice = await patchInvoice(accountCheck.account.orgId, id, patch, { status: current.status });
-  if (invoice) return NextResponse.json(invoice);
+  if (invoice) return NextResponse.json(withoutCreateKey(invoice));
   const now = await readInvoice(accountCheck.account.orgId, id);
   return now
     ? NextResponse.json({ error: `The invoice changed while it was being updated; it is ${now.status} now. Check it again.`, code: 'changed' }, { status: 409 })
