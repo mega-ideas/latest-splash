@@ -1019,8 +1019,12 @@ export async function openBankPayout(
     await cancel(deps, id, 'system', u ? u.code : 'partner_error', ['preparing']);
     return u ?? refuse(502, 'partner_error', 'The partner did not take the instruction. Nothing was sent.');
   }
-  await store.patchWithdrawal(deps.db, deps.orgId, id, { partnerRef, updatedAt: now });
+  const instructed = await store.patchWithdrawal(deps.db, deps.orgId, id, { partnerRef, updatedAt: now });
   await store.recordWithdrawalEvent(deps.db, { orgId: deps.orgId, subject: 'withdrawal', subjectId: id, actor: 'system', action: 'instructed', detail: { partnerRef }, at: now });
+  // Cancelled while the partner was being instructed (its bank account was
+  // removed, or the registered name changed): the cancel found no reference
+  // to reverse, so the instruction is reversed here, and nobody is asked to sign.
+  if (instructed?.status !== 'preparing') return cancelledUnder(deps, r.adapter, { id, intentId, partnerRef, returnAddress: r.wallet.address }, noun);
 
   // 2. The owners' signatures, on bytes bound to this deposit address, account and amount.
   const { requestWalletPayment } = await import('./business-wallet.ts');
@@ -1081,8 +1085,20 @@ export async function openBankPayout(
     return refuse(opened.status, opened.code, opened.error);
   }
   const moved = await store.moveWithdrawal(deps.db, deps.orgId, id, ['preparing'], { status: 'awaiting_signatures', signingRequestId: opened.request.id, updatedAt: now });
+  if (!moved) {
+    // Cancelled while the owners' request was being opened: the request is closed before anyone signs it.
+    await closeSigningRequest(deps.db, { orgId: deps.orgId, id: opened.request.id, status: 'cancelled', from: ['collecting'], now: deps.now() });
+    return cancelledUnder(deps, r.adapter, { id, intentId, partnerRef, returnAddress: r.wallet.address }, noun);
+  }
   await store.recordWithdrawalEvent(deps.db, { orgId: deps.orgId, subject: 'withdrawal', subjectId: id, actor: userId, action: 'awaiting_signatures', detail: { signingRequestId: opened.request.id }, at: now });
-  return { ok: true, created: true, payout: await withdrawalView(deps, moved ?? (await store.getWithdrawalRow(deps.db, deps.orgId, id))!), request: opened.request };
+  return { ok: true, created: true, payout: await withdrawalView(deps, moved), request: opened.request };
+}
+
+/** A bank payout cancelled while it was being opened: its instruction is reversed and the caller told. */
+async function cancelledUnder(deps: WithdrawalDeps, adapter: PayoutPartner, w: { id: string; intentId: string; partnerRef: string; returnAddress: string }, noun: string): Promise<Refusal> {
+  const accepted = await reverseInstruction(deps, adapter, { intentId: w.intentId, partnerRef: w.partnerRef, returnAddress: w.returnAddress }, 'cancelled_while_opening');
+  await store.recordWithdrawalEvent(deps.db, { orgId: deps.orgId, subject: 'withdrawal', subjectId: w.id, actor: 'system', action: 'instruction_reversed', detail: { reason: 'cancelled_while_opening', accepted }, at: deps.now() });
+  return refuse(409, 'withdrawal_cancelled', `This ${noun} was cancelled while it was being set up: its bank account was removed meanwhile. Nothing was sent.`);
 }
 
 export async function cancel(deps: Pick<WithdrawalDeps, 'db' | 'now' | 'orgId'>, id: string, actor: string, reason: string, from: WithdrawalStatus[]) {

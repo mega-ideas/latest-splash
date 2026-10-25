@@ -174,7 +174,11 @@ test deposit to it would be lost.
   its bank account and deposit address are still verified, and they are the
   ones the bytes commit to (`withdrawal_changed` otherwise). Removing a bank
   account cancels its withdrawals not yet sent: their requests close, and
-  their instructions are reversed.
+  their instructions are reversed. A withdrawal cancelled while it is still
+  being set up (the partner being instructed, or the owners' request being
+  opened) answers `withdrawal_cancelled`: the instruction the partner took
+  is reversed and the request, if one was opened, is closed before anyone
+  signs it.
 - When it executes, the withdrawal is `sent`. The executed transaction is
   read, and the digest is posted to the partner only when its
   `IntentCreated` event (under the original package id) names the
