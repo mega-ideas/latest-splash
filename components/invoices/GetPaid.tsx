@@ -217,6 +217,7 @@ export default function GetPaid({ issuerName, onCounts }: { issuerName: string; 
                     <td className="px-4 py-3">
                       <span className={cn('inline-block rounded-full px-2.5 py-1 text-[12px] font-semibold', STATUS_STYLE[invoice.status])}>{INVOICE_STATUS_LABEL[invoice.status]}</span>
                       {invoice.usdcTxDigest && <span className="mt-1 block text-[12px] text-[#326273]">Paid in USDC on Sui</span>}
+                      {invoice.status === 'reported' && invoice.payerReportedReference && <span className="mt-1 block text-[12px] text-[#326273]">Their reference <span className="font-mono">{invoice.payerReportedReference}</span></span>}
                     </td>
                     <td className="px-4 py-3">{actions(invoice)}</td>
                   </tr>
@@ -234,6 +235,7 @@ export default function GetPaid({ issuerName, onCounts }: { issuerName: string; 
                     <p className="dash-num shrink-0 font-mono font-semibold text-[#0c3e48]">{usdc(invoice.amountUsd)} <span className="text-[12px] font-normal text-[#326273]">USDC</span></p>
                   </div>
                   <span className={cn('inline-block rounded-full px-2.5 py-1 text-[12px] font-semibold', STATUS_STYLE[invoice.status])}>{INVOICE_STATUS_LABEL[invoice.status]}</span>
+                  {invoice.status === 'reported' && invoice.payerReportedReference && <p className="text-[12px] text-[#326273]">Their reference <span className="font-mono">{invoice.payerReportedReference}</span></p>}
                   {actions(invoice, true)}
                 </li>
               ))}
@@ -286,14 +288,25 @@ function Sheet({ title, close, children }: { title: string; close: () => void; c
 }
 
 function MarkPaid({ invoice, close, submit, busy }: { invoice: InvoiceRecord; close: () => void; submit: (reference: string) => void; busy: boolean }) {
-  const [reference, setReference] = useState(invoice.paymentReference ?? '');
+  // Empty on purpose: the reference is the one the business finds on its own
+  // bank statement, typed here. The payer's report is shown beside it, never
+  // filled in for them.
+  const [reference, setReference] = useState('');
+  const payer = invoice.payerOrgName ?? 'The payer';
   return (
     <Sheet title="Mark as paid" close={close}>
       <form onSubmit={(e) => { e.preventDefault(); if (reference.trim().length >= 4) submit(reference.trim()); }} className="mt-3 space-y-3">
-        <p className="text-sm text-[#1f4452]">{invoice.payerOrgName} paid {usdc(invoice.amountUsd)} USDC outside the pay link, for example by bank transfer. Record the reference you received.</p>
+        <p className="text-sm text-[#1f4452]">Mark it paid once {usdc(invoice.amountUsd)} has reached your account. Enter the reference your bank shows for that payment.</p>
+        {invoice.payerReportedReference && (
+          <div className="rounded-xl bg-[var(--warn-bg)] p-3 text-[13px] text-[var(--warn-ink)]">
+            <p className="font-semibold">{payer} says they paid</p>
+            <p className="mt-1">Their reference: <span className="font-mono">{invoice.payerReportedReference}</span>{invoice.payerReportedAt ? <>, reported <LocalTime value={invoice.payerReportedAt} format="date" locale="en-GB" options={{ day: 'numeric', month: 'short', year: 'numeric' }} /></> : null}. Find it on your statement before you mark it paid.</p>
+          </div>
+        )}
         <div>
-          <label htmlFor="mark-ref" className="text-[13px] font-semibold text-[#1f4452]">Payment reference<span className="text-[var(--error)]" aria-hidden="true">*</span></label>
+          <label htmlFor="mark-ref" className="text-[13px] font-semibold text-[#1f4452]">Reference on your statement<span className="text-[var(--error)]" aria-hidden="true">*</span></label>
           <input id="mark-ref" value={reference} onChange={(e) => setReference(e.target.value)} minLength={4} autoComplete="off" className="mt-1 h-11 w-full rounded-lg border border-[#326273]/20 bg-white px-3 font-mono text-sm focus:border-[#145d6a] focus:outline-none focus:ring-2 focus:ring-[#5c9ead]/30" />
+          <p className="mt-1 text-[12px] text-[#326273]">At least 4 characters.</p>
         </div>
         <button type="submit" disabled={busy || reference.trim().length < 4} className="dash-btn min-h-11 w-full disabled:opacity-50">Mark as paid</button>
       </form>

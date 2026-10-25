@@ -5,7 +5,7 @@ import { readJsonBody } from '@/lib/server/http';
 import { PAYER_MAY_REPORT } from '@/lib/invoices/status';
 import { RATE_LIMITS, clientIp, enforceRateLimit } from '@/lib/server/rate-limit';
 import { recordAnalyticsEvent } from '@/lib/server/operations';
-import { findInvoiceBySlug, patchInvoiceForStaff } from '@/lib/server/invoices-store';
+import { findInvoiceBySlug, reportInvoicePayment } from '@/lib/server/invoices-store';
 import { payLinkBankInstructions } from '@/lib/server/pay-link';
 import { findIssuerForPayLink, upsertRecipientFromInvoice } from '@/lib/server/recipients-store';
 import { publicUsdcForSlug } from '@/lib/server/usdc-invoice-payments';
@@ -70,12 +70,28 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
 
   // The payer's word is a report, not a payment: it moves the invoice to
   // "reported", and only the issuer or a matched Sui payment makes it paid
-  // (lib/invoices/status.ts). Once reported, paid or settled, nothing here
-  // overwrites it; the same report again is answered as before.
-  if (invoice.status === 'reported' && invoice.paymentReference === parsed.data.paymentReference && invoice.payerOrgEmail === parsed.data.payerOrgEmail) {
-    return NextResponse.json({ ok: true, replayed: true });
-  }
+  // (lib/invoices/status.ts). What the payer says is kept apart from the
+  // issuer's own payment reference, which it never replaces, and it is
+  // never the evidence for Mark as paid. Once reported, paid or settled,
+  // nothing here overwrites it; the same report again is answered as before.
+  const replayed = invoice.status === 'reported'
+    && invoice.payerReportedReference === parsed.data.paymentReference
+    && invoice.payerOrgEmail === parsed.data.payerOrgEmail;
+  if (replayed) return NextResponse.json({ ok: true, replayed: true });
   if (!PAYER_MAY_REPORT.includes(invoice.status)) {
+    return NextResponse.json({ error: 'This invoice already has a payment on record.', code: 'status' }, { status: 409 });
+  }
+
+  // By id, not by session: the payer has no account. The slug already
+  // established which invoice this is. Guarded on the status it leaves, so a
+  // report that raced another lands once.
+  const reported = await reportInvoicePayment(invoice.id, PAYER_MAY_REPORT, {
+    payerOrgName: parsed.data.payerOrgName,
+    payerOrgEmail: parsed.data.payerOrgEmail,
+    reference: parsed.data.paymentReference,
+    at: new Date(),
+  });
+  if (!reported) {
     return NextResponse.json({ error: 'This invoice already has a payment on record.', code: 'status' }, { status: 409 });
   }
 
@@ -85,14 +101,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
     orgId: invoice.orgId,
     name: parsed.data.payerOrgName,
     orgEmail: parsed.data.payerOrgEmail,
-  });
-  // By id, not by session: the payer has no account. The slug already
-  // established which invoice this is.
-  await patchInvoiceForStaff(invoice.id, {
-    payerOrgName: parsed.data.payerOrgName,
-    payerOrgEmail: parsed.data.payerOrgEmail,
-    paymentReference: parsed.data.paymentReference,
-    status: 'reported',
   });
   const counterpartyPull = recordAnalyticsEvent('counterparty_pull');
   console.info('[kyb-invite] prepared', { recipientId: recipient.id, email: recipient.orgEmail });

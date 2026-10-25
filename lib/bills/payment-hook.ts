@@ -18,6 +18,14 @@
  *     returns the same payment intent, never a second payment;
  *   - pay `recipientId` as stored for `orgId` (verified, on file), for exactly
  *     `amountMicros` of `currency`, and nothing printed on the invoice;
+ *   - settle in `settlementAsset` (USDC). Only a USD or USDC invoice is handed
+ *     off; any other currency needs a rate quote first, and Pay invoices
+ *     refuses it (`fx_quote_needed`) rather than invent a rate;
+ *   - follow `feeRule` (docs/v2/fees.md, Amendment A1): Splash's fee is
+ *     computed on chain from the derived kind, never here. The flow shows the
+ *     quote, and the fee it showed is what the approver signs as `max_fee`.
+ *     The invoice carries no fee and no fee number of its own; partner and
+ *     Circle fees are separate lines, off chain, never marked up;
  *   - when the payment settles, call `recordBillSettlement` (lib/server/bills.ts)
  *     with the intent id and the Sui digest; when it closes unpaid, call
  *     `recordBillPaymentClosed`.
@@ -38,7 +46,14 @@ export type BillPaymentRequest = {
   /** For the payment's reference and the receipt. */
   supplierInvoiceNumber: string;
   payee: string;
+  /** What the payment settles in. A non-USD invoice is not handed off without a rate quote. */
+  settlementAsset: 'USDC';
+  /** The fee is quoted in Transfer, and the fee shown there is the payment's max_fee. */
+  feeRule: 'quote_in_transfer_shown_fee_is_max_fee';
 };
+
+/** The currencies an invoice can be handed off in without a rate quote: USDC pays them one for one. */
+export const HANDOFF_CURRENCIES: readonly string[] = ['USD', 'USDC'];
 
 export type BillPaymentHandoff =
   | { ok: true; paymentIntentId: string }

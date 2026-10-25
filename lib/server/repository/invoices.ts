@@ -21,7 +21,7 @@
  * handed to a payer who has no account, the slug is unguessable, and it
  * resolves to exactly one invoice and nothing else. Every OTHER read is scoped.
  */
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import type { PgDatabase } from 'drizzle-orm/pg-core';
 
 import { invoices } from '../../db/schema.ts';
@@ -52,6 +52,10 @@ export type InvoiceRow = {
   /** Paid in USDC on Sui to the issuer's own wallet: the proving transaction. */
   usdcTxDigest?: string;
   usdcPaidAt?: string;
+  /** What the payer said from the pay link (0058): a report, never the
+   *  issuer's `paymentReference` and never the evidence that it was paid. */
+  payerReportedReference?: string;
+  payerReportedAt?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -103,12 +107,14 @@ function toRow(row: InvoiceSelect): InvoiceRow {
     demo: row.demo,
     usdcTxDigest: row.usdcTxDigest ?? undefined,
     usdcPaidAt: row.usdcPaidAt ? row.usdcPaidAt.toISOString() : undefined,
+    payerReportedReference: row.payerReportedReference ?? undefined,
+    payerReportedAt: row.payerReportedAt ? row.payerReportedAt.toISOString() : undefined,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
 }
 
-export type NewInvoice = Omit<InvoiceRow, 'createdAt' | 'updatedAt'>;
+export type NewInvoice = Omit<InvoiceRow, 'createdAt' | 'updatedAt' | 'payerReportedReference' | 'payerReportedAt'>;
 
 export async function insertInvoice(db: DrizzleDb, input: NewInvoice): Promise<InvoiceRow> {
   const [row] = await db
@@ -247,6 +253,37 @@ export async function patchInvoiceForStaff(
 ): Promise<InvoiceRow | null> {
   const row = await getInvoiceForStaff(db, invoiceId);
   return row ? patchInvoice(db, row.orgId, invoiceId, patch) : null;
+}
+
+export type PaymentReport = { payerOrgName: string; payerOrgEmail: string; reference: string; at: Date };
+
+/**
+ * The payer says they paid, from the pay link. By id alone (the slug already
+ * established which invoice), and only while the invoice is in one of
+ * `from`: a guarded UPDATE, so a report never lands on an invoice that is
+ * already reported, paid or settled, and two reports racing cannot both
+ * land. The report is kept in its own columns; the issuer's
+ * `payment_reference` is never touched. Null when nothing changed.
+ */
+export async function reportPayment(
+  db: DrizzleDb,
+  invoiceId: string,
+  from: readonly string[],
+  report: PaymentReport,
+): Promise<InvoiceRow | null> {
+  const rows = await db
+    .update(invoices)
+    .set({
+      status: 'reported',
+      payerName: report.payerOrgName,
+      payerEmail: report.payerOrgEmail,
+      payerReportedReference: report.reference,
+      payerReportedAt: report.at,
+      updatedAt: report.at,
+    })
+    .where(and(eq(invoices.id, invoiceId), inArray(invoices.status, [...from])))
+    .returning();
+  return rows.length > 0 ? toRow(rows[0]) : null;
 }
 
 export const __testing = { toMinor, fromMinor };

@@ -231,6 +231,9 @@ export type InvoiceRecord = {
   /** Paid in USDC on Sui to the issuer's own wallet (lib/server/usdc-invoice-payments.ts). */
   usdcTxDigest?: string;
   usdcPaidAt?: string;
+  /** What the payer said from the pay link: a report, never the evidence it was paid. */
+  payerReportedReference?: string;
+  payerReportedAt?: string;
   createdAt: string;
   updatedAt: string;
 };

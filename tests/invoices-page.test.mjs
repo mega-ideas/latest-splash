@@ -32,10 +32,14 @@ test('an invoice the business sent only moves forward', async () => {
 test('PATCH refuses a status regression, a paid with no reference and a second transfer binding', async () => {
   const route = await source('app/api/invoices/[id]/route.ts');
   assert.match(route, /z\.enum\(ISSUER_SETTABLE/);
-  assert.match(route, /!canMoveInvoice\(current\.status, next\)/);
-  assert.match(route, /status: 409/);
-  assert.match(route, /Add the payment reference you received/);
-  assert.match(route, /already bound to a transfer/);
+  // The rules live in lib/invoices/patch-rules.ts since the 5.8 review;
+  // tests/pay-invoices-review.test.mjs drives them.
+  assert.match(route, /checkInvoicePatch\(/);
+  const rules = await source('lib/invoices/patch-rules.ts');
+  assert.match(rules, /!canMoveInvoice\(current\.status as InvoiceStatusV2, next\)/);
+  assert.match(rules, /status: 409/);
+  assert.match(rules, /Add the reference of the payment you received/);
+  assert.match(rules, /already bound to a transfer/);
   // Still scoped to the session's org (WS2).
   assert.match(route, /readInvoice\(accountCheck\.account\.orgId, id\)/);
   assert.match(route, /patchInvoice\(accountCheck\.account\.orgId, id,/);
@@ -43,7 +47,9 @@ test('PATCH refuses a status regression, a paid with no reference and a second t
 
 test('the pay link reports a payment, never marks it paid, and never overwrites one on record', async () => {
   const route = await source('app/api/pay/[slug]/route.ts');
-  assert.match(route, /status: 'reported'/);
+  // The report is written by a guarded UPDATE in the repository since the 5.8 review.
+  assert.match(route, /reportInvoicePayment\(invoice\.id, PAYER_MAY_REPORT/);
+  assert.match(await source('lib/server/repository/invoices.ts'), /status: 'reported'/);
   assert.doesNotMatch(route, /status: 'paid'/);
   assert.match(route, /!PAYER_MAY_REPORT\.includes\(invoice\.status\)/);
   assert.match(route, /replayed: true/);

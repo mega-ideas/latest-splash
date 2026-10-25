@@ -33,7 +33,6 @@ import { toast } from 'sonner';
 
 import LocalTime from '@/components/LocalTime';
 import { cn } from '@/lib/utils';
-import { suiScanTxUrlOn } from '@/lib/explorer';
 import { formatMicros, toMicros } from '@/lib/bills/amount';
 import { BILL_CURRENCIES, BILL_FIELDS, CONFIDENCE_LABEL, COUNTRY_CODES, type BillField, type Confidence } from '@/lib/bills/extract';
 import { BILL_STEP_LABEL, type BillStatus, type BillStep, type StepState } from '@/lib/bills/flow';
@@ -418,7 +417,7 @@ function BillCase({ bill, canWrite, paymentFlowWired, onChange, onOpen }: {
 
       {bill.confirmed && <DuplicateStep bill={bill} canWrite={canWrite && bill.status === 'review'} onOpen={onOpen} onAcknowledge={(reason) => act({ action: 'acknowledge_duplicate', reason }, 'ack')} busy={busy === 'ack'} />}
 
-      {bill.confirmed && <RecipientStep bill={bill} canWrite={canWrite && bill.status === 'review'} onMatch={(recipientId) => act({ action: 'match', recipientId }, 'match')} busy={busy} />}
+      {bill.confirmed && <RecipientStep bill={bill} canWrite={canWrite && bill.status === 'review'} onMatch={(recipientId, reason) => act({ action: 'match', recipientId, ...(reason ? { reason } : {}) }, 'match')} busy={busy} />}
 
       {bill.confirmed && <ScheduleStep bill={bill} canWrite={canWrite} paymentFlowWired={paymentFlowWired} act={act} busy={busy} onChange={onChange} />}
 
@@ -621,19 +620,19 @@ function DuplicateStep({ bill, canWrite, onOpen, onAcknowledge, busy }: {
   return (
     <StepCard id={`dup-${bill.id}`} title="Duplicate check" icon={blocked || needsAck ? AlertTriangle : ShieldCheck} state={blocked || needsAck ? 'warn' : 'done'}>
       {bill.status !== 'review' || bill.duplicates.length === 0 ? (
-        <p className="text-sm text-[#1f4452]">No other invoice in your list has this supplier’s number, or the same amount from them in the last 45 days.</p>
+        <p className="text-sm text-[#1f4452]">Checked against every invoice in your list that is not cancelled: none has this invoice number from this supplier or to the recipient it pays, and none has the same amount from either in the last 45 days.</p>
       ) : (
         <div className="space-y-3 text-sm text-[#1f4452]">
           {number.length > 0 && (
             <div role="alert" className="rounded-xl border border-[var(--error)]/30 bg-[var(--error-bg)] p-3">
-              <p className="font-semibold text-[var(--error)]">The same invoice number from this supplier is already in your list.</p>
+              <p className="font-semibold text-[var(--error)]">{number.some((d) => d.by === 'recipient') ? 'The same invoice number is already in your list, paid to the same recipient under another supplier name.' : 'The same invoice number from this supplier is already in your list.'}</p>
               <p className="mt-1">It cannot be paid twice. Cancel one of them.</p>
               <ul className="mt-2 space-y-1">{number.map((d) => <li key={d.billId}><button type="button" onClick={() => onOpen(d.billId)} className="min-h-11 bg-transparent font-semibold text-[#145d6a] underline decoration-1 underline-offset-2">Open the other invoice ({d.status})</button></li>)}</ul>
             </div>
           )}
           {amount.length > 0 && (
             <div className="rounded-xl border border-[var(--warn)]/35 bg-[var(--warn-bg)] p-3">
-              <p className="font-semibold text-[var(--warn-ink)]">The same amount from this supplier in the last 45 days, under another number.</p>
+              <p className="font-semibold text-[var(--warn-ink)]">{amount.some((d) => d.by === 'recipient') ? 'The same amount to the same recipient in the last 45 days, under another number.' : 'The same amount from this supplier in the last 45 days, under another number.'}</p>
               <ul className="mt-1 space-y-1">{amount.map((d) => <li key={d.billId}><button type="button" onClick={() => onOpen(d.billId)} className="min-h-11 bg-transparent font-semibold text-[#145d6a] underline decoration-1 underline-offset-2">Open that invoice ({d.status})</button></li>)}</ul>
               {bill.duplicateAck ? (
                 <p className="mt-2">Not a duplicate: “{bill.duplicateAck.reason}”</p>
@@ -652,9 +651,12 @@ function DuplicateStep({ bill, canWrite, onOpen, onAcknowledge, busy }: {
   );
 }
 
-function RecipientStep({ bill, canWrite, onMatch, busy }: { bill: BillView; canWrite: boolean; onMatch: (id: string) => Promise<{ ok: boolean }>; busy: string | null }) {
+function RecipientStep({ bill, canWrite, onMatch, busy }: { bill: BillView; canWrite: boolean; onMatch: (id: string, reason?: string) => Promise<{ ok: boolean }>; busy: string | null }) {
   const [changing, setChanging] = useState(false);
+  const [otherId, setOtherId] = useState('');
+  const [otherReason, setOtherReason] = useState('');
   const showChoices = canWrite && (!bill.recipient || changing);
+  const supplier = bill.confirmed?.payee ?? bill.payee;
   return (
     <StepCard id={`recipient-${bill.id}`} title="Who is paid" icon={UserRoundCheck} state={bill.facts.recipientMatched && bill.facts.recipientVerified ? 'done' : 'open'}>
       {bill.recipient && (
@@ -671,7 +673,19 @@ function RecipientStep({ bill, canWrite, onMatch, busy }: { bill: BillView; canW
           )}
         </div>
       )}
+      {bill.recipient && bill.recipientNameDiffers && (
+        <p className="mt-2 text-[13px] text-[#1f4452]">
+          {bill.matchReason
+            ? <>Paid for {supplier} because: “{bill.matchReason}”</>
+            : <>The recipient’s name is close to {supplier}, not the same. Check it is the same business.</>}
+        </p>
+      )}
       {bill.recipientMissing && <p role="alert" className="mt-2 text-[13px] font-medium text-[var(--error)]">The recipient this invoice was matched to is no longer in your list. Choose another.</p>}
+      {bill.extraction.paymentDetailsRead === 'not_read' && (
+        <p className="mt-3 rounded-xl border border-[var(--info)]/25 bg-[var(--info-bg)] p-3 text-[13px] leading-5 text-[var(--info)]">
+          The bank account or wallet printed on this PDF was not read, so it was not compared with the recipient’s. Check it against your copy before you schedule.
+        </p>
+      )}
       {bill.paymentDetailsDiffer && (
         <div role="alert" className="mt-3 flex gap-2 rounded-xl border border-[var(--warn)]/35 bg-[var(--warn-bg)] p-3 text-[13px] text-[var(--warn-ink)]">
           <AlertTriangle size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
@@ -697,7 +711,35 @@ function RecipientStep({ bill, canWrite, onMatch, busy }: { bill: BillView; canW
               ))}
             </ul>
           ) : (
-            <p className="text-sm text-[#1f4452]">No recipient in your list matches “{bill.confirmed?.payee ?? bill.payee}”.</p>
+            <p className="text-sm text-[#1f4452]">No recipient in your list matches “{supplier}”.</p>
+          )}
+          {bill.otherRecipients.length > 0 && (
+            <details className="mt-3 rounded-xl border border-[#326273]/10 bg-white/70 px-3">
+              <summary className="min-h-11 cursor-pointer py-3 text-[13px] font-semibold text-[#145d6a]">Paid under another name</summary>
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  if (!otherId || otherReason.trim().length < 8) return;
+                  if ((await onMatch(otherId, otherReason.trim())).ok) { setChanging(false); setOtherId(''); setOtherReason(''); }
+                }}
+                className="space-y-3 pb-3"
+              >
+                <p className="text-[13px] text-[#326273]">For a supplier paid through a trading name or an agent. Say why, and it is kept with the invoice.</p>
+                <div>
+                  <label htmlFor={`other-${bill.id}`} className="block text-[13px] font-semibold text-[#1f4452]">Recipient</label>
+                  <select id={`other-${bill.id}`} value={otherId} onChange={(e) => setOtherId(e.target.value)} className="mt-1 h-11 w-full rounded-lg border border-[#326273]/20 bg-white px-3 text-sm text-[#1f4452] focus:border-[#145d6a] focus:outline-none focus:ring-2 focus:ring-[#5c9ead]/30">
+                    <option value="">Choose a verified recipient</option>
+                    {bill.otherRecipients.map((r) => <option key={r.id} value={r.id}>{r.name}, {r.destination}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor={`other-why-${bill.id}`} className="block text-[13px] font-semibold text-[#1f4452]">Why this recipient is paid for {supplier}</label>
+                  <input id={`other-why-${bill.id}`} value={otherReason} onChange={(e) => setOtherReason(e.target.value)} minLength={8} maxLength={300} aria-describedby={`other-why-help-${bill.id}`} className="mt-1 h-11 w-full rounded-lg border border-[#326273]/20 bg-white px-3 text-sm focus:border-[#145d6a] focus:outline-none focus:ring-2 focus:ring-[#5c9ead]/30" />
+                  <p id={`other-why-help-${bill.id}`} className="mt-1 text-[12px] text-[#326273]">At least 8 characters, for example: its Philippine trading name.</p>
+                </div>
+                <button type="submit" disabled={busy !== null || !otherId || otherReason.trim().length < 8} className="dash-btn dash-btn-ghost min-h-11 !text-[13px] disabled:opacity-50">Pay this recipient</button>
+              </form>
+            </details>
           )}
           <p className="mt-3 text-[13px] text-[#326273]">
             Not listed? <Link href="/dashboard/recipients" className="font-semibold text-[#145d6a] underline decoration-1 underline-offset-2">Add the supplier in Recipients</Link>, then come back. A new recipient is screened before it can be paid.
@@ -756,6 +798,11 @@ function ScheduleStep({ bill, canWrite, paymentFlowWired, act, busy, onChange }:
     return (
       <StepCard id={`approve-${bill.id}`} title={BILL_STEP_LABEL.approve} icon={ShieldCheck} state="open">
         <p className="text-sm text-[#1f4452]">Scheduled to pay on <strong className="font-semibold">{dueLabel(bill.scheduledFor)}</strong>. The owners approve it in Transfer, with the fee and the rate shown before anyone signs.</p>
+        {bill.needsRateQuote && (
+          <p role="status" className="mt-3 rounded-xl border border-[var(--warn)]/35 bg-[var(--warn-bg)] p-3 text-[13px] leading-5 text-[var(--warn-ink)]">
+            This invoice is in {bill.confirmed?.currency}. It is paid in USDC, so it needs a rate quote, and Invoices does not quote rates. Pay it from Transfer, where the rate is quoted and shown.
+          </p>
+        )}
         {(!paymentFlowWired || notWired) && (
           <p role="status" className="mt-3 rounded-xl border border-[var(--info)]/25 bg-[var(--info-bg)] p-3 text-[13px] leading-5 text-[var(--info)]">
             {notWired ?? 'Approving from Invoices is not connected to Transfer on this server yet. The invoice stays scheduled; nothing is sent for approval.'}
@@ -763,7 +810,7 @@ function ScheduleStep({ bill, canWrite, paymentFlowWired, act, busy, onChange }:
         )}
         {canWrite && (
           <div className="mt-3 flex flex-wrap gap-2">
-            <button type="button" onClick={() => void approve()} disabled={sending || !paymentFlowWired || Boolean(notWired)} className="dash-btn min-h-11 disabled:opacity-50">
+            <button type="button" onClick={() => void approve()} disabled={sending || !paymentFlowWired || Boolean(notWired) || bill.needsRateQuote} className="dash-btn min-h-11 disabled:opacity-50">
               {sending ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null} Send for approval
             </button>
             <button type="button" onClick={() => void act({ action: 'unschedule' }, 'unschedule')} disabled={busy !== null} className="dash-btn dash-btn-ghost min-h-11 !text-[13px] disabled:opacity-50">Change it</button>
@@ -808,8 +855,8 @@ function ReceiptStep({ bill, canWrite, onChange }: { bill: BillView; canWrite: b
             </div>
           ))}
         </dl>
-        {paid.suiDigest && (
-          <a href={suiScanTxUrlOn('mainnet', paid.suiDigest)} target="_blank" rel="noreferrer" className="mt-3 inline-flex min-h-11 items-center gap-1.5 text-[13px] font-semibold text-[#145d6a] underline decoration-1 underline-offset-2">
+        {paid.verifyUrl && (
+          <a href={paid.verifyUrl} target="_blank" rel="noreferrer" className="mt-3 inline-flex min-h-11 items-center gap-1.5 text-[13px] font-semibold text-[#145d6a] underline decoration-1 underline-offset-2">
             Verify the payment on Sui <ExternalLink size={13} aria-hidden="true" />
           </a>
         )}

@@ -52,6 +52,8 @@ export type BillRow = {
   recipientId: string | null;
   matchedBy: string | null;
   matchedAt: Date | null;
+  /** Why a recipient unlike the confirmed supplier was chosen (migration 0058). */
+  matchReason: string | null;
   scheduledFor: string | null;
   scheduledBy: string | null;
   scheduledAt: Date | null;
@@ -60,6 +62,8 @@ export type BillRow = {
   approvalRequestedAt: Date | null;
   paidAt: Date | null;
   suiDigest: string | null;
+  /** Where the digest is: testnet or mainnet (migration 0058). */
+  suiNetwork: string | null;
   receiptNo: string | null;
   approvers: string[] | null;
   myinvois: Record<string, unknown> | null;
@@ -158,6 +162,18 @@ export async function listBills(db: BillsDb, orgId: string, limit = 200): Promis
 
 /** For updateBillIf: only while no e-invoice has been made. */
 export const noEInvoiceYet = (): SQL => isNull(payableInvoices.myinvois);
+
+/** For updateBillIf: only while the e-invoice on file is still the one with this hash. */
+export const eInvoiceStill = (sha256: string): SQL => eq(payableInvoices.myinvoisSha256, sha256);
+
+/**
+ * For updateBillIf: only while the invoice is as it was read. A step that
+ * checked the invoice (its duplicates, its recipient) and then writes refuses
+ * when someone changed it in between. Compared to the millisecond, the
+ * precision every write here sets it with.
+ */
+export const unchangedSince = (updatedAt: Date): SQL =>
+  sql`date_trunc('milliseconds', ${payableInvoices.updatedAt}) = ${updatedAt.toISOString()}::timestamptz`;
 
 export type GuardedUpdate =
   | { ok: true; row: BillRow }

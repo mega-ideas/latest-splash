@@ -1,12 +1,15 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
+import { UnauthorizedError, resolveAuthorityForSession } from '@/lib/auth/authority';
+import { checkInvoicePatch } from '@/lib/invoices/patch-rules';
+import { ISSUER_SETTABLE } from '@/lib/invoices/status';
 import { invoiceDeliveryTier } from '@/lib/server/custody-phase';
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { readJsonBody } from '@/lib/server/http';
-import { ISSUER_SETTABLE, canMoveInvoice } from '@/lib/invoices/status';
 import { patchInvoice, readInvoice } from '@/lib/server/invoices-store';
 import { requireSessionAccount } from '@/lib/server/session-account';
+import { readTransfer } from '@/lib/server/transfers-store';
 
 const patchSchema = z.object({
   // The business moves its own invoice forward only (lib/invoices/status.ts).
@@ -47,23 +50,32 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const { id } = await params;
   const parsed = patchSchema.safeParse(await readJsonBody(request));
   if (!parsed.success) return NextResponse.json({ error: 'Invalid invoice update' }, { status: 400 });
+  // The role is the membership row's, never the request's; with no
+  // membership readable, nothing is changed.
+  let role: string;
+  try {
+    const authority = await resolveAuthorityForSession(auth.session);
+    if (authority.orgId !== accountCheck.account.orgId) {
+      return NextResponse.json({ error: 'The session and its membership disagree about the business.' }, { status: 403 });
+    }
+    role = authority.role;
+  } catch (error) {
+    if (error instanceof UnauthorizedError) {
+      return NextResponse.json({ error: 'No workspace membership yet.', code: 'no_membership' }, { status: 403 });
+    }
+    throw error;
+  }
   const current = await readInvoice(accountCheck.account.orgId, id);
   if (!current) return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
   const next = parsed.data.status as typeof current.status | undefined;
-  // Forward only: a settled invoice never goes back to draft, a paid one
-  // never back to sent.
-  if (next && !canMoveInvoice(current.status, next)) {
-    return NextResponse.json({ error: `A ${current.status} invoice cannot be marked ${next}.`, code: 'status' }, { status: 409 });
-  }
-  // Marked paid by hand means a bank payment the business has seen: it says
-  // which, by its reference, unless the payer or Sui already did.
-  if (next === 'paid' && current.status !== 'paid' && !current.usdcTxDigest && !(parsed.data.paymentReference ?? current.paymentReference)) {
-    return NextResponse.json({ error: 'Add the payment reference you received.', code: 'reference' }, { status: 422 });
-  }
-  // The transfer an invoice binds to is set once.
-  if (parsed.data.transferIntentId && current.transferIntentId && parsed.data.transferIntentId !== current.transferIntentId) {
-    return NextResponse.json({ error: 'This invoice is already bound to a transfer.', code: 'transfer' }, { status: 409 });
-  }
+  // Forward only; paid by hand needs the reference the business received
+  // (the one on file and the payer's report are not evidence); a transfer
+  // is the business's own and bound once (lib/invoices/patch-rules.ts).
+  const transferOwned = parsed.data.transferIntentId
+    ? (await readTransfer(accountCheck.account.orgId, parsed.data.transferIntentId)) !== null
+    : false;
+  const refusal = checkInvoicePatch({ role, current, patch: parsed.data, transferOwned });
+  if (refusal) return NextResponse.json({ error: refusal.error, code: refusal.code }, { status: refusal.status });
   const { status: _ignored, ...rest } = parsed.data;
   void _ignored;
   const invoice = await patchInvoice(accountCheck.account.orgId, id, next ? { ...rest, status: next } : rest);

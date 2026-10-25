@@ -50,6 +50,8 @@ function toRecord(row: repo.InvoiceRow): InvoiceRecord {
     demo: row.demo,
     usdcTxDigest: row.usdcTxDigest,
     usdcPaidAt: row.usdcPaidAt,
+    payerReportedReference: row.payerReportedReference,
+    payerReportedAt: row.payerReportedAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -144,6 +146,33 @@ export async function patchInvoice(
     return record;
   }
   const row = await repo.patchInvoice(await db(), orgId, invoiceId, patch);
+  return row ? toRecord(row) : null;
+}
+
+/**
+ * The payer's report from the pay link: "reported", with what they said kept
+ * apart from the issuer's reference, and only while the invoice is in one of
+ * `from`. Null when it was not (already reported, paid or settled).
+ */
+export async function reportInvoicePayment(
+  invoiceId: string,
+  from: readonly string[],
+  report: repo.PaymentReport,
+): Promise<InvoiceRecord | null> {
+  if (!usingPostgres()) {
+    const record = operations.invoices.get(invoiceId);
+    if (!record || !from.includes(record.status)) return null;
+    Object.assign(record, {
+      status: 'reported',
+      payerOrgName: report.payerOrgName,
+      payerOrgEmail: report.payerOrgEmail,
+      payerReportedReference: report.reference,
+      payerReportedAt: report.at.toISOString(),
+      updatedAt: report.at.toISOString(),
+    });
+    return record;
+  }
+  const row = await repo.reportPayment(await db(), invoiceId, from, report);
   return row ? toRecord(row) : null;
 }
 

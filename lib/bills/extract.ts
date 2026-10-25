@@ -36,8 +36,21 @@ export type BillExtraction = {
   fields: Record<BillField, ExtractedField>;
   /** Printed payment details. Read for a mismatch warning only; never paid to. */
   paymentDetails: { walletAddresses: string[]; accountNumbers: string[] };
+  /**
+   * How the printed payment details were read: from the document's text, by
+   * Zeke from a PDF, or not at all (a PDF Zeke said nothing about). When they
+   * were not read, the page says the changed-details check did not run,
+   * rather than showing an empty list as a pass. Absent on invoices read
+   * before 0058, which were all text.
+   */
+  paymentDetailsRead?: PaymentDetailsRead;
   source: 'parser' | 'model' | 'model_pdf';
 };
+
+export type PaymentDetailsRead = 'document_text' | 'zeke_pdf' | 'not_read';
+
+/** What Zeke may answer: the seven fields, and the account numbers and wallets the invoice prints. */
+export type ModelReading = Partial<Record<BillField, unknown>> & { paymentAccounts?: unknown; paymentWallets?: unknown };
 
 export const CONFIDENCE_LABEL: Record<Confidence, string> = {
   high: 'High',
@@ -227,8 +240,31 @@ export function parseBillText(text: string, options: { buyerCountry?: string | n
       payeeCountry: readCountry(doc, options.buyerCountry ?? null),
     },
     paymentDetails: readPaymentDetails(doc),
+    paymentDetailsRead: doc.trim() ? 'document_text' : 'not_read',
     source: 'parser',
   };
+}
+
+const MAX_PRINTED = 10;
+
+/**
+ * The account numbers and wallets Zeke says a PDF prints, kept only when they
+ * have the form of one: a Sui address (0x and 64 hex), or 5 to 34 digits
+ * written with spaces or dashes at most. Null when Zeke gave neither list,
+ * which means the details were not read, not that there were none.
+ */
+export function readPrintedDetails(reading: ModelReading): BillExtraction['paymentDetails'] | null {
+  const { paymentAccounts, paymentWallets } = reading;
+  if (!Array.isArray(paymentAccounts) && !Array.isArray(paymentWallets)) return null;
+  const strings = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string').map((x) => x.trim()) : []);
+  const walletAddresses = [...new Set(strings(paymentWallets).filter((w) => /^0x[0-9a-fA-F]{64}$/.test(w)).map((w) => w.toLowerCase()))].slice(0, MAX_PRINTED);
+  const accountNumbers = [...new Set(
+    strings(paymentAccounts)
+      .filter((a) => /^[\d\s-]{5,48}$/.test(a))
+      .map((a) => a.replace(/\D/g, ''))
+      .filter((a) => a.length >= 5 && a.length <= 34),
+  )].slice(0, MAX_PRINTED);
+  return { walletAddresses, accountNumbers };
 }
 
 /** What a model may say about a field, normalised to the form a person confirms, or '' when it is not that form. */
@@ -270,7 +306,7 @@ function locate(text: string, field: BillField, value: string): [number, number]
  */
 export function groundReading(
   text: string,
-  reading: Partial<Record<BillField, unknown>> | null,
+  reading: ModelReading | null,
   parsed: BillExtraction,
   source: 'model' | 'model_pdf',
 ): BillExtraction {
@@ -296,6 +332,12 @@ export function groundReading(
     fields[field] = span
       ? { value, confidence: 'medium', reason: 'Read by Zeke and found in the document', span }
       : { value, confidence: 'low', reason: 'Read by Zeke but not found in the document text', span: null };
+  }
+  if (source === 'model_pdf') {
+    // A PDF has no text here: its printed details are Zeke's to read, and
+    // checked for form only. They are never paid to (lib/bills/match.ts).
+    const printed = readPrintedDetails(reading);
+    return { ...parsed, fields, source, paymentDetails: printed ?? { walletAddresses: [], accountNumbers: [] }, paymentDetailsRead: printed ? 'zeke_pdf' : 'not_read' };
   }
   return { ...parsed, fields, source };
 }

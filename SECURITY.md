@@ -952,7 +952,9 @@ owner. Only `AdminCap` lifts a compliance freeze.
 ## v2 Phase 3 — Invoices: Get paid and Pay invoices (brief 5.8) — 2026-10-25
 
 Design: [`docs/v2/phase3-invoices.md`](docs/v2/phase3-invoices.md). Tests:
-`tests/pay-invoices.test.mjs`, `tests/invoices-page.test.mjs`.
+`tests/pay-invoices.test.mjs`, `tests/invoices-page.test.mjs`,
+`tests/pay-invoices-review.test.mjs` (the independent review's findings) and
+`tests/pay-invoices-review-paths.test.mjs`.
 
 - **A supplier's invoice is untrusted data.** What it says is a proposal; a
   person confirms every field. The payee picks candidates among the
@@ -964,9 +966,27 @@ Design: [`docs/v2/phase3-invoices.md`](docs/v2/phase3-invoices.md). Tests:
   "low"). Pinned with an invoice that tries to change the payee, the amount
   and the recipient.
 - **No double payment.** One supplier invoice number is scheduled, waiting
-  for approval or paid once per org (partial unique index); the same
-  document is one invoice; the intake key is unique per org; one invoice
-  per payment intent; one invoice per Sui digest.
+  for approval or paid once per org, by the supplier's name as typed (0057)
+  and by the recipient actually paid (0058), so a second spelling of the
+  supplier does not pay the same invoice again; the duplicate check runs
+  again before the hand-off. The same document is one invoice; the intake
+  key is unique per org; one invoice per payment intent; one invoice per Sui
+  digest. A step that checked the invoice and then writes (match, the
+  duplicate answer, schedule) is a guarded UPDATE on the invoice as it was
+  read, so a change in between is refused, not scheduled.
+- **Who is paid.** A recipient whose name the supplier's does not suggest
+  needs a written reason, kept with the invoice; changing the supplier
+  clears the match. A recipient whose wallet is one of Splash's own (the
+  operator, the treasury, the FeeConfig fee recipient) is never matched or
+  handed off, checked at both steps; when those addresses cannot be read the
+  answer is 503 and nothing changes. A PDF's printed account or wallet is
+  read by Zeke, kept only in the form of one, and compared; when Zeke did not
+  read them the page says the comparison did not run.
+- **Fees and rates.** The hand-off carries `feeRule:
+  quote_in_transfer_shown_fee_is_max_fee` (Amendment A1: the fee is quoted
+  in Transfer and the one shown is the payment's `max_fee`) and no fee of
+  its own. A non-USD invoice is not handed off without a rate quote
+  (`fx_quote_needed`); no rate is invented.
 - **Approval is not here.** Pay invoices hands a scheduled invoice to the
   payment flow (brief 5.4) through `lib/bills/payment-hook.ts`, keyed by the
   invoice id. That flow is not on this branch: the hook answers 501
@@ -986,9 +1006,14 @@ Design: [`docs/v2/phase3-invoices.md`](docs/v2/phase3-invoices.md). Tests:
   The public pay link no longer marks an invoice paid on the payer's word
   (WS7-3's open note): it records "reported", never overwrites a payment on
   record, and only the business or a USDC payment matched on Sui makes it
-  paid. The PATCH reads then writes; a concurrent USDC sync between the two
-  is not yet guarded in the database (the invoices repository has no
-  status-conditional update).
+  paid. What the payer reports is kept in its own columns (0058), never
+  replaces the issuer's reference and is never the evidence for Mark as
+  paid, which needs the reference the business typed from its statement; the
+  report is a guarded UPDATE on the statuses a payer may report from. Only
+  owners, finance admins, approvers and makers (the membership's role) may
+  PATCH an invoice, and a transfer it binds to must be the org's own. The
+  PATCH itself still reads then writes; a concurrent USDC sync between the
+  two is not yet guarded in the database.
 
 ## WS4 — operator custody, the code half — 2026-10-23
 

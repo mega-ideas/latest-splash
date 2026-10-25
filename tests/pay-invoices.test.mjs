@@ -76,6 +76,7 @@ function deps(over = {}) {
     readBusiness: async (orgId) => BUSINESS[orgId] ?? null,
     paymentFlow: { wired: false, start: async () => ({ ok: false, code: 'PAYMENT_FLOW_NOT_WIRED', status: 501, error: 'not wired' }) },
     stablecoinOnly: () => false,
+    splashOwnedAddresses: async () => [],
     now: () => new Date('2026-10-25T03:00:00Z'),
     ...over,
   };

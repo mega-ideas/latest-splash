@@ -13,6 +13,13 @@
  * lib/bills/payment-hook.ts. It is not wired on this branch, and then the
  * approve step refuses with PAYMENT_FLOW_NOT_WIRED and changes nothing.
  *
+ * Who is paid is the recipient, not the name typed: the duplicate check and
+ * its unique index (0058) are keyed on the recipient too, a recipient whose
+ * name is unlike the confirmed supplier needs a written reason, a changed
+ * supplier clears the match, and a recipient whose wallet is one of Splash's
+ * own is never matched or paid. A step that checked the invoice and then
+ * writes refuses when the invoice changed in between.
+ *
  * Scope (WS2): the org is the caller's, from the session; every read and
  * write is scoped to it; another org's invoice is "not found".
  * Idempotency: intake by the client's key (unique per org) and by the
@@ -34,11 +41,12 @@ import {
   parseBillText,
   readDate,
   type BillExtraction,
-  type BillField,
+  type ModelReading,
 } from '../bills/extract.ts';
 import { BILL_STATUS_LABEL, billSteps, scheduleBlockers, type BillFacts } from '../bills/flow.ts';
 import { maskDestination, matchRecipients, paymentDetailsDiffer, recipientVerified, type RecipientLite } from '../bills/match.ts';
-import type { BillPaymentFlow } from '../bills/payment-hook.ts';
+import { HANDOFF_CURRENCIES, type BillPaymentFlow } from '../bills/payment-hook.ts';
+import { suiScanTxUrlOn, type SuiNetworkName } from '../explorer.ts';
 import {
   MYINVOIS_PORTAL_URL,
   SELF_BILLED_CLASSIFICATIONS,
@@ -55,6 +63,8 @@ import {
   readBillByIntake,
   readBillByIntent,
   readOpenBillByDocument,
+  eInvoiceStill,
+  unchangedSince,
   updateBillIf,
   type BillRow,
   type BillsDb,
@@ -79,8 +89,8 @@ export type BusinessFacts = {
   addressCountry: string | null;
 };
 
-/** Zeke's reading of an invoice: field name to what it read. Null when it read nothing. */
-export type ModelReader = (input: { text?: string; pdfBase64?: string }) => Promise<Partial<Record<BillField, unknown>> | null>;
+/** Zeke's reading of an invoice: field name to what it read, and the payment details it prints. Null when it read nothing. */
+export type ModelReader = (input: { text?: string; pdfBase64?: string }) => Promise<ModelReading | null>;
 
 export type BillDeps = {
   /** Null when this server has no model: the parser reads text alone, and a PDF is refused. */
@@ -91,6 +101,13 @@ export type BillDeps = {
   paymentFlow: BillPaymentFlow;
   /** A USDC-only launch pays no bank recipient. */
   stablecoinOnly: () => boolean;
+  /**
+   * Splash's own addresses (the operator, the treasury, the fee recipient):
+   * a supplier invoice is never paid to one. Throws when they cannot be
+   * read, and then nothing is matched or handed off: an unreadable list is
+   * not an empty one.
+   */
+  splashOwnedAddresses: () => Promise<string[]>;
   now?: () => Date;
 };
 
@@ -98,6 +115,11 @@ const INTAKE_KEY = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 const SUI_DIGEST = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const DAY_MS = 86_400_000;
 const E_INVOICE_FRESH_MS = 72 * 3_600_000;
+
+/** When the payment flow reports no network: the one this server runs on. */
+function serverNetwork(): SuiNetworkName {
+  return process.env.SUI_NETWORK === 'mainnet' ? 'mainnet' : 'testnet';
+}
 
 const refuse = (status: number, error: string, extra: Record<string, unknown> = {}): Answer => ({ status, body: { error, ...extra } });
 const forbidden = (role: UserRole): Answer => refuse(403, `A ${role.toLowerCase().replace('_', ' ')} can read invoices but not change them.`, { code: 'role' });
@@ -116,6 +138,7 @@ function candidate(row: BillRow): DuplicateCandidate {
     status: row.status,
     payeeKey: row.payeeKey,
     invoiceNumberKey: row.invoiceNumberKey,
+    recipientId: row.recipientId,
     amountMinor: row.amountMinor,
     currency: row.currency,
     invoiceDate: row.invoiceDate,
@@ -130,7 +153,7 @@ function utcDay(d: Date): string {
 // ─── The view the page reads ────────────────────────────────────────────────
 
 export function billFacts(row: BillRow, ctx: { recipients: RecipientLite[]; others: BillRow[] }): BillFacts & { findings: ReturnType<typeof findDuplicates>; recipient: RecipientLite | null } {
-  const findings = row.payeeKey ? findDuplicates(candidate(row), ctx.others.map(candidate)) : [];
+  const findings = row.payeeKey || row.recipientId ? findDuplicates(candidate(row), ctx.others.map(candidate)) : [];
   const recipient = row.recipientId ? ctx.recipients.find((r) => r.id === row.recipientId) ?? null : null;
   const inReview = row.status === 'review';
   return {
@@ -183,6 +206,11 @@ export function billView(row: BillRow, ctx: { recipients: RecipientLite[]; other
       destination: maskDestination(recipient),
     } : null,
     recipientMissing: row.recipientId !== null && recipient === null,
+    /** The recipient's name is not the confirmed supplier's, reduced. The reason a person gave is beside it. */
+    recipientNameDiffers: recipient !== null && !nameMatches(row.payeeName ?? payee, recipient),
+    matchReason: row.matchReason,
+    /** USDC pays USD one for one; anything else needs a rate quote before it is handed off. */
+    needsRateQuote: row.currency !== null && !HANDOFF_CURRENCIES.includes(row.currency),
     matches: row.status === 'review'
       ? matchRecipients(payee, ctx.recipients).slice(0, 5).map((m) => ({
         id: m.recipient.id,
@@ -193,6 +221,16 @@ export function billView(row: BillRow, ctx: { recipients: RecipientLite[]; other
         exact: m.exact,
         destination: maskDestination(m.recipient),
       }))
+      : [],
+    /** Verified recipients the supplier's name does not suggest: choosing one needs a written reason. */
+    otherRecipients: row.status === 'review'
+      ? (() => {
+        const suggested = new Set(matchRecipients(payee, ctx.recipients).map((m) => m.recipient.id));
+        return ctx.recipients
+          .filter((r) => recipientVerified(r) && !suggested.has(r.id))
+          .slice(0, 20)
+          .map((r) => ({ id: r.id, name: r.name, country: r.country, payoutMethod: r.payoutMethod, destination: maskDestination(r) }));
+      })()
       : [],
     paymentDetailsDiffer: recipient ? paymentDetailsDiffer(row.extraction.paymentDetails, recipient) : false,
     facts,
@@ -205,6 +243,8 @@ export function billView(row: BillRow, ctx: { recipients: RecipientLite[]; other
       suiDigest: row.suiDigest,
       receiptNo: row.receiptNo,
       approvers: row.approvers ?? [],
+      network: (row.suiNetwork as SuiNetworkName | null) ?? null,
+      verifyUrl: row.suiDigest ? suiScanTxUrlOn((row.suiNetwork as SuiNetworkName | null) ?? serverNetwork(), row.suiDigest) : null,
     } : null,
     eInvoice: row.myinvois ? {
       sha256: row.myinvoisSha256,
@@ -216,6 +256,26 @@ export function billView(row: BillRow, ctx: { recipients: RecipientLite[]; other
   };
 }
 export type BillView = ReturnType<typeof billView>;
+
+/** The recipient carries the confirmed supplier's name, reduced: exact, not merely alike. */
+function nameMatches(payee: string, recipient: RecipientLite): boolean {
+  return matchRecipients(payee, [recipient]).some((m) => m.exact);
+}
+
+/** The recipient is among the ones the supplier's name suggests (lib/bills/match.ts). */
+function nameResembles(payee: string, recipient: RecipientLite): boolean {
+  return matchRecipients(payee, [recipient]).length > 0;
+}
+
+/** True when this recipient's wallet is one of Splash's own; throws when they cannot be read. */
+async function paysSplash(recipient: RecipientLite, deps: BillDeps): Promise<boolean> {
+  if (!recipient.walletAddress) return false;
+  const own = (await deps.splashOwnedAddresses()).map((a) => a.trim().toLowerCase()).filter(Boolean);
+  return own.includes(recipient.walletAddress.trim().toLowerCase());
+}
+
+const SPLASH_ADDRESS = 'That recipient’s wallet is one of Splash’s own addresses, and a supplier is never paid there. Check the recipient’s details.';
+const SPLASH_ADDRESSES_UNREAD = 'Splash could not check the recipient’s wallet against its own addresses just now, so nothing was changed. Try again shortly.';
 
 async function context(db: BillsDb, orgId: string, deps: BillDeps) {
   const [recipients, others] = await Promise.all([deps.listRecipients(orgId), listBills(db, orgId)]);
@@ -341,7 +401,7 @@ const confirmSchema = z.object({
 const actionSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('confirm'), fields: confirmSchema }),
   z.object({ action: z.literal('acknowledge_duplicate'), reason: z.string().trim().min(8).max(300) }),
-  z.object({ action: z.literal('match'), recipientId: z.string().trim().min(1).max(120) }),
+  z.object({ action: z.literal('match'), recipientId: z.string().trim().min(1).max(120), reason: z.string().trim().min(8).max(300).optional() }),
   z.object({ action: z.literal('schedule'), payOn: z.string().trim() }),
   z.object({ action: z.literal('unschedule') }),
   z.object({ action: z.literal('cancel'), reason: z.string().trim().max(300).optional() }),
@@ -350,8 +410,16 @@ const actionSchema = z.discriminatedUnion('action', [
 function moved(result: Awaited<ReturnType<typeof updateBillIf>>, what: string): Answer | null {
   if (result.ok) return null;
   if (result.reason === 'not_found') return refuse(404, 'Invoice not found.');
-  if (result.reason === 'unique') return refuse(409, 'This supplier’s invoice number is already scheduled, waiting for approval or paid.', { code: 'duplicate_number' });
+  if (result.reason === 'unique') return refuse(409, 'This invoice number is already scheduled, waiting for approval or paid, from this supplier or to this recipient.', { code: 'duplicate_number' });
   return refuse(409, `This invoice is ${BILL_STATUS_LABEL[result.row!.status].toLowerCase()} now, so it cannot be ${what}.`, { code: 'status' });
+}
+
+/** As `moved`, and a write that met an invoice changed since it was read says so. */
+function changed(result: Awaited<ReturnType<typeof updateBillIf>>, what: string): Answer | null {
+  if (!result.ok && result.reason === 'status' && result.row?.status === 'review') {
+    return refuse(409, `The invoice changed while it was being ${what}. Check it again.`, { code: 'changed' });
+  }
+  return moved(result, what);
 }
 
 export async function handleBillAction(db: BillsDb, caller: BillCaller, id: string, body: unknown, deps: BillDeps): Promise<Answer> {
@@ -394,6 +462,10 @@ export async function handleBillAction(db: BillsDb, caller: BillCaller, id: stri
         confirmedAt: now,
         // A new amount or supplier needs its duplicate question asked again.
         ...(changedWhatMatters ? { duplicateAckBy: null, duplicateAckReason: null, duplicateAckAt: null } : {}),
+        // Another supplier is another payee: the recipient is chosen again.
+        ...(row.payeeKey !== null && row.payeeKey !== payeeKey(f.payee)
+          ? { recipientId: null, matchedBy: null, matchedAt: null, matchReason: null }
+          : {}),
       }, entry(caller, now, 'confirmed'));
       return moved(result, 'changed') ?? { status: 200, body: { bill: await viewOf(db, (result as { row: BillRow }).row, deps) } };
     }
@@ -402,8 +474,8 @@ export async function handleBillAction(db: BillsDb, caller: BillCaller, id: stri
       if (!facts.sameAmount) return refuse(409, 'There is no possible duplicate to answer for.');
       const result = await updateBillIf(db, caller.orgId, id, ['review'], {
         duplicateAckBy: caller.userId, duplicateAckReason: action.reason, duplicateAckAt: now,
-      }, entry(caller, now, 'duplicate_acknowledged', action.reason));
-      return moved(result, 'changed') ?? { status: 200, body: { bill: await viewOf(db, (result as { row: BillRow }).row, deps) } };
+      }, entry(caller, now, 'duplicate_acknowledged', action.reason), unchangedSince(row.updatedAt));
+      return changed(result, 'answered for') ?? { status: 200, body: { bill: await viewOf(db, (result as { row: BillRow }).row, deps) } };
     }
     case 'match': {
       const recipients = await deps.listRecipients(caller.orgId);
@@ -414,10 +486,20 @@ export async function handleBillAction(db: BillsDb, caller: BillCaller, id: stri
       if (recipient.payoutMethod === 'BANK' && deps.stablecoinOnly()) {
         return refuse(403, 'Bank payouts are not open in this launch. Choose a recipient paid in USDC.', { code: 'launch_scope' });
       }
+      let splash: boolean;
+      try { splash = await paysSplash(recipient, deps); } catch { return refuse(503, SPLASH_ADDRESSES_UNREAD, { code: 'splash_addresses_unread' }); }
+      if (splash) return refuse(409, SPLASH_ADDRESS, { code: 'splash_address' });
+      if (!row.payeeName) return refuse(409, 'Check and confirm what Zeke read before choosing who is paid.', { code: 'not_confirmed' });
+      // The name on the invoice picks candidates. A recipient it does not
+      // suggest can still be the right one (a trading name, an agent), and
+      // then a person says why, in words kept with the invoice.
+      if (!nameResembles(row.payeeName, recipient) && !action.reason) {
+        return refuse(409, `${recipient.name} is not the supplier on this invoice. Say why this recipient is paid for it.`, { code: 'name_mismatch' });
+      }
       const result = await updateBillIf(db, caller.orgId, id, ['review'], {
-        recipientId: recipient.id, matchedBy: caller.userId, matchedAt: now,
-      }, entry(caller, now, 'matched', recipient.id));
-      return moved(result, 'changed') ?? { status: 200, body: { bill: await viewOf(db, (result as { row: BillRow }).row, deps) } };
+        recipientId: recipient.id, matchedBy: caller.userId, matchedAt: now, matchReason: action.reason ?? null,
+      }, entry(caller, now, 'matched', action.reason ? `${recipient.id}: ${action.reason}` : recipient.id), unchangedSince(row.updatedAt));
+      return changed(result, 'matched') ?? { status: 200, body: { bill: await viewOf(db, (result as { row: BillRow }).row, deps) } };
     }
     case 'schedule': {
       const ctx = await context(db, caller.orgId, deps);
@@ -428,14 +510,19 @@ export async function handleBillAction(db: BillsDb, caller: BillCaller, id: stri
       if (facts.recipient?.payoutMethod === 'BANK' && deps.stablecoinOnly()) {
         return refuse(403, 'Bank payouts are not open in this launch. Choose a recipient paid in USDC.', { code: 'launch_scope' });
       }
+      if (facts.recipient && !nameResembles(row.payeeName ?? '', facts.recipient) && !row.matchReason) {
+        return refuse(409, 'Say why this recipient is paid for this supplier’s invoice, or choose another.', { code: 'name_mismatch' });
+      }
       const day = readDate(action.payOn);
       const today = utcDay(now);
       const latest = utcDay(new Date(now.getTime() + 365 * DAY_MS));
       if (!day || day.iso < today || day.iso > latest) return refuse(422, 'Choose a payment date from today to a year from now.', { fields: { payOn: 'Choose a date from today.' } });
+      // Only the invoice that was checked: one changed since it was read is
+      // checked again, not scheduled as it was.
       const result = await updateBillIf(db, caller.orgId, id, ['review'], {
         status: 'scheduled', scheduledFor: day.iso, scheduledBy: caller.userId, scheduledAt: now,
-      }, entry(caller, now, 'scheduled', day.iso));
-      return moved(result, 'scheduled') ?? { status: 200, body: { bill: await viewOf(db, (result as { row: BillRow }).row, deps) } };
+      }, entry(caller, now, 'scheduled', day.iso), unchangedSince(row.updatedAt));
+      return changed(result, 'scheduled') ?? { status: 200, body: { bill: await viewOf(db, (result as { row: BillRow }).row, deps) } };
     }
     case 'unschedule': {
       const result = await updateBillIf(db, caller.orgId, id, ['scheduled'], {
@@ -469,6 +556,20 @@ export async function handleBillPay(db: BillsDb, caller: BillCaller, id: string,
   if (recipient.payoutMethod === 'BANK' && deps.stablecoinOnly()) {
     return refuse(403, 'Bank payouts are not open in this launch.', { code: 'launch_scope' });
   }
+  // Checked again here, not only when it was scheduled: what is known about
+  // the invoice, the recipient and Splash's addresses can change in between.
+  let splash: boolean;
+  try { splash = await paysSplash(recipient, deps); } catch { return refuse(503, SPLASH_ADDRESSES_UNREAD, { code: 'splash_addresses_unread' }); }
+  if (splash) return refuse(409, SPLASH_ADDRESS, { code: 'splash_address' });
+  const others = await listBills(db, caller.orgId);
+  const twice = findDuplicates(candidate(row), others.map(candidate))
+    .find((f) => f.kind === 'same_number' && ['scheduled', 'approving', 'paid'].includes(f.status));
+  if (twice) {
+    return refuse(409, 'This invoice number is already scheduled, waiting for approval or paid. Cancel one of the two.', { code: 'duplicate_number', billId: twice.billId });
+  }
+  if (!HANDOFF_CURRENCIES.includes(row.currency!)) {
+    return refuse(422, `This invoice is in ${row.currency}. It is paid in USDC, so it needs a rate quote first, and Invoices does not quote rates. Pay it from Transfer, where the rate is quoted and shown.`, { code: 'fx_quote_needed' });
+  }
   const handoff = await deps.paymentFlow.start({
     orgId: caller.orgId,
     idempotencyKey: row.id,
@@ -480,6 +581,8 @@ export async function handleBillPay(db: BillsDb, caller: BillCaller, id: string,
     payOn: row.scheduledFor!,
     supplierInvoiceNumber: row.invoiceNumber!,
     payee: row.payeeName!,
+    settlementAsset: 'USDC',
+    feeRule: 'quote_in_transfer_shown_fee_is_max_fee',
   });
   if (!handoff.ok) {
     return { status: handoff.status, body: { error: handoff.error, code: handoff.code, bill: await viewOf(db, row, deps) } };
@@ -516,9 +619,10 @@ export type SettlementResult =
  */
 export async function recordBillSettlement(
   db: BillsDb,
-  input: { orgId: string; paymentIntentId: string; suiDigest: string; paidAt: Date; approvers: string[] },
+  input: { orgId: string; paymentIntentId: string; suiDigest: string; paidAt: Date; approvers: string[]; network?: SuiNetworkName },
 ): Promise<SettlementResult> {
   if (!SUI_DIGEST.test(input.suiDigest) || !input.paymentIntentId) return { ok: false, code: 'invalid' };
+  if (input.network !== undefined && input.network !== 'testnet' && input.network !== 'mainnet') return { ok: false, code: 'invalid' };
   const row = await readBillByIntent(db, input.orgId, input.paymentIntentId);
   if (!row) return { ok: false, code: 'not_found' };
   if (row.status === 'paid') {
@@ -529,6 +633,8 @@ export async function recordBillSettlement(
   const result = await updateBillIf(db, input.orgId, row.id, ['approving'], {
     status: 'paid',
     suiDigest: input.suiDigest,
+    // Where the digest is, so the receipt's link opens the right explorer.
+    suiNetwork: input.network ?? serverNetwork(),
     paidAt: input.paidAt,
     receiptNo,
     approvers: input.approvers.slice(0, 20),
@@ -638,7 +744,12 @@ export async function handleBillEInvoice(db: BillsDb, caller: BillCaller, id: st
     myinvoisSha256: sha256(JSON.stringify(document)),
     myinvoisGeneratedAt: now,
     myinvoisGeneratedBy: caller.userId,
-  }, entry(caller, now, row.myinvois ? 'einvoice_remade' : 'einvoice_made'), row.myinvois ? undefined : noEInvoiceYet());
+  }, row.myinvois
+    // The earlier file is replaced, and its hash stays in the history: a
+    // file filed with MyInvois from it can still be told from this one.
+    ? entry(caller, now, 'einvoice_remade', `Replaces the file with SHA-256 ${row.myinvoisSha256}`)
+    : entry(caller, now, 'einvoice_made'),
+  row.myinvois && row.myinvoisSha256 ? eInvoiceStill(row.myinvoisSha256) : noEInvoiceYet());
   if (!result.ok) {
     // Another request made it first: theirs is the one.
     const current = await readBill(db, caller.orgId, id);
