@@ -30,21 +30,23 @@ const WRAP = '0x' + 'a1'.repeat(32);
 const CORE = '0x' + 'c0'.repeat(32);
 const CORE_V2 = '0x' + 'c2'.repeat(32);
 const CONFIG = '0x' + 'cf'.repeat(32);
+const FEE_CONFIG = '0x' + 'fe'.repeat(32);
 const ATTACKER = '0x' + '99'.repeat(32);
 
-const POLICY = { upgradeDelayPackageId: UD, wrapperId: WRAP, complianceConfigId: CONFIG };
+const POLICY = { upgradeDelayPackageId: UD, wrapperId: WRAP, complianceConfigId: CONFIG, feeConfigId: FEE_CONFIG };
 const ENV = {
   NODE_ENV: 'test',
   SPLASH_UPGRADE_DELAY_PACKAGE_ID: UD,
   SPLASH_UPGRADE_WRAPPER_ID: WRAP,
   SPLASH_COMPLIANCE_CONFIG_ID: CONFIG,
+  SPLASH_FEE_CONFIG_ID: FEE_CONFIG,
 };
 
 const NOW = Date.UTC(2026, 9, 24, 9, 0);
 const PROPOSED = NOW - 60 * 60 * 1000;
 const ETA = PROPOSED + 86_400_000;
 const DAY = 86_400_000;
-const NO_HISTORY = { wrapper: null, config: null };
+const NO_HISTORY = { wrapper: null, config: null, feeConfig: null };
 
 const pendingUpgrade = (over = {}) => ({
   digest: over.digest ?? Buffer.alloc(32, 7).toString('base64'),
@@ -54,7 +56,7 @@ const pendingUpgrade = (over = {}) => ({
 
 /** A read of both objects; each side takes wrapperObject / configObject overrides. */
 function chainRead({ wrapper = {}, config = {} } = {}) {
-  return { wrapper: wrapperObject(wrapper), config: configObject(config) };
+  return { wrapper: wrapperObject(wrapper), config: configObject(config), feeConfig: feeConfigObject() };
 }
 
 function stateOf(read) {
@@ -190,12 +192,12 @@ test('only the canonical objects are read: a missing object, a look-alike type, 
     assert.match(parsed.reason, names);
     return parsed.reason;
   };
-  refused({ wrapper: null, config: configObject() }, WRAP, /SPLASH_UPGRADE_WRAPPER_ID .* names no object on chain/);
+  refused({ wrapper: null, config: configObject(), feeConfig: feeConfigObject() }, WRAP, /SPLASH_UPGRADE_WRAPPER_ID .* names no object on chain/);
   refused(chainRead({ wrapper: { type: `${ATTACKER}::upgrade_delay::DelayedUpgradeCap` } }), WRAP, /SPLASH_UPGRADE_WRAPPER_ID .* is a 0x9{2}.*::upgrade_delay::DelayedUpgradeCap, not a 0xd1d1/);
   refused(chainRead({ wrapper: { type: `${UD}::upgrade_delay::DelayedUpgradeCap<u8>` } }), WRAP, /SPLASH_UPGRADE_WRAPPER_ID/);
   refused(chainRead({ wrapper: { address: STRANGER_WRAP } }), WRAP, /not the one asked for/);
-  refused({ wrapper: { ...wrapperObject(), owner: { __typename: 'Shared' } }, config: configObject() }, WRAP, /not owned by an address/);
-  refused({ wrapper: wrapperObject(), config: null }, CONFIG, /SPLASH_COMPLIANCE_CONFIG_ID .* names no object on chain/);
+  refused({ wrapper: { ...wrapperObject(), owner: { __typename: 'Shared' } }, config: configObject(), feeConfig: feeConfigObject() }, WRAP, /not owned by an address/);
+  refused({ wrapper: wrapperObject(), config: null, feeConfig: feeConfigObject() }, CONFIG, /SPLASH_COMPLIANCE_CONFIG_ID .* names no object on chain/);
   refused(chainRead({ config: { type: `${ATTACKER}::compliance_config::ComplianceConfig` } }), CONFIG, /SPLASH_COMPLIANCE_CONFIG_ID/);
   // Core's original id is the wrapper's record, not whichever version the
   // app calls: a config typed under the latest id is not core's.
@@ -243,6 +245,7 @@ test('the objects parse exactly as Sui testnet GraphQL rendered them (24 October
     upgradeDelayPackageId: '0xc8ea66e425577c26a4bde76185f3d68b869f23e65de7f8e4de2aa1db608cc0a0',
     wrapperId: '0x34ec5a523b809c442f91f916596bf79ca30c49f6ce239989928737e7b12ceecb',
     complianceConfigId: '0x271897e5ab3ab8ba391f777860bd4aabb9ae403c581e36eeebebd41defd3327d',
+    feeConfigId: FEE_CONFIG,
   };
   const core = '0x993736cefd0df038b62126ddfceade1a45db5f45b93106ee220eec20437d9db2';
   const read = {
@@ -278,6 +281,7 @@ test('the objects parse exactly as Sui testnet GraphQL rendered them (24 October
         legacy_enabled: true,
       } } },
     },
+    feeConfig: feeConfigObject({ core }),
   };
   const parsed = parseGovernanceState(read, ids);
   assert.equal(parsed.ok, true, parsed.reason);
@@ -294,7 +298,7 @@ test('unconfigured or malformed canonical ids fail closed, naming every key', as
   const { readGovernanceConfig, runGovernanceAlertMonitor } = await import('../lib/server/governance-alert-monitor.ts');
   const none = readGovernanceConfig({});
   assert.equal(none.ok, false);
-  for (const key of ['SPLASH_UPGRADE_DELAY_PACKAGE_ID', 'SPLASH_UPGRADE_WRAPPER_ID', 'SPLASH_COMPLIANCE_CONFIG_ID']) {
+  for (const key of ['SPLASH_UPGRADE_DELAY_PACKAGE_ID', 'SPLASH_UPGRADE_WRAPPER_ID', 'SPLASH_COMPLIANCE_CONFIG_ID', 'SPLASH_FEE_CONFIG_ID']) {
     assert.match(none.reason, new RegExp(key));
   }
   assert.doesNotMatch(none.reason, /SPLASH_CORE_PACKAGE_ID/, "core's original id is read from the wrapper, not configured");
@@ -665,7 +669,7 @@ test('a claim older than the lease is claimed again, by exactly one of two racin
 test('the GraphQL reader asks for the two configured objects in one query, and refuses anything but a complete answer', async () => {
   const { graphqlGovernanceStateReader } = await import('../lib/server/governance-alert-monitor.ts');
   const asked = [];
-  const reply = { current: () => Response.json({ data: { wrapper: wrapperObject(), config: configObject() } }) };
+  const reply = { current: () => Response.json({ data: { wrapper: wrapperObject(), config: configObject(), feeConfig: feeConfigObject() } }) };
   const fetcher = async (url, init) => {
     asked.push({ url, ...JSON.parse(init.body) });
     return reply.current();
@@ -676,15 +680,16 @@ test('the GraphQL reader asks for the two configured objects in one query, and r
   assert.equal(asked.length, 1, 'one query for both objects');
   assert.match(asked[0].query, /query GovernanceState/);
   assert.doesNotMatch(asked[0].query, /events\s*\(/, 'never the event feed');
-  assert.deepEqual(asked[0].variables, { wrapper: WRAP, config: CONFIG });
+  assert.deepEqual(asked[0].variables, { wrapper: WRAP, config: CONFIG, feeConfig: FEE_CONFIG });
 
-  reply.current = () => Response.json({ data: { wrapper: null, config: configObject() } });
+  reply.current = () => Response.json({ data: { wrapper: null, config: configObject(), feeConfig: feeConfigObject() } });
   assert.equal((await read(POLICY)).wrapper, null, 'no such object is an answer, which the parser refuses');
 
   for (const [label, current, message] of [
     ['HTTP 500', () => new Response('no', { status: 500 }), /HTTP 500/],
     ['a GraphQL error', () => Response.json({ errors: [{ message: 'timeout' }] }), /refused the query: timeout/],
-    ['no config field', () => Response.json({ data: { wrapper: wrapperObject() } }), /without the wrapper and the config/],
+    ['no config field', () => Response.json({ data: { wrapper: wrapperObject() } }), /without the wrapper, the config and the fee config/],
+    ['no fee config field', () => Response.json({ data: { wrapper: wrapperObject(), config: configObject() } }), /without the wrapper, the config and the fee config/],
   ]) {
     reply.current = current;
     await assert.rejects(read(POLICY), message, label);
@@ -737,6 +742,32 @@ function wrapperObject(over = {}) {
         },
       },
     },
+  };
+}
+
+/** The canonical FeeConfig at the launch schedule, nothing pending. */
+function feeConfigObject(over = {}) {
+  const sched = (tiers, min, max) => ({ tiers: tiers.map(([u, b]) => ({ upper_minor: String(u), bps: String(b) })), min_minor: String(min), max_minor: String(max) });
+  const MAX = '18446744073709551615';
+  const banded = [[1_000_000_000, 30], [10_000_000_000, 20], [50_000_000_000, 12], [100_000_000_000, 7], [MAX, 5]];
+  return {
+    address: FEE_CONFIG,
+    version: over.version ?? 70,
+    owner: { __typename: 'Shared' },
+    asMoveObject: { contents: { type: { repr: `${over.core ?? CORE}::fee_config::FeeConfig` }, json: {
+      id: FEE_CONFIG,
+      schedules: [
+        sched([[MAX, 0]], 0, 0),
+        sched([[MAX, 2]], 250_000, 5_000_000),
+        sched([[1_000_000_000, 15], [10_000_000_000, 12], [50_000_000_000, 10], [100_000_000_000, 7], [MAX, 5]], 0, MAX),
+        sched(banded, 0, MAX),
+        sched(banded, 0, MAX),
+      ],
+      fee_recipient: null,
+      discounts: { id: '0x' + 'db'.repeat(32), size: '0' },
+      pending_schedules: [null, null, null, null, null],
+      pending_recipient: null,
+    } } },
   };
 }
 
@@ -797,7 +828,7 @@ function fakeWorld(chain) {
       if (query.includes('GovernanceState')) {
         calls.state += 1;
         if (chain.stateReply) return chain.stateReply();
-        return Response.json({ data: { wrapper: chain.wrapper === undefined ? wrapperObject() : chain.wrapper, config: chain.config === undefined ? configObject() : chain.config } });
+        return Response.json({ data: { wrapper: chain.wrapper === undefined ? wrapperObject() : chain.wrapper, config: chain.config === undefined ? configObject() : chain.config, feeConfig: chain.feeConfig === undefined ? feeConfigObject() : chain.feeConfig } });
       }
       return Response.json({ errors: [{ message: 'unknown query' }] });
     }
@@ -826,6 +857,7 @@ const ROUTE_ENV = {
   SPLASH_UPGRADE_WRAPPER_ID: WRAP,
   SPLASH_CORE_PACKAGE_ID: CORE,
   SPLASH_COMPLIANCE_CONFIG_ID: CONFIG,
+  SPLASH_FEE_CONFIG_ID: FEE_CONFIG,
   SUI_GRAPHQL_URL: GRAPHQL,
   OPERATOR_ALERT_WEBHOOK_URL: WEBHOOK,
   NEXT_PUBLIC_APP_URL: 'https://v1.splashz.xyz',
@@ -941,11 +973,11 @@ test('review A7: an unreadable or partial read of the chain answers 502, never s
       ['the indexer is down', () => new Response('upstream unavailable', { status: 503 })],
       ['the query is refused', () => Response.json({ errors: [{ message: 'Query exceeded max output nodes' }] })],
       ['no data at all', () => Response.json({ data: null })],
-      ['the wrapper has no pending field', () => Response.json({ data: { wrapper: wrapperObject({ json: { ...good, pending: undefined } }), config: configObject() } })],
-      ['a 31-byte digest', () => Response.json({ data: { wrapper: wrapperObject({ pending: { ...pending, digest: Buffer.alloc(31, 7).toString('base64') } }), config: configObject() } })],
-      ['an eta that is not a number', () => Response.json({ data: { wrapper: wrapperObject({ pending: { ...pending, eta_ms: 'soon' } }), config: configObject() } })],
-      ['a registry with no contents', () => Response.json({ data: { wrapper: wrapperObject({ pending }), config: configObject({ json: { ...configObject().asMoveObject.contents.json, settlement_apps: null } }) } })],
-      ['pending additions that are not a list', () => Response.json({ data: { wrapper: wrapperObject({ pending }), config: configObject({ json: { ...configObject().asMoveObject.contents.json, pending_additions: { truncated: true } } }) } })],
+      ['the wrapper has no pending field', () => Response.json({ data: { wrapper: wrapperObject({ json: { ...good, pending: undefined } }), config: configObject(), feeConfig: feeConfigObject() } })],
+      ['a 31-byte digest', () => Response.json({ data: { wrapper: wrapperObject({ pending: { ...pending, digest: Buffer.alloc(31, 7).toString('base64') } }), config: configObject(), feeConfig: feeConfigObject() } })],
+      ['an eta that is not a number', () => Response.json({ data: { wrapper: wrapperObject({ pending: { ...pending, eta_ms: 'soon' } }), config: configObject(), feeConfig: feeConfigObject() } })],
+      ['a registry with no contents', () => Response.json({ data: { wrapper: wrapperObject({ pending }), config: configObject({ json: { ...configObject().asMoveObject.contents.json, settlement_apps: null } }), feeConfig: feeConfigObject() } })],
+      ['pending additions that are not a list', () => Response.json({ data: { wrapper: wrapperObject({ pending }), config: configObject({ json: { ...configObject().asMoveObject.contents.json, pending_additions: { truncated: true } } }), feeConfig: feeConfigObject() } })],
     ];
     for (const [label, reply] of replies) {
       chain.stateReply = reply;
