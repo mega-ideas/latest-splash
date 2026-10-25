@@ -76,6 +76,19 @@ export const ASSETS = [
       { file: 'public/cinematic/liquidity-pools.png', phone: { x0: 0.12, y0: 0, x1: 0.88, y1: 1 } },
     ],
   },
+  // The three loops' art (the step B review): small cards, so 720 and
+  // 1448 px. Their red-orange details (Supply's "%" tile and label, Settle's
+  // clock, Save's Approve button) are shifted to gold over the whole picture
+  // (goldShift below); nothing else in this art is red.
+  ...[
+    ['loop-settle', 'public/isometric/loop-settle-v3.png'],
+    ['loop-save', 'public/isometric/loop-save-v3.png'],
+    ['loop-supply', 'public/isometric/loop-supply.png'],
+  ].map(([key, file]) => ({
+    key,
+    widths: [720, 1448],
+    sources: [{ file, goldShift: true, phone: { x0: 0, y0: 0, x1: 1, y1: 1 } }],
+  })),
 ];
 
 // ─── The recolour, on raw RGBA, so a test can run it on a planted square ───
@@ -134,6 +147,38 @@ export function recolourPanel(data, width, height, box) {
   return hits.length;
 }
 
+const GOLD_HUE = hsv(...GOLD_FILL).h;
+
+function fromHsv(h, s, v) {
+  const c = v * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = v - c;
+  const [r, g, b] = h < 60 ? [c, x, 0] : h < 120 ? [x, c, 0] : [0, c, x];
+  return [r, g, b].map((t) => Math.round((t + m) * 255));
+}
+
+/**
+ * Shift every red-orange pixel of an RGBA buffer to the gold hue, in place.
+ * Unlike recolourPanel this keeps each pixel's own saturation and
+ * brightness, so a red edge blended into white becomes a gold edge blended
+ * into white, with no pink fringe. Gold (about 40 degrees), teal, cream and
+ * transparent pixels are left alone. Returns how many pixels changed.
+ */
+export function goldShift(data, width, height) {
+  let changed = 0;
+  for (let i = 0; i < width * height * 4; i += 4) {
+    if (data[i + 3] < 8) continue;
+    const { h, s, v } = hsv(data[i], data[i + 1], data[i + 2]);
+    if (!((h <= 28 || h >= 340) && s >= 0.12 && v >= 0.25)) continue;
+    const [r, g, b] = fromHsv(GOLD_HUE, Math.min(1, s * 0.95), v);
+    data[i] = r;
+    data[i + 1] = g;
+    data[i + 2] = b;
+    changed += 1;
+  }
+  return changed;
+}
+
 // ─── The files ─────────────────────────────────────────────────────────────
 
 function pickSource(asset, root) {
@@ -160,10 +205,11 @@ export async function build({ root = process.cwd(), write = true } = {}) {
     if (!source) throw new Error(`${asset.key}: none of ${asset.sources.map((s) => s.file).join(', ')} exists`);
     const raw = await sharp(path.join(root, source.file)).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
     const recoloured = source.recolour ? recolourPanel(raw.data, raw.info.width, raw.info.height, source.recolour) : 0;
+    const shifted = source.goldShift ? goldShift(raw.data, raw.info.width, raw.info.height) : 0;
     const input = { data: raw.data, info: raw.info };
 
     const sourceHash = createHash('sha256').update(readFileSync(path.join(root, source.file))).digest('hex').slice(0, 16);
-    const widths = [...new Set(WIDTHS.map((w) => Math.min(w, raw.info.width)))];
+    const widths = [...new Set((asset.widths ?? WIDTHS).map((w) => Math.min(w, raw.info.width)))];
     const variants = [];
     for (const width of widths) {
       const budget = width <= 1600 ? asset.budgetBytes : undefined;
@@ -191,6 +237,7 @@ export async function build({ root = process.cwd(), write = true } = {}) {
       source: source.file.replace(/^public\//, ''),
       sourceSha256: sourceHash,
       recolouredPixels: recoloured,
+      ...(source.goldShift ? { goldShiftedPixels: shifted } : {}),
       variants,
       phone: { src: `/${phoneFile.replace(/^public\//, '')}`, width: phone.info.width, height: phone.info.height, bytes: phone.data.length },
     };

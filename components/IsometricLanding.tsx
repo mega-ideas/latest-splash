@@ -193,7 +193,7 @@ const loopCards = (status: { settle: LoopStatus; save: LoopStatus }) => [
     label: 'Settle',
     title: 'Move it in minutes.',
     copy: 'Hold USDC, pay Southeast Asia. Every approved payout builds verified counterparties and settlement history.',
-    image: '/isometric/loop-settle-v3.png',
+    art: landingImage('loop-settle'),
     imageAlt: 'Isometric settlement: a USD coin crossing an approved rail in minutes to arrive as a PHP coin',
     meta: 'USDC → PHP and IDR',
     status: status.settle,
@@ -203,7 +203,7 @@ const loopCards = (status: { settle: LoopStatus; save: LoopStatus }) => [
     label: 'Save',
     title: 'Grow it while it waits.',
     copy: 'Zeke models a projected, variable treasury posture for idle USDC. Your business approves every move.',
-    image: '/isometric/loop-save-v3.png',
+    art: landingImage('loop-save'),
     imageAlt: 'Isometric treasury tiers of idle USD growing along a yield curve, gated by an approve control',
     meta: 'Projected · variable · human-approved',
     status: status.save,
@@ -213,7 +213,7 @@ const loopCards = (status: { settle: LoopStatus; save: LoopStatus }) => [
     label: 'Supply',
     title: 'Finance it early.',
     copy: 'Invoices would become working capital: your buyer funds early payment against a receivable both sides can verify.',
-    image: '/isometric/loop-supply.png',
+    art: landingImage('loop-supply'),
     imageAlt: 'Isometric supply loop: an invoice financed early and returned as working capital',
     meta: 'Buyer-funded · no third-party lender',
     status: 'roadmap' as LoopStatus,
@@ -557,7 +557,7 @@ export default function IsometricLanding({
                   <LoopChip status={loop.status} />
                 </div>
                 <div className="iso-loops-art">
-                  <Image src={loop.image} alt={loop.imageAlt} width={640} height={480} />
+                  <Image src={loop.art.src} loader={loop.art.loader} alt={loop.imageAlt} width={loop.art.width} height={loop.art.height} sizes="(max-width: 900px) 86vw, 400px" />
                 </div>
                 <div className="iso-loops-copy">
                   <h3>{loop.title}</h3>

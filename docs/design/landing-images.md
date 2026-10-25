@@ -33,6 +33,11 @@ down until it fits, and fails if it cannot. Today: about 124 KB at 1600 px and
 | `hero` | `public/cinematic/hero-district-v6.png` (approved, 3840x2160) | `hero-district-v5.png` |
 | `liquidity-pools` | `public/cinematic/liquidity-pools-cream.png` (approved cream deck) | `liquidity-pools.png` |
 
+The three loops' art (`loop-settle`, `loop-save`, `loop-supply`, from
+`public/isometric/`) goes through the same script at 720 px and 1448 px
+(1200 px for Supply, its full width), so those PNGs are no longer requested
+either.
+
 ## Dropping in the new art
 
 1. Put the file at the path above.
@@ -60,3 +65,28 @@ orange fringe, and nothing else in the picture should have changed colour.
 The script prints how many pixels it recoloured; for v5 it is about 3,900. A
 count of 0 on v6 means the panel sits outside the box: widen the v6
 `recolour` box in `ASSETS` and run it again.
+
+## The loops' gold shift
+
+The loop illustrations had red-orange details: Supply's "%" tile and its
+"Early payment discount" label, Settle's clock and "Minutes" tag, Save's
+Approve button. Brief D14 allows no coral or red. `goldShift` in the script
+moves every red-orange pixel of those three pictures to the gold hue
+(`#efc46f`'s, about 40 degrees) and keeps each pixel's own saturation and
+brightness, so soft edges stay soft and nothing turns pink. Gold coins,
+teal, cream and transparent pixels are not touched. The manifest records
+`goldShiftedPixels` for each piece (about 17,000 to 23,000).
+
+**Visual check for Sky.** Open `public/cinematic/landing/loop-supply-1200.webp`,
+`loop-settle-1448.webp` and `loop-save-1448.webp`. The tile, label, clock and
+button should read as gold. The Supply label's lettering is lighter than it
+was in red; if it reads too faint, the art needs a redraw rather than a
+stronger shift.
+
+## When check:images fails
+
+`npm run lint` fails with "run node scripts/landing-images.mjs" whenever a
+preferred source is on disk but the manifest still names the old one, for
+example right after `liquidity-pools-cream.png` or `hero-district-v6.png`
+is added. That is on purpose: the page never serves a stale image. The fix
+is the one command, `npm run images:landing`, then commit what it wrote.
