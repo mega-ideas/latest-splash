@@ -1391,3 +1391,37 @@ test('a short return that lands while the payout moves is retried, and what came
   assert.equal(shorts.length, 1, 'the losing delivery recorded no short return');
   await t.w.client.close();
 });
+
+test('a bank account removed while its withdrawal is being instructed leaves no live instruction and no request to sign', async () => {
+  const base = payoutPartner('hata_fiuu', ENV);
+  let revokeDuring = null;
+  const t = await setup({
+    overrides: {
+      createPayout: async (input) => {
+        // An owner removes the bank account while the partner is being instructed.
+        if (revokeDuring) await revokeDuring();
+        return base.createPayout(input);
+      },
+    },
+  });
+  const { destination } = await readyToWithdraw(t);
+  const q = await quoted(t, destination.id);
+  revokeDuring = async () => {
+    revokeDuring = null;
+    const revoked = await revokeWithdrawalDestination(t.deps(), 'u-two', destination.id);
+    assert.equal(revoked.ok, true, JSON.stringify(revoked));
+  };
+  const r = await createWithdrawal(t.deps(), 'u-founder', { clientKey: 'ck_revoke_mid', destinationId: destination.id, amountMinor: '1000000000', acceptedReceiveMinor: q.receiveMinor, maxFeeMinor: q.maxFeeMinor, ...bundle() });
+  assert.equal(r.ok, false, `the withdrawal was cancelled under it: ${JSON.stringify(r)}`);
+  assert.equal(r.code, 'withdrawal_cancelled');
+  const [row] = await t.w.db.select().from(schema.withdrawals);
+  assert.equal(row.status, 'cancelled');
+  assert.ok(row.partnerRef, 'the partner took the instruction');
+  // The instruction the partner took after the cancel is reversed.
+  const reversals = t.partner.called('returnOrReverse').filter((c) => c.input.partnerRef === row.partnerRef);
+  assert.equal(reversals.length, 1, 'the instruction taken after the cancel is reversed');
+  // And no owners' request is left open to sign.
+  const open = (await t.w.db.select().from(schema.walletSigningRequests)).filter((s) => s.purpose === 'withdrawal' && s.status === 'collecting');
+  assert.equal(open.length, 0, 'no request is left for the owners to sign');
+  await t.w.client.close();
+});
