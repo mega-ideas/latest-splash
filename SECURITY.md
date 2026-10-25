@@ -30,6 +30,56 @@ The remaining four modules (`smart_treasury`, `payment_intent`, `audit_anchor`, 
 
 ---
 
+## v2 Phase 2 §4.7 — wallet recipients: exchange accounts, proven wallets, CCTP — 2026-10-25
+
+Design: `docs/v2/phase2-wallet-recipients.md`. Tests:
+`tests/wallet-recipients-v2.test.mjs`, with additions to
+`tests/compliance-payment-gates.test.mjs`, `tests/controls-evidence.test.mjs`
+and `tests/spend-rules.test.mjs`. Migration 0047.
+
+- **No payment to a wallet the supplier holds before it proves it holds it
+  (D5b).** A signed Sui personal message over a fixed text naming the
+  address, the supplier, the paying business, a 32-byte nonce and a 72-hour
+  expiry. The link's token is kept only as its SHA-256; the challenge is
+  used up before the signature is checked (one try per link, each nonce
+  once for ever); a newer link replaces an open one; the proof is recorded
+  only if the recipient's address is still the one the link was made for.
+  The proof is also the WALLET tag's gate on a SpendPolicy, and withdrawing
+  it (owners, or removing the recipient) cancels a waiting request that
+  would tag it.
+- **The payment gate** (`walletDeliveryGate`), when a wallet payment, an
+  owners' payment of an open intent or a second approval is opened, and
+  before every signature: kind WALLET only to this business's proven
+  wallet, kind EXCHANGE only to its saved exchange account; an address
+  saved as the other kind is refused, so the declared kind cannot dodge the
+  proof or the Travel Rule. Previously any CLEAR address could be paid as
+  either kind (Medium: D5b was not enforced off chain). The older
+  per-person send lane refuses an unproven wallet and any exchange account
+  at its quote.
+- **The EXCHANGE tag** on a SpendPolicy only for a saved exchange account of
+  this business (previously any address could be tagged EXCHANGE without a
+  proof, which skipped D5b for rule payments: Medium).
+- **The exchange of a Travel Rule message and a sender declaration** is the
+  saved recipient's, not the request's (§4.6 open item closed).
+- **Recipients are screened before they are saved**, a BLOCK never saved;
+  one address is one recipient per business; the org is the session's,
+  owners and staff only; another business's recipient, proof or receipt
+  reads as absent.
+- **Cross-chain (D5c, D13):** USDC only, CCTP V2 only, the owners' multisig
+  only (Move, the rule path and staff asks all refuse kind 3). The receipt
+  records the burn only from this business's own executed multisig request
+  that confirmed the intent on chain; Circle's attestation only for a
+  message that mints exactly this payment (domain, mint recipient, amount,
+  fee bound, any relayer); the mint only from the destination chain's
+  receipt of Circle's `MessageReceived` for that nonce. Forward only, by a
+  trigger; production reads only the configured Circle service and never
+  its sandbox.
+- **Open:** the cross-chain PTB and bridge adapter; reading a Solana mint;
+  the supplier's proof page (Phase 3); a legacy wallet recipient (saved
+  before 0047) is unproven and unpayable until proven, which Phase 3 must
+  explain to the business; Phantom is not offered as a label although D5
+  names it (it ended Sui support; the table refuses it since 0020).
+
 ## v2 Phase 2 §4.6 — compliance: KYB, Travel Rule, KYT, controls evidence — 2026-10-25
 
 Design: `docs/v2/phase2-compliance.md`. Tests:
@@ -95,9 +145,9 @@ Design: `docs/v2/phase2-compliance.md`. Tests:
   refuses account-shaped values and more account keys, and copies partner
   fee lines field by field; production refuses SHA-1 webhooks unless
   `SUMSUB_WEBHOOK_ALLOW_SHA1`; only an owner opens a KYB session.
-- **Open:** supplier name screening; the recipient forms calling the
-  screening route (§4.7), and the exchange taken from the recipient record
-  rather than the request; a staff member's own in-limit rule payment
+- **Open:** supplier name screening (the recipient screening on save and
+  the exchange taken from the recipient record are closed by §4.7, above);
+  a staff member's own in-limit rule payment
   (not built server-side, so not screened by Splash); an owner override of a
   Travel Rule hold (not built: compliance to decide); checking Elliptic's and Sumsub's shapes against
   the contracted sandboxes; who is the originating party for Travel Rule

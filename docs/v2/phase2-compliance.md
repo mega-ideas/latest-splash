@@ -99,9 +99,13 @@ exchange (VASP to VASP). `POST /api/wallet/payments/[wsr_…]/travel-rule
   case) are read on the server. The business's KYB must be approved
   (KYB_PROVIDER_APPROVED, KYB_ADMIN_APPROVED or ACTIVE), or nothing is sent
   (`kyb_not_approved`).
-- The exchange still comes from the request until §4.7 keeps it on the
-  recipient. A deposit address once named at one exchange in a message the
-  provider took keeps that exchange: another is refused (`exchange_mismatch`).
+- The exchange is the saved exchange account's own (§4.7,
+  `docs/v2/phase2-wallet-recipients.md`): a request naming another is
+  refused (`exchange_mismatch`), a wallet the supplier holds is not an
+  exchange account (`not_an_exchange_recipient`), and only a recipient saved
+  before §4.7 still takes it from the request. A deposit address once named
+  at one exchange in a message the provider took keeps that exchange: another
+  is refused (`exchange_mismatch`).
 - The recipient's newest screening by this business must be CLEAR: REVIEW
   waits for a person, BLOCK is refused (403), none asks for screening first.
 - Once per payment: the row is written before Sumsub is asked, keyed by the
@@ -254,9 +258,12 @@ that cannot be read leaves the chain fields empty and says so.
   which a bank route's partner does today. Sumsub screens both parties of a
   Travel Rule transfer; that answer arrives by webhook as the transfer's
   status.
-- The recipient forms (§4.7) do not call the screening route yet, and the
-  existing wallet-recipient save still screens with the sanctions list
-  only. §4.7 moves both onto `screenRecipient`.
+- §4.7's wallet recipients (exchange, self-custody, cross-chain) are
+  screened with `screenRecipient` before they are saved. The older wallet
+  save (`POST /api/recipients` with `payoutMethod: WALLET` and no
+  `deliveryKind`) still screens with the sanctions list only; what it saves
+  is an unproven wallet the supplier holds, which is not paid until proven
+  and screened here.
 - A deposit's screening is not copied into `kyt_screenings`; the evidence
   export is per outbound payment and does not show it.
 - The Elliptic request and response shapes and the Sumsub Travel Rule shape

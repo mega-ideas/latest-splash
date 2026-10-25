@@ -79,7 +79,8 @@ signers. A second approval is signed by one owner's own passkey.
 
 A recipient tagged WALLET is charged Splash's wallet fee (0.02%, min 0.25
 USDC) and is a self-custody address, which D5 allows only after the payee
-signs an ownership proof. §4.7 builds the proof; this section builds the
+signs an ownership proof. §4.7 builds the proof
+(`docs/v2/phase2-wallet-recipients.md`); this section builds the
 gate: an address may be verified with the WALLET tag only while
 `wallet_ownership_proofs` holds a live row for this business (another
 business's proof does not count). Refused before anything is built
@@ -198,8 +199,9 @@ nothing else moves.
   running totals) come from the objects, not the events.
 - **The operator's executor rule** (scheduled payments and batches) is not
   exposed: only STAFF rules are given here.
-- **The ownership proof itself** (§4.7): the gate reads the table, which
-  nothing writes yet but `recordOwnershipProof`.
+- **The ownership proof itself** is §4.7's (`submitOwnershipProof`, which
+  calls `recordOwnershipProof`). §4.7 also gates the EXCHANGE tag: only a
+  saved exchange account of this business (`exchange_not_saved`).
 - **No testnet run.** The PTB shapes (in particular `propose_for_app`'s
   result going straight into `splash_spend::accept`, and a rate limit made by
   a Move call wrapped in `option::some`) follow the Sui TypeScript SDK's own
