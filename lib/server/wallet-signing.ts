@@ -166,18 +166,23 @@ export type ShapeContext = {
   /** A withdrawal or a test deposit: the exact principal (minor units). */
   amountMinor?: bigint;
   /**
-   * A subscription (A1 §6): the plan's terms the new billing allowance must
-   * carry exactly, and the billing allowance a cancel or plan change revokes.
+   * A subscription (A1 §6): exactly the billing allowances it revokes (every
+   * one the wallet holds to a Splash finance multisig, so none is left behind
+   * that Splash does not track), and, for a subscribe or a plan change, the
+   * plan's terms the new billing allowance must carry exactly.
    */
-  billing?: { name: string; monthlyLimitMinor: bigint; expiresAtMs: bigint; lifetimeCapMinor: bigint | null; revokeAllowance?: string };
+  billing?: { revokeAllowances: string[]; grant?: { name: string; monthlyLimitMinor: bigint; expiresAtMs: bigint; lifetimeCapMinor: bigint | null } };
 };
 
-/** The shapes a subscription request may have: subscribe, cancel, change plan. */
-const SUBSCRIPTION_SHAPES: ReadonlySet<string> = new Set([
-  'rate_limit,wrap_rate_limit,new_billing_allowance',
-  'revoke_billing_allowance',
-  'revoke_billing_allowance,rate_limit,wrap_rate_limit,new_billing_allowance',
-]);
+/** The grant a subscribe or plan change ends with. */
+const BILLING_GRANT = 'rate_limit,wrap_rate_limit,new_billing_allowance';
+/** A subscription request: revokes first (none for a first subscribe), then at most one grant. */
+function subscriptionShape(actions: WalletAction[]): boolean {
+  let i = 0;
+  while (i < actions.length && actions[i].type === 'revoke_billing_allowance') i += 1;
+  const rest = kinds(actions.slice(i));
+  return (i > 0 && rest === '') || rest === BILLING_GRANT;
+}
 
 /** What a spending-rule transaction (`spend_rule`) may do, and nothing else. */
 const SPEND_RULE_ACTIONS: ReadonlySet<string> = new Set([
@@ -317,15 +322,21 @@ export function assertPurposeShape(purpose: SigningPurpose, d: WalletTxDescripti
     case 'subscription': {
       // A1 §6: only the billing allowance, to the finance multisig (the
       // describer checked the spender), on exactly the plan's terms.
-      if (!SUBSCRIPTION_SHAPES.has(shape)) bad(shape);
+      if (!subscriptionShape(d.actions)) bad(shape);
       const t = context.billing;
       if (!t) bad('no plan terms were named');
-      const terms = t as NonNullable<ShapeContext['billing']>;
-      const revoke = d.actions.find((x) => x.type === 'revoke_billing_allowance') as Extract<WalletAction, { type: 'revoke_billing_allowance' }> | undefined;
-      if (revoke && (!terms.revokeAllowance || revoke.allowance !== normalizeSuiAddress(terms.revokeAllowance))) bad('it revokes an allowance other than the subscription being replaced');
-      if (!revoke && terms.revokeAllowance) bad('a plan change revokes the current allowance in the same transaction');
+      const expected = t as NonNullable<ShapeContext['billing']>;
+      // Exactly the allowances named, each once: no fewer (one left behind
+      // keeps billing), no other (a revoke is the wallet's own decision).
+      const revoked = d.actions.filter((x) => x.type === 'revoke_billing_allowance').map((x) => (x as Extract<WalletAction, { type: 'revoke_billing_allowance' }>).allowance);
+      const named = expected.revokeAllowances.map((a) => normalizeSuiAddress(a));
+      if (new Set(revoked).size !== revoked.length || new Set(named).size !== named.length) bad('it revokes one allowance twice');
+      if (revoked.length !== named.length || !revoked.every((a) => named.includes(a))) bad('it does not revoke exactly the billing allowances the wallet holds');
       const n = d.actions.find((x) => x.type === 'new_billing_allowance') as Extract<WalletAction, { type: 'new_billing_allowance' }> | undefined;
+      if (n && !expected.grant) bad('a cancel grants nothing');
+      if (!n && expected.grant) bad('a subscribe or plan change grants the plan allowance');
       if (n) {
+        const terms = expected.grant as NonNullable<NonNullable<ShapeContext['billing']>['grant']>;
         if (n.name !== terms.name) bad('the allowance is not named for this plan');
         if (BigInt(n.monthlyLimitMinor) !== terms.monthlyLimitMinor) bad('the monthly limit is not the plan price');
         if (BigInt(n.expiresAtMs) !== terms.expiresAtMs) bad('the allowance does not end with the term');

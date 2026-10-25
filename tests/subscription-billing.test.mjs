@@ -405,12 +405,13 @@ test('the bytes must carry exactly the plan: another price, term or spender is r
       orgId: 'acme', requestedBy: 'u-founder', purpose: 'subscription', dedupeKey: 'billing:test', signer: { kind: 'multisig', ...r.members }, gasMode: 'sponsored',
       transactionBytes: await subscribeTx({ wallet: r.address, usdcType: USDC, name: terms.name, finance: FINANCE, monthlyLimitMinor: terms.monthlyLimitMinor, expiresAtMs: terms.expiresAtMs, lifetimeCapMinor: null, gas, ...bytesOver }),
       billing: { financeAddress: FINANCE, allowanceIds: [], capIds: [] },
-      billingTerms: { ...terms, ...termsOver },
+      billingTerms: { revokeAllowances: [], grant: terms, ...termsOver },
     });
   assert.equal((await open({ monthlyLimitMinor: 4_900n * USDC_1 })).code, 'wrong_shape', 'a hundred times the price');
   assert.equal((await open({ expiresAtMs: terms.expiresAtMs + 1n })).code, 'wrong_shape', 'a longer term');
   assert.equal((await open({ finance: STRANGER })).code, 'wrong_spender', 'another spender');
-  assert.equal((await open({}, { revokeAllowance: '0x' + '76'.repeat(32) })).code, 'wrong_shape', 'a plan change that revokes nothing');
+  assert.equal((await open({}, { revokeAllowances: ['0x' + '76'.repeat(32)] })).code, 'wrong_shape', 'it must revoke every allowance the server named');
+  assert.equal((await open({}, { grant: undefined })).code, 'wrong_shape', 'a grant the server did not ask for');
 
   const noFinance = await subscribe(w.deps, { ...w.bw, financeAddress: async () => ({ ok: false, error: 'SPLASH_FINANCE_ADDRESS is not set' }) }, { orgId: 'acme', requestedBy: 'u-founder', wallet: r.members, planId: 'growth' });
   assert.deepEqual([noFinance.status, noFinance.code], [503, 'finance_unconfigured']);

@@ -265,7 +265,7 @@ async function openBilling(
       signer: { kind: 'multisig', ...input.wallet },
       gasMode: 'sponsored',
       billing: billingExpect,
-      billingTerms: { name: current!.allowanceName, monthlyLimitMinor: current!.priceMinor, expiresAtMs: BigInt(current!.expiresAt.getTime()), lifetimeCapMinor: current!.lifetimeCapMinor, revokeAllowance: currentHeld!.id },
+      billingTerms: { revokeAllowances: [currentHeld!.id] },
     });
     if (!opened.ok) return opened;
     await db.update(subscriptions).set({ cancelRequestId: opened.request.id, updatedAt: now }).where(and(eq(subscriptions.id, current!.id), eq(subscriptions.orgId, input.orgId)));
@@ -277,7 +277,7 @@ async function openBilling(
   if (input.mode === 'change' && plan.id === current!.planId && plan.priceMinor === current!.priceMinor) return refuse(409, 'same_plan', 'this business is on that plan already');
   const name = billingAllowanceName(plan.id);
   const expiresAtMs = BigInt(termEndUtc(now.getTime(), plan.termMonths));
-  const terms = { name, monthlyLimitMinor: plan.priceMinor, expiresAtMs, lifetimeCapMinor: plan.lifetimeCapMinor, ...(revoke ? { revokeAllowance: currentHeld!.id } : {}) };
+  const terms = { revokeAllowances: revoke ? [currentHeld!.id] : [], grant: { name, monthlyLimitMinor: plan.priceMinor, expiresAtMs, lifetimeCapMinor: plan.lifetimeCapMinor } };
   let bytes: Uint8Array;
   try {
     bytes = await subscribeTx({ wallet, usdcType: bw.ctx.chain.usdcType, name, finance: financeAddress, monthlyLimitMinor: plan.priceMinor, expiresAtMs, lifetimeCapMinor: plan.lifetimeCapMinor, ...(revoke ? { revoke } : {}), gas });
