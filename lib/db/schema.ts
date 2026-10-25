@@ -1429,7 +1429,8 @@ export const governanceAlerts = pgTable('governance_alerts', {
   /** The wrapper or config the alert was read from. */
   subjectId: text('subject_id').notNull(),
   /** upgrade_proposed | owner_change_proposed | registry_addition_proposed |
-   *  upgrade_committed | registry_addition_activated. */
+   *  upgrade_committed | registry_addition_activated | fee_schedule_proposed |
+   *  fee_recipient_proposed | fee_schedule_applied | fee_recipient_applied. */
   kind: text('kind').notNull(),
   /** The announced bytecode digest, 0x + 64 hex (upgrade_proposed). */
   bytecodeDigest: text('bytecode_digest'),
@@ -1441,6 +1442,10 @@ export const governanceAlerts = pgTable('governance_alerts', {
   registry: integer('registry'),
   typeName: text('type_name'),
   newOwner: text('new_owner'),
+  /** The payment kind a fee schedule alert is about, 0-4 (migration 0050). */
+  feeKind: integer('fee_kind'),
+  /** The proposed or applied fee recipient (fee recipient alerts). */
+  feeRecipient: text('fee_recipient'),
   proposedAt: timestamp('proposed_at', { withTimezone: true }),
   /** When the change can take effect. */
   etaAt: timestamp('eta_at', { withTimezone: true }),
@@ -1464,7 +1469,7 @@ export const governanceAlerts = pgTable('governance_alerts', {
  */
 export const governanceWatchState = pgTable('governance_watch_state', {
   subjectId: text('subject_id').primaryKey(),
-  /** wrapper | config. */
+  /** wrapper | config | fee_config. */
   subjectKind: text('subject_kind').notNull(),
   objectVersion: bigint('object_version', { mode: 'number' }).notNull(),
   /** WrapperSnapshot | ConfigSnapshot (lib/server/governance-events.ts). */

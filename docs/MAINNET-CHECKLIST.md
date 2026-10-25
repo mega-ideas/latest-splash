@@ -148,8 +148,11 @@ procedure in [`docs/UPGRADE-POLICY.md`](UPGRADE-POLICY.md).
       `SPLASH_OPS_CAP_ID`, `SPLASH_OPS_ADDRESS` (blank: the governance
       multisig) and `SPLASH_FINANCE_ADDRESS`; unset, those checks are
       reported skipped, never passed.
-- [ ] Know the gap: no owner is alerted to a fee proposal yet, because the
-      governance alert cron does not read `FeeConfig` (Phase 2).
+- [ ] The governance alert cron reads `FeeConfig` too: with
+      `SPLASH_FEE_CONFIG_ID` unset it answers 502, and a 502 naming it means
+      the id is not the canonical `FeeConfig` of core's original package. A
+      test fee proposal on testnet (a schedule and a recipient) reached every
+      test owner.
 - [ ] `SPLASH_CUSTODY_PACKAGE_ID` and `SPLASH_PAYOUT_DELEGATION_ID` are
       **unset**. Production on mainnet refuses to boot with either, because
       custody and the meter are retired in v2. On mainnet the

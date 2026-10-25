@@ -52,6 +52,19 @@
  * route answers 502 and a person is paged. Nothing is alerted from a read
  * that could not be trusted, and nothing is silently skipped.
  *
+ * ─── Fees (A1 §2.9, §6) ─────────────────────────────────────────────────────
+ *
+ * The third object is the canonical FeeConfig (SPLASH_FEE_CONFIG_ID), of type
+ * exactly `<original_package>::fee_config::FeeConfig` and shared. Only the
+ * FeeAdminCap (the governance multisig) can change it. Its pending schedule
+ * slots and pending fee recipient are what FeeScheduleProposed and
+ * FeeRecipientProposed announce; each waits `fee_config::FEE_NOTICE_MS` (24
+ * hours) and lapses `FEE_APPLY_WINDOW_MS` (seven days) after its eta, the
+ * same windows as an upgrade, so a 15-minute poll of the state misses none.
+ * What took effect (a schedule or a recipient applied) is seen against the
+ * stored state, like the rest. A per-business discount (`set_discount`) only
+ * ever lowers a fee and is not alerted.
+ *
  * ─── Proposals, and what took effect ────────────────────────────────────────
  *
  * Each alert is keyed by its content: wrapper + bytecode digest + eta for an
@@ -67,10 +80,15 @@
  * first state a monitor ever stores is a baseline and raises neither, because
  * nothing in it says when those things happened.
  */
+import { formatRate, formatUsdcBound, tierLabel } from '../fees/copy.ts';
+import { FeeConfigUnavailableError, parseFeeConfig, type FeeConfigObjectRead } from '../fees/fee-config.ts';
+import { U64_MAX, type KindSchedule } from '../fees/schedule.ts';
 import { normalizeSuiAddress } from './operator-outflows.ts';
 
 /** Where every governance alert sends the owner. The page arrives in Phase 3. */
 export const REVIEW_PATH = '/dashboard/settings/spending-rules';
+/** Where a fee alert sends the owner: Settings, where the pricing is. */
+export const FEE_REVIEW_PATH = '/dashboard/settings';
 
 const DAY_MS = 86_400_000;
 /** `upgrade_delay::WINDOW_MS`: an upgrade or owner change not put into force
@@ -85,6 +103,7 @@ export type GovernancePolicy = {
   upgradeDelayPackageId: string;
   wrapperId: string;
   complianceConfigId: string;
+  feeConfigId: string;
 };
 
 /** One object as Sui GraphQL renders `object(address) { address version owner
@@ -98,7 +117,7 @@ export type ChainObject = {
 };
 
 /** What one read of the chain returned: null where no object exists. */
-export type GovernanceChainRead = { wrapper: ChainObject | null; config: ChainObject | null };
+export type GovernanceChainRead = { wrapper: ChainObject | null; config: ChainObject | null; feeConfig: ChainObject | null };
 
 /** 1 accepted asset, 2 settlement app, 3 bridge adapter (compliance_config). */
 export type RegistryKind = 1 | 2 | 3;
@@ -126,17 +145,36 @@ export type ConfigState = {
   pending: Array<{ registry: RegistryKind; typeName: string; proposedAtMs: number; etaMs: number }>;
 };
 
-export type GovernanceState = { wrapper: WrapperState; config: ConfigState };
+export type FeeGovernanceState = {
+  id: string;
+  objectVersion: number;
+  /** The fee recipient in force; null while Splash's fees are off. */
+  feeRecipient: string | null;
+  /** One per kind, as in force. */
+  schedules: readonly KindSchedule[];
+  /** One slot per kind. */
+  pendingSchedules: ReadonlyArray<(KindSchedule & { etaMs: number }) | null>;
+  pendingRecipient: { recipient: string; etaMs: number } | null;
+};
+
+export type GovernanceState = { wrapper: WrapperState; config: ConfigState; feeConfig: FeeGovernanceState };
 
 export type GovernanceAlertKind =
   | 'upgrade_proposed'
   | 'owner_change_proposed'
   | 'registry_addition_proposed'
   | 'upgrade_committed'
-  | 'registry_addition_activated';
+  | 'registry_addition_activated'
+  | 'fee_schedule_proposed'
+  | 'fee_recipient_proposed'
+  | 'fee_schedule_applied'
+  | 'fee_recipient_applied';
 
 /** Shown only while the latest state read still holds them (see the store). */
-export const PROPOSAL_KINDS: GovernanceAlertKind[] = ['upgrade_proposed', 'owner_change_proposed', 'registry_addition_proposed'];
+export const PROPOSAL_KINDS: GovernanceAlertKind[] = ['upgrade_proposed', 'owner_change_proposed', 'registry_addition_proposed', 'fee_schedule_proposed', 'fee_recipient_proposed'];
+
+/** The alerts about Splash's fee, which send the owner to Settings. */
+export const FEE_KINDS: GovernanceAlertKind[] = ['fee_schedule_proposed', 'fee_recipient_proposed', 'fee_schedule_applied', 'fee_recipient_applied'];
 
 export type GovernanceAlert = {
   /** What the alert says, as a key: the same change always derives the same one. */
@@ -153,6 +191,10 @@ export type GovernanceAlert = {
   registry: RegistryKind | null;
   typeName: string | null;
   newOwner: string | null;
+  /** The payment kind a fee schedule alert is about (0-4, fee_config). */
+  feeKind: number | null;
+  /** The proposed or applied fee recipient. */
+  feeRecipient: string | null;
   /** When it was announced on chain (proposals). */
   proposedAtMs: number | null;
   /** When it can take effect (proposals). */
@@ -178,7 +220,9 @@ export type GovernanceBannerAlert = {
 /** What the monitor stores per object between runs. JSON (a jsonb column). */
 export type WrapperSnapshot = { objectVersion: number; capVersion: number; pendingKeys: string[] };
 export type ConfigSnapshot = { objectVersion: number; registries: Record<'1' | '2' | '3', string[]>; pendingKeys: string[] };
-export type GovernanceSnapshots = { wrapper: WrapperSnapshot | null; config: ConfigSnapshot | null };
+/** `schedules` holds each kind's schedule as `scheduleKey` writes it. */
+export type FeeConfigSnapshot = { objectVersion: number; schedules: string[]; feeRecipient: string | null; pendingKeys: string[] };
+export type GovernanceSnapshots = { wrapper: WrapperSnapshot | null; config: ConfigSnapshot | null; feeConfig: FeeConfigSnapshot | null };
 
 // ─── Parsing: every field, or nothing ─────────────────────────────────────────
 
@@ -349,7 +393,40 @@ export function parseGovernanceState(read: GovernanceChainRead, policy: Governan
     if (!(error instanceof Unreadable)) throw error;
     return { ok: false, objectId: configId, reason: `the compliance config ${configId} could not be read in full (${error.message}), so nothing from it is trusted.` };
   }
-  return { ok: true, state: { wrapper, config } };
+
+  // ── The fee config, checked against the wrapper's own record of core ──
+  const feeId = normalizeSuiAddress(policy.feeConfigId);
+  const feeType = `${wrapper.originalPackage}::fee_config::FeeConfig`;
+  const f = read.feeConfig;
+  if (!f) {
+    return { ok: false, objectId: feeId, reason: `SPLASH_FEE_CONFIG_ID (${feeId}) names no object on chain, so there are no fee changes to watch.` };
+  }
+  const fType = canonicalType(f.asMoveObject?.contents?.type?.repr);
+  if (fType !== feeType) {
+    return { ok: false, objectId: feeId, reason: `SPLASH_FEE_CONFIG_ID (${feeId}) is ${fType ? `a ${fType}` : 'not a Move object of a type this monitor can read'}, not a ${feeType}, the fee config of the core package the upgrade wrapper guards (its original_package).` };
+  }
+  let feeConfig: FeeGovernanceState;
+  try {
+    if (canonicalId(f.address) !== feeId) throw new Unreadable('the object returned is not the one asked for');
+    if (f.owner?.__typename !== 'Shared') throw new Unreadable('it is not shared');
+    const json = need(record(f.asMoveObject?.contents?.json), 'it has no fields');
+    if (canonicalId(json.id) !== feeId) throw new Unreadable('its id is not the configured id');
+    // Every field, by the same parser the quote reads the schedule with.
+    const parsed = parseFeeConfig(f as FeeConfigObjectRead, feeId);
+    const eta = (ms: bigint, what: string) => need(millis(ms.toString()), `${what} is not a time`);
+    feeConfig = {
+      id: feeId,
+      objectVersion: parsed.version,
+      feeRecipient: parsed.feeRecipient,
+      schedules: parsed.schedule,
+      pendingSchedules: parsed.pendingSchedules.map((p, k) => (p ? { tiers: p.tiers, minMinor: p.minMinor, maxMinor: p.maxMinor, etaMs: eta(p.etaMs, `kind ${k}'s pending eta`) } : null)),
+      pendingRecipient: parsed.pendingRecipient && { recipient: parsed.pendingRecipient.recipient, etaMs: eta(parsed.pendingRecipient.etaMs, 'the pending recipient eta') },
+    };
+  } catch (error) {
+    if (!(error instanceof Unreadable) && !(error instanceof FeeConfigUnavailableError)) throw error;
+    return { ok: false, objectId: feeId, reason: `the fee config ${feeId} could not be read in full (${error.message}), so nothing from it is trusted.` };
+  }
+  return { ok: true, state: { wrapper, config, feeConfig } };
 }
 
 // ─── Words ────────────────────────────────────────────────────────────────────
@@ -420,9 +497,44 @@ function shortType(typeName: string): string {
   return parts.length >= 3 ? parts.slice(1).join('::') : typeName;
 }
 
+/** Who pays each kind's fee, as a phrase: "payments to a bank". */
+const FEE_WHERE: Record<number, string> = {
+  0: 'payments to another Splash business',
+  1: 'payments to a Sui wallet',
+  2: 'payments to an exchange',
+  3: 'payments to another chain',
+  4: 'payments to a bank',
+};
+
+/** A schedule as a key: every tier, the minimum and the maximum. */
+export function scheduleKey(s: KindSchedule): string {
+  return `${s.tiers.map((t) => `${t.upperMinor}:${t.bps}`).join(',')};${s.minMinor};${s.maxMinor}`;
+}
+
+/** A schedule in words, every number from lib/fees: "under 1,000 USDC 0.30%, …; minimum 0.25 USDC". */
+function scheduleWords(s: KindSchedule): string {
+  const bands = s.tiers.map((t, i) => {
+    const label = tierLabel(s, i);
+    return `${label.charAt(0).toLowerCase()}${label.slice(1)} ${formatRate(t.bps)}`;
+  });
+  const bounds = [
+    s.minMinor > 0n ? `minimum ${formatUsdcBound(s.minMinor)} USDC` : '',
+    s.maxMinor < U64_MAX ? `maximum ${formatUsdcBound(s.maxMinor)} USDC` : '',
+  ].filter(Boolean);
+  return [bands.join(', '), ...bounds].join('; ');
+}
+
+/** What the max_fee bound (A1 §2.6) guarantees whatever the schedule does. */
+const FEE_PROTECT = 'A payment never pays more than the Splash fee its approvers were shown: if the fee rises before it settles, the chain refuses it and it needs a new approval.';
+/** What `propose_fee_recipient` checks: the address is derived from the multisig's members, and one any single member can sign for aborts. */
+const MULTISIG_CHECKED = 'a multisig account the contract checked when the change was proposed: no single key can sign for it alone.';
+const FEES_OFF = 'No Splash fee is charged yet.';
+
 // ─── Deriving alerts ──────────────────────────────────────────────────────────
 
 const empty = {
+  feeKind: null,
+  feeRecipient: null,
   bytecodeDigest: null,
   upgradePolicy: null,
   packageId: null,
@@ -438,7 +550,7 @@ const empty = {
 export type DerivedGovernance = {
   alerts: GovernanceAlert[];
   /** What to store for the next run's comparison. */
-  snapshots: { wrapper: WrapperSnapshot; config: ConfigSnapshot };
+  snapshots: { wrapper: WrapperSnapshot; config: ConfigSnapshot; feeConfig: FeeConfigSnapshot };
 };
 
 /**
@@ -554,6 +666,80 @@ export function deriveGovernanceAlerts(state: GovernanceState, previous: Governa
     }
   }
 
+  // ── Fees: each pending schedule and the pending recipient, while it can
+  // still be applied; then what took effect against the stored state.
+  const fee = state.feeConfig;
+  const feePending: string[] = [];
+  const feeBase = { ...empty, subjectId: fee.id, reviewPath: FEE_REVIEW_PATH };
+  const offNote = fee.feeRecipient === null ? ' No Splash fee is charged yet: this schedule would apply once fees start.' : '';
+  fee.pendingSchedules.forEach((p, kind) => {
+    if (!p || nowMs >= p.etaMs + PROPOSAL_WINDOW_MS) return;
+    const key = `fee_schedule_proposed|${fee.id}|${kind}|${scheduleKey(p)}|${p.etaMs}`;
+    feePending.push(key);
+    alerts.push({
+      ...feeBase,
+      key,
+      kind: 'fee_schedule_proposed',
+      feeKind: kind,
+      etaMs: p.etaMs,
+      activeUntilMs: p.etaMs + PROPOSAL_WINDOW_MS,
+      summary: `Splash has announced a change to its fee for ${FEE_WHERE[kind]}. It can take effect from ${formatUtc(p.etaMs)}.`,
+      detail: `Proposed: ${scheduleWords(p)}. In force now: ${scheduleWords(fee.schedules[kind])}.${offNote} ${FEE_PROTECT}`,
+    });
+  });
+  const pr = fee.pendingRecipient;
+  if (pr && nowMs < pr.etaMs + PROPOSAL_WINDOW_MS) {
+    const key = `fee_recipient_proposed|${fee.id}|${pr.recipient}|${pr.etaMs}`;
+    feePending.push(key);
+    const first = fee.feeRecipient === null;
+    alerts.push({
+      ...feeBase,
+      key,
+      kind: 'fee_recipient_proposed',
+      feeRecipient: pr.recipient,
+      etaMs: pr.etaMs,
+      activeUntilMs: pr.etaMs + PROPOSAL_WINDOW_MS,
+      summary: first
+        ? `Splash has announced that its fees start. They can start from ${formatUtc(pr.etaMs)}.`
+        : `Splash has announced a change to the account its fees are paid to. It can take effect from ${formatUtc(pr.etaMs)}.`,
+      detail: first
+        ? `${FEES_OFF} Fees would be paid to ${pr.recipient}, ${MULTISIG_CHECKED} From then, each payment is charged the published fee for its kind, never more than its approvers were shown.`
+        : `Fees would be paid to ${pr.recipient} instead of ${fee.feeRecipient}. It is ${MULTISIG_CHECKED} No payment pays a fee to anyone but this account, and the fee itself does not change.`,
+    });
+  }
+  const prevFee = previous.feeConfig;
+  if (prevFee && fee.objectVersion > prevFee.objectVersion) {
+    fee.schedules.forEach((s, kind) => {
+      const now = scheduleKey(s);
+      if (prevFee.schedules[kind] === undefined || prevFee.schedules[kind] === now) return;
+      alerts.push({
+        ...feeBase,
+        key: `fee_schedule_applied|${fee.id}|${kind}|${now}|${prevFee.objectVersion}`,
+        kind: 'fee_schedule_applied',
+        feeKind: kind,
+        activeUntilMs: nowMs + SHOW_EFFECT_MS,
+        summary: `Splash has changed its fee for ${FEE_WHERE[kind]}. The new schedule has taken effect.`,
+        detail: `Now: ${scheduleWords(s)}.${fee.feeRecipient === null ? ` ${FEES_OFF}` : ''} ${FEE_PROTECT}`,
+      });
+    });
+    if (fee.feeRecipient !== null && fee.feeRecipient !== prevFee.feeRecipient) {
+      const started = prevFee.feeRecipient === null;
+      alerts.push({
+        ...feeBase,
+        key: `fee_recipient_applied|${fee.id}|${fee.feeRecipient}|${prevFee.objectVersion}`,
+        kind: 'fee_recipient_applied',
+        feeRecipient: fee.feeRecipient,
+        activeUntilMs: nowMs + SHOW_EFFECT_MS,
+        summary: started
+          ? "Splash's fees have started. They are paid to the account announced 24 hours or more ago."
+          : 'Splash has changed the account its fees are paid to. The change has taken effect.',
+        detail: started
+          ? `Fees are paid to ${fee.feeRecipient}. Each payment is charged the published fee for its kind, never more than its approvers were shown.`
+          : `Fees are now paid to ${fee.feeRecipient} instead of ${prevFee.feeRecipient}.`,
+      });
+    }
+  }
+
   return {
     alerts,
     snapshots: {
@@ -563,6 +749,7 @@ export function deriveGovernanceAlerts(state: GovernanceState, previous: Governa
         registries: { 1: config.registries[1], 2: config.registries[2], 3: config.registries[3] },
         pendingKeys: configPending,
       },
+      feeConfig: { objectVersion: fee.objectVersion, schedules: fee.schedules.map(scheduleKey), feeRecipient: fee.feeRecipient, pendingKeys: feePending },
     },
   };
 }

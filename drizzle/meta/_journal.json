@@ -351,6 +351,13 @@
       "when": 1792800000000,
       "tag": "0049_zeke_session_notices",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1792886400000,
+      "tag": "0050_fee_governance_alerts",
+      "breakpoints": true
     }
   ]
 }

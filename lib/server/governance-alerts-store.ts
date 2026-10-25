@@ -44,6 +44,7 @@ import type * as schemaModule from '../db/schema.ts';
 import {
   PROPOSAL_KINDS,
   type ConfigSnapshot,
+  type FeeConfigSnapshot,
   type GovernanceAlert,
   type GovernanceAlertKind,
   type GovernanceBannerAlert,
@@ -140,6 +141,8 @@ export async function recordGovernanceAlert(
       registry: alert.registry,
       typeName: alert.typeName,
       newOwner: alert.newOwner,
+      feeKind: alert.feeKind,
+      feeRecipient: alert.feeRecipient,
       proposedAt: at(alert.proposedAtMs),
       etaAt: at(alert.etaMs),
       activeUntil: new Date(alert.activeUntilMs),
@@ -157,15 +160,16 @@ export async function recordGovernanceAlert(
 }
 
 /** The stored state of these objects, by id. */
-export async function readWatchStateForStaff(db: DrizzleDb, ids: { wrapperId: string; configId: string }): Promise<GovernanceSnapshots> {
+export async function readWatchStateForStaff(db: DrizzleDb, ids: { wrapperId: string; configId: string; feeConfigId: string }): Promise<GovernanceSnapshots> {
   const rows = await db
     .select({ subjectId: governanceWatchState.subjectId, snapshot: governanceWatchState.snapshot })
     .from(governanceWatchState)
-    .where(inArray(governanceWatchState.subjectId, [ids.wrapperId, ids.configId]));
+    .where(inArray(governanceWatchState.subjectId, [ids.wrapperId, ids.configId, ids.feeConfigId]));
   const by = new Map(rows.map((r: { subjectId: string; snapshot: unknown }) => [r.subjectId, r.snapshot]));
   return {
     wrapper: (by.get(ids.wrapperId) as WrapperSnapshot | undefined) ?? null,
     config: (by.get(ids.configId) as ConfigSnapshot | undefined) ?? null,
+    feeConfig: (by.get(ids.feeConfigId) as FeeConfigSnapshot | undefined) ?? null,
   };
 }
 
@@ -176,7 +180,7 @@ export async function readWatchStateForStaff(db: DrizzleDb, ids: { wrapperId: st
  */
 export async function saveWatchStateForStaff(
   db: DrizzleDb,
-  input: { subjectId: string; subjectKind: 'wrapper' | 'config'; snapshot: WrapperSnapshot | ConfigSnapshot; nowMs: number },
+  input: { subjectId: string; subjectKind: 'wrapper' | 'config' | 'fee_config'; snapshot: WrapperSnapshot | ConfigSnapshot | FeeConfigSnapshot; nowMs: number },
 ): Promise<boolean> {
   const now = new Date(input.nowMs);
   const saved = await db

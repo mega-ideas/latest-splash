@@ -766,11 +766,19 @@ owner. Only `AdminCap` lifts a compliance freeze.
   `FeeConfig`, its fee recipient for example; a rule payment is still bounded
   by `splash_spend`'s own 1% ceiling, and an owners' payment by its
   `max_fee`.
-- **Fee proposals reach no owner yet.** The governance alert cron reads the
-  upgrade wrapper and the `ComplianceConfig`, not `FeeConfig`. Owner alerts
-  for `FeeScheduleProposed`, `FeeRecipientProposed`, their application and
-  their withdrawal are Phase 2; until then a fee change's 24-hour notice is
-  public on chain only.
+- **Fee proposals reach every owner (Phase 2).** The governance alert cron
+  also reads the canonical `FeeConfig` (`SPLASH_FEE_CONFIG_ID`, typed
+  `<core original>::fee_config::FeeConfig`, shared), by its state, not the
+  event feed: each pending schedule slot (`FeeScheduleProposed`) and the
+  pending fee recipient (`FeeRecipientProposed`) is an alert to every owner
+  in the app, by email and on a verified WhatsApp number, with the proposed
+  schedule against the one in force, or the new recipient; a schedule or
+  recipient that took effect is told against the stored state. A withdrawn
+  or lapsed proposal stops being shown; the withdrawal itself is not a
+  separate message. A `FeeConfig` that is missing, of another type or not
+  shared answers 502 and pages a person. Discounts (`set_discount`) only
+  lower a fee and are not alerted. Without `SPLASH_FEE_CONFIG_ID` the cron
+  does not run at all.
 - **The fee is outside the principal's limits.** Tier ceilings and a
   policy's limits and threshold count the principal; Splash's fee, at most
   1%, comes on top. The allowance's caps count principal plus `max_fee`.

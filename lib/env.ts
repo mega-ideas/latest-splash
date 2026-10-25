@@ -231,10 +231,11 @@ export const envSchema = z.object({
    *  monitor. Unset: Mysten's public endpoint for SUI_NETWORK. */
   SUI_GRAPHQL_URL: url,
   /* v2 upgrade governance (brief 3.5). lib/server/governance-alert-monitor.ts
-     reads the on-chain state of the canonical upgrade wrapper and the
-     canonical compliance config (SPLASH_COMPLIANCE_CONFIG_ID), and tells every
-     business owner when a core upgrade, a new governance owner or a registry
-     addition is pending, and when one takes effect. It reads no event feed:
+     reads the on-chain state of the canonical upgrade wrapper, the canonical
+     compliance config (SPLASH_COMPLIANCE_CONFIG_ID) and the canonical fee
+     config (SPLASH_FEE_CONFIG_ID), and tells every business owner when a core
+     upgrade, a new governance owner, a registry addition, a fee schedule or a
+     fee recipient is pending, and when one takes effect. It reads no event feed:
      `wrap` is public, so anyone can emit an UpgradeProposed from a wrapper of
      their own. These ids name the two objects, whose Move types the monitor
      checks on chain. Read from the environment only, never from

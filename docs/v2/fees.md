@@ -325,11 +325,17 @@ each and whom `FeeConfig` pays.
   finance multisig with a monthly rate limit, at most one pull per calendar
   month, invoices and receipts, a grace period on a failed pull, and payments
   never blocked by billing.
-- **Owner alerts for fee proposals.** `/api/cron/governance-alerts` reads the
-  upgrade wrapper and the `ComplianceConfig` only; it does not read
-  `FeeConfig`. Phase 2 is to alert every owner on `FeeScheduleProposed` and
-  `FeeRecipientProposed`, on their application, and on their withdrawal
-  (`FeeScheduleProposalCancelled`, `FeeRecipientProposalCancelled`).
+- **Owner alerts for fee proposals: built (Phase 2).**
+  `/api/cron/governance-alerts` reads the canonical `FeeConfig`'s state
+  with the wrapper and the `ComplianceConfig` (one GraphQL query;
+  `lib/server/governance-events.ts`). Each pending schedule slot and the
+  pending fee recipient alerts every owner (in-app, email, verified
+  WhatsApp), with the proposed schedule against the one in force in words
+  rendered by `lib/fees/copy.ts`; an applied schedule or recipient is told
+  against the stored state, and the first recipient says the fees start. A
+  withdrawn or lapsed proposal stops being shown (as an upgrade's does); the
+  withdrawal is not a message of its own. Migration 0050. Tests:
+  `tests/fee-governance-alerts.test.mjs`.
 - **Near-threshold alerts**, read from `RuleSpend`. The second-approval
   threshold itself is enforced on chain today, over a running total
   (`docs/v2/phase1-move-design.md`, R5).
