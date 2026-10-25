@@ -109,7 +109,7 @@ function isUniqueViolation(error: unknown): boolean {
 
 export async function insertSigningRequest(
   db: DrizzleDb,
-  request: Omit<StoredRequest, 'status' | 'executedDigest' | 'error' | 'createdAt' | 'signers' | 'claimedAt'>,
+  request: Omit<StoredRequest, 'status' | 'executedDigest' | 'error' | 'createdAt' | 'signers' | 'claimedAt'> & { /** The request's own clock (the sponsor's 24-hour window reads it), not the database's. */ createdAt?: Date },
   signers: Array<Pick<StoredSigner, 'userId' | 'address' | 'publicKey' | 'weight'>>,
 ): Promise<void> {
   try {

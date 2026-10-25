@@ -585,6 +585,8 @@ export async function openSigningRequest(
     nextStep: input.nextStep ?? null,
     requestedBy: input.requestedBy,
     expiresAt: new Date(now.getTime() + ttl),
+    // The same clock as the sponsor's 24-hour window (sponsoredBudgetSince), not the database's default.
+    createdAt: now,
   } as const;
 
   try {
