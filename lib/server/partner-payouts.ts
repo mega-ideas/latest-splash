@@ -346,6 +346,7 @@ export async function createPartnerPayout(deps: PartnerPayoutDeps, userId: strin
     ready: r,
     amounts: a,
     debtor: profile.party,
+    debtorTransliterated: 'transliterated' in profile ? profile.transliterated : undefined,
     creditor,
     declaration,
   });

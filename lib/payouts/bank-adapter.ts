@@ -28,7 +28,7 @@ import { blake2b } from '@noble/hashes/blake2.js';
 import { assertPacs008Matches, Iso20022Error, localDecimals } from '../payments/iso20022.ts';
 import type { PartnerId } from '../partners/signed-partners.ts';
 import {
-  payoutSandboxWebhookSecret,
+  sandboxWebhookSecretFor,
   PayoutPartnerUnavailable,
   verifyPayoutWebhook,
   WebhookRejected,
@@ -145,7 +145,7 @@ export function sandboxBankAdapter(spec: SandboxBankSpec): PayoutPartner {
       return { status: 'instructed', sandbox: true };
     },
     handleWebhook({ rawBody, signature, now }) {
-      return verifyPayoutWebhook(rawBody, signature, payoutSandboxWebhookSecret(spec.env), now);
+      return verifyPayoutWebhook(rawBody, signature, sandboxWebhookSecretFor(spec.env, facts.id), now);
     },
     async returnOrReverse() {
       return { accepted: true, sandbox: true };

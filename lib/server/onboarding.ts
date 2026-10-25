@@ -8,6 +8,7 @@ import { canMoveMoney, kybGateReason, type KybLifecycleState } from '@/lib/compl
 import { organizations, orgSettings, suppliers, termsAcceptances } from '@/lib/db/schema';
 import { TERMS_VERSION } from '@/content/legal';
 import type { PayoutPartner, PayoutPartnerId } from '@/lib/payouts/partner';
+import { Iso20022Error, normalizeAddress } from '@/lib/payments/iso20022';
 import type { DrizzleDb } from '@/lib/server/wallet-signing-store';
 
 /**
@@ -216,7 +217,21 @@ export async function setIntent(
 
 export type ProfileResult =
   | { ok: true; legalNameChanged: boolean; destinationsRevoked: number }
-  | { ok: false; status: number; code: 'owner_only' | 'legal_name_locked' | 'no_org'; error: string };
+  | { ok: false; status: number; code: 'owner_only' | 'legal_name_locked' | 'no_org' | 'bad_address'; error: string; field?: string };
+
+/**
+ * The business's registered address, in its parts (ISO 20022 structured,
+ * lib/payments/iso20022.ts): the originator of every supplier payout carries
+ * it (the travel rule), so a payout is refused until it is on file. The
+ * country is the profile's `addressCountry`.
+ */
+export type RegisteredAddress = {
+  streetName?: string;
+  buildingName?: string;
+  postCode?: string;
+  townName: string;
+  countrySubDivision?: string;
+};
 
 /** KYB states in which the legal name is still the business's own to correct. */
 const NAME_EDITABLE: ReadonlySet<string> = new Set(['REGISTERED', 'REJECTED']);
@@ -234,10 +249,25 @@ const NAME_EDITABLE: ReadonlySet<string> = new Set(['REGISTERED', 'REJECTED']);
 export async function saveBusinessProfileFor(
   d: Db,
   ctx: { orgId: string; userId: string; role: string },
-  profile: { legalName: string; registrationNumber: string; addressCountry: string },
+  profile: { legalName: string; registrationNumber: string; addressCountry: string; address?: RegisteredAddress },
   opts: { now?: Date; partner?: (id: PayoutPartnerId) => PayoutPartner } = {},
 ): Promise<ProfileResult> {
   if (ctx.role !== 'OWNER') return { ok: false, status: 403, code: 'owner_only', error: "Only an owner can change the business's registered details." };
+  // The structured address is checked as the payout message will read it (a
+  // town and a country at least, each part within its length). Accented
+  // letters are kept as typed and transliterated only in the message.
+  let address: RegisteredAddress | null = null;
+  if (profile.address) {
+    const raw = { ...profile.address, country: profile.addressCountry };
+    try {
+      normalizeAddress(raw, 'address', { changed: [] });
+    } catch (error) {
+      if (error instanceof Iso20022Error) return { ok: false, status: 400, code: 'bad_address', error: error.message, field: error.field };
+      throw error;
+    }
+    const t = (v: string | undefined) => (typeof v === 'string' && v.replace(/\s+/g, ' ').trim() ? v.replace(/\s+/g, ' ').trim() : undefined);
+    address = { streetName: t(profile.address.streetName), buildingName: t(profile.address.buildingName), postCode: t(profile.address.postCode), townName: t(profile.address.townName) as string, countrySubDivision: t(profile.address.countrySubDivision) };
+  }
   const [org] = await d
     .select({ legalName: organizations.legalName, kybLifecycle: organizations.kybLifecycle })
     .from(organizations)
@@ -256,6 +286,15 @@ export async function saveBusinessProfileFor(
       legalName: next,
       registrationNumber: profile.registrationNumber,
       addressCountry: profile.addressCountry.toUpperCase(),
+      ...(address
+        ? {
+            addressLine1: address.streetName ?? null,
+            addressLine2: address.buildingName ?? null,
+            addressCity: address.townName,
+            addressState: address.countrySubDivision ?? null,
+            addressPostalCode: address.postCode ?? null,
+          }
+        : {}),
     })
     .where(eq(organizations.id, ctx.orgId));
   let destinationsRevoked = 0;
@@ -269,7 +308,7 @@ export async function saveBusinessProfileFor(
 
 export async function saveBusinessProfile(
   session: CustomerSession,
-  profile: { legalName: string; registrationNumber: string; addressCountry: string },
+  profile: { legalName: string; registrationNumber: string; addressCountry: string; address?: RegisteredAddress },
 ): Promise<ProfileResult> {
   const ctx = await resolveAuthorityForSession(session);
   const { payoutPartner } = await import('@/lib/payouts/registry');

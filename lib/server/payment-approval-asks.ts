@@ -25,6 +25,11 @@
  *
  * One open ask per payment (per intent, or per draft's payment reference).
  *
+ * Not here: a bank payout (kind 4), or any payment to one of the business's
+ * partner deposit addresses (`use_payout_route`). Those go through the
+ * withdrawal or supplier payout route, which sends the partner its
+ * instruction before the deposit (§4.4, §4.5); staff ask for one there.
+ *
  *   accept    An OWNER turns the ask into a signing request:
  *               wallet_pays     the quorum pays it from the business wallet
  *                               (a draft: requestWalletPayment; an intent:
@@ -282,6 +287,8 @@ export async function askOwnersToApprove(
   if (input.draft) {
     const shown = readDraft(input.draft, now);
     if ('ok' in shown) return shown;
+    const routed = await routedElsewhere(deps.db, input.orgId, shown);
+    if (routed) return routed;
     shown.checks = await draftChecks(deps.policy, shown, input.requesterAddresses);
     return storeAsk(deps.db, deps.notify, { orgId: input.orgId, userId: input.userId, shown, note, contentHash, blob, now });
   }
@@ -306,6 +313,8 @@ export async function askOwnersToApprove(
   if (intent.expiresAtMs <= BigInt(now.getTime())) return fail(409, 'intent_expired', 'this payment has expired');
   if (normalizeStructTag(intent.asset) !== normalizeStructTag(deps.ctx.chain.usdcType)) return fail(400, 'wrong_asset', 'a payment may move USDC only');
   if (intent.kind === V2_KIND.CROSS_CHAIN) return fail(400, 'cross_chain_not_built', 'a cross-chain payment is paid through a bridge adapter, which is not registered yet');
+  const routed = await routedElsewhere(deps.db, input.orgId, { kind: intent.kind, recipient: intent.recipient });
+  if (routed) return routed;
 
   const shown: AskIntent = {
     source: 'intent',
@@ -319,6 +328,18 @@ export async function askOwnersToApprove(
     expiresAtMs: intent.expiresAtMs.toString(),
   };
   return storeAsk(deps.db, deps.notify, { orgId: input.orgId, userId: input.userId, shown, note, contentHash, blob, now });
+}
+
+/**
+ * A bank payout, or a payment to one of the business's partner deposit
+ * addresses, is opened only by the withdrawal or supplier payout route, which
+ * instructs the partner first (Sky's §4.5 decision). Staff ask for one there
+ * (POST /api/wallet/payouts), never with a draft or an open intent here.
+ */
+async function routedElsewhere(db: DrizzleDb, orgId: string, payment: { kind: number; recipient: string }): Promise<AskFailure | null> {
+  const { payoutRouteOnly } = await import('./business-wallet.ts');
+  const r = await payoutRouteOnly(db, orgId, payment);
+  return r ? fail(r.status, r.code, r.error) : null;
 }
 
 /**
@@ -430,6 +451,10 @@ export async function acceptApprovalAsk(
   if (input.mode === 'wallet_pays' && !input.wallet) return fail(409, 'no_wallet', 'register the business wallet first');
   if (input.mode === 'second_approval' && isDraft) return fail(409, 'no_intent', 'a second approval is for a payment already opened under a rule; pay this one from the business wallet');
   if (input.mode === 'second_approval' && !deps.secondApproval) return fail(503, 'no_spending_rules', 'spending rules are not set up for this business');
+  // An ask stored before the payout-route check (or a deposit address
+  // requested since) is refused here too, before anything is claimed or built.
+  const routed = await routedElsewhere(deps.db, input.orgId, current.intent);
+  if (routed) return routed;
 
   // Claim the ask before building anything: of two owners accepting at once,
   // one wins. The claim is compare-and-swap on the state just read.

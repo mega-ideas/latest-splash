@@ -136,7 +136,7 @@ export type WithdrawalDeps = {
    * supplier payout needs it complete (the travel rule's originator half);
    * a withdrawal uses what there is, and at least the registered name.
    */
-  debtorParty?: () => Promise<{ party: Iso20022Party | null; missing: string[] }>;
+  debtorParty?: () => Promise<{ party: Iso20022Party | null; missing: string[]; transliterated?: string[] }>;
 };
 
 export type Refusal = { ok: false; status: number; code: string; error: string; [k: string]: unknown };
@@ -784,7 +784,9 @@ export async function createWithdrawal(deps: WithdrawalDeps, userId: string, inp
   if ('ok' in r) return r;
   // The business moving its own money: the creditor is the business, at its own address when the profile has one.
   const company = (await deps.companyName()) as string;
-  const profile = deps.debtorParty ? await deps.debtorParty() : { party: null, missing: [] };
+  const profile = deps.debtorParty ? await deps.debtorParty() : { party: null, missing: [] as string[], transliterated: [] as string[] };
+  // An incomplete profile never blocks a withdrawal: the debtor is then the
+  // registered name alone, transliterated in the message if it must be.
   const debtor: Iso20022Party = profile.party ?? { name: company };
   const creditor: Iso20022Party = { name: r.destination.holderName, ...(profile.party?.address ? { address: profile.party.address } : {}), ...(profile.party?.registrationNumber ? { registrationNumber: profile.party.registrationNumber, registrationScheme: profile.party.registrationScheme } : {}) };
   const opened = await openBankPayout(deps, userId, {
@@ -794,6 +796,7 @@ export async function createWithdrawal(deps: WithdrawalDeps, userId: string, inp
     ready: r,
     amounts: a,
     debtor,
+    debtorTransliterated: profile.party ? profile.transliterated : undefined,
     creditor,
     declaration: { purposeCode: 'INTC', relationship: 'self' },
   });
@@ -819,6 +822,8 @@ export async function openBankPayout(
     ready: Ready;
     amounts: BankPayoutAmounts;
     debtor: Iso20022Party;
+    /** Fields of the debtor's KYB text transliterated when it was read (debtorFromProfile). */
+    debtorTransliterated?: string[];
     creditor: Iso20022Party;
     declaration: PaymentDeclaration;
   },
@@ -898,6 +903,7 @@ export async function openBankPayout(
       creditor: p.creditor,
       declaration: p.declaration,
       charges: q.lines,
+      transliterated: p.debtorTransliterated,
     });
   } catch (error) {
     if (error instanceof Iso20022Error) return refuse(400, error.code, error.message, { field: error.field });
@@ -941,6 +947,12 @@ export async function openBankPayout(
     return { ok: true, created: false, payout: await withdrawalView(deps, winner), request: null };
   }
   await store.recordWithdrawalEvent(deps.db, { orgId: deps.orgId, subject: 'withdrawal', subjectId: id, actor: userId, action: 'created', detail: { kind: p.kind, intentId, amountMinor: amount.toString(), last4: r.destination.last4 }, at: now });
+  const transliterated = iso.CdtTrfTxInf.SplmtryData.transliterated ?? [];
+  if (transliterated.length) {
+    // The business's own name or address had characters outside the CBPR+
+    // set: the message carries a transliteration, and the trail says which fields.
+    await store.recordWithdrawalEvent(deps.db, { orgId: deps.orgId, subject: 'withdrawal', subjectId: id, actor: 'system', action: 'iso20022_transliterated', detail: { fields: transliterated }, at: now });
+  }
 
   // 1. The instruction, before any money moves.
   let partnerRef: string;
@@ -961,6 +973,9 @@ export async function openBankPayout(
       depositAddress,
       returnAddress: r.wallet.address,
       purposeCode: p.declaration.purposeCode,
+      rateMicro: q.rateMicro,
+      debtor: p.debtor,
+      charges: q.lines,
       iso20022: iso,
       now,
     });

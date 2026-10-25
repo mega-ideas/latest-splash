@@ -38,6 +38,13 @@ export function sandboxNetworkRefusal(env: NodeJS.ProcessEnv = process.env): str
   return null;
 }
 
+/** The bank route that pays a local currency, or null when none does (PHP pdax, IDR durianpay, MYR hata_fiuu). */
+const BANK_ROUTE_BY_CURRENCY: Record<string, PayoutPartnerId> = { PHP: 'pdax', IDR: 'durianpay', MYR: 'hata_fiuu' };
+
+export function bankPartnerForCurrency(currency: string): PayoutPartnerId | null {
+  return BANK_ROUTE_BY_CURRENCY[String(currency ?? '').trim().toUpperCase()] ?? null;
+}
+
 export function payoutPartner(id: PayoutPartnerId, env: NodeJS.ProcessEnv = process.env): PayoutPartner {
   if (!payoutPartnerEnabled(id, env)) throw new PayoutPartnerUnavailable('This payout route is switched off on this server.', 'partner_disabled');
   const production = isProductionRuntime(env);

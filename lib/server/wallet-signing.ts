@@ -228,6 +228,9 @@ export function assertPurposeShape(purpose: SigningPurpose, d: WalletTxDescripti
         const p = d.actions[2] as Extract<WalletAction, { type: 'pay_intent' }>;
         if (BigInt(w.amountMinor) !== BigInt(o.amountMinor) + BigInt(p.maxFeeMinor)) bad('the withdrawal is not the amount plus the maximum fee');
         if (BigInt(p.settleByMs) > BigInt(o.expiresAtMs)) bad('the quote outlives the intent');
+        // §4.5: a bank payout is a withdrawal or a partner payout, whose
+        // instruction reaches the partner first; never a plain wallet payment.
+        if (o.kind === 4) bad('it is a bank payout, opened only as a withdrawal or a supplier payout');
         return;
       }
       if (shape === 'withdraw,pay_intent,anchor_receipt') {
@@ -240,6 +243,7 @@ export function assertPurposeShape(purpose: SigningPurpose, d: WalletTxDescripti
         const intent = p.intent as OpenIntentExpectation;
         if (BigInt(w.amountMinor) !== BigInt(intent.amountMinor) + BigInt(p.maxFeeMinor)) bad('the withdrawal is not the amount plus the maximum fee');
         if (BigInt(p.settleByMs) > BigInt(intent.expiresAtMs)) bad('the quote outlives the intent');
+        if (intent.kind === 4) bad('it is a bank payout, opened only as a withdrawal or a supplier payout');
         return;
       }
       bad(shape);

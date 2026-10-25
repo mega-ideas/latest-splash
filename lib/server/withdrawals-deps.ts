@@ -104,6 +104,7 @@ export function withdrawalDepsFor(route: WalletRoute, env: NodeJS.ProcessEnv = p
           kybStatus: organizations.kybStatus,
           registrationNumber: organizations.registrationNumber,
           addressLine1: organizations.addressLine1,
+          addressLine2: organizations.addressLine2,
           addressCity: organizations.addressCity,
           addressState: organizations.addressState,
           addressPostalCode: organizations.addressPostalCode,

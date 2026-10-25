@@ -406,7 +406,7 @@ test('a bank beneficiary is bound only to a partner deposit address this busines
   // bank accounts, bound to the deposit address of that account's own partner.
   const notOurs = await bind();
   assert.equal(notOurs.code, 'beneficiary_not_a_destination', 'any 32 bytes is no beneficiary');
-  const dest = (id, orgId, partner, ref) => ({ id, orgId, partner, country: partner === 'pdax' ? 'PH' : 'MY', currency: partner === 'pdax' ? 'PHP' : 'MYR', bankCode: 'BANKXXXX', holderName: 'X Co', bankHolderName: 'X Co', nameCheckRef: 'chk', fingerprint: `fp_${id}`, last4: '1234', accountSealed: 's', beneficiarySaltSealed: 's', beneficiaryRef: ref, label: 'x', kind: 'supplier', status: 'verified', verifiedAt: T0, verifiedBy: 'u-founder', createdBy: 'u-founder', createdAt: T0, updatedAt: T0 });
+  const dest = (id, orgId, partner, ref) => ({ id, orgId, partner, country: partner === 'pdax' ? 'PH' : 'MY', currency: partner === 'pdax' ? 'PHP' : 'MYR', bankCode: 'BANKXXXX', holderName: 'X Co', bankHolderName: 'X Co', nameCheckRef: 'chk', fingerprint: `fp_${id}`, last4: '1234', accountSealed: 's', beneficiarySaltSealed: 's', beneficiaryRef: ref, label: 'x', kind: 'supplier', partySealed: 's', relationship: 'supplier', status: 'verified', verifiedAt: T0, verifiedBy: 'u-founder', createdBy: 'u-founder', createdAt: T0, updatedAt: T0 });
   await w.db.insert(schema.withdrawalDestinations).values(dest('wdd_north', 'northwind', 'hata_fiuu', '3a'.repeat(32)));
   assert.equal((await bind()).code, 'beneficiary_not_a_destination', "another business's account is not this one's");
   await w.db.insert(schema.withdrawalDestinations).values(dest('wdd_ph', 'acme', 'pdax', '3b'.repeat(32)));

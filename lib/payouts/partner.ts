@@ -38,8 +38,10 @@
  *            ever fabricated. No sandbox answer is reachable in production.
  */
 
+import { createHmac } from 'node:crypto';
+
 import type { PartnerId } from '../partners/signed-partners.ts';
-import type { Pacs008, PurposeCode } from '../payments/iso20022.ts';
+import type { Iso20022Party, Pacs008, PurposeCode } from '../payments/iso20022.ts';
 import { verifySignedWebhook, WebhookRejected } from '../funding/providers.ts';
 
 export { WebhookRejected };
@@ -154,6 +156,12 @@ export type BankPayoutInstruction = InstructionCommon & {
   beneficiarySalt: string;
   /** The partner deposit address it goes to. */
   depositAddress: string;
+  /** The quoted rate, local currency per USDC, in millionths (the message's XchgRate). */
+  rateMicro: bigint;
+  /** The paying business, as the message's Dbtr names it (the travel rule's originator half). */
+  debtor: Iso20022Party;
+  /** The partner's own fee lines from its quote (the message's ChrgsInf). */
+  charges: PartnerFeeLine[];
   iso20022: Pacs008;
 };
 
@@ -342,4 +350,17 @@ export function payoutSandboxWebhookSecret(env: NodeJS.ProcessEnv = process.env)
   if ((env.PAYOUT_SANDBOX_WEBHOOKS_ENABLED ?? '').trim().toLowerCase() !== 'true') return '';
   const secret = (env.PAYOUT_SANDBOX_WEBHOOK_SECRET ?? '').trim();
   return secret.length >= PAYOUT_SANDBOX_SECRET_MIN_LENGTH ? secret : '';
+}
+
+/**
+ * One sandbox route's own webhook secret, derived from the configured one:
+ * HMAC-SHA256(secret, "splash:payout-sandbox-webhook:v1:<partner>"), hex. A
+ * body signed for one route does not verify at another, as with the live
+ * routes' own secrets (PDAX_WEBHOOK_SECRET, DURIANPAY_WEBHOOK_SECRET,
+ * HATA_WEBHOOK_SECRET). '' when no sandbox webhook is accepted.
+ */
+export function sandboxWebhookSecretFor(env: NodeJS.ProcessEnv, partner: PayoutPartnerId): string {
+  const secret = payoutSandboxWebhookSecret(env);
+  if (!secret) return '';
+  return createHmac('sha256', secret).update(`splash:payout-sandbox-webhook:v1:${partner}`).digest('hex');
 }

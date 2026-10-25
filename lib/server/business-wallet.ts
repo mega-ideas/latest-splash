@@ -567,6 +567,27 @@ export async function fundsOnHold(ctx: WalletContext, wallet: string, needMinor:
 }
 
 /**
+ * Sky's decision (§4.5): the payout instruction goes to the partner by API
+ * BEFORE the deposit, keyed by the intent id and the expected amount. So a
+ * bank payout (kind 4), and any payment to one of the business's partner
+ * deposit addresses, is opened only by the withdrawal or supplier payout
+ * route (lib/server/withdrawals.ts openBankPayout), never as a plain wallet
+ * payment, a staff draft or an open intent the owners pay. Null lets it through.
+ */
+export async function payoutRouteOnly(db: DrizzleDb, orgId: string, payment: { kind: number; recipient: string }): Promise<PlanFailure | null> {
+  const why = (error: string) => refuse(409, 'use_payout_route', error);
+  if (payment.kind === V2_KIND.BANK_PAYOUT) {
+    return why('a bank payout is opened only as a withdrawal or a supplier payout, so the partner is told before the money moves');
+  }
+  const { partnerDepositAddressesOf } = await import('./withdrawals-store.ts');
+  const deposits = new Set((await partnerDepositAddressesOf(db, orgId)).map((a) => normalizeSuiAddress(a)));
+  if (deposits.has(normalizeSuiAddress(payment.recipient))) {
+    return why("this is the business's deposit address with a payout partner: pay it as a withdrawal or a supplier payout, so the partner is told before the money moves");
+  }
+  return null;
+}
+
+/**
  * A payment from the business wallet, signed by its quorum. With
  * `withdrawal`, it is a withdrawal to the business's own bank (v2 §4.4): the
  * request is opened as purpose `withdrawal`, and the bytes must be a bank
@@ -600,6 +621,12 @@ export async function requestWalletPayment(
   if (onHold) return onHold;
   const gas = await sponsoredGas(ctx);
   if (!gas) return refuse(503, 'no_sponsor', 'business wallet transactions need a gas sponsor, and none is configured');
+  if (!input.withdrawal) {
+    // Before anything is built or stored: a bank payout, or a payment to a
+    // partner deposit address, goes only through the payout route.
+    const routed = await payoutRouteOnly(ctx.signing.db, input.orgId, input.payment);
+    if (routed) return routed;
+  }
   let bytes: Uint8Array;
   try {
     bytes = await payFromWalletTx(ctx.chain, { ...input.payment, wallet: registration(input.wallet).address, account: ctx.account, gas });
@@ -714,6 +741,8 @@ export async function requestOpenIntentPayment(
   if (intent.kind === V2_KIND.CROSS_CHAIN) {
     return refuse(400, 'cross_chain_not_built', 'a cross-chain payment is paid through a bridge adapter, which is not registered yet');
   }
+  const routed = await payoutRouteOnly(ctx.signing.db, input.orgId, { kind: intent.kind, recipient: intent.recipient });
+  if (routed) return routed;
   const onHold = await fundsOnHold(ctx, registration(input.wallet).address, intent.amountMinor + input.maxFeeMinor);
   if (onHold) return onHold;
   const gas = await sponsoredGas(ctx);

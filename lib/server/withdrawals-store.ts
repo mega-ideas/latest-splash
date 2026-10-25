@@ -130,6 +130,29 @@ export async function depositAddressByTestRequest(db: DrizzleDb, orgId: string, 
   return row ?? null;
 }
 
+/**
+ * Every partner deposit address this business holds that is not revoked,
+ * verified or still waiting for its test deposit. Money to any of them goes
+ * only through the withdrawal or supplier payout route (the instruction to
+ * the partner first, v2 §4.4/§4.5), never as a plain wallet payment.
+ */
+export async function partnerDepositAddressesOf(db: DrizzleDb, orgId: string): Promise<string[]> {
+  const rows = await db
+    .select({ address: partnerDepositAddresses.address })
+    .from(partnerDepositAddresses)
+    .where(and(eq(partnerDepositAddresses.orgId, orgId), sql`${partnerDepositAddresses.status} <> 'revoked'`));
+  return rows.map((r) => r.address);
+}
+
+/** This business's verified deposit address with each partner. */
+export async function verifiedDepositAddressesByPartner(db: DrizzleDb, orgId: string): Promise<Map<string, string>> {
+  const rows = await db
+    .select({ partner: partnerDepositAddresses.partner, address: partnerDepositAddresses.address })
+    .from(partnerDepositAddresses)
+    .where(and(eq(partnerDepositAddresses.orgId, orgId), eq(partnerDepositAddresses.status, 'verified')));
+  return new Map(rows.map((r) => [r.partner, r.address]));
+}
+
 /** This business's partner deposit addresses that passed their test deposit. */
 export async function verifiedDepositAddresses(db: DrizzleDb, orgId: string): Promise<string[]> {
   const rows = await db

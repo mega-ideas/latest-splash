@@ -64,6 +64,12 @@ export function requireWithdrawalRequester(route: WalletRoute): Response | null 
   return NextResponse.json({ error: 'Only an owner or a staff member can ask for a withdrawal.' }, { status: 403, headers: NO_STORE });
 }
 
+/** Supplier payouts and suppliers' accounts are read by the owners and the staff who pay; a viewer does not see them. */
+export function requirePayoutReader(route: WalletRoute): Response | null {
+  if (canAskForWithdrawal(route.authority.role)) return null;
+  return NextResponse.json({ error: "Only an owner or a staff member can see the business's payouts and suppliers." }, { status: 403, headers: NO_STORE });
+}
+
 export function requireOwner(route: WalletRoute, what: string): Response | null {
   if (route.authority.role === 'OWNER') return null;
   return NextResponse.json({ error: `Only an owner can ${what}.` }, { status: 403, headers: NO_STORE });

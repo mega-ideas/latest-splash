@@ -134,11 +134,51 @@ export type Iso20022Party = {
 };
 
 /**
- * The CBPR+ character set: Latin letters, digits, space and . , ' + - / ? : ( ).
- * Anything else (another script, an emoji, a control character) is refused,
- * not transliterated: the name a bank checks must be the one typed.
+ * The CBPR+ character set: Latin letters, digits, space and . , ' + - / ? : ( ),
+ * plus the members of the CBPR+ extended set a business name or address
+ * really uses: & # @ ! % * = _ ; (common in company names, and in MY and SG
+ * unit numbers such as "#12-03"). An adapter that writes XML escapes & with
+ * escapeXmlText; the JSON message carries it as is.
+ *
+ * Anything else (an accented letter, another script, an emoji, a control
+ * character) is refused where the name is one a bank checks: a supplier's
+ * holder name, refused when the supplier is added, before any name check.
+ * Where the text is the business's own (the debtor, and the creditor of a
+ * withdrawal) it is transliterated instead (lenient mode), and the message
+ * lists the fields it changed (SplmtryData.transliterated): no payout is
+ * blocked on how the business's own name is spelled.
  */
-const LATIN = /^[A-Za-z0-9 .,'+\-/?:()]+$/;
+const LATIN = /^[A-Za-z0-9 .,'+\-/?:()&#@!%*=_;]+$/;
+const NOT_LATIN = /[^A-Za-z0-9 .,'+\-/?:()&#@!%*=_;]/g;
+
+/** Letters (and typographic marks) NFKD does not turn into a base letter and a mark. */
+const SPECIAL_LETTERS: Record<string, string> = {
+  'ß': 'ss', 'Æ': 'AE', 'æ': 'ae', 'Ø': 'O', 'ø': 'o', 'Œ': 'OE', 'œ': 'oe', 'Đ': 'D', 'đ': 'd', 'Ł': 'L', 'ł': 'l', 'Þ': 'TH', 'þ': 'th', 'ı': 'i',
+  '‘': "'", '’': "'", '“': "'", '”': "'", '–': '-', '—': '-',
+};
+const SPECIAL_RE = new RegExp(`[${Object.keys(SPECIAL_LETTERS).join('')}]`, 'g');
+
+/**
+ * Latin text with its accents removed ("Cafe" for "Café"), and anything still
+ * outside the CBPR+ set replaced by a space. Another script comes out empty.
+ */
+export function transliterate(value: string): string {
+  return value
+    .replace(SPECIAL_RE, (c) => SPECIAL_LETTERS[c] ?? ' ')
+    .normalize('NFKD')
+    .replace(/\p{M}+/gu, '')
+    .replace(NOT_LATIN, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Text for an XML element, with & < > escaped. The JSON message is not escaped; an adapter that writes XML uses this. */
+export function escapeXmlText(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/** Lenient mode: transliterate instead of refusing, and record which fields were changed or left out. */
+type TextMode = { changed: string[] };
 
 const ADDRESS_LIMITS: Record<keyof StructuredAddress, number> = {
   streetName: 70,
@@ -155,16 +195,29 @@ const ADDRESS_LIMITS: Record<keyof StructuredAddress, number> = {
   country: 2,
 };
 
-function text(value: unknown, field: string, max: number, required: boolean): string | undefined {
-  const v = typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : value === undefined || value === null ? '' : null;
+function text(value: unknown, field: string, max: number, required: boolean, mode?: TextMode): string | undefined {
+  let v = typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : value === undefined || value === null ? '' : null;
   if (v === null) throw new Iso20022Error(`${field} must be text.`, field);
+  if (v && !LATIN.test(v)) {
+    if (!mode) throw new Iso20022Error(`${field} may use Latin letters without accents, digits, spaces and . , ' + - / ? : ( ) & # @ ! % * = _ ; only.`, field);
+    v = transliterate(v);
+    mode.changed.push(field);
+  }
   if (!v) {
     if (required) throw new Iso20022Error(`${field} is required.`, field, 'iso20022_missing');
     return undefined;
   }
-  if (v.length > max) throw new Iso20022Error(`${field} is longer than ${max} characters.`, field);
-  if (!LATIN.test(v)) throw new Iso20022Error(`${field} may use Latin letters, digits, spaces and . , ' + - / ? : ( ) only.`, field);
+  if (v.length > max) {
+    if (!mode) throw new Iso20022Error(`${field} is longer than ${max} characters.`, field);
+    v = v.slice(0, max).trim();
+    mode.changed.push(field);
+  }
   return v;
+}
+
+/** Whether a holder name is in the character set a bank-checked name must use (checked when an account is added). */
+export function isCbprText(value: string): boolean {
+  return LATIN.test(value.replace(/\s+/g, ' ').trim());
 }
 
 function country(value: unknown, field: string): string {
@@ -173,31 +226,49 @@ function country(value: unknown, field: string): string {
   return v;
 }
 
-export function normalizeAddress(input: unknown, field = 'address'): StructuredAddress {
+export function normalizeAddress(input: unknown, field = 'address', mode?: TextMode): StructuredAddress {
   if (!input || typeof input !== 'object') throw new Iso20022Error('A structured address (at least a town and a country) is required.', field, 'iso20022_missing');
   const a = input as Record<string, unknown>;
   if ('addressLine' in a || 'adrLine' in a || 'AdrLine' in a) {
     throw new Iso20022Error('Give the address in its parts (street, building, post code, town, country), not as free lines.', field);
   }
-  const out: StructuredAddress = { townName: text(a.townName, `${field}.townName`, ADDRESS_LIMITS.townName, true) as string, country: country(a.country, `${field}.country`) };
+  const out: StructuredAddress = { townName: text(a.townName, `${field}.townName`, ADDRESS_LIMITS.townName, true, mode) as string, country: country(a.country, `${field}.country`) };
   for (const key of Object.keys(ADDRESS_LIMITS) as Array<keyof StructuredAddress>) {
     if (key === 'townName' || key === 'country') continue;
-    const v = text(a[key], `${field}.${key}`, ADDRESS_LIMITS[key], false);
+    const v = text(a[key], `${field}.${key}`, ADDRESS_LIMITS[key], false, mode);
     if (v) out[key] = v;
   }
   return out;
 }
 
-export function normalizeParty(input: unknown, opts: { field?: string; requireAddress?: boolean; requireRegistration?: boolean } = {}): Iso20022Party {
+/**
+ * A party from the form. With `lenient` (the business's own text: the debtor,
+ * a withdrawal's creditor) nothing in it refuses a payout that can still be
+ * described: the name and address are transliterated, an optional address or
+ * registration that still cannot be read is left out, and every field changed
+ * or left out is pushed onto `lenient.changed`.
+ */
+export function normalizeParty(input: unknown, opts: { field?: string; requireAddress?: boolean; requireRegistration?: boolean; lenient?: TextMode } = {}): Iso20022Party {
   const field = opts.field ?? 'party';
+  const mode = opts.lenient;
   if (!input || typeof input !== 'object') throw new Iso20022Error(`${field} is required.`, field, 'iso20022_missing');
   const p = input as Record<string, unknown>;
-  const name = text(p.name, `${field}.name`, 140, true) as string;
+  const name = text(p.name, `${field}.name`, 140, true, mode) as string;
   if (name.length < 2) throw new Iso20022Error(`${field}.name is too short.`, `${field}.name`);
   const out: Iso20022Party = { name };
-  if (p.address !== undefined && p.address !== null) out.address = normalizeAddress(p.address, `${field}.address`);
-  else if (opts.requireAddress) throw new Iso20022Error(`${field} needs a structured address (at least a town and a country).`, `${field}.address`, 'iso20022_missing');
+  if (p.address !== undefined && p.address !== null) {
+    try {
+      out.address = normalizeAddress(p.address, `${field}.address`, mode);
+    } catch (error) {
+      if (!mode || opts.requireAddress || !(error instanceof Iso20022Error)) throw error;
+      mode.changed.push(`${field}.address`);
+    }
+  } else if (opts.requireAddress) throw new Iso20022Error(`${field} needs a structured address (at least a town and a country).`, `${field}.address`, 'iso20022_missing');
   const reg = typeof p.registrationNumber === 'string' ? p.registrationNumber.replace(/\s+/g, '').toUpperCase() : '';
+  if (reg && mode && !opts.requireRegistration && !/^[A-Z0-9\-/.]{2,35}$/.test(reg)) {
+    mode.changed.push(`${field}.registrationNumber`);
+    return out;
+  }
   if (reg) {
     if (!/^[A-Z0-9\-/.]{2,35}$/.test(reg)) throw new Iso20022Error(`${field}.registrationNumber is not a registration number.`, `${field}.registrationNumber`);
     const scheme = p.registrationScheme === undefined || p.registrationScheme === null || p.registrationScheme === '' ? 'CINC' : p.registrationScheme;
@@ -257,6 +328,8 @@ export type Pacs008 = {
       sourceWallet: string;
       depositAddress: string;
       beneficiaryRef: string;
+      /** The fields of the business's own text that were transliterated or left out (lenient mode); absent when none were. */
+      transliterated?: string[];
     };
   };
 };
@@ -369,6 +442,8 @@ export type Pacs008Input = {
   declaration: PaymentDeclaration;
   /** The partner's fee lines from its quote, in the local currency's minor units. */
   charges?: Array<{ label: string; currency: string; amountMinor: bigint }>;
+  /** Fields already transliterated upstream (debtorFromProfile), listed in the message with any changed here. */
+  transliterated?: string[];
 };
 
 /**
@@ -382,10 +457,15 @@ export function pacs008ForInstruction(input: Pacs008Input): Pacs008 {
   // business paying its own account is the creditor, and its address is the
   // KYB file's, given when the profile has it.
   const thirdParty = input.declaration?.relationship !== 'self';
-  const debtor = normalizeParty(input.debtor, { field: 'debtor' });
-  const creditor = normalizeParty(input.creditor, { field: 'creditor', requireAddress: thirdParty });
+  // The debtor is always the paying business's own KYB text, and so is the
+  // creditor of a withdrawal: transliterated, never a refusal. A supplier's
+  // name is the one its bank checks, validated when the supplier was added.
+  const changed: string[] = [...(input.transliterated ?? [])];
+  const own: TextMode | undefined = thirdParty ? undefined : { changed };
+  const debtor = normalizeParty(input.debtor, { field: 'debtor', lenient: { changed } });
+  const creditor = normalizeParty(input.creditor, { field: 'creditor', requireAddress: thirdParty, lenient: own });
   const declaration = normalizeDeclaration(input.declaration, { thirdParty });
-  const holder = text(input.beneficiary.holderName, 'beneficiary.holderName', 140, true) as string;
+  const holder = text(input.beneficiary.holderName, 'beneficiary.holderName', 140, true, own) as string;
   if (fold(holder) !== fold(creditor.name)) throw new Iso20022Error('The creditor is not the account holder.', 'creditor.name', 'iso20022_mismatch');
   // The bank's country decides the route; the creditor's address may be elsewhere.
   const bankCountry = country(input.beneficiary.country, 'beneficiary.country');
@@ -410,7 +490,7 @@ export function pacs008ForInstruction(input: Pacs008Input): Pacs008 {
       IntrBkSttlmAmt: { Amt: decimalOf(input.receiveMinor, dec), Ccy: ccy },
       XchgRate: decimalOf(input.rateMicro, 6),
       ChrgBr: 'SHAR',
-      ChrgsInf: (input.charges ?? []).map((c) => ({ Amt: { Amt: decimalOf(c.amountMinor, localDecimals(c.currency)), Ccy: c.currency.toUpperCase() }, Tp: c.label.slice(0, 35) })),
+      ChrgsInf: chargesOf(input.charges),
       Dbtr: party(debtor),
       DbtrAcct: { Id: { Othr: { Id: input.sourceWallet, SchmeNm: { Prtry: 'SUI_ADDRESS' } } } },
       CdtrAgt: { FinInstnId: BIC.test(bankCode) ? { BICFI: bankCode } : { ClrSysMmbId: { MmbId: bankCode }, PstlAdr: { Ctry: bankCountry } } },
@@ -425,13 +505,19 @@ export function pacs008ForInstruction(input: Pacs008Input): Pacs008 {
         sourceWallet: input.sourceWallet,
         depositAddress: input.depositAddress,
         beneficiaryRef: input.beneficiaryRef.toLowerCase().replace(/^0x/, ''),
+        ...(changed.length ? { transliterated: [...new Set(changed)] } : {}),
       },
     },
   };
 }
 
+function chargesOf(charges: Pacs008Input['charges']): Pacs008['CdtTrfTxInf']['ChrgsInf'] {
+  return (charges ?? []).map((c) => ({ Amt: { Amt: decimalOf(c.amountMinor, localDecimals(c.currency)), Ccy: c.currency.toUpperCase() }, Tp: c.label.slice(0, 35) }));
+}
+
+/** A name as compared: transliterated, upper case, letters and digits only. */
 function fold(name: string): string {
-  return name.toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
+  return transliterate(name).toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim();
 }
 
 /**
@@ -441,7 +527,22 @@ function fold(name: string): string {
  */
 export function assertPacs008Matches(
   msg: Pacs008 | null | undefined,
-  instruction: { intentId: string; expectedUsdcMinor: bigint; currency: string; beneficiary: { bankCode: string; accountNumber: string; holderName: string }; beneficiaryRef: string; depositAddress: string; sourceWallet: string },
+  instruction: {
+    intentId: string;
+    expectedUsdcMinor: bigint;
+    currency: string;
+    receiveMinor: bigint;
+    minReceiveMinor: bigint;
+    rateMicro: bigint;
+    beneficiary: { bankCode: string; accountNumber: string; holderName: string };
+    beneficiaryRef: string;
+    depositAddress: string;
+    sourceWallet: string;
+    /** The paying business (the travel rule's originator half). */
+    debtor: Iso20022Party;
+    /** The partner's fee lines from its quote. */
+    charges: Array<{ label: string; currency: string; amountMinor: bigint }>;
+  },
 ): Pacs008 {
   const bad = (why: string): never => {
     throw new Iso20022Error(`The ISO 20022 payment data does not match this payout: ${why}. Nothing was sent.`, 'iso20022', 'iso20022_mismatch');
@@ -452,6 +553,13 @@ export function assertPacs008Matches(
   if (t.SplmtryData.intentId !== instruction.intentId.toLowerCase()) bad('another intent');
   if (t.InstdAmt.Amt !== decimalOf(instruction.expectedUsdcMinor, 6)) bad('another amount');
   if (t.IntrBkSttlmAmt.Ccy !== instruction.currency.toUpperCase()) bad('another currency');
+  if (t.IntrBkSttlmAmt.Amt !== decimalOf(instruction.receiveMinor, localDecimals(instruction.currency))) bad('another settlement amount');
+  if (instruction.receiveMinor < instruction.minReceiveMinor) bad('it pays less than the owners accepted');
+  if (t.XchgRate !== decimalOf(instruction.rateMicro, 6)) bad('another rate');
+  if (JSON.stringify(t.ChrgsInf) !== JSON.stringify(chargesOf(instruction.charges))) bad('other charges');
+  if (fold(t.Dbtr.Nm) !== fold(instruction.debtor.name)) bad('another debtor');
+  const wantReg = instruction.debtor.registrationNumber ? instruction.debtor.registrationNumber.replace(/\s+/g, '').toUpperCase() : null;
+  if (wantReg !== null && t.Dbtr.Id?.OrgId.Othr[0]?.Id !== wantReg) bad("another debtor's registration");
   if (t.CdtrAcct.Id.Othr.Id !== instruction.beneficiary.accountNumber.replace(/[\s-]+/g, '').toUpperCase()) bad('another account');
   if (fold(t.CdtrAcct.Nm) !== fold(instruction.beneficiary.holderName) || fold(t.Cdtr.Nm) !== fold(instruction.beneficiary.holderName)) bad('another account holder');
   const agt = t.CdtrAgt.FinInstnId as { BICFI?: string; ClrSysMmbId?: { MmbId: string } };
@@ -492,13 +600,15 @@ export type Pacs008Evidence = {
 
 /**
  * What the evidence export shows of a payout's message: who paid whom, why,
- * and from what. A mask suffices for the account number, so only its last
- * four digits are kept, and of the creditor's address only the town and
- * country (the partner holds the full message).
+ * and from what. A mask suffices for the account number and for both
+ * registration numbers, so only their last four characters are kept, and of
+ * the creditor's address only the town and country (the partner holds the
+ * full message, and the supplier's sealed party the rest).
  */
 export function pacs008Evidence(msg: Pacs008): Pacs008Evidence {
   const t = msg.CdtTrfTxInf;
-  const reg = (p: Party) => (p.Id ? `${p.Id.OrgId.Othr[0].SchmeNm.Cd} ${p.Id.OrgId.Othr[0].Id}` : null);
+  // A registration number is masked like the account: its scheme and last four.
+  const reg = (p: Party) => (p.Id ? `${p.Id.OrgId.Othr[0].SchmeNm.Cd} ****${p.Id.OrgId.Othr[0].Id.slice(-4)}` : null);
   const agt = t.CdtrAgt.FinInstnId as { BICFI?: string; ClrSysMmbId?: { MmbId: string } };
   const rel = t.RgltryRptg[0]?.Dtls.find((d) => d.Tp === 'RELATIONSHIP');
   const sof = t.RgltryRptg[0]?.Dtls.find((d) => d.Tp === 'SOURCE_OF_FUNDS');
@@ -526,43 +636,46 @@ export function pacs008Evidence(msg: Pacs008): Pacs008Evidence {
 
 /**
  * The paying business as a party, from its KYB profile (lib/server/originator.ts
- * reads the same columns). The first address line is the street; the profile
- * keeps no building number of its own.
+ * reads the same columns, and the owner's profile save writes them,
+ * lib/server/onboarding.ts). Line 1 is the street, line 2 the building. The
+ * text is the business's own, so it is transliterated rather than refused
+ * (`transliterated` lists the fields changed).
  */
 export function debtorFromProfile(org: {
   legalName: string | null;
   registrationNumber: string | null;
   addressLine1: string | null;
+  addressLine2?: string | null;
   addressCity: string | null;
   addressState: string | null;
   addressPostalCode: string | null;
   addressCountry: string | null;
-}): { party: Iso20022Party | null; missing: string[] } {
+}): { party: Iso20022Party | null; missing: string[]; transliterated: string[] } {
   const missing: string[] = [];
   if (!org.legalName?.trim()) missing.push('legalName');
   if (!org.registrationNumber?.trim()) missing.push('registrationNumber');
   if (!org.addressCity?.trim()) missing.push('addressCity');
   if (!org.addressCountry?.trim()) missing.push('addressCountry');
-  if (missing.length) return { party: null, missing };
+  if (missing.length) return { party: null, missing, transliterated: [] };
+  const changed: string[] = [];
   try {
-    return {
-      party: normalizeParty(
-        {
-          name: org.legalName,
-          registrationNumber: org.registrationNumber,
-          address: {
-            streetName: org.addressLine1 ?? undefined,
-            townName: org.addressCity,
-            countrySubDivision: org.addressState ?? undefined,
-            postCode: org.addressPostalCode ?? undefined,
-            country: org.addressCountry,
-          },
+    const party = normalizeParty(
+      {
+        name: org.legalName,
+        registrationNumber: org.registrationNumber,
+        address: {
+          streetName: org.addressLine1 ?? undefined,
+          buildingName: org.addressLine2 ?? undefined,
+          townName: org.addressCity,
+          countrySubDivision: org.addressState ?? undefined,
+          postCode: org.addressPostalCode ?? undefined,
+          country: org.addressCountry,
         },
-        { field: 'debtor', requireAddress: true, requireRegistration: true },
-      ),
-      missing: [],
-    };
+      },
+      { field: 'debtor', requireAddress: true, requireRegistration: true, lenient: { changed } },
+    );
+    return { party, missing: [], transliterated: [...new Set(changed)] };
   } catch (error) {
-    return { party: null, missing: [error instanceof Iso20022Error ? error.field : 'debtor'] };
+    return { party: null, missing: [error instanceof Iso20022Error ? error.field : 'debtor'], transliterated: [] };
   }
 }

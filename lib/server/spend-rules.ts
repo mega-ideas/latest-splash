@@ -429,11 +429,26 @@ async function recipientOps(sc: SpendContext, orgId: string, policy: PolicyState
   // deposit the partner confirmed (v2 §4.4), before the wallet binds any
   // beneficiary to it.
   if ((change.addBeneficiaries ?? []).length > 0) {
-    const { verifiedDepositAddresses } = await import('./withdrawals-store.ts');
+    const { listDestinations, verifiedDepositAddresses, verifiedDepositAddressesByPartner } = await import('./withdrawals-store.ts');
     const verified = new Set((await verifiedDepositAddresses(sc.db, orgId)).map((a) => normalizeSuiAddress(a)));
     const unverified = [...new Set((change.addBeneficiaries ?? []).map((b) => normalizeSuiAddress(b.partnerDeposit)))].filter((a) => !verified.has(a));
     if (unverified.length) {
       return refuse(409, 'partner_address_unverified', 'a beneficiary is bound only to a partner deposit address this business verified with a test deposit', { addresses: unverified });
+    }
+    // p2-4.5 review: the commitment is one of THIS business's verified bank
+    // accounts (its own, or a supplier's), and it is bound to the deposit
+    // address of that account's own partner, so the partner the money lands
+    // with is the one that can pay that account.
+    const byPartner = await verifiedDepositAddressesByPartner(sc.db, orgId);
+    const accounts = new Map((await listDestinations(sc.db, orgId)).filter((d) => d.status === 'verified').map((d) => [d.beneficiaryRef.toLowerCase(), d.partner]));
+    for (const b of change.addBeneficiaries ?? []) {
+      const commitment = b.commitment.toLowerCase();
+      const partner = accounts.get(commitment);
+      if (!partner) return refuse(409, 'beneficiary_not_a_destination', "a beneficiary is one of this business's verified bank accounts, named by its commitment", { commitment });
+      const deposit = byPartner.get(partner);
+      if (!deposit || normalizeSuiAddress(deposit) !== normalizeSuiAddress(b.partnerDeposit)) {
+        return refuse(409, 'beneficiary_partner_mismatch', "a bank account is bound only to the deposit address of the partner that pays it", { commitment, partner });
+      }
     }
   }
   for (const b of change.addBeneficiaries ?? []) {

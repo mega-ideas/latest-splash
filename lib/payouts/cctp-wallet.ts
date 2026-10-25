@@ -48,7 +48,7 @@ import {
 } from '../payments/cctp.ts';
 import { PAYOUT_QUOTE_TTL_MS } from './bank-adapter.ts';
 import {
-  payoutSandboxWebhookSecret,
+  sandboxWebhookSecretFor,
   PayoutPartnerUnavailable,
   verifyPayoutWebhook,
   WebhookRejected,
@@ -150,7 +150,7 @@ function sandboxAdapter(env: NodeJS.ProcessEnv): PayoutPartner {
       return { status: 'instructed', sandbox: true };
     },
     handleWebhook({ rawBody, signature, now }) {
-      return verifyPayoutWebhook(rawBody, signature, payoutSandboxWebhookSecret(env), now);
+      return verifyPayoutWebhook(rawBody, signature, sandboxWebhookSecretFor(env, 'cctp_wallet'), now);
     },
     async returnOrReverse({ reason }) {
       return { accepted: BEFORE_BURN.has(reason), sandbox: true };

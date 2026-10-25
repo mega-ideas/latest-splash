@@ -15,6 +15,20 @@ const bodySchema = z.object({
   registrationNumber: z.string().trim().min(2).max(64),
   /** ISO 3166-1 alpha-2. */
   addressCountry: z.string().trim().length(2),
+  /**
+   * The registered address in its parts (ISO 20022 structured; the country is
+   * addressCountry). A supplier payout's originator needs it; the service
+   * checks each part as the payout message reads it.
+   */
+  address: z
+    .object({
+      streetName: z.string().max(70).optional(),
+      buildingName: z.string().max(35).optional(),
+      postCode: z.string().max(16).optional(),
+      townName: z.string().trim().min(1).max(35),
+      countrySubDivision: z.string().max(35).optional(),
+    })
+    .optional(),
 });
 
 export async function POST(request: Request) {
@@ -29,6 +43,6 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json({ error: 'onboarding_unavailable' }, { status: 503 });
   }
-  if (!result.ok) return NextResponse.json({ error: result.error, code: result.code }, { status: result.status });
+  if (!result.ok) return NextResponse.json({ error: result.error, code: result.code, ...(result.field ? { field: result.field } : {}) }, { status: result.status });
   return NextResponse.json({ ok: true, legalNameChanged: result.legalNameChanged, destinationsRevoked: result.destinationsRevoked });
 }

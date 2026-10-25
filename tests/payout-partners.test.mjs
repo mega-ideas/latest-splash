@@ -70,6 +70,9 @@ function bankInstruction(country, over = {}) {
     depositAddress: DEPOSIT,
     returnAddress: WALLET,
     purposeCode: 'SUPP',
+    rateMicro: 56_500_000n,
+    debtor: DEBTOR,
+    charges: [],
     now: NOW,
     ...over,
   };
@@ -201,7 +204,7 @@ test('the evidence export takes the same message, masked: last four digits, town
   assert.equal(e.creditor.name, 'Dela Cruz Trading Corp');
   assert.equal(e.creditor.town, 'Makati');
   assert.equal(e.creditor.country, 'PH');
-  assert.equal(e.debtor.registration, 'CINC 202001012345');
+  assert.equal(e.debtor.registration, 'CINC ****2345', 'a registration number is masked like the account');
   assert.equal(e.purposeCode, 'SUPP');
   assert.equal(e.relationship, 'supplier');
   assert.equal(e.sourceOfFunds, 'business_revenue');
@@ -336,6 +339,20 @@ test('cctp_wallet: USDC only, CCTP V2 standard from Sui, Circle’s fee its own 
   await assert.rejects(p.createPayout(bankInstruction('PH')), (e) => e.code === 'not_on_this_route');
   assert.equal((await p.returnOrReverse({ intentId: INTENT, partnerRef: order.partnerRef, returnAddress: WALLET, reason: 'not_sent', now: NOW })).accepted, true, 'before the burn nothing is at Circle');
   assert.equal((await p.returnOrReverse({ intentId: INTENT, partnerRef: order.partnerRef, returnAddress: WALLET, reason: 'payout_failed', now: NOW })).accepted, false, 'a burn cannot be undone');
+});
+
+test("the CBPR+ extended set: '&' and '#' are kept, a bank-checked name with an accent is refused, the business's own text is transliterated", () => {
+  assert.equal(ISO.transliterate('Café Ñandú Straße'), 'Cafe Nandu Strasse');
+  assert.equal(ISO.transliterate('株式会社'), '', 'another script comes out empty');
+  assert.equal(ISO.escapeXmlText('Maju & Jaya <Sdn>'), 'Maju &amp; Jaya &lt;Sdn&gt;');
+  assert.equal(ISO.normalizeParty({ name: 'Maju & Jaya Sdn Bhd', address: { streetName: '#12-03, Jalan Ampang', townName: 'Kuala Lumpur', country: 'MY' } }).name, 'Maju & Jaya Sdn Bhd');
+  assert.throws(() => ISO.normalizeParty({ name: 'Café Nusantara Sdn Bhd' }, { field: 'supplier' }), (e) => e.field === 'supplier.name' && /without accents/.test(e.message), 'a supplier name is the one its bank checks: refused, with the reason');
+  const changed = [];
+  assert.equal(ISO.normalizeParty({ name: 'Café Nusantara Sdn Bhd', registrationNumber: '§§' }, { field: 'debtor', lenient: { changed } }).name, 'Cafe Nusantara Sdn Bhd');
+  assert.deepEqual(changed, ['debtor.name', 'debtor.registrationNumber'], 'what was changed or left out is listed');
+  const d = ISO.debtorFromProfile({ legalName: 'Café Nusantara Sdn Bhd', registrationNumber: '202001012345', addressLine1: 'Jalan Ampang', addressLine2: null, addressCity: 'Kuala Lumpur', addressState: null, addressPostalCode: null, addressCountry: 'MY' });
+  assert.equal(d.party.name, 'Cafe Nusantara Sdn Bhd');
+  assert.deepEqual(d.transliterated, ['debtor.name']);
 });
 
 test('the legacy sweep quotes through the route that pays its currency, and refuses one no route pays', async () => {

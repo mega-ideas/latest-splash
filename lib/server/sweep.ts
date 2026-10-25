@@ -9,7 +9,8 @@ import { readRecipientForStaff } from '@/lib/server/recipients-store';
 import { recordMovement } from '@/lib/server/ledger-store';
 import { patchTransfer, readTransferForStaff } from '@/lib/server/transfers-store';
 import { formatMinor } from '@/lib/money';
-import { legacySweepPayout, pdaxAdapter } from '@/lib/server/pdax';
+import { legacySweepPayout } from '@/lib/server/pdax';
+import { bankPartnerForCurrency, payoutPartner } from '@/lib/payouts/registry';
 
 export async function completeDeliveryForTransfer(intentId: string) {
   const intent = await readTransferForStaff(intentId);
@@ -39,7 +40,11 @@ export async function completeDeliveryForTransfer(intentId: string) {
   // rate, no made-up reference), and nothing must be left behind when it does.
   let fxRate = '';
   if (intent.deliveryTier === 'SWEEP_ACCOUNT') {
-    const quote = await pdaxAdapter().quote({ currency: intent.targetCurrency, sendMinor: BigInt(intent.stablecoinAmountMicro), now: new Date() });
+    // The route that pays this currency quotes it; a currency no route pays
+    // stops here, with nothing credited.
+    const route = bankPartnerForCurrency(intent.targetCurrency);
+    if (!route) throw new Error(`No payout route pays ${intent.targetCurrency}; nothing was credited.`);
+    const quote = await payoutPartner(route).quote({ currency: intent.targetCurrency, sendMinor: BigInt(intent.stablecoinAmountMicro), now: new Date() });
     fxRate = formatMinor(quote.rateMicro, 6);
   }
 

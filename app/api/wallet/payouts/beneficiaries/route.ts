@@ -1,6 +1,6 @@
 import { readJsonBody } from '@/lib/server/http';
 import { addPayoutBeneficiary, listPayoutBeneficiaries } from '@/lib/server/partner-payouts';
-import { limitWalletRequests, requireOwner } from '@/lib/server/wallet-route';
+import { limitWalletRequests, requireOwner, requirePayoutReader } from '@/lib/server/wallet-route';
 import { withdrawalResponse, withdrawalRoute } from '@/lib/server/withdrawals-deps';
 
 export const dynamic = 'force-dynamic';
@@ -17,6 +17,8 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: Request) {
   const gate = await withdrawalRoute(request);
   if (gate.response) return gate.response;
+  const reader = requirePayoutReader(gate.route);
+  if (reader) return reader;
   return withdrawalResponse({ ok: true, beneficiaries: await listPayoutBeneficiaries(gate.deps) });
 }
 

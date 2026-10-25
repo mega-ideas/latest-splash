@@ -1,6 +1,6 @@
 import { readJsonBody } from '@/lib/server/http';
 import { createPartnerPayout, listPartnerPayouts, listPayoutBeneficiaries, SUPPLIER_PAYOUT_PARTNERS } from '@/lib/server/partner-payouts';
-import { limitWalletRequests, requireWithdrawalRequester } from '@/lib/server/wallet-route';
+import { limitWalletRequests, requirePayoutReader, requireWithdrawalRequester } from '@/lib/server/wallet-route';
 import { withdrawalDepositAddress } from '@/lib/server/withdrawals';
 import { withdrawalResponse, withdrawalRoute } from '@/lib/server/withdrawals-deps';
 
@@ -21,6 +21,8 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: Request) {
   const gate = await withdrawalRoute(request);
   if (gate.response) return gate.response;
+  const reader = requirePayoutReader(gate.route);
+  if (reader) return reader;
   const [payouts, beneficiaries, ...addresses] = await Promise.all([
     listPartnerPayouts(gate.deps),
     listPayoutBeneficiaries(gate.deps),
