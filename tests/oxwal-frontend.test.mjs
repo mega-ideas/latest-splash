@@ -156,8 +156,8 @@ test('landing is the v1 cinematic: hero district, five steps with manual entry, 
   const ogImage = await readFile(new URL('../app/opengraph-image.tsx', import.meta.url), 'utf8');
   const composer = await readFile(new URL('../components/oxwal/OxWalComposer.tsx', import.meta.url), 'utf8');
   const floating = await readFile(new URL('../components/FloatingCopilot.tsx', import.meta.url), 'utf8');
-  // The invoice loop lives inside the Invoices page now (Inspection loop tab).
-  const invoiceLoop = await readFile(new URL('../components/invoices/InvoiceLoop.tsx', import.meta.url), 'utf8');
+  // The invoice loop became Pay invoices, inside the Invoices page (v2 brief 5.8).
+  const invoiceLoop = await readFile(new URL('../components/invoices/PayInvoices.tsx', import.meta.url), 'utf8');
 
   assert.match(claims, /headline: 'Collect USD\. Pay Southeast Asia\. Keep cash working\.'/);
   // The hero art is still the versioned district raster, owned by the
@@ -177,7 +177,7 @@ test('landing is the v1 cinematic: hero district, five steps with manual entry, 
   assert.match(composer, /onFilePrepared/);
   assert.doesNotMatch(composer, /priorityLabel|bg-black/);
   assert.match(floating, /OxWalComposer/);
-  assert.match(invoiceLoop, /What should Zeke inspect\?/);
+  assert.match(invoiceLoop, /Bring in an invoice/);
   assert.match(claims, /footerLegal/);
   assert.match(copyCheck, /8 corridors/);
   assert.match(copyCheck, /Sui network live/);

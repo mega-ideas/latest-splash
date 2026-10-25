@@ -949,6 +949,47 @@ owner. Only `AdminCap` lifts a compliance freeze.
 - **No penalty or late fees.** Splash is not a party to the supplier's
   invoice, so none exists.
 
+## v2 Phase 3 — Invoices: Get paid and Pay invoices (brief 5.8) — 2026-10-25
+
+Design: [`docs/v2/phase3-invoices.md`](docs/v2/phase3-invoices.md). Tests:
+`tests/pay-invoices.test.mjs`, `tests/invoices-page.test.mjs`.
+
+- **A supplier's invoice is untrusted data.** What it says is a proposal; a
+  person confirms every field. The payee picks candidates among the
+  business's own verified recipients only (screening `CLEAR` or admin
+  `ATTESTED`); an account or wallet printed on the invoice is read only to
+  warn that it differs, never paid to. Zeke's reader has no tools, is told
+  the document is data, may answer only seven named fields, and its answer
+  is checked against the document text (a value it cannot point to is
+  "low"). Pinned with an invoice that tries to change the payee, the amount
+  and the recipient.
+- **No double payment.** One supplier invoice number is scheduled, waiting
+  for approval or paid once per org (partial unique index); the same
+  document is one invoice; the intake key is unique per org; one invoice
+  per payment intent; one invoice per Sui digest.
+- **Approval is not here.** Pay invoices hands a scheduled invoice to the
+  payment flow (brief 5.4) through `lib/bills/payment-hook.ts`, keyed by the
+  invoice id. That flow is not on this branch: the hook answers 501
+  `PAYMENT_FLOW_NOT_WIRED` and nothing changes. Only the server-side
+  `recordBillSettlement`, called by that flow, marks an invoice paid; no
+  client route reaches it. A paid or cancelled invoice never changes.
+- **Fail closed.** No model key: no model reader in any runtime, and a PDF
+  is refused rather than read by anything else. No database: the routes
+  answer 503. The self-billed e-invoice asks for the business's TIN,
+  contact number and the exchange rate, and is not made without them.
+- **Scope (WS2).** Every Pay invoices route goes through `billCaller`
+  (session org, membership role); another org's invoice is "not found" on
+  every handler. Viewers, auditors and developers read only.
+- **Get paid: forward-only status.** `PATCH /api/invoices/:id` took any
+  status (a settled invoice could go back to draft). It now refuses a
+  regression, a "paid" with no reference and a second transfer binding.
+  The public pay link no longer marks an invoice paid on the payer's word
+  (WS7-3's open note): it records "reported", never overwrites a payment on
+  record, and only the business or a USDC payment matched on Sui makes it
+  paid. The PATCH reads then writes; a concurrent USDC sync between the two
+  is not yet guarded in the database (the invoices repository has no
+  status-conditional update).
+
 ## WS4 — operator custody, the code half — 2026-10-23
 
 **Scope**: the hot operator signer — how it is held, how much it may hold, and

@@ -421,6 +421,13 @@
       "when": 1793404800000,
       "tag": "0056_treasury_wallet_binding",
       "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1793491200000,
+      "tag": "0057_payable_invoices",
+      "breakpoints": true
     }
   ]
 }

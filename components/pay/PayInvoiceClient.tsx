@@ -29,7 +29,7 @@ type PublicInvoice = {
 export default function PayInvoiceClient({ slug, invoice }: { slug: string; invoice: PublicInvoice }) {
   const [payerOrgName, setPayerOrgName] = useState('');
   const [payerOrgEmail, setPayerOrgEmail] = useState('');
-  const [paid, setPaid] = useState(invoice.status === 'paid' || invoice.status === 'settled');
+  const [paid, setPaid] = useState(invoice.status === 'reported' || invoice.status === 'paid' || invoice.status === 'settled');
   const [submitting, setSubmitting] = useState(false);
 
   async function copy(value: string) {
@@ -45,6 +45,10 @@ export default function PayInvoiceClient({ slug, invoice }: { slug: string; invo
       body: JSON.stringify({ payerOrgName, payerOrgEmail, paymentReference: invoice.paymentReference }),
     });
     setSubmitting(false);
+    if (response.status === 409) {
+      setPaid(true);
+      return toast.info('This invoice already has a payment on record.');
+    }
     if (!response.ok) return toast.error('Enter valid payer details');
     setPaid(true);
     toast.success('Payment notification sent');

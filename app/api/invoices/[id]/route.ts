@@ -4,11 +4,14 @@ import { z } from 'zod';
 import { invoiceDeliveryTier } from '@/lib/server/custody-phase';
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { readJsonBody } from '@/lib/server/http';
+import { ISSUER_SETTABLE, canMoveInvoice } from '@/lib/invoices/status';
 import { patchInvoice, readInvoice } from '@/lib/server/invoices-store';
 import { requireSessionAccount } from '@/lib/server/session-account';
 
 const patchSchema = z.object({
-  status: z.enum(['draft', 'sent', 'viewed', 'paid', 'settled', 'overdue']).optional(),
+  // The business moves its own invoice forward only (lib/invoices/status.ts).
+  // "reported" is the payer's, from the pay link, and "viewed" the page's.
+  status: z.enum(ISSUER_SETTABLE as [string, ...string[]]).optional(),
   paymentReference: z.string().trim().optional(),
   transferIntentId: z.string().trim().optional(),
 });
@@ -44,7 +47,26 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const { id } = await params;
   const parsed = patchSchema.safeParse(await readJsonBody(request));
   if (!parsed.success) return NextResponse.json({ error: 'Invalid invoice update' }, { status: 400 });
-  const invoice = await patchInvoice(accountCheck.account.orgId, id, parsed.data);
+  const current = await readInvoice(accountCheck.account.orgId, id);
+  if (!current) return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
+  const next = parsed.data.status as typeof current.status | undefined;
+  // Forward only: a settled invoice never goes back to draft, a paid one
+  // never back to sent.
+  if (next && !canMoveInvoice(current.status, next)) {
+    return NextResponse.json({ error: `A ${current.status} invoice cannot be marked ${next}.`, code: 'status' }, { status: 409 });
+  }
+  // Marked paid by hand means a bank payment the business has seen: it says
+  // which, by its reference, unless the payer or Sui already did.
+  if (next === 'paid' && current.status !== 'paid' && !current.usdcTxDigest && !(parsed.data.paymentReference ?? current.paymentReference)) {
+    return NextResponse.json({ error: 'Add the payment reference you received.', code: 'reference' }, { status: 422 });
+  }
+  // The transfer an invoice binds to is set once.
+  if (parsed.data.transferIntentId && current.transferIntentId && parsed.data.transferIntentId !== current.transferIntentId) {
+    return NextResponse.json({ error: 'This invoice is already bound to a transfer.', code: 'transfer' }, { status: 409 });
+  }
+  const { status: _ignored, ...rest } = parsed.data;
+  void _ignored;
+  const invoice = await patchInvoice(accountCheck.account.orgId, id, next ? { ...rest, status: next } : rest);
   return invoice
     ? NextResponse.json(invoice)
     : NextResponse.json({ error: 'Invoice not found' }, { status: 404 });

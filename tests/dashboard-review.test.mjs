@@ -114,9 +114,10 @@ test('the approval and invoice copy send people to Wallet, not Send USDC', async
   assert.doesNotMatch(approval, /Send USDC page/);
   assert.match(approval, /in their Wallet/);
 
-  const invoice = await source('components/invoices/InvoiceLoop.tsx');
-  assert.doesNotMatch(invoice, /'LAUNCH_SCOPE' \? 'Send USDC'/, 'the button opens Wallet, so it says so');
-  assert.match(invoice, /'LAUNCH_SCOPE' \? 'Open Wallet'/);
+  // v2 brief 5.8: the invoice loop (and its Wallet button) became Pay
+  // invoices, which names no removed page either.
+  const invoice = await source('components/invoices/PayInvoices.tsx');
+  assert.doesNotMatch(invoice, /Send USDC/);
 
   for (const file of ['components/transfer/StepDelivery.tsx', 'lib/server/quote.ts']) {
     assert.doesNotMatch(await source(file), /use Send USDC/, `${file} names the removed page`);

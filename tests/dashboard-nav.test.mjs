@@ -152,7 +152,7 @@ test('links into the dashboard point at pages that exist under their new names',
   for (const file of [
     'app/queue/page.tsx',
     'components/queue/ApprovalQueueBoard.tsx',
-    'components/invoices/InvoiceLoop.tsx',
+    'components/invoices/PayInvoices.tsx',
     'app/dashboard/recipients/page.tsx',
   ]) {
     const text = await source(file);
@@ -163,7 +163,9 @@ test('links into the dashboard point at pages that exist under their new names',
   assert.match(await source('app/queue/page.tsx'), /href="\/dashboard\/zeke">\{assistantName\}</);
   // v2 brief 5.3: "Back to Zeke" moved from the board to the foot of the page.
   assert.match(await source('app/queue/page.tsx'), /href="\/dashboard\/zeke"[\s\S]{0,200}Back to \{assistantName\}/);
-  assert.match(await source('components/invoices/InvoiceLoop.tsx'), /href="\/dashboard\/zeke"[\s\S]{0,300}Chat/);
+  // v2 brief 5.8: the invoice loop became Pay invoices, which sends a
+  // supplier with no match to Recipients, a page that exists.
+  assert.match(await source('components/invoices/PayInvoices.tsx'), /href="\/dashboard\/recipients"/);
   // The floating Zeke stays out of the way on the Zeke page itself.
   assert.match(await source('components/FloatingCopilot.tsx'), /if \(pathname === '\/dashboard\/zeke'\) return null;/);
 });

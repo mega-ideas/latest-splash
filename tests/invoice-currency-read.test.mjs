@@ -141,7 +141,13 @@ test('the route asks the lane question through invoiceLocalCurrency, before reco
   assert.doesNotMatch(route, /c !== 'USDC'/, 'the rule lives in one place now');
 });
 
-test('the invoice loop shows a currency that was not read as not read', async () => {
-  const loop = await source('components/invoices/InvoiceLoop.tsx');
-  assert.match(loop, /<ProofPill label="Currency" value=\{extraction\.currency \|\| 'Not read'\} \/>/);
+test('Pay invoices shows a currency that was not read as not read', async () => {
+  // v2 brief 5.8: the invoice loop became Pay invoices. A field nothing read
+  // is '' with confidence 'none', which the page labels "Not read".
+  const { parseBillText, CONFIDENCE_LABEL } = await import('../lib/bills/extract.ts');
+  const read = parseBillText('Total due 1,250.00');
+  assert.equal(read.fields.currency.value, '');
+  assert.equal(read.fields.currency.confidence, 'none');
+  assert.equal(CONFIDENCE_LABEL.none, 'Not read');
+  assert.match(await source('components/invoices/PayInvoices.tsx'), /CONFIDENCE_LABEL\[read\.confidence\]/);
 });

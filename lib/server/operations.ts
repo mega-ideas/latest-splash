@@ -204,7 +204,8 @@ export type TravelRuleBeneficiary = {
   bankAccountName?: string;
 };
 
-export type InvoiceStatusV2 = 'draft' | 'sent' | 'viewed' | 'paid' | 'settled' | 'overdue';
+/** 'reported': the payer says they paid by bank (lib/invoices/status.ts). */
+export type InvoiceStatusV2 = 'draft' | 'sent' | 'viewed' | 'reported' | 'paid' | 'settled' | 'overdue';
 export type InvoiceRecord = {
   id: string;
   /** The org this invoice belongs to.

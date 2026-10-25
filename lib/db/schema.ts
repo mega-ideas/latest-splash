@@ -2475,3 +2475,73 @@ export const treasuryFundReferralHistory = pgTable('treasury_fund_referral_histo
 }, (table) => [
   index('treasury_fund_referral_history_org_seq_idx').on(table.orgId, table.seq),
 ]);
+
+/**
+ * A supplier's invoice the business is paying (v2 brief 5.8, Pay invoices;
+ * migration 0057). lib/server/bills-store.ts is the only reader and writer.
+ *
+ * Intake reads it (Zeke and the parser), a person confirms what was read,
+ * matches a verified recipient and schedules it; approval and payment run in
+ * the payment flow, which reports back the intent and the Sui digest. The
+ * status only moves forward (lib/bills/flow.ts), and every move is a guarded
+ * UPDATE on the status it leaves.
+ */
+export const payableInvoices = pgTable('payable_invoices', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  /** The client's idempotency key for the intake (a UUID), unique per org. */
+  intakeKey: text('intake_key').notNull(),
+  /** review | scheduled | approving | paid | cancelled. */
+  status: text('status').notNull(),
+  documentName: text('document_name'),
+  documentSha256: text('document_sha256').notNull(),
+  /** The text that was read, so the page can show where each value came from. */
+  documentText: text('document_text'),
+  /** lib/bills/extract.ts BillExtraction: every field, its confidence and why. */
+  extraction: jsonb('extraction').notNull(),
+  // What a person confirmed. Null until then.
+  payeeName: text('payee_name'),
+  payeeKey: text('payee_key'),
+  invoiceNumber: text('invoice_number'),
+  invoiceNumberKey: text('invoice_number_key'),
+  /** Six decimals in `currency`. */
+  amountMinor: bigint('amount_minor', { mode: 'bigint' }),
+  currency: text('currency'),
+  dueDate: text('due_date'),
+  invoiceDate: text('invoice_date'),
+  /** ISO 3166-1 alpha-2. */
+  payeeCountry: text('payee_country'),
+  confirmedBy: text('confirmed_by'),
+  confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
+  duplicateAckBy: text('duplicate_ack_by'),
+  duplicateAckReason: text('duplicate_ack_reason'),
+  duplicateAckAt: timestamp('duplicate_ack_at', { withTimezone: true }),
+  recipientId: text('recipient_id'),
+  matchedBy: text('matched_by'),
+  matchedAt: timestamp('matched_at', { withTimezone: true }),
+  scheduledFor: text('scheduled_for'),
+  scheduledBy: text('scheduled_by'),
+  scheduledAt: timestamp('scheduled_at', { withTimezone: true }),
+  /** The payment flow's intent for this invoice. One invoice, one intent. */
+  paymentIntentId: text('payment_intent_id'),
+  approvalRequestedBy: text('approval_requested_by'),
+  approvalRequestedAt: timestamp('approval_requested_at', { withTimezone: true }),
+  paidAt: timestamp('paid_at', { withTimezone: true }),
+  suiDigest: text('sui_digest'),
+  receiptNo: text('receipt_no'),
+  approvers: jsonb('approvers'),
+  /** The self-billed e-invoice made for it, once (lib/myinvois/self-billed.ts). */
+  myinvois: jsonb('myinvois'),
+  myinvoisSha256: text('myinvois_sha256'),
+  myinvoisGeneratedAt: timestamp('myinvois_generated_at', { withTimezone: true }),
+  myinvoisGeneratedBy: text('myinvois_generated_by'),
+  /** Who did what, appended to, never rewritten. */
+  history: jsonb('history').notNull(),
+  createdBy: text('created_by').notNull(),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('payable_invoices_org_intake_unique').on(table.orgId, table.intakeKey),
+  index('payable_invoices_org_created_idx').on(table.orgId, table.createdAt),
+  uniqueIndex('payable_invoices_payment_intent_unique').on(table.paymentIntentId),
+  uniqueIndex('payable_invoices_sui_digest_unique').on(table.suiDigest),
+]);

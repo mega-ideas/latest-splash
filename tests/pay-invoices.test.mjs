@@ -29,7 +29,6 @@ import { migratedDb } from './helpers/store-db.mjs';
      8. fail closed: no model key means no model and no PDF, in production
         as anywhere. */
 
-const ACME_OWNER = { orgId: 'acme', userId: 'u_owner', role: 'OWNER' };
 const ACME_MAKER = { orgId: 'acme', userId: 'u_maker', role: 'MAKER' };
 const ACME_VIEWER = { orgId: 'acme', userId: 'u_viewer', role: 'VIEWER' };
 const NW_OWNER = { orgId: 'northwind', userId: 'u_nw', role: 'OWNER' };

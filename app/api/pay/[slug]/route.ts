@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
 import { readJsonBody } from '@/lib/server/http';
+import { PAYER_MAY_REPORT } from '@/lib/invoices/status';
 import { RATE_LIMITS, clientIp, enforceRateLimit } from '@/lib/server/rate-limit';
 import { recordAnalyticsEvent } from '@/lib/server/operations';
 import { findInvoiceBySlug, patchInvoiceForStaff } from '@/lib/server/invoices-store';
@@ -67,6 +68,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
   const parsed = paidSchema.safeParse(await readJsonBody(request));
   if (!parsed.success) return NextResponse.json({ error: 'Valid payer details are required' }, { status: 400 });
 
+  // The payer's word is a report, not a payment: it moves the invoice to
+  // "reported", and only the issuer or a matched Sui payment makes it paid
+  // (lib/invoices/status.ts). Once reported, paid or settled, nothing here
+  // overwrites it; the same report again is answered as before.
+  if (invoice.status === 'reported' && invoice.paymentReference === parsed.data.paymentReference && invoice.payerOrgEmail === parsed.data.payerOrgEmail) {
+    return NextResponse.json({ ok: true, replayed: true });
+  }
+  if (!PAYER_MAY_REPORT.includes(invoice.status)) {
+    return NextResponse.json({ error: 'This invoice already has a payment on record.', code: 'status' }, { status: 409 });
+  }
+
   // The payer becomes a beneficiary of the ISSUING org, which the invoice now
   // names directly rather than by looking its issuer up by name.
   const recipient = await upsertRecipientFromInvoice({
@@ -80,7 +92,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ slu
     payerOrgName: parsed.data.payerOrgName,
     payerOrgEmail: parsed.data.payerOrgEmail,
     paymentReference: parsed.data.paymentReference,
-    status: 'paid',
+    status: 'reported',
   });
   const counterpartyPull = recordAnalyticsEvent('counterparty_pull');
   console.info('[kyb-invite] prepared', { recipientId: recipient.id, email: recipient.orgEmail });

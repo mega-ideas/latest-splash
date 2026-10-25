@@ -194,9 +194,12 @@ test('the behaviour card on the same page shows the same score, under the same n
   assert.match(card, /confidencePercent\(memory\.confidence\) !== null &&/);
 });
 
-test('the invoice loop shows a percentage only for a measured score', async () => {
-  const loop = await source('components/invoices/InvoiceLoop.tsx');
-  assert.doesNotMatch(loop, /Math\.round\(suggestion\.confidence \* 100\)/);
-  assert.doesNotMatch(loop, /Math\.round\(extraction\.confidence \* 100\)/);
-  assert.match(loop, /confidencePercent\(suggestion\.confidence\)/);
+test('Pay invoices shows a percentage for nothing, because nothing measures one', async () => {
+  // v2 brief 5.8: the invoice loop became Pay invoices. Its confidence is a
+  // level earned from where the value was found (lib/bills/extract.ts),
+  // shown with its reason; no percentage is drawn from it.
+  const loop = await source('components/invoices/PayInvoices.tsx');
+  assert.doesNotMatch(loop, /\* 100\)/);
+  assert.doesNotMatch(loop, /confidencePercent/);
+  assert.match(loop, /CONFIDENCE_LABEL\[read\.confidence\]/);
 });
