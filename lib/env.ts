@@ -463,6 +463,19 @@ export const envSchema = z.object({
   HATA_WEBHOOK_SECRET: optional,
   FIUU_MERCHANT_ID: optional,
   FIUU_VERIFY_KEY: optional,
+  /** §4.5 supplier payouts. PH (lib/payouts/pdax.ts; PDAX_API_KEY is below). */
+  PDAX_API_SECRET: optional,
+  PDAX_WEBHOOK_SECRET: optional,
+  /** ID, with the payout partner's exchange partner (lib/payouts/durianpay.ts). */
+  DURIANPAY_API_KEY: optional,
+  DURIANPAY_WEBHOOK_SECRET: optional,
+  DURIANPAY_EXCHANGE_API_KEY: optional,
+  /** Cross-chain USDC over CCTP V2 (lib/payouts/cctp-wallet.ts): Circle's
+   *  attestation and fee API, and the registered bridge adapter's witness
+   *  type. Without both the route refuses; with both it still refuses until
+   *  a bridge adapter is registered on chain. */
+  CCTP_IRIS_API_URL: url,
+  CCTP_BRIDGE_ADAPTER_TYPE: optional,
   /** The sandbox payout partners' webhook secret, outside production only:
    *  random, at least 32 characters, read only when
    *  PAYOUT_SANDBOX_WEBHOOKS_ENABLED is true. No fallback secret. */

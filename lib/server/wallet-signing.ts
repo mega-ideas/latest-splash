@@ -245,11 +245,13 @@ export function assertPurposeShape(purpose: SigningPurpose, d: WalletTxDescripti
       bad(shape);
       return;
     }
-    case 'withdrawal': {
+    case 'withdrawal':
+    case 'partner_payout': {
       // v2 §4.4: a new bank payout (kind 4) from the wallet to the business's
       // verified partner deposit address, for the business's own bank account
       // (its beneficiary commitment), of exactly the amount the partner was
-      // instructed. Nothing else is a withdrawal.
+      // instructed. Nothing else is a withdrawal. §4.5: a supplier payout is
+      // the same shape, for the supplier's account's commitment.
       if (shape !== 'withdraw,open_intent,pay_intent,anchor_receipt,delete_intent') bad(shape);
       const w = d.actions[0] as Extract<WalletAction, { type: 'withdraw' }>;
       const o = d.actions[1] as Extract<WalletAction, { type: 'open_intent' }>;
@@ -353,6 +355,9 @@ export type WithdrawalSigningDetails = {
   rateMicro: string;
   /** The deposit's deadline, ms since epoch (the intent's settle_by). */
   settleByMs: string;
+  /** ISO 20022 purpose code and the payer's relationship to the account holder (§4.5). */
+  purposeCode?: string;
+  relationship?: string;
 };
 
 export type RequestView = {

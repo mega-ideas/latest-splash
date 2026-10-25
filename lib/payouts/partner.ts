@@ -1,8 +1,10 @@
 /**
- * Payout partners behind one interface (v2 §4.5, D4, D12). Withdrawals to the
- * business's own bank (§4.4) are the first route on it; the supplier payout
- * routes (`pdax` PH, `durianpay` ID, `cctp_wallet` cross-chain) join it in
- * §4.5 with the same methods.
+ * Payout partners behind one interface (v2 §4.5, D4, D12): `hata_fiuu` (MY,
+ * withdrawals to the business's own bank, §4.4), `pdax` (PH) and `durianpay`
+ * (ID, with its exchange partner) for supplier payouts
+ * (lib/server/partner-payouts.ts), and `cctp_wallet` (USDC to another chain
+ * over CCTP V2). Every bank instruction carries its ISO 20022 message
+ * (lib/payments/iso20022.ts), which the adapter checks before sending.
  *
  * The money model (D3, Sky's decision of 24 Oct 2026):
  *   - the partner gives each business ONE fixed Sui deposit address
@@ -37,11 +39,12 @@
  */
 
 import type { PartnerId } from '../partners/signed-partners.ts';
+import type { Pacs008, PurposeCode } from '../payments/iso20022.ts';
 import { verifySignedWebhook, WebhookRejected } from '../funding/providers.ts';
 
 export { WebhookRejected };
 
-/** Every payout route the brief names (§4.5). Only those in BUILT have an adapter yet. */
+/** Every payout route the brief names (§4.5). Each has a sandbox and a live adapter. */
 export const PAYOUT_PARTNER_IDS = ['hata_fiuu', 'pdax', 'durianpay', 'cctp_wallet'] as const;
 export type PayoutPartnerId = (typeof PAYOUT_PARTNER_IDS)[number];
 
@@ -51,8 +54,11 @@ export function isPayoutPartnerId(value: unknown): value is PayoutPartnerId {
 
 /** One fee line a partner charges, in the local currency's minor units. Never Splash's. */
 export type PartnerFeeLine = {
-  /** Which partner charges it (named in copy only if signed). */
-  partner: PartnerId;
+  /**
+   * Which partner charges it (named in copy only if signed), or `circle` for
+   * CCTP's own fee, which Circle sets and takes at mint. Never Splash's.
+   */
+  partner: PartnerId | 'circle';
   label: string;
   currency: string;
   amountMinor: bigint;
@@ -101,22 +107,18 @@ export type PayoutQuote = {
   sandbox: boolean;
 };
 
-/**
- * What the partner is told before the deposit. Every field comes from the
- * stored withdrawal; the beneficiary is the one whose commitment the intent
- * carries (`beneficiary_ref`), recomputed and compared before this is sent.
- */
-export type PayoutInstruction = {
+/** What every instruction carries, whatever the route. */
+type InstructionCommon = {
   /** The on-chain intent id: the idempotency key. */
   intentId: string;
-  /** Exactly the USDC the deposit will carry (the intent's principal). */
+  /** Exactly the USDC the deposit (or the burn) will carry: the intent's principal. */
   expectedUsdcMinor: bigint;
   quoteRef: string;
   currency: string;
-  /** What the quote said the bank account receives. */
+  /** What the quote said the beneficiary receives. */
   receiveMinor: bigint;
   /**
-   * The least the bank account must receive: what the owners accepted. The
+   * The least the beneficiary must receive: what the owners accepted. The
    * partner converts when the deposit lands (the owners may sign up to
    * `settleByMs`, long after the quote); if its rate then pays less than
    * this, it does not pay out and returns the USDC to `returnAddress`.
@@ -124,6 +126,23 @@ export type PayoutInstruction = {
   minReceiveMinor: bigint;
   /** The deposit's deadline (the intent's settle_by, ms since epoch): none lands after it. */
   settleByMs: bigint;
+  /** The business wallet the deposit comes from. */
+  sourceWallet: string;
+  /** Where a return goes: the business wallet, never Splash. */
+  returnAddress: string;
+  /** ISO 20022 ExternalPurpose1Code (INTC for a business moving its own money). */
+  purposeCode: PurposeCode;
+};
+
+/**
+ * A bank payout: what the partner is told before the deposit. Every field
+ * comes from the stored payout; the beneficiary is the one whose commitment
+ * the intent carries (`beneficiary_ref`), recomputed and compared before this
+ * is sent, and `iso20022` is the pacs.008-style message built from the same
+ * fields (lib/payments/iso20022.ts), which the adapter checks again.
+ */
+export type BankPayoutInstruction = InstructionCommon & {
+  route: 'bank';
   beneficiary: PayoutBeneficiary;
   /** Hex of the 32-byte beneficiary commitment on the intent. */
   beneficiaryRef: string;
@@ -133,15 +152,34 @@ export type PayoutInstruction = {
    * does not match the intent on chain.
    */
   beneficiarySalt: string;
-  /** The business wallet the deposit comes from. */
-  sourceWallet: string;
   /** The partner deposit address it goes to. */
   depositAddress: string;
-  /** Where a return goes: the business wallet, never Splash. */
-  returnAddress: string;
-  /** ISO 20022 purpose: a business moving its own money. */
-  purposeCode: 'INTC';
+  iso20022: Pacs008;
 };
+
+/**
+ * A cross-chain USDC payout over CCTP V2 (`cctp_wallet`, D5(c)). There is no
+ * partner deposit address: the owners' transaction burns exactly the
+ * principal through Circle's TokenMessenger to `mintRecipient` on `domain`,
+ * and anyone may relay the mint (destination caller zero).
+ */
+export type CrossChainPayoutInstruction = InstructionCommon & {
+  route: 'cctp';
+  destination: {
+    /** The chain, as lib/payments/cctp.ts names it (e.g. BASE, SOLANA). */
+    chain: string;
+    domain: number;
+    /** The recipient as its chain writes it. */
+    recipient: string;
+    /** CCTP's 32-byte mint recipient, hex. */
+    mintRecipient: string;
+  };
+  /** The most Circle may take at mint (the intent's bridge_max_fee). */
+  maxBridgeFeeMinor: bigint;
+  minFinalityThreshold: number;
+};
+
+export type PayoutInstruction = BankPayoutInstruction | CrossChainPayoutInstruction;
 
 export type PayoutOrder = { partnerRef: string; sandbox: boolean };
 
@@ -173,7 +211,7 @@ export type PayoutEvent =
     };
 
 export class PayoutPartnerUnavailable extends Error {
-  readonly code: 'partner_not_configured' | 'partner_not_connected' | 'partner_disabled' | 'partner_not_built' | 'currency_not_offered';
+  readonly code: 'partner_not_configured' | 'partner_not_connected' | 'partner_disabled' | 'partner_not_built' | 'currency_not_offered' | 'not_on_this_route' | 'bad_instruction';
   readonly status = 503;
   constructor(message: string, code: PayoutPartnerUnavailable['code']) {
     super(message);
@@ -182,8 +220,16 @@ export class PayoutPartnerUnavailable extends Error {
   }
 }
 
+/**
+ * One payout partner (v2 §4.5). The brief's five verbs are `quote`,
+ * `createPayout`, `status`, `handleWebhook` and `returnOrReverse`; a bank
+ * route also gives the business's fixed deposit address, checks an account's
+ * holder name with the bank, and is told the Sui digest after settlement.
+ */
 export interface PayoutPartner {
   id: PayoutPartnerId;
+  /** `bank`: USDC to the partner's deposit address, local currency to a bank. `cctp`: USDC burned on Sui, minted on another chain. */
+  rail: 'bank' | 'cctp';
   /** The partners behind the route, for labels (named only when signed). */
   partners: readonly PartnerId[];
   countries: readonly string[];
@@ -193,14 +239,15 @@ export interface PayoutPartner {
   depositAddress(input: { businessId: string; now: Date }): Promise<PartnerDepositAddress>;
   /** The bank's own holder name for an account (name enquiry). */
   checkAccount(input: { beneficiary: PayoutBeneficiary; now: Date }): Promise<AccountNameCheck>;
-  quote(input: { currency: string; sendMinor: bigint; now: Date }): Promise<PayoutQuote>;
+  /** `destinationChain` names the chain a cross-chain quote is for; bank routes ignore it. */
+  quote(input: { currency: string; sendMinor: bigint; now: Date; destinationChain?: string }): Promise<PayoutQuote>;
   /** The instruction, before the deposit. Idempotent by `intentId`: a retry names the same order. */
   createPayout(input: PayoutInstruction & { now: Date }): Promise<PayoutOrder>;
   /** After settlement: the Sui digest of the deposit. */
   postSettlement(input: { intentId: string; partnerRef: string; suiDigest: string; now: Date }): Promise<void>;
   status(input: { intentId: string; partnerRef: string; now: Date }): Promise<{ status: PartnerPayoutStatus; sandbox: boolean }>;
-  /** Verify a webhook's signature and freshness, then parse it. Throws WebhookRejected. */
-  verifyWebhook(input: { rawBody: string; signature: string | null; now: Date }): PayoutEvent;
+  /** Verify a webhook's signature and freshness (signature first), then parse it. Throws WebhookRejected. */
+  handleWebhook(input: { rawBody: string; signature: string | null; now: Date }): PayoutEvent;
   /**
    * Cancel an instruction no deposit followed, or ask for funds received to be
    * returned. A return goes to `returnAddress`, the business wallet.

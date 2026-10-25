@@ -48,7 +48,9 @@ export type SigningPurpose =
   /** v2 §4.4: a bank payout to the business's own account, through its partner deposit address. */
   | 'withdrawal'
   /** v2 §4.4: the small plain transfer that verifies a partner deposit address. */
-  | 'partner_test_deposit';
+  | 'partner_test_deposit'
+  /** v2 §4.5: a bank payout to a supplier's account, through the business's partner deposit address. */
+  | 'partner_payout';
 
 export type SigningStatus = 'collecting' | 'submitting' | 'unknown' | 'executed' | 'failed' | 'expired' | 'cancelled';
 

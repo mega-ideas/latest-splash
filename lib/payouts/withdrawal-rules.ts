@@ -140,7 +140,7 @@ export function openWithAny(sealed: string, keys: Buffer[], aad: string): { plai
 }
 
 /** What a destination's sealed fields are bound to. */
-export const destinationAad = (orgId: string, destinationId: string, field: 'account' | 'salt') => `withdrawal_destination:${orgId}:${destinationId}:${field}`;
+export const destinationAad = (orgId: string, destinationId: string, field: 'account' | 'salt' | 'party') => `withdrawal_destination:${orgId}:${destinationId}:${field}`;
 export const withdrawalAad = (orgId: string, withdrawalId: string) => `withdrawal:${orgId}:${withdrawalId}:commitment_salt`;
 
 // ─── The beneficiary ────────────────────────────────────────────────────────

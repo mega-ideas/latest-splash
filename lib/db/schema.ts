@@ -1882,6 +1882,12 @@ export const withdrawalDestinations = pgTable('withdrawal_destinations', {
   beneficiarySaltSealed: text('beneficiary_salt_sealed').notNull(),
   beneficiaryRef: text('beneficiary_ref').notNull(),
   label: text('label').notNull(),
+  /** own_account (a withdrawal) | supplier (a payout to another business, 0042) */
+  kind: text('kind').notNull().default('own_account'),
+  /** A supplier's ISO 20022 party (structured address, registration), sealed like the account (0042). */
+  partySealed: text('party_sealed'),
+  /** The payer's relationship to a supplier (lib/payments/iso20022.ts RELATIONSHIPS) (0042). */
+  relationship: text('relationship'),
   /** verified | revoked */
   status: text('status').notNull(),
   verifiedAt: timestamp('verified_at', { withTimezone: true }).notNull(),
@@ -1953,6 +1959,12 @@ export const withdrawals = pgTable('withdrawals', {
   intentConfirmedAt: timestamp('intent_confirmed_at', { withTimezone: true }),
   /** Why the digest is held back from the partner, for ops (0041). */
   settlementHold: text('settlement_hold'),
+  /** withdrawal (to the business's own bank) | supplier_payout (to a supplier's bank) (0042). */
+  kind: text('kind').notNull().default('withdrawal'),
+  /** ISO 20022 ExternalPurpose1Code (0042). */
+  purposeCode: text('purpose_code'),
+  /** The masked pacs.008-style evidence of what the partner was sent (lib/payments/iso20022.ts pacs008Evidence) (0042). */
+  iso20022: jsonb('iso20022'),
   /** preparing | awaiting_signatures | sent | partner_received | paid_out | failed | returned | cancelled */
   status: text('status').notNull(),
   failure: text('failure'),
@@ -1966,6 +1978,7 @@ export const withdrawals = pgTable('withdrawals', {
   uniqueIndex('withdrawals_sui_digest_unique').on(table.suiDigest).where(sql`${table.suiDigest} is not null`),
   uniqueIndex('withdrawals_return_digest_unique').on(table.returnDigest).where(sql`${table.returnDigest} is not null`),
   index('withdrawals_org_idx').on(table.orgId, table.status),
+  index('withdrawals_org_kind_idx').on(table.orgId, table.kind, table.status),
 ]);
 
 /** Every withdrawal, destination and deposit-address change, append-only (0040). */

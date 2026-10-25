@@ -6,7 +6,10 @@
  */
 
 import { isProductionRuntime } from '../server/runtime-mode.ts';
+import { cctpWalletAdapter } from './cctp-wallet.ts';
+import { durianpayAdapter } from './durianpay.ts';
 import { hataFiuuAdapter } from './hata-fiuu.ts';
+import { pdaxAdapter } from './pdax.ts';
 import { PayoutPartnerUnavailable, type PayoutPartner, type PayoutPartnerId } from './partner.ts';
 
 const ENABLED_FLAG: Record<PayoutPartnerId, { key: string; fallback: boolean }> = {
@@ -44,8 +47,13 @@ export function payoutPartner(id: PayoutPartnerId, env: NodeJS.ProcessEnv = proc
   switch (id) {
     case 'hata_fiuu':
       return hataFiuuAdapter(production, env);
+    case 'pdax':
+      return pdaxAdapter(production, env);
+    case 'durianpay':
+      return durianpayAdapter(production, env);
+    case 'cctp_wallet':
+      return cctpWalletAdapter(production, env);
     default:
-      // §4.5 moves pdax, durianpay and cctp_wallet onto this interface.
-      throw new PayoutPartnerUnavailable('This payout route is not on the payout interface yet.', 'partner_not_built');
+      throw new PayoutPartnerUnavailable('This payout route is not on the payout interface.', 'partner_not_built');
   }
 }

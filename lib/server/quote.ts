@@ -1,13 +1,14 @@
 import { randomUUID } from 'crypto';
 
 import { getUsdCorridorByCurrency } from '@/lib/fx/corridors';
-import { applyBps, applyRate, formatMinor, parseRate } from '@/lib/money';
+import { applyRate, formatMinor, parseRate } from '@/lib/money';
 import { quoteDiscountBps, quoteFeeState, type FeeScheduleSource } from '@/lib/fees/fee-config';
 import { destinationKind, destinationLabel, type PaymentDestination } from '@/lib/fees/destination';
 import { buildFeeQuote, feeQuoteToWire, type FeeQuoteWire, type ThirdPartyFee } from '@/lib/fees/quote';
 import { getCachedJson, setCachedJson } from '@/lib/server/redis-cache';
 import { evaluateTransferLimits, type LimitResult } from '@/lib/server/limits';
-import { pdaxAdapter, mockPdaxAdapter } from '@/lib/server/pdax';
+import { localDecimals } from '@/lib/payments/iso20022';
+import { pdaxAdapter } from '@/lib/server/pdax';
 import { labelFor } from '@/lib/server/signed-partners';
 import type { FundingFeeTier } from '@/lib/funding/registry';
 
@@ -128,11 +129,15 @@ async function partnerFeeFor(targetCurrency: string, principalMinor: bigint): Pr
   const label = labelFor('pdax');
   const who = label.charAt(0).toUpperCase() + label.slice(1);
   try {
-    const quote = await pdaxAdapter.quote(targetCurrency, Number(principalMinor));
-    const bps = quote.partnerFeeBps;
-    if (!Number.isInteger(bps) || bps < 0) throw new Error('the partner quoted no fee');
-    const sandbox = pdaxAdapter === mockPdaxAdapter;
-    return { minor: applyBps(principalMinor, bps, 'floor'), source: `${who}, ${sandbox ? 'sandbox quote' : 'live quote'}` };
+    // The partner's own quote (lib/payouts/pdax.ts): its fee lines, in PHP,
+    // shown here as the USDC they are worth at the partner's own rate. In
+    // production without the partner's API the adapter refuses, and the line
+    // says the partner quotes at payout: no fee is made up.
+    const quote = await pdaxAdapter().quote({ currency: targetCurrency, sendMinor: principalMinor, now: new Date() });
+    const localFee = quote.lines.reduce((a, l) => a + l.amountMinor, 0n);
+    if (localFee < 0n || quote.rateMicro <= 0n) throw new Error('the partner quoted no fee');
+    const minor = (localFee * 1_000_000_000_000n) / (quote.rateMicro * 10n ** BigInt(localDecimals(targetCurrency)));
+    return { minor, source: `${who}, ${quote.sandbox ? 'sandbox quote' : 'live quote'}` };
   } catch {
     return { minor: null, source: `${who} quotes its fee at payout` };
   }

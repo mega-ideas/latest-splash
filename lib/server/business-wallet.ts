@@ -581,11 +581,17 @@ export async function requestWalletPayment(
     wallet: WalletMembers;
     payment: Omit<WalletPayment, 'wallet' | 'account' | 'gas'>;
     /** A withdrawal: the deposit address and commitment the bytes must carry, and what its signers are shown. */
-    withdrawal?: { depositAddress: string; beneficiaryRef: string; details?: WithdrawalSigningDetails };
+    withdrawal?: {
+      /** `withdrawal` (the business's own bank, §4.4) or `partner_payout` (a supplier's bank, §4.5). Default `withdrawal`. */
+      purpose?: 'withdrawal' | 'partner_payout';
+      depositAddress: string;
+      beneficiaryRef: string;
+      details?: WithdrawalSigningDetails;
+    };
   },
 ): Promise<Result> {
   if (input.withdrawal) {
-    if (input.payment.kind !== V2_KIND.BANK_PAYOUT) return refuse(400, 'not_a_bank_payout', 'a withdrawal is a bank payout');
+    if (input.payment.kind !== V2_KIND.BANK_PAYOUT) return refuse(400, 'not_a_bank_payout', 'a withdrawal or partner payout is a bank payout');
     if (normalizeSuiAddress(input.payment.recipient) !== normalizeSuiAddress(input.withdrawal.depositAddress)) {
       return refuse(400, 'wrong_recipient', "a withdrawal pays the business's partner deposit address only");
     }
@@ -604,7 +610,7 @@ export async function requestWalletPayment(
   return openSigningRequest(ctx.signing, {
     orgId: input.orgId,
     requestedBy: input.requestedBy,
-    purpose: input.withdrawal ? 'withdrawal' : 'wallet_payment',
+    purpose: input.withdrawal ? (input.withdrawal.purpose ?? 'withdrawal') : 'wallet_payment',
     // The payment reference is the idempotency key on chain too: one intent
     // per reference, ever (derived_object::claim).
     dedupeKey: `pay:${Buffer.from(input.payment.paymentRef).toString('hex')}`,

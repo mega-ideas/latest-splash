@@ -183,6 +183,8 @@ function usdc(minor: string): string {
 
 function localAmount(minor: string, currency: string): string {
   const n = BigInt(minor);
+  // IDR is paid in whole rupiah (lib/payments/iso20022.ts LOCAL_DECIMALS); PHP and MYR in hundredths.
+  if (currency === 'IDR') return `${currency} ${n.toLocaleString('en-US')}`;
   return `${currency} ${(n / 100n).toLocaleString('en-US')}.${(n % 100n).toString().padStart(2, '0')}`;
 }
 
@@ -239,6 +241,22 @@ export function walletRequestHeadline(purpose: SigningPurpose, d: WalletTxDescri
         );
       }
       return `withdraw ${usdc(open.amountMinor)} to the business's own bank account in ${open.targetCurrency}, through the payout partner's deposit address ${shortAddress(open.recipient)}${fee}`;
+    }
+    case 'partner_payout': {
+      // §4.5: the payee is the supplier the bytes commit to by a salted hash,
+      // so the account it was built from is named here, as for a withdrawal.
+      const open = a.find((x) => x.type === 'open_intent') as Extract<WalletAction, { type: 'open_intent' }>;
+      const pay = a.find((x) => x.type === 'pay_intent') as Extract<WalletAction, { type: 'pay_intent' }>;
+      const fee = BigInt(pay.maxFeeMinor) > 0n ? `, Splash fee at most ${usdc(pay.maxFeeMinor)}` : '';
+      if (withdrawal) {
+        const by = new Date(Number(withdrawal.settleByMs)).toISOString().slice(0, 16).replace('T', ' ');
+        return (
+          `pay ${usdc(open.amountMinor)} to ${withdrawal.holderName}, bank ${withdrawal.bankCode}, account ending ${withdrawal.last4}${withdrawal.purposeCode ? ` (purpose ${withdrawal.purposeCode})` : ''}: ` +
+          `about ${localAmount(withdrawal.receiveMinor, withdrawal.currency)} at ${rateOf(withdrawal.rateMicro, withdrawal.currency)}, and at least ${localAmount(withdrawal.minReceiveMinor, withdrawal.currency)} or the USDC comes back, ` +
+          `through the payout partner's deposit address ${shortAddress(open.recipient)}${fee}; sign by ${by} UTC`
+        );
+      }
+      return `pay ${usdc(open.amountMinor)} to a supplier's bank account in ${open.targetCurrency}, through the payout partner's deposit address ${shortAddress(open.recipient)}${fee}`;
     }
     case 'partner_test_deposit': {
       const s = a.find((x) => x.type === 'send_funds') as Extract<WalletAction, { type: 'send_funds' }>;

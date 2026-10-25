@@ -258,7 +258,7 @@ export async function liveWalletContext(orgId: string): Promise<{ ok: true; ctx:
   // A withdrawal signature is taken only while the bank account and deposit
   // address it pays are still the ones its bytes commit to (v2 §4.4).
   signing.beforeSign = async (request) => {
-    if (request.purpose !== 'withdrawal') return null;
+    if (request.purpose !== 'withdrawal' && request.purpose !== 'partner_payout') return null;
     const { withdrawalBeforeSign } = await import('@/lib/server/withdrawals');
     return withdrawalBeforeSign({ db }, request);
   };
@@ -269,7 +269,7 @@ export async function liveWalletContext(orgId: string): Promise<{ ok: true; ctx:
     // closes that offboarding to-do (Postgres only).
     const { resolveOffboardedSpenders } = await import('@/lib/server/spend-standing');
     await resolveOffboardedSpenders(db, request);
-    if (request.purpose === 'withdrawal' || request.purpose === 'partner_test_deposit') {
+    if (request.purpose === 'withdrawal' || request.purpose === 'partner_payout' || request.purpose === 'partner_test_deposit') {
       // v2 §4.4: the withdrawal is sent and its digest posted to the partner,
       // or the test deposit is recorded for the partner to confirm.
       // The digest is posted only once the chain shows the intent the partner was instructed for.

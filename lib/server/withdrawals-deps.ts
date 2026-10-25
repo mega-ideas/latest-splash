@@ -15,6 +15,7 @@ import { NextResponse } from 'next/server';
 
 import { organizations } from '@/lib/db/schema';
 import { parseSignedPartners } from '@/lib/partners/signed-partners';
+import { debtorFromProfile } from '@/lib/payments/iso20022';
 import { payoutPartner } from '@/lib/payouts/registry';
 import { corePackageOriginalIdFor, splashControlledAddresses } from '@/lib/payouts/withdrawal-rules';
 import { currentWalletMembers } from '@/lib/server/business-wallet';
@@ -94,6 +95,26 @@ export function withdrawalDepsFor(route: WalletRoute, env: NodeJS.ProcessEnv = p
     corePackageOriginalId: original,
     fiatOutOpen: () => !stablecoinOnly(),
     signedPartners: parseSignedPartners(env.SIGNED_PARTNERS),
+    // The paying business as an ISO 20022 party, from its KYB profile (the
+    // columns lib/server/originator.ts reads), and only once KYB verified the name.
+    debtorParty: async () => {
+      const [org] = await db
+        .select({
+          legalName: organizations.legalName,
+          kybStatus: organizations.kybStatus,
+          registrationNumber: organizations.registrationNumber,
+          addressLine1: organizations.addressLine1,
+          addressCity: organizations.addressCity,
+          addressState: organizations.addressState,
+          addressPostalCode: organizations.addressPostalCode,
+          addressCountry: organizations.addressCountry,
+        })
+        .from(organizations)
+        .where(eq(organizations.id, orgId))
+        .limit(1);
+      if (!org) return { party: null, missing: ['profile'] };
+      return debtorFromProfile({ ...org, legalName: verifiedLegalName(org) });
+    },
   };
 }
 

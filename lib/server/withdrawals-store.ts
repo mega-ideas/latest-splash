@@ -168,8 +168,11 @@ export async function depositAddressForWebhook(db: DrizzleDb, partner: string, a
 
 // ─── Withdrawals ────────────────────────────────────────────────────────────
 
-export async function listWithdrawalRows(db: DrizzleDb, orgId: string): Promise<WithdrawalRow[]> {
-  return db.select().from(withdrawals).where(eq(withdrawals.orgId, orgId)).orderBy(desc(withdrawals.createdAt));
+/** A withdrawal to the business's own bank, or a payout to a supplier's bank (0042). */
+export type PayoutRowKind = 'withdrawal' | 'supplier_payout';
+
+export async function listWithdrawalRows(db: DrizzleDb, orgId: string, kind: PayoutRowKind = 'withdrawal'): Promise<WithdrawalRow[]> {
+  return db.select().from(withdrawals).where(and(eq(withdrawals.orgId, orgId), eq(withdrawals.kind, kind))).orderBy(desc(withdrawals.createdAt));
 }
 
 export async function getWithdrawalRow(db: DrizzleDb, orgId: string, id: string): Promise<WithdrawalRow | null> {
