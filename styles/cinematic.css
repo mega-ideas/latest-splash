@@ -811,7 +811,10 @@
 
 /* ── Reduced-motion static variant ────────────────────────────────── */
 
-.cin-section-static {
+/* Two classes, so the narrow-screen `.cin-section { height: 430vh }` (the
+   pinned cinematic's scroll length) never lands on the static hero phones
+   get: that left about 1,900 px of empty cream under the telemetry. */
+.cin-section.cin-section-static {
   height: auto;
 }
 

@@ -160,6 +160,50 @@ function DeskPreview() {
   );
 }
 
+/* ── The same desk on a phone: the app's own phone layout, peeking out
+   from behind the calculator (board "Product section · phone"). Layout
+   only, like the desk above: no balances, no amounts. Shown by CSS at
+   700 px and under, where the desktop desk is hidden. ─────────────────── */
+
+/** A phone shows the first three payments: a PH bank, an ID bank, and one waiting on an owner. */
+const PHONE_ROWS = DESK_ROWS.slice(0, 3);
+
+function PhoneDeskPreview() {
+  return (
+    <div className="pv-phone-desk" aria-hidden="true">
+      <div className="pv-phone-bar">
+        <span className="pv-desk-brand">
+          <Image src="/splash-main-icon.png" alt="" width={22} height={22} />
+          <strong>Splash</strong>
+        </span>
+        <i className="pv-phone-menu" />
+      </div>
+      <div className="pv-phone-body">
+        <div className="pv-phone-card">
+          <small>Splash Wallet</small>
+          <i className="pv-bar pv-bar-lg" />
+          <em>USDC, held by your business</em>
+        </div>
+        <div className="pv-phone-card pv-phone-approve">
+          <span>Needs approval</span>
+          <b>Review</b>
+        </div>
+        <div className="pv-phone-card pv-phone-list">
+          {PHONE_ROWS.map((row) => (
+            <div key={row.who}>
+              <span>
+                <strong>{row.who}</strong>
+                <small>{row.type}</small>
+              </span>
+              <b className={`pv-chip is-${row.tone}`}>{row.status}</b>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ── Pilot access ───────────────────────────────────────────────────── */
 
 /** How long the access form waits for the server before it lets the reader try again. */
@@ -547,6 +591,7 @@ export default function ProductSection({ fees }: { fees: { schedule: FeeSchedule
         <div className="pv-stage">
           <DeskPreview />
           <Calculator schedule={schedule} feesOn={fees.feesOn} />
+          <PhoneDeskPreview />
         </div>
       </div>
     </section>

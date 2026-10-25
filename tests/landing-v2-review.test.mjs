@@ -222,7 +222,11 @@ test('phones get their own landing composition, not the desktop stacked', () => 
   const phone = css.slice(css.indexOf('/* ── Phone composition'));
   assert.ok(phone.length > 30, 'there is a phone composition block');
   assert.match(phone, /\.pv-actions \{ display: none; \}/, 'the product section opens on the calculator, not a second pair of buttons');
-  assert.match(phone, /\.pv-desk \{[^}]*order: -1/, 'the desk peeks out from behind the calculator, above it');
+  // Step C: the desktop desk is no longer cut down to its title above the
+  // calculator; a phone-sized desk peeks out from behind it, below
+  // (tests/landing-v2-step-c.test.mjs has the detail).
+  assert.match(phone, /\.pv-desk \{ display: none; \}/, 'the desktop desk is not squeezed onto a phone');
+  assert.match(phone, /\.pv-phone-desk \{[^}]*margin: -44px auto 0/, 'the phone desk peeks out from behind the calculator');
   assert.match(phone, /\.hw-steps-phone \{[^}]*display: grid/, 'the five steps are stacked');
   assert.match(phone, /\.iso-loops-grid \{[^}]*scroll-snap-type: x mandatory/, 'the loop cards swipe');
   assert.match(phone, /\.ps-cta/, 'a sticky bottom CTA');

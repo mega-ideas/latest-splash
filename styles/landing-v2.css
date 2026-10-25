@@ -918,19 +918,9 @@
   .pv-head { gap: 14px; }
   .pv-head > p { margin-top: 4px; }
   .iso-product .pv-stage { margin-top: 28px; }
-  .iso-product .pv-desk {
-    order: -1;
-    z-index: 0;
-    width: 100%;
-    height: 210px;
-    margin: 0 0 -132px;
-    transform: none;
-    opacity: .92;
-    -webkit-mask-image: linear-gradient(180deg, #000 30%, transparent 92%);
-    mask-image: linear-gradient(180deg, #000 30%, transparent 92%);
-  }
-  .iso-product .pv-desk-cards,
-  .iso-product .pv-desk-top { display: none; }
+  /* The desktop desk is not squeezed onto a phone: the phone desk
+     (.pv-phone-desk, step C below) peeks out from behind the calculator. */
+  .iso-product .pv-desk { display: none; }
   .iso-product .pv-calc { position: relative; z-index: 2; }
 
   /* How it works: stacked steps instead of tabs and a picture panel. */
@@ -1589,4 +1579,301 @@
     box-shadow: 4px 5px 0 rgba(12, 62, 72, .1);
   }
   .iso-landing .iso-splash-today dl { grid-template-columns: 1fr; gap: 12px; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Step C: the phone landing, its own composition per section (D15).
+   Everything here is hidden above 700 px; the desktop is unchanged.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* The hero's description and proof line sit over the district art's soft
+   wash; at 72% ink they measured 3.9:1 to 4.3:1 against the pixels behind
+   them at 1440x900. Full ink clears 4.5:1 everywhere on the wash. */
+.iso-landing .cin-copy .iso-hero-description,
+.iso-landing .cin-copy .iso-proof-line span { color: rgba(12, 62, 72, .9); }
+
+.pv-phone-desk { display: none; }
+.lc-controls { display: none; }
+.pc-compare { display: none; }
+
+@media (max-width: 700px) {
+  /* ── Product: the phone desk peeking out from behind the calculator ── */
+  .pv-phone-desk {
+    display: block;
+    position: relative;
+    z-index: 1;
+    width: min(300px, 84%);
+    margin: -44px auto 0;
+    padding: 52px 0 28px;
+    overflow: hidden;
+    border: 1px solid rgba(12, 62, 72, .18);
+    border-radius: 28px;
+    background: #f3ece7;
+    box-shadow: 0 30px 60px -30px rgba(8, 54, 64, .5);
+    /* The fade covers only the bottom padding, so no label in the desk
+       is drawn at less than full contrast. */
+    -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 28px), transparent);
+    mask-image: linear-gradient(180deg, #000 calc(100% - 28px), transparent);
+  }
+  .pv-phone-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 14px;
+    background: var(--iso-teal-dark);
+  }
+  .pv-phone-bar .pv-desk-brand { padding: 0; font-size: 15px; }
+  .pv-phone-menu {
+    width: 18px;
+    height: 12px;
+    border-block: 2px solid var(--iso-paper);
+    background: linear-gradient(var(--iso-paper), var(--iso-paper)) center / 100% 2px no-repeat;
+  }
+  .pv-phone-body {
+    display: grid;
+    gap: 10px;
+    padding: 14px;
+  }
+  .pv-phone-card {
+    display: grid;
+    gap: 8px;
+    padding: 12px;
+    border: 1px solid rgba(50, 98, 115, .14);
+    border-radius: 12px;
+    background: #fffaf2;
+  }
+  .pv-phone-card small {
+    color: var(--iso-teal);
+    font-family: var(--font-mono), monospace;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+  }
+  .pv-phone-card em {
+    color: var(--iso-ink);
+    font-size: 12px;
+    font-style: normal;
+    font-weight: 600;
+  }
+  .pv-phone-approve {
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    color: var(--iso-ink);
+    font-size: 13px;
+    font-weight: 700;
+  }
+  .pv-phone-approve b {
+    padding: 6px 10px;
+    border-radius: 8px;
+    color: var(--iso-paper);
+    background: var(--iso-ink);
+    font-size: 12px;
+  }
+  .pv-phone-list { gap: 0; padding-block: 4px; }
+  .pv-phone-list > div {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 0;
+  }
+  .pv-phone-list > div + div { border-top: 1px solid rgba(50, 98, 115, .1); }
+  .pv-phone-list span { display: grid; gap: 2px; min-width: 0; }
+  .pv-phone-list strong {
+    overflow: hidden;
+    color: var(--iso-ink);
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .pv-phone-list span small {
+    color: var(--iso-ink);
+    font-family: inherit;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+
+  /* ── Three loops: the controls under the swipeable row ── */
+  .lc .iso-loops-grid:focus-visible {
+    outline: 2px solid var(--iso-teal);
+    outline-offset: 4px;
+    border-radius: 18px;
+  }
+  .lc-controls {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: 6px;
+  }
+  .lc-step {
+    display: grid;
+    flex: 0 0 44px;
+    width: 44px;
+    height: 44px;
+    place-items: center;
+    border: 1px solid rgba(12, 62, 72, .22);
+    border-radius: 50%;
+    color: var(--iso-ink);
+    background: var(--surface);
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  .lc-step svg { width: 20px; height: 20px; }
+  .lc-step:disabled { opacity: .4; cursor: default; }
+  .lc-dots { display: flex; gap: 6px; }
+  .lc-dot {
+    min-height: 44px;
+    padding: 0 14px;
+    border: 1px solid rgba(12, 62, 72, .22);
+    border-radius: var(--r-pill, 999px);
+    color: var(--iso-ink);
+    background: transparent;
+    font-size: 13px;
+    font-weight: 750;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  .lc-dot[aria-current='true'] {
+    border-color: var(--iso-ink);
+    color: var(--iso-paper);
+    background: var(--iso-ink);
+  }
+  .lc-step:focus-visible,
+  .lc-dot:focus-visible {
+    outline: 2px solid var(--iso-teal);
+    outline-offset: 2px;
+  }
+
+  /* ── Comparison: Splash beside one alternative at a time ── */
+  .iso-landing .iso-comparison-wrap .iso-comparison-table { display: none; }
+  .pc-compare {
+    display: grid;
+    gap: 12px;
+  }
+  .pc-tabs {
+    display: flex;
+    padding: 3px;
+    border-radius: 999px;
+    background: #f1ebe3;
+  }
+  .pc-tabs button {
+    flex: 1;
+    min-height: 44px;
+    border: 0;
+    border-radius: 999px;
+    color: var(--iso-ink);
+    background: transparent;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  .pc-tabs button[aria-selected='true'] {
+    color: var(--iso-paper);
+    background: var(--iso-ink);
+  }
+  .pc-tabs button:focus-visible {
+    outline: 2px solid var(--iso-teal);
+    outline-offset: 2px;
+  }
+  .pc-panel { display: grid; gap: 10px; }
+  .pc-row {
+    padding: 14px 14px 12px;
+    border: 1px solid rgba(12, 62, 72, .16);
+    border-radius: 14px;
+    background: rgba(255, 253, 249, .94);
+  }
+  .pc-row h4 {
+    margin: 0 0 10px;
+    color: var(--iso-ink);
+    font-size: 15px;
+    font-weight: 800;
+    letter-spacing: -.01em;
+  }
+  .pc-row dl {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin: 0;
+  }
+  .pc-row dl > div {
+    display: grid;
+    align-content: start;
+    gap: 4px;
+    padding: 10px;
+    border-radius: 10px;
+    background: rgba(12, 62, 72, .04);
+  }
+  .pc-row dl > div.is-splash { background: rgba(13, 99, 112, .09); }
+  .pc-row dt {
+    color: var(--iso-ink);
+    font-family: var(--font-mono), monospace;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+  }
+  .pc-row dd {
+    margin: 0;
+    color: var(--iso-ink);
+    font-size: 13.5px;
+    font-weight: 600;
+    line-height: 1.4;
+    font-variant-numeric: tabular-nums;
+  }
+  .pc-row .is-splash dd { color: var(--iso-teal-dark); font-weight: 750; }
+  .pc-row .is-splash dd svg {
+    display: inline;
+    width: 14px;
+    height: 14px;
+    vertical-align: -2px;
+    color: var(--iso-teal);
+  }
+
+  /* ── Platform: shorter art, so the three layers read as one sequence ── */
+  .iso-landing .iso-layer-art { max-height: 220px; }
+  .iso-layer-picture { display: contents; }
+  .iso-landing .iso-layer-art img { max-height: 220px; object-fit: contain; }
+
+  /* ── Trust: the four gates as one connected sequence, on one rail ── */
+  .iso-landing .iso-trust-grid {
+    position: relative;
+    gap: 0;
+  }
+  .iso-landing .iso-trust-grid::before {
+    content: '';
+    position: absolute;
+    top: 16px;
+    bottom: 24px;
+    left: 15px;
+    width: 2px;
+    border-radius: 2px;
+    background: linear-gradient(180deg, var(--iso-gold), rgba(159, 207, 199, .55));
+  }
+  .iso-landing .iso-trust-card {
+    position: relative;
+    gap: 8px;
+    padding: 0 0 26px;
+    padding-left: 52px;
+    border: 0;
+    border-radius: 0;
+    background: none;
+  }
+  .iso-landing .iso-trust-card:hover { transform: none; }
+  .iso-landing .iso-trust-card:last-child { padding-bottom: 0; }
+  .iso-landing .iso-trust-meta { min-height: 32px; }
+  .iso-landing .iso-trust-meta span {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 32px;
+    height: 32px;
+  }
+  .iso-landing .iso-trust-card h3 { font-size: 19px; }
+  .iso-landing .iso-trust-card > p { font-size: 14px; }
+  .iso-landing .iso-trust-card small { padding-top: 10px; }
 }

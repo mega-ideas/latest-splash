@@ -2,7 +2,7 @@
 
 import Image from 'next/image';
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type KeyboardEvent } from 'react';
 import {
   Anchor,
   ArrowDownRight,
@@ -22,6 +22,7 @@ import {
 
 import FloatingToken from '@/components/landing/FloatingToken';
 import HowItWorks from '@/components/landing/HowItWorks';
+import LoopCarousel from '@/components/landing/LoopCarousel';
 import PartnersRail, { type SignedPartner } from '@/components/landing/PartnersRail';
 import PhoneStickyCta from '@/components/landing/PhoneStickyCta';
 import ProductSection from '@/components/landing/ProductSection';
@@ -33,7 +34,7 @@ import { lockedCopy, saasCompliance } from '@/content/claims';
 import { pricingSummary, type FeeScheduleWire, type PricingSummary } from '@/lib/fees/copy';
 import { LAUNCH_SCHEDULE } from '@/lib/fees/schedule';
 import { getComparisonBaseline } from '@/lib/fx/comparison-baselines';
-import { comparisonRows, splashToday, SPEED_LINE } from '@/lib/landing/comparison';
+import { comparisonRows, splashToday, SPEED_LINE, type ComparisonRow } from '@/lib/landing/comparison';
 import { landingImage, type LandingImage } from '@/lib/landing/images';
 import { PILOT_ROUTES, QUOTABLE_ROUTES, type QuotableCurrency } from '@/lib/landing/routes';
 import { REQUEST_ACCESS_ID } from '@/components/landing/ProductSection';
@@ -225,6 +226,76 @@ function LoopChip({ status }: { status: LoopStatus }) {
   if (status === 'signoff') return <RoadmapChip detail="after legal sign-off" />;
   if (status === 'quotes') return <em className="iso-loops-live is-quotes">Quotes open</em>;
   return <em className="iso-loops-live"><i aria-hidden="true" /> Live</em>;
+}
+
+/* The comparison on a phone (v2 brief D15): Splash beside one alternative at
+   a time, chosen with tabs, instead of the four-column table re-laid as a
+   dozen cards. Same rows as the table (lib/landing/comparison.ts), so a
+   phone and a desktop never say different things. */
+const ALTERNATIVES = [
+  { id: 'bank', label: 'Bank' },
+  { id: 'broker', label: 'Broker' },
+  { id: 'fintech', label: 'Fintech app' },
+] as const;
+type Alternative = (typeof ALTERNATIVES)[number]['id'];
+
+function PhoneComparison({ rows }: { rows: readonly ComparisonRow[] }) {
+  const [alt, setAlt] = useState<Alternative>('bank');
+  const current = ALTERNATIVES.findIndex((a) => a.id === alt);
+
+  function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    const last = ALTERNATIVES.length - 1;
+    const moves: Record<string, number> = {
+      ArrowLeft: current === 0 ? last : current - 1,
+      ArrowRight: current === last ? 0 : current + 1,
+      Home: 0,
+      End: last,
+    };
+    if (!(event.key in moves)) return;
+    event.preventDefault();
+    const next = ALTERNATIVES[moves[event.key]];
+    setAlt(next.id);
+    document.getElementById(`pc-tab-${next.id}`)?.focus();
+  }
+
+  const label = ALTERNATIVES[current].label;
+  return (
+    <div className="pc-compare">
+      <div className="pc-tabs" role="tablist" aria-label="Compare Splash with" onKeyDown={onKeyDown}>
+        {ALTERNATIVES.map((a) => (
+          <button
+            type="button"
+            role="tab"
+            key={a.id}
+            id={`pc-tab-${a.id}`}
+            aria-selected={a.id === alt}
+            aria-controls="pc-panel"
+            tabIndex={a.id === alt ? 0 : -1}
+            onClick={() => setAlt(a.id)}
+          >
+            {a.label}
+          </button>
+        ))}
+      </div>
+      <div className="pc-panel" role="tabpanel" id="pc-panel" aria-labelledby={`pc-tab-${alt}`}>
+        {rows.map((row) => (
+          <div className="pc-row" key={row.feature}>
+            <h4>{row.feature}</h4>
+            <dl>
+              <div className="is-splash">
+                <dt>Splash</dt>
+                <dd><Check aria-hidden="true" /> {row.splash}</dd>
+              </div>
+              <div>
+                <dt>{label}</dt>
+                <dd>{row[alt]}</dd>
+              </div>
+            </dl>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 const LAUNCH_PRICING = pricingSummary(LAUNCH_SCHEDULE);
@@ -475,6 +546,7 @@ export default function IsometricLanding({
           </div>
 
           <div className="iso-comparison-wrap">
+            <PhoneComparison rows={rows} />
             {/* Explicit roles: on a phone the rows are re-laid as cards, and a
                 browser drops a table's implicit roles once its display changes. */}
             <table className="iso-comparison-table" role="table">
@@ -548,9 +620,14 @@ export default function IsometricLanding({
             </p>
           </div>
 
-          <div className="iso-loops-grid">
+          <LoopCarousel labels={loops.map((loop) => loop.label)}>
             {loops.map((loop, index) => (
-              <article className={`iso-loops-card iso-loops-card-${index + 1}`} key={loop.number}>
+              <article
+                className={`iso-loops-card iso-loops-card-${index + 1}`}
+                key={loop.number}
+                aria-roledescription="slide"
+                aria-label={`${index + 1} of ${loops.length}: ${loop.label}`}
+              >
                 <div className="iso-loops-meta">
                   <span>{loop.number}</span>
                   <p>{loop.label}</p>
@@ -572,7 +649,7 @@ export default function IsometricLanding({
                 </div>
               </article>
             ))}
-          </div>
+          </LoopCarousel>
 
           <div className="iso-loops-foot">
             <p className="iso-gasless-note">
@@ -614,10 +691,15 @@ export default function IsometricLanding({
                   <p>{layer.label}</p>
                 </div>
                 <div className="iso-layer-art">
+                  {/* Phones get the art's own phone crop (scripts/landing-images.mjs);
+                      wider screens the WebP widths the loader picks. */}
                   {layer.art ? (
-                    <Image src={layer.art.src} loader={layer.art.loader} alt={layer.imageAlt} width={layer.art.width} height={layer.art.height} sizes="(max-width: 900px) 92vw, 440px" />
+                    <picture className="iso-layer-picture">
+                      <source media="(max-width: 700px)" srcSet={layer.art.phone.src} width={layer.art.phone.width} height={layer.art.phone.height} />
+                      <Image src={layer.art.src} loader={layer.art.loader} alt={layer.imageAlt} width={layer.art.width} height={layer.art.height} sizes="(max-width: 900px) 92vw, 440px" />
+                    </picture>
                   ) : (
-                    <Image src={layer.image} alt={layer.imageAlt} width={1448} height={1086} />
+                    <Image src={layer.image} alt={layer.imageAlt} width={1448} height={1086} sizes="(max-width: 900px) 92vw, 440px" />
                   )}
                 </div>
                 <div className="iso-layer-copy">
@@ -684,6 +766,7 @@ export default function IsometricLanding({
               alt="Zeke, an isometric robot assistant at a desk, presenting suggestion cards"
               width={2172}
               height={1629}
+              sizes="(max-width: 900px) 92vw, 640px"
             />
             <div className="iso-copilot-memory">
               <BrainCircuit aria-hidden="true" />

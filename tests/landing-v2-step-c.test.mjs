@@ -32,8 +32,7 @@ function phoneCss(p) {
   const css = read(p).replace(/\/\*[\s\S]*?\*\//g, ' ');
   const out = [];
   const re = /@media\s*\(max-width:\s*700px\)\s*\{/g;
-  let m;
-  while ((m = re.exec(css))) {
+  while (re.exec(css)) {
     let depth = 1;
     let i = re.lastIndex;
     while (depth > 0 && i < css.length) {
