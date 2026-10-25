@@ -69,8 +69,30 @@ Design: `docs/v2/phase2-payout-partners.md`. Tests:
   commitment or purpose. The row keeps the masked evidence form only (last
   four digits; town and country of the address). A supplier payout needs
   the payer's KYB profile complete (`originator_incomplete` otherwise).
+- **Review fixes (p2-4.5).** High: a staff draft of kind 4 (or any kind)
+  to the business's partner deposit address could be accepted by an owner
+  and paid as a plain `wallet_payment`, with no instruction to the partner
+  first. Now a bank payout, or any payment to a partner deposit address of
+  the business, is refused with `use_payout_route` in
+  `requestWalletPayment`, `requestOpenIntentPayment`, the ask and accept
+  paths, and the `wallet_payment` shape check. Medium: a name with `&` or
+  an accented letter blocked every withdrawal (`bad_iso20022`): the CBPR+
+  extended characters are accepted and the business's own text is
+  transliterated and flagged. Medium: nothing wrote the registered address
+  a supplier payout's originator needs: the owner's profile save takes the
+  structured address. Low: a spending rule binds only this business's own
+  verified bank accounts, each to its own partner's deposit address; the
+  adapter check also binds the settlement amount, rate, minimum, debtor and
+  charges; registration numbers are masked in the stored evidence and
+  viewers do not read payouts; the dev sweep quotes by currency; each
+  sandbox route has its own webhook secret.
 - **Open:** name screening of a supplier (§4.6); the live partner APIs;
-  Circle's fee API and the bridge adapter for `cctp_wallet`.
+  Circle's fee API and the bridge adapter for `cctp_wallet`. A staff member
+  holding a spending rule that binds a beneficiary can still open and pay a
+  kind 4 intent from their own device under that rule (Move permits it);
+  Splash does not build or sponsor that path, and the partner gets no
+  instruction for it, so bind beneficiaries in rules only once a staff
+  payout route exists.
 
 ## v2 Phase 2 §4.4 — withdrawals to the business's own bank — 2026-10-25
 

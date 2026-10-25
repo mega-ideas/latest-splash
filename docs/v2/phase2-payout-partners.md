@@ -110,6 +110,30 @@ the same:
 `anchor_audit_hash` is not in this PTB: the `AnchorCap` is the operator's,
 so it is the operator's own transaction, as before.
 
+**This is the only way money reaches a partner** (p2-4.5 review). A bank
+payout (kind 4), or a payment of any kind to one of the business's partner
+deposit addresses (verified or still waiting for its test deposit), is
+refused everywhere else with `use_payout_route` (409):
+`requestWalletPayment` without its withdrawal block, `requestOpenIntentPayment`,
+a staff member's draft or open-intent ask (`askOwnersToApprove`), an owner
+accepting an ask stored before the check, and the `wallet_payment` shape
+check (an `open_intent` or existing intent of kind 4). A staff member asks
+for a supplier payout through `POST /api/wallet/payouts`, which instructs the
+partner before anything is signed.
+
+**Binding a beneficiary in the spending rules** (`addBeneficiaries`): the
+commitment must be the `beneficiaryRef` of one of this business's verified
+bank accounts (`beneficiary_not_a_destination` otherwise), and the deposit
+address the verified one of that account's own partner
+(`beneficiary_partner_mismatch`). The business multisig adds it to the
+SpendPolicy through `POST /api/wallet/spending-rules/recipients`.
+
+**Before the first supplier payout** an owner saves the business's
+structured registered address with its profile (`POST /api/onboarding/profile`
+`address: { streetName, buildingName, postCode, townName, countrySubDivision }`,
+the country is `addressCountry`). Without it every supplier payout answers
+`originator_incomplete`. The setup form's address fields are Phase 3 UI.
+
 ## ISO 20022
 
 `lib/payments/iso20022.ts` is the one mapping from the recipient form to
@@ -132,15 +156,36 @@ id) and `UETR` (derived from the intent id, the same on every retry),
 receives; IDR in whole rupiah), `XchgRate`, `ChrgBr` SHAR with the
 partner's lines in `ChrgsInf`, `Dbtr` from the payer's KYB profile,
 `DbtrAcct` (the Sui wallet), and the intent id, asset, deposit address and
-beneficiary commitment in `SplmtryData`. Only Latin characters CBPR+ allows
-are taken; anything else is refused, not transliterated.
+beneficiary commitment in `SplmtryData`.
+
+Characters: the CBPR+ Latin set plus the extended-set characters business
+names and addresses use, `& # @ ! % * = _ ;` (an adapter that writes XML
+escapes `&` with `escapeXmlText`). A supplier's holder name is the one its
+bank checks, so an accented letter or another script is refused when the
+supplier is added, before any name enquiry. The business's own text (the
+debtor, and a withdrawal's creditor) is transliterated instead (Cafe for
+Café; an unreadable optional part left out), never a refusal, and
+`SplmtryData.transliterated` plus an `iso20022_transliterated` trail event
+name the fields changed.
+
+Each adapter checks the message against the instruction before sending:
+intent, amount, settlement amount, rate, the owners' minimum, charges,
+account, holder, bank, deposit address, wallet, commitment, debtor name and
+registration, relationship and purpose.
 
 A withdrawal (§4.4) carries a message too: purpose `INTC`, relationship
 `self`, the creditor is the business itself.
 
 The evidence export (§4.6) takes `pacs008Evidence`: the same message,
-masked to the account's last four digits and the address's town and
-country. A supplier payout stores it on its row (`withdrawals.iso20022`).
+masked to the last four characters of the account and of both registration
+numbers, and the address's town and country. A supplier payout stores it on
+its row (`withdrawals.iso20022`). Payouts and suppliers are read by owners
+and staff only, not viewers (`requirePayoutReader`).
+
+Sandbox webhooks: each route verifies with its own secret,
+HMAC-SHA256(`PAYOUT_SANDBOX_WEBHOOK_SECRET`, `splash:payout-sandbox-webhook:v1:<partner>`)
+(`sandboxWebhookSecretFor`), so a body signed for one route does not verify
+at another, as with the live secrets.
 
 ## cctp_wallet
 

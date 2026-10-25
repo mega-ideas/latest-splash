@@ -208,7 +208,9 @@ Nothing moves backwards. Paid out, returned and cancelled are final.
 t=…,v1=…`, which is HMAC-SHA256 over `t.body`. The signature is checked
 first, inside a 5-minute window. The sandbox accepts a webhook only with
 `PAYOUT_SANDBOX_WEBHOOKS_ENABLED=true` and a random
-`PAYOUT_SANDBOX_WEBHOOK_SECRET` of at least 32 characters.
+`PAYOUT_SANDBOX_WEBHOOK_SECRET` of at least 32 characters; each route signs
+with its own key derived from it (`sandboxWebhookSecretFor(env, partner)`,
+lib/payouts/partner.ts).
 
 - `payout.status`: `funds_received`, `paid_out` (with Fiuu's `bankRef`),
   `failed` or `returned` (with `returnDigest`).
