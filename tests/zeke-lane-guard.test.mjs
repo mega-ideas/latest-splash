@@ -14,7 +14,19 @@ import {
   resetOxwalFixtures,
   resetOxwalProposalStore,
   runOxwalAgent,
+  upsertOxwalCounterpartyFixture,
 } from '../lib/agent/oxwal.ts';
+
+/**
+ * A verified supplier of the org's own. Drafts name only the session org's
+ * counterparties: the sample workspace's cp_acme_ph is readable by every
+ * business but payable only by the sample workspace itself (v2 §4.8 review).
+ */
+function ownSupplier(orgId) {
+  const id = `cp_${orgId.replace(/[^a-z0-9]/gi, '_')}_ph`;
+  upsertOxwalCounterpartyFixture({ id, orgId, name: 'Acme Manufacturing PH', kybStatus: 'VERIFIED' });
+  return id;
+}
 import { buildRecipient } from '../lib/server/operations.ts';
 import { persistRecipient, recordRecipientScreening } from '../lib/server/recipients-store.ts';
 import { findSavedRecipient, listSavedRecipients } from '../lib/agent/recipient-tools.ts';
@@ -134,7 +146,8 @@ test('an unverified business asking to pay in PHP is refused before any tool run
 test('the same request from a verified business still drafts a proposal', async () => {
   resetOxwalFixtures();
   resetOxwalProposalStore();
-  const events = await run({ message: 'Pay cp_acme_ph 5000 PHP', orgId: 'org-verified', kybState: 'ACTIVE' });
+  const supplier = ownSupplier('org-verified');
+  const events = await run({ message: `Pay ${supplier} 5000 PHP`, orgId: 'org-verified', kybState: 'ACTIVE' });
   assert.equal(events.filter((e) => e.type === 'proposal').length, 1);
   assert.equal(events.some((e) => e.type === 'warning' && e.warning.code === 'LANE_LOCKED'), false);
 });
@@ -144,7 +157,8 @@ test('the invoice loop: Zeke reads a PHP invoice the operator never described, a
   resetOxwalProposalStore();
   await withGate(true, async () => {
     // No currency in the message. The invoice says PHP; the tool reads it.
-    const events = await run({ message: 'pay invoice inv_demo_acme_5000 to cp_acme_ph', orgId: 'org-unverified' });
+    const supplier = ownSupplier('org-unverified');
+    const events = await run({ message: `pay invoice inv_demo_acme_5000 to ${supplier}`, orgId: 'org-unverified' });
     assert.ok(events.some((e) => e.type === 'tool' && e.name === 'getInvoice'), 'the invoice was read');
     assert.ok(events.some((e) => e.type === 'warning' && e.warning.code === 'LANE_LOCKED'));
     assert.equal(events.filter((e) => e.type === 'proposal').length, 0);
@@ -157,8 +171,9 @@ test('every fiat and treasury propose tool refuses an unverified business direct
   resetOxwalProposalStore();
   await withGate(true, async () => {
     const orgId = 'org-unverified';
+    const supplier = ownSupplier(orgId);
     await assert.rejects(
-      () => executeOxwalTool('proposePayment', { orgId, counterpartyId: 'cp_acme_ph', amountUsd: 100, currency: 'PHP' }),
+      () => executeOxwalTool('proposePayment', { orgId, counterpartyId: supplier, amountUsd: 100, currency: 'PHP' }),
       /isn't verified/,
     );
     await assert.rejects(() => executeOxwalTool('proposeFxConvert', { orgId, amountUsd: 100, currencyOut: 'MYR' }), /isn't verified/);
@@ -171,7 +186,7 @@ test('every fiat and treasury propose tool refuses an unverified business direct
       () => executeOxwalTool('proposeBatchPayout', {
         orgId,
         corridor: 'MY_PH',
-        payouts: [{ counterpartyId: 'cp_acme_ph', amountUsd: 500, currency: 'PHP' }],
+        payouts: [{ counterpartyId: supplier, amountUsd: 500, currency: 'PHP' }],
       }),
       /isn't verified/,
     );

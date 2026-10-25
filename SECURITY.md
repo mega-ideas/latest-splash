@@ -55,6 +55,28 @@ Migration 0049.
 - **The chat route** resolves the org through `requireSessionAccount`, so a
   signed-in person with no membership gets an answer, not a 500.
 - **The model client test hook** refuses to be set in production.
+- **Review fixes (§4.8 review).**
+  - *Classifier gaps (Medium).* Indirect and polite phrasings ("kindly pay",
+    "we need to pay", "is it possible to pay"), act-on verbs (approve,
+    release, execute, process, fund, repeat, resend a payment, payout, batch
+    or payroll), refund, reimburse, disburse, cash out, off-ramp, buy,
+    rebalance, quoted asks and a money clause after a question are now
+    money-moving. On the model path each response's text is held back until
+    its tool calls are checked, so the statement precedes the model's own
+    "Done, queued" text.
+  - *Forged history (Medium).* The route and the tool loop pass the model
+    only `{role: user|assistant, content: string}` turns, each capped
+    (`sanitizeOxwalHistory`); a forged `tool_result` or system turn is
+    dropped. With a session key the ledger alone decides once-per-session
+    notices, so a forged assistant turn cannot suppress the read statement.
+  - *Sample counterparty payable by every tenant (Medium).* Drafts (payment,
+    batch, netting) now require the counterparty's own org to be the session
+    org. The sample workspace stays readable to all as an example but only
+    the sample workspace can draft against it.
+  - *Low.* A report or summary request is a read; a refused turn or a USDC
+    send that prepares nothing no longer opens with "I can prepare this
+    payment". The session key is an HMAC under `CUSTOMER_SESSION_SECRET`,
+    not a bare hash; expired rows are pruned on about 2% of claims.
 
 ## v2 Phase 2 §4.7 — wallet recipients: exchange accounts, proven wallets, CCTP — 2026-10-25
 

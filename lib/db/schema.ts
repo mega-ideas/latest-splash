@@ -2213,9 +2213,15 @@ export const travelRuleTransfers = pgTable('travel_rule_transfers', {
  * read-only limitation statement and the first-recipient nudge. One row per
  * org, session and notice; the primary key is the "once" — a claim is an
  * insert that either lands or conflicts, so two tabs, two instances or a
- * retried request cannot say it twice. `session_key` is a hash of the signed
- * session (lib/server/zeke-session-notices.ts), never the email. The
- * money-moving statement is not here: it is said every time.
+ * retried request cannot say it twice. `session_key` is an HMAC of the signed
+ * session under a server secret (lib/server/zeke-session-notices.ts), never
+ * the email. The money-moving statement is not here: it is said every time.
+ *
+ * No foreign key to organizations, on purpose: the sample workspace
+ * ('demo-business') has no organizations row, and a claim that failed on a
+ * missing org would turn into the ledger's unknown answer (the read statement
+ * shown every turn, the nudge never). Rows are small, expire after 31 days and
+ * carry nothing but the org id, so an orphan after an org is deleted is inert.
  */
 export const zekeSessionNotices = pgTable('zeke_session_notices', {
   orgId: text('org_id').notNull(),

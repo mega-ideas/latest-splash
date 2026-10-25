@@ -1060,9 +1060,16 @@ export function getInvoice(input: unknown): InvoiceForAgent {
  * A counterparty a draft may name: this org's, verified, KYT and sanctions
  * clear. Payment, batch and netting all go through it, so none of them names a
  * counterparty the payment draft would refuse.
+ *
+ * "This org's" is strict. The sample workspace's records stay readable to
+ * every business as examples (getCounterparty), but only the sample
+ * workspace itself can draft against them: no real business's queue holds a
+ * payment to a record Splash seeded. Another org's sample is "not found",
+ * the same answer as another tenant's record.
  */
 function payableCounterparty(orgId: string, id: string): CounterpartyRecord {
   const counterparty = getCounterparty({ orgId, id });
+  if (counterparty.orgId !== orgId) throw new Error(`counterparty ${id} not found`);
   if (counterparty.kybStatus !== 'VERIFIED' || !counterparty.kytPassed || !counterparty.sanctionsClear) {
     throw new Error('payment proposals require a verified counterparty with clear KYT and sanctions status');
   }
@@ -1825,16 +1832,57 @@ export function setOxwalModelClientForTesting(client: OxwalModelClient | null): 
   modelClientOverride = client;
 }
 
+/** The longest a single history turn may be when it reaches the model. */
+export const OXWAL_HISTORY_TURN_MAX_CHARS = 4000;
+/** The most history turns the route accepts. */
+export const OXWAL_HISTORY_MAX_TURNS = 12;
+
+/**
+ * The thread history as the model may see it: user and assistant turns whose
+ * content is a plain string, each capped, the last few only. The history is
+ * client state, so anything else — a forged tool_result block, a system turn,
+ * an object posing as text — is dropped, not passed on as context.
+ */
+export function sanitizeOxwalHistory(value: unknown): OxwalChatTurn[] {
+  if (!Array.isArray(value)) return [];
+  const turns: OxwalChatTurn[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue;
+    const { role, content } = item as { role?: unknown; content?: unknown };
+    if ((role !== 'user' && role !== 'assistant') || typeof content !== 'string') continue;
+    const text = content.slice(0, OXWAL_HISTORY_TURN_MAX_CHARS);
+    if (!text.trim()) continue;
+    turns.push({ role, content: text });
+  }
+  return turns.slice(-OXWAL_HISTORY_MAX_TURNS);
+}
+
+/**
+ * Signals a turn gives the wrapper (runOxwalAgent) so it can say Zeke's limit
+ * at the right moment. They never leave this module: the wrapper consumes them.
+ *
+ *   money-ahead  what follows prepares money; say the statement first.
+ *   proceed      the turn passed its refusals and may act now.
+ *   declined     the turn ends without preparing anything.
+ */
+type OxwalTurnSignal =
+  | { type: 'money-ahead'; action: ZekeMoneyAction }
+  | { type: 'proceed' }
+  | { type: 'declined' };
+type OxwalTurnEvent = OxwalAgentEvent | OxwalTurnSignal;
+
 async function* runClaudeToolLoop(
   request: OxwalAgentRequest,
   assistantName: string,
-): AsyncGenerator<OxwalAgentEvent> {
+): AsyncGenerator<OxwalTurnEvent> {
   const client = modelClientOverride ?? await (async () => {
     const { default: Anthropic } = await import('@anthropic-ai/sdk');
     return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY }) as unknown as OxwalModelClient;
   })();
+  // Plain strings only, re-checked here as well as in the route: no caller can
+  // hand the model a tool result or a system turn it did not produce.
   const messages: ClaudeMessageParam[] = [
-    ...(request.history ?? []).slice(-8),
+    ...sanitizeOxwalHistory(request.history).slice(-8),
     { role: 'user', content: request.message },
   ];
 
@@ -1849,11 +1897,20 @@ async function* runClaudeToolLoop(
     });
 
     const content = response.content as ClaudeContentBlock[];
+    const toolUses = content.filter((block): block is Extract<ClaudeContentBlock, { type: 'tool_use' }> => block.type === 'tool_use');
+
+    // A response's text is held back until its tool calls are checked: when
+    // one of them prepares money, the limit is said before the model's own
+    // words ("Done, I have queued it") reach the person.
+    const moneyAhead = toolUses
+      .map((toolUse) => MONEY_TOOL_ACTION[toolUse.name as OxwalToolName])
+      .find((action): action is ZekeMoneyAction => Boolean(action));
+    if (moneyAhead) yield { type: 'money-ahead', action: moneyAhead };
+
     for (const block of content) {
       if (block.type === 'text') yield { type: 'delta', text: block.text };
     }
 
-    const toolUses = content.filter((block): block is Extract<ClaudeContentBlock, { type: 'tool_use' }> => block.type === 'tool_use');
     if (toolUses.length === 0) return;
 
     messages.push({ role: 'assistant', content });
@@ -2323,21 +2380,44 @@ export const ZEKE_LIMITATION_TEXT = {
 export const ZEKE_FIRST_RECIPIENT_NUDGE =
   "You haven't saved a recipient yet. Add your first one under Recipients, and I can prepare payments to them.";
 
-/** Leading words that do not change what is asked: "ok, please can you pay …". */
+/**
+ * Leading words that do not change what is asked: "ok, please can you pay …",
+ * "kindly pay …", "we need to pay …", "is it possible to pay …", "if not, pay
+ * …", or an opening quote mark.
+ */
 const COURTESY_PREFIX =
-  /^(?:(?:hi|hey|hello|ok(?:ay)?|yes|yeah|yep|sure|great|thanks|please|pls|zeke|now|then|and|so|also|right)\b[\s,!.:;-]*)*(?:(?:can|could|would|will) you\s+(?:please\s+)?|i(?: would|'d)? (?:want|need|like) (?:you )?to\s+|i'd like to\s+|help me\s+|let'?s\s+|go ahead and\s+|please\s+)*/i;
+  /^(?:(?:hi|hey|hello|ok(?:ay)?|yes|yeah|yep|sure|great|thanks|please|pls|kindly|zeke|now|then|and|so|also|right|actually|if not|otherwise)\b[\s,!.:;-]*|(?:can|could|would|will) you\s+|i(?: would|'d)? (?:want|need|like) (?:you )?to\s+|i'd like to\s+|(?:we|i) (?:need|have|want|got) to\s+|(?:is|would) it (?:be )?possible (?:for you )?to\s+|help me\s+|let'?s\s+|go ahead and\s+|time to\s+|["'\u201c\u201d\u2018\u2019`]+\s*)*/i;
 
 /** Verbs that move money by themselves. */
-const MONEY_VERB = /^(?:send|pay|payout|transfer|wire|remit|settle|allocate|sweep|invest|redeem|withdraw|swap|convert|top up)\b/i;
+const MONEY_VERB =
+  /^(?:send|pay|pay out|payout|transfer|wire|remit|settle|allocate|sweep|invest|redeem|withdraw|swap|convert|top up|refund|reimburse|disburse|cash out|off-?ramp|buy|rebalance)\b/i;
 
 /** Verbs that move money only with a money object: "prepare a payment", not "prepare a summary". */
 const DRAFT_VERB = /^(?:prepare|draft|create|make|run|start|queue|propose|set up|do|put|move|park|raise)\b/i;
+
+/**
+ * Verbs that act on a payment someone else drafted: "approve the Acme
+ * payment", "release the payout", "execute the batch", "repeat the last
+ * payment". Zeke can do none of them, which is exactly why they get the
+ * statement.
+ */
+const ACT_ON_VERB = /^(?:approve|release|execute|process|fund|repeat|re-?send|retry|confirm|authori[sz]e|sign off(?: on)?)\b/i;
+
 const MONEY_OBJECT =
-  /\b(?:payments?|payouts?|transfers?|batch(?:es)?|payroll|bulk|treasury|usdy|allocation|netting|settlement|x402|in the queue|to the queue|into (?:the )?queue)\b/i;
+  /\b(?:payments?|payouts?|transfers?|batch(?:es)?|payroll|bulk|treasury|usdy|allocation|netting|settlement|x402|salar(?:y|ies)|refunds?|reimbursements?|disbursements?|in the queue|to the queue|into (?:the )?queue)\b/i;
+const ACT_ON_OBJECT = /\binvoices?\b/i;
 
 /** "send 500", "pay inv_…", "transfer $2,000" anywhere in a sentence. */
 const MONEY_PHRASE =
-  /\b(?:send|pay|transfer|wire|remit|allocate|sweep|invest|redeem)\s+(?:(?:us)?\$\s?\d|\d|invoice\b|inv[_-]|cp[_-]|everyone\b|all\b|the (?:invoice|supplier|team)\b)/i;
+  /\b(?:send|pay|transfer|wire|remit|allocate|sweep|invest|redeem|refund|reimburse|disburse)\s+(?:(?:us)?\$\s?\d|\d|invoice\b|inv[_-]|cp[_-]|everyone\b|all\b|the (?:invoice|supplier|team)\b)/i;
+
+/**
+ * "Prepare a summary of payments", "make a report of treasury", "run a
+ * payments report": a request for a document about money is a read, even
+ * though it names a payment.
+ */
+const REPORT_REQUEST =
+  /^(?:prepare|draft|create|make|run|start|do|generate|build|pull|put together|give me|show me|send me)\s+(?:me\s+)?(?:(?:a|an|the|my|our|this|that)\s+)?(?:[\w-]+\s+)?(?:reports?|summary|summaries|statements?|exports?|lists?|overview|breakdown|recap|reconciliation|csv|spreadsheet)\b/i;
 
 /** A question about what already happened is history, not an instruction. */
 const ABOUT_THE_PAST =
@@ -2348,25 +2428,29 @@ const READ_ONLY_TOPIC =
 
 const WH_QUESTION = /^(?:how|what|why|when|where|which|who|is|are|does|do|can i|could i|should i)\b/i;
 
+/**
+ * Where one ask ends and the next begins: after a question mark, full stop or
+ * semicolon followed by a space, at a line break, or at "then". "What is my
+ * balance? Then pay Acme 500" is a read and then a payment.
+ */
+const CLAUSE_BREAK = /(?<=[?!.;])\s+|\n+|,?\s+(?:and\s+)?then\s+/i;
+
 function moneyActionFor(text: string): ZekeMoneyAction {
-  if (/\b(?:batch(?:es)?|bulk|payroll|payout run|pay (?:everyone|all)|the (?:supplier )?sheet)\b/i.test(text)) return 'BATCH';
-  if (/\b(?:treasury|usdy|yield|allocate|sweep|invest|redeem|idle cash)\b/i.test(text)) return 'TREASURY';
+  if (/\b(?:batch(?:es)?|bulk|payroll|payout run|salar(?:y|ies)|pay (?:everyone|all)|the (?:supplier )?sheet)\b/i.test(text)) return 'BATCH';
+  if (/\b(?:treasury|usdy|yield|allocate|sweep|invest|redeem|rebalance|idle cash)\b/i.test(text)) return 'TREASURY';
   return 'PAYMENT';
 }
 
-/**
- * What a message asks Zeke to do, as far as its limits are concerned. Pure and
- * deterministic: the statement does not depend on the model reading the
- * prompt the same way twice.
- */
-export function classifyZekeIntent(message: string): ZekeIntent {
-  const text = message.trim();
-  const ask = text.replace(COURTESY_PREFIX, '');
+function classifyClause(clause: string): ZekeIntent {
+  const ask = clause.trim().replace(COURTESY_PREFIX, '');
+  if (!ask) return { class: 'OTHER' };
+  if (REPORT_REQUEST.test(ask)) return { class: 'READ_ONLY' };
   const isQuestionAboutThePast = WH_QUESTION.test(ask) && ABOUT_THE_PAST.test(ask);
 
   const money =
     MONEY_VERB.test(ask)
     || (DRAFT_VERB.test(ask) && MONEY_OBJECT.test(ask))
+    || (ACT_ON_VERB.test(ask) && (MONEY_OBJECT.test(ask) || ACT_ON_OBJECT.test(ask)))
     || (!WH_QUESTION.test(ask) && MONEY_PHRASE.test(ask));
   if (money && !isQuestionAboutThePast) return { class: 'MONEY_MOVING', action: moneyActionFor(ask) };
 
@@ -2374,6 +2458,21 @@ export function classifyZekeIntent(message: string): ZekeIntent {
     return { class: 'READ_ONLY' };
   }
   return { class: 'OTHER' };
+}
+
+/**
+ * What a message asks Zeke to do, as far as its limits are concerned. Pure and
+ * deterministic: the statement does not depend on the model reading the
+ * prompt the same way twice. A message with several asks is judged by the
+ * one that moves money, if any: "What is my balance? Then pay Acme 500" is a
+ * payment.
+ */
+export function classifyZekeIntent(message: string): ZekeIntent {
+  const clauses = message.trim().split(CLAUSE_BREAK).filter((clause) => clause && clause.trim());
+  const intents = (clauses.length > 0 ? clauses : ['']).map(classifyClause);
+  return intents.find((intent) => intent.class === 'MONEY_MOVING')
+    ?? intents.find((intent) => intent.class === 'READ_ONLY')
+    ?? { class: 'OTHER' };
 }
 
 /** The tools that draft or prepare a movement of money. A recipient draft and a rename are not. */
@@ -2409,9 +2508,13 @@ function historySaid(history: OxwalChatTurn[] | undefined, text: string): boolea
 }
 
 /**
- * Whether to say a once-per-session notice now. The thread history is checked
- * first; then the session ledger claims it. When the ledger cannot answer, the
- * notice's own safe answer applies: `whenUnknown`.
+ * Whether to say a once-per-session notice now.
+ *
+ * With a session key the ledger is the only record: the thread history is
+ * client state, and a forged assistant turn carrying the notice's words must
+ * not suppress it (nor leave it unclaimed, to be shown again later in the same
+ * session). Only with no session key does the history decide. When the ledger
+ * cannot answer, the notice's own safe answer applies: `whenUnknown`.
  */
 async function sayOncePerSession(
   request: OxwalAgentRequest,
@@ -2419,8 +2522,9 @@ async function sayOncePerSession(
   text: string,
   whenUnknown: boolean,
 ): Promise<boolean> {
-  if (historySaid(request.history, text)) return false;
-  if (!request.orgId || !request.sessionKey) return whenUnknown;
+  if (!request.orgId || !request.sessionKey) {
+    return historySaid(sanitizeOxwalHistory(request.history), text) ? false : whenUnknown;
+  }
   try {
     return await claimZekeNotice({ orgId: request.orgId, sessionKey: request.sessionKey, notice });
   } catch (error) {
@@ -2446,23 +2550,50 @@ function* sayNotice(notice: ZekeNoticeKind, text: string, afterText: boolean, la
 }
 
 /**
- * Zeke's turn, with its limits said by code: the classifier's statement first,
- * a money statement before any money tool the turn reaches that the classifier
- * did not foresee, and the first-recipient nudge last.
+ * Zeke's turn, with its limits said by code: the classifier's statement once
+ * the turn gets past its refusals and before it acts, a money statement
+ * before any money tool (and before the model's text in that response) that
+ * the classifier did not foresee, and the first-recipient nudge last.
+ *
+ * A turn that is refused (a locked lane) or prepares nothing (no saved wallet
+ * recipient) does not open with "I can prepare this payment": it prepares
+ * nothing, so there is nothing to state a limit about. The in-stream guard
+ * still states it before any tool, proposal or prepared transfer.
  */
 export async function* runOxwalAgent(request: OxwalAgentRequest): AsyncGenerator<OxwalAgentEvent> {
   assertNoExecutionTools();
   const intent = classifyZekeIntent(request.message);
+  let pendingMoney: ZekeMoneyAction | null = intent.class === 'MONEY_MOVING' ? intent.action : null;
   let moneyStated = false;
   let textSoFar = false;
 
+  function* stateMoney(action: ZekeMoneyAction): Generator<OxwalAgentEvent> {
+    if (moneyStated) return;
+    moneyStated = true;
+    yield* sayNotice('MONEY_LIMIT', ZEKE_LIMITATION_TEXT[action], textSoFar);
+  }
+
   for await (const event of runOxwalTurn(request)) {
+    // The turn's own signals are consumed here and never reach the client.
+    if (event.type === 'proceed') {
+      if (pendingMoney) yield* stateMoney(pendingMoney);
+      pendingMoney = null;
+      continue;
+    }
+    if (event.type === 'declined') {
+      pendingMoney = null;
+      continue;
+    }
+    if (event.type === 'money-ahead') {
+      yield* stateMoney(event.action);
+      continue;
+    }
+
     if (event.type === 'done') {
       // An org with no saved recipient hears how to add its first one — once
       // per session, and never when "once" cannot be proven (no session key,
       // or a ledger that cannot answer).
       if (request.orgId && request.sessionKey
-        && !historySaid(request.history, ZEKE_FIRST_RECIPIENT_NUDGE)
         && await hasNoSavedRecipient(request.orgId)
         && await sayOncePerSession(request, 'FIRST_RECIPIENT', ZEKE_FIRST_RECIPIENT_NUDGE, false)) {
         yield* sayNotice('FIRST_RECIPIENT', ZEKE_FIRST_RECIPIENT_NUDGE, textSoFar, true);
@@ -2471,29 +2602,22 @@ export async function* runOxwalAgent(request: OxwalAgentRequest): AsyncGenerator
       continue;
     }
 
+    // The backstop: whatever the classifier said, nothing acts on money
+    // before the statement.
     const action = moneyActionOf(event);
-    if (action && !moneyStated) {
-      moneyStated = true;
-      yield* sayNotice('MONEY_LIMIT', ZEKE_LIMITATION_TEXT[action], textSoFar);
-    }
+    if (action) yield* stateMoney(action);
     if (event.type === 'delta' && event.text.trim()) textSoFar = true;
     yield event;
 
-    // The classifier's statement goes straight after `meta`: before any text,
-    // tool, proposal or prepared transfer.
-    if (event.type === 'meta') {
-      if (intent.class === 'MONEY_MOVING') {
-        moneyStated = true;
-        yield* sayNotice('MONEY_LIMIT', ZEKE_LIMITATION_TEXT[intent.action], false);
-      } else if (intent.class === 'READ_ONLY'
-        && await sayOncePerSession(request, 'READ_LIMIT', ZEKE_LIMITATION_TEXT.READ, true)) {
-        yield* sayNotice('READ_LIMIT', ZEKE_LIMITATION_TEXT.READ, false);
-      }
+    // The read-only statement goes straight after `meta`, before any text.
+    if (event.type === 'meta' && intent.class === 'READ_ONLY'
+      && await sayOncePerSession(request, 'READ_LIMIT', ZEKE_LIMITATION_TEXT.READ, true)) {
+      yield* sayNotice('READ_LIMIT', ZEKE_LIMITATION_TEXT.READ, false);
     }
   }
 }
 
-async function* runOxwalTurn(request: OxwalAgentRequest): AsyncGenerator<OxwalAgentEvent> {
+async function* runOxwalTurn(request: OxwalAgentRequest): AsyncGenerator<OxwalTurnEvent> {
   const useLocal = request.forceLocal
     || process.env.OXWAL_FORCE_LOCAL === 'true'
     || (!process.env.ANTHROPIC_API_KEY && !modelClientOverride);
@@ -2523,6 +2647,7 @@ async function* runOxwalTurn(request: OxwalAgentRequest): AsyncGenerator<OxwalAg
   // when the operator does not), so this is the early answer, not the only one.
   const refusal = request.orgId ? await laneRefusalFor(request.orgId, request.message, request.kybState) : null;
   if (refusal) {
+    yield { type: 'declined' };
     yield { type: 'warning', warning: { code: 'LANE_LOCKED', message: refusal } };
     for (const token of tokens(refusal)) yield { type: 'delta', text: token };
     yield { type: 'done', source: 'scripted' };
@@ -2533,11 +2658,18 @@ async function* runOxwalTurn(request: OxwalAgentRequest): AsyncGenerator<OxwalAg
   // words and before the model. Zeke never quotes, approves or signs it.
   const handoff = request.orgId ? await usdcHandoffFor(request.orgId, request.message, liveHandoffDeps()) : null;
   if (handoff) {
+    // A prepared transfer gets the statement before its text; a reply that
+    // prepares nothing (no saved wallet recipient, a question back) does not.
+    yield handoff.handoff ? { type: 'money-ahead', action: 'PAYMENT' } : { type: 'declined' };
     for (const token of tokens(handoff.text)) yield { type: 'delta', text: token };
     if (handoff.handoff) yield { type: 'handoff', handoff: handoff.handoff };
     yield { type: 'done', source: 'scripted' };
     return;
   }
+
+  // Past its refusals: the turn may act now, and the classifier's statement
+  // is said before it does.
+  yield { type: 'proceed' };
 
   // Deterministic demo intents answer instantly, before the model.
   const scripted = matchDemoScript(request.message.trim());

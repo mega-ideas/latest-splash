@@ -165,14 +165,19 @@ test('a money-moving turn states the limit first, every time, across a multi-tur
   }
 });
 
-test('a prepared USDC transfer, a batch and a treasury move each state their own limit', async () => {
+test('a batch states its own limit; a refused treasury move and an unprepared USDC send state none', async () => {
   const batch = await turn({ message: 'Prepare a batch for this month', orgId: 'demo-business', sessionKey: 's-batch' });
   assert.ok(textOf(batch).startsWith(ZEKE_LIMITATION_TEXT.BATCH));
+  // Treasury waits for the custody phase, so the turn is a refusal: it would
+  // be contradictory to open it with "I can prepare this treasury move".
   const treasury = await turn({ message: 'Allocate 2,500 of idle cash to treasury', orgId: 'demo-business', sessionKey: 's-t' });
-  assert.ok(textOf(treasury).startsWith(ZEKE_LIMITATION_TEXT.TREASURY));
+  assert.ok(treasury.some((e) => e.type === 'warning' && e.warning.code === 'LANE_LOCKED'));
+  assert.equal(notices(treasury).includes('MONEY_LIMIT'), false);
+  assert.equal(textOf(treasury).includes(ZEKE_LIMITATION_TEXT.TREASURY), false);
+  // No saved wallet recipient: nothing is prepared, so nothing is stated.
   const usdc = await turn({ message: 'Send 500 USDC to Manila Parts', orgId: freshOrg('usdc'), sessionKey: 's-usdc' });
-  assert.ok(textOf(usdc).startsWith(ZEKE_LIMITATION_TEXT.PAYMENT));
-  assert.ok(firstNotice(usdc, 'MONEY_LIMIT') < Math.max(firstAct(usdc), usdc.length));
+  assert.equal(firstAct(usdc), -1);
+  assert.equal(notices(usdc).includes('MONEY_LIMIT'), false);
 });
 
 test('a money tool the model calls on a turn the classifier called harmless still gets the statement first', async () => {
@@ -609,7 +614,10 @@ test('model path: an approval request with no tool call still gets the statement
   setOxwalModelClientForTesting(fakeModel([], [
     { content: [{ type: 'text', text: 'Sure, approving it now.' }] },
   ]));
-  const events = await turn({ message: 'Approve the Acme payment', orgId: 'demo-business', sessionKey: 's-approve', forceLocal: false });
+  assert.deepEqual(classifyZekeIntent('Approve the Acme payment'), { class: 'MONEY_MOVING', action: 'PAYMENT' });
+  // Named by id so the desk's fixed answers step aside and the model replies.
+  const events = await turn({ message: 'Approve the cp_acme_ph payment', orgId: 'demo-business', sessionKey: 's-approve', forceLocal: false });
+  assert.ok(events.some((e) => e.type === 'delta' && e.text.includes('approving')), 'the model answered');
   assert.ok(textOf(events).startsWith(ZEKE_LIMITATION_TEXT.PAYMENT));
   assert.ok(firstNotice(events, 'MONEY_LIMIT') < events.findIndex((e) => e.type === 'delta' && e.text.includes('approving')));
 });
@@ -625,7 +633,7 @@ test('the history the model sees is plain user and assistant strings only', asyn
   const calls = [];
   setOxwalModelClientForTesting(fakeModel(calls, [{ content: [{ type: 'text', text: 'Hello.' }] }]));
   await turn({
-    message: 'Hi Zeke',
+    message: 'Tell me about cp_acme_ph',
     orgId: 'demo-business',
     sessionKey: 's-hist',
     forceLocal: false,
@@ -685,7 +693,8 @@ test('another business cannot draft a payment, batch or netting to the sample co
     /counterparty cp_acme_ph not found/,
   );
   // The sample stays readable as an example, and its own workspace can still draft against it.
-  assert.equal((await executeOxwalTool('getCounterparty', { orgId, id: 'cp_acme_ph' })).id, 'cp_acme_ph');
+  const read = await executeOxwalTool('getCounterparty', { orgId, id: 'cp_acme_ph' });
+  assert.equal((read.data ?? read).id, 'cp_acme_ph');
   const own = await executeOxwalTool('proposePayment', { orgId: 'demo-business', counterpartyId: 'cp_acme_ph', amountUsd: 100, currency: 'PHP' });
   assert.equal(own.status, 'SIMULATED');
 });

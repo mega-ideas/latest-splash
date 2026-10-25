@@ -18,9 +18,18 @@
  *
  * ─── The session key ───────────────────────────────────────────────────────
  *
- * A hash of the signed session's email and mint time — derived by the route
- * from the cookie it verified, never from the request body. A new sign-in is a
- * new session; the email itself is never stored.
+ * An HMAC of the signed session's email and mint time under a server secret
+ * (CUSTOMER_SESSION_SECRET, the key that signs the session cookie) — derived
+ * by the route from the cookie it verified, never from the request body. A new
+ * sign-in is a new session; the email itself is never stored, and without the
+ * secret a reader of the table cannot test an email and a sign-in time
+ * against a row, as a bare hash would allow.
+ *
+ * ─── Pruning ───────────────────────────────────────────────────────────────
+ *
+ * Rows older than any session's lifetime can never match again. They are
+ * pruned on a small share of claims (PRUNE_PROBABILITY), not on every one: a
+ * chat turn can make two claims, and a table-wide delete per turn is waste.
  *
  * ─── Failing closed ────────────────────────────────────────────────────────
  *
@@ -31,7 +40,7 @@
  * "once" nobody can prove is a "never"). Outside production with no database,
  * claims live in this process, for local development and tests.
  */
-import { createHash } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
 
 import { lt } from 'drizzle-orm';
 
@@ -43,6 +52,9 @@ export type ZekeSessionNotice = 'READ_LIMIT' | 'FIRST_RECIPIENT';
 /** Longer than any customer session lives; older rows can never match again. */
 const RETAIN_MS = 31 * 24 * 60 * 60 * 1000;
 
+/** The share of claims that also prune expired rows. */
+export const PRUNE_PROBABILITY = 0.02;
+
 type MemoryGlobal = typeof globalThis & { splashZekeSessionNotices?: Map<string, number> };
 const memoryGlobal = globalThis as MemoryGlobal;
 
@@ -51,9 +63,25 @@ function memory(): Map<string, number> {
   return memoryGlobal.splashZekeSessionNotices;
 }
 
-/** The session key for a verified customer session. */
+/** A key for local development only, when no session secret is configured. */
+let devKey: Buffer | null = null;
+
+function sessionKeySecret(): string | Buffer {
+  const configured = process.env.CUSTOMER_SESSION_SECRET?.trim();
+  if (configured) return configured;
+  // A verified customer session cannot exist in production without this
+  // secret (lib/server/customer-auth.ts), so reaching here there is a
+  // misconfiguration: refuse rather than key on something guessable.
+  if (isProductionRuntime()) throw new Error('the Zeke session key needs CUSTOMER_SESSION_SECRET');
+  devKey ??= randomBytes(32);
+  return devKey;
+}
+
+/** The session key for a verified customer session: an HMAC, never the email. */
 export function zekeSessionKey(session: { email: string; issuedAt: string }): string {
-  return createHash('sha256').update(`zeke-session\u0000${session.email.toLowerCase()}\u0000${session.issuedAt}`).digest('hex');
+  return createHmac('sha256', sessionKeySecret())
+    .update(`zeke-session\u0000${session.email.toLowerCase()}\u0000${session.issuedAt}`)
+    .digest('hex');
 }
 
 /**
@@ -85,7 +113,9 @@ export async function claimZekeNotice(input: {
 
   const { getDb } = await import('../db/client.ts');
   const db = getDb();
-  await db.delete(zekeSessionNotices).where(lt(zekeSessionNotices.shownAt, new Date(now.getTime() - RETAIN_MS)));
+  if (Math.random() < PRUNE_PROBABILITY) {
+    await db.delete(zekeSessionNotices).where(lt(zekeSessionNotices.shownAt, new Date(now.getTime() - RETAIN_MS)));
+  }
   const inserted = await db
     .insert(zekeSessionNotices)
     .values({ orgId, sessionKey, notice, shownAt: now })

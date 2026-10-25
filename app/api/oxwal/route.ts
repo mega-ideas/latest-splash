@@ -1,4 +1,4 @@
-import { runOxwalAgent, stringifyAgentJson, type OxwalAgentRequest } from '../../../lib/agent/oxwal';
+import { runOxwalAgent, sanitizeOxwalHistory, stringifyAgentJson } from '../../../lib/agent/oxwal';
 import { resolveAuthorityForSession } from '@/lib/auth/authority';
 import { assertCleanBody, ProvenanceViolationError, provenanceViolationResponse } from '@/lib/auth/provenance-guard';
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
@@ -15,7 +15,8 @@ export const dynamic = 'force-dynamic';
  *  provenance violation. */
 type OxwalRouteBody = {
   message?: string;
-  history?: OxwalAgentRequest['history'];
+  /** Untrusted: see sanitizeOxwalHistory. */
+  history?: unknown;
 };
 
 export async function POST(request: Request) {
@@ -63,7 +64,9 @@ export async function POST(request: Request) {
         // What Zeke says once per sign-in (v2 §4.8) is keyed on the verified
         // session, never on anything the body says.
         sessionKey: zekeSessionKey(auth.session),
-        history: Array.isArray(body.history) ? body.history.slice(-12) : [],
+        // Client state: only {role: user|assistant, content: string} turns,
+        // each capped, survive. A forged tool_result or system turn is dropped.
+        history: sanitizeOxwalHistory(body.history),
       })) {
         send(event);
       }

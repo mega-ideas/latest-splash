@@ -460,8 +460,11 @@ test('after a restart, a payment whose proposal was rejected can be proposed aga
 test('Zeke drafting after a restart finds the draft in Postgres instead of making a second', async () => {
   const { client, db } = await migratedDb();
   await withDatabase(db, async () => {
-    const { proposePayment } = await import('../lib/agent/oxwal.ts');
-    const input = { orgId: 'acme', counterpartyId: 'cp_acme_ph', amountUsd: 2500, currency: 'USDC' };
+    const { proposePayment, upsertOxwalCounterpartyFixture } = await import('../lib/agent/oxwal.ts');
+    // The org's own verified supplier: drafts never name another org's record,
+    // the sample workspace's included.
+    upsertOxwalCounterpartyFixture({ id: 'cp_acme_own_ph', orgId: 'acme', name: 'Acme Manufacturing PH', kybStatus: 'VERIFIED' });
+    const input = { orgId: 'acme', counterpartyId: 'cp_acme_own_ph', amountUsd: 2500, currency: 'USDC' };
     const writer = (p) => upsertProposal(db, p);
 
     globalThis.oxwalProposalStore = new InMemoryProposalStore(writer);
