@@ -1329,7 +1329,7 @@ async function racingWebhook(t, body, during) {
   });
 }
 
-test("a return that lands while a failure is being recorded is retried, never lost: the partner's retry closes the withdrawal", async () => {
+test("a return that lands while a failure is being recorded is counted against the payout as it then stands, never lost: it closes the withdrawal", async () => {
   const t = await setup();
   const { destination, depositAddress } = await readyToWithdraw(t);
   const one = await created(t, destination.id);
@@ -1344,14 +1344,13 @@ test("a return that lands while a failure is being recorded is retried, never lo
     const failed = await t.webhook({ type: 'payout.status', eventId: 'evt_race_fail', partnerRef: wd.partnerRef, intentId: wd.intentId, status: 'failed', failureReason: 'account closed', occurredAt: T0.toISOString() });
     assert.equal(failed.status, 200, JSON.stringify(failed));
   });
-  assert.equal(first.status, 503, `the return was not recorded this time, so the partner must retry: ${JSON.stringify(first)}`);
-  assert.equal((await getWithdrawal(t.deps(), wd.id)).withdrawal.status, 'failed');
-  assert.equal((await t.w.db.select().from(schema.withdrawalReturns)).length, 0, 'no return is held for a payout that did not record it');
-
-  // The partner's retry of the same event counts, and the withdrawal closes.
+  // The return is counted against the payout as it stands once locked (failed now), so it closes it at once.
+  assert.equal(first.status, 200, JSON.stringify(first));
+  assert.equal(first.body.ok, true, JSON.stringify(first.body));
+  // A retry of the same event is a duplicate.
   const retry = await t.webhook(returned);
   assert.equal(retry.status, 200, JSON.stringify(retry));
-  assert.equal(retry.body.ok, true, JSON.stringify(retry.body));
+  assert.equal(retry.body.duplicate, true, JSON.stringify(retry.body));
   const closed = (await getWithdrawal(t.deps(), wd.id)).withdrawal;
   assert.equal(closed.status, 'returned');
   assert.equal(closed.returnedMinor, '1000000000');
@@ -1363,7 +1362,7 @@ test("a return that lands while a failure is being recorded is retried, never lo
   await t.w.client.close();
 });
 
-test('a short return that lands while the payout moves is retried, and what came back is kept on the withdrawal', async () => {
+test("a short return that lands while the payout moves is counted against the payout as it then stands, and what came back is kept on the withdrawal", async () => {
   const t = await setup();
   const { destination, depositAddress } = await readyToWithdraw(t);
   const one = await created(t, destination.id);
@@ -1378,12 +1377,11 @@ test('a short return that lands while the payout moves is retried, and what came
     const recv = await t.webhook({ type: 'payout.status', eventId: 'evt_race_recv', partnerRef: wd.partnerRef, intentId: wd.intentId, status: 'funds_received', occurredAt: T0.toISOString() });
     assert.equal(recv.status, 200, JSON.stringify(recv));
   });
-  assert.equal(first.status, 503, JSON.stringify(first));
-  assert.equal((await t.w.db.select().from(schema.withdrawalReturns)).length, 0);
-  assert.equal((await getWithdrawal(t.deps(), wd.id)).withdrawal.status, 'partner_received');
-
+  // Read against the payout as it stands once locked (partner_received now): short, so failed, with what came back.
+  assert.equal(first.status, 200, JSON.stringify(first));
+  assert.equal(first.body.short, true, JSON.stringify(first.body));
   const retry = await t.webhook(shortEvent);
-  assert.equal(retry.body.short, true, JSON.stringify(retry.body));
+  assert.equal(retry.body.duplicate, true, JSON.stringify(retry.body));
   const after = (await getWithdrawal(t.deps(), wd.id)).withdrawal;
   assert.equal(after.status, 'failed');
   assert.equal(after.returnedMinor, '400000000');
@@ -1425,3 +1423,244 @@ test('a bank account removed while its withdrawal is being instructed leaves no 
   assert.equal(open.length, 0, 'no request is left for the owners to sign');
   await t.w.client.close();
 });
+
+/* ── Review of the §4.4 webhooks, 26 Oct 2026 (second pass): returns at once ── */
+
+const failedEvent = (t, wd, id) => t.webhook({ type: 'payout.status', eventId: id, partnerRef: wd.partnerRef, intentId: wd.intentId, status: 'failed', failureReason: 'account closed', occurredAt: T0.toISOString() });
+
+test('two returns that add up and land at once close the withdrawal once, and neither digest can close another payout', async () => {
+  const t = await setup();
+  const { destination, depositAddress } = await readyToWithdraw(t);
+  const ret = returnedEvent(t);
+  const one = await created(t, destination.id);
+  await signBoth(t, one.r.request);
+  assert.equal((await failedEvent(t, one.r.withdrawal, 'evt_conc_fail')).status, 200);
+  const a = digest();
+  const b = digest();
+  backTx(t, a, depositAddress.address, '400000000');
+  backTx(t, b, depositAddress.address, '600000000');
+  const answers = await Promise.all([ret(one.r.withdrawal, 'evt_conc_a', a), ret(one.r.withdrawal, 'evt_conc_b', b)]);
+  // Whatever the order, a delivery that did not count is retried by the partner.
+  for (const [i, ans] of answers.entries()) {
+    if (ans.status !== 200) {
+      const again = await ret(one.r.withdrawal, i === 0 ? 'evt_conc_a' : 'evt_conc_b', i === 0 ? a : b);
+      assert.equal(again.status, 200, JSON.stringify(again));
+    }
+  }
+  const closed = (await getWithdrawal(t.deps(), one.r.withdrawal.id)).withdrawal;
+  assert.equal(closed.status, 'returned');
+  assert.equal(closed.returnedMinor, '1000000000');
+  const claims = (await t.w.db.select().from(schema.withdrawalReturns)).filter((c) => c.withdrawalId === one.r.withdrawal.id);
+  assert.deepEqual(claims.map((c) => c.creditedMinor).sort(), [400000000n, 600000000n], 'both returns are held by the payout they closed');
+
+  // A second payout to the same deposit address fails; neither digest closes it.
+  const two = await created(t, destination.id, { amountMinor: '600000000' });
+  await signBoth(t, two.r.request);
+  assert.equal((await failedEvent(t, two.r.withdrawal, 'evt_conc_fail2')).status, 200);
+  for (const [id, d] of [['evt_conc_reuse_b', b], ['evt_conc_reuse_a', a]]) {
+    const reuse = await ret(two.r.withdrawal, id, d);
+    assert.equal(reuse.body.ignored, 'that return was already counted', JSON.stringify(reuse.body));
+  }
+  assert.equal((await getWithdrawal(t.deps(), two.r.withdrawal.id)).withdrawal.status, 'failed');
+  await t.w.client.close();
+});
+
+test('short returns that land at once on a failed withdrawal keep what came back in full, and the rest still closes it', async () => {
+  const t = await setup();
+  const { destination, depositAddress } = await readyToWithdraw(t);
+  const ret = returnedEvent(t);
+  const one = await created(t, destination.id);
+  await signBoth(t, one.r.request);
+  assert.equal((await failedEvent(t, one.r.withdrawal, 'evt_cs_fail')).status, 200);
+  const parts = [digest(), digest(), digest()];
+  parts.forEach((d, i) => backTx(t, d, depositAddress.address, ['200000000', '300000000', '100000000'][i]));
+  const answers = await Promise.all(parts.map((d, i) => ret(one.r.withdrawal, `evt_cs_${i}`, d)));
+  assert.ok(answers.every((x) => x.status === 200 && x.body.short === true), JSON.stringify(answers.map((x) => x.body)));
+  let row = (await getWithdrawal(t.deps(), one.r.withdrawal.id)).withdrawal;
+  assert.equal(row.status, 'failed');
+  assert.equal(row.returnedMinor, '600000000', 'the three short returns add up on the row');
+
+  const rest = digest();
+  backTx(t, rest, depositAddress.address, '400000000');
+  const done = await ret(one.r.withdrawal, 'evt_cs_rest', rest);
+  assert.equal(done.body.ok, true, JSON.stringify(done.body));
+  row = (await getWithdrawal(t.deps(), one.r.withdrawal.id)).withdrawal;
+  assert.equal(row.status, 'returned');
+  assert.equal(row.returnedMinor, '1000000000');
+  await t.w.client.close();
+});
+
+test('a short return and the return that completes it land at once: the close is never overwritten by the short one', async () => {
+  const t = await setup();
+  const { destination, depositAddress } = await readyToWithdraw(t);
+  const ret = returnedEvent(t);
+  const one = await created(t, destination.id);
+  await signBoth(t, one.r.request);
+  assert.equal((await failedEvent(t, one.r.withdrawal, 'evt_ov_fail')).status, 200);
+  const first = digest();
+  backTx(t, first, depositAddress.address, '300000000');
+  assert.equal((await ret(one.r.withdrawal, 'evt_ov_first', first)).body.short, true);
+  const x = digest();
+  const y = digest();
+  backTx(t, x, depositAddress.address, '300000000');
+  backTx(t, y, depositAddress.address, '400000000');
+  await Promise.all([ret(one.r.withdrawal, 'evt_ov_x', x), ret(one.r.withdrawal, 'evt_ov_y', y)]);
+  const row = (await getWithdrawal(t.deps(), one.r.withdrawal.id)).withdrawal;
+  assert.equal(row.status, 'returned');
+  assert.equal(row.returnedMinor, '1000000000', 'the short patch did not land over the close');
+  await t.w.client.close();
+});
+
+/**
+ * The database as one delivery sees it: its first write to a withdrawal row
+ * waits until `before` has run (another delivery landing in between).
+ */
+function writeWaits(db, before) {
+  let fired = false;
+  const delayed = (obj) =>
+    new Proxy(obj, {
+      get(o, p) {
+        if (p === 'then') {
+          return (res, rej) => (fired ? Promise.resolve() : ((fired = true), before())).then(() => o.then(res, rej), rej);
+        }
+        const v = o[p];
+        return typeof v === 'function' ? (...args) => { const r = v.apply(o, args); return r && typeof r === 'object' ? delayed(r) : r; } : v;
+      },
+    });
+  return new Proxy(db, {
+    get(o, p) {
+      if (p === 'update') return (table) => (table === schema.withdrawals && !fired ? delayed(o.update(table)) : o.update(table));
+      const v = o[p];
+      return typeof v === 'function' ? v.bind(o) : v;
+    },
+  });
+}
+
+test('a short return on a failed withdrawal whose write lands after the return that closed it does not undo the close', async () => {
+  const t = await setup();
+  const { destination, depositAddress } = await readyToWithdraw(t);
+  const ret = returnedEvent(t);
+  const one = await created(t, destination.id);
+  await signBoth(t, one.r.request);
+  assert.equal((await failedEvent(t, one.r.withdrawal, 'evt_late_fail')).status, 200);
+  const a = digest();
+  const b = digest();
+  backTx(t, a, depositAddress.address, '400000000');
+  backTx(t, b, depositAddress.address, '600000000');
+  const real = t.w.db;
+  let bAnswer = null;
+  const runB = async () => {
+    bAnswer = await ret(one.r.withdrawal, 'evt_late_b', b);
+  };
+  t.w.db = writeWaits(real, runB);
+  const aPromise = ret(one.r.withdrawal, 'evt_late_a', a);
+  t.w.db = real;
+  const aAnswer = await aPromise;
+  if (!bAnswer) await runB();
+  for (const [ans, id, d] of [[aAnswer, 'evt_late_a', a], [bAnswer, 'evt_late_b', b]]) {
+    if (ans.status !== 200) assert.equal((await ret(one.r.withdrawal, id, d)).status, 200);
+  }
+  const row = (await getWithdrawal(t.deps(), one.r.withdrawal.id)).withdrawal;
+  assert.equal(row.status, 'returned');
+  assert.equal(row.returnedMinor, '1000000000', 'the short write did not land over the close');
+  await t.w.client.close();
+});
+
+/* ── Reversals still owed for a cancelled payout ─────────────────────── */
+
+test('a reversal the partner did not take when a withdrawal was cancelled under it is asked again by the sweep until taken, and ops are told when it sticks', async () => {
+  const base = payoutPartner('hata_fiuu', ENV);
+  let revokeDuring = null;
+  let refuseReversals = 0;
+  const t = await setup({
+    overrides: {
+      createPayout: async (input) => {
+        if (revokeDuring) await revokeDuring();
+        return base.createPayout(input);
+      },
+      returnOrReverse: async (input) => {
+        if (refuseReversals > 0) {
+          refuseReversals -= 1;
+          throw new Error('partner timed out');
+        }
+        return base.returnOrReverse(input);
+      },
+    },
+  });
+  const { destination } = await readyToWithdraw(t);
+  const q = await quoted(t, destination.id);
+  revokeDuring = async () => {
+    revokeDuring = null;
+    assert.equal((await revokeWithdrawalDestination(t.deps(), 'u-two', destination.id)).ok, true);
+  };
+  refuseReversals = R_ASKS();
+  const r = await createWithdrawal(t.deps(), 'u-founder', { clientKey: 'ck_rev_owed', destinationId: destination.id, amountMinor: '1000000000', acceptedReceiveMinor: q.receiveMinor, maxFeeMinor: q.maxFeeMinor, ...bundle() });
+  assert.equal(r.code, 'withdrawal_cancelled', JSON.stringify(r));
+  const [row] = await t.w.db.select().from(schema.withdrawals);
+  const reversalsOf = () => t.partner.called('returnOrReverse').filter((c) => c.input.partnerRef === row.partnerRef).length;
+  assert.equal(reversalsOf(), 1);
+
+  // The sweep asks again while the partner keeps timing out, and ops are alerted once it sticks.
+  const errors = [];
+  const origError = console.error;
+  console.error = (...args) => errors.push(args.join(' '));
+  try {
+    for (let i = 1; i < R_ASKS(); i += 1) {
+      const swept = await t.reconcile();
+      assert.equal(swept.reversalsAsked, 1, JSON.stringify(swept));
+      assert.equal(swept.reversalsPending, 1, JSON.stringify(swept));
+    }
+  } finally {
+    console.error = origError;
+  }
+  assert.equal(reversalsOf(), R_ASKS());
+  const trail = await t.w.db.select().from(schema.withdrawalEvents);
+  assert.equal(trail.filter((e) => e.action === 'reversal_request_stuck' && e.subjectId === row.id).length, 1, 'ops see the stuck reversal');
+  assert.ok(errors.some((e) => e.includes('ALERT') && e.includes(row.id) && !e.includes('5140')), 'an ops alert names the payout and nothing about the account');
+
+  // The partner takes it: recorded, and never asked again.
+  const swept = await t.reconcile();
+  assert.equal(swept.reversalsAsked, 1);
+  assert.equal(swept.reversalsPending, 0);
+  const [after] = await t.w.db.select().from(schema.withdrawals);
+  assert.ok(after.returnAcceptedAt, 'the accepted reversal is kept on the row');
+  assert.equal(after.status, 'cancelled');
+  const n = reversalsOf();
+  assert.equal((await t.reconcile()).reversalsAsked, 0);
+  assert.equal(reversalsOf(), n);
+  await t.w.client.close();
+});
+
+test('a bank account removed while the owners\' request is being opened closes that request and reverses the instruction once', async () => {
+  const t = await setup();
+  const { destination } = await readyToWithdraw(t);
+  const q = await quoted(t, destination.id);
+  // An owner removes the bank account while the owners' request is being built (its gas is fetched).
+  const sponsor = t.w.ctx.signing.sponsor;
+  const gasFor = sponsor.gasFor;
+  sponsor.gasFor = async (...args) => {
+    sponsor.gasFor = gasFor;
+    assert.equal((await revokeWithdrawalDestination(t.deps(), 'u-two', destination.id)).ok, true);
+    return gasFor.apply(sponsor, args);
+  };
+  const r = await createWithdrawal(t.deps(), 'u-founder', { clientKey: 'ck_revoke_open', destinationId: destination.id, amountMinor: '1000000000', acceptedReceiveMinor: q.receiveMinor, maxFeeMinor: q.maxFeeMinor, ...bundle() });
+  sponsor.gasFor = gasFor;
+  assert.equal(r.ok, false, JSON.stringify(r));
+  assert.equal(r.code, 'withdrawal_cancelled', JSON.stringify(r));
+  const [row] = await t.w.db.select().from(schema.withdrawals);
+  assert.equal(row.status, 'cancelled');
+  const requests = (await t.w.db.select().from(schema.walletSigningRequests)).filter((s) => s.purpose === 'withdrawal');
+  assert.equal(requests.length, 1, 'the request was opened');
+  assert.equal(requests[0].status, 'cancelled', 'and closed before anyone signed it');
+  const reversals = t.partner.called('returnOrReverse').filter((c) => c.input.partnerRef === row.partnerRef);
+  assert.equal(reversals.length, 1, 'the instruction is reversed once, not once per path that saw it');
+  assert.ok(row.returnAcceptedAt, 'and the partner taking it is kept');
+  const trail = (await t.w.db.select().from(schema.withdrawalEvents)).filter((e) => e.subjectId === row.id);
+  assert.ok(trail.some((e) => e.action === 'cancelled'), JSON.stringify(trail.map((e) => e.action)));
+  assert.equal((await t.reconcile()).reversalsAsked, 0, 'nothing is owed');
+  await t.w.client.close();
+});
+
+function R_ASKS() {
+  return W.RETURN_ASKS_BEFORE_ALERT;
+}
