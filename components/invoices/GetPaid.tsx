@@ -158,9 +158,9 @@ export default function GetPaid({ issuerName, onCounts }: { issuerName: string; 
             { label: 'Overdue', value: String(totals.overdue), sub: 'past due' },
             { label: 'Paid this month', value: usdc(totals.paidMonth), sub: 'USDC' },
           ].map((s) => (
-            <div key={s.label} className="min-w-0 px-4 py-3">
+            <div key={s.label} className="min-w-0 px-3 py-3 sm:px-4">
               <p className="text-[12px] font-semibold text-[#326273]">{s.label}</p>
-              <p className="dash-num mt-0.5 truncate font-mono text-lg font-semibold text-[#0c3e48]">{s.value}</p>
+              <p className="dash-num mt-0.5 font-mono text-[15px] sm:text-lg font-semibold leading-tight text-[#0c3e48] [overflow-wrap:anywhere]">{s.value}</p>
               <p className="text-[12px] text-[#326273]">{s.sub}</p>
             </div>
           ))}
