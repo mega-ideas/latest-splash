@@ -575,6 +575,51 @@ test('a plan change revokes the old allowance and grants the new one in one tran
   await w.client.close();
 });
 
+// ─── 6b. Staff tools: plans and the finance multisig's pulls ──────────────────
+
+test('staff list and edit plans, and list the pulls waiting for the finance signers with what each does; nothing while the flag is off', async () => {
+  const { listPlansForStaff, listPullsAwaitingSignatureForStaff } = await import('../lib/server/subscription-billing.ts');
+  const w = await billingWorld();
+  const { address } = await subscribed(w);
+  await upsertPlanForStaff(w.db, { id: 'legacy', name: 'Legacy', priceMinor: 9n * USDC_1, active: false });
+  const plans = await listPlansForStaff(w.deps);
+  assert.deepEqual(plans.plans.map((p) => [p.id, p.active]), [['legacy', false], ['growth', true], ['scale', true]], 'inactive plans too, for staff');
+  await w.cycle();
+  const listed = await listPullsAwaitingSignatureForStaff({ ...w.deps, usdcType: USDC });
+  assert.equal(listed.ok, true);
+  assert.equal(listed.pulls.length, 1);
+  const [p] = listed.pulls;
+  assert.deepEqual([p.orgId, p.period, p.amountMinor, p.planName], ['acme', '2026-10', String(49n * USDC_1), 'Growth']);
+  assert.deepEqual([p.description.sender, p.description.funder, p.description.recipient], [FINANCE, normalizeSuiAddress(address), FINANCE], 'the signers see what the bytes do, read from the bytes');
+  assert.equal(p.description.digest, p.txDigest);
+  assert.ok(p.txBytes.length > 0);
+  for (const r of [await listPlansForStaff({ ...w.deps, env: OFF }), await listPullsAwaitingSignatureForStaff({ ...w.deps, env: OFF, usdcType: USDC })]) {
+    assert.deepEqual([r.ok, r.status, r.code], [false, 404, 'not_found']);
+  }
+  await w.client.close();
+});
+
+test('the staff billing routes check the flag first, then an operations staff session; the pull route only relays signatures', async () => {
+  for (const [file, methods] of [['app/api/admin/billing/plans/route.ts', ['GET', 'PUT']], ['app/api/admin/billing/pulls/route.ts', ['GET']], ['app/api/admin/billing/pulls/[id]/route.ts', ['POST']]]) {
+    const src = await code(file);
+    for (const m of methods) {
+      const body = handler(src, m);
+      const flag = body.indexOf('subscriptionBillingEnabled()');
+      const session = body.indexOf('requireBillingStaff(');
+      assert.ok(flag >= 0 && session > flag, `${file} ${m}: the flag, then the staff session`);
+      for (const later of ['getDb(', 'upsertPlanForStaff(', 'submitPullForStaff(', 'listPullsAwaitingSignatureForStaff(', 'listPlansForStaff(']) {
+        const at = body.indexOf(later);
+        if (at >= 0) assert.ok(session < at, `${file} ${m}: staff are checked before ${later}`);
+      }
+    }
+  }
+  const staff = await code('lib/server/billing-staff.ts');
+  assert.match(staff, /getAdminSession\(\)/);
+  assert.match(staff, /role !== 'operations'/);
+  const pull = await code('app/api/admin/billing/pulls/[id]/route.ts');
+  assert.doesNotMatch(pull, /signTransaction|Keypair|fromSecretKey|kms/i, 'the server never signs a pull');
+});
+
 // ─── 7. Review fixes: reconcile, cancel without the finance proof, plan changes and stuck pulls ──
 
 const pulls = (w) => w.client.query(`SELECT * FROM subscription_pulls ORDER BY created_at, (status = 'superseded') DESC, id`).then((r) => r.rows);
