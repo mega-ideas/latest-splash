@@ -187,6 +187,40 @@ the owners took back on the new policy does not come back. The old wallet's
 own quorum then revokes the stale allowances (`{ revokeStaleFrom }`);
 nothing else moves.
 
+## Near-threshold alerts (detective only)
+
+The chain enforces the second-approval threshold over a running total per
+(payer, recipient). Two patterns stay under it, and
+`lib/server/near-threshold.ts` flags them for the owners from the same
+index (running totals counted as `threshold_total` counts them, and
+`RuleSpend`):
+
+- **`near_threshold_repeat`**: one spender has paid one recipient (or one
+  bank beneficiary) two or more times (`RuleSpend`) and what the check counts
+  now is at least 80% of the threshold and below it. At or above the
+  threshold the chain itself asks for an approval, so that is not flagged.
+- **`same_recipient_many_spenders`**: two or more spenders (the operator's
+  executor rule included) each have a total to the same recipient or
+  beneficiary, together at least 80% of the threshold; `over_threshold`
+  when together they reach it, since each total was checked alone and no
+  approval was asked for.
+
+RuleSpend carries no principal: the amounts are the policy's totals. A
+bank payout's RuleSpend names the partner deposit address, so its payments
+are counted per deposit address (beneficiaries sharing one deposit address
+count together: a flag can only become likelier).
+
+Nothing is blocked, signed or changed. `GET /api/wallet/spending-rules`
+gives owners (only) the live flags as `nearThreshold`.
+`/api/cron/spend-rule-alerts` (hourly, `CRON_SECRET`) reads every business
+with an on-chain account with its own context, records each alert once per
+business (`spend_rule_alerts`, unique on org and content key, migration
+0051) and emails that business's owners once each (claimed before it is
+sent, retried up to three times). A business whose rules cannot be read
+makes the cron answer 502; one with no wallet or policy yet is skipped.
+`GET /api/wallet/spending-rules/alerts` is the owners' in-app list, read
+for the session's org only. Tests: `tests/near-threshold-alerts.test.mjs`.
+
 ## Open, not built here
 
 - **Running totals restart after a rotation.** The new policy's totals are

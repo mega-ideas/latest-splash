@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { readJsonBody } from '@/lib/server/http';
+import { deriveNearThresholdAlerts } from '@/lib/server/near-threshold';
 import { issueSpendingRule, readSpendingRules } from '@/lib/server/spend-rules';
 import { recipientsFromBody, ruleFromBody, spendRoute, staffSpender, walletMembersOr } from '@/lib/server/spend-rules-route';
 import { orgMemberWalletAddresses } from '@/lib/server/wallet-deps';
@@ -34,8 +35,11 @@ export async function GET(request: Request) {
   const mine = new Set(people.filter((p) => p.userId === route.authority.userId).map((p) => p.address));
   const view = result.view;
   const rules = view.rules.filter((r) => seesAll || mine.has(r.spender)).map((r) => ({ ...r, userId: userOf.get(r.spender) ?? null }));
+  // Near-threshold flags (detective only) are the owners' to see: they name
+  // who paid whom across every rule.
+  const owners = route.authority.role === 'OWNER' ? { nearThreshold: deriveNearThresholdAlerts(view) } : {};
   return NextResponse.json(
-    seesAll ? { ...view, rules } : { walletEpoch: view.walletEpoch, policy: view.policy, rules, unattached: [], stale: [], reissueNeeded: view.reissueNeeded },
+    seesAll ? { ...view, rules, ...owners } : { walletEpoch: view.walletEpoch, policy: view.policy, rules, unattached: [], stale: [], reissueNeeded: view.reissueNeeded },
     { headers: NO_STORE },
   );
 }

@@ -790,8 +790,10 @@ owner. Only `AdminCap` lifts a compliance freeze.
 - **Split payments.** The threshold now applies to a running total per payer
   and recipient (above), so one spender splitting one invoice needs an
   approval for the part over it. What remains: a split across several
-  spenders, each under the threshold, which Phase 2's near-threshold alert
-  (read from `RuleSpend`) is to flag; and, with a fixed window, the
+  spenders, each under the threshold, which the Phase 2 near-threshold
+  alert flags to the owners (detective only: `lib/server/near-threshold.ts`,
+  `/api/cron/spend-rule-alerts`, which also flags one spender paying one
+  recipient repeatedly at 80% or more of the threshold); and, with a fixed window, the
   allowance's own rate limit can still move twice its size across a window
   boundary. The allowance's own caps and the account's tier ceilings still
   bound what moves.

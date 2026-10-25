@@ -358,6 +358,13 @@
       "when": 1792886400000,
       "tag": "0050_fee_governance_alerts",
       "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1792972800000,
+      "tag": "0051_spend_rule_alerts",
+      "breakpoints": true
     }
   ]
 }

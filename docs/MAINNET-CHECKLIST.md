@@ -148,6 +148,9 @@ procedure in [`docs/UPGRADE-POLICY.md`](UPGRADE-POLICY.md).
       `SPLASH_OPS_CAP_ID`, `SPLASH_OPS_ADDRESS` (blank: the governance
       multisig) and `SPLASH_FINANCE_ADDRESS`; unset, those checks are
       reported skipped, never passed.
+- [ ] The near-threshold alert cron (`/api/cron/spend-rule-alerts`) is
+      scheduled hourly with `CRON_SECRET`, and answers 200 (a 502 lists the
+      businesses whose spending rules could not be read).
 - [ ] The governance alert cron reads `FeeConfig` too: with
       `SPLASH_FEE_CONFIG_ID` unset it answers 502, and a 502 naming it means
       the id is not the canonical `FeeConfig` of core's original package. A

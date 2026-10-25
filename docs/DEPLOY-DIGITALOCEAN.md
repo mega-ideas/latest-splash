@@ -173,8 +173,14 @@ new build refuses to install or start on the old runtime and environment.
    calls. It answers 502 without those ids; when either id is not the
    canonical object of the canonical type (that case also pages through
    `OPERATOR_ALERT_WEBHOOK_URL`); or when it cannot read both objects in
-   full. A 502 is again an alert in itself. It does not read `FeeConfig`:
-   owner alerts for fee schedule and fee recipient proposals are Phase 2.
+   full. A 502 is again an alert in itself. It also reads the canonical
+   `FeeConfig` (`SPLASH_FEE_CONFIG_ID`, required) and tells every owner of
+   a proposed or applied fee schedule or fee recipient.
+   Schedule `https://<domain>/api/cron/spend-rule-alerts` hourly (v2 Phase
+   2): it reads every business's spending rules from the chain and emails
+   that business's owners about near-threshold patterns (detective only).
+   It answers 502 without a database or when any business's rules could not
+   be read.
    Schedule `https://<domain>/api/cron/wallet-signing` every five minutes
    (v2 §4.1): it closes Business Splash Wallet signature requests past their
    expiry and clears the partial signatures they held, and reads on chain

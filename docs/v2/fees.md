@@ -336,8 +336,10 @@ each and whom `FeeConfig` pays.
   withdrawn or lapsed proposal stops being shown (as an upgrade's does); the
   withdrawal is not a message of its own. Migration 0050. Tests:
   `tests/fee-governance-alerts.test.mjs`.
-- **Near-threshold alerts**, read from `RuleSpend`. The second-approval
-  threshold itself is enforced on chain today, over a running total
+- **Near-threshold alerts: built (Phase 2).** Read from the policy's
+  running totals and `RuleSpend`, detective only, owner-facing
+  (`docs/v2/phase2-spending-rules.md`, "Near-threshold alerts"). The
+  threshold itself is enforced on chain over a running total
   (`docs/v2/phase1-move-design.md`, R5).
 - **The partner payout-instruction API**, keyed by the intent id as the
   idempotency key. It must build the instruction strictly from the intent's

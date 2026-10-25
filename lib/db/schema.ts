@@ -2238,3 +2238,53 @@ export const zekeSessionNotices = pgTable('zeke_session_notices', {
   primaryKey({ columns: [table.orgId, table.sessionKey, table.notice] }),
   index('zeke_session_notices_shown_at_idx').on(table.shownAt),
 ]);
+
+/**
+ * A near-threshold alert for one business's spending rules (v2 Phase 2;
+ * migration 0051): lib/server/near-threshold.ts decides it from the chain.
+ * Detective only. Unique on (org, content key), so a re-run records it once;
+ * the row is the in-app alert, read by the business's owners only
+ * (lib/server/near-threshold-store.ts).
+ */
+export const spendRuleAlerts = pgTable('spend_rule_alerts', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  contentKey: text('content_key').notNull(),
+  /** near_threshold_repeat | same_recipient_many_spenders */
+  kind: text('kind').notNull(),
+  /** near_threshold | over_threshold */
+  severity: text('severity').notNull(),
+  policyId: text('policy_id').notNull(),
+  recipient: text('recipient'),
+  beneficiary: text('beneficiary'),
+  spenders: jsonb('spenders').notNull(),
+  countedMinor: text('counted_minor').notNull(),
+  thresholdMinor: text('threshold_minor').notNull(),
+  payments: integer('payments').notNull(),
+  summary: text('summary').notNull(),
+  detail: text('detail').notNull(),
+  activeUntil: timestamp('active_until', { withTimezone: true }).notNull(),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('spend_rule_alerts_org_content_key_unique').on(table.orgId, table.contentKey),
+  index('spend_rule_alerts_org_active_idx').on(table.orgId, table.activeUntil),
+]);
+
+/** One owner emailed about one near-threshold alert; claimed before it is sent. */
+export const spendRuleAlertDeliveries = pgTable('spend_rule_alert_deliveries', {
+  id: text('id').primaryKey(),
+  alertId: text('alert_id').notNull().references(() => spendRuleAlerts.id),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  /** email */
+  channel: text('channel').notNull(),
+  /** sending | sent | failed */
+  status: text('status').notNull(),
+  attempts: integer('attempts').notNull().default(1),
+  providerRef: text('provider_ref'),
+  error: text('error'),
+  sentAt: timestamp('sent_at', { withTimezone: true }),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('spend_rule_alert_deliveries_alert_user_channel_unique').on(table.alertId, table.userId, table.channel),
+]);
