@@ -88,6 +88,11 @@ export const RATE_LIMITS = {
   // own 24-hour gas budget per business sits behind these.
   walletRequestUser: { bucket: 'wallet-request:user', limit: 20, windowMs: HOUR },
   walletRequestOrg: { bucket: 'wallet-request:org', limit: 60, windowMs: HOUR },
+  // A payment's controls evidence and sender declaration read the chain and
+  // write a PDF (v2 §4.6); per person. Opening a Sumsub verification asks a
+  // paid provider for a token; per business.
+  complianceReadUser: { bucket: 'compliance-read:user', limit: 120, windowMs: HOUR },
+  kybSessionOrg: { bucket: 'kyb-session:org', limit: 20, windowMs: HOUR },
   // Each request sends a WhatsApp message; the per-subject cooldown stops a
   // double-click, this stops a loop.
   stepUpRequestUser: { bucket: 'step-up-request:user', limit: 10, windowMs: 15 * MINUTE },

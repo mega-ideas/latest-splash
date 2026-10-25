@@ -21,7 +21,14 @@ Code:
   `POST /api/wallet/payments/[ref]/travel-rule`,
   `POST /api/wallet/payments/[ref]/sender-declaration`.
 
-Tests: `tests/compliance-kyt.test.mjs`, `tests/compliance-sumsub.test.mjs`,
+Limits: opening a Sumsub verification is 20 an hour per business
+(`kybSessionOrg`), the evidence and the sender declaration 120 an hour per
+person (`complianceReadUser`), the screening route and the Travel Rule
+message their existing per-person limits. The webhook has no session; its
+signature, date window and one-time claim stand in for one.
+
+Tests: `tests/compliance-routes.test.mjs` (the gates of each route, as
+source checks), `tests/compliance-kyt.test.mjs`, `tests/compliance-sumsub.test.mjs`,
 `tests/controls-evidence.test.mjs`, `tests/compliance-payment-gates.test.mjs`,
 `tests/compliance-provider-answers.test.mjs` (PGlite, no network), and the
 source checks in `tests/kyb-lifecycle.test.mjs`.

@@ -5,6 +5,7 @@ import { ComplianceProviderUnavailable, kybProviderFromEnv } from '@/lib/complia
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { readJsonBody } from '@/lib/server/http';
 import { attachSumsubApplicant, readKybCase } from '@/lib/server/kyb';
+import { RATE_LIMITS, enforceRateLimit } from '@/lib/server/rate-limit';
 import { requireSessionAccount } from '@/lib/server/session-account';
 
 export const dynamic = 'force-dynamic';
@@ -38,6 +39,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Only an owner opens the verification.' }, { status: 403, headers: NO_STORE });
   }
   if (authority.orgId !== orgId || authority.role !== 'OWNER') return NextResponse.json({ error: 'Only an owner opens the verification.' }, { status: 403, headers: NO_STORE });
+
+  const limited = await enforceRateLimit({ rule: RATE_LIMITS.kybSessionOrg, key: orgId });
+  if (limited) return limited;
 
   const body = await readJsonBody(request);
   const kybCaseId = typeof body.kybCaseId === 'string' ? body.kybCaseId.trim() : '';

@@ -3,7 +3,8 @@ import { NextResponse } from 'next/server';
 import { evidenceJson, evidencePdf, evidenceSha256 } from '@/lib/compliance/controls-evidence';
 import { complianceResponse, evidenceDepsFor } from '@/lib/server/compliance-deps';
 import { controlsEvidenceFor } from '@/lib/server/controls-evidence';
-import { NO_STORE, requirePayoutReader, walletRoute } from '@/lib/server/wallet-route';
+import { RATE_LIMITS, enforceRateLimit } from '@/lib/server/rate-limit';
+import { NO_STORE,requirePayoutReader, walletRoute } from '@/lib/server/wallet-route';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,6 +21,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ ref:
   if (gate.response) return gate.response;
   const reader = requirePayoutReader(gate.route);
   if (reader) return reader;
+  const limited = await enforceRateLimit({ rule: RATE_LIMITS.complianceReadUser, key: gate.route.authority.userId });
+  if (limited) return limited;
   const format = new URL(request.url).searchParams.get('format') ?? 'json';
   if (format !== 'json' && format !== 'pdf') return NextResponse.json({ error: 'format is json or pdf' }, { status: 400, headers: NO_STORE });
   const { ref } = await params;

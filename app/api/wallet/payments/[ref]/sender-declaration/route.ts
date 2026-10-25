@@ -3,7 +3,8 @@ import { NextResponse } from 'next/server';
 import { complianceResponse, exchangePaymentDepsFor } from '@/lib/server/compliance-deps';
 import { senderDeclarationFor } from '@/lib/server/exchange-payment-compliance';
 import { readJsonBody } from '@/lib/server/http';
-import { NO_STORE, requirePayoutReader, walletRoute } from '@/lib/server/wallet-route';
+import { RATE_LIMITS, enforceRateLimit } from '@/lib/server/rate-limit';
+import { NO_STORE,requirePayoutReader, walletRoute } from '@/lib/server/wallet-route';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,6 +21,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ ref
   if (gate.response) return gate.response;
   const reader = requirePayoutReader(gate.route);
   if (reader) return reader;
+  const limited = await enforceRateLimit({ rule: RATE_LIMITS.complianceReadUser, key: gate.route.authority.userId });
+  if (limited) return limited;
   const { ref } = await params;
   const body = await readJsonBody(request);
   const format = body.format ?? 'pdf';
