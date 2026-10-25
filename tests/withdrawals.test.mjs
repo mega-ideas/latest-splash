@@ -245,12 +245,16 @@ test('withdrawal and partner statuses never go backwards, and the final ones are
   assert.equal(canAdvanceWithdrawal('partner_received', 'paid_out'), true);
   assert.equal(canAdvanceWithdrawal('sent', 'failed'), true);
   assert.equal(canAdvanceWithdrawal('failed', 'returned'), true);
-  for (const [a, b] of [['paid_out', 'failed'], ['paid_out', 'partner_received'], ['partner_received', 'sent'], ['returned', 'failed'], ['cancelled', 'sent'], ['awaiting_signatures', 'paid_out'], ['sent', 'returned']]) {
+  // A partner that does not pay out may send the USDC straight back: a return the chain shows closes it, failure reported or not.
+  assert.equal(canAdvanceWithdrawal('sent', 'returned'), true);
+  assert.equal(canAdvanceWithdrawal('partner_received', 'returned'), true);
+  for (const [a, b] of [['paid_out', 'failed'], ['paid_out', 'partner_received'], ['partner_received', 'sent'], ['returned', 'failed'], ['cancelled', 'sent'], ['awaiting_signatures', 'paid_out'], ['awaiting_signatures', 'returned'], ['paid_out', 'returned']]) {
     assert.equal(canAdvanceWithdrawal(a, b), false, `${a} → ${b}`);
   }
   assert.equal(canAdvancePayout('instructed', 'funds_received'), true);
   assert.equal(canAdvancePayout('funds_received', 'paid_out'), true);
   assert.equal(canAdvancePayout('failed', 'returned'), true);
+  assert.equal(canAdvancePayout('funds_received', 'returned'), true);
   for (const [a, b] of [['paid_out', 'failed'], ['paid_out', 'funds_received'], ['funds_received', 'instructed'], ['failed', 'paid_out'], ['instructed', 'returned'], ['returned', 'failed']]) {
     assert.equal(canAdvancePayout(a, b), false, `${a} → ${b}`);
   }
@@ -1080,5 +1084,103 @@ test("an owner saves the business's structured registered address with its profi
   const { readFile } = await import('node:fs/promises');
   const route = await readFile(new URL('../app/api/onboarding/profile/route.ts', import.meta.url), 'utf8');
   assert.match(route, /address: z\s*\.object/, 'the profile route takes the structured address');
+  await t.w.client.close();
+});
+
+/* ── Review of §4.4, 25 Oct 2026 ─────────────────────────────────────── */
+
+test('a partner that sends the USDC straight back, with no failure first, closes the withdrawal as returned, and a short one is left failed for ops', async () => {
+  const t = await setup();
+  const { destination, depositAddress } = await readyToWithdraw(t);
+  const ret = (wd, id, returnDigest) => t.webhook({ type: 'payout.status', eventId: id, partnerRef: wd.partnerRef, intentId: wd.intentId, status: 'returned', returnDigest, occurredAt: T0.toISOString() });
+
+  // Sent, and the partner never said it received it: the return alone, proven on chain, closes it.
+  const one = await created(t, destination.id);
+  await signBoth(t, one.r.request);
+  const back = digest();
+  t.chainTxs.set(back, { digest: back, success: true, sender: depositAddress.address, balanceChanges: [{ address: t.wallet.address, coinType: USDC, amount: '1000000000' }] });
+  const answer = await ret(one.r.withdrawal, 'evt_direct_back1', back);
+  assert.equal(answer.status, 200, JSON.stringify(answer));
+  assert.equal(answer.body.ok, true, JSON.stringify(answer.body));
+  const closed = (await getWithdrawal(t.deps(), one.r.withdrawal.id)).withdrawal;
+  assert.equal(closed.status, 'returned');
+  assert.equal(closed.returnDigest, back);
+  assert.equal(closed.returnedMinor, '1000000000');
+  assert.equal(t.partner.called('returnOrReverse').length, 0, 'the USDC is already back: nothing more is asked of the partner');
+
+  // Received by the partner, then sent back short: failed, with what came back, never returned.
+  const two = await created(t, destination.id);
+  await signBoth(t, two.r.request);
+  assert.equal((await t.webhook({ type: 'payout.status', eventId: 'evt_recv_two', partnerRef: two.r.withdrawal.partnerRef, intentId: two.r.withdrawal.intentId, status: 'funds_received', occurredAt: T0.toISOString() })).status, 200);
+  const short = digest();
+  t.chainTxs.set(short, { digest: short, success: true, sender: depositAddress.address, balanceChanges: [{ address: t.wallet.address, coinType: USDC, amount: '400000000' }] });
+  const shortAnswer = await ret(two.r.withdrawal, 'evt_direct_short', short);
+  assert.equal(shortAnswer.body.short, true, JSON.stringify(shortAnswer.body));
+  const open2 = (await getWithdrawal(t.deps(), two.r.withdrawal.id)).withdrawal;
+  assert.equal(open2.status, 'failed', 'a short return is no payout and no full return: ops look at it');
+  assert.equal(open2.returnedMinor, '400000000');
+  const trail = await t.w.db.select().from(schema.withdrawalEvents);
+  assert.ok(trail.some((e) => e.action === 'return_short' && e.subjectId === two.r.withdrawal.id));
+  // A replay of the short return changes nothing.
+  await ret(two.r.withdrawal, 'evt_direct_short', short);
+  assert.equal((await getWithdrawal(t.deps(), two.r.withdrawal.id)).withdrawal.status, 'failed');
+
+  // A return before the deposit is recorded is retried, never taken; and a
+  // return digest that closed one withdrawal closes no other.
+  const three = await created(t, destination.id);
+  assert.equal((await ret(three.r.withdrawal, 'evt_early_ret', back)).status, 503);
+  await signBoth(t, three.r.request);
+  assert.equal((await ret(three.r.withdrawal, 'evt_reuse_back', back)).body.ignored, 'that return was already counted');
+  assert.equal((await getWithdrawal(t.deps(), three.r.withdrawal.id)).withdrawal.status, 'sent');
+  await t.w.client.close();
+});
+
+test("a payout the partner's fees would swallow is never quoted or instructed, and the owners never accept a receive amount of nothing", async () => {
+  const base = payoutPartner('hata_fiuu', ENV);
+  let zero = false;
+  const t = await setup({ overrides: { quote: async (input) => ({ ...(await base.quote(input)), ...(zero ? { receiveMinor: 0n } : {}) }) } });
+  const { destination } = await readyToWithdraw(t);
+  const q = await quoted(t, destination.id);
+
+  // "At least nothing" would let the partner keep the USDC and pay the bank nothing.
+  const nothing = await createWithdrawal(t.deps(), 'u-founder', { clientKey: 'ck_nothing01', destinationId: destination.id, amountMinor: '1000000000', acceptedReceiveMinor: '0', maxFeeMinor: q.maxFeeMinor, ...bundle() });
+  assert.equal(nothing.ok, false);
+  assert.equal(nothing.code, 'nothing_received');
+  assert.equal(t.partner.called('createPayout').length, 0, 'nobody was instructed');
+
+  // The partner's fee lines eat the whole amount: no quote, and no withdrawal on an earlier quote.
+  zero = true;
+  const none = await quoteWithdrawal(t.deps(), { destinationId: destination.id, amountMinor: '1000000000' });
+  assert.equal(none.ok, false);
+  assert.equal(none.code, 'below_partner_fees');
+  const late = await createWithdrawal(t.deps(), 'u-founder', { clientKey: 'ck_swallow01', destinationId: destination.id, amountMinor: '1000000000', acceptedReceiveMinor: '1', maxFeeMinor: q.maxFeeMinor, ...bundle() });
+  assert.equal(late.ok, false);
+  assert.equal(late.code, 'below_partner_fees');
+  assert.equal(t.partner.called('createPayout').length, 0);
+  assert.equal((await t.w.db.select().from(schema.withdrawals)).length, 0, 'nothing was stored');
+
+  // The sandbox itself: 0.10 USDC is 44 sen, less than its RM1.00 bank transfer fee.
+  const tiny = await quoteWithdrawal({ ...t.deps(), partner: () => base }, { destinationId: destination.id, amountMinor: '100000' });
+  assert.equal(tiny.code, 'below_partner_fees', JSON.stringify(tiny));
+  await t.w.client.close();
+});
+
+test("a bank account is the business's only when the names match letter for letter, whatever the script: letters outside the Latin alphabet are compared, not dropped", async () => {
+  const { sameCompany: same, normalizeCompanyName: fold } = await import('../lib/funding/wallet-funding.ts');
+  assert.equal(same('ACME 日本 SDN BHD', 'Acme 中文 Sdn. Bhd.'), false, 'two names that differ only in Chinese characters are two names');
+  assert.equal(same('Syarikat ابن', 'Syarikat ابو'), false);
+  assert.equal(same('株式会社アクメ', '株式会社アクメ'), true, 'a name wholly in another script still matches itself');
+  assert.equal(same('ACME TRADING SDN BHD', 'Acme Trading Sdn. Bhd.'), true);
+  assert.equal(same('Café Ölüm Sdn Bhd', 'CAFE OLUM SDN BHD'), true, 'accents still fold');
+  assert.equal(fold('  PT  Maju & Co. '), 'pt maju and co');
+
+  const t = await setup();
+  const deps = { ...t.deps(), companyName: async () => 'Acme 中文 Sdn. Bhd.' };
+  const wrong = await addWithdrawalDestination(deps, 'u-founder', { ...ACME_BANK, holderName: 'ACME 日本 SDN BHD' });
+  assert.equal(wrong.ok, false);
+  assert.equal(wrong.code, 'not_company_name');
+  assert.equal((await t.w.db.select().from(schema.withdrawalDestinations)).length, 0, 'nothing about the account was kept');
+  const right = await addWithdrawalDestination(deps, 'u-founder', { ...ACME_BANK, holderName: 'ACME 中文 SDN BHD' });
+  assert.equal(right.ok, true, JSON.stringify(right));
   await t.w.client.close();
 });
