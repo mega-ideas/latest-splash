@@ -8,7 +8,9 @@
  * a fixed message with the address, business name, nonce and expiry). This
  * module is the gate the spending rules read: an address is "proven" for a
  * business while a row in `wallet_ownership_proofs` says so and has not been
- * revoked. Nothing here verifies a proof; `recordOwnershipProof` is what
+ * revoked, and (since the §4.7 review) only while the payment gate would pay
+ * it: an owner-approved saved recipient with the supplier's details, never
+ * Splash's or the business's own address. Nothing here verifies a proof; `recordOwnershipProof` is what
  * §4.7's verifier calls once it has (lib/server/wallet-recipients.ts
  * submitOwnershipProof). An exchange deposit address (the EXCHANGE tag)
  * needs no such proof, but it must be the business's saved exchange
@@ -18,10 +20,10 @@
  */
 import { createHash } from 'node:crypto';
 
-import { and, eq, inArray, isNull } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { normalizeSuiAddress } from '@mysten/sui/utils';
 
-import { suppliers, walletOwnershipProofs } from '../db/schema.ts';
+import { walletOwnershipProofs } from '../db/schema.ts';
 import { closeSigningRequest, listSigningRequests, type DrizzleDb } from './wallet-signing-store.ts';
 
 export interface OwnershipGate {
@@ -31,25 +33,22 @@ export interface OwnershipGate {
   savedExchanges(orgId: string, addresses: string[]): Promise<string[]>;
 }
 
-export function dbOwnershipGate(db: DrizzleDb): OwnershipGate {
+/**
+ * The live gate. An address is taggable only as the payment gate would pay
+ * it (lib/server/wallet-recipients.ts walletDeliveryGate): WALLET a proven,
+ * owner-approved wallet the supplier holds, with its details; EXCHANGE a
+ * saved, owner-approved exchange account the exchange confirmed. Never an
+ * address Splash controls or one of the business's own.
+ */
+export function dbOwnershipGate(db: DrizzleDb, opts: { splashAddresses?: () => Promise<string[]> } = {}): OwnershipGate {
   return {
     async provenAddresses(orgId, addresses) {
-      const wanted = [...new Set(addresses.map((a) => normalizeSuiAddress(a)))];
-      if (wanted.length === 0) return [];
-      const rows = await db
-        .select({ address: walletOwnershipProofs.address })
-        .from(walletOwnershipProofs)
-        .where(and(eq(walletOwnershipProofs.orgId, orgId), inArray(walletOwnershipProofs.address, wanted), isNull(walletOwnershipProofs.revokedAt)));
-      return rows.map((r) => r.address);
+      const { payableForTag } = await import('./wallet-recipients.ts');
+      return payableForTag(db, orgId, addresses, 1, opts);
     },
     async savedExchanges(orgId, addresses) {
-      const wanted = [...new Set(addresses.map((a) => normalizeSuiAddress(a)))];
-      if (wanted.length === 0) return [];
-      const rows = await db
-        .select({ address: suppliers.walletAddress })
-        .from(suppliers)
-        .where(and(eq(suppliers.orgId, orgId), eq(suppliers.deliveryKind, 'EXCHANGE'), inArray(suppliers.walletAddress, wanted)));
-      return [...new Set(rows.map((r) => r.address).filter((a): a is string => Boolean(a)))];
+      const { payableForTag } = await import('./wallet-recipients.ts');
+      return payableForTag(db, orgId, addresses, 2, opts);
     },
   };
 }

@@ -316,10 +316,12 @@ test("a wallet without the supplier's business details is not payable, and the o
 /* 7 ── Cross-chain addresses ──────────────────────────────────────────── */
 
 test('a cross-chain EVM address is taken only in its EIP-55 form', () => {
-  for (const address of ['0x52908400098527886e0f7030069857d2e4169ee7', '0x52908400098527886E0F7030069857D2E4169EE7'.toUpperCase().replace('0X', '0x')]) {
+  // EIP-55's own vectors: 0x5290…9EE7 is all caps in its checksummed form; 0xfB69…d359 is mixed.
+  for (const address of ['0x52908400098527886e0f7030069857d2e4169ee7', '0xfb6916095ca1df60bb79ce92ce3ea74c37c5d359', '0xFB6916095CA1DF60BB79CE92CE3EA74C37C5D359']) {
     assert.throws(() => parseWalletRecipient({ ...supplier, deliveryKind: 'CROSS_CHAIN', chain: 'BASE', address }), (e) => e instanceof RecipientInputError && e.code === 'bad_address', address);
   }
   assert.equal(parseWalletRecipient({ ...supplier, deliveryKind: 'CROSS_CHAIN', chain: 'BASE', address: '0x52908400098527886E0F7030069857D2E4169EE7' }).chain, 'BASE');
+  assert.equal(parseWalletRecipient({ ...supplier, deliveryKind: 'CROSS_CHAIN', chain: 'ARBITRUM', address: '0xfB6916095ca1df60bB79Ce92cE3Ea74c37c5d359' }).address, '0xfb6916095ca1df60bb79ce92ce3ea74c37c5d359');
 });
 
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
@@ -354,11 +356,11 @@ test('a Solana mint recipient is saved only once the chain shows it is a USDC to
 
 test('one EVM transaction may carry the mints of two payments', async () => {
   const w = await world();
-  const mk = (id, nonce) => ({
+  const mk = (id) => ({
     id, orgId: 'acme', paymentRef: sui(id.slice(-2)), destinationChain: 'BASE', destinationDomain: 6, mintRecipient: `0x${'0'.repeat(24)}52908400098527886e0f7030069857d2e4169ee7`,
     amountMinor: 1_000_000n, status: 'awaiting_burn',
   });
-  await w.db.insert(schema.crossChainTransfers).values([mk('cct_a1', null), mk('cct_a2', null)]);
+  await w.db.insert(schema.crossChainTransfers).values([mk('cct_a1'), mk('cct_a2')]);
   await w.client.exec(`UPDATE cross_chain_transfers SET status = 'burned', burn_digest = id, burned_at = now()`);
   await w.client.exec(`UPDATE cross_chain_transfers SET status = 'attested', message = '0x00', message_nonce = '0x' || repeat(right(id, 2), 32), attestation = '0xa7', attested_at = now()`);
   await w.client.exec(`UPDATE cross_chain_transfers SET status = 'minted', mint_tx_hash = '0x${'de'.repeat(32)}', minted_amount_minor = 1000000, minted_at = now()`);
@@ -383,8 +385,8 @@ test('two saves of one Sui address at once leave one recipient', async () => {
 test('removing a recipient and approving one follow the roles', async () => {
   const read = (p) => readFile(new URL(`../${p}`, import.meta.url), 'utf8');
   const del = await read('app/api/recipients/[id]/route.ts');
-  assert.match(del, /recipientRoute\(request\)/, 'owners and staff, not any member');
-  assert.match(del, /route\.authority\.role !== 'OWNER'/, 'a proven wallet or a tagged one only by an owner');
+  assert.match(del, /canAskForWithdrawal\(authority\.role\)/, 'owners and staff, not any member');
+  assert.match(del, /authority\.role !== 'OWNER'/, 'a payable wallet only by an owner');
   const proof = await read('app/api/recipients/[id]/ownership-proof/route.ts');
   assert.match(proof, /revealLink: route\.authority\.role === 'OWNER'/, 'the link only to an owner');
   const approve = await read('app/api/recipients/[id]/approval/route.ts');

@@ -11,8 +11,9 @@ export const dynamic = 'force-dynamic';
  *
  *   GET     the links made for it and what became of each (no tokens: they
  *           are not kept).
- *   POST    make the link (and email it to the supplier when its email is
- *           on file). Any open link is replaced. Owners and staff.
+ *   POST    make the link and email it to the supplier. Any open link is
+ *           replaced. Owners and staff; only an owner is shown the link
+ *           (staff need the supplier's email on file).
  *   DELETE  withdraw the proof: no payment to the wallet until it is proven
  *           again. Owners only.
  *
@@ -32,7 +33,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const limited = await enforceRateLimit({ rule: RATE_LIMITS.ownershipProofUser, key: route.authority.userId });
   if (limited) return limited;
   const { id } = await params;
-  const result = await requestOwnershipProof(await proofLinkDeps(route.db, route.orgId), { recipientId: id, requestedBy: route.authority.userId });
+  // The link goes to the supplier's email; only an owner is shown it, so a
+  // staff member can neither sign it themselves nor spend it.
+  const result = await requestOwnershipProof(await proofLinkDeps(route.db, route.orgId), { recipientId: id, requestedBy: route.authority.userId, revealLink: route.authority.role === 'OWNER' });
   if (!result.ok) return NextResponse.json({ error: result.error, code: result.code }, { status: result.status, headers: NO_STORE });
   const { ok: _ok, ...rest } = result;
   void _ok;

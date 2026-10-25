@@ -175,7 +175,10 @@ export async function recipientCleared(ctx: WalletContext, orgId: string, recipi
 export async function recipientPayable(ctx: WalletContext, orgId: string, recipient: string, kind: number, requestedBy: string): Promise<PlanFailure | null> {
   const screened = await recipientCleared(ctx, orgId, recipient, requestedBy);
   if (screened) return screened;
-  const delivery = await walletDeliveryGate(ctx.signing.db, orgId, recipient, kind);
+  // Opening: an exchange account the exchange has not confirmed yet may be
+  // opened for (its Travel Rule message is sent from this payment); its
+  // signatures wait for the confirmation (lib/server/payment-compliance-gate.ts).
+  const delivery = await walletDeliveryGate(ctx.signing.db, orgId, recipient, kind, { stage: 'open' });
   return delivery ? refuse(delivery.status, delivery.code, delivery.error) : null;
 }
 

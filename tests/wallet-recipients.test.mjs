@@ -77,19 +77,23 @@ test('what may be paid (mainnet, always): CLEAR or ATTESTED; never BLOCK, ERROR 
 
 // ─── The route ──────────────────────────────────────────────────────────────
 
-test('the recipients route validates, screens and refuses BEFORE it saves a wallet', async () => {
+test('the recipients route saves an older wallet body through the one wallet save, which screens and refuses BEFORE it saves', async () => {
   const route = await readFile(new URL('../app/api/recipients/route.ts', import.meta.url), 'utf8');
   const start = route.indexOf("if (body.payoutMethod === 'WALLET')");
   assert.ok(start > 0, 'a wallet branch exists');
   const branch = route.slice(start, route.indexOf("const account = String(body.account"));
-  const persistAt = branch.indexOf('persistRecipient(');
-  for (const step of ['normaliseSuiAddress(', 'WALLET_PROVIDERS', 'screenWalletAddress(', "verdict === 'BLOCK'"]) {
-    const at = branch.indexOf(step);
-    assert.ok(at > 0 && at < persistAt, `${step} runs before the wallet is saved`);
+  // v2 §4.7: owners and staff only, and the same save as every wallet recipient.
+  assert.match(branch, /recipientRoute\(request\)/);
+  assert.match(branch, /createWalletRecipient\(walletRecipientDeps\(route\.db, route\.orgId\), \{ body: legacyWalletBody\(body\)/);
+  assert.doesNotMatch(branch, /persistRecipient\(|attestation\(/, 'no second, weaker save, and no attestation in place of a screening');
+  // That save checks the address, screens it and refuses a BLOCK before it stores anything.
+  const save = await readFile(new URL('../lib/server/wallet-recipients.ts', import.meta.url), 'utf8');
+  const body = save.slice(save.indexOf('export async function createWalletRecipient'), save.indexOf('export async function approveWalletRecipient'));
+  const insertAt = body.indexOf('repo.insertRecipient(');
+  for (const step of ['parseWalletRecipient(', 'screenRecipient(', "verdict === 'BLOCK'"]) {
+    const at = body.indexOf(step);
+    assert.ok(at > 0 && at < insertAt, `${step} runs before the wallet is saved`);
   }
-  assert.match(branch, /status: 403/, 'a listed wallet is refused, not saved');
-  assert.match(branch, /ctx\.role !== 'OWNER' && ctx\.role !== 'FINANCE_ADMIN'/, 'only an admin may attest');
-  assert.match(branch, /recordRecipientScreening\(/);
   // The custody gate sits above the split, so neither path saves first.
   assert.ok(route.indexOf('deliveryTierAllowed(') < start);
 });

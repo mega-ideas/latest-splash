@@ -34,6 +34,7 @@ import { normalizeSuiAddress } from '@mysten/sui/utils';
 
 import { isTravelRuleExchange, TRAVEL_RULE_EXCHANGES, type TravelRuleExchange } from '../compliance/sumsub.ts';
 import {
+  evmChecksumHolds,
   evmMintRecipient,
   FUNDING_CHAINS,
   FundingPlanError,
@@ -154,7 +155,7 @@ export type CrossChainRecipientInput = {
   kind: 'CROSS_CHAIN';
   supplier: SupplierDetails;
   chain: CrossChainChain;
-  /** As the chain writes it: EVM lower-case hex, Solana base58 (the USDC token account). */
+  /** As the chain writes it: EVM lower-case hex (given in its EIP-55 form), Solana base58 (the USDC token account). */
   address: string;
   /** CCTP's 32 bytes, 0x hex. */
   mintRecipient: string;
@@ -200,11 +201,20 @@ export function parseWalletRecipient(body: Record<string, unknown>): WalletRecip
   const raw = typeof body.address === 'string' ? body.address.trim() : '';
   try {
     if (facts.addressFormat === 'EVM') {
+      // EIP-55 only: the address must be in its checksummed form. An all
+      // lower-case (or all upper-case) copy usually is not, and carries no
+      // checksum, so a one-character typo would pass, and a CCTP mint to it
+      // cannot be undone. (An address with no letters has nothing to check.)
+      const hex = raw.replace(/^0x/, '');
+      if (/^[0-9a-fA-F]{40}$/.test(hex) && /[a-fA-F]/.test(hex) && !evmChecksumHolds(hex)) {
+        throw new RecipientInputError('bad_address', 'Paste the address exactly as the wallet shows it, with its mixed upper and lower case: that is its checksum (EIP-55).');
+      }
       const mintRecipient = evmMintRecipient(raw);
       return { kind, supplier, chain, address: raw.toLowerCase(), mintRecipient, domain: facts.cctpDomain };
     }
     // Solana: CCTP mints to a USDC token account. A wallet key looks the same
-    // and loses the funds, so the business says which it gave.
+    // and loses the funds, so the business says which it gave, and the
+    // server then asks the chain (lib/server/solana-token-accounts.ts).
     if (body.addressIsUsdcTokenAccount !== true) {
       throw new RecipientInputError(
         'solana_token_account_needed',

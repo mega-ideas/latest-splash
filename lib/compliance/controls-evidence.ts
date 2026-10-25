@@ -76,6 +76,31 @@ export type ControlsEvidence = {
   /** Screenings made after the payment was approved: not the control that applied to it. */
   screeningsAfterApproval: EvidenceScreening[];
   travelRule: { provider: string; sandbox: boolean; reference: string | null; status: string; exchange: string } | null;
+  /**
+   * The saved wallet recipient the payment went to (v2 §4.7): who saved it,
+   * the owner who approved it, and for a wallet the supplier holds when and
+   * by which link it was proven; for an exchange account whether the
+   * exchange confirmed it. Null for a payout or an address not saved once.
+   */
+  recipient: {
+    recipientId: string;
+    deliveryKind: string;
+    createdBy: string | null;
+    approvedBy: string | null;
+    approvedAt: string | null;
+    ownership: { status: string; provenAt: string | null; challengeId: string | null } | null;
+    exchange: { id: string | null; confirmed: boolean } | null;
+  } | null;
+  /** A cross-chain payment's CCTP receipt: the Sui burn, Circle's attestation, the mint. Null when it is not one. */
+  crossChain: {
+    status: string;
+    destination: { chain: string; domain: number; mintRecipient: string };
+    amountMinor: string;
+    maxBridgeFeeMinor: string;
+    burn: { suiDigest: string; at: string | null } | null;
+    attestation: { nonce: string | null; at: string | null; sandbox: boolean } | null;
+    mint: { chain: string; txHash: string; mintedMinor: string | null; at: string | null } | null;
+  } | null;
   approval: {
     signingRequestId: string;
     purpose: string;
@@ -229,6 +254,28 @@ export function evidencePdf(e: ControlsEvidence): Uint8Array {
       { kind: 'field', label: 'Status', value: e.travelRule.status },
     );
   } else L.push({ kind: 'text', text: 'No Travel Rule message for this payment.' });
+  if (e.recipient) {
+    L.push(
+      { kind: 'heading', text: 'The saved recipient' },
+      { kind: 'field', label: 'Recipient', value: `${e.recipient.recipientId} (${e.recipient.deliveryKind})` },
+      { kind: 'field', label: 'Saved by', value: or(e.recipient.createdBy, 'Not recorded') },
+      { kind: 'field', label: 'Approved by', value: e.recipient.approvedBy ? `${e.recipient.approvedBy} at ${or(e.recipient.approvedAt, 'an unrecorded time')}` : 'No owner approved it' },
+    );
+    if (e.recipient.ownership) {
+      L.push({ kind: 'field', label: 'Ownership proof', value: e.recipient.ownership.provenAt ? `${e.recipient.ownership.status}, proven ${e.recipient.ownership.provenAt} (link ${or(e.recipient.ownership.challengeId, 'not recorded')})` : e.recipient.ownership.status });
+    }
+    if (e.recipient.exchange) L.push({ kind: 'field', label: 'Exchange account', value: `${or(e.recipient.exchange.id, 'unknown')}, ${e.recipient.exchange.confirmed ? 'confirmed by the exchange' : 'not yet confirmed by the exchange'}` });
+  }
+  if (e.crossChain) {
+    L.push(
+      { kind: 'heading', text: 'Cross-chain receipt (CCTP V2)' },
+      { kind: 'field', label: 'Status', value: e.crossChain.status },
+      { kind: 'field', label: 'Destination', value: `${e.crossChain.destination.chain} (domain ${e.crossChain.destination.domain}), mint recipient ${e.crossChain.destination.mintRecipient}` },
+      { kind: 'field', label: 'Sui burn', value: e.crossChain.burn ? `${e.crossChain.burn.suiDigest} at ${or(e.crossChain.burn.at, 'an unrecorded time')}` : 'Not burned yet' },
+      { kind: 'field', label: "Circle's attestation", value: e.crossChain.attestation ? `nonce ${or(e.crossChain.attestation.nonce, 'none')}${e.crossChain.attestation.sandbox ? ' (sandbox)' : ''}` : 'Not attested yet' },
+      { kind: 'field', label: 'Mint', value: e.crossChain.mint ? `${e.crossChain.mint.txHash} on ${e.crossChain.mint.chain}` : 'Not minted yet' },
+    );
+  }
   L.push({ kind: 'heading', text: 'Which rule and approval applied' });
   if (e.approval) {
     L.push(

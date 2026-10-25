@@ -17,9 +17,14 @@
  *                 so sending it as kind WALLET does not avoid the check.
  *   Recipient     the saved recipient's own rule (v2 §4.7,
  *                 lib/server/wallet-recipients.ts walletDeliveryGate): kind
- *                 WALLET only to a proven wallet the supplier holds, kind
- *                 EXCHANGE only to a saved exchange account. A proof
- *                 withdrawn after the payment opened stops it here.
+ *                 WALLET only to a proven, owner-approved wallet the
+ *                 supplier holds, kind EXCHANGE only to an owner-approved
+ *                 exchange account the exchange confirmed (an approved
+ *                 Travel Rule message; until then `submitted` and
+ *                 `awaiting_counterparty` do not let the first payment be
+ *                 signed). Never an address Splash controls or one of the
+ *                 business's own. A proof withdrawn after the payment
+ *                 opened stops it here.
  *
  * The signature that completes the quorum passes through here too, so the
  * check also holds at submission. Reads only; nothing is signed or sent.
@@ -109,7 +114,7 @@ export async function paymentBeforeSign(deps: PaymentGateDeps, request: StoredRe
   // The saved recipient's own rule (v2 §4.7): a proof withdrawn, or a
   // recipient removed, after the payment was opened stops its signature.
   if (payment.kind !== null || request.purpose === 'wallet_payment') {
-    const delivery = await walletDeliveryGate(deps.db, request.orgId, payment.recipient, payment.kind);
+    const delivery = await walletDeliveryGate(deps.db, request.orgId, payment.recipient, payment.kind, { stage: 'sign' });
     if (delivery) return { code: delivery.code, error: delivery.error };
   }
   // A rule payment's message is not a signing request of its own yet; only wallet payments carry one.

@@ -440,7 +440,7 @@ test('the WALLET tag needs a verified ownership proof; an exchange address needs
   assert.equal(exchange.ok, true, JSON.stringify(exchange));
   await signBy(w, exchange.request, 'founder', 'three');
 
-  await recordOwnershipProof(w.db, { orgId: 'acme', address: SUPPLIER, method: 'signed_message', evidence: 'sig', now: T0 });
+  await saveWalletRecipient(w.db, { address: SUPPLIER, now: T0 }); // a saved, owner-approved wallet the supplier proved (v2 §4.7)
   const proven = await changeRecipients(w.sc, { orgId: 'acme', requestedBy: 'u-founder', wallet: members, change: { add: [{ address: SUPPLIER, tag: 'wallet' }] } });
   assert.equal(proven.ok, true, JSON.stringify(proven));
   await signBy(w, proven.request, 'founder', 'three');
@@ -458,7 +458,7 @@ test('the WALLET tag needs a verified ownership proof; an exchange address needs
 test('withdrawing an ownership proof cancels a waiting request that would tag that address as a wallet', async () => {
   const w = await spendWorld();
   const { members } = await withPolicy(w);
-  await recordOwnershipProof(w.db, { orgId: 'acme', address: SUPPLIER, method: 'signed_message', evidence: 'sig', now: T0 });
+  await saveWalletRecipient(w.db, { address: SUPPLIER, now: T0 }); // a saved, owner-approved wallet the supplier proved (v2 §4.7)
   const tagged = await changeRecipients(w.sc, { orgId: 'acme', requestedBy: 'u-founder', wallet: members, change: { add: [{ address: SUPPLIER, tag: 'wallet' }] } });
   assert.equal(tagged.ok, true, JSON.stringify(tagged));
   const other = await changeRecipients(w.sc, { orgId: 'acme', requestedBy: 'u-founder', wallet: members, change: { add: [{ address: EXCHANGE, tag: 'exchange' }] } });
@@ -666,7 +666,7 @@ test('after a rotation the old policy is stale; the rules are reissued under the
   const w = await spendWorld();
   const { members, wallet: old } = await withPolicy(w);
   await passkeyFor(w, 'u-staff', STAFF);
-  await recordOwnershipProof(w.db, { orgId: 'acme', address: SUPPLIER, method: 'signed_message', evidence: 'sig', now: T0 });
+  await saveWalletRecipient(w.db, { address: SUPPLIER, now: T0 }); // a saved, owner-approved wallet the supplier proved (v2 §4.7)
   await saveWalletRecipient(w.db, { address: EXCHANGE, kind: 'EXCHANGE' });
   const recipients = await changeRecipients(w.sc, { orgId: 'acme', requestedBy: 'u-founder', wallet: members, change: { add: [{ address: SUPPLIER, tag: 'wallet' }, { address: EXCHANGE, tag: 'exchange' }] } });
   await signBy(w, recipients.request, 'founder', 'two');

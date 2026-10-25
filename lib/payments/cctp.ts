@@ -255,7 +255,8 @@ export function suiMintRecipient(address: string): string {
 }
 
 /** EIP-55: a mixed-case EVM address carries a checksum in its letter case. */
-function evmChecksumHolds(body: string): boolean {
+/** Whether a 40-hex-character EVM address body is in its EIP-55 form (each letter's case is its checksum bit). */
+export function evmChecksumHolds(body: string): boolean {
   const lower = body.toLowerCase();
   const hash = toHex(keccak_256(new TextEncoder().encode(lower)));
   for (let i = 0; i < lower.length; i += 1) {

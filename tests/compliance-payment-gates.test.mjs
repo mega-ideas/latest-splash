@@ -208,7 +208,7 @@ test('every signature of a wallet payment re-checks the screening, and an exchan
   await w.db.insert(schema.travelRuleTransfers).values(row('preparing', null));
   assert.equal((await paymentBeforeSign({ db: w.db, now: () => T0 }, await stored())).code, 'travel_rule_missing', 'not yet with the provider');
   for (const [status, code] of [['on_hold', 'travel_rule_on_hold'], ['rejected', 'travel_rule_rejected'], ['submitted', null], ['approved', null]]) {
-    await w.client.exec(`UPDATE travel_rule_transfers SET status = '${status}', provider_ref = 'txn-1'`);
+    await w.client.exec(`UPDATE travel_rule_transfers SET status = '${status}', provider_ref = 'txn-1' WHERE payment_ref = '${ex.request.id}'`);
     const r = await paymentBeforeSign({ db: w.db, now: () => T0 }, await stored());
     assert.equal(r?.code ?? null, code, status);
   }

@@ -28,6 +28,8 @@ import {
 } from '@/lib/server/stablecoin-outflows';
 import { walletSendable } from '@/lib/server/wallet-screening';
 import { stablecoinTransferSubject } from '@/lib/server/step-up-subjects';
+import { MOVE_KIND } from '@/lib/recipients/wallet-recipients';
+import { walletDeliveryGate } from '@/lib/server/wallet-recipients';
 
 /**
  * A wallet transfer, end to end: quote → the business signs → submit.
@@ -161,6 +163,11 @@ export async function quoteWalletTransfer(
 
   const recipientAddress = normaliseSuiAddress(recipient.walletAddress);
   if (recipientAddress === sender) return fail(400, 'self_transfer', 'The recipient wallet is the wallet you are sending from.');
+  // The server's own gate (v2 §4.7), read from the saved row: approved by an
+  // owner, the supplier's details on file, the proof live, never Splash's
+  // address or the business's own. Read again at submission.
+  const gated = await walletDeliveryGate(deps.db, input.orgId, recipientAddress, MOVE_KIND.WALLET);
+  if (gated) return fail(gated.status, gated.code, gated.error);
 
   // Free to a Splash user's wallet; to anywhere else, Splash's WALLET fee
   // from the schedule when it is switched on (free until then).
@@ -340,6 +347,12 @@ export async function submitWalletTransfer(
   // The approval — WhatsApp code + passkey, or a click, per Settings — for
   // exactly this quote. Spent here, before the chain; handed back below if
   // nothing moves, so a retry does not need a second approval.
+  // The recipient is checked again (v2 §4.7): a proof withdrawn, or an
+  // approval or address that stopped holding, between the quote and now
+  // stops the transfer before its approval is spent.
+  const stillPayable = await walletDeliveryGate(deps.db, input.orgId, row.recipientAddress, MOVE_KIND.WALLET);
+  if (stillPayable) return fail(stillPayable.status, stillPayable.code, stillPayable.error);
+
   const approvalSubject = stablecoinTransferSubject(row, '');
   // (x402 rows are paid through lib/server/x402-pay.ts, never here.)
   // A resend of the SAME bound transaction already spent its approval.

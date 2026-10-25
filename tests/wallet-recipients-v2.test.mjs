@@ -140,7 +140,7 @@ test('the ownership message names the address, both businesses, the nonce and th
 
 test('a recipient is screened before it is saved, a BLOCK is never saved, and each business sees its own', async () => {
   const w = await world();
-  const ex = await createWalletRecipient(w.deps(), { body: { ...supplier, deliveryKind: 'EXCHANGE', exchange: 'pdax', depositAddress: sui('66') }, requestedBy: 'u-owner' });
+  const ex = await createWalletRecipient(w.deps(), { body: { ...supplier, deliveryKind: 'EXCHANGE', exchange: 'pdax', depositAddress: sui('66') }, requestedBy: 'u-owner', requestedRole: 'OWNER' });
   assert.equal(ex.ok, true, JSON.stringify(ex));
   assert.deepEqual([ex.recipient.deliveryKind, ex.recipient.exchange.id, ex.recipient.exchange.network, ex.recipient.move.kind, ex.screening.verdict], ['EXCHANGE', 'pdax', 'SUI', 2, 'CLEAR']);
   assert.equal(ex.recipient.supplier.registrationNumber, 'CS201912345');
@@ -148,34 +148,34 @@ test('a recipient is screened before it is saved, a BLOCK is never saved, and ea
   assert.deepEqual([screened.orgId, screened.subjectKind, screened.chain, screened.address], ['acme', 'exchange_recipient', 'SUI', sui('66')]);
 
   // One address, one recipient, whatever the kind.
-  const again = await createWalletRecipient(w.deps(), { body: { ...supplier, deliveryKind: 'SELF_CUSTODY', address: sui('66') }, requestedBy: 'u-owner' });
+  const again = await createWalletRecipient(w.deps(), { body: { ...supplier, deliveryKind: 'SELF_CUSTODY', address: sui('66') }, requestedBy: 'u-owner', requestedRole: 'OWNER' });
   assert.deepEqual([again.status, again.code], [409, 'recipient_exists']);
   // Another business may save the same address for itself; neither sees the other's.
-  const theirs = await createWalletRecipient(w.deps('northwind'), { body: { ...supplier, deliveryKind: 'EXCHANGE', exchange: 'bitkub', depositAddress: sui('66') }, requestedBy: 'u-nw' });
+  const theirs = await createWalletRecipient(w.deps('northwind'), { body: { ...supplier, deliveryKind: 'EXCHANGE', exchange: 'bitkub', depositAddress: sui('66') }, requestedBy: 'u-nw', requestedRole: 'OWNER' });
   assert.equal(theirs.ok, true);
   assert.deepEqual((await listRecipients(w.db, 'acme')).map((r) => r.delivery.exchangeId), ['pdax']);
   assert.deepEqual((await listRecipients(w.db, 'northwind')).map((r) => r.delivery.exchangeId), ['bitkub']);
 
   // The sandbox lists an address ending in dead: refused, and nothing saved.
   const dead = `0x${'55'.repeat(30)}dead`;
-  const blocked = await createWalletRecipient(w.deps(), { body: { ...supplier, deliveryKind: 'SELF_CUSTODY', address: dead }, requestedBy: 'u-owner' });
+  const blocked = await createWalletRecipient(w.deps(), { body: { ...supplier, deliveryKind: 'SELF_CUSTODY', address: dead }, requestedBy: 'u-owner', requestedRole: 'OWNER' });
   assert.deepEqual([blocked.status, blocked.code], [403, 'recipient_blocked']);
   assert.equal((await listRecipients(w.db, 'acme')).some((r) => r.walletAddress === dead), false);
 
   // A cross-chain recipient: USDC over CCTP, its mint recipient kept, once per business.
-  const cc = await createWalletRecipient(w.deps(), { body: { ...supplier, deliveryKind: 'CROSS_CHAIN', chain: 'BASE', address: '0x52908400098527886E0F7030069857D2E4169EE7' }, requestedBy: 'u-owner' });
+  const cc = await createWalletRecipient(w.deps(), { body: { ...supplier, deliveryKind: 'CROSS_CHAIN', chain: 'BASE', address: '0x52908400098527886E0F7030069857D2E4169EE7' }, requestedBy: 'u-owner', requestedRole: 'OWNER' });
   assert.equal(cc.ok, true, JSON.stringify(cc));
   assert.deepEqual([cc.recipient.crossChain.chain, cc.recipient.crossChain.domain, cc.recipient.crossChain.asset, cc.recipient.move.ownersOnly, cc.recipient.move.policyTag], ['BASE', 6, 'USDC', true, null]);
   const [ccScreen] = (await w.db.select().from(schema.kytScreenings)).filter((r) => r.chain === 'BASE');
   assert.deepEqual([ccScreen.subjectKind, ccScreen.address], ['cross_chain_recipient', '0x52908400098527886e0f7030069857d2e4169ee7']);
-  assert.equal((await createWalletRecipient(w.deps(), { body: { ...supplier, deliveryKind: 'CROSS_CHAIN', chain: 'BASE', address: '0x52908400098527886e0f7030069857d2e4169ee7' }, requestedBy: 'u-owner' })).code, 'recipient_exists');
+  assert.equal((await createWalletRecipient(w.deps(), { body: { ...supplier, deliveryKind: 'CROSS_CHAIN', chain: 'BASE', address: '0x52908400098527886E0F7030069857D2E4169EE7' }, requestedBy: 'u-owner', requestedRole: 'OWNER' })).code, 'recipient_exists');
   await w.client.close();
 });
 
 test('in production with no screening provider a recipient is saved unscreened and cannot be paid', async () => {
   const w = await world();
   const kyt = kytProviderFromEnv({ NODE_ENV: 'production' });
-  const r = await createWalletRecipient(w.deps('acme', kyt), { body: { ...supplier, deliveryKind: 'EXCHANGE', exchange: 'hata', depositAddress: sui('68') }, requestedBy: 'u-owner' });
+  const r = await createWalletRecipient(w.deps('acme', kyt), { body: { ...supplier, deliveryKind: 'EXCHANGE', exchange: 'hata', depositAddress: sui('68') }, requestedBy: 'u-owner', requestedRole: 'OWNER' });
   assert.equal(r.ok, true);
   assert.deepEqual([r.screening.verdict, r.screening.provider], [null, 'none'], 'no verdict is made up');
   const { recipientScreeningGate } = await import('../lib/server/kyt-screenings.ts');
@@ -210,7 +210,7 @@ const verifySignature = async (message, signature, address) => {
 };
 
 async function selfCustody(w, keypair, orgId = 'acme') {
-  const r = await createWalletRecipient(w.deps(orgId), { body: { ...supplier, deliveryKind: 'SELF_CUSTODY', walletLabel: 'SLUSH', address: keypair.toSuiAddress() }, requestedBy: 'u-owner' });
+  const r = await createWalletRecipient(w.deps(orgId), { body: { ...supplier, deliveryKind: 'SELF_CUSTODY', walletLabel: 'SLUSH', address: keypair.toSuiAddress() }, requestedBy: 'u-owner', requestedRole: 'OWNER' });
   assert.equal(r.ok, true, JSON.stringify(r));
   return r.recipient.id;
 }
@@ -227,7 +227,7 @@ test('a wallet the supplier holds is paid only after it signs the fixed message 
   assert.deepEqual(await walletDeliveryGate(w.db, 'acme', address, 1), { status: 409, code: 'ownership_not_proven', error: 'The supplier has not proven it holds this wallet yet. Send the ownership link and wait for the signature.' });
 
   const sent = [];
-  const link = await requestOwnershipProof(proofDeps(w, 'acme', sent), { recipientId: id, requestedBy: 'u-owner' });
+  const link = await requestOwnershipProof(proofDeps(w, 'acme', sent), { recipientId: id, requestedBy: 'u-owner', revealLink: true });
   assert.equal(link.ok, true, JSON.stringify(link));
   assert.match(link.link, /^https:\/\/app\.splash\.test\/wallet-proof\/[A-Za-z0-9_-]{43}$/);
   assert.equal(new Date(link.expiresAt).getTime(), T0.getTime() + 72 * HOUR);
@@ -251,24 +251,24 @@ test('a wallet the supplier holds is paid only after it signs the fixed message 
   assert.equal((await readOwnershipChallenge(w.db, token, T0)).state, 'used');
 
   // A new link; the old one cannot be used; a signature of another message proves nothing.
-  const second = await requestOwnershipProof(proofDeps(w), { recipientId: id, requestedBy: 'u-owner' });
-  const third = await requestOwnershipProof(proofDeps(w), { recipientId: id, requestedBy: 'u-owner' });
+  const second = await requestOwnershipProof(proofDeps(w), { recipientId: id, requestedBy: 'u-owner', revealLink: true });
+  const third = await requestOwnershipProof(proofDeps(w), { recipientId: id, requestedBy: 'u-owner', revealLink: true });
   assert.equal((await submitOwnershipProof({ db: w.db, now: () => T0, verifySignature }, { token: tokenOf(second.link), signature: await sign(key, second.message) })).code, 'link_used', 'replaced by a newer link');
   assert.equal((await submitOwnershipProof({ db: w.db, now: () => T0, verifySignature }, { token: tokenOf(third.link), signature: await sign(key, second.message) })).code, 'bad_signature', "a signature of another link's message");
 
   // Expired.
-  const fourth = await requestOwnershipProof(proofDeps(w), { recipientId: id, requestedBy: 'u-owner' });
+  const fourth = await requestOwnershipProof(proofDeps(w), { recipientId: id, requestedBy: 'u-owner', revealLink: true });
   const late = await submitOwnershipProof({ db: w.db, now: () => new Date(T0.getTime() + 73 * HOUR), verifySignature }, { token: tokenOf(fourth.link), signature: await sign(key, fourth.message) });
   assert.deepEqual([late.status, late.code], [410, 'link_expired']);
 
   // The wallet's own signature of the current message.
-  const fifth = await requestOwnershipProof(proofDeps(w), { recipientId: id, requestedBy: 'u-owner' });
+  const fifth = await requestOwnershipProof(proofDeps(w), { recipientId: id, requestedBy: 'u-owner', revealLink: true });
   const ok = await submitOwnershipProof({ db: w.db, now: () => T0, verifySignature }, { token: tokenOf(fifth.link), signature: await sign(key, fifth.message) });
-  assert.deepEqual(ok, { ok: true, address });
+  assert.deepEqual([ok.ok, ok.address], [true, address]);
   assert.equal(await walletDeliveryGate(w.db, 'acme', address, 1), null);
   assert.deepEqual(await dbOwnershipGate(w.db).provenAddresses('acme', [address]), [address], 'the WALLET tag may now be given');
   assert.deepEqual(await dbOwnershipGate(w.db).provenAddresses('northwind', [address]), [], "not another business's");
-  assert.equal((await requestOwnershipProof(proofDeps(w), { recipientId: id, requestedBy: 'u-owner' })).code, 'already_proven');
+  assert.equal((await requestOwnershipProof(proofDeps(w), { recipientId: id, requestedBy: 'u-owner', revealLink: true })).code, 'already_proven');
   // Each nonce once, for ever.
   const nonces = (await w.db.select().from(schema.recipientOwnershipChallenges)).map((r) => r.nonce);
   assert.equal(new Set(nonces).size, nonces.length);
@@ -284,16 +284,16 @@ test("one business cannot ask for, read or withdraw another's proof, and a link 
   const w = await world();
   const key = Ed25519Keypair.generate();
   const id = await selfCustody(w, key);
-  assert.equal((await requestOwnershipProof(proofDeps(w, 'northwind'), { recipientId: id, requestedBy: 'u-nw' })).code, 'not_found');
+  assert.equal((await requestOwnershipProof(proofDeps(w, 'northwind'), { recipientId: id, requestedBy: 'u-nw', revealLink: true })).code, 'not_found');
   assert.equal((await revokeRecipientOwnership({ db: w.db, orgId: 'northwind', now: () => T0 }, { recipientId: id })).code, 'not_found');
-  const link = await requestOwnershipProof(proofDeps(w), { recipientId: id, requestedBy: 'u-owner' });
+  const link = await requestOwnershipProof(proofDeps(w), { recipientId: id, requestedBy: 'u-owner', revealLink: true });
   const page = await readOwnershipChallenge(w.db, tokenOf(link.link), T0);
   assert.deepEqual(Object.keys(page).sort(), ['address', 'expiresAt', 'message', 'ok', 'state']);
   assert.equal((await readOwnershipChallenge(w.db, 'A'.repeat(43), T0)).code, 'not_found');
   assert.equal((await submitOwnershipProof({ db: w.db, now: () => T0, verifySignature }, { token: '../etc', signature: 'x' })).code, 'not_found');
   // An exchange account needs no proof link.
-  const ex = await createWalletRecipient(w.deps(), { body: { ...supplier, deliveryKind: 'EXCHANGE', exchange: 'pdax', depositAddress: sui('66') }, requestedBy: 'u-owner' });
-  assert.equal((await requestOwnershipProof(proofDeps(w), { recipientId: ex.recipient.id, requestedBy: 'u-owner' })).code, 'not_self_custody');
+  const ex = await createWalletRecipient(w.deps(), { body: { ...supplier, deliveryKind: 'EXCHANGE', exchange: 'pdax', depositAddress: sui('66') }, requestedBy: 'u-owner', requestedRole: 'OWNER' });
+  assert.equal((await requestOwnershipProof(proofDeps(w), { recipientId: ex.recipient.id, requestedBy: 'u-owner', revealLink: true })).code, 'not_self_custody');
   await w.client.close();
 });
 
@@ -301,7 +301,7 @@ test('a proof is not recorded for a recipient whose address changed after the li
   const w = await world();
   const key = Ed25519Keypair.generate();
   const id = await selfCustody(w, key);
-  const link = await requestOwnershipProof(proofDeps(w), { recipientId: id, requestedBy: 'u-owner' });
+  const link = await requestOwnershipProof(proofDeps(w), { recipientId: id, requestedBy: 'u-owner', revealLink: true });
   await w.db.update(schema.suppliers).set({ walletAddress: sui('7a') }).where(eq(schema.suppliers.id, id));
   const r = await submitOwnershipProof({ db: w.db, now: () => T0, verifySignature }, { token: tokenOf(link.link), signature: await sign(key, link.message) });
   assert.equal(r.code, 'recipient_changed');
@@ -316,9 +316,11 @@ test('a wallet payment goes only to a proven wallet, an exchange payment only to
   const key = Ed25519Keypair.generate();
   await selfCustody(w, key);
   const wallet = key.toSuiAddress();
-  await createWalletRecipient(w.deps(), { body: { ...supplier, deliveryKind: 'EXCHANGE', exchange: 'pdax', depositAddress: sui('66') }, requestedBy: 'u-owner' });
+  await createWalletRecipient(w.deps(), { body: { ...supplier, deliveryKind: 'EXCHANGE', exchange: 'pdax', depositAddress: sui('66') }, requestedBy: 'u-owner', requestedRole: 'OWNER' });
   const gate = (address, kind, orgId = 'acme') => walletDeliveryGate(w.db, orgId, address, kind);
-  assert.equal(await gate(sui('66'), 2), null);
+  // Opened, yes (its Travel Rule message is sent from the payment); signed only once the exchange confirmed the account.
+  assert.equal(await walletDeliveryGate(w.db, 'acme', sui('66'), 2, { stage: 'open' }), null);
+  assert.equal((await gate(sui('66'), 2)).code, 'exchange_unconfirmed');
   assert.equal((await gate(sui('66'), 1)).code, 'kind_mismatch', 'an exchange account sent as a wallet payment');
   assert.equal((await gate(wallet, 2)).code, 'kind_mismatch', 'a wallet sent as an exchange payment');
   assert.equal((await gate(wallet, 1)).code, 'ownership_not_proven');
@@ -400,7 +402,7 @@ const BURN = 'Fq3nXdigest1111111111111111111111111111111';
 async function crossChainWorld() {
   const w = await world();
   await w.client.exec(`INSERT INTO users (id, email, name) VALUES ('u-owner', 'owner@acme.test', 'Owner')`);
-  const cc = await createWalletRecipient(w.deps(), { body: { ...supplier, deliveryKind: 'CROSS_CHAIN', chain: 'BASE', address: '0x52908400098527886E0F7030069857D2E4169EE7' }, requestedBy: 'u-owner' });
+  const cc = await createWalletRecipient(w.deps(), { body: { ...supplier, deliveryKind: 'CROSS_CHAIN', chain: 'BASE', address: '0x52908400098527886E0F7030069857D2E4169EE7' }, requestedBy: 'u-owner', requestedRole: 'OWNER' });
   const self = Ed25519Keypair.generate();
   const own = await selfCustody(w, self);
   const request = async ({ orgId = 'acme', signerKind = 'multisig', digest = BURN, status = 'executed' } = {}) => {
@@ -495,7 +497,8 @@ test('the attestation and the mint are recorded once each, forward only, from th
 
 test('a Solana mint is not read yet, so its payment stays attested', async () => {
   const w = await world();
-  const cc = await createWalletRecipient(w.deps(), { body: { ...supplier, deliveryKind: 'CROSS_CHAIN', chain: 'SOLANA', address: '4Nd1mBQtrMJVYVfKf2PJy9NZUZdTAsp7D4xWLs4gDB4T', addressIsUsdcTokenAccount: true }, requestedBy: 'u-owner' });
+  const solana = { async check() { return { ok: true, tokenOwner: '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM' }; } };
+  const cc = await createWalletRecipient({ ...w.deps(), solana }, { body: { ...supplier, deliveryKind: 'CROSS_CHAIN', chain: 'SOLANA', address: '4Nd1mBQtrMJVYVfKf2PJy9NZUZdTAsp7D4xWLs4gDB4T', addressIsUsdcTokenAccount: true }, requestedBy: 'u-owner', requestedRole: 'OWNER' });
   assert.equal(cc.ok, true, JSON.stringify(cc));
   const base = { db: w.db, orgId: 'acme', now: () => T0 };
   const opened = await openCrossChainTransfer(base, { paymentRef: INTENT, recipientId: cc.recipient.id, amountMinor: 1_000_000_000n, maxBridgeFeeMinor: 0n });

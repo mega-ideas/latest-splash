@@ -452,6 +452,22 @@ export const suppliers = pgTable('suppliers', {
   /** SELF_CUSTODY: unproven, proven (the supplier signed the ownership proof) or revoked. */
   ownershipStatus: text('ownership_status'),
 
+  // ── Controls (v2 §4.7, migration 0048) ───────────────────────────────────
+  /** Who saved the recipient (a user id). */
+  createdBy: text('created_by'),
+  /** The owner who approved a wallet recipient for payment, and when. A
+   *  recipient a staff member saved is paid or tagged only once approved. */
+  approvedBy: text('approved_by'),
+  approvedAt: timestamp('approved_at', { withTimezone: true }),
+  /** SELF_CUSTODY: moved on by every withdrawal of the proof; a challenge of
+   *  an older epoch proves nothing. */
+  ownershipEpoch: integer('ownership_epoch').notNull().default(0),
+  /** SELF_CUSTODY: when the proof was recorded, and by which challenge. */
+  ownershipProvenAt: timestamp('ownership_proven_at', { withTimezone: true }),
+  ownershipChallengeId: text('ownership_challenge_id'),
+  /** CROSS_CHAIN on Solana: the USDC token account's owner, as the chain showed it at saving. */
+  destinationTokenOwner: text('destination_token_owner'),
+
   ...timestamps,
 }, (table) => [
   index('suppliers_org_idx').on(table.orgId),
@@ -1615,6 +1631,8 @@ export const recipientOwnershipChallenges = pgTable('recipient_ownership_challen
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   usedAt: timestamp('used_at', { withTimezone: true }),
   outcome: text('outcome'),
+  /** The recipient's ownership epoch when the challenge was made (0048). */
+  recipientEpoch: integer('recipient_epoch').notNull().default(0),
 }, (table) => [
   index('recipient_ownership_challenges_recipient_idx').on(table.orgId, table.recipientId, table.createdAt),
 ]);
@@ -1649,7 +1667,8 @@ export const crossChainTransfers = pgTable('cross_chain_transfers', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   unique('cross_chain_transfers_payment_unique').on(table.orgId, table.paymentRef),
-  unique('cross_chain_transfers_mint_unique').on(table.destinationChain, table.mintTxHash),
+  // One EVM transaction may carry several messages' mints (0048).
+  unique('cross_chain_transfers_mint_unique').on(table.destinationChain, table.mintTxHash, table.messageNonce),
 ]);
 
 /**

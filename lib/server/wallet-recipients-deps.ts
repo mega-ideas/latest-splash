@@ -14,6 +14,8 @@ import { kytProviderFromEnv } from '@/lib/compliance/kyt';
 import { canAskForWithdrawal } from '@/lib/payouts/withdrawal-rules';
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { requireSessionAccount } from '@/lib/server/session-account';
+import { solanaTokenAccountReaderFromEnv } from '@/lib/server/solana-token-accounts';
+import { splashAddressSourceFromEnv, splashCrossChainAddresses } from '@/lib/server/splash-addresses';
 import type { ProofLinkDeps, ProofSubmitDeps, WalletRecipientDeps } from '@/lib/server/wallet-recipients';
 import type { DrizzleDb } from '@/lib/server/wallet-signing-store';
 
@@ -47,7 +49,17 @@ export async function recipientRoute(request: Request): Promise<{ ok: true; orgI
 }
 
 export function walletRecipientDeps(db: DrizzleDb, orgId: string, env: NodeJS.ProcessEnv = process.env): WalletRecipientDeps {
-  return { db, orgId, now: () => new Date(), kyt: kytProviderFromEnv(env) };
+  return {
+    db,
+    orgId,
+    now: () => new Date(),
+    kyt: kytProviderFromEnv(env),
+    // Splash's own addresses, read live (FeeConfig's recipient can change).
+    splashAddresses: splashAddressSourceFromEnv(env),
+    splashCrossChain: splashCrossChainAddresses(env),
+    // Solana token accounts are checked on chain; with no RPC, none is saved.
+    solana: solanaTokenAccountReaderFromEnv(env),
+  };
 }
 
 export async function proofLinkDeps(db: DrizzleDb, orgId: string, env: NodeJS.ProcessEnv = process.env): Promise<ProofLinkDeps> {

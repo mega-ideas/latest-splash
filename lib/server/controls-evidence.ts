@@ -28,8 +28,10 @@ import { assertEvidenceClean } from '../compliance/controls-evidence.ts';
 import type { Pacs008Evidence } from '../payments/iso20022.ts';
 import { createdIntentIds } from '../payouts/withdrawal-rules.ts';
 import type { WalletAction, WalletTxDescription } from '../wallet/wallet-tx-describe.ts';
+import { readCrossChainTransfer } from './cross-chain-transfers.ts';
 import { screeningsOf } from './kyt-screenings.ts';
 import { readTravelRuleTransfer } from './travel-rule-transfers.ts';
+import { recipientControlsAt } from './wallet-recipients.ts';
 import { readSigningRequest, type DrizzleDb, type StoredRequest } from './wallet-signing-store.ts';
 import type { WithdrawalChainTx } from './withdrawals.ts';
 import { getWithdrawalRow, withdrawalBySigningRequest, type WithdrawalRow } from './withdrawals-store.ts';
@@ -248,6 +250,23 @@ export async function controlsEvidenceFor(deps: EvidenceDeps, ref: string, gener
     gaps.push('This payment goes to an exchange, and no Travel Rule message accepted by the provider is on file for it.');
   }
 
+  // The saved recipient's controls (v2 §4.7), and a cross-chain payment's receipt.
+  const recipient: ControlsEvidence['recipient'] = kind === 'wallet_payment' && paidTo ? await recipientControlsAt(deps.db, deps.orgId, paidTo) : null;
+  if (recipient && !recipient.approvedBy) gaps.push('No owner approved the recipient this payment went to.');
+  const cct = intentId ? await readCrossChainTransfer(deps.db, deps.orgId, normalizeSuiAddress(intentId)) : null;
+  const crossChain: ControlsEvidence['crossChain'] = cct
+    ? {
+        status: cct.status,
+        destination: { chain: cct.destinationChain, domain: cct.destinationDomain, mintRecipient: cct.mintRecipient },
+        amountMinor: cct.amountMinor.toString(),
+        maxBridgeFeeMinor: cct.maxBridgeFeeMinor.toString(),
+        burn: cct.burnDigest ? { suiDigest: cct.burnDigest, at: cct.burnedAt?.toISOString() ?? null } : null,
+        attestation: cct.attestation ? { nonce: cct.messageNonce, at: cct.attestedAt?.toISOString() ?? null, sandbox: cct.sandbox } : null,
+        mint: cct.mintTxHash ? { chain: cct.destinationChain, txHash: cct.mintTxHash, mintedMinor: cct.mintedAmountMinor?.toString() ?? null, at: cct.mintedAt?.toISOString() ?? null } : null,
+      }
+    : null;
+  if (cct && cct.status !== 'minted') gaps.push('This cross-chain payment is not yet minted on its destination chain.');
+
   let approval: ControlsEvidence['approval'] = null;
   if (request) {
     const second = described?.approval && described.approval.type === 'approve_payout' ? { policy: described.approval.policy, payer: described.approval.payer, settleByMs: described.approval.settleByMs } : null;
@@ -321,6 +340,8 @@ export async function controlsEvidenceFor(deps: EvidenceDeps, ref: string, gener
     screenings,
     screeningsAfterApproval,
     travelRule,
+    recipient,
+    crossChain,
     approval,
     quote,
     partner,
