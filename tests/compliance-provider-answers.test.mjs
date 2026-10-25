@@ -40,6 +40,7 @@ import { openCrossChainTransfer } from '../lib/server/cross-chain-transfers.ts';
 import { travelRuleForPayment } from '../lib/server/exchange-payment-compliance.ts';
 import { crossChainRecipientGate, latestScreening, recipientScreeningGate, recordScreening } from '../lib/server/kyt-screenings.ts';
 import { travelRuleHold } from '../lib/server/payment-compliance-gate.ts';
+import { sendTravelRule } from '../lib/server/travel-rule-transfers.ts';
 import { addFundingSource, listWalletDeposits, recheckDeposit, recordDeposit, verifyWalletSource, walletSourceChallenge } from '../lib/server/wallet-funding.ts';
 import { createWalletRecipient } from '../lib/server/wallet-recipients.ts';
 
@@ -258,11 +259,19 @@ test('a cross-chain payment is opened only when the destination address is a fre
   const newest = await latestScreening(w.db, 'acme', 'BASE', BASE_ADDRESS);
   assert.deepEqual([newest.provider, newest.subjectKind], ['elliptic', 'cross_chain_recipient']);
 
-  // A retry of a receipt already opened answers it, whatever the screening says now.
+  // A retry of a receipt already opened is screened again: a BLOCK since is
+  // refused, and the receipt is kept as it was (nothing is deleted).
   await pause();
-  await recordScreening(w.db, kept(BASE_ADDRESS, { chain: 'BASE', kind: 'cross_chain_recipient', verdict: 'BLOCK' }));
+  await recordScreening(w.db, kept(BASE_ADDRESS, { chain: 'BASE', kind: 'cross_chain_recipient', verdict: 'BLOCK', at: at(25 * HOUR)() }));
   const retry = await open({ now: at(25 * HOUR) });
-  assert.deepEqual([retry.ok, retry.created], [true, false]);
+  assert.deepEqual([retry.ok, retry.status, retry.code], [false, 403, 'recipient_blocked'], show(retry));
+  const kept1 = await w.db.select().from(schema.crossChainTransfers).where(eq(schema.crossChainTransfers.paymentRef, INTENT));
+  assert.deepEqual([kept1.length, kept1[0].status], [1, 'awaiting_burn'], 'the receipt is kept');
+  // A fresh CLEAR again: the retry answers the receipt already opened.
+  await pause();
+  await recordScreening(w.db, kept(BASE_ADDRESS, { chain: 'BASE', kind: 'cross_chain_recipient', at: at(25 * HOUR)() }));
+  const again = await open({ now: at(25 * HOUR) });
+  assert.deepEqual([again.ok, again.created], [true, false], show(again));
   await w.client.close();
 });
 
@@ -334,5 +343,155 @@ test("in production the evidence says when a screening or a Travel Rule message 
   assert.ok(prod.evidence.gaps.some((g) => /screening .*sandbox's, not a provider's answer/.test(g)), prod.evidence.gaps.join('\n'));
   assert.ok(prod.evidence.gaps.some((g) => /Travel Rule message .*sandbox's/.test(g)), prod.evidence.gaps.join('\n'));
   assert.ok(prod.evidence.gaps.some((g) => /No CLEAR screening of the recipient address/.test(g)), 'a sandbox CLEAR is not the CLEAR that applied');
+  await client.close();
+});
+
+/* 5 ── A Solana recipient is screened by the wallet that owns its token account ── */
+
+const SOL_TOKEN_ACCOUNT = '4Nd1mBQtrMJVYVfKf2PJy9NZUZdTAsp7D4xWLs4gDB4T';
+const SOL_OWNER = '9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM';
+
+/** A live provider whose answer depends on the address asked about. */
+function scriptedProvider(verdicts, answeredAt = T0) {
+  const asked = [];
+  return {
+    asked,
+    provider: {
+      id: 'elliptic',
+      async screen(subject) {
+        asked.push(subject);
+        const verdict = verdicts[subject.address] ?? 'CLEAR';
+        return { provider: 'elliptic', verdict, reference: `elliptic:${randomUUID()}`, detail: 'live', screenedAt: answeredAt.toISOString(), riskScore: 1 };
+      },
+    },
+  };
+}
+
+const SOL_SUPPLIER = { name: 'Dela Cruz', legalName: 'Dela Cruz Trading Corp', registrationNumber: 'CS201912345', country: 'PH', addressLine1: '1 Ayala Ave', addressCity: 'Makati', email: 'ap@delacruz.test' };
+const solanaChecker = { async check() { return { ok: true, tokenOwner: SOL_OWNER }; } };
+
+async function saveSolana(db, kyt) {
+  return createWalletRecipient(
+    { db, orgId: 'acme', now: () => T0, kyt, solana: solanaChecker },
+    { body: { ...SOL_SUPPLIER, deliveryKind: 'CROSS_CHAIN', chain: 'SOLANA', address: SOL_TOKEN_ACCOUNT, addressIsUsdcTokenAccount: true }, requestedBy: 'u-owner', requestedRole: 'OWNER' },
+  );
+}
+
+test('a Solana recipient whose token account owner is BLOCKed is not saved, though the token account screens CLEAR', async () => {
+  const { db, client } = await migratedDb();
+  await client.exec(`INSERT INTO users (id, email, name) VALUES ('u-owner', 'owner@acme.test', 'Owner')`);
+  const kyt = scriptedProvider({ [SOL_OWNER]: 'BLOCK' });
+  const saved = await saveSolana(db, kyt.provider);
+  assert.deepEqual([saved.ok, saved.status, saved.code], [false, 403, 'recipient_blocked'], show(saved));
+  assert.deepEqual(kyt.asked.map((s) => [s.chain, s.address]).sort(), [['SOLANA', SOL_OWNER], ['SOLANA', SOL_TOKEN_ACCOUNT]].sort());
+  assert.equal((await db.select().from(schema.suppliers).where(eq(schema.suppliers.destinationAddress, SOL_TOKEN_ACCOUNT))).length, 0, 'not saved');
+  assert.equal((await latestScreening(db, 'acme', 'SOLANA', SOL_OWNER)).verdict, 'BLOCK', 'the owner screening is kept');
+
+  // An owner in REVIEW: saved, and the recipient shows REVIEW, not the token account's CLEAR.
+  const { db: db2, client: client2 } = await migratedDb();
+  await client2.exec(`INSERT INTO users (id, email, name) VALUES ('u-owner', 'owner@acme.test', 'Owner')`);
+  const review = await saveSolana(db2, scriptedProvider({ [SOL_OWNER]: 'REVIEW' }).provider);
+  assert.equal(review.ok, true, show(review));
+  const [row] = await db2.select().from(schema.suppliers).where(eq(schema.suppliers.id, review.recipient.id));
+  assert.equal(row.screeningVerdict, 'REVIEW');
+  assert.equal(review.ownerScreening?.verdict, 'REVIEW', show(review));
+  await client.close();
+  await client2.close();
+});
+
+test('a Solana payment is opened only when both the token account and its owner wallet are fresh CLEARs here', async () => {
+  const { db, client } = await migratedDb();
+  await client.exec(`INSERT INTO users (id, email, name) VALUES ('u-owner', 'owner@acme.test', 'Owner')`);
+  const saved = await saveSolana(db, scriptedProvider({}).provider);
+  assert.equal(saved.ok, true, show(saved));
+  const open = (paymentRef, deps = {}) => openCrossChainTransfer(
+    { db, orgId: 'acme', now: () => T0, requestedBy: 'u-owner', env: TEST, ...deps },
+    { paymentRef, recipientId: saved.recipient.id, amountMinor: 1_000_000_000n, maxBridgeFeeMinor: 0n },
+  );
+  const ok = await open(normalizeSuiAddress(`0x${'f1'.repeat(32)}`));
+  assert.equal(ok.ok, true, show(ok));
+
+  // The owner BLOCKed since, the token account still CLEAR: refused.
+  await pause();
+  await recordScreening(db, kept(SOL_OWNER, { chain: 'SOLANA', kind: 'cross_chain_recipient', verdict: 'BLOCK' }));
+  const blocked = await open(normalizeSuiAddress(`0x${'f2'.repeat(32)}`));
+  assert.deepEqual([blocked.status, blocked.code], [403, 'recipient_blocked'], show(blocked));
+  // And a retry of the receipt already opened is refused too.
+  const retry = await open(normalizeSuiAddress(`0x${'f1'.repeat(32)}`));
+  assert.deepEqual([retry.status, retry.code], [403, 'recipient_blocked'], show(retry));
+
+  // The owner in REVIEW: refused.
+  await pause();
+  await recordScreening(db, kept(SOL_OWNER, { chain: 'SOLANA', kind: 'cross_chain_recipient', verdict: 'REVIEW' }));
+  assert.equal((await open(normalizeSuiAddress(`0x${'f3'.repeat(32)}`))).code, 'recipient_in_review');
+
+  // A stale owner CLEAR: screened again by the live provider.
+  await pause();
+  await recordScreening(db, kept(SOL_OWNER, { chain: 'SOLANA', kind: 'cross_chain_recipient' }));
+  const later = new Date(T0.getTime() + 25 * HOUR);
+  const live = scriptedProvider({}, later);
+  const reopened = await open(normalizeSuiAddress(`0x${'f4'.repeat(32)}`), { now: () => later, kyt: live.provider });
+  assert.equal(reopened.ok, true, show(reopened));
+  assert.ok(live.asked.some((s) => s.address === SOL_OWNER), 'the owner is screened again');
+
+  // No owner on file for a Solana recipient: it cannot be screened, so it is not paid.
+  await db.update(schema.suppliers).set({ destinationTokenOwner: null }).where(eq(schema.suppliers.id, saved.recipient.id));
+  const ownerless = await open(normalizeSuiAddress(`0x${'f5'.repeat(32)}`), { now: () => later });
+  assert.deepEqual([ownerless.status, ownerless.code], [409, 'recipient_not_screened'], show(ownerless));
+  await client.close();
+});
+
+test("a Solana payment's evidence lists its owner wallet's screenings, and says when the owner was not CLEAR before approval", async () => {
+  const { db, client } = await migratedDb();
+  await client.exec(`INSERT INTO users (id, email, name) VALUES ('u-owner', 'owner@acme.test', 'Owner')`);
+  const saved = await saveSolana(db, scriptedProvider({}).provider);
+  assert.equal(saved.ok, true, show(saved));
+  const opened = await openCrossChainTransfer({ db, orgId: 'acme', now: () => T0, requestedBy: 'u-owner', env: TEST }, { paymentRef: INTENT, recipientId: saved.recipient.id, amountMinor: 1_000_000_000n, maxBridgeFeeMinor: 0n });
+  assert.equal(opened.ok, true, show(opened));
+  await recordScreening(db, kept(SOL_OWNER, { chain: 'SOLANA', kind: 'cross_chain_recipient', verdict: 'REVIEW', at: new Date(T0.getTime() + HOUR) }));
+  const intent = { intentId: INTENT, recipient: PAYEE, amountMinor: '1000000000', kind: 3, targetCurrency: 'USDC', fxRateUsdLocal: '1000000', expiresAtMs: '9', asset: 'USDC' };
+  const requestId = await signedRequest(db, { description: { actions: [{ type: 'pay_intent', asset: 'USDC', maxFeeMinor: '0', settleByMs: '2', paysFromCommand: 0, intentFromCommand: null, intent }] } });
+  const ev = await controlsEvidenceFor({ db, orgId: 'acme', now: () => T0, readTransaction: async () => null, corePackageOriginalId: CORE, env: TEST }, requestId, 'u-owner');
+  assert.equal(ev.ok, true, JSON.stringify(ev));
+  const owner = ev.evidence.screenings.filter((s) => s.subject === 'cross_chain_recipient_owner');
+  assert.deepEqual(owner.map((s) => [s.address, s.verdict]), [[SOL_OWNER, 'REVIEW'], [SOL_OWNER, 'CLEAR']]);
+  const account = ev.evidence.screenings.filter((s) => s.subject === 'cross_chain_recipient');
+  assert.deepEqual(account.map((s) => s.address), [SOL_TOKEN_ACCOUNT]);
+  assert.ok(ev.evidence.gaps.some((g) => /No CLEAR screening of the wallet that owns the cross-chain recipient's token account/.test(g)), ev.evidence.gaps.join('\n'));
+  assert.ok(!ev.evidence.gaps.some((g) => /No CLEAR screening of the cross-chain recipient was/.test(g)), 'the token account itself was CLEAR');
+  await client.close();
+});
+
+/* 6 ── A sandbox Travel Rule message is replaced by the provider's ──────── */
+
+test("a sandbox Travel Rule message on file is replaced when the payment's message is sent through the provider", async () => {
+  const { db, client } = await migratedDb();
+  const ref = normalizeSuiAddress(`0x${'a7'.repeat(32)}`);
+  const sandboxId = `trt_${randomUUID()}`;
+  await db.insert(schema.travelRuleTransfers).values({ id: sandboxId, orgId: 'acme', paymentRef: ref, signingRequestId: null, exchange: 'pdax', depositAddress: PAYEE, amountMinor: 1_000_000n, requestHash: 'sandbox-hash', provider: 'sandbox', sandbox: true, providerRef: 'sandbox_tr_1', status: 'approved', createdBy: 'u-dev', createdAt: T0, updatedAt: T0 });
+  const payment = { recipient: PAYEE, kind: 2, paymentRef: ref };
+  assert.equal((await travelRuleHold(db, { orgId: 'acme' }, payment, PROD)).code, 'travel_rule_missing');
+
+  const calls = [];
+  const live = { id: 'sumsub', sandbox: false, async submitOutbound(input) { calls.push(input); return { provider: 'sumsub', sandbox: false, reference: 'txn-live-1', status: 'submitted' }; } };
+  const input = {
+    intentId: ref, orgId: 'acme', applicantId: 'applicant-001', at: T0, amountMinor: 1_000_000n,
+    originator: { legalName: 'Acme Trading Sdn Bhd', registrationNumber: '202001012345', country: 'MY', town: 'Kuala Lumpur', street: 'Jalan Ampang', postCode: '50450', walletAddress: WALLET },
+    beneficiary: { legalName: 'Dela Cruz Trading Corp', registrationNumber: 'CS201912345', country: 'PH', town: 'Makati', exchange: 'pdax', depositAddress: PAYEE },
+    purpose: null, signingRequestId: null, createdBy: 'u-owner',
+  };
+  const sent = await sendTravelRule({ db, provider: live, orgId: 'acme', now: () => T0 }, input);
+  assert.equal(sent.ok, true, show(sent));
+  assert.deepEqual([calls.length, sent.transfer.provider, sent.transfer.sandbox, sent.transfer.reference, sent.transfer.status], [1, 'sumsub', false, 'txn-live-1', 'submitted']);
+  const rows = await db.select().from(schema.travelRuleTransfers).where(eq(schema.travelRuleTransfers.paymentRef, ref));
+  assert.equal(rows.length, 1);
+  assert.notEqual(rows[0].id, sandboxId, "the sandbox's late answer cannot land on the provider's row");
+  assert.equal(await travelRuleHold(db, { orgId: 'acme' }, payment, PROD), null, "the provider's message lets it be signed");
+
+  // A retry answers the provider's message; the sandbox may not replace it.
+  assert.equal((await sendTravelRule({ db, provider: live, orgId: 'acme', now: () => T0 }, input)).transfer.reference, 'txn-live-1');
+  assert.equal(calls.length, 1);
+  const sandbox = { id: 'sandbox', sandbox: true, async submitOutbound() { throw new Error('not asked'); } };
+  assert.equal((await sendTravelRule({ db, provider: sandbox, orgId: 'acme', now: () => T0 }, input)).code, 'travel_rule_conflict');
   await client.close();
 });
