@@ -705,6 +705,12 @@ export async function feeFor(deps: WithdrawalDeps, principal: bigint): Promise<{
   }
 }
 
+/** A quote whose partner fee lines take the whole amount pays the bank nothing: never shown, never instructed. */
+function swallowedByFees(q: PayoutQuote): Refusal | null {
+  if (q.receiveMinor > 0n) return null;
+  return refuse(409, 'below_partner_fees', "The partner's fees are more than this amount would pay out, so the bank account would receive nothing. Nothing was sent; send a larger amount.");
+}
+
 /** The fee and the partner's quote for a ready route, only once the wallet holds principal plus fee. */
 export async function quoteReady(deps: WithdrawalDeps, r: Pick<Ready, 'adapter' | 'destination' | 'wallet'>, amount: bigint): Promise<{ ok: true; quote: QuoteWire } | Refusal> {
   const fee = await feeFor(deps, amount);
@@ -719,6 +725,8 @@ export async function quoteReady(deps: WithdrawalDeps, r: Pick<Ready, 'adapter' 
     if (u) return u;
     return refuse(502, 'partner_error', 'The partner did not quote. Nothing was sent.');
   }
+  const swallowed = swallowedByFees(q);
+  if (swallowed) return swallowed;
   return { ok: true, quote: quoteWire(deps, r.adapter, q, fee) };
 }
 
@@ -752,6 +760,8 @@ export function parseBankPayoutAmounts(input: { amountMinor: unknown; acceptedRe
   const shownFee = parseMinor(input.maxFeeMinor);
   if (amount === null || amount <= 0n || amount > MAX_WITHDRAWAL_MINOR) return refuse(400, 'bad_amount', `Say how much USDC to ${what}.`);
   if (accepted === null) return refuse(400, 'accepted_quote_required', 'Send the receive amount of the quote you accepted.');
+  // "At least nothing" would let the partner keep the USDC and pay the bank nothing.
+  if (accepted <= 0n) return refuse(400, 'nothing_received', 'The least the bank account receives must be more than nothing.');
   if (shownFee === null) return refuse(400, 'fee_shown_required', 'Send the Splash fee you were shown.');
   // No Splash fee is ever above 1% of the principal (the ceiling, A1).
   if (shownFee * 10_000n > amount * 100n) return refuse(400, 'bad_fee', 'The fee shown is above the 1% ceiling.');
@@ -845,6 +855,8 @@ export async function openBankPayout(
     if (u) return u;
     return refuse(502, 'partner_error', 'The partner did not quote. Nothing was sent.');
   }
+  const swallowed = swallowedByFees(q);
+  if (swallowed) return swallowed;
   if (q.receiveMinor < accepted) {
     return refuse(409, 'quote_changed', 'The rate moved below the one you accepted. Nothing was sent; look at the new quote.', { quote: quoteWire(deps, r.adapter, q, fee) });
   }
@@ -1435,7 +1447,10 @@ export async function handlePayoutWebhook(input: WebhookInput): Promise<WebhookA
     if (credited < row.amountMinor) {
       // Short: recorded, and left open for ops; never closed as returned.
       await store.releasePartnerEvent(input.db, adapter.id, event.eventId);
-      await store.patchWithdrawal(input.db, row.orgId, row.id, { returnedMinor: credited, failure: `short return: ${credited} of ${row.amountMinor} USDC minor units came back`, updatedAt: at });
+      const shortSet = { returnedMinor: credited, failure: `short return: ${credited} of ${row.amountMinor} USDC minor units came back`, updatedAt: at };
+      // Straight back with no failure first: it did not pay out, so it is failed (forward only), and ops look at it.
+      if (from === 'failed') await store.patchWithdrawal(input.db, row.orgId, row.id, shortSet);
+      else await store.moveWithdrawal(input.db, row.orgId, row.id, [from], { ...shortSet, status: 'failed' });
       await store.recordWithdrawalEvent(input.db, { orgId: row.orgId, subject: 'withdrawal', subjectId: row.id, actor: `partner:${adapter.id}`, action: 'return_short', detail: { returnDigest: event.returnDigest, returnedMinor: credited.toString(), amountMinor: row.amountMinor.toString() }, at });
       return { status: 200, body: { ok: true, short: true } };
     }

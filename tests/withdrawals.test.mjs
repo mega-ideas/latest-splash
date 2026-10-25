@@ -484,7 +484,7 @@ test('a withdrawal is idempotent by its key: a retry is the same withdrawal and 
   assert.equal(again.created, false);
   assert.equal(again.withdrawal.id, r.withdrawal.id);
   assert.equal(t.partner.called('createPayout').length, 1);
-  const other = await createWithdrawal(t.deps(), 'u-founder', { clientKey, destinationId: destination.id, amountMinor: '2000000000', acceptedReceiveMinor: '0', maxFeeMinor: q.maxFeeMinor, ...bundle() });
+  const other = await createWithdrawal(t.deps(), 'u-founder', { clientKey, destinationId: destination.id, amountMinor: '2000000000', acceptedReceiveMinor: '1', maxFeeMinor: q.maxFeeMinor, ...bundle() });
   assert.equal(other.code, 'idempotency_key_reused');
   assert.equal((await createWithdrawal(t.deps(), 'u-founder', { clientKey: 'x', destinationId: destination.id, amountMinor: '1', acceptedReceiveMinor: '0', maxFeeMinor: '0', ...bundle() })).code, 'idempotency_key_required');
   assert.equal((await t.w.db.select().from(schema.withdrawals)).length, 1);
@@ -650,7 +650,7 @@ test("another business's destinations, addresses and withdrawals read as absent"
   assert.equal(await withdrawalDepositAddress(north), null);
   assert.equal((await getWithdrawal(north, r.withdrawal.id)).code, 'not_found');
   assert.equal((await quoteWithdrawal(north, { destinationId: destination.id, amountMinor: '1000000' })).code, 'not_found');
-  assert.equal((await createWithdrawal(north, 'u-north', { clientKey: 'ck_cross_tenant', destinationId: destination.id, amountMinor: '1000000', acceptedReceiveMinor: '0', maxFeeMinor: '0', ...bundle() })).code, 'not_found');
+  assert.equal((await createWithdrawal(north, 'u-north', { clientKey: 'ck_cross_tenant', destinationId: destination.id, amountMinor: '1000000', acceptedReceiveMinor: '1', maxFeeMinor: '0', ...bundle() })).code, 'not_found');
   assert.equal((await revokeWithdrawalDestination(north, 'u-north', destination.id)).code, 'not_found');
   assert.equal((await listWithdrawalDestinations(t.deps())).length, 1, "acme's is untouched");
   await t.w.client.close();

@@ -270,12 +270,13 @@ const RANK: Record<PartnerPayoutStatus, number> = { instructed: 0, funds_receive
 /**
  * Whether a partner's report may move a payout from `from` to `to`. Statuses
  * never go backwards: funds received → paid out; a failure (before payout) →
- * returned. Paid out and returned are final.
+ * returned; funds received → returned (the partner did not pay out and sent
+ * the USDC straight back). Paid out and returned are final.
  */
 export function canAdvancePayout(from: PartnerPayoutStatus, to: PartnerPayoutStatus): boolean {
   if (from === to) return false;
   if (from === 'paid_out' || from === 'returned') return false;
-  if (to === 'returned') return from === 'failed';
+  if (to === 'returned') return from === 'failed' || from === 'funds_received';
   if (to === 'failed') return from === 'instructed' || from === 'funds_received';
   if (to === 'paid_out') return from === 'instructed' || from === 'funds_received';
   return RANK[to] > RANK[from];

@@ -193,12 +193,15 @@ const LEGAL_SUFFIXES: Array<[RegExp, string]> = [
 
 /**
  * A company name as a bank or card network prints it: case, punctuation,
- * accents and spacing folded, and the common legal suffixes written one way.
+ * Latin accents and spacing folded, and the common legal suffixes written one way.
  * Nothing else is guessed: "Acme Trading" and "Acme" are different names.
  */
 export function normalizeCompanyName(name: string): string {
   let s = name.normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase();
-  s = s.replace(/&/g, ' and ').replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+  // Punctuation goes; letters and digits of every script stay, so two names
+  // that differ only in letters outside a-z are two names, and a name wholly
+  // in another script still matches itself.
+  s = s.replace(/&/g, ' and ').replace(/[^\p{L}\p{M}\p{N} ]+/gu, ' ').replace(/\s+/g, ' ').trim();
   for (const [pattern, canonical] of LEGAL_SUFFIXES) s = s.replace(pattern, canonical);
   return s.replace(/\s+/g, ' ').trim();
 }

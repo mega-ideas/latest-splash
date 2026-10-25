@@ -261,7 +261,7 @@ test("another business's supplier, payout or deposit address reads as absent, an
   assert.equal((await P.getPartnerPayout(north, r.payout.id)).code, 'not_found');
   assert.equal((await P.quotePartnerPayout(north, { beneficiaryId: beneficiary.id, amountMinor: '1000000' })).code, 'not_found');
   assert.equal((await P.revokePayoutBeneficiary(north, 'u-north', beneficiary.id)).code, 'not_found');
-  assert.equal((await P.createPartnerPayout(north, 'u-north', { clientKey: 'ck_north_0001', beneficiaryId: beneficiary.id, amountMinor: '1000000', acceptedReceiveMinor: '0', maxFeeMinor: '0', purposeCode: 'SUPP', sourceOfFunds: 'business_revenue', ...bundle() })).code, 'not_found');
+  assert.equal((await P.createPartnerPayout(north, 'u-north', { clientKey: 'ck_north_0001', beneficiaryId: beneficiary.id, amountMinor: '1000000', acceptedReceiveMinor: '1', maxFeeMinor: '0', purposeCode: 'SUPP', sourceOfFunds: 'business_revenue', ...bundle() })).code, 'not_found');
   assert.equal(await W.withdrawalDepositAddress(north, 'pdax'), null);
   assert.equal((await W.getWithdrawal(t.deps(), r.payout.id)).code, 'not_found', 'a supplier payout is not a withdrawal');
   assert.deepEqual(await W.listWithdrawals(t.deps()), []);

@@ -28,8 +28,11 @@ export type WithdrawalStatus = 'preparing' | 'awaiting_signatures' | 'sent' | 'p
 const NEXT: Record<WithdrawalStatus, readonly WithdrawalStatus[]> = {
   preparing: ['awaiting_signatures', 'cancelled'],
   awaiting_signatures: ['sent', 'cancelled'],
-  sent: ['partner_received', 'paid_out', 'failed'],
-  partner_received: ['paid_out', 'failed'],
+  // A partner that does not pay out (the rate fell below the least the owners
+  // accepted, say) may send the USDC straight back with no failure first: a
+  // return the chain shows closes it from either.
+  sent: ['partner_received', 'paid_out', 'failed', 'returned'],
+  partner_received: ['paid_out', 'failed', 'returned'],
   failed: ['returned'],
   paid_out: [],
   returned: [],
