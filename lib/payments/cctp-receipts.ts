@@ -93,12 +93,22 @@ export type BurnReading =
  * attested? A complete message must come from Sui, go to the payment's
  * domain, mint to its recipient exactly its amount with a fee no higher than
  * the payment's bridge fee bound, and anyone may relay it (zero destination
- * caller). A complete message that says anything else is a mismatch, never
- * this payment's receipt.
+ * caller).
+ *
+ * One Sui transaction may burn for several payments (a batch is one
+ * PTB), so Circle may hold several messages for one burn. Each payment takes
+ * the first complete message that is exactly its own and whose nonce no
+ * other receipt has taken (`takenNonces`). A message to this recipient that
+ * says anything else is not this payment's; when no message is, the burn is
+ * pending if Circle still holds an unattested one, and otherwise a mismatch
+ * (with the first reason found), never this payment's receipt.
  */
-export function readBurn(messages: IrisMessage[], expected: ExpectedBurn): BurnReading {
+export function readBurn(messages: IrisMessage[], expected: ExpectedBurn, takenNonces: ReadonlySet<string> = new Set()): BurnReading {
   const want = expected.mintRecipient.toLowerCase();
+  const taken = new Set([...takenNonces].map((n) => n.toLowerCase()));
   let pending = false;
+  let reason: string | null = null;
+  let takenByAnother = false;
   for (const m of messages) {
     if (m.status !== 'complete' || !m.attestation || !/^0x[0-9a-fA-F]+$/.test(m.attestation)) {
       pending = true;
@@ -109,15 +119,28 @@ export function readBurn(messages: IrisMessage[], expected: ExpectedBurn): BurnR
     const burn = decodeBurnMessageV2(msg.body);
     if (!burn) continue;
     if (burn.mintRecipient.toLowerCase() !== want) continue;
-    if (msg.sourceDomain !== SUI_CCTP_DOMAIN) return { state: 'mismatch', reason: 'the message is not from Sui' };
-    if (msg.destinationDomain !== expected.destinationDomain) return { state: 'mismatch', reason: 'the message goes to another chain' };
-    if (burn.amount !== expected.amountMinor) return { state: 'mismatch', reason: 'the message burns another amount' };
-    if (burn.maxFee > expected.maxBridgeFeeMinor) return { state: 'mismatch', reason: "the message allows Circle a higher fee than the payment's bound" };
-    if (!/^0x0{64}$/.test(msg.destinationCaller)) return { state: 'mismatch', reason: 'the message names a destination caller' };
-    if (/^0x0{64}$/.test(msg.nonce)) return { state: 'mismatch', reason: 'the attested message has no nonce' };
+    const not =
+      msg.sourceDomain !== SUI_CCTP_DOMAIN ? 'the message is not from Sui'
+      : msg.destinationDomain !== expected.destinationDomain ? 'the message goes to another chain'
+      : burn.amount !== expected.amountMinor ? 'the message burns another amount'
+      : burn.maxFee > expected.maxBridgeFeeMinor ? "the message allows Circle a higher fee than the payment's bound"
+      : !/^0x0{64}$/.test(msg.destinationCaller) ? 'the message names a destination caller'
+      : /^0x0{64}$/.test(msg.nonce) ? 'the attested message has no nonce'
+      : null;
+    if (not) {
+      reason ??= not;
+      continue;
+    }
+    if (taken.has(msg.nonce.toLowerCase())) {
+      takenByAnother = true;
+      continue;
+    }
     return { state: 'complete', message: m.message.toLowerCase(), nonce: msg.nonce, attestation: m.attestation.toLowerCase(), mintsMinor: mintedAmount(burn) };
   }
-  return pending ? { state: 'pending' } : { state: 'mismatch', reason: 'Circle holds no message for this burn to this recipient' };
+  if (pending) return { state: 'pending' };
+  if (reason) return { state: 'mismatch', reason };
+  if (takenByAnother) return { state: 'mismatch', reason: "every message of this burn that mints this payment is already another payment's" };
+  return { state: 'mismatch', reason: 'Circle holds no message for this burn to this recipient' };
 }
 
 // ─── The mint on an EVM chain ───────────────────────────────────────────────

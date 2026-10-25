@@ -8,7 +8,9 @@
  *              Circle's fee bound, keyed once per business and payment
  *              reference (the intent id). A second open with anything else
  *              is refused.
- *   burned     the Sui transaction that paid it: it is this business's own
+ *   burned     the Sui transaction that paid it (one transaction may pay
+ *              several cross-chain payments; each records it only if it
+ *              confirmed that payment's own intent): it is this business's own
  *              executed signing request, signed by the owners' multisig (a
  *              cross-chain payment is never a rule payment), the chain shows
  *              it succeeded from that wallet and confirmed this intent under
@@ -19,7 +21,9 @@
  *              this domain (lib/payments/cctp-receipts.ts). The message and
  *              attestation are kept as Circle gave them.
  *   minted     the destination chain's own receipt of the transaction shows
- *              Circle's MessageTransmitterV2 receiving this message (EVM).
+ *              Circle's MessageTransmitterV2 receiving this message (EVM),
+ *              on the network the attestation came from (testnet for a
+ *              sandbox attestation, mainnet otherwise).
  *              A Solana mint is not read yet: it stays attested.
  *
  * Forward only: the table's trigger refuses a step back and never replaces a
@@ -35,7 +39,7 @@
  */
 import { randomUUID } from 'node:crypto';
 
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, ne } from 'drizzle-orm';
 import { normalizeSuiAddress } from '@mysten/sui/utils';
 
 import { crossChainTransfers, suppliers, walletSigningRequests } from '../db/schema.ts';
@@ -217,6 +221,13 @@ export async function readCrossChainTransfer(db: DrizzleDb, orgId: string, payme
   return row ?? null;
 }
 
+/** A unique-constraint violation on `constraint`, as Postgres or PGlite reports it. */
+function isUniqueViolation(error: unknown, constraint: string): boolean {
+  const e = error as { message?: string; constraint?: string; cause?: { message?: string; constraint?: string } } | null;
+  const text = `${e?.message ?? ''} ${e?.constraint ?? ''} ${e?.cause?.message ?? ''} ${e?.cause?.constraint ?? ''}`;
+  return text.includes(constraint);
+}
+
 /** Move a row one step, only from the status it was read in. */
 async function step(db: DrizzleDb, row: CrossChainRow, set: Partial<typeof crossChainTransfers.$inferInsert>): Promise<CrossChainRow | null> {
   const [done] = await db
@@ -311,7 +322,14 @@ export async function refreshCrossChainAttestation(deps: CrossChainDeps & { iris
     if (error instanceof CctpUnavailable) return refuse(503, error.code, error.message);
     return refuse(502, 'cctp_unavailable', "Circle's attestation service could not be reached. Nothing was recorded.");
   }
-  const reading = readBurn(messages, { destinationDomain: row.destinationDomain, mintRecipient: row.mintRecipient, amountMinor: row.amountMinor, maxBridgeFeeMinor: row.maxBridgeFeeMinor });
+  // One transaction may burn for several payments: the messages other
+  // receipts of this burn already took are not this payment's.
+  const others = await deps.db
+    .select({ nonce: crossChainTransfers.messageNonce })
+    .from(crossChainTransfers)
+    .where(and(eq(crossChainTransfers.orgId, row.orgId), eq(crossChainTransfers.burnDigest, row.burnDigest), ne(crossChainTransfers.id, row.id), isNotNull(crossChainTransfers.messageNonce)));
+  const taken = new Set(others.map((o) => o.nonce).filter((n): n is string => typeof n === 'string'));
+  const reading = readBurn(messages, { destinationDomain: row.destinationDomain, mintRecipient: row.mintRecipient, amountMinor: row.amountMinor, maxBridgeFeeMinor: row.maxBridgeFeeMinor }, taken);
   if (reading.state === 'pending') return { ok: true, transfer: row, pending: true };
   if (reading.state === 'mismatch') {
     // An alert for ops: ids only.
@@ -319,16 +337,24 @@ export async function refreshCrossChainAttestation(deps: CrossChainDeps & { iris
     return refuse(409, 'burn_mismatch', `Circle's message for this burn does not match the payment (${reading.reason}). Nothing was recorded.`);
   }
   const now = deps.now();
-  const done = await step(deps.db, row, {
-    status: 'attested',
-    message: reading.message,
-    messageNonce: reading.nonce,
-    attestation: reading.attestation,
-    attestedAt: now,
-    mintedAmountMinor: reading.mintsMinor,
-    sandbox: deps.iris.sandbox,
-    updatedAt: now,
-  });
+  let done: CrossChainRow | null;
+  try {
+    done = await step(deps.db, row, {
+      status: 'attested',
+      message: reading.message,
+      messageNonce: reading.nonce,
+      attestation: reading.attestation,
+      attestedAt: now,
+      mintedAmountMinor: reading.mintsMinor,
+      sandbox: deps.iris.sandbox,
+      updatedAt: now,
+    });
+  } catch (error) {
+    // Another receipt of the same burn took this message at the same moment:
+    // nothing is recorded, and the next refresh takes the next message.
+    if (isUniqueViolation(error, 'cross_chain_transfers_nonce_unique')) return { ok: true, transfer: row, pending: true };
+    throw error;
+  }
   return { ok: true, transfer: done ?? (await readCrossChainTransfer(deps.db, deps.orgId, row.paymentRef)) ?? row, pending: false };
 }
 
@@ -371,7 +397,7 @@ export async function sweepCrossChainTransfers(deps: { db: DrizzleDb; now: () =>
 
 /** Record the mint: believed only from the destination chain's own receipt. */
 export async function recordCrossChainMint(
-  deps: CrossChainDeps & { mints: MintReader; network: 'mainnet' | 'testnet' },
+  deps: CrossChainDeps & { mints: MintReader },
   input: { paymentRef: string; mintTxHash: unknown },
 ): Promise<{ ok: true; transfer: CrossChainRow } | Refusal> {
   const row = await readCrossChainTransfer(deps.db, deps.orgId, input.paymentRef);
@@ -393,7 +419,11 @@ export async function recordCrossChainMint(
     if (error instanceof CctpUnavailable) return refuse(503, error.code, error.message);
     return refuse(502, 'mint_check_unavailable', `The ${FUNDING_CHAINS[chain].label} transaction could not be read. Nothing was recorded.`);
   }
-  const read = readEvmMint(receipt, { transmitter: messageTransmitterV2(chain, deps.network), nonce: row.messageNonce, message: row.message });
+  // Circle's contract on the network the attestation came from: a sandbox
+  // attestation is minted only by the testnet MessageTransmitterV2, any
+  // other only by the mainnet one, whatever this server's Sui network says.
+  const network = row.sandbox ? 'testnet' : 'mainnet';
+  const read = readEvmMint(receipt, { transmitter: messageTransmitterV2(chain, network), nonce: row.messageNonce, message: row.message });
   if (!read.ok) return refuse(409, 'not_the_mint', `That transaction is not the mint of this payment (${read.reason}).`);
   const now = deps.now();
   let done: CrossChainRow | null;

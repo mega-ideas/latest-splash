@@ -1659,7 +1659,8 @@ export const crossChainTransfers = pgTable('cross_chain_transfers', {
   amountMinor: bigint('amount_minor', { mode: 'bigint' }).notNull(),
   maxBridgeFeeMinor: bigint('max_bridge_fee_minor', { mode: 'bigint' }).notNull().default(0n),
   status: text('status').notNull(),
-  burnDigest: text('burn_digest').unique('cross_chain_transfers_burn_unique'),
+  /** Several receipts may share one burn: one owners' transaction may pay several cross-chain payments (0056). */
+  burnDigest: text('burn_digest'),
   burnedAt: timestamp('burned_at', { withTimezone: true }),
   message: text('message'),
   messageNonce: text('message_nonce').unique('cross_chain_transfers_nonce_unique'),
@@ -1675,6 +1676,7 @@ export const crossChainTransfers = pgTable('cross_chain_transfers', {
   unique('cross_chain_transfers_payment_unique').on(table.orgId, table.paymentRef),
   // One EVM transaction may carry several messages' mints (0048).
   unique('cross_chain_transfers_mint_unique').on(table.destinationChain, table.mintTxHash, table.messageNonce),
+  index('cross_chain_transfers_burn_idx').on(table.burnDigest),
 ]);
 
 /**

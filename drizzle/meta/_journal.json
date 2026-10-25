@@ -393,6 +393,13 @@
       "when": 1793318400000,
       "tag": "0055_lost_answer_reversal_backfill",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1793404800000,
+      "tag": "0056_cross_chain_batch_burn",
+      "breakpoints": true
     }
   ]
 }

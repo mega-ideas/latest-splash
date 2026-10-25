@@ -58,8 +58,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ ref
       { paymentRef, burnDigest: body.burnDigest },
     );
   } else if (body.mintTxHash !== undefined) {
-    const network = process.env.SUI_NETWORK === 'mainnet' ? 'mainnet' : 'testnet';
-    result = await recordCrossChainMint({ ...base, mints: mintReaderFromEnv(process.env), network }, { paymentRef, mintTxHash: body.mintTxHash });
+    // Checked against Circle's contract on the network the receipt's attestation came from.
+    result = await recordCrossChainMint({ ...base, mints: mintReaderFromEnv(process.env) }, { paymentRef, mintTxHash: body.mintTxHash });
   } else if (body.refresh === true) {
     let iris;
     try {

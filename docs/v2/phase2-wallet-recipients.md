@@ -19,7 +19,8 @@ Code:
   `GET|POST /api/ownership-proofs/[token]` (public, the supplier's side),
   `GET|POST /api/wallet/payments/[ref]/cross-chain`.
 
-Tests: `tests/wallet-recipients-v2.test.mjs` (PGlite, no network), with
+Tests: `tests/wallet-recipients-v2.test.mjs` and
+`tests/cross-chain-batch-burn.test.mjs` (PGlite, no network), with
 additions to `tests/compliance-payment-gates.test.mjs`,
 `tests/controls-evidence.test.mjs` and `tests/spend-rules.test.mjs`.
 
@@ -264,10 +265,23 @@ its own source:
 
 Forward only: a trigger refuses a step back, a replaced burn, attestation or
 mint, a change to what is paid, and any delete. Each step is a
-compare-and-set on the status. One burn and one message nonce per receipt
-(unique); a mint is unique per chain, transaction and message nonce
-(0048), so a relayer that mints several payments' messages in one
+compare-and-set on the status. One owners' transaction may pay several
+cross-chain payments (a batch is one signature for one PTB, §5.6), so a Sui
+digest may be the burn of several receipts (0056), each recorded only
+because that transaction confirmed the receipt's own intent. Each receipt
+takes its own Circle message of that burn: the one that mints exactly its
+amount to its recipient and whose nonce no other receipt has taken; a
+message nonce is unique, and a receipt that loses a race for one stays
+burned for the next refresh. When none of Circle's messages is the
+payment's, it stays burned while Circle still holds one unattested, and is
+otherwise a mismatch. A mint is unique per chain, transaction and message
+nonce (0048), so a relayer that mints several payments' messages in one
 transaction is recorded for each.
+
+A mint is checked against Circle's MessageTransmitterV2 on the network the
+receipt's attestation came from: the testnet contract for a sandbox
+attestation, the mainnet one for any other, whatever the server's
+`SUI_NETWORK` says.
 
 The sweep (`/api/cron/cross-chain`, every ten minutes; review B7) asks
 Circle again for every burned payment, within its own business, so a lost
