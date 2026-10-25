@@ -33,9 +33,10 @@ import { lockedCopy, saasCompliance } from '@/content/claims';
 import { pricingSummary, type FeeScheduleWire, type PricingSummary } from '@/lib/fees/copy';
 import { LAUNCH_SCHEDULE } from '@/lib/fees/schedule';
 import { getComparisonBaseline } from '@/lib/fx/comparison-baselines';
-import { comparisonRows, SPEED_LINE } from '@/lib/landing/comparison';
+import { comparisonRows, splashToday, SPEED_LINE } from '@/lib/landing/comparison';
 import { landingImage, type LandingImage } from '@/lib/landing/images';
-import { PILOT_ROUTES, QUOTABLE_ROUTES } from '@/lib/landing/routes';
+import { PILOT_ROUTES, QUOTABLE_ROUTES, type QuotableCurrency } from '@/lib/landing/routes';
+import { REQUEST_ACCESS_ID } from '@/components/landing/ProductSection';
 import { BRAND } from '@/content/brand';
 
 const LIQUIDITY_ART = landingImage('liquidity-pools');
@@ -111,12 +112,13 @@ const copilotLayers = [
 /* Where a payment can land (v2 brief section 6). A bank in local currency
    through a partner of record, or a wallet in stablecoin; and the money
    waiting to be sent sits in the business's own Splash Wallet. There is no
-   Splash account that holds anyone's funds (D3). */
-const recipientLadder = [
+   Splash account that holds anyone's funds (D3). A bank payout says "Live"
+   only once a payout partner is signed (lib/landing/routes.ts routeIsLive). */
+const recipientLadder = (bankLive: boolean) => [
   {
     number: '01',
     title: 'Bank payout',
-    status: 'Live',
+    status: bankLive ? 'Live' : 'Quotes open',
     copy: 'Local currency to a verified recipient’s bank, paid by a partner of record.',
   },
   {
@@ -180,26 +182,31 @@ const headerNavItems = [
 ];
 
 
-const loopCards = [
+/* Each loop's status chip is what is true today: Settle is "Live" once a
+   payout partner is signed, Save once treasury execution is switched on
+   after legal sign-off (brief section 9), Supply is on the roadmap. */
+type LoopStatus = 'live' | 'quotes' | 'roadmap' | 'signoff';
+
+const loopCards = (status: { settle: LoopStatus; save: LoopStatus }) => [
   {
     number: '01',
     label: 'Settle',
     title: 'Move it in minutes.',
-    copy: 'Collect USD, pay Southeast Asia. Every approved payout builds verified counterparties and settlement history.',
+    copy: 'Hold USDC, pay Southeast Asia. Every approved payout builds verified counterparties and settlement history.',
     image: '/isometric/loop-settle-v3.png',
     imageAlt: 'Isometric settlement: a USD coin crossing an approved rail in minutes to arrive as a PHP coin',
     meta: 'USDC → PHP and IDR',
-    roadmap: false,
+    status: status.settle,
   },
   {
     number: '02',
     label: 'Save',
     title: 'Grow it while it waits.',
-    copy: 'Idle USD follows a projected, variable treasury posture. Your business approves every move.',
+    copy: 'Zeke models a projected, variable treasury posture for idle USDC. Your business approves every move.',
     image: '/isometric/loop-save-v3.png',
     imageAlt: 'Isometric treasury tiers of idle USD growing along a yield curve, gated by an approve control',
     meta: 'Projected · variable · human-approved',
-    roadmap: false,
+    status: status.save,
   },
   {
     number: '03',
@@ -209,9 +216,16 @@ const loopCards = [
     image: '/isometric/loop-supply.png',
     imageAlt: 'Isometric supply loop: an invoice financed early and returned as working capital',
     meta: 'Buyer-funded · no third-party lender',
-    roadmap: true,
+    status: 'roadmap' as LoopStatus,
   },
 ];
+
+function LoopChip({ status }: { status: LoopStatus }) {
+  if (status === 'roadmap') return <RoadmapChip />;
+  if (status === 'signoff') return <RoadmapChip detail="after legal sign-off" />;
+  if (status === 'quotes') return <em className="iso-loops-live is-quotes">Quotes open</em>;
+  return <em className="iso-loops-live"><i aria-hidden="true" /> Live</em>;
+}
 
 const LAUNCH_PRICING = pricingSummary(LAUNCH_SCHEDULE);
 
@@ -250,6 +264,8 @@ export default function IsometricLanding({
   fees,
   signedPartners = [],
   fundingPartners = [],
+  livePayouts = [],
+  treasuryLive = false,
 }: {
   isPhone?: boolean;
   pricing?: PricingSummary;
@@ -259,6 +275,10 @@ export default function IsometricLanding({
   signedPartners?: readonly SignedPartner[];
   /** The signed funding providers' names, for the Splash Wallet card. */
   fundingPartners?: readonly string[];
+  /** The quotable routes whose payout partner is signed (lib/landing/routes.ts livePayoutCurrencies). */
+  livePayouts?: readonly QuotableCurrency[];
+  /** Treasury execution is switched on (TREASURY_EXECUTION_ENABLED, after legal sign-off). */
+  treasuryLive?: boolean;
 }) {
   // The control plane reveals below the copilot on demand — a credit-roll,
   // not a second section.
@@ -304,6 +324,11 @@ export default function IsometricLanding({
   }, []);
 
   const rows = comparisonRows(pricing, COMPARISON_BASELINE);
+  const capabilities = splashToday();
+  const liveRoutes = QUOTABLE_ROUTES.filter((route) => livePayouts.includes(route.currency));
+  const quotingRoutes = QUOTABLE_ROUTES.filter((route) => !livePayouts.includes(route.currency));
+  const ladder = recipientLadder(liveRoutes.length > 0);
+  const loops = loopCards({ settle: liveRoutes.length > 0 ? 'live' : 'quotes', save: treasuryLive ? 'live' : 'signoff' });
 
   return (
     <main className={`iso-landing${isPhone ? ' is-phone' : ''}`}>
@@ -362,20 +387,38 @@ export default function IsometricLanding({
               </p>
 
               <div className="iso-route-groups">
-                <div className="iso-route-group">
-                  <h3>
-                    Live <small>{QUOTABLE_ROUTES.length} routes</small>
-                  </h3>
-                  <ul>
-                    {QUOTABLE_ROUTES.map((route) => (
-                      <li key={route.currency} className="is-live">
-                        <strong>{route.currency}</strong>
-                        <span>{route.country}</span>
-                        <small>{route.arrives}</small>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
+                {liveRoutes.length > 0 ? (
+                  <div className="iso-route-group">
+                    <h3>
+                      Live <small>{liveRoutes.length} {liveRoutes.length === 1 ? 'route' : 'routes'}</small>
+                    </h3>
+                    <ul>
+                      {liveRoutes.map((route) => (
+                        <li key={route.currency} className="is-live">
+                          <strong>{route.currency}</strong>
+                          <span>{route.country}</span>
+                          <small>{route.arrives}</small>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+                {quotingRoutes.length > 0 ? (
+                  <div className="iso-route-group">
+                    <h3>
+                      Quotes open <small>{quotingRoutes.length} {quotingRoutes.length === 1 ? 'route' : 'routes'}</small>
+                    </h3>
+                    <ul>
+                      {quotingRoutes.map((route) => (
+                        <li key={route.currency} className="is-live">
+                          <strong>{route.currency}</strong>
+                          <span>{route.country}</span>
+                          <small>Payouts once the partner signs</small>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
                 <div className="iso-route-group is-pilot">
                   <h3>
                     Pilot access <small>{PILOT_ROUTES.length} routes</small>
@@ -388,7 +431,7 @@ export default function IsometricLanding({
                       </li>
                     ))}
                   </ul>
-                  <a href="#product" className="iso-inline-link">
+                  <a href={`#${REQUEST_ACCESS_ID}`} className="iso-inline-link">
                     Request access
                     <ArrowRight aria-hidden="true" />
                   </a>
@@ -396,7 +439,7 @@ export default function IsometricLanding({
               </div>
 
               <ol className="iso-recipient-ladder" aria-label="Where a payment can land">
-                {recipientLadder.map((step) => (
+                {ladder.map((step) => (
                   <li key={step.number}>
                     <span aria-hidden="true">{step.number}</span>
                     <div>
@@ -432,29 +475,42 @@ export default function IsometricLanding({
           </div>
 
           <div className="iso-comparison-wrap">
-            <table className="iso-comparison-table">
+            {/* Explicit roles: on a phone the rows are re-laid as cards, and a
+                browser drops a table's implicit roles once its display changes. */}
+            <table className="iso-comparison-table" role="table">
               <caption className="sr-only">Splash compared with a bank wire, a broker and a fintech app</caption>
-              <thead>
-                <tr>
-                  <th scope="col">Feature</th>
-                  <th scope="col">Bank</th>
-                  <th scope="col">Broker</th>
-                  <th scope="col">Fintech app</th>
-                  <th scope="col" className="is-splash">Splash</th>
+              <thead role="rowgroup">
+                <tr role="row">
+                  <th scope="col" role="columnheader">Feature</th>
+                  <th scope="col" role="columnheader">Bank</th>
+                  <th scope="col" role="columnheader">Broker</th>
+                  <th scope="col" role="columnheader">Fintech app</th>
+                  <th scope="col" role="columnheader" className="is-splash">Splash</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody role="rowgroup">
                 {rows.map((row) => (
-                  <tr key={row.feature}>
-                    <th scope="row">{row.feature}</th>
-                    <td data-label="Bank">{row.bank}</td>
-                    <td data-label="Broker">{row.broker}</td>
-                    <td data-label="Fintech app">{row.fintech}</td>
-                    <td className="is-splash" data-label="Splash"><span className="iso-splash-cell"><Check aria-hidden="true" /> {row.splash}</span></td>
+                  <tr key={row.feature} role="row">
+                    <th scope="row" role="rowheader">{row.feature}</th>
+                    <td role="cell" data-label="Bank">{row.bank}</td>
+                    <td role="cell" data-label="Broker">{row.broker}</td>
+                    <td role="cell" data-label="Fintech app">{row.fintech}</td>
+                    <td role="cell" className="is-splash" data-label="Splash"><span className="iso-splash-cell"><Check aria-hidden="true" /> {row.splash}</span></td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            <div className="iso-splash-today">
+              <h4>What Splash does today</h4>
+              <dl>
+                {capabilities.map((item) => (
+                  <div key={item.feature}>
+                    <dt>{item.feature}</dt>
+                    <dd><Check aria-hidden="true" /> {item.splash}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
             <p className="iso-pricing-line">
               <strong>Splash pricing</strong>
               <span>{pricing.line}</span>
@@ -486,19 +542,19 @@ export default function IsometricLanding({
               </h2>
             </div>
             <p>
-              Idle dollars on Sui already move for free. Splash&apos;s job is what the transfer
-              alone can&apos;t do. Settle in minutes. Save while it waits. Supply turns invoices
-              into working capital.
+              A stablecoin transfer moves the money. Splash does what the transfer alone
+              can&apos;t: settle to a local bank, model what idle cash could do while it waits, and
+              next, turn invoices into working capital.
             </p>
           </div>
 
           <div className="iso-loops-grid">
-            {loopCards.map((loop, index) => (
+            {loops.map((loop, index) => (
               <article className={`iso-loops-card iso-loops-card-${index + 1}`} key={loop.number}>
                 <div className="iso-loops-meta">
                   <span>{loop.number}</span>
                   <p>{loop.label}</p>
-                  {loop.roadmap ? <RoadmapChip /> : <em className="iso-loops-live"><i aria-hidden="true" /> Live</em>}
+                  <LoopChip status={loop.status} />
                 </div>
                 <div className="iso-loops-art">
                   <Image src={loop.image} alt={loop.imageAlt} width={640} height={480} />
@@ -507,7 +563,7 @@ export default function IsometricLanding({
                   <h3>{loop.title}</h3>
                   <p>{loop.copy}</p>
                   <small>{loop.meta}</small>
-                  {loop.roadmap ? (
+                  {loop.status === 'roadmap' ? (
                     <Link href="/working-capital" className="iso-inline-link iso-loops-more">
                       Learn more
                       <ArrowRight aria-hidden="true" />
@@ -520,8 +576,8 @@ export default function IsometricLanding({
 
           <div className="iso-loops-foot">
             <p className="iso-gasless-note">
-              <strong>Where the fees live:</strong> simple USD payouts ride Sui&apos;s zero-fee
-              rail; programmable settlement is gas-sponsored. You never hold SUI.
+              <strong>Where the fees live:</strong> Splash sponsors the Sui network fee, so you
+              never hold SUI. Splash&apos;s own fee is shown before you approve.
             </p>
             <Link href="/working-capital" className="iso-button iso-button-small">
               Explore the Supply loop
@@ -744,8 +800,8 @@ export default function IsometricLanding({
             <p>Stablecoin payments for Southeast Asian businesses, to a bank or a wallet.</p>
           </div>
 
-          <nav className="cin-footer-col" aria-label="Product">
-            <strong>Product</strong>
+          <nav className="cin-footer-col" aria-labelledby="footer-product">
+            <h2 id="footer-product">Product</h2>
             <a href="#how-it-works">How it works</a>
             <a href="#comparison">Compare</a>
             <a href="#platform">Platform</a>
@@ -753,14 +809,14 @@ export default function IsometricLanding({
             <a href="#corridors">Routes</a>
           </nav>
 
-          <nav className="cin-footer-col" aria-label="Trust">
-            <strong>Trust</strong>
+          <nav className="cin-footer-col" aria-labelledby="footer-trust">
+            <h2 id="footer-trust">Trust</h2>
             <Link href="/trust">Trust &amp; compliance</Link>
             <a href="#copilot">Zeke control plane</a>
           </nav>
 
-          <nav className="cin-footer-col" aria-label="Get started">
-            <strong>Get started</strong>
+          <nav className="cin-footer-col" aria-labelledby="footer-start">
+            <h2 id="footer-start">Get started</h2>
             <Link href="/login">Log in</Link>
             <Link href="/signup">Open payment desk</Link>
           </nav>

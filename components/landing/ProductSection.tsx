@@ -271,6 +271,9 @@ function RequestAccess({ currency }: { currency: PilotCurrency }) {
 
 type Answer = { key: string; quote: PreviewQuote | null; receivedAt: number };
 
+/** The calculator's anchor: a link here opens it on a pilot route's access request. */
+export const REQUEST_ACCESS_ID = 'request-access';
+
 function Calculator({ schedule, feesOn }: { schedule: FeeSchedule; feesOn: boolean }) {
   const [mode, setMode] = useState<Mode>('bank');
   const [amount, setAmount] = useState('5000');
@@ -343,6 +346,23 @@ function Calculator({ schedule, feesOn }: { schedule: FeeSchedule; feesOn: boole
     return () => observer.disconnect();
   }, [askAgainIfExpired]);
 
+  // "Request access" in the routes section links to #request-access: the
+  // browser scrolls here, and the calculator opens on the first pilot route
+  // with its access form showing, so nobody has to find it again (D16).
+  useEffect(() => {
+    function openRequest() {
+      if (window.location.hash !== `#${REQUEST_ACCESS_ID}`) return;
+      setMode('bank');
+      setDestination(PILOT_ROUTES[0].currency);
+    }
+    const first = window.setTimeout(openRequest, 0);
+    window.addEventListener('hashchange', openRequest);
+    return () => {
+      window.clearTimeout(first);
+      window.removeEventListener('hashchange', openRequest);
+    };
+  }, []);
+
   // The chip counts down once a second while there is a rate on it.
   const ticking = Boolean(quote?.rate);
   useEffect(() => {
@@ -365,7 +385,7 @@ function Calculator({ schedule, feesOn }: { schedule: FeeSchedule; feesOn: boole
   const chip = rateKnown && current ? rateChip(quote!, now - current.receivedAt) : null;
 
   return (
-    <div className="pv-calc" role="group" aria-label="Payment calculator" ref={rootRef}>
+    <div className="pv-calc" id={REQUEST_ACCESS_ID} role="group" aria-label="Payment calculator" ref={rootRef}>
       <div className="pv-calc-top">
         <div className="pv-toggle" role="group" aria-label="Send to">
           {(['bank', 'wallet'] as const).map((m) => (

@@ -18,7 +18,8 @@ export type Claim = {
 
 export const lockedCopy = {
   headline: 'Collect USD. Pay Southeast Asia. Keep cash working.',
-  speed: '~400ms Sui settlement finality',
+  // In words, not a benchmark figure nobody sourced (the step B review).
+  speed: 'Seconds on Sui',
   speedFootnote: 'Local delivery varies by rail.',
   yield: 'Variable APY - T-bill-backed',
   agent: 'Zeke prepares. You approve.',
@@ -78,8 +79,8 @@ export const claims = {
     status: 'testnet-verified',
   },
   footerLegal: {
-    claim: 'Licence application in preparation with Labuan FSA. Not yet authorised to hold customer funds. USDC transfers are real, on Sui mainnet, signed by the sending business in its own wallet. USD in and local-currency payouts are not live yet.',
-    evidence: 'Custody gate (lib/custody-phase-rules.ts); the stablecoin lane is mainnet-only and the business wallet signs every transfer (lib/payments/stablecoin-lane.ts); fiat partners are not connected (docs/GO-LIVE-HANDOVER.md).',
+    claim: 'Splash is software and does not hold customer funds. USDC transfers are signed by the sending business in its own Splash Wallet. Local-currency payouts are made by partners of record, each live once its agreement is signed.',
+    evidence: 'D3 (no Splash account receives client money); the business wallet signs every transfer (lib/payments/stablecoin-lane.ts); a route is live only once its payout partner is in SIGNED_PARTNERS (lib/landing/routes.ts routeIsLive).',
     status: 'modeled',
   },
 } satisfies Record<string, Claim>;

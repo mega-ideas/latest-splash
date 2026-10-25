@@ -737,7 +737,8 @@
   gap: 11px;
 }
 
-.cin-footer-col strong {
+.cin-footer-col strong,
+.cin-footer-col h2 {
   margin-bottom: 7px;
   color: var(--iso-teal);
   font-family: var(--font-mono), monospace;
@@ -1708,7 +1709,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  color: color-mix(in srgb, var(--ink) 64%, transparent);
+  color: color-mix(in srgb, var(--ink) 78%, transparent);
   font-family: var(--font-mono), monospace;
   font-size: 12px;
   font-weight: 800;
@@ -1722,8 +1723,9 @@
   place-items: center;
   border: 1px solid var(--line);
   border-radius: var(--r-sm);
+  /* White on the deep brand teal (6.8:1); the light --teal was 3.0:1. */
   color: var(--surface);
-  background: var(--teal);
+  background: var(--iso-teal, #0d6370);
   box-shadow: 3px 3px 0 var(--ink);
 }
 .iso-loops-card-3 .iso-loops-meta span {
@@ -1738,7 +1740,8 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: var(--ok);
+  /* --ok is 4.4:1 on the card; its words take --ok-ink (6.6:1 on white). */
+  color: var(--ok-ink);
   font-size: 10px;
   font-style: normal;
 }
@@ -2085,7 +2088,7 @@
   font-weight: 700;
   letter-spacing: .14em;
   text-transform: uppercase;
-  color: rgba(12, 62, 72, .6);
+  color: var(--iso-text-label);
 }
 
 .iso-ctrl-toggle strong {

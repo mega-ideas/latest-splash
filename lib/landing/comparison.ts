@@ -40,10 +40,18 @@ function cost(category: CategoryBaseline | undefined): string {
   return category ? `US$${formatMinor(category.flatUsdMinor, 2)} + ${formatBps(category.marginBps)} FX margin` : UNSOURCED;
 }
 
+/**
+ * The rows that compare something: a competitor cell here can carry a
+ * figure from the dataset. With no reviewed dataset these cells say
+ * "Varies", and the row still shows Splash's side.
+ *
+ * The bank and fintech fee cells are all-in (a flat fee plus the FX margin),
+ * so the Splash cell names both of its legs: Splash's own fee from the
+ * schedule, and the payout partner's rate, shown before approval.
+ */
 export function comparisonRows(pricing: ComparisonPricing, baseline: ComparisonBaseline | null): ComparisonRow[] {
   const bank = baseline?.bankWire;
   const fintech = baseline?.fintech;
-  const varies = { bank: UNSOURCED, broker: UNSOURCED, fintech: UNSOURCED };
   return [
     {
       feature: 'Settlement speed',
@@ -58,14 +66,28 @@ export function comparisonRows(pricing: ComparisonPricing, baseline: ComparisonB
       broker: UNSOURCED,
       fintech: cost(fintech),
       // The schedule once fees are on; until then, the phrase says none is charged.
-      splash: pricing.feesOn ? pricing.bank : pricing.bankFeePhrase,
+      splash: pricing.feesOn
+        ? `${pricing.bankFeePhrase} + the partner’s rate, shown before you approve`
+        : `${pricing.bankFeePhrase}; the partner’s rate is shown before you approve`,
     },
-    { feature: 'Rate before you approve', ...varies, splash: 'Shown and locked for the quote' },
-    { feature: 'Pay a bank or a wallet', ...varies, splash: 'Both, in one transfer flow' },
-    { feature: 'Settlement', ...varies, splash: 'All-or-nothing on Sui' },
-    { feature: 'Batch payments', ...varies, splash: 'Many payees, one approval' },
-    { feature: 'Where your money sits', ...varies, splash: 'Your Splash Wallet, held by your business' },
-    { feature: 'AI copilot', ...varies, splash: lockedCopy.agent },
-    { feature: 'Payment record', ...varies, splash: 'Encrypted receipt, kept' },
+  ];
+}
+
+export type SplashCapability = { feature: string; splash: string };
+
+/**
+ * What Splash does today where no dataset says what a bank, a broker or a
+ * fintech app does: Splash's side alone, as a list, not a table of "Varies"
+ * cells (the step B review). Every line is true today.
+ */
+export function splashToday(): SplashCapability[] {
+  return [
+    { feature: 'Rate before you approve', splash: 'Shown and locked for the quote' },
+    { feature: 'Pay a bank or a wallet', splash: 'Both, in one transfer flow' },
+    { feature: 'Settlement', splash: 'All-or-nothing on Sui' },
+    { feature: 'Batch payments', splash: 'Many payees, one approval' },
+    { feature: 'Where your money sits', splash: 'Your Splash Wallet, held by your business' },
+    { feature: 'AI copilot', splash: lockedCopy.agent },
+    { feature: 'Payment record', splash: 'Encrypted receipt, kept' },
   ];
 }

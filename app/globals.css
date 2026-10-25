@@ -339,10 +339,11 @@ body {
   /* Text brand — "the numbers are the brand".
      Display headlines stay loud; everything below them obeys these floors:
      - no text smaller than 10px (micro-labels), data values >= 12px, body >= 13px
-     - ink never drops below 66% alpha for text; alphas under .3 are for borders/decoration only */
+     - ink never drops below 74% alpha for text (5.0:1 on paper-deep, 4.8:1
+       on a #f1e6d6 card tint); alphas under .3 are for borders/decoration only */
   --iso-text-secondary: rgba(12, 62, 72, .78);
-  --iso-text-muted: rgba(12, 62, 72, .7);
-  --iso-text-label: rgba(12, 62, 72, .66);
+  --iso-text-muted: rgba(12, 62, 72, .76);
+  --iso-text-label: rgba(12, 62, 72, .74);
   min-height: 100svh;
   /* clip (not hidden): hidden makes this the scroll container and breaks
      position: sticky inside the cinematic hero. */
@@ -1455,8 +1456,8 @@ body {
   --iso-gold: #efc46f;
   --iso-line: rgba(12, 62, 72, .16);
   --iso-text-secondary: rgba(12, 62, 72, .78);
-  --iso-text-muted: rgba(12, 62, 72, .7);
-  --iso-text-label: rgba(12, 62, 72, .66);
+  --iso-text-muted: rgba(12, 62, 72, .76);
+  --iso-text-label: rgba(12, 62, 72, .74);
   min-height: 100dvh;
   background: var(--iso-paper);
   color: var(--iso-ink);
@@ -2207,7 +2208,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  color: rgba(12, 62, 72, .64);
+  color: var(--iso-text-label);
   font-family: var(--font-mono), monospace;
   font-size: 12px;
   font-weight: 800;
@@ -3772,7 +3773,7 @@ body {
 
 .iso-footer p,
 .iso-footer > .iso-shell > small {
-  color: rgba(12, 62, 72, .66);
+  color: var(--iso-text-muted);
   font-size: 12px;
   line-height: 1.6;
 }

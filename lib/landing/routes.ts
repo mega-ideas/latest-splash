@@ -52,3 +52,19 @@ export function quotableRoute(currency: QuotableCurrency): QuotableRoute {
   if (!route) throw new RangeError(`${currency} is not a quotable route`);
   return route;
 }
+
+/**
+ * Whether a quotable route's payouts are live: its payout partner's
+ * agreement is signed (SIGNED_PARTNERS, read on the server). Until then the
+ * route still quotes, but no page calls it "Live". The landing and
+ * content/claims.ts then say the same thing, and the label flips on the day
+ * the partner is added, with no copy change (v2 brief sections 6 and 9).
+ */
+export function routeIsLive(route: QuotableRoute, signed: ReadonlySet<string>): boolean {
+  return signed.has(route.partner);
+}
+
+/** The currencies whose payouts are live, for the landing. */
+export function livePayoutCurrencies(signed: ReadonlySet<string>): QuotableCurrency[] {
+  return QUOTABLE_ROUTES.filter((route) => routeIsLive(route, signed)).map((route) => route.currency);
+}

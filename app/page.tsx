@@ -8,6 +8,7 @@ import { pricingSummary, scheduleToWire } from "@/lib/fees/copy";
 import { publishedFeeSchedule } from "@/lib/fees/fee-config";
 import { PARTNERS, type PartnerId } from "@/lib/partners/signed-partners";
 import { signedPartners } from "@/lib/server/signed-partners";
+import { livePayoutCurrencies } from "@/lib/landing/routes";
 
 /**
  * The landing route.
@@ -81,6 +82,12 @@ export default async function Home() {
   const signedList = [...signed].map((id) => ({ name: PARTNERS[id].name, role: roleOf(id) }));
   const fundingIds: PartnerId[] = ["stripe", "halliday", "transfi", "bridge"];
   const fundingPartners = fundingIds.filter((id) => signed.has(id)).map((id) => PARTNERS[id].name);
+  // A route is "Live" only once its payout partner is signed; until then it
+  // still quotes (lib/landing/routes.ts routeIsLive).
+  const livePayouts = livePayoutCurrencies(signed);
+  // Save says "Live" only once treasury execution is switched on, which
+  // waits for legal sign-off (brief section 9); until then it is a projection.
+  const treasuryLive = process.env.TREASURY_EXECUTION_ENABLED === "true";
 
   return (
     <>
@@ -98,6 +105,8 @@ export default async function Home() {
         fees={{ schedule: scheduleToWire(schedule), feesOn }}
         signedPartners={signedList}
         fundingPartners={fundingPartners}
+        livePayouts={livePayouts}
+        treasuryLive={treasuryLive}
       />
     </>
   );

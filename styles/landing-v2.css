@@ -289,7 +289,9 @@
 
 .pv-chip.is-ok { color: var(--ok-ink); background: var(--ok-bg); }
 .pv-chip.is-info { color: var(--info); background: var(--info-bg); }
-.pv-chip.is-warn { color: var(--warn-ink); background: var(--warn-bg); }
+/* --gold-ink, not --warn-ink: the chip sits in the faded desk behind the
+   calculator, where --warn-ink came out at 4.1:1. */
+.pv-chip.is-warn { color: var(--gold-ink); background: var(--warn-bg); }
 
 /* The calculator, floating in front of the desk. */
 .pv-calc {
@@ -1505,4 +1507,86 @@
   .iso-landing .iso-comparison-table tbody td.is-splash::before { color: #fffaf1; }
   .iso-landing .iso-comparison-table tbody tr > :last-child { border-bottom: 0; }
   .iso-landing .iso-comparison-table tbody tr:last-child > * { border-bottom: 1px solid rgba(12, 62, 72, .1); }
+}
+
+/* ── Step B review ─────────────────────────────────────────────────────── */
+
+/* Footer column titles are headings now (h2), styled as the old labels. */
+.iso-landing .cin-footer-col h2 { margin: 0 0 7px; line-height: 1.3; }
+
+/* "Request access" lands on the calculator below the sticky header. */
+.iso-landing #request-access { scroll-margin-top: 96px; }
+
+/* A route that quotes but has no signed payout partner yet: ink, not green. */
+.iso-landing .iso-loops-live.is-quotes { color: var(--iso-text-secondary); }
+
+/* What Splash does today: Splash's side alone, where no dataset says what
+   the others do. A list of pairs under the two compared rows. */
+.iso-landing .iso-splash-today {
+  position: sticky;
+  left: 0;
+  max-width: min(100%, 1180px);
+  padding: 22px 22px 6px;
+  border-top: 1px solid rgba(12, 62, 72, .11);
+}
+.iso-landing .iso-splash-today h4 {
+  margin: 0 0 14px;
+  color: var(--iso-ink);
+  font-size: 15px;
+  font-weight: 760;
+  letter-spacing: -.01em;
+}
+.iso-landing .iso-splash-today dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px 28px;
+  margin: 0;
+}
+.iso-landing .iso-splash-today dl > div { display: grid; gap: 4px; align-content: start; }
+.iso-landing .iso-splash-today dt {
+  color: var(--iso-text-secondary);
+  font-size: 12.5px;
+  font-weight: 650;
+}
+.iso-landing .iso-splash-today dd {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0;
+  color: var(--iso-ink);
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.45;
+}
+.iso-landing .iso-splash-today dd svg {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  margin-top: 2px;
+  color: var(--iso-teal);
+}
+
+@media (max-width: 700px) {
+  /* The column headers stay in the accessibility tree (visually hidden,
+     not display:none), so a screen reader still names each cell. */
+  .iso-landing .iso-comparison-table thead {
+    display: block;
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .iso-landing .iso-splash-today {
+    position: static;
+    margin-top: 12px;
+    padding: 16px 14px 14px;
+    border: 1px solid rgba(12, 62, 72, .2);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, .78);
+    box-shadow: 4px 5px 0 rgba(12, 62, 72, .1);
+  }
+  .iso-landing .iso-splash-today dl { grid-template-columns: 1fr; gap: 12px; }
 }
