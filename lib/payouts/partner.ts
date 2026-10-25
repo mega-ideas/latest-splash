@@ -218,6 +218,13 @@ export type PayoutEvent =
       occurredAt: Date;
     };
 
+/**
+ * The partner's answer to `status`. A paid-out answer may carry the bank's
+ * reference and a failed one the partner's reason, as a webhook would; both
+ * are checked the same way (`partnerBankRef`, `partnerFailureReason`).
+ */
+export type PartnerStatusAnswer = { status: PartnerPayoutStatus; sandbox: boolean; bankRef?: string; failureReason?: string };
+
 export class PayoutPartnerUnavailable extends Error {
   readonly code:
     | 'partner_not_configured'
@@ -264,7 +271,7 @@ export interface PayoutPartner {
   createPayout(input: PayoutInstruction & { now: Date }): Promise<PayoutOrder>;
   /** After settlement: the Sui digest of the deposit. */
   postSettlement(input: { intentId: string; partnerRef: string; suiDigest: string; now: Date }): Promise<void>;
-  status(input: { intentId: string; partnerRef: string; now: Date }): Promise<{ status: PartnerPayoutStatus; sandbox: boolean }>;
+  status(input: { intentId: string; partnerRef: string; now: Date }): Promise<PartnerStatusAnswer>;
   /** Verify a webhook's signature and freshness (signature first), then parse it. Throws WebhookRejected. */
   handleWebhook(input: { rawBody: string; signature: string | null; now: Date }): PayoutEvent;
   /**
@@ -302,6 +309,40 @@ const ID = /^[A-Za-z0-9_.:-]{6,128}$/;
 const SUI_DIGEST = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const INTENT_ID = /^0x[0-9a-f]{64}$/;
 
+/** A partner's bank reference, kept only when it is an id (the webhook's rule). */
+export function partnerBankRef(v: unknown): string | undefined {
+  return typeof v === 'string' && ID.test(v) ? v : undefined;
+}
+
+/** A partner's failure reason, cut to 200 characters (the webhook's rule). */
+export function partnerFailureReason(v: unknown): string | undefined {
+  const r = typeof v === 'string' ? v.slice(0, 200) : '';
+  return r || undefined;
+}
+
+/** A field of an event Splash does not know, safe to keep and log: 64 characters of [A-Za-z0-9_.:-], the rest as '?'. */
+function safeLabel(v: string): string {
+  return v.slice(0, 64).replace(/[^A-Za-z0-9_.:-]/g, '?');
+}
+
+/**
+ * A signed event whose type or status Splash does not know. It carries only
+ * what ops need to find it (the event id, the type and the status, cut
+ * short); nothing else from the body.
+ */
+export class UnknownPayoutEvent extends WebhookRejected {
+  readonly eventId: string;
+  readonly eventType: string;
+  readonly eventStatus: string;
+  constructor(message: string, e: { eventId: string; type: string; status: string }) {
+    super(message, 'unknown_event');
+    this.name = 'UnknownPayoutEvent';
+    this.eventId = e.eventId;
+    this.eventType = safeLabel(e.type);
+    this.eventStatus = safeLabel(e.status);
+  }
+}
+
 /** Parse a verified payout webhook body. Unknown events are refused, never guessed at. */
 export function parsePayoutEvent(rawBody: string): PayoutEvent {
   let body: Record<string, unknown>;
@@ -321,23 +362,23 @@ export function parsePayoutEvent(rawBody: string): PayoutEvent {
     if (!ID.test(accountRef) || !SUI_DIGEST.test(suiDigest)) throw new WebhookRejected('The test-deposit webhook is missing its account or digest.', 'bad_body');
     return { kind: 'test_deposit', eventId, accountRef, suiDigest, occurredAt };
   }
-  if (str('type') !== 'payout.status') throw new WebhookRejected('Unknown payout event.', 'unknown_event');
   const status = str('status');
-  if (!['funds_received', 'paid_out', 'failed', 'returned'].includes(status)) throw new WebhookRejected('Unknown payout status.', 'unknown_event');
+  if (str('type') !== 'payout.status') throw new UnknownPayoutEvent('Unknown payout event.', { eventId, type: str('type'), status });
+  if (!['funds_received', 'paid_out', 'failed', 'returned'].includes(status)) throw new UnknownPayoutEvent('Unknown payout status.', { eventId, type: str('type'), status });
   const partnerRef = str('partnerRef');
   const intentId = str('intentId').toLowerCase();
   if (!ID.test(partnerRef) || !INTENT_ID.test(intentId)) throw new WebhookRejected('The webhook is missing its payout or intent id.', 'bad_body');
   const returnDigest = str('returnDigest');
   if (status === 'returned' && !SUI_DIGEST.test(returnDigest)) throw new WebhookRejected('A return names the Sui transaction that returned the funds.', 'bad_body');
-  const bankRef = str('bankRef');
-  const failureReason = str('failureReason').slice(0, 200);
+  const bankRef = partnerBankRef(body.bankRef);
+  const failureReason = partnerFailureReason(body.failureReason);
   return {
     kind: 'payout',
     eventId,
     partnerRef,
     intentId,
     status: status as Exclude<PartnerPayoutStatus, 'instructed'>,
-    ...(bankRef && ID.test(bankRef) ? { bankRef } : {}),
+    ...(bankRef ? { bankRef } : {}),
     ...(returnDigest ? { returnDigest } : {}),
     ...(failureReason ? { failureReason } : {}),
     occurredAt,

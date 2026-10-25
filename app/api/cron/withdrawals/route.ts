@@ -11,11 +11,22 @@
  *   3. a digest the partner was not told yet (the partner was down) is
  *      posted again;
  *   4. a partner test deposit whose request executed is recorded, and one
- *      whose request lapsed is freed for the owners to ask again.
+ *      whose request lapsed is freed for the owners to ask again;
+ *   5. a payout whose digest is posted and that is not final is polled at
+ *      its partner (the `status` verb), so a lost webhook does not leave it
+ *      sent forever; the answer moves it forward only;
+ *   6. a failed payout whose USDC the partner has not yet agreed to send
+ *      back is asked again, every run, until it accepts; after five asks ops
+ *      are alerted once (an ALERT log line and a `return_request_stuck`
+ *      event).
  *
  * The API's reads never call the partner; this does, once per row per run.
  * Run it every five minutes, after /api/cron/wallet-signing. A 502 (a row
- * that could not be settled) is an alert in itself.
+ * that could not be settled) is an alert in itself. A poll the partner could
+ * not answer (`pollErrors`) and a return still owed (`returnsPending`) are
+ * reported in the body but do not make a 502 on their own: a row the partner
+ * cannot answer for would otherwise keep the cron red and hide a real
+ * settlement failure.
  */
 import { timingSafeEqual } from 'node:crypto';
 import { NextResponse } from 'next/server';

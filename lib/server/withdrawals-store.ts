@@ -10,7 +10,7 @@ import { randomUUID } from 'node:crypto';
 
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 
-import { partnerDepositAddresses, payoutPartnerEvents, walletDepositSync, withdrawalDestinations, withdrawalEvents, withdrawalReturns, withdrawals } from '../db/schema.ts';
+import { partnerDepositAddresses, payoutPartnerEvents, payoutPartnerUnknownEvents, walletDepositSync, withdrawalDestinations, withdrawalEvents, withdrawalReturns, withdrawals } from '../db/schema.ts';
 import type { WithdrawalStatus } from '../payouts/withdrawal-rules.ts';
 import type { DrizzleDb } from './wallet-signing-store.ts';
 
@@ -299,6 +299,37 @@ export async function withdrawalsToReconcileForStaff(db: DrizzleDb): Promise<Wit
     );
 }
 
+/**
+ * Failed payouts (withdrawals and supplier payouts, every org) whose USDC the
+ * partner has not yet agreed to send back: the sweep asks again.
+ */
+export async function returnsOwedForStaff(db: DrizzleDb): Promise<WithdrawalRow[]> {
+  return db
+    .select()
+    .from(withdrawals)
+    .where(sql`${withdrawals.status} = 'failed' and ${withdrawals.returnAcceptedAt} is null and ${withdrawals.partnerRef} is not null`);
+}
+
+/** The bank's reference on a payout already paid out without one; a kept reference is never replaced. */
+export async function patchBankRefIfMissing(db: DrizzleDb, orgId: string, id: string, bankRef: string, at: Date): Promise<WithdrawalRow | null> {
+  const [row] = await db
+    .update(withdrawals)
+    .set({ bankRef, updatedAt: at })
+    .where(and(eq(withdrawals.orgId, orgId), eq(withdrawals.id, id), eq(withdrawals.status, 'paid_out'), sql`${withdrawals.bankRef} is null`))
+    .returning();
+  return row ?? null;
+}
+
+/** One ask for a failed payout's USDC back: counted, and when accepted, the time kept. */
+export async function recordReturnAsk(db: DrizzleDb, orgId: string, id: string, accepted: boolean, at: Date): Promise<WithdrawalRow | null> {
+  const [row] = await db
+    .update(withdrawals)
+    .set({ returnAsks: sql`${withdrawals.returnAsks} + 1`, returnAskedAt: at, ...(accepted ? { returnAcceptedAt: at } : {}), updatedAt: at })
+    .where(and(eq(withdrawals.orgId, orgId), eq(withdrawals.id, id)))
+    .returning();
+  return row ?? null;
+}
+
 /** Withdrawals sent whose digest the partner has not been told yet. */
 export async function unpostedSettlements(db: DrizzleDb, orgId: string): Promise<WithdrawalRow[]> {
   return db
@@ -339,6 +370,19 @@ export async function claimPartnerEvent(db: DrizzleDb, e: { partner: string; eve
     .onConflictDoNothing()
     .returning();
   return Boolean(row);
+}
+
+/**
+ * A signed event Splash does not know, kept for ops (one row per event,
+ * however often it is delivered). Returns whether this is its first delivery.
+ */
+export async function recordUnknownPartnerEvent(db: DrizzleDb, e: { partner: string; eventKey: string; eventId: string | null; eventType: string; eventStatus: string; at: Date }): Promise<boolean> {
+  const [row] = await db
+    .insert(payoutPartnerUnknownEvents)
+    .values({ partner: e.partner, eventKey: e.eventKey, eventId: e.eventId, eventType: e.eventType, eventStatus: e.eventStatus, deliveries: 1, firstReceivedAt: e.at, lastReceivedAt: e.at })
+    .onConflictDoUpdate({ target: [payoutPartnerUnknownEvents.partner, payoutPartnerUnknownEvents.eventKey], set: { deliveries: sql`${payoutPartnerUnknownEvents.deliveries} + 1`, lastReceivedAt: e.at } })
+    .returning();
+  return (row?.deliveries ?? 0) === 1;
 }
 
 /** Give an event back (it could not be acted on yet, so the partner's retry must count). */

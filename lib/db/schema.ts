@@ -1965,6 +1965,13 @@ export const withdrawals = pgTable('withdrawals', {
   purposeCode: text('purpose_code'),
   /** The masked pacs.008-style evidence of what the partner was sent (lib/payments/iso20022.ts pacs008Evidence) (0042). */
   iso20022: jsonb('iso20022'),
+  /** A withdrawal row written before its ISO 20022 copy was kept (0044); every newer row carries one. */
+  iso20022Legacy: boolean('iso20022_legacy').notNull().default(false),
+  /** How often Splash asked the partner for a failed payout's USDC back (0044). */
+  returnAsks: integer('return_asks').notNull().default(0),
+  returnAskedAt: timestamp('return_asked_at', { withTimezone: true }),
+  /** When the partner accepted the return; null while it is still owed (0044). */
+  returnAcceptedAt: timestamp('return_accepted_at', { withTimezone: true }),
   /** preparing | awaiting_signatures | sent | partner_received | paid_out | failed | returned | cancelled */
   status: text('status').notNull(),
   failure: text('failure'),
@@ -1979,6 +1986,7 @@ export const withdrawals = pgTable('withdrawals', {
   uniqueIndex('withdrawals_return_digest_unique').on(table.returnDigest).where(sql`${table.returnDigest} is not null`),
   index('withdrawals_org_idx').on(table.orgId, table.status),
   index('withdrawals_org_kind_idx').on(table.orgId, table.kind, table.status),
+  index('withdrawals_return_owed_idx').on(table.status).where(sql`${table.status} = 'failed' and ${table.returnAcceptedAt} is null`),
 ]);
 
 /**
@@ -2013,6 +2021,24 @@ export const withdrawalEvents = pgTable('withdrawal_events', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   index('withdrawal_events_org_idx').on(table.orgId, table.createdAt),
+]);
+
+/**
+ * A signed partner event Splash does not know (0044): acknowledged, changes
+ * nothing, kept for ops. Only the type, status and event id, cut short.
+ */
+export const payoutPartnerUnknownEvents = pgTable('payout_partner_unknown_events', {
+  partner: text('partner').notNull(),
+  /** The event id, or a hash of the body when it has none. */
+  eventKey: text('event_key').notNull(),
+  eventId: text('event_id'),
+  eventType: text('event_type').notNull(),
+  eventStatus: text('event_status').notNull(),
+  deliveries: integer('deliveries').notNull().default(1),
+  firstReceivedAt: timestamp('first_received_at', { withTimezone: true }).notNull().defaultNow(),
+  lastReceivedAt: timestamp('last_received_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  primaryKey({ columns: [table.partner, table.eventKey] }),
 ]);
 
 /** Each payout-partner webhook, once. */

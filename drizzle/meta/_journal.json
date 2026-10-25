@@ -309,6 +309,13 @@
       "when": 1792281600000,
       "tag": "0043_withdrawal_returns",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1792368000000,
+      "tag": "0044_payout_followups",
+      "breakpoints": true
     }
   ]
 }

@@ -52,10 +52,14 @@ import { partnerLabel, type PartnerId } from '../partners/signed-partners.ts';
 import { Iso20022Error, pacs008Evidence, pacs008ForInstruction, type Iso20022Party, type Pacs008, type Pacs008Evidence, type PaymentDeclaration } from '../payments/iso20022.ts';
 import {
   isPayoutPartnerId,
+  partnerBankRef,
+  partnerFailureReason,
   PayoutPartnerUnavailable,
+  UnknownPayoutEvent,
   WebhookRejected,
   type PartnerFeeLine,
   type PartnerPayoutStatus,
+  type PartnerStatusAnswer,
   type PayoutEvent,
   type PayoutPartner,
   type PayoutPartnerId,
@@ -335,10 +339,16 @@ export type WithdrawalView = {
   sandbox: boolean;
   /** `withdrawal` (the business's own bank) or `supplier_payout`. */
   kind: store.PayoutRowKind;
-  /** The ISO 20022 purpose code, on a supplier payout. */
+  /** The ISO 20022 purpose code, on every bank payout (a withdrawal or a supplier payout). */
   purposeCode: string | null;
-  /** The masked pacs.008-style data the partner was sent, on a supplier payout (the evidence export's section). */
+  /**
+   * The masked pacs.008-style data the partner was sent, on every bank payout
+   * (the evidence export's section). Null only on a withdrawal written before
+   * the copy was kept (`iso20022Legacy`).
+   */
   iso20022: Pacs008Evidence | null;
+  /** A withdrawal written before its ISO 20022 copy was kept: the export says so instead of showing an empty message. */
+  iso20022Legacy: boolean;
 };
 
 export async function withdrawalView(deps: Pick<WithdrawalDeps, 'db' | 'orgId'>, row: store.WithdrawalRow): Promise<WithdrawalView> {
@@ -350,6 +360,7 @@ export async function withdrawalView(deps: Pick<WithdrawalDeps, 'db' | 'orgId'>,
     kind: row.kind as store.PayoutRowKind,
     purposeCode: row.purposeCode,
     iso20022: (row.iso20022 as Pacs008Evidence | null) ?? null,
+    iso20022Legacy: row.iso20022Legacy,
     partner: row.partner,
     destination: dest ? { id: dest.id, bankCode: dest.bankCode, last4: dest.last4, label: dest.label } : null,
     amountMinor: row.amountMinor.toString(),
@@ -1091,6 +1102,36 @@ export async function reverseInstruction(deps: Pick<WithdrawalDeps, 'now'>, adap
   }
 }
 
+/** After this many asks a return still owed is an alert for ops (the sweep keeps asking). */
+export const RETURN_ASKS_BEFORE_ALERT = 5;
+
+/**
+ * Ask the partner for a failed payout's USDC back, to the business wallet,
+ * and keep the answer on the row: until the partner accepts, the sweep asks
+ * again on every run (returnsOwedForStaff). After RETURN_ASKS_BEFORE_ALERT
+ * asks without an acceptance, ops are alerted once.
+ */
+async function askForReturn(
+  deps: { db: DrizzleDb; now: () => Date; orgId: string },
+  adapter: PayoutPartner,
+  row: store.WithdrawalRow,
+  reason: string,
+  more: Record<string, unknown> = {},
+): Promise<boolean> {
+  if (!row.partnerRef) return false;
+  const at = deps.now();
+  const accepted = await reverseInstruction(deps, adapter, { intentId: row.intentId, partnerRef: row.partnerRef, returnAddress: row.walletAddress }, reason);
+  const after = await store.recordReturnAsk(deps.db, deps.orgId, row.id, accepted, at);
+  const asks = after?.returnAsks ?? row.returnAsks + 1;
+  await store.recordWithdrawalEvent(deps.db, { orgId: deps.orgId, subject: 'withdrawal', subjectId: row.id, actor: 'system', action: 'return_requested', detail: { accepted, returnAddress: row.walletAddress, ask: asks, ...more }, at });
+  if (!accepted && asks === RETURN_ASKS_BEFORE_ALERT) {
+    await store.recordWithdrawalEvent(deps.db, { orgId: deps.orgId, subject: 'withdrawal', subjectId: row.id, actor: 'system', action: 'return_request_stuck', detail: { asks }, at });
+    // An alert for ops: ids only, nothing about the bank account.
+    console.error(`[withdrawals] ALERT return still owed: payout ${row.id} (intent ${row.intentId}) failed and the partner has not accepted the return after ${asks} asks; the sweep keeps asking`);
+  }
+  return accepted;
+}
+
 // ─── Reconciling with the signing request ───────────────────────────────────
 
 /** What settling a withdrawal after its owners' request needs. Cross-tenant callers act within each row's own org. */
@@ -1170,27 +1211,32 @@ async function postSettlement(deps: SettlementDeps & { orgId: string }, row: sto
  */
 async function pollPartnerStatus(deps: SettlementDeps & { orgId: string }, row: store.WithdrawalRow): Promise<'advanced' | 'unchanged' | 'error'> {
   if ((row.status !== 'sent' && row.status !== 'partner_received') || !row.partnerRef || !row.settlementPostedAt || row.settlementHold) return 'unchanged';
-  const adapter = deps.partner(row.partner as PayoutPartnerId);
-  let answer: PartnerPayoutStatus;
+  let adapter: PayoutPartner;
+  let reply: PartnerStatusAnswer;
   try {
-    answer = (await adapter.status({ intentId: row.intentId, partnerRef: row.partnerRef, now: deps.now() })).status;
+    // A route switched off answers no poll: counted with the poll errors, not guessed at.
+    adapter = deps.partner(row.partner as PayoutPartnerId);
+    reply = await adapter.status({ intentId: row.intentId, partnerRef: row.partnerRef, now: deps.now() });
   } catch {
     return 'error'; // Asked again on the next run; nothing is guessed.
   }
+  const answer: PartnerPayoutStatus = reply.status;
   if (answer === 'instructed' || answer === 'returned') return 'unchanged';
   const to = PARTNER_TO_WITHDRAWAL[answer];
   const from = row.status as WithdrawalStatus;
   if (!to || !canAdvanceWithdrawal(from, to)) return 'unchanged';
   const now = deps.now();
   const set: Partial<store.WithdrawalInsert> & { status: WithdrawalStatus; updatedAt: Date } = { status: to, updatedAt: now };
-  if (to === 'failed') set.failure = 'the partner reports it could not pay it out';
+  // The bank's reference and the partner's reason, checked as a webhook's are.
+  const bankRef = to === 'paid_out' ? partnerBankRef(reply.bankRef) : undefined;
+  if (bankRef) set.bankRef = bankRef;
+  if (to === 'failed') set.failure = partnerFailureReason(reply.failureReason) ?? 'the partner reports it could not pay it out';
   const moved = await store.moveWithdrawal(deps.db, deps.orgId, row.id, [from], set);
   if (!moved) return 'unchanged'; // A webhook moved it meanwhile.
-  await store.recordWithdrawalEvent(deps.db, { orgId: deps.orgId, subject: 'withdrawal', subjectId: row.id, actor: `partner:${adapter.id}`, action: to, detail: { via: 'status' }, at: now });
+  await store.recordWithdrawalEvent(deps.db, { orgId: deps.orgId, subject: 'withdrawal', subjectId: row.id, actor: `partner:${adapter.id}`, action: to, detail: { via: 'status', ...(bankRef ? { bankRef } : {}) }, at: now });
   if (to === 'failed') {
-    // As for a failure webhook: ask for the USDC back, to the business wallet.
-    const accepted = await reverseInstruction(deps, adapter, { intentId: row.intentId, partnerRef: row.partnerRef, returnAddress: row.walletAddress }, 'payout_failed');
-    await store.recordWithdrawalEvent(deps.db, { orgId: deps.orgId, subject: 'withdrawal', subjectId: row.id, actor: 'system', action: 'return_requested', detail: { accepted, returnAddress: row.walletAddress }, at: now });
+    // As for a failure webhook: ask for the USDC back, to the business wallet (asked again until accepted).
+    await askForReturn(deps, adapter, moved, 'payout_failed');
   }
   return 'advanced';
 }
@@ -1246,8 +1292,35 @@ async function refreshDepositAddressIn(db: DrizzleDb, now: () => Date, row: stor
  * posted; a test deposit whose request closed is recorded or freed. Reads of
  * the API never call the partner; this does, once per row per run.
  */
-export async function reconcileWithdrawals(deps: SettlementDeps): Promise<{ sent: number; cancelled: number; posted: number; advanced: number; testDeposits: number; errors: number }> {
-  const out = { sent: 0, cancelled: 0, posted: 0, advanced: 0, testDeposits: 0, errors: 0 };
+export type SweepResult = {
+  sent: number;
+  cancelled: number;
+  posted: number;
+  advanced: number;
+  testDeposits: number;
+  /** Rows that could not be settled (a digest not posted, a store failure): the cron's 502. */
+  errors: number;
+  /** Status polls the partner could not answer: retried next run and reported, but not a 502 on their own. */
+  pollErrors: number;
+  /** Failed payouts whose return was asked for again this run, and those still owed after it. */
+  returnsAsked: number;
+  returnsPending: number;
+};
+
+export async function reconcileWithdrawals(deps: SettlementDeps): Promise<SweepResult> {
+  const out: SweepResult = { sent: 0, cancelled: 0, posted: 0, advanced: 0, testDeposits: 0, errors: 0, pollErrors: 0, returnsAsked: 0, returnsPending: 0 };
+  // Failed payouts whose USDC is still at the partner: ask again until it accepts.
+  // (Before the polls, so a payout found failed this run is asked once, by the poll.)
+  for (const row of await store.returnsOwedForStaff(deps.db)) {
+    let accepted = false;
+    try {
+      accepted = await askForReturn({ ...deps, orgId: row.orgId }, deps.partner(row.partner as PayoutPartnerId), row, row.returnedMinor ? 'short_return' : 'payout_failed', { via: 'sweep' });
+    } catch {
+      accepted = false; // A route switched off: still owed, asked again next run.
+    }
+    out.returnsAsked += 1;
+    if (!accepted) out.returnsPending += 1;
+  }
   for (const row of await store.withdrawalsToReconcileForStaff(deps.db)) {
     try {
       const r = await settleRow(deps, row);
@@ -1256,7 +1329,7 @@ export async function reconcileWithdrawals(deps: SettlementDeps): Promise<{ sent
       const current = (await store.getWithdrawalRow(deps.db, row.orgId, row.id)) ?? row;
       const polled = await pollPartnerStatus({ ...deps, orgId: row.orgId }, current);
       if (polled === 'advanced') out.advanced += 1;
-      if (polled === 'error') out.errors += 1;
+      if (polled === 'error') out.pollErrors += 1;
     } catch {
       out.errors += 1;
     }
@@ -1414,7 +1487,14 @@ export async function handlePayoutWebhook(input: WebhookInput): Promise<WebhookA
       // The signature is checked before the body is parsed, so an unknown
       // event here is the partner's own: acknowledged and ignored (nothing
       // moves, nothing is counted), never retried forever.
-      if (error.code === 'unknown_event') return { status: 200, body: { ignored: 'unknown event' } };
+      // It is kept for ops (id, type and status only) and alerted on its first delivery.
+      if (error.code === 'unknown_event') {
+        if (error instanceof UnknownPayoutEvent) {
+          const first = await store.recordUnknownPartnerEvent(input.db, { partner: adapter.id, eventKey: error.eventId, eventId: error.eventId, eventType: error.eventType, eventStatus: error.eventStatus, at: input.now });
+          if (first) console.error(`[withdrawals] ALERT unknown payout event from ${adapter.id}: event ${error.eventId}, type ${error.eventType}, status ${error.eventStatus}; acknowledged and kept for ops`);
+        }
+        return { status: 200, body: { ignored: 'unknown event' } };
+      }
       const status = error.code === 'bad_body' ? 400 : error.code === 'partner_not_configured' || error.code === 'partner_not_connected' ? 503 : 401;
       return { status, body: { error: error.message, code: error.code } };
     }
@@ -1464,6 +1544,15 @@ export async function handlePayoutWebhook(input: WebhookInput): Promise<WebhookA
   if (from === 'awaiting_signatures' || from === 'preparing') {
     // The deposit's digest is not recorded yet; the retry counts.
     return { status: 503, body: { error: 'the deposit is not recorded yet; retry' } };
+  }
+  if (from === 'paid_out' && to === 'paid_out' && !row.bankRef && event.bankRef) {
+    // Paid out by poll before the bank's reference came: a later webhook may
+    // add it (once; a kept reference is never replaced). Nothing else moves.
+    const claimed = await store.claimPartnerEvent(input.db, { partner: adapter.id, eventId: event.eventId, orgId: row.orgId, subjectId: row.id, status: event.status, at });
+    if (!claimed) return { status: 200, body: { duplicate: true } };
+    const patched = await store.patchBankRefIfMissing(input.db, row.orgId, row.id, event.bankRef, at);
+    if (patched) await store.recordWithdrawalEvent(input.db, { orgId: row.orgId, subject: 'withdrawal', subjectId: row.id, actor: `partner:${adapter.id}`, action: 'bank_ref_added', detail: { eventId: event.eventId, bankRef: event.bankRef }, at });
+    return { status: 200, body: { ok: true } };
   }
   if (!canAdvanceWithdrawal(from, to)) {
     return { status: 200, body: { ignored: `a withdrawal ${from.replace(/_/g, ' ')} does not move to ${to.replace(/_/g, ' ')}` } };
@@ -1548,9 +1637,8 @@ export async function handlePayoutWebhook(input: WebhookInput): Promise<WebhookA
       if (from === 'failed') await store.patchWithdrawal(input.db, row.orgId, row.id, shortSet);
       await store.recordWithdrawalEvent(input.db, { orgId: row.orgId, subject: 'withdrawal', subjectId: row.id, actor: `partner:${adapter.id}`, action: 'return_short', detail: { eventId: event.eventId, returnDigest, creditedMinor: credited.toString(), returnedMinor: total.toString(), amountMinor: row.amountMinor.toString() }, at });
       if (movedToFailed && row.partnerRef) {
-        // The failed path asks for the USDC back; so does this one, for the rest.
-        const accepted = await reverseInstruction({ now: () => at }, adapter, { intentId: row.intentId, partnerRef: row.partnerRef, returnAddress: row.walletAddress }, 'short_return');
-        await store.recordWithdrawalEvent(input.db, { orgId: row.orgId, subject: 'withdrawal', subjectId: row.id, actor: 'system', action: 'return_requested', detail: { accepted, returnAddress: row.walletAddress, outstandingMinor: (row.amountMinor - total).toString() }, at });
+        // The failed path asks for the USDC back; so does this one, for the rest (asked again until accepted).
+        await askForReturn({ db: input.db, now: () => at, orgId: row.orgId }, adapter, movedToFailed, 'short_return', { outstandingMinor: (row.amountMinor - total).toString() });
       }
       return { status: 200, body: { ok: true, short: true } };
     }
@@ -1572,9 +1660,8 @@ export async function handlePayoutWebhook(input: WebhookInput): Promise<WebhookA
   if (!moved) return { status: 200, body: { ignored: 'the withdrawal moved meanwhile' } };
   await store.recordWithdrawalEvent(input.db, { orgId: row.orgId, subject: 'withdrawal', subjectId: row.id, actor: `partner:${adapter.id}`, action: to, detail: { eventId: event.eventId, ...(set.bankRef ? { bankRef: set.bankRef } : {}), ...(set.returnDigest ? { returnDigest: set.returnDigest } : {}) }, at });
   if (to === 'failed' && row.partnerRef) {
-    // The USDC reached the partner and the bank payout failed: ask for it back, to the business wallet.
-    const accepted = await reverseInstruction({ now: () => at }, adapter, { intentId: row.intentId, partnerRef: row.partnerRef, returnAddress: row.walletAddress }, 'payout_failed');
-    await store.recordWithdrawalEvent(input.db, { orgId: row.orgId, subject: 'withdrawal', subjectId: row.id, actor: 'system', action: 'return_requested', detail: { accepted, returnAddress: row.walletAddress }, at });
+    // The USDC reached the partner and the bank payout failed: ask for it back, to the business wallet (asked again until accepted).
+    await askForReturn({ db: input.db, now: () => at, orgId: row.orgId }, adapter, moved, 'payout_failed');
   }
   return { status: 200, body: { ok: true } };
 }

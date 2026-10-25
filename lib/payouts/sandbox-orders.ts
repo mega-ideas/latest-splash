@@ -5,7 +5,8 @@
  *
  *   - the same instruction again names the same order;
  *   - the same intent id for another payout (another amount, deposit
- *     address, account commitment, currency or destination) is refused
+ *     address, account commitment, currency, destination, quote reference
+ *     or ISO 20022 message) is refused
  *     (`instruction_conflict`), never answered with the first order;
  *   - `status` answers only for an order it took, under its own reference
  *     (`payout_not_found` otherwise): no status is made up.
@@ -37,11 +38,27 @@ export function sandboxRefKey(env: NodeJS.ProcessEnv): Buffer {
   return createHmac('sha256', secret).update('splash:payout-sandbox-refs:v1').digest();
 }
 
-/** What makes two instructions for one intent id the same payout. */
+/** JSON with sorted keys and bigints as strings: the same message always hashes the same. */
+function canonical(v: unknown): string {
+  if (typeof v === 'bigint') return JSON.stringify(v.toString());
+  if (Array.isArray(v)) return `[${v.map(canonical).join(',')}]`;
+  if (v && typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    return `{${Object.keys(o).filter((k) => o[k] !== undefined).sort().map((k) => `${JSON.stringify(k)}:${canonical(o[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(v ?? null);
+}
+
+/**
+ * What makes two instructions for one intent id the same payout: the
+ * amounts, the destination, the quote and, on a bank route, the whole
+ * ISO 20022 message, so a changed message is refused as a strict partner
+ * would refuse it.
+ */
 function fingerprintOf(input: PayoutInstruction): string {
-  const parts: string[] = [input.route, input.intentId.toLowerCase(), input.expectedUsdcMinor.toString(), input.currency, input.minReceiveMinor.toString(), input.settleByMs.toString(), input.sourceWallet.toLowerCase(), input.returnAddress.toLowerCase(), input.purposeCode];
+  const parts: string[] = [input.route, input.intentId.toLowerCase(), input.expectedUsdcMinor.toString(), input.currency, input.minReceiveMinor.toString(), input.settleByMs.toString(), input.sourceWallet.toLowerCase(), input.returnAddress.toLowerCase(), input.purposeCode, input.quoteRef];
   if (input.route === 'bank') {
-    parts.push(input.depositAddress.toLowerCase(), input.beneficiaryRef.toLowerCase(), input.rateMicro.toString(), input.receiveMinor.toString());
+    parts.push(input.depositAddress.toLowerCase(), input.beneficiaryRef.toLowerCase(), input.rateMicro.toString(), input.receiveMinor.toString(), createHash('sha256').update(canonical(input.iso20022)).digest('hex'));
   } else {
     parts.push(input.destination.chain, String(input.destination.domain), input.destination.mintRecipient.toLowerCase(), input.maxBridgeFeeMinor.toString());
   }
