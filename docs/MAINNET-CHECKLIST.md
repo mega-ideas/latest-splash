@@ -219,7 +219,8 @@ procedure in [`docs/UPGRADE-POLICY.md`](UPGRADE-POLICY.md).
       `WITHDRAWAL_ACCOUNT_KEY_PREVIOUS`; losing every key makes the stored bank
       accounts unusable), and `SPLASH_CORE_ORIGINAL_PACKAGE_ID` (required in
       production: withdrawals refuse without it). Schedule
-      `/api/cron/withdrawals` every five minutes. Before relying on the
+      `/api/cron/withdrawals` every five minutes, and `/api/cron/cross-chain`
+      every ten (it needs `CCTP_IRIS_API_URL`). Before relying on the
       derived intent id, dry-run one kind 4 withdrawal on testnet and compare
       the created intent with `withdrawals.intent_id`.
       The Hata and Fiuu credentials (`HATA_API_KEY`, `HATA_WEBHOOK_SECRET`,

@@ -190,6 +190,11 @@ new build refuses to install or start on the old runtime and environment.
    cancels the withdrawal when the request lapsed, and records or frees a
    partner test deposit. It answers 502 without a database, without
    `SPLASH_CORE_ORIGINAL_PACKAGE_ID`, or when a row could not be settled.
+   Schedule `https://<domain>/api/cron/cross-chain` every ten minutes (v2
+   §4.7): it asks Circle's attestation service again for every burned CCTP
+   payment, and reports a payment burned but not minted six hours after its
+   burn. It answers 502 without a database, without `CCTP_IRIS_API_URL` in
+   production, when Circle could not be asked, or when a payment is stuck.
 
 **Redeploys**: push to `main` → App Platform rebuilds, runs the pre-deploy
 migration job, then deploys. Deleted files disappear from the server because

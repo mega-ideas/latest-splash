@@ -32,8 +32,8 @@ checks this, and each check is written so a NULL cannot make it pass.
 | Kind | What is kept | Paid as (Move) | SpendPolicy tag |
 |---|---|---|---|
 | `BANK` | as before | `BANK_PAYOUT` (4), through the payout route | a beneficiary commitment |
-| `EXCHANGE` | the exchange (Hata, PDAX, Tokocrypto, Bitkub: `TRAVEL_RULE_EXCHANGES`), the deposit address, its network (Sui only) | `EXCHANGE` (2) | `EXCHANGE`, only for a saved exchange account |
-| `SELF_CUSTODY` | the address, the wallet app as a label, the proof state (`unproven`, `proven`, `revoked`) | `WALLET` (1), only once proven | `WALLET`, only with a live proof |
+| `EXCHANGE` | the exchange (Hata, PDAX, Tokocrypto, Bitkub: `TRAVEL_RULE_EXCHANGES`), the deposit address, its network (Sui only) | `EXCHANGE` (2), signed only once the exchange confirmed the account | `EXCHANGE`, only for a confirmed exchange account |
+| `SELF_CUSTODY` | the address, the wallet app as a label, the proof state (`unproven`, `proven`, `revoked`), when and by which link it was proven, the ownership epoch | `WALLET` (1), only once proven | `WALLET`, only with a live proof |
 | `CROSS_CHAIN` | the chain, its CCTP domain, the address as that chain writes it, CCTP's 32-byte mint recipient | `CROSS_CHAIN` (3), the owners' multisig only | none: never on a policy |
 
 Every kind also carries the supplier's business details: registered name,
@@ -54,12 +54,33 @@ Checks, before anything is stored:
   since migration 0020.
 - **Cross-chain.** USDC only. Ethereum, Base, Arbitrum, OP Mainnet, Polygon
   PoS, Avalanche and Solana: CCTP V2 chains Circle lists with USDC that
-  Splash can also screen. An EVM address passes its EIP-55 checksum when it
-  is mixed case and becomes the left-padded mint recipient; a Solana
-  recipient must be the supplier's USDC token account, and the business
-  confirms that is what it gave (a wallet key looks the same and loses the
-  funds). Sui itself is refused (it is not cross-chain), and so are chains
-  Splash does not pay (Stellar, Starknet).
+  Splash can also screen. An EVM address is taken only in its EIP-55
+  checksummed form (an all lower-case copy carries no checksum, so a typo
+  would pass and a mint to it cannot be undone; `bad_address`) and becomes
+  the left-padded mint recipient. A Solana recipient must be the supplier's
+  USDC token account: the business confirms that is what it gave, and the
+  server then asks Solana (`getAccountInfo`, jsonParsed, through
+  `CCTP_MINT_RPC_URLS_JSON`'s `SOLANA` entry,
+  `lib/server/solana-token-accounts.ts`): owned by the SPL Token program, a
+  token account, Circle's USDC mint for the network, initialized. The token
+  account's owner is recorded (`destination_token_owner`). Otherwise
+  `solana_not_usdc_token_account`; with no RPC, or one that does not answer,
+  nothing is saved (`solana_check_not_configured`,
+  `solana_check_unavailable`), in every runtime. Sui itself is refused (it is
+  not cross-chain), and so are chains Splash does not pay (Stellar,
+  Starknet).
+- **Never Splash's address, never the business's own.** An address Splash
+  controls is refused at saving and at every gate
+  (`splash_controlled_address`, `lib/server/splash-addresses.ts`): the
+  operator (who is also the gas sponsor), the treasury, the test recipient,
+  FeeConfig's fee recipient and pending recipient (read live; production
+  refuses with `splash_addresses_unreadable` when it cannot name them), and,
+  for a cross-chain recipient, the operator's CCTP deposit addresses. The
+  business's own wallet and its members' addresses (passkey credentials,
+  zkLogin identities, signers, single-signer consents, the senders of its
+  signing requests and withdrawals) are refused as suppliers (`own_address`):
+  a member's own wallet saved as a "supplier" is how an insider would pay
+  themselves.
 
 Saving (`createWalletRecipient`):
 - The address is screened for this business by the server's provider
@@ -70,12 +91,40 @@ Saving (`createWalletRecipient`):
   screened (no verdict is made up).
 - One address is one recipient in a business: a second recipient at the
   same Sui address, whatever its kind, is refused (`recipient_exists`), so
-  which supplier a payment goes to is never guessed. Cross-chain recipients
-  are unique per business, chain and address in the table too.
+  which supplier a payment goes to is never guessed. The check and the
+  insert run under a per-address transaction lock
+  (`pg_advisory_xact_lock`), so two saves at once leave one recipient.
+  Cross-chain recipients are unique per business, chain and address in the
+  table too.
 - The org comes from the session (`recipientRoute`:
   `requireSessionAccount`, own membership); owners and staff may add
   recipients, viewers may not. Another business may save the same address
   for itself; neither sees the other's.
+- The older body (`POST /api/recipients` with `payoutMethod: 'WALLET'`) is
+  the same save: a `SELF_CUSTODY` recipient through `createWalletRecipient`,
+  the supplier's details required, owners and staff only. There is no
+  second save and no attestation in place of a screening.
+
+## The owners' approval (maker-checker)
+
+A wallet recipient a staff member saved is not paid, and cannot be tagged on
+a SpendPolicy, until an owner approves it
+(`POST /api/recipients/[id]/approval`, owners only; the one who saved it
+does not approve it): `recipient_not_approved` at the gate. An owner's own
+save is approved by that owner. Who saved it (`created_by`), the owner who
+approved it (`approved_by`, `approved_at`), and when and by which link it
+was proven are kept on the recipient and named in the controls evidence
+(`recipient`). Recipients saved before migration 0048 have no approval and
+wait for one.
+
+A wallet without the supplier's registered name, registration number,
+address and city is not paid and gets no proof link
+(`supplier_details_missing`).
+
+Removing a recipient (`DELETE /api/recipients/[id]`) is for owners and
+staff; removing one that can be paid (a proven wallet, a confirmed
+exchange account: what a SpendPolicy may tag) is for owners only, as
+withdrawing a proof is.
 
 ## The ownership proof (self-custody)
 
@@ -86,8 +135,13 @@ it holds it.
    (`POST /api/recipients/[id]/ownership-proof`). Splash makes a random
    32-byte token (the link, `{NEXT_PUBLIC_APP_URL}/wallet-proof/<token>`) and
    a random 32-byte nonce, and keeps the token only as its SHA-256. The link
-   is returned to whoever asked, and emailed to the supplier when its email
-   is on file. Any link still open for that recipient is replaced.
+   is emailed to the supplier. Only an owner is shown it (an owner may pass
+   it on); a staff member is not, so a staff member can neither sign it
+   with a wallet of their own nor spend it with a junk signature. A staff
+   member's request needs the supplier's email on file
+   (`supplier_email_needed`), and an email that fails closes the link at
+   once (`email_failed`). Any link still open for that recipient is
+   replaced.
 2. The supplier opens it (`GET /api/ownership-proofs/[token]`, public, limited
    per network address) and sees the fixed message:
 
@@ -110,10 +164,16 @@ it holds it.
    used up first, by a compare-and-set on an unused, unexpired row, so a
    link is good for one try and its nonce for ever; then the signature over
    the stored message is checked against the stored address (any scheme Sui
-   verifies; zkLogin through the chain). Only then is the proof recorded in
-   `wallet_ownership_proofs` (the evidence kept as a hash) and the recipient
-   marked `proven`. If the recipient's address changed after the link was
-   made, nothing is recorded.
+   verifies; zkLogin through the chain). Only then, in one transaction, is
+   the recipient marked `proven` (with the time and the link), the challenge
+   `verified`, and the proof recorded in `wallet_ownership_proofs` (the
+   evidence kept as a hash), and only if the recipient is still the one the
+   link was made for and no withdrawal came since: each withdrawal moves
+   the recipient's ownership epoch on, and a link made in an older epoch
+   proves nothing (`proof_withdrawn`). So an owner's withdrawal while a
+   zkLogin signature is being checked is never undone by the check
+   finishing after it. If the recipient's address changed, nothing is
+   recorded (`recipient_changed`).
 
 A wrong signature, a used, replaced or expired link, or a signature of
 another link's message proves nothing. The page shows only the address, the
@@ -128,8 +188,9 @@ multisig's), but the owners' own payments and second approvals to it stop at
 the gate below.
 
 The same proof is the off-chain gate for the WALLET tag (§4.2): a SpendPolicy
-recipient is tagged WALLET only while this business holds a live proof for
-it.
+recipient is tagged WALLET only while the payment gate below would pay it as
+a wallet (a live proof, an owner's approval, the supplier's details, not
+Splash's or the business's own address).
 
 ## The gate a payment passes
 
@@ -137,10 +198,24 @@ it.
 owners' payment of an open intent, or a second approval is opened, and again
 before every signature (`paymentBeforeSign`):
 
+- never an address Splash controls (`splash_controlled_address`) or one of
+  the business's own (`own_address`), whatever is saved;
 - kind `WALLET` (1): this business's one saved `SELF_CUSTODY` recipient at
-  the address, `proven`, with a live proof row; otherwise
-  `recipient_not_saved`, `recipient_ambiguous` or `ownership_not_proven`;
-- kind `EXCHANGE` (2): this business's saved `EXCHANGE` recipient;
+  the address, with the supplier's details, approved by an owner, `proven`,
+  with a live proof row; otherwise `recipient_not_saved`,
+  `recipient_ambiguous`, `supplier_details_missing`,
+  `recipient_not_approved` or `ownership_not_proven`;
+- kind `EXCHANGE` (2): this business's saved `EXCHANGE` recipient, with
+  the supplier's details, approved by an owner. Nothing checks by itself
+  that a deposit address belongs to the exchange named, so the account is
+  unconfirmed until the exchange's side confirmed it: a Travel Rule message
+  from this business to that address at that exchange, made after the
+  account was saved, that the counterparty approved (`approved`, not
+  `submitted` or `awaiting_counterparty`; in production never a sandbox
+  message). The first payment may be opened (its message is sent from it),
+  but it is signed only once its message is approved
+  (`exchange_unconfirmed`); after that, later payments follow the usual
+  Travel Rule hold (§4.6);
 - an address saved as the other kind is refused (`kind_mismatch`), so
   declaring the other kind avoids neither the proof nor the Travel Rule;
 - kind `SPLASH_BUSINESS` (0) is the chain's to check (the address registry
@@ -148,15 +223,16 @@ before every signature (`paymentBeforeSign`):
   cross-chain payment (3) is never a payment on Sui (`wrong_pay_path`).
 
 The older per-person send lane (`lib/server/stablecoin-send.ts`, a member's
-own passkey wallet) follows the same rule at its quote: a wallet the
-supplier holds only once `proven`, and an exchange account not at all
+own passkey wallet) follows the same rule: a wallet the supplier holds only
+once the gate above lets it through, and an exchange account not at all
 (`exchange_from_business_wallet`: it is paid from the business wallet, where
-its Travel Rule message goes first). The quote is the lane's gate; a proof
-withdrawn in the minutes between a quote and its submission is not
-re-checked there.
+its Travel Rule message goes first). The gate runs at the quote and again at
+submission, before the approval is spent: a proof withdrawn between the two
+stops the transfer.
 
-The EXCHANGE tag on a SpendPolicy is given only to a saved exchange account
-of this business (`exchange_not_saved`), through `OwnershipGate.savedExchanges`.
+The EXCHANGE tag on a SpendPolicy is given only to a confirmed exchange
+account of this business (`exchange_not_saved`), through
+`OwnershipGate.savedExchanges`, which reads the same gate.
 
 The exchange of a Travel Rule message and of a sender-declaration pack is
 now the saved exchange account's own: a request naming another is refused
@@ -188,8 +264,17 @@ its own source:
 
 Forward only: a trigger refuses a step back, a replaced burn, attestation or
 mint, a change to what is paid, and any delete. Each step is a
-compare-and-set on the status. One burn, one message nonce and one mint
-transaction per receipt (unique). The attestation is kept as Circle gave
+compare-and-set on the status. One burn and one message nonce per receipt
+(unique); a mint is unique per chain, transaction and message nonce
+(0048), so a relayer that mints several payments' messages in one
+transaction is recorded for each.
+
+The sweep (`/api/cron/cross-chain`, every ten minutes; review B7) asks
+Circle again for every burned payment, within its own business, so a lost
+refresh does not leave it burned, and reports a payment burned but not
+minted six hours after its burn (an ALERT line by id, and a 502) for ops to
+relay its mint from the message and attestation on the receipt. The receipt
+is also in the payment's controls evidence (`crossChain`). The attestation is kept as Circle gave
 it; the destination chain checks Circle's signatures when it mints.
 
 Fail closed: production reads Circle only at `CCTP_IRIS_API_URL` and never
@@ -218,6 +303,15 @@ and the event are from `circlefin/evm-cctp-contracts`
 - The sender-declaration pack before a payment exists: it is per payment
   (the signing request), as §4.6 built it.
 - A legacy wallet recipient (saved before this section) is now an unproven
-  wallet the supplier holds: it is not paid until proven, and it has no
-  supplier business details until the business adds them.
-- The controls evidence does not include the cross-chain receipt yet.
+  wallet the supplier holds: it is not paid until proven, gets no proof link
+  until the supplier's business details are on file, and waits for an
+  owner's approval. There is no edit route yet, so the business saves it
+  again with its details.
+- A memo or tag on an exchange deposit address: Splash assumes each
+  exchange gives each customer their own Sui USDC deposit address. To be
+  confirmed with each exchange before go-live; a shared omnibus address
+  with a memo would need a memo field carried in the Travel Rule message and
+  the declaration.
+- A staff member's own in-limit rule payment has no server path yet, so the
+  gate does not run on it; a WALLET or EXCHANGE tag stays on chain after a
+  proof is withdrawn until the owners remove it (§4.2).

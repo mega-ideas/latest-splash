@@ -80,6 +80,56 @@ and `tests/spend-rules.test.mjs`. Migration 0047.
   explain to the business; Phantom is not offered as a label although D5
   names it (it ended Sui support; the table refuses it since 0020).
 
+### §4.7 review follow-up — 2026-10-25
+
+Tests: `tests/wallet-recipients-v2-controls.test.mjs`,
+`tests/cross-chain-sweep.test.mjs`, with additions to
+`tests/compliance-payment-gates.test.mjs`, `tests/controls-evidence.test.mjs`
+and `tests/stablecoin-send.test.mjs`. Migration 0048.
+
+- **An exchange account was taken on the business's word (High).** Any
+  address saved as EXCHANGE could be paid once its Travel Rule message was
+  merely `submitted`, so choosing the exchange kind avoided D5(b). Now an
+  exchange account is unconfirmed until a Travel Rule message to that
+  address at that exchange, made after it was saved, is `approved` by the
+  counterparty (never a sandbox one in production): until then its first
+  payment may be opened but not signed (`exchange_unconfirmed`), and the
+  EXCHANGE tag is refused.
+- **Splash-controlled addresses could be recipients (High, B1).** The
+  operator (the gas sponsor), treasury, test recipient, FeeConfig's fee and
+  pending recipient (read live), and the operator's CCTP deposit addresses
+  are refused at saving and at every gate (`splash_controlled_address`);
+  production refuses when it cannot name them.
+- **A late signature check undid an owner's withdrawal (Medium).** The proof
+  is now recorded in one transaction, only if the recipient's ownership
+  epoch is the link's; every withdrawal moves it on (`proof_withdrawn`).
+- **The older WALLET body skipped the supplier's details and the role check
+  (Medium).** It is now the same save, owners and staff only, and the gate
+  refuses a wallet without the supplier's details
+  (`supplier_details_missing`).
+- **EIP-55 was skipped for lower-case addresses (Medium).** A cross-chain EVM
+  address is taken only in its checksummed form.
+- **A Solana mint recipient was the business's word (Medium).** The chain is
+  asked: an SPL Token account for Circle's USDC mint, initialized; its owner
+  recorded. No RPC, no save.
+- **An insider could prove their own wallet as a supplier (Medium).** The
+  business's wallet and its members' addresses are refused (`own_address`);
+  a recipient a staff member saved is paid or tagged only once an owner
+  approves it (maker-checker); the proof link goes to the supplier's email
+  and only an owner is shown it; who saved, approved and proved each
+  recipient is in the controls evidence.
+- **Low:** removing a payable wallet is owners only, and removing any
+  recipient owners and staff only; one EVM transaction may carry several
+  payments' mints; two saves of one address cannot race past
+  one-address-one-recipient (a per-address transaction lock); the send lane
+  re-checks the recipient at submission; a sweep asks Circle again for
+  every burned payment and reports one not minted six hours on.
+- **Residual:** an exchange's `approved` is Sumsub's report of the
+  counterparty's answer, not a test deposit; whether each exchange uses
+  per-customer deposit addresses or a memo is to be confirmed before
+  go-live; a rule payment by a staff member has no server path yet, so the
+  gate does not run on it.
+
 ## v2 Phase 2 §4.6 — compliance: KYB, Travel Rule, KYT, controls evidence — 2026-10-25
 
 Design: `docs/v2/phase2-compliance.md`. Tests:
