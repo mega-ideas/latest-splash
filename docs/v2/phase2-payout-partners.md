@@ -187,8 +187,10 @@ A withdrawal (§4.4) carries a message too: purpose `INTC`, relationship
 
 The evidence export (§4.6) takes `pacs008Evidence`: the same message,
 masked to the last four characters of the account and of both registration
-numbers, and the address's town and country. A supplier payout stores it on
-its row (`withdrawals.iso20022`). Payouts and suppliers are read by owners
+numbers, and the address's town and country. Every bank payout, a supplier
+payout or a withdrawal, stores it on its row with its purpose code
+(`withdrawals.iso20022`, `withdrawals.purpose_code`); rows from before 25 Oct
+2026 that are withdrawals have none. Payouts and suppliers are read by owners
 and staff only, not viewers (`requirePayoutReader`).
 
 Sandbox webhooks: each route verifies with its own secret,

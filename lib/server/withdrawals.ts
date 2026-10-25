@@ -949,7 +949,9 @@ export async function openBankPayout(
     quote: quoteRecord,
     quoteRef: q.quoteRef,
     quoteExpiresAt: q.expiresAt,
-    ...(p.kind === 'supplier_payout' ? { purposeCode: p.declaration.purposeCode, iso20022: pacs008Evidence(iso) } : {}),
+    // Every bank payout keeps the masked message its partner is sent, for the evidence export.
+    purposeCode: p.declaration.purposeCode,
+    iso20022: pacs008Evidence(iso),
     status: 'preparing',
     createdBy: userId,
     createdAt: now,
