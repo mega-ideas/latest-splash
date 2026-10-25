@@ -163,7 +163,7 @@ test('an approval stands in for the code on its own move, once', async () => {
   assert.equal(treasuryApprovedMove(again), null);
 });
 
-test('in Phase 2 an approved move is replayed through /api/treasury, not skipped, and then spent', async () => {
+test('even in Phase 2 an approved custodial move is recorded and not carried out (D9), and it is spent', async () => {
   const orgId = 'org_replay';
   const proposal = await proposeMove(orgId, 'move', '65000.00');
   const submitted = approveAndSubmit(proposal.id);
@@ -171,15 +171,13 @@ test('in Phase 2 an approved move is replayed through /api/treasury, not skipped
     cookie: '',
     origin: 'http://localhost',
   });
-  // Outside Next the route module cannot load, so the replay fails here. What
-  // matters is where it went: this case used to fall through to "settle
-  // through their own path", and the PAYMENT-kind proposal went to
-  // /api/transfers/authorize.
-  assert.notEqual(outcome.state, 'SKIPPED', outcome.detail);
-  assert.doesNotMatch(outcome.detail, /own path/);
-  assert.doesNotMatch(outcome.detail, /transfers[\\/]authorize|Invalid transfer authorization/);
-  // The replay never reached a route, so nothing in it spent the approval —
-  // and it is spent all the same: one approval, one attempt.
+  // v2 D9: Treasury is USDY in the business's own wallet. The custodial
+  // Smart Treasury ledger is retired even with a custody package configured,
+  // so an approval for it moves nothing into a Splash-held position.
+  assert.equal(outcome.state, 'SKIPPED', outcome.detail);
+  assert.match(outcome.detail, /own Splash Wallet/);
+  assert.doesNotMatch(outcome.detail, /transfers[\/]authorize|Invalid transfer authorization/);
+  // One approval, one attempt, all the same.
   assert.equal((await resolveFor(proposal.id, orgId, submitted.executionPayload)).reason, 'already used');
 });
 
@@ -220,18 +218,16 @@ test('the approval of this move stands in for the second factor, and the claim i
   assert.match(route, /limits\.requiresSecondApproval && !approvalClaim\.approved/);
 });
 
-test('the executor carries the treasury kinds out through /api/treasury', async () => {
+test('the executor records the treasury kinds and carries none out: the custodial ledger is retired (D9)', async () => {
   const execution = await source('lib/server/approval-execution.ts');
   const treasuryCase = execution.slice(
     execution.indexOf("case 'TREASURY_ALLOCATE':"),
     execution.indexOf('default:', execution.indexOf("case 'TREASURY_ALLOCATE':")),
   );
-  // Phase 0 is unchanged: recorded, not executed.
-  assert.match(treasuryCase, /if \(!custodyPhaseEnabled\(\)\) \{\s*return \{ state: 'SKIPPED'/);
-  assert.match(treasuryCase, /return await executeTreasuryMove\(proposal, payload, context\);/);
-  assert.match(execution, /const \{ authorizeTreasuryForApproval \} = await import\('\.\/approval-replay\.ts'\);/);
+  assert.match(treasuryCase, /return \{ state: 'SKIPPED'/);
+  assert.doesNotMatch(treasuryCase, /executeTreasuryMove|custodyPhaseEnabled/);
+  assert.doesNotMatch(execution, /authorizeTreasuryForApproval/);
 
   const replay = await source('lib/server/approval-replay.ts');
-  assert.match(replay, /await import\('@\/app\/api\/treasury\/route'\)/);
-  assert.match(replay, /return replayThroughRoute\(POST, '\/api\/treasury', input\)/);
+  assert.doesNotMatch(replay, /app\/api\/treasury\/route/, 'nothing replays into the retired ledger route');
 });

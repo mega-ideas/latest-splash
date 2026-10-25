@@ -184,7 +184,8 @@ test('execution replays the real route so every guard runs again', async () => {
   // largest ones, because being large is what sent them for approval.
   assert.match(replay, /await import\('@\/app\/api\/transfers\/authorize\/route'\)/);
   assert.match(replay, /await import\('@\/app\/api\/batches\/authorize\/route'\)/);
-  assert.match(replay, /await import\('@\/app\/api\/treasury\/route'\)/);
+  // The custodial treasury ledger is retired (v2 D9): nothing replays into it.
+  assert.doesNotMatch(replay, /app\/api\/treasury\/route/);
   // The approver's own cookie, so the replay resolves a real session.
   assert.match(replay, /cookie: input\.cookie/);
 });
