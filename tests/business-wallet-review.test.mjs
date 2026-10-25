@@ -529,7 +529,9 @@ test("10: the signer's device decodes the exact bytes and refuses a code that do
   assert.equal(review.code, transactionCode(register.bytesHash));
   assert.match(review.code, /^[0-9a-f]{4} [0-9a-f]{4} [0-9a-f]{4} [0-9a-f]{4}$/);
   // A server that sends one transaction's bytes with another's digest is caught.
-  assert.throws(() => reviewOnDevice({ ...register, digest: 'GZ' + register.digest.slice(2) }), /does not match/);
+  // (A fixed prefix that the random digest may already start with would change nothing.)
+  const otherPrefix = register.digest.startsWith('GZ') ? 'HY' : 'GZ';
+  assert.throws(() => reviewOnDevice({ ...register, digest: otherPrefix + register.digest.slice(2) }), /does not match/);
   assert.throws(() => reviewOnDevice({ ...register, bytesHash: 'ff'.repeat(32) }), /does not match/);
   await w.client.close();
 });
