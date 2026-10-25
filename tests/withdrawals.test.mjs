@@ -482,6 +482,22 @@ test('a withdrawal instructs the partner first, keyed by its intent id, and the 
   await t.w.client.close();
 });
 
+test('a withdrawal row keeps the masked ISO 20022 message it was instructed with, for the evidence export, as a supplier payout does', async () => {
+  const t = await setup();
+  const { destination } = await readyToWithdraw(t);
+  const { r } = await created(t, destination.id);
+  const [instruction] = t.partner.called('createPayout').map((c) => c.input);
+  const [row] = await t.w.db.select().from(schema.withdrawals).where(eq(schema.withdrawals.id, r.withdrawal.id));
+  assert.equal(row.purposeCode, 'INTC', 'a business moving its own money');
+  assert.ok(row.iso20022, 'the message the partner was sent is on the row');
+  const { pacs008Evidence } = await import('../lib/payments/iso20022.ts');
+  assert.deepEqual(row.iso20022, JSON.parse(JSON.stringify(pacs008Evidence(instruction.iso20022))), 'exactly what was sent, masked');
+  assert.equal(row.iso20022.relationship, 'self');
+  assert.equal(row.iso20022.creditorAccountLast4, '5678');
+  assert.ok(!JSON.stringify(row.iso20022).includes('514012345678'), 'the account number is masked');
+  await t.w.client.close();
+});
+
 test('a withdrawal is idempotent by its key: a retry is the same withdrawal and instructs nobody twice; another request on the key is refused', async () => {
   const t = await setup();
   const { destination } = await readyToWithdraw(t);
