@@ -133,8 +133,26 @@ export function treasuryRefusalText(env: NodeJS.ProcessEnv = process.env): strin
   return (
     "I can't prepare, approve or send a Treasury swap. Treasury is USDY held in your business's own Splash Wallet, so Splash holds nothing for you. " +
     `${where} ` +
-    'USDY is backed by US Treasury bills, its yield is variable and not promised, and it is not Shariah-compliant.'
+    TREASURY_RISK_LINE
   );
+}
+
+/** What Treasury is, on every Treasury answer: the risk and the Shariah label. */
+export const TREASURY_RISK_LINE =
+  'USDY is backed by US Treasury bills, its yield is variable and not promised, and it is not Shariah-compliant.';
+
+/**
+ * Zeke's answer to "how do I get out of Treasury?" (the 5.7 review). There is
+ * no notice period: redeeming is a swap on Sui. It says how a redemption
+ * works only when this server has a swap route; otherwise it says, once, that
+ * swaps are not switched on, and never describes a route first. It answers a
+ * question, so it does not open with the refusal; it adds only the risk line.
+ */
+export function treasuryRedemptionText(env: NodeJS.ProcessEnv = process.env): string {
+  const how = resolveTreasurySwapRoute(env).ok
+    ? "Redeeming USDY is a swap back to USDC on Sui at the market price. The Treasury page quotes it first, there is no Splash fee on a swap, and your wallet's owners sign it there."
+    : 'Swaps between USDY and USDC are not switched on yet; the Treasury page shows a quote.';
+  return `Treasury has no notice period. ${how} ${TREASURY_RISK_LINE}`;
 }
 
 /** The answer on a server with no swap route: the default, and what tests compare against. */

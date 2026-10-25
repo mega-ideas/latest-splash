@@ -11,6 +11,7 @@ import {
   formatUsdcAllowance,
   laneRefusalText,
   treasuryCustodyRefusal,
+  treasuryRedemptionText,
   ZekeLaneRefusal,
   assertZekeKindInScope,
   launchScopeRefusal,
@@ -25,7 +26,7 @@ import {
   rememberAssistantName,
 } from './assistant-name.ts';
 import { estimateNettingSavedUsd, getUsdCorridorByCurrency } from '../fx/corridors.ts';
-import { formatRate, pricingLine } from '../fees/copy.ts';
+import { formatRate, kindPrice, pricingLine, PRICING_FOOTNOTE } from '../fees/copy.ts';
 import { lastPublishedFees, quoteFeeState } from '../fees/fee-config.ts';
 import { buildFeeQuote } from '../fees/quote.ts';
 import { BANK_DESTINATION, destinationKind } from '../fees/destination.ts';
@@ -2092,7 +2093,9 @@ const MISSING_DATA_REPLY = 'You need to provide me the data or upload a file. At
 
 // A reply is a function when its truth depends on the phase: Treasury and the
 // balances it holds exist only once Splash may hold funds.
-const SPLASH_ANSWERS: Array<{ test: RegExp; reply: string | (() => string); skipIf?: RegExp }> = [
+// `requires`, when set, must match too: it keeps an answer to its subject
+// (the Treasury redemption answer only for a Treasury question).
+const SPLASH_ANSWERS: Array<{ test: RegExp; reply: string | (() => string); skipIf?: RegExp; requires?: RegExp }> = [
   {
     // Fees / pricing / cost
     test: /\b(fee|fees|pricing|price|cost|charge|commission|how much (do|does|will) (it|you|this) cost)\b/,
@@ -2123,7 +2126,8 @@ const SPLASH_ANSWERS: Array<{ test: RegExp; reply: string | (() => string); skip
   {
     // Treasury / yield — QUESTIONS only; allocate/sweep actions flow to the planner
     test: /\b(treasury|yield|apy|earn|interest|idle cash|usdy|t-?bill)\b/,
-    skipIf: /\b(allocate|sweep|deploy|move|put|redeem|withdraw)\b/,
+    // Coming out of Treasury, and notice periods, get the redemption answer below.
+    skipIf: /\b(allocate|sweep|deploy|move|put|redeem|withdraw|money out|notice period)\b/,
     reply: () => treasuryCustodyRefusal(),
   },
   {
@@ -2224,14 +2228,35 @@ const SPLASH_ANSWERS: Array<{ test: RegExp; reply: string | (() => string); skip
     reply: 'Sui settlement runs around the clock — the on-chain record anchors in about 400ms at any hour. Delivery speed depends on the receiving rail: a Splash balance credit is immediate, and the PHP testnet bank path lands in roughly 3-20 minutes during rail hours.',
   },
   {
-    // Withdrawal notice period + fees for treasury
-    test: /\b(notice period|withdraw(al)? (time|fee|period|notice)|how long (to|does) (withdraw|redeem)|get (my )?money out)\b/,
+    // Coming out of Treasury: notice period, redemption time.
+    test: /\b(notice period|redeem|redemption|withdraw(al)? (time|fee|period|notice)|how long (to|does) (withdraw|redeem)|get (my )?money out)\b/,
+    // Only for Treasury. "Get my money out to my bank" is a bank withdrawal,
+    // which has a Splash fee and partner fees (the 5.7 review): it gets the
+    // answer below. A bare "notice period?" is a Treasury question here.
+    requires: /\b(treasury|usdy|redeem|redemption|notice period)\b/,
     // v2 D9: Treasury is USDY in the business's own wallet, so coming out is
     // a swap on Sui, not a notice-period withdrawal from the ledger Splash
-    // held (retired). The rest is Zeke's Treasury answer, which says what
-    // this server can do.
-    reply: () => 'Treasury has no notice period. Redeeming USDY is a swap back to USDC on Sui at the price the market pays then, the Treasury page quotes that figure first, and Splash charges no fee on a swap. '
-      + treasuryCustodyRefusal(),
+    // held (retired). Says only what this server can do.
+    reply: () => treasuryRedemptionText(),
+  },
+  {
+    // Money out to a bank account: a withdrawal, not a Treasury redemption.
+    test: /\b(money out|cash ?out|off-?ramp|withdraw(al|als|ing)?|to (my|our|the) bank|bank account)\b/,
+    skipIf: /\b(treasury|usdy|redeem|redemption)\b/,
+    // The fee comes from the published schedule (A1 §2.7), never typed in;
+    // the partner's fees are separate lines, off chain, never marked up.
+    reply: () => {
+      const { schedule, feesOn } = lastPublishedFees();
+      const price = kindPrice(schedule, destinationKind(BANK_DESTINATION));
+      const fee = feesOn
+        ? `Splash's fee on a bank payout is ${price}.`
+        : `No Splash fee is charged yet; once fees start, a bank payout is ${price}.`;
+      return 'Money out to a bank account is a withdrawal from your business wallet, not a Treasury redemption. '
+        + 'The USDC goes to your own deposit address at a payout partner, which converts it and pays it into your bank account. '
+        + `${fee} ${PRICING_FOOTNOTE} `
+        + 'How long it takes depends on the partner and your bank. '
+        + "I can't prepare, approve or send a withdrawal: nothing moves until it is approved and signed in your wallet.";
+    },
   },
   {
     // Batch CSV format
@@ -2435,6 +2460,7 @@ function matchDemoScript(message: string): string | null {
   // 5. Known Splash topics.
   for (const entry of SPLASH_ANSWERS) {
     if (entry.skipIf?.test(q)) continue;
+    if (entry.requires && !entry.requires.test(q)) continue;
     if (entry.test.test(q)) return typeof entry.reply === 'function' ? entry.reply() : entry.reply;
   }
 
