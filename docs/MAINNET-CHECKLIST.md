@@ -190,7 +190,10 @@ procedure in [`docs/UPGRADE-POLICY.md`](UPGRADE-POLICY.md).
 - [ ] Sumsub, Elliptic and every payout partner contract is signed before its
       flag is switched on.
 - [ ] Compliance (v2 §4.6, `docs/v2/phase2-compliance.md`): Sumsub's webhook
-      is set to `HMAC_SHA256_HEX` and `SUMSUB_WEBHOOK_SECRET` is set; one
+      is set to `HMAC_SHA256_HEX` and `SUMSUB_WEBHOOK_SECRET` is set
+      (`SUMSUB_WEBHOOK_ALLOW_SHA1` stays off, or is turned off once the switch
+      is made); compliance confirms `KYT_SCREENING_MAX_AGE_HOURS` (default
+      24); one
       KYB applicant and one Travel Rule transfer are run in Sumsub's sandbox
       against this code before `SUMSUB_TRAVEL_RULE_ENABLED=true`; Elliptic's
       wallet-exposure call is checked against the contracted account's

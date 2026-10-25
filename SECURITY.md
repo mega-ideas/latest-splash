@@ -34,7 +34,7 @@ The remaining four modules (`smart_treasury`, `payment_intent`, `audit_anchor`, 
 
 Design: `docs/v2/phase2-compliance.md`. Tests:
 `tests/compliance-kyt.test.mjs`, `tests/compliance-sumsub.test.mjs`,
-`tests/controls-evidence.test.mjs`.
+`tests/controls-evidence.test.mjs`, `tests/compliance-payment-gates.test.mjs`.
 
 - **Fail closed.** KYB, Travel Rule and KYT each have a labelled sandbox
   outside production only. In production, decided by the runtime mode
@@ -67,8 +67,39 @@ Design: `docs/v2/phase2-compliance.md`. Tests:
   (another's reads as 404). It carries masked data only and is checked for
   secret, signature, sealed, salt and account-number fields before it is
   served.
+- **Review fixes (p2-4.6).** High: the screening was kept but nothing in
+  the money path read it, so a BLOCK or unscreened address could be paid.
+  Now a wallet payment, the owners' payment of an open intent and an
+  owner's second approval are opened only for a fresh CLEAR (BLOCK 403;
+  REVIEW, unscreened or no answer 409; a CLEAR older than 24 hours is
+  screened again or refused), and the check runs again before every
+  signature. High: an exchange payment could be signed and sent with no
+  Travel Rule message, or after Sumsub rejected it. Now it is not signed
+  until the message is with the provider; on hold holds, rejected refuses;
+  an address screened as an exchange's counts as one whatever kind the
+  payment names. Medium: a database failure while applying a KYB verdict
+  was acknowledged as a refused transition and the verdict lost; only
+  `KybTransitionError` is acknowledged now, anything else releases the
+  delivery. Medium: one provider reference covering two addresses returned
+  the first address's screening for the second; the key is per address
+  (0046) and the sanctions list's reference names the address. Medium: the
+  evidence listed today's screenings and KYB case as if they applied at
+  payment time; it now splits screenings at the approving signature, and
+  says when no CLEAR came before, when the KYB case changed after, and when
+  an exchange payment has no Travel Rule message. Medium: two callers could
+  both send a Travel Rule message and a lost answer left it stuck; a
+  compare-and-set claims the send, a duplicate is held `unconfirmed` until
+  Sumsub's webhook names it, two saved recipients at one address are
+  refused, and one deposit address keeps one exchange. Low: the originator
+  is the KYB case's name and number and needs an approved KYB; the evidence
+  refuses account-shaped values and more account keys, and copies partner
+  fee lines field by field; production refuses SHA-1 webhooks unless
+  `SUMSUB_WEBHOOK_ALLOW_SHA1`; only an owner opens a KYB session.
 - **Open:** supplier name screening; the recipient forms calling the
-  screening route (§4.7); checking Elliptic's and Sumsub's shapes against
+  screening route (§4.7), and the exchange taken from the recipient record
+  rather than the request; a staff member's own in-limit rule payment
+  (not built server-side, so not screened by Splash); an owner override of a
+  Travel Rule hold (not built: compliance to decide); checking Elliptic's and Sumsub's shapes against
   the contracted sandboxes; who is the originating party for Travel Rule
   purposes when the sender is the business's own self-hosted wallet
   (counsel).

@@ -58,20 +58,25 @@ No session, verdict, Travel Rule reference or screening result is made up.
 
 In this order: the HMAC over the raw body in the algorithm Sumsub names
 (`HMAC_SHA256_HEX`, `HMAC_SHA512_HEX`, or its SHA-1 default; any other name
-is refused, and no secret verifies as false); then the body; then its date
+is refused, and no secret verifies as false). Production refuses SHA-1,
+which is also what a delivery without the algorithm header gets, unless
+`SUMSUB_WEBHOOK_ALLOW_SHA1=true` for the switch-over to `HMAC_SHA256_HEX`; then the body; then its date
 (`createdAtMs` or `createdAt`) inside a two-day window, since Sumsub retries
 for about a day, and no more than five minutes ahead; then the delivery is
 claimed once in `webhook_events` by the SHA-256 of the raw body. A replay
 inside the window is acknowledged and changes nothing. A failure of ours
-releases the claim so Sumsub can deliver again. Production without a
-database refuses (503).
+releases the claim so Sumsub can deliver again, and the route answers 500.
+Production without a database refuses (503).
 
 - **KYB:** only `applicantReviewed` decides. GREEN moves the business to
   KYB_PROVIDER_APPROVED; RED with `reviewRejectType: FINAL` to REJECTED; a
   RED the applicant may retry changes nothing (before, any RED rejected).
   The actor is PROVIDER, which the state machine never lets reach ACTIVE; a
-  transition the machine refuses is acknowledged (200) and nothing moves
-  back.
+  transition the machine refuses (`KybTransitionError`, and only that) is
+  acknowledged (200) and nothing moves back. Any other failure while applying
+  it (the database down, a timeout) releases the delivery, so the verdict
+  arrives again rather than being lost (before the review, every error was
+  acknowledged as a refused transition).
 - **Travel Rule:** `applicantKytTxnApproved`, `…Rejected`, `applicantKytOnHold`
   and `applicantKytTxnAwaitingUser` move the transfer Sumsub's own
   reference names, only when the txnId (when given) is that transfer's
@@ -86,9 +91,17 @@ the paying business and the supplier to Sumsub, which delivers them to the
 exchange (VASP to VASP). `POST /api/wallet/payments/[wsr_…]/travel-rule
 {exchange, purpose?}`, owners and staff:
 
-- The payment, the payer (the business's registered profile), the supplier
-  (this business's saved recipient at that address, with its Travel Rule
-  half) and the applicant (the business's KYB case) are read on the server.
+- The payment, the payer (the name and registration number of the
+  business's KYB case, the business the provider verified; the address and
+  country from its profile), the supplier (this business's ONE saved
+  recipient at that address, with its Travel Rule half; two saved at one
+  address is refused, `recipient_ambiguous`) and the applicant (the KYB
+  case) are read on the server. The business's KYB must be approved
+  (KYB_PROVIDER_APPROVED, KYB_ADMIN_APPROVED or ACTIVE), or nothing is sent
+  (`kyb_not_approved`).
+- The exchange still comes from the request until §4.7 keeps it on the
+  recipient. A deposit address once named at one exchange in a message the
+  provider took keeps that exchange: another is refused (`exchange_mismatch`).
 - The recipient's newest screening by this business must be CLEAR: REVIEW
   waits for a person, BLOCK is refused (403), none asks for screening first.
 - Once per payment: the row is written before Sumsub is asked, keyed by the
@@ -96,9 +109,16 @@ exchange (VASP to VASP). `POST /api/wallet/payments/[wsr_…]/travel-rule
   the signing request id), which is also Sumsub's txnId. A retry of the same
   message answers the same transfer without asking again; the same payment
   with another amount, address or party is refused (`travel_rule_conflict`).
-  A failed send leaves the row `preparing`, with no reference, and the retry
-  asks again under the same txnId. An answer without Sumsub's transfer id,
-  or naming another txnId, is not a submission.
+  The caller that sends first claims the row (`preparing` to `sending`, a
+  compare-and-set); a second caller meanwhile is told it is in progress
+  (`travel_rule_in_progress`) and Sumsub is asked once. A failed send goes
+  back to `preparing`, with no reference, and the retry asks again under the
+  same txnId. A send Sumsub answers 409 (it may hold that txnId from a send
+  whose answer was lost), or a claim older than ten minutes with no answer,
+  is held as `unconfirmed`: never sent again and never taken for sent, until
+  Sumsub's webhook for that txnId and this business (`externalUserId`)
+  names its transfer. An answer without Sumsub's transfer id, or naming
+  another txnId, is not a submission.
 - The payer is `type: company`, paying from an `unhostedWallet` (the
   business's own wallet); the supplier is at a `crypto` (hosted) address
   with the exchange named to Sumsub. Countries go as ISO alpha-3, from a
@@ -110,8 +130,9 @@ The business's wallet is self-hosted, so no VASP holds the sending side.
 `POST /api/wallet/payments/[wsr_…]/sender-declaration {exchange,
 invoiceNumber?, invoiceDate?, format?}` returns the pack as PDF (default)
 or JSON (`splash.sender-declaration.v1`), with the SHA-256 of the JSON in
-`X-Content-SHA256` and on the PDF. It holds the payer (name, registration,
-country, address from the profile), the sending wallet, the supplier and
+`X-Content-SHA256` and on the PDF. It holds the payer (the KYB case's name
+and registration number, the country and address from the profile; only for
+a business whose KYB is approved), the sending wallet, the supplier and
 its deposit address on Sui, the amount, the invoice number and date (the
 only fields from the request, marked as the sender's), the payment
 reference and the digest once sent. The exchange is named only when its
@@ -142,9 +163,44 @@ agreement is signed (`SIGNED_PARTNERS`), its role otherwise.
   one is refused before any provider is asked.
 - **Kept:** every screening, the unanswered ones too, in `kyt_screenings`
   (0045): append-only (a trigger refuses UPDATE and DELETE), a provider's
-  reference once per business, and the database refuses a verdict without a
-  reference and a time. Another business's screening of the same address
-  does not count. Only CLEAR permits a payment.
+  reference once per business and address (0046: an answer covering two
+  addresses is two rows, and neither is handed the other's; the sanctions
+  list's reference names the address), and the database refuses a verdict
+  without a reference and a time. Another business's screening of the same
+  address does not count. Only CLEAR permits a payment.
+
+## What holds a payment back
+
+The screening and the Travel Rule message are not only kept: the money path
+reads them.
+
+- **Opening.** A wallet payment (`requestWalletPayment`), the owners'
+  payment of an open intent (`requestOpenIntentPayment`) and an owner's
+  second approval of a rule payment (`openSecondApproval`) are opened only
+  when this business's newest screening of the recipient is a fresh CLEAR
+  (`recipientScreeningGate`, lib/server/kyt-screenings.ts). BLOCK is 403
+  (`recipient_blocked`); REVIEW (`recipient_in_review`), nothing on file or
+  no answer (`recipient_not_screened`) are 409. A CLEAR older than
+  `KYT_SCREENING_MAX_AGE_HOURS` (default 24), or an unanswered newest attempt,
+  is screened again by the server's provider and that answer decides; with
+  no provider it is refused (`recipient_screening_stale`). A BLOCK is never
+  screened away by this check. Nothing is stored for a refused payment. A
+  bank payout pays the business's verified partner deposit address and goes
+  through the payout route (§4.4, §4.5).
+- **Signing.** Before every signature on a wallet payment or a second
+  approval (the signing layer's `beforeSign`,
+  lib/server/payment-compliance-gate.ts) the same check runs again, so a
+  payment opened before a BLOCK is not signed after it; the signature that
+  completes the quorum passes through it too.
+- **Exchange payments.** A wallet payment to an exchange recipient is not
+  signed until its Travel Rule message is with the provider (`submitted`,
+  `awaiting_counterparty` or `approved`, with Sumsub's reference): none, or
+  one not yet accepted, is `travel_rule_missing`; `on_hold` holds
+  (`travel_rule_on_hold`); `rejected` refuses (`travel_rule_rejected`). A
+  recipient is an exchange's when the payment's kind is EXCHANGE, when this
+  business screened the address as an `exchange_recipient`, or when a
+  message was started for the payment, so sending it as kind WALLET does not
+  avoid the check.
 
 ## The controls evidence, per payment
 
@@ -157,21 +213,42 @@ both formats, the JSON's SHA-256 in `X-Content-SHA256` and on the PDF:
 |---|---|
 | payment | the payout row or the signing request's decoded bytes: kind, status, amount, the `max_fee` bound, paid to, from wallet |
 | kyb | the business's newest KYB case: id, state, the provider's applicant reference, the lifecycle |
-| screenings | this business's screenings of the address paid: provider, reference, verdict, score, time |
+| approvedAt | when the payment was approved: the signature that completed its quorum (null while it is not) |
+| screenings | this business's screenings of the address paid that were on file when it was approved: provider, reference, verdict, score, time |
+| screeningsAfterApproval | screenings made after it was approved, listed apart: not the check that applied to it |
 | travelRule | the Travel Rule transfer for the payment |
 | approval | the signing request: purpose, status, threshold, each signer's address, weight and time; the spending rule's allowance and policy ids; a second approval's policy and payer |
 | quote | the payout's quote: reference, rate, what arrives, each partner fee its own line, Splash's fee |
 | partner | the route, the partner's reference, the bank's reference, the account's last four |
 | iso20022 | the masked pacs.008 copy the partner was sent |
 | chain | the Sui digest; read from the chain, the intent created (under splash_core's original package id), and the SettlementAnchored event's Walrus blob and content hash; the receipt as `<digest>#<event index>` |
-| gaps | what is not on file, in words |
+| gaps | what is not on file, in words: among them no CLEAR as the newest screening before approval, a KYB case changed after approval (it is shown as it is now), and an exchange payment with no Travel Rule message the provider took |
 
 No secret, signature, sealed value, salt, transaction bytes or account
 number is ever in it: `assertEvidenceClean` refuses a document with such a
-key or a raw key value, so a field added later cannot leak one. A chain
+key (an account under its usual names too: `iban`, `account`,
+`creditorAccount`, `accountNo`; the last four is `…Last4`), a raw key
+value, or an account-shaped value (eight digits or more, or an IBAN) outside
+the amount, time, score and reference fields, so a field added later cannot
+leak one. Each partner fee is copied as its own line with its four fields
+only, not passed through from the quote. A chain
 that cannot be read leaves the chain fields empty and says so.
 
 ## Not built here
+
+- An owner's override of a Travel Rule `on_hold`: a held payment waits for
+  the exchange. Whether owners may override a VASP's hold at all is for
+  compliance to decide.
+- A staff member's own payment under their rule, within its limits, is made
+  with their allowance on chain and is not built by the server here, so the
+  screening check does not run on it; when that path is built it must call
+  `recipientCleared`. Rule recipients are verified by the business multisig.
+- The Travel Rule step for a rule payment (`spend_approval`): the message
+  route takes wallet payments only.
+- An `unconfirmed` Travel Rule message is resolved by Sumsub's webhook only;
+  ops have no screen for it yet, and the payment stays held meanwhile.
+- A REVIEW is cleared only by screening the address again; there is no
+  reviewer's decision record yet.
 
 - Name screening of a supplier or its owners (sanctions and PEP by name),
   which a bank route's partner does today. Sumsub screens both parties of a
