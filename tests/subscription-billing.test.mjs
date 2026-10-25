@@ -193,6 +193,8 @@ async function billingWorld({ env = ON } = {}) {
       readAllowance: async (id) => model.state.allowances.get(id) ?? null,
       financeGas: async () => ({ price: 1000n, budget: 20_000_000n, epoch: 900n, chain: (await w.sponsor.gasFor()).chain, nonce: nonce++ }),
       readDigest: async () => null,
+      readHeldAllowances: (owner) => bw.readHeldAllowances(owner),
+      currentEpoch: async () => 900n,
       sendEmail: async (m) => { emails.push(m); return { providerRef: `em_${emails.length}` }; },
       appUrl: 'https://v1.splashz.xyz',
       ...over,
@@ -434,7 +436,7 @@ test('one pull per calendar month: an invoice with it, signed by the finance mul
   assert.deepEqual([d.sender, d.funder, d.recipient, d.amountMinor], [FINANCE, wallet, FINANCE, String(49n * USDC_1)], 'the finance multisig draws from the business wallet, to itself');
   assert.equal(d.digest, pull.tx_digest);
   const [invoice] = (await w.client.query(`SELECT * FROM subscription_invoices`)).rows;
-  assert.match(invoice.number, /^SPL-202610-[0-9A-F]{8}$/);
+  assert.equal(invoice.number, 'SPL-202610-000001', 'a sequence per calendar month, not a hash of the org');
   assert.equal(invoice.plan_name, 'Growth');
 
   assert.equal((await w.cycle()).prepared, 0, 'the month has its pull');
@@ -569,5 +571,179 @@ test('a plan change revokes the old allowance and grants the new one in one tran
   assert.deepEqual(rows, [['growth', 'replaced'], ['scale', 'active']]);
   const view = await readSubscription(w.deps, 'acme');
   assert.equal(view.subscription.copy, 'Splash can draw up to 199 USDC per calendar month (UTC) for your plan. Revoke any time.');
+  await w.client.close();
+});
+
+// ─── 7. Review fixes: reconcile, cancel without the finance proof, plan changes and stuck pulls ──
+
+const pulls = (w) => w.client.query(`SELECT * FROM subscription_pulls ORDER BY created_at, id`).then((r) => r.rows);
+const subs = (w) => w.client.query(`SELECT * FROM subscriptions ORDER BY created_at, id`).then((r) => r.rows);
+const succeed = (w) => async (bytes) => {
+  const x = describeBillingPull(bytes, USDC);
+  w.model.charge(x.allowance, BigInt(x.amountMinor), BigInt(w.clock().getTime()));
+  return { digest: x.digest, success: true };
+};
+const failingPull = async (bytes) => ({ digest: describeBillingPull(bytes, USDC).digest, success: false, error: 'MoveAbort(EInsufficientFunds)' });
+
+test('a subscribe whose follow-up missed the new allowance (indexer lag) opens no second request when an owner subscribes again, and a later run activates it', async () => {
+  const w = await billingWorld();
+  const r = await registered(w);
+  await upsertPlanForStaff(w.db, { id: 'growth', name: 'Growth', priceMinor: 49n * USDC_1 });
+  let lag = false;
+  const real = w.bw.readHeldAllowances;
+  w.bw.readHeldAllowances = async (owner) => (lag ? [] : real(owner));
+  const opened = await subscribe(w.deps, w.bw, { orgId: 'acme', requestedBy: 'u-founder', wallet: r.members, planId: 'growth' });
+  assert.equal(opened.ok, true, JSON.stringify(opened));
+  lag = true;
+  assert.equal((await signBy(w, opened.request, 'founder', 'two')).status, 'executed');
+  assert.deepEqual((await subs(w)).map((s) => [s.status, s.allowance_id]), [['pending', null]], 'the follow-up could not see the allowance yet');
+
+  const requestsBefore = await count(w, 'wallet_signing_requests');
+  const again = await subscribe(w.deps, w.bw, { orgId: 'acme', requestedBy: 'u-founder', wallet: r.members, planId: 'growth' });
+  assert.equal(again.ok, false);
+  assert.equal(again.code, 'reconcile_pending');
+  assert.equal(await count(w, 'wallet_signing_requests'), requestsBefore, 'no request is left for the owners to sign');
+  assert.equal(w.model.state.allowances.size, 1, 'one billing allowance on chain');
+
+  lag = false;
+  const c = await w.cycle();
+  assert.deepEqual(c.errors, []);
+  const [s] = await subs(w);
+  assert.equal(s.status, 'active', 'the cron reconciles the executed subscribe');
+  assert.equal(s.allowance_id, [...w.model.state.allowances.keys()][0]);
+  await w.client.close();
+});
+
+test('the cron reports an executed subscribe it still cannot reconcile, so a person is told, and keeps trying', async () => {
+  const w = await billingWorld();
+  const r = await registered(w);
+  await upsertPlanForStaff(w.db, { id: 'growth', name: 'Growth', priceMinor: 49n * USDC_1 });
+  const real = w.bw.readHeldAllowances;
+  let lag = false;
+  w.bw.readHeldAllowances = async (owner) => (lag ? [] : real(owner));
+  const opened = await subscribe(w.deps, w.bw, { orgId: 'acme', requestedBy: 'u-founder', wallet: r.members, planId: 'growth' });
+  lag = true;
+  await signBy(w, opened.request, 'founder', 'two');
+  const c = await w.cycle();
+  assert.equal(c.errors.length, 1);
+  assert.match(c.errors[0].error, /left no allowance/);
+  lag = false;
+  assert.deepEqual((await w.cycle()).errors, []);
+  assert.equal((await subs(w))[0].status, 'active');
+  await w.client.close();
+});
+
+test('cancel needs no finance proof: it works after a finance rotation, with the finance address unset, and with the fee config unreadable', async () => {
+  for (const finance of [
+    async () => ({ ok: true, address: normalizeSuiAddress('0x' + 'f2'.repeat(32)) }),
+    async () => ({ ok: false, error: 'SPLASH_FINANCE_ADDRESS is not set' }),
+    async () => { throw new Error('the fee config could not be read'); },
+  ]) {
+    const w = await billingWorld();
+    const { members } = await subscribed(w);
+    const opened = await cancelSubscription(w.deps, { ...w.bw, financeAddress: finance }, { orgId: 'acme', requestedBy: 'u-two', wallet: members });
+    assert.equal(opened.ok, true, JSON.stringify(opened));
+    assert.equal((await signBy(w, opened.request, 'two', 'three')).status, 'executed');
+    assert.equal(w.model.state.allowances.size, 0);
+    assert.deepEqual((await subs(w)).map((s) => s.status), ['cancelled']);
+    await w.client.close();
+  }
+});
+
+test('cancel revokes every billing allowance the wallet holds to a Splash finance address, not only the tracked one', async () => {
+  const w = await billingWorld();
+  const { members, address } = await subscribed(w);
+  // A stray billing allowance to the same finance multisig, which Splash has no row for.
+  const stray = hex(0x900);
+  const strayCap = hex(0x901);
+  w.model.state.allowances.set(stray, { ...[...w.model.state.allowances.values()][0], id: stray });
+  w.model.state.caps.set(strayCap, { objectId: strayCap, version: '22', digest: '11111111111111111111111111111111', owner: normalizeSuiAddress(address), allowance: stray });
+  const opened = await cancelSubscription(w.deps, w.bw, { orgId: 'acme', requestedBy: 'u-two', wallet: members });
+  assert.equal(opened.ok, true, JSON.stringify(opened));
+  assert.deepEqual(opened.request.description.actions.map((a) => a.type), ['revoke_billing_allowance', 'revoke_billing_allowance']);
+  assert.equal((await signBy(w, opened.request, 'two', 'three')).status, 'executed');
+  assert.equal(w.model.state.allowances.size, 0, 'no billing allowance is left on chain');
+  await w.client.close();
+});
+
+test('a failed pull retried after a plan change is drawn, invoiced and receipted under the new plan; the old pull is superseded', async () => {
+  const w = await billingWorld();
+  const { members } = await subscribed(w);
+  await w.cycle();
+  const [growthPull] = await pulls(w);
+  assert.deepEqual(await submitPullForStaff({ ...w.deps, usdcType: USDC, execute: failingPull, sendEmail: async () => ({ providerRef: null }) }, { pullId: growthPull.id, signatures: ['s'] }), { ok: true, status: 'failed' });
+
+  const changed = await changePlan(w.deps, w.bw, { orgId: 'acme', requestedBy: 'u-founder', wallet: members, planId: 'scale' });
+  assert.equal(changed.ok, true, JSON.stringify(changed));
+  assert.equal((await signBy(w, changed.request, 'founder', 'three')).status, 'executed');
+  const scale = (await subs(w)).find((s) => s.plan_id === 'scale');
+  assert.equal(scale.status, 'active');
+
+  const c = await w.cycle();
+  assert.deepEqual(c.errors, []);
+  assert.equal(c.prepared, 1);
+  const rows = await pulls(w);
+  assert.deepEqual(rows.map((p) => [p.subscription_id === scale.id, p.status, BigInt(p.amount_minor)]), [[false, 'superseded', 49n * USDC_1], [true, 'awaiting_signature', 199n * USDC_1]]);
+  const fresh = rows[1];
+  assert.equal(describeBillingPull(fromBase64(fresh.tx_bytes), USDC).amountMinor, String(199n * USDC_1), 'the bytes draw what the row says');
+  const invoices = (await w.client.query(`SELECT * FROM subscription_invoices ORDER BY number`)).rows;
+  assert.deepEqual(invoices.map((i) => [i.number, i.plan_name, BigInt(i.amount_minor)]), [['SPL-202610-000001', 'Growth', 49n * USDC_1], ['SPL-202610-000002', 'Scale', 199n * USDC_1]]);
+
+  assert.deepEqual(await submitPullForStaff({ ...w.deps, usdcType: USDC, execute: succeed(w) }, { pullId: fresh.id, signatures: ['s'] }), { ok: true, status: 'succeeded' });
+  const [receipt] = (await w.client.query(`SELECT * FROM subscription_receipts`)).rows;
+  assert.equal(BigInt(receipt.amount_minor), 199n * USDC_1, 'the receipt is what the chain drew');
+  assert.equal(receipt.invoice_id, invoices[1].id);
+  assert.equal((await w.cycle()).prepared, 0, 'October is paid: no further pull');
+  await w.client.close();
+});
+
+test('a plan change supersedes the old plan’s pull waiting for signatures, so no stale pull or false notice follows', async () => {
+  const w = await billingWorld();
+  const { members } = await subscribed(w);
+  await w.cycle();
+  const changed = await changePlan(w.deps, w.bw, { orgId: 'acme', requestedBy: 'u-founder', wallet: members, planId: 'scale' });
+  await signBy(w, changed.request, 'founder', 'three');
+  const [old] = await pulls(w);
+  assert.equal(old.status, 'superseded');
+  assert.equal((await submitPullForStaff({ ...w.deps, usdcType: USDC, execute: failingPull }, { pullId: old.id, signatures: ['s'] })).code, 'not_awaiting');
+  assert.deepEqual(w.emails, []);
+  await w.client.close();
+});
+
+test('a pull left unsigned past its gas window is rebuilt on the same row; a pull the network refused before running stays signable', async () => {
+  const w = await billingWorld();
+  await subscribed(w);
+  await w.cycle({ currentEpoch: async () => 900n });
+  const [before] = await pulls(w);
+  assert.equal((await w.cycle({ currentEpoch: async () => 901n })).prepared, 0, 'still inside its window');
+  const later = await w.cycle({ currentEpoch: async () => 902n, financeGas: async () => ({ price: 1000n, budget: 20_000_000n, epoch: 902n, chain: (await w.sponsor.gasFor()).chain, nonce: 9 }) });
+  assert.deepEqual(later.errors, []);
+  assert.equal(later.prepared, 1);
+  const [after] = await pulls(w);
+  assert.equal(after.id, before.id, 'the same row');
+  assert.notEqual(after.tx_digest, before.tx_digest, 'new bytes');
+  assert.deepEqual([after.status, after.attempts], ['awaiting_signature', 1], 'an expired window is not a failed attempt');
+
+  const rejected = await submitPullForStaff({ ...w.deps, usdcType: USDC, execute: async () => { throw new Error('Invalid user signature'); }, readDigest: async () => null }, { pullId: after.id, signatures: ['bad'] });
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.code, 'not_sent');
+  assert.equal((await pulls(w))[0].status, 'awaiting_signature', 'the finance signers can sign again');
+  assert.deepEqual(await submitPullForStaff({ ...w.deps, usdcType: USDC, execute: succeed(w) }, { pullId: after.id, signatures: ['good'] }), { ok: true, status: 'succeeded' });
+  await w.client.close();
+});
+
+test('a submitted pull the chain never saw is made signable again once its gas window has passed', async () => {
+  const w = await billingWorld();
+  await subscribed(w);
+  await w.cycle({ currentEpoch: async () => 900n });
+  const [p] = await pulls(w);
+  const lost = await submitPullForStaff({ ...w.deps, usdcType: USDC, execute: async () => { throw new Error('timeout'); }, readDigest: async () => { throw new Error('unreachable'); } }, { pullId: p.id, signatures: ['s'] });
+  assert.deepEqual(lost, { ok: true, status: 'submitted' }, 'the answer is unknown: it waits for the digest');
+  assert.equal((await w.cycle({ currentEpoch: async () => 901n })).prepared, 0);
+  const c = await w.cycle({ currentEpoch: async () => 903n, financeGas: async () => ({ price: 1000n, budget: 20_000_000n, epoch: 903n, chain: (await w.sponsor.gasFor()).chain, nonce: 11 }) });
+  assert.equal(c.prepared, 1);
+  const [q] = await pulls(w);
+  assert.deepEqual([q.id, q.status], [p.id, 'awaiting_signature']);
+  assert.notEqual(q.tx_digest, p.tx_digest);
   await w.client.close();
 });
