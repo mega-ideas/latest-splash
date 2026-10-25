@@ -70,6 +70,19 @@ export const CUSTOMER_RULES = [
   },
 ];
 
+/**
+ * Claims a stranger reads as a price promise. Marketing only: the signed-in
+ * product may say "Splash fee: free" for a transfer between Splash users,
+ * which is Splash's own fee and true.
+ * @type {CopyRule[]}
+ */
+export const MARKETING_CLAIMS = [
+  {
+    pattern: /\bzero[- ]fees?\b|\bfee[- ]free\b|\bfor free\b/i,
+    reason: 'no payment is free end to end: Sui gas is sponsored, not zero, and a payout carries its partner\'s rate; say who pays which fee',
+  },
+];
+
 /** @type {CopyRule[]} */
 export const MARKETING_JARGON = [
   {
@@ -113,7 +126,7 @@ export function copyViolations(relPath, text) {
   const surface = surfaceFor(path);
   if (surface === 'exempt') return [];
 
-  const rules = surface === 'marketing' ? [...CUSTOMER_RULES, ...MARKETING_JARGON] : CUSTOMER_RULES;
+  const rules = surface === 'marketing' ? [...CUSTOMER_RULES, ...MARKETING_CLAIMS, ...MARKETING_JARGON] : CUSTOMER_RULES;
   const found = [];
   const lines = text.split(/\r?\n/);
   for (const rule of rules) {
