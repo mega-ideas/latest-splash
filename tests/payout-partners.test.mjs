@@ -341,6 +341,31 @@ test('cctp_wallet: USDC only, CCTP V2 standard from Sui, Circle’s fee its own 
   assert.equal((await p.returnOrReverse({ intentId: INTENT, partnerRef: order.partnerRef, returnAddress: WALLET, reason: 'payout_failed', now: NOW })).accepted, false, 'a burn cannot be undone');
 });
 
+test('the sandbox keys an instruction by its intent id and expected amount: a retry for another payout is refused, another server names the same order, and it reports only orders it took', async () => {
+  const p = payoutPartner('pdax', SANDBOX);
+  const intent = `0x${'5a'.repeat(32)}`;
+  const instruction = (amount, over = {}) => {
+    const iso = ISO.pacs008ForInstruction({ ...isoInput('PH'), quoteRef: 'sbq_test_000000000000', intentId: intent, expectedUsdcMinor: amount, ...over });
+    return bankInstruction('PH', { intentId: intent, expectedUsdcMinor: amount, iso20022: iso, ...over });
+  };
+  const first = await p.createPayout(instruction(1_000_000_000n));
+  assert.equal((await p.createPayout(instruction(1_000_000_000n))).partnerRef, first.partnerRef, 'the same instruction again names the same order');
+  await assert.rejects(p.createPayout(instruction(2_000_000_000n)), (e) => e instanceof PayoutPartnerUnavailable && e.code === 'instruction_conflict', 'the intent id with another amount is another payout');
+  await assert.rejects(p.createPayout(instruction(1_000_000_000n, { depositAddress: `0x${'33'.repeat(32)}` })), (e) => e.code === 'instruction_conflict', 'or another deposit address');
+  // Another server instance (a fresh module, so a fresh process key) names the same order.
+  const fresh = await import('../lib/payouts/bank-adapter.ts?instance=second');
+  const other = fresh.sandboxBankAdapter({ facts: { id: 'pdax', partners: ['pdax'], countries: ['PH'], currencies: ['PHP'] }, tag: 'pdax', depositSeed: 'splash:sandbox:pdax-deposit:', rateMicro: 56_500_000n, fees: () => [], env: SANDBOX });
+  assert.equal((await other.createPayout(instruction(1_000_000_000n))).partnerRef, first.partnerRef, 'a retry on another server names the same order');
+  assert.deepEqual(await p.status({ intentId: intent, partnerRef: first.partnerRef, now: NOW }), { status: 'instructed', sandbox: true });
+  await assert.rejects(p.status({ intentId: `0x${'5b'.repeat(32)}`, partnerRef: 'sb_pdax_unknown000', now: NOW }), (e) => e.code === 'payout_not_found', 'no status is made up for an order it never took');
+  await assert.rejects(p.status({ intentId: intent, partnerRef: 'sb_pdax_someoneelse', now: NOW }), (e) => e.code === 'payout_not_found', 'nor for another reference');
+  // The cross-chain route keys the same way.
+  const c = payoutPartner('cctp_wallet', SANDBOX);
+  const cIntent = `0x${'5c'.repeat(32)}`;
+  await c.createPayout(cctpInstruction({ intentId: cIntent }));
+  await assert.rejects(c.createPayout(cctpInstruction({ intentId: cIntent, expectedUsdcMinor: 300_000_000n, receiveMinor: 300_000_000n, minReceiveMinor: 300_000_000n })), (e) => e.code === 'instruction_conflict');
+});
+
 test("the CBPR+ extended set: '&' and '#' are kept, a bank-checked name with an accent is refused, the business's own text is transliterated", () => {
   assert.equal(ISO.transliterate('Café Ñandú Straße'), 'Cafe Nandu Strasse');
   assert.equal(ISO.transliterate('株式会社'), '', 'another script comes out empty');

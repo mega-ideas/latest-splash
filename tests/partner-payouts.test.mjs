@@ -499,6 +499,62 @@ test('the sweep posts a digest the partner missed', async () => {
   await t.w.client.close();
 });
 
+test("the sweep asks the partner for a payout's status when no webhook came, moves it forward only, and never takes a return without the chain", async () => {
+  let answer = 'instructed';
+  const t = await setup({ overrides: { pdax: { status: async () => ({ status: answer, sandbox: true }) } } });
+  const { beneficiary } = await readyToPay(t);
+  const { r } = await paid(t, beneficiary.id);
+  const p = r.payout;
+  await signBoth(t, r.request);
+  const status = async () => (await P.getPartnerPayout(t.deps(), p.id)).payout.status;
+  assert.equal(await status(), 'sent');
+  assert.equal((await t.reconcile()).advanced, 0, 'instructed is no news');
+  const asked = t.partners.pdax.called('status').map((c) => c.input);
+  assert.ok(asked.length >= 1, 'the partner was asked');
+  assert.ok(asked.every((i) => i.intentId === p.intentId && i.partnerRef === p.partnerRef), 'for this payout, by its intent id and the partner reference');
+  answer = 'funds_received';
+  assert.equal((await t.reconcile()).advanced, 1);
+  assert.equal(await status(), 'partner_received');
+  answer = 'instructed';
+  await t.reconcile();
+  assert.equal(await status(), 'partner_received', 'never backwards');
+  answer = 'returned';
+  await t.reconcile();
+  assert.equal(await status(), 'partner_received', 'a return counts only from a digest the chain shows, so a polled one is not believed');
+  answer = 'failed';
+  assert.equal((await t.reconcile()).advanced, 1);
+  assert.equal(await status(), 'failed');
+  const [ret] = t.partners.pdax.called('returnOrReverse').map((c) => c.input);
+  assert.equal(ret.returnAddress, t.wallet.address, 'the USDC is asked back to the business wallet');
+  assert.equal(ret.intentId, p.intentId);
+  const before = t.partners.pdax.called('status').length;
+  answer = 'paid_out';
+  await t.reconcile();
+  assert.equal(await status(), 'failed', 'a failed payout waits for its return; a poll does not reopen it');
+  assert.equal(t.partners.pdax.called('status').length, before, 'a failed payout is not polled');
+  const trail = (await t.w.db.select().from(schema.withdrawalEvents)).filter((e) => e.subjectId === p.id).map((e) => e.action);
+  assert.ok(trail.includes('partner_received') && trail.includes('failed') && trail.includes('return_requested'), trail.join(','));
+
+  // A second payout paid out by poll is final: it is not asked again.
+  const second = await paid(t, beneficiary.id);
+  await signBoth(t, second.r.request);
+  answer = 'paid_out';
+  await t.reconcile();
+  assert.equal((await P.getPartnerPayout(t.deps(), second.r.payout.id)).payout.status, 'paid_out');
+  const n = t.partners.pdax.called('status').length;
+  await t.reconcile();
+  assert.equal(t.partners.pdax.called('status').length, n, 'paid out is final: nothing more to ask');
+
+  // A route that cannot answer leaves the payout where it was and is counted, not guessed at.
+  const third = await paid(t, beneficiary.id);
+  await signBoth(t, third.r.request);
+  t.partners.pdax.status = async () => { throw new Error('partner down'); };
+  const swept = await t.reconcile();
+  assert.equal((await P.getPartnerPayout(t.deps(), third.r.payout.id)).payout.status, 'sent');
+  assert.equal(swept.advanced, 0);
+  await t.w.client.close();
+});
+
 /* ── Production ──────────────────────────────────────────────────────── */
 
 test('production without credentials refuses at every step and stores nothing, whatever USE_MOCK_APIS says', async () => {
