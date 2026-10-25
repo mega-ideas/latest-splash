@@ -866,3 +866,27 @@ test("a webhook signed for one partner's route does not verify at another's", as
     assert.throws(() => payoutPartner(other, ENV).handleWebhook({ rawBody, signature: sig, now }), /signature/i, `${other} refuses pdax's signature`);
   }
 });
+
+test('a payout left in preparing (the flow died after the insert) is cancelled by the sweep and its instruction reversed by intent id', async () => {
+  const t = await setup();
+  const { beneficiary } = await readyToPay(t);
+  const { r } = await paid(t, beneficiary.id);
+  const id = r.payout.id;
+  const stale = new Date(t.w.signing.now().getTime() - 60 * 60 * 1000);
+  const before = t.partners.pdax.called('returnOrReverse').length;
+  // A row young enough to still be in flight is left alone.
+  await t.w.db.update(schema.withdrawals).set({ status: 'preparing', signingRequestId: null, partnerRef: null, updatedAt: t.w.signing.now() }).where(eq(schema.withdrawals.id, id));
+  await t.reconcile();
+  let [row] = await t.w.db.select().from(schema.withdrawals).where(eq(schema.withdrawals.id, id));
+  assert.equal(row.status, 'preparing', 'a fresh preparing row is not touched');
+  // The row as an interrupted openBankPayout leaves it: inserted, never advanced, no request.
+  await t.w.db.update(schema.withdrawals).set({ updatedAt: stale }).where(eq(schema.withdrawals.id, id));
+  const swept = await t.reconcile();
+  [row] = await t.w.db.select().from(schema.withdrawals).where(eq(schema.withdrawals.id, id));
+  assert.equal(row.status, 'cancelled', JSON.stringify(swept));
+  assert.equal(row.failure, 'instruction_unconfirmed');
+  const calls = t.partners.pdax.called('returnOrReverse').slice(before).map((c) => c.input);
+  assert.equal(calls.length, 1, JSON.stringify(swept));
+  assert.equal(calls[0].intentId, row.intentId, 'reversed by the intent id');
+  await t.w.client.close();
+});
