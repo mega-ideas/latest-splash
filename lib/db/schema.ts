@@ -1856,3 +1856,136 @@ export const fundingProviderEvents = pgTable('funding_provider_events', {
 }, (table) => [
   primaryKey({ columns: [table.provider, table.eventId] }),
 ]);
+
+/* ── Withdrawals to the business's own bank (v2 §4.4, migration 0040) ──── */
+
+/**
+ * The business's own bank account, stored only once the holder name, as given
+ * and as the partner's name enquiry returns it from the bank, both match the
+ * business's registered name. The account number and the beneficiary salt
+ * are sealed (lib/payouts/withdrawal-rules.ts); `beneficiary_ref` is the
+ * stable commitment a bank-payout intent carries.
+ */
+export const withdrawalDestinations = pgTable('withdrawal_destinations', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  partner: text('partner').notNull(),
+  country: text('country').notNull(),
+  currency: text('currency').notNull(),
+  bankCode: text('bank_code').notNull(),
+  holderName: text('holder_name').notNull(),
+  bankHolderName: text('bank_holder_name').notNull(),
+  nameCheckRef: text('name_check_ref').notNull(),
+  fingerprint: text('fingerprint').notNull(),
+  last4: text('last4').notNull(),
+  accountSealed: text('account_sealed').notNull(),
+  beneficiarySaltSealed: text('beneficiary_salt_sealed').notNull(),
+  beneficiaryRef: text('beneficiary_ref').notNull(),
+  label: text('label').notNull(),
+  /** verified | revoked */
+  status: text('status').notNull(),
+  verifiedAt: timestamp('verified_at', { withTimezone: true }).notNull(),
+  verifiedBy: text('verified_by').notNull(),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  createdBy: text('created_by').notNull(),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('withdrawal_destinations_live_unique').on(table.orgId, table.partner, table.fingerprint).where(sql`${table.status} <> 'revoked'`),
+  index('withdrawal_destinations_org_idx').on(table.orgId, table.status),
+]);
+
+/** The business's fixed deposit address with a payout partner, verified once by a test deposit. */
+export const partnerDepositAddresses = pgTable('partner_deposit_addresses', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  partner: text('partner').notNull(),
+  address: text('address').notNull(),
+  accountRef: text('account_ref').notNull(),
+  /** pending_test | test_requested | test_sent | verified | revoked */
+  status: text('status').notNull(),
+  testAmountMinor: bigint('test_amount_minor', { mode: 'bigint' }).notNull(),
+  testRequestId: text('test_request_id'),
+  testDigest: text('test_digest'),
+  testWallet: text('test_wallet'),
+  verifiedAt: timestamp('verified_at', { withTimezone: true }),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  createdBy: text('created_by').notNull(),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('partner_deposit_addresses_live_unique').on(table.orgId, table.partner).where(sql`${table.status} <> 'revoked'`),
+  uniqueIndex('partner_deposit_addresses_address_unique').on(table.partner, table.address).where(sql`${table.status} <> 'revoked'`),
+  uniqueIndex('partner_deposit_addresses_test_digest_unique').on(table.testDigest).where(sql`${table.testDigest} is not null`),
+]);
+
+/** One withdrawal from the business wallet to the business's own bank. */
+export const withdrawals = pgTable('withdrawals', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  clientKey: text('client_key').notNull(),
+  requestHash: text('request_hash').notNull(),
+  partner: text('partner').notNull(),
+  destinationId: text('destination_id').notNull().references(() => withdrawalDestinations.id),
+  depositAddressId: text('deposit_address_id').notNull().references(() => partnerDepositAddresses.id),
+  depositAddress: text('deposit_address').notNull(),
+  walletAddress: text('wallet_address').notNull(),
+  paymentRef: text('payment_ref').notNull(),
+  /** The on-chain intent id, derived from the account and payment_ref: the partner's idempotency key. */
+  intentId: text('intent_id').notNull(),
+  beneficiaryRef: text('beneficiary_ref').notNull(),
+  commitmentSaltSealed: text('commitment_salt_sealed').notNull(),
+  amountMinor: bigint('amount_minor', { mode: 'bigint' }).notNull(),
+  maxFeeMinor: bigint('max_fee_minor', { mode: 'bigint' }).notNull(),
+  currency: text('currency').notNull(),
+  rateMicro: bigint('rate_micro', { mode: 'bigint' }).notNull(),
+  receiveMinor: bigint('receive_minor', { mode: 'bigint' }).notNull(),
+  quote: jsonb('quote').notNull(),
+  quoteRef: text('quote_ref').notNull(),
+  quoteExpiresAt: timestamp('quote_expires_at', { withTimezone: true }).notNull(),
+  partnerRef: text('partner_ref'),
+  signingRequestId: text('signing_request_id'),
+  suiDigest: text('sui_digest'),
+  settlementPostedAt: timestamp('settlement_posted_at', { withTimezone: true }),
+  bankRef: text('bank_ref'),
+  returnDigest: text('return_digest'),
+  /** preparing | awaiting_signatures | sent | partner_received | paid_out | failed | returned | cancelled */
+  status: text('status').notNull(),
+  failure: text('failure'),
+  createdBy: text('created_by').notNull(),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('withdrawals_client_key_unique').on(table.orgId, table.clientKey),
+  uniqueIndex('withdrawals_intent_unique').on(table.intentId),
+  uniqueIndex('withdrawals_payment_ref_unique').on(table.paymentRef),
+  uniqueIndex('withdrawals_partner_ref_unique').on(table.partner, table.partnerRef).where(sql`${table.partnerRef} is not null`),
+  uniqueIndex('withdrawals_sui_digest_unique').on(table.suiDigest).where(sql`${table.suiDigest} is not null`),
+  index('withdrawals_org_idx').on(table.orgId, table.status),
+]);
+
+/** Every withdrawal, destination and deposit-address change, append-only (0040). */
+export const withdrawalEvents = pgTable('withdrawal_events', {
+  id: text('id').primaryKey(),
+  seq: bigserial('seq', { mode: 'number' }).notNull(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  /** destination | deposit_address | withdrawal */
+  subject: text('subject').notNull(),
+  subjectId: text('subject_id'),
+  /** A user id, `system`, or `partner:<id>`. */
+  actor: text('actor').notNull(),
+  action: text('action').notNull(),
+  detail: jsonb('detail').notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index('withdrawal_events_org_idx').on(table.orgId, table.createdAt),
+]);
+
+/** Each payout-partner webhook, once. */
+export const payoutPartnerEvents = pgTable('payout_partner_events', {
+  partner: text('partner').notNull(),
+  eventId: text('event_id').notNull(),
+  orgId: text('org_id').references(() => organizations.id),
+  subjectId: text('subject_id'),
+  status: text('status').notNull(),
+  receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  primaryKey({ columns: [table.partner, table.eventId] }),
+]);

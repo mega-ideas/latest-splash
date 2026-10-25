@@ -216,6 +216,16 @@ export function walletRequestHeadline(purpose: SigningPurpose, d: WalletTxDescri
       if (pay.intent) return `pay ${usdc(pay.intent.amountMinor)} to ${shortAddress(pay.intent.recipient)}, a payment a team member prepared${fee}`;
       return `pay a payment whose payee could not be read${fee}`;
     }
+    case 'withdrawal': {
+      const open = a.find((x) => x.type === 'open_intent') as Extract<WalletAction, { type: 'open_intent' }>;
+      const pay = a.find((x) => x.type === 'pay_intent') as Extract<WalletAction, { type: 'pay_intent' }>;
+      const fee = BigInt(pay.maxFeeMinor) > 0n ? `, Splash fee at most ${usdc(pay.maxFeeMinor)}` : '';
+      return `withdraw ${usdc(open.amountMinor)} to the business's own bank account in ${open.targetCurrency}, through the payout partner's deposit address ${shortAddress(open.recipient)}${fee}`;
+    }
+    case 'partner_test_deposit': {
+      const s = a.find((x) => x.type === 'send_funds') as Extract<WalletAction, { type: 'send_funds' }>;
+      return `send a test deposit of ${s.amountMinor ? usdc(s.amountMinor) : 'USDC'} to the payout partner's deposit address ${shortAddress(s.recipient)}`;
+    }
     case 'migration_transfer': {
       const s = a.find((x) => x.type === 'send_funds') as Extract<WalletAction, { type: 'send_funds' }>;
       return `move ${s.amountMinor ? usdc(s.amountMinor) : 'your USDC'} from your own wallet to the business wallet ${shortAddress(s.recipient)}`;

@@ -450,6 +450,31 @@ export const envSchema = z.object({
   /** Elliptic (D8): deposit and recipient screening. Configured, not yet connected. */
   ELLIPTIC_API_KEY: optional,
   ELLIPTIC_API_SECRET: optional,
+
+  /* v2 §4.4 and §4.5, payout partners and withdrawals to the business's own
+     bank (lib/payouts/, lib/server/withdrawals.ts). A sandbox outside
+     production; in production each route refuses without its credentials
+     and, until its API is wired, with them. None is required at boot. */
+  PAYOUT_PARTNER_HATA_FIUU_ENABLED: flag('true'),
+  PAYOUT_PARTNER_PDAX_ENABLED: flag('true'),
+  PAYOUT_PARTNER_DURIANPAY_ENABLED: flag('true'),
+  PAYOUT_PARTNER_CCTP_WALLET_ENABLED: flag('true'),
+  HATA_API_KEY: optional,
+  HATA_WEBHOOK_SECRET: optional,
+  FIUU_MERCHANT_ID: optional,
+  FIUU_VERIFY_KEY: optional,
+  /** The sandbox payout partners' webhook secret, outside production only:
+   *  random, at least 32 characters, read only when
+   *  PAYOUT_SANDBOX_WEBHOOKS_ENABLED is true. No fallback secret. */
+  PAYOUT_SANDBOX_WEBHOOK_SECRET: optional,
+  PAYOUT_SANDBOX_WEBHOOKS_ENABLED: flag('false'),
+  /** Seals withdrawal bank-account numbers at rest (AES-256-GCM; random, at
+   *  least 32 characters). Without it no bank account can be added or paid. */
+  WITHDRAWAL_ACCOUNT_KEY: optional,
+  /** splash_core's original (defining) package id, the type tag of the
+   *  intent id a withdrawal instruction is keyed by. Unset: SPLASH_CORE_PACKAGE_ID,
+   *  which is the original until the first upgrade. */
+  SPLASH_CORE_ORIGINAL_PACKAGE_ID: objectId,
   USDC_AVAILABLE_MICRO: opt(z.coerce.number().int().min(0)),
   USDT_AVAILABLE_MICRO: opt(z.coerce.number().int().min(0)),
   USDT_BUFFER_AGE_MS: int(0),

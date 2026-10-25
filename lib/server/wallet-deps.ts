@@ -262,6 +262,12 @@ export async function liveWalletContext(orgId: string): Promise<{ ok: true; ctx:
     // closes that offboarding to-do (Postgres only).
     const { resolveOffboardedSpenders } = await import('@/lib/server/spend-standing');
     await resolveOffboardedSpenders(db, request);
+    if (request.purpose === 'withdrawal' || request.purpose === 'partner_test_deposit') {
+      // v2 §4.4: the withdrawal is sent and its digest posted to the partner,
+      // or the test deposit is recorded for the partner to confirm.
+      const [{ withdrawalSigningExecuted }, { payoutPartner }] = await Promise.all([import('@/lib/server/withdrawals'), import('@/lib/payouts/registry')]);
+      await withdrawalSigningExecuted({ db, now: () => new Date(), partner: (id) => payoutPartner(id) }, request);
+    }
     if (request.purpose === 'spend_policy') {
       // A new policy opened as part of reissuing the rules after a rotation
       // is followed by the reissue itself (§4.2).

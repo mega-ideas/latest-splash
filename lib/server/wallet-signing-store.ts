@@ -44,7 +44,11 @@ export type SigningPurpose =
   /** v2 §4.2: the wallet gives, changes or takes back spending rules, or changes its policy. */
   | 'spend_rule'
   /** v2 §4.2: one owner's second approval (`splash_spend::approve_payout`). */
-  | 'spend_approval';
+  | 'spend_approval'
+  /** v2 §4.4: a bank payout to the business's own account, through its partner deposit address. */
+  | 'withdrawal'
+  /** v2 §4.4: the small plain transfer that verifies a partner deposit address. */
+  | 'partner_test_deposit';
 
 export type SigningStatus = 'collecting' | 'submitting' | 'unknown' | 'executed' | 'failed' | 'expired' | 'cancelled';
 

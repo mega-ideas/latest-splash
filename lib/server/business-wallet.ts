@@ -566,11 +566,29 @@ export async function fundsOnHold(ctx: WalletContext, wallet: string, needMinor:
   return null;
 }
 
-/** A payment from the business wallet, signed by its quorum. */
+/**
+ * A payment from the business wallet, signed by its quorum. With
+ * `withdrawal`, it is a withdrawal to the business's own bank (v2 §4.4): the
+ * request is opened as purpose `withdrawal`, and the bytes must be a bank
+ * payout to exactly that deposit address, for exactly that beneficiary and
+ * amount, or nothing is stored.
+ */
 export async function requestWalletPayment(
   ctx: WalletContext,
-  input: { orgId: string; requestedBy: string; wallet: WalletMembers; payment: Omit<WalletPayment, 'wallet' | 'account' | 'gas'> },
+  input: {
+    orgId: string;
+    requestedBy: string;
+    wallet: WalletMembers;
+    payment: Omit<WalletPayment, 'wallet' | 'account' | 'gas'>;
+    withdrawal?: { depositAddress: string; beneficiaryRef: string };
+  },
 ): Promise<Result> {
+  if (input.withdrawal) {
+    if (input.payment.kind !== V2_KIND.BANK_PAYOUT) return refuse(400, 'not_a_bank_payout', 'a withdrawal is a bank payout');
+    if (normalizeSuiAddress(input.payment.recipient) !== normalizeSuiAddress(input.withdrawal.depositAddress)) {
+      return refuse(400, 'wrong_recipient', "a withdrawal pays the business's partner deposit address only");
+    }
+  }
   const onHold = await fundsOnHold(ctx, registration(input.wallet).address, input.payment.amountMinor + input.payment.maxFeeMinor);
   if (onHold) return onHold;
   const gas = await sponsoredGas(ctx);
@@ -585,13 +603,63 @@ export async function requestWalletPayment(
   return openSigningRequest(ctx.signing, {
     orgId: input.orgId,
     requestedBy: input.requestedBy,
-    purpose: 'wallet_payment',
+    purpose: input.withdrawal ? 'withdrawal' : 'wallet_payment',
     // The payment reference is the idempotency key on chain too: one intent
     // per reference, ever (derived_object::claim).
     dedupeKey: `pay:${Buffer.from(input.payment.paymentRef).toString('hex')}`,
     transactionBytes: bytes,
     signer: { kind: 'multisig', ...input.wallet },
     gasMode: 'sponsored',
+    ...(input.withdrawal
+      ? { recipient: input.withdrawal.depositAddress, beneficiaryRef: input.withdrawal.beneficiaryRef, amountMinor: input.payment.amountMinor }
+      : {}),
+  });
+}
+
+/**
+ * The test deposit that verifies a partner deposit address (v2 §4.4): one
+ * plain USDC transfer of exactly `amountMinor` from the business wallet's
+ * address balance to the deposit address, signed by the quorum, sponsored
+ * (a partial transfer cannot use the gasless lane, which moves whole
+ * balances). Held funds are never used.
+ */
+export async function requestPartnerTestDeposit(
+  ctx: WalletContext,
+  input: { orgId: string; requestedBy: string; wallet: WalletMembers; depositAddress: string; amountMinor: bigint; dedupeKey: string },
+): Promise<Result> {
+  if (input.amountMinor <= 0n) return refuse(400, 'bad_amount', 'the test deposit must be above zero');
+  const from = registration(input.wallet).address;
+  if (normalizeSuiAddress(input.depositAddress) === from) return refuse(400, 'own_wallet', 'the deposit address is the business wallet itself');
+  const onHold = await fundsOnHold(ctx, from, input.amountMinor);
+  if (onHold) return onHold;
+  if (!ctx.validity) return refuse(503, 'no_chain', 'the chain cannot be read, so no transfer can be built');
+  const gas = await sponsoredGas(ctx);
+  if (!gas) return refuse(503, 'no_sponsor', 'business wallet transactions need a gas sponsor, and none is configured');
+  let bytes: Uint8Array;
+  try {
+    bytes = await memberToWalletTransferTx({
+      member: from,
+      wallet: input.depositAddress,
+      usdcType: ctx.chain.usdcType,
+      coins: [],
+      addressBalanceMinor: input.amountMinor,
+      validity: await ctx.validity(),
+      sponsor: gas,
+    });
+  } catch (error) {
+    const e = error as { code?: string; message?: string };
+    return refuse(400, e.code ?? 'bad_transfer', e.message ?? 'the test deposit could not be built');
+  }
+  return openSigningRequest(ctx.signing, {
+    orgId: input.orgId,
+    requestedBy: input.requestedBy,
+    purpose: 'partner_test_deposit',
+    dedupeKey: input.dedupeKey,
+    transactionBytes: bytes,
+    signer: { kind: 'multisig', ...input.wallet },
+    gasMode: 'sponsored',
+    recipient: input.depositAddress,
+    amountMinor: input.amountMinor,
   });
 }
 

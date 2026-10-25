@@ -155,6 +155,10 @@ export type ShapeContext = {
   walletTagAllowed?: string[];
   /** A second approval: the payer it must name. */
   payer?: string;
+  /** A withdrawal: the beneficiary commitment (hex) the intent must carry. */
+  beneficiaryRef?: string;
+  /** A withdrawal or a test deposit: the exact principal (minor units). */
+  amountMinor?: bigint;
 };
 
 /** What a spending-rule transaction (`spend_rule`) may do, and nothing else. */
@@ -233,6 +237,30 @@ export function assertPurposeShape(purpose: SigningPurpose, d: WalletTxDescripti
         return;
       }
       bad(shape);
+      return;
+    }
+    case 'withdrawal': {
+      // v2 §4.4: a new bank payout (kind 4) from the wallet to the business's
+      // verified partner deposit address, for the business's own bank account
+      // (its beneficiary commitment), of exactly the amount the partner was
+      // instructed. Nothing else is a withdrawal.
+      if (shape !== 'withdraw,open_intent,pay_intent,anchor_receipt,delete_intent') bad(shape);
+      const w = d.actions[0] as Extract<WalletAction, { type: 'withdraw' }>;
+      const o = d.actions[1] as Extract<WalletAction, { type: 'open_intent' }>;
+      const p = d.actions[2] as Extract<WalletAction, { type: 'pay_intent' }>;
+      if (BigInt(w.amountMinor) !== BigInt(o.amountMinor) + BigInt(p.maxFeeMinor)) bad('the withdrawal is not the amount plus the maximum fee');
+      if (BigInt(p.settleByMs) > BigInt(o.expiresAtMs)) bad('the quote outlives the intent');
+      if (o.kind !== 4) bad('it is not a bank payout');
+      if (!context.recipient || o.recipient !== normalizeSuiAddress(context.recipient)) bad("it does not pay the business's verified partner deposit address");
+      if (!context.beneficiaryRef || o.beneficiaryRef !== context.beneficiaryRef.toLowerCase()) bad("it is not for the business's own bank account");
+      if (context.amountMinor === undefined || BigInt(o.amountMinor) !== context.amountMinor) bad('the amount is not the one the partner was told');
+      return;
+    }
+    case 'partner_test_deposit': {
+      if (shape !== 'withdraw,send_funds') bad('a test deposit is one withdrawal from the wallet and one transfer');
+      const s = d.actions[1] as Extract<WalletAction, { type: 'send_funds' }>;
+      if (!context.recipient || s.recipient !== normalizeSuiAddress(context.recipient)) bad("the transfer is not to the business's partner deposit address");
+      if (context.amountMinor === undefined || s.amountMinor === null || BigInt(s.amountMinor) !== context.amountMinor) bad('the transfer is not the test amount');
       return;
     }
     case 'spend_policy': {
@@ -409,6 +437,10 @@ export async function openSigningRequest(
     walletTagAllowed?: string[];
     /** For a second approval: the payer it must name. */
     payer?: string;
+    /** For a withdrawal: the beneficiary commitment the intent must carry. */
+    beneficiaryRef?: string;
+    /** For a withdrawal or a test deposit: the exact principal. */
+    amountMinor?: bigint;
     /** Opened by `onExecuted` once this request executes. Keys and weights only. */
     nextStep?: unknown;
   },
@@ -449,7 +481,14 @@ export async function openSigningRequest(
     description = describeWalletTransaction(input.transactionBytes, expectations);
     if (description.sender !== normalizeSuiAddress(sender)) return fail(400, 'wrong_sender', 'the transaction is not sent by the signer this request names');
     const members = input.purpose === 'register_wallet' ? signers.map((s) => s.address) : input.members;
-    assertPurposeShape(input.purpose, description, { members, recipient: input.recipient, walletTagAllowed: input.walletTagAllowed, payer: input.payer });
+    assertPurposeShape(input.purpose, description, {
+      members,
+      recipient: input.recipient,
+      walletTagAllowed: input.walletTagAllowed,
+      payer: input.payer,
+      beneficiaryRef: input.beneficiaryRef,
+      amountMinor: input.amountMinor,
+    });
     if (input.gasMode === 'sponsored') {
       if (!deps.sponsor) return fail(503, 'no_sponsor', 'business wallet transactions need a gas sponsor, and none is configured');
       assertSponsorable(description, { sponsor: deps.sponsor.address, senders: [sender] });

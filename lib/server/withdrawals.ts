@@ -1,0 +1,1043 @@
+/**
+ * Withdrawals to the business's OWN bank (v2 §4.4, D3, D4), over the
+ * payout-partner interface (lib/payouts/partner.ts, §4.5).
+ *
+ * MYR: business wallet → Hata (exchange partner) → Fiuu (bank-transfer
+ * partner) → the business's own bank account. Splash never receives the MYR,
+ * and no Splash address is ever on the path: the USDC goes from the business
+ * wallet straight to the business's own deposit address at the partner, in
+ * the canonical composed PTB (open, pay, anchor, delete), signed by the
+ * owners' multisig.
+ *
+ *   destinations     the business's own bank accounts. Stored only when the
+ *                    holder name as given AND as the partner's name enquiry
+ *                    returns it from the bank are both the business's
+ *                    registered name. The account number is sealed at rest.
+ *   deposit address  the business's fixed address with the partner, verified
+ *                    once: the owners send it a 1 USDC test deposit, and only
+ *                    the partner's signed confirmation of that exact deposit,
+ *                    re-read on chain, verifies it.
+ *   quote            the partner's rate and its own fee lines, and Splash's
+ *                    bank-payout fee (kind 4) as the chain would charge it;
+ *                    only once the wallet holds the money.
+ *   create           idempotent by the client's key. A fresh quote below the
+ *                    one accepted, or a fee above the one shown, is refused,
+ *                    never taken. The payout instruction goes to the partner
+ *                    BEFORE any money moves, keyed by the intent id (derived
+ *                    from the payment reference) and the expected amount, and
+ *                    built only from the destination whose commitment the
+ *                    intent carries. Then the owners are asked to sign.
+ *   settlement       when the owners' transaction executes, its digest is
+ *                    posted to the partner.
+ *   webhooks         signed, inside a replay window, counted once, statuses
+ *                    never backwards; a return is believed only from the
+ *                    chain.
+ *
+ * Every function runs within ONE org (`deps.orgId`, from the session) and
+ * builds only against that org's BusinessAccount and wallet.
+ */
+import { randomBytes, randomUUID } from 'node:crypto';
+
+import { normalizeStructTag, normalizeSuiAddress } from '@mysten/sui/utils';
+
+import { paymentCommitment, railCommitment, toHex } from '../evidence/commitment.ts';
+import { bankAccountIdentity, fingerprintKeys, FundingSourceError, sameCompany, validClientKey } from '../funding/wallet-funding.ts';
+import { partnerLabel, type PartnerId } from '../partners/signed-partners.ts';
+import {
+  isPayoutPartnerId,
+  PayoutPartnerUnavailable,
+  WebhookRejected,
+  type PartnerFeeLine,
+  type PayoutEvent,
+  type PayoutPartner,
+  type PayoutPartnerId,
+  type PayoutQuote,
+} from '../payouts/partner.ts';
+import { payoutPartner } from '../payouts/registry.ts';
+import {
+  accountKey,
+  assertBeneficiaryMatches,
+  beneficiaryRefOf,
+  canAdvanceWithdrawal,
+  destinationAad,
+  MAX_WITHDRAWAL_MINOR,
+  normalizeBeneficiary,
+  open,
+  seal,
+  TEST_DEPOSIT_MINOR,
+  WITHDRAWAL_INTENT_TTL_MS,
+  withdrawalAad,
+  withdrawalIntentId,
+  withdrawalIsFinal,
+  withdrawalRequestHash,
+  WithdrawalRuleError,
+  type WithdrawalStatus,
+} from '../payouts/withdrawal-rules.ts';
+import type { WalletContext, WalletMembers } from './business-wallet.ts';
+import { V2_KIND } from './sui-v2-builders.ts';
+import type { RequestView } from './wallet-signing.ts';
+import { readSigningRequest, type DrizzleDb, type StoredRequest } from './wallet-signing-store.ts';
+import * as store from './withdrawals-store.ts';
+
+// ─── Dependencies ───────────────────────────────────────────────────────────
+
+/** A Sui transaction as a withdrawal needs it (the funding reader's shape). */
+export type WithdrawalChainTx = {
+  digest: string;
+  success: boolean;
+  sender: string | null;
+  balanceChanges: Array<{ address: string; coinType: string; amount: string }>;
+};
+
+export type WithdrawalDeps = {
+  db: DrizzleDb;
+  /** The session's org. Never from a request. */
+  orgId: string;
+  env: NodeJS.ProcessEnv;
+  now: () => Date;
+  /** The org's wallet context: its BusinessAccount, signing, balances and holds. */
+  ctx: WalletContext;
+  /** The wallet's members as Splash set it up, or why there is none. */
+  walletMembers: () => Promise<{ ok: true; address: string; members: WalletMembers } | Refusal>;
+  /** The adapter for a route (throws PayoutPartnerUnavailable). */
+  partner: (id: PayoutPartnerId) => PayoutPartner;
+  /** The business's registered (legal) name. */
+  companyName: () => Promise<string | null>;
+  /** Addresses Splash controls (operator, sponsor, treasury): never a deposit address. */
+  splashAddresses: string[];
+  /** Splash's bank-payout fee (kind 4) for a principal, as the chain would charge it now. Throws if it cannot be read. */
+  bankPayoutFee: (principalMinor: bigint) => Promise<{ feeMinor: bigint; feesOn: boolean }>;
+  readTransaction: (digest: string) => Promise<WithdrawalChainTx | null>;
+  /** splash_core's original (defining) package id: the intent id's type tag. */
+  corePackageOriginalId: string;
+  /** Whether local-currency payouts are open in this launch scope. */
+  fiatOutOpen: () => boolean;
+  signedPartners: ReadonlySet<PartnerId>;
+};
+
+export type Refusal = { ok: false; status: number; code: string; error: string; [k: string]: unknown };
+const refuse = (status: number, code: string, error: string, extra: Record<string, unknown> = {}): Refusal => ({ ok: false, status, code, error, ...extra });
+
+const WITHDRAWAL_PARTNERS: readonly PayoutPartnerId[] = ['hata_fiuu'];
+
+function unavailable(error: unknown): Refusal | null {
+  if (error instanceof PayoutPartnerUnavailable) return refuse(error.status, error.code, error.message);
+  return null;
+}
+
+function routeLabel(deps: Pick<WithdrawalDeps, 'signedPartners'>, adapter: Pick<PayoutPartner, 'partners'>): string {
+  return adapter.partners.map((p) => partnerLabel(p, deps.signedPartners)).join(', then ');
+}
+
+const hexOf = (v: unknown) => String(v ?? '').trim().toLowerCase().replace(/^0x/, '');
+const isHexBytes = (v: string, min: number, max: number) => /^([0-9a-f]{2})+$/.test(v) && v.length / 2 >= min && v.length / 2 <= max;
+
+function parseMinor(value: unknown): bigint | null {
+  const s = typeof value === 'number' && Number.isSafeInteger(value) ? String(value) : typeof value === 'string' ? value.trim() : '';
+  if (!/^\d{1,20}$/.test(s)) return null;
+  const n = BigInt(s);
+  return n <= 18_446_744_073_709_551_615n ? n : null;
+}
+
+function partnerOf(deps: WithdrawalDeps, id: unknown): { adapter: PayoutPartner } | Refusal {
+  const pid = typeof id === 'string' && id ? id : 'hata_fiuu';
+  if (!isPayoutPartnerId(pid) || !WITHDRAWAL_PARTNERS.includes(pid)) return refuse(400, 'bad_partner', 'Withdrawals go through the Malaysia route only.');
+  try {
+    return { adapter: deps.partner(pid) };
+  } catch (error) {
+    const r = unavailable(error);
+    if (r) return r;
+    throw error;
+  }
+}
+
+// ─── Views ──────────────────────────────────────────────────────────────────
+
+export type DestinationView = {
+  id: string;
+  partner: string;
+  route: string;
+  country: string;
+  currency: string;
+  bankCode: string;
+  holderName: string;
+  last4: string;
+  label: string;
+  status: string;
+  /** The stable beneficiary commitment, for binding it to the deposit address in the spending rules. */
+  beneficiaryRef: string;
+  verifiedAt: string;
+};
+
+function destinationView(deps: WithdrawalDeps, row: store.DestinationRow): DestinationView {
+  let route = row.partner;
+  try {
+    route = routeLabel(deps, deps.partner(row.partner as PayoutPartnerId));
+  } catch {
+    /* the route may be switched off; the row is still shown */
+  }
+  return {
+    id: row.id,
+    partner: row.partner,
+    route,
+    country: row.country,
+    currency: row.currency,
+    bankCode: row.bankCode,
+    holderName: row.holderName,
+    last4: row.last4,
+    label: row.label,
+    status: row.status,
+    beneficiaryRef: row.beneficiaryRef,
+    verifiedAt: row.verifiedAt.toISOString(),
+  };
+}
+
+export type DepositAddressView = {
+  id: string;
+  partner: string;
+  address: string;
+  status: string;
+  testAmountMinor: string;
+  testRequestId: string | null;
+  testDigest: string | null;
+  verifiedAt: string | null;
+};
+
+function depositAddressView(row: store.DepositAddressRow): DepositAddressView {
+  return {
+    id: row.id,
+    partner: row.partner,
+    address: row.address,
+    status: row.status,
+    testAmountMinor: row.testAmountMinor.toString(),
+    testRequestId: row.testRequestId,
+    testDigest: row.testDigest,
+    verifiedAt: row.verifiedAt?.toISOString() ?? null,
+  };
+}
+
+type QuoteWire = {
+  partner: string;
+  route: string;
+  currency: string;
+  sendMinor: string;
+  rateMicro: string;
+  receiveMinor: string;
+  partnerFees: Array<{ partner: string; label: string; currency: string; amountMinor: string }>;
+  splashFee: { kind: number; minor: string; feesOn: boolean };
+  /** Exactly the Splash fee shown: send it back as `maxFeeMinor`. */
+  maxFeeMinor: string;
+  /** Principal plus Splash's fee: what leaves the wallet at most. */
+  totalDebitMinor: string;
+  expiresAt: string;
+  sandbox: boolean;
+};
+
+function linesWire(deps: WithdrawalDeps, lines: PartnerFeeLine[]) {
+  return lines.map((l) => ({ partner: partnerLabel(l.partner, deps.signedPartners), label: l.label, currency: l.currency, amountMinor: l.amountMinor.toString() }));
+}
+
+function quoteWire(deps: WithdrawalDeps, adapter: PayoutPartner, q: PayoutQuote, fee: { feeMinor: bigint; feesOn: boolean }): QuoteWire {
+  return {
+    partner: adapter.id,
+    route: routeLabel(deps, adapter),
+    currency: q.currency,
+    sendMinor: q.sendMinor.toString(),
+    rateMicro: q.rateMicro.toString(),
+    receiveMinor: q.receiveMinor.toString(),
+    partnerFees: linesWire(deps, q.lines),
+    splashFee: { kind: V2_KIND.BANK_PAYOUT, minor: fee.feeMinor.toString(), feesOn: fee.feesOn },
+    maxFeeMinor: fee.feeMinor.toString(),
+    totalDebitMinor: (q.sendMinor + fee.feeMinor).toString(),
+    expiresAt: q.expiresAt.toISOString(),
+    sandbox: q.sandbox,
+  };
+}
+
+export type WithdrawalView = {
+  id: string;
+  status: WithdrawalStatus;
+  partner: string;
+  destination: { id: string; bankCode: string; last4: string; label: string } | null;
+  amountMinor: string;
+  maxFeeMinor: string;
+  currency: string;
+  rateMicro: string;
+  receiveMinor: string;
+  partnerFees: QuoteWire['partnerFees'];
+  intentId: string;
+  depositAddress: string;
+  partnerRef: string | null;
+  signingRequestId: string | null;
+  suiDigest: string | null;
+  settlementPosted: boolean;
+  bankRef: string | null;
+  returnDigest: string | null;
+  failure: string | null;
+  quoteExpiresAt: string;
+  createdAt: string;
+  sandbox: boolean;
+};
+
+async function withdrawalView(deps: WithdrawalDeps, row: store.WithdrawalRow): Promise<WithdrawalView> {
+  const dest = await store.getDestination(deps.db, deps.orgId, row.destinationId);
+  const quote = row.quote as { partnerFees?: QuoteWire['partnerFees']; sandbox?: boolean };
+  return {
+    id: row.id,
+    status: row.status as WithdrawalStatus,
+    partner: row.partner,
+    destination: dest ? { id: dest.id, bankCode: dest.bankCode, last4: dest.last4, label: dest.label } : null,
+    amountMinor: row.amountMinor.toString(),
+    maxFeeMinor: row.maxFeeMinor.toString(),
+    currency: row.currency,
+    rateMicro: row.rateMicro.toString(),
+    receiveMinor: row.receiveMinor.toString(),
+    partnerFees: quote.partnerFees ?? [],
+    intentId: row.intentId,
+    depositAddress: row.depositAddress,
+    partnerRef: row.partnerRef,
+    signingRequestId: row.signingRequestId,
+    suiDigest: row.suiDigest,
+    settlementPosted: row.settlementPostedAt !== null,
+    bankRef: row.bankRef,
+    returnDigest: row.returnDigest,
+    failure: row.failure,
+    quoteExpiresAt: row.quoteExpiresAt.toISOString(),
+    createdAt: row.createdAt.toISOString(),
+    sandbox: Boolean(quote.sandbox),
+  };
+}
+
+// ─── Destinations: the business's own bank accounts ─────────────────────────
+
+export type AddDestinationInput = { partner?: string; holderName: string; country: string; bankCode: string; accountNumber: string; label?: string };
+
+export async function listWithdrawalDestinations(deps: WithdrawalDeps): Promise<DestinationView[]> {
+  return (await store.listDestinations(deps.db, deps.orgId)).filter((r) => r.status === 'verified').map((r) => destinationView(deps, r));
+}
+
+/**
+ * Add the business's own bank account. Owners only (the route checks). It is
+ * stored only once BOTH the name given and the bank's own holder name (the
+ * partner's name enquiry) are the business's registered name. Nothing about
+ * the account is kept when either does not match; the attempt is recorded
+ * with its last four digits only.
+ */
+export async function addWithdrawalDestination(deps: WithdrawalDeps, userId: string, input: AddDestinationInput): Promise<({ ok: true; created: boolean; destination: DestinationView }) | Refusal> {
+  const now = deps.now();
+  const p = partnerOf(deps, input.partner);
+  if ('ok' in p) return p;
+  const adapter = p.adapter;
+  let b;
+  try {
+    b = normalizeBeneficiary({ country: input.country, bankCode: input.bankCode, accountNumber: input.accountNumber, holderName: input.holderName });
+  } catch (error) {
+    if (error instanceof WithdrawalRuleError) return refuse(400, error.code, error.message);
+    throw error;
+  }
+  if (!adapter.countries.includes(b.country)) return refuse(400, 'country_not_offered', `This route pays bank accounts in ${adapter.countries.join(', ')} only.`);
+  const company = await deps.companyName();
+  if (!company) return refuse(409, 'no_company_name', "The business's registered name is not on record yet, so no bank account can be checked against it.");
+  const last4 = b.accountNumber.slice(-4);
+  if (!sameCompany(b.holderName, company)) {
+    await store.recordWithdrawalEvent(deps.db, { orgId: deps.orgId, subject: 'destination', subjectId: null, actor: userId, action: 'name_mismatch', detail: { stage: 'given', last4 }, at: now });
+    return refuse(409, 'not_company_name', "A withdrawal goes only to the business's own bank account, in its registered name.");
+  }
+  const key = accountKey(deps.env);
+  if (!key) return refuse(503, 'account_key_missing', 'This server has no key to keep bank account numbers sealed, so no bank account can be added.');
+  const fpKeys = fingerprintKeys(deps.env);
+  if (!fpKeys.current) return refuse(503, 'fingerprint_key_missing', 'No bank-account fingerprint key is configured on this server.');
+  let identity: { fingerprint: string; last4: string };
+  let known: string[];
+  try {
+    identity = bankAccountIdentity(b, fpKeys.current);
+    known = fpKeys.all.map((k) => bankAccountIdentity(b, k).fingerprint);
+  } catch (error) {
+    if (error instanceof FundingSourceError) return refuse(400, error.code, error.message);
+    throw error;
+  }
+  const existing = await store.liveDestinationByFingerprint(deps.db, deps.orgId, adapter.id, known);
+  if (existing) return { ok: true, created: false, destination: destinationView(deps, existing) };
+
+  let check;
+  try {
+    check = await adapter.checkAccount({ beneficiary: b, now });
+  } catch (error) {
+    const r = unavailable(error);
+    if (r) return r;
+    return refuse(502, 'name_check_failed', 'The bank could not confirm who holds this account, so it was not added.');
+  }
+  if (!sameCompany(check.holderName, company)) {
+    await store.recordWithdrawalEvent(deps.db, { orgId: deps.orgId, subject: 'destination', subjectId: null, actor: userId, action: 'name_mismatch', detail: { stage: 'bank', last4, checkRef: check.checkRef, sandbox: check.sandbox }, at: now });
+    return refuse(409, 'bank_name_mismatch', "The bank says this account is held in another name. A withdrawal goes only to the business's own account.");
+  }
+
+  const id = `wdd_${randomUUID()}`;
+  const salt = randomBytes(32);
+  const row = await store.insertDestination(deps.db, {
+    id,
+    orgId: deps.orgId,
+    partner: adapter.id,
+    country: b.country,
+    currency: adapter.currencies[0],
+    bankCode: b.bankCode,
+    holderName: b.holderName,
+    bankHolderName: check.holderName,
+    nameCheckRef: check.checkRef,
+    fingerprint: identity.fingerprint,
+    last4: identity.last4,
+    accountSealed: seal(b.accountNumber, key, destinationAad(deps.orgId, id, 'account')),
+    beneficiarySaltSealed: seal(salt, key, destinationAad(deps.orgId, id, 'salt')),
+    beneficiaryRef: beneficiaryRefOf(adapter.id, b, salt),
+    label: (input.label ?? '').trim().slice(0, 80) || `Bank account ending ${identity.last4}`,
+    status: 'verified',
+    verifiedAt: now,
+    verifiedBy: userId,
+    createdBy: userId,
+    createdAt: now,
+    updatedAt: now,
+  });
+  if (row.created) {
+    await store.recordWithdrawalEvent(deps.db, { orgId: deps.orgId, subject: 'destination', subjectId: row.row.id, actor: userId, action: 'added', detail: { last4: identity.last4, checkRef: check.checkRef, sandbox: check.sandbox }, at: now });
+  }
+  return { ok: true, created: row.created, destination: destinationView(deps, row.row) };
+}
+
+export async function revokeWithdrawalDestination(deps: WithdrawalDeps, userId: string, id: string): Promise<{ ok: true } | Refusal> {
+  const now = deps.now();
+  const row = await store.revokeDestination(deps.db, deps.orgId, id, now);
+  if (!row) return refuse(404, 'not_found', 'No such bank account.');
+  await store.recordWithdrawalEvent(deps.db, { orgId: deps.orgId, subject: 'destination', subjectId: id, actor: userId, action: 'revoked', at: now });
+  return { ok: true };
+}
+
+// ─── The partner deposit address ────────────────────────────────────────────
+
+async function refreshDepositAddress(deps: WithdrawalDeps, row: store.DepositAddressRow): Promise<store.DepositAddressRow> {
+  if (row.status !== 'test_requested' || !row.testRequestId) return row;
+  const request = await readSigningRequest(deps.db, deps.orgId, row.testRequestId);
+  if (!request) return row;
+  if (request.status === 'executed' && request.executedDigest) {
+    return (await store.moveDepositAddress(deps.db, deps.orgId, row.id, ['test_requested'], { status: 'test_sent', testDigest: request.executedDigest, updatedAt: deps.now() })) ?? row;
+  }
+  if (request.status === 'expired' || request.status === 'cancelled' || request.status === 'failed') {
+    // The test deposit was never sent: the owners may ask again.
+    return (await store.moveDepositAddress(deps.db, deps.orgId, row.id, ['test_requested'], { status: 'pending_test', testRequestId: null, testWallet: null, updatedAt: deps.now() })) ?? row;
+  }
+  return row;
+}
+
+export async function withdrawalDepositAddress(deps: WithdrawalDeps, partner?: string): Promise<DepositAddressView | null> {
+  const p = partnerOf(deps, partner);
+  if ('ok' in p) return null;
+  const row = await store.liveDepositAddress(deps.db, deps.orgId, p.adapter.id);
+  return row ? depositAddressView(await refreshDepositAddress(deps, row)) : null;
+}
+
+/**
+ * Ask the partner for the business's fixed deposit address and record it,
+ * unverified. Owners only. Refused when it is an address Splash controls, the
+ * business wallet itself, or an address another business already has.
+ */
+export async function requestPartnerDepositAddress(deps: WithdrawalDeps, userId: string, input: { partner?: string } = {}): Promise<{ ok: true; created: boolean; depositAddress: DepositAddressView } | Refusal> {
+  const now = deps.now();
+  const p = partnerOf(deps, input.partner);
+  if ('ok' in p) return p;
+  const adapter = p.adapter;
+  const live = await store.liveDepositAddress(deps.db, deps.orgId, adapter.id);
+  if (live) return { ok: true, created: false, depositAddress: depositAddressView(await refreshDepositAddress(deps, live)) };
+  let given;
+  try {
+    given = await adapter.depositAddress({ businessId: normalizeSuiAddress(deps.ctx.account.objectId), now });
+  } catch (error) {
+    const r = unavailable(error);
+    if (r) return r;
+    return refuse(502, 'partner_error', 'The partner did not give a deposit address. Nothing was recorded.');
+  }
+  let address: string;
+  try {
+    address = normalizeSuiAddress(given.address);
+  } catch {
+    return refuse(502, 'bad_deposit_address', 'The partner gave a deposit address that is not a Sui address. Nothing was recorded.');
+  }
+  if (!/^0x[0-9a-f]{64}$/.test(address) || /^0x0+$/.test(address)) return refuse(502, 'bad_deposit_address', 'The partner gave a deposit address that is not a Sui address. Nothing was recorded.');
+  if (deps.splashAddresses.map((a) => normalizeSuiAddress(a)).includes(address)) {
+    return refuse(409, 'splash_address', 'That address is one Splash controls. Splash never receives client money, so it cannot be a deposit address.');
+  }
+  const wallet = (await deps.ctx.readAccount()).wallet;
+  if (wallet && normalizeSuiAddress(wallet) === address) return refuse(409, 'own_wallet', 'The deposit address is the business wallet itself.');
+  if (await store.depositAddressHeldElsewhere(deps.db, deps.orgId, adapter.id, address)) {
+    return refuse(409, 'address_conflict', 'The partner gave an address another business already has. Nothing was recorded; the partner must give this business its own.');
+  }
+  const row = await store.insertDepositAddress(deps.db, {
+    id: `pda_${randomUUID()}`,
+    orgId: deps.orgId,
+    partner: adapter.id,
+    address,
+    accountRef: given.accountRef,
+    status: 'pending_test',
+    testAmountMinor: TEST_DEPOSIT_MINOR,
+    createdBy: userId,
+    createdAt: now,
+    updatedAt: now,
+  });
+  if (row.created) {
+    await store.recordWithdrawalEvent(deps.db, { orgId: deps.orgId, subject: 'deposit_address', subjectId: row.row.id, actor: userId, action: 'added', detail: { address, sandbox: given.sandbox }, at: now });
+  }
+  return { ok: true, created: row.created, depositAddress: depositAddressView(row.row) };
+}
+
+/** The owners send the 1 USDC test deposit. Owners only. */
+export async function requestTestDeposit(deps: WithdrawalDeps, userId: string, input: { partner?: string } = {}): Promise<{ ok: true; depositAddress: DepositAddressView; request: RequestView } | Refusal> {
+  const now = deps.now();
+  const p = partnerOf(deps, input.partner);
+  if ('ok' in p) return p;
+  const live = await store.liveDepositAddress(deps.db, deps.orgId, p.adapter.id);
+  if (!live) return refuse(404, 'no_deposit_address', 'Get the deposit address from the partner first.');
+  const row = await refreshDepositAddress(deps, live);
+  if (row.status === 'verified') return refuse(409, 'already_verified', 'This deposit address is already verified.');
+  if (row.status !== 'pending_test') return refuse(409, 'test_in_progress', 'A test deposit for this address is already waiting or sent.');
+  const wallet = await deps.walletMembers();
+  if (!wallet.ok) return wallet;
+  const { requestPartnerTestDeposit } = await import('./business-wallet.ts');
+  const opened = await requestPartnerTestDeposit(deps.ctx, {
+    orgId: deps.orgId,
+    requestedBy: userId,
+    wallet: wallet.members,
+    depositAddress: row.address,
+    amountMinor: row.testAmountMinor,
+    dedupeKey: `withdraw:test:${row.id}`,
+  });
+  if (!opened.ok) return refuse(opened.status, opened.code, opened.error);
+  const moved = await store.moveDepositAddress(deps.db, deps.orgId, row.id, ['pending_test'], {
+    status: 'test_requested',
+    testRequestId: opened.request.id,
+    testWallet: normalizeSuiAddress(wallet.address),
+    updatedAt: now,
+  });
+  await store.recordWithdrawalEvent(deps.db, { orgId: deps.orgId, subject: 'deposit_address', subjectId: row.id, actor: userId, action: 'test_requested', detail: { signingRequestId: opened.request.id }, at: now });
+  return { ok: true, depositAddress: depositAddressView(moved ?? row), request: opened.request };
+}
+
+// ─── Quote and create ───────────────────────────────────────────────────────
+
+type Ready = {
+  adapter: PayoutPartner;
+  destination: store.DestinationRow;
+  deposit: store.DepositAddressRow;
+  wallet: { address: string; members: WalletMembers };
+};
+
+async function ready(deps: WithdrawalDeps, destinationId: string): Promise<Ready | Refusal> {
+  if (!deps.fiatOutOpen()) return refuse(403, 'not_in_launch_scope', 'Local-currency payouts are not open yet. Nothing was sent.');
+  const destination = await store.getDestination(deps.db, deps.orgId, destinationId);
+  // Another business's destination reads as absent.
+  if (!destination || destination.status !== 'verified') return refuse(404, 'not_found', 'No such bank account.');
+  const p = partnerOf(deps, destination.partner);
+  if ('ok' in p) return p;
+  const live = await store.liveDepositAddress(deps.db, deps.orgId, p.adapter.id);
+  const deposit = live ? await refreshDepositAddress(deps, live) : null;
+  if (!deposit || deposit.status !== 'verified') {
+    return refuse(409, 'deposit_address_unverified', "The business's deposit address with the partner is not verified yet: send the test deposit first.");
+  }
+  const wallet = await deps.walletMembers();
+  if (!wallet.ok) return wallet;
+  if (normalizeSuiAddress(deposit.address) === normalizeSuiAddress(wallet.address)) return refuse(409, 'own_wallet', 'The deposit address is the business wallet itself.');
+  if (deps.splashAddresses.map((a) => normalizeSuiAddress(a)).includes(normalizeSuiAddress(deposit.address))) return refuse(409, 'splash_address', 'That address is one Splash controls.');
+  return { adapter: p.adapter, destination, deposit, wallet: { address: normalizeSuiAddress(wallet.address), members: wallet.members } };
+}
+
+/** The wallet holds principal plus fee, outside every hold. The quote comes only after this. */
+async function fundsAvailable(deps: WithdrawalDeps, wallet: string, needMinor: bigint): Promise<Refusal | null> {
+  if (!deps.ctx.readUsdc) return refuse(503, 'balance_unreadable', 'The wallet balance cannot be read here.');
+  let balance: bigint;
+  try {
+    const b = await deps.ctx.readUsdc(wallet);
+    balance = b.coinMinor + b.addressBalanceMinor;
+  } catch {
+    return refuse(502, 'balance_unreadable', 'The wallet balance could not be read.');
+  }
+  if (balance < needMinor) return refuse(409, 'insufficient_funds', 'The business wallet does not hold enough USDC for this withdrawal and its fee.', { balanceMinor: balance.toString() });
+  const { fundsOnHold } = await import('./business-wallet.ts');
+  const held = await fundsOnHold(deps.ctx, wallet, needMinor);
+  return held ? refuse(held.status, held.code, held.error, held.details ?? {}) : null;
+}
+
+async function feeFor(deps: WithdrawalDeps, principal: bigint): Promise<{ feeMinor: bigint; feesOn: boolean } | Refusal> {
+  try {
+    return await deps.bankPayoutFee(principal);
+  } catch {
+    return refuse(503, 'fee_unavailable', "Splash's fee could not be read from the chain, so nothing was quoted.");
+  }
+}
+
+export async function quoteWithdrawal(deps: WithdrawalDeps, input: { destinationId: string; amountMinor: unknown }): Promise<{ ok: true; quote: QuoteWire } | Refusal> {
+  const amount = parseMinor(input.amountMinor);
+  if (amount === null || amount <= 0n || amount > MAX_WITHDRAWAL_MINOR) return refuse(400, 'bad_amount', 'Say how much USDC to withdraw.');
+  const r = await ready(deps, String(input.destinationId ?? ''));
+  if ('ok' in r) return r;
+  const fee = await feeFor(deps, amount);
+  if ('ok' in fee) return fee;
+  const funds = await fundsAvailable(deps, r.wallet.address, amount + fee.feeMinor);
+  if (funds) return funds;
+  let q: PayoutQuote;
+  try {
+    q = await r.adapter.quote({ currency: r.destination.currency, sendMinor: amount, now: deps.now() });
+  } catch (error) {
+    const u = unavailable(error);
+    if (u) return u;
+    return refuse(502, 'partner_error', 'The partner did not quote. Nothing was sent.');
+  }
+  return { ok: true, quote: quoteWire(deps, r.adapter, q, fee) };
+}
+
+export type CreateWithdrawalInput = {
+  clientKey: unknown;
+  destinationId: unknown;
+  amountMinor: unknown;
+  /** The least the accepted quote said the bank account receives (local minor units). */
+  acceptedReceiveMinor: unknown;
+  /** The Splash fee the owner was shown: the chain charges at most this. */
+  maxFeeMinor: unknown;
+  /** The audit bundle the receipt anchors (hex). */
+  contentHash: unknown;
+  walrusBlobId: unknown;
+};
+
+/**
+ * One withdrawal. Owners only (the route checks). Idempotent by the client's
+ * key: the same key and request return the same withdrawal; the same key
+ * for another request is refused.
+ */
+export async function createWithdrawal(deps: WithdrawalDeps, userId: string, input: CreateWithdrawalInput): Promise<({ ok: true; created: boolean; withdrawal: WithdrawalView; request: RequestView | null }) | Refusal> {
+  const now = deps.now();
+  const clientKey = validClientKey(input.clientKey);
+  if (!clientKey) return refuse(400, 'idempotency_key_required', 'An Idempotency-Key (8 to 80 letters, digits, - or _) is needed.');
+  const destinationId = String(input.destinationId ?? '');
+  const amount = parseMinor(input.amountMinor);
+  const accepted = parseMinor(input.acceptedReceiveMinor);
+  const shownFee = parseMinor(input.maxFeeMinor);
+  if (amount === null || amount <= 0n || amount > MAX_WITHDRAWAL_MINOR) return refuse(400, 'bad_amount', 'Say how much USDC to withdraw.');
+  if (accepted === null) return refuse(400, 'accepted_quote_required', 'Send the receive amount of the quote you accepted.');
+  if (shownFee === null) return refuse(400, 'fee_shown_required', 'Send the Splash fee you were shown.');
+  // No Splash fee is ever above 1% of the principal (the ceiling, A1).
+  if (shownFee * 10_000n > amount * 100n) return refuse(400, 'bad_fee', 'The fee shown is above the 1% ceiling.');
+  const contentHash = hexOf(input.contentHash);
+  const walrusBlobId = hexOf(input.walrusBlobId);
+  if (!isHexBytes(contentHash, 32, 32) || !isHexBytes(walrusBlobId, 1, 128)) return refuse(400, 'no_audit_bundle', 'The withdrawal needs its audit bundle (content hash and blob id).');
+  const requestHash = withdrawalRequestHash({ destinationId, amountMinor: amount, acceptedReceiveMinor: accepted, maxFeeMinor: shownFee });
+
+  const prior = await store.withdrawalByClientKey(deps.db, deps.orgId, clientKey);
+  if (prior) {
+    if (prior.requestHash !== requestHash) return refuse(409, 'idempotency_key_reused', 'That key was used for a different withdrawal.');
+    return { ok: true, created: false, withdrawal: await withdrawalView(deps, await reconcileRow(deps, prior)), request: null };
+  }
+
+  const r = await ready(deps, destinationId);
+  if ('ok' in r) return r;
+  const fee = await feeFor(deps, amount);
+  if ('ok' in fee) return fee;
+  if (fee.feeMinor > shownFee) return refuse(409, 'fee_above_shown', "Splash's fee is now above the one you were shown. Nothing was sent.", { feeMinor: fee.feeMinor.toString() });
+  const funds = await fundsAvailable(deps, r.wallet.address, amount + shownFee);
+  if (funds) return funds;
+  let q: PayoutQuote;
+  try {
+    q = await r.adapter.quote({ currency: r.destination.currency, sendMinor: amount, now });
+  } catch (error) {
+    const u = unavailable(error);
+    if (u) return u;
+    return refuse(502, 'partner_error', 'The partner did not quote. Nothing was sent.');
+  }
+  if (q.receiveMinor < accepted) {
+    return refuse(409, 'quote_changed', 'The rate moved below the one you accepted. Nothing was sent; look at the new quote.', { quote: quoteWire(deps, r.adapter, q, fee) });
+  }
+  if (q.expiresAt.getTime() <= now.getTime()) return refuse(409, 'quote_expired', 'The quote has expired. Nothing was sent.');
+
+  // The instruction names exactly the account the intent commits to.
+  const key = accountKey(deps.env);
+  if (!key) return refuse(503, 'account_key_missing', 'This server has no key to open the sealed bank account, so nothing was sent.');
+  let beneficiary;
+  let beneficiaryRef: string;
+  try {
+    const accountNumber = open(r.destination.accountSealed, key, destinationAad(deps.orgId, r.destination.id, 'account')).toString('utf8');
+    const salt = open(r.destination.beneficiarySaltSealed, key, destinationAad(deps.orgId, r.destination.id, 'salt'));
+    beneficiaryRef = r.destination.beneficiaryRef;
+    beneficiary = assertBeneficiaryMatches(r.adapter.id, { country: r.destination.country, bankCode: r.destination.bankCode, accountNumber, holderName: r.destination.holderName }, salt, beneficiaryRef);
+  } catch (error) {
+    if (error instanceof WithdrawalRuleError) return refuse(409, error.code, error.message);
+    throw error;
+  }
+
+  const id = `wdr_${randomUUID()}`;
+  const paymentRef = randomBytes(32);
+  const intentId = withdrawalIntentId({ accountId: deps.ctx.account.objectId, corePackageId: deps.corePackageOriginalId, paymentRef });
+  const commitmentSalt = randomBytes(32);
+  const quoteRecord = { partnerFees: linesWire(deps, q.lines), sandbox: q.sandbox, splashFeeMinor: fee.feeMinor.toString(), feesOn: fee.feesOn };
+  const inserted = await store.insertWithdrawal(deps.db, {
+    id,
+    orgId: deps.orgId,
+    clientKey,
+    requestHash,
+    partner: r.adapter.id,
+    destinationId: r.destination.id,
+    depositAddressId: r.deposit.id,
+    depositAddress: normalizeSuiAddress(r.deposit.address),
+    walletAddress: r.wallet.address,
+    paymentRef: toHex(paymentRef),
+    intentId,
+    beneficiaryRef,
+    commitmentSaltSealed: seal(commitmentSalt, key, withdrawalAad(deps.orgId, id)),
+    amountMinor: amount,
+    maxFeeMinor: shownFee,
+    currency: q.currency,
+    rateMicro: q.rateMicro,
+    receiveMinor: q.receiveMinor,
+    quote: quoteRecord,
+    quoteRef: q.quoteRef,
+    quoteExpiresAt: q.expiresAt,
+    status: 'preparing',
+    createdBy: userId,
+    createdAt: now,
+    updatedAt: now,
+  });
+  if (!inserted) {
+    // Another request with this key won the insert.
+    const winner = await store.withdrawalByClientKey(deps.db, deps.orgId, clientKey);
+    if (!winner || winner.requestHash !== requestHash) return refuse(409, 'idempotency_key_reused', 'That key was used for a different withdrawal.');
+    return { ok: true, created: false, withdrawal: await withdrawalView(deps, winner), request: null };
+  }
+  await store.recordWithdrawalEvent(deps.db, { orgId: deps.orgId, subject: 'withdrawal', subjectId: id, actor: userId, action: 'created', detail: { intentId, amountMinor: amount.toString(), last4: r.destination.last4 }, at: now });
+
+  // 1. The instruction, before any money moves.
+  let partnerRef: string;
+  try {
+    const order = await r.adapter.createPayout({
+      intentId,
+      expectedUsdcMinor: amount,
+      quoteRef: q.quoteRef,
+      currency: q.currency,
+      receiveMinor: q.receiveMinor,
+      beneficiary,
+      beneficiaryRef,
+      sourceWallet: r.wallet.address,
+      depositAddress: normalizeSuiAddress(r.deposit.address),
+      returnAddress: r.wallet.address,
+      purposeCode: 'INTC',
+      now,
+    });
+    partnerRef = order.partnerRef;
+  } catch (error) {
+    const u = unavailable(error);
+    await cancel(deps, id, 'system', u ? u.code : 'partner_error', ['preparing']);
+    return u ?? refuse(502, 'partner_error', 'The partner did not take the instruction. Nothing was sent.');
+  }
+  await store.patchWithdrawal(deps.db, deps.orgId, id, { partnerRef, updatedAt: now });
+  await store.recordWithdrawalEvent(deps.db, { orgId: deps.orgId, subject: 'withdrawal', subjectId: id, actor: 'system', action: 'instructed', detail: { partnerRef }, at: now });
+
+  // 2. The owners' signatures, on bytes bound to this deposit address, account and amount.
+  const { requestWalletPayment } = await import('./business-wallet.ts');
+  const opened = await requestWalletPayment(deps.ctx, {
+    orgId: deps.orgId,
+    requestedBy: userId,
+    wallet: r.wallet.members,
+    payment: {
+      paymentRef,
+      recipient: normalizeSuiAddress(r.deposit.address),
+      beneficiaryRef: Buffer.from(beneficiaryRef, 'hex'),
+      amountMinor: amount,
+      targetCurrency: q.currency,
+      fxRateUsdLocal: q.rateMicro,
+      commitment: paymentCommitment(
+        {
+          sender: r.wallet.address,
+          recipient: normalizeSuiAddress(r.deposit.address),
+          beneficiaryRef,
+          amount,
+          currency: normalizeStructTag(deps.ctx.chain.usdcType),
+          corridor: r.destination.country,
+          targetCurrency: q.currency,
+          fxRateUsdLocal: q.rateMicro,
+        },
+        commitmentSalt,
+      ),
+      kind: V2_KIND.BANK_PAYOUT,
+      railCommitment: railCommitment({ rail: r.adapter.id, partnerReference: partnerRef }, commitmentSalt),
+      expiresAtMs: BigInt(now.getTime() + WITHDRAWAL_INTENT_TTL_MS),
+      maxFeeMinor: shownFee,
+      settleByMs: BigInt(q.expiresAt.getTime()),
+      contentHash: Buffer.from(contentHash, 'hex'),
+      walrusBlobId: Buffer.from(walrusBlobId, 'hex'),
+    },
+    withdrawal: { depositAddress: normalizeSuiAddress(r.deposit.address), beneficiaryRef },
+  });
+  if (!opened.ok) {
+    await reverseInstruction(deps, r.adapter, { intentId, partnerRef, returnAddress: r.wallet.address }, 'not_sent');
+    await cancel(deps, id, 'system', opened.code, ['preparing']);
+    return refuse(opened.status, opened.code, opened.error);
+  }
+  const moved = await store.moveWithdrawal(deps.db, deps.orgId, id, ['preparing'], { status: 'awaiting_signatures', signingRequestId: opened.request.id, updatedAt: now });
+  await store.recordWithdrawalEvent(deps.db, { orgId: deps.orgId, subject: 'withdrawal', subjectId: id, actor: userId, action: 'awaiting_signatures', detail: { signingRequestId: opened.request.id }, at: now });
+  return { ok: true, created: true, withdrawal: await withdrawalView(deps, moved ?? (await store.getWithdrawalRow(deps.db, deps.orgId, id))!), request: opened.request };
+}
+
+async function cancel(deps: WithdrawalDeps, id: string, actor: string, reason: string, from: WithdrawalStatus[]) {
+  const now = deps.now();
+  const row = await store.moveWithdrawal(deps.db, deps.orgId, id, from, { status: 'cancelled', failure: reason, updatedAt: now });
+  if (row) await store.recordWithdrawalEvent(deps.db, { orgId: deps.orgId, subject: 'withdrawal', subjectId: id, actor, action: 'cancelled', detail: { reason }, at: now });
+  return row;
+}
+
+async function reverseInstruction(deps: Pick<WithdrawalDeps, 'now'>, adapter: PayoutPartner, w: { intentId: string; partnerRef: string; returnAddress: string }, reason: string): Promise<boolean> {
+  try {
+    const r = await adapter.returnOrReverse({ ...w, reason, now: deps.now() });
+    return r.accepted;
+  } catch {
+    // Nothing was deposited for it: an instruction no deposit follows pays nothing.
+    return false;
+  }
+}
+
+// ─── Reconciling with the signing request ───────────────────────────────────
+
+async function postSettlement(deps: Pick<WithdrawalDeps, 'db' | 'now'> & { orgId: string }, adapter: PayoutPartner, row: store.WithdrawalRow): Promise<store.WithdrawalRow> {
+  if (!row.suiDigest || !row.partnerRef || row.settlementPostedAt) return row;
+  try {
+    await adapter.postSettlement({ intentId: row.intentId, partnerRef: row.partnerRef, suiDigest: row.suiDigest, now: deps.now() });
+  } catch {
+    return row; // Retried on the next read.
+  }
+  const now = deps.now();
+  const patched = await store.patchWithdrawal(deps.db, deps.orgId, row.id, { settlementPostedAt: now, updatedAt: now });
+  await store.recordWithdrawalEvent(deps.db, { orgId: deps.orgId, subject: 'withdrawal', subjectId: row.id, actor: 'system', action: 'settlement_posted', detail: { suiDigest: row.suiDigest }, at: now });
+  return patched ?? row;
+}
+
+async function markSent(deps: Pick<WithdrawalDeps, 'db' | 'now'> & { orgId: string }, row: store.WithdrawalRow, digest: string): Promise<store.WithdrawalRow> {
+  const now = deps.now();
+  const moved = await store.moveWithdrawal(deps.db, deps.orgId, row.id, ['awaiting_signatures'], { status: 'sent', suiDigest: digest, updatedAt: now });
+  if (!moved) return (await store.getWithdrawalRow(deps.db, deps.orgId, row.id)) ?? row;
+  await store.recordWithdrawalEvent(deps.db, { orgId: deps.orgId, subject: 'withdrawal', subjectId: row.id, actor: 'system', action: 'sent', detail: { suiDigest: digest }, at: now });
+  return moved;
+}
+
+async function reconcileRow(deps: WithdrawalDeps, row: store.WithdrawalRow): Promise<store.WithdrawalRow> {
+  let current = row;
+  if (current.status === 'awaiting_signatures' && current.signingRequestId) {
+    const request = await readSigningRequest(deps.db, deps.orgId, current.signingRequestId);
+    if (request?.status === 'executed' && request.executedDigest) {
+      current = await markSent(deps, current, request.executedDigest);
+    } else if (request && (request.status === 'expired' || request.status === 'cancelled' || request.status === 'failed')) {
+      try {
+        const adapter = deps.partner(current.partner as PayoutPartnerId);
+        if (current.partnerRef) await reverseInstruction(deps, adapter, { intentId: current.intentId, partnerRef: current.partnerRef, returnAddress: current.walletAddress }, 'not_sent');
+      } catch {
+        /* the route is off: no deposit was made, so nothing is owed */
+      }
+      current = (await cancel(deps, current.id, 'system', `signing_${request.status}`, ['awaiting_signatures'])) ?? current;
+    }
+  }
+  if ((current.status === 'sent' || current.status === 'partner_received') && !current.settlementPostedAt) {
+    try {
+      current = await postSettlement(deps, deps.partner(current.partner as PayoutPartnerId), current);
+    } catch {
+      /* the route is unavailable now; retried on the next read */
+    }
+  }
+  return current;
+}
+
+export async function listWithdrawals(deps: WithdrawalDeps): Promise<WithdrawalView[]> {
+  const rows = await store.listWithdrawalRows(deps.db, deps.orgId);
+  const out: WithdrawalView[] = [];
+  for (const row of rows) out.push(await withdrawalView(deps, withdrawalIsFinal(row.status as WithdrawalStatus) ? row : await reconcileRow(deps, row)));
+  return out;
+}
+
+export async function getWithdrawal(deps: WithdrawalDeps, id: string): Promise<{ ok: true; withdrawal: WithdrawalView } | Refusal> {
+  const row = await store.getWithdrawalRow(deps.db, deps.orgId, id);
+  if (!row) return refuse(404, 'not_found', 'No such withdrawal.');
+  return { ok: true, withdrawal: await withdrawalView(deps, await reconcileRow(deps, row)) };
+}
+
+/**
+ * When an owners' request executes (the signing layer's `onExecuted`): a
+ * test deposit is marked sent; a withdrawal is marked sent and its digest
+ * posted to the partner. Runs within the request's own org.
+ */
+export async function withdrawalSigningExecuted(
+  input: { db: DrizzleDb; now: () => Date; partner: (id: PayoutPartnerId) => PayoutPartner },
+  request: StoredRequest,
+): Promise<void> {
+  if (request.status !== 'executed' || !request.executedDigest) return;
+  const ctx = { db: input.db, now: input.now, orgId: request.orgId };
+  if (request.purpose === 'partner_test_deposit') {
+    const row = await store.depositAddressByTestRequest(input.db, request.orgId, request.id);
+    if (!row) return;
+    const moved = await store.moveDepositAddress(input.db, request.orgId, row.id, ['test_requested'], { status: 'test_sent', testDigest: request.executedDigest, updatedAt: input.now() });
+    if (moved) await store.recordWithdrawalEvent(input.db, { orgId: request.orgId, subject: 'deposit_address', subjectId: row.id, actor: 'system', action: 'test_sent', detail: { suiDigest: request.executedDigest }, at: input.now() });
+    return;
+  }
+  if (request.purpose !== 'withdrawal') return;
+  const row = await store.withdrawalBySigningRequest(input.db, request.orgId, request.id);
+  if (!row) return;
+  const sent = await markSent(ctx, row, request.executedDigest);
+  try {
+    await postSettlement(ctx, input.partner(sent.partner as PayoutPartnerId), sent);
+  } catch {
+    /* retried on the next read */
+  }
+}
+
+// ─── Partner webhooks ───────────────────────────────────────────────────────
+
+const PARTNER_TO_WITHDRAWAL: Record<Extract<PayoutEvent, { kind: 'payout' }>['status'], WithdrawalStatus> = {
+  funds_received: 'partner_received',
+  paid_out: 'paid_out',
+  failed: 'failed',
+  returned: 'returned',
+};
+
+export type WebhookInput = {
+  partner: string;
+  rawBody: string;
+  signature: string | null;
+  env: NodeJS.ProcessEnv;
+  now: Date;
+  db: DrizzleDb;
+  readTransaction: (digest: string) => Promise<WithdrawalChainTx | null>;
+  usdcType: string;
+  /** Overrides the adapter (tests). */
+  adapter?: PayoutPartner;
+};
+
+type WebhookAnswer = { status: number; body: Record<string, unknown> };
+
+function sameAddress(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (!a || !b) return false;
+  try {
+    return normalizeSuiAddress(a) === normalizeSuiAddress(b);
+  } catch {
+    return false;
+  }
+}
+
+function usdcChange(tx: WithdrawalChainTx, address: string, usdcType: string): bigint {
+  const t = normalizeStructTag(usdcType);
+  let total = 0n;
+  for (const c of tx.balanceChanges) {
+    let coin: string;
+    try {
+      coin = normalizeStructTag(c.coinType);
+    } catch {
+      continue;
+    }
+    if (coin === t && sameAddress(c.address, address)) total += BigInt(c.amount);
+  }
+  return total;
+}
+
+/**
+ * A payout partner's signed webhook. The signature is checked first, inside
+ * the replay window; nothing is read before that. Each event counts once.
+ * A status never goes backwards. A test deposit or a return is believed only
+ * from the chain, by the digest the partner names.
+ */
+export async function handlePayoutWebhook(input: WebhookInput): Promise<WebhookAnswer> {
+  if (!isPayoutPartnerId(input.partner)) return { status: 404, body: { error: 'unknown partner' } };
+  let adapter: PayoutPartner;
+  try {
+    adapter = input.adapter ?? payoutPartner(input.partner, input.env);
+  } catch (error) {
+    if (error instanceof PayoutPartnerUnavailable) return { status: 503, body: { error: error.message, code: error.code } };
+    throw error;
+  }
+  let event: PayoutEvent;
+  try {
+    event = adapter.verifyWebhook({ rawBody: input.rawBody, signature: input.signature, now: input.now });
+  } catch (error) {
+    if (error instanceof WebhookRejected) {
+      const status = error.code === 'bad_body' || error.code === 'unknown_event' ? 400 : error.code === 'partner_not_configured' || error.code === 'partner_not_connected' ? 503 : 401;
+      return { status, body: { error: error.message, code: error.code } };
+    }
+    throw error;
+  }
+  const at = input.now;
+  if (event.kind === 'test_deposit') {
+    const row = await store.depositAddressForWebhook(input.db, adapter.id, event.accountRef);
+    if (!row) return { status: 200, body: { ignored: 'no such account' } };
+    if (row.status === 'verified') return { status: 200, body: { duplicate: true } };
+    if (row.status === 'test_requested') {
+      // The owners' transaction may have landed before Splash recorded it:
+      // the partner retries, and the retry counts.
+      return { status: 503, body: { error: 'the test deposit is not recorded yet; retry' } };
+    }
+    if (row.status !== 'test_sent' || row.testDigest !== event.suiDigest) {
+      await store.recordWithdrawalEvent(input.db, { orgId: row.orgId, subject: 'deposit_address', subjectId: row.id, actor: `partner:${adapter.id}`, action: 'test_confirmation_refused', detail: { reason: 'not the test deposit Splash sent', suiDigest: event.suiDigest }, at });
+      return { status: 200, body: { ignored: 'not the test deposit sent' } };
+    }
+    const claimed = await store.claimPartnerEvent(input.db, { partner: adapter.id, eventId: event.eventId, orgId: row.orgId, subjectId: row.id, status: 'test_deposit', at });
+    if (!claimed) return { status: 200, body: { duplicate: true } };
+    let tx: WithdrawalChainTx | null;
+    try {
+      tx = await input.readTransaction(event.suiDigest);
+    } catch {
+      tx = null;
+    }
+    if (!tx) {
+      await store.releasePartnerEvent(input.db, adapter.id, event.eventId);
+      return { status: 503, body: { error: 'the chain has not shown that transaction yet; retry' } };
+    }
+    const received = usdcChange(tx, row.address, input.usdcType);
+    if (!tx.success || !sameAddress(tx.sender, row.testWallet) || received !== row.testAmountMinor) {
+      await store.recordWithdrawalEvent(input.db, { orgId: row.orgId, subject: 'deposit_address', subjectId: row.id, actor: `partner:${adapter.id}`, action: 'test_confirmation_refused', detail: { reason: 'the chain does not show this test deposit', suiDigest: event.suiDigest }, at });
+      return { status: 200, body: { ignored: 'the chain does not show this test deposit' } };
+    }
+    const moved = await store.moveDepositAddress(input.db, row.orgId, row.id, ['test_sent'], { status: 'verified', verifiedAt: at, updatedAt: at });
+    if (moved) await store.recordWithdrawalEvent(input.db, { orgId: row.orgId, subject: 'deposit_address', subjectId: row.id, actor: `partner:${adapter.id}`, action: 'verified', detail: { suiDigest: event.suiDigest, eventId: event.eventId }, at });
+    return { status: 200, body: { ok: true } };
+  }
+
+  const row = await store.withdrawalForWebhook(input.db, adapter.id, event.intentId);
+  // An event must name the intent AND the partner's own reference for it.
+  if (!row || !row.partnerRef || row.partnerRef !== event.partnerRef) return { status: 200, body: { ignored: 'no such payout' } };
+  const to = PARTNER_TO_WITHDRAWAL[event.status];
+  const from = row.status as WithdrawalStatus;
+  if (from === 'awaiting_signatures' || from === 'preparing') {
+    // The deposit's digest is not recorded yet; the retry counts.
+    return { status: 503, body: { error: 'the deposit is not recorded yet; retry' } };
+  }
+  if (!canAdvanceWithdrawal(from, to)) {
+    return { status: 200, body: { ignored: `a withdrawal ${from.replace(/_/g, ' ')} does not move to ${to.replace(/_/g, ' ')}` } };
+  }
+  const claimed = await store.claimPartnerEvent(input.db, { partner: adapter.id, eventId: event.eventId, orgId: row.orgId, subjectId: row.id, status: event.status, at });
+  if (!claimed) return { status: 200, body: { duplicate: true } };
+  const set: Partial<store.WithdrawalInsert> & { status: WithdrawalStatus; updatedAt: Date } = { status: to, updatedAt: at };
+  if (event.status === 'paid_out' && event.bankRef) set.bankRef = event.bankRef;
+  if (event.status === 'failed') set.failure = event.failureReason ?? 'the partner could not pay it out';
+  if (event.status === 'returned') {
+    let tx: WithdrawalChainTx | null;
+    try {
+      tx = await input.readTransaction(event.returnDigest as string);
+    } catch {
+      tx = null;
+    }
+    if (!tx) {
+      await store.releasePartnerEvent(input.db, adapter.id, event.eventId);
+      return { status: 503, body: { error: 'the chain has not shown the return yet; retry' } };
+    }
+    if (!tx.success || usdcChange(tx, row.walletAddress, input.usdcType) <= 0n) {
+      await store.recordWithdrawalEvent(input.db, { orgId: row.orgId, subject: 'withdrawal', subjectId: row.id, actor: `partner:${adapter.id}`, action: 'return_refused', detail: { reason: 'the chain does not show USDC back in the business wallet', returnDigest: event.returnDigest }, at });
+      return { status: 200, body: { ignored: 'the chain does not show the return' } };
+    }
+    set.returnDigest = event.returnDigest;
+  }
+  const moved = await store.moveWithdrawal(input.db, row.orgId, row.id, [from], set);
+  if (!moved) return { status: 200, body: { ignored: 'the withdrawal moved meanwhile' } };
+  await store.recordWithdrawalEvent(input.db, { orgId: row.orgId, subject: 'withdrawal', subjectId: row.id, actor: `partner:${adapter.id}`, action: to, detail: { eventId: event.eventId, ...(set.bankRef ? { bankRef: set.bankRef } : {}), ...(set.returnDigest ? { returnDigest: set.returnDigest } : {}) }, at });
+  if (to === 'failed' && row.partnerRef) {
+    // The USDC reached the partner and the bank payout failed: ask for it back, to the business wallet.
+    const accepted = await reverseInstruction({ now: () => at }, adapter, { intentId: row.intentId, partnerRef: row.partnerRef, returnAddress: row.walletAddress }, 'payout_failed');
+    await store.recordWithdrawalEvent(input.db, { orgId: row.orgId, subject: 'withdrawal', subjectId: row.id, actor: 'system', action: 'return_requested', detail: { accepted, returnAddress: row.walletAddress }, at });
+  }
+  return { status: 200, body: { ok: true } };
+}
