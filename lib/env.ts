@@ -471,9 +471,14 @@ export const envSchema = z.object({
   /** Seals withdrawal bank-account numbers at rest (AES-256-GCM; random, at
    *  least 32 characters). Without it no bank account can be added or paid. */
   WITHDRAWAL_ACCOUNT_KEY: optional,
+  /** Rotation: the previous sealing key(s), comma-separated. They only open;
+   *  a value opened with one is sealed again under WITHDRAWAL_ACCOUNT_KEY when
+   *  next used. Clear it once nothing opens with it. */
+  WITHDRAWAL_ACCOUNT_KEY_PREVIOUS: optional,
   /** splash_core's original (defining) package id, the type tag of the
-   *  intent id a withdrawal instruction is keyed by. Unset: SPLASH_CORE_PACKAGE_ID,
-   *  which is the original until the first upgrade. */
+   *  intent id a withdrawal instruction is keyed by. Required for withdrawals
+   *  in production (no fallback). Outside production, unset falls back to
+   *  SPLASH_CORE_PACKAGE_ID, which is the original until the first upgrade. */
   SPLASH_CORE_ORIGINAL_PACKAGE_ID: objectId,
   USDC_AVAILABLE_MICRO: opt(z.coerce.number().int().min(0)),
   USDT_AVAILABLE_MICRO: opt(z.coerce.number().int().min(0)),

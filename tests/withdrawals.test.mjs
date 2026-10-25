@@ -892,8 +892,10 @@ test('the intent id: production names the original package, the derivation is pi
   assert.equal(R.corePackageOriginalIdFor({ NODE_ENV: 'production', SPLASH_CORE_PACKAGE_ID: pkg, SPLASH_CORE_ORIGINAL_PACKAGE_ID: orig }), orig);
   assert.equal(R.corePackageOriginalIdFor({ NODE_ENV: 'development', SPLASH_CORE_PACKAGE_ID: pkg }), pkg);
   assert.equal(R.corePackageOriginalIdFor({ NODE_ENV: 'development' }), null);
-  // The same pair is pinned in move/splash_core/tests/intent_v2_tests.move against derived_object.
-  assert.equal(withdrawalIntentId({ accountId: `0x${'ac'.repeat(32)}`, corePackageId: '0x0', paymentRef: new Uint8Array(32).fill(9) }), '0x6afec1d4e2a1c073d83ef4f577f11f1ece7c50fcc5c4b9ffcf12892bab5500e0');
+  // The same inputs are pinned in move/splash_core/tests/intent_v2_tests.move
+  // against derived_object, with splash_core at the address `sui move test` gives it.
+  const MOVE_TEST_CORE = '0xae1fb78a654fde843bcf88836a43aae4d76b6758bd44acb8ee12cc69d60067b7';
+  assert.equal(withdrawalIntentId({ accountId: `0x${'ac'.repeat(32)}`, corePackageId: MOVE_TEST_CORE, paymentRef: new Uint8Array(32).fill(9) }), '0xa6c14246e84b60948bd881cfc42f7f361cc5dfffe0bba410e8fe889b755d40a0');
 
   const t = await setup({ intentEvents: () => [`0x${'99'.repeat(32)}`] });
   const { destination } = await readyToWithdraw(t);
@@ -991,6 +993,8 @@ test('staff may ask the owners to approve a withdrawal; the owners alone sign it
   assert.equal(R.canAskForWithdrawal('MAKER'), true);
   assert.equal(R.canAskForWithdrawal('VIEWER'), false);
   const t = await setup();
+  await t.w.db.insert(schema.users).values({ id: 'u-staff', email: 'staff@acme.test', name: 'u-staff' });
+  await t.w.db.insert(schema.memberships).values({ id: 'm-u-staff', userId: 'u-staff', orgId: 'acme', role: 'maker' });
   const { destination } = await readyToWithdraw(t);
   const q = await quoted(t, destination.id);
   const r = await createWithdrawal(t.deps(), 'u-staff', { clientKey: 'ck_staff_ask', destinationId: destination.id, amountMinor: '1000000000', acceptedReceiveMinor: q.receiveMinor, maxFeeMinor: q.maxFeeMinor, ...bundle() });

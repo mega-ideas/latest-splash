@@ -58,7 +58,7 @@ import {
   type V2Chain,
   type WalletPayment,
 } from '@/lib/server/sui-v2-builders';
-import { openSigningRequest, type SigningDeps, type SigningFailure, type RequestView } from '@/lib/server/wallet-signing';
+import { openSigningRequest, type SigningDeps, type SigningFailure, type RequestView, type WithdrawalSigningDetails } from '@/lib/server/wallet-signing';
 import { listSigningRequests, type DrizzleDb, type StoredRequest } from '@/lib/server/wallet-signing-store';
 
 /** What the BusinessAccount says on chain, read fresh for each flow. */
@@ -580,7 +580,8 @@ export async function requestWalletPayment(
     requestedBy: string;
     wallet: WalletMembers;
     payment: Omit<WalletPayment, 'wallet' | 'account' | 'gas'>;
-    withdrawal?: { depositAddress: string; beneficiaryRef: string };
+    /** A withdrawal: the deposit address and commitment the bytes must carry, and what its signers are shown. */
+    withdrawal?: { depositAddress: string; beneficiaryRef: string; details?: WithdrawalSigningDetails };
   },
 ): Promise<Result> {
   if (input.withdrawal) {
@@ -611,7 +612,12 @@ export async function requestWalletPayment(
     signer: { kind: 'multisig', ...input.wallet },
     gasMode: 'sponsored',
     ...(input.withdrawal
-      ? { recipient: input.withdrawal.depositAddress, beneficiaryRef: input.withdrawal.beneficiaryRef, amountMinor: input.payment.amountMinor }
+      ? {
+          recipient: input.withdrawal.depositAddress,
+          beneficiaryRef: input.withdrawal.beneficiaryRef,
+          amountMinor: input.payment.amountMinor,
+          ...(input.withdrawal.details ? { withdrawal: input.withdrawal.details } : {}),
+        }
       : {}),
   });
 }

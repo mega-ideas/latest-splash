@@ -1078,10 +1078,17 @@ fun the_intent_id_is_derived_from_the_account_and_the_payment_ref() {
 }
 
 #[test]
-/// The derivation pinned to the value the server computes for the same pair:
-/// account 0xacac…ac, payment reference 32 bytes of 0x09, splash_core at 0x0
-/// (tests/withdrawals.test.mjs pins the same value).
+/// The derivation pinned to the value the server computes for the same
+/// inputs: account 0xacac…ac, payment reference 32 bytes of 0x09, and
+/// splash_core at the address the test build gives it (0xae1f…67b7, checked
+/// here first). tests/withdrawals.test.mjs pins the same value from
+/// `withdrawalIntentId`, so the type tag, the key's BCS and the
+/// DerivedObjectKey wrapper are the chain's.
 fun the_intent_id_derivation_matches_the_server() {
+    assert_eq!(
+        std::type_name::with_original_ids<PaymentIntent>().address_string(),
+        b"ae1fb78a654fde843bcf88836a43aae4d76b6758bd44acb8ee12cc69d60067b7".to_ascii_string(),
+    );
     let account_id = object::id_from_address(
         @0xacacacacacacacacacacacacacacacacacacacacacacacacacacacacacacacac,
     );
@@ -1089,7 +1096,7 @@ fun the_intent_id_derivation_matches_the_server() {
     32u64.do!(|_| payment_ref.push_back(9u8));
     assert_eq!(
         payment_intent::derived_intent_id_for_testing(account_id, payment_ref),
-        @0x6afec1d4e2a1c073d83ef4f577f11f1ece7c50fcc5c4b9ffcf12892bab5500e0,
+        @0xa6c14246e84b60948bd881cfc42f7f361cc5dfffe0bba410e8fe889b755d40a0,
     );
 }
 

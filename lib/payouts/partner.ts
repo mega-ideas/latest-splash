@@ -113,11 +113,26 @@ export type PayoutInstruction = {
   expectedUsdcMinor: bigint;
   quoteRef: string;
   currency: string;
-  /** The receive amount the business accepted. */
+  /** What the quote said the bank account receives. */
   receiveMinor: bigint;
+  /**
+   * The least the bank account must receive: what the owners accepted. The
+   * partner converts when the deposit lands (the owners may sign up to
+   * `settleByMs`, long after the quote); if its rate then pays less than
+   * this, it does not pay out and returns the USDC to `returnAddress`.
+   */
+  minReceiveMinor: bigint;
+  /** The deposit's deadline (the intent's settle_by, ms since epoch): none lands after it. */
+  settleByMs: bigint;
   beneficiary: PayoutBeneficiary;
   /** Hex of the 32-byte beneficiary commitment on the intent. */
   beneficiaryRef: string;
+  /**
+   * Hex of the commitment's salt, so the partner can recompute
+   * `beneficiaryRef` from the account it pays and refuse an instruction that
+   * does not match the intent on chain.
+   */
+  beneficiarySalt: string;
   /** The business wallet the deposit comes from. */
   sourceWallet: string;
   /** The partner deposit address it goes to. */

@@ -8,6 +8,8 @@ import 'server-only';
 
 import { NextResponse } from 'next/server';
 
+import { canAskForWithdrawal } from '@/lib/payouts/withdrawal-rules';
+
 import { resolveAuthorityForSession, type AuthorityContext } from '@/lib/auth/authority';
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { RATE_LIMITS, enforceRateLimit } from '@/lib/server/rate-limit';
@@ -52,6 +54,16 @@ export async function limitWalletRequests(route: WalletRoute): Promise<Response 
 }
 
 /** Only an owner (role admin) changes the wallet or pays from it. */
+/**
+ * A withdrawal may be ASKED for by an owner or a staff member (Sky's
+ * decision: staff may ask owners to approve); it opens the owners' signing
+ * request, and only their quorum signs. A viewer cannot ask.
+ */
+export function requireWithdrawalRequester(route: WalletRoute): Response | null {
+  if (canAskForWithdrawal(route.authority.role)) return null;
+  return NextResponse.json({ error: 'Only an owner or a staff member can ask for a withdrawal.' }, { status: 403, headers: NO_STORE });
+}
+
 export function requireOwner(route: WalletRoute, what: string): Response | null {
   if (route.authority.role === 'OWNER') return null;
   return NextResponse.json({ error: `Only an owner can ${what}.` }, { status: 403, headers: NO_STORE });

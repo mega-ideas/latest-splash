@@ -22,10 +22,13 @@ export async function POST(request: Request) {
   if (auth.response) return auth.response;
   const parsed = bodySchema.safeParse(await readJsonBody(request));
   if (!parsed.success) return NextResponse.json({ error: 'invalid profile' }, { status: 400 });
+  let result;
   try {
-    await saveBusinessProfile(auth.session, parsed.data);
-    return NextResponse.json({ ok: true });
+    // The role is read from the membership (owners only), never from the request.
+    result = await saveBusinessProfile(auth.session, parsed.data);
   } catch {
     return NextResponse.json({ error: 'onboarding_unavailable' }, { status: 503 });
   }
+  if (!result.ok) return NextResponse.json({ error: result.error, code: result.code }, { status: result.status });
+  return NextResponse.json({ ok: true, legalNameChanged: result.legalNameChanged, destinationsRevoked: result.destinationsRevoked });
 }

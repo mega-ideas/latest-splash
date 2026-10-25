@@ -119,6 +119,12 @@ export type SigningDeps = {
   notifier?: SigningNotifier;
   /** Called after a request executes (the wallet-creation sequence uses it). */
   onExecuted?: (request: StoredRequest) => Promise<void>;
+  /**
+   * Checked before each signature is taken: what the bytes commit to must
+   * still be what the server holds (a withdrawal's bank account, say). A
+   * reason refuses the signature; null lets it through.
+   */
+  beforeSign?: (request: StoredRequest) => Promise<{ code: string; error: string } | null>;
   now?: () => Date;
   /** Override of WALLET_SPONSOR_DAILY_BUDGET_MIST (tests). */
   sponsorDailyBudgetMist?: bigint;
@@ -327,6 +333,28 @@ function expectationsFor(request: StoredRequest, expect: WalletTxExpectations): 
 export type PublicExpectations = WalletTxExpectations;
 
 /** The view a signer is shown: the bytes and what they do, read from the bytes now. */
+/**
+ * What a withdrawal's signers are shown beside the bytes (v2 §4.4): the bytes
+ * carry only a salted commitment to the bank account, so the server binds
+ * the account it was built from (bank code, last four digits, holder), the
+ * quoted and least receive amounts, the rate and the deadline, and checks
+ * them again before each signature (`beforeSign`).
+ */
+export type WithdrawalSigningDetails = {
+  destinationId: string;
+  bankCode: string;
+  last4: string;
+  holderName: string;
+  currency: string;
+  /** Local minor units the quote said the account receives. */
+  receiveMinor: string;
+  /** The least the account must receive: what the owners accepted. */
+  minReceiveMinor: string;
+  rateMicro: string;
+  /** The deposit's deadline, ms since epoch (the intent's settle_by). */
+  settleByMs: string;
+};
+
 export type RequestView = {
   id: string;
   purpose: SigningPurpose;
@@ -355,6 +383,8 @@ export type RequestView = {
   executedDigest: string | null;
   /** What the dry run of these exact bytes moved, when the request opened. */
   simulatedBalanceChanges: BalanceChange[];
+  /** A withdrawal: the bank account and amounts the bytes were built for. */
+  withdrawal: WithdrawalSigningDetails | null;
 };
 
 function signedWeight(request: StoredRequest): number {
@@ -407,6 +437,7 @@ function viewOf(request: StoredRequest, expect: WalletTxExpectations, userId: st
       coinType: String(c.coinType),
       amount: String(c.amount),
     })),
+    withdrawal: ((request.summary as { withdrawal?: WithdrawalSigningDetails } | null)?.withdrawal ?? null),
   };
 }
 
@@ -441,6 +472,8 @@ export async function openSigningRequest(
     beneficiaryRef?: string;
     /** For a withdrawal or a test deposit: the exact principal. */
     amountMinor?: bigint;
+    /** For a withdrawal: the bank account and amounts its signers are shown. */
+    withdrawal?: WithdrawalSigningDetails;
     /** Opened by `onExecuted` once this request executes. Keys and weights only. */
     nextStep?: unknown;
   },
@@ -538,6 +571,7 @@ export async function openSigningRequest(
       simulatedBalanceChanges: simulated.balanceChanges ?? [],
       ...(input.openIntent ? { openIntent: input.openIntent } : {}),
       ...(input.spend ? { spend: input.spend } : {}),
+      ...(input.withdrawal ? { withdrawal: input.withdrawal } : {}),
     },
     nextStep: input.nextStep ?? null,
     requestedBy: input.requestedBy,
@@ -613,6 +647,10 @@ export async function submitPartialSignature(
     describeWalletTransaction(request.txBytes, expectationsFor(request, deps.expect));
   } catch {
     return fail(409, 'no_longer_valid', 'this request no longer matches the business account; ask for it again');
+  }
+  if (deps.beforeSign) {
+    const refused = await deps.beforeSign(request);
+    if (refused) return fail(409, refused.code, refused.error);
   }
 
   const bytes = fromBase64(request.txBytes);

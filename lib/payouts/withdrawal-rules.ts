@@ -20,6 +20,7 @@ import { bcs } from '@mysten/sui/bcs';
 import { deriveObjectID, normalizeSuiAddress } from '@mysten/sui/utils';
 
 import { beneficiaryCommitment, toHex } from '../evidence/commitment.ts';
+import { isProductionRuntime } from '../server/runtime-mode.ts';
 import type { PayoutBeneficiary, PayoutPartnerId } from './partner.ts';
 
 export type WithdrawalStatus = 'preparing' | 'awaiting_signatures' | 'sent' | 'partner_received' | 'paid_out' | 'failed' | 'returned' | 'cancelled';
@@ -49,8 +50,18 @@ export function withdrawalIsFinal(status: WithdrawalStatus): boolean {
 export const TEST_DEPOSIT_MINOR = 1_000_000n;
 /** At most 1,000,000 USDC in one withdrawal; the tier ceilings on chain bind first. */
 export const MAX_WITHDRAWAL_MINOR = 1_000_000n * 1_000_000n;
-/** A withdrawal intent lives a day; its quote holds five minutes. */
+/** A withdrawal intent lives a day. */
 export const WITHDRAWAL_INTENT_TTL_MS = 24 * 60 * 60 * 1000;
+/**
+ * How long the owners have to sign a withdrawal: its `settle_by`. The
+ * partner's quote holds five minutes, which no multisig quorum can be held
+ * to, so the quote is NOT the deadline. The policy (docs/v2/phase2-withdrawals.md,
+ * "The rate and the signing window"): the owners accept a least receive
+ * amount; the partner converts at its rate when the deposit lands and pays at
+ * least that, or treats the payout as failed and returns the USDC to the
+ * business wallet. The window is the intent's own lifetime.
+ */
+export const WITHDRAWAL_SIGNING_WINDOW_MS = WITHDRAWAL_INTENT_TTL_MS;
 
 export class WithdrawalRuleError extends Error {
   readonly code: string;
@@ -66,11 +77,32 @@ export class WithdrawalRuleError extends Error {
 /** The least length of the sealing key: 32 characters, random. */
 export const ACCOUNT_KEY_MIN_LENGTH = 32;
 
+function deriveAccountKey(raw: string): Buffer | null {
+  const v = raw.trim();
+  if (v.length < ACCOUNT_KEY_MIN_LENGTH) return null;
+  return createHash('sha256').update(`splash:withdrawal-account:v1:${v}`).digest();
+}
+
 /** The sealing key, or null (no bank account can be added or paid). */
 export function accountKey(env: NodeJS.ProcessEnv): Buffer | null {
-  const raw = (env.WITHDRAWAL_ACCOUNT_KEY ?? '').trim();
-  if (raw.length < ACCOUNT_KEY_MIN_LENGTH) return null;
-  return createHash('sha256').update(`splash:withdrawal-account:v1:${raw}`).digest();
+  return deriveAccountKey(env.WITHDRAWAL_ACCOUNT_KEY ?? '');
+}
+
+/**
+ * The sealing keys: `current` seals, `all` opens (current first, then each
+ * of WITHDRAWAL_ACCOUNT_KEY_PREVIOUS, comma-separated). Rotation: set the new
+ * key, move the old one to _PREVIOUS; a value opened with an old key is
+ * sealed again under the new one when it is next used, and _PREVIOUS can be
+ * cleared once nothing opens with it.
+ */
+export function accountKeys(env: NodeJS.ProcessEnv): { current: Buffer | null; all: Buffer[] } {
+  const current = accountKey(env);
+  const previous = String(env.WITHDRAWAL_ACCOUNT_KEY_PREVIOUS ?? '')
+    .split(',')
+    .map((v) => deriveAccountKey(v))
+    .filter((k): k is Buffer => k !== null);
+  const all = current ? [current, ...previous.filter((k) => !k.equals(current))] : [];
+  return { current, all };
 }
 
 /** `v1.<iv>.<tag>.<ciphertext>`, base64url, bound to `aad`. */
@@ -93,6 +125,18 @@ export function open(sealed: string, key: Buffer, aad: string): Buffer {
   } catch {
     throw new WithdrawalRuleError('A sealed value does not open with this key for this record.', 'sealed_unreadable');
   }
+}
+
+/** Open with the first key that opens it; `rotated` when that was not the current key. */
+export function openWithAny(sealed: string, keys: Buffer[], aad: string): { plain: Buffer; rotated: boolean } {
+  for (let i = 0; i < keys.length; i++) {
+    try {
+      return { plain: open(sealed, keys[i], aad), rotated: i > 0 };
+    } catch {
+      /* the next key */
+    }
+  }
+  throw new WithdrawalRuleError('A sealed value does not open with any key for this record.', 'sealed_unreadable');
 }
 
 /** What a destination's sealed fields are bound to. */
@@ -150,4 +194,71 @@ export function withdrawalIntentId(input: { accountId: string; corePackageId: st
 /** A hash of what a withdrawal request asked for: a reused idempotency key must ask for the same thing. */
 export function withdrawalRequestHash(input: { destinationId: string; amountMinor: bigint; acceptedReceiveMinor: bigint; maxFeeMinor: bigint }): string {
   return createHash('sha256').update(`${input.destinationId}|${input.amountMinor}|${input.acceptedReceiveMinor}|${input.maxFeeMinor}`).digest('hex');
+}
+
+/**
+ * splash_core's ORIGINAL (defining) package id, the type tag the intent id is
+ * derived under. In production it must be named explicitly: after the first
+ * upgrade the current package id gives another id, one the chain never
+ * creates, and the partner could not match the deposit. Outside production
+ * the current id stands in (before any upgrade the two are the same).
+ */
+export function corePackageOriginalIdFor(env: NodeJS.ProcessEnv): string | null {
+  const ok = (v: string | undefined) => (/^0x[0-9a-fA-F]{64}$/.test((v ?? '').trim()) ? normalizeSuiAddress((v ?? '').trim()) : null);
+  const original = ok(env.SPLASH_CORE_ORIGINAL_PACKAGE_ID);
+  if (original) return original;
+  return isProductionRuntime(env) ? null : ok(env.SPLASH_CORE_PACKAGE_ID);
+}
+
+/** The intent ids an executed transaction's `payment_intent::IntentCreated` events name, for this package only. */
+export function createdIntentIds(events: ReadonlyArray<{ eventType: string; json: unknown }>, corePackageOriginalId: string): string[] {
+  const type = `${normalizeSuiAddress(corePackageOriginalId)}::payment_intent::IntentCreated`;
+  const out: string[] = [];
+  for (const e of events) {
+    let t: string;
+    try {
+      const [addr, ...rest] = e.eventType.split('::');
+      t = [normalizeSuiAddress(addr), ...rest].join('::');
+    } catch {
+      continue;
+    }
+    if (t !== type) continue;
+    const id = (e.json as { intent_id?: unknown } | null)?.intent_id;
+    if (typeof id === 'string' && /^0x[0-9a-fA-F]{1,64}$/.test(id)) out.push(normalizeSuiAddress(id));
+  }
+  return out;
+}
+
+/**
+ * Every address Splash controls that must never be a deposit address: the
+ * operator, the treasury, the test recipient, the gas sponsor, and FeeConfig's
+ * fee recipient and pending recipient (read live by the caller).
+ */
+export function splashControlledAddresses(input: {
+  env: NodeJS.ProcessEnv;
+  sponsor?: string | null;
+  feeConfig: { feeRecipient: string | null; pendingRecipient: { recipient: string } | null };
+}): string[] {
+  const raw = [
+    input.env.OPERATOR_SUI_ADDRESS,
+    input.env.TREASURY_ADDRESS,
+    input.env.SPLASH_TEST_RECIPIENT_ADDRESS,
+    input.sponsor ?? undefined,
+    input.feeConfig.feeRecipient ?? undefined,
+    input.feeConfig.pendingRecipient?.recipient,
+  ];
+  const out = new Set<string>();
+  for (const a of raw) {
+    if (typeof a === 'string' && /^0x[0-9a-fA-F]{1,64}$/.test(a.trim())) out.add(normalizeSuiAddress(a.trim()));
+  }
+  return [...out];
+}
+
+/**
+ * Who may ASK for a withdrawal (Sky's decision: staff may ask owners to
+ * approve). Asking opens the owners' signing request; only the owners' quorum
+ * signs it. Bank accounts and the deposit address stay owner-only.
+ */
+export function canAskForWithdrawal(role: string): boolean {
+  return role === 'OWNER' || role === 'APPROVER' || role === 'MAKER';
 }

@@ -10,7 +10,7 @@ import { randomUUID } from 'node:crypto';
 
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 
-import { partnerDepositAddresses, payoutPartnerEvents, withdrawalDestinations, withdrawalEvents, withdrawals } from '../db/schema.ts';
+import { partnerDepositAddresses, payoutPartnerEvents, walletDepositSync, withdrawalDestinations, withdrawalEvents, withdrawals } from '../db/schema.ts';
 import type { WithdrawalStatus } from '../payouts/withdrawal-rules.ts';
 import type { DrizzleDb } from './wallet-signing-store.ts';
 
@@ -57,6 +57,19 @@ export async function revokeDestination(db: DrizzleDb, orgId: string, id: string
     .where(and(eq(withdrawalDestinations.orgId, orgId), eq(withdrawalDestinations.id, id), eq(withdrawalDestinations.status, 'verified')))
     .returning();
   return row ?? null;
+}
+
+/** Seal a destination's fields again (a key rotation). */
+export async function resealDestination(db: DrizzleDb, orgId: string, id: string, set: { accountSealed: string; beneficiarySaltSealed: string; updatedAt: Date }): Promise<void> {
+  await db.update(withdrawalDestinations).set(set).where(and(eq(withdrawalDestinations.orgId, orgId), eq(withdrawalDestinations.id, id)));
+}
+
+/** Withdrawals of a destination that have not moved money yet. */
+export async function inFlightWithdrawalsFor(db: DrizzleDb, orgId: string, destinationId: string): Promise<WithdrawalRow[]> {
+  return db
+    .select()
+    .from(withdrawals)
+    .where(and(eq(withdrawals.orgId, orgId), eq(withdrawals.destinationId, destinationId), inArray(withdrawals.status, ['preparing', 'awaiting_signatures'])));
 }
 
 // ─── Partner deposit addresses ──────────────────────────────────────────────
@@ -126,6 +139,23 @@ export async function verifiedDepositAddresses(db: DrizzleDb, orgId: string): Pr
   return rows.map((r) => r.address);
 }
 
+/**
+ * Whether `address` is another business's wallet as Splash knows it (the
+ * deposit watcher's wallets, and the wallets withdrawals were sent from).
+ * A partner must never hand one business another's wallet as a deposit address.
+ */
+export async function isAnotherBusinessWallet(db: DrizzleDb, orgId: string, address: string): Promise<boolean> {
+  const synced = await db.select({ orgId: walletDepositSync.orgId }).from(walletDepositSync).where(eq(walletDepositSync.walletAddress, address));
+  if (synced.some((r) => r.orgId !== orgId)) return true;
+  const sent = await db.select({ orgId: withdrawals.orgId }).from(withdrawals).where(eq(withdrawals.walletAddress, address));
+  return sent.some((r) => r.orgId !== orgId);
+}
+
+/** For the sweep, across every org: test deposits whose signing request may have closed. */
+export async function testRequestedDepositAddressesForStaff(db: DrizzleDb): Promise<DepositAddressRow[]> {
+  return db.select().from(partnerDepositAddresses).where(eq(partnerDepositAddresses.status, 'test_requested'));
+}
+
 /** For a partner webhook: the live address the partner's account ref names, with its org. */
 export async function depositAddressForWebhook(db: DrizzleDb, partner: string, accountRef: string): Promise<DepositAddressRow | null> {
   const [row] = await db
@@ -189,6 +219,26 @@ export async function patchWithdrawal(db: DrizzleDb, orgId: string, id: string, 
 export async function withdrawalForWebhook(db: DrizzleDb, partner: string, intentId: string): Promise<WithdrawalRow | null> {
   const [row] = await db.select().from(withdrawals).where(and(eq(withdrawals.partner, partner), eq(withdrawals.intentId, intentId))).limit(1);
   return row ?? null;
+}
+
+/** The withdrawal a return digest already closed, if any (one return, one withdrawal). */
+export async function withdrawalByReturnDigest(db: DrizzleDb, digest: string): Promise<WithdrawalRow | null> {
+  const [row] = await db.select().from(withdrawals).where(eq(withdrawals.returnDigest, digest)).limit(1);
+  return row ?? null;
+}
+
+/**
+ * For the sweep, across every org: withdrawals waiting on their owners'
+ * request, and withdrawals sent whose digest is not posted and not held.
+ */
+export async function withdrawalsToReconcileForStaff(db: DrizzleDb): Promise<WithdrawalRow[]> {
+  return db
+    .select()
+    .from(withdrawals)
+    .where(
+      sql`(${withdrawals.status} = 'awaiting_signatures' and ${withdrawals.signingRequestId} is not null)
+        or (${withdrawals.status} in ('sent', 'partner_received') and ${withdrawals.suiDigest} is not null and ${withdrawals.settlementPostedAt} is null and ${withdrawals.settlementHold} is null)`,
+    );
 }
 
 /** Withdrawals sent whose digest the partner has not been told yet. */

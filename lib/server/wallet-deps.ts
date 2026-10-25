@@ -255,6 +255,13 @@ export async function liveWalletContext(orgId: string): Promise<{ ok: true; ctx:
       return { epoch: BigInt(systemState.epoch), chain: chainIdentifier, nonce: randomInt(0, 2 ** 32) };
     },
   };
+  // A withdrawal signature is taken only while the bank account and deposit
+  // address it pays are still the ones its bytes commit to (v2 §4.4).
+  signing.beforeSign = async (request) => {
+    if (request.purpose !== 'withdrawal') return null;
+    const { withdrawalBeforeSign } = await import('@/lib/server/withdrawals');
+    return withdrawalBeforeSign({ db }, request);
+  };
   signing.onExecuted = async (request) => {
     await settleApprovalAsks(db, request);
     await continueWalletSteps(ctx, request);
@@ -265,8 +272,10 @@ export async function liveWalletContext(orgId: string): Promise<{ ok: true; ctx:
     if (request.purpose === 'withdrawal' || request.purpose === 'partner_test_deposit') {
       // v2 §4.4: the withdrawal is sent and its digest posted to the partner,
       // or the test deposit is recorded for the partner to confirm.
-      const [{ withdrawalSigningExecuted }, { payoutPartner }] = await Promise.all([import('@/lib/server/withdrawals'), import('@/lib/payouts/registry')]);
-      await withdrawalSigningExecuted({ db, now: () => new Date(), partner: (id) => payoutPartner(id) }, request);
+      // The digest is posted only once the chain shows the intent the partner was instructed for.
+      const [{ withdrawalSigningExecuted }, { withdrawalSettlementDeps }] = await Promise.all([import('@/lib/server/withdrawals'), import('@/lib/server/withdrawals-deps')]);
+      const settlement = withdrawalSettlementDeps(db);
+      if (settlement) await withdrawalSigningExecuted(settlement, request);
     }
     if (request.purpose === 'spend_policy') {
       // A new policy opened as part of reissuing the rules after a rotation

@@ -288,6 +288,13 @@
       "when": 1792022400000,
       "tag": "0040_withdrawals",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1792108800000,
+      "tag": "0041_withdrawals_review",
+      "breakpoints": true
     }
   ]
 }

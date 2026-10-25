@@ -7,6 +7,8 @@ import { resolveAuthorityForSession } from '@/lib/auth/authority';
 import { canMoveMoney, kybGateReason, type KybLifecycleState } from '@/lib/compliance/kyb-state';
 import { organizations, orgSettings, suppliers, termsAcceptances } from '@/lib/db/schema';
 import { TERMS_VERSION } from '@/content/legal';
+import type { PayoutPartner, PayoutPartnerId } from '@/lib/payouts/partner';
+import type { DrizzleDb } from '@/lib/server/wallet-signing-store';
 
 /**
  * Onboarding — the derived setup state, and the one new gate.
@@ -212,21 +214,66 @@ export async function setIntent(
   return { changed: true };
 }
 
-/** Step 2 — the org-level half of the travel-rule record, established once. */
-export async function saveBusinessProfile(
-  session: CustomerSession,
+export type ProfileResult =
+  | { ok: true; legalNameChanged: boolean; destinationsRevoked: number }
+  | { ok: false; status: number; code: 'owner_only' | 'legal_name_locked' | 'no_org'; error: string };
+
+/** KYB states in which the legal name is still the business's own to correct. */
+const NAME_EDITABLE: ReadonlySet<string> = new Set(['REGISTERED', 'REJECTED']);
+
+/**
+ * Step 2 — the org-level half of the travel-rule record. Owners only.
+ *
+ * The legal name is what a withdrawal's bank account must be held in (v2
+ * §4.4, lib/server/withdrawals.ts), so it is not a field any member may
+ * rewrite: only an owner sets it, and once KYB is under way (submitted,
+ * approved, active, suspended) it is fixed. A change of name before that
+ * revokes every withdrawal bank account checked against the old one, and
+ * cancels any withdrawal to them not yet sent.
+ */
+export async function saveBusinessProfileFor(
+  d: Db,
+  ctx: { orgId: string; userId: string; role: string },
   profile: { legalName: string; registrationNumber: string; addressCountry: string },
-): Promise<void> {
-  const ctx = await resolveAuthorityForSession(session);
-  const d = await db();
+  opts: { now?: Date; partner?: (id: PayoutPartnerId) => PayoutPartner } = {},
+): Promise<ProfileResult> {
+  if (ctx.role !== 'OWNER') return { ok: false, status: 403, code: 'owner_only', error: "Only an owner can change the business's registered details." };
+  const [org] = await d
+    .select({ legalName: organizations.legalName, kybLifecycle: organizations.kybLifecycle })
+    .from(organizations)
+    .where(eq(organizations.id, ctx.orgId))
+    .limit(1);
+  if (!org) return { ok: false, status: 404, code: 'no_org', error: 'No such business.' };
+  const next = profile.legalName.trim();
+  const previous = (org.legalName ?? '').trim();
+  const legalNameChanged = previous !== '' && previous !== next;
+  if (legalNameChanged && !NAME_EDITABLE.has(org.kybLifecycle)) {
+    return { ok: false, status: 409, code: 'legal_name_locked', error: 'The registered name is fixed once verification has started. Contact support to correct it.' };
+  }
   await d
     .update(organizations)
     .set({
-      legalName: profile.legalName,
+      legalName: next,
       registrationNumber: profile.registrationNumber,
       addressCountry: profile.addressCountry.toUpperCase(),
     })
     .where(eq(organizations.id, ctx.orgId));
+  let destinationsRevoked = 0;
+  if (legalNameChanged) {
+    const { revokeDestinationsForNameChange } = await import('./withdrawals.ts');
+    const now = opts.now ?? new Date();
+    destinationsRevoked = await revokeDestinationsForNameChange({ db: d as unknown as DrizzleDb, now: () => now, orgId: ctx.orgId, actor: ctx.userId, partner: opts.partner });
+  }
+  return { ok: true, legalNameChanged, destinationsRevoked };
+}
+
+export async function saveBusinessProfile(
+  session: CustomerSession,
+  profile: { legalName: string; registrationNumber: string; addressCountry: string },
+): Promise<ProfileResult> {
+  const ctx = await resolveAuthorityForSession(session);
+  const { payoutPartner } = await import('@/lib/payouts/registry');
+  return saveBusinessProfileFor(await db(), ctx, profile, { partner: (id) => payoutPartner(id) });
 }
 
 let warnedTermsGateSkipped = false;

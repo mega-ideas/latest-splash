@@ -30,7 +30,17 @@ export default function SetupStepper({ state }: { state: OnboardingState }) {
         headers: { 'Content-Type': 'application/json' },
         body: body === undefined ? undefined : JSON.stringify(body),
       });
-      if (!res.ok) throw new Error(String(res.status));
+      if (!res.ok) {
+        // A refusal the server explains (only an owner may change the
+        // registered name, and not once verification has started) is shown
+        // as it is; anything else is a plain retry.
+        const answer = (await res.json().catch(() => null)) as { error?: unknown; code?: unknown } | null;
+        if (typeof answer?.code === 'string' && typeof answer.error === 'string') {
+          setError(answer.error);
+          return;
+        }
+        throw new Error(String(res.status));
+      }
       router.refresh();
     } catch {
       setError('That did not save. Try again.');

@@ -22,7 +22,7 @@ import { formatMinor, parseMinor, USD_DECIMALS } from '@/lib/money';
 import type { UnsignedProposal } from '@/lib/agent/types';
 import type { WalletAction, WalletTxDescription } from '@/lib/wallet/wallet-tx-describe';
 import { transactionCode } from '@/lib/wallet/review-on-device';
-import type { SigningNotifier } from '@/lib/server/wallet-signing';
+import type { SigningNotifier, WithdrawalSigningDetails } from '@/lib/server/wallet-signing';
 import type { SigningPurpose } from '@/lib/server/wallet-signing-store';
 import { listApprovers, type Approver } from '@/lib/server/approver-channels';
 import { issueTokens, recordDecision, tally, type Tally } from '@/lib/server/approval-tokens';
@@ -181,8 +181,18 @@ function usdc(minor: string): string {
   return `${BigInt(whole).toLocaleString('en-US')}.${trimmed} USDC`;
 }
 
-/** One line on what the bytes do, for a person about to sign them. */
-export function walletRequestHeadline(purpose: SigningPurpose, d: WalletTxDescription): string {
+function localAmount(minor: string, currency: string): string {
+  const n = BigInt(minor);
+  return `${currency} ${(n / 100n).toLocaleString('en-US')}.${(n % 100n).toString().padStart(2, '0')}`;
+}
+
+function rateOf(rateMicro: string, currency: string): string {
+  const n = BigInt(rateMicro);
+  return `${n / 1_000_000n}.${(n % 1_000_000n).toString().padStart(6, '0').replace(/0+$/, '').padEnd(2, '0')} ${currency} per USDC`;
+}
+
+/** One line on what the bytes do, for a person about to sign them. A withdrawal names the bank account it pays. */
+export function walletRequestHeadline(purpose: SigningPurpose, d: WalletTxDescription, withdrawal?: WithdrawalSigningDetails | null): string {
   const a = d.actions;
   switch (purpose) {
     case 'nominate_wallet': {
@@ -220,6 +230,14 @@ export function walletRequestHeadline(purpose: SigningPurpose, d: WalletTxDescri
       const open = a.find((x) => x.type === 'open_intent') as Extract<WalletAction, { type: 'open_intent' }>;
       const pay = a.find((x) => x.type === 'pay_intent') as Extract<WalletAction, { type: 'pay_intent' }>;
       const fee = BigInt(pay.maxFeeMinor) > 0n ? `, Splash fee at most ${usdc(pay.maxFeeMinor)}` : '';
+      if (withdrawal) {
+        const by = new Date(Number(withdrawal.settleByMs)).toISOString().slice(0, 16).replace('T', ' ');
+        return (
+          `withdraw ${usdc(open.amountMinor)} to the business's own bank account ${withdrawal.holderName}, bank ${withdrawal.bankCode}, account ending ${withdrawal.last4}: ` +
+          `about ${localAmount(withdrawal.receiveMinor, withdrawal.currency)} at ${rateOf(withdrawal.rateMicro, withdrawal.currency)}, and at least ${localAmount(withdrawal.minReceiveMinor, withdrawal.currency)} or the USDC comes back, ` +
+          `through the payout partner's deposit address ${shortAddress(open.recipient)}${fee}; sign by ${by} UTC`
+        );
+      }
       return `withdraw ${usdc(open.amountMinor)} to the business's own bank account in ${open.targetCurrency}, through the payout partner's deposit address ${shortAddress(open.recipient)}${fee}`;
     }
     case 'partner_test_deposit': {
@@ -269,12 +287,12 @@ function spendRuleHeadline(a: WalletAction[]): string {
   return parts.join('; ') || 'change the spending rules';
 }
 
-export function walletSignatureMessage(input: { orgName: string; purpose: SigningPurpose; description: WalletTxDescription; threshold: number; signerCount: number; expiresAt: Date; now: Date }): string {
+export function walletSignatureMessage(input: { orgName: string; purpose: SigningPurpose; description: WalletTxDescription; withdrawal?: WithdrawalSigningDetails | null; threshold: number; signerCount: number; expiresAt: Date; now: Date }): string {
   const hours = Math.max(1, Math.round((input.expiresAt.getTime() - input.now.getTime()) / 3_600_000));
   const who = input.signerCount > 1 ? `${input.threshold} of ${input.signerCount} owners must sign.` : 'Only you can sign this.';
   return (
     `Splash: your signature is needed\n\n` +
-    `${input.orgName} asks you to ${walletRequestHeadline(input.purpose, input.description)}.\n` +
+    `${input.orgName} asks you to ${walletRequestHeadline(input.purpose, input.description, input.withdrawal)}.\n` +
     `${who} Splash pays the network fee.\n\n` +
     `Open Splash, check the details and the transaction code ${transactionCode(input.description.bytesHash)}, and sign with your passkey. ` +
     `This request expires in ${hours} hour${hours === 1 ? '' : 's'}.\n\n` +
@@ -303,6 +321,7 @@ export function walletSigningNotifier(deps: { orgName: (orgId: string) => Promis
         orgName,
         purpose: request.purpose,
         description,
+        withdrawal: (request.summary as { withdrawal?: WithdrawalSigningDetails } | null)?.withdrawal ?? null,
         threshold: request.threshold,
         signerCount: request.signers.length,
         expiresAt: request.expiresAt,

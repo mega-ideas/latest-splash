@@ -16,17 +16,19 @@ import { NextResponse } from 'next/server';
 import { organizations } from '@/lib/db/schema';
 import { parseSignedPartners } from '@/lib/partners/signed-partners';
 import { payoutPartner } from '@/lib/payouts/registry';
+import { corePackageOriginalIdFor, splashControlledAddresses } from '@/lib/payouts/withdrawal-rules';
 import { currentWalletMembers } from '@/lib/server/business-wallet';
 import { stablecoinOnly } from '@/lib/server/launch-scope';
 import { NO_STORE, walletRoute, type WalletRoute } from '@/lib/server/wallet-route';
-import type { WithdrawalChainTx, WithdrawalDeps } from '@/lib/server/withdrawals';
+import { verifiedLegalName, type SettlementDeps, type WithdrawalChainTx, type WithdrawalDeps } from '@/lib/server/withdrawals';
+import { isAnotherBusinessWallet } from '@/lib/server/withdrawals-store';
 
 /** A Sui transaction's sender and balance changes, read from the fullnode. Null when the chain has not seen it. */
 export async function readWithdrawalTransaction(digest: string): Promise<WithdrawalChainTx | null> {
   const { suiClient } = await import('@/lib/sui');
   let result;
   try {
-    result = await suiClient.core.getTransaction({ digest, include: { effects: true, balanceChanges: true, transaction: true } });
+    result = await suiClient.core.getTransaction({ digest, include: { effects: true, balanceChanges: true, transaction: true, events: true } });
   } catch (error) {
     if (/not ?found|does not exist|unknown/i.test(error instanceof Error ? error.message : '')) return null;
     throw error;
@@ -36,16 +38,27 @@ export async function readWithdrawalTransaction(digest: string): Promise<Withdra
     status: { success: boolean };
     balanceChanges?: Array<{ coinType: string; address: string; amount: string }>;
     transaction?: { sender?: string | null };
+    events?: Array<{ packageId: string; eventType: string; json: Record<string, unknown> | null }>;
   };
-  return { digest: t.digest ?? digest, success: t.status.success, sender: t.transaction?.sender ?? null, balanceChanges: t.balanceChanges ?? [] };
+  return {
+    digest: t.digest ?? digest,
+    success: t.status.success,
+    sender: t.transaction?.sender ?? null,
+    balanceChanges: t.balanceChanges ?? [],
+    events: (t.events ?? []).map((e) => ({ packageId: e.packageId, eventType: e.eventType, json: e.json })),
+  };
+}
+
+/** What settling a withdrawal needs, for the signing hook and the sweep (no org: each row acts within its own). */
+export function withdrawalSettlementDeps(db: SettlementDeps['db'], env: NodeJS.ProcessEnv = process.env): SettlementDeps | null {
+  const corePackageOriginalId = corePackageOriginalIdFor(env);
+  if (!corePackageOriginalId) return null;
+  return { db, now: () => new Date(), partner: (id) => payoutPartner(id, env), readTransaction: readWithdrawalTransaction, corePackageOriginalId };
 }
 
 export function withdrawalDepsFor(route: WalletRoute, env: NodeJS.ProcessEnv = process.env): WithdrawalDeps {
   const { orgId, ctx, db } = route;
-  const splash = [env.OPERATOR_SUI_ADDRESS, env.TREASURY_ADDRESS, env.SPLASH_TEST_RECIPIENT_ADDRESS, ctx.signing.sponsor?.address]
-    .filter((a): a is string => typeof a === 'string' && /^0x[0-9a-fA-F]{1,64}$/.test(a.trim()))
-    .map((a) => normalizeSuiAddress(a.trim()));
-  const original = (env.SPLASH_CORE_ORIGINAL_PACKAGE_ID ?? '').trim() || (env.SPLASH_CORE_PACKAGE_ID ?? '').trim();
+  const original = corePackageOriginalIdFor(env) ?? '';
   return {
     db,
     orgId,
@@ -57,12 +70,20 @@ export function withdrawalDepsFor(route: WalletRoute, env: NodeJS.ProcessEnv = p
       return current.ok ? { ok: true, address: current.address, members: current.members } : { ok: false, status: current.status, code: current.code, error: current.error };
     },
     partner: (id) => payoutPartner(id, env),
-    // The registered (legal) name only: a trading name is not who a bank account is held by.
+    // The registered (legal) name only, and only as KYB verified it: a trading
+    // name is not who a bank account is held by, and a name nobody verified
+    // is only what someone typed.
     companyName: async () => {
-      const [org] = await db.select({ legalName: organizations.legalName }).from(organizations).where(eq(organizations.id, orgId)).limit(1);
-      return (org?.legalName ?? '').trim() || null;
+      const [org] = await db.select({ legalName: organizations.legalName, kybStatus: organizations.kybStatus }).from(organizations).where(eq(organizations.id, orgId)).limit(1);
+      return org ? verifiedLegalName(org) : null;
     },
-    splashAddresses: splash,
+    // Read live each time: FeeConfig's recipient can change (24h notice).
+    splashAddresses: async () => {
+      const { getFeeConfig } = await import('@/lib/fees/fee-config');
+      const feeConfig = await getFeeConfig();
+      return splashControlledAddresses({ env, sponsor: ctx.signing.sponsor?.address ?? null, feeConfig });
+    },
+    isBusinessWallet: (address) => isAnotherBusinessWallet(db, orgId, normalizeSuiAddress(address)),
     bankPayoutFee: async (principalMinor) => {
       const { currentSplashFee } = await import('@/lib/fees/fee-config');
       const { FEE_KIND } = await import('@/lib/fees/schedule');
@@ -80,8 +101,11 @@ export function withdrawalDepsFor(route: WalletRoute, env: NodeJS.ProcessEnv = p
 export async function withdrawalRoute(request: Request): Promise<{ route: WalletRoute; deps: WithdrawalDeps; response: null } | { route: null; deps: null; response: Response }> {
   const gate = await walletRoute(request);
   if (gate.response) return { route: null, deps: null, response: gate.response };
-  if (!/^0x[0-9a-fA-F]{64}$/.test((process.env.SPLASH_CORE_ORIGINAL_PACKAGE_ID ?? '').trim() || (process.env.SPLASH_CORE_PACKAGE_ID ?? '').trim())) {
-    return { route: null, deps: null, response: NextResponse.json({ error: 'withdrawals need splash_core\'s package id', code: 'no_core_package' }, { status: 503, headers: NO_STORE }) };
+  // Production names splash_core's original package id explicitly: the intent
+  // id the partner is keyed by is derived under it, and the current id would
+  // give one the chain never creates once core has been upgraded.
+  if (!corePackageOriginalIdFor(process.env)) {
+    return { route: null, deps: null, response: NextResponse.json({ error: "withdrawals need splash_core's original package id (SPLASH_CORE_ORIGINAL_PACKAGE_ID)", code: 'no_core_package' }, { status: 503, headers: NO_STORE }) };
   }
   return { route: gate.route, deps: withdrawalDepsFor(gate.route), response: null };
 }

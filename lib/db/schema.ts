@@ -1947,6 +1947,12 @@ export const withdrawals = pgTable('withdrawals', {
   settlementPostedAt: timestamp('settlement_posted_at', { withTimezone: true }),
   bankRef: text('bank_ref'),
   returnDigest: text('return_digest'),
+  /** The USDC a return put back in the wallet, as the chain shows it (0041). */
+  returnedMinor: bigint('returned_minor', { mode: 'bigint' }),
+  /** When the executed transaction's IntentCreated event was read and named this intent id (0041). */
+  intentConfirmedAt: timestamp('intent_confirmed_at', { withTimezone: true }),
+  /** Why the digest is held back from the partner, for ops (0041). */
+  settlementHold: text('settlement_hold'),
   /** preparing | awaiting_signatures | sent | partner_received | paid_out | failed | returned | cancelled */
   status: text('status').notNull(),
   failure: text('failure'),
@@ -1958,6 +1964,7 @@ export const withdrawals = pgTable('withdrawals', {
   uniqueIndex('withdrawals_payment_ref_unique').on(table.paymentRef),
   uniqueIndex('withdrawals_partner_ref_unique').on(table.partner, table.partnerRef).where(sql`${table.partnerRef} is not null`),
   uniqueIndex('withdrawals_sui_digest_unique').on(table.suiDigest).where(sql`${table.suiDigest} is not null`),
+  uniqueIndex('withdrawals_return_digest_unique').on(table.returnDigest).where(sql`${table.returnDigest} is not null`),
   index('withdrawals_org_idx').on(table.orgId, table.status),
 ]);
 

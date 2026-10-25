@@ -1,5 +1,5 @@
 import { readJsonBody } from '@/lib/server/http';
-import { limitWalletRequests, requireOwner } from '@/lib/server/wallet-route';
+import { limitWalletRequests, requireWithdrawalRequester } from '@/lib/server/wallet-route';
 import { createWithdrawal, listWithdrawalDestinations, listWithdrawals, withdrawalDepositAddress } from '@/lib/server/withdrawals';
 import { withdrawalResponse, withdrawalRoute } from '@/lib/server/withdrawals-deps';
 
@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
  *
  * GET   this business's withdrawals, its own bank accounts and its deposit
  *       address with the partner.
- * POST  an owner withdraws: { destinationId, amountMinor, acceptedReceiveMinor,
+ * POST  an owner, or a staff member asking the owners to approve, withdraws: { destinationId, amountMinor, acceptedReceiveMinor,
  *       maxFeeMinor, contentHash, walrusBlobId } with an Idempotency-Key
  *       header (or `clientKey`). `acceptedReceiveMinor` and `maxFeeMinor` are
  *       the quote's receive amount and Splash fee as shown; a worse rate or a
@@ -31,8 +31,8 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const gate = await withdrawalRoute(request);
   if (gate.response) return gate.response;
-  const owner = requireOwner(gate.route, 'withdraw from the business wallet');
-  if (owner) return owner;
+  const asker = requireWithdrawalRequester(gate.route);
+  if (asker) return asker;
   const limited = await limitWalletRequests(gate.route);
   if (limited) return limited;
   const body = await readJsonBody(request);
