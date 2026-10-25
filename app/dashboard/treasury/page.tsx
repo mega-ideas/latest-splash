@@ -214,7 +214,7 @@ export default function TreasuryPage() {
   const totalMinor = usdcMinor !== null && usdyValueMinor !== null ? usdcMinor + usdyValueMinor : null;
   const treasuryShare = totalMinor && totalMinor > 0n && usdyValueMinor !== null ? Number((usdyValueMinor * 100n) / totalMinor) : 0;
   const apy = overview?.apyPct ?? 0;
-  const rateLabel = overview ? `Modeled at ${apy}% APY · variable` : 'Rate loading…';
+  const rateLabel = overview ? `Modeled at ${apy}% APY · variable` : overviewError ? 'Rate unavailable' : 'Rate loading…';
   const toTreasury = direction === 'swap';
   const amountMinor = parseAmountMinor(amount);
   const sourceMinor = toTreasury ? usdcMinor : usdyMinor;
@@ -423,7 +423,7 @@ export default function TreasuryPage() {
         <div className="grid gap-4 p-5 lg:grid-cols-[1fr_270px_1fr] lg:items-stretch">
 
           {/* Vessel · Operating cash (USDC) */}
-          <div className={cn('dash-block flex flex-col justify-between p-5 transition-shadow', !toTreasury && 'tr-vessel-dest-teal')}>
+          <div className={cn('dash-block flex flex-col p-5 transition-shadow', !toTreasury && 'tr-vessel-dest-teal')}>
             <div className="flex items-center justify-between">
               <span className="text-[12px] font-semibold uppercase tracking-[0.12em] text-[#326273]">Operating cash</span>
               <div className="flex items-center gap-1.5">
@@ -441,7 +441,8 @@ export default function TreasuryPage() {
               <span className="rounded-full bg-[#326273]/8 px-2 py-0.5 text-[#326273]">USDC</span>
               <span className="text-[#326273]">Funds every payout · no yield</span>
             </div>
-            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[#326273]/8">
+            <div className="min-h-3 flex-1" aria-hidden="true" />
+            <div className="h-1.5 overflow-hidden rounded-full bg-[#326273]/8">
               <div className="h-full rounded-full bg-[#5C9EAD]/70 transition-all" style={{ width: `${walletKnown ? 100 - treasuryShare : 0}%` }} />
             </div>
           </div>
@@ -583,7 +584,7 @@ export default function TreasuryPage() {
           </form>
 
           {/* Vessel · Treasury (USDY) */}
-          <div className={cn('dash-block dash-block-accent flex flex-col justify-between p-5 transition-shadow', toTreasury && 'tr-vessel-dest')}>
+          <div className={cn('dash-block dash-block-accent flex flex-col p-5 transition-shadow', toTreasury && 'tr-vessel-dest')}>
             <div className="flex items-center justify-between">
               <span className="text-[12px] font-semibold uppercase tracking-[0.12em] text-[var(--gold-ink)]">Treasury</span>
               <div className="flex items-center gap-1.5">
@@ -606,9 +607,10 @@ export default function TreasuryPage() {
             <p className="mt-2 text-[12px] leading-5 text-[#326273]">
               {priceMicros !== null
                 ? <>USDY price ${formatUsdc(priceMicros)}{overview?.price.asOf ? <>, <LocalTime value={overview.price.asOf} /></> : null}{overview?.price.status === 'STALE' ? ' (stale)' : ''}</>
-                : overview ? 'The USDY price is unavailable, so nothing is valued.' : 'Reading the USDY price…'}
+                : overview ? 'The USDY price is unavailable, so nothing is valued.' : overviewError ? 'The USDY price could not be read.' : 'Reading the USDY price…'}
             </p>
-            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[#326273]/8">
+            <div className="min-h-3 flex-1" aria-hidden="true" />
+            <div className="h-1.5 overflow-hidden rounded-full bg-[#326273]/8">
               <div className="h-full rounded-full bg-[#C99A2E]/80 transition-all" style={{ width: `${walletKnown ? treasuryShare : 0}%` }} />
             </div>
           </div>
@@ -623,7 +625,7 @@ export default function TreasuryPage() {
 
           {/* Projection: one series, one hue, labelled as a projection */}
           <section className="dash-surface p-5" aria-labelledby="projection-title">
-            <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <div className="flex items-center gap-2">
                   <h2 id="projection-title" className="text-sm font-semibold text-[#1F4452]">Projected value</h2>
@@ -634,7 +636,7 @@ export default function TreasuryPage() {
                     ? <>At <span className="font-medium text-[#1F4452]">{focus.label}</span></>
                     : usdyValueMinor && usdyValueMinor > 0n
                       ? `The USDY you hold, at the modeled ${apy}% a year. USDY's price moves; this is not a promise.`
-                      : `The amount you are swapping in, at the modeled ${apy}% a year. A projection, not a promise.`}
+                      : overview ? `The amount you are swapping in, at the modeled ${apy}% a year. A projection, not a promise.` : 'A projection at the modeled rate, once it loads.'}
                 </p>
               </div>
               <div className="flex flex-col items-end gap-2">
@@ -674,7 +676,7 @@ export default function TreasuryPage() {
                     setHovered(Math.max(0, Math.min(projection.length - 1, Math.round(plotFrac * (projection.length - 1)))));
                   }}
                 >
-                  <svg viewBox={`0 0 ${CH.W} ${CH.H}`} preserveAspectRatio="none" className="h-40 w-full" role="img" aria-label={`Projected value over ${chartRange === '30d' ? '30 days' : 'a year'} at ${apy}% a year: from $${chart.lo.toFixed(2)} to $${chart.hi.toFixed(2)}`}>
+                  <svg viewBox={`0 0 ${CH.W} ${CH.H}`} preserveAspectRatio="none" className="h-40 w-full" role="img" aria-label={`Projected value over ${chartRange === '30d' ? '30 days' : 'a year'} at ${apy}% a year: from $${formatUsdc(projection[0].valueMinor)} to $${formatUsdc(projection[projection.length - 1].valueMinor)}`}>
                     <defs>
                       <linearGradient id="usdyFill" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="0%" stopColor="#D9A441" stopOpacity="0.34" />
@@ -692,8 +694,8 @@ export default function TreasuryPage() {
                       </g>
                     )}
                   </svg>
-                  <span className="dash-num pointer-events-none absolute right-1 -translate-y-1/2 rounded bg-white/85 px-1 font-mono text-[12px] font-semibold text-[#326273]" style={{ top: `${(chart.cy(chart.hi) / CH.H) * 100}%` }}>${chart.hi.toFixed(2)}</span>
-                  <span className="dash-num pointer-events-none absolute left-1 -translate-y-1/2 rounded bg-white/85 px-1 font-mono text-[12px] font-semibold text-[#326273]" style={{ top: `${(chart.cy(chart.lo) / CH.H) * 100}%` }}>${chart.lo.toFixed(2)}</span>
+                  <span className="dash-num pointer-events-none absolute right-1 -translate-y-1/2 rounded bg-white/85 px-1 font-mono text-[12px] font-semibold text-[#326273]" style={{ top: `${(chart.cy(chart.hi) / CH.H) * 100}%` }}>${formatUsdc(projection[projection.length - 1].valueMinor)}</span>
+                  <span className="dash-num pointer-events-none absolute left-1 -translate-y-1/2 rounded bg-white/85 px-1 font-mono text-[12px] font-semibold text-[#326273]" style={{ top: `${(chart.cy(chart.lo) / CH.H) * 100}%` }}>${formatUsdc(projection[0].valueMinor)}</span>
                 </div>
                 <div className="mt-1 flex justify-between px-1 text-[13px] text-[#326273]">
                   <span>Today</span>

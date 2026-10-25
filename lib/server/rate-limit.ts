@@ -68,6 +68,9 @@ export const RATE_LIMITS = {
   invoiceUsdcSyncUser: { bucket: 'invoice-usdc-sync:user', limit: 30, windowMs: 15 * MINUTE },
   // Each treasury quote asks the Cetus aggregator what Sui can fill.
   treasuryQuoteUser: { bucket: 'treasury-quote:user', limit: 30, windowMs: 15 * MINUTE },
+  // The Treasury page's overview (GET /api/treasury/wallet): two balance
+  // reads from Sui and the org's orders, on every visit and after each action.
+  treasuryOverviewUser: { bucket: 'treasury-overview:user', limit: 120, windowMs: 15 * MINUTE },
   // Home's summary (GET /api/home) reads the org's transfers, wallet
   // payments and approvals on every sign-in and every refresh.
   homeSummaryUser: { bucket: 'home-summary:user', limit: 120, windowMs: 15 * MINUTE },

@@ -152,7 +152,7 @@ export function treasuryQuote(input: {
       fillable = shortfallBps === null ? null : shortfallBps <= MAX_MARKET_SHORTFALL_BPS;
       if (fillable === false && valueMinor !== null && shortfallBps !== null) {
         reasons.push(
-          `On Sui right now, ${formatUsdc(input.usdcInMinor)} USDC buys ${formatUsdc(input.market.usdyOutMinor)} USDY on the best route — ` +
+          `On Sui right now, ${formatUsdc(input.usdcInMinor)} USDC buys ${formatUsdc(input.market.usdyOutMinor)} USDY on the best route, ` +
           `worth ${formatUsdc(valueMinor)} USDC at the redemption rate, ${formatBps(shortfallBps)} less than you would pay. ` +
           'There is not enough USDY liquidity on Sui for this size, so Splash would not route it.',
         );

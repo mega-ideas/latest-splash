@@ -27,7 +27,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: Request) {
   const gate = await treasuryCaller(request);
   if (gate.response) return gate.response;
-  const limited = await enforceRateLimit({ rule: RATE_LIMITS.treasuryQuoteUser, key: gate.session.email });
+  const limited = await enforceRateLimit({ rule: RATE_LIMITS.treasuryOverviewUser, key: gate.session.email });
   if (limited) return limited;
 
   const url = new URL(request.url);
