@@ -296,6 +296,9 @@ test('no payment path consults billing: only the billing routes, the cron and th
     'app/api/wallet/subscription/route.ts',
     'app/api/billing/plans/route.ts',
     'app/api/cron/billing/route.ts',
+    'app/api/admin/billing/plans/route.ts',
+    'app/api/admin/billing/pulls/route.ts',
+    'app/api/admin/billing/pulls/[id]/route.ts',
   ]);
   const hits = [];
   async function walk(dir) {
@@ -599,13 +602,13 @@ test('staff list and edit plans, and list the pulls waiting for the finance sign
   await w.client.close();
 });
 
-test('the staff billing routes check the flag first, then an operations staff session; the pull route only relays signatures', async () => {
+test('the staff billing routes check the flag first, then an operations staff session; the pull route only relays signatures ', async () => {
   for (const [file, methods] of [['app/api/admin/billing/plans/route.ts', ['GET', 'PUT']], ['app/api/admin/billing/pulls/route.ts', ['GET']], ['app/api/admin/billing/pulls/[id]/route.ts', ['POST']]]) {
     const src = await code(file);
     for (const m of methods) {
       const body = handler(src, m);
       const flag = body.indexOf('subscriptionBillingEnabled()');
-      const session = body.indexOf('requireBillingStaff(');
+      const session = body.indexOf('getAdminSession()');
       assert.ok(flag >= 0 && session > flag, `${file} ${m}: the flag, then the staff session`);
       for (const later of ['getDb(', 'upsertPlanForStaff(', 'submitPullForStaff(', 'listPullsAwaitingSignatureForStaff(', 'listPlansForStaff(']) {
         const at = body.indexOf(later);
@@ -613,9 +616,9 @@ test('the staff billing routes check the flag first, then an operations staff se
       }
     }
   }
-  const staff = await code('lib/server/billing-staff.ts');
-  assert.match(staff, /getAdminSession\(\)/);
-  assert.match(staff, /role !== 'operations'/);
+  for (const file of ['app/api/admin/billing/plans/route.ts', 'app/api/admin/billing/pulls/route.ts', 'app/api/admin/billing/pulls/[id]/route.ts']) {
+    assert.match(await code(file), /session\.role !== 'operations'/, `${file}: operations staff only`);
+  }
   const pull = await code('app/api/admin/billing/pulls/[id]/route.ts');
   assert.doesNotMatch(pull, /signTransaction|Keypair|fromSecretKey|kms/i, 'the server never signs a pull');
 });

@@ -223,6 +223,9 @@ const STAFF_ROUTES = [
   'app/api/admin/support/[id]/route.ts',
   'app/api/audit-batches/route.ts',
   'app/api/audit-batches/verify/route.ts',
+  'app/api/admin/billing/plans/route.ts',
+  'app/api/admin/billing/pulls/route.ts',
+  'app/api/admin/billing/pulls/[id]/route.ts',
 ];
 
 test('member routes take the org from the session: requireCustomerRequest, then requireSessionAccount', async () => {

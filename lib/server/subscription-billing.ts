@@ -128,6 +128,50 @@ export async function upsertPlanForStaff(db: DrizzleDb, plan: { id: string; name
   await db.insert(subscriptionPlans).values({ ...values, createdAt: now }).onConflictDoUpdate({ target: subscriptionPlans.id, set: values });
 }
 
+/** Every plan, inactive ones too, for Splash staff (the admin route). */
+export async function listPlansForStaff(deps: BillingDeps): Promise<{ ok: true; plans: Array<PlanView & { active: boolean }> } | BillingFailure> {
+  if (!on(deps)) return NOT_FOUND();
+  const rows = await deps.db.select().from(subscriptionPlans).orderBy(asc(subscriptionPlans.priceMinor));
+  return { ok: true, plans: rows.map((p: PlanRow) => ({ ...planView(p), active: p.active })) };
+}
+
+export type PullForSigners = {
+  id: string;
+  orgId: string;
+  period: string;
+  amountMinor: string;
+  planName: string;
+  txBytes: string;
+  txDigest: string;
+  /** What the bytes do, read from the bytes alone. */
+  description: PullDescription;
+  createdAt: string;
+};
+
+/**
+ * The pulls waiting for the finance multisig's signers, cross-tenant (Splash
+ * staff, the admin route): the exact stored bytes and what they do, read
+ * from the bytes, so each signer can check them before signing on their own
+ * device. A pull whose bytes do not describe as a billing pull is left out.
+ */
+export async function listPullsAwaitingSignatureForStaff(deps: BillingDeps & { usdcType: string }): Promise<{ ok: true; pulls: PullForSigners[] } | BillingFailure> {
+  if (!on(deps)) return NOT_FOUND();
+  const rows = (await deps.db.select().from(subscriptionPulls).where(eq(subscriptionPulls.status, 'awaiting_signature')).orderBy(asc(subscriptionPulls.createdAt)).limit(200)) as PullRow[];
+  const pulls: PullForSigners[] = [];
+  for (const p of rows) {
+    let description: PullDescription;
+    try {
+      description = describeBillingPull(fromBase64(p.txBytes), deps.usdcType);
+    } catch {
+      continue;
+    }
+    if (description.digest !== p.txDigest || description.amountMinor !== p.amountMinor.toString()) continue;
+    const [invoice] = await deps.db.select().from(subscriptionInvoices).where(eq(subscriptionInvoices.pullId, p.id)).limit(1);
+    pulls.push({ id: p.id, orgId: p.orgId, period: p.period, amountMinor: p.amountMinor.toString(), planName: invoice?.planName ?? '', txBytes: p.txBytes, txDigest: p.txDigest, description, createdAt: p.createdAt.toISOString() });
+  }
+  return { ok: true, pulls };
+}
+
 export async function listPlans(deps: BillingDeps): Promise<{ ok: true; plans: PlanView[] } | BillingFailure> {
   if (!on(deps)) return NOT_FOUND();
   const rows = await deps.db.select().from(subscriptionPlans).where(eq(subscriptionPlans.active, true)).orderBy(asc(subscriptionPlans.priceMinor));

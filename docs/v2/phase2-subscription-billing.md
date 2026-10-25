@@ -161,10 +161,27 @@ digest, forward only. A failed pull of a plan no longer live tells nobody.
 From the plan price only: "Splash can draw up to X USDC per calendar month
 (UTC) for your plan. Revoke any time." (`allowanceCopy`).
 
+## Staff routes
+
+Each checks the flag first (404 while off), then a staff session with the
+`operations` role (401, 403), before anything else:
+
+- `GET|PUT /api/admin/billing/plans`: every plan (inactive ones too), and
+  add or change one (`listPlansForStaff`, `upsertPlanForStaff`).
+- `GET /api/admin/billing/pulls`: the pulls waiting for the finance
+  signers, each with its stored bytes and digest and what the bytes do,
+  read from the bytes (`describeBillingPull`). A row whose bytes do not
+  describe as its own pull is left out.
+- `POST /api/admin/billing/pulls/[id]` `{ signatures }`: relays the finance
+  multisig's signature with the stored bytes (`submitPullForStaff`). The
+  server never signs a pull.
+
 ## Open
 
-- The Settings → Billing UI (Phase 3), and a staff tool to edit plans and
-  to collect the finance multisig's signatures over a pull.
+- The Settings → Billing UI and the console pages over the staff routes
+  (Phase 3). The finance signers sign on their own devices; collecting
+  their partial signatures into the multisig signature is their tooling's
+  job, as for the governance multisig.
 - No testnet run of `allowance::new` from a multisig, or of a pull under a
   plain allowance. The shapes follow the framework source
   (`sui::allowance`, `new` is `entry`) and the TS SDK's
