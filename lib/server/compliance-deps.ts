@@ -10,7 +10,7 @@ import 'server-only';
 import { normalizeSuiAddress } from '@mysten/sui/utils';
 import { NextResponse } from 'next/server';
 
-import { ComplianceProviderUnavailable, travelRuleProviderFromEnv, type TravelRuleProvider } from '@/lib/compliance/sumsub';
+import { ComplianceProviderUnavailable, isTravelRuleExchange, travelRuleProviderFromEnv, type TravelRuleProvider } from '@/lib/compliance/sumsub';
 import { kytProviderFromEnv } from '@/lib/compliance/kyt';
 import { parseSignedPartners } from '@/lib/partners/signed-partners';
 import { corePackageOriginalIdFor } from '@/lib/payouts/withdrawal-rules';
@@ -44,6 +44,8 @@ export async function savedRecipientAt(orgId: string, address: string): Promise<
     town: t.addressCity ?? null,
     street: t.addressLine1 ?? null,
     postCode: t.addressPostalCode ?? null,
+    deliveryKind: match.delivery?.deliveryKind ?? null,
+    exchange: match.delivery?.deliveryKind === 'EXCHANGE' && isTravelRuleExchange(match.delivery.exchangeId) ? match.delivery.exchangeId : null,
   };
 }
 

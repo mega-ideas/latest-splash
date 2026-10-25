@@ -15,6 +15,11 @@
  *                 business screened the address as an exchange recipient,
  *                 or when a message was already started for the payment,
  *                 so sending it as kind WALLET does not avoid the check.
+ *   Recipient     the saved recipient's own rule (v2 §4.7,
+ *                 lib/server/wallet-recipients.ts walletDeliveryGate): kind
+ *                 WALLET only to a proven wallet the supplier holds, kind
+ *                 EXCHANGE only to a saved exchange account. A proof
+ *                 withdrawn after the payment opened stops it here.
  *
  * The signature that completes the quorum passes through here too, so the
  * check also holds at submission. Reads only; nothing is signed or sent.
@@ -27,6 +32,7 @@ import type { KytProvider } from '../compliance/kyt.ts';
 import type { WalletTxDescription } from '../wallet/wallet-tx-describe.ts';
 import { paymentOfDescription } from './controls-evidence.ts';
 import { recipientScreeningGate } from './kyt-screenings.ts';
+import { walletDeliveryGate } from './wallet-recipients.ts';
 import { readTravelRuleTransfer } from './travel-rule-transfers.ts';
 import type { DrizzleDb, StoredRequest } from './wallet-signing-store.ts';
 
@@ -100,6 +106,12 @@ export async function paymentBeforeSign(deps: PaymentGateDeps, request: StoredRe
     payment.recipient,
   );
   if (screened) return { code: screened.code, error: screened.error };
+  // The saved recipient's own rule (v2 §4.7): a proof withdrawn, or a
+  // recipient removed, after the payment was opened stops its signature.
+  if (payment.kind !== null || request.purpose === 'wallet_payment') {
+    const delivery = await walletDeliveryGate(deps.db, request.orgId, payment.recipient, payment.kind);
+    if (delivery) return { code: delivery.code, error: delivery.error };
+  }
   // A rule payment's message is not a signing request of its own yet; only wallet payments carry one.
   if (request.purpose === 'wallet_payment') return travelRuleHold(deps.db, request, payment);
   return null;

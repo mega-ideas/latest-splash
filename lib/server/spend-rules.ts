@@ -50,7 +50,7 @@ import { PasskeyPublicKey } from '@mysten/sui/keypairs/passkey';
 
 import { liveRateLimit } from '../wallet/allowance-window.ts';
 import { allowanceNameFor, policyIdFor, splashSpendAppName, type AllowanceState, type RuleSpendEvent } from '../wallet/spend-rules-bcs.ts';
-import { fundsOnHold, recipientCleared, recordedWalletMembers, walletRegistration, type AccountState, type IntentState, type WalletContext, type WalletMembers } from './business-wallet.ts';
+import { fundsOnHold, recipientPayable, recordedWalletMembers, walletRegistration, type AccountState, type IntentState, type WalletContext, type WalletMembers } from './business-wallet.ts';
 import type { OwnershipGate } from './ownership-proofs.ts';
 import { approvePayoutTx, createSpendPolicyTx, RECIPIENT_TAG, SPEND_ROLE, spendRuleTx, type OwnedRef, type RuleCap, type RuleOp, type SpendChain } from './spend-rules-builders.ts';
 import { buildSpendView, boundTo, DAY_MS, type HeldAllowance, type PolicyState, type SpendView } from './spend-rules-index.ts';
@@ -408,6 +408,14 @@ async function recipientOps(sc: SpendContext, orgId: string, policy: PolicyState
   if (missing.length) {
     return refuse(409, 'ownership_not_proven', 'a recipient is tagged as a wallet only after its owner signs the ownership proof', { addresses: missing });
   }
+  // An exchange tag only for this business's saved exchange account (v2
+  // §4.7): the Travel Rule and the sender declaration are built from it.
+  const exchangeTagged = add.filter((r) => r.tag === 'exchange').map((r) => r.address);
+  const exchanges = exchangeTagged.length ? await sc.ownership.savedExchanges(orgId, exchangeTagged) : [];
+  const unsaved = exchangeTagged.filter((a) => !exchanges.includes(a));
+  if (unsaved.length) {
+    return refuse(409, 'exchange_not_saved', 'a recipient is tagged as an exchange only once it is saved as an exchange account', { addresses: unsaved });
+  }
   for (const r of change.remove ?? []) {
     const address = normalizeSuiAddress(r);
     if (!onPolicy.has(address)) return refuse(404, 'not_a_recipient', 'that address is not a verified recipient', { address });
@@ -657,7 +665,7 @@ export async function openSecondApproval(
   const onHold = await fundsOnHold(sc.wallet, l.wallet, intent.amountMinor + input.maxFeeMinor);
   if (onHold) return onHold;
   // The approval releases the payment to its recipient: only to a fresh CLEAR here (v2 §4.6).
-  const screened = await recipientCleared(sc.wallet, input.orgId, intent.recipient, input.ownerUserId);
+  const screened = await recipientPayable(sc.wallet, input.orgId, intent.recipient, intent.kind, input.ownerUserId);
   if (screened) return screened;
   const g = await gas(sc);
   if (!g) return refuse(503, 'no_sponsor', 'business wallet transactions need a gas sponsor, and none is configured');

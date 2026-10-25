@@ -17,6 +17,8 @@ import { requireTermsAccepted } from '@/lib/server/onboarding';
 import { resolveAuthorityForSession } from '@/lib/auth/authority';
 import { normaliseSuiAddress, StablecoinLaneError, WALLET_PROVIDERS } from '@/lib/payments/stablecoin-lane';
 import { attestation, screenWalletAddress } from '@/lib/server/wallet-screening';
+import { createWalletRecipient } from '@/lib/server/wallet-recipients';
+import { NO_STORE, recipientRoute, walletRecipientDeps } from '@/lib/server/wallet-recipients-deps';
 
 export async function GET(request: Request) {
   const auth = await requireCustomerRequest(request);
@@ -49,6 +51,18 @@ export async function POST(request: Request) {
   if (termsGate) return termsGate;
 
   const body = await readJsonBody(request);
+
+  // ── Wallet recipients (v2 §4.7): an exchange account, a wallet the
+  // supplier holds (paid once proven), or USDC on another chain over CCTP.
+  // Owners and staff; checked, screened, and saved only if not blocked.
+  if (body.deliveryKind !== undefined && body.deliveryKind !== 'BANK') {
+    const route = await recipientRoute(request);
+    if (!route.ok) return route.response;
+    const result = await createWalletRecipient(walletRecipientDeps(route.db, route.orgId), { body, requestedBy: route.authority.userId });
+    if (!result.ok) return NextResponse.json({ error: result.error, code: result.code }, { status: result.status, headers: NO_STORE });
+    return NextResponse.json({ ...result.recipient, screening: result.screening }, { status: 201, headers: NO_STORE });
+  }
+
   const name = String(body.name ?? '').trim();
 
   // Phase 0 pays out: a recipient may not be set up for a fund-holding

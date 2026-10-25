@@ -148,6 +148,17 @@ export async function quoteWalletTransfer(
   const sendable = walletSendable(recipient.screeningVerdict);
   if (!sendable.ok) return fail(403, 'recipient_not_sendable', sendable.reason);
 
+  // v2 §4.7 (D5b): a wallet the supplier holds is paid only once it signed
+  // the ownership proof. An exchange account is paid from the business
+  // wallet, where its Travel Rule message is sent first, not from here.
+  const delivery = recipient.delivery;
+  if (delivery?.deliveryKind === 'EXCHANGE') {
+    return fail(409, 'exchange_from_business_wallet', 'An exchange account is paid from the business wallet, with its Travel Rule message. Pay it there.');
+  }
+  if (delivery?.deliveryKind !== 'SELF_CUSTODY' || delivery.ownershipStatus !== 'proven') {
+    return fail(409, 'ownership_not_proven', 'The supplier has not proven it holds this wallet yet. Send the ownership link from Recipients and wait for the signature.');
+  }
+
   const recipientAddress = normaliseSuiAddress(recipient.walletAddress);
   if (recipientAddress === sender) return fail(400, 'self_transfer', 'The recipient wallet is the wallet you are sending from.');
 

@@ -496,6 +496,10 @@ export const envSchema = z.object({
    *  a bridge adapter is registered on chain. */
   CCTP_IRIS_API_URL: url,
   CCTP_BRIDGE_ADAPTER_TYPE: optional,
+  /** Reading a cross-chain payment's mint (lib/server/cross-chain-transfers.ts):
+   *  JSON of https JSON-RPC URLs per CCTP chain, e.g. {"BASE":"https://…"}.
+   *  A chain without one cannot be read, and its payment stays attested. */
+  CCTP_MINT_RPC_URLS_JSON: optional,
   /** The sandbox payout partners' webhook secret, outside production only:
    *  random, at least 32 characters, read only when
    *  PAYOUT_SANDBOX_WEBHOOKS_ENABLED is true. No fallback secret. */

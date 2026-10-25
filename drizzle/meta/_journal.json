@@ -330,6 +330,13 @@
       "when": 1792540800000,
       "tag": "0046_compliance_gates",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1792627200000,
+      "tag": "0047_wallet_recipients",
+      "breakpoints": true
     }
   ]
 }

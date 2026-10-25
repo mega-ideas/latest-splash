@@ -62,6 +62,7 @@ import { openSigningRequest, type SigningDeps, type SigningFailure, type Request
 import { listSigningRequests, type DrizzleDb, type StoredRequest } from '@/lib/server/wallet-signing-store';
 import type { KytProvider } from '@/lib/compliance/kyt';
 import { recipientScreeningGate } from '@/lib/server/kyt-screenings';
+import { walletDeliveryGate } from '@/lib/server/wallet-recipients';
 
 /** What the BusinessAccount says on chain, read fresh for each flow. */
 export type AccountState = {
@@ -163,6 +164,19 @@ export async function recipientCleared(ctx: WalletContext, orgId: string, recipi
     recipient,
   );
   return refused ? refuse(refused.status, refused.code, refused.error) : null;
+}
+
+/**
+ * The recipient may be paid as `kind`: a fresh CLEAR here (above), then the
+ * saved recipient's own rule (v2 §4.7, lib/server/wallet-recipients.ts): a
+ * wallet payment only to a proven wallet the supplier holds, an exchange
+ * payment only to a saved exchange account.
+ */
+export async function recipientPayable(ctx: WalletContext, orgId: string, recipient: string, kind: number, requestedBy: string): Promise<PlanFailure | null> {
+  const screened = await recipientCleared(ctx, orgId, recipient, requestedBy);
+  if (screened) return screened;
+  const delivery = await walletDeliveryGate(ctx.signing.db, orgId, recipient, kind);
+  return delivery ? refuse(delivery.status, delivery.code, delivery.error) : null;
 }
 
 function passkeySuiKey(compressed: string): { suiKey: string; address: string } {
@@ -663,7 +677,7 @@ export async function requestWalletPayment(
   }
   if (!input.withdrawal) {
     // Nothing is stored for a recipient that is not a fresh CLEAR here.
-    const screened = await recipientCleared(ctx, input.orgId, input.payment.recipient, input.requestedBy);
+    const screened = await recipientPayable(ctx, input.orgId, input.payment.recipient, input.payment.kind, input.requestedBy);
     if (screened) return screened;
   }
   return openSigningRequest(ctx.signing, {
@@ -796,7 +810,7 @@ export async function requestOpenIntentPayment(
     const e = error as { code?: string; message?: string };
     return refuse(400, e.code ?? 'bad_payment', e.message ?? 'the payment could not be built');
   }
-  const screened = await recipientCleared(ctx, input.orgId, intent.recipient, input.requestedBy);
+  const screened = await recipientPayable(ctx, input.orgId, intent.recipient, intent.kind, input.requestedBy);
   if (screened) return screened;
   return openSigningRequest(ctx.signing, {
     orgId: input.orgId,

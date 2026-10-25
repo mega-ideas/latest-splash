@@ -13,6 +13,7 @@ import {
   primaryKey,
   text,
   timestamp,
+  unique,
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
 
@@ -432,6 +433,24 @@ export const suppliers = pgTable('suppliers', {
   walletAddress: text('wallet_address'),
   /** 'SLUSH' | 'METAMASK_SUI_SNAP' — the wallet the recipient said they use. */
   walletProvider: text('wallet_provider'),
+
+  // ── How the recipient is paid (v2 §4.7, migration 0047) ──────────────────
+  /** BANK, EXCHANGE (a deposit address at an exchange, on Sui), SELF_CUSTODY
+   *  (a wallet the supplier holds; paid only once proven) or CROSS_CHAIN
+   *  (USDC over CCTP V2). Each kind's columns are checked by the table. */
+  deliveryKind: text('delivery_kind').notNull().default('BANK'),
+  /** EXCHANGE: the exchange the deposit address is at (a TRAVEL_RULE_EXCHANGES id). */
+  exchangeId: text('exchange_id'),
+  /** EXCHANGE: the deposit address's network. SUI only. */
+  depositNetwork: text('deposit_network'),
+  /** CROSS_CHAIN: the CCTP chain, its domain, the address as that chain
+   *  writes it, and CCTP's 32-byte mint recipient. */
+  destinationChain: text('destination_chain'),
+  destinationDomain: integer('destination_domain'),
+  destinationAddress: text('destination_address'),
+  mintRecipient: text('mint_recipient'),
+  /** SELF_CUSTODY: unproven, proven (the supplier signed the ownership proof) or revoked. */
+  ownershipStatus: text('ownership_status'),
 
   ...timestamps,
 }, (table) => [
@@ -1575,6 +1594,62 @@ export const walletOwnershipProofs = pgTable('wallet_ownership_proofs', {
   revokedAt: timestamp('revoked_at', { withTimezone: true }),
 }, (table) => [
   primaryKey({ columns: [table.orgId, table.address] }),
+]);
+
+/**
+ * The link Splash sends a self-custody supplier to prove it holds the wallet
+ * (v2 §4.7, D5b; migration 0047). The token in the link is kept only as its
+ * SHA-256. Used once, whatever the outcome; the nonce is unique for ever.
+ */
+export const recipientOwnershipChallenges = pgTable('recipient_ownership_challenges', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  recipientId: text('recipient_id').notNull().references(() => suppliers.id, { onDelete: 'cascade' }),
+  address: text('address').notNull(),
+  tokenSha256: text('token_sha256').notNull().unique('recipient_ownership_challenges_token_unique'),
+  nonce: text('nonce').notNull().unique('recipient_ownership_challenges_nonce_unique'),
+  message: text('message').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  createdBy: text('created_by').notNull(),
+  sentTo: text('sent_to'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  usedAt: timestamp('used_at', { withTimezone: true }),
+  outcome: text('outcome'),
+}, (table) => [
+  index('recipient_ownership_challenges_recipient_idx').on(table.orgId, table.recipientId, table.createdAt),
+]);
+
+/**
+ * The receipt of a cross-chain USDC payment over CCTP V2 (v2 §4.7, D5c;
+ * migration 0047): the burn on Sui, Circle's attestation, the mint on the
+ * destination chain. Once per business and payment; forward only.
+ */
+export const crossChainTransfers = pgTable('cross_chain_transfers', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  paymentRef: text('payment_ref').notNull(),
+  recipientId: text('recipient_id').references(() => suppliers.id, { onDelete: 'set null' }),
+  destinationChain: text('destination_chain').notNull(),
+  destinationDomain: integer('destination_domain').notNull(),
+  mintRecipient: text('mint_recipient').notNull(),
+  amountMinor: bigint('amount_minor', { mode: 'bigint' }).notNull(),
+  maxBridgeFeeMinor: bigint('max_bridge_fee_minor', { mode: 'bigint' }).notNull().default(0n),
+  status: text('status').notNull(),
+  burnDigest: text('burn_digest').unique('cross_chain_transfers_burn_unique'),
+  burnedAt: timestamp('burned_at', { withTimezone: true }),
+  message: text('message'),
+  messageNonce: text('message_nonce').unique('cross_chain_transfers_nonce_unique'),
+  attestation: text('attestation'),
+  attestedAt: timestamp('attested_at', { withTimezone: true }),
+  mintedAmountMinor: bigint('minted_amount_minor', { mode: 'bigint' }),
+  mintTxHash: text('mint_tx_hash'),
+  mintedAt: timestamp('minted_at', { withTimezone: true }),
+  sandbox: boolean('sandbox').notNull().default(false),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  unique('cross_chain_transfers_payment_unique').on(table.orgId, table.paymentRef),
+  unique('cross_chain_transfers_mint_unique').on(table.destinationChain, table.mintTxHash),
 ]);
 
 /**

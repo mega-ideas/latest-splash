@@ -9,8 +9,10 @@
  * module is the gate the spending rules read: an address is "proven" for a
  * business while a row in `wallet_ownership_proofs` says so and has not been
  * revoked. Nothing here verifies a proof; `recordOwnershipProof` is what
- * §4.7's verifier calls once it has. An exchange deposit address (the
- * EXCHANGE tag) needs no such proof.
+ * §4.7's verifier calls once it has (lib/server/wallet-recipients.ts
+ * submitOwnershipProof). An exchange deposit address (the EXCHANGE tag)
+ * needs no such proof, but it must be the business's saved exchange
+ * account (§4.7): `savedExchanges`.
  *
  * Every read and write takes the business's org.
  */
@@ -19,12 +21,14 @@ import { createHash } from 'node:crypto';
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { normalizeSuiAddress } from '@mysten/sui/utils';
 
-import { walletOwnershipProofs } from '../db/schema.ts';
+import { suppliers, walletOwnershipProofs } from '../db/schema.ts';
 import { closeSigningRequest, listSigningRequests, type DrizzleDb } from './wallet-signing-store.ts';
 
 export interface OwnershipGate {
   /** Which of these addresses the business has a live ownership proof for. */
   provenAddresses(orgId: string, addresses: string[]): Promise<string[]>;
+  /** Which of these addresses are the business's saved exchange accounts (v2 §4.7): the EXCHANGE tag's gate. */
+  savedExchanges(orgId: string, addresses: string[]): Promise<string[]>;
 }
 
 export function dbOwnershipGate(db: DrizzleDb): OwnershipGate {
@@ -37,6 +41,15 @@ export function dbOwnershipGate(db: DrizzleDb): OwnershipGate {
         .from(walletOwnershipProofs)
         .where(and(eq(walletOwnershipProofs.orgId, orgId), inArray(walletOwnershipProofs.address, wanted), isNull(walletOwnershipProofs.revokedAt)));
       return rows.map((r) => r.address);
+    },
+    async savedExchanges(orgId, addresses) {
+      const wanted = [...new Set(addresses.map((a) => normalizeSuiAddress(a)))];
+      if (wanted.length === 0) return [];
+      const rows = await db
+        .select({ address: suppliers.walletAddress })
+        .from(suppliers)
+        .where(and(eq(suppliers.orgId, orgId), eq(suppliers.deliveryKind, 'EXCHANGE'), inArray(suppliers.walletAddress, wanted)));
+      return [...new Set(rows.map((r) => r.address).filter((a): a is string => Boolean(a)))];
     },
   };
 }

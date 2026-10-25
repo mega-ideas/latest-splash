@@ -24,8 +24,10 @@
  * and registration number, not the editable profile, and only once the
  * business's KYB is approved. The beneficiary is the ONE saved recipient at
  * the address (two saved at one address is refused, not guessed). The
- * exchange still comes from the request until §4.7 keeps it on the
- * recipient; a deposit address once named at one exchange keeps it.
+ * exchange is the saved exchange account's own (§4.7): a request naming
+ * another is refused, and a request names it only for a recipient saved
+ * before exchanges were kept on the recipient. A deposit address once named
+ * at one exchange keeps it.
  */
 import { and, desc, eq, isNotNull, ne } from 'drizzle-orm';
 import { normalizeSuiAddress } from '@mysten/sui/utils';
@@ -52,6 +54,10 @@ export type SavedRecipient = {
   town?: string | null;
   street?: string | null;
   postCode?: string | null;
+  /** How the recipient is paid (v2 §4.7). Absent on a recipient saved before. */
+  deliveryKind?: string | null;
+  /** The exchange the saved EXCHANGE recipient's deposit address is at. */
+  exchange?: TravelRuleExchange | null;
 };
 
 /** More than one saved recipient at the address: which one is the beneficiary is not guessed. */
@@ -63,6 +69,25 @@ export type ExchangePaymentDeps = {
   now: () => Date;
   recipientAt: (orgId: string, address: string) => Promise<SavedRecipient | AmbiguousRecipient | null>;
 };
+
+/**
+ * The exchange of a payment: the saved recipient's own (v2 §4.7). A request
+ * naming another is refused; a request may name it only for a recipient
+ * saved before exchanges were kept on the recipient. A wallet the supplier
+ * holds is not an exchange account.
+ */
+function exchangeOf(saved: SavedRecipient, requested: unknown): { ok: true; exchange: TravelRuleExchange } | Refusal {
+  if (saved.deliveryKind === 'SELF_CUSTODY' || saved.deliveryKind === 'CROSS_CHAIN' || saved.deliveryKind === 'BANK') {
+    return refuse(409, 'not_an_exchange_recipient', 'This recipient is not saved as an exchange account.');
+  }
+  const named = requested === undefined || requested === null || requested === '' ? null : requested;
+  if (saved.exchange) {
+    if (named !== null && named !== saved.exchange) return refuse(409, 'exchange_mismatch', 'The recipient is saved at another exchange. Check the recipient.');
+    return { ok: true, exchange: saved.exchange };
+  }
+  if (!isTravelRuleExchange(named)) return refuse(400, 'bad_exchange', 'Choose the exchange the supplier holds this deposit address at.');
+  return { ok: true, exchange: named };
+}
 
 async function oneRecipientAt(deps: ExchangePaymentDeps, address: string): Promise<{ ok: true; recipient: SavedRecipient } | Refusal> {
   const found = await deps.recipientAt(deps.orgId, address);
@@ -117,12 +142,13 @@ export async function senderDeclarationFor(
   deps: ExchangePaymentDeps & { signedPartners: ReadonlySet<PartnerId> },
   input: { requestId: unknown; exchange: unknown; invoiceNumber: unknown; invoiceDate: unknown },
 ): Promise<{ ok: true; pack: ReturnType<typeof senderDeclaration> } | Refusal> {
-  if (!isTravelRuleExchange(input.exchange)) return refuse(400, 'bad_exchange', 'Choose the exchange the supplier holds this deposit address at.');
   const p = await walletPayment(deps, input.requestId);
   if (!p.ok) return p;
   const saved = await oneRecipientAt(deps, p.recipient);
   if (!saved.ok) return saved;
   const supplier = saved.recipient;
+  const ex = exchangeOf(supplier, input.exchange);
+  if (!ex.ok) return ex;
   const payer = await payerOf(deps.db, deps.orgId);
   if (!payer) return refuse(404, 'not_found', 'No such business.');
   const [kyb] = await deps.db
@@ -137,7 +163,7 @@ export async function senderDeclarationFor(
   const pack = senderDeclaration({
     payer: { legalName: kyb.businessName, registrationNumber: kyb.registrationNumber, country: payer.country, address: payer.address },
     walletAddress: p.request.senderAddress,
-    supplier: { name: supplier.legalName?.trim() || supplier.name, exchange: input.exchange as TravelRuleExchange, depositAddress: p.recipient },
+    supplier: { name: supplier.legalName?.trim() || supplier.name, exchange: ex.exchange, depositAddress: p.recipient },
     amountMinor: p.amountMinor,
     invoice: { number: text(input.invoiceNumber), date: text(input.invoiceDate) },
     paymentRef: p.paymentRef,
@@ -153,7 +179,9 @@ export async function travelRuleForPayment(
   deps: ExchangePaymentDeps & { provider: TravelRuleProvider },
   input: { requestId: unknown; exchange: unknown; purpose: unknown; createdBy: string },
 ) {
-  if (!isTravelRuleExchange(input.exchange)) return refuse(400, 'bad_exchange', 'Choose the exchange the supplier holds this deposit address at.');
+  if (input.exchange !== undefined && input.exchange !== null && input.exchange !== '' && !isTravelRuleExchange(input.exchange)) {
+    return refuse(400, 'bad_exchange', 'Choose the exchange the supplier holds this deposit address at.');
+  }
   const p = await walletPayment(deps, input.requestId);
   if (!p.ok) return p;
   const screening = await latestScreening(deps.db, deps.orgId, 'SUI', p.recipient);
@@ -163,6 +191,9 @@ export async function travelRuleForPayment(
   const saved = await oneRecipientAt(deps, p.recipient);
   if (!saved.ok) return saved;
   const supplier = saved.recipient;
+  const ex = exchangeOf(supplier, input.exchange);
+  if (!ex.ok) return ex;
+  const exchange = ex.exchange;
   const payer = await payerOf(deps.db, deps.orgId);
   if (!payer?.country) return refuse(409, 'originator_incomplete', "Complete the business's registered address first.");
   const [kyb] = await deps.db
@@ -179,7 +210,7 @@ export async function travelRuleForPayment(
     .from(travelRuleTransfers)
     .where(and(eq(travelRuleTransfers.orgId, deps.orgId), eq(travelRuleTransfers.depositAddress, p.recipient), ne(travelRuleTransfers.paymentRef, p.paymentRef), isNotNull(travelRuleTransfers.providerRef)))
     .limit(1);
-  if (earlier && earlier.exchange !== input.exchange) {
+  if (earlier && earlier.exchange !== exchange) {
     return refuse(409, 'exchange_mismatch', 'An earlier Travel Rule message named another exchange for this deposit address. Check the recipient.');
   }
   const purpose = typeof input.purpose === 'string' ? input.purpose.replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 140) || null : null;
@@ -200,7 +231,7 @@ export async function travelRuleForPayment(
         town: supplier.town ?? null,
         street: supplier.street ?? null,
         postCode: supplier.postCode ?? null,
-        exchange: input.exchange as TravelRuleExchange,
+        exchange,
         depositAddress: p.recipient,
       },
       purpose,
