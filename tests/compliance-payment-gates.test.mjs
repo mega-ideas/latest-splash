@@ -492,3 +492,22 @@ test('the evidence refuses an account number under any key, and keeps amounts, t
     receiptId: 'Fq3nXdigest1111111111111111111111111111111#2', contentHash: 'ab'.repeat(32), threshold: 2,
   }));
 });
+
+test('a payment to an exchange account not yet confirmed is signed only once its Travel Rule message is approved (v2 §4.7)', async () => {
+  const w = await world();
+  const { members } = await registered(w);
+  const EXCHANGE = normalizeSuiAddress('0x' + '64'.repeat(32));
+  await recordScreening(w.db, clear(EXCHANGE, { kind: 'exchange_recipient' }));
+  await saveWalletRecipient(w.db, { address: EXCHANGE, kind: 'EXCHANGE', confirmed: false });
+  const ex = await requestWalletPayment(w.ctx, { orgId: 'acme', requestedBy: 'u-two', wallet: members, payment: payment({ paymentRef: bytes32(8), recipient: EXCHANGE, kind: 2 }) });
+  assert.equal(ex.ok, true, JSON.stringify(ex));
+  const stored = async () => (await import('../lib/server/wallet-signing-store.ts')).readSigningRequest(w.db, 'acme', ex.request.id);
+  const now = new Date(Date.now() + 1000);
+  await w.db.insert(schema.travelRuleTransfers).values({ id: `trt_${randomUUID()}`, orgId: 'acme', paymentRef: ex.request.id, signingRequestId: ex.request.id, exchange: 'pdax', depositAddress: EXCHANGE, amountMinor: 250_000_000n, requestHash: 'h', provider: 'sumsub', sandbox: false, providerRef: 'txn-8', status: 'submitted', createdBy: 'u', createdAt: now, updatedAt: now });
+  for (const [status, code] of [['submitted', 'exchange_unconfirmed'], ['awaiting_counterparty', 'exchange_unconfirmed'], ['approved', null]]) {
+    await w.client.exec(`UPDATE travel_rule_transfers SET status = '${status}' WHERE provider_ref = 'txn-8'`);
+    const r = await paymentBeforeSign({ db: w.db, now: () => T0 }, await stored());
+    assert.equal(r?.code ?? null, code, status);
+  }
+  await w.client.close();
+});

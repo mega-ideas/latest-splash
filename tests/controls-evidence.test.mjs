@@ -409,3 +409,23 @@ test('without a provider applicant or a registered address the Travel Rule messa
   const sandboxed = await travelRuleForPayment(d, { requestId, exchange: 'pdax', createdBy: 'u' });
   assert.deepEqual([sandboxed.ok, sandboxed.transfer.sandbox, sandboxed.transfer.provider], [true, true, 'sandbox']);
 });
+
+test('a wallet payment names who saved, approved and proved its recipient, and a cross-chain one its CCTP receipt (v2 §4.7)', async () => {
+  const w = await world();
+  const PAYEE = `0x${'d4'.repeat(32)}`;
+  await w.client.exec(`INSERT INTO suppliers (id, org_id, name, country, payout_method, wallet_address, wallet_provider, delivery_kind, ownership_status, legal_name, registration_number, address_line1, address_city, created_by, approved_by, approved_at, ownership_proven_at, ownership_challenge_id)
+    VALUES ('rcp_ev', 'acme', 'Dela Cruz', 'PH', 'WALLET', '${PAYEE}', 'SLUSH', 'SELF_CUSTODY', 'proven', 'Dela Cruz Trading Corp', 'CS1', '1 Ayala', 'Makati', 'u-owner2', 'u-owner', '${T0.toISOString()}', '${T0.toISOString()}', 'roc_1')`);
+  const requestId = await signingRequest(w.db, { purpose: 'wallet_payment', summary: { description: { actions: [{ type: 'open_intent', asset: 'USDC', recipient: PAYEE, amountMinor: '5000000', kind: 1, targetCurrency: 'USDC', fxRateUsdLocal: '1000000', beneficiaryRef: '', expiresAtMs: '1' }, { type: 'pay_intent', asset: 'USDC', maxFeeMinor: '100', settleByMs: '2', paysFromCommand: 0, intentFromCommand: 0, intent: null }] } } });
+  const r = await controlsEvidenceFor(deps(w.db), requestId, 'u-owner');
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.deepEqual(r.evidence.recipient, { recipientId: 'rcp_ev', deliveryKind: 'SELF_CUSTODY', createdBy: 'u-owner2', approvedBy: 'u-owner', approvedAt: T0.toISOString(), ownership: { status: 'proven', provenAt: T0.toISOString(), challengeId: 'roc_1' }, exchange: null });
+  assert.equal(r.evidence.crossChain, null);
+
+  // A cross-chain payment's receipt, by its intent id.
+  await w.db.insert(schema.crossChainTransfers).values({ id: 'cct_ev', orgId: 'acme', paymentRef: INTENT, destinationChain: 'BASE', destinationDomain: 6, mintRecipient: `0x${'0'.repeat(24)}${'52'.repeat(20)}`, amountMinor: 1_000_000_000n, status: 'awaiting_burn' });
+  const ccRequest = await signingRequest(w.db, { purpose: 'wallet_payment', summary: { description: { actions: [{ type: 'pay_intent', asset: 'USDC', maxFeeMinor: '0', settleByMs: '2', paysFromCommand: 0, intentFromCommand: null, intent: { intentId: INTENT, recipient: PAYEE, amountMinor: '1000000000', kind: 3, targetCurrency: 'USDC', fxRateUsdLocal: '1000000', expiresAtMs: '9', asset: 'USDC' } }] } } });
+  const withCc = await controlsEvidenceFor(deps(w.db), ccRequest, 'u-owner');
+  assert.deepEqual([withCc.evidence.crossChain.status, withCc.evidence.crossChain.destination.chain, withCc.evidence.crossChain.burn], ['awaiting_burn', 'BASE', null]);
+  assertEvidenceClean(withCc.evidence);
+  await w.client.close();
+});

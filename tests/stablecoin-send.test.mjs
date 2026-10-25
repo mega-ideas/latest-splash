@@ -105,8 +105,17 @@ async function setup({ kyb = 'REGISTERED', verdict = 'CLEAR', payoutMethod = 'WA
   const { client, db } = await migratedDb();
   await client.exec(`INSERT INTO organizations (id, name, kyb_lifecycle) VALUES ('org_s', 'S Co', '${kyb}')`);
   await client.exec(`INSERT INTO users (id, email, name) VALUES ('u_owner', 'owner@s.test', 'Owner')`);
-  await client.exec(`INSERT INTO suppliers (id, org_id, name, country, payout_method, wallet_address, wallet_provider)
-    VALUES ('rcpt_w', 'org_s', 'Maria', 'PH', 'WALLET', '${RECIPIENT}', 'SLUSH')`);
+  // The saved row the server's own gate reads (v2 §4.7), as the record below describes it.
+  if (payoutMethod === 'WALLET' && delivery?.deliveryKind === 'SELF_CUSTODY') {
+    await client.exec(`INSERT INTO suppliers (id, org_id, name, country, payout_method, wallet_address, wallet_provider, delivery_kind, ownership_status, legal_name, registration_number, address_line1, address_city, created_by, approved_by, approved_at)
+      VALUES ('rcpt_w', 'org_s', 'Maria', 'PH', 'WALLET', '${RECIPIENT}', 'SLUSH', 'SELF_CUSTODY', '${delivery.ownershipStatus}', 'Maria Trading', 'R-1', '1 Rizal St', 'Manila', 'u_owner', 'u_owner', now())`);
+    if (delivery.ownershipStatus === 'proven') {
+      await client.exec(`INSERT INTO wallet_ownership_proofs (org_id, address, method, evidence_sha256, verified_at) VALUES ('org_s', '${RECIPIENT}', 'test', '${'0'.repeat(64)}', now())`);
+    }
+  } else {
+    await client.exec(`INSERT INTO suppliers (id, org_id, name, country, payout_method, wallet_address, wallet_provider)
+      VALUES ('rcpt_w', 'org_s', 'Maria', 'PH', 'WALLET', '${RECIPIENT}', 'SLUSH')`);
+  }
   const recipient = {
     id: 'rcpt_w', orgId: 'org_s', name: 'Maria', country: 'PH', bank: '', swift: '', account: '', tier: 'PAYOUT_ONLY',
     kybStatus: 'none', createdVia: 'manual', createdAt: new Date(T0).toISOString(),
@@ -525,4 +534,17 @@ test('the chain reader takes the digest from effects when a dry run has none at 
   assert.equal(executed.digest, 'RealDigest');
   const failed = observe({ $kind: 'FailedTransaction', FailedTransaction: { digest: 'F', status: { success: false, error: { message: 'InsufficientCoinBalance' } } } });
   assert.deepEqual([failed.success, failed.error], [false, 'InsufficientCoinBalance']);
+});
+
+test('a proof withdrawn between the quote and the submission stops the transfer before its approval is spent (v2 §4.7)', async () => {
+  const s = await setup();
+  const q = await quote(s.deps);
+  assert.equal(q.ok, true, JSON.stringify(q));
+  await s.client.exec(`UPDATE wallet_ownership_proofs SET revoked_at = now()`);
+  await s.client.exec(`UPDATE suppliers SET ownership_status = 'revoked'`);
+  const r = await submit(s.deps, q);
+  assert.deepEqual([r.ok, r.code], [false, 'ownership_not_proven']);
+  assert.equal(s.approvals.consumed, 0, 'the approval is not spent');
+  assert.equal(s.chain.calls.execute, 0, 'nothing reached the chain');
+  await s.client.close();
 });
