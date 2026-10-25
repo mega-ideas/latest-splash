@@ -2226,7 +2226,12 @@ const SPLASH_ANSWERS: Array<{ test: RegExp; reply: string | (() => string); skip
   {
     // Withdrawal notice period + fees for treasury
     test: /\b(notice period|withdraw(al)? (time|fee|period|notice)|how long (to|does) (withdraw|redeem)|get (my )?money out)\b/,
-    reply: 'Moving idle cash into Smart Treasury is instant and carries no fee. Coming back out has a 1-3 business-day notice window, shown before you confirm, with no withdrawal fee — the notice is recorded so approvers can see exactly what was requested and when.',
+    // v2 D9: Treasury is USDY in the business's own wallet, so coming out is
+    // a swap on Sui, not a notice-period withdrawal from the ledger Splash
+    // held (retired). The rest is Zeke's Treasury answer, which says what
+    // this server can do.
+    reply: () => 'Treasury has no notice period. Redeeming USDY is a swap back to USDC on Sui at the price the market pays then, the Treasury page quotes that figure first, and Splash charges no fee on a swap. '
+      + treasuryCustodyRefusal(),
   },
   {
     // Batch CSV format

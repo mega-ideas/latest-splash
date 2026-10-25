@@ -7,7 +7,7 @@ import { ArrowRight, FileText, Send, TrendingUp } from 'lucide-react';
 import type { OnboardingIntent } from '@/lib/server/onboarding';
 
 /**
- * "How will you use Splash?" — one intent per workspace, chosen once
+ * "How will you use Splash?": one intent per workspace, chosen once
  * (changeable later only from Settings). The choice tailors which setup steps
  * the stepper emphasises and NOTHING else: the KYB lifecycle stays the single
  * authority on what may move money, whatever is picked here.
@@ -18,7 +18,6 @@ const CARDS: Array<{
   title: string;
   copy: string;
   bestFor: string;
-  roadmap?: boolean;
 }> = [
   {
     intent: 'pay',
@@ -38,9 +37,9 @@ const CARDS: Array<{
     intent: 'treasury',
     icon: TrendingUp,
     title: 'Treasury',
-    copy: 'Idle USD under a projected, variable posture — every move human-approved.',
-    bestFor: 'A business parking idle USD between payouts.',
-    roadmap: true,
+    // v2 D9: USDY in the business's own wallet, swapped by its owners.
+    copy: 'Swap idle USDC for USDY in your own Splash Wallet, and redeem it from there. Your owners sign every swap. USDY is not Shariah-compliant.',
+    bestFor: 'A business holding idle USDC between payouts.',
   },
 ];
 
@@ -68,16 +67,9 @@ export default function IntentPicker() {
 
   return (
     <div className="grid gap-4 md:grid-cols-3">
-      {CARDS.map(({ intent, icon: Icon, title, copy, bestFor, roadmap }) => (
+      {CARDS.map(({ intent, icon: Icon, title, copy, bestFor }) => (
         <article key={intent} className="dash-surface flex flex-col gap-4 p-6">
-          <div className="flex items-center justify-between">
-            <Icon aria-hidden="true" className="h-6 w-6 text-[#1F4452]" />
-            {roadmap ? (
-              <span className="rounded-full border border-[#D9A441]/50 bg-[#D9A441]/10 px-2.5 py-0.5 text-[11px] font-semibold text-[#B4690E]">
-                Coming — subject to licensing
-              </span>
-            ) : null}
-          </div>
+          <Icon aria-hidden="true" className="h-6 w-6 text-[#1F4452]" />
           <div>
             <h2 className="text-lg font-bold text-[#1F4452]">{title}</h2>
             <p className="mt-1.5 text-sm leading-relaxed text-[#326273]">{copy}</p>
@@ -91,7 +83,7 @@ export default function IntentPicker() {
             disabled={busy !== null}
             className="dash-block mt-auto inline-flex min-h-[46px] items-center justify-center gap-2 rounded-lg bg-[#1F4452] px-5 text-sm font-semibold text-white transition hover:bg-[#326273] disabled:opacity-60"
           >
-            {busy === intent ? 'Saving…' : roadmap ? 'Choose and register interest' : `Choose ${title.toLowerCase()}`}
+            {busy === intent ? 'Saving…' : `Choose ${title.toLowerCase()}`}
             <ArrowRight aria-hidden="true" className="h-4 w-4" />
           </button>
         </article>
