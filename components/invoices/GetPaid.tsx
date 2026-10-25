@@ -6,6 +6,7 @@
  * once paid.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, Copy, ExternalLink, FilePlus2, Loader2, ReceiptText, RefreshCw, Search, X } from 'lucide-react';
 import { toast } from 'sonner';
@@ -274,8 +275,10 @@ function Sheet({ title, close, children }: { title: string; close: () => void; c
     document.addEventListener('keydown', onKey);
     return () => { document.removeEventListener('keydown', onKey); previous?.focus?.(); };
   }, [close]);
-  return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-[#0c3e48]/40 backdrop-blur-sm sm:items-center sm:p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) close(); }}>
+  // On document.body, so no stacking context in the page puts the floating
+  // Zeke button over the sheet's own button.
+  return createPortal(
+    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-[#0c3e48]/40 backdrop-blur-sm sm:items-center sm:p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) close(); }}>
       <div ref={ref} role="dialog" aria-modal="true" aria-label={title} className="dash-surface w-full max-w-md rounded-b-none p-5 sm:rounded-b-2xl">
         <div className="flex items-start justify-between gap-3">
           <h2 className="text-lg font-bold text-[#0c3e48]">{title}</h2>
@@ -283,7 +286,8 @@ function Sheet({ title, close, children }: { title: string; close: () => void; c
         </div>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -296,7 +300,7 @@ function MarkPaid({ invoice, close, submit, busy }: { invoice: InvoiceRecord; cl
   return (
     <Sheet title="Mark as paid" close={close}>
       <form onSubmit={(e) => { e.preventDefault(); if (reference.trim().length >= 4) submit(reference.trim()); }} className="mt-3 space-y-3">
-        <p className="text-sm text-[#1f4452]">Mark it paid once {usdc(invoice.amountUsd)} has reached your account. Enter the reference your bank shows for that payment.</p>
+        <p className="text-sm text-[#1f4452]">Mark it paid once {usdc(invoice.amountUsd)} USDC has reached your account. Enter the reference your bank shows for that payment.</p>
         {invoice.payerReportedReference && (
           <div className="rounded-xl bg-[var(--warn-bg)] p-3 text-[13px] text-[var(--warn-ink)]">
             <p className="font-semibold">{payer} says they paid</p>

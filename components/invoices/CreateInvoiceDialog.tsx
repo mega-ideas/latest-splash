@@ -7,6 +7,7 @@
  * link ready to copy the moment the invoice exists.
  */
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { CheckCircle2, Copy, ExternalLink, Loader2, Lock, X } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -116,8 +117,9 @@ export default function CreateInvoiceDialog({ issuerName, documentsOpen, close, 
     }
   }
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-[#0c3e48]/40 p-0 backdrop-blur-sm sm:items-center sm:p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) close(); }}>
+  // On document.body, above the floating Zeke button.
+  return createPortal(
+    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-[#0c3e48]/40 p-0 backdrop-blur-sm sm:items-center sm:p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) close(); }}>
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="ci-title" className="dash-surface max-h-[92dvh] w-full max-w-4xl overflow-y-auto rounded-b-none p-5 sm:rounded-b-2xl sm:p-6">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -204,7 +206,8 @@ export default function CreateInvoiceDialog({ issuerName, documentsOpen, close, 
           </form>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

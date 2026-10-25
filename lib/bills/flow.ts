@@ -53,7 +53,7 @@ export type BillFacts = {
 export function scheduleBlockers(f: BillFacts): string[] {
   const out: string[] = [];
   if (!f.confirmed) out.push('Check and confirm what Zeke read.');
-  if (f.sameNumber) out.push('This supplier’s invoice number is already in your list. Cancel one of the two.');
+  if (f.sameNumber) out.push('This invoice number is already in your list, from this supplier or to this recipient. Cancel one of the two.');
   if (f.sameAmount && !f.duplicateAcknowledged) out.push('Say why this is not a duplicate of the invoice with the same amount.');
   if (!f.recipientMatched) out.push('Choose the verified recipient this invoice pays.');
   else if (!f.recipientVerified) out.push('The recipient is not verified yet.');
