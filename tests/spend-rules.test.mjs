@@ -821,6 +821,24 @@ test("a staff member's payment above the threshold gets one owner's second appro
   await w.client.close();
 });
 
+test("an owner's second approval is not given to a bank payout or a payout partner's deposit address (instruction before deposit)", async () => {
+  const w = await spendWorld();
+  const { members } = await withPolicy(w);
+  await giveRule(w, members);
+  const DEPOSIT = normalizeSuiAddress('0x' + 'a3'.repeat(32));
+  const open = (id, over) => w.model.addIntent({ id, initialSharedVersion: 7, account: ACCOUNT, maker: STAFF, recipient: SUPPLIER, beneficiaryRef: '', amountMinor: 1_500n * USDC_1, kind: 1, targetCurrency: 'USDC', fxRateUsdLocal: 1_000_000n, expiresAtMs: t0 + 3n * DAY, status: 0, asset: USDC, ...over });
+  const approve = (intentId) => openSecondApproval(w.sc, { orgId: 'acme', ownerUserId: 'u-three', ownerPasskeyPublicKey: w.keys.three.publicKey, intentId, payer: STAFF, maxFeeMinor: 300_000n, settleByMs: t0 + 300_000n });
+  const bank = normalizeSuiAddress('0x' + 'a1'.repeat(32));
+  const toDeposit = normalizeSuiAddress('0x' + 'a2'.repeat(32));
+  open(bank, { kind: 4, targetCurrency: 'PHP', fxRateUsdLocal: 56_000_000n, beneficiaryRef: 'ab'.repeat(32) });
+  open(toDeposit, { recipient: DEPOSIT });
+  await w.db.insert(schema.partnerDepositAddresses).values({ id: 'pda_1', orgId: 'acme', partner: 'pdax', address: DEPOSIT, accountRef: 'acct-1', status: 'verified', testAmountMinor: 1_000_000n, createdBy: 'u-two' });
+  await w.screenClear(DEPOSIT);
+  assert.equal((await approve(bank)).code, 'use_payout_route');
+  assert.equal((await approve(toDeposit)).code, 'use_payout_route');
+  await w.client.close();
+});
+
 /* ── Offboarding: a rule outlives its membership until the owners act ─── */
 
 async function passkeyFor(w, userId, address) {
