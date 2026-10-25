@@ -59,8 +59,9 @@ test('comparison: no yield row, no ~400ms, sourced competitor cells or "Varies"'
     assert.ok(!features.some((f) => gone.test(f)), `no ${gone} row: Splash cannot claim it today`);
   }
   assert.equal(rows.find((r) => /speed/i.test(r.feature)).splash, SPEED_LINE);
-  assert.equal(rows.find((r) => /fee to a bank/i.test(r.feature)).splash, 'No fee yet', 'the fee is the schedule, in words');
-  assert.ok(rows.some((r) => /Splash Wallet/.test(r.splash)), 'where the money sits: the Splash Wallet');
+  // The review: the fee cell names the partner's leg too, and "where the
+  // money sits" moved to the list of what Splash does today (splashToday).
+  assert.match(rows.find((r) => /fee to a bank/i.test(r.feature)).splash, /^No fee yet; /, 'the fee is the schedule, in words');
 
   // A competitor cell is a figure from the dataset, or "Varies". Nothing else.
   const sourced = new Set([baseline.bankWire.delivery, baseline.fintech.delivery]);
@@ -120,11 +121,12 @@ test('trust: four gates true for bank and wallet payments, and the software foot
 test('footer: Product, Trust and Get started columns, and the SaaS compliance text', async () => {
   const landing = LANDING();
   const footer = landing.slice(landing.indexOf('<footer'), landing.indexOf('</footer>'));
-  const columns = [...footer.matchAll(/aria-label="([^"]+)"/g)].map((m) => m[1]).filter((l) => ['Product', 'Trust', 'Get started'].includes(l));
+  // Each column's nav is named by its heading (the review: titles are h2s).
+  const columns = [...footer.matchAll(/<h2 id="[^"]+">([^<]+)<\/h2>/g)].map((m) => m[1]);
   assert.deepEqual(columns, ['Product', 'Trust', 'Get started']);
 
   const col = (label) => {
-    const start = footer.indexOf(`aria-label="${label}"`);
+    const start = footer.indexOf(`">${label}</h2>`);
     return footer.slice(start, footer.indexOf('</nav>', start));
   };
   const links = (s) => [...s.matchAll(/>([^<>{}]+)<\/(?:a|Link)>/g)].map((m) => m[1].trim().replace('&amp;', '&'));

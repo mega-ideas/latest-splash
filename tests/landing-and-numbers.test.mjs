@@ -327,7 +327,7 @@ test('the comparison table names no competitor, and its fintech column is the da
   const table = await source('lib/landing/comparison.ts');
   assert.doesNotMatch(table, /\bWise\b/, 'no Wise in the rows');
   assert.doesNotMatch(table, /Mid-market/, 'no mid-market claim the dataset contradicts');
-  const head = landing.slice(landing.indexOf('<table className="iso-comparison-table">'), landing.indexOf('</thead>'));
+  const head = landing.slice(landing.indexOf('<table className="iso-comparison-table"'), landing.indexOf('</thead>'));
   assert.doesNotMatch(head, /\bWise\b/, 'no Wise column');
   assert.match(head, /Fintech app/, 'the column is the category');
   assert.match(table, /baseline\?\.fintech/, "the fintech column's figures come from the dataset");
