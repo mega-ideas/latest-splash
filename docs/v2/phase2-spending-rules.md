@@ -208,7 +208,17 @@ index (running totals counted as `threshold_total` counts them, and
 RuleSpend carries no principal: the amounts are the policy's totals. A
 bank payout's RuleSpend names the partner deposit address, so its payments
 are counted per deposit address (beneficiaries sharing one deposit address
-count together: a flag can only become likelier).
+count together: a flag can only become likelier). A repeat counts only the
+payments made inside what the check counts now (`countsFromMs`: the
+window's start, or the previous window's while a carried amount still
+counts), by each payment's checkpoint time; a payment whose time the
+reader could not tell is counted.
+
+The key of a `same_recipient_many_spenders` alert carries its severity:
+the same spenders in the same windows passing the threshold together after
+a near alert is a new alert and a new email, and the near one stops being
+shown. An alert seen again (a repeat whose payments rise) keeps its row,
+updated to what is counted now, with no new email.
 
 Nothing is blocked, signed or changed. `GET /api/wallet/spending-rules`
 gives owners (only) the live flags as `nearThreshold`.

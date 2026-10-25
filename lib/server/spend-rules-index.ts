@@ -88,6 +88,12 @@ export type RunningTotalView = {
   /** What the second-approval check counts now (this window, and what it still carries). */
   countedMinor: string;
   countsUntilMs: string;
+  /**
+   * The earliest a payment counted in `countedMinor` can have been made: the
+   * window's start, or the previous window's start while an amount carried
+   * from it still counts.
+   */
+  countsFromMs?: string;
   /** How much more this payer can pay this recipient before an owner must approve. */
   beforeApprovalMinor: string;
   /** At or above 80% of the threshold. */
@@ -108,7 +114,8 @@ export type RuleView = {
   status: 'active' | 'not_started' | 'expired' | 'no_allowance';
   allowances: AllowanceView[];
   runningTotals: RunningTotalView[];
-  recentSpends: Array<{ intentId: string; allowanceId: string; approvalId: string | null; recipient: string; derivedKind: number; feeMinor: string }>;
+  /** `timestampMs`: when the payment was checkpointed, when the reader could tell. */
+  recentSpends: Array<{ intentId: string; allowanceId: string; approvalId: string | null; recipient: string; derivedKind: number; feeMinor: string; timestampMs?: string }>;
 };
 
 export type SpendView = {
@@ -229,6 +236,7 @@ export function buildSpendView(input: {
             totalMinor: now < e.windowEndMs ? s(e.total) : '0',
             countedMinor: s(countedMinor),
             countsUntilMs: s(countsUntilMs),
+            countsFromMs: s(now < e.carriedUntilMs && e.carried > 0n ? e.windowStartMs - (e.windowEndMs - e.windowStartMs) : e.windowStartMs),
             beforeApprovalMinor: s(countedMinor >= threshold ? 0n : threshold - countedMinor),
             nearThreshold: threshold > 0n && countedMinor * 100n >= threshold * 80n,
           };
@@ -236,7 +244,7 @@ export function buildSpendView(input: {
         .filter((t) => t.countedMinor !== '0' || t.totalMinor !== '0');
       const recentSpends = input.spends
         .filter((e) => e.policyId === current.id && e.spender === sp.spender)
-        .map((e) => ({ intentId: e.intentId, allowanceId: e.allowanceId, approvalId: e.approvalId, recipient: e.recipient, derivedKind: e.derivedKind, feeMinor: s(e.fee) }));
+        .map((e) => ({ intentId: e.intentId, allowanceId: e.allowanceId, approvalId: e.approvalId, recipient: e.recipient, derivedKind: e.derivedKind, feeMinor: s(e.fee), ...(e.timestampMs !== undefined && e.timestampMs !== null ? { timestampMs: s(e.timestampMs) } : {}) }));
       const role = sp.role === 2 ? ('executor' as const) : ('staff' as const);
       rules.push({
         spender: sp.spender,

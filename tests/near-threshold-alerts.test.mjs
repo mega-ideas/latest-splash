@@ -113,7 +113,7 @@ test('several spenders paying one recipient: near at 80% together, over when tog
   assert.deepEqual(o.spenders, [STAFF_A, STAFF_B], 'sorted, so the key is the same whatever order the index gives');
   assert.equal(o.countedMinor, String(11_000n * USDC));
   assert.equal(o.payments, 2);
-  assert.equal(o.key, `same_recipient_many_spenders|${POLICY}|${SUPPLIER}|${STAFF_A}@${W0},${STAFF_B}@${W0}`);
+  assert.equal(o.key, `same_recipient_many_spenders|${POLICY}|${SUPPLIER}|${STAFF_A}@${W0},${STAFF_B}@${W0}|over_threshold`);
   assert.match(o.summary, /have together paid 0x5a5a…5a5a 11,000 USDC, above the 10,000 USDC that needs a second approval for one person\. Each stayed under it alone, so no approval was asked for\./);
   assert.match(o.detail, /0xa1a1…a1a1: 6,000 USDC; 0xb2b2…b2b2: 5,000 USDC/);
 

@@ -232,6 +232,8 @@ export type RuleSpendEvent = {
   recipient: string;
   derivedKind: number;
   fee: bigint;
+  /** When the emitting transaction was checkpointed (ms), when the reader looked it up; the event itself carries no time. */
+  timestampMs?: bigint | null;
 };
 
 export function parseRuleSpend(bytes: Uint8Array): RuleSpendEvent {

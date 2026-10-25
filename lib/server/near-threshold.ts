@@ -31,9 +31,12 @@
  * (several beneficiaries bound to one deposit address count together, a
  * possible over-count that only makes a flag likelier).
  *
- * Pure. Each alert is keyed by its content (the policy, who, to whom, and
- * the windows the totals belong to), so a re-run derives the same key and a
- * new window derives a new one.
+ * Pure. Each alert is keyed by its content (the policy, who, to whom, the
+ * windows the totals belong to and, for several spenders, whether they are
+ * near or over), so a re-run derives the same key, a new window derives a
+ * new one, and passing the threshold derives a new one. A repeat counts
+ * only the RuleSpend payments made inside what the threshold check counts
+ * now (`countsFromMs`, by each payment's checkpoint time).
  */
 import { formatUsdcBound } from '../fees/copy.ts';
 import type { SpendView } from './spend-rules-index.ts';
@@ -58,6 +61,8 @@ export type NearThresholdAlert = {
   payments: number;
   /** Shown until the last of the totals stops counting. */
   activeUntilMs: string;
+  /** The alert this one escalates (the same spenders' near alert, once over): no longer shown. */
+  supersedesKey: string | null;
   summary: string;
   detail: string;
 };
@@ -103,7 +108,12 @@ export function deriveNearThresholdAlerts(view: SpendView, opts: { nameOf?: Name
       // Who RuleSpend names for this total: the address, or the bank
       // beneficiary's partner deposit address.
       const paidTo = t.recipient ?? (t.beneficiary ? depositOf.get(t.beneficiary.toLowerCase()) ?? null : null);
-      const payments = paidTo ? rule.recentSpends.filter((s) => s.recipient === paidTo).length : 0;
+      // Only payments inside what the threshold check counts now: one made
+      // before `countsFromMs` is in no total that counts. A payment whose time
+      // the reader could not tell is counted (a flag is likelier, not missed).
+      const from = t.countsFromMs === undefined ? null : BigInt(t.countsFromMs);
+      const inWindow = (x: { timestampMs?: string }) => from === null || x.timestampMs === undefined || BigInt(x.timestampMs) >= from;
+      const payments = paidTo ? rule.recentSpends.filter((x) => x.recipient === paidTo && inWindow(x)).length : 0;
       entries.push({ spender: rule.spender, recipient: t.recipient, beneficiary: t.beneficiary, counted, windowStartMs: t.windowStartMs, countsUntilMs: BigInt(t.countsUntilMs), payments });
     }
   }
@@ -128,6 +138,7 @@ export function deriveNearThresholdAlerts(view: SpendView, opts: { nameOf?: Name
       thresholdMinor: threshold.toString(),
       payments: e.payments,
       activeUntilMs: e.countsUntilMs.toString(),
+      supersedesKey: null,
       summary: `${who(e.spender, role.get(e.spender), opts.nameOf)} has paid ${to(e)} ${e.payments} times, ${usdc(e.counted)} in all, close to the ${usdc(threshold)} that needs a second approval.`,
       detail: `${full(e)} What counts toward the second approval now: ${usdc(e.counted)} of ${usdc(threshold)}. ${ACT}`,
     });
@@ -149,8 +160,12 @@ export function deriveNearThresholdAlerts(view: SpendView, opts: { nameOf?: Name
     const until = group.reduce((m, e) => (e.countsUntilMs > m ? e.countsUntilMs : m), 0n);
     const names = list(spenders.map((s) => who(s, role.get(s), opts.nameOf)));
     const e0 = group[0];
+    // Severity is part of the key: the same spenders, in the same windows,
+    // passing the threshold together after a near alert is a new alert (and
+    // a new email), and the near one stops being shown.
+    const base = `same_recipient_many_spenders|${policy.id}|${target}|${sorted.map((e) => `${e.spender}@${e.windowStartMs}`).join(',')}`;
     alerts.push({
-      key: `same_recipient_many_spenders|${policy.id}|${target}|${sorted.map((e) => `${e.spender}@${e.windowStartMs}`).join(',')}`,
+      key: `${base}|${over ? 'over_threshold' : 'near_threshold'}`,
       kind: 'same_recipient_many_spenders',
       severity: over ? 'over_threshold' : 'near_threshold',
       policyId: policy.id,
@@ -161,6 +176,7 @@ export function deriveNearThresholdAlerts(view: SpendView, opts: { nameOf?: Name
       thresholdMinor: threshold.toString(),
       payments: group.reduce((n, e) => n + e.payments, 0),
       activeUntilMs: until.toString(),
+      supersedesKey: over ? `${base}|near_threshold` : null,
       summary: over
         ? `${names} have together paid ${to(e0)} ${usdc(counted)}, above the ${usdc(threshold)} that needs a second approval for one person. Each stayed under it alone, so no approval was asked for.`
         : `${names} have together paid ${to(e0)} ${usdc(counted)}, close to the ${usdc(threshold)} that needs a second approval for one person.`,

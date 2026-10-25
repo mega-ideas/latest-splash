@@ -96,6 +96,21 @@ export async function recordSpendRuleAlert(db: DrizzleDb, orgId: string, alert: 
     })
     .onConflictDoNothing()
     .returning({ id: spendRuleAlerts.id });
+  if (!inserted.length) {
+    // The same alert, seen again: what it counts now (a repeat's payments
+    // rise), without a new alert or a new email.
+    await db
+      .update(spendRuleAlerts)
+      .set({ countedMinor: alert.countedMinor, payments: alert.payments, summary: alert.summary, detail: alert.detail, activeUntil: new Date(Number(alert.activeUntilMs)), updatedAt: now })
+      .where(and(eq(spendRuleAlerts.orgId, orgId), eq(spendRuleAlerts.contentKey, alert.key)));
+  }
+  if (alert.supersedesKey) {
+    // Escalated: the near alert it replaces is no longer shown.
+    await db
+      .update(spendRuleAlerts)
+      .set({ activeUntil: now, updatedAt: now })
+      .where(and(eq(spendRuleAlerts.orgId, orgId), eq(spendRuleAlerts.contentKey, alert.supersedesKey), gt(spendRuleAlerts.activeUntil, now)));
+  }
   const rows = await db.select().from(spendRuleAlerts).where(and(eq(spendRuleAlerts.orgId, orgId), eq(spendRuleAlerts.contentKey, alert.key))).limit(1);
   if (!rows[0]) throw new Error('a spending-rule alert was neither recorded nor found');
   return { alert: toStored(rows[0]), created: inserted.length > 0 };

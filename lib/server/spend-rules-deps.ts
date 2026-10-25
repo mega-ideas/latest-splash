@@ -128,17 +128,40 @@ export function liveSpendReader(spendPackageId: string, usdcType: string): Spend
       const sui = await client();
       const wanted = normalizeSuiAddress(policyId);
       const out: RuleSpendEvent[] = [];
+      const digests = new Map<number, string>();
       let before: string | null = null;
       for (let page = 0; page < 4 && out.length < limit; page++) {
         const res = await sui.core.listEvents({ filter: { eventType: `${pkg}::splash_spend::RuleSpend` }, order: 'descending', limit: 50, ...(before ? { before } : {}) });
         for (const e of res.events) {
           const parsed = parseRuleSpend(e.bcs);
-          if (parsed.policyId === wanted) out.push(parsed);
+          if (parsed.policyId === wanted) digests.set(out.push(parsed) - 1, e.transactionDigest);
         }
         if (!res.hasNextPage || !res.endCursor) break;
         before = res.endCursor;
       }
-      return out.slice(0, limit);
+      const kept = out.slice(0, limit);
+      // When each payment was made (its checkpoint's time), so a near-threshold
+      // repeat counts only the payments inside the window the threshold check
+      // counts. Best effort: a time that cannot be read is left unknown.
+      const unique = [...new Set(kept.map((_, i) => digests.get(i)).filter((d): d is string => Boolean(d)))];
+      const times = new Map<string, bigint | null>(
+        await Promise.all(
+          unique.map(async (digest): Promise<[string, bigint | null]> => {
+            try {
+              const tx = await sui.core.getTransaction({ digest });
+              const t = (tx.Transaction ?? tx.FailedTransaction)?.timestampMs;
+              return [digest, typeof t === 'number' ? BigInt(t) : null];
+            } catch {
+              return [digest, null];
+            }
+          }),
+        ),
+      );
+      kept.forEach((e, i) => {
+        const digest = digests.get(i);
+        e.timestampMs = digest ? times.get(digest) ?? null : null;
+      });
+      return kept;
     },
   };
 }
