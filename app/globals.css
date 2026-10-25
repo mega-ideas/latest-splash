@@ -1307,7 +1307,9 @@ body {
 }
 
 .iso-comparison-table thead th {
-  color: rgba(12, 62, 72, .7);
+  /* 88% ink: 11 px labels, so 4.5:1 must hold over the gold glow too
+     (about 6.5:1 there; 70% measured 4.2:1 behind "Broker"). */
+  color: rgba(12, 62, 72, .88);
   background: rgba(12, 62, 72, .045);
   font-family: var(--font-mono), monospace;
   font-size: 11px;

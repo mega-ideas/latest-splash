@@ -7,13 +7,17 @@ import { ArrowRight } from 'lucide-react';
 /**
  * The phone landing's sticky bottom CTA (v2 brief D15, section 6). It shows
  * once the hero, with its own button, has scrolled away, and steps aside
- * while the closing CTA or the footer is on screen, so there is never a
- * second copy of the same button in view. CSS shows it on phones only
+ * while any other "Open payment desk" button is on screen (the product
+ * section's, the calculator's, the closing CTA's) or the footer is, so
+ * there is never a second copy of the same button in view. CSS shows it on phones only
  * (styles/landing-v2.css .ps-cta), floating
  * clear of the home indicator (safe-area-inset-bottom).
  *
  * Visibility comes from IntersectionObserver, not a scroll listener.
  */
+/** Everything on the landing that carries its own "Open payment desk", plus the footer. */
+export const STEP_ASIDE_SELECTOR = '.pv-actions, .pv-send, .iso-final, .iso-footer';
+
 export default function PhoneStickyCta() {
   const [heroVisible, setHeroVisible] = useState(true);
   const [endVisible, setEndVisible] = useState(false);
@@ -21,7 +25,7 @@ export default function PhoneStickyCta() {
   useEffect(() => {
     if (typeof IntersectionObserver === 'undefined') return;
     const hero = document.getElementById('cinematic');
-    const ends = [...document.querySelectorAll('.iso-final, .iso-footer')];
+    const ends = [...document.querySelectorAll(STEP_ASIDE_SELECTOR)];
     const seen = new Map<Element, boolean>();
 
     const heroObserver = new IntersectionObserver(([entry]) => setHeroVisible(entry.isIntersecting), { rootMargin: '0px 0px -40% 0px' });

@@ -406,7 +406,7 @@ export default function IsometricLanding({
       <header className={`iso-header ${showBackToTop ? 'is-scrolled' : ''}`}>
         <div className="iso-shell iso-header-inner">
           <Link href="/" className="iso-brand" aria-label="Splash Finance home">
-            <Image src="/splash-main-icon.png" alt="" width={841} height={823} className="iso-header-brand-icon" priority />
+            <Image src="/splash-main-icon.png" alt="" width={841} height={823} className="iso-header-brand-icon" sizes="40px" priority />
             <span className="iso-header-wordmark">
               <strong>Splash</strong>
             </span>
@@ -625,8 +625,6 @@ export default function IsometricLanding({
               <article
                 className={`iso-loops-card iso-loops-card-${index + 1}`}
                 key={loop.number}
-                aria-roledescription="slide"
-                aria-label={`${index + 1} of ${loops.length}: ${loop.label}`}
               >
                 <div className="iso-loops-meta">
                   <span>{loop.number}</span>
@@ -877,7 +875,7 @@ export default function IsometricLanding({
         <div className="iso-shell cin-footer-grid">
           <div className="cin-footer-brand">
             <span className="cin-footer-logo">
-              <Image src="/splash-main-icon.png" alt="" width={841} height={823} />
+              <Image src="/splash-main-icon.png" alt="" width={841} height={823} sizes="48px" />
               <strong>Splash</strong>
             </span>
             <p>Stablecoin payments for Southeast Asian businesses, to a bank or a wallet.</p>

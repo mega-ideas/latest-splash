@@ -87,6 +87,14 @@ test('header brand mark asks for a 40 px image, not 1080 px', () => {
   const tag = src.match(/<Image[^>]*className="iso-header-brand-icon"[^>]*>/);
   assert.ok(tag, 'the header brand image exists');
   assert.match(tag[0], /sizes="40px"/, 'the header brand image has sizes="40px"');
+  // Found while verifying the fix: the footer mark (48 px) had no sizes either.
+  const footer = src.match(/<span className="cin-footer-logo">\s*<Image[^>]*>/);
+  assert.ok(footer, 'the footer brand image exists');
+  assert.match(footer[0], /sizes="48px"/, 'the footer brand image has sizes="48px"');
+  // And the route loading mark (68 px), whose preload of the 1080 px file
+  // the browser then reused for the header mark despite its sizes.
+  const loading = code('app/loading.tsx');
+  assert.match(loading, /className="cin-loading-mark"\s*sizes="68px"/, 'the loading mark has sizes="68px"');
 });
 
 test('hero contrast comment matches the value it describes', () => {

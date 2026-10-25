@@ -1588,7 +1588,7 @@
 
 /* The hero's description and proof line sit over the district art's soft
    wash; at 72% ink they measured 3.9:1 to 4.3:1 against the pixels behind
-   them at 1440x900. Full ink clears 4.5:1 everywhere on the wash. */
+   them at 1440x900. 90% ink clears 4.5:1 everywhere on the wash. */
 .iso-landing .cin-copy .iso-hero-description,
 .iso-landing .cin-copy .iso-proof-line span { color: rgba(12, 62, 72, .9); }
 
@@ -1670,6 +1670,10 @@
     background: var(--iso-ink);
     font-size: 12px;
   }
+  /* A glimpse, not a second card: only the bar and "Needs approval" show
+     under the calculator (step C review), about 200 px instead of 440. The
+     wallet card and the rows stay in the markup for wider phones later. */
+  .pv-phone-body > .pv-phone-card:not(.pv-phone-approve) { display: none; }
   .pv-phone-list { gap: 0; padding-block: 4px; }
   .pv-phone-list > div {
     display: flex;

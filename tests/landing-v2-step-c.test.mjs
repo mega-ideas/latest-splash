@@ -59,13 +59,14 @@ test('phone hero: the static cinematic is as tall as its content, not 430vh', ()
 test('phone loops: a carousel with buttons, keys and a position, not swipe only', () => {
   assert.ok(existsSync('components/landing/LoopCarousel.tsx'), 'components/landing/LoopCarousel.tsx exists');
   const carousel = code('components/landing/LoopCarousel.tsx');
-  assert.match(carousel, /aria-roledescription="carousel"/, 'announced as a carousel');
+  // Conditional since the step C review: a carousel only while the row scrolls.
+  assert.match(carousel, /aria-roledescription=(?:"carousel"|\{\s*\w+\s*\?\s*'carousel'\s*:\s*undefined\s*\})/, 'announced as a carousel');
   assert.match(carousel, /aria-label="Previous loop"/, 'a previous button');
   assert.match(carousel, /aria-label="Next loop"/, 'a next button');
   assert.match(carousel, /<button/, 'real buttons');
   assert.match(carousel, /ArrowLeft/, 'the left arrow key moves back');
   assert.match(carousel, /ArrowRight/, 'the right arrow key moves on');
-  assert.match(carousel, /tabIndex=\{0\}/, 'the track takes focus, so the keys work');
+  assert.match(carousel, /tabIndex=\{(?:0|\s*\w+\s*\?\s*0\s*:\s*undefined\s*)\}/, 'the track takes focus, so the keys work');
   assert.match(carousel, /aria-live="polite"/, 'the position is announced');
   assert.match(carousel, /of \{/, 'the position reads "1 of 3"');
   assert.match(carousel, /prefers-reduced-motion/, 'no smooth scroll under reduced motion');

@@ -1,6 +1,6 @@
 'use client';
 
-import { Children, useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { Children, cloneElement, isValidElement, useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactElement, type ReactNode } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 /**
@@ -9,8 +9,13 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
  * The cards stay a swipeable scroll-snap row, but swiping is never the only
  * way through: Previous and Next buttons, a button per card, and the arrow
  * keys (plus Home and End) on the focused row all move it, and the position
- * is read out with the card's place and name, for example "1 of 3: Settle". Above 700 px the row is the desktop grid
- * again and the controls are hidden by CSS (styles/landing-v2.css .lc-controls).
+ * is read out with the card's place and name, for example "1 of 3: Settle".
+ *
+ * Above 700 px the row is the desktop grid again and the controls are hidden
+ * by CSS (styles/landing-v2.css .lc-controls). There the track cannot
+ * scroll, so it is only a labelled group: no keyboard stop, no arrow-key
+ * hint, and no carousel or slide roles. `scrollable` follows the track's
+ * real overflow (ResizeObserver), so the semantics match what is on screen.
  *
  * `labels` names each card, in order; `children` are the cards themselves,
  * kept direct children of `.iso-loops-grid` so the grid's own styles and
@@ -20,6 +25,19 @@ export default function LoopCarousel({ labels, children }: { labels: readonly st
   const trackRef = useRef<HTMLDivElement>(null);
   const [index, setIndex] = useState(0);
   const count = Children.count(children);
+  const [scrollable, setScrollable] = useState(false);
+
+  // A carousel only while the row actually overflows (the phone layout).
+  useEffect(() => {
+    const track = trackRef.current;
+    if (!track) return;
+    const measure = () => setScrollable(track.scrollWidth > track.clientWidth + 1);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(track);
+    return () => observer.disconnect();
+  }, [count]);
 
   // The card most in view is the current one, whichever way it got there.
   useEffect(() => {
@@ -61,16 +79,31 @@ export default function LoopCarousel({ labels, children }: { labels: readonly st
     go(moves[event.key]);
   }
 
+  const cards = Children.map(children, (child, i) =>
+    isValidElement(child)
+      ? cloneElement(child as ReactElement<Record<string, unknown>>, {
+          'aria-roledescription': scrollable ? 'slide' : undefined,
+          'aria-label': scrollable ? `${i + 1} of ${count}: ${labels[i]}` : undefined,
+        })
+      : child,
+  );
+
   return (
-    <div className="lc" role="region" aria-roledescription="carousel" aria-label="The three loops">
+    <div
+      className="lc"
+      role="region"
+      aria-roledescription={scrollable ? 'carousel' : undefined}
+      aria-label="The three loops"
+    >
       <div
         ref={trackRef}
         className="iso-loops-grid"
-        tabIndex={0}
-        onKeyDown={onKeyDown}
-        aria-label="Loop cards. Use the left and right arrow keys to move between them."
+        role="group"
+        tabIndex={scrollable ? 0 : undefined}
+        onKeyDown={scrollable ? onKeyDown : undefined}
+        aria-label={scrollable ? 'Loop cards. Use the left and right arrow keys to move between them.' : 'Loop cards'}
       >
-        {children}
+        {cards}
       </div>
 
       <div className="lc-controls">
@@ -95,7 +128,11 @@ export default function LoopCarousel({ labels, children }: { labels: readonly st
           <ChevronRight aria-hidden="true" />
         </button>
         <p className="sr-only" aria-live="polite">
-          {index + 1} of {count}: {labels[index]}
+          {scrollable ? (
+            <>
+              {index + 1} of {count}: {labels[index]}
+            </>
+          ) : null}
         </p>
       </div>
     </div>
