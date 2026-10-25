@@ -109,7 +109,7 @@ function recorded(base, overrides = {}) {
     postSettlement: wrap('postSettlement'),
     status: wrap('status'),
     returnOrReverse: wrap('returnOrReverse'),
-    verifyWebhook: (input) => base.verifyWebhook(input),
+    handleWebhook: (input) => base.handleWebhook(input),
     called: (name) => calls.filter((c) => c.name === name),
   };
 }
@@ -678,12 +678,13 @@ test('production fails closed: without credentials, with them, and with USE_MOCK
     ]) {
       await assert.rejects(call(), (e) => e instanceof PayoutPartnerUnavailable && e.code === 'partner_not_configured');
     }
-    assert.throws(() => p.verifyWebhook({ rawBody: '{}', signature: null, now }), (e) => e instanceof WebhookRejected && e.code === 'partner_not_configured');
+    assert.throws(() => p.handleWebhook({ rawBody: '{}', signature: null, now }), (e) => e instanceof WebhookRejected && e.code === 'partner_not_configured');
   }
   const creds = { NODE_ENV: 'production', HATA_API_KEY: 'k', HATA_WEBHOOK_SECRET: 's', FIUU_MERCHANT_ID: 'm', FIUU_VERIFY_KEY: 'v' };
   await assert.rejects(payoutPartner('hata_fiuu', creds).quote({ currency: 'MYR', sendMinor: 1n, now }), (e) => e.code === 'partner_not_connected');
   assert.throws(() => payoutPartner('hata_fiuu', { NODE_ENV: 'test', PAYOUT_PARTNER_HATA_FIUU_ENABLED: 'false' }), (e) => e.code === 'partner_disabled');
-  assert.throws(() => payoutPartner('pdax', { NODE_ENV: 'test' }), (e) => e.code === 'partner_not_built');
+  // §4.5: every route the brief names is on the interface (tests/payout-partners.test.mjs).
+  assert.equal(payoutPartner('pdax', { NODE_ENV: 'test' }).mode, 'sandbox');
 
   // Through the service: nothing is stored, and a production webhook is refused.
   const t = await setup();
