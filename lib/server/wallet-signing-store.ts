@@ -50,7 +50,9 @@ export type SigningPurpose =
   /** v2 §4.4: the small plain transfer that verifies a partner deposit address. */
   | 'partner_test_deposit'
   /** v2 §4.5: a bank payout to a supplier's account, through the business's partner deposit address. */
-  | 'partner_payout';
+  | 'partner_payout'
+  /** A1 §6 (FEATURE_SUBSCRIPTION_BILLING, off): the wallet grants, changes or revokes the billing allowance. */
+  | 'subscription';
 
 export type SigningStatus = 'collecting' | 'submitting' | 'unknown' | 'executed' | 'failed' | 'expired' | 'cancelled';
 

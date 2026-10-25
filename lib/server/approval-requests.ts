@@ -280,6 +280,14 @@ export function walletRequestHeadline(purpose: SigningPurpose, d: WalletTxDescri
       const p = a[0] as Extract<WalletAction, { type: 'approve_payout' }>;
       return `approve ${usdc(p.intent.amountMinor)} to ${shortAddress(p.intent.recipient)}, paid by ${shortAddress(p.payer)}, at most ${usdc(p.maxTotalMinor)} with Splash's fee`;
     }
+    case 'subscription': {
+      // A1 §6: the allowance Splash's finance multisig bills under.
+      const n = a.find((x) => x.type === 'new_billing_allowance') as Extract<WalletAction, { type: 'new_billing_allowance' }> | undefined;
+      const revoking = a.some((x) => x.type === 'revoke_billing_allowance');
+      if (!n) return 'cancel the Splash subscription: revoke the allowance Splash bills under';
+      const until = new Date(Number(n.expiresAtMs)).toISOString().slice(0, 10);
+      return `${revoking ? 'change the Splash plan: ' : ''}let Splash draw up to ${usdc(n.monthlyLimitMinor)} per calendar month (UTC) for the plan, until ${until}; revoke any time`;
+    }
   }
 }
 

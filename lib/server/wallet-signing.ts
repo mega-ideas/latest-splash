@@ -165,7 +165,19 @@ export type ShapeContext = {
   beneficiaryRef?: string;
   /** A withdrawal or a test deposit: the exact principal (minor units). */
   amountMinor?: bigint;
+  /**
+   * A subscription (A1 §6): the plan's terms the new billing allowance must
+   * carry exactly, and the billing allowance a cancel or plan change revokes.
+   */
+  billing?: { name: string; monthlyLimitMinor: bigint; expiresAtMs: bigint; lifetimeCapMinor: bigint | null; revokeAllowance?: string };
 };
+
+/** The shapes a subscription request may have: subscribe, cancel, change plan. */
+const SUBSCRIPTION_SHAPES: ReadonlySet<string> = new Set([
+  'rate_limit,wrap_rate_limit,new_billing_allowance',
+  'revoke_billing_allowance',
+  'revoke_billing_allowance,rate_limit,wrap_rate_limit,new_billing_allowance',
+]);
 
 /** What a spending-rule transaction (`spend_rule`) may do, and nothing else. */
 const SPEND_RULE_ACTIONS: ReadonlySet<string> = new Set([
@@ -302,6 +314,26 @@ export function assertPurposeShape(purpose: SigningPurpose, d: WalletTxDescripti
       if (BigInt(a.settleByMs) > BigInt(a.intent.expiresAtMs)) bad('the approval outlives the payment');
       return;
     }
+    case 'subscription': {
+      // A1 §6: only the billing allowance, to the finance multisig (the
+      // describer checked the spender), on exactly the plan's terms.
+      if (!SUBSCRIPTION_SHAPES.has(shape)) bad(shape);
+      const t = context.billing;
+      if (!t) bad('no plan terms were named');
+      const terms = t as NonNullable<ShapeContext['billing']>;
+      const revoke = d.actions.find((x) => x.type === 'revoke_billing_allowance') as Extract<WalletAction, { type: 'revoke_billing_allowance' }> | undefined;
+      if (revoke && (!terms.revokeAllowance || revoke.allowance !== normalizeSuiAddress(terms.revokeAllowance))) bad('it revokes an allowance other than the subscription being replaced');
+      if (!revoke && terms.revokeAllowance) bad('a plan change revokes the current allowance in the same transaction');
+      const n = d.actions.find((x) => x.type === 'new_billing_allowance') as Extract<WalletAction, { type: 'new_billing_allowance' }> | undefined;
+      if (n) {
+        if (n.name !== terms.name) bad('the allowance is not named for this plan');
+        if (BigInt(n.monthlyLimitMinor) !== terms.monthlyLimitMinor) bad('the monthly limit is not the plan price');
+        if (BigInt(n.expiresAtMs) !== terms.expiresAtMs) bad('the allowance does not end with the term');
+        if (n.startsAtMs !== null) bad('a subscription allowance starts at once');
+        if ((n.lifetimeCapMinor === null ? null : BigInt(n.lifetimeCapMinor)) !== terms.lifetimeCapMinor) bad("the lifetime cap is not the plan's");
+      }
+      return;
+    }
     case 'migration_transfer':
     case 'rotation_transfer': {
       const last = d.actions[d.actions.length - 1];
@@ -327,11 +359,12 @@ function assertGasless(d: WalletTxDescription) {
 
 /** What a request's bytes are decoded against: the org's ids, plus any existing intent read when it opened. */
 function expectationsFor(request: StoredRequest, expect: WalletTxExpectations): WalletTxExpectations {
-  const summary = request.summary as { openIntent?: OpenIntentExpectation; spend?: WalletTxExpectations['spend'] } | null;
+  const summary = request.summary as { openIntent?: OpenIntentExpectation; spend?: WalletTxExpectations['spend']; billing?: WalletTxExpectations['billing'] } | null;
   return {
     ...expect,
     ...(summary?.openIntent ? { openIntent: summary.openIntent } : {}),
     ...(summary?.spend ? { spend: summary.spend } : {}),
+    ...(summary?.billing ? { billing: summary.billing } : {}),
   };
 }
 
@@ -483,6 +516,10 @@ export async function openSigningRequest(
     amountMinor?: bigint;
     /** For a withdrawal: the bank account and amounts its signers are shown. */
     withdrawal?: WithdrawalSigningDetails;
+    /** For a subscription (A1 §6): the finance multisig and the billing allowances the wallet holds, read by the server. */
+    billing?: WalletTxExpectations['billing'];
+    /** For a subscription: the plan's terms the bytes must carry. */
+    billingTerms?: ShapeContext['billing'];
     /** Opened by `onExecuted` once this request executes. Keys and weights only. */
     nextStep?: unknown;
   },
@@ -517,6 +554,7 @@ export async function openSigningRequest(
     ...deps.expect,
     ...(input.openIntent ? { openIntent: input.openIntent } : {}),
     ...(input.spend ? { spend: input.spend } : {}),
+    ...(input.billing ? { billing: input.billing } : {}),
   };
   let description: WalletTxDescription;
   try {
@@ -530,6 +568,7 @@ export async function openSigningRequest(
       payer: input.payer,
       beneficiaryRef: input.beneficiaryRef,
       amountMinor: input.amountMinor,
+      billing: input.billingTerms,
     });
     if (input.gasMode === 'sponsored') {
       if (!deps.sponsor) return fail(503, 'no_sponsor', 'business wallet transactions need a gas sponsor, and none is configured');
@@ -581,6 +620,7 @@ export async function openSigningRequest(
       ...(input.openIntent ? { openIntent: input.openIntent } : {}),
       ...(input.spend ? { spend: input.spend } : {}),
       ...(input.withdrawal ? { withdrawal: input.withdrawal } : {}),
+      ...(input.billing ? { billing: input.billing } : {}),
     },
     nextStep: input.nextStep ?? null,
     requestedBy: input.requestedBy,

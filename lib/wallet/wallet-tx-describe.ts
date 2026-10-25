@@ -31,7 +31,14 @@
  * must be bound to Splash's SPLASH_SPEND, draw USDC, be accepted in the same
  * transaction under the policy its name names; a policy, allowance or cap
  * must be one the server read as this business's (`expect.spend`). Never
- * `allowance::new`, `rotate_spender`, `issue` or any spend.
+ * `rotate_spender`, `issue` or any spend.
+ *
+ * `allowance::new` (a plain allowance no app polices) only for subscription
+ * billing (A1 §6), only when the server set `expect.billing`: USDC, named
+ * `splash-billing:…`, to exactly the configured finance multisig, with an
+ * end of term and a monthly rate limit made in the same transaction; and a
+ * billing allowance is revoked only if the server read it as this wallet's.
+ * Without `expect.billing` it is refused as before.
  *
  * The address-alias rule is Phase 0 finding 6 (docs/v2/phase1-move-design.md
  * §1): if a wallet's quorum ever signed `0x2::address_alias::enable`, one
@@ -82,6 +89,14 @@ export type WalletTxExpectations = {
    * policy, allowance or cap is refused.
    */
   spend?: { policyIds: string[]; allowanceIds?: string[]; capIds?: string[] };
+  /**
+   * Subscription billing (A1 §6; FEATURE_SUBSCRIPTION_BILLING, off), only
+   * when the server set it: the Splash finance multisig, the one spender a
+   * plain `allowance::new` may name, and the billing allowances and caps the
+   * wallet holds (the only ones a billing revoke may touch). Without it,
+   * `allowance::new` is refused as before.
+   */
+  billing?: { financeAddress: string; allowanceIds?: string[]; capIds?: string[] };
 };
 
 /** A recurring cap as a rule's allowance carries it. */
@@ -171,6 +186,20 @@ export type WalletAction =
     }
   | { type: 'accept_allowance'; policy: string; proposalFromCommand: number }
   | { type: 'revoke_allowance'; allowance: string; cap: string }
+  // ─── Subscription billing (A1 §6) ────────────────────────────────────────
+  | {
+      type: 'new_billing_allowance';
+      asset: string;
+      name: string;
+      /** Always the configured finance multisig. */
+      spender: string;
+      lifetimeCapMinor: string | null;
+      startsAtMs: string | null;
+      expiresAtMs: string;
+      /** The most the finance multisig may draw per calendar month (UTC). */
+      monthlyLimitMinor: string;
+    }
+  | { type: 'revoke_billing_allowance'; allowance: string; cap: string }
   | { type: 'approve_payout'; policy: string; intent: OpenIntentExpectation; payer: string; maxTotalMinor: string; settleByMs: string };
 
 export type WalletTxDescription = {
@@ -289,6 +318,8 @@ export function describeWalletTransaction(input: Uint8Array | string, expect: Wa
 
   // ─── Spending rules (v2 §4.2) ─────────────────────────────────────────────
   const spendPkg = expect.spendPackageId ? normalizeSuiAddress(expect.spendPackageId) : null;
+  // Subscription billing (A1 §6): only with a well-formed finance address.
+  const billing = expect.billing && /^0x[0-9a-fA-F]{64}$/.test(expect.billing.financeAddress) ? expect.billing : null;
   /** Results already taken by a later command (a rate limit, a proposal): each is used once. */
   const consumed = new Set<number>();
   const usdcBalance = () => {
@@ -313,7 +344,7 @@ export function describeWalletTransaction(input: Uint8Array | string, expect: Wa
   };
 
   function describeAllowanceCall(target: string, a: Arg[], typeArgs: string[]): void {
-    if (!spendPkg) refuse('spending rules are not configured here', 'command_not_allowed');
+    if (!spendPkg && !billing) refuse('spending rules are not configured here', 'command_not_allowed');
     switch (target) {
       case 'allowance::periodic_rate_limit': {
         needN(target, a, 2);
@@ -331,6 +362,7 @@ export function describeWalletTransaction(input: Uint8Array | string, expect: Wa
         return;
       }
       case 'allowance::propose_for_app': {
+        if (!spendPkg) refuse('spending rules are not configured here', 'command_not_allowed');
         needN(target, a, 6);
         if (typeArgs.length !== 2) refuse('a proposal names the balance and the app', 'bad_type');
         if (normalizeStructTag(typeArgs[0]) !== usdcBalance()) refuse('a spending rule draws USDC only (D6)', 'wrong_asset');
@@ -372,9 +404,51 @@ export function describeWalletTransaction(input: Uint8Array | string, expect: Wa
         if (allowance.kind !== 'object' || allowance.owned || allowance.mutable !== true) refuse('the allowance must be a shared object passed mutably', 'bad_argument');
         const capId = (cap as { objectId: string }).objectId;
         const allowanceId = (allowance as { objectId: string }).objectId;
-        if (!(expect.spend?.capIds ?? []).map((x) => normalizeSuiAddress(x)).includes(capId)) refuse("the cap is not one this business's wallet holds", 'wrong_object');
-        if (!(expect.spend?.allowanceIds ?? []).map((x) => normalizeSuiAddress(x)).includes(allowanceId)) refuse("the allowance is not one of this business's rules", 'wrong_object');
+        const listed = (ids: string[] | undefined, id: string) => (ids ?? []).map((x) => normalizeSuiAddress(x)).includes(id);
+        // A billing allowance (A1 §6) is revoked as one, and only one the
+        // server read as this wallet's; anything else must be a rule's.
+        if (billing && listed(billing.capIds, capId) && listed(billing.allowanceIds, allowanceId)) {
+          actions.push({ type: 'revoke_billing_allowance', allowance: allowanceId, cap: capId });
+          return;
+        }
+        if (!listed(expect.spend?.capIds, capId)) refuse("the cap is not one this business's wallet holds", 'wrong_object');
+        if (!listed(expect.spend?.allowanceIds, allowanceId)) refuse("the allowance is not one of this business's rules", 'wrong_object');
         actions.push({ type: 'revoke_allowance', allowance: allowanceId, cap: capId });
+        return;
+      }
+      case 'allowance::new': {
+        // Only subscription billing, and only to the finance multisig. Any
+        // other plain allowance is one no app polices: refused.
+        if (!billing) refuse(`0x2::${target} is not a wallet command`, 'command_not_allowed');
+        needN(target, a, 6);
+        if (typeArgs.length !== 1 || normalizeStructTag(typeArgs[0]) !== usdcBalance()) refuse('a subscription draws USDC only (D6)', 'wrong_asset');
+        const name = pure(a[0], bcs.string(), 'the name');
+        if (!name.startsWith('splash-billing:') || new TextEncoder().encode(name).length > 128) refuse('a plain allowance here is a Splash subscription, named as one', 'bad_argument');
+        const spender = normalizeSuiAddress(pure(a[1], bcs.Address, 'the spender'));
+        if (spender !== normalizeSuiAddress((billing as { financeAddress: string }).financeAddress)) refuse('a subscription allowance is only to the Splash finance multisig', 'wrong_spender');
+        const lifetime = pure(a[2], bcs.option(bcs.u256()), 'the lifetime cap');
+        const start = pure(a[3], bcs.option(bcs.u64()), 'the start');
+        const expiry = pure(a[4], bcs.option(bcs.u64()), 'the expiry');
+        if (expiry === null) refuse('a subscription always ends with its term', 'bad_argument');
+        const rate = a[5];
+        if (rate.kind !== 'result' || actions[rate.command]?.type !== 'wrap_rate_limit' || consumed.has(rate.command)) {
+          refuse("the subscription's monthly limit must be made in this transaction, once", 'bad_argument');
+        }
+        const r = rate as { command: number };
+        consumed.add(r.command);
+        const wrapped = actions[r.command] as Extract<WalletAction, { type: 'wrap_rate_limit' }>;
+        const limit = actions[wrapped.rateLimitFromCommand] as Extract<WalletAction, { type: 'rate_limit' }>;
+        if (limit.window.kind !== 'calendar' || limit.window.months !== 1) refuse('a subscription is limited per calendar month', 'bad_argument');
+        actions.push({
+          type: 'new_billing_allowance',
+          asset: normalizeStructTag(expect.usdcType as string),
+          name,
+          spender,
+          lifetimeCapMinor: lifetime === null ? null : String(lifetime),
+          startsAtMs: start === null ? null : String(start),
+          expiresAtMs: String(expiry),
+          monthlyLimitMinor: limit.limitMinor,
+        });
         return;
       }
       default:
