@@ -51,6 +51,7 @@ import { applyTravelRuleEvent, readTravelRuleTransfer } from '../lib/server/trav
 import { signingInbox, submitPartialSignature } from '../lib/server/wallet-signing.ts';
 
 import { migratedDb } from './helpers/store-db.mjs';
+import { saveWalletRecipient } from './fixtures/saved-recipients.mjs';
 import { ACCOUNT, T0, USDC, world } from './fixtures/wallet-world.mjs';
 
 const PAYEE = normalizeSuiAddress('0x' + '77'.repeat(32));
@@ -123,6 +124,9 @@ test('a wallet payment is opened only for a recipient whose newest screening her
   assert.equal((await w.db.select().from(schema.walletSigningRequests)).filter((r) => r.purpose === 'wallet_payment').length, 0, 'nothing was stored');
   await new Promise((r) => setTimeout(r, 5));
   await recordScreening(w.db, clear(PAYEE, { at: new Date(T0.getTime() - 1000) }));
+  // A CLEAR is not enough on its own (v2 §4.7): the payee is a saved, proven wallet.
+  assert.equal((await pay(1)).code, 'recipient_not_saved');
+  await saveWalletRecipient(w.db, { address: PAYEE, now: T0 });
   const opened = await pay(1);
   assert.equal(opened.ok, true, JSON.stringify(opened));
   await w.client.close();
@@ -132,6 +136,7 @@ test('a CLEAR older than the screening age is screened again, or refused when no
   const w = await world();
   const { members } = await registered(w);
   await recordScreening(w.db, clear(PAYEE, { at: new Date(T0.getTime() - 25 * HOUR) }));
+  await saveWalletRecipient(w.db, { address: PAYEE, now: T0 });
   const pay = (n) => requestWalletPayment(w.ctx, { orgId: 'acme', requestedBy: 'u-two', wallet: members, payment: payment({ paymentRef: bytes32(n) }) });
   assert.deepEqual([(await pay(1)).status, (await pay(1)).code], [409, 'recipient_screening_stale']);
   // With the server's provider (the sandbox here), it is screened again and kept.
@@ -181,6 +186,7 @@ test('every signature of a wallet payment re-checks the screening, and an exchan
   const { members } = await registered(w);
   w.signing.beforeSign = (request) => paymentBeforeSign({ db: w.db, now: () => T0 }, request);
   await recordScreening(w.db, clear(PAYEE));
+  await saveWalletRecipient(w.db, { address: PAYEE, now: T0 });
   const opened = await requestWalletPayment(w.ctx, { orgId: 'acme', requestedBy: 'u-two', wallet: members, payment: payment() });
   assert.equal(opened.ok, true, JSON.stringify(opened));
   // Blocked after it was opened: no one may sign it.
@@ -192,6 +198,7 @@ test('every signature of a wallet payment re-checks the screening, and an exchan
   // An exchange payment: CLEAR, but no Travel Rule message yet.
   const EXCHANGE = normalizeSuiAddress('0x' + '66'.repeat(32));
   await recordScreening(w.db, clear(EXCHANGE, { kind: 'exchange_recipient' }));
+  await saveWalletRecipient(w.db, { address: EXCHANGE, kind: 'EXCHANGE' });
   const ex = await requestWalletPayment(w.ctx, { orgId: 'acme', requestedBy: 'u-two', wallet: members, payment: payment({ paymentRef: bytes32(5), recipient: EXCHANGE, kind: 2 }) });
   assert.equal(ex.ok, true, JSON.stringify(ex));
   const stored = async () => (await import('../lib/server/wallet-signing-store.ts')).readSigningRequest(w.db, 'acme', ex.request.id);
@@ -209,13 +216,37 @@ test('every signature of a wallet payment re-checks the screening, and an exchan
   const signed = await submitPartialSignature(w.signing, { orgId: 'acme', userId: 'u-two', id: ex.request.id, signature: await sign(w.keys.two, ex.request), digest: ex.request.digest });
   assert.equal(signed.ok, true, JSON.stringify(signed));
 
+  // A saved exchange account sent as a wallet payment is refused (v2 §4.7).
+  const asWallet = await requestWalletPayment(w.ctx, { orgId: 'acme', requestedBy: 'u-two', wallet: members, payment: payment({ paymentRef: bytes32(7), recipient: EXCHANGE, kind: 1 }) });
+  assert.deepEqual([asWallet.status, asWallet.code], [409, 'kind_mismatch']);
   // An address this business screened as an exchange's is an exchange payment whatever kind it is sent as.
   const EX2 = normalizeSuiAddress('0x' + '65'.repeat(32));
   await recordScreening(w.db, clear(EX2, { kind: 'exchange_recipient' }));
+  await saveWalletRecipient(w.db, { address: EX2, now: T0 });
   const disguised = await requestWalletPayment(w.ctx, { orgId: 'acme', requestedBy: 'u-two', wallet: members, payment: payment({ paymentRef: bytes32(6), recipient: EX2, kind: 1 }) });
   assert.equal(disguised.ok, true);
   const d = await (await import('../lib/server/wallet-signing-store.ts')).readSigningRequest(w.db, 'acme', disguised.request.id);
   assert.equal((await paymentBeforeSign({ db: w.db, now: () => T0 }, d)).code, 'travel_rule_missing');
+  await w.client.close();
+});
+
+test('a wallet whose ownership proof is withdrawn after the payment opened is not signed for (v2 §4.7)', async () => {
+  const w = await world();
+  const { members } = await registered(w);
+  w.signing.beforeSign = (request) => paymentBeforeSign({ db: w.db, now: () => T0 }, request);
+  await recordScreening(w.db, clear(PAYEE));
+  await saveWalletRecipient(w.db, { address: PAYEE, proven: false });
+  const unproven = await requestWalletPayment(w.ctx, { orgId: 'acme', requestedBy: 'u-two', wallet: members, payment: payment() });
+  assert.deepEqual([unproven.status, unproven.code], [409, 'ownership_not_proven']);
+  assert.equal((await w.db.select().from(schema.walletSigningRequests)).filter((r) => r.purpose === 'wallet_payment').length, 0, 'nothing was stored');
+  const { recordOwnershipProof, revokeOwnershipProof } = await import('../lib/server/ownership-proofs.ts');
+  await recordOwnershipProof(w.db, { orgId: 'acme', address: PAYEE, method: 'sui_personal_message', evidence: 'sig', now: T0 });
+  await w.client.exec(`UPDATE suppliers SET ownership_status = 'proven'`);
+  const opened = await requestWalletPayment(w.ctx, { orgId: 'acme', requestedBy: 'u-two', wallet: members, payment: payment() });
+  assert.equal(opened.ok, true, JSON.stringify(opened));
+  await revokeOwnershipProof(w.db, { orgId: 'acme', address: PAYEE, now: T0 });
+  const refused = await submitPartialSignature(w.signing, { orgId: 'acme', userId: 'u-two', id: opened.request.id, signature: await sign(w.keys.two, opened.request), digest: opened.request.digest });
+  assert.deepEqual([refused.ok, refused.code], [false, 'ownership_not_proven']);
   await w.client.close();
 });
 

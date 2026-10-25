@@ -418,6 +418,7 @@ test('a wallet payment shows payee, amount, asset and the fee bound read from it
   const w = await world();
   const { wallet, members } = await registeredWallet(w);
   await w.screenClear('0x' + '77'.repeat(32));
+  await w.saveRecipient('0x' + '77'.repeat(32));
   const opened = await requestWalletPayment(w.ctx, { orgId: 'acme', requestedBy: 'u-two', wallet: members, payment: payment() });
   assert.equal(opened.ok, true, JSON.stringify(opened));
   const d = opened.request.description;

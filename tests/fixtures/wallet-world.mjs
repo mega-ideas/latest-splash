@@ -31,6 +31,7 @@ import * as schema from '../../lib/db/schema.ts';
 import { describeWalletTransaction } from '../../lib/wallet/wallet-tx-describe.ts';
 import { continueWalletSteps } from '../../lib/server/business-wallet.ts';
 import { recordScreening } from '../../lib/server/kyt-screenings.ts';
+import { saveWalletRecipient } from './saved-recipients.mjs';
 
 export const CORE = '0x' + 'c0'.repeat(32);
 export const ACCOUNT = '0x' + 'ac'.repeat(32);
@@ -275,6 +276,8 @@ export async function world({ simulateOk = true, sponsor: withSponsor = true, sp
     setNow: (d) => {
       now = d;
     },
+    /** A saved recipient at the address (v2 §4.7): a proven wallet the supplier holds unless told otherwise. */
+    saveRecipient: (address, opts = {}) => saveWalletRecipient(db, { address, now, ...opts }),
     /** A fresh CLEAR for an address this business pays (v2 §4.6: a payment is opened only for one). */
     screenClear: (address, orgId = 'acme') =>
       recordScreening(db, {

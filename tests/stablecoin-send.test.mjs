@@ -101,7 +101,7 @@ function scriptedChain({ buildError, gaslessBuildError, senderPaysBuildError, si
   };
 }
 
-async function setup({ kyb = 'REGISTERED', verdict = 'CLEAR', payoutMethod = 'WALLET', fee = FEE, approved = true, chainOpts, anchorFee = false, splashWallet = false, gasless = true } = {}) {
+async function setup({ kyb = 'REGISTERED', verdict = 'CLEAR', payoutMethod = 'WALLET', fee = FEE, approved = true, chainOpts, anchorFee = false, splashWallet = false, gasless = true, delivery = { deliveryKind: 'SELF_CUSTODY', ownershipStatus: 'proven' } } = {}) {
   const { client, db } = await migratedDb();
   await client.exec(`INSERT INTO organizations (id, name, kyb_lifecycle) VALUES ('org_s', 'S Co', '${kyb}')`);
   await client.exec(`INSERT INTO users (id, email, name) VALUES ('u_owner', 'owner@s.test', 'Owner')`);
@@ -110,7 +110,7 @@ async function setup({ kyb = 'REGISTERED', verdict = 'CLEAR', payoutMethod = 'WA
   const recipient = {
     id: 'rcpt_w', orgId: 'org_s', name: 'Maria', country: 'PH', bank: '', swift: '', account: '', tier: 'PAYOUT_ONLY',
     kybStatus: 'none', createdVia: 'manual', createdAt: new Date(T0).toISOString(),
-    payoutMethod, walletAddress: payoutMethod === 'WALLET' ? RECIPIENT : undefined, walletProvider: 'SLUSH', screeningVerdict: verdict,
+    payoutMethod, walletAddress: payoutMethod === 'WALLET' ? RECIPIENT : undefined, walletProvider: 'SLUSH', screeningVerdict: verdict, delivery,
   };
   const chain = scriptedChain(chainOpts);
   let now = T0;
@@ -416,6 +416,18 @@ test('refusals before any reservation: role, bank recipient, unscreened on mainn
   s = await setup({ verdict: null });
   assert.equal((await quote(s.deps)).code, 'recipient_not_sendable', 'mainnet wants CLEAR or ATTESTED');
   await s.client.close();
+
+  // v2 §4.7: a wallet the supplier holds only once proven; an exchange account only from the business wallet.
+  for (const [delivery, code] of [
+    [{ deliveryKind: 'SELF_CUSTODY', ownershipStatus: 'unproven' }, 'ownership_not_proven'],
+    [{ deliveryKind: 'SELF_CUSTODY', ownershipStatus: 'revoked' }, 'ownership_not_proven'],
+    [null, 'ownership_not_proven'],
+    [{ deliveryKind: 'EXCHANGE', exchangeId: 'pdax', depositNetwork: 'SUI' }, 'exchange_from_business_wallet'],
+  ]) {
+    s = await setup({ delivery });
+    assert.equal((await quote(s.deps)).code, code, JSON.stringify(delivery));
+    await s.client.close();
+  }
 
   s = await setup({ verdict: 'ATTESTED' });
   assert.equal((await quote(s.deps)).ok, true);

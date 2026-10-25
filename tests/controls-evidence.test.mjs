@@ -341,6 +341,24 @@ test('the sender declaration is built from what the server holds, for this busin
   assert.equal((await senderDeclarationFor(d, { requestId: cancelled, exchange: 'pdax' })).code, 'payment_closed');
 });
 
+test("the exchange is the saved exchange account's own (v2 §4.7): another is refused, and a wallet the supplier holds is not one", async () => {
+  const w = await world();
+  const requestId = await exchangePayment(w.db);
+  const at = (r) => ({ db: w.db, orgId: 'acme', now: () => T0, recipientAt: recipients({ [`acme:${DEPOSIT}`]: r }), signedPartners: new Set() });
+  const saved = { ...SUPPLIER, deliveryKind: 'EXCHANGE', exchange: 'tokocrypto' };
+  const own = await senderDeclarationFor(at(saved), { requestId });
+  assert.equal(own.ok, true, JSON.stringify(own));
+  assert.equal(own.pack.json.recipient.exchange, 'an Indonesia exchange', 'named only once signed');
+  assert.equal((await senderDeclarationFor({ ...at(saved), signedPartners: new Set(['tokocrypto']) }, { requestId })).pack.json.recipient.exchange, 'Tokocrypto');
+  assert.equal((await senderDeclarationFor(at(saved), { requestId, exchange: 'tokocrypto' })).ok, true);
+  assert.equal((await senderDeclarationFor(at(saved), { requestId, exchange: 'pdax' })).code, 'exchange_mismatch');
+  assert.equal((await senderDeclarationFor(at({ ...SUPPLIER, deliveryKind: 'SELF_CUSTODY' }), { requestId, exchange: 'pdax' })).code, 'not_an_exchange_recipient');
+  const provider = { id: 'sumsub', sandbox: false, async submitOutbound() { throw new Error('not asked'); } };
+  assert.equal((await travelRuleForPayment({ ...at(saved), provider }, { requestId, exchange: 'pdax', purpose: null, createdBy: 'u-owner' })).code, 'not_screened', 'screened first');
+  await recordScreening(w.db, { orgId: 'acme', kind: 'exchange_recipient', chain: 'SUI', address: DEPOSIT, requestedBy: 'u', screening: { provider: 'elliptic', verdict: 'CLEAR', reference: 'elliptic:x-1', detail: 'x', screenedAt: T0.toISOString(), riskScore: 0 } });
+  assert.equal((await travelRuleForPayment({ ...at(saved), provider }, { requestId, exchange: 'pdax', purpose: null, createdBy: 'u-owner' })).code, 'exchange_mismatch', 'the Travel Rule message names the saved exchange only');
+});
+
 test('the Travel Rule message goes only to a CLEAR recipient, once, with the business as the applicant', async () => {
   const w = await world();
   const requestId = await exchangePayment(w.db);

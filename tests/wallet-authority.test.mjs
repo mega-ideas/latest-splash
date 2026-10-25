@@ -189,6 +189,7 @@ test('(3) an owner accepts the ask: the quorum is asked to pay exactly that paym
   const { members } = await registered(w);
   w.model.addIntent(intentBy(staff.address));
   await w.screenClear(PAYEE);
+  await w.saveRecipient(PAYEE);
   const deps = { db: w.db, ctx: w.ctx, now: () => T0 };
   const asked = await askOwnersToApprove(deps, { orgId: 'acme', userId: 'u-staff', intentId: INTENT, contentHash: HASH, walrusBlobId: BLOB, requesterAddresses: [staff.address] });
 

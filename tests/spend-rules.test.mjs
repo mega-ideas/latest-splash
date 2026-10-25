@@ -41,6 +41,7 @@ import { describeWalletTransaction } from '../lib/wallet/wallet-tx-describe.ts';
 import { buildBusinessMultisig } from '../lib/wallet/business-multisig.ts';
 import { startBusinessWallet, startWalletRotation } from '../lib/server/business-wallet.ts';
 import { recordOwnershipProof } from '../lib/server/ownership-proofs.ts';
+import { saveWalletRecipient } from './fixtures/saved-recipients.mjs';
 import { approvePayoutTx, createSpendPolicyTx, spendRuleTx } from '../lib/server/spend-rules-builders.ts';
 import { spendIdsFromEnv } from '../lib/server/spend-rules-env.ts';
 import {
@@ -419,7 +420,7 @@ test('a bank beneficiary is bound only to a partner deposit address this busines
   await w.client.close();
 });
 
-test('the WALLET tag needs a verified ownership proof; an exchange address does not', async () => {
+test('the WALLET tag needs a verified ownership proof; an exchange address needs none, but must be a saved exchange account', async () => {
   const w = await spendWorld();
   const { members } = await withPolicy(w);
   const refused = await changeRecipients(w.sc, { orgId: 'acme', requestedBy: 'u-founder', wallet: members, change: { add: [{ address: SUPPLIER, tag: 'wallet' }] } });
@@ -429,6 +430,12 @@ test('the WALLET tag needs a verified ownership proof; an exchange address does 
   await recordOwnershipProof(w.db, { orgId: 'northwind', address: SUPPLIER, method: 'signed_message', evidence: 'sig', now: T0 });
   assert.equal((await changeRecipients(w.sc, { orgId: 'acme', requestedBy: 'u-founder', wallet: members, change: { add: [{ address: SUPPLIER, tag: 'wallet' }] } })).code, 'ownership_not_proven');
 
+  // v2 §4.7: the EXCHANGE tag only for this business's saved exchange account.
+  const unsaved = await changeRecipients(w.sc, { orgId: 'acme', requestedBy: 'u-founder', wallet: members, change: { add: [{ address: EXCHANGE, tag: 'exchange' }] } });
+  assert.deepEqual([unsaved.status, unsaved.code, unsaved.details.addresses], [409, 'exchange_not_saved', [EXCHANGE]]);
+  await saveWalletRecipient(w.db, { orgId: 'northwind', address: EXCHANGE, kind: 'EXCHANGE' });
+  assert.equal((await changeRecipients(w.sc, { orgId: 'acme', requestedBy: 'u-founder', wallet: members, change: { add: [{ address: EXCHANGE, tag: 'exchange' }] } })).code, 'exchange_not_saved', "another business's exchange account does not count");
+  await saveWalletRecipient(w.db, { address: EXCHANGE, kind: 'EXCHANGE' });
   const exchange = await changeRecipients(w.sc, { orgId: 'acme', requestedBy: 'u-founder', wallet: members, change: { add: [{ address: EXCHANGE, tag: 'exchange' }] } });
   assert.equal(exchange.ok, true, JSON.stringify(exchange));
   await signBy(w, exchange.request, 'founder', 'three');
@@ -660,6 +667,7 @@ test('after a rotation the old policy is stale; the rules are reissued under the
   const { members, wallet: old } = await withPolicy(w);
   await passkeyFor(w, 'u-staff', STAFF);
   await recordOwnershipProof(w.db, { orgId: 'acme', address: SUPPLIER, method: 'signed_message', evidence: 'sig', now: T0 });
+  await saveWalletRecipient(w.db, { address: EXCHANGE, kind: 'EXCHANGE' });
   const recipients = await changeRecipients(w.sc, { orgId: 'acme', requestedBy: 'u-founder', wallet: members, change: { add: [{ address: SUPPLIER, tag: 'wallet' }, { address: EXCHANGE, tag: 'exchange' }] } });
   await signBy(w, recipients.request, 'founder', 'two');
   await giveRule(w, members);
@@ -771,6 +779,7 @@ test("a staff member's payment above the threshold gets one owner's second appro
   const INTENT = normalizeSuiAddress('0x' + '99'.repeat(32));
   w.model.addIntent({ id: INTENT, initialSharedVersion: 7, account: ACCOUNT, maker: STAFF, recipient: SUPPLIER, beneficiaryRef: '', amountMinor: 1_500n * USDC_1, kind: 1, targetCurrency: 'USDC', fxRateUsdLocal: 1_000_000n, expiresAtMs: t0 + 3n * DAY, status: 0, asset: USDC });
   await w.screenClear(SUPPLIER);
+  await saveWalletRecipient(w.db, { address: SUPPLIER, now: T0 });
   const asked = await askOwnersToApprove({ db: w.db, ctx: w.ctx }, { orgId: 'acme', userId: 'u-staff', intentId: INTENT, contentHash: '04'.repeat(32), walrusBlobId: 'aa', requesterAddresses: [STAFF] });
   assert.equal(asked.ok, true, JSON.stringify(asked));
   const opener = (ownerKey) => (input) => openSecondApproval(w.sc, { ...input, ownerPasskeyPublicKey: ownerKey.publicKey });
@@ -873,6 +882,7 @@ function draft(overrides = {}) {
 test('(3) a staff payment over the rule cannot be opened on chain, so staff ask with a draft and the quorum pays it', async () => {
   const w = await spendWorld();
   const { members } = await withPolicy(w);
+  await saveWalletRecipient(w.db, { address: EXCHANGE, kind: 'EXCHANGE' });
   const ex = await changeRecipients(w.sc, { orgId: 'acme', requestedBy: 'u-founder', wallet: members, change: { add: [{ address: EXCHANGE, tag: 'exchange' }] } });
   await signBy(w, ex.request, 'founder', 'two');
   await giveRule(w, members);
@@ -911,6 +921,7 @@ test('(3) a staff payment over the rule cannot be opened on chain, so staff ask 
   const second = await acceptApprovalAsk({ ...deps, secondApproval: opener }, { orgId: 'acme', userId: 'u-two', askId: asked.ask.id, mode: 'second_approval', maxFeeMinor: 0n, settleByMs: t0 + 300_000n });
   assert.equal(second.code, 'no_intent');
   await w.screenClear(SUPPLIER);
+  await saveWalletRecipient(w.db, { address: SUPPLIER, now: T0 });
   const accepted = await acceptApprovalAsk(deps, { orgId: 'acme', userId: 'u-two', askId: asked.ask.id, mode: 'wallet_pays', wallet: members, maxFeeMinor: 250_000n, settleByMs: t0 + 300_000n });
   assert.equal(accepted.ok, true, JSON.stringify(accepted));
   const d = accepted.request.description;
@@ -928,6 +939,7 @@ test('(3) a staff payment over the rule cannot be opened on chain, so staff ask 
 test('two owners accepting one ask at once: one signing request opens, and the ask follows it', async () => {
   const w = await spendWorld();
   const { members } = await withPolicy(w);
+  await saveWalletRecipient(w.db, { address: EXCHANGE, kind: 'EXCHANGE' });
   const ex = await changeRecipients(w.sc, { orgId: 'acme', requestedBy: 'u-founder', wallet: members, change: { add: [{ address: EXCHANGE, tag: 'exchange' }] } });
   await signBy(w, ex.request, 'founder', 'two');
   await giveRule(w, members);
