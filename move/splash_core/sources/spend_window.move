@@ -5,7 +5,7 @@
 /// PROTOCOL can move out of pooled custody; this bounds what a single tenant can
 /// move. Different object, different lifecycle, different threat: the meter
 /// contains a compromised operator key, this contains a compromised tenant key
-/// and gives a stolen approver credential a ceiling.
+/// and gives a stolen spender credential (a spending rule's key) a ceiling.
 ///
 /// ─── Why this is not `splash_meter` ─────────────────────────────────────────
 ///

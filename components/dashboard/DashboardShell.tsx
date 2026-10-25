@@ -5,7 +5,9 @@ import { useState, type ReactNode } from 'react';
 import FloatingCopilot from '@/components/FloatingCopilot';
 import DashboardHeader from '@/components/DashboardHeader';
 import { CustodyPhaseContext, LaunchScopeContext, SweepSwitchContext } from '@/components/dashboard/CustodyPhaseContext';
+import GovernanceAlertBanner from '@/components/dashboard/GovernanceAlertBanner';
 import type { CustomerSession } from '@/lib/auth/customer-session';
+import type { GovernanceBannerAlert } from '@/lib/server/governance-events';
 import { LAUNCH_SCOPE_REASON, type LaunchScope } from '@/lib/launch-scope-rules';
 import {
   Bot,
@@ -88,6 +90,11 @@ type DashboardShellProps = {
   /** The launch scope (lib/server/launch-scope.ts), resolved by the same
    *  layout. Needs no database, so it locks even when `locks` is absent. */
   launchScope?: LaunchScope;
+  /** Active governance alerts for this person (a contract change announced or
+   *  in force), resolved by the same layout from their own recorded in-app
+   *  deliveries (lib/server/governance-alerts-store.ts). Empty for anyone who
+   *  is not a business owner. */
+  governanceAlerts?: GovernanceBannerAlert[];
 };
 
 /** The pages a USDC-only launch does not open; their routes answer 403. */
@@ -143,7 +150,7 @@ function lockReasonFor(
   return null;
 }
 
-export default function DashboardShell({ children, session, kyb, locks, sweepOn, launchScope }: DashboardShellProps) {
+export default function DashboardShell({ children, session, kyb, locks, sweepOn, launchScope, governanceAlerts }: DashboardShellProps) {
   const [collapsed,  setCollapsed]  = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const router   = useRouter();
@@ -371,6 +378,9 @@ export default function DashboardShell({ children, session, kyb, locks, sweepOn,
           collapsed ? 'md:ml-20' : 'md:ml-60'
         }`}
       >
+        {/* Above the KYB banner and above any page lock: it asks every owner
+            to act before a date, whatever else the workspace is waiting on. */}
+        <GovernanceAlertBanner alerts={governanceAlerts ?? []} />
         {kyb?.blocked ? (
           <div
             role="status"

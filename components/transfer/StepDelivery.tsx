@@ -5,16 +5,19 @@ import { Building2, Check, Landmark, Lock, Zap } from 'lucide-react';
 import type { TransferState } from '@/app/dashboard/transfer/page';
 import { useCustodyPhaseOn, useSweepSwitchOn } from '@/components/dashboard/CustodyPhaseContext';
 import { CUSTODY_PHASE_WHY, deliveryTierOpen } from '@/lib/custody-phase-rules';
-import { getCorridorFeeBps } from '@/lib/fx/corridors';
+import { usePublishedPricing } from '@/lib/fees/use-published-pricing';
 import type { RecipientTier } from '@/lib/server/operations';
 
 const options: Array<{ tier: RecipientTier; icon: typeof Building2; title: string; body: (currency: string) => string; eta: string }> = [
-  { tier: 'PAYOUT_ONLY', icon: Building2, title: 'Direct to business bank account / crypto wallet', body: (currency) => `Bank: they receive ${currency} in their business account. Wallet: USDC on Sui lands in their Slush or MetaMask (Sui Snap) wallet.`, eta: '3–20 min' },
+  { tier: 'PAYOUT_ONLY', icon: Building2, title: 'Direct to their business bank account', body: (currency) => `They receive ${currency} in their business account. To pay a Sui wallet in USDC, use Send USDC.`, eta: '3–20 min' },
   { tier: 'SWEEP_ACCOUNT', icon: Zap, title: 'Splash receive account (auto-sweep)', body: () => 'Account experience; funds sweep to their bank in seconds.', eta: '≈5 s receive + sweep' },
   { tier: 'STORED_BALANCE', icon: Landmark, title: 'Splash balance', body: () => 'Funds stay as USD. Instant. Re-spendable in-network.', eta: 'Instant' },
 ];
 
 const CUSTODY_NOTE_ID = 'delivery-custody-phase-note';
+
+/** The fee line of a route that opens in Phase 2: where its money lands on chain is not built yet, so neither is its price. */
+const PHASE_2_FEE_NOTE = 'Splash fee set when this route opens in Phase 2';
 
 type TierLock = 'custody_phase' | 'sweep_switch' | 'corridor';
 
@@ -39,7 +42,13 @@ export default function StepDelivery({ state, set, prev, next }: { state: Transf
   const sweepOn = useSweepSwitchOn();
   const storedCurrencies = (process.env.NEXT_PUBLIC_STORED_BALANCE_CORRIDORS ?? '').split(',').map((value) => value.trim().toUpperCase());
   const storedOpen = process.env.NEXT_PUBLIC_DEMO_MODE === 'true' || storedCurrencies.includes(state.amount.targetCurrency);
-  const feeBps = getCorridorFeeBps(state.amount.targetCurrency);
+  // Splash's fee is the schedule's, not the corridor's (A1 §2.8), priced by
+  // where the payment goes. A direct payout goes to the supplier's bank, so
+  // it pays the bank-payout range (or none while the fees are off). The
+  // receive account and the Splash balance open in Phase 2; their price is
+  // set then, so they say so rather than borrow another route's. The quote
+  // on the next step shows this payment's own fee.
+  const pricing = usePublishedPricing();
   // A tier already in state that is locked here (chosen before the target
   // currency changed, or prefilled under a different phase) is not one the
   // operator can keep: show and continue with PAYOUT_ONLY, always open.
@@ -67,7 +76,7 @@ export default function StepDelivery({ state, set, prev, next }: { state: Transf
               <span className={`flex h-11 w-11 items-center justify-center rounded-xl ${selected ? 'bg-[#237284] text-card' : 'bg-muted text-[#1F4452]'} ${lock ? 'opacity-50' : ''}`}><Icon className="h-5 w-5" /></span>
               <span>
                 {/* Only the offer dims; the reason below stays at full contrast. */}
-                <span className={`block ${lock ? 'opacity-55' : ''}`}><strong className="block">{option.title}</strong><small className="mt-1 block leading-5 text-foreground/90">{option.body(state.amount.targetCurrency)}</small><small className="mt-2 block font-semibold text-foreground">ETA {option.eta} · {option.tier === 'STORED_BALANCE' ? '0.00% transfer' : `${(feeBps / 100).toFixed(2)}% corridor fee`}</small>{option.tier === 'SWEEP_ACCOUNT' && <small className="mt-1 block text-foreground/90">Pass-through account; funds rest for seconds.</small>}{option.tier === 'STORED_BALANCE' && <small className="mt-1 block text-foreground/90">Off-ramp fees apply when leaving the network.</small>}</span>
+                <span className={`block ${lock ? 'opacity-55' : ''}`}><strong className="block">{option.title}</strong><small className="mt-1 block leading-5 text-foreground/90">{option.body(state.amount.targetCurrency)}</small><small className="mt-2 block font-semibold text-foreground">ETA {option.eta} · {!pricing ? 'Splash fee shown in the quote' : option.tier === 'PAYOUT_ONLY' ? pricing.bankFeePhrase : PHASE_2_FEE_NOTE}</small>{option.tier === 'SWEEP_ACCOUNT' && <small className="mt-1 block text-foreground/90">Pass-through account; funds rest for seconds.</small>}{option.tier === 'STORED_BALANCE' && <small className="mt-1 block text-foreground/90">Off-ramp fees apply when leaving the network.</small>}</span>
                 {lock && (
                   <small className="mt-3 flex items-start gap-1.5 text-[13px] font-semibold leading-5 text-foreground">
                     <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
@@ -93,7 +102,7 @@ export default function StepDelivery({ state, set, prev, next }: { state: Transf
           </div>
         </div>
       )}
-      <div className="flex gap-3"><button onClick={prev} className="flex-1 rounded-xl border border-foreground/15 py-3 font-bold">Back</button><button onClick={() => { set({ deliveryTier: chosen }); next(); }} className="flex-1 rounded-xl bg-accent py-3 font-bold text-[#073d49]">Review quote</button></div>
+      <div className="flex gap-3"><button onClick={prev} className="flex-1 rounded-xl border border-foreground/15 py-3 font-bold">Back</button><button onClick={() => { set({ deliveryTier: chosen }); next(); }} className="flex-1 rounded-xl bg-[#0C3E48] py-3 font-bold text-white transition-colors hover:bg-[#145D6A] focus-ring">Review quote</button></div>
     </div>
   );
 }

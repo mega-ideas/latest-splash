@@ -16,6 +16,11 @@
  * it cannot render one.
  */
 
+import { formatRate, rateRange, tierLabel } from '../lib/fees/copy.ts';
+import { FEE_KIND, LAUNCH_SCHEDULE } from '../lib/fees/schedule.ts';
+
+const BANK = LAUNCH_SCHEDULE[FEE_KIND.BANK_PAYOUT];
+
 export type NumberStatus = 'verified' | 'needs_verification';
 
 export type NumberLabel = 'Third-party estimate' | 'Official statistic' | 'Regulatory rule' | 'Splash configuration';
@@ -48,12 +53,13 @@ export const SEA_NUMBERS: SeaNumber[] = [
     status: 'verified',
   },
   {
-    id: 'splash-fee-usd-php',
-    value: '0.70%',
-    meaning: 'What Splash charges to pay out in local currency, USD to PHP and every other corridor, before the exchange rate. No fixed fee.',
-    source: 'Splash pricing configuration',
-    sourceUrl: 'https://github.com/mega-ideas/latest-splash/blob/main/lib/fx/corridors.ts',
-    asOf: '2026-09-26',
+    // Rendered from the launch schedule, never typed in (A1 §2.7).
+    id: 'splash-fee-bank-payout',
+    value: rateRange(BANK),
+    meaning: `What Splash charges on a payout to a bank, by the size of the payment: ${formatRate(BANK.tiers[0].bps)} ${tierLabel(BANK, 0).replace(/^Under/, 'under')}, down to ${formatRate(BANK.tiers[BANK.tiers.length - 1].bps)} from ${tierLabel(BANK, BANK.tiers.length - 1).replace(/ and above$/, '')}. Charged on top of the amount; the payout partner's fee is quoted separately.`,
+    source: 'Splash fee schedule, splash_core::fee_config (launch schedule)',
+    sourceUrl: 'https://github.com/mega-ideas/latest-splash/blob/main/move/splash_core/sources/fee_config.move',
+    asOf: '2026-10-24',
     label: 'Splash configuration',
     status: 'verified',
   },

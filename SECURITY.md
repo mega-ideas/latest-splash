@@ -30,6 +30,237 @@ The remaining four modules (`smart_treasury`, `payment_intent`, `audit_anchor`, 
 
 ---
 
+## v2 Phase 1 — business wallets, spending rules, a delayed upgrade — 2026-10-24
+
+Brief: `SPLASH_SUI_V2_PROMPT.md` §3. Design and its two reviews:
+`docs/v2/phase1-move-design.md`. Mainnet gate: `docs/mainnet-checks-2026-10.md`.
+
+### The money paths, after v2
+
+Exactly two paths move a business's funds to a third party.
+
+| Path | Function | Who authorises |
+|---|---|---|
+| The owners' multisig | `payment_intent::confirm_from_business_wallet`, `_balance`, `confirm_cross_chain_from_business_wallet` | The protocol: the business wallet signed the transaction |
+| Spending rules | `splash_spend::pay_intent` (Sui intents only) | An app-bound allowance from the business wallet, plus its `SpendPolicy` |
+
+The unbound path (`create_payment_intent`, `create`, `confirm_payment_intent`)
+is **not in v2 core**. It let any signer, in practice Splash's operator, pay a
+recipient from its own coin, and an additive upgrade policy could never remove
+it again.
+
+**The legacy approval path is not in v2 core either** (Sky, decision 3, 24
+Oct 2026). An earlier revision kept `confirm_with_approval` behind a one-way
+`legacy_enabled` switch. A public function, however firmly closed, can never
+be removed once published, so `create_payment_intent_for_account`,
+`approve_payout`, `confirm_with_approval`, the approver set and the switch are
+not published at all (`tests/legacy-path-removed.test.mjs`).
+
+Both paths pay Splash's fee as their own leg (Amendment A1, below and
+[`docs/v2/fees.md`](docs/v2/fees.md)).
+
+### What v2 enforces on chain
+
+- **Wallet registration.** Only the founder nominates a wallet. The wallet
+  registers itself: the transaction sender must equal the multisig address
+  recomputed in Move from its members, and every member must be an owner.
+  If one member can meet the threshold alone, the founder must have chosen
+  that and the wallet must acknowledge it (D1).
+- **Membership after registration.** The business wallet adds and removes
+  owners and names the recovery party. It may do so under an owner freeze,
+  never under a compliance freeze, and it may remove the founder once the
+  founder no longer signs. There is no per-person approver set in v2 core.
+  Any one owner can still freeze.
+- **Recovery only adds an owner.** If the founder loses their key before
+  `nominate_wallet`, no wallet can ever be registered for that account:
+  nomination is founder-only and the founder anchor never moves. The business
+  applies again (`submit_application`, then KYB). If a wallet's quorum is
+  lost, nobody can rotate it, and an owner freeze it does not lift stays; the
+  business opens a new account. Its funds stay in its own wallet.
+- **Bank-payout floor.** A bank payout must be at least the larger of 99 USDC
+  and `ComplianceConfig.min_settlement_amount`, checked when the intent opens
+  and again when it settles (abort 434). Other kinds have no floor.
+- **Wallet rotation** takes two steps: the current wallet proposes, and the new
+  wallet confirms. `wallet_epoch` goes up, so spending rules made under the old
+  wallet stop paying, even after a rotation back to the same address.
+- **`splash_spend` is immutable.** Nothing in it can rotate a spender or let a
+  permit or a `Balance` escape (`npm run check:spend`, in CI).
+- **Every `SpendPolicy` mutation is signed by the business wallet.** The policy
+  lives outside core, so no core upgrade can reach it. A policy grows (a
+  spender, a recipient, a beneficiary, a higher limit, a shorter running
+  window, a new spending rule) only while it is the account's current one and
+  the account is not frozen. Cutting back is always open.
+- **The second-approval threshold counts a running total** (decision 4). A
+  payment needs an owner's approval when it, with what its payer has already
+  paid that recipient in the current window (24 hours by default, fixed at
+  the first payment) and what the window before still counts, is above the
+  threshold. The total belongs to the payer's address, so removing and
+  re-adding a spender does not reset it.
+- **Partner deposit addresses are paid only as bank payouts** (decision 2).
+  A policy binds each verified beneficiary to one partner deposit address,
+  keeps that address off its recipient list (1067, 1068), and pays it only as
+  a bank payout for a beneficiary bound to it, so the partner can match
+  sender, amount and intent.
+- **Spending rules pay on Sui only.** A cross-chain payment is the owners'
+  multisig alone (`confirm_cross_chain_from_business_wallet`). No spending
+  rule can open, approve or pay one.
+- **Splash's KMS operator is an EXECUTOR.** It cannot open an intent, and it
+  pays only with an approval naming it: an owner's `approve_payout` naming
+  it, or the wallet's `delegate_execution` of an intent the wallet itself
+  opened. Staff cannot hand a payment to it. Each approval names the quote's
+  deadline (`settle_by_ms`) and `max_total`, the principal plus the Splash fee
+  the approver was shown, and dies when the policy removes anything.
+- **One `ComplianceConfig`**, created by consuming a ticket minted once at
+  publish. A PTB cannot pick a laxer config, and each spending policy pins its
+  config's ID (`E_WRONG_CONFIG`, 1028).
+- **Registry additions** (assets, settlement apps, bridge adapters) need
+  `AdminCap` and on-chain proof that the sender is a quorum multisig. Each one
+  gives 24 hours' notice, with every owner alerted, and lapses after 7 days.
+  Removals are immediate. The last asset cannot be removed. "Never by a single
+  key" means what the chain can prove: the sender holds `AdminCap` and is a
+  multisig that no single member can sign for. It does not prove that this is
+  the governance multisig, so the mainnet ceremony checks the registries
+  before the first business onboards (`docs/MAINNET-CHECKLIST.md`). Every
+  accepted asset is assumed to have 6 decimals; nothing on chain checks it,
+  so governance verifies it before proposing an asset.
+- **The upgrade delay.** `splash_core` upgrades additive-only through
+  `splash_upgrade_delay`, which holds the `UpgradeCap`. An upgrade gives 24
+  hours' notice, must be authorised within 7 days of it, and the wrapper itself
+  is immutable.
+- **Idempotency.** A v2 intent's UID is derived from the business's own
+  payment reference, so a second intent for the same reference can never exist.
+- **Bridge obligations name their coin.** A cross-chain settlement cannot keep
+  the business's coin and burn another.
+
+### Splash's fee, on chain (Amendment A1, 24 Oct 2026)
+
+The rules are in [`docs/v2/fees.md`](docs/v2/fees.md). What the chain
+enforces:
+
+- **No intent carries a fee.** The fee is computed at settlement by
+  `fee_config::splash_fee` from the kind the chain derives and the principal.
+  No PTB argument sets a rate.
+- **The kind is derived.** `address_registry::derive_kind` charges a
+  registered business wallet as a Splash business (free) and a partner
+  deposit address as a bank payout. Every settle path refuses a derived kind
+  that does not fit the declared one (1400), except a declared wallet or
+  exchange payment to a business wallet, so a partner address can never be
+  paid as a cheap wallet transfer that skips the bank floor and the
+  beneficiary.
+- **The ceiling is 100 bps.** No schedule rate or discount may exceed it, and
+  every fee is clamped to 1% of the principal. `splash_spend` checks the same
+  ceiling with its own constant on `max_fee` before (1037) and on the fee
+  core charged after (1032), so no core upgrade can make a spending rule pay
+  Splash more. `check:fees` holds the three constants equal.
+- **The payer bounds the fee.** Every money path takes `max_fee`, the fee the
+  payer was shown, and aborts above it (435; 1031 under a rule). An
+  approval's `max_total` bounds principal plus fee (1033). A raised schedule
+  can stop a payment, never make it pay more than it showed.
+- **The fee leg is inside Move.** It is split in core's settle path and sent
+  to `FeeConfig`'s fee recipient, never to an address in the PTB. Every
+  remainder (an overpayment, the unused part of `max_fee`) goes to the
+  business wallet, never to the sender. This replaces the original H-03 fix,
+  which refunded an overpayment to the caller.
+- **Fees are off until governance turns them on.** `FeeConfig` is published
+  with no fee recipient, and while it has none every fee is 0. The recipient
+  is proposed as a multisig's members, weights and threshold, and the address
+  is derived on chain; a multisig any one member can sign for is refused
+  (1304), so it can never be the KMS operator.
+- **Changes give 24 hours' notice and lapse after seven days.** Schedule and
+  recipient changes need `FeeAdminCap`, held by the governance multisig. The
+  only immediate change is a business's discount, at most 100 bps, which only
+  lowers what it pays.
+- **`OpsCap` only classifies.** It adds and removes partner deposit addresses
+  in Splash's registry, at once and with an event. The registry holds no
+  address any payment is sent to, so a stolen `OpsCap` can make a declared
+  bank payout to a removed address abort, or a wallet payment to an added one
+  abort. It cannot redirect funds or raise a fee.
+- **Each `SpendPolicy` pins Splash's `FeeConfig` and `Registry`** (1035,
+  1036), as it pins its `ComplianceConfig`.
+
+### What a freeze does and does not do
+
+A freeze, whether by an owner or by compliance, stops every Splash path:
+intents, the wallet path and staff allowances. **It does not
+and cannot freeze the business's own wallet.** The business holds its keys
+(D1) and can always move its own funds directly. Copy, evidence exports and
+partner material must never describe a freeze as a funds freeze.
+
+Once a wallet is registered, only the wallet lifts an owner freeze, and in the
+same transaction it can remove the owner who pulled it or add a replacement
+owner. Only `AdminCap` lifts a compliance freeze.
+
+### Accepted limits, stated plainly
+
+- **Address aliases.** `address_aliases` is on mainnet, and Move cannot see
+  whether a multisig has aliased itself to a single key. A wallet whose quorum
+  signs `0x2::address_alias` hands that key the wallet. The wallet transaction
+  builder refuses alias commands, and a watcher alerts if an alias object
+  appears for a wallet, the governance multisig or the operator (Phase 2).
+- **What an additive core upgrade can still do.** It could add a function that
+  writes an intent's fields, and so make a spender pay a verified recipient
+  twice, within caps. It can also change what core keeps: the tier ceilings,
+  the KYB flag and the freeze flags. It cannot change a spending rule
+  (spenders, recipients, beneficiaries, the policy's limits), point a policy
+  at another config, or create an allowance. This is why every proposal
+  alerts every owner 24 hours ahead. The alert gives the bytecode digest, the
+  upgrade policy and the eta; nothing rebuilds the source to show what
+  changes. An added `fee_config` function could rewrite the real
+  `FeeConfig`, its fee recipient for example; a rule payment is still bounded
+  by `splash_spend`'s own 1% ceiling, and an owners' payment by its
+  `max_fee`.
+- **Fee proposals reach no owner yet.** The governance alert cron reads the
+  upgrade wrapper and the `ComplianceConfig`, not `FeeConfig`. Owner alerts
+  for `FeeScheduleProposed`, `FeeRecipientProposed`, their application and
+  their withdrawal are Phase 2; until then a fee change's 24-hour notice is
+  public on chain only.
+- **The fee is outside the principal's limits.** Tier ceilings and a
+  policy's limits and threshold count the principal; Splash's fee, at most
+  1%, comes on top. The allowance's caps count principal plus `max_fee`.
+- **Owners choose a recipient's tag.** An owner can tag an exchange's address
+  as a wallet and pay 2 bps instead of 5 to 15 (accepted in A1). Phase 2 KYT
+  attribution is to flag it.
+- **Fixed windows.** Allowance rate limits are fixed windows, so a limit can
+  move twice its size across a window boundary.
+- **Split payments.** The threshold now applies to a running total per payer
+  and recipient (above), so one spender splitting one invoice needs an
+  approval for the part over it. What remains: a split across several
+  spenders, each under the threshold, which Phase 2's near-threshold alert
+  (read from `RuleSpend`) is to flag; and, with a fixed window, the
+  allowance's own rate limit can still move twice its size across a window
+  boundary. The allowance's own caps and the account's tier ceilings still
+  bound what moves.
+- **Bank payouts.** The chain proves the funds reached the partner deposit
+  address bound to a verified beneficiary. The partner then pays the bank
+  account in the instruction; Phase 2 recomputes the beneficiary commitment
+  from that instruction and refuses to send it if they differ. A partner
+  address receives nothing under a rule but bank payouts for its bound
+  beneficiaries. Several beneficiaries bound to one partner address keep
+  separate totals, so the Phase 2 partner payout-instruction API (keyed by
+  the intent id) must build each instruction strictly from the intent's
+  `beneficiary_ref`.
+- **Partner deposit model.** Decided by Sky (decision 2): fixed per business
+  per partner, verified once by a test deposit, bound by the wallet. Which
+  networks each partner deposits on is still a per-partner question
+  (`docs/mainnet-checks-2026-10.md`).
+
+### Decided by Sky (24 Oct 2026)
+
+- **The audit-anchor fee address.** It was open here: the stablecoin lane's
+  optional fee leg paid `SPLASH_FEE_ADDRESS_MAINNET`, a single address from
+  the environment, and review item B1 rates any Splash-owned receiving
+  address in a payout transaction as Critical. Amendment A1 decides it. On
+  the v2 settle paths the fee is computed and split inside Move to
+  `FeeConfig`'s fee recipient, a proven multisig changed only after 24
+  hours' notice. The Send USDC desk, a plain wallet transfer, charges the
+  WALLET schedule's fee only when `STABLECOIN_ANCHOR_FEE=on` (off by default)
+  and pays that same recipient, read from the mainnet `FeeConfig`; nothing is
+  charged while `FeeConfig` has none. `SPLASH_FEE_ADDRESS_MAINNET` is
+  retired. On that desk the fee leg is built by the server from the
+  `FeeConfig` it read, not split in Move.
+- **No penalty or late fees.** Splash is not a party to the supplier's
+  invoice, so none exists.
+
 ## WS4 — operator custody, the code half — 2026-10-23
 
 **Scope**: the hot operator signer — how it is held, how much it may hold, and
@@ -48,6 +279,24 @@ AWS or a fullnode.
 | OC-3 | Medium | The operator address could hold any amount, and a payout larger than its balance failed only on chain, with an opaque abort. **Fixed**: `assertOperatorCanPay(amount)` runs before the operator-funded paths (`recordSingleTransferOnSui`, `confirmComposedPaymentOnSui`) build and sign. Below the payout it throws `OperatorTopUpNeededError` (`state: 'top-up-needed'`) and pays nothing — never a partial payment. Above `OPERATOR_HOT_BALANCE_CEILING_MICRO` (micro-USDC) it alerts with the excess to sweep to cold, and does not block the payout. bigint throughout. | Fixed |
 | OC-4 | High | No one would have noticed value leaving the operator address by any route other than Splash's own. **Fixed**: `/api/cron/operator-outflows` (bearer `CRON_SECRET`, every 15 minutes) reads what the address sent over Sui GraphQL and alerts on any outflow that is not `payment_intent::confirm_with_approval` in our core package, to a wallet beneficiary whose screening is CLEAR or ATTESTED. Gas is not an outflow. Value into an object rather than an address is flagged. A monitor that cannot read its inputs answers 502 rather than reporting all clear. | Fixed |
 | OC-5 | Info | Canon D-0004: the operator key must never enter 0xWal's process or any agent tool. **Enforced**: a test fails the build if anything under `lib/agent`, `lib/oxwal`, `lib/ai`, `lib/chain` or the agent and copilot routes imports the signer or settlement module, or names an operator key or AWS secret. The outflow monitor itself never builds a signer. | Guarded |
+
+**Revised for v2 (Amendment A1 review, 24 Oct 2026).** OC-4's approved path
+above is v1's: v2 core has no `confirm_with_approval`. The monitor's rule is
+now (`lib/server/operator-outflows.ts`): the operator is an EXECUTOR and pays
+only through `splash_spend::pay_intent` in our `splash_spend` package, with
+`audit_anchor::anchor` in our core package in the same transaction, from the
+business wallet's allowance and never from its own balance. On that path
+every address that gained value must be an approved wallet beneficiary, an
+address Splash's registry classifies (a partner deposit address or a business
+wallet), or `FeeConfig`'s fee recipient. Anything else is flagged:
+`not_approved_path` (value moved off that path, including the retired
+`confirm_with_approval`), `operator_paid_from_own_balance`,
+`recipient_not_approved`, or `outflow_without_recipient`. The monitor reads
+`SPLASH_SPEND_PACKAGE_ID`, `SPLASH_FEE_CONFIG_ID` and
+`SPLASH_ADDRESS_REGISTRY_ID` (`lib/server/operator-outflow-monitor.ts`). A
+read that fails fails the run rather than reporting all clear; with an id
+unset, payments that need it are flagged, not cleared. The bullets below are
+kept as written for v1.
 
 **Still open, and stated.**
 
@@ -656,7 +905,8 @@ on chain.
 (business_account, payment_intent, audit_anchor, receipt_v2, compliance_config,
 peg_monitor) publishes to mainnet; `splash_custody` (settlement, smart_treasury,
 dual_treasury, liquidity_guard) publishes only when the Labuan e-money licence is
-granted. Non-custody stops being an assert someone can forget and becomes a
+granted (superseded in v2: D11 retires `splash_custody` from the mainnet path
+for good; testnet only). Non-custody stops being an assert someone can forget and becomes a
 property of the type system: **no struct in `splash_core` holds a `Balance<T>`**,
 enforced by `scripts/check-core-no-balance.mjs` in CI
 (`.github/workflows/core-invariant.yml`) and in `npm run lint`.
@@ -871,6 +1121,8 @@ After init, `assert_pegged` passes immediately because (a) deviations are 0 and 
 
 The contract previously hardcoded `FEE_BPS = 150` (1.50%) while the off-chain quote engine, dashboards, and marketing all advertised 0.80%–1.10%. There was no way to align them without redeploying. Worse — any future change to the constant required a full upgrade.
 
+**v2 note (Amendment A1, 24 Oct 2026):** this finding is custody-era history. `splash_custody` is retired from the mainnet path, `lib/fx/corridors.ts` carries no fee any more, and the v1 testnet custody path is handed the A1 bank tier's rate (at most 100 bps). On the v2 paths no caller passes a rate: the fee is computed on chain by `splash_core::fee_config` under a 100 bps ceiling (`docs/v2/fees.md`).
+
 **Resolution**: `settle_payment` and `settle_batch` now take `fee_bps: u64` as a parameter, bounded by `MAX_FEE_BPS = 200` via `assert!(fee_bps <= MAX_FEE_BPS, E_FEE_EXCEEDED)`. Per-corridor fees are defined in `lib/fx/corridors.ts` and passed by the off-chain settlement layer. The contract emits `fee_bps` in `PaymentSettled` and `PaymentExecuted` for full auditability. See `lib/fx/corridors.ts`, `lib/server/sui-settlement.ts`, and `lib/sui/contracts.ts` for the off-chain pieces.
 
 ---
@@ -969,6 +1221,8 @@ Functions take `cap: &AdminCap` then do `let _ = cap;`. This works (the borrow s
 **Location**: `move/sources/settlement.move:23`
 
 Current corridor fees are 80–110 bps. The 200 bps (2%) ceiling is roughly 2× headroom — defensive but allows a misconfigured quote engine to charge double the highest legitimate fee without aborting.
+
+**v2 note (Amendment A1):** custody-only. The v2 fee ceiling is 100 bps, written into `splash_core::fee_config` and `splash_spend` and held equal by `check:fees`.
 
 **Recommendation**: Tighten to 150 bps if no genuine 1.5%+ corridors are planned. Or: emit a `HighFeeWarning` event when `fee_bps > 120` so off-chain monitors can alert on suspicious quotes.
 
@@ -1076,6 +1330,8 @@ Caller has to read `state` afterwards or parse the emitted event. Minor UX frict
 ## Permanent Monitoring Checklist
 
 These are the items the security/ops team should **always** keep eyes on. Each has a recommended cadence and alert threshold.
+
+**v2 note (Amendment A1, 24 Oct 2026):** the rows that name `E_FEE_EXCEEDED`, `fee_bps`, `MAX_FEE_BPS`, `protocol_fees` or `lib/fx/corridors.ts` as the fee's source (1, 5, 7, 9, 15, 22, 25) describe the retired custody path. On v2 the fee comes from `FeeConfig` and its signals are its events: `FeeCharged` for revenue reconciliation, and `FeeScheduleProposed`, `FeeRecipientProposed`, their `…Applied` and `…ProposalCancelled` events and `FeeDiscountSet` for governance changes (alerting on them is Phase 2). Aborts 435, 1031 and 1033 mean a schedule rose after a quote was shown; 1032 should never fire.
 
 ### Hot signals (alert immediately)
 

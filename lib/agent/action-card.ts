@@ -1,4 +1,5 @@
 import { confidencePercent as formatConfidencePercent } from '../confidence.ts';
+import { formatUsdc } from '../fees/copy.ts';
 import type { DataStatus, EvidenceItem, EvidenceQuality, ProposalFxRate, ProposalKind, ProposalStatus, RiskBand, SimulationResult, UserRole } from './types';
 
 type AmountLike = bigint | number | string | undefined;
@@ -8,7 +9,7 @@ export type ClientFinancialImpact = {
   amountOut?: AmountLike;
   currencyIn?: string;
   currencyOut?: string;
-  feeBps?: number;
+  splashFeeMinor?: AmountLike;
   fxRate?: ProposalFxRate;
   yieldDeltaBps?: number;
   nettingSaved?: AmountLike;
@@ -97,6 +98,17 @@ function bps(value?: number) {
   return typeof value === 'number' ? `${(value / 100).toFixed(2)}%` : '-';
 }
 
+/** Splash's fee in USDC minor units, exactly: "2.00 USDC". */
+function splashFee(value: AmountLike) {
+  if (value === undefined || value === null || value === '') return '-';
+  try {
+    const minor = BigInt(String(value));
+    return minor < 0n ? '-' : `${formatUsdc(minor)} USDC`;
+  } catch {
+    return '-';
+  }
+}
+
 function row(label: string, value: string): ActionCardRow {
   return { label, value, status: value === '-' ? 'empty' : 'ok' };
 }
@@ -142,7 +154,7 @@ export function buildActionCardModel(proposal: ActionCardProposal): ActionCardMo
     impactRows: [
       row('Amount in', money(impact.amountIn, impact.currencyIn)),
       row('Amount out', money(impact.amountOut, impact.currencyOut)),
-      row('Fee', bps(impact.feeBps)),
+      row('Splash fee', splashFee(impact.splashFeeMinor)),
       row('FX', impact.fxRate ? `${impact.fxRate.value} (${fxSourceLabel(impact.fxRate)})` : '-'),
       row('Yield delta', bps(impact.yieldDeltaBps)),
       row('Netting saved', money(impact.nettingSaved, impact.currencyIn ?? impact.currencyOut ?? 'USD')),

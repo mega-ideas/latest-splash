@@ -29,8 +29,9 @@ test('comparison baselines: category cost math is bps-of-amount plus flat, in mi
 test('quote step derives all figures from the live quote and reads real settings', async () => {
   const source = await readFile(new URL('../components/transfer/StepQuote.tsx', import.meta.url), 'utf8');
 
-  // Fee % derives from the quote object — no duplicated fee math in the card.
-  assert.match(source, /quoteFeeUsd \/ sendAmountUsd/);
+  // The fee comes from the quote object: A1 §2.7's breakdown of it, with no
+  // fee math of its own in the card.
+  assert.match(source, /<FeeBreakdown quote=\{state\.quote\.fees\}/);
   assert.match(source, /state\.quote\.netReceived/);
   // Rate-lock chip reads the REAL hold expiry, never a hardcoded window.
   assert.match(source, /state\.rateHold\.holdUntil/);

@@ -49,14 +49,14 @@ test('a hold with no owner belongs to nobody, not to everybody', async () => {
   const { createRateHold, listRateHoldsFor } = await import('../lib/server/operations.ts');
 
   const mine = await createRateHold({
-    orgId: 'acme', corridorCurrency: 'PHP', rate: '56.5', feeBps: 80,
+    orgId: 'acme', corridorCurrency: 'PHP', rate: '56.5',
   });
   const theirs = await createRateHold({
-    orgId: 'northwind', corridorCurrency: 'PHP', rate: '56.5', feeBps: 80,
+    orgId: 'northwind', corridorCurrency: 'PHP', rate: '56.5',
   });
   // The demo seed creates holds with no orgId. An `orgId === undefined`
   // comparison must not match a real org.
-  const ownerless = await createRateHold({ corridorCurrency: 'MYR', rate: '4.7', feeBps: 80, demo: true });
+  const ownerless = await createRateHold({ corridorCurrency: 'MYR', rate: '4.7', demo: true });
 
   const forMe = await listRateHoldsFor('acme');
   assert.ok(forMe.some((h) => h.id === mine.id));

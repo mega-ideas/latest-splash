@@ -27,6 +27,11 @@ import LocalTime from '@/components/LocalTime';
 import ControlPlaneExplainer from '@/components/oxwal/ControlPlaneExplainer';
 import RoadmapChip from '@/components/supply/RoadmapChip';
 import { claims, lockedCopy } from '@/content/claims';
+import { pricingSummary, type PricingSummary } from '@/lib/fees/copy';
+import { LAUNCH_SCHEDULE } from '@/lib/fees/schedule';
+import { formatBps } from '@/lib/fx/calculator';
+import { getComparisonBaseline } from '@/lib/fx/comparison-baselines';
+import { formatMinor } from '@/lib/money';
 import { BRAND } from '@/content/brand';
 import { CUSTODY_LICENCE } from '@/lib/custody-phase-rules';
 
@@ -60,7 +65,8 @@ const operatingLayers = [
   },
 ];
 
-const flowSteps = [
+/** The five steps. Delivery quotes Splash's bank fee from the schedule (A1 §2.7). */
+const flowStepsFor = (pricing: PricingSummary) => [
   {
     id: 'intake',
     number: '01',
@@ -96,7 +102,7 @@ const flowSteps = [
     description: 'Pay a verified supplier or sweep value into the recipient ladder where the corridor allows it.',
     image: '/cinematic/flow-deliver-v4.png',
     imageAlt: 'Deliver isometric typography with a truck bringing a peso coin to a local shop',
-    stat: lockedCopy.fee,
+    stat: pricing.bankFeePhrase,
   },
   {
     id: 'proof',
@@ -109,13 +115,15 @@ const flowSteps = [
   },
 ];
 
-/* Metrics ticker: the moving bridge band at the bottom of the hero. */
-const marqueeItems = [
+/* Metrics ticker: the moving bridge band at the bottom of the hero. Splash's
+   fees are the schedule's (A1 §2.7): free between Splash businesses, a rate
+   to a bank, and "None yet" while FeeConfig's fees are off. */
+const marqueeFor = (pricing: PricingSummary) => [
   ['1 live testnet', 'MY to PH corridor'],
   ['Modeled routes', 'expand with controls'],
   ['~400ms', 'Sui settlement finality'],
-  ['Free', 'USDC transfers'],
-  ['0.70%', 'to local currency'],
+  [pricing.business, 'between Splash businesses'],
+  [pricing.bankFee, 'Splash fee to a bank'],
   ['Human approved', 'AI recommendations'],
   ['Stored proof', 'A record that lasts'],
 ];
@@ -156,94 +164,125 @@ function PartnerBadge({ src, name, role, logoClass }: (typeof partnerRail)[numbe
   );
 }
 
-const comparisonRows = [
+/* The comparison's competitor figures (the A1 review). The bank and
+   fintech columns are the reviewed category midpoints for USD to PHP from
+   a named, dated dataset (lib/fx/comparison-baselines.ts): a correspondent
+   wire with its FX margin, and the digital-provider category, never a
+   named provider. No broker figure has a source, so its cells show none
+   rather than a number nobody can check. */
+const COMPARISON_BASELINE = getComparisonBaseline('PHP');
+const UNSOURCED = 'Varies';
+const BANK_WIRE = COMPARISON_BASELINE?.bankWire ?? null;
+const BANK_WIRE_DELIVERY = BANK_WIRE?.delivery ?? UNSOURCED;
+const BANK_WIRE_COST = BANK_WIRE ? `US$${formatMinor(BANK_WIRE.flatUsdMinor, 2)} + ${formatBps(BANK_WIRE.marginBps)} FX margin` : UNSOURCED;
+const FINTECH = COMPARISON_BASELINE?.fintech ?? null;
+const FINTECH_DELIVERY = FINTECH?.delivery ?? UNSOURCED;
+const FINTECH_COST = FINTECH ? `US$${formatMinor(FINTECH.flatUsdMinor, 2)} + ${formatBps(FINTECH.marginBps)} FX margin` : UNSOURCED;
+/** The dataset's ISO date as a reader says it ("31 March 2025"): a calendar
+ *  date, not a moment, so it is spelled out the same on server and client. */
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+function calendarDate(iso: string) {
+  const [year, month, day] = iso.split('-').map(Number);
+  return `${day} ${MONTHS[month - 1]} ${year}`;
+}
+const BASELINE_DATE = COMPARISON_BASELINE ? calendarDate(COMPARISON_BASELINE.dataset.asOf) : '';
+
+const comparisonRowsFor = (pricing: PricingSummary) => [
   {
     feature: 'Settlement speed',
-    bank: '2-5 days',
-    broker: '1-3 days',
-    wise: '1-2 days',
+    bank: BANK_WIRE_DELIVERY,
+    broker: UNSOURCED,
+    fintech: FINTECH_DELIVERY,
     splash: lockedCopy.speed,
   },
   {
-    feature: 'Starting fee',
-    bank: '3-5%',
-    broker: '2-4%',
-    wise: '0.5-1.5%',
-    splash: lockedCopy.fee,
+    feature: 'Fee to a bank',
+    bank: BANK_WIRE_COST,
+    broker: UNSOURCED,
+    fintech: FINTECH_COST,
+    // The schedule once fees are on; until then, none is charged.
+    splash: pricing.feesOn ? pricing.bank : pricing.bankFeePhrase,
   },
   {
     feature: 'FX transparency',
     bank: 'Hidden markup',
     broker: 'Cash spread',
-    wise: 'Mid-market',
+    fintech: 'Margin in the rate',
     splash: 'Oracle-labeled quote',
   },
   {
     feature: 'Atomic settlement',
     bank: 'No',
     broker: 'No',
-    wise: 'No',
+    fintech: 'No',
     splash: 'Yes',
   },
   {
     feature: 'Batch payments',
     bank: 'Limited',
     broker: 'No',
-    wise: 'Limited',
+    fintech: 'Limited',
     splash: 'Native',
   },
   {
     feature: 'AI treasury copilot',
     bank: 'No',
     broker: 'No',
-    wise: 'No',
+    fintech: 'No',
     splash: lockedCopy.agent,
   },
   {
     feature: 'Early payment on invoices',
     bank: 'Manual factoring',
     broker: 'No',
-    wise: 'No',
+    fintech: 'No',
     splash: 'Buyer-approved discount offer',
   },
   {
     feature: 'Bilateral netting',
     bank: 'Manual',
     broker: 'No',
-    wise: 'No',
+    fintech: 'No',
     splash: 'Modeled in account loop',
   },
   {
     feature: 'Permanent audit trail',
     bank: 'Siloed records',
     broker: 'Manual receipts',
-    wise: 'Platform history',
+    fintech: 'Platform history',
     splash: 'Encrypted and kept',
   },
   {
     feature: 'Recipient account ladder',
     bank: 'Bank account only',
     broker: 'Cash-out only',
-    wise: 'Wise account',
+    fintech: 'Provider account',
     splash: 'Payout, sweep, stored balance',
   },
 ];
 
+/** Each benchmark as its source published it, read live by /api/market/yields; null when it could not be read. */
 type YieldBenchmarks = {
-  bank: number;
-  broker: number;
-  wise: number;
-  splash: number;
+  bank: number | null;
+  broker: number | null;
+  wise: number | null;
+  splash: number | null;
   asOf: string;
 };
 
-const fallbackYieldBenchmarks: YieldBenchmarks = {
-  bank: 0.38,
-  broker: 3.12,
-  wise: 3.14,
-  splash: 0,
+/** Nothing is shown until a source has been read: no remembered rate stands in for a reading. */
+const unreadYieldBenchmarks: YieldBenchmarks = {
+  bank: null,
+  broker: null,
+  wise: null,
+  splash: null,
   asOf: '',
 };
+
+/** A benchmark rate for a table cell, or "No reading" when its source could not be read. */
+function yieldCell(value: number | null, suffix: string) {
+  return value === null ? 'No reading' : `${formatPercent(value)} ${suffix}`;
+}
 
 const percentFormatter = new Intl.NumberFormat('en-US', {
   minimumFractionDigits: 2,
@@ -381,12 +420,46 @@ const loopCards = [
   },
 ];
 
-export default function IsometricLanding({ isPhone = false }: { isPhone?: boolean }) {
-  const [activeFlow, setActiveFlow] = useState(flowSteps[0]);
+const LAUNCH_PRICING = pricingSummary(LAUNCH_SCHEDULE);
+
+/**
+ * The value on the closing art's Fee row (the A1 review). The receipt in
+ * public/isometric/payments.svg is a raster, and the rate once baked into
+ * it is gone; this writes Splash's bank fee there from the schedule in
+ * force, or "None yet" while the fees are off (PricingSummary.bankFee), so
+ * no rate on the art is one the schedule did not set.
+ *
+ * It is drawn in the art's own coordinates and laid over it in the same box
+ * (globals.css .iso-final-art-fee), so it tracks the art at every width. The
+ * outer matrix is the one payments.svg places its raster with; the inner one
+ * puts the text on the Fee row's isometric baseline (it climbs 0.48 px per
+ * px), condensed to the art's lettering, right-aligned where the old rate
+ * ended. Decorative: the fee is in words on the page itself.
+ */
+function ReceiptArtFee({ value }: { value: string }) {
+  return (
+    <svg className="iso-final-art-fee" viewBox="0 0 1086 814.5" preserveAspectRatio="xMidYMid meet" aria-hidden="true" focusable="false">
+      <g transform="matrix(0.861356 0 0 0.862736 280.465514 -15.590548)">
+        <text transform="matrix(0.72 -0.3456 0 1 507 669)" textAnchor="end">{value}</text>
+      </g>
+    </svg>
+  );
+}
+
+/**
+ * `pricing` is Splash's fee schedule in words, from app/page.tsx, which reads
+ * the schedule in force (lib/fees/fee-config.ts publishedFeeSchedule). The
+ * launch schedule is only the default for a caller that passes none.
+ */
+export default function IsometricLanding({ isPhone = false, pricing = LAUNCH_PRICING }: { isPhone?: boolean; pricing?: PricingSummary }) {
+  const flowSteps = flowStepsFor(pricing);
+  const marqueeItems = marqueeFor(pricing);
+  const [activeFlowId, setActiveFlowId] = useState(flowSteps[0].id);
+  const activeFlow = flowSteps.find((step) => step.id === activeFlowId) ?? flowSteps[0];
   // The control plane reveals below the copilot on demand — a credit-roll,
   // not a second section.
   const [ctrlOpen, setCtrlOpen] = useState(false);
-  const [yieldBenchmarks, setYieldBenchmarks] = useState(fallbackYieldBenchmarks);
+  const [yieldBenchmarks, setYieldBenchmarks] = useState(unreadYieldBenchmarks);
   const [showBackToTop, setShowBackToTop] = useState(false);
 
   useEffect(() => {
@@ -450,13 +523,13 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
   }, []);
 
   const liveComparisonRows = [
-    ...comparisonRows,
+    ...comparisonRowsFor(pricing),
     {
       feature: 'Yield on idle USD',
-      bank: `${formatPercent(yieldBenchmarks.bank)} APY`,
-      broker: `${formatPercent(yieldBenchmarks.broker)} APY`,
-      wise: `${formatPercent(yieldBenchmarks.wise)} APY`,
-      splash: `${formatPercent(yieldBenchmarks.splash)} projected variable APY`,
+      bank: yieldCell(yieldBenchmarks.bank, 'APY'),
+      broker: yieldCell(yieldBenchmarks.broker, 'APY'),
+      fintech: yieldCell(yieldBenchmarks.wise, 'APY'),
+      splash: yieldCell(yieldBenchmarks.splash, 'projected variable APY'),
     },
   ];
 
@@ -493,7 +566,7 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
         </div>
       </header>
 
-      <SettlementCinematic isPhone={isPhone} />
+      <SettlementCinematic isPhone={isPhone} pricing={pricing} />
 
       <div className="iso-marquee is-static" aria-label="Platform metrics">
         <div className="iso-marquee-track">
@@ -601,7 +674,7 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
                     role="tab"
                     aria-selected={active}
                     className={active ? 'is-active' : ''}
-                    onClick={() => setActiveFlow(step)}
+                    onClick={() => setActiveFlowId(step.id)}
                   >
                     <span>{step.number}</span>
                     <strong>{step.title}</strong>
@@ -718,7 +791,7 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
                   <th>Feature</th>
                   <th>Bank</th>
                   <th>Broker</th>
-                  <th>Wise</th>
+                  <th>Fintech app</th>
                   <th className="is-splash">Splash</th>
                 </tr>
               </thead>
@@ -728,12 +801,25 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
                     <th scope="row">{row.feature}</th>
                     <td>{row.bank}</td>
                     <td>{row.broker}</td>
-                    <td>{row.wise}</td>
+                    <td>{row.fintech}</td>
                     <td className="is-splash"><span className="iso-splash-cell"><Check aria-hidden="true" /> {row.splash}</span></td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            <p className="iso-pricing-line">
+              <strong>Splash pricing</strong>
+              <span>{pricing.line}</span>
+            </p>
+            {COMPARISON_BASELINE ? (
+              <p className="iso-pricing-line">
+                <strong>Bank and fintech figures</strong>
+                <span>
+                  Category midpoints for a transfer of US$1,000 or more, from{' '}
+                  <a href={COMPARISON_BASELINE.dataset.url} rel="noopener noreferrer" target="_blank">{COMPARISON_BASELINE.dataset.name}</a>, as of {BASELINE_DATE}: a correspondent wire with its FX margin and the digital-provider category, not a named provider. No broker figure is shown without a source.
+                </span>
+              </p>
+            ) : null}
             <div className="iso-yield-live is-demoted">
               <i aria-hidden="true" />
               <strong>Reference yield benchmark</strong>
@@ -943,6 +1029,7 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
               width={1448}
               height={1086}
             />
+            <ReceiptArtFee value={pricing.bankFee} />
           </div>
         </div>
       </section>
@@ -989,7 +1076,7 @@ export default function IsometricLanding({ isPhone = false }: { isPhone?: boolea
           <div className="iso-shell cin-footer-bar-inner">
             <span>{BRAND.copyright()}</span>
             <span className="cin-footer-tick">
-              USDC transfers carry no Splash fee · {lockedCopy.speed} · {lockedCopy.fee}
+              {pricing.parts[0]} · {lockedCopy.speed} · {pricing.bankFeePhrase}
             </span>
           </div>
         </div>

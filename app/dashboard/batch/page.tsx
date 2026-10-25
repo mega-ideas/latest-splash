@@ -13,6 +13,11 @@ import DashStat from "@/components/dashboard/DashStat";
 import ExplorerLinks from "@/components/dashboard/ExplorerLinks";
 import SettlementEngineFlow from "@/components/dashboard/SettlementEngineFlow";
 import { takeBatchDraft } from "@/lib/batch-parse";
+import { formatUsdc } from "@/lib/fees/copy";
+import { buildFeeQuote } from "@/lib/fees/quote";
+import { BANK_DESTINATION, destinationKind } from "@/lib/fees/destination";
+import { usePublishedFees } from "@/lib/fees/use-published-pricing";
+import { MoneyError, parseMinor } from "@/lib/money";
 import { checkMinimumSettlement, minSettlementUsd, formatUsd } from '@/lib/policy/limits';
 
 type ComplianceResult = "PASS" | "REVIEW" | "BLOCK";
@@ -72,7 +77,7 @@ function buildSampleCsv() {
 const batchBenefits = [
   {
     icon: PercentCircle,
-    title: "15–30 bps cheaper FX",
+    title: "Cheaper FX on netted rows",
     body: "Batched rows are netted against treasury inventory, so we quote one tighter rate instead of paying spread on every transfer.",
   },
   {
@@ -238,7 +243,25 @@ export default function BatchPage() {
   const blockedRows = useMemo(() => rows.filter((row) => row.status === "blocked" || row.status === "failed"), [rows]);
   const total = useMemo(() => rows.reduce((sum, row) => sum + (Number.parseFloat(row.amount) || 0), 0), [rows]);
   const acceptedTotal = useMemo(() => acceptedRows.reduce((sum, row) => sum + (Number.parseFloat(row.amount) || 0), 0), [acceptedRows]);
-  const estimatedFees = acceptedTotal > 0 ? acceptedTotal * 0.014 + 4.5 : 0;
+  // Splash's fee on each cleared row, a payout to a bank each, from the
+  // schedule in force (A1 §2.2): no flat rate and no fixed fee, and 0 while
+  // FeeConfig's fees are off. Null until the schedule has loaded.
+  // Payout-partner fees are quoted with the batch.
+  const published = usePublishedFees();
+  const splashFeesMinor = useMemo(() => {
+    if (!published) return null;
+    let sum = 0n;
+    for (const row of acceptedRows) {
+      try {
+        const cents = parseMinor(String(row.amount ?? '0').replace(/[,\s]/g, ''), 2, 'half-up');
+        if (cents <= 0n) continue;
+        sum += buildFeeQuote({ kind: destinationKind(BANK_DESTINATION), principalMinor: cents * 10_000n, state: { feesOn: published.feesOn, schedule: published.schedule } }).splashFee.minor;
+      } catch (error) {
+        if (!(error instanceof MoneyError)) throw error;
+      }
+    }
+    return sum;
+  }, [acceptedRows, published]);
 
   function onFile(file: File) {
     Papa.parse<CsvRow>(file, {
@@ -484,7 +507,7 @@ ${sampleCsvRows.map((row) => `${row.name},${row.address},${row.country},${row.pu
                 <div className="mt-4 space-y-3 text-sm">
                   <Row label="Uploaded total" value={`$${total.toFixed(2)}`} />
                   <Row label="Cleared total" value={`$${acceptedTotal.toFixed(2)}`} />
-                  <Row label="Estimated fees" value={`$${estimatedFees.toFixed(2)}`} />
+                  <Row label="Splash fees (schedule)" value={splashFeesMinor === null ? '—' : published && !published.feesOn ? 'None charged yet' : `${formatUsdc(splashFeesMinor)} USDC`} />
                   <Row label="Rows excluded" value={`${reviewRows.length + blockedRows.length}`} />
                   <Row label="Minimum batch total" value={formatUsd(minSettlementUsd())} />
                 </div>

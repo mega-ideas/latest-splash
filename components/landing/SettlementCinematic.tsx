@@ -7,14 +7,16 @@ import { ArrowRight, Check } from 'lucide-react';
 import {
   motion,
   useMotionValue,
-  useReducedMotion,
   useSpring,
   useTransform,
   type MotionValue,
 } from 'framer-motion';
 
 import WaitlistCta from '@/components/landing/WaitlistCta';
+import { useHydratedReducedMotion } from '@/components/useHydratedReducedMotion';
 import { lockedCopy } from '@/content/claims';
+import { pricingSummary, type PricingSummary } from '@/lib/fees/copy';
+import { LAUNCH_SCHEDULE } from '@/lib/fees/schedule';
 
 const HERO_IMG = '/cinematic/hero-district-v5.png';
 
@@ -30,7 +32,8 @@ const rise = {
   shown: { opacity: 1, y: 0, transition: { duration: 0.8, ease: EASE_OUT_EXPO } },
 };
 
-const telemetry = [
+/** The callouts. Splash's fee is the schedule's (A1 §2.7), handed down by the page. */
+const telemetryFor = (pricing: PricingSummary) => [
   {
     id: 'corridor',
     className: 'cin-callout-a',
@@ -45,9 +48,10 @@ const telemetry = [
     id: 'fee',
     className: 'cin-callout-b',
     enter: 0.31,
-    tag: 'Edge fee · Modeled',
-    value: lockedCopy.fee,
-    meta: lockedCopy.feeFootnote,
+    tag: 'Splash fee · To a bank',
+    // "None yet" and why, while FeeConfig's fees are off.
+    value: pricing.bankFee,
+    meta: pricing.notice ?? `${pricing.parts[0]}. Partner fees are shown before you approve.`,
   },
   {
     id: 'treasury',
@@ -277,7 +281,7 @@ function VisionCopy() {
 }
 
 /** Non-pinned fallback for prefers-reduced-motion: same story, no choreography. */
-function StaticCinematic() {
+function StaticCinematic({ telemetry }: { telemetry: ReturnType<typeof telemetryFor> }) {
   return (
     <section id="cinematic" className="cin-section cin-section-static" aria-label="Splash settlement network">
       <div className="cin-static-hero">
@@ -323,9 +327,12 @@ function StaticCinematic() {
   );
 }
 
-export default function SettlementCinematic({ isPhone = false }: { isPhone?: boolean }) {
+const LAUNCH_PRICING = pricingSummary(LAUNCH_SCHEDULE);
+
+export default function SettlementCinematic({ isPhone = false, pricing = LAUNCH_PRICING }: { isPhone?: boolean; pricing?: PricingSummary }) {
+  const telemetry = telemetryFor(pricing);
   const containerRef = useRef<HTMLElement>(null);
-  const reducedMotion = useReducedMotion();
+  const reducedMotion = useHydratedReducedMotion();
   const [compact, setCompact] = useState(false);
   const [artLoaded, setArtLoaded] = useState(false);
   // Phones (and narrow viewports) get the non-pinned static hero: same art,
@@ -417,7 +424,7 @@ export default function SettlementCinematic({ isPhone = false }: { isPhone?: boo
   const visionPointerEvents = useTransform(scrollYProgress, (value) => (value > 0.78 ? 'auto' : 'none'));
 
   if (reducedMotion || phoneLayout) {
-    return <StaticCinematic />;
+    return <StaticCinematic telemetry={telemetry} />;
   }
 
   function enterEngine() {

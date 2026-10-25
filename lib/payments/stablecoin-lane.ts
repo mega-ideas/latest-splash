@@ -1,4 +1,6 @@
-import { applyBps, formatMinor, MICRO_DECIMALS, parseMinor, sumMinor } from '../money.ts';
+import { kindPrice } from '../fees/copy.ts';
+import { FEE_KIND, LAUNCH_SCHEDULE, splashFee, type FeeSchedule } from '../fees/schedule.ts';
+import { formatMinor, MICRO_DECIMALS, parseMinor, sumMinor } from '../money.ts';
 import type { KybLifecycleState } from '../compliance/kyb-state.ts';
 import { suiScanTxUrlOn } from '../explorer.ts';
 
@@ -8,8 +10,10 @@ import { suiScanTxUrlOn } from '../explorer.ts';
  *
  * ─── The asset ──────────────────────────────────────────────────────────────
  * Settlement is native USDC on Sui, and only that. Businesses may FUND from
- * USDC on other chains through Circle's CCTP (see lib/payments/cctp.ts), but
- * what moves between wallets here is Circle's native Sui USDC. There is no
+ * USDC on other chains through Circle's CCTP V2, and a cross-chain recipient
+ * is paid by burning USDC on Sui and minting it on their chain (both planned
+ * in lib/payments/cctp.ts), but what moves between wallets here is Circle's
+ * native Sui USDC. There is no
  * native Tether USDT on Sui — only bridge-wrapped versions — and settling in a
  * bridge wrapper adds a bridge's failure modes to every payment for no gain.
  *
@@ -71,53 +75,69 @@ export function explorerTxUrl(network: SuiNetwork, digest: string): string {
 // ─── Price ──────────────────────────────────────────────────────────────────
 
 /**
- * Stablecoin transfers are free (decision of 2026-09-26).
+ * Stablecoin transfers are free until Splash's fee is switched on here
+ * (decision of 2026-09-26), and then priced like any wallet payment.
  *
  *   To a Splash user's wallet    free, always: it never leaves Splash.
- *   To a wallet outside Splash   the audit-anchor fee — 0.02% with a 0.05 USDC
- *                                floor and a 5 USDC cap — pays for the record
- *                                Splash anchors for the transfer. Built, but
- *                                OFF until STABLECOIN_ANCHOR_FEE=on, so today
- *                                it is free too and the screens say so.
+ *   To a wallet outside Splash   Splash's WALLET fee, from the same fee
+ *                                schedule the chain charges (Amendment A1
+ *                                §2.2, §2.4): the schedule's rate rounded
+ *                                down, raised to its minimum, lowered to its
+ *                                maximum and last to the 1% ceiling, which
+ *                                beats the minimum. One wallet price, the one
+ *                                the pricing line quotes. Built, but OFF
+ *                                until STABLECOIN_ANCHOR_FEE=on, so today it
+ *                                is free too and the screens say so. When on,
+ *                                the schedule and the fee recipient (the
+ *                                finance multisig) are read from the on-chain
+ *                                FeeConfig (lib/server/stablecoin-fee.ts),
+ *                                and while the FeeConfig has no recipient
+ *                                (fees off at publish) nothing is charged.
  *   x402                         no Splash fee (the seller sets the price).
  *
  * Network gas is separate, and on a wallet transfer there is none: see Gas
- * below. Local-currency payouts are priced elsewhere (lib/fx/corridors.ts,
- * 0.70%).
+ * below. Local-currency payouts are priced by the same schedule, on chain,
+ * from their derived kind and the amount.
  *
  * A fee, when there is one, is charged ON TOP: the recipient receives exactly
  * the amount the business entered, and the business's wallet is debited
  * amount + fee. An invoice states what the payee must receive, and an x402
  * seller verifies it received exactly `amount` — a fee deducted from the
- * principal would break both. Rounded half-up, the house convention.
+ * principal would break both.
  */
-export const ANCHOR_FEE_BPS = 2;
-/** 0.05 USDC: covers the anchor's own cost on small transfers. */
-export const ANCHOR_FEE_MIN_MINOR = 50_000n;
-/** 5 USDC: keeps large treasury moves cheap. */
-export const ANCHOR_FEE_CAP_MINOR = 5_000_000n;
+
+/**
+ * The wallet fee's terms in words, rendered from `schedule`'s WALLET kind,
+ * so no screen types them in: the pricing line's own phrase.
+ */
+export function walletFeeTerms(schedule: FeeSchedule = LAUNCH_SCHEDULE): string {
+  return kindPrice(schedule, FEE_KIND.WALLET);
+}
 
 /** Where the USDC goes: to a Splash user's wallet, or out of Splash. */
 export type StablecoinDestination = 'SPLASH' | 'EXTERNAL';
 
-export type StablecoinFeeKind = 'FREE' | 'AUDIT_ANCHOR';
+export type StablecoinFeeKind = 'FREE' | 'WALLET_FEE';
 
-/** The audit-anchor fee is charged only when switched on. Off by default. */
+/** Splash's fee on this lane is charged only when switched on. Off by default. */
 export function anchorFeeEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return (env.STABLECOIN_ANCHOR_FEE ?? '').trim().toLowerCase() === 'on';
 }
 
+/**
+ * Splash's fee on a transfer: 0 to a Splash user's wallet or while the fee
+ * is off; otherwise the WALLET fee under `schedule`, exactly as
+ * `fee_config::splash_fee` computes it (lib/fees/schedule.ts).
+ */
 export function stablecoinFeeMinor(
   principalMinor: bigint,
   destination: StablecoinDestination,
   anchorFeeOn: boolean,
+  schedule: FeeSchedule = LAUNCH_SCHEDULE,
 ): bigint {
   if (principalMinor <= 0n) throw new StablecoinLaneError('amount must be positive');
   if (destination === 'SPLASH' || !anchorFeeOn) return 0n;
-  const proportional = applyBps(principalMinor, ANCHOR_FEE_BPS, 'half-up');
-  if (proportional < ANCHOR_FEE_MIN_MINOR) return ANCHOR_FEE_MIN_MINOR;
-  if (proportional > ANCHOR_FEE_CAP_MINOR) return ANCHOR_FEE_CAP_MINOR;
-  return proportional;
+  return splashFee({ kind: FEE_KIND.WALLET, principalMinor, discountBps: 0, schedule });
 }
 
 /** Below this a wallet transfer is refused: 1.00 USDC. It keeps test-sized
@@ -195,29 +215,32 @@ export interface StablecoinQuote {
 
 export function quoteStablecoinTransfer(
   principalMinor: bigint,
-  pricing: { destination: StablecoinDestination; anchorFeeOn: boolean },
+  pricing: { destination: StablecoinDestination; anchorFeeOn: boolean; schedule?: FeeSchedule },
 ): StablecoinQuote {
   if (principalMinor < MIN_STABLECOIN_TRANSFER_MINOR) {
     throw new StablecoinLaneError(
       `the minimum wallet transfer is ${formatMinor(MIN_STABLECOIN_TRANSFER_MINOR, USDC_DECIMALS)} USDC`,
     );
   }
-  const feeMinor = stablecoinFeeMinor(principalMinor, pricing.destination, pricing.anchorFeeOn);
+  const feeMinor = stablecoinFeeMinor(principalMinor, pricing.destination, pricing.anchorFeeOn, pricing.schedule);
   return {
     principalMinor,
     feeMinor,
     totalDebitMinor: principalMinor + feeMinor,
-    feeKind: feeMinor > 0n ? 'AUDIT_ANCHOR' : 'FREE',
+    feeKind: feeMinor > 0n ? 'WALLET_FEE' : 'FREE',
     destination: pricing.destination,
   };
 }
 
-/** How a quote's fee reads to the person paying. */
-export function describeStablecoinFee(quote: Pick<StablecoinQuote, 'feeMinor' | 'destination'>): string {
+/** How a quote's fee reads to the person paying, its terms from `schedule`. */
+export function describeStablecoinFee(
+  quote: Pick<StablecoinQuote, 'feeMinor' | 'destination'>,
+  schedule: FeeSchedule = LAUNCH_SCHEDULE,
+): string {
   if (quote.feeMinor === 0n) {
     return quote.destination === 'SPLASH' ? 'Free: to another Splash user' : 'Free';
   }
-  return `Audit-anchor fee ${formatUsdc(quote.feeMinor)} USDC (0.02%, min 0.05, max 5)`;
+  return `Splash fee ${formatUsdc(quote.feeMinor)} USDC, at ${walletFeeTerms(schedule)}`;
 }
 
 // ─── Limits ─────────────────────────────────────────────────────────────────

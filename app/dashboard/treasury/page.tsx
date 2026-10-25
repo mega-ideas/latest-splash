@@ -27,6 +27,11 @@ import {
 import { cn } from '../../../lib/utils';
 import MoneyPathPanel from '@/components/compliance/MoneyPathPanel';
 import LocalTime from '@/components/LocalTime';
+import { FEES_OFF_NOTICE } from '@/lib/fees/copy';
+import { buildFeeQuote } from '@/lib/fees/quote';
+import { BANK_DESTINATION, destinationKind } from '@/lib/fees/destination';
+import { usePublishedFees } from '@/lib/fees/use-published-pricing';
+import { formatMinor } from '@/lib/money';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -281,10 +286,20 @@ export default function TreasuryPage() {
   }
 
   const previewSource = validAmount ? Math.max(0, sourceBalance - parsedAmount) : null;
-  const simulationPrincipal = 5_000;
-  const simulationFee = simulationPrincipal * 0.014 + 4.5;
-  const feesDeleted = simulationFee * (nettingRatio / 100);
-  const feesRelocated = simulationFee - feesDeleted;
+  // The simulation's fee is Splash's fee on a 5,000 USDC payout to a bank,
+  // from the schedule in force and whether its fees are on: no flat rate and
+  // no fixed fee (A1 §2.8), and none while FeeConfig's fees are off. Nothing
+  // is shown until the schedule has loaded.
+  const publishedFees = usePublishedFees();
+  const simulationPrincipalMicro = 5_000_000_000n;
+  const simulationFee = publishedFees
+    ? Number(formatMinor(
+      buildFeeQuote({ kind: destinationKind(BANK_DESTINATION), principalMinor: simulationPrincipalMicro, state: { feesOn: publishedFees.feesOn, schedule: publishedFees.schedule } }).splashFee.minor,
+      6,
+    ))
+    : null;
+  const feesDeleted = simulationFee === null ? null : simulationFee * (nettingRatio / 100);
+  const feesRelocated = simulationFee === null || feesDeleted === null ? null : simulationFee - feesDeleted;
 
   if (phase !== 'live') {
     return (
@@ -686,12 +701,12 @@ export default function TreasuryPage() {
                 <div className="grid grid-cols-2 gap-3">
                   <div className="rounded-2xl border border-[#5C9EAD]/20 bg-white p-4">
                     <div className="text-[12px] font-semibold uppercase tracking-[0.14em] text-[var(--info)]">Fees deleted</div>
-                    <div className="dash-num mt-2 text-2xl font-semibold text-[#0c3e48]">${feesDeleted.toFixed(2)}</div>
+                    <div className="dash-num mt-2 text-2xl font-semibold text-[#0c3e48]">{feesDeleted === null ? '—' : `$${feesDeleted.toFixed(2)}`}</div>
                     <p className="mt-1 text-[13px] leading-4 text-[#326273]/90">Avoided while value stays netted inside the operating loop.</p>
                   </div>
                   <div className="rounded-2xl border border-[#E39774]/20 bg-white p-4">
                     <div className="text-[12px] font-semibold uppercase tracking-[0.14em] text-[#9f5839]">Fees relocated</div>
-                    <div className="dash-num mt-2 text-2xl font-semibold text-[#0c3e48]">${feesRelocated.toFixed(2)}</div>
+                    <div className="dash-num mt-2 text-2xl font-semibold text-[#0c3e48]">{feesRelocated === null ? '—' : `$${feesRelocated.toFixed(2)}`}</div>
                     <p className="mt-1 text-[13px] leading-4 text-[#326273]/90">Still paid when the remaining value reaches a local cash-out rail.</p>
                   </div>
                 </div>
@@ -701,6 +716,7 @@ export default function TreasuryPage() {
                 <div className="mt-3 flex items-start gap-2 rounded-xl bg-white p-3 text-[13px] leading-4 text-[#326273]/90">
                   <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--info)]" />
                   Simulation only. Netting reduces repeated payout costs; it does not remove the cost of the final external payout.
+                  {publishedFees && !publishedFees.feesOn ? ` ${FEES_OFF_NOTICE}` : null}
                 </div>
               </div>
             </div>

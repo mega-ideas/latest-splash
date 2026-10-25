@@ -11,9 +11,6 @@ import {
   stablecoinFeeMinor,
   anchorFeeEnabled,
   describeStablecoinFee,
-  ANCHOR_FEE_BPS,
-  ANCHOR_FEE_MIN_MINOR,
-  ANCHOR_FEE_CAP_MINOR,
   stablecoinLimitsFor,
   STABLECOIN_WINDOW_MS,
   SUI_USDC_COIN_TYPE,
@@ -42,7 +39,7 @@ test('settlement is Circle native USDC on Sui, with the verified coin types', ()
 
 const OFF = { destination: 'EXTERNAL', anchorFeeOn: false };
 
-test('stablecoin transfers are free: out of Splash while the anchor fee is off, and to a Splash user always', () => {
+test("stablecoin transfers are free: out of Splash while Splash's wallet fee is off, and to a Splash user always", () => {
   const out = quoteStablecoinTransfer(usdc('1000'), OFF);
   assert.equal(out.principalMinor, usdc('1000'), 'the recipient receives exactly what was entered');
   assert.equal(out.feeMinor, 0n);
@@ -50,32 +47,33 @@ test('stablecoin transfers are free: out of Splash while the anchor fee is off, 
   assert.equal(out.feeKind, 'FREE');
   assert.equal(describeStablecoinFee(out), 'Free');
 
-  // A Splash user's wallet is free even with the anchor fee switched on.
+  // A Splash user's wallet is free even with the wallet fee switched on.
   const internal = quoteStablecoinTransfer(usdc('1000'), { destination: 'SPLASH', anchorFeeOn: true });
   assert.equal(internal.feeMinor, 0n);
   assert.equal(describeStablecoinFee(internal), 'Free: to another Splash user');
 });
 
-test('the audit-anchor fee, when on: 0.02% on top, never below 0.05 or above 5 USDC', () => {
+test("Splash's wallet fee, when on: the WALLET schedule on top, its minimum and maximum, and the 1% ceiling that beats the minimum", () => {
   const on = (amount) => stablecoinFeeMinor(usdc(amount), 'EXTERNAL', true);
-  assert.equal(on('100'), usdc('0.05'), '0.02% of 100 is 0.02: the 0.05 floor applies');
-  assert.equal(on('250'), usdc('0.05'), 'exactly the floor');
-  assert.equal(on('1000'), usdc('0.2'));
-  assert.equal(on('25000'), usdc('5'), 'exactly the cap');
-  assert.equal(on('1000000'), usdc('5'), '0.02% would be 200: the 5 USDC cap applies');
+  assert.equal(on('10'), usdc('0.1'), 'the 1% ceiling beats the 0.25 minimum');
+  assert.equal(on('100'), usdc('0.25'), '0.02% of 100 is 0.02: the 0.25 minimum applies');
+  assert.equal(on('1000'), usdc('0.25'));
+  assert.equal(on('1250'), usdc('0.25'), 'exactly the minimum');
+  assert.equal(on('10000'), usdc('2'));
+  assert.equal(on('25000'), usdc('5'), 'exactly the maximum');
+  assert.equal(on('1000000'), usdc('5'), '0.02% would be 200: the 5 USDC maximum applies');
   assert.equal(stablecoinFeeMinor(usdc('1000'), 'SPLASH', true), 0n);
   assert.equal(stablecoinFeeMinor(usdc('1000'), 'EXTERNAL', false), 0n);
-  // Rounded half-up at the micro-unit: 2 bps of 1,000.0025 is 0.2000005.
-  assert.equal(stablecoinFeeMinor(1_000_002_500n, 'EXTERNAL', true), 200_001n);
+  // Rounded down at the micro-unit, as on chain: 2 bps of 10,000.0025 is 2.0000005.
+  assert.equal(stablecoinFeeMinor(10_000_002_500n, 'EXTERNAL', true), 2_000_000n);
 
   const q = quoteStablecoinTransfer(usdc('1000'), { destination: 'EXTERNAL', anchorFeeOn: true });
-  assert.equal(q.totalDebitMinor, usdc('1000.2'), 'on top: the business pays principal + fee');
-  assert.equal(q.feeKind, 'AUDIT_ANCHOR');
-  assert.equal(describeStablecoinFee(q), 'Audit-anchor fee 0.20 USDC (0.02%, min 0.05, max 5)');
-  assert.deepEqual([ANCHOR_FEE_BPS, ANCHOR_FEE_MIN_MINOR, ANCHOR_FEE_CAP_MINOR], [2, 50_000n, 5_000_000n]);
+  assert.equal(q.totalDebitMinor, usdc('1000.25'), 'on top: the business pays principal + fee');
+  assert.equal(q.feeKind, 'WALLET_FEE');
+  assert.equal(describeStablecoinFee(q), 'Splash fee 0.25 USDC, at 0.02% (min 0.25 USDC)');
 });
 
-test('the audit-anchor fee is off unless switched on by name', () => {
+test("Splash's wallet fee is off unless switched on by name", () => {
   assert.equal(anchorFeeEnabled({}), false);
   assert.equal(anchorFeeEnabled({ STABLECOIN_ANCHOR_FEE: 'off' }), false);
   assert.equal(anchorFeeEnabled({ STABLECOIN_ANCHOR_FEE: 'yes' }), false);

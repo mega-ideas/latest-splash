@@ -1,3 +1,4 @@
+import type { FeeQuoteWire } from '@/lib/fees/quote';
 import { suiScanTxUrl, suiVisionTxUrl } from '@/lib/explorer';
 import { getContractConfig } from '@/lib/server/contract-config';
 import { rememberForOrg } from '@/lib/server/memwal';
@@ -60,6 +61,14 @@ export type TransferIntentRecord = {
   fundingKytStatus?: string;
   fundingNormalizeVenue?: string;
   fundingEffectiveSlippageBps?: number;
+  /**
+   * Splash's fee on this payment, as quoted when it was authorized
+   * (Amendment A1 §4): the breakdown the receipt shows (Splash fee with its
+   * kind and tier, the payout partner's fee with its source, the total
+   * debited) and `maxFeeMinor`, the max_fee the payment is bounded by.
+   * Absent on a transfer authorized before A1.
+   */
+  fees?: FeeQuoteWire;
   verificationReference: string | null;
   receiptObjectId: string | null;
   suiTxDigest: string | null;
@@ -268,8 +277,9 @@ export type RateHold = {
    *  would have merged two tenants' holds back together. */
   orgId?: string;
   corridorCurrency: string;
+  /** The exchange rate held. A hold carries no fee: Splash's fee is the
+   *  schedule's on the payment it is used for (A1 §2.8). */
   rate: string;
-  feeBps: number;
   holdUntil: string;
   scheduledExecuteAt?: string;
   alertRule?: { direction: 'STRENGTHENS_PAST' | 'WEAKENS_PAST'; threshold: string };
@@ -987,7 +997,7 @@ function seedDemoData() {
   });
   Object.assign(invoice, { transferIntentId: transfer.id });
   createLedgerEntry({ accountId: cebu.id, direction: 'CREDIT', amountUsdcMicro: 5_000_000_000n, refType: 'SEED', refId: 'demo_seed', demo: true });
-  const hold = buildRateHold({ corridorCurrency: 'PHP', rate: '56.5', feeBps: 80, demo: true });
+  const hold = buildRateHold({ corridorCurrency: 'PHP', rate: '56.5', demo: true });
   operations.rateHolds.set(hold.id, hold);
 }
 

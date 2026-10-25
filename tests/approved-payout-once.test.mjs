@@ -365,7 +365,9 @@ test('an approved payout is paid once: the replay sends it, and the same claim s
   assert.equal(debits.length, paidBefore + 1);
   const paid = debits.find((line) => line.refId === first.ref);
   assert.ok(paid, 'the debit is the transfer the replay made');
-  assert.equal(paid.amountMinor, 25_000_000_000n);
+  // The payer is debited the principal plus Splash's fee, charged on top
+  // (A1 §4): 25,000 USDC is in the 10,000 to 50,000 band, 0.12%, 30 USDC.
+  assert.equal(paid.amountMinor, 25_000_000_000n + 30_000_000n);
   assert.equal(scope.deferred.length, settlingBefore + 1, 'settlement started once');
   assert.equal(store.get(id).status, 'SUBMITTED', 'carried out, it is still SUBMITTED; the status alone would not stop a second');
 

@@ -1,0 +1,53 @@
+{
+  "$comment": [
+    "Splash's fee vectors: Amendment A1 section 3, every row, in one file.",
+    "scripts/gen-fee-tests.mjs turns each row into a #[test] in move/splash_core/tests/fee_vectors_tests.move, which calls address_registry::derive_kind and fee_config::splash_fee on the launch schedule; tests/fee-schedule.test.mjs runs the same rows through lib/fees/schedule.ts. Edit this file, then run `node scripts/gen-fee-tests.mjs`; check:fees fails until the Move file matches.",
+    "Amounts are USDC minor units (6 decimals), written as decimal strings so no row loses precision as a JSON number.",
+    "kind: the kind the chain DERIVES and charges (address_registry::derive_kind, then fee_config::splash_fee), by A1's numbers (see kinds). Since Sky's 24 Oct decision every settle path then also refuses a derived kind that does not fit the declared one (address_registry::assert_kind_fits, EKindMismatch), so the row 'Partner address declared WALLET' pins the derivation and the fee A1 §3 gives it, not a payment that settles: that payment is refused. declared: what the payer declares (default: kind). partner: the recipient is in the partner deposit-address registry (default: true when kind is BANK_PAYOUT). The recipient is a registered business wallet when kind is SPLASH_BUSINESS, and the payment goes through CCTP when kind is CROSS_CHAIN. discount_bps: the business's discount (0: none).",
+    "Each expected fee was checked by hand against A1 sections 2.2 and 2.4: the tier by principal (upper bounds exclusive), less the discount, principal * bps / 10000 rounded down, then the kind's minimum and maximum, then the 100 bps ceiling."
+  ],
+  "kinds": {
+    "SPLASH_BUSINESS": 0,
+    "WALLET": 1,
+    "EXCHANGE": 2,
+    "CROSS_CHAIN": 3,
+    "BANK_PAYOUT": 4
+  },
+  "vectors": [
+    { "name": "BANK 999.999999", "kind": 4, "principal_minor": "999999999", "discount_bps": 0, "expected_fee_minor": "2999999" },
+    { "name": "BANK 1,000", "kind": 4, "principal_minor": "1000000000", "discount_bps": 0, "expected_fee_minor": "2000000" },
+    { "name": "BANK 9,999.999999", "kind": 4, "principal_minor": "9999999999", "discount_bps": 0, "expected_fee_minor": "19999999" },
+    { "name": "BANK 10,000", "kind": 4, "principal_minor": "10000000000", "discount_bps": 0, "expected_fee_minor": "12000000" },
+    { "name": "BANK 49,999.999999", "kind": 4, "principal_minor": "49999999999", "discount_bps": 0, "expected_fee_minor": "59999999" },
+    { "name": "BANK 50,000", "kind": 4, "principal_minor": "50000000000", "discount_bps": 0, "expected_fee_minor": "35000000" },
+    { "name": "BANK 99,999.999999", "kind": 4, "principal_minor": "99999999999", "discount_bps": 0, "expected_fee_minor": "69999999" },
+    { "name": "BANK 100,000", "kind": 4, "principal_minor": "100000000000", "discount_bps": 0, "expected_fee_minor": "50000000" },
+
+    { "name": "CROSS_CHAIN 999.999999", "kind": 3, "principal_minor": "999999999", "discount_bps": 0, "expected_fee_minor": "2999999" },
+    { "name": "CROSS_CHAIN 1,000", "kind": 3, "principal_minor": "1000000000", "discount_bps": 0, "expected_fee_minor": "2000000" },
+    { "name": "CROSS_CHAIN 9,999.999999", "kind": 3, "principal_minor": "9999999999", "discount_bps": 0, "expected_fee_minor": "19999999" },
+    { "name": "CROSS_CHAIN 10,000", "kind": 3, "principal_minor": "10000000000", "discount_bps": 0, "expected_fee_minor": "12000000" },
+    { "name": "CROSS_CHAIN 49,999.999999", "kind": 3, "principal_minor": "49999999999", "discount_bps": 0, "expected_fee_minor": "59999999" },
+    { "name": "CROSS_CHAIN 50,000", "kind": 3, "principal_minor": "50000000000", "discount_bps": 0, "expected_fee_minor": "35000000" },
+    { "name": "CROSS_CHAIN 99,999.999999", "kind": 3, "principal_minor": "99999999999", "discount_bps": 0, "expected_fee_minor": "69999999" },
+    { "name": "CROSS_CHAIN 100,000", "kind": 3, "principal_minor": "100000000000", "discount_bps": 0, "expected_fee_minor": "50000000" },
+
+    { "name": "EXCHANGE 999.999999", "kind": 2, "principal_minor": "999999999", "discount_bps": 0, "expected_fee_minor": "1499999" },
+    { "name": "EXCHANGE 1,000", "kind": 2, "principal_minor": "1000000000", "discount_bps": 0, "expected_fee_minor": "1200000" },
+    { "name": "EXCHANGE 10,000", "kind": 2, "principal_minor": "10000000000", "discount_bps": 0, "expected_fee_minor": "10000000" },
+    { "name": "EXCHANGE 50,000", "kind": 2, "principal_minor": "50000000000", "discount_bps": 0, "expected_fee_minor": "35000000" },
+    { "name": "EXCHANGE 100,000", "kind": 2, "principal_minor": "100000000000", "discount_bps": 0, "expected_fee_minor": "50000000" },
+
+    { "name": "WALLET 10 (ceiling beats min)", "kind": 1, "principal_minor": "10000000", "discount_bps": 0, "expected_fee_minor": "100000" },
+    { "name": "WALLET 25", "kind": 1, "principal_minor": "25000000", "discount_bps": 0, "expected_fee_minor": "250000" },
+    { "name": "WALLET 1,250 (min boundary)", "kind": 1, "principal_minor": "1250000000", "discount_bps": 0, "expected_fee_minor": "250000" },
+    { "name": "WALLET 10,000", "kind": 1, "principal_minor": "10000000000", "discount_bps": 0, "expected_fee_minor": "2000000" },
+    { "name": "WALLET 25,000 (max boundary)", "kind": 1, "principal_minor": "25000000000", "discount_bps": 0, "expected_fee_minor": "5000000" },
+    { "name": "WALLET 1,000,000 (clamped to max)", "kind": 1, "principal_minor": "1000000000000", "discount_bps": 0, "expected_fee_minor": "5000000" },
+
+    { "name": "SPLASH_BUSINESS 50,000", "kind": 0, "principal_minor": "50000000000", "discount_bps": 0, "expected_fee_minor": "0" },
+
+    { "name": "Partner address declared WALLET, 5,000 -> BANK", "kind": 4, "declared": 1, "partner": true, "principal_minor": "5000000000", "discount_bps": 0, "expected_fee_minor": "10000000" },
+    { "name": "BANK 5,000 with 10 bps discount", "kind": 4, "principal_minor": "5000000000", "discount_bps": 10, "expected_fee_minor": "5000000" }
+  ]
+}

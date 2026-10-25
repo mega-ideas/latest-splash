@@ -60,7 +60,6 @@ export default function StepReceipt({ state, reset }: { state: TransferState; re
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           transferIntentId: state.transferIntentId,
-          fee: state.quote?.fee,
           reference,
           issuedAt,
         }),
@@ -87,7 +86,7 @@ export default function StepReceipt({ state, reset }: { state: TransferState; re
         recipientName={state.recipient.name}
         amount={state.amount.value}
         currency="USD"
-        fee={state.quote?.fee ?? '0.00'}
+        fees={state.quote?.fees ?? undefined}
         feeTier={state.funding.selection.feeTier}
         fundingSource={selectionLabel(state.funding.selection)}
         status={digest ? 'Settled' : 'Pending'}

@@ -8,6 +8,7 @@ import ComplianceControlForm from '@/components/admin/ComplianceControlForm';
 import { Activity, CheckCircle2, Circle, ExternalLink, Loader2, ReceiptText, XCircle } from 'lucide-react';
 import { listFundingSessions } from '@/lib/server/funding-sessions';
 import { describeFundingSelection } from '@/lib/funding/registry';
+import { formatUsdc } from '@/lib/fees/copy';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,7 +25,10 @@ export default async function AdminTransactionsPage() {
     ? `DeepBook ${pegStatus.deepbook.pair} ${pegStatus.deepbook.midPrice.toFixed(4)} (${pegStatus.deepbook.deviationBps.toFixed(1)} bps)`
     : 'DeepBook did not answer: settlement is paused';
   const volume = transfers.reduce((sum, transfer) => sum + Number.parseFloat(transfer.sourceAmountUsd || '0'), 0);
-  const fees = volume * 0.015;
+  // Splash's fee as each transfer was charged it, from its own record (A1 §4);
+  // a transfer from before A1 carries none and adds nothing. Not an estimate.
+  const charged = transfers.filter((transfer) => transfer.fees);
+  const splashFeesMinor = charged.reduce((sum, transfer) => sum + BigInt(transfer.fees!.splashFee.minor), 0n);
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
@@ -37,7 +41,7 @@ export default async function AdminTransactionsPage() {
       <section className="grid gap-5 md:grid-cols-3">
         <MonitorCard icon={Circle} label="Peg Status" value={`${zone === 'green' ? '🟢' : zone === 'yellow' ? '🟡' : '🔴'} ${zone[0].toUpperCase()}${zone.slice(1)}`} detail={pegDetail} />
         <MonitorCard icon={Activity} label="24h Volume" value={`RM ${volume.toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} detail={`${transfers.length} transfer intents`} />
-        <MonitorCard icon={ReceiptText} label="Fees" value={`RM ${fees.toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} detail="Estimated at 1.5% headline" />
+        <MonitorCard icon={ReceiptText} label="Splash fees" value={`${formatUsdc(splashFeesMinor)} USDC`} detail={`Charged on ${charged.length} of ${transfers.length} transfer intents, from their records`} />
       </section>
 
       <ComplianceControlForm initial={complianceControls} />

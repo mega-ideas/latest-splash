@@ -124,6 +124,18 @@ export const envSchema = z.object({
   SPLASH_ATTESTATION_CAP_ID: renamedAnchorCap,
   SPLASH_PEG_STATE_ID: objectId,
   SPLASH_COMPLIANCE_CONFIG_ID: objectId,
+  /** Amendment A1: the shared fee_config::FeeConfig, Splash's fee schedule.
+   *  lib/fees/fee-config.ts reads it over SUI_GRAPHQL_URL to quote the fee.
+   *  Unset on mainnet, no fee is quoted and no payment is built; unset
+   *  elsewhere, a quote uses A1's launch schedule and says so. */
+  SPLASH_FEE_CONFIG_ID: objectId,
+  /** splash_core::address_registry::Registry: the partner deposit addresses
+   *  and business wallets. The operator-outflow monitor reads it to clear a
+   *  v2 executor payment to one of them. */
+  SPLASH_ADDRESS_REGISTRY_ID: objectId,
+  /** The splash_spend package, whose pay_intent is the v2 executor path the
+   *  operator-outflow monitor approves. */
+  SPLASH_SPEND_PACKAGE_ID: objectId,
   SPLASH_COMPLIANCE_CAP_ID: objectId,
   SPLASH_BUSINESS_ACCOUNT_ID: objectId,
   SPLASH_TRANSFER_COIN_ID: objectId,
@@ -141,12 +153,8 @@ export const envSchema = z.object({
   USDT_BUFFER_ID: objectId,
   TREASURY_ADDRESS: suiAddress,
   OPERATOR_SUI_ADDRESS: suiAddress,
-  /** Splash's Sui mainnet fee wallet: receives the audit-anchor fee on USDC
-   *  sent out of Splash, in the same transaction, when STABLECOIN_ANCHOR_FEE
-   *  is on. Stablecoin transfers are otherwise free and do not need it. A real
-   *  fee must have a real, named destination: never defaulted. */
-  SPLASH_FEE_ADDRESS_MAINNET: suiAddress,
-  /* 'on' charges the audit-anchor fee on USDC sent out of Splash (lib/payments/stablecoin-lane.ts). */
+  /* 'on' charges Splash's wallet fee, from the FeeConfig's schedule and paid to
+     its fee recipient, on USDC sent out of Splash (lib/server/stablecoin-fee.ts). */
   STABLECOIN_ANCHOR_FEE: opt(z.enum(['on', 'off'])),
   /* Unset or 'on': wallet transfers go gasless. 'off': the sending wallet pays gas in SUI. */
   STABLECOIN_GASLESS: opt(z.enum(['on', 'off'])),
@@ -170,7 +178,7 @@ export const envSchema = z.object({
   SPLASH_PEG_USDC_DEVIATION_PPM: int(0),
   SPLASH_PEG_USDT_DEVIATION_PPM: int(0),
 
-  /* Settlement. lib/server/sui-settlement.ts, lib/sui/gas.ts. */
+  /* Settlement. lib/server/sui-settlement.ts. */
   SUI_SETTLEMENT_MODE: withDefault(z.enum(['auto', 'live', 'simulate']), 'auto'),
   SUI_BATCH_SETTLEMENT_MODE: optional,
   /** Raw operator keys: development and testnet only. Production refuses
@@ -201,9 +209,25 @@ export const envSchema = z.object({
   OPERATOR_HOT_BALANCE_CEILING_MICRO: opt(str.regex(/^\d+$/, 'must be a whole number of micro-USDC')),
   /** Where operator custody alerts are POSTed (ceiling, top-up, outflow). */
   OPERATOR_ALERT_WEBHOOK_URL: httpsUrl,
-  /** Sui GraphQL, read by the outflow monitor. Unset: Mysten's public
-   *  endpoint for SUI_NETWORK. */
+  /** Sui GraphQL, read by the outflow monitor and the governance alert
+   *  monitor. Unset: Mysten's public endpoint for SUI_NETWORK. */
   SUI_GRAPHQL_URL: url,
+  /* v2 upgrade governance (brief 3.5). lib/server/governance-alert-monitor.ts
+     reads the on-chain state of the canonical upgrade wrapper and the
+     canonical compliance config (SPLASH_COMPLIANCE_CONFIG_ID), and tells every
+     business owner when a core upgrade, a new governance owner or a registry
+     addition is pending, and when one takes effect. It reads no event feed:
+     `wrap` is public, so anyone can emit an UpgradeProposed from a wrapper of
+     their own. These ids name the two objects, whose Move types the monitor
+     checks on chain. Read from the environment only, never from
+     data/contract-config.json, so a file staff can edit at runtime cannot
+     widen what counts as canonical. Unset or mismatched, the cron answers 502
+     rather than watch nothing. Core's original id is read from the wrapper's
+     original_package; SPLASH_CORE_PACKAGE_ID is not read by the monitor. */
+  /** The published, immutable splash_upgrade_delay package. */
+  SPLASH_UPGRADE_DELAY_PACKAGE_ID: objectId,
+  /** The one DelayedUpgradeCap that wraps splash_core's UpgradeCap. */
+  SPLASH_UPGRADE_WRAPPER_ID: objectId,
   ENOKI_API_KEY: optional,
   SUI_PEG_UPDATE_GAS_BUDGET: int(10_000_000, 1),
   SUI_RECORD_SETTLEMENT_GAS_BUDGET: int(10_000_000, 1),
@@ -372,6 +396,11 @@ export const envSchema = z.object({
   USDT_AVAILABLE_MICRO: opt(z.coerce.number().int().min(0)),
   USDT_BUFFER_AGE_MS: int(0),
 
+  /** Partners whose agreements are signed, by id (lib/partners/signed-partners.ts).
+   *  Only these are named in shipped copy; everyone else is described by role.
+   *  Empty by default, so a fresh deployment names nobody (brief §0.8, §3.9). */
+  SIGNED_PARTNERS: opt(str.regex(/^[a-z]+(\s*,\s*[a-z]+)*$/, 'must be comma-separated partner ids, e.g. pdax,sumsub')),
+
   /* Payout and settlement partners. Mocked when USE_MOCK_APIS or unset. */
   PDAX_API_BASE_URL: url,
   PDAX_API_KEY: optional,
@@ -480,6 +509,38 @@ function productionIssues(env: Env): Issue[] {
   }
   if (env.USDC_TYPE === '0x2::sui::SUI') {
     issues.push({ key: 'USDC_TYPE', message: 'is the development stand-in (native SUI); set the real USDC coin type' });
+  }
+
+  /* v2 (D11): splash_custody and splash_meter are retired from the mainnet
+     path. App-bound allowances and address balances replace pooling and the
+     spend meter, so a mainnet deployment that names the custody package or a
+     payout delegation is configured for a path that no longer exists. The code
+     stays, for testnet and for the record. */
+  if (env.SUI_NETWORK === 'mainnet') {
+    for (const key of ['SPLASH_CUSTODY_PACKAGE_ID', 'SPLASH_PAYOUT_DELEGATION_ID'] as const) {
+      if (env[key] !== undefined) {
+        issues.push({ key, message: 'names the retired custody path; splash_custody and splash_meter do not publish to mainnet in v2 (docs/v2/phase1-move-design.md §8) — remove it from the host' });
+      }
+    }
+    /* D1 and D3: Splash holds no key to client funds and owns no account that
+       receives client money. A funding session's deposit address was derived
+       from the first key, so whoever holds it can rebuild the address's
+       private key, or read from the second, an address the operator chose.
+       On mainnet funding sessions give out no deposit address at all
+       (lib/server/funding-sessions.ts), so either key configures a path that
+       must not exist there. */
+    if (env.FUNDING_DEPOSIT_DERIVATION_SECRET !== undefined) {
+      issues.push({
+        key: 'FUNDING_DEPOSIT_DERIVATION_SECRET',
+        message: 'derives the private key of every Sui deposit address from a Splash secret, so Splash would hold a key to client funds (D1, D3); funding sessions give out no deposit address on mainnet — remove it from the host',
+      });
+    }
+    if (env.FUNDING_CCTP_DEPOSIT_ADDRESSES_JSON !== undefined) {
+      issues.push({
+        key: 'FUNDING_CCTP_DEPOSIT_ADDRESSES_JSON',
+        message: 'names CCTP deposit addresses the operator chose, an account between the business and its own wallet (D3); funding sessions give out no deposit address on mainnet — remove it from the host',
+      });
+    }
   }
 
   /* Email: a grant requires a verified mailbox, and verification is a link

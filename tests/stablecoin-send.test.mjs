@@ -267,10 +267,14 @@ test('gas: gasless by default; the switch off, or a network that refuses gasless
   assert.equal(done.status, 'CONFIRMED');
   await s.client.close();
 
-  // The fee leg counts too: every leg must clear Sui's 0.01 floor (0.05 does).
+  // The fee leg counts too: every leg must clear Sui's 0.01 floor. The
+  // smallest fee, 1% of the 1 USDC minimum transfer, is exactly 0.01.
   s = await setup({ anchorFee: true });
   q = await quote(s.deps, '10');
-  assert.equal(q.feeMinor, '50000');
+  assert.equal(q.feeMinor, '100000');
+  assert.equal(q.gas, 'GASLESS');
+  q = await quote(s.deps, '1');
+  assert.equal(q.feeMinor, '10000');
   assert.equal(q.gas, 'GASLESS');
   await s.client.close();
 });
@@ -426,7 +430,7 @@ test('refusals before any reservation: role, bank recipient, unscreened on mainn
   assert.equal((await quote(s.deps)).ok, true);
   await s.client.close();
 
-  // With the audit-anchor fee on, a transfer out of Splash needs one.
+  // With Splash's wallet fee on, a transfer out of Splash needs a recipient.
   s = await setup({ fee: null, anchorFee: true });
   const noFee = await quote(s.deps);
   assert.equal(noFee.code, 'fee_address_missing');
@@ -465,23 +469,23 @@ test('an approval is handed back when nothing moved, and the quote records who a
   await client.close();
 });
 
-test('with the audit-anchor fee on, a transfer out of Splash pays it on top, in the same transaction', async () => {
+test("with Splash's wallet fee on, a transfer out of Splash pays the WALLET schedule on top, in the same transaction", async () => {
   const { client, deps } = await setup({ anchorFee: true });
   const q = await quote(deps, '1000');
-  assert.equal(q.feeMinor, usdc('0.2').toString(), '0.02% of 1,000');
-  assert.equal(q.totalDebitMinor, usdc('1000.2').toString());
-  assert.equal(q.feeKind, 'AUDIT_ANCHOR');
+  assert.equal(q.feeMinor, usdc('0.25').toString(), '0.02% of 1,000 is 0.20: the 0.25 minimum');
+  assert.equal(q.totalDebitMinor, usdc('1000.25').toString());
+  assert.equal(q.feeKind, 'WALLET_FEE');
   assert.equal(q.feeAddress, FEE);
   const legs = JSON.parse(new TextDecoder().decode(fromBase64(q.transactionBytes))).legs;
-  assert.deepEqual(legs.map((l) => [l.address, l.amountMinor]), [[RECIPIENT, usdc('1000').toString()], [FEE, usdc('0.2').toString()]]);
+  assert.deepEqual(legs.map((l) => [l.address, l.amountMinor]), [[RECIPIENT, usdc('1000').toString()], [FEE, usdc('0.25').toString()]]);
   assert.equal((await submit(deps, q)).status, 'CONFIRMED', 'the dry run and the chain check the fee leg too');
 
   const small = await quote(deps, '10');
-  assert.equal(small.feeMinor, usdc('0.05').toString(), 'the 0.05 floor');
+  assert.equal(small.feeMinor, usdc('0.1').toString(), 'the 1% ceiling beats the minimum');
   await client.close();
 });
 
-test('to a Splash user wallet it stays free, even with the audit-anchor fee on', async () => {
+test("to a Splash user wallet it stays free, even with Splash's wallet fee on", async () => {
   const { client, deps } = await setup({ anchorFee: true, splashWallet: true });
   const q = await quote(deps, '1000');
   assert.equal(q.feeMinor, '0');

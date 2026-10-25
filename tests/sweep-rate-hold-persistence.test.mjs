@@ -95,7 +95,7 @@ test('one transfer opens one sweep, however many times delivery is retried', asy
 test('a rate hold survives a cold start and still belongs to its org', async () => {
   await withDb(async () => {
     const operations = await import('../lib/server/operations.ts');
-    const hold = await operations.createRateHold({ orgId: 'acme', corridorCurrency: 'PHP', rate: '56.5', feeBps: 80 });
+    const hold = await operations.createRateHold({ orgId: 'acme', corridorCurrency: 'PHP', rate: '56.5' });
 
     const fresh = await coldStart('lib/server/operations.ts');
     const read = await fresh.readRateHoldFor('acme', hold.id);
@@ -114,7 +114,6 @@ test('a rate hold past its time reads as expired, in the database too', async ()
       orgId: 'acme',
       corridorCurrency: 'PHP',
       rate: '56.5',
-      feeBps: 80,
       holdUntil: new Date(Date.now() - 1000).toISOString(),
     });
     assert.equal((await operations.readRateHoldFor('acme', hold.id))?.state, 'EXPIRED');
@@ -126,6 +125,6 @@ test('a rate hold past its time reads as expired, in the database too', async ()
 test('a rate hold without an owner is refused by the database store', async () => {
   await withDb(async () => {
     const operations = await import('../lib/server/operations.ts');
-    await assert.rejects(() => operations.createRateHold({ corridorCurrency: 'PHP', rate: '56.5', feeBps: 80 }));
+    await assert.rejects(() => operations.createRateHold({ corridorCurrency: 'PHP', rate: '56.5' }));
   });
 });

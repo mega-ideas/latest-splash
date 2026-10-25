@@ -46,28 +46,32 @@ async function filesUnder(dir) {
 /* ── Calculator ────────────────────────────────────────────────────────── */
 
 test('the calculator prices the one leg Splash prices, in minor units, and fails closed without a rate', async () => {
-  const { SPLASH_USD_PHP, splashCostMinor, estimatePayment } = await calculator();
+  const { SPLASH_LEG, splashQuote, estimatePayment } = await calculator();
 
-  // 0.70%, nothing fixed (2026-09-26) — the same numbers lib/server/quote.ts applies.
-  assert.equal(SPLASH_USD_PHP.flatUsdMinor, 0n);
-  assert.equal(SPLASH_USD_PHP.marginBps, 70);
-  assert.equal(SPLASH_USD_PHP.label, 'Illustrative');
-  assert.equal(splashCostMinor(100_000n), 700n, '$1,000 costs $7.00');
-  assert.equal(typeof splashCostMinor(1n), 'bigint');
+  // Splash's fee is the bank-payout schedule's (A1 §2.2), on top of the
+  // amount, the same computation lib/server/quote.ts and the chain apply:
+  // US$1,000 is 1,000 USDC, the 1,000 to 10,000 band, 0.20%, 2 USDC.
+  assert.equal(SPLASH_LEG.label, 'Illustrative');
+  const q = splashQuote(100_000n);
+  assert.equal(q.splashFee.kind, 4, 'a payout to a bank');
+  assert.equal(q.splashFee.minor, 2_000_000n);
+  assert.equal(q.totalDebitMinor, 1_002_000_000n);
+  assert.equal(q.partnerFee?.minor, null, "the partner's fee is the partner's own quote, never guessed");
 
   // No exchange rate: no PHP figure. Never a substituted default.
   const estimate = estimatePayment({ amountUsdMinor: 100_000n, baseline: null, fxRate: null });
   assert.equal(estimate.phpReceivedMinor, null);
   assert.equal(estimate.bankWire, null, 'no dataset, no bank row');
-  assert.equal(estimate.splash.costMinor, 700n);
+  assert.equal(estimate.splash.quote.splashFee.minor, 2_000_000n);
 
-  // With a dated rate the received amount is exact integer arithmetic.
+  // With a dated rate the received amount is exact integer arithmetic. The
+  // fee is on top, so the whole amount is converted.
   const withRate = estimatePayment({
     amountUsdMinor: 100_000n,
     baseline: null,
     fxRate: { phpPerUsd: '56.00', asOf: '2026-09-01' },
   });
-  assert.equal(withRate.phpReceivedMinor, (100_000n - 700n) * 56n, 'PHP centavos on the net amount');
+  assert.equal(withRate.phpReceivedMinor, 100_000n * 56n, 'PHP centavos on the amount sent');
 
   // The Splash row never carries a leg Splash does not price: no MYR anywhere
   // near it, and no Wise anywhere at all.
@@ -280,4 +284,47 @@ test('the copy lint gives a reason for every rule, fails on a planted "licensed 
 
   const lint = await source('scripts/check-copy.mjs');
   assert.match(lint, /copy-rules\.mjs/, 'the lint uses the rules module');
+});
+
+/* ── The comparison table's competitor figures (the A1 review, L8) ─────── */
+
+test('the comparison table shows no competitor figure without a named, dated source', async () => {
+  // The review found the cinematic landing's comparison table quoting a
+  // bank at 3-5%, a broker at 2-4% and Wise at 0.5-1.5%, with settlement
+  // days beside them, and none of it sourced. A competitor figure comes
+  // from a named, dated dataset (lib/fx/comparison-baselines.ts), or no
+  // figure is shown.
+  const landing = await source('components/IsometricLanding.tsx');
+  const rows = landing.slice(landing.indexOf('const comparisonRowsFor'), landing.indexOf('type YieldBenchmarks'));
+  assert.ok(rows.length > 100, 'the comparison rows are found');
+  const typed = [...rows.matchAll(/\b(bank|broker|wise):\s*(['`])([^'`]*\d[^'`]*)\2/g)].map((m) => `${m[1]}: ${m[3]}`);
+  assert.deepEqual(typed, [], 'no competitor figure is typed into a row');
+  assert.match(landing, /getComparisonBaseline\('PHP'\)/, "the bank column's figures come from the reviewed dataset");
+  assert.match(landing, /COMPARISON_BASELINE\.dataset\.name/, 'the table names its source');
+  assert.match(landing, /COMPARISON_BASELINE\.dataset\.asOf/, 'and its date');
+
+  // The yield row's competitor rates are the sources' own, read live, and
+  // nothing when a source could not be read: no hard-coded fallback rate
+  // shown as if it were a reading.
+  assert.doesNotMatch(landing, /bank:\s*0\.38|broker:\s*3\.12|wise:\s*3\.14/, 'no typed yield on the page');
+  const yields = await source('app/api/market/yields/route.ts');
+  assert.doesNotMatch(yields, /0\.38|3\.12|3\.14/, 'nor in the route');
+  assert.doesNotMatch(yields, /fallback/i, 'an unread source is null, not a remembered rate');
+});
+
+test('the comparison table names no competitor, and its fintech column is the dataset category', async () => {
+  // The A1 review: the cinematic landing's table still had a Wise column
+  // with qualitative claims about it ('Mid-market', 'Wise account'), none
+  // sourced. lib/fx/comparison-baselines.ts keeps named competitors off
+  // every surface until a sourced number exists and Sky approves it, as
+  // components/landing already does. The column is the dataset's
+  // digital-provider category instead, with that category's own figures.
+  const landing = await source('components/IsometricLanding.tsx');
+  const table = landing.slice(landing.indexOf('const comparisonRowsFor'), landing.indexOf('type YieldBenchmarks'));
+  assert.doesNotMatch(table, /\bWise\b/, 'no Wise in the rows');
+  assert.doesNotMatch(table, /Mid-market/, 'no mid-market claim the dataset contradicts');
+  const head = landing.slice(landing.indexOf('<table className="iso-comparison-table">'), landing.indexOf('</thead>'));
+  assert.doesNotMatch(head, /\bWise\b/, 'no Wise column');
+  assert.match(head, /Fintech app/, 'the column is the category');
+  assert.match(landing, /COMPARISON_BASELINE\?\.fintech/, "the fintech column's figures come from the dataset");
 });

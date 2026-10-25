@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
-import { getCorridorFeeBps } from '@/lib/fx/corridors';
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { readJsonBody } from '@/lib/server/http';
 import { createRateHold, listRateHoldsFor, readRateHoldFor } from '@/lib/server/operations';
@@ -55,7 +54,6 @@ export async function POST(request: Request) {
     orgId: accountCheck.account.orgId,
     corridorCurrency,
     rate: String(parsed.data.rate),
-    feeBps: getCorridorFeeBps(corridorCurrency),
   });
   return NextResponse.json(hold, { status: 201 });
 }

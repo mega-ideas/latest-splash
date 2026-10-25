@@ -12,6 +12,8 @@ import {
 import WaitlistCta from '@/components/landing/WaitlistCta';
 import { claims, lockedCopy } from '@/content/claims';
 import { BRAND } from '@/content/brand';
+import { pricingSummary, type PricingSummary } from '@/lib/fees/copy';
+import { LAUNCH_SCHEDULE } from '@/lib/fees/schedule';
 
 /**
  * Phone-only landing. Server component — zero client JS beyond Next's
@@ -20,17 +22,18 @@ import { BRAND } from '@/content/brand';
  * single-column, thumb-first retelling of the same story.
  */
 
-const proofChips = [
+/* Splash's fees are the schedule's (A1 §2.7), handed in as `pricing`. */
+const proofChipsFor = (pricing: PricingSummary) => [
   '~400ms settlement',
-  'Free USDC transfers',
+  `${pricing.business} between Splash businesses`,
   'Human-approved AI',
 ];
 
-const marqueeItems = [
+const marqueeFor = (pricing: PricingSummary) => [
   ['1 live testnet', 'MY to PH corridor'],
   ['~400ms', 'Sui settlement finality'],
-  ['Free', 'USDC transfers'],
-  ['0.70%', 'to local currency'],
+  [pricing.business, 'between Splash businesses'],
+  [pricing.bankFee, 'Splash fee to a bank'],
   ['Human approved', 'AI recommendations'],
   ['Stored proof', 'A record that lasts'],
 ];
@@ -43,11 +46,15 @@ const steps = [
   { number: '05', title: 'Anchor the proof', copy: 'Receipts and audit evidence stay encrypted, permanent, and reviewable.' },
 ];
 
-const compareRows = [
+const compareRowsFor = (pricing: PricingSummary) => [
   { label: 'Settlement speed', bank: '2–5 days', splash: '~400ms finality' },
-  { label: 'Fee to local currency', bank: '3–5%', splash: '0.70%' },
+  // A bank's own wire fee varies by bank and is not sourced here, so the row
+  // compares what Splash charges with nothing invented beside it.
+  { label: 'Splash fee to a bank', bank: 'Varies by bank', splash: pricing.feesOn ? pricing.bank : pricing.bankFeePhrase },
   { label: 'Audit trail', bank: 'Siloed records', splash: 'One record, both sides' },
 ];
+
+const LAUNCH_PRICING = pricingSummary(LAUNCH_SCHEDULE);
 
 const trustPoints = [
   { icon: Gauge, title: 'Fast by default', copy: 'Sui settlement finality is measured in milliseconds, not banking days.' },
@@ -62,7 +69,10 @@ const partners = [
   { src: '/sui-logo-blue.svg', name: 'Sui' },
 ];
 
-export default function MobileLanding() {
+export default function MobileLanding({ pricing = LAUNCH_PRICING }: { pricing?: PricingSummary }) {
+  const proofChips = proofChipsFor(pricing);
+  const marqueeItems = marqueeFor(pricing);
+  const compareRows = compareRowsFor(pricing);
   return (
     <main className="mob-landing">
       {/* ── Sticky header ─────────────────────────────────── */}

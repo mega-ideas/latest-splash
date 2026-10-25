@@ -33,7 +33,7 @@ function sampleProposal(overrides = {}) {
       financialImpact: {
         amountOut: '5000000000',
         currencyOut: 'PHP',
-        feeBps: 80,
+        splashFeeMinor: 2_000_000n,
         fxRate: { value: '56.4200', pythPriceId: 'pyth_usdc_usd', observedAt: now },
         nettingSaved: '125000',
       },
@@ -56,7 +56,7 @@ test('ActionCard model exposes full proposal anatomy and trust treatment', () =>
   assert.deepEqual(model.impactRows.map((row) => row.label), [
     'Amount in',
     'Amount out',
-    'Fee',
+    'Splash fee',
     'FX',
     'Yield delta',
     'Netting saved',
@@ -166,7 +166,7 @@ test('landing is the v1 cinematic: hero district, five steps with manual entry, 
   assert.match(landing, /Invoice in, or type it in/);
   assert.doesNotMatch(landing, /Early Pay|id="supply"/);
   assert.match(page, /<IsometricLanding/);
-  assert.match(page, /LANDING_FAQ/, 'the FAQ JSON-LD is generated from the page copy, not duplicated');
+  assert.match(page, /landingFaq\(/, 'the FAQ JSON-LD is generated from the page copy, not duplicated');
   // Composer is now a payment-desk command bar (not a ChatGPT pill): no
   // "High" effort dropdown, a branded "Prepare" action, and a functional
   // file-attach that prepares a batch for human approval.

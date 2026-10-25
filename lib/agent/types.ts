@@ -66,7 +66,9 @@ export interface FinancialImpact {
   amountOut?: bigint;
   currencyIn?: string;
   currencyOut?: string;
-  feeBps?: number;
+  /** Splash's fee on the payment, in USDC minor units, from the fee schedule
+   *  (A1 §4). It replaced a flat per-corridor rate. */
+  splashFeeMinor?: bigint;
   fxRate?: ProposalFxRate;
   yieldDeltaBps?: number;
   nettingSaved?: bigint;

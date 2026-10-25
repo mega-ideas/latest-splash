@@ -24,13 +24,8 @@ import DashStat from '@/components/dashboard/DashStat';
 import SettlementEngineFlow from '@/components/dashboard/SettlementEngineFlow';
 import StatusBadge, { type Status } from '@/components/StatusBadge';
 import { cn } from '@/lib/utils';
-import { getCorridorFeeBps } from '@/lib/fx/corridors';
+import { usePublishedPricing } from '@/lib/fees/use-published-pricing';
 import { LAUNCH_SCOPE_CODE } from '@/lib/launch-scope-rules';
-
-/** Convert bps to display percentage (e.g. 80 -> "0.80%"). */
-function bpsToPct(bps: number) {
-  return `${(bps / 100).toFixed(2)}%`;
-}
 
 // ─── Data ────────────────────────────────────────────────────────────────────
 
@@ -47,18 +42,18 @@ const TOP_STATS = [
   { label: 'Settlement SLA', value: '400ms', delta: 'On target', icon: Zap, accent: 'text-[var(--ok)]', bg: 'bg-[var(--ok-bg)]', id: 'sla' },
 ] as const;
 
-// Corridor display rows — fee comes from lib/fx/corridors.ts (single source of
-// truth that the contract also uses), so dashboard, quote engine, and
-// settlement.move can never drift apart again.
+// Corridor display rows. A corridor carries no fee: Splash's fee is the
+// bank-payout schedule's (A1 §2.2), the same on every corridor, read from the
+// schedule in force (usePublishedPricing).
 const INITIAL_CORRIDORS = [
-  { pair: 'USD → PHP', flag: '🇵🇭', rate: 56.42, volume: '$4.2M', sla: '4.2m', success: 99.8, currency: 'PHP', dec: 2, fee: bpsToPct(getCorridorFeeBps('PHP')) },
-  { pair: 'USD → MYR', flag: '🇲🇾', rate: 4.71,  volume: '$1.8M', sla: '5.1m', success: 98.9, currency: 'MYR', dec: 2, fee: bpsToPct(getCorridorFeeBps('MYR')) },
-  { pair: 'USD → IDR', flag: '🇮🇩', rate: 16284,  volume: '$2.1M', sla: '3.0m', success: 99.5, currency: 'IDR', dec: 0, fee: bpsToPct(getCorridorFeeBps('IDR')) },
-  { pair: 'USD → VND', flag: '🇻🇳', rate: 25385,  volume: '$0.9M', sla: '4.8m', success: 98.2, currency: 'VND', dec: 0, fee: bpsToPct(getCorridorFeeBps('VND')) },
-  { pair: 'USD → THB', flag: '🇹🇭', rate: 35.82,  volume: '$0.7M', sla: '5.5m', success: 97.8, currency: 'THB', dec: 2, fee: bpsToPct(getCorridorFeeBps('THB')) },
-  { pair: 'USD → SGD', flag: '🇸🇬', rate: 1.345,  volume: '$0.4M', sla: '6.1m', success: 99.1, currency: 'SGD', dec: 3, fee: bpsToPct(getCorridorFeeBps('SGD')) },
-  { pair: 'USD → EUR', flag: '🇪🇺', rate: 0.924,  volume: '$0.3M', sla: '6.4m', success: 97.6, currency: 'EUR', dec: 3, fee: bpsToPct(getCorridorFeeBps('EUR')) },
-  { pair: 'USD → GBP', flag: '🇬🇧', rate: 0.789,  volume: '$0.2M', sla: '7.2m', success: 97.1, currency: 'GBP', dec: 3, fee: bpsToPct(getCorridorFeeBps('GBP')) },
+  { pair: 'USD → PHP', flag: '🇵🇭', rate: 56.42, volume: '$4.2M', sla: '4.2m', success: 99.8, currency: 'PHP', dec: 2 },
+  { pair: 'USD → MYR', flag: '🇲🇾', rate: 4.71,  volume: '$1.8M', sla: '5.1m', success: 98.9, currency: 'MYR', dec: 2 },
+  { pair: 'USD → IDR', flag: '🇮🇩', rate: 16284,  volume: '$2.1M', sla: '3.0m', success: 99.5, currency: 'IDR', dec: 0 },
+  { pair: 'USD → VND', flag: '🇻🇳', rate: 25385,  volume: '$0.9M', sla: '4.8m', success: 98.2, currency: 'VND', dec: 0 },
+  { pair: 'USD → THB', flag: '🇹🇭', rate: 35.82,  volume: '$0.7M', sla: '5.5m', success: 97.8, currency: 'THB', dec: 2 },
+  { pair: 'USD → SGD', flag: '🇸🇬', rate: 1.345,  volume: '$0.4M', sla: '6.1m', success: 99.1, currency: 'SGD', dec: 3 },
+  { pair: 'USD → EUR', flag: '🇪🇺', rate: 0.924,  volume: '$0.3M', sla: '6.4m', success: 97.6, currency: 'EUR', dec: 3 },
+  { pair: 'USD → GBP', flag: '🇬🇧', rate: 0.789,  volume: '$0.2M', sla: '7.2m', success: 97.1, currency: 'GBP', dec: 3 },
 ];
 
 /**
@@ -148,6 +143,7 @@ function TxPill({ status }: { status: TxStatus }) {
 
 export default function DashboardOverview() {
   const [corridors] = useState(INITIAL_CORRIDORS);
+  const pricing = usePublishedPricing();
   // No number is shown until the ledger answers; the card used to render
   // $24,500 and $98.72 from constants, and "+$3.22" a day from nowhere.
   const [treasuryPhase, setTreasuryPhase] = useState<'loading' | 'gated' | 'scoped' | 'live'>('loading');
@@ -443,7 +439,7 @@ export default function DashboardOverview() {
                     <th className="px-4 py-2 text-left font-medium text-[#326273]/90">Corridor</th>
                     <th className="px-4 py-2 text-right font-medium text-[#326273]/90">Reference rate</th>
                     <th className="hidden px-4 py-2 text-right font-medium text-[#326273]/90 sm:table-cell">Model volume</th>
-                    <th className="hidden px-4 py-2 text-right font-medium text-[#326273]/90 md:table-cell">Splash fee</th>
+                    <th className="hidden px-4 py-2 text-right font-medium text-[#326273]/90 md:table-cell">Splash fee to a bank</th>
                     <th className="px-4 py-2 text-right font-medium text-[#326273]/90">Test success</th>
                   </tr>
                 </thead>
@@ -476,7 +472,7 @@ export default function DashboardOverview() {
                       </td>
                       <td className="money hidden px-4 py-2.5 font-medium text-[#326273]/90 sm:table-cell">{c.volume}</td>
                       <td className="hidden px-4 py-2.5 text-right md:table-cell">
-                        <span className="money rounded-full bg-[var(--ok-bg)] px-2 py-0.5 text-[13px] font-medium text-[#1F4452]">{c.fee}</span>
+                        <span className="money rounded-full bg-[var(--ok-bg)] px-2 py-0.5 text-[13px] font-medium text-[#1F4452]">{pricing ? pricing.bankFee : '—'}</span>
                       </td>
                       <td className="px-4 py-2.5 text-right">
                         <span

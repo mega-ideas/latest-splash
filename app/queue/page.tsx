@@ -3,6 +3,17 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
 import type { ProposalExplain, SimulationResult, UnsignedProposal } from '@/lib/agent/types';
+import { publishedFeeSchedule } from '@/lib/fees/fee-config';
+import { buildFeeQuote } from '@/lib/fees/quote';
+import { BANK_DESTINATION, destinationKind } from '@/lib/fees/destination';
+import type { FeeState } from '@/lib/fees/schedule';
+
+/**
+ * The preview's Splash fee: the published schedule's bank-payout fee on the
+ * amount (A1 §2.2), never a typed rate, and 0 while FeeConfig's fees are off.
+ */
+const previewFee = (fees: FeeState, principalMicro: bigint) =>
+  buildFeeQuote({ kind: destinationKind(BANK_DESTINATION), principalMinor: principalMicro, state: fees }).splashFee.minor;
 import { getOxwalProposalStore } from '@/lib/agent/oxwal';
 import { resolveAuthorityForSession, UnauthorizedError } from '@/lib/auth/authority';
 import { ensureProposalStoreHydrated } from '@/lib/queue/proposal-persistence';
@@ -29,7 +40,6 @@ const baseExplain: ProposalExplain = {
   financialImpact: {
     amountOut: BigInt(420_000_000_000),
     currencyOut: 'USD',
-    feeBps: 18,
   },
   evidence: [
     { source: 'COUNTERPARTY', ref: 'cp_acme_ph', observedAt: generatedAt.toISOString(), trusted: true },
@@ -55,8 +65,9 @@ function minutesFromNow(minutes: number) {
   return new Date(generatedAt.getTime() + minutes * 60 * 1000).toISOString();
 }
 
-function proposal(id: string, overrides: ProposalOverride = {}): UnsignedProposal {
-  const explain = { ...baseExplain, ...overrides.explain };
+function proposal(fees: FeeState, id: string, overrides: ProposalOverride = {}): UnsignedProposal {
+  const base = { ...baseExplain, financialImpact: { ...baseExplain.financialImpact, splashFeeMinor: previewFee(fees, BigInt(420_000_000_000)) } };
+  const explain = { ...base, ...overrides.explain };
   const simulation = { ...baseSimulation, ...overrides.simulation };
   return {
     id,
@@ -77,30 +88,31 @@ function proposal(id: string, overrides: ProposalOverride = {}): UnsignedProposa
   };
 }
 
-const demoProposals: UnsignedProposal[] = [
-  proposal('prop_dual_threshold', {
+/** The example rows, their Splash fee under `fees`, the schedule in force. */
+const exampleProposals = (fees: FeeState): UnsignedProposal[] => [
+  proposal(fees, 'prop_dual_threshold', {
     explain: {
       recommendation: 'Approve dual-control supplier payout',
       // Micro units, like a real proposal. These were display-scale, which is
       // what hid the formatting bug above.
-      financialImpact: { amountOut: BigInt(1_250_000_000_000), currencyOut: 'USD', feeBps: 14 },
+      financialImpact: { amountOut: BigInt(1_250_000_000_000), currencyOut: 'USD', splashFeeMinor: previewFee(fees, BigInt(1_250_000_000_000)) },
       requiredApprovers: 2,
       risk: 'MEDIUM',
       confidence: 0.86,
     },
     approvals: [{ userId: 'approver_ops_1', role: 'APPROVER', signedAt: generatedAt.toISOString() }],
   }),
-  proposal('prop_expiring_quote', {
+  proposal(fees, 'prop_expiring_quote', {
     kind: 'FX_CONVERT',
     expiresAt: minutesFromNow(11),
     explain: {
       recommendation: 'Convert corridor float before quote expiry',
-      financialImpact: { amountIn: BigInt(300_000_000_000), amountOut: BigInt(299_240_000_000), currencyIn: 'USD', currencyOut: 'USD', feeBps: 9 },
+      financialImpact: { amountIn: BigInt(300_000_000_000), amountOut: BigInt(299_240_000_000), currencyIn: 'USD', currencyOut: 'USD', splashFeeMinor: previewFee(fees, BigInt(300_000_000_000)) },
       requiredApprovers: 1,
       risk: 'LOW',
     },
   }),
-  proposal('prop_compliance_hold', {
+  proposal(fees, 'prop_compliance_hold', {
     explain: {
       recommendation: 'Hold payout pending compliance review',
       evidence: [
@@ -111,7 +123,7 @@ const demoProposals: UnsignedProposal[] = [
       confidence: 0.58,
     },
   }),
-  proposal('prop_failed_relay', {
+  proposal(fees, 'prop_failed_relay', {
     status: 'FAILED',
     simulation: { ok: false, balanceChanges: [], error: 'settlement relay failed' },
     explain: {
@@ -120,7 +132,7 @@ const demoProposals: UnsignedProposal[] = [
       confidence: 0.7,
     },
   }),
-  proposal('prop_anomaly_halt', {
+  proposal(fees, 'prop_anomaly_halt', {
     status: 'FAILED',
     simulation: { ok: false, balanceChanges: [], error: 'anomaly velocity halt' },
     explain: {
@@ -131,7 +143,6 @@ const demoProposals: UnsignedProposal[] = [
   }),
 ];
 
-const queueView = buildApprovalQueue(demoProposals, { now: generatedAt, expiringWithinMs: 20 * 60 * 1000 });
 
 /**
  * `financialImpact` amounts are MICRO units — `lib/agent/oxwal.ts` builds
@@ -260,6 +271,10 @@ export default async function QueuePage() {
       blockedReason,
     }),
   );
+
+  // The seeded rows are fixtures, not anyone's payments, priced under the
+  // schedule in force and whether its fees are on.
+  const queueView = buildApprovalQueue(exampleProposals(await publishedFeeSchedule()), { now: generatedAt, expiringWithinMs: 20 * 60 * 1000 });
 
   // The seeded rows are fixtures, not anyone's payments. They go to the board
   // as examples, which it shows apart and never offers to approve. Mixed into

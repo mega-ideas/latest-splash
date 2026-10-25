@@ -1359,6 +1359,38 @@ body {
   gap: 7px;
 }
 
+/* Splash's pricing line under the comparison (A1 §2.7), rendered from the
+   fee schedule. Sticky to the left so it stays in view while the table
+   scrolls sideways on a narrow screen. */
+.iso-pricing-line {
+  position: sticky;
+  left: 0;
+  display: grid;
+  gap: 6px;
+  max-width: min(100%, 92vw);
+  margin: 0;
+  padding: 16px 20px;
+  border-top: 1px solid rgba(12, 62, 72, .11);
+  color: var(--iso-ink);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.iso-pricing-line a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.iso-pricing-line strong {
+  color: rgba(12, 62, 72, .78);
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .13em;
+  text-transform: uppercase;
+}
+
 .iso-yield-live {
   display: flex;
   align-items: center;
@@ -3951,7 +3983,8 @@ body {
   height: 100%;
 }
 
-.iso-final-art img {
+.iso-final-art img,
+.iso-final-art .iso-final-art-fee {
   position: absolute;
   top: -5%;
   right: -14%;
@@ -3961,6 +3994,22 @@ body {
   object-fit: contain;
   filter: drop-shadow(0 30px 25px rgba(0, 0, 0, .28));
   transform: rotate(-4deg);
+}
+
+/* The Fee row's value, laid over the closing art in the same box, so it
+   moves with it; ReceiptArtFee in IsometricLanding.tsx. The art's own ink,
+   read from its "Fee" label. */
+.iso-final-art .iso-final-art-fee {
+  filter: none;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.iso-final-art-fee text {
+  fill: #36524a;
+  font-family: var(--font-sans), system-ui, sans-serif;
+  font-size: 37px;
+  font-weight: 800;
 }
 
 .iso-footer {
@@ -4186,7 +4235,8 @@ body {
     min-height: 390px;
   }
 
-  .iso-final-art img {
+  .iso-final-art img,
+  .iso-final-art .iso-final-art-fee {
     top: -20%;
     right: -10%;
     width: 90%;
@@ -4701,7 +4751,8 @@ body {
     min-height: 350px;
   }
 
-  .iso-final-art img {
+  .iso-final-art img,
+  .iso-final-art .iso-final-art-fee {
     top: -18%;
     right: -34%;
     width: 135%;
