@@ -296,6 +296,61 @@ test('the spending-rules view gives owners the live near-threshold flags, and no
   assert.match(src, /route\.authority\.role === 'OWNER'\s*\?\s*\{\s*nearThreshold:/);
 });
 
+// ─── 4. Review fixes ─────────────────────────────────────────────────────────
+
+const spendAt = (recipient, i, timestampMs) => ({ ...spend(recipient, i), timestampMs: String(timestampMs) });
+
+test('a repeat counts only the payments inside what the threshold check counts now', () => {
+  const t = { ...total({ counted: 8_500n * USDC }), countsFromMs: String(W0) };
+  const old = spendAt(SUPPLIER, 1, W0 - 7n * DAY);
+  const current = spendAt(SUPPLIER, 2, W0 + 60_000n);
+  assert.deepEqual(deriveNearThresholdAlerts(view([rule(STAFF_A, { totals: [t], spends: [old, current] })])), [], "last week's payment plus today's is not a repeat");
+  const [a] = deriveNearThresholdAlerts(view([rule(STAFF_A, { totals: [t], spends: [current, spendAt(SUPPLIER, 3, W0 + 120_000n), old] })]));
+  assert.equal(a.payments, 2);
+});
+
+test('several spenders going from near the threshold to over it is a new alert, keyed by severity', () => {
+  const near = deriveNearThresholdAlerts(view([rule(STAFF_A, { totals: [total({ counted: 4_000n * USDC })] }), rule(STAFF_B, { totals: [total({ counted: 4_500n * USDC })] })]));
+  const over = deriveNearThresholdAlerts(view([rule(STAFF_A, { totals: [total({ counted: 6_000n * USDC })] }), rule(STAFF_B, { totals: [total({ counted: 6_000n * USDC })] })]));
+  assert.equal(near[0].severity, 'near_threshold');
+  assert.equal(over[0].severity, 'over_threshold');
+  assert.notEqual(near[0].key, over[0].key);
+});
+
+test('near then over in the same windows: the owners are emailed again, and only the over alert is still shown', async () => {
+  await withDb(async ({ client, db }) => {
+    await seed(client);
+    const { runNearThresholdMonitor } = await import('../lib/server/near-threshold-monitor.ts');
+    const { listSpendRuleAlertsForOrg } = await import('../lib/server/near-threshold-store.ts');
+    const group = (a, b) => view([rule(STAFF_A, { totals: [total({ counted: a })] }), rule(STAFF_B, { totals: [total({ counted: b })] })]);
+    const sent = [];
+    const readView = (v) => async (orgId) => ({ ok: true, view: orgId === 'acme' ? v : view([]) });
+    await runNearThresholdMonitor(monitorDeps(db, sent, { readView: readView(group(4_000n * USDC, 4_500n * USDC)) }));
+    assert.equal(sent.length, 1);
+    const second = await runNearThresholdMonitor(monitorDeps(db, sent, { now: NOW + 3_600_000, readView: readView(group(6_000n * USDC, 6_000n * USDC)) }));
+    assert.equal(second.recorded, 1, 'the escalation is recorded');
+    assert.equal(sent.length, 2, 'and emailed');
+    assert.match(sent[1].text, /above the 10,000 USDC/);
+    const shown = await listSpendRuleAlertsForOrg(db, 'acme', NOW + 3_600_000);
+    assert.deepEqual(shown.map((a) => [a.severity, a.countedMinor]), [['over_threshold', String(12_000n * USDC)]]);
+  });
+});
+
+test('a repeat whose payment count rises keeps one alert, updated, and is not emailed again', async () => {
+  await withDb(async ({ client, db }) => {
+    await seed(client);
+    const { runNearThresholdMonitor } = await import('../lib/server/near-threshold-monitor.ts');
+    const { listSpendRuleAlertsForOrg } = await import('../lib/server/near-threshold-store.ts');
+    const sent = [];
+    const v = (counted, n) => view([rule(STAFF_A, { totals: [total({ counted })], spends: Array.from({ length: n }, (_, i) => spend(SUPPLIER, i + 1)) })]);
+    await runNearThresholdMonitor(monitorDeps(db, sent, { readView: async (o) => ({ ok: true, view: o === 'acme' ? v(8_500n * USDC, 2) : view([]) }) }));
+    await runNearThresholdMonitor(monitorDeps(db, sent, { now: NOW + 3_600_000, readView: async (o) => ({ ok: true, view: o === 'acme' ? v(9_500n * USDC, 3) : view([]) }) }));
+    assert.equal(sent.length, 1);
+    const [a] = await listSpendRuleAlertsForOrg(db, 'acme', NOW + 3_600_000);
+    assert.deepEqual([a.payments, a.countedMinor], [3, String(9_500n * USDC)], 'the in-app alert shows what is counted now');
+  });
+});
+
 test('the cron route refuses without CRON_SECRET', async () => {
   const src = await code('app/api/cron/spend-rule-alerts/route.ts');
   assert.match(src, /CRON_SECRET/);
