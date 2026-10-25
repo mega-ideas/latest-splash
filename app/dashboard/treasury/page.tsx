@@ -370,7 +370,7 @@ export default function TreasuryPage() {
 
       {/* Toast */}
       {toast && (
-        <div role="status" className="fixed bottom-6 right-6 z-50 flex items-center gap-2 rounded-xl bg-[#0c3e48] px-4 py-3 text-sm font-medium text-white shadow-xl">
+        <div role="status" className="fixed inset-x-4 bottom-24 z-50 flex items-center gap-2 rounded-xl sm:inset-x-auto sm:bottom-6 sm:right-6 bg-[#0c3e48] px-4 py-3 text-sm font-medium text-white shadow-xl">
           <CheckCircle2 size={15} className="text-[#6FB4A0]" aria-hidden="true" /> {toast}
         </div>
       )}
