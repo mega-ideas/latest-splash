@@ -7,7 +7,7 @@ import { readOnboardingState } from '@/lib/server/onboarding';
 export const dynamic = 'force-dynamic';
 
 /**
- * "How will you use Splash?" — the one screen between signing up and the
+ * "How will you use Splash?": the one screen between signing up and the
  * dashboard. Orgs that already have payment history were backfilled to 'pay'
  * by migration 0019 and never see it; everyone else answers once.
  */

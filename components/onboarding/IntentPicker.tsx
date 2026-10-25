@@ -38,7 +38,9 @@ const CARDS: Array<{
     icon: TrendingUp,
     title: 'Treasury',
     // v2 D9: USDY in the business's own wallet, swapped by its owners.
-    copy: 'Swap idle USDC for USDY in your own Splash Wallet, and redeem it from there. Your owners sign every swap. USDY is not Shariah-compliant.',
+    // Present tense that holds whether or not this server has a swap route
+    // (production has none yet), with the same caveats as the page and Zeke.
+    copy: 'Hold idle USDC as USDY in your own Splash Wallet. Your owners sign every swap. Yield is variable and not promised. USDY is not Shariah-compliant.',
     bestFor: 'A business holding idle USDC between payouts.',
   },
 ];
@@ -81,9 +83,18 @@ export default function IntentPicker() {
             type="button"
             onClick={() => choose(intent)}
             disabled={busy !== null}
-            className="dash-block mt-auto inline-flex min-h-[46px] items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-[#1F4452] px-4 text-[13px] font-semibold text-white transition hover:bg-[#326273] disabled:opacity-60"
+            className="dash-block mt-auto inline-flex min-h-[46px] items-center justify-center gap-2 rounded-lg bg-[#1F4452] px-4 text-sm font-semibold text-white transition hover:bg-[#326273] disabled:opacity-60"
           >
-            {busy === intent ? 'Saving…' : `Choose ${title.toLowerCase()}`}
+            {/* A short visible label fits the narrowest card (768px: about
+                187px of content); the card's title completes the name for a
+                screen reader, so the three buttons stay distinct. */}
+            {busy === intent ? (
+              'Saving…'
+            ) : (
+              <span>
+                Choose<span className="sr-only"> {title}</span>
+              </span>
+            )}
             <ArrowRight aria-hidden="true" className="h-4 w-4" />
           </button>
         </article>
