@@ -180,7 +180,7 @@ export async function grantRole(
  */
 export async function revokeRole(
   db: DrizzleDb,
-  input: { email: string; by?: string },
+  input: { email: string; by?: string; now?: () => Date },
 ): Promise<{ offboarded: Array<{ orgId: string; addresses: string[] }> }> {
   const email = input.email.trim().toLowerCase();
   const rows = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
@@ -193,7 +193,7 @@ export async function revokeRole(
   const addresses = await passkeyAddressesOf(db as never, userId);
   const offboarded: Array<{ orgId: string; addresses: string[] }> = [];
   for (const m of held) {
-    const done = await offboardMember(db as never, { orgId: m.orgId, userId, by: input.by ?? 'operator:unknown', addresses });
+    const done = await offboardMember(db as never, { orgId: m.orgId, userId, by: input.by ?? 'operator:unknown', addresses, now: input.now });
     offboarded.push({ orgId: m.orgId, addresses: done.addresses });
   }
   return { offboarded };

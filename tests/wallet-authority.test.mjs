@@ -227,14 +227,14 @@ test('(3) only the person who asked withdraws an ask; an owner declines one; nob
   const deps = { db: w.db, ctx: w.ctx, now: () => T0 };
   const asked = await askOwnersToApprove(deps, { orgId: 'acme', userId: 'u-staff', intentId: INTENT, contentHash: HASH, walrusBlobId: BLOB, requesterAddresses: [staff.address] });
 
-  const byOwner = await cancelApprovalAsk(w.db, { orgId: 'acme', userId: 'u-two', askId: asked.ask.id });
+  const byOwner = await cancelApprovalAsk(w.db, { orgId: 'acme', userId: 'u-two', askId: asked.ask.id, now: () => T0 });
   assert.equal(byOwner.status, 403, 'an owner declines; withdrawing is the asker’s');
-  const byStaff = await declineApprovalAsk(w.db, { orgId: 'acme', userId: 'u-staff', askId: asked.ask.id });
+  const byStaff = await declineApprovalAsk(w.db, { orgId: 'acme', userId: 'u-staff', askId: asked.ask.id, now: () => T0 });
   assert.equal(byStaff.status, 403, 'staff cannot decline');
-  const foreign = await declineApprovalAsk(w.db, { orgId: 'northwind', userId: 'u-north', askId: asked.ask.id });
+  const foreign = await declineApprovalAsk(w.db, { orgId: 'northwind', userId: 'u-north', askId: asked.ask.id, now: () => T0 });
   assert.equal(foreign.status, 404);
 
-  const declined = await declineApprovalAsk(w.db, { orgId: 'acme', userId: 'u-three', askId: asked.ask.id, reason: 'Pay it next week' });
+  const declined = await declineApprovalAsk(w.db, { orgId: 'acme', userId: 'u-three', askId: asked.ask.id, reason: 'Pay it next week', now: () => T0 });
   assert.equal(declined.ok, true);
   const [after] = await listApprovalAsks(w.db, { orgId: 'acme', userId: 'u-staff' });
   assert.equal(after.status, 'declined');
@@ -243,7 +243,7 @@ test('(3) only the person who asked withdraws an ask; an owner declines one; nob
   // Declined frees the payment for a fresh ask; the asker can withdraw that one.
   const second = await askOwnersToApprove(deps, { orgId: 'acme', userId: 'u-staff', intentId: INTENT, contentHash: HASH, walrusBlobId: BLOB, requesterAddresses: [staff.address] });
   assert.equal(second.ok, true);
-  const withdrawn = await cancelApprovalAsk(w.db, { orgId: 'acme', userId: 'u-staff', askId: second.ask.id });
+  const withdrawn = await cancelApprovalAsk(w.db, { orgId: 'acme', userId: 'u-staff', askId: second.ask.id, now: () => T0 });
   assert.equal(withdrawn.ok, true);
   const actions = (await listAuthorityEvents(w.db, 'acme')).map((e) => e.action);
   assert.ok(actions.includes('approval_declined') && actions.includes('approval_withdrawn'));
@@ -465,7 +465,7 @@ test('(4) a person in charge made a viewer, removed, or removed and re-added, no
   await w.db.update(schema.memberships).set({ role: 'checker' }).where(eq(schema.memberships.userId, 'u-pic'));
 
   // Removing the membership revokes the appointment and voids what they signed.
-  await revokeRole(w.db, { email: 'pic@acme.test', by: 'operator:ops@splash.test' });
+  await revokeRole(w.db, { email: 'pic@acme.test', by: 'operator:ops@splash.test', now });
   assert.equal(await highestAuthority(w.db, 'acme', 'u-pic'), null);
   await w.db.insert(schema.memberships).values({ id: 'm-u-pic-2', userId: 'u-pic', orgId: 'acme', role: 'checker' });
   assert.equal(await highestAuthority(w.db, 'acme', 'u-pic'), null, 're-hired, they are not in charge again until an owner appoints them');
