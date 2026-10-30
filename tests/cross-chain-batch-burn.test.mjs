@@ -177,7 +177,7 @@ test('a mint is checked against Circle’s contract on the network its attestati
   await w.burn(B);
   await refreshCrossChainAttestation({ ...w.base, iris: { sandbox: false, async messagesForSuiBurn() { return [complete({ nonce: N1 })]; } } }, { paymentRef: A });
   await refreshCrossChainAttestation({ ...w.base, iris: { sandbox: true, async messagesForSuiBurn() { return [complete({ nonce: N1 }), complete({ nonce: N3 })]; } } }, { paymentRef: B });
-  const reader = (receipt) => ({ async receipt() { return receipt; } });
+  const reader = (receipt) => ({ async receipt() { return { blockNumber: '0x64', ...receipt }; }, async finalizedBlock() { return 100n; } });
   const mainnet = messageTransmitterV2('BASE', 'mainnet');
   const testnet = messageTransmitterV2('BASE', 'testnet');
   const mint = (paymentRef, receipt, network, hash) => recordCrossChainMint({ ...w.base, mints: reader(receipt), ...(network ? { network } : {}) }, { paymentRef, mintTxHash: hash });
@@ -215,7 +215,7 @@ test('a mint above the finalized block is not recorded, and is once the chain fi
   const w = await attestedWorld();
   const at = (block, finalized) => ({ async receipt() { return w.receipt(block); }, async finalizedBlock() { return finalized; } });
   const early = await w.mint(at('0x65', 100n));
-  assert.deepEqual([early.ok, early.status, early.code], [undefined, 409, 'mint_not_final'], show(early));
+  assert.deepEqual([early.ok, early.status, early.code], [false, 409, 'mint_not_final'], show(early));
   assert.equal((await readCrossChainTransfer(w.db, 'acme', A)).status, 'attested', 'nothing recorded for a mint that is not final');
   const done = await w.mint(at('0x64', 100n));
   assert.deepEqual([done.ok, done.transfer?.status], [true, 'minted'], show(done));

@@ -475,7 +475,7 @@ test('the attestation and the mint are recorded once each, forward only, from th
   const attested = await refreshCrossChainAttestation({ ...base, iris }, { paymentRef: INTENT });
   assert.deepEqual([attested.transfer.status, attested.transfer.messageNonce, attested.transfer.attestation], ['attested', NONCE, '0xa77e']);
 
-  const reader = (receipt) => ({ async receipt() { return receipt; } });
+  const reader = (receipt) => ({ async receipt() { return { blockNumber: '0x64', ...receipt }; }, async finalizedBlock() { return 100n; } });
   const mint = (mints, hash = `0x${'de'.repeat(32)}`) => recordCrossChainMint({ ...base, mints, network: 'mainnet' }, { paymentRef: INTENT, mintTxHash: hash });
   assert.equal((await mint(reader(mintReceipt()), 'nope')).code, 'bad_tx_hash');
   assert.equal((await mint(reader(mintReceipt({ nonce: `0x${'5e'.repeat(32)}` })))).code, 'not_the_mint');

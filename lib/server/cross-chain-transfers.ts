@@ -75,6 +75,8 @@ export interface IrisClient {
 /** The destination chain's receipt of one transaction. */
 export interface MintReader {
   receipt(chain: CrossChainChain, txHash: string): Promise<EvmReceipt | null>;
+  /** The chain's own "finalized" block number. A mint is recorded only at or below it. */
+  finalizedBlock?(chain: CrossChainChain): Promise<bigint>;
 }
 
 type Fetcher = typeof fetch;
@@ -110,20 +112,28 @@ export function mintReaderFromEnv(env: NodeJS.ProcessEnv = process.env, fetcher:
   } catch {
     urls = {};
   }
+  async function call<T>(chain: CrossChainChain, method: string, params: unknown[]): Promise<T | null> {
+    const url = typeof urls[chain] === 'string' ? urls[chain].trim() : '';
+    if (!/^https:\/\//.test(url)) throw new CctpUnavailable(`No RPC for ${FUNDING_CHAINS[chain].label} is set up (CCTP_MINT_RPC_URLS_JSON), so the mint cannot be read.`, 'mint_check_not_configured');
+    const res = await fetcher(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) throw new CctpUnavailable(`The ${FUNDING_CHAINS[chain].label} RPC answered ${res.status}.`, 'mint_check_unavailable');
+    const json = (await res.json()) as { result?: T | null; error?: unknown };
+    if (json.error) throw new CctpUnavailable(`The ${FUNDING_CHAINS[chain].label} RPC refused the read.`, 'mint_check_unavailable');
+    return json.result ?? null;
+  }
   return {
-    async receipt(chain, txHash) {
-      const url = typeof urls[chain] === 'string' ? urls[chain].trim() : '';
-      if (!/^https:\/\//.test(url)) throw new CctpUnavailable(`No RPC for ${FUNDING_CHAINS[chain].label} is set up (CCTP_MINT_RPC_URLS_JSON), so the mint cannot be read.`, 'mint_check_not_configured');
-      const res = await fetcher(url, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_getTransactionReceipt', params: [txHash] }),
-        signal: AbortSignal.timeout(10_000),
-      });
-      if (!res.ok) throw new CctpUnavailable(`The ${FUNDING_CHAINS[chain].label} RPC answered ${res.status}.`, 'mint_check_unavailable');
-      const json = (await res.json()) as { result?: EvmReceipt | null; error?: unknown };
-      if (json.error) throw new CctpUnavailable(`The ${FUNDING_CHAINS[chain].label} RPC refused the read.`, 'mint_check_unavailable');
-      return json.result ?? null;
+    receipt: (chain, txHash) => call<EvmReceipt>(chain, 'eth_getTransactionReceipt', [txHash]),
+    async finalizedBlock(chain) {
+      const block = await call<{ number?: string }>(chain, 'eth_getBlockByNumber', ['finalized', false]);
+      if (!block || typeof block.number !== 'string' || !/^0x[0-9a-fA-F]+$/.test(block.number)) {
+        throw new CctpUnavailable(`The ${FUNDING_CHAINS[chain].label} RPC did not say which block is final.`, 'mint_check_unavailable');
+      }
+      return BigInt(block.number);
     },
   };
 }
@@ -434,8 +444,10 @@ export async function recordCrossChainMint(
   if (!isEvmTxHash(input.mintTxHash)) return refuse(400, 'bad_tx_hash', 'An EVM transaction hash is 0x followed by 64 hexadecimal characters.');
   const txHash = input.mintTxHash.toLowerCase();
   let receipt: EvmReceipt | null;
+  let finalized: bigint | null = null;
   try {
     receipt = await deps.mints.receipt(chain, txHash);
+    if (receipt && deps.mints.finalizedBlock) finalized = await deps.mints.finalizedBlock(chain);
   } catch (error) {
     if (error instanceof CctpUnavailable) return refuse(503, error.code, error.message);
     return refuse(502, 'mint_check_unavailable', `The ${FUNDING_CHAINS[chain].label} transaction could not be read. Nothing was recorded.`);
@@ -446,6 +458,12 @@ export async function recordCrossChainMint(
   const network = row.sandbox ? 'testnet' : 'mainnet';
   const read = readEvmMint(receipt, { transmitter: messageTransmitterV2(chain, network), nonce: row.messageNonce, message: row.message });
   if (!read.ok) return refuse(409, 'not_the_mint', `That transaction is not the mint of this payment (${read.reason}).`);
+  // Final, not merely latest: a reorg could still remove the mint. No block
+  // number, or no way to know what is final, counts as not final.
+  const included = typeof receipt?.blockNumber === 'string' && /^0x[0-9a-fA-F]+$/.test(receipt.blockNumber) ? BigInt(receipt.blockNumber) : null;
+  if (included === null || finalized === null || included > finalized) {
+    return refuse(409, 'mint_not_final', `The ${FUNDING_CHAINS[chain].label} chain has not finalized that transaction yet. Nothing was recorded; try again in a few minutes.`);
+  }
   const now = deps.now();
   let done: CrossChainRow | null;
   try {

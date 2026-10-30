@@ -264,7 +264,7 @@ its own source:
 | opened | the saved `CROSS_CHAIN` recipient of this business, the amount and Circle's fee bound; once per business and intent id | another recipient, amount or fee bound for the same intent (`cross_chain_conflict`) |
 | burned | the Sui transaction: this business's own executed signing request with that digest, signed by the owners' multisig; the chain shows it succeeded from that wallet and confirmed this intent under `splash_core`'s original package id | a digest no request of this business executed, a single-key request, a failed transaction, another sender, no `IntentConfirmed` for this intent |
 | attested | Circle's attestation service (`GET {CCTP_IRIS_API_URL}/v2/messages/8?transactionHash=…`): a complete message from Sui to this domain, minting exactly this amount to this mint recipient, a fee no higher than the bound, any relayer, a nonce | anything else (`burn_mismatch`, logged for ops by id) |
-| minted | the destination chain's own receipt (`eth_getTransactionReceipt` through `CCTP_MINT_RPC_URLS_JSON`): succeeded, and Circle's MessageTransmitterV2 on that chain logged `MessageReceived` for this nonce from Sui with this message's body | another contract, nonce, source or body; a Solana mint (not read yet: the payment stays attested) |
+| minted | the destination chain's own receipt (`eth_getTransactionReceipt` through `CCTP_MINT_RPC_URLS_JSON`): succeeded, in a block at or below the chain's `finalized` block (`eth_getBlockByNumber`), and Circle's MessageTransmitterV2 on that chain logged `MessageReceived` for this nonce from Sui with this message's body | another contract, nonce, source or body; a block not yet final, or no way to tell (`mint_not_final`); a Solana mint (not read yet: the payment stays attested) |
 
 Forward only: a trigger refuses a step back, a replaced burn, attestation or
 mint, a change to what is paid, and any delete. Each step is a
@@ -330,10 +330,6 @@ and the event are from `circlefin/evm-cctp-contracts`
   executor's rule payment does not pass through Splash's signing layer, so no
   message is made for it. Sky decides whether rule payments to an exchange
   are allowed at all, or need a message per payment before the tag is set.
-- A mint read at a finalised block: a Base, Ethereum or other EVM mint is
-  read at the latest block, so a reorg could leave a recorded mint that no
-  longer exists.
-
 - The supplier's page at `/wallet-proof/<token>` (Phase 3): the API it calls
   is built.
 - The cross-chain payment PTB and the bridge adapter (above). Until then

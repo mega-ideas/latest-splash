@@ -158,6 +158,8 @@ export const MESSAGE_RECEIVED_TOPIC = `0x${toHex(keccak_256(new TextEncoder().en
 export type EvmReceipt = {
   status?: string;
   transactionHash?: string;
+  /** Hex block number the transaction was included in. */
+  blockNumber?: string;
   logs?: Array<{ address?: string; topics?: string[]; data?: string; removed?: boolean }>;
 };
 
