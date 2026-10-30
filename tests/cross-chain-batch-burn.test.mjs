@@ -269,7 +269,6 @@ test('the finalized block is read before the receipt, so a reorg between the rea
 
 test('a mint is recorded only for the recipient and amount the payment stored', async () => {
   const w = await attestedWorld();
-  const final = { async receipt() { return w.receipt('0x64'); }, async finalizedBlock() { return 100n; } };
   // A stored message swapped or corrupted after it was attested.
   const swapped = async (opts) => {
     const message = cctpMessage({ nonce: N1, ...opts });
