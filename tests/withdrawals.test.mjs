@@ -397,6 +397,24 @@ test('the deposit address is fixed per business, never a Splash address or anoth
   await t.w.client.close();
 });
 
+test('a partner that gives two businesses one account reference is refused for the second, and a webhook can never name two businesses', async () => {
+  const addrs = ['0x' + '5a'.repeat(32), '0x' + '5b'.repeat(32), '0x' + '5c'.repeat(32)];
+  let n = 0;
+  const t = await setup({ overrides: { depositAddress: async () => ({ address: addrs[n++], network: 'sui', accountRef: 'acct_reused', sandbox: true }) } });
+  assert.equal((await requestPartnerDepositAddress(t.deps('acme'), 'u-founder')).ok, true);
+  const second = await requestPartnerDepositAddress(t.deps('northwind'), 'u-north');
+  assert.equal(second.ok, undefined, 'the second business is not given the first one’s account reference');
+  assert.equal(second.code, 'account_ref_conflict');
+  assert.equal(second.status, 409);
+  const rows = await t.w.db.select().from(schema.partnerDepositAddresses).where(eq(schema.partnerDepositAddresses.accountRef, 'acct_reused'));
+  assert.deepEqual(rows.map((r) => r.orgId), ['acme'], 'nothing was recorded for the second business');
+  // The database holds the line too: a second live row with the reference cannot be written.
+  await assert.rejects(
+    t.w.db.insert(schema.partnerDepositAddresses).values({ id: 'pda_direct', orgId: 'northwind', partner: rows[0].partner, address: addrs[2], accountRef: 'acct_reused', status: 'pending_test', testAmountMinor: 1_000_000n, createdBy: 'u-north' }),
+  );
+  await t.w.client.close();
+});
+
 test('a test deposit whose signing request lapses can be asked for again', async () => {
   const t = await setup();
   await requestPartnerDepositAddress(t.deps(), 'u-founder');
