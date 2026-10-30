@@ -102,8 +102,14 @@ unavailable ledger means no nudge.
 
 Invoices and uploaded sheets are data:
 
-- Invoice free text is tagged `trusted: false`, and directives in it raise an
-  `UNTRUSTED_INSTRUCTION` warning. The payee comes only from a verified
+- Invoice and counterparty free text is tagged `trusted: false`, and text that
+  reads like an instruction raises an `UNTRUSTED_INSTRUCTION` warning
+  (`scanUntrustedText`). The text is normalised first (full-width and
+  look-alike forms, zero-width and control characters), then checked for
+  override wording, system-style prefixes, a changed payee or bank, "pay to"
+  phrasings, tool names, IBAN-like and long account numbers and wallet
+  addresses. The warning is advice for the reader; the payee and amount never
+  come from this text whether or not it is flagged. The payee comes only from a verified
   counterparty id the person named, the amount from the person or the
   invoice's amount field, never from a memo.
 - `getInvoice` and `getCounterparty` take the session org; another tenant's
