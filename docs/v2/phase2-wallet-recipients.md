@@ -264,7 +264,14 @@ its own source:
 | opened | the saved `CROSS_CHAIN` recipient of this business, the amount and Circle's fee bound; once per business and intent id | another recipient, amount or fee bound for the same intent (`cross_chain_conflict`) |
 | burned | the Sui transaction: this business's own executed signing request with that digest, signed by the owners' multisig; the chain shows it succeeded from that wallet and confirmed this intent under `splash_core`'s original package id | a digest no request of this business executed, a single-key request, a failed transaction, another sender, no `IntentConfirmed` for this intent |
 | attested | Circle's attestation service (`GET {CCTP_IRIS_API_URL}/v2/messages/8?transactionHash=…`): a complete message from Sui to this domain, minting exactly this amount to this mint recipient, a fee no higher than the bound, any relayer, a nonce | anything else (`burn_mismatch`, logged for ops by id) |
-| minted | the destination chain's own receipt (`eth_getTransactionReceipt` through `CCTP_MINT_RPC_URLS_JSON`): succeeded, in a block at or below the chain's `finalized` block (`eth_getBlockByNumber`), and Circle's MessageTransmitterV2 on that chain logged `MessageReceived` for this nonce from Sui with this message's body | another contract, nonce, source or body; a block not yet final, or no way to tell (`mint_not_final`); a Solana mint (not read yet: the payment stays attested) |
+| minted | the destination chain's own receipt (`eth_getTransactionReceipt` through `CCTP_MINT_RPC_URLS_JSON`): succeeded, in a block at or below the chain's `finalized` block (`eth_getBlockByNumber`, read before the receipt so a reorg between the reads cannot pass a mint that no longer exists), and Circle's MessageTransmitterV2 on that chain logged `MessageReceived` for this nonce from Sui with this message's body | another contract, nonce, source or body; a stored message whose recipient, amount or fee bound no longer matches the payment (`mint_mismatch`); a block not yet final, or no way to tell (`mint_not_final`); a Solana mint (not read yet: the payment stays attested) |
+
+Go-live check for every chain in `CCTP_MINT_RPC_URLS_JSON`: its RPC must
+answer `eth_getBlockByNumber` for the `finalized` tag. A chain or provider
+that does not makes every mint on it fail closed (`mint_check_unavailable`,
+503/502) and the payment stays attested, which the sweep lists as stuck for
+hand relay. Splash does not substitute a confirmation depth: choosing one per
+chain is a decision for Sky, taken per chain after the RPC list is known.
 
 Forward only: a trigger refuses a step back, a replaced burn, attestation or
 mint, a change to what is paid, and any delete. Each step is a

@@ -43,8 +43,8 @@ import { and, eq, inArray, isNotNull, ne } from 'drizzle-orm';
 import { normalizeSuiAddress } from '@mysten/sui/utils';
 
 import { crossChainTransfers, suppliers, walletSigningRequests } from '../db/schema.ts';
-import { FUNDING_CHAINS, SUI_CCTP_DOMAIN } from '../payments/cctp.ts';
-import { irisMessagesOf, isEvmTxHash, messageTransmitterV2, readBurn, readEvmMint, type EvmReceipt, type IrisMessage } from '../payments/cctp-receipts.ts';
+import { decodeBurnMessageV2, FUNDING_CHAINS, SUI_CCTP_DOMAIN } from '../payments/cctp.ts';
+import { decodeMessageV2, irisMessagesOf, isEvmTxHash, messageTransmitterV2, readBurn, readEvmMint, type EvmReceipt, type IrisMessage } from '../payments/cctp-receipts.ts';
 import type { KytProvider } from '../compliance/kyt.ts';
 import { CROSS_CHAIN_CHAINS, isCrossChainChain, moveDeliveryOf, type CrossChainChain } from '../recipients/wallet-recipients.ts';
 import { crossChainDestinationGate } from './kyt-screenings.ts';
@@ -446,8 +446,11 @@ export async function recordCrossChainMint(
   let receipt: EvmReceipt | null;
   let finalized: bigint | null = null;
   try {
+    // Finality first, then the receipt: a receipt in a block at or below one
+    // already final is final. The other order lets a reorg remove the mint
+    // between the reads while the finalized number overtakes its block.
+    if (deps.mints.finalizedBlock) finalized = await deps.mints.finalizedBlock(chain);
     receipt = await deps.mints.receipt(chain, txHash);
-    if (receipt && deps.mints.finalizedBlock) finalized = await deps.mints.finalizedBlock(chain);
   } catch (error) {
     if (error instanceof CctpUnavailable) return refuse(503, error.code, error.message);
     return refuse(502, 'mint_check_unavailable', `The ${FUNDING_CHAINS[chain].label} transaction could not be read. Nothing was recorded.`);
@@ -458,6 +461,14 @@ export async function recordCrossChainMint(
   const network = row.sandbox ? 'testnet' : 'mainnet';
   const read = readEvmMint(receipt, { transmitter: messageTransmitterV2(chain, network), nonce: row.messageNonce, message: row.message });
   if (!read.ok) return refuse(409, 'not_the_mint', `That transaction is not the mint of this payment (${read.reason}).`);
+  // The minted message must still be this payment's: the recipient, the amount
+  // and the fee bound stored when it was opened. A message swapped or
+  // corrupted since it was attested is never recorded as the payment's mint.
+  const decoded = decodeMessageV2(row.message);
+  const burn = decoded ? decodeBurnMessageV2(decoded.body) : null;
+  if (!burn || burn.mintRecipient.toLowerCase() !== row.mintRecipient.toLowerCase() || burn.amount !== row.amountMinor || burn.maxFee > row.maxBridgeFeeMinor) {
+    return refuse(409, 'mint_mismatch', "The mint does not match this payment's recipient, amount or fee bound. Nothing was recorded.");
+  }
   // Final, not merely latest: a reorg could still remove the mint. No block
   // number, or no way to know what is final, counts as not final.
   const included = typeof receipt?.blockNumber === 'string' && /^0x[0-9a-fA-F]+$/.test(receipt.blockNumber) ? BigInt(receipt.blockNumber) : null;
