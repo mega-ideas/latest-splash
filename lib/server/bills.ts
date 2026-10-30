@@ -358,6 +358,14 @@ export async function handleBillRead(db: BillsDb, caller: BillCaller, id: string
 
 // ─── Intake ─────────────────────────────────────────────────────────────────
 
+/**
+ * Every control character but the tab and the line breaks. Postgres refuses a
+ * NUL in text and in jsonb, so none is stored. Built from a string so that
+ * this file holds no raw control byte.
+ */
+const CONTROL_CHARACTERS = new RegExp('[\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F\\u007F]');
+const CONTROL_CHARACTERS_ALL = new RegExp(CONTROL_CHARACTERS.source, 'g');
+
 const intakeSchema = z.object({
   intakeKey: z.string().regex(INTAKE_KEY),
   documentName: z.string().trim().max(120).optional(),
@@ -365,11 +373,42 @@ const intakeSchema = z.object({
   pdfBase64: z.string().max(7_000_000).regex(/^[A-Za-z0-9+/=\s]+$/).optional(),
 });
 
+function hasControlCharacter(value: unknown): boolean {
+  if (typeof value === 'string') return CONTROL_CHARACTERS.test(value);
+  if (Array.isArray(value)) return value.some(hasControlCharacter);
+  if (value && typeof value === 'object') return Object.values(value).some(hasControlCharacter);
+  return false;
+}
+
+/**
+ * Runs one route's work. An error thrown from the store or a provider is a
+ * fixed answer, and the log carries the error's name and the org: the message
+ * of a database error holds the query's parameters, which here are the
+ * invoice (the supplier, the amounts).
+ */
+export async function answerSafely(
+  orgId: string,
+  run: () => Promise<Answer>,
+  log: (...args: unknown[]) => void = console.error,
+): Promise<Answer> {
+  try {
+    return await run();
+  } catch (error) {
+    log('pay invoices: a request failed', { error: error instanceof Error ? error.name : 'unknown', orgId });
+    return refuse(500, 'Something went wrong on our side, and nothing was changed. Try again in a moment.', { code: 'server_error' });
+  }
+}
+
 export async function handleBillIntake(db: BillsDb, caller: BillCaller, body: unknown, deps: BillDeps): Promise<Answer> {
   if (!mayWriteBills(caller.role)) return forbidden(caller.role);
   const parsed = intakeSchema.safeParse(body);
   if (!parsed.success) return refuse(400, 'Send the invoice as text or a PDF, with an intake key.');
-  const { intakeKey, documentName, pdfBase64 } = parsed.data;
+  const { intakeKey, pdfBase64 } = parsed.data;
+  const documentName = parsed.data.documentName?.replace(CONTROL_CHARACTERS_ALL, '').trim();
+  // A file read in another encoding (UTF-16 shows as a NUL between letters) is not text the database takes.
+  if (parsed.data.text && CONTROL_CHARACTERS.test(parsed.data.text)) {
+    return refuse(400, 'That is not plain text. Save the file as UTF-8, or paste the invoice text.', { code: 'not_plain_text' });
+  }
   const text = parsed.data.text?.replace(/\r\n?/g, '\n').trim();
   if (!text && !pdfBase64) return refuse(400, 'The invoice is empty. Paste its text or attach the file.');
   const now = deps.now?.() ?? new Date();
@@ -401,6 +440,10 @@ export async function handleBillIntake(db: BillsDb, caller: BillCaller, body: un
     }
     if (!reading) return refuse(422, 'Zeke could not read this PDF. Paste the invoice text instead.', { code: 'pdf_unreadable' });
     extraction = groundReading('', reading, parseBillText('', { buyerCountry }), 'model_pdf');
+    // For a PDF the model's words are not checked against any text: a reading that holds a control character is not stored.
+    if (hasControlCharacter(reading)) {
+      return refuse(422, 'Zeke could not read this PDF. Paste the invoice text instead.', { code: 'pdf_unreadable' });
+    }
   } else {
     const parsedText = parseBillText(text!, { buyerCountry });
     let reading: Awaited<ReturnType<ModelReader>> = null;
@@ -493,10 +536,13 @@ export async function handleBillAction(db: BillsDb, caller: BillCaller, id: stri
       // The currency the person chose settles "1.234": thousands in rupiah, a decimal in dollars.
       const amount = BILL_CURRENCIES.includes(f.currency) ? normalizeAmount(f.amount, f.currency) : normalizeAmount(f.amount);
       const problems: Record<string, string> = {};
-      if (!amount || amount === '0' || !/^\d+(\.\d{1,6})?$/.test(amount)) {
+      // Twelve whole digits at most, as Get paid takes: past that it is a typo, and it would not fit the column.
+      if (!amount || amount === '0' || !/^\d{1,12}(\.\d{1,6})?$/.test(amount)) {
         problems.amount = isAmbiguousAmount(f.amount) && !BILL_CURRENCIES.includes(f.currency)
           ? 'Choose the currency first: a dot before three digits is a thousands mark in some currencies and a decimal point in others.'
-          : 'Enter the amount due, like 1250.00.';
+          : amount && /^\d{13,}/.test(amount)
+            ? 'That amount has too many digits. Check it for a typo.'
+            : 'Enter the amount due, like 1250.00.';
       }
       if (!BILL_CURRENCIES.includes(f.currency)) problems.currency = 'Choose the invoice’s currency.';
       const due = readDate(f.dueDate);

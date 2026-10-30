@@ -207,7 +207,7 @@ export default function PayInvoices({ onCounts }: { onCounts?: (counts: { toRevi
                             )}
                           >
                             <span className="min-w-0">
-                              <span className="block truncate text-sm font-semibold">{b.payee || b.documentName || 'Supplier not read'}</span>
+                              <span className="block truncate text-sm font-semibold" title={b.payee || b.documentName || undefined}>{b.payee || b.documentName || 'Supplier not read'}</span>
                               <span className={cn('mt-0.5 block text-[12px]', selectedId === b.id ? 'text-white/80' : 'text-[#326273]')}>
                                 {b.scheduledFor ? `Pay on ${dueLabel(b.scheduledFor)}` : `Due ${dueLabel(b.confirmed?.dueDate ?? b.extraction.fields.dueDate.value)}`}
                               </span>
@@ -411,7 +411,7 @@ function BillCase({ bill, canWrite, paymentFlowWired, paymentFlowCancels, onChan
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="text-[13px] font-medium text-[#326273]">{bill.statusLabel}{bill.documentName ? ` · ${bill.documentName}` : ''}</p>
-            <h2 className="mt-1 truncate text-2xl font-bold tracking-tight text-[#0c3e48]">{head?.payee ?? (bill.payee || 'Supplier not read')}</h2>
+            <h2 className="mt-1 truncate text-2xl font-bold tracking-tight text-[#0c3e48]" title={head?.payee ?? (bill.payee || undefined)}>{head?.payee ?? (bill.payee || 'Supplier not read')}</h2>
           </div>
           <div className="sm:text-right">
             <p className="dash-num font-mono text-2xl font-semibold text-[#0c3e48]">{amountLine(bill)}</p>
@@ -601,7 +601,7 @@ function FieldInput({ id, field, value, disabled, invalid, describedBy, onChange
   id: string; field: BillField; value: string; disabled: boolean; invalid: boolean; describedBy: string; onChange: (v: string) => void;
 }) {
   const cls = 'mt-1.5 h-11 w-full rounded-lg border border-[#326273]/20 bg-white px-3 text-sm text-[#1f4452] focus:border-[#145d6a] focus:outline-none focus:ring-2 focus:ring-[#5c9ead]/30 disabled:bg-[#326273]/5 aria-[invalid=true]:border-[var(--error)]';
-  const common = { id, disabled, 'aria-invalid': invalid, 'aria-describedby': describedBy, className: cls };
+  const common = { id, disabled, 'aria-required': field !== 'invoiceDate', 'aria-invalid': invalid, 'aria-describedby': describedBy, className: cls };
   if (field === 'currency') {
     return (
       <select {...common} value={value} onChange={(e) => onChange(e.target.value)}>
@@ -712,6 +712,11 @@ function RecipientStep({ bill, canWrite, onMatch, busy }: { bill: BillView; canW
       {bill.extraction.paymentDetailsRead === 'not_read' && (
         <p className="mt-3 rounded-xl border border-[var(--info)]/25 bg-[var(--info-bg)] p-3 text-[13px] leading-5 text-[var(--info)]">
           The bank account or wallet printed on this PDF was not read, so it was not compared with the recipient’s. Check it against your copy before you schedule.
+        </p>
+      )}
+      {bill.extraction.paymentDetailsRead === 'zeke_pdf' && (
+        <p className="mt-3 rounded-xl border border-[var(--info)]/25 bg-[var(--info-bg)] p-3 text-[13px] leading-5 text-[var(--info)]">
+          The account or wallet check on this PDF rests on Zeke’s reading of it, not on text Splash could compare itself. Check it against your copy before you schedule.
         </p>
       )}
       {bill.paymentDetailsDiffer && (
@@ -836,7 +841,7 @@ function ScheduleStep({ bill, canWrite, paymentFlowWired, paymentFlowCancels, ac
         ) : canWrite ? (
           <form onSubmit={(e) => { e.preventDefault(); void act({ action: 'schedule', payOn, revision: bill.revision }, 'schedule'); }} className="flex flex-wrap items-end gap-3">
             <div>
-              <label htmlFor={`payon-${bill.id}`} className="block text-[13px] font-semibold text-[#1f4452]">Pay on</label>
+              <label htmlFor={`payon-${bill.id}`} className="block text-[13px] font-semibold text-[#1f4452]">Pay on <span className="font-normal text-[#326273]">(UTC date)</span></label>
               <input id={`payon-${bill.id}`} type="date" min={today} value={payOn} onChange={(e) => setPayOn(e.target.value)} className="mt-1 h-11 rounded-lg border border-[#326273]/20 bg-white px-3 text-sm focus:border-[#145d6a] focus:outline-none focus:ring-2 focus:ring-[#5c9ead]/30" />
             </div>
             <button type="submit" disabled={busy !== null} className="dash-btn min-h-11 disabled:opacity-50">Schedule payment</button>
@@ -958,7 +963,7 @@ function EInvoiceCard({ bill, canWrite, onChange }: { bill: BillView; canWrite: 
         <p className="text-sm text-[#1f4452]">The supplier is in Malaysia, so it issues the e-invoice itself. Nothing to make here.</p>
       ) : bill.eInvoice ? (
         <div className="space-y-3 text-sm text-[#1f4452]">
-          <p>Made {bill.eInvoice.generatedAt ? <LocalTime value={bill.eInvoice.generatedAt} locale="en-GB" options={STAMP} /> : ''}. Submit it in the MyInvois portal within 72 hours of that time.</p>
+          <p>Made {bill.eInvoice.generatedAt ? <LocalTime value={bill.eInvoice.generatedAt} locale="en-GB" options={STAMP} /> : ''}. Submit it in the MyInvois portal, and check the filing deadline with your tax adviser.</p>
           <div className="flex flex-wrap gap-2">
             <a href={`/api/bills/${encodeURIComponent(bill.id)}/e-invoice?download=1`} className="dash-btn min-h-11"><FileDown size={14} aria-hidden="true" /> Download the file</a>
             <a href={MYINVOIS_PORTAL_URL} target="_blank" rel="noreferrer" className="dash-btn dash-btn-ghost min-h-11 !text-[13px]">Open the MyInvois portal <ExternalLink size={13} aria-hidden="true" /></a>

@@ -1,4 +1,4 @@
-import { handleBillPay } from '@/lib/server/bills';
+import { answerSafely, handleBillPay } from '@/lib/server/bills';
 import { readJsonBody } from '@/lib/server/http';
 import { liveBillDeps } from '@/lib/server/bills-deps';
 import { answer, billCaller, billsDb } from '@/lib/server/bills-route';
@@ -22,5 +22,5 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const { id } = await params;
   const body = await readJsonBody(request);
   const revision = typeof body.revision === 'string' ? body.revision : undefined;
-  return answer(await handleBillPay(store.db, gate.caller, id, liveBillDeps(store.db), { expectedRevision: revision, requireRevision: true }));
+  return answer(await answerSafely(gate.caller.orgId, async () => handleBillPay(store.db, gate.caller, id, liveBillDeps(store.db), { expectedRevision: revision, requireRevision: true })));
 }

@@ -34,6 +34,7 @@ import { getFeeConfig, normalizeAddress } from '@/lib/fees/fee-config';
 import { getContractConfig } from '@/lib/server/contract-config';
 import type { BillDeps, BusinessFacts, ModelReader } from '@/lib/server/bills';
 import { stablecoinOnly } from '@/lib/server/launch-scope';
+import { splashAddressSourceFromEnv } from '@/lib/server/splash-addresses';
 import { listRecipientsFor } from '@/lib/server/recipients-store';
 
 export const INVOICE_READER_PROMPT =
@@ -181,12 +182,31 @@ export async function splashOwnedAddressesFrom(input: SplashAddressInputs): Prom
   return [...out];
 }
 
-/** Splash's own addresses from the contract config and the live FeeConfig. Throws when they cannot all be read. */
+/**
+ * The checks above, and the shared definition of a Splash address
+ * (lib/server/splash-addresses.ts) that recipient saving and withdrawals use:
+ * the union of both. A change to the shared set (the finance address, a new
+ * deposit address) reaches Invoices, and where the shared source refuses
+ * (production with no FeeConfig id) so does this. Throws when either cannot
+ * be read.
+ */
+export async function splashOwnedAddressesWith(input: SplashAddressInputs & { shared: () => Promise<string[]> }): Promise<string[]> {
+  const [own, shared] = await Promise.all([splashOwnedAddressesFrom(input), input.shared()]);
+  const out = new Set<string>(own);
+  for (const raw of shared) {
+    const address = normalizeAddress(raw);
+    if (address) out.add(address);
+  }
+  return [...out];
+}
+
+/** Splash's own addresses from the contract config, the live FeeConfig and the shared source. Throws when they cannot all be read. */
 export function splashOwnedAddresses(): Promise<string[]> {
-  return splashOwnedAddressesFrom({
+  return splashOwnedAddressesWith({
     config: getContractConfig(),
     feeConfigId: process.env.SPLASH_FEE_CONFIG_ID ?? '',
     readFeeConfig: getFeeConfig,
+    shared: splashAddressSourceFromEnv(),
   });
 }
 

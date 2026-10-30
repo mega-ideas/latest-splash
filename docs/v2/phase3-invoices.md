@@ -114,6 +114,15 @@ leaves, appending to `history` in the same statement. With no
 `DATABASE_URL` the routes answer 503: supplier invoices are never kept in
 memory.
 
+## Limits and failures
+
+- An amount is at most twelve whole digits (as in Get paid); more is a field error on the amount, not a database error.
+- Pasted text with a control character (a UTF-16 file shows as a NUL between letters) is refused with 400 `not_plain_text`; tabs and line breaks are text. A control character in a file name is dropped.
+- Every route runs through `answerSafely`: an error from the store or a provider is a fixed 500 answer, and the log carries the error's name and the org id, never the message (a database error's message holds the invoice).
+- "A Splash address" is one definition: the union of `splashAddressSourceFromEnv` (lib/server/splash-addresses.ts, which production refuses without a FeeConfig id) and the operator/treasury checks in lib/server/bills-deps.ts. Nothing is matched or handed off when either cannot be read.
+- The page's dates are UTC days. For a PDF, the printed-details check rests on Zeke's reading and the page says so.
+- Not here: the approve and pay steps run through the 5.4 payment flow (lib/bills/payment-hook.ts). When it lands it must read the settled digest from chain and compare its recipient, amount and asset with the invoice row before `recordBillSettlement`, and map approver ids to names before they reach a receipt.
+
 ## Roles
 
 Owners, finance admins, approvers and makers bring in, check, match,

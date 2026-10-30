@@ -1,6 +1,6 @@
 import { readJsonBody } from '@/lib/server/http';
 import { RATE_LIMITS, enforceRateLimit } from '@/lib/server/rate-limit';
-import { handleBillIntake, handleBillList } from '@/lib/server/bills';
+import { answerSafely, handleBillIntake, handleBillList } from '@/lib/server/bills';
 import { liveBillDeps } from '@/lib/server/bills-deps';
 import { answer, billCaller, billsDb } from '@/lib/server/bills-route';
 
@@ -18,7 +18,7 @@ export async function GET(request: Request) {
   if (gate.response) return gate.response;
   const store = await billsDb();
   if (store.response) return store.response;
-  return answer(await handleBillList(store.db, gate.caller, liveBillDeps(store.db)));
+  return answer(await answerSafely(gate.caller.orgId, async () => handleBillList(store.db, gate.caller, liveBillDeps(store.db))));
 }
 
 export async function POST(request: Request) {
@@ -29,5 +29,6 @@ export async function POST(request: Request) {
   if (limited) return limited;
   const store = await billsDb();
   if (store.response) return store.response;
-  return answer(await handleBillIntake(store.db, gate.caller, await readJsonBody(request), liveBillDeps(store.db)));
+  const body = await readJsonBody(request);
+  return answer(await answerSafely(gate.caller.orgId, async () => handleBillIntake(store.db, gate.caller, body, liveBillDeps(store.db))));
 }

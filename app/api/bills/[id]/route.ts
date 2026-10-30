@@ -1,5 +1,5 @@
 import { readJsonBody } from '@/lib/server/http';
-import { handleBillAction, handleBillRead } from '@/lib/server/bills';
+import { answerSafely, handleBillAction, handleBillRead } from '@/lib/server/bills';
 import { liveBillDeps } from '@/lib/server/bills-deps';
 import { answer, billCaller, billsDb } from '@/lib/server/bills-route';
 
@@ -18,7 +18,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const store = await billsDb();
   if (store.response) return store.response;
   const { id } = await params;
-  return answer(await handleBillRead(store.db, gate.caller, id, liveBillDeps(store.db)));
+  return answer(await answerSafely(gate.caller.orgId, async () => handleBillRead(store.db, gate.caller, id, liveBillDeps(store.db))));
 }
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -27,5 +27,6 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const store = await billsDb();
   if (store.response) return store.response;
   const { id } = await params;
-  return answer(await handleBillAction(store.db, gate.caller, id, await readJsonBody(request), liveBillDeps(store.db), { requireRevision: true }));
+  const body = await readJsonBody(request);
+  return answer(await answerSafely(gate.caller.orgId, async () => handleBillAction(store.db, gate.caller, id, body, liveBillDeps(store.db), { requireRevision: true })));
 }
