@@ -1161,15 +1161,35 @@ export function getComplianceStatus(input: unknown): ComplianceResult {
  * compared, not scored: the invoice's own warnings, an amount or currency
  * that is not the invoice's, and an invoice already marked paid.
  */
+function nameKey(value: string): string {
+  return value.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+}
+
+/**
+ * A payment drafted against an invoice is bound to it in code. The invoice's
+ * text is not trusted, but its record is: it names who is owed (the issuer or
+ * the named payer) and for how much. A draft to anyone else, or for another
+ * amount, is refused rather than flagged, so a model steered by a memo cannot
+ * prepare it and leave the check to the person approving.
+ */
+function assertPaymentMatchesInvoice(invoice: InvoiceForAgent, counterparty: CounterpartyRecord, amountUsd: number) {
+  const names = [invoice.issuerOrg?.value, invoice.payerOrgName?.value]
+    .filter((value): value is string => typeof value === 'string' && value.length > 0)
+    .map(nameKey);
+  if (!names.includes(nameKey(counterparty.name.value))) {
+    throw new Error(`counterparty ${counterparty.id} is not the payee on invoice ${invoice.id}; a payment drafted against an invoice goes to the business named on it`);
+  }
+  const invoiceAmount = Number(invoice.amountUsd);
+  if (Number.isFinite(invoiceAmount) && usdMicro(invoiceAmount) !== usdMicro(amountUsd)) {
+    throw new Error(`the amount ${amountUsd} USD is not invoice ${invoice.id}'s: the invoice is for ${invoice.amountUsd} USD`);
+  }
+}
+
 function invoiceReviewReasons(invoice: InvoiceForAgent, amountUsd: number, currency: string): string[] {
   const reasons: string[] = [];
   if (invoice.warnings.length) {
     const count = invoice.warnings.length;
     reasons.push(`Invoice ${invoice.id} has ${count} warning${count === 1 ? '' : 's'}: text in it was flagged as a possible instruction. It was treated as data, not acted on.`);
-  }
-  const invoiceAmount = Number(invoice.amountUsd);
-  if (Number.isFinite(invoiceAmount) && usdMicro(invoiceAmount) !== usdMicro(amountUsd)) {
-    reasons.push(`The amount is ${amountUsd} USD, but invoice ${invoice.id} is for ${invoice.amountUsd} USD.`);
   }
   if (invoice.targetCurrency.toUpperCase() !== currency) {
     reasons.push(`The payout is in ${currency}, but invoice ${invoice.id} asks for ${invoice.targetCurrency.toUpperCase()}.`);
@@ -1200,6 +1220,7 @@ export async function proposePayment(input: unknown): Promise<UnsignedProposal> 
   if (currency !== 'USDC') await assertZekeLane(orgId, 'FIAT_OUT_LOCAL', currency);
   const invoiceId = optionalString(object, 'invoiceId');
   const invoice = invoiceId ? getInvoice({ orgId, id: invoiceId }) : undefined;
+  if (invoice) assertPaymentMatchesInvoice(invoice, counterparty, amountUsd);
   const corridor = optionalString(object, 'corridor') ?? `USD_${currency}`;
 
   // Real economics: USD in, target currency out at the live corridor rate,
@@ -1923,6 +1944,7 @@ async function* runClaudeToolLoop(
     { role: 'user', content: request.message },
   ];
 
+  let flaggedInvoiceId: string | undefined;
   for (let round = 0; round < 4; round += 1) {
     const response = await client.messages.create({
       model: copilotModel(),
@@ -1966,7 +1988,14 @@ async function* runClaudeToolLoop(
       const name = toolUse.name as OxwalToolName;
       yield { type: 'tool', name, category: toolCategory(name) };
       try {
-        const result = await executeOxwalTool(name, scopeToolInputToOrg(name, toolUse.input, request.orgId));
+        let input = scopeToolInputToOrg(name, toolUse.input, request.orgId);
+        // A flagged invoice read earlier this turn is bound to any payment the
+        // model then drafts, whether or not it names the invoice: the payee and
+        // amount checks run against it either way.
+        if (name === 'proposePayment' && flaggedInvoiceId && input && typeof input === 'object' && !(input as { invoiceId?: unknown }).invoiceId) {
+          input = { ...(input as Record<string, unknown>), invoiceId: flaggedInvoiceId };
+        }
+        const result = await executeOxwalTool(name, input);
         if (isUnsignedProposal(result)) yield { type: 'proposal', proposal: result };
         const payload = (result as Envelope<unknown>)?.data ?? result;
         // A prepared USDC transfer becomes the same card as the fixed phrasing's.
@@ -1974,6 +2003,7 @@ async function* runClaudeToolLoop(
         if (handoff) yield { type: 'handoff', handoff };
         if (isInvoiceForAgent(payload)) {
           for (const warning of payload.warnings) yield { type: 'warning', warning };
+          if (payload.warnings.length > 0 && typeof payload.id === 'string') flaggedInvoiceId = payload.id;
         }
         results.push({
           type: 'tool_result',
