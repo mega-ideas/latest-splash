@@ -415,6 +415,18 @@ test('a partner that gives two businesses one account reference is refused for t
   await t.w.client.close();
 });
 
+test('an account reference the webhook could never match is refused and nothing is recorded', async () => {
+  for (const [i, bad] of ['acct_1', 'acct 12345', ' acct_12345', 'acct_12345 ', 'acct_é12345', 'a'.repeat(129), ''].entries()) {
+    const t = await setup({ overrides: { depositAddress: async () => ({ address: '0x' + (0x60 + i).toString(16).repeat(32), network: 'sui', accountRef: bad, sandbox: true }) } });
+    const got = await requestPartnerDepositAddress(t.deps(), 'u-founder');
+    assert.equal(got.ok, false, JSON.stringify(bad));
+    assert.equal(got.code, 'bad_account_ref');
+    assert.equal(got.status, 502);
+    assert.equal((await t.w.db.select().from(schema.partnerDepositAddresses)).length, 0, 'nothing was recorded');
+    await t.w.client.close();
+  }
+});
+
 test('a test deposit whose signing request lapses can be asked for again', async () => {
   const t = await setup();
   await requestPartnerDepositAddress(t.deps(), 'u-founder');
