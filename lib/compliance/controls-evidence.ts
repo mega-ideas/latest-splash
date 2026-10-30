@@ -77,6 +77,24 @@ export type ControlsEvidence = {
   screenings: EvidenceScreening[];
   /** Screenings made after the payment was approved: not the control that applied to it. */
   screeningsAfterApproval: EvidenceScreening[];
+  /**
+   * The deposits that funded the paying wallet before the payment was approved
+   * (the newest ten) and how each was screened on arrival: provider, the
+   * provider's reference, the verdict. Screenings of the paid address are
+   * above; these are of the money that came in.
+   */
+  fundingScreenings: Array<{
+    depositId: string;
+    suiDigest: string;
+    asset: string;
+    amountMinor: string;
+    status: string;
+    provider: string | null;
+    reference: string | null;
+    verdict: string | null;
+    screenedAt: string | null;
+    arrivedAt: string | null;
+  }>;
   travelRule: { provider: string; sandbox: boolean; reference: string | null; status: string; exchange: string } | null;
   /**
    * The saved wallet recipient the payment went to (v2 §4.7): who saved it,
@@ -150,8 +168,8 @@ const FORBIDDEN_VALUE = /(suiprivkey1|BEGIN [A-Z ]*PRIVATE KEY)/;
 const ACCOUNT_LIKE = /\d(?:[ -]?\d){7,}/;
 const IBAN_LIKE = /\b[A-Z]{2}\d{2}[A-Z0-9]{10,30}\b/;
 const NUMERIC_KEY = /(Minor|Micro|Ms|Score|^value$|^threshold$|^weight$|^exchangeRate$|^amount$)$/;
-/** A provider's or the chain's own reference or id: whatever shape it has, it is theirs, not an account. */
-const REFERENCE_KEY = /(Ref|^ref|reference|Id|^id|Ids|[dD]igest|^uetr|^endToEndId)$/;
+/** A provider's or the chain's own reference or id, or the bank's own clearing code (as public as its BIC): whatever shape it has, it is not an account. */
+const REFERENCE_KEY = /(Ref|^ref|reference|Id|^id|Ids|[dD]igest|^uetr|^endToEndId|^creditorAgent)$/;
 const SAFE_SHAPE = [
   /^0x[0-9a-fA-F]+$/, // a Sui address or object id
   /^[0-9a-fA-F]{64}$/, // a hash
@@ -275,6 +293,17 @@ export function evidencePdf(e: ControlsEvidence): Uint8Array {
   if (e.screeningsAfterApproval.length > 0) {
     L.push({ kind: 'text', text: 'Screened after the payment was approved (not the check that applied to it):' });
     e.screeningsAfterApproval.forEach(screening);
+  }
+  L.push({ kind: 'heading', text: 'Deposits that funded the wallet (KYT)' });
+  if (e.fundingScreenings.length === 0) L.push({ kind: 'text', text: 'No deposit into the paying wallet is on file before the payment was approved.' });
+  for (const d of e.fundingScreenings) {
+    L.push(
+      { kind: 'field', label: 'Deposit', value: `${d.depositId} (${d.status}), ${d.amountMinor} ${d.asset} minor units, arrived ${or(d.arrivedAt, 'at an unrecorded time')}` },
+      { kind: 'field', label: 'Sui digest', value: d.suiDigest },
+      { kind: 'field', label: 'Screened by', value: `${or(d.provider, 'no provider')}, reference ${or(d.reference, 'none')}` },
+      { kind: 'field', label: 'Result', value: or(d.verdict, 'Not screened: the provider gave no answer') },
+      { kind: 'gap' },
+    );
   }
   L.push({ kind: 'heading', text: 'Travel Rule' });
   if (e.travelRule) {

@@ -22,7 +22,7 @@
 import { and, desc, eq } from 'drizzle-orm';
 import { normalizeSuiAddress } from '@mysten/sui/utils';
 
-import { kybCases, organizations, suppliers, withdrawals } from '../db/schema.ts';
+import { kybCases, organizations, suppliers, walletDeposits, withdrawals } from '../db/schema.ts';
 import type { ControlsEvidence, EvidencePaymentKind } from '../compliance/controls-evidence.ts';
 import { assertEvidenceClean, sanitizeIsoEvidence } from '../compliance/controls-evidence.ts';
 import type { Pacs008Evidence } from '../payments/iso20022.ts';
@@ -51,7 +51,7 @@ export type EvidenceDeps = {
 
 type Refusal = { ok: false; status: number; code: string; error: string };
 
-const PAYMENT_PURPOSES = new Set(['wallet_payment', 'withdrawal', 'partner_payout']);
+const PAYMENT_PURPOSES = new Set(['wallet_payment', 'withdrawal', 'partner_payout', 'spend_approval']);
 /** A request in one of these has had its quorum: its last signature is when it was approved. */
 const APPROVED = new Set(['submitting', 'unknown', 'executed', 'failed']);
 /** splash_core's payment kind for an exchange deposit address. */
@@ -68,6 +68,7 @@ function kindOf(description: WalletTxDescription | null | undefined): number | n
   for (const a of description?.actions ?? []) {
     if (a.type === 'open_intent') return a.kind;
     if (a.type === 'pay_intent' && a.intent) return a.intent.kind;
+    if (a.type === 'approve_payout') return a.intent.kind;
   }
   return null;
 }
@@ -127,6 +128,11 @@ export function paymentOfDescription(description: WalletTxDescription | null | u
     return { recipient: pay.intent.recipient, amountMinor: pay.intent.amountMinor, intentId: pay.intent.intentId, maxFeeMinor: pay.maxFeeMinor, approval };
   }
   if (send && send.type === 'send_funds') return { recipient: send.recipient, amountMinor: send.amountMinor ?? '0', intentId: null, maxFeeMinor: null, approval };
+  // An owner's second approval of a rule payment: the intent already exists, and the approved total is the amount plus the fee shown.
+  if (approval && approval.type === 'approve_payout') {
+    const fee = BigInt(approval.maxTotalMinor) - BigInt(approval.intent.amountMinor);
+    return { recipient: approval.intent.recipient, amountMinor: approval.intent.amountMinor, intentId: approval.intent.intentId, maxFeeMinor: fee >= 0n ? fee.toString() : null, approval };
+  }
   return null;
 }
 
@@ -311,6 +317,31 @@ export async function controlsEvidenceFor(deps: EvidenceDeps, ref: string, gener
     gaps.push("No KYT screening of the partner's deposit address is on file; the supplier's bank account is the partner's to screen.");
   }
 
+  // The money that funded the paying wallet: each deposit's own screening, kept on its row.
+  const fromWallet = row?.walletAddress ?? request?.senderAddress ?? null;
+  const depositRows = fromWallet
+    ? await deps.db.select().from(walletDeposits).where(and(eq(walletDeposits.orgId, deps.orgId), eq(walletDeposits.walletAddress, fromWallet))).orderBy(desc(walletDeposits.createdAt)).limit(200)
+    : [];
+  const fundingScreenings: ControlsEvidence['fundingScreenings'] = depositRows
+    .filter((d) => !approvedAt || (d.arrivedAt ?? d.createdAt).getTime() <= approvedAt.getTime())
+    .slice(0, 10)
+    .map((d) => {
+      const s = (d.screening ?? {}) as { provider?: unknown; verdict?: unknown; reference?: unknown; screenedAt?: unknown };
+      const text = (v: unknown) => (typeof v === 'string' && v ? v.slice(0, 200) : null);
+      return {
+        depositId: d.id,
+        suiDigest: d.suiDigest,
+        asset: d.asset,
+        amountMinor: d.amountMinor.toString(),
+        status: d.status,
+        provider: text(s.provider),
+        reference: text(s.reference),
+        verdict: s.verdict === 'CLEAR' || s.verdict === 'BLOCK' || s.verdict === 'REVIEW' ? s.verdict : null,
+        screenedAt: text(s.screenedAt),
+        arrivedAt: d.arrivedAt ? d.arrivedAt.toISOString() : null,
+      };
+    });
+
   const tr = await readTravelRuleTransfer(deps.db, deps.orgId, intentId ?? request?.id ?? '');
   const travelRule = tr ? { provider: tr.provider, sandbox: tr.sandbox, reference: tr.providerRef, status: tr.status, exchange: tr.exchange } : null;
   const trSandboxHere = Boolean(tr?.sandbox) && production;
@@ -408,6 +439,7 @@ export async function controlsEvidenceFor(deps: EvidenceDeps, ref: string, gener
     kyb: kyb ? { caseId: kyb.id, state: kyb.state, provider: kyb.applicant ? 'sumsub' : null, providerApplicantRef: kyb.applicant, lifecycle, updatedAt: kyb.updatedAt.toISOString() } : null,
     screenings,
     screeningsAfterApproval,
+    fundingScreenings,
     travelRule,
     recipient,
     crossChain,

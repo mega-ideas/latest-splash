@@ -205,7 +205,9 @@ export async function sendTravelRule(
     .set({ providerRef: sent.reference, status: sent.status, updatedAt: deps.now() })
     .where(and(eq(travelRuleTransfers.orgId, deps.orgId), eq(travelRuleTransfers.id, row.id), eq(travelRuleTransfers.status, 'sending')))
     .returning();
-  const final = updated ?? (await readTravelRuleTransfer(deps.db, deps.orgId, input.intentId))!;
+  const final = updated ?? (await readTravelRuleTransfer(deps.db, deps.orgId, input.intentId));
+  // The claim was taken from us (its lease ran out) and nothing gave the row the provider's reference: not "sent".
+  if (!final || !final.providerRef) return unconfirmed();
   return { ok: true, created: Boolean(inserted), transfer: travelRuleView(final) };
 }
 

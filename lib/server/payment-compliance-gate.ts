@@ -131,7 +131,6 @@ export async function paymentBeforeSign(deps: PaymentGateDeps, request: StoredRe
     const delivery = await walletDeliveryGate(deps.db, request.orgId, payment.recipient, payment.kind, { stage: 'sign' });
     if (delivery) return { code: delivery.code, error: delivery.error };
   }
-  // A rule payment's message is not a signing request of its own yet; only wallet payments carry one.
-  if (request.purpose === 'wallet_payment') return travelRuleHold(deps.db, request, payment, deps.env);
-  return null;
+  // A rule payment to an exchange is held the same way: its message is kept under the intent's id.
+  return travelRuleHold(deps.db, request, payment, deps.env);
 }

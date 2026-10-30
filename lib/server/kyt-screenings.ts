@@ -99,6 +99,22 @@ export async function latestScreening(db: DrizzleDb, orgId: string, chain: strin
   return row ?? null;
 }
 
+/**
+ * A sanctions-list BLOCK is sticky: once this business has one for an address
+ * on a chain, no later CLEAR lifts it (a re-screen during a list outage, say),
+ * and nobody's re-screen asks the provider again. Only a recorded decision
+ * could supersede it, and none is built (docs/v2/phase2-compliance.md).
+ */
+export async function stickyBlock(db: DrizzleDb, orgId: string, chain: string, address: string): Promise<KytScreeningRow | null> {
+  const [row] = await db
+    .select()
+    .from(kytScreenings)
+    .where(and(eq(kytScreenings.orgId, orgId), eq(kytScreenings.chain, chain), eq(kytScreenings.address, address), eq(kytScreenings.provider, 'chainalysis_sanctions'), eq(kytScreenings.verdict, 'BLOCK')))
+    .orderBy(desc(kytScreenings.createdAt))
+    .limit(1);
+  return row ?? null;
+}
+
 /** This business's screenings of one address, newest first. */
 export async function screeningsOf(db: DrizzleDb, orgId: string, chain: string, address: string, limit = 20): Promise<KytScreeningRow[]> {
   return db
@@ -244,6 +260,8 @@ async function screeningGate(
   const { chain, address } = subject;
   const env = deps.env ?? process.env;
   const maxAgeMs = deps.maxAgeMs ?? screeningMaxAgeMs(env);
+  // A listing stays, whatever came after it.
+  if (await stickyBlock(deps.db, deps.orgId, chain, address)) return { status: 403, code: 'recipient_blocked', error: 'This address was refused by screening. Splash will not pay it.' };
   let row = await latestScreening(deps.db, deps.orgId, chain, address);
   if (row && row.verdict !== 'BLOCK' && !freshAnswer(row, deps.now, maxAgeMs, env) && deps.kyt) {
     const kind = isScreeningKind(row.subjectKind) && row.subjectKind !== 'deposit' ? row.subjectKind : subject.defaultKind;
@@ -287,6 +305,9 @@ export async function screenRecipient(
     if (error instanceof ScreeningSubjectError) return { ok: false, status: 400, code: error.code, error: error.message };
     throw error;
   }
+  // A sanctions listing is not asked about again: it stays (stickyBlock).
+  const listed = await stickyBlock(deps.db, deps.orgId, subject.chain, subject.address);
+  if (listed) return { ok: true, screening: screeningView(listed) };
   const screening = await deps.kyt.screen({ chain: subject.chain, address: subject.address, direction: 'recipient' });
   const row = await recordScreening(deps.db, { orgId: deps.orgId, kind, chain: subject.chain, address: subject.address, screening, requestedBy: input.requestedBy });
   return { ok: true, screening: screeningView(row) };

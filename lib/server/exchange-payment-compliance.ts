@@ -38,7 +38,7 @@ import { senderDeclaration } from '../compliance/sender-declaration.ts';
 import type { PartnerId } from '../partners/signed-partners.ts';
 import type { WalletTxDescription } from '../wallet/wallet-tx-describe.ts';
 import { paymentOfDescription } from './controls-evidence.ts';
-import { latestScreening, rowIsProviderAnswer } from './kyt-screenings.ts';
+import { latestScreening, rowIsProviderAnswer, stickyBlock } from './kyt-screenings.ts';
 import { sendTravelRule } from './travel-rule-transfers.ts';
 import { readSigningRequest, type DrizzleDb } from './wallet-signing-store.ts';
 
@@ -107,7 +107,8 @@ const DEAD = new Set(['failed', 'expired', 'cancelled']);
 async function walletPayment(deps: ExchangePaymentDeps, requestId: unknown) {
   if (typeof requestId !== 'string' || !/^wsr_[0-9a-f-]{36}$/.test(requestId)) return refuse(400, 'bad_payment', 'Name the payment by its signing request.');
   const request = await readSigningRequest(deps.db, deps.orgId, requestId);
-  if (!request || request.purpose !== 'wallet_payment') return refuse(404, 'not_found', 'No such payment.');
+  // A wallet payment, or an owner's second approval of a rule payment (its message is kept under the intent's id).
+  if (!request || (request.purpose !== 'wallet_payment' && request.purpose !== 'spend_approval')) return refuse(404, 'not_found', 'No such payment.');
   if (DEAD.has(request.status)) return refuse(409, 'payment_closed', 'This payment was not sent and will not be.');
   const described = paymentOfDescription((request.summary as { description?: WalletTxDescription } | null)?.description);
   if (!described || !described.recipient) return refuse(409, 'not_a_payment', 'The signing request does not describe a payment.');
@@ -188,7 +189,7 @@ export async function travelRuleForPayment(
   const p = await walletPayment(deps, input.requestId);
   if (!p.ok) return p;
   const screening = await latestScreening(deps.db, deps.orgId, 'SUI', p.recipient);
-  if (screening?.verdict === 'BLOCK') return refuse(403, 'screening_blocked', 'This address was refused by screening. Splash will not pay it.');
+  if (screening?.verdict === 'BLOCK' || (await stickyBlock(deps.db, deps.orgId, 'SUI', p.recipient))) return refuse(403, 'screening_blocked', 'This address was refused by screening. Splash will not pay it.');
   // Only a provider's answer here counts: never the sandbox's in production.
   if (!screening || !rowIsProviderAnswer(screening, deps.env)) return refuse(409, 'not_screened', 'Screen the recipient address first.');
   if (screening.verdict !== 'CLEAR') return refuse(409, 'screening_review', 'A person reviews this address before it is paid.');

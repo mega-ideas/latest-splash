@@ -38,7 +38,6 @@ const T0 = new Date('2026-10-20T10:00:00.000Z');
 const HOUR = 3_600_000;
 const PAYEE = normalizeSuiAddress('0x' + '77'.repeat(32));
 const INTENT = normalizeSuiAddress('0x' + '99'.repeat(32));
-const WALLET = `0x${'b2'.repeat(32)}`;
 const sui = () => normalizeSuiAddress(`0x${randomUUID().replaceAll('-', '').padEnd(64, 'a')}`);
 
 const answer = (address, { provider = 'elliptic', verdict = 'CLEAR', at = T0, orgId = 'acme' } = {}) => ({

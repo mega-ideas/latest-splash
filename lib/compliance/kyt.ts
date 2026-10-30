@@ -295,17 +295,24 @@ function none(): KytProvider {
 /**
  * Elliptic decides, and Chainalysis's sanctions list can only make it
  * stricter: a listed address is BLOCK whatever Elliptic says, and anything
- * else is Elliptic's verdict. A sanctions-list CLEAR ("not listed") is never
- * taken for the contracted provider's answer.
+ * else is Elliptic's verdict, but only when the list answered too: a list that
+ * is down leaves the screening unanswered. A sanctions-list CLEAR ("not
+ * listed") is never taken for the contracted provider's answer.
  */
 function ellipticWithSanctionsList(elliptic: KytProvider, list: KytProvider): KytProvider {
   return {
     id: 'elliptic',
     async screen(subject) {
-      const listed = await list.screen(subject);
+      // Both at once: each has its own deadline, so the pair is held no
+      // longer than the slower one, not the sum of the two.
+      const [listed, answer] = await Promise.all([list.screen(subject), elliptic.screen(subject)]);
       if (listed.verdict === 'BLOCK') return listed;
-      const answer = await elliptic.screen(subject);
-      return { ...answer, detail: `${answer.detail} Sanctions list: ${listed.verdict ?? 'no answer'}.` };
+      // A list that gave no answer is not "not listed": Elliptic's verdict
+      // alone never stands for a screening that was meant to include it.
+      if (listed.verdict === null) {
+        return unanswered('elliptic', 'The sanctions list gave no answer, so this was not screened.');
+      }
+      return { ...answer, detail: `${answer.detail} Sanctions list: ${listed.verdict}.` };
     },
   };
 }

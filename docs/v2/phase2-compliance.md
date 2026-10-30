@@ -318,8 +318,6 @@ that cannot be read leaves the chain fields empty and says so.
   with their allowance on chain and is not built by the server here, so the
   screening check does not run on it; when that path is built it must call
   `recipientCleared`. Rule recipients are verified by the business multisig.
-- The Travel Rule step for a rule payment (`spend_approval`): the message
-  route takes wallet payments only.
 - An `unconfirmed` Travel Rule message is resolved by Sumsub's webhook only;
   ops have no screen for it yet, and the payment stays held meanwhile.
 - A REVIEW is cleared only by screening the address again; there is no
@@ -349,8 +347,35 @@ that cannot be read leaves the chain fields empty and says so.
   everything else, and a refused document answers 422 (`evidence_refused`).
 - After a Sumsub 409 the applicant is looked up by its external user id so
   the case's reference is attached even when the first attach was lost.
-- Decision for compliance: with Elliptic and the sanctions list both
-  configured, an unreachable list leaves Elliptic's verdict standing and the
-  detail says the list gave no answer. Elliptic's score already includes
-  sanctions exposure; failing closed would stop every payment during a list
-  outage. Say which is wanted.
+- A sanctions-list BLOCK on a recipient is sticky, per business and address:
+  no later CLEAR lifts it, and a re-screen (by an owner or by staff) does not
+  ask the provider again. Only a recorded decision could supersede it, and
+  none is built. An Elliptic BLOCK is not sticky: its score moves, and a
+  re-screen is how it is looked at again.
+- With Elliptic and the sanctions list both configured, the two are asked at
+  once, and a list that gave no answer leaves the screening unanswered
+  (no verdict, never CLEAR). A payment waits until the list answers.
+- The evidence keeps the bank's clearing code (`creditorAgent`: a BIC, a
+  routing number, a sort code) as the public identifier it is. Any other
+  account-shaped value is still refused.
+- The evidence exists for an owner's second approval of a rule payment
+  (`spend_approval`): the recipient, the amount, the fee bound, the rule's
+  allowance and policy ids, the second approval and the signers. A rule
+  payment to an exchange waits for its Travel Rule message like a wallet
+  payment (the message is kept under the intent's id and is sent through the
+  same route, named by the approval's signing request).
+- The evidence lists, before the payment was approved, the newest ten
+  deposits into the paying wallet with the provider, reference and verdict of
+  each one's screening (`fundingScreenings`). A payout's partner deposit
+  address is still not screened by Splash at setup: the evidence says so.
+- A KYB state write is compare-and-set: it lands only while the state is the
+  one the move was checked against. The writer that lost is refused with the
+  state machine's own error, so a webhook that is refused this way is
+  acknowledged and a person can read the state again.
+- A Travel Rule send whose claim ran out and whose row never got the
+  provider's reference answers `unconfirmed`, not sent.
+
+Left for later (low): a late Sumsub GREEN for an earlier submission is not
+matched against the case's applicant and last submission time; the sender
+declaration can be generated for a payment screening refused (it does not say
+the payment is not sent).
