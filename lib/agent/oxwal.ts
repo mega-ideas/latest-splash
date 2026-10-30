@@ -1958,6 +1958,13 @@ type OxwalTurnSignal =
   | { type: 'declined' };
 type OxwalTurnEvent = OxwalAgentEvent | OxwalTurnSignal;
 
+function bindFlaggedInvoice<T extends { name: string; input: unknown }>(toolUse: T, invoiceId: string | undefined): T {
+  const input = toolUse.input;
+  if (toolUse.name !== 'proposePayment' || !invoiceId || !input || typeof input !== 'object' || Array.isArray(input)) return toolUse;
+  if ((input as { invoiceId?: unknown }).invoiceId) return toolUse;
+  return { ...toolUse, input: { ...(input as Record<string, unknown>), invoiceId } };
+}
+
 async function* runClaudeToolLoop(
   request: OxwalAgentRequest,
   assistantName: string,
@@ -2003,7 +2010,11 @@ async function* runClaudeToolLoop(
 
     messages.push({ role: 'assistant', content });
     const results: ClaudeToolResultBlock[] = [];
-    for (const toolUse of toolUses) {
+    for (const modelToolUse of toolUses) {
+      // A flagged invoice read earlier this turn is bound to any payment the
+      // model then drafts, whether or not it names the invoice: the payee and
+      // amount checks run against it either way.
+      const toolUse = bindFlaggedInvoice(modelToolUse, flaggedInvoiceId);
       if (!READ_TOOL_SET.has(toolUse.name) && !PROPOSE_TOOL_SET.has(toolUse.name)) {
         results.push({
           type: 'tool_result',
@@ -2017,14 +2028,7 @@ async function* runClaudeToolLoop(
       const name = toolUse.name as OxwalToolName;
       yield { type: 'tool', name, category: toolCategory(name) };
       try {
-        let input = scopeToolInputToOrg(name, toolUse.input, request.orgId);
-        // A flagged invoice read earlier this turn is bound to any payment the
-        // model then drafts, whether or not it names the invoice: the payee and
-        // amount checks run against it either way.
-        if (name === 'proposePayment' && flaggedInvoiceId && input && typeof input === 'object' && !(input as { invoiceId?: unknown }).invoiceId) {
-          input = { ...(input as Record<string, unknown>), invoiceId: flaggedInvoiceId };
-        }
-        const result = await executeOxwalTool(name, input);
+        const result = await executeOxwalTool(name, scopeToolInputToOrg(name, toolUse.input, request.orgId));
         if (isUnsignedProposal(result)) yield { type: 'proposal', proposal: result };
         const payload = (result as Envelope<unknown>)?.data ?? result;
         // A prepared USDC transfer becomes the same card as the fixed phrasing's.
