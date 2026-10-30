@@ -400,6 +400,13 @@
       "when": 1793404800000,
       "tag": "0056_cross_chain_batch_burn",
       "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1793491200000,
+      "tag": "0057_partner_account_ref_unique",
+      "breakpoints": true
     }
   ]
 }

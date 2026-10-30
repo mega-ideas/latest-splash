@@ -598,6 +598,9 @@ export async function requestPartnerDepositAddress(deps: WithdrawalDeps, userId:
   if (await store.depositAddressHeldElsewhere(deps.db, deps.orgId, adapter.id, address)) {
     return refuse(409, 'address_conflict', 'The partner gave an address another business already has. Nothing was recorded; the partner must give this business its own.');
   }
+  if (await store.accountRefHeldElsewhere(deps.db, deps.orgId, adapter.id, given.accountRef)) {
+    return refuse(409, 'account_ref_conflict', "The partner gave an account reference another business already has. Nothing was recorded; the partner must give this business its own.");
+  }
   const row = await store.insertDepositAddress(deps.db, {
     id: `pda_${randomUUID()}`,
     orgId: deps.orgId,
@@ -610,6 +613,7 @@ export async function requestPartnerDepositAddress(deps: WithdrawalDeps, userId:
     createdAt: now,
     updatedAt: now,
   });
+  if (!row) return refuse(409, 'address_conflict', 'The partner gave an address or an account reference another business already has. Nothing was recorded; the partner must give this business its own.');
   if (row.created) {
     await store.recordWithdrawalEvent(deps.db, { orgId: deps.orgId, subject: 'deposit_address', subjectId: row.row.id, actor: userId, action: 'added', detail: { address, sandbox: given.sandbox }, at: now });
   }

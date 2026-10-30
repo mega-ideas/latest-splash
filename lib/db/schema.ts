@@ -2022,6 +2022,7 @@ export const partnerDepositAddresses = pgTable('partner_deposit_addresses', {
 }, (table) => [
   uniqueIndex('partner_deposit_addresses_live_unique').on(table.orgId, table.partner).where(sql`${table.status} <> 'revoked'`),
   uniqueIndex('partner_deposit_addresses_address_unique').on(table.partner, table.address).where(sql`${table.status} <> 'revoked'`),
+  uniqueIndex('partner_deposit_addresses_account_ref_unique').on(table.partner, table.accountRef).where(sql`${table.status} <> 'revoked'`),
   uniqueIndex('partner_deposit_addresses_test_digest_unique').on(table.testDigest).where(sql`${table.testDigest} is not null`),
 ]);
 

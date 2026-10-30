@@ -252,9 +252,10 @@ live adapter refuses.
   (`use_payout_route`). Decision needed: whether SpendPolicy should refuse to
   bind a kind-4 beneficiary or a partner deposit address as a rule
   recipient. Until then the owners see the recipient list they set.
-- One business could hold the same partner `account_ref` as another if a
-  partner reused one; a unique index on (partner, account_ref) for live rows
-  needs a migration and is still to do.
+- (Done, migration 0057.) A partner's `account_ref` is one business's while
+  its row is live: a unique index on (partner, account_ref) for live rows,
+  and a second business offered the same reference is refused
+  (`account_ref_conflict`, 409) with nothing recorded.
 
 ## Guards added after review
 

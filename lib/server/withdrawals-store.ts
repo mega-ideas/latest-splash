@@ -97,11 +97,21 @@ export async function depositAddressHeldElsewhere(db: DrizzleDb, orgId: string, 
   return rows.some((r) => r.orgId !== orgId);
 }
 
-export async function insertDepositAddress(db: DrizzleDb, row: typeof partnerDepositAddresses.$inferInsert): Promise<{ row: DepositAddressRow; created: boolean }> {
+/** Whether another business already holds this account reference with the partner (a webhook names a business by it, so it can be only one's). */
+export async function accountRefHeldElsewhere(db: DrizzleDb, orgId: string, partner: string, accountRef: string): Promise<boolean> {
+  const rows = await db
+    .select({ orgId: partnerDepositAddresses.orgId })
+    .from(partnerDepositAddresses)
+    .where(and(eq(partnerDepositAddresses.partner, partner), eq(partnerDepositAddresses.accountRef, accountRef), sql`${partnerDepositAddresses.status} <> 'revoked'`));
+  return rows.some((r) => r.orgId !== orgId);
+}
+
+/** Null when a concurrent insert by another business took the address or the reference first (the unique indexes decide). */
+export async function insertDepositAddress(db: DrizzleDb, row: typeof partnerDepositAddresses.$inferInsert): Promise<{ row: DepositAddressRow; created: boolean } | null> {
   const [inserted] = await db.insert(partnerDepositAddresses).values(row).onConflictDoNothing().returning();
   if (inserted) return { row: inserted, created: true };
   const existing = await liveDepositAddress(db, row.orgId, row.partner);
-  if (!existing) throw new Error('the deposit address could not be stored');
+  if (!existing) return null;
   return { row: existing, created: false };
 }
 

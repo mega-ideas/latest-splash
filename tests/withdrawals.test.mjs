@@ -403,7 +403,7 @@ test('a partner that gives two businesses one account reference is refused for t
   const t = await setup({ overrides: { depositAddress: async () => ({ address: addrs[n++], network: 'sui', accountRef: 'acct_reused', sandbox: true }) } });
   assert.equal((await requestPartnerDepositAddress(t.deps('acme'), 'u-founder')).ok, true);
   const second = await requestPartnerDepositAddress(t.deps('northwind'), 'u-north');
-  assert.equal(second.ok, undefined, 'the second business is not given the first one’s account reference');
+  assert.equal(second.ok, false, 'the second business is not given the first one’s account reference');
   assert.equal(second.code, 'account_ref_conflict');
   assert.equal(second.status, 409);
   const rows = await t.w.db.select().from(schema.partnerDepositAddresses).where(eq(schema.partnerDepositAddresses.accountRef, 'acct_reused'));
