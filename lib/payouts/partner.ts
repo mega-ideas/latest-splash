@@ -321,6 +321,11 @@ const ID = /^[A-Za-z0-9_.:-]{6,128}$/;
 const SUI_DIGEST = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const INTENT_ID = /^0x[0-9a-f]{64}$/;
 
+/** True when an account reference is one the partner's own webhook can name. It is stored and matched exactly, with no case folding. */
+export function isPartnerAccountRef(v: unknown): v is string {
+  return typeof v === 'string' && ID.test(v);
+}
+
 /** A partner's bank reference, kept only when it is an id (the webhook's rule). */
 export function partnerBankRef(v: unknown): string | undefined {
   return typeof v === 'string' && ID.test(v) ? v : undefined;

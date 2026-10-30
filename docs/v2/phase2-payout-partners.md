@@ -256,6 +256,19 @@ live adapter refuses.
   its row is live: a unique index on (partner, account_ref) for live rows,
   and a second business offered the same reference is refused
   (`account_ref_conflict`, 409) with nothing recorded.
+- An account reference is checked against the webhook's own format (6 to 128
+  of `A-Z a-z 0-9 _ . : -`) before it is stored; one outside it is refused
+  (`bad_account_ref`, 502) with nothing recorded. References are stored and
+  matched exactly. If the webhook lookup is ever made case-insensitive, the
+  lookup and the unique index must change together.
+- Before deploying migration 0057 to staging and production, run
+  `SELECT partner, account_ref, count(*) FROM partner_deposit_addresses WHERE status <> 'revoked' GROUP BY 1, 2 HAVING count(*) > 1;`.
+  Any row it returns must be resolved (revoke the wrong deposit address, a
+  staff action recorded in withdrawal_events) first, or the index cannot be built.
+- Known and accepted: a revoked row frees its reference, so a late webhook
+  for it can reach another business's row. It moves nothing (the test deposit
+  needs a `test_sent` row and its own digest) and only records a refusal event.
+  Reserving revoked references would need a non-partial index or a tombstone.
 
 ## Guards added after review
 

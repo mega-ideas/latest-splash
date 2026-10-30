@@ -416,7 +416,7 @@ test('a partner that gives two businesses one account reference is refused for t
 });
 
 test('an account reference the webhook could never match is refused and nothing is recorded', async () => {
-  for (const [i, bad] of ['acct_1', 'acct 12345', ' acct_12345', 'acct_12345 ', 'acct_é12345', 'a'.repeat(129), ''].entries()) {
+  for (const [i, bad] of ['acct1', 'acct 12345', ' acct_12345', 'acct_12345 ', 'acct_é12345', 'a'.repeat(129), ''].entries()) {
     const t = await setup({ overrides: { depositAddress: async () => ({ address: '0x' + (0x60 + i).toString(16).repeat(32), network: 'sui', accountRef: bad, sandbox: true }) } });
     const got = await requestPartnerDepositAddress(t.deps(), 'u-founder');
     assert.equal(got.ok, false, JSON.stringify(bad));

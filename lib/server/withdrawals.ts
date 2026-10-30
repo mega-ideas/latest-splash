@@ -51,6 +51,7 @@ import { bankAccountIdentity, fingerprintKeys, FundingSourceError, sameCompany, 
 import { partnerLabel, type PartnerId } from '../partners/signed-partners.ts';
 import { Iso20022Error, pacs008Evidence, pacs008ForInstruction, type Iso20022Party, type Pacs008, type Pacs008Evidence, type PaymentDeclaration } from '../payments/iso20022.ts';
 import {
+  isPartnerAccountRef,
   isPayoutPartnerId,
   partnerBankRef,
   partnerFailureReason,
@@ -585,6 +586,9 @@ export async function requestPartnerDepositAddress(deps: WithdrawalDeps, userId:
     return refuse(502, 'bad_deposit_address', 'The partner gave a deposit address that is not a Sui address. Nothing was recorded.');
   }
   if (!/^0x[0-9a-f]{64}$/.test(address) || /^0x0+$/.test(address)) return refuse(502, 'bad_deposit_address', 'The partner gave a deposit address that is not a Sui address. Nothing was recorded.');
+  if (!isPartnerAccountRef(given.accountRef)) {
+    return refuse(502, 'bad_account_ref', 'The partner gave an account reference its own notices cannot name. Nothing was recorded.');
+  }
   const splash = await splashAddressSet(deps);
   if (!(splash instanceof Set)) return splash;
   if (splash.has(address)) {
