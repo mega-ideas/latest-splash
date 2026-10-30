@@ -729,25 +729,54 @@ function instructionPatterns(): readonly RegExp[] {
     /\b[a-z]{2}\d{2}[a-z0-9]{10,30}\b/,
     /\baccount\s*(no\.?|number|#)?\s*:?\s*\d{8,}/,
     /\b0x[a-z0-9_]{4,}\b/,
+    /\b\d{3,4}[- ]\d{3,4}[- ]\d{2,}\b/,
+    /\b(?:swift|bic)\b/,
+    /\b(?:crypto|bitcoin|usdt|ethereum)\b/,
   ];
 }
 
-function normaliseForScan(value: string): string {
-  return value
+/** Cyrillic and Greek letters that read as Latin ones, which NFKC does not fold. */
+const CONFUSABLES: Record<string, string> = {
+  '\u0430': 'a', '\u0435': 'e', '\u043e': 'o', '\u0440': 'p', '\u0441': 'c', '\u0443': 'y', '\u0445': 'x',
+  '\u0456': 'i', '\u0458': 'j', '\u04bb': 'h', '\u0455': 's', '\u043a': 'k', '\u0442': 't', '\u043c': 'm', '\u043d': 'h',
+  '\u03b1': 'a', '\u03bf': 'o', '\u03c1': 'p', '\u03b9': 'i', '\u03bd': 'v', '\u03c5': 'u', '\u03ba': 'k', '\u03c4': 't',
+};
+
+/**
+ * Text folded the way a reader sees it: compatibility forms, hidden
+ * characters, look-alike letters, and single letters spaced apart ("i g n o
+ * r e", "p a y").
+ */
+function foldForReading(value: string): string {
+  const folded = value
     .normalize('NFKC')
     .replace(/[\u0000-\u001f\u007f-\u009f\u00ad\u200b-\u200f\u2028-\u202e\u2060-\u2064\ufeff]/g, '')
-    .toLowerCase();
+    .toLowerCase()
+    .replace(/[\u0370-\u03ff\u0400-\u04ff]/g, (char) => CONFUSABLES[char] ?? char);
+  return folded.replace(/\b(?:[a-z] ){2,}[a-z]\b/g, (run) => run.replace(/ /g, ''));
+}
+
+function normaliseForScan(value: string): string {
+  return foldForReading(value);
+}
+
+/** The same text with digits and symbols read as the letters they stand in for ("ign0re"). */
+function leetFolded(text: string): string {
+  return text.replace(/(?<=[a-z])[0134578@$](?=[a-z])/g, (char) => ({ '0': 'o', '1': 'i', '3': 'e', '4': 'a', '5': 's', '7': 't', '8': 'b', '@': 'a', $: 's' })[char] ?? char);
 }
 
 export function scanUntrustedText(values: string[], ref?: string): OxwalWarning[] {
   return values
     .filter((value) => {
       const text = normaliseForScan(value);
-      return instructionPatterns().some((pattern) => pattern.test(text));
+      const variants = [text, leetFolded(text)];
+      return instructionPatterns().some((pattern) => variants.some((variant) => pattern.test(variant)));
     })
     .map((value) => ({
       code: 'UNTRUSTED_INSTRUCTION' as const,
-      message: `Untrusted invoice or counterparty text appears to contain an instruction: "${value.slice(0, 160)}"`,
+      // A fixed label and typographic quotes: the excerpt is visibly someone
+      // else's words, so it cannot pass for a Splash notice.
+      message: `Text from the invoice or counterparty, not from Splash: \u201c${value.slice(0, 160)}\u201d appears to contain an instruction. It was treated as data.`,
       ref,
     }));
 }
@@ -2491,7 +2520,13 @@ const ABOUT_THE_PAST =
   /\b(?:did|have (?:i|we)|has|had|was|were|paid|sent|last (?:week|month|year)|so far|already|history|receipts?)\b/i;
 
 const READ_ONLY_TOPIC =
-  /\b(?:balances?|receipts?|history|statements?|transactions?|activity|recent payments|what did (?:i|we) (?:pay|send)|how much (?:do|did|have) (?:i|we)|treasury position|position|holdings|sent this month|paid this month)\b/i;
+  /\b(?:balances?|receipts?|history|statements?|transactions?|activity|recent payments|what did (?:i|we) (?:pay|send)|how much (?:do|did|have) (?:i|we)|treasury position|position|holdings|sent this month|paid this month|recipients?|counterpart(?:y|ies)|compliance|(?:fx |exchange |corridor )?rates?|status of)\b/i;
+
+/** Money phrased without a leading money verb: "Get Acme paid", "Credit Acme with 500". */
+const MONEY_OTHER_WORDING = /^(?:credit\s+\S.*\d|get\s+.+\s+paid\b)/i;
+
+/** "Show me what I paid Acme": a request to see history, not a payment. */
+const SHOW_VERB = /^(?:show|list|view|see|display)\b/i;
 
 const WH_QUESTION = /^(?:how|what|why|when|where|which|who|is|are|does|do|can i|could i|should i)\b/i;
 
@@ -2500,7 +2535,7 @@ const WH_QUESTION = /^(?:how|what|why|when|where|which|who|is|are|does|do|can i|
  * semicolon followed by a space, at a line break, or at "then". "What is my
  * balance? Then pay Acme 500" is a read and then a payment.
  */
-const CLAUSE_BREAK = /(?<=[?!.;])\s+|\n+|,?\s+(?:and\s+)?then\s+/i;
+const CLAUSE_BREAK = /(?<=[?!.;])\s+|\n+|,?\s+(?:and\s+)?then\s+|,\s*(?:and\s+)?|\s+and\s+/i;
 
 function moneyActionFor(text: string): ZekeMoneyAction {
   if (/\b(?:batch(?:es)?|bulk|payroll|payout run|salar(?:y|ies)|pay (?:everyone|all)|the (?:supplier )?sheet)\b/i.test(text)) return 'BATCH';
@@ -2518,10 +2553,16 @@ function classifyClause(clause: string): ZekeIntent {
     MONEY_VERB.test(ask)
     || (DRAFT_VERB.test(ask) && MONEY_OBJECT.test(ask))
     || (ACT_ON_VERB.test(ask) && (MONEY_OBJECT.test(ask) || ACT_ON_OBJECT.test(ask)))
-    || (!WH_QUESTION.test(ask) && MONEY_PHRASE.test(ask));
+    || MONEY_OTHER_WORDING.test(ask)
+    || (!WH_QUESTION.test(ask) && !SHOW_VERB.test(ask) && MONEY_PHRASE.test(ask))
+    || (/^move\s+(?:(?:us)?\$\s?)?\d/i.test(ask));
   if (money && !isQuestionAboutThePast) return { class: 'MONEY_MOVING', action: moneyActionFor(ask) };
 
-  if (READ_ONLY_TOPIC.test(ask) || isQuestionAboutThePast && /\b(?:pay|paid|send|sent|spend|spent)\b/i.test(ask)) {
+  if (
+    READ_ONLY_TOPIC.test(ask)
+    || isQuestionAboutThePast && /\b(?:pay|paid|send|sent|spend|spent)\b/i.test(ask)
+    || (SHOW_VERB.test(ask) && ABOUT_THE_PAST.test(ask))
+  ) {
     return { class: 'READ_ONLY' };
   }
   return { class: 'OTHER' };
@@ -2535,7 +2576,7 @@ function classifyClause(clause: string): ZekeIntent {
  * payment.
  */
 export function classifyZekeIntent(message: string): ZekeIntent {
-  const clauses = message.trim().split(CLAUSE_BREAK).filter((clause) => clause && clause.trim());
+  const clauses = foldForReading(message).trim().split(CLAUSE_BREAK).filter((clause) => clause && clause.trim());
   const intents = (clauses.length > 0 ? clauses : ['']).map(classifyClause);
   return intents.find((intent) => intent.class === 'MONEY_MOVING')
     ?? intents.find((intent) => intent.class === 'READ_ONLY')

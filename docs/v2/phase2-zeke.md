@@ -112,6 +112,17 @@ Invoices and uploaded sheets are data:
   come from this text whether or not it is flagged. The payee comes only from a verified
   counterparty id the person named, the amount from the person or the
   invoice's amount field, never from a memo.
+- A payment drafted against an invoice is bound to it in code
+  (`proposePayment`). The counterparty must be the business named on the
+  invoice (issuer or named payer) and the amount must equal the invoice's;
+  otherwise the draft is refused with the reason, not flagged for the approver
+  to catch. On the model path, an invoice that carried a warning and was read
+  earlier in the same turn is bound to any `proposePayment` the model makes,
+  even if the model leaves the invoice id out. A partial payment is drafted
+  without an invoice. Scan hits also cover leetspeak, spaced letters,
+  Cyrillic/Greek look-alikes, dashed account numbers, SWIFT/BIC and crypto
+  wording, and the warning labels the excerpt "Text from the invoice or
+  counterparty, not from Splash".
 - `getInvoice` and `getCounterparty` take the session org; another tenant's
   record is "not found", the same answer as one that does not exist. Payment,
   batch and netting drafts accept only this org's verified, KYT- and

@@ -830,7 +830,7 @@ test('a money ask joined to a read, or phrased another way or in look-alike lett
     'Move 500 USDC to Manila Parts',
     'Get Acme paid',
     'Credit Acme with 500',
-    'Payа Acme 500'.replace('Paya', 'Раy'),
+    'Раy Acme 500',
     'ｐａｙ Acme 500',
     'p a y Acme 500',
   ]) {
