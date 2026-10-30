@@ -32,6 +32,7 @@ import { decodeMessageV2, MESSAGE_RECEIVED_TOPIC, messageTransmitterV2 } from '.
 import {
   openCrossChainTransfer,
   readCrossChainTransfer,
+  mintReaderFromEnv,
   recordCrossChainBurn,
   recordCrossChainMint,
   refreshCrossChainAttestation,
@@ -194,4 +195,56 @@ test('a mint is checked against Circle’s contract on the network its attestati
   const b = await mint(B, mintReceipt({ transmitter: testnet, nonce: N3, message: msgB }), undefined, `0x${'d4'.repeat(32)}`);
   assert.deepEqual([b.ok, b.transfer?.status], [true, 'minted'], show(b));
   await w.client.close();
+});
+
+// A mint is recorded only once its block is final on the destination chain: a
+// reorg of a Base, Ethereum or other EVM block must not leave a recorded mint
+// that no longer exists. The reader asks the chain for its `finalized` block.
+async function attestedWorld() {
+  const w = await world();
+  await w.open(A);
+  await w.burn(A);
+  await refreshCrossChainAttestation({ ...w.base, iris: { sandbox: false, async messagesForSuiBurn() { return [complete({ nonce: N1 })]; } } }, { paymentRef: A });
+  const msg = cctpMessage({ nonce: N1 });
+  const receipt = (blockNumber) => ({ ...mintReceipt({ transmitter: messageTransmitterV2('BASE', 'mainnet'), nonce: N1, message: msg }), ...(blockNumber === undefined ? {} : { blockNumber }) });
+  const mint = (mints, hash = `0x${'e1'.repeat(32)}`) => recordCrossChainMint({ ...w.base, mints, network: 'mainnet' }, { paymentRef: A, mintTxHash: hash });
+  return { ...w, receipt, mint };
+}
+
+test('a mint above the finalized block is not recorded, and is once the chain finalizes it', async () => {
+  const w = await attestedWorld();
+  const at = (block, finalized) => ({ async receipt() { return w.receipt(block); }, async finalizedBlock() { return finalized; } });
+  const early = await w.mint(at('0x65', 100n));
+  assert.deepEqual([early.ok, early.status, early.code], [undefined, 409, 'mint_not_final'], show(early));
+  assert.equal((await readCrossChainTransfer(w.db, 'acme', A)).status, 'attested', 'nothing recorded for a mint that is not final');
+  const done = await w.mint(at('0x64', 100n));
+  assert.deepEqual([done.ok, done.transfer?.status], [true, 'minted'], show(done));
+  await w.client.close();
+});
+
+test('a mint whose block or whose chain finality cannot be read is not recorded', async () => {
+  const w = await attestedWorld();
+  const noBlock = await w.mint({ async receipt() { return w.receipt(); }, async finalizedBlock() { return 100n; } });
+  assert.equal(noBlock.code, 'mint_not_final', 'a receipt with no block number is not final');
+  const noReader = await w.mint({ async receipt() { return w.receipt('0x64'); } });
+  assert.equal(noReader.code, 'mint_not_final', 'a reader that cannot say what is final records nothing');
+  const down = await w.mint({ async receipt() { return w.receipt('0x64'); }, async finalizedBlock() { throw new Error('rpc down'); } });
+  assert.deepEqual([down.status, down.code], [502, 'mint_check_unavailable']);
+  assert.equal((await readCrossChainTransfer(w.db, 'acme', A)).status, 'attested');
+  await w.client.close();
+});
+
+test('the RPC reader asks the chain for its finalized block', async () => {
+  const calls = [];
+  const fetcher = async (_url, init) => {
+    const body = JSON.parse(init.body);
+    calls.push([body.method, body.params]);
+    return { ok: true, status: 200, async json() { return { result: body.method === 'eth_getBlockByNumber' ? { number: '0x2a' } : null }; } };
+  };
+  const reader = mintReaderFromEnv({ CCTP_MINT_RPC_URLS_JSON: JSON.stringify({ BASE: 'https://base.example' }) }, fetcher);
+  assert.equal(await reader.finalizedBlock('BASE'), 42n);
+  assert.deepEqual(calls, [['eth_getBlockByNumber', ['finalized', false]]]);
+  const none = mintReaderFromEnv({ CCTP_MINT_RPC_URLS_JSON: JSON.stringify({ BASE: 'https://base.example' }) }, async () => ({ ok: true, status: 200, async json() { return { result: null }; } }));
+  await assert.rejects(() => none.finalizedBlock('BASE'), (e) => e.code === 'mint_check_unavailable', 'no answer is not finality');
+  await assert.rejects(() => mintReaderFromEnv({}).finalizedBlock('BASE'), (e) => e.code === 'mint_check_not_configured');
 });
