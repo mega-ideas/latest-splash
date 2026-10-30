@@ -59,8 +59,8 @@ const N3 = `0x${'50'.repeat(32)}`;
 const word = (n) => BigInt(n).toString(16).padStart(64, '0');
 const show = (v) => JSON.stringify(v, (_k, x) => (typeof x === 'bigint' ? x.toString() : x));
 const u32 = (n) => n.toString(16).padStart(8, '0');
-function cctpMessage({ nonce, amount = 1_000_000_000n, dest = 6 }) {
-  const body = u32(1) + '11'.repeat(32) + MINT_RECIPIENT.slice(2) + word(amount) + '22'.repeat(32) + word(0) + word(0) + word(0);
+function cctpMessage({ nonce, amount = 1_000_000_000n, dest = 6, recipient = MINT_RECIPIENT, maxFee = 0n }) {
+  const body = u32(1) + '11'.repeat(32) + recipient.slice(2) + word(amount) + '22'.repeat(32) + word(maxFee) + word(0) + word(0);
   return `0x${u32(1)}${u32(8)}${u32(dest)}${nonce.slice(2)}${'33'.repeat(32)}${'44'.repeat(32)}${'0'.repeat(64)}${u32(2000)}${u32(2000)}${body}`;
 }
 const complete = (o) => ({ message: cctpMessage(o), attestation: `0xa77e${o.nonce.slice(2, 6)}`, status: 'complete' });
@@ -247,4 +247,44 @@ test('the RPC reader asks the chain for its finalized block', async () => {
   const none = mintReaderFromEnv({ CCTP_MINT_RPC_URLS_JSON: JSON.stringify({ BASE: 'https://base.example' }) }, async () => ({ ok: true, status: 200, async json() { return { result: null }; } }));
   await assert.rejects(() => none.finalizedBlock('BASE'), (e) => e.code === 'mint_check_unavailable', 'no answer is not finality');
   await assert.rejects(() => mintReaderFromEnv({}).finalizedBlock('BASE'), (e) => e.code === 'mint_check_not_configured');
+});
+
+// Finality is read before the receipt. A receipt found in a block at or below a
+// block already known to be final is final; the other order lets a reorg drop
+// the mint between the two reads while the finalized number overtakes it.
+test('the finalized block is read before the receipt, so a reorg between the reads records nothing', async () => {
+  const w = await attestedWorld();
+  const calls = [];
+  let reorged = false;
+  const mints = {
+    async finalizedBlock() { calls.push('finalized'); return reorged ? 101n : 100n; },
+    async receipt() { calls.push('receipt'); reorged = true; return w.receipt('0x65'); },
+  };
+  const r = await w.mint(mints);
+  assert.deepEqual(calls, ['finalized', 'receipt'], 'finality first, then the receipt');
+  assert.equal(r.code, 'mint_not_final', show(r));
+  assert.equal((await readCrossChainTransfer(w.db, 'acme', A)).status, 'attested');
+  await w.client.close();
+});
+
+test('a mint is recorded only for the recipient and amount the payment stored', async () => {
+  const w = await attestedWorld();
+  const final = { async receipt() { return w.receipt('0x64'); }, async finalizedBlock() { return 100n; } };
+  // A stored message swapped or corrupted after it was attested.
+  const swapped = async (opts) => {
+    const message = cctpMessage({ nonce: N1, ...opts });
+    await w.client.query('UPDATE cross_chain_transfers SET message = $1', [message]);
+    const reader = { async receipt() { return { ...mintReceipt({ transmitter: messageTransmitterV2('BASE', 'mainnet'), nonce: N1, message }), blockNumber: '0x64' }; }, async finalizedBlock() { return 100n; } };
+    return w.mint(reader);
+  };
+  const wrongRecipient = await swapped({ recipient: `0x${'0'.repeat(24)}${'ab'.repeat(20)}` });
+  assert.deepEqual([wrongRecipient.ok, wrongRecipient.code], [false, 'mint_mismatch'], show(wrongRecipient));
+  const wrongAmount = await swapped({ amount: 999_000_000n });
+  assert.deepEqual([wrongAmount.ok, wrongAmount.code], [false, 'mint_mismatch'], show(wrongAmount));
+  const wrongFee = await swapped({ maxFee: 5n });
+  assert.deepEqual([wrongFee.ok, wrongFee.code], [false, 'mint_mismatch'], show(wrongFee));
+  assert.equal((await readCrossChainTransfer(w.db, 'acme', A)).status, 'attested');
+  const ok = await swapped({});
+  assert.equal(ok.ok, true, show(ok));
+  await w.client.close();
 });
