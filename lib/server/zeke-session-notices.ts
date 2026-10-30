@@ -114,7 +114,12 @@ export async function claimZekeNotice(input: {
   const { getDb } = await import('../db/client.ts');
   const db = getDb();
   if (Math.random() < PRUNE_PROBABILITY) {
-    await db.delete(zekeSessionNotices).where(lt(zekeSessionNotices.shownAt, new Date(now.getTime() - RETAIN_MS)));
+    // Housekeeping only: a failed prune must not fail the claim.
+    try {
+      await db.delete(zekeSessionNotices).where(lt(zekeSessionNotices.shownAt, new Date(now.getTime() - RETAIN_MS)));
+    } catch {
+      // Expired rows are pruned on a later claim.
+    }
   }
   const inserted = await db
     .insert(zekeSessionNotices)
