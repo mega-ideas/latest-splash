@@ -132,6 +132,8 @@ export type CounterpartyRecord = {
   kytPassed: boolean;
   sanctionsClear: boolean;
   notes?: TrustedValue<string>;
+  /** Set when the counterparty's free text reads like an instruction. Advice for the reader only. */
+  warnings: OxwalWarning[];
   observedAt: string;
 };
 
@@ -648,6 +650,7 @@ export function upsertOxwalCounterpartyFixture(input: FixtureCounterpartyInput):
     kytPassed: input.kytPassed ?? true,
     sanctionsClear: input.sanctionsClear ?? true,
     notes: input.notes ? untrusted(input.notes) : undefined,
+    warnings: scanUntrustedText([input.name, input.notes].filter((v): v is string => typeof v === 'string' && v.length > 0), input.id),
     observedAt,
   };
   fixtureState.counterparties.set(record.id, record);
@@ -669,7 +672,7 @@ export function upsertOxwalInvoiceFixture(input: FixtureInvoiceInput): InvoiceFo
     payerOrgName: input.payerOrgName ? untrusted(input.payerOrgName) : undefined,
     payerOrgEmail: input.payerOrgEmail ? untrusted(input.payerOrgEmail) : undefined,
     memo: input.memo ? untrusted(input.memo) : undefined,
-    warnings: detectUntrustedInstructionWarnings(textFields, input.id),
+    warnings: scanUntrustedText(textFields, input.id),
     observedAt,
   };
   fixtureState.invoices.set(record.id, record);
@@ -703,11 +706,45 @@ export function getOxwalProposalStore() {
   return proposalStore();
 }
 
-function detectUntrustedInstructionWarnings(values: string[], ref?: string): OxwalWarning[] {
-  const directivePattern = /\b(0xwal|ignore|approve|also\s+send|send\s+\d|wire|transfer|route\s+to|beneficiary|destination)\b/i;
-  const addressPattern = /\b0x[a-z0-9_]{4,}\b/i;
+/**
+ * Text written by a supplier or an invoice is data. This flags text that reads
+ * like an instruction to Zeke or like a change of payee, so a person sees a
+ * warning next to it. It is advice for the reader: the payee and the amount
+ * never come from this text whether or not it is flagged.
+ *
+ * The text is normalised first (compatibility forms, zero-width and control
+ * characters), so full-width letters or a hidden character inside a word do
+ * not hide a directive.
+ */
+function instructionPatterns(): readonly RegExp[] {
+  return [
+    /\b(0xwal|zeke|ignore|disregard|override|approve[ds]?|also\s+send|send\s+\d|wire|transfer|remit|route\s+to|beneficiary|destination|payee)\b/,
+    /\b(system|assistant|developer)\s*:/,
+    /<\s*\|/,
+    /\byou\s+are\s+now\b/,
+    /\b(from\s+now\s+on|instead|going\s+forward|all\s+future)\b.{0,60}\b(pay|payment|account|send|use)/,
+    /\b(new|updated|changed|revised|different)\s+(bank|account|payee|beneficiary|payment|wallet|iban)\b/,
+    /\b(pay|send|forward|remit|deposit)\s+(funds\s+)?(to|into)\b/,
+    /\b(propose[a-z]+|signproposal|prepareusdctransfer|setassistantname)\b/,
+    /\b[a-z]{2}\d{2}[a-z0-9]{10,30}\b/,
+    /\baccount\s*(no\.?|number|#)?\s*:?\s*\d{8,}/,
+    /\b0x[a-z0-9_]{4,}\b/,
+  ];
+}
+
+function normaliseForScan(value: string): string {
+  return value
+    .normalize('NFKC')
+    .replace(/[\u0000-\u001f\u007f-\u009f\u00ad\u200b-\u200f\u2028-\u202e\u2060-\u2064\ufeff]/g, '')
+    .toLowerCase();
+}
+
+export function scanUntrustedText(values: string[], ref?: string): OxwalWarning[] {
   return values
-    .filter((value) => directivePattern.test(value) || addressPattern.test(value))
+    .filter((value) => {
+      const text = normaliseForScan(value);
+      return instructionPatterns().some((pattern) => pattern.test(text));
+    })
     .map((value) => ({
       code: 'UNTRUSTED_INSTRUCTION' as const,
       message: `Untrusted invoice or counterparty text appears to contain an instruction: "${value.slice(0, 160)}"`,
