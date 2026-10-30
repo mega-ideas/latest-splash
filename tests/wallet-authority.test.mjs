@@ -227,23 +227,23 @@ test('(3) only the person who asked withdraws an ask; an owner declines one; nob
   const deps = { db: w.db, ctx: w.ctx, now: () => T0 };
   const asked = await askOwnersToApprove(deps, { orgId: 'acme', userId: 'u-staff', intentId: INTENT, contentHash: HASH, walrusBlobId: BLOB, requesterAddresses: [staff.address] });
 
-  const byOwner = await cancelApprovalAsk(w.db, { orgId: 'acme', userId: 'u-two', askId: asked.ask.id, now: () => T0 });
+  const byOwner = await cancelApprovalAsk(w.db, { orgId: 'acme', userId: 'u-two', askId: asked.ask.id, now: deps.now });
   assert.equal(byOwner.status, 403, 'an owner declines; withdrawing is the asker’s');
-  const byStaff = await declineApprovalAsk(w.db, { orgId: 'acme', userId: 'u-staff', askId: asked.ask.id, now: () => T0 });
+  const byStaff = await declineApprovalAsk(w.db, { orgId: 'acme', userId: 'u-staff', askId: asked.ask.id, now: deps.now });
   assert.equal(byStaff.status, 403, 'staff cannot decline');
-  const foreign = await declineApprovalAsk(w.db, { orgId: 'northwind', userId: 'u-north', askId: asked.ask.id, now: () => T0 });
+  const foreign = await declineApprovalAsk(w.db, { orgId: 'northwind', userId: 'u-north', askId: asked.ask.id, now: deps.now });
   assert.equal(foreign.status, 404);
 
-  const declined = await declineApprovalAsk(w.db, { orgId: 'acme', userId: 'u-three', askId: asked.ask.id, reason: 'Pay it next week', now: () => T0 });
+  const declined = await declineApprovalAsk(w.db, { orgId: 'acme', userId: 'u-three', askId: asked.ask.id, reason: 'Pay it next week', now: deps.now });
   assert.equal(declined.ok, true);
-  const [after] = await listApprovalAsks(w.db, { orgId: 'acme', userId: 'u-staff' });
+  const [after] = await listApprovalAsks(w.db, { orgId: 'acme', userId: 'u-staff', now: deps.now });
   assert.equal(after.status, 'declined');
   assert.equal(after.decidedBy, 'u-three');
 
   // Declined frees the payment for a fresh ask; the asker can withdraw that one.
   const second = await askOwnersToApprove(deps, { orgId: 'acme', userId: 'u-staff', intentId: INTENT, contentHash: HASH, walrusBlobId: BLOB, requesterAddresses: [staff.address] });
   assert.equal(second.ok, true);
-  const withdrawn = await cancelApprovalAsk(w.db, { orgId: 'acme', userId: 'u-staff', askId: second.ask.id, now: () => T0 });
+  const withdrawn = await cancelApprovalAsk(w.db, { orgId: 'acme', userId: 'u-staff', askId: second.ask.id, now: deps.now });
   assert.equal(withdrawn.ok, true);
   const actions = (await listAuthorityEvents(w.db, 'acme')).map((e) => e.action);
   assert.ok(actions.includes('approval_declined') && actions.includes('approval_withdrawn'));
