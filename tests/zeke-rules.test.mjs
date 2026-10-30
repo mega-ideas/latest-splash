@@ -309,6 +309,30 @@ test('a notice is claimed once per org and session in Postgres, and survives a c
   }
 });
 
+test('pruning in Postgres removes only rows older than a session can live, and never stops a claim', async () => {
+  const { db } = await migratedDb();
+  const detach = attachDb(db);
+  const random = Math.random;
+  try {
+    const longAgo = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000);
+    assert.equal(await claimZekeNotice({ orgId: 'acme', sessionKey: 'old', notice: 'READ_LIMIT', now: longAgo }), true);
+    assert.equal(await claimZekeNotice({ orgId: 'acme', sessionKey: 'recent', notice: 'READ_LIMIT' }), true);
+    Math.random = () => 0; // force the prune on this claim
+    assert.equal(await claimZekeNotice({ orgId: 'acme', sessionKey: 'trigger', notice: 'READ_LIMIT' }), true);
+    Math.random = random;
+    assert.equal(await claimZekeNotice({ orgId: 'acme', sessionKey: 'old', notice: 'READ_LIMIT' }), true, 'the expired row is gone');
+    assert.equal(await claimZekeNotice({ orgId: 'acme', sessionKey: 'recent', notice: 'READ_LIMIT' }), false, 'a live row stays');
+  } finally {
+    Math.random = random;
+    detach();
+  }
+});
+
+test('a prune that fails does not stop the claim', () => {
+  const source = readFileSync(new URL('../lib/server/zeke-session-notices.ts', import.meta.url), 'utf8');
+  assert.match(source, /try \{\s*await db\.delete\(zekeSessionNotices\)[\s\S]*?\} catch/);
+});
+
 test('in production with no database the ledger refuses, and Zeke fails closed: the limit is stated, the nudge is not', async () => {
   const before = { NODE_ENV: process.env.NODE_ENV, DATABASE_URL: process.env.DATABASE_URL };
   process.env.NODE_ENV = 'production';
