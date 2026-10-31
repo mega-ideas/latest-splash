@@ -7,7 +7,6 @@ import {
   Bot,
   CircleCheck,
   Layers,
-  RefreshCw,
   Send,
   ShieldCheck,
   Wallet,
@@ -17,14 +16,18 @@ import Link from 'next/link';
 import LocalTime from '@/components/LocalTime';
 import StatusBadge, { type Status } from '@/components/StatusBadge';
 import DashPageHeader from '@/components/dashboard/DashPageHeader';
+import { usePhone } from '@/components/dashboard/Device';
+import PhoneHome from '@/components/home/PhoneHome';
+import { Figure, FigureError, FigureSkeleton, PaymentPill } from '@/components/home/parts';
+import WalletBody from '@/components/home/WalletBody';
+import { readWallet, type WalletState } from '@/components/home/wallet-state';
+import { waitingForMe } from '@/lib/dashboard/phone';
 import {
   approvalNote,
-  businessWalletFrom,
   formatUsdcMinor,
   ownRequestsNote,
   type HomePaymentRow,
   type HomeSummary,
-  type PaymentStatus,
 } from '@/lib/dashboard/home';
 import { cn } from '@/lib/utils';
 
@@ -50,127 +53,6 @@ const KYB_COPY: Record<string, { value: string; status: Status }> = {
   SUSPENDED: { value: 'Suspended. Contact compliance.', status: 'failed' },
 };
 
-/**
- * The Splash Wallet card. Only `unavailable` (a failed read) offers Try
- * again: no wallet yet, one being set up, wallets switched off on this
- * server and no access each stay true until something else changes, and a
- * retry would only show the same thing.
- */
-type WalletState =
-  | { kind: 'loading' }
-  | { kind: 'business'; usdcMinor: string }
-  | { kind: 'none' | 'pending' | 'off'; passkeyUsdcMinor: string | null }
-  | { kind: 'no_access' }
-  | { kind: 'unavailable' };
-
-function minorFrom(body: unknown): string | null {
-  const value = (body as { usdcMinor?: unknown } | null)?.usdcMinor;
-  if (typeof value === 'string' && /^\d+$/.test(value)) return value;
-  if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) return String(value);
-  return null;
-}
-
-/**
- * The Splash Wallet balance, from the chain. The business wallet is the
- * Phase 2 API's (GET /api/wallet/business); until there is one, the person's
- * own passkey wallet is shown as theirs, never as the business's.
- */
-async function readWallet(): Promise<WalletState> {
-  let kind: 'none' | 'pending' | 'off';
-  try {
-    const res = await fetch('/api/wallet/business', { cache: 'no-store' });
-    const body = await res.json().catch(() => null);
-    const source = businessWalletFrom(res.status, body);
-    if (source.kind === 'error') return { kind: 'unavailable' };
-    if (source.kind === 'no_access') return { kind: 'no_access' };
-    if (source.kind === 'address') {
-      const balance = await fetch(`/api/stablecoin/wallet?address=${encodeURIComponent(source.address)}`, { cache: 'no-store' });
-      const minor = balance.ok ? minorFrom(await balance.json().catch(() => null)) : null;
-      return minor === null ? { kind: 'unavailable' } : { kind: 'business', usdcMinor: minor };
-    }
-    kind = source.kind;
-  } catch {
-    return { kind: 'unavailable' };
-  }
-  let passkeyUsdcMinor: string | null = null;
-  try {
-    const own = await fetch('/api/stablecoin/wallet', { cache: 'no-store' });
-    if (own.ok) passkeyUsdcMinor = minorFrom(await own.json().catch(() => null));
-  } catch {
-    /* the business figure is what matters here; the passkey line just stays off */
-  }
-  return { kind, passkeyUsdcMinor };
-}
-
-const STATUS_STYLE: Record<PaymentStatus, { label: string; className: string }> = {
-  settled: { label: 'Settled', className: 'bg-[var(--ok-bg)] text-[#1F4452]' },
-  on_the_way: { label: 'On the way', className: 'bg-[var(--info-bg)] text-[#1F4452]' },
-  failed: { label: 'Failed', className: 'bg-[var(--error-bg)] text-[var(--error)]' },
-  expired: { label: 'Expired', className: 'bg-[var(--warn-bg)] text-[var(--warn-ink)]' },
-};
-
-function PaymentPill({ status }: { status: PaymentStatus }) {
-  const style = STATUS_STYLE[status];
-  return (
-    <span className={cn('inline-flex items-center rounded-full px-2.5 py-0.5 text-[12px] font-semibold', style.className)}>
-      {style.label}
-    </span>
-  );
-}
-
-function FigureSkeleton() {
-  return (
-    <div aria-hidden="true" className="mt-3 space-y-2">
-      <div className="h-7 w-40 rounded-md bg-[#326273]/10 motion-safe:animate-pulse" />
-      <div className="h-4 w-28 rounded-md bg-[#326273]/10 motion-safe:animate-pulse" />
-    </div>
-  );
-}
-
-/** A figure card whose summary did not load: said aloud, and retryable. */
-function FigureError({ onRetry }: { onRetry: () => void }) {
-  return (
-    <p className="mt-2 flex flex-wrap items-center gap-x-2 text-[13px] font-medium text-[#326273]" role="status">
-      Couldn&rsquo;t load.
-      <button
-        type="button"
-        onClick={onRetry}
-        className="inline-flex min-h-11 items-center gap-1 font-semibold text-[#145d6a] underline decoration-1 underline-offset-2"
-      >
-        <RefreshCw size={13} aria-hidden="true" />
-        Try again
-      </button>
-    </p>
-  );
-}
-
-function Figure({ value, unit }: { value: string; unit?: string }) {
-  return (
-    <p className="dash-num mt-2 text-[28px] font-extrabold leading-tight tracking-[-0.02em] text-[#0c3e48]">
-      {value}
-      {unit ? <span className="ml-1.5 text-[13px] font-semibold tracking-normal text-[#326273]">{unit}</span> : null}
-    </p>
-  );
-}
-
-/** "Your own passkey wallet holds 12.50 USDC." Theirs, never the business's. */
-function PasskeyLine({ minor }: { minor: string | null }) {
-  if (minor === null) return null;
-  return (
-    <>
-      Your own passkey wallet holds <span className="dash-num font-semibold text-[#1F4452]">{formatUsdcMinor(minor)} USDC</span>.{' '}
-    </>
-  );
-}
-
-function OpenWalletLink() {
-  return (
-    <Link href="/dashboard/wallet" className="font-semibold text-[#145d6a] underline decoration-1 underline-offset-2">
-      Open Wallet
-    </Link>
-  );
-}
-
 const QUICK_ACTIONS = [
   { href: '/dashboard/transfer', label: 'Pay someone', help: 'A bank account, a business on Splash or a wallet', icon: Send },
   { href: '/dashboard/batch', label: 'Batch payout', help: 'Pay many suppliers from one sheet', icon: Layers },
@@ -184,6 +66,9 @@ export default function DashboardHome() {
   const [wallet, setWallet] = useState<WalletState>({ kind: 'loading' });
   const [kyb, setKyb] = useState<{ state: string; blocked: boolean } | null>(null);
   const [workspace, setWorkspace] = useState<string | null>(null);
+  // Wallet requests waiting for this person's passkey: null until read, and when it could not be read.
+  const [waiting, setWaiting] = useState<number | null>(null);
+  const phone = usePhone();
   // The clock the expiry note counts down from. Read when the summary lands,
   // and once a minute after, so "expires in 3 min" does not go stale.
   const [nowMs, setNowMs] = useState<number | null>(null);
@@ -231,6 +116,17 @@ export default function DashboardHome() {
 
   useEffect(() => {
     let active = true;
+    void fetch('/api/wallet/signing-requests', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { requests?: unknown } | null) => {
+        if (active) setWaiting(d ? waitingForMe(d.requests) : null);
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
     void fetch('/api/auth/session', { cache: 'no-store' })
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { organization?: string } | null) => {
@@ -255,6 +151,24 @@ export default function DashboardHome() {
   }, [stale, summary, loadSummary]);
 
   const kybCopy = kyb ? KYB_COPY[kyb.state] ?? { value: kyb.state, status: 'pending' as Status } : null;
+
+  // A phone has its own Home (v2 brief 5.10): the same reads, arranged for a thumb.
+  if (phone) {
+    return (
+      <PhoneHome
+        workspace={workspace}
+        summary={summary}
+        summaryFailed={summaryFailed}
+        onRetrySummary={() => void loadSummary()}
+        wallet={wallet}
+        onRetryWallet={() => void loadWallet()}
+        waiting={waiting}
+        kyb={kyb && kybCopy ? { blocked: kyb.blocked, text: kybCopy.value } : null}
+        approvalNote={note ? { text: note.text, warn: note.warn } : null}
+        ownNote={ownNote}
+      />
+    );
+  }
 
   return (
     <div className="space-y-5">
@@ -298,59 +212,7 @@ export default function DashboardHome() {
             <h2 id="home-wallet" className="dash-kicker">Splash Wallet</h2>
             <Wallet size={16} className="text-[#145d6a]" aria-hidden="true" />
           </div>
-          {wallet.kind === 'loading' ? (
-            <FigureSkeleton />
-          ) : wallet.kind === 'business' ? (
-            <>
-              <Figure value={formatUsdcMinor(wallet.usdcMinor)} unit="USDC" />
-              <p className="mt-1 text-[13px] font-medium text-[#326273]">Held by your business</p>
-            </>
-          ) : wallet.kind === 'none' ? (
-            <>
-              <p className="mt-2 text-lg font-bold text-[#0c3e48]">No business wallet yet</p>
-              <p className="mt-1 text-[13px] font-medium text-[#326273]">
-                <PasskeyLine minor={wallet.passkeyUsdcMinor} />
-                <OpenWalletLink />
-              </p>
-            </>
-          ) : wallet.kind === 'pending' ? (
-            <>
-              <p className="mt-2 text-lg font-bold text-[#0c3e48]">Wallet being set up</p>
-              <p className="mt-1 text-[13px] font-medium text-[#326273]">
-                Waiting for the owners to sign. <PasskeyLine minor={wallet.passkeyUsdcMinor} />
-                <OpenWalletLink />
-              </p>
-            </>
-          ) : wallet.kind === 'off' || wallet.kind === 'no_access' ? (
-            <>
-              <p className="mt-2 text-lg font-bold text-[#0c3e48]">Business wallet not available</p>
-              <p className="mt-1 text-[13px] font-medium text-[#326273]">
-                {wallet.kind === 'off' ? (
-                  <>
-                    Splash hasn&rsquo;t switched business wallets on for this workspace. <PasskeyLine minor={wallet.passkeyUsdcMinor} />
-                  </>
-                ) : (
-                  <>Your membership doesn&rsquo;t cover this business&rsquo;s wallet. Ask an owner. </>
-                )}
-                <OpenWalletLink />
-              </p>
-            </>
-          ) : (
-            <>
-              <p className="mt-2 text-lg font-bold text-[#0c3e48]">Balance unavailable</p>
-              <p className="mt-1 flex flex-wrap items-center gap-x-2 text-[13px] font-medium text-[#326273]" role="status">
-                We couldn&rsquo;t read it from Sui.
-                <button
-                  type="button"
-                  onClick={() => void loadWallet()}
-                  className="inline-flex min-h-11 items-center gap-1 font-semibold text-[#145d6a] underline decoration-1 underline-offset-2"
-                >
-                  <RefreshCw size={13} aria-hidden="true" />
-                  Try again
-                </button>
-              </p>
-            </>
-          )}
+          <WalletBody wallet={wallet} onRetry={() => void loadWallet()} />
         </article>
 
         {/* Needs approval */}

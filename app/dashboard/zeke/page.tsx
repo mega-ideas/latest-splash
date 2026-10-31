@@ -6,7 +6,9 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { FileText, Layers, RotateCcw, Send, TrendingUp, type LucideIcon } from 'lucide-react';
 
+import { usePhone } from '@/components/dashboard/Device';
 import OxWalComposer from '@/components/oxwal/OxWalComposer';
+import { PhoneMore, PhoneStarters } from '@/components/oxwal/ZekePhone';
 import ThreadRow, { BotAvatar, StreamingRow, ThinkingRow } from '@/components/oxwal/ThreadView';
 import MemWalBehaviorCard from '@/components/MemWalBehaviorCard';
 import ZekeSuggestions from '@/components/oxwal/ZekeSuggestions';
@@ -85,6 +87,7 @@ const STARTERS = (name: string): Starter[] => [
 
 export default function OxwalDeskPage() {
   const router = useRouter();
+  const phone = usePhone();
   const [input, setInput] = useState('');
 
   const {
@@ -130,6 +133,84 @@ export default function OxwalDeskPage() {
     chips: [],
     disabled: isSending,
   };
+
+  // A phone (v2 brief 5.10): the conversation fills the screen between the top bar and the tab bar, the thread scrolls and the composer stays under it.
+  if (phone && hasStarted) {
+    return (
+      <section
+        aria-label={`Conversation with ${assistantName}`}
+        className="-mx-4 -mt-4 mb-[calc(-1*(env(safe-area-inset-bottom)+4.5rem))] flex h-[calc(100dvh-76px-3.5rem-env(safe-area-inset-bottom))] flex-col overflow-hidden bg-[var(--zeke-paper)]"
+      >
+        <header className="flex shrink-0 items-center justify-between gap-2 border-b border-[#326273]/12 bg-white/70 px-4 py-2">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <BotAvatar size={28} />
+            <h1 className="truncate text-base font-bold text-[#0c3e48]">{assistantName}</h1>
+            <span className="shrink-0 rounded-md bg-[var(--zeke-tint)] px-2 py-0.5 text-[12px] font-bold text-[#0d6370]">AI assistant</span>
+          </div>
+          <button
+            type="button"
+            onClick={startOver}
+            disabled={isSending}
+            className="inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-[10px] border border-[#326273]/20 bg-white px-3 text-[13px] font-bold text-[#0c3e48] transition hover:border-[#0d6370] disabled:cursor-not-allowed disabled:opacity-50 focus-ring"
+          >
+            <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+            New
+          </button>
+        </header>
+        <div ref={threadRef} className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4" aria-live="polite">
+          {thread.map((item) => (
+            <ThreadRow key={item.id} item={item} onRetry={(prompt) => ask(prompt)} chatApprovals={chatApprovals} clockMs={clockMs} onApprove={(proposal) => void approveInChat(proposal)} />
+          ))}
+          {streamingText && <StreamingRow text={streamingText} />}
+          {isSending && !streamingText && <ThinkingRow />}
+        </div>
+        <div className="shrink-0 border-t border-[#326273]/12 bg-white/80 px-4 py-3">
+          <OxWalComposer variant="reply" {...composerProps} assistantName={assistantName} placeholder={`Reply to ${assistantName}`} />
+        </div>
+      </section>
+    );
+  }
+
+  if (phone) {
+    return (
+      <div className="space-y-4">
+        <header className={cn(ZEKE_CARD, 'p-4')}>
+          <div className="flex items-center gap-3">
+            <span className="grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-full bg-[radial-gradient(circle_at_50%_35%,#eaf6f1,#cfe8e0)] ring-2 ring-[#0d6370]/25">
+              <Image src="/cinematic/agent-bot-cut.png" alt="" width={96} height={96} className="h-8 w-auto" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <h1 className="dash-title text-[26px] leading-tight">{assistantName}</h1>
+              <span className="mt-0.5 inline-flex items-center gap-1.5 rounded-md bg-[#0d6370] px-2 py-0.5 font-mono text-[12px] font-bold uppercase tracking-[0.1em] text-white">
+                <span className="h-1.5 w-1.5 rounded-full bg-[var(--zeke-mint)]" aria-hidden="true" />
+                AI assistant · online
+              </span>
+            </div>
+          </div>
+          <div className="mt-3 grid grid-cols-3 overflow-hidden rounded-xl border border-[#326273]/14 bg-white text-center">
+            <DeskStat label="Drafts" value={snapshot?.known ? snapshot.drafts : null} />
+            <DeskStat label="To approve" value={snapshot?.forViewer?.waiting ?? null} caution />
+            <DeskStat label="Alerts" value={snapshot?.alerts ?? null} caution />
+          </div>
+        </header>
+
+        <section aria-labelledby="zeke-agenda" className={cn(ZEKE_CARD, 'p-4')}>
+          <h2 id="zeke-agenda" className="text-[20px] font-extrabold leading-tight tracking-[-0.01em] text-[#0c3e48]">
+            {firstName ? `What's on the agenda today, ${firstName}?` : "What's on the agenda today?"}
+          </h2>
+          <p className="mt-1 text-sm font-medium text-[#326273]">{deskSubtitle(snapshot, walletUsdc)}</p>
+          <div className="mt-4">
+            <OxWalComposer variant="desk" canSee={CAN_SEE} {...composerProps} assistantName={assistantName} placeholder={`Ask ${assistantName} anything, or attach a payout sheet`} />
+            <p className="mt-2 text-[13px] font-medium text-[#326273]">{ZEKE_LIMIT}</p>
+          </div>
+        </section>
+
+        <PhoneStarters starters={STARTERS(assistantName)} disabled={isSending} onAsk={ask} />
+        <ZekeRecent snapshot={snapshot} state={state} assistantName={assistantName} />
+        <PhoneMore assistantName={assistantName} snapshot={snapshot} disabled={isSending} onAsk={ask} />
+      </div>
+    );
+  }
 
   if (hasStarted) {
     return (

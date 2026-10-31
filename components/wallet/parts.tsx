@@ -5,15 +5,20 @@
  * a card, a status pill (colour never carries the meaning alone: every pill
  * has words), a loader that says what failed, and one clipboard button.
  */
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import { Check, CircleAlert, Copy, Loader2 } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Check, ChevronDown, CircleAlert, Copy, Loader2 } from 'lucide-react';
 
+import { usePhone } from '@/components/dashboard/Device';
 import { call, errorText } from '@/components/transfer/api';
+import { OPEN_SECTION_EVENT, foldsOnPhone, sectionFromHash } from '@/lib/wallet-page/phone';
 import { loadView, type LoadState } from '@/lib/settings-page/load-state';
 import type { Tone } from '@/lib/wallet-page/labels';
 
 export function Card({ id, title, aside, children, className = '' }: { id?: string; title: string; aside?: ReactNode; children: ReactNode; className?: string }) {
   const heading = id ? `${id}-title` : undefined;
+  const phone = usePhone();
+  // On a phone every section but what waits for a signature folds under its own title (v2 brief 5.10).
+  if (phone && foldsOnPhone(id)) return <FoldedCard id={id as string} heading={heading as string} title={title} aside={aside} className={className}>{children}</FoldedCard>;
   return (
     <section id={id} aria-labelledby={heading} className={`dash-surface scroll-mt-24 p-4 sm:p-5 ${className}`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -22,6 +27,47 @@ export function Card({ id, title, aside, children, className = '' }: { id?: stri
       </div>
       <div className="mt-3">{children}</div>
     </section>
+  );
+}
+
+/**
+ * A section folded under its title: the title row is a 56px target, the body
+ * opens under it. A link to it (a hash in the address, or Add funds and
+ * Withdraw on the balance) opens it and brings it into view.
+ */
+function FoldedCard({ id, heading, title, aside, className, children }: { id: string; heading: string; title: string; aside?: ReactNode; className: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    const reveal = () => {
+      setOpen(true);
+      window.requestAnimationFrame(() => box.current?.scrollIntoView({ block: 'start', behavior: 'smooth' }));
+    };
+    if (sectionFromHash(window.location.hash) === id) reveal();
+    const onHash = () => {
+      if (sectionFromHash(window.location.hash) === id) reveal();
+    };
+    const onOpen = (event: Event) => {
+      if ((event as CustomEvent<string>).detail === id) reveal();
+    };
+    window.addEventListener('hashchange', onHash);
+    window.addEventListener(OPEN_SECTION_EVENT, onOpen);
+    return () => {
+      window.removeEventListener('hashchange', onHash);
+      window.removeEventListener(OPEN_SECTION_EVENT, onOpen);
+    };
+  }, [id]);
+  return (
+    <details ref={box} id={id} open={open} onToggle={(e) => setOpen(e.currentTarget.open)} className={`dash-surface group scroll-mt-20 ${className}`}>
+      <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-3 px-4 py-2 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[#0d6370] [&::-webkit-details-marker]:hidden">
+        <h2 id={heading} className="text-sm font-extrabold text-[#0c3e48]">{title}</h2>
+        <span className="flex items-center gap-2">
+          {aside}
+          <ChevronDown className="h-5 w-5 text-[#326273] transition-transform group-open:rotate-180 motion-reduce:transition-none" aria-hidden="true" />
+        </span>
+      </summary>
+      <div className="border-t border-[#326273]/10 px-4 pb-4 pt-3">{children}</div>
+    </details>
   );
 }
 

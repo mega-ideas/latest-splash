@@ -3,9 +3,20 @@
 import Link from 'next/link';
 import { ArrowDownToLine, ArrowRight, ArrowUpFromLine, ShieldCheck } from 'lucide-react';
 
+import { usePhone } from '@/components/dashboard/Device';
 import { formatUsdc } from '@/lib/fees/copy';
+import { OPEN_SECTION_EVENT, sectionFromHash } from '@/lib/wallet-page/phone';
 import { Address, CopyButton, Note } from './parts';
 import type { Overview } from './types';
+
+const PHONE_ACTION = 'flex min-h-[72px] flex-col items-center justify-center gap-1.5 rounded-2xl border border-[#326273]/15 bg-white px-1 py-2 text-center text-[13px] font-semibold text-[#0c3e48] transition-colors active:bg-[#eef4f5] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0d6370]';
+
+/** Open a folded section of the phone's Wallet page, and say so in the address so Back and a shared link both find it. */
+function openSection(id: string) {
+  if (sectionFromHash(id) === null) return;
+  window.history.replaceState(null, '', `#${id}`);
+  window.dispatchEvent(new CustomEvent(OPEN_SECTION_EVENT, { detail: id }));
+}
 
 /**
  * The business wallet's balance (v2 brief 5.5), read from Sui: USDC held by
@@ -13,6 +24,7 @@ import type { Overview } from './types';
  * "Held by the business" is literal: Splash has no key to this wallet.
  */
 export default function BalanceCard({ overview }: { overview: Overview }) {
+  const phone = usePhone();
   const b = overview.balance;
   const unknown = Boolean(b?.holdsUnknown);
   const held = b && !unknown ? BigInt(b.heldMinor) : 0n;
@@ -60,11 +72,20 @@ export default function BalanceCard({ overview }: { overview: Overview }) {
           </div>
         </div>
       ) : null}
-      <div className="mt-4 flex flex-wrap gap-2">
-        <a href="#top-up" className="dash-btn inline-flex min-h-11 items-center !px-4 !py-2 !text-[13px]"><ArrowDownToLine className="h-4 w-4" aria-hidden="true" />Add funds</a>
-        <a href="#withdraw" className="dash-btn-ghost inline-flex min-h-11 items-center !px-4 !py-2 !text-[13px]"><ArrowUpFromLine className="h-4 w-4" aria-hidden="true" />Withdraw to your bank</a>
-        <Link href="/dashboard/transfer" className="dash-btn-ghost inline-flex min-h-11 items-center !px-4 !py-2 !text-[13px]">Send a payment<ArrowRight className="h-4 w-4" aria-hidden="true" /></Link>
-      </div>
+      {phone ? (
+        // On a phone the three things a person does with a wallet are one row of large targets under the balance.
+        <div className="mt-4 grid grid-cols-3 gap-2" role="group" aria-label="Wallet actions">
+          <button type="button" onClick={() => openSection('top-up')} className={PHONE_ACTION}><ArrowDownToLine className="h-5 w-5" aria-hidden="true" />Add funds</button>
+          <button type="button" onClick={() => openSection('withdraw')} className={PHONE_ACTION}><ArrowUpFromLine className="h-5 w-5" aria-hidden="true" />Withdraw</button>
+          <Link href="/dashboard/transfer" className={PHONE_ACTION}><ArrowRight className="h-5 w-5" aria-hidden="true" />Send</Link>
+        </div>
+      ) : (
+        <div className="mt-4 flex flex-wrap gap-2">
+          <a href="#top-up" className="dash-btn inline-flex min-h-11 items-center !px-4 !py-2 !text-[13px]"><ArrowDownToLine className="h-4 w-4" aria-hidden="true" />Add funds</a>
+          <a href="#withdraw" className="dash-btn-ghost inline-flex min-h-11 items-center !px-4 !py-2 !text-[13px]"><ArrowUpFromLine className="h-4 w-4" aria-hidden="true" />Withdraw to your bank</a>
+          <Link href="/dashboard/transfer" className="dash-btn-ghost inline-flex min-h-11 items-center !px-4 !py-2 !text-[13px]">Send a payment<ArrowRight className="h-4 w-4" aria-hidden="true" /></Link>
+        </div>
+      )}
     </section>
   );
 }
