@@ -172,7 +172,7 @@ export default function SignPanel({ initial, expected = null, expectedBatch = nu
                           {o.type === 'open_intent' ? (
                             <>
                               <span className="flex flex-wrap items-baseline justify-between gap-2">
-                                <span className="font-semibold">{`${i + 1}. ${expectedBatch?.[i]?.payeeName ?? 'Recipient'}`}</span>
+                                <span className="font-semibold">{expectedBatch?.[i]?.payeeName ? `${i + 1}. ${expectedBatch[i].payeeName}` : `Payment ${i + 1}`}</span>
                                 <span className="font-mono text-[13px]">{formatUsdc(BigInt(o.amountMinor))} USDC</span>
                               </span>
                               <span className="mt-0.5 block break-all font-mono text-[13px] leading-5 text-[#1F4452]">{groupAddress(normalizeSuiAddress(o.recipient))}</span>

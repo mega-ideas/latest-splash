@@ -154,7 +154,15 @@ test('a device checks a batch against what was approved: each payment, in order,
     { recipient: A, amountMinor: '100', maxFeeMinor: '1' },
     { recipient: B, amountMinor: '200', maxFeeMinor: '2' },
   ];
-  const tx = (...pairs) => ({ actions: pairs.flatMap(([recipient, amountMinor, maxFeeMinor]) => [{ type: 'withdraw' }, { type: 'open_intent', recipient, amountMinor }, { type: 'pay_intent', maxFeeMinor }, { type: 'anchor_receipt' }, { type: 'delete_intent' }]) });
+  const tx = (...pairs) => ({
+    actions: pairs.flatMap(([recipient, amountMinor, maxFeeMinor], i) => [
+      { type: 'withdraw', amountMinor: String(BigInt(amountMinor) + BigInt(maxFeeMinor)) },
+      { type: 'open_intent', recipient, amountMinor, kind: 1 },
+      { type: 'pay_intent', maxFeeMinor, paysFromCommand: i * 5, intentFromCommand: i * 5 + 1 },
+      { type: 'anchor_receipt' },
+      { type: 'delete_intent' },
+    ]),
+  });
   assert.equal(differsFromApprovedBatch(tx([A, '100', '1'], [B, '200', '2']), expected), null);
   assert.match(differsFromApprovedBatch(tx([A, '100', '1']), expected), /1 payments, and the batch you approved has 2/);
   assert.match(differsFromApprovedBatch(tx([A, '100', '1'], [B, '200', '2'], [A, '1', '0']), expected), /3 payments/);
@@ -184,7 +192,7 @@ test('a device refuses a batch that is not exactly five commands per payment, ea
 
   const extra = good();
   extra.actions.push({ type: 'withdraw', amountMinor: '999' }, { type: 'send_funds', recipient: A, amountMinor: '999' });
-  assert.match(differsFromApprovedBatch(extra, expected) ?? '', /not exactly|other commands|extra/i, 'a withdrawal and a send tacked on the end');
+  assert.match(differsFromApprovedBatch(extra, expected) ?? '', /commands the batch you approved does not have/, 'a withdrawal and a send tacked on the end');
 
   const reordered = good();
   [reordered.actions[3], reordered.actions[4]] = [reordered.actions[4], reordered.actions[3]];
@@ -208,8 +216,8 @@ test('a changed or late review cannot be taken for the rows on the screen, and t
   const flow = read('components/batch/BatchFlow.tsx');
   assert.match(flow, /reviewSeq/, 'each review carries a sequence number and a late one is dropped');
   const review = read('components/batch/StepReview.tsx');
-  assert.doesNotMatch(code(review), /md:sr-only/, 'the column labels are visible at desktop widths too');
-  assert.match(review, /role="columnheader"|<th\b|Recipient<\/span>/);
+  assert.doesNotMatch(code(review), /font-semibold text-\[#1F4452\] md:sr-only/, 'the column labels are visible at desktop widths too');
+  assert.match(review, /hidden [^"]*md:grid/, 'a header row of labels above the rows at desktop widths');
   assert.match(code(flow), /takeBatchDraft[\s\S]{0,400}BATCH_MAX_PAYMENTS/, 'a draft from Zeke is capped like a file');
   const sign = read('components/transfer/SignPanel.tsx');
   assert.match(sign, /differsFromApprovedBatch/);

@@ -270,7 +270,13 @@ export async function liveWalletContext(orgId: string): Promise<{ ok: true; ctx:
     if (request.purpose === 'wallet_batch') {
       // v2 brief 5.6: every payee of the batch is checked again before each signature.
       const { batchBeforeSign } = await import('@/lib/server/payment-compliance-gate');
-      return batchBeforeSign({ db, now: () => new Date(), kyt, maxAgeMs }, request);
+      const [{ getFeeConfig }, { splashCrossChainAddresses }, { splashControlledAddresses }] = await Promise.all([
+        import('@/lib/fees/fee-config'),
+        import('@/lib/server/splash-addresses'),
+        import('@/lib/payouts/withdrawal-rules'),
+      ]);
+      const splashAddresses = async () => splashControlledAddresses({ env: process.env, sponsor: signing.sponsor?.address ?? null, feeConfig: await getFeeConfig(), extra: splashCrossChainAddresses(process.env) });
+      return batchBeforeSign({ db, now: () => new Date(), kyt, maxAgeMs, splashAddresses }, request);
     }
     if (request.purpose === 'wallet_payment' || request.purpose === 'spend_approval') {
       const { paymentBeforeSign } = await import('@/lib/server/payment-compliance-gate');

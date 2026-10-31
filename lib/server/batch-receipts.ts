@@ -55,15 +55,18 @@ export async function batchReceiptsFor(deps: ReceiptDeps, batchId: string): Prom
   const [org] = await deps.db.select({ name: organizations.name, legalName: organizations.legalName }).from(organizations).where(eq(organizations.id, deps.orgId)).limit(1);
   const payerName = org?.legalName || org?.name || deps.orgId;
 
-  const status: ReceiptStatus = request?.status === 'executed' ? 'settled' : request && ['failed', 'expired', 'cancelled'].includes(request.status) ? 'failed' : 'on_the_way';
-  const signed = (request?.signers ?? []).filter((s) => s.signedAt);
+  // A batch nobody has started has nothing to receipt: it is not "on the way".
+  if (!request) return { ok: false, status: 409, code: 'batch_not_started', error: 'The signatures for this batch have not been started, so there are no receipts yet.' };
+  // Explicit: executed is settled; a request that failed, lapsed or was cancelled did not go through; the rest (collecting, submitting, unknown) is not final.
+  const status: ReceiptStatus = request.status === 'executed' ? 'settled' : ['failed', 'expired', 'cancelled'].includes(request.status) ? 'failed' : 'on_the_way';
+  const signed = (request.signers ?? []).filter((s) => s.signedAt);
   const people = signed.length ? await deps.db.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, signed.map((s) => s.userId))) : [];
   const nameOf = new Map(people.map((p) => [p.id, p.name || 'An owner']));
   const approvers = signed.map((s) => ({ name: nameOf.get(s.userId) ?? 'An owner', signedAt: (s.signedAt as Date).toISOString() }));
   const paidAt = status === 'settled' && signed.length ? new Date(Math.max(...signed.map((s) => (s.signedAt as Date).getTime()))).toISOString() : null;
 
   // The fees the chain charged, one per payment.
-  const digest = status === 'settled' ? request?.executedDigest ?? null : null;
+  const digest = status === 'settled' ? request.executedDigest ?? null : null;
   let fees: Array<bigint> = rows.map((r) => r.maxFeeMinor);
   let feeRead = false;
   if (digest && deps.corePackageOriginalId) {

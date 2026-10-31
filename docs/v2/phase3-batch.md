@@ -73,7 +73,12 @@ intent on chain, once. All the anchors carry the batch's one sealed audit bundle
 **exactly** the stored rows: the same number of payments, each tied to its own
 withdrawal and intent, to the row's recipient, amount, kind and fee bound.
 `openSigningRequest` also simulates the bytes (a dry run), so an overdrawn
-wallet or a failing intent is refused before anyone is asked to sign.
+wallet or a failing intent is refused before anyone is asked to sign (a batch too
+large for one transaction is told to split it). Each owner's device runs the same
+shape rule on the transaction's own bytes (`differsFromApprovedBatch`): exactly five
+commands per approved payment in order, each paid from its own withdrawal and
+intent, the withdrawal equal to the amount plus the fee bound, no bank, other
+chain or exchange payment, and the withdrawn total equal to the approved total.
 
 ## Fees (Amendment A1)
 
@@ -88,13 +93,28 @@ payment, so none is shown. The page types no rate (`check:fees`).
 ## Idempotency
 
 The batch's intent id is the `Idempotency-Key` (8 to 80 letters, digits, `-`,
-`_`), unique per business. The same key with the same batch (the same payees,
-amounts, references, in the same order) answers the batch already made; a
-changed fee bound does not make it another batch; the same key with another
-batch is `409 idempotency_key_reused`; requests racing on one key make one batch
-and one signing request. Starting the signatures twice opens one request. A
-request that fails after the rows were stored leaves no batch under the key. The
-page makes a new intent id whenever the sheet changes.
+`_`), unique per business. A retry is answered **first**, from the stored batch,
+before anything about the world is read again: the same key with the same cells
+(recipient, amount, reference, in the same order, normalised) answers the batch
+already made even after a recipient was added, a fee moved, the balance dropped
+or the batch settled. A changed fee bound does not make it another batch; the same
+key with other cells is `409 idempotency_key_reused`; requests racing on one key
+make one batch and one signing request. Starting the signatures twice opens one
+request, and a request whose link to its batch failed to save is found again by
+its dedupe key (`batch:<id>`). A request that fails after the rows were stored
+leaves no batch under the key. The page makes a new intent id whenever the sheet
+changes.
+
+**The same sheet under a new intent id is a new batch on purpose, so it is not
+silent.** The review compares every row (address, amount, reference) with the rows
+of this business's batches of the last 30 days that have not failed or lapsed. A
+repeat is shown on its row, and the batch is made only when the person confirms
+(`confirmDuplicates`, else `409 duplicate_of_earlier_batch`). Batches already out
+for signatures are counted against the wallet balance of the next one. A Splash
+business a sheet names only by its registered name is shown as a new payee, with
+its full address and country, and is paid only once confirmed
+(`confirmNewPayees`, else `409 new_payee_needs_confirmation`). The unique payment
+reference per business only stops one row being stored twice.
 
 ## Tenants and roles
 
@@ -112,7 +132,8 @@ prepare; only an owner starts the signatures; a viewer can do neither.
   nothing is stored or asked of the owners.
 - A row is cleared only by a **provider's** answer: in production a sandbox CLEAR
   on file is no clearance, and a row is refused. The same check runs again before
-  each signature (`batchBeforeSign`), naming the payment ("Payment 2 of 5: …").
+  each signature (`batchBeforeSign`), naming the payment ("Payment 2 of 5: …"),
+  together with the wallet's own address and Splash's own addresses read now.
 - No verdict, reference or number is made up by the page: screening, fees,
   balances and receipts are all the server's.
 
@@ -124,6 +145,7 @@ events, one per payment, in order). A batch whose transaction cannot be read, or
 whose events cannot be matched to the rows (for example a payment that charged
 nothing and so emitted none), is **not final** and shows the bound, never a fee
 given to the wrong row. No event at all reads as no fee, as for a single payment.
+A batch nobody has started has no receipts (`409 batch_not_started`).
 The CSV writes any cell a spreadsheet would run as a formula as text.
 
 ## Not done, and why

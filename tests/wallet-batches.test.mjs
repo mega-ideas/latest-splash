@@ -284,7 +284,7 @@ test('an owner’s batch is ONE signing request for the owners: every row’s pa
   await twoRecipients(t);
   await t.w.screenClear(NORTH_WALLET);
   const rows = sheet(row('Dela Cruz Trading Corp', '5,000', 'INV-1'), row('Santos Supplies Inc', '250.50'), row('Northwind Pte Ltd', '1,000', 'INV-3'));
-  const r = await B.createBatch(t.deps(), OWNER, input(rows));
+  const r = await B.createBatch(t.deps(), OWNER, input(rows, { confirmNewPayees: true }));
   assert.equal(r.ok, true, JSON.stringify(r));
   assert.equal(r.created, true);
   assert.equal(r.batch.status, 'awaiting_signatures');
@@ -463,8 +463,10 @@ test('each row’s payment reference comes from its batch’s intent id and its 
   const rows = sheet(row('Dela Cruz Trading Corp', '100'), row('Santos Supplies Inc', '100'));
   const a = await B.createBatch(t.deps(), OWNER, input(rows));
   assert.equal(a.ok, true, JSON.stringify(a));
-  // Another intent id is another batch on purpose, with references of its own.
-  const b = await B.createBatch(t.deps(), OWNER, input(rows, { clientKey: 'batch_key_000002' }));
+  // Another intent id is another batch on purpose (once the repeat is confirmed), with references of its own.
+  const repeat = await B.createBatch(t.deps(), OWNER, input(rows, { clientKey: 'batch_key_000002' }));
+  assert.equal(repeat.code, 'duplicate_of_earlier_batch', 'the same sheet again is not paid unless the person confirms');
+  const b = await B.createBatch(t.deps(), OWNER, input(rows, { clientKey: 'batch_key_000002', confirmDuplicates: true }));
   assert.equal(b.ok, true, JSON.stringify(b));
   assert.notEqual(a.batch.id, b.batch.id);
   const stored = await t.w.db.select().from(schema.walletBatchRows);

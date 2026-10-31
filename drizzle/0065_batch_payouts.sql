@@ -12,7 +12,9 @@
 -- wallet_batch_rows: one row per payment, in the order of the sheet. Each
 -- keeps what its receipt shows about the payee (a name, a masked address) and
 -- the payment reference its intent is claimed under on chain, unique per
--- business, so no row is ever paid twice even by a second batch.
+-- business. That stops one row being stored twice; a repeat of the same
+-- recipient, amount and reference under another intent id is caught by the
+-- review (wallet-batches.ts, DUPLICATE_WINDOW_DAYS) and needs an explicit yes.
 --
 -- The signing purpose `wallet_batch` is added to the list the table allows.
 CREATE TABLE IF NOT EXISTS "wallet_batches" (

@@ -17,7 +17,10 @@ export const dynamic = 'force-dynamic';
  * POST  { rows: [{ recipient, amount, reference }], maxFeeMinor, label? } with
  *       an Idempotency-Key header (or `clientKey`): the batch's intent id.
  *       `maxFeeMinor` is the total Splash fee the person was shown (from
- *       POST /api/wallet/batches/review). The rows are checked again here; a
+ *       POST /api/wallet/batches/review), and `confirmDuplicates` / `confirmNewPayees`
+ *       are true only when the person confirmed the repeats and the payees found
+ *       by name that the review showed. A retry under the same key is answered
+ *       from the stored batch. The rows are checked again here; a
  *       sheet can name only a recipient this business saved. An owner's batch
  *       becomes one signing request for the owners; a team member's waits for
  *       an owner to start the signatures.
@@ -45,6 +48,8 @@ export async function POST(request: Request) {
         rows: sheetRowsFromBody(body.rows),
         maxFeeMinor: body.maxFeeMinor,
         label: body.label,
+        confirmDuplicates: body.confirmDuplicates === true,
+        confirmNewPayees: body.confirmNewPayees === true,
       },
     );
     if (!result.ok) return batchRefusal(result);

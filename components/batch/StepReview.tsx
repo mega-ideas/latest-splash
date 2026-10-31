@@ -36,6 +36,8 @@ export default function StepReview({
   onAdd,
   onCheck,
   onRemoveProblems,
+  confirmed,
+  onConfirm,
   back,
   next,
 }: {
@@ -49,11 +51,16 @@ export default function StepReview({
   onAdd: () => void;
   onCheck: () => void;
   onRemoveProblems: () => void;
+  /** What the person has confirmed for THESE rows; any edit clears it. */
+  confirmed: { duplicates: boolean; newPayees: boolean };
+  onConfirm: (change: Partial<{ duplicates: boolean; newPayees: boolean }>) => void;
   back: () => void;
   next: () => void;
 }) {
   const byLine = new Map((review?.rows ?? []).map((r) => [r.line, r]));
-  const ready = Boolean(review?.ready) && !stale && !checking;
+  const duplicates = review?.duplicateCount ?? 0;
+  const newPayees = review?.newPayeeCount ?? 0;
+  const ready = Boolean(review?.ready) && !stale && !checking && (duplicates === 0 || confirmed.duplicates) && (newPayees === 0 || confirmed.newPayees);
   const shortBy = review?.balance.state === 'ok' ? BigInt(review.balance.shortByMinor) : 0n;
   return (
     <div className="space-y-5">
@@ -73,12 +80,19 @@ export default function StepReview({
       {review && !review.feesOn ? <p className="text-[13px] text-[#326273]">{FEES_OFF_NOTICE}</p> : null}
       {review?.balance.state === 'ok' && shortBy > 0n ? (
         <p role="alert" className="rounded-xl border border-[var(--warn)] bg-[var(--warn-bg)] px-3 py-2.5 text-sm font-semibold text-[var(--warn-ink)]">
-          Your Splash Wallet holds {usdc(review.balance.usdcMinor)}, which is {usdc(shortBy.toString())} short of the batch and its fees. Add funds, or remove rows.
+          Your Splash Wallet holds {usdc(review.balance.usdcMinor)}, which is {usdc(shortBy.toString())} short of the batch and its fees{review.balance.heldMinor !== '0' ? `, with ${usdc(review.balance.heldMinor)} already held for batches out for signatures` : ''}. Add funds, or remove rows.
         </p>
       ) : null}
       {review?.balance.state === 'unknown' ? <p className="text-[13px] text-[#326273]">Your wallet balance could not be read just now, so a shortfall is not shown here.</p> : null}
       {error ? <p role="alert" className="text-sm font-medium text-[var(--error)]">{error}</p> : null}
 
+      <div aria-hidden="true" className="hidden gap-3 px-[15px] font-mono text-[12px] font-bold uppercase tracking-[0.12em] text-[#1F4452] md:grid md:grid-cols-[2rem_minmax(0,1.6fr)_minmax(0,0.8fr)_minmax(0,1fr)_auto]">
+        <span />
+        <span>Recipient</span>
+        <span className="text-right">Amount (USDC)</span>
+        <span>Reference</span>
+        <span className="w-11" />
+      </div>
       <ol className="space-y-3" aria-label="Rows of the batch">
         {rows.map((row, i) => {
           const result = byLine.get(row.line);
@@ -103,13 +117,26 @@ export default function StepReview({
               </div>
               {result ? (
                 result.ok && result.payee ? (
-                  <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg bg-[var(--ok-bg)] px-3 py-2 text-[13px] text-[#1F4452]">
-                    <span className="inline-flex items-center gap-1.5 font-bold text-[#145d6a]"><Check className="h-3.5 w-3.5" aria-hidden="true" />Cleared</span>
-                    <span className="font-semibold">{result.payee.name}</span>
-                    <span className="font-mono">{result.payee.masked}</span>
-                    <span className="inline-flex items-center gap-1"><ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />{verification(result)}</span>
-                    <span className="font-mono">{result.feeMinor && review?.feesOn ? `Splash fee ${usdc(result.feeMinor)}` : ''}</span>
-                  </div>
+                  <>
+                    <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg bg-[var(--ok-bg)] px-3 py-2 text-[13px] text-[#1F4452]">
+                      <span className="inline-flex items-center gap-1.5 font-bold text-[#145d6a]"><Check className="h-3.5 w-3.5" aria-hidden="true" />Cleared</span>
+                      <span className="font-semibold">{result.payee.name}</span>
+                      <span className="font-mono">{result.payee.masked}</span>
+                      <span className="inline-flex items-center gap-1"><ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />{verification(result)}</span>
+                      <span className="font-mono">{result.feeMinor && review?.feesOn ? `Splash fee ${usdc(result.feeMinor)}` : ''}</span>
+                    </div>
+                    {result.newPayee ? (
+                      <p className="mt-2 rounded-lg border border-[var(--warn)] bg-[var(--warn-bg)] px-3 py-2 text-[13px] leading-5 text-[var(--warn-ink)]">
+                        <span className="font-bold">A new payee, found by name.</span> Nobody on your team has saved {result.payee.name}. Check it is the business you mean: <span className="break-all font-mono">{result.payee.address}</span>
+                        {result.payee.country ? `, ${result.payee.country}` : ''}.
+                      </p>
+                    ) : null}
+                    {result.duplicateOf ? (
+                      <p className="mt-2 rounded-lg border border-[var(--warn)] bg-[var(--warn-bg)] px-3 py-2 text-[13px] leading-5 text-[var(--warn-ink)]">
+                        <span className="font-bold">Already in another batch.</span> The same recipient, amount and reference are in a batch you made in the last 30 days that has not failed or lapsed.
+                      </p>
+                    ) : null}
+                  </>
                 ) : (
                   <p role="alert" className="mt-2.5 flex items-start gap-2 rounded-lg bg-[var(--error-bg)] px-3 py-2 text-[13px] font-medium text-[var(--error)]">
                     <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
@@ -130,6 +157,24 @@ export default function StepReview({
       {rows.length >= BATCH_MAX_PAYMENTS ? <p className="text-[13px] text-[#326273]">A batch holds at most {BATCH_MAX_PAYMENTS} payments. Split a longer sheet into smaller batches.</p> : null}
       {stale && review ? <p role="status" className="text-[13px] font-semibold text-[var(--warn-ink)]">You changed the rows. Check them again before you go on.</p> : null}
 
+      {review && !stale && !checking && (duplicates > 0 || newPayees > 0) ? (
+        <fieldset className="space-y-3 rounded-2xl border border-[var(--warn)] bg-[var(--warn-bg)] p-4">
+          <legend className="px-1 text-sm font-bold text-[var(--warn-ink)]">Check before you continue</legend>
+          {duplicates > 0 ? (
+            <label className="flex min-h-11 items-start gap-3 text-sm leading-6 text-[#0c3e48]">
+              <input type="checkbox" checked={confirmed.duplicates} onChange={(e) => onConfirm({ duplicates: e.target.checked })} className="mt-1 h-5 w-5 shrink-0 accent-[#0d6370]" />
+              <span>{duplicates === 1 ? 'One payment here is already in' : `${duplicates} payments here are already in`} a batch you made. I mean to pay {duplicates === 1 ? 'it' : 'them'} again.</span>
+            </label>
+          ) : null}
+          {newPayees > 0 ? (
+            <label className="flex min-h-11 items-start gap-3 text-sm leading-6 text-[#0c3e48]">
+              <input type="checkbox" checked={confirmed.newPayees} onChange={(e) => onConfirm({ newPayees: e.target.checked })} className="mt-1 h-5 w-5 shrink-0 accent-[#0d6370]" />
+              <span>I have checked the name, address and country of {newPayees === 1 ? 'the business' : `the ${newPayees} businesses`} found by name, and {newPayees === 1 ? 'it is' : 'they are'} the ones I mean to pay.</span>
+            </label>
+          ) : null}
+        </fieldset>
+      ) : null}
+
       <div className="flex flex-wrap justify-between gap-2 border-t border-[#326273]/10 pt-4">
         <QuietButton type="button" onClick={back}>Back</QuietButton>
         <PrimaryButton type="button" onClick={next} disabled={!ready || shortBy > 0n}>Continue to approval</PrimaryButton>
@@ -143,7 +188,7 @@ const CELL = 'h-11 w-full rounded-xl border border-[#326273]/25 bg-white px-3 te
 function Cell({ label, visibleLabel, children }: { label: string; visibleLabel: string; children: ReactElement<{ 'aria-label'?: string }> }) {
   return (
     <div className="min-w-0">
-      <span className="text-[13px] font-semibold text-[#1F4452] md:sr-only" aria-hidden="true">{visibleLabel}</span>
+      <span className="text-[13px] font-semibold text-[#1F4452] md:hidden" aria-hidden="true">{visibleLabel}</span>
       <span className="mt-1 block md:mt-0">{cloneElement(children, { 'aria-label': label })}</span>
     </div>
   );

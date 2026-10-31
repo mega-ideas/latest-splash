@@ -53,6 +53,8 @@ export type PaymentGateDeps = {
   maxAgeMs?: number;
   /** The runtime: in production a sandbox screening or Travel Rule message on file is no answer. Default: this process. */
   env?: NodeJS.ProcessEnv;
+  /** Splash's own addresses, read now: one added since a batch was opened stops its signatures. */
+  splashAddresses?: () => Promise<string[]>;
 };
 
 type GateRefusal = { code: string; error: string };
@@ -149,8 +151,12 @@ export async function batchBeforeSign(deps: PaymentGateDeps, request: StoredRequ
   const summary = (request.summary ?? null) as { description?: WalletTxDescription } | null;
   const opens = (summary?.description?.actions ?? []).filter((a) => a.type === 'open_intent') as Array<Extract<WalletTxDescription['actions'][number], { type: 'open_intent' }>>;
   if (opens.length === 0) return { code: 'not_a_batch', error: 'The request does not describe a batch Splash can check, so it is not signed.' };
+  const splash = deps.splashAddresses ? (await deps.splashAddresses()).map((a) => normalizeSuiAddress(a)) : [];
+  const wallet = request.senderAddress ? normalizeSuiAddress(request.senderAddress) : null;
   for (const [i, open] of opens.entries()) {
     const recipient = normalizeSuiAddress(open.recipient);
+    if (wallet && recipient === wallet) return { code: 'own_wallet', error: `Payment ${i + 1} of ${opens.length} pays this business's own wallet, so the batch is not signed.` };
+    if (splash.includes(recipient)) return { code: 'splash_controlled_address', error: `Payment ${i + 1} of ${opens.length} pays an address that belongs to Splash, so the batch is not signed.` };
     if (open.kind === EXCHANGE_KIND || open.kind === 3 || open.kind === 4) {
       return { code: 'not_payable_in_a_batch', error: `Payment ${i + 1} of this batch is not one a batch may pay, so the batch is not signed.` };
     }

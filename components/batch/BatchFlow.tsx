@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Check, CircleHelp, Wallet } from 'lucide-react';
 
@@ -41,6 +41,10 @@ export default function BatchFlow() {
   const [stale, setStale] = useState(false);
   const [checking, setChecking] = useState(false);
   const [reviewError, setReviewError] = useState<string | null>(null);
+  const [draftNote, setDraftNote] = useState<string | null>(null);
+  const [confirmed, setConfirmed] = useState({ duplicates: false, newPayees: false });
+  // Each review carries a number; only the latest one is believed, and an edit retires every review still running.
+  const reviewSeq = useRef(0);
   const [intentKey, setIntentKey] = useState('');
   const [made, setMade] = useState<MadeBatch | null>(null);
   const [batches, setBatches] = useState<BatchView[]>([]);
@@ -72,9 +76,14 @@ export default function BatchFlow() {
   }, [loadBatches]);
 
   const runReview = useCallback(async (sheet: SheetRow[]) => {
+    reviewSeq.current += 1;
+    const seq = reviewSeq.current;
     setChecking(true);
     setReviewError(null);
+    setConfirmed({ duplicates: false, newPayees: false });
     const answer = await call<{ review?: BatchReview }>('/api/wallet/batches/review', { body: { rows: sheet.map((r) => ({ recipient: r.recipient, amount: r.amount, reference: r.reference })) } });
+    // The rows changed while this was being checked: the answer is for rows that are no longer on the screen.
+    if (seq !== reviewSeq.current) return;
     setChecking(false);
     if (answer.ok && answer.body?.review) {
       setReview(answer.body.review);
@@ -87,6 +96,7 @@ export default function BatchFlow() {
 
   const takeRows = useCallback(
     (next: SheetRow[]) => {
+      setDraftNote(null);
       const numbered = renumber(next);
       setRows(numbered);
       setReview(null);
@@ -105,20 +115,33 @@ export default function BatchFlow() {
     if (params.get('draft') !== '1') return;
     const draft = takeBatchDraft();
     if (!draft || draft.rows.length === 0) return;
+    // A draft is capped like a file: a very long one would put thousands of inputs on the page.
+    if (draft.rows.length > BATCH_MAX_PAYMENTS + 5) {
+      const note = `That draft has ${draft.rows.length} rows. A batch is at most ${BATCH_MAX_PAYMENTS} payments: split it into smaller batches.`;
+      const timer = window.setTimeout(() => setDraftNote(note), 0);
+      return () => window.clearTimeout(timer);
+    }
     const timer = window.setTimeout(() => takeRows(draft.rows.map((r) => ({ line: 0, recipient: r.address && /^0x/i.test(r.address) ? r.address : r.name || r.address, amount: r.amount, reference: r.purpose }))), 0);
     return () => window.clearTimeout(timer);
   }, [takeRows]);
 
-  const edit = (index: number, change: Partial<Pick<SheetRow, 'recipient' | 'amount' | 'reference'>>) => {
-    setRows((current) => current.map((r, i) => (i === index ? { ...r, ...change } : r)));
+  /** Any change to the rows retires the review still running and the confirmations given for the old rows. */
+  const changed = () => {
+    reviewSeq.current += 1;
+    setChecking(false);
+    setConfirmed({ duplicates: false, newPayees: false });
     setStale(true);
     setIntentKey(newBatchKey());
   };
+
+  const edit = (index: number, change: Partial<Pick<SheetRow, 'recipient' | 'amount' | 'reference'>>) => {
+    changed();
+    setRows((current) => current.map((r, i) => (i === index ? { ...r, ...change } : r)));
+  };
   const remove = (index: number) => {
+    changed();
     const next = renumber(rows.filter((_, i) => i !== index));
     setRows(next);
-    setStale(true);
-    setIntentKey(newBatchKey());
     if (next.length === 0) {
       setReview(null);
       go(1);
@@ -126,26 +149,27 @@ export default function BatchFlow() {
   };
   const add = () => {
     if (rows.length >= BATCH_MAX_PAYMENTS) return;
+    changed();
     setRows(renumber([...rows, { line: 0, recipient: '', amount: '', reference: '' }]));
-    setStale(true);
-    setIntentKey(newBatchKey());
   };
   const removeProblems = () => {
     if (!review) return;
     const bad = new Set(review.rows.filter((r) => !r.ok).map((r) => r.line));
     const next = renumber(rows.filter((r) => !bad.has(r.line)));
+    changed();
     setRows(next);
-    setIntentKey(newBatchKey());
     if (next.length === 0) {
       setReview(null);
       go(1);
       return;
     }
-    setStale(true);
     void runReview(next);
   };
 
   const restart = useCallback(() => {
+    reviewSeq.current += 1;
+    setChecking(false);
+    setConfirmed({ duplicates: false, newPayees: false });
     setRows([]);
     setReview(null);
     setStale(false);
@@ -246,14 +270,15 @@ export default function BatchFlow() {
             <>
               {step === 1 ? (
                 <div className="space-y-8">
+                  {draftNote ? <p role="alert" className="text-sm font-medium text-[var(--error)]">{draftNote}</p> : null}
                   <StepUpload onRows={takeRows} />
                   <RecentBatches batches={batches} onOpen={(b) => void open(b)} />
                 </div>
               ) : null}
               {step === 2 ? (
-                <StepReview rows={rows} review={review} stale={stale} checking={checking} error={reviewError} onEdit={edit} onRemove={remove} onAdd={add} onCheck={() => void runReview(rows)} onRemoveProblems={removeProblems} back={restart} next={() => go(3)} />
+                <StepReview rows={rows} review={review} stale={stale} checking={checking} error={reviewError} onEdit={edit} onRemove={remove} onAdd={add} onCheck={() => void runReview(rows)} onRemoveProblems={removeProblems} confirmed={confirmed} onConfirm={(change) => setConfirmed((c) => ({ ...c, ...change }))} back={restart} next={() => go(3)} />
               ) : null}
-              {step === 3 ? <StepApprove ctx={ctx} rows={rows} review={review} intentKey={intentKey} made={made} onMade={onMade} onExecuted={onExecuted} onRestart={restart} back={() => go(2)} /> : null}
+              {step === 3 ? <StepApprove ctx={ctx} rows={rows} review={review} confirmed={confirmed} intentKey={intentKey} made={made} onMade={onMade} onExecuted={onExecuted} onRestart={restart} back={() => go(2)} /> : null}
               {step === 4 && made ? <StepSend batch={made.batch} onBatch={(b) => setMade((m) => (m ? { ...m, batch: b } : m))} onSettled={() => go(5)} onRestart={restart} /> : null}
               {step === 5 && made ? <StepReceipts batchId={made.batch.id} onNew={restart} /> : null}
             </>

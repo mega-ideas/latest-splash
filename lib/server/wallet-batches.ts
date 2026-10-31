@@ -20,8 +20,21 @@
  *   - Idempotent by the batch's intent id (the client's key, unique per
  *     business): the same key with the same batch answers the batch already
  *     made, the same key with another batch is a 409, two requests racing on
- *     one key make one batch. Each row's payment reference is unique per
- *     business too, so no row is paid twice, even by a second batch.
+ *     one key make one batch. A retry is answered from the stored batch before
+ *     anything is checked again (the batch is its normalised cells), so it still
+ *     answers once a recipient, a fee or the balance has moved. Each row's
+ *     payment reference is unique per business, which only stops one row being
+ *     stored twice.
+ *   - The same sheet under a NEW intent id is a new batch on purpose, so the
+ *     review compares every row (address, amount, reference) with the rows of
+ *     this business's batches of the last DUPLICATE_WINDOW_DAYS days that have
+ *     not lapsed or failed, and the batch is made only when the person has said
+ *     yes to the repeats (`confirmDuplicates`). Batches already out for
+ *     signatures are counted against the wallet balance.
+ *   - A Splash business a sheet names only by its registered name is a payee
+ *     nobody on the team has saved: it is shown with its full address and
+ *     country, and the batch is made only once the person has confirmed it
+ *     (`confirmNewPayees`).
  *   - The fee shown is the batch's fee bound: a fee above it is refused with
  *     the new fee (`fee_changed`), a bound above the ceiling is refused, and
  *     every row's fee comes from `deps.splashFee` (the schedule on chain).
@@ -36,7 +49,7 @@
  */
 import { createHash, randomUUID } from 'node:crypto';
 
-import { and, asc, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray } from 'drizzle-orm';
 import { isValidSuiAddress, normalizeSuiAddress } from '@mysten/sui/utils';
 
 import { organizations, suppliers, walletBatches, walletBatchRows, walletSigningRequests } from '../db/schema.ts';
@@ -71,6 +84,10 @@ export type RowReview = {
   code: string | null;
   error: string | null;
   payee: { kind: 'splash_business' | 'self_custody'; name: string; masked: string; address: string; country: string | null; recipientId: string | null; businessId: string | null } | null;
+  /** A Splash business found by the registered name in the sheet, not one this business saved: it must be confirmed. */
+  newPayee: boolean;
+  /** The earlier batch that already pays this same recipient, amount and reference, or null. */
+  duplicateOf: { batchId: string; position: number } | null;
   amountMinor: string | null;
   feeMinor: string | null;
   feeKind: number | null;
@@ -87,7 +104,11 @@ export type BatchReview = {
   maxFeeMinor: string;
   totalDebitMinor: string;
   maxPayments: number;
-  balance: { state: 'ok'; usdcMinor: string; shortByMinor: string } | { state: 'unknown' };
+  /** Rows that repeat a payment of a batch already made or out for signatures. */
+  duplicateCount: number;
+  /** Rows paying a Splash business the sheet named by its registered name. */
+  newPayeeCount: number;
+  balance: { state: 'ok'; usdcMinor: string; shortByMinor: string; heldMinor: string } | { state: 'unknown' };
   /** Nothing is wrong with any row, and there is at least one. */
   ready: boolean;
 };
@@ -111,6 +132,9 @@ type BatchRow = typeof walletBatches.$inferSelect;
 type RowRow = typeof walletBatchRows.$inferSelect;
 
 const sha = (text: string) => createHash('sha256').update(text).digest();
+
+/** How far back a repeated payment is looked for. */
+export const DUPLICATE_WINDOW_DAYS = 30;
 const ownerError = 'Only an owner starts the signatures for a batch.';
 
 function digitsOf(value: unknown): bigint | null {
@@ -135,7 +159,7 @@ async function savedRecipients(deps: BatchDeps): Promise<Saved[]> {
 const same = (a: string | null | undefined, b: string) => (a ?? '').trim().toLowerCase() === b.trim().toLowerCase();
 
 /** What one cell of the sheet names: a recipient this business saved, or a business on Splash. Never anything else. */
-async function payeeFromCell(deps: BatchDeps, saved: Saved[], cell: string): Promise<{ ok: true; payee: PayeeInput } | { ok: false; code: string; error: string }> {
+async function payeeFromCell(deps: BatchDeps, saved: Saved[], cell: string): Promise<{ ok: true; payee: PayeeInput; byName: boolean } | { ok: false; code: string; error: string }> {
   const asAddress = /^0x/i.test(cell.trim());
   if (asAddress) {
     let address: string;
@@ -146,21 +170,52 @@ async function payeeFromCell(deps: BatchDeps, saved: Saved[], cell: string): Pro
     }
     if (!isValidSuiAddress(address)) return { ok: false, code: 'bad_address', error: 'That is not a valid Sui address.' };
     const hit = saved.filter((s) => s.walletAddress && normalizeSuiAddress(s.walletAddress) === address);
-    if (hit.length === 1) return { ok: true, payee: { kind: 'recipient', recipientId: hit[0].id } };
+    if (hit.length === 1) return { ok: true, payee: { kind: 'recipient', recipientId: hit[0].id }, byName: false };
     if (hit.length > 1) return { ok: false, code: 'ambiguous_recipient', error: 'More than one saved recipient has this address. Fix it in Recipients.' };
     return { ok: false, code: 'recipient_not_saved', error: 'This address is not one of your saved recipients. A batch pays only recipients you have saved and Splash has screened: add it in Recipients first.' };
   }
   const hits = saved.filter((s) => same(s.name, cell) || same(s.legalName, cell));
-  if (hits.length === 1) return { ok: true, payee: { kind: 'recipient', recipientId: hits[0].id } };
+  if (hits.length === 1) return { ok: true, payee: { kind: 'recipient', recipientId: hits[0].id }, byName: false };
   if (hits.length > 1) return { ok: false, code: 'ambiguous_recipient', error: 'More than one saved recipient has this name. Use the wallet address instead.' };
   if (cell.trim().length >= 3) {
     const found = (await deps.searchBusinesses(cell.trim().slice(0, 80))).filter((b) => b.id !== deps.orgId && same(b.name, cell));
-    if (found.length === 1) return { ok: true, payee: { kind: 'splash_business', businessId: found[0].id } };
+    if (found.length === 1) return { ok: true, payee: { kind: 'splash_business', businessId: found[0].id }, byName: true };
   }
   return { ok: false, code: 'recipient_not_found', error: 'No saved recipient or Splash business has this name. A batch pays only recipients you have saved: add it in Recipients first.' };
 }
 
-const rowFail = (row: SheetRow, code: string, error: string): RowReview => ({ line: row.line, recipient: row.recipient, amount: row.amount, reference: row.reference, ok: false, code, error, payee: null, amountMinor: null, feeMinor: null, feeKind: null });
+type Earlier = { rows: Map<string, { batchId: string; position: number }>; heldMinor: bigint };
+
+/**
+ * What this business's earlier batches (of the last DUPLICATE_WINDOW_DAYS days,
+ * not failed or lapsed) already pay, and how much the ones still out for
+ * signatures hold of the wallet. A repeated sheet under a new intent id would
+ * otherwise be a second batch that pays everything again.
+ */
+async function earlierBatches(deps: BatchDeps): Promise<Earlier> {
+  const since = new Date(deps.now().getTime() - DUPLICATE_WINDOW_DAYS * 86_400_000);
+  const batches = await deps.db.select().from(walletBatches).where(and(eq(walletBatches.orgId, deps.orgId), gte(walletBatches.createdAt, since))).orderBy(asc(walletBatches.createdAt)).limit(200);
+  const live: string[] = [];
+  let held = 0n;
+  for (const b of batches) {
+    const linked = await withLink(deps, b);
+    const status = await requestStatusOf(deps, linked);
+    if (status === 'failed' || status === 'expired') continue;
+    live.push(b.id);
+    if (status === 'awaiting_signatures' || status === 'on_the_way') held += b.totalAmountMinor + b.totalMaxFeeMinor;
+  }
+  const rows = new Map<string, { batchId: string; position: number }>();
+  if (live.length > 0) {
+    const stored = await deps.db.select().from(walletBatchRows).where(and(eq(walletBatchRows.orgId, deps.orgId), inArray(walletBatchRows.batchId, live))).orderBy(asc(walletBatchRows.createdAt), asc(walletBatchRows.position));
+    for (const r of stored) {
+      const key = `${normalizeSuiAddress(r.address)}|${r.amountMinor}|${r.reference ?? ''}`;
+      if (!rows.has(key)) rows.set(key, { batchId: r.batchId, position: r.position });
+    }
+  }
+  return { rows, heldMinor: held };
+}
+
+const rowFail = (row: SheetRow, code: string, error: string): RowReview => ({ line: row.line, recipient: row.recipient, amount: row.amount, reference: row.reference, ok: false, code, error, payee: null, newPayee: false, duplicateOf: null, amountMinor: null, feeMinor: null, feeKind: null });
 
 /**
  * Every row of a sheet, checked: its cells, its payee, its screening, its fee.
@@ -175,6 +230,7 @@ export async function reviewBatch(deps: BatchDeps, actor: { userId: string; role
   const own = members.ok ? normalizeSuiAddress(members.address) : null;
   const splash = (await deps.splashAddresses()).map((a) => normalizeSuiAddress(a));
   const saved = await savedRecipients(deps);
+  const earlier = await earlierBatches(deps);
   const seen = new Set<string>();
   const out: RowReview[] = [];
   let total = 0n;
@@ -236,6 +292,8 @@ export async function reviewBatch(deps: BatchDeps, actor: { userId: string; role
       code: null,
       error: null,
       payee: { kind: resolved.payeeKind === 'splash_business' ? 'splash_business' : 'self_custody', name: resolved.name, masked: maskAddress(address), address, country: resolved.country, recipientId: resolved.recipientId, businessId: resolved.businessId },
+      newPayee: cell.byName,
+      duplicateOf: earlier.rows.get(dupKey) ?? null,
       amountMinor: amount.toString(),
       feeMinor: fee.feeMinor.toString(),
       feeKind: resolved.kind,
@@ -248,8 +306,9 @@ export async function reviewBatch(deps: BatchDeps, actor: { userId: string; role
   if (deps.walletBalance) {
     const have = await deps.walletBalance().catch(() => null);
     if (have !== null) {
-      const need = total + fees;
-      balance = { state: 'ok', usdcMinor: have.toString(), shortByMinor: (need > have ? need - have : 0n).toString() };
+      // What batches already out for signatures will take is not free to spend again.
+      const need = total + fees + earlier.heldMinor;
+      balance = { state: 'ok', usdcMinor: have.toString(), shortByMinor: (need > have ? need - have : 0n).toString(), heldMinor: earlier.heldMinor.toString() };
     }
   }
   return {
@@ -264,6 +323,8 @@ export async function reviewBatch(deps: BatchDeps, actor: { userId: string; role
       maxFeeMinor: fees.toString(),
       totalDebitMinor: (total + fees).toString(),
       maxPayments: BATCH_MAX_PAYMENTS,
+      duplicateCount: out.filter((r) => r.duplicateOf).length,
+      newPayeeCount: out.filter((r) => r.newPayee).length,
       balance,
       ready: errorCount === 0 && okCount > 0,
     },
@@ -271,6 +332,24 @@ export async function reviewBatch(deps: BatchDeps, actor: { userId: string; role
 }
 
 // ─── The batch ──────────────────────────────────────────────────────────────
+
+/**
+ * The batch's own request, found by its dedupe key `batch:<id>` when the stored
+ * link is missing or older than the newest request (a link that failed to save
+ * after the request opened must not leave a batch reading "prepared" while
+ * owners hold a live request). The link is written again, best effort.
+ */
+async function withLink(deps: Pick<BatchDeps, 'db'>, row: BatchRow): Promise<BatchRow> {
+  const [newest] = await deps.db
+    .select({ id: walletSigningRequests.id })
+    .from(walletSigningRequests)
+    .where(and(eq(walletSigningRequests.orgId, row.orgId), eq(walletSigningRequests.dedupeKey, `batch:${row.id}`)))
+    .orderBy(desc(walletSigningRequests.createdAt))
+    .limit(1);
+  if (!newest || newest.id === row.signingRequestId) return row;
+  await deps.db.update(walletBatches).set({ signingRequestId: newest.id, updatedAt: new Date() }).where(and(eq(walletBatches.id, row.id), eq(walletBatches.orgId, row.orgId))).catch(() => {});
+  return { ...row, signingRequestId: newest.id };
+}
 
 async function requestStatusOf(deps: BatchDeps, row: BatchRow): Promise<BatchStatus> {
   if (!row.signingRequestId) return 'prepared';
@@ -319,12 +398,12 @@ async function viewOf(deps: BatchDeps, row: BatchRow): Promise<BatchView> {
 
 async function getRow(deps: Pick<BatchDeps, 'db' | 'orgId'>, id: string): Promise<BatchRow | null> {
   const [row] = await deps.db.select().from(walletBatches).where(and(eq(walletBatches.orgId, deps.orgId), eq(walletBatches.id, id))).limit(1);
-  return row ?? null;
+  return row ? withLink(deps, row) : null;
 }
 
 async function getByKey(deps: Pick<BatchDeps, 'db' | 'orgId'>, clientKey: string): Promise<BatchRow | null> {
   const [row] = await deps.db.select().from(walletBatches).where(and(eq(walletBatches.orgId, deps.orgId), eq(walletBatches.clientKey, clientKey))).limit(1);
-  return row ?? null;
+  return row ? withLink(deps, row) : null;
 }
 
 export async function getBatch(deps: BatchDeps, id: string): Promise<BatchView | null> {
@@ -335,31 +414,47 @@ export async function getBatch(deps: BatchDeps, id: string): Promise<BatchView |
 export async function listBatches(deps: BatchDeps): Promise<BatchView[]> {
   const rows = await deps.db.select().from(walletBatches).where(eq(walletBatches.orgId, deps.orgId)).orderBy(desc(walletBatches.createdAt)).limit(50);
   const out: BatchView[] = [];
-  for (const row of rows) out.push(await viewOf(deps, row));
+  for (const row of rows) out.push(await viewOf(deps, await withLink(deps, row)));
   return out;
 }
 
-/** What the batch IS: who, how much, the reference, in order. The fee bound is not part of it. */
-const requestHashOf = (rows: Array<{ recipientId: string | null; businessId: string | null; address: string; amountMinor: string; reference: string }>) =>
-  sha(JSON.stringify(['batch', rows.map((r) => [r.recipientId ?? r.businessId, r.address, r.amountMinor, r.reference])])).toString('hex');
+/**
+ * What the batch IS, read from what was SUBMITTED: who (the cell, trimmed and
+ * lower-cased), how much (as an amount when it reads as one), the reference,
+ * in order. Nothing that was looked up is part of it, so a retry can be
+ * answered without reviewing again; the fee bound is not part of it either.
+ */
+const requestHashOf = (rows: SheetRow[]) =>
+  sha(
+    JSON.stringify([
+      'batch-cells',
+      rows.map((r) => [String(r.recipient ?? '').trim().toLowerCase(), parseAmountMinor(String(r.amount ?? ''))?.toString() ?? String(r.amount ?? '').trim(), String(r.reference ?? '').trim()]),
+    ]),
+  ).toString('hex');
 
 export type CreateBatchResult = BatchFailure | { ok: true; created: boolean; batch: BatchView; signingRequest: RequestView | null };
 
 export async function createBatch(
   deps: BatchDeps,
   actor: { userId: string; role: string },
-  input: { clientKey: unknown; rows: SheetRow[]; maxFeeMinor: unknown; label?: unknown },
+  input: { clientKey: unknown; rows: SheetRow[]; maxFeeMinor: unknown; label?: unknown; confirmDuplicates?: unknown; confirmNewPayees?: unknown },
   attempt = 0,
 ): Promise<CreateBatchResult> {
   if (actor.role !== 'OWNER' && actor.role !== 'MAKER' && actor.role !== 'APPROVER') return fail(403, 'cannot_pay', 'Viewers can look at payments but cannot make them.');
   const clientKey = validClientKey(input.clientKey);
   if (!clientKey) return fail(400, 'idempotency_key_required', 'An intent id (8 to 80 letters, digits, - or _) is needed.');
+  const rowsIn = Array.isArray(input.rows) ? input.rows : [];
+  const requestHash = requestHashOf(rowsIn);
+  // A retry is answered from the batch already made, before anything about the world is read again.
+  const prior = await getByKey(deps, clientKey);
+  if (prior) return replay(deps, actor, prior, requestHash);
+
   const maxFee = digitsOf(input.maxFeeMinor);
   if (maxFee === null) return fail(400, 'bad_fee', 'The fee that was shown is needed with the batch.');
   const label = typeof input.label === 'string' && input.label.trim() ? input.label.trim().slice(0, 80) : null;
   if (attempt >= 3) return fail(409, 'in_progress', 'This batch is still being prepared. Wait a moment and try again; nothing is sent twice.');
 
-  const reviewed = await reviewBatch(deps, actor, input.rows);
+  const reviewed = await reviewBatch(deps, actor, rowsIn);
   if (!reviewed.ok) return reviewed;
   const { review } = reviewed;
   if (!review.ready) {
@@ -373,11 +468,12 @@ export async function createBatch(
     return fail(409, 'insufficient_balance', 'The wallet does not hold enough for this batch and its fees. Add funds, or remove rows.', { feeMinor: fees.toString() });
   }
 
-  const reviewedRows = review.rows.map((r) => ({ recipientId: r.payee?.recipientId ?? null, businessId: r.payee?.businessId ?? null, address: r.payee?.address ?? '', amountMinor: r.amountMinor ?? '0', reference: r.reference }));
-  const requestHash = requestHashOf(reviewedRows);
-
-  const prior = await getByKey(deps, clientKey);
-  if (prior) return replay(deps, actor, prior, requestHash);
+  if (review.duplicateCount > 0 && input.confirmDuplicates !== true) {
+    return fail(409, 'duplicate_of_earlier_batch', 'Some of these payments are already in a batch you made. Paying them again sends the money twice: check the rows, and confirm if you mean to.', { rows: review.rows });
+  }
+  if (review.newPayeeCount > 0 && input.confirmNewPayees !== true) {
+    return fail(409, 'new_payee_needs_confirmation', 'A business on Splash is named in this sheet that nobody on your team has saved. Check its name, address and country, and confirm it is the one you mean to pay.', { rows: review.rows });
+  }
 
   const id = `wbt_${randomUUID()}`;
   const now = deps.now();
@@ -542,7 +638,8 @@ export async function startBatchSigning(
     }
     return fail(opened.status, opened.code, opened.error);
   }
-  await deps.db.update(walletBatches).set({ signingRequestId: opened.request.id, updatedAt: deps.now() }).where(and(eq(walletBatches.id, batchId), eq(walletBatches.orgId, deps.orgId)));
+  // The request carries the batch's dedupe key, so a link that fails to save here is found again (withLink), never orphaned.
+  await deps.db.update(walletBatches).set({ signingRequestId: opened.request.id, updatedAt: deps.now() }).where(and(eq(walletBatches.id, batchId), eq(walletBatches.orgId, deps.orgId))).catch(() => {});
   const after = (await getRow(deps, batchId)) as BatchRow;
   return { ok: true, batch: await viewOf(deps, after), signingRequest: opened.request };
 }

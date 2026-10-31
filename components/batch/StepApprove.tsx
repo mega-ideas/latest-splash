@@ -37,6 +37,7 @@ export default function StepApprove({
   ctx,
   rows,
   review,
+  confirmed,
   intentKey,
   made,
   onMade,
@@ -47,6 +48,8 @@ export default function StepApprove({
   ctx: Context | null;
   rows: SheetRow[];
   review: BatchReview | null;
+  /** What the person confirmed on the Review step: repeated payments, and payees found by name. */
+  confirmed: { duplicates: boolean; newPayees: boolean };
   intentKey: string;
   made: MadeBatch | null;
   onMade: (made: MadeBatch) => void;
@@ -65,7 +68,7 @@ export default function StepApprove({
     setError(null);
     const approved: ApprovedRow[] = review.rows.map((r) => ({ recipient: r.payee?.address ?? '', amountMinor: r.amountMinor ?? '0', maxFeeMinor: r.feeMinor ?? '0', payeeName: r.payee?.name ?? '' }));
     const answer = await call<{ batch?: BatchView; signingRequest?: SigningView | null; feeMinor?: string }>('/api/wallet/batches', {
-      body: { rows: rows.map((r) => ({ recipient: r.recipient, amount: r.amount, reference: r.reference })), maxFeeMinor: review.maxFeeMinor },
+      body: { rows: rows.map((r) => ({ recipient: r.recipient, amount: r.amount, reference: r.reference })), maxFeeMinor: review.maxFeeMinor, confirmDuplicates: confirmed.duplicates, confirmNewPayees: confirmed.newPayees },
       key: intentKey,
     });
     setBusy(false);

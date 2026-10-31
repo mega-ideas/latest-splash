@@ -633,7 +633,8 @@ export async function openSigningRequest(
 
   const simulated = await deps.chain.simulate(input.transactionBytes);
   if (!simulated.success) {
-    return fail(422, 'simulation_failed', `the transaction would fail on chain, so nobody is asked to sign it: ${simulated.error ?? 'the dry run failed'}`);
+    const split = input.purpose === 'wallet_batch' ? ' A batch this large may be more than one transaction can carry: split it into smaller batches.' : '';
+    return fail(422, 'simulation_failed', `the transaction would fail on chain, so nobody is asked to sign it: ${simulated.error ?? 'the dry run failed'}.${split}`);
   }
 
   let ttl = Math.min(input.ttlMs ?? MAX_REQUEST_TTL_MS, MAX_REQUEST_TTL_MS);
