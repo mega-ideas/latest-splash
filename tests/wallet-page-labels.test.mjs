@@ -45,7 +45,7 @@ test('USDT and USDsui are shown as the coin that arrived, never counted as USDC,
   ]);
   assert.equal(history.converted.length, 2, 'the coins that need converting are their own list');
   assert.equal(history.usdc.length, 1);
-  assert.equal(history.converted[0].amount, '2.00 USDSUI');
+  assert.equal(history.converted[0].amount, '2.00 USDsui');
 });
 
 test('a funding source is verified, or checking with the way it gets checked', () => {
@@ -89,7 +89,7 @@ test('what a transaction does is listed in plain words from the decoded commands
   assert.match(lines[1], /3 USDC coins/);
   assert.match(lines[2], /5\.00 USDC/);
   assert.match(lines[2], /0x2222/);
-  assert.equal(lines.length, 4, 'a step with nothing a person needs to read (the withdrawal leg) and one unknown one: the unknown is dropped, never shown as code');
+  assert.equal(lines.length, 4, 'a command the page does not know is dropped, never shown as code');
 });
 
 test('no sentence here claims a licence, names a partner, says coming soon or mentions the test network', () => {
