@@ -178,3 +178,22 @@ test('every money-adjacent route asks for the terms beside its other gates', asy
   assert.match(gate, /status: 412/);
   assert.match(gate, /terms_not_accepted/);
 });
+
+test('the wallet routes that open a batch or a payment ask for the terms before they do anything', async () => {
+  // The Batch payouts page is padlocked until the terms are accepted, but a
+  // padlock is not a gate: the route is what refuses. The removed v1 batch
+  // route asked; the wallet routes that replaced it did not (p3-d-custody).
+  for (const file of [
+    'app/api/wallet/batches/route.ts',
+    'app/api/wallet/batches/review/route.ts',
+    'app/api/wallet/batches/[id]/start/route.ts',
+    'app/api/wallet/transfers/route.ts',
+    'app/api/wallet/transfers/quote/route.ts',
+  ]) {
+    const text = await readFile(new URL(`../${file}`, import.meta.url), 'utf8');
+    const post = text.slice(text.indexOf('export async function POST'));
+    assert.match(post, /requireTermsAccepted\(/, `${file}: POST must gate on the terms`);
+    // Before the rate limit and before the body is read, so a refused request costs nothing.
+    assert.ok(post.indexOf('requireTermsAccepted(') < post.indexOf('readJsonBody('), `${file}: the terms are asked first`);
+  }
+});

@@ -126,7 +126,7 @@ delete process.env.DATABASE_URL;
 delete process.env.SPLASH_CUSTODY_PACKAGE_ID;
 
 const { InMemoryProposalStore } = await import('../lib/queue/proposal-state.ts');
-const { executeApprovedProposal } = await import('../lib/server/approval-execution.ts');
+const { executeApprovedProposal, BATCH_PAYOUT_RETIRED_REASON } = await import('../lib/server/approval-execution.ts');
 const { resolveApprovalClaim } = await import('../lib/server/approved-proposal.ts');
 const { batchPayoutSubstance } = await import('../lib/server/step-up-subjects.ts');
 const settlement = await import('../lib/server/sui-settlement.ts');
@@ -230,13 +230,60 @@ test('an approval from one business is no approval in another', async () => {
   assert.equal((await presented(proposal, 'northwind')).approved, false);
 });
 
-test('a proposal with no payload on record still fails closed, naming nothing paid', async () => {
+test('an old payout-run proposal with no payload is recorded as retired, never told to re-authorize', async () => {
+  // Zeke's drafts never carried a payload, and the only writer of one was the
+  // removed route, so a payload-less BATCH_PAYOUT is every real one. It must
+  // reach the retired answer, not the "re-authorize the payment" one: there is
+  // no route left to re-authorize through.
+  for (const env of [{}, { NODE_ENV: 'production' }, { LAUNCH_SCOPE: 'stablecoin' }]) {
+    await withEnv(env, async () => {
+      const store = new InMemoryProposalStore();
+      globalThis.oxwalProposalStore = store;
+      const proposal = approvedBatch(store, `prop_retired_nopayload_${JSON.stringify(env).length}`);
+      const outcome = await executeApprovedProposal(proposal, null, context);
+      assert.equal(outcome.state, 'SKIPPED', JSON.stringify(env));
+      assert.equal(outcome.ref, undefined);
+      assert.equal(outcome.detail, BATCH_PAYOUT_RETIRED_REASON);
+      assert.match(outcome.detail, /Batch payouts/);
+      assert.doesNotMatch(outcome.detail, /re-authorize/i);
+      assert.equal(store.get(proposal.id).approvalConsumedBy, 'execution', 'spent once, like any other attempt');
+    });
+  }
+});
+
+test('a payment with no payload on record still fails closed, naming nothing paid', async () => {
   const store = new InMemoryProposalStore();
   globalThis.oxwalProposalStore = store;
-  const proposal = approvedBatch(store, 'prop_retired_4');
-  const outcome = await executeApprovedProposal(proposal, null, context);
+  const proposal = approvedBatch(store, 'prop_nopayload_payment');
+  const outcome = await executeApprovedProposal({ ...proposal, kind: 'PAYMENT' }, null, context);
   assert.equal(outcome.state, 'FAILED');
   assert.match(outcome.detail, /nothing was sent/i);
+});
+
+test("Zeke's batch-payout draft points at Batch payouts and promises nothing a draft cannot do", async () => {
+  process.env.FEATURE_KYB_GATE = 'false';
+  const { executeOxwalTool } = await import('../lib/agent/oxwal.ts');
+  const draft = await executeOxwalTool('proposeBatchPayout', {
+    orgId: 'demo-business',
+    corridor: 'MY_PH',
+    payouts: [{ counterpartyId: 'cp_verified_payee', amountUsd: 600, currency: 'USDC' }],
+  });
+  assert.equal(draft.kind, 'BATCH_PAYOUT');
+  assert.match(draft.explain.recommendation, /Batch payouts/);
+  assert.match(draft.explain.recommendation, /sends nothing|nothing is sent/i);
+  assert.doesNotMatch(draft.explain.recommendation, /Human approval is required in v1/);
+
+  // And approving that very draft ends on the retired answer, with no payload.
+  const outcome = await executeApprovedProposal(draft, draft.executionPayload ?? null, context);
+  assert.equal(outcome.state, 'SKIPPED');
+  assert.equal(outcome.detail, BATCH_PAYOUT_RETIRED_REASON);
+});
+
+test('no route asks approvers to approve a batch payout that cannot be carried out', async () => {
+  const dual = await readFile(at('lib/server/dual-approval.ts'), 'utf8');
+  assert.doesNotMatch(dual, /kind: Extract<ProposalKind, [^>]*'BATCH_PAYOUT'/);
+  const requests = await readFile(at('lib/server/approval-requests.ts'), 'utf8');
+  assert.doesNotMatch(requests, /a batch payout/);
 });
 
 test('in production, and in the stablecoin scope, the answer is the same: recorded, not carried out', async () => {
@@ -268,6 +315,48 @@ test('the staff transaction list holds transfers only; no batch row can be made 
   assert.equal(rows.some((row) => row.kind === 'batch' || row.functionName === 'settle_batch'), false);
   const admin = await readFile(at('app/admin/(console)/transactions/page.tsx'), 'utf8');
   assert.doesNotMatch(admin, /Batch payouts|listBatchesForStaff|No batch transactions/);
+});
+
+// ── Nothing outside the code scan points at what was removed ───────────────
+
+async function allFiles(dir) {
+  const out = [];
+  let entries;
+  try {
+    entries = await readdir(at(dir), { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const entry of entries) {
+    if (entry.name === 'build' || entry.name === 'node_modules') continue;
+    const rel = `${dir}/${entry.name}`;
+    if (entry.isDirectory()) out.push(...(await allFiles(rel)));
+    else out.push(rel);
+  }
+  return out;
+}
+
+test('the Move package, SECURITY.md and the docs do not point at the removed TypeScript', async () => {
+  const targets = ['SECURITY.md'];
+  for (const dir of ['docs', 'move']) {
+    for (const file of await allFiles(dir)) if (/\.(md|move|toml)$/.test(file)) targets.push(file);
+  }
+  const found = [];
+  for (const file of targets) {
+    const text = await readFile(at(file), 'utf8');
+    if (/batch-limits/.test(text)) found.push(`${file}: names lib/policy/batch-limits.ts`);
+    if (/sui-settlement\.ts:1528/.test(text)) found.push(`${file}: cites the removed batch PTB by line`);
+  }
+  assert.deepEqual(found, []);
+  const security = await readFile(at('SECURITY.md'), 'utf8');
+  const a12 = security.split('\n').find((line) => line.startsWith('| A-12 |')) ?? '';
+  assert.match(a12, /removed in v2 Phase 3/, 'A-12 says the batch PTB it describes is gone');
+});
+
+test('the approval replay does not word an idempotent answer as a payout run', async () => {
+  const replay = await readFile(at('lib/server/approval-replay.ts'), 'utf8');
+  assert.doesNotMatch(replay, /This run had already/);
+  assert.doesNotMatch(replay, /payout[- ]run/i, 'no copy or comment still speaks of the removed route');
 });
 
 test('the operator and support copy no longer describe the removed flow', async () => {
