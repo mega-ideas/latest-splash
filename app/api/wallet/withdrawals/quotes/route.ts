@@ -1,5 +1,5 @@
 import { readJsonBody } from '@/lib/server/http';
-import { limitWalletRequests, requireWithdrawalRequester } from '@/lib/server/wallet-route';
+import { limitWalletRequests, requireFundsAccess } from '@/lib/server/wallet-route';
 import { quoteWithdrawal } from '@/lib/server/withdrawals';
 import { withdrawalResponse, withdrawalRoute } from '@/lib/server/withdrawals-deps';
 
@@ -15,8 +15,8 @@ export const dynamic = 'force-dynamic';
 export async function POST(request: Request) {
   const gate = await withdrawalRoute(request);
   if (gate.response) return gate.response;
-  const asker = requireWithdrawalRequester(gate.route);
-  if (asker) return asker;
+  const noAccess = await requireFundsAccess(gate.route, 'withdraw', 'withdraw to your bank');
+  if (noAccess) return noAccess;
   const limited = await limitWalletRequests(gate.route);
   if (limited) return limited;
   const body = await readJsonBody(request);

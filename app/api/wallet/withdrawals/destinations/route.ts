@@ -1,5 +1,5 @@
 import { readJsonBody } from '@/lib/server/http';
-import { limitWalletRequests, requireOwner } from '@/lib/server/wallet-route';
+import { limitWalletRequests, requireFundsAccess, requireOwner } from '@/lib/server/wallet-route';
 import { addWithdrawalDestination, listWithdrawalDestinations } from '@/lib/server/withdrawals';
 import { withdrawalResponse, withdrawalRoute } from '@/lib/server/withdrawals-deps';
 
@@ -14,6 +14,8 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: Request) {
   const gate = await withdrawalRoute(request);
   if (gate.response) return gate.response;
+  const noAccess = await requireFundsAccess(gate.route, 'withdraw', 'see the bank accounts you withdraw to');
+  if (noAccess) return noAccess;
   return withdrawalResponse({ ok: true, destinations: await listWithdrawalDestinations(gate.deps) });
 }
 

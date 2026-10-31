@@ -1,5 +1,6 @@
 import { recheckDeposit } from '@/lib/server/wallet-funding';
-import { fundingResponse, fundingRoute, limitFunding, refuseViewer } from '@/lib/server/wallet-funding-route';
+import { fundingResponse, fundingRoute, limitFunding } from '@/lib/server/wallet-funding-route';
+import { requireFundsAccess } from '@/lib/server/wallet-route';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,8 +12,8 @@ export const dynamic = 'force-dynamic';
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const gate = await fundingRoute(request);
   if (gate.response) return gate.response;
-  const viewer = refuseViewer(gate.funding, 'recheck a deposit');
-  if (viewer) return viewer;
+  const noAccess = await requireFundsAccess(gate.funding.route, 'add_funds', 'recheck a deposit');
+  if (noAccess) return noAccess;
   const limited = await limitFunding(gate.funding);
   if (limited) return limited;
   const { id } = await params;

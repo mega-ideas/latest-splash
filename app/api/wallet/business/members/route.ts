@@ -4,7 +4,7 @@ import { isValidSuiAddress, normalizeSuiAddress } from '@mysten/sui/utils';
 import { changeWalletMembership, currentWalletMembers } from '@/lib/server/business-wallet';
 import { readJsonBody } from '@/lib/server/http';
 import { orgWalletMembers } from '@/lib/server/wallet-deps';
-import { asResponse, limitWalletRequests, NO_STORE, requireOwner, walletRoute } from '@/lib/server/wallet-route';
+import { asResponse, limitWalletRequests, NO_STORE, requireOwner, requireOwnerOrFinanceLead, walletRoute } from '@/lib/server/wallet-route';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,20 +23,26 @@ type Change = (typeof CHANGES)[number];
  *                                here, or the recovery party).
  *
  * A member named who is not in this org reads as absent (404).
+ *
+ * Who may ask: `add_owner` by an owner or the business's Finance lead (they
+ * start the request; only the wallet's signers can sign it, and the person
+ * added must already be an owner of the business with a passkey, which only an
+ * owner can make them). `remove_owner` and `set_recovery_party` by an owner.
  */
 export async function POST(request: Request) {
   const gate = await walletRoute(request);
   if (gate.response) return gate.response;
   const route = gate.route;
-  const notOwner = requireOwner(route, 'change the business owners');
-  if (notOwner) return notOwner;
-  const limited = await limitWalletRequests(route);
-  if (limited) return limited;
-  const { orgId, authority, ctx, db } = route;
-
   const body = await readJsonBody(request);
   const change = String(body.change ?? '') as Change;
   if (!CHANGES.includes(change)) return NextResponse.json({ error: 'Unknown change.' }, { status: 400, headers: NO_STORE });
+  // Starting a request to ADD a signer is the one thing the Finance lead may do here. Removing an owner and the
+  // recovery party stay an owner's. The owners' signers still read and sign the request; the role adds no signing power.
+  const notAllowed = change === 'add_owner' ? await requireOwnerOrFinanceLead(route, 'start a request to add a signer') : requireOwner(route, 'change the business owners');
+  if (notAllowed) return notAllowed;
+  const limited = await limitWalletRequests(route);
+  if (limited) return limited;
+  const { orgId, authority, ctx, db } = route;
 
   const current = await currentWalletMembers(ctx, db, orgId);
   if (!current.ok) return asResponse(current);

@@ -530,7 +530,7 @@ test('the team list names each person, role, and what they hold; the activity li
   assert.deepEqual([by['u-owner'].addFunds, by['u-owner'].withdraw], [true, true]);
   assert.equal(by['u-owner'].email, 'owner@acme.test');
   const activity = await listTeamActivity(db, 'acme', 50);
-  assert.deepEqual(activity.map((a) => a.action), ['finance_lead_appointed', 'member_access_granted']);
+  assert.deepEqual(activity.map((a) => a.action), ['finance_lead_appointed', 'member_access_granted', 'person_in_charge_appointed'], 'oldest first; the person in charge is a team grant too');
   assert.ok(activity.every((a) => typeof a.createdAt === 'string' && a.actorName && a.summary));
   assert.ok(!JSON.stringify(activity).includes('passwordHash'));
   await client.close();

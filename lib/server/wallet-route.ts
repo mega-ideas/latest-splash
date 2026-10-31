@@ -14,6 +14,8 @@ import { resolveAuthorityForSession, type AuthorityContext } from '@/lib/auth/au
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { RATE_LIMITS, enforceRateLimit } from '@/lib/server/rate-limit';
 import { requireSessionAccount } from '@/lib/server/session-account';
+import { fundsAccessOf, teamManager } from '@/lib/server/team-admin';
+import type { FundsAccessKind } from '@/lib/team/view';
 import { liveWalletContext } from '@/lib/server/wallet-deps';
 import { customerRefusal, refusalLogLine } from '@/lib/server/wallet-refusal';
 import type { WalletContext } from '@/lib/server/business-wallet';
@@ -65,11 +67,13 @@ export async function limitWalletReads(userId: string): Promise<Response | null>
   return enforceRateLimit({ rule: RATE_LIMITS.walletReadUser, key: userId, message: 'Too many requests. Try again shortly.' });
 }
 
-/** Only an owner (role admin) changes the wallet or pays from it. */
 /**
- * A withdrawal may be ASKED for by an owner or a staff member (Sky's
- * decision: staff may ask owners to approve); it opens the owners' signing
- * request, and only their quorum signs. A viewer cannot ask.
+ * Preparing a payment (a quote, a supplier payout, a batch review) may be
+ * done by an owner or a staff member (Sky's decision: staff may ask owners to
+ * approve); it opens the owners' signing request, and only their quorum signs.
+ * A viewer cannot. This is the payment gate. Add funds and Withdraw to the
+ * business's own bank are different: an owner grants those member by member
+ * (`requireFundsAccess`).
  */
 export function requireWithdrawalRequester(route: WalletRoute): Response | null {
   if (canAskForWithdrawal(route.authority.role)) return null;
@@ -82,9 +86,32 @@ export function requirePayoutReader(route: WalletRoute): Response | null {
   return NextResponse.json({ error: "Only an owner or a staff member can see the business's payouts and suppliers." }, { status: 403, headers: NO_STORE });
 }
 
+/** Only an owner (role admin) changes the wallet or pays from it. */
 export function requireOwner(route: WalletRoute, what: string): Response | null {
   if (route.authority.role === 'OWNER') return null;
   return NextResponse.json({ error: `Only an owner can ${what}.` }, { status: 403, headers: NO_STORE });
+}
+
+/**
+ * An owner, or the business's Finance lead. Used for exactly one thing on the
+ * wallet: starting a request to add a signer. The signers still sign it.
+ */
+export async function requireOwnerOrFinanceLead(route: WalletRoute, what: string): Promise<Response | null> {
+  if (route.authority.role === 'OWNER') return null;
+  if ((await teamManager(route.db, route.orgId, route.authority.userId)) === 'finance_lead') return null;
+  return NextResponse.json({ error: `Only an owner or the Finance lead can ${what}.` }, { status: 403, headers: NO_STORE });
+}
+
+/**
+ * Add funds and Withdraw to the business's own bank are for owners and for the
+ * staff and approvers an owner has granted them to (Settings → Team). A viewer
+ * never. The decision is read from the database on every request.
+ */
+export async function requireFundsAccess(route: WalletRoute, access: FundsAccessKind, what: string): Promise<Response | null> {
+  const held = await fundsAccessOf(route.db, route.orgId, route.authority.userId);
+  if (access === 'add_funds' ? held.addFunds : held.withdraw) return null;
+  if (route.authority.role === 'VIEWER') return NextResponse.json({ error: `A viewer cannot ${what}.`, code: 'viewer' }, { status: 403, headers: NO_STORE });
+  return NextResponse.json({ error: `You do not have access to ${what}. An owner can turn it on for you in Settings.`, code: 'no_funds_access' }, { status: 403, headers: NO_STORE });
 }
 
 /** A non-negative integer field (minor units, milliseconds) as a bigint, or null if absent or malformed. */

@@ -46,11 +46,12 @@ test('the route seals only a request the rest of the checks will accept, and pas
   assert.match(route, /destinationId/, 'and the destination');
 });
 
-test('bank accounts and the deposit address are for owners and those who may ask, not for viewers', () => {
+test('bank accounts and the deposit address are for owners and the members an owner let withdraw, not for anyone else', () => {
   const route = read('app/api/wallet/withdrawals/route.ts');
   const get = route.slice(route.indexOf('export async function GET'), route.indexOf('export async function POST'));
-  assert.match(get, /canAskForWithdrawal/, 'the destinations are gated by role');
-  assert.match(get, /destinations: \[\]/, 'a viewer gets no accounts');
+  assert.match(get, /fundsAccessOf\(/, 'the destinations are gated by what an owner granted');
+  assert.match(get, /\.withdraw\)/);
+  assert.match(get, /destinations: \[\]/, 'anyone else gets no accounts');
   assert.match(get, /depositAddress: null/, 'and no address');
 });
 

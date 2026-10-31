@@ -793,8 +793,8 @@ test('every withdrawal route takes the org from the session, owners alone change
       const at = source.indexOf(`export async function ${method}(`);
       if (at < 0) continue;
       const body = source.slice(at, source.indexOf('\n}\n', at));
-      // Staff may ask the owners to approve a withdrawal (Sky's decision); only owners change the bank accounts or the deposit address.
-      if ((r === 'route.ts' || r === 'quotes/route.ts') && method === 'POST') assert.match(body, /requireWithdrawalRequester\(gate\.route\)/, `${r} ${method}: a member who may ask`);
+      // Staff may ask the owners to approve a withdrawal (Sky's decision) once an owner lets them withdraw (Settings → Team); only owners change the bank accounts or the deposit address.
+      if ((r === 'route.ts' || r === 'quotes/route.ts') && method === 'POST') assert.match(body, /requireFundsAccess\(gate\.route, 'withdraw'/, `${r} ${method}: a member an owner let withdraw`);
       else assert.match(body, /requireOwner\(gate\.route,/, `${r} ${method}: owners only`);
       assert.match(body, /limitWalletRequests\(gate\.route\)/, `${r} ${method}: rate-limited`);
     }

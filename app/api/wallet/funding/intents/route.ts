@@ -1,8 +1,8 @@
 import { readJsonBody } from '@/lib/server/http';
 import { createFundingIntent, listFundingIntents } from '@/lib/server/wallet-funding';
 import { intentInputFrom } from '@/lib/server/wallet-funding-input';
-import { fundingResponse, fundingRoute, limitFunding, refuseViewer } from '@/lib/server/wallet-funding-route';
-import { refusal } from '@/lib/server/wallet-route';
+import { fundingResponse, fundingRoute, limitFunding } from '@/lib/server/wallet-funding-route';
+import { refusal, requireFundsAccess } from '@/lib/server/wallet-route';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,8 +26,8 @@ export async function POST(request: Request) {
   const gate = await fundingRoute(request);
   if (gate.response) return gate.response;
   const f = gate.funding;
-  const viewer = refuseViewer(f, 'add funds');
-  if (viewer) return viewer;
+  const noAccess = await requireFundsAccess(f.route, 'add_funds', 'add funds');
+  if (noAccess) return noAccess;
   const limited = await limitFunding(f);
   if (limited) return limited;
   const input = intentInputFrom(await readJsonBody(request), { userId: f.route.authority.userId, idempotencyKey: request.headers.get('idempotency-key') });

@@ -2,8 +2,8 @@ import { validClientKey } from '@/lib/funding/wallet-funding';
 import { readJsonBody } from '@/lib/server/http';
 import { makePaymentRecorder } from '@/lib/server/payment-record';
 import { sealAdapter } from '@/lib/server/seal';
-import { canAskForWithdrawal } from '@/lib/payouts/withdrawal-rules';
-import { limitWalletRequests, requireWithdrawalRequester } from '@/lib/server/wallet-route';
+import { fundsAccessOf } from '@/lib/server/team-admin';
+import { limitWalletRequests, requireFundsAccess } from '@/lib/server/wallet-route';
 import { storeEncryptedInvoice } from '@/lib/server/walrus';
 import { createWithdrawal, listWithdrawalDestinations, listWithdrawals, parseBankPayoutRequest, withdrawalDepositAddress } from '@/lib/server/withdrawals';
 import { withdrawalResponse, withdrawalRoute } from '@/lib/server/withdrawals-deps';
@@ -16,9 +16,10 @@ export const dynamic = 'force-dynamic';
  *
  * GET   this business's withdrawals (amounts and statuses). Its own bank
  *       accounts and its deposit address with the partner go only to the
- *       owners and the staff who may ask for a withdrawal; a viewer gets
- *       neither, and no account on the withdrawals.
- * POST  an owner, or a staff member asking the owners to approve, withdraws: { destinationId, amountMinor, acceptedReceiveMinor,
+ *       owners and the members an owner let withdraw (Settings → Team);
+ *       everyone else gets neither, and no account on the withdrawals.
+ * POST  an owner, or a member an owner let withdraw and who is asking the
+ *       owners to approve, withdraws: { destinationId, amountMinor, acceptedReceiveMinor,
  *       maxFeeMinor } with an Idempotency-Key header (or `clientKey`). The
  *       sealed audit bundle behind the receipt (its content hash and blob id)
  *       is made here, by the server, and fails closed in production
@@ -35,8 +36,8 @@ export async function GET(request: Request) {
     listWithdrawalDestinations(gate.deps),
     withdrawalDepositAddress(gate.deps),
   ]);
-  // Bank accounts and the deposit address are for those who may ask for a withdrawal; a viewer sees amounts and statuses only.
-  if (!canAskForWithdrawal(gate.route.authority.role)) {
+  // Bank accounts and the deposit address are for the owners and the members an owner let withdraw; everyone else sees amounts and statuses only.
+  if (!(await fundsAccessOf(gate.route.db, gate.route.orgId, gate.route.authority.userId)).withdraw) {
     return withdrawalResponse({ ok: true, withdrawals: withdrawals.map((w) => ({ ...w, destination: null })), destinations: [], depositAddress: null });
   }
   return withdrawalResponse({ ok: true, withdrawals, destinations, depositAddress });
@@ -45,8 +46,8 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const gate = await withdrawalRoute(request);
   if (gate.response) return gate.response;
-  const asker = requireWithdrawalRequester(gate.route);
-  if (asker) return asker;
+  const noAccess = await requireFundsAccess(gate.route, 'withdraw', 'withdraw to your bank');
+  if (noAccess) return noAccess;
   const limited = await limitWalletRequests(gate.route);
   if (limited) return limited;
   const body = await readJsonBody(request);

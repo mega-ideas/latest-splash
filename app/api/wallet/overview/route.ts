@@ -5,6 +5,7 @@ import { currentWalletMembers, walletRegistration } from '@/lib/server/business-
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { orgMemberNames } from '@/lib/server/org-member-names';
 import { requireSessionAccount } from '@/lib/server/session-account';
+import { fundsAccessOf } from '@/lib/server/team-admin';
 import { liveWalletContext } from '@/lib/server/wallet-deps';
 import { buildWalletOverview } from '@/lib/server/wallet-overview';
 import { limitWalletReads, NO_STORE } from '@/lib/server/wallet-route';
@@ -41,7 +42,8 @@ export async function GET(request: Request) {
   if (!live.ok) {
     const walletState = live.status === 409 ? 'none' : live.status === 503 ? 'off' : 'unavailable';
     return NextResponse.json(
-      { role: authority.role, walletState, wallet: null, balance: null, balanceError: null, signers: null, canManage: authority.role === 'OWNER' },
+      // Without a wallet context there is no database handle here: an owner has Add funds and Withdraw, no one else is offered them.
+      { role: authority.role, walletState, wallet: null, balance: null, balanceError: null, signers: null, canManage: authority.role === 'OWNER', access: { addFunds: authority.role === 'OWNER', withdraw: authority.role === 'OWNER' } },
       { headers: NO_STORE },
     );
   }
@@ -62,5 +64,7 @@ export async function GET(request: Request) {
     // Names of members of THIS business only: the membership join keeps another business's people out.
     namesOf: (ids) => orgMemberNames(db, orgId, ids),
   });
-  return NextResponse.json(overview, { headers: NO_STORE });
+  // What this person may do with Add funds and Withdraw, from the server: owners both, others only what an owner granted.
+  const access = await fundsAccessOf(db, orgId, authority.userId);
+  return NextResponse.json({ ...overview, access }, { headers: NO_STORE });
 }

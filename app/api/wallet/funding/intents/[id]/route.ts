@@ -1,5 +1,6 @@
 import { cancelFundingIntent, getFundingIntent } from '@/lib/server/wallet-funding';
-import { fundingResponse, fundingRoute, refuseViewer } from '@/lib/server/wallet-funding-route';
+import { fundingResponse, fundingRoute } from '@/lib/server/wallet-funding-route';
+import { requireFundsAccess } from '@/lib/server/wallet-route';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,8 +19,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const gate = await fundingRoute(request);
   if (gate.response) return gate.response;
-  const viewer = refuseViewer(gate.funding, 'cancel a top-up');
-  if (viewer) return viewer;
+  const noAccess = await requireFundsAccess(gate.funding.route, 'add_funds', 'cancel a top-up');
+  if (noAccess) return noAccess;
   const { id } = await params;
   return fundingResponse(await cancelFundingIntent(gate.funding.deps, id));
 }

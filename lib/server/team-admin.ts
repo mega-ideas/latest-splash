@@ -164,7 +164,7 @@ export async function changeTeamMemberRole(
   const updated = await db
     .update(memberships)
     .set({ role, updatedAt: now })
-    .where(and(eq(memberships.orgId, input.orgId), eq(memberships.userId, input.userId), eq(memberships.role, current)))
+    .where(and(eq(memberships.orgId, input.orgId), eq(memberships.userId, input.userId), eq(memberships.role, current as MembershipRole)))
     .returning({ id: memberships.id });
   // Changed under us by someone else at the same moment: nothing was done here.
   if (updated.length === 0) return fail(409, 'changed_meanwhile', 'This person’s role changed while you were changing it. Reload and look again.');
@@ -334,7 +334,7 @@ export async function listTeam(db: DrizzleDb, orgId: string): Promise<TeamMember
 }
 
 /** The latest team lines of the trail for one business, oldest first, with names and a sentence. */
-export async function listTeamActivity(db: DrizzleDb, orgId: string, limit = 50): Promise<Array<TeamActivityWire & { detail: unknown }>> {
+export async function listTeamActivity(db: DrizzleDb, orgId: string, limit = 50): Promise<TeamActivityWire[]> {
   const rows = await db
     .select()
     .from(walletAuthorityEvents)
@@ -351,7 +351,7 @@ export async function listTeamActivity(db: DrizzleDb, orgId: string, limit = 50)
     .map((r: { id: string; action: string; detail: unknown; createdAt: Date; actorUserId: string; subjectUserId: string | null }) => {
       const actorName = nameOf(r.actorUserId) ?? 'Someone';
       const subjectName = nameOf(r.subjectUserId);
-      return { id: r.id, action: r.action, createdAt: r.createdAt.toISOString(), actorName, subjectName, summary: activitySummary({ action: r.action, detail: r.detail, actorName, subjectName }), detail: r.detail };
+      return { id: r.id, action: r.action, createdAt: r.createdAt.toISOString(), actorName, subjectName, summary: activitySummary({ action: r.action, detail: r.detail, actorName, subjectName }) };
     })
     .reverse();
 }

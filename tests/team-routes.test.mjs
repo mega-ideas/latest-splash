@@ -165,9 +165,13 @@ test('every Withdraw route asks for the Withdraw access an owner granted; bank a
   assert.match(handler(deposit, 'POST'), /requireOwner\(/);
   const one = code(read('app/api/wallet/withdrawals/[id]/route.ts'));
   assert.match(handler(one, 'GET'), /await requireFundsAccess\([^)]*'withdraw'/);
+  // The any-staff gate is for PREPARING a payment (a quote, a supplier payout, a batch review); no bank-withdrawal route uses it any more.
+  for (const path of ['quotes/route.ts', 'route.ts', 'destinations/route.ts', 'deposit-address/route.ts', '[id]/route.ts']) {
+    assert.doesNotMatch(code(read(`app/api/wallet/withdrawals/${path}`)), /requireWithdrawalRequester|canAskForWithdrawal/, path);
+  }
   const walletRoute = code(read('lib/server/wallet-route.ts'));
-  assert.doesNotMatch(walletRoute, /export function requireWithdrawalRequester/, 'the any-staff gate is gone');
   assert.match(walletRoute, /export async function requireFundsAccess/);
+  assert.match(walletRoute, /fundsAccessOf\(route\.db, route\.orgId, route\.authority\.userId\)/, 'read from the database on every request, for the session\'s own person');
 });
 
 test('the wallet overview carries what this person may do, from the server', () => {

@@ -1,7 +1,7 @@
 import { readJsonBody } from '@/lib/server/http';
 import { listWalletDeposits, recordDeposit } from '@/lib/server/wallet-funding';
-import { fundingResponse, fundingRoute, limitFunding, refuseViewer } from '@/lib/server/wallet-funding-route';
-import { refusal } from '@/lib/server/wallet-route';
+import { fundingResponse, fundingRoute, limitFunding } from '@/lib/server/wallet-funding-route';
+import { refusal, requireFundsAccess } from '@/lib/server/wallet-route';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,8 +23,8 @@ export async function POST(request: Request) {
   const gate = await fundingRoute(request);
   if (gate.response) return gate.response;
   const f = gate.funding;
-  const viewer = refuseViewer(f, 'record a deposit');
-  if (viewer) return viewer;
+  const noAccess = await requireFundsAccess(f.route, 'add_funds', 'record a deposit');
+  if (noAccess) return noAccess;
   const limited = await limitFunding(f);
   if (limited) return limited;
   const body = await readJsonBody(request);

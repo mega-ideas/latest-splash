@@ -22,11 +22,12 @@ export async function fundingRoute(request: Request): Promise<{ funding: Funding
   return { funding: { route, deps: fundingDepsFor({ orgId: route.orgId, ctx: route.ctx, db: route.db }) }, response: null };
 }
 
-/** A viewer reads; adding funds, recording a deposit or looking again needs any other role. */
-export function refuseViewer(f: FundingRoute, what: string): Response | null {
-  if (f.route.authority.role !== 'VIEWER') return null;
-  return NextResponse.json({ error: `A viewer cannot ${what}.`, code: 'viewer' }, { status: 403, headers: NO_STORE });
-}
+/*
+ * Adding funds, recording a deposit, looking again and cancelling a top-up ask
+ * for the Add funds access an owner granted (`requireFundsAccess`, wallet-route).
+ * Anyone can SEND money to the wallet from any wallet; this is about who may
+ * use the dashboard's Add funds. A deposit still follows the screening and holds.
+ */
 
 /** Funding sources decide where the business's money may come from: owners only. */
 export function requireFundingOwner(f: FundingRoute, what: string): Response | null {

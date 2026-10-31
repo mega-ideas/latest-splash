@@ -148,8 +148,9 @@ export async function grantRole(
   // The same function the fail-closed tests assert against. One grant path.
   // It re-checks verification itself; a refusal from it is surfaced in the
   // console's own vocabulary rather than leaking as a 500.
+  let granted: { created: boolean; userId: string };
   try {
-    await grantMembership(db, {
+    granted = await grantMembership(db, {
       email,
       orgId: input.orgId,
       role: input.role,
@@ -158,6 +159,12 @@ export async function grantRole(
   } catch (error) {
     if (error instanceof GrantRefusedError) throw new MembershipAdminError(error.message, error.code);
     throw error;
+  }
+  // On the business's own trail, under the operator's name: the owners see that Splash support added someone.
+  if (granted.created) {
+    const { recordAuthorityEvent } = await import('./wallet-authority.ts');
+    const by = input.grantedBy.startsWith('operator:') ? input.grantedBy : `operator:${input.grantedBy}`;
+    await recordAuthorityEvent(db as never, { orgId: input.orgId, actorUserId: by, action: 'member_added', subjectUserId: granted.userId, detail: { role: input.role } });
   }
 }
 

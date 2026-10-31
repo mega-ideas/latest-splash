@@ -7,6 +7,8 @@ export type Overview = {
   balanceError: string | null;
   signers: { threshold: number; totalWeight: number; singleSigner: boolean; members: Array<{ name: string; you: boolean; weight: number }> } | null;
   canManage: boolean;
+  /** What this person may do with Add funds and Withdraw: owners both, others only what an owner granted. */
+  access?: { addFunds: boolean; withdraw: boolean };
 };
 
 export type FundingSource = {
