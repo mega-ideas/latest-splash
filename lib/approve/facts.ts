@@ -138,6 +138,16 @@ export function approveFacts(review: DeviceReview, opts: { names?: Array<string 
   };
 }
 
+/** One line for a request's card in the inbox. (Not yet worded: the first line of the request stands in.) */
+export function cardSummary(facts: ApproveFacts): { text: string; warn: boolean } {
+  return { text: facts.headline, warn: false };
+}
+
+/** What the person is told after they decline or withdraw. (Not yet worded.) */
+export function closeOutcomeText(outcome: string | undefined): string {
+  return outcome === 'cancelled' ? 'You withdrew this request. Nothing was signed or sent.' : 'You declined this request. The other owners can still sign it.';
+}
+
 /** What a signing request looks like to the device: its bytes, the digest and hash it claims, and the ids it may touch. */
 export type ReviewableRequest = { transactionBytes: string; digest: string; bytesHash: string; expect: unknown };
 

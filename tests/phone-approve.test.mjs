@@ -14,7 +14,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-import { approveFacts, receiveApprox, rateText } from '../lib/approve/facts.ts';
+import { approveFacts, cardSummary, closeOutcomeText, receiveApprox, rateText } from '../lib/approve/facts.ts';
 import { formatMoney } from '../lib/formatMoney.ts';
 import { copyViolations } from '../scripts/copy-rules.mjs';
 
@@ -190,4 +190,113 @@ test('the Approve words pass the copy rules and use no coral, Demo, testnet or p
     assert.deepEqual(copyViolations(file, text), [], file);
     assert.doesNotMatch(text, /E39774|coral|\bDemo\b|\bDEMO\b|Coming soon|testnet|non-custodial/i, file);
   }
+});
+
+// ── Review round 5.10: nothing hides behind a payment's headline ─────────────────────────────────────
+
+const send = (amountMinor = '900000000', to = A(7)) => ({ type: 'send_funds', asset: USDC, recipient: to, amountMinor });
+const usd = { kind: 0, targetCurrency: 'USD', fxRateUsdLocal: '1000000' };
+
+test('a payment that also sends funds somewhere else is blocked, names the extra send, and counts what leaves', () => {
+  const f = approveFacts(review([...payment({ ...usd, amountMinor: '250000000' }, { maxFeeMinor: '250000' }, '250250000'), withdraw('900000000'), send()]));
+  assert.equal(f.kind, 'payment');
+  assert.equal(f.headline, 'Pay 250.00 USDC');
+  assert.equal(f.blocked, true);
+  assert.match(f.blockedReason, /also/i);
+  assert.deepEqual(f.unexpected.map((s) => s.line.split(' ')[0]), ['Send']);
+  assert.equal(f.unexpected[0].fields.find((x) => x.address).value, A(7), 'the address is the one in the bytes, in full');
+  assert.equal(f.leavesAtMost, '1,150.25');
+  assert.match(f.mismatch, /more leaves the wallet/i);
+});
+
+test('a payment whose withdrawals are not exactly its amounts and fees is blocked even with no extra command', () => {
+  const f = approveFacts(review(payment({ ...usd }, {}, '9000000000')));
+  assert.equal(f.blocked, true);
+  assert.match(f.mismatch, /more leaves the wallet|does not add up/i);
+  assert.deepEqual(f.unexpected, [], 'no command is out of place; the sum is');
+  const less = approveFacts(review(payment({ ...usd }, {}, '1000')));
+  assert.equal(less.blocked, true, 'less than the payment needs does not add up either');
+});
+
+test('a batch adds up per payment: every payment and its fee bound, together, is every withdrawal', () => {
+  const ok = approveFacts(review([...payment({ ...usd, recipient: A(2), amountMinor: '1000000000' }, { maxFeeMinor: '500000' }, '1000500000'), ...payment({ ...usd, recipient: A(3), amountMinor: '2000000000' }, { maxFeeMinor: '600000' }, '2000600000')]));
+  assert.equal(ok.blocked, false);
+  assert.equal(ok.mismatch, null);
+  const extra = approveFacts(review([...payment({ ...usd, recipient: A(2), amountMinor: '1000000000' }, { maxFeeMinor: '500000' }, '1000500000'), ...payment({ ...usd, recipient: A(3), amountMinor: '2000000000' }, { maxFeeMinor: '600000' }, '2000600000'), withdraw('5000000'), send('5000000')]));
+  assert.equal(extra.kind, 'batch');
+  assert.equal(extra.blocked, true);
+});
+
+test('a payment that pays an intent opened elsewhere, or opens one it does not pay, is not a plain payment', () => {
+  const own = approveFacts(review([withdraw(), open({ ...usd }), pay({ intent: { intentId: A(4), recipient: A(5), amountMinor: '5000000000', kind: 0, targetCurrency: 'USD', fxRateUsdLocal: '1000000', expiresAtMs: '1', asset: USDC } })]));
+  assert.equal(own.blocked, true, 'one command opens a payment and the next pays a different one');
+  const unpaid = approveFacts(review([withdraw(), open({ ...usd })]));
+  assert.equal(unpaid.blocked, true, 'a payment opened and never paid is not what the headline says');
+});
+
+test('known bookkeeping is not an alarm: coins merged and joined for a payment, the receipt, the cleanup', () => {
+  const f = approveFacts(review([{ type: 'merge_coins', coins: 3 }, { type: 'coin_to_balance', asset: USDC }, { type: 'join_balance', asset: USDC }, ...payment({ ...usd })]));
+  assert.equal(f.blocked, false);
+  assert.deepEqual(f.unexpected, []);
+});
+
+test('a currency the screen cannot word does not crash it: no rate is shown and the request is blocked', () => {
+  for (const currency of ['MYR1', 'US$', '', 'x'.repeat(40), 'PH P']) {
+    let f;
+    assert.doesNotThrow(() => { f = approveFacts(review(payment({ targetCurrency: currency, fxRateUsdLocal: '4500000' }))); }, currency);
+    assert.equal(f.blocked, true, currency);
+    assert.match(f.blockedReason, /rate/i, currency);
+    assert.equal(f.payments[0].rate, null, currency);
+  }
+});
+
+test('a payment in a currency that is not USD with no rate in the bytes is blocked: the signer cannot see what is received', () => {
+  const f = approveFacts(review(payment({ fxRateUsdLocal: '0' })));
+  assert.equal(f.blocked, true);
+  assert.match(f.blockedReason, /rate/i);
+  const usdc = approveFacts(review(payment({ ...usd })));
+  assert.equal(usdc.blocked, false, 'a payment in dollars has no rate to be missing');
+});
+
+test('every card says the same thing the screen would: a clean payment its amount, a blocked one to not sign, a change its first line and how many more', () => {
+  assert.deepEqual(cardSummary(approveFacts(review(payment({ ...usd })))), { text: '5,000.00 USDC · Splash business', warn: false });
+  const batch = approveFacts(review([...payment({ ...usd, recipient: A(2) }, {}, '5001000000'), ...payment({ ...usd, recipient: A(3) }, {}, '5001000000')]));
+  assert.deepEqual(cardSummary(batch), { text: '2 payments in one transaction', warn: false });
+  const blocked = cardSummary(approveFacts(review([...payment({ ...usd }), withdraw('1'), send('1')])));
+  assert.equal(blocked.warn, true);
+  assert.match(blocked.text, /^Do not sign/);
+  const one = cardSummary(approveFacts(review([{ type: 'set_limits', policy: A(1), perPaymentMaxMinor: '2000000000', secondApprovalThresholdMinor: '750000000' }])));
+  assert.match(one.text, /^Change the limits/);
+  assert.doesNotMatch(one.text, /more/);
+  const many = cardSummary(approveFacts(review([{ type: 'set_limits', policy: A(1), perPaymentMaxMinor: '2000000000', secondApprovalThresholdMinor: '750000000' }, { type: 'remove_spender', policy: A(1), spender: A(6) }, { type: 'remove_owner', address: A(8) }])));
+  assert.match(many.text, /^Change the limits.* and 2 more changes$/);
+  assert.equal(many.warn, false);
+});
+
+test('what the declining person is told is what happened: withdrawn, declined and still open, or declined and closed', () => {
+  assert.match(closeOutcomeText('cancelled'), /withdrew/);
+  assert.match(closeOutcomeText('declined'), /can still sign/);
+  const closed = closeOutcomeText('declined_and_closed');
+  assert.match(closed, /closed/);
+  assert.match(closed, /nothing was sent/i);
+  assert.doesNotMatch(closed, /can still sign/, 'it must not say the others can still sign a request that has closed');
+  assert.match(closeOutcomeText(undefined), /declined/i, 'an answer it does not know is worded as the safe one');
+});
+
+test('the Approve screen opens the steps whenever one is not known bookkeeping, and says why it will not sign', () => {
+  assert.match(screen, /open=\{facts\.kind === 'change' \|\| facts\.unexpected\.length > 0\}/);
+  assert.match(screen, /facts\.blockedReason/);
+  assert.match(code(read('components/approve/ApproveInbox.tsx')), /cardSummary\(/, 'the card is worded by the same facts, not by its first line');
+});
+
+test('the sign panel and the screen cannot crash on a request: one reading of the facts, blocked ones not signed', () => {
+  assert.match(panel, /facts\.blocked|blocked = /);
+  assert.match(panel, /blockedReason/);
+  assert.doesNotMatch(panel, /approveFacts\(review\)\.payments\[0\]\?\.rate/, 'the rate is read from the one set of facts');
+});
+
+test('the requester can withdraw a request after signing it, and a person who declined a request that closed is told it closed', () => {
+  const page = read('components/approve/ApproveDetail.tsx');
+  assert.match(page, /closeOutcomeText\(/);
+  assert.match(page, /requester \|\| !request\.you\.signed/);
 });

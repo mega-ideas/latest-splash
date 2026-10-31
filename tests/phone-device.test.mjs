@@ -10,7 +10,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import { PHONE_MAX_WIDTH, PHONE_MEDIA_QUERY, isPhoneUserAgent, phoneHintFromHeaders, resolvePhone } from '../lib/device.ts';
-import { PHONE_TABS, SIGNING_POLL_MS, badgeText, phoneTabCurrent, waitingForMe } from '../lib/dashboard/phone.ts';
+import { PHONE_TABS, SIGNING_POLL_MS, badgeText, phoneTabCurrent, readWaiting, waitingForMe } from '../lib/dashboard/phone.ts';
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 const headers = (map) => ({ get: (name) => map[name.toLowerCase()] ?? null });
@@ -103,4 +103,38 @@ test('one provider and one hook say which layout a component renders', () => {
   const shell = read('components/dashboard/DashboardShell.tsx');
   assert.match(shell, /<DeviceProvider phoneHint=\{phoneHint\}/);
   assert.match(shell, /<PhoneTabBar\b/);
+});
+
+// ── Review round 5.10 ─────────────────────────────────────────────────────────
+
+test('the badge keeps the last good count through a look that failed, and stops looking once the session or the wallet is not there', () => {
+  assert.deepEqual(readWaiting(3, null), { count: 3, stop: false }, 'no answer at all keeps what was known');
+  assert.deepEqual(readWaiting(3, { status: 500 }), { count: 3, stop: false });
+  assert.deepEqual(readWaiting(3, { status: 200, body: { waiting: 'x' } }), { count: 3, stop: false });
+  assert.deepEqual(readWaiting(3, { status: 200, body: { waiting: -1 } }), { count: 3, stop: false });
+  assert.deepEqual(readWaiting(3, { status: 200, body: null }), { count: 3, stop: false });
+  assert.deepEqual(readWaiting(3, { status: 200, body: { waiting: 2 } }), { count: 2, stop: false });
+  assert.deepEqual(readWaiting(3, { status: 200, body: { waiting: 0 } }), { count: 0, stop: false });
+  for (const status of [401, 403, 404]) assert.deepEqual(readWaiting(3, { status }), { count: 0, stop: true }, `${status}: the session is gone or there is no wallet to sign for`);
+});
+
+test('the tab bar asks for a count and nothing else, and stops asking when told it is not signed in', () => {
+  const bar = read('components/dashboard/PhoneTabBar.tsx');
+  assert.match(bar, /\/api\/wallet\/signing-requests\?count=1/);
+  assert.doesNotMatch(bar, /fetch\('\/api\/wallet\/signing-requests'/, 'it does not fetch every request with its bytes just to count them');
+  assert.match(bar, /readWaiting\(/);
+  assert.match(bar, /stopped/);
+  const route = read('app/api/wallet/signing-requests/route.ts');
+  assert.match(route, /searchParams\.get\('count'\)/);
+  assert.match(route, /waiting: waitingForMe\(/);
+});
+
+test('the phone action bar is inert while the menu is open, as the page and the tab bar are', () => {
+  const device = read('components/dashboard/Device.tsx');
+  assert.match(device, /export function useModalOpen\(/);
+  assert.match(device, /modalOpen = false/);
+  assert.match(read('components/dashboard/DashboardShell.tsx'), /<DeviceProvider phoneHint=\{phoneHint\} modalOpen=\{mobileOpen\}/);
+  const bar = read('components/dashboard/PhoneBar.tsx');
+  assert.match(bar, /useModalOpen\(\)/);
+  assert.match(bar, /inert=\{modalOpen\}/);
 });

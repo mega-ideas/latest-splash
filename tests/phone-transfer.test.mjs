@@ -253,3 +253,28 @@ test('a new question is announced: its heading takes focus, except where the que
   assert.match(phone, /<h1 ref=\{heading\} tabIndex=\{-1\}/);
   assert.equal((phone.match(/<TextQuestion autoFocus /g) ?? []).length, 6, 'every single-field screen opens its keyboard');
 });
+
+// ── Review round 5.10: the draft cannot be edited under a request that is already out ────────────────
+
+test('once the request is made the phone has no Back and no question count, so the draft cannot be changed under a request in flight', () => {
+  assert.match(code(phone), /const sent = made !== null;/);
+  assert.match(code(phone), /\{!paid && !sent \? \(/, 'the header with Back and “Question n of m” is drawn only before the request is made');
+  assert.match(code(phone), /aria-label="Back" disabled=\{sending\} onClick=\{\(\) => goTo\(back\)\}/, 'and Back is off while the request is being sent');
+  assert.match(code(phone), /onSending=\{setSending\}/);
+  assert.match(code(phone), /const \[sending, setSending\] = useState\(false\)/);
+});
+
+test('Review tells the phone when it is sending, and its own Back is off while it does', () => {
+  const review = code(read('components/transfer/StepReview.tsx'));
+  assert.match(review, /onSending\?: \(sending: boolean\) => void/);
+  assert.match(review, /onSending\?\.\(sending\)/);
+  assert.match(review, /<QuietButton type="button" disabled=\{sending\} onClick=\{back\}/);
+});
+
+test('a window moved across the phone break in the middle of a payment keeps the request: it lives above the layout switch, and Review sends it to that', () => {
+  const text = code(flow);
+  assert.ok(text.indexOf('useState<Made | null>(null)') > 0 && text.indexOf('useState<Made | null>(null)') < text.indexOf('if (phone) {'), 'the request is held by the flow, not by either layout');
+  assert.match(text, /const onMade = useCallback/);
+  const review = code(read('components/transfer/StepReview.tsx'));
+  assert.match(review, /onMade\(\{ ref: transfer\.id/, 'a send that outlives its layout still hands its request to the flow');
+});

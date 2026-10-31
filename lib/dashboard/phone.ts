@@ -60,3 +60,8 @@ export function waitingForMe(requests: unknown): number {
   if (!Array.isArray(requests)) return 0;
   return (requests as WaitingView[]).filter((r) => r?.status === 'collecting' && r.you?.mustSign === true && r.you.signed !== true && r.you.declined !== true).length;
 }
+
+/** (Not yet built.) */
+export function readWaiting(previous: number, _answer: { status: number; body?: unknown } | null): { count: number; stop: boolean } {
+  return { count: previous, stop: false };
+}
