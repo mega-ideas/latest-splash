@@ -33,6 +33,27 @@ test('the withdrawal route checks cheaply before it seals, and a retry seals not
   assert.doesNotMatch(route, /String\(body\.amountMinor/);
 });
 
+test('the route seals only a request the rest of the checks will accept, and passes no stand-in bundle', () => {
+  const route = read('app/api/wallet/withdrawals/route.ts');
+  assert.doesNotMatch(code(route), /'00'\.repeat|walrusBlobId = '00'/, 'no zero hash or blob id stands in for a bundle');
+  const post = route.indexOf('export async function POST');
+  const sealAt = route.indexOf('makePaymentRecorder({');
+  for (const check of ['parseBankPayoutRequest(', 'withdrawalDepositAddress(', 'listWithdrawalDestinations(']) {
+    const at = route.indexOf(check, post);
+    assert.ok(at > 0 && at < sealAt, `${check} comes before anything is sealed`);
+  }
+  assert.match(route, /acceptedReceiveMinor/, 'the sealed record names the amount the owner accepted');
+  assert.match(route, /destinationId/, 'and the destination');
+});
+
+test('bank accounts and the deposit address are for owners and those who may ask, not for viewers', () => {
+  const route = read('app/api/wallet/withdrawals/route.ts');
+  const get = route.slice(route.indexOf('export async function GET'), route.indexOf('export async function POST'));
+  assert.match(get, /canAskForWithdrawal/, 'the destinations are gated by role');
+  assert.match(get, /destinations: \[\]/, 'a viewer gets no accounts');
+  assert.match(get, /depositAddress: null/, 'and no address');
+});
+
 test('the sealed record names the business and the bank account holder the business saved, not text from the request', () => {
   const route = read('app/api/wallet/withdrawals/route.ts');
   assert.match(route, /companyName\(\)/);

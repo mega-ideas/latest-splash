@@ -565,6 +565,24 @@ test('a worse rate, a higher fee than shown, a fee over the ceiling or no audit 
   await t.w.client.close();
 });
 
+test('an all-zero bundle is never accepted, and a retry of a withdrawal already made needs no bundle', async () => {
+  const t = await setup();
+  const { destination } = await readyToWithdraw(t);
+  const q = await quoted(t, destination.id);
+  const base = { destinationId: destination.id, amountMinor: '1000000000', maxFeeMinor: q.maxFeeMinor, acceptedReceiveMinor: q.receiveMinor };
+  const zero = await createWithdrawal(t.deps(), 'u-founder', { ...base, clientKey: 'ck_zero_bundle', contentHash: '00'.repeat(32), walrusBlobId: '00' });
+  assert.equal(zero.code, 'no_audit_bundle', 'a sentinel is not a bundle');
+  const none = await createWithdrawal(t.deps(), 'u-founder', { ...base, clientKey: 'ck_none_bundle' });
+  assert.equal(none.code, 'no_audit_bundle');
+  const first = await createWithdrawal(t.deps(), 'u-founder', { ...base, clientKey: 'ck_retry_nobundle', ...bundle() });
+  assert.equal(first.ok, true);
+  const again = await createWithdrawal(t.deps(), 'u-founder', { ...base, clientKey: 'ck_retry_nobundle' });
+  assert.equal(again.ok, true, 'the retry is answered from the stored withdrawal, with no bundle to make');
+  assert.equal(again.created, false);
+  assert.equal(again.withdrawal.id, first.withdrawal.id);
+  await t.w.client.close();
+});
+
 test('the partner is never sent an account the intent does not commit to', async () => {
   const t = await setup();
   const { destination } = await readyToWithdraw(t);
