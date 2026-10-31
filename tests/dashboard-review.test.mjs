@@ -178,9 +178,14 @@ test('the named failure states use --error, and attention states --warn', async 
   const step = await source('components/transfer/StepReview.tsx');
   assert.match(step, /role="alert" className="flex items-start gap-2 rounded-xl border border-\[var\(--error\)\]\/40 bg-\[var\(--error-bg\)\]/, 'a quote that failed is an error');
 
-  const recipients = await source('app/dashboard/recipients/page.tsx');
-  assert.match(recipients, /screeningVerdict === 'ERROR'\s*\?\s*'[^']*--error-bg/, 'Screening failed is an error');
-  assert.match(recipients, /--warn-bg[^']*'\s*}`\}>\s*\{r\.screeningVerdict === 'CLEAR'/, 'Not screened needs attention');
+  // The Recipients page words a recipient's state in lib/recipients-page/view.ts and draws it with the shared pill:
+  // 'bad' is the error colour, 'wait' the warning one.
+  const recipients = await source('lib/recipients-page/view.ts');
+  assert.match(recipients, /verdict === 'ERROR'\s*\?\s*\{ step: 'screening', tone: 'bad'/, 'Screening failed is an error');
+  assert.match(recipients, /step: 'screening', tone: 'wait', label: 'Screening not complete'/, 'Not screened needs attention');
+  const pill = await source('components/wallet/parts.tsx');
+  assert.match(pill, /bad: 'bg-\[var\(--error-bg\)\][^']*--error/);
+  assert.match(pill, /wait: 'bg-\[var\(--warn-bg\)\]/);
 });
 
 /* ── The phone drawer ──────────────────────────────────────────────── */
