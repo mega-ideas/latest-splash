@@ -18,7 +18,15 @@ type RuleLike = {
   spender: string;
   status: string;
   perPaymentMaxMinor: string;
-  allowances: Array<{ current: boolean; state: string; spendableNowMinor: string }>;
+  allowances: Array<{
+    current: boolean;
+    state: string;
+    spendableNowMinor: string;
+    startsAtMs?: string | null;
+    expiresAtMs?: string | null;
+    lifetimeRemainingMinor?: string | null;
+    window?: { endsAtMs?: string | null } | null;
+  }>;
   runningTotals: Array<{ recipient: string | null; countedMinor: string }>;
 };
 
@@ -46,15 +54,26 @@ export function staffFactsFrom(view: SpendViewLike | null, myAddresses: string[]
     return s !== null && mine.has(s);
   });
   if (!own) return { rule: null, policy, runningTotals: {} };
-  const usable = own.allowances.filter((a) => a.current && a.state === 'active').map((a) => BigInt(a.spendableNowMinor));
-  const spendable = usable.length ? usable.reduce((a, b) => (b > a ? b : a)) : 0n;
+  const usable = own.allowances.filter((a) => a.current && a.state === 'active');
+  // The allowance with the most room is the one a payment draws on: its dates are the rule's dates.
+  const best = usable.reduce<(typeof usable)[number] | null>((top, a) => (top === null || BigInt(a.spendableNowMinor) > BigInt(top.spendableNowMinor) ? a : top), null);
+  const spendable = best ? BigInt(best.spendableNowMinor) : 0n;
   const runningTotals: Record<string, string> = {};
   for (const t of own.runningTotals) {
     const r = t.recipient ? norm(t.recipient) : null;
     if (r) runningTotals[r] = t.countedMinor;
   }
   return {
-    rule: { status: usable.length ? own.status : 'no_allowance', perPaymentMaxMinor: own.perPaymentMaxMinor, spendableNowMinor: spendable.toString() },
+    rule: {
+      // With no allowance that can pay now, say why: ended, not begun, or taken back (nothing left to pay under).
+      status: best ? own.status : own.status === 'expired' || own.status === 'not_started' ? own.status : 'no_allowance',
+      perPaymentMaxMinor: own.perPaymentMaxMinor,
+      spendableNowMinor: spendable.toString(),
+      startsAtMs: best?.startsAtMs ?? null,
+      expiresAtMs: best?.expiresAtMs ?? null,
+      // A lifetime cap that is spent never renews, whatever its window says.
+      renewsAtMs: best && best.lifetimeRemainingMinor !== '0' ? (best.window?.endsAtMs ?? null) : null,
+    },
     policy,
     runningTotals,
   };

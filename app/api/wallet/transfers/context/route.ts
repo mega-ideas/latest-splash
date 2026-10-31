@@ -9,7 +9,6 @@ import { readSpendingRules } from '@/lib/server/spend-rules';
 import { liveSpendContext } from '@/lib/server/spend-rules-deps';
 import { NO_STORE } from '@/lib/server/wallet-route';
 import { staffFactsFrom } from '@/lib/transfer/context';
-import { STAFF_RULE_PAYMENTS_WIRED } from '@/lib/transfer/plan';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,7 +38,9 @@ export async function GET(request: Request) {
   }
   if (authority.orgId !== accountCheck.account.orgId) return NextResponse.json({ error: 'no membership' }, { status: 403, headers: NO_STORE });
 
-  const base = { role: authority.role, orgId: authority.orgId, staffRulePaymentsWired: STAFF_RULE_PAYMENTS_WIRED };
+  // Whether this server can carry out a payment under a staff rule is a fact about this business right now, not a constant: it needs
+  // splash_spend's ids, a gas sponsor and a registered wallet. Until all three are true the page sends such a payment to the owners.
+  const base = { role: authority.role, orgId: authority.orgId, staffRulePaymentsWired: false };
   const live = await liveWalletContext(authority.orgId);
   if (!live.ok) {
     const walletState = live.status === 409 ? 'none' : live.status === 503 ? 'off' : 'unavailable';
@@ -55,15 +56,18 @@ export async function GET(request: Request) {
     walletState = 'unavailable';
   }
   let facts: ReturnType<typeof staffFactsFrom> = { rule: null, policy: null, runningTotals: {} };
+  let wired = false;
   if (wallet && authority.role !== 'OWNER' && authority.role !== 'VIEWER') {
     const sc = await liveSpendContext({ ctx: live.ctx, db: live.db, orgId: authority.orgId });
     if (sc.ok) {
       const read = await readSpendingRules(sc.sc);
       if (read.ok) {
-        const mine = (await orgMemberWalletAddresses(live.db, authority.orgId)).filter((m) => m.userId === authority.userId).map((m) => m.address);
-        facts = staffFactsFrom(read.view as unknown as Parameters<typeof staffFactsFrom>[0], mine);
+        const members = (await orgMemberWalletAddresses(live.db, authority.orgId)).filter((m) => m.userId === authority.userId);
+        facts = staffFactsFrom(read.view as unknown as Parameters<typeof staffFactsFrom>[0], members.map((m) => m.address));
+        // Paying alone needs the policy to exist, a sponsor for the gas, and a passkey of the person's that can sign on this site.
+        wired = read.view.policy !== null && Boolean(live.ctx.signing.sponsor) && members.some((m) => m.canSign);
       }
     }
   }
-  return NextResponse.json({ ...base, walletState, wallet, ...facts }, { headers: NO_STORE });
+  return NextResponse.json({ ...base, staffRulePaymentsWired: wired, walletState, wallet, ...facts }, { headers: NO_STORE });
 }
