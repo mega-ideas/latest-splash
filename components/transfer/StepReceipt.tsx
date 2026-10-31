@@ -36,7 +36,10 @@ export default function StepReceipt({ refId, onNew }: { refId: string; onNew: ()
 
   useEffect(() => {
     if (!data || data.receipt.final) return;
-    const timer = window.setInterval(() => void load(), 5000);
+    // Ask again while it has not settled, but never from a hidden tab.
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void load();
+    }, 5000);
     return () => window.clearInterval(timer);
   }, [data, load]);
 
@@ -78,7 +81,14 @@ export default function StepReceipt({ refId, onNew }: { refId: string; onNew: ()
     return answer.body.url;
   }
 
-  if (error && !data) return <p role="alert" className="rounded-xl border border-[var(--error)]/40 bg-[var(--error-bg)] p-4 text-sm font-medium text-[var(--error)]">{error}</p>;
+  if (error && !data) {
+    return (
+      <div className="space-y-3">
+        <p role="alert" className="rounded-xl border border-[var(--error)]/40 bg-[var(--error-bg)] p-4 text-sm font-medium text-[var(--error)]">{error}</p>
+        <QuietButton type="button" onClick={() => void load()}>Try again</QuietButton>
+      </div>
+    );
+  }
   if (!data) return <p role="status" className="flex items-center gap-2 text-sm text-[#326273]"><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />Loading the receipt…</p>;
   const { receipt, rows } = data;
 
@@ -229,7 +239,7 @@ function EInvoice({ base, data, onChange }: { base: string; data: ReceiptAnswer;
     <section aria-labelledby="einv-h" className="space-y-3 rounded-2xl border border-[#326273]/15 bg-white p-4 sm:p-5">
       <h3 id="einv-h" className="text-base font-extrabold text-[#0c3e48]">Self-billed e-invoice (MyInvois)</h3>
       {!offer.offered ? (
-        <p className="text-sm leading-6 text-[#1F4452]">Splash does not have this supplier&rsquo;s country on file, so it cannot tell whether a self-billed e-invoice applies. Add the country in Recipients.</p>
+        <p className="text-sm leading-6 text-[#1F4452]">Splash does not have this supplier&rsquo;s country on file, so it cannot tell whether a self-billed e-invoice applies. Ask Splash support to add it.</p>
       ) : made && !open ? (
         <div className="space-y-3">
           <p className="text-sm leading-6 text-[#1F4452]">Your file is ready ({made.fileName}). Download it, then upload it in MyInvois. Splash does not submit it for you.</p>

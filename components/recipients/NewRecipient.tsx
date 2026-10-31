@@ -25,17 +25,16 @@ export default function NewRecipient({ bankOpen, onSaved, onClose }: { bankOpen:
     <section className="dash-surface space-y-4 p-4 sm:p-5" aria-labelledby="new-recipient-title">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 id="new-recipient-title" className="text-lg font-extrabold text-[#0c3e48]">Add a recipient</h2>
-        <QuietButton type="button" onClick={onClose} className="!h-10 !text-[13px]">Close</QuietButton>
+        <QuietButton type="button" onClick={onClose} className="!text-[13px]">Close</QuietButton>
       </div>
-      <div role="radiogroup" aria-label="What are you adding?" className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+      <div role="group" aria-label="What are you adding?" className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
         {RECIPIENT_KINDS.map((k) => {
           const on = kind === k.id;
           return (
             <button
               key={k.id}
               type="button"
-              role="radio"
-              aria-checked={on}
+              aria-pressed={on}
               onClick={() => setKind(k.id)}
               className={`flex min-h-12 items-center rounded-xl border px-3 py-2 text-left text-[13px] font-bold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0d6370] ${on ? 'border-[#0c3e48] bg-[#0c3e48] text-white' : 'border-[#326273]/20 bg-white text-[#1F4452] hover:border-[#0d6370]/60'}`}
             >

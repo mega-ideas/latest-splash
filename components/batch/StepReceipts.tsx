@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { BadgeCheck, Download, ExternalLink } from 'lucide-react';
 
 import { formatUsdc } from '@/lib/fees/copy';
@@ -20,20 +20,27 @@ export default function StepReceipts({ batchId, onNew }: { batchId: string; onNe
   const [batch, setBatch] = useState<BatchReceipt | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let alive = true;
-    void (async () => {
-      const answer = await call<{ batch?: BatchReceipt }>(`/api/wallet/batches/${encodeURIComponent(batchId)}/receipts`);
-      if (!alive) return;
-      if (answer.ok && answer.body?.batch) setBatch(answer.body.batch);
-      else setError(errorText(answer, 'The receipts could not be loaded just now.'));
-    })();
-    return () => {
-      alive = false;
-    };
+  const load = useCallback(async () => {
+    const answer = await call<{ batch?: BatchReceipt }>(`/api/wallet/batches/${encodeURIComponent(batchId)}/receipts`);
+    if (answer.ok && answer.body?.batch) {
+      setBatch(answer.body.batch);
+      setError(null);
+    } else setError(errorText(answer, 'The receipts could not be loaded just now.'));
   }, [batchId]);
 
-  if (error) return <p role="alert" className="text-sm font-medium text-[var(--error)]">{error}</p>;
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch on mount; state is set when the answer arrives
+    void load();
+  }, [load]);
+
+  if (error && !batch) {
+    return (
+      <div className="space-y-3">
+        <p role="alert" className="text-sm font-medium text-[var(--error)]">{error}</p>
+        <QuietButton type="button" onClick={() => void load()}>Try again</QuietButton>
+      </div>
+    );
+  }
   if (!batch) return <p role="status" className="text-sm text-[#326273]">Loading the receipts…</p>;
 
   return (
@@ -93,6 +100,7 @@ export default function StepReceipts({ batchId, onNew }: { batchId: string; onNe
             <ExternalLink className="h-4 w-4" aria-hidden="true" />Check the transaction on Sui
           </a>
         ) : null}
+        {batch.final ? null : <QuietButton type="button" onClick={() => void load()}>Check again</QuietButton>}
         <PrimaryButton type="button" onClick={onNew}>Make another batch</PrimaryButton>
         <QuietButton type="button" onClick={() => window.print()}>Print</QuietButton>
       </div>
