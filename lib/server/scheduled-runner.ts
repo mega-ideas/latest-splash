@@ -728,3 +728,8 @@ async function settleAuto(d: ScheduleDeps, runId: string): Promise<number> {
   await tell(d, 'failed', sch, failed, { reason });
   return 1;
 }
+
+/** What the cron answers. (Red stub: the real one drops the error text.) */
+export function publicRunnerResult<T>(result: T): T {
+  return result;
+}
