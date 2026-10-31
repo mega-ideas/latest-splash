@@ -215,6 +215,32 @@ test('an invoice paid by a staff member under their rule is told it was paid, wi
   await t.w.client.close();
 });
 
+test('the receipt of a payment made under a rule names the person who signed and the fee the chain charged, and is the business’s own', async () => {
+  const t = await setup();
+  await t.w.db.update(schema.users).set({ name: 'Aisha Rahman' }).where(eq(schema.users.id, 'u-staff'));
+  await t.give(t.rule(staffKey.address));
+  const r = await T.createTransfer(t.deps(), STAFF, input(t.recipientId));
+  const { paymentReceiptFor } = await import('../lib/server/payment-receipts.ts');
+  const { CORE } = await import('./fixtures/wallet-world.mjs');
+  const rdeps = (orgId = 'acme', readable = true) => ({
+    db: t.w.db, orgId, now: () => t.w.signing.now(), corePackageOriginalId: CORE,
+    readTransaction: async (digest) => (readable ? { digest, success: true, sender: staffKey.address, balanceChanges: [], events: [{ packageId: CORE, eventType: `${CORE}::fee_config::FeeCharged`, json: { fee: feeFor(U(1_000)).toString(), derived_kind: 1 } }] } : null),
+    schedule: LAUNCH_SCHEDULE, feesOn: true, signedPartners: [], network: 'mainnet',
+  });
+  const waiting = await paymentReceiptFor(rdeps(), r.signingRequest.id, 'u-staff');
+  assert.equal(waiting.ok, true, JSON.stringify(waiting));
+  assert.equal(waiting.receipt.final, false, 'not final before it is signed and executed');
+  await submitPartialSignature(t.w.signing, { orgId: 'acme', userId: 'u-staff', id: r.signingRequest.id, signature: await sign(staffKey, r.signingRequest), digest: r.signingRequest.digest });
+  const done = await paymentReceiptFor(rdeps(), r.signingRequest.id, 'u-staff');
+  assert.equal(done.ok, true, JSON.stringify(done));
+  assert.equal(done.receipt.final, true);
+  assert.equal(done.receipt.fees.splash.minor, feeFor(U(1_000)).toString());
+  assert.deepEqual(done.receipt.approvers.map((a) => a.name), ['Aisha Rahman'], 'the one person who signed, by name');
+  assert.equal(done.receipt.payee.name, 'Dela Cruz Trading Corp');
+  assert.equal((await paymentReceiptFor(rdeps('northwind'), r.signingRequest.id, 'u-north-staff')).status, 404, 'another business reads none of it');
+  await t.w.client.close();
+});
+
 test('the same person, a second payment later, draws on the same allowance and the running total to that recipient grows', async () => {
   const t = await setup();
   await t.give(t.rule(staffKey.address));
@@ -568,6 +594,21 @@ test('the cap the first request is waiting on is released when it is withdrawn',
   assert.equal((await cancelSigningRequest(t.w.signing, { orgId: 'acme', userId: 'u-staff', id: first.signingRequest.id })).ok, true);
   const third = await T.createTransfer(t.deps(), STAFF, input(t.recipientId, { clientKey: 'tx_key_00000c' }));
   assert.equal(third.transfer.route, 'staff_rule', 'a withdrawn request no longer holds the cap');
+  await t.w.client.close();
+});
+
+test('a request nobody signed in time holds nothing, even before the sweep has closed it', async () => {
+  const t = await setup();
+  await t.give(t.rule(staffKey.address, { cap: { period: 'month', limitMinor: U(1_300) } }));
+  const first = await T.createTransfer(t.deps(), STAFF, input(t.recipientId, { clientKey: 'tx_key_00000a' }));
+  assert.equal(first.transfer.route, 'staff_rule');
+  // Over an hour later the request can no longer be signed, though its row still says collecting.
+  t.w.setNow(new Date(T0.getTime() + 61 * 60_000));
+  await t.w.screenClear(SUPPLIER);
+  const [row] = await requests(t.w);
+  assert.equal(row.status, 'collecting');
+  const second = await T.createTransfer(t.deps(), STAFF, input(t.recipientId, { clientKey: 'tx_key_00000b' }));
+  assert.equal(second.transfer.route, 'staff_rule', 'the lapsed request does not hold the cap');
   await t.w.client.close();
 });
 

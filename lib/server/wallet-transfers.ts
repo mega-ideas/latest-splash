@@ -725,7 +725,7 @@ async function inFlightFor(db: DrizzleDb, deps: Pick<TransferDeps, 'orgId' | 'no
   const ids = rows.map((r) => r.requestId).filter((v): v is string => Boolean(v));
   const requests = ids.length
     ? await db
-        .select({ id: walletSigningRequests.id, status: walletSigningRequests.status, closedAt: walletSigningRequests.closedAt })
+        .select({ id: walletSigningRequests.id, status: walletSigningRequests.status, closedAt: walletSigningRequests.closedAt, expiresAt: walletSigningRequests.expiresAt })
         .from(walletSigningRequests)
         .where(and(eq(walletSigningRequests.orgId, deps.orgId), inArray(walletSigningRequests.id, ids)))
     : [];
@@ -737,7 +737,9 @@ async function inFlightFor(db: DrizzleDb, deps: Pick<TransferDeps, 'orgId' | 'no
     const req = r.requestId ? byId.get(r.requestId) : undefined;
     let counts = false;
     if (!r.requestId) counts = nowMs - r.createdAt.getTime() < TRANSFER_CLAIM_TTL_MS;
-    else if (req && ['collecting', 'submitting', 'unknown'].includes(String(req.status))) counts = true;
+    // A request still collecting past its end can no longer be signed (the sweep has not closed it yet): it holds nothing.
+    else if (req && req.status === 'collecting') counts = req.expiresAt.getTime() > nowMs;
+    else if (req && ['submitting', 'unknown'].includes(String(req.status))) counts = true;
     else if (req && req.status === 'executed') counts = (req.closedAt?.getTime() ?? 0) > Number(readAtMs);
     if (!counts) continue;
     spender += r.amount + r.fee;

@@ -466,8 +466,9 @@ export async function notifyOwnersOfAsk(input: {
     const amount = BigInt(input.amountMinor);
     const usdc = `${(amount / 1_000_000n).toLocaleString('en-US')}.${(amount % 1_000_000n).toString().padStart(6, '0').slice(0, 2)}`;
     const payee = `${input.recipient.slice(0, 6)}…${input.recipient.slice(-4)}`;
-    const body = `${businessName(input.orgName)}: a member of your team asks you to approve a payment of ${usdc} USDC to ${payee}.\n\nOpen Splash to review it. Nothing is paid until the owners sign.`;
-    const leadBody = `${businessName(input.orgName)}: a member of your team asked the owners to approve a payment of ${usdc} USDC to ${payee}.\n\nYou can see it in Splash. The owners decide; nothing is paid until they sign.`;
+    const business = businessName(input.orgName);
+    const body = `${business}: a member of your team asks you to approve a payment of ${usdc} USDC to ${payee}.\n\nOpen Splash to review it. Nothing is paid until the owners sign.`;
+    const leadBody = `${business}: a member of your team asked the owners to approve a payment of ${usdc} USDC to ${payee}.\n\nYou can see it in Splash. The owners decide; nothing is paid until they sign.`;
     const targets: Array<[string, string]> = input.ownerUserIds.map((u): [string, string] => [u, body]);
     if (input.financeLeadUserId && !input.ownerUserIds.includes(input.financeLeadUserId)) targets.push([input.financeLeadUserId, leadBody]);
     for (const [userId, text] of targets) {
