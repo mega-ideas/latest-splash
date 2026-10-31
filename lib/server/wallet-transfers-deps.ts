@@ -31,7 +31,10 @@ function likePattern(query: string): string {
   return `${query.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
 }
 
-export function transferDepsFor(route: WalletRoute, env: NodeJS.ProcessEnv = process.env): TransferDeps {
+/** What the wiring needs of a route: the business, its wallet context and the database. The cron makes one without a signed-in person. */
+export type WalletRouteLike = Pick<WalletRoute, 'orgId' | 'ctx' | 'db'>;
+
+export function transferDepsFor(route: WalletRouteLike, env: NodeJS.ProcessEnv = process.env): TransferDeps {
   const { orgId, ctx, db } = route;
   return {
     db,
@@ -112,7 +115,7 @@ export function transferDepsFor(route: WalletRoute, env: NodeJS.ProcessEnv = pro
  * wallet can spend now (its balance less held deposits) and a note to the
  * owners when a team member prepares a batch.
  */
-export function batchDepsFor(route: WalletRoute, env: NodeJS.ProcessEnv = process.env): BatchDeps {
+export function batchDepsFor(route: WalletRouteLike, env: NodeJS.ProcessEnv = process.env): BatchDeps {
   const base = transferDepsFor(route, env);
   const { orgId, ctx, db } = route;
   return {
