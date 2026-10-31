@@ -73,11 +73,18 @@ const RENDER: Renderers = {
   coin_to_balance: () => plain('Prepare the USDC coin for sending.'),
   join_balance: () => plain('Join the prepared USDC into one amount.'),
   send_funds: (a) => ({ line: a.amountMinor ? `Send ${usdc(a.amountMinor)} to the address below. Check it is the address you expect.` : 'Send the USDC to the address below. Check it is the address you expect.', fields: [addr('To', a.recipient), ...(a.amountMinor ? [num('Amount', a.amountMinor)] : [])] }),
-  open_intent: (a) => ({ line: `Open a payment of ${usdc(a.amountMinor)}.`, fields: [addr('To', a.recipient), num('Amount', a.amountMinor)], covered: true }),
+  open_intent: (a) => ({ line: `Open a payment of ${usdc(a.amountMinor)}${a.underRule ? ' under your spending rule' : ''}.`, fields: [addr('To', a.recipient), num('Amount', a.amountMinor)], covered: true }),
   pay_intent: (a) =>
-    a.intent
-      ? { line: `Pay the open payment of ${usdc(a.intent.amountMinor)}. Splash fee at most ${usdc(a.maxFeeMinor)}.`, fields: [addr('To', a.intent.recipient), num('Amount', a.intent.amountMinor), num('Splash fee at most', a.maxFeeMinor)] }
-      : { line: `Pay the payment opened here. Splash fee at most ${usdc(a.maxFeeMinor)}.`, fields: [], covered: true },
+    a.underRule
+      ? {
+          line: `Pay it from your business wallet under your spending rule. Splash fee at most ${usdc(a.maxFeeMinor)}; up to ${usdc(a.underRule.withdrawalMinor)} is taken in all, and what the fee does not use stays in the wallet.`,
+          fields: [],
+          covered: true,
+        }
+      : a.intent
+        ? { line: `Pay the open payment of ${usdc(a.intent.amountMinor)}. Splash fee at most ${usdc(a.maxFeeMinor)}.`, fields: [addr('To', a.intent.recipient), num('Amount', a.intent.amountMinor), num('Splash fee at most', a.maxFeeMinor)] }
+        : { line: `Pay the payment opened here. Splash fee at most ${usdc(a.maxFeeMinor)}.`, fields: [], covered: true },
+  no_second_approval: () => ({ line: 'No second approval is attached: this payment is within your rule.', fields: [], covered: true }),
   anchor_receipt: () => plain('Record the receipt of this payment.'),
   delete_intent: () => plain('Remove the finished payment record.'),
   create_spend_policy: (a) => ({ line: `Start your spending rules: ${a.threshold} of ${a.members.length} owners approve changes. No payment above ${usdc(a.perPaymentMaxMinor)} unless the rules allow it.`, fields: [addr('Wallet', a.wallet), num('Most per payment', a.perPaymentMaxMinor), ...members(a.members)] }),

@@ -112,6 +112,7 @@ const TITLES: Record<string, string> = {
   spend_policy: 'Set up spending rules',
   spend_rule: 'Change a spending rule',
   spend_approval: 'Give a second approval',
+  staff_rule_payment: 'Approve a payment under your spending rule',
   withdrawal: 'Approve a withdrawal to your bank',
   partner_test_deposit: 'Send the small test deposit',
   partner_payout: 'Approve a payment to a supplier’s bank',

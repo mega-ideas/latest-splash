@@ -51,7 +51,7 @@ export type EvidenceDeps = {
 
 type Refusal = { ok: false; status: number; code: string; error: string };
 
-const PAYMENT_PURPOSES = new Set(['wallet_payment', 'withdrawal', 'partner_payout', 'spend_approval']);
+const PAYMENT_PURPOSES = new Set(['wallet_payment', 'withdrawal', 'partner_payout', 'spend_approval', 'staff_rule_payment']);
 /** A request in one of these has had its quorum: its last signature is when it was approved. */
 const APPROVED = new Set(['submitting', 'unknown', 'executed', 'failed']);
 /** splash_core's payment kind for an exchange deposit address. */

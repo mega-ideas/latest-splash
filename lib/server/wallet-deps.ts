@@ -278,7 +278,7 @@ export async function liveWalletContext(orgId: string): Promise<{ ok: true; ctx:
       const splashAddresses = async () => splashControlledAddresses({ env: process.env, sponsor: signing.sponsor?.address ?? null, feeConfig: await getFeeConfig(), extra: splashCrossChainAddresses(process.env) });
       return batchBeforeSign({ db, now: () => new Date(), kyt, maxAgeMs, splashAddresses }, request);
     }
-    if (request.purpose === 'wallet_payment' || request.purpose === 'spend_approval') {
+    if (request.purpose === 'wallet_payment' || request.purpose === 'spend_approval' || request.purpose === 'staff_rule_payment') {
       const { paymentBeforeSign } = await import('@/lib/server/payment-compliance-gate');
       return paymentBeforeSign({ db, now: () => new Date(), kyt, maxAgeMs }, request);
     }

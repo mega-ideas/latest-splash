@@ -477,6 +477,13 @@
       "when": 1794355200000,
       "tag": "0067_access_requests",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1794441600000,
+      "tag": "0068_staff_rule_payments",
+      "breakpoints": true
     }
   ]
 }

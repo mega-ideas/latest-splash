@@ -47,6 +47,8 @@ export type SigningPurpose =
   | 'spend_rule'
   /** v2 §4.2: one owner's second approval (`splash_spend::approve_payout`). */
   | 'spend_approval'
+  /** v2 §4.2, decision D2: a staff member pays alone under their own rule (`splash_spend::pay_intent`), signed by their own passkey. */
+  | 'staff_rule_payment'
   /** v2 §4.4: a bank payout to the business's own account, through its partner deposit address. */
   | 'withdrawal'
   /** v2 §4.4: the small plain transfer that verifies a partner deposit address. */

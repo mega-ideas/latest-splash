@@ -33,6 +33,13 @@
  * must be one the server read as this business's (`expect.spend`). Never
  * `rotate_spender`, `issue` or any spend.
  *
+ * A payment under a rule (v2 §4.2), only when `expect.staffPay` is set:
+ * `splash_spend::create_intent`, `0x1::option::none<PayoutApproval>` (no
+ * second approval: the payment is inside the rule), and `splash_spend::
+ * pay_intent` drawing on the one allowance the server read as this person's,
+ * through a withdrawal from that allowance. An allowance withdrawal anywhere
+ * else (`redeem_funds`, a send) is refused.
+ *
  * `allowance::new` (a plain allowance no app polices) only for subscription
  * billing (A1 §6), only when the server set `expect.billing`: USDC, named
  * `splash-billing:…`, to exactly the configured finance multisig, with an
@@ -90,6 +97,15 @@ export type WalletTxExpectations = {
    */
   spend?: { policyIds: string[]; allowanceIds?: string[]; capIds?: string[] };
   /**
+   * A staff member's payment under their own rule (v2 §4.2, decision D2),
+   * only when the server set it from what it read on chain: this business's
+   * current policy, the one allowance that is this person's rule, and the
+   * wallet that funds it. Only then are `splash_spend::create_intent` and
+   * `pay_intent` understood, and a withdrawal from that allowance (and no
+   * other) is allowed, and only as the argument of `pay_intent`.
+   */
+  staffPay?: { policyId: string; allowanceId: string; funder: string };
+  /**
    * Subscription billing (A1 §6; FEATURE_SUBSCRIPTION_BILLING, off), only
    * when the server set it: the Splash finance multisig, the one spender a
    * plain `allowance::new` may name, and the billing allowances and caps the
@@ -118,7 +134,7 @@ export type OpenIntentExpectation = {
 type Arg =
   | { kind: 'pure'; bytes: Uint8Array }
   | { kind: 'object'; objectId: string; mutable: boolean | null; owned: boolean }
-  | { kind: 'withdrawal'; amount: bigint; type: string; from: string }
+  | { kind: 'withdrawal'; amount: bigint; type: string; from: string; allowance?: string; funder?: string }
   | { kind: 'result'; command: number }
   | { kind: 'gas' };
 
@@ -148,18 +164,29 @@ export type WalletAction =
       fxRateUsdLocal: string;
       beneficiaryRef: string;
       expiresAtMs: string;
+      /** Opened by a staff member under their rule (`splash_spend::create_intent`), on this policy. */
+      underRule?: { policy: string };
     }
   | {
       type: 'pay_intent';
       asset: string;
       maxFeeMinor: string;
       settleByMs: string;
+      /** The withdrawal command that funds it; -1 when it is paid under an allowance (`underRule`). */
       paysFromCommand: number;
       intentFromCommand: number | null;
       /** The existing intent this pays, its fields as read from the chain;
        *  null when the intent is opened in this same transaction. */
       intent: OpenIntentExpectation | null;
+      /**
+       * Paid under a staff member's rule (`splash_spend::pay_intent`): the
+       * allowance it draws on, the wallet that funds it, the policy it is paid
+       * under, and the most it draws (the principal and the fee bound).
+       */
+      underRule?: { allowance: string; funder: string; policy: string; withdrawalMinor: string };
     }
+  /** A payment under a rule carries no second approval: it is inside the rule (`0x1::option::none<PayoutApproval>`). */
+  | { type: 'no_second_approval' }
   | { type: 'anchor_receipt' }
   | { type: 'delete_intent' }
   // ─── Spending rules (v2 §4.2) ────────────────────────────────────────────
@@ -253,13 +280,30 @@ export function describeWalletTransaction(input: Uint8Array | string, expect: Wa
     }
     if (input.$kind === 'FundsWithdrawal') {
       const w = input.FundsWithdrawal;
+      if (w.typeArg.$kind !== 'Balance') refuse('an unknown withdrawal type', 'bad_withdrawal');
+      if (w.withdrawFrom.$kind === 'SenderAllowance') {
+        // A staff member's own rule (v2 §4.2): the one allowance the server
+        // read as theirs, funded by this business's wallet, and nothing else.
+        // Where it may be used is checked at its one use, splash_spend::pay_intent.
+        const staff = expect.spendPackageId ? expect.staffPay : undefined;
+        const from = w.withdrawFrom.SenderAllowance as { funder: string; allowance: string };
+        if (!staff || normalizeSuiAddress(from.allowance) !== normalizeSuiAddress(staff.allowanceId) || normalizeSuiAddress(from.funder) !== normalizeSuiAddress(staff.funder)) {
+          refuse('a withdrawal from an allowance that is not this person’s spending rule is not allowed here', 'foreign_withdrawal');
+        }
+        return {
+          kind: 'withdrawal',
+          amount: BigInt(w.reservation.MaxAmountU64),
+          type: normalizeStructTag(w.typeArg.Balance),
+          from: 'allowance',
+          allowance: normalizeSuiAddress(from.allowance),
+          funder: normalizeSuiAddress(from.funder),
+        };
+      }
       if (w.withdrawFrom.$kind !== 'Sender') {
         // A withdrawal "from the sponsor" would let a wallet transaction spend
-        // Splash's gas balance; from an allowance, a staff path the owners'
-        // wallet never uses.
-        refuse(`a withdrawal from ${w.withdrawFrom.$kind === 'Sponsor' ? "the gas sponsor's" : 'an allowance'} balance is not allowed here`, 'foreign_withdrawal');
+        // Splash's gas balance.
+        refuse("a withdrawal from the gas sponsor's balance is not allowed here", 'foreign_withdrawal');
       }
-      if (w.typeArg.$kind !== 'Balance') refuse('an unknown withdrawal type', 'bad_withdrawal');
       return { kind: 'withdrawal', amount: BigInt(w.reservation.MaxAmountU64), type: normalizeStructTag(w.typeArg.Balance), from: 'sender' };
     }
     return refuse('an input that was not resolved', 'unresolved_input');
@@ -318,6 +362,9 @@ export function describeWalletTransaction(input: Uint8Array | string, expect: Wa
 
   // ─── Spending rules (v2 §4.2) ─────────────────────────────────────────────
   const spendPkg = expect.spendPackageId ? normalizeSuiAddress(expect.spendPackageId) : null;
+  // A staff member's payment under their own rule: understood only with the server's word for whose rule it is.
+  const staff = spendPkg && expect.staffPay ? { policyId: normalizeSuiAddress(expect.staffPay.policyId), allowanceId: normalizeSuiAddress(expect.staffPay.allowanceId), funder: normalizeSuiAddress(expect.staffPay.funder) } : null;
+  const approvalType = spendPkg ? normalizeStructTag(`${spendPkg}::splash_spend::PayoutApproval`) : null;
   // Subscription billing (A1 §6): only with a well-formed finance address.
   const billing = expect.billing && /^0x[0-9a-fA-F]{64}$/.test(expect.billing.financeAddress) ? expect.billing : null;
   /** Results already taken by a later command (a rate limit, a proposal): each is used once. */
@@ -342,6 +389,15 @@ export function describeWalletTransaction(input: Uint8Array | string, expect: Wa
   const needN = (target: string, a: Arg[], n: number) => {
     if (a.length !== n) refuse(`${target} takes ${n} arguments`, 'bad_argument');
   };
+  /** The policy of a payment under a rule: the one shared object the server read as this person's, however it is passed. */
+  const staffPolicy = (arg: Arg): string => {
+    if (arg.kind !== 'object' || arg.owned) refuse('the spending policy must be a shared object', 'bad_argument');
+    const id = (arg as { objectId: string }).objectId;
+    if (!staff || id !== staff.policyId) refuse("the spending policy is not this person's", 'wrong_object');
+    return id;
+  };
+  /** Intents already paid in this transaction (command indexes): each is paid once. */
+  const paid = new Set<number>();
 
   function describeAllowanceCall(target: string, a: Arg[], typeArgs: string[]): void {
     if (!spendPkg && !billing) refuse('spending rules are not configured here', 'command_not_allowed');
@@ -594,9 +650,89 @@ export function describeWalletTransaction(input: Uint8Array | string, expect: Wa
         });
         return;
       }
+      case 'splash_spend::create_intent': {
+        // A staff member opens a payment under their own rule (v2 §4.2). Only with the server's word for whose rule it is.
+        if (!staff) refuse('a payment under a rule is not understood here', 'command_not_allowed');
+        needN(target, a, 14);
+        const t = usdcOnly();
+        const policy = staffPolicy(a[0]);
+        accountRef(a[1]);
+        object(a[2], expect.complianceConfigId, 'the compliance config', false);
+        const paymentRef = pure(a[3], bcs.vector(bcs.u8()), 'the payment reference');
+        if (paymentRef.length !== 32) refuse('the payment reference must be 32 bytes', 'bad_argument');
+        const recipient = normalizeSuiAddress(pure(a[4], bcs.Address, 'the recipient'));
+        const beneficiaryRef = pure(a[5], bcs.vector(bcs.u8()), 'the beneficiary reference');
+        const amount = pure(a[6], bcs.u64(), 'the amount');
+        const targetCurrency = pure(a[7], bcs.string(), 'the target currency');
+        const fx = pure(a[8], bcs.u64(), 'the rate');
+        pure(a[9], bcs.vector(bcs.u8()), 'the commitment');
+        const kind = pure(a[10], bcs.u8(), 'the kind');
+        pure(a[11], bcs.vector(bcs.u8()), 'the rail commitment');
+        const expiresAt = pure(a[12], bcs.u64(), 'the expiry');
+        clock(a[13]);
+        actions.push({
+          type: 'open_intent',
+          asset: t,
+          recipient,
+          amountMinor: String(amount),
+          kind,
+          targetCurrency,
+          fxRateUsdLocal: String(fx),
+          beneficiaryRef: toHex(new Uint8Array(beneficiaryRef)),
+          expiresAtMs: String(expiresAt),
+          underRule: { policy },
+        });
+        return;
+      }
+      case 'splash_spend::pay_intent': {
+        if (!staff) refuse('a payment under a rule is not understood here', 'command_not_allowed');
+        const rule = staff as NonNullable<typeof staff>;
+        needN(target, a, 12);
+        const t = usdcOnly();
+        const allowance = a[0];
+        if (allowance.kind !== 'object' || allowance.owned || allowance.mutable !== true) refuse('the allowance must be a shared object passed mutably', 'bad_argument');
+        if ((allowance as { objectId: string }).objectId !== rule.allowanceId) refuse("the allowance is not this person's spending rule", 'wrong_object');
+        const w = a[1];
+        if (w.kind !== 'withdrawal' || w.from !== 'allowance' || w.allowance !== rule.allowanceId || w.funder !== rule.funder) {
+          refuse("the payment must draw on this person's spending rule, and nothing else", 'bad_argument');
+        }
+        const withdrawal = w as Extract<Arg, { kind: 'withdrawal' }>;
+        if (withdrawal.type !== t) refuse('the withdrawal and the asset differ', 'bad_argument');
+        const intent = a[2];
+        if (intent.kind !== 'result' || actions[intent.command]?.type !== 'open_intent' || !(actions[intent.command] as Extract<WalletAction, { type: 'open_intent' }>).underRule || paid.has(intent.command)) {
+          refuse('a rule pays the intent opened in this transaction, once', 'bad_argument');
+        }
+        const opened = intent as { command: number };
+        paid.add(opened.command);
+        accountRef(a[3]);
+        const policy = staffPolicy(a[4]);
+        if ((actions[opened.command] as Extract<WalletAction, { type: 'open_intent' }>).underRule?.policy !== policy) refuse('the payment is opened and paid under different policies', 'wrong_object');
+        object(a[5], expect.complianceConfigId, 'the compliance config', false);
+        object(a[6], expect.feeConfigId, 'the fee config', false);
+        object(a[7], expect.registryId, 'the address registry', false);
+        const approval = a[8];
+        if (approval.kind !== 'result' || actions[approval.command]?.type !== 'no_second_approval' || consumed.has(approval.command)) {
+          refuse('a payment under a rule carries no second approval, and an approval slot is used once', 'bad_argument');
+        }
+        consumed.add((approval as { command: number }).command);
+        const maxFee = u64s(a[9], 'the maximum fee');
+        const settleBy = u64s(a[10], 'the settle-by time');
+        clock(a[11]);
+        actions.push({
+          type: 'pay_intent',
+          asset: t,
+          maxFeeMinor: maxFee,
+          settleByMs: settleBy,
+          paysFromCommand: -1,
+          intentFromCommand: opened.command,
+          intent: null,
+          underRule: { allowance: rule.allowanceId, funder: rule.funder, policy, withdrawalMinor: withdrawal.amount.toString() },
+        });
+        return;
+      }
       default:
-        // create_intent, pay_intent, delegate_execution, discard_approval,
-        // prune: none is a business wallet transaction Splash asks for.
+        // delegate_execution, discard_approval, prune: none is a business
+        // wallet or staff transaction Splash asks for.
         refuse(`${target} is not a wallet command`, 'command_not_allowed');
     }
   }
@@ -626,6 +762,8 @@ export function describeWalletTransaction(input: Uint8Array | string, expect: Wa
         need(1);
         const w = a[0];
         if (w.kind !== 'withdrawal') refuse('redeem_funds takes a withdrawal', 'bad_argument');
+        // An allowance's money leaves only through splash_spend::pay_intent, which checks the policy first.
+        if (w.from !== 'sender') refuse('a withdrawal from an allowance is not redeemed here', 'foreign_withdrawal');
         const t = asset(call.typeArguments);
         if (w.type !== t) refuse('the withdrawal and the asset differ', 'bad_argument');
         actions.push({ type: 'withdraw', asset: t, amountMinor: w.amount.toString() });
@@ -674,6 +812,13 @@ export function describeWalletTransaction(input: Uint8Array | string, expect: Wa
     if (pkg === MOVE_STDLIB) {
       // Only wrapping a rule's rate limit, which is a Move value, in an Option.
       if (target !== 'option::some' && target !== 'option::none') refuse(`0x1::${target} is not a wallet command`, 'command_not_allowed');
+      if (target === 'option::none' && approvalType !== null && call.typeArguments.length === 1 && normalizeStructTag(call.typeArguments[0]) === approvalType) {
+        // The second-approval slot of a payment under a rule, left empty: the payment is inside the rule.
+        if (!staff) refuse('a payment under a rule is not understood here', 'command_not_allowed');
+        need(0);
+        actions.push({ type: 'no_second_approval' });
+        return;
+      }
       if (call.typeArguments.length !== 1 || normalizeStructTag(call.typeArguments[0]) !== RATE_LIMIT_TYPE) refuse('only a rate limit is wrapped here', 'bad_type');
       if (target === 'option::none') refuse('a spending rule always has its recurring cap', 'bad_argument');
       need(1);
@@ -832,8 +977,8 @@ export function describeWalletTransaction(input: Uint8Array | string, expect: Wa
   // A rate limit, its Option and a proposal exist only to be used by the
   // next step; one left over is a rule nobody accepted.
   actions.forEach((x, i) => {
-    if ((x.type === 'rate_limit' || x.type === 'wrap_rate_limit' || x.type === 'propose_allowance') && !consumed.has(i)) {
-      refuse('a proposed rule is never accepted in this transaction', 'dangling_proposal');
+    if ((x.type === 'rate_limit' || x.type === 'wrap_rate_limit' || x.type === 'propose_allowance' || x.type === 'no_second_approval') && !consumed.has(i)) {
+      refuse(x.type === 'no_second_approval' ? 'an approval slot is made and never used in this transaction' : 'a proposed rule is never accepted in this transaction', 'dangling_proposal');
     }
   });
 

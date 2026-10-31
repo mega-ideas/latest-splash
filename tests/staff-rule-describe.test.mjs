@@ -191,10 +191,11 @@ test('the purpose is a rule payment only when the bytes are exactly the payment 
 });
 
 test('a quote that outlives the intent, or a withdrawal that is not the amount plus the fee, is refused as a rule payment', async () => {
-  const late = describeWalletTransaction(await build({ settleByMs: NOW + 9n * 86_400_000n }), expectStaff);
+  const d = describeWalletTransaction(await build(), expectStaff);
+  const late = structuredClone(d);
+  late.actions[2].settleByMs = (BigInt(d.actions[0].expiresAtMs) + 1n).toString();
   const context = { staffPayment: { spender: STAFF, recipient: SUPPLIER, amountMinor: U(1_000), maxFeeMinor: U(0.25), policyId: POLICY, allowanceId: ALLOWANCE } };
   assert.equal(refusal(() => assertPurposeShape('staff_rule_payment', late, context)).code, 'wrong_shape');
-  const d = describeWalletTransaction(await build(), expectStaff);
   const tampered = structuredClone(d);
   tampered.actions[2].underRule.withdrawalMinor = (U(1_000) + U(5)).toString();
   assert.equal(refusal(() => assertPurposeShape('staff_rule_payment', tampered, context)).code, 'wrong_shape', 'drawing more than amount plus fee');

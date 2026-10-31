@@ -2642,6 +2642,7 @@ export const walletTransfers = pgTable('wallet_transfers', {
   uniqueIndex('wallet_transfers_org_ref_unique').on(table.orgId, table.paymentRef),
   index('wallet_transfers_org_created_idx').on(table.orgId, table.createdAt),
   index('wallet_transfers_request_idx').on(table.signingRequestId),
+  index('wallet_transfers_org_requester_idx').on(table.orgId, table.requestedBy),
 ]);
 
 /** A link made to share a receipt (migration 0064). Only the token's hash is kept. */

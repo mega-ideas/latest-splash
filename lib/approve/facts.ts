@@ -109,7 +109,7 @@ type Action = DeviceReview['actions'][number];
  * the payment's headline. (The decoder accepts a send in any wallet
  * transaction; it is this screen that must not let one pass as a payment.)
  */
-const PAYMENT_BOOKKEEPING = new Set(['merge_coins', 'coin_to_balance', 'join_balance', 'anchor_receipt', 'delete_intent']);
+const PAYMENT_BOOKKEEPING = new Set(['merge_coins', 'coin_to_balance', 'join_balance', 'anchor_receipt', 'delete_intent', 'no_second_approval']);
 
 function isKnownInPayment(a: Action): boolean {
   if (a.type === 'open_intent' || a.type === 'withdraw') return true;
@@ -166,6 +166,8 @@ function build(review: DeviceReview, opts: { names?: Array<string | null | undef
 
   let withdrawn = 0n;
   for (const w of withdraws) withdrawn += BigInt(w.amountMinor);
+  // A payment under a staff member's rule draws on an allowance in the same command that pays: that draw is what leaves the wallet.
+  for (const p of ownPays) if (p.underRule) withdrawn += BigInt(p.underRule.withdrawalMinor);
 
   const items = signingItems(actions as Parameters<typeof signingItems>[0]);
   const kind = payments.length > 1 ? 'batch' : payments.length === 1 ? 'payment' : 'change';
@@ -197,7 +199,7 @@ function build(review: DeviceReview, opts: { names?: Array<string | null | undef
     headline: kind === 'batch' ? `${payments.length} payments in one transaction` : kind === 'payment' ? `Pay ${payments[0].amount} USDC` : 'Change to your business wallet',
     asset: 'USDC',
     payments,
-    leavesAtMost: withdraws.length > 0 ? formatUsdc(withdrawn) : null,
+    leavesAtMost: withdraws.length > 0 || ownPays.some((p) => p.underRule) ? formatUsdc(withdrawn) : null,
     steps,
     unexpected,
     mismatch,

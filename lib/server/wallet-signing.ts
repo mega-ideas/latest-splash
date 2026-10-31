@@ -162,6 +162,12 @@ export type ShapeContext = {
   walletTagAllowed?: string[];
   /** A second approval: the payer it must name. */
   payer?: string;
+  /**
+   * A staff member's payment under their rule: exactly what the server stored
+   * for it (who sends it, the payee, the amount, the fee bound, the policy and
+   * the allowance), which the bytes must say and nothing more.
+   */
+  staffPayment?: { spender: string; recipient: string; amountMinor: bigint; maxFeeMinor: bigint; policyId: string; allowanceId: string };
   /** A withdrawal: the beneficiary commitment (hex) the intent must carry. */
   beneficiaryRef?: string;
   /** A withdrawal or a test deposit: the exact principal (minor units). */
@@ -341,6 +347,29 @@ export function assertPurposeShape(purpose: SigningPurpose, d: WalletTxDescripti
       }
       return;
     }
+    case 'staff_rule_payment': {
+      // v2 §4.2: open, no second approval, pay under the person's own allowance,
+      // anchor, delete, exactly as the server stored the payment, and sent by the
+      // person the rule is for. Nothing else is a payment under a rule.
+      if (shape !== 'open_intent,no_second_approval,pay_intent,anchor_receipt,delete_intent') bad(shape);
+      const stored = context.staffPayment ?? bad('no stored payment was named to compare it with');
+      const o = d.actions[0] as Extract<WalletAction, { type: 'open_intent' }>;
+      const p = d.actions[2] as Extract<WalletAction, { type: 'pay_intent' }>;
+      const rule = p.underRule;
+      if (!o.underRule || !rule || p.intentFromCommand !== 0) bad('it does not pay the intent it opens under a rule');
+      const bound = rule as NonNullable<typeof rule>;
+      if (d.sender !== normalizeSuiAddress(stored.spender)) bad('it is sent by someone other than the person the rule is for');
+      if (bound.policy !== normalizeSuiAddress(stored.policyId) || o.underRule?.policy !== bound.policy) bad('it is not paid under the business’s current policy');
+      if (bound.allowance !== normalizeSuiAddress(stored.allowanceId)) bad('it does not draw on this person’s rule');
+      if (o.recipient !== normalizeSuiAddress(stored.recipient)) bad('it does not pay the recipient that was approved');
+      if (BigInt(o.amountMinor) !== stored.amountMinor) bad('it is not the amount that was approved');
+      if (BigInt(p.maxFeeMinor) !== stored.maxFeeMinor) bad('it allows another Splash fee from the one shown');
+      if (BigInt(bound.withdrawalMinor) !== BigInt(o.amountMinor) + BigInt(p.maxFeeMinor)) bad('it draws more or less than the amount and the fee bound');
+      if (BigInt(p.settleByMs) > BigInt(o.expiresAtMs)) bad('the quote outlives the intent');
+      // A rule pays a recipient tagged a wallet (A1 §2.3). An exchange, a bank payout and another chain are the owners'.
+      if (o.kind !== 1 || o.beneficiaryRef !== '') bad('a rule pays a wallet or a Splash business, never an exchange, a bank or another chain');
+      return;
+    }
     case 'spend_approval': {
       if (shape !== 'approve_payout') bad(shape);
       const a = d.actions[0] as Extract<WalletAction, { type: 'approve_payout' }>;
@@ -400,12 +429,13 @@ function assertGasless(d: WalletTxDescription) {
 
 /** What a request's bytes are decoded against: the org's ids, plus any existing intent read when it opened. */
 function expectationsFor(request: StoredRequest, expect: WalletTxExpectations): WalletTxExpectations {
-  const summary = request.summary as { openIntent?: OpenIntentExpectation; spend?: WalletTxExpectations['spend']; billing?: WalletTxExpectations['billing'] } | null;
+  const summary = request.summary as { openIntent?: OpenIntentExpectation; spend?: WalletTxExpectations['spend']; billing?: WalletTxExpectations['billing']; staffPay?: WalletTxExpectations['staffPay'] } | null;
   return {
     ...expect,
     ...(summary?.openIntent ? { openIntent: summary.openIntent } : {}),
     ...(summary?.spend ? { spend: summary.spend } : {}),
     ...(summary?.billing ? { billing: summary.billing } : {}),
+    ...(summary?.staffPay ? { staffPay: summary.staffPay } : {}),
   };
 }
 
@@ -551,6 +581,10 @@ export async function openSigningRequest(
     walletTagAllowed?: string[];
     /** For a second approval: the payer it must name. */
     payer?: string;
+    /** For a payment under a staff rule: the policy, allowance and funder the server read as the person's. */
+    staffPay?: WalletTxExpectations['staffPay'];
+    /** For a payment under a staff rule: exactly the payment the server stored, which the bytes must say. */
+    staffPayment?: ShapeContext['staffPayment'];
     /** For a withdrawal: the beneficiary commitment the intent must carry. */
     beneficiaryRef?: string;
     /** For a withdrawal or a test deposit: the exact principal. */
@@ -598,6 +632,7 @@ export async function openSigningRequest(
     ...(input.openIntent ? { openIntent: input.openIntent } : {}),
     ...(input.spend ? { spend: input.spend } : {}),
     ...(input.billing ? { billing: input.billing } : {}),
+    ...(input.staffPay ? { staffPay: input.staffPay } : {}),
   };
   let description: WalletTxDescription;
   try {
@@ -609,6 +644,7 @@ export async function openSigningRequest(
       recipient: input.recipient,
       walletTagAllowed: input.walletTagAllowed,
       payer: input.payer,
+      staffPayment: input.staffPayment,
       beneficiaryRef: input.beneficiaryRef,
       amountMinor: input.amountMinor,
       batch: input.batch,
@@ -666,6 +702,7 @@ export async function openSigningRequest(
       ...(input.spend ? { spend: input.spend } : {}),
       ...(input.withdrawal ? { withdrawal: input.withdrawal } : {}),
       ...(input.billing ? { billing: input.billing } : {}),
+      ...(input.staffPay ? { staffPay: input.staffPay } : {}),
     },
     nextStep: input.nextStep ?? null,
     requestedBy: input.requestedBy,

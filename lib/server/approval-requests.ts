@@ -304,6 +304,11 @@ export function walletRequestHeadline(purpose: SigningPurpose, d: WalletTxDescri
     }
     case 'spend_rule':
       return spendRuleHeadline(a);
+    case 'staff_rule_payment': {
+      const open = a[0] as Extract<WalletAction, { type: 'open_intent' }>;
+      const pay = a.find((x) => x.type === 'pay_intent') as Extract<WalletAction, { type: 'pay_intent' }>;
+      return `pay ${usdc(open.amountMinor)} to ${shortAddress(open.recipient)} under your spending rule, Splash fee at most ${usdc(pay.maxFeeMinor)}`;
+    }
     case 'spend_approval': {
       const p = a[0] as Extract<WalletAction, { type: 'approve_payout' }>;
       return `approve ${usdc(p.intent.amountMinor)} to ${shortAddress(p.intent.recipient)}, paid by ${shortAddress(p.payer)}, at most ${usdc(p.maxTotalMinor)} with Splash's fee`;

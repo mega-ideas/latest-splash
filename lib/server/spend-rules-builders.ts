@@ -239,3 +239,136 @@ export function approvePayoutTx(
   applySponsoredGas(tx, input.owner, input.gas);
   return tx.build();
 }
+
+/** A staff member's payment under their own rule (v2 §4.2, decision D2). */
+export type StaffPayment = {
+  /** The sender: the staff member's own passkey address, the allowance's spender. */
+  spender: string;
+  account: SharedRef;
+  /** The business's current `SpendPolicy`. */
+  policy: SharedRef;
+  /** The spender's allowance, bound to that policy. */
+  allowance: SharedRef;
+  /** The business wallet that funds the allowance. */
+  funder: string;
+  /** 32 bytes: the commitment over the business's payment id (idempotency). */
+  paymentRef: Uint8Array;
+  recipient: string;
+  amountMinor: bigint;
+  targetCurrency: string;
+  fxRateUsdLocal: bigint;
+  commitment: Uint8Array;
+  railCommitment: Uint8Array;
+  expiresAtMs: bigint;
+  /** The Splash fee the staff member was shown (A1 §2.6): drawn with the principal; the unused part goes back to the wallet. */
+  maxFeeMinor: bigint;
+  /** The quote's deadline: the chain refuses the payment from then on. */
+  settleByMs: bigint;
+  contentHash: Uint8Array;
+  walrusBlobId: Uint8Array;
+  gas: SponsoredGas;
+};
+
+/** splash_spend's own ceiling on max_fee, 1% of the principal (`FEE_CEILING_BPS = 100`). */
+const SPEND_FEE_CEILING_BPS = 100n;
+const SPEND_BPS_DENOM = 10_000n;
+/** What a recipient tagged a wallet is declared as (A1 §2.3); a rule pays no other kind here. */
+const WALLET_KIND = 1;
+
+/**
+ * Open, pay and anchor an intent under the sender's rule, in one PTB the staff
+ * member signs alone with their own passkey:
+ *
+ *   splash_spend::create_intent<USDC>     as STAFF on the policy; the recipient
+ *                                         must already be verified
+ *   0x1::option::none<PayoutApproval>     no second approval: inside the rule
+ *   splash_spend::pay_intent<USDC>        draws principal + max_fee under the
+ *                                         allowance; the chain checks the
+ *                                         policy, the per-payment maximum, the
+ *                                         running total and the cap
+ *   audit_anchor::anchor                  the receipt
+ *   payment_intent::delete_finalized      the finished intent
+ *
+ * The allowance draws principal + max_fee; the unused part of the fee goes
+ * back to the wallet, never to the spender. A recipient tagged an exchange, a
+ * bank payout and a cross-chain payment are never built here: the owners pay
+ * those from the wallet.
+ */
+export async function staffRulePaymentTx(chain: SpendChain, p: StaffPayment): Promise<Uint8Array> {
+  if (p.amountMinor <= 0n) throw new V2BuildError('the amount must be above zero', 'bad_amount');
+  if (p.maxFeeMinor < 0n || p.maxFeeMinor > (p.amountMinor * SPEND_FEE_CEILING_BPS) / SPEND_BPS_DENOM) {
+    throw new V2BuildError("the fee bound is below zero or above Splash's 1% ceiling", 'bad_fee');
+  }
+  if (p.amountMinor + p.maxFeeMinor > U64_MAX) throw new V2BuildError('the amount is out of range', 'bad_amount');
+  if (p.settleByMs > p.expiresAtMs) throw new V2BuildError('the quote cannot outlive the intent', 'bad_deadline');
+  for (const [bytes, what] of [
+    [p.paymentRef, 'the payment reference'],
+    [p.commitment, 'the commitment'],
+    [p.railCommitment, 'the rail commitment'],
+  ] as const) {
+    if (bytes.length !== 32) throw new V2BuildError(`${what} must be 32 bytes`, 'bad_commitment');
+  }
+  if (p.contentHash.length === 0 || p.walrusBlobId.length === 0) throw new V2BuildError('the receipt needs its audit bundle', 'no_audit_bundle');
+  const recipient = normalizeSuiAddress(p.recipient);
+  if (recipient === normalizeSuiAddress(p.spender) || /^0x0+$/.test(recipient)) throw new V2BuildError('a payment goes to someone else', 'bad_recipient');
+
+  const tx = new Transaction();
+  const T = coreUsdc(chain);
+  // One input per object, passed mutably where either command needs it.
+  const policy = shared(tx, p.policy, true);
+  const account = shared(tx, p.account, true);
+  const config = shared(tx, chain.complianceConfig, false);
+  const clock = tx.object.clock();
+  const [intent] = tx.moveCall({
+    target: spendFn(chain, 'splash_spend::create_intent'),
+    typeArguments: [T],
+    arguments: [
+      policy,
+      account,
+      config,
+      tx.pure.vector('u8', Array.from(p.paymentRef)),
+      tx.pure.address(recipient),
+      tx.pure.vector('u8', []),
+      tx.pure.u64(p.amountMinor),
+      tx.pure.string(p.targetCurrency),
+      tx.pure.u64(u64(p.fxRateUsdLocal, 'the rate')),
+      tx.pure.vector('u8', Array.from(p.commitment)),
+      tx.pure.u8(WALLET_KIND),
+      tx.pure.vector('u8', Array.from(p.railCommitment)),
+      tx.pure.u64(u64(p.expiresAtMs, 'the expiry')),
+      clock,
+    ],
+  });
+  const [noApproval] = tx.moveCall({
+    target: '0x1::option::none',
+    typeArguments: [`${normalizeSuiAddress(chain.spendPackageId)}::splash_spend::PayoutApproval`],
+    arguments: [],
+  });
+  const withdrawal = tx.withdrawal({ amount: p.amountMinor + p.maxFeeMinor, type: T, from: 'allowance', allowance: normalizeSuiAddress(p.allowance.objectId), funder: normalizeSuiAddress(p.funder) });
+  const [receipt] = tx.moveCall({
+    target: spendFn(chain, 'splash_spend::pay_intent'),
+    typeArguments: [T],
+    arguments: [
+      shared(tx, p.allowance, true),
+      withdrawal,
+      intent,
+      account,
+      policy,
+      config,
+      shared(tx, chain.feeConfig, false),
+      shared(tx, chain.registry, false),
+      noApproval,
+      tx.pure.u64(p.maxFeeMinor),
+      tx.pure.u64(u64(p.settleByMs, 'the settle-by time')),
+      clock,
+    ],
+  });
+  const core = normalizeSuiAddress(chain.corePackageId);
+  tx.moveCall({
+    target: `${core}::audit_anchor::anchor`,
+    arguments: [receipt, tx.pure.vector('u8', Array.from(p.contentHash)), tx.pure.vector('u8', Array.from(p.walrusBlobId)), clock],
+  });
+  tx.moveCall({ target: `${core}::payment_intent::delete_finalized`, arguments: [intent] });
+  applySponsoredGas(tx, p.spender, p.gas);
+  return tx.build();
+}

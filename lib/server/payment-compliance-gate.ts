@@ -119,7 +119,7 @@ export async function travelRuleHold(
 
 /** Before each signature on a payment: null lets the signature through. */
 export async function paymentBeforeSign(deps: PaymentGateDeps, request: StoredRequest): Promise<GateRefusal | null> {
-  if (request.purpose !== 'wallet_payment' && request.purpose !== 'spend_approval') return null;
+  if (request.purpose !== 'wallet_payment' && request.purpose !== 'spend_approval' && request.purpose !== 'staff_rule_payment') return null;
   const payment = paymentOfRequest(request);
   if (!payment) return { code: 'not_a_payment', error: 'The request does not describe a payment Splash can check, so it is not signed.' };
   const screened = await recipientScreeningGate(
