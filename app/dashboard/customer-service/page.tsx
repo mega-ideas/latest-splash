@@ -35,7 +35,7 @@ const issueTypes = [
 
 const faqs = [
   { question: 'How long until my transfer settles?', answer: 'Most corridors clear within 3–5 minutes. The SLA target is under 10 minutes.' },
-  { question: 'How do I authorize a batch payout?', answer: 'Upload a CSV in Batch Payout, review preflight, then confirm with your TOTP.' },
+  { question: 'How do I authorize a batch payout?', answer: 'Open Batch payouts, upload your sheet, and check each row. Your business owners then approve the batch with their own passkeys, and it is paid in one transaction.' },
   { question: 'Where are receipts stored?', answer: 'Receipts are sealed on Sui and downloadable as PDF for your records.' },
 ];
 

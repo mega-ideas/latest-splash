@@ -1,6 +1,5 @@
 import { suiScanTxUrl, suiVisionTxUrl } from '@/lib/explorer';
 import { listTransactions } from '@/lib/server/operations';
-import { listBatchesForStaff } from '@/lib/server/batches-store';
 import { listTransfersForStaff } from '@/lib/server/transfers-store';
 import { getPegStatus } from '@/lib/server/peg';
 import { readComplianceControls } from '@/lib/server/sui-settlement';
@@ -13,7 +12,6 @@ import { formatUsdc } from '@/lib/fees/copy';
 export const dynamic = 'force-dynamic';
 
 export default async function AdminTransactionsPage() {
-  const batches = await listBatchesForStaff();
   const transfers = await listTransfersForStaff();
   const transactions = await listTransactions();
   const fundingSessions = await listFundingSessions();
@@ -158,69 +156,6 @@ export default async function AdminTransactionsPage() {
                       )}
                     </td>
                     <td className="text-xs text-[#326273]/90">{new Date(transfer.createdAt).toLocaleString()}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      <div className="dash-surface">
-        <div className="border-b border-[#326273]/10 p-5">
-          <h2 className="text-lg font-bold text-[#326273]">Batch payouts</h2>
-        </div>
-        {batches.length === 0 ? (
-          <div className="p-8 text-center text-sm text-[#326273]/90">No batch transactions yet.</div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[900px] text-sm">
-              <thead className="bg-[#326273]/5">
-                <tr className="text-left text-[#326273]/90">
-                  <th className="p-3">Batch ID</th>
-                  <th>State</th>
-                  <th className="text-right">Rows</th>
-                  <th className="text-right">Amount</th>
-                  <th>Digest</th>
-                  <th>Package</th>
-                  <th>Explorer</th>
-                  <th>Time</th>
-                </tr>
-              </thead>
-              <tbody>
-                {batches.map((batch) => (
-                  <tr key={batch.id} className="border-t border-[#326273]/5">
-                    <td className="p-3 font-mono text-xs text-[#326273]">{batch.id}</td>
-                    <td>
-                      <div className="flex items-center gap-2">
-                        {batch.state === 'SETTLED' && <CheckCircle2 className="text-[#237284]" size={14} />}
-                        {batch.state === 'SETTLING' && <Loader2 className="animate-spin text-[var(--gold-ink)]" size={14} />}
-                        {batch.state === 'QUEUED' && <Loader2 className="animate-spin text-[#326273]/90" size={14} />}
-                        {batch.state === 'FAILED' && <XCircle className="text-red-500" size={14} />}
-                        <span className="font-semibold text-[#326273]">{batch.state}</span>
-                      </div>
-                    </td>
-                    <td className="text-right text-[#326273]">{batch.acceptedRows}</td>
-                    <td className="text-right font-mono text-[#326273]">$ {batch.totalAmount}</td>
-                    <td className="font-mono text-xs text-[#326273]/90">{batch.digest || '—'}</td>
-                    <td className="font-mono text-xs text-[#326273]/90">{batch.packageId || '—'}</td>
-                    <td>
-                      <div className="flex gap-1">
-                        {batch.explorer.suiVisionTxUrl && (
-                          <a href={batch.explorer.suiVisionTxUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded bg-[#5C9EAD]/10 px-2 py-1 text-xs font-semibold text-[#237284] hover:bg-[#5C9EAD]/20">
-                            <ExternalLink size={10} />
-                            SuiVision
-                          </a>
-                        )}
-                        {batch.explorer.suiScanTxUrl && (
-                          <a href={batch.explorer.suiScanTxUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded bg-[#5C9EAD]/10 px-2 py-1 text-xs font-semibold text-[#237284] hover:bg-[#5C9EAD]/20">
-                            <ExternalLink size={10} />
-                            SuiScan
-                          </a>
-                        )}
-                      </div>
-                    </td>
-                    <td className="text-xs text-[#326273]/90">{new Date(batch.createdAt).toLocaleString()}</td>
                   </tr>
                 ))}
               </tbody>

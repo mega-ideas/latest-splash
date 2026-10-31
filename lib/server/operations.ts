@@ -891,20 +891,10 @@ export async function listTransactions(): Promise<TransactionRecord[]> {
     explorer: explorerLinks(transfer.suiTxDigest),
     createdAt: transfer.createdAt,
   }));
-  const { listBatchesForStaff } = await import('./batches-store.ts');
-  const fromBatches: TransactionRecord[] = (await listBatchesForStaff()).map((batch) => ({
-    id: batch.id,
-    kind: 'batch',
-    state: batch.state,
-    module: 'settlement',
-    functionName: 'settle_batch',
-    amount: `$${batch.totalAmount}`,
-    digest: batch.digest,
-    packageId: batch.packageId,
-    explorer: batch.explorer,
-    createdAt: batch.createdAt,
-  }));
-  return [...fromTransfers, ...fromBatches].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  // The v1 custody payout runs (settle_batch) that used to be listed here are
+  // gone with their route and store; wallet batches are the owners' own
+  // transactions and are read through /api/wallet/batches.
+  return fromTransfers.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 function seedDemoData() {
