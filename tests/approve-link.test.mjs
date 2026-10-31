@@ -229,9 +229,8 @@ test('the proxy hands the layout the Approve address, only for that path, and dr
 
 test('a signed-out visit to the link goes to sign in and back, and only through the allowlist', async () => {
   const layout = await read('app/dashboard/layout.tsx');
-  assert.match(layout, /safeApproveReturn/);
+  // The redirect target itself is tested as behaviour in approve-link-hardening.test.mjs (loginRedirectFor).
   assert.match(layout, /RETURN_HEADER/);
-  assert.match(layout, /\/login\?next=\$\{encodeURIComponent\(back\)\}/);
   const login = await read('app/login/page.tsx');
   assert.match(login, /safeApproveReturn\(/);
   assert.match(login, /router\.push\(returnTo \?\? '\/dashboard'\)/);
