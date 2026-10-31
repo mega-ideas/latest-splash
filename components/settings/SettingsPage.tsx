@@ -18,6 +18,7 @@ import type { GovernanceBannerAlert } from '@/lib/server/governance-events';
 import { canEditControls } from '@/lib/settings-page/controls';
 import { settingsWallet } from '@/lib/settings-page/wallet-gate';
 import type { SpendWire } from '@/lib/team-rules/view';
+import type { TeamWire } from '@/lib/team/view';
 import AboutCard from './AboutCard';
 import ApprovalChannelCard from './ApprovalChannelCard';
 import BillingCard from './BillingCard';
@@ -61,25 +62,27 @@ export default function SettingsPage({ alerts, billingOn }: { alerts: Governance
   const { manage } = wallet;
   const spend = useLoad<SpendWire>(manage ? '/api/wallet/spending-rules' : null, 'The spending rules could not be read.');
   const funding = useLoad<FundingOptions>(manage ? '/api/wallet/funding' : null, 'Your funding options could not be loaded.');
-  const team = useLoad<InCharge>(manage ? '/api/wallet/persons-in-charge' : null, 'The team could not be loaded.');
+  const charge = useLoad<InCharge>(manage ? '/api/wallet/persons-in-charge' : null, 'The people in charge could not be loaded.');
+  // The team is the database's, not the chain's: it is managed here before a business wallet exists too.
+  const people = useLoad<TeamWire>('/api/team', 'The team could not be loaded.');
   const ops = useOperatingSettings();
   const { reload: reloadOverview } = overview;
   const { reload: reloadSpend } = spend;
   const { reload: reloadFunding } = funding;
-  const { reload: reloadTeam } = team;
+  const { reload: reloadCharge } = charge;
   const changed = useCallback(() => {
     reloadOverview();
     reloadSpend();
     reloadFunding();
-    reloadTeam();
-  }, [reloadOverview, reloadSpend, reloadFunding, reloadTeam]);
+    reloadCharge();
+  }, [reloadOverview, reloadSpend, reloadFunding, reloadCharge]);
 
   const o = overview.data;
   const owner = o?.role === 'OWNER';
-  const nav = SECTIONS.filter((s) => manage || !NEEDS_WALLET.has(s.id)).map((s) => (s.id === 'team' && !manage ? { ...s, label: 'Team and rules' } : s));
+  const nav = SECTIONS.filter((s) => manage || !NEEDS_WALLET.has(s.id));
   if (billingOn) nav.splice(nav.findIndex((s) => s.id === 'alerts') + 1, 0, { id: 'billing', label: 'Billing' });
   const view = spend.data;
-  const staff: StaffChoice[] = (team.data?.members ?? [])
+  const staff: StaffChoice[] = (charge.data?.members ?? [])
     .filter((m) => m.role === 'maker' || m.role === 'checker')
     .map((m) => ({ userId: m.userId, name: m.name, role: m.role, hasRule: Boolean(view?.rules.some((r) => r.userId === m.userId)) }));
 
@@ -87,7 +90,7 @@ export default function SettingsPage({ alerts, billingOn }: { alerts: Governance
     <DashPageHeader
       kicker="Your business"
       title="Settings"
-      description="Your team and their spending rules, who signs for the wallet, where funds may come from, and how approvals reach you."
+      description="Your team and what each person may do, their spending rules, who signs for the wallet, where funds may come from, and how approvals reach you."
     />
   );
 
@@ -130,9 +133,9 @@ export default function SettingsPage({ alerts, billingOn }: { alerts: Governance
 
       <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
         <div className="min-w-0 space-y-5">
+          <TeamCard people={people} charge={charge} spend={view} walletReady={manage} onChanged={changed} />
           {manage ? (
             <>
-              <TeamCard owner={owner === true} spend={view} team={team} onChanged={changed} />
               {view ? (
                 <>
                   <PolicyCard owner={owner === true} spend={view} onChanged={changed} />
@@ -143,7 +146,7 @@ export default function SettingsPage({ alerts, billingOn }: { alerts: Governance
               )}
             </>
           ) : (
-            <Card id="team" title="Team and spending rules">{walletNote()}</Card>
+            <Card id="wallet-note" title="Spending rules, signers and funding">{walletNote()}</Card>
           )}
           {billingOn ? <BillingCard owner={owner === true} /> : null}
           {ops.settings ? <OperatingControls settings={ops.settings} setSettings={ops.setSettings} editable={canEditControls(o?.role)} /> : ops.problem ? <OperatingControlsUnavailable problem={ops.problem} /> : <Card id="controls" title="Operating controls"><Loading label="Reading your controls…" /></Card>}

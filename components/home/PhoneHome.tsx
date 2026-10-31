@@ -5,6 +5,8 @@ import { AlertTriangle, ArrowRight, Bot, ChevronRight, Fingerprint, Layers, Send
 
 import LocalTime from '@/components/LocalTime';
 import StatusBadge from '@/components/StatusBadge';
+import { useTeamAccess } from '@/components/team/useTeamAccess';
+import { walletActions } from '@/lib/team/view';
 import { formatUsdcMinor, type HomePaymentRow, type HomeSummary } from '@/lib/dashboard/home';
 import { cn } from '@/lib/utils';
 import { Figure, FigureError, FigureSkeleton, PaymentPill } from './parts';
@@ -38,9 +40,13 @@ export type PhoneHomeProps = {
  * does are one row of 44px-plus targets under it, what waits for their
  * passkey comes before anything that is history, and payments are rows.
  * Every figure is the page's own read (the same summary and wallet reads as
- * the desktop); this component only arranges them and fetches nothing.
+ * the desktop); this component only arranges them. The one thing it asks for
+ * itself is whether Add funds is offered to this person (an owner grants it).
  */
 export default function PhoneHome({ workspace, summary, summaryFailed, onRetrySummary, wallet, onRetryWallet, waiting, kyb, approvalNote, ownNote }: PhoneHomeProps) {
+  // Add funds is offered only to someone an owner let use it; until the server has said, it is not shown.
+  const access = useTeamAccess();
+  const quick = ACTIONS.filter((a) => !a.href.includes('#top-up') || walletActions(access).addFunds);
   return (
     <div className="space-y-4" data-testid="phone-home">
       <header className="flex items-start justify-between gap-3">
@@ -76,8 +82,8 @@ export default function PhoneHome({ workspace, summary, summaryFailed, onRetrySu
       </section>
 
       <nav aria-label="Quick actions">
-        <ul className="grid grid-cols-4 gap-2">
-          {ACTIONS.map(({ href, label, icon: Icon }) => (
+        <ul className={cn('grid gap-2', quick.length === 4 ? 'grid-cols-4' : 'grid-cols-3')}>
+          {quick.map(({ href, label, icon: Icon }) => (
             <li key={href}>
               <Link
                 href={href}

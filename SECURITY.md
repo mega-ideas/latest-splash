@@ -949,6 +949,49 @@ owner. Only `AdminCap` lifts a compliance freeze.
 - **No penalty or late fees.** Splash is not a party to the supplier's
   invoice, so none exists.
 
+## v2 Phase 3 — Team, the Finance lead, and who may Add funds and Withdraw — 2026-10-31
+
+The business's owners run their team, not Splash support
+(`docs/v2/phase3-team-roles.md`). What the code holds to:
+
+- **Default deny, one place.** Adding, changing and removing people, the
+  Finance lead and Add funds / Withdraw access are decided in
+  `lib/server/team-admin.ts` only. A caller who is not an owner or the
+  Finance lead is refused on every function before anything is read. The
+  routes (`app/api/team/**`) share one gate (`lib/server/team-route.ts`): the
+  business and the actor are the session's, never a field of the request, and
+  `tests/team-routes.test.mjs` fails if any other file calls a team-changing
+  function. Changes are rate limited per person and per business.
+- **The Finance lead is not a role.** It is an appointment on a membership (one
+  open row per business, a partial unique index), valid only while the person is
+  still an approver of the business. `memberships.role` gained no value, so every
+  `role === 'admin'` check means owner and the lead fails each. The lead can add,
+  change and remove viewers, staff and approvers; they cannot give the owner
+  role, touch an owner, appoint or take back the role, change or remove
+  themselves, grant or take away Add funds or Withdraw, or change anything on the
+  wallet beyond starting a request to add a signer. That request is signed by
+  the wallet's signers; the lead, who is not one, is refused `not_a_signer`. No
+  Move code changed.
+- **A business always has an owner.** Nobody changes or removes themselves; only
+  another owner can. A person who belongs to another business, has no account or
+  has not verified their email cannot be added, and the answer is the same for all
+  three, so the form tells no one who has an account.
+- **Add funds and Withdraw are granted.** Owners have both; a staff member or
+  approver only with an owner's grant, kind by kind; a viewer never. Read from
+  the database on each request for the session's person and business, and a
+  stale row for a viewer or a person who left grants nothing. The old rule let
+  any non-viewer add funds and any staff member ask for a withdrawal. Sending
+  USDC to the wallet from any wallet is unchanged and still screened and held.
+- **What ends with a person.** A removal, or a move to viewer or owner, ends
+  their place in charge, the Finance lead role, their access grants and usable
+  sign-offs, through `offboardMember`, and marks the spending rules they hold as
+  orphaned. Removing someone from the team does not remove an owner from the
+  multisig; a change of signers, signed by the quorum, does.
+- **The trail.** Every grant, change and removal is a line in the append-only
+  `wallet_authority_events` (seven new actions, migration 0066), with the actor,
+  the person and the old and new role. Splash support's grant is a line under
+  `operator:<email>`. A retry writes nothing; two at once make one change.
+
 ## v2 Phase 3 — Batch payouts (brief 5.6) — 2026-10-31
 
 Up to 20 payments in one Sui transaction the owners' multisig signs once

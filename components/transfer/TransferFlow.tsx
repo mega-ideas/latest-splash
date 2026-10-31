@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { Check, CircleHelp, Wallet } from 'lucide-react';
 
 import { usePhone } from '@/components/dashboard/Device';
+import { useTeamAccess } from '@/components/team/useTeamAccess';
+import { walletActions } from '@/lib/team/view';
 import { formatUsdc } from '@/lib/fees/copy';
 import { newIntentKey, draftStorageKey, parseDraft, serializeDraft, type TransferDraft } from '@/lib/transfer/draft';
 import { parseAmountMinor } from '@/lib/transfer/plan';
@@ -59,6 +61,8 @@ function writeStore(key: string, value: string | null) {
 /** The five steps of one payment (v2 brief 5.4): who, details, amount and pay from, review and approve, receipt. */
 export default function TransferFlow() {
   const phone = usePhone();
+  // Add funds is offered only to someone an owner let use it.
+  const canAddFunds = walletActions(useTeamAccess()).addFunds;
   const [flow, setFlow] = useState<Flow>(BLANK);
   const [ctx, setCtx] = useState<Context | null>(null);
   const [ctxState, setCtxState] = useState<'loading' | 'ok' | 'denied' | 'failed'>('loading');
@@ -288,7 +292,7 @@ export default function TransferFlow() {
           <div className="dash-block p-4">
             <div className="flex items-center gap-2 font-mono text-[12px] font-bold uppercase tracking-[0.14em] text-[#145d6a]"><Wallet className="h-3.5 w-3.5" aria-hidden="true" />Splash Wallet</div>
             <div className="mt-1.5 text-2xl font-extrabold tabular-nums text-[#0c3e48]">{balance.state === 'ok' ? `${formatUsdc(balance.usdcMinor)} USDC` : balance.state === 'loading' ? '…' : 'Not available'}</div>
-            <Link href="/dashboard/wallet" className="mt-1 inline-flex min-h-11 items-center text-sm font-semibold text-[#0d6370] underline underline-offset-2">Add funds</Link>
+            {canAddFunds ? <Link href="/dashboard/wallet#top-up" className="mt-1 inline-flex min-h-11 items-center text-sm font-semibold text-[#0d6370] underline underline-offset-2">Add funds</Link> : null}
           </div>
         </aside>
       </div>

@@ -7,6 +7,7 @@ import DashPageHeader from '@/components/dashboard/DashPageHeader';
 import { QuietButton } from '@/components/transfer/ui';
 import WalletActivity from '@/components/stablecoin/WalletActivity';
 import type { GovernanceBannerAlert } from '@/lib/server/governance-events';
+import { walletActions } from '@/lib/team/view';
 import AddFunds from './AddFunds';
 import AlertsCard from './AlertsCard';
 import BalanceCard from './BalanceCard';
@@ -106,19 +107,28 @@ export default function WalletPage({ alerts }: { alerts: GovernanceBannerAlert[]
   }
 
   const fundingReady = funding.data;
+  // Add funds and Withdraw are an owner's to give, member by member. The server sends what this person may do; nothing is offered without it.
+  const actions = walletActions(o.access);
   return (
     <Frame>
       {header}
       <SigningInbox onChanged={changed} />
       <div className="grid gap-5 xl:grid-cols-[1.5fr_1fr]">
         <div className="space-y-4">
-          <BalanceCard overview={o} />
-          {fundingReady ? (
-            <AddFunds funding={fundingReady} canAdd={o.role !== 'VIEWER'} onChanged={changed} />
-          ) : (
-            <Card id="top-up" title="Add funds">{funding.error ? <Note tone="error">{funding.error}</Note> : <Loading label="Loading…" />}</Card>
-          )}
-          <Withdraw canAsk={o.role === 'OWNER' || o.role === 'MAKER' || o.role === 'APPROVER'} owner={owner} onChanged={changed} />
+          <BalanceCard overview={o} actions={actions} />
+          {actions.addFunds ? (
+            fundingReady ? (
+              <AddFunds funding={fundingReady} canAdd onChanged={changed} />
+            ) : (
+              <Card id="top-up" title="Add funds">{funding.error ? <Note tone="error">{funding.error}</Note> : <Loading label="Loading…" />}</Card>
+            )
+          ) : null}
+          {actions.withdraw ? <Withdraw canAsk owner={owner} onChanged={changed} /> : null}
+          {actions.notice ? (
+            <Card id="funds-access" title="Add funds and Withdraw">
+              <Note>{actions.notice}</Note>
+            </Card>
+          ) : null}
           <FundingHistory refreshKey={version} />
           {fundingReady ? <FundingSources funding={fundingReady} owner={owner} onChanged={changed} /> : null}
           {o.wallet ? <WalletActivity address={o.wallet} splash={false} refreshKey={version} /> : null}

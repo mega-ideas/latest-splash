@@ -30,9 +30,20 @@ export type TeamActivityWire = { id: string; action: string; createdAt: string; 
 
 /** What GET /api/team answers. `members` and `activity` go to a manager only. */
 export type TeamWire = {
-  you: { userId: string; role: MembershipRole; manager: Manager };
+  you: { userId: string; role: MembershipRole | null; manager: Manager; addFunds: boolean; withdraw: boolean };
   members: TeamMemberWire[];
   activity: TeamActivityWire[];
+};
+
+/** The four roles in the words a customer uses. */
+export const ROLE_NAME: Record<MembershipRole, string> = { viewer: 'Viewer', maker: 'Staff', checker: 'Approver', admin: 'Owner' };
+
+/** What each role can do, in a sentence. */
+export const ROLE_SENTENCE: Record<MembershipRole, string> = {
+  viewer: 'Reads the workspace and changes nothing.',
+  maker: 'Prepares payments and pays within the rule they hold. Anything above it goes to the owners.',
+  checker: 'Approves payments, and prepares them like staff. Can be made the Finance lead.',
+  admin: 'Full authority in the workspace, including Add funds and Withdraw. Signs for the wallet once added as a signer.',
 };
 
 const ALL_ROLES: readonly MembershipRole[] = ['viewer', 'maker', 'checker', 'admin'];
@@ -103,10 +114,18 @@ export function walletActions(access: { addFunds: boolean; withdraw: boolean } |
   };
 }
 
+/** Said where a member without Add funds would otherwise be offered a top-up. */
+export const ADD_FUNDS_ASK = 'Adding funds is turned on by an owner. Ask an owner to add funds, or to give you access in Settings.';
+
 // ─── The activity line ──────────────────────────────────────────────────────
 
 const A_ROLE: Record<string, string> = { viewer: 'a viewer', maker: 'staff', checker: 'an approver', admin: 'an owner' };
 const BARE_ROLE: Record<string, string> = { viewer: 'viewer', maker: 'staff', checker: 'approver', admin: 'owner' };
+
+/** "an approver", "staff", "a viewer", "an owner". */
+export function roleWithArticle(role: string): string {
+  return A_ROLE[role] ?? 'a member';
+}
 
 export const TEAM_ACTIONS = [
   'member_added',

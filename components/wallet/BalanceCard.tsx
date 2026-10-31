@@ -23,8 +23,10 @@ function openSection(id: string) {
  * the business, what is on hold and so not spendable, and what can be paid.
  * "Held by the business" is literal: Splash has no key to this wallet.
  */
-export default function BalanceCard({ overview }: { overview: Overview }) {
+export default function BalanceCard({ overview, actions }: { overview: Overview; actions: { addFunds: boolean; withdraw: boolean } }) {
   const phone = usePhone();
+  // Add funds and Withdraw are offered only to those an owner let use them; Send is for anyone who may prepare a payment.
+  const phoneColumns = ['grid-cols-1', 'grid-cols-2', 'grid-cols-3'][Number(actions.addFunds) + Number(actions.withdraw)];
   const b = overview.balance;
   const unknown = Boolean(b?.holdsUnknown);
   const held = b && !unknown ? BigInt(b.heldMinor) : 0n;
@@ -74,15 +76,15 @@ export default function BalanceCard({ overview }: { overview: Overview }) {
       ) : null}
       {phone ? (
         // On a phone the three things a person does with a wallet are one row of large targets under the balance.
-        <div className="mt-4 grid grid-cols-3 gap-2" role="group" aria-label="Wallet actions">
-          <button type="button" onClick={() => openSection('top-up')} className={PHONE_ACTION}><ArrowDownToLine className="h-5 w-5" aria-hidden="true" />Add funds</button>
-          <button type="button" onClick={() => openSection('withdraw')} className={PHONE_ACTION}><ArrowUpFromLine className="h-5 w-5" aria-hidden="true" />Withdraw</button>
+        <div className={`mt-4 grid ${phoneColumns} gap-2`} role="group" aria-label="Wallet actions">
+          {actions.addFunds ? <button type="button" onClick={() => openSection('top-up')} className={PHONE_ACTION}><ArrowDownToLine className="h-5 w-5" aria-hidden="true" />Add funds</button> : null}
+          {actions.withdraw ? <button type="button" onClick={() => openSection('withdraw')} className={PHONE_ACTION}><ArrowUpFromLine className="h-5 w-5" aria-hidden="true" />Withdraw</button> : null}
           <Link href="/dashboard/transfer" className={PHONE_ACTION}><ArrowRight className="h-5 w-5" aria-hidden="true" />Send</Link>
         </div>
       ) : (
         <div className="mt-4 flex flex-wrap gap-2">
-          <a href="#top-up" className="dash-btn inline-flex min-h-11 items-center !px-4 !py-2 !text-[13px]"><ArrowDownToLine className="h-4 w-4" aria-hidden="true" />Add funds</a>
-          <a href="#withdraw" className="dash-btn-ghost inline-flex min-h-11 items-center !px-4 !py-2 !text-[13px]"><ArrowUpFromLine className="h-4 w-4" aria-hidden="true" />Withdraw to your bank</a>
+          {actions.addFunds ? <a href="#top-up" className="dash-btn inline-flex min-h-11 items-center !px-4 !py-2 !text-[13px]"><ArrowDownToLine className="h-4 w-4" aria-hidden="true" />Add funds</a> : null}
+          {actions.withdraw ? <a href="#withdraw" className="dash-btn-ghost inline-flex min-h-11 items-center !px-4 !py-2 !text-[13px]"><ArrowUpFromLine className="h-4 w-4" aria-hidden="true" />Withdraw to your bank</a> : null}
           <Link href="/dashboard/transfer" className="dash-btn-ghost inline-flex min-h-11 items-center !px-4 !py-2 !text-[13px]">Send a payment<ArrowRight className="h-4 w-4" aria-hidden="true" /></Link>
         </div>
       )}

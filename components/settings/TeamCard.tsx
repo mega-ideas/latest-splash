@@ -1,69 +1,186 @@
 'use client';
 
-import { Fingerprint, UserRound } from 'lucide-react';
+import { useState } from 'react';
+import { Fingerprint, Landmark, UserRound } from 'lucide-react';
 
-import { Card, Loading, Note, Pill } from '@/components/wallet/parts';
+import FinanceLeadNote from '@/components/team/FinanceLeadNote';
+import MemberDialog from '@/components/team/MemberDialog';
+import TeamActivity from '@/components/team/TeamActivity';
+import { call, errorText } from '@/components/transfer/api';
+import { Field, PrimaryButton, QuietButton, SelectInput, TextInput } from '@/components/transfer/ui';
 import { PersonInCharge, type InCharge } from '@/components/wallet/Migration';
+import { Card, Loading, Note, Pill } from '@/components/wallet/parts';
+import type { MembershipRole } from '@/lib/membership-roles';
 import { teamRows, type SpendWire } from '@/lib/team-rules/view';
+import { FINANCE_LEAD_NAME, ROLE_NAME, roleChoicesFor, roleWithArticle, rowControls, type TeamMemberWire, type TeamWire } from '@/lib/team/view';
+
+type Load<T> = { data: T | null; loading: boolean; error: string | null };
 
 /**
- * The team (v2 brief 5.9): who is in the business, what each person is, who is
- * in charge, and the rule each staff member holds. An owner sees everyone; the
- * list of people to choose from goes to an owner only, because who holds which
- * role is theirs to decide. Roles are set by Splash support, not here: a role
- * decides what a person can do, and changing one is a decision for the
- * business's owners and Splash together.
+ * The team (v2 brief 5.9, Sky's decision of 31 Oct): the business's owners run
+ * it here. An owner adds a person, changes their role, takes it away, chooses
+ * who may use Add funds and Withdraw, and may name one Finance lead who can do
+ * the adding and changing for viewers, staff and approvers. It is not a Splash
+ * support request any more.
  *
- * The page reads the team once and gives it here (so a change of who is in
- * charge refreshes the list); this card fetches nothing.
+ * What each person is offered is lib/team/view.ts's rowControls, which mirrors
+ * the server's rules (lib/server/team-admin.ts); the server decides.
+ * Someone who manages nothing sees who they are, what they may do with Add
+ * funds and Withdraw, and who to ask. The page reads the team once and gives it
+ * here, so a change refreshes the whole page.
  */
 export default function TeamCard({
-  owner,
+  people,
+  charge,
   spend,
-  team,
+  walletReady,
   onChanged,
 }: {
-  owner: boolean;
+  people: Load<TeamWire> & { reload: () => void };
+  charge: Load<InCharge>;
   spend: SpendWire | null;
-  team: { data: InCharge | null; loading: boolean; error: string | null };
+  walletReady: boolean;
   onChanged: () => void;
 }) {
+  const [selected, setSelected] = useState<string | null>(null);
+  const [email, setEmail] = useState('');
+  const [role, setRole] = useState<MembershipRole>('viewer');
+  const [adding, setAdding] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
+  const [added, setAdded] = useState<string | null>(null);
+
   // Waiting is not failing: with neither an answer nor an error yet, the card says it is reading, never an empty alert.
-  if (team.loading || (!team.data && !team.error)) return <Card id="team" title="Team"><Loading label="Reading your team…" /></Card>;
-  if (!team.data) return <Card id="team" title="Team"><Note tone="error">{team.error}</Note></Card>;
-  const rows = teamRows({ members: team.data.members, personsInCharge: team.data.personsInCharge, rules: spend?.rules ?? [] }, new Date());
+  if (people.loading || (!people.data && !people.error)) return <Card id="team" title="Team"><Loading label="Reading your team…" /></Card>;
+  if (!people.data) return <Card id="team" title="Team"><Note tone="error">{people.error}</Note></Card>;
+  const { you, members, activity } = people.data;
+  const manager = you.manager;
+  const refresh = () => {
+    people.reload();
+    onChanged();
+  };
+
+  if (!manager) {
+    return (
+      <Card id="team" title="Team">
+        <div className="space-y-3">
+          <Note>Your owners manage the team. Your own rule, if you have one, is under Spending rules.</Note>
+          <p className="flex items-start gap-2 text-[13px] leading-5 text-[#1F4452]">
+            <Landmark className="mt-0.5 h-4 w-4 shrink-0 text-[#145d6a]" aria-hidden="true" />
+            <span>
+              {you.addFunds && you.withdraw
+                ? 'You can add funds and withdraw to the business bank account.'
+                : you.addFunds
+                  ? 'You can add funds. You cannot withdraw. Ask an owner if you need to.'
+                  : you.withdraw
+                    ? 'You can withdraw to the business bank account. You cannot add funds. Ask an owner if you need to.'
+                    : 'You cannot add funds or withdraw. An owner can turn either on for you.'}
+            </span>
+          </p>
+          {charge.data && charge.data.personsInCharge.length > 0 ? <p className="text-[13px] text-[#326273]">In charge: {charge.data.personsInCharge.map((p) => p.name).join(', ')}.</p> : null}
+        </div>
+      </Card>
+    );
+  }
+
+  const rows = teamRows(
+    { members: members.map((m) => ({ userId: m.userId, name: m.name, role: m.role })), personsInCharge: charge.data?.personsInCharge ?? [], rules: spend?.rules ?? [] },
+    new Date(),
+  );
+  const ruleOf = new Map(rows.map((r) => [r.userId, r]));
+  const lead = members.find((m) => m.financeLead) ?? null;
+  const choices = roleChoicesFor(manager);
+  const picked = members.find((m) => m.userId === selected) ?? null;
+
+  async function add() {
+    setAdding(true);
+    setAddError(null);
+    setAdded(null);
+    const answer = await call('/api/team', { body: { email: email.trim(), role } });
+    setAdding(false);
+    if (!answer.ok) {
+      setAddError(errorText(answer, 'That person was not added. Nothing was changed.'));
+      return;
+    }
+    setAdded(`${email.trim()} was added as ${roleWithArticle(role)}.`);
+    setEmail('');
+    refresh();
+  }
+
+  const access = (m: TeamMemberWire) =>
+    m.role === 'viewer' ? null : m.addFunds && m.withdraw ? 'Can add funds and withdraw.' : m.addFunds ? 'Can add funds.' : m.withdraw ? 'Can withdraw.' : 'Cannot add funds or withdraw.';
 
   return (
     <Card id="team" title="Team">
-      <div className="space-y-4">
+      <div className="space-y-5">
         <p className="text-[13px] leading-5 text-[#326273]">
-          Owners sign for the business wallet. Staff pay within the rule they hold, approvers approve, and viewers read. To add someone or change a role, ask Splash support.
+          {manager === 'owner'
+            ? 'You run the team. Add people, choose their role, and decide who can add funds and withdraw. Owners sign for the business wallet; staff pay within the rule they hold, approvers approve, and viewers read.'
+            : `You are the ${FINANCE_LEAD_NAME}. You can add people and change or remove viewers, staff and approvers. Owners, the wallet’s signers, bank accounts and Add funds or Withdraw access stay with the owners.`}
         </p>
-        {owner ? (
-          rows.length === 0 ? (
-            <Note>No one else is on the team yet.</Note>
-          ) : (
-            <ul className="space-y-2" aria-label="Team">
-              {rows.map((m) => (
-                <li key={m.userId} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl bg-[#F6F0ED] px-3 py-2.5 text-sm text-[#1F4452]">
-                  <UserRound className="h-4 w-4 shrink-0 text-[#145d6a]" aria-hidden="true" />
-                  <span className="min-w-0 flex-1 basis-40 truncate font-semibold">{m.name}</span>
-                  <Pill tone="ok">{m.role}</Pill>
-                  {m.inCharge ? <Pill tone="wait"><Fingerprint className="mr-1 h-3 w-3" aria-hidden="true" />In charge</Pill> : null}
-                  <span className="basis-full text-[13px] text-[#326273] sm:basis-auto">
-                    {m.rule ? `Up to ${m.rule.perPayment} a payment. ${m.rule.state.label}.` : m.canHaveRule ? 'No rule: each payment goes to the owners.' : m.role === 'Owner' ? 'Signs for the business wallet.' : 'Reads only.'}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )
-        ) : (
-          <Note>Your owners manage the team. Your own rule, if you have one, is under Spending rules.</Note>
-        )}
-        {owner ? <PersonInCharge given={team.data} onChanged={onChanged} /> : team.data.personsInCharge.length > 0 ? (
-          <p className="text-[13px] text-[#326273]">In charge: {team.data.personsInCharge.map((p) => p.name).join(', ')}.</p>
+
+        <ul className="space-y-2" aria-label="Team">
+          {members.map((m) => {
+            const row = ruleOf.get(m.userId);
+            const controls = rowControls({ manager, youUserId: you.userId }, m);
+            const can = controls.roles.length > 0 || controls.remove || controls.access || controls.financeLead !== null;
+            return (
+              <li key={m.userId} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl bg-[#F6F0ED] px-3 py-2.5 text-sm text-[#1F4452]">
+                <UserRound className="h-4 w-4 shrink-0 text-[#145d6a]" aria-hidden="true" />
+                <span className="min-w-0 flex-1 basis-40">
+                  <span className="block truncate font-semibold">{m.name}{m.userId === you.userId ? ' (you)' : ''}</span>
+                  <span className="block truncate text-[13px] text-[#326273]">{m.email}</span>
+                </span>
+                <Pill tone="ok">{ROLE_NAME[m.role]}</Pill>
+                {m.financeLead ? <Pill tone="wait">{FINANCE_LEAD_NAME}</Pill> : null}
+                {m.inCharge ? <Pill tone="wait"><Fingerprint className="mr-1 h-3 w-3" aria-hidden="true" />In charge</Pill> : null}
+                {can ? (
+                  <QuietButton type="button" className="!h-11" onClick={() => setSelected(m.userId)} aria-label={`Manage ${m.name}`}>Manage</QuietButton>
+                ) : null}
+                <span className="basis-full text-[13px] leading-5 text-[#326273]">
+                  {access(m)}{' '}
+                  {walletReady && row?.rule ? `Up to ${row.rule.perPayment} a payment. ${row.rule.state.label}.` : walletReady && row?.canHaveRule ? 'No rule: each payment goes to the owners.' : m.role === 'admin' ? 'Signs for the business wallet once added as a signer.' : m.role === 'viewer' ? 'Reads only.' : ''}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+
+        {choices.length > 0 ? (
+          <form
+            className="space-y-3 rounded-xl border border-[#326273]/15 p-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (email.trim() && !adding) void add();
+            }}
+          >
+            <h3 className="text-[13px] font-extrabold text-[#0c3e48]">Add a person</h3>
+            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_11rem]">
+              <Field label="Email" htmlFor="team-add-email" hint="Needs a verified Splash account">
+                <TextInput id="team-add-email" type="email" autoComplete="off" inputMode="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+              </Field>
+              <Field label="Role" htmlFor="team-add-role">
+                <SelectInput id="team-add-role" value={role} onChange={(e) => setRole(e.target.value as MembershipRole)}>
+                  {choices.map((r) => <option key={r} value={r}>{ROLE_NAME[r]}</option>)}
+                </SelectInput>
+              </Field>
+            </div>
+            {addError ? <Note tone="error">{addError}</Note> : null}
+            <div aria-live="polite">{added ? <Note>{added}</Note> : null}</div>
+            <PrimaryButton type="submit" disabled={adding || !email.trim()}>{adding ? 'Adding…' : 'Add to team'}</PrimaryButton>
+          </form>
         ) : null}
+
+        <FinanceLeadNote leadName={lead?.name ?? null} />
+
+        {manager === 'owner' && walletReady && charge.data ? <PersonInCharge given={charge.data} onChanged={refresh} /> : null}
+
+        <section aria-labelledby="team-activity" className="space-y-1">
+          <h3 id="team-activity" className="text-[13px] font-extrabold text-[#0c3e48]">Recent changes</h3>
+          <TeamActivity activity={activity} />
+        </section>
       </div>
+
+      <MemberDialog key={picked?.userId ?? 'none'} member={picked} manager={manager} youUserId={you.userId} onClose={() => setSelected(null)} onChanged={refresh} />
     </Card>
   );
 }

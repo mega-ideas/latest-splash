@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { readJsonBody } from '@/lib/server/http';
-import { addTeamMember, listTeam, listTeamActivity, teamManager } from '@/lib/server/team-admin';
+import { addTeamMember, fundsAccessOf, listTeam, listTeamActivity, teamManager } from '@/lib/server/team-admin';
 import { limitTeamChanges, NO_STORE, teamResponse, teamRoute } from '@/lib/server/team-route';
 import { memberRole } from '@/lib/server/wallet-authority';
 
@@ -23,10 +23,11 @@ export async function GET(request: Request) {
   if (gate.response) return gate.response;
   const manager = await teamManager(gate.route.db, gate.route.orgId, gate.route.authority.userId);
   const role = await memberRole(gate.route.db, gate.route.orgId, gate.route.authority.userId);
+  const access = await fundsAccessOf(gate.route.db, gate.route.orgId, gate.route.authority.userId);
   const members = manager ? await listTeam(gate.route.db, gate.route.orgId) : [];
   // Newest first for a page that reads top down.
   const activity = manager ? (await listTeamActivity(gate.route.db, gate.route.orgId, 50)).reverse() : [];
-  return NextResponse.json({ you: { userId: gate.route.authority.userId, role, manager }, members, activity }, { headers: NO_STORE });
+  return NextResponse.json({ you: { userId: gate.route.authority.userId, role, manager, addFunds: access.addFunds, withdraw: access.withdraw }, members, activity }, { headers: NO_STORE });
 }
 
 export async function POST(request: Request) {

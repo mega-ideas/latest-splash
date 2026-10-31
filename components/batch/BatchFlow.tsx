@@ -4,7 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Check, CircleHelp, Wallet } from 'lucide-react';
 
+import { useTeamAccess } from '@/components/team/useTeamAccess';
 import { BATCH_MAX_PAYMENTS, type SheetRow } from '@/lib/batch/sheet';
+import { walletActions } from '@/lib/team/view';
 import { takeBatchDraft } from '@/lib/batch-parse';
 import { formatUsdc } from '@/lib/fees/copy';
 import LocalTime from '../LocalTime';
@@ -33,6 +35,8 @@ const renumber = (rows: SheetRow[]): SheetRow[] => rows.map((r, i) => ({ ...r, l
 
 /** The five steps of a batch (v2 brief 5.6): upload, review rows, approve, send, receipts. */
 export default function BatchFlow() {
+  // Add funds is offered only to someone an owner let use it.
+  const canAddFunds = walletActions(useTeamAccess()).addFunds;
   const [ctx, setCtx] = useState<Context | null>(null);
   const [ctxState, setCtxState] = useState<'loading' | 'ok' | 'denied' | 'failed'>('loading');
   const [step, setStep] = useState<StepNumber>(1);
@@ -303,7 +307,7 @@ export default function BatchFlow() {
           <div className="dash-block p-4">
             <div className="flex items-center gap-2 font-mono text-[12px] font-bold uppercase tracking-[0.14em] text-[#145d6a]"><Wallet className="h-3.5 w-3.5" aria-hidden="true" />Splash Wallet</div>
             <div className="mt-1.5 text-2xl font-extrabold tabular-nums text-[#0c3e48]">{balance ?? 'Shown when you review'}</div>
-            <Link href="/dashboard/wallet" className="mt-1 inline-flex min-h-11 items-center text-sm font-semibold text-[#0d6370] underline underline-offset-2">Add funds</Link>
+            {canAddFunds ? <Link href="/dashboard/wallet#top-up" className="mt-1 inline-flex min-h-11 items-center text-sm font-semibold text-[#0d6370] underline underline-offset-2">Add funds</Link> : null}
           </div>
         </aside>
       </div>

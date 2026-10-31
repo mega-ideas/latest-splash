@@ -61,6 +61,12 @@ and the cron answer as if absent), Controls, How Splash operates.
   Near-threshold flags (owners only) and the housekeeping a rotation leaves
   (a reissue, rules of people who left) are said in one place with the button
   that fixes them.
+- **Team (Sky, 31 Oct).** The owners run the team here, not Splash support: add
+  a person by email with a role, change a role, remove, choose who may use Add
+  funds and Withdraw, and name one Finance lead who can do the adding, changing
+  and removing for viewers, staff and approvers. Each change is a line of the
+  trail, shown under Recent changes. It works before a business wallet exists. See
+  `phase3-team-roles.md`.
 - **Person in charge.** An owner appoints and takes back the person who signs
   off a team member's move of their own USDC (see the Wallet doc). The team is
   read once and shared by the list and the appointment.

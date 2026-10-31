@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Banknote, Check, CircleAlert, Clock3, CreditCard, Copy, Loader2, Wallet } from 'lucide-react';
 
+import { useTeamAccess } from '@/components/team/useTeamAccess';
 import { formatUsdc } from '@/lib/fees/copy';
+import { ADD_FUNDS_ASK, walletActions } from '@/lib/team/view';
 import { call, errorText } from './api';
 import { PrimaryButton, QuietButton } from './ui';
 
@@ -41,7 +43,19 @@ const decimal = (minor: bigint) => formatUsdc(minor).replace(/,/g, '');
  * arrive. The page goes on only when the server says the top-up has arrived
  * (cleared by screening), never on the person's word.
  */
-export default function TopUpPanel({ shortByMinor, intentKey, existingIntentId, onStarted, onArrived }: { shortByMinor: bigint; intentKey: string; existingIntentId: string | null; onStarted: (intentId: string) => void; onArrived: () => void }) {
+type TopUpProps = { shortByMinor: bigint; intentKey: string; existingIntentId: string | null; onStarted: (intentId: string) => void; onArrived: () => void };
+
+/**
+ * Add funds is an owner's to give. Someone without it is told so and who to ask, and no funding call is made for them (the routes refuse it too).
+ */
+export default function TopUpPanel(props: TopUpProps) {
+  const access = useTeamAccess();
+  if (!access) return <p role="status" className="text-[13px] text-[#326273]">Checking whether you can add funds…</p>;
+  if (!walletActions(access).addFunds) return <p role="status" className="text-[13px] leading-5 text-[#1F4452]">{ADD_FUNDS_ASK}</p>;
+  return <TopUpForm {...props} />;
+}
+
+function TopUpForm({ shortByMinor, intentKey, existingIntentId, onStarted, onArrived }: TopUpProps) {
   const [options, setOptions] = useState<Options | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [sourceId, setSourceId] = useState<string | null>(null);

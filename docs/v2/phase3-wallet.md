@@ -31,6 +31,16 @@ else the page calls already existed from Phase 2 (§4.1 to §4.4).
 Every state is a sentence: wallets off on this server, the chain not answering,
 no wallet yet, a wallet being set up, and the viewer's limits.
 
+## Add funds and Withdraw: who sees them
+
+Both are an owner's to give (Sky, 31 Oct). Owners have them; a staff member or an
+approver only when an owner switched them on in Settings → Team, each on its own;
+a viewer never. `GET /api/wallet/overview` carries `access` (what this person may
+do), and the page offers Add funds and Withdraw, on the balance and as sections,
+only from it. Someone without either is told an owner can turn them on. Anyone can
+still send USDC to the wallet from any wallet; a deposit is screened and held as
+before. See `phase3-team-roles.md`.
+
 ## Move to your business wallet
 
 USDC only. Each member's USDC at their own passkey address moves in one plain
