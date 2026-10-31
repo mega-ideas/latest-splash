@@ -214,6 +214,15 @@ export const envSchema = z.object({
    *  profile. 'static': a long-lived key pair, for hosts AWS cannot issue a
    *  role to; scope it to kms:Sign + kms:GetPublicKey on this key only. */
   OPERATOR_KMS_CREDENTIALS: withDefault(z.enum(['role', 'static']), 'role'),
+  /* Scheduled payer (v2 Phase 3, scheduled batches, "pay automatically within
+     my limits"). lib/server/scheduled-payer-signer.ts. A SECOND KMS key,
+     separate from the operator's gas-sponsor key (separation of duties): it
+     signs only as the spender of an allowance the owners signed, holds no
+     funds and no SUI. Unset in production, automatic payments are off and
+     every run is handed back to "ask me first". Never a raw key. */
+  SCHEDULED_PAYER_KMS_KEY_ID: opt(str.regex(KMS_KEY_ID, 'must be a KMS key id, key ARN, alias/… or mrk-… id')),
+  /** The address the scheduled-payer KMS key derives; checked against its public key, and never the operator's or the sponsor's. */
+  SCHEDULED_PAYER_SUI_ADDRESS: suiAddress,
   AWS_ACCESS_KEY_ID: optional,
   AWS_SECRET_ACCESS_KEY: optional,
   AWS_SESSION_TOKEN: optional,
@@ -771,6 +780,22 @@ function productionIssues(env: Env): Issue[] {
       need('AWS_ACCESS_KEY_ID', 'OPERATOR_KMS_CREDENTIALS=static');
       need('AWS_SECRET_ACCESS_KEY', 'OPERATOR_KMS_CREDENTIALS=static');
     }
+  }
+  /* The scheduled payer is a second KMS key. If one is named, everything needed
+     to check it is required, and it may not be the operator's key or address:
+     the gas sponsor must never be able to pay, and the payer must never be
+     able to sponsor. */
+  if (env.SCHEDULED_PAYER_KMS_KEY_ID !== undefined) {
+    need('AWS_REGION', "the scheduled payer's KMS signer needs the key's region");
+    need('SCHEDULED_PAYER_SUI_ADDRESS', 'the scheduled payer must be named so it can be checked against its KMS public key');
+    if (env.SCHEDULED_PAYER_KMS_KEY_ID === env.OPERATOR_KMS_KEY_ID) {
+      issues.push({ key: 'SCHEDULED_PAYER_KMS_KEY_ID', message: 'is the operator key: the key that sponsors gas must not also be the key that pays (docs/KEY-POLICY.md, separation of duties)' });
+    }
+    if (env.SCHEDULED_PAYER_SUI_ADDRESS !== undefined && env.SCHEDULED_PAYER_SUI_ADDRESS.toLowerCase() === (env.OPERATOR_SUI_ADDRESS ?? '').toLowerCase()) {
+      issues.push({ key: 'SCHEDULED_PAYER_SUI_ADDRESS', message: 'is the operator address: the gas sponsor and the scheduled payer must be different keys' });
+    }
+  } else if (env.SCHEDULED_PAYER_SUI_ADDRESS !== undefined) {
+    issues.push({ key: 'SCHEDULED_PAYER_SUI_ADDRESS', message: 'is set without SCHEDULED_PAYER_KMS_KEY_ID: an address with no key behind it would be offered to owners as an allowance spender that can never pay' });
   }
   if (env.OXWAL_CHAIN_MODE === 'live') {
     need('OXWAL_SUI_SENDER', 'OXWAL_CHAIN_MODE=live composes real transactions');
