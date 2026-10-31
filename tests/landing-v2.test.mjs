@@ -130,34 +130,71 @@ test('PHP and IDR are quotable; MYR, VND, THB and SGD are under pilot access', a
 
 /* ── The landing quote ─────────────────────────────────────────────────── */
 
-const mockAdapter = { async quote(currency) { return { fxRate: currency === 'PHP' ? '56.5' : '16250', partnerFeeBps: 20 }; } };
-const deadAdapter = { async quote() { throw new Error('not configured'); } };
+// The landing asks the payout partner through the ONE payout-partner
+// interface (lib/payouts/partner.ts, v2 section 4.5), never a private adapter.
+// The partner is a function, so a partner that is switched off or not built
+// refuses inside the quote and the answer is "not quoted".
+const NOW = new Date('2026-10-31T00:00:00Z');
+const sandboxPartner = async (id) => {
+  const { payoutPartner } = await import('../lib/payouts/registry.ts');
+  return () => payoutPartner(id, { NODE_ENV: 'test' });
+};
+const deadPartner = () => ({ async quote() { throw new Error('not configured'); } });
 
 test('a landing quote comes from the payout partner, and fails closed rather than invent a rate', async () => {
   const { landingQuote } = await import('../lib/server/landing-quote.ts');
+  const { payoutPartner } = await import('../lib/payouts/registry.ts');
   const thousand = 1_000_000_000n; // 1,000 USDC
 
-  const sandbox = await landingQuote({ currency: 'PHP', amountMinor: thousand }, { adapter: mockAdapter, sandbox: true, sandboxAllowed: true, partnerLabel: 'our Philippines payout partner' });
+  const sandbox = await landingQuote({ currency: 'PHP', amountMinor: thousand }, { partner: await sandboxPartner('pdax'), sandboxAllowed: true, partnerLabel: 'our Philippines payout partner', now: NOW });
   assert.equal(sandbox.rate, '56.5');
   assert.equal(sandbox.sandbox, true, 'a sandbox rate says so');
-  assert.equal(sandbox.partnerFee.minor, '2000000', "the partner's own fee, from its own quote");
-  // (1,000 - 2) USDC at 56.5 = 56,387.00 PHP, in centavos.
-  assert.equal(sandbox.receivedMinor, '5638700');
-  assert.ok(sandbox.ttlSeconds > 0);
+  // The sandbox partner takes 0.20% and P15.00: 1,000 USDC is P56,500.00, less P128.00 is P56,372.00.
+  assert.equal(sandbox.receivedMinor, '5637200', "what the partner's own quote says the bank receives");
+  // The same fee in USDC at the quoted rate, rounded up: 1,000 less 997.734513.
+  assert.equal(sandbox.partnerFee.minor, '2265487');
+  assert.match(sandbox.partnerFee.source, /our Philippines payout partner, sandbox quote/);
+  assert.ok(sandbox.ttlSeconds > 0 && sandbox.ttlSeconds <= 30);
 
-  const idr = await landingQuote({ currency: 'IDR', amountMinor: thousand }, { adapter: mockAdapter, sandbox: true, sandboxAllowed: true, partnerLabel: 'our Indonesia payout partner' });
-  assert.equal(idr.receivedMinor, '16217500', 'whole rupiah: (1,000 - 2) x 16,250');
+  const idr = await landingQuote({ currency: 'IDR', amountMinor: thousand }, { partner: await sandboxPartner('durianpay'), sandboxAllowed: true, partnerLabel: 'our Indonesia payout partner', now: NOW });
+  assert.equal(idr.receivedMinor, '16221625', 'whole rupiah: Rp16,250,000 less 0.15% and Rp4,000');
+  assert.equal(idr.partnerFee.minor, '1746154');
 
-  const production = await landingQuote({ currency: 'PHP', amountMinor: thousand }, { adapter: mockAdapter, sandbox: true, sandboxAllowed: false, partnerLabel: 'x' });
-  assert.equal(production.rate, null, 'a sandbox rate never reaches a production page');
-  assert.equal(production.receivedMinor, null);
-  assert.equal(production.partnerFee.minor, null);
+  const notAllowed = await landingQuote({ currency: 'PHP', amountMinor: thousand }, { partner: await sandboxPartner('pdax'), sandboxAllowed: false, partnerLabel: 'x', now: NOW });
+  assert.equal(notAllowed.rate, null, 'a sandbox rate never reaches a page where sandboxes are not allowed');
+  assert.equal(notAllowed.receivedMinor, null);
+  assert.equal(notAllowed.partnerFee.minor, null);
 
-  const dead = await landingQuote({ currency: 'IDR', amountMinor: thousand }, { adapter: deadAdapter, sandbox: false, sandboxAllowed: false, partnerLabel: 'x' });
+  // In production the registry hands out the live adapter, which refuses without
+  // credentials and, until its API is wired, with them: there is no quote at all.
+  const production = await landingQuote(
+    { currency: 'PHP', amountMinor: thousand },
+    { partner: () => payoutPartner('pdax', { NODE_ENV: 'production', PDAX_API_KEY: 'k', PDAX_API_SECRET: 's', PDAX_WEBHOOK_SECRET: 'w', USE_MOCK_APIS: 'true' }), sandboxAllowed: true, partnerLabel: 'x', now: NOW },
+  );
+  assert.equal(production.rate, null, 'USE_MOCK_APIS never brings a sandbox quote into production');
+  assert.equal(production.sandbox, false);
+  assert.match(production.partnerFee.source, /Not quoted yet/);
+
+  const dead = await landingQuote({ currency: 'IDR', amountMinor: thousand }, { partner: deadPartner, sandboxAllowed: false, partnerLabel: 'x', now: NOW });
   assert.equal(dead.rate, null, 'an unconfigured partner quotes nothing');
   assert.match(dead.partnerFee.source, /Not quoted yet/);
 
-  await assert.rejects(() => landingQuote({ currency: 'MYR', amountMinor: thousand }, { adapter: mockAdapter, sandbox: true, sandboxAllowed: true, partnerLabel: 'x' }), /pilot|not quoted/i);
+  const off = await landingQuote({ currency: 'PHP', amountMinor: thousand }, { partner: () => payoutPartner('pdax', { NODE_ENV: 'test', PAYOUT_PARTNER_PDAX_ENABLED: 'false' }), sandboxAllowed: true, partnerLabel: 'x', now: NOW });
+  assert.equal(off.rate, null, 'a route that is switched off quotes nothing');
+
+  const pdaxSandbox = await sandboxPartner('pdax');
+  await assert.rejects(() => landingQuote({ currency: 'MYR', amountMinor: thousand }, { partner: pdaxSandbox, sandboxAllowed: true, partnerLabel: 'x', now: NOW }), /pilot|not quoted/i);
+});
+
+test('the landing has no payout adapter of its own, and the environment declares each key once', () => {
+  assert.equal(exists('lib/server/durianpay.ts'), false, 'the Indonesia partner is lib/payouts/durianpay.ts, behind the registry');
+  const route = code('app/api/quotes/preview/route.ts');
+  assert.match(route, /payoutPartner\(/, 'the route takes its partner from the registry');
+  assert.doesNotMatch(route, /mockPdaxAdapter|mockDurianpayAdapter/);
+  const env = code('lib/env.ts');
+  for (const key of ['DURIANPAY_API_KEY', 'PDAX_API_KEY']) {
+    assert.equal(env.split(new RegExp(`^\\s*${key}:`, 'm')).length - 1, 1, `${key} is declared once in lib/env.ts`);
+  }
 });
 
 test('the public quote and access routes are rate-limited by network and need no session', () => {
