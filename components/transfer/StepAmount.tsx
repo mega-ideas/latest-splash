@@ -1,34 +1,17 @@
 'use client';
 
-import { useMemo } from 'react';
 import { ArrowLeft, ArrowRight, CircleAlert, FileText, Wallet } from 'lucide-react';
 
-import { feeUnderConfig } from '@/lib/fees/schedule';
 import { formatUsdc, kindLabel } from '@/lib/fees/copy';
-import { usePublishedFees } from '@/lib/fees/use-published-pricing';
-import { feeKindOf, PURPOSE_OPTIONS, SOURCE_OPTIONS } from '@/lib/transfer/payee';
-import { fundsCheck, parseAmountMinor } from '@/lib/transfer/plan';
+import { PURPOSE_OPTIONS, SOURCE_OPTIONS } from '@/lib/transfer/payee';
+import { useAmountPlan } from './amount-plan';
 import { Field, PrimaryButton, QuietButton, SelectInput, TextInput } from './ui';
 import TopUpPanel from './TopUpPanel';
 import type { StepProps } from './flow';
 
 /** Step 3, "Amount and pay from": the Splash Wallet balance, the shortfall and a top-up from a verified source. */
 export default function StepAmount({ flow, patch, balance, next, back, reload, topUpId, onTopUp }: StepProps & { topUpId: string | null; onTopUp: (id: string | null) => void }) {
-  const fees = usePublishedFees();
-  const bank = flow.chosen?.kind === 'bank';
-  const amount = parseAmountMinor(flow.amountText);
-  const kind = flow.payeeType ? feeKindOf(flow.payeeType === 'wallet' ? { kind: 'wallet', wallet: flow.chosen?.kind === 'recipient' ? (flow.chosen.deliveryKind === 'EXCHANGE' ? 'exchange' : flow.chosen.deliveryKind === 'CROSS_CHAIN' ? 'cross_chain' : 'self_custody') : 'self_custody' } : { kind: flow.payeeType }) : null;
-  const estimate = useMemo(() => {
-    if (!fees || amount === null || kind === null) return null;
-    try {
-      return feeUnderConfig({ config: { feesOn: fees.feesOn, schedule: fees.schedule }, kind, principalMinor: amount, discountBps: 0 });
-    } catch {
-      return null;
-    }
-  }, [fees, amount, kind]);
-  // An estimate is shown rounded up to the cent; the real fee comes with the quote.
-  const estimateUp = estimate === null ? null : ((estimate + 9_999n) / 10_000n) * 10_000n;
-  const funds = amount !== null && estimateUp !== null && balance.state === 'ok' ? fundsCheck({ balanceMinor: balance.usdcMinor, amountMinor: amount, feeMinor: estimateUp }) : null;
+  const { fees, bank, amount, kind, estimateUp, funds } = useAmountPlan(flow, balance);
   const declared = !bank || (flow.purposeCode && flow.sourceOfFunds);
   const canGo = amount !== null && Boolean(declared) && funds?.enough === true;
 

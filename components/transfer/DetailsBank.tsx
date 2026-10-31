@@ -3,38 +3,24 @@
 import { useState } from 'react';
 import { Building2, Check, CircleHelp, Hash, Landmark, MapPin, UserRound } from 'lucide-react';
 
-import { checkPayeeField } from '@/lib/transfer/addresses';
+import { BANK_BLANK, type BankErrors, type BankForm } from '@/lib/transfer/bank-form';
 import { BANK_COUNTRIES, RELATIONSHIP_OPTIONS, corridorAccess } from '@/lib/transfer/payee';
-import { call, errorText, type Beneficiary } from './api';
+import type { Beneficiary } from './api';
+import { saveBeneficiary } from './bank-save';
+import PilotAccess from './PilotAccess';
 import RequirementsSheet from './RequirementsSheet';
 import { Field, PrimaryButton, QuietButton, Segmented, SelectInput, TextInput } from './ui';
 import type { StepProps } from './flow';
-
-type Form = {
-  holder: 'business' | 'person';
-  country: string;
-  holderName: string;
-  registrationNumber: string;
-  bankCode: string;
-  accountNumber: string;
-  street: string;
-  city: string;
-  postCode: string;
-  relationship: string;
-};
-
-const BLANK: Form = { holder: 'business', country: 'PH', holderName: '', registrationNumber: '', bankCode: '', accountNumber: '', street: '', city: '', postCode: '', relationship: 'supplier' };
 
 /** Step 2 for a bank: a saved supplier, or a new one. One list of fields, one input height, one icon gutter. */
 export default function DetailsBank({ flow, patch, ctx, beneficiaries, reload }: Pick<StepProps, 'flow' | 'patch' | 'ctx' | 'beneficiaries' | 'reload'>) {
   const owner = ctx?.role === 'OWNER';
   const [adding, setAdding] = useState(beneficiaries.length === 0);
-  const [form, setForm] = useState<Form>(BLANK);
+  const [form, setForm] = useState<BankForm>(BANK_BLANK);
   const [sheet, setSheet] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [errors, setErrors] = useState<Partial<Record<keyof Form | 'form', string>>>({});
-  const [request, setRequest] = useState<{ email: string; state: 'idle' | 'sending' | 'sent' | 'failed' }>({ email: '', state: 'idle' });
-  const set = <K extends keyof Form>(key: K, value: Form[K]) => setForm((f) => ({ ...f, [key]: value }));
+  const [errors, setErrors] = useState<BankErrors>({});
+  const set = <K extends keyof BankForm>(key: K, value: BankForm[K]) => setForm((f) => ({ ...f, [key]: value }));
   const access = corridorAccess(form.country);
   const chosenId = flow.chosen?.kind === 'bank' ? flow.chosen.beneficiaryId : null;
 
@@ -42,44 +28,18 @@ export default function DetailsBank({ flow, patch, ctx, beneficiaries, reload }:
     patch({ chosen: { kind: 'bank', beneficiaryId: b.id, name: b.holderName, country: b.country, currency: b.currency, last4: b.last4 } });
 
   async function save() {
-    const next: typeof errors = {};
-    if (form.holderName.trim().length < 2) next.holderName = 'Enter the name the bank holds on the account.';
-    const account = checkPayeeField('bank', form.accountNumber);
-    if (!account.ok) next.accountNumber = account.message;
-    if (!form.bankCode.trim()) next.bankCode = 'Enter the bank code.';
-    if (!form.city.trim()) next.city = 'Enter the town or city.';
-    if (form.holder === 'business' && !form.registrationNumber.trim()) next.registrationNumber = 'Enter the company registration number.';
-    setErrors(next);
-    if (Object.keys(next).length > 0 || !account.ok) return;
     setBusy(true);
-    const answer = await call<{ beneficiary?: Beneficiary }>('/api/wallet/payouts/beneficiaries', {
-      body: {
-        holderName: form.holderName.trim(),
-        country: form.country,
-        bankCode: form.bankCode.trim(),
-        accountNumber: account.address,
-        address: { streetName: form.street.trim() || undefined, postCode: form.postCode.trim() || undefined, townName: form.city.trim(), country: form.country },
-        registrationNumber: form.holder === 'business' ? form.registrationNumber.trim() : undefined,
-        registrationScheme: form.holder === 'business' ? 'CINC' : undefined,
-        relationship: form.relationship,
-      },
-    });
+    const saved = await saveBeneficiary(form);
     setBusy(false);
-    if (!answer.ok || !answer.body?.beneficiary) {
-      setErrors({ form: errorText(answer, 'The account could not be saved. Nothing was sent.') });
+    if (!saved.ok) {
+      setErrors(saved.errors);
       return;
     }
     setErrors({});
-    choose(answer.body.beneficiary);
+    choose(saved.beneficiary);
     setAdding(false);
-    setForm(BLANK);
+    setForm(BANK_BLANK);
     reload();
-  }
-
-  async function requestAccess() {
-    setRequest((r) => ({ ...r, state: 'sending' }));
-    const answer = await call('/api/waitlist', { body: { email: request.email, source: `pilot-${form.country}` } });
-    setRequest((r) => ({ ...r, state: answer.ok ? 'sent' : 'failed' }));
   }
 
   return (
@@ -169,23 +129,7 @@ export default function DetailsBank({ flow, patch, ctx, beneficiaries, reload }:
           </div>
 
           {access === 'pilot' ? (
-            <div className="rounded-xl border border-[var(--warn)] bg-[var(--warn-bg)] p-4">
-              <p className="text-sm font-bold text-[#0c3e48]">{BANK_COUNTRIES.find((c) => c.country === form.country)?.name} is under Pilot access.</p>
-              <p className="mt-1 text-[13px] leading-5 text-[#1F4452]">There is no quote or payment to {form.country} yet. Leave an email and we will contact you when your business can use it.</p>
-              {request.state === 'sent' ? (
-                <p role="status" className="mt-3 text-sm font-semibold text-[#145d6a]">Thanks. We will be in touch.</p>
-              ) : (
-                <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                  <div className="flex-1">
-                    <TextInput type="email" autoComplete="email" aria-label="Work email" placeholder="you@company.com" value={request.email} onChange={(e) => setRequest({ email: e.target.value, state: 'idle' })} />
-                  </div>
-                  <PrimaryButton type="button" disabled={!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(request.email) || request.state === 'sending'} onClick={() => void requestAccess()}>
-                    {request.state === 'sending' ? 'Sending…' : 'Request access'}
-                  </PrimaryButton>
-                </div>
-              )}
-              {request.state === 'failed' ? <p role="alert" className="mt-2 text-[13px] font-medium text-[var(--error)]">That did not go through. Try again.</p> : null}
-            </div>
+            <PilotAccess country={form.country} />
           ) : (
             <>
               <div className="flex flex-wrap items-center gap-3">

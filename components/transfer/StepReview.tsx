@@ -7,6 +7,7 @@ import { formatUsdc, kindLabel } from '@/lib/fees/copy';
 import { groupAddress } from '@/lib/transfer/addresses';
 import { formatMoney } from '@/lib/formatMoney';
 import { approvalPlan, APPROVAL_REASON_TEXT, executableRoute, maxFeeToSend, parseAmountMinor } from '@/lib/transfer/plan';
+import PhoneBar from '@/components/dashboard/PhoneBar';
 import { call, errorText, type SigningView } from './api';
 import SignPanel from './SignPanel';
 import { PrimaryButton, QuietButton } from './ui';
@@ -34,7 +35,7 @@ function rateText(rateMicro: string): string {
 }
 
 /** Step 4, "Review and approve": the fee shown is the fee signed, the owners sign together, staff ask the owners. */
-export default function StepReview({ flow, ctx, balance, back, made, onMade, onExecuted, onRestart }: StepProps & { made: Made | null; onMade: (m: Made) => void; onExecuted: (digest: string | null) => void; onRestart: () => void }) {
+export default function StepReview({ flow, ctx, balance, back, made, onMade, onExecuted, onRestart, stickyActions = false }: StepProps & { made: Made | null; onMade: (m: Made) => void; onExecuted: (digest: string | null) => void; onRestart: () => void; /** On a phone the actions are one fixed bar at the foot (v2 brief 5.10), and the tab bar steps aside for it. */ stickyActions?: boolean }) {
   const [quote, setQuote] = useState<Quote | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -179,6 +180,18 @@ export default function StepReview({ flow, ctx, balance, back, made, onMade, onE
     );
   }
 
+  const actions = (
+    <>
+      <QuietButton type="button" onClick={back} className={stickyActions ? 'min-h-14 shrink-0' : undefined}>
+        <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+        Back
+      </QuietButton>
+      <PrimaryButton type="button" className={stickyActions ? 'min-h-14 flex-1 text-base' : undefined} disabled={!quote || lapsed || sending || (quote.payee?.recentlyAdded === true && !addressChecked) || plan?.route === 'blocked' || !plan || (balance.state === 'ok' && quote !== null && balance.usdcMinor < quote.totalDebitMinor)} onClick={() => void send()}>
+        {sending ? 'Sending…' : ownerRoute ? 'Approve and collect signatures' : 'Ask the owners to approve'}
+      </PrimaryButton>
+    </>
+  );
+
   return (
     <div className="space-y-6">
       <div>
@@ -257,14 +270,15 @@ export default function StepReview({ flow, ctx, balance, back, made, onMade, onE
 
       {sendError ? <p role="alert" className="flex items-start gap-2 text-sm font-medium text-[var(--error)]"><CircleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />{sendError}</p> : null}
 
-      <div className="flex flex-col-reverse gap-2 border-t border-[#326273]/10 pt-4 sm:flex-row sm:items-center sm:justify-between">
-        <QuietButton type="button" onClick={back}>
-          <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-          Back
-        </QuietButton>
-        <PrimaryButton type="button" disabled={!quote || lapsed || sending || (quote.payee?.recentlyAdded === true && !addressChecked) || plan?.route === 'blocked' || !plan || (balance.state === 'ok' && quote !== null && balance.usdcMinor < quote.totalDebitMinor)} onClick={() => void send()}>
-          {sending ? 'Sending…' : ownerRoute ? 'Approve and collect signatures' : 'Ask the owners to approve'}
-        </PrimaryButton>
+      <div className={stickyActions ? undefined : 'flex flex-col-reverse gap-2 border-t border-[#326273]/10 pt-4 sm:flex-row sm:items-center sm:justify-between'}>
+        {stickyActions ? (
+          // On a phone the actions are the one bar at the foot, and the tab bar steps aside for it.
+          <PhoneBar>
+            <div className="flex items-center gap-2">{actions}</div>
+          </PhoneBar>
+        ) : (
+          actions
+        )}
       </div>
     </div>
   );

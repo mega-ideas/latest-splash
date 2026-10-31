@@ -15,7 +15,7 @@ import { useEffect, useId, useRef, type InputHTMLAttributes, type ReactNode, typ
 import { createPortal } from 'react-dom';
 import { CircleAlert, X, type LucideIcon } from 'lucide-react';
 
-export const CONTROL = 'h-11 w-full rounded-xl border border-[#326273]/25 bg-white px-3 text-sm text-[#0c3e48] outline-none transition-colors placeholder:text-[#326273] focus:border-[#0d6370] focus:ring-2 focus:ring-[#0d6370]/20 disabled:cursor-not-allowed disabled:bg-[#F6F0ED]';
+export const CONTROL = 'h-11 w-full rounded-xl border border-[#326273]/25 bg-white px-3 text-base text-[#0c3e48] outline-none transition-colors md:text-sm placeholder:text-[#326273] focus:border-[#0d6370] focus:ring-2 focus:ring-[#0d6370]/20 disabled:cursor-not-allowed disabled:bg-[#F6F0ED]';
 
 export function Field({ label, hint, error, children, className = '', htmlFor }: { label: string; hint?: string; error?: string | null; children: ReactNode; className?: string; htmlFor?: string }) {
   return (

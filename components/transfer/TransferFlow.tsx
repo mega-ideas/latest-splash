@@ -4,12 +4,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Check, CircleHelp, Wallet } from 'lucide-react';
 
+import { usePhone } from '@/components/dashboard/Device';
 import { formatUsdc } from '@/lib/fees/copy';
 import { newIntentKey, draftStorageKey, parseDraft, serializeDraft, type TransferDraft } from '@/lib/transfer/draft';
 import { parseAmountMinor } from '@/lib/transfer/plan';
 import { call, type Beneficiary, type Context, type SavedRecipient } from './api';
 import type { Balance, Chosen, Flow, Made } from './flow';
 import HowItWorks from './HowItWorks';
+import PhoneTransfer from './PhoneTransfer';
 import StepAmount from './StepAmount';
 import StepDetails from './StepDetails';
 import StepReceipt from './StepReceipt';
@@ -56,6 +58,7 @@ function writeStore(key: string, value: string | null) {
 
 /** The five steps of one payment (v2 brief 5.4): who, details, amount and pay from, review and approve, receipt. */
 export default function TransferFlow() {
+  const phone = usePhone();
   const [flow, setFlow] = useState<Flow>(BLANK);
   const [ctx, setCtx] = useState<Context | null>(null);
   const [ctxState, setCtxState] = useState<'loading' | 'ok' | 'denied' | 'failed'>('loading');
@@ -171,6 +174,34 @@ export default function TransferFlow() {
   const amount = parseAmountMinor(flow.amountText);
   const step = flow.step;
   const shared = { flow, patch, ctx, balance, recipients, beneficiaries, reload: () => void load() };
+
+  // A phone asks one question per screen (v2 brief 5.10). The state, the draft, the intent id and the Review step are this flow's own.
+  if (phone) {
+    return (
+      <>
+        <PhoneTransfer
+          ctxState={ctxState}
+          flow={flow}
+          patch={patch}
+          go={go}
+          ctx={ctx}
+          balance={balance}
+          recipients={recipients}
+          beneficiaries={beneficiaries}
+          reload={() => void load()}
+          made={made}
+          onMade={onMade}
+          onExecuted={onExecuted}
+          onRestart={restart}
+          receiptRef={receiptRef}
+          topUpId={topUp}
+          onTopUp={setTopUp}
+          onHow={() => setHow(true)}
+        />
+        <HowItWorks open={how} onClose={() => setHow(false)} />
+      </>
+    );
+  }
 
   return (
     <div className="mx-auto w-full max-w-7xl space-y-4">
