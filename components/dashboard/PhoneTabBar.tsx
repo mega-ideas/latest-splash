@@ -28,7 +28,7 @@ function useWaiting(): number {
     if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
     let answer: { status: number; body?: unknown } | null = null;
     try {
-      const response = await fetch('/api/wallet/signing-requests?count=1', { cache: 'no-store' });
+      const response = await fetch('/api/wallet/signing-requests/count', { cache: 'no-store' });
       answer = { status: response.status, body: await response.json().catch(() => null) };
     } catch {
       answer = null;

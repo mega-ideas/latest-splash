@@ -120,13 +120,15 @@ test('the badge keeps the last good count through a look that failed, and stops 
 
 test('the tab bar asks for a count and nothing else, and stops asking when told it is not signed in', () => {
   const bar = read('components/dashboard/PhoneTabBar.tsx');
-  assert.match(bar, /\/api\/wallet\/signing-requests\?count=1/);
+  assert.match(bar, /\/api\/wallet\/signing-requests\/count/);
   assert.doesNotMatch(bar, /fetch\('\/api\/wallet\/signing-requests'/, 'it does not fetch every request with its bytes just to count them');
   assert.match(bar, /readWaiting\(/);
   assert.match(bar, /stopped/);
-  const route = read('app/api/wallet/signing-requests/route.ts');
-  assert.match(route, /searchParams\.get\('count'\)/);
+  const route = read('app/api/wallet/signing-requests/count/route.ts');
+  assert.match(route, /walletRoute\(request\)/, 'the org and the person come from the session');
   assert.match(route, /waiting: waitingForMe\(/);
+  assert.doesNotMatch(route, /searchParams|body\.|transactionBytes/, 'nothing is read from the request and no bytes are answered');
+  assert.doesNotMatch(read('app/api/wallet/signing-requests/route.ts'), /searchParams/, 'the list route reads nothing from the request');
 });
 
 test('the phone action bar is inert while the menu is open, as the page and the tab bar are', () => {
@@ -137,4 +139,5 @@ test('the phone action bar is inert while the menu is open, as the page and the 
   const bar = read('components/dashboard/PhoneBar.tsx');
   assert.match(bar, /useModalOpen\(\)/);
   assert.match(bar, /inert=\{modalOpen\}/);
+  assert.match(bar, /hidden=\{modalOpen\}/, 'drawn in the body above the drawer’s own layer, it must not cover the foot of the menu either');
 });
