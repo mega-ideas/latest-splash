@@ -7,7 +7,7 @@ import { refusal, requireFundsAccess } from '@/lib/server/wallet-route';
 export const dynamic = 'force-dynamic';
 
 /**
- * GET   this business's top-ups, newest first.
+ * GET   this business's top-ups, newest first (for someone with Add funds).
  * POST  one top-up. Send an `Idempotency-Key` header (or `clientKey`): the
  *       same key returns the same top-up and never opens a second one, and a
  *       key reused for a different top-up is refused. Send
@@ -19,6 +19,8 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: Request) {
   const gate = await fundingRoute(request);
   if (gate.response) return gate.response;
+  const noAccess = await requireFundsAccess(gate.funding.route, 'add_funds', 'see top-ups');
+  if (noAccess) return noAccess;
   return fundingResponse({ ok: true, intents: await listFundingIntents(gate.funding.deps) });
 }
 
