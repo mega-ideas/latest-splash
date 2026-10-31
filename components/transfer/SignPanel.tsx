@@ -109,6 +109,11 @@ export default function SignPanel({ initial, expected = null, expectedBatch = nu
 
   async function sign() {
     if (!reviewed) return;
+    // The button is off for a blocked request; this is the same rule where the signing is, in case it is reached another way.
+    if (approveFacts(reviewed.review).blocked) {
+      setError('This request is not to be signed from here. Do not sign it.');
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -154,10 +159,12 @@ export default function SignPanel({ initial, expected = null, expectedBatch = nu
     else counted.set(key, { item, times: 1 });
   }
   const steps = [...counted.values()].map(({ item, times }) => (times > 1 ? { ...item, line: `${item.line.replace(/\.$/, '')}, ${times} times, once for each payment.` } : item));
-  // A command the page cannot word is never signed: the owner would be signing bytes whose meaning is not on the screen.
-  const blocked = items.some((i) => i.unknown);
+  // One reading of the bytes for the whole panel (it never throws). A command the page cannot word, a payment that does more than it says, an amount that does not add up and a rate that cannot be shown are never signed: the owner would be signing something that is not on the screen.
+  const facts = review ? approveFacts(review) : null;
+  const blocked = facts ? facts.blocked : items.some((i) => i.unknown);
+  const blockedReason = facts?.blockedReason ?? 'Part of this request cannot be shown here, so it cannot be signed from this screen.';
   // The rate the intent in the bytes carries, for a payment that is not in USDC.
-  const rate = review && !isBatch ? approveFacts(review).payments[0]?.rate ?? null : null;
+  const rate = facts && !isBatch ? facts.payments[0]?.rate ?? null : null;
 
   // On a phone an open review is the whole screen (v2 brief 5.10): who is paid comes first, and where the signatures stand is one line of it.
   if (phone && review && !finished && !dead && view.you.mustSign && !view.you.signed) {
@@ -277,7 +284,7 @@ export default function SignPanel({ initial, expected = null, expectedBatch = nu
                   <dd className="min-w-0 text-[#0c3e48]">
                     <ul className="space-y-3">
                       {steps.map((item, n) => (
-                        <li key={`${n}-${item.line}`} className={item.unknown ? 'font-semibold text-[var(--error)]' : undefined}>
+                        <li key={`${n}-${item.line}`} className={item.unknown || facts?.unexpected.some((u) => u.line === item.line) ? 'font-semibold text-[var(--error)]' : undefined}>
                           <span className="block">{item.line}</span>
                           {item.fields.length > 0 ? (
                             <dl className="mt-1 grid gap-x-3 gap-y-1 text-[13px] sm:grid-cols-[auto_1fr]">
@@ -299,7 +306,7 @@ export default function SignPanel({ initial, expected = null, expectedBatch = nu
               <dd className="font-mono text-[13px] font-bold text-[#0c3e48]">{review.code}</dd>
             </dl>
             <p className="text-[13px] leading-5 text-[#326273]">If your WhatsApp message shows a different code, do not sign.</p>
-            {blocked ? <p role="alert" className="text-sm font-semibold text-[var(--error)]">Part of this request cannot be shown here, so it cannot be signed from this screen. Do not sign it.</p> : null}
+            {blocked ? <p role="alert" className="text-sm font-semibold text-[var(--error)]">{blockedReason} Do not sign it.</p> : null}
             {error ? <p role="alert" className="text-sm font-medium text-[var(--error)]">{error}</p> : null}
             <div className="flex flex-wrap gap-2">
               <PrimaryButton type="button" disabled={busy || blocked} onClick={() => void sign()}>

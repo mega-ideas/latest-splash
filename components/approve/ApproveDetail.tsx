@@ -7,6 +7,7 @@ import { ArrowLeft, Loader2, RefreshCw, TriangleAlert } from 'lucide-react';
 
 import { call, errorText, type SigningView } from '@/components/transfer/api';
 import SignPanel, { type SignLabels } from '@/components/transfer/SignPanel';
+import { closeOutcomeText } from '@/lib/approve/facts';
 import { SIGNING_CHANGED_EVENT } from '@/lib/dashboard/phone';
 import { requestTitle } from '@/lib/wallet-page/labels';
 
@@ -70,7 +71,7 @@ export default function ApproveDetail({ id }: { id: string }) {
     }
     window.dispatchEvent(new Event(SIGNING_CHANGED_EVENT));
     setConfirming(false);
-    setOutcome(answer.body?.outcome === 'cancelled' ? 'You withdrew this request. Nothing was signed or sent.' : 'You declined this request. The other owners can still sign it.');
+    setOutcome(closeOutcomeText(answer.body?.outcome));
   }
 
   const request = state.request;
@@ -112,7 +113,8 @@ export default function ApproveDetail({ id }: { id: string }) {
                 onRestart={() => router.push('/dashboard/approve')}
                 onCancelReview={() => router.push('/dashboard/approve')}
               />
-              {request.status === 'collecting' && !request.you.signed ? (
+              {/* The person who asked can withdraw it even after they signed it; anyone else can decline only until they have signed. */}
+              {request.status === 'collecting' && (requester || !request.you.signed) ? (
                 <section aria-label={requester ? 'Withdraw the request' : 'Decline the request'} className="rounded-2xl border border-[#326273]/15 bg-white p-4">
                   {confirming ? (
                     <div className="space-y-3">

@@ -6,7 +6,7 @@ import { ChevronRight, Clock3, Fingerprint, Loader2, RefreshCw, TriangleAlert } 
 
 import type { SigningView } from '@/components/transfer/api';
 import { call, errorText } from '@/components/transfer/api';
-import { reviewRequest } from '@/lib/approve/facts';
+import { cardSummary, reviewRequest } from '@/lib/approve/facts';
 import { requestTitle } from '@/lib/wallet-page/labels';
 
 type Waiting = SigningView & { purpose: string };
@@ -103,7 +103,8 @@ export default function ApproveInbox() {
 function RequestCard({ request, now, signed = false }: { request: Waiting; now: number; signed?: boolean }) {
   // Decoded on this device: what the card says it pays is what the bytes say.
   const reviewed = reviewRequest(request);
-  const first = reviewed.ok ? reviewed.facts.payments[0] : null;
+  // The same facts the screen shows, worded once: a request that is not to be signed says so on its card too.
+  const summary = reviewed.ok ? cardSummary(reviewed.facts) : null;
   return (
     <Link
       href={`/dashboard/approve/${encodeURIComponent(request.id)}`}
@@ -111,10 +112,10 @@ function RequestCard({ request, now, signed = false }: { request: Waiting; now: 
     >
       <span className="min-w-0 flex-1">
         <span className="block text-sm font-bold text-[#0c3e48]">{requestTitle(request.purpose)}</span>
-        {reviewed.ok ? (
-          <span className="mt-0.5 block text-[15px] font-semibold text-[#0c3e48]">
-            {reviewed.facts.kind === 'change' ? reviewed.facts.steps[0]?.line ?? reviewed.facts.headline : reviewed.facts.kind === 'batch' ? reviewed.facts.headline : `${first?.amount} USDC${first?.kindLabel ? ` · ${first.kindLabel}` : ''}`}
-          </span>
+        {summary?.warn ? (
+          <span className="mt-0.5 flex items-start gap-1.5 text-[13px] font-semibold text-[var(--error)]"><TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />{summary.text}</span>
+        ) : summary ? (
+          <span className="mt-0.5 block text-[15px] font-semibold text-[#0c3e48]">{summary.text}</span>
         ) : (
           <span className="mt-0.5 flex items-start gap-1.5 text-[13px] font-semibold text-[var(--error)]"><TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />This request could not be checked on your device. Do not sign it.</span>
         )}

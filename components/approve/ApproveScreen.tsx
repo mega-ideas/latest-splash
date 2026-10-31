@@ -82,7 +82,18 @@ export default function ApproveScreen({
                 At most <span className="font-mono font-bold text-white">{facts.leavesAtMost} USDC</span> leaves your wallet.
               </p>
             ) : null}
-            {signed !== undefined && needed !== undefined ? <p>{signed} of {needed} signatures so far. Each owner signs on their own device.</p> : null}
+            {/* The fee bound and the rate are in the first screenful, not below it: they are what the amount is not. */}
+            {facts.kind === 'payment' && first?.maxFee ? (
+              <p>
+                Splash fee at most <span className="font-mono font-bold text-white">{first.maxFee} USDC</span>.
+              </p>
+            ) : null}
+            {facts.kind === 'payment' && first?.rate ? (
+              <p>
+                <span className="font-mono font-bold text-white">{first.rate.text}</span>, about {first.rate.receiveApprox} before the payout partner&rsquo;s fee.
+              </p>
+            ) : null}
+            {signed !== undefined && needed !== undefined ? <p>{signed} of {needed} signatures so far. Each owner signs on their own device.{expiresIn ? ` Expires in ${expiresIn}.` : ''}</p> : null}
           </div>
         ) : null}
       </section>
@@ -118,14 +129,15 @@ export default function ApproveScreen({
 
       {facts.steps.length > 0 ? (
         // A change to the wallet is the whole point, so it is open. A payment's own bookkeeping is every command the transaction has, one tap away.
-        <details open={facts.kind === 'change'} className="group rounded-2xl border border-[#326273]/15 bg-white">
+        // ...and so is a payment's step that is not known bookkeeping: a send to another address is never one tap away.
+        <details open={facts.kind === 'change' || facts.unexpected.length > 0} className="group rounded-2xl border border-[#326273]/15 bg-white">
           <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-3 px-4 py-2 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[#0d6370] [&::-webkit-details-marker]:hidden">
-            <span className="text-sm font-extrabold text-[#0c3e48]">{facts.kind === 'change' ? 'This will' : `Everything else in this transaction (${facts.steps.length})`}</span>
+            <span className="text-sm font-extrabold text-[#0c3e48]">{facts.kind === 'change' ? 'This will' : facts.unexpected.length > 0 ? `Also in this transaction (${facts.steps.length})` : `Everything else in this transaction (${facts.steps.length})`}</span>
             <ChevronDown className="h-5 w-5 shrink-0 text-[#326273] transition-transform group-open:rotate-180 motion-reduce:transition-none" aria-hidden="true" />
           </summary>
           <ul className="space-y-3 border-t border-[#326273]/10 px-4 py-3">
             {facts.steps.map((item, n) => (
-              <li key={`${n}-${item.line}`} className={item.unknown ? 'font-semibold text-[var(--error)]' : 'text-[#0c3e48]'}>
+              <li key={`${n}-${item.line}`} className={item.unknown || facts.unexpected.some((u) => u.line === item.line) ? 'font-semibold text-[var(--error)]' : 'text-[#0c3e48]'}>
                 <span className="block text-sm leading-6">{item.line}</span>
                 {item.fields.length > 0 ? (
                   <dl className="mt-1 space-y-1 text-[13px]">
@@ -152,7 +164,7 @@ export default function ApproveScreen({
       {blocked ? (
         <p role="alert" className="flex items-start gap-2 rounded-xl border border-[var(--error)]/30 bg-[var(--error-bg)] p-3 text-sm font-semibold text-[var(--error)]">
           <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-          Part of this request cannot be shown here, so it cannot be signed from this screen. Do not sign it.
+          {facts.blockedReason} Do not sign it.
         </p>
       ) : null}
       {error ? (
@@ -177,7 +189,8 @@ export default function ApproveScreen({
             <button type="button" onClick={onCancel} className="min-h-11 bg-transparent px-1 text-sm font-semibold text-[#0d6370] underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0d6370]">
               Not now
             </button>
-            {expiresIn ? <span className="text-[13px] text-[#326273]">Expires in {expiresIn}</span> : null}
+            {/* The code to compare with the WhatsApp message sits beside the button that signs. */}
+            <span className="text-[13px] text-[#326273]">Code <span className="font-mono font-bold text-[#0c3e48]">{facts.code}</span></span>
           </div>
         </div>
       </PhoneBar>

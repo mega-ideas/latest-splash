@@ -41,8 +41,19 @@ export type ApproveFacts = {
   leavesAtMost: string | null;
   /** What the transaction does besides what the rows above already say. A batch's repeated commands are said once, with how many times. */
   steps: ShownAction[];
-  /** A command the screen cannot word is never signed. */
+  /**
+   * The steps of a payment or a batch that are not a payment's own known
+   * bookkeeping (a send to another address, a payment opened elsewhere, any
+   * command the screen does not expect here). Empty for a clean payment.
+   * Counted like `steps`, and they are all in `steps` too.
+   */
+  unexpected: ShownAction[];
+  /** Set when what leaves the wallet is not exactly the payments and their fee bounds, in words. */
+  mismatch: string | null;
+  /** A command the screen cannot word, a payment that does more than it says, an amount that does not add up, a rate that cannot be shown: never signed from the phone. */
   blocked: boolean;
+  /** Why, in a sentence for the person; null when not blocked. */
+  blockedReason: string | null;
   /** The transaction code to compare with the WhatsApp message. */
   code: string;
 };
@@ -88,44 +99,99 @@ function safeUsdc(minor: string | null | undefined): string | null {
   }
 }
 
-/** Word a device review. `names` are the payees' names the page knew, in the order of the payments. */
-export function approveFacts(review: DeviceReview, opts: { names?: Array<string | null | undefined> } = {}): ApproveFacts {
-  const opens = review.actions.filter((a) => a.type === 'open_intent');
-  const pays = review.actions.filter((a) => a.type === 'pay_intent');
-  const withdraws = review.actions.filter((a) => a.type === 'withdraw');
+type Action = DeviceReview['actions'][number];
 
-  const payments: ApprovePayment[] = opens.flatMap((open, i) => {
-    if (open.type !== 'open_intent') return [];
-    const pay = pays[i];
-    const currency = open.targetCurrency;
-    const hasRate = !USD_LIKE.has(currency.toUpperCase()) && BigInt(open.fxRateUsdLocal) > 0n;
-    return [
-      {
-        payeeName: opts.names?.[i] ?? null,
-        recipient: addressOf(open.recipient),
-        amount: safeUsdc(open.amountMinor) ?? 'an amount',
-        maxFee: pay && pay.type === 'pay_intent' ? safeUsdc(pay.maxFeeMinor) : null,
-        kindLabel: kindText(open.kind),
-        rate: hasRate ? { currency, text: `1 USDC = ${rateText(open.fxRateUsdLocal)} ${currency}`, receiveApprox: receiveApprox(open.amountMinor, open.fxRateUsdLocal, currency) } : null,
-      },
-    ];
+/**
+ * What a payment's transaction may contain besides the payment itself: the
+ * bookkeeping that is always there (the receipt, the cleanup) and the coins a
+ * payment may have to gather. Anything else in a payment, a send to another
+ * address above all, is "also" something, and is said so, never folded under
+ * the payment's headline. (The decoder accepts a send in any wallet
+ * transaction; it is this screen that must not let one pass as a payment.)
+ */
+const PAYMENT_BOOKKEEPING = new Set(['merge_coins', 'coin_to_balance', 'join_balance', 'anchor_receipt', 'delete_intent']);
+
+function isKnownInPayment(a: Action): boolean {
+  if (a.type === 'open_intent' || a.type === 'withdraw') return true;
+  // A payment opened and paid in this transaction. One that pays an intent opened elsewhere is something else.
+  if (a.type === 'pay_intent') return a.intent === null;
+  return PAYMENT_BOOKKEEPING.has(a.type);
+}
+
+/** A repeated command is said once, with how many times. */
+function counted(items: ShownAction[]): ShownAction[] {
+  const seen = new Map<string, { item: ShownAction; times: number }>();
+  for (const item of items) {
+    const key = `${item.line}|${item.fields.map((f) => `${f.label}=${f.value}`).join(';')}`;
+    const had = seen.get(key);
+    if (had) had.times += 1;
+    else seen.set(key, { item, times: 1 });
+  }
+  return [...seen.values()].map(({ item, times }) => (times > 1 ? { ...item, line: `${item.line.replace(/\.$/, '')}, ${times} times, once for each payment.` } : item));
+}
+
+/** A payment's rate, or why there is none to show. A currency that is not a currency code, or a rate of nothing, is a problem the signer is told about, never a crash. */
+function rateOf(open: Extract<Action, { type: 'open_intent' }>): { rate: ApproveRate | null; problem: boolean } {
+  const currency = open.targetCurrency;
+  if (USD_LIKE.has(currency.toUpperCase())) return { rate: null, problem: false };
+  try {
+    if (!/^[A-Za-z]{3}$/.test(currency) || BigInt(open.fxRateUsdLocal) <= 0n) return { rate: null, problem: true };
+    return { rate: { currency, text: `1 USDC = ${rateText(open.fxRateUsdLocal)} ${currency}`, receiveApprox: receiveApprox(open.amountMinor, open.fxRateUsdLocal, currency) }, problem: false };
+  } catch {
+    return { rate: null, problem: true };
+  }
+}
+
+function build(review: DeviceReview, opts: { names?: Array<string | null | undefined> }): ApproveFacts {
+  const actions = review.actions as Action[];
+  const opens = actions.filter((a): a is Extract<Action, { type: 'open_intent' }> => a.type === 'open_intent');
+  // Each payment is opened and paid here, in order. A pay that carries its own intent is not one of them.
+  const ownPays = actions.filter((a): a is Extract<Action, { type: 'pay_intent' }> => a.type === 'pay_intent' && a.intent === null);
+  const withdraws = actions.filter((a): a is Extract<Action, { type: 'withdraw' }> => a.type === 'withdraw');
+
+  let rateProblem = false;
+  const payments: ApprovePayment[] = opens.map((open, i) => {
+    const pay = ownPays[i];
+    const { rate, problem } = rateOf(open);
+    if (problem) rateProblem = true;
+    return {
+      payeeName: opts.names?.[i] ?? null,
+      recipient: addressOf(open.recipient),
+      amount: safeUsdc(open.amountMinor) ?? 'an amount',
+      maxFee: pay ? safeUsdc(pay.maxFeeMinor) : null,
+      kindLabel: kindText(open.kind),
+      rate,
+    };
   });
 
   let withdrawn = 0n;
-  for (const w of withdraws) if (w.type === 'withdraw') withdrawn += BigInt(w.amountMinor);
+  for (const w of withdraws) withdrawn += BigInt(w.amountMinor);
 
-  const items = signingItems(review.actions as Parameters<typeof signingItems>[0]);
-  // A batch repeats the same few commands once per payment: each is said once, with how many times.
-  const counted = new Map<string, { item: ShownAction; times: number }>();
-  for (const item of items.filter((i) => !i.covered)) {
-    const key = `${item.line}|${item.fields.map((f) => `${f.label}=${f.value}`).join(';')}`;
-    const seen = counted.get(key);
-    if (seen) seen.times += 1;
-    else counted.set(key, { item, times: 1 });
-  }
-  const steps = [...counted.values()].map(({ item, times }) => (times > 1 ? { ...item, line: `${item.line.replace(/\.$/, '')}, ${times} times, once for each payment.` } : item));
-
+  const items = signingItems(actions as Parameters<typeof signingItems>[0]);
   const kind = payments.length > 1 ? 'batch' : payments.length === 1 ? 'payment' : 'change';
+  const steps = counted(items.filter((i) => !i.covered));
+  // A change to the wallet is all steps, and the screen opens them. In a payment, a step that is not known bookkeeping is the alarm.
+  const unexpected = kind === 'change' ? [] : counted(items.filter((item, i) => !isKnownInPayment(actions[i]) && !item.covered));
+
+  // What leaves the wallet is exactly each payment and the most its fee may be. More is another payout; less is a transaction that cannot pay.
+  let mismatch: string | null = null;
+  let shape = false;
+  if (kind !== 'change') {
+    shape = opens.length !== ownPays.length;
+    if (!shape) {
+      const expected = opens.reduce((sum, o, i) => sum + BigInt(o.amountMinor) + BigInt(ownPays[i].maxFeeMinor), 0n);
+      if (withdrawn > expected) mismatch = `More leaves the wallet than the payment and its fee: up to ${formatUsdc(withdrawn)} USDC, against ${formatUsdc(expected)} USDC.`;
+      else if (withdrawn < expected) mismatch = `The wallet is asked for less than the payment and its fee, so this does not add up: ${formatUsdc(withdrawn)} USDC, against ${formatUsdc(expected)} USDC.`;
+    }
+  }
+
+  const reasons: string[] = [];
+  if (items.some((i) => i.unknown)) reasons.push('Part of this request cannot be shown here, so it cannot be signed from this screen.');
+  if (unexpected.length > 0) reasons.push('This transaction also does something besides the payment it shows. It is listed below.');
+  if (shape) reasons.push('A payment here is opened without being paid, or paid without being opened in this transaction.');
+  if (mismatch) reasons.push(mismatch);
+  if (rateProblem) reasons.push('The rate for this payment cannot be shown, so what is received cannot be checked.');
+
   return {
     kind,
     headline: kind === 'batch' ? `${payments.length} payments in one transaction` : kind === 'payment' ? `Pay ${payments[0].amount} USDC` : 'Change to your business wallet',
@@ -133,19 +199,58 @@ export function approveFacts(review: DeviceReview, opts: { names?: Array<string 
     payments,
     leavesAtMost: withdraws.length > 0 ? formatUsdc(withdrawn) : null,
     steps,
-    blocked: items.some((i) => i.unknown),
+    unexpected,
+    mismatch,
+    blocked: reasons.length > 0,
+    blockedReason: reasons.length > 0 ? reasons.join(' ') : null,
     code: review.code,
   };
 }
 
-/** One line for a request's card in the inbox. (Not yet worded: the first line of the request stands in.) */
-export function cardSummary(facts: ApproveFacts): { text: string; warn: boolean } {
-  return { text: facts.headline, warn: false };
+/**
+ * Word a device review. `names` are the payees' names the page knew, in the
+ * order of the payments. It never throws: a request it cannot word is
+ * blocked, with the reason, so the screen says do not sign and the person can
+ * still decline it from the same page.
+ */
+export function approveFacts(review: DeviceReview, opts: { names?: Array<string | null | undefined> } = {}): ApproveFacts {
+  try {
+    return build(review, opts);
+  } catch {
+    return {
+      kind: 'change',
+      headline: 'This request could not be worded',
+      asset: 'USDC',
+      payments: [],
+      leavesAtMost: null,
+      steps: [],
+      unexpected: [],
+      mismatch: null,
+      blocked: true,
+      blockedReason: 'Part of this request cannot be shown here, so it cannot be signed from this screen.',
+      code: review.code,
+    };
+  }
 }
 
-/** What the person is told after they decline or withdraw. (Not yet worded.) */
+/** One line for a request's card in the inbox: what the screen would say, the same words, and a request that is not to be signed says so. */
+export function cardSummary(facts: ApproveFacts): { text: string; warn: boolean } {
+  if (facts.blocked) return { text: `Do not sign: ${facts.blockedReason ?? 'this request cannot be shown here.'}`, warn: true };
+  if (facts.kind === 'batch') return { text: facts.headline, warn: false };
+  if (facts.kind === 'payment') {
+    const first = facts.payments[0];
+    return { text: `${first.amount} USDC${first.kindLabel ? ` · ${first.kindLabel}` : ''}`, warn: false };
+  }
+  const more = facts.steps.length - 1;
+  const first = facts.steps[0]?.line ?? facts.headline;
+  return { text: more > 0 ? `${first} and ${more} more ${more === 1 ? 'change' : 'changes'}` : first, warn: false };
+}
+
+/** What the person is told after they decline or withdraw, in what actually happened. */
 export function closeOutcomeText(outcome: string | undefined): string {
-  return outcome === 'cancelled' ? 'You withdrew this request. Nothing was signed or sent.' : 'You declined this request. The other owners can still sign it.';
+  if (outcome === 'cancelled') return 'You withdrew this request. Nothing was signed or sent.';
+  if (outcome === 'declined_and_closed') return 'You declined this request. It can no longer reach enough signatures, so it is closed and nothing was sent.';
+  return 'You declined this request. The other owners can still sign it.';
 }
 
 /** What a signing request looks like to the device: its bytes, the digest and hash it claims, and the ids it may touch. */
