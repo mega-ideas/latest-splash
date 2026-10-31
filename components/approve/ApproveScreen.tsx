@@ -165,7 +165,7 @@ export default function ApproveScreen({
       <section aria-labelledby="approve-code" className="rounded-2xl border border-[#0d6370]/30 bg-[#f4f8fa] p-4">
         <h2 id="approve-code" className="text-[13px] font-bold text-[#0c3e48]">Transaction code</h2>
         <p className="mt-1 font-mono text-xl font-bold tracking-wide text-[#0c3e48]">{facts.code}</p>
-        <p className="mt-1 text-[13px] leading-5 text-[#326273]">If your WhatsApp message shows a different code, do not sign. Opening this page from a link signs nothing; only your passkey does.</p>
+        <p className="mt-1 text-sm leading-5 text-[#326273]">If your WhatsApp message shows a different code, do not sign. Opening this page from a link signs nothing; only your passkey does.</p>
       </section>
 
       {error ? (
