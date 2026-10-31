@@ -33,6 +33,8 @@ export type Quote = {
   expiresAt: string | null;
   route: string | null;
   sandbox: boolean;
+  /** Who is paid, as the quote read them: the full address and whether it was saved in the last 24 hours. Null for a bank payout. */
+  payee: { address: string; country: string | null; recentlyAdded: boolean } | null;
 };
 
 /** The wallet balance as the page knows it: a number, or why there is none. */
@@ -44,6 +46,8 @@ export type Made = {
   route: 'owners_sign' | 'asked_owners';
   signing: SigningView | null;
   askId: string | null;
+  /** What the person approved on the Review step: the signing screen checks the transaction's bytes against it. */
+  expected: { recipient: string | null; amountMinor: string; maxFeeMinor: string; payeeName: string } | null;
 };
 
 export type StepProps = {

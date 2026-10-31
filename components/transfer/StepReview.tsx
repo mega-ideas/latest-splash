@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, CircleAlert, Clock3, Loader2, RefreshCw, ShieldCheck } from 'lucide-react';
 
 import { formatUsdc, kindLabel } from '@/lib/fees/copy';
+import { groupAddress } from '@/lib/transfer/addresses';
 import { formatMoney } from '@/lib/formatMoney';
 import { approvalPlan, APPROVAL_REASON_TEXT, executableRoute, maxFeeToSend, parseAmountMinor } from '@/lib/transfer/plan';
 import { call, errorText, type SigningView } from './api';
@@ -24,7 +25,7 @@ type BankQuoteWire = {
   expiresAt: string;
   sandbox: boolean;
 };
-type TransferQuoteWire = { kind: number; principalMinor: string; feeMinor: string; feesOn: boolean; maxFeeMinor: string; totalDebitMinor: string };
+type TransferQuoteWire = { kind: number; principalMinor: string; feeMinor: string; feesOn: boolean; maxFeeMinor: string; totalDebitMinor: string; payee?: { address: string; country: string | null; recentlyAdded: boolean } };
 
 function rateText(rateMicro: string): string {
   const micro = BigInt(rateMicro);
@@ -40,6 +41,7 @@ export default function StepReview({ flow, ctx, balance, back, made, onMade, onE
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [now, setNow] = useState(0);
+  const [addressChecked, setAddressChecked] = useState(false);
   const chosen = flow.chosen;
   const amount = parseAmountMinor(flow.amountText);
 
@@ -67,6 +69,7 @@ export default function StepReview({ flow, ctx, balance, back, made, onMade, onE
           expiresAt: q.expiresAt,
           route: q.route,
           sandbox: q.sandbox,
+          payee: null,
         });
       }
     } else {
@@ -77,7 +80,7 @@ export default function StepReview({ flow, ctx, balance, back, made, onMade, onE
         setQuote(null);
         setError(errorText(answer, 'There is no quote right now. Nothing was sent.'));
       } else {
-        setQuote({ principalMinor: BigInt(q.principalMinor), feeMinor: BigInt(q.feeMinor), feesOn: q.feesOn, maxFeeMinor: BigInt(q.maxFeeMinor), totalDebitMinor: BigInt(q.totalDebitMinor), kind: q.kind, partnerFees: [], receive: null, acceptedReceiveMinor: null, expiresAt: null, route: null, sandbox: false });
+        setQuote({ principalMinor: BigInt(q.principalMinor), feeMinor: BigInt(q.feeMinor), feesOn: q.feesOn, maxFeeMinor: BigInt(q.maxFeeMinor), totalDebitMinor: BigInt(q.totalDebitMinor), kind: q.kind, partnerFees: [], receive: null, acceptedReceiveMinor: null, expiresAt: null, route: null, sandbox: false, payee: q.payee ?? null });
       }
     }
     setLoading(false);
@@ -134,7 +137,7 @@ export default function StepReview({ flow, ctx, balance, back, made, onMade, onE
         setSendError(errorText(answer, 'The payment was not sent. Nothing left your wallet.'));
         return;
       }
-      onMade({ ref: payout.id, route: ctx?.role === 'OWNER' ? 'owners_sign' : 'asked_owners', signing: answer.body?.request ?? null, askId: null });
+      onMade({ ref: payout.id, route: ctx?.role === 'OWNER' ? 'owners_sign' : 'asked_owners', signing: answer.body?.request ?? null, askId: null, expected: { recipient: null, amountMinor: amount.toString(), maxFeeMinor: maxFee, payeeName: chosen.name } });
       return;
     }
     const payee = chosen.kind === 'splash_business' ? { kind: 'splash_business', businessId: chosen.businessId } : { kind: 'recipient', recipientId: chosen.recipientId };
@@ -153,7 +156,7 @@ export default function StepReview({ flow, ctx, balance, back, made, onMade, onE
       setSendError(errorText(answer, 'The payment was not sent. Nothing left your wallet.'));
       return;
     }
-    onMade({ ref: transfer.id, route: transfer.route, signing: answer.body?.signingRequest ?? null, askId: answer.body?.ask?.id ?? null });
+    onMade({ ref: transfer.id, route: transfer.route, signing: answer.body?.signingRequest ?? null, askId: answer.body?.ask?.id ?? null, expected: { recipient: quote.payee?.address ?? null, amountMinor: amount.toString(), maxFeeMinor: maxFee, payeeName: chosen.name } });
   }
 
   const feeLine = quote ? (quote.feesOn ? `${formatUsdc(quote.feeMinor)} USDC` : 'None charged yet') : '';
@@ -164,7 +167,7 @@ export default function StepReview({ flow, ctx, balance, back, made, onMade, onE
       <div className="space-y-5">
         <h2 className="text-[22px] font-extrabold text-[#0c3e48]">{made.route === 'owners_sign' ? 'Approve the payment' : 'Sent to your owners'}</h2>
         {made.signing ? (
-          <SignPanel initial={made.signing} onExecuted={onExecuted} onRestart={onRestart} />
+          <SignPanel initial={made.signing} expected={made.expected} onExecuted={onExecuted} onRestart={onRestart} />
         ) : (
           <div className="space-y-3 rounded-2xl border border-[#326273]/15 bg-white p-4 sm:p-5" role="status">
             <p className="flex items-center gap-2 text-base font-extrabold text-[#0c3e48]"><ShieldCheck className="h-5 w-5 text-[#0d6370]" aria-hidden="true" />{made.route === 'asked_owners' ? 'Your owners have been asked' : 'Waiting for the owners'}</p>
@@ -192,7 +195,19 @@ export default function StepReview({ flow, ctx, balance, back, made, onMade, onE
         </div>
       ) : (
         <dl className="divide-y divide-[#326273]/10 rounded-2xl border border-[#326273]/15 bg-white text-sm">
-          <Row label="To" value={chosen?.name ?? ''} sub={chosen?.kind === 'bank' ? `${chosen.country} bank account ••${chosen.last4}` : chosen?.kind === 'splash_business' ? 'A business on Splash' : chosen?.kind === 'recipient' ? (chosen.deliveryKind === 'EXCHANGE' ? 'Exchange account on Sui' : 'Sui wallet') : undefined} />
+          <Row
+            label="To"
+            value={chosen?.name ?? ''}
+            sub={chosen?.kind === 'bank' ? `${chosen.country} bank account ••${chosen.last4}` : chosen?.kind === 'splash_business' ? 'A business on Splash' : chosen?.kind === 'recipient' ? (chosen.deliveryKind === 'EXCHANGE' ? 'Exchange account on Sui' : 'Sui wallet') : undefined}
+            extra={
+              quote.payee ? (
+                <>
+                  <span className="mt-1 block break-all font-mono text-[13px] leading-5 text-[#0c3e48]" data-testid="payee-address">{groupAddress(quote.payee.address)}</span>
+                  {quote.payee.country ? <span className="block text-[13px] text-[#326273]">Country: {quote.payee.country}</span> : null}
+                </>
+              ) : null
+            }
+          />
           {quote.receive ? <Row label="They receive" value={formatMoney(BigInt(quote.receive.minor), quote.receive.currency)} sub={`1 USDC = ${rateText(quote.receive.rateMicro)} ${quote.receive.currency}`} /> : null}
           <Row label="You pay" value={`${formatUsdc(quote.principalMinor)} USDC`} />
           <Row label={`Splash fee · ${kindLabel(quote.kind)}`} value={feeLine} sub={quote.feesOn ? 'You will never be charged more than this.' : "No Splash fee is charged yet. Fees start only after 24 hours' public notice."} />
@@ -209,6 +224,12 @@ export default function StepReview({ flow, ctx, balance, back, made, onMade, onE
         </dl>
       )}
 
+      {quote?.payee?.recentlyAdded ? (
+        <label className="flex items-start gap-3 rounded-xl border border-[var(--warn)] bg-[var(--warn-bg)] p-3.5 text-sm leading-6 text-[#1F4452]">
+          <input type="checkbox" checked={addressChecked} onChange={(e) => setAddressChecked(e.target.checked)} className="mt-1 h-5 w-5 shrink-0 accent-[#0d6370]" />
+          <span>This address was saved in the last 24 hours. I have checked it with {chosen?.name ?? 'the recipient'}, letter for letter.</span>
+        </label>
+      ) : null}
       {quote?.sandbox ? <p className="text-[13px] font-semibold text-[var(--warn-ink)]">This quote comes from a test service, not a payout partner.</p> : null}
       {balance.state === 'ok' && quote && balance.usdcMinor < quote.totalDebitMinor ? (
         <p role="alert" className="text-sm font-semibold text-[var(--error)]">Your wallet holds {formatUsdc(balance.usdcMinor)} USDC, which is less than this payment needs. Go back and top up.</p>
@@ -241,7 +262,7 @@ export default function StepReview({ flow, ctx, balance, back, made, onMade, onE
           <ArrowLeft className="h-4 w-4" aria-hidden="true" />
           Back
         </QuietButton>
-        <PrimaryButton type="button" disabled={!quote || lapsed || sending || plan?.route === 'blocked' || !plan || (balance.state === 'ok' && quote !== null && balance.usdcMinor < quote.totalDebitMinor)} onClick={() => void send()}>
+        <PrimaryButton type="button" disabled={!quote || lapsed || sending || (quote.payee?.recentlyAdded === true && !addressChecked) || plan?.route === 'blocked' || !plan || (balance.state === 'ok' && quote !== null && balance.usdcMinor < quote.totalDebitMinor)} onClick={() => void send()}>
           {sending ? 'Sending…' : ownerRoute ? 'Approve and collect signatures' : 'Ask the owners to approve'}
         </PrimaryButton>
       </div>
@@ -249,13 +270,14 @@ export default function StepReview({ flow, ctx, balance, back, made, onMade, onE
   );
 }
 
-function Row({ label, value, sub, strong }: { label: string; value: string; sub?: string; strong?: boolean }) {
+function Row({ label, value, sub, strong, extra }: { label: string; value: string; sub?: string; strong?: boolean; extra?: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-0.5 px-4 py-3 sm:flex-row sm:items-baseline sm:justify-between sm:gap-6">
       <dt className="text-[#326273]">{label}</dt>
       <dd className="min-w-0 sm:text-right">
         <span className={`block break-words font-mono tabular-nums ${strong ? 'text-lg font-extrabold' : 'font-bold'} text-[#0c3e48]`}>{value}</span>
         {sub ? <span className="block text-[13px] text-[#326273]">{sub}</span> : null}
+        {extra}
       </dd>
     </div>
   );

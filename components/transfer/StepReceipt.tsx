@@ -17,6 +17,7 @@ export default function StepReceipt({ refId, onNew }: { refId: string; onNew: ()
   const [note, setNote] = useState<string | null>(null);
   const [accountant, setAccountant] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
+  const [shares, setShares] = useState<{ live: number; canRevoke: boolean }>({ live: 0, canRevoke: false });
 
   const load = useCallback(async () => {
     const answer = await call<ReceiptAnswer>(`${base}/receipt`);
@@ -38,6 +39,31 @@ export default function StepReceipt({ refId, onNew }: { refId: string; onNew: ()
     const timer = window.setInterval(() => void load(), 5000);
     return () => window.clearInterval(timer);
   }, [data, load]);
+
+  const final = data?.receipt.final === true;
+  useEffect(() => {
+    if (!final) return;
+    let live = true;
+    void call<{ live?: number; canRevoke?: boolean }>(`${base}/share`).then((answer) => {
+      if (live && answer.ok && answer.body) setShares({ live: answer.body.live ?? 0, canRevoke: answer.body.canRevoke === true });
+    });
+    return () => {
+      live = false;
+    };
+  }, [final, base, link]);
+
+  async function stopSharing() {
+    setBusy('stop');
+    const answer = await call(`${base}/share`, { method: 'DELETE' });
+    setBusy(null);
+    if (!answer.ok) {
+      setNote(errorText(answer, 'Sharing could not be stopped. Try again.'));
+      return;
+    }
+    setLink(null);
+    setShares((s) => ({ ...s, live: 0 }));
+    setNote('Sharing stopped. Links you sent no longer open this receipt.');
+  }
 
   async function makeLink(): Promise<string | null> {
     if (link) return link;
@@ -132,6 +158,16 @@ export default function StepReceipt({ refId, onNew }: { refId: string; onNew: ()
               <FileText className="h-4 w-4" aria-hidden="true" />PDF
             </a>
           </div>
+          {shares.live > 0 ? (
+            <div className="flex flex-col gap-2 rounded-xl border border-[#326273]/15 bg-[#f4f8fa] p-3 text-sm text-[#1F4452] sm:flex-row sm:items-center sm:justify-between">
+              <p>{shares.live === 1 ? '1 link to this receipt is live.' : `${shares.live} links to this receipt are live.`} Anyone who has one can open it without signing in.</p>
+              {shares.canRevoke ? (
+                <QuietButton type="button" disabled={busy === 'stop'} onClick={() => void stopSharing()}>
+                  Stop sharing
+                </QuietButton>
+              ) : null}
+            </div>
+          ) : null}
           <form
             className="flex flex-col gap-2 sm:flex-row"
             onSubmit={async (e) => {

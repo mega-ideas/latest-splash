@@ -2,14 +2,19 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Check, CircleAlert, Clock3, Fingerprint, ShieldCheck } from 'lucide-react';
+import { normalizeSuiAddress } from '@mysten/sui/utils';
 
 import { describeSignError, signWithPasskey } from '@/lib/wallet/sui-signers';
 import { reviewOnDevice, type DeviceReview } from '@/lib/wallet/review-on-device';
 import { formatUsdc } from '@/lib/fees/copy';
+import { groupAddress } from '@/lib/transfer/addresses';
+import { differsFromApproved } from '@/lib/transfer/approved';
 import { call, errorText, type SigningView } from './api';
+import type { Made } from './flow';
 import { PrimaryButton, QuietButton } from './ui';
 
-const shortAddress = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
+/** What was reviewed, kept apart from the live request: the bytes and digest the owner looked at are the ones signed. */
+type Reviewed = { transactionBytes: string; digest: string; review: DeviceReview };
 
 /**
  * Collecting the owners' signatures (v2 brief 4.1 and 5.4 step 4). Each owner
@@ -20,9 +25,10 @@ const shortAddress = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
  * signed, lets this person sign if they are one of the signers, and goes on
  * only when the payment has executed.
  */
-export default function SignPanel({ initial, onExecuted, onRestart }: { initial: SigningView; onExecuted: (digest: string | null) => void; onRestart: () => void }) {
+export default function SignPanel({ initial, expected = null, onExecuted, onRestart }: { initial: SigningView; expected?: Made['expected']; onExecuted: (digest: string | null) => void; onRestart: () => void }) {
   const [view, setView] = useState<SigningView>(initial);
-  const [review, setReview] = useState<DeviceReview | null>(null);
+  const [reviewed, setReviewed] = useState<Reviewed | null>(null);
+  const reviewedDigest = useRef<string | null>(null);
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -32,6 +38,12 @@ export default function SignPanel({ initial, onExecuted, onRestart }: { initial:
     const answer = await call<{ request?: SigningView }>(`/api/wallet/signing-requests/${encodeURIComponent(initial.id)}`);
     const next = answer.body?.request;
     if (!next) return;
+    // The request changed under an open review: what was reviewed is no longer what is waiting, so the review closes.
+    if (reviewedDigest.current && next.digest !== reviewedDigest.current) {
+      reviewedDigest.current = null;
+      setReviewed(null);
+      setReviewError('The request changed while you were reviewing it. Review it again before you sign.');
+    }
     setView(next);
     if (next.status === 'executed' && !done.current) {
       done.current = true;
@@ -48,25 +60,33 @@ export default function SignPanel({ initial, onExecuted, onRestart }: { initial:
   function openReview() {
     setReviewError(null);
     try {
-      setReview(reviewOnDevice({ transactionBytes: view.transactionBytes, digest: view.digest, bytesHash: view.bytesHash, expect: view.expect as Parameters<typeof reviewOnDevice>[0]['expect'] }));
+      const snapshot = { transactionBytes: view.transactionBytes, digest: view.digest };
+      const review = reviewOnDevice({ ...snapshot, bytesHash: view.bytesHash, expect: view.expect as Parameters<typeof reviewOnDevice>[0]['expect'] });
+      const wrong = expected ? differsFromApproved(review, expected) : null;
+      if (wrong) throw new Error(`${wrong} Do not sign it.`);
+      reviewedDigest.current = snapshot.digest;
+      setReviewed({ ...snapshot, review });
     } catch (e) {
-      setReview(null);
+      reviewedDigest.current = null;
+      setReviewed(null);
       setReviewError(e instanceof Error ? e.message : 'This request could not be checked on your device, so do not sign it.');
     }
   }
 
   async function sign() {
+    if (!reviewed) return;
     setBusy(true);
     setError(null);
     try {
       const key = await call<{ passkey?: { publicKey: string; rpId: string } | null }>('/api/stablecoin/wallet');
       const passkey = key.body?.passkey;
       if (!passkey) throw new Error('Your passkey is not set up on this device yet. Set it up in Settings, then sign.');
-      const signed = await signWithPasskey(passkey, view.transactionBytes);
-      const answer = await call<{ request?: SigningView }>(`/api/wallet/signing-requests/${encodeURIComponent(view.id)}/signatures`, { body: { signature: signed.signature, digest: view.digest } });
+      const signed = await signWithPasskey(passkey, reviewed.transactionBytes);
+      const answer = await call<{ request?: SigningView }>(`/api/wallet/signing-requests/${encodeURIComponent(view.id)}/signatures`, { body: { signature: signed.signature, digest: reviewed.digest } });
       if (!answer.ok || !answer.body?.request) throw new Error(errorText(answer, 'The signature was not accepted.'));
       setView(answer.body.request);
-      setReview(null);
+      reviewedDigest.current = null;
+      setReviewed(null);
       if (answer.body.request.status === 'executed' && !done.current) {
         done.current = true;
         onExecuted(answer.body.request.executedDigest);
@@ -80,6 +100,7 @@ export default function SignPanel({ initial, onExecuted, onRestart }: { initial:
 
   const finished = view.status === 'executed';
   const dead = ['failed', 'expired', 'cancelled'].includes(view.status);
+  const review = reviewed?.review ?? null;
   const open = review?.actions.find((a) => a.type === 'open_intent');
   const pay = review?.actions.find((a) => a.type === 'pay_intent');
   const withdraw = review?.actions.find((a) => a.type === 'withdraw');
@@ -118,7 +139,12 @@ export default function SignPanel({ initial, onExecuted, onRestart }: { initial:
               {open && open.type === 'open_intent' ? (
                 <>
                   <dt className="text-[#326273]">Pays</dt>
-                  <dd className="font-mono text-[13px] text-[#0c3e48]">{formatUsdc(BigInt(open.amountMinor))} USDC to {shortAddress(open.recipient)}</dd>
+                  <dd className="font-mono text-[13px] text-[#0c3e48]">{formatUsdc(BigInt(open.amountMinor))} USDC</dd>
+                  <dt className="text-[#326273]">To</dt>
+                  <dd className="min-w-0 text-[#0c3e48]">
+                    {expected?.payeeName ? <span className="block font-semibold">{expected.payeeName}</span> : null}
+                    <span className="block break-all font-mono text-[13px] leading-5">{groupAddress(normalizeSuiAddress(open.recipient))}</span>
+                  </dd>
                 </>
               ) : null}
               {pay && pay.type === 'pay_intent' ? (
@@ -143,7 +169,7 @@ export default function SignPanel({ initial, onExecuted, onRestart }: { initial:
                 <Fingerprint className="h-4 w-4" aria-hidden="true" />
                 {busy ? 'Waiting for your passkey…' : 'Sign with your passkey'}
               </PrimaryButton>
-              <QuietButton type="button" onClick={() => setReview(null)}>Cancel</QuietButton>
+              <QuietButton type="button" onClick={() => { reviewedDigest.current = null; setReviewed(null); }}>Cancel</QuietButton>
             </div>
           </div>
         ) : (

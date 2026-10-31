@@ -253,6 +253,18 @@ test('a retry under the same intent id with another fee answers the payment alre
   assert.equal(b.transfer.id, a.transfer.id);
 });
 
+test('the quote carries the full address and whether the recipient was saved in the last 24 hours, so the review is not approved on a name alone', async () => {
+  const t = await setup();
+  const q = await T.quoteTransfer(t.deps(), { payee: { kind: 'recipient', recipientId: t.recipientId }, amountMinor: USDC(5_000).toString() });
+  assert.equal(q.ok, true, JSON.stringify(q));
+  assert.equal(q.quote.payee.address, SUPPLIER);
+  assert.equal(q.quote.payee.country, 'PH');
+  assert.equal(q.quote.payee.recentlyAdded, false, 'a recipient saved long before is not new');
+  await t.w.db.update(schema.suppliers).set({ createdAt: t.deps().now() }).where(eq(schema.suppliers.id, t.recipientId));
+  const fresh = await T.quoteTransfer(t.deps(), { payee: { kind: 'recipient', recipientId: t.recipientId }, amountMinor: USDC(5_000).toString() });
+  assert.equal(fresh.quote.payee.recentlyAdded, true);
+});
+
 test('revoking a receipt link stops it opening, for this business only', async () => {
   const t = await setup();
   const share = await mintReceiptShare(t.w.db, { orgId: 'acme', paymentRef: 'ref-1', userId: 'u-founder', now: T0 });

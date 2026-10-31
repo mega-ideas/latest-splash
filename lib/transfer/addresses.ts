@@ -150,3 +150,9 @@ export function checkPayeeField(kind: PayeeFieldKind, raw: string, options: { ch
       return checkSuiAddress(raw);
   }
 }
+
+/** A Sui address in groups of four characters after the 0x, so two addresses can be compared by eye. Anything else comes back unchanged. */
+export function groupAddress(address: string): string {
+  const m = /^0x([0-9a-fA-F]{64})$/.exec(address);
+  return m ? `0x ${m[1].match(/.{4}/g)!.join(' ')}` : address;
+}

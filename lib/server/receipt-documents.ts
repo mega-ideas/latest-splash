@@ -51,6 +51,15 @@ export async function readReceiptShare(db: DrizzleDb, token: string, now: Date):
   return { orgId: row.orgId, paymentRef: row.paymentRef };
 }
 
+/** The links to one payment's receipt that still open: when each was made and when it lapses. Never the token (only its hash is kept). */
+export async function liveReceiptShares(db: DrizzleDb, input: { orgId: string; paymentRef: string; now: Date }): Promise<Array<{ createdAt: Date; expiresAt: Date }>> {
+  const rows = await db
+    .select({ createdAt: paymentReceiptShares.createdAt, expiresAt: paymentReceiptShares.expiresAt })
+    .from(paymentReceiptShares)
+    .where(and(eq(paymentReceiptShares.orgId, input.orgId), eq(paymentReceiptShares.paymentRef, input.paymentRef), isNull(paymentReceiptShares.revokedAt)));
+  return rows.filter((r) => r.expiresAt.getTime() > input.now.getTime());
+}
+
 export async function revokeReceiptShares(db: DrizzleDb, input: { orgId: string; paymentRef: string; now: Date }): Promise<number> {
   const done = await db
     .update(paymentReceiptShares)

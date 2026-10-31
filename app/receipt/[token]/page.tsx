@@ -11,6 +11,9 @@ import { sharedReceiptFor } from '@/lib/server/shared-receipt';
 
 export const dynamic = 'force-dynamic';
 
+/** A shared receipt is for the people it was sent to: search engines do not index it, and following a link out of it sends no referrer. */
+export const metadata = { robots: { index: false, follow: false }, referrer: 'no-referrer' as const };
+
 /**
  * W9.2 — public, read-only receipt (the "Share with supplier" link).
  *

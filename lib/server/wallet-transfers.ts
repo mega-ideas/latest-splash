@@ -232,6 +232,8 @@ type Resolved = {
   country: string | null;
   address: string;
   kind: number;
+  /** When the saved recipient was added (a Splash business has none). */
+  addedAt: Date | null;
 };
 
 async function resolvePayee(deps: TransferDeps, payee: PayeeInput): Promise<Resolved | TransferFailure> {
@@ -243,7 +245,7 @@ async function resolvePayee(deps: TransferDeps, payee: PayeeInput): Promise<Reso
     if (!found) return fail(404, 'business_not_found', 'That business is not on Splash, or has no Splash Wallet yet.');
     const wallet = normalizeSuiAddress(found.wallet);
     if (!(await deps.isBusinessWallet(wallet))) return fail(409, 'not_a_splash_wallet', 'Splash does not list that wallet as a business wallet, so it cannot be paid as a Splash business.');
-    return { payeeKind: 'splash_business', recipientId: null, businessId, name: found.name, country: found.country, address: wallet, kind: MOVE_KIND.SPLASH_BUSINESS };
+    return { payeeKind: 'splash_business', recipientId: null, businessId, name: found.name, country: found.country, address: wallet, kind: MOVE_KIND.SPLASH_BUSINESS, addedAt: null };
   }
   const recipientId = String(payee.recipientId ?? '');
   if (!recipientId) return fail(400, 'bad_payee', 'Choose the recipient you are paying.');
@@ -269,6 +271,7 @@ async function resolvePayee(deps: TransferDeps, payee: PayeeInput): Promise<Reso
     country: row.addressCountry || row.country || null,
     address: delivery.recipient,
     kind: delivery.kind,
+    addedAt: row.createdAt ?? null,
   };
 }
 
@@ -332,7 +335,8 @@ export type TransferQuote = {
   /** Exactly the fee shown: send it back as `maxFeeMinor`. */
   maxFeeMinor: string;
   totalDebitMinor: string;
-  payee: { kind: string; name: string; masked: string; country: string | null };
+  /** Who is paid, as the review shows it: the full address too, so approval is not on a name alone. `recentlyAdded`: saved in the last 24 hours. */
+  payee: { kind: string; name: string; masked: string; address: string; country: string | null; recentlyAdded: boolean };
 };
 
 /** The fee of a payment, before anything is made: Splash's fee for the kind this payee is paid as. Nothing is stored. */
@@ -351,7 +355,14 @@ export async function quoteTransfer(deps: TransferDeps, input: { payee: PayeeInp
       feesOn: fee.feesOn,
       maxFeeMinor: fee.feeMinor.toString(),
       totalDebitMinor: (amount + fee.feeMinor).toString(),
-      payee: { kind: resolved.payeeKind, name: resolved.name, masked: maskAddress(resolved.address), country: resolved.country },
+      payee: {
+        kind: resolved.payeeKind,
+        name: resolved.name,
+        masked: maskAddress(resolved.address),
+        address: normalizeSuiAddress(resolved.address),
+        country: resolved.country,
+        recentlyAdded: resolved.addedAt !== null && deps.now().getTime() - resolved.addedAt.getTime() < 24 * 3_600_000,
+      },
     },
   };
 }

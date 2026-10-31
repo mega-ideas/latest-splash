@@ -54,8 +54,20 @@ export function SelectInput({ children, className = '', ...rest }: SelectHTMLAtt
 
 /** One selected state: the chosen option is filled, the others are plain. */
 export function Segmented<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: Array<{ value: T; label: string }>; onChange: (value: T) => void }) {
+  const group = useRef<HTMLDivElement>(null);
+  // The ARIA radio pattern: one Tab stop (the chosen option), and the arrow keys choose and move.
+  function onKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    const forward = event.key === 'ArrowRight' || event.key === 'ArrowDown';
+    const backward = event.key === 'ArrowLeft' || event.key === 'ArrowUp';
+    if (!forward && !backward) return;
+    event.preventDefault();
+    const at = options.findIndex((o) => o.value === value);
+    const next = options[(at + (forward ? 1 : options.length - 1)) % options.length];
+    onChange(next.value);
+    window.requestAnimationFrame(() => group.current?.querySelector<HTMLElement>(`[data-value="${next.value}"]`)?.focus());
+  }
   return (
-    <div role="radiogroup" aria-label={label} className="inline-grid auto-cols-fr grid-flow-col rounded-xl border border-[#326273]/20 bg-[#F6F0ED] p-1">
+    <div ref={group} role="radiogroup" aria-label={label} onKeyDown={onKeyDown} className="inline-grid auto-cols-fr grid-flow-col rounded-xl border border-[#326273]/20 bg-[#F6F0ED] p-1">
       {options.map((o) => {
         const on = o.value === value;
         return (
@@ -64,8 +76,10 @@ export function Segmented<T extends string>({ label, value, options, onChange }:
             type="button"
             role="radio"
             aria-checked={on}
+            data-value={o.value}
+            tabIndex={on ? 0 : -1}
             onClick={() => onChange(o.value)}
-            className={`h-9 rounded-lg px-4 text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0d6370] ${on ? 'bg-[#0c3e48] text-white' : 'text-[#1F4452] hover:bg-white'}`}
+            className={`h-11 rounded-lg px-4 text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0d6370] ${on ? 'bg-[#0c3e48] text-white' : 'text-[#1F4452] hover:bg-white'}`}
           >
             {o.label}
           </button>
@@ -104,6 +118,11 @@ export function Modal({ open, onClose, title, eyebrow, children, side = false, w
   const titleId = useId();
   const panel = useRef<HTMLDivElement>(null);
   const opener = useRef<Element | null>(null);
+  // The caller's onClose is usually a fresh function on every render; the effect must not restart (and move focus) because of it.
+  const closeRef = useRef(onClose);
+  useEffect(() => {
+    closeRef.current = onClose;
+  });
 
   useEffect(() => {
     if (!open) return;
@@ -113,7 +132,7 @@ export function Modal({ open, onClose, title, eyebrow, children, side = false, w
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.stopPropagation();
-        onClose();
+        closeRef.current();
         return;
       }
       if (event.key !== 'Tab' || !node) return;
@@ -137,7 +156,7 @@ export function Modal({ open, onClose, title, eyebrow, children, side = false, w
       document.body.style.overflow = overflow;
       if (opener.current instanceof HTMLElement) opener.current.focus();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
   // In the body, not in the page: the page's own layers (the rail, the top bar) would otherwise paint over it.
