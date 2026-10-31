@@ -49,6 +49,21 @@ export const ROLE_SENTENCE: Record<MembershipRole, string> = {
 const ALL_ROLES: readonly MembershipRole[] = ['viewer', 'maker', 'checker', 'admin'];
 const BELOW_OWNER: readonly MembershipRole[] = ['viewer', 'maker', 'checker'];
 
+/**
+ * What moving someone to this role ends, said before it is saved. Only a move
+ * to viewer or owner ends anything; the words also say what does NOT end: a
+ * spending rule lives on the chain, so it stays valid until the owners take it back.
+ */
+export function roleChangeNote(role: MembershipRole): string | null {
+  if (role === 'viewer') {
+    return `Moving someone to viewer ends their place in charge, the ${FINANCE_LEAD_NAME} role and any Add funds or Withdraw access they hold. A spending rule they already hold stays valid until the owners take it back; it shows under their name until then.`;
+  }
+  if (role === 'admin') {
+    return `An owner already has Add funds and Withdraw, so any place in charge, ${FINANCE_LEAD_NAME} role or access they held ends. A spending rule they hold stays as it is.`;
+  }
+  return null;
+}
+
 /** The roles a manager may give. */
 export function roleChoicesFor(manager: Manager): MembershipRole[] {
   if (manager === 'owner') return [...ALL_ROLES];
@@ -66,12 +81,18 @@ export type RowControls = {
 
 const NONE: RowControls = { roles: [], remove: false, access: false, financeLead: null };
 
+/** Is this staff member or approver in charge of sign-offs, or granted Add funds or Withdraw? Only an owner moves or removes them. */
+export function holdsGrantedAuthority(row: Pick<TeamMemberWire, 'role' | 'inCharge' | 'addFunds' | 'withdraw'>): boolean {
+  return row.role !== 'admin' && row.role !== 'viewer' && (row.inCharge || row.addFunds || row.withdraw);
+}
+
 /** What the signed-in manager is offered on one person's row. */
-export function rowControls(ctx: { manager: Manager; youUserId: string }, row: Pick<TeamMemberWire, 'userId' | 'role' | 'financeLead'>): RowControls {
+export function rowControls(ctx: { manager: Manager; youUserId: string }, row: Pick<TeamMemberWire, 'userId' | 'role' | 'financeLead' | 'inCharge' | 'addFunds' | 'withdraw'>): RowControls {
   if (!ctx.manager || row.userId === ctx.youUserId) return NONE;
   if (ctx.manager === 'finance_lead') {
-    // Never an owner. Everything else about the people below an owner.
-    return row.role === 'admin' ? NONE : { roles: roleChoicesFor('finance_lead'), remove: true, access: false, financeLead: null };
+    // Never an owner, and never someone an owner put in charge or gave Add funds or Withdraw: ending that is the owners'.
+    if (row.role === 'admin' || holdsGrantedAuthority(row)) return NONE;
+    return { roles: roleChoicesFor('finance_lead'), remove: true, access: false, financeLead: null };
   }
   return {
     roles: roleChoicesFor('owner'),
@@ -97,6 +118,8 @@ export function financeLeadWords(): { can: string[]; cannot: string[]; chain: st
       'Give or take away Add funds and Withdraw access, their own included.',
       'Change spending rules or limits, their own included.',
       'Put someone in charge of sign-offs, or change or take back this role.',
+      'Change or remove someone who is in charge of sign-offs or who can add funds or withdraw. An owner does that, and takes the access back first.',
+      'Take back a spending rule. A person moved to viewer or removed keeps the rule they hold until the owners revoke it.',
     ],
     chain:
       'Nothing about the business wallet changes on the chain. Its owners’ signers control it: when a signer is added, the owners sign that request on their own devices and read exactly what it does first. The Finance lead can start the request. Splash holds no key.',

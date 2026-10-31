@@ -115,7 +115,7 @@ export default function TeamCard({
         <p className="text-[13px] leading-5 text-[#326273]">
           {manager === 'owner'
             ? 'You run the team. Add people, choose their role, and decide who can add funds and withdraw. Owners sign for the business wallet; staff pay within the rule they hold, approvers approve, and viewers read.'
-            : `You are the ${FINANCE_LEAD_NAME}. You can add people and change or remove viewers, staff and approvers. Owners, the wallet’s signers, bank accounts and Add funds or Withdraw access stay with the owners.`}
+            : `You are the ${FINANCE_LEAD_NAME}. You can add people and change or remove viewers, staff and approvers. Owners, the wallet’s signers, bank accounts and Add funds or Withdraw access stay with the owners, and so do the people an owner put in charge or gave that access.`}
         </p>
 
         <ul className="space-y-2" aria-label="Team">
@@ -141,6 +141,7 @@ export default function TeamCard({
                 <span className="basis-full text-[13px] leading-5 text-[#326273]">
                   {access(m)}{' '}
                   {walletReady && row?.rule ? `Up to ${row.rule.perPayment} a payment. ${row.rule.state.label}.` : walletReady && row?.canHaveRule ? 'No rule: each payment goes to the owners.' : m.role === 'admin' ? 'Signs for the business wallet once added as a signer.' : m.role === 'viewer' ? 'Reads only.' : ''}
+                  {manager === 'finance_lead' && !can && m.userId !== you.userId && m.role !== 'admin' ? ' An owner changes or removes this person.' : ''}
                 </span>
               </li>
             );

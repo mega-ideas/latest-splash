@@ -1,12 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 import { call, errorText } from '@/components/transfer/api';
 import { Field, Modal, PrimaryButton, QuietButton, SelectInput } from '@/components/transfer/ui';
 import { Note } from '@/components/wallet/parts';
 import type { MembershipRole } from '@/lib/membership-roles';
-import { FINANCE_LEAD_NAME, ROLE_NAME, ROLE_SENTENCE, rowControls, type FundsAccessKind, type Manager, type TeamMemberWire } from '@/lib/team/view';
+import { FINANCE_LEAD_NAME, ROLE_NAME, ROLE_SENTENCE, holdsGrantedAuthority, roleChangeNote, rowControls, type FundsAccessKind, type Manager, type TeamMemberWire } from '@/lib/team/view';
 
 /**
  * One person on the team: their role, what they may do with Add funds and
@@ -35,6 +35,8 @@ export default function MemberDialog({
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
   const [confirmRemove, setConfirmRemove] = useState(false);
+  const [confirmWithdraw, setConfirmWithdraw] = useState(false);
+  const withdrawBox = useRef<HTMLInputElement>(null);
 
   if (!member) return null;
   const controls = rowControls({ manager, youUserId }, member);
@@ -57,20 +59,44 @@ export default function MemberDialog({
   }
 
   const saveRole = () => run('role', () => call(base, { method: 'PATCH', body: { role: chosen } }), `${member!.name} is now ${ROLE_NAME[chosen]}.`, () => setRole(null));
-  const setAccess = (access: FundsAccessKind, allowed: boolean) =>
-    run(access, () => call(`${base}/access`, { method: 'PUT', body: { access, allowed } }), `${allowed ? 'Allowed' : 'Stopped'}: ${access === 'add_funds' ? 'Add funds' : 'Withdraw'} for ${member!.name}.`);
+  // A switch stays focusable while it saves (aria-disabled, not disabled): a keyboard or screen-reader user keeps their place, and a second press is ignored until the answer is in.
+  const setAccess = (access: FundsAccessKind, allowed: boolean) => {
+    if (busy !== null) return;
+    return run(access, () => call(`${base}/access`, { method: 'PUT', body: { access, allowed } }), `${allowed ? 'Allowed' : 'Stopped'}: ${access === 'add_funds' ? 'Add funds' : 'Withdraw'} for ${member!.name}.`);
+  };
+  // Giving Withdraw moves money out of the business, so it asks first. Taking any access back does not.
+  const switchAccess = (access: FundsAccessKind, allowed: boolean) => {
+    if (busy !== null) return;
+    if (access === 'withdraw' && allowed) {
+      setConfirmWithdraw(true);
+      return;
+    }
+    void setAccess(access, allowed);
+  };
+  const closeWithdrawAsk = () => {
+    setConfirmWithdraw(false);
+    withdrawBox.current?.focus();
+  };
   const lead = (appoint: boolean) =>
     run('lead', () => call('/api/team/finance-lead', appoint ? { body: { userId: member!.userId } } : { method: 'DELETE' }), appoint ? `${member!.name} is the ${FINANCE_LEAD_NAME}.` : `${member!.name} is no longer the ${FINANCE_LEAD_NAME}.`);
   const remove = () => run('remove', () => call(base, { method: 'DELETE' }), `${member!.name} was removed.`, () => { setConfirmRemove(false); onClose(); });
 
   const nothing = controls.roles.length === 0 && !controls.remove && !controls.access && controls.financeLead === null;
+  const ownersOnly = nothing && manager === 'finance_lead' && member.userId !== youUserId && holdsGrantedAuthority(member);
+  const roleNote = roleChangeNote(chosen);
 
   return (
     <Modal open onClose={onClose} title={member.name} eyebrow={ROLE_NAME[member.role]}>
       <div className="space-y-5 px-5 pb-5 pt-4 sm:px-6">
         <p className="break-all text-[13px] text-[#326273]">{member.email}</p>
         {nothing ? (
-          <Note>{member.userId === youUserId ? 'You cannot change or remove yourself. Another owner can.' : 'Only an owner can change this person.'}</Note>
+          <Note>
+            {member.userId === youUserId
+              ? 'You cannot change or remove yourself. Another owner can.'
+              : ownersOnly
+                ? 'This person is in charge of sign-offs or can add funds or withdraw. An owner changes or removes them, after taking that access back.'
+                : 'Only an owner can change this person.'}
+          </Note>
         ) : null}
 
         {controls.roles.length > 0 ? (
@@ -81,9 +107,7 @@ export default function MemberDialog({
               </SelectInput>
             </Field>
             <p className="text-[13px] leading-5 text-[#326273]">{ROLE_SENTENCE[chosen]}</p>
-            {chosen === 'viewer' || chosen === 'admin' ? (
-              <p className="text-[13px] leading-5 text-[#1F4452]">Moving someone to {ROLE_NAME[chosen].toLowerCase()} ends their place in charge, the {FINANCE_LEAD_NAME} role and any Add funds or Withdraw access they hold.</p>
-            ) : null}
+            {roleNote ? <p className="text-[13px] leading-5 text-[#1F4452]">{roleNote}</p> : null}
             <PrimaryButton type="button" disabled={busy !== null || chosen === member.role} onClick={() => void saveRole()}>
               {busy === 'role' ? 'Saving…' : 'Save role'}
             </PrimaryButton>
@@ -97,15 +121,27 @@ export default function MemberDialog({
             {([['add_funds', 'Can add funds', member.addFunds], ['withdraw', 'Can withdraw to the business bank account', member.withdraw]] as const).map(([kind, label, on]) => (
               <label key={kind} className="flex min-h-11 cursor-pointer items-center gap-3 rounded-xl bg-[#F6F0ED] px-3 text-sm font-semibold text-[#1F4452]">
                 <input
+                  ref={kind === 'withdraw' ? withdrawBox : undefined}
                   type="checkbox"
                   className="h-5 w-5 shrink-0 accent-[#0d6370]"
                   checked={on}
-                  disabled={busy !== null}
-                  onChange={(e) => void setAccess(kind, e.target.checked)}
+                  aria-disabled={busy !== null}
+                  onChange={(e) => switchAccess(kind, e.target.checked)}
                 />
                 {label}
               </label>
             ))}
+            {confirmWithdraw ? (
+              <div role="group" aria-labelledby="md-withdraw-ask" className="space-y-2 rounded-xl border border-[#326273]/20 p-3">
+                <p id="md-withdraw-ask" className="text-[13px] leading-5 text-[#1F4452]">
+                  Let {member.name} ask to withdraw to the business bank account? A withdrawal is still signed only by the owners. You can take this back at any time.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <PrimaryButton type="button" autoFocus disabled={busy !== null} onClick={() => { void setAccess('withdraw', true); closeWithdrawAsk(); }}>Allow withdrawing</PrimaryButton>
+                  <QuietButton type="button" onClick={closeWithdrawAsk}>Not now</QuietButton>
+                </div>
+              </div>
+            ) : null}
           </section>
         ) : null}
 
@@ -152,7 +188,7 @@ export default function MemberDialog({
           </section>
         ) : null}
 
-        <div aria-live="polite">{done ? <Note>{done}</Note> : null}</div>
+        <div aria-live="polite">{busy !== null ? <Note>Saving…</Note> : done ? <Note>{done}</Note> : null}</div>
         {error ? <Note tone="error">{error}</Note> : null}
       </div>
     </Modal>

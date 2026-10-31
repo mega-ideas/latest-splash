@@ -155,7 +155,7 @@ test('Transfer, Batch and Home show an Add funds link only to someone with the a
 
 test('a switch that saves at once stays focusable while it saves, and granting Withdraw asks first', () => {
   const dialog = read('components/team/MemberDialog.tsx');
-  assert.doesNotMatch(dialog, /type="checkbox"[\s\S]{0,200}disabled=\{busy !== null\}/, 'a disabled switch drops keyboard focus');
+  assert.doesNotMatch(dialog, /type="checkbox"[\s\S]{0,200}(?<!aria-)disabled=\{busy !== null\}/, 'a disabled switch drops keyboard focus');
   assert.match(dialog, /aria-disabled/);
   assert.match(dialog, /confirmWithdraw/);
 });
