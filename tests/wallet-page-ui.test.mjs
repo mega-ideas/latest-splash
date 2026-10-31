@@ -82,11 +82,18 @@ test('a bank is added by an owner and checked against the company’s own name; 
 
 test('staff migration: owners and the person in charge sign off with their own passkey, and nobody is offered a move the server would refuse', () => {
   const m = read('components/wallet/Migration.tsx');
-  assert.match(m, /signApprovalWithPasskey\(passkey, made\.body\.signOff\.message\)/);
+  assert.match(m, /signApprovalWithPasskey\(passkey, pending\.message\)/, 'what is signed is the statement that was shown');
   assert.match(m, /migrationRows\(members, viewer\)/);
   assert.match(m, /Sign off their move/);
   assert.match(m, /PersonInCharge/);
   assert.match(m, /you\.authority === 'owner' \? <PersonInCharge/, 'only an owner appoints');
+});
+
+test('the sign-off statement is shown in full before the approver signs it, and says what it covers', () => {
+  const m = read('components/wallet/Migration.tsx');
+  assert.match(m, /\{pending\.message\}/, 'the statement the server wrote (the full From and To) is on screen');
+  assert.match(m, /whatever the wallet holds/, 'the sign-off is not for an amount: it covers whatever the wallet holds when it is used');
+  assert.doesNotMatch(m, /signApprovalWithPasskey\(passkey, made\./, 'nothing is signed straight from the prepare answer');
 });
 
 test('the signing screens decode on the device, and a wallet change reads in plain words', () => {
