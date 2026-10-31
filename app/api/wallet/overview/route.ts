@@ -1,10 +1,9 @@
-import { and, eq, inArray } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 
 import { resolveAuthorityForSession, UnauthorizedError } from '@/lib/auth/authority';
-import { memberships, users } from '@/lib/db/schema';
 import { currentWalletMembers, walletRegistration } from '@/lib/server/business-wallet';
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
+import { orgMemberNames } from '@/lib/server/org-member-names';
 import { requireSessionAccount } from '@/lib/server/session-account';
 import { liveWalletContext } from '@/lib/server/wallet-deps';
 import { buildWalletOverview } from '@/lib/server/wallet-overview';
@@ -58,16 +57,8 @@ export async function GET(request: Request) {
       const registration = walletRegistration(current.members);
       return { threshold: registration.threshold, singleSigner: registration.singleSigner, members: current.members.members.map((m) => ({ userId: m.userId, weight: m.weight })) };
     },
-    // Names of members of THIS business only: the join on the membership keeps another business's people out.
-    namesOf: async (ids) => {
-      if (ids.length === 0) return new Map();
-      const rows = await db
-        .select({ id: users.id, name: users.name })
-        .from(users)
-        .innerJoin(memberships, and(eq(memberships.userId, users.id), eq(memberships.orgId, orgId)))
-        .where(inArray(users.id, ids));
-      return new Map(rows.map((r: { id: string; name: string }) => [r.id, r.name]));
-    },
+    // Names of members of THIS business only: the membership join keeps another business's people out.
+    namesOf: (ids) => orgMemberNames(db, orgId, ids),
   });
   return NextResponse.json(overview, { headers: NO_STORE });
 }

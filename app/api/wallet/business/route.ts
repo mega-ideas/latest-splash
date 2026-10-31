@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 
 import { planBusinessWallet, startBusinessWallet } from '@/lib/server/business-wallet';
 import { readJsonBody } from '@/lib/server/http';
+import { orgMemberNames } from '@/lib/server/org-member-names';
 import { orgWalletMembers } from '@/lib/server/wallet-deps';
 import { asResponse, limitWalletRequests, NO_STORE, requireOwner, walletRoute } from '@/lib/server/wallet-route';
 import { listSigningRequests, singleSignerConsents } from '@/lib/server/wallet-signing-store';
@@ -25,7 +26,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: Request) {
   const gate = await walletRoute(request);
   if (gate.response) return gate.response;
-  const { orgId, db, ctx } = gate.route;
+  const { orgId, db, ctx, authority } = gate.route;
   let account;
   try {
     account = await ctx.readAccount();
@@ -33,12 +34,14 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'The business account could not be read from the chain.' }, { status: 502, headers: NO_STORE });
   }
   const [{ candidates, missing }, requests] = await Promise.all([orgWalletMembers(db, orgId, account), listSigningRequests(db, orgId)]);
+  const names = await orgMemberNames(db, orgId, [...candidates.map((o) => o.userId), ...missing]);
   return NextResponse.json(
     {
       wallet: account.wallet,
       pendingWallet: account.pendingWallet,
-      owners: candidates.map((o) => ({ userId: o.userId, address: o.address, founder: o.founder, onChainOwner: o.onChainOwner })),
-      ownersWithoutPasskey: missing,
+      owners: candidates.map((o) => ({ userId: o.userId, name: names.get(o.userId) ?? 'An owner', address: o.address, founder: o.founder, onChainOwner: o.onChainOwner })),
+      ownersWithoutPasskey: missing.map((id) => ({ userId: id, name: names.get(id) ?? 'An owner' })),
+      you: { userId: authority.userId, role: authority.role },
       requests: requests.map((r) => ({ id: r.id, purpose: r.purpose, status: r.status, digest: r.txDigest, expiresAt: r.expiresAt.toISOString(), executedDigest: r.executedDigest })),
     },
     { headers: NO_STORE },

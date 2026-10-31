@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { readJsonBody } from '@/lib/server/http';
+import { orgMembers } from '@/lib/server/org-member-names';
 import { appointPersonInCharge, listPersonsInCharge, revokePersonInCharge } from '@/lib/server/wallet-authority';
 import { asResponse, limitWalletRequests, NO_STORE, refusal, walletRoute } from '@/lib/server/wallet-route';
 
@@ -20,7 +21,12 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: Request) {
   const gate = await walletRoute(request);
   if (gate.response) return gate.response;
-  return NextResponse.json({ personsInCharge: await listPersonsInCharge(gate.route.db, gate.route.orgId) }, { headers: NO_STORE });
+  const personsInCharge = await listPersonsInCharge(gate.route.db, gate.route.orgId);
+  const members = await orgMembers(gate.route.db, gate.route.orgId);
+  const named = personsInCharge.map((p) => ({ ...p, name: members.find((m) => m.userId === p.userId)?.name ?? 'A member' }));
+  // The people to choose from go to an owner only: who holds which role is theirs to decide.
+  const candidates = gate.route.authority.role === 'OWNER' ? members : [];
+  return NextResponse.json({ personsInCharge: named, members: candidates }, { headers: NO_STORE });
 }
 
 export async function POST(request: Request) {

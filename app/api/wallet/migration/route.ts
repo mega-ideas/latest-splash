@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 
 import { gaslessEnabled } from '@/lib/payments/stablecoin-lane';
 import { collectCoins, detectMemberFunds, requestMigrationTransfer } from '@/lib/server/business-wallet';
+import { orgMemberNames } from '@/lib/server/org-member-names';
 import { scopeMigrationMembers } from '@/lib/wallet-page/migration';
 import { highestAuthority, memberRole, migrationClearance, recordAuthorityEvent } from '@/lib/server/wallet-authority';
 import { orgMemberWalletAddresses, walletUsdcType } from '@/lib/server/wallet-deps';
@@ -60,6 +61,7 @@ export async function GET(request: Request) {
   const canSign = new Map(addresses.map((a) => [a.address, a.canSign]));
   const roles = new Map<string, string | null>();
   for (const f of found) if (!roles.has(f.userId)) roles.set(f.userId, await memberRole(db, orgId, f.userId));
+  const names = await orgMemberNames(db, orgId, found.map((f) => f.userId));
   const members = [];
   for (const f of found) {
     const needsSignOff = roles.get(f.userId) !== 'admin';
@@ -70,6 +72,7 @@ export async function GET(request: Request) {
     }
     members.push({
       userId: f.userId,
+      name: names.get(f.userId) ?? 'A member',
       address: f.address,
       usdcMinor: f.usdcMinor.toString(),
       canMove: canSign.get(f.address) === true,
