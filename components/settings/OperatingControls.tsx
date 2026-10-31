@@ -160,9 +160,10 @@ function NumberControl({ label, value, suffix, onChange, disabled = false, readO
     <label className={`block rounded-2xl border border-[#326273]/10 bg-[#F6F0ED] p-4 ${disabled ? 'cursor-not-allowed border-dashed' : ''}`}>
       <span className="text-[13px] font-semibold text-[#1F4452]">{label}</span>
       {/* Only the value dims; the reason below keeps full contrast. */}
-      <span className={`mt-2 flex items-center gap-2 ${disabled ? 'opacity-50' : ''}`}>
-        <input type="number" min={0} value={value} disabled={disabled} readOnly={readOnly} onChange={(event) => onChange(Number(event.target.value))} className="w-full min-w-0 flex-1 bg-transparent text-xl font-bold tabular-nums text-[#326273] outline-none disabled:cursor-not-allowed" />
-        <span className="text-[13px] font-bold text-[var(--info)]">{suffix}</span>
+      <span className="mt-2 flex items-center gap-2">
+        <input type="number" min={0} value={value} disabled={disabled} readOnly={readOnly} onChange={(event) => onChange(Number(event.target.value))} className="w-full min-w-0 flex-1 bg-transparent text-xl font-bold tabular-nums text-[#326273] outline-none disabled:cursor-not-allowed disabled:opacity-50" />
+        {/* The unit is a word, not the value: it keeps full contrast when the control is read-only. */}
+        <span className="text-[13px] font-bold text-[#1F4452]">{suffix}</span>
       </span>
       {note && (
         <span className="mt-2 flex items-start gap-1.5 text-[12px] font-semibold leading-5 text-[#326273]">

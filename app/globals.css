@@ -8355,3 +8355,10 @@ button.iso-product-row {
   .legal-prose p,
   .legal-prose li { font-size: 14.5px; }
 }
+
+/* v2 Phase 3 final check (brief 8): a placeholder is text, and reads at 4.5:1 on a white field and on the page behind a search box.
+   Browsers draw it at about 2.8:1 by default, and a few fields dimmed it further. */
+.fintech-dashboard-shell ::placeholder {
+  color: var(--slate);
+  opacity: 1;
+}
