@@ -247,9 +247,9 @@ test('no Zeke starter sends a seeded invoice id', async () => {
 });
 
 test('the Wallet page is titled Wallet, and the unused sidebar signal CSS is gone', async () => {
-  const desk = await source('components/stablecoin/SendUsdcDesk.tsx');
-  assert.doesNotMatch(desk, /title="Send USDC"/);
-  assert.match(desk, /title="Wallet"/);
+  const page = await source('components/wallet/WalletPage.tsx');
+  assert.doesNotMatch(page, /title="Send USDC"/);
+  assert.match(page, /title="Wallet"/);
   assert.doesNotMatch(await source('app/globals.css'), /fintech-sidebar-signal/);
 });
 

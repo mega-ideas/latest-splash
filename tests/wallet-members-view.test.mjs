@@ -30,9 +30,9 @@ test('only a member who makes or approves payments can be put in charge, and one
 });
 
 test('members are read only inside the caller’s own business', () => {
-  const module = read('lib/server/org-member-names.ts');
-  assert.match(module, /eq\(memberships\.orgId, orgId\)/);
-  assert.doesNotMatch(module, /searchParams|request\./);
+  const orgModule = read('lib/server/org-member-names.ts');
+  assert.match(orgModule, /eq\(memberships\.orgId, orgId\)/);
+  assert.doesNotMatch(orgModule, /searchParams|request\./);
   const route = read('app/api/wallet/persons-in-charge/route.ts');
   assert.match(route, /orgMembers\(gate\.route\.db, gate\.route\.orgId\)/);
   assert.match(route, /role === 'OWNER'/, 'the list of people to choose from goes to an owner only');

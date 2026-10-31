@@ -180,13 +180,14 @@ test('Zeke answers it after the lane refusal and before the model', async () => 
   assert.match(oxwal, /yield \{ type: 'handoff', handoff: handoff\.handoff \}/);
 });
 
-test('the card links only into Wallet, and Wallet fills in without quoting', async () => {
+test('the card links only into Wallet, and an old Wallet link with a recipient goes to Transfer unchanged', async () => {
   const thread = code(await readFile(new URL('../components/oxwal/ThreadView.tsx', import.meta.url), 'utf8'));
   assert.match(thread, /item\.handoff\.href\.startsWith\('\/dashboard\/wallet\?'\)/);
-  const desk = code(await readFile(new URL('../components/stablecoin/SendUsdcDesk.tsx', import.meta.url), 'utf8'));
-  const prefill = desk.slice(desk.indexOf("const to = params.get('to')"), desk.indexOf("setPrefilled(params.get('from') === 'zeke')"));
-  assert.match(prefill, /wallets\.some\(\(r\) => r\.id === to\)/, 'only a recipient this workspace saved');
-  assert.doesNotMatch(prefill, /getQuote\(|fetch\(/, 'filling in is not quoting');
+  // Sending moved to Transfer (v2 brief 5.4, 5.5): the Wallet page no longer sends, so it carries the query over.
+  const page = code(await readFile(new URL('../app/dashboard/wallet/page.tsx', import.meta.url), 'utf8'));
+  assert.match(page, /asked\.to !== undefined \|\| asked\.amount !== undefined/);
+  assert.match(page, /redirect\(`\/dashboard\/transfer\?\$\{query\.toString\(\)\}`\)/);
+  assert.doesNotMatch(page, /getQuote\(|fetch\(/, 'carrying a link over is not quoting');
 });
 
 // ─── Phase 12: more ways to ask, and the model's own way in ─────────────────

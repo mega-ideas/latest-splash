@@ -127,9 +127,9 @@ test('the old routes redirect: Rate holds, Send USDC (keeping its query), Overvi
   assert.match(overview, /redirect\('\/dashboard'\)/);
 });
 
-test('Wallet is today’s Send USDC page, Zeke has its own route, and Home is /dashboard', async () => {
+test('Wallet is the business wallet page, Zeke has its own route, and Home is /dashboard', async () => {
   const wallet = await source('app/dashboard/wallet/page.tsx');
-  assert.match(wallet, /<SendUsdcDesk \/>/);
+  assert.match(wallet, /<WalletPage alerts=\{alerts\} \/>/);
 
   const zeke = await source('app/dashboard/zeke/page.tsx');
   assert.match(zeke, /useOxwalThread\(/);
