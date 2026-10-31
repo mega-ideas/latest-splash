@@ -223,7 +223,7 @@ test('the page sends no business, account or wallet of its own, and each action 
   const joined = pageFiles().map(([, t]) => code(t)).join('\n');
   assert.doesNotMatch(joined, /orgId|accountId|\?(org|orgId|account)=/);
   assert.match(joined, /aria-label=/);
-  assert.match(joined, /role="radiogroup"/);
+  assert.match(joined, /aria-pressed=\{on\}/, 'the type filter is a set of toggle buttons');
   assert.match(joined, /aria-live|role="status"/);
 });
 
