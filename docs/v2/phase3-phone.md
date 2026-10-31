@@ -39,16 +39,19 @@ A bottom bar of five tabs, 56px tall, clear of the home indicator
 Approve, Wallet, Zeke. Everything else is one tap away in the menu, which still
 holds the whole rail. The current tab is announced. Approve carries a badge with
 how many wallet requests wait for this person's signature: their own inbox in
-their own business, looked at every 30 seconds while the page is in view and at
-once when a signature is given or declined; a failed read shows no badge, never
-a made-up number. The floating Zeke is not drawn on a phone (Zeke is a tab, and
+their own business, asked of `GET /api/wallet/signing-requests/count` (a count and
+no transaction bytes) every 30 seconds while the page is in view and at once when a
+signature is given or declined. A look that fails keeps the last count read, never
+a made-up number, and a 401, 403 or 404 stops the asking (`readWaiting`). The
+floating Zeke is not drawn on a phone (Zeke is a tab, and
 the widget covers the little content there is).
 
 A screen with its own action bar (Transfer's Continue, Review's Approve, the
 passkey button) draws it with `PhoneBar` and the tab bar steps aside, so there is
 one bar at the foot, never two. `PhoneBar` is drawn in the body: the dashboard's
 cards blur what is behind them (`backdrop-filter`), and a fixed element inside one
-is fixed to the card, not the screen.
+is fixed to the card, not the screen. Being outside the page, it is not drawn (and
+so is inert) while the menu drawer is open, or it would cover the foot of the menu.
 
 ## Approve
 
@@ -66,6 +69,24 @@ says how many payments and shows each; a change to the wallet is worded command 
 command; a payment's own bookkeeping commands are one tap away, still on the
 screen. A command the screen cannot word blocks signing.
 
+**Nothing hides behind a payment's headline.** The decoder accepts a send to
+another address in any wallet transaction, so a request that reads as "Pay 250.00
+USDC" could carry a second payout. A payment or a batch may contain only a
+payment's own bookkeeping (coins gathered, the receipt, the cleanup); any other
+step is `unexpected`: the steps open under "Also in this transaction", the line
+is marked, and the request is **blocked**. What leaves the wallet must be exactly
+each payment plus the most its fee may be; more (another withdrawal) or less is
+blocked with the two figures. A payment opened without being paid here, or paid
+without being opened, is blocked. A target currency that is not a three-letter
+code, or a rate of nothing on a payment not in dollars, is blocked ("the rate
+cannot be shown") and never throws: `approveFacts` as a whole never throws, so the
+sign screen says do not sign and the person can still decline from the same page.
+The reason is the first thing on the screen, above the amount, and the same words
+are on the inbox card (`cardSummary`: a blocked request says do not sign; a change
+says its first line and how many more). The sign function repeats the check where
+the signing is. The fee bound and the rate are in the first screenful, and the
+transaction code sits beside the passkey button.
+
 All of it is a function of the device's own review (`reviewOnDevice`: the bytes
 decoded on the person's device, the digest and hash recomputed and compared with
 what the request claims). Bytes that do not match are not shown; the card says
@@ -77,9 +98,11 @@ the rate row.
 One 56px "Sign with your passkey" button sits in a bar at the foot and is off
 while a signature is in flight or when the screen cannot word part of the request.
 "Not now" goes back. **Decline** (anyone but the person who asked) and
-**Withdraw** (the person who asked) are one tap and a confirmation, through the
-existing `DELETE /api/wallet/signing-requests/:id`. A request that is not in the
-person's own business reads as absent, the same as one that does not exist.
+**Withdraw** (the person who asked, also after signing) are one tap and a
+confirmation, through the existing `DELETE /api/wallet/signing-requests/:id`; a
+decline that leaves the request unable to reach its threshold is told it closed
+(`closeOutcomeText`). A request that is not in the person's own business reads as
+absent, the same as one that does not exist.
 
 Wallet's "Needs your signature" opens a request on this screen on a phone.
 
@@ -102,6 +125,12 @@ second payment. The bank form's checks and request (`bank-form.ts`, `bank-save.t
 the request for access (`PilotAccess`) and what the amount step knows
 (`useAmountPlan`) are shared with the desktop rather than copied. A corridor that is
 not live is a request for access, never a quote.
+
+Once the request is made there is no Back and no "Question n of m": the draft
+cannot be edited under a request that is out for signature, and Back is off while
+the request is being sent. The request is held by `TransferFlow`, above the phone
+and desktop layouts, so a window moved across the phone break mid-send still
+receives it.
 
 Every control the flow builds is 16px on a phone (`CONTROL` is `text-base
 md:text-sm`), so the browser does not zoom the page in when a field is focused.
@@ -131,8 +160,11 @@ badge, who is waiting), `phone-approve` (the facts as data, the passkey bar, the
 pages, the words), `phone-approve-real` (a request made from real transaction
 bytes: payee, amount, asset and fee bound read back from the bytes; bytes changed
 after the digest are not shown; **another business's inbox and read are empty and
-absent**; **a signature given twice is one signature and nothing is submitted
-twice**), `phone-transfer` (the order of the questions, what each needs, the shared
+absent**; **a signature given twice is refused (409, already signed), no second
+signature is stored and nothing is submitted twice**; **a payment with a second
+payout added to its real bytes is blocked and named**; a bank payout's rate, a
+currency that is not a code and a rate of nothing are read from real bytes),
+`phone-transfer` (the order of the questions, what each needs, the shared
 bank form, **no second intent id**, the pilot corridor, owner-only questions),
 `phone-pages` (the frame, Home, Wallet's folding and hash links, Zeke). The static
 contrast audit (`dashboard-contrast`) covers every new component.
@@ -149,7 +181,11 @@ server and refused under a demo policy in production
   a phone User-Agent. The passkey prompt, the home indicator's inset and the
   on-screen keyboard are not exercised by that; they are Sky's on a phone.
 - **A deep link from WhatsApp.** `/dashboard/approve/[id]` is the address; the
-  WhatsApp message does not carry it yet (it names the transaction code).
+  WhatsApp message does not carry it yet (it names the transaction code). Left for
+  Sky: a link in a signing message is a choice about what owners are taught to tap.
+- **Keyboard and viewport on a phone.** The Zeke composer's height uses `dvh`,
+  which on iOS does not shrink for the on-screen keyboard, and `viewport-fit=cover`
+  is set for the whole dashboard. Neither can be exercised without a phone.
 - **Landscape phones** get the desktop layout (the window is wider than 767px).
 - **Pages that are not these five** (Batch, Invoices, Treasury, Recipients, History,
   Settings, Setup, Support) keep their responsive desktop layouts on a phone, as the
