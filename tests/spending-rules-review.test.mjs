@@ -296,4 +296,6 @@ test('a bridged rule still shows what is left today and when the full cap return
   used.allowances[0] = { ...used.allowances[0], lifetimeCapMinor: U(1000), lifetimeRemainingMinor: '0', currentSpendMinor: U(1000), spendableNowMinor: '0' };
   const u = ruleLine(used, NOW);
   assert.deepEqual([u.usage, u.left, u.renewsLine], [null, null, null], 'a full lifetime total pays nothing, so no window figure reads as room');
+  const card = rulesSummary({ policy: { secondApprovalThresholdMinor: U(10000) }, reissueNeeded: false, rules: [used] }, { owner: true }).rules[0];
+  assert.deepEqual([card.state, card.window], ['Used up', null], 'the Wallet card says the same');
 });

@@ -34,9 +34,10 @@ export function rulesSummary(view: SpendViewFacts, viewer: { owner: boolean }) {
     const s = STATES[r.status] ?? { state: 'Unknown', tone: 'wait' as Tone };
     // A rule is read as a whole: a change made after spending leaves a short bridge for today that is not the rule.
     const t = ruleTerms(r.allowances);
-    const w = t?.window ?? null;
-    const when = w?.period === 'day' ? 'today' : w?.period === 'month' ? 'this month' : 'in the current window';
     const used = r.status === 'active' && t?.usedUp;
+    // A rule whose lifetime total is spent pays nothing, whatever its window has left.
+    const w = used ? null : t?.window ?? null;
+    const when = w?.period === 'day' ? 'today' : w?.period === 'month' ? 'this month' : 'in the current window';
     return {
       name: r.name ?? 'A staff member',
       perPayment: usdc(r.perPaymentMaxMinor),
