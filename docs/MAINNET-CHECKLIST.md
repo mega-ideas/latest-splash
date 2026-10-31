@@ -142,12 +142,28 @@ procedure in [`docs/UPGRADE-POLICY.md`](UPGRADE-POLICY.md).
       fee is quoted and no payment is built; `verify_business` and the
       operator-outflow monitor need the `Registry`), and so is
       `SPLASH_SPEND_PACKAGE_ID` (the operator-outflow monitor's approved
-      path). For the verify step, also `SPLASH_FEE_ADMIN_CAP_ID`,
+      path), with `SPLASH_SPEND_POLICY_REGISTRY_ID`, the `PolicyRegistry`
+      splash_spend shares at publish (spending rules, §4.2: without both no
+      rule is built or read). For the verify step, also `SPLASH_FEE_ADMIN_CAP_ID`,
       `SPLASH_OPS_CAP_ID`, `SPLASH_OPS_ADDRESS` (blank: the governance
       multisig) and `SPLASH_FINANCE_ADDRESS`; unset, those checks are
       reported skipped, never passed.
-- [ ] Know the gap: no owner is alerted to a fee proposal yet, because the
-      governance alert cron does not read `FeeConfig` (Phase 2).
+- [ ] `FEATURE_SUBSCRIPTION_BILLING` is **unset or `false`** (A1 §6: built,
+      not enabled). `/api/cron/billing` is not scheduled. Before it is ever
+      enabled: `SPLASH_FINANCE_ADDRESS` is the finance multisig and equals
+      `FeeConfig`'s applied fee recipient, plans are seeded, and a testnet
+      subscribe, pull and revoke has run.
+- [ ] The near-threshold alert cron (`/api/cron/spend-rule-alerts`) is
+      scheduled hourly with `CRON_SECRET`, and answers 200 (a 502 lists the
+      businesses whose spending rules could not be read).
+- [ ] The governance alert cron reads `FeeConfig` too: with
+      `SPLASH_FEE_CONFIG_ID` unset it answers 502, and a 502 naming it means
+      the id is not the canonical `FeeConfig` of core's original package
+      (the upgrade and owner-change alerts are still delivered, and the run
+      still answers 502). Before the cron is scheduled, its GraphQL read has
+      run once against the testnet `FeeConfig` and parsed (the parser is
+      tested on fixtures only). A test fee proposal on testnet (a schedule and
+      a recipient) reached every test owner, and so did its withdrawal.
 - [ ] `SPLASH_CUSTODY_PACKAGE_ID` and `SPLASH_PAYOUT_DELEGATION_ID` are
       **unset**. Production on mainnet refuses to boot with either, because
       custody and the meter are retired in v2. On mainnet the
@@ -164,11 +180,41 @@ procedure in [`docs/UPGRADE-POLICY.md`](UPGRADE-POLICY.md).
       and a test proposal on testnet reached every test owner. Against the
       mainnet ids it answers 200. A 502 naming `SPLASH_UPGRADE_WRAPPER_ID` or
       `SPLASH_COMPLIANCE_CONFIG_ID` means that id is not the canonical object.
+- [ ] **The hardware 2-of-3 passkey check has passed on testnet** (owed from
+      Phase 0): run on testnet by one approver (Sky, decided 25 Oct) with
+      three of his own authenticators on three kinds of device, as three
+      owner logins of one testnet business; the runbook in
+      `docs/v2/phase2-business-wallet.md`, `scripts/wallet-hardware-check.mjs`
+      output and the executed registration digest recorded under a
+      `wallet-2-of-3` heading in `docs/mainnet-checks-2026-10.md`. No business
+      wallet is created on mainnet before it: the code refuses every wallet
+      request on mainnet until `WALLET_MAINNET_ENABLED=true` and
+      `WALLET_HARDWARE_CHECK_REF=docs/mainnet-checks-2026-10.md#wallet-2-of-3`
+      are both set, and production will not boot with only the first.
+- [ ] A testnet dry run shows a transaction sponsored from the operator's SUI
+      **address balance** (no gas coin) is accepted, before
+      `WALLET_GAS_SPONSOR=operator` is set. The operator's SUI address balance
+      is funded, within `OPERATOR_HOT_BALANCE_CEILING_MICRO`'s intent.
+- [ ] The wallet signature sweep (`/api/cron/wallet-signing`) is scheduled
+      every five minutes and answers 200 (it also reconciles submissions whose
+      outcome is unknown, and answers 502 while any is stuck).
 
 **Partners and legal**
 
 - [ ] Sumsub, Elliptic and every payout partner contract is signed before its
       flag is switched on.
+- [ ] Compliance (v2 §4.6, `docs/v2/phase2-compliance.md`): Sumsub's webhook
+      is set to `HMAC_SHA256_HEX` and `SUMSUB_WEBHOOK_SECRET` is set
+      (`SUMSUB_WEBHOOK_ALLOW_SHA1` stays off, or is turned off once the switch
+      is made); compliance confirms `KYT_SCREENING_MAX_AGE_HOURS` (default
+      24); one
+      KYB applicant and one Travel Rule transfer are run in Sumsub's sandbox
+      against this code before `SUMSUB_TRAVEL_RULE_ENABLED=true`; Elliptic's
+      wallet-exposure call is checked against the contracted account's
+      sandbox, and compliance sets `ELLIPTIC_REVIEW_SCORE` and
+      `ELLIPTIC_BLOCK_SCORE`; counsel confirms whose Travel Rule obligation
+      a payment from the business's own self-hosted wallet to an exchange is,
+      and the sender-declaration wording.
 - [ ] `SIGNED_PARTNERS` lists exactly the partners whose agreements are
       signed. It is empty by default, and nobody is named until then.
 - [ ] The SSM registration number is entered in `BRAND.legalEntity`
@@ -181,6 +227,22 @@ procedure in [`docs/UPGRADE-POLICY.md`](UPGRADE-POLICY.md).
       once by a test deposit and bound to its beneficiaries by the business
       wallet. Each partner still confirms it can work that way, and on which
       networks it deposits.
+- [ ] Withdrawals (v2 §4.4, `docs/v2/phase2-withdrawals.md`): set
+      `WITHDRAWAL_ACCOUNT_KEY` (random, at least 32 characters, kept like any
+      other secret; to rotate, move the old value to
+      `WITHDRAWAL_ACCOUNT_KEY_PREVIOUS`; losing every key makes the stored bank
+      accounts unusable), and `SPLASH_CORE_ORIGINAL_PACKAGE_ID` (required in
+      production: withdrawals refuse without it). Schedule
+      `/api/cron/withdrawals` every five minutes, and `/api/cron/cross-chain`
+      every ten (it needs `CCTP_IRIS_API_URL`). Before relying on the
+      derived intent id, dry-run one kind 4 withdrawal on testnet and compare
+      the created intent with `withdrawals.intent_id`.
+      The Hata and Fiuu credentials (`HATA_API_KEY`, `HATA_WEBHOOK_SECRET`,
+      `FIUU_MERCHANT_ID`, `FIUU_VERIFY_KEY`) are set only once both contracts
+      are signed and the adapter is wired. Each partner's deposit address is
+      added to the on-chain partner registry (`OpsCap`), or a kind 4 payout
+      to it aborts. `PAYOUT_SANDBOX_WEBHOOKS_ENABLED` stays off in
+      production.
 
 ## Shipped (in review)
 - [x] W9.0 type & color discipline · W9.1 quote comparison card ·

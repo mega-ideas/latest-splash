@@ -22,7 +22,7 @@
  * `suppliers.org_id` is NOT NULL, so scoping here is a property of the table
  * rather than a filter each read has to remember.
  */
-import { and, desc, eq, inArray, isNotNull } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, ne, or } from 'drizzle-orm';
 import type { PgDatabase } from 'drizzle-orm/pg-core';
 
 import { suppliers } from '../../db/schema.ts';
@@ -70,15 +70,30 @@ export type RecipientRow = {
   kybInviteSent?: boolean;
   travelRule?: TravelRuleColumns;
   demo?: boolean;
-  /** BANK (local currency via a partner rail) or WALLET (USDC on Sui). */
-  payoutMethod?: 'BANK' | 'WALLET';
+  /** BANK (local currency via a partner rail), WALLET (USDC on Sui) or
+   *  CROSS_CHAIN (USDC over CCTP V2 to another chain). */
+  payoutMethod?: 'BANK' | 'WALLET' | 'CROSS_CHAIN';
   /** Lower-cased Sui address; set only for WALLET recipients. */
   walletAddress?: string;
-  /** 'SLUSH' | 'METAMASK_SUI_SNAP'. */
+  /** The wallet app the supplier named: a label only. */
   walletProvider?: string;
   /** Sanctions screening outcome; null = never screened. */
   screeningVerdict?: string | null;
+  /** How it is paid (v2 §4.7): the kind and that kind's own fields. */
+  delivery?: RecipientDelivery;
   createdAt: string;
+};
+
+/** v2 §4.7. Absent on insert means: derived from `payoutMethod`. */
+export type RecipientDelivery = {
+  deliveryKind: 'BANK' | 'EXCHANGE' | 'SELF_CUSTODY' | 'CROSS_CHAIN';
+  exchangeId?: string | null;
+  depositNetwork?: string | null;
+  destinationChain?: string | null;
+  destinationDomain?: number | null;
+  destinationAddress?: string | null;
+  mintRecipient?: string | null;
+  ownershipStatus?: 'unproven' | 'proven' | 'revoked' | null;
 };
 
 /** Empty strings are absent, not present-and-blank: a travel-rule field that
@@ -156,12 +171,29 @@ function toRow(row: SupplierSelect): RecipientRow {
     kybInviteSent: metadata.kybInviteSent,
     travelRule: hasTravelRule ? travelRule : undefined,
     demo: row.demo,
-    payoutMethod: row.payoutMethod === 'WALLET' ? 'WALLET' : 'BANK',
+    payoutMethod: row.payoutMethod === 'WALLET' ? 'WALLET' : row.payoutMethod === 'CROSS_CHAIN' ? 'CROSS_CHAIN' : 'BANK',
     walletAddress: row.walletAddress ?? undefined,
     walletProvider: row.walletProvider ?? undefined,
     screeningVerdict: row.screeningVerdict ?? null,
+    delivery: {
+      deliveryKind: row.deliveryKind as RecipientDelivery['deliveryKind'],
+      exchangeId: row.exchangeId,
+      depositNetwork: row.depositNetwork,
+      destinationChain: row.destinationChain,
+      destinationDomain: row.destinationDomain,
+      destinationAddress: row.destinationAddress,
+      mintRecipient: row.mintRecipient,
+      ownershipStatus: row.ownershipStatus as RecipientDelivery['ownershipStatus'],
+    },
     createdAt: row.createdAt.toISOString(),
   };
+}
+
+/** A recipient paid on chain without its own delivery says WALLET: a wallet the supplier holds, not yet proven. */
+function deliveryFor(input: NewRecipient): RecipientDelivery {
+  if (input.delivery) return input.delivery;
+  if (input.payoutMethod === 'WALLET') return { deliveryKind: 'SELF_CUSTODY', ownershipStatus: 'unproven' };
+  return { deliveryKind: 'BANK' };
 }
 
 export type NewRecipient = Omit<RecipientRow, 'createdAt'>;
@@ -204,6 +236,19 @@ export async function insertRecipient(db: DrizzleDb, input: NewRecipient): Promi
       payoutMethod: input.payoutMethod ?? 'BANK',
       walletAddress: input.walletAddress ?? null,
       walletProvider: input.walletProvider ?? null,
+      ...(() => {
+        const d = deliveryFor(input);
+        return {
+          deliveryKind: d.deliveryKind,
+          exchangeId: d.exchangeId ?? null,
+          depositNetwork: d.depositNetwork ?? null,
+          destinationChain: d.destinationChain ?? null,
+          destinationDomain: d.destinationDomain ?? null,
+          destinationAddress: d.destinationAddress ?? null,
+          mintRecipient: d.mintRecipient ?? null,
+          ownershipStatus: d.ownershipStatus ?? null,
+        };
+      })(),
       recipientMetadata: {
         orgEmail: input.orgEmail,
         createdVia: input.createdVia,
@@ -280,6 +325,15 @@ export async function listApprovedWalletAddressesForStaff(db: DrizzleDb): Promis
         eq(suppliers.payoutMethod, 'WALLET'),
         isNotNull(suppliers.walletAddress),
         inArray(suppliers.screeningVerdict, ['CLEAR', 'ATTESTED']),
+        // A wallet recipient counts only once an owner approved it
+        // (maker-checker): a staff member's save is not yet a destination.
+        // Recipients that are Splash's or the business's own addresses are
+        // refused when they are saved and at every payment gate, so none is here.
+        isNotNull(suppliers.approvedBy),
+        isNotNull(suppliers.approvedAt),
+        // A wallet the supplier holds counts only once it signed the
+        // ownership proof (v2 §4.7); an exchange deposit address needs none.
+        or(ne(suppliers.deliveryKind, 'SELF_CUSTODY'), eq(suppliers.ownershipStatus, 'proven')),
       ),
     );
   return rows.map((r: { walletAddress: string | null }) => r.walletAddress).filter((a: string | null): a is string => Boolean(a));

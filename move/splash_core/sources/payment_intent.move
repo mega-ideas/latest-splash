@@ -1105,6 +1105,15 @@ public(package) fun unpack_settle_receipt<W: drop>(
 // to an event changes a tuple and fails the test build.
 
 #[test_only]
+/// The id `create_for_wallet` gives the intent for `payment_ref` under the
+/// account `account_id`. Tests pin it against the server's derivation
+/// (lib/payouts/withdrawal-rules.ts, `withdrawalIntentId`), which keys a
+/// withdrawal's payout instruction before the intent exists.
+public fun derived_intent_id_for_testing(account_id: ID, payment_ref: vector<u8>): address {
+    derived_object::derive_address(account_id, PaymentRef(payment_ref))
+}
+
+#[test_only]
 public fun unpack_intent_created_for_testing(
     e: IntentCreated,
 ): (ID, vector<u8>, vector<u8>, String, u8, u8, u64, u64) {

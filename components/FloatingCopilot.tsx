@@ -255,15 +255,9 @@ export default function FloatingCopilot() {
           </Link>
         )}
 
-        {/* The tool boundary, stated once. This replaced a three-cell "live
-            ticker" whose figures were hard-coded — it read as a market feed and
-            was a static string, which is the one thing a terminal must not do.
-            What is here instead is true on every render. */}
-        <div className="shrink-0 border-b border-[#0c3e48]/10 bg-[#f4efe4] px-4 py-1.5">
-          <span className="font-mono text-[12px] font-semibold uppercase tracking-[0.14em] text-[#0d6370]">
-            Reads state · prepares proposals · cannot send
-          </span>
-        </div>
+        {/* No fixed "cannot send" strip (v2 §4.8): Zeke states its limit in
+            the conversation, every time before it acts on a payment and once
+            per session for a read (lib/agent/oxwal.ts). */}
 
         {/* Messages */}
         <div

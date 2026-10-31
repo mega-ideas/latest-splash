@@ -173,8 +173,35 @@ new build refuses to install or start on the old runtime and environment.
    calls. It answers 502 without those ids; when either id is not the
    canonical object of the canonical type (that case also pages through
    `OPERATOR_ALERT_WEBHOOK_URL`); or when it cannot read both objects in
-   full. A 502 is again an alert in itself. It does not read `FeeConfig`:
-   owner alerts for fee schedule and fee recipient proposals are Phase 2.
+   full. A 502 is again an alert in itself. It also reads the canonical
+   `FeeConfig` (`SPLASH_FEE_CONFIG_ID`, required) and tells every owner of
+   a proposed or applied fee schedule or fee recipient.
+   Schedule `https://<domain>/api/cron/spend-rule-alerts` hourly (v2 Phase
+   2): it reads every business's spending rules from the chain and emails
+   that business's owners about near-threshold patterns (detective only).
+   It answers 502 without a database or when any business's rules could not
+   be read. Leave `https://<domain>/api/cron/billing` unscheduled while
+   `FEATURE_SUBSCRIPTION_BILLING` is off (it answers 404).
+   Schedule `https://<domain>/api/cron/wallet-signing` every five minutes
+   (v2 §4.1): it closes Business Splash Wallet signature requests past their
+   expiry and clears the partial signatures they held, and reads on chain
+   every submission whose outcome is unknown or that is stuck past its lease,
+   closing it as executed (and opening the next step) or failed. It answers
+   502 without a database, when any partial signature is still held for a
+   closed request, when a submission is still stuck, or when a chain read
+   failed.
+   Schedule `https://<domain>/api/cron/withdrawals` every five minutes, after
+   the wallet-signing sweep (v2 §4.4): it marks withdrawals sent whose
+   owners' request executed, posts their digest to the payout partner once
+   the chain shows the instructed intent, reverses the instruction and
+   cancels the withdrawal when the request lapsed, and records or frees a
+   partner test deposit. It answers 502 without a database, without
+   `SPLASH_CORE_ORIGINAL_PACKAGE_ID`, or when a row could not be settled.
+   Schedule `https://<domain>/api/cron/cross-chain` every ten minutes (v2
+   §4.7): it asks Circle's attestation service again for every burned CCTP
+   payment, and reports a payment burned but not minted six hours after its
+   burn. It answers 502 without a database, without `CCTP_IRIS_API_URL` in
+   production, when Circle could not be asked, or when a payment is stuck.
 
 **Redeploys**: push to `main` → App Platform rebuilds, runs the pre-deploy
 migration job, then deploys. Deleted files disappear from the server because

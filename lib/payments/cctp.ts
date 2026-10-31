@@ -255,7 +255,8 @@ export function suiMintRecipient(address: string): string {
 }
 
 /** EIP-55: a mixed-case EVM address carries a checksum in its letter case. */
-function evmChecksumHolds(body: string): boolean {
+/** Whether a 40-hex-character EVM address body is in its EIP-55 form (each letter's case is its checksum bit). */
+export function evmChecksumHolds(body: string): boolean {
   const lower = body.toLowerCase();
   const hash = toHex(keccak_256(new TextEncoder().encode(lower)));
   for (let i = 0; i < lower.length; i += 1) {
@@ -606,4 +607,106 @@ export function planCrossChainPayout(input: {
       maxFeeMinor,
     },
   };
+}
+
+// ─── Reading a CCTP V2 mint on Sui: who burned on the other side ────────────
+
+/**
+ * Circle's MessageTransmitterV2 package on Sui (docs/mainnet-checks-2026-10.md
+ * section 5, from Circle's Sui packages page, read 24 Oct 2026). An event's
+ * TYPE keeps the package's original id across upgrades, so an event is
+ * Circle's only when its type is `<one of these>::receive_message::MessageReceived`:
+ * anyone can publish a module that emits an event named MessageReceived.
+ *
+ * The id of the package whose module EMITTED the event is no signal: on
+ * testnet Circle's own mints are emitted from TokenMessengerMinter's
+ * `handle_receive_message` (0x267d3c0c...), not from the transmitter, and an
+ * upgrade or a wrapper changes it again. Read from testnet on 25 Oct 2026:
+ * the MessageReceived struct is {caller, source_domain, nonce, sender,
+ * finality_threshold_executed, message_body}, and the BurnMessageV2 offsets
+ * below match the minted amount and recipient of real mints.
+ */
+export const CCTP_SUI_MESSAGE_TRANSMITTER = {
+  mainnet: '0x16bcfcfc465f96281663a344641c017de84529370e11aa3879d0dce43ad6db87',
+  testnet: '0xe9678cd42a81886e18e21361088071f275105636a4d3751e1d7f255211f73bbe',
+} as const;
+
+/** The module and struct of Circle's MessageReceived event on Sui. */
+export const CCTP_MESSAGE_RECEIVED = 'receive_message::MessageReceived';
+
+/** Whether an event type is Circle's MessageReceived on `network`, by its type's own (original) package id. */
+export function isCircleMessageReceived(eventType: string, network: keyof typeof CCTP_SUI_MESSAGE_TRANSMITTER): boolean {
+  const m = /^(0x[0-9a-fA-F]{1,64})::receive_message::MessageReceived$/.exec(eventType.trim());
+  if (!m) return false;
+  return normalizeHex32(m[1]) === normalizeHex32(CCTP_SUI_MESSAGE_TRANSMITTER[network]);
+}
+
+function normalizeHex32(address: string): string {
+  return `0x${address.slice(2).toLowerCase().padStart(64, '0')}`;
+}
+
+/** The domain → chain table, inverted, for a mint's source. */
+export function chainForDomain(domain: number): CctpPeerChain | null {
+  for (const [chain, facts] of Object.entries(FUNDING_CHAINS) as Array<[CctpPeerChain, ChainFacts]>) {
+    if (facts.cctpDomain === domain) return chain;
+  }
+  return null;
+}
+
+export type BurnMessageV2 = {
+  version: number;
+  burnToken: string;
+  /** 32 bytes, 0x hex. */
+  mintRecipient: string;
+  /** What was burned. Circle mints `amount - feeExecuted`. */
+  amount: bigint;
+  /** Who burned on the source chain, 32 bytes, 0x hex (an EVM address is left-padded). */
+  messageSender: string;
+  maxFee: bigint;
+  feeExecuted: bigint;
+};
+
+/**
+ * CCTP V2's BurnMessage body (Circle's BurnMessageV2): version (uint32),
+ * burnToken (bytes32), mintRecipient (bytes32), amount (uint256),
+ * messageSender (bytes32), maxFee (uint256), feeExecuted (uint256), then
+ * expirationBlock and hook data, which are not read here. Null when the
+ * bytes are too short to carry feeExecuted.
+ *
+ * Checked against real testnet mints on 25 Oct 2026 (version 1; recipient
+ * and amount equal the mint's balance change). A deposit whose burn cannot
+ * be read is held (source unknown), never credited to a guess.
+ */
+export function decodeBurnMessageV2(body: Uint8Array): BurnMessageV2 | null {
+  if (body.length < 196) return null;
+  const word = (offset: number) => `0x${toHex(body.slice(offset, offset + 32))}`;
+  const version = new DataView(body.buffer, body.byteOffset, body.byteLength).getUint32(0, false);
+  return {
+    version,
+    burnToken: word(4),
+    mintRecipient: word(36),
+    amount: BigInt(word(68)),
+    messageSender: word(100),
+    maxFee: BigInt(word(132)),
+    feeExecuted: BigInt(word(164)),
+  };
+}
+
+/** What Circle minted for a burn: the amount less the fee it executed. Never negative. */
+export function mintedAmount(burn: BurnMessageV2): bigint {
+  const minted = burn.amount - burn.feeExecuted;
+  return minted > 0n ? minted : 0n;
+}
+
+/** A bytes32 burner as the address its chain writes: EVM (last 20 bytes, lowercase), Solana (base58), else null. */
+export function burnerAddress(chain: CctpPeerChain, messageSender: string): string | null {
+  const format = FUNDING_CHAINS[chain]?.addressFormat;
+  const bytes = fromHex(messageSender);
+  if (bytes.length !== 32) return null;
+  if (format === 'EVM') {
+    if (bytes.slice(0, 12).some((b) => b !== 0)) return null;
+    return `0x${toHex(bytes.slice(12))}`;
+  }
+  if (format === 'SOLANA') return toBase58(bytes);
+  return null;
 }

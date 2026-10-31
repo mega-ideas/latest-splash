@@ -169,11 +169,32 @@ export async function grantRole(
  * approver's address and its own record, and it does not depend on this row
  * still existing. Leaving a tombstone here would mean a revoked member still
  * appears in the org's member list.
+ *
+ * Removing a membership offboards the member from the business wallet's
+ * authority (lib/server/wallet-authority.ts offboardMember): an appointment
+ * as person in charge is revoked, their usable migration sign-offs are
+ * voided, and their passkey addresses are recorded so a spending rule they
+ * still hold on chain shows as orphaned until the owners take it back. A
+ * role change is a removal and a new grant, so it offboards too. `by` is who
+ * removed it, for the audit trail (`operator:<email>` from the console).
  */
-export async function revokeRole(db: DrizzleDb, input: { email: string }): Promise<void> {
+export async function revokeRole(
+  db: DrizzleDb,
+  input: { email: string; by?: string; now?: () => Date },
+): Promise<{ offboarded: Array<{ orgId: string; addresses: string[] }> }> {
   const email = input.email.trim().toLowerCase();
   const rows = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
   if (rows.length === 0) throw new MembershipAdminError(`no account exists for ${email}`, 'no_account');
+  const userId = rows[0].id;
 
-  await db.delete(memberships).where(eq(memberships.userId, rows[0].id));
+  const held = await db.select({ orgId: memberships.orgId }).from(memberships).where(eq(memberships.userId, userId));
+  await db.delete(memberships).where(eq(memberships.userId, userId));
+  const { offboardMember, passkeyAddressesOf } = await import('./wallet-authority.ts');
+  const addresses = await passkeyAddressesOf(db as never, userId);
+  const offboarded: Array<{ orgId: string; addresses: string[] }> = [];
+  for (const m of held) {
+    const done = await offboardMember(db as never, { orgId: m.orgId, userId, by: input.by ?? 'operator:unknown', addresses, now: input.now });
+    offboarded.push({ orgId: m.orgId, addresses: done.addresses });
+  }
+  return { offboarded };
 }

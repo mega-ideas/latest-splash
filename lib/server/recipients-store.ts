@@ -53,6 +53,7 @@ function toRecord(row: repo.RecipientRow): RecipientRecord {
     walletAddress: row.walletAddress,
     walletProvider: row.walletProvider,
     screeningVerdict: row.screeningVerdict ?? null,
+    delivery: row.delivery,
     createdAt: row.createdAt,
   };
 }
@@ -82,6 +83,7 @@ export async function persistRecipient(record: RecipientRecord): Promise<Recipie
       payoutMethod: record.payoutMethod,
       walletAddress: record.walletAddress,
       walletProvider: record.walletProvider,
+      delivery: record.delivery,
     }),
   );
 }

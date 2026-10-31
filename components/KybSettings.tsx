@@ -30,7 +30,9 @@ type KybCaseStatus = {
 
 type SumsubResponse = {
   configured: boolean;
-  provider?: 'SUMSUB';
+  provider?: 'sumsub' | 'sandbox';
+  /** A labelled sandbox session outside production: there is nothing to open. */
+  sandbox?: boolean;
   applicantId?: string | null;
   externalUserId?: string;
   levelName?: string;
@@ -96,11 +98,13 @@ export default function KybSettings() {
     const response = await fetch('/api/kyb/sumsub', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ kybCaseId: caseId, businessName, registrationNumber: ssmNumber }),
+      // The server sends the case's own business name and number, not these.
+      body: JSON.stringify({ kybCaseId: caseId }),
     });
 
     const body = (await response.json()) as SumsubResponse;
 
+    if (body.configured === false) return body;
     if (!response.ok) {
       throw new Error(body.error ?? 'Sumsub KYB session failed');
     }
@@ -193,7 +197,7 @@ export default function KybSettings() {
     try {
       const session = await requestSumsubSession(caseId);
 
-      if (!session.configured) {
+      if (!session.configured || session.sandbox) {
         setSumsubStatus('unconfigured');
         setSumsubError(session.error ?? 'Sumsub environment variables are not configured');
         return;

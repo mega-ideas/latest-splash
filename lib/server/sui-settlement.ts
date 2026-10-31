@@ -882,7 +882,9 @@ function refuseRetiredCustodyPathOnMainnet(path: string): void {
  * Splash's fee computed on chain and bounded by max_fee (Amendment A1). The
  * composed builders below call the v1 entry points, which exist only in the
  * v1 package deployed on testnet. On mainnet, a fresh v2 publish, they refuse
- * before anything is built or signed. Phase 2's v2 builder replaces them.
+ * before anything is built or signed. The v2 builders are in
+ * lib/server/sui-v2-builders.ts (payFromWalletTx, payOpenIntentFromWalletTx),
+ * signed by the business wallet through lib/server/wallet-signing.ts.
  */
 function refuseV1CoreBuilderOnMainnet(path: string): void {
   if (!onMainnet()) return;
@@ -972,7 +974,7 @@ async function requireSdkExecution() {
 /**
  * V1 TESTNET ONLY. Opens an intent with the v1 `payment_intent::
  * create_payment_intent`, which v2 core does not have; refused on mainnet
- * (refuseV1CoreBuilderOnMainnet). Phase 2's v2 builder replaces it with
+ * (refuseV1CoreBuilderOnMainnet). lib/server/sui-v2-builders.ts replaces it with
  * `create_for_wallet` / `create_for_app`.
  */
 export async function createPaymentIntentOnSui(input: {
@@ -1029,7 +1031,7 @@ export async function createPaymentIntentOnSui(input: {
  * V1 TESTNET ONLY. Settles with the v1 `payment_intent::
  * confirm_payment_intent`, paid from the operator's gas coin, which v2 core
  * does not have and the operator-outflow monitor flags; refused on mainnet
- * (refuseV1CoreBuilderOnMainnet). Phase 2's v2 builder replaces it with
+ * (refuseV1CoreBuilderOnMainnet). lib/server/sui-v2-builders.ts replaces it with
  * `splash_spend::pay_intent` (or the owners' `confirm_from_business_wallet`),
  * passing the quote's maxFeeMinor as max_fee.
  */

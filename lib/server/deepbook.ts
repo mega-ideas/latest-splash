@@ -136,3 +136,65 @@ export async function getDeepbookStablePrice(env: NodeJS.ProcessEnv = process.en
     clearTimeout(timeout);
   }
 }
+
+export interface DeepbookPairBook {
+  pair: string;
+  bid: Rate;
+  ask: Rate;
+  mid: Rate;
+  /** |mid − 1| in basis points. */
+  deviationBps: bigint;
+  source: 'deepbook' | 'mock';
+  asOf: string;
+}
+
+/**
+ * One named pool's top of book, for converting that pool's base coin into
+ * USDC (lib/server/funding-conversion.ts). Unlike getDeepbookStablePrice this
+ * reads exactly the pair asked for: the peg that matters for a USDT → USDC
+ * swap is USDT's against USDC, not the busiest book's. Same rules otherwise:
+ * a two-sided book no wider than 1%, exact decimal parsing, null on any
+ * failure (no reading is never a peg).
+ */
+export async function getDeepbookPairBook(pair: string, env: NodeJS.ProcessEnv = process.env): Promise<DeepbookPairBook | null> {
+  const wanted = pair.trim().toUpperCase();
+  if (env.USE_MOCK_APIS === 'true') {
+    const one = parseRate('1');
+    return { pair: `MOCK_${wanted}`, bid: one, ask: one, mid: one, deviationBps: 0n, source: 'mock', asOf: new Date().toISOString() };
+  }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Number(env.DEEPBOOK_TIMEOUT_MS ?? 2500));
+  try {
+    const res = await fetch(`${indexerUrl(env)}/summary`, { headers: { Accept: 'application/json' }, signal: controller.signal, next: { revalidate: 30 } } as RequestInit);
+    if (!res.ok) return null;
+    const data = (await res.json()) as SummaryItem[];
+    if (!Array.isArray(data)) return null;
+    const item = data.find((d) => (d.trading_pairs ?? '').toUpperCase() === wanted);
+    if (!item || !saneBook(item)) return null;
+    let bid: Rate;
+    let ask: Rate;
+    try {
+      bid = parseRate(String(item.highest_bid));
+      ask = parseRate(String(item.lowest_ask));
+    } catch {
+      return null;
+    }
+    const midScaled = divRound(bid.scaled + ask.scaled, 2n, 'half-even');
+    if (midScaled <= 0n) return null;
+    const ONE = 10n ** BigInt(bid.scale);
+    const drift = midScaled > ONE ? midScaled - ONE : ONE - midScaled;
+    return {
+      pair: item.trading_pairs,
+      bid,
+      ask,
+      mid: { scaled: midScaled, scale: bid.scale },
+      deviationBps: divRound(drift * 10_000n, ONE, 'half-even'),
+      source: 'deepbook',
+      asOf: new Date().toISOString(),
+    };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}

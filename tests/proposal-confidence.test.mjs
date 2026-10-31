@@ -57,7 +57,7 @@ async function freshDesk() {
   const { resetOxwalFixtures, resetOxwalProposalStore, upsertOxwalCounterpartyFixture } = await agent();
   resetOxwalFixtures();
   resetOxwalProposalStore();
-  upsertOxwalCounterpartyFixture({ id: 'cp_verified_payee', name: 'Verified Payee', kybStatus: 'VERIFIED', bankRefHash: 'verified-payee-ref' });
+  upsertOxwalCounterpartyFixture({ id: 'cp_verified_payee', name: 'Vendor Ltd', kybStatus: 'VERIFIED', bankRefHash: 'verified-payee-ref' });
 }
 
 /* ── The action card ───────────────────────────────────────────────────── */
@@ -140,9 +140,13 @@ test('a payment that is not the invoice, or pays one already paid, says so', asy
   upsertOxwalInvoiceFixture({ id: 'inv_1200_php', amountUsd: '1200.00', targetCurrency: 'PHP', dueDate: '2026-12-01', issuerOrg: 'Vendor Ltd', payerOrgName: 'Buyer Ltd', memo: 'Component supply' });
   upsertOxwalInvoiceFixture({ id: 'inv_paid', amountUsd: '100.00', targetCurrency: 'PHP', dueDate: '2026-12-01', issuerOrg: 'Vendor Ltd', payerOrgName: 'Buyer Ltd', memo: 'Component supply', status: 'paid' });
 
-  const other = await executeOxwalTool('proposePayment', { orgId: 'demo-business', counterpartyId: 'cp_verified_payee', amountUsd: 100, currency: 'IDR', invoiceId: 'inv_1200_php' });
+  // Another amount is refused, not flagged (tests/zeke-rules.test.mjs).
+  await assert.rejects(
+    () => executeOxwalTool('proposePayment', { orgId: 'demo-business', counterpartyId: 'cp_verified_payee', amountUsd: 100, currency: 'IDR', invoiceId: 'inv_1200_php' }),
+    /the invoice is for 1200\.00 USD/,
+  );
+  const other = await executeOxwalTool('proposePayment', { orgId: 'demo-business', counterpartyId: 'cp_verified_payee', amountUsd: 1200, currency: 'IDR', invoiceId: 'inv_1200_php' });
   assert.deepEqual(other.explain.reviewReasons, [
-    'The amount is 100 USD, but invoice inv_1200_php is for 1200.00 USD.',
     'The payout is in IDR, but invoice inv_1200_php asks for PHP.',
   ]);
 

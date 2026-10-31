@@ -232,6 +232,181 @@
       "when": 1791331200000,
       "tag": "0032_governance_alerts",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1791417600000,
+      "tag": "0033_wallet_signing_requests",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1791504000000,
+      "tag": "0034_wallet_signing_lifecycle",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1791590400000,
+      "tag": "0035_wallet_authority",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1791676800000,
+      "tag": "0036_spending_rules",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1791763200000,
+      "tag": "0037_wallet_offboarding",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1791849600000,
+      "tag": "0038_wallet_funding",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1791936000000,
+      "tag": "0039_wallet_funding_review",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1792022400000,
+      "tag": "0040_withdrawals",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1792108800000,
+      "tag": "0041_withdrawals_review",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1792195200000,
+      "tag": "0042_partner_payouts",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1792281600000,
+      "tag": "0043_withdrawal_returns",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1792368000000,
+      "tag": "0044_payout_followups",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1792454400000,
+      "tag": "0045_compliance",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1792540800000,
+      "tag": "0046_compliance_gates",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1792627200000,
+      "tag": "0047_wallet_recipients",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1792713600000,
+      "tag": "0048_wallet_recipient_controls",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1792800000000,
+      "tag": "0049_zeke_session_notices",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1792886400000,
+      "tag": "0050_fee_governance_alerts",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1792972800000,
+      "tag": "0051_spend_rule_alerts",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1793059200000,
+      "tag": "0052_subscription_billing",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1793145600000,
+      "tag": "0053_billing_pull_supersede",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1793232000000,
+      "tag": "0054_fee_withdrawal_alerts",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1793318400000,
+      "tag": "0055_lost_answer_reversal_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1793404800000,
+      "tag": "0056_cross_chain_batch_burn",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1793491200000,
+      "tag": "0057_partner_account_ref_unique",
+      "breakpoints": true
     }
   ]
 }

@@ -152,8 +152,11 @@ export type RecipientRecord = {
     sweepDelaySeconds: number;
   };
   kybInviteSent?: boolean;
-  /** BANK (local currency via a partner rail) or WALLET (USDC on Sui). */
-  payoutMethod?: 'BANK' | 'WALLET';
+  /** BANK (local currency via a partner rail), WALLET (USDC on Sui) or
+   *  CROSS_CHAIN (USDC over CCTP V2, v2 §4.7). */
+  payoutMethod?: 'BANK' | 'WALLET' | 'CROSS_CHAIN';
+  /** How it is paid (v2 §4.7): the kind and that kind's own fields. */
+  delivery?: import('./repository/recipients.ts').RecipientDelivery;
   /** Lower-cased Sui address; set only for WALLET recipients. */
   walletAddress?: string;
   /** 'SLUSH' | 'METAMASK_SUI_SNAP'. */

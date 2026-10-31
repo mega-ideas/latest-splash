@@ -50,7 +50,7 @@ test('getInvoice tags free text as untrusted', async () => {
   });
 
   // WS2: read tool results travel inside a truth envelope with an honest status.
-  const envelope = await executeOxwalTool('getInvoice', { id: 'inv_untrusted_text' });
+  const envelope = await executeOxwalTool('getInvoice', { orgId: 'demo-business', id: 'inv_untrusted_text' });
   assert.equal(envelope.status, 'DEMO');
   assert.equal(envelope.source, 'fixture.invoices');
   const invoice = envelope.data;

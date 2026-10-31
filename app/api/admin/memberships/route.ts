@@ -109,8 +109,12 @@ export async function DELETE(request: Request) {
   const parsed = revokeSchema.safeParse(await readJsonBody(request));
   if (!parsed.success) return NextResponse.json({ error: 'An email is required' }, { status: 400 });
 
+  let offboarded: Array<{ orgId: string; addresses: string[] }>;
   try {
-    await revokeRole(await db(), { email: parsed.data.email });
+    // Offboarding goes with it: the person-in-charge appointment and usable
+    // sign-offs end now, and any spending rule their addresses hold on chain
+    // is shown to the owners as orphaned until their quorum takes it back.
+    ({ offboarded } = await revokeRole(await db(), { email: parsed.data.email, by: `operator:${session.email}` }));
   } catch (error) {
     if (error instanceof MembershipAdminError) {
       return NextResponse.json({ error: error.message, code: error.code }, { status: 409 });
@@ -118,6 +122,6 @@ export async function DELETE(request: Request) {
     throw error;
   }
 
-  console.info('[memberships] revoked', { by: session.email, from: parsed.data.email });
-  return NextResponse.json({ revoked: true });
+  console.info('[memberships] revoked', { by: session.email, from: parsed.data.email, orgs: offboarded.map((o) => o.orgId) });
+  return NextResponse.json({ revoked: true, offboarded });
 }
