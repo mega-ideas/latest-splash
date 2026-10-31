@@ -31,6 +31,7 @@ import {
   type RuleSpendEvent,
 } from '@/lib/wallet/spend-rules-bcs';
 import { dbOwnershipGate } from '@/lib/server/ownership-proofs';
+import { scheduledPayerAddress } from '@/lib/server/scheduled-payer-signer';
 import { readSpenderStanding } from '@/lib/server/spend-standing';
 import type { SecondApprovalOpener } from '@/lib/server/payment-approval-asks';
 import { balanceType } from '@/lib/server/spend-rules-builders';
@@ -188,7 +189,7 @@ export async function liveSpendContext(route: Pick<WalletRoute, 'ctx' | 'db'> & 
       read: liveSpendReader(ids.spendPackageId, ctx.chain.usdcType),
       ownership: dbOwnershipGate(db),
       db,
-      ...(route.orgId ? { orgId: route.orgId, standing: () => readSpenderStanding(db, route.orgId as string) } : {}),
+      ...(route.orgId ? { orgId: route.orgId, standing: () => readSpenderStanding(db, route.orgId as string, { scheduledPayer: scheduledPayerAddress() }) } : {}),
     },
   };
 }

@@ -2743,3 +2743,129 @@ export const accessRequests = pgTable('access_requests', {
   uniqueIndex('access_requests_email_currency_unique').on(table.email, table.currency),
   index('access_requests_created_idx').on(table.createdAt),
 ]);
+
+/**
+ * A scheduled batch (v2 Phase 3, migration 0069): payments to verified
+ * recipients, set to fall due once, every week or every month, in the mode an
+ * owner chose. `items` are the recipients and amounts as they were saved (the
+ * address, the amount and the fee shown), so a run can tell when one changed.
+ * (org, client key) is unique: a double click makes one schedule.
+ */
+export const paymentSchedules = pgTable('payment_schedules', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  clientKey: text('client_key').notNull(),
+  name: text('name').notNull(),
+  /** ask | auto */
+  mode: text('mode').notNull(),
+  /** once | weekly | monthly */
+  cadence: text('cadence').notNull(),
+  firstDueAt: timestamp('first_due_at', { withTimezone: true }).notNull(),
+  /** The next time it falls due that has not been run; null when there is none. */
+  nextDueAt: timestamp('next_due_at', { withTimezone: true }),
+  /** active | stopped | completed | deleted */
+  status: text('status').notNull(),
+  createdBy: text('created_by').notNull(),
+  /** owner | finance_lead: an automatic schedule is always an owner's. */
+  createdAs: text('created_as').notNull(),
+  items: jsonb('items').notNull(),
+  itemCount: integer('item_count').notNull(),
+  totalMinor: bigint('total_minor', { mode: 'bigint' }).notNull(),
+  feeMinor: bigint('fee_minor', { mode: 'bigint' }).notNull(),
+  confirmedNewPayees: boolean('confirmed_new_payees').notNull().default(false),
+  version: integer('version').notNull().default(1),
+  stoppedAt: timestamp('stopped_at', { withTimezone: true }),
+  stoppedBy: text('stopped_by'),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('payment_schedules_org_key_unique').on(table.orgId, table.clientKey),
+  index('payment_schedules_org_idx').on(table.orgId, table.status),
+  index('payment_schedules_due_idx').on(table.status, table.nextDueAt),
+]);
+
+/**
+ * One run of a schedule, for one due date. (schedule, due date) is unique:
+ * running twice is running once. `claimedAt` is the lease a runner holds.
+ */
+export const paymentScheduleRuns = pgTable('payment_schedule_runs', {
+  id: text('id').primaryKey(),
+  scheduleId: text('schedule_id').notNull().references(() => paymentSchedules.id),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  /** YYYY-MM-DD, UTC. */
+  dueDate: text('due_date').notNull(),
+  dueAt: timestamp('due_at', { withTimezone: true }).notNull(),
+  /** The mode the schedule was in when the run was made. */
+  mode: text('mode').notNull(),
+  /** How it was actually carried out: ask (a person signs) or auto (inside the allowance). Null until it starts. */
+  ranAs: text('ran_as'),
+  /** scheduled | waiting_approval | approved | paid | skipped | failed | lapsed */
+  status: text('status').notNull(),
+  reasonCode: text('reason_code'),
+  /** Plain words for the owners. */
+  reason: text('reason'),
+  /** True when an automatic run was handed back to "ask me first". */
+  fallback: boolean('fallback').notNull().default(false),
+  batchId: text('batch_id').references(() => walletBatches.id),
+  itemCount: integer('item_count').notNull().default(0),
+  totalMinor: bigint('total_minor', { mode: 'bigint' }).notNull().default(0n),
+  feeMinor: bigint('fee_minor', { mode: 'bigint' }).notNull().default(0n),
+  claimedAt: timestamp('claimed_at', { withTimezone: true }),
+  noticeDayBeforeAt: timestamp('notice_day_before_at', { withTimezone: true }),
+  noticeRunningAt: timestamp('notice_running_at', { withTimezone: true }),
+  noticeReceiptAt: timestamp('notice_receipt_at', { withTimezone: true }),
+  skippedBy: text('skipped_by'),
+  skippedAt: timestamp('skipped_at', { withTimezone: true }),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('payment_schedule_runs_schedule_due_unique').on(table.scheduleId, table.dueDate),
+  index('payment_schedule_runs_org_idx').on(table.orgId, table.createdAt),
+  index('payment_schedule_runs_status_idx').on(table.status, table.dueAt),
+  index('payment_schedule_runs_batch_idx').on(table.batchId),
+]);
+
+/**
+ * One payment of an automatic run, claimed once (pending, submitting, then
+ * paid or failed). The payment reference is unique per business and is also
+ * the payment's idempotency key on chain. `gasBudgetMist` counts toward the
+ * business's 24-hour network-fee allowance.
+ */
+export const paymentScheduleRunPayments = pgTable('payment_schedule_run_payments', {
+  id: text('id').primaryKey(),
+  runId: text('run_id').notNull().references(() => paymentScheduleRuns.id, { onDelete: 'cascade' }),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  position: integer('position').notNull(),
+  paymentRef: text('payment_ref').notNull(),
+  recipientId: text('recipient_id'),
+  businessId: text('business_id'),
+  payeeName: text('payee_name').notNull(),
+  address: text('address').notNull(),
+  amountMinor: bigint('amount_minor', { mode: 'bigint' }).notNull(),
+  maxFeeMinor: bigint('max_fee_minor', { mode: 'bigint' }).notNull(),
+  feeKind: integer('fee_kind').notNull(),
+  reference: text('reference'),
+  /** pending | submitting | paid | failed */
+  status: text('status').notNull(),
+  digest: text('digest'),
+  gasBudgetMist: bigint('gas_budget_mist', { mode: 'bigint' }).notNull().default(0n),
+  error: text('error'),
+  attemptedAt: timestamp('attempted_at', { withTimezone: true }),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('payment_schedule_run_payments_run_position_unique').on(table.runId, table.position),
+  uniqueIndex('payment_schedule_run_payments_org_ref_unique').on(table.orgId, table.paymentRef),
+  index('payment_schedule_run_payments_org_idx').on(table.orgId, table.createdAt),
+]);
+
+/**
+ * Per business: the kill switch for automatic payments (any one owner may
+ * pause) and the daily limit the owners set, which Splash's server enforces.
+ */
+export const scheduledPaymentSettings = pgTable('scheduled_payment_settings', {
+  orgId: text('org_id').primaryKey().references(() => organizations.id),
+  autoPaused: boolean('auto_paused').notNull().default(false),
+  pausedBy: text('paused_by'),
+  pausedAt: timestamp('paused_at', { withTimezone: true }),
+  dailyCapMinor: bigint('daily_cap_minor', { mode: 'bigint' }),
+  ...timestamps,
+});

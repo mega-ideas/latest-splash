@@ -53,7 +53,17 @@ export type AuthorityAction =
   | 'finance_lead_appointed'
   | 'finance_lead_revoked'
   | 'member_access_granted'
-  | 'member_access_revoked';
+  | 'member_access_revoked'
+  | 'schedule_created'
+  | 'schedule_changed'
+  | 'schedule_run_skipped'
+  | 'schedule_stopped'
+  | 'schedule_resumed'
+  | 'schedule_deleted'
+  | 'automatic_payments_paused'
+  | 'automatic_payments_resumed'
+  | 'automatic_allowance_requested'
+  | 'automatic_allowance_revoke_requested';
 
 export type AuthorityFailure = { ok: false; status: number; code: string; error: string };
 const fail = (status: number, code: string, error: string): AuthorityFailure => ({ ok: false, status, code, error });

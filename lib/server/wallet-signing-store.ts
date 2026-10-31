@@ -23,7 +23,7 @@ import { createHash } from 'node:crypto';
 import { and, eq, gt, gte, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import type { PgDatabase } from 'drizzle-orm/pg-core';
 
-import { walletSigningRequests, walletSigningSigners, walletSingleSignerConsents } from '../db/schema.ts';
+import { paymentScheduleRunPayments, walletSigningRequests, walletSigningSigners, walletSingleSignerConsents } from '../db/schema.ts';
 import type * as schemaModule from '../db/schema.ts';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -348,7 +348,14 @@ export async function sponsoredBudgetSince(db: DrizzleDb, orgId: string, since: 
     .select({ total: sql<string>`coalesce(sum((${walletSigningRequests.summary}->'description'->'gas'->>'budget')::numeric), 0)::text` })
     .from(walletSigningRequests)
     .where(and(eq(walletSigningRequests.orgId, orgId), eq(walletSigningRequests.gasMode, 'sponsored'), gte(walletSigningRequests.createdAt, since), ...(purpose ? [eq(walletSigningRequests.purpose, purpose)] : [])));
-  return BigInt(String(rows[0]?.total ?? '0').split('.')[0]);
+  const requests = BigInt(String(rows[0]?.total ?? '0').split('.')[0]);
+  if (purpose) return requests;
+  // The payments an automatic scheduled run sent are sponsored too (migration 0069), and share the same 24-hour allowance.
+  const scheduled = await db
+    .select({ total: sql<string>`coalesce(sum(${paymentScheduleRunPayments.gasBudgetMist}), 0)::text` })
+    .from(paymentScheduleRunPayments)
+    .where(and(eq(paymentScheduleRunPayments.orgId, orgId), gte(paymentScheduleRunPayments.attemptedAt, since)));
+  return requests + BigInt(String(scheduled[0]?.total ?? '0').split('.')[0]);
 }
 
 // ─── Single-signer consents (D1) ────────────────────────────────────────────

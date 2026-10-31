@@ -440,7 +440,7 @@ export type CreateBatchResult = BatchFailure | { ok: true; created: boolean; bat
 export async function createBatch(
   deps: BatchDeps,
   actor: { userId: string; role: string },
-  input: { clientKey: unknown; rows: SheetRow[]; maxFeeMinor: unknown; label?: unknown; confirmDuplicates?: unknown; confirmNewPayees?: unknown },
+  input: { clientKey: unknown; rows: SheetRow[]; maxFeeMinor: unknown; label?: unknown; confirmDuplicates?: unknown; confirmNewPayees?: unknown; settleWindowMs?: number },
   attempt = 0,
 ): Promise<CreateBatchResult> {
   if (actor.role !== 'OWNER' && actor.role !== 'MAKER' && actor.role !== 'APPROVER') return fail(403, 'cannot_pay', 'Viewers can look at payments but cannot make them.');
@@ -531,7 +531,7 @@ export async function createBatch(
     if (deps.notifyBatch) await deps.notifyBatch({ batchId: id, rowCount: review.rows.length, totalMinor: total, requestedBy: actor.userId }).catch(() => {});
     return { ok: true, created: true, batch: await viewOf(deps, row), signingRequest: null };
   }
-  const started = await startBatchSigning(deps, actor, id);
+  const started = await startBatchSigning(deps, actor, id, { settleWindowMs: input.settleWindowMs });
   if (!started.ok) {
     // Nothing was asked of the owners: the batch is not left half made under a key a retry would find.
     await deps.db.delete(walletBatches).where(and(eq(walletBatches.id, id), eq(walletBatches.orgId, deps.orgId)));
@@ -561,7 +561,7 @@ export async function startBatchSigning(
   deps: BatchDeps,
   actor: { userId: string; role: string },
   batchId: string,
-  opts: { schedule?: boolean } = {},
+  opts: { schedule?: boolean; settleWindowMs?: number } = {},
 ): Promise<{ ok: true; batch: BatchView; signingRequest: RequestView | null } | BatchFailure> {
   if (actor.role !== 'OWNER') return fail(403, 'owner_only', ownerError);
   if (opts.schedule && !BATCH_SCHEDULE_WIRED) {
@@ -606,7 +606,10 @@ export async function startBatchSigning(
 
   const now = deps.now();
   const expiresAtMs = BigInt(now.getTime()) + BigInt(TRANSFER_INTENT_LIFETIME_MS);
-  const settleByMs = BigInt(now.getTime() + TRANSFER_SETTLE_WINDOW_MS);
+  // A batch a person starts by hand is signed within the hour its quote lasts. A scheduled batch is prepared before the owners
+  // are at their desks, so the scheduler names a longer window (at most the signing layer's own 24 hours).
+  const window = Number.isFinite(opts.settleWindowMs) && (opts.settleWindowMs as number) >= 60_000 ? Math.min(opts.settleWindowMs as number, 24 * 3_600_000) : TRANSFER_SETTLE_WINDOW_MS;
+  const settleByMs = BigInt(now.getTime() + window);
   const opened = await requestWalletBatch(deps.ctx, {
     orgId: deps.orgId,
     requestedBy: actor.userId,

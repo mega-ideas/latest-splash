@@ -23,7 +23,13 @@ import type { DrizzleDb, StoredRequest } from './wallet-signing-store.ts';
 export type Standing = 'member' | 'viewer' | 'removed' | 'not_a_member';
 export type StandingOf = (address: string) => Standing;
 
-export async function readSpenderStanding(db: DrizzleDb, orgId: string): Promise<StandingOf> {
+/**
+ * `scheduledPayer` is Splash's own scheduled payer (lib/server/scheduled-payer-signer.ts), the spender of the allowance an
+ * owner signed for automatic scheduled payments. It is nobody's passkey, so without being named it would read as
+ * `not_a_member` and be offered to the owners as a rule to take back. It reads as `member` and nothing else; the
+ * owners' own revoke is the only way it stops.
+ */
+export async function readSpenderStanding(db: DrizzleDb, orgId: string, opts: { scheduledPayer?: string | null } = {}): Promise<StandingOf> {
   const people = await db.select({ userId: memberships.userId, role: memberships.role }).from(memberships).where(eq(memberships.orgId, orgId));
   const roleOf = new Map(people.map((p) => [p.userId, String(p.role)]));
   const keys = people.length
@@ -41,8 +47,10 @@ export async function readSpenderStanding(db: DrizzleDb, orgId: string): Promise
     .from(walletOffboardedSpenders)
     .where(and(eq(walletOffboardedSpenders.orgId, orgId), isNull(walletOffboardedSpenders.resolvedAt)));
   const removed = new Set(gone.map((g) => normalizeSuiAddress(g.address)));
+  const payer = opts.scheduledPayer ? normalizeSuiAddress(opts.scheduledPayer) : null;
   return (address: string) => {
     const a = normalizeSuiAddress(address);
+    if (payer !== null && a === payer) return 'member';
     if (removed.has(a)) return 'removed';
     const role = byAddress.get(a);
     if (role === undefined) return 'not_a_member';

@@ -484,6 +484,13 @@
       "when": 1794441600000,
       "tag": "0068_staff_rule_payments",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1794528000000,
+      "tag": "0069_scheduled_batches",
+      "breakpoints": true
     }
   ]
 }
