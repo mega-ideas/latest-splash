@@ -681,7 +681,10 @@ async function payOne(d: ScheduleDeps, sch: ScheduleRow, run: RunRow, checked: C
   if (!simulated.success) return failRow(`The network's dry run refused this payment, so it was not sent: ${simulated.error ?? 'it would fail'}.`);
 
   // One caller sends it, once. The digest is written first, so a crash after this is read back from the chain, never sent again.
-  const claimed = await claimPayment(d.db, d.orgId, row.id, { digest, gasBudgetMist: gasBudget, now: at });
+  // (The network-fee allowance is checked again under the claim's lock, so two payments of one business cannot both pass the last of it.)
+  const feeAllowance = sc.wallet.signing.sponsorDailyBudgetMist ?? WALLET_SPONSOR_DAILY_BUDGET_MIST;
+  const claimed = await claimPayment(d.db, d.orgId, row.id, { digest, gasBudgetMist: gasBudget, now: at }, async (tx) => (await sponsoredBudgetSince(tx, d.orgId, new Date(at.getTime() - 24 * 3_600_000))) + gasBudget <= feeAllowance);
+  if (claimed === 'refused') return failRow('This business has used its network-fee allowance for the last 24 hours, so this payment was not sent.');
   if (!claimed) return 'stopped';
 
   let result: { digest: string; success: boolean; error?: string | null };

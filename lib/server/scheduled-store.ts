@@ -247,9 +247,19 @@ export async function listRunPayments(db: DrizzleDb, orgId: string, runId: strin
  * still pending. The digest is written first, so a crash after this leaves a
  * row that is read back from the chain, never sent again.
  */
-export async function claimPayment(db: DrizzleDb, orgId: string, id: string, input: { digest: string; gasBudgetMist: bigint; now: Date }): Promise<RunPaymentRow | null> {
+export async function claimPayment(
+  db: DrizzleDb,
+  orgId: string,
+  id: string,
+  input: { digest: string; gasBudgetMist: bigint; now: Date },
+  /** Asked under the lock, just before the claim: false refuses it. Used to hold the claim to the business's 24-hour network-fee allowance atomically. */
+  allow?: (tx: DrizzleDb) => Promise<boolean>,
+): Promise<RunPaymentRow | null | 'refused'> {
   // Under the lock a Skip takes too: the two go one after the other, never at once, so a run cannot be skipped with a payment going out.
-  return withLock(db, `scheduled-run|${orgId}`, (tx) => claimPaymentIn(tx, orgId, id, input));
+  return withLock(db, `scheduled-run|${orgId}`, async (tx) => {
+    if (allow && !(await allow(tx))) return 'refused' as const;
+    return claimPaymentIn(tx, orgId, id, input);
+  });
 }
 
 async function claimPaymentIn(db: DrizzleDb, orgId: string, id: string, input: { digest: string; gasBudgetMist: bigint; now: Date }): Promise<RunPaymentRow | null> {

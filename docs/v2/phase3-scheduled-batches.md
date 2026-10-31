@@ -112,7 +112,9 @@ the owners signed, an ask they approved, an executed batch or an earlier
 scheduled payment: never a first payment to a new recipient), cleared by
 screening now, on the verified list; each payment under the allowance's
 per-payment limit and under the second-approval line counting what was paid that
-recipient; the whole run fits what is left of the window, each payment counted
+recipient (the lower of the business's own line and 10,000 USDC, so a policy can
+never lift the ceiling; an allowance cannot offer more than that for one
+payment); the whole run fits what is left of the window, each payment counted
 against the next; the daily limit holds; the fee is no higher than the one the
 owner was shown (and the fee paid is the current fee, which is `max_fee`); the
 wallet holds enough.
@@ -177,7 +179,13 @@ payment. What bounds it:
   monthly cap on one allowance is not possible in `0x2::allowance`; the daily
   limit the owners set is enforced by the server (against what automatic runs
   paid in the last 24 hours). A stolen key is therefore bounded per day only by
-  the monthly cap.
+  the monthly cap. Two things hold the server's limit honestly: a limit asked
+  for with an allowance waits (migration 0070) and applies only when the owners'
+  signed request executes, so one owner's call cannot raise it; and an automatic
+  run reserves its payments under a per-business lock that counts what other
+  runs have set aside, so two runners cannot both pass a limit that fits one.
+  What the server cannot give is the network's own daily cap; that needs a
+  `splash_spend` change, which is Sky's decision.
 - Verified recipients are the main defence: money goes to the owners' own
   suppliers, so a misuse is mostly an early or repeated payment to a supplier.
 
@@ -195,6 +203,28 @@ A wallet rotation reissues the scheduled payer's rule with the others
 the payer does). The owners sign that request. If they do not want automatic
 payments to carry over, they revoke the allowance after.
 
+## What the independent review changed
+
+- **A moved time moves its run.** One run is made per schedule and UTC day; when
+  the time moves inside the day, the run already made takes the new time (and the
+  day-before notice is sent again). A schedule started again after a stop opens
+  the run the stop closed. A time an owner skipped stays skipped; a "once"
+  schedule moved onto such a day says so.
+- **Automatic is confirmed by an owner.** Switching a schedule to automatic needs
+  its payments sent again, so a Finance lead's changes are never taken on trust;
+  the schedule then becomes the owner's. An owner editing the payments of any
+  schedule takes it as theirs.
+- **Skip and the first payment** go through one lock; a Skip is one statement
+  that checks no payment was claimed. The network-fee allowance is checked again
+  under the same lock as the claim.
+- **Left as they are, on purpose.** An unknown outcome stays "being paid" until
+  the chain answers or 72 hours pass: telling a rejected transaction from an
+  outage needs a real network, and at-most-once matters more than a quick
+  answer. "Paid before" counts an approved ask because an ask becomes approved
+  only after its signing request has executed (`settleApprovalAsks`). The
+  allowance request is not idempotent by key; a second request while one is
+  open is a second signing request the owners can decline.
+
 ## Tests
 
 `tests/scheduled-rules.test.mjs`, `scheduled-auto-check.test.mjs` (every check
@@ -204,7 +234,8 @@ idempotency, tenants, the allowance through signed requests),
 `scheduled-runner-ask.test.mjs`, `scheduled-runner-auto.test.mjs` (payments,
 every hand-back, once-only, kill switch between payments, unknown outcomes,
 production), `scheduled-routes.test.mjs` (gates, cron fail-closed),
-`scheduled-history.test.mjs` (History, the tab, copy). They run on PGlite with the
+`scheduled-history.test.mjs` (History, the tab, copy), `scheduled-review.test.mjs`
+and `scheduled-review-units.test.mjs` (what the review found). They run on PGlite with the
 staff-rule world's model chain, which applies `splash_spend`'s checks and the
 allowance's caps to the bytes built.
 

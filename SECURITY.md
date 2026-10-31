@@ -2429,7 +2429,10 @@ authority: the batch is prepared and the owners' quorum signs it.
   businesses is the sum of their allowances.
 - **The daily limit is the server's, not the network's.** `0x2::allowance` carries
   one recurring cap per allowance; the monthly cap is on chain and the daily one
-  is enforced by Splash against what automatic runs paid in the last 24 hours.
+  is enforced by Splash against what automatic runs paid in the last 24 hours. A
+  limit asked for waits for the owners' signatures (0070) and applies when the
+  request executes; a run reserves its payments under a per-business lock, so
+  two runners cannot both pass a limit that fits one.
 - **Before Splash signs, it re-checks everything** (`lib/schedule/auto-check.ts`):
   not paused; an owner's schedule by someone still an owner; payer and sponsor
   present; the allowance readable, running and not ending; every payee unchanged,
