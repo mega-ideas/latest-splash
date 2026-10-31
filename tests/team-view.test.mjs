@@ -12,6 +12,7 @@ import {
   FINANCE_LEAD_NAME,
   activitySummary,
   financeLeadWords,
+  roleChangeNote,
   roleChoicesFor,
   rowControls,
   walletActions,
@@ -58,6 +59,35 @@ test('the Finance lead sees controls on viewers, staff and approvers only: never
   assert.deepEqual([self.roles, self.remove, self.access, self.financeLead], [[], false, false, null]);
 });
 
+test('the Finance lead is offered nothing on someone who is in charge or can add funds or withdraw: ending that is for an owner', () => {
+  const ctx = { manager: 'finance_lead', youUserId: 'u-me' };
+  const none = { roles: [], remove: false, access: false, financeLead: null };
+  assert.deepEqual(rowControls(ctx, row({ role: 'checker', inCharge: true })), none);
+  assert.deepEqual(rowControls(ctx, row({ role: 'maker', addFunds: true })), none);
+  assert.deepEqual(rowControls(ctx, row({ role: 'maker', withdraw: true })), none);
+  // An owner still sees every control on the same people.
+  const owner = { manager: 'owner', youUserId: 'u-me' };
+  for (const over of [{ inCharge: true }, { addFunds: true }, { withdraw: true }]) {
+    const c = rowControls(owner, row({ role: 'checker', ...over }));
+    assert.deepEqual([c.roles.length > 0, c.remove], [true, true]);
+  }
+  // Someone who holds none of it is still the Finance lead's.
+  assert.equal(rowControls(ctx, row({ role: 'maker' })).remove, true);
+});
+
+test('moving someone to viewer says that a spending rule they hold stays until the owners take it back', () => {
+  const viewer = roleChangeNote('viewer');
+  assert.match(viewer, /spending rule/i);
+  assert.match(viewer, /owners/i);
+  assert.match(viewer, /place in charge/i);
+  assert.match(viewer, /Add funds or Withdraw/);
+  const owner = roleChangeNote('admin');
+  assert.match(owner, /already/i, 'an owner has Add funds and Withdraw already');
+  assert.equal(roleChangeNote('maker'), null);
+  assert.equal(roleChangeNote('checker'), null);
+  assert.doesNotMatch(JSON.stringify([viewer, owner]), /—|non-custodial|licen[cs]e|coming soon|demo|testnet/i);
+});
+
 test('a member who manages nothing is offered nothing', () => {
   for (const role of ['viewer', 'maker', 'checker', 'admin']) {
     assert.deepEqual(rowControls({ manager: null, youUserId: 'u-me' }, row({ role })), { roles: [], remove: false, access: false, financeLead: null });
@@ -69,6 +99,8 @@ test('the words say what the role can do, what it cannot, and what it means on c
   assert.ok(w.can.length >= 3 && w.cannot.length >= 6);
   const cannot = w.cannot.join(' ').toLowerCase();
   for (const phrase of ['wallet signers', 'bank account', 'add funds', 'withdraw', 'owner', 'limits', 'this role']) assert.ok(cannot.includes(phrase), phrase);
+  assert.match(cannot, /in charge/, 'moving someone who holds a grant is for an owner');
+  assert.match(cannot, /spending rule/, 'a rule on the chain stays until the owners take it back');
   assert.match(w.chain, /owners'? quorum|owners sign/i, 'adding a signer stays the owners\' to sign');
   assert.match(w.chain, /start/i);
   assert.match(w.chain, /Splash holds no key|no key/i);
@@ -119,6 +151,13 @@ test('Transfer, Batch and Home show an Add funds link only to someone with the a
     const text = read(path);
     assert.match(text, /useTeamAccess\(/, path);
   }
+});
+
+test('a switch that saves at once stays focusable while it saves, and granting Withdraw asks first', () => {
+  const dialog = read('components/team/MemberDialog.tsx');
+  assert.doesNotMatch(dialog, /type="checkbox"[\s\S]{0,200}disabled=\{busy !== null\}/, 'a disabled switch drops keyboard focus');
+  assert.match(dialog, /aria-disabled/);
+  assert.match(dialog, /confirmWithdraw/);
 });
 
 test('Settings shows the team to anyone who manages it, even before a business wallet exists', () => {
