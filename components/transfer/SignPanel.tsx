@@ -8,6 +8,7 @@ import { describeSignError, signWithPasskey } from '@/lib/wallet/sui-signers';
 import { reviewOnDevice, type DeviceReview } from '@/lib/wallet/review-on-device';
 import { formatUsdc } from '@/lib/fees/copy';
 import { groupAddress } from '@/lib/transfer/addresses';
+import { plainActions } from '@/lib/wallet-page/actions';
 import { differsFromApproved } from '@/lib/transfer/approved';
 import { call, errorText, type SigningView } from './api';
 import type { Made } from './flow';
@@ -25,7 +26,11 @@ type Reviewed = { transactionBytes: string; digest: string; review: DeviceReview
  * signed, lets this person sign if they are one of the signers, and goes on
  * only when the payment has executed.
  */
-export default function SignPanel({ initial, expected = null, onExecuted, onRestart }: { initial: SigningView; expected?: Made['expected']; onExecuted: (digest: string | null) => void; onRestart: () => void }) {
+/** What the panel says about the request it is collecting for: a payment by default; the Wallet page passes its own for a wallet change. */
+export type SignLabels = { working: string; done: string; doneNote: string; deadNote: string; restart: string };
+const PAYMENT_LABELS: SignLabels = { working: 'Sending the payment', done: 'Paid', doneNote: 'The payment, its record and its receipt happened together.', deadNote: 'Nothing was sent. You can start the payment again.', restart: 'Start a new payment' };
+
+export default function SignPanel({ initial, expected = null, labels = PAYMENT_LABELS, onExecuted, onRestart }: { initial: SigningView; expected?: Made['expected']; labels?: SignLabels; onExecuted: (digest: string | null) => void; onRestart: () => void }) {
   const [view, setView] = useState<SigningView>(initial);
   const [reviewed, setReviewed] = useState<Reviewed | null>(null);
   const reviewedDigest = useRef<string | null>(null);
@@ -104,6 +109,7 @@ export default function SignPanel({ initial, expected = null, onExecuted, onRest
   const open = review?.actions.find((a) => a.type === 'open_intent');
   const pay = review?.actions.find((a) => a.type === 'pay_intent');
   const withdraw = review?.actions.find((a) => a.type === 'withdraw');
+  const steps = review ? plainActions(review.actions as Parameters<typeof plainActions>[0]) : [];
 
   return (
     <section aria-labelledby="sig-h" className="space-y-4 rounded-2xl border border-[#326273]/15 bg-white p-4 sm:p-5" aria-live="polite">
@@ -113,10 +119,10 @@ export default function SignPanel({ initial, expected = null, onExecuted, onRest
         </span>
         <div>
           <h3 id="sig-h" className="text-base font-extrabold text-[#0c3e48]">
-            {finished ? 'Paid' : dead ? (view.status === 'expired' ? 'The request expired' : 'The payment did not go through') : view.status === 'submitting' || view.status === 'unknown' ? 'Sending the payment' : 'Waiting for signatures'}
+            {finished ? labels.done : dead ? (view.status === 'expired' ? 'The request expired' : 'This did not go through') : view.status === 'submitting' || view.status === 'unknown' ? labels.working : 'Waiting for signatures'}
           </h3>
           <p className="text-[13px] text-[#326273]">
-            {finished ? 'The payment, its record and its receipt happened together.' : dead ? 'Nothing was sent. You can start the payment again.' : `${view.signedWeight} of ${view.threshold} needed. Each owner signs on their own device.`}
+            {finished ? labels.doneNote : dead ? labels.deadNote : `${view.signedWeight} of ${view.threshold} needed. Each owner signs on their own device.`}
           </p>
         </div>
       </div>
@@ -159,6 +165,16 @@ export default function SignPanel({ initial, expected = null, onExecuted, onRest
                   <dd className="font-mono text-[13px] text-[#0c3e48]">{formatUsdc(BigInt(withdraw.amountMinor))} USDC</dd>
                 </>
               ) : null}
+              {steps.length > 0 && !open && !pay ? (
+                <>
+                  <dt className="text-[#326273]">This will</dt>
+                  <dd className="text-[#0c3e48]">
+                    <ul className="list-disc space-y-1 pl-4">
+                      {steps.map((line) => <li key={line}>{line}</li>)}
+                    </ul>
+                  </dd>
+                </>
+              ) : null}
               <dt className="text-[#326273]">Transaction code</dt>
               <dd className="font-mono text-[13px] font-bold text-[#0c3e48]">{review.code}</dd>
             </dl>
@@ -184,7 +200,7 @@ export default function SignPanel({ initial, expected = null, onExecuted, onRest
       ) : null}
       {!finished && !dead && !view.you.mustSign ? <p className="text-sm text-[#1F4452]">The owners have been told on WhatsApp and in their Splash inbox. This page updates when they sign.</p> : null}
       {!finished && !dead && view.you.signed ? <p className="text-sm font-semibold text-[#145d6a]">You have signed. Waiting for the others.</p> : null}
-      {dead ? <QuietButton type="button" onClick={onRestart}>Start a new payment</QuietButton> : null}
+      {dead ? <QuietButton type="button" onClick={onRestart}>{labels.restart}</QuietButton> : null}
     </section>
   );
 }

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { readJsonBody } from '@/lib/server/http';
+import { orgMemberNames } from '@/lib/server/org-member-names';
 import { deriveNearThresholdAlerts } from '@/lib/server/near-threshold';
 import { issueSpendingRule, readSpendingRules } from '@/lib/server/spend-rules';
 import { recipientsFromBody, ruleFromBody, spendRoute, staffSpender, walletMembersOr } from '@/lib/server/spend-rules-route';
@@ -34,7 +35,8 @@ export async function GET(request: Request) {
   const seesAll = route.authority.role === 'OWNER' || route.authority.role === 'APPROVER';
   const mine = new Set(people.filter((p) => p.userId === route.authority.userId).map((p) => p.address));
   const view = result.view;
-  const rules = view.rules.filter((r) => seesAll || mine.has(r.spender)).map((r) => ({ ...r, userId: userOf.get(r.spender) ?? null }));
+  const names = await orgMemberNames(route.db, route.orgId, [...userOf.values()]);
+  const rules = view.rules.filter((r) => seesAll || mine.has(r.spender)).map((r) => ({ ...r, userId: userOf.get(r.spender) ?? null, name: names.get(userOf.get(r.spender) ?? '') ?? null }));
   // Near-threshold flags (detective only) are the owners' to see: they name
   // who paid whom across every rule.
   const owners = route.authority.role === 'OWNER' ? { nearThreshold: deriveNearThresholdAlerts(view) } : {};
