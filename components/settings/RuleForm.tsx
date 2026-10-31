@@ -241,7 +241,7 @@ export default function RuleForm({ staff, policy, recipients, changing, initial,
       {error ? <Note tone="error">{error}</Note> : null}
 
       <div className="flex flex-wrap gap-2">
-        <PrimaryButton type="submit" disabled={busy || (step.id === 'review' && !summary)}>{nextLabel}</PrimaryButton>
+        <PrimaryButton type="submit" disabled={busy}>{nextLabel}</PrimaryButton>
         {at > 0 ? <QuietButton type="button" disabled={busy} onClick={() => { setErrors({}); setAt((i) => Math.max(0, i - 1)); }}>Back</QuietButton> : <QuietButton type="button" onClick={onCancel}>Cancel</QuietButton>}
       </div>
     </form>
