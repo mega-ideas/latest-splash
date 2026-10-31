@@ -140,6 +140,36 @@ test('every Add funds route asks for the Add funds access an owner granted, and 
   assert.doesNotMatch(helper, /export function refuseViewer/, 'the old any-non-viewer gate is gone');
 });
 
+test('a top-up\'s details are read only by someone with Add funds; the options and the deposit history stay the wallet\'s open record', () => {
+  for (const path of ['app/api/wallet/funding/intents/route.ts', 'app/api/wallet/funding/intents/[id]/route.ts']) {
+    assert.match(handler(code(read(path)), 'GET'), /await requireFundsAccess\([^)]*'add_funds'/, `${path} GET`);
+  }
+  // The Wallet page shows every member the options and what arrived; those reads are not Add funds.
+  for (const path of ['app/api/wallet/funding/route.ts', 'app/api/wallet/funding/deposits/route.ts']) {
+    assert.doesNotMatch(handler(code(read(path)), 'GET'), /requireFundsAccess/, `${path} GET stays open to a member who can read the wallet`);
+  }
+});
+
+test('only the gated routes call the Add funds and bank-withdrawal services, so no new caller skips the access check', () => {
+  const services = [
+    'createFundingIntent', 'getFundingIntent', 'listFundingIntents', 'cancelFundingIntent', 'recordDeposit', 'recheckDeposit', 'quoteFunding',
+    'quoteWithdrawal', 'createWithdrawal', 'listWithdrawalDestinations', 'requestPartnerDepositAddress', 'requestTestDeposit', 'getWithdrawal',
+  ];
+  const own = new Set(['lib/server/wallet-funding.ts', 'lib/server/withdrawals.ts']);
+  const offenders = [];
+  for (const file of [...walk('app/'), ...walk('lib/'), ...walk('components/')]) {
+    if (!/\.(ts|tsx)$/.test(file) || own.has(file)) continue;
+    const text = code(read(file));
+    for (const n of services) {
+      if (!new RegExp(`\\b${n}\\s*\\(`).test(text)) continue;
+      const gated = file.startsWith('app/api/wallet/') && /requireFundsAccess\(/.test(text);
+      // The open reads are the options and the deposit history.
+      if (!gated) offenders.push(`${file}: ${n}`);
+    }
+  }
+  assert.deepEqual(offenders, []);
+});
+
 test('the funding sources stay owners-only', () => {
   for (const path of ['app/api/wallet/funding/sources/route.ts', 'app/api/wallet/funding/sources/[id]/route.ts', 'app/api/wallet/funding/sources/[id]/challenge/route.ts', 'app/api/wallet/funding/sources/[id]/verify/route.ts']) {
     const text = code(read(path));
