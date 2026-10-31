@@ -3,6 +3,7 @@ import { FEE_KIND, LAUNCH_SCHEDULE, splashFee, type FeeSchedule } from '../fees/
 import { formatMinor, MICRO_DECIMALS, parseMinor, sumMinor } from '../money.ts';
 import type { KybLifecycleState } from '../compliance/kyb-state.ts';
 import { suiScanTxUrlOn } from '../explorer.ts';
+import { cleanPaste } from '../transfer/paste.ts';
 
 /**
  * The stablecoin lane — what a business may send before, and after, it is
@@ -445,7 +446,9 @@ const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
  * in the whole lane.
  */
 export function normaliseSuiAddress(input: string): string {
-  const raw = input.trim();
+  // What a paste adds (a zero-width character, quotes, an upper-case 0X) is
+  // removed first; the rule itself is unchanged (lib/transfer/addresses.ts).
+  const raw = cleanPaste(input);
   if (EVM_ADDRESS.test(raw)) {
     throw new StablecoinLaneError(
       'That is an Ethereum address. Splash settles in USDC on Sui — ask your recipient for their Sui address (from Slush, or MetaMask with the Sui Snap).',

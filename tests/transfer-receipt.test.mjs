@@ -10,13 +10,13 @@ import {
   eInvoiceOffer,
   mailtoUrl,
   receiptNumber,
-  receiptPdf,
   receiptRows,
   receiptShareText,
   whatsappUrl,
   EINVOICE_GUIDELINE,
   eInvoiceInputFromReceipt,
 } from '../lib/transfer/receipt.ts';
+import { receiptPdf } from '../lib/transfer/receipt-pdf.ts';
 
 /**
  * v2 Phase 3, brief 5.4 step 5: the receipt. Receipt no., amounts, the Splash

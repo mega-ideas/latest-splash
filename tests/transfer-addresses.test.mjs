@@ -68,14 +68,18 @@ test('every way a Sui address is pasted gives the one long lower-case address, f
   }
 });
 
-test('the strict tests the old paths used refuse the same pastes, which is the defect', () => {
-  // The Sui address on the Send desk and in x402 (lib/payments/stablecoin-lane.ts).
-  assert.throws(() => normaliseSuiAddress(`${FULL}\n`));
-  assert.throws(() => normaliseSuiAddress(`0X${'9c'.repeat(32)}`));
-  // The wallet recipient form (lib/recipients/wallet-recipients.ts), once fixed, takes what a paste carries.
-  assert.equal(suiRecipientAddress(`${FULL}\n`), FULL);
-  assert.equal(suiRecipientAddress(`​${FULL}`), FULL);
-  assert.equal(suiRecipientAddress(`0X${'9c'.repeat(32)}`), FULL);
+test('the Send desk’s rule and the recipient form’s rule take the same pastes and give the same address as the Transfer page', () => {
+  // These were refused as "invalid" by the strict 64-hex tests before: a zero-width character, quotes, an upper-case 0X.
+  for (const paste of PASTES) {
+    assert.equal(normaliseSuiAddress(paste), FULL, JSON.stringify(paste));
+    assert.equal(suiRecipientAddress(paste), FULL, JSON.stringify(paste));
+    assert.equal(checkSuiAddress(paste).address, FULL, JSON.stringify(paste));
+  }
+  // And they still refuse what money must not take.
+  for (const bad of ['', '0x2', `0x${'ab'.repeat(20)}`, '9c'.repeat(32), `0x${'0'.repeat(64)}`, '0012345678']) {
+    assert.throws(() => normaliseSuiAddress(bad), undefined, bad);
+    assert.throws(() => suiRecipientAddress(bad), undefined, bad);
+  }
 });
 
 test('an address is held to what money needs: 0x is required, an EVM address is never padded, a short paste is never padded', () => {

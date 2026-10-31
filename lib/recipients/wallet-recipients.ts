@@ -32,6 +32,8 @@
  */
 import { normalizeSuiAddress } from '@mysten/sui/utils';
 
+import { checkSuiAddress } from '../transfer/addresses.ts';
+
 import { isTravelRuleExchange, TRAVEL_RULE_EXCHANGES, type TravelRuleExchange } from '../compliance/sumsub.ts';
 import {
   evmChecksumHolds,
@@ -137,16 +139,23 @@ export function parseSupplierDetails(body: Record<string, unknown>): SupplierDet
   return { name, legalName, registrationNumber, country, addressLine1, addressCity, addressPostalCode, email };
 }
 
-/** A Sui address, long form. Never an EVM address padded to fit. */
+/**
+ * A Sui address, long form. Never an EVM address padded to fit. What a paste
+ * adds (a trailing newline, a zero-width character, quotes, an upper-case
+ * 0X) is removed first, and the rule is the SDK's own
+ * (isValidSuiAddress(normalizeSuiAddress(x))) with the money refusals in
+ * lib/transfer/addresses.ts: the same check the Transfer page runs, so the
+ * page and the server never disagree about one address.
+ */
 export function suiRecipientAddress(value: unknown): string {
-  const raw = typeof value === 'string' ? value.trim() : '';
-  if (/^0x[0-9a-fA-F]{40}$/.test(raw)) {
-    throw new RecipientInputError('bad_address', 'That is an EVM address. A recipient paid on Sui needs a Sui address; for another chain, add a cross-chain recipient.');
+  const checked = checkSuiAddress(typeof value === 'string' ? value : '');
+  if (!checked.ok) {
+    throw new RecipientInputError(
+      'bad_address',
+      checked.code === 'evm_address' ? 'That is an EVM address. A recipient paid on Sui needs a Sui address; for another chain, add a cross-chain recipient.' : checked.message,
+    );
   }
-  if (!/^0x[0-9a-fA-F]{64}$/.test(raw)) throw new RecipientInputError('bad_address', 'A Sui address is 0x followed by 64 hexadecimal characters.');
-  const address = normalizeSuiAddress(raw);
-  if (/^0x0{64}$/.test(address)) throw new RecipientInputError('bad_address', 'The zero address cannot receive USDC.');
-  return address;
+  return checked.address;
 }
 
 export type ExchangeRecipientInput = { kind: 'EXCHANGE'; supplier: SupplierDetails; exchange: TravelRuleExchange; network: 'SUI'; depositAddress: string };
