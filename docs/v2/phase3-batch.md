@@ -168,7 +168,18 @@ history is kept; no migration was added and none dropped), and the
 `BATCH_PAYOUT` proposal kind with its approval-binding helpers, because Zeke's
 drafts and approvals already on file carry it. Approving one now records it as
 **not executed**, names Batch payouts as where payout runs are paid, claims no
-payment, and spends the approval once (`BATCH_PAYOUT_RETIRED_REASON`).
+payment, and spends the approval once (`BATCH_PAYOUT_RETIRED_REASON`). That holds
+whether or not the proposal carries a payload (none of them does), in every launch
+scope: the executor checks the kind before it asks for a payload, so an approver is
+never told to "re-authorize" through a route that no longer exists. Zeke's draft
+says the same in its own recommendation ("approving this draft sends nothing").
+Whether Zeke should draft one at all is Sky's decision.
+
+The wallet batch routes that replaced the old route ask for the accepted terms
+(`requireTermsAccepted`, 412 `terms_not_accepted`) on every POST that opens a
+batch: review, create and start. So do `POST /api/wallet/transfers` and
+`/quote`. Reads (lists, receipts) are not gated, so a business can still see its
+history. `tests/onboarding.test.mjs` lists them.
 
 ## Not done, and why
 
