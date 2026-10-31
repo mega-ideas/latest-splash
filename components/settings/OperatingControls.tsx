@@ -176,7 +176,7 @@ function NumberControl({ label, value, suffix, onChange, disabled = false, readO
 
 function Toggle({ label, active, onClick, disabled = false }: { label: string; active: boolean; onClick: () => void; disabled?: boolean }) {
   return (
-    <button type="button" role="switch" aria-checked={active} disabled={disabled} onClick={onClick} className="flex min-h-12 w-full disabled:cursor-not-allowed items-center justify-between rounded-xl border border-[#326273]/10 bg-[#F6F0ED] p-4 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0d6370]">
+    <button type="button" role="switch" aria-checked={active} aria-disabled={disabled} onClick={disabled ? undefined : onClick} className={`flex min-h-12 w-full items-center justify-between rounded-xl border border-[#326273]/10 bg-[#F6F0ED] p-4 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0d6370] ${disabled ? 'cursor-not-allowed' : ''}`}>
       <span className="text-sm font-semibold text-[#326273]">{label}</span>
       <span aria-hidden="true" className={`h-6 w-11 rounded-full p-1 transition-colors ${active ? 'bg-[#5C9EAD]' : 'bg-[#326273]/20'}`}>
         <span className={`block h-4 w-4 rounded-full bg-white transition-transform ${active ? 'translate-x-5' : ''}`} />
