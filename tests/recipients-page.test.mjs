@@ -94,7 +94,7 @@ test('a bank account is verified when the bank confirmed the holder’s name; an
   const older = bank.find((e) => e.id === 'r4');
   assert.equal(older.state.step, 'older');
   assert.match(older.state.detail, /add it again in Transfer/);
-  assert.equal(bank.find((e) => e.id === 'r5').state.label, 'Business verified');
+  assert.doesNotMatch(bank.find((e) => e.id === 'r5').state.label, /verified/i, 'an entry that cannot be paid here is not called verified');
   // A bank account number is never shown whole.
   for (const e of bank) assert.doesNotMatch(JSON.stringify(e), /1234567890/);
 });
