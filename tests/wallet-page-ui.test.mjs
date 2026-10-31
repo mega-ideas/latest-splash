@@ -50,7 +50,7 @@ test('a withdrawal binds what was shown to what is sent, and a retry is the same
   assert.match(w, /acceptedReceiveMinor: quote\.receiveMinor, maxFeeMinor: quote\.maxFeeMinor/, 'the fee shown is the fee signed and the least received is the amount shown');
   assert.match(w, /newKey\('wd'\)/);
   assert.match(w, /if \(!key\) setKey\(newKey/, 'the key is made once per attempt, not per click');
-  assert.match(w, /\n\s+key,\n/, 'the key goes as the Idempotency-Key');
+  assert.match(w, /\r?\n\s+key,\r?\n/, 'the key goes as the Idempotency-Key');
   assert.doesNotMatch(code(w), /contentHash|walrusBlobId/, 'the audit bundle is the server’s to make');
   assert.match(w, /Leaves your wallet at most/);
 });
@@ -91,7 +91,7 @@ test('the signing screens decode on the device, and a wallet change reads in pla
   assert.match(inbox, /r\.you\.mustSign && !r\.you\.signed/);
   const panel = read('components/transfer/SignPanel.tsx');
   assert.match(panel, /reviewOnDevice\(/);
-  assert.match(panel, /plainActions\(/);
+  assert.match(panel, /signingItems\(/);
   assert.match(panel, /Transaction code/);
 });
 
