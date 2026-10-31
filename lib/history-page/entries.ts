@@ -203,7 +203,18 @@ function withdrawalEntry(w: WithdrawalRow, restricted: boolean): HistoryEntry {
  */
 function scheduledEntry(r: ScheduledRunRow): HistoryEntry {
   const s = RUN_STATE[r.status];
-  const how = r.ranAs === 'auto' ? 'Paid automatically within your limits' : r.ranAs === 'ask' ? (r.fallback ? 'Handed back for approval' : 'Approved by your owners') : MODE_WORDS[r.mode].label;
+  // How it was paid is said only of a run that was paid or is being paid; a run that ended unpaid says how it was set up.
+  const going = r.status === 'paid' || r.status === 'approved';
+  const how =
+    r.ranAs === 'auto' && going
+      ? 'Paid automatically within your limits'
+      : r.ranAs === 'ask' && going
+        ? 'Approved by your owners'
+        : r.ranAs === 'ask' && r.status === 'waiting_approval'
+          ? r.fallback
+            ? 'Handed back for approval'
+            : 'Waiting for your owners'
+          : MODE_WORDS[r.mode].label;
   return {
     key: `scheduled:${r.id}`,
     kind: 'scheduled',
@@ -216,7 +227,7 @@ function scheduledEntry(r: ScheduledRunRow): HistoryEntry {
     status: { label: s.label, tone: s.tone },
     date: r.dueAt,
     href: r.status === 'paid' ? r.receiptPath : null,
-    noReceipt: r.status === 'paid' ? null : r.status === 'scheduled' || r.status === 'waiting_approval' || r.status === 'approved' ? 'Open the Scheduled tab in Transfer to approve it, skip it or see where it is.' : 'No payment was made, so there is no receipt.',
+    noReceipt: r.status === 'paid' ? null : r.status === 'scheduled' || r.status === 'waiting_approval' || r.status === 'approved' ? 'Open the Scheduled tab in Transfer to approve it, skip it or see where it is.' : r.status === 'failed' ? 'The Scheduled tab in Transfer shows what was and was not paid.' : 'No payment was made, so there is no receipt.',
     explain: s.group === 'failed' ? { why: r.reason?.trim() || 'The scheduled payment could not be completed.', next: 'Open the Scheduled tab in Transfer to see what was and was not paid. Pay anything left from Transfer; nothing was paid twice.' } : null,
     mayChange: s.group === 'in_progress',
   };

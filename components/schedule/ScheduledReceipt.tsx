@@ -60,39 +60,28 @@ export default function ScheduledReceipt({ runId }: { runId: string }) {
               </div>
             </dl>
             {run.payments && run.payments.length > 0 ? (
-              <div className="overflow-x-auto rounded-xl border border-[#326273]/12 bg-white">
-                <table className="w-full min-w-[34rem] text-left text-sm">
-                  <caption className="sr-only">The payments of this run</caption>
-                  <thead>
-                    <tr className="border-b border-[#326273]/12 text-[13px] text-[#326273]">
-                      <th scope="col" className="px-3 py-2 font-semibold">Payee</th>
-                      <th scope="col" className="px-3 py-2 text-right font-semibold">Amount</th>
-                      <th scope="col" className="px-3 py-2 font-semibold">Status</th>
-                      <th scope="col" className="px-3 py-2 font-semibold">Transaction</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {run.payments.map((p) => (
-                      <tr key={p.position} className="border-b border-[#326273]/8 last:border-0">
-                        <th scope="row" className="px-3 py-2.5 font-semibold text-[#0c3e48]">{p.payeeName}<span className="ml-2 font-mono text-[12px] font-normal text-[#326273]">{p.masked}</span></th>
-                        <td className="px-3 py-2.5 text-right font-bold tabular-nums text-[#0c3e48]">{usdc(p.amountMinor)}</td>
-                        <td className="px-3 py-2.5 text-[#1F4452]">{p.status === 'paid' ? 'Paid' : p.status === 'failed' ? 'Not paid' : p.status === 'submitting' ? 'On its way' : 'Waiting'}{p.error ? <span className="block text-[13px] text-[var(--error)]">{p.error}</span> : null}</td>
-                        <td className="px-3 py-2.5">
-                          {p.digest ? (
-                            <a href={suiVisionTxUrl(p.digest)} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center gap-1 font-mono text-[12px] font-semibold text-[#0d6370] hover:underline">
-                              {p.digest.slice(0, 8)}…
-                              <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
-                              <span className="sr-only">Open the transaction in the explorer</span>
-                            </a>
-                          ) : (
-                            <span className="text-[#326273]">None</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <ul className="divide-y divide-[#326273]/10 rounded-xl border border-[#326273]/12 bg-white" aria-label="The payments of this run">
+                {run.payments.map((p) => (
+                  <li key={p.position} className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1 px-3 py-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-[#0c3e48]">{p.payeeName}</p>
+                      <p className="font-mono text-[12px] text-[#326273]">{p.masked}</p>
+                      {p.error ? <p className="mt-1 text-[13px] text-[var(--error)]">{p.error}</p> : null}
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-bold tabular-nums text-[#0c3e48]">{usdc(p.amountMinor)}</p>
+                      <p className="text-[13px] text-[#1F4452]">{p.status === 'paid' ? 'Paid' : p.status === 'failed' ? 'Not paid' : p.status === 'submitting' ? 'On its way' : 'Waiting'}</p>
+                      {p.digest ? (
+                        <a href={suiVisionTxUrl(p.digest)} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center gap-1 font-mono text-[12px] font-semibold text-[#0d6370] hover:underline">
+                          {p.digest.slice(0, 8)}…
+                          <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                          <span className="sr-only">Open the transaction in the explorer</span>
+                        </a>
+                      ) : null}
+                    </div>
+                  </li>
+                ))}
+              </ul>
             ) : null}
             {run.reason ? <Note tone="warn">{run.reason}</Note> : null}
           </div>
