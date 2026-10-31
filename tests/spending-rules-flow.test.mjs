@@ -4,7 +4,7 @@ import test from 'node:test';
 import { fromBase64 } from '@mysten/sui/utils';
 
 import { softPasskey } from './fixtures/soft-passkey.mjs';
-import { T0, USDC } from './fixtures/wallet-world.mjs';
+import { T0 } from './fixtures/wallet-world.mjs';
 import { spendWorld } from './fixtures/spend-world.mjs';
 import { buildBusinessMultisig } from '../lib/wallet/business-multisig.ts';
 import { startBusinessWallet } from '../lib/server/business-wallet.ts';

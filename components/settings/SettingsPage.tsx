@@ -17,6 +17,7 @@ import type { FundingOptions, Overview } from '@/components/wallet/types';
 import type { GovernanceBannerAlert } from '@/lib/server/governance-events';
 import { canEditControls } from '@/lib/settings-page/controls';
 import { settingsWallet } from '@/lib/settings-page/wallet-gate';
+import { explainSpendFailure } from '@/lib/team-rules/states';
 import type { SpendWire } from '@/lib/team-rules/view';
 import type { TeamWire } from '@/lib/team/view';
 import AboutCard from './AboutCard';
@@ -60,7 +61,7 @@ export default function SettingsPage({ alerts, billingOn }: { alerts: Governance
   const overview = useLoad<Overview>('/api/wallet/overview', 'Your wallet could not be read.');
   const wallet = settingsWallet(overview.data?.walletState);
   const { manage } = wallet;
-  const spend = useLoad<SpendWire>(manage ? '/api/wallet/spending-rules' : null, 'The spending rules could not be read.');
+  const spend = useLoad<SpendWire>(manage ? '/api/wallet/spending-rules' : null, 'The spending rules could not be read.', explainSpendFailure);
   const funding = useLoad<FundingOptions>(manage ? '/api/wallet/funding' : null, 'Your funding options could not be loaded.');
   const charge = useLoad<InCharge>(manage ? '/api/wallet/persons-in-charge' : null, 'The people in charge could not be loaded.');
   // The team is the database's, not the chain's: it is managed here before a business wallet exists too.
@@ -136,14 +137,8 @@ export default function SettingsPage({ alerts, billingOn }: { alerts: Governance
           <TeamCard people={people} charge={charge} spend={view} walletReady={manage} onChanged={changed} />
           {manage ? (
             <>
-              {view ? (
-                <>
-                  <PolicyCard owner={owner === true} spend={view} onChanged={changed} />
-                  <RulesSection owner={owner === true} spend={view} staff={staff} onChanged={changed} />
-                </>
-              ) : (
-                <Card id="rules" title="Spending rules">{spend.error ? <Note tone="error">{spend.error}</Note> : <Loading label="Reading the rules from the chain…" />}</Card>
-              )}
+              {view ? <PolicyCard owner={owner === true} spend={view} onChanged={changed} /> : null}
+              <RulesSection owner={owner === true} spend={view} loading={spend.loading} error={spend.error} onRetry={spend.reload} staff={staff} onChanged={changed} />
             </>
           ) : (
             <Card id="wallet-note" title="Spending rules, signers and funding">{walletNote()}</Card>

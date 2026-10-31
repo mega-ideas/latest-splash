@@ -10,6 +10,7 @@ import { formatUsdc } from '../fees/copy.ts';
 import { kindOfRecipient, stateOf } from '../recipients-page/view.ts';
 import type { ClientRecipient } from '../recipients-page/wire.ts';
 import { roleLabel } from '../wallet-page/members.ts';
+import { timeLeftWords, windowWords } from './words.ts';
 
 export type Tone = 'ok' | 'wait' | 'bad';
 
@@ -19,6 +20,7 @@ type AllowanceLike = {
   expiresAtMs: string | null;
   lifetimeCapMinor: string | null;
   lifetimeRemainingMinor: string | null;
+  currentSpendMinor: string;
   window: { period: string; limitMinor: string; spentMinor: string; remainingMinor: string; endsAtMs: string | null; rolledOver: boolean } | null;
 };
 export type RuleLike = {
@@ -53,11 +55,16 @@ export type RuleLineView = {
   renews: string | null;
   ends: string | null;
   lifetime: string | null;
+  /** "Renews in 14 hours": null when the window has passed (the next payment starts a new one) or there is none. */
+  renewsIn: string | null;
+  /** "Ends in 95 days": null when there is no end or it has passed. */
+  endsIn: string | null;
+  /** What the current allowance has charged (current_spend): null with no current allowance. */
+  paidInAll: string | null;
   orphaned: boolean;
 };
 
-export function ruleLine(rule: RuleLike, _now: Date): RuleLineView {
-  void _now;
+export function ruleLine(rule: RuleLike, now: Date): RuleLineView {
   const standing = rule.standing ?? 'member';
   const orphaned = standing !== 'member';
   const base = STATUS[rule.status] ?? { label: 'Unknown', tone: 'wait' as Tone };
@@ -79,6 +86,9 @@ export function ruleLine(rule: RuleLike, _now: Date): RuleLineView {
     // A rule ends at the close of its last day: midnight UTC after it.
     ends: current?.expiresAtMs ? `Ends ${new Date(Number(current.expiresAtMs) - 1).toISOString().slice(0, 10)} (UTC)` : null,
     lifetime: current?.lifetimeCapMinor && current.lifetimeRemainingMinor ? `${usdc(current.lifetimeRemainingMinor)} of ${usdc(current.lifetimeCapMinor)} USDC left in all` : null,
+    renewsIn: w && !w.rolledOver && w.endsAtMs && Number(w.endsAtMs) > now.getTime() ? `Renews in ${timeLeftWords(Number(w.endsAtMs) - now.getTime())}` : null,
+    endsIn: current?.expiresAtMs && Number(current.expiresAtMs) > now.getTime() ? `Ends in ${timeLeftWords(Number(current.expiresAtMs) - now.getTime())}` : null,
+    paidInAll: current ? `Paid since the rule was set: ${usdc(current.currentSpendMinor)} USDC` : null,
     orphaned,
   };
 }
@@ -109,13 +119,6 @@ export function teamRows(input: { members: MemberLike[]; personsInCharge: Array<
 }
 
 export type PolicyLike = { perPaymentMaxMinor: string; secondApprovalThresholdMinor: string; runningWindowMs: string; recipients: Array<{ address: string; tag: string }>; beneficiaries: Array<unknown> };
-
-function windowWords(ms: bigint): string {
-  const day = 86_400_000n;
-  if (ms % day === 0n && ms / day >= 2n) return `${ms / day} days`;
-  const hours = ms / 3_600_000n;
-  return ms % 3_600_000n === 0n ? `${hours} ${hours === 1n ? 'hour' : 'hours'}` : `${ms / 60_000n} minutes`;
-}
 
 export function policyView(policy: PolicyLike | null): { perPayment: string; threshold: string; window: string; recipients: number; bankAccounts: number } | null {
   if (!policy) return null;

@@ -2,6 +2,7 @@
 
 import { call, errorText, type SigningView } from '@/components/transfer/api';
 import SignPanel, { type SignLabels } from '@/components/transfer/SignPanel';
+import { askFailureText } from '@/lib/team-rules/states';
 
 /** What the signing screen says for a change to a rule, the policy or a plan: the owners sign it on their own devices, and it takes effect at once. */
 export const CHANGE_LABELS: SignLabels = {
@@ -23,7 +24,10 @@ export type Asked = { ok: true; request: SigningView; body: Record<string, unkno
  */
 export async function askToSign(url: string, init: { method?: string; body?: unknown }): Promise<Asked> {
   const answer = await call<{ request?: SigningView } & Record<string, unknown>>(url, { method: init.method ?? 'POST', body: init.body ?? {} });
-  if (!answer.ok || !answer.body?.request) return { ok: false, error: errorText(answer, 'That change was not started. Nothing was changed.') };
+  if (!answer.ok || !answer.body?.request) {
+    const code = answer.body && typeof answer.body.code === 'string' ? answer.body.code : undefined;
+    return { ok: false, error: askFailureText({ status: answer.status, code, error: errorText(answer, '') }, 'other') };
+  }
   return { ok: true, request: answer.body.request, body: answer.body };
 }
 

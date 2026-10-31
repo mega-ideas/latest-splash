@@ -103,7 +103,7 @@ export function Loading({ label }: { label: string }) {
 }
 
 /** One GET, with a reload. A failure is a sentence, never a blank card. */
-export function useLoad<T>(url: string | null, failure: string) {
+export function useLoad<T>(url: string | null, failure: string, explain?: (status: number, text: string) => string) {
   const [state, setState] = useState<LoadState<T>>({ url: null, data: null, error: null });
   const [tick, setTick] = useState(0);
   useEffect(() => {
@@ -111,13 +111,13 @@ export function useLoad<T>(url: string | null, failure: string) {
     let live = true;
     void call<T & { error?: string }>(url).then((answer) => {
       if (!live) return;
-      if (!answer.ok || !answer.body) setState({ url, data: null, error: errorText(answer, failure) });
+      if (!answer.ok || !answer.body) setState({ url, data: null, error: explain ? explain(answer.status, errorText(answer, '')) : errorText(answer, failure) });
       else setState({ url, data: answer.body, error: null });
     });
     return () => {
       live = false;
     };
-  }, [url, tick, failure]);
+  }, [url, tick, failure, explain]);
   const reload = useCallback(() => setTick((t) => t + 1), []);
   // Waiting for an answer to this address (or for the address itself) is loading, never an empty answer.
   return { ...loadView(state, url), reload };

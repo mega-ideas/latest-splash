@@ -257,7 +257,7 @@ test('the create and change flow is a sheet that asks one question per step, and
   assert.match(form, /validateStep\(/);
   assert.match(form, /reviewSummary\(/);
   assert.match(form, /withRecipients\(/);
-  assert.match(form, /aria-current="step"/);
+  assert.match(form, /aria-current={[^}]*'step'/);
   assert.doesNotMatch(form, /signTransaction|signWithPasskey|fetch\(|orgId|accountId/);
   const section = code(read('components/settings/RulesSection.tsx'));
   assert.match(section, /<Modal /, 'the form is a sheet; on a phone it is the whole screen');

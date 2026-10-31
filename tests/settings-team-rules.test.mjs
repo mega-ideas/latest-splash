@@ -268,9 +268,11 @@ test('every change an owner makes opens a signing request for the owners, and no
 
 test('taking a rule back asks first, says what stops, and a change says what it keeps', () => {
   const rules = read('components/settings/RulesSection.tsx');
-  assert.match(rules, /Take back this rule\?/);
-  assert.match(rules, /stops at once|cannot pay/);
-  assert.match(rules, /what was spent|Spending so far/);
+  // The words are lib/team-rules/states.ts's revokeWords (tested in spending-rules-screens.test.mjs); the sheet shows them.
+  assert.match(rules, /revokeWords\(/);
+  assert.match(read('lib/team-rules/states.ts'), /Take back this rule\?/);
+  assert.match(read('lib/team-rules/states.ts'), /Their open payments stop at once/);
+  assert.match(read('components/settings/RuleForm.tsx'), /What was spent so far carries over/);
 });
 
 test('only an owner is offered a change, and no one is offered what the server would refuse', () => {
