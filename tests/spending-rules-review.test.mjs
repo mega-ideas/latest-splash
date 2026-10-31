@@ -283,3 +283,17 @@ test('the Wallet page card reads a changed rule as a whole too', async () => {
   assert.doesNotMatch(s.rules[0].window ?? '', /0\.00 of 200\.00/);
   assert.match(s.rules[0].window ?? '', /200\.00 USDC left today/);
 });
+
+test('a bridged rule still shows what is left today and when the full cap returns; a used-up rule shows no window room', async () => {
+  const { rule: r } = await changedAfterSpending(null);
+  const section = code(read('components/settings/RulesSection.tsx'));
+  assert.match(section, /l\.usage \|\| l\.left/, 'the list does not hide "left today" because no "used" figure is known');
+  const l = ruleLine(r, T0);
+  assert.equal(l.usage, null);
+  assert.ok(l.renewsLine?.startsWith('The full cap applies again in '), l.renewsLine ?? 'none');
+  assert.match(l.renewsLine ?? '', /\(\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC\)$/);
+  const used = simple();
+  used.allowances[0] = { ...used.allowances[0], lifetimeCapMinor: U(1000), lifetimeRemainingMinor: '0', currentSpendMinor: U(1000), spendableNowMinor: '0' };
+  const u = ruleLine(used, NOW);
+  assert.deepEqual([u.usage, u.left, u.renewsLine], [null, null, null], 'a full lifetime total pays nothing, so no window figure reads as room');
+});

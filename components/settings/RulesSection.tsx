@@ -179,12 +179,16 @@ export default function RulesSection({ owner, spend, loading, error, onRetry, st
                     <Pill tone={l.state.tone}>{l.state.label}</Pill>
                   </div>
                   <p className="mt-0.5 text-[13px] text-[#326273]">Up to {l.perPayment} a payment</p>
-                  {l.usage ? (
+                  {l.usage || l.left ? (
                     <div className="mt-2 space-y-1">
-                      <div role="progressbar" aria-label={`${l.name}: ${l.usage.text}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={l.usage.percent} className="h-1.5">
-                        <div className="h-full rounded-full bg-[#0d6370]" style={{ width: `${l.usage.percent}%` }} />
-                      </div>
-                      <p className="text-[13px] text-[#1F4452]">{l.usage.text}</p>
+                      {l.usage ? (
+                        <>
+                          <div role="progressbar" aria-label={`${l.name}: ${l.usage.text}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={l.usage.percent} className="h-1.5">
+                            <div className="h-full rounded-full bg-[#0d6370]" style={{ width: `${l.usage.percent}%` }} />
+                          </div>
+                          <p className="text-[13px] text-[#1F4452]">{l.usage.text}</p>
+                        </>
+                      ) : null}
                       <p className="text-[13px] text-[#326273]">{[l.left, renews].filter(Boolean).join('. ')}.</p>
                     </div>
                   ) : null}

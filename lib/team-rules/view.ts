@@ -78,7 +78,8 @@ export function ruleLine(rule: RuleLike, now: Date): RuleLineView {
         : rule.status === 'active' && t?.usedUp
           ? { label: 'Used up', tone: 'wait' as Tone }
           : base;
-  const w = t?.window ?? null;
+  // A rule whose lifetime total is spent pays nothing, whatever the window has left: no window figures to read as room.
+  const w = t?.usedUp ? null : t?.window ?? null;
   const when = w?.period === 'day' ? 'today' : w?.period === 'month' ? 'this month' : 'in the current window';
   const limit = w ? BigInt(w.limitMinor) : 0n;
   const spent = w ? BigInt(w.spentMinor) : 0n;
