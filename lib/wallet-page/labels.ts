@@ -46,12 +46,12 @@ export function depositLine(d: DepositFacts): DepositLine {
   return { amount, asset: coin, state: 'Ready to use', tone: 'ok', reasons: [], note: conversion, when: d.arrivedAt };
 }
 
-/** USDC arrivals, and the other coins that arrive and wait to be converted, each with its own list. */
-export function fundingHistory(deposits: DepositFacts[]): { usdc: DepositLine[]; converted: DepositLine[] } {
-  const lines = deposits.map((d) => ({ d, line: depositLine(d) }));
+/** USDC arrivals, and the other coins that arrive and wait to be converted, each with its own list. Each line keeps the deposit it was made from. */
+export function fundingHistory<T extends DepositFacts>(deposits: T[]): { usdc: Array<DepositLine & { item: T }>; converted: Array<DepositLine & { item: T }> } {
+  const lines = deposits.map((d) => ({ ...depositLine(d), item: d }));
   return {
-    usdc: lines.filter((l) => l.d.asset.toUpperCase() === 'USDC').map((l) => l.line),
-    converted: lines.filter((l) => l.d.asset.toUpperCase() !== 'USDC').map((l) => l.line),
+    usdc: lines.filter((l) => l.item.asset.toUpperCase() === 'USDC'),
+    converted: lines.filter((l) => l.item.asset.toUpperCase() !== 'USDC'),
   };
 }
 

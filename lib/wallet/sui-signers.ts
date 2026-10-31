@@ -109,6 +109,20 @@ export async function signWithWallet(
   return feature.signTransaction({ transaction: { toJSON: async () => json }, account, chain: SUI_MAINNET_CHAIN });
 }
 
+/**
+ * Sign a message (not a transaction) with a connected Sui wallet: the proof
+ * that a business controls a funding wallet (lib/server/wallet-funding.ts,
+ * `verifyWalletSource`). The wallet shows the text; nothing is sent.
+ */
+export async function signMessageWithWallet(accepted: AcceptedWallet, account: StdAccount, message: string): Promise<string> {
+  const feature = accepted.wallet.features['sui:signPersonalMessage'] as
+    | { signPersonalMessage(input: { message: Uint8Array; account: StdAccount; chain?: string }): Promise<{ signature: string }> }
+    | undefined;
+  if (!feature) throw new Error(`${accepted.label} cannot sign a message. Paste a signature instead.`);
+  const { signature } = await feature.signPersonalMessage({ message: new TextEncoder().encode(message), account, chain: SUI_MAINNET_CHAIN });
+  return signature;
+}
+
 // ─── The Splash wallet: the business's own passkey ──────────────────────────
 
 async function passkeyKeypair(passkey: { publicKey: string; rpId: string }) {
