@@ -2721,3 +2721,24 @@ export const walletBatchRows = pgTable('wallet_batch_rows', {
   uniqueIndex('wallet_batch_rows_org_ref_unique').on(table.orgId, table.paymentRef),
   index('wallet_batch_rows_org_idx').on(table.orgId),
 ]);
+
+/**
+ * A request for pilot access to a route that is not live yet (v2 brief D16):
+ * Malaysia, Vietnam, Thailand or Singapore, from the landing calculator.
+ *
+ * Public input, so it is scoped narrowly. One row per email and route (the
+ * unique index), so asking twice changes nothing and a flood of one address
+ * adds nothing. No customer route reads it back; the staff console reads it
+ * through `listAccessRequestsForStaff` (lib/server/access-requests.ts).
+ */
+export const accessRequests = pgTable('access_requests', {
+  id: text('id').primaryKey(),
+  email: text('email').notNull(),
+  company: text('company').notNull(),
+  /** MYR | VND | THB | SGD. */
+  currency: text('currency').notNull(),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('access_requests_email_currency_unique').on(table.email, table.currency),
+  index('access_requests_created_idx').on(table.createdAt),
+]);

@@ -470,6 +470,13 @@
       "when": 1794268800000,
       "tag": "0066_team_roles",
       "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1794355200000,
+      "tag": "0067_access_requests",
+      "breakpoints": true
     }
   ]
 }

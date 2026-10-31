@@ -5,6 +5,7 @@
 @import "../styles/cinematic.css";
 @import "../styles/mobile-landing.css";
 @import "../styles/landing.css";
+@import "../styles/landing-v2.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -78,7 +79,7 @@
   --secondary-foreground: #326273;
   --muted: #d9cbc4;
   --muted-foreground: #6d7f86;
-  /* Gold, not coral (v2 D14): ink words on it, 6.4:1. */
+  /* Gold (v2 D14): ink words on it, 6.4:1. */
   --accent: #efc46f;
   --accent-foreground: #1f4452;
   --destructive: oklch(0.577 0.245 27.325);
@@ -312,8 +313,8 @@ body {
 @keyframes iso-arrow-fall-explode {
   0% { opacity: 1; transform: translateY(0) rotate(90deg) scale(10); filter: drop-shadow(0 8px 7px rgba(8, 54, 64, .14)); }
   58% { opacity: 1; transform: translateY(150px) rotate(250deg) scale(10); filter: drop-shadow(0 18px 10px rgba(8, 54, 64, .2)); }
-  78% { opacity: .95; transform: translateY(175px) rotate(300deg) scale(14); filter: drop-shadow(0 0 22px rgba(227, 151, 116, .95)); }
-  100% { opacity: 0; transform: translateY(180px) rotate(360deg) scale(24); filter: blur(8px) drop-shadow(0 0 40px rgba(227, 151, 116, .9)); }
+  78% { opacity: .95; transform: translateY(175px) rotate(300deg) scale(14); filter: drop-shadow(0 0 22px rgba(239, 196, 111, .95)); }
+  100% { opacity: 0; transform: translateY(180px) rotate(360deg) scale(24); filter: blur(8px) drop-shadow(0 0 40px rgba(239, 196, 111, .9)); }
 }
 
 @keyframes iso-marquee {
@@ -338,10 +339,11 @@ body {
   /* Text brand — "the numbers are the brand".
      Display headlines stay loud; everything below them obeys these floors:
      - no text smaller than 10px (micro-labels), data values >= 12px, body >= 13px
-     - ink never drops below 66% alpha for text; alphas under .3 are for borders/decoration only */
+     - ink never drops below 74% alpha for text (5.0:1 on paper-deep, 4.8:1
+       on a #f1e6d6 card tint); alphas under .3 are for borders/decoration only */
   --iso-text-secondary: rgba(12, 62, 72, .78);
-  --iso-text-muted: rgba(12, 62, 72, .7);
-  --iso-text-label: rgba(12, 62, 72, .66);
+  --iso-text-muted: rgba(12, 62, 72, .76);
+  --iso-text-label: rgba(12, 62, 72, .74);
   min-height: 100svh;
   /* clip (not hidden): hidden makes this the scroll container and breaks
      position: sticky inside the cinematic hero. */
@@ -1305,7 +1307,9 @@ body {
 }
 
 .iso-comparison-table thead th {
-  color: rgba(12, 62, 72, .7);
+  /* 88% ink: 11 px labels, so 4.5:1 must hold over the gold glow too
+     (about 6.5:1 there; 70% measured 4.2:1 behind "Broker"). */
+  color: rgba(12, 62, 72, .88);
   background: rgba(12, 62, 72, .045);
   font-family: var(--font-mono), monospace;
   font-size: 11px;
@@ -1392,50 +1396,11 @@ body {
   text-transform: uppercase;
 }
 
-.iso-yield-live {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 11px 18px;
-  color: rgba(12, 62, 72, .7);
-  background: rgba(159, 207, 199, .13);
-  font-family: var(--font-mono), monospace;
-  font-size: 11px;
-  font-weight: 750;
-}
-
-.iso-yield-live i {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #34a874;
-  box-shadow: 0 0 0 4px rgba(52, 168, 116, .14);
-  animation: iso-live-pulse 1.7s ease-in-out infinite;
-}
-
-.iso-yield-live strong {
-  color: var(--iso-teal-dark);
-  text-transform: uppercase;
-}
-
-/* Demoted yield strip — reference data, deliberately quieter than the table. */
-.iso-yield-live.is-demoted {
-  background: rgba(12, 62, 72, .05);
-  color: rgba(12, 62, 72, .58);
-  font-weight: 650;
-}
-.iso-yield-live.is-demoted i { background: rgba(12, 62, 72, .35); box-shadow: none; animation: none; }
-.iso-yield-live.is-demoted strong { color: rgba(12, 62, 72, .6); }
-
-/* ─── Working-capital flywheel (Settle → Supply → Save) ───────────────────
-   Landing band + /working-capital diagram. Supply is the weighted coral
-   focal (the moat, roadmap-labeled); Settle is the live feeding wedge;
-   Save is the small hygiene ring. The dashed orbit says "loop", the
-   handoff arrows say what travels between loops. */
+/* ─── The three loops band and the roadmap chip ─────────────────────────── */
 .iso-loops {
   border-bottom: 1px solid var(--iso-line);
   background:
-    radial-gradient(circle at 88% 0%, rgba(227, 151, 116, .12), transparent 32%),
+    radial-gradient(circle at 88% 0%, rgba(239, 196, 111, .12), transparent 32%),
     var(--iso-paper-deep);
 }
 
@@ -1443,11 +1408,11 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  border: 1px solid rgba(227, 151, 116, .55);
+  border: 1px solid rgba(239, 196, 111, .55);
   border-radius: 999px;
   padding: 3px 10px;
-  background: rgba(227, 151, 116, .14);
-  color: #9b4e32;
+  background: rgba(239, 196, 111, .14);
+  color: var(--gold-ink);
   font-family: var(--font-mono), monospace;
   font-size: 9.5px;
   font-weight: 800;
@@ -1457,161 +1422,6 @@ body {
 }
 .iso-roadmap-chip svg { width: 11px; height: 11px; }
 .iso-roadmap-chip small { font-size: 9px; font-weight: 700; letter-spacing: .04em; text-transform: none; }
-
-.iso-wheel { position: relative; margin-top: 34px; }
-
-.iso-wheel-orbit {
-  position: absolute;
-  top: -46px;
-  left: 2%;
-  width: 96%;
-  height: 84px;
-  overflow: visible;
-  pointer-events: none;
-}
-.iso-wheel-orbit path {
-  stroke: rgba(12, 62, 72, .38);
-  stroke-width: 2;
-  stroke-dasharray: 7 9;
-}
-/* Full variant is drawn on scroll (GSAP) — a solid, slightly bolder coral-ink
-   line so the traced flow reads. GSAP overrides stroke-dasharray inline. */
-.iso-wheel.is-full .iso-wheel-orbit path {
-  stroke: rgba(155, 78, 50, .5);
-  stroke-width: 2.5;
-  stroke-linecap: round;
-}
-.iso-wheel-orbit path.is-flowing { animation: iso-loops-flow 2.6s linear infinite; }
-.iso-wheel-orbit text {
-  fill: rgba(12, 62, 72, .55);
-  font-family: var(--font-mono), monospace;
-  font-size: 11px;
-  font-weight: 750;
-  letter-spacing: .1em;
-  text-transform: uppercase;
-}
-@keyframes iso-loops-flow { to { stroke-dashoffset: -32; } }
-
-.iso-wheel-track {
-  display: grid;
-  grid-template-columns: 1fr auto 1.28fr auto .92fr;
-  align-items: stretch;
-  gap: 0;
-}
-.iso-wheel-station { display: contents; }
-
-.iso-wheel-card {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  border: 1px solid rgba(12, 62, 72, .22);
-  border-radius: 12px;
-  padding: 20px;
-  background: rgba(255, 251, 245, .82);
-  box-shadow: 7px 8px 0 rgba(12, 62, 72, .1);
-  transition: box-shadow .4s ease, border-color .4s ease, transform .4s ease;
-}
-.iso-wheel-card.is-settle { border-top: 3px solid var(--iso-teal); }
-/* GSAP draw-on-scroll lights each node as the flow reaches it (--coral). */
-.iso-wheel-card.is-lit {
-  border-color: rgba(227, 151, 116, .7);
-  box-shadow: 8px 10px 0 rgba(227, 151, 116, .28), 0 0 0 3px rgba(227, 151, 116, .14);
-}
-.iso-wheel-card.is-lit .iso-wheel-live i { box-shadow: 0 0 0 4px rgba(227, 151, 116, .2); }
-.iso-wheel-card.is-supply {
-  border: 1px solid rgba(227, 151, 116, .6);
-  border-top: 3px solid var(--coral);
-  background: linear-gradient(160deg, rgba(227, 151, 116, .1), transparent 46%), rgba(255, 251, 245, .92);
-  box-shadow: 8px 9px 0 rgba(155, 78, 50, .16);
-}
-.iso-wheel-card.is-save {
-  border-top: 3px solid var(--iso-gold);
-  align-self: center;
-  padding: 16px 18px;
-}
-
-.iso-wheel-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.iso-loops-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 34px;
-  height: 34px;
-  border: 1px solid rgba(12, 62, 72, .2);
-  border-radius: 10px;
-  background: #fffdf9;
-  color: var(--iso-teal);
-}
-.iso-loops-icon svg { width: 17px; height: 17px; }
-.iso-wheel-card.is-supply .iso-loops-icon { color: #9b4e32; border-color: rgba(227, 151, 116, .5); }
-
-.iso-wheel-live {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--iso-teal-dark);
-  font-family: var(--font-mono), monospace;
-  font-size: 9.5px;
-  font-weight: 800;
-  letter-spacing: .1em;
-  text-transform: uppercase;
-}
-.iso-wheel-live i {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #34a874;
-  box-shadow: 0 0 0 3px rgba(52, 168, 116, .16);
-}
-
-.iso-wheel-card h3 {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  color: var(--iso-ink);
-  font-size: 19px;
-  font-weight: 950;
-  letter-spacing: -.02em;
-}
-.iso-wheel-card h3 span {
-  color: var(--iso-text-label);
-  font-family: var(--font-mono), monospace;
-  font-size: 10px;
-  font-weight: 750;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-}
-.iso-wheel-card.is-supply h3 { font-size: 22px; }
-.iso-wheel-card p { color: var(--iso-text-secondary); font-size: 13.5px; line-height: 1.55; }
-.iso-wheel-card small {
-  margin-top: auto;
-  color: var(--iso-text-label);
-  font-family: var(--font-mono), monospace;
-  font-size: 10px;
-  font-weight: 750;
-  letter-spacing: .06em;
-  text-transform: uppercase;
-}
-
-.iso-wheel-handoff {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  padding: 0 14px;
-  color: var(--iso-text-label);
-}
-.iso-wheel-handoff span {
-  max-width: 92px;
-  font-family: var(--font-mono), monospace;
-  font-size: 9px;
-  font-weight: 750;
-  letter-spacing: .08em;
-  text-align: center;
-  text-transform: uppercase;
-}
-.iso-wheel-handoff svg { width: 15px; height: 15px; }
 
 .iso-loops-foot {
   display: flex;
@@ -1630,17 +1440,9 @@ body {
 .iso-gasless-note strong { color: var(--iso-teal-dark); font-weight: 800; }
 
 @media (max-width: 900px) {
-  .iso-wheel-orbit { display: none; }
-  .iso-wheel-track { grid-template-columns: 1fr; gap: 0; }
-  .iso-wheel-card.is-save { align-self: stretch; }
-  .iso-wheel-handoff { flex-direction: row; padding: 10px 0; }
-  .iso-wheel-handoff svg { transform: rotate(90deg); }
   .iso-loops-foot { flex-direction: column; align-items: flex-start; }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .iso-wheel-orbit path.is-flowing { animation: none; }
-}
 
 /* ─── /working-capital (Supply loop, roadmap) ────────────────────────────── */
 .wc-page {
@@ -1654,11 +1456,10 @@ body {
   --iso-teal-dark: #083640;
   --iso-mint: #9fcfc7;
   --iso-gold: #efc46f;
-  --iso-coral: #e39774;
   --iso-line: rgba(12, 62, 72, .16);
   --iso-text-secondary: rgba(12, 62, 72, .78);
-  --iso-text-muted: rgba(12, 62, 72, .7);
-  --iso-text-label: rgba(12, 62, 72, .66);
+  --iso-text-muted: rgba(12, 62, 72, .76);
+  --iso-text-label: rgba(12, 62, 72, .74);
   min-height: 100dvh;
   background: var(--iso-paper);
   color: var(--iso-ink);
@@ -1696,7 +1497,7 @@ body {
 .wc-hero {
   border-bottom: 1px solid var(--iso-line);
   background:
-    radial-gradient(circle at 84% 8%, rgba(227, 151, 116, .16), transparent 40%),
+    radial-gradient(circle at 84% 8%, rgba(239, 196, 111, .16), transparent 40%),
     radial-gradient(circle at 4% 92%, rgba(159, 207, 199, .2), transparent 34%),
     var(--iso-paper);
 }
@@ -1872,9 +1673,9 @@ body {
   gap: 9px;
   margin: 0;
   padding: 12px 14px;
-  border: 1px solid color-mix(in srgb, var(--iso-coral) 42%, transparent);
+  border: 1px solid color-mix(in srgb, var(--iso-gold) 42%, transparent);
   border-radius: 10px;
-  background: color-mix(in srgb, var(--iso-coral) 10%, transparent);
+  background: color-mix(in srgb, var(--iso-gold) 10%, transparent);
   color: var(--iso-ink);
   font: 700 12.5px/1.5 var(--font-sans), sans-serif;
   font-variant-numeric: tabular-nums;
@@ -1886,8 +1687,8 @@ body {
   margin-top: 1px;
   padding: 3px;
   border-radius: 50%;
-  color: #fff;
-  background: var(--iso-coral);
+  color: var(--iso-ink);
+  background: var(--iso-gold);
 }
 .wc-ticket-note { margin: 0; color: var(--iso-text-secondary); font-size: 12.5px; line-height: 1.55; }
 .wc-ticket-foot {
@@ -1933,7 +1734,7 @@ body {
   border-bottom: 1px solid var(--iso-line);
 }
 .wc-chapter-index {
-  color: color-mix(in srgb, var(--iso-coral) 76%, var(--iso-ink));
+  color: var(--iso-teal);
   font: 950 clamp(30px, 4vw, 46px)/1 var(--font-mono), monospace;
   letter-spacing: -.04em;
 }
@@ -1946,13 +1747,10 @@ body {
   line-height: 1.65;
 }
 
+/* Plain paper: no background grid outside the landing Platform (D14). */
 .wc-mechanics {
   border-bottom: 1px solid var(--iso-line);
-  background:
-    linear-gradient(rgba(12, 62, 72, .04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(12, 62, 72, .04) 1px, transparent 1px),
-    var(--iso-paper);
-  background-size: 64px 64px;
+  background: var(--iso-paper);
 }
 
 /* ── Sequence cards (premium override of shared .iso-supply-card) ───────── */
@@ -1967,14 +1765,14 @@ body {
   inset: 0 0 auto 0;
   height: 3px;
   border-radius: 12px 12px 0 0;
-  background: linear-gradient(90deg, var(--iso-coral), transparent 72%);
+  background: linear-gradient(90deg, var(--iso-gold), transparent 72%);
 }
 .wc-flow-ghost {
   position: absolute;
   top: 4px;
   right: 12px;
   z-index: 0;
-  color: color-mix(in srgb, var(--iso-coral) 13%, transparent);
+  color: color-mix(in srgb, var(--iso-gold) 13%, transparent);
   font: 950 74px/1 var(--font-mono), monospace;
   letter-spacing: -.06em;
   pointer-events: none;
@@ -1991,15 +1789,20 @@ body {
   gap: clamp(28px, 4vw, 56px);
   align-items: center;
   padding: clamp(30px, 4vw, 52px);
-  border: 1px solid var(--iso-line);
+  border: 1px solid rgba(159, 207, 199, .22);
   border-radius: 20px;
+  color: #fffaf1;
+  /* Dark cyan (v2 brief section 6): the deep teal of the palette, lit from
+     the corner with mint so it reads as a surface, not a hole. */
   background:
-    radial-gradient(circle at 94% 0%, rgba(159, 207, 199, .16), transparent 44%),
-    var(--surface, #fff);
-  box-shadow: 14px 18px 0 rgba(12, 62, 72, .08);
+    radial-gradient(circle at 94% 0%, rgba(159, 207, 199, .2), transparent 44%),
+    var(--iso-teal-dark);
+  box-shadow: 14px 18px 0 rgba(8, 54, 64, .16);
 }
 .wc-close-copy h2 { margin-top: 8px; }
-.wc-close .wc-legal { margin-top: 16px; max-width: 560px; }
+.wc-close .iso-kicker { color: var(--iso-mint); }
+.wc-close .wc-legal { margin-top: 16px; max-width: 560px; color: rgba(255, 250, 241, .82); }
+.wc-close a:focus-visible { outline: 2px solid var(--iso-gold); outline-offset: 3px; }
 .wc-close-actions { display: flex; flex-direction: column; gap: 12px; align-items: stretch; }
 .wc-legal {
   max-width: 520px;
@@ -2087,11 +1890,11 @@ body {
   transform: translateY(-4px);
   box-shadow: 8px 10px 0 color-mix(in srgb, var(--ink) 11%, transparent);
 }
-/* Step 04 (human approval) is the focal gate — coral, like supply card 3. */
+/* Step 04 (human approval) is the focal gate, gold like supply card 3. */
 .iso-ctrl-card:nth-child(4) {
-  border-color: color-mix(in srgb, var(--coral) 55%, transparent);
-  background: linear-gradient(155deg, color-mix(in srgb, var(--coral) 9%, transparent), transparent 46%), color-mix(in srgb, var(--surface) 88%, transparent);
-  box-shadow: 6px 7px 0 color-mix(in srgb, var(--coral) 24%, transparent);
+  border-color: color-mix(in srgb, var(--gold-light) 55%, transparent);
+  background: linear-gradient(155deg, color-mix(in srgb, var(--gold-light) 9%, transparent), transparent 46%), color-mix(in srgb, var(--surface) 88%, transparent);
+  box-shadow: 6px 7px 0 color-mix(in srgb, var(--gold-light) 24%, transparent);
 }
 .iso-ctrl-meta {
   display: flex;
@@ -2116,8 +1919,9 @@ body {
   box-shadow: 3px 3px 0 var(--ink);
 }
 .iso-ctrl-card:nth-child(4) .iso-ctrl-meta span {
-  background: var(--coral);
-  box-shadow: 3px 3px 0 color-mix(in srgb, var(--coral) 55%, var(--ink));
+  color: var(--ink);
+  background: var(--gold-light);
+  box-shadow: 3px 3px 0 color-mix(in srgb, var(--gold-light) 55%, var(--ink));
 }
 .iso-ctrl-art { position: relative; height: 118px; margin-top: var(--s3); }
 .iso-ctrl-art img {
@@ -2164,12 +1968,12 @@ body {
   align-items: center;
   gap: 24px;
   margin-top: var(--s6);
-  border: 1px solid color-mix(in srgb, var(--coral) 50%, transparent);
-  border-left: 5px solid var(--coral);
+  border: 1px solid color-mix(in srgb, var(--gold-light) 50%, transparent);
+  border-left: 5px solid var(--gold-light);
   border-radius: 14px;
   padding: 26px 28px;
-  background: linear-gradient(150deg, color-mix(in srgb, var(--coral) 12%, transparent), transparent 52%), color-mix(in srgb, var(--surface) 86%, transparent);
-  box-shadow: 8px 9px 0 color-mix(in srgb, var(--coral) 22%, transparent);
+  background: linear-gradient(150deg, color-mix(in srgb, var(--gold-light) 12%, transparent), transparent 52%), color-mix(in srgb, var(--surface) 86%, transparent);
+  box-shadow: 8px 9px 0 color-mix(in srgb, var(--gold-light) 22%, transparent);
 }
 .iso-supply-cta-copy h3 {
   margin-top: 8px;
@@ -2246,7 +2050,7 @@ body {
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  color: rgba(155, 78, 50, .16);
+  color: rgba(122, 84, 16, .16);
   font-family: var(--font-mono), monospace;
   font-size: clamp(28px, 6vw, 68px);
   font-weight: 900;
@@ -2263,13 +2067,13 @@ body {
 .trust-mandatory {
   display: flex;
   gap: 14px;
-  border: 1px solid rgba(155, 78, 50, .4);
-  border-left: 4px solid var(--coral);
+  border: 1px solid rgba(122, 84, 16, .4);
+  border-left: 4px solid var(--gold-light);
   border-radius: 12px;
   padding: 18px 20px;
-  background: rgba(227, 151, 116, .1);
+  background: rgba(239, 196, 111, .1);
 }
-.trust-mandatory svg { flex-shrink: 0; width: 22px; height: 22px; color: #9b4e32; }
+.trust-mandatory svg { flex-shrink: 0; width: 22px; height: 22px; color: var(--gold-ink); }
 .trust-mandatory p { color: var(--iso-text-secondary); font-size: 14.5px; line-height: 1.6; }
 .trust-mandatory strong { color: var(--iso-ink); font-weight: 900; }
 
@@ -2406,7 +2210,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  color: rgba(12, 62, 72, .64);
+  color: var(--iso-text-label);
   font-family: var(--font-mono), monospace;
   font-size: 12px;
   font-weight: 800;
@@ -2500,18 +2304,6 @@ body {
     linear-gradient(155deg, #0b424c 0%, #062b33 64%, #041f25 100%);
 }
 
-.iso-flow::before {
-  position: absolute;
-  inset: 0;
-  opacity: .13;
-  content: "";
-  background-image:
-    linear-gradient(rgba(255, 250, 241, .34) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 250, 241, .34) 1px, transparent 1px);
-  background-size: 72px 72px;
-  mask-image: linear-gradient(90deg, transparent, #000 55%, transparent);
-  transform: perspective(700px) rotateX(55deg) scale(1.4);
-}
 
 .iso-flow-layout {
   position: relative;
@@ -2726,14 +2518,11 @@ body {
   line-height: 1.5;
 }
 
+/* No grid behind Zeke: only Platform keeps one (v2 brief D14). */
 .iso-copilot {
   overflow: hidden;
   border-bottom: 1px solid var(--iso-line);
-  background:
-    linear-gradient(rgba(12, 62, 72, .04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(12, 62, 72, .04) 1px, transparent 1px),
-    linear-gradient(180deg, #fffaf2, var(--iso-paper));
-  background-size: 64px 64px;
+  background: linear-gradient(180deg, #fffaf2, var(--iso-paper));
 }
 
 .iso-copilot-layout {
@@ -2753,18 +2542,6 @@ body {
     radial-gradient(circle at 50% 45%, rgba(159, 207, 199, .42), transparent 34%),
     rgba(255, 253, 249, .74);
   box-shadow: 12px 14px 0 rgba(12, 62, 72, .11);
-}
-
-.iso-copilot-stage::before {
-  position: absolute;
-  inset: 0;
-  opacity: .17;
-  content: "";
-  background-image:
-    linear-gradient(rgba(12, 62, 72, .25) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(12, 62, 72, .25) 1px, transparent 1px);
-  background-size: 48px 48px;
-  transform: perspective(700px) rotateX(60deg) scale(1.5);
 }
 
 .iso-copilot-stage > img {
@@ -3485,38 +3262,15 @@ body {
   margin-top: 24px;
 }
 
-.iso-route-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-  margin-top: 28px;
-}
-
-.iso-route-list span {
-  border: 1px solid rgba(12, 62, 72, .2);
-  border-radius: 5px;
-  padding: 7px 10px;
-  color: var(--iso-teal);
-  background: rgba(255, 251, 245, .55);
-  box-shadow: 2px 3px 0 rgba(12, 62, 72, .11);
-  font-family: var(--font-mono), monospace;
-  font-size: 12px;
-  font-weight: 900;
-}
-
-.iso-route-list span.is-live {
-  color: #fffaf1;
-  background: var(--iso-teal);
-  box-shadow: 2px 3px 0 var(--iso-teal-dark);
-}
-
 .iso-recipient-ladder {
   display: grid;
+  padding: 0;
+  list-style: none;
   gap: 9px;
   margin-top: 26px;
 }
 
-.iso-recipient-ladder article {
+.iso-recipient-ladder li {
   display: grid;
   grid-template-columns: 34px 1fr;
   gap: 12px;
@@ -3527,7 +3281,7 @@ body {
   box-shadow: 3px 4px 0 rgba(12, 62, 72, .1);
 }
 
-.iso-recipient-ladder article > span {
+.iso-recipient-ladder li > span {
   display: grid;
   width: 32px;
   height: 32px;
@@ -3925,18 +3679,6 @@ body {
     0 32px 70px rgba(8, 54, 64, .16);
 }
 
-.iso-final-panel::before {
-  position: absolute;
-  inset: 0;
-  opacity: .08;
-  content: "";
-  background-image:
-    linear-gradient(rgba(255, 250, 241, .5) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 250, 241, .5) 1px, transparent 1px);
-  background-size: 58px 58px;
-  transform: rotate(12deg) scale(1.2);
-}
-
 .iso-final-copy {
   position: relative;
   z-index: 3;
@@ -4033,7 +3775,7 @@ body {
 
 .iso-footer p,
 .iso-footer > .iso-shell > small {
-  color: rgba(12, 62, 72, .66);
+  color: var(--iso-text-muted);
   font-size: 12px;
   line-height: 1.6;
 }
@@ -5164,11 +4906,11 @@ body {
 }
 
 .iso-auth-error {
-  border: 1px solid rgba(158, 73, 48, .24);
+  border: 1px solid color-mix(in srgb, var(--error) 28%, transparent);
   border-radius: 8px;
   padding: 10px 12px;
-  color: #9b4e32;
-  background: rgba(227, 151, 116, .14);
+  color: var(--error);
+  background: var(--error-bg);
   font-size: 13px;
   font-weight: 750;
   line-height: 1.45;
@@ -5414,7 +5156,7 @@ body {
    glow's brightest point: at .2 the page's #326273 read 4.2:1 there. The
    lower glow sits where the mask fades the layer out. No hairline grid
    behind the dashboard (v2 D14: the landing's Platform section is the only
-   place a grid is drawn), and the lower glow is gold, not coral. */
+   place a grid is drawn), and the lower glow is gold. */
 .fintech-dashboard-shell::before {
   position: fixed;
   z-index: -1;
@@ -6140,19 +5882,6 @@ th.money { text-align: right; }
     linear-gradient(200deg, #0b424c 0%, #062b33 62%, #041f25 100%);
 }
 
-.iso-trust::before {
-  position: absolute;
-  inset: 0;
-  opacity: .12;
-  content: "";
-  background-image:
-    linear-gradient(rgba(255, 250, 241, .34) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 250, 241, .34) 1px, transparent 1px);
-  background-size: 72px 72px;
-  mask-image: linear-gradient(270deg, transparent, #000 55%, transparent);
-  transform: perspective(700px) rotateX(55deg) scale(1.4);
-}
-
 .iso-trust .iso-shell { position: relative; z-index: 2; }
 
 .iso-trust .iso-section-heading > p {
@@ -6294,24 +6023,25 @@ th.money { text-align: right; }
   .iso-trust-card { transition: none; }
 }
 
-/* CANONICAL section order (founder-approved 2026-07-09; #trust added
-   2026-07-10) — the single source of truth for the landing flex order. The
-   JSX mirrors this sequence for DOM/reading order; .cin-section and
-   .iso-marquee share order 1 in cinematic.css (hero then marquee by DOM
-   order). Do not add a second order map elsewhere. */
+/* CANONICAL section order: v2 brief section 6 (Phase 4, 25 Oct 2026). The
+   single source of truth for the landing flex order; the JSX mirrors it for
+   reading order, and tests/landing-v2.test.mjs holds the two together. The
+   stats marquee is gone. Do not add a second order map elsewhere. */
 .iso-header { order: 0; }
+.cin-section { order: 1; }
 .iso-hero { order: 1; }
-.iso-loops { order: 2; }
+.iso-product { order: 2; }
 .iso-partner-rail { order: 3; }
-.iso-flow { order: 4; }
+.iso-flow { order: 4; } /* #how-it-works */
 .iso-corridors { order: 5; }
-.iso-comparison { order: 6; }
-.iso-trust { order: 7; } /* #trust — dark control-plane fold after the table's claims */
-.iso-operating { order: 8; } /* #platform (merged operating-layer + operations) */
+.iso-comparison { order: 5; } /* routes and comparison, one section */
+.iso-loops { order: 6; }
+.iso-operating { order: 7; } /* #platform */
+.iso-trust { order: 8; }
 .iso-supply { order: 9; }
-.iso-copilot { order: 10; }
-.iso-final { order: 11; }
-.iso-footer { order: 12; }
+.iso-copilot { order: 9; } /* Zeke */
+.iso-final { order: 10; }
+.iso-footer { order: 11; }
 .iso-back-to-top { order: 99; }
 /* Removed 2026-07-10 (mainnet-ready pruning): marquee, #walrus, #readiness,
    #operations tool grid + modal, and the fabricated client-proof section. */

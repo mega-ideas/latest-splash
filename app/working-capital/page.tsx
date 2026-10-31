@@ -7,7 +7,7 @@ import { ArrowLeft, ArrowRight } from 'lucide-react';
 
 import RoadmapChip from '@/components/supply/RoadmapChip';
 import DiscountTermSheet from '@/components/supply/DiscountTermSheet';
-import WorkingCapitalFlywheel from '@/components/supply/WorkingCapitalFlywheel';
+import SupplyLoop from '@/components/supply/SupplyLoop';
 
 export const metadata: Metadata = {
   title: 'Dynamic discounting for Southeast Asia — early invoice payment on Splash (roadmap)',
@@ -230,7 +230,7 @@ export default function WorkingCapitalPage() {
         </div>
       </section>
 
-      <section className="iso-section iso-loops wc-flywheel">
+      <section className="iso-section wc-flywheel">
         <div className="iso-shell">
           <ChapterHeading
             index="§03"
@@ -243,7 +243,7 @@ export default function WorkingCapitalPage() {
               </>
             }
           />
-          <WorkingCapitalFlywheel variant="full" />
+          <SupplyLoop />
         </div>
       </section>
 
@@ -252,7 +252,7 @@ export default function WorkingCapitalPage() {
           <div className="wc-close">
             <div className="wc-close-copy">
               <p className="iso-kicker">Shape the build order</p>
-              <h2 className="iso-section-title wc-h2">
+              <h2 className="iso-section-title iso-section-title-light wc-h2">
                 Early interest decides
                 <span>which corridor is first.</span>
               </h2>
@@ -262,11 +262,11 @@ export default function WorkingCapitalPage() {
               </p>
             </div>
             <div className="wc-close-actions">
-              <Link href="/signup?interest=financing" className="iso-button">
+              <Link href="/signup?interest=financing" className="iso-button iso-button-gold">
                 Register financing interest
                 <ArrowRight aria-hidden="true" />
               </Link>
-              <Link href="/" className="iso-button iso-button-ghost iso-button-small">
+              <Link href="/" className="iso-button iso-button-dark-ghost iso-button-small">
                 See live settlement
               </Link>
             </div>
@@ -277,7 +277,7 @@ export default function WorkingCapitalPage() {
       <footer className="wc-footer">
         <div className="iso-shell wc-footer-inner">
           <span>{BRAND.copyright()}</span>
-          <span>Supply loop: roadmap · Settle loop: live on testnet</span>
+          <span>Supply loop: roadmap · Settle loop: live for PH and ID</span>
         </div>
       </footer>
     </main>

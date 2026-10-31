@@ -14,6 +14,7 @@ export default function Loading() {
           width={841}
           height={823}
           className="cin-loading-mark"
+          sizes="68px"
           priority
         />
       </div>

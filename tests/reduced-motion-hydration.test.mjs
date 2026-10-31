@@ -22,7 +22,6 @@ const HOOK = 'components/useHydratedReducedMotion.ts';
 const USERS = [
   'components/landing/SettlementCinematic.tsx',
   'components/supply/DiscountTermSheet.tsx',
-  'components/supply/WorkingCapitalFlywheel.tsx',
 ];
 
 test('the reduced-motion hook reads no preference on the server or while hydrating', () => {

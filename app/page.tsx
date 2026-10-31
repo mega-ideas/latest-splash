@@ -4,8 +4,11 @@ import IsometricLanding from "@/components/IsometricLanding";
 import { landingFaq } from "@/content/landing-faq";
 import { BRAND } from "@/content/brand";
 import { isPhoneUserAgent } from "@/lib/device";
-import { pricingSummary } from "@/lib/fees/copy";
+import { pricingSummary, scheduleToWire } from "@/lib/fees/copy";
 import { publishedFeeSchedule } from "@/lib/fees/fee-config";
+import { PARTNERS, type PartnerId } from "@/lib/partners/signed-partners";
+import { signedPartners } from "@/lib/server/signed-partners";
+import { livePayoutCurrencies } from "@/lib/landing/routes";
 
 /**
  * The landing route.
@@ -52,6 +55,12 @@ function faqJsonLd(faq: ReturnType<typeof landingFaq>) {
   };
 }
 
+/** A signed partner's role as a label: "Philippines payout partner", not "our Philippines payout partner". */
+function roleOf(id: PartnerId): string {
+  const role = PARTNERS[id].role.replace(/^(?:our|an?)\s+/, "");
+  return role.charAt(0).toUpperCase() + role.slice(1);
+}
+
 export default async function Home() {
   // Every device gets the isometric cinematic — the desktop identity — but
   // phones get it "shrunk to fit": a reflowed single column with readable
@@ -66,6 +75,19 @@ export default async function Home() {
   // FeeConfig's fees are off, the page says no Splash fee is charged yet.
   const { schedule, feesOn } = await publishedFeeSchedule();
   const pricing = pricingSummary(schedule, { feesOn });
+  // Who may be named: SIGNED_PARTNERS, read here on the server, empty by
+  // default. The landing renders partners only from this list, and the rails
+  // and standards while it is empty (brief section 6).
+  const signed = signedPartners();
+  const signedList = [...signed].map((id) => ({ name: PARTNERS[id].name, role: roleOf(id) }));
+  const fundingIds: PartnerId[] = ["stripe", "halliday", "transfi", "bridge"];
+  const fundingPartners = fundingIds.filter((id) => signed.has(id)).map((id) => PARTNERS[id].name);
+  // A route is "Live" only once its payout partner is signed; until then it
+  // still quotes (lib/landing/routes.ts routeIsLive).
+  const livePayouts = livePayoutCurrencies(signed);
+  // Save says "Live" only once treasury execution is switched on, which
+  // waits for legal sign-off (brief section 9); until then it is a projection.
+  const treasuryLive = process.env.TREASURY_EXECUTION_ENABLED === "true";
 
   return (
     <>
@@ -77,7 +99,15 @@ export default async function Home() {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd(landingFaq(schedule, { feesOn }))).replace(/</g, "\\u003c") }}
       />
-      <IsometricLanding isPhone={isPhone} pricing={pricing} />
+      <IsometricLanding
+        isPhone={isPhone}
+        pricing={pricing}
+        fees={{ schedule: scheduleToWire(schedule), feesOn }}
+        signedPartners={signedList}
+        fundingPartners={fundingPartners}
+        livePayouts={livePayouts}
+        treasuryLive={treasuryLive}
+      />
     </>
   );
 }

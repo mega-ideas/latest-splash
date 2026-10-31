@@ -17,8 +17,14 @@ import { useHydratedReducedMotion } from '@/components/useHydratedReducedMotion'
 import { lockedCopy } from '@/content/claims';
 import { pricingSummary, type PricingSummary } from '@/lib/fees/copy';
 import { LAUNCH_SCHEDULE } from '@/lib/fees/schedule';
+import { landingImage } from '@/lib/landing/images';
 
-const HERO_IMG = '/cinematic/hero-district-v5.png';
+/* The district art, as scripts/landing-images.mjs made it: WebP at 1600 and
+   2400 px (and a phone crop), from hero-district-v6 once Sky adds it and v5
+   until then. The loader hands next/image the right file for each width, so
+   the PNG original is never requested. */
+const HERO = landingImage('hero');
+const HERO_ALT = 'Isometric Splash district on a floating plinth: a columned SPLASH building, twin towers, a glass tower and a gold ring road with coin trucks';
 
 const EASE_OUT_EXPO = [0.16, 1, 0.3, 1] as const;
 
@@ -32,15 +38,15 @@ const rise = {
   shown: { opacity: 1, y: 0, transition: { duration: 0.8, ease: EASE_OUT_EXPO } },
 };
 
-/** The callouts. Splash's fee is the schedule's (A1 §2.7), handed down by the page. */
+/** The callouts: what is true on mainnet. Splash's fee is the schedule's (A1 §2.7), handed down by the page. */
 const telemetryFor = (pricing: PricingSummary) => [
   {
     id: 'corridor',
     className: 'cin-callout-a',
     enter: 0.27,
-    tag: 'Corridor · Testnet',
-    value: 'USD → PHP',
-    meta: lockedCopy.speed,
+    tag: 'Payout routes · PH and ID',
+    value: 'USDC → PHP, IDR',
+    meta: 'Seconds on Sui, minutes to a PH bank',
     badge: '/cinematic/token-php.png',
     badgeAlt: 'Philippine peso token',
   },
@@ -54,12 +60,12 @@ const telemetryFor = (pricing: PricingSummary) => [
     meta: pricing.notice ?? `${pricing.parts[0]}. Partner fees are shown before you approve.`,
   },
   {
-    id: 'treasury',
+    id: 'wallet',
     className: 'cin-callout-c',
     enter: 0.35,
-    tag: 'Treasury · Approval-gated',
-    value: 'USDY posture',
-    meta: lockedCopy.yield,
+    tag: 'Splash Wallet · Your business',
+    value: 'Stablecoins only',
+    meta: 'Splash has no key to your Splash Wallet.',
   },
   {
     id: 'agent',
@@ -150,7 +156,7 @@ function SpinButton({
       onAnimationEnd={(event) => {
         if (event.animationName === 'cin-spin') setSpinning(false);
       }}
-      aria-label={`${alt} — spin`}
+      aria-label={`Spin the ${alt}`}
     >
       <span className={`cin-token-inner ${float}`}>
         <Image src={src} alt="" width={1024} height={1024} sizes={sizes} loading="eager" />
@@ -203,7 +209,7 @@ function HeroCopy({ animated, onEnterEngine }: { animated: boolean; onEnterEngin
       animate={animated ? 'shown' : undefined}
     >
       <motion.p variants={animated ? rise : undefined} className="iso-kicker">
-        Splash · Settlement network on Sui
+        Splash · Payments on Sui
       </motion.p>
       {/* Display headline (visual) — the real <h1> below carries the SEO wedge. */}
       <motion.p variants={animated ? rise : undefined} className="iso-display" role="presentation">
@@ -211,11 +217,11 @@ function HeroCopy({ animated, onEnterEngine }: { animated: boolean; onEnterEngin
         <span>Settle everything.</span>
       </motion.p>
       <motion.h1 variants={animated ? rise : undefined} className="cin-hero-h1">
-        Send USD across Southeast Asia in minutes — starting with the Philippines
+        Pay suppliers in the Philippines and Indonesia from your business&apos;s own stablecoin wallet
       </motion.h1>
       <motion.p variants={animated ? rise : undefined} className="iso-hero-description">
-        A compliance-gated B2B account network for cross-border money. Between the invoice and the
-        settlement, Splash nets, yields, discounts, and escrows — with human approval on every action.
+        Pay a supplier&apos;s bank in pesos or rupiah, or another business in USDC. A person approves
+        every payment, and every payment leaves a receipt.
       </motion.p>
       <motion.div variants={animated ? rise : undefined} className="iso-hero-actions">
         <Link href="/signup" className="iso-button">
@@ -233,69 +239,34 @@ function HeroCopy({ animated, onEnterEngine }: { animated: boolean; onEnterEngin
         <WaitlistCta />
       </motion.div>
       <motion.div variants={animated ? rise : undefined} className="iso-proof-line">
-        <span><Check aria-hidden="true" /> Compliance-gated</span>
-        <span><Check aria-hidden="true" /> {lockedCopy.speed}</span>
-        <span><Check aria-hidden="true" /> Human-approved AI</span>
+        <span><Check aria-hidden="true" /> Every recipient verified</span>
+        <span><Check aria-hidden="true" /> Settles on Sui</span>
+        <span><Check aria-hidden="true" /> {lockedCopy.agent}</span>
       </motion.div>
     </motion.div>
   );
 }
 
-function VisionCopy() {
-  return (
-    <>
-      <Image
-        src="/cinematic/brand-mark.png"
-        alt=""
-        width={256}
-        height={256}
-        className="cin-vision-mark"
-        loading="eager"
-      />
-      <span className="cin-vision-chip">The product</span>
-      <h2 className="cin-vision-title">
-        Payments are the feature.
-        <span>Treasury is the product.</span>
-      </h2>
-      <p className="cin-vision-lede">
-        Stripe and Airwallex move money. Splash runs everything between the invoice and the
-        settlement — netting it, yielding it, discounting it, escrowing it.
-      </p>
-      <div className="cin-vision-pillars" aria-hidden="true">
-        <span>Netting</span>
-        <span>Yield</span>
-        <span>Discounting</span>
-        <span>Escrow</span>
-      </div>
-      <div className="cin-vision-actions">
-        <Link href="/signup" className="iso-button iso-button-gold">
-          Open payment desk
-          <ArrowRight aria-hidden="true" />
-        </Link>
-        <Link href="/login" className="iso-button iso-button-ghost">
-          Log in
-        </Link>
-      </div>
-    </>
-  );
-}
-
 /** Non-pinned fallback for prefers-reduced-motion: same story, no choreography. */
-function StaticCinematic({ telemetry }: { telemetry: ReturnType<typeof telemetryFor> }) {
+function StaticCinematic({ telemetry, phone }: { telemetry: ReturnType<typeof telemetryFor>; phone: boolean }) {
   return (
-    <section id="cinematic" className="cin-section cin-section-static" aria-label="Splash settlement network">
+    <section id="cinematic" className={`cin-section cin-section-static${phone ? ' is-phone' : ''}`} aria-label="Splash settlement network">
       <div className="cin-static-hero">
         <div className="cin-orb cin-orb-gold" aria-hidden="true" />
         <div className="cin-orb cin-orb-mint" aria-hidden="true" />
-        <div className="cin-grid" aria-hidden="true" />
-        <div className="cin-static-stage" aria-hidden="true">
-          <div className="cin-object-layer">
-            <div className="cin-object">
-              <div className="cin-object-glow" />
-              <Image src={HERO_IMG} alt="" width={2752} height={1536} sizes="1700px" quality={90} priority />
+        {/* Desktop reduced-motion only. On a phone the stage is hidden by CSS,
+            so it is not rendered at all: its priority image would be fetched
+            for nothing. */}
+        {!phone ? (
+          <div className="cin-static-stage" aria-hidden="true">
+            <div className="cin-object-layer">
+              <div className="cin-object">
+                <div className="cin-object-glow" />
+                <Image src={HERO.src} loader={HERO.loader} alt="" width={HERO.width} height={HERO.height} sizes="(max-width: 1200px) 100vw, 1700px" priority />
+              </div>
             </div>
           </div>
-        </div>
+        ) : null}
         <div className="iso-shell cin-copy cin-copy-static">
           <HeroCopy animated={false} />
         </div>
@@ -304,24 +275,22 @@ function StaticCinematic({ telemetry }: { telemetry: ReturnType<typeof telemetry
             the stage above. */}
         <div className="iso-shell cin-phone-object">
           <Image
-            src={HERO_IMG}
-            alt="Isometric Splash settlement district ringed by a gold delivery route"
-            width={2752}
-            height={1536}
-            sizes="(max-width: 760px) 92vw, 1700px"
-            quality={82}
+            src={HERO.phone.src}
+            alt={HERO_ALT}
+            width={HERO.phone.width}
+            height={HERO.phone.height}
+            sizes="92vw"
+            unoptimized
+            priority={phone}
           />
         </div>
       </div>
-      <div className="iso-shell cin-static-telemetry" aria-label="Network telemetry, simulated view">
+      <div className="iso-shell cin-static-telemetry" aria-label="What a payment on Splash looks like">
         {telemetry.map((item) => (
           <div className="cin-callout cin-callout-static" key={item.id}>
             <CalloutBody tag={item.tag} value={item.value} meta={item.meta} badge={item.badge} badgeAlt={item.badgeAlt} />
           </div>
         ))}
-      </div>
-      <div className="iso-shell cin-vision cin-vision-static">
-        <VisionCopy />
       </div>
     </section>
   );
@@ -416,15 +385,11 @@ export default function SettlementCinematic({ isPhone = false, pricing = LAUNCH_
   const scanScale = useTransform(scrollYProgress, [0.24, 0.34], [1.14, 1]);
   const statusOpacity = useTransform(scrollYProgress, [0.27, 0.33, 0.55, 0.63], [0, 1, 1, 0]);
 
-  /* Act III — gold light burst, then the product vision. */
+  /* Act III: gold light burst into the product section below. */
   const flashOpacity = useTransform(scrollYProgress, [0.58, 0.72, 0.82, 0.92], [0, 0.9, 0.35, 0]);
-  const visionOpacity = useTransform(scrollYProgress, [0.74, 0.84], [0, 1]);
-  const visionScale = useTransform(scrollYProgress, [0.74, 0.88], [0.93, 1]);
-  const visionY = useTransform(scrollYProgress, [0.74, 0.86], [44, 0]);
-  const visionPointerEvents = useTransform(scrollYProgress, (value) => (value > 0.78 ? 'auto' : 'none'));
 
   if (reducedMotion || phoneLayout) {
-    return <StaticCinematic telemetry={telemetry} />;
+    return <StaticCinematic telemetry={telemetry} phone={phoneLayout} />;
   }
 
   function enterEngine() {
@@ -444,7 +409,6 @@ export default function SettlementCinematic({ isPhone = false, pricing = LAUNCH_
       <div className="cin-sticky" onPointerMove={trackPointer}>
         <div className="cin-orb cin-orb-gold" aria-hidden="true" />
         <div className="cin-orb cin-orb-mint" aria-hidden="true" />
-        <div className="cin-grid" aria-hidden="true" />
 
         {/* The isometric network artwork with its ambient life. */}
         <div className="cin-object-layer">
@@ -461,12 +425,12 @@ export default function SettlementCinematic({ isPhone = false, pricing = LAUNCH_
             >
               <div className="cin-object-glow" aria-hidden="true" />
               <Image
-                src={HERO_IMG}
-                alt="Isometric Splash headquarters campus on a floating platform: columned SPLASH building, Petronas towers, a glass tower, and a golden ring road with coin trucks"
-                width={2752}
-                height={1536}
+                src={HERO.src}
+                loader={HERO.loader}
+                alt={HERO_ALT}
+                width={HERO.width}
+                height={HERO.height}
                 sizes="(max-width: 880px) 140vw, 1700px"
-                quality={90}
                 priority
                 onLoad={() => setArtLoaded(true)}
               />
@@ -511,7 +475,7 @@ export default function SettlementCinematic({ isPhone = false, pricing = LAUNCH_
         ))}
 
         <motion.p className="cin-status" style={{ opacity: statusOpacity }}>
-          Network telemetry · Sandbox environment · No real money moves
+          An illustration of the payment network, not live figures
         </motion.p>
 
         {/* Act I — hero copy. */}
@@ -524,14 +488,8 @@ export default function SettlementCinematic({ isPhone = false, pricing = LAUNCH_
           </div>
         </motion.div>
 
-        {/* Act III — gold light burst + vision. */}
+        {/* Act III: a gold light burst that hands over to the product section. */}
         <motion.div className="cin-flash" style={{ opacity: flashOpacity }} aria-hidden="true" />
-        <motion.div
-          className="cin-vision"
-          style={{ opacity: visionOpacity, scale: visionScale, y: visionY, pointerEvents: visionPointerEvents }}
-        >
-          <VisionCopy />
-        </motion.div>
 
         <motion.div className="cin-hint" style={{ opacity: hintOpacity }} aria-hidden="true">
           <span className="cin-hint-wheel" />

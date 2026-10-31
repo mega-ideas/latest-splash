@@ -111,18 +111,21 @@ test('with no collection account the payer is told to pay the issuer, and why, i
 
 /* ── The landing ───────────────────────────────────────────────────────── */
 
-test('the landing ladder puts both fund-holding rungs in Phase 2, in the licence words', async () => {
+// v2 brief section 6 and D3: Splash never owns an account that receives
+// client money, so the sweep account and the stored balance leave the
+// landing rather than wait for a licence. Money waits in the business's own
+// Splash Wallet, which Splash has no key to.
+test('the landing ladder offers no Splash account that holds funds: a bank, a wallet, the Splash Wallet', async () => {
   const landing = await source('components/IsometricLanding.tsx');
   const start = landing.indexOf('const recipientLadder');
   assert.ok(start > 0, 'the ladder exists');
   const ladder = landing.slice(start, landing.indexOf('];', start));
-  // It sold the sweep account as a "Phase 1 launch" into "a Splash account",
-  // and stored balance as merely "Corridor gated".
-  assert.doesNotMatch(ladder, /Phase 1 launch|Corridor gated|sweep value into a Splash account/);
-  for (const title of ['Sweep account', 'Stored balance']) {
-    assert.match(ladder, new RegExp(`title: '${title}',\\s*status: 'Phase 2'`), `${title} is Phase 2`);
+  assert.doesNotMatch(ladder, /Sweep account|Stored balance|Phase 1 launch|Corridor gated|sweep value into a Splash account/);
+  for (const title of ['Bank payout', 'Wallet payout', 'Splash Wallet']) {
+    assert.match(ladder, new RegExp(`title: '${title}'`), title);
   }
-  assert.match(ladder, /\$\{CUSTODY_LICENCE\}/, 'the sweep rung names the licence it waits for');
+  assert.match(ladder, /Held by your business/);
+  assert.match(ladder, /Splash has no key to it/);
 });
 
 /* ── Settings ──────────────────────────────────────────────────────────── */
