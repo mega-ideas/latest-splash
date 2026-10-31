@@ -973,20 +973,44 @@ The business's owners run their team, not Splash support
   the wallet's signers; the lead, who is not one, is refused `not_a_signer`. No
   Move code changed.
 - **A business always has an owner.** Nobody changes or removes themselves; only
-  another owner can. A person who belongs to another business, has no account or
-  has not verified their email cannot be added, and the answer is the same for all
-  three, so the form tells no one who has an account.
+  another owner can. That alone is not enough when two owners act on each other
+  at the same moment, so changing or removing a member runs in one transaction
+  that first locks the business's owner rows, reads again, and refuses a change
+  that would leave no owner (409 `last_owner`). Splash support's `revokeRole`
+  takes the same lock and refuses to remove a business's only owner.
+  `tests/team-roles-hardening.test.mjs` runs two owners demoting, removing and
+  mixing against each other. The in-process test database serialises
+  transactions, so the tests prove the rule and the rollback; it is the row
+  lock (`SELECT ... FOR UPDATE` on the owner rows) that protects a deployment
+  with several connections. A person who belongs to
+  another business, has no account or has not verified their email cannot be
+  added, and the answer is the same for all three, so the form tells no one who
+  has an account. There is no invitation for the person to accept: an owner adds
+  an account that has no business by email, as support always could (open
+  question for the product owner).
 - **Add funds and Withdraw are granted.** Owners have both; a staff member or
   approver only with an owner's grant, kind by kind; a viewer never. Read from
   the database on each request for the session's person and business, and a
   stale row for a viewer or a person who left grants nothing. The old rule let
-  any non-viewer add funds and any staff member ask for a withdrawal. Sending
-  USDC to the wallet from any wallet is unchanged and still screened and held.
-- **What ends with a person.** A removal, or a move to viewer or owner, ends
-  their place in charge, the Finance lead role, their access grants and usable
-  sign-offs, through `offboardMember`, and marks the spending rules they hold as
-  orphaned. Removing someone from the team does not remove an owner from the
-  multisig; a change of signers, signed by the quorum, does.
+  any non-viewer add funds and any staff member ask for a withdrawal. A top-up's
+  details are read only with Add funds; the funding options and the deposit
+  history are the wallet's record and are shown to every member who can read
+  the wallet. Sending USDC to the wallet from any wallet is unchanged and still
+  screened and held.
+- **What ends with a person.** A removal ends their place in charge, the
+  Finance lead role, their access grants and usable sign-offs, writes a
+  `member_offboarded` line, and records their passkey addresses so a spending
+  rule they hold shows as orphaned. A move to viewer or owner ends the same
+  holds but is a role change: no offboarding line and no orphaned-spender row,
+  because the person is still here and their rule already reads as a viewer's
+  (or an owner's) until the owners' quorum changes it. A viewer who holds a
+  passkey and a spending rule can still pay inside that rule on the chain; the
+  dialog and the Finance lead words say so. The Finance lead cannot end any of
+  that by moving or removing the person who holds it: someone in charge or
+  holding Add funds or Withdraw is an owner's to move. The change and its
+  clean-up commit together or not at all. Removing someone from the team does
+  not remove an owner from the multisig; a change of signers, signed by the
+  quorum, does.
 - **The trail.** Every grant, change and removal is a line in the append-only
   `wallet_authority_events` (seven new actions, migration 0066), with the actor,
   the person and the old and new role. Splash support's grant is a line under

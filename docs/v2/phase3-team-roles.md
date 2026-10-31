@@ -44,7 +44,7 @@ refused for them without anyone remembering to say so.
 |---|---|---|---|
 | Add a person (viewer, staff, approver) | yes | yes | no |
 | Add an owner, or move someone to owner | yes | no | no |
-| Change or remove a viewer, staff or approver | yes | yes | no |
+| Change or remove a viewer, staff or approver | yes | yes, unless that person is in charge of sign-offs or holds Add funds or Withdraw | no |
 | Change or remove an owner | yes (not themselves) | no | no |
 | Change or remove themselves | no | no | no |
 | Appoint or take back the Finance lead | yes | no | no |
@@ -53,13 +53,33 @@ refused for them without anyone remembering to say so.
 | Remove an owner or set the recovery party (wallet) | yes | no | no |
 | Rotate the wallet, bank accounts, funding sources, spending rules | yes | no | no |
 
-Nobody changes or removes themselves, so a business always keeps an owner: the
-owner who acts is, by that fact, still there.
+**A business always keeps an owner.** Nobody changes or removes themselves, so
+the owner who acts is still there. Two owners acting on each other at the same
+moment is the case that rule does not cover, so changing or removing a member
+runs in one transaction that first locks the business's owner rows (`SELECT ...
+FOR UPDATE`) and then reads again: the second of two simultaneous changes finds
+the first and is refused (403 if its actor is no longer an owner, 409
+`last_owner` if the change would leave no owner). Splash support's console
+(`revokeRole`) takes the same lock and refuses to remove a business's only
+owner; to replace one, add the new owner first. The test database serialises
+transactions, so `tests/team-roles-hardening.test.mjs` proves the rule and the
+rollback; the row lock is what protects a deployment with several connections.
+
+**The Finance lead and what an owner granted.** The lead may not change Add
+funds or Withdraw access or the person in charge, and moving or removing the
+person who holds one ends it. So the lead cannot change the role of, or remove,
+someone who is in charge or holds Add funds or Withdraw (403 `owner_only`); an
+owner takes that back first, or does the change. Settings does not offer Manage
+on such a person to the lead and says an owner changes them.
 
 An owner must name a person who already has a **verified Splash account** and
 belongs to no business. A missing account, an unverified one and one that
 belongs to another business all get the same answer, so the form cannot be used
-to find out who has an account or where.
+to find out who has an account or where. There is **no invitation for that
+person to accept**: they are added, as Splash support always could add them,
+and until a product decision says otherwise the only way out is an owner
+removing them. An accept step, or a way for a member to leave, is open for the
+product owner.
 
 ## Add funds and Withdraw
 
@@ -69,8 +89,10 @@ from the database on every request (`fundsAccessOf`), for the session's own
 person in the session's own business; a stale row for someone who is now a
 viewer or has left grants nothing.
 
-- **Add funds**: funding quotes, a top-up, recording or rechecking a deposit,
-  cancelling a top-up, and Transfer's step-3 top-up.
+- **Add funds**: funding quotes, a top-up and reading a top-up's details,
+  recording or rechecking a deposit, cancelling a top-up, and Transfer's
+  step-3 top-up. The funding options and the deposit history are not Add funds:
+  the Wallet page shows them to every member who can read the wallet.
 - **Withdraw**: a quote, the request, reading the business's bank accounts, the
   payout route, and one withdrawal's bank details. Adding a bank account and
   setting up the payout route stay owner-only. A withdrawal is still **asked
@@ -82,12 +104,32 @@ can turn it on; the routes refuse them anyway. While the page does not yet know,
 it offers nothing.
 
 Preparing a payment (a quote, a supplier payout, a batch review) is a different
-gate (`requireWithdrawalRequester`: owners and staff) and is unchanged.
+gate (`requireWithdrawalRequester`: owners, approvers and staff; a viewer
+never) and is unchanged. A withdrawal is asked for by an owner or by a staff
+member or approver with Withdraw, and signed only by the owners' quorum on
+their own devices; an approver's approval is not part of a withdrawal, so an
+approver who asked for one has no further say in it.
 
 Funding **from outside** is unchanged: anyone can send USDC to the wallet
 address from any wallet, and the deposit watcher still screens and holds it.
 
 ## The audit trail
+
+A role change is a role change on the trail (`member_role_changed`, with the old
+and new role) and, when the new role cannot carry them, the lines that end a
+place in charge, the Finance lead role or access (reason `role_changed`). It is
+**not** an offboarding: no `member_offboarded` line and no "removed" spender row,
+because the person is still on the team. A removal writes both. A spending rule
+a person holds lives on the chain, so moving them to viewer does not stop it: a
+viewer who holds a passkey can still pay inside it until the owners' quorum
+revokes the rule. Settings says so before the role is saved (`roleChangeNote`),
+shows the rule under the person's name ("Belongs to a viewer") and the Finance
+lead words say the lead cannot take a rule back. Making someone staff again
+reads their rule as theirs again.
+
+A change and its clean-up (the role or the membership, the Finance lead role,
+grants, place in charge, sign-offs and the trail lines) commit in one
+transaction, so a failure between them keeps neither.
 
 Every grant, change and removal is a line in `wallet_authority_events`, which a
 trigger keeps append-only: `member_added`, `member_role_changed` (with the old
@@ -129,7 +171,8 @@ chain has no concept of a Finance lead and **none was added**.
 Owners see everyone with their email, role, whether they are the Finance lead or
 in charge, what they may do with Add funds and Withdraw, and their spending
 rule. **Manage** opens one person: role (saved by its own button), Add funds and
-Withdraw switches (owners only, saved as they are switched), Make or take back
+Withdraw switches (owners only, saved as they are switched; they stay focusable
+while saving, and giving Withdraw asks first), Make or take back
 Finance lead (owners only), and Remove, which asks first and says what ends with
 it. **Add a person** takes an email and a role. The Finance lead sees the same
 list with only what they may do, and none of the owner-only controls. Someone
@@ -155,3 +198,12 @@ known on chain** (for example a signer tier that can only add approvers, or a
 threshold rule that counts the Finance lead differently from an owner), that is
 a Move change and Sebastian approves every file under `move/`. Today the role is
 Splash's, not the chain's.
+
+## Release note: existing members lose Add funds and Withdraw until an owner grants them
+
+Migration 0066 grants nothing. The moment it ships, every existing staff member
+and approver is refused on Add funds, Withdraw and Transfer's top-up, and sees a
+sentence that an owner can turn it on, until an owner opens Settings > Team and
+switches it on for them. Owners are not affected. Decision for the product
+owner: tell owners in the release notes, or run a one-off grant of both to
+today's staff and approvers so nothing changes on day one. Neither is done.
