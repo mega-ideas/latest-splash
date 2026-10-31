@@ -15,7 +15,6 @@ import {
   fundsCheck,
   maxFeeToSend,
   parseAmountMinor,
-  STAFF_RULE_PAYMENTS_WIRED,
 } from '../lib/transfer/plan.ts';
 import { newIntentKey, parseDraft, serializeDraft, draftStorageKey, DRAFT_MAX_AGE_MS } from '../lib/transfer/draft.ts';
 
@@ -148,7 +147,6 @@ test('staff within their rule, below the threshold, pay under the rule (splash_s
   });
   assert.equal(plan.route, 'staff_rule');
   assert.equal(plan.needsOwnerApproval, false);
-  assert.equal(typeof STAFF_RULE_PAYMENTS_WIRED, 'boolean');
 });
 
 test('staff outside their rule ask the owners, with every reason named', () => {
@@ -156,10 +154,11 @@ test('staff outside their rule ask the owners, with every reason named', () => {
   const reasonsOf = (over) => approvalPlan({ ...base, amountMinor: USDC(1_000), ...over });
   assert.deepEqual(reasonsOf({ rule: null }).reasons, ['no_rule']);
   assert.equal(reasonsOf({ rule: null }).route, 'ask_owners');
-  assert.deepEqual(reasonsOf({ rule: { ...RULE, status: 'expired' } }).reasons, ['rule_not_active']);
-  assert.deepEqual(reasonsOf({ rule: { ...RULE, status: 'no_allowance' } }).reasons, ['rule_not_active']);
+  assert.deepEqual(reasonsOf({ rule: { ...RULE, status: 'expired' } }).reasons, ['rule_expired']);
+  assert.deepEqual(reasonsOf({ rule: { ...RULE, status: 'no_allowance' } }).reasons, ['rule_revoked']);
   assert.deepEqual(reasonsOf({ amountMinor: USDC(5_000.01) }).reasons, ['over_payment_max']);
   assert.deepEqual(reasonsOf({ rule: { ...RULE, spendableNowMinor: USDC(500).toString() } }).reasons, ['over_cap']);
+  assert.deepEqual(reasonsOf({ rule: { ...RULE, spendableNowMinor: '0' } }).reasons, ['cap_used_up']);
   assert.deepEqual(reasonsOf({ policy: { ...POLICY, recipients: [] } }).reasons, ['recipient_not_on_rule']);
   const two = reasonsOf({ amountMinor: USDC(6_000), policy: { ...POLICY, recipients: [] } });
   assert.deepEqual(two.reasons.sort(), ['over_payment_max', 'recipient_not_on_rule']);
