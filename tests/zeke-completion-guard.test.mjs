@@ -42,6 +42,7 @@ const {
 
 const PREPARED_LINE = 'Nothing has been sent. It is waiting for approval.';
 const PLAIN_LINE = "I haven't sent anything. I can't approve or send payments, so a person on your team does that.";
+const STATUS_LINE = "I can't tell you whether it went through. Open History to see where it stands.";
 
 function guard(text, { level = 'strict', prepared = true } = {}) {
   assert.equal(typeof oxwal.guardCompletionClaims, 'function', 'guardCompletionClaims is exported');
@@ -453,7 +454,8 @@ test('asked "did it go through?", a model that says yes is answered with what is
   const events = await turn({ message: 'Did it go through?', orgId: 'demo-business', sessionKey: 's-guard-3', history: MONEY_HISTORY, forceLocal: false });
   const text = textOf(events);
   assert.equal(text.includes('it was sent'), false);
-  assert.equal(count(text, PLAIN_LINE), 1);
+  assert.equal(count(text, STATUS_LINE), 1);
+  assert.equal(text.includes("I haven't sent"), false);
   assert.equal(text.includes('waiting for approval'), false);
 });
 
@@ -476,7 +478,7 @@ test('a short reply with no money in the thread is not a money turn', async () =
   assert.equal(textOf(events), 'Done. Anything else?');
 });
 
-test('a reply with no claim reaches the person word for word, with no extra line', async () => {
+test('a reply with no claim reaches the person word for word, and the fixed line follows it once', async () => {
   const body = 'I prepared the payment to Acme. A teammate approves it in Wallet.';
   setOxwalModelClientForTesting(fakeModel([
     {
@@ -489,8 +491,8 @@ test('a reply with no claim reaches the person word for word, with no extra line
   ]));
   const events = await turn({ message: 'Pay Acme 600 USD', orgId: 'demo-business', sessionKey: 's-guard-6', forceLocal: false });
   const text = textOf(events);
-  assert.ok(text.endsWith(body) || text.includes(body), 'the model\'s words are intact');
-  assert.equal(text.includes('Nothing has been sent'), false, 'no claim, so no extra line');
+  assert.ok(text.includes(body), 'the model\'s words are intact');
+  assert.equal(count(text, PREPARED_LINE), 1, 'the line is always carried when a payment was prepared');
   assert.equal(text.includes("I haven't sent"), false);
 });
 
@@ -537,7 +539,7 @@ test('the same turn replayed says the same thing, and the line is not stacked on
   const second = await run(MONEY_HISTORY);
   assert.equal(first, second);
   const third = await run([...MONEY_HISTORY, { role: 'assistant', content: PLAIN_LINE }]);
-  assert.equal(count(third, PLAIN_LINE), 1, 'a line in the thread is not a reason to skip it or to repeat it');
+  assert.equal(count(third, STATUS_LINE), 1, 'a line in the thread is not a reason to skip it or to repeat it');
 });
 
 test('the guard does not depend on the environment: production replaces claims too', () => {
