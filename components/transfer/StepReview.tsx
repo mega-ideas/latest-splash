@@ -7,6 +7,8 @@ import { formatUsdc, kindLabel } from '@/lib/fees/copy';
 import { groupAddress } from '@/lib/transfer/addresses';
 import { formatMoney } from '@/lib/formatMoney';
 import { approvalPlan, approvalReasonLines, APPROVAL_REASON_TEXT, executableRoute, maxFeeToSend, parseAmountMinor, SETTLE_WINDOW_MS } from '@/lib/transfer/plan';
+import { inFlightForPayee } from '@/lib/transfer/context';
+import { refusalAsksOwners, viaFor } from '@/lib/transfer/send';
 import PhoneBar from '@/components/dashboard/PhoneBar';
 import { call, errorText, type SigningView } from './api';
 import SignPanel from './SignPanel';
@@ -47,6 +49,8 @@ export default function StepReview({ flow, ctx, balance, reload, back, made, onM
   const [sendError, setSendError] = useState<string | null>(null);
   const [now, setNow] = useState(0);
   const [addressChecked, setAddressChecked] = useState(false);
+  /** The server's words when it would not take this as a payment under the person's rule: the one way on is to ask the owners, with the same intent id. */
+  const [askInstead, setAskInstead] = useState<string | null>(null);
   const chosen = flow.chosen;
   const amount = parseAmountMinor(flow.amountText);
 
@@ -133,19 +137,24 @@ export default function StepReview({ flow, ctx, balance, reload, back, made, onM
         policy: ctx.policy,
         runningTotalMinor: counted ? BigInt(counted) : 0n,
         asset: 'USDC',
+        // What is already on its way counts, as it does on the server: the page and the server answer the same question.
+        inFlight: inFlightForPayee(ctx.inFlight, address),
         ...(now ? { nowMs: BigInt(now), settleByMs: BigInt(now + SETTLE_WINDOW_MS) } : {}),
       }),
       ctx.staffRulePaymentsWired,
     );
   }, [ctx, chosen, amount, quote, now]);
 
+  /** What is already on its way, for the recipient chosen (a Splash business or a bank account is not on a rule's list). */
+  const flight = useMemo(() => inFlightForPayee(ctx?.inFlight, chosen?.kind === 'recipient' ? chosen.address : null), [ctx, chosen]);
+
   /** Why the owners decide, in sentences with the limit, what is left and when the cap renews. */
   const reasonLines = useMemo(
-    () => (plan && amount !== null && ctx ? approvalReasonLines(plan, { rule: ctx.rule, policy: ctx.policy, amountMinor: amount, ...(now ? { nowMs: now } : {}) }) : []),
-    [plan, amount, ctx, now],
+    () => (plan && amount !== null && ctx ? approvalReasonLines(plan, { rule: ctx.rule, policy: ctx.policy, amountMinor: amount, feeMinor: quote?.maxFeeMinor ?? 0n, inFlight: flight, ...(now ? { nowMs: now } : {}) }) : []),
+    [plan, amount, ctx, now, quote, flight],
   );
   /** What is left of the person's cap once this payment is made, when it is paid under their rule. */
-  const leftAfter = plan?.route === 'staff_rule' && ctx?.rule && quote ? BigInt(ctx.rule.spendableNowMinor) - quote.totalDebitMinor : null;
+  const leftAfter = plan?.route === 'staff_rule' && ctx?.rule && quote ? BigInt(ctx.rule.spendableNowMinor) - flight.spenderMinor - quote.totalDebitMinor : null;
 
   async function send() {
     if (!chosen || !quote || amount === null) return;
@@ -171,7 +180,8 @@ export default function StepReview({ flow, ctx, balance, reload, back, made, onM
     const answer = await call<{ transfer?: { id: string; route: 'owners_sign' | 'asked_owners' | 'staff_rule' }; signingRequest?: SigningView | null; ask?: { id: string } | null; plan?: { reasons: string[]; lines: string[] }; feeMinor?: string; code?: string }>('/api/wallet/transfers', {
       key: flow.intentKey,
       // A page that said "within your spending rule" asks to pay alone: if the server finds it is not, it says why instead of quietly asking the owners.
-      body: { payee, amountMinor: amount.toString(), maxFeeMinor: maxFee, reference: flow.reference || undefined, asset: 'USDC', via: plan?.route === 'staff_rule' ? 'rule' : undefined },
+      // Once it has said why, the same button asks the owners, with the same intent id (nothing was stored by the refusal).
+      body: { payee, amountMinor: amount.toString(), maxFeeMinor: maxFee, reference: flow.reference || undefined, asset: 'USDC', via: viaFor(plan?.route, askInstead !== null) },
     });
     setSending(false);
     if (answer.status === 409 && answer.body?.code === 'fee_changed') {
@@ -179,9 +189,10 @@ export default function StepReview({ flow, ctx, balance, reload, back, made, onM
       void load();
       return;
     }
-    if (answer.status === 409 && answer.body?.code === 'outside_rule') {
-      // The rule changed since the page read it: read it again, and say why in the server's words.
-      setSendError(errorText(answer, 'This payment is outside your spending rule now. Nothing was sent.'));
+    if (refusalAsksOwners(answer.status, answer.body?.code)) {
+      // The server would not take this as a payment under the rule (the rule or what is on its way changed, or paying alone is not
+      // available): say why in its words, read the rule again, and leave the one way on, asking the owners.
+      setAskInstead(errorText(answer, 'This payment is outside your spending rule now. Nothing was sent.'));
       reload();
       return;
     }
@@ -195,7 +206,8 @@ export default function StepReview({ flow, ctx, balance, reload, back, made, onM
 
   const feeLine = quote ? (quote.feesOn ? `${formatUsdc(quote.feeMinor)} USDC` : 'None charged yet') : '';
   const ownerRoute = plan?.route === 'owners_sign';
-  const ruleRoute = plan?.route === 'staff_rule';
+  // A payment the server would not take under the rule is the owners' to approve, and the person asks them with the same button.
+  const ruleRoute = plan?.route === 'staff_rule' && askInstead === null;
 
   if (made) {
     return (
@@ -297,17 +309,17 @@ export default function StepReview({ flow, ctx, balance, reload, back, made, onM
           <h3 id="who-approves" className="flex items-center gap-2 text-sm font-extrabold text-[#0c3e48]"><ShieldCheck className="h-4 w-4 text-[#0d6370]" aria-hidden="true" />Who approves</h3>
           {plan.route === 'owners_sign' ? (
             <p className="text-sm leading-6 text-[#1F4452]">Your owners approve this together. Each signs on their own device with their own passkey, and Splash combines the signatures. Splash has no key to your wallet.</p>
-          ) : plan.route === 'staff_rule' ? (
+          ) : plan.route === 'staff_rule' && askInstead === null ? (
             <>
               <h4 className="text-sm font-bold text-[#145d6a]">Within your spending rule</h4>
               <p className="text-sm leading-6 text-[#1F4452]">The amount, the recipient and the time all fit your rule, so you sign this yourself with your passkey. It is paid from your business wallet, and no one else has to approve it.</p>
               {leftAfter !== null && leftAfter >= 0n ? <p className="text-[13px] leading-5 text-[#326273]">After this, your rule has {formatUsdc(leftAfter)} USDC left{ctx?.rule?.renewsAtMs ? ' until it renews' : ''}.</p> : null}
             </>
-          ) : plan.route === 'ask_owners' ? (
+          ) : plan.route === 'ask_owners' || askInstead !== null ? (
             <>
               <p className="text-sm leading-6 text-[#1F4452]">Your owners approve this payment. Nothing leaves your wallet until they do.</p>
               <ul className="list-disc space-y-1 pl-5 text-[13px] leading-5 text-[#1F4452]">
-                {reasonLines.map((line) => (
+                {(askInstead !== null ? [askInstead] : reasonLines).map((line) => (
                   <li key={line}>{line}</li>
                 ))}
               </ul>

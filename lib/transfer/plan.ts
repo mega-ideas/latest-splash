@@ -100,6 +100,8 @@ export type ApprovalReason =
   | 'owners_pay_this_kind'
   | 'exchange_needs_owners'
   | 'wrong_asset'
+  | 'too_many_open'
+  | 'staff_gas_share_used'
   | 'policy_unreadable'
   | 'staff_rule_not_wired';
 
@@ -127,8 +129,18 @@ export type PolicyFacts = { secondApprovalThresholdMinor: string; recipients: Ar
 
 export type PlanPayee = { kind: 'bank' | 'splash_business' | 'wallet'; wallet?: string; address?: string | null };
 
-/** Payments this person has asked for that the chain has not yet counted: signed but not on chain, or still collecting. */
-export type InFlight = { spenderMinor: bigint; recipientMinor: bigint };
+/**
+ * The most payments one person has waiting to be signed at once. Each one is a sponsored transaction whose network
+ * fee Splash covers up to a daily allowance the owners' own payments share, so a person cannot hold more than this.
+ */
+export const STAFF_OPEN_LIMIT = 3;
+
+/**
+ * Payments already asked for that the chain has not yet counted: signed but not on chain, or still waiting.
+ * `spenderMinor` is this person's (amount and fee); `recipientMinor` is everyone's towards this recipient, because
+ * the second-approval amount is the recipient's, not the person's; `openCount` is this person's payments waiting.
+ */
+export type InFlight = { spenderMinor: bigint; recipientMinor: bigint; openCount?: number };
 
 export function approvalPlan(input: {
   role: string;
@@ -178,6 +190,7 @@ export function approvalPlan(input: {
   const left = BigInt(rule.spendableNowMinor) - flight.spenderMinor;
   if (left <= 0n) reasons.push('cap_used_up');
   else if (input.amountMinor + input.feeMinor > left) reasons.push('over_cap');
+  if ((flight.openCount ?? 0) >= STAFF_OPEN_LIMIT) reasons.push('too_many_open');
   if (!policy) {
     reasons.push('policy_unreadable');
   } else {
@@ -222,7 +235,7 @@ export const APPROVAL_REASON_TEXT: Record<ApprovalReason, string> = {
   no_rule: 'You have no spending rule, so this payment needs the owners.',
   rule_not_active: 'Your spending rule is not running at the moment, so this payment needs the owners.',
   rule_expired: 'Your spending rule has ended, so this payment needs the owners.',
-  rule_revoked: 'Your spending rule was taken back, so this payment needs the owners.',
+  rule_revoked: 'Your spending rule was taken back or replaced, so this payment needs the owners.',
   rule_not_started: 'Your spending rule has not started yet, so this payment needs the owners.',
   rule_ends_soon: 'Your spending rule ends before this payment could be signed, so it needs the owners.',
   rule_needs_passkey: 'Your spending rule belongs to a passkey you cannot sign with on this site, so this payment needs the owners.',
@@ -234,11 +247,18 @@ export const APPROVAL_REASON_TEXT: Record<ApprovalReason, string> = {
   owners_pay_this_kind: 'Bank payouts and USDC to another chain are paid by the owners.',
   exchange_needs_owners: 'Payments to an exchange account need a Travel Rule message first, so the owners send them.',
   wrong_asset: 'Payments are made in USDC only.',
+  too_many_open: `You already have ${STAFF_OPEN_LIMIT} payments waiting to be signed, so this one needs the owners.`,
+  staff_gas_share_used: 'Your business has used the network-fee allowance for staff payments for today, so this one needs the owners.',
   policy_unreadable: 'Your business’s spending policy could not be read, so this payment needs the owners.',
   staff_rule_not_wired: 'Your rule covers this payment, but paying under a rule is not set up for your business, so the owners approve it.',
 };
 
-const stampUtc = (ms: bigint | string) => `${new Date(Number(ms)).toISOString().replace('T', ' ').slice(0, 16)} UTC`;
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+/** "16:00 UTC on 3 Nov": the way the rest of the dashboard words a moment, the same on the server and in the browser. */
+const stampUtc = (ms: bigint | string) => {
+  const d = new Date(Number(ms));
+  return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')} UTC on ${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`;
+};
 
 /**
  * The reasons as sentences with their numbers: the limit the amount is over,
@@ -247,7 +267,7 @@ const stampUtc = (ms: bigint | string) => `${new Date(Number(ms)).toISOString().
  */
 export function approvalReasonLines(
   plan: ApprovalPlan,
-  facts: { rule: StaffRuleFacts | null; policy: PolicyFacts | null; amountMinor: bigint; nowMs?: number },
+  facts: { rule: StaffRuleFacts | null; policy: PolicyFacts | null; amountMinor: bigint; feeMinor?: bigint; inFlight?: InFlight; nowMs?: number },
 ): string[] {
   const usdc = (minor: string | bigint) => `${formatUsdc(BigInt(minor))} USDC`;
   const renews = (): string => {
@@ -256,15 +276,24 @@ export function approvalReasonLines(
     const left = facts.nowMs !== undefined ? Number(at) - facts.nowMs : Number.NaN;
     return Number.isFinite(left) && left > 0 ? ` It renews in ${timeLeftWords(left)} (${stampUtc(at)}).` : ` It renews on ${stampUtc(at)}.`;
   };
+  // What the cap really has left is what the chain says less what is already on its way. When those payments are
+  // what hold it, the window's renewal is not what frees it: signing or lapsing is.
+  const onItsWay = facts.inFlight?.spenderMinor ?? 0n;
+  const spendable = facts.rule ? BigInt(facts.rule.spendableNowMinor) : 0n;
+  const left = spendable > onItsWay ? spendable - onItsWay : 0n;
+  const wayText = onItsWay > 0n ? ` ${usdc(onItsWay)} is already on its way for you.` : '';
   return plan.reasons.map((reason) => {
     const base = APPROVAL_REASON_TEXT[reason];
     switch (reason) {
       case 'over_payment_max':
         return facts.rule ? `This is more than your rule allows for one payment. Your limit is ${usdc(facts.rule.perPaymentMaxMinor)} a payment.` : base;
       case 'cap_used_up':
-        return `${base}${renews()}`;
-      case 'over_cap':
-        return facts.rule ? `This is more than is left of your rule’s cap for now: ${usdc(facts.rule.spendableNowMinor)} left, counting the fee.${renews()}` : base;
+        return onItsWay > 0n && spendable > 0n ? `${base}${wayText.replace(/\.$/, '')}; if it is not signed within the hour it lapses and gives that part of your cap back.` : `${base}${renews()}`;
+      case 'over_cap': {
+        if (!facts.rule) return base;
+        const heldByThose = onItsWay > 0n && facts.amountMinor + (facts.feeMinor ?? 0n) <= spendable;
+        return `This is more than is left of your rule’s cap for now: ${usdc(left)} left, counting the fee.${wayText}${heldByThose ? '' : renews()}`;
+      }
       case 'above_threshold':
         return facts.policy ? `With what was already paid to this recipient, the total is above ${usdc(facts.policy.secondApprovalThresholdMinor)}, the amount an owner must approve.` : base;
       default:

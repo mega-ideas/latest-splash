@@ -148,6 +148,9 @@ type Loaded = {
 
 /** Everything a rule decision needs, read fresh from the chain. */
 async function load(sc: SpendContext, opts: { wallet?: WalletMembers } = {}): Promise<Loaded | SpendFailure> {
+  // The moment of the read is taken before the chain is read, so a payment that lands while it is read is in the figures
+  // or in what the caller counts as on its way, possibly both, never neither.
+  const readAt = nowOf(sc);
   let account: AccountState;
   try {
     account = await sc.wallet.readAccount();
@@ -193,7 +196,7 @@ async function load(sc: SpendContext, opts: { wallet?: WalletMembers } = {}): Pr
       policy: mine(policy) ? policy : null,
       earlier,
       held,
-      now: nowOf(sc),
+      now: readAt,
       appName: splashSpendAppName(sc.chain.spendPackageId),
     };
   } catch {

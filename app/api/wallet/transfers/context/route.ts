@@ -8,7 +8,8 @@ import { liveWalletContext } from '@/lib/server/wallet-deps';
 import { readSpendingRules } from '@/lib/server/spend-rules';
 import { liveSpendContext } from '@/lib/server/spend-rules-deps';
 import { NO_STORE } from '@/lib/server/wallet-route';
-import { staffFactsFrom } from '@/lib/transfer/context';
+import { paysAlone, staffFactsFrom } from '@/lib/transfer/context';
+import { staffInFlight } from '@/lib/server/wallet-transfers';
 
 export const dynamic = 'force-dynamic';
 
@@ -44,7 +45,7 @@ export async function GET(request: Request) {
   const live = await liveWalletContext(authority.orgId);
   if (!live.ok) {
     const walletState = live.status === 409 ? 'none' : live.status === 503 ? 'off' : 'unavailable';
-    return NextResponse.json({ ...base, walletState, wallet: null, rule: null, policy: null, runningTotals: {} }, { headers: NO_STORE });
+    return NextResponse.json({ ...base, walletState, wallet: null, rule: null, policy: null, runningTotals: {}, spender: null, inFlight: { spenderMinor: '0', openCount: 0, byRecipient: {} } }, { headers: NO_STORE });
   }
   let wallet: string | null = null;
   let walletState: 'ready' | 'none' | 'pending' | 'unavailable' = 'none';
@@ -55,19 +56,24 @@ export async function GET(request: Request) {
   } catch {
     walletState = 'unavailable';
   }
-  let facts: ReturnType<typeof staffFactsFrom> = { rule: null, policy: null, runningTotals: {} };
+  let facts: ReturnType<typeof staffFactsFrom> = { rule: null, policy: null, runningTotals: {}, spender: null };
   let wired = false;
+  let inFlight: Awaited<ReturnType<typeof staffInFlight>> = { spenderMinor: '0', openCount: 0, byRecipient: {} };
   if (wallet && authority.role !== 'OWNER' && authority.role !== 'VIEWER') {
     const sc = await liveSpendContext({ ctx: live.ctx, db: live.db, orgId: authority.orgId });
     if (sc.ok) {
+      // The moment is taken before the chain is read, so a payment that lands in between is counted twice, not never.
+      const readAtMs = BigInt(Date.now());
       const read = await readSpendingRules(sc.sc);
       if (read.ok) {
         const members = (await orgMemberWalletAddresses(live.db, authority.orgId)).filter((m) => m.userId === authority.userId);
         facts = staffFactsFrom(read.view as unknown as Parameters<typeof staffFactsFrom>[0], members.map((m) => m.address));
-        // Paying alone needs the policy to exist, a sponsor for the gas, and a passkey of the person's that can sign on this site.
-        wired = read.view.policy !== null && Boolean(live.ctx.signing.sponsor) && members.some((m) => m.canSign);
+        // Paying alone needs the policy to exist, a sponsor for the gas, and the passkey the rule belongs to to be one the person can sign with on this site.
+        wired = paysAlone({ hasPolicy: read.view.policy !== null, sponsored: Boolean(live.ctx.signing.sponsor), spender: facts.spender, members });
+        // What the person, and their colleagues, have already asked for that the chain has not counted: the page plans with it, as the server does.
+        inFlight = await staffInFlight(live.db, { orgId: authority.orgId, now: () => new Date() }, authority.userId, readAtMs);
       }
     }
   }
-  return NextResponse.json({ ...base, staffRulePaymentsWired: wired, walletState, wallet, ...facts }, { headers: NO_STORE });
+  return NextResponse.json({ ...base, staffRulePaymentsWired: wired, walletState, wallet, ...facts, inFlight }, { headers: NO_STORE });
 }

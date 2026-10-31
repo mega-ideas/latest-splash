@@ -1052,16 +1052,35 @@ needs the person in charge. No Move changed. What the code holds to:
   gas sponsor, no policy, or a passkey that cannot sign here: nothing is built.
   There is no stand-in rule, signer or sponsor, in production or out of it.
 - **Replay and races.** The intent id is unique per business; the payment
-  reference is claimed once on chain. The claim and the read of what the person
-  has already asked for are one step under an advisory lock per person, so two
-  sends cannot both claim the last of a cap. Withdrawn, declined, expired and
-  failed requests hold nothing.
+  reference is claimed once on chain, and an intent id answers only the person
+  who made the payment (another member, owner or not, gets 409
+  `idempotency_key_reused` and sees nothing of it). The claim and the read of
+  what has already been asked for are one step under an advisory lock per
+  business, so two sends cannot both claim the last of a cap or of a
+  recipient's second-approval amount. Withdrawn, declined, expired and failed
+  requests hold nothing; a claim still being made holds for 15 minutes (a slow
+  bundle upload), then is let go of. The moment a rule is read is taken before
+  the chain is read.
+- **Staff cannot use up the owners' network-fee allowance (found by review,
+  High).** A staff payment is a sponsored transaction opened before anyone
+  signs it, and the business's 1 SUI per 24 hours counts every request. A
+  person holds at most three payments waiting to be signed (`too_many_open`),
+  and staff payments together may use 20% of the day's allowance
+  (`WALLET_SPONSOR_STAFF_SHARE_PERCENT`; past that the owners are asked,
+  `staff_gas_share_used`), so the owners always keep 80% for their own
+  payments. Tested: 45 one-USDC payments no longer lock an owner out.
 - **Funds on hold are never drawn**, and the recipient must be a fresh CLEAR
   and a wallet the supplier has proven, as for the owners' own payment; the
   signing layer checks both again before the signature.
-- **Same-recipient splitting across spenders stays detective.** The chain checks
-  the threshold per payer and recipient; the near-threshold alerts read these
-  payments (`RuleSpend`, running totals). Nothing blocks it.
+- **Same-recipient splitting across spenders is blocked off chain and
+  detected.** The chain checks the second-approval amount per payer and
+  recipient, so several spenders could each stay under it. The server and the
+  page count every spender's running total to that recipient, and every staff
+  payment still on its way to it, together: the payment that would cross the
+  amount goes to the owners (`above_threshold`). The near-threshold alerts
+  still read these payments (`RuleSpend`, running totals). The Move-level
+  recipient-wide total stays a decision for Sebastian's review (it needs a
+  republish of `splash_spend`).
 - **Open:** no testnet run of the PTB (`pay_intent` with an allowance
   withdrawal input and an empty `Option<PayoutApproval>`); a passkey's
   signature on a sponsored single-signer transaction is part of the owed

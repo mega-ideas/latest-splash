@@ -76,7 +76,9 @@ them has to be right alone.
 | Cap too small for this one | ask, `over_cap` with what is left | 409 |
 | Recipient not on the rule | ask, `recipient_not_on_rule` | 409 |
 | Exchange account | ask, `exchange_needs_owners` (its Travel Rule message goes first) | 409 |
-| Running total above the second-approval threshold | ask, `above_threshold` | 409 |
+| Running total above the second-approval threshold (every spender's payments to this recipient, and every staff payment on its way to it, together) | ask, `above_threshold` | 409 |
+| Three payments already waiting to be signed | ask, `too_many_open` | 409 `outside_rule` |
+| Staff payments have used their 20% of the day's network-fee allowance | ask, `staff_gas_share_used` | 429 `staff_gas_share_used` |
 | Another asset than USDC | 400 `wrong_asset`, for staff and owners alike | same |
 | Recipient not a fresh CLEAR / not a proven wallet | refused with the screening or recipient reason | same |
 | Funds on hold | 409 `funds_on_hold` | same |
@@ -100,23 +102,45 @@ a staff member who insists on paying alone gets 503 and nothing is stored.
   intent id with the same payment answers the payment already made; another
   payment under it is 409; two sends racing make one. The chain's payment
   reference (a hash of the business and the intent id) is claimed once, ever.
+  An intent id answers only the person who made the payment: another member of
+  the business, owner or not, gets 409 `idempotency_key_reused` and sees
+  nothing of it.
 - **The last of a cap.** A payment the chain has not counted yet is invisible
-  to the chain's own figures. The claim and the read of what this person has
-  already asked for (requests collecting or on their way, a claim being made,
-  and requests that executed after the rule was read) are one step under an
-  advisory lock per person, with the plan run again over them. Two sends
+  to the chain's own figures. The claim and the read of what has already been
+  asked for (requests collecting or on their way, a claim being made, and
+  requests that executed after the rule was read) are one step under an
+  advisory lock per business, with the plan run again over them. Two sends
   racing for the last of a cap: one pays alone, the other is asked of the
-  owners with `over_cap`. A request that is withdrawn, declined, expired or
-  failed holds nothing. The chain would refuse the second anyway; this keeps
-  the person from being told otherwise, and keeps a failed transaction out of
-  their history.
+  owners with `over_cap`, and the sentence says what is left after the payment
+  on its way ("299.75 USDC left ... 1,000.25 USDC is already on its way for
+  you"), not the whole cap; a cap held only by payments on their way says
+  they free it when signed or lapsed, not when the window renews. A request
+  that is withdrawn, declined, expired or failed holds nothing; a claim still
+  being made holds for 15 minutes. The moment the rule is read is taken before
+  the chain is, so a payment that lands in between is counted twice, not never.
+  The chain would refuse the second anyway; this keeps the person from being
+  told otherwise, and keeps a failed transaction out of their history.
 - **Two staff.** Each has their own allowance. Both go through, independently.
 - **The same recipient through several spenders.** The chain checks the
   second-approval threshold per (payer, recipient), so several spenders can
-  each stay under it. That stays detective (`near_threshold_repeat`,
-  `same_recipient_many_spenders`): the alerts read the running totals and
-  `RuleSpend`, which these payments produce. A test pays one recipient through
-  two spenders and shows the alert.
+  each stay under it. The server and the page count every spender's running
+  total to the recipient (`staffFactsFrom`) and every staff payment on its way
+  to it, together, and send the payment that would cross the amount to the
+  owners (`above_threshold`). The Move-level fix, a recipient-wide total in
+  `splash_spend`, needs a republish and is for Sebastian's review. The alerts
+  (`near_threshold_repeat`, `same_recipient_many_spenders`) still read the
+  running totals and `RuleSpend`, which these payments produce.
+- **The owners' network-fee allowance.** A staff payment is a sponsored
+  transaction opened before anyone signs it, and the business's 1 SUI per 24
+  hours counts every request. A person holds at most three payments waiting
+  to be signed (`too_many_open`), and staff payments together may use 20% of
+  the day's allowance (`staff_gas_share_used`); past either the owners are
+  asked. The owners always keep 80% for their own payments.
+- **When the server turns a person away.** Every refusal that leaves a way on
+  (`outside_rule`, `no_passkey_for_rule`, `staff_rule_unavailable`,
+  `no_sponsor`, `rule_unreadable`, `staff_gas_share_used`) stores nothing, so
+  the page shows the reason and the same button then asks the owners
+  (`via: 'ask'`) with the same intent id (`lib/transfer/send.ts`).
 - **A signature sent twice** is refused once the request has closed, and the
   same transaction cannot land twice.
 
@@ -169,4 +193,8 @@ a request can be read and signed only by its signer, and the person who asked.
   has been simulated on a network. The hardware check of a passkey's signature
   on a sponsored single-signer transaction is part of the owed Phase 2 run.
 - **Gas.** The operator sponsors each payment (the cap is the business's 1 SUI
-  in 24 hours already counted by the signing layer).
+  in 24 hours counted by the signing layer; staff payments may use a fifth of
+  it, see above).
+- **Not checked against the wallet's balance across people.** Two staff can both
+  be shown "Pay now" for more than the wallet holds; the second request fails at
+  its dry run, before anyone signs, and nothing moves.

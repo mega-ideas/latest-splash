@@ -20,8 +20,8 @@ const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf
 test('step 4 sends a payment inside the rule as "pay alone or tell me why not", and shows the owners’ reasons with their numbers', () => {
   const review = read('components/transfer/StepReview.tsx');
   assert.match(review, /approvalReasonLines\(/, 'the reasons are said with the limit, what is left and when it renews');
-  assert.match(review, /via: plan\?\.route === 'staff_rule' \? 'rule' : undefined/, 'a page that said "within your rule" sends via rule, so a stale page is refused in words, never asked silently');
-  assert.match(review, /code === 'outside_rule'/, 'the refusal is shown, and the quote and rule are read again');
+  assert.match(review, /via: viaFor\(plan\?\.route, askInstead !== null\)/, 'a page that said "within your rule" sends via rule, so a stale page is refused in words, never asked silently; after the refusal the same button asks');
+  assert.match(review, /refusalAsksOwners\(answer\.status, answer\.body\?\.code\)/, 'the refusal is shown, the rule is read again, and the owners can be asked');
   assert.match(review, /Pay now/, 'the button for a payment inside the rule');
   assert.match(review, /Ask the owners to approve/, 'the button for one outside it');
   assert.match(review, /plan\.route === 'staff_rule'/);

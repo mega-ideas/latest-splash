@@ -94,6 +94,12 @@ export const SUBMISSION_LEASE_MS = 5 * 60 * 1000;
  * the operator's hot balance, not ordinary use.
  */
 export const WALLET_SPONSOR_DAILY_BUDGET_MIST = 1_000_000_000n;
+/**
+ * The share of that allowance staff payments under a rule may use together (percent). They are opened before they are
+ * signed, so without a share a few staff could use the whole allowance with requests nobody signs and lock the owners
+ * out of their own sponsored payments for the day.
+ */
+export const WALLET_SPONSOR_STAFF_SHARE_PERCENT = 20n;
 /** A multisig signature's flag. A signer sends their own part, never a whole. */
 const MULTISIG_FLAG = 0x03;
 
@@ -664,8 +670,17 @@ export async function openSigningRequest(
 
   if (input.gasMode === 'sponsored') {
     const used = await sponsoredBudgetSince(deps.db, input.orgId, new Date(now.getTime() - 24 * 60 * 60 * 1000));
-    if (used + BigInt(description.gas.budget) > (deps.sponsorDailyBudgetMist ?? WALLET_SPONSOR_DAILY_BUDGET_MIST)) {
+    const daily = deps.sponsorDailyBudgetMist ?? WALLET_SPONSOR_DAILY_BUDGET_MIST;
+    if (used + BigInt(description.gas.budget) > daily) {
       return fail(429, 'sponsor_budget', 'this business has used its network-fee allowance for the last 24 hours; try again later');
+    }
+    // A staff member's payment under a rule opens a sponsored transaction before anyone signs it, so staff payments together may
+    // use only a share of the allowance: whatever they open or leave unsigned, the owners keep the rest for their own payments.
+    if (input.purpose === 'staff_rule_payment') {
+      const staffUsed = await sponsoredBudgetSince(deps.db, input.orgId, new Date(now.getTime() - 24 * 60 * 60 * 1000), 'staff_rule_payment');
+      if (staffUsed + BigInt(description.gas.budget) > (daily * WALLET_SPONSOR_STAFF_SHARE_PERCENT) / 100n) {
+        return fail(429, 'staff_gas_share_used', 'staff payments have used their share of this business’s network-fee allowance for the last 24 hours');
+      }
     }
   }
 

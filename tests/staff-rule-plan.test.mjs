@@ -138,7 +138,7 @@ test('the reasons are worded with the numbers: the limit, what is left, and when
   const used = approvalReasonLines(plan({ rule: { ...RULE, spendableNowMinor: '0' } }), { rule: { ...RULE, spendableNowMinor: '0' }, policy: POLICY, amountMinor: USDC(1_000), nowMs: NOW });
   assert.match(used[0], /used up/i);
   assert.match(used[0], /14 hours/);
-  assert.match(used[0], /2026-10-31 22:00 UTC/);
+  assert.match(used[0], /22:00 UTC on 31 Oct/);
   const small = approvalReasonLines(plan({ rule: { ...RULE, spendableNowMinor: USDC(500).toString() } }), { rule: { ...RULE, spendableNowMinor: USDC(500).toString() }, policy: POLICY, amountMinor: USDC(1_000), nowMs: NOW });
   assert.match(small[0], /500\.00 USDC left/);
   const threshold = approvalReasonLines(

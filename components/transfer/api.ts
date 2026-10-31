@@ -5,6 +5,7 @@
  */
 import type { PaymentReceipt, ReceiptRow, EInvoiceOffer } from '@/lib/transfer/receipt';
 import type { PolicyFacts, StaffRuleFacts } from '@/lib/transfer/plan';
+import type { InFlightWire } from '@/lib/transfer/context';
 
 export type Answer<T> = { ok: boolean; status: number; body: T | null };
 
@@ -36,7 +37,10 @@ export type Context = {
   wallet: string | null;
   rule: StaffRuleFacts | null;
   policy: PolicyFacts | null;
+  /** What every spender has paid each recipient in the window that counts towards the second-approval amount. */
   runningTotals: Record<string, string>;
+  /** Payments already asked for that the chain has not counted: the caller's own cap and open payments, and everyone's towards each recipient. */
+  inFlight?: InFlightWire;
   staffRulePaymentsWired: boolean;
 };
 

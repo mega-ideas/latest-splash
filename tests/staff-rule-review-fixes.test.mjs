@@ -66,6 +66,9 @@ test('staff payments together may use only a fifth of the day’s network-fee al
   const t = await setup();
   await t.give(t.rule(staffKey.address, { cap: { period: 'month', limitMinor: U(15_000) } }));
   await t.give(t.rule(staff2Key.address, { cap: { period: 'month', limitMinor: U(15_000) } }));
+  // Setting the business up used some of the day's allowance; start a fresh day so the figures below are the payments' own.
+  t.w.setNow(new Date(T0.getTime() + 25 * 3_600_000));
+  await t.w.screenClear(SUPPLIER);
   const first = await T.createTransfer(t.deps(), STAFF, amountInput(t.recipientId, 1, { clientKey: key(1) }));
   assert.equal(first.transfer.route, 'staff_rule');
   const gas = BigInt(first.signingRequest.description.gas.budget);
@@ -216,7 +219,7 @@ test('a claim whose request is still being made holds the cap for as long as it 
     n += 1;
     const at = new Date(T0.getTime() - minutesAgo * 60_000);
     return t.w.db.insert(schema.walletTransfers).values({
-      id: `wtr_old_${n}`, orgId: 'acme', clientKey: `old_claim_${n}0000`, requestHash: `h${n}`, paymentRef: `ref${n}`, route: 'staff_rule', payeeKind: 'self_custody',
+      id: `wtr_old_${n}`, orgId: 'acme', clientKey: `old_claim_${n}0000`, requestHash: `h${n}`, paymentRef: String(n).repeat(64).slice(0, 64), route: 'staff_rule', payeeKind: 'self_custody',
       recipientId: t.recipientId, payeeName: 'Dela Cruz Trading Corp', payeeMasked: 'x', address: SUPPLIER, amountMinor: U(1_000), maxFeeMinor: fee, feeKind: 1, requestedBy: 'u-staff', createdAt: at, updatedAt: at,
     });
   };

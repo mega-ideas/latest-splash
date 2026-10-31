@@ -343,11 +343,11 @@ export async function markNotified(db: DrizzleDb, input: { orgId: string; reques
  * `since`: what the sponsor has agreed to pay for at most. Read from the
  * server's own decoding of the bytes (`summary.description.gas.budget`).
  */
-export async function sponsoredBudgetSince(db: DrizzleDb, orgId: string, since: Date): Promise<bigint> {
+export async function sponsoredBudgetSince(db: DrizzleDb, orgId: string, since: Date, purpose?: SigningPurpose): Promise<bigint> {
   const rows = await db
     .select({ total: sql<string>`coalesce(sum((${walletSigningRequests.summary}->'description'->'gas'->>'budget')::numeric), 0)::text` })
     .from(walletSigningRequests)
-    .where(and(eq(walletSigningRequests.orgId, orgId), eq(walletSigningRequests.gasMode, 'sponsored'), gte(walletSigningRequests.createdAt, since)));
+    .where(and(eq(walletSigningRequests.orgId, orgId), eq(walletSigningRequests.gasMode, 'sponsored'), gte(walletSigningRequests.createdAt, since), ...(purpose ? [eq(walletSigningRequests.purpose, purpose)] : [])));
   return BigInt(String(rows[0]?.total ?? '0').split('.')[0]);
 }
 

@@ -40,7 +40,7 @@
  */
 import { createHash, randomUUID } from 'node:crypto';
 
-import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNull, sql } from 'drizzle-orm';
 import { normalizeSuiAddress } from '@mysten/sui/utils';
 
 import { suppliers, walletApprovalAsks, walletSigningRequests, walletTransfers } from '../db/schema.ts';
@@ -315,6 +315,9 @@ const RECLAIMED = Symbol('reclaimed');
 const IN_PROGRESS = fail(409, 'in_progress', 'This payment is still being prepared. Wait a moment and try again; nothing is sent twice.');
 
 async function replay(deps: TransferDeps, actor: { userId: string }, row: Row, requestHash: string) {
+  // An intent id answers the person who made the payment. Another member of the business, an owner or not, is shown
+  // nothing of it: not its payee, its amount or its signing request, and is not told a payment exists for them.
+  if (row.requestedBy !== actor.userId) return fail(409, 'idempotency_key_reused', 'That intent id was used for a different payment.');
   if (!row.signingRequestId && !row.askId) {
     // A claim with nothing behind it yet: another request is still making it, or it died.
     const settled = await settledClaim(deps, row.clientKey);
@@ -475,20 +478,21 @@ export async function createTransfer(deps: TransferDeps, actor: { userId: string
   const underRule = staff?.kind === 'rule' ? staff : null;
   try {
     if (underRule) {
-      // The claim and the read of what this person has already asked for are one step under a lock per person,
-      // so two sends cannot both be told there is room for the last of a cap (the chain would refuse the second;
-      // this keeps the person from being told otherwise).
+      // The claim and the read of what has already been asked for are one step under a lock per business, so two
+      // sends cannot both be told there is room for the last of a cap, or for the last of a recipient's second-approval
+      // amount, which is shared by every person paying that recipient (the chain would refuse the second of the first
+      // kind; this keeps the person from being told otherwise). The step is a read and an insert, so the lock is short.
       const outcome = await deps.db.transaction(async (tx) => {
-        await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`staff-rule:${deps.orgId}:${actor.userId}`}))`);
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`staff-rule:${deps.orgId}`}))`);
         const flight = await inFlightFor(tx as unknown as DrizzleDb, deps, actor.userId, address, underRule.read.readAtMs);
         const plan = planFor(deps, actor, { resolved, address, amount, maxFee, read: underRule.read, inFlight: flight });
-        if (plan.route !== 'staff_rule') return { plan };
+        if (plan.route !== 'staff_rule') return { plan, flight };
         await tx.insert(walletTransfers).values(claim);
-        return { plan: null };
+        return { plan: null, flight };
       });
       if (outcome.plan) {
         // What was in flight changed the answer: it is outside the rule now.
-        const lines = linesFor(outcome.plan, underRule.read, amount, now);
+        const lines = linesFor(outcome.plan, underRule.read, amount, now, maxFee, outcome.flight);
         if (via === 'rule') return fail(409, 'outside_rule', outsideRuleText(lines), { reasons: outcome.plan.reasons });
         staff = { kind: 'ask', reasons: outcome.plan.reasons, lines };
         route = 'asked_owners';
@@ -575,13 +579,25 @@ export async function createTransfer(deps: TransferDeps, actor: { userId: string
           walrusBlobId: record.walrusBlobId,
         },
       });
-      if (!opened.ok) {
+      if (opened.ok) {
+        await deps.db.update(walletTransfers).set({ signingRequestId: opened.request.id, updatedAt: deps.now() }).where(eq(walletTransfers.id, id));
+        const row = (await getByKey(deps, clientKey)) as Row;
+        return { ok: true as const, created: true, transfer: await viewOf(deps, row), signingRequest: opened.request, ask: null, plan: { route: 'staff_rule' as const, reasons: [], lines: [] } };
+      }
+      if (opened.code !== 'staff_gas_share_used') {
         await release();
         return fail(opened.status, opened.code, opened.error);
       }
-      await deps.db.update(walletTransfers).set({ signingRequestId: opened.request.id, updatedAt: deps.now() }).where(eq(walletTransfers.id, id));
-      const row = (await getByKey(deps, clientKey)) as Row;
-      return { ok: true as const, created: true, transfer: await viewOf(deps, row), signingRequest: opened.request, ask: null, plan: { route: 'staff_rule' as const, reasons: [], lines: [] } };
+      // Staff payments together have used their share of the day's network-fee allowance. That is not the person's fault and
+      // not an error: the owners are asked instead (a person who insisted on paying alone is told, and nothing is kept).
+      const lines = [APPROVAL_REASON_TEXT.staff_gas_share_used];
+      if (via === 'rule') {
+        await release();
+        return fail(429, 'staff_gas_share_used', `${lines[0]} Nothing was sent. Ask the owners to approve it instead.`, { reasons: ['staff_gas_share_used'] });
+      }
+      staff = { kind: 'ask', reasons: ['staff_gas_share_used'], lines };
+      route = 'asked_owners';
+      await deps.db.update(walletTransfers).set({ route, updatedAt: deps.now() }).where(eq(walletTransfers.id, id));
     }
 
     const why = staff?.kind === 'ask' ? staff : null;
@@ -657,8 +673,8 @@ function planFor(
   });
 }
 
-function linesFor(plan: ApprovalPlan, read: StaffRuleRead, amount: bigint, now: Date): string[] {
-  return approvalReasonLines(plan, { rule: read.facts.rule, policy: read.facts.policy, amountMinor: amount, nowMs: now.getTime() });
+function linesFor(plan: ApprovalPlan, read: StaffRuleRead, amount: bigint, now: Date, fee: bigint, inFlight?: InFlight): string[] {
+  return approvalReasonLines(plan, { rule: read.facts.rule, policy: read.facts.policy, amountMinor: amount, feeMinor: fee, ...(inFlight ? { inFlight } : {}), nowMs: now.getTime() });
 }
 
 const outsideRuleText = (lines: string[]) => `${lines.join(' ')} Nothing was sent. Ask the owners to approve it instead.`.trim();
@@ -687,9 +703,9 @@ async function decideStaff(
     return ask(['policy_unreadable']);
   }
   const plan = planFor(deps, actor, { resolved: c.resolved, address: c.address, amount: c.amount, maxFee: c.maxFee, read: read.read });
-  if (plan.route === 'blocked') return fail(403, 'cannot_pay', linesFor(plan, read.read, c.amount, deps.now()).join(' '), { reasons: plan.reasons });
+  if (plan.route === 'blocked') return fail(403, 'cannot_pay', linesFor(plan, read.read, c.amount, deps.now(), c.maxFee).join(' '), { reasons: plan.reasons });
   if (plan.route === 'ask_owners') {
-    const lines = linesFor(plan, read.read, c.amount, deps.now());
+    const lines = linesFor(plan, read.read, c.amount, deps.now(), c.maxFee);
     if (c.via === 'rule') return fail(409, 'outside_rule', outsideRuleText(lines), { reasons: plan.reasons });
     return { kind: 'ask', reasons: plan.reasons, lines };
   }
@@ -712,16 +728,26 @@ async function decideStaff(
 }
 
 /**
- * What this person has asked for under their rule that the chain has not
- * counted yet: requests still collecting or on their way, a claim still being
- * made, and requests that executed after the rule was read. Only theirs, and
- * only this business's.
+ * A claim on an intent id that has no request yet still holds its cap this long. A request is made within seconds, or
+ * after a slow upload of the audit bundle within minutes; one older than this was left by a request that died.
  */
-async function inFlightFor(db: DrizzleDb, deps: Pick<TransferDeps, 'orgId' | 'now'>, userId: string, address: string, readAtMs: bigint): Promise<InFlight> {
+export const TRANSFER_CLAIM_HOLD_MS = 15 * 60_000;
+
+type Flight = { requestedBy: string; address: string; amount: bigint; total: bigint; waiting: boolean };
+
+/**
+ * Every staff payment under a rule in this business that the chain has not
+ * counted yet: requests still collecting or on their way, a claim still being
+ * made, and requests that executed after the rule was read. `waiting` marks
+ * the ones still to be signed or on their way (not the ones already counted
+ * by the time they executed).
+ */
+async function staffFlight(db: DrizzleDb, deps: Pick<TransferDeps, 'orgId' | 'now'>, readAtMs: bigint): Promise<Flight[]> {
+  const nowMs = deps.now().getTime();
   const rows = await db
-    .select({ amount: walletTransfers.amountMinor, fee: walletTransfers.maxFeeMinor, address: walletTransfers.address, requestId: walletTransfers.signingRequestId, createdAt: walletTransfers.createdAt })
+    .select({ amount: walletTransfers.amountMinor, fee: walletTransfers.maxFeeMinor, address: walletTransfers.address, requestedBy: walletTransfers.requestedBy, requestId: walletTransfers.signingRequestId, createdAt: walletTransfers.createdAt })
     .from(walletTransfers)
-    .where(and(eq(walletTransfers.orgId, deps.orgId), eq(walletTransfers.requestedBy, userId), eq(walletTransfers.route, 'staff_rule')));
+    .where(and(eq(walletTransfers.orgId, deps.orgId), eq(walletTransfers.route, 'staff_rule'), gte(walletTransfers.createdAt, new Date(nowMs - 24 * 3_600_000))));
   const ids = rows.map((r) => r.requestId).filter((v): v is string => Boolean(v));
   const requests = ids.length
     ? await db
@@ -730,22 +756,64 @@ async function inFlightFor(db: DrizzleDb, deps: Pick<TransferDeps, 'orgId' | 'no
         .where(and(eq(walletSigningRequests.orgId, deps.orgId), inArray(walletSigningRequests.id, ids)))
     : [];
   const byId = new Map(requests.map((r) => [r.id, r]));
-  const nowMs = deps.now().getTime();
-  let spender = 0n;
-  let recipient = 0n;
+  const out: Flight[] = [];
   for (const r of rows) {
     const req = r.requestId ? byId.get(r.requestId) : undefined;
     let counts = false;
-    if (!r.requestId) counts = nowMs - r.createdAt.getTime() < TRANSFER_CLAIM_TTL_MS;
+    let waiting = true;
+    if (!r.requestId) counts = nowMs - r.createdAt.getTime() < TRANSFER_CLAIM_HOLD_MS;
     // A request still collecting past its end can no longer be signed (the sweep has not closed it yet): it holds nothing.
     else if (req && req.status === 'collecting') counts = req.expiresAt.getTime() > nowMs;
     else if (req && ['submitting', 'unknown'].includes(String(req.status))) counts = true;
-    else if (req && req.status === 'executed') counts = (req.closedAt?.getTime() ?? 0) > Number(readAtMs);
-    if (!counts) continue;
-    spender += r.amount + r.fee;
-    if (normalizeSuiAddress(r.address) === address) recipient += r.amount;
+    else if (req && req.status === 'executed') {
+      counts = (req.closedAt?.getTime() ?? 0) > Number(readAtMs);
+      waiting = false;
+    }
+    if (counts) out.push({ requestedBy: r.requestedBy, address: normalizeSuiAddress(r.address), amount: r.amount, total: r.amount + r.fee, waiting });
   }
-  return { spenderMinor: spender, recipientMinor: recipient };
+  return out;
+}
+
+/**
+ * What this person has asked for under their rule that the chain has not
+ * counted yet (their cap and their open payments), and what everyone in this
+ * business has asked to pay this recipient (the second-approval amount is the
+ * recipient's, not the person's). Only this business's.
+ */
+async function inFlightFor(db: DrizzleDb, deps: Pick<TransferDeps, 'orgId' | 'now'>, userId: string, address: string, readAtMs: bigint): Promise<InFlight> {
+  const flight = await staffFlight(db, deps, readAtMs);
+  let spender = 0n;
+  let recipient = 0n;
+  let open = 0;
+  for (const f of flight) {
+    if (f.requestedBy === userId) {
+      spender += f.total;
+      if (f.waiting) open += 1;
+    }
+    if (f.address === address) recipient += f.amount;
+  }
+  return { spenderMinor: spender, recipientMinor: recipient, openCount: open };
+}
+
+/**
+ * What the Transfer page needs to plan with what is already on its way: the
+ * caller's own total and open payments, and everyone's towards each recipient
+ * (GET /api/wallet/transfers/context). `readAtMs` is taken before the chain
+ * is read for the same figures.
+ */
+export async function staffInFlight(db: DrizzleDb, deps: Pick<TransferDeps, 'orgId' | 'now'>, userId: string, readAtMs: bigint): Promise<{ spenderMinor: string; openCount: number; byRecipient: Record<string, string> }> {
+  const flight = await staffFlight(db, deps, readAtMs);
+  const byRecipient: Record<string, bigint> = {};
+  let spender = 0n;
+  let open = 0;
+  for (const f of flight) {
+    if (f.requestedBy === userId) {
+      spender += f.total;
+      if (f.waiting) open += 1;
+    }
+    byRecipient[f.address] = (byRecipient[f.address] ?? 0n) + f.amount;
+  }
+  return { spenderMinor: spender.toString(), openCount: open, byRecipient: Object.fromEntries(Object.entries(byRecipient).map(([k, v]) => [k, v.toString()])) };
 }
 
 async function getByKey(deps: TransferDeps, clientKey: string): Promise<Row | null> {
