@@ -552,6 +552,7 @@ test('every wallet route takes the org from the session, never the request', asy
     'app/api/wallet/business/rotation/route.ts',
     'app/api/wallet/business/members/route.ts',
     'app/api/wallet/signing-requests/route.ts',
+    'app/api/wallet/signing-requests/count/route.ts',
     'app/api/wallet/signing-requests/[id]/route.ts',
     'app/api/wallet/signing-requests/[id]/signatures/route.ts',
     'app/api/wallet/migration/route.ts',
