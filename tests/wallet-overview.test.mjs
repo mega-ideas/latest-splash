@@ -87,3 +87,9 @@ test('the route takes the business from the session and reads nothing about a bu
   assert.doesNotMatch(route, /searchParams|body\.orgId|request\.json/, 'nothing is read from the request but the session');
   assert.match(route, /headers: NO_STORE/, 'a balance is never cached');
 });
+
+test('wallets that are off, or a business with no on-chain account, answer as such and never as a wallet', () => {
+  const route = read('app/api/wallet/overview/route.ts');
+  assert.match(route, /live\.status === 409 \? 'none' : live\.status === 503 \? 'off' : 'unavailable'/);
+  assert.match(route, /wallet: null, balance: null/, 'when the context cannot be built no wallet and no balance are named');
+});
