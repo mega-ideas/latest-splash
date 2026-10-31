@@ -134,3 +134,9 @@ test('the old Settings link for upgrade alerts lands on the wallet’s own rules
   assert.match(redirect, /redirect\('\/dashboard\/wallet#spending-rules'\)/);
   assert.match(read('components/wallet/RulesCard.tsx'), /id="spending-rules"/);
 });
+
+test('the rules card never sends the owner to Settings for something Settings cannot do', () => {
+  const r = code(read('components/wallet/RulesCard.tsx'));
+  assert.doesNotMatch(r, /in Settings|Manage in Settings|href="\/dashboard\/settings"/, 'no screen in Settings gives, changes or takes back a rule, so the page must not say it does');
+  assert.match(r, /Splash support/, 'the owner is told who can change a rule');
+});
