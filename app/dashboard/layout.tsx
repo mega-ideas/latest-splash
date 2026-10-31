@@ -1,3 +1,5 @@
+import type { Viewport } from 'next';
+import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import type { ReactNode } from 'react';
 
@@ -8,8 +10,12 @@ import { readGovernanceBannerForSession } from '@/lib/server/governance-alerts-s
 import { readKybGateState } from '@/lib/server/kyb-gate';
 import { readOnboardingState } from '@/lib/server/onboarding';
 import { launchScope } from '@/lib/server/launch-scope';
+import { phoneHintFromHeaders } from '@/lib/device';
 
 export const dynamic = 'force-dynamic';
+
+/** The bottom bars of the phone layouts clear the home indicator (env(safe-area-inset-bottom)) only when the page covers the whole screen. */
+export const viewport: Viewport = { width: 'device-width', initialScale: 1, viewportFit: 'cover' };
 
 export default async function DashboardLayout({ children }: { children: ReactNode }) {
   const session = await getCustomerSession();
@@ -60,5 +66,8 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   // One line on purpose: tests/oxwal-frontend.test.mjs pins the shape
   // {children}</DashboardShell> as the no-second-wrapper contract.
   // sweepOn needs no database, so it is resolved even when `locks` is not.
-  return <DashboardShell session={session} kyb={kyb} locks={locks} setup={setup} sweepOn={sweepAccountEnabled()} launchScope={launchScope()} governanceAlerts={governanceAlerts}>{children}</DashboardShell>;
+  // Phone is decided where the layout renders, from the User-Agent, so the
+  // right layout arrives on the first byte; the window's width decides after.
+  const phoneHint = phoneHintFromHeaders(await headers());
+  return <DashboardShell session={session} kyb={kyb} locks={locks} setup={setup} sweepOn={sweepAccountEnabled()} launchScope={launchScope()} governanceAlerts={governanceAlerts} phoneHint={phoneHint}>{children}</DashboardShell>;
 }

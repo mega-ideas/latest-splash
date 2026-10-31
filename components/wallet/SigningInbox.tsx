@@ -1,7 +1,10 @@
 'use client';
 
+import Link from 'next/link';
 import { useState } from 'react';
 import { Clock3, PenLine } from 'lucide-react';
+
+import { usePhone } from '@/components/dashboard/Device';
 
 import type { SigningView } from '@/components/transfer/api';
 import SignPanel from '@/components/transfer/SignPanel';
@@ -29,6 +32,8 @@ export default function SigningInbox({ onChanged }: { onChanged: () => void }) {
   const inbox = useLoad<{ requests: Waiting[] }>('/api/wallet/signing-requests', 'Your requests could not be loaded.');
   const [openId, setOpenId] = useState<string | null>(null);
   const [now] = useState(() => Date.now());
+  // On a phone a request opens on the Approve screen, which is for nothing else (v2 brief 5.10).
+  const phone = usePhone();
 
   if (inbox.loading) return <Card id="needs-signature" title="Needs your signature"><Loading label="Looking for requests…" /></Card>;
   if (!inbox.data) return <Card id="needs-signature" title="Needs your signature"><Note tone="error">{inbox.error}</Note></Card>;
@@ -47,12 +52,19 @@ export default function SigningInbox({ onChanged }: { onChanged: () => void }) {
                   <p className="text-sm font-bold text-[#0c3e48]">{requestTitle(r.purpose)}</p>
                   <p className="mt-0.5 flex items-center gap-1.5 text-[13px] text-[#326273]"><Clock3 className="h-3.5 w-3.5" aria-hidden="true" />{r.signedWeight} of {r.threshold} signed, {hours(r.expiresAt, now)}</p>
                 </div>
-                <QuietButton type="button" aria-expanded={open} onClick={() => setOpenId(open ? null : r.id)}>
-                  <PenLine className="h-4 w-4" aria-hidden="true" />
-                  {open ? 'Close' : 'Review and sign'}
-                </QuietButton>
+                {phone ? (
+                  <Link href={`/dashboard/approve/${encodeURIComponent(r.id)}`} className="inline-flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-[#326273]/25 bg-white px-4 text-sm font-semibold text-[#1F4452] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0d6370]">
+                    <PenLine className="h-4 w-4" aria-hidden="true" />
+                    Review and sign
+                  </Link>
+                ) : (
+                  <QuietButton type="button" aria-expanded={open} onClick={() => setOpenId(open ? null : r.id)}>
+                    <PenLine className="h-4 w-4" aria-hidden="true" />
+                    {open ? 'Close' : 'Review and sign'}
+                  </QuietButton>
+                )}
               </div>
-              {open ? (
+              {open && !phone ? (
                 <div className="mt-3">
                   <SignPanel
                     initial={r}

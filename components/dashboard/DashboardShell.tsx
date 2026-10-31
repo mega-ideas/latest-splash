@@ -5,7 +5,9 @@ import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, 
 import FloatingCopilot from '@/components/FloatingCopilot';
 import DashboardHeader from '@/components/DashboardHeader';
 import { CustodyPhaseContext, LaunchScopeContext, SweepSwitchContext } from '@/components/dashboard/CustodyPhaseContext';
+import { DeviceProvider, OffPhone, OnPhone } from '@/components/dashboard/Device';
 import GovernanceAlertBanner from '@/components/dashboard/GovernanceAlertBanner';
+import PhoneTabBar from '@/components/dashboard/PhoneTabBar';
 import type { CustomerSession } from '@/lib/auth/customer-session';
 import type { GovernanceBannerAlert } from '@/lib/server/governance-events';
 import type { LaunchScope } from '@/lib/launch-scope-rules';
@@ -88,6 +90,8 @@ type DashboardShellProps = {
    *  deliveries (lib/server/governance-alerts-store.ts). Empty for anyone who
    *  is not a business owner. */
   governanceAlerts?: GovernanceBannerAlert[];
+  /** The server's hint that this is a phone (lib/device.ts), read where the layout renders. Only the first paint: the window's width decides after. */
+  phoneHint?: boolean;
 };
 
 type LinkProps = {
@@ -255,7 +259,7 @@ function UtilityLinks({ view, pathname, collapsed, locks, scope, onNavigate }: L
   );
 }
 
-export default function DashboardShell({ children, session, kyb, locks, setup, sweepOn, launchScope, governanceAlerts }: DashboardShellProps) {
+export default function DashboardShell({ children, session, kyb, locks, setup, sweepOn, launchScope, governanceAlerts, phoneHint = false }: DashboardShellProps) {
   const [collapsed,  setCollapsed]  = useState(false);
   const router   = useRouter();
   const pathname = usePathname();
@@ -332,6 +336,7 @@ export default function DashboardShell({ children, session, kyb, locks, setup, s
   const pageClosed = pageLock(pathname, locks, launchScope);
 
   return (
+    <DeviceProvider phoneHint={phoneHint}>
     <div className="fintech-dashboard-shell flex min-h-screen splash-page-bg">
       <a
         href="#dashboard-content"
@@ -504,7 +509,7 @@ export default function DashboardShell({ children, session, kyb, locks, setup, s
         inert={mobileOpen}
         id="dashboard-content"
         tabIndex={-1}
-        className={`fintech-dashboard-main relative z-0 min-w-0 flex-1 overflow-x-hidden outline-none transition-all duration-300 p-4 pt-[76px] pb-16 md:px-8 md:pb-8 md:pt-[76px] ${
+        className={`fintech-dashboard-main relative z-0 min-w-0 flex-1 overflow-x-hidden outline-none transition-all duration-300 p-4 pt-[76px] pb-[calc(env(safe-area-inset-bottom)+5rem)] md:px-8 md:pb-8 md:pt-[76px] ${
           collapsed ? 'md:ml-20' : 'md:ml-60'
         }`}
       >
@@ -553,12 +558,23 @@ export default function DashboardShell({ children, session, kyb, locks, setup, s
         )}
       </main>
 
+      {/* ── Phone bottom bar (v2 brief 5.10) ───────────────────── */}
+      <OnPhone>
+        <div inert={mobileOpen} className="md:hidden">
+          <PhoneTabBar />
+        </div>
+      </OnPhone>
+
       {/* ── Floating AI Copilot widget ────────────────────────── */}
       {/* Outside the phone drawer, so inert and hidden while it is open: it
-          used to sit above the scrim, clickable beside Log out. */}
-      <div inert={mobileOpen} className={mobileOpen ? 'hidden' : undefined}>
-        <FloatingCopilot />
-      </div>
+          used to sit above the scrim, clickable beside Log out. On a phone
+          Zeke is a tab, and the widget would cover the little content there is. */}
+      <OffPhone>
+        <div inert={mobileOpen} className={mobileOpen ? 'hidden' : undefined}>
+          <FloatingCopilot />
+        </div>
+      </OffPhone>
     </div>
+    </DeviceProvider>
   );
 }

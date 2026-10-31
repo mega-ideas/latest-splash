@@ -4,6 +4,10 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Check, CircleAlert, Clock3, Fingerprint, ShieldCheck } from 'lucide-react';
 import { normalizeSuiAddress } from '@mysten/sui/utils';
 
+import ApproveScreen from '@/components/approve/ApproveScreen';
+import { usePhone } from '@/components/dashboard/Device';
+import { approveFacts } from '@/lib/approve/facts';
+import { SIGNING_CHANGED_EVENT } from '@/lib/dashboard/phone';
 import { describeSignError, signWithPasskey } from '@/lib/wallet/sui-signers';
 import { reviewOnDevice, type DeviceReview } from '@/lib/wallet/review-on-device';
 import { formatUsdc } from '@/lib/fees/copy';
@@ -13,6 +17,16 @@ import { differsFromApproved, differsFromApprovedBatch, type ApprovedPayment } f
 import { call, errorText, type SigningView } from './api';
 import type { Made } from './flow';
 import { PrimaryButton, QuietButton } from './ui';
+
+/** "5 hours" or "12 minutes" until a request ends, or null when it has no end or has ended. */
+function expiresIn(iso: string): string | null {
+  const left = Date.parse(iso) - Date.now();
+  if (!Number.isFinite(left) || left <= 0) return null;
+  const hours = Math.floor(left / 3_600_000);
+  if (hours >= 1) return `${hours} ${hours === 1 ? 'hour' : 'hours'}`;
+  const minutes = Math.max(1, Math.round(left / 60_000));
+  return `${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`;
+}
 
 /** What was reviewed, kept apart from the live request: the bytes and digest the owner looked at are the ones signed. */
 type Reviewed = { transactionBytes: string; digest: string; review: DeviceReview };
@@ -33,7 +47,7 @@ const PAYMENT_LABELS: SignLabels = { working: 'Sending the payment', done: 'Paid
 /** A batch's signers see every payment, each checked on their own device against the batch they approved (v2 brief 5.6). */
 export type ExpectedBatch = Array<ApprovedPayment & { payeeName: string }>;
 
-export default function SignPanel({ initial, expected = null, expectedBatch = null, labels = PAYMENT_LABELS, onExecuted, onRestart }: { initial: SigningView; expected?: Made['expected']; expectedBatch?: ExpectedBatch | null; labels?: SignLabels; onExecuted: (digest: string | null) => void; onRestart: () => void }) {
+export default function SignPanel({ initial, expected = null, expectedBatch = null, labels = PAYMENT_LABELS, autoReview = false, onExecuted, onRestart, onCancelReview }: { initial: SigningView; expected?: Made['expected']; expectedBatch?: ExpectedBatch | null; labels?: SignLabels; /** Open the review as soon as the request is in front of a signer who must sign: the Approve screen is for nothing else. */ autoReview?: boolean; onExecuted: (digest: string | null) => void; onRestart: () => void; /** What "Not now" does on the phone's Approve screen. */ onCancelReview?: () => void }) {
   const [view, setView] = useState<SigningView>(initial);
   const [reviewed, setReviewed] = useState<Reviewed | null>(null);
   const reviewedDigest = useRef<string | null>(null);
@@ -42,6 +56,8 @@ export default function SignPanel({ initial, expected = null, expectedBatch = nu
   const [error, setError] = useState<string | null>(null);
   const done = useRef(false);
   const headingId = useId();
+  const phone = usePhone();
+  const autoOpened = useRef(false);
 
   const refresh = useCallback(async () => {
     const answer = await call<{ request?: SigningView }>(`/api/wallet/signing-requests/${encodeURIComponent(initial.id)}`);
@@ -82,6 +98,15 @@ export default function SignPanel({ initial, expected = null, expectedBatch = nu
     }
   }
 
+  // The Approve screen opens a request to review it: the person came to sign.
+  useEffect(() => {
+    if (!autoReview || autoOpened.current || !view.you.mustSign || view.you.signed || view.status !== 'collecting') return;
+    autoOpened.current = true;
+    openReview();
+    // openReview reads the request in view; it is run once for the first one.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoReview, view.you.mustSign, view.you.signed, view.status]);
+
   async function sign() {
     if (!reviewed) return;
     setBusy(true);
@@ -96,6 +121,8 @@ export default function SignPanel({ initial, expected = null, expectedBatch = nu
       setView(answer.body.request);
       reviewedDigest.current = null;
       setReviewed(null);
+      // The tab bar's count of what waits for this person is looked at again at once.
+      window.dispatchEvent(new Event(SIGNING_CHANGED_EVENT));
       if (answer.body.request.status === 'executed' && !done.current) {
         done.current = true;
         onExecuted(answer.body.request.executedDigest);
@@ -129,6 +156,31 @@ export default function SignPanel({ initial, expected = null, expectedBatch = nu
   const steps = [...counted.values()].map(({ item, times }) => (times > 1 ? { ...item, line: `${item.line.replace(/\.$/, '')}, ${times} times, once for each payment.` } : item));
   // A command the page cannot word is never signed: the owner would be signing bytes whose meaning is not on the screen.
   const blocked = items.some((i) => i.unknown);
+  // The rate the intent in the bytes carries, for a payment that is not in USDC.
+  const rate = review && !isBatch ? approveFacts(review).payments[0]?.rate ?? null : null;
+
+  // On a phone an open review is the whole screen (v2 brief 5.10): who is paid comes first, and where the signatures stand is one line of it.
+  if (phone && review && !finished && !dead && view.you.mustSign && !view.you.signed) {
+    return (
+      <section aria-label="Approve" aria-live="polite">
+        <ApproveScreen
+          review={review}
+          names={isBatch ? (expectedBatch ?? []).map((e) => e.payeeName) : [expected?.payeeName]}
+          busy={busy}
+          error={error}
+          onSign={() => void sign()}
+          onCancel={() => {
+            reviewedDigest.current = null;
+            setReviewed(null);
+            onCancelReview?.();
+          }}
+          expiresIn={expiresIn(view.expiresAt)}
+          signed={view.signedWeight}
+          needed={view.threshold}
+        />
+      </section>
+    );
+  }
 
   return (
     <section aria-labelledby={headingId} className="space-y-4 rounded-2xl border border-[#326273]/15 bg-white p-4 sm:p-5" aria-live="polite">
@@ -202,6 +254,15 @@ export default function SignPanel({ initial, expected = null, expectedBatch = nu
                 <>
                   <dt className="text-[#326273]">Splash fee at most</dt>
                   <dd className="font-mono text-[13px] text-[#0c3e48]">{formatUsdc(BigInt(pay.maxFeeMinor))} USDC</dd>
+                </>
+              ) : null}
+              {!isBatch && rate ? (
+                <>
+                  <dt className="text-[#326273]">Rate</dt>
+                  <dd className="text-[#0c3e48]">
+                    <span className="block font-mono text-[13px]">{rate.text}</span>
+                    <span className="block text-[13px] text-[#326273]">About {rate.receiveApprox} before the payout partner&rsquo;s fee</span>
+                  </dd>
                 </>
               ) : null}
               {!isBatch && withdraw && withdraw.type === 'withdraw' ? (
