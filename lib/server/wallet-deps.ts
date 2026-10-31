@@ -290,6 +290,12 @@ export async function liveWalletContext(orgId: string): Promise<{ ok: true; ctx:
       const settlement = withdrawalSettlementDeps(db);
       if (settlement) await withdrawalSigningExecuted(settlement, request);
     }
+    if (request.purpose === 'wallet_payment') {
+      // Pay invoices (v2 brief 5.8): an invoice's payment that just executed tells the invoice it was paid,
+      // once the transaction is shown to have paid what was asked.
+      const { reportTransferSettled } = await import('@/lib/server/bill-payment-flow');
+      await reportTransferSettled(db, request);
+    }
     if (request.purpose === 'subscription') {
       // A1 §6: the billing allowance granted, changed or revoked. Requests of
       // this purpose exist only once billing was switched on.

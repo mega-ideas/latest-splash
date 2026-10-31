@@ -28,7 +28,7 @@ import { eq } from 'drizzle-orm';
 import { copilotModel } from '@/lib/ai/model';
 import { BILL_FIELDS, type ModelReading } from '@/lib/bills/extract';
 import type { RecipientLite } from '@/lib/bills/match';
-import { billPaymentFlow } from '@/lib/bills/payment-hook';
+import { billPaymentFlow, type BillPaymentFlow } from '@/lib/bills/payment-hook';
 import { organizations } from '@/lib/db/schema';
 import { getFeeConfig, normalizeAddress } from '@/lib/fees/fee-config';
 import { getContractConfig } from '@/lib/server/contract-config';
@@ -210,12 +210,33 @@ export function splashOwnedAddresses(): Promise<string[]> {
   });
 }
 
+/**
+ * The payment flow Pay invoices hands an approved invoice to (v2 brief 5.4):
+ * the Transfer payment service (lib/server/bill-payment-flow.ts), loaded when
+ * the first invoice is handed over, so nothing of the wallet is loaded by
+ * the routes that only read invoices. A flow registered by something else
+ * (tests, a later wiring) is used as it is.
+ */
+function lazyPaymentFlow(): BillPaymentFlow {
+  const registered = billPaymentFlow();
+  if (registered.wired) return registered;
+  const live = async () => (await import('@/lib/server/bill-payment-flow-live')).liveBillPaymentFlow();
+  return {
+    wired: true,
+    start: async (request) => (await live()).start(request),
+    cancel: async (request) => {
+      const flow = await live();
+      return flow.cancel ? flow.cancel(request) : { ok: false, status: 501, error: 'This payment cannot be withdrawn from here.' };
+    },
+  };
+}
+
 export function liveBillDeps(db: unknown): BillDeps {
   return {
     modelReader: liveModelReader(),
     listRecipients,
     readBusiness: businessReader(db),
-    paymentFlow: billPaymentFlow(),
+    paymentFlow: lazyPaymentFlow(),
     stablecoinOnly,
     splashOwnedAddresses,
   };

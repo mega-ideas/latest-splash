@@ -8,8 +8,9 @@
  * does none of that itself. It hands the confirmed invoice to that flow
  * through this hook, and records what the flow reports back.
  *
- * STATUS: the 5.4 payment flow is not on this branch yet. Until it registers
- * itself with `registerBillPaymentFlow`, `billPaymentFlow()` returns the
+ * STATUS: the 5.4 payment flow is lib/server/bill-payment-flow.ts, registered
+ * the first time an invoice is handed over (lib/server/bills-deps.ts). Where
+ * nothing has registered one, `billPaymentFlow()` returns the
  * flow below that refuses with PAYMENT_FLOW_NOT_WIRED: nothing is created,
  * nothing is marked approved, and the page says so. It never pretends.
  *
