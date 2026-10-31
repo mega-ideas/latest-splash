@@ -267,9 +267,30 @@ function paymentChecks(p: Pick<WalletPayment, 'amountMinor' | 'maxFeeMinor' | 's
  */
 export function payFromWalletTx(chain: V2Chain, p: WalletPayment): Promise<Uint8Array> {
   paymentChecks(p);
-  const T = normalizeStructTag(chain.usdcType);
   const tx = new Transaction();
-  const account = shared(tx, p.account, true);
+  addWalletPayment(tx, chain, p, sharedRefs(tx));
+  applyGas(tx, p.wallet, p.gas);
+  return build(tx);
+}
+
+/** One input per shared object, however many payments use it. */
+function sharedRefs(tx: Transaction) {
+  const seen = new Map<string, ReturnType<Transaction['sharedObjectRef']>>();
+  return (ref: SharedRef, mutable: boolean) => {
+    const key = `${normalizeSuiAddress(ref.objectId)}:${mutable}`;
+    let input = seen.get(key);
+    if (!input) {
+      input = shared(tx, ref, mutable);
+      seen.set(key, input);
+    }
+    return input;
+  };
+}
+
+/** The commands of one payment: withdraw, open, pay, anchor, delete. Shared by one payment and a batch. */
+function addWalletPayment(tx: Transaction, chain: V2Chain, p: Omit<WalletPayment, 'gas' | 'wallet'>, ref: ReturnType<typeof sharedRefs>) {
+  const T = normalizeStructTag(chain.usdcType);
+  const account = ref(p.account, true);
   const clock = tx.object.clock();
   const [funds] = tx.moveCall({
     target: '0x2::balance::redeem_funds',
@@ -281,7 +302,7 @@ export function payFromWalletTx(chain: V2Chain, p: WalletPayment): Promise<Uint8
     typeArguments: [T],
     arguments: [
       account,
-      shared(tx, chain.complianceConfig, false),
+      ref(chain.complianceConfig, false),
       tx.pure.vector('u8', Array.from(bytes32(p.paymentRef, 'the payment reference'))),
       tx.pure.address(normalizeSuiAddress(p.recipient)),
       tx.pure.vector('u8', Array.from(p.beneficiaryRef)),
@@ -301,9 +322,9 @@ export function payFromWalletTx(chain: V2Chain, p: WalletPayment): Promise<Uint8
     arguments: [
       intent,
       account,
-      shared(tx, chain.complianceConfig, false),
-      shared(tx, chain.feeConfig, false),
-      shared(tx, chain.registry, false),
+      ref(chain.complianceConfig, false),
+      ref(chain.feeConfig, false),
+      ref(chain.registry, false),
       funds,
       tx.pure.u64(p.maxFeeMinor),
       tx.pure.u64(p.settleByMs),
@@ -315,7 +336,44 @@ export function payFromWalletTx(chain: V2Chain, p: WalletPayment): Promise<Uint8
     arguments: [receipt, tx.pure.vector('u8', Array.from(p.contentHash)), tx.pure.vector('u8', Array.from(p.walrusBlobId)), clock],
   });
   tx.moveCall({ target: fn(chain, 'payment_intent::delete_finalized'), arguments: [intent] });
-  applyGas(tx, p.wallet, p.gas);
+}
+
+/**
+ * Most payments one batch transaction carries (v2 brief 5.6). The chain bounds
+ * a transaction's commands and inputs; each payment here is five commands, so
+ * this keeps a batch well inside them. Whether a full batch fits the
+ * protocol's per-transaction limits is still to be dry-run on testnet
+ * (docs/v2/phase3-batch.md); until then the cap is conservative.
+ */
+export const MAX_BATCH_PAYMENTS = 20;
+
+/**
+ * Every payment of a batch in ONE transaction (v2 brief 5.6): the owners sign
+ * once for the whole batch. Each payment is exactly the one-payment shape
+ * (withdraw, open, pay, anchor, delete), in the order of the rows, so the
+ * transaction is atomic: all of them are paid, or none. Each carries its own
+ * payment reference (its own intent, once), its own fee bound, and the batch's
+ * one sealed audit bundle. A bank payout and a cross-chain payment are never
+ * in a batch.
+ */
+export function payBatchFromWalletTx(
+  chain: V2Chain,
+  b: { wallet: string; account: SharedRef; payments: Array<Omit<WalletPayment, 'wallet' | 'account' | 'gas'>>; gas: SponsoredGas },
+): Promise<Uint8Array> {
+  if (b.payments.length === 0) throw new V2BuildError('a batch pays at least one recipient', 'empty_batch');
+  if (b.payments.length > MAX_BATCH_PAYMENTS) throw new V2BuildError(`a batch pays at most ${MAX_BATCH_PAYMENTS} recipients`, 'batch_too_large');
+  const refs = new Set<string>();
+  for (const p of b.payments) {
+    paymentChecks(p);
+    if (p.kind === V2_KIND.BANK_PAYOUT) throw new V2BuildError('a bank payout is not part of a batch', 'bank_payout_not_in_batch');
+    const key = Buffer.from(p.paymentRef).toString('hex');
+    if (refs.has(key)) throw new V2BuildError('two payments in one batch carry the same payment reference', 'duplicate_payment_ref');
+    refs.add(key);
+  }
+  const tx = new Transaction();
+  const ref = sharedRefs(tx);
+  for (const p of b.payments) addWalletPayment(tx, chain, { ...p, account: b.account }, ref);
+  applyGas(tx, b.wallet, b.gas);
   return build(tx);
 }
 

@@ -55,6 +55,24 @@ export function feeChargedFrom(tx: Pick<WithdrawalChainTx, 'events'>, corePackag
   return null;
 }
 
+/** Every fee the chain charged in one executed transaction, in the order it charged them (a batch pays several). */
+export function feesChargedFrom(tx: Pick<WithdrawalChainTx, 'events'>, corePackageOriginalId: string): Array<{ feeMinor: bigint; kind: number }> {
+  const out: Array<{ feeMinor: bigint; kind: number }> = [];
+  for (const e of tx.events ?? []) {
+    const [addr, ...rest] = e.eventType.split('::');
+    let same = false;
+    try {
+      same = normalizeSuiAddress(addr) === normalizeSuiAddress(corePackageOriginalId);
+    } catch {
+      same = false;
+    }
+    if (!same || rest.join('::') !== 'fee_config::FeeCharged') continue;
+    const j = (e.json ?? {}) as { fee?: unknown; derived_kind?: unknown };
+    if ((typeof j.fee === 'string' || typeof j.fee === 'number') && /^\d+$/.test(String(j.fee))) out.push({ feeMinor: BigInt(j.fee), kind: Number(j.derived_kind ?? 0) });
+  }
+  return out;
+}
+
 const SETTLED_WITHDRAWAL = new Set(['sent', 'partner_received', 'paid_out']);
 
 function statusOf(requestStatus: string | null, withdrawalStatus: string | null): ReceiptStatus {

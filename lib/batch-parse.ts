@@ -53,7 +53,10 @@ function mapRecord(record: Record<string, unknown>): ParsedBatchRow | null {
 
   const name = pick('name');
   const address = pick('address');
-  const amount = pick('amount').replace(/[^0-9.\-]/g, '');
+  // An amount with a currency sign or code, or "20k", is kept as written: the batch desk refuses it
+  // (one currency convention, USDC), rather than reading "RM 20k" as 20.
+  const amountText = pick('amount');
+  const amount = /[a-z$€£¥₱]/i.test(amountText) ? amountText : amountText.replace(/[^0-9.\-]/g, '');
   if (!name && !address && !amount) return null;
 
   let country = pick('country').toUpperCase();

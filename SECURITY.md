@@ -949,6 +949,35 @@ owner. Only `AdminCap` lifts a compliance freeze.
 - **No penalty or late fees.** Splash is not a party to the supplier's
   invoice, so none exists.
 
+## v2 Phase 3 — Batch payouts (brief 5.6) — 2026-10-31
+
+Up to 20 payments in one Sui transaction the owners' multisig signs once
+(`docs/v2/phase3-batch.md`). What the code holds to:
+
+- **A sheet is untrusted data.** A row can only name a recipient this business
+  already saved (or a Splash business by registered name); it can never add a
+  payee, an address or a fee, and text in a cell is never an instruction. The
+  server reviews the rows itself, at creation and again when the signatures are
+  started; a recipient changed, removed or no longer cleared stops the batch.
+- **The bytes are exactly the rows.** `assertPurposeShape('wallet_batch')` refuses
+  a transaction that is not the stored rows' payments in order, each tied to its
+  own withdrawal and intent, with the row's recipient, amount, kind and fee bound.
+  Each owner's device decodes the bytes itself and checks them against the batch
+  that was approved before the passkey is asked.
+- **Every payee is checked before every signature** (`batchBeforeSign`): a fresh
+  provider CLEAR (a sandbox verdict is no answer in production) and the saved
+  recipient's own rule; an exchange, a bank or another chain is never in a batch.
+- **The audit bundle fails closed** in production; no stand-in is anchored.
+- **Idempotent** by the batch's intent id, unique per business; each row's
+  payment reference is its own and unique per business; one key makes one batch
+  and one request.
+- **Tenant isolation** through the session's org on every route; another
+  business's batch, recipient or receipt reads as absent.
+- **Not carried out:** a scheduled batch (`splash_spend`, an executor named by an
+  owner) answers `schedule_not_wired` and schedules nothing. A full 20-payment
+  batch has not been dry-run against the protocol's per-transaction limits and the
+  sponsor's gas budget; only the model chain ran it.
+
 ## v2 Phase 3 — Invoices: Get paid and Pay invoices (brief 5.8) — 2026-10-25
 
 Design: [`docs/v2/phase3-invoices.md`](docs/v2/phase3-invoices.md). Tests:

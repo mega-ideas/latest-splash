@@ -19,6 +19,7 @@ import { makePaymentRecorder } from '@/lib/server/payment-record';
 import { sealAdapter } from '@/lib/server/seal';
 import { splashControlledAddresses } from '@/lib/payouts/withdrawal-rules';
 import type { TransferDeps } from '@/lib/server/wallet-transfers';
+import type { BatchDeps } from '@/lib/server/wallet-batches';
 import { liveWalletContext, orgMemberWalletAddresses } from '@/lib/server/wallet-deps';
 import { NO_STORE, walletRoute, type WalletRoute } from '@/lib/server/wallet-route';
 import { readWithdrawalTransaction } from '@/lib/server/withdrawals-deps';
@@ -94,6 +95,40 @@ export function transferDepsFor(route: WalletRoute, env: NodeJS.ProcessEnv = pro
       await notifyOwnersOfAsk({ orgId, orgName: org?.name ?? 'Your business', ownerUserIds, amountMinor: ask.intent.amountMinor, recipient: ask.intent.recipient });
     },
   };
+}
+
+/**
+ * The live wiring for batch payouts (v2 brief 5.6): Transfer's, plus what the
+ * wallet can spend now (its balance less held deposits) and a note to the
+ * owners when a team member prepares a batch.
+ */
+export function batchDepsFor(route: WalletRoute, env: NodeJS.ProcessEnv = process.env): BatchDeps {
+  const base = transferDepsFor(route, env);
+  const { orgId, ctx, db } = route;
+  return {
+    ...base,
+    walletBalance: async () => {
+      const members = await base.walletMembers();
+      if (!members.ok || !ctx.readUsdc) return null;
+      const read = await ctx.readUsdc(members.address);
+      const total = read.coinMinor + read.addressBalanceMinor;
+      const held = ctx.heldUsdc ? await ctx.heldUsdc(members.address, total) : 0n;
+      return total > held ? total - held : 0n;
+    },
+    notifyBatch: async ({ rowCount, totalMinor, requestedBy }) => {
+      const { memberships } = await import('@/lib/db/schema');
+      const { notifyOwnersOfBatch } = await import('@/lib/server/approval-requests');
+      const owners = await db.select({ userId: memberships.userId }).from(memberships).where(and(eq(memberships.orgId, orgId), eq(memberships.role, 'admin')));
+      const [org] = await db.select({ name: organizations.name }).from(organizations).where(eq(organizations.id, orgId)).limit(1);
+      await notifyOwnersOfBatch({ orgId, orgName: org?.name ?? 'Your business', ownerUserIds: owners.map((o) => o.userId).filter((u) => u !== requestedBy), rowCount, totalMinor: totalMinor.toString() });
+    },
+  };
+}
+
+export async function batchRoute(request: Request): Promise<{ route: WalletRoute; deps: BatchDeps; response: null } | { route: null; deps: null; response: Response }> {
+  const gate = await walletRoute(request);
+  if (gate.response) return { route: null, deps: null, response: gate.response };
+  return { route: gate.route, deps: batchDepsFor(gate.route), response: null };
 }
 
 export async function transferRoute(request: Request): Promise<{ route: WalletRoute; deps: TransferDeps; response: null } | { route: null; deps: null; response: Response }> {

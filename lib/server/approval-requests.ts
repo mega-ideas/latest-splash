@@ -228,6 +228,13 @@ export function walletRequestHeadline(purpose: SigningPurpose, d: WalletTxDescri
       if (pay.intent) return `pay ${usdc(pay.intent.amountMinor)} to ${shortAddress(pay.intent.recipient)}, a payment a team member prepared${fee}`;
       return `pay a payment whose payee could not be read${fee}`;
     }
+    case 'wallet_batch': {
+      const opens = a.filter((x) => x.type === 'open_intent') as Array<Extract<WalletAction, { type: 'open_intent' }>>;
+      const fees = a.filter((x) => x.type === 'pay_intent') as Array<Extract<WalletAction, { type: 'pay_intent' }>>;
+      const total = opens.reduce((sum, o) => sum + BigInt(o.amountMinor), 0n);
+      const fee = fees.reduce((sum, p) => sum + BigInt(p.maxFeeMinor), 0n);
+      return `pay ${opens.length} recipients ${usdc(total.toString())} in one batch${fee > 0n ? `, Splash fees at most ${usdc(fee.toString())} in all` : ''}`;
+    }
     case 'withdrawal': {
       const open = a.find((x) => x.type === 'open_intent') as Extract<WalletAction, { type: 'open_intent' }>;
       const pay = a.find((x) => x.type === 'pay_intent') as Extract<WalletAction, { type: 'pay_intent' }>;
@@ -392,6 +399,40 @@ export async function notifyOwnersOfAsk(input: {
     const usdc = `${(amount / 1_000_000n).toLocaleString('en-US')}.${(amount % 1_000_000n).toString().padStart(6, '0').slice(0, 2)}`;
     const payee = `${input.recipient.slice(0, 6)}…${input.recipient.slice(-4)}`;
     const body = `${input.orgName}: a member of your team asks you to approve a payment of ${usdc} USDC to ${payee}.\n\nOpen Splash to review it. Nothing is paid until the owners sign.`;
+    for (const userId of input.ownerUserIds) {
+      const person = people.find((p) => p.userId === userId);
+      if (!settings?.whatsappEnabled || !whatsappConfigured() || !person?.whatsappE164) {
+        unreachable.push(userId);
+        continue;
+      }
+      const result = await sendWhatsApp(person.whatsappE164, body).catch(() => ({ sent: false as const }));
+      if (result.sent) delivered.push(userId);
+      else unreachable.push(userId);
+    }
+  } catch {
+    return { delivered, unreachable: input.ownerUserIds.filter((u) => !delivered.includes(u)) };
+  }
+  return { delivered, unreachable };
+}
+
+/**
+ * Tell the owners a team member prepared a batch of payments (v2 brief 5.6):
+ * by WhatsApp where they have a verified number. The batch waits in the app
+ * either way, and nothing is paid until an owner starts the signatures and the
+ * quorum signs. Never throws.
+ */
+export async function notifyOwnersOfBatch(input: {
+  orgId: string;
+  orgName: string;
+  ownerUserIds: string[];
+  rowCount: number;
+  totalMinor: string;
+}): Promise<{ delivered: string[]; unreachable: string[] }> {
+  const delivered: string[] = [];
+  const unreachable: string[] = [];
+  try {
+    const [people, settings] = await Promise.all([listApprovers(input.orgId), readOrgSettings(input.orgId).catch(() => null)]);
+    const body = `${input.orgName}: a member of your team prepared a batch of ${input.rowCount} payments totalling ${usdc(input.totalMinor)}.\n\nOpen Splash, Batch payouts, to review it. Nothing is paid until the owners sign.`;
     for (const userId of input.ownerUserIds) {
       const person = people.find((p) => p.userId === userId);
       if (!settings?.whatsappEnabled || !whatsappConfigured() || !person?.whatsappE164) {

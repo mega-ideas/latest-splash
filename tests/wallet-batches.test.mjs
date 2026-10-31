@@ -241,6 +241,17 @@ test('a recipient that is not freshly screened CLEAR is a row error, with the sc
   assert.match(r.review.rows[1].code, /^recipient_/);
 });
 
+test('a wallet the supplier has not proven it holds is a row error, and a team member’s saved wallet waits for an owner’s approval', async () => {
+  const t = await setup();
+  await saved(t, WALLET_A, 'Unproven Co', { proven: false });
+  await saved(t, WALLET_B, 'Unapproved Co', { approved: false });
+  await saved(t, WALLET_C, 'Fine Co');
+  const r = await B.reviewBatch(t.deps(), OWNER, sheet(row('Unproven Co', '10'), row('Unapproved Co', '10'), row('Fine Co', '10')));
+  assert.deepEqual(r.review.rows.map((x) => x.ok), [false, false, true], JSON.stringify(r.review.rows.map((x) => x.code)));
+  assert.ok(r.review.rows[0].error.length > 10 && r.review.rows[1].error.length > 10, 'each says why in words');
+  assert.equal(r.review.ready, false);
+});
+
 test('a sheet of no rows, or over the cap, is refused before any row is read; a viewer cannot review', async () => {
   const t = await setup();
   await twoRecipients(t);

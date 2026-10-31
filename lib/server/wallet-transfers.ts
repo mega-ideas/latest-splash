@@ -124,7 +124,7 @@ const digits = (value: unknown): bigint | null => {
 };
 
 const sha = (text: string) => createHash('sha256').update(text).digest();
-const maskAddress = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
+export const maskAddress = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 
 async function statusOf(deps: TransferDeps, row: Row): Promise<TransferStatus> {
   if (row.route === 'owners_sign' && row.signingRequestId) {
@@ -224,7 +224,7 @@ export async function findBusinesses(deps: TransferDeps, query: string): Promise
   return { ok: true, businesses: found.filter((b) => b.id !== deps.orgId).slice(0, 5) };
 }
 
-type Resolved = {
+export type Resolved = {
   payeeKind: 'splash_business' | 'exchange' | 'self_custody';
   recipientId: string | null;
   businessId: string | null;
@@ -236,7 +236,7 @@ type Resolved = {
   addedAt: Date | null;
 };
 
-async function resolvePayee(deps: TransferDeps, payee: PayeeInput): Promise<Resolved | TransferFailure> {
+export async function resolvePayee(deps: TransferDeps, payee: PayeeInput): Promise<Resolved | TransferFailure> {
   if (payee.kind === 'splash_business') {
     const businessId = String(payee.businessId ?? '');
     if (!businessId) return fail(400, 'bad_payee', 'Choose the business you are paying.');
@@ -279,7 +279,7 @@ async function resolvePayee(deps: TransferDeps, payee: PayeeInput): Promise<Reso
 const requestHashOf = (input: { payee: PayeeInput; amount: bigint; reference: string | null }) =>
   sha(JSON.stringify(['transfer', input.payee, input.amount.toString(), input.reference])).toString('hex');
 
-function isUniqueViolation(error: unknown): boolean {
+export function isUniqueViolation(error: unknown): boolean {
   const e = error as { code?: string; cause?: { code?: string }; message?: string } | null;
   return e?.code === '23505' || e?.cause?.code === '23505' || /unique|duplicate key/i.test(e?.message ?? '');
 }

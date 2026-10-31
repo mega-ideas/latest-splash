@@ -456,6 +456,13 @@
       "when": 1794096000000,
       "tag": "0064_transfer_payments",
       "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1794182400000,
+      "tag": "0065_batch_payouts",
+      "breakpoints": true
     }
   ]
 }

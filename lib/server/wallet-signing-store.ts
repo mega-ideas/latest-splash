@@ -37,6 +37,8 @@ export type SigningPurpose =
   | 'cancel_wallet_rotation'
   | 'wallet_membership'
   | 'wallet_payment'
+  /** v2 §5.6: every payment of a batch in one transaction, signed once by the owners. */
+  | 'wallet_batch'
   | 'migration_transfer'
   | 'rotation_transfer'
   /** v2 §4.2: the wallet creates its SpendPolicy for the current wallet generation. */

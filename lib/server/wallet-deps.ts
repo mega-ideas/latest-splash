@@ -267,6 +267,11 @@ export async function liveWalletContext(orgId: string): Promise<{ ok: true; ctx:
   // screening is a fresh CLEAR, and an exchange payment only once its Travel
   // Rule message is with the provider (v2 §4.6).
   signing.beforeSign = async (request) => {
+    if (request.purpose === 'wallet_batch') {
+      // v2 brief 5.6: every payee of the batch is checked again before each signature.
+      const { batchBeforeSign } = await import('@/lib/server/payment-compliance-gate');
+      return batchBeforeSign({ db, now: () => new Date(), kyt, maxAgeMs }, request);
+    }
     if (request.purpose === 'wallet_payment' || request.purpose === 'spend_approval') {
       const { paymentBeforeSign } = await import('@/lib/server/payment-compliance-gate');
       return paymentBeforeSign({ db, now: () => new Date(), kyt, maxAgeMs }, request);

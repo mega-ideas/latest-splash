@@ -106,6 +106,7 @@ const TITLES: Record<string, string> = {
   cancel_wallet_rotation: 'Withdraw the change of signers',
   wallet_membership: 'Change who owns the business account',
   wallet_payment: 'Approve a payment from your business wallet',
+  wallet_batch: 'Approve a batch of payments from your business wallet',
   migration_transfer: 'Move your USDC to your business wallet',
   rotation_transfer: 'Move the USDC to the new business wallet',
   spend_policy: 'Set up spending rules',

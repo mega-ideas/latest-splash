@@ -9,7 +9,7 @@ import { reviewOnDevice, type DeviceReview } from '@/lib/wallet/review-on-device
 import { formatUsdc } from '@/lib/fees/copy';
 import { groupAddress } from '@/lib/transfer/addresses';
 import { signingItems } from '@/lib/wallet-page/actions';
-import { differsFromApproved } from '@/lib/transfer/approved';
+import { differsFromApproved, differsFromApprovedBatch, type ApprovedPayment } from '@/lib/transfer/approved';
 import { call, errorText, type SigningView } from './api';
 import type { Made } from './flow';
 import { PrimaryButton, QuietButton } from './ui';
@@ -30,7 +30,10 @@ type Reviewed = { transactionBytes: string; digest: string; review: DeviceReview
 export type SignLabels = { working: string; done: string; doneNote: string; deadNote: string; restart: string };
 const PAYMENT_LABELS: SignLabels = { working: 'Sending the payment', done: 'Paid', doneNote: 'The payment, its record and its receipt happened together.', deadNote: 'Nothing was sent. You can start the payment again.', restart: 'Start a new payment' };
 
-export default function SignPanel({ initial, expected = null, labels = PAYMENT_LABELS, onExecuted, onRestart }: { initial: SigningView; expected?: Made['expected']; labels?: SignLabels; onExecuted: (digest: string | null) => void; onRestart: () => void }) {
+/** A batch's signers see every payment, each checked on their own device against the batch they approved (v2 brief 5.6). */
+export type ExpectedBatch = Array<ApprovedPayment & { payeeName: string }>;
+
+export default function SignPanel({ initial, expected = null, expectedBatch = null, labels = PAYMENT_LABELS, onExecuted, onRestart }: { initial: SigningView; expected?: Made['expected']; expectedBatch?: ExpectedBatch | null; labels?: SignLabels; onExecuted: (digest: string | null) => void; onRestart: () => void }) {
   const [view, setView] = useState<SigningView>(initial);
   const [reviewed, setReviewed] = useState<Reviewed | null>(null);
   const reviewedDigest = useRef<string | null>(null);
@@ -68,7 +71,7 @@ export default function SignPanel({ initial, expected = null, labels = PAYMENT_L
     try {
       const snapshot = { transactionBytes: view.transactionBytes, digest: view.digest };
       const review = reviewOnDevice({ ...snapshot, bytesHash: view.bytesHash, expect: view.expect as Parameters<typeof reviewOnDevice>[0]['expect'] });
-      const wrong = expected ? differsFromApproved(review, expected) : null;
+      const wrong = expectedBatch ? differsFromApprovedBatch(review, expectedBatch) : expected ? differsFromApproved(review, expected) : null;
       if (wrong) throw new Error(`${wrong} Do not sign it.`);
       reviewedDigest.current = snapshot.digest;
       setReviewed({ ...snapshot, review });
@@ -107,11 +110,23 @@ export default function SignPanel({ initial, expected = null, labels = PAYMENT_L
   const finished = view.status === 'executed';
   const dead = ['failed', 'expired', 'cancelled'].includes(view.status);
   const review = reviewed?.review ?? null;
+  const opens = review?.actions.filter((a) => a.type === 'open_intent') ?? [];
+  const pays = review?.actions.filter((a) => a.type === 'pay_intent') ?? [];
+  const isBatch = opens.length > 1;
   const open = review?.actions.find((a) => a.type === 'open_intent');
   const pay = review?.actions.find((a) => a.type === 'pay_intent');
   const withdraw = review?.actions.find((a) => a.type === 'withdraw');
+  const withdrawn = (review?.actions.filter((a) => a.type === 'withdraw') ?? []).reduce((sum, a) => sum + (a.type === 'withdraw' ? BigInt(a.amountMinor) : 0n), 0n);
   const items = review ? signingItems(review.actions as Parameters<typeof signingItems>[0]) : [];
-  const steps = items.filter((i) => !i.covered);
+  // A batch repeats the same few commands once per payment: each is said once, with how many times.
+  const counted = new Map<string, { item: (typeof items)[number]; times: number }>();
+  for (const item of items.filter((i) => !i.covered)) {
+    const key = `${item.line}|${item.fields.map((f) => `${f.label}=${f.value}`).join(';')}`;
+    const seen = counted.get(key);
+    if (seen) seen.times += 1;
+    else counted.set(key, { item, times: 1 });
+  }
+  const steps = [...counted.values()].map(({ item, times }) => (times > 1 ? { ...item, line: `${item.line} (${times} times, once for each payment)` } : item));
   // A command the page cannot word is never signed: the owner would be signing bytes whose meaning is not on the screen.
   const blocked = items.some((i) => i.unknown);
 
@@ -146,7 +161,33 @@ export default function SignPanel({ initial, expected = null, labels = PAYMENT_L
           <div className="space-y-3 rounded-xl border border-[#0d6370]/30 bg-[#f4f8fa] p-4">
             <p className="flex items-center gap-2 text-sm font-bold text-[#0c3e48]"><ShieldCheck className="h-4 w-4" aria-hidden="true" />Checked on this device</p>
             <dl className="grid gap-x-4 gap-y-1.5 text-sm sm:grid-cols-[auto_1fr]">
-              {open && open.type === 'open_intent' ? (
+              {isBatch ? (
+                <>
+                  <dt className="text-[#326273]">Pays</dt>
+                  <dd className="min-w-0 text-[#0c3e48]">
+                    <span className="block font-mono text-[13px]">{opens.length} payments in one transaction</span>
+                    <ol className="mt-2 space-y-2">
+                      {opens.map((o, i) => (
+                        <li key={`${i}-${o.type === 'open_intent' ? o.recipient : ''}`} className="rounded-lg bg-white p-2.5">
+                          {o.type === 'open_intent' ? (
+                            <>
+                              <span className="flex flex-wrap items-baseline justify-between gap-2">
+                                <span className="font-semibold">{`${i + 1}. ${expectedBatch?.[i]?.payeeName ?? 'Recipient'}`}</span>
+                                <span className="font-mono text-[13px]">{formatUsdc(BigInt(o.amountMinor))} USDC</span>
+                              </span>
+                              <span className="mt-0.5 block break-all font-mono text-[13px] leading-5 text-[#1F4452]">{groupAddress(normalizeSuiAddress(o.recipient))}</span>
+                              {pays[i] && pays[i].type === 'pay_intent' ? <span className="block text-[13px] text-[#326273]">{`Splash fee at most ${formatUsdc(BigInt(pays[i].maxFeeMinor ?? '0'))} USDC`}</span> : null}
+                            </>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ol>
+                  </dd>
+                  <dt className="text-[#326273]">Leaves your wallet at most</dt>
+                  <dd className="font-mono text-[13px] text-[#0c3e48]">{formatUsdc(withdrawn)} USDC</dd>
+                </>
+              ) : null}
+              {!isBatch && open && open.type === 'open_intent' ? (
                 <>
                   <dt className="text-[#326273]">Pays</dt>
                   <dd className="font-mono text-[13px] text-[#0c3e48]">{formatUsdc(BigInt(open.amountMinor))} USDC</dd>
@@ -157,13 +198,13 @@ export default function SignPanel({ initial, expected = null, labels = PAYMENT_L
                   </dd>
                 </>
               ) : null}
-              {pay && pay.type === 'pay_intent' ? (
+              {!isBatch && pay && pay.type === 'pay_intent' ? (
                 <>
                   <dt className="text-[#326273]">Splash fee at most</dt>
                   <dd className="font-mono text-[13px] text-[#0c3e48]">{formatUsdc(BigInt(pay.maxFeeMinor))} USDC</dd>
                 </>
               ) : null}
-              {withdraw && withdraw.type === 'withdraw' ? (
+              {!isBatch && withdraw && withdraw.type === 'withdraw' ? (
                 <>
                   <dt className="text-[#326273]">Leaves your wallet at most</dt>
                   <dd className="font-mono text-[13px] text-[#0c3e48]">{formatUsdc(BigInt(withdraw.amountMinor))} USDC</dd>

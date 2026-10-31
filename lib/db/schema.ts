@@ -2636,3 +2636,51 @@ export const paymentEInvoices = pgTable('payment_einvoices', {
 }, (table) => [
   uniqueIndex('payment_einvoices_org_ref_unique').on(table.orgId, table.paymentRef),
 ]);
+
+/**
+ * A batch of payments the owners sign once (v2 brief 5.6, migration 0065). The
+ * client's key is unique per business. It names the signing request once an
+ * owner has started the signatures; a batch a staff member prepared has none.
+ */
+export const walletBatches = pgTable('wallet_batches', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  clientKey: text('client_key').notNull(),
+  requestHash: text('request_hash').notNull(),
+  label: text('label'),
+  rowCount: integer('row_count').notNull(),
+  totalAmountMinor: bigint('total_amount_minor', { mode: 'bigint' }).notNull(),
+  totalMaxFeeMinor: bigint('total_max_fee_minor', { mode: 'bigint' }).notNull(),
+  signingRequestId: text('signing_request_id').references(() => walletSigningRequests.id),
+  requestedBy: text('requested_by').notNull(),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('wallet_batches_org_key_unique').on(table.orgId, table.clientKey),
+  index('wallet_batches_org_created_idx').on(table.orgId, table.createdAt),
+  index('wallet_batches_request_idx').on(table.signingRequestId),
+]);
+
+/** One payment of a batch, in the order of the sheet (migration 0065). Its payment reference is unique per business. */
+export const walletBatchRows = pgTable('wallet_batch_rows', {
+  id: text('id').primaryKey(),
+  batchId: text('batch_id').notNull().references(() => walletBatches.id, { onDelete: 'cascade' }),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  position: integer('position').notNull(),
+  paymentRef: text('payment_ref').notNull(),
+  payeeKind: text('payee_kind').notNull(),
+  recipientId: text('recipient_id'),
+  businessId: text('business_id'),
+  payeeName: text('payee_name').notNull(),
+  payeeMasked: text('payee_masked'),
+  payeeCountry: text('payee_country'),
+  address: text('address').notNull(),
+  amountMinor: bigint('amount_minor', { mode: 'bigint' }).notNull(),
+  maxFeeMinor: bigint('max_fee_minor', { mode: 'bigint' }).notNull(),
+  feeKind: integer('fee_kind').notNull(),
+  reference: text('reference'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex('wallet_batch_rows_batch_position_unique').on(table.batchId, table.position),
+  uniqueIndex('wallet_batch_rows_org_ref_unique').on(table.orgId, table.paymentRef),
+  index('wallet_batch_rows_org_idx').on(table.orgId),
+]);

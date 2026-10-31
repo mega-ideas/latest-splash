@@ -165,6 +165,8 @@ export type ShapeContext = {
   beneficiaryRef?: string;
   /** A withdrawal or a test deposit: the exact principal (minor units). */
   amountMinor?: bigint;
+  /** A batch (v2 §5.6): each payment, in order, exactly as the stored rows say. */
+  batch?: Array<{ recipient: string; amountMinor: bigint; maxFeeMinor: bigint; kind: number }>;
   /**
    * A subscription (A1 §6): exactly the billing allowances it revokes (every
    * one the wallet holds to a Splash finance multisig, so none is left behind
@@ -264,6 +266,33 @@ export function assertPurposeShape(purpose: SigningPurpose, d: WalletTxDescripti
         return;
       }
       bad(shape);
+      return;
+    }
+    case 'wallet_batch': {
+      // v2 §5.6: the one-payment shape, once per row, in the order of the rows,
+      // and nothing else. Each group must be tied to its own withdrawal and
+      // intent, and say exactly what the stored row says: a payee, an amount
+      // and a fee bound swapped, added or dropped is refused before it is stored.
+      const rows = context.batch ?? [];
+      if (rows.length === 0) bad('no payments were named');
+      if (d.actions.length !== rows.length * 5) bad(`it does not carry exactly the ${rows.length} payments of this batch`);
+      rows.forEach((row, i) => {
+        const at = i * 5;
+        const group = d.actions.slice(at, at + 5);
+        if (kinds(group) !== 'withdraw,open_intent,pay_intent,anchor_receipt,delete_intent') bad(`payment ${i + 1} is not a plain wallet payment`);
+        const w = group[0] as Extract<WalletAction, { type: 'withdraw' }>;
+        const o = group[1] as Extract<WalletAction, { type: 'open_intent' }>;
+        const p = group[2] as Extract<WalletAction, { type: 'pay_intent' }>;
+        if (p.paysFromCommand !== at || p.intentFromCommand !== at + 1) bad(`payment ${i + 1} is not paid from its own withdrawal and its own intent`);
+        if (BigInt(w.amountMinor) !== BigInt(o.amountMinor) + BigInt(p.maxFeeMinor)) bad(`payment ${i + 1}: the withdrawal is not the amount plus the maximum fee`);
+        if (BigInt(p.settleByMs) > BigInt(o.expiresAtMs)) bad(`payment ${i + 1}: the quote outlives the intent`);
+        // A bank payout, another chain and an exchange (whose Travel Rule message is sent per payment) are paid one at a time, never here.
+        if (o.kind === 4 || o.kind === 3 || o.kind === 2) bad(`payment ${i + 1}: only a Splash business or a wallet is paid in a batch`);
+        if (o.kind !== row.kind) bad(`payment ${i + 1} is not the kind of payment the row names`);
+        if (o.recipient !== normalizeSuiAddress(row.recipient)) bad(`payment ${i + 1} does not pay the recipient the row names`);
+        if (BigInt(o.amountMinor) !== row.amountMinor) bad(`payment ${i + 1} is not the amount the row names`);
+        if (BigInt(p.maxFeeMinor) !== row.maxFeeMinor) bad(`payment ${i + 1} allows another Splash fee from the one the row names`);
+      });
       return;
     }
     case 'withdrawal':
@@ -525,6 +554,8 @@ export async function openSigningRequest(
     beneficiaryRef?: string;
     /** For a withdrawal or a test deposit: the exact principal. */
     amountMinor?: bigint;
+    /** For a batch (v2 §5.6): each payment, in order, as the stored rows say. */
+    batch?: ShapeContext['batch'];
     /** For a withdrawal: the bank account and amounts its signers are shown. */
     withdrawal?: WithdrawalSigningDetails;
     /** For a subscription (A1 §6): the finance multisig and the billing allowances the wallet holds, read by the server. */
@@ -579,6 +610,7 @@ export async function openSigningRequest(
       payer: input.payer,
       beneficiaryRef: input.beneficiaryRef,
       amountMinor: input.amountMinor,
+      batch: input.batch,
       billing: input.billingTerms,
     });
     if (input.gasMode === 'sponsored') {

@@ -47,6 +47,7 @@ import {
   confirmWalletRotationTx,
   memberToWalletTransferTx,
   nominateWalletTx,
+  payBatchFromWalletTx,
   payFromWalletTx,
   payOpenIntentFromWalletTx,
   registerWalletTx,
@@ -701,6 +702,59 @@ export async function requestWalletPayment(
           ...(input.withdrawal.details ? { withdrawal: input.withdrawal.details } : {}),
         }
       : {}),
+  });
+}
+
+/**
+ * A batch of payments from the business wallet (v2 brief 5.6): one
+ * transaction with every payment in it, one request the owners' quorum signs
+ * once. Before anything is built: held funds are never used (for the whole
+ * batch together), and every payee is a fresh CLEAR the business may pay as
+ * its kind. The bytes are checked to be exactly these payments, in order,
+ * before the request is stored (purpose `wallet_batch`).
+ */
+export async function requestWalletBatch(
+  ctx: WalletContext,
+  input: {
+    orgId: string;
+    requestedBy: string;
+    wallet: WalletMembers;
+    /** The batch's id: the request's dedupe key, so one batch has one open request. */
+    batchId: string;
+    payments: Array<Omit<WalletPayment, 'wallet' | 'account' | 'gas'>>;
+  },
+): Promise<Result> {
+  const total = input.payments.reduce((sum, p) => sum + p.amountMinor + p.maxFeeMinor, 0n);
+  const onHold = await fundsOnHold(ctx, registration(input.wallet).address, total);
+  if (onHold) return onHold;
+  const gas = await sponsoredGas(ctx);
+  if (!gas) return refuse(503, 'no_sponsor', 'business wallet transactions need a gas sponsor, and none is configured');
+  for (const p of input.payments) {
+    // A bank payout, or a payment to one of the partner deposit addresses, goes only through the payout route.
+    const routed = await payoutRouteOnly(ctx.signing.db, input.orgId, p);
+    if (routed) return routed;
+  }
+  let bytes: Uint8Array;
+  try {
+    bytes = await payBatchFromWalletTx(ctx.chain, { wallet: registration(input.wallet).address, account: ctx.account, payments: input.payments, gas });
+  } catch (error) {
+    const e = error as { code?: string; message?: string };
+    return refuse(400, e.code ?? 'bad_batch', e.message ?? 'the batch could not be built');
+  }
+  for (const [i, p] of input.payments.entries()) {
+    // Nothing is stored for a recipient that is not a fresh CLEAR here.
+    const screened = await recipientPayable(ctx, input.orgId, p.recipient, p.kind, input.requestedBy);
+    if (screened) return { ...screened, error: `Payment ${i + 1} of ${input.payments.length}: ${screened.error}` };
+  }
+  return openSigningRequest(ctx.signing, {
+    orgId: input.orgId,
+    requestedBy: input.requestedBy,
+    purpose: 'wallet_batch',
+    dedupeKey: `batch:${input.batchId}`,
+    transactionBytes: bytes,
+    signer: { kind: 'multisig', ...input.wallet },
+    gasMode: 'sponsored',
+    batch: input.payments.map((p) => ({ recipient: p.recipient, amountMinor: p.amountMinor, maxFeeMinor: p.maxFeeMinor, kind: p.kind })),
   });
 }
 

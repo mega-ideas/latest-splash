@@ -134,3 +134,33 @@ export async function paymentBeforeSign(deps: PaymentGateDeps, request: StoredRe
   // A rule payment to an exchange is held the same way: its message is kept under the intent's id.
   return travelRuleHold(deps.db, request, payment, deps.env);
 }
+
+/**
+ * Before each signature on a batch (v2 brief 5.6): every payee of the batch
+ * must still be a fresh CLEAR and still be a recipient the business may pay
+ * as that kind (a proof withdrawn, or a recipient removed, after the batch was
+ * opened stops it), and none may be an exchange or a bank: those are paid one
+ * at a time, so their own checks run. The payees are read from the commands
+ * stored with the request, never from anything a client sent. Null lets the
+ * signature through.
+ */
+export async function batchBeforeSign(deps: PaymentGateDeps, request: StoredRequest): Promise<GateRefusal | null> {
+  if (request.purpose !== 'wallet_batch') return null;
+  const summary = (request.summary ?? null) as { description?: WalletTxDescription } | null;
+  const opens = (summary?.description?.actions ?? []).filter((a) => a.type === 'open_intent') as Array<Extract<WalletTxDescription['actions'][number], { type: 'open_intent' }>>;
+  if (opens.length === 0) return { code: 'not_a_batch', error: 'The request does not describe a batch Splash can check, so it is not signed.' };
+  for (const [i, open] of opens.entries()) {
+    const recipient = normalizeSuiAddress(open.recipient);
+    if (open.kind === EXCHANGE_KIND || open.kind === 3 || open.kind === 4) {
+      return { code: 'not_payable_in_a_batch', error: `Payment ${i + 1} of this batch is not one a batch may pay, so the batch is not signed.` };
+    }
+    const screened = await recipientScreeningGate(
+      { db: deps.db, orgId: request.orgId, now: deps.now(), kyt: deps.kyt ?? null, ...(deps.maxAgeMs ? { maxAgeMs: deps.maxAgeMs } : {}), requestedBy: 'splash:before-sign', ...(deps.env ? { env: deps.env } : {}) },
+      recipient,
+    );
+    if (screened) return { code: screened.code, error: `Payment ${i + 1} of ${opens.length}: ${screened.error}` };
+    const delivery = await walletDeliveryGate(deps.db, request.orgId, recipient, open.kind, { stage: 'sign' });
+    if (delivery) return { code: delivery.code, error: `Payment ${i + 1} of ${opens.length}: ${delivery.error}` };
+  }
+  return null;
+}
