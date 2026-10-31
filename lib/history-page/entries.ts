@@ -31,6 +31,8 @@ export type HistoryEntry = {
   date: string;
   /** The receipt, when there is one to open. */
   href: string | null;
+  /** Why there is no receipt to open, when there is none. */
+  noReceipt: string | null;
 };
 
 const usdc = (minor: string) => `${formatUsdc(BigInt(minor))} USDC`;
@@ -71,6 +73,9 @@ const WALLET_KIND: Record<string, string> = { splash_business: 'Splash business'
 
 const UNKNOWN = { label: 'Status not known', tone: 'wait' as Tone, group: 'in_progress' as Group };
 
+/** Why a row has no receipt to open: it is not signed yet, it was never paid, or this person may not open it. */
+const missingReceipt = (group: Group): string => (group === 'in_progress' ? 'The receipt opens once the owners have signed.' : 'No payment was made, so there is no receipt.');
+
 function transferEntry(t: TransferRow): HistoryEntry {
   const s = TRANSFER[t.status] ?? UNKNOWN;
   const receipt = t.status === 'settled' || t.status === 'on_the_way';
@@ -86,6 +91,7 @@ function transferEntry(t: TransferRow): HistoryEntry {
     status: { label: s.label, tone: s.tone },
     date: t.createdAt,
     href: receipt ? `/dashboard/history/${path(t.paymentRef)}` : null,
+    noReceipt: receipt ? null : missingReceipt(s.group),
   };
 }
 
@@ -104,12 +110,15 @@ function batchEntry(b: BatchRow): HistoryEntry {
     status: { label: s.label, tone: s.tone },
     date: b.createdAt,
     href: receipt ? `/dashboard/history/batch/${path(b.id)}` : null,
+    noReceipt: receipt ? null : missingReceipt(s.group),
   };
 }
 
-function withdrawalEntry(w: WithdrawalRow): HistoryEntry {
+function withdrawalEntry(w: WithdrawalRow, restricted: boolean): HistoryEntry {
   const s = WITHDRAWAL[w.status] ?? UNKNOWN;
-  const receipt = w.status === 'sent' || w.status === 'partner_received' || w.status === 'paid_out';
+  // The list shows a viewer their withdrawals, but the receipt is an owner's or a staff member's to open.
+  const sent = w.status === 'sent' || w.status === 'partner_received' || w.status === 'paid_out';
+  const receipt = sent && !restricted;
   return {
     key: `withdrawal:${w.id}`,
     kind: 'withdrawal',
@@ -122,6 +131,7 @@ function withdrawalEntry(w: WithdrawalRow): HistoryEntry {
     status: { label: s.label, tone: s.tone },
     date: w.createdAt,
     href: receipt ? `/dashboard/history/${path(w.id)}` : null,
+    noReceipt: receipt ? null : sent ? 'Only an owner or a staff member can open a withdrawal’s receipt.' : missingReceipt(s.group),
   };
 }
 
@@ -143,11 +153,60 @@ function earlierEntry(e: EarlierRow): HistoryEntry {
     status,
     date: e.createdAt,
     href: `/dashboard/audit/${path(e.id)}`,
+    noReceipt: null,
   };
 }
 
-export function buildHistory(input: { transfers: TransferRow[]; batches: BatchRow[]; withdrawals: WithdrawalRow[]; earlier: EarlierRow[] }): HistoryEntry[] {
-  return [...input.transfers.map(transferEntry), ...input.batches.map(batchEntry), ...input.withdrawals.map(withdrawalEntry), ...input.earlier.map(earlierEntry)].sort((a, b) => b.date.localeCompare(a.date));
+export function buildHistory(input: { transfers: TransferRow[]; batches: BatchRow[]; withdrawals: WithdrawalRow[]; earlier: EarlierRow[]; restricted?: boolean }): HistoryEntry[] {
+  const restricted = input.restricted === true;
+  return [...input.transfers.map(transferEntry), ...input.batches.map(batchEntry), ...input.withdrawals.map((w) => withdrawalEntry(w, restricted)), ...input.earlier.map(earlierEntry)].sort((a, b) => b.date.localeCompare(a.date));
+}
+
+export type Lists = { transfers: TransferRow[]; batches: BatchRow[]; withdrawals: WithdrawalRow[]; earlier: EarlierRow[]; restricted: boolean };
+type Answer<T> = { ok: boolean; status: number; items: T[] };
+type Source = 'payments' | 'batches' | 'withdrawals' | 'earlier';
+
+/**
+ * What the four lists answered, folded into what the page shows. A list that
+ * did not answer keeps what it held before (so a payment on its way does not
+ * vanish from a refresh that failed) and is named, so the page never presents
+ * a shorter list as complete. A viewer's 403 is not a failure: it is the
+ * business's rule about what they may see. With nothing loaded before and
+ * every list failing there is no list at all, and the page says so.
+ */
+export function mergeLists(
+  previous: Lists | null,
+  answers: { transfers: Answer<TransferRow>; batches: Answer<BatchRow>; withdrawals: Answer<WithdrawalRow>; earlier: Answer<EarlierRow> },
+): { lists: Lists | null; failed: Source[] } {
+  const failed: Source[] = [];
+  const pick = <T>(source: Source, answer: Answer<T>, before: T[] | undefined): T[] => {
+    if (answer.ok) return answer.items;
+    if (answer.status === 403) return [];
+    failed.push(source);
+    return before ?? [];
+  };
+  const restricted = answers.transfers.status === 403 || answers.batches.status === 403;
+  const lists: Lists = {
+    transfers: pick('payments', answers.transfers, previous?.transfers),
+    batches: pick('batches', answers.batches, previous?.batches),
+    withdrawals: pick('withdrawals', answers.withdrawals, previous?.withdrawals),
+    earlier: pick('earlier', answers.earlier, previous?.earlier),
+    restricted: restricted || (previous?.restricted === true && [answers.transfers, answers.batches].some((a) => !a.ok && a.status !== 403)),
+  };
+  if (failed.length === 4 && previous === null) return { lists: null, failed };
+  if (failed.length === 4 && previous) return { lists: previous, failed };
+  return { lists, failed };
+}
+
+const SOURCE_WORDS: Record<Source, string> = { payments: 'Payments', batches: 'Batches', withdrawals: 'Withdrawals', earlier: 'Earlier transfers' };
+
+/** One sentence naming what did not load. */
+export function failureNote(failed: Source[]): string {
+  if (failed.length === 0) return '';
+  if (failed.length === 4) return 'Your history could not be refreshed. Showing what was loaded before.';
+  const names = failed.map((f) => SOURCE_WORDS[f].toLowerCase());
+  const joined = names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+  return `${joined.charAt(0).toUpperCase()}${joined.slice(1)} could not be loaded. Showing the rest.`;
 }
 
 export function filterHistory(entries: HistoryEntry[], input: { group: Group | 'all'; query: string }): HistoryEntry[] {

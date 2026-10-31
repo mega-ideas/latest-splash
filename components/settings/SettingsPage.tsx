@@ -15,6 +15,7 @@ import SigningInbox from '@/components/wallet/SigningInbox';
 import { Card, Loading, Note, useLoad } from '@/components/wallet/parts';
 import type { FundingOptions, Overview } from '@/components/wallet/types';
 import type { GovernanceBannerAlert } from '@/lib/server/governance-events';
+import { canEditControls } from '@/lib/settings-page/controls';
 import { settingsWallet } from '@/lib/settings-page/wallet-gate';
 import type { SpendWire } from '@/lib/team-rules/view';
 import AboutCard from './AboutCard';
@@ -145,7 +146,7 @@ export default function SettingsPage({ alerts, billingOn }: { alerts: Governance
             <Card id="team" title="Team and spending rules">{walletNote()}</Card>
           )}
           {billingOn ? <BillingCard owner={owner === true} /> : null}
-          {ops.settings ? <OperatingControls settings={ops.settings} setSettings={ops.setSettings} /> : ops.problem ? <OperatingControlsUnavailable problem={ops.problem} /> : <Card id="controls" title="Operating controls"><Loading label="Reading your controls…" /></Card>}
+          {ops.settings ? <OperatingControls settings={ops.settings} setSettings={ops.setSettings} editable={canEditControls(o?.role)} /> : ops.problem ? <OperatingControlsUnavailable problem={ops.problem} /> : <Card id="controls" title="Operating controls"><Loading label="Reading your controls…" /></Card>}
         </div>
 
         <aside className="min-w-0 space-y-5">

@@ -160,13 +160,17 @@ export function recipientOffers(policy: PolicyLike | null, saved: ClientRecipien
 export type HousekeepingId = 'reissue' | 'orphaned' | 'near_threshold' | 'stale';
 
 /** What needs an owner's attention, in one place and in order. */
-export function housekeeping(view: { reissueNeeded: boolean; orphaned?: unknown[]; nearThreshold?: unknown[]; stale?: unknown[]; unattached?: unknown[] }): Array<{ id: HousekeepingId; text: string }> {
+export function housekeeping(
+  view: { reissueNeeded: boolean; orphaned?: unknown[]; nearThreshold?: unknown[]; stale?: unknown[]; unattached?: unknown[] },
+  options: { alertsShown?: boolean } = {},
+): Array<{ id: HousekeepingId; text: string }> {
   const out: Array<{ id: HousekeepingId; text: string }> = [];
   if (view.reissueNeeded) out.push({ id: 'reissue', text: 'The wallet’s signers changed, and some rules were not reissued under the new wallet. Until they are reissued they cannot pay.' });
   const orphaned = (view.orphaned?.length ?? 0) + (view.unattached?.length ?? 0);
   if (orphaned > 0) out.push({ id: 'orphaned', text: orphaned === 1 ? 'A rule belongs to someone who is no longer on the team. Take it back.' : `${orphaned} rules belong to people who are no longer on the team. Take them back.` });
   const near = view.nearThreshold?.length ?? 0;
-  if (near > 0) out.push({ id: 'near_threshold', text: near === 1 ? 'One recipient is near the amount that needs an owner’s approval. Review it with your owners.' : `${near} recipients are near the amount that needs an owner’s approval. Review them with your owners.` });
+  // The alert cards name each recipient; the line that counts them is for when the cards are not shown.
+  if (near > 0 && !options.alertsShown) out.push({ id: 'near_threshold', text: near === 1 ? 'One recipient is near the amount that needs an owner’s approval. Review it with your owners.' : `${near} recipients are near the amount that needs an owner’s approval. Review them with your owners.` });
   const stale = view.stale?.length ?? 0;
   if (stale > 0) out.push({ id: 'stale', text: stale === 1 ? 'An allowance from an earlier wallet can no longer pay.' : `${stale} allowances from an earlier wallet can no longer pay.` });
   return out;

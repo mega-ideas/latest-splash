@@ -19,3 +19,20 @@ export function customerRefusal(refusal: WalletRefusal): { status: number; error
   if (refusal.status >= 500) return { status: refusal.status, error: UPSTREAM };
   return { status: refusal.status, error: refusal.error };
 }
+
+const LOG_EVERY_MS = 10 * 60_000;
+const lastLogged = new Map<string, number>();
+
+/**
+ * The line for the server log when the wallet cannot run for a business, or
+ * null when this business was logged a moment ago: one Settings load makes
+ * several wallet calls, each of which would say the same thing. An address in
+ * the reason (a chain endpoint, with its key) is left out of the line.
+ */
+export function refusalLogLine(orgId: string, reason: string, now: number = Date.now()): string | null {
+  const before = lastLogged.get(orgId);
+  if (before !== undefined && now - before < LOG_EVERY_MS) return null;
+  if (lastLogged.size > 5000) lastLogged.clear();
+  lastLogged.set(orgId, now);
+  return `[wallet] refused for org ${orgId}: ${reason.replace(/[a-z][a-z0-9+.-]*:\/\/\S*/gi, '[address]')}`;
+}

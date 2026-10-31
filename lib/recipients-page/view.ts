@@ -42,6 +42,8 @@ export type Entry = {
   subtitle: string;
   /** The account or address, shortened. */
   masked: string;
+  /** The whole address of a wallet, exchange or other-chain recipient; empty for a bank account or a business. A person reads it before approving. */
+  address: string;
   country: string;
   state: RecipientState;
   searchText: string;
@@ -91,8 +93,9 @@ const READY: RecipientState = { step: 'ready', tone: 'ok', label: 'Ready to pay'
 export function stateOf(r: ClientRecipient): RecipientState {
   const kind = kindOfRecipient(r);
   if (kind === 'bank') {
+    // Neither can be paid from here: the bank has not confirmed the holder's name for an older entry, whatever its business check says.
     return r.kybStatus === 'full'
-      ? { step: 'older', tone: 'ok', label: 'Business verified', detail: 'To pay this account, add it again in Transfer, where the bank confirms the name.' }
+      ? { step: 'older', tone: 'wait', label: 'Business checked, add it again', detail: 'The business was checked, but this account was never confirmed with the bank. To pay it, add it again in Transfer, where the bank confirms the name.' }
       : { step: 'older', tone: 'wait', label: 'Not verified', detail: 'To pay this account, add it again in Transfer, where the bank confirms the name.' };
   }
   const verdict = r.screeningVerdict ?? null;
@@ -135,6 +138,7 @@ function savedEntry(r: ClientRecipient): Entry {
     name: r.name,
     subtitle,
     masked: kind === 'bank' ? maskAccount(r.account) : maskAddress(address),
+    address: kind === 'bank' ? '' : address,
     country: r.country,
     state,
     searchText: [r.name, r.bank, address, place, r.supplier?.legalName].filter(Boolean).join(' ').toLowerCase(),
@@ -156,6 +160,7 @@ function bankEntry(b: BankAccount): Entry {
     name: b.holderName,
     subtitle: `${b.label && b.label !== b.holderName ? `${b.label} · ` : ''}${b.currency} · ${b.bankCode}`,
     masked: `••${b.last4}`,
+    address: '',
     country: b.country,
     state: { step: 'ready', tone: 'ok', label: 'Verified with the bank', detail: 'The bank confirmed the account holder’s name before it was saved.' },
     searchText: [b.holderName, b.label, b.bankCode, b.country].filter(Boolean).join(' ').toLowerCase(),
@@ -168,7 +173,8 @@ function businessEntries(transfers: PaidPayee[]): Entry[] {
   const seen = new Map<string, { latest: PaidPayee; count: number }>();
   for (const t of transfers) {
     if (t.payeeKind !== 'splash_business') continue;
-    const key = t.payeeName.trim().toLowerCase();
+    // Two businesses can share a registered name; their wallets differ.
+    const key = `${t.payeeName.trim().toLowerCase()}|${(t.payeeMasked ?? '').toLowerCase()}`;
     const found = seen.get(key);
     if (!found) seen.set(key, { latest: t, count: 1 });
     else {
@@ -185,6 +191,7 @@ function businessEntries(transfers: PaidPayee[]): Entry[] {
       name: latest.payeeName,
       subtitle: `${count} ${count === 1 ? 'payment' : 'payments'} · last ${latest.createdAt.slice(0, 10)}`,
       masked: '',
+      address: '',
       country: latest.payeeCountry ?? '',
       state: { step: 'ready' as const, tone: 'ok' as const, label: 'On Splash', detail: 'Found by its registered name in Transfer. Paying it costs nothing.' },
       searchText: latest.payeeName.toLowerCase(),
@@ -228,11 +235,38 @@ export function actionsFor(entry: Entry, role: string): Action[] {
   if (entry.source === 'beneficiary') return owner ? ['remove'] : [];
   const actions: Action[] = [];
   const wallet = entry.kind === 'exchange' || entry.kind === 'self_custody' || entry.kind === 'cross_chain';
-  if (wallet && entry.kind === 'self_custody' && !entry.facts.proven) actions.push('send_proof');
-  if (wallet && owner && !entry.facts.approved && !entry.facts.savedByYou && entry.state.step !== 'blocked') actions.push('approve');
+  // Staff are not shown the link; it goes to the supplier's email, so without one there is nothing for them to send.
+  if (wallet && entry.kind === 'self_custody' && !entry.facts.proven && (owner || entry.facts.hasEmail)) actions.push('send_proof');
+  // Approving is what makes an address payable: it is offered only once the address has been screened clean (and, for a wallet, proven), the point at which the state reads 'waiting for an owner's approval'.
+  if (wallet && owner && !entry.facts.approved && !entry.facts.savedByYou && entry.state.step === 'approval') actions.push('approve');
   if (owner && entry.kind === 'self_custody' && entry.facts.proven) actions.push('withdraw_proof');
   // What can be paid is the owners' to remove; what cannot be paid yet is anyone's who manages recipients.
   const payable = entry.facts.payable || (entry.kind === 'self_custody' && entry.facts.proven);
   if (owner || !payable) actions.push('remove');
   return actions;
+}
+
+const norm = (a: string | null | undefined) => String(a ?? '').trim().toLowerCase();
+
+/** Whether the business's spending policy still lets staff pay this address on the chain. */
+export function policyHolds(policy: { recipients: Array<{ address: string }> } | null | undefined, address: string): boolean {
+  const a = norm(address);
+  return a !== '' && (policy?.recipients ?? []).some((r) => norm(r.address) === a);
+}
+
+/**
+ * What Remove says. The list here is Splash's own; the spending policy is on
+ * the chain and is changed only by the owners' signatures, so removing a wallet
+ * from this list does not take it off the policy. Until the owners stop
+ * allowing it, a staff member can still pay that address under their rule
+ * directly on the chain (Splash's own payment path refuses it).
+ * `onPolicy` is null when the policy could not be read.
+ */
+export function removeWords(entry: Pick<Entry, 'name' | 'source' | 'kind'>, onPolicy: boolean | null): string {
+  const base = `${entry.name} is taken off your list. ${entry.source === 'beneficiary' ? 'A payment to this account that has not been sent is cancelled.' : 'Payments you have already made are not affected.'} You can save them again later.`;
+  const wallet = entry.source === 'saved' && (entry.kind === 'self_custody' || entry.kind === 'exchange');
+  if (!wallet || onPolicy === false) return base;
+  return onPolicy === true
+    ? `${base} This address is on your spending policy, and removing it here does not take it off. Staff can still pay it under their rule on the chain until your owners choose Stop allowing in Settings.`
+    : `${base} If this address is on your spending policy, removing it here does not take it off. Check under Stop allowing in Settings.`;
 }

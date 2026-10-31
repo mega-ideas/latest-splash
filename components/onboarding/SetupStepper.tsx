@@ -131,7 +131,7 @@ export default function SetupStepper({ state }: { state: OnboardingState }) {
               <span className="min-w-0">
                 <strong className="block text-[13.5px] font-semibold leading-5 text-[#1F4452]">{step.title}</strong>
                 <small className="block text-[12px] text-[#326273]">
-                  {step.done ? 'Done' : step.pending ? 'In review' : isNext ? 'Next' : 'To do'}
+                  {step.done ? 'Done' : step.pending ? 'In review' : isNext ? 'Next' : step.id === 'recipient' ? 'Optional' : 'To do'}
                 </small>
               </span>
              </a>

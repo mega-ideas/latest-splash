@@ -48,6 +48,19 @@ export function defaultExpiry(now: Date): string {
   return new Date(now.getTime() + 90 * DAY_MS).toISOString().slice(0, 10);
 }
 
+/**
+ * The last day of a rule as the form shows it (UTC): a rule ends at the close of
+ * its last day, so the millisecond before the stored time is on that day. Null
+ * when there is no end date or it has already passed, so the form falls back to
+ * the default for a new rule rather than offering a date it would refuse.
+ */
+export function expiryField(expiresAtMs: string | null | undefined, now: Date): string | undefined {
+  if (!expiresAtMs || !/^\d+$/.test(expiresAtMs)) return undefined;
+  const ends = Number(expiresAtMs);
+  if (!Number.isFinite(ends) || ends <= now.getTime()) return undefined;
+  return new Date(ends - 1).toISOString().slice(0, 10);
+}
+
 export function ruleRequest(form: RuleForm, ctx: { now: Date; policyMaxMinor: bigint | null }): { ok: true; body: RuleBody; errors?: undefined } | { ok: false; errors: Errors<keyof RuleForm> } {
   const errors: Errors<keyof RuleForm> = {};
   if (!form.staffUserId.trim()) errors.staffUserId = 'Choose who this is for.';

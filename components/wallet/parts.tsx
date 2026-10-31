@@ -9,6 +9,7 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Check, CircleAlert, Copy, Loader2 } from 'lucide-react';
 
 import { call, errorText } from '@/components/transfer/api';
+import { loadView, type LoadState } from '@/lib/settings-page/load-state';
 import type { Tone } from '@/lib/wallet-page/labels';
 
 export function Card({ id, title, aside, children, className = '' }: { id?: string; title: string; aside?: ReactNode; children: ReactNode; className?: string }) {
@@ -57,22 +58,23 @@ export function Loading({ label }: { label: string }) {
 
 /** One GET, with a reload. A failure is a sentence, never a blank card. */
 export function useLoad<T>(url: string | null, failure: string) {
-  const [state, setState] = useState<{ data: T | null; error: string | null; loading: boolean }>({ data: null, error: null, loading: url !== null });
+  const [state, setState] = useState<LoadState<T>>({ url: null, data: null, error: null });
   const [tick, setTick] = useState(0);
   useEffect(() => {
     if (!url) return;
     let live = true;
     void call<T & { error?: string }>(url).then((answer) => {
       if (!live) return;
-      if (!answer.ok || !answer.body) setState({ data: null, error: errorText(answer, failure), loading: false });
-      else setState({ data: answer.body, error: null, loading: false });
+      if (!answer.ok || !answer.body) setState({ url, data: null, error: errorText(answer, failure) });
+      else setState({ url, data: answer.body, error: null });
     });
     return () => {
       live = false;
     };
   }, [url, tick, failure]);
   const reload = useCallback(() => setTick((t) => t + 1), []);
-  return { ...state, reload };
+  // Waiting for an answer to this address (or for the address itself) is loading, never an empty answer.
+  return { ...loadView(state, url), reload };
 }
 
 export function CopyButton({ value, label }: { value: string; label: string }) {

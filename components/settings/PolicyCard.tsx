@@ -146,7 +146,7 @@ export default function PolicyCard({ owner, spend, onChanged }: { owner: boolean
         {view ? (
           <div className="space-y-3 border-t border-[#326273]/10 pt-4">
             <h3 className="flex items-center gap-2 text-sm font-extrabold text-[#0c3e48]"><ShieldCheck className="h-4 w-4 text-[var(--info)]" aria-hidden="true" />Recipients staff may pay alone</h3>
-            <p className="text-[13px] leading-5 text-[#326273]">Only a recipient that is screened, approved by an owner and, for a wallet, proven by the supplier can be allowed. A bank account is allowed per beneficiary{view.bankAccounts > 0 ? ` (${view.bankAccounts} on the policy now)` : ''}.</p>
+            <p className="text-[13px] leading-5 text-[#326273]">You can allow a saved recipient that is screened, approved by an owner and, for a wallet, proven by the supplier. Staff can pay it alone only while it stays that way. A bank account is allowed per beneficiary{view.bankAccounts > 0 ? ` (${view.bankAccounts} on the policy now)` : ''}.</p>
             {saved.loading ? <Loading label="Reading your recipients…" /> : null}
             {offers.allowed.length === 0 && !saved.loading ? <Note>No recipient is allowed yet, so staff ask the owners for each payment.</Note> : null}
             {offers.allowed.length > 0 ? (

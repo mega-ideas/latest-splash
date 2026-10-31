@@ -12,7 +12,8 @@ import { PrimaryButton, QuietButton } from '@/components/transfer/ui';
 import { Card, Loading, Note, useLoad } from '@/components/wallet/parts';
 import type { Overview } from '@/components/wallet/types';
 import { Layers, Send } from 'lucide-react';
-import { buildEntries, countByKind, filterEntries, RECIPIENT_KINDS, type BankAccount, type PaidPayee, type RecipientKind } from '@/lib/recipients-page/view';
+import { buildEntries, countByKind, filterEntries, policyHolds, RECIPIENT_KINDS, type BankAccount, type PaidPayee, type RecipientKind } from '@/lib/recipients-page/view';
+import { settingsWallet } from '@/lib/settings-page/wallet-gate';
 import type { ClientRecipient } from '@/lib/recipients-page/wire';
 import NewRecipient from './NewRecipient';
 import RecipientCard from './RecipientCard';
@@ -60,6 +61,14 @@ export default function RecipientsPage() {
   }, [load]);
 
   const role = overview.data?.role ?? 'VIEWER';
+  // The spending policy is on the chain: taking a wallet off this list does not take it off the policy. An owner reads the policy to say so.
+  const hasWallet = settingsWallet(overview.data?.walletState).manage;
+  const policy = useLoad<{ policy: { recipients: Array<{ address: string }> } | null }>(role === 'OWNER' && hasWallet ? '/api/wallet/spending-rules' : null, 'The spending policy could not be read.');
+  const onPolicyOf = (address: string): boolean | null => {
+    if (role !== 'OWNER' || !hasWallet || address === '') return false;
+    if (policy.loading || policy.error || !policy.data) return null;
+    return policyHolds(policy.data.policy, address);
+  };
   const entries = useMemo(() => (data ? buildEntries(data) : []), [data]);
   const counts = useMemo(() => countByKind(entries), [entries]);
   const shown = useMemo(() => filterEntries(entries, { kind, query }), [entries, kind, query]);
@@ -73,7 +82,7 @@ export default function RecipientsPage() {
         description="Everyone your business pays, and where each one stands before money can move. Payments are made in Transfer; what has been paid is in History."
         actions={
           canAdd ? (
-            <PrimaryButton type="button" onClick={() => setAdding((v) => !v)} aria-expanded={adding} className="!h-10 !px-4 !text-[13px]">
+            <PrimaryButton type="button" onClick={() => setAdding((v) => !v)} aria-expanded={adding} className="!px-4 !text-[13px]">
               <Plus className="h-4 w-4" aria-hidden="true" />
               New recipient
             </PrimaryButton>
@@ -98,17 +107,16 @@ export default function RecipientsPage() {
       <section className="grid gap-5 xl:grid-cols-[1.6fr_1fr]">
         <div className="space-y-4">
           <div className="dash-surface space-y-3 p-3 sm:p-4">
-            <div role="radiogroup" aria-label="Type of recipient" className="flex flex-wrap gap-2">
+            <div role="group" aria-label="Type of recipient" className="flex flex-wrap gap-2">
               {([{ id: 'all', label: 'All' }, ...RECIPIENT_KINDS.map((k) => ({ id: k.id, label: k.label }))] as Array<{ id: RecipientKind | 'all'; label: string }>).map((k) => {
                 const on = kind === k.id;
                 return (
                   <button
                     key={k.id}
                     type="button"
-                    role="radio"
-                    aria-checked={on}
+                    aria-pressed={on}
                     onClick={() => setKind(k.id)}
-                    className={`inline-flex min-h-10 items-center gap-2 rounded-xl border px-3 text-[13px] font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0d6370] ${on ? 'border-[#0c3e48] bg-[#0c3e48] text-white' : 'border-[#326273]/20 bg-white text-[#1F4452] hover:border-[#0d6370]/60'}`}
+                    className={`inline-flex min-h-11 items-center gap-2 rounded-xl border px-3 text-[13px] font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0d6370] ${on ? 'border-[#0c3e48] bg-[#0c3e48] text-white' : 'border-[#326273]/20 bg-white text-[#1F4452] hover:border-[#0d6370]/60'}`}
                   >
                     {k.label}
                     <span className={`rounded-full px-1.5 text-[12px] font-bold tabular-nums ${on ? 'bg-white/20 text-white' : 'bg-[#326273]/10 text-[#1F4452]'}`}>{counts[k.id]}</span>
@@ -150,7 +158,7 @@ export default function RecipientsPage() {
           ) : (
             <ul className="space-y-3" aria-label="Recipients">
               {shown.map((entry) => (
-                <RecipientCard key={`${entry.source}-${entry.id}`} entry={entry} role={role} onChanged={() => void load()} />
+                <RecipientCard key={`${entry.source}-${entry.id}`} entry={entry} role={role} onPolicy={onPolicyOf(entry.address)} onChanged={() => { void load(); policy.reload(); }} />
               ))}
             </ul>
           )}

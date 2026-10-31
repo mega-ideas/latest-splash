@@ -28,7 +28,8 @@ export default function TeamCard({
   team: { data: InCharge | null; loading: boolean; error: string | null };
   onChanged: () => void;
 }) {
-  if (team.loading) return <Card id="team" title="Team"><Loading label="Reading your team…" /></Card>;
+  // Waiting is not failing: with neither an answer nor an error yet, the card says it is reading, never an empty alert.
+  if (team.loading || (!team.data && !team.error)) return <Card id="team" title="Team"><Loading label="Reading your team…" /></Card>;
   if (!team.data) return <Card id="team" title="Team"><Note tone="error">{team.error}</Note></Card>;
   const rows = teamRows({ members: team.data.members, personsInCharge: team.data.personsInCharge, rules: spend?.rules ?? [] }, new Date());
 

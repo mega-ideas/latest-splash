@@ -9,6 +9,7 @@ import { Card, Loading, Note, Pill, useLoad } from '@/components/wallet/parts';
 import type { RuleBody } from '@/lib/team-rules/form';
 import { housekeeping, ruleLine, type RuleLineView, type SpendWire } from '@/lib/team-rules/view';
 import { formatUsdc } from '@/lib/fees/copy';
+import { expiryField } from '@/lib/team-rules/form';
 import RuleForm, { type StaffChoice } from './RuleForm';
 import SignFlow, { askToSign } from './SignFlow';
 
@@ -34,7 +35,8 @@ export default function RulesSection({ owner, spend, staff, onChanged }: { owner
   const alerts = useLoad<{ alerts: Alert[] }>(owner ? '/api/wallet/spending-rules/alerts' : null, 'The near-threshold alerts could not be read.');
   const now = new Date();
   const lines = spend.rules.map((r) => ruleLine(r, now));
-  const attention = housekeeping(spend);
+  // The alert cards name each recipient; the line that only counts them is dropped while they are shown.
+  const attention = housekeeping(spend, { alertsShown: Boolean(owner && alerts.data && alerts.data.alerts.length > 0) });
   const policyMax = spend.policy ? BigInt(spend.policy.perPaymentMaxMinor) : null;
 
   async function ask(url: string, init: { method: string; body?: unknown }) {
@@ -146,7 +148,7 @@ export default function RulesSection({ owner, spend, staff, onChanged }: { owner
                   {l.usage ? (
                     <div className="mt-2 space-y-1">
                       <div role="progressbar" aria-label={`${l.name}: ${l.usage.text}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={l.usage.percent} className="h-2 overflow-hidden rounded-full bg-[#F6F0ED]">
-                        <div className="h-full rounded-full bg-[#5C9EAD]" style={{ width: `${l.usage.percent}%` }} />
+                        <div className="h-full rounded-full bg-[#0d6370]" style={{ width: `${l.usage.percent}%` }} />
                       </div>
                       <p className="text-[13px] text-[#1F4452]">{l.usage.text}</p>
                       <p className="text-[13px] text-[#326273]">{[l.left, l.renews].filter(Boolean).join('. ')}.</p>
@@ -173,6 +175,8 @@ export default function RulesSection({ owner, spend, staff, onChanged }: { owner
                                 perPayment: plain(raw.perPaymentMaxMinor),
                                 ...(current?.window ? { period: current.window.period === 'month' ? 'month' : 'day', cap: plain(current.window.limitMinor) } : {}),
                                 ...(current?.lifetimeCapMinor ? { lifetimeCap: plain(current.lifetimeCapMinor) } : {}),
+                                // A change keeps the end date the rule has; only a new rule starts from the default.
+                                ...(expiryField(current?.expiresAtMs, now) ? { expires: expiryField(current?.expiresAtMs, now) as string } : {}),
                               },
                             });
                           }}

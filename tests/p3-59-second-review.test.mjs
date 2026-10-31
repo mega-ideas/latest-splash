@@ -60,7 +60,7 @@ test('Remove says when the wallet stays allowed on the chain, and where to stop 
   const on = removeWords(entry, true);
   assert.match(on, /spending policy/i);
   assert.match(on, /Stop allowing/);
-  assert.match(on, /still (be )?paid|stays allowed|stay allowed/i);
+  assert.match(on, /still pay|stays allowed|stay allowed/i);
   const unknown = removeWords(entry, null);
   assert.match(unknown, /Stop allowing/, 'when the policy could not be read, it says what to check');
   const off = removeWords(entry, false);
@@ -108,7 +108,7 @@ test('an older bank entry is not called verified, whatever its business check sa
   for (const kybStatus of ['full', 'none']) {
     const s = stateOf(legacyBank({ kybStatus }));
     assert.notEqual(s.tone, 'ok', 'it cannot be paid, so it is not a success');
-    assert.doesNotMatch(s.label, /verified/i);
+    assert.doesNotMatch(s.label, /^(Business )?verified/i);
   }
 });
 
@@ -191,7 +191,7 @@ test('the empty-state sentence is shown only when every list answered', () => {
   const page = code(read('components/history/HistoryPage.tsx'));
   assert.match(page, /mergeLists\(/);
   assert.match(page, /failureNote\(/);
-  assert.match(page, /failed\.length === 0 &&?[\s\S]{0,200}Nothing here yet|entries\.length === 0 && failed\.length === 0/);
+  assert.match(page, /entries\.length === 0 && failed \? null/, 'with nothing shown and a list missing, the page says what failed and not that there is nothing');
 });
 
 test('a viewer is not given a receipt link they cannot open, and is told why', () => {
@@ -208,7 +208,7 @@ test('a viewer is not given a receipt link they cannot open, and is told why', (
 
 test('the Settings privacy line is built from what Zeke’s own disclosure says it stores', () => {
   const line = ABOUT.find((a) => a.label === 'Records and privacy').text;
-  const lower = (s) => s.charAt(0).toLowerCase() + s.slice(1);
+  const lower = (s) => (/^[A-Z][a-z]/.test(s) ? s.charAt(0).toLowerCase() + s.slice(1) : s);
   for (const stored of MEMWAL_STORED) assert.ok(line.includes(lower(stored.label)), `names: ${stored.label}`);
   for (const never of MEMWAL_NEVER_STORED) assert.ok(line.includes(lower(never)), `says never: ${never}`);
   assert.doesNotMatch(line, /never balances or recipients/);
