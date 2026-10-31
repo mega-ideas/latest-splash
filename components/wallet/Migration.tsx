@@ -15,7 +15,7 @@ import { WALLET_LABELS } from './SetupWallet';
 
 type Found = FundsRow & { name: string };
 type Migration = { businessWallet: string | null; you: { userId: string; authority: Authority }; members: Found[] };
-type InCharge = { personsInCharge: Array<{ userId: string; name: string }>; members: Member[] };
+export type InCharge = { personsInCharge: Array<{ userId: string; name: string }>; members: Member[] };
 
 const LABELS = { ...WALLET_LABELS, working: 'Moving your USDC', done: 'Your USDC is in the business wallet', doneNote: 'It now shows in the wallet balance.', deadNote: 'Nothing moved. You can start the move again.' };
 
@@ -142,9 +142,14 @@ export default function Migration({ onChanged }: { onChanged: () => void }) {
 }
 
 /** An owner appoints or revokes the person in charge: the other person who may sign off a staff member's move. */
-/** The person in charge: an owner appoints and takes back. Shown here (Move to your business wallet) and in Settings → Team. */
-export function PersonInCharge() {
-  const data = useLoad<InCharge>('/api/wallet/persons-in-charge', 'The people in charge could not be loaded.');
+/**
+ * The person in charge: an owner appoints and takes back. Shown here (Move to your business wallet) and in Settings → Team.
+ * Settings already has the team and passes it in (`given`), so the page reads it once and a change refreshes the whole
+ * team; here it reads for itself.
+ */
+export function PersonInCharge({ given, onChanged }: { given?: InCharge; onChanged?: () => void } = {}) {
+  const own = useLoad<InCharge>(given ? null : '/api/wallet/persons-in-charge', 'The people in charge could not be loaded.');
+  const data = given ? { data: given, loading: false, error: null, reload: () => onChanged?.() } : own;
   const [pick, setPick] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);

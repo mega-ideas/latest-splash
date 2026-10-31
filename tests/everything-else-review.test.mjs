@@ -44,7 +44,7 @@ test('a missing server setting is a sentence for the customer, and never the nam
 
 test('the refusals that are the customer’s own are passed on in their words', () => {
   const own = { ok: false, status: 409, error: 'this business has no on-chain account yet, so it cannot have a business wallet' };
-  assert.deepEqual(customerRefusal(own), own);
+  assert.deepEqual(customerRefusal(own), { status: own.status, error: own.error });
   assert.equal(customerRefusal({ ok: false, status: 502, error: 'the chain did not answer' }).status, 502);
   assert.doesNotMatch(customerRefusal({ ok: false, status: 502, error: 'RPC https://fullnode.mainnet.sui.io:443 refused the connection' }).error, /https?:|sui\.io/i);
 });
@@ -94,7 +94,7 @@ test('the Settings columns can shrink to the screen, so a long word cannot push 
 
 test('a number in the operating controls is not cut off, and the approvals card has the title every other card has', () => {
   const controls = code(read('components/settings/OperatingControls.tsx'));
-  assert.match(controls, /<input type="number"[^>]*className="[^"]*\bw-full\b[^"]*\bmin-w-0\b[^"]*\btext-xl\b/);
+  assert.match(controls, /<input type="number"[\s\S]*?className="[^"]*\bw-full\b[^"]*\bmin-w-0\b[^"]*\btext-xl\b/);
   assert.doesNotMatch(controls, /text-2xl font-bold text-\[#326273\] outline-none/);
   const approvals = code(read('components/settings/ApprovalChannelCard.tsx'));
   assert.doesNotMatch(approvals, /<h2 className="text-xl/);
@@ -113,4 +113,24 @@ test('the Setup rail says each step in full, and a step that is done takes less 
   const stepper = code(read('components/onboarding/SetupStepper.tsx'));
   assert.doesNotMatch(stepper, /\btruncate\b/, 'a step name is never cut short');
   assert.match(stepper, /compact=\{/, 'a done step is drawn compactly');
+});
+
+/* Pressing twice ------------------------------------------------------------------ */
+
+test('a control that opens a signing request, changes a recipient or saves a step cannot be pressed twice while it is working', () => {
+  const buttons = (file) => [...code(read(file)).matchAll(/<(?:PrimaryButton|QuietButton|button)\b[^>]*?onClick=\{[^]*?\}[^>]*>/g)].map((m) => m[0]);
+  for (const [file, busy] of [
+    ['components/settings/RulesSection.tsx', /disabled=\{busy\}/],
+    ['components/settings/PolicyCard.tsx', /disabled=\{busy\}/],
+    ['components/recipients/RecipientCard.tsx', /disabled=\{busy !== null\}/],
+    ['components/onboarding/SetupStepper.tsx', /disabled=\{busy !== null\}/],
+  ]) {
+    const asking = buttons(file).filter((b) => /ask\(|recipients\(|asked\(|run\(|post\(/.test(b));
+    assert.ok(asking.length >= 1, `${file}: found the buttons that ask`);
+    for (const b of asking) assert.match(b, busy, `${file}: ${b.slice(0, 90)}`);
+  }
+  // A form's submit is guarded too, and its sending is `busy` until the answer is in.
+  for (const file of ['components/settings/RuleForm.tsx', 'components/settings/PolicyCard.tsx']) assert.match(code(read(file)), /<PrimaryButton type="submit" disabled=\{busy\}>/, file);
+  const stepper = code(read('components/onboarding/SetupStepper.tsx'));
+  assert.match(stepper, /<button\s+type="submit"\s+disabled=\{busy !== null\}/);
 });

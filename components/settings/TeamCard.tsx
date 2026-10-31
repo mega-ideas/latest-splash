@@ -2,11 +2,9 @@
 
 import { Fingerprint, UserRound } from 'lucide-react';
 
-import { Card, Loading, Note, Pill, useLoad } from '@/components/wallet/parts';
-import { PersonInCharge } from '@/components/wallet/Migration';
-import { teamRows, type MemberLike, type SpendWire } from '@/lib/team-rules/view';
-
-type InCharge = { personsInCharge: Array<{ userId: string; name: string }>; members: MemberLike[] };
+import { Card, Loading, Note, Pill } from '@/components/wallet/parts';
+import { PersonInCharge, type InCharge } from '@/components/wallet/Migration';
+import { teamRows, type SpendWire } from '@/lib/team-rules/view';
 
 /**
  * The team (v2 brief 5.9): who is in the business, what each person is, who is
@@ -15,12 +13,24 @@ type InCharge = { personsInCharge: Array<{ userId: string; name: string }>; memb
  * role is theirs to decide. Roles are set by Splash support, not here: a role
  * decides what a person can do, and changing one is a decision for the
  * business's owners and Splash together.
+ *
+ * The page reads the team once and gives it here (so a change of who is in
+ * charge refreshes the list); this card fetches nothing.
  */
-export default function TeamCard({ owner, spend }: { owner: boolean; spend: SpendWire | null }) {
-  const data = useLoad<InCharge>('/api/wallet/persons-in-charge', 'The team could not be loaded.');
-  if (data.loading) return <Card id="team" title="Team"><Loading label="Reading your team…" /></Card>;
-  if (!data.data) return <Card id="team" title="Team"><Note tone="error">{data.error}</Note></Card>;
-  const rows = teamRows({ members: data.data.members, personsInCharge: data.data.personsInCharge, rules: spend?.rules ?? [] }, new Date());
+export default function TeamCard({
+  owner,
+  spend,
+  team,
+  onChanged,
+}: {
+  owner: boolean;
+  spend: SpendWire | null;
+  team: { data: InCharge | null; loading: boolean; error: string | null };
+  onChanged: () => void;
+}) {
+  if (team.loading) return <Card id="team" title="Team"><Loading label="Reading your team…" /></Card>;
+  if (!team.data) return <Card id="team" title="Team"><Note tone="error">{team.error}</Note></Card>;
+  const rows = teamRows({ members: team.data.members, personsInCharge: team.data.personsInCharge, rules: spend?.rules ?? [] }, new Date());
 
   return (
     <Card id="team" title="Team">
@@ -49,8 +59,8 @@ export default function TeamCard({ owner, spend }: { owner: boolean; spend: Spen
         ) : (
           <Note>Your owners manage the team. Your own rule, if you have one, is under Spending rules.</Note>
         )}
-        {owner ? <PersonInCharge /> : data.data.personsInCharge.length > 0 ? (
-          <p className="text-[13px] text-[#326273]">In charge: {data.data.personsInCharge.map((p) => p.name).join(', ')}.</p>
+        {owner ? <PersonInCharge given={team.data} onChanged={onChanged} /> : team.data.personsInCharge.length > 0 ? (
+          <p className="text-[13px] text-[#326273]">In charge: {team.data.personsInCharge.map((p) => p.name).join(', ')}.</p>
         ) : null}
       </div>
     </Card>

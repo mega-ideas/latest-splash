@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, type ReactNode } from 'react';
 import Link from 'next/link';
 import { Lock, RefreshCw } from 'lucide-react';
 
@@ -9,11 +9,13 @@ import DashPageHeader from '@/components/dashboard/DashPageHeader';
 import { QuietButton } from '@/components/transfer/ui';
 import AlertsCard from '@/components/wallet/AlertsCard';
 import FundingSources from '@/components/wallet/FundingSources';
+import type { InCharge } from '@/components/wallet/Migration';
 import SignersCard from '@/components/wallet/SignersCard';
 import SigningInbox from '@/components/wallet/SigningInbox';
 import { Card, Loading, Note, useLoad } from '@/components/wallet/parts';
 import type { FundingOptions, Overview } from '@/components/wallet/types';
 import type { GovernanceBannerAlert } from '@/lib/server/governance-events';
+import { settingsWallet } from '@/lib/settings-page/wallet-gate';
 import type { SpendWire } from '@/lib/team-rules/view';
 import AboutCard from './AboutCard';
 import ApprovalChannelCard from './ApprovalChannelCard';
@@ -35,6 +37,9 @@ const SECTIONS: Array<{ id: string; label: string }> = [
   { id: 'about', label: 'How Splash operates' },
 ];
 
+/** The sections that need a business wallet: with none, they are one card and not in the list of links. */
+const NEEDS_WALLET = new Set(['rules', 'signers', 'funding']);
+
 /**
  * Settings (v2 brief 5.9): the business's team and spending rules, who signs
  * for the wallet, where funds may come from, how approvers are reached, what
@@ -44,30 +49,34 @@ const SECTIONS: Array<{ id: string; label: string }> = [
  * changes keep a 24-hour notice (Upgrade alerts). Billing is built behind its
  * switch and shown only when it is on.
  *
- * Every section reads the signed-in person's own business and none takes a
- * business, a wallet or an address from the page.
+ * With no business wallet the page says so once, in one card, and shows what
+ * does not need a wallet (approvals, alerts, controls). Every section reads the
+ * signed-in person's own business and none takes a business, a wallet or an
+ * address from the page.
  */
 export default function SettingsPage({ alerts, billingOn }: { alerts: GovernanceBannerAlert[]; billingOn: boolean }) {
   const overview = useLoad<Overview>('/api/wallet/overview', 'Your wallet could not be read.');
-  const ready = overview.data?.walletState === 'ready';
-  const spend = useLoad<SpendWire>(ready ? '/api/wallet/spending-rules' : null, 'The spending rules could not be read.');
-  const funding = useLoad<FundingOptions>(ready ? '/api/wallet/funding' : null, 'Your funding options could not be loaded.');
-  const team = useLoad<{ members: Array<{ userId: string; name: string; role: string }> }>('/api/wallet/persons-in-charge', 'The team could not be loaded.');
+  const wallet = settingsWallet(overview.data?.walletState);
+  const { manage } = wallet;
+  const spend = useLoad<SpendWire>(manage ? '/api/wallet/spending-rules' : null, 'The spending rules could not be read.');
+  const funding = useLoad<FundingOptions>(manage ? '/api/wallet/funding' : null, 'Your funding options could not be loaded.');
+  const team = useLoad<InCharge>(manage ? '/api/wallet/persons-in-charge' : null, 'The team could not be loaded.');
   const ops = useOperatingSettings();
-  const [, setVersion] = useState(0);
   const { reload: reloadOverview } = overview;
   const { reload: reloadSpend } = spend;
   const { reload: reloadFunding } = funding;
+  const { reload: reloadTeam } = team;
   const changed = useCallback(() => {
     reloadOverview();
     reloadSpend();
     reloadFunding();
-    setVersion((v) => v + 1);
-  }, [reloadOverview, reloadSpend, reloadFunding]);
+    reloadTeam();
+  }, [reloadOverview, reloadSpend, reloadFunding, reloadTeam]);
 
   const o = overview.data;
   const owner = o?.role === 'OWNER';
-  const nav = billingOn ? [...SECTIONS.slice(0, 6), { id: 'billing', label: 'Billing' }, ...SECTIONS.slice(6)] : SECTIONS;
+  const nav = SECTIONS.filter((s) => manage || !NEEDS_WALLET.has(s.id)).map((s) => (s.id === 'team' && !manage ? { ...s, label: 'Team and rules' } : s));
+  if (billingOn) nav.splice(nav.findIndex((s) => s.id === 'alerts') + 1, 0, { id: 'billing', label: 'Billing' });
   const view = spend.data;
   const staff: StaffChoice[] = (team.data?.members ?? [])
     .filter((m) => m.role === 'maker' || m.role === 'checker')
@@ -81,20 +90,25 @@ export default function SettingsPage({ alerts, billingOn }: { alerts: Governance
     />
   );
 
-  const walletNote = (what: string) => {
-    if (overview.loading) return <Loading label="Reading your wallet…" />;
-    if (!o) {
-      return (
-        <div className="space-y-3">
-          <Note tone="error">{overview.error}</Note>
-          <QuietButton type="button" onClick={overview.reload}><RefreshCw className="h-4 w-4" aria-hidden="true" />Try again</QuietButton>
-        </div>
-      );
+  /** What to say about the wallet, once: it is being read, it is not open, it is not set up, or it is being set up. */
+  const walletNote = (): ReactNode => {
+    switch (wallet.note) {
+      case 'loading':
+        return overview.error ? (
+          <div className="space-y-3">
+            <Note tone="error">{overview.error}</Note>
+            <QuietButton type="button" onClick={overview.reload}><RefreshCw className="h-4 w-4" aria-hidden="true" />Try again</QuietButton>
+          </div>
+        ) : <Loading label="Reading your wallet…" />;
+      case 'off':
+        return <p role="status" className="flex items-start gap-2 text-[13px] leading-5 text-[#1F4452]"><Lock className="mt-0.5 h-4 w-4 shrink-0 text-[var(--warn-ink)]" aria-hidden="true" />Business wallets are not open for your workspace yet, so there is no team to give spending rules to, no signers and no funding sources to manage. Your Splash contact will tell you when they are.</p>;
+      case 'unavailable':
+        return <Note tone="error">Splash could not reach the chain to read your wallet. Nothing was changed.</Note>;
+      case 'pending':
+        return <Note>Your business wallet is being set up. Each owner signs the next step on their own device, under Needs your signature above or on the Wallet page. Rules, signers and funding sources are managed here after that.</Note>;
+      default:
+        return <Note>You have no business wallet yet. {owner ? <>An owner creates it on the <Link href="/dashboard/wallet" className="font-semibold underline">Wallet page</Link>; the team&rsquo;s spending rules, signers and funding sources are managed here after that.</> : 'An owner creates it; the team’s spending rules, signers and funding sources appear here after that.'}</Note>;
     }
-    if (o.walletState === 'off') return <p role="status" className="flex items-start gap-2 text-[13px] leading-5 text-[#1F4452]"><Lock className="mt-0.5 h-4 w-4 shrink-0 text-[var(--warn-ink)]" aria-hidden="true" />Business wallets are not open for your workspace yet, so there are no {what} to manage. Your Splash contact will tell you when they are.</p>;
-    if (o.walletState === 'unavailable') return <Note tone="error">Splash could not reach the chain to read your wallet. Nothing was changed.</Note>;
-    if (o.walletState === 'pending') return <Note>Your business wallet is being set up. Each owner signs the next step on their own device, under Needs your signature on the Wallet page.</Note>;
-    return <Note>You have no business wallet yet. {owner ? <>An owner creates it on the <Link href="/dashboard/wallet" className="font-semibold underline">Wallet page</Link>; {what} are managed here after that.</> : `An owner creates it; ${what} appear here after that.`}</Note>;
   };
 
   return (
@@ -111,35 +125,40 @@ export default function SettingsPage({ alerts, billingOn }: { alerts: Governance
         </ul>
       </nav>
 
-      <SigningInbox onChanged={changed} />
+      {wallet.inbox ? <SigningInbox onChanged={changed} /> : null}
 
-      <div className="grid items-start gap-5 xl:grid-cols-[1.35fr_1fr]">
-        <div className="space-y-5">
-          <TeamCard owner={owner === true} spend={view} />
-          {ready && view ? (
+      <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
+        <div className="min-w-0 space-y-5">
+          {manage ? (
             <>
-              <PolicyCard owner={owner === true} spend={view} onChanged={changed} />
-              <RulesSection owner={owner === true} spend={view} staff={staff} onChanged={changed} />
+              <TeamCard owner={owner === true} spend={view} team={team} onChanged={changed} />
+              {view ? (
+                <>
+                  <PolicyCard owner={owner === true} spend={view} onChanged={changed} />
+                  <RulesSection owner={owner === true} spend={view} staff={staff} onChanged={changed} />
+                </>
+              ) : (
+                <Card id="rules" title="Spending rules">{spend.error ? <Note tone="error">{spend.error}</Note> : <Loading label="Reading the rules from the chain…" />}</Card>
+              )}
             </>
           ) : (
-            <>
-              <Card id="policy" title="Spending policy">{spend.error && ready ? <Note tone="error">{spend.error}</Note> : ready ? <Loading label="Reading the rules from the chain…" /> : walletNote('spending rules')}</Card>
-              <Card id="rules" title="Spending rules">{spend.error && ready ? <Note tone="error">{spend.error}</Note> : ready ? <Loading label="Reading the rules from the chain…" /> : walletNote('spending rules')}</Card>
-            </>
+            <Card id="team" title="Team and spending rules">{walletNote()}</Card>
           )}
           {billingOn ? <BillingCard owner={owner === true} /> : null}
           {ops.settings ? <OperatingControls settings={ops.settings} setSettings={ops.setSettings} /> : ops.problem ? <OperatingControlsUnavailable problem={ops.problem} /> : <Card id="controls" title="Operating controls"><Loading label="Reading your controls…" /></Card>}
         </div>
 
-        <aside className="space-y-5">
-          {ready && o ? <SignersCard overview={o} onChanged={changed} /> : <Card id="signers" title="Signers and threshold">{walletNote('signers')}</Card>}
-          <div id="funding" className="scroll-mt-24">
-            {ready && funding.data ? (
-              <FundingSources funding={funding.data} owner={owner === true} onChanged={changed} />
-            ) : (
-              <Card title="Funding sources">{ready ? (funding.error ? <Note tone="error">{funding.error}</Note> : <Loading label="Loading…" />) : walletNote('funding sources')}</Card>
-            )}
-          </div>
+        <aside className="min-w-0 space-y-5">
+          {manage && o ? <SignersCard overview={o} onChanged={changed} /> : null}
+          {manage ? (
+            <div id="funding" className="scroll-mt-24">
+              {funding.data ? (
+                <FundingSources funding={funding.data} owner={owner === true} onChanged={changed} />
+              ) : (
+                <Card title="Funding sources">{funding.error ? <Note tone="error">{funding.error}</Note> : <Loading label="Loading…" />}</Card>
+              )}
+            </div>
+          ) : null}
           <div id="approvals" className="scroll-mt-24 space-y-5">
             {ops.settings ? (
               <ApprovalChannelCard whatsappEnabled={ops.settings.whatsappEnabled} approvalChannel={ops.settings.approvalChannel} onChange={(patch) => ops.setSettings((current) => (current ? { ...current, ...patch } : current))} />

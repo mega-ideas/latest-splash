@@ -9,6 +9,7 @@ import 'server-only';
 import { billPaymentFlow, registerBillPaymentFlow, type BillPaymentFlow } from '@/lib/bills/payment-hook';
 import { makeBillPaymentFlow } from '@/lib/server/bill-payment-flow';
 import { liveWalletContext } from '@/lib/server/wallet-deps';
+import { customerRefusal } from '@/lib/server/wallet-refusal';
 import { transferDepsFor } from '@/lib/server/wallet-transfers-deps';
 
 export function liveBillPaymentFlow(): BillPaymentFlow {
@@ -16,7 +17,10 @@ export function liveBillPaymentFlow(): BillPaymentFlow {
   registerBillPaymentFlow(
     makeBillPaymentFlow(async (orgId) => {
       const live = await liveWalletContext(orgId);
-      if (!live.ok) return { ok: false, status: live.status, error: live.error };
+      if (!live.ok) {
+        console.warn(`[wallet] refused for org ${orgId}: ${live.error}`);
+        return { ok: false, ...customerRefusal(live) };
+      }
       // A route's shape, for the one thing the service reads from it: the org's own context.
       return transferDepsFor({ orgId, ctx: live.ctx, db: live.db } as Parameters<typeof transferDepsFor>[0]);
     }),

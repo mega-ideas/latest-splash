@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ArrowRight, Check, Clock3 } from 'lucide-react';
@@ -104,17 +104,18 @@ export default function SetupStepper({ state }: { state: OnboardingState }) {
       ) : null}
 
       {/* The rail. */}
-      <ol className="dash-surface flex flex-wrap items-stretch gap-0 overflow-x-auto p-2" aria-label="Setup steps">
+      <ol className="dash-surface grid gap-0 p-2 sm:grid-cols-3 lg:grid-cols-5" aria-label="Setup steps">
         {state.steps.map((step, i) => {
           const isNext = summary.next?.id === step.id;
           return (
             <li
               key={step.id}
-              className={`flex min-w-[150px] flex-1 items-center gap-3 border-b-2 px-4 py-3 ${
+              className={`border-b-2 ${
                 step.done ? 'border-[#2E7D6B]' : step.pending ? 'border-[#D9A441]' : isNext ? 'border-[#0d6370]' : 'border-transparent'
               }`}
               aria-current={isNext ? 'step' : undefined}
             >
+             <a href={`#${step.id}`} className="flex min-h-14 items-center gap-3 rounded-lg px-3 py-3 transition-colors hover:bg-[#F6F0ED] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0d6370]">
               <span
                 className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[13px] font-bold ${
                   step.done
@@ -128,11 +129,12 @@ export default function SetupStepper({ state }: { state: OnboardingState }) {
                 {step.done ? <Check className="h-4 w-4" /> : step.pending ? <Clock3 className="h-4 w-4" /> : i + 1}
               </span>
               <span className="min-w-0">
-                <strong className="block truncate text-[13.5px] font-semibold text-[#1F4452]">{step.title}</strong>
-                <small className="block truncate text-[12px] text-[#326273]">
+                <strong className="block text-[13.5px] font-semibold leading-5 text-[#1F4452]">{step.title}</strong>
+                <small className="block text-[12px] text-[#326273]">
                   {step.done ? 'Done' : step.pending ? 'In review' : isNext ? 'Next' : 'To do'}
                 </small>
               </span>
+             </a>
             </li>
           );
         })}
@@ -143,7 +145,7 @@ export default function SetupStepper({ state }: { state: OnboardingState }) {
       ) : null}
 
       {/* 1 · Terms */}
-      <section id="terms" className={`dash-surface scroll-mt-24 p-6 ${summary.next?.id === 'terms' ? 'ring-2 ring-[#0d6370]/40' : ''}`}>
+      <StepCard id="terms" compact={state.steps[0].done} next={summary.next?.id === 'terms'}>
         <StepHeading n={1} title="Accept the terms" done={state.steps[0].done} />
         <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[#326273]">{state.steps[0].detail}</p>
         {state.steps[0].done ? null : (
@@ -161,10 +163,10 @@ export default function SetupStepper({ state }: { state: OnboardingState }) {
             </button>
           </div>
         )}
-      </section>
+      </StepCard>
 
       {/* 2 · Business profile */}
-      <section id="profile" className={`dash-surface scroll-mt-24 p-6 ${summary.next?.id === 'profile' ? 'ring-2 ring-[#0d6370]/40' : ''}`}>
+      <StepCard id="profile" compact={state.steps[1].done} next={summary.next?.id === 'profile'}>
         <StepHeading n={2} title="Business profile" done={state.steps[1].done} />
         <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[#326273]">{state.steps[1].detail}</p>
         {state.steps[1].done ? null : (
@@ -219,11 +221,11 @@ export default function SetupStepper({ state }: { state: OnboardingState }) {
             </button>
           </form>
         )}
-      </section>
+      </StepCard>
 
       {/* 3 to 5 · Owned elsewhere; this page shows the truth and points at the door. */}
       {state.steps.slice(2).map((step, i) => (
-        <section key={step.id} id={step.id} className={`dash-surface scroll-mt-24 p-6 ${summary.next?.id === step.id ? 'ring-2 ring-[#0d6370]/40' : ''}`}>
+        <StepCard key={step.id} id={step.id} compact={step.done} next={summary.next?.id === step.id}>
           <StepHeading n={i + 3} title={step.title} done={step.done} pending={step.pending} />
           <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[#326273]">{step.detail}</p>
           {step.done ? null : (
@@ -235,9 +237,18 @@ export default function SetupStepper({ state }: { state: OnboardingState }) {
               <ArrowRight aria-hidden="true" className="h-4 w-4" />
             </Link>
           )}
-        </section>
+        </StepCard>
       ))}
     </div>
+  );
+}
+
+/** One step's card: the next one is ringed, and one already done takes less room than one still to do. */
+function StepCard({ id, compact, next, children }: { id: string; compact: boolean; next: boolean; children: ReactNode }) {
+  return (
+    <section id={id} className={`dash-surface scroll-mt-24 ${compact ? 'p-4' : 'p-6'} ${next ? 'ring-2 ring-[#0d6370]/40' : ''}`}>
+      {children}
+    </section>
   );
 }
 

@@ -119,8 +119,8 @@ export default function HistoryPage() {
 
       <div className="dash-reveal-stagger grid grid-cols-2 gap-3 md:grid-cols-4">
         <DashStat label="Sent this month" value={`${formatUsdc(BigInt(summary.sentThisMonthMinor))} USDC`} valueClassName="text-[#326273]" />
-        <DashStat label="In progress" value={String(summary.inProgress)} valueClassName="text-[var(--gold-ink)]" />
-        <DashStat label="Not paid" value={String(summary.notPaid)} valueClassName="text-[var(--error)]" />
+        <DashStat label="In progress" value={String(summary.inProgress)} valueClassName={summary.inProgress > 0 ? 'text-[var(--gold-ink)]' : 'text-[#326273]'} />
+        <DashStat label="Not paid" value={String(summary.notPaid)} valueClassName={summary.notPaid > 0 ? 'text-[var(--error)]' : 'text-[#326273]'} />
         <DashStat label="Receipts and records" value={String(summary.total)} valueClassName="text-[var(--info)]" />
       </div>
 

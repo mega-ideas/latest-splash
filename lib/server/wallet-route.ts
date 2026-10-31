@@ -15,6 +15,7 @@ import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import { RATE_LIMITS, enforceRateLimit } from '@/lib/server/rate-limit';
 import { requireSessionAccount } from '@/lib/server/session-account';
 import { liveWalletContext } from '@/lib/server/wallet-deps';
+import { customerRefusal } from '@/lib/server/wallet-refusal';
 import type { WalletContext } from '@/lib/server/business-wallet';
 import type { DrizzleDb } from '@/lib/server/wallet-signing-store';
 
@@ -37,7 +38,12 @@ export async function walletRoute(request: Request): Promise<{ route: WalletRout
     return { route: null, response: NextResponse.json({ error: 'no membership' }, { status: 403, headers: NO_STORE }) };
   }
   const live = await liveWalletContext(account.account.orgId);
-  if (!live.ok) return { route: null, response: NextResponse.json({ error: live.error }, { status: live.status, headers: NO_STORE }) };
+  if (!live.ok) {
+    // The reason is the operator's (a missing setting, a network); the customer is told in a sentence.
+    console.warn(`[wallet] refused for org ${account.account.orgId}: ${live.error}`);
+    const said = customerRefusal(live);
+    return { route: null, response: NextResponse.json({ error: said.error }, { status: said.status, headers: NO_STORE }) };
+  }
   return { route: { orgId: account.account.orgId, authority, ctx: live.ctx, db: live.db }, response: null };
 }
 

@@ -118,7 +118,7 @@ export default function OperatingControls({ settings, setSettings }: { settings:
           </section>
         ) : null}
 
-        <div className="grid gap-5 lg:grid-cols-[1.15fr_0.85fr]">
+        <div className="grid gap-5">
           <div>
             <h3 className="flex items-center gap-2 text-sm font-extrabold text-[#0c3e48]"><SlidersHorizontal className="h-4 w-4 text-[var(--info)]" aria-hidden="true" />Payment controls</h3>
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
@@ -130,7 +130,7 @@ export default function OperatingControls({ settings, setSettings }: { settings:
           </div>
           <div>
             <h3 className="flex items-center gap-2 text-sm font-extrabold text-[#0c3e48]"><LockKeyhole className="h-4 w-4 text-[var(--info)]" aria-hidden="true" />Security controls</h3>
-            <div className="mt-3 space-y-2.5">
+            <div className="mt-3 grid gap-2.5 sm:grid-cols-2">
               <Toggle label="TOTP authorization" active={settings.requireTotp} onClick={() => update('requireTotp', !settings.requireTotp)} />
               <Toggle label="Dual approval above threshold" active={settings.requireDualApproval} onClick={() => update('requireDualApproval', !settings.requireDualApproval)} />
               <Toggle label="Block high-risk corridors" active={settings.blockHighRiskCorridors} onClick={() => update('blockHighRiskCorridors', !settings.blockHighRiskCorridors)} />
@@ -159,7 +159,7 @@ function NumberControl({ label, value, suffix, onChange, disabled = false, note 
       <span className="text-[13px] font-semibold text-[#1F4452]">{label}</span>
       {/* Only the value dims; the reason below keeps full contrast. */}
       <span className={`mt-2 flex items-center gap-2 ${disabled ? 'opacity-50' : ''}`}>
-        <input type="number" min={0} value={value} disabled={disabled} onChange={(event) => onChange(Number(event.target.value))} className="min-w-0 flex-1 bg-transparent text-2xl font-bold text-[#326273] outline-none disabled:cursor-not-allowed" />
+        <input type="number" min={0} value={value} disabled={disabled} onChange={(event) => onChange(Number(event.target.value))} className="w-full min-w-0 flex-1 bg-transparent text-xl font-bold tabular-nums text-[#326273] outline-none disabled:cursor-not-allowed" />
         <span className="text-[13px] font-bold text-[var(--info)]">{suffix}</span>
       </span>
       {note && (
