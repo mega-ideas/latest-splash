@@ -70,6 +70,17 @@ test('a receipt link can be stopped by an owner, and the public page is not inde
   assert.match(read('components/transfer/StepReceipt.tsx'), /Stop sharing/);
 });
 
+test('the payout route validates before it seals: no bundle for a request about to be refused, and what is sealed is the parsed payment', () => {
+  const route = read('app/api/wallet/payouts/route.ts');
+  const check = route.indexOf('bigintField(body.amountMinor)');
+  const seal = route.indexOf('makePaymentRecorder({');
+  assert.ok(check > 0 && seal > check, 'the amount and fee are parsed before anything is sealed');
+  assert.match(route, /if \(holder && amount !== null && amount > 0n && maxFee !== null\)/);
+  assert.match(route, /amountMinor: amount\.toString\(\)/);
+  assert.match(route, /\.slice\(0, 60\)/, 'the reference is bounded');
+  assert.doesNotMatch(route, /String\(body\.amountMinor/);
+});
+
 test('the pop-up does not restart its focus handling when its parent renders, and the toggle is a real radio group with 44px targets', () => {
   const ui = read('components/transfer/ui.tsx');
   assert.match(ui, /closeRef\.current\(\)/);

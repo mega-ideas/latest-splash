@@ -3,7 +3,7 @@ import { readJsonBody } from '@/lib/server/http';
 import { createPartnerPayout, listPartnerPayouts, listPayoutBeneficiaries, SUPPLIER_PAYOUT_PARTNERS } from '@/lib/server/partner-payouts';
 import { makePaymentRecorder } from '@/lib/server/payment-record';
 import { sealAdapter } from '@/lib/server/seal';
-import { limitWalletRequests, requirePayoutReader, requireWithdrawalRequester } from '@/lib/server/wallet-route';
+import { bigintField, limitWalletRequests, requirePayoutReader, requireWithdrawalRequester } from '@/lib/server/wallet-route';
 import { storeEncryptedInvoice } from '@/lib/server/walrus';
 import { withdrawalDepositAddress } from '@/lib/server/withdrawals';
 import { withdrawalResponse, withdrawalRoute } from '@/lib/server/withdrawals-deps';
@@ -52,20 +52,28 @@ export async function POST(request: Request) {
   let contentHash = '00'.repeat(32);
   let walrusBlobId = '00';
   const prior = clientKey ? await withdrawalByClientKey(gate.route.db, gate.route.orgId, clientKey) : null;
-  if (!prior) {
-    const holder = (await listPayoutBeneficiaries(gate.deps)).find((b) => b.id === String(body.beneficiaryId ?? ''))?.holderName ?? 'Supplier';
-    const record = await makePaymentRecorder({ seal: sealAdapter, store: storeEncryptedInvoice })({
-      orgId: gate.route.orgId,
-      transferId: clientKey ?? 'no-key',
-      payer: (await gate.deps.companyName()) ?? gate.route.orgId,
-      payee: holder,
-      amountMinor: String(body.amountMinor ?? ''),
-      maxFeeMinor: String(body.maxFeeMinor ?? ''),
-      reference: typeof body.remittanceInfo === 'string' ? body.remittanceInfo : null,
-    });
-    if (!record.ok) return withdrawalResponse(record);
-    contentHash = Buffer.from(record.contentHash).toString('hex');
-    walrusBlobId = Buffer.from(record.walrusBlobId).toString('hex');
+  // The cheap checks come first: nothing is sealed or stored for a request that is about to be refused (no key, a
+  // beneficiary that is not this business's, an amount or fee that is not a number). The payout service then gives
+  // the proper refusal. What is sealed is the parsed payment, not the strings the client sent.
+  if (!prior && clientKey) {
+    const amount = bigintField(body.amountMinor);
+    const maxFee = bigintField(body.maxFeeMinor);
+    const holder = (await listPayoutBeneficiaries(gate.deps)).find((b) => b.id === String(body.beneficiaryId ?? ''))?.holderName ?? null;
+    if (holder && amount !== null && amount > 0n && maxFee !== null) {
+      const remittance = typeof body.remittanceInfo === 'string' && body.remittanceInfo.trim() ? body.remittanceInfo.trim().slice(0, 60) : null;
+      const record = await makePaymentRecorder({ seal: sealAdapter, store: storeEncryptedInvoice })({
+        orgId: gate.route.orgId,
+        transferId: clientKey,
+        payer: (await gate.deps.companyName()) ?? gate.route.orgId,
+        payee: holder,
+        amountMinor: amount.toString(),
+        maxFeeMinor: maxFee.toString(),
+        reference: remittance,
+      });
+      if (!record.ok) return withdrawalResponse(record);
+      contentHash = Buffer.from(record.contentHash).toString('hex');
+      walrusBlobId = Buffer.from(record.walrusBlobId).toString('hex');
+    }
   }
   const result = await createPartnerPayout(gate.deps, gate.route.authority.userId, {
     clientKey: request.headers.get('idempotency-key') ?? body.clientKey,
