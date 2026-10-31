@@ -1,16 +1,13 @@
 'use client';
 
-import Link from 'next/link';
-import { ArrowRight } from 'lucide-react';
-
 import { rulesSummary, type SpendViewFacts } from '@/lib/wallet-page/rules';
 import { Card, Loading, Note, Pill, useLoad } from './parts';
 
 /**
  * Spending rules summary (v2 brief 4.2, 5.5): what each staff member may pay
  * alone, and what is left of it, read from the chain. Inside a rule a staff
- * member pays alone; outside it, the payment goes to the owners. Rules are
- * given, changed and taken back in Settings.
+ * member pays alone; outside it, the payment goes to the owners. This card
+ * shows the rules; it does not give, change or take them back.
  */
 export default function RulesCard({ owner }: { owner: boolean }) {
   const data = useLoad<SpendViewFacts>('/api/wallet/spending-rules', 'The spending rules could not be read.');
@@ -18,7 +15,6 @@ export default function RulesCard({ owner }: { owner: boolean }) {
     <Card
       id="spending-rules"
       title="Spending rules"
-      aside={<Link href="/dashboard/settings" className="inline-flex min-h-11 items-center gap-1 text-[13px] font-semibold text-[var(--info)] hover:underline">Manage in Settings<ArrowRight className="h-3.5 w-3.5" aria-hidden="true" /></Link>}
     >
       {data.loading ? <Loading label="Reading the rules from the chain…" /> : !data.data ? <Note>{data.error}</Note> : <Body view={data.data} owner={owner} />}
     </Card>
@@ -32,9 +28,9 @@ function Body({ view, owner }: { view: SpendViewFacts; owner: boolean }) {
       <p className="text-[13px] leading-5 text-[#326273]">
         {s.threshold ? `A payment of ${s.threshold} or more needs an owner’s approval, whoever makes it.` : 'No spending policy is set yet, so staff payments go to your owners.'}
       </p>
-      {s.reissueNeeded ? <Note tone="warn">The wallet&rsquo;s signers changed and some rules were not reissued under the new wallet. Reissue them in Settings; until then they cannot pay.</Note> : null}
-      {s.orphaned > 0 ? <Note tone="warn">{s.orphaned === 1 ? 'A rule belongs to someone who is no longer on the team.' : `${s.orphaned} rules belong to people who are no longer on the team.`} Take {s.orphaned === 1 ? 'it' : 'them'} back in Settings.</Note> : null}
-      {s.nearThreshold > 0 ? <Note tone="warn">{s.nearThreshold === 1 ? 'One recipient is' : `${s.nearThreshold} recipients are`} near the amount that needs an owner&rsquo;s approval. See the alerts in Settings.</Note> : null}
+      {s.reissueNeeded ? <Note tone="warn">The wallet&rsquo;s signers changed and some rules were not reissued under the new wallet. Until they are reissued they cannot pay. Ask Splash support to reissue them.</Note> : null}
+      {s.orphaned > 0 ? <Note tone="warn">{s.orphaned === 1 ? 'A rule belongs to someone who is no longer on the team.' : `${s.orphaned} rules belong to people who are no longer on the team.`} Ask Splash support to take {s.orphaned === 1 ? 'it' : 'them'} back.</Note> : null}
+      {s.nearThreshold > 0 ? <Note tone="warn">{s.nearThreshold === 1 ? 'One recipient is' : `${s.nearThreshold} recipients are`} near the amount that needs an owner&rsquo;s approval. Review {s.nearThreshold === 1 ? 'it' : 'them'} with your owners.</Note> : null}
       {s.rules.length === 0 ? (
         <Note>No staff member has a rule yet. Until one is given, staff ask the owners for each payment.</Note>
       ) : (
