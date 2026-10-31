@@ -61,7 +61,18 @@ export function waitingForMe(requests: unknown): number {
   return (requests as WaitingView[]).filter((r) => r?.status === 'collecting' && r.you?.mustSign === true && r.you.signed !== true && r.you.declined !== true).length;
 }
 
-/** (Not yet built.) */
-export function readWaiting(previous: number, _answer: { status: number; body?: unknown } | null): { count: number; stop: boolean } {
+/**
+ * What the badge does with one look at the count. A look that fails (no
+ * answer, a server error, an answer that is not a count) keeps the last count
+ * that was read: a real badge is not cleared by one bad moment, and no number
+ * is made up. A session that is gone or a person with no wallet to sign for
+ * (401, 403, 404) is no count, and the bar stops asking.
+ */
+export function readWaiting(previous: number, answer: { status: number; body?: unknown } | null): { count: number; stop: boolean } {
+  if (!answer) return { count: previous, stop: false };
+  if (answer.status === 401 || answer.status === 403 || answer.status === 404) return { count: 0, stop: true };
+  if (answer.status < 200 || answer.status > 299) return { count: previous, stop: false };
+  const waiting = (answer.body as { waiting?: unknown } | null | undefined)?.waiting;
+  if (typeof waiting === 'number' && Number.isInteger(waiting) && waiting >= 0) return { count: waiting, stop: false };
   return { count: previous, stop: false };
 }

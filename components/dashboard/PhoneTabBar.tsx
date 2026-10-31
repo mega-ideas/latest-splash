@@ -2,33 +2,41 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Bot, Fingerprint, House, Send, Wallet, type LucideIcon } from 'lucide-react';
 
 import { useBottomBarClaimed } from '@/components/dashboard/Device';
-import { PHONE_TABS, SIGNING_CHANGED_EVENT, SIGNING_POLL_MS, badgeText, phoneTabCurrent, waitingForMe, type PhoneTabKey } from '@/lib/dashboard/phone';
+import { PHONE_TABS, SIGNING_CHANGED_EVENT, SIGNING_POLL_MS, badgeText, phoneTabCurrent, readWaiting, type PhoneTabKey } from '@/lib/dashboard/phone';
 
 const ICONS: Record<PhoneTabKey, LucideIcon> = { home: House, transfer: Send, approve: Fingerprint, wallet: Wallet, zeke: Bot };
 
 /**
  * How many wallet requests wait for this person's signature. Their own
- * inbox, in their own business (the server takes both from the session);
- * a failed read is no badge, never a made-up number. It is looked at every
- * SIGNING_POLL_MS while the page is in view, and at once when a screen says
- * a signature was given or declined.
+ * inbox, in their own business (the server takes both from the session).
+ * It asks for the count alone, not for every request with its bytes. A look
+ * that fails keeps the last count that was read (never a made-up number), and
+ * a session that is gone or a person with no wallet stops the asking
+ * (readWaiting). It is looked at every SIGNING_POLL_MS while the page is in
+ * view, and at once when a screen says a signature was given or declined.
  */
 function useWaiting(): number {
   const [count, setCount] = useState(0);
+  const last = useRef(0);
+  const stopped = useRef(false);
   const look = useCallback(async () => {
+    if (stopped.current) return;
     if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+    let answer: { status: number; body?: unknown } | null = null;
     try {
-      const response = await fetch('/api/wallet/signing-requests', { cache: 'no-store' });
-      if (!response.ok) return setCount(0);
-      const body = (await response.json().catch(() => null)) as { requests?: unknown } | null;
-      setCount(waitingForMe(body?.requests));
+      const response = await fetch('/api/wallet/signing-requests?count=1', { cache: 'no-store' });
+      answer = { status: response.status, body: await response.json().catch(() => null) };
     } catch {
-      setCount(0);
+      answer = null;
     }
+    const next = readWaiting(last.current, answer);
+    last.current = next.count;
+    if (next.stop) stopped.current = true;
+    setCount(next.count);
   }, []);
   useEffect(() => {
     const first = window.setTimeout(() => void look(), 0);

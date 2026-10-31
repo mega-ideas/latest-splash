@@ -336,7 +336,7 @@ export default function DashboardShell({ children, session, kyb, locks, setup, s
   const pageClosed = pageLock(pathname, locks, launchScope);
 
   return (
-    <DeviceProvider phoneHint={phoneHint}>
+    <DeviceProvider phoneHint={phoneHint} modalOpen={mobileOpen}>
     <div className="fintech-dashboard-shell flex min-h-screen splash-page-bg">
       <a
         href="#dashboard-content"

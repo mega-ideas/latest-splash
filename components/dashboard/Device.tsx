@@ -21,21 +21,28 @@ import { PHONE_MEDIA_QUERY, resolvePhone } from '@/lib/device';
 
 type Chrome = {
   phoneHint: boolean;
+  /** True while the phone's menu is open over the page: what sits outside the page's own tree (the action bar) is as inert as the page is. */
+  modalOpen: boolean;
   /** How many screens have claimed the foot of the page for their own action bar. */
   claims: number;
   claim: () => () => void;
 };
 
-const DeviceContext = createContext<Chrome>({ phoneHint: false, claims: 0, claim: () => () => undefined });
+const DeviceContext = createContext<Chrome>({ phoneHint: false, modalOpen: false, claims: 0, claim: () => () => undefined });
 
-export function DeviceProvider({ phoneHint, children }: { phoneHint: boolean; children: ReactNode }) {
+export function DeviceProvider({ phoneHint, modalOpen = false, children }: { phoneHint: boolean; modalOpen?: boolean; children: ReactNode }) {
   const [claims, setClaims] = useState(0);
   const claim = useCallback(() => {
     setClaims((n) => n + 1);
     return () => setClaims((n) => Math.max(0, n - 1));
   }, []);
-  const value = useMemo(() => ({ phoneHint, claims, claim }), [phoneHint, claims, claim]);
+  const value = useMemo(() => ({ phoneHint, modalOpen, claims, claim }), [phoneHint, modalOpen, claims, claim]);
   return <DeviceContext value={value}>{children}</DeviceContext>;
+}
+
+/** True while the menu drawer is open over the page. */
+export function useModalOpen(): boolean {
+  return useContext(DeviceContext).modalOpen;
 }
 
 function subscribe(onChange: () => void): () => void {
