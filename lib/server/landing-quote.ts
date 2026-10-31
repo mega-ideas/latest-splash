@@ -1,26 +1,34 @@
 /**
- * The landing calculator's bank quote: the exchange rate and the payout
- * partner's fee for one amount, from the partner's own quote.
+ * The landing calculator's bank quote: the exchange rate, the payout
+ * partner's fee and what the bank receives, for one amount, from the
+ * partner's own quote.
+ *
+ * It asks the ONE payout-partner interface (lib/payouts/partner.ts `quote`),
+ * the same one a payment uses, so the landing never shows a number a payment
+ * could not get. The partner arrives as a function: one that is switched off,
+ * not built, or refused for want of credentials refuses inside the quote.
  *
  * Splash's fee is not here. The page renders it from the published schedule
  * (lib/fees/schedule.ts `splashFee`), the same function the chain applies, so
  * nothing about Splash's price depends on this call succeeding.
  *
- * Fails closed. A partner that is not configured answers nothing, and the
+ * Fails closed. A partner that cannot quote answers nothing, and the
  * calculator says the partner fee and the rate are not quoted yet. A sandbox
- * partner's rate is shown only where the runtime is a sandbox
- * (lib/server/runtime-mode.ts `isDemoRuntime`), and labelled one; in
- * production a sandbox answer is treated as no answer, so a made-up rate can
- * never reach a customer.
+ * quote is shown only where the runtime is a sandbox
+ * (lib/server/runtime-mode.ts `isDemoRuntime`), and labelled one. In
+ * production the registry hands out the live adapter, which refuses, so no
+ * sandbox rate can reach a customer however the flags are set.
  *
  * Amounts are USDC minor units (6 decimals) in and the target currency's
- * minor units out, all bigint (lib/money.ts). What the supplier receives is
- * the amount less the partner's fee, at the partner's rate, rounded down:
- * Splash's fee is on top and does not reduce it (lib/server/quote.ts).
+ * minor units out, all bigint (lib/money.ts). `receivedMinor` is the
+ * partner's own figure for what the bank receives after its fees. The partner
+ * fee is shown in USDC (the calculator's unit): the USDC the partner's fees
+ * come to at its quoted rate, rounded up, so the lines add back to the amount
+ * and the fee is never shown smaller than the partner's. It is the partner's
+ * fee as quoted, never marked up.
  */
-import { applyBps, applyRate, parseRate } from '@/lib/money';
 import { isQuotable, quotableRoute, type QuotableCurrency } from '@/lib/landing/routes';
-import type { PayoutPartnerAdapter } from '@/lib/server/pdax';
+import type { PayoutPartner } from '@/lib/payouts/partner';
 
 export class LandingQuoteRouteError extends Error {
   constructor(message: string) {
@@ -35,7 +43,7 @@ export type LandingQuote = {
   /** Target currency per USDC, as the partner quoted it; null when not quoted. */
   rate: string | null;
   partnerFee: { minor: string | null; source: string };
-  /** What the supplier receives, in the target currency's minor units; null without a rate. */
+  /** What the bank receives, in the target currency's minor units; null without a rate. */
   receivedMinor: string | null;
   /** How long the rate holds once quoted. */
   ttlSeconds: number;
@@ -44,11 +52,25 @@ export type LandingQuote = {
 };
 
 const USDC_DECIMALS = 6;
+const RATE_SCALE = 1_000_000n;
 export const LANDING_QUOTE_TTL_SECONDS = Number.parseInt(process.env.QUOTE_TTL_SECONDS ?? '30', 10);
+
+/** A rate in millionths as a decimal string: 56_500_000 is "56.5", 16_250_000_000 is "16250". */
+function rateString(rateMicro: bigint): string {
+  const whole = rateMicro / RATE_SCALE;
+  const fraction = (rateMicro % RATE_SCALE).toString().padStart(6, '0').replace(/0+$/, '');
+  return fraction ? `${whole}.${fraction}` : whole.toString();
+}
 
 export async function landingQuote(
   input: { currency: string; amountMinor: bigint },
-  deps: { adapter: PayoutPartnerAdapter; sandbox: boolean; sandboxAllowed: boolean; partnerLabel: string },
+  deps: {
+    /** The payout partner for the route; may throw when the route is off or not built. */
+    partner: () => Pick<PayoutPartner, 'quote'>;
+    sandboxAllowed: boolean;
+    partnerLabel: string;
+    now?: Date;
+  },
 ): Promise<LandingQuote> {
   if (!isQuotable(input.currency)) {
     throw new LandingQuoteRouteError(`${input.currency} is not quoted on the landing: it is under pilot access, or not a route.`);
@@ -56,6 +78,7 @@ export async function landingQuote(
   if (typeof input.amountMinor !== 'bigint' || input.amountMinor <= 0n) throw new RangeError('a quote needs a positive amount');
   const route = quotableRoute(input.currency);
   const who = deps.partnerLabel.charAt(0).toUpperCase() + deps.partnerLabel.slice(1);
+  const now = deps.now ?? new Date();
   const none = (source: string): LandingQuote => ({
     currency: route.currency,
     amountMinor: input.amountMinor.toString(),
@@ -66,34 +89,37 @@ export async function landingQuote(
     sandbox: false,
   });
 
-  if (deps.sandbox && !deps.sandboxAllowed) return none('Not quoted yet');
-
-  let quoted: { fxRate: string; partnerFeeBps: number };
+  let quoted;
   try {
-    const usdcMicro = input.amountMinor;
-    quoted = await deps.adapter.quote(route.currency, Number(usdcMicro));
+    quoted = await deps.partner().quote({ currency: route.currency, sendMinor: input.amountMinor, now });
   } catch {
     return none('Not quoted yet');
   }
-  const bps = quoted.partnerFeeBps;
-  let rate;
-  try {
-    rate = parseRate(quoted.fxRate);
-  } catch {
+  if (quoted.sandbox && !deps.sandboxAllowed) return none('Not quoted yet');
+  // A quote for another amount or currency, or without a usable rate, is no quote.
+  if (
+    quoted.currency !== route.currency ||
+    quoted.sendMinor !== input.amountMinor ||
+    typeof quoted.rateMicro !== 'bigint' ||
+    quoted.rateMicro <= 0n ||
+    typeof quoted.receiveMinor !== 'bigint' ||
+    quoted.receiveMinor < 0n
+  ) {
     return none('Not quoted yet');
   }
-  if (!Number.isInteger(bps) || bps < 0 || !/^\d+(\.\d+)?$/.test(quoted.fxRate) || !/[1-9]/.test(quoted.fxRate)) return none('Not quoted yet');
+  const heldMs = quoted.expiresAt.getTime() - now.getTime();
+  if (!Number.isFinite(heldMs) || heldMs < 1000) return none('Not quoted yet');
 
-  const partnerMinor = applyBps(input.amountMinor, bps, 'floor');
-  const converted = input.amountMinor - partnerMinor;
-  const received = converted > 0n ? applyRate(converted, rate, 'floor', USDC_DECIMALS, route.decimals) : 0n;
+  // The USDC the bank's amount is worth at the quoted rate, rounded down; the partner fee is the rest.
+  const convertedUsdc = (quoted.receiveMinor * 10n ** BigInt(USDC_DECIMALS - route.decimals) * RATE_SCALE) / quoted.rateMicro;
+  const feeUsdc = input.amountMinor > convertedUsdc ? input.amountMinor - convertedUsdc : 0n;
   return {
     currency: route.currency,
     amountMinor: input.amountMinor.toString(),
-    rate: quoted.fxRate,
-    partnerFee: { minor: partnerMinor.toString(), source: `${who}, ${deps.sandbox ? 'sandbox quote' : 'live quote'}` },
-    receivedMinor: received.toString(),
-    ttlSeconds: LANDING_QUOTE_TTL_SECONDS,
-    sandbox: deps.sandbox,
+    rate: rateString(quoted.rateMicro),
+    partnerFee: { minor: feeUsdc.toString(), source: `${who}, ${quoted.sandbox ? 'sandbox quote' : 'live quote'}` },
+    receivedMinor: quoted.receiveMinor.toString(),
+    ttlSeconds: Math.min(LANDING_QUOTE_TTL_SECONDS, Math.floor(heldMs / 1000)),
+    sandbox: quoted.sandbox,
   };
 }

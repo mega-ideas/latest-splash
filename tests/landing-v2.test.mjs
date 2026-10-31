@@ -153,7 +153,7 @@ test('a landing quote comes from the payout partner, and fails closed rather tha
   assert.equal(sandbox.receivedMinor, '5637200', "what the partner's own quote says the bank receives");
   // The same fee in USDC at the quoted rate, rounded up: 1,000 less 997.734513.
   assert.equal(sandbox.partnerFee.minor, '2265487');
-  assert.match(sandbox.partnerFee.source, /our Philippines payout partner, sandbox quote/);
+  assert.match(sandbox.partnerFee.source, /^Our Philippines payout partner, sandbox quote$/);
   assert.ok(sandbox.ttlSeconds > 0 && sandbox.ttlSeconds <= 30);
 
   const idr = await landingQuote({ currency: 'IDR', amountMinor: thousand }, { partner: await sandboxPartner('durianpay'), sandboxAllowed: true, partnerLabel: 'our Indonesia payout partner', now: NOW });

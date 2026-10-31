@@ -1,10 +1,9 @@
 import { NextResponse } from 'next/server';
 
-import { QUOTABLE_ROUTES, isQuotable } from '@/lib/landing/routes';
+import { QUOTABLE_ROUTES, isQuotable, quotableRoute } from '@/lib/landing/routes';
 import { parseMinor } from '@/lib/money';
-import { durianpayAdapter, mockDurianpayAdapter } from '@/lib/server/durianpay';
+import { payoutPartner } from '@/lib/payouts/registry';
 import { LandingQuoteRouteError, landingQuote } from '@/lib/server/landing-quote';
-import { mockPdaxAdapter, pdaxAdapter } from '@/lib/server/pdax';
 import { RATE_LIMITS, clientIp, enforceRateLimit } from '@/lib/server/rate-limit';
 import { isDemoRuntime } from '@/lib/server/runtime-mode';
 import { labelFor } from '@/lib/server/signed-partners';
@@ -47,13 +46,13 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Enter an amount above zero and up to ten million USDC.', code: 'bad_amount' }, { status: 400 });
   }
 
-  const php = currency === 'PHP';
-  const adapter = php ? pdaxAdapter : durianpayAdapter;
-  const sandbox = php ? adapter === mockPdaxAdapter : adapter === mockDurianpayAdapter;
+  const route = quotableRoute(currency);
   try {
     const quote = await landingQuote(
       { currency, amountMinor },
-      { adapter, sandbox, sandboxAllowed: isDemoRuntime(), partnerLabel: labelFor(php ? 'pdax' : 'durianpay') },
+      // The payout-partner registry decides: a sandbox outside production, the
+      // live adapter (which refuses until it is wired) in production.
+      { partner: () => payoutPartner(route.partner), sandboxAllowed: isDemoRuntime(), partnerLabel: labelFor(route.partner) },
     );
     return NextResponse.json(quote, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
