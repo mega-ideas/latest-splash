@@ -275,7 +275,7 @@ function WalletDeposit({ funding, onChanged }: { funding: FundingOptions; onChan
   return (
     <div className="space-y-3">
       <p className="text-sm leading-6 text-[#1F4452]">
-        Send <strong>USDC on Sui</strong> from any Sui wallet (Slush, MetaMask with the Sui Snap, Phantom or Backpack are only labels) or from an exchange, to your business wallet:
+        Send <strong>USDC on Sui</strong> from any Sui wallet or from an exchange, to your business wallet:
       </p>
       <div className="flex items-center gap-2 rounded-xl bg-[#F6F0ED]/70 p-3">
         <Address value={funding.channels.wallet.address} />
