@@ -29,7 +29,7 @@ import { ACCOUNT, chainCfg, expect as walletExpect, USDC, world } from './wallet
 import * as schema from '../../lib/db/schema.ts';
 import { describeWalletTransaction } from '../../lib/wallet/wallet-tx-describe.ts';
 import { allowanceNameFor, policyIdFor, splashSpendAppName } from '../../lib/wallet/spend-rules-bcs.ts';
-import { windowIndexAt } from '../../lib/wallet/allowance-window.ts';
+import { thresholdCounted, windowIndexAt } from '../../lib/wallet/allowance-window.ts';
 import { continueWalletSteps } from '../../lib/server/business-wallet.ts';
 import { continueSpendSteps } from '../../lib/server/spend-rules.ts';
 import { dbOwnershipGate } from '../../lib/server/ownership-proofs.ts';
@@ -47,7 +47,7 @@ const SPEND_TYPES = new Set([
 
 const clone = (s) => ({
   epoch: s.epoch,
-  policies: new Map([...s.policies].map(([k, p]) => [k, { ...p, spenders: p.spenders.map((x) => ({ ...x })), recipients: [...p.recipients], beneficiaries: [...p.beneficiaries], runningTotals: [...p.runningTotals] }])),
+  policies: new Map([...s.policies].map(([k, p]) => [k, { ...p, spenders: p.spenders.map((x) => ({ ...x })), recipients: [...p.recipients], beneficiaries: [...p.beneficiaries], runningTotals: p.runningTotals.map((e) => ({ ...e })) }])),
   allowances: new Map([...s.allowances].map(([k, a]) => [k, { ...a, rateLimit: a.rateLimit ? { ...a.rateLimit } : null }])),
   caps: new Map([...s.caps].map(([k, c]) => [k, { ...c }])),
   approvals: [...s.approvals],
@@ -56,6 +56,8 @@ const clone = (s) => ({
 
 export async function spendWorld(opts = {}) {
   const w = await world(opts);
+  /** The Splash fee the chain charges on a rule payment of this principal to this recipient (default none). */
+  const feeOf = opts.feeOf ?? (() => 0n);
   for (const [id, email, org, role] of [
     ['u-staff', 'staff@acme.test', 'acme', 'maker'],
     ['u-staff2', 'staff2@acme.test', 'acme', 'maker'],
@@ -75,6 +77,18 @@ export async function spendWorld(opts = {}) {
     try {
       return describeWalletTransaction(bytes, { ...spendExpect, ...extra });
     } catch (error) {
+      // A payment under a staff rule names its own policy and allowance: try each the chain has, as the server's read would name one.
+      if (error.code === 'foreign_withdrawal' || error.code === 'command_not_allowed' || error.code === 'wrong_object') {
+        for (const a of state.allowances.values()) {
+          for (const p of state.policies.values()) {
+            try {
+              return describeWalletTransaction(bytes, { ...spendExpect, ...extra, staffPay: { policyId: p.id, allowanceId: a.id, funder: a.funder } });
+            } catch {
+              /* the next pair */
+            }
+          }
+        }
+      }
       if (error.code !== 'open_intent_unchecked' && error.code !== 'wrong_object') throw error;
       for (const i of w.model.state.intents.values()) {
         try {
@@ -219,10 +233,86 @@ export async function spendWorld(opts = {}) {
     } catch (error) {
       return { spend: true, result: { success: false, error: `the model chain cannot read it: ${error.message}` } };
     }
+    if (d.actions.some((a) => a.type === 'no_second_approval')) {
+      const r = applyStaff(d);
+      if (mode === 'execute' && r.success) {
+        commit(r.next);
+        spends.push(r.spend);
+        for (const [address, delta] of r.balances) {
+          const was = w.balances.get(address) ?? { coinMinor: 0n, addressBalanceMinor: 0n };
+          w.balances.set(address, { ...was, addressBalanceMinor: was.addressBalanceMinor + delta });
+        }
+      }
+      return { spend: true, result: r.success ? { success: true } : r };
+    }
     if (!d.actions.some((a) => SPEND_TYPES.has(a.type))) return { spend: false, d };
     const r = apply(d);
     if (mode === 'execute' && r.success) commit(r.next);
     return { spend: true, result: r.success ? { success: true } : r };
+  }
+
+  /**
+   * A payment under a staff member's rule, as splash_spend::create_intent and
+   * pay_intent decide it (no second approval attached): the policy is current,
+   * the sender is STAFF on it, the recipient is verified with exactly the kind
+   * declared, the amount is within both per-payment maximums, the allowance is
+   * this policy's, funded by its wallet, for this sender, the fee bound is
+   * within 1%, the payer's running total to this recipient stays at or below
+   * the threshold, and the allowance's own caps hold. Anything else aborts and
+   * moves nothing. The allowance is charged the principal and the fee bound.
+   */
+  function applyStaff(d) {
+    const s = clone(state);
+    const abort = (code) => ({ success: false, error: `MoveAbort(${code})` });
+    const open = d.actions[0];
+    const pay = d.actions[2];
+    const nowMs = BigInt(w.signing.now().getTime());
+    const p = s.policies.get(open.underRule.policy);
+    if (!p) return abort('E_NO_SUCH_POLICY');
+    if (p.wallet !== w.model.state.wallet || p.walletEpoch !== s.epoch) return abort('E_STALE_POLICY');
+    const sp = p.spenders.find((x) => x.spender === d.sender && x.role === 1);
+    if (!sp) return abort('E_NOT_STAFF');
+    const recipient = normalizeSuiAddress(open.recipient);
+    const tagged = p.recipients.find((r) => r.address === recipient);
+    if (!tagged) return abort('E_RECIPIENT_NOT_VERIFIED');
+    if (tagged.kind !== open.kind) return abort('E_WRONG_DELIVERY_KIND');
+    const amount = BigInt(open.amountMinor);
+    if (amount > p.perPaymentMax || amount > sp.perPaymentMax) return abort('E_OVER_PER_PAYMENT_MAX');
+    const maxFee = BigInt(pay.maxFeeMinor);
+    if (maxFee > (amount * 100n) / 10_000n) return abort('E_MAX_FEE_ABOVE_CEILING');
+    const fee = feeOf(amount, recipient);
+    if (fee > maxFee) return abort('E_FEE_ABOVE_MAX');
+    if (nowMs >= BigInt(pay.settleByMs)) return abort('E_QUOTE_EXPIRED');
+    const allowance = s.allowances.get(pay.underRule.allowance);
+    if (!allowance || allowance.funder !== p.wallet) return abort('E_WRONG_FUNDER');
+    if (allowance.spender !== d.sender) return abort('ENotTheSpender');
+    if (allowance.name !== allowanceNameFor(p.id)) return abort('E_ALLOWANCE_NOT_FOR_POLICY');
+    // The second-approval threshold, over this payer's running total to this recipient.
+    let entry = p.runningTotals.find((e) => e.payer === d.sender && e.recipient === recipient && e.beneficiary === '');
+    const counted = entry ? thresholdCounted(entry, nowMs).countedMinor : 0n;
+    if (counted > p.secondApprovalThreshold || amount > p.secondApprovalThreshold - counted) return abort('E_APPROVAL_REQUIRED');
+    if (!entry || nowMs >= entry.windowEndMs) {
+      entry = { payer: d.sender, beneficiary: '', recipient, windowStartMs: nowMs, windowEndMs: nowMs + p.runningWindowMs, lastPaymentMs: nowMs, total: 0n, carried: 0n, carriedUntilMs: 0n };
+      p.runningTotals = p.runningTotals.filter((e) => !(e.payer === d.sender && e.recipient === recipient && e.beneficiary === ''));
+      p.runningTotals.push(entry);
+    }
+    entry.total += amount;
+    entry.lastPaymentMs = nowMs;
+    try {
+      chargeInto(s.allowances, allowance.id, amount + maxFee, nowMs);
+    } catch (error) {
+      return abort(error.message);
+    }
+    const wallet = p.wallet;
+    const held = w.balances.get(wallet);
+    if (held && held.addressBalanceMinor < amount + fee) return abort('EInsufficientFunds');
+    const intentId = '0x' + (s.next++).toString(16).padStart(64, 'f');
+    return {
+      success: true,
+      next: s,
+      spend: { policyId: p.id, intentId, allowanceId: allowance.id, approvalId: null, spender: d.sender, recipient, derivedKind: tagged.kind, fee },
+      balances: held ? [[wallet, -(amount + fee)], [recipient, amount]] : [[recipient, amount]],
+    };
   }
 
   const landed = new Map();
@@ -233,6 +323,10 @@ export async function spendWorld(opts = {}) {
       return r.result.success ? { success: true, balanceChanges: [] } : r.result;
     },
     execute: async (bytes, signatures) => {
+      // The same transaction cannot land twice: its digest is its identity.
+      const { TransactionDataBuilder: Builder } = await import('@mysten/sui/transactions');
+      const already = landed.get(Builder.getDigestFromBytes(bytes));
+      if (already) return already;
       const r = await run(bytes, 'execute');
       if (!r.spend) {
         const out = await base.execute(bytes, signatures);
@@ -270,8 +364,12 @@ export async function spendWorld(opts = {}) {
 
   /** Spend under an allowance as `allowance::consume` charges it. */
   function charge(allowanceId, amount, nowMs) {
+    chargeInto(state.allowances, allowanceId, amount, nowMs);
+  }
+
+  function chargeInto(allowances, allowanceId, amount, nowMs) {
     // On a copy: an abort leaves the allowance as it was, as on chain.
-    const stored = state.allowances.get(normalizeSuiAddress(allowanceId));
+    const stored = allowances.get(normalizeSuiAddress(allowanceId));
     const a = { ...stored, rateLimit: { ...stored.rateLimit } };
     if (a.startMs !== null && nowMs < a.startMs) throw new Error('ENotStarted');
     if (a.expiresAtMs !== null && nowMs >= a.expiresAtMs) throw new Error('EExpired');
@@ -289,7 +387,7 @@ export async function spendWorld(opts = {}) {
     }
     rl.spent += amount;
     if (rl.spent > rl.limit) throw new Error('EExceedsRateLimit');
-    state.allowances.set(stored.id, a);
+    allowances.set(stored.id, a);
   }
 
   /**
