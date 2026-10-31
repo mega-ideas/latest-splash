@@ -42,7 +42,7 @@ export const PAYER = normalizeSuiAddress(payerKey.toSuiAddress());
 
 export async function scheduleWorld(opts = {}) {
   const t = await setup(opts);
-  const { w, wallet, members } = t;
+  const { w, wallet } = t;
   // The Finance lead is an approver (role checker), not an owner.
   await w.db.insert(schema.users).values({ id: 'u-lead', email: 'lead@acme.test', name: 'u-lead' });
   await w.db.insert(schema.memberships).values({ id: 'm-u-lead', userId: 'u-lead', orgId: 'acme', role: 'checker' });

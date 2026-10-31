@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { ArrowUpRight, Download, FileText, Landmark, Layers, RefreshCw, Search, Send } from 'lucide-react';
+import { ArrowUpRight, CalendarClock, Download, FileText, Landmark, Layers, RefreshCw, Search, Send } from 'lucide-react';
 
 import DashPageHeader from '@/components/dashboard/DashPageHeader';
 import DashStat from '@/components/dashboard/DashStat';
@@ -11,7 +11,7 @@ import { call, errorText } from '@/components/transfer/api';
 import { QuietButton } from '@/components/transfer/ui';
 import { Loading, Note, Pill } from '@/components/wallet/parts';
 import { formatUsdc } from '@/lib/fees/copy';
-import { buildHistory, failureNote, filterHistory, historyCsv, mergeLists, statTones, summaryOf, type BatchRow, type EarlierRow, type Group, type HistoryEntry, type Lists, type TransferRow, type WithdrawalRow } from '@/lib/history-page/entries';
+import { buildHistory, failureNote, filterHistory, historyCsv, mergeLists, statTones, summaryOf, type BatchRow, type EarlierRow, type Group, type HistoryEntry, type Lists, type ScheduledRunRow, type TransferRow, type WithdrawalRow } from '@/lib/history-page/entries';
 
 const FILTERS: Array<{ id: Group | 'all'; label: string }> = [
   { id: 'all', label: 'All' },
@@ -21,7 +21,7 @@ const FILTERS: Array<{ id: Group | 'all'; label: string }> = [
   { id: 'not_paid', label: 'Not paid' },
 ];
 
-const ICONS = { payment: Send, batch: Layers, withdrawal: Landmark, earlier: FileText } as const;
+const ICONS = { payment: Send, batch: Layers, withdrawal: Landmark, earlier: FileText, scheduled: CalendarClock } as const;
 const PAGE = 40;
 const REFRESH_MS = 15_000;
 
@@ -36,6 +36,7 @@ export default function HistoryPage() {
   const [lists, setLists] = useState<Lists | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [failed, setFailed] = useState<string>('');
+  const [scheduledNote, setScheduledNote] = useState<string>('');
   const [group, setGroup] = useState<Group | 'all'>('all');
   const [query, setQuery] = useState('');
   const [shown, setShown] = useState(PAGE);
@@ -45,11 +46,12 @@ export default function HistoryPage() {
 
   const load = useCallback(async () => {
     setRefreshing(true);
-    const [t, b, w, e] = await Promise.all([
+    const [t, b, w, e, s] = await Promise.all([
       call<{ transfers?: TransferRow[] }>('/api/wallet/transfers'),
       call<{ batches?: BatchRow[] }>('/api/wallet/batches'),
       call<{ withdrawals?: WithdrawalRow[] }>('/api/wallet/withdrawals'),
       call<{ items?: EarlierRow[] }>('/api/transfers?filter=all'),
+      call<{ runs?: ScheduledRunRow[] }>('/api/wallet/schedules/runs'),
     ]);
     setRefreshing(false);
     const previous = loaded.current;
@@ -60,8 +62,12 @@ export default function HistoryPage() {
       withdrawals: { ok: w.ok, status: w.status, items: w.body?.withdrawals ?? [] },
       earlier: { ok: e.ok, status: e.status, items: e.body?.items ?? [] },
     });
-    loaded.current = merged.lists;
-    setLists(merged.lists);
+    // Scheduled runs are folded in beside the four lists. One that cannot be read keeps what it held, and a viewer's 403 is the business's rule.
+    const scheduled = s.ok ? (s.body?.runs ?? []) : s.status === 403 ? [] : (previous?.scheduled ?? []);
+    const withScheduled = merged.lists ? { ...merged.lists, scheduled } : null;
+    loaded.current = withScheduled;
+    setLists(withScheduled);
+    setScheduledNote(s.ok || s.status === 403 || merged.lists === null ? '' : 'Scheduled payments could not be refreshed, so they may be missing or out of date below.');
     // With no list at all the error below says so; a sentence about the last time it loaded would be false.
     setFailed(merged.lists === null ? '' : failureNote(merged.failed, merged.missing));
     setProblem(merged.lists === null ? errorText(t, 'Your history could not be loaded.') : null);
@@ -172,6 +178,7 @@ export default function HistoryPage() {
       {lists?.restricted ? <Note>Only an owner or a staff member can see the business&rsquo;s payments and batches. You can see its withdrawals, but not open their receipts.</Note> : null}
       {/* A live region is read out when its content changes, so it stays on the page and only its sentence comes and goes. */}
       <div role="status" className="empty:mb-0">{failed ? <Note tone="warn">{failed}</Note> : null}</div>
+      <div role="status" className="empty:hidden">{scheduledNote ? <Note tone="warn">{scheduledNote}</Note> : null}</div>
       {failed ? <QuietButton type="button" onClick={() => void load()} disabled={refreshing}><RefreshCw className="h-4 w-4" aria-hidden="true" />Try again</QuietButton> : null}
 
       {problem ? (

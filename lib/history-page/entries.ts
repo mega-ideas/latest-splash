@@ -8,6 +8,7 @@
  * be, and what the chain charged is on each receipt. Pure and client-safe.
  */
 import { formatUsdc } from '../fees/copy.ts';
+import { MODE_WORDS, RUN_STATE, type RunStatus, type ScheduleMode } from '../schedule/rules.ts';
 
 /**
  * Four groups, and a row is in exactly one:
@@ -22,11 +23,13 @@ export type Tone = 'ok' | 'wait' | 'bad';
 export type TransferRow = { id: string; paymentRef: string; status: string; payeeKind: string; payeeName: string; payeeMasked: string | null; payeeCountry: string | null; amountMinor: string; reference: string | null; createdAt: string };
 export type BatchRow = { id: string; label: string | null; status: string; rowCount: number; totalMinor: string; createdAt: string };
 export type WithdrawalRow = { id: string; status: string; destination: { label: string; last4: string } | null; amountMinor: string; currency: string; createdAt: string };
+/** A run of a scheduled batch, as GET /api/wallet/schedules/runs answers it (lib/schedule/views.ts). */
+export type ScheduledRunRow = { id: string; scheduleName: string; status: RunStatus; mode: ScheduleMode; ranAs: ScheduleMode | null; fallback: boolean; reason: string | null; itemCount: number; totalMinor: string; dueAt: string; receiptPath: string | null; batchId: string | null };
 export type EarlierRow = { id: string; recipientName: string; targetCurrency: string; targetAmount: string; sourceAmountUsd: string | number; state: string; createdAt: string };
 
 export type HistoryEntry = {
   key: string;
-  kind: 'payment' | 'batch' | 'withdrawal' | 'earlier';
+  kind: 'payment' | 'batch' | 'withdrawal' | 'earlier' | 'scheduled';
   title: string;
   detail: string;
   /** USDC minor units sent; null for an earlier transfer, which was in dollars. */
@@ -193,6 +196,32 @@ function withdrawalEntry(w: WithdrawalRow, restricted: boolean): HistoryEntry {
   };
 }
 
+/**
+ * A scheduled run, in the owners' words. Paid, skipped, not approved in time
+ * and failed are four different things: a lapse is nobody's failure and costs
+ * nothing, and a failed run has its own group, with what happened and what to do.
+ */
+function scheduledEntry(r: ScheduledRunRow): HistoryEntry {
+  const s = RUN_STATE[r.status];
+  const how = r.ranAs === 'auto' ? 'Paid automatically within your limits' : r.ranAs === 'ask' ? (r.fallback ? 'Handed back for approval' : 'Approved by your owners') : MODE_WORDS[r.mode].label;
+  return {
+    key: `scheduled:${r.id}`,
+    kind: 'scheduled',
+    title: r.scheduleName,
+    detail: `Scheduled · ${r.itemCount} ${r.itemCount === 1 ? 'payment' : 'payments'} · ${how}`,
+    amountMinor: r.totalMinor,
+    amountText: usdc(r.totalMinor),
+    reference: '',
+    group: s.group,
+    status: { label: s.label, tone: s.tone },
+    date: r.dueAt,
+    href: r.status === 'paid' ? r.receiptPath : null,
+    noReceipt: r.status === 'paid' ? null : r.status === 'scheduled' || r.status === 'waiting_approval' || r.status === 'approved' ? 'Open the Scheduled tab in Transfer to approve it, skip it or see where it is.' : 'No payment was made, so there is no receipt.',
+    explain: s.group === 'failed' ? { why: r.reason?.trim() || 'The scheduled payment could not be completed.', next: 'Open the Scheduled tab in Transfer to see what was and was not paid. Pay anything left from Transfer; nothing was paid twice.' } : null,
+    mayChange: s.group === 'in_progress',
+  };
+}
+
 const EARLIER_PAID = new Set(['SETTLED', 'DISBURSED', 'CREDITED']);
 /** An earlier transfer has no state a person chose: it either completed, is moving, or broke (and was or is being refunded). */
 const EARLIER_FAILED = new Set(['FAILED', 'REFUNDED', 'REFUNDING']);
@@ -220,13 +249,17 @@ function earlierEntry(e: EarlierRow): HistoryEntry {
   };
 }
 
-export function buildHistory(input: { transfers: TransferRow[]; batches: BatchRow[]; withdrawals: WithdrawalRow[]; earlier: EarlierRow[]; restricted?: boolean }): HistoryEntry[] {
+export function buildHistory(input: { transfers: TransferRow[]; batches: BatchRow[]; withdrawals: WithdrawalRow[]; earlier: EarlierRow[]; scheduled?: ScheduledRunRow[]; restricted?: boolean }): HistoryEntry[] {
   const restricted = input.restricted === true;
-  return [...input.transfers.map(transferEntry), ...input.batches.map(batchEntry), ...input.withdrawals.map((w) => withdrawalEntry(w, restricted)), ...input.earlier.map(earlierEntry)].sort((a, b) => b.date.localeCompare(a.date));
+  // A scheduled run that was prepared for approval is one payment, shown once: as the run, not again as its batch.
+  const scheduledBatches = new Set((input.scheduled ?? []).flatMap((r) => (r.batchId ? [r.batchId] : [])));
+  return [...input.transfers.map(transferEntry), ...input.batches.filter((b) => !scheduledBatches.has(b.id)).map(batchEntry), ...input.withdrawals.map((w) => withdrawalEntry(w, restricted)), ...input.earlier.map(earlierEntry), ...(input.scheduled ?? []).map(scheduledEntry)].sort((a, b) => b.date.localeCompare(a.date));
 }
 
 export type Source = 'payments' | 'batches' | 'withdrawals' | 'earlier';
 export type Lists = {
+  /** Scheduled runs; absent on lists built before they existed, and then none. */
+  scheduled?: ScheduledRunRow[];
   transfers: TransferRow[];
   batches: BatchRow[];
   withdrawals: WithdrawalRow[];
@@ -338,7 +371,7 @@ export function statTones(summary: { inProgress: number; failed: number; notPaid
   };
 }
 
-const TYPE: Record<HistoryEntry['kind'], string> = { payment: 'Payment', batch: 'Batch', withdrawal: 'Withdrawal', earlier: 'Earlier transfer' };
+const TYPE: Record<HistoryEntry['kind'], string> = { payment: 'Payment', batch: 'Batch', withdrawal: 'Withdrawal', earlier: 'Earlier transfer', scheduled: 'Scheduled payment' };
 
 /** A cell that starts like a formula is made text, so a spreadsheet never runs what a supplier typed. */
 function cell(value: string): string {

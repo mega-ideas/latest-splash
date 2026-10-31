@@ -56,13 +56,12 @@ import {
   dueDateOf,
   nextDueAfter,
   type Cadence,
-  type RunGroup,
   type RunStatus,
-  type RunTone,
   type ScheduleMode,
   type ScheduleStatus,
 } from '../schedule/rules.ts';
 import { scheduledRunPath, SCHEDULED_PATH, type ScheduleNotice } from '../schedule/notice.ts';
+import type { AutomaticStatus, ItemView, RunView, ScheduleView } from '../schedule/views.ts';
 import { parseAmountMinor } from '../transfer/plan.ts';
 import { recipientPayable, type WalletContext } from './business-wallet.ts';
 import { listOrgOwners } from './near-threshold-store.ts';
@@ -95,6 +94,7 @@ import { getBatch, type BatchDeps } from './wallet-batches.ts';
 import { isUniqueViolation, maskAddress, resolvePayee, type PayeeInput } from './wallet-transfers.ts';
 import type { DrizzleDb } from './wallet-signing-store.ts';
 
+export type { AutomaticStatus, ItemView, RunView, ScheduleView };
 export type Actor = { userId: string; role: string; financeLead?: boolean };
 export type Fail = { ok: false; status: number; code: string; error: string; details?: Record<string, unknown> };
 export const fail = (status: number, code: string, error: string, details?: Record<string, unknown>): Fail => ({ ok: false, status, code, error, ...(details ? { details } : {}) });
@@ -119,58 +119,6 @@ const cannotManage = (mode: ScheduleMode) =>
 
 // ─── Views ──────────────────────────────────────────────────────────────────
 
-export type ItemView = { position: number; payeeKind: 'splash_business' | 'recipient'; payeeId: string; name: string; masked: string; country: string | null; amountMinor: string; reference: string; feeMinor: string };
-
-export type RunView = {
-  id: string;
-  scheduleId: string;
-  scheduleName: string;
-  dueDate: string;
-  dueAt: string;
-  mode: ScheduleMode;
-  ranAs: ScheduleMode | null;
-  status: RunStatus;
-  label: string;
-  tone: RunTone;
-  group: RunGroup;
-  /** Plain words: what happened and why. */
-  reason: string | null;
-  reasonCode: string | null;
-  /** An automatic run that was handed back to "ask me first". */
-  fallback: boolean;
-  itemCount: number;
-  totalMinor: string;
-  feeMinor: string;
-  batchId: string | null;
-  /** Skip is offered while nothing has been paid. */
-  canSkip: boolean;
-  /** Where the receipt is, once it was paid. */
-  receiptPath: string | null;
-  payments: Array<{ position: number; payeeName: string; masked: string; amountMinor: string; feeMinor: string; status: string; digest: string | null; error: string | null }> | null;
-  createdAt: string;
-};
-
-export type ScheduleView = {
-  id: string;
-  name: string;
-  mode: ScheduleMode;
-  cadence: Cadence;
-  cadenceText: string;
-  firstDueAt: string;
-  nextDueAt: string | null;
-  status: ScheduleStatus;
-  createdBy: string;
-  createdAs: 'owner' | 'finance_lead';
-  itemCount: number;
-  totalMinor: string;
-  feeMinor: string;
-  items: ItemView[];
-  version: number;
-  /** What the person asking may do with it. */
-  can: { edit: boolean; skip: boolean; stop: boolean; delete: boolean };
-  runs: RunView[];
-};
-
 function itemView(i: ScheduleItem): ItemView {
   return {
     position: i.position,
@@ -185,7 +133,8 @@ function itemView(i: ScheduleItem): ItemView {
   };
 }
 
-export function runView(run: RunRow, scheduleName: string, payments: Awaited<ReturnType<typeof listRunPayments>> | null = null): RunView {
+/** `plan` is what an unstarted run will be: a run that has not started has no totals of its own yet, so it shows its schedule's. */
+export function runView(run: RunRow, scheduleName: string, payments: Awaited<ReturnType<typeof listRunPayments>> | null = null, plan: { itemCount: number; totalMinor: bigint; feeMinor: bigint } | null = null): RunView {
   const state = RUN_STATE[run.status as RunStatus];
   const started = (payments ?? []).some((p) => p.status === 'submitting' || p.status === 'paid');
   return {
@@ -203,9 +152,9 @@ export function runView(run: RunRow, scheduleName: string, payments: Awaited<Ret
     reason: run.reason ?? null,
     reasonCode: run.reasonCode ?? null,
     fallback: run.fallback,
-    itemCount: run.itemCount,
-    totalMinor: run.totalMinor.toString(),
-    feeMinor: run.feeMinor.toString(),
+    itemCount: run.itemCount || plan?.itemCount || 0,
+    totalMinor: (run.totalMinor > 0n ? run.totalMinor : (plan?.totalMinor ?? 0n)).toString(),
+    feeMinor: (run.totalMinor > 0n ? run.feeMinor : (plan?.feeMinor ?? 0n)).toString(),
     batchId: run.batchId ?? null,
     canSkip: (run.status === 'scheduled' || run.status === 'waiting_approval' || run.status === 'approved') && !started,
     receiptPath: run.status === 'paid' ? (run.ranAs === 'auto' || !run.batchId ? `/dashboard/history/scheduled/${encodeURIComponent(run.id)}` : `/dashboard/history/batch/${encodeURIComponent(run.batchId)}`) : null,
@@ -220,7 +169,7 @@ async function scheduleView(deps: ScheduleDeps, actor: Actor, row: ScheduleRow, 
   const runs = withRuns ? await listRuns(deps.db, deps.orgId, 400) : [];
   const mine = runs.filter((r) => r.scheduleId === row.id).slice(0, 8);
   const views: RunView[] = [];
-  for (const r of mine) views.push(runView(r, row.name, r.ranAs === 'auto' ? await listRunPayments(deps.db, deps.orgId, r.id) : null));
+  for (const r of mine) views.push(runView(r, row.name, r.ranAs === 'auto' ? await listRunPayments(deps.db, deps.orgId, r.id) : null, { itemCount: row.itemCount, totalMinor: row.totalMinor, feeMinor: row.feeMinor }));
   const manage = mayManage(actor, row.mode as ScheduleMode);
   return {
     id: row.id,
@@ -259,12 +208,12 @@ export async function getScheduleView(deps: ScheduleDeps, actor: Actor, id: stri
 /** Every run of this business, newest first: what History lists. */
 export async function listRunViews(deps: Pick<ScheduleDeps, 'db' | 'orgId'>, limit = 100): Promise<RunView[]> {
   const rows = await listRuns(deps.db, deps.orgId, limit);
-  const names = new Map((await listSchedules(deps.db, deps.orgId)).map((s) => [s.id, s.name]));
+  const known = new Map((await listSchedules(deps.db, deps.orgId)).map((s) => [s.id, s]));
   const out: RunView[] = [];
   for (const r of rows) {
     // A deleted schedule's runs stay in History under the name it had.
-    const name = names.get(r.scheduleId) ?? (await getSchedule(deps.db, deps.orgId, r.scheduleId))?.name ?? 'Scheduled payment';
-    out.push(runView(r, name, r.ranAs === 'auto' ? await listRunPayments(deps.db, deps.orgId, r.id) : null));
+    const sch = known.get(r.scheduleId) ?? (await getSchedule(deps.db, deps.orgId, r.scheduleId));
+    out.push(runView(r, sch?.name ?? 'Scheduled payment', r.ranAs === 'auto' ? await listRunPayments(deps.db, deps.orgId, r.id) : null, sch ? { itemCount: sch.itemCount, totalMinor: sch.totalMinor, feeMinor: sch.feeMinor } : null));
   }
   return out;
 }
@@ -273,7 +222,7 @@ export async function getRunView(deps: Pick<ScheduleDeps, 'db' | 'orgId'>, id: s
   const run = await getRun(deps.db, deps.orgId, id);
   if (!run) return null;
   const sch = await getSchedule(deps.db, deps.orgId, run.scheduleId);
-  return runView(run, sch?.name ?? 'Scheduled payment', run.ranAs === 'auto' ? await listRunPayments(deps.db, deps.orgId, run.id) : null);
+  return runView(run, sch?.name ?? 'Scheduled payment', run.ranAs === 'auto' ? await listRunPayments(deps.db, deps.orgId, run.id) : null, sch ? { itemCount: sch.itemCount, totalMinor: sch.totalMinor, feeMinor: sch.feeMinor } : null);
 }
 
 // ─── Making the items ───────────────────────────────────────────────────────
@@ -686,29 +635,6 @@ export async function deleteSchedule(deps: ScheduleDeps, actor: Actor, id: strin
 }
 
 // ─── Automatic payments: the kill switch and the allowance ──────────────────
-
-export type AutomaticStatus = {
-  /** Can the scheduled payer sign here at all? */
-  payer: { ready: boolean; kind: 'kms' | 'sandbox' | null; reason: string | null; address: string | null };
-  paused: boolean;
-  pausedBy: string | null;
-  pausedAt: string | null;
-  dailyCapMinor: string;
-  dailyUsedMinor: string;
-  /** The owners' allowance to the scheduled payer, as the network has it now. Null when it could not be read. */
-  allowance:
-    | { state: 'none' }
-    | { state: 'unreadable' }
-    | {
-        state: 'active' | 'expired' | 'not_started' | 'revoked';
-        perPaymentMaxMinor: string;
-        spendableNowMinor: string;
-        startsAtMs: string | null;
-        expiresAtMs: string | null;
-        renewsAtMs: string | null;
-      };
-  defaults: typeof ALLOWANCE_DEFAULTS;
-};
 
 function spendOf(deps: ScheduleDeps): Promise<SpendContext | null> {
   const sc = typeof deps.spend === 'function' ? deps.spend() : Promise.resolve(deps.spend ?? null);
