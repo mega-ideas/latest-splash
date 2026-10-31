@@ -25,11 +25,11 @@ test('the withdrawal route seals the record itself and ignores a bundle the clie
 test('the withdrawal route checks cheaply before it seals, and a retry seals nothing', () => {
   const route = read('app/api/wallet/withdrawals/route.ts');
   const prior = route.indexOf('withdrawalByClientKey(');
-  const check = route.indexOf('bigintField(body.amountMinor)');
+  const check = route.indexOf('parseBankPayoutRequest(');
   const seal = route.indexOf('makePaymentRecorder({');
   assert.ok(prior > 0 && check > prior && seal > check, 'a retry is answered before the amount is parsed, and the amount before anything is sealed');
   assert.match(route, /if \(!prior && clientKey\)/);
-  assert.match(route, /amountMinor: amount\.toString\(\)/);
+  assert.match(route, /amountMinor: parsed\.amount\.toString\(\)/);
   assert.doesNotMatch(route, /String\(body\.amountMinor/);
 });
 
