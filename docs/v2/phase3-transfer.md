@@ -53,14 +53,15 @@ too, and a business with no wallet is told so.
 | Caller | Route |
 |---|---|
 | Owner | `owners_sign`: a signing request for the owners' multisig (`POST /api/wallet/transfers`, or `/api/wallet/payouts` for a bank). Owners' own limits and recipients are instant. |
-| Staff within their rule, below the threshold | `staff_rule` (`splash_spend`). **Not carried out on this server** (`STAFF_RULE_PAYMENTS_WIRED = false`): the staff-side transaction has no builder here. The page says so and the payment goes to the owners (`staff_rule_not_wired`). |
+| Staff within their rule (amount, recipient and time window all fit), below the threshold | `staff_rule` (`splash_spend`): one transaction signed alone by that person's own passkey, paid from the business wallet under their allowance. The server reads the rule from the chain and runs the page's own check before it builds anything (`docs/v2/phase3-staff-in-rule.md`). Where it cannot (no chain client, no gas sponsor, no policy) the owners are asked with the reason `staff_rule_not_wired`, and a person who insisted on paying alone is refused. |
 | Staff outside their rule, above the threshold (running total to the same recipient, default 10,000 USDC) or paying a bank or another chain | `ask_owners`, with each reason named. |
 | Viewer | Cannot pay. |
 
 ## The payment service
 
-`POST /api/wallet/transfers { payee, amountMinor, maxFeeMinor, reference? }`
-with `Idempotency-Key` (the intent id). Splash business or a saved wallet or
+`POST /api/wallet/transfers { payee, amountMinor, maxFeeMinor, reference?, via?, asset? }`
+with `Idempotency-Key` (the intent id). `via` and `asset` are for staff: see
+`docs/v2/phase3-staff-in-rule.md`; the answer carries `plan` (who approves and why). Splash business or a saved wallet or
 exchange recipient. A bank recipient answers `use_payout_route`, USDC to
 another chain `cross_chain_not_built` (no bridge adapter is registered).
 
@@ -151,9 +152,10 @@ recipient and the amount that were asked (`reportTransferSettled`).
 
 ## Not done here
 
-- **A payment under a staff rule** (`splash_spend::create_intent` and
-  `pay_intent`, signed on the staff member's device): no builder. Planned,
-  shown, and sent to the owners.
+- **A payment under a staff rule** is built now, for a wallet the supplier
+  holds (`docs/v2/phase3-staff-in-rule.md`). Not under a rule: an exchange
+  account, a payment above the second-approval threshold, a bank payout or
+  USDC to another chain. Those go to the owners. No testnet run.
 - **USDC to another chain**: a recipient can be saved; the bridge adapter is not
   registered, so it is not payable.
 - **Hardware and testnet checks**: nothing was signed or sent on any network.

@@ -29,6 +29,7 @@ export default function ApproveScreen({
   expiresIn,
   signed,
   needed,
+  withinRule = false,
 }: {
   review: DeviceReview;
   /** The payees' names as the page knew them, in the order of the payments. Shown beside the address from the bytes, never instead of it. */
@@ -42,6 +43,8 @@ export default function ApproveScreen({
   /** Where the signatures stand: how many are in, and how many are needed. */
   signed?: number;
   needed?: number;
+  /** A staff member's own payment under their spending rule: one signer, and it is them. */
+  withinRule?: boolean;
 }) {
   const facts = approveFacts(review, { names });
   const blocked = facts.blocked;
@@ -82,7 +85,7 @@ export default function ApproveScreen({
             <p className="mt-1 text-[22px] font-bold leading-tight">{facts.headline}</p>
           </>
         )}
-        {facts.leavesAtMost || (signed !== undefined && needed !== undefined) ? (
+        {facts.leavesAtMost || withinRule || (signed !== undefined && needed !== undefined) ? (
           <div className="mt-4 space-y-1 border-t border-white/20 pt-3 text-[13px] text-white/85">
             {facts.leavesAtMost ? (
               <p>
@@ -100,7 +103,11 @@ export default function ApproveScreen({
                 <span className="font-mono font-bold text-white">{first.rate.text}</span>, about {first.rate.receiveApprox} before the payout partner&rsquo;s fee.
               </p>
             ) : null}
-            {signed !== undefined && needed !== undefined ? <p>{signed} of {needed} signatures so far. Each owner signs on their own device.{expiresIn ? ` Expires in ${expiresIn}.` : ''}</p> : null}
+            {withinRule ? (
+              <p>Within your spending rule, so you sign this yourself with your passkey.{expiresIn ? ` Expires in ${expiresIn}.` : ''}</p>
+            ) : signed !== undefined && needed !== undefined ? (
+              <p>{signed} of {needed} signatures so far. Each owner signs on their own device.{expiresIn ? ` Expires in ${expiresIn}.` : ''}</p>
+            ) : null}
           </div>
         ) : null}
       </section>

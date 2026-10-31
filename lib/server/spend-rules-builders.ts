@@ -19,6 +19,10 @@
  *                           0x2::allowance::propose_for_app<Balance<USDC>, SPLASH_SPEND>
  *                           splash_spend::accept<USDC>               the wallet
  *   approvePayoutTx       splash_spend::approve_payout              one owner
+ *   staffRulePaymentTx    splash_spend::create_intent, 0x1::option::none<PayoutApproval>,
+ *                         splash_spend::pay_intent (a draw on the sender's allowance),
+ *                         audit_anchor::anchor, payment_intent::delete_finalized
+ *                                                                   the staff member, alone
  *
  * A rule is an app-bound allowance from the wallet to the staff member's
  * address, named `splash-policy:<policy id>` so it pays only under the

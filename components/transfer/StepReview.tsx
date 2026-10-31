@@ -240,7 +240,7 @@ export default function StepReview({ flow, ctx, balance, reload, back, made, onM
     <div className="space-y-6">
       <div>
         <h2 className="text-[22px] font-extrabold text-[#0c3e48]">Review and approve</h2>
-        <p className="mt-1 text-sm text-[#326273]">The amount, who is paid and the fee below are what the approvers sign. If anything changes, you are asked again.</p>
+        <p className="mt-1 text-sm text-[#326273]">The amount, who is paid and the fee below are what {ruleRoute ? 'you sign' : 'the approvers sign'}. If anything changes, you are asked again.</p>
       </div>
 
       {loading ? (

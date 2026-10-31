@@ -256,8 +256,9 @@ and `tests/stablecoin-send.test.mjs`. Migration 0048.
 - **Residual:** an exchange's `approved` is Sumsub's report of the
   counterparty's answer, not a test deposit; whether each exchange uses
   per-customer deposit addresses or a memo is to be confirmed before
-  go-live; a rule payment by a staff member has no server path yet, so the
-  gate does not run on it.
+  go-live. A rule payment by a staff member now has a server path
+  (`staff_rule_payment`), and the signing layer runs this gate before each
+  signature on it (an exchange account is not paid under a rule).
 
 ## v2 Phase 2 §4.6 — compliance: KYB, Travel Rule, KYT, controls evidence — 2026-10-25
 
@@ -367,7 +368,9 @@ Design: `docs/v2/phase2-compliance.md`. Tests:
 - **Open:** supplier name screening (the recipient screening on save and
   the exchange taken from the recipient record are closed by §4.7, above);
   a staff member's own in-limit rule payment
-  (not built server-side, so not screened by Splash); an owner override of a
+  (now built, and screened before it is opened and before each signature; a staff
+  member who builds a payment alone, without Splash's backend, is still not
+  screened by Splash); an owner override of a
   Travel Rule hold (not built: compliance to decide); checking Elliptic's and Sumsub's shapes against
   the contracted sandboxes; who is the originating party for Travel Rule
   purposes when the sender is the business's own self-hosted wallet
@@ -1015,6 +1018,54 @@ The business's owners run their team, not Splash support
   `wallet_authority_events` (seven new actions, migration 0066), with the actor,
   the person and the old and new role. Splash support's grant is a line under
   `operator:<email>`. A retry writes nothing; two at once make one change.
+
+## v2 Phase 3 — Staff payments inside a rule — 2026-11-01
+
+A staff member whose spending rule covers a payment pays it alone, signed by
+their own passkey; anything outside the rule asks the owners
+(`docs/v2/phase3-staff-in-rule.md`). Sky's rule: anyone can fund the wallet,
+but they can only spend what the rule allows, and anything outside the rule
+needs the person in charge. No Move changed. What the code holds to:
+
+- **The rule is checked four times by four things.** The page, the server
+  before it builds (the same function, over a fresh chain read: a stale page
+  cannot claim a rule the chain does not show), the signing layer (the bytes
+  must be exactly open, no second approval, pay under the stored allowance,
+  anchor, delete; sent by the person the rule is for, to the stored payee, for
+  the stored amount and fee bound, drawing exactly amount plus fee), and the
+  chain (`splash_spend::pay_intent` and the allowance).
+- **An allowance withdrawal has one legal use.** The decoder allows a
+  `FundsWithdrawal` from an allowance only as the argument of
+  `splash_spend::pay_intent`, only for the one allowance and funder the
+  server read as that person's (`expect.staffPay`), and only for a request
+  opened with that expectation. `redeem_funds`, a send, another allowance, or
+  any other purpose refuses it.
+- **No second approval can be smuggled in.** The approval slot is an empty
+  `Option<PayoutApproval>` made in the same transaction and used once; a half
+  built or reused one is refused.
+- **No draw outside the rule.** Expired, not started, taken back, over the
+  limit, cap used up, recipient not verified (or an exchange, or verified for
+  another kind), over the threshold, another asset: each is a plain reason.
+  `via: 'rule'` turns it into a refusal with nothing stored; otherwise the
+  owners are asked.
+- **Fail closed.** No chain client for spending rules, an unreadable chain, no
+  gas sponsor, no policy, or a passkey that cannot sign here: nothing is built.
+  There is no stand-in rule, signer or sponsor, in production or out of it.
+- **Replay and races.** The intent id is unique per business; the payment
+  reference is claimed once on chain. The claim and the read of what the person
+  has already asked for are one step under an advisory lock per person, so two
+  sends cannot both claim the last of a cap. Withdrawn, declined, expired and
+  failed requests hold nothing.
+- **Funds on hold are never drawn**, and the recipient must be a fresh CLEAR
+  and a wallet the supplier has proven, as for the owners' own payment; the
+  signing layer checks both again before the signature.
+- **Same-recipient splitting across spenders stays detective.** The chain checks
+  the threshold per payer and recipient; the near-threshold alerts read these
+  payments (`RuleSpend`, running totals). Nothing blocks it.
+- **Open:** no testnet run of the PTB (`pay_intent` with an allowance
+  withdrawal input and an empty `Option<PayoutApproval>`); a passkey's
+  signature on a sponsored single-signer transaction is part of the owed
+  hardware check; an exchange account is not paid under a rule.
 
 ## v2 Phase 3 — Batch payouts (brief 5.6) — 2026-10-31
 

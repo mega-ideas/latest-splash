@@ -6,8 +6,10 @@ needs, and how that was checked.
 
 ## The list
 
-68 migrations, `0000` to `0067`, one journal entry each, `idx` 0 to 67, and the
-`when` values rising. `npm run check:migrations` checks names, `idx`, file order
+69 migrations, `0000` to `0068`, one journal entry each, `idx` 0 to 68, and the
+`when` values rising. (`0068` is staff payments inside a rule, on top of the
+state checked below, which was 68 migrations; it applies by the dev database's
+runner on an empty start, and `check:migrations` passes.) `npm run check:migrations` checks names, `idx`, file order
 and now `when`.
 
 | Number | Migration | Owner |
@@ -24,6 +26,7 @@ and now `when`.
 | 0065 | batch payouts | Phase 3 |
 | 0066 | team roles | Phase 3 |
 | 0067 | access requests | Phase 4 |
+| 0068 | staff rule payments (the purpose `staff_rule_payment`, the route `staff_rule`) | Phase 3, staff in a rule |
 
 Phase 4's migration was `0033_access_requests` on its own branch, where it was
 the only migration after Phase 1's `0032`. It is now `0067_access_requests`,

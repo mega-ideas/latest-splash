@@ -191,6 +191,7 @@ export default function SignPanel({ initial, expected = null, expectedBatch = nu
           expiresIn={expiresIn(view.expiresAt)}
           signed={view.signedWeight}
           needed={view.threshold}
+          withinRule={underRule}
         />
       </section>
     );

@@ -3,7 +3,8 @@
  *
  * A request is one transaction that must be signed by a wallet (a multisig of
  * the owners' passkeys), by the founder alone (the nomination), or by one
- * member (that member's own migration transfer). The lifecycle:
+ * member (that member's own migration transfer, or a staff member's payment
+ * under their own spending rule, `staff_rule_payment`). The lifecycle:
  *
  *   open     The server builds the exact bytes (lib/server/sui-v2-builders.ts),
  *            decodes them (lib/wallet/wallet-tx-describe.ts), checks they are

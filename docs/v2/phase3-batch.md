@@ -184,10 +184,11 @@ history. `tests/onboarding.test.mjs` lists them.
 ## Not done, and why
 
 - **Scheduled batches** (`splash_spend`, the operator named as executor by an
-  owner approval) are not carried out: the staff-side and executor-side
-  transactions have no builder on this server (the same reason as
-  `STAFF_RULE_PAYMENTS_WIRED`, `docs/v2/phase3-transfer.md`). The page and the API
-  say so. Nothing is scheduled.
+  owner approval) are not carried out: the executor-side transaction, and a
+  staff member's batch under a rule, have no builder on this server. (A staff
+  member's single payment under a rule now has one, `docs/v2/phase3-staff-in-rule.md`;
+  a batch is many such payments in one transaction and has not been built or
+  dry-run.) The page and the API say so. Nothing is scheduled.
 - **No testnet dry run of a full batch.** The cap of 20 payments (100 commands) is
   conservative against the protocol's per-transaction limits and the sponsor's
   20,000,000 MIST gas budget; both must be checked with a simulation of a full

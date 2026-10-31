@@ -196,6 +196,25 @@ test('a staff member whose rule covers the payment pays alone: one request, one 
   await t.w.client.close();
 });
 
+test('an invoice paid by a staff member under their rule is told it was paid, with who signed, once the transaction paid what was asked', async () => {
+  const t = await setup();
+  await t.give(t.rule(staffKey.address));
+  const r = await T.createTransfer(t.deps(), STAFF, input(t.recipientId));
+  const signed = await submitPartialSignature(t.w.signing, { orgId: 'acme', userId: 'u-staff', id: r.signingRequest.id, signature: await sign(staffKey, r.signingRequest), digest: r.signingRequest.digest });
+  assert.equal(signed.request.status, 'executed');
+  const { readSigningRequest } = await import('../lib/server/wallet-signing-store.ts');
+  const { reportTransferSettled } = await import('../lib/server/bill-payment-flow.ts');
+  const stored = await readSigningRequest(t.w.db, 'acme', r.signingRequest.id);
+  const told = [];
+  await reportTransferSettled(t.w.db, stored, new Date(Number(t0)), async (_db, line) => told.push(line));
+  assert.equal(told.length, 1);
+  assert.equal(told[0].orgId, 'acme');
+  assert.equal(told[0].paymentIntentId, r.transfer.id);
+  assert.equal(told[0].suiDigest, stored.executedDigest);
+  assert.deepEqual(told[0].approvers, ['u-staff'], 'the person who signed, by name');
+  await t.w.client.close();
+});
+
 test('the same person, a second payment later, draws on the same allowance and the running total to that recipient grows', async () => {
   const t = await setup();
   await t.give(t.rule(staffKey.address));

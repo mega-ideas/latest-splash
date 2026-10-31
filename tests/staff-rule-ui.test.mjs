@@ -45,6 +45,8 @@ test('the signing panel names the one signer, "you", and says the rule is why no
 test('the approve screens treat a payment under a rule as a payment', () => {
   assert.match(read('components/approve/ApproveDetail.tsx'), /'staff_rule_payment'/);
   assert.equal(requestTitle('staff_rule_payment'), 'Approve a payment under your spending rule');
+  assert.match(read('components/approve/ApproveScreen.tsx'), /Within your spending rule, so you sign this yourself with your passkey/, 'on a phone the one signer is not told "each owner signs"');
+  assert.match(read('components/transfer/SignPanel.tsx'), /withinRule=\{underRule\}/);
   const flow = read('components/transfer/flow.ts');
   assert.match(flow, /'owners_sign' \| 'asked_owners' \| 'staff_rule'/);
   assert.match(flow, /plan\?: \{ reasons: string\[\]; lines: string\[\] \}/);
@@ -57,6 +59,19 @@ test('"How it works" says who signs a staff member’s payment, and the context 
   const route = read('app/api/wallet/transfers/context/route.ts');
   assert.match(route, /staffRulePaymentsWired: wired/);
   assert.doesNotMatch(route, /STAFF_RULE_PAYMENTS_WIRED/);
+});
+
+test('the live wiring knows the new purpose: compliance before each signature, the invoice told once it executes, the evidence, the owner notice', () => {
+  const deps = read('lib/server/wallet-deps.ts');
+  assert.match(deps, /request\.purpose === 'wallet_payment' \|\| request\.purpose === 'spend_approval' \|\| request\.purpose === 'staff_rule_payment'/);
+  assert.match(deps, /request\.purpose === 'wallet_payment' \|\| request\.purpose === 'staff_rule_payment'/);
+  assert.match(read('lib/server/payment-compliance-gate.ts'), /request\.purpose !== 'staff_rule_payment'/);
+  assert.match(read('lib/server/controls-evidence.ts'), /'staff_rule_payment'/);
+  assert.match(read('lib/server/approval-requests.ts'), /case 'staff_rule_payment'/);
+  const live = read('lib/server/wallet-transfers-deps.ts');
+  assert.match(live, /staffSigner:/);
+  assert.match(live, /m\.canSign/, 'only a passkey that can sign on this site');
+  assert.match(live, /liveSpendContext\(route\)/, 'the chain client is the route’s own, for the session’s business');
 });
 
 test('the words a staff member reads stay in the dashboard’s voice: plain sentences, no promises Splash cannot keep', () => {
