@@ -2,7 +2,7 @@
 
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowLeft, ArrowRight, Check, CircleAlert, CircleHelp, Landmark, Loader2, Wallet, X } from 'lucide-react';
 
 import PhoneBar from '@/components/dashboard/PhoneBar';
@@ -89,6 +89,7 @@ export default function PhoneTransfer(props: PhoneTransferProps) {
   const [saving, setSaving] = useState(false);
   const [sheet, setSheet] = useState(false);
   const plan = useAmountPlan(flow, balance);
+  const heading = useRef<HTMLHeadingElement>(null);
   const set = <K extends keyof BankForm>(key: K, value: BankForm[K]) => setForm((f) => ({ ...f, [key]: value }));
 
   const state: PhoneState = { payeeType: flow.payeeType, adding, holder: form.holder, owner };
@@ -100,6 +101,16 @@ export default function PhoneTransfer(props: PhoneTransferProps) {
   const fundsOk = funds?.enough === true;
   const accountCheck = checkPayeeField('bank', form.accountNumber);
   const ready = screenReady(screen, { payeeType: flow.payeeType, chosen: flow.chosen, amountText: flow.amountText, purposeCode: flow.purposeCode, sourceOfFunds: flow.sourceOfFunds, fundsOk, bank: form });
+
+  // A new question is announced: focus moves to its heading, except where the question is a field that takes focus itself.
+  const firstScreen = useRef(true);
+  useEffect(() => {
+    if (firstScreen.current) {
+      firstScreen.current = false;
+      return;
+    }
+    if (!TEXT_SCREENS.has(screen)) heading.current?.focus({ preventScroll: true });
+  }, [screen]);
 
   function goTo(target: Screen) {
     // Back to the list of suppliers leaves the form: what was typed is kept, the questions are not asked again.
@@ -165,7 +176,7 @@ export default function PhoneTransfer(props: PhoneTransferProps) {
 
       {screen !== 'review' && screen !== 'receipt' ? (
         <div className="mb-5">
-          <h1 className="text-[26px] font-extrabold leading-tight tracking-[-0.01em] text-[#0c3e48]">{QUESTION[screen].title}</h1>
+          <h1 ref={heading} tabIndex={-1} className="text-[26px] font-extrabold leading-tight tracking-[-0.01em] text-[#0c3e48] outline-none">{QUESTION[screen].title}</h1>
           {QUESTION[screen].hint ? <p className="mt-1.5 text-[15px] leading-6 text-[#326273]">{QUESTION[screen].hint}</p> : null}
         </div>
       ) : null}
@@ -202,15 +213,15 @@ export default function PhoneTransfer(props: PhoneTransferProps) {
             <Choice on={form.holder === 'person'} title="A person" body="No company number is needed." onClick={() => set('holder', 'person')} />
           </Choices>
         ) : null}
-        {screen === 'b.name' ? <TextQuestion id="pb-name" label="Registered name on the account" value={form.holderName} onChange={(v) => set('holderName', v)} autoComplete="off" /> : null}
-        {screen === 'b.registration' ? <TextQuestion id="pb-reg" label="Company registration number" value={form.registrationNumber} onChange={(v) => set('registrationNumber', v)} autoComplete="off" /> : null}
-        {screen === 'b.bank' ? <TextQuestion id="pb-bank" label="Bank code" value={form.bankCode} mono onChange={(v) => set('bankCode', v.toUpperCase())} autoComplete="off" /> : null}
+        {screen === 'b.name' ? <TextQuestion autoFocus id="pb-name" label="Registered name on the account" value={form.holderName} onChange={(v) => set('holderName', v)} autoComplete="off" /> : null}
+        {screen === 'b.registration' ? <TextQuestion autoFocus id="pb-reg" label="Company registration number" value={form.registrationNumber} onChange={(v) => set('registrationNumber', v)} autoComplete="off" /> : null}
+        {screen === 'b.bank' ? <TextQuestion autoFocus id="pb-bank" label="Bank code" value={form.bankCode} mono onChange={(v) => set('bankCode', v.toUpperCase())} autoComplete="off" /> : null}
         {screen === 'b.account' ? (
-          <TextQuestion id="pb-acct" label="Account number" value={form.accountNumber} mono inputMode="numeric" onChange={(v) => set('accountNumber', v)} autoComplete="off" error={accountCheck.ok || form.accountNumber.trim() === '' ? null : accountCheck.message} />
+          <TextQuestion autoFocus id="pb-acct" label="Account number" value={form.accountNumber} mono inputMode="numeric" onChange={(v) => set('accountNumber', v)} autoComplete="off" error={accountCheck.ok || form.accountNumber.trim() === '' ? null : accountCheck.message} />
         ) : null}
         {screen === 'b.city' ? (
           <div className="space-y-4">
-            <TextQuestion id="pb-city" label="Town or city" value={form.city} onChange={(v) => set('city', v)} autoComplete="address-level2" />
+            <TextQuestion autoFocus id="pb-city" label="Town or city" value={form.city} onChange={(v) => set('city', v)} autoComplete="address-level2" />
             <TextQuestion id="pb-street" label="Street" hint="Optional" value={form.street} onChange={(v) => set('street', v)} autoComplete="off" />
             <TextQuestion id="pb-post" label="Postcode" hint="Optional" value={form.postCode} onChange={(v) => set('postCode', v)} autoComplete="off" />
           </div>
@@ -300,7 +311,7 @@ export default function PhoneTransfer(props: PhoneTransferProps) {
             {SOURCE_OPTIONS.map((o) => <Choice key={o.code} on={flow.sourceOfFunds === o.code} title={o.label} onClick={() => patch({ sourceOfFunds: o.code })} />)}
           </Choices>
         ) : null}
-        {screen === 'reference' ? <TextQuestion id="pt-ref" label="Invoice or reference" value={flow.reference} maxLength={60} onChange={(v) => patch({ reference: v })} autoComplete="off" /> : null}
+        {screen === 'reference' ? <TextQuestion autoFocus id="pt-ref" label="Invoice or reference" value={flow.reference} maxLength={60} onChange={(v) => patch({ reference: v })} autoComplete="off" /> : null}
 
         {screen === 'review' ? (
           <StepReview {...shared} next={() => undefined} back={() => back && goTo(back)} made={made} onMade={props.onMade} onExecuted={props.onExecuted} onRestart={restart} stickyActions />
@@ -319,6 +330,9 @@ export default function PhoneTransfer(props: PhoneTransferProps) {
     </div>
   );
 }
+
+/** The screens that are one text field: it takes focus (and the keyboard) itself. */
+const TEXT_SCREENS = new Set<Screen>(['b.name', 'b.registration', 'b.bank', 'b.account', 'b.city', 'reference']);
 
 const ICON_BUTTON = 'grid h-11 w-11 place-items-center rounded-xl border border-[#326273]/20 bg-white text-[#1F4452] transition-colors hover:border-[#0d6370] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0d6370]';
 
@@ -363,14 +377,14 @@ function Choice({ on, title, body, tags, onClick }: { on: boolean; title: string
   );
 }
 
-function TextQuestion({ id, label, hint, value, onChange, mono = false, error = null, ...rest }: { id: string; label: string; hint?: string; value: string; onChange: (value: string) => void; mono?: boolean; error?: string | null } & Omit<React.InputHTMLAttributes<HTMLInputElement>, 'onChange' | 'value' | 'id'>) {
+function TextQuestion({ id, label, hint, value, onChange, mono = false, error = null, autoFocus = false, ...rest }: { id: string; label: string; hint?: string; value: string; onChange: (value: string) => void; mono?: boolean; error?: string | null; autoFocus?: boolean } & Omit<React.InputHTMLAttributes<HTMLInputElement>, 'onChange' | 'value' | 'id'>) {
   return (
     <div>
       <div className="flex items-baseline justify-between gap-2">
         <label htmlFor={id} className="text-sm font-semibold text-[#1F4452]">{label}</label>
         {hint ? <span className="text-[13px] text-[#326273]">{hint}</span> : null}
       </div>
-      <input id={id} value={value} onChange={(e) => onChange(e.target.value)} aria-invalid={error ? true : undefined} aria-describedby={error ? `${id}-err` : undefined} {...rest} className={`mt-1.5 ${PHONE_INPUT} ${mono ? 'font-mono' : ''}`} />
+      <input id={id} autoFocus={autoFocus} value={value} onChange={(e) => onChange(e.target.value)} aria-invalid={error ? true : undefined} aria-describedby={error ? `${id}-err` : undefined} {...rest} className={`mt-1.5 ${PHONE_INPUT} ${mono ? 'font-mono' : ''}`} />
       {error ? <p id={`${id}-err`} role="alert" className="mt-1.5 flex items-start gap-1.5 text-[13px] font-medium text-[var(--error)]"><CircleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />{error}</p> : null}
     </div>
   );

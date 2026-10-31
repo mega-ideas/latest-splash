@@ -246,3 +246,10 @@ test('the phone Transfer words pass the copy rules and use no coral, Demo, testn
     assert.doesNotMatch(text, /E39774|coral|\bDemo\b|\bDEMO\b|Coming soon|testnet|non-custodial/i, file);
   }
 });
+
+test('a new question is announced: its heading takes focus, except where the question is a text field that takes focus itself', () => {
+  assert.match(phone, /heading\.current\?\.focus\(\{ preventScroll: true \}\)/);
+  assert.match(phone, /TEXT_SCREENS = new Set<Screen>\(\['b\.name', 'b\.registration', 'b\.bank', 'b\.account', 'b\.city', 'reference'\]\)/);
+  assert.match(phone, /<h1 ref=\{heading\} tabIndex=\{-1\}/);
+  assert.equal((phone.match(/<TextQuestion autoFocus /g) ?? []).length, 6, 'every single-field screen opens its keyboard');
+});
