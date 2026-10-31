@@ -191,10 +191,12 @@ export function isEmail(value: string): boolean {
   return value.length <= 200 && EMAIL.test(value);
 }
 
-export function mailtoUrl(input: { to: string; subject: string; body: string }): string {
-  if (!isEmail(input.to)) throw new RangeError('that is not an email address');
+/** A message for the person's own mail program. With no address the program asks for one. */
+export function mailtoUrl(input: { to?: string; subject: string; body: string }): string {
+  const to = input.to ?? '';
+  if (to !== '' && !isEmail(to)) throw new RangeError('that is not an email address');
   if (/[\r\n]/.test(input.subject)) throw new RangeError('a subject is one line');
-  return `mailto:${encodeURIComponent(input.to)}?subject=${encodeURIComponent(input.subject)}&body=${encodeURIComponent(input.body)}`;
+  return `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(input.subject)}&body=${encodeURIComponent(input.body)}`;
 }
 
 export function accountantMessage(r: PaymentReceipt, link: string | null, input: { business: string }): { subject: string; text: string } {

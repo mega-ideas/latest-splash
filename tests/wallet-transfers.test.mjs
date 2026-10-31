@@ -41,7 +41,6 @@ import { world, T0 } from './fixtures/wallet-world.mjs';
 const USDC = (n) => BigInt(Math.round(n * 1_000_000));
 const OPERATOR = normalizeSuiAddress(`0x${'0e'.repeat(32)}`);
 const SUPPLIER_WALLET = normalizeSuiAddress(`0x${'77'.repeat(32)}`);
-const EXCHANGE_WALLET = normalizeSuiAddress(`0x${'88'.repeat(32)}`);
 const NORTH_WALLET = normalizeSuiAddress(`0x${'99'.repeat(32)}`);
 const OWNER = { userId: 'u-founder', role: 'OWNER' };
 
@@ -49,7 +48,7 @@ async function sign(passkey, view) {
   return (await passkey.keypair.signTransaction(fromBase64(view.transactionBytes))).signature;
 }
 
-async function setup(more = {}) {
+async function setup() {
   const w = await world();
   const { startBusinessWallet } = await import('../lib/server/business-wallet.ts');
   const { signingInbox } = await import('../lib/server/wallet-signing.ts');

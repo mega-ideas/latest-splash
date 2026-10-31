@@ -20,6 +20,7 @@
  */
 import { FEE_KIND, type FeeKind } from '../fees/schedule.ts';
 import { CORRIDOR_RULES } from '../compliance/travel-rule.ts';
+import { PARTNERS } from '../partners/signed-partners.ts';
 
 export const PAYEE_KINDS = ['bank', 'splash_business', 'wallet'] as const;
 export type PayeeKind = (typeof PAYEE_KINDS)[number];
@@ -90,6 +91,51 @@ export function feeKindOf(payee: PayeeRef): FeeKind {
       throw new RangeError(`unknown payee kind: ${String((payee as { kind?: unknown }).kind)}`);
   }
 }
+
+/**
+ * The words the bank-payout declaration is picked from (ISO 20022 purpose
+ * codes, the relationship to the supplier, where the money comes from). The
+ * same keys as lib/payments/iso20022.ts, which holds the checked vocabulary
+ * but cannot be loaded in a browser; a test keeps the two in step.
+ */
+export const PURPOSE_OPTIONS: Array<{ code: string; label: string }> = [
+  { code: 'SUPP', label: 'Supplier payment' },
+  { code: 'GDDS', label: 'Purchase or sale of goods' },
+  { code: 'SCVE', label: 'Purchase or sale of services' },
+  { code: 'TRAD', label: 'Trade services' },
+  { code: 'COMC', label: 'Commercial payment' },
+  { code: 'RENT', label: 'Rent' },
+  { code: 'LICF', label: 'Licence fee' },
+];
+
+export const RELATIONSHIP_OPTIONS: Array<{ code: string; label: string }> = [
+  { code: 'supplier', label: 'Supplier' },
+  { code: 'contractor', label: 'Contractor' },
+  { code: 'service_provider', label: 'Service provider' },
+  { code: 'customer', label: 'Customer' },
+  { code: 'affiliate', label: 'Affiliate' },
+  { code: 'subsidiary', label: 'Subsidiary' },
+  { code: 'parent_company', label: 'Parent company' },
+  { code: 'other', label: 'Other' },
+];
+
+export const SOURCE_OPTIONS: Array<{ code: string; label: string }> = [
+  { code: 'business_revenue', label: 'Business revenue' },
+  { code: 'retained_earnings', label: 'Retained earnings' },
+  { code: 'capital_contribution', label: 'Capital contribution' },
+  { code: 'loan_proceeds', label: 'Loan proceeds' },
+  { code: 'investment_proceeds', label: 'Investment proceeds' },
+  { code: 'sale_of_assets', label: 'Sale of assets' },
+  { code: 'other', label: 'Other' },
+];
+
+/**
+ * The exchanges a deposit address can be at (lib/compliance/sumsub.ts
+ * TRAVEL_RULE_EXCHANGES), labelled by role: an exchange is named in copy only
+ * once its agreement is signed (lib/partners/signed-partners.ts), so the page
+ * never prints a name from here.
+ */
+export const EXCHANGE_OPTIONS: Array<{ id: string; label: string }> = (['hata', 'pdax', 'tokocrypto', 'bitkub'] as const).map((id) => ({ id, label: PARTNERS[id].role }));
 
 export type PayeeField = 'account_number' | 'registered_name' | 'sui_address' | 'chain_address';
 
