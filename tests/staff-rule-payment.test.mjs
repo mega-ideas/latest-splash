@@ -453,6 +453,42 @@ test('a viewer cannot pay at all, and an owner’s payment is the owners’ even
   await t.w.client.close();
 });
 
+// ─── Between asking and signing ─────────────────────────────────────────────
+
+test('a rule taken back after the request was opened: the dry run fails at submission, nothing is drawn, and the payment reads as not paid', async () => {
+  const t = await setup();
+  await t.give(t.rule(staffKey.address));
+  const r = await T.createTransfer(t.deps(), STAFF, input(t.recipientId));
+  assert.equal(r.transfer.route, 'staff_rule');
+  const taken = await revokeSpendingRule(t.w.sc, { orgId: 'acme', requestedBy: 'u-founder', wallet: t.members, spender: staffKey.address });
+  assert.equal((await signBy(t.w, taken.request, ['founder', 'two'])).status, 'executed');
+  const signed = await submitPartialSignature(t.w.signing, { orgId: 'acme', userId: 'u-staff', id: r.signingRequest.id, signature: await sign(staffKey, r.signingRequest), digest: r.signingRequest.digest });
+  assert.equal(signed.request.status, 'failed');
+  assert.equal(t.w.spends.length, 0);
+  assert.equal(t.w.balances.get(SUPPLIER), undefined, 'the recipient was not paid');
+  assert.equal((await T.getTransfer(t.deps(), r.transfer.id)).status, 'failed');
+  await t.w.client.close();
+});
+
+test('a recipient blocked after the request was opened is not paid: the signature is refused', async () => {
+  const t = await setup();
+  await t.give(t.rule(staffKey.address));
+  const { paymentBeforeSign } = await import('../lib/server/payment-compliance-gate.ts');
+  const { recordScreening } = await import('../lib/server/kyt-screenings.ts');
+  t.w.signing.beforeSign = (request) => paymentBeforeSign({ db: t.w.db, now: () => T0 }, request);
+  const r = await T.createTransfer(t.deps(), STAFF, input(t.recipientId));
+  assert.equal(r.transfer.route, 'staff_rule');
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await recordScreening(t.w.db, {
+    orgId: 'acme', kind: 'wallet_recipient', chain: 'SUI', address: SUPPLIER, requestedBy: 'test',
+    screening: { provider: 'elliptic', verdict: 'BLOCK', reference: 'elliptic:test-block', detail: 'test', screenedAt: new Date(T0.getTime() + 1).toISOString(), riskScore: 100 },
+  });
+  const refused = await submitPartialSignature(t.w.signing, { orgId: 'acme', userId: 'u-staff', id: r.signingRequest.id, signature: await sign(staffKey, r.signingRequest), digest: r.signingRequest.digest });
+  assert.deepEqual([refused.ok, refused.code], [false, 'recipient_blocked']);
+  assert.equal(t.w.spends.length, 0);
+  await t.w.client.close();
+});
+
 // ─── Replay ─────────────────────────────────────────────────────────────────
 
 test('the same intent id answers the payment already made; another payment under it is refused; a signature sent again moves nothing', async () => {
