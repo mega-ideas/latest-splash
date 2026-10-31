@@ -3,8 +3,6 @@
   --ink: #1F4452;
   --slate: #326273;
   --teal: #5C9EAD;
-  /* Coral is retired (v2 D14) and the landing no longer reads it, so the
-     token is gone (tests/dashboard-brand.test.mjs). */
   --gold: #D9A441;
   /* The accent (v2 D14): a solid gold fill with --ink words on it, the pale
      gold tint where a peach tint was, and --gold-ink for words on the tint
