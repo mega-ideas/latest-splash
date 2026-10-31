@@ -35,7 +35,7 @@ function rateText(rateMicro: string): string {
 }
 
 /** Step 4, "Review and approve": the fee shown is the fee signed, the owners sign together, staff ask the owners. */
-export default function StepReview({ flow, ctx, balance, back, made, onMade, onExecuted, onRestart, stickyActions = false }: StepProps & { made: Made | null; onMade: (m: Made) => void; onExecuted: (digest: string | null) => void; onRestart: () => void; /** On a phone the actions are one fixed bar at the foot (v2 brief 5.10), and the tab bar steps aside for it. */ stickyActions?: boolean }) {
+export default function StepReview({ flow, ctx, balance, back, made, onMade, onExecuted, onRestart, onSending, stickyActions = false }: StepProps & { made: Made | null; onMade: (m: Made) => void; onExecuted: (digest: string | null) => void; onRestart: () => void; /** Told when the request is being sent and when it has answered, so a phone's own Back can be off in between. */ onSending?: (sending: boolean) => void; /** On a phone the actions are one fixed bar at the foot (v2 brief 5.10), and the tab bar steps aside for it. */ stickyActions?: boolean }) {
   const [quote, setQuote] = useState<Quote | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -92,6 +92,10 @@ export default function StepReview({ flow, ctx, balance, back, made, onMade, onE
     // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch the quote on mount; state is set when it answers
     void load();
   }, [load, made]);
+
+  useEffect(() => {
+    onSending?.(sending);
+  }, [sending, onSending]);
 
   useEffect(() => {
     const first = window.setTimeout(() => setNow(Date.now()), 0);
@@ -182,7 +186,7 @@ export default function StepReview({ flow, ctx, balance, back, made, onMade, onE
 
   const actions = (
     <>
-      <QuietButton type="button" onClick={back} className={stickyActions ? 'min-h-14 shrink-0' : undefined}>
+      <QuietButton type="button" disabled={sending} onClick={back} className={stickyActions ? 'min-h-14 shrink-0' : undefined}>
         <ArrowLeft className="h-4 w-4" aria-hidden="true" />
         Back
       </QuietButton>

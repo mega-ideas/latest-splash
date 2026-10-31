@@ -88,6 +88,8 @@ export default function PhoneTransfer(props: PhoneTransferProps) {
   const [errors, setErrors] = useState<BankErrors>({});
   const [saving, setSaving] = useState(false);
   const [sheet, setSheet] = useState(false);
+  // Review is sending the request: Back is off until it has answered, so the screen is not left under it.
+  const [sending, setSending] = useState(false);
   const plan = useAmountPlan(flow, balance);
   const heading = useRef<HTMLHeadingElement>(null);
   const set = <K extends keyof BankForm>(key: K, value: BankForm[K]) => setForm((f) => ({ ...f, [key]: value }));
@@ -153,15 +155,17 @@ export default function PhoneTransfer(props: PhoneTransferProps) {
   if (ctxState === 'failed') return <p role="alert" className="dash-surface p-4 text-sm font-medium text-[var(--error)]">Splash could not load your business just now. Nothing was sent. Try again in a moment.</p>;
 
   const paid = screen === 'receipt';
+  // Once the request is made, what was asked is what is out for signature: no Back, so the draft cannot be changed under it.
+  const sent = made !== null;
   const shared = { flow, patch, ctx, balance, recipients, beneficiaries, reload };
 
   return (
     <div className="mx-auto w-full max-w-lg" data-testid="phone-transfer">
-      {!paid ? (
+      {!paid && !sent ? (
         <div className="mb-4">
           <div className="flex items-center justify-between gap-2">
             {back ? (
-              <button type="button" aria-label="Back" onClick={() => goTo(back)} className={ICON_BUTTON}><ArrowLeft className="h-5 w-5" aria-hidden="true" /></button>
+              <button type="button" aria-label="Back" disabled={sending} onClick={() => goTo(back)} className={ICON_BUTTON}><ArrowLeft className="h-5 w-5" aria-hidden="true" /></button>
             ) : (
               <button type="button" aria-label="Close and keep the draft" onClick={() => router.push('/dashboard')} className={ICON_BUTTON}><X className="h-5 w-5" aria-hidden="true" /></button>
             )}
@@ -314,7 +318,7 @@ export default function PhoneTransfer(props: PhoneTransferProps) {
         {screen === 'reference' ? <TextQuestion autoFocus id="pt-ref" label="Invoice or reference" value={flow.reference} maxLength={60} onChange={(v) => patch({ reference: v })} autoComplete="off" /> : null}
 
         {screen === 'review' ? (
-          <StepReview {...shared} next={() => undefined} back={() => back && goTo(back)} made={made} onMade={props.onMade} onExecuted={props.onExecuted} onRestart={restart} stickyActions />
+          <StepReview {...shared} next={() => undefined} back={() => back && goTo(back)} made={made} onMade={props.onMade} onExecuted={props.onExecuted} onRestart={restart} onSending={setSending} stickyActions />
         ) : null}
         {screen === 'receipt' && receiptRef ? <StepReceipt refId={receiptRef} onNew={restart} /> : null}
       </div>
