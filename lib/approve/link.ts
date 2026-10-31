@@ -13,8 +13,9 @@
  *     executes until an approver signs with their own passkey.
  *   - It does not replace the transaction code. The message still carries the
  *     code and the screen still asks the person to compare it.
- *   - It fails closed. In production a link is made only on https and never
- *     for a local address; anything else sends the message without a link.
+ *   - It fails closed. In production (an unset NODE_ENV is production) a link
+ *     is made only on https and a public name: no IP address, no private or
+ *     local name; anything else sends the message without a link.
  *
  * No environment is read here: the caller passes the address and the mode.
  */
@@ -32,15 +33,44 @@ export function approvePath(id: string): string | null {
   return typeof id === 'string' && REQUEST_ID.test(id) ? `${PATH_PREFIX}${id}` : null;
 }
 
-function isLocalHost(hostname: string): boolean {
-  const h = hostname.toLowerCase();
-  return h === 'localhost' || h.endsWith('.localhost') || h === '127.0.0.1' || h === '[::1]' || h === '0.0.0.0';
+/** Names that only mean something on one machine or one network. */
+const LOCAL_ONLY_LABELS = new Set(['localhost', 'local', 'localdomain', 'internal', 'lan', 'intranet']);
+
+/** The host without the trailing dot of a fully qualified name ("example.com." is "example.com"). */
+function bareHost(hostname: string): string {
+  return hostname.toLowerCase().replace(/\.+$/, '');
+}
+
+/**
+ * Whether a host may appear in a link that goes out of the building. Refused:
+ * any IP address (the URL parser has already turned 2130706433, 0x7f000001 and
+ * 127.1 into 127.0.0.1, and IPv6 and IPv4-mapped forms keep their brackets, so
+ * loopback, private, link-local and shared ranges all fall here), a name with
+ * no dot (an intranet or machine name), a name whose last label has no letter
+ * (an IPv4 form), and names that are local by convention (.localhost, .local,
+ * .internal, .home.arpa and the like). What is left is a public name.
+ */
+function isPublicHost(hostname: string): boolean {
+  const host = bareHost(hostname);
+  if (host === '' || host.startsWith('[')) return false;
+  const labels = host.split('.');
+  if (labels.length < 2 || labels.some((label) => label === '')) return false;
+  const last = labels[labels.length - 1];
+  if (!/[a-z]/.test(last) || LOCAL_ONLY_LABELS.has(last)) return false;
+  if (host.endsWith('.home.arpa')) return false;
+  return true;
+}
+
+/** Only development and test are not production: an unset or unknown mode is treated as production. */
+function isProduction(env: { NODE_ENV?: string }): boolean {
+  return env.NODE_ENV !== 'development' && env.NODE_ENV !== 'test';
 }
 
 /**
  * The full link for a signing message, or null where none may be sent.
  * Only the origin of the configured address is used, so a path, a query, a
- * fragment or credentials in it never reach a message.
+ * fragment or credentials in it never reach a message. In production (which an
+ * unset NODE_ENV is) the address must be https on a public name.
  */
 export function approveLink(appUrl: string | undefined | null, id: string, env: { NODE_ENV?: string }): string | null {
   const path = approvePath(id);
@@ -52,8 +82,9 @@ export function approveLink(appUrl: string | undefined | null, id: string, env: 
     return null;
   }
   if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
-  if (env.NODE_ENV === 'production' && (url.protocol !== 'https:' || isLocalHost(url.hostname))) return null;
-  return `${url.origin}${path}`;
+  if (isProduction(env) && (url.protocol !== 'https:' || !isPublicHost(url.hostname))) return null;
+  const host = bareHost(url.hostname);
+  return `${url.protocol}//${host}${url.port ? `:${url.port}` : ''}${path}`;
 }
 
 /**
@@ -79,8 +110,14 @@ export function withReturnHeader(headers: Headers, pathname: string, rendersPage
   return headers;
 }
 
-export function loginRedirectFor(_header: string | null | undefined): string {
-  return '/login';
+/**
+ * Where the dashboard layout sends a signed-out visit: sign in, and for a link
+ * to one request's Approve screen come back to it afterwards. The header is the
+ * proxy's (withReturnHeader), and only the one allowed shape is believed.
+ */
+export function loginRedirectFor(header: string | null | undefined): string {
+  const back = safeApproveReturn(header);
+  return back ? `/login?next=${encodeURIComponent(back)}` : '/login';
 }
 
 /** What the signing message says about its link, in the words every channel uses. */

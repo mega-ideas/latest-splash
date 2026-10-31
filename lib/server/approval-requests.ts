@@ -25,6 +25,7 @@ import { transactionCode } from '@/lib/wallet/review-on-device';
 import type { SigningNotifier, WithdrawalSigningDetails } from '@/lib/server/wallet-signing';
 import type { SigningPurpose } from '@/lib/server/wallet-signing-store';
 import { approveLink, LINK_NOTE } from '@/lib/approve/link';
+import { plainText } from '@/lib/approve/plain-text';
 import { listApprovers, type Approver } from '@/lib/server/approver-channels';
 import { issueTokens, recordDecision, tally, type Tally } from '@/lib/server/approval-tokens';
 import { readOrgSettings } from '@/lib/server/org-settings';
@@ -80,7 +81,7 @@ function messageFor(input: {
 
   const head =
     `Splash — approval needed\n\n` +
-    `${input.orgName} wants to send ${money(input.amountUsd)} (${what}).\n` +
+    `${businessName(input.orgName)} wants to send ${money(input.amountUsd)} (${what}).\n` +
     `${input.proposal.explain.recommendation}\n\n` +
     `Every approver must agree. One rejection stops it.\n\n`;
 
@@ -182,6 +183,24 @@ function shortAddress(address: string): string {
   return `${address.slice(0, 6)}…${address.slice(-4)}`;
 }
 
+/**
+ * Free text that a message carries beside an official link: the business name
+ * and the account holder's name are typed by people, so each goes through
+ * plainText (lib/approve/plain-text.ts) before it is worded. Capped so a long
+ * name cannot crowd the message.
+ */
+function businessName(name: unknown): string {
+  return plainText(name, 48, 'Your business');
+}
+
+function holderOf(name: unknown): string {
+  return plainText(name, 60, 'the account holder');
+}
+
+function codeOf(value: unknown, fallback: string): string {
+  return plainText(value, 24, fallback);
+}
+
 function usdc(minor: string): string {
   const [whole, frac] = formatMinor(BigInt(minor), USDC_DECIMALS_V2).split('.');
   const trimmed = frac.replace(/0+$/, '').padEnd(2, '0');
@@ -249,7 +268,7 @@ export function walletRequestHeadline(purpose: SigningPurpose, d: WalletTxDescri
       if (withdrawal) {
         const by = new Date(Number(withdrawal.settleByMs)).toISOString().slice(0, 16).replace('T', ' ');
         return (
-          `withdraw ${usdc(open.amountMinor)} to the business's own bank account ${withdrawal.holderName}, bank ${withdrawal.bankCode}, account ending ${withdrawal.last4}: ` +
+          `withdraw ${usdc(open.amountMinor)} to the business's own bank account ${holderOf(withdrawal.holderName)}, bank ${codeOf(withdrawal.bankCode, 'unknown')}, account ending ${codeOf(withdrawal.last4, '----')}: ` +
           `about ${localAmount(withdrawal.receiveMinor, withdrawal.currency)} at ${rateOf(withdrawal.rateMicro, withdrawal.currency)}, and at least ${localAmount(withdrawal.minReceiveMinor, withdrawal.currency)} or the USDC comes back, ` +
           `through the payout partner's deposit address ${shortAddress(open.recipient)}${fee}; sign by ${by} UTC`
         );
@@ -265,7 +284,7 @@ export function walletRequestHeadline(purpose: SigningPurpose, d: WalletTxDescri
       if (withdrawal) {
         const by = new Date(Number(withdrawal.settleByMs)).toISOString().slice(0, 16).replace('T', ' ');
         return (
-          `pay ${usdc(open.amountMinor)} to ${withdrawal.holderName}, bank ${withdrawal.bankCode}, account ending ${withdrawal.last4}${withdrawal.purposeCode ? ` (purpose ${withdrawal.purposeCode})` : ''}: ` +
+          `pay ${usdc(open.amountMinor)} to ${holderOf(withdrawal.holderName)}, bank ${codeOf(withdrawal.bankCode, 'unknown')}, account ending ${codeOf(withdrawal.last4, '----')}${withdrawal.purposeCode ? ` (purpose ${codeOf(withdrawal.purposeCode, 'unknown')})` : ''}: ` +
           `about ${localAmount(withdrawal.receiveMinor, withdrawal.currency)} at ${rateOf(withdrawal.rateMicro, withdrawal.currency)}, and at least ${localAmount(withdrawal.minReceiveMinor, withdrawal.currency)} or the USDC comes back, ` +
           `through the payout partner's deposit address ${shortAddress(open.recipient)}${fee}; sign by ${by} UTC`
         );
@@ -342,27 +361,26 @@ export function walletSignatureMessage(input: {
   const hours = Math.max(1, Math.round((input.expiresAt.getTime() - input.now.getTime()) / 3_600_000));
   const who = input.signerCount > 1 ? `${input.threshold} of ${input.signerCount} owners must sign.` : 'Only you can sign this.';
   const code = transactionCode(input.description.bytesHash);
+  const expires = `This request expires in ${hours} hour${hours === 1 ? '' : 's'}.`;
+  // The line breaks are written out, one line to a string: the message's shape
+  // does not depend on how an editor or a checkout treats line endings.
   const ask = input.link
-    ? `Review it here: ${input.link}
-${LINK_NOTE}
-` +
-      `On the screen, check the payee, the amount and the fee, and that the transaction code is ${code}. `
-    : `Open Splash, check the details and the transaction code ${code}, and sign with your passkey. `;
-  return (
-    `Splash: your signature is needed
-
-` +
-    `${input.orgName} asks you to ${walletRequestHeadline(input.purpose, input.description, input.withdrawal)}.
-` +
-    `${who} Splash pays the network fee.
-
-` +
-    ask +
-    `This request expires in ${hours} hour${hours === 1 ? '' : 's'}.
-
-` +
-    `If you did not expect this, do not sign it.`
-  );
+    ? [
+        `Review it here: ${input.link}`,
+        LINK_NOTE,
+        `On the screen, check the payee, the amount and the fee, and that the transaction code is ${code}. ${expires}`,
+      ]
+    : [`Open Splash, check the details and the transaction code ${code}, and sign with your passkey. ${expires}`];
+  return [
+    'Splash: your signature is needed',
+    '',
+    `${businessName(input.orgName)} asks you to ${walletRequestHeadline(input.purpose, input.description, input.withdrawal)}.`,
+    `${who} Splash pays the network fee.`,
+    '',
+    ...ask,
+    '',
+    'If you did not expect this, do not sign it.',
+  ].join('\n');
 }
 
 /**
@@ -446,7 +464,7 @@ export async function notifyOwnersOfAsk(input: {
     const amount = BigInt(input.amountMinor);
     const usdc = `${(amount / 1_000_000n).toLocaleString('en-US')}.${(amount % 1_000_000n).toString().padStart(6, '0').slice(0, 2)}`;
     const payee = `${input.recipient.slice(0, 6)}…${input.recipient.slice(-4)}`;
-    const body = `${input.orgName}: a member of your team asks you to approve a payment of ${usdc} USDC to ${payee}.\n\nOpen Splash to review it. Nothing is paid until the owners sign.`;
+    const body = `${businessName(input.orgName)}: a member of your team asks you to approve a payment of ${usdc} USDC to ${payee}.\n\nOpen Splash to review it. Nothing is paid until the owners sign.`;
     for (const userId of input.ownerUserIds) {
       const person = people.find((p) => p.userId === userId);
       if (!settings?.whatsappEnabled || !whatsappConfigured() || !person?.whatsappE164) {
@@ -480,7 +498,7 @@ export async function notifyOwnersOfBatch(input: {
   const unreachable: string[] = [];
   try {
     const [people, settings] = await Promise.all([listApprovers(input.orgId), readOrgSettings(input.orgId).catch(() => null)]);
-    const body = `${input.orgName}: a member of your team prepared a batch of ${input.rowCount} payments totalling ${usdc(input.totalMinor)}.\n\nOpen Splash, Batch payouts, to review it. Nothing is paid until the owners sign.`;
+    const body = `${businessName(input.orgName)}: a member of your team prepared a batch of ${input.rowCount} payments totalling ${usdc(input.totalMinor)}.\n\nOpen Splash, Batch payouts, to review it. Nothing is paid until the owners sign.`;
     for (const userId of input.ownerUserIds) {
       const person = people.find((p) => p.userId === userId);
       if (!settings?.whatsappEnabled || !whatsappConfigured() || !person?.whatsappE164) {

@@ -141,7 +141,7 @@ test('a link typed into the business name or the account holder name does not re
   assert.deepEqual(noLink.match(LINKY) ?? [], [], 'no link, and no look-alike one either');
 });
 
-test('a business name with a link in it does not carry the link in the other messages to owners either', async () => {
+test('through the notifier too: a link in the business name or the holder name is not in what the signers are sent', async () => {
   const approvals = await import('../lib/server/approval-requests.ts');
   const orgName = 'Acme https://evil.example/x';
   const sent = [];
@@ -170,7 +170,8 @@ test('a business name with a link in it does not carry the link in the other mes
 
 test('one sanitiser serves every message that names a business: no message builds its name from raw text', async () => {
   const source = await read('lib/server/approval-requests.ts');
-  assert.match(source, /plainText\(input\.orgName/, 'the signing message cleans the name');
+  assert.match(source, /import \{ plainText \} from '@\/lib\/approve\/plain-text'/);
+  assert.equal((source.match(/businessName\(input\.orgName\)/g) ?? []).length, 4, 'the three messages and the signing message clean the name');
   const raw = source.match(/\$\{input\.orgName\}/g) ?? [];
   assert.equal(raw.length, 0, 'no message interpolates the business name uncleaned');
   const holder = source.match(/\$\{withdrawal\.holderName\}/g) ?? [];
@@ -282,7 +283,7 @@ test('the message is built from explicit lines: no carriage return, the same ten
   assert.match(plain[5], /^Open Splash, check the details and the transaction code a1b2 c3d4 e5f6 0718, and sign with your passkey\. This request expires in 24 hours\.$/);
 });
 
-test('the message file spells its line breaks as \n: no template string in the message builder spans lines', async () => {
+test('the message file writes its line breaks out: no template string in the message builder spans lines', async () => {
   const { default: ts } = await import('typescript');
   const source = await read('lib/server/approval-requests.ts');
   const file = ts.createSourceFile('approval-requests.ts', source, ts.ScriptTarget.Latest, true);
@@ -298,5 +299,5 @@ test('the message file spells its line breaks as \n: no template string in the m
     ts.forEachChild(node, visit);
   };
   visit(fn);
-  assert.deepEqual(spanning, [], 'every line break in the message is an explicit \n');
+  assert.deepEqual(spanning, [], 'every line break in the message is written out, none sits inside a template string');
 });

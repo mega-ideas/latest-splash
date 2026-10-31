@@ -137,18 +137,37 @@ What the link is:
   screen shows it above the passkey button and beside it ("If your WhatsApp message
   shows a different code, do not sign. Opening this page from a link signs nothing;
   only your passkey does."). The link does not replace the comparison.
-- **Fails closed.** In production a link is made only on https and never for a
-  local address; with no usable address the message goes without a link and says
+- **Fails closed.** In production a link is made only on https and a public name:
+  no IP address (loopback, private, link-local, shared and IPv4-mapped forms all
+  fall to this), no name without a dot, no `.localhost`, `.local`, `.internal`,
+  `.lan` or `.home.arpa` name; a trailing dot on a real name is cut. An unset or
+  unknown `NODE_ENV` is production: only `development` and `test` may use http or a
+  local address. With no usable address the message goes without a link and says
   "Open Splash, check the details and the transaction code ..." as before. A
   plain-http link is never sent in production. The inbox in the app is the channel
-  that always works.
+  that always works. A configured canonical host (a link only on one named host) is
+  not built: the guard refuses what cannot be right and trusts the rest of
+  `NEXT_PUBLIC_APP_URL`.
+- **Typed text cannot add an address.** The business name and an account holder's
+  name are typed by people and sit beside the official link. Each goes through
+  `plainText` (`lib/approve/plain-text.ts`) before it is worded: schemes, `www.`,
+  bare domains (with a path), IPv4 addresses and e-mail addresses are removed,
+  look-alike dots and invisible characters are read first, only letters, digits,
+  spaces and `. , & ' ( ) -` stay (so WhatsApp's formatting marks go too), and the
+  length is capped (business name 48, holder 60). The Approve link is the only
+  address in a message; a test puts addresses in every field and counts. Plain
+  words can still say something odd, which a cap limits but cannot remove. Any
+  channel added later must use `plainText` through `walletSignatureMessage`.
 - **Signed out.** The dashboard layout sends a signed-out visitor to
   `/login?next=<that one address>` and the password sign-in returns to it. The way
   back is an allowlist of one shape, `/dashboard/approve/<id>` exactly
   (`safeApproveReturn`): another site, another path, a query, a fragment, a doubled
   slash or a dot segment signs in to Home. The proxy sets the header the layout
   reads (`x-splash-return`) from the path alone and drops whatever the browser sent
-  under that name. zkLogin keeps landing on Home.
+  under that name; the layout's redirect is `loginRedirectFor`, tested from the
+  header to the target. zkLogin keeps landing on Home. There is no passkey sign-in
+  on the sign-in page (a passkey signs a transaction; it is not a way in), so the
+  password sign-in is the only one that returns to the link.
 
 **No approval, no draw.** A payment that needs the owners cannot execute without
 their recorded signatures, whatever is opened or replayed: tested at the service
@@ -217,7 +236,9 @@ signature is stored and nothing is submitted twice**; **a payment with a second
 payout added to its real bytes is blocked and named**; a bank payout's rate, a
 currency that is not a code and a rate of nothing are read from real bytes),
 `approve-link` (the link, its production fail-closed rule, the way back after
-sign-in, the message and the notifier, one place wording the message) and
+sign-in, the message and the notifier, one place wording the message),
+`approve-link-hardening` (typed text cannot add an address, the host guard, the
+signed-out redirect as behaviour, the message's lines) and
 `approve-link-service` (no approval, no draw, cross-tenant, replay),
 `phone-transfer` (the order of the questions, what each needs, the shared
 bank form, **no second intent id**, the pilot corridor, owner-only questions),
