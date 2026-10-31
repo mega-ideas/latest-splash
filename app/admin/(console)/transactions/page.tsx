@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react';
+
 import { suiScanTxUrl, suiVisionTxUrl } from '@/lib/explorer';
 import { listTransactions } from '@/lib/server/operations';
 import { listTransfersForStaff } from '@/lib/server/transfers-store';
@@ -37,8 +39,8 @@ export default async function AdminTransactionsPage() {
       </header>
 
       <section className="grid gap-5 md:grid-cols-3">
-        <MonitorCard icon={Circle} label="Peg Status" value={`${zone === 'green' ? '🟢' : zone === 'yellow' ? '🟡' : '🔴'} ${zone[0].toUpperCase()}${zone.slice(1)}`} detail={pegDetail} />
-        <MonitorCard icon={Activity} label="24h Volume" value={`RM ${volume.toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} detail={`${transfers.length} transfer intents`} />
+        <MonitorCard icon={Circle} label="Peg status" value={<PegValue zone={zone} />} detail={pegDetail} />
+        <MonitorCard icon={Activity} label="Transfer volume" value={`${volume.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDC`} detail={`${transfers.length} transfer intents`} />
         <MonitorCard icon={ReceiptText} label="Splash fees" value={`${formatUsdc(splashFeesMinor)} USDC`} detail={`Charged on ${charged.length} of ${transfers.length} transfer intents, from their records`} />
       </section>
 
@@ -234,7 +236,20 @@ export default async function AdminTransactionsPage() {
   );
 }
 
-function MonitorCard({ icon: Icon, label, value, detail }: { icon: typeof Circle; label: string; value: string; detail: string }) {
+const PEG_WORDS = { green: 'Within range', yellow: 'Drifting', red: 'Outside range' } as const;
+const PEG_SWATCH = { green: 'bg-[#237284]', yellow: 'bg-[var(--gold-ink)]', red: 'bg-[#8a1f1f]' } as const;
+
+/** The peg reading in words first; the swatch only repeats it. */
+function PegValue({ zone }: { zone: keyof typeof PEG_WORDS }) {
+  return (
+    <span className="flex items-center gap-3">
+      <span aria-hidden="true" className={`h-3.5 w-3.5 shrink-0 rounded-full ${PEG_SWATCH[zone]}`} />
+      {PEG_WORDS[zone]}
+    </span>
+  );
+}
+
+function MonitorCard({ icon: Icon, label, value, detail }: { icon: typeof Circle; label: string; value: ReactNode; detail: string }) {
   return (
     <div className="dash-block p-6">
       <Icon className="h-5 w-5 text-[#237284]" />
