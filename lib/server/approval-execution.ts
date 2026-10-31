@@ -27,8 +27,8 @@
  *
  * An approval says "this payment is authorised", not "skip the checks". It
  * removes the requirement for a second approver, because that is precisely
- * what it supplied, and the maker's second factor, which was spent proposing
- * the payment and cannot be presented again (lib/server/batch-approval.ts).
+ * what it supplied. (A payout-run approval is no longer replayed at all: the
+ * v1 custody batch route is removed, see BATCH_PAYOUT_RETIRED_REASON.)
  */
 import 'server-only';
 
@@ -59,6 +59,14 @@ export const APPROVAL_NOT_SAVED = {
   state: 'FAILED',
   detail: 'The approval could not be saved, so the payment was not sent and nothing moved.',
 } as const satisfies ExecutionOutcome;
+
+/**
+ * What an approval of an old payout-run proposal records. Said in the outcome
+ * itself, so the queue and Zeke show it rather than a made-up success.
+ */
+export const BATCH_PAYOUT_RETIRED_REASON =
+  'Approved and recorded, not executed. Payout runs are no longer carried out from an approval: ' +
+  'use Batch payouts, which pays from your business wallet once its owners sign. Nothing was sent.';
 
 /**
  * Carry out the payment an approved proposal describes.
@@ -120,7 +128,12 @@ async function carryOut(
       case 'PAYMENT':
         return await executeTransfer(proposal, payload, context);
       case 'BATCH_PAYOUT':
-        return await executeBatch(proposal, payload, context);
+        // v2 Phase 3: the v1 custody payout run (a shared SettlementPool, a
+        // typed code) is removed. Batch payouts are paid from the business's
+        // own wallet and signed by its owners (/dashboard/batch), never
+        // carried out from an approval here, so an old approval is recorded
+        // and moves nothing.
+        return { state: 'SKIPPED', detail: BATCH_PAYOUT_RETIRED_REASON };
       case 'X402_PAYMENT':
         // There is no path that settles x402, so the default's "settles
         // through their own path" would be a lie. Recorded, named, not paid.
@@ -177,22 +190,5 @@ async function executeTransfer(
   });
   return result.ok
     ? { state: 'EXECUTED', detail: 'Payment sent.', ref: result.ref }
-    : { state: 'FAILED', detail: result.error };
-}
-
-async function executeBatch(
-  proposal: UnsignedProposal,
-  payload: Record<string, unknown>,
-  context: ExecutionContext,
-): Promise<ExecutionOutcome> {
-  const { authorizeBatchForApproval } = await import('./approval-replay.ts');
-  const result = await authorizeBatchForApproval({
-    orgId: proposal.orgId,
-    approvedProposalId: proposal.id,
-    body: payload,
-    ...context,
-  });
-  return result.ok
-    ? { state: 'EXECUTED', detail: 'Payout run started.', ref: result.ref }
     : { state: 'FAILED', detail: result.error };
 }

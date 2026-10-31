@@ -647,19 +647,19 @@ test('hydration is per store: a second store is not taken as hydrated because th
 
 // ── Carrying approvals out ──────────────────────────────────────────────────
 
-test('an idempotent replay of an earlier run is not reported as this approval carried out', async () => {
+test('an idempotent replay of an earlier payment is not reported as this approval carried out', async () => {
   globalThis.oxwalProposalStore = new InMemoryProposalStore();
   const replay = (body) => replayThroughRoute(
     async () => Response.json(body),
-    '/api/batches/authorize',
+    '/api/transfers/authorize',
     { orgId: 'acme', approvedProposalId: 'prop_repeat', body: {}, cookie: '', origin: 'http://splash.test' },
   );
 
-  const swallowed = await replay({ id: 'batch_last_month', idempotentReplay: true });
+  const swallowed = await replay({ id: 'transfer_last_month', idempotentReplay: true });
   assert.equal(swallowed.ok, false);
-  assert.match(swallowed.error, /already been carried out as batch_last_month; nothing new was paid/);
+  assert.match(swallowed.error, /already been carried out as transfer_last_month; nothing new was paid/);
 
-  assert.deepEqual(await replay({ id: 'batch_new', state: 'QUEUED' }), { ok: true, ref: 'batch_new' });
+  assert.deepEqual(await replay({ id: 'transfer_new', state: 'QUEUED' }), { ok: true, ref: 'transfer_new' });
 });
 
 test('a late ballot on a lapsed payment is answered as closed, without reading a ballot or moving anything', async () => {

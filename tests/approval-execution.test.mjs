@@ -84,10 +84,9 @@ test('the settings route requires an admin, resolved from the database', async (
   assert.match(route, /assertCleanBody\(body, 'settings'\)/);
 });
 
-test('both money routes read their own org’s dials', async () => {
+test('the money route reads its own org’s dials', async () => {
   for (const file of [
     '../app/api/transfers/authorize/route.ts',
-    '../app/api/batches/authorize/route.ts',
   ]) {
     const route = await readFile(new URL(file, import.meta.url), 'utf8');
     assert.match(route, /await readOrgSettings\(orgId\)/, `${file} must scope settings by org`);
@@ -166,7 +165,6 @@ test('an approved-proposal header is a claim the route resolves', async () => {
 
   for (const file of [
     '../app/api/transfers/authorize/route.ts',
-    '../app/api/batches/authorize/route.ts',
   ]) {
     const route = await readFile(new URL(file, import.meta.url), 'utf8');
     assert.match(route, /resolveApprovalClaim\(request, orgId, \{/);
@@ -183,7 +181,9 @@ test('execution replays the real route so every guard runs again', async () => {
   // in six months would silently not apply to approved payments, which are the
   // largest ones, because being large is what sent them for approval.
   assert.match(replay, /await import\('@\/app\/api\/transfers\/authorize\/route'\)/);
-  assert.match(replay, /await import\('@\/app\/api\/batches\/authorize\/route'\)/);
+  // The v1 custody payout-run route is removed; an old batch approval is
+  // recorded, never replayed.
+  assert.doesNotMatch(replay, /app\/api\/batches/);
   // The custodial treasury ledger is retired (v2 D9): nothing replays into it.
   assert.doesNotMatch(replay, /app\/api\/treasury\/route/);
   // The approver's own cookie, so the replay resolves a real session.
@@ -258,11 +258,11 @@ test('an approval is spent by its attempt, even one no route saw', async () => {
   assert.equal(store.get(treasury.id).approvalConsumedBy, 'execution');
   assert.equal((await presented(treasury, treasuryMoveSubstance, move)).reason, 'already used');
 
-  // A replay that fails before its route runs spends nothing inside the
-  // route. (Outside Next, the route module cannot even load.)
+  // An old payout-run approval has no route to replay into: recorded
+  // SKIPPED, and spent by the attempt like any other.
   const payload = { rows: [{ name: 'Maria Santos', address: `0x${'a'.repeat(64)}`, amount: '12500.00' }], targetCurrency: 'PHP' };
   const batch = submitted('BATCH_PAYOUT', payload);
   const failed = await executeApprovedProposal(batch, payload, context);
-  assert.equal(failed.state, 'FAILED');
+  assert.equal(failed.state, 'SKIPPED');
   assert.equal((await presented(batch, batchPayoutSubstance, payload)).reason, 'already used');
 });

@@ -21,8 +21,7 @@
  * screening, and the daily ceiling can be consumed by other payments. An
  * approval says "this payment is authorised". It does not say "skip the
  * checks". It removes the second-approver requirement, because that is
- * exactly what it supplied, and on the batch route the maker's
- * second factor, which was single-use and spent making the proposal.
+ * exactly what it supplied.
  *
  * ─── The header is a claim, not a credential ────────────────────────────────
  *
@@ -94,11 +93,10 @@ export async function replayThroughRoute(
     return { ok: false, error: detail };
   }
 
-  // The route answered with a run it had ALREADY carried out: this approval
-  // paid nothing. Counted as a success, it read "Payout run started" and nobody
-  // was paid. An approved run is claimed under its own approval's key
-  // (lib/server/batch-approval.ts), so this means that approval had already
-  // released one; whatever the cause, nothing new was paid.
+  // The route answered with a payment it had ALREADY carried out (the removed
+  // v1 payout-run route did this when a key was reused): this approval paid
+  // nothing. Counted as a success, it read as started and nobody was paid.
+  // Kept for any route that answers an idempotent replay with a 200.
   if (parsed.idempotentReplay === true) {
     const earlier = typeof parsed.id === 'string' ? ` as ${parsed.id}` : '';
     return { ok: false, error: `This run had already been carried out${earlier}; nothing new was paid for this approval.` };
@@ -114,9 +112,4 @@ export async function replayThroughRoute(
 export async function authorizeTransferForApproval(input: ReplayInput): Promise<ReplayResult> {
   const { POST } = await import('@/app/api/transfers/authorize/route');
   return replayThroughRoute(POST, '/api/transfers/authorize', input);
-}
-
-export async function authorizeBatchForApproval(input: ReplayInput): Promise<ReplayResult> {
-  const { POST } = await import('@/app/api/batches/authorize/route');
-  return replayThroughRoute(POST, '/api/batches/authorize', input);
 }
