@@ -222,7 +222,7 @@ test('a load that has no address yet is loading, not a finished empty answer', (
   const parts = code(read('components/wallet/parts.tsx'));
   assert.match(parts, /loadView\(/);
   const team = code(read('components/settings/TeamCard.tsx'));
-  assert.match(team, /!team\.data && !team\.error|team\.data === null && team\.error === null/);
+  assert.match(team, /!people\.data && !people\.error|!team\.data && !team\.error|team\.data === null && team\.error === null/);
 });
 
 test('changing a rule starts from the end date it has now', () => {

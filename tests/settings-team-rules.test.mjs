@@ -279,7 +279,11 @@ test('only an owner is offered a change, and no one is offered what the server w
     assert.match(text, /owner/, `${file} knows who is an owner`);
   }
   assert.match(code(read('components/settings/RulesSection.tsx')), /owner \?/);
-  assert.match(read('components/settings/TeamCard.tsx'), /ask Splash support/i, 'a role is changed by Splash support; the page says so');
+  // Sky, 31 Oct: the owners run the team here. The card offers each person only what rowControls says the server accepts from the signed-in manager.
+  const team = read('components/settings/TeamCard.tsx');
+  assert.match(code(team), /rowControls\(/, 'what is offered comes from the one function that mirrors the server');
+  assert.match(code(team), /manager/, 'who manages the team decides what is offered');
+  assert.doesNotMatch(team, /ask Splash support/i, 'a role is no longer a Splash support request');
 });
 
 test('every call is to the signed-in person’s own business, and none names a business, a wallet or an address of the page’s own choosing', () => {
@@ -288,7 +292,7 @@ test('every call is to the signed-in person’s own business, and none names a b
   // A load that waits for the wallet is `useLoad(manage ? '/api/...' : null, ...)`: those addresses are read too.
   urls.push(...[...joined.matchAll(/\?\s*['"`](\/api\/[^'"`]+)['"`]\s*:\s*null/g)].map((m) => m[1]));
   assert.ok(urls.length >= 10, `found ${urls.length}`);
-  for (const url of urls) assert.match(url, /^\/api\/(wallet|settings|approvals|billing)\b|^\/api\/recipients$/, url);
+  for (const url of urls) assert.match(url, /^\/api\/(wallet|settings|approvals|billing|team)\b|^\/api\/recipients$/, url);
   assert.doesNotMatch(joined, /orgId|accountId|businessWallet|\?(org|orgId|account|wallet)=/);
 });
 
