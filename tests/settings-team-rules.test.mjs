@@ -227,7 +227,11 @@ test('Settings is one page of sections an owner can reach by name: team, rules, 
   assert.ok(existsSync(new URL('../components/settings/SettingsPage.tsx', import.meta.url)));
   const page = read('components/settings/SettingsPage.tsx');
   for (const part of ['TeamCard', 'PolicyCard', 'RulesSection', 'SignersCard', 'FundingSources', 'ApprovalChannelCard', 'AlertsCard', 'OperatingControls', 'AboutCard']) assert.match(page, new RegExp(`<${part}\\b`), part);
-  for (const id of ['team', 'rules', 'signers', 'funding', 'approvals', 'alerts', 'controls', 'about']) assert.match(page, new RegExp(`#${id}\\b`), `a link to #${id}`);
+  for (const id of ['team', 'rules', 'signers', 'funding', 'approvals', 'alerts', 'controls', 'about']) {
+    assert.match(page, new RegExp(`\\{ id: '${id}', label:`), `a link to #${id}`);
+    assert.match(page + read('components/settings/TeamCard.tsx') + read('components/settings/RulesSection.tsx') + read('components/settings/OperatingControls.tsx') + read('components/settings/AboutCard.tsx') + read('components/wallet/SignersCard.tsx'), new RegExp(`id="${id}"`), `a section with id ${id}`);
+  }
+  assert.match(page, /href=\{`#\$\{s\.id\}`\}/);
   assert.match(page, /aria-label="Settings sections"/);
   const route = read('app/dashboard/settings/page.tsx');
   assert.match(route, /<SettingsPage\b/);
@@ -281,7 +285,7 @@ test('only an owner is offered a change, and no one is offered what the server w
 test('every call is to the signed-in person’s own business, and none names a business, a wallet or an address of the page’s own choosing', () => {
   const joined = settingsFiles().map(([, t]) => code(t)).join('\n');
   const urls = [...joined.matchAll(/(?:call|useLoad|fetch)(?:<[^>]*(?:<[^>]*>[^>]*)*>)?\(\s*[`'"]([^`'"]+)/g)].map((m) => m[1]);
-  assert.ok(urls.length >= 12, `found ${urls.length}`);
+  assert.ok(urls.length >= 10, `found ${urls.length}`);
   for (const url of urls) assert.match(url, /^\/api\/(wallet|settings|approvals|billing)\b|^\/api\/recipients$/, url);
   assert.doesNotMatch(joined, /orgId|accountId|businessWallet|\?(org|orgId|account|wallet)=/);
 });

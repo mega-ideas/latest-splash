@@ -144,7 +144,7 @@ export async function readOnboardingStateForOrg(d: Db, orgId: string): Promise<O
           ? 'Approval threshold is set. Add a second approver any time.'
           : 'Confirm the approval threshold, and who signs above it.',
       done: settingsRows.length > 0,
-      href: '/dashboard/settings',
+      href: '/dashboard/settings#controls',
     },
     {
       id: 'recipient',

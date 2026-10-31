@@ -6,20 +6,24 @@ import { useRouter } from 'next/navigation';
 import { ArrowRight, Check, Clock3 } from 'lucide-react';
 
 import type { OnboardingState } from '@/lib/server/onboarding';
+import { setupSummary } from '@/lib/setup-page/view';
 
 /**
- * Account setup, the Stablecorp grammar on Splash's machine: a horizontal
- * rail — checkmark for done, number for pending — and a card per step. Every
- * status here is DERIVED server-side from real records (see
- * lib/server/onboarding.ts); this component only renders it and posts the two
- * actions that are its own (terms, profile). KYB and approvals link to the
- * surfaces that already own them.
+ * Account setup: a progress meter that says where the person is and what is
+ * next, a rail of the steps (a checkmark for done, a clock for waiting on
+ * someone else, a number for to do) and a card per step. Every status is
+ * DERIVED server-side from real records (lib/server/onboarding.ts); this only
+ * renders it and posts the two actions that are its own (terms, profile). KYB
+ * and approvals link to the surfaces that already own them. Once the four
+ * required steps are done it points to what comes next.
  */
 export default function SetupStepper({ state }: { state: OnboardingState }) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [profile, setProfile] = useState({ legalName: '', registrationNumber: '', addressCountry: '' });
+  const summary = setupSummary(state);
+  const percent = Math.round((summary.requiredDone / summary.requiredTotal) * 100);
 
   async function post(path: string, body?: unknown) {
     setBusy(path);
@@ -51,36 +55,87 @@ export default function SetupStepper({ state }: { state: OnboardingState }) {
 
   return (
     <div className="grid gap-6">
-      {/* The rail. */}
-      <ol className="dash-surface flex flex-wrap items-stretch gap-0 overflow-x-auto p-2" aria-label="Setup progress">
-        {state.steps.map((step, i) => (
-          <li
-            key={step.id}
-            className={`flex min-w-[150px] flex-1 items-center gap-3 border-b-2 px-4 py-3 ${
-              step.done ? 'border-[#2E7D6B]' : step.pending ? 'border-[#D9A441]' : 'border-transparent'
-            }`}
-            aria-current={!step.done && state.steps.slice(0, i).every((s) => s.done) ? 'step' : undefined}
+      {/* Where you are. */}
+      <section className="dash-surface p-5 sm:p-6" aria-labelledby="setup-progress-title">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div className="min-w-0">
+            <h2 id="setup-progress-title" className="text-lg font-extrabold text-[#0c3e48]">{summary.headline}</h2>
+            <p className="mt-1 max-w-xl text-sm leading-6 text-[#326273]">{summary.subline}</p>
+          </div>
+          <p className="font-mono text-sm font-bold tabular-nums text-[#0c3e48]">{summary.progress}</p>
+        </div>
+        <div
+          role="progressbar"
+          aria-label="Required setup steps done"
+          aria-valuemin={0}
+          aria-valuemax={summary.requiredTotal}
+          aria-valuenow={summary.requiredDone}
+          aria-valuetext={summary.progress}
+          className="mt-4 h-2.5 overflow-hidden rounded-full bg-[#F6F0ED]"
+        >
+          <div className="h-full rounded-full bg-[#2E7D6B]" style={{ width: `${percent}%` }} />
+        </div>
+        {!summary.complete ? <p className="mt-3 text-[13px] leading-5 text-[#326273]">{summary.unlocks}</p> : null}
+        {summary.next ? (
+          <Link
+            href={summary.next.href}
+            className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-xl bg-[#0d6370] px-5 text-sm font-bold text-white transition-colors hover:bg-[#073d49] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0d6370]"
           >
-            <span
-              className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[13px] font-bold ${
-                step.done
-                  ? 'bg-[#2E7D6B] text-white'
-                  : step.pending
-                    ? 'bg-[#D9A441]/20 text-[#1F4452]'
-                    : 'border border-[#C9BDB5] text-[#326273]'
+            Next: {summary.next.title}
+            <ArrowRight aria-hidden="true" className="h-4 w-4" />
+          </Link>
+        ) : null}
+      </section>
+
+      {summary.after.length > 0 ? (
+        <section className="dash-surface p-5 sm:p-6" aria-labelledby="setup-after-title">
+          <h2 id="setup-after-title" className="text-lg font-extrabold text-[#0c3e48]">What comes next</h2>
+          <ul className="mt-3 grid gap-3 sm:grid-cols-3">
+            {summary.after.map((a) => (
+              <li key={a.href}>
+                <Link href={a.href} className="flex h-full min-h-24 flex-col justify-between gap-2 rounded-xl border border-[#326273]/15 bg-white p-4 transition-colors hover:border-[#0d6370]/60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0d6370]">
+                  <span className="text-sm font-bold text-[#0c3e48]">{a.label}</span>
+                  <span className="text-[13px] leading-5 text-[#326273]">{a.detail}</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      {/* The rail. */}
+      <ol className="dash-surface flex flex-wrap items-stretch gap-0 overflow-x-auto p-2" aria-label="Setup steps">
+        {state.steps.map((step, i) => {
+          const isNext = summary.next?.id === step.id;
+          return (
+            <li
+              key={step.id}
+              className={`flex min-w-[150px] flex-1 items-center gap-3 border-b-2 px-4 py-3 ${
+                step.done ? 'border-[#2E7D6B]' : step.pending ? 'border-[#D9A441]' : isNext ? 'border-[#0d6370]' : 'border-transparent'
               }`}
-              aria-hidden="true"
+              aria-current={isNext ? 'step' : undefined}
             >
-              {step.done ? <Check className="h-4 w-4" /> : step.pending ? <Clock3 className="h-4 w-4" /> : i + 1}
-            </span>
-            <span className="min-w-0">
-              <strong className="block truncate text-[13.5px] font-semibold text-[#1F4452]">{step.title}</strong>
-              <small className="block truncate text-[12px] text-[#326273]/90">
-                {step.done ? 'Done' : step.pending ? 'In review' : 'To do'}
-              </small>
-            </span>
-          </li>
-        ))}
+              <span
+                className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[13px] font-bold ${
+                  step.done
+                    ? 'bg-[#2E7D6B] text-white'
+                    : step.pending
+                      ? 'bg-[#D9A441]/20 text-[#1F4452]'
+                      : 'border border-[#C9BDB5] text-[#326273]'
+                }`}
+                aria-hidden="true"
+              >
+                {step.done ? <Check className="h-4 w-4" /> : step.pending ? <Clock3 className="h-4 w-4" /> : i + 1}
+              </span>
+              <span className="min-w-0">
+                <strong className="block truncate text-[13.5px] font-semibold text-[#1F4452]">{step.title}</strong>
+                <small className="block truncate text-[12px] text-[#326273]">
+                  {step.done ? 'Done' : step.pending ? 'In review' : isNext ? 'Next' : 'To do'}
+                </small>
+              </span>
+            </li>
+          );
+        })}
       </ol>
 
       {error ? (
@@ -88,12 +143,12 @@ export default function SetupStepper({ state }: { state: OnboardingState }) {
       ) : null}
 
       {/* 1 · Terms */}
-      <section id="terms" className="dash-surface p-6">
+      <section id="terms" className={`dash-surface scroll-mt-24 p-6 ${summary.next?.id === 'terms' ? 'ring-2 ring-[#0d6370]/40' : ''}`}>
         <StepHeading n={1} title="Accept the terms" done={state.steps[0].done} />
         <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[#326273]">{state.steps[0].detail}</p>
         {state.steps[0].done ? null : (
           <div className="mt-4 flex flex-wrap items-center gap-3">
-            <Link href="/terms-of-service" className="text-sm font-semibold text-[#1F4452] underline underline-offset-4">
+            <Link href="/terms-of-service" className="inline-flex min-h-11 items-center text-sm font-semibold text-[#1F4452] underline underline-offset-4">
               Read the terms
             </Link>
             <button
@@ -109,7 +164,7 @@ export default function SetupStepper({ state }: { state: OnboardingState }) {
       </section>
 
       {/* 2 · Business profile */}
-      <section id="profile" className="dash-surface p-6">
+      <section id="profile" className={`dash-surface scroll-mt-24 p-6 ${summary.next?.id === 'profile' ? 'ring-2 ring-[#0d6370]/40' : ''}`}>
         <StepHeading n={2} title="Business profile" done={state.steps[1].done} />
         <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[#326273]">{state.steps[1].detail}</p>
         {state.steps[1].done ? null : (
@@ -125,6 +180,7 @@ export default function SetupStepper({ state }: { state: OnboardingState }) {
               <input
                 required
                 minLength={2}
+                autoComplete="organization"
                 value={profile.legalName}
                 onChange={(e) => setProfile((p) => ({ ...p, legalName: e.target.value }))}
                 className="min-h-[44px] rounded-lg border border-[#C9BDB5] bg-white px-3 text-sm font-normal text-[#1F4452]"
@@ -148,6 +204,7 @@ export default function SetupStepper({ state }: { state: OnboardingState }) {
                 minLength={2}
                 maxLength={2}
                 placeholder="MY"
+                autoComplete="country"
                 value={profile.addressCountry}
                 onChange={(e) => setProfile((p) => ({ ...p, addressCountry: e.target.value }))}
                 className="min-h-[44px] w-28 rounded-lg border border-[#C9BDB5] bg-white px-3 text-sm font-normal uppercase text-[#1F4452]"
@@ -164,9 +221,9 @@ export default function SetupStepper({ state }: { state: OnboardingState }) {
         )}
       </section>
 
-      {/* 3–5 · Owned elsewhere; this page shows the truth and points at the door. */}
+      {/* 3 to 5 · Owned elsewhere; this page shows the truth and points at the door. */}
       {state.steps.slice(2).map((step, i) => (
-        <section key={step.id} id={step.id} className="dash-surface p-6">
+        <section key={step.id} id={step.id} className={`dash-surface scroll-mt-24 p-6 ${summary.next?.id === step.id ? 'ring-2 ring-[#0d6370]/40' : ''}`}>
           <StepHeading n={i + 3} title={step.title} done={step.done} pending={step.pending} />
           <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[#326273]">{step.detail}</p>
           {step.done ? null : (
@@ -174,7 +231,7 @@ export default function SetupStepper({ state }: { state: OnboardingState }) {
               href={step.href}
               className="mt-4 inline-flex min-h-[44px] items-center gap-2 rounded-lg border border-[#1F4452] px-5 text-sm font-semibold text-[#1F4452] transition hover:bg-[#1F4452] hover:text-white"
             >
-              Open
+              {step.pending ? 'See where it stands' : 'Open'}
               <ArrowRight aria-hidden="true" className="h-4 w-4" />
             </Link>
           )}
@@ -186,7 +243,7 @@ export default function SetupStepper({ state }: { state: OnboardingState }) {
 
 function StepHeading({ n, title, done, pending }: { n: number; title: string; done: boolean; pending?: boolean }) {
   return (
-    <h2 className="flex items-center gap-3 text-lg font-bold text-[#1F4452]">
+    <h2 className="flex flex-wrap items-center gap-3 text-lg font-bold text-[#1F4452]">
       <span
         className={`flex h-7 w-7 items-center justify-center rounded-full text-[13px] ${
           done ? 'bg-[#2E7D6B] text-white' : pending ? 'bg-[#D9A441]/20 text-[#1F4452]' : 'border border-[#C9BDB5] text-[#326273]'

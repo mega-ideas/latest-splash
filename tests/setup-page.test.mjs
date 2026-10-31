@@ -81,7 +81,7 @@ test('the stepper shows progress as a meter with words, highlights the next step
   const s = code(read('components/onboarding/SetupStepper.tsx'));
   assert.match(s, /setupSummary\(state\)/);
   assert.match(s, /role="progressbar"/);
-  assert.match(s, /aria-current="step"/);
+  assert.match(s, /aria-current=\{isNext \? 'step' : undefined\}/);
   assert.match(s, /summary\.after/);
   assert.match(s, /href=\{step\.href\}/);
   // The two actions that are Setup's own are unchanged.

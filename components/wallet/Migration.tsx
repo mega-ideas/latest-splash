@@ -142,7 +142,8 @@ export default function Migration({ onChanged }: { onChanged: () => void }) {
 }
 
 /** An owner appoints or revokes the person in charge: the other person who may sign off a staff member's move. */
-function PersonInCharge() {
+/** The person in charge: an owner appoints and takes back. Shown here (Move to your business wallet) and in Settings → Team. */
+export function PersonInCharge() {
   const data = useLoad<InCharge>('/api/wallet/persons-in-charge', 'The people in charge could not be loaded.');
   const [pick, setPick] = useState('');
   const [busy, setBusy] = useState(false);
