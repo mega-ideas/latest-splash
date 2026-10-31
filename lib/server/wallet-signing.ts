@@ -76,6 +76,7 @@ import {
   recordDecline,
   recordPartialSignature,
   sponsoredBudgetSince,
+  DECLINED_BY_SIGNERS,
   type DrizzleDb,
   type SigningPurpose,
   type StoredRequest,
@@ -979,7 +980,7 @@ export async function declineSigningRequest(
       status: 'cancelled',
       from: ['collecting'],
       now,
-      error: 'enough signers declined that it can no longer be signed',
+      error: DECLINED_BY_SIGNERS,
     });
     return { ok: true, closed };
   }

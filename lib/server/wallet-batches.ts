@@ -60,6 +60,7 @@ import { parseAmountMinor, U64_MAX } from '../transfer/plan.ts';
 import { validClientKey } from '../funding/wallet-funding.ts';
 import { recipientPayable, requestWalletBatch, type WalletMembers } from './business-wallet.ts';
 import { readRequestForSigner, type RequestView } from './wallet-signing.ts';
+import { endedByPeople } from './wallet-signing-store.ts';
 import { resolvePayee, isUniqueViolation, maskAddress, TRANSFER_INTENT_LIFETIME_MS, TRANSFER_SETTLE_WINDOW_MS, type PayeeInput, type TransferDeps } from './wallet-transfers.ts';
 
 /** A batch to run later under a rule (splash_spend, the operator named as executor by an owner) is not built on this server yet. */
@@ -113,7 +114,7 @@ export type BatchReview = {
   ready: boolean;
 };
 
-export type BatchStatus = 'prepared' | 'awaiting_signatures' | 'on_the_way' | 'settled' | 'failed' | 'expired';
+export type BatchStatus = 'prepared' | 'awaiting_signatures' | 'on_the_way' | 'settled' | 'failed' | 'expired' | 'declined' | 'withdrawn';
 
 export type BatchView = {
   id: string;
@@ -200,7 +201,7 @@ async function earlierBatches(deps: BatchDeps): Promise<Earlier> {
   for (const b of batches) {
     const linked = await withLink(deps, b);
     const status = await requestStatusOf(deps, linked);
-    if (status === 'failed' || status === 'expired') continue;
+    if (status === 'failed' || status === 'expired' || status === 'declined' || status === 'withdrawn') continue;
     live.push(b.id);
     if (status === 'awaiting_signatures' || status === 'on_the_way') held += b.totalAmountMinor + b.totalMaxFeeMinor;
   }
@@ -353,13 +354,15 @@ async function withLink(deps: Pick<BatchDeps, 'db'>, row: BatchRow): Promise<Bat
 
 async function requestStatusOf(deps: BatchDeps, row: BatchRow): Promise<BatchStatus> {
   if (!row.signingRequestId) return 'prepared';
-  const [r] = await deps.db.select({ status: walletSigningRequests.status }).from(walletSigningRequests).where(and(eq(walletSigningRequests.orgId, row.orgId), eq(walletSigningRequests.id, row.signingRequestId))).limit(1);
+  const [r] = await deps.db.select({ status: walletSigningRequests.status, error: walletSigningRequests.error }).from(walletSigningRequests).where(and(eq(walletSigningRequests.orgId, row.orgId), eq(walletSigningRequests.id, row.signingRequestId))).limit(1);
   switch (r?.status) {
     case 'collecting': return 'awaiting_signatures';
     case 'submitting':
     case 'unknown': return 'on_the_way';
     case 'executed': return 'settled';
     case 'expired': return 'expired';
+    // The sender took the batch back, or the owners declined it: a person's own no, never a failure.
+    case 'cancelled': return endedByPeople(r.error);
     default: return 'failed';
   }
 }

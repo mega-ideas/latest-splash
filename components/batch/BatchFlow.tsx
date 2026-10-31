@@ -27,6 +27,8 @@ const STATUS_WORDS: Record<BatchView['status'], string> = {
   settled: 'Paid',
   failed: 'Did not go through',
   expired: 'Expired',
+  declined: 'Declined by the owners',
+  withdrawn: 'Withdrawn',
 };
 
 const usdc = (minor: string) => `${formatUsdc(BigInt(minor))} USDC`;
@@ -334,7 +336,7 @@ function RecentBatches({ batches, onOpen }: { batches: BatchView[]; onOpen: (b: 
                 <span className="block text-sm font-bold text-[#0c3e48]">{b.rowCount} {b.rowCount === 1 ? 'payment' : 'payments'} · {usdc(b.totalMinor)}</span>
                 <span className="block text-[13px] text-[#326273]"><LocalTime value={b.createdAt} format="date" /></span>
               </span>
-              <span className={`rounded-full border px-3 py-1 text-[13px] font-semibold ${b.status === 'settled' ? 'border-[var(--ok)] bg-[var(--ok-bg)] text-[#1F4452]' : b.status === 'failed' || b.status === 'expired' ? 'border-[var(--error)] bg-[var(--error-bg)] text-[var(--error)]' : 'border-[var(--warn)] bg-[var(--warn-bg)] text-[var(--warn-ink)]'}`}>{STATUS_WORDS[b.status]}</span>
+              <span className={`rounded-full border px-3 py-1 text-[13px] font-semibold ${b.status === 'settled' ? 'border-[var(--ok)] bg-[var(--ok-bg)] text-[#1F4452]' : b.status === 'failed' || b.status === 'expired' || b.status === 'declined' || b.status === 'withdrawn' ? 'border-[var(--error)] bg-[var(--error-bg)] text-[var(--error)]' : 'border-[var(--warn)] bg-[var(--warn-bg)] text-[var(--warn-ink)]'}`}>{STATUS_WORDS[b.status]}</span>
             </button>
           </li>
         ))}

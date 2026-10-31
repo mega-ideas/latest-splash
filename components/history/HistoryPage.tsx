@@ -62,7 +62,8 @@ export default function HistoryPage() {
     });
     loaded.current = merged.lists;
     setLists(merged.lists);
-    setFailed(failureNote(merged.failed, previous !== null));
+    // With no list at all the error below says so; a sentence about the last time it loaded would be false.
+    setFailed(merged.lists === null ? '' : failureNote(merged.failed, merged.missing));
     setProblem(merged.lists === null ? errorText(t, 'Your history could not be loaded.') : null);
   }, []);
 
@@ -77,15 +78,15 @@ export default function HistoryPage() {
   const visible = useMemo(() => filterHistory(entries, { group, query }), [entries, group, query]);
   const counts = useMemo(() => ({ all: entries.length, paid: entries.filter((e) => e.group === 'paid').length, in_progress: summary.inProgress, failed: summary.failed, not_paid: summary.notPaid }), [entries, summary]);
 
-  // Something is on its way: ask again every so often, but never from a hidden tab.
-  const inProgress = summary.inProgress;
+  // Something can still change by itself (on its way, or a failed withdrawal whose USDC is coming back): ask again every so often, but never from a hidden tab.
+  const moving = useMemo(() => entries.some((e) => e.mayChange), [entries]);
   useEffect(() => {
-    if (!(inProgress > 0)) return;
+    if (!moving) return;
     const timer = window.setInterval(() => {
       if (document.visibilityState === 'visible') void load();
     }, REFRESH_MS);
     return () => window.clearInterval(timer);
-  }, [inProgress, load]);
+  }, [moving, load]);
 
   function exportCsv() {
     const blob = new Blob([historyCsv(entries)], { type: 'text/csv;charset=utf-8' });
@@ -169,12 +170,9 @@ export default function HistoryPage() {
       </div>
 
       {lists?.restricted ? <Note>Only an owner or a staff member can see the business&rsquo;s payments and batches. You can see its withdrawals, but not open their receipts.</Note> : null}
-      {failed ? (
-        <div role="status" className="space-y-3">
-          <Note tone="warn">{failed}</Note>
-          <QuietButton type="button" onClick={() => void load()} disabled={refreshing}><RefreshCw className="h-4 w-4" aria-hidden="true" />Try again</QuietButton>
-        </div>
-      ) : null}
+      {/* A live region is read out when its content changes, so it stays on the page and only its sentence comes and goes. */}
+      <div role="status" className="empty:mb-0">{failed ? <Note tone="warn">{failed}</Note> : null}</div>
+      {failed ? <QuietButton type="button" onClick={() => void load()} disabled={refreshing}><RefreshCw className="h-4 w-4" aria-hidden="true" />Try again</QuietButton> : null}
 
       {problem ? (
         <div className="space-y-3">

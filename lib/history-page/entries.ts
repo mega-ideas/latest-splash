@@ -42,6 +42,8 @@ export type HistoryEntry = {
   noReceipt: string | null;
   /** For a failed row only: what happened and what to do next, in plain words. */
   explain: Explain | null;
+  /** True while the row can still change by itself (in progress, or failed with a return on its way), so the page keeps asking. */
+  mayChange: boolean;
 };
 
 export type Explain = { why: string; next: string };
@@ -67,6 +69,8 @@ const BATCH: Record<string, { label: string; tone: Tone; group: Group }> = {
   prepared: { label: 'Waiting for an owner to start the signatures', tone: 'wait', group: 'in_progress' },
   failed: { label: 'Did not go through', tone: 'bad', group: 'failed' },
   expired: { label: 'Expired before it was signed', tone: 'bad', group: 'not_paid' },
+  declined: { label: 'Declined by the owners', tone: 'bad', group: 'not_paid' },
+  withdrawn: { label: 'Withdrawn', tone: 'bad', group: 'not_paid' },
 };
 
 const WITHDRAWAL: Record<string, { label: string; tone: Tone; group: Group }> = {
@@ -102,8 +106,8 @@ const EXPLAIN = {
     next: 'Check your balance and the rows in the batch, then prepare the batch again.',
   },
   withdrawalFailed: {
-    why: 'The bank payout did not go through. We have asked for the USDC to be sent back to your wallet.',
-    next: 'Wait for the USDC to show in your wallet, then check the bank details and start the withdrawal again.',
+    why: 'The bank payout did not go through, so the USDC did not reach your bank. It comes back to your wallet.',
+    next: 'Wait until this row reads Returned to your wallet, then check the bank details and start the withdrawal again. If it does not change, contact support.',
   },
   withdrawalReturned: {
     why: 'The bank payout did not go through, and the USDC is back in your wallet.',
@@ -140,6 +144,7 @@ function transferEntry(t: TransferRow): HistoryEntry {
     href: receipt ? `/dashboard/history/${path(t.paymentRef)}` : null,
     noReceipt: receipt ? null : missingReceipt(s.group),
     explain: s.group === 'failed' ? { ...EXPLAIN.payment } : null,
+    mayChange: s.group === 'in_progress',
   };
 }
 
@@ -160,6 +165,7 @@ function batchEntry(b: BatchRow): HistoryEntry {
     href: receipt ? `/dashboard/history/batch/${path(b.id)}` : null,
     noReceipt: receipt ? null : missingReceipt(s.group),
     explain: s.group === 'failed' ? { ...EXPLAIN.batch } : null,
+    mayChange: s.group === 'in_progress',
   };
 }
 
@@ -182,6 +188,8 @@ function withdrawalEntry(w: WithdrawalRow, restricted: boolean): HistoryEntry {
     href: receipt ? `/dashboard/history/${path(w.id)}` : null,
     noReceipt: receipt ? null : sent ? 'Only an owner or a staff member can open a withdrawal’s receipt.' : missingReceipt(s.group),
     explain: s.group !== 'failed' ? null : w.status === 'returned' ? { ...EXPLAIN.withdrawalReturned } : { ...EXPLAIN.withdrawalFailed },
+    // A failed withdrawal becomes Returned once the USDC is back, so it is still worth asking about.
+    mayChange: s.group === 'in_progress' || w.status === 'failed',
   };
 }
 
@@ -207,6 +215,8 @@ function earlierEntry(e: EarlierRow): HistoryEntry {
     href: `/dashboard/audit/${path(e.id)}`,
     noReceipt: null,
     explain,
+    // A refund in progress ends as Refunded.
+    mayChange: group === 'in_progress' || e.state === 'REFUNDING',
   };
 }
 
@@ -215,27 +225,48 @@ export function buildHistory(input: { transfers: TransferRow[]; batches: BatchRo
   return [...input.transfers.map(transferEntry), ...input.batches.map(batchEntry), ...input.withdrawals.map((w) => withdrawalEntry(w, restricted)), ...input.earlier.map(earlierEntry)].sort((a, b) => b.date.localeCompare(a.date));
 }
 
-export type Lists = { transfers: TransferRow[]; batches: BatchRow[]; withdrawals: WithdrawalRow[]; earlier: EarlierRow[]; restricted: boolean };
+export type Source = 'payments' | 'batches' | 'withdrawals' | 'earlier';
+export type Lists = {
+  transfers: TransferRow[];
+  batches: BatchRow[];
+  withdrawals: WithdrawalRow[];
+  earlier: EarlierRow[];
+  restricted: boolean;
+  /** The lists that have answered at least once (a viewer's 403 is an answer). Absent on lists built by hand: every list is then taken to have answered. */
+  held?: Source[];
+};
 type Answer<T> = { ok: boolean; status: number; items: T[] };
-type Source = 'payments' | 'batches' | 'withdrawals' | 'earlier';
 
 /**
  * What the four lists answered, folded into what the page shows. A list that
  * did not answer keeps what it held before (so a payment on its way does not
  * vanish from a refresh that failed) and is named, so the page never presents
- * a shorter list as complete. A viewer's 403 is not a failure: it is the
- * business's rule about what they may see. With nothing loaded before and
- * every list failing there is no list at all, and the page says so.
+ * a shorter list as complete. `missing` names the failed lists that have never
+ * answered: nothing was kept for them, so the counts leave them out. A viewer's
+ * 403 is not a failure: it is the business's rule about what they may see.
+ * With nothing loaded before and every list failing there is no list at all,
+ * and the page says so.
  */
 export function mergeLists(
   previous: Lists | null,
   answers: { transfers: Answer<TransferRow>; batches: Answer<BatchRow>; withdrawals: Answer<WithdrawalRow>; earlier: Answer<EarlierRow> },
-): { lists: Lists | null; failed: Source[] } {
+): { lists: Lists | null; failed: Source[]; missing: Source[] } {
   const failed: Source[] = [];
+  const missing: Source[] = [];
+  const held = new Set<Source>();
+  const heldBefore = (source: Source) => previous !== null && (previous.held === undefined || previous.held.includes(source));
   const pick = <T>(source: Source, answer: Answer<T>, before: T[] | undefined): T[] => {
-    if (answer.ok) return answer.items;
-    if (answer.status === 403) return [];
+    if (answer.ok) {
+      held.add(source);
+      return answer.items;
+    }
+    if (answer.status === 403) {
+      held.add(source);
+      return [];
+    }
     failed.push(source);
+    if (heldBefore(source)) held.add(source);
+    else missing.push(source);
     return before ?? [];
   };
   const restricted = answers.transfers.status === 403 || answers.batches.status === 403;
@@ -245,29 +276,37 @@ export function mergeLists(
     withdrawals: pick('withdrawals', answers.withdrawals, previous?.withdrawals),
     earlier: pick('earlier', answers.earlier, previous?.earlier),
     restricted: restricted || (previous?.restricted === true && [answers.transfers, answers.batches].some((a) => !a.ok && a.status !== 403)),
+    held: [...held],
   };
-  if (failed.length === 4 && previous === null) return { lists: null, failed };
-  if (failed.length === 4 && previous) return { lists: previous, failed };
-  return { lists, failed };
+  if (failed.length === 4 && previous === null) return { lists: null, failed, missing };
+  if (failed.length === 4 && previous) return { lists: previous, failed, missing };
+  return { lists, failed, missing };
 }
 
 const SOURCE_WORDS: Record<Source, string> = { payments: 'Payments', batches: 'Batches', withdrawals: 'Withdrawals', earlier: 'Earlier transfers' };
 
+const named = (sources: Source[]): string => {
+  const names = sources.map((f) => SOURCE_WORDS[f].toLowerCase());
+  const joined = names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+  return `${joined.charAt(0).toUpperCase()}${joined.slice(1)}`;
+};
+
 /**
  * The sentence above the list when a list did not answer. The counts and the
- * list are never quietly shorter: with something loaded before, the sentence
- * says they are the last ones loaded; on a first load that only partly
- * answered, it says what is missing from them.
+ * list are never quietly shorter. A list that answered before is said to be
+ * the last one loaded; a list that never answered is said to be missing from
+ * the counts, so the page never tells the person a count is complete when a
+ * whole list is absent from it.
  */
-export function failureNote(failed: Source[], hadLoadedBefore: boolean): string {
+export function failureNote(failed: Source[], missing: Source[] = []): string {
   if (failed.length === 0) return '';
-  if (failed.length === 4) return 'Your history could not be refreshed, so the counts and the list below are from the last time it loaded.';
-  const names = failed.map((f) => SOURCE_WORDS[f].toLowerCase());
-  const joined = names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
-  const subject = `${joined.charAt(0).toUpperCase()}${joined.slice(1)}`;
-  return hadLoadedBefore
-    ? `${subject} could not be refreshed. The counts and the list below still show what was loaded before for them.`
-    : `${subject} could not be loaded, so they are missing from the counts and the list below.`;
+  const refreshed = failed.filter((f) => !missing.includes(f));
+  const parts: string[] = [];
+  if (refreshed.length === 4) parts.push('Your history could not be refreshed, so the counts and the list below are from the last time it loaded.');
+  else if (refreshed.length > 0) parts.push(`${named(refreshed)} could not be refreshed. The counts and the list below still show what was loaded before for them.`);
+  const never = failed.filter((f) => missing.includes(f));
+  if (never.length > 0) parts.push(`${named(never)} could not be loaded, so they are missing from the counts and the list below.`);
+  return parts.join(' ');
 }
 
 export function filterHistory(entries: HistoryEntry[], input: { group: Group | 'all'; query: string }): HistoryEntry[] {

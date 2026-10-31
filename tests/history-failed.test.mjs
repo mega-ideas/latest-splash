@@ -320,7 +320,7 @@ test('the failed-refresh sentence sits above the list, in a live region that is 
   assert.ok(stats > -1 && region > stats && list > region, 'counts, then the sentence, then the list');
   // A live region is announced when its content changes; one created together with its content is often not.
   assert.doesNotMatch(src.slice(region - 80, region), /failed \?|&&|\? \(/, 'the region is not created by the failure it announces');
-  const after = src.slice(region, list);
+  const after = src.slice(region - 5, list);
   assert.match(after, /<div role="status"[^>]*>\s*\{failed \? <Note tone="warn">\{failed\}<\/Note> : null\}\s*<\/div>/, 'the sentence is the region’s content');
   assert.match(after, /Try again/);
   assert.match(src, /failureNote\(merged\.failed, merged\.missing\)/, 'the sentence knows which lists never loaded');

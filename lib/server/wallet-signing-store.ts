@@ -58,6 +58,16 @@ export type SigningPurpose =
 
 export type SigningStatus = 'collecting' | 'submitting' | 'unknown' | 'executed' | 'failed' | 'expired' | 'cancelled';
 
+/**
+ * What a request closed as `cancelled` records when enough signers declined it; a request its sender
+ * withdrew records nothing. History tells the two apart by it ("declined" and "withdrawn", both a
+ * person's own no) so neither reads as a failure.
+ */
+export const DECLINED_BY_SIGNERS = 'enough signers declined that it can no longer be signed';
+
+/** How a request that people closed ended: the owners declined it, or its sender took it back. */
+export const endedByPeople = (error: string | null | undefined): 'declined' | 'withdrawn' => (error === DECLINED_BY_SIGNERS ? 'declined' : 'withdrawn');
+
 /** Requests whose dedupe key is held: open, or sent with no final answer. */
 export const IN_FLIGHT: readonly SigningStatus[] = ['collecting', 'submitting', 'unknown'];
 

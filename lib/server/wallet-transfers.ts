@@ -42,7 +42,7 @@ import { askOwnersToApprove, type ApprovalAsk, type AskNotifier, type AskPolicy 
 import { recipientPayable, requestWalletPayment, type WalletContext, type WalletMembers } from './business-wallet.ts';
 import type { PaymentRecorder } from './payment-record.ts';
 import { readRequestForSigner, type RequestView } from './wallet-signing.ts';
-import type { DrizzleDb } from './wallet-signing-store.ts';
+import { endedByPeople, type DrizzleDb } from './wallet-signing-store.ts';
 
 export type TransferFailure = { ok: false; status: number; code: string; error: string; feeMinor?: string };
 const fail = (status: number, code: string, error: string, more: { feeMinor?: string } = {}): TransferFailure => ({ ok: false, status, code, error, ...more });
@@ -128,13 +128,15 @@ export const maskAddress = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 
 async function statusOf(deps: TransferDeps, row: Row): Promise<TransferStatus> {
   if (row.route === 'owners_sign' && row.signingRequestId) {
-    const [r] = await deps.db.select({ status: walletSigningRequests.status }).from(walletSigningRequests).where(and(eq(walletSigningRequests.orgId, row.orgId), eq(walletSigningRequests.id, row.signingRequestId))).limit(1);
+    const [r] = await deps.db.select({ status: walletSigningRequests.status, error: walletSigningRequests.error }).from(walletSigningRequests).where(and(eq(walletSigningRequests.orgId, row.orgId), eq(walletSigningRequests.id, row.signingRequestId))).limit(1);
     switch (r?.status) {
       case 'collecting': return 'awaiting_signatures';
       case 'submitting':
       case 'unknown': return 'on_the_way';
       case 'executed': return 'settled';
       case 'expired': return 'expired';
+      // A request the sender took back, or the owners declined, is a person's own no, never a failure.
+      case 'cancelled': return endedByPeople(r.error);
       default: return 'failed';
     }
   }

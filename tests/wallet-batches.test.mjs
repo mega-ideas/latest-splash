@@ -842,6 +842,10 @@ test('a batch its sender took back, or the owners declined, is Not paid in Histo
     assert.equal(e.href, null);
   }
   assert.deepEqual(entries.map((e) => e.status.label).sort(), ['Declined by the owners', 'Withdrawn']);
+  // A batch a person ended is not a live batch: the same sheet is not flagged against it, and it holds none of the wallet.
+  const again = await B.reviewBatch(t.deps(), OWNER, sheet(row('Dela Cruz Trading Corp', '5,000'), row('Santos Supplies Inc', '250')));
+  assert.equal(again.ok, true, JSON.stringify(again));
+  assert.equal(again.review.duplicateCount, 0, 'a withdrawn or declined batch is not an earlier batch to repeat');
   // A request that really failed is still Failed.
   await t.w.client.exec(`UPDATE wallet_signing_requests SET status = 'failed' WHERE id = '${taken.signingRequest.id}'`);
   const after = buildHistory({ transfers: [], batches: await B.listBatches(t.deps()), withdrawals: [], earlier: [] });

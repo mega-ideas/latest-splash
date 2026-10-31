@@ -38,7 +38,8 @@ its receipt. A payment the owners have not accepted has no receipt and says so.
 is a plain table with the receipt path; a cell that starts like a formula is
 made text. It carries no fee: the list knows only the most a fee could be, and
 the chain's charge is on each receipt. The page asks again every 15 seconds
-only while something is in progress and the tab is visible. A count is coloured
+only while something can still change by itself (in progress, or a failed
+withdrawal whose USDC is on its way back) and the tab is visible. A count is coloured
 as an alarm only when it is not zero.
 
 A row is in exactly one of four groups, each with its own filter and count:
@@ -46,12 +47,15 @@ A row is in exactly one of four groups, each with its own filter and count:
 (something broke: a payment, batch or withdrawal that did not go through, a
 withdrawal that came back, an earlier transfer that failed or was refunded);
 **Not paid** (a person declined, cancelled or withdrew it, or the time to sign
-ran out). A failed row carries two sentences in plain words, what happened and
+ran out). A payment or batch whose request its sender took back, or that the
+owners declined, is Withdrawn or Declined by the owners under Not paid and
+never Failed: the history reads the request's close, not only its status. A failed row carries two sentences in plain words, what happened and
 what to do next, from `EXPLAIN` in `lib/history-page/entries.ts`. Failed takes
 the alarm colour; Not paid never does. When a refresh fails the loaded counts
 and list stay, and one sentence above the list says they are the last ones
-loaded (or, on a first load that only partly answered, what is missing from
-them). `tests/history-failed.test.mjs` holds these rules.
+loaded for a list that has answered before, and that a list that never
+answered is missing from them (`mergeLists` reports it as `missing`). The
+sentence sits in a live region that is always on the page. `tests/history-failed.test.mjs` holds these rules.
 
 ## Settings
 
