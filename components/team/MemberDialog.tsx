@@ -74,8 +74,7 @@ export default function MemberDialog({
         ) : null}
 
         {controls.roles.length > 0 ? (
-          <section className="space-y-2" aria-labelledby="md-role">
-            <h3 id="md-role" className="text-[13px] font-extrabold text-[#0c3e48]">Role</h3>
+          <section className="space-y-2" aria-label="Role">
             <Field label="Role" htmlFor="md-role-pick">
               <SelectInput id="md-role-pick" value={chosen} onChange={(e) => setRole(e.target.value as MembershipRole)} disabled={busy !== null}>
                 {controls.roles.map((r) => <option key={r} value={r}>{ROLE_NAME[r]}</option>)}

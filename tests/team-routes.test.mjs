@@ -13,7 +13,6 @@
  */
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
 import test from 'node:test';
 
 const root = new URL('../', import.meta.url);

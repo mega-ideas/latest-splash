@@ -130,12 +130,14 @@ export default function TeamCard({
                   <span className="block truncate font-semibold">{m.name}{m.userId === you.userId ? ' (you)' : ''}</span>
                   <span className="block truncate text-[13px] text-[#326273]">{m.email}</span>
                 </span>
-                <Pill tone="ok">{ROLE_NAME[m.role]}</Pill>
-                {m.financeLead ? <Pill tone="wait">{FINANCE_LEAD_NAME}</Pill> : null}
-                {m.inCharge ? <Pill tone="wait"><Fingerprint className="mr-1 h-3 w-3" aria-hidden="true" />In charge</Pill> : null}
-                {can ? (
-                  <QuietButton type="button" className="!h-11" onClick={() => setSelected(m.userId)} aria-label={`Manage ${m.name}`}>Manage</QuietButton>
-                ) : null}
+                <span className="ml-auto flex flex-wrap items-center justify-end gap-2">
+                  <Pill tone="ok">{ROLE_NAME[m.role]}</Pill>
+                  {m.financeLead ? <Pill tone="wait">{FINANCE_LEAD_NAME}</Pill> : null}
+                  {m.inCharge ? <Pill tone="wait"><Fingerprint className="mr-1 h-3 w-3" aria-hidden="true" />In charge</Pill> : null}
+                  {can ? (
+                    <QuietButton type="button" className="!h-11" onClick={() => setSelected(m.userId)} aria-label={`Manage ${m.name}`}>Manage</QuietButton>
+                  ) : null}
+                </span>
                 <span className="basis-full text-[13px] leading-5 text-[#326273]">
                   {access(m)}{' '}
                   {walletReady && row?.rule ? `Up to ${row.rule.perPayment} a payment. ${row.rule.state.label}.` : walletReady && row?.canHaveRule ? 'No rule: each payment goes to the owners.' : m.role === 'admin' ? 'Signs for the business wallet once added as a signer.' : m.role === 'viewer' ? 'Reads only.' : ''}
