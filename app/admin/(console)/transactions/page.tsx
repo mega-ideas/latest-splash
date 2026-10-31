@@ -237,7 +237,7 @@ export default async function AdminTransactionsPage() {
 }
 
 const PEG_WORDS = { green: 'Within range', yellow: 'Drifting', red: 'Outside range' } as const;
-const PEG_SWATCH = { green: 'bg-[#237284]', yellow: 'bg-[var(--gold-ink)]', red: 'bg-[#8a1f1f]' } as const;
+const PEG_SWATCH = { green: 'bg-[#237284]', yellow: 'bg-[var(--gold-ink)]', red: 'bg-[var(--error)]' } as const;
 
 /** The peg reading in words first; the swatch only repeats it. */
 function PegValue({ zone }: { zone: keyof typeof PEG_WORDS }) {
