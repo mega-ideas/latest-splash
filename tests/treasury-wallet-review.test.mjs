@@ -457,7 +457,8 @@ test('a request that meets an order still being prepared is told so, not given a
 // ─── 10. Copy and the Max button ─────────────────────────────────────────
 
 test('Settings and the stocks card name no licence and no unsigned partner', async () => {
-  const settings = await source('app/dashboard/settings/page.tsx');
+  // The card's words live in lib/settings-page/about.ts since Settings was rebuilt (v2 brief 5.9).
+  const settings = await source('lib/settings-page/about.ts');
   assert.doesNotMatch(settings, /Ondo/);
   assert.doesNotMatch(settings, /Smart Treasury holds customer funds/);
   assert.match(settings, /USDY in your own Splash Wallet/);

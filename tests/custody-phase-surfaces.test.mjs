@@ -127,19 +127,19 @@ test('the landing ladder puts both fund-holding rungs in Phase 2, in the licence
 
 /* ── Settings ──────────────────────────────────────────────────────────── */
 
-test('the settings page stops presenting the fund-holding rungs as running in Phase 0, and Treasury as custodial at all', async () => {
-  const page = await source('app/dashboard/settings/page.tsx');
-  assert.match(page, /const custodyOn = useCustodyPhaseOn\(\);/, 'the phase the shell resolved');
+test('the settings page presents no fund-holding rung at all, and Treasury is not custodial in any phase', async () => {
+  // v2 brief 5.9: the "Recipient ladder" card (payout, sweep, stored balance) is gone with the
+  // custody it described; Settings says what is true in lib/settings-page/about.ts.
+  const text = [await source('components/settings/SettingsPage.tsx'), await source('components/settings/AboutCard.tsx'), await source('components/settings/OperatingControls.tsx'), await source('lib/settings-page/about.ts')].join('\n');
+  assert.doesNotMatch(text, /useCustodyPhaseOn|custodyOn|Recipient ladder|payout\/sweep\/stored|sweep and stored balance/);
   // Nothing reads autoAllocateTreasuryPct, so "applied to treasury allocation" was never true.
-  assert.doesNotMatch(page, /treasury allocation, and account security/);
+  assert.doesNotMatch(text, /treasury allocation, and account security/);
   // v2 D9: Treasury is USDY in the business's own wallet, in any phase. No
   // licence is cited for it and no issuer is named (the 5.7 review).
-  assert.doesNotMatch(page, /Smart Treasury holds customer funds|CUSTODY_LICENCE|Ondo/);
-  assert.match(page, /USDY in your own Splash Wallet/);
-  assert.match(page, /custodyOn \? 'payout\/sweep\/stored' : 'payout today · sweep and stored balance in Phase 2/);
-  assert.match(page, /text\(custodyOn\)/, 'the phase-dependent cards are rendered with the phase');
+  assert.doesNotMatch(text, /Smart Treasury holds customer funds|CUSTODY_LICENCE|Ondo/);
+  assert.match(text, /USDY in your own Splash Wallet/);
   assert.match(
-    page,
+    await source('components/settings/OperatingControls.tsx'),
     /label="Auto-allocate to treasury"[^\n]*disabled note=\{AUTO_ALLOCATE_NOTE\}/,
     'no allocation is offered automatically, in any phase: every swap is the wallet owners\' own',
   );
