@@ -14,14 +14,15 @@
  * the bound the owners signed and the receipt not final; a payment whose
  * agreement with its partner is not signed names no partner.
  */
-import { and, eq, inArray } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { normalizeSuiAddress } from '@mysten/sui/utils';
 
-import { organizations, users, walletTransfers } from '../db/schema.ts';
+import { organizations, users } from '../db/schema.ts';
 import type { FeeSchedule } from '../fees/schedule.ts';
 import { FEE_KIND } from '../fees/schedule.ts';
 import { buildReceipt, type PaymentReceipt, type ReceiptInput, type ReceiptStatus } from '../transfer/receipt.ts';
 import { controlsEvidenceFor, type EvidenceDeps } from './controls-evidence.ts';
+import { transferForRequest } from './transfer-lookup.ts';
 import { getDestination, withdrawalBySigningRequest, getWithdrawalRow } from './withdrawals-store.ts';
 import type { WithdrawalChainTx } from './withdrawals.ts';
 
@@ -88,9 +89,7 @@ export async function paymentReceiptFor(deps: ReceiptDeps, ref: string, userId: 
   const payerName = org?.legalName || org?.name || deps.orgId;
 
   const requestId = ev.approval?.signingRequestId ?? null;
-  const [transfer] = requestId
-    ? await deps.db.select().from(walletTransfers).where(and(eq(walletTransfers.orgId, deps.orgId), eq(walletTransfers.signingRequestId, requestId))).limit(1)
-    : [];
+  const transfer = requestId ? await transferForRequest(deps.db, deps.orgId, requestId) : null;
   const withdrawal = ev.payment.ref.startsWith('wdr_')
     ? await getWithdrawalRow(deps.db, deps.orgId, ev.payment.ref)
     : requestId

@@ -30,7 +30,7 @@
  */
 import { createHash, randomUUID } from 'node:crypto';
 
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, isNull } from 'drizzle-orm';
 import { normalizeSuiAddress } from '@mysten/sui/utils';
 
 import { suppliers, walletApprovalAsks, walletSigningRequests, walletTransfers } from '../db/schema.ts';
@@ -49,6 +49,8 @@ const fail = (status: number, code: string, error: string, more: { feeMinor?: st
 
 /** How long the owners have to sign before the quote behind the payment lapses. */
 export const TRANSFER_SETTLE_WINDOW_MS = 60 * 60 * 1000;
+/** A claim on an intent id that has no request and no ask after this long was left by a request that died: it is reclaimed. */
+export const TRANSFER_CLAIM_TTL_MS = 2 * 60_000;
 /** How long the intent stays open on chain. */
 export const TRANSFER_INTENT_LIFETIME_MS = 7 * 24 * 3_600_000;
 
@@ -68,6 +70,8 @@ export type TransferDeps = {
   requesterAddresses: (userId: string) => Promise<string[]>;
   askPolicy?: () => Promise<AskPolicy | null>;
   notifyAsk?: AskNotifier;
+  /** How long a second request on a key waits for the first to finish before answering "in progress" (default 3 s). */
+  claimWaitMs?: number;
 };
 
 export type PayeeInput = { kind: 'recipient'; recipientId?: string } | { kind: 'splash_business'; businessId?: string };
@@ -86,7 +90,7 @@ export type TransferInput = {
   reference?: unknown;
 };
 
-export type TransferStatus = 'awaiting_signatures' | 'asked_owners' | 'on_the_way' | 'settled' | 'failed' | 'declined' | 'expired';
+export type TransferStatus = 'awaiting_signatures' | 'asked_owners' | 'on_the_way' | 'settled' | 'failed' | 'declined' | 'expired' | 'withdrawn';
 
 export type TransferView = {
   id: string;
@@ -107,6 +111,10 @@ export type TransferView = {
 };
 
 type Row = typeof walletTransfers.$inferSelect;
+
+export type CreateTransferResult =
+  | TransferFailure
+  | { ok: true; created: boolean; transfer: TransferView; signingRequest: RequestView | null; ask: ApprovalAsk | null };
 
 const digits = (value: unknown): bigint | null => {
   const s = typeof value === 'number' && Number.isSafeInteger(value) ? String(value) : typeof value === 'string' ? value.trim() : '';
@@ -134,10 +142,19 @@ async function statusOf(deps: TransferDeps, row: Row): Promise<TransferStatus> {
     const [a] = await deps.db.select({ status: walletApprovalAsks.status, signingRequestId: walletApprovalAsks.signingRequestId }).from(walletApprovalAsks).where(and(eq(walletApprovalAsks.orgId, row.orgId), eq(walletApprovalAsks.id, row.askId))).limit(1);
     switch (a?.status) {
       case 'open': return 'asked_owners';
-      case 'signing': return 'awaiting_signatures';
+      case 'signing': {
+        // The owners accepted: the request they sign says where it is. A request that died hands the ask back to the owners.
+        if (!a.signingRequestId) return 'awaiting_signatures';
+        const [r] = await deps.db.select({ status: walletSigningRequests.status }).from(walletSigningRequests).where(and(eq(walletSigningRequests.orgId, row.orgId), eq(walletSigningRequests.id, a.signingRequestId))).limit(1);
+        if (r?.status === 'submitting' || r?.status === 'unknown') return 'on_the_way';
+        if (r?.status === 'executed') return 'settled';
+        if (r?.status === 'collecting') return 'awaiting_signatures';
+        return 'asked_owners';
+      }
       case 'approved': return 'settled';
       case 'declined': return 'declined';
       case 'expired': return 'expired';
+      case 'withdrawn': return 'withdrawn';
       default: return 'failed';
     }
   }
@@ -255,10 +272,30 @@ async function resolvePayee(deps: TransferDeps, payee: PayeeInput): Promise<Reso
   };
 }
 
-const requestHashOf = (input: { payee: PayeeInput; amount: bigint; maxFee: bigint; reference: string | null }) =>
-  sha(JSON.stringify(['transfer', input.payee, input.amount.toString(), input.maxFee.toString(), input.reference])).toString('hex');
+/** What the payment is: who, how much, and the reference. The fee bound is not part of it, so a retry after a lost response that carries a changed fee answers the payment already made. */
+const requestHashOf = (input: { payee: PayeeInput; amount: bigint; reference: string | null }) =>
+  sha(JSON.stringify(['transfer', input.payee, input.amount.toString(), input.reference])).toString('hex');
+
+function isUniqueViolation(error: unknown): boolean {
+  const e = error as { code?: string; cause?: { code?: string }; message?: string } | null;
+  return e?.code === '23505' || e?.cause?.code === '23505' || /unique|duplicate key/i.test(e?.message ?? '');
+}
+
+const RECLAIMED = Symbol('reclaimed');
+const IN_PROGRESS = fail(409, 'in_progress', 'This payment is still being prepared. Wait a moment and try again; nothing is sent twice.');
 
 async function replay(deps: TransferDeps, actor: { userId: string }, row: Row, requestHash: string) {
+  if (!row.signingRequestId && !row.askId) {
+    // A claim with nothing behind it yet: another request is still making it, or it died.
+    const settled = await settledClaim(deps, row.clientKey);
+    if (!settled) return RECLAIMED;
+    if (!settled.signingRequestId && !settled.askId) {
+      if (deps.now().getTime() - settled.createdAt.getTime() < TRANSFER_CLAIM_TTL_MS) return IN_PROGRESS;
+      const gone = await deps.db.delete(walletTransfers).where(and(eq(walletTransfers.id, settled.id), eq(walletTransfers.orgId, deps.orgId), isNull(walletTransfers.signingRequestId), isNull(walletTransfers.askId))).returning({ id: walletTransfers.id });
+      return gone.length ? RECLAIMED : IN_PROGRESS;
+    }
+    row = settled;
+  }
   if (row.requestHash !== requestHash) return fail(409, 'idempotency_key_reused', 'That intent id was used for a different payment.');
   const transfer = await viewOf(deps, row);
   let signingRequest: RequestView | null = null;
@@ -276,7 +313,8 @@ async function replay(deps: TransferDeps, actor: { userId: string }, row: Row, r
 
 /** While another request holds the key, wait for its outcome: its payment, or its row gone (it was refused). */
 async function settledClaim(deps: TransferDeps, clientKey: string): Promise<Row | null> {
-  for (let i = 0; i < 30; i += 1) {
+  const tries = Math.max(1, Math.ceil((deps.claimWaitMs ?? 3000) / 100));
+  for (let i = 0; i < tries; i += 1) {
     const [row] = await deps.db.select().from(walletTransfers).where(and(eq(walletTransfers.orgId, deps.orgId), eq(walletTransfers.clientKey, clientKey))).limit(1);
     if (!row) return null;
     if (row.signingRequestId || row.askId) return row;
@@ -318,7 +356,7 @@ export async function quoteTransfer(deps: TransferDeps, input: { payee: PayeeInp
   };
 }
 
-export async function createTransfer(deps: TransferDeps, actor: { userId: string; role: string }, input: TransferInput) {
+export async function createTransfer(deps: TransferDeps, actor: { userId: string; role: string }, input: TransferInput, attempt = 0): Promise<CreateTransferResult> {
   if (actor.role !== 'OWNER' && actor.role !== 'MAKER' && actor.role !== 'APPROVER') {
     return fail(403, 'cannot_pay', 'Viewers can look at payments but cannot make them.');
   }
@@ -330,10 +368,14 @@ export async function createTransfer(deps: TransferDeps, actor: { userId: string
   if (maxFee === null) return fail(400, 'bad_fee', 'The fee that was shown is needed with the payment.');
   const reference = typeof input.reference === 'string' && input.reference.trim() ? input.reference.trim().slice(0, 60) : null;
   const payeeKey: PayeeInput = input.payee.kind === 'splash_business' ? { kind: 'splash_business', businessId: String(input.payee.businessId ?? '') } : { kind: 'recipient', recipientId: String(input.payee.recipientId ?? '') };
-  const requestHash = requestHashOf({ payee: payeeKey, amount, maxFee, reference });
+  const requestHash = requestHashOf({ payee: payeeKey, amount, reference });
+  if (attempt >= 3) return IN_PROGRESS;
 
   const prior = await getByKey(deps, clientKey);
-  if (prior) return replay(deps, actor, prior, requestHash);
+  if (prior) {
+    const again = await replay(deps, actor, prior, requestHash);
+    if (again !== RECLAIMED) return again;
+  }
 
   const members = await deps.walletMembers();
   if (!members.ok) return fail(members.status, members.code, members.error);
@@ -380,11 +422,16 @@ export async function createTransfer(deps: TransferDeps, actor: { userId: string
       createdAt: now,
       updatedAt: now,
     });
-  } catch {
-    // Another request holds this key: its payment is the answer, or, if it was refused, this one goes on.
-    const other = await settledClaim(deps, clientKey);
-    if (other) return replay(deps, actor, other, requestHash);
-    return createTransfer(deps, actor, input);
+  } catch (error) {
+    // Only a clash on the key means another request holds it; anything else (a database fault) is not ours to swallow.
+    if (!isUniqueViolation(error)) throw error;
+    // Its payment is the answer, or, if it was refused, this one goes on.
+    const other = await getByKey(deps, clientKey);
+    if (other) {
+      const again = await replay(deps, actor, other, requestHash);
+      if (again !== RECLAIMED) return again;
+    }
+    return createTransfer(deps, actor, input, attempt + 1);
   }
 
   const release = () => deps.db.delete(walletTransfers).where(eq(walletTransfers.id, id)).then(() => undefined);
@@ -445,6 +492,7 @@ export async function createTransfer(deps: TransferDeps, actor: { userId: string
           commitment: commitment.toString('hex'),
           railCommitment: railCommitment.toString('hex'),
           expiresAtMs,
+          maxFeeMinor: maxFee,
         },
         contentHash: Buffer.from(record.contentHash).toString('hex'),
         walrusBlobId: Buffer.from(record.walrusBlobId).toString('hex'),

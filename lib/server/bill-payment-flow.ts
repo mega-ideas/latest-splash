@@ -29,6 +29,7 @@ import type { BillPaymentFlow } from '@/lib/bills/payment-hook';
 import { users, walletTransfers, walletSigningRequests } from '@/lib/db/schema';
 import { recordBillSettlement } from '@/lib/server/bills';
 import { cancelApprovalAsk } from '@/lib/server/payment-approval-asks';
+import { transferForRequest } from '@/lib/server/transfer-lookup';
 import { createTransfer, quoteTransfer, type TransferDeps } from '@/lib/server/wallet-transfers';
 import { cancelSigningRequest } from '@/lib/server/wallet-signing';
 import type { DrizzleDb, StoredRequest } from '@/lib/server/wallet-signing-store';
@@ -88,7 +89,7 @@ export function makeBillPaymentFlow(depsFor: DepsFor): BillPaymentFlow {
  */
 export async function reportTransferSettled(db: DrizzleDb, request: Pick<StoredRequest, 'id' | 'orgId' | 'status' | 'executedDigest' | 'summary' | 'signers'>, now: Date = new Date(), record: typeof recordBillSettlement = recordBillSettlement): Promise<void> {
   if (request.status !== 'executed' || !request.executedDigest) return;
-  const [row] = await db.select().from(walletTransfers).where(and(eq(walletTransfers.orgId, request.orgId), eq(walletTransfers.signingRequestId, request.id))).limit(1);
+  const row = await transferForRequest(db, request.orgId, request.id);
   if (!row) return;
   const actions = ((request.summary as { description?: { actions?: Array<{ type: string; recipient?: string; amountMinor?: string }> } } | null)?.description?.actions ?? []);
   const open = actions.find((a) => a.type === 'open_intent');

@@ -8,13 +8,16 @@ export const dynamic = 'force-dynamic';
 /**
  * One approval ask.
  *
- * POST { action: 'accept', mode, maxFeeMinor, settleByMs }   an owner opens the
+ * POST { action: 'accept', mode, maxFeeMinor?, confirmFeeChange?, settleByMs }
+ *      an owner opens the
  *      signing request that approves it: `wallet_pays` (the quorum pays it
  *      from the business wallet: the open intent, or for a draft a new intent
  *      opened and paid in one transaction) or `second_approval` (the owner's
  *      own second approval, for an intent within the asker's spending rule;
  *      not for a draft). The ask is claimed first, so two owners accepting
- *      at once open one request.
+ *      at once open one request. A payment that carries the fee its asker was
+ *      shown signs that fee when `maxFeeMinor` is left out; a lower one is
+ *      refused, a higher one needs `confirmFeeChange: true`.
  * POST { action: 'decline', reason? }                        an owner declines it.
  * POST { action: 'withdraw' }                                the asker withdraws it.
  */
@@ -36,9 +39,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   }
   if (action !== 'accept') return refusal(400, 'Say whether you accept, decline or withdraw this.');
 
-  const maxFeeMinor = bigintField(body.maxFeeMinor);
+  // The fee is optional for a payment that carries the fee its asker was shown (then that fee is signed); a different one needs `confirmFeeChange`.
+  const feeSent = body.maxFeeMinor !== undefined && body.maxFeeMinor !== null && body.maxFeeMinor !== '';
+  const maxFeeMinor = feeSent ? bigintField(body.maxFeeMinor) : null;
   const settleByMs = bigintField(body.settleByMs);
-  if (maxFeeMinor === null || settleByMs === null) return refusal(400, 'The fee shown and the quote deadline are needed.');
+  if ((feeSent && maxFeeMinor === null) || settleByMs === null) return refusal(400, 'The fee shown and the quote deadline are needed.');
   const mode = body.mode === 'second_approval' ? 'second_approval' : body.mode === 'wallet_pays' ? 'wallet_pays' : null;
   if (!mode) return refusal(400, 'Choose to pay it from the business wallet or to give a second approval.');
 
@@ -51,7 +56,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const { spendSecondApprovalOpener } = await import('@/lib/server/spend-rules-deps');
   const result = await acceptApprovalAsk(
     { db, ctx, secondApproval: mode === 'second_approval' ? await spendSecondApprovalOpener(route) : undefined },
-    { orgId, userId: authority.userId, askId: id, mode, wallet, maxFeeMinor, settleByMs },
+    { orgId, userId: authority.userId, askId: id, mode, wallet, maxFeeMinor, confirmFeeChange: body.confirmFeeChange === true, settleByMs },
   );
   return asResponse(result, result.ok ? { ask: result.ask, request: result.request } : undefined);
 }

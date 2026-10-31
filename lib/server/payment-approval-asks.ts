@@ -53,7 +53,7 @@ import { randomUUID } from 'node:crypto';
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { normalizeStructTag, normalizeSuiAddress } from '@mysten/sui/utils';
 
-import { memberships, walletApprovalAsks, walletSigningRequests } from '../db/schema.ts';
+import { memberships, walletApprovalAsks, walletSigningRequests, walletTransfers } from '../db/schema.ts';
 import { MAX_INTENT_LIFETIME_MS, V2_KIND } from './sui-v2-builders.ts';
 import { memberRole, recordAuthorityEvent } from './wallet-authority.ts';
 import type { IntentState, WalletContext, WalletMembers } from './business-wallet.ts';
@@ -81,6 +81,8 @@ export type AskIntent = {
   beneficiaryRef?: string;
   commitment?: string;
   railCommitment?: string;
+  /** The Splash fee the asker was shown, in USDC minor units: the owners sign at least this as the payment's max_fee. */
+  maxFeeMinor?: string;
   /** Why it needs the owners, from the policy; null where the policy could not be read. */
   checks?: { recipientVerified: boolean | null; overPerPaymentMax: boolean | null; makerPerPaymentMaxMinor: string | null };
 };
@@ -99,6 +101,8 @@ export type AskDraft = {
   commitment: string;
   railCommitment: string;
   expiresAtMs: bigint | string;
+  /** The fee the asker was shown. Bound into the ask. */
+  maxFeeMinor?: bigint | string;
 };
 
 /** What the policy says, for showing a draft's reasons. */
@@ -215,6 +219,8 @@ function readDraft(d: AskDraft, now: Date): AskIntent | AskFailure {
   if (amount === null || amount <= 0n || amount > U64_MAX) return fail(400, 'bad_draft', 'the amount must be above zero');
   if (fx === null || fx <= 0n || fx > U64_MAX) return fail(400, 'bad_draft', 'the rate could not be read');
   if (expires === null || expires <= nowMs || expires > nowMs + MAX_INTENT_LIFETIME_MS) return fail(400, 'bad_draft', 'the payment must expire in the future, within 30 days');
+  const shownFee = d.maxFeeMinor === undefined ? undefined : bigintOf(d.maxFeeMinor);
+  if (shownFee === null || (shownFee !== undefined && shownFee > U64_MAX)) return fail(400, 'bad_draft', 'the fee shown could not be read');
   const currency = String(d.targetCurrency ?? '');
   if (!/^[A-Z]{3,5}$/.test(currency)) return fail(400, 'bad_draft', 'the target currency could not be read');
   let recipient: string;
@@ -238,6 +244,7 @@ function readDraft(d: AskDraft, now: Date): AskIntent | AskFailure {
     beneficiaryRef,
     commitment,
     railCommitment,
+    ...(shownFee !== undefined ? { maxFeeMinor: shownFee.toString() } : {}),
   };
 }
 
@@ -438,7 +445,18 @@ export type SecondApprovalOpener = (input: {
 /** An owner turns an open ask into the signing request that approves it. */
 export async function acceptApprovalAsk(
   deps: { db: DrizzleDb; ctx: WalletContext; now?: Clock; secondApproval?: SecondApprovalOpener },
-  input: { orgId: string; userId: string; askId: string; mode: AcceptMode; wallet?: WalletMembers; maxFeeMinor: bigint; settleByMs: bigint },
+  input: {
+    orgId: string;
+    userId: string;
+    askId: string;
+    mode: AcceptMode;
+    wallet?: WalletMembers;
+    /** The max_fee the owners sign. Null: the fee the asker was shown (an ask that carries one). */
+    maxFeeMinor: bigint | null;
+    /** The owner has seen that this fee differs from the one the asker was shown. */
+    confirmFeeChange?: boolean;
+    settleByMs: bigint;
+  },
 ): Promise<{ ok: true; ask: ApprovalAsk; request: RequestView } | AskFailure> {
   const now = (deps.now ?? deps.ctx.signing.now ?? (() => new Date()))();
   const row = await readAsk(deps.db, input.orgId, input.askId);
@@ -455,6 +473,17 @@ export async function acceptApprovalAsk(
   // requested since) is refused here too, before anything is claimed or built.
   const routed = await routedElsewhere(deps.db, input.orgId, current.intent);
   if (routed) return routed;
+  // The fee the asker was shown is a floor the owners sign; a different (higher) fee needs the owner's confirmation.
+  const shownFee = current.intent.maxFeeMinor ? BigInt(current.intent.maxFeeMinor) : null;
+  let maxFee: bigint;
+  if (input.maxFeeMinor === null || input.maxFeeMinor === undefined) {
+    if (shownFee === null) return fail(400, 'fee_needed', 'the fee shown and the quote deadline are needed');
+    maxFee = shownFee;
+  } else {
+    maxFee = input.maxFeeMinor;
+    if (shownFee !== null && maxFee < shownFee) return fail(409, 'fee_below_shown', 'that fee is below the fee the payment was shown with, so the payment would not go through');
+    if (shownFee !== null && maxFee > shownFee && !input.confirmFeeChange) return fail(409, 'fee_change_needs_confirmation', 'that fee is higher than the fee the payment was shown with; confirm it to sign the higher one');
+  }
 
   // Claim the ask before building anything: of two owners accepting at once,
   // one wins. The claim is compare-and-swap on the state just read.
@@ -482,7 +511,7 @@ export async function acceptApprovalAsk(
 
   let opened: { ok: true; request: RequestView } | AskFailure;
   try {
-    opened = await openFor(deps, input, row, current);
+    opened = await openFor(deps, { ...input, maxFeeMinor: maxFee }, row, current);
   } catch (error) {
     await release();
     throw error;
@@ -496,6 +525,8 @@ export async function acceptApprovalAsk(
     .update(walletApprovalAsks)
     .set({ signingRequestId: opened.request.id, updatedAt: now })
     .where(and(eq(walletApprovalAsks.orgId, input.orgId), eq(walletApprovalAsks.id, row.id), eq(walletApprovalAsks.status, 'signing'), eq(walletApprovalAsks.decidedBy, input.userId)));
+  // A payment started from Transfer learns its signing request, so its receipt, share link and invoice are found by it.
+  await deps.db.update(walletTransfers).set({ signingRequestId: opened.request.id, updatedAt: now }).where(and(eq(walletTransfers.orgId, input.orgId), eq(walletTransfers.askId, row.id)));
   await recordAuthorityEvent(deps.db, {
     orgId: input.orgId,
     actorUserId: input.userId,
