@@ -104,6 +104,8 @@ const MISSED_PHRASINGS = [
   'Payment has been made.',
   'Sure - sent 600 to Acme.',
   'Acme received 600.',
+  'Money has been moved to Acme.',
+  'Wire sent.',
 ];
 
 test('the phrasings the review found are all replaced, on a turn with a proposal and on a turn without one', () => {
@@ -173,6 +175,12 @@ test('the truthful words around those verbs still stay', () => {
     "I'll prepare the payment for a teammate to approve.",
     'You have the funds in your wallet.',
     'Do you want me to send it?',
+    'Payments are released only after a person approves them.',
+    'I found 3 invoices from Acme: INV-1 (paid), INV-2 (pending).',
+    'This payment is above your single-payment limit, so it needs a second approver.',
+    PREPARED_LINE,
+    PLAIN_LINE,
+    STATUS_LINE,
   ]) {
     const out = guard(text);
     assert.equal(out.replaced, false, text);
@@ -361,9 +369,9 @@ test('a turn about something else, whose reply has no money in it, is still neve
 // ── 7. The fixed line, always ──────────────────────────────────────────────
 
 test('guard(): with `always`, the fixed line follows a reply in which no claim was recognised, once', () => {
-  const out = guard('All taken care of on my side, have a good day.', { always: true });
+  const out = guard('Everything is in order on my side, have a good day.', { always: true });
   assert.equal(out.replaced, true);
-  assert.equal(out.text, `All taken care of on my side, have a good day.\n\n${PREPARED_LINE}`);
+  assert.equal(out.text, `Everything is in order on my side, have a good day.\n\n${PREPARED_LINE}`);
   const twice = guard(out.text, { always: true });
   assert.equal(twice.text, out.text, 'the line is not stacked');
   assert.equal(guard('', { always: true }).text, '');

@@ -105,12 +105,38 @@ code: `guardCompletionClaims` in `lib/agent/oxwal.ts`.
   copy (the limitation statement, the proposal's words). A sentence is dropped
   whole: a claim tucked into reassurance ("Paid, and no further steps are
   needed") goes with the reassurance.
-- **The fixed line.** Where claims were removed, the reply ends with
-  "Nothing has been sent. It is waiting for approval." when a payment was
-  prepared this turn, and with "I haven't sent anything. I can't approve or
+- **The fixed line, always.** Recognising claims is a list of phrasings, and
+  a list cannot be complete, so the line does not wait for a claim. On a turn
+  that reached for a money tool, proposed, or prepared a transfer, the model's
+  words are always followed by it, once, whether or not a claim was
+  recognised: "Nothing has been sent. It is waiting for approval." when a
+  payment was prepared this turn; "I haven't sent anything. I can't approve or
   send payments, so a person on your team does that." when none was, so the
-  line never promises an approval that does not exist. A reply with no claim
-  gets no extra line.
+  line never promises an approval that does not exist; and, for a question
+  such as "did it go through?" with nothing prepared, "I can't tell you
+  whether it went through. Open History to see where it stands." Where claims
+  were also removed, the line takes their place. A model that wrote nothing,
+  and Splash's own fixed replies (planner, hand-off), get no second line. On a
+  turn that moved nothing, a claim the list does not recognise is not caught.
+- **A bounded read.** A sentence is read in pieces of at most 1,200
+  characters, and a reply of more than 24,000 characters or 300 sentences has
+  the rest dropped (and the fixed line added). No shape of punctuation makes
+  the matching slower than that.
+- **What the records show stays.** A sentence that states what a record says
+  ("Invoice INV-1 is paid", "Acme was paid 500 USDC last week", "That invoice
+  has already been paid, so I will not prepare another payment") is not a
+  claim that Zeke moved money, unless it also says Zeke did ("I sent it") or
+  says it just happened. So is what Zeke truly did ("I sent the draft to
+  Wallet for approval"). While a payment is being prepared this turn the
+  record allowance is off, and the fixed line follows anyway.
+- **An opener does not excuse.** "After review: Paid!", "When ready: Done!",
+  "Do not worry it has been sent" are claims. A hypothesis ("if it had been
+  sent") excuses a past-tense claim in its own clause, a negation excuses it
+  when it governs the verb, a condition excuses a rule ("once approved, it is
+  sent") and "has been approved, then it will be sent" is kept.
+- **The reply is read too.** A reply that talks of money (a payment word or
+  an amount) on a turn the message did not mark as one ("Take care of the
+  Acme bill") is guarded as a discussion of payments.
 - **Deterministic and idempotent.** No model reads the model, nothing reads
   the environment, and the same text gives the same answer every time; the
   guard's own output is a fixed point. `tests/zeke-completion-guard.test.mjs`

@@ -2281,7 +2281,9 @@ This report should be re-run after any change to `move/sources/` and committed a
 ## v2 Phase 3 - Zeke never says money moved - 2026-10-31
 
 Design: `docs/v2/phase2-zeke.md` section 2a. Tests:
-`tests/zeke-completion-guard.test.mjs`.
+`tests/zeke-completion-guard.test.mjs`,
+`tests/zeke-completion-guard-review.test.mjs`. Phrase tables:
+`lib/agent/zeke-claim-patterns.ts`.
 
 - **A model sentence cannot assert execution.** Zeke cannot send, approve or
   sign, but a model can write "Paid!" about a draft (and a prompt-injected
@@ -2296,6 +2298,31 @@ Design: `docs/v2/phase2-zeke.md` section 2a. Tests:
   dotted letters, small caps, accents, stretched words) and in the languages
   of the corridors and the common ones. Negated, conditional and fixed Splash
   copy stay; turns that are not about money are never touched.
-- **Fails towards the truth.** The thread can only tighten a turn. A claim the
-  patterns miss is not made true by anything; a true sentence caught by
-  mistake costs a line, never money.
+- **The list of phrasings cannot be complete, so the reply always carries the
+  fixed line.** Recognising a claim is a denylist: a person can always find one
+  more way to say "sent", and an independent review found several (see below).
+  So the control that does not depend on it: on any turn that reached for a
+  money tool, proposed, or prepared a transfer, the model's words are always
+  followed by the fixed line, once, whether or not a claim was recognised. "Nothing has
+  been sent. It is waiting for approval." when a payment is waiting; "I
+  haven't sent anything. ..." when a tool ran and nothing was prepared; for a
+  question about whether a payment went through, "I can't tell you whether it
+  went through. Open History to see where it stands." A claim the list misses
+  is contradicted in the same reply by words only Splash writes. Splash's own
+  fixed replies (the planner, a hand-off) already say what is true and get no
+  second line. A turn that moved nothing and where nothing was recognised is
+  not touched, so a claim there is not caught by this control.
+- **Review hardening (2026-10-31).** Opening a sentence with "After", "When",
+  "If" or "Before", or a negation word nearby ("Do not worry it has been
+  sent"), no longer excuses a claim: a hypothesis ("if it had been sent")
+  excuses a past-tense claim only in its own clause, and a negation excuses it
+  only when it governs the verb. Matching is bounded (a sentence is read in
+  pieces of at most 1,200 characters, a reply of at most 24,000 characters and
+  300 sentences; a run of 100,000 commas takes milliseconds, where it took two
+  minutes). Invisible characters of every kind (Unicode default-ignorable and
+  format characters, Hangul fillers, Braille blank), more look-alikes, HTML
+  tags and comments, entities and link syntax are read through. True
+  statements of what a record shows ("Invoice INV-1 is paid"), and of what
+  Zeke did ("I sent the draft to Wallet for approval"), are kept. A reply that
+  talks of money on a turn the message did not mark as one is guarded as a
+  discussion of payments.

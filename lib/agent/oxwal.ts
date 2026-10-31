@@ -17,6 +17,33 @@ import {
   launchScopeRefusal,
   zekeLaneState,
 } from './zeke-lane-guard.ts';
+import {
+  APPROVAL_PARTICIPLE,
+  CONDITION,
+  ENGLISH_CLAIMS,
+  FIRST_PERSON_CONDITION,
+  GENERAL_RULE,
+  HYPOTHETICAL,
+  LATIN_CLAIMS,
+  MODAL_FUTURE,
+  MODAL_LEAD,
+  MONEY_TOPIC_ENGLISH,
+  MONEY_TOPIC_FOREIGN_LATIN,
+  MONEY_TOPIC_FOREIGN_NATIVE,
+  NATIVE_CLAIMS,
+  NEGATION_GLUE_ENGLISH,
+  NEGATION_LATIN,
+  NEGATION_NATIVE,
+  NEGATION_WORDS_ENGLISH,
+  OPENER_CONDITION,
+  OPENS_ON_CONDITION,
+  PAST_ANCHOR,
+  PRONOUN_START,
+  RECORD_ANCHOR,
+  REVIEWED_ENGLISH_CLAIMS,
+  TRUTHFUL_SPANS,
+  type ClaimPattern,
+} from './zeke-claim-patterns.ts';
 import { gaslessEnabled, isOnboarding, laneAccess } from '../payments/stablecoin-lane.ts';
 import { kindInScope, launchScope } from '../server/launch-scope.ts';
 import type { KybLifecycleState } from '../compliance/kyb-state.ts';
@@ -741,6 +768,7 @@ function instructionPatterns(): readonly RegExp[] {
 const CONFUSABLES: Record<string, string> = {
   '\u0430': 'a', '\u0435': 'e', '\u043e': 'o', '\u0440': 'p', '\u0441': 'c', '\u0443': 'y', '\u0445': 'x',
   '\u0456': 'i', '\u0458': 'j', '\u04bb': 'h', '\u0455': 's', '\u043a': 'k', '\u0442': 't', '\u043c': 'm', '\u043d': 'h',
+  '\u0501': 'd', '\u051b': 'q', '\u051d': 'w', '\u0578': 'n', '\u0585': 'o', '\u0570': 'h', '\u0251': 'a', '\u0261': 'g', '\u0269': 'i', '\u03b5': 'e', '\u03b7': 'n',
   '\u03b1': 'a', '\u03bf': 'o', '\u03c1': 'p', '\u03b9': 'i', '\u03bd': 'v', '\u03c5': 'u', '\u03ba': 'k', '\u03c4': 't',
 };
 
@@ -1940,8 +1968,11 @@ export function sanitizeOxwalHistory(value: unknown): OxwalChatTurn[] {
  *   money-ahead  what follows prepares money; say the statement first.
  *   proceed      the turn passed its refusals and may act now.
  *   declined     the turn ends without preparing anything.
+ *   model-text   words the model wrote (as against Splash's own fixed words),
+ *                held by the wrapper so the completion guard can read them.
  */
 type OxwalTurnSignal =
+  | { type: 'model-text'; text: string }
   | { type: 'money-ahead'; action: ZekeMoneyAction }
   | { type: 'proceed' }
   | { type: 'declined' };
@@ -1992,7 +2023,7 @@ async function* runClaudeToolLoop(
     if (moneyAhead) yield { type: 'money-ahead', action: moneyAhead };
 
     for (const block of content) {
-      if (block.type === 'text') yield { type: 'delta', text: block.text };
+      if (block.type === 'text') yield { type: 'model-text', text: block.text };
     }
 
     if (toolUses.length === 0) return;
@@ -2612,22 +2643,33 @@ export function classifyZekeIntent(message: string): ZekeIntent {
     ?? { class: 'OTHER' };
 }
 
-// ─── v2 Phase 3: Zeke never says money moved \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+// --- v2 Phase 3: Zeke never says money moved ----------------------------------
 //
 // Zeke cannot send, approve or sign. A sentence the model writes that says
 // money has been or is being sent, paid or done is therefore false, however
 // well meant, and a prompt-injected invoice can ask for it outright. The
 // prompt says so, but the prompt is not the control: code is.
 //
-// On a turn that proposes, prepares or discusses a money movement, every
-// sentence that claims completion is dropped before it reaches the person,
-// and the reply carries a fixed, truthful line in its place. The detection is
-// deterministic (no model reads the model), works on the text as a person
-// reads it (look-alike letters, hidden characters, spaced or dotted letters,
-// small caps, accents, stretched words, markdown), covers the languages a
-// business writes in, and leaves a sentence alone when it is negated ("has
-// not been sent"), conditional ("once approved it will be sent") or fixed
-// Splash copy. A turn about something else is never touched.
+// Two controls, and the second does not depend on the first being complete:
+//
+//   1. Sentences that claim completion are dropped before they reach the
+//      person. The detection is a list of phrasings (lib/agent/zeke-claim-
+//      patterns.ts), deterministic, with no model reading the model. A list of
+//      phrasings cannot be complete: a person can always find one more.
+//   2. On a turn that proposed, prepared, handed off or reached for a money
+//      tool, the reply ALWAYS carries a fixed, truthful line, whether or not
+//      a claim was recognised. A claim the list missed is contradicted in the
+//      same reply by words only Splash writes.
+//
+// It works on the text as a person reads it (look-alike letters, hidden and
+// invisible characters, spaced or dotted letters, small caps, accents,
+// stretched words, markdown and markup), covers the languages a business
+// writes in, and leaves a sentence alone when a negation, a hypothesis or a
+// modal governs the claim ("has not been sent", "if it had been sent", "once
+// approved it will be sent"), when it states what a record shows ("Invoice
+// INV-1 is paid"), or when it states what Zeke did ("I sent the draft to
+// Wallet for approval"). An opener such as "After review:" or "Do not worry"
+// does not excuse a claim. A turn about something else is never touched.
 //
 // The fixed opening message and the Zeke page header are not part of this.
 
@@ -2636,6 +2678,14 @@ export const ZEKE_NOT_SENT_PREPARED = 'Nothing has been sent. It is waiting for 
 /** The same when nothing was prepared this turn, so no approval is waiting for it. */
 export const ZEKE_NOT_SENT_PLAIN =
   "I haven't sent anything. I can't approve or send payments, so a person on your team does that.";
+/** To a question about whether a payment went through, when there is nothing prepared to report on. */
+export const ZEKE_NOT_SENT_STATUS = "I can't tell you whether it went through. Open History to see where it stands.";
+
+/** The fixed line for a turn: what is waiting, what was asked, or neither. */
+function notSentLine(options: { prepared: boolean; status?: boolean }): string {
+  if (options.prepared) return ZEKE_NOT_SENT_PREPARED;
+  return options.status ? ZEKE_NOT_SENT_STATUS : ZEKE_NOT_SENT_PLAIN;
+}
 
 /**
  * How closely the turn is about moving money:
@@ -2645,7 +2695,8 @@ export const ZEKE_NOT_SENT_PLAIN =
  */
 export type ZekeMoneyTurnLevel = 'strict' | 'topic' | 'none';
 
-const HIDDEN_CHARACTERS = /[\u00ad\u200b-\u200f\u2028-\u202e\u2060-\u2064\ufeff]/g;
+/** Invisible and format characters, whatever script they come from. */
+const HIDDEN_CHARACTERS = /[\p{Default_Ignorable_Code_Point}\p{Cf}\u2028\u2029\u2800]/gu;
 const CONTROL_CHARACTERS = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g;
 
 const SMALL_CAPS: Record<string, string> = {
@@ -2655,10 +2706,28 @@ const SMALL_CAPS: Record<string, string> = {
 };
 const SMALL_CAPS_PATTERN = new RegExp(`[${Object.keys(SMALL_CAPS).join('')}]`, 'g');
 
-/** The text as it reads: compatibility forms, hidden characters, markdown marks, one case. Scripts are kept. */
-function nativeFold(value: string): string {
+const NAMED_ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
+
+/** "&#80;" and "&amp;" as the characters they stand for. */
+function decodeEntities(value: string): string {
+  return value.replace(/&(?:#(\d{1,7})|#x([0-9a-f]{1,6})|(amp|lt|gt|quot|apos|nbsp));/gi, (whole, dec, hex, name) => {
+    if (name) return NAMED_ENTITIES[String(name).toLowerCase()] ?? whole;
+    const code = dec ? Number.parseInt(dec, 10) : Number.parseInt(hex, 16);
+    return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : '';
+  });
+}
+
+/** Comments, tags and link syntax read as the words inside them, with bounded searches. */
+function stripMarkup(value: string): string {
   return value
-    .normalize('NFKC')
+    .replace(/<!--[\s\S]{0,300}?-->/g, '')
+    .replace(/<\/?[a-z][^<>]{0,200}>/gi, '')
+    .replace(/\[([^\][]{0,200})\]\([^)\s]{0,300}\)/g, '$1');
+}
+
+/** The text as it reads: compatibility forms, entities, markup, hidden characters, markdown marks, one case. Scripts are kept. */
+function nativeFold(value: string): string {
+  return stripMarkup(decodeEntities(value.normalize('NFKC')))
     .replace(HIDDEN_CHARACTERS, '')
     .replace(CONTROL_CHARACTERS, '')
     .replace(/[\u2018\u2019\u02bc\u00b4]/g, "'")
@@ -2671,7 +2740,7 @@ function nativeFold(value: string): string {
 /** The same in Latin letters only: look-alikes, small caps, accents, spaced and dotted letters read as the word. */
 function latinFold(native: string): string {
   return native
-    .replace(/[\u0370-\u03ff\u0400-\u04ff]/g, (char) => CONFUSABLES[char] ?? char)
+    .replace(/[\u0250-\u02af\u0370-\u03ff\u0400-\u052f\u0530-\u058f]/g, (char) => CONFUSABLES[char] ?? char)
     .replace(SMALL_CAPS_PATTERN, (char) => SMALL_CAPS[char] ?? char)
     .normalize('NFD')
     .replace(/\p{M}/gu, '')
@@ -2685,6 +2754,7 @@ const STRETCHABLE_CLAIM_WORDS = [
   'paid', 'sent', 'done', 'transferred', 'wired', 'settled', 'released', 'processed', 'executed', 'completed',
   'submitted', 'approved', 'signed', 'funded', 'deposited', 'refunded', 'reimbursed', 'swapped', 'converted',
   'dispatched', 'delivered', 'cleared', 'finished', 'success', 'successful', 'successfully', 'complete',
+  'payed', 'remitted', 'disbursed', 'redeemed', 'allocated', 'debited', 'credited',
 ];
 const collapseRuns = (word: string) => word.replace(/([a-z])\1+/g, '$1');
 const STRETCHED_TO_CLAIM_WORD = new Map(STRETCHABLE_CLAIM_WORDS.map((word) => [collapseRuns(word), word]));
@@ -2698,257 +2768,257 @@ function claimReadings(segment: string): { native: string; latin: string[] } {
   return { native, latin: [...new Set([base, leet, restored])] };
 }
 
-const CLAIM_VERB =
-  '(?:sent|paid|transferr?ed|wired|remit{1,2}ed|set{1,2}led|disbursed|released(?!\\s+by\\b)|proces{1,2}ed|executed|completed|submit{1,2}ed|approved(?!\\s+by\\b)|signed(?!\\s+(?:in|up|out|on|off|by)\\b)|authori[sz]ed(?!\\s+by\\b)|funded|deposited|credited|refunded|reimbursed|swapp?ed|converted|withdrawn|withdrew|invested|allocated|redeemed|swept|dispatched|finali[sz]ed|cleared|delivered|initiated|forwarded|actioned|transmitted)';
-const ADVERBS = '(?:just|already|now|successfully|also|finally|duly|safely|fully|all|been|being)';
-const BOUNDARY = String.raw`[,;:!.\-\u2013\u2014]`;
-
-type ClaimPattern = {
-  re: RegExp;
-  /** Said of a payment only; a discussion turn lets a bare "done" be just a word. */
-  strictOnly?: boolean;
-  /** The speaker says they did it: a conditional opening the sentence does not excuse it. */
-  firstPerson?: boolean;
-  /** Bare "is sent": habitual when a condition sits anywhere in the sentence. */
-  tensed?: boolean;
-  /** Said of the future ("will arrive"): excused by an approval or condition anywhere in the sentence. */
-  wholeSentence?: boolean;
-};
-
-const rx = (source: string) => new RegExp(source, 'g');
-
-const WORD_BREAK = '[^a-z0-9]*';
-// A claim opens a clause: the start of the sentence, or after a comma, colon, dash or full stop.
-const AT_START = String.raw`(?:^|[,;:.!?\u2013\u2014(])[^a-z0-9]*(?:(?:ok|okay|great|alright|perfect|sure|yes|yep|good|cool|nice|so|now|and|well|there you go|good news|great news)[^a-z0-9]+)*`;
-
-const ENGLISH_CLAIMS: readonly ClaimPattern[] = [
-  { re: rx(String.raw`\b(?:i|we|zeke)(?:'ve|\s+(?:have|has|had|did)|'d)?\s+(?:(?:just|already|now|successfully|also|finally|duly|safely|(?:gone|went|go) ahead and)\s+)*${CLAIM_VERB}\b`), firstPerson: true },
-  { re: rx(String.raw`\b(?:i|we)(?:'ve|\s+have)?\s+(?:just\s+|already\s+)?made\s+(?:the|a|your|that|this)\s+(?:payment|transfer|payout|transaction|deposit|withdrawal)\b`), firstPerson: true },
-  { re: rx(String.raw`\b(?:i|we)(?:'ve|\s+have)?\s+(?:just\s+|already\s+)?moved\s+(?:the|your|those)\s+(?:funds?|money|usdc)\b`), firstPerson: true },
-  { re: rx(String.raw`\b(?:has|have|had|was|were|got|is|are|be|been)\s+(?:${ADVERBS}\s+)*${CLAIM_VERB}\b`), tensed: true },
-  { re: rx(String.raw`\b(?:i(?:'m|\s+am)|we(?:'re|\s+are)|zeke\s+is)\s+(?:(?:now|just|currently|already|actually)\s+)*(?:sending(?!\s+you\b)|paying(?!\s+(?:attention|close|special)\b)|transferring|wiring|remitting|releasing|executing|settling|disbursing|dispatching|refunding|swapping|withdrawing|depositing)\b`), firstPerson: true },
-  { re: rx(String.raw`\b(?:is|are)\s+(?:now\s+|currently\s+)?(?:on (?:its|their|the) way|in transit|en route|processing)\b`) },
-  { re: rx(String.raw`\b(?:sending|paying|transferring|wiring|remitting|approving|signing|releasing|executing|processing|settling|submitting)\s+(?:it|this|that|them|the (?:money|funds|payment|transfer))\s+(?:now|right now|today|immediately)\b|\b(?:sending|paying|transferring|approving|releasing)\s+(?:now|right now)\b`) },
-  { re: rx(String.raw`\bprocessing\s+(?:the|your|this|that)\s+(?:payment|transfer|payout|transaction|batch|withdrawal|refund)\b`) },
-  { re: rx(String.raw`\b(?:payments?|payouts?|transfers?|money|funds?|transactions?)\s+${CLAIM_VERB}\b`) },
-  { re: rx(String.raw`\b(?:payments?|payouts?|transfers?|transactions?|batch(?:es)?|withdrawals?|swaps?|settlements?|deposits?|disbursements?|remittances?|refunds?)\s+(?:(?:is|are|was|were|has|have|had|been|now|all|just|successfully)\s+)*(?:complete[d]?|successful(?:ly)?|confirmed|done|finali[sz]ed|received|delivered|cleared|executed|processed|approved|released)\b`) },
-  { re: rx(String.raw`\bsuccess{1,2}fully\s+${CLAIM_VERB}\b`) },
-  { re: rx(String.raw`\b${CLAIM_VERB}\s+success{1,2}fully\b`) },
-  { re: rx(String.raw`\b(?:payment|transfer|transaction|it|that|this)\s+(?:has\s+|have\s+)?(?:went|gone)\s+through\b`) },
-  { re: rx(String.raw`\bconsider (?:it|this|that) (?:paid|sent|settled|transferred)\b`) },
-  { re: rx(String.raw`\b(?:money|funds?|usdc|payment)\s+(?:has\s+|have\s+)?moved\b|\b(?:has|have|had)\s+(?:now\s+|already\s+)?received\s+(?:the|your|their|its)\s+(?:money|funds|payment|transfer|usdc)\b|\b(?:funds?|money|payment|usdc)\s+(?:has\s+|have\s+)?(?:arrived|landed|reached\s+(?:them|acme|the))\b|\b(?:has|have|had|just)\s+(?:gone|went)\s+out\b|\b(?:transaction|tx)\s+(?:id|hash|digest)\s*[:=]\s*(?:0x)?[a-f0-9]{6,}`) },
-  // A claim as the whole of the sentence, or its first word: "Paid!", "Sent, thanks", "Payment sent."
-  { re: rx(String.raw`${AT_START}(?:(?:all|it is|it's|its|that's|thats|that is|everything is)\s+)?(?:paid|sent|settled|executed|transferred|processed|released|success|successful)\b(?:\s+(?:it|out|off|now|already|successfully))?[^a-z0-9]*(?:${BOUNDARY}|$)`) },
-  { re: rx(String.raw`${AT_START}(?:(?:all|it is|it's|that's|everything is)\s+)?(?:done|completed|finished|sorted|handled)\b(?=[^a-z0-9]*(?:${BOUNDARY}|$)|\s+(?:i|we|it|that|this|and|now|all|everything)\b)`), strictOnly: true },
-  { re: rx(String.raw`\b(?:it's|its|that's|thats|everything's|all)\s+(?:all\s+)?(?:done|sorted|handled)\b|\ball done\b|\bdone and dusted\b|\bconsider (?:it|this|that) (?:done|handled|sorted)\b|\btaken care of\b|\byou(?:'re| are) all set\b|\bgood to go\b`), strictOnly: true },
-  { re: rx(String.raw`\b(?:funds?|money|usdc|payment|transfer)\s+(?:is|are|will be|should be|'ll be)\s+(?:arriving|landing|reaching|with (?:them|acme|the)|in (?:their|the) account)\b|\b(?:will|should|'ll)\s+(?:arrive|land|reach)\s+(?:in|within|by|today|tomorrow|shortly|soon|on)\b`), strictOnly: true, wholeSentence: true },
-];
-
-/** Latin-script languages. The text is read without accents, so the patterns are written without them. */
-const LATIN_CLAIMS: readonly ClaimPattern[] = [
-  // Indonesian and Malay
-  { re: rx(String.raw`\b(?:sudah|telah|udah)\s+(?:saya\s+|kami\s+)?(?:\w+\s+){0,2}?(?:di|ter|me)?(?:kirim|bayar|transfer|hantar)\w*`) },
-  { re: rx(String.raw`\bpembayaran\s+(?:telah\s+|sudah\s+)?(?:berhasil|sukses|selesai|berjaya|diterima)\b|\b(?:berhasil|sukses|berjaya)\s+(?:di)?(?:kirim|bayar|transfer|hantar)\w*`) },
-  { re: rx(`${AT_START}(?:terkirim|terbayar|lunas|dikirim|dibayar|ditransfer|dihantar)\\b${WORD_BREAK}(?:${BOUNDARY}|$)`) },
-  { re: rx(`${AT_START}(?:selesai|beres|siap|tuntas)\\b${WORD_BREAK}(?:${BOUNDARY}|$)`), strictOnly: true },
-  // Tagalog
-  { re: rx(String.raw`\b(?:naipadala|ipinadala|nabayaran|binayaran|nailipat|inilipat)(?:\s+na)?\b|\bbayad\s+na\b`) },
-  { re: rx(String.raw`\b(?:tapos|natapos)\s+na\b`), strictOnly: true },
-  // Vietnamese
-  { re: rx(String.raw`\bda\s+(?:\w+\s+){0,1}?(?:gui|thanh toan|chuyen|tra tien|xu ly|thuc hien|hoan tat|hoan thanh)\b|\bthanh cong\b`) },
-  { re: rx(String.raw`\b(?:hoan tat|hoan thanh|xong roi|da xong)\b`), strictOnly: true },
-  // Spanish, Portuguese, Italian
-  { re: rx(String.raw`\b(?:he|hemos|ha|han)\s+(?:\w+\s+){0,1}?(?:enviado|pagado|transferido|realizado|procesado|completado|ejecutado|aprobado|firmado|abonado|depositado)\b|\bse\s+(?:ha\s+)?(?:enviado|pagado|transferido|realizado)\b`) },
-  { re: rx(String.raw`\b(?:ha|han|fue|fueron)\s+(?:sido\s+)?(?:enviad[oa]|pagad[oa]|transferid[oa]|procesad[oa]|completad[oa]|ejecutad[oa]|aprobad[oa]|realizad[oa]|efectuad[oa]|abonad[oa])s?\b`) },
-  { re: rx(String.raw`\b(?:pago|pagamento|transferencia|transferenza|trasferimento|envio|transacao|transazione|operacion|bonifico)\s+(?:(?:ha|foi|e)\s+(?:sido\s+|stato\s+)?)?(?:enviad[oa]|inviato|realizad[oa]|realizzato|conclu[i]d[oa]|completad[oa]|completato|efetuad[oa]|effettuato|eseguito|exitos[oa]|processad[oa]|elaborato|aprovad[oa]|aprobad[oa]|riuscito|confermato)s?\b`) },
-  { re: rx(String.raw`\b(?:enviei|paguei|transferi|efetuei|realizei|processei|executei|aprovei|liberei|quitei)\b`) },
-  { re: rx(String.raw`\b(?:foi|foram|ja foi|esta|estao)\s+(?:\w+\s+){0,1}?(?:enviad[oa]s?|pag[oa]s?|transferid[oa]s?|processad[oa]s?|conclu[i]d[oa]s?|executad[oa]s?|realizad[oa]s?|efetuad[oa]s?|aprovad[oa]s?)\b`) },
-  { re: rx(String.raw`\b(?:ho|abbiamo)\s+(?:\w+\s+){0,1}?(?:inviato|pagato|trasferito|eseguito|effettuato|bonificato|approvato|completato|elaborato|rimborsato)\b`) },
-  { re: rx(String.raw`\b(?:e stato|e stata|sono stati|sono state)\s+(?:\w+\s+){0,1}?(?:inviat[oai]|pagat[oai]|trasferit[oai]|eseguit[oai]|effettuat[oai]|elaborat[oai]|completat[oai])\b`) },
-  { re: rx(`${AT_START}(?:enviado|pagado|transferido|realizado|efectuado|pago|transferi|concluido|efetuado|inviato|pagato|eseguito|effettuato)\\b${WORD_BREAK}(?:${BOUNDARY}|$)`) },
-  { re: rx(`${AT_START}(?:listo|hecho|completado|feito|pronto|fatto)\\b${WORD_BREAK}(?:${BOUNDARY}|$)`), strictOnly: true },
-  // French
-  { re: rx(String.raw`\b(?:j'ai|nous avons|on a|il a ete|elle a ete|ils ont ete|a ete|ont ete|est)\s+(?:\w+\s+){0,1}?(?:envoye|paye|vire|effectue|transfere|execute|traite|valide|approuve|regle|rembourse|debloque|libere)e?s?\b`) },
-  { re: rx(String.raw`\b(?:paiement|virement|transfert|transaction|versement)\s+(?:est\s+|a ete\s+)?(?:effectue|envoye|reussi|termine|valide|execute|complete|confirme|traite)e?s?\b`) },
-  { re: rx(`${AT_START}(?:envoye|paye|vire|effectue)e?\\b${WORD_BREAK}(?:${BOUNDARY}|$)`) },
-  { re: rx(String.raw`\bc'est\s+fait\b|${AT_START}(?:fait|termine)e?\b${WORD_BREAK}(?:${BOUNDARY}|$)`), strictOnly: true },
-  // Turkish
-  { re: rx(String.raw`\b(?:gonderildi|odendi|aktarildi|islendi|yapildi|tamamlandi)\b|\b(?:gonderdim|odedim|aktardim|yaptim)\b`) },
-  // Dutch
-  { re: rx(String.raw`\b(?:ik heb|wij hebben)\s+(?:\w+\s+){0,2}?(?:verzonden|betaald|overgemaakt|verstuurd|overgeboekt|uitgevoerd|goedgekeurd)\b|\b(?:is|zijn|werd|werden)\s+(?:\w+\s+){0,1}?(?:verzonden|betaald|overgemaakt|verstuurd|overgeboekt|uitgevoerd)\b|\bbetaling\s+(?:is\s+)?(?:voltooid|geslaagd|uitgevoerd|verzonden)\b`) },
-  { re: rx(`${AT_START}(?:klaar|gedaan)\\b${WORD_BREAK}(?:${BOUNDARY}|$)`), strictOnly: true },
-  // German
-  { re: rx(String.raw`\bich\s+habe\s+(?:\w+\s+){0,2}?(?:gesendet|uberwiesen|bezahlt|ausgefuhrt|abgeschickt|freigegeben|gezahlt|angewiesen|ubermittelt|verschickt|genehmigt|beglichen)\b`) },
-  { re: rx(String.raw`\b(?:wurde|wurden|ist|sind)\s+(?:\w+\s+){0,1}?(?:gesendet|uberwiesen|bezahlt|ausgefuhrt|verarbeitet|gezahlt|abgeschickt|freigegeben|genehmigt|ubermittelt|verschickt)\b`) },
-  { re: rx(String.raw`\bzahlung\s+(?:ist\s+|wurde\s+)?(?:erfolgt|abgeschlossen|ausgefuhrt|erfolgreich|gesendet|bestatigt)\b`) },
-  { re: rx(`${AT_START}(?:gesendet|bezahlt|uberwiesen|ausgefuhrt)\\b${WORD_BREAK}(?:${BOUNDARY}|$)`) },
-  { re: rx(`${AT_START}(?:erledigt|fertig)\\b${WORD_BREAK}(?:${BOUNDARY}|$)`), strictOnly: true },
-];
-
-const WORD = String.raw`(?<![\p{L}\p{N}])`;
-
-/** Languages in other scripts, read as written (not folded to Latin letters). */
-const NATIVE_CLAIMS: readonly ClaimPattern[] = [
-  // Thai
-  { re: /(?:ส่ง|จ่าย|โอน|ชำระ|ดำเนินการ)(?:เงิน)?(?:ให้\S{0,10})?(?:เรียบร้อย)?แล้ว|(?:ส่ง|จ่าย|โอน|ชำระ)เงิน?สำเร็จ/gu },
-  { re: /เรียบร้อยแล้ว|สำเร็จแล้ว/gu, strictOnly: true },
-  // Chinese, simplified and traditional
-  { re: /(?:已经?|已被|已成功|成功)(?:发送|发出|支付|付款|转账|转帐|汇款|汇出|转出|打款|划转|付|转|汇|处理|执行|提交|批准|签署|结算|退款|存入|發送|發出|轉帳|轉賬|匯款|匯出|轉出|處理|執行|批準|簽署|結算)|(?:发送|支付|付款|转账|转帐|汇款|打款|交易|结算|發送|轉帳|轉賬|匯款|結算)(?:已)?成功|(?:支付|付款|转账|汇款|转帐|轉帳|匯款)完成|已到账|已到帳/gu },
-  { re: /搞定|(?:已|已经|已經)完成|完成了/gu, strictOnly: true },
-  // Japanese
-  { re: /(?:送金|支払い?|振り?込み?|送信|入金|決済|処理|実行|承認|署名|返金|精算|引き落とし)(?:し|さ)?(?:ました|れました|済み|済)/gu },
-  { re: /(?:完了|終了)(?:しました|です|致しました)/gu, strictOnly: true },
-  // Korean
-  { re: /(?:송금|결제|지불|전송|입금|이체|처리|승인|발송|보내)(?:했|하였|되었|됐)|(?:보냈|지불했|송금했|결제했|입금했|이체했)|완료(?:되었|됐|했)/gu },
-  // Russian
-  { re: new RegExp(`${WORD}(?:отправлен|оплачен|переведен|переведён|выполнен|проведен|проведён|завершен|завершён|совершен|совершён)[а-яё]*`, 'gu') },
-  { re: new RegExp(`${WORD}я\\s+(?:уже\\s+)?(?:отправил|оплатил|перевел|перевёл|выполнил|провел|провёл|совершил|одобрил|подписал)[а-яё]*`, 'gu'), firstPerson: true },
-  { re: new RegExp(`${WORD}платеж[а-яё]*\\s+(?:был[а]?\\s+)?(?:выполнен|отправлен|завершен|завершён|прошел|прошёл|успешно)`, 'gu') },
-  { re: new RegExp(`^[^а-яё]*(?:готово|успешно)(?![а-яё])`, 'gu'), strictOnly: true },
-  // Hindi
-  { re: /(?:भेज\s*दि(?:या|ए)|भेज\s*दी|भुगतान\s*(?:हो\s*गया|कर\s*दिया)|ट्रांसफर\s*(?:हो\s*गया|कर\s*दिया))/gu },
-  // Arabic
-  { re: /تم\s*(?:ال)?(?:إرسال|ارسال|دفع|تحويل|سداد|تنفيذ)|(?:أرسلت|دفعت|حولت|سددت|نفذت)/gu },
-];
-
-const NEGATION = new RegExp(
-  [
-    String.raw`\b(?:not|never|nothing|none|neither|nor|without|unable|cannot|no longer|yet to)\b`,
-    String.raw`n't`,
-    String.raw`\bno\s+(?:payments?|money|funds?|transfers?|transactions?|payouts?|usdc)\b`,
-    String.raw`\b(?:belum|tidak|tak|bukan|tiada|tanpa|hindi|wala|chua|khong|nada|ningun\w*|sin|rien|jamais|aucun\w*|pas|nao|nunca|nicht|nichts|kein\w*|ohne|nie|non|nulla|niente|mai|senza|degil|henuz|yok|niet|geen|niets|zonder)\b`,
-    String.raw`\bno\s+(?:se|he|ha|han|hemos|fue|es|esta|hay)\b|\b(?:aun|todavia|ya)\s+no\b`,
-    '未|没有|沒有|尚未|还没|還沒|并未|並未|ません|ていない|まだ|않|못했|아직|ยังไม่|ไม่|لم|لن|ليس|नहीं|नही',
-    '(?<![а-яё])(?:не|ничего|нет|без)(?![а-яё])',
-  ].join('|'),
-  'iu',
-);
-
-const CONDITION = new RegExp(
-  [
-    String.raw`\b(?:if|unless|once|until|till|after|when|whenever|as soon as|before|whether|upon|approves?|approving|signs?|waiting for|awaiting|pending)\b`,
-    String.raw`\b(?:setelah|jika|kalau|apabila|sesudah|menunggu|persetujuan|kapag|pagkatapos|kung|hintay|sau khi|neu|doi|phe duyet)\b`,
-    String.raw`\b(?:una vez|cuando|despues|tras|hasta|aprobacion|aprueba|esperando|pendiente|une fois|apres|quand|lorsque|des que|en attente|jusqu|approbation|depois|assim que|quando|aguardando|pendente|apos|nach|sobald|wenn|falls|warte|ausstehend|freigabe|dopo|fino|in attesa|approvazione|sonra|onay|beklen|nadat|zodra|wanneer|goedkeuring)\b`,
-    '批准后|批准後|审批后|審批後|之后|之後|等待|等候|一旦|如果|获批|獲批|批准前|待批准|承認後|承認され次第|承認されるまで|承認待ち|場合|승인 후|승인되면|승인 전|대기|경우|หลังจาก|เมื่อ|ถ้า|หาก|รอ|อนุมัติ|после|когда|если|ожида|بعد|عند|إذا|عندما|انتظار|موافقة|के बाद|अगर|जब',
-  ].join('|'),
-  'iu',
-);
-
-/** Words that make a present-tense statement a rule rather than an event: "every release is approved by a person". */
-const GENERAL_RULE = /\b(?:every|each|any|always|usually|normally|typically|generally|whenever)\b/i;
-
-const FIRST_PERSON_CONDITION = /\b(?:if|unless|whether)\b/i;
-
-/** A modal or "to" straight before the claim: "will be sent", "can be paid", "to be released". */
-const MODAL_LEAD = /\b(?:will|would|'ll|can|could|should|may|might|must|shall|cannot|to|going to|gets?|about to)\s+(?:then\s+|also\s+|only\s+)?$/i;
-
-/** A sentence that opens on a condition says what happens then, not what happened. */
-const OPENS_ON_CONDITION = /^[^a-z0-9]*(?:if|once|when|after|as soon as|until|unless|whenever|before|upon|assuming|provided|setelah|jika|una vez|cuando|apres|quand|une fois|depois|quando|sobald|wenn|nach|dopo)\b/;
-
-/** A date or a record: the sentence reports what history shows, which a discussion turn may. */
-const PAST_ANCHOR = new RegExp(
-  [
-    String.raw`\b(?:yesterday|last (?:week|month|year|night|quarter)|\d+ (?:days?|weeks?|months?|years?) ago|on (?:mon|tues|wednes|thurs|fri|satur|sun)day)\b`,
-    String.raw`\b\d{1,2}(?:st|nd|rd|th)? (?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b`,
-    String.raw`\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]* \d{1,2}(?:st|nd|rd|th)?\b`,
-    String.raw`\b\d{4}-\d{2}-\d{2}\b`,
-    String.raw`\b(?:receipts?|history|statements?)\b`,
-    '\\d{1,2}月\\d{1,2}日|\\d{4}年',
-  ].join('|'),
-  'iu',
-);
-
-const CJK_OR_THAI = /[\u0e00-\u0e7f\u3040-ヿ㐀-鿿가-\ud7af]/;
+const CJK_OR_THAI = /[\u0e00-\u0e7f\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/;
 const CLAUSE_BREAKS = [',', ';', ':', '.', '!', '?', '(', ')', '\u3001', '\uff0c', '\uff1b', '\uff1a', '\u3002', '\uff01', '\uff1f', '\u2014', '\u2013'];
 
-/** Whether the claim is negated, conditional or about the future in the clause it sits in. */
-function claimIsExcused(text: string, index: number, matched: string, pattern: ClaimPattern): boolean {
-  const span = CJK_OR_THAI.test(text.charAt(index)) ? 10 : 28;
-  const before = text.slice(Math.max(0, index - span), index);
-  const cut = Math.max(...CLAUSE_BREAKS.map((mark) => before.lastIndexOf(mark)));
-  const clause = cut >= 0 ? before.slice(cut + 1) : before;
+type ClaimFamily = 'english' | 'latin' | 'native';
 
-  if (NEGATION.test(`${clause} ${matched}`)) return true;
-  // Someone who says they did it is not excused by "when" or "after"; only "if I have sent it" is.
-  if ((pattern.firstPerson ? FIRST_PERSON_CONDITION : CONDITION).test(clause)) return true;
-  if (MODAL_LEAD.test(clause)) return true;
-  // "is sent" with nothing to say it already happened is a habit, not an event,
-  // when the sentence names a condition: "once approved, it is sent".
-  const bare = pattern.tensed && /^(?:is|are)\s+(?!(?:just|already|now|successfully|also|finally|duly|safely|fully|all|been|being)\b)/.test(matched);
-  if ((bare || pattern.wholeSentence) && (CONDITION.test(text) || GENERAL_RULE.test(text))) return true;
+const wordsOf = (value: string) => value.match(/[a-z0-9']+/g) ?? [];
+const isEnglishNegator = (word: string) => NEGATION_WORDS_ENGLISH.has(word) || word.endsWith("n't");
+
+/**
+ * Whether a negation governs the claim: it is in the claim, or it is the
+ * nearest word before it once the words that only carry the verb are set
+ * aside ("has NOT yet been sent", "NONE OF THE payments has been sent"). A
+ * negation about something else ("Do not WORRY it has been sent", "Without
+ * DELAY I sent it") does not.
+ */
+function englishNegates(clause: string, matched: string): boolean {
+  if (wordsOf(matched).some(isEnglishNegator)) return true;
+  const words = wordsOf(clause);
+  for (let i = words.length - 1, steps = 0; i >= 0 && steps < 6; i -= 1, steps += 1) {
+    if (isEnglishNegator(words[i])) return true;
+    if (!NEGATION_GLUE_ENGLISH.has(words[i])) return false;
+  }
   return false;
 }
 
-function matchesClaim(text: string, patterns: readonly ClaimPattern[], level: 'strict' | 'topic'): boolean {
+/** Whether the claim is negated, hypothetical, conditional or about the future where it sits. */
+function claimIsExcused(text: string, rawIndex: number, matched: string, pattern: ClaimPattern, family: ClaimFamily): boolean {
+  // The mark that opens a clause-initial match belongs to the clause before it.
+  const index = rawIndex + (CLAUSE_BREAKS.includes(matched.charAt(0)) ? 1 : 0);
+  const before = text.slice(Math.max(0, index - 200), index);
+  const cut = Math.max(...CLAUSE_BREAKS.map((mark) => before.lastIndexOf(mark)));
+  const clause = cut >= 0 ? before.slice(cut + 1) : before;
+  const after = text.slice(rawIndex + matched.length);
+
+  if (family === 'english') {
+    if (englishNegates(clause, matched)) return true;
+    if (HYPOTHETICAL.test(clause)) return true;
+    if (MODAL_LEAD.test(clause)) return true;
+    // "is sent" with nothing to say it already happened is a habit or a rule, not an event.
+    const habitual = Boolean(pattern.wholeSentence)
+      || (/\b(?:is|are|be)\s+(?!(?:just|already|now|successfully|also|finally|duly|safely|fully|all|been|being)\b)/.test(matched)
+        && !/\b(?:has|have|had|was|were)\b/.test(matched));
+    if (habitual && (CONDITION.test(text) || GENERAL_RULE.test(text) || OPENS_ON_CONDITION.test(text))) return true;
+    if (pattern.conditionAfter && CONDITION.test(after)) return true;
+    // "Once it has been approved it will be sent": the approval is the condition, and the sentence goes on to the future.
+    if (!pattern.firstPerson && OPENER_CONDITION.test(clause) && APPROVAL_PARTICIPLE.test(matched) && MODAL_FUTURE.test(after)) return true;
+    return false;
+  }
+
+  const negated = family === 'latin'
+    ? NEGATION_LATIN.test(`${wordsOf(clause).slice(-3).join(' ')} ${matched}`)
+    : NEGATION_NATIVE.test(`${clause.slice(-(CJK_OR_THAI.test(text.charAt(index)) ? 10 : 28))} ${matched}`);
+  if (negated) return true;
+  // Someone who says they did it is not excused by "when" or "after"; only "if I have sent it" is.
+  if ((pattern.firstPerson ? FIRST_PERSON_CONDITION : CONDITION).test(clause)) return true;
+  if (MODAL_LEAD.test(clause)) return true;
+  if (pattern.wholeSentence && (CONDITION.test(text) || GENERAL_RULE.test(text))) return true;
+  return false;
+}
+
+type ClaimTable = { patterns: readonly ClaimPattern[]; family: ClaimFamily };
+const CLAIM_TABLES: readonly ClaimTable[] = [
+  { patterns: ENGLISH_CLAIMS, family: 'english' },
+  { patterns: REVIEWED_ENGLISH_CLAIMS, family: 'english' },
+  { patterns: LATIN_CLAIMS, family: 'latin' },
+  { patterns: NATIVE_CLAIMS, family: 'native' },
+];
+
+function matchesClaim(text: string, table: ClaimTable, level: 'strict' | 'topic', onlyFirstPerson: boolean): boolean {
   if (!text) return false;
-  const opensOnCondition = OPENS_ON_CONDITION.test(text);
-  for (const pattern of patterns) {
+  // A foreign sentence that opens on a condition says what happens then, not what happened.
+  const opensOnCondition = table.family !== 'english' && OPENS_ON_CONDITION.test(text);
+  for (const pattern of table.patterns) {
     if (pattern.strictOnly && level !== 'strict') continue;
+    if (onlyFirstPerson && !pattern.firstPerson) continue;
     if (opensOnCondition && !pattern.firstPerson) continue;
     for (const match of text.matchAll(pattern.re)) {
-      if (!claimIsExcused(text, match.index ?? 0, match[0], pattern)) return true;
+      if (!claimIsExcused(text, match.index ?? 0, match[0], pattern, table.family)) return true;
     }
   }
   return false;
 }
 
-/** Whether one sentence says money was, is being, or has been moved. */
-function claimsCompletion(segment: string, level: 'strict' | 'topic'): boolean {
-  const { native, latin } = claimReadings(segment);
-  if (level === 'topic' && (PAST_ANCHOR.test(latin[0]) || PAST_ANCHOR.test(native))) return false;
-  for (const reading of latin) {
-    if (matchesClaim(reading, ENGLISH_CLAIMS, level) || matchesClaim(reading, LATIN_CLAIMS, level)) return true;
-  }
-  return matchesClaim(native, NATIVE_CLAIMS, level);
+/** The sentence with what Zeke truly did ("sent the draft to Wallet for approval") taken out, so it is not read as a claim. */
+const withoutTruthfulSpans = (reading: string) => TRUTHFUL_SPANS.reduce((text, span) => text.replace(span, ' '), reading);
+
+/** A sentence about something the records show, not something done just now. */
+const JUST_NOW = /\b(?:just|now|right now|a moment ago|(?:a few |\d+ )?(?:minutes?|seconds?|hours?) ago|today|shortly|momentarily)\b/;
+function statesARecord(latin: string, native: string, level: 'strict' | 'topic'): boolean {
+  if (JUST_NOW.test(latin)) return false;
+  const dated = PAST_ANCHOR.test(latin) || PAST_ANCHOR.test(native);
+  if (level === 'topic') return dated || RECORD_ANCHOR.test(latin);
+  return RECORD_ANCHOR.test(latin) || (dated && !PRONOUN_START.test(latin));
 }
 
-/** A reply as sentences, each keeping its end mark and the space after it, so they join back to the text. */
-function splitSentences(text: string): string[] {
-  // A full stop ends a sentence after a word of two letters or more, even with no space ("OK.Paid!"),
-  // but not inside spaced-out letters ("S.E.N.T.").
-  const parts = text.match(/[^!?\u3002\uff01\uff1f\u2026\n;]*?(?:[!?]+|(?<=[\p{L}\p{N}]{2})\.+(?=\s|$|[A-Z\u00c0-\u00de])|\.+(?=\s|$)|[\u3002\uff01\uff1f]+|\u2026+|\n+|;|$)\s*/gu);
-  return (parts ?? [text]).filter((part) => part.length > 0);
+/** One piece of a sentence, at most a few hundred characters, so no sentence costs more than a bounded amount to read. */
+function claimsInPiece(piece: string, level: 'strict' | 'topic', records: boolean): boolean {
+  const { native, latin } = claimReadings(piece);
+  const readings = latin.map(withoutTruthfulSpans);
+  const found = (onlyFirstPerson: boolean, englishToo = true) =>
+    CLAIM_TABLES.some((table) => {
+      if (table.family === 'english' && !englishToo) return false;
+      return table.family === 'native'
+        ? matchesClaim(native, table, level, onlyFirstPerson)
+        : readings.some((reading) => matchesClaim(reading, table, level, onlyFirstPerson));
+    });
+  if (!found(false)) return false;
+  // What the records show is not a claim that Zeke moved money; only a first-person claim beside it is,
+  // and the allowance is for English record words: a claim in another language stays a claim.
+  if (records && statesARecord(readings[0], native, level)) return found(true) || found(false, false);
+  return true;
 }
+
+const PIECE_LENGTH = 1200;
+const PIECE_STEP = 1000;
+
+/** Whether one sentence says money was, is being, or has been moved. */
+function claimsCompletion(sentence: string, level: 'strict' | 'topic', records: boolean): boolean {
+  if (sentence.length <= PIECE_LENGTH) return claimsInPiece(sentence, level, records);
+  // A long sentence is read in overlapping pieces; a claim in any of them drops the whole sentence.
+  for (let start = 0; start < sentence.length; start += PIECE_STEP) {
+    if (claimsInPiece(sentence.slice(start, start + PIECE_LENGTH), level, records)) return true;
+  }
+  return false;
+}
+
+const SENTENCE_END = new Set(['!', '?', '\u3002', '\uff01', '\uff1f', '\u2026']);
+const isLetterOrDigit = (ch: string | undefined) => ch !== undefined && /[\p{L}\p{N}]/u.test(ch);
+
+/**
+ * A reply as sentences, each keeping its end mark and the space after it, so
+ * they join back to the text. One pass, no backtracking. A full stop ends a
+ * sentence after a word of two letters or more, even with no space
+ * ("OK.Paid!"), but not inside spaced-out letters ("S.E.N.T.").
+ */
+function splitSentences(text: string): string[] {
+  const parts: string[] = [];
+  const length = text.length;
+  let start = 0;
+  let i = 0;
+  while (i < length) {
+    const ch = text[i];
+    let end = -1;
+    if (ch === '\n') {
+      end = i;
+      while (end < length && text[end] === '\n') end += 1;
+    } else if (ch === ';') {
+      // The ";" that closes an entity ("&#80;") is part of the word it spells.
+      const amp = text.lastIndexOf('&', i);
+      const inEntity = amp >= 0 && i - amp <= 10 && /^&#?[a-z0-9]+$/i.test(text.slice(amp, i));
+      if (inEntity) {
+        i += 1;
+        continue;
+      }
+      end = i + 1;
+    } else if (ch === '!' && text[i - 1] === '<') {
+      // "<!-- comment -->" is markup, not the end of a sentence.
+      i += 1;
+      continue;
+    } else if (SENTENCE_END.has(ch)) {
+      end = i;
+      while (end < length && SENTENCE_END.has(text[end])) end += 1;
+    } else if (ch === '.') {
+      let run = i;
+      while (run < length && text[run] === '.') run += 1;
+      const next = text[run];
+      const spaceOrEnd = next === undefined || /\s/.test(next);
+      const afterWord = i >= 2 && isLetterOrDigit(text[i - 1]) && isLetterOrDigit(text[i - 2]) && next !== undefined && /[A-Z\u00c0-\u00de]/.test(next);
+      if (spaceOrEnd || afterWord) end = run;
+      else {
+        i = run;
+        continue;
+      }
+    }
+    if (end < 0) {
+      i += 1;
+      continue;
+    }
+    while (end < length && /\s/.test(text[end])) end += 1;
+    parts.push(text.slice(start, end));
+    start = end;
+    i = end;
+  }
+  if (start < length) parts.push(text.slice(start));
+  return parts;
+}
+
+/** More than this in one reply is not a chat answer: the rest is dropped, and the fixed line says what is true. */
+const MAX_GUARDED_CHARS = 24000;
+const MAX_GUARDED_SENTENCES = 300;
 
 /**
  * The reply with every sentence that claims money moved taken out, and the
- * fixed truthful line added once at the end. `prepared` says whether a
- * payment was prepared this turn, so that "waiting for approval" is only said
- * when something is. Unchanged (same string, `replaced: false`) when nothing
- * claims completion. Pure and deterministic.
+ * fixed truthful line added once at the end.
+ *
+ *   prepared  a payment was prepared this turn, so "waiting for approval" is
+ *             true; otherwise the plain line is used
+ *   status    the person asked whether a payment went through, so with nothing
+ *             prepared the line points to History
+ *   always    add the line even when no claim was recognised (a turn that
+ *             proposed, prepared or reached for a money tool)
+ *   records   a sentence that states what a record shows ("Invoice INV-1 is
+ *             paid") is left alone; off when a payment was just prepared
+ *
+ * Unchanged (same string, `replaced: false`) when nothing is to be said.
+ * Pure and deterministic; the same line is never added twice.
  */
 export function guardCompletionClaims(
   text: string,
-  options: { level: 'strict' | 'topic'; prepared: boolean },
+  options: { level: 'strict' | 'topic'; prepared: boolean; status?: boolean; always?: boolean; records?: boolean },
 ): { text: string; replaced: boolean } {
+  const records = options.records !== false;
+  const line = notSentLine(options);
+  const overCap = text.length > MAX_GUARDED_CHARS;
+  const sentences = splitSentences(overCap ? text.slice(0, MAX_GUARDED_CHARS) : text);
   const kept: string[] = [];
-  let replaced = false;
-  for (const sentence of splitSentences(text)) {
-    if (claimsCompletion(sentence, options.level)) replaced = true;
+  let replaced = overCap || sentences.length > MAX_GUARDED_SENTENCES;
+  for (const sentence of sentences.slice(0, MAX_GUARDED_SENTENCES)) {
+    if (claimsCompletion(sentence, options.level, records)) replaced = true;
     else kept.push(sentence);
   }
-  if (!replaced) return { text, replaced: false };
-  const line = options.prepared ? ZEKE_NOT_SENT_PREPARED : ZEKE_NOT_SENT_PLAIN;
+  if (!replaced) {
+    if (!options.always || !text.trim() || text.includes(line)) return { text, replaced: false };
+    return { text: `${text.trimEnd()}\n\n${line}`, replaced: true };
+  }
   const body = kept.join('').trim();
-  return { text: body ? `${body}\n\n${line}` : line, replaced: true };
+  if (!body) return { text: line, replaced: true };
+  return { text: body.includes(line) ? body : `${body}\n\n${line}`, replaced: true };
 }
-
-const MONEY_TOPIC_ENGLISH = new RegExp(
-  String.raw`\b(?:pay|pays|paying|paid|payments?|payouts?|payroll|transfers?|transferr?ed|transferring|wire|wired|wiring|remit\w*|settle\w*|disburs\w*|refunds?|reimburs\w*|withdraw\w*|swaps?|salary|salaries|batch(?:es)?|treasury|usdc|usdy|x402|allocate|redeem|sweep|invoices?|money|funds|send (?:it|this|that|money|funds|usdc|\$?\d)|sent (?:it|money|funds|usdc))\b`,
-  'i',
-);
-/** The same talk of payments in the Latin-script languages (read without accents) and the others. */
-const MONEY_TOPIC_FOREIGN_LATIN = new RegExp(
-  String.raw`\b(?:bayar\w*|kirim\w*|pembayaran|uang|duit|bayad|bayaran|padala|magbayad|magpadala|ipadala|thanh toan|chuyen tien|chuyen khoan|gui tien|tra tien|pag(?:a|ad[oa]s?|ar|ame|o|os|ue|amos|amento|amentos|are)|envi(?:a|ad[oa]|ar|o|e|ame|ei)|transfier\w*|transfir\w*|transferenc\w*|paiement|pay(?:er|ez)|envoi\w*|envoy\w*|virer|virez|virement|zahl\w*|bezahl\w*|uberweis\w*|senden|schick\w*|bonific\w*|invia\w*|trasfer\w*|odeme|gonder\w*|betaal\w*|betaling|overmaken|verstuur\w*)\b`,
-  'i',
-);
-const MONEY_TOPIC_FOREIGN_NATIVE = /支付|付款|付钱|付錢|转账|轉帳|转钱|汇款|匯款|发送|發送|打款|送金|支払|振込|振り込|決済|결제|송금|지불|입금|이체|보내|ส่งเงิน|ส่ง|จ่าย|โอน|ชำระ|оплат|заплат|отправ|перев|платеж|платит|دفع|تحويل|إرسال|ارسال|أرسل|भुगतान|भेज|ट्रांसफर|पैसे/u;
 
 /** A short reply that goes along with, or asks after, what was just said. */
 const ACKNOWLEDGEMENT_START =
   /^[^a-z0-9]*(?:y|yes|yep|yeah|yup|ok|okay|sure|go ahead|do it|proceed|confirm\w*|approve\w*|send it|pay it|please|pls|continue|go for it|ship it|execute|run it|status|update|any update|any news)\b/;
 const STATUS_QUESTION =
   /\b(?:did it|is it|has it|was it|have you|did you|did that|is that|has that|did the|is the|has the|was the)\b.{0,30}\b(?:go through|went through|sent|paid|done|complete|completed|arrive|arrived|processed|executed|settled|worked|success\w*|there)\b|\b(?:go through|went through)\b/;
+const STATUS_ASK_START = /^[^a-z0-9]*(?:status|update|any update|any news)\b/;
+
+/** Whether the message asks where a payment stands. */
+function isStatusQuestion(message: string): boolean {
+  if (message.length > 120) return false;
+  const { latin } = claimReadings(message);
+  return STATUS_QUESTION.test(latin[0]) || STATUS_ASK_START.test(latin[0]);
+}
+
+const AMOUNT_OF_MONEY = /\$\s?\d|\b\d[\d,]*(?:\.\d+)?\s?(?:usdc|usd|php|myr|sgd|idr|vnd|thb|eur|gbp)\b/;
+
+/** Whether a reply is itself about money: a payment word or an amount. The message may have been in words the classifier does not read. */
+function replyIsAboutMoney(reply: string): boolean {
+  const { native, latin } = claimReadings(reply.slice(0, 4000));
+  return MONEY_TOPIC_ENGLISH.test(latin[0]) || AMOUNT_OF_MONEY.test(latin[0]) || MONEY_TOPIC_FOREIGN_LATIN.test(latin[0]) || MONEY_TOPIC_FOREIGN_NATIVE.test(native);
+}
 
 function threadIsAboutMoney(history: OxwalChatTurn[] | undefined): boolean {
   return (history ?? []).slice(-4).some((turn) => {
@@ -2962,6 +3032,8 @@ function threadIsAboutMoney(history: OxwalChatTurn[] | undefined): boolean {
  * reply: an ask to move money (the intent classifier), a short reply going
  * along with a money thread ("yes, go ahead"), or just talk of payments. The
  * thread is client state, so it can only ever tighten this, never loosen it.
+ * (runOxwalAgent also reads the reply: one that talks of money on a turn
+ * judged "none" is guarded as a discussion of payments.)
  */
 export function moneyTurnLevel(message: string, history?: OxwalChatTurn[]): ZekeMoneyTurnLevel {
   if (classifyZekeIntent(message).class === 'MONEY_MOVING') return 'strict';
@@ -3075,9 +3147,17 @@ export async function* runOxwalAgent(request: OxwalAgentRequest): AsyncGenerator
   // still come before its card), and at the end of the turn. They go out as
   // they were, or without the sentences that claim completion and with the
   // fixed line in their place, said once.
+  //
+  // And the line does not wait for a claim to be recognised: on a turn that
+  // reached for a money tool, proposed or prepared a transfer, the model's
+  // words are always followed by it, once, so a claim the list of phrasings
+  // missed is contradicted in the same reply. Splash's own fixed replies (the
+  // planner, a hand-off) already say what is true and get no second line.
   const turnLevel = moneyTurnLevel(request.message, sanitizeOxwalHistory(request.history));
+  const statusTurn = isStatusQuestion(request.message);
   let turnMoves = false;
   let turnPrepared = false;
+  let modelWrote = false;
   let notSentSaid = false;
   let held: string[] = [];
 
@@ -3086,16 +3166,18 @@ export async function* runOxwalAgent(request: OxwalAgentRequest): AsyncGenerator
     held = [];
     if (said.length === 0) return;
     const joined = said.join('');
-    const level = turnMoves ? 'strict' : turnLevel;
+    // A reply that talks of money on a turn the message did not mark as one is guarded as a discussion of payments.
+    const level: ZekeMoneyTurnLevel = turnMoves ? 'strict' : turnLevel === 'none' && replyIsAboutMoney(joined) ? 'topic' : turnLevel;
+    const always = turnMoves && modelWrote && !notSentSaid;
     const guarded = level === 'none'
       ? { text: joined, replaced: false }
-      : guardCompletionClaims(joined, { level, prepared: turnPrepared });
+      : guardCompletionClaims(joined, { level, prepared: turnPrepared, status: statusTurn, always, records: !turnPrepared });
     if (!guarded.replaced) {
       for (const text of said) yield { type: 'delta', text };
       if (joined.trim()) textSoFar = true;
       return;
     }
-    const line = turnPrepared ? ZEKE_NOT_SENT_PREPARED : ZEKE_NOT_SENT_PLAIN;
+    const line = turnPrepared ? ZEKE_NOT_SENT_PREPARED : statusTurn ? ZEKE_NOT_SENT_STATUS : ZEKE_NOT_SENT_PLAIN;
     let out = guarded.text;
     if (notSentSaid && out.endsWith(line)) out = out.slice(0, -line.length).trimEnd();
     notSentSaid = true;
@@ -3127,6 +3209,11 @@ export async function* runOxwalAgent(request: OxwalAgentRequest): AsyncGenerator
       continue;
     }
 
+    if (event.type === 'model-text') {
+      held.push(event.text);
+      if (event.text.trim()) modelWrote = true;
+      continue;
+    }
     if (event.type === 'delta') {
       held.push(event.text);
       continue;
