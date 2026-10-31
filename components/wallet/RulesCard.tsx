@@ -28,7 +28,7 @@ function Body({ view, owner }: { view: SpendViewFacts; owner: boolean }) {
   return (
     <div className="space-y-3">
       <p className="text-[13px] leading-5 text-[#326273]">
-        {s.threshold ? `A payment of ${s.threshold} or more needs an owner’s approval, whoever makes it.` : 'No spending policy is set yet, so staff payments go to your owners.'}
+        {s.threshold ? `A payment above ${s.threshold} needs an owner’s approval, whoever makes it.` : 'No spending policy is set yet, so staff payments go to your owners.'}
       </p>
       {s.reissueNeeded ? <Note tone="warn">The wallet&rsquo;s signers changed and some rules were not reissued under the new wallet. Until they are reissued they cannot pay. {owner ? 'Reissue them in Settings.' : 'An owner reissues them in Settings.'}</Note> : null}
       {s.orphaned > 0 ? <Note tone="warn">{s.orphaned === 1 ? 'A rule belongs to someone who is no longer on the team.' : `${s.orphaned} rules belong to people who are no longer on the team.`} {owner ? `Take ${s.orphaned === 1 ? 'it' : 'them'} back in Settings.` : `An owner takes ${s.orphaned === 1 ? 'it' : 'them'} back in Settings.`}</Note> : null}

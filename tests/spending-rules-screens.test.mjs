@@ -295,6 +295,15 @@ test('only the Settings screens an owner reaches call the rule routes, and the F
   }
 });
 
+test('the second approval is said as the chain applies it: above the threshold, never "or more"', () => {
+  for (const name of ['components/settings/RulesSection.tsx', 'components/wallet/RulesCard.tsx', 'lib/team-rules/summary.ts']) {
+    assert.doesNotMatch(code(read(name)), /\bor more\b/, name);
+  }
+  assert.match(read('components/wallet/RulesCard.tsx'), /A payment above \$\{s\.threshold\} needs an owner’s approval/);
+  // splash_spend: over_threshold = paid_so_far > threshold || amount > threshold - paid_so_far.
+  assert.match(read('move/splash_spend/sources/splash_spend.move'), /paid_so_far > threshold \|\| amount > threshold - paid_so_far/);
+});
+
 test('the new files hold the house rules: no coral, Demo, Coming soon, testnet, grid, unsigned partner or licence claim', () => {
   for (const name of ['lib/team-rules/summary.ts', 'lib/team-rules/steps.ts', 'lib/team-rules/states.ts', 'components/settings/RuleForm.tsx', 'components/settings/RulesSection.tsx']) {
     const text = read(name);

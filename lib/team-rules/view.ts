@@ -88,7 +88,7 @@ export function ruleLine(rule: RuleLike, now: Date): RuleLineView {
     lifetime: current?.lifetimeCapMinor && current.lifetimeRemainingMinor ? `${usdc(current.lifetimeRemainingMinor)} of ${usdc(current.lifetimeCapMinor)} USDC left in all` : null,
     renewsIn: w && !w.rolledOver && w.endsAtMs && Number(w.endsAtMs) > now.getTime() ? `Renews in ${timeLeftWords(Number(w.endsAtMs) - now.getTime())}` : null,
     endsIn: current?.expiresAtMs && Number(current.expiresAtMs) > now.getTime() ? `Ends in ${timeLeftWords(Number(current.expiresAtMs) - now.getTime())}` : null,
-    paidInAll: current ? `Paid since the rule was set: ${usdc(current.currentSpendMinor)} USDC` : null,
+    paidInAll: current && current.currentSpendMinor ? `Paid since the rule was set: ${usdc(current.currentSpendMinor)} USDC` : null,
     orphaned,
   };
 }
