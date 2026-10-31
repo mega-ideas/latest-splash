@@ -9,7 +9,14 @@
  */
 import { formatUsdc } from '../fees/copy.ts';
 
-export type Group = 'paid' | 'in_progress' | 'not_paid';
+/**
+ * Four groups, and a row is in exactly one:
+ *   paid         it arrived;
+ *   in_progress  it is still moving or waiting for a person;
+ *   failed       something broke, so it did not complete (and what to do is said);
+ *   not_paid     a person said no, took it back, or the time to sign ran out.
+ */
+export type Group = 'paid' | 'in_progress' | 'failed' | 'not_paid';
 export type Tone = 'ok' | 'wait' | 'bad';
 
 export type TransferRow = { id: string; paymentRef: string; status: string; payeeKind: string; payeeName: string; payeeMasked: string | null; payeeCountry: string | null; amountMinor: string; reference: string | null; createdAt: string };
@@ -33,7 +40,11 @@ export type HistoryEntry = {
   href: string | null;
   /** Why there is no receipt to open, when there is none. */
   noReceipt: string | null;
+  /** For a failed row only: what happened and what to do next, in plain words. */
+  explain: Explain | null;
 };
+
+export type Explain = { why: string; next: string };
 
 const usdc = (minor: string) => `${formatUsdc(BigInt(minor))} USDC`;
 const path = (segment: string) => encodeURIComponent(segment);
@@ -43,7 +54,7 @@ const TRANSFER: Record<string, { label: string; tone: Tone; group: Group }> = {
   on_the_way: { label: 'On its way', tone: 'wait', group: 'in_progress' },
   awaiting_signatures: { label: 'Waiting for signatures', tone: 'wait', group: 'in_progress' },
   asked_owners: { label: 'Waiting for an owner', tone: 'wait', group: 'in_progress' },
-  failed: { label: 'Did not go through', tone: 'bad', group: 'not_paid' },
+  failed: { label: 'Did not go through', tone: 'bad', group: 'failed' },
   declined: { label: 'Declined by an owner', tone: 'bad', group: 'not_paid' },
   expired: { label: 'Expired before it was signed', tone: 'bad', group: 'not_paid' },
   withdrawn: { label: 'Withdrawn', tone: 'bad', group: 'not_paid' },
@@ -54,7 +65,7 @@ const BATCH: Record<string, { label: string; tone: Tone; group: Group }> = {
   on_the_way: { label: 'On its way', tone: 'wait', group: 'in_progress' },
   awaiting_signatures: { label: 'Waiting for signatures', tone: 'wait', group: 'in_progress' },
   prepared: { label: 'Waiting for an owner to start the signatures', tone: 'wait', group: 'in_progress' },
-  failed: { label: 'Did not go through', tone: 'bad', group: 'not_paid' },
+  failed: { label: 'Did not go through', tone: 'bad', group: 'failed' },
   expired: { label: 'Expired before it was signed', tone: 'bad', group: 'not_paid' },
 };
 
@@ -64,8 +75,8 @@ const WITHDRAWAL: Record<string, { label: string; tone: Tone; group: Group }> = 
   sent: { label: 'On its way to your bank', tone: 'wait', group: 'in_progress' },
   awaiting_signatures: { label: 'Waiting for signatures', tone: 'wait', group: 'in_progress' },
   preparing: { label: 'Being prepared', tone: 'wait', group: 'in_progress' },
-  failed: { label: 'Did not go through', tone: 'bad', group: 'not_paid' },
-  returned: { label: 'Returned to your wallet', tone: 'bad', group: 'not_paid' },
+  failed: { label: 'Did not go through', tone: 'bad', group: 'failed' },
+  returned: { label: 'Returned to your wallet', tone: 'bad', group: 'failed' },
   cancelled: { label: 'Cancelled', tone: 'bad', group: 'not_paid' },
 };
 
@@ -75,6 +86,42 @@ const UNKNOWN = { label: 'Status not known', tone: 'wait' as Tone, group: 'in_pr
 
 /** Why a row has no receipt to open: it is not signed yet, it was never paid, or this person may not open it. */
 const missingReceipt = (group: Group): string => (group === 'in_progress' ? 'The receipt opens once the owners have signed.' : 'No payment was made, so there is no receipt.');
+
+/**
+ * What a failed row says: what happened, then what to do, each one sentence a
+ * person can act on. It states the fact and does not apologise. It names no
+ * system state, code or address; the receipt of a paid row has those.
+ */
+const EXPLAIN = {
+  payment: {
+    why: 'The payment could not be completed, so it was not sent to the payee.',
+    next: 'Check the payee’s details and your balance, then make the payment again. If it fails a second time, contact support.',
+  },
+  batch: {
+    why: 'The batch could not be completed. A batch goes as one transaction, so none of its payments were sent.',
+    next: 'Check your balance and the rows in the batch, then prepare the batch again.',
+  },
+  withdrawalFailed: {
+    why: 'The bank payout did not go through. We have asked for the USDC to be sent back to your wallet.',
+    next: 'Wait for the USDC to show in your wallet, then check the bank details and start the withdrawal again.',
+  },
+  withdrawalReturned: {
+    why: 'The bank payout did not go through, and the USDC is back in your wallet.',
+    next: 'Check the bank details, then start the withdrawal again.',
+  },
+  earlierFailed: {
+    why: 'The transfer did not complete, so the recipient was not paid.',
+    next: 'Open the record to see the details, then make the transfer again.',
+  },
+  earlierRefunding: {
+    why: 'The transfer could not be completed, and the money is being sent back to you.',
+    next: 'Nothing is needed from you. The money reaches you when the refund is done.',
+  },
+  earlierRefunded: {
+    why: 'The transfer could not be completed, and the money was sent back to you.',
+    next: 'Open the record to see the details, then make the transfer again if you still need to pay.',
+  },
+} as const satisfies Record<string, Explain>;
 
 function transferEntry(t: TransferRow): HistoryEntry {
   const s = TRANSFER[t.status] ?? UNKNOWN;
@@ -92,6 +139,7 @@ function transferEntry(t: TransferRow): HistoryEntry {
     date: t.createdAt,
     href: receipt ? `/dashboard/history/${path(t.paymentRef)}` : null,
     noReceipt: receipt ? null : missingReceipt(s.group),
+    explain: s.group === 'failed' ? { ...EXPLAIN.payment } : null,
   };
 }
 
@@ -111,6 +159,7 @@ function batchEntry(b: BatchRow): HistoryEntry {
     date: b.createdAt,
     href: receipt ? `/dashboard/history/batch/${path(b.id)}` : null,
     noReceipt: receipt ? null : missingReceipt(s.group),
+    explain: s.group === 'failed' ? { ...EXPLAIN.batch } : null,
   };
 }
 
@@ -132,15 +181,18 @@ function withdrawalEntry(w: WithdrawalRow, restricted: boolean): HistoryEntry {
     date: w.createdAt,
     href: receipt ? `/dashboard/history/${path(w.id)}` : null,
     noReceipt: receipt ? null : sent ? 'Only an owner or a staff member can open a withdrawal’s receipt.' : missingReceipt(s.group),
+    explain: s.group !== 'failed' ? null : w.status === 'returned' ? { ...EXPLAIN.withdrawalReturned } : { ...EXPLAIN.withdrawalFailed },
   };
 }
 
 const EARLIER_PAID = new Set(['SETTLED', 'DISBURSED', 'CREDITED']);
-const EARLIER_NOT = new Set(['FAILED', 'REFUNDED', 'REFUNDING']);
+/** An earlier transfer has no state a person chose: it either completed, is moving, or broke (and was or is being refunded). */
+const EARLIER_FAILED = new Set(['FAILED', 'REFUNDED', 'REFUNDING']);
 
 function earlierEntry(e: EarlierRow): HistoryEntry {
-  const group: Group = EARLIER_PAID.has(e.state) ? 'paid' : EARLIER_NOT.has(e.state) ? 'not_paid' : 'in_progress';
-  const status = group === 'paid' ? { label: 'Paid', tone: 'ok' as Tone } : group === 'not_paid' ? { label: 'Did not go through', tone: 'bad' as Tone } : { label: 'On its way', tone: 'wait' as Tone };
+  const group: Group = EARLIER_PAID.has(e.state) ? 'paid' : EARLIER_FAILED.has(e.state) ? 'failed' : 'in_progress';
+  const status = group === 'paid' ? { label: 'Paid', tone: 'ok' as Tone } : group === 'failed' ? { label: 'Did not go through', tone: 'bad' as Tone } : { label: 'On its way', tone: 'wait' as Tone };
+  const explain: Explain | null = group !== 'failed' ? null : e.state === 'REFUNDING' ? { ...EXPLAIN.earlierRefunding } : e.state === 'REFUNDED' ? { ...EXPLAIN.earlierRefunded } : { ...EXPLAIN.earlierFailed };
   return {
     key: `earlier:${e.id}`,
     kind: 'earlier',
@@ -154,6 +206,7 @@ function earlierEntry(e: EarlierRow): HistoryEntry {
     date: e.createdAt,
     href: `/dashboard/audit/${path(e.id)}`,
     noReceipt: null,
+    explain,
   };
 }
 
@@ -200,13 +253,21 @@ export function mergeLists(
 
 const SOURCE_WORDS: Record<Source, string> = { payments: 'Payments', batches: 'Batches', withdrawals: 'Withdrawals', earlier: 'Earlier transfers' };
 
-/** One sentence naming what did not load. */
-export function failureNote(failed: Source[]): string {
+/**
+ * The sentence above the list when a list did not answer. The counts and the
+ * list are never quietly shorter: with something loaded before, the sentence
+ * says they are the last ones loaded; on a first load that only partly
+ * answered, it says what is missing from them.
+ */
+export function failureNote(failed: Source[], hadLoadedBefore: boolean): string {
   if (failed.length === 0) return '';
-  if (failed.length === 4) return 'Your history could not be refreshed. Showing what was loaded before.';
+  if (failed.length === 4) return 'Your history could not be refreshed, so the counts and the list below are from the last time it loaded.';
   const names = failed.map((f) => SOURCE_WORDS[f].toLowerCase());
   const joined = names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
-  return `${joined.charAt(0).toUpperCase()}${joined.slice(1)} could not be loaded. Showing the rest.`;
+  const subject = `${joined.charAt(0).toUpperCase()}${joined.slice(1)}`;
+  return hadLoadedBefore
+    ? `${subject} could not be refreshed. The counts and the list below still show what was loaded before for them.`
+    : `${subject} could not be loaded, so they are missing from the counts and the list below.`;
 }
 
 export function filterHistory(entries: HistoryEntry[], input: { group: Group | 'all'; query: string }): HistoryEntry[] {
@@ -215,23 +276,26 @@ export function filterHistory(entries: HistoryEntry[], input: { group: Group | '
 }
 
 /** What was sent this month is only what was paid, in USDC, in the calendar month (UTC) of `now`. */
-export function summaryOf(entries: HistoryEntry[], now: Date): { sentThisMonthMinor: string; inProgress: number; notPaid: number; total: number } {
+export function summaryOf(entries: HistoryEntry[], now: Date): { sentThisMonthMinor: string; inProgress: number; failed: number; notPaid: number; total: number } {
   const month = now.toISOString().slice(0, 7);
   let sent = 0n;
   for (const e of entries) if (e.group === 'paid' && e.amountMinor !== null && e.date.slice(0, 7) === month) sent += BigInt(e.amountMinor);
-  return { sentThisMonthMinor: sent.toString(), inProgress: entries.filter((e) => e.group === 'in_progress').length, notPaid: entries.filter((e) => e.group === 'not_paid').length, total: entries.length };
+  return { sentThisMonthMinor: sent.toString(), inProgress: entries.filter((e) => e.group === 'in_progress').length, failed: entries.filter((e) => e.group === 'failed').length, notPaid: entries.filter((e) => e.group === 'not_paid').length, total: entries.length };
 }
 
 /**
- * The colour of a count at the top of History: an alarm only when there is
- * something to look at (a payment still on its way, one that was not paid), and
- * the quiet ink otherwise. A zero is not news.
+ * The colour of a count at the top of History: attention only when there is
+ * something to look at (a payment still on its way, one that failed), and the
+ * quiet ink otherwise. A zero is not news. Not paid is never an alarm: a person
+ * said no or the time ran out, and there is nothing to fix. Failing and waiting
+ * take different colours, and every count also has its words.
  */
-export function statTones(summary: { inProgress: number; notPaid: number }): { inProgress: string; notPaid: string } {
+export function statTones(summary: { inProgress: number; failed: number; notPaid: number }): { inProgress: string; failed: string; notPaid: string } {
   const quiet = 'text-[#326273]';
   return {
     inProgress: summary.inProgress > 0 ? 'text-[var(--gold-ink)]' : quiet,
-    notPaid: summary.notPaid > 0 ? 'text-[var(--error)]' : quiet,
+    failed: summary.failed > 0 ? 'text-[var(--error)]' : quiet,
+    notPaid: quiet,
   };
 }
 

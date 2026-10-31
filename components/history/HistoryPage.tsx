@@ -17,6 +17,7 @@ const FILTERS: Array<{ id: Group | 'all'; label: string }> = [
   { id: 'all', label: 'All' },
   { id: 'paid', label: 'Paid' },
   { id: 'in_progress', label: 'In progress' },
+  { id: 'failed', label: 'Failed' },
   { id: 'not_paid', label: 'Not paid' },
 ];
 
@@ -51,8 +52,9 @@ export default function HistoryPage() {
       call<{ items?: EarlierRow[] }>('/api/transfers?filter=all'),
     ]);
     setRefreshing(false);
+    const previous = loaded.current;
     // Each list is folded in on its own: one that failed keeps what it held before and is named, a viewer's 403 is the business's rule.
-    const merged = mergeLists(loaded.current, {
+    const merged = mergeLists(previous, {
       transfers: { ok: t.ok, status: t.status, items: t.body?.transfers ?? [] },
       batches: { ok: b.ok, status: b.status, items: b.body?.batches ?? [] },
       withdrawals: { ok: w.ok, status: w.status, items: w.body?.withdrawals ?? [] },
@@ -60,7 +62,7 @@ export default function HistoryPage() {
     });
     loaded.current = merged.lists;
     setLists(merged.lists);
-    setFailed(failureNote(merged.failed));
+    setFailed(failureNote(merged.failed, previous !== null));
     setProblem(merged.lists === null ? errorText(t, 'Your history could not be loaded.') : null);
   }, []);
 
@@ -73,7 +75,7 @@ export default function HistoryPage() {
   const summary = useMemo(() => summaryOf(entries, new Date()), [entries]);
   const tones = statTones(summary);
   const visible = useMemo(() => filterHistory(entries, { group, query }), [entries, group, query]);
-  const counts = useMemo(() => ({ all: entries.length, paid: entries.filter((e) => e.group === 'paid').length, in_progress: summary.inProgress, not_paid: summary.notPaid }), [entries, summary]);
+  const counts = useMemo(() => ({ all: entries.length, paid: entries.filter((e) => e.group === 'paid').length, in_progress: summary.inProgress, failed: summary.failed, not_paid: summary.notPaid }), [entries, summary]);
 
   // Something is on its way: ask again every so often, but never from a hidden tab.
   const inProgress = summary.inProgress;
@@ -121,11 +123,12 @@ export default function HistoryPage() {
         }
       />
 
-      <div className="dash-reveal-stagger grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className="dash-reveal-stagger grid grid-cols-2 gap-3 md:grid-cols-5">
         <DashStat label="Sent this month" value={`${formatUsdc(BigInt(summary.sentThisMonthMinor))} USDC`} valueClassName="text-[#326273]" />
         <DashStat label="In progress" value={String(summary.inProgress)} valueClassName={tones.inProgress} />
+        <DashStat label="Failed" value={String(summary.failed)} valueClassName={tones.failed} />
         <DashStat label="Not paid" value={String(summary.notPaid)} valueClassName={tones.notPaid} />
-        <DashStat label="Receipts and records" value={String(summary.total)} valueClassName="text-[var(--info)]" />
+        <DashStat label="Receipts and records" value={String(summary.total)} valueClassName="text-[var(--info)]" className="col-span-2 md:col-span-1" />
       </div>
 
       <div className="dash-surface space-y-3 p-3 sm:p-4">
@@ -167,7 +170,7 @@ export default function HistoryPage() {
 
       {lists?.restricted ? <Note>Only an owner or a staff member can see the business&rsquo;s payments and batches. You can see its withdrawals, but not open their receipts.</Note> : null}
       {failed ? (
-        <div className="space-y-3">
+        <div role="status" className="space-y-3">
           <Note tone="warn">{failed}</Note>
           <QuietButton type="button" onClick={() => void load()} disabled={refreshing}><RefreshCw className="h-4 w-4" aria-hidden="true" />Try again</QuietButton>
         </div>
@@ -230,6 +233,18 @@ function Row({ entry }: { entry: HistoryEntry }) {
           <Pill tone={entry.status.tone}>{entry.status.label}</Pill>
         </div>
       </div>
+      {entry.explain ? (
+        <dl className="mt-3 space-y-2 rounded-xl border-l-4 border-[var(--error)] bg-[var(--error-bg)] p-3 text-[13px] leading-5 text-[var(--ink)]">
+          <div>
+            <dt className="font-bold">What happened</dt>
+            <dd>{entry.explain.why}</dd>
+          </div>
+          <div>
+            <dt className="font-bold">What to do next</dt>
+            <dd>{entry.explain.next}</dd>
+          </div>
+        </dl>
+      ) : null}
       <div className="mt-3 border-t border-[#326273]/10 pt-3">
         {entry.href ? (
           <Link href={entry.href} aria-label={`Open the receipt for ${entry.title}`} className="inline-flex min-h-11 items-center gap-1.5 text-[13px] font-bold text-[#0d6370] hover:underline">
