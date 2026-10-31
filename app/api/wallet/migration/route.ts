@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 
 import { gaslessEnabled } from '@/lib/payments/stablecoin-lane';
 import { collectCoins, detectMemberFunds, requestMigrationTransfer } from '@/lib/server/business-wallet';
-import { memberRole, migrationClearance, recordAuthorityEvent } from '@/lib/server/wallet-authority';
+import { scopeMigrationMembers } from '@/lib/wallet-page/migration';
+import { highestAuthority, memberRole, migrationClearance, recordAuthorityEvent } from '@/lib/server/wallet-authority';
 import { orgMemberWalletAddresses, walletUsdcType } from '@/lib/server/wallet-deps';
 import { asResponse, limitWalletRequests, NO_STORE, walletRoute } from '@/lib/server/wallet-route';
 
@@ -49,22 +50,35 @@ export async function GET(request: Request) {
   const addresses = (await orgMemberWalletAddresses(db, orgId)).filter((a) => a.address !== wallet);
   const read = ctx.readUsdc;
   if (!read) return NextResponse.json({ error: 'Balances cannot be read from the chain.' }, { status: 503, headers: NO_STORE });
-  const found = await detectMemberFunds(read, addresses);
+  // Only what the viewer may see is read from the chain: owners and the
+  // person in charge see every member's (they sign off a staff member's
+  // move); anyone else sees their own only.
+  const authority = await highestAuthority(db, orgId, gate.route.authority.userId);
+  const viewer = { userId: gate.route.authority.userId, authority };
+  const visible = scopeMigrationMembers(addresses, viewer);
+  const found = await detectMemberFunds(read, visible);
   const canSign = new Map(addresses.map((a) => [a.address, a.canSign]));
   const roles = new Map<string, string | null>();
   for (const f of found) if (!roles.has(f.userId)) roles.set(f.userId, await memberRole(db, orgId, f.userId));
+  const members = [];
+  for (const f of found) {
+    const needsSignOff = roles.get(f.userId) !== 'admin';
+    let clearance: 'not_needed' | 'signed_off' | 'needs_sign_off' = 'not_needed';
+    if (needsSignOff && wallet) {
+      const cleared = await migrationClearance(db, { orgId, userId: f.userId, fromAddress: f.address, toWallet: wallet });
+      clearance = cleared.ok ? 'signed_off' : 'needs_sign_off';
+    }
+    members.push({
+      userId: f.userId,
+      address: f.address,
+      usdcMinor: f.usdcMinor.toString(),
+      canMove: canSign.get(f.address) === true,
+      needsSignOff,
+      clearance,
+    });
+  }
   return NextResponse.json(
-    {
-      businessWallet: wallet,
-      asset: 'USDC',
-      members: found.map((f) => ({
-        userId: f.userId,
-        address: f.address,
-        usdcMinor: f.usdcMinor.toString(),
-        canMove: canSign.get(f.address) === true,
-        needsSignOff: roles.get(f.userId) !== 'admin',
-      })),
-    },
+    { businessWallet: wallet, asset: 'USDC', you: { userId: viewer.userId, authority }, members },
     { headers: NO_STORE },
   );
 }
