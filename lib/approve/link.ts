@@ -79,5 +79,9 @@ export function withReturnHeader(headers: Headers, pathname: string, rendersPage
   return headers;
 }
 
+export function loginRedirectFor(_header: string | null | undefined): string {
+  return '/login';
+}
+
 /** What the signing message says about its link, in the words every channel uses. */
 export const LINK_NOTE = 'The link only opens the review. It signs nothing and carries no secret; nothing happens until you sign with your passkey.';
