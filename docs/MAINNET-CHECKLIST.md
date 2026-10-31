@@ -153,6 +153,26 @@ procedure in [`docs/UPGRADE-POLICY.md`](UPGRADE-POLICY.md).
       enabled: `SPLASH_FINANCE_ADDRESS` is the finance multisig and equals
       `FeeConfig`'s applied fee recipient, plans are seeded, and a testnet
       subscribe, pull and revoke has run.
+- [ ] **Scheduled batches** (v2 Phase 3, `docs/v2/phase3-scheduled-batches.md`).
+      "Ask me first" needs only the cron: `/api/cron/scheduled-payments` is
+      scheduled every five minutes with `CRON_SECRET` and answers 200. Human
+      steps for "pay automatically", none of which a build does:
+      1. Sebastian reviews the design, the key policy below and the default
+         allowance caps (per payment 2,000, daily 5,000, monthly 20,000 USDC,
+         90 days) before it is switched on.
+      2. Create a **second** AWS KMS key (ECC secp256k1 or secp256r1, sign and
+         verify), not the operator's. Key policy: only the app's role may
+         `kms:Sign` and `kms:GetPublicKey`; no `kms:ScheduleKeyDeletion` or
+         policy changes outside the break-glass admin; a CloudTrail alarm on any
+         `Sign` by another principal. Derive its Sui address from the public key.
+      3. Set `SCHEDULED_PAYER_KMS_KEY_ID`, `SCHEDULED_PAYER_SUI_ADDRESS` and
+         `AWS_REGION`. The boot refuses the operator's key or address. Leave both
+         unset to keep automatic payments off (every run is handed back).
+      4. Fund the payer with **nothing**: no USDC and no SUI. The operator
+         sponsors gas.
+      5. Add the payer to the operator-outflow watch (it is not watched yet).
+      6. A testnet rehearsal: an owner-signed allowance, one automatic run, a
+         Skip, the kill switch, a revoke. Hardware passkey check first (Phase 2).
 - [ ] The near-threshold alert cron (`/api/cron/spend-rule-alerts`) is
       scheduled hourly with `CRON_SECRET`, and answers 200 (a 502 lists the
       businesses whose spending rules could not be read).

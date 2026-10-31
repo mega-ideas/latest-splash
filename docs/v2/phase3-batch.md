@@ -183,8 +183,11 @@ history. `tests/onboarding.test.mjs` lists them.
 
 ## Not done, and why
 
-- **Scheduled batches** (`splash_spend`, the operator named as executor by an
-  owner approval) are not carried out: the executor-side transaction, and a
+- **Scheduled batches** are built separately, in two modes, in the Scheduled tab
+  of Transfer (`docs/v2/phase3-scheduled-batches.md`); this page's "Run later"
+  (`BATCH_SCHEDULE_WIRED`) stays off. The text below is what was true of the
+  operator-as-executor design and is kept as the record of why that was not the
+  route taken. (Earlier note:) not carried out: the executor-side transaction, and a
   staff member's batch under a rule, have no builder on this server. (A staff
   member's single payment under a rule now has one, `docs/v2/phase3-staff-in-rule.md`;
   a batch is many such payments in one transaction and has not been built or

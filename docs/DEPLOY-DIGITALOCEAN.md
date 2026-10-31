@@ -182,6 +182,16 @@ new build refuses to install or start on the old runtime and environment.
    It answers 502 without a database or when any business's rules could not
    be read. Leave `https://<domain>/api/cron/billing` unscheduled while
    `FEATURE_SUBSCRIPTION_BILLING` is off (it answers 404).
+   Schedule `https://<domain>/api/cron/scheduled-payments` every five minutes
+   (v2 Phase 3, scheduled batches): it makes each schedule's run, sends the
+   automatic ones' day-before notice, starts a run at its due time ("ask me
+   first" prepares the batch and asks the owners; "pay automatically" pays
+   inside the owners' allowance after every check, or hands the run back with
+   the reason), follows prepared batches to their end and settles automatic runs.
+   Safe to call twice. It answers 401 without `CRON_SECRET`, 502 without a
+   database or when any business could not be worked on. Without
+   `SCHEDULED_PAYER_KMS_KEY_ID` nothing is paid automatically: every run is
+   handed back to "ask me first".
    Schedule `https://<domain>/api/cron/wallet-signing` every five minutes
    (v2 §4.1): it closes Business Splash Wallet signature requests past their
    expiry and clears the partial signatures they held, and reads on chain

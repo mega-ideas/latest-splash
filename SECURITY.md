@@ -2396,3 +2396,65 @@ Design: `docs/v2/phase2-zeke.md` section 2a. Tests:
   Zeke did ("I sent the draft to Wallet for approval"), are kept. A reply that
   talks of money on a turn the message did not mark as one is guarded as a
   discussion of payments.
+
+## v2 Phase 3 - Scheduled batches and the scheduled payer - 2026-11-01
+
+Design and the honest account: `docs/v2/phase3-scheduled-batches.md`. Tests:
+`tests/scheduled-*.test.mjs`.
+
+**A trust change, said plainly.** Until now every payment had a person's passkey
+behind it. A schedule an owner sets to **pay automatically within my limits**
+(Mode B) is paid by a **Splash-held key**, the scheduled payer, with no one
+present. The owners' consent is an **allowance they signed** (a spending rule for
+that key), not each payment. "Ask me first" (Mode A, the default) is unchanged in
+authority: the batch is prepared and the owners' quorum signs it.
+
+- **The scheduled payer is its own AWS KMS key**, separate from the operator's
+  gas-sponsor key (`SCHEDULED_PAYER_KMS_KEY_ID`, `SCHEDULED_PAYER_SUI_ADDRESS`;
+  `lib/server/scheduled-payer-signer.ts`). It holds no funds and no SUI. Production
+  refuses it unless its KMS public key derives the named address and it is neither
+  the operator's key or address nor the sponsor's; the boot refuses an
+  environment that names the operator's key or address for it. With none
+  configured, automatic payments are off and every run is handed back to "ask me
+  first". No sandbox signer is reachable in production (the resolver never returns
+  one, and the executor refuses one again). Canon D-0004: nothing under the agent
+  code reaches it.
+- **What a stolen payer key can do** is what its allowance lets it: ask
+  `splash_spend` to pay a **recipient the owners verified on the policy**, up to the
+  allowance's per-payment maximum, its monthly cap (held by the network) and its
+  expiry, and never above the second-approval line (that needs an owner's
+  approval, which it can never have). It cannot pay another address, raise a
+  limit, add a recipient or touch the wallet. The owners revoke it. The key
+  serves every business that gave it an allowance, so the worst case across
+  businesses is the sum of their allowances.
+- **The daily limit is the server's, not the network's.** `0x2::allowance` carries
+  one recurring cap per allowance; the monthly cap is on chain and the daily one
+  is enforced by Splash against what automatic runs paid in the last 24 hours.
+- **Before Splash signs, it re-checks everything** (`lib/schedule/auto-check.ts`):
+  not paused; an owner's schedule by someone still an owner; payer and sponsor
+  present; the allowance readable, running and not ending; every payee unchanged,
+  a Splash business or wallet, **paid before** (never a first payment to a new
+  recipient automatically), screened clear and verified; every payment within the
+  per-payment limit and under the second-approval line, the run within the window,
+  the daily limit and the fee that was shown; the wallet funded. One failed check
+  hands the whole run to "ask me first" with the reason in plain words.
+- **At most once.** One run per schedule and due date (unique key); a run claimed
+  with a lease; each payment claimed with its digest written first and only while
+  its run is still `approved`, unique per business by its payment reference (the
+  on-chain idempotency key). An unknown outcome is read back from the chain by its
+  digest and never sent again. The bytes are decoded again and held to exactly the
+  stored payment (`assertPurposeShape('staff_rule_payment')`) before signing.
+- **Instant stops.** Skip, Stop, Edit, Delete, a switch to "ask me first" and the
+  kill switch (one owner pauses every automatic payment) take effect for the next
+  run and are read before **every** payment of a run in progress. Revoking the
+  allowance is a multisig request and takes effect when signed.
+- **Tenant isolation**: every route takes the business from the session; every
+  store read takes the org; the runner works each business with its own context;
+  the cross-tenant lists are `ForStaff` and return ids only.
+- **The cron** (`/api/cron/scheduled-payments`) is bearer-secret protected and fails
+  closed (no secret, nobody is authorised, in every environment).
+- **Notices carry no link that pays, skips or stops.** E-mail links open the
+  signed-in Scheduled tab.
+- **Not covered**: the outflow monitor watches the operator, not this key; there
+  is no testnet run; a daily limit that is on chain needs a Move change (see the
+  hand-off). Sebastian reviews the key policy and the default caps before mainnet.
