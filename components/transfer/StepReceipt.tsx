@@ -215,7 +215,7 @@ function EInvoice({ base, data, onChange }: { base: string; data: ReceiptAnswer;
   async function make() {
     setBusy(true);
     setError(null);
-    const answer = await call(`${base}/e-invoice`, { body: form });
+    const answer = await call(`${base}/e-invoice`, { body: { ...form, refresh: Boolean(made) } });
     setBusy(false);
     if (!answer.ok) {
       const problems = (answer.body as { problems?: string[] } | null)?.problems;
@@ -230,7 +230,7 @@ function EInvoice({ base, data, onChange }: { base: string; data: ReceiptAnswer;
       <h3 id="einv-h" className="text-base font-extrabold text-[#0c3e48]">Self-billed e-invoice (MyInvois)</h3>
       {!offer.offered ? (
         <p className="text-sm leading-6 text-[#1F4452]">Splash does not have this supplier&rsquo;s country on file, so it cannot tell whether a self-billed e-invoice applies. Add the country in Recipients.</p>
-      ) : made ? (
+      ) : made && !open ? (
         <div className="space-y-3">
           <p className="text-sm leading-6 text-[#1F4452]">Your file is ready ({made.fileName}). Download it, then upload it in MyInvois. Splash does not submit it for you.</p>
           <div className="flex flex-wrap gap-2">
@@ -240,7 +240,9 @@ function EInvoice({ base, data, onChange }: { base: string; data: ReceiptAnswer;
             <a href={EINVOICE_GUIDELINE.portal} target="_blank" rel="noopener noreferrer" className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-[#0d6370] px-5 text-sm font-bold text-white hover:bg-[#073d49] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0d6370]">
               <ExternalLink className="h-4 w-4" aria-hidden="true" />Open MyInvois
             </a>
+            <QuietButton type="button" onClick={() => setOpen(true)}>Correct the details</QuietButton>
           </div>
+          <p className="text-[13px] leading-5 text-[#326273]">A corrected file replaces this one. If you already filed this one in MyInvois, cancel it there first.</p>
         </div>
       ) : !open ? (
         <>

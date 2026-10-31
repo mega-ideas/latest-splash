@@ -107,7 +107,8 @@ exists.
 - **Self-billed e-invoice (MyInvois)**, `POST .../e-invoice`: UBL 2.1 JSON,
   type `11`, document version `1.0`, offered only for a settled payment by a
   Malaysian business to a supplier outside Malaysia, once per payment, remade
-  only after 72 hours (the replaced file's SHA-256 stays in the history). The
+  at once when its details are corrected (the replaced file's SHA-256 stays in
+  the history, so a file already filed can still be told from the new one). The
   business's TIN, contact number, state and the exchange rate are the person's:
   Splash fills in none. The page then opens the MyInvois portal; Splash does
   not submit it.

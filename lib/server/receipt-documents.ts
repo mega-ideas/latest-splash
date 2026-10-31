@@ -9,9 +9,10 @@
  * The e-invoice: made once per payment, for a settled payment, by a Malaysian
  * business to a supplier outside Malaysia, from the receipt and the person's
  * own details (their TIN, contact, state, the exchange rate). A second
- * request answers the same file; `refresh` remakes one older than 72 hours
- * (a fresh issue date) and the history keeps the replaced file's SHA-256, so
- * a file already filed with MyInvois can still be told from the new one. Two
+ * request answers the same file; `refresh` remakes it at once (corrected
+ * details, a fresh issue date) and the history keeps the replaced file's
+ * SHA-256, so a file already filed with MyInvois can still be told from the
+ * new one. Two
  * remakes racing leave one. Every read takes the org.
  */
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
@@ -24,7 +25,6 @@ import { EINVOICE_GUIDELINE, eInvoiceInputFromReceipt, eInvoiceOffer, type EInvo
 import type { DrizzleDb } from './wallet-signing-store.ts';
 
 export const RECEIPT_LINK_TTL_MS = 30 * 24 * 3_600_000;
-export const E_INVOICE_FRESH_MS = 72 * 3_600_000;
 
 const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
 
@@ -115,8 +115,7 @@ export async function makeEInvoice(
   }
   const paymentRef = input.receipt.paymentRef;
   const [existing] = await db.select().from(paymentEInvoices).where(and(eq(paymentEInvoices.orgId, input.orgId), eq(paymentEInvoices.paymentRef, paymentRef))).limit(1);
-  const fresh = existing && input.now.getTime() - existing.generatedAt.getTime() < E_INVOICE_FRESH_MS;
-  if (existing && (!input.refresh || fresh)) return { ok: true, created: false, eInvoice: viewOf(existing, input.receipt.receiptNo) };
+  if (existing && !input.refresh) return { ok: true, created: false, eInvoice: viewOf(existing, input.receipt.receiptNo) };
 
   const file = eInvoiceInputFromReceipt(input.receipt, input.details, input.now);
   const problems = selfBilledProblems(file);

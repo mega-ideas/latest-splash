@@ -8,7 +8,7 @@
  * FeeCharged event), not the bound the owners signed; a transaction that
  * cannot be read leaves the receipt not final; another business reads none of
  * it; a link opens one payment, expires and can be revoked, and is kept only
- * as a hash; the e-invoice is made once, remade only after 72 hours with the
+ * as a hash; the e-invoice is made once, remade at once when corrected, with the
  * replaced file's hash kept, and only for a Malaysian business paying a
  * supplier outside Malaysia.
  */
