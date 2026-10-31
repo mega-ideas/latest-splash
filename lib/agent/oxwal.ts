@@ -1484,7 +1484,13 @@ export async function proposeBatchPayout(input: unknown): Promise<UnsignedPropos
     kind: 'BATCH_PAYOUT',
     orgId,
     corridor,
-    recommendation: `Prepare a batch payout for ${payouts.length} verified counterparties. Human approval is required in v1.`,
+    // v2 Phase 3: a payout run is paid from Batch payouts, where the business
+    // owners sign. An approval of this draft is recorded and sends nothing
+    // (BATCH_PAYOUT_RETIRED_REASON), so the draft says so rather than promise
+    // a payment its approval cannot make.
+    recommendation:
+      `Prepare a batch payout for ${payouts.length} verified counterparties. ` +
+      'Pay it from Batch payouts, where your business owners sign; approving this draft sends nothing.',
     amountOut: usdMicro(totalUsd),
     currencyOut: 'USDC',
     evidence: counterpartyIds.map((id) => evidence('COUNTERPARTY', id, true)),

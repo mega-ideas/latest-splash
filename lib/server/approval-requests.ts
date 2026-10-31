@@ -72,12 +72,7 @@ function messageFor(input: {
   channel: 'code' | 'reply';
   code: string;
 }): string {
-  const what =
-    input.proposal.kind === 'BATCH_PAYOUT'
-      ? 'a batch payout'
-      : input.proposal.kind === 'PAYMENT'
-        ? 'a payment'
-        : input.proposal.kind.toLowerCase().replace(/_/g, ' ');
+  const what = input.proposal.kind === 'PAYMENT' ? 'a payment' : input.proposal.kind.toLowerCase().replace(/_/g, ' ');
 
   const head =
     `Splash — approval needed\n\n` +

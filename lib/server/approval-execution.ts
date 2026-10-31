@@ -107,6 +107,15 @@ async function carryOut(
   payload: Record<string, unknown> | null,
   context: ExecutionContext,
 ): Promise<ExecutionOutcome> {
+  // First, before the payload is looked at. Every real payout-run proposal has
+  // none (only the removed route ever wrote one; Zeke's drafts carry none), so
+  // asking for the payload first sent each of them to "re-authorize the
+  // payment", which there is no longer a route to do. In every launch scope the
+  // answer is the same: recorded, not carried out, and where to pay it.
+  if (proposal.kind === 'BATCH_PAYOUT') {
+    return { state: 'SKIPPED', detail: BATCH_PAYOUT_RETIRED_REASON };
+  }
+
   if (!payload) {
     return {
       state: 'FAILED',
@@ -127,13 +136,6 @@ async function carryOut(
     switch (proposal.kind) {
       case 'PAYMENT':
         return await executeTransfer(proposal, payload, context);
-      case 'BATCH_PAYOUT':
-        // v2 Phase 3: the v1 custody payout run (a shared SettlementPool, a
-        // typed code) is removed. Batch payouts are paid from the business's
-        // own wallet and signed by its owners (/dashboard/batch), never
-        // carried out from an approval here, so an old approval is recorded
-        // and moves nothing.
-        return { state: 'SKIPPED', detail: BATCH_PAYOUT_RETIRED_REASON };
       case 'X402_PAYMENT':
         // There is no path that settles x402, so the default's "settles
         // through their own path" would be a lie. Recorded, named, not paid.

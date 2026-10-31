@@ -262,7 +262,10 @@ test('a payment with no payload on record still fails closed, naming nothing pai
 
 test("Zeke's batch-payout draft points at Batch payouts and promises nothing a draft cannot do", async () => {
   process.env.FEATURE_KYB_GATE = 'false';
-  const { executeOxwalTool } = await import('../lib/agent/oxwal.ts');
+  const { executeOxwalTool, resetOxwalFixtures, resetOxwalProposalStore, upsertOxwalCounterpartyFixture } = await import('../lib/agent/oxwal.ts');
+  resetOxwalFixtures();
+  resetOxwalProposalStore();
+  upsertOxwalCounterpartyFixture({ id: 'cp_verified_payee', name: 'Vendor Ltd', kybStatus: 'VERIFIED', bankRefHash: 'verified-payee-ref' });
   const draft = await executeOxwalTool('proposeBatchPayout', {
     orgId: 'demo-business',
     corridor: 'MY_PH',
