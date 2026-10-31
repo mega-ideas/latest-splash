@@ -2,9 +2,10 @@ import { validClientKey } from '@/lib/funding/wallet-funding';
 import { readJsonBody } from '@/lib/server/http';
 import { makePaymentRecorder } from '@/lib/server/payment-record';
 import { sealAdapter } from '@/lib/server/seal';
-import { bigintField, limitWalletRequests, requireWithdrawalRequester } from '@/lib/server/wallet-route';
+import { canAskForWithdrawal } from '@/lib/payouts/withdrawal-rules';
+import { limitWalletRequests, requireWithdrawalRequester } from '@/lib/server/wallet-route';
 import { storeEncryptedInvoice } from '@/lib/server/walrus';
-import { createWithdrawal, listWithdrawalDestinations, listWithdrawals, withdrawalDepositAddress } from '@/lib/server/withdrawals';
+import { createWithdrawal, listWithdrawalDestinations, listWithdrawals, parseBankPayoutRequest, withdrawalDepositAddress } from '@/lib/server/withdrawals';
 import { withdrawalResponse, withdrawalRoute } from '@/lib/server/withdrawals-deps';
 import { withdrawalByClientKey } from '@/lib/server/withdrawals-store';
 
@@ -13,8 +14,10 @@ export const dynamic = 'force-dynamic';
 /**
  * Withdrawals to the business's own bank (v2 §4.4).
  *
- * GET   this business's withdrawals, its own bank accounts and its deposit
- *       address with the partner.
+ * GET   this business's withdrawals (amounts and statuses). Its own bank
+ *       accounts and its deposit address with the partner go only to the
+ *       owners and the staff who may ask for a withdrawal; a viewer gets
+ *       neither, and no account on the withdrawals.
  * POST  an owner, or a staff member asking the owners to approve, withdraws: { destinationId, amountMinor, acceptedReceiveMinor,
  *       maxFeeMinor } with an Idempotency-Key header (or `clientKey`). The
  *       sealed audit bundle behind the receipt (its content hash and blob id)
@@ -32,6 +35,10 @@ export async function GET(request: Request) {
     listWithdrawalDestinations(gate.deps),
     withdrawalDepositAddress(gate.deps),
   ]);
+  // Bank accounts and the deposit address are for those who may ask for a withdrawal; a viewer sees amounts and statuses only.
+  if (!canAskForWithdrawal(gate.route.authority.role)) {
+    return withdrawalResponse({ ok: true, withdrawals: withdrawals.map((w) => ({ ...w, destination: null })), destinations: [], depositAddress: null });
+  }
   return withdrawalResponse({ ok: true, withdrawals, destinations, depositAddress });
 }
 
@@ -45,28 +52,29 @@ export async function POST(request: Request) {
   const body = await readJsonBody(request);
   const clientKey = validClientKey(request.headers.get('idempotency-key') ?? body.clientKey);
   // A retry of a withdrawal already made is answered before any bundle is
-  // used, so it seals nothing a second time. The cheap checks come first:
-  // nothing is sealed for a request about to be refused.
-  let contentHash = '00'.repeat(32);
-  let walrusBlobId = '00';
+  // used, so it seals nothing a second time. A new request is sealed only
+  // when the checks that need no partner already pass (the amounts, the
+  // account, the verified deposit address): nothing is sealed for a request
+  // about to be refused. No stand-in bundle is ever passed on: when nothing
+  // was sealed, createWithdrawal is given none and refuses a new withdrawal.
+  let bundle: { contentHash?: string; walrusBlobId?: string } = {};
   const prior = clientKey ? await withdrawalByClientKey(gate.route.db, gate.route.orgId, clientKey) : null;
   if (!prior && clientKey) {
-    const amount = bigintField(body.amountMinor);
-    const maxFee = bigintField(body.maxFeeMinor);
-    const holder = (await listWithdrawalDestinations(gate.deps)).find((d) => d.id === String(body.destinationId ?? ''))?.holderName ?? null;
-    if (holder && amount !== null && amount > 0n && maxFee !== null) {
+    const parsed = parseBankPayoutRequest({ amountMinor: body.amountMinor, acceptedReceiveMinor: body.acceptedReceiveMinor, maxFeeMinor: body.maxFeeMinor }, 'withdraw');
+    const destination = (await listWithdrawalDestinations(gate.deps)).find((d) => d.id === String(body.destinationId ?? '')) ?? null;
+    const deposit = await withdrawalDepositAddress(gate.deps);
+    if (!('ok' in parsed) && destination && deposit?.status === 'verified') {
       const record = await makePaymentRecorder({ seal: sealAdapter, store: storeEncryptedInvoice })({
         orgId: gate.route.orgId,
         transferId: clientKey,
         payer: (await gate.deps.companyName()) ?? gate.route.orgId,
-        payee: holder,
-        amountMinor: amount.toString(),
-        maxFeeMinor: maxFee.toString(),
-        reference: 'Withdrawal to own bank account',
+        payee: destination.holderName,
+        amountMinor: parsed.amount.toString(),
+        maxFeeMinor: parsed.shownFee.toString(),
+        reference: `Withdrawal to own bank account ${destination.id}; the bank receives at least ${parsed.accepted.toString()} ${destination.currency} (minor units)`,
       });
       if (!record.ok) return withdrawalResponse(record);
-      contentHash = Buffer.from(record.contentHash).toString('hex');
-      walrusBlobId = Buffer.from(record.walrusBlobId).toString('hex');
+      bundle = { contentHash: Buffer.from(record.contentHash).toString('hex'), walrusBlobId: Buffer.from(record.walrusBlobId).toString('hex') };
     }
   }
   const result = await createWithdrawal(gate.deps, gate.route.authority.userId, {
@@ -75,8 +83,8 @@ export async function POST(request: Request) {
     amountMinor: body.amountMinor,
     acceptedReceiveMinor: body.acceptedReceiveMinor,
     maxFeeMinor: body.maxFeeMinor,
-    contentHash,
-    walrusBlobId,
+    contentHash: bundle.contentHash,
+    walrusBlobId: bundle.walrusBlobId,
   });
   return withdrawalResponse(result, result.ok && result.created ? 201 : 200);
 }

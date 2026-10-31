@@ -777,7 +777,10 @@ export type CreateWithdrawalInput = {
 /** The amounts and audit bundle every bank payout request carries, checked. */
 export type BankPayoutAmounts = { amount: bigint; accepted: bigint; shownFee: bigint; contentHash: string; walrusBlobId: string };
 
-export function parseBankPayoutAmounts(input: { amountMinor: unknown; acceptedReceiveMinor: unknown; maxFeeMinor: unknown; contentHash: unknown; walrusBlobId: unknown }, what: string): BankPayoutAmounts | Refusal {
+/** The amounts of a bank payout request, checked: everything but the audit bundle, so a retry can be answered without one. */
+export type BankPayoutRequest = { amount: bigint; accepted: bigint; shownFee: bigint };
+
+export function parseBankPayoutRequest(input: { amountMinor: unknown; acceptedReceiveMinor: unknown; maxFeeMinor: unknown }, what: string): BankPayoutRequest | Refusal {
   const amount = parseMinor(input.amountMinor);
   const accepted = parseMinor(input.acceptedReceiveMinor);
   const shownFee = parseMinor(input.maxFeeMinor);
@@ -788,10 +791,25 @@ export function parseBankPayoutAmounts(input: { amountMinor: unknown; acceptedRe
   if (shownFee === null) return refuse(400, 'fee_shown_required', 'Send the Splash fee you were shown.');
   // No Splash fee is ever above 1% of the principal (the ceiling, A1).
   if (shownFee * 10_000n > amount * 100n) return refuse(400, 'bad_fee', 'The fee shown is above the 1% ceiling.');
+  return { amount, accepted, shownFee };
+}
+
+/** The audit bundle a payout anchors: 32 bytes of hash and a blob id, neither of them all zero (no stand-in is a bundle). */
+export function parseAuditBundle(input: { contentHash: unknown; walrusBlobId: unknown }, what: string): { contentHash: string; walrusBlobId: string } | Refusal {
   const contentHash = hexOf(input.contentHash);
   const walrusBlobId = hexOf(input.walrusBlobId);
-  if (!isHexBytes(contentHash, 32, 32) || !isHexBytes(walrusBlobId, 1, 128)) return refuse(400, 'no_audit_bundle', `The ${what === 'withdraw' ? 'withdrawal' : 'payout'} needs its audit bundle (content hash and blob id).`);
-  return { amount, accepted, shownFee, contentHash, walrusBlobId };
+  if (!isHexBytes(contentHash, 32, 32) || !isHexBytes(walrusBlobId, 1, 128) || /^0+$/.test(contentHash) || /^0+$/.test(walrusBlobId)) {
+    return refuse(400, 'no_audit_bundle', `The ${what === 'withdraw' ? 'withdrawal' : 'payout'} needs its audit bundle (content hash and blob id).`);
+  }
+  return { contentHash, walrusBlobId };
+}
+
+export function parseBankPayoutAmounts(input: { amountMinor: unknown; acceptedReceiveMinor: unknown; maxFeeMinor: unknown; contentHash: unknown; walrusBlobId: unknown }, what: string): BankPayoutAmounts | Refusal {
+  const request = parseBankPayoutRequest(input, what);
+  if ('ok' in request) return request;
+  const bundle = parseAuditBundle(input, what);
+  if ('ok' in bundle) return bundle;
+  return { ...request, ...bundle };
 }
 
 /**
@@ -803,9 +821,9 @@ export async function createWithdrawal(deps: WithdrawalDeps, userId: string, inp
   const clientKey = validClientKey(input.clientKey);
   if (!clientKey) return refuse(400, 'idempotency_key_required', 'An Idempotency-Key (8 to 80 letters, digits, - or _) is needed.');
   const destinationId = String(input.destinationId ?? '');
-  const a = parseBankPayoutAmounts(input, 'withdraw');
-  if ('ok' in a) return a;
-  const requestHash = withdrawalRequestHash({ destinationId, amountMinor: a.amount, acceptedReceiveMinor: a.accepted, maxFeeMinor: a.shownFee });
+  const request = parseBankPayoutRequest(input, 'withdraw');
+  if ('ok' in request) return request;
+  const requestHash = withdrawalRequestHash({ destinationId, amountMinor: request.amount, acceptedReceiveMinor: request.accepted, maxFeeMinor: request.shownFee });
 
   const prior = await store.withdrawalByClientKey(deps.db, deps.orgId, clientKey);
   if (prior) {
@@ -815,6 +833,10 @@ export async function createWithdrawal(deps: WithdrawalDeps, userId: string, inp
 
   const r = await ready(deps, destinationId);
   if ('ok' in r) return r;
+  // The bundle is needed only for a new withdrawal, after the route is ready: a retry above never makes one.
+  const bundle = parseAuditBundle(input, 'withdraw');
+  if ('ok' in bundle) return bundle;
+  const a: BankPayoutAmounts = { ...request, ...bundle };
   // The business moving its own money: the creditor is the business, at its own address when the profile has one.
   const company = (await deps.companyName()) as string;
   const profile = deps.debtorParty ? await deps.debtorParty() : { party: null, missing: [] as string[], transliterated: [] as string[] };
