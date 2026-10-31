@@ -190,6 +190,31 @@ test('the clean payment is not blocked: its bookkeeping is known and what leaves
   await w.client.close();
 });
 
+test('a target currency that is not a currency code, in real bytes, is a refusal on the screen and not a crash, and a rate of nothing is one too', async () => {
+  for (const [currency, rate] of [['MYR1', 4_500_000n], ['PHP', 0n]]) {
+    const w = await world();
+    const { members } = await registeredWallet(w);
+    await w.screenClear(PAYEE);
+    const opened = await requestWalletPayment(w.ctx, {
+      orgId: 'acme',
+      requestedBy: 'u-two',
+      wallet: members,
+      payment: payment({ kind: 4, targetCurrency: currency, fxRateUsdLocal: rate, beneficiaryRef: bytes32(9) }),
+      withdrawal: { depositAddress: PAYEE, beneficiaryRef: Buffer.from(bytes32(9)).toString('hex') },
+    });
+    assert.equal(opened.ok, true, `${currency}: ${JSON.stringify(opened)}`);
+    const [view] = await signingInbox(w.signing, { orgId: 'acme', userId: 'u-three' });
+    let reviewed;
+    assert.doesNotThrow(() => { reviewed = reviewRequest(view, {}); }, currency);
+    assert.equal(reviewed.ok, true);
+    assert.equal(reviewed.facts.blocked, true, currency);
+    assert.match(reviewed.facts.blockedReason, /rate/i);
+    assert.equal(reviewed.facts.payments[0].rate, null);
+    assert.equal(cardSummary(reviewed.facts).warn, true);
+    await w.client.close();
+  }
+});
+
 test('a bank payout in a real request shows the rate the bytes carry and what it comes to', async () => {
   const w = await world();
   const { members } = await registeredWallet(w);
