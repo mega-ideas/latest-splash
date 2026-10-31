@@ -23,7 +23,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { NextResponse } from 'next/server';
 
 import { scheduleDepsForOrg } from '@/lib/server/scheduled-payments-deps';
-import { runScheduledPayments } from '@/lib/server/scheduled-runner';
+import { publicRunnerResult, runScheduledPayments } from '@/lib/server/scheduled-runner';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -50,10 +50,11 @@ async function handle(request: Request) {
       depsFor: (orgId) => scheduleDepsForOrg(orgId),
     });
     if (result.errors.length > 0) {
+      // Named by business and id only: an error's own text can carry a query and its values.
       console.error('[cron/scheduled-payments] some work could not be done:', result.errors.map((e) => `${e.orgId}/${e.id}`).join(', '));
-      return NextResponse.json({ success: false, ...result, error: `${result.errors.length} item(s) could not be worked on` }, { status: 502 });
+      return NextResponse.json({ success: false, ...publicRunnerResult(result), error: `${result.errors.length} item(s) could not be worked on` }, { status: 502 });
     }
-    return NextResponse.json({ success: true, ...result });
+    return NextResponse.json({ success: true, ...publicRunnerResult(result) });
   } catch (error) {
     console.error('[cron/scheduled-payments] the runner did not run:', error instanceof Error ? error.message : error);
     return NextResponse.json({ success: false, error: 'the runner did not run' }, { status: 502 });

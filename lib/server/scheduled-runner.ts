@@ -56,6 +56,7 @@ import {
   SUBMIT_LEASE_MS,
   ALLOWANCE_DEFAULTS,
   dueDateOf,
+  fallbackWords,
   nextDueAfter,
   runKey,
   type Cadence,
@@ -74,6 +75,7 @@ import {
   autoPaidSince,
   claimPayment,
   claimRun,
+  dailyCapOf,
   finishPayment,
   getRun,
   getSchedule,
@@ -87,6 +89,7 @@ import {
   moveRun,
   paidBefore,
   stampNotice,
+  withLock,
   type RunPaymentRow,
   type RunRow,
   type ScheduleRow,
@@ -115,6 +118,11 @@ export type RunnerDeps = {
   /** One business's own context, or null when it cannot be worked on (no wallet, no database). Never another business's. */
   depsFor: (orgId: string) => Promise<ScheduleDeps | null>;
   env?: NodeJS.ProcessEnv;
+  /**
+   * How long, in real time, one pass may go on starting new work (default 40 seconds, inside the cron route's 60). Work not
+   * reached is left for the next pass, which is every few minutes; nothing already begun is cut off in the middle.
+   */
+  budgetMs?: number;
 };
 
 export type RunnerResult = {
@@ -124,12 +132,26 @@ export type RunnerResult = {
   started: number;
   followed: number;
   notices: number;
+  /** The pass ran out of its time before reaching everything; the next pass carries on. */
+  deferred: boolean;
   errors: Array<{ orgId: string; id: string; error: string }>;
 };
 
+/** What the cron answers: what could not be worked on is named by business and id, never by error text, which can carry a query. */
+export function publicRunnerResult(result: RunnerResult): Omit<RunnerResult, 'errors'> & { errors: Array<{ orgId: string; id: string }> } {
+  return { ...result, errors: result.errors.map((e) => ({ orgId: e.orgId, id: e.id })) };
+}
+
 /** Do what is due. Safe to run twice: the second finds the first's work done. */
 export async function runScheduledPayments(deps: RunnerDeps): Promise<RunnerResult> {
-  const result: RunnerResult = { ok: true, schedules: 0, runsMade: 0, started: 0, followed: 0, notices: 0, errors: [] };
+  const result: RunnerResult = { ok: true, schedules: 0, runsMade: 0, started: 0, followed: 0, notices: 0, deferred: false, errors: [] };
+  const began = performance.now();
+  const budget = deps.budgetMs ?? 40_000;
+  const outOfTime = () => {
+    if (performance.now() - began <= budget) return false;
+    result.deferred = true;
+    return true;
+  };
   const cache = new Map<string, ScheduleDeps | null>();
   const forOrg = async (orgId: string) => {
     if (!cache.has(orgId)) cache.set(orgId, await deps.depsFor(orgId));
@@ -147,6 +169,7 @@ export async function runScheduledPayments(deps: RunnerDeps): Promise<RunnerResu
   // 1. Schedules.
   const now = deps.now();
   for (const due of await listDueSchedulesForStaff(deps.db, now, NOTICE_LEAD_MS)) {
+    if (outOfTime()) break;
     result.schedules += 1;
     await guard(due.orgId, due.id, async () => {
       const d = await forOrg(due.orgId);
@@ -159,6 +182,7 @@ export async function runScheduledPayments(deps: RunnerDeps): Promise<RunnerResu
 
   // 2. Runs.
   for (const open of await listOpenRunsForStaff(deps.db)) {
+    if (outOfTime()) break;
     await guard(open.orgId, open.id, async () => {
       const d = await forOrg(open.orgId);
       if (!d) return;
@@ -191,7 +215,7 @@ async function makeRuns(d: ScheduleDeps, scheduleId: string): Promise<{ made: nu
     const now = d.now();
     const dueAt = sch.nextDueAt;
     if (dueAt.getTime() - now.getTime() > NOTICE_LEAD_MS) break;
-    const { run, created } = await insertRunOnce(d.db, {
+    const inserted = await insertRunOnce(d.db, {
       id: `psr_${randomUUID()}`,
       scheduleId: sch.id,
       orgId: d.orgId,
@@ -202,7 +226,14 @@ async function makeRuns(d: ScheduleDeps, scheduleId: string): Promise<{ made: nu
       createdAt: now,
       updatedAt: now,
     });
+    const created = inserted.created;
+    let run = inserted.run;
     if (created) made += 1;
+    // A run made for another time of this day (the time was moved) takes the schedule's time, so it is never started at the old one.
+    if (!created && run.status === 'scheduled' && run.dueAt.getTime() !== dueAt.getTime()) {
+      const retimed = await moveRun(d.db, d.orgId, run.id, { dueAt, claimedAt: null, noticeDayBeforeAt: null, updatedAt: now }, ['scheduled']);
+      if (retimed) run = retimed;
+    }
     // The day before: an automatic run says it is coming, once.
     if (sch.mode === 'auto' && run.status === 'scheduled' && now.getTime() < dueAt.getTime()) {
       if (await stampNotice(d.db, d.orgId, run.id, 'noticeDayBeforeAt', now)) {
@@ -460,7 +491,7 @@ async function evaluateAuto(d: ScheduleDeps, sch: ScheduleRow): Promise<CheckedR
     });
   }
 
-  const dailyCap = settings?.dailyCapMinor ?? BigInt(ALLOWANCE_DEFAULTS.dailyUsdc) * 1_000_000n;
+  const dailyCap = (await dailyCapOf(d.db, d.orgId)).capMinor ?? BigInt(ALLOWANCE_DEFAULTS.dailyUsdc) * 1_000_000n;
   const dailyUsed = await autoPaidSince(d.db, d.orgId, new Date(now.getTime() - 24 * 3_600_000));
   const balance = d.walletBalance ? await d.walletBalance().catch(() => null) : null;
   const verdict = evaluateAutoRun(
@@ -495,33 +526,42 @@ async function executeAuto(d: ScheduleDeps, sch: ScheduleRow, run: RunRow, check
   const now = d.now();
   const items = itemsOf(sch);
   const key = runKey(sch.id, run.dueDate);
-  await insertRunPayments(
-    d.db,
-    checked.rows.map((r) => {
-      const item = items.find((i) => i.position === r.position) as ReturnType<typeof itemsOf>[number];
-      return {
-        id: `psp_${randomUUID()}`,
-        runId: run.id,
-        orgId: d.orgId,
-        position: r.position,
-        paymentRef: sha(`splash-scheduled-payment|${d.orgId}|${key}|${r.position}`).toString('hex'),
-        recipientId: item.payee.kind === 'recipient' ? item.payee.recipientId : null,
-        businessId: item.payee.kind === 'splash_business' ? item.payee.businessId : null,
-        payeeName: item.name,
-        address: r.address,
-        amountMinor: r.amountMinor,
-        maxFeeMinor: r.feeMinor,
-        feeKind: r.kind,
-        reference: item.reference || null,
-        status: 'pending',
-        createdAt: now,
-        updatedAt: now,
-      };
-    }),
-  );
-  // From here the run is the owners' allowance paying: a Skip or a pause moves it, and the payments below look first.
-  const started = await moveRun(d.db, d.orgId, run.id, { status: 'approved', ranAs: 'auto', fallback: false, reasonCode: null, reason: null, itemCount: checked.rows.length, totalMinor: checked.totalMinor, feeMinor: checked.feeMinor, updatedAt: now }, ['scheduled']);
-  if (!started) return 0;
+  const payments = checked.rows.map((r) => {
+    const item = items.find((i) => i.position === r.position) as ReturnType<typeof itemsOf>[number];
+    return {
+      id: `psp_${randomUUID()}`,
+      runId: run.id,
+      orgId: d.orgId,
+      position: r.position,
+      paymentRef: sha(`splash-scheduled-payment|${d.orgId}|${key}|${r.position}`).toString('hex'),
+      recipientId: item.payee.kind === 'recipient' ? item.payee.recipientId : null,
+      businessId: item.payee.kind === 'splash_business' ? item.payee.businessId : null,
+      payeeName: item.name,
+      address: r.address,
+      amountMinor: r.amountMinor,
+      maxFeeMinor: r.feeMinor,
+      feeKind: r.kind,
+      reference: item.reference || null,
+      status: 'pending' as const,
+      createdAt: now,
+      updatedAt: now,
+    };
+  });
+  // Reserve the run under the daily limit: one business's runners take this lock one after the other, each counting what the
+  // earlier ones have set aside, so two runs working different schedules cannot both pass a limit that fits only one.
+  const cap = (await dailyCapOf(d.db, d.orgId)).capMinor ?? BigInt(ALLOWANCE_DEFAULTS.dailyUsdc) * 1_000_000n;
+  const reserved = await withLock(d.db, `scheduled-cap|${d.orgId}`, async (tx) => {
+    const used = await autoPaidSince(tx, d.orgId, new Date(now.getTime() - 24 * 3_600_000));
+    if (used + checked.totalMinor + checked.feeMinor > cap) return 'over_cap' as const;
+    // From here the run is the owners' allowance paying: a Skip or a pause moves it, and the payments below look first.
+    const moved = await moveRun(tx, d.orgId, run.id, { status: 'approved', ranAs: 'auto', fallback: false, reasonCode: null, reason: null, itemCount: checked.rows.length, totalMinor: checked.totalMinor, feeMinor: checked.feeMinor, updatedAt: now }, ['scheduled']);
+    if (!moved) return null;
+    await insertRunPayments(tx, payments);
+    return moved;
+  });
+  if (reserved === 'over_cap') return prepareApproval(d, sch, run, { code: 'daily_cap', text: fallbackWords('daily_cap') });
+  if (!reserved) return 0;
+  const started = reserved;
   let notices = 0;
   if (await stampNotice(d.db, d.orgId, started.id, 'noticeRunningAt', now)) {
     await tell(d, 'running', sch, started);
@@ -727,9 +767,4 @@ async function settleAuto(d: ScheduleDeps, runId: string): Promise<number> {
   if (!failed) return 0;
   await tell(d, 'failed', sch, failed, { reason });
   return 1;
-}
-
-/** What the cron answers. (Red stub: the real one drops the error text.) */
-export function publicRunnerResult<T>(result: T): T {
-  return result;
 }

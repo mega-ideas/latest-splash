@@ -233,6 +233,14 @@ export const ALLOWANCE_DEFAULTS = {
 /** An allowance outlives no more than a year (the spending rules' own limit). */
 export const ALLOWANCE_MAX_DAYS = 366;
 
+/**
+ * The most one automatic payment to a recipient, with what was paid it already,
+ * may reach: 10,000 USDC, the amount an owner must approve. Whatever second-
+ * approval amount the business's own policy says, an automatic payment is held
+ * to the lower of the two, so the policy can never be set to lift this line.
+ */
+export const AUTO_APPROVAL_CEILING_MINOR = 10_000_000_000n;
+
 export type AllowanceForm = { perPaymentMinor: bigint; dailyMinor: bigint; monthlyMinor: bigint; expiresInDays: number };
 
 /** What is wrong with an allowance an owner typed, in words; an empty list means it can be asked for. */
@@ -243,6 +251,9 @@ export function allowanceProblems(form: AllowanceForm, policyPerPaymentMaxMinor?
   if (form.monthlyMinor <= 0n) out.push('Set a monthly limit above zero.');
   if (form.dailyMinor > 0n && form.perPaymentMinor > form.dailyMinor) out.push('The limit for one payment cannot be more than the daily limit.');
   if (form.monthlyMinor > 0n && form.dailyMinor > form.monthlyMinor) out.push('The daily limit cannot be more than the monthly limit.');
+  if (form.perPaymentMinor > AUTO_APPROVAL_CEILING_MINOR) {
+    out.push(`The limit for one payment cannot be more than ${formatUsdc(AUTO_APPROVAL_CEILING_MINOR)} USDC, the amount an owner must always approve.`);
+  }
   if (policyPerPaymentMaxMinor != null && form.perPaymentMinor > policyPerPaymentMaxMinor) {
     out.push(`The limit for one payment cannot be more than your business’s own limit of ${formatUsdc(policyPerPaymentMaxMinor)} USDC.`);
   }

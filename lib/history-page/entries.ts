@@ -207,7 +207,9 @@ function scheduledEntry(r: ScheduledRunRow): HistoryEntry {
   const going = r.status === 'paid' || r.status === 'approved';
   const how =
     r.ranAs === 'auto' && going
-      ? 'Paid automatically within your limits'
+      ? r.status === 'paid'
+        ? 'Paid automatically within your limits'
+        : 'Being paid automatically within your limits'
       : r.ranAs === 'ask' && going
         ? 'Approved by your owners'
         : r.ranAs === 'ask' && r.status === 'waiting_approval'

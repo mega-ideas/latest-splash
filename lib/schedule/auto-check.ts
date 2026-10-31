@@ -30,7 +30,7 @@
  * Pure and free of the database and the network, so every branch is tested.
  */
 import { approvalPlan, type ApprovalReason, type PolicyFacts, type StaffRuleFacts } from '../transfer/plan.ts';
-import { FALLBACK_TEXT, fallbackWords, type FallbackCode } from './rules.ts';
+import { AUTO_APPROVAL_CEILING_MINOR, FALLBACK_TEXT, fallbackWords, type FallbackCode } from './rules.ts';
 
 export type AutoItemFacts = {
   position: number;
@@ -118,7 +118,10 @@ export function evaluateAutoRun(facts: AutoFacts, items: AutoItemFacts[]): AutoV
   if (!facts.rule) return refuse('no_allowance');
   if (items.length === 0) return refuse('over_window');
 
-  const threshold = BigInt(facts.policy.secondApprovalThresholdMinor);
+  // The line an owner must approve above: the business's own, and never higher than 10,000 USDC.
+  const policyThreshold = BigInt(facts.policy.secondApprovalThresholdMinor);
+  const threshold = policyThreshold < AUTO_APPROVAL_CEILING_MINOR ? policyThreshold : AUTO_APPROVAL_CEILING_MINOR;
+  const policy = { ...facts.policy, secondApprovalThresholdMinor: threshold.toString() };
   const rows: Extract<AutoVerdict, { ok: true }>['rows'] = [];
   let spender = 0n;
   const toRecipient = new Map<string, bigint>();
@@ -148,7 +151,7 @@ export function evaluateAutoRun(facts: AutoFacts, items: AutoItemFacts[]): AutoV
       feeMinor: fee,
       payee: item.now.kind === 0 ? { kind: 'splash_business', address } : { kind: 'wallet', wallet: 'self_custody', address },
       rule: facts.rule,
-      policy: facts.policy,
+      policy,
       runningTotalMinor: BigInt(facts.runningTotals[address] ?? '0'),
       asset: 'USDC',
       nowMs: BigInt(facts.nowMs),

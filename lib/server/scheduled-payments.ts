@@ -67,6 +67,7 @@ import { recipientPayable, type WalletContext } from './business-wallet.ts';
 import { listOrgOwners } from './near-threshold-store.ts';
 import {
   advanceSchedule,
+  dailyCapOf,
   getRun,
   getRunForDate,
   getSchedule,
@@ -79,6 +80,7 @@ import {
   listRuns,
   listSchedules,
   moveRun,
+  moveRunUnlessPaying,
   saveSettings,
   autoPaidSince,
   updateSchedule,
@@ -156,7 +158,7 @@ export function runView(run: RunRow, scheduleName: string, payments: Awaited<Ret
     totalMinor: (run.totalMinor > 0n ? run.totalMinor : (plan?.totalMinor ?? 0n)).toString(),
     feeMinor: (run.totalMinor > 0n ? run.feeMinor : (plan?.feeMinor ?? 0n)).toString(),
     batchId: run.batchId ?? null,
-    canSkip: (run.status === 'scheduled' || run.status === 'waiting_approval' || run.status === 'approved') && !started,
+    canSkip: (run.status === 'scheduled' || run.status === 'waiting_approval' || (run.status === 'approved' && run.ranAs === 'auto')) && !started,
     receiptPath: run.status === 'paid' ? (run.ranAs === 'auto' || !run.batchId ? `/dashboard/history/scheduled/${encodeURIComponent(run.id)}` : `/dashboard/history/batch/${encodeURIComponent(run.batchId)}`) : null,
     payments: payments
       ? payments.map((p) => ({ position: p.position, payeeName: p.payeeName, masked: maskAddress(p.address), amountMinor: p.amountMinor.toString(), feeMinor: p.maxFeeMinor.toString(), status: p.status, digest: p.digest && !p.digest.startsWith('sandbox:') ? p.digest : null, error: p.error }))
@@ -165,8 +167,9 @@ export function runView(run: RunRow, scheduleName: string, payments: Awaited<Ret
   };
 }
 
-async function scheduleView(deps: ScheduleDeps, actor: Actor, row: ScheduleRow, withRuns = true): Promise<ScheduleView> {
-  const runs = withRuns ? await listRuns(deps.db, deps.orgId, 400) : [];
+async function scheduleView(deps: ScheduleDeps, actor: Actor, row: ScheduleRow, known?: RunRow[]): Promise<ScheduleView> {
+  // A list of schedules reads the business's runs once and hands them to each; a single schedule reads them itself.
+  const runs = known ?? (await listRuns(deps.db, deps.orgId, 400));
   const mine = runs.filter((r) => r.scheduleId === row.id).slice(0, 8);
   const views: RunView[] = [];
   for (const r of mine) views.push(runView(r, row.name, r.ranAs === 'auto' ? await listRunPayments(deps.db, deps.orgId, r.id) : null, { itemCount: row.itemCount, totalMinor: row.totalMinor, feeMinor: row.feeMinor }));
@@ -195,8 +198,9 @@ async function scheduleView(deps: ScheduleDeps, actor: Actor, row: ScheduleRow, 
 /** This business's schedules with their latest runs. Another business's are never in it. */
 export async function listScheduleViews(deps: ScheduleDeps, actor: Actor): Promise<ScheduleView[]> {
   const rows = await listSchedules(deps.db, deps.orgId);
+  const runs = await listRuns(deps.db, deps.orgId, 400);
   const out: ScheduleView[] = [];
-  for (const row of rows) out.push(await scheduleView(deps, actor, row));
+  for (const row of rows) out.push(await scheduleView(deps, actor, row, runs));
   return out;
 }
 
@@ -427,6 +431,60 @@ export async function createSchedule(
 
 export type SchedulePatch = Partial<Omit<ScheduleInput, 'clientKey'>>;
 
+/** A database check that refused a change (23514): the caller gets a plain sentence, never the query. */
+function isCheckViolation(error: unknown): boolean {
+  const e = error as { code?: string; cause?: { code?: string } } | null;
+  return e?.code === '23514' || e?.cause?.code === '23514';
+}
+
+/** Runs that were closed by the schedule being changed or stopped, not by a person's choice: they open again when their time comes back. */
+const reopenable = (r: RunRow) => r.status === 'skipped' && (r.reasonCode === 'stopped' || r.reasonCode === 'schedule_changed');
+
+/**
+ * Where the schedule's next run really falls, once its time has changed (an
+ * edit, or starting it again), and the run for that day made to agree.
+ *
+ * A run is made once per schedule and day, so the day's run may already exist:
+ *   - waiting to start, on another time of that day: it takes the new time (a
+ *     payment never goes out at a time the owner moved it away from), and the
+ *     day-before notice is sent again for the new time;
+ *   - closed only because the schedule was changed or stopped: it opens again;
+ *   - finished, or skipped by a person: that time is spent. A recurring
+ *     schedule moves on to its next time; a "once" schedule says so, so
+ *     nothing quietly never runs.
+ * With `apply` false it only works out the answer.
+ */
+async function placeRun(
+  deps: ScheduleDeps,
+  sch: { id: string; cadence: Cadence; firstDueMs: number },
+  candidateMs: number | null,
+  apply: boolean,
+  now: Date,
+): Promise<{ ok: true; nextMs: number | null } | Fail> {
+  let candidate = candidateMs;
+  for (let guard = 0; guard < 60 && candidate !== null; guard += 1) {
+    const run = await getRunForDate(deps.db, deps.orgId, sch.id, dueDateOf(candidate));
+    if (!run) return { ok: true, nextMs: candidate };
+    if (run.status === 'scheduled' || reopenable(run)) {
+      if (apply && (run.status !== 'scheduled' || run.dueAt.getTime() !== candidate)) {
+        await moveRun(
+          deps.db,
+          deps.orgId,
+          run.id,
+          { status: 'scheduled', dueAt: new Date(candidate), reasonCode: null, reason: null, skippedBy: null, skippedAt: null, claimedAt: null, noticeDayBeforeAt: null, updatedAt: now },
+          [run.status as RunStatus],
+        );
+      }
+      return { ok: true, nextMs: candidate };
+    }
+    if (sch.cadence === 'once') {
+      return fail(409, 'already_ran_that_day', 'This payment already ran, or was skipped, on that day. Choose another day to run it again.');
+    }
+    candidate = nextDueAfter(sch.cadence, sch.firstDueMs, candidate);
+  }
+  return { ok: true, nextMs: candidate };
+}
+
 /**
  * Change a schedule, at once. Switching it to "ask me first" takes effect for
  * the very next run. Changing the time or the recipients of a run already
@@ -460,6 +518,19 @@ export async function editSchedule(deps: ScheduleDeps, actor: Actor, id: string,
     const when = checkWhen(deps, mode, nextMs);
     if (when) return when;
   }
+  // An owner makes a schedule pay automatically only after being shown its payments and confirming them: they are sent again, so
+  // nobody's changes (a Finance lead's included) ride into automatic mode unseen.
+  const toAuto = mode === 'auto' && wasMode !== 'auto';
+  if (toAuto && patch.items === undefined) {
+    return fail(400, 'confirm_payments', 'Check this schedule’s payments before it pays automatically: review each recipient and amount, then save. Paying automatically needs an owner to confirm them.');
+  }
+  // Where it really falls due, once the run already made for that day is taken into account.
+  let finalNext = nextMs;
+  if (timeChanged) {
+    const placed = await placeRun(deps, { id, cadence, firstDueMs }, nextMs, false, deps.now());
+    if (!placed.ok) return placed;
+    finalNext = placed.nextMs;
+  }
 
   let items = itemsOf(row);
   let total = row.totalMinor;
@@ -485,31 +556,42 @@ export async function editSchedule(deps: ScheduleDeps, actor: Actor, id: string,
 
   const now = deps.now();
   const moved = timeChanged || patch.items !== undefined || mode !== wasMode;
-  const updated = await updateSchedule(
-    deps.db,
-    deps.orgId,
-    id,
-    {
-      name,
-      mode,
-      cadence,
-      firstDueAt: new Date(firstDueMs),
-      nextDueAt: nextMs === null ? null : new Date(nextMs),
-      status: nextMs === null && row.status === 'active' ? 'completed' : row.status === 'completed' && nextMs !== null ? 'active' : row.status,
-      items,
-      itemCount: items.length,
-      totalMinor: total,
-      feeMinor: fees,
-      confirmedNewPayees: confirmed,
-      version: row.version + 1,
-      updatedAt: now,
-    },
-    { from: ['active', 'stopped', 'completed'] },
-  );
+  // An owner who edits the payments, or makes the schedule automatic, has made it theirs: an automatic schedule is an owner's.
+  const ownerAuthored = isOwner(actor) && (patch.items !== undefined || toAuto);
+  let updated: ScheduleRow | null;
+  try {
+    updated = await updateSchedule(
+      deps.db,
+      deps.orgId,
+      id,
+      {
+        name,
+        mode,
+        cadence,
+        firstDueAt: new Date(firstDueMs),
+        nextDueAt: finalNext === null ? null : new Date(finalNext),
+        status: finalNext === null && row.status === 'active' ? 'completed' : row.status === 'completed' && finalNext !== null ? 'active' : row.status,
+        items,
+        itemCount: items.length,
+        totalMinor: total,
+        feeMinor: fees,
+        confirmedNewPayees: confirmed,
+        ...(ownerAuthored ? { createdBy: actor.userId, createdAs: 'owner' as const } : {}),
+        version: row.version + 1,
+        updatedAt: now,
+      },
+      { from: ['active', 'stopped', 'completed'] },
+    );
+  } catch (error) {
+    // A rule the database keeps (an automatic schedule is an owner's, for one) answers in words, never with the query.
+    if (!isCheckViolation(error)) throw error;
+    return fail(409, 'change_not_allowed', 'That change is not allowed for this schedule. An automatic schedule has to be an owner’s: open it, review its payments and save.');
+  }
   if (!updated) return fail(409, 'schedule_changed', 'The schedule changed while you were editing it. Reload it and try again.');
   if (timeChanged) {
-    // A run made for the old time that has not started is taken back; the new time makes its own.
-    const stale = (await listRuns(deps.db, deps.orgId, 400)).filter((r) => r.scheduleId === id && r.status === 'scheduled' && (nextMs === null || dueDateOf(r.dueAt.getTime()) !== dueDateOf(nextMs)));
+    // The run for the new time agrees with it; a run made for an old day that has not started is taken back.
+    await placeRun(deps, { id, cadence, firstDueMs }, finalNext, true, now);
+    const stale = (await listRuns(deps.db, deps.orgId, 400)).filter((r) => r.scheduleId === id && r.status === 'scheduled' && (finalNext === null || dueDateOf(r.dueAt.getTime()) !== dueDateOf(finalNext)));
     for (const r of stale) await moveRun(deps.db, deps.orgId, r.id, { status: 'skipped', reasonCode: 'schedule_changed', reason: 'The schedule was changed, so this run was taken back. Nothing was paid.', skippedBy: actor.userId, skippedAt: now, updatedAt: now }, ['scheduled']);
   }
   if (moved) await recordAuthorityEvent(deps.db, { orgId: deps.orgId, actorUserId: actor.userId, action: 'schedule_changed', ref: id, detail: { mode, cadence, items: items.length }, now: deps.now });
@@ -551,9 +633,12 @@ export async function skipRun(deps: ScheduleDeps, actor: Actor, scheduleId: stri
     }
     moved = await moveRun(deps.db, deps.orgId, run.id, patch, ['waiting_approval']);
   } else if (run.status === 'approved') {
+    if (run.ranAs !== 'auto') return fail(409, 'already_paying', 'The owners already signed this one and it is on its way, so it cannot be skipped.');
     const payments = await listRunPayments(deps.db, deps.orgId, run.id);
     if (payments.some((p) => p.status === 'submitting' || p.status === 'paid')) return fail(409, 'already_paying', 'Part of this run has already gone out, so it cannot be skipped. Nothing more will be started if you stop the schedule.');
-    moved = await moveRun(deps.db, deps.orgId, run.id, patch, ['approved']);
+    // One statement that also checks no payment has been claimed, under the lock a payment's claim takes: a Skip and a first payment never both go through.
+    moved = await moveRunUnlessPaying(deps.db, deps.orgId, run.id, patch, ['approved']);
+    if (!moved) return fail(409, 'already_paying', 'Part of this run has just gone out, so it cannot be skipped. Nothing more will be started if you stop the schedule.');
   } else {
     return fail(409, 'run_finished', run.status === 'skipped' ? 'That run was already skipped.' : 'That run has already finished, so it cannot be skipped.');
   }
@@ -598,9 +683,12 @@ export async function stopSchedule(deps: ScheduleDeps, actor: Actor, id: string)
   if (!stopped) return row.status === 'stopped' ? { ok: true, schedule: await scheduleView(deps, actor, row) } : fail(409, 'schedule_changed', 'That schedule just changed. Reload it and try again.');
   // The run that is about to start does not.
   for (const r of (await listRuns(deps.db, deps.orgId, 400)).filter((x) => x.scheduleId === id && (x.status === 'scheduled' || x.status === 'approved'))) {
-    const payments = r.status === 'approved' ? await listRunPayments(deps.db, deps.orgId, r.id) : [];
-    if (payments.some((p) => p.status === 'submitting' || p.status === 'paid')) continue;
-    await moveRun(deps.db, deps.orgId, r.id, { status: 'skipped', reasonCode: 'stopped', reason: 'The schedule was stopped, so this run was not started. Nothing was paid.', skippedBy: actor.userId, skippedAt: now, updatedAt: now }, [r.status as RunStatus]);
+    const patch = { status: 'skipped' as const, reasonCode: 'stopped', reason: 'The schedule was stopped, so this run was not started. Nothing was paid.', skippedBy: actor.userId, skippedAt: now, updatedAt: now };
+    // A run already being paid is left to finish what has gone out; one that has not paid anything yet is stopped in one statement.
+    // (A run the owners already signed is on its way; stopping the schedule does not take it back.)
+    if (r.status === 'approved') {
+      if (r.ranAs === 'auto') await moveRunUnlessPaying(deps.db, deps.orgId, r.id, patch, ['approved']);
+    } else await moveRun(deps.db, deps.orgId, r.id, patch, ['scheduled']);
   }
   await recordAuthorityEvent(deps.db, { orgId: deps.orgId, actorUserId: actor.userId, action: 'schedule_stopped', ref: id, detail: {}, now: deps.now });
   return { ok: true, schedule: await scheduleView(deps, actor, stopped) };
@@ -613,10 +701,17 @@ export async function resumeSchedule(deps: ScheduleDeps, actor: Actor, id: strin
   if (!mayManage(actor, row.mode as ScheduleMode)) return cannotManage(row.mode as ScheduleMode);
   if (row.status !== 'stopped') return fail(409, 'not_stopped', 'That schedule is not stopped.');
   const now = deps.now();
-  const next = nextDueAfter(row.cadence as Cadence, row.firstDueAt.getTime(), now.getTime() + (row.mode === 'auto' ? AUTO_MIN_LEAD_MS : ASK_MIN_LEAD_MS) - 1);
+  const first = nextDueAfter(row.cadence as Cadence, row.firstDueAt.getTime(), now.getTime() + (row.mode === 'auto' ? AUTO_MIN_LEAD_MS : ASK_MIN_LEAD_MS) - 1);
+  if (first === null) return fail(409, 'nothing_left', 'That schedule has no coming run. Edit its time to start it again.');
+  // The time it was stopped before still runs if it is still ahead: the run the stop closed opens again. A time an owner skipped stays skipped, and the schedule moves on.
+  const spec = { id, cadence: row.cadence as Cadence, firstDueMs: row.firstDueAt.getTime() };
+  const placed = await placeRun(deps, spec, first, false, now);
+  if (!placed.ok) return fail(409, 'time_already_used', 'Its coming time was already skipped or has already run. Edit its time to start it again.');
+  const next = placed.nextMs;
   if (next === null) return fail(409, 'nothing_left', 'That schedule has no coming run. Edit its time to start it again.');
   const updated = await updateSchedule(deps.db, deps.orgId, id, { status: 'active', nextDueAt: new Date(next), stoppedAt: null, stoppedBy: null, updatedAt: now }, { from: ['stopped'] });
   if (!updated) return fail(409, 'schedule_changed', 'That schedule just changed. Reload it and try again.');
+  await placeRun(deps, spec, next, true, now);
   await recordAuthorityEvent(deps.db, { orgId: deps.orgId, actorUserId: actor.userId, action: 'schedule_resumed', ref: id, detail: {}, now: deps.now });
   return { ok: true, schedule: await scheduleView(deps, actor, updated) };
 }
@@ -643,6 +738,7 @@ function spendOf(deps: ScheduleDeps): Promise<SpendContext | null> {
 
 export async function automaticStatus(deps: ScheduleDeps): Promise<AutomaticStatus> {
   const settings = await getSettings(deps.db, deps.orgId);
+  const cap = await dailyCapOf(deps.db, deps.orgId);
   const payer = await deps.payer();
   const now = deps.now();
   const used = await autoPaidSince(deps.db, deps.orgId, new Date(now.getTime() - 24 * 3_600_000));
@@ -672,7 +768,8 @@ export async function automaticStatus(deps: ScheduleDeps): Promise<AutomaticStat
     paused: settings?.autoPaused ?? false,
     pausedBy: settings?.pausedBy ?? null,
     pausedAt: settings?.pausedAt ? settings.pausedAt.toISOString() : null,
-    dailyCapMinor: (settings?.dailyCapMinor ?? BigInt(ALLOWANCE_DEFAULTS.dailyUsdc) * 1_000_000n).toString(),
+    dailyCapMinor: (cap.capMinor ?? BigInt(ALLOWANCE_DEFAULTS.dailyUsdc) * 1_000_000n).toString(),
+    pendingDailyCapMinor: cap.pending ? cap.pending.capMinor.toString() : null,
     dailyUsedMinor: used.toString(),
     allowance,
     defaults: ALLOWANCE_DEFAULTS,
@@ -750,7 +847,8 @@ export async function requestAllowance(deps: ScheduleDeps, actor: Actor, input: 
   // An allowance already exists: change it (revoke and reissue in one signed request), keeping what was spent.
   if (!opened.ok && opened.code === 'rule_exists') opened = await changeSpendingRule(sc, args);
   if (!opened.ok) return fail(opened.status, opened.code, opened.error, 'details' in opened ? (opened.details as Record<string, unknown> | undefined) : undefined);
-  await saveSettings(deps.db, deps.orgId, { dailyCapMinor: daily as bigint }, deps.now());
+  // The daily limit asked for waits with this request: it applies when the owners have signed, and not before.
+  await saveSettings(deps.db, deps.orgId, { pendingDailyCapMinor: daily as bigint, pendingCapRequestId: opened.request.id }, deps.now());
   await recordAuthorityEvent(deps.db, { orgId: deps.orgId, actorUserId: actor.userId, action: 'automatic_allowance_requested', ref: opened.request.id, detail: { perPaymentMinor: perPayment?.toString(), dailyMinor: daily?.toString(), monthlyMinor: monthly?.toString(), days }, now: deps.now });
   return { ok: true, request: opened.request };
 }

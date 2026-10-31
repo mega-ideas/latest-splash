@@ -95,7 +95,10 @@ export default function AutomaticPanel({ status, onChanged }: { status: Automati
         <div className="dash-block p-3">
           <dt className="font-mono text-[12px] font-bold uppercase tracking-[0.12em] text-[#145d6a]">Daily limit</dt>
           <dd className="mt-1 text-sm font-bold tabular-nums text-[#0c3e48]">{usdc(status.dailyCapMinor)}</dd>
-          <dd className="mt-0.5 text-[13px] leading-5 text-[#326273]">{usdc(status.dailyUsedMinor)} paid automatically in the last 24 hours.</dd>
+          <dd className="mt-0.5 text-[13px] leading-5 text-[#326273]">
+            {usdc(status.dailyUsedMinor)} paid automatically in the last 24 hours.
+            {status.pendingDailyCapMinor ? ` Your owners have been asked to sign a limit of ${usdc(status.pendingDailyCapMinor)}; the limit above holds until they do.` : ''}
+          </dd>
         </div>
         <div className="dash-block p-3">
           <dt className="font-mono text-[12px] font-bold uppercase tracking-[0.12em] text-[#145d6a]">Pause switch</dt>

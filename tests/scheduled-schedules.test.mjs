@@ -183,7 +183,9 @@ test('an owner edits a schedule at once, and the Finance lead may edit only “a
 test('only an owner makes a schedule automatic, and the Finance lead cannot edit one that is', async () => {
   const t = await scheduleWorld();
   const id = ok(await S.createSchedule(t.sdeps(), OWNER_ACTOR, sched(t.ids))).schedule.id;
-  const auto = ok(await S.editSchedule(t.sdeps(), OWNER_ACTOR, id, { mode: 'auto' }));
+  // The owner confirms the payments when making it automatic: the mode alone is not enough.
+  refused(await S.editSchedule(t.sdeps(), OWNER_ACTOR, id, { mode: 'auto' }), 400, 'confirm_payments');
+  const auto = ok(await S.editSchedule(t.sdeps(), OWNER_ACTOR, id, { mode: 'auto', items: [{ recipientId: t.ids.a, amount: '500', reference: 'INV-1' }, { recipientId: t.ids.b, amount: '750.50', reference: 'INV-2' }] }));
   assert.equal(auto.schedule.mode, 'auto');
   assert.deepEqual(auto.schedule.can, { edit: true, skip: true, stop: true, delete: true });
   refused(await S.editSchedule(t.sdeps(), FINANCE_LEAD, id, { name: 'Sneaky' }), 403, 'owner_only');

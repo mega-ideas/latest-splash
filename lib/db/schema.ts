@@ -2867,5 +2867,8 @@ export const scheduledPaymentSettings = pgTable('scheduled_payment_settings', {
   pausedBy: text('paused_by'),
   pausedAt: timestamp('paused_at', { withTimezone: true }),
   dailyCapMinor: bigint('daily_cap_minor', { mode: 'bigint' }),
+  /** A daily limit asked for and waiting for the owners' signatures (migration 0070); it becomes the limit when that request executes. */
+  pendingDailyCapMinor: bigint('pending_daily_cap_minor', { mode: 'bigint' }),
+  pendingCapRequestId: text('pending_cap_request_id'),
   ...timestamps,
 });

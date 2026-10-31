@@ -67,6 +67,8 @@ export type AutomaticStatus = {
   pausedBy: string | null;
   pausedAt: string | null;
   dailyCapMinor: string;
+  /** A daily limit the owners have been asked to sign; it applies once they have. */
+  pendingDailyCapMinor: string | null;
   dailyUsedMinor: string;
   /** The owners' allowance to the scheduled payer, as the network has it now. Null when it could not be read. */
   allowance:

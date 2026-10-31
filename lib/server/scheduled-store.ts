@@ -147,6 +147,44 @@ export async function moveRun(
   return row ?? null;
 }
 
+/** Run `fn` in a transaction holding a lock on `key` (released at the end), so two callers working under one key go one after the other. */
+export async function withLock<T>(db: DrizzleDb, key: string, fn: (tx: DrizzleDb) => Promise<T>): Promise<T> {
+  return db.transaction(async (tx) => {
+    const t = tx as unknown as DrizzleDb;
+    await t.execute(sql`select pg_advisory_xact_lock(hashtext(${key}))`);
+    return fn(t);
+  });
+}
+
+/**
+ * Move a run, only while it is in one of the states in `from` and none of its
+ * payments has been claimed or paid. One statement under the lock claimPayment
+ * takes, so a Skip and the first payment's claim cannot both succeed.
+ */
+export async function moveRunUnlessPaying(
+  db: DrizzleDb,
+  orgId: string,
+  id: string,
+  patch: Partial<typeof paymentScheduleRuns.$inferInsert>,
+  from: RunStatus[],
+): Promise<RunRow | null> {
+  return withLock(db, `scheduled-run|${orgId}`, async (tx) => {
+    const [row] = await tx
+      .update(paymentScheduleRuns)
+      .set(patch)
+      .where(
+        and(
+          eq(paymentScheduleRuns.orgId, orgId),
+          eq(paymentScheduleRuns.id, id),
+          inArray(paymentScheduleRuns.status, from),
+          sql`not exists (select 1 from ${paymentScheduleRunPayments} p where p.run_id = ${paymentScheduleRuns.id} and p.org_id = ${orgId} and p.status in ('submitting', 'paid'))`,
+        ),
+      )
+      .returning();
+    return row ?? null;
+  });
+}
+
 /** Take the lease on a run that is waiting to be started. One caller wins; a lease older than `leaseMs` is free. */
 export async function claimRun(db: DrizzleDb, orgId: string, id: string, now: Date, leaseMs: number): Promise<RunRow | null> {
   const [row] = await db
@@ -210,6 +248,11 @@ export async function listRunPayments(db: DrizzleDb, orgId: string, runId: strin
  * row that is read back from the chain, never sent again.
  */
 export async function claimPayment(db: DrizzleDb, orgId: string, id: string, input: { digest: string; gasBudgetMist: bigint; now: Date }): Promise<RunPaymentRow | null> {
+  // Under the lock a Skip takes too: the two go one after the other, never at once, so a run cannot be skipped with a payment going out.
+  return withLock(db, `scheduled-run|${orgId}`, (tx) => claimPaymentIn(tx, orgId, id, input));
+}
+
+async function claimPaymentIn(db: DrizzleDb, orgId: string, id: string, input: { digest: string; gasBudgetMist: bigint; now: Date }): Promise<RunPaymentRow | null> {
   const [row] = await db
     .update(paymentScheduleRunPayments)
     .set({ status: 'submitting', digest: input.digest, gasBudgetMist: input.gasBudgetMist, attemptedAt: input.now, updatedAt: input.now })
@@ -240,7 +283,12 @@ export async function finishPayment(
   return row ?? null;
 }
 
-/** Everything an automatic run paid, or is paying, from a time on: the figure the daily limit is held to. */
+/**
+ * Everything an automatic run paid, is paying, or has set aside to pay, from a
+ * time on: the figure the daily limit is held to. A payment of a run that has
+ * started but not yet gone out (pending) counts, so a second runner working
+ * another schedule of the same business sees what the first has reserved.
+ */
 export async function autoPaidSince(db: DrizzleDb, orgId: string, since: Date): Promise<bigint> {
   const rows = await db
     .select({ amount: paymentScheduleRunPayments.amountMinor, fee: paymentScheduleRunPayments.maxFeeMinor })
@@ -248,8 +296,13 @@ export async function autoPaidSince(db: DrizzleDb, orgId: string, since: Date): 
     .where(
       and(
         eq(paymentScheduleRunPayments.orgId, orgId),
-        inArray(paymentScheduleRunPayments.status, ['submitting', 'paid']),
-        gte(paymentScheduleRunPayments.attemptedAt, since),
+        or(
+          and(inArray(paymentScheduleRunPayments.status, ['submitting', 'paid']), gte(paymentScheduleRunPayments.attemptedAt, since)),
+          and(
+            eq(paymentScheduleRunPayments.status, 'pending'),
+            sql`exists (select 1 from ${paymentScheduleRuns} r where r.id = ${paymentScheduleRunPayments.runId} and r.org_id = ${orgId} and r.status = 'approved')`,
+          ),
+        ),
       ),
     );
   return rows.reduce((sum: bigint, r: { amount: bigint; fee: bigint }) => sum + r.amount + r.fee, 0n);
@@ -271,7 +324,12 @@ export async function getSettings(db: DrizzleDb, orgId: string): Promise<Setting
   return row ?? null;
 }
 
-export async function saveSettings(db: DrizzleDb, orgId: string, patch: { autoPaused?: boolean; pausedBy?: string | null; pausedAt?: Date | null; dailyCapMinor?: bigint | null }, now: Date): Promise<SettingsRow> {
+export async function saveSettings(
+  db: DrizzleDb,
+  orgId: string,
+  patch: { autoPaused?: boolean; pausedBy?: string | null; pausedAt?: Date | null; dailyCapMinor?: bigint | null; pendingDailyCapMinor?: bigint | null; pendingCapRequestId?: string | null },
+  now: Date,
+): Promise<SettingsRow> {
   const values = { orgId, ...patch, createdAt: now, updatedAt: now };
   const [row] = await db
     .insert(scheduledPaymentSettings)
@@ -279,6 +337,33 @@ export async function saveSettings(db: DrizzleDb, orgId: string, patch: { autoPa
     .onConflictDoUpdate({ target: scheduledPaymentSettings.orgId, set: { ...patch, updatedAt: now } })
     .returning();
   return row;
+}
+
+/**
+ * The daily limit in force, and one asked for that is waiting for signatures.
+ * A limit asked for becomes the limit only when its signing request executes;
+ * a request that ended any other way drops it. (Idempotent: whoever reads it
+ * settles it.) `capMinor` is null when the owners have never set one.
+ */
+export async function dailyCapOf(db: DrizzleDb, orgId: string): Promise<{ capMinor: bigint | null; pending: { capMinor: bigint; requestId: string } | null }> {
+  const s = await getSettings(db, orgId);
+  if (!s || s.pendingCapRequestId == null || s.pendingDailyCapMinor == null) return { capMinor: s?.dailyCapMinor ?? null, pending: null };
+  const [req] = await db
+    .select({ status: walletSigningRequests.status })
+    .from(walletSigningRequests)
+    .where(and(eq(walletSigningRequests.orgId, orgId), eq(walletSigningRequests.id, s.pendingCapRequestId)))
+    .limit(1);
+  const now = new Date();
+  const mine = and(eq(scheduledPaymentSettings.orgId, orgId), eq(scheduledPaymentSettings.pendingCapRequestId, s.pendingCapRequestId));
+  if (req?.status === 'executed') {
+    await db.update(scheduledPaymentSettings).set({ dailyCapMinor: s.pendingDailyCapMinor, pendingDailyCapMinor: null, pendingCapRequestId: null, updatedAt: now }).where(mine);
+    return { capMinor: s.pendingDailyCapMinor, pending: null };
+  }
+  if (!req || req.status === 'failed' || req.status === 'expired' || req.status === 'cancelled') {
+    await db.update(scheduledPaymentSettings).set({ pendingDailyCapMinor: null, pendingCapRequestId: null, updatedAt: now }).where(mine);
+    return { capMinor: s.dailyCapMinor ?? null, pending: null };
+  }
+  return { capMinor: s.dailyCapMinor ?? null, pending: { capMinor: s.pendingDailyCapMinor, requestId: s.pendingCapRequestId } };
 }
 
 // ─── Has this address been paid before? ─────────────────────────────────────

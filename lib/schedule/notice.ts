@@ -64,7 +64,7 @@ export function noticeText(n: ScheduleNotice): { subject: string; text: string }
     case 'running':
       return {
         subject: `Splash is paying ${n.scheduleName} now`,
-        text: `${n.businessName}: ${what} is being paid now, inside your allowance. You can still skip it in the Scheduled tab for any payment that has not gone out yet. A receipt follows.${reasonLine}`,
+        text: `${n.businessName}: ${what} is being paid now, inside your allowance. It goes out within moments, so there is rarely time to skip it now. To stop automatic payments at once, pause them in the Scheduled tab. A receipt follows.${reasonLine}`,
       };
     case 'approval_ready':
       return {
