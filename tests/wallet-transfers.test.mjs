@@ -34,7 +34,8 @@ import { LAUNCH_SCHEDULE, splashFee } from '../lib/fees/schedule.ts';
 import { buildBusinessMultisig } from '../lib/wallet/business-multisig.ts';
 import { makePaymentRecorder } from '../lib/server/payment-record.ts';
 import * as T from '../lib/server/wallet-transfers.ts';
-import { submitPartialSignature } from '../lib/server/wallet-signing.ts';
+import { cancelSigningRequest, declineSigningRequest, submitPartialSignature } from '../lib/server/wallet-signing.ts';
+import { buildHistory } from '../lib/history-page/entries.ts';
 
 import { world, T0 } from './fixtures/wallet-world.mjs';
 
@@ -375,4 +376,33 @@ test('the commitment on chain is over the payment’s own facts, and the payment
   assert.equal(r.ok, true);
   const want = createHash('sha256').update('splash-transfer|acme|tx_key_000001').digest('hex');
   assert.equal(r.transfer.paymentRef, want);
+});
+
+test('a payment its sender took back, or the owners declined, is Not paid in History, never Failed, and carries no failure block', async () => {
+  const t = await setup();
+  const recipientId = await savedWallet(t);
+  const taken = await T.createTransfer(t.deps(), OWNER, input({ recipientId, clientKey: 'tx_key_taken01' }));
+  assert.equal(taken.ok, true, JSON.stringify(taken));
+  const withdrawn = await cancelSigningRequest(t.w.signing, { orgId: 'acme', userId: 'u-founder', id: taken.signingRequest.id });
+  assert.equal(withdrawn.ok, true, JSON.stringify(withdrawn));
+  const refused = await T.createTransfer(t.deps(), OWNER, input({ recipientId, clientKey: 'tx_key_refus01' }));
+  assert.equal(refused.ok, true, JSON.stringify(refused));
+  for (const userId of ['u-two', 'u-three']) {
+    const declined = await declineSigningRequest(t.w.signing, { orgId: 'acme', userId, id: refused.signingRequest.id });
+    assert.equal(declined.ok, true, JSON.stringify(declined));
+  }
+  const listed = await T.listTransfers(t.deps());
+  const byKey = (clientKey) => listed.find((x) => x.id === (clientKey === 'tx_key_taken01' ? taken : refused).transfer.id);
+  assert.equal(byKey('tx_key_taken01').status, 'withdrawn');
+  assert.equal(byKey('tx_key_refus01').status, 'declined');
+  const entries = buildHistory({ transfers: listed, batches: [], withdrawals: [], earlier: [] });
+  assert.equal(entries.length, 2);
+  for (const e of entries) {
+    assert.equal(e.group, 'not_paid', e.status.label);
+    assert.equal(e.explain, null, 'a person’s own no is not a failure to explain or send to support');
+  }
+  // A request that really failed is still Failed.
+  await t.w.client.exec(`UPDATE wallet_signing_requests SET status = 'failed' WHERE id = '${taken.signingRequest.id}'`);
+  const after = buildHistory({ transfers: await T.listTransfers(t.deps()), batches: [], withdrawals: [], earlier: [] });
+  assert.deepEqual(after.map((e) => e.group).sort(), ['failed', 'not_paid']);
 });

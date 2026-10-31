@@ -167,7 +167,7 @@ test('a viewer is told why the list is short, polling runs only while something 
   // Where the four answers are folded (a viewer's 403 is not a failure) is the page or the pure lists module beside it.
   assert.match([joined, read('lib/history-page/entries.ts')].join('\n'), /status === 403/);
   assert.match(joined, /Only an owner or a staff member/);
-  assert.match(joined, /inProgress > 0/, 'a page with nothing in progress asks nothing every few seconds');
+  assert.match(joined, /if \(!moving\) return;/, 'a page with nothing moving asks nothing every few seconds');
   assert.match(joined, /visibilityState/);
   assert.match(joined, /<Note tone="error">/, 'a failure is a sentence (the Note is an alert)');
   assert.match(read('components/wallet/parts.tsx'), /role="alert"/);

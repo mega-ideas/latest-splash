@@ -32,6 +32,8 @@ test('a payment that broke is Failed; one that a person stopped or that ran out 
   for (const status of ['declined', 'expired', 'withdrawn']) assert.equal(group('transfers', transfer({ status })), 'not_paid', `payment ${status}`);
   assert.equal(group('batches', batch({ status: 'failed' })), 'failed');
   assert.equal(group('batches', batch({ status: 'expired' })), 'not_paid');
+  // A batch the owners declined or its sender took back is a person's own no, not a failure.
+  for (const status of ['declined', 'withdrawn']) assert.equal(group('batches', batch({ status })), 'not_paid', `batch ${status}`);
   for (const status of ['failed', 'returned']) assert.equal(group('withdrawals', withdrawal({ status })), 'failed', `withdrawal ${status}`);
   assert.equal(group('withdrawals', withdrawal({ status: 'cancelled' })), 'not_paid');
   for (const state of ['FAILED', 'REFUNDING', 'REFUNDED']) assert.equal(group('earlier', earlier({ state })), 'failed', `earlier ${state}`);
@@ -150,6 +152,26 @@ test('each kind of failure says what is true for it', () => {
   assert.match(refunded.explain.why, /sent back|returned|refund/i);
 });
 
+test('a withdrawal that failed does not promise a request was made, and says the row will change', () => {
+  const [, , failedWithdrawal] = FAILED_ROWS();
+  assert.doesNotMatch(failedWithdrawal.explain.why, /we have asked/i);
+  assert.match(`${failedWithdrawal.explain.why} ${failedWithdrawal.explain.next}`, /Returned to your wallet/);
+});
+
+test('a failed row that can still change keeps the page refreshing; one that has settled does not', () => {
+  const may = (kind, row) => one(kind, row).mayChange;
+  assert.equal(may('withdrawals', withdrawal({ status: 'failed' })), true, 'a failed withdrawal can still become Returned');
+  assert.equal(may('earlier', earlier({ state: 'REFUNDING' })), true);
+  assert.equal(may('transfers', transfer({ status: 'on_the_way' })), true);
+  assert.equal(may('batches', batch({ status: 'prepared' })), true);
+  for (const [kind, row] of [['withdrawals', withdrawal({ status: 'returned' })], ['earlier', earlier({ state: 'REFUNDED' })], ['earlier', earlier({ state: 'FAILED' })], ['transfers', transfer({ status: 'failed' })], ['batches', batch({ status: 'failed' })], ['transfers', transfer({ status: 'settled' })], ['transfers', transfer({ status: 'withdrawn' })]]) {
+    assert.equal(may(kind, row), false, `${kind} ${row.status ?? row.state}`);
+  }
+  const src = page();
+  assert.match(src, /entries\.some\(\(e\) => e\.mayChange\)/);
+  assert.match(src, /if \(!moving\) return;/);
+});
+
 test('a failed row has no receipt to open, and says that it was not paid', () => {
   for (const e of FAILED_ROWS().filter((x) => x.kind !== 'earlier')) {
     assert.equal(e.href, null, e.key);
@@ -196,30 +218,69 @@ test('a refresh that fails keeps the counts that were loaded', () => {
 });
 
 test('the sentence above the list says the counts are the last ones loaded', () => {
-  const all = failureNote(['payments', 'batches', 'withdrawals', 'earlier'], true);
+  const four = ['payments', 'batches', 'withdrawals', 'earlier'];
+  const all = failureNote(four, []);
   assert.match(all, /could not be refreshed/);
   assert.match(all, /counts/);
   assert.match(all, /list below/);
   assert.match(all, /last time it loaded|loaded before/);
-  const some = failureNote(['payments'], true);
+  const some = failureNote(['payments'], []);
   assert.match(some, /^Payments could not be refreshed\./);
   assert.match(some, /counts/);
   assert.match(some, /loaded before/);
-  const two = failureNote(['payments', 'earlier'], true);
+  const two = failureNote(['payments', 'earlier'], []);
   assert.match(two, /^Payments and earlier transfers could not be refreshed\./);
-  assert.equal(failureNote([], true), '');
-  assert.equal(failureNote([], false), '');
+  assert.equal(failureNote([], []), '');
   for (const sentence of [all, some, two]) assert.doesNotMatch(sentence, /—|–|!|sorry/i);
 });
 
 test('on a first load that only partly answered, the sentence says what is missing from the counts', () => {
-  const first = failureNote(['withdrawals'], false);
+  const first = failureNote(['withdrawals'], ['withdrawals']);
   assert.match(first, /^Withdrawals could not be loaded/);
   assert.match(first, /missing from the counts/);
   assert.match(first, /list below/);
+  assert.doesNotMatch(first, /loaded before|last time/);
   const merged = mergeLists(null, answers({ withdrawals: down }));
   assert.deepEqual(merged.failed, ['withdrawals']);
+  assert.deepEqual(merged.missing, ['withdrawals'], 'nothing was ever loaded for it');
   assert.deepEqual(merged.lists.withdrawals, [], 'nothing was loaded for it, so nothing is invented');
+});
+
+test('a list that never loaded keeps being reported missing when it fails again, never as "still shown"', () => {
+  const first = mergeLists(null, answers({ earlier: down }));
+  assert.deepEqual(first.missing, ['earlier']);
+  const second = mergeLists(first.lists, answers({ earlier: down }));
+  assert.deepEqual(second.failed, ['earlier']);
+  assert.deepEqual(second.missing, ['earlier'], 'the first load never held it, so the second failure still leaves it out');
+  const note = failureNote(second.failed, second.missing);
+  assert.match(note, /^Earlier transfers could not be loaded, so they are missing from the counts and the list below\.$/);
+  assert.doesNotMatch(note, /still show|loaded before|last time/);
+  // Once it answers, it is held; a later failure then keeps what it held and says so.
+  const third = mergeLists(second.lists, answers({ earlier: ok([{ id: 'tr_old', recipientName: 'PT Maju', targetCurrency: 'IDR', targetAmount: '1', sourceAmountUsd: '1', state: 'FAILED', createdAt: '2026-09-01T00:00:00.000Z' }]) }));
+  assert.deepEqual(third.failed, []);
+  assert.deepEqual(third.missing, []);
+  const fourth = mergeLists(third.lists, answers({ earlier: down }));
+  assert.deepEqual(fourth.missing, []);
+  assert.equal(fourth.lists.earlier.length, 1, 'it held a row, so the row stays');
+  assert.match(failureNote(fourth.failed, fourth.missing), /^Earlier transfers could not be refreshed\. The counts and the list below still show what was loaded before for them\.$/);
+});
+
+test('a refresh that fails for one list that loaded and one that never did says each thing once', () => {
+  const first = mergeLists(null, answers({ earlier: down }));
+  const next = mergeLists(first.lists, answers({ transfers: down, earlier: down }));
+  assert.deepEqual(next.failed.sort(), ['earlier', 'payments']);
+  assert.deepEqual(next.missing, ['earlier']);
+  const note = failureNote(next.failed, next.missing);
+  assert.match(note, /Payments could not be refreshed\. The counts and the list below still show what was loaded before for them\./);
+  assert.match(note, /Earlier transfers could not be loaded, so they are missing from the counts and the list below\./);
+  assert.doesNotMatch(note, /Earlier transfers could not be refreshed/);
+});
+
+test('a viewer’s 403 counts as an answer, so a later failure of that list is a refresh failure', () => {
+  const first = mergeLists(null, answers({ transfers: { ok: false, status: 403, items: [] }, batches: { ok: false, status: 403, items: [] } }));
+  assert.deepEqual(first.missing, []);
+  const again = mergeLists(first.lists, answers({ withdrawals: down }));
+  assert.deepEqual(again.missing, []);
 });
 
 test('a viewer’s 403 is the business’s rule, never a failed refresh', () => {
@@ -251,15 +312,18 @@ test('a failed row shows what happened and what to do next, in words, not by col
   assert.match(src, /entry\.explain\.next/);
 });
 
-test('the failed-refresh sentence sits above the list, is announced, and offers Try again', () => {
+test('the failed-refresh sentence sits above the list, in a live region that is always on the page, and offers Try again', () => {
   const src = page();
-  const note = src.indexOf('{failed ?');
+  const region = src.indexOf('role="status"');
   const list = src.indexOf('aria-label="Receipts and records"');
   const stats = src.indexOf('<DashStat label="Sent this month"');
-  assert.ok(stats > -1 && note > stats && list > note, 'counts, then the sentence, then the list');
-  assert.match(src.slice(note, list), /role="status"/);
-  assert.match(src.slice(note, list), /Try again/);
-  assert.match(src, /failureNote\(merged\.failed, [a-zA-Z.]+ !== null\)/, 'the sentence knows whether anything was loaded before');
+  assert.ok(stats > -1 && region > stats && list > region, 'counts, then the sentence, then the list');
+  // A live region is announced when its content changes; one created together with its content is often not.
+  assert.doesNotMatch(src.slice(region - 80, region), /failed \?|&&|\? \(/, 'the region is not created by the failure it announces');
+  const after = src.slice(region, list);
+  assert.match(after, /<div role="status"[^>]*>\s*\{failed \? <Note tone="warn">\{failed\}<\/Note> : null\}\s*<\/div>/, 'the sentence is the region’s content');
+  assert.match(after, /Try again/);
+  assert.match(src, /failureNote\(merged\.failed, merged\.missing\)/, 'the sentence knows which lists never loaded');
 });
 
 /* Tenancy ---------------------------------------------------------------------- */

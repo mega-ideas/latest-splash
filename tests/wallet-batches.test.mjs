@@ -33,7 +33,8 @@ import { batchBeforeSign } from '../lib/server/payment-compliance-gate.ts';
 import * as B from '../lib/server/wallet-batches.ts';
 import { payBatchFromWalletTx, MAX_BATCH_PAYMENTS } from '../lib/server/sui-v2-builders.ts';
 import { describeWalletTransaction } from '../lib/wallet/wallet-tx-describe.ts';
-import { openSigningRequest, submitPartialSignature } from '../lib/server/wallet-signing.ts';
+import { cancelSigningRequest, declineSigningRequest, openSigningRequest, submitPartialSignature } from '../lib/server/wallet-signing.ts';
+import { buildHistory } from '../lib/history-page/entries.ts';
 import { BATCH_MAX_PAYMENTS, problemsOf, recordsFromCsv, rowsFromRecords, sheetRowsFromBody } from '../lib/batch/sheet.ts';
 
 import { world, T0, chainCfg, ACCOUNT, CORE, expect } from './fixtures/wallet-world.mjs';
@@ -815,4 +816,34 @@ test('before each signature the gate also stops the wallet’s own address and a
   const listed = await gate({ splashAddresses: async () => [OPERATOR, WALLET_B] });
   assert.equal(listed?.code, 'splash_controlled_address');
   assert.match(listed?.error ?? '', /Payment 2 of 2/);
+});
+
+test('a batch its sender took back, or the owners declined, is Not paid in History, never Failed, and carries no failure block', async () => {
+  const t = await setup();
+  await twoRecipients(t);
+  const taken = await B.createBatch(t.deps(), OWNER, input(sheet(row('Dela Cruz Trading Corp', '5,000'), row('Santos Supplies Inc', '250')), { clientKey: 'batch_key_taken01' }));
+  assert.equal(taken.ok, true, JSON.stringify(taken));
+  const withdrawn = await cancelSigningRequest(t.w.signing, { orgId: 'acme', userId: 'u-founder', id: taken.signingRequest.id });
+  assert.equal(withdrawn.ok, true, JSON.stringify(withdrawn));
+  const refused = await B.createBatch(t.deps(), OWNER, input(sheet(row('Dela Cruz Trading Corp', '600'), row('Santos Supplies Inc', '70')), { clientKey: 'batch_key_refus01' }));
+  assert.equal(refused.ok, true, JSON.stringify(refused));
+  for (const userId of ['u-two', 'u-three']) {
+    const declined = await declineSigningRequest(t.w.signing, { orgId: 'acme', userId, id: refused.signingRequest.id });
+    assert.equal(declined.ok, true, JSON.stringify(declined));
+  }
+  const listed = await B.listBatches(t.deps());
+  assert.equal(listed.find((b) => b.id === taken.batch.id).status, 'withdrawn');
+  assert.equal(listed.find((b) => b.id === refused.batch.id).status, 'declined');
+  const entries = buildHistory({ transfers: [], batches: listed, withdrawals: [], earlier: [] });
+  assert.equal(entries.length, 2);
+  for (const e of entries) {
+    assert.equal(e.group, 'not_paid', e.status.label);
+    assert.equal(e.explain, null, 'a person’s own no is not a failure to explain or send to support');
+    assert.equal(e.href, null);
+  }
+  assert.deepEqual(entries.map((e) => e.status.label).sort(), ['Declined by the owners', 'Withdrawn']);
+  // A request that really failed is still Failed.
+  await t.w.client.exec(`UPDATE wallet_signing_requests SET status = 'failed' WHERE id = '${taken.signingRequest.id}'`);
+  const after = buildHistory({ transfers: [], batches: await B.listBatches(t.deps()), withdrawals: [], earlier: [] });
+  assert.deepEqual(after.map((e) => e.group).sort(), ['failed', 'not_paid']);
 });

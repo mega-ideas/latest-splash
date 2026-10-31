@@ -160,7 +160,7 @@ test('one list that fails is named, and the rest is still shown', () => {
   const merged = mergeLists(null, { transfers: bad(502), batches: ok([B]), withdrawals: ok([]), earlier: ok([]) });
   assert.deepEqual(merged.failed, ['payments']);
   assert.equal(merged.lists.batches.length, 1);
-  assert.equal(failureNote(merged.failed, false), 'Payments could not be loaded, so they are missing from the counts and the list below.');
+  assert.equal(failureNote(merged.failed, merged.missing), 'Payments could not be loaded, so they are missing from the counts and the list below.');
 });
 
 test('a failed refresh keeps what was loaded before, so a payment in progress does not vanish', () => {
@@ -172,7 +172,7 @@ test('a failed refresh keeps what was loaded before, so a payment in progress do
   const down = mergeLists(first.lists, { transfers: bad(), batches: bad(), withdrawals: bad(), earlier: bad(429) });
   assert.equal(down.lists, first.lists, 'when everything fails the earlier lists stay');
   assert.equal(down.failed.length, 4);
-  assert.match(failureNote(down.failed, true), /could not be refreshed/i);
+  assert.match(failureNote(down.failed, down.missing), /could not be refreshed/i);
 });
 
 test('when nothing has ever loaded and every list fails, there is no list at all', () => {
