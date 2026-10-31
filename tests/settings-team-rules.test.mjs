@@ -285,6 +285,8 @@ test('only an owner is offered a change, and no one is offered what the server w
 test('every call is to the signed-in person’s own business, and none names a business, a wallet or an address of the page’s own choosing', () => {
   const joined = settingsFiles().map(([, t]) => code(t)).join('\n');
   const urls = [...joined.matchAll(/(?:call|useLoad|fetch)(?:<[^>]*(?:<[^>]*>[^>]*)*>)?\(\s*[`'"]([^`'"]+)/g)].map((m) => m[1]);
+  // A load that waits for the wallet is `useLoad(manage ? '/api/...' : null, ...)`: those addresses are read too.
+  urls.push(...[...joined.matchAll(/\?\s*['"`](\/api\/[^'"`]+)['"`]\s*:\s*null/g)].map((m) => m[1]));
   assert.ok(urls.length >= 10, `found ${urls.length}`);
   for (const url of urls) assert.match(url, /^\/api\/(wallet|settings|approvals|billing)\b|^\/api\/recipients$/, url);
   assert.doesNotMatch(joined, /orgId|accountId|businessWallet|\?(org|orgId|account|wallet)=/);
