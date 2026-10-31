@@ -49,7 +49,10 @@ test('a withdrawal binds what was shown to what is sent, and a retry is the same
   const w = read('components/wallet/Withdraw.tsx');
   assert.match(w, /acceptedReceiveMinor: quote\.receiveMinor, maxFeeMinor: quote\.maxFeeMinor/, 'the fee shown is the fee signed and the least received is the amount shown');
   assert.match(w, /newKey\('wd'\)/);
-  assert.match(w, /if \(!key\) setKey\(newKey/, 'the key is made once per attempt, not per click');
+  assert.doesNotMatch(code(w), /if \(!key\) setKey/, 'a key made once for the whole page session would be reused by the next withdrawal');
+  assert.match(code(w), /setQuote\(answer\.body\.quote\);\s*setKey\(newKey\('wd'\)\)/, 'each quote is one attempt with its own key; a retry of the same quote keeps it');
+  assert.match(code(w), /setRequest\(answer\.body\?\.request \?\? null\);[\s\S]{0,80}setKey\(null\)/, 'the key is cleared once a withdrawal was created');
+  assert.match(w, /created === false/, 'an answer that is the earlier withdrawal says so');
   assert.match(w, /\r?\n\s+key,\r?\n/, 'the key goes as the Idempotency-Key');
   assert.doesNotMatch(code(w), /contentHash|walrusBlobId/, 'the audit bundle is the server’s to make');
   assert.match(w, /Leaves your wallet at most/);
@@ -60,6 +63,7 @@ test('a top-up is made only at a quote the person was shown, with one key per at
   assert.match(a, /acceptedArrivesMinMinor: quote\.arrivesMinMinor/);
   assert.match(a, /if \(!quote \|\| !key\.current\) return;/);
   assert.match(a, /if \(!key\.current\) key\.current = newKey\('top'\)/);
+  assert.match(a, /id="af-amount"[^>]*onChange=\{[^}]*key\.current = null/, 'changing the amount ends the attempt, so a stale key is never reused for another amount');
   assert.match(a, /Splash adds none to a top-up/, 'a partner’s or network’s fee is theirs and is never marked up');
   // A link a partner gives is followed only if it is https or a path on this site.
   assert.match(a, /protocol === 'https:'/);
