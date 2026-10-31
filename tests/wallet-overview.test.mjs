@@ -30,7 +30,7 @@ test('a business with a wallet: its balance in coins and address balance, what i
   const o = await buildWalletOverview(deps());
   assert.equal(o.walletState, 'ready');
   assert.equal(o.wallet, WALLET);
-  assert.deepEqual(o.balance, { usdcMinor: '12500000', heldMinor: '1500000', availableMinor: '11000000' });
+  assert.deepEqual(o.balance, { usdcMinor: '12500000', heldMinor: '1500000', availableMinor: '11000000', holdsUnknown: false });
   assert.equal(o.balanceError, null);
 });
 
