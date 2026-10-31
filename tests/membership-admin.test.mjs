@@ -144,7 +144,7 @@ test('revoking removes the authority, not the account', async () => {
 test('a revoked member can be granted again', async () => {
   const { client, db } = await migratedDb();
   await verifiedAccount(db, 'e@example.com', 'E');
-  await grantRole(db, { email: 'e@example.com', orgId: 'acme', role: 'admin', grantedBy: STAFF });
+  await grantRole(db, { email: 'e@example.com', orgId: 'acme', role: 'checker', grantedBy: STAFF });
   await revokeRole(db, { email: 'e@example.com' });
 
   // A hard delete, unlike the passkey tombstone: a membership is current
