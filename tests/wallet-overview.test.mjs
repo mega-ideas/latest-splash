@@ -85,5 +85,5 @@ test('the route takes the business from the session and reads nothing about a bu
   assert.match(route, /requireSessionAccount\(auth\.session\)/);
   assert.match(route, /liveWalletContext\(authority\.orgId\)/);
   assert.doesNotMatch(route, /searchParams|body\.orgId|request\.json/, 'nothing is read from the request but the session');
-  assert.match(route, /no-store/i);
+  assert.match(route, /headers: NO_STORE/, 'a balance is never cached');
 });
