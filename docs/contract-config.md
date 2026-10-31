@@ -35,7 +35,7 @@ no module-level caching, no in-process pinning, no service restart.
 | `businessAccountId` | `SPLASH_BUSINESS_ACCOUNT_ID` | `business_account::BusinessAccount` shared object. |
 | `transferCoinId` | `SPLASH_TRANSFER_COIN_ID` | Optional. SUI coin pre-funded for test transfers. |
 | `settlementRegistryId` | `SPLASH_SETTLEMENT_REGISTRY_ID` | Optional. |
-| `testRecipientAddress` | `SPLASH_TEST_RECIPIENT_ADDRESS` | If set, single + batch settlements are forced to this recipient. |
+| `testRecipientAddress` | `SPLASH_TEST_RECIPIENT_ADDRESS` | If set, the testnet single settlement is forced to this recipient. |
 | `operatorAddress` | `OPERATOR_SUI_ADDRESS` | The operator wallet address. |
 | `treasuryAddress` | `TREASURY_ADDRESS` | |
 | `usdcType` | `USDC_TYPE` | Move type, e.g. `0x2::sui::SUI`. |
@@ -53,8 +53,9 @@ against `0xpkg::module::TYPE`.
 `getContractConfig()` is called by every path that needs an on-chain
 reference:
 
-- `lib/server/sui-settlement.ts` — `recordSingleTransferOnSui`,
-  `recordBatchSettlementOnSui`, and the (currently unused) `updatePegOnSui`.
+- `lib/server/sui-settlement.ts` — `recordSingleTransferOnSui` and the
+  (currently unused) `updatePegOnSui`. (`recordBatchSettlementOnSui` was
+  removed in v2 Phase 3.)
 - `lib/sui/contracts.ts` — `buildUpdatePriceTx` and
   `buildSubmitBusinessApplicationTx`.
 - `lib/server/operations.ts` — the unified transaction log surfaces the
@@ -120,8 +121,8 @@ See [`openapi.yaml`](./openapi.yaml) for the full contract.
 
 ### `E_PEG_STALE` (Move abort 302)
 
-The peg reading was older than 60 s when settle ran. The single/batch PTBs
-bundle a `peg_monitor::update_peg` step, so this usually means
+The peg reading was older than 60 s when settle ran. The single-transfer PTB
+bundles a `peg_monitor::update_peg` step, so this usually means
 `SPLASH_ADMIN_CAP_ID` or `SPLASH_PEG_STATE_ID` is wrong. Open the admin page
 and verify both fields.
 

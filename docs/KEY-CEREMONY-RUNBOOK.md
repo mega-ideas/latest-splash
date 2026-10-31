@@ -106,10 +106,12 @@ fresh publish and fresh object ids for everything below.
 from the mainnet path for good (D11): app-bound allowances and address
 balances replace pooled settlement and the delegated batch. On mainnet every
 custody path refuses in every settlement mode, and production refuses to boot
-with `SPLASH_CUSTODY_PACKAGE_ID` set. On testnet, without
-`SPLASH_CUSTODY_PACKAGE_ID`, the app refuses batches
-(`custodyPackageIdOrThrow` in `lib/server/sui-settlement.ts`). This section
-is kept for testnet and for the record. The
+with `SPLASH_CUSTODY_PACKAGE_ID` set. **This server no longer calls the
+custody batch at all:** the payout-run route that did (`recordBatchSettlementOnSui`
+behind a customer route) was removed in v2 Phase 3, because nothing used it.
+Batch payouts are paid from the business's own wallet and signed by its owners
+(`docs/v2/phase3-batch.md`). This section is kept for the custody package's
+record. The
 custody source has also moved on since this section was written: batches now
 settle through `settlement::settle_sui_batch_delegated` against a
 `PayoutDelegation` (`move/splash_custody/sources/settlement.move`), which takes
@@ -523,18 +525,17 @@ book's spread is ~43 bps and a mainnet-grade 30 bps band captures zero bids.
 **Mainnet must keep the tight value** — the script hard-refuses >50 bps on
 mainnet.
 
-**After this publish**, prove a batch settles for real. That needs
-`splash_custody`, which v2 retires from the mainnet path for good (D11), so
-this is a testnet proof only, and
-`scripts/e2e-testnet.mjs` no longer runs a batch: since 2026-09-26 it checks the
-core package only (§3.8). Its last batch flow (`testBatch` in
+**After this publish**, a custody batch cannot be proved from this server any
+more: `splash_custody` is retired from the mainnet path for good (D11), the
+app's custody batch path was removed in v2 Phase 3, and
+`scripts/e2e-testnet.mjs` no longer runs a batch (since 2026-09-26 it checks the
+core package only, §3.8). Its last batch flow (`testBatch` in
 `git show 248137e:scripts/e2e-testnet.mjs`) is stale too: its `update_peg`
 passes no `CapRegistry`, it calls `settlement` on the core package id, and it
-calls `settle_sui_batch` with the `AdminCap`. Build the proof from the app's
-batch path instead, `recordBatchSettlementOnSui` in
-`lib/server/sui-settlement.ts`, which calls
-`splash_custody::settlement::settle_sui_batch_delegated`. If a batch still
-aborts 304, re-measure the book — testnet depth moves.
+calls `settle_sui_batch` with the `AdminCap`. A proof of
+`splash_custody::settlement::settle_sui_batch_delegated` would have to be a new
+script built from the Move source. If a batch still aborts 304, re-measure the
+book — testnet depth moves.
 
 ---
 
@@ -544,13 +545,14 @@ Enforced at four layers so no single bypass opens a sub-minimum payout:
 
 | Layer | Where |
 |---|---|
-| UI | transfer step + batch authorization summary (blocks before a TOTP is spent) |
-| API | `transfers/authorize`, `batches/authorize` → 400 `below_minimum` |
+| UI | transfer step (blocks before a TOTP is spent) |
+| API | `transfers/authorize` → 400 `below_minimum` |
 | Policy engine | `evaluatePolicy` → `BLOCK` — the choke point in-chat approval, the queue and submit-time re-evaluation all share |
 | Contract | v2: `payment_intent::create_for_wallet` / `create_for_app` and every settle path → abort 434 `E_BELOW_SETTLEMENT_FLOOR` for a bank payout below max(99 USDC, `min_settlement_amount`). Per payout, not per batch total. The retired `splash_custody` path (`settlement::settle_payment`, `settle_batch`) aborts 107 `E_BELOW_MINIMUM` |
 
-The floor applies to a single transfer and to a batch **TOTAL** (not per row — a
-payroll run legitimately contains small rows). Internal transfers and treasury
+The floor applies to a single transfer. (The v1 payout run applied it to the
+batch **TOTAL**, not per row; that route is removed, and batch payouts from the
+wallet meet the contract floor per payment.) Internal transfers and treasury
 moves are exempt: the floor exists because of corridor settlement fixed costs,
 which internal movements do not incur.
 

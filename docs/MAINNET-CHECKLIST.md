@@ -167,10 +167,11 @@ procedure in [`docs/UPGRADE-POLICY.md`](UPGRADE-POLICY.md).
 - [ ] `SPLASH_CUSTODY_PACKAGE_ID` and `SPLASH_PAYOUT_DELEGATION_ID` are
       **unset**. Production on mainnet refuses to boot with either, because
       custody and the meter are retired in v2. On mainnet the
-      `splash_custody` settlement paths (single transfer, delegated batch,
-      Smart Treasury allocation) refuse in every `SUI_SETTLEMENT_MODE`, so
-      `SUI_SETTLEMENT_MODE=simulate` or `SUI_BATCH_SETTLEMENT_MODE=simulate`
-      cannot mark a batch SETTLED.
+      `splash_custody` settlement paths (single transfer, Smart Treasury
+      allocation) refuse in every `SUI_SETTLEMENT_MODE`, so
+      `SUI_SETTLEMENT_MODE=simulate` cannot mark a payment SETTLED. (The
+      custody payout-run route and its `SUI_BATCH_SETTLEMENT_MODE` switch were
+      removed in v2 Phase 3.)
 - [ ] `FUNDING_DEPOSIT_DERIVATION_SECRET` and
       `FUNDING_CCTP_DEPOSIT_ADDRESSES_JSON` are **unset**. Production on
       mainnet refuses to boot with either: on mainnet funding sessions give

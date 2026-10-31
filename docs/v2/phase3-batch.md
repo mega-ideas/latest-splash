@@ -20,12 +20,12 @@ Code: `components/batch/` (the page), `lib/batch/sheet.ts` (the sheet, pure),
 
 The old desk screened rows **in the browser** ("No list match in dev screen"),
 authorised with a typed authenticator code, settled through the v1 custody
-batch (`/api/batches/authorize`, a shared pool) and said things Splash cannot
+batch (a payout-run route over a shared pool) and said things Splash cannot
 back: a cheaper FX rate on netted rows, a "merkle-rooted receipt", off-peak
 window pricing, "Tier 1 limits · RM 20k / transfer" next to USD amounts, and
-the settlement-engine container. All of it is gone from the page.
-`/api/batches/authorize` is no longer called by anything on the page (it is
-unchanged; see "Not done"). There is **one currency**: every amount is USDC. A
+the settlement-engine container. All of it is gone from the page, and the
+v1 custody route itself is removed (see "The v1 custody batch is removed").
+There is **one currency**: every amount is USDC. A
 cell with a currency sign or code ("RM 20k", "$5,000", "USD 100", "20k") is
 refused rather than read as a number.
 
@@ -148,6 +148,28 @@ given to the wrong row. No event at all reads as no fee, as for a single payment
 A batch nobody has started has no receipts (`409 batch_not_started`).
 The CSV writes any cell a spreadsheet would run as a formula as text.
 
+## The v1 custody batch is removed
+
+Sky decided that the old custody path goes if nothing uses it. Nothing did, so
+the payout-run route (a customer route that paid a payroll file out of the
+shared `SettlementPool` with a typed authenticator code), its status route, its
+store and repository, its run-key and second-factor helper, its size limits,
+`recordBatchSettlementOnSui` with the `SUI_BATCH_SETTLEMENT_MODE` switch, the
+staff "Batch payouts" table and the staff transaction list's batch rows, and the
+tests that covered only them, are removed.
+
+What was checked first: no page, component, script, scheduled job or document
+called the route; the one internal caller was the approval queue's replay, which
+only replayed a payload the route itself wrote (Zeke's batch drafts carry none);
+and the path was already refused on mainnet in every mode (v2 D11).
+
+What stays: the `batch_runs` table and its shipped migration `0011` (the
+history is kept; no migration was added and none dropped), and the
+`BATCH_PAYOUT` proposal kind with its approval-binding helpers, because Zeke's
+drafts and approvals already on file carry it. Approving one now records it as
+**not executed**, names Batch payouts as where payout runs are paid, claims no
+payment, and spends the approval once (`BATCH_PAYOUT_RETIRED_REASON`).
+
 ## Not done, and why
 
 - **Scheduled batches** (`splash_spend`, the operator named as executor by an
@@ -160,8 +182,6 @@ The CSV writes any cell a spreadsheet would run as a formula as text.
   20,000,000 MIST gas budget; both must be checked with a simulation of a full
   batch before the cap or the budget is changed (phase 1 design, "Batches are
   atomic"). Only the model chain ran here.
-- **The v1 custody batch route** (`/api/batches/authorize`, its store and tests)
-  is untouched and no longer reached from the page.
 - **A staff member's batch is not tied to the 10,000 USDC second-approval rule**:
   every batch is the owners' to sign, so the rule never applies.
 

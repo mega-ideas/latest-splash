@@ -110,14 +110,14 @@ UpgradeCap   0x7c95896b5b8e9f31b46bc5b2d516f5d667d53b89453644d18b2fb41f0b2c729f
 They hold the same value, and that is deliberate. `SPLASH_PACKAGE_ID` is
 required unconditionally in production. But `custodyPackageIdOrThrow()` falls
 back to the legacy id **only when `SPLASH_CORE_PACKAGE_ID` is unset** — so
-setting core is what *disables* the fallback and makes batch settlement throw
+setting core is what *disables* the fallback and makes custody settlement throw
 the licence-named error instead of silently targeting a `settlement` module
 that does not exist in `splash_core`.
 
 That is now true on testnet only. On mainnet there is no fallback in any
-configuration: `custodyPackageIdOrThrow`, `recordSingleTransferOnSui` and
-`recordBatchSettlementOnSui` throw the retired-path error (D11) first, in
-every settlement mode. On testnet the error without a custody package now
+configuration: `custodyPackageIdOrThrow` and `recordSingleTransferOnSui`
+throw the retired-path error (D11) first, in every settlement mode. (The
+custody batch, `recordBatchSettlementOnSui`, was removed in v2 Phase 3.) On testnet the error without a custody package now
 names the v2 retirement rather than a licence.
 
 That error is the demo's best beat: non-custody is enforced by absent
