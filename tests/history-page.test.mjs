@@ -22,13 +22,13 @@ const batch = (over = {}) => ({ id: 'wb_1', label: 'October suppliers', status: 
 const withdrawal = (over = {}) => ({ id: 'wdr_1', status: 'paid_out', partner: 'p', destination: { id: 'd', bankCode: 'X', last4: '4411', label: 'Operating account' }, amountMinor: USDC(1000), maxFeeMinor: USDC(1), currency: 'MYR', receiveMinor: '470000', intentId: 'i', createdAt: '2026-10-25T08:00:00.000Z', kind: 'withdrawal', ...over });
 const earlier = (over = {}) => ({ id: 'tr_old', recipientName: 'PT Maju', targetCurrency: 'IDR', targetAmount: '1500000', sourceAmountUsd: '95', state: 'SETTLED', createdAt: '2026-09-01T00:00:00.000Z', ...over });
 
-test('a transfer reads in the words a person uses, grouped paid, in progress or not paid', () => {
+test('a transfer reads in the words a person uses, grouped paid, in progress, failed or not paid', () => {
   const cases = {
     settled: ['Paid', 'ok', 'paid'],
     on_the_way: ['On its way', 'wait', 'in_progress'],
     awaiting_signatures: ['Waiting for signatures', 'wait', 'in_progress'],
     asked_owners: ['Waiting for an owner', 'wait', 'in_progress'],
-    failed: ['Did not go through', 'bad', 'not_paid'],
+    failed: ['Did not go through', 'bad', 'failed'],
     declined: ['Declined by an owner', 'bad', 'not_paid'],
     expired: ['Expired before it was signed', 'bad', 'not_paid'],
     withdrawn: ['Withdrawn', 'bad', 'not_paid'],
@@ -44,14 +44,16 @@ test('a batch and a withdrawal read the same way, and a withdrawal says where it
   assert.deepEqual([b('settled').status.label, b('settled').group], ['Paid', 'paid']);
   assert.equal(b('prepared').status.label, 'Waiting for an owner to start the signatures');
   assert.equal(b('awaiting_signatures').group, 'in_progress');
-  assert.equal(b('failed').group, 'not_paid');
+  assert.equal(b('failed').group, 'failed');
+  assert.equal(b('expired').group, 'not_paid');
   assert.equal(b('settled').title, 'October suppliers');
   assert.equal(buildHistory({ transfers: [], batches: [batch({ label: null })], withdrawals: [], earlier: [] })[0].title, 'Batch of 12 payments');
   const w = (status) => buildHistory({ transfers: [], batches: [], withdrawals: [withdrawal({ status })], earlier: [] })[0];
   assert.deepEqual([w('paid_out').status.label, w('paid_out').group], ['In your bank', 'paid']);
   assert.deepEqual([w('sent').status.label, w('sent').group], ['On its way to your bank', 'in_progress']);
   assert.equal(w('returned').status.label, 'Returned to your wallet');
-  assert.equal(w('returned').group, 'not_paid');
+  assert.equal(w('returned').group, 'failed');
+  assert.equal(w('cancelled').group, 'not_paid');
   assert.equal(w('paid_out').title, 'Withdrawal to Operating account');
   assert.match(w('paid_out').detail, /4411/);
 });
@@ -82,7 +84,7 @@ test('everything is one list, newest first, and an earlier transfer is marked as
   assert.match(old.detail, /Earlier transfer/);
   assert.equal(old.group, 'paid');
   assert.equal(buildHistory({ transfers: [], batches: [], withdrawals: [], earlier: [earlier({ state: 'EXCHANGING' })] })[0].group, 'in_progress');
-  assert.equal(buildHistory({ transfers: [], batches: [], withdrawals: [], earlier: [earlier({ state: 'REFUNDED' })] })[0].group, 'not_paid');
+  assert.equal(buildHistory({ transfers: [], batches: [], withdrawals: [], earlier: [earlier({ state: 'REFUNDED' })] })[0].group, 'failed');
 });
 
 test('the amount is what was sent, in USDC, never a guess', () => {
@@ -103,6 +105,7 @@ test('sent this month counts only what was paid, this month, in USDC', () => {
   assert.equal(s.sentThisMonthMinor, USDC(5250));
   assert.equal(s.inProgress, 1);
   assert.equal(s.notPaid, 0);
+  assert.equal(s.failed, 0);
   assert.equal(s.total, 6);
 });
 
