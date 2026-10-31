@@ -189,6 +189,9 @@ test('the wallet routes that open a batch or a payment ask for the terms before 
     'app/api/wallet/batches/[id]/start/route.ts',
     'app/api/wallet/transfers/route.ts',
     'app/api/wallet/transfers/quote/route.ts',
+    // Scheduled batches (v2 Phase 3): setting one up and giving Splash an allowance to pay it are instructions to pay.
+    'app/api/wallet/schedules/route.ts',
+    'app/api/wallet/schedules/automatic/allowance/route.ts',
   ]) {
     const text = await readFile(new URL(`../${file}`, import.meta.url), 'utf8');
     const post = text.slice(text.indexOf('export async function POST'));
