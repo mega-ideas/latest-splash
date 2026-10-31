@@ -93,13 +93,14 @@ export async function replayThroughRoute(
     return { ok: false, error: detail };
   }
 
-  // The route answered with a payment it had ALREADY carried out (the removed
-  // v1 payout-run route did this when a key was reused): this approval paid
-  // nothing. Counted as a success, it read as started and nobody was paid.
-  // Kept for any route that answers an idempotent replay with a 200.
+  // A route that answers a reused key with the payment it ALREADY carried out
+  // (a 200 marked idempotentReplay) paid nothing for this approval. Counted as
+  // a success, it would read as sent when nobody was paid. No route replayed
+  // from here answers that way today; the guard stays so one that starts to
+  // cannot turn into a false "sent".
   if (parsed.idempotentReplay === true) {
     const earlier = typeof parsed.id === 'string' ? ` as ${parsed.id}` : '';
-    return { ok: false, error: `This run had already been carried out${earlier}; nothing new was paid for this approval.` };
+    return { ok: false, error: `This payment had already been carried out${earlier}; nothing new was paid for this approval.` };
   }
 
   const ref =
