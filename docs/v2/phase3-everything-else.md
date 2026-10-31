@@ -109,3 +109,37 @@ state is a sentence a customer can act on.
 no-wallet page, a phone's columns, pressing twice). The chain rules behind
 Team and rules are tested in `tests/spend-rules.test.mjs`; the recipient gates
 in `tests/wallet-recipients*.test.mjs`.
+
+## Second review (the independent findings)
+
+What an independent reviewer found, and what the pages now do:
+
+- **Remove, on a wallet that is on the spending policy.** The policy is on the
+  chain; this page's list is Splash's. An owner's Recipients page reads the
+  policy, and the Remove step says when the address stays allowed (staff can
+  still pay it under their rule until the owners Stop allowing it) and links to
+  Settings. When the policy cannot be read it says what to check.
+- **Approve for payment** opens a step with the recipient's name and type, the
+  screening result and the whole address with a copy button. It is offered only
+  once the address screened clean (and, for a wallet, was proven).
+- **History** folds its four lists one by one (`mergeLists`): a list that fails
+  keeps what it held and is named in a sentence; the empty-state sentence shows
+  only when every list answered. A viewer's 403 is the business's rule, not a
+  failure, and a viewer is not given a withdrawal receipt link they cannot open.
+- **Settings** builds its privacy line from Zeke's own disclosure lists. The
+  Team card waits instead of flashing an empty alert; Change this rule keeps the
+  rule's end date; Operating controls are read-only for everyone but an owner or
+  a finance admin, with one line saying how the dollar limits differ from the
+  spending policy; near-threshold is said once; the wallet refusal is logged
+  once per business per ten minutes without an address.
+- Smaller: an older bank entry is not called verified; staff are offered the
+  proof link only when an email is on file; two Splash businesses with one name
+  and different wallets are two rows; filters are toggle buttons at 44px; the
+  add-recipient chooser too; a single payment's receipt polls only from a visible
+  tab and can be asked for again; the Setup rail marks the optional step.
+
+Not changed: a bank account on the policy is named there by a commitment the
+Recipients page does not hold, so Remove on a bank account does not warn about
+it. A business that changes its wallet shows as a second row on Recipients.
+
+Tests: `tests/p3-59-second-review.test.mjs`.
