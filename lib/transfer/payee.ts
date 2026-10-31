@@ -171,7 +171,7 @@ export function requirementsFor(country: string): RequirementsSheet | null {
   if (!rule || !entry) return null;
   return {
     title: `What’s needed for ${code}`,
-    intro: `To pay a business bank account in ${entry.name} (${entry.currency}, by ${entry.rails}), the bank and its payout partner ask for these, once per supplier. Each is saved with the supplier, so the next payment asks for none of it.`,
+    intro: `To pay a business bank account in ${code === 'PH' ? 'the ' : ''}${entry.name} (${entry.currency}, by ${entry.rails}), the bank and its payout partner ask for these, once per supplier. Each is saved with the supplier, so the next payment asks for none of it.`,
     groups: [
       {
         heading: 'The supplier',

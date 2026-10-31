@@ -26,7 +26,9 @@ export default function StepAmount({ flow, patch, balance, next, back, reload, t
       return null;
     }
   }, [fees, amount, kind]);
-  const funds = amount !== null && estimate !== null && balance.state === 'ok' ? fundsCheck({ balanceMinor: balance.usdcMinor, amountMinor: amount, feeMinor: estimate }) : null;
+  // An estimate is shown rounded up to the cent; the real fee comes with the quote.
+  const estimateUp = estimate === null ? null : ((estimate + 9_999n) / 10_000n) * 10_000n;
+  const funds = amount !== null && estimateUp !== null && balance.state === 'ok' ? fundsCheck({ balanceMinor: balance.usdcMinor, amountMinor: amount, feeMinor: estimateUp }) : null;
   const declared = !bank || (flow.purposeCode && flow.sourceOfFunds);
   const canGo = amount !== null && Boolean(declared) && funds?.enough === true;
 
@@ -55,7 +57,7 @@ export default function StepAmount({ flow, patch, balance, next, back, reload, t
             <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 font-mono text-sm font-bold text-[#326273]">USDC</span>
           </div>
           <p id="amt-help" className="mt-1.5 text-[13px] text-[#326273]">
-            {kind !== null && fees ? `${kindLabel(kind)} payments${estimate !== null && amount !== null ? `: Splash fee about ${formatUsdc(estimate)} USDC` : ''}. The exact fee is shown before you approve.` : 'The exact fee is shown before you approve.'}
+            {kind !== null && fees ? `${kindLabel(kind)} payments${estimateUp !== null && amount !== null ? `: Splash fee about ${formatUsdc(estimateUp)} USDC` : ''}. The exact fee is shown before you approve.` : 'The exact fee is shown before you approve.'}
           </p>
         </Field>
         <Field label="Invoice or reference" hint="Optional" htmlFor="ref">

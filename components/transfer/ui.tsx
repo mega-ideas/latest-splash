@@ -12,6 +12,7 @@
  *     given back.
  */
 import { useEffect, useId, useRef, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes } from 'react';
+import { createPortal } from 'react-dom';
 import { CircleAlert, X, type LucideIcon } from 'lucide-react';
 
 export const CONTROL = 'h-11 w-full rounded-xl border border-[#326273]/25 bg-white px-3 text-sm text-[#0c3e48] outline-none transition-colors placeholder:text-[#326273] focus:border-[#0d6370] focus:ring-2 focus:ring-[#0d6370]/20 disabled:cursor-not-allowed disabled:bg-[#F6F0ED]';
@@ -139,7 +140,8 @@ export function Modal({ open, onClose, title, eyebrow, children, side = false, w
   }, [open, onClose]);
 
   if (!open) return null;
-  return (
+  // In the body, not in the page: the page's own layers (the rail, the top bar) would otherwise paint over it.
+  return createPortal(
     <div className={`fixed inset-0 z-[80] flex ${side ? 'items-stretch justify-end' : 'items-end justify-center sm:items-center'} p-0 ${side ? '' : 'sm:p-6'}`}>
       <div className="absolute inset-0 bg-[#0c3e48]/45 backdrop-blur-md" onClick={onClose} aria-hidden="true" />
       <div
@@ -166,6 +168,7 @@ export function Modal({ open, onClose, title, eyebrow, children, side = false, w
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
