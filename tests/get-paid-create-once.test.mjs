@@ -160,12 +160,12 @@ test('the dialog keeps one create key across retries, and a dropped connection d
 });
 
 test('the migration adds the key with a partial unique index per org, journalled', async () => {
-  const sql = await source('drizzle/0060_invoices_create_once.sql');
+  const sql = await source('drizzle/0063_invoices_create_once.sql');
   assert.match(sql, /ADD COLUMN IF NOT EXISTS "create_key" text/);
   assert.match(sql, /ADD COLUMN IF NOT EXISTS "create_fingerprint" text/);
   assert.match(sql, /CREATE UNIQUE INDEX IF NOT EXISTS "invoices_org_create_key_unique" ON "invoices" \("org_id", "create_key"\) WHERE "create_key" IS NOT NULL/);
   const journal = JSON.parse(await source('drizzle/meta/_journal.json'));
-  assert.ok(journal.entries.some((e) => e.tag === '0060_invoices_create_once'));
+  assert.ok(journal.entries.some((e) => e.tag === '0063_invoices_create_once'));
   const schema = await source('lib/db/schema.ts');
   assert.match(schema, /createKey: text\('create_key'\)/);
   assert.match(schema, /invoices_org_create_key_unique/);

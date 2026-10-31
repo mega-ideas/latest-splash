@@ -55,7 +55,7 @@ request.
 
 ## Orders
 
-`treasury_wallet_orders` (migrations 0055 and 0056) holds one swap or
+`treasury_wallet_orders` (migrations 0058 and 0059) holds one swap or
 redemption per (org, intent id), bound to the business wallet. The server
 resolves the wallet, never the client, and records it as both
 `source_address` and `recipient_address` (a CHECK keeps them equal), with
@@ -159,7 +159,7 @@ release a link, with a reason.
 
 Nothing is overwritten without a trace: every assessment (who, when, the
 answers and the outcome), every confirmed link and every release is appended
-to `treasury_fund_referral_history` (migration 0056), and the current row
+to `treasury_fund_referral_history` (migration 0059), and the current row
 points at the latest assessment. A business that first declared it did not
 qualify and then answered again still shows the first declaration, to itself
 and to staff. Whether answering again after a "not eligible" result needs a
