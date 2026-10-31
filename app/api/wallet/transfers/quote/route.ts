@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 
 import { FeeConfigUnavailableError } from '@/lib/fees/fee-config';
 import { readJsonBody } from '@/lib/server/http';
+import { requireTermsAccepted } from '@/lib/server/onboarding';
 import { payeeFromBody, quoteTransfer } from '@/lib/server/wallet-transfers';
 import { transferRoute } from '@/lib/server/wallet-transfers-deps';
 import { limitWalletRequests, NO_STORE, requireWithdrawalRequester } from '@/lib/server/wallet-route';
@@ -18,6 +19,8 @@ export const dynamic = 'force-dynamic';
 export async function POST(request: Request) {
   const gate = await transferRoute(request);
   if (gate.response) return gate.response;
+  const termsGate = await requireTermsAccepted(gate.route.orgId);
+  if (termsGate) return termsGate;
   const asker = requireWithdrawalRequester(gate.route);
   if (asker) return asker;
   const limited = await limitWalletRequests(gate.route);

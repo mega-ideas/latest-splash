@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 
 import { sheetRowsFromBody } from '@/lib/batch/sheet';
 import { readJsonBody } from '@/lib/server/http';
+import { requireTermsAccepted } from '@/lib/server/onboarding';
 import { createBatch, listBatches } from '@/lib/server/wallet-batches';
 import { batchRefusal, withFeeGuard } from '@/lib/server/wallet-batches-route';
 import { batchRoute } from '@/lib/server/wallet-transfers-deps';
@@ -36,6 +37,8 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const gate = await batchRoute(request);
   if (gate.response) return gate.response;
+  const termsGate = await requireTermsAccepted(gate.route.orgId);
+  if (termsGate) return termsGate;
   const limited = await limitWalletRequests(gate.route);
   if (limited) return limited;
   const body = await readJsonBody(request);

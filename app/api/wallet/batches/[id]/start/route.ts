@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { readJsonBody } from '@/lib/server/http';
+import { requireTermsAccepted } from '@/lib/server/onboarding';
 import { startBatchSigning } from '@/lib/server/wallet-batches';
 import { batchRefusal, withFeeGuard } from '@/lib/server/wallet-batches-route';
 import { batchRoute } from '@/lib/server/wallet-transfers-deps';
@@ -19,6 +20,8 @@ export const dynamic = 'force-dynamic';
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const gate = await batchRoute(request);
   if (gate.response) return gate.response;
+  const termsGate = await requireTermsAccepted(gate.route.orgId);
+  if (termsGate) return termsGate;
   const limited = await limitWalletRequests(gate.route);
   if (limited) return limited;
   const body = await readJsonBody(request);

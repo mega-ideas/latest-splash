@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 
 import { sheetRowsFromBody } from '@/lib/batch/sheet';
 import { readJsonBody } from '@/lib/server/http';
+import { requireTermsAccepted } from '@/lib/server/onboarding';
 import { reviewBatch } from '@/lib/server/wallet-batches';
 import { batchRefusal, withFeeGuard } from '@/lib/server/wallet-batches-route';
 import { batchRoute } from '@/lib/server/wallet-transfers-deps';
@@ -20,6 +21,8 @@ export const dynamic = 'force-dynamic';
 export async function POST(request: Request) {
   const gate = await batchRoute(request);
   if (gate.response) return gate.response;
+  const termsGate = await requireTermsAccepted(gate.route.orgId);
+  if (termsGate) return termsGate;
   const asker = requireWithdrawalRequester(gate.route);
   if (asker) return asker;
   const limited = await limitWalletRequests(gate.route);

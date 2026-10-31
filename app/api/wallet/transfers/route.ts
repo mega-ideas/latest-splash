@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { readJsonBody } from '@/lib/server/http';
+import { requireTermsAccepted } from '@/lib/server/onboarding';
 import { createTransfer, listTransfers, payeeFromBody } from '@/lib/server/wallet-transfers';
 import { transferRoute } from '@/lib/server/wallet-transfers-deps';
 import { limitWalletRequests, NO_STORE, requirePayoutReader } from '@/lib/server/wallet-route';
@@ -30,6 +31,8 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const gate = await transferRoute(request);
   if (gate.response) return gate.response;
+  const termsGate = await requireTermsAccepted(gate.route.orgId);
+  if (termsGate) return termsGate;
   const limited = await limitWalletRequests(gate.route);
   if (limited) return limited;
   const body = await readJsonBody(request);
