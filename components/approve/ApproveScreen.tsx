@@ -49,6 +49,13 @@ export default function ApproveScreen({
 
   return (
     <div className="space-y-4 pb-32" data-testid="approve-screen">
+      {/* First, above the amount: a request that is not to be signed says so before it says what it pays. */}
+      {blocked ? (
+        <p role="alert" className="flex items-start gap-2 rounded-xl border border-[var(--error)]/30 bg-[var(--error-bg)] p-3 text-sm font-semibold text-[var(--error)]">
+          <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          {facts.blockedReason} Do not sign it.
+        </p>
+      ) : null}
       <section aria-labelledby="approve-heading" className="overflow-hidden rounded-2xl bg-[#0c3e48] p-5 text-white">
         <p id="approve-heading" className="flex items-center gap-2 text-[13px] font-semibold text-white/85">
           <ShieldCheck className="h-4 w-4" aria-hidden="true" />
@@ -161,12 +168,6 @@ export default function ApproveScreen({
         <p className="mt-1 text-[13px] leading-5 text-[#326273]">If your WhatsApp message shows a different code, do not sign.</p>
       </section>
 
-      {blocked ? (
-        <p role="alert" className="flex items-start gap-2 rounded-xl border border-[var(--error)]/30 bg-[var(--error-bg)] p-3 text-sm font-semibold text-[var(--error)]">
-          <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-          {facts.blockedReason} Do not sign it.
-        </p>
-      ) : null}
       {error ? (
         <p role="alert" className="flex items-start gap-2 rounded-xl border border-[var(--error)]/30 bg-[var(--error-bg)] p-3 text-sm font-medium text-[var(--error)]">
           <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />

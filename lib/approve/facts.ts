@@ -187,7 +187,7 @@ function build(review: DeviceReview, opts: { names?: Array<string | null | undef
 
   const reasons: string[] = [];
   if (items.some((i) => i.unknown)) reasons.push('Part of this request cannot be shown here, so it cannot be signed from this screen.');
-  if (unexpected.length > 0) reasons.push('This transaction also does something besides the payment it shows. It is listed below.');
+  if (unexpected.length > 0) reasons.push('This transaction also does something besides the payment it shows.');
   if (shape) reasons.push('A payment here is opened without being paid, or paid without being opened in this transaction.');
   if (mismatch) reasons.push(mismatch);
   if (rateProblem) reasons.push('The rate for this payment cannot be shown, so what is received cannot be checked.');

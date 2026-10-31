@@ -289,6 +289,15 @@ test('the Approve screen opens the steps whenever one is not known bookkeeping, 
   assert.match(code(read('components/approve/ApproveInbox.tsx')), /cardSummary\(/, 'the card is worded by the same facts, not by its first line');
 });
 
+test('a request that is not to be signed says so above the amount, and the fee bound, the rate and the code are in the first screenful beside the button', () => {
+  const text = code(screen);
+  assert.ok(text.indexOf('{blocked ? (') < text.indexOf('<section aria-labelledby="approve-heading"'), 'the refusal comes before what the request pays');
+  assert.ok(text.indexOf('first?.maxFee') < text.indexOf('<dl className="divide-y'), 'the fee bound is in the hero, before the rows');
+  assert.ok(text.indexOf('first?.rate') < text.indexOf('<dl className="divide-y'), 'and the rate');
+  const bar = text.slice(text.indexOf('<PhoneBar>'));
+  assert.match(bar, /facts\.code/, 'the transaction code sits in the bar beside the passkey button');
+});
+
 test('the sign panel and the screen cannot crash on a request: one reading of the facts, blocked ones not signed', () => {
   assert.match(panel, /facts\.blocked|blocked = /);
   assert.match(panel, /blockedReason/);
