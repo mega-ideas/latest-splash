@@ -136,14 +136,15 @@ test('an unavailable chain and a switched-off wallet each say so, and nothing is
   assert.match(balance, /b \? formatUsdc\(BigInt\(b\.availableMinor\)\) : 'Not available'/, 'an unreadable balance is "Not available", never zero');
 });
 
-test('the old Settings link for upgrade alerts lands on the wallet’s own rules section', () => {
+test('the old link for upgrade alerts lands on Team & rules in Settings, where a rule is given, changed and taken back (brief 5.9)', () => {
   const redirect = read('app/dashboard/settings/spending-rules/page.tsx');
-  assert.match(redirect, /redirect\('\/dashboard\/wallet#spending-rules'\)/);
-  assert.match(read('components/wallet/RulesCard.tsx'), /id="spending-rules"/);
+  assert.match(redirect, /redirect\('\/dashboard\/settings#rules'\)/);
+  assert.match(read('components/wallet/RulesCard.tsx'), /id="spending-rules"/, 'the wallet still shows the rules summary');
 });
 
-test('the rules card never sends the owner to Settings for something Settings cannot do', () => {
+test('the rules card shows the rules and sends an owner to Settings, which now gives, changes and takes back a rule', () => {
   const r = code(read('components/wallet/RulesCard.tsx'));
-  assert.doesNotMatch(r, /in Settings|Manage in Settings|href="\/dashboard\/settings"/, 'no screen in Settings gives, changes or takes back a rule, so the page must not say it does');
-  assert.match(r, /Splash support/, 'the owner is told who can change a rule');
+  assert.match(r, /href="\/dashboard\/settings#rules"/);
+  assert.doesNotMatch(r, /Ask Splash support to (reissue|take)/, 'an owner reissues and takes back rules in Settings');
+  assert.ok(existsSync(new URL('../components/settings/RulesSection.tsx', import.meta.url)), 'Settings has the screen the card points to');
 });
