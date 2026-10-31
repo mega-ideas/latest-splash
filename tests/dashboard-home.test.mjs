@@ -21,6 +21,8 @@ import { migratedDb } from './helpers/store-db.mjs';
 
 const ROOT = new URL('../', import.meta.url);
 const source = (path) => readFile(new URL(path, ROOT), 'utf8');
+/** Home's desktop and phone layouts share their wallet card, their figure parts and the wallet read (v2 brief 5.10): they live beside the page. */
+const homeSource = async () => (await Promise.all(['app/dashboard/page.tsx', 'components/home/WalletBody.tsx', 'components/home/parts.tsx', 'components/home/wallet-state.ts'].map(source))).join('\n');
 const codeOnly = (text) => text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/\{\/\*[\s\S]*?\*\/\}/g, '');
 
 const ORG = 'org_acme';
@@ -343,7 +345,7 @@ test('the wallet card reads every answer the Phase 2 business wallet route gives
 });
 
 test('only a failed read offers Try again; the other wallet states say what is true', async () => {
-  const page = codeOnly(await source('app/dashboard/page.tsx'));
+  const page = codeOnly(await source('components/home/WalletBody.tsx'));
   for (const copy of ['No business wallet yet', 'Wallet being set up', 'Business wallet not available', 'Balance unavailable']) {
     assert.ok(page.includes(copy), `the wallet card is missing “${copy}”`);
   }
@@ -461,7 +463,7 @@ test('Home is titled Home and the modeled panels are gone', async () => {
 });
 
 test('Home shows the board’s figures from real sources, with loading, empty and retryable error states', async () => {
-  const page = codeOnly(await source('app/dashboard/page.tsx'));
+  const page = codeOnly(await homeSource());
   for (const label of ['Splash Wallet', 'Needs approval', 'Sent this month', 'Recent payments']) {
     assert.ok(page.includes(label), `Home is missing ${label}`);
   }

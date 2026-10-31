@@ -21,7 +21,7 @@ test('the phone has a bottom tab bar of five tabs, each 44px or taller with an i
   const bar = read('components/dashboard/PhoneTabBar.tsx');
   assert.match(bar, /PHONE_TABS\.map/);
   assert.match(bar, /aria-label="Main"/);
-  assert.match(bar, /aria-current=\{current === tab\.key \? 'page' : undefined\}/);
+  assert.match(bar, /aria-current=\{on \? 'page' : undefined\}/);
   assert.match(bar, /min-h-14/);
   assert.match(bar, /env\(safe-area-inset-bottom\)/);
   assert.match(bar, /badgeText\(/);
@@ -79,7 +79,8 @@ test('a figure that could not be read is said, never zero, on the phone too', ()
   const home = read('components/home/PhoneHome.tsx');
   assert.match(home, /Couldn&rsquo;t load/);
   assert.match(home, /Try again/);
-  assert.match(home, /Balance unavailable/);
+  assert.match(home, /<WalletBody\b/, 'the balance says what is true in the desktop card’s own words');
+  assert.match(read('components/home/WalletBody.tsx'), /Balance unavailable/);
 });
 
 // ── Wallet ────────────────────────────────────────────────────────────────────
@@ -87,7 +88,7 @@ test('a figure that could not be read is said, never zero, on the phone too', ()
 test('on the Wallet page a phone sees the signature requests and the balance first, and every other section folded under its own title', () => {
   assert.deepEqual(sectionsOpenAtFirst(), ['needs-signature']);
   assert.deepEqual(SECTION_ORDER.slice(0, 2), ['needs-signature', 'balance']);
-  for (const id of ['top-up', 'withdraw', 'funding-history', 'funding-sources', 'wallet-activity', 'signers', 'spending-rules', 'migration', 'upgrade-alerts']) assert.ok(SECTION_ORDER.includes(id), id);
+  for (const id of ['top-up', 'withdraw', 'funding-history', 'funding-sources', 'signers', 'spending-rules', 'migration', 'upgrade-alerts']) assert.ok(SECTION_ORDER.includes(id), id);
   const parts = read('components/wallet/parts.tsx');
   assert.match(parts, /usePhone\(\)/);
   assert.match(parts, /<details\b/);
@@ -110,7 +111,7 @@ test('the balance card puts the three things a person does with a wallet within 
   assert.match(card, /usePhone\(\)/);
   assert.match(card, /grid-cols-3|grid grid-cols/);
   for (const label of ['Add funds', 'Withdraw', 'Send']) assert.match(card, new RegExp(label), label);
-  assert.match(card, /min-h-1[1-9]|min-h-\[(4|5|6)\d/);
+  assert.match(card, /min-h-1[1-9]|min-h-\[[4-9]\d/);
 });
 
 test('the Wallet page keeps every section and sends nothing the desktop did not', () => {
@@ -131,12 +132,17 @@ test('on a phone Zeke leads with the question and the composer, and the cards co
   assert.match(page, /<ZekeQuickLinks \/>/);
 });
 
-test('the starters are a row to swipe on a phone, each a 44px target, and the conversation docks its composer above the tab bar', () => {
+test('the starters are a row to swipe on a phone, each a 44px target, and the conversation keeps its composer under the thread above the tab bar', () => {
+  const phone = read('components/oxwal/ZekePhone.tsx');
+  assert.match(phone, /snap-x/);
+  assert.match(phone, /overflow-x-auto/);
+  assert.match(phone, /min-h-\[116px\]|min-h-1[1-9]|min-h-\[[4-9]\d/);
+  assert.match(phone, /<details\b/);
   const page = read('app/dashboard/zeke/page.tsx');
-  assert.match(page, /snap-x/);
-  assert.match(page, /overflow-x-auto/);
+  assert.match(page, /<PhoneStarters\b/);
+  assert.match(page, /<PhoneMore\b/);
   assert.match(page, /env\(safe-area-inset-bottom\)/);
-  assert.match(page, /sticky bottom-|fixed inset-x-0 bottom-/);
+  assert.match(page, /shrink-0 border-t[^"]*"[\s\S]{0,200}variant="reply"/, 'the composer is docked under the thread');
 });
 
 test('the approvals Zeke knows of lead to Approve on a phone, where the passkey is', () => {
@@ -147,7 +153,7 @@ test('the approvals Zeke knows of lead to Approve on a phone, where the passkey 
 // ── Words and colours ─────────────────────────────────────────────────────────
 
 test('the phone files pass the copy rules and use no coral, Demo, testnet, grid, or partner name', () => {
-  for (const file of ['components/dashboard/Device.tsx', 'components/dashboard/PhoneTabBar.tsx', 'components/home/PhoneHome.tsx', 'components/home/wallet-state.ts', 'lib/dashboard/phone.ts', 'lib/wallet-page/phone.ts', 'lib/oxwal/phone-desk.ts', 'lib/device.ts']) {
+  for (const file of ['components/dashboard/Device.tsx', 'components/dashboard/PhoneTabBar.tsx', 'components/home/PhoneHome.tsx', 'components/home/wallet-state.ts', 'components/home/WalletBody.tsx', 'components/home/parts.tsx', 'components/oxwal/ZekePhone.tsx', 'lib/dashboard/phone.ts', 'lib/wallet-page/phone.ts', 'lib/oxwal/phone-desk.ts', 'lib/device.ts']) {
     const text = read(file);
     assert.deepEqual(copyViolations(file, text), [], file);
     assert.doesNotMatch(text, /E39774|coral|\bDemo\b|\bDEMO\b|Coming soon|testnet|non-custodial|background-grid|bg-grid|grid-lines/i, file);

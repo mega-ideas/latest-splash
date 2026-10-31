@@ -36,7 +36,8 @@ test('step 1 has the three cards of the board, and the corridors that are not li
   for (const title of ['A business bank account', 'A business on Splash', 'A Sui wallet address']) assert.match(who, new RegExp(title), title);
   assert.match(who, /role="radiogroup"/);
   assert.match(who, /aria-checked=\{on\}/);
-  const bank = read('components/transfer/DetailsBank.tsx');
+  // The request for access is one component, shared by the desktop form and the phone's questions (v2 brief 5.10).
+  const bank = read('components/transfer/DetailsBank.tsx') + read('components/transfer/PilotAccess.tsx');
   assert.match(bank, /Pilot access/);
   assert.match(bank, /Request access/);
   assert.doesNotMatch(flowSource, /Coming soon/i);
@@ -65,7 +66,8 @@ test('step 2 for a bank: one set of fields, one input height, one icon gutter, o
 });
 
 test('a bank payout is never checked against a Sui address field, and no copy says "invalid Sui address"', () => {
-  const bank = read('components/transfer/DetailsBank.tsx');
+  // The checks are one rule, shared by the desktop form and the phone's questions (lib/transfer/bank-form.ts).
+  const bank = read('components/transfer/DetailsBank.tsx') + read('lib/transfer/bank-form.ts');
   assert.match(bank, /checkPayeeField\('bank', form\.accountNumber\)/);
   assert.doesNotMatch(bank, /checkSuiAddress|isValidSuiAddress/);
   // The form that saves a wallet recipient is shared with Recipients (v2 brief 5.9).

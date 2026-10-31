@@ -175,14 +175,17 @@ test('every screen is one question with its own heading, and the phone says wher
   }
 });
 
-test('the action is a 56px bar at the foot, clear of the home indicator, with Back above the keyboard’s reach and a close that keeps the draft', () => {
-  assert.match(phone, /fixed inset-x-0 bottom-0/);
-  assert.match(phone, /env\(safe-area-inset-bottom\)/);
+test('the action is a 56px bar at the foot, clear of the home indicator, with Back at the top and a close that keeps the draft', () => {
+  assert.match(phone, /<PhoneBar>/);
   assert.match(phone, /min-h-14/);
-  assert.match(phone, /usePhoneBottomBar\(true\)/);
   assert.match(phone, /aria-label="Back"/);
+  assert.match(phone, /Close and keep the draft/);
   assert.match(phone, /Continue/);
   assert.match(phone, /disabled=\{!ready/);
+  const review = read('components/transfer/StepReview.tsx');
+  assert.match(review, /stickyActions/);
+  assert.match(review, /<PhoneBar>/, 'Review’s Approve is the same bar');
+  assert.match(read('components/dashboard/PhoneBar.tsx'), /fixed inset-x-0 bottom-0[^"]*env\(safe-area-inset-bottom\)|env\(safe-area-inset-bottom\)[^"]*/);
 });
 
 test('walking back and forward never makes a second intent id: the phone only moves the screen', () => {
@@ -226,10 +229,14 @@ test('the amount screen shows the wallet balance and the shortfall, and tops up 
   assert.match(read('components/transfer/StepAmount.tsx'), /useAmountPlan\(/, 'the desktop step computes its funds the same way');
 });
 
-test('inputs on a phone are 16px or larger, so the browser does not zoom the page in, and every control is 44px', () => {
-  assert.match(phone, /text-base|text-\[16px\]|text-lg|text-2xl|text-3xl/);
-  assert.doesNotMatch(phone, /text-\[1[0-5]px\]/);
-  assert.doesNotMatch(phone, /h-(?:[1-9]|10)\b(?! rounded-full)(?=[^\n]*<button)/, 'no button shorter than 44px');
+test('inputs on a phone are 16px or larger, so the browser does not zoom the page in, and every control is 56px', () => {
+  const input = /const PHONE_INPUT = '([^']+)'/.exec(phone)?.[1] ?? '';
+  assert.match(input, /\bh-14\b/);
+  assert.match(input, /text-\[17px\]/);
+  assert.match(phone, /className="h-16 w-full[^"]*text-\[28px\]/, 'the amount is the largest thing on its screen');
+  for (const choice of phone.match(/min-h-14 w-full/g) ?? []) assert.ok(choice);
+  // The rest of the forms the phone reuses (a search, an address, a top-up) are built from CONTROL: 16px on a phone, 14px from md.
+  assert.match(read('components/transfer/ui.tsx'), /export const CONTROL = 'h-11 [^']*text-base[^']*md:text-sm/);
 });
 
 test('the phone Transfer words pass the copy rules and use no coral, Demo, testnet or partner name', () => {

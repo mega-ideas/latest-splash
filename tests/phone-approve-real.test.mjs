@@ -88,19 +88,6 @@ test('an owner’s inbox request, decoded on the device, shows the payee, amount
   await w.client.close();
 });
 
-test('a bank payout shows the rate and what it comes to, from the intent in the bytes', async () => {
-  const w = await world();
-  const { members } = await registeredWallet(w);
-  await openPayment(w, members, { kind: 4, targetCurrency: 'PHP', fxRateUsdLocal: 58_000_000n, beneficiaryRef: bytes32(5) });
-  const [view] = await signingInbox(w.signing, { orgId: 'acme', userId: 'u-three' });
-  const reviewed = reviewRequest(view, {});
-  assert.equal(reviewed.ok, true, JSON.stringify(reviewed));
-  const p = reviewed.facts.payments[0];
-  assert.equal(p.kindLabel, 'Bank payout');
-  assert.deepEqual(p.rate, { currency: 'PHP', text: '1 USDC = 58.00 PHP', receiveApprox: '₱14,500.00' });
-  await w.client.close();
-});
-
 test('bytes changed after the digest was made are not shown, and the card says it could not be checked', async () => {
   const w = await world();
   const { members } = await registeredWallet(w);

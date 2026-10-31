@@ -95,7 +95,7 @@ test('commands the payment panel already shows as rows are not said twice', () =
 
 test('the facts are read only from the device review: no server decoding is an input', () => {
   const src = code(read('lib/approve/facts.ts'));
-  assert.doesNotMatch(src, /fetch\(|\.description|server/i);
+  assert.doesNotMatch(src, /fetch\(|\.description|server/i);
   assert.match(src, /DeviceReview/);
   assert.doesNotMatch(src, /sandbox|USE_MOCK_APIS|mock/i, 'nothing here can show a made-up result in production');
 });
@@ -113,12 +113,15 @@ test('the sign screen shows the five facts and the transaction code, and signs o
   assert.match(screen, /groupAddress|payee\.recipient|p\.recipient/);
 });
 
-test('the passkey button is a 56px bar at the foot, clear of the home indicator, and the tab bar steps aside for it', () => {
-  assert.match(screen, /fixed inset-x-0 bottom-0/);
-  assert.match(screen, /env\(safe-area-inset-bottom\)/);
+test('the passkey button is a 56px bar at the foot, clear of the home indicator, drawn in the body so a blurred card cannot hold it, and the tab bar steps aside for it', () => {
+  assert.match(screen, /<PhoneBar>/);
   assert.match(screen, /min-h-14/);
-  assert.match(screen, /usePhoneBottomBar\(true\)/);
   assert.match(screen, /pb-(2\d|3\d)/, 'the content clears the fixed bar');
+  const bar = read('components/dashboard/PhoneBar.tsx');
+  assert.match(bar, /fixed inset-x-0 bottom-0/);
+  assert.match(bar, /env\(safe-area-inset-bottom\)/);
+  assert.match(bar, /usePhoneBottomBar\(true\)/);
+  assert.match(bar, /createPortal\(/, 'dash-surface blurs what is behind it, and a fixed element inside it is fixed to the card');
 });
 
 test('the passkey button cannot be pressed twice, and is off when the screen cannot word part of the request', () => {
@@ -172,7 +175,7 @@ test('the list decodes every request on the device, so a card says what it pays,
   assert.match(read('lib/approve/facts.ts'), /reviewOnDevice\(/, 'the one reader of the bytes is the device’s');
   assert.match(inbox, /could not be checked/i);
   assert.match(inbox, /href=\{`\/dashboard\/approve\/\$\{/);
-  assert.match(inbox, /min-h-1[1-9]|min-h-\[6/);
+  assert.match(inbox, /min-h-1[1-9]|min-h-\[[6-9]\d/);
 });
 
 test('the empty and the failed list are sentences with a way on', () => {
