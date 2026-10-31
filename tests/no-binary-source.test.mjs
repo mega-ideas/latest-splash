@@ -16,9 +16,8 @@ import test from 'node:test';
  * proven to work.
  */
 
-test('the two files that reached for NUL as a separator are text', async () => {
+test('the file that still uses NUL as a separator is text', async () => {
   for (const file of [
-    '../app/api/batches/authorize/route.ts',
     '../lib/server/dual-approval.ts',
   ]) {
     const bytes = await readFile(new URL(file, import.meta.url));

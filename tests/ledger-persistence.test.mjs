@@ -329,7 +329,6 @@ test('the application writes through postJournal, not around it', async () => {
 
   for (const file of [
     '../app/api/transfers/authorize/route.ts',
-    '../app/api/batches/authorize/route.ts',
     '../lib/server/sweep.ts',
     '../lib/server/funding-intake.ts',
     '../app/api/ledger/route.ts',

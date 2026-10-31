@@ -26,8 +26,8 @@
  * is single-use: it was spent when the proposal was made. Replaying it when
  * the approval lands can only fail, and an approval that can never be carried
  * out is the dead end the queue exists to remove. So an approval of this move
- * stands in for the code, as it does for a payroll run's
- * (lib/server/batch-approval.ts). It lifts nothing else: the pause and the
+ * stands in for the code, as it did for the v1 payroll run's (a route since
+ * removed). It lifts nothing else: the pause and the
  * ceilings run again against the state at the moment of the move.
  */
 import 'server-only';

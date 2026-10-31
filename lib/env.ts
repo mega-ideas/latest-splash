@@ -198,7 +198,6 @@ export const envSchema = z.object({
 
   /* Settlement. lib/server/sui-settlement.ts. */
   SUI_SETTLEMENT_MODE: withDefault(z.enum(['auto', 'live', 'simulate']), 'auto'),
-  SUI_BATCH_SETTLEMENT_MODE: optional,
   /** Raw operator keys: development and testnet only. Production refuses
    *  both (WS4) — it signs through OPERATOR_KMS_KEY_ID. */
   OPERATOR_SUI_PRIVATE_KEY: privkey,

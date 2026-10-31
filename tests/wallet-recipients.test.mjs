@@ -109,7 +109,6 @@ test('the invoice loop and the money routes refuse with the lane, not a generic 
 
   for (const [file, lane] of [
     ['app/api/transfers/authorize/route.ts', 'FIAT_OUT_LOCAL'],
-    ['app/api/batches/authorize/route.ts', 'FIAT_OUT_LOCAL'],
     ['app/api/treasury/route.ts', 'TREASURY'],
   ]) {
     const text = await readFile(new URL(`../${file}`, import.meta.url), 'utf8');

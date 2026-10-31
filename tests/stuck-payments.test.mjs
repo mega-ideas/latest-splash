@@ -226,6 +226,7 @@ test("an approval's spend says whether the route could have paid with it, and wh
     [{ consumedBy: 'execution', consumedAt: at }, 'closed-unused', ['NOT_SENT'], true],
     [{ consumedBy: 'reconciliation', consumedAt: at }, 'closed-unused', ['NOT_SENT'], true],
     [{ consumedBy: 'transfers/authorize', consumedAt: at }, 'route-used', ['SENT', 'NOT_SENT'], false],
+    // History: spends recorded by the since-removed payout-run route stay route-used.
     [{ consumedBy: 'batches/authorize', consumedAt: at }, 'route-used', ['SENT', 'NOT_SENT'], false],
     [{ consumedBy: 'treasury', consumedAt: at }, 'route-used', ['SENT', 'NOT_SENT'], false],
     [{ consumedBy: 'backfill', consumedAt: at }, 'backfilled', ['SENT', 'NOT_SENT'], false],

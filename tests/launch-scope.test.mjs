@@ -228,7 +228,7 @@ test('every route that reaches fiat money or settlement refuses outside the laun
 
 test('the named fiat routes carry the guard', () => {
   for (const route of [
-    'transfers/authorize', 'batches/authorize', 'treasury', 'funding/sessions', 'funding/sessions/[id]',
+    'transfers/authorize', 'treasury', 'funding/sessions', 'funding/sessions/[id]',
     'funding/deposits', 'funding/usd-deposits', 'rate-holds', 'pay/[slug]',
     'cron/accrue-yield', 'cron/settle-withdrawals', 'cron/update-peg', 'cron/audit-batch', 'recipients',
     'stablecoin/treasury-quote', 'funding/options',

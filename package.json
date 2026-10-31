@@ -44,7 +44,6 @@
     "test:wire": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/wire-format.test.mjs",
     "test:beneficiary": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --import ./scripts/alias-hook.mjs --test tests/beneficiary-form.test.mjs",
     "test:travelrule": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/travel-rule.test.mjs",
-    "test:batches": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --import ./scripts/alias-hook.mjs --test tests/batch-persistence.test.mjs",
     "test:kyblifecycle": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --import ./scripts/alias-hook.mjs --test tests/kyb-lifecycle.test.mjs",
     "test:signup": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --import ./scripts/alias-hook.mjs --test tests/signup-workspace.test.mjs",
     "test:oxwalcaps": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --import ./scripts/alias-hook.mjs --test tests/oxwal-capabilities.test.mjs",

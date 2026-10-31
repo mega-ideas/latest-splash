@@ -168,7 +168,6 @@ test('the shell locks from a server-resolved prop and reroutes to setup — it i
 test('every money-adjacent route asks for the terms beside its other gates', async () => {
   for (const file of [
     'app/api/transfers/authorize/route.ts',
-    'app/api/batches/authorize/route.ts',
     'app/api/recipients/route.ts',
     'app/api/invoices/route.ts',
   ]) {

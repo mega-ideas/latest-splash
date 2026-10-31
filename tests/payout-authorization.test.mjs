@@ -14,7 +14,7 @@ import { checkAuthorizationLimits, spentTodayUsd } from '../lib/policy/authoriza
 /**
  * The payout second factor and the operating ceilings.
  *
- * Before this, `/api/transfers/authorize` and `/api/batches/authorize` accepted
+ * Before this, `/api/transfers/authorize` and the since-removed `/api/batches/authorize` accepted
  * any six digits (`/^\d{6}$/`) as the "authorization code", and the configured
  * per-transfer / daily limits were read by nothing. Both controls existed in
  * the UI and in the settings file, and neither existed in the code path that

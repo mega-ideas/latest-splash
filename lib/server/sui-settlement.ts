@@ -1,4 +1,4 @@
-import { MICRO_DECIMALS, MIST_DECIMALS, formatMinor, parseMinor, sumMinor } from '../money.ts';
+import { MIST_DECIMALS, formatMinor } from '../money.ts';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { promisify } from 'node:util';
@@ -7,7 +7,6 @@ import { Transaction } from '@mysten/sui/transactions';
 
 import { assertCommitmentBytes } from '@/lib/evidence/commitment';
 import { FEE_KIND, LAUNCH_SCHEDULE, tierOf } from '@/lib/fees/schedule';
-import { batchGasBudgetMist, checkBatchSize } from '@/lib/policy/batch-limits';
 import {
   checkPoolAllowed,
   parsePoolWhitelist,
@@ -34,18 +33,6 @@ function settlementMode(): 'auto' | 'live' | 'simulate' {
   const mode = (process.env.SUI_SETTLEMENT_MODE ?? 'auto').trim().toLowerCase();
   if (mode === 'auto' || mode === 'live' || mode === 'simulate') return mode;
   throw new Error(`Invalid SUI_SETTLEMENT_MODE "${mode}". Use auto, live, or simulate.`);
-}
-
-// Batch-only settlement override. `settle_batch` requires live DeepBook order-book
-// depth (splash_custody's liquidity_guard::assert_deepbook_liquidity), which testnet pools rarely have,
-// so a real batch can abort mid-demo. Setting SUI_BATCH_SETTLEMENT_MODE=simulate
-// keeps batch on a labelled SIM_ receipt while single transfers, treasury, and the
-// composed proof flow still settle for real. Returns null → fall through to the
-// global mode. Never reached on mainnet: the batch path is refused there before
-// any mode is read (refuseRetiredCustodyPathOnMainnet).
-function batchExecutionOverride(): SettlementExecution | null {
-  const mode = (process.env.SUI_BATCH_SETTLEMENT_MODE ?? '').trim().toLowerCase();
-  return mode === 'simulate' ? 'simulate' : null;
 }
 
 function configuredOperatorAddress(): string {
@@ -172,44 +159,6 @@ function optionalConfigId(field: ContractConfigField): string {
  * (docs/KEY-CEREMONY-RUNBOOK.md §0).
  */
 /**
- * Pre-flight for batch settlement: the shared SettlementPool must already hold
- * enough SUI, because `settle_sui_batch` splits every recipient's net + fee
- * straight out of `pool.balance`. An unfunded pool is the single most common
- * batch failure and otherwise surfaces as an opaque mid-PTB MoveAbort.
- *
- * Best-effort: a read failure must not block settlement — the chain remains the
- * authority, this only turns a knowable failure into a readable one.
- */
-async function assertSettlementPoolFunded(
-  poolId: string,
-  rows: Array<{ amount?: string }>,
-): Promise<void> {
-  // Each row is a decimal string. Parsing to a double and rounding to micro
-  // per row, then summing the doubles, is how a hundred-row batch ends up a
-  // unit short of the sum the ledger computed from the same rows.
-  const requiredMicro = sumMinor(rows.map((row) => parseMinor(row.amount ?? '0', MICRO_DECIMALS, 'half-up')));
-  if (requiredMicro <= 0n) return;
-
-  let balance: bigint;
-  try {
-    const res = await suiClient.core.getObject({ objectId: poolId, include: { json: true } });
-    const json = (res as { object?: { json?: { balance?: string } } }).object?.json;
-    if (!json || json.balance === undefined) return;
-    balance = BigInt(json.balance);
-  } catch {
-    return;
-  }
-
-  if (balance < requiredMicro) {
-    throw new Error(
-      `SettlementPool ${poolId.slice(0, 12)}… holds ${formatMinor(balance, MIST_DECIMALS)} SUI but this batch needs ` +
-      `${formatMinor(requiredMicro, MIST_DECIMALS)} SUI. Batch payouts are paid FROM the pool, not from the operator wallet — ` +
-      'fund it first: node --use-system-ca --env-file=.env.local scripts/fund-settlement-pool.mjs <SUI>',
-    );
-  }
-}
-
-/**
  * The shared `CapRegistry` (Phase 7). Required by every call that USES a
  * revocable capability.
  *
@@ -241,17 +190,17 @@ function anchorCapObjectId(): string {
 }
 
 /**
- * The rate the v1 testnet custody settlement (`settlement::settle_payment`,
- * `settle_sui_batch_delegated`) is handed, in bps of each payment.
+ * The rate the v1 testnet custody settlement (`settlement::settle_payment`)
+ * is handed, in bps of the payment. (The custody payout run,
+ * `settle_sui_batch_delegated`, is no longer called from this server.)
  *
  * splash_custody takes a rate as an argument; v2 takes none, and computes
  * Splash's fee on chain from the kind and the amount (Amendment A1). So this
  * retired path is handed what v2 would charge a payout to a bank: the A1
  * bank-payout tier for the amount, from the launch schedule
  * (lib/fees/schedule.ts), which is never above the 100 bps ceiling and so
- * always inside custody's own limit. For a batch, one rate covers every row,
- * so it is the lowest of the rows' tiers: no row pays more than its own tier.
- * Testnet only; refused on mainnet with the rest of the custody path.
+ * always inside custody's own limit. Given several principals it returns the
+ * lowest tier, so no payment pays more than its own. Testnet only; refused on mainnet with the rest of the custody path.
  */
 function custodyRateBps(principalsMicro: readonly bigint[]): number {
   const bank = LAUNCH_SCHEDULE[FEE_KIND.BANK_PAYOUT];
@@ -1440,14 +1389,6 @@ async function updatePegOnSui(): Promise<void> {
   console.log('[Sui Peg Update] Peg refreshed:', output.digest);
 }
 
-export type SettlementBatchRow = {
-  name?: string;
-  address?: string;
-  country?: string;
-  purpose?: string;
-  amount?: string;
-};
-
 type SuiCliCallOutput = {
   digest?: string;
   effects?: {
@@ -1680,239 +1621,6 @@ export async function recordSingleTransferOnSui(input: {
   }
 
   console.log('[Sui Single Transfer] Transaction successful:', digest);
-
-  return {
-    digest,
-    packageId: SPLASH_PACKAGE_ID,
-    treasuryId: SPLASH_TREASURY_ID,
-  };
-}
-
-export async function recordBatchSettlementOnSui(input: {
-  batchId: string;
-  rows: SettlementBatchRow[];
-  totalUsd: number;
-  /** ISO 4217 code of the destination corridor (e.g. 'PHP'). */
-  targetCurrency?: string;
-}) {
-  // settle_sui_batch_delegated is a splash_custody function: refused on
-  // mainnet in every mode, simulate and SUI_BATCH_SETTLEMENT_MODE included,
-  // so the batch route records FAILED rather than SETTLED for a payout that
-  // never happened.
-  refuseRetiredCustodyPathOnMainnet('Batch settlement');
-  const execution = batchExecutionOverride() ?? await resolveSettlementExecution();
-  if (execution === 'simulate') {
-    const sim = simulatedSettlement(input.batchId);
-    console.warn(`[Sui Batch Settlement] simulate mode (or CLI unavailable) — recording SIMULATED settlement. batch=${input.batchId} rows=${input.rows.length} digest=${sim.digest}`);
-    return { ...sim, simulated: true as const };
-  }
-  const cfg = getContractConfig();
-  // Core modules (peg_monitor) and custody modules (settlement) now live in
-  // SEPARATE packages. The custody package is not published on mainnet (v2
-  // retired it, D11), so this resolution is what turns 'there is no custody
-  // here' into a clear error instead of an ObjectNotFound deep inside a PTB.
-  const SPLASH_PACKAGE_ID = corePackageIdOrThrow();
-  const SPLASH_CUSTODY_PACKAGE_ID = custodyPackageIdOrThrow();
-  const SPLASH_TREASURY_ID = configIdOrThrow('treasuryId', 'SPLASH_TREASURY_ID');
-  const SPLASH_PEG_STATE_ID = configIdOrThrow('pegStateId', 'SPLASH_PEG_STATE_ID');
-  // Called for its side effect, not its value: it throws a named error if the
-  // id is unconfigured, which is the whole point of the pre-flight above.
-  configIdOrThrow('businessAccountId', 'SPLASH_BUSINESS_ACCOUNT_ID');
-  // 2026-07-19 package (0xec3b06…): settle_sui_batch pays recipients from the
-  // SUI SettlementPool but now ALSO requires the ComplianceConfig object, a
-  // DeepBook Pool<SUI, QuoteAsset> reference for the liquidity guard, and the
-  // QuoteAsset type argument.
-  const SPLASH_COMPLIANCE_CONFIG_ID = configIdOrThrow('complianceConfigId', 'SPLASH_COMPLIANCE_CONFIG_ID');
-  const DEEPBOOK_POOL_ID = configIdOrThrow('deepbookPoolId', 'DEEPBOOK_POOL_ID');
-  await assertDeepbookPoolWhitelisted();
-  if (!cfg.deepbookQuoteType) {
-    throw new Error('DEEPBOOK_QUOTE_TYPE is not configured — settle_sui_batch<QuoteAsset> needs the DeepBook quote type. Set it in admin → Contract config (or .env.local), or run batches in simulate mode.');
-  }
-  const DEEPBOOK_QUOTE_TYPE = cfg.deepbookQuoteType;
-  // Peg refresh is bundled into the same PTB below — no separate tx, no staleness race.
-  //
-  // NOTE (cap split, spec §5): this PTB needs BOTH caps — the attestation cap
-  // for `update_peg` and the money-authority AdminCap for `settle_sui_batch`,
-  // which pays recipients out of the shared SettlementPool. That means once the
-  // AdminCap moves to a cold 2-of-3 multisig, batch settlement can no longer be
-  // driven by the hot server alone. Resolving that (a bounded, hot
-  // `SettlementCap` with per-batch limits) is an explicit follow-up decision —
-  // see docs/KEY-CEREMONY-RUNBOOK.md. Single transfers are unaffected.
-  const SPLASH_ANCHOR_CAP_ID = anchorCapObjectId();
-  const SPLASH_CAP_REGISTRY_ID = capRegistryObjectId();
-  // The batch no longer takes an AdminCap. It takes a delegation the TENANT
-  // granted, which the operator owns and can therefore name as an input.
-  const SPLASH_PAYOUT_DELEGATION_ID = configIdOrThrow('payoutDelegationId', 'SPLASH_PAYOUT_DELEGATION_ID');
-  // MEASURED, never a constant. Writing a hardcoded 0 here and reading it back
-  // via assert_pegged one command later is what made the peg breaker inert.
-  const pegAttestation = await resolvePegAttestation();
-  if (!pegAttestation.push) {
-    console.warn(`[Sui Peg] not attesting the peg in this PTB: ${pegAttestation.reason}`);
-  }
-  const usdcDeviationPpm = String(pegAttestation.push ? pegAttestation.usdcDeviationPpm : 0);
-  const usdtDeviationPpm = String(pegAttestation.push ? pegAttestation.usdtDeviationPpm : 0);
-
-  // A batch creates one Coin object and emits one event PER ROW, so a flat
-  // budget is wrong by construction: 10_000_000 MIST was exhausted at
-  // single-digit row counts while the single-transfer path next door used
-  // 30_000_000 for one payment.
-  const batchSize = checkBatchSize(input.rows.length);
-  if (!batchSize.ok) throw new Error(batchSize.message);
-  const gasBudget = batchGasBudgetMist(input.rows.length, process.env.SUI_RECORD_SETTLEMENT_GAS_BUDGET);
-
-  // Pre-flight: the most common batch failure is an unfunded SettlementPool,
-  // which otherwise surfaces as an opaque MoveAbort mid-PTB. Check it here so
-  // the operator gets an actionable message instead of an abort code.
-  await assertSettlementPoolFunded(SPLASH_TREASURY_ID, input.rows);
-
-  const paymentObjects = input.rows.map((row) => {
-    const amount = parseMinor(row.amount ?? '0', MICRO_DECIMALS, 'half-up');
-    const recipient = requireSuiAddress(resolvePayoutRecipient(row.address, `Batch recipient ${row.name ?? row.address ?? ''}`.trim()), `Batch recipient ${row.name ?? row.address ?? ''}`.trim());
-    return { recipient, amount };
-  });
-
-  if (execution === 'sdk') {
-    const tx = new Transaction();
-    tx.setGasBudget(gasBudget);
-    // Only attest a peg we actually measured. Pushing a constant here and
-    // reading it back through assert_pegged one command later is what made the
-    // breaker inert; when there is no live reading we omit the command entirely
-    // and let PegState go stale (abort 302) rather than clear the settlement.
-    if (pegAttestation.push) {
-      tx.moveCall({
-        target: `${SPLASH_PACKAGE_ID}::peg_monitor::update_peg`,
-        arguments: [
-          tx.object(SPLASH_PEG_STATE_ID),
-          tx.object(SPLASH_ANCHOR_CAP_ID),
-          tx.object(SPLASH_CAP_REGISTRY_ID),
-          tx.pure.u64(usdcDeviationPpm),
-          tx.pure.u64(usdtDeviationPpm),
-          tx.object('0x6'),
-        ],
-      });
-    }
-    const payments = paymentObjects.map((payment) =>
-      tx.moveCall({
-        target: `${SPLASH_CUSTODY_PACKAGE_ID}::settlement::new_payment`,
-        arguments: [tx.pure.address(payment.recipient), tx.pure.u64(payment.amount)],
-      }),
-    );
-    const paymentVector = tx.makeMoveVec({
-      type: `${SPLASH_CUSTODY_PACKAGE_ID}::settlement::Payment`,
-      elements: payments,
-    });
-    // AdminCap and BusinessAccount are GONE from this call, and that is the
-    // whole point. They were owned by two different addresses (cold multisig and
-    // tenant), and a Sui transaction may only name owned objects belonging to
-    // its sender — so the old `settle_batch` could not be signed by anyone.
-    // The delegation carries the tenant's identity and their rate limit, and the
-    // operator owns it, so one signer suffices.
-    tx.moveCall({
-      target: `${SPLASH_CUSTODY_PACKAGE_ID}::settlement::settle_sui_batch_delegated`,
-      typeArguments: [DEEPBOOK_QUOTE_TYPE],
-      arguments: [
-        tx.object(SPLASH_TREASURY_ID),
-        tx.object(SPLASH_PAYOUT_DELEGATION_ID),
-        tx.object(SPLASH_PEG_STATE_ID),
-        tx.object(SPLASH_COMPLIANCE_CONFIG_ID),
-        tx.object(DEEPBOOK_POOL_ID),
-        paymentVector,
-        tx.pure.u64(custodyRateBps(paymentObjects.map((p) => p.amount))),
-        tx.object('0x6'),
-      ],
-    });
-
-    const result = await executeSdkTransaction(tx);
-    return {
-      digest: result.digest,
-      packageId: SPLASH_PACKAGE_ID,
-      treasuryId: SPLASH_TREASURY_ID,
-    };
-  }
-
-  const ptbArgs = ['client', 'ptb'];
-  if (pegAttestation.push) {
-    // 1. Attest the MEASURED peg reading, atomically with settle_batch below.
-    ptbArgs.push(
-      '--move-call',
-      `${SPLASH_PACKAGE_ID}::peg_monitor::update_peg`,
-      `@${SPLASH_PEG_STATE_ID}`,
-      `@${SPLASH_ANCHOR_CAP_ID}`,
-      `@${SPLASH_CAP_REGISTRY_ID}`,
-      usdcDeviationPpm,
-      usdtDeviationPpm,
-      '@0x6',
-    );
-  }
-
-  paymentObjects.forEach((payment, index) => {
-    ptbArgs.push(
-      '--move-call',
-      `${SPLASH_CUSTODY_PACKAGE_ID}::settlement::new_payment`,
-      `@${payment.recipient}`,
-      payment.amount.toString(),
-      '--assign',
-      `payment_${index}`,
-    );
-  });
-
-  ptbArgs.push(
-    '--make-move-vec',
-    `<${SPLASH_CUSTODY_PACKAGE_ID}::settlement::Payment>`,
-    `[${paymentObjects.map((_, index) => `payment_${index}`).join(',')}]`,
-    '--assign',
-    'payments',
-    // No AdminCap and no BusinessAccount: they were owned by two different
-    // addresses, which made the old settle_batch unsignable by anyone. The
-    // delegation carries the tenant's identity and rate limit, and the operator
-    // owns it, so one signature is enough.
-    '--move-call',
-    `${SPLASH_CUSTODY_PACKAGE_ID}::settlement::settle_sui_batch_delegated`,
-    `<${DEEPBOOK_QUOTE_TYPE}>`,
-    `@${SPLASH_TREASURY_ID}`,
-    `@${SPLASH_PAYOUT_DELEGATION_ID}`,
-    `@${SPLASH_PEG_STATE_ID}`,
-    `@${SPLASH_COMPLIANCE_CONFIG_ID}`,
-    `@${DEEPBOOK_POOL_ID}`,
-    'payments',
-    custodyRateBps(paymentObjects.map((p) => p.amount)).toString(),
-    '@0x6',
-    '--gas-budget',
-    gasBudget,
-    '--json',
-  );
-
-  console.log('[Sui Batch Settlement] Calling sui client call with:', {
-    package: SPLASH_PACKAGE_ID,
-    module: 'settlement',
-    function: 'settle_sui_batch',
-    rateBps: custodyRateBps(paymentObjects.map((p) => p.amount)),
-    targetCurrency: input.targetCurrency,
-    args: ptbArgs,
-  });
-
-  const { stdout, stderr } = await runSuiCommand(ptbArgs);
-
-  console.log('[Sui Batch Settlement] CLI stdout:', stdout.substring(0, 500));
-  console.log('[Sui Batch Settlement] CLI stderr:', stderr.substring(0, 500));
-
-  const jsonStart = stdout.indexOf('{');
-
-  if (jsonStart === -1) {
-    throw new Error(`Sui CLI did not return JSON output. stdout: ${stdout.substring(0, 200)}, stderr: ${stderr.substring(0, 200)}`);
-  }
-
-  const output = JSON.parse(stdout.slice(jsonStart)) as SuiCliCallOutput;
-  const digest = output.digest ?? output.effects?.transactionDigest ?? null;
-  const status = output.effects?.status?.status;
-
-  if (!digest || status !== 'success') {
-    const errorMsg = humanizeSuiError(output.effects?.status?.error, stderr);
-    console.error('[Sui Batch Settlement] Transaction failed:', errorMsg);
-    throw new Error(errorMsg);
-  }
-
-  console.log('[Sui Batch Settlement] Transaction successful:', digest);
 
   return {
     digest,

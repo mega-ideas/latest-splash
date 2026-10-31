@@ -14,18 +14,17 @@ import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519';
  *
  * Two holes it closes:
  *
- * - simulate. recordBatchSettlementOnSui and recordSingleTransferOnSui took
- *   the simulate branch before anything asked for the custody package, so on
- *   mainnet with SUI_SETTLEMENT_MODE=simulate, or SUI_BATCH_SETTLEMENT_MODE=
- *   simulate beside live settlement, the retired batch path returned a SIM_
- *   digest and the batch route marked the run SETTLED for a payout that never
- *   happened.
+ * - simulate. recordSingleTransferOnSui (and the since-removed custody batch
+ *   settlement) took the simulate branch before anything asked for the custody
+ *   package, so on mainnet with SUI_SETTLEMENT_MODE=simulate the retired path
+ *   returned a SIM_ digest and the route marked the payment SETTLED for a
+ *   payout that never happened.
  * - the legacy fallback. custodyPackageIdOrThrow returned SPLASH_PACKAGE_ID as
  *   "the custody package" whenever SPLASH_CORE_PACKAGE_ID was unset, which
  *   production on mainnet allows, so custody calls were built against the v2
  *   core package instead of stopping at a named refusal.
  *
- * Testnet keeps both paths, simulate included.
+ * Testnet keeps the single-transfer path, simulate included.
  *
  * Red before green: on the tree before the fix the mainnet simulate cases
  * resolve with a SIM_ digest, and the live case fails on a missing treasury
@@ -65,7 +64,6 @@ async function withEnv(vars, fn) {
 }
 
 const ROW = { address: '0x' + '12'.repeat(32), amount: '25.00', name: 'Ana Cruz' };
-const batch = () => settlement.recordBatchSettlementOnSui({ batchId: 'batch_retired', rows: [ROW], totalUsd: 25, targetCurrency: 'PHP' });
 const single = () => settlement.recordSingleTransferOnSui({
   transferId: 'tx_retired',
   recipient: ROW.address,
@@ -75,19 +73,9 @@ const single = () => settlement.recordSingleTransferOnSui({
 });
 const RETIRED = /retired from the mainnet path/;
 
-const SIMULATE_MODES = [
-  ['SUI_SETTLEMENT_MODE=simulate', { SUI_SETTLEMENT_MODE: 'simulate' }],
-  ['SUI_BATCH_SETTLEMENT_MODE=simulate beside live settlement', { SUI_SETTLEMENT_MODE: 'live', SUI_BATCH_SETTLEMENT_MODE: 'simulate' }],
-];
-
-test('on mainnet the delegated batch path fails closed in simulate mode instead of reporting a SIM_ settlement', async () => {
-  for (const [label, modes] of SIMULATE_MODES) {
-    await withEnv({ SUI_NETWORK: 'mainnet', ...modes }, async () => {
-      const outcome = await batch().then((result) => ({ result }), (error) => ({ error }));
-      assert.ok(outcome.error, `${label}: a batch on mainnet must not "settle", but returned ${outcome.result?.digest}`);
-      assert.match(outcome.error.message, RETIRED, label);
-    });
-  }
+test('the custody batch settlement is gone: nothing can report a batch as SETTLED from the shared pool', () => {
+  // Removed with the v1 payout-run route (tests/custody-batch-retired.test.mjs).
+  assert.equal(settlement.recordBatchSettlementOnSui, undefined);
 });
 
 test('on mainnet the custody single-transfer path fails closed in simulate mode too', async () => {
@@ -111,14 +99,7 @@ test('on mainnet the legacy package is never taken for the custody package, even
   });
 });
 
-test('testnet keeps the paths: simulate still records a labelled SIM_ settlement', async () => {
-  for (const [label, modes] of SIMULATE_MODES) {
-    await withEnv({ SUI_NETWORK: 'testnet', ...modes }, async () => {
-      const result = await batch();
-      assert.match(result.digest, /^SIM_/, label);
-      assert.equal(result.simulated, true, label);
-    });
-  }
+test('testnet keeps the single-transfer path: simulate still records a labelled SIM_ settlement', async () => {
   await withEnv({ SUI_NETWORK: 'testnet', SUI_SETTLEMENT_MODE: 'simulate' }, async () => {
     assert.match((await single()).digest, /^SIM_/);
   });

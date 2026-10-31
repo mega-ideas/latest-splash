@@ -96,33 +96,6 @@ export type TransferIntentRecord = {
   updatedAt: string;
 };
 
-export type BatchRecord = {
-  id: string;
-  /** The org this run belongs to. Required — `accountId` below is an
-   *  on-chain object id that falls back to a value shared across orgs, so it
-   *  cannot serve as the ownership boundary. */
-  orgId: string;
-  state: TransferIntentState;
-  rowCount: number;
-  acceptedRows: number;
-  blockedRows: number;
-  totalAmount: string;
-  digest: string | null;
-  packageId: string | null;
-  explorer: { suiVisionTxUrl: string | null; suiScanTxUrl: string | null };
-  demo?: boolean;
-  /** The on-chain BusinessAccount this run settles from. Recorded, not the
-   *  scoping key — see `orgId` above. */
-  accountId?: string;
-  /** The proposal that authorized this run, when it needed a second
-   *  approver. */
-  proposalId?: string;
-  /** Replay key. A repeat authorization with the same key returns this record
-   *  instead of paying every recipient a second time. */
-  idempotencyKey?: string;
-  createdAt: string;
-};
-
 export type RecipientRecord = {
   id: string;
   /** The org this beneficiary belongs to.
@@ -353,7 +326,7 @@ export type AuditReceipt = {
 
 export type TransactionRecord = {
   id: string;
-  kind: 'transfer' | 'batch';
+  kind: 'transfer';
   state: TransferIntentState;
   module: string;
   functionName: string;
@@ -366,7 +339,6 @@ export type TransactionRecord = {
 
 type OperationStore = {
   transfers: Map<string, TransferIntentRecord>;
-  batches: Map<string, BatchRecord>;
   recipients: Map<string, RecipientRecord>;
   invoices: Map<string, InvoiceRecord>;
   ledgerEntries: Map<string, LedgerEntry>;
@@ -381,7 +353,6 @@ const globalStore = globalThis as typeof globalThis & { splashOperations?: Opera
 
 export const operations = globalStore.splashOperations ?? {
   transfers: new Map<string, TransferIntentRecord>(),
-  batches: new Map<string, BatchRecord>(),
   recipients: new Map<string, RecipientRecord>(),
   invoices: new Map<string, InvoiceRecord>(),
   ledgerEntries: new Map<string, LedgerEntry>(),
@@ -511,67 +482,6 @@ export function createTransferIntent(input: {
 // gone rather than deprecated: a scoped replacement beside an unscoped original
 // is a choice somebody makes wrongly at 2am. Use `lib/server/transfers-store.ts`,
 // where every read takes an orgId and cross-tenant reach is spelled `*ForStaff`.
-
-/**
- * Build a payout-run record. Does NOT decide where it lives — the caller
- * claims it through `lib/server/batches-store.ts`, where the replay key is
- * enforced by a unique index rather than a lookup that a restart empties.
- *
- * Nor does it put the record anywhere. It used to add it to the in-process
- * map, and with no database the claim then looked for a run holding the key
- * and found this one: every first submission came back as an idempotent
- * replay, and nothing settled.
- */
-export function buildBatch(input: {
-  orgId: string;
-  rowCount: number;
-  acceptedRows: number;
-  blockedRows: number;
-  totalAmount: string;
-  accountId?: string;
-  idempotencyKey?: string;
-  proposalId?: string;
-}) {
-  const record: BatchRecord = {
-    id: createId('batch'),
-    orgId: input.orgId,
-    state: 'QUEUED',
-    rowCount: input.rowCount,
-    acceptedRows: input.acceptedRows,
-    blockedRows: input.blockedRows,
-    totalAmount: input.totalAmount,
-    digest: null,
-    packageId: null,
-    explorer: explorerLinks(null),
-    accountId: input.accountId,
-    idempotencyKey: input.idempotencyKey,
-    proposalId: input.proposalId,
-    createdAt: new Date().toISOString(),
-  };
-  return record;
-}
-
-/**
- * Find a batch already created for this (account, idempotency key) pair.
- *
- * A batch pays every recipient out of the SHARED SettlementPool, so a replayed
- * authorization — a dropped response, a double-click, a proxy retry — pays
- * everyone twice. Returning the existing record makes the second call a no-op
- * rather than a second payroll run.
- */
-// `readBatch`, `readBatchFor`, `updateBatch`, `listBatches` and
-// `findBatchByIdempotencyKey` used to live here over a process-global map.
-//
-// `readBatch(id)` and `listBatches()` were unscoped — any tenant's payout run,
-// row counts, totals and settlement digest, to anyone signed in. And the
-// idempotency lookup, the guard that stops a re-submitted file paying every
-// recipient twice, was a read of that same map: a restart between the two
-// submissions emptied it, and restarts are exactly when an operator retries.
-//
-// They are gone rather than deprecated. Use `lib/server/batches-store.ts`,
-// where every read takes an orgId, cross-tenant reach is spelled
-// `listBatchesForStaff`, and the replay key is claimed by a unique index rather
-// than consulted by a lookup.
 
 /**
  * Build a beneficiary record. Does NOT decide where it lives — the caller
