@@ -100,6 +100,9 @@ export const RATE_LIMITS = {
   complianceReadUser: { bucket: 'compliance-read:user', limit: 120, windowMs: HOUR },
   // One payment's evidence is a chain read and a PDF; an accountant exports a quarter's at once.
   controlsEvidenceUser: { bucket: 'controls-evidence:user', limit: 600, windowMs: HOUR },
+  // Transfer: a search by registered name is a read of other businesses' names (capped so it cannot list them); a send is an email from Splash.
+  transferSearchUser: { bucket: 'transfer-search:user', limit: 60, windowMs: HOUR },
+  receiptSendUser: { bucket: 'receipt-send:user', limit: 30, windowMs: HOUR },
   kybSessionOrg: { bucket: 'kyb-session:org', limit: 20, windowMs: HOUR },
   // Each request sends a WhatsApp message; the per-subject cooldown stops a
   // double-click, this stops a loop.

@@ -335,7 +335,8 @@ test('the sealed audit bundle is the server’s to make, and fails closed in pro
   assert.equal(demoStoreOnly.code, 'record_unavailable', 'a demo blob is refused in production even when the seal is live');
   const demoSealOnly = await makePaymentRecorder({ seal: demoSeal, store: liveStore, env: prod })(record);
   assert.equal(demoSealOnly.code, 'record_unavailable', 'a demo seal is refused in production even when the store is live');
-  assert.equal(stored.filter((c) => c === 'ct').length, 3, 'only ciphertext ever reaches the store');
+  assert.equal(stored.length, 1, 'a demo seal never reaches the store, and only ciphertext ever does');
+  assert.ok(stored.every((c) => c === 'ct'));
 
   const ok = await makePaymentRecorder({ seal: live, store: liveStore, env: prod })(record);
   assert.equal(ok.ok, true, JSON.stringify(ok));

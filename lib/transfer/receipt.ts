@@ -51,6 +51,8 @@ export type ReceiptInput = {
   partnerReference?: { partner: string; reference: string } | null;
   signedPartners: readonly string[];
   reference?: string | null;
+  /** A bank payout: where the bank leg is, as the partner reports it. */
+  bankCredit?: 'pending' | 'credited' | 'failed' | null;
 };
 
 export type PaymentReceipt = {
@@ -77,6 +79,7 @@ export type PaymentReceipt = {
   network: 'mainnet' | 'testnet';
   verifyUrl: string | null;
   reference: string | null;
+  bankCredit: 'pending' | 'credited' | 'failed' | null;
 };
 
 /** SPL-YYMM-XXXXXX: the month of the payment and six hex digits of its reference's hash. Stable for a payment. */
@@ -121,6 +124,7 @@ export function buildReceipt(input: ReceiptInput): PaymentReceipt {
     network: input.network,
     verifyUrl: input.suiDigest ? suiScanTxUrlOn(input.network, input.suiDigest) : null,
     reference: input.reference ?? null,
+    bankCredit: input.bankCredit ?? null,
   };
 }
 
@@ -158,6 +162,7 @@ export function receiptRows(r: PaymentReceipt): ReceiptRow[] {
   if (r.approvers.length > 0) rows.push({ label: 'Approved by', value: r.approvers.map((a) => a.name).join(', ') });
   if (r.partner) rows.push({ label: `${r.partner.name} reference`, value: r.partner.reference });
   if (r.reference) rows.push({ label: 'Reference', value: r.reference });
+  if (r.bankCredit) rows.push({ label: 'Bank credit', value: r.bankCredit === 'credited' ? 'Credited to the account' : r.bankCredit === 'failed' ? 'Not credited: the USDC is returned to your wallet' : 'On its way to the account' });
   if (r.suiDigest) rows.push({ label: 'Sui transaction', value: short(r.suiDigest) });
   return rows;
 }
@@ -195,7 +200,7 @@ export function mailtoUrl(input: { to: string; subject: string; body: string }):
 export function accountantMessage(r: PaymentReceipt, link: string | null, input: { business: string }): { subject: string; text: string } {
   return {
     subject: `Receipt ${r.receiptNo} · ${input.business}`,
-    text: `${input.business} has sent you the receipt of a payment, for your records.\n\n${receiptShareText(r, link)}`,
+    text: `${input.business} has sent you the receipt of a payment, for your records.\n\n${receiptShareText(r, null)}${link ? `\n\n${link}` : ''}`,
   };
 }
 

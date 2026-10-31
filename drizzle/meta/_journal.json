@@ -449,6 +449,13 @@
       "when": 1794009600000,
       "tag": "0063_invoices_create_once",
       "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1794096000000,
+      "tag": "0064_transfer_payments",
+      "breakpoints": true
     }
   ]
 }

@@ -2573,3 +2573,66 @@ export const payableInvoices = pgTable('payable_invoices', {
   // payable_invoices_number_once_unique (0057, by the typed supplier name) and
   // payable_invoices_recipient_number_once_unique (0058, by who is paid).
 ]);
+
+/**
+ * A payment started from Transfer (migration 0064): to a Splash business or a
+ * saved wallet or exchange recipient. The client's key is unique per business.
+ */
+export const walletTransfers = pgTable('wallet_transfers', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  clientKey: text('client_key').notNull(),
+  requestHash: text('request_hash').notNull(),
+  paymentRef: text('payment_ref').notNull(),
+  route: text('route').notNull(),
+  payeeKind: text('payee_kind').notNull(),
+  recipientId: text('recipient_id'),
+  businessId: text('business_id'),
+  payeeName: text('payee_name').notNull(),
+  payeeMasked: text('payee_masked'),
+  payeeCountry: text('payee_country'),
+  address: text('address').notNull(),
+  amountMinor: bigint('amount_minor', { mode: 'bigint' }).notNull(),
+  maxFeeMinor: bigint('max_fee_minor', { mode: 'bigint' }).notNull(),
+  feeKind: integer('fee_kind').notNull(),
+  reference: text('reference'),
+  signingRequestId: text('signing_request_id').references(() => walletSigningRequests.id),
+  askId: text('ask_id').references(() => walletApprovalAsks.id),
+  requestedBy: text('requested_by').notNull(),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex('wallet_transfers_org_key_unique').on(table.orgId, table.clientKey),
+  uniqueIndex('wallet_transfers_org_ref_unique').on(table.orgId, table.paymentRef),
+  index('wallet_transfers_org_created_idx').on(table.orgId, table.createdAt),
+  index('wallet_transfers_request_idx').on(table.signingRequestId),
+]);
+
+/** A link made to share a receipt (migration 0064). Only the token's hash is kept. */
+export const paymentReceiptShares = pgTable('payment_receipt_shares', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  paymentRef: text('payment_ref').notNull(),
+  tokenHash: text('token_hash').notNull(),
+  createdBy: text('created_by').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex('payment_receipt_shares_hash_unique').on(table.tokenHash),
+  index('payment_receipt_shares_org_ref_idx').on(table.orgId, table.paymentRef),
+]);
+
+/** The self-billed MyInvois file made for a payment, once per payment (migration 0064). */
+export const paymentEInvoices = pgTable('payment_einvoices', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  paymentRef: text('payment_ref').notNull(),
+  document: jsonb('document').notNull(),
+  sha256: text('sha256').notNull(),
+  guideline: text('guideline').notNull(),
+  generatedBy: text('generated_by').notNull(),
+  generatedAt: timestamp('generated_at', { withTimezone: true }).notNull(),
+  history: jsonb('history').notNull().default([]),
+}, (table) => [
+  uniqueIndex('payment_einvoices_org_ref_unique').on(table.orgId, table.paymentRef),
+]);
