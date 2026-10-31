@@ -58,6 +58,9 @@ test('a self-custody wallet reads: not screened, not proven, not approved, ready
   assert.equal(stateOf(wallet({ delivery: { deliveryKind: 'SELF_CUSTODY', ownershipStatus: 'revoked' } })).label, 'Proof withdrawn');
   assert.equal(stateOf(wallet({ screeningVerdict: null })).step, 'screening');
   assert.equal(stateOf(wallet({ screeningVerdict: 'ERROR' })).label, 'Screening did not complete');
+  // A screening that failed is a failure and reads as one; one not yet done is attention, not an alarm.
+  assert.equal(stateOf(wallet({ screeningVerdict: 'ERROR' })).tone, 'bad');
+  assert.equal(stateOf(wallet({ screeningVerdict: null })).tone, 'wait');
   assert.equal(stateOf(wallet({ approvedAt: null })).step, 'approval');
   assert.equal(stateOf(wallet({ approvedAt: null })).label, 'Waiting for an owner’s approval');
   const ready = stateOf(wallet());

@@ -4,6 +4,7 @@ import test from 'node:test';
 
 import { customerRefusal } from '../lib/server/wallet-refusal.ts';
 import { settingsWallet } from '../lib/settings-page/wallet-gate.ts';
+import { statTones } from '../lib/history-page/entries.ts';
 
 /**
  * v2 Phase 3, brief 5.9, second pass: what Recipients, History, Settings and
@@ -104,9 +105,12 @@ test('a number in the operating controls is not cut off, and the approvals card 
 /* History and Setup -------------------------------------------------------------- */
 
 test('History colours a count as an alarm only when there is something to look at', () => {
+  assert.deepEqual(statTones({ inProgress: 0, notPaid: 0 }), { inProgress: 'text-[#326273]', notPaid: 'text-[#326273]' });
+  assert.deepEqual(statTones({ inProgress: 2, notPaid: 0 }), { inProgress: 'text-[var(--gold-ink)]', notPaid: 'text-[#326273]' });
+  assert.deepEqual(statTones({ inProgress: 0, notPaid: 1 }), { inProgress: 'text-[#326273]', notPaid: 'text-[var(--error)]' });
   const page = code(read('components/history/HistoryPage.tsx'));
-  assert.match(page, /summary\.notPaid > 0 \? 'text-\[var\(--error\)\]'/);
-  assert.match(page, /summary\.inProgress > 0 \? 'text-\[var\(--gold-ink\)\]'/);
+  assert.match(page, /statTones\(summary\)/);
+  assert.doesNotMatch(page, /gold-ink/, 'a failure never takes the gold accent, and the page does not choose colours beside it');
 });
 
 test('the Setup rail says each step in full, and a step that is done takes less room than one still to do', () => {
