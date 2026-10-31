@@ -22,7 +22,7 @@ import * as schema from '../lib/db/schema.ts';
 import { LAUNCH_SCHEDULE, splashFee } from '../lib/fees/schedule.ts';
 import { buildBusinessMultisig } from '../lib/wallet/business-multisig.ts';
 import { feeChargedFrom, paymentReceiptFor } from '../lib/server/payment-receipts.ts';
-import { makeEInvoice, mintReceiptShare, readEInvoice, readReceiptShare, revokeReceiptShares, E_INVOICE_FRESH_MS, RECEIPT_LINK_TTL_MS } from '../lib/server/receipt-documents.ts';
+import { makeEInvoice, mintReceiptShare, readEInvoice, readReceiptShare, revokeReceiptShares, RECEIPT_LINK_TTL_MS } from '../lib/server/receipt-documents.ts';
 import { receiptRows } from '../lib/transfer/receipt.ts';
 import * as T from '../lib/server/wallet-transfers.ts';
 import { submitPartialSignature, signingInbox } from '../lib/server/wallet-signing.ts';
@@ -190,7 +190,7 @@ async function einvoiceInput(t, over = {}) {
   return { orgId: 'acme', userId: 'u-founder', receipt: r.receipt, payerCountry: r.payerCountry, supplierCountry: r.supplierCountry, details: DETAILS, now: t.w.signing.now(), ...over };
 }
 
-test('the e-invoice is made once, answers the same file again, and is remade only after 72 hours with the old hash kept', async () => {
+test('the e-invoice is made once, answers the same file again, and is remade at once when its details are corrected, with the old hash kept', async () => {
   const t = await setup();
   const input = await einvoiceInput(t);
   const first = await makeEInvoice(t.w.db, input);
@@ -205,11 +205,11 @@ test('the e-invoice is made once, answers the same file again, and is remade onl
   const again = await makeEInvoice(t.w.db, input);
   assert.equal(again.created, false);
   assert.equal(again.eInvoice.sha256, first.eInvoice.sha256);
-  const early = await makeEInvoice(t.w.db, { ...input, refresh: true, now: new Date(input.now.getTime() + E_INVOICE_FRESH_MS - 1) });
-  assert.equal(early.created, false, 'a file under 72 hours old is kept');
-  const later = await makeEInvoice(t.w.db, { ...input, refresh: true, now: new Date(input.now.getTime() + E_INVOICE_FRESH_MS + 1) });
-  assert.equal(later.created, true);
-  assert.notEqual(later.eInvoice.sha256, first.eInvoice.sha256, 'a fresh issue date is a different file');
+  // A typo in the TIN must not block a corrected file for three days: a remake is allowed at once, and the replaced file's hash is kept.
+  const later = await makeEInvoice(t.w.db, { ...input, refresh: true, details: { ...input.details, buyer: { ...input.details.buyer, tin: 'C20880050010' } }, now: new Date(input.now.getTime() + 60_000) });
+  assert.equal(later.created, true, 'a corrected file is remade at once');
+  assert.notEqual(later.eInvoice.sha256, first.eInvoice.sha256, 'the corrected details are a different file');
+  assert.match(JSON.stringify(later.eInvoice.document), /C20880050010/);
   const [row] = await t.w.db.select().from(schema.paymentEInvoices);
   assert.equal(row.history.length, 1);
   assert.equal(row.history[0].replacedSha256, first.eInvoice.sha256);
