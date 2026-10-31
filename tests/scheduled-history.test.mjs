@@ -93,6 +93,16 @@ test('a batch prepared for a scheduled run is shown once, as the run', () => {
   assert.match(historyCsv(entries), /Scheduled payment,Monthly suppliers/);
 });
 
+test('a run that ended unpaid never says it was approved or paid, and a failed one points at the tab, not at "no payment"', () => {
+  const lapsed = buildHistory({ ...none, scheduled: [run({ status: 'lapsed', receiptPath: null })] })[0];
+  assert.doesNotMatch(lapsed.detail, /Approved by|Paid automatically/);
+  assert.match(lapsed.detail, /Ask me first/);
+  const failed = buildHistory({ ...none, scheduled: [run({ status: 'failed', ranAs: 'auto', mode: 'auto', receiptPath: null })] })[0];
+  assert.doesNotMatch(failed.detail, /Paid automatically/);
+  assert.match(failed.noReceipt, /Scheduled tab/);
+  assert.doesNotMatch(failed.noReceipt, /No payment was made/, 'part of it may have been paid');
+});
+
 test('without scheduled runs History is as it was', () => {
   assert.deepEqual(buildHistory(none), []);
 });
