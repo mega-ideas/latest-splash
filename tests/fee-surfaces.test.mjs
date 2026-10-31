@@ -283,9 +283,9 @@ test('the quote route takes the destination from the request, and the transfer f
   assert.match(route, /destination_required/, 'and refuses a quote that does not say');
   assert.match(route, /QuoteDestinationError/, 'and names a destination it cannot price yet');
   assert.match(route, /calculateQuote\([^)]*\{ businessId: businessAccountId, destination \}\)/);
-  const step = read('components/transfer/StepQuote.tsx');
-  assert.match(step, /destination: destinationForRecipient\(\{ rail: recipientRail \}\)/, 'the review says where its payment goes');
-  assert.match(step, /const recipientRail = state\.recipient\.rail;/);
+  const step = read('components/transfer/StepReview.tsx');
+  assert.match(step, /\/api\/wallet\/transfers\/quote/, 'a payment to a business or a wallet is quoted as the kind its payee is');
+  assert.match(step, /\/api\/wallet\/payouts\/quotes/, 'a bank payout is quoted by the payout route');
   const authorize = read('app/api/transfers/authorize/route.ts');
   assert.match(authorize, /calculateQuote\([^)]*\{ businessId: businessAccountId, destination: BANK_DESTINATION \}\)/, 'authorize re-quotes the bank payout it sends');
 });
@@ -303,10 +303,9 @@ test('no surface quotes Splash fee on a kind it typed in: every quote goes throu
   assert.deepEqual(offenders, []);
 });
 
-test('the delivery step prices the route it knows, and says which are priced when they open in Phase 2', () => {
-  const step = read('components/transfer/StepDelivery.tsx');
-  assert.doesNotMatch(step, /crypto wallet/i, 'this flow pays a bank account; a Sui wallet is paid from Wallet');
-  assert.match(step, /use Wallet/);
-  assert.match(step, /PHASE_2_FEE_NOTE/, 'the Phase 2 routes say their fee is set when they open');
-  assert.match(step, /option\.tier === 'PAYOUT_ONLY' \? pricing\.bankFeePhrase : PHASE_2_FEE_NOTE/);
+test("the first step shows each payee kind's price from the published schedule", () => {
+  const step = read('components/transfer/StepWho.tsx');
+  assert.match(step, /usePublishedFees\(\)/);
+  assert.match(step, /kindPrice\(fees\.schedule, FEE_KIND\.BANK_PAYOUT\)/);
+  assert.doesNotMatch(step, /\d\s?%/, 'no rate is typed into the card');
 });

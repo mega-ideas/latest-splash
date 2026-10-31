@@ -69,5 +69,7 @@ test('receipt exposes a collapsed independent settlement proof drawer', async ()
   assert.match(drawer, /Walrus blob/);
   assert.match(drawer, /Seal policy/);
   assert.match(drawer, /Hash match/);
-  assert.match(receiptStep, /<SettlementProofDrawer/);
+  // The Transfer receipt is the payment's own rows with a link that opens the transaction on Sui (v2 brief 5.4); the drawer stays for receipts of earlier payments.
+  assert.match(receiptStep, /Check this payment on Sui/);
+  assert.match(receiptStep, /rel="noopener noreferrer"/);
 });

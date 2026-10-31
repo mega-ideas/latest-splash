@@ -82,10 +82,9 @@ test('the unverified-business refusal still stops the loop before any tier is re
   assert.match(route, /return NextResponse\.json\(\{ extraction, suggestion: refused \}\);/);
 });
 
-test('the transfer page prefills the server-gated tier from ?invoiceId=, not its own PHP mapping', async () => {
-  const page = await source('app/dashboard/transfer/page.tsx');
-  assert.doesNotMatch(page, /'SWEEP_ACCOUNT'/, 'the page names no fund-holding tier of its own');
-  assert.match(page, /deliveryTier: invoice\.recommendedDeliveryTier \?\? 'PAYOUT_ONLY'/);
+test('the transfer flow names no fund-holding tier, and the invoice read answers the gated one', async () => {
+  const page = await source('components/transfer/TransferFlow.tsx');
+  assert.doesNotMatch(page, /SWEEP_ACCOUNT|STORED_BALANCE/, 'the flow names no fund-holding tier of its own: it pays out, from the Splash Wallet');
 
   // The page is a client component and cannot read the custody phase, so the
   // invoice read answers it — through the same function extract-invoice uses.

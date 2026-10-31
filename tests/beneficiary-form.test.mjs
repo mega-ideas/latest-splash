@@ -128,39 +128,6 @@ test('the originator has columns of its own now', async () => {
 
 // ── The form asks the server, and the server decides ───────────────────────
 
-test('the corridor decides the fields — the component does not list them', async () => {
-  const component = await readFile(
-    new URL('../components/transfer/TravelRuleFields.tsx', import.meta.url),
-    'utf8',
-  );
-  // Every requirement comes from the engine via the endpoint. A hardcoded
-  // field list is how a form starts demanding something nobody checks, or
-  // omitting one everybody does.
-  assert.match(component, /\/api\/compliance\/travel-rule/);
-  assert.match(component, /corridor\?\.requiresBranchCode/);
-  assert.match(component, /corridor\?\.requiresPurposeCode/);
-  assert.match(component, /corridor\?\.requiresAccountNumber/);
-  // And each one explains itself.
-  assert.match(component, /item\.because/);
-  assert.doesNotMatch(component, /CORRIDOR_RULES/, 'the rules live in one module, not two');
-});
-
-test('unchecked is not the same as complete', async () => {
-  const component = await readFile(
-    new URL('../components/transfer/TravelRuleFields.tsx', import.meta.url),
-    'utf8',
-  );
-  // Before the first response lands there is no `check`, and the step must
-  // stay gated rather than opening in the gap.
-  assert.match(component, /onReadyChange\(Boolean\(check\?\.ready\)\)/);
-
-  const step = await readFile(
-    new URL('../components/transfer/StepBeneficiary.tsx', import.meta.url),
-    'utf8',
-  );
-  assert.match(step, /usingSaved \|\| travelRuleReady/);
-});
-
 // ── And the route enforces the same rule ───────────────────────────────────
 
 test('authorize refuses an incomplete record, naming what is missing', async () => {

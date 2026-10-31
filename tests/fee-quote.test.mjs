@@ -325,6 +325,8 @@ test('the payment the server builds carries maxFeeMinor, and the shown fee bound
   const authorize = readFileSync('app/api/transfers/authorize/route.ts', 'utf8');
   assert.match(authorize, /maxFeeMinor/);
   assert.match(authorize, /fee_above_shown/, 'a fee above the one shown is refused before anything moves');
-  const step = readFileSync('components/transfer/StepQuote.tsx', 'utf8');
+  const step = readFileSync('components/transfer/StepReview.tsx', 'utf8');
   assert.match(step, /maxFeeMinor/, 'the review sends the fee it showed');
+  const service = readFileSync('lib/server/wallet-transfers.ts', 'utf8');
+  assert.match(service, /fee_changed/, 'a fee above the one shown is refused with the new fee, before anything is made');
 });

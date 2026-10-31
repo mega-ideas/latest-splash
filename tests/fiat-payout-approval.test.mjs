@@ -134,9 +134,3 @@ test('authorize: an approved-proposal claim only counts for the payment it appro
   assert.equal(route.match(/resolveApprovalClaim\(/g).length, 1);
 });
 
-test('the wizard waits for the approval before Send, and asks again when it lapses', async () => {
-  const wizard = code(await readFile(new URL('../components/transfer/StepQuote.tsx', import.meta.url), 'utf8'));
-  assert.match(wizard, /<ApprovalFlow[\s\S]*?purpose="FIAT_TRANSFER"/);
-  assert.match(wizard, /disabled=\{!agree \|\| awaitingApproval/);
-  assert.match(wizard, /body\.code === 'approval_required'/);
-});

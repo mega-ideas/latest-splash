@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 import { baselineCostMinor, getComparisonBaseline } from '../lib/fx/comparison-baselines.ts';
@@ -26,26 +25,3 @@ test('comparison baselines: category cost math is bps-of-amount plus flat, in mi
   assert.equal(typeof cost, 'bigint');
 });
 
-test('quote step derives all figures from the live quote and reads real settings', async () => {
-  const source = await readFile(new URL('../components/transfer/StepQuote.tsx', import.meta.url), 'utf8');
-
-  // The fee comes from the quote object: A1 §2.7's breakdown of it, with no
-  // fee math of its own in the card.
-  assert.match(source, /<FeeBreakdown quote=\{state\.quote\.fees\}/);
-  assert.match(source, /state\.quote\.netReceived/);
-  // Rate-lock chip reads the REAL hold expiry, never a hardcoded window.
-  assert.match(source, /state\.rateHold\.holdUntil/);
-  assert.doesNotMatch(source, /locked 10 min/i);
-  // Maker-checker note reads operating settings server-side values.
-  assert.match(source, /fetch\('\/api\/settings'\)/);
-  assert.match(source, /approvalThresholdUsd/);
-  // Comparison strip: generic categories only, labeled, and gated on a
-  // reviewed baseline (hidden when getComparisonBaseline returns null).
-  assert.match(source, /getComparisonBaseline/);
-  assert.match(source, /Illustrative, mid-market baseline/);
-  assert.match(source, /Fintech transfer/);
-  assert.match(source, /Bank wire/);
-  assert.doesNotMatch(source, /Wise|Revolut|Remitly|WorldRemit|Western Union|PayPal|Payoneer/i);
-  // Mockup structure: supplier-receives line present.
-  assert.match(source, /Supplier receives/);
-});

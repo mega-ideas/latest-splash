@@ -119,7 +119,7 @@ test('the approval and invoice copy send people to Wallet, not Send USDC', async
   const invoice = await source('components/invoices/PayInvoices.tsx');
   assert.doesNotMatch(invoice, /Send USDC/);
 
-  for (const file of ['components/transfer/StepDelivery.tsx', 'lib/server/quote.ts']) {
+  for (const file of ['components/transfer/StepReview.tsx', 'lib/server/quote.ts']) {
     assert.doesNotMatch(await source(file), /use Send USDC/, `${file} names the removed page`);
   }
 });
@@ -175,8 +175,8 @@ test('the named failure states use --error, and attention states --warn', async 
   assert.doesNotMatch(proof, GOLD, 'a proof that did not verify is an error, not a highlight');
   assert.match(proof, /XCircle className="h-4 w-4 text-\[var\(--error\)\]"/);
 
-  const step = await source('components/transfer/StepBeneficiary.tsx');
-  assert.match(step, /recipientError \? \(\s*<div[^>]*--error-bg/);
+  const step = await source('components/transfer/StepReview.tsx');
+  assert.match(step, /role="alert" className="flex items-start gap-2 rounded-xl border border-\[var\(--error\)\]\/40 bg-\[var\(--error-bg\)\]/, 'a quote that failed is an error');
 
   const recipients = await source('app/dashboard/recipients/page.tsx');
   assert.match(recipients, /screeningVerdict === 'ERROR'\s*\?\s*'[^']*--error-bg/, 'Screening failed is an error');
@@ -216,9 +216,10 @@ test('active quote holds are listed on Transfer, newest first, expired ones left
   assert.equal(holdTimeLeft('2026-10-26T10:30:00Z', now), '22h 30m');
   assert.equal(holdTimeLeft('2026-10-25T12:00:30Z', now), 'under a minute');
 
-  const page = await source('app/dashboard/transfer/page.tsx');
-  assert.match(page, /fetch\('\/api\/rate-holds'\)/, 'the org-scoped list the old page read');
-  assert.match(page, /<ActiveRateHolds/);
+  // The Rate holds page is gone (brief 5.1); the hold is shown where it is used, on the review, from the quote's own expiry.
+  const review = await source('components/transfer/StepReview.tsx');
+  assert.match(review, /Rate held for/);
+  assert.match(review, /Get a new rate/);
 });
 
 test('Treasury does not say it is waiting for a licence while the nav opens it', async () => {

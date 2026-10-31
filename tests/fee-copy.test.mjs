@@ -166,12 +166,14 @@ test('the calculator renders the breakdown from the schedule it is given', async
   assert.match(changed, /0\.10% 1\.00 USDC/, 'a different schedule, a different fee: nothing is typed in');
 });
 
-test('the transfer review shows the breakdown and sends the fee it showed', () => {
-  const step = read('components/transfer/StepQuote.tsx');
-  assert.match(step, /<FeeBreakdown/);
+test('the transfer review shows the fee and sends the fee it showed', () => {
+  const step = read('components/transfer/StepReview.tsx');
+  assert.match(step, /Splash fee/);
+  assert.match(step, /kindLabel\(quote\.kind\)/, 'the fee is shown with its kind');
+  assert.match(step, /maxFeeToSend\(/, 'the fee shown is what goes back as max_fee');
   assert.doesNotMatch(step, /All-in fee/);
   const receiptStep = read('components/transfer/StepReceipt.tsx');
-  assert.match(receiptStep, /fees=\{/);
+  assert.match(receiptStep, /receiptShareText/, "the receipt is the payment's own rows");
   const shared = read('app/receipt/[token]/page.tsx');
   assert.match(shared, /fees=\{intent\.fees\}/, 'the shared receipt shows the breakdown recorded at authorization');
 });
