@@ -3,7 +3,7 @@ export type Overview = {
   role: string;
   walletState: 'ready' | 'none' | 'pending' | 'unavailable' | 'off';
   wallet: string | null;
-  balance: { usdcMinor: string; heldMinor: string; availableMinor: string } | null;
+  balance: { usdcMinor: string; heldMinor: string; availableMinor: string; holdsUnknown: boolean } | null;
   balanceError: string | null;
   signers: { threshold: number; totalWeight: number; singleSigner: boolean; members: Array<{ name: string; you: boolean; weight: number }> } | null;
   canManage: boolean;

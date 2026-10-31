@@ -33,6 +33,8 @@ export default function Migration({ onChanged }: { onChanged: () => void }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  /** A sign-off the server prepared, shown in full before it is signed. */
+  const [pending, setPending] = useState<{ id: string; message: string; row: MigrationRow } | null>(null);
 
   if (data.loading) return <Card id="migration" title="Move to your business wallet"><Loading label="Looking for USDC in personal wallets…" /></Card>;
   if (!data.data) return <Card id="migration" title="Move to your business wallet"><Note>{data.error}</Note></Card>;
@@ -56,20 +58,33 @@ export default function Migration({ onChanged }: { onChanged: () => void }) {
     setRequest(answer.body.request);
   }
 
-  async function signOff(row: MigrationRow) {
+  /** Prepares the statement and shows it. Nothing is signed until the approver has read it and chosen to sign. */
+  async function prepareSignOff(row: MigrationRow) {
     setBusy(row.address);
     setError(null);
     setNotice(null);
+    const made = await call<{ signOff?: { id: string; message: string } }>('/api/wallet/migration/sign-offs', { body: { memberUserId: row.userId, fromAddress: row.address } });
+    setBusy(null);
+    if (!made.ok || !made.body?.signOff) {
+      setError(errorText(made, 'The sign-off could not be prepared.'));
+      return;
+    }
+    setPending({ id: made.body.signOff.id, message: made.body.signOff.message, row });
+  }
+
+  async function signOff() {
+    if (!pending) return;
+    setBusy(pending.row.address);
+    setError(null);
     try {
-      const made = await call<{ signOff?: { id: string; message: string } }>('/api/wallet/migration/sign-offs', { body: { memberUserId: row.userId, fromAddress: row.address } });
-      if (!made.ok || !made.body?.signOff) throw new Error(errorText(made, 'The sign-off could not be prepared.'));
       const key = await call<{ passkey?: { publicKey: string; rpId: string } | null }>('/api/stablecoin/wallet');
       const passkey = key.body?.passkey;
       if (!passkey) throw new Error('Your passkey is not set up on this device yet. Set it up in Settings, then sign off.');
-      const signature = await signApprovalWithPasskey(passkey, made.body.signOff.message);
-      const done = await call(`/api/wallet/migration/sign-offs/${encodeURIComponent(made.body.signOff.id)}`, { body: { signature } });
+      const signature = await signApprovalWithPasskey(passkey, pending.message);
+      const done = await call(`/api/wallet/migration/sign-offs/${encodeURIComponent(pending.id)}`, { body: { signature } });
       if (!done.ok) throw new Error(errorText(done, 'The sign-off was not accepted.'));
-      setNotice(`Signed off. ${names.get(row.userId) ?? 'They'} can move their USDC now.`);
+      setNotice(`Signed off. ${names.get(pending.row.userId) ?? 'They'} can move their USDC now.`);
+      setPending(null);
       data.reload();
     } catch (e) {
       setError(describeSignError(e));
@@ -98,7 +113,7 @@ export default function Migration({ onChanged }: { onChanged: () => void }) {
                     <p className="font-mono text-[13px] tabular-nums text-[#326273]">{r.amount} USDC at {shortAddress(r.address)}</p>
                   </div>
                   {r.action === 'move' ? <PrimaryButton type="button" disabled={busy !== null} onClick={() => void move(r)}><ArrowRight className="h-4 w-4" aria-hidden="true" />{busy === r.address ? 'Preparing…' : 'Move to the business wallet'}</PrimaryButton> : null}
-                  {r.action === 'sign_off' ? <QuietButton type="button" disabled={busy !== null} onClick={() => void signOff(r)}><Fingerprint className="h-4 w-4" aria-hidden="true" />{busy === r.address ? 'Waiting for your passkey…' : 'Sign off their move'}</QuietButton> : null}
+                  {r.action === 'sign_off' ? <QuietButton type="button" disabled={busy !== null} onClick={() => void prepareSignOff(r)}><Fingerprint className="h-4 w-4" aria-hidden="true" />{busy === r.address ? 'Preparing…' : 'Sign off their move'}</QuietButton> : null}
                 </div>
                 {r.action === 'ask' ? <p className="mt-2 text-[13px] text-[#326273]">{you.authority === 'person_in_charge' ? 'Someone else with the highest authority signs off your move: an owner, or another person in charge.' : 'An owner or the person in charge signs this off first. Ask them to open this page.'}</p> : null}
                 {r.action === 'wait' ? <p className="mt-2 text-[13px] text-[#326273]">{names.get(r.userId) ?? 'They'} can move this themselves{members.find((m) => m.address === r.address)?.clearance === 'signed_off' ? ': it is signed off' : ' once it is signed off'}.</p> : null}
@@ -107,6 +122,17 @@ export default function Migration({ onChanged }: { onChanged: () => void }) {
             ))}
           </ul>
         )}
+        {pending ? (
+          <div className="space-y-3 rounded-xl border border-[#0d6370]/30 bg-[#f4f8fa] p-4" role="group" aria-label="Sign-off statement">
+            <p className="text-sm font-bold text-[#0c3e48]">You are signing this statement</p>
+            <pre className="whitespace-pre-wrap break-all rounded-lg bg-white p-3 font-mono text-[13px] leading-5 text-[#0c3e48]">{pending.message}</pre>
+            <p className="text-[13px] leading-5 text-[#326273]">This sign-off is for the wallet above, not for an amount: it covers whatever the wallet holds when it is used, until it expires. Check the From and To addresses match what you expect.</p>
+            <div className="flex flex-wrap gap-2">
+              <PrimaryButton type="button" disabled={busy !== null} onClick={() => void signOff()}><Fingerprint className="h-4 w-4" aria-hidden="true" />{busy === pending.row.address ? 'Waiting for your passkey…' : 'Sign with your passkey'}</PrimaryButton>
+              <QuietButton type="button" disabled={busy !== null} onClick={() => setPending(null)}>Cancel</QuietButton>
+            </div>
+          </div>
+        ) : null}
         {notice ? <Note>{notice}</Note> : null}
         {error ? <Note tone="error">{error}</Note> : null}
         {you.authority === 'owner' ? <PersonInCharge /> : null}

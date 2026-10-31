@@ -26,7 +26,7 @@ export type WalletOverview = {
   role: string;
   walletState: WalletState;
   wallet: string | null;
-  balance: { usdcMinor: string; heldMinor: string; availableMinor: string } | null;
+  balance: { usdcMinor: string; heldMinor: string; availableMinor: string; holdsUnknown: boolean } | null;
   balanceError: string | null;
   signers: { threshold: number; totalWeight: number; singleSigner: boolean; members: Array<{ name: string; you: boolean; weight: number }> } | null;
   canManage: boolean;
@@ -63,7 +63,7 @@ export async function buildWalletOverview(deps: OverviewDeps): Promise<WalletOve
         known = false;
       }
       const available = known && total > held ? total - held : 0n;
-      balance = { usdcMinor: total.toString(), heldMinor: (known ? held : total).toString(), availableMinor: available.toString() };
+      balance = { usdcMinor: total.toString(), heldMinor: (known ? held : total).toString(), availableMinor: available.toString(), holdsUnknown: !known };
     } catch {
       balanceError = BALANCE_UNREADABLE;
     }

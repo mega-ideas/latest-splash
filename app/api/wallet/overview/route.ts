@@ -7,7 +7,7 @@ import { orgMemberNames } from '@/lib/server/org-member-names';
 import { requireSessionAccount } from '@/lib/server/session-account';
 import { liveWalletContext } from '@/lib/server/wallet-deps';
 import { buildWalletOverview } from '@/lib/server/wallet-overview';
-import { NO_STORE } from '@/lib/server/wallet-route';
+import { limitWalletReads, NO_STORE } from '@/lib/server/wallet-route';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,6 +35,8 @@ export async function GET(request: Request) {
   }
   if (authority.orgId !== accountCheck.account.orgId) return NextResponse.json({ error: 'no membership' }, { status: 403, headers: NO_STORE });
 
+  const limited = await limitWalletReads(authority.userId);
+  if (limited) return limited;
   const live = await liveWalletContext(authority.orgId);
   if (!live.ok) {
     const walletState = live.status === 409 ? 'none' : live.status === 503 ? 'off' : 'unavailable';

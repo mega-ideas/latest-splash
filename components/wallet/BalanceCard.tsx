@@ -14,7 +14,8 @@ import type { Overview } from './types';
  */
 export default function BalanceCard({ overview }: { overview: Overview }) {
   const b = overview.balance;
-  const held = b ? BigInt(b.heldMinor) : 0n;
+  const unknown = Boolean(b?.holdsUnknown);
+  const held = b && !unknown ? BigInt(b.heldMinor) : 0n;
   return (
     <section className="dash-block dash-block-accent p-4 sm:p-5" aria-labelledby="balance-title">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -34,8 +35,15 @@ export default function BalanceCard({ overview }: { overview: Overview }) {
       {b ? (
         <dl className="mt-3 grid gap-x-6 gap-y-1 text-[13px] tabular-nums text-[#326273] sm:grid-cols-2">
           <div className="flex justify-between gap-3"><dt>In the wallet</dt><dd className="font-mono font-semibold text-[#0c3e48]">{formatUsdc(BigInt(b.usdcMinor))} USDC</dd></div>
-          <div className="flex justify-between gap-3"><dt>On hold, not spent</dt><dd className="font-mono font-semibold text-[#0c3e48]">{formatUsdc(held)} USDC</dd></div>
+          {unknown ? (
+            <div className="flex justify-between gap-3"><dt>On hold</dt><dd className="font-semibold text-[#0c3e48]">Could not be checked</dd></div>
+          ) : (
+            <div className="flex justify-between gap-3"><dt>On hold, not spent</dt><dd className="font-mono font-semibold text-[#0c3e48]">{formatUsdc(held)} USDC</dd></div>
+          )}
         </dl>
+      ) : null}
+      {unknown ? (
+        <p className="mt-2 text-[13px] leading-5 text-[#326273]">Money on hold could not be checked just now, so nothing is offered to spend. Try again shortly.</p>
       ) : null}
       {held > 0n ? (
         <p className="mt-2 text-[13px] leading-5 text-[#326273]">

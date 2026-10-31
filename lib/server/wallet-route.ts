@@ -53,6 +53,11 @@ export async function limitWalletRequests(route: WalletRoute): Promise<Response 
   );
 }
 
+/** The reads that go to the chain (the overview, funds in personal wallets): limited per person. */
+export async function limitWalletReads(userId: string): Promise<Response | null> {
+  return enforceRateLimit({ rule: RATE_LIMITS.walletReadUser, key: userId, message: 'Too many requests. Try again shortly.' });
+}
+
 /** Only an owner (role admin) changes the wallet or pays from it. */
 /**
  * A withdrawal may be ASKED for by an owner or a staff member (Sky's

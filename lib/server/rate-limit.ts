@@ -94,6 +94,8 @@ export const RATE_LIMITS = {
   // own 24-hour gas budget per business sits behind these.
   walletRequestUser: { bucket: 'wallet-request:user', limit: 20, windowMs: HOUR },
   walletRequestOrg: { bucket: 'wallet-request:org', limit: 60, windowMs: HOUR },
+  // The Wallet page reads the balance and the funds in personal wallets from the chain on every load; per person, high enough that reloads are never refused.
+  walletReadUser: { bucket: 'wallet-read:user', limit: 300, windowMs: HOUR },
   // A payment's controls evidence and sender declaration read the chain and
   // write a PDF (v2 §4.6); per person. Opening a Sumsub verification asks a
   // paid provider for a token; per business.

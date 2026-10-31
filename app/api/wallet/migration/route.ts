@@ -6,7 +6,7 @@ import { orgMemberNames } from '@/lib/server/org-member-names';
 import { scopeMigrationMembers } from '@/lib/wallet-page/migration';
 import { highestAuthority, memberRole, migrationClearance, recordAuthorityEvent } from '@/lib/server/wallet-authority';
 import { orgMemberWalletAddresses, walletUsdcType } from '@/lib/server/wallet-deps';
-import { asResponse, limitWalletRequests, NO_STORE, walletRoute } from '@/lib/server/wallet-route';
+import { asResponse, limitWalletReads, limitWalletRequests, NO_STORE, walletRoute } from '@/lib/server/wallet-route';
 
 export const dynamic = 'force-dynamic';
 
@@ -42,6 +42,8 @@ export async function GET(request: Request) {
   const gate = await walletRoute(request);
   if (gate.response) return gate.response;
   const { orgId, db, ctx } = gate.route;
+  const limited = await limitWalletReads(gate.route.authority.userId);
+  if (limited) return limited;
   let wallet: string | null;
   try {
     wallet = await businessWallet(ctx.readAccount);
