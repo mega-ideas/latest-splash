@@ -161,7 +161,8 @@ test('a receipt opens from the list: a payment, a batch and a withdrawal each ha
 
 test('a viewer is told why the list is short, polling runs only while something is in progress, and a failure is a sentence', () => {
   const joined = pageFiles().map(([, t]) => code(t)).join('\n');
-  assert.match(joined, /status === 403/);
+  // Where the four answers are folded (a viewer's 403 is not a failure) is the page or the pure lists module beside it.
+  assert.match([joined, read('lib/history-page/entries.ts')].join('\n'), /status === 403/);
   assert.match(joined, /Only an owner or a staff member/);
   assert.match(joined, /inProgress > 0/, 'a page with nothing in progress asks nothing every few seconds');
   assert.match(joined, /visibilityState/);

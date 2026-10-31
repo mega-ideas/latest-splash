@@ -35,7 +35,7 @@ const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf
 const code = (text) => text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 const sui = (b) => `0x${b.repeat(32)}`;
 
-const base = { id: 'r1', name: 'Dela Cruz Trading', country: 'PH', bank: '', account: '', kybStatus: 'none', createdAt: '2026-10-20T00:00:00.000Z', screeningVerdict: 'CLEAR', approvedAt: '2026-10-21T00:00:00.000Z', savedByYou: false };
+const base = { id: 'r1', name: 'Dela Cruz Trading', country: 'PH', bank: '', account: '', kybStatus: 'none', createdAt: '2026-10-20T00:00:00.000Z', screeningVerdict: 'CLEAR', approvedAt: '2026-10-21T00:00:00.000Z', savedByYou: false, hasEmail: true };
 const wallet = (over = {}) => ({ ...base, payoutMethod: 'WALLET', walletAddress: sui('77'), delivery: { deliveryKind: 'SELF_CUSTODY', ownershipStatus: 'proven' }, ...over });
 const exchange = (over = {}) => ({ ...base, id: 'r2', name: 'Maria Exchange Ltd', payoutMethod: 'WALLET', walletAddress: sui('66'), delivery: { deliveryKind: 'EXCHANGE', exchangeId: 'pdax', depositNetwork: 'SUI', destinationAddress: sui('66') }, ...over });
 const chain = (over = {}) => ({ ...base, id: 'r3', name: 'Base Supplier', payoutMethod: 'CROSS_CHAIN', delivery: { deliveryKind: 'CROSS_CHAIN', destinationChain: 'BASE', destinationAddress: '0x52908400098527886e0f7030069857d2e4169ee7' }, ...over });
