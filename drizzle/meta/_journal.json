@@ -463,6 +463,13 @@
       "when": 1794182400000,
       "tag": "0065_batch_payouts",
       "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1794268800000,
+      "tag": "0066_team_roles",
+      "breakpoints": true
     }
   ]
 }

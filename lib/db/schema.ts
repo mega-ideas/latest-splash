@@ -1738,6 +1738,43 @@ export const walletPersonsInCharge = pgTable('wallet_persons_in_charge', {
 ]);
 
 /**
+ * The Finance lead: one person per business whom an owner trusts with the
+ * team (add, change and remove viewers, staff and approvers) and nothing else
+ * that is an owner's. It sits on top of a membership, as the person in charge
+ * does, and grants nothing unless the person is still an approver of this
+ * business (migration 0066).
+ */
+export const walletFinanceLeads = pgTable('wallet_finance_leads', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  grantedBy: text('granted_by').notNull(),
+  grantedAt: timestamp('granted_at', { withTimezone: true }).notNull(),
+  revokedBy: text('revoked_by'),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+}, (table) => [
+  uniqueIndex('wallet_finance_leads_one_open').on(table.orgId).where(sql`${table.revokedAt} is null`),
+]);
+
+/**
+ * Who may use Add funds and Withdraw inside the dashboard, granted by an
+ * owner, member by member (migration 0066). Owners have both without a row.
+ */
+export const walletMemberAccess = pgTable('wallet_member_access', {
+  id: text('id').primaryKey(),
+  orgId: text('org_id').notNull().references(() => organizations.id),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  access: text('access').notNull(),
+  grantedBy: text('granted_by').notNull(),
+  grantedAt: timestamp('granted_at', { withTimezone: true }).notNull(),
+  revokedBy: text('revoked_by'),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+}, (table) => [
+  uniqueIndex('wallet_member_access_one_open').on(table.orgId, table.userId, table.access).where(sql`${table.revokedAt} is null`),
+  index('wallet_member_access_org_idx').on(table.orgId, table.userId),
+]);
+
+/**
  * The highest authority's passkey-signed sign-off for one member moving the
  * USDC at one address into one business wallet (migration 0035).
  */

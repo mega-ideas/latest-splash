@@ -30,7 +30,7 @@ import { and, desc, eq, gt, isNotNull, isNull, or } from 'drizzle-orm';
 import { normalizeSuiAddress } from '@mysten/sui/utils';
 import { verifyPersonalMessageSignature } from '@mysten/sui/verify';
 
-import { memberships, passkeyCredentials, walletAuthorityEvents, walletMigrationSignoffs, walletOffboardedSpenders, walletPersonsInCharge } from '../db/schema.ts';
+import { memberships, passkeyCredentials, walletAuthorityEvents, walletFinanceLeads, walletMemberAccess, walletMigrationSignoffs, walletOffboardedSpenders, walletPersonsInCharge } from '../db/schema.ts';
 import type { DrizzleDb } from './wallet-signing-store.ts';
 
 export type AuthorityAction =
@@ -46,7 +46,14 @@ export type AuthorityAction =
   | 'approval_withdrawn'
   | 'approval_completed'
   | 'member_offboarded'
-  | 'spending_rules_revoke_opened';
+  | 'spending_rules_revoke_opened'
+  | 'member_added'
+  | 'member_role_changed'
+  | 'member_removed'
+  | 'finance_lead_appointed'
+  | 'finance_lead_revoked'
+  | 'member_access_granted'
+  | 'member_access_revoked';
 
 export type AuthorityFailure = { ok: false; status: number; code: string; error: string };
 const fail = (status: number, code: string, error: string): AuthorityFailure => ({ ok: false, status, code, error });
@@ -176,6 +183,46 @@ export async function revokePersonInCharge(
 
 // ─── Offboarding ────────────────────────────────────────────────────────────
 
+/**
+ * End what only an approver or a staff member holds in a business: the
+ * Finance lead role and Add funds / Withdraw access. Each one that was open
+ * is closed and put on the trail. Used when a person leaves, and when their
+ * role moves somewhere that cannot hold it. `by` is a user id or
+ * `operator:<email>`.
+ */
+export async function endFinanceLead(
+  db: DrizzleDb,
+  input: { orgId: string; userId: string; by: string; reason: string; now?: Clock },
+): Promise<boolean> {
+  const now = clock(input.now);
+  const lead = await db
+    .update(walletFinanceLeads)
+    .set({ revokedAt: now, revokedBy: input.by })
+    .where(and(eq(walletFinanceLeads.orgId, input.orgId), eq(walletFinanceLeads.userId, input.userId), isNull(walletFinanceLeads.revokedAt)))
+    .returning({ id: walletFinanceLeads.id });
+  if (lead.length > 0) {
+    await recordAuthorityEvent(db, { orgId: input.orgId, actorUserId: input.by, action: 'finance_lead_revoked', subjectUserId: input.userId, detail: { reason: input.reason }, now: () => now });
+  }
+  return lead.length > 0;
+}
+
+export async function endTeamHolds(
+  db: DrizzleDb,
+  input: { orgId: string; userId: string; by: string; reason: string; now?: Clock },
+): Promise<{ financeLead: boolean; access: string[] }> {
+  const now = clock(input.now);
+  const financeLead = await endFinanceLead(db, { ...input, now: () => now });
+  const access = await db
+    .update(walletMemberAccess)
+    .set({ revokedAt: now, revokedBy: input.by })
+    .where(and(eq(walletMemberAccess.orgId, input.orgId), eq(walletMemberAccess.userId, input.userId), isNull(walletMemberAccess.revokedAt)))
+    .returning({ access: walletMemberAccess.access });
+  for (const a of access) {
+    await recordAuthorityEvent(db, { orgId: input.orgId, actorUserId: input.by, action: 'member_access_revoked', subjectUserId: input.userId, detail: { access: a.access, reason: input.reason }, now: () => now });
+  }
+  return { financeLead, access: access.map((a) => a.access) };
+}
+
 /** Every Sui address a user has a passkey wallet at, active or retired: who an address on chain is. */
 export async function passkeyAddressesOf(db: DrizzleDb, userId: string): Promise<string[]> {
   const rows = await db.select({ address: passkeyCredentials.suiAddress }).from(passkeyCredentials).where(eq(passkeyCredentials.userId, userId));
@@ -223,6 +270,7 @@ export async function offboardMember(
   for (const v of voided) {
     await recordAuthorityEvent(db, { orgId: input.orgId, actorUserId: input.by, action: 'migration_sign_off_voided', subjectUserId: input.userId, ref: v.id, detail: { reason: 'membership_removed' }, now: at });
   }
+  await endTeamHolds(db, { orgId: input.orgId, userId: input.userId, by: input.by, reason: 'membership_removed', now: at });
   for (const address of addresses) {
     await db.insert(walletOffboardedSpenders).values({ id: `wofs_${randomUUID()}`, orgId: input.orgId, userId: input.userId, address, reason: 'removed', offboardedBy: input.by, offboardedAt: now });
   }

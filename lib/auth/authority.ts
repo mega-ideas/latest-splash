@@ -169,7 +169,7 @@ export class GrantRefusedError extends Error {
 export async function grantMembership(
   db: DrizzleDb,
   input: { email: string; orgId: string; role: 'maker' | 'checker' | 'admin' | 'viewer'; grantedBy?: string },
-): Promise<void> {
+): Promise<{ created: boolean; userId: string }> {
   const normalized = input.email.trim().toLowerCase();
 
   const existing = await db
@@ -191,7 +191,7 @@ export async function grantMembership(
   const { ensureOrganization } = await import('../db/proposal-repo.ts');
   await ensureOrganization(db, input.orgId);
 
-  await db
+  const inserted = await db
     .insert(memberships)
     .values({
       id: `mem_${account.id}_${input.orgId}`,
@@ -200,7 +200,10 @@ export async function grantMembership(
       role: input.role,
       grantedBy: input.grantedBy ?? null,
     })
-    .onConflictDoNothing();
+    .onConflictDoNothing()
+    .returning({ id: memberships.id });
+  // `created` is false when the membership already existed: two grants at once make one, and only one is told so.
+  return { created: inserted.length > 0, userId: account.id };
 }
 
 /** Read a user's membership in one organisation, or null. */
