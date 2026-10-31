@@ -276,3 +276,22 @@ test('a refusal is logged once per business in a while, and never with an addres
   assert.match(code(read('lib/server/wallet-route.ts')), /refusalLogLine\(/);
   assert.match(code(read('lib/server/bill-payment-flow-live.ts')), /refusalLogLine\(/);
 });
+
+/* The pages around them: adding a recipient and the receipts ----------------------- */
+
+test('adding a recipient uses toggle buttons and a 44px Close, as the other filters do', () => {
+  const src = code(read('components/recipients/NewRecipient.tsx'));
+  assert.doesNotMatch(src, /role="radiogroup"|role="radio"/);
+  assert.match(src, /aria-pressed=\{on\}/);
+  assert.doesNotMatch(src, /!h-10/);
+});
+
+test('a receipt that cannot be read can be asked for again, and one not yet final is not polled from a hidden tab', () => {
+  const single = code(read('components/transfer/StepReceipt.tsx'));
+  assert.match(single, /visibilityState === 'visible'/);
+  assert.match(single, /Try again/);
+  assert.doesNotMatch(single, /Add the country in Recipients/, 'Recipients has no way to edit a country, so the copy does not send a person there');
+  const batch = code(read('components/batch/StepReceipts.tsx'));
+  assert.match(batch, /Try again/);
+  assert.match(batch, /Check again/);
+});
