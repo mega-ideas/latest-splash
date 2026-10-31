@@ -27,7 +27,7 @@ test('the phone has a bottom tab bar of five tabs, each 44px or taller with an i
   assert.match(bar, /badgeText\(/);
   assert.match(bar, /md:hidden/, 'a window wide enough for the rail has no tab bar');
   assert.match(bar, /usePhoneBottomBar|claimed/, 'a screen with its own fixed action bar takes the tab bar’s place');
-  assert.match(bar, /waitingForMe\(/);
+  assert.match(bar, /readWaiting\(/, 'the count is read from the server’s count-only answer (waitingForMe runs there)');
   assert.match(bar, /\/api\/wallet\/signing-requests/);
   assert.match(bar, /SIGNING_POLL_MS/);
   assert.match(bar, /document\.hidden|visibilityState/, 'a tab nobody is looking at does not poll');
