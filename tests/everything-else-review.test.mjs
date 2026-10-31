@@ -105,9 +105,11 @@ test('a number in the operating controls is not cut off, and the approvals card 
 /* History and Setup -------------------------------------------------------------- */
 
 test('History colours a count as an alarm only when there is something to look at', () => {
-  assert.deepEqual(statTones({ inProgress: 0, notPaid: 0 }), { inProgress: 'text-[#326273]', notPaid: 'text-[#326273]' });
-  assert.deepEqual(statTones({ inProgress: 2, notPaid: 0 }), { inProgress: 'text-[var(--gold-ink)]', notPaid: 'text-[#326273]' });
-  assert.deepEqual(statTones({ inProgress: 0, notPaid: 1 }), { inProgress: 'text-[#326273]', notPaid: 'text-[var(--error)]' });
+  assert.deepEqual(statTones({ inProgress: 0, failed: 0, notPaid: 0 }), { inProgress: 'text-[#326273]', failed: 'text-[#326273]', notPaid: 'text-[#326273]' });
+  assert.deepEqual(statTones({ inProgress: 2, failed: 0, notPaid: 0 }), { inProgress: 'text-[var(--gold-ink)]', failed: 'text-[#326273]', notPaid: 'text-[#326273]' });
+  assert.deepEqual(statTones({ inProgress: 0, failed: 1, notPaid: 0 }), { inProgress: 'text-[#326273]', failed: 'text-[var(--error)]', notPaid: 'text-[#326273]' });
+  // Not paid (a person said no, or the time ran out) is never an alarm: there is nothing to fix.
+  assert.deepEqual(statTones({ inProgress: 0, failed: 0, notPaid: 3 }), { inProgress: 'text-[#326273]', failed: 'text-[#326273]', notPaid: 'text-[#326273]' });
   const page = code(read('components/history/HistoryPage.tsx'));
   assert.match(page, /statTones\(summary\)/);
   assert.doesNotMatch(page, /gold-ink/, 'a failure never takes the gold accent, and the page does not choose colours beside it');
