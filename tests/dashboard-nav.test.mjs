@@ -142,7 +142,11 @@ test('Wallet is the business wallet page, Zeke has its own route, and Home is /d
 
 test('every sign-in lands on Home', async () => {
   const login = await source('app/login/page.tsx');
-  assert.match(login, /router\.push\('\/dashboard'\)/);
+  // Home, except for one thing: a sign-in that began at a link to a request's
+  // Approve screen returns to that screen (lib/approve/link.ts, the one shape
+  // safeApproveReturn accepts). Anything else in `next` is Home.
+  assert.match(login, /const returnTo = safeApproveReturn\(new URLSearchParams\(window\.location\.search\)\.get\('next'\)\)/);
+  assert.match(login, /router\.push\(returnTo \?\? '\/dashboard'\)/);
   const zk = await source('app/login/zklogin/callback/page.tsx');
   assert.match(zk, /router\.replace\('\/dashboard'\)/);
   assert.doesNotMatch(zk, /router\.replace\('\/settings\/kyb/);
