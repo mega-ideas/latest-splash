@@ -8,6 +8,9 @@ const DAY = 86_400_000;
 
 export const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
+/** An address a person can compare by eye: the first six and last four characters. */
+export const shortAddress = (address: string) => `${address.slice(0, 6)}…${address.slice(-4)}`;
+
 /**
  * "5 hours 12 minutes", "3 days 5 hours", "95 days": the two units that matter
  * at each scale, never seconds. Nothing left, or nothing readable, is "now".

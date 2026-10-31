@@ -6,9 +6,9 @@
  * changed and taken back in Settings, never here.
  */
 import { formatUsdc } from '../fees/copy.ts';
+import { ruleTerms, type AllowanceLike } from '../team-rules/terms.ts';
 import type { Tone } from './labels.ts';
 
-type AllowanceLike = { current: boolean; state: string; window: { period: string; limitMinor: string; spentMinor: string; remainingMinor: string } | null };
 type RuleLike = { name?: string | null; status: string; perPaymentMaxMinor: string; allowances: AllowanceLike[] };
 export type SpendViewFacts = {
   policy: { secondApprovalThresholdMinor: string } | null;
@@ -32,15 +32,17 @@ export type RuleLine = { name: string; perPayment: string; state: string; tone: 
 export function rulesSummary(view: SpendViewFacts, viewer: { owner: boolean }) {
   const rules: RuleLine[] = view.rules.map((r) => {
     const s = STATES[r.status] ?? { state: 'Unknown', tone: 'wait' as Tone };
-    const current = r.allowances.find((a) => a.current && a.state === 'active') ?? r.allowances.find((a) => a.current);
-    const w = current?.window ?? null;
+    // A rule is read as a whole: a change made after spending leaves a short bridge for today that is not the rule.
+    const t = ruleTerms(r.allowances);
+    const w = t?.window ?? null;
     const when = w?.period === 'day' ? 'today' : w?.period === 'month' ? 'this month' : 'in the current window';
+    const used = r.status === 'active' && t?.usedUp;
     return {
       name: r.name ?? 'A staff member',
       perPayment: usdc(r.perPaymentMaxMinor),
-      state: s.state,
-      tone: s.tone,
-      window: w ? `${formatUsdc(BigInt(w.spentMinor))} of ${usdc(w.limitMinor)} used ${when}` : null,
+      state: used ? 'Used up' : s.state,
+      tone: used ? ('wait' as Tone) : s.tone,
+      window: w ? (t?.bridged ? `${usdc(w.remainingMinor)} left ${when}` : `${formatUsdc(BigInt(w.spentMinor))} of ${usdc(w.limitMinor)} used ${when}`) : null,
     };
   });
   return {

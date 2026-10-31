@@ -117,6 +117,16 @@ export function tierOf(s: KindSchedule, principalMinor: bigint): { index: number
   return { index: last, bps: s.tiers[last].bps };
 }
 
+/**
+ * The most a payment of this principal can charge an allowance: the principal
+ * plus the most its fee could be, the ceiling (an allowance counts both,
+ * splash_spend's pay_intent). A cap or a lifetime total below this cannot pay
+ * that one payment. Not a quote: the fee shown is the one charged.
+ */
+export function principalWithFeeCeiling(principalMinor: bigint): bigint {
+  return principalMinor + (principalMinor * FEE_CEILING_BPS) / BPS_DENOM;
+}
+
 /** `a * b / d`, rounded down; throws where Move's u64 cast would abort. */
 function mulDivFloor(a: bigint, b: bigint, d: bigint): bigint {
   const r = (a * b) / d;

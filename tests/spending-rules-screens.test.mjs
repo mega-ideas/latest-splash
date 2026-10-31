@@ -67,7 +67,7 @@ test('a rule line shows the time left in the window and in the rule, and what ha
   const l = ruleLine(rule(), NOW);
   assert.equal(l.renewsIn, 'Renews in 14 hours');
   assert.equal(l.endsIn, 'Ends in 95 days');
-  assert.equal(l.paidInAll, 'Paid since the rule was set: 300.00 USDC');
+  assert.equal(l.paidInAll, 'Paid since the rule was given or last changed: 300.00 USDC');
   // A window that has passed starts again with the next payment: there is no time left to show.
   const rolled = ruleLine(rule({ allowances: [{ ...rule().allowances[0], window: { ...rule().allowances[0].window, rolledOver: true, spentMinor: '0', remainingMinor: U(2000) } }] }), NOW);
   assert.equal(rolled.renewsIn, null);
@@ -224,7 +224,7 @@ test('taking a rule back says what stops, what stays, and that it needs no waiti
   assert.match(stops, /open payments stop/);
   const stays = w.stays.join(' ');
   assert.match(stays, /Payments already made stay on the record/);
-  assert.match(stays, /pay again with the owners/);
+  assert.match(stays, /still ask the owners to pay for them/);
   assert.match(stays, /give a new rule later/);
   assert.match(w.note, /takes effect at once/);
   assert.match(w.note, /owners sign/);

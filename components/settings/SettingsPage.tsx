@@ -85,7 +85,7 @@ export default function SettingsPage({ alerts, billingOn }: { alerts: Governance
   const view = spend.data;
   const staff: StaffChoice[] = (charge.data?.members ?? [])
     .filter((m) => m.role === 'maker' || m.role === 'checker')
-    .map((m) => ({ userId: m.userId, name: m.name, role: m.role, hasRule: Boolean(view?.rules.some((r) => r.userId === m.userId)) }));
+    .map((m) => ({ userId: m.userId, name: m.name, role: m.role, hasRule: Boolean(view?.rules.some((r) => r.userId === m.userId)), hasPasskey: m.hasPasskey }));
 
   const header = (
     <DashPageHeader
@@ -138,7 +138,7 @@ export default function SettingsPage({ alerts, billingOn }: { alerts: Governance
           {manage ? (
             <>
               {view ? <PolicyCard owner={owner === true} spend={view} onChanged={changed} /> : null}
-              <RulesSection owner={owner === true} spend={view} loading={spend.loading} error={spend.error} onRetry={spend.reload} staff={staff} onChanged={changed} />
+              <RulesSection owner={owner === true} spend={view} loading={spend.loading} error={spend.error} onRetry={spend.reload} staff={staff} staffLoading={charge.loading} staffError={charge.error} onRetryStaff={charge.reload} onChanged={changed} />
             </>
           ) : (
             <Card id="wallet-note" title="Spending rules, signers and funding">{walletNote()}</Card>

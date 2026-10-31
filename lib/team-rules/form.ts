@@ -8,7 +8,8 @@
  * business, the wallet and the person's address are never in a body: the
  * server knows them from the session and from the person's own passkey.
  */
-import { formatUsdcBound } from '../fees/copy.ts';
+import { formatUsdc, formatUsdcBound } from '../fees/copy.ts';
+import { principalWithFeeCeiling } from '../fees/schedule.ts';
 
 const UNIT = 1_000_000n;
 const U64_MAX = 18_446_744_073_709_551_615n;
@@ -75,7 +76,7 @@ export function ruleRequest(form: RuleForm, ctx: { now: Date; policyMaxMinor: bi
   if (form.cap.trim() === '') errors.cap = 'Enter a daily or monthly cap.';
   else if (cap === null) errors.cap = 'Enter an amount in USDC, for example 2,000.';
   else if (cap === 0n) errors.cap = 'The cap must be above zero.';
-  else if (perPayment !== null && perPayment > 0n && cap < perPayment) errors.cap = 'The cap is lower than the most one payment may be. Raise the cap or lower the payment limit.';
+  else if (perPayment !== null && perPayment > 0n && cap < principalWithFeeCeiling(perPayment)) errors.cap = `The cap is lower than the most one payment may be plus its fee (${formatUsdc(principalWithFeeCeiling(perPayment))} USDC), so that payment could never be paid. Raise the cap or lower the payment limit.`;
 
   const end = endOfDay(form.expires);
   if (end === null) errors.expires = 'Choose the date the rule ends.';
@@ -87,7 +88,7 @@ export function ruleRequest(form: RuleForm, ctx: { now: Date; policyMaxMinor: bi
     lifetime = parseUsdc(form.lifetimeCap);
     if (lifetime === null) errors.lifetimeCap = 'Enter an amount in USDC, or leave it empty.';
     else if (lifetime === 0n) errors.lifetimeCap = 'It must be above zero, or leave it empty.';
-    else if (perPayment !== null && perPayment > 0n && lifetime < perPayment) errors.lifetimeCap = 'The lifetime cap is lower than the most one payment may be.';
+    else if (perPayment !== null && perPayment > 0n && lifetime < principalWithFeeCeiling(perPayment)) errors.lifetimeCap = `The total is lower than the most one payment may be plus its fee (${formatUsdc(principalWithFeeCeiling(perPayment))} USDC). Raise the total, or leave it empty.`;
   }
 
   if (Object.keys(errors).length > 0 || perPayment === null || cap === null || end === null) return { ok: false, errors };

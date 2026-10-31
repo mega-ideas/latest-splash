@@ -231,7 +231,9 @@ test('changing a rule starts from the end date it has now', () => {
   assert.equal(expiryField(null, new Date('2026-10-31T00:00:00Z')), undefined);
   assert.equal(expiryField(String(Date.UTC(2026, 0, 15) + day), new Date('2026-10-31T00:00:00Z')), undefined, 'an end date already past is not kept');
   const rules = code(read('components/settings/RulesSection.tsx'));
-  assert.match(rules, /expiryField\(current\?\.expiresAtMs/);
+  // The Change sheet opens from the rule read as a whole (a bridge's end date is not the rule's).
+  assert.match(rules, /changeInitial\(raw, now\)/);
+  assert.match(read('lib/team-rules/terms.ts'), /expiryField\(t\.expiresAtMs, now\)/);
 });
 
 test('only an owner or a finance admin sees editable operating controls', () => {

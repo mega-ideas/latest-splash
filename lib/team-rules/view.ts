@@ -10,19 +10,11 @@ import { formatUsdc } from '../fees/copy.ts';
 import { kindOfRecipient, stateOf } from '../recipients-page/view.ts';
 import type { ClientRecipient } from '../recipients-page/wire.ts';
 import { roleLabel } from '../wallet-page/members.ts';
+import { ruleTerms, type AllowanceLike } from './terms.ts';
 import { timeLeftWords, windowWords } from './words.ts';
 
 export type Tone = 'ok' | 'wait' | 'bad';
 
-type AllowanceLike = {
-  current: boolean;
-  state: string;
-  expiresAtMs: string | null;
-  lifetimeCapMinor: string | null;
-  lifetimeRemainingMinor: string | null;
-  currentSpendMinor: string;
-  window: { period: string; limitMinor: string; spentMinor: string; remainingMinor: string; endsAtMs: string | null; rolledOver: boolean } | null;
-};
 export type RuleLike = {
   userId?: string | null;
   name?: string | null;
@@ -49,7 +41,7 @@ export type RuleLineView = {
   name: string;
   state: { label: string; tone: Tone };
   perPayment: string;
-  /** What was spent in the window that is current now, null when no current allowance. */
+  /** What was spent in the window that is current now, null when there is none or a change left only what is honestly left today. */
   usage: { text: string; percent: number } | null;
   left: string | null;
   renews: string | null;
@@ -57,38 +49,69 @@ export type RuleLineView = {
   lifetime: string | null;
   /** "Renews in 14 hours": null when the window has passed (the next payment starts a new one) or there is none. */
   renewsIn: string | null;
+  /** "Renews in 14 hours (2026-10-29 00:00 UTC)", or the date alone when it has passed: the one line the list shows. */
+  renewsLine: string | null;
   /** "Ends in 95 days": null when there is no end or it has passed. */
   endsIn: string | null;
-  /** What the current allowance has charged (current_spend): null with no current allowance. */
+  /** What the rule's allowances have charged since the rule was given or last changed: null with no current allowance. */
   paidInAll: string | null;
+  /** A change after spending left a short bridge for today; the full cap applies from the renewal. */
+  bridged: boolean;
   orphaned: boolean;
 };
 
+/**
+ * One rule, read as a whole (lib/team-rules/terms.ts): the cap and the end
+ * date are the rule's own even when a change made after spending left a short
+ * bridge for today, and a lifetime total appears only when the owner set one.
+ */
 export function ruleLine(rule: RuleLike, now: Date): RuleLineView {
   const standing = rule.standing ?? 'member';
   const orphaned = standing !== 'member';
+  const t = ruleTerms(rule.allowances);
   const base = STATUS[rule.status] ?? { label: 'Unknown', tone: 'wait' as Tone };
-  const state = standing === 'removed' || standing === 'not_a_member' ? { label: 'Belongs to someone who left', tone: 'bad' as Tone } : standing === 'viewer' ? { label: 'Belongs to a viewer', tone: 'bad' as Tone } : base;
-  // Only the current allowance is the rule: one from an earlier wallet cannot pay.
-  const current = rule.allowances.find((a) => a.current && a.state === 'active') ?? rule.allowances.find((a) => a.current) ?? null;
-  const w = current?.window ?? null;
+  const state =
+    standing === 'removed' || standing === 'not_a_member'
+      ? { label: 'Belongs to someone who left', tone: 'bad' as Tone }
+      : standing === 'viewer'
+        ? { label: 'Belongs to a viewer', tone: 'bad' as Tone }
+        : rule.status === 'active' && t?.usedUp
+          ? { label: 'Used up', tone: 'wait' as Tone }
+          : base;
+  const w = t?.window ?? null;
   const when = w?.period === 'day' ? 'today' : w?.period === 'month' ? 'this month' : 'in the current window';
   const limit = w ? BigInt(w.limitMinor) : 0n;
   const spent = w ? BigInt(w.spentMinor) : 0n;
+  const at = (ms: string) => `${stamp(ms).slice(0, 10)} ${stamp(ms).slice(11, 16)} UTC`;
+  const fullFrom = t?.bridged && t.fullFromMs ? t.fullFromMs : null;
+  const renews = !w
+    ? null
+    : fullFrom
+      ? `The full cap applies again ${at(fullFrom)}`
+      : w.rolledOver
+        ? 'A new window starts with the next payment'
+        : w.endsAtMs
+          ? `Renews ${at(w.endsAtMs)}`
+          : null;
+  const renewsEnd = fullFrom ?? (w && !w.rolledOver ? w.endsAtMs ?? null : null);
+  const renewsIn = renewsEnd && Number(renewsEnd) > now.getTime() ? `${fullFrom ? 'The full cap applies again in' : 'Renews in'} ${timeLeftWords(Number(renewsEnd) - now.getTime())}` : null;
   return {
     userId: rule.userId ?? null,
     name: rule.name ?? 'A staff member',
     state,
     perPayment: `${usdc(rule.perPaymentMaxMinor)} USDC`,
-    usage: w ? { text: `${usdc(spent)} of ${usdc(limit)} USDC used ${when}`, percent: limit > 0n ? Math.min(100, Number((spent * 100n) / limit)) : 0 } : null,
+    // After a change made mid-window the spend before it is not on the new allowance: only what is left today is true.
+    usage: w && !t?.bridged ? { text: `${usdc(spent)} of ${usdc(limit)} USDC used ${when}`, percent: limit > 0n ? Math.min(100, Number((spent * 100n) / limit)) : 0 } : null,
     left: w ? `${usdc(w.remainingMinor)} USDC left ${when}` : null,
-    renews: w ? (w.rolledOver ? 'A new window starts with the next payment' : w.endsAtMs ? `Renews ${stamp(w.endsAtMs).slice(0, 10)} ${stamp(w.endsAtMs).slice(11, 16)} UTC` : null) : null,
+    renews,
     // A rule ends at the close of its last day: midnight UTC after it.
-    ends: current?.expiresAtMs ? `Ends ${new Date(Number(current.expiresAtMs) - 1).toISOString().slice(0, 10)} (UTC)` : null,
-    lifetime: current?.lifetimeCapMinor && current.lifetimeRemainingMinor ? `${usdc(current.lifetimeRemainingMinor)} of ${usdc(current.lifetimeCapMinor)} USDC left in all` : null,
-    renewsIn: w && !w.rolledOver && w.endsAtMs && Number(w.endsAtMs) > now.getTime() ? `Renews in ${timeLeftWords(Number(w.endsAtMs) - now.getTime())}` : null,
-    endsIn: current?.expiresAtMs && Number(current.expiresAtMs) > now.getTime() ? `Ends in ${timeLeftWords(Number(current.expiresAtMs) - now.getTime())}` : null,
-    paidInAll: current && current.currentSpendMinor ? `Paid since the rule was set: ${usdc(current.currentSpendMinor)} USDC` : null,
+    ends: t?.expiresAtMs ? `Ends ${new Date(Number(t.expiresAtMs) - 1).toISOString().slice(0, 10)} (UTC)` : null,
+    lifetime: t?.lifetimeCapMinor && t.lifetimeRemainingMinor ? `${usdc(t.lifetimeRemainingMinor)} of ${usdc(t.lifetimeCapMinor)} USDC left in all` : null,
+    renewsIn,
+    renewsLine: renewsIn ? `${renewsIn}${renewsEnd ? ` (${at(renewsEnd)})` : ''}` : renews,
+    endsIn: t?.expiresAtMs && Number(t.expiresAtMs) > now.getTime() ? `Ends in ${timeLeftWords(Number(t.expiresAtMs) - now.getTime())}` : null,
+    paidInAll: t ? `Paid since the rule was given or last changed: ${usdc(t.paidMinor)} USDC` : null,
+    bridged: t?.bridged ?? false,
     orphaned,
   };
 }

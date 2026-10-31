@@ -6,19 +6,33 @@
  * and client-safe.
  */
 
-export type RulesState = 'loading' | 'error' | 'no_policy' | 'no_staff' | 'empty' | 'list';
+export type RulesState = 'loading' | 'error' | 'staff_error' | 'no_policy' | 'no_staff' | 'empty' | 'list';
 
 /**
  * Waiting is not failing, and a failure is not an empty list. An owner with no
- * one to give a rule to is told that; rules whose holders are gone are still
- * listed so they can be taken back. Someone who is not an owner never sees
- * "no staff": only that they have no rule.
+ * one to give a rule to is told that, but only after the team was read and
+ * found no one: a team still being read is loading, and one that could not be
+ * read is an error with a way to try again, never "No staff yet". Rules whose
+ * holders are gone are still listed so they can be taken back. Someone who is
+ * not an owner never sees "no staff" and never waits for the team: only that
+ * they have no rule.
  */
-export function rulesState(input: { owner: boolean; loading: boolean; error: string | null; hasPolicy: boolean; staff: number; rules: number }): RulesState {
+export function rulesState(input: {
+  owner: boolean;
+  loading: boolean;
+  error: string | null;
+  hasPolicy: boolean;
+  staff: number;
+  rules: number;
+  staffLoading?: boolean;
+  staffError?: string | null;
+}): RulesState {
   if (input.loading) return 'loading';
   if (input.error) return 'error';
   if (!input.hasPolicy) return 'no_policy';
   if (input.rules > 0) return 'list';
+  if (input.owner && input.staffLoading) return 'loading';
+  if (input.owner && input.staffError) return 'staff_error';
   if (input.owner && input.staff === 0) return 'no_staff';
   return 'empty';
 }
@@ -35,7 +49,7 @@ export function revokeWords(name: string | null): { title: string; stops: string
     ],
     stays: [
       'Payments already made stay on the record.',
-      'Their later payments go to the owners, and they can still ask. They can pay again with the owners’ approval.',
+      'Their later payments go to the owners. They can still ask the owners to pay for them; the owners pay from the wallet.',
       'You can give a new rule later.',
     ],
     note: 'Your own change takes effect at once, with no waiting period. The owners sign it on their own devices.',

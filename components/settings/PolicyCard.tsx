@@ -92,7 +92,7 @@ export default function PolicyCard({ owner, spend, onChanged }: { owner: boolean
           <dl className="grid gap-3 sm:grid-cols-3">
             {[
               ['Most one payment', view.perPayment],
-              ['An owner approves from', view.threshold],
+              ['An owner approves above', view.threshold],
               ['Payments to one recipient add up over', view.window],
             ].map(([label, value]) => (
               <div key={label} className="rounded-xl border border-[#326273]/12 bg-white p-3">
@@ -124,7 +124,7 @@ export default function PolicyCard({ owner, spend, onChanged }: { owner: boolean
               </Field>
               {!creating ? (
                 <>
-                  <Field label="An owner approves from" hint="USDC" error={errors.threshold} htmlFor="pol-thr">
+                  <Field label="An owner approves above" hint="USDC" error={errors.threshold} htmlFor="pol-thr">
                     <TextInput id="pol-thr" inputMode="decimal" value={form.threshold} onChange={(e) => set('threshold', e.target.value)} autoComplete="off" />
                   </Field>
                   <Field label="Payments add up over" hint="hours" error={errors.windowHours} htmlFor="pol-win">

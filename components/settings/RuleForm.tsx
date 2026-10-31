@@ -9,9 +9,10 @@ import { formatUsdc } from '@/lib/fees/copy';
 import { defaultExpiry, ruleRequest, type RuleBody, type RuleForm as Form } from '@/lib/team-rules/form';
 import { ruleSteps, validateStep, withRecipients, type RecipientPick } from '@/lib/team-rules/steps';
 import { reviewSummary } from '@/lib/team-rules/summary';
+import { shortAddress } from '@/lib/team-rules/words';
 import type { PolicyLike } from '@/lib/team-rules/view';
 
-export type StaffChoice = { userId: string; name: string; role: string; hasRule: boolean };
+export type StaffChoice = { userId: string; name: string; role: string; hasRule: boolean; /** false: no passkey on this site yet, so no rule can be given; undefined: not known. */ hasPasskey?: boolean };
 export type RecipientOffers = {
   loading: boolean;
   error: string | null;
@@ -19,7 +20,7 @@ export type RecipientOffers = {
   offers: Array<{ id: string; name: string; address: string; tag: 'wallet' | 'exchange' }>;
 };
 
-const short = (address: string) => `${address.slice(0, 6)}…${address.slice(-4)}`;
+const short = shortAddress;
 
 /**
  * Give or change a spending rule, one question at a time (v2 §4.2; brief
@@ -103,7 +104,7 @@ export default function RuleForm({ staff, policy, recipients, changing, initial,
   const lifetimeEmpty = form.lifetimeCap.trim() === '';
   const summary = step.id === 'review' ? (() => {
     const made = ruleRequest(form, ctx());
-    return made.ok ? reviewSummary(changing ? made.body : withRecipients(made.body, picks), policy, personName) : null;
+    return made.ok ? reviewSummary(changing ? made.body : withRecipients(made.body, picks), policy, personName, changing ? [] : recipients.offers.filter((o) => picked.includes(o.id)).map((o) => ({ name: o.name, address: o.address }))) : null;
   })() : null;
   const nextLabel = step.id === 'review'
     ? busy ? 'Asking your owners…' : changing ? 'Ask the owners to sign the change' : 'Ask the owners to sign'
@@ -146,7 +147,7 @@ export default function RuleForm({ staff, policy, recipients, changing, initial,
             <SelectInput id="rule-staff" value={form.staffUserId} aria-describedby={`rule-q-${step.id}`} onChange={(e) => set('staffUserId', e.target.value)}>
               <option value="">{choices.length === 0 ? 'Everyone who can have a rule has one' : 'Choose a person'}</option>
               {choices.map((s) => (
-                <option key={s.userId} value={s.userId}>{s.name}</option>
+                <option key={s.userId} value={s.userId} disabled={s.hasPasskey === false}>{s.hasPasskey === false ? `${s.name} (no passkey yet)` : s.name}</option>
               ))}
             </SelectInput>
           </Field>
@@ -231,6 +232,15 @@ export default function RuleForm({ staff, policy, recipients, changing, initial,
                     {summary.approval.map((l) => <li key={l}>{l}</li>)}
                   </ul>
                 </section>
+                {summary.added && summary.added.length > 0 ? (
+                  <section aria-labelledby="rule-added" className="space-y-1.5">
+                    <h4 id="rule-added" className="text-sm font-extrabold text-[#0c3e48]">Added for everyone with a rule</h4>
+                    <ul className="list-disc space-y-1 pl-5 text-[13px] leading-5 text-[#1F4452]">
+                      {summary.added.map((l) => <li key={l}>{l}</li>)}
+                    </ul>
+                    <p className="text-[13px] leading-5 text-[#326273]">The list is the business’s. Once the owners sign, every staff member and approver who has a rule can pay these recipients alone.</p>
+                  </section>
+                ) : null}
                 {changing ? <Note>What was spent so far carries over to the new rule, so a change does not give a fresh allowance.</Note> : null}
               </>
             ) : <Note tone="error">Something in an earlier answer needs fixing. Go back.</Note>}

@@ -8,18 +8,15 @@ import { Modal, PrimaryButton, QuietButton } from '@/components/transfer/ui';
 import { Card, Loading, Note, Pill, useLoad } from '@/components/wallet/parts';
 import type { ClientRecipient } from '@/lib/recipients-page/wire';
 import type { RuleBody } from '@/lib/team-rules/form';
-import { expiryField } from '@/lib/team-rules/form';
 import { revokeWords, rulesState } from '@/lib/team-rules/states';
-import { ruleSummary } from '@/lib/team-rules/summary';
+import { ruleSummary, rulesIntro } from '@/lib/team-rules/summary';
+import { changeInitial } from '@/lib/team-rules/terms';
 import { housekeeping, recipientOffers, ruleLine, type RuleLineView, type SpendWire } from '@/lib/team-rules/view';
-import { formatUsdc } from '@/lib/fees/copy';
 import RuleForm, { type StaffChoice } from './RuleForm';
 import SignFlow, { askToSign } from './SignFlow';
 
 type Alert = { id: string; severity: string; summary: string; detail: string };
 type FormState = { mode: 'give' } | { mode: 'change'; rule: RuleLineView; initial: Record<string, string> };
-
-const plain = (minor: string) => formatUsdc(BigInt(minor)).replaceAll(',', '');
 
 /**
  * Spending rules (v2 §4.2, decision D2): what each staff member may pay alone,
@@ -35,13 +32,17 @@ const plain = (minor: string) => formatUsdc(BigInt(minor)).replaceAll(',', '');
  * It is always in one honest state: reading, could not be read (with a way to
  * try again), no spending policy yet, no staff yet, no rules yet, or the list.
  */
-export default function RulesSection({ owner, spend, loading, error, onRetry, staff, onChanged }: {
+export default function RulesSection({ owner, spend, loading, error, onRetry, staff, staffLoading, staffError, onRetryStaff, onChanged }: {
   owner: boolean;
   spend: SpendWire | null;
   loading: boolean;
   error: string | null;
   onRetry: () => void;
   staff: StaffChoice[];
+  /** The team read (who can be given a rule) is still going, or failed: an owner is never told "No staff yet" from either. */
+  staffLoading: boolean;
+  staffError: string | null;
+  onRetryStaff: () => void;
   onChanged: () => void;
 }) {
   const [form, setForm] = useState<FormState | null>(null);
@@ -56,7 +57,7 @@ export default function RulesSection({ owner, spend, loading, error, onRetry, st
   const lines = (spend?.rules ?? []).map((r) => ruleLine(r, now));
   // The alert cards name each recipient; the line that only counts them is dropped while they are shown.
   const attention = spend ? housekeeping(spend, { alertsShown: Boolean(owner && alerts.data && alerts.data.alerts.length > 0) }) : [];
-  const state = rulesState({ owner, loading, error, hasPolicy: Boolean(spend?.policy), staff: staff.length, rules: lines.length });
+  const state = rulesState({ owner, loading, error, hasPolicy: Boolean(spend?.policy), staff: staff.length, rules: lines.length, staffLoading, staffError });
   const free = staff.filter((s) => !s.hasRule);
   const offers = recipientOffers(spend?.policy ?? null, saved.data ?? []);
 
@@ -110,11 +111,9 @@ export default function RulesSection({ owner, spend, loading, error, onRetry, st
       ) : null}
     >
       <div className="space-y-4">
-        <p className="text-[13px] leading-5 text-[#326273]">
-          Inside a rule a staff member pays alone, from their own device, to recipients you have verified. A payment over the cap, over their limit or to anyone else goes to the owners.{spend?.policy ? ` A payment that takes what they have paid one recipient above ${formatUsdc(BigInt(spend.policy.secondApprovalThresholdMinor))} USDC also needs an owner’s approval, whoever makes it.` : ''} Your own changes take effect at once.
-        </p>
+        <p className="text-[13px] leading-5 text-[#326273]">{rulesIntro({ owner, thresholdMinor: spend?.policy?.secondApprovalThresholdMinor ?? null })}</p>
 
-        {state === 'loading' ? <Loading label="Reading the rules from the chain…" /> : null}
+        {state === 'loading' ? <Loading label={loading ? 'Reading the rules from the chain…' : 'Reading your team…'} /> : null}
         {state === 'error' ? (
           <div className="space-y-3">
             <Note tone="error">{error}</Note>
@@ -122,6 +121,12 @@ export default function RulesSection({ owner, spend, loading, error, onRetry, st
           </div>
         ) : null}
 
+        {state === 'staff_error' || (owner && staffError && state === 'list') ? (
+          <div className="space-y-3">
+            <Note tone="error">{state === 'staff_error' ? staffError : `${staffError} Until it loads, a new rule cannot be given.`}</Note>
+            <QuietButton type="button" onClick={onRetryStaff}><RefreshCw className="h-4 w-4" aria-hidden="true" />Try again</QuietButton>
+          </div>
+        ) : null}
         {attention.length > 0 ? (
           <ul className="space-y-2" aria-label="Needs your attention">
             {attention.map((a) => (
@@ -165,9 +170,8 @@ export default function RulesSection({ owner, spend, loading, error, onRetry, st
           <ul className="space-y-3" aria-label="Rules">
             {lines.map((l, i) => {
               const raw = spend.rules[i];
-              const current = raw.allowances.find((a) => a.current) ?? null;
-              const summary = ruleSummary(raw, spend.policy, now);
-              const renews = l.renewsIn ? `${l.renewsIn}${l.renews ? ` (${l.renews.replace(/^Renews /, '')})` : ''}` : l.renews;
+                            const summary = ruleSummary(raw, spend.policy, now, { owner });
+              const renews = l.renewsLine;
               return (
                 <li key={`${l.userId ?? raw.spender}-${i}`} className="rounded-xl border border-[#326273]/12 bg-white p-3.5">
                   <div className="flex flex-wrap items-center justify-between gap-2">
@@ -177,7 +181,7 @@ export default function RulesSection({ owner, spend, loading, error, onRetry, st
                   <p className="mt-0.5 text-[13px] text-[#326273]">Up to {l.perPayment} a payment</p>
                   {l.usage ? (
                     <div className="mt-2 space-y-1">
-                      <div role="progressbar" aria-label={`${l.name}: ${l.usage.text}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={l.usage.percent} className="h-2 overflow-hidden rounded-full bg-[#F6F0ED]">
+                      <div role="progressbar" aria-label={`${l.name}: ${l.usage.text}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={l.usage.percent} className="h-1.5">
                         <div className="h-full rounded-full bg-[#0d6370]" style={{ width: `${l.usage.percent}%` }} />
                       </div>
                       <p className="text-[13px] text-[#1F4452]">{l.usage.text}</p>
@@ -216,18 +220,7 @@ export default function RulesSection({ owner, spend, loading, error, onRetry, st
                           aria-label={`Change the rule for ${l.name}`}
                           onClick={() => {
                             setProblem(null);
-                            setForm({
-                              mode: 'change',
-                              rule: l,
-                              initial: {
-                                staffUserId: l.userId as string,
-                                perPayment: plain(raw.perPaymentMaxMinor),
-                                ...(current?.window ? { period: current.window.period === 'month' ? 'month' : 'day', cap: plain(current.window.limitMinor) } : {}),
-                                ...(current?.lifetimeCapMinor ? { lifetimeCap: plain(current.lifetimeCapMinor) } : {}),
-                                // A change keeps the end date the rule has; only a new rule starts from the default.
-                                ...(expiryField(current?.expiresAtMs, now) ? { expires: expiryField(current?.expiresAtMs, now) as string } : {}),
-                              },
-                            });
+                            setForm({ mode: 'change', rule: l, initial: changeInitial(raw, now) });
                           }}
                         >
                           Change

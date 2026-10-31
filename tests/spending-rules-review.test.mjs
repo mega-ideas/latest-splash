@@ -114,9 +114,9 @@ test('Change opens with the whole rule: the cap, no lifetime total, and the real
   const { rule: r } = await changedAfterSpending(null);
   const { changeInitial } = await import('../lib/team-rules/terms.ts');
   const initial = changeInitial(r, T0);
-  assert.equal(initial.cap, '300');
+  assert.equal(initial.cap, '300.00');
   assert.equal(initial.period, 'day');
-  assert.equal(initial.perPayment, '200');
+  assert.equal(initial.perPayment, '200.00');
   assert.equal('lifetimeCap' in initial, false, 'an owner who set none is not handed the bridge’s');
   assert.equal(initial.expires, new Date(Number(t0 + 300n * DAY) - 1).toISOString().slice(0, 10));
 });
@@ -128,7 +128,7 @@ test('a lifetime total the owner set is the sum of the pieces, and what is left 
   assert.match(text, /No more than 900\.00 USDC in all under this rule \(900\.00 USDC left\)/, text);
   assert.equal(ruleLine(r, T0).lifetime, '900.00 of 900.00 USDC left in all');
   const { changeInitial } = await import('../lib/team-rules/terms.ts');
-  assert.equal(changeInitial(r, T0).lifetimeCap, '900', 'asking again for 900 less nothing spent under the new allowances is 900 left, as it is now');
+  assert.equal(changeInitial(r, T0).lifetimeCap, '900.00', 'asking again for 900 less nothing spent under the new allowances is 900 left, as it is now');
 });
 
 test('what has been paid is summed across the rule’s allowances, and says since when', () => {
