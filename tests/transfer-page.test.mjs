@@ -68,7 +68,8 @@ test('a bank payout is never checked against a Sui address field, and no copy sa
   const bank = read('components/transfer/DetailsBank.tsx');
   assert.match(bank, /checkPayeeField\('bank', form\.accountNumber\)/);
   assert.doesNotMatch(bank, /checkSuiAddress|isValidSuiAddress/);
-  const wallet = read('components/transfer/DetailsWallet.tsx');
+  // The form that saves a wallet recipient is shared with Recipients (v2 brief 5.9).
+  const wallet = read('components/transfer/DetailsWallet.tsx') + read('components/recipients/WalletRecipientForm.tsx');
   assert.match(wallet, /checkPayeeField\(kind === 'CROSS_CHAIN' \? 'cross_chain' : kind === 'EXCHANGE' \? 'exchange' : 'sui_wallet'/);
   assert.match(wallet, /field\.address/, 'the normalised long address is what is sent');
   assert.doesNotMatch(code(flowSource + read("lib/transfer/addresses.ts")), /invalid Sui address/i);
@@ -78,7 +79,7 @@ test('step 2 for a business on Splash searches by registered name, and a wallet 
   const business = read('components/transfer/DetailsBusiness.tsx');
   assert.match(business, /Their registered business name/);
   assert.match(business, /\/api\/wallet\/transfers\/businesses\?q=/);
-  const wallet = read('components/transfer/DetailsWallet.tsx');
+  const wallet = read('components/transfer/DetailsWallet.tsx') + read('components/recipients/WalletRecipientForm.tsx');
   for (const title of ['An exchange account', 'A wallet they hold', 'USDC on another chain']) assert.match(wallet, new RegExp(title), title);
   assert.match(wallet, /A payment on Sui is final once it is sent/);
 });
