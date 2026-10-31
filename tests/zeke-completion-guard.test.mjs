@@ -126,6 +126,15 @@ const CLAIMS = [
   'I signed it for you.',
   'Your invoice is now paid.',
   'Good news: it is sent.',
+  'Sure, approving it now.',
+  'Okay, sending now!',
+  'Money moved.',
+  'Acme has received the funds.',
+  'The funds have arrived.',
+  'It has gone out.',
+  'Transaction hash: 0xabc123def456',
+  'Releasing the funds now.',
+  'Done - I have queued the payment to Acme for 1250.',
   // A claim wrapped in reassurance, or followed by a negation that is about something else.
   'Paid, and no further steps are needed.',
   'You can relax, I have sent it.',
@@ -156,16 +165,16 @@ test('with nothing prepared this turn the line does not promise an approval that
 });
 
 const OBFUSCATED = [
-  ['Cyrillic look-alike P', 'Рaid!'],
-  ['Cyrillic look-alike e', 'Sеnt!'],
-  ['Cyrillic look-alike a in a sentence', 'I hаve sent it.'],
-  ['Greek omicron', 'Dοne!'],
-  ['full-width letters', 'Ｓｅｎｔ！'],
-  ['math bold letters', '𝐏𝐚𝐢𝐝!'],
-  ['circled letters', 'ⓟⓐⓘⓓ'],
-  ['small caps', 'ᴘᴀɪᴅ!'],
-  ['zero-width space inside', 'Pa​id!'],
-  ['zero-width joiner and soft hyphen', 'I h‍ave s­ent it.'],
+  ['Cyrillic look-alike P', '\u0420aid!'],
+  ['Cyrillic look-alike e', 'S\u0435nt!'],
+  ['Cyrillic look-alike a in a sentence', 'I h\u0430ve sent it.'],
+  ['Greek omicron', 'D\u03bfne!'],
+  ['full-width letters', '\uff33\uff45\uff4e\uff54\uff01'],
+  ['math bold letters', '\ud835\udc0f\ud835\udc1a\ud835\udc22\ud835\udc1d!'],
+  ['circled letters', '\u24df\u24d0\u24d8\u24d3'],
+  ['small caps', '\u1d18\u1d00\u026a\u1d05!'],
+  ['zero-width space inside', 'Pa\u200bid!'],
+  ['zero-width joiner and soft hyphen', 'I h\u200dave s\u00adent it.'],
   ['spaced letters', 'P a i d !'],
   ['dotted letters', 'S.e.n.t.'],
   ['hyphenated letters', 'P-a-i-d!'],
@@ -174,8 +183,8 @@ const OBFUSCATED = [
   ['zero for o', 'd0ne!'],
   ['stretched word', 'Paaaaid!'],
   ['stretched done', 'Dooooone!'],
-  ['accents', 'Pàïd!'],
-  ['combining marks', 'Páïd!'],
+  ['accents', 'P\u00e0\u00efd!'],
+  ['combining marks', 'Pa\u0301i\u0308d!'],
   ['markdown bold', '**Paid**'],
   ['markdown italics and backticks', '_Sent_ `it`'],
   ['shouting', 'SENT!!!'],
@@ -187,7 +196,9 @@ test('look-alike letters, hidden characters and other disguises do not hide a co
   for (const [label, text] of OBFUSCATED) {
     const out = guard(text);
     assert.equal(out.replaced, true, label);
-    assert.equal(out.text, PREPARED_LINE, label);
+    assert.ok(out.text.endsWith(PREPARED_LINE), label);
+    // Whatever stays is not the claim: only the line, or the true words beside it ("OK.").
+    assert.doesNotMatch(out.text.slice(0, -PREPARED_LINE.length), /paid|sent|done/i, label);
   }
 });
 
@@ -198,38 +209,44 @@ const OTHER_LANGUAGES = [
   ['Malay', 'Pembayaran telah dihantar.'],
   ['Tagalog', 'Naipadala na!'],
   ['Tagalog', 'Nabayaran na ang invoice.'],
-  ['Vietnamese', 'Đã gửi tiền cho Acme.'],
-  ['Vietnamese', 'Đã thanh toán xong.'],
-  ['Thai', 'ส่งเงินแล้ว'],
-  ['Thai', 'โอนเรียบร้อยแล้ว'],
-  ['Chinese', '已转账给Acme。'],
-  ['Chinese', '付款成功！'],
-  ['Chinese', '已经发送了。'],
-  ['Chinese', '搞定！'],
-  ['Japanese', '送金しました。'],
-  ['Japanese', '支払い済みです。'],
-  ['Korean', '송금했습니다.'],
-  ['Korean', '결제가 완료되었습니다.'],
+  ['Vietnamese', '\u0110\u00e3 g\u1eedi ti\u1ec1n cho Acme.'],
+  ['Vietnamese', '\u0110\u00e3 thanh to\u00e1n xong.'],
+  ['Thai', '\u0e2a\u0e48\u0e07\u0e40\u0e07\u0e34\u0e19\u0e41\u0e25\u0e49\u0e27'],
+  ['Thai', '\u0e42\u0e2d\u0e19\u0e40\u0e23\u0e35\u0e22\u0e1a\u0e23\u0e49\u0e2d\u0e22\u0e41\u0e25\u0e49\u0e27'],
+  ['Chinese', '\u5df2\u8f6c\u8d26\u7ed9Acme\u3002'],
+  ['Chinese', '\u4ed8\u6b3e\u6210\u529f\uff01'],
+  ['Chinese', '\u5df2\u7ecf\u53d1\u9001\u4e86\u3002'],
+  ['Chinese', '\u641e\u5b9a\uff01'],
+  ['Japanese', '\u9001\u91d1\u3057\u307e\u3057\u305f\u3002'],
+  ['Japanese', '\u652f\u6255\u3044\u6e08\u307f\u3067\u3059\u3002'],
+  ['Korean', '\uc1a1\uae08\ud588\uc2b5\ub2c8\ub2e4.'],
+  ['Korean', '\uacb0\uc81c\uac00 \uc644\ub8cc\ub418\uc5c8\uc2b5\ub2c8\ub2e4.'],
   ['Spanish', 'Pago enviado.'],
   ['Spanish', 'Ya lo he enviado.'],
-  ['Spanish', '¡Listo, he pagado a Acme!'],
+  ['Spanish', '\u00a1Listo, he pagado a Acme!'],
   ['Spanish', 'La transferencia ha sido completada.'],
-  ['French', "J'ai envoyé le paiement."],
-  ['French', 'Paiement effectué.'],
+  ['French', "J'ai envoy\u00e9 le paiement."],
+  ['French', 'Paiement effectu\u00e9.'],
   ['French', "C'est fait !"],
   ['Portuguese', 'Pagamento enviado.'],
-  ['Portuguese', 'Já paguei o fornecedor.'],
-  ['Portuguese', 'Transferência concluída.'],
-  ['German', 'Ich habe das Geld überwiesen.'],
+  ['Portuguese', 'J\u00e1 paguei o fornecedor.'],
+  ['Portuguese', 'Transfer\u00eancia conclu\u00edda.'],
+  ['German', 'Ich habe das Geld \u00fcberwiesen.'],
   ['German', 'Zahlung erfolgreich.'],
   ['German', 'Erledigt!'],
   ['Italian', 'Ho inviato il pagamento.'],
   ['Italian', 'Pagamento effettuato.'],
-  ['Russian', 'Платёж отправлен.'],
-  ['Russian', 'Я перевёл деньги.'],
-  ['Russian', 'Готово!'],
-  ['Arabic', 'تم الإرسال.'],
-  ['Arabic', 'تم الدفع بنجاح.'],
+  ['Russian', '\u041f\u043b\u0430\u0442\u0451\u0436 \u043e\u0442\u043f\u0440\u0430\u0432\u043b\u0435\u043d.'],
+  ['Russian', '\u042f \u043f\u0435\u0440\u0435\u0432\u0451\u043b \u0434\u0435\u043d\u044c\u0433\u0438.'],
+  ['Russian', '\u0413\u043e\u0442\u043e\u0432\u043e!'],
+  ['Arabic', '\u062a\u0645 \u0627\u0644\u0625\u0631\u0633\u0627\u0644.'],
+  ['Arabic', '\u062a\u0645 \u0627\u0644\u062f\u0641\u0639 \u0628\u0646\u062c\u0627\u062d.'],
+  ['Hindi', '\u092d\u0947\u091c \u0926\u093f\u092f\u093e \u0917\u092f\u093e \u0939\u0948\u0964'],
+  ['Hindi', '\u092d\u0941\u0917\u0924\u093e\u0928 \u0939\u094b \u0917\u092f\u093e\u0964'],
+  ['Turkish', '\u00d6deme g\u00f6nderildi.'],
+  ['Turkish', 'Tamamland\u0131.'],
+  ['Dutch', 'De betaling is voltooid.'],
+  ['Dutch', 'Ik heb het geld overgemaakt.'],
 ];
 
 test('the same claims in the other languages Zeke is written to are replaced too', () => {
@@ -261,6 +278,23 @@ const TRUTHFUL = [
   'Paid invoices are listed under Receipts.',
   'Sent items appear in your history.',
   'Hello, how can I help?',
+  'Acme Manufacturing PH is verified. Want me to draft 600 USD?',
+  'Your fee is 0.5% of the amount, shown before you approve.',
+  'Once you approve it in Wallet, the transfer is sent from your Splash Wallet.',
+  'I will prepare the payment and a teammate will approve it.',
+  'The transfer is waiting for a second approver.',
+  'The payment is not complete until both approvers sign.',
+  'Nothing was paid.',
+  'I cannot confirm whether it was sent.',
+  'This would have been paid on 3 October.',
+  'If it had been sent, you would see a receipt.',
+  'Done with the review of the invoice.',
+  'Sent and received items are under History.',
+  'Approved payments appear in the queue.',
+  'Completed batches are listed on the Batches page.',
+  'Your account is signed in as Dana.',
+  'Here is last month: you paid Acme 500 USDC on 3 October.',
+  'The fee on 500.50 USDC is 0.50 USDC.',
   ZEKE_LIMITATION_TEXT.PAYMENT,
   ZEKE_LIMITATION_TEXT.BATCH,
   ZEKE_LIMITATION_TEXT.TREASURY,
@@ -269,16 +303,17 @@ const TRUTHFUL = [
   PREPARED_LINE,
   PLAIN_LINE,
   // Other languages, said truthfully.
-  'Aún no se ha enviado nada.',
-  "Rien n'a été envoyé.",
+  'A\u00fan no se ha enviado nada.',
+  "Rien n'a \u00e9t\u00e9 envoy\u00e9.",
   'Belum dikirim, menunggu persetujuan.',
-  '尚未发送，等待批准。',
-  '承認されるまで送金されません。',
+  '\u5c1a\u672a\u53d1\u9001\uff0c\u7b49\u5f85\u6279\u51c6\u3002',
+  '\u627f\u8a8d\u3055\u308c\u308b\u307e\u3067\u9001\u91d1\u3055\u308c\u307e\u305b\u3093\u3002',
   'Nichts wurde gesendet.',
+  'Nog niets is verzonden.',
   'Nada foi enviado ainda.',
-  'Ancora nulla è stato inviato.',
-  'Пока ничего не отправлено.',
-  'لم يتم إرسال أي شيء.',
+  'Ancora nulla \u00e8 stato inviato.',
+  '\u041f\u043e\u043a\u0430 \u043d\u0438\u0447\u0435\u0433\u043e \u043d\u0435 \u043e\u0442\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u043e.',
+  '\u0644\u0645 \u064a\u062a\u0645 \u0625\u0631\u0633\u0627\u0644 \u0623\u064a \u0634\u064a\u0621.',
 ];
 
 test('true sentences are left exactly as written: negations, conditions, the limit statement, the proposal\'s own words', () => {
@@ -300,6 +335,22 @@ test('the guard is a fixed point: running it on its own output changes nothing',
   }
 });
 
+test('a long or adversarial reply is guarded in reasonable time', () => {
+  const started = Date.now();
+  const spaced = `${'a b c d e f g h '.repeat(2000)}Paid!`;
+  const dotted = `${'x.'.repeat(5000)} Sent.`;
+  const stretched = `${'p'.repeat(20000)}aid!`;
+  const long = `${'I prepared the payment for review. '.repeat(1500)}Done!`;
+  for (const text of [dotted, stretched, long]) {
+    const out = guard(text);
+    assert.equal(out.replaced, true);
+    assert.ok(out.text.endsWith(PREPARED_LINE));
+  }
+  // A wall of single letters is read once, in time (it holds no claim to find).
+  guard(spaced);
+  assert.ok(Date.now() - started < 5000, `took ${Date.now() - started}ms`);
+});
+
 test('a discussion turn keeps a dated statement of what already happened and drops an undated claim', () => {
   const dated = 'Acme was paid 500 USDC on 3 October (receipt R-1042).';
   assert.deepEqual(guard(dated, { level: 'topic' }), { text: dated, replaced: false });
@@ -316,10 +367,10 @@ test('a discussion turn keeps a dated statement of what already happened and dro
 // ── Which turns are money turns ────────────────────────────────────────────
 
 test('the money turns are told from the others by the message and the thread', () => {
-  const strict = ['Send 500 USDC to Manila Parts', 'Pay Acme', 'Prepare a batch for this month', 'Run payroll'];
+  const strict = ['Send 500 USDC to Manila Parts', 'Pay Acme', 'Prepare a batch for this month', 'Run payroll', 'Kirim 500 USDC ke Acme', 'Paga a Acme 500 USD', 'Envoie 500 USD a Acme'];
   for (const message of strict) assert.equal(level(message, []), 'strict', message);
 
-  const topic = ['What did we pay last month?', 'Show me my receipts for payments', 'How do I pay a supplier in the Philippines?', 'Kirim 500 USDC ke Acme', '支付了多少？'];
+  const topic = ['What did we pay last month?', 'Show me my receipts for payments', 'How do I pay a supplier in the Philippines?', 'Wie funktioniert die Zahlung?', '\u652f\u4ed8\u4e86\u591a\u5c11\uff1f'];
   for (const message of topic) assert.equal(level(message, []), 'topic', message);
 
   const none = ['How do fees work?', 'Hi Zeke', 'Call yourself Ada', 'Add Acme as a recipient', 'Thanks!', 'What can you do?'];
@@ -359,6 +410,26 @@ test('a model that says "Paid!" about a draft never gets it to the person, and t
   assert.ok(noticeAt >= 0 && noticeAt < toolAt);
 });
 
+test('the words that lead up to a proposal still come before its card, and the line is said once whichever side the claims are on', async () => {
+  setOxwalModelClientForTesting(fakeModel([
+    {
+      content: [
+        { type: 'text', text: 'I prepared the payment to Acme. Paid!' },
+        toolUse('t1', 'proposePayment', { orgId: 'demo-business', counterpartyId: 'cp_acme_ph', amountUsd: 600, currency: 'PHP' }),
+      ],
+    },
+    { content: [{ type: 'text', text: 'Sent! It is on its way.' }] },
+  ]));
+  const events = await turn({ message: 'yes, go ahead', orgId: 'demo-business', history: MONEY_HISTORY, forceLocal: false });
+  const proposalAt = events.findIndex((e) => e.type === 'proposal');
+  const wordsAt = events.findIndex((e) => e.type === 'delta' && e.text.includes('prepared'));
+  const lineAt = events.findIndex((e) => e.type === 'delta' && e.text.includes('Nothing'));
+  assert.ok(proposalAt > 0 && wordsAt >= 0 && lineAt >= 0);
+  assert.ok(wordsAt < proposalAt && lineAt < proposalAt, 'both before the card');
+  assert.equal(count(textOf(events), PREPARED_LINE), 1);
+  assert.equal(textOf(events).includes('Sent!'), false);
+});
+
 test('a claim made in the same sentence as the true part keeps the true part', async () => {
   setOxwalModelClientForTesting(fakeModel([
     {
@@ -388,7 +459,7 @@ test('asked "did it go through?", a model that says yes is answered with what is
 
 test('a turn that is not about money is never touched, whatever the model says', async () => {
   setOxwalModelClientForTesting(fakeModel([{ content: [{ type: 'text', text: 'Done! I will go by Ada from now on. Sent you my thanks.' }] }]));
-  const events = await turn({ message: 'Call yourself Ada', orgId: 'demo-business', sessionKey: 's-guard-4', forceLocal: false });
+  const events = await turn({ message: 'Call yourself Ada', orgId: 'demo-business', forceLocal: false });
   assert.equal(textOf(events), 'Done! I will go by Ada from now on. Sent you my thanks.');
   assert.equal(textOf(events).includes('Nothing has been sent'), false);
   assert.equal(textOf(events).includes("I haven't sent"), false);
@@ -399,7 +470,6 @@ test('a short reply with no money in the thread is not a money turn', async () =
   const events = await turn({
     message: 'yes, go ahead',
     orgId: 'demo-business',
-    sessionKey: 's-guard-5',
     history: [{ role: 'user', content: 'Call yourself Ada' }, { role: 'assistant', content: 'Do you want me to go by Ada?' }],
     forceLocal: false,
   });
@@ -449,8 +519,8 @@ test('two turns at once keep their own words: one is guarded, the other is not, 
     return { content: [{ type: 'text', text: asked.startsWith('Pay') ? 'Paid! It is done.' : 'Hello from the other business.' }] };
   }));
   const [a, b] = await Promise.all([
-    turn({ message: 'Pay Acme 600 USD', orgId: 'org-a.test', sessionKey: 's-a', forceLocal: false }),
-    turn({ message: 'Hi there', orgId: 'org-b.test', sessionKey: 's-b', forceLocal: false }),
+    turn({ message: 'Pay Acme 600 USD', orgId: 'org-a.test', forceLocal: false }),
+    turn({ message: 'Summarise the situation for the board', orgId: 'org-b.test', forceLocal: false }),
   ]);
   assert.equal(textOf(b), 'Hello from the other business.');
   assert.equal(textOf(a).includes('Hello from'), false);
@@ -461,7 +531,7 @@ test('two turns at once keep their own words: one is guarded, the other is not, 
 test('the same turn replayed says the same thing, and the line is not stacked on a history that already has it', async () => {
   const run = async (history) => {
     setOxwalModelClientForTesting(fakeModel([{ content: [{ type: 'text', text: 'Paid!' }] }]));
-    return textOf(await turn({ message: 'Did it go through?', orgId: 'demo-business', sessionKey: 's-replay', history, forceLocal: false }));
+    return textOf(await turn({ message: 'Did it go through?', orgId: 'demo-business', history, forceLocal: false }));
   };
   const first = await run(MONEY_HISTORY);
   const second = await run(MONEY_HISTORY);

@@ -2277,3 +2277,25 @@ These are the items the security/ops team should **always** keep eyes on. Each h
 5. **Treat the four scaffold modules as deleted for production purposes** until rewritten. Move them under `move/sources/scaffolds/` and exclude from `Move.toml::[package].sources` until ready.
 
 This report should be re-run after any change to `move/sources/` and committed alongside the change.
+
+## v2 Phase 3 - Zeke never says money moved - 2026-10-31
+
+Design: `docs/v2/phase2-zeke.md` section 2a. Tests:
+`tests/zeke-completion-guard.test.mjs`.
+
+- **A model sentence cannot assert execution.** Zeke cannot send, approve or
+  sign, but a model can write "Paid!" about a draft (and a prompt-injected
+  invoice can ask it to). On any turn that proposes, prepares or discusses a
+  money movement, `guardCompletionClaims` (lib/agent/oxwal.ts) removes the
+  sentences that say money has been or is being sent, paid or done, and the
+  reply carries a fixed line instead: "Nothing has been sent. It is waiting
+  for approval." (or, when nothing was prepared, "I haven't sent anything.
+  I can't approve or send payments, so a person on your team does that.").
+- **Code, not prompt.** Deterministic, no model, no environment read. It reads
+  text as a person does (look-alike letters, hidden characters, spaced or
+  dotted letters, small caps, accents, stretched words) and in the languages
+  of the corridors and the common ones. Negated, conditional and fixed Splash
+  copy stay; turns that are not about money are never touched.
+- **Fails towards the truth.** The thread can only tighten a turn. A claim the
+  patterns miss is not made true by anything; a true sentence caught by
+  mistake costs a line, never money.

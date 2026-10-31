@@ -61,6 +61,64 @@ model:
 Each statement arrives as a `notice` event followed by its text as `delta`s, so
 it is in the thread and in the history the client sends back.
 
+## 2a. Zeke never says money moved
+
+Zeke cannot send, approve or sign, so a sentence that says money **has been or
+is being** sent, paid, transferred or done is false whatever the model meant
+by it (a prompt-injected invoice can ask for exactly that). The prompt says so
+("Never say that money has been, was or is being sent..."), but the control is
+code: `guardCompletionClaims` in `lib/agent/oxwal.ts`.
+
+- **Where.** `runOxwalAgent` holds the turn's own words until it is known
+  whether the turn moved money (a money tool, a proposal, a prepared
+  transfer) and whether a draft is waiting: they are released when a proposal
+  or prepared transfer arrives (so what led up to a card still comes before
+  it) and at the end of the turn. They go out unchanged (the same pieces) or
+  with the claiming sentences removed, and the fixed line is said once. The limitation statement, the first-recipient nudge and every other
+  notice are Splash's own fixed words and are not part of this.
+- **Which turns.** `moneyTurnLevel` and what the turn did decide:
+  - *strict*: the classifier says money-moving, or the turn called a money
+    tool or produced a proposal or prepared transfer, or it is a short reply
+    ("yes, go ahead", "did it go through?", "status") in a thread about
+    money. Every claim is removed.
+  - *topic*: the message talks about payments (history, how to pay, in the
+    languages above) without moving any. A claim is removed unless the
+    sentence is dated or points at a record ("Acme was paid 500 USDC on 3
+    October"), and a bare "Done!" is just a word.
+  - *none*: anything else. The reply is never touched, so "Done! I will go by
+    Ada" on a rename stays.
+  The thread is client state: it can only move a turn from none to strict,
+  never the other way.
+- **What is a claim.** A sentence that says it was done ("Paid!", "Sent",
+  "Done, I transferred it", "I've paid Acme", "It has been sent", "The payment
+  went through", "Payment successful"), is being done ("I'm sending it now",
+  "on its way", "processing your payment") or was approved or signed by Zeke.
+  Read the way a person reads it: compatibility forms, look-alike Cyrillic and
+  Greek letters, small caps, accents, hidden and zero-width characters,
+  spaced, dotted or hyphenated letters, digits for letters, stretched words
+  and markdown all fold to the word. The same claims are caught in Indonesian,
+  Malay, Tagalog, Vietnamese, Thai, Chinese, Japanese, Korean, Spanish, French,
+  Portuguese, German, Italian, Dutch, Turkish, Russian, Arabic and Hindi.
+- **What is not.** A negation in the same clause ("has not been sent",
+  "nothing was paid"), a condition or a modal ("once approved it will be
+  sent", "can be sent", "if it had been sent"), a question, and Splash's own
+  copy (the limitation statement, the proposal's words). A sentence is dropped
+  whole: a claim tucked into reassurance ("Paid, and no further steps are
+  needed") goes with the reassurance.
+- **The fixed line.** Where claims were removed, the reply ends with
+  "Nothing has been sent. It is waiting for approval." when a payment was
+  prepared this turn, and with "I haven't sent anything. I can't approve or
+  send payments, so a person on your team does that." when none was, so the
+  line never promises an approval that does not exist. A reply with no claim
+  gets no extra line.
+- **Deterministic and idempotent.** No model reads the model, nothing reads
+  the environment, and the same text gives the same answer every time; the
+  guard's own output is a fixed point. `tests/zeke-completion-guard.test.mjs`
+  covers hostile phrasing, other languages, truthful sentences that must
+  stay, turns that must not be touched, two turns at once, and production.
+
+The opening message and the Zeke page header keep the fixed limit sentence.
+
 ## 3. Once per session
 
 "Once" is recorded on the server, in `zeke_session_notices` (migration 0049):

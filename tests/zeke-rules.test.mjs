@@ -622,7 +622,7 @@ test('a request for a report or summary of payments is a read, not a payment', (
 
 test('model path: when the model writes text and then calls a money tool, the statement comes before its text', async () => {
   setOxwalModelClientForTesting(fakeModel([], [
-    { content: [{ type: 'text', text: 'Done - I have queued the payment to Acme for 1250.' }, toolUse('t1', 'proposePayment', { orgId: 'demo-business', counterpartyId: 'cp_acme_ph', amountUsd: 1250, currency: 'PHP' })] },
+    { content: [{ type: 'text', text: 'I have queued the payment to Acme for 1250.' }, toolUse('t1', 'proposePayment', { orgId: 'demo-business', counterpartyId: 'cp_acme_ph', amountUsd: 1250, currency: 'PHP' })] },
     { content: [{ type: 'text', text: 'It is in the queue.' }] },
   ]));
   const events = await turn({ message: 'yes, go ahead', orgId: 'demo-business', sessionKey: 's-text-first', forceLocal: false });
@@ -636,14 +636,14 @@ test('model path: when the model writes text and then calls a money tool, the st
 
 test('model path: an approval request with no tool call still gets the statement', async () => {
   setOxwalModelClientForTesting(fakeModel([], [
-    { content: [{ type: 'text', text: 'Sure, approving it now.' }] },
+    { content: [{ type: 'text', text: 'Sure, I can look at that one.' }] },
   ]));
   assert.deepEqual(classifyZekeIntent('Approve the Acme payment'), { class: 'MONEY_MOVING', action: 'PAYMENT' });
   // Named by id so the desk's fixed answers step aside and the model replies.
   const events = await turn({ message: 'Approve the cp_acme_ph payment', orgId: 'demo-business', sessionKey: 's-approve', forceLocal: false });
-  assert.ok(events.some((e) => e.type === 'delta' && e.text.includes('approving')), 'the model answered');
+  assert.ok(events.some((e) => e.type === 'delta' && e.text.includes('look at that')), 'the model answered');
   assert.ok(textOf(events).startsWith(ZEKE_LIMITATION_TEXT.PAYMENT));
-  assert.ok(firstNotice(events, 'MONEY_LIMIT') < events.findIndex((e) => e.type === 'delta' && e.text.includes('approving')));
+  assert.ok(firstNotice(events, 'MONEY_LIMIT') < events.findIndex((e) => e.type === 'delta' && e.text.includes('look at that')));
 });
 
 test('a money turn that prepares nothing does not open with "I can prepare this payment"', async () => {
