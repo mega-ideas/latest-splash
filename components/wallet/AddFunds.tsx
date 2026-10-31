@@ -180,7 +180,7 @@ export default function AddFunds({ funding, canAdd, onChanged }: { funding: Fund
               {!intent ? (
                 <>
                   <Field label="Amount to arrive" hint="USDC" htmlFor="af-amount">
-                    <TextInput id="af-amount" value={amount} onChange={(e) => { setAmount(e.target.value.replace(/[^\d.]/g, '')); setQuote(null); }} inputMode="decimal" mono placeholder="1,000.00" autoComplete="off" />
+                    <TextInput id="af-amount" value={amount} onChange={(e) => { setAmount(e.target.value.replace(/[^\d.]/g, '')); setQuote(null); if (!intent) key.current = null; }} inputMode="decimal" mono placeholder="1,000.00" autoComplete="off" />
                   </Field>
                   {quote ? (
                     <div className="rounded-xl border border-[#326273]/15 bg-white p-4 text-sm text-[#1F4452]" aria-live="polite">

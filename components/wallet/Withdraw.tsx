@@ -63,6 +63,7 @@ export default function Withdraw({ canAsk, owner, onChanged }: { canAsk: boolean
   const [key, setKey] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [request, setRequest] = useState<SigningView | null>(null);
 
   if (data.loading) return <Card id="withdraw" title="Withdraw to your bank"><Loading label="Loading…" /></Card>;
@@ -76,6 +77,7 @@ export default function Withdraw({ canAsk, owner, onChanged }: { canAsk: boolean
     if (!chosen) return;
     setBusy(true);
     setError(null);
+    setNotice(null);
     const answer = await call<{ quote?: Quote }>('/api/wallet/withdrawals/quotes', { body: { destinationId: chosen.id, amountMinor: toMinor(amount).toString() } });
     setBusy(false);
     if (!answer.ok || !answer.body?.quote) {
@@ -84,14 +86,14 @@ export default function Withdraw({ canAsk, owner, onChanged }: { canAsk: boolean
       return;
     }
     setQuote(answer.body.quote);
-    if (!key) setKey(newKey('wd'));
+    setKey(newKey('wd'));
   }
 
   async function send() {
     if (!chosen || !quote || !key) return;
     setBusy(true);
     setError(null);
-    const answer = await call<{ request?: SigningView | null }>('/api/wallet/withdrawals', {
+    const answer = await call<{ request?: SigningView | null; created?: boolean }>('/api/wallet/withdrawals', {
       key,
       body: { destinationId: chosen.id, amountMinor: toMinor(amount).toString(), acceptedReceiveMinor: quote.receiveMinor, maxFeeMinor: quote.maxFeeMinor },
     });
@@ -101,6 +103,8 @@ export default function Withdraw({ canAsk, owner, onChanged }: { canAsk: boolean
       return;
     }
     setRequest(answer.body?.request ?? null);
+    setKey(null);
+    setNotice(answer.body?.created === false ? 'This withdrawal was already started, so no second one was made. Its status is in the list below.' : null);
     setQuote(null);
     setAmount('');
     data.reload();
@@ -148,6 +152,7 @@ export default function Withdraw({ canAsk, owner, onChanged }: { canAsk: boolean
               </div>
             ) : null}
             {error ? <Note tone="error">{error}</Note> : null}
+            {notice ? <Note tone="warn">{notice}</Note> : null}
             <div className="flex flex-wrap gap-2">
               {quote ? (
                 <>
