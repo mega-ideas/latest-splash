@@ -131,6 +131,24 @@ The invoice's key is the intent id; the fee is quoted and signed as `max_fee`;
 executes, the invoice is told it was paid only if the transaction paid the
 recipient and the amount that were asked (`reportTransferSettled`).
 
+## After the independent review
+
+- A staff member's payment keeps its link to the signing request: accepting the
+  ask writes the request back to the payment, and receipts and invoice
+  settlement also find a request through its ask. The fee the staff member was
+  shown is stored on the ask; owners sign it by default, a lower fee is refused
+  and a higher one needs `confirmFeeChange`.
+- A second request on one intent id while the first is being made answers 409
+  `in_progress`; a claim with nothing behind it for two minutes is reclaimed.
+- The Review step shows the full address and country, and asks for a check when
+  the recipient was saved in the last 24 hours. The signing screen signs the
+  bytes that were reviewed and checks them against what was approved.
+- An owner can stop sharing a receipt (`DELETE .../share`); the public page is
+  not indexed. The e-invoice is remade at once when corrected.
+- Still true: the package and object ids the device checks come from the signing
+  request itself (there is no separately pinned public config yet), so the device
+  check protects the payee, amount and fee but not those ids.
+
 ## Not done here
 
 - **A payment under a staff rule** (`splash_spend::create_intent` and
