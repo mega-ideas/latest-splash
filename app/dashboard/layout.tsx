@@ -3,6 +3,7 @@ import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import type { ReactNode } from 'react';
 
+import { RETURN_HEADER, safeApproveReturn } from '@/lib/approve/link';
 import DashboardShell from '@/components/dashboard/DashboardShell';
 import { custodyPhaseEnabled, sweepAccountEnabled } from '@/lib/server/custody-phase';
 import { getCustomerSession } from '@/lib/server/customer-auth';
@@ -21,7 +22,11 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   const session = await getCustomerSession();
 
   if (!session) {
-    redirect('/login');
+    // A link to one request's Approve screen comes back to it after sign-in;
+    // anything else signs in to Home. The proxy sets the header, and only for
+    // that one path (lib/approve/link.ts).
+    const back = safeApproveReturn((await headers()).get(RETURN_HEADER));
+    redirect(back ? `/login?next=${encodeURIComponent(back)}` : '/login');
   }
 
   // Wallet spec §3.2 — resolve the KYB state ONCE, here. Every page under

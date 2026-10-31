@@ -211,25 +211,27 @@ test('every message that asks someone to sign is built by walletSignatureMessage
 /* ── Signed out, and the screen itself ────────────────────────────────── */
 
 test('the proxy hands the layout the Approve address, only for that path, and drops a header the browser sent', async () => {
-  const { NextRequest } = await import('next/server');
-  const { proxy } = await import('../proxy.ts');
-  const asked = (path, headers = {}) => proxy(new NextRequest(`http://localhost:3000${path}`, { headers }));
-  const passed = (response) => response.headers.get(`x-middleware-request-${RETURN_HEADER}`);
+  const { withReturnHeader } = await import('../lib/approve/link.ts');
+  const asked = (path, sent = {}, renders = true) => withReturnHeader(new Headers(sent), path, renders).get(RETURN_HEADER);
 
-  assert.equal(passed(asked(`/dashboard/approve/${ID}`)), `/dashboard/approve/${ID}`);
-  assert.equal(passed(asked('/dashboard')), null);
-  assert.equal(passed(asked('/dashboard/approve')), null);
-  assert.equal(passed(asked(`/dashboard/approve/${ID}/more`)), null);
+  assert.equal(asked(`/dashboard/approve/${ID}`), `/dashboard/approve/${ID}`);
+  assert.equal(asked('/dashboard'), null);
+  assert.equal(asked('/dashboard/approve'), null);
+  assert.equal(asked(`/dashboard/approve/${ID}/more`), null);
+  assert.equal(asked(`/dashboard/approve/${ID}`, {}, false), null, 'a prefetch or asset carries none');
   // A spoofed header on another page, or on this one with another value, is not passed on.
-  assert.equal(passed(asked('/dashboard', { [RETURN_HEADER]: 'https://evil.example' })), null);
-  assert.equal(passed(asked(`/dashboard/approve/${ID}`, { [RETURN_HEADER]: 'https://evil.example' })), `/dashboard/approve/${ID}`);
+  assert.equal(asked('/dashboard', { [RETURN_HEADER]: 'https://evil.example' }), null);
+  assert.equal(asked('/dashboard', { [RETURN_HEADER]: `/dashboard/approve/${ID}` }), null, 'not even a valid value is believed from the browser');
+  assert.equal(asked(`/dashboard/approve/${ID}`, { [RETURN_HEADER]: 'https://evil.example' }), `/dashboard/approve/${ID}`);
+  const proxy = await read('proxy.ts');
+  assert.match(proxy, /withReturnHeader\(requestHeaders, pathname, rendersPage\)/, 'the proxy uses it on every request');
 });
 
 test('a signed-out visit to the link goes to sign in and back, and only through the allowlist', async () => {
   const layout = await read('app/dashboard/layout.tsx');
   assert.match(layout, /safeApproveReturn/);
   assert.match(layout, /RETURN_HEADER/);
-  assert.match(layout, /redirect\(`\/login\?next=\$\{encodeURIComponent\(/);
+  assert.match(layout, /\/login\?next=\$\{encodeURIComponent\(back\)\}/);
   const login = await read('app/login/page.tsx');
   assert.match(login, /safeApproveReturn\(/);
   assert.match(login, /router\.push\(returnTo \?\? '\/dashboard'\)/);

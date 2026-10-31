@@ -305,7 +305,7 @@ export default function SignPanel({ initial, expected = null, expectedBatch = nu
               <dt className="text-[#326273]">Transaction code</dt>
               <dd className="font-mono text-[13px] font-bold text-[#0c3e48]">{review.code}</dd>
             </dl>
-            <p className="text-[13px] leading-5 text-[#326273]">If your WhatsApp message shows a different code, do not sign.</p>
+            <p className="text-[13px] leading-5 text-[#326273]">If your WhatsApp message shows a different code, do not sign. Opening this page from a link signs nothing; only your passkey does.</p>
             {blocked ? <p role="alert" className="text-sm font-semibold text-[var(--error)]">{blockedReason} Do not sign it.</p> : null}
             {error ? <p role="alert" className="text-sm font-medium text-[var(--error)]">{error}</p> : null}
             <div className="flex flex-wrap gap-2">

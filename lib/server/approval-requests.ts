@@ -24,6 +24,7 @@ import type { WalletAction, WalletTxDescription } from '@/lib/wallet/wallet-tx-d
 import { transactionCode } from '@/lib/wallet/review-on-device';
 import type { SigningNotifier, WithdrawalSigningDetails } from '@/lib/server/wallet-signing';
 import type { SigningPurpose } from '@/lib/server/wallet-signing-store';
+import { approveLink, LINK_NOTE } from '@/lib/approve/link';
 import { listApprovers, type Approver } from '@/lib/server/approver-channels';
 import { issueTokens, recordDecision, tally, type Tally } from '@/lib/server/approval-tokens';
 import { readOrgSettings } from '@/lib/server/org-settings';
@@ -165,9 +166,15 @@ export async function requestApprovals(input: {
 // which only the signer's own device can make, in Splash. So the message
 // says what the transaction does, read from its bytes on the server
 // (lib/wallet/wallet-tx-describe.ts), who else must sign, and when it
-// expires, and asks the person to open Splash. It carries no code, no
-// link and no transaction bytes. The in-app inbox (lib/server/wallet-signing.ts,
+// expires, and links to the Approve screen for that one request
+// (lib/approve/link.ts: the business's own address and the request id, no
+// secret, no token, no bytes; opening it signs nothing). The transaction
+// code stays in the message as the second check against the screen. With no
+// link (production without an https address) the message asks the person to
+// open Splash instead. The in-app inbox (lib/server/wallet-signing.ts,
 // `signingInbox`) is the other channel, and the one that always works.
+// This is the only place the message is worded, so any other channel (email,
+// push) must call walletSignatureMessage and say the same thing.
 
 const USDC_DECIMALS_V2 = 6;
 
@@ -320,15 +327,40 @@ function spendRuleHeadline(a: WalletAction[]): string {
   return parts.join('; ') || 'change the spending rules';
 }
 
-export function walletSignatureMessage(input: { orgName: string; purpose: SigningPurpose; description: WalletTxDescription; withdrawal?: WithdrawalSigningDetails | null; threshold: number; signerCount: number; expiresAt: Date; now: Date }): string {
+export function walletSignatureMessage(input: {
+  orgName: string;
+  purpose: SigningPurpose;
+  description: WalletTxDescription;
+  withdrawal?: WithdrawalSigningDetails | null;
+  threshold: number;
+  signerCount: number;
+  expiresAt: Date;
+  now: Date;
+  /** The Approve screen of this request (approveLink), or none: the message then asks the person to open Splash. */
+  link?: string | null;
+}): string {
   const hours = Math.max(1, Math.round((input.expiresAt.getTime() - input.now.getTime()) / 3_600_000));
   const who = input.signerCount > 1 ? `${input.threshold} of ${input.signerCount} owners must sign.` : 'Only you can sign this.';
+  const code = transactionCode(input.description.bytesHash);
+  const ask = input.link
+    ? `Review it here: ${input.link}
+${LINK_NOTE}
+` +
+      `On the screen, check the payee, the amount and the fee, and that the transaction code is ${code}. `
+    : `Open Splash, check the details and the transaction code ${code}, and sign with your passkey. `;
   return (
-    `Splash: your signature is needed\n\n` +
-    `${input.orgName} asks you to ${walletRequestHeadline(input.purpose, input.description, input.withdrawal)}.\n` +
-    `${who} Splash pays the network fee.\n\n` +
-    `Open Splash, check the details and the transaction code ${transactionCode(input.description.bytesHash)}, and sign with your passkey. ` +
-    `This request expires in ${hours} hour${hours === 1 ? '' : 's'}.\n\n` +
+    `Splash: your signature is needed
+
+` +
+    `${input.orgName} asks you to ${walletRequestHeadline(input.purpose, input.description, input.withdrawal)}.
+` +
+    `${who} Splash pays the network fee.
+
+` +
+    ask +
+    `This request expires in ${hours} hour${hours === 1 ? '' : 's'}.
+
+` +
     `If you did not expect this, do not sign it.`
   );
 }
@@ -337,7 +369,20 @@ export function walletSignatureMessage(input: { orgName: string; purpose: Signin
  * Tell each signer, on WhatsApp where they have a verified number. Never
  * throws, like requestApprovals: the inbox in the app is always there.
  */
-export function walletSigningNotifier(deps: { orgName: (orgId: string) => Promise<string>; channels: (orgId: string) => Promise<Approver[]> }): SigningNotifier {
+export function walletSigningNotifier(deps: {
+  orgName: (orgId: string) => Promise<string>;
+  channels: (orgId: string) => Promise<Approver[]>;
+  /** The org's WhatsApp setting (default: the stored settings). */
+  settings?: (orgId: string) => Promise<{ whatsappEnabled: boolean } | null>;
+  /** Whether WhatsApp can send at all here (default: the Twilio credentials are set). */
+  configured?: () => boolean;
+  send?: typeof sendWhatsApp;
+  /** The address the link is built on (default: NEXT_PUBLIC_APP_URL) and the mode (default: this process's). */
+  appUrl?: string;
+  env?: { NODE_ENV?: string };
+}): SigningNotifier {
+  const send = deps.send ?? sendWhatsApp;
+  const ready = deps.configured ?? (() => whatsappConfigured());
   return {
     async notify({ orgId, request, description, userIds, now }) {
       const delivered: string[] = [];
@@ -349,8 +394,11 @@ export function walletSigningNotifier(deps: { orgName: (orgId: string) => Promis
       } catch {
         return { delivered, unreachable: [...userIds] };
       }
-      const settings = await readOrgSettings(orgId).catch(() => null);
+      const settings = await (deps.settings ?? readOrgSettings)(orgId).catch(() => null);
+      // The link to this request's Approve screen: none where it cannot be made safely (approveLink).
+      const link = approveLink(deps.appUrl ?? process.env.NEXT_PUBLIC_APP_URL, request.id, deps.env ?? process.env);
       const body = walletSignatureMessage({
+        link,
         orgName,
         purpose: request.purpose,
         description,
@@ -366,11 +414,11 @@ export function walletSigningNotifier(deps: { orgName: (orgId: string) => Promis
           continue;
         }
         const person = people.find((p) => p.userId === userId);
-        if (!settings?.whatsappEnabled || !whatsappConfigured() || !person?.whatsappE164) {
+        if (!settings?.whatsappEnabled || !ready() || !person?.whatsappE164) {
           unreachable.push(userId);
           continue;
         }
-        const result = await sendWhatsApp(person.whatsappE164, body).catch(() => ({ sent: false as const }));
+        const result = await send(person.whatsappE164, body).catch(() => ({ sent: false as const }));
         if (result.sent) delivered.push(userId);
         else unreachable.push(userId);
       }
