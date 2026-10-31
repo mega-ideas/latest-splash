@@ -277,6 +277,12 @@ test('a refusal is logged once per business in a while, and never with an addres
   assert.match(code(read('lib/server/bill-payment-flow-live.ts')), /refusalLogLine\(/);
 });
 
+test('a read-only switch stays readable: it is marked aria-disabled, not dimmed to half by the disabled attribute', () => {
+  const controls = code(read('components/settings/OperatingControls.tsx'));
+  assert.match(controls, /aria-disabled=\{disabled\}/);
+  assert.doesNotMatch(controls, /role="switch"[^>]*\sdisabled=\{disabled\}/);
+});
+
 /* The pages around them: adding a recipient and the receipts ----------------------- */
 
 test('adding a recipient uses toggle buttons and a 44px Close, as the other filters do', () => {
