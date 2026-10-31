@@ -105,7 +105,7 @@ export function stateOf(r: ClientRecipient): RecipientState {
   // An owner's own statement is not a screening, and an old one does not stand in for it.
   if (verdict !== 'CLEAR') {
     return verdict === 'ERROR'
-      ? { step: 'screening', tone: 'wait', label: 'Screening did not complete', detail: 'It cannot be paid until the address has been screened.' }
+      ? { step: 'screening', tone: 'bad', label: 'Screening did not complete', detail: 'It cannot be paid until the address has been screened.' }
       : { step: 'screening', tone: 'wait', label: 'Screening not complete', detail: 'It cannot be paid until the address has been screened.' };
   }
   if (!r.approvedAt) return { step: 'approval', tone: 'wait', label: 'Waiting for an owner’s approval', detail: r.savedByYou ? 'Another owner approves a recipient you saved.' : 'An owner approves it before it can be paid.' };

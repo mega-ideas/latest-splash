@@ -11,7 +11,7 @@ import { call, errorText } from '@/components/transfer/api';
 import { QuietButton } from '@/components/transfer/ui';
 import { Loading, Note, Pill } from '@/components/wallet/parts';
 import { formatUsdc } from '@/lib/fees/copy';
-import { buildHistory, filterHistory, historyCsv, summaryOf, type BatchRow, type EarlierRow, type Group, type HistoryEntry, type TransferRow, type WithdrawalRow } from '@/lib/history-page/entries';
+import { buildHistory, filterHistory, historyCsv, statTones, summaryOf, type BatchRow, type EarlierRow, type Group, type HistoryEntry, type TransferRow, type WithdrawalRow } from '@/lib/history-page/entries';
 
 type Lists = { transfers: TransferRow[]; batches: BatchRow[]; withdrawals: WithdrawalRow[]; earlier: EarlierRow[]; restricted: boolean };
 
@@ -68,6 +68,7 @@ export default function HistoryPage() {
 
   const entries = useMemo(() => (lists ? buildHistory(lists) : []), [lists]);
   const summary = useMemo(() => summaryOf(entries, new Date()), [entries]);
+  const tones = statTones(summary);
   const visible = useMemo(() => filterHistory(entries, { group, query }), [entries, group, query]);
   const counts = useMemo(() => ({ all: entries.length, paid: entries.filter((e) => e.group === 'paid').length, in_progress: summary.inProgress, not_paid: summary.notPaid }), [entries, summary]);
 
@@ -119,8 +120,8 @@ export default function HistoryPage() {
 
       <div className="dash-reveal-stagger grid grid-cols-2 gap-3 md:grid-cols-4">
         <DashStat label="Sent this month" value={`${formatUsdc(BigInt(summary.sentThisMonthMinor))} USDC`} valueClassName="text-[#326273]" />
-        <DashStat label="In progress" value={String(summary.inProgress)} valueClassName={summary.inProgress > 0 ? 'text-[var(--gold-ink)]' : 'text-[#326273]'} />
-        <DashStat label="Not paid" value={String(summary.notPaid)} valueClassName={summary.notPaid > 0 ? 'text-[var(--error)]' : 'text-[#326273]'} />
+        <DashStat label="In progress" value={String(summary.inProgress)} valueClassName={tones.inProgress} />
+        <DashStat label="Not paid" value={String(summary.notPaid)} valueClassName={tones.notPaid} />
         <DashStat label="Receipts and records" value={String(summary.total)} valueClassName="text-[var(--info)]" />
       </div>
 

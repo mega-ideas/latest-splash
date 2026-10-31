@@ -163,6 +163,19 @@ export function summaryOf(entries: HistoryEntry[], now: Date): { sentThisMonthMi
   return { sentThisMonthMinor: sent.toString(), inProgress: entries.filter((e) => e.group === 'in_progress').length, notPaid: entries.filter((e) => e.group === 'not_paid').length, total: entries.length };
 }
 
+/**
+ * The colour of a count at the top of History: an alarm only when there is
+ * something to look at (a payment still on its way, one that was not paid), and
+ * the quiet ink otherwise. A zero is not news.
+ */
+export function statTones(summary: { inProgress: number; notPaid: number }): { inProgress: string; notPaid: string } {
+  const quiet = 'text-[#326273]';
+  return {
+    inProgress: summary.inProgress > 0 ? 'text-[var(--gold-ink)]' : quiet,
+    notPaid: summary.notPaid > 0 ? 'text-[var(--error)]' : quiet,
+  };
+}
+
 const TYPE: Record<HistoryEntry['kind'], string> = { payment: 'Payment', batch: 'Batch', withdrawal: 'Withdrawal', earlier: 'Earlier transfer' };
 
 /** A cell that starts like a formula is made text, so a spreadsheet never runs what a supplier typed. */
