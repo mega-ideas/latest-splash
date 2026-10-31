@@ -164,3 +164,56 @@ test('a device checks a batch against what was approved: each payment, in order,
   assert.match(differsFromApprovedBatch(tx(['not an address', '100', '1'], [B, '200', '2']), expected), /different address/);
   assert.match(differsFromApprovedBatch({ actions: [] }, expected), /0 payments/);
 });
+
+test('a device refuses a batch that is not exactly five commands per payment, each tied to its own withdrawal and intent', () => {
+  const A = `0x${'71'.repeat(32)}`;
+  const B = `0x${'72'.repeat(32)}`;
+  const expected = [
+    { recipient: A, amountMinor: '100', maxFeeMinor: '1' },
+    { recipient: B, amountMinor: '200', maxFeeMinor: '2' },
+  ];
+  const group = (at, recipient, amount, fee, over = {}) => [
+    { type: 'withdraw', amountMinor: String(BigInt(amount) + BigInt(fee)) },
+    { type: 'open_intent', recipient, amountMinor: amount, kind: 1 },
+    { type: 'pay_intent', maxFeeMinor: fee, paysFromCommand: at, intentFromCommand: at + 1, ...over },
+    { type: 'anchor_receipt' },
+    { type: 'delete_intent' },
+  ];
+  const good = () => ({ actions: [...group(0, A, '100', '1'), ...group(5, B, '200', '2')] });
+  assert.equal(differsFromApprovedBatch(good(), expected), null);
+
+  const extra = good();
+  extra.actions.push({ type: 'withdraw', amountMinor: '999' }, { type: 'send_funds', recipient: A, amountMinor: '999' });
+  assert.match(differsFromApprovedBatch(extra, expected) ?? '', /not exactly|other commands|extra/i, 'a withdrawal and a send tacked on the end');
+
+  const reordered = good();
+  [reordered.actions[3], reordered.actions[4]] = [reordered.actions[4], reordered.actions[3]];
+  assert.ok(differsFromApprovedBatch(reordered, expected), 'commands out of their order');
+
+  const repaired = { actions: [...group(0, A, '100', '1'), ...group(5, B, '200', '2', { paysFromCommand: 0 })] };
+  assert.match(differsFromApprovedBatch(repaired, expected) ?? '', /Payment 2.*own withdrawal/i, 'a payment paid from another payment’s withdrawal');
+  const swappedIntent = { actions: [...group(0, A, '100', '1', { intentFromCommand: 6 }), ...group(5, B, '200', '2')] };
+  assert.match(differsFromApprovedBatch(swappedIntent, expected) ?? '', /Payment 1.*own/i);
+
+  const fat = good();
+  fat.actions[0].amountMinor = '5000';
+  assert.match(differsFromApprovedBatch(fat, expected) ?? '', /Payment 1.*withdraws/i, 'a withdrawal larger than the amount plus the fee bound');
+
+  const bank = good();
+  bank.actions[6].kind = 4;
+  assert.match(differsFromApprovedBatch(bank, expected) ?? '', /Payment 2/, 'a bank payout is not paid in a batch');
+});
+
+test('a changed or late review cannot be taken for the rows on the screen, and the review shows its column labels', () => {
+  const flow = read('components/batch/BatchFlow.tsx');
+  assert.match(flow, /reviewSeq/, 'each review carries a sequence number and a late one is dropped');
+  const review = read('components/batch/StepReview.tsx');
+  assert.doesNotMatch(code(review), /md:sr-only/, 'the column labels are visible at desktop widths too');
+  assert.match(review, /role="columnheader"|<th\b|Recipient<\/span>/);
+  assert.match(code(flow), /takeBatchDraft[\s\S]{0,400}BATCH_MAX_PAYMENTS/, 'a draft from Zeke is capped like a file');
+  const sign = read('components/transfer/SignPanel.tsx');
+  assert.match(sign, /differsFromApprovedBatch/);
+  const stepApprove = read('components/batch/StepApprove.tsx');
+  assert.match(stepApprove, /confirmDuplicates/);
+  assert.match(stepApprove, /confirmNewPayees/);
+});

@@ -698,3 +698,119 @@ test('another business reads a batch’s receipts as absent', async () => {
   assert.deepEqual([other.ok, other.status, other.code], [false, 404, 'batch_not_found']);
   assert.equal((await batchReceiptsFor(receiptDeps(t, 'acme', async () => charged()), 'wbt_missing')).code, 'batch_not_found');
 });
+
+// ─── Review findings (p3-5.6): a repeated sheet, a retry, new payees, a lost link ─────────
+
+const rowsAB = () => sheet(row('Dela Cruz Trading Corp', '100', 'A'), row('Santos Supplies Inc', '100', 'B'));
+
+test('the same sheet under a new intent id is flagged against the earlier batch and is paid only on an explicit yes; a failed batch does not count', async () => {
+  const t = await setup();
+  await twoRecipients(t);
+  const first = await B.createBatch(t.deps(), OWNER, input(rowsAB()));
+  assert.equal(first.ok, true, JSON.stringify(first));
+
+  const review = await B.reviewBatch(t.deps(), OWNER, rowsAB());
+  assert.deepEqual(review.review.rows.map((x) => x.duplicateOf?.batchId), [first.batch.id, first.batch.id], 'each row says which batch already pays it');
+  assert.equal(review.review.duplicateCount, 2);
+
+  const again = await B.createBatch(t.deps(), OWNER, input(rowsAB(), { clientKey: 'batch_key_000002' }));
+  assert.deepEqual([again.ok, again.status, again.code], [false, 409, 'duplicate_of_earlier_batch']);
+  assert.equal(again.rows.length, 2);
+  assert.equal((await t.w.db.select().from(schema.walletBatches)).length, 1, 'nothing was stored for the repeat');
+  assert.equal((await t.w.db.select().from(schema.walletSigningRequests)).filter((x) => x.purpose === 'wallet_batch').length, 1, 'and no second request was opened');
+
+  const edited = await B.createBatch(t.deps(), OWNER, input(sheet(row('Dela Cruz Trading Corp', '100', 'A'), row('Santos Supplies Inc', '101', 'B')), { clientKey: 'batch_key_000003' }));
+  assert.equal(edited.code, 'duplicate_of_earlier_batch', 'one repeated payment is enough');
+
+  const confirmed = await B.createBatch(t.deps(), OWNER, input(rowsAB(), { clientKey: 'batch_key_000002', confirmDuplicates: true }));
+  assert.equal(confirmed.ok, true, JSON.stringify(confirmed));
+
+  await t.w.client.exec(`UPDATE wallet_signing_requests SET status = 'expired'`);
+  const free = await B.createBatch(t.deps(), OWNER, input(rowsAB(), { clientKey: 'batch_key_000004' }));
+  assert.equal(free.ok, true, 'batches that lapsed pay nothing, so they do not count');
+});
+
+test('a batch already out for signatures counts against the wallet balance of the next one', async () => {
+  const t = await setup();
+  await twoRecipients(t);
+  const deps = t.deps('acme', { walletBalance: async () => USDC(1_500) });
+  const one = await B.createBatch(deps, OWNER, input(sheet(row('Dela Cruz Trading Corp', '1,000'))));
+  assert.equal(one.ok, true, JSON.stringify(one));
+  const two = await B.createBatch(deps, OWNER, input(sheet(row('Santos Supplies Inc', '1,000')), { clientKey: 'batch_key_000002' }));
+  assert.deepEqual([two.ok, two.code], [false, 'insufficient_balance'], 'the first batch still holds 1,000 of the 1,500');
+  const review = await B.reviewBatch(deps, OWNER, sheet(row('Santos Supplies Inc', '1,000')));
+  assert.equal(review.review.balance.shortByMinor, (USDC(1_000) + feeOf(1_000) + USDC(1_000) + feeOf(1_000) - USDC(1_500)).toString());
+});
+
+test('the same intent id answers the batch already made, even after a recipient, a fee or the balance has moved', async () => {
+  const t = await setup();
+  await twoRecipients(t);
+  const first = await B.createBatch(t.deps(), OWNER, input(rowsAB()));
+  assert.equal(first.ok, true);
+  await saved(t, WALLET_C, 'Dela Cruz Trading Corp');
+  const afterRename = await B.createBatch(t.deps(), OWNER, input(rowsAB()));
+  assert.deepEqual([afterRename.ok, afterRename.created, afterRename.batch?.id], [true, false, first.batch.id], 'a name that now matches two recipients does not undo the batch');
+  await execute(t, first);
+  const settled = await B.createBatch(t.deps('acme', { walletBalance: async () => 0n }), OWNER, input(rowsAB()));
+  assert.deepEqual([settled.ok, settled.created, settled.batch?.status], [true, false, 'settled'], 'a retry after it settled reads the batch, not an empty wallet');
+  const cells = await B.createBatch(t.deps(), OWNER, input(sheet(row('  dela cruz trading corp ', '100', 'A'), row('Santos Supplies Inc', '100', 'B'))));
+  assert.equal(cells.created, false, 'the batch is its cells, normalised');
+  const other = await B.createBatch(t.deps(), OWNER, input(sheet(row('Dela Cruz Trading Corp', '100', 'A'), row('Santos Supplies Inc', '100', 'C'))));
+  assert.equal(other.code, 'idempotency_key_reused');
+});
+
+test('a Splash business named in a sheet by its registered name is paid only once the person has confirmed the payee shown', async () => {
+  const t = await setup();
+  await t.w.screenClear(NORTH_WALLET);
+  await saved(t, WALLET_A, 'Dela Cruz Trading Corp');
+  const rows = sheet(row('Northwind Pte Ltd', '100'));
+  const review = await B.reviewBatch(t.deps(), OWNER, rows);
+  assert.equal(review.review.rows[0].ok, true);
+  assert.equal(review.review.rows[0].newPayee, true, 'the row is marked as a payee found by name');
+  assert.equal(review.review.rows[0].payee.address, NORTH_WALLET, 'with its full address');
+  assert.equal(review.review.rows[0].payee.country, 'SG');
+  assert.equal(review.review.newPayeeCount, 1);
+  const refused = await B.createBatch(t.deps(), OWNER, input(rows));
+  assert.deepEqual([refused.ok, refused.status, refused.code], [false, 409, 'new_payee_needs_confirmation']);
+  assert.equal((await t.w.db.select().from(schema.walletBatches)).length, 0);
+  const ok = await B.createBatch(t.deps(), OWNER, input(rows, { confirmNewPayees: true }));
+  assert.equal(ok.ok, true, JSON.stringify(ok));
+  const savedRow = await B.reviewBatch(t.deps(), OWNER, sheet(row('Dela Cruz Trading Corp', '1')));
+  assert.equal(savedRow.review.rows[0].newPayee ?? false, false, 'a recipient the business saved is not a new payee');
+});
+
+test('a request whose link to its batch was lost is found again by its own dedupe key, never left orphaned', async () => {
+  const t = await setup();
+  await twoRecipients(t);
+  const made = await B.createBatch(t.deps(), OWNER, input(rowsAB()));
+  assert.equal(made.ok, true);
+  await t.w.client.exec(`UPDATE wallet_batches SET signing_request_id = NULL`);
+  assert.equal((await B.getBatch(t.deps(), made.batch.id)).status, 'awaiting_signatures', 'the batch still reads its open request');
+  const again = await B.startBatchSigning(t.deps(), OWNER, made.batch.id);
+  assert.equal(again.ok, true, JSON.stringify(again));
+  assert.equal(again.signingRequest?.id, made.signingRequest.id);
+  assert.equal((await t.w.db.select().from(schema.walletBatches))[0].signingRequestId, made.signingRequest.id, 'and the link is made again');
+});
+
+test('a batch nobody has started has no receipts to read', async () => {
+  const { batchReceiptsFor } = await import('../lib/server/batch-receipts.ts');
+  const t = await setup();
+  await twoRecipients(t);
+  const prepared = await B.createBatch(t.deps(), STAFF, input(rowsAB()));
+  const r = await batchReceiptsFor(receiptDeps(t, 'acme', async () => null), prepared.batch.id);
+  assert.deepEqual([r.ok, r.status, r.code], [false, 409, 'batch_not_started']);
+});
+
+test('before each signature the gate also stops the wallet’s own address and an address Splash has since listed as its own', async () => {
+  const t = await setup();
+  await twoRecipients(t);
+  const made = await B.createBatch(t.deps(), OWNER, input(rowsAB()));
+  assert.equal(made.ok, true);
+  const rows = await t.w.db.select().from(schema.walletSigningRequests);
+  const stored = rows.find((x) => x.purpose === 'wallet_batch');
+  const gate = (over = {}) => batchBeforeSign({ db: t.w.db, now: () => T0, ...over }, stored);
+  assert.equal(await gate({ splashAddresses: async () => [OPERATOR] }), null);
+  const listed = await gate({ splashAddresses: async () => [OPERATOR, WALLET_B] });
+  assert.equal(listed?.code, 'splash_controlled_address');
+  assert.match(listed?.error ?? '', /Payment 2 of 2/);
+});
