@@ -43,11 +43,13 @@ type Reviewed = { transactionBytes: string; digest: string; review: DeviceReview
 /** What the panel says about the request it is collecting for: a payment by default; the Wallet page passes its own for a wallet change. */
 export type SignLabels = { working: string; done: string; doneNote: string; deadNote: string; restart: string };
 const PAYMENT_LABELS: SignLabels = { working: 'Sending the payment', done: 'Paid', doneNote: 'The payment, its record and its receipt happened together.', deadNote: 'Nothing was sent. You can start the payment again.', restart: 'Start a new payment' };
+/** A staff member paying alone under their spending rule (`staff_rule_payment`): one signer, and it is them. */
+const RULE_LABELS: SignLabels = { working: 'Sending the payment', done: 'Paid', doneNote: 'It was paid from your business wallet, within your spending rule. The payment, its record and its receipt happened together.', deadNote: 'Nothing was sent. You can start the payment again, or ask the owners.', restart: 'Start a new payment' };
 
 /** A batch's signers see every payment, each checked on their own device against the batch they approved (v2 brief 5.6). */
 export type ExpectedBatch = Array<ApprovedPayment & { payeeName: string }>;
 
-export default function SignPanel({ initial, expected = null, expectedBatch = null, labels = PAYMENT_LABELS, autoReview = false, onExecuted, onRestart, onCancelReview }: { initial: SigningView; expected?: Made['expected']; expectedBatch?: ExpectedBatch | null; labels?: SignLabels; /** Open the review as soon as the request is in front of a signer who must sign: the Approve screen is for nothing else. */ autoReview?: boolean; onExecuted: (digest: string | null) => void; onRestart: () => void; /** What "Not now" does on the phone's Approve screen. */ onCancelReview?: () => void }) {
+export default function SignPanel({ initial, expected = null, expectedBatch = null, labels: given = PAYMENT_LABELS, autoReview = false, onExecuted, onRestart, onCancelReview }: { initial: SigningView; expected?: Made['expected']; expectedBatch?: ExpectedBatch | null; labels?: SignLabels; /** Open the review as soon as the request is in front of a signer who must sign: the Approve screen is for nothing else. */ autoReview?: boolean; onExecuted: (digest: string | null) => void; onRestart: () => void; /** What "Not now" does on the phone's Approve screen. */ onCancelReview?: () => void }) {
   const [view, setView] = useState<SigningView>(initial);
   const [reviewed, setReviewed] = useState<Reviewed | null>(null);
   const reviewedDigest = useRef<string | null>(null);
@@ -141,6 +143,9 @@ export default function SignPanel({ initial, expected = null, expectedBatch = nu
 
   const finished = view.status === 'executed';
   const dead = ['failed', 'expired', 'cancelled'].includes(view.status);
+  // A staff member's payment under their rule has one signer, the staff member: the wording is theirs, not the owners'.
+  const underRule = (view.purpose ?? initial.purpose) === 'staff_rule_payment';
+  const labels = underRule ? RULE_LABELS : given;
   const review = reviewed?.review ?? null;
   const opens = review?.actions.filter((a) => a.type === 'open_intent') ?? [];
   const pays = review?.actions.filter((a) => a.type === 'pay_intent') ?? [];
@@ -149,6 +154,8 @@ export default function SignPanel({ initial, expected = null, expectedBatch = nu
   const pay = review?.actions.find((a) => a.type === 'pay_intent');
   const withdraw = review?.actions.find((a) => a.type === 'withdraw');
   const withdrawn = (review?.actions.filter((a) => a.type === 'withdraw') ?? []).reduce((sum, a) => sum + (a.type === 'withdraw' ? BigInt(a.amountMinor) : 0n), 0n);
+  // Under a rule the money leaves in the command that pays, as a draw on the person's allowance.
+  const drawn = pay && pay.type === 'pay_intent' && pay.underRule ? BigInt(pay.underRule.withdrawalMinor) : null;
   const items = review ? signingItems(review.actions as Parameters<typeof signingItems>[0]) : [];
   // A batch repeats the same few commands once per payment: each is said once, with how many times.
   const counted = new Map<string, { item: (typeof items)[number]; times: number }>();
@@ -197,10 +204,10 @@ export default function SignPanel({ initial, expected = null, expectedBatch = nu
         </span>
         <div>
           <h3 id={headingId} className="text-base font-extrabold text-[#0c3e48]">
-            {finished ? labels.done : dead ? (view.status === 'expired' ? 'The request expired' : 'This did not go through') : view.status === 'submitting' || view.status === 'unknown' ? labels.working : 'Waiting for signatures'}
+            {finished ? labels.done : dead ? (view.status === 'expired' ? 'The request expired' : 'This did not go through') : view.status === 'submitting' || view.status === 'unknown' ? labels.working : underRule ? 'Waiting for your signature' : 'Waiting for signatures'}
           </h3>
           <p className="text-[13px] text-[#326273]">
-            {finished ? labels.doneNote : dead ? labels.deadNote : `${view.signedWeight} of ${view.threshold} needed. Each owner signs on their own device.`}
+            {finished ? labels.doneNote : dead ? labels.deadNote : underRule ? 'This is within your spending rule, so you sign it yourself with your passkey. No one else has to.' : `${view.signedWeight} of ${view.threshold} needed. Each owner signs on their own device.`}
           </p>
         </div>
       </div>
@@ -209,7 +216,7 @@ export default function SignPanel({ initial, expected = null, expectedBatch = nu
         {view.signers.map((s, i) => (
           <li key={s.userId} className="flex min-h-11 items-center gap-2 rounded-lg bg-[#F6F0ED] px-3 text-sm text-[#1F4452]">
             {s.signed ? <Check className="h-4 w-4 text-[#145d6a]" aria-hidden="true" /> : <Clock3 className="h-4 w-4 text-[#326273]" aria-hidden="true" />}
-            <span className="font-semibold">{`Owner ${i + 1}`}</span>
+            <span className="font-semibold">{underRule ? 'You' : `Owner ${i + 1}`}</span>
             <span className="text-[13px] text-[#326273]">{s.signed ? 'signed' : s.declined ? 'declined' : 'not yet'}</span>
           </li>
         ))}
@@ -278,6 +285,15 @@ export default function SignPanel({ initial, expected = null, expectedBatch = nu
                   <dd className="font-mono text-[13px] text-[#0c3e48]">{formatUsdc(BigInt(withdraw.amountMinor))} USDC</dd>
                 </>
               ) : null}
+              {!isBatch && drawn !== null ? (
+                <>
+                  <dt className="text-[#326273]">Leaves your wallet at most</dt>
+                  <dd className="min-w-0 text-[#0c3e48]">
+                    <span className="block font-mono text-[13px]">{formatUsdc(drawn)} USDC</span>
+                    <span className="block text-[13px] text-[#326273]">Taken under your spending rule. What the fee does not use stays in the wallet.</span>
+                  </dd>
+                </>
+              ) : null}
               {steps.length > 0 ? (
                 <>
                   <dt className="text-[#326273]">This will</dt>
@@ -326,8 +342,8 @@ export default function SignPanel({ initial, expected = null, expectedBatch = nu
           </div>
         )
       ) : null}
-      {!finished && !dead && !view.you.mustSign ? <p className="text-sm text-[#1F4452]">The owners have been told on WhatsApp and in their Splash inbox. This page updates when they sign.</p> : null}
-      {!finished && !dead && view.you.signed ? <p className="text-sm font-semibold text-[#145d6a]">You have signed. Waiting for the others.</p> : null}
+      {!finished && !dead && !view.you.mustSign && !underRule ? <p className="text-sm text-[#1F4452]">The owners have been told on WhatsApp and in their Splash inbox. This page updates when they sign.</p> : null}
+      {!finished && !dead && view.you.signed ? <p className="text-sm font-semibold text-[#145d6a]">{underRule ? 'You have signed. Sending the payment.' : 'You have signed. Waiting for the others.'}</p> : null}
       {dead ? <QuietButton type="button" onClick={onRestart}>{labels.restart}</QuietButton> : null}
     </section>
   );

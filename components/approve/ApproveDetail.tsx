@@ -14,7 +14,7 @@ import { requestTitle } from '@/lib/wallet-page/labels';
 type Request = SigningView & { purpose: string };
 
 /** Payments are worded as payments; every other request is a change to the wallet. */
-const PAYMENT_PURPOSES = new Set(['wallet_payment', 'wallet_batch', 'partner_payout', 'withdrawal']);
+const PAYMENT_PURPOSES = new Set(['wallet_payment', 'wallet_batch', 'partner_payout', 'withdrawal', 'staff_rule_payment']);
 const CHANGE_LABELS: SignLabels = {
   working: 'Sending your change',
   done: 'Signed and sent',

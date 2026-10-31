@@ -48,6 +48,8 @@ import { MICRO_DECIMALS } from '../money.ts';
 import { timeLeftWords } from '../team-rules/words.ts';
 
 export const DEFAULT_SECOND_APPROVAL_MINOR = 10_000_000_000n;
+/** How long a person has to sign before the quote behind a payment lapses (server and page agree on it). */
+export const SETTLE_WINDOW_MS = 60 * 60 * 1000;
 export const U64_MAX = 18_446_744_073_709_551_615n;
 
 /** An amount as a person types it ("5,000", "5000.50"), in USDC minor units; null when it is not an exact amount above zero. */

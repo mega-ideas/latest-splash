@@ -8,7 +8,7 @@ const STEPS = [
   { title: 'You choose who you’re paying', body: 'A business bank account, a business on Splash, or a Sui wallet address.' },
   { title: 'Splash checks the recipient', body: 'A bank account is checked with the bank before it is saved, and must match the name you give. A wallet address is screened against sanctions lists.' },
   { title: 'The money comes from your Splash Wallet', body: 'Your business holds it, and Splash has no key to it. If it is short, you top up from a source you have already verified, and your draft waits.' },
-  { title: 'Your approvers sign', body: 'The fee is fixed at what you were shown. Your owners sign on their own devices; a staff member’s request goes to an owner. A bank payout’s rate is held for a few minutes.' },
+  { title: 'Your approvers sign', body: 'The fee is fixed at what you were shown. Your owners sign on their own devices. A staff member whose spending rule covers the payment signs it alone with their own passkey; anything outside the rule goes to an owner. A bank payout’s rate is held for a few minutes.' },
   { title: 'One Sui transaction pays and records it', body: 'The payment, its record and its receipt happen together, or not at all. For a bank payout, our payout partner then credits the account by InstaPay, PESONet or BI-FAST.' },
 ];
 

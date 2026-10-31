@@ -43,9 +43,11 @@ export type Balance = { state: 'loading' } | { state: 'ok'; usdcMinor: bigint } 
 export type Made = {
   /** The id the receipt is read by. */
   ref: string;
-  route: 'owners_sign' | 'asked_owners';
+  route: 'owners_sign' | 'asked_owners' | 'staff_rule';
   signing: SigningView | null;
   askId: string | null;
+  /** What the server decided and why, in plain words: for a payment sent to the owners, the reasons it came to them. */
+  plan?: { reasons: string[]; lines: string[] };
   /** What the person approved on the Review step: the signing screen checks the transaction's bytes against it. */
   expected: { recipient: string | null; amountMinor: string; maxFeeMinor: string; payeeName: string } | null;
 };

@@ -6,7 +6,7 @@ import { ArrowLeft, CircleAlert, Clock3, Loader2, RefreshCw, ShieldCheck } from 
 import { formatUsdc, kindLabel } from '@/lib/fees/copy';
 import { groupAddress } from '@/lib/transfer/addresses';
 import { formatMoney } from '@/lib/formatMoney';
-import { approvalPlan, APPROVAL_REASON_TEXT, executableRoute, maxFeeToSend, parseAmountMinor } from '@/lib/transfer/plan';
+import { approvalPlan, approvalReasonLines, APPROVAL_REASON_TEXT, executableRoute, maxFeeToSend, parseAmountMinor, SETTLE_WINDOW_MS } from '@/lib/transfer/plan';
 import PhoneBar from '@/components/dashboard/PhoneBar';
 import { call, errorText, type SigningView } from './api';
 import SignPanel from './SignPanel';
@@ -34,8 +34,12 @@ function rateText(rateMicro: string): string {
   return `${whole}.${(micro % 1_000_000n).toString().padStart(6, '0').replace(/0+$/, '').padEnd(2, '0')}`;
 }
 
-/** Step 4, "Review and approve": the fee shown is the fee signed, the owners sign together, staff ask the owners. */
-export default function StepReview({ flow, ctx, balance, back, made, onMade, onExecuted, onRestart, onSending, stickyActions = false }: StepProps & { made: Made | null; onMade: (m: Made) => void; onExecuted: (digest: string | null) => void; onRestart: () => void; /** Told when the request is being sent and when it has answered, so a phone's own Back can be off in between. */ onSending?: (sending: boolean) => void; /** On a phone the actions are one fixed bar at the foot (v2 brief 5.10), and the tab bar steps aside for it. */ stickyActions?: boolean }) {
+/**
+ * Step 4, "Review and approve": the fee shown is the fee signed. The owners sign together. A staff member whose rule covers the
+ * amount, the recipient and the time signs alone with their own passkey; anything outside the rule goes to the owners, and the
+ * page says why, with the numbers.
+ */
+export default function StepReview({ flow, ctx, balance, reload, back, made, onMade, onExecuted, onRestart, onSending, stickyActions = false }: StepProps & { made: Made | null; onMade: (m: Made) => void; onExecuted: (digest: string | null) => void; onRestart: () => void; /** Told when the request is being sent and when it has answered, so a phone's own Back can be off in between. */ onSending?: (sending: boolean) => void; /** On a phone the actions are one fixed bar at the foot (v2 brief 5.10), and the tab bar steps aside for it. */ stickyActions?: boolean }) {
   const [quote, setQuote] = useState<Quote | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -120,10 +124,28 @@ export default function StepReview({ flow, ctx, balance, back, made, onMade, onE
     const address = chosen.kind === 'recipient' ? chosen.address : null;
     const counted = address ? ctx.runningTotals[address.toLowerCase()] : undefined;
     return executableRoute(
-      approvalPlan({ role: ctx.role, amountMinor: amount, feeMinor: quote?.maxFeeMinor ?? 0n, payee, rule: ctx.rule, policy: ctx.policy, runningTotalMinor: counted ? BigInt(counted) : 0n }),
+      approvalPlan({
+        role: ctx.role,
+        amountMinor: amount,
+        feeMinor: quote?.maxFeeMinor ?? 0n,
+        payee,
+        rule: ctx.rule,
+        policy: ctx.policy,
+        runningTotalMinor: counted ? BigInt(counted) : 0n,
+        asset: 'USDC',
+        ...(now ? { nowMs: BigInt(now), settleByMs: BigInt(now + SETTLE_WINDOW_MS) } : {}),
+      }),
       ctx.staffRulePaymentsWired,
     );
-  }, [ctx, chosen, amount, quote]);
+  }, [ctx, chosen, amount, quote, now]);
+
+  /** Why the owners decide, in sentences with the limit, what is left and when the cap renews. */
+  const reasonLines = useMemo(
+    () => (plan && amount !== null && ctx ? approvalReasonLines(plan, { rule: ctx.rule, policy: ctx.policy, amountMinor: amount, ...(now ? { nowMs: now } : {}) }) : []),
+    [plan, amount, ctx, now],
+  );
+  /** What is left of the person's cap once this payment is made, when it is paid under their rule. */
+  const leftAfter = plan?.route === 'staff_rule' && ctx?.rule && quote ? BigInt(ctx.rule.spendableNowMinor) - quote.totalDebitMinor : null;
 
   async function send() {
     if (!chosen || !quote || amount === null) return;
@@ -146,9 +168,10 @@ export default function StepReview({ flow, ctx, balance, back, made, onMade, onE
       return;
     }
     const payee = chosen.kind === 'splash_business' ? { kind: 'splash_business', businessId: chosen.businessId } : { kind: 'recipient', recipientId: chosen.recipientId };
-    const answer = await call<{ transfer?: { id: string; route: 'owners_sign' | 'asked_owners' }; signingRequest?: SigningView | null; ask?: { id: string } | null; feeMinor?: string; code?: string }>('/api/wallet/transfers', {
+    const answer = await call<{ transfer?: { id: string; route: 'owners_sign' | 'asked_owners' | 'staff_rule' }; signingRequest?: SigningView | null; ask?: { id: string } | null; plan?: { reasons: string[]; lines: string[] }; feeMinor?: string; code?: string }>('/api/wallet/transfers', {
       key: flow.intentKey,
-      body: { payee, amountMinor: amount.toString(), maxFeeMinor: maxFee, reference: flow.reference || undefined },
+      // A page that said "within your spending rule" asks to pay alone: if the server finds it is not, it says why instead of quietly asking the owners.
+      body: { payee, amountMinor: amount.toString(), maxFeeMinor: maxFee, reference: flow.reference || undefined, asset: 'USDC', via: plan?.route === 'staff_rule' ? 'rule' : undefined },
     });
     setSending(false);
     if (answer.status === 409 && answer.body?.code === 'fee_changed') {
@@ -156,26 +179,43 @@ export default function StepReview({ flow, ctx, balance, back, made, onMade, onE
       void load();
       return;
     }
+    if (answer.status === 409 && answer.body?.code === 'outside_rule') {
+      // The rule changed since the page read it: read it again, and say why in the server's words.
+      setSendError(errorText(answer, 'This payment is outside your spending rule now. Nothing was sent.'));
+      reload();
+      return;
+    }
     const transfer = answer.body?.transfer;
     if (!answer.ok || !transfer) {
       setSendError(errorText(answer, 'The payment was not sent. Nothing left your wallet.'));
       return;
     }
-    onMade({ ref: transfer.id, route: transfer.route, signing: answer.body?.signingRequest ?? null, askId: answer.body?.ask?.id ?? null, expected: { recipient: quote.payee?.address ?? null, amountMinor: amount.toString(), maxFeeMinor: maxFee, payeeName: chosen.name } });
+    onMade({ ref: transfer.id, route: transfer.route, signing: answer.body?.signingRequest ?? null, askId: answer.body?.ask?.id ?? null, plan: answer.body?.plan, expected: { recipient: quote.payee?.address ?? null, amountMinor: amount.toString(), maxFeeMinor: maxFee, payeeName: chosen.name } });
   }
 
   const feeLine = quote ? (quote.feesOn ? `${formatUsdc(quote.feeMinor)} USDC` : 'None charged yet') : '';
   const ownerRoute = plan?.route === 'owners_sign';
+  const ruleRoute = plan?.route === 'staff_rule';
 
   if (made) {
     return (
       <div className="space-y-5">
-        <h2 className="text-[22px] font-extrabold text-[#0c3e48]">{made.route === 'owners_sign' ? 'Approve the payment' : 'Sent to your owners'}</h2>
+        <h2 className="text-[22px] font-extrabold text-[#0c3e48]">{made.route === 'owners_sign' ? 'Approve the payment' : made.route === 'staff_rule' ? 'Sign your payment' : 'Sent to your owners'}</h2>
         {made.signing ? (
           <SignPanel initial={made.signing} expected={made.expected} onExecuted={onExecuted} onRestart={onRestart} />
         ) : (
           <div className="space-y-3 rounded-2xl border border-[#326273]/15 bg-white p-4 sm:p-5" role="status">
             <p className="flex items-center gap-2 text-base font-extrabold text-[#0c3e48]"><ShieldCheck className="h-5 w-5 text-[#0d6370]" aria-hidden="true" />{made.route === 'asked_owners' ? 'Your owners have been asked' : 'Waiting for the owners'}</p>
+            {made.plan && made.plan.lines.length > 0 ? (
+              <div>
+                <p className="text-sm font-bold text-[#0c3e48]">Why it went to them</p>
+                <ul className="mt-1 list-disc space-y-1 pl-5 text-[13px] leading-5 text-[#1F4452]">
+                  {made.plan.lines.map((line) => (
+                    <li key={line}>{line}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
             <p className="text-sm leading-6 text-[#1F4452]">Nothing has left your wallet. An owner reviews the payment and signs it with the other owners; you are told in Splash when it is paid. The receipt appears here and in History.</p>
             <QuietButton type="button" onClick={onRestart}>Start another payment</QuietButton>
           </div>
@@ -191,7 +231,7 @@ export default function StepReview({ flow, ctx, balance, back, made, onMade, onE
         Back
       </QuietButton>
       <PrimaryButton type="button" className={stickyActions ? 'min-h-14 flex-1 text-base' : undefined} disabled={!quote || lapsed || sending || (quote.payee?.recentlyAdded === true && !addressChecked) || plan?.route === 'blocked' || !plan || (balance.state === 'ok' && quote !== null && balance.usdcMinor < quote.totalDebitMinor)} onClick={() => void send()}>
-        {sending ? 'Sending…' : ownerRoute ? 'Approve and collect signatures' : 'Ask the owners to approve'}
+        {sending ? 'Sending…' : ownerRoute ? 'Approve and collect signatures' : ruleRoute ? 'Pay now' : 'Ask the owners to approve'}
       </PrimaryButton>
     </>
   );
@@ -257,12 +297,18 @@ export default function StepReview({ flow, ctx, balance, back, made, onMade, onE
           <h3 id="who-approves" className="flex items-center gap-2 text-sm font-extrabold text-[#0c3e48]"><ShieldCheck className="h-4 w-4 text-[#0d6370]" aria-hidden="true" />Who approves</h3>
           {plan.route === 'owners_sign' ? (
             <p className="text-sm leading-6 text-[#1F4452]">Your owners approve this together. Each signs on their own device with their own passkey, and Splash combines the signatures. Splash has no key to your wallet.</p>
+          ) : plan.route === 'staff_rule' ? (
+            <>
+              <h4 className="text-sm font-bold text-[#145d6a]">Within your spending rule</h4>
+              <p className="text-sm leading-6 text-[#1F4452]">The amount, the recipient and the time all fit your rule, so you sign this yourself with your passkey. It is paid from your business wallet, and no one else has to approve it.</p>
+              {leftAfter !== null && leftAfter >= 0n ? <p className="text-[13px] leading-5 text-[#326273]">After this, your rule has {formatUsdc(leftAfter)} USDC left{ctx?.rule?.renewsAtMs ? ' until it renews' : ''}.</p> : null}
+            </>
           ) : plan.route === 'ask_owners' ? (
             <>
-              <p className="text-sm leading-6 text-[#1F4452]">An owner approves this payment. Nothing leaves your wallet until they do.</p>
+              <p className="text-sm leading-6 text-[#1F4452]">Your owners approve this payment. Nothing leaves your wallet until they do.</p>
               <ul className="list-disc space-y-1 pl-5 text-[13px] leading-5 text-[#1F4452]">
-                {plan.reasons.map((r) => (
-                  <li key={r}>{APPROVAL_REASON_TEXT[r]}</li>
+                {reasonLines.map((line) => (
+                  <li key={line}>{line}</li>
                 ))}
               </ul>
             </>

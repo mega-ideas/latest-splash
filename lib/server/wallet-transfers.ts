@@ -47,7 +47,7 @@ import { suppliers, walletApprovalAsks, walletSigningRequests, walletTransfers }
 import { validClientKey } from '../funding/wallet-funding.ts';
 import { moveDeliveryOf, MOVE_KIND, type DeliveryKind } from '../recipients/wallet-recipients.ts';
 import { FEE_CEILING_BPS, BPS_DENOM } from '../fees/schedule.ts';
-import { approvalPlan, approvalReasonLines, APPROVAL_REASON_TEXT, U64_MAX, type ApprovalPlan, type ApprovalReason, type InFlight, type PlanPayee } from '../transfer/plan.ts';
+import { approvalPlan, approvalReasonLines, APPROVAL_REASON_TEXT, SETTLE_WINDOW_MS, U64_MAX, type ApprovalPlan, type ApprovalReason, type InFlight, type PlanPayee } from '../transfer/plan.ts';
 import { openStaffRulePayment, readStaffRule, type SpendContext, type StaffRuleRead } from './spend-rules.ts';
 import { askOwnersToApprove, type ApprovalAsk, type AskNotifier, type AskPolicy } from './payment-approval-asks.ts';
 import { recipientPayable, requestWalletPayment, type WalletContext, type WalletMembers } from './business-wallet.ts';
@@ -59,7 +59,7 @@ export type TransferFailure = { ok: false; status: number; code: string; error: 
 const fail = (status: number, code: string, error: string, more: { feeMinor?: string; reasons?: ApprovalReason[] } = {}): TransferFailure => ({ ok: false, status, code, error, ...more });
 
 /** How long the owners have to sign before the quote behind the payment lapses. */
-export const TRANSFER_SETTLE_WINDOW_MS = 60 * 60 * 1000;
+export const TRANSFER_SETTLE_WINDOW_MS = SETTLE_WINDOW_MS;
 /** A claim on an intent id that has no request and no ask after this long was left by a request that died: it is reclaimed. */
 export const TRANSFER_CLAIM_TTL_MS = 2 * 60_000;
 /** How long the intent stays open on chain. */

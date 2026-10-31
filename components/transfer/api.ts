@@ -42,6 +42,8 @@ export type Context = {
 
 export type SigningView = {
   id: string;
+  /** What the request is for (`staff_rule_payment`: a staff member paying alone under their rule). */
+  purpose?: string;
   status: string;
   transactionBytes: string;
   digest: string;
