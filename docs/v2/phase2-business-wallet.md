@@ -57,7 +57,8 @@ UI that drives it is Phase 3.
    sponsor will pay for them, that the org is inside its sponsored-gas budget
    (1 SUI per 24 hours), and that they **simulate**. Only then are they stored,
    with their digest and the decoded description, and each signer told:
-   WhatsApp (no link, no bytes; a 16-hex transaction code to compare) and the
+   WhatsApp (a link to that one request's Approve screen, no bytes, and a
+   16-hex transaction code to compare; see `phase3-phone.md`) and the
    in-app inbox (`GET /api/wallet/signing-requests`). Routes that open a
    request are rate-limited per person and per business.
 2. **Sign.** A signer fetches the request and their device decodes the bytes

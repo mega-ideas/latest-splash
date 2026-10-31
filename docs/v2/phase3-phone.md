@@ -106,6 +106,58 @@ absent, the same as one that does not exist.
 
 Wallet's "Needs your signature" opens a request on this screen on a phone.
 
+### The link in the signing message
+
+Sky's decision: the WhatsApp signing message links to `/dashboard/approve/[id]`
+(`lib/approve/link.ts`, worded in `walletSignatureMessage`, sent by
+`walletSigningNotifier`).
+
+```
+Review it here: https://<the business's own address>/dashboard/approve/wsr_...
+The link only opens the review. It signs nothing and carries no secret; nothing
+happens until you sign with your passkey.
+On the screen, check the payee, the amount and the fee, and that the transaction
+code is 1a2b 3c4d 5e6f 7a8b. This request expires in 24 hours.
+```
+
+What the link is:
+
+- **No secret, nothing signed.** The address is the origin of `NEXT_PUBLIC_APP_URL`
+  (any path, query, fragment or credentials in it are cut) plus the request's id.
+  The id is an identifier, not a credential: reading the request takes the
+  person's own session and business, and a request that is not theirs reads as
+  absent, the same as one that does not exist. No query string, no token, no
+  transaction bytes. The WhatsApp message still carries no payee's bank details.
+- **Opening it only shows the screen.** The page reads the request once
+  (`GET /api/wallet/signing-requests/:id`) and decodes the bytes on the device:
+  payee, amount, asset and fee bound, from the exact bytes. Nothing executes until
+  an approver signs with their own passkey; the page itself sends only the
+  confirmed decline or withdraw.
+- **The transaction code is still the second check.** The message names it, the
+  screen shows it above the passkey button and beside it ("If your WhatsApp message
+  shows a different code, do not sign. Opening this page from a link signs nothing;
+  only your passkey does."). The link does not replace the comparison.
+- **Fails closed.** In production a link is made only on https and never for a
+  local address; with no usable address the message goes without a link and says
+  "Open Splash, check the details and the transaction code ..." as before. A
+  plain-http link is never sent in production. The inbox in the app is the channel
+  that always works.
+- **Signed out.** The dashboard layout sends a signed-out visitor to
+  `/login?next=<that one address>` and the password sign-in returns to it. The way
+  back is an allowlist of one shape, `/dashboard/approve/<id>` exactly
+  (`safeApproveReturn`): another site, another path, a query, a fragment, a doubled
+  slash or a dot segment signs in to Home. The proxy sets the header the layout
+  reads (`x-splash-return`) from the path alone and drops whatever the browser sent
+  under that name. zkLogin keeps landing on Home.
+
+**No approval, no draw.** A payment that needs the owners cannot execute without
+their recorded signatures, whatever is opened or replayed: tested at the service
+level in `approve-link-service` (no signature, one of two, the same owner twice, a
+read of the link any number of times, a signature after execution: the chain sees
+no submission before the quorum and one after; a staff payment is an ask that
+approves only when its request executes; another business's request and a member
+who is not a signer read as absent and sign nothing).
+
 ## Transfer, one question per screen
 
 `lib/transfer/phone-steps.ts` is the order of the screens and what each needs
@@ -164,6 +216,9 @@ absent**; **a signature given twice is refused (409, already signed), no second
 signature is stored and nothing is submitted twice**; **a payment with a second
 payout added to its real bytes is blocked and named**; a bank payout's rate, a
 currency that is not a code and a rate of nothing are read from real bytes),
+`approve-link` (the link, its production fail-closed rule, the way back after
+sign-in, the message and the notifier, one place wording the message) and
+`approve-link-service` (no approval, no draw, cross-tenant, replay),
 `phone-transfer` (the order of the questions, what each needs, the shared
 bank form, **no second intent id**, the pilot corridor, owner-only questions),
 `phone-pages` (the frame, Home, Wallet's folding and hash links, Zeke). The static
@@ -180,9 +235,15 @@ server and refused under a demo policy in production
 - **A real device.** The layouts were checked at 390x844 in a desktop browser with
   a phone User-Agent. The passkey prompt, the home indicator's inset and the
   on-screen keyboard are not exercised by that; they are Sky's on a phone.
-- **A deep link from WhatsApp.** `/dashboard/approve/[id]` is the address; the
-  WhatsApp message does not carry it yet (it names the transaction code). Left for
-  Sky: a link in a signing message is a choice about what owners are taught to tap.
+- **An ask to the owners has no link.** A payment a staff member asked the owners
+  to approve is an ask, not a request to sign: there is nothing to open on the
+  Approve screen until an owner accepts it, and then the signing message (with its
+  link) goes to the owners. The ask's own message still says "Open Splash to review
+  it. Nothing is paid until the owners sign."
+- **No email or push for a signing request exists.** WhatsApp and the inbox are
+  the two channels. If one is added it must build its text with
+  `walletSignatureMessage` (a test fails if any other file words the message), so
+  the link, what it signs and the code check read the same.
 - **Keyboard and viewport on a phone.** The Zeke composer's height uses `dvh`,
   which on iOS does not shrink for the on-screen keyboard, and `viewport-fit=cover`
   is set for the whole dashboard. Neither can be exercised without a phone.
