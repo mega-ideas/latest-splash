@@ -91,7 +91,7 @@ const panel = readFileSync(new URL('../components/transfer/SignPanel.tsx', impor
 
 test('the signing panel lists every item with its full fields and will not sign what it cannot word', () => {
   assert.match(panel, /signingItems\(/);
-  assert.match(panel, /groupAddress\(f\.value\)|groupAddress\(field\.value\)/, 'addresses are grouped, in full');
+  assert.match(panel, /groupAddress\(normalizeSuiAddress\(f\.value\)\)/, 'addresses are grouped, in full');
   assert.match(panel, /unknown/, 'unknown commands are handled');
   assert.match(panel, /disabled=\{busy \|\| blocked\}/, 'signing is disabled for an unwordable request');
   assert.match(panel, /useId\(\)/, 'the heading id is unique per panel');

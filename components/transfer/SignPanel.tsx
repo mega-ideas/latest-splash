@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Check, CircleAlert, Clock3, Fingerprint, ShieldCheck } from 'lucide-react';
 import { normalizeSuiAddress } from '@mysten/sui/utils';
 
@@ -8,7 +8,7 @@ import { describeSignError, signWithPasskey } from '@/lib/wallet/sui-signers';
 import { reviewOnDevice, type DeviceReview } from '@/lib/wallet/review-on-device';
 import { formatUsdc } from '@/lib/fees/copy';
 import { groupAddress } from '@/lib/transfer/addresses';
-import { plainActions } from '@/lib/wallet-page/actions';
+import { signingItems } from '@/lib/wallet-page/actions';
 import { differsFromApproved } from '@/lib/transfer/approved';
 import { call, errorText, type SigningView } from './api';
 import type { Made } from './flow';
@@ -38,6 +38,7 @@ export default function SignPanel({ initial, expected = null, labels = PAYMENT_L
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const done = useRef(false);
+  const headingId = useId();
 
   const refresh = useCallback(async () => {
     const answer = await call<{ request?: SigningView }>(`/api/wallet/signing-requests/${encodeURIComponent(initial.id)}`);
@@ -109,16 +110,19 @@ export default function SignPanel({ initial, expected = null, labels = PAYMENT_L
   const open = review?.actions.find((a) => a.type === 'open_intent');
   const pay = review?.actions.find((a) => a.type === 'pay_intent');
   const withdraw = review?.actions.find((a) => a.type === 'withdraw');
-  const steps = review ? plainActions(review.actions as Parameters<typeof plainActions>[0]) : [];
+  const items = review ? signingItems(review.actions as Parameters<typeof signingItems>[0]) : [];
+  const steps = items.filter((i) => !i.covered);
+  // A command the page cannot word is never signed: the owner would be signing bytes whose meaning is not on the screen.
+  const blocked = items.some((i) => i.unknown);
 
   return (
-    <section aria-labelledby="sig-h" className="space-y-4 rounded-2xl border border-[#326273]/15 bg-white p-4 sm:p-5" aria-live="polite">
+    <section aria-labelledby={headingId} className="space-y-4 rounded-2xl border border-[#326273]/15 bg-white p-4 sm:p-5" aria-live="polite">
       <div className="flex items-center gap-3">
         <span className={`flex h-10 w-10 items-center justify-center rounded-lg ${finished ? 'bg-[var(--ok-bg)] text-[#145d6a]' : dead ? 'bg-[var(--error-bg)] text-[var(--error)]' : 'bg-[var(--warn-bg)] text-[var(--warn-ink)]'}`}>
           {finished ? <Check className="h-5 w-5" aria-hidden="true" /> : dead ? <CircleAlert className="h-5 w-5" aria-hidden="true" /> : <Clock3 className="h-5 w-5" aria-hidden="true" />}
         </span>
         <div>
-          <h3 id="sig-h" className="text-base font-extrabold text-[#0c3e48]">
+          <h3 id={headingId} className="text-base font-extrabold text-[#0c3e48]">
             {finished ? labels.done : dead ? (view.status === 'expired' ? 'The request expired' : 'This did not go through') : view.status === 'submitting' || view.status === 'unknown' ? labels.working : 'Waiting for signatures'}
           </h3>
           <p className="text-[13px] text-[#326273]">
@@ -165,12 +169,26 @@ export default function SignPanel({ initial, expected = null, labels = PAYMENT_L
                   <dd className="font-mono text-[13px] text-[#0c3e48]">{formatUsdc(BigInt(withdraw.amountMinor))} USDC</dd>
                 </>
               ) : null}
-              {steps.length > 0 && !open && !pay ? (
+              {steps.length > 0 ? (
                 <>
                   <dt className="text-[#326273]">This will</dt>
-                  <dd className="text-[#0c3e48]">
-                    <ul className="list-disc space-y-1 pl-4">
-                      {steps.map((line) => <li key={line}>{line}</li>)}
+                  <dd className="min-w-0 text-[#0c3e48]">
+                    <ul className="space-y-3">
+                      {steps.map((item, n) => (
+                        <li key={`${n}-${item.line}`} className={item.unknown ? 'font-semibold text-[var(--error)]' : undefined}>
+                          <span className="block">{item.line}</span>
+                          {item.fields.length > 0 ? (
+                            <dl className="mt-1 grid gap-x-3 gap-y-1 text-[13px] sm:grid-cols-[auto_1fr]">
+                              {item.fields.map((f) => (
+                                <div key={`${f.label}-${f.value}`} className="contents">
+                                  <dt className="text-[#326273]">{f.label}</dt>
+                                  <dd className={`min-w-0 break-all font-mono leading-5 text-[#0c3e48]`}>{f.address ? groupAddress(normalizeSuiAddress(f.value)) : f.value}</dd>
+                                </div>
+                              ))}
+                            </dl>
+                          ) : null}
+                        </li>
+                      ))}
                     </ul>
                   </dd>
                 </>
@@ -179,9 +197,10 @@ export default function SignPanel({ initial, expected = null, labels = PAYMENT_L
               <dd className="font-mono text-[13px] font-bold text-[#0c3e48]">{review.code}</dd>
             </dl>
             <p className="text-[13px] leading-5 text-[#326273]">If your WhatsApp message shows a different code, do not sign.</p>
+            {blocked ? <p role="alert" className="text-sm font-semibold text-[var(--error)]">Part of this request cannot be shown here, so it cannot be signed from this screen. Do not sign it.</p> : null}
             {error ? <p role="alert" className="text-sm font-medium text-[var(--error)]">{error}</p> : null}
             <div className="flex flex-wrap gap-2">
-              <PrimaryButton type="button" disabled={busy} onClick={() => void sign()}>
+              <PrimaryButton type="button" disabled={busy || blocked} onClick={() => void sign()}>
                 <Fingerprint className="h-4 w-4" aria-hidden="true" />
                 {busy ? 'Waiting for your passkey…' : 'Sign with your passkey'}
               </PrimaryButton>

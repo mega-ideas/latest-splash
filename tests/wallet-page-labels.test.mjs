@@ -88,7 +88,6 @@ test('what a transaction does is listed in plain words from the decoded commands
   assert.match(lines[0], /2 of 3/);
   assert.match(lines[1], /3 USDC coins/);
   assert.match(lines[2], /5\.00 USDC/);
-  assert.match(lines[2], /0x2222/);
   assert.equal(lines.length, 5);
   assert.match(lines[4], /Not shown here.*do not sign/i, 'a command the page does not know is labelled, never dropped or shown as code');
 });
