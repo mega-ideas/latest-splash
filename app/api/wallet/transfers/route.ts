@@ -14,11 +14,17 @@ export const dynamic = 'force-dynamic';
  *
  * GET   this business's payments, newest first.
  * POST  { payee: { kind: 'recipient', recipientId } | { kind: 'splash_business',
- *       businessId }, amountMinor, maxFeeMinor, reference? } with an
- *       Idempotency-Key header (or `clientKey`): the intent id. An owner's
- *       payment becomes a signing request for the owners; staff ask the
- *       owners. `maxFeeMinor` is the Splash fee the person was shown: the
- *       chain charges at most that. The business is the session's.
+ *       businessId }, amountMinor, maxFeeMinor, reference?, via?, asset? }
+ *       with an Idempotency-Key header (or `clientKey`): the intent id. An
+ *       owner's payment becomes a signing request for the owners. A staff
+ *       member whose rule covers the amount, the recipient and the time
+ *       window pays alone: a one-signer request for their own passkey
+ *       (`staff_rule`); anything outside the rule asks the owners, and the
+ *       answer's `plan` says why in plain words. `via: 'rule'` means "pay alone
+ *       or tell me why not" (409 outside_rule, nothing stored); `via: 'ask'`
+ *       asks the owners. `asset` other than USDC is refused. `maxFeeMinor` is
+ *       the Splash fee the person was shown: the chain charges at most that.
+ *       The business is the session's.
  */
 export async function GET(request: Request) {
   const gate = await transferRoute(request);
@@ -45,6 +51,8 @@ export async function POST(request: Request) {
       amountMinor: body.amountMinor,
       maxFeeMinor: body.maxFeeMinor,
       reference: body.reference,
+      via: body.via,
+      asset: body.asset,
     },
   );
   if (!result.ok) {
@@ -53,7 +61,7 @@ export async function POST(request: Request) {
     return NextResponse.json(rest, { status, headers: NO_STORE });
   }
   return NextResponse.json(
-    { transfer: result.transfer, signingRequest: result.signingRequest ?? null, ask: result.ask ?? null, created: result.created },
+    { transfer: result.transfer, signingRequest: result.signingRequest ?? null, ask: result.ask ?? null, plan: result.plan, created: result.created },
     { status: result.created ? 201 : 200, headers: NO_STORE },
   );
 }

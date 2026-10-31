@@ -41,7 +41,6 @@ import { T0 } from './fixtures/wallet-world.mjs';
 import { startBusinessWallet } from '../lib/server/business-wallet.ts';
 import { changeRecipients, issueSpendingRule, readSpendingRules, revokeSpendingRule, startSpendPolicy } from '../lib/server/spend-rules.ts';
 import { deriveNearThresholdAlerts } from '../lib/server/near-threshold.ts';
-import { makePaymentRecorder } from '../lib/server/payment-record.ts';
 import { listApprovalAsks } from '../lib/server/payment-approval-asks.ts';
 import { readRequestForSigner, signingInbox, submitPartialSignature } from '../lib/server/wallet-signing.ts';
 import * as T from '../lib/server/wallet-transfers.ts';
@@ -244,15 +243,35 @@ test('a transaction built by hand for someone with no rule never reaches a signe
   const t = await setup();
   await t.give(t.rule(staffKey.address));
   // staff2 has no rule. Their bytes name staff's allowance, which the reader will accept for a request that names it.
-  const read = await (await import('../lib/server/spend-rules.ts')).readStaffRule(t.w.sc, { addresses: [staffKey.address] });
-  assert.equal(read.ok, true, JSON.stringify(read));
-  const { openStaffRulePayment } = await import('../lib/server/spend-rules.ts');
-  const forged = await openStaffRulePayment(t.w.sc, {
+  const { readStaffRule, openStaffRulePayment } = await import('../lib/server/spend-rules.ts');
+  const read = await readStaffRule(t.w.sc, { addresses: [staffKey.address] });
+  assert.equal(read.ok, true, read.error);
+  const payment = { paymentRef: new Uint8Array(32).fill(9), recipient: SUPPLIER, amountMinor: U(100), targetCurrency: 'USDC', fxRateUsdLocal: 1_000_000n, commitment: new Uint8Array(32).fill(8), railCommitment: new Uint8Array(32).fill(7), expiresAtMs: t0 + 7n * DAY, maxFeeMinor: feeFor(U(100)), settleByMs: t0 + 3_600_000n, contentHash: new Uint8Array(32).fill(4), walrusBlobId: new TextEncoder().encode('blob') };
+  // The server will not even build it: the allowance is not theirs.
+  const refused = await openStaffRulePayment(t.w.sc, { orgId: 'acme', userId: 'u-staff2', signer: { publicKey: staff2Key.publicKey, address: staff2Key.address }, read: read.read, payment });
+  assert.deepEqual([refused.ok, refused.code], [false, 'no_passkey_for_rule']);
+  // Bytes made by hand and put to the signing layer: the dry run aborts, so nobody is asked to sign.
+  const bytes = await staffRulePaymentTx(t.w.sc.chain, {
+    ...payment,
+    spender: staff2Key.address,
+    account: t.w.ctx.account,
+    policy: { objectId: read.read.policy.objectId, initialSharedVersion: read.read.policy.initialSharedVersion },
+    allowance: { objectId: read.read.allowance.objectId, initialSharedVersion: read.read.allowance.initialSharedVersion },
+    funder: read.read.allowance.funder,
+    gas: await t.w.signing.sponsor.gasFor(),
+  });
+  const { openSigningRequest } = await import('../lib/server/wallet-signing.ts');
+  const staffPay = { policyId: read.read.policy.objectId, allowanceId: read.read.allowance.objectId, funder: read.read.allowance.funder };
+  const forged = await openSigningRequest(t.w.signing, {
     orgId: 'acme',
-    userId: 'u-staff2',
-    signer: { publicKey: staff2Key.publicKey, address: staff2Key.address },
-    read: read.read,
-    payment: { paymentRef: new Uint8Array(32).fill(9), recipient: SUPPLIER, amountMinor: U(100), targetCurrency: 'USDC', fxRateUsdLocal: 1_000_000n, commitment: new Uint8Array(32).fill(8), railCommitment: new Uint8Array(32).fill(7), expiresAtMs: t0 + 7n * DAY, maxFeeMinor: feeFor(U(100)), settleByMs: t0 + 3_600_000n, contentHash: new Uint8Array(32).fill(4), walrusBlobId: new TextEncoder().encode('blob') },
+    requestedBy: 'u-staff2',
+    purpose: 'staff_rule_payment',
+    dedupeKey: 'pay:forged',
+    transactionBytes: bytes,
+    signer: { kind: 'single', userId: 'u-staff2', publicKey: Buffer.from(new (await import('@mysten/sui/keypairs/passkey')).PasskeyPublicKey(fromBase64(staff2Key.publicKey)).toSuiBytes()).toString('base64') },
+    gasMode: 'sponsored',
+    staffPay,
+    staffPayment: { spender: staff2Key.address, recipient: SUPPLIER, amountMinor: U(100), maxFeeMinor: payment.maxFeeMinor, policyId: staffPay.policyId, allowanceId: staffPay.allowanceId },
   });
   assert.equal(forged.ok, false);
   assert.equal(forged.code, 'simulation_failed');
@@ -264,10 +283,20 @@ test('a transaction built by hand for someone with no rule never reaches a signe
 const OUTSIDE = [
   ['a rule that has ended', async (t) => t.w.setNow(new Date(Number(t0 + 91n * DAY))), 'rule_expired', /ended/i],
   [
-    'a rule taken back',
+    'a rule the owners took back',
     async (t) => {
       const opened = await revokeSpendingRule(t.w.sc, { orgId: 'acme', requestedBy: 'u-founder', wallet: t.members, spender: staffKey.address });
       assert.equal((await signBy(t.w, opened.request, ['founder', 'two'])).status, 'executed');
+    },
+    'no_rule',
+    /no spending rule/i,
+  ],
+  [
+    'an allowance taken back while the person is still on the policy',
+    async (t) => {
+      const [id] = [...t.w.spend.allowances.keys()];
+      t.w.spend.allowances.delete(id);
+      for (const [cap, c] of t.w.spend.caps) if (c.allowance === id) t.w.spend.caps.delete(cap);
     },
     'rule_revoked',
     /taken back/i,
@@ -301,7 +330,8 @@ for (const [name, prepare, reason, words, opts = {}] of OUTSIDE) {
       await t.verify(EXCHANGE, 'exchange');
     }
     await prepare(t);
-    const body = (over = {}) => amountInput(recipientId, opts.usdc ?? 1_000, over);
+    // The fee the page showed: an exchange account is priced as an exchange payment.
+    const body = (over = {}) => amountInput(recipientId, opts.usdc ?? 1_000, { ...(opts.exchange ? { maxFeeMinor: feeFor(U(opts.usdc ?? 1_000), 2).toString() } : {}), ...over });
     // The person insists on paying alone: refused, plainly.
     const insisted = await T.createTransfer(t.deps(), STAFF, body({ via: 'rule' }));
     assert.equal(insisted.ok, false, JSON.stringify(insisted));
@@ -332,6 +362,7 @@ test('once the cap window has renewed, the same rule pays alone again', async ()
   assert.equal(second.transfer.route, 'asked_owners');
   assert.deepEqual(second.plan.reasons, ['over_cap']);
   t.w.setNow(new Date(T0.getTime() + 25 * 3_600_000));
+  await t.w.screenClear(SUPPLIER);
   const third = await T.createTransfer(t.deps(), STAFF, input(t.recipientId, { clientKey: 'tx_key_000003' }));
   assert.equal(third.transfer.route, 'staff_rule', 'a day later the cap is whole again');
   await t.w.client.close();
@@ -373,12 +404,14 @@ test('a payment in anything but USDC is refused for staff and for owners alike, 
 test('a recipient that is not a fresh CLEAR is not paid under a rule, and neither are funds on hold', async () => {
   const t = await setup();
   await t.give(t.rule(staffKey.address));
-  await t.w.db.delete(schema.kytScreenings);
-  const unscreened = await T.createTransfer(t.deps(), STAFF, input(t.recipientId, { via: 'rule' }));
+  // A recipient the owners verified on the policy but nobody has screened: no fresh CLEAR, so no payment.
+  const unscreenedId = await t.w.saveRecipient(STRANGER);
+  await t.verify(STRANGER);
+  const unscreened = await T.createTransfer(t.deps(), STAFF, input(unscreenedId, { via: 'rule' }));
   assert.equal(unscreened.ok, false);
   assert.ok([403, 409].includes(unscreened.status), String(unscreened.status));
   assert.equal((await requests(t.w)).length, 0);
-  await t.w.screenClear(SUPPLIER);
+  assert.equal((await transfers(t.w)).length, 0);
   t.w.ctx.heldUsdc = async () => U(99_999);
   t.w.ctx.readUsdc = async () => ({ coinMinor: 0n, addressBalanceMinor: U(100_000) });
   const held = await T.createTransfer(t.deps(), STAFF, input(t.recipientId, { clientKey: 'tx_key_000002' }));
@@ -462,8 +495,10 @@ test('one person asking twice at once for the last of their cap: one pays alone,
   assert.equal((await submitPartialSignature(t.w.signing, { orgId: 'acme', userId: 'u-staff', id: winner.signingRequest.id, signature: await sign(staffKey, winner.signingRequest), digest: winner.signingRequest.digest })).request.status, 'executed');
   assert.equal(t.w.spends.length, 1);
   // Once the first has landed, what is left on chain is what is counted: no double count of it.
-  const third = await T.createTransfer(t.deps(), STAFF, amountInput(t.recipientId, 100, { clientKey: 'tx_key_00000c' }));
-  assert.equal(third.transfer.route, 'asked_owners', 'there is not room for another 100 and its fee: 1,300 less 1,001 is 299');
+  const third = await T.createTransfer(t.deps(), STAFF, amountInput(t.recipientId, 300, { clientKey: 'tx_key_00000c' }));
+  assert.equal(third.transfer.route, 'asked_owners', 'there is not room for another 300 and its fee: 1,300 less the 1,000 and its fee already drawn is just under 300');
+  const fourth = await T.createTransfer(t.deps(), STAFF, amountInput(t.recipientId, 100, { clientKey: 'tx_key_00000d' }));
+  assert.equal(fourth.transfer.route, 'staff_rule', 'what is left on chain is counted once, not twice: 100 and its fee fit');
   await t.w.client.close();
 });
 
@@ -602,7 +637,9 @@ test('a rule held by a passkey this person can no longer sign with is not paid u
   const swapped = t.deps('acme', { staffSigner: async () => ({ publicKey: other.publicKey, address: other.address }) });
   const asked = await T.createTransfer(swapped, STAFF, input(t.recipientId));
   assert.equal(asked.transfer.route, 'asked_owners');
-  assert.ok(asked.plan.reasons.includes('no_rule'), 'a rule that is not theirs here is no rule');
+  assert.deepEqual(asked.plan.reasons, ['rule_needs_passkey']);
+  assert.match(asked.plan.lines.join(' '), /passkey you cannot sign with/);
+  assert.equal((await requests(t.w)).length, 0);
   await t.w.client.close();
 });
 
@@ -636,6 +673,6 @@ test('the audit bundle is made for a payment under a rule the same way, and a re
   assert.equal(t.calls.records, 0);
   const ok = await T.createTransfer(t.deps(), STAFF, input(t.recipientId));
   assert.equal(ok.transfer.route, 'staff_rule');
-  assert.equal(typeof makePaymentRecorder, 'function');
+  assert.equal(t.calls.records, 1, 'one bundle, made by the server');
   await t.w.client.close();
 });

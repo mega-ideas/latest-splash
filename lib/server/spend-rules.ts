@@ -52,7 +52,9 @@ import { liveRateLimit } from '../wallet/allowance-window.ts';
 import { allowanceNameFor, policyIdFor, splashSpendAppName, type AllowanceState, type RuleSpendEvent } from '../wallet/spend-rules-bcs.ts';
 import { fundsOnHold, payoutRouteOnly, recipientPayable, recordedWalletMembers, walletRegistration, type AccountState, type IntentState, type WalletContext, type WalletMembers } from './business-wallet.ts';
 import type { OwnershipGate } from './ownership-proofs.ts';
-import { approvePayoutTx, createSpendPolicyTx, RECIPIENT_TAG, SPEND_ROLE, spendRuleTx, type OwnedRef, type RuleCap, type RuleOp, type SpendChain } from './spend-rules-builders.ts';
+import { approvePayoutTx, createSpendPolicyTx, RECIPIENT_TAG, SPEND_ROLE, spendRuleTx, staffRulePaymentTx, type OwnedRef, type RuleCap, type RuleOp, type SpendChain, type StaffPayment } from './spend-rules-builders.ts';
+import { staffFactsFrom } from '../transfer/context.ts';
+import type { PolicyFacts, StaffRuleFacts } from '../transfer/plan.ts';
 import { buildSpendView, boundTo, DAY_MS, type HeldAllowance, type PolicyState, type SpendView } from './spend-rules-index.ts';
 import { V2_KIND } from './sui-v2-builders.ts';
 import { openSigningRequest, type RequestView, type SigningFailure } from './wallet-signing.ts';
@@ -702,6 +704,124 @@ export async function openSecondApproval(
       expiresAtMs: intent.expiresAtMs.toString(),
       asset: intent.asset,
     },
+  });
+}
+
+// ─── A payment under a staff member's rule ──────────────────────────────────
+
+/**
+ * One staff member's rule as the chain has it now, for Transfer: the facts the
+ * plan (lib/transfer/plan.ts) judges a payment by, and the objects a payment
+ * under it names. Read fresh from the chain, never from the page.
+ */
+export type StaffRuleRead = {
+  facts: { rule: StaffRuleFacts | null; policy: PolicyFacts | null; runningTotals: Record<string, string> };
+  /** The business wallet that funds the rule. */
+  wallet: string;
+  /** The staff member's own address on the allowance a payment would draw on; null when they have no rule that can pay. */
+  spender: string | null;
+  allowance: { objectId: string; initialSharedVersion: string; funder: string } | null;
+  policy: { objectId: string; initialSharedVersion: string } | null;
+  /** When it was read (ms): requests that executed after this are not in it yet. */
+  readAtMs: bigint;
+};
+
+/**
+ * The rule held by any of `addresses` (the person's own passkey addresses in
+ * this business), judged by what the chain says now. A person with no rule
+ * gets `rule: null`; a business with no current policy gets `policy: null`.
+ * A chain that cannot be read is a failure, never an empty rule.
+ */
+export async function readStaffRule(sc: SpendContext, input: { addresses: string[] }): Promise<{ ok: true; read: StaffRuleRead } | SpendFailure> {
+  const l = await load(sc);
+  if (isFailure(l)) return l;
+  const view = buildSpendView({ now: l.now, wallet: l.wallet, walletEpoch: l.walletEpoch, policy: l.policy, earlierPolicies: l.earlier, allowances: l.held, spends: [], appName: l.appName });
+  const facts = staffFactsFrom(view as unknown as Parameters<typeof staffFactsFrom>[0], input.addresses);
+  const mine = new Set(input.addresses.map((a) => normalizeSuiAddress(a)));
+  const rule = view.rules.find((r) => r.role === 'staff' && mine.has(normalizeSuiAddress(r.spender)));
+  // The allowance a payment draws on is the one the facts were judged by: current, active, with the most room.
+  let best: (typeof view.rules)[number]['allowances'][number] | null = null;
+  for (const a of rule?.allowances ?? []) {
+    if (!a.current || a.state !== 'active') continue;
+    if (best === null || BigInt(a.spendableNowMinor) > BigInt(best.spendableNowMinor)) best = a;
+  }
+  const held = best ? l.held.find((h) => normalizeSuiAddress(h.id) === normalizeSuiAddress(best.allowanceId)) : undefined;
+  const current = l.policy && l.policy.wallet === l.wallet && l.policy.walletEpoch === l.walletEpoch ? l.policy : null;
+  return {
+    ok: true,
+    read: {
+      facts,
+      wallet: l.wallet,
+      spender: rule && held ? normalizeSuiAddress(rule.spender) : null,
+      allowance: held ? { objectId: normalizeSuiAddress(held.id), initialSharedVersion: held.initialSharedVersion, funder: normalizeSuiAddress(held.funder) } : null,
+      policy: current ? { objectId: normalizeSuiAddress(current.id), initialSharedVersion: current.initialSharedVersion } : null,
+      readAtMs: l.now,
+    },
+  };
+}
+
+/**
+ * Open a staff member's payment under their own rule: the transaction built
+ * (create_intent, pay_intent with no second approval, anchor, delete), checked
+ * against exactly what is stored for it, sponsored, simulated, and put to its
+ * one signer, the staff member's own passkey (purpose `staff_rule_payment`).
+ * The rule is the one `read` found; the sender must be that rule's spender.
+ * Held funds are never drawn.
+ */
+export async function openStaffRulePayment(
+  sc: SpendContext,
+  input: {
+    orgId: string;
+    userId: string;
+    /** The person's active passkey: its compressed public key (base64) and Sui address. */
+    signer: { publicKey: string; address: string };
+    read: StaffRuleRead;
+    payment: Omit<StaffPayment, 'spender' | 'account' | 'policy' | 'allowance' | 'funder' | 'gas'>;
+  },
+): Promise<Result> {
+  const { read } = input;
+  if (!read.allowance || !read.policy || !read.spender) return refuse(409, 'no_rule', 'you have no spending rule that can pay this');
+  let key: PasskeyPublicKey;
+  try {
+    key = new PasskeyPublicKey(fromBase64(input.signer.publicKey));
+  } catch {
+    return refuse(400, 'bad_signer', 'your passkey could not be read');
+  }
+  const signerAddress = normalizeSuiAddress(key.toSuiAddress());
+  if (signerAddress !== normalizeSuiAddress(input.signer.address) || signerAddress !== read.spender) {
+    return refuse(409, 'no_passkey_for_rule', 'your spending rule belongs to a passkey you cannot sign with on this site');
+  }
+  const g = await gas(sc);
+  if (!g) return refuse(503, 'no_sponsor', 'business wallet transactions need a gas sponsor, and none is configured');
+  const onHold = await fundsOnHold(sc.wallet, read.wallet, input.payment.amountMinor + input.payment.maxFeeMinor);
+  if (onHold) return onHold;
+  let bytes: Uint8Array;
+  try {
+    bytes = await staffRulePaymentTx(sc.chain, {
+      ...input.payment,
+      spender: signerAddress,
+      account: sc.wallet.account,
+      policy: read.policy,
+      allowance: { objectId: read.allowance.objectId, initialSharedVersion: read.allowance.initialSharedVersion },
+      funder: read.allowance.funder,
+      gas: g,
+    });
+  } catch (error) {
+    const e = error as { code?: string; message?: string };
+    return refuse(400, e.code ?? 'bad_payment', e.message ?? 'the payment could not be built');
+  }
+  const staffPay = { policyId: read.policy.objectId, allowanceId: read.allowance.objectId, funder: read.allowance.funder };
+  return openSigningRequest(sc.wallet.signing, {
+    orgId: input.orgId,
+    requestedBy: input.userId,
+    purpose: 'staff_rule_payment',
+    // The payment reference is the idempotency key on chain too: one intent per reference, ever.
+    dedupeKey: `pay:${Buffer.from(input.payment.paymentRef).toString('hex')}`,
+    transactionBytes: bytes,
+    signer: { kind: 'single', userId: input.userId, publicKey: toBase64(key.toSuiBytes()) },
+    gasMode: 'sponsored',
+    staffPay,
+    staffPayment: { spender: signerAddress, recipient: input.payment.recipient, amountMinor: input.payment.amountMinor, maxFeeMinor: input.payment.maxFeeMinor, policyId: staffPay.policyId, allowanceId: staffPay.allowanceId },
   });
 }
 

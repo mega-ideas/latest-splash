@@ -55,6 +55,7 @@ import { normalizeStructTag, normalizeSuiAddress } from '@mysten/sui/utils';
 
 import { memberships, walletApprovalAsks, walletSigningRequests, walletTransfers } from '../db/schema.ts';
 import { MAX_INTENT_LIFETIME_MS, V2_KIND } from './sui-v2-builders.ts';
+import { financeLeadOf } from './team-admin.ts';
 import { memberRole, recordAuthorityEvent } from './wallet-authority.ts';
 import type { IntentState, WalletContext, WalletMembers } from './business-wallet.ts';
 import type { RequestView } from './wallet-signing.ts';
@@ -353,7 +354,16 @@ async function routedElsewhere(db: DrizzleDb, orgId: string, payment: { kind: nu
  * Tells the owners an ask is waiting (the live route sends it on their
  * approver channels). Best effort: the ask stands whatever the channel does.
  */
-export type AskNotifier = (n: { orgId: string; ask: ApprovalAsk; ownerUserIds: string[] }) => Promise<void>;
+export type AskNotifier = (n: {
+  orgId: string;
+  ask: ApprovalAsk;
+  ownerUserIds: string[];
+  /**
+   * The business's Finance lead, when it has one and they are not the asker: told so they know, where their role allows.
+   * They see every ask as an approver but cannot decide it; only an owner approves.
+   */
+  financeLeadUserId?: string | null;
+}) => Promise<void>;
 
 async function ownersBut(db: DrizzleDb, orgId: string, userId: string): Promise<string[]> {
   const rows = await db.select({ userId: memberships.userId }).from(memberships).where(and(eq(memberships.orgId, orgId), eq(memberships.role, 'admin')));
@@ -368,7 +378,9 @@ async function storeAsk(
   const stored = await insertAsk(db, a);
   if (stored.ok && notify) {
     try {
-      await notify({ orgId: a.orgId, ask: stored.ask, ownerUserIds: await ownersBut(db, a.orgId, a.userId) });
+      const ownerUserIds = await ownersBut(db, a.orgId, a.userId);
+      const lead = await financeLeadOf(db, a.orgId).catch(() => null);
+      await notify({ orgId: a.orgId, ask: stored.ask, ownerUserIds, financeLeadUserId: lead && lead !== a.userId && !ownerUserIds.includes(lead) ? lead : null });
     } catch {
       // The ask is in the owners' inbox in the app either way.
     }

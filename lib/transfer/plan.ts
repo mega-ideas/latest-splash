@@ -89,6 +89,7 @@ export type ApprovalReason =
   | 'rule_revoked'
   | 'rule_not_started'
   | 'rule_ends_soon'
+  | 'rule_needs_passkey'
   | 'over_payment_max'
   | 'cap_used_up'
   | 'over_cap'
@@ -222,6 +223,7 @@ export const APPROVAL_REASON_TEXT: Record<ApprovalReason, string> = {
   rule_revoked: 'Your spending rule was taken back, so this payment needs the owners.',
   rule_not_started: 'Your spending rule has not started yet, so this payment needs the owners.',
   rule_ends_soon: 'Your spending rule ends before this payment could be signed, so it needs the owners.',
+  rule_needs_passkey: 'Your spending rule belongs to a passkey you cannot sign with on this site, so this payment needs the owners.',
   over_payment_max: 'This is more than your rule allows for one payment.',
   cap_used_up: 'You have used up your rule’s cap for now.',
   over_cap: 'This is more than is left of your rule’s cap for now.',

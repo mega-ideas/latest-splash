@@ -89,10 +89,20 @@ export function transferDepsFor(route: WalletRoute, env: NodeJS.ProcessEnv = pro
       const live = await liveSpendContext(route);
       return live.ok ? readCurrentPolicy(live.sc) : null;
     },
-    notifyAsk: async ({ ask, ownerUserIds }) => {
+    notifyAsk: async ({ ask, ownerUserIds, financeLeadUserId }) => {
       const { notifyOwnersOfAsk } = await import('@/lib/server/approval-requests');
       const [org] = await db.select({ name: organizations.name }).from(organizations).where(eq(organizations.id, orgId)).limit(1);
-      await notifyOwnersOfAsk({ orgId, orgName: org?.name ?? 'Your business', ownerUserIds, amountMinor: ask.intent.amountMinor, recipient: ask.intent.recipient });
+      await notifyOwnersOfAsk({ orgId, orgName: org?.name ?? 'Your business', ownerUserIds, financeLeadUserId: financeLeadUserId ?? null, amountMinor: ask.intent.amountMinor, recipient: ask.intent.recipient });
+    },
+    // A payment under a staff rule (v2 §4.2): the chain client for this business's rules, and the person's own passkey that can sign here.
+    spend: async () => {
+      const { liveSpendContext } = await import('@/lib/server/spend-rules-deps');
+      const live = await liveSpendContext(route);
+      return live.ok ? live.sc : null;
+    },
+    staffSigner: async (userId) => {
+      const mine = (await orgMemberWalletAddresses(db, orgId)).find((m) => m.userId === userId && m.canSign);
+      return mine ? { publicKey: mine.publicKey, address: mine.address } : null;
     },
   };
 }

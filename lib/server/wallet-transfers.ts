@@ -8,10 +8,20 @@
  *
  *   owners    the payment becomes a signing request for the owners'
  *             multisig; the quorum collects the signatures (§4.1).
- *   staff     ask the owners (lib/server/payment-approval-asks.ts). A payment
- *             under a staff rule is the splash_spend path, which this server
- *             does not carry out yet (lib/transfer/plan.ts), so staff always
- *             ask; the owners then pay it from the wallet.
+ *   staff     a staff member whose rule covers the amount, the recipient and
+ *             the time window pays alone (`staff_rule`): one transaction
+ *             through splash_spend, signed by that person's own passkey. The
+ *             server reads the rule from the chain and runs the same check
+ *             the page ran (lib/transfer/plan.ts) before it builds anything,
+ *             counting what this person has already asked for and the chain
+ *             has not (the claim and the in-flight read are one step under a
+ *             lock, so two sends cannot both take the last of a cap).
+ *             Anything outside the rule asks the owners
+ *             (lib/server/payment-approval-asks.ts) with the reasons; a
+ *             person who insisted on paying alone (`via: 'rule'`) is refused
+ *             in words instead, and nothing is stored. Without the chain
+ *             client for spending rules nothing is built: the owners are
+ *             asked, or, if the person insisted, 503.
  *
  * What must hold, and where:
  *   - The fee shown is the payment's max_fee, exactly. A fee above it is
@@ -30,22 +40,23 @@
  */
 import { createHash, randomUUID } from 'node:crypto';
 
-import { and, desc, eq, isNull } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { normalizeSuiAddress } from '@mysten/sui/utils';
 
 import { suppliers, walletApprovalAsks, walletSigningRequests, walletTransfers } from '../db/schema.ts';
 import { validClientKey } from '../funding/wallet-funding.ts';
 import { moveDeliveryOf, MOVE_KIND, type DeliveryKind } from '../recipients/wallet-recipients.ts';
 import { FEE_CEILING_BPS, BPS_DENOM } from '../fees/schedule.ts';
-import { U64_MAX } from '../transfer/plan.ts';
+import { approvalPlan, approvalReasonLines, APPROVAL_REASON_TEXT, U64_MAX, type ApprovalPlan, type ApprovalReason, type InFlight, type PlanPayee } from '../transfer/plan.ts';
+import { openStaffRulePayment, readStaffRule, type SpendContext, type StaffRuleRead } from './spend-rules.ts';
 import { askOwnersToApprove, type ApprovalAsk, type AskNotifier, type AskPolicy } from './payment-approval-asks.ts';
 import { recipientPayable, requestWalletPayment, type WalletContext, type WalletMembers } from './business-wallet.ts';
 import type { PaymentRecorder } from './payment-record.ts';
 import { readRequestForSigner, type RequestView } from './wallet-signing.ts';
 import { endedByPeople, type DrizzleDb } from './wallet-signing-store.ts';
 
-export type TransferFailure = { ok: false; status: number; code: string; error: string; feeMinor?: string };
-const fail = (status: number, code: string, error: string, more: { feeMinor?: string } = {}): TransferFailure => ({ ok: false, status, code, error, ...more });
+export type TransferFailure = { ok: false; status: number; code: string; error: string; feeMinor?: string; reasons?: ApprovalReason[] };
+const fail = (status: number, code: string, error: string, more: { feeMinor?: string; reasons?: ApprovalReason[] } = {}): TransferFailure => ({ ok: false, status, code, error, ...more });
 
 /** How long the owners have to sign before the quote behind the payment lapses. */
 export const TRANSFER_SETTLE_WINDOW_MS = 60 * 60 * 1000;
@@ -70,6 +81,13 @@ export type TransferDeps = {
   requesterAddresses: (userId: string) => Promise<string[]>;
   askPolicy?: () => Promise<AskPolicy | null>;
   notifyAsk?: AskNotifier;
+  /**
+   * The chain client for this business's spending rules (lib/server/spend-rules.ts), or a function that makes it.
+   * Without it nothing is read or built for a payment under a rule; a context for another business is refused.
+   */
+  spend?: SpendContext | (() => Promise<SpendContext | null>);
+  /** The person's active passkey that can sign on this site: its compressed public key (base64) and Sui address. */
+  staffSigner?: (userId: string) => Promise<{ publicKey: string; address: string } | null>;
   /** How long a second request on a key waits for the first to finish before answering "in progress" (default 3 s). */
   claimWaitMs?: number;
 };
@@ -88,6 +106,10 @@ export type TransferInput = {
   amountMinor: unknown;
   maxFeeMinor: unknown;
   reference?: unknown;
+  /** Staff only. 'rule': pay alone under my rule, or refuse in words (never silently ask). 'ask': ask the owners. Absent: the server decides. */
+  via?: unknown;
+  /** The asset the payment moves. Absent means USDC, the only asset a payment moves (D6); anything else is refused. */
+  asset?: unknown;
 };
 
 export type TransferStatus = 'awaiting_signatures' | 'asked_owners' | 'on_the_way' | 'settled' | 'failed' | 'declined' | 'expired' | 'withdrawn';
@@ -95,7 +117,7 @@ export type TransferStatus = 'awaiting_signatures' | 'asked_owners' | 'on_the_wa
 export type TransferView = {
   id: string;
   paymentRef: string;
-  route: 'owners_sign' | 'asked_owners';
+  route: 'owners_sign' | 'asked_owners' | 'staff_rule';
   status: TransferStatus;
   payeeKind: string;
   payeeName: string;
@@ -112,9 +134,12 @@ export type TransferView = {
 
 type Row = typeof walletTransfers.$inferSelect;
 
+/** Who approves, and why, in the words the person is shown. */
+export type TransferPlan = { route: 'owners_sign' | 'staff_rule' | 'ask_owners'; reasons: ApprovalReason[]; lines: string[] };
+
 export type CreateTransferResult =
   | TransferFailure
-  | { ok: true; created: boolean; transfer: TransferView; signingRequest: RequestView | null; ask: ApprovalAsk | null };
+  | { ok: true; created: boolean; transfer: TransferView; signingRequest: RequestView | null; ask: ApprovalAsk | null; plan: TransferPlan };
 
 const digits = (value: unknown): bigint | null => {
   const s = typeof value === 'number' && Number.isSafeInteger(value) ? String(value) : typeof value === 'string' ? value.trim() : '';
@@ -127,7 +152,7 @@ const sha = (text: string) => createHash('sha256').update(text).digest();
 export const maskAddress = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 
 async function statusOf(deps: TransferDeps, row: Row): Promise<TransferStatus> {
-  if (row.route === 'owners_sign' && row.signingRequestId) {
+  if ((row.route === 'owners_sign' || row.route === 'staff_rule') && row.signingRequestId) {
     const [r] = await deps.db.select({ status: walletSigningRequests.status, error: walletSigningRequests.error }).from(walletSigningRequests).where(and(eq(walletSigningRequests.orgId, row.orgId), eq(walletSigningRequests.id, row.signingRequestId))).limit(1);
     switch (r?.status) {
       case 'collecting': return 'awaiting_signatures';
@@ -313,7 +338,7 @@ async function replay(deps: TransferDeps, actor: { userId: string }, row: Row, r
     const { listApprovalAsks } = await import('./payment-approval-asks.ts');
     ask = (await listApprovalAsks(deps.db, { orgId: deps.orgId, userId: actor.userId, now: deps.now })).find((a) => a.id === row.askId) ?? null;
   }
-  return { ok: true as const, created: false, transfer, signingRequest, ask };
+  return { ok: true as const, created: false, transfer, signingRequest, ask, plan: { route: row.route === 'asked_owners' ? ('ask_owners' as const) : (row.route as 'owners_sign' | 'staff_rule'), reasons: [], lines: [] } };
 }
 
 /** While another request holds the key, wait for its outcome: its payment, or its row gone (it was refused). */
@@ -379,6 +404,10 @@ export async function createTransfer(deps: TransferDeps, actor: { userId: string
   if (amount === null || amount <= 0n) return fail(400, 'bad_amount', 'Say how much USDC to pay: an amount above zero.');
   const maxFee = digits(input.maxFeeMinor);
   if (maxFee === null) return fail(400, 'bad_fee', 'The fee that was shown is needed with the payment.');
+  // One payment asset: USDC (D6). No rule pays another, and the owners do not either.
+  if (input.asset !== undefined && input.asset !== null && String(input.asset).trim().toUpperCase() !== 'USDC') {
+    return fail(400, 'wrong_asset', `${APPROVAL_REASON_TEXT.wrong_asset} Nothing was sent.`);
+  }
   const reference = typeof input.reference === 'string' && input.reference.trim() ? input.reference.trim().slice(0, 60) : null;
   const payeeKey: PayeeInput = input.payee.kind === 'splash_business' ? { kind: 'splash_business', businessId: String(input.payee.businessId ?? '') } : { kind: 'recipient', recipientId: String(input.payee.recipientId ?? '') };
   const requestHash = requestHashOf({ payee: payeeKey, amount, reference });
@@ -403,6 +432,15 @@ export async function createTransfer(deps: TransferDeps, actor: { userId: string
   if (maxFee * BPS_DENOM > amount * FEE_CEILING_BPS) return fail(400, 'fee_above_ceiling', 'The fee bound is above what Splash may ever charge on this payment.');
   if (maxFee < fee.feeMinor) return fail(409, 'fee_changed', 'The fee changed since it was shown. Check the new fee and approve again.', { feeMinor: fee.feeMinor.toString() });
 
+  // Staff: does the payment fit their rule? Read from the chain now, judged by the rule the page showed (plan.ts), before anything is stored.
+  const via = input.via === 'rule' ? 'rule' : input.via === 'ask' ? 'ask' : null;
+  let staff: StaffDecision | null = null;
+  if (actor.role !== 'OWNER') {
+    const decided = await decideStaff(deps, actor, { resolved, address, amount, maxFee, via });
+    if ('ok' in decided) return decided;
+    staff = decided;
+  }
+
   if (actor.role === 'OWNER') {
     const screened = await recipientPayable(deps.ctx, deps.orgId, address, resolved.kind, actor.userId);
     if (screened) return fail(screened.status, screened.code, screened.error);
@@ -411,30 +449,54 @@ export async function createTransfer(deps: TransferDeps, actor: { userId: string
   const id = `wtr_${randomUUID()}`;
   const paymentRef = sha(`splash-transfer|${deps.orgId}|${clientKey}`);
   const now = deps.now();
-  const route = actor.role === 'OWNER' ? 'owners_sign' : 'asked_owners';
+  let route: 'owners_sign' | 'asked_owners' | 'staff_rule' = actor.role === 'OWNER' ? 'owners_sign' : staff?.kind === 'rule' ? 'staff_rule' : 'asked_owners';
+  const claim = {
+    id,
+    orgId: deps.orgId,
+    clientKey,
+    requestHash,
+    paymentRef: paymentRef.toString('hex'),
+    route,
+    payeeKind: resolved.payeeKind,
+    recipientId: resolved.recipientId,
+    businessId: resolved.businessId,
+    payeeName: resolved.name,
+    payeeMasked: maskAddress(address),
+    payeeCountry: resolved.country,
+    address,
+    amountMinor: amount,
+    maxFeeMinor: maxFee,
+    feeKind: resolved.kind,
+    reference,
+    requestedBy: actor.userId,
+    createdAt: now,
+    updatedAt: now,
+  };
+  const underRule = staff?.kind === 'rule' ? staff : null;
   try {
-    await deps.db.insert(walletTransfers).values({
-      id,
-      orgId: deps.orgId,
-      clientKey,
-      requestHash,
-      paymentRef: paymentRef.toString('hex'),
-      route,
-      payeeKind: resolved.payeeKind,
-      recipientId: resolved.recipientId,
-      businessId: resolved.businessId,
-      payeeName: resolved.name,
-      payeeMasked: maskAddress(address),
-      payeeCountry: resolved.country,
-      address,
-      amountMinor: amount,
-      maxFeeMinor: maxFee,
-      feeKind: resolved.kind,
-      reference,
-      requestedBy: actor.userId,
-      createdAt: now,
-      updatedAt: now,
-    });
+    if (underRule) {
+      // The claim and the read of what this person has already asked for are one step under a lock per person,
+      // so two sends cannot both be told there is room for the last of a cap (the chain would refuse the second;
+      // this keeps the person from being told otherwise).
+      const outcome = await deps.db.transaction(async (tx) => {
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`staff-rule:${deps.orgId}:${actor.userId}`}))`);
+        const flight = await inFlightFor(tx as unknown as DrizzleDb, deps, actor.userId, address, underRule.read.readAtMs);
+        const plan = planFor(deps, actor, { resolved, address, amount, maxFee, read: underRule.read, inFlight: flight });
+        if (plan.route !== 'staff_rule') return { plan };
+        await tx.insert(walletTransfers).values(claim);
+        return { plan: null };
+      });
+      if (outcome.plan) {
+        // What was in flight changed the answer: it is outside the rule now.
+        const lines = linesFor(outcome.plan, underRule.read, amount, now);
+        if (via === 'rule') return fail(409, 'outside_rule', outsideRuleText(lines), { reasons: outcome.plan.reasons });
+        staff = { kind: 'ask', reasons: outcome.plan.reasons, lines };
+        route = 'asked_owners';
+        await deps.db.insert(walletTransfers).values({ ...claim, route });
+      }
+    } else {
+      await deps.db.insert(walletTransfers).values(claim);
+    }
   } catch (error) {
     // Only a clash on the key means another request holds it; anything else (a database fault) is not ours to swallow.
     if (!isUniqueViolation(error)) throw error;
@@ -487,9 +549,42 @@ export async function createTransfer(deps: TransferDeps, actor: { userId: string
       }
       await deps.db.update(walletTransfers).set({ signingRequestId: opened.request.id, updatedAt: deps.now() }).where(eq(walletTransfers.id, id));
       const row = (await getByKey(deps, clientKey)) as Row;
-      return { ok: true as const, created: true, transfer: await viewOf(deps, row), signingRequest: opened.request, ask: null };
+      return { ok: true as const, created: true, transfer: await viewOf(deps, row), signingRequest: opened.request, ask: null, plan: { route: 'owners_sign' as const, reasons: [], lines: [] } };
     }
 
+    if (underRule && route === 'staff_rule') {
+      // Inside the rule: one transaction, signed by this person's own passkey. The declared kind is the wallet tag the owners verified.
+      const declared = 1;
+      const opened = await openStaffRulePayment(await spendOf(deps) as SpendContext, {
+        orgId: deps.orgId,
+        userId: actor.userId,
+        signer: underRule.signer,
+        read: underRule.read,
+        payment: {
+          paymentRef: new Uint8Array(paymentRef),
+          recipient: address,
+          amountMinor: amount,
+          targetCurrency: 'USDC',
+          fxRateUsdLocal: 1_000_000n,
+          commitment: new Uint8Array(sha(JSON.stringify(['splash-transfer-commitment', deps.orgId, id, address, amount.toString(), maxFee.toString(), declared]))),
+          railCommitment: new Uint8Array(sha(`splash-transfer-rail|${declared}`)),
+          expiresAtMs,
+          maxFeeMinor: maxFee,
+          settleByMs: BigInt(now.getTime() + TRANSFER_SETTLE_WINDOW_MS),
+          contentHash: record.contentHash,
+          walrusBlobId: record.walrusBlobId,
+        },
+      });
+      if (!opened.ok) {
+        await release();
+        return fail(opened.status, opened.code, opened.error);
+      }
+      await deps.db.update(walletTransfers).set({ signingRequestId: opened.request.id, updatedAt: deps.now() }).where(eq(walletTransfers.id, id));
+      const row = (await getByKey(deps, clientKey)) as Row;
+      return { ok: true as const, created: true, transfer: await viewOf(deps, row), signingRequest: opened.request, ask: null, plan: { route: 'staff_rule' as const, reasons: [], lines: [] } };
+    }
+
+    const why = staff?.kind === 'ask' ? staff : null;
     const asked = await askOwnersToApprove(
       { db: deps.db, ctx: deps.ctx, now: deps.now, policy: deps.askPolicy, notify: deps.notifyAsk },
       {
@@ -510,7 +605,7 @@ export async function createTransfer(deps: TransferDeps, actor: { userId: string
         contentHash: Buffer.from(record.contentHash).toString('hex'),
         walrusBlobId: Buffer.from(record.walrusBlobId).toString('hex'),
         requesterAddresses: await deps.requesterAddresses(actor.userId),
-        note: `Fee shown: ${maxFee.toString()} (USDC minor units). ${reference ? `Reference ${reference}.` : ''}`.trim(),
+        note: `Fee shown: ${maxFee.toString()} (USDC minor units). ${reference ? `Reference ${reference}.` : ''}${why && why.lines.length ? ` Why it came to you: ${why.lines.join(' ')}` : ''}`.trim(),
       },
     );
     if (!asked.ok) {
@@ -519,11 +614,136 @@ export async function createTransfer(deps: TransferDeps, actor: { userId: string
     }
     await deps.db.update(walletTransfers).set({ askId: asked.ask.id, updatedAt: deps.now() }).where(eq(walletTransfers.id, id));
     const row = (await getByKey(deps, clientKey)) as Row;
-    return { ok: true as const, created: true, transfer: await viewOf(deps, row), signingRequest: null, ask: asked.ask };
+    return { ok: true as const, created: true, transfer: await viewOf(deps, row), signingRequest: null, ask: asked.ask, plan: { route: 'ask_owners' as const, reasons: why?.reasons ?? [], lines: why?.lines ?? [] } };
   } catch (error) {
     await release().catch(() => {});
     throw error;
   }
+}
+
+// ─── A staff member's payment: inside the rule, or the owners ──────────────
+
+type StaffDecision =
+  | { kind: 'rule'; read: StaffRuleRead; signer: { publicKey: string; address: string } }
+  | { kind: 'ask'; reasons: ApprovalReason[]; lines: string[] };
+
+/** The chain client for this business's spending rules, or null: none configured, or one made for another business. */
+async function spendOf(deps: TransferDeps): Promise<SpendContext | null> {
+  const sc = typeof deps.spend === 'function' ? await deps.spend() : (deps.spend ?? null);
+  return sc && sc.orgId === deps.orgId ? sc : null;
+}
+
+function planFor(
+  deps: TransferDeps,
+  actor: { role: string },
+  c: { resolved: Resolved; address: string; amount: bigint; maxFee: bigint; read: StaffRuleRead; inFlight?: InFlight },
+): ApprovalPlan {
+  const now = deps.now().getTime();
+  const payee: PlanPayee =
+    c.resolved.payeeKind === 'splash_business' ? { kind: 'splash_business', address: c.address } : { kind: 'wallet', wallet: c.resolved.payeeKind === 'exchange' ? 'exchange' : 'self_custody', address: c.address };
+  const counted = c.read.facts.runningTotals[c.address.toLowerCase()];
+  return approvalPlan({
+    role: actor.role,
+    amountMinor: c.amount,
+    feeMinor: c.maxFee,
+    payee,
+    rule: c.read.facts.rule,
+    policy: c.read.facts.policy,
+    runningTotalMinor: counted ? BigInt(counted) : 0n,
+    asset: 'USDC',
+    nowMs: BigInt(now),
+    settleByMs: BigInt(now + TRANSFER_SETTLE_WINDOW_MS),
+    ...(c.inFlight ? { inFlight: c.inFlight } : {}),
+  });
+}
+
+function linesFor(plan: ApprovalPlan, read: StaffRuleRead, amount: bigint, now: Date): string[] {
+  return approvalReasonLines(plan, { rule: read.facts.rule, policy: read.facts.policy, amountMinor: amount, nowMs: now.getTime() });
+}
+
+const outsideRuleText = (lines: string[]) => `${lines.join(' ')} Nothing was sent. Ask the owners to approve it instead.`.trim();
+
+/**
+ * Does this staff payment fit the person's rule, judged by the chain now? Reads
+ * only; stores nothing. Without the chain client nothing is judged: the owners
+ * are asked (or, if the person insisted on paying alone, 503), and no stand-in
+ * rule is ever used.
+ */
+async function decideStaff(
+  deps: TransferDeps,
+  actor: { userId: string; role: string },
+  c: { resolved: Resolved; address: string; amount: bigint; maxFee: bigint; via: 'rule' | 'ask' | null },
+): Promise<StaffDecision | TransferFailure> {
+  const ask = (reasons: ApprovalReason[]): StaffDecision => ({ kind: 'ask', reasons, lines: reasons.map((r) => APPROVAL_REASON_TEXT[r]) });
+  if (c.via === 'ask') return { kind: 'ask', reasons: [], lines: [] };
+  const sc = await spendOf(deps);
+  if (!sc || !deps.staffSigner) {
+    if (c.via === 'rule') return fail(503, 'staff_rule_unavailable', 'Paying under a rule is not set up for your business here, so nothing was sent. Ask the owners to approve this payment instead.');
+    return ask(['staff_rule_not_wired']);
+  }
+  const read = await readStaffRule(sc, { addresses: await deps.requesterAddresses(actor.userId) });
+  if (!read.ok) {
+    if (c.via === 'rule') return fail(read.status >= 500 ? read.status : 502, 'rule_unreadable', 'Your spending rule could not be read from the chain, so nothing was sent. Try again in a moment, or ask the owners to approve this payment.');
+    return ask(['policy_unreadable']);
+  }
+  const plan = planFor(deps, actor, { resolved: c.resolved, address: c.address, amount: c.amount, maxFee: c.maxFee, read: read.read });
+  if (plan.route === 'blocked') return fail(403, 'cannot_pay', linesFor(plan, read.read, c.amount, deps.now()).join(' '), { reasons: plan.reasons });
+  if (plan.route === 'ask_owners') {
+    const lines = linesFor(plan, read.read, c.amount, deps.now());
+    if (c.via === 'rule') return fail(409, 'outside_rule', outsideRuleText(lines), { reasons: plan.reasons });
+    return { kind: 'ask', reasons: plan.reasons, lines };
+  }
+  if (plan.route !== 'staff_rule') return fail(409, 'outside_rule', 'This payment is not one a rule pays. Nothing was sent.');
+
+  // It fits. It is paid by this person's own passkey, so that passkey must be the rule's and must be one they can sign with here.
+  const signer = await deps.staffSigner(actor.userId);
+  if (!signer || !read.read.spender || normalizeSuiAddress(signer.address) !== read.read.spender) {
+    if (c.via === 'rule') return fail(409, 'no_passkey_for_rule', "Your spending rule belongs to a passkey you can't sign with on this site, so nothing was sent. Ask the owners to approve this payment instead.");
+    return ask(['rule_needs_passkey']);
+  }
+  if (!sc.wallet.signing.sponsor) {
+    if (c.via === 'rule') return fail(503, 'no_sponsor', 'Paying under a rule needs Splash to cover the network fee, and that is not set up here, so nothing was sent. Ask the owners to approve this payment instead.');
+    return ask(['staff_rule_not_wired']);
+  }
+  // The recipient is a fresh CLEAR here and a proven wallet the supplier holds, as it must be for the owners' own payment.
+  const screened = await recipientPayable(deps.ctx, deps.orgId, c.address, 1, actor.userId);
+  if (screened) return fail(screened.status, screened.code, screened.error);
+  return { kind: 'rule', read: read.read, signer };
+}
+
+/**
+ * What this person has asked for under their rule that the chain has not
+ * counted yet: requests still collecting or on their way, a claim still being
+ * made, and requests that executed after the rule was read. Only theirs, and
+ * only this business's.
+ */
+async function inFlightFor(db: DrizzleDb, deps: Pick<TransferDeps, 'orgId' | 'now'>, userId: string, address: string, readAtMs: bigint): Promise<InFlight> {
+  const rows = await db
+    .select({ amount: walletTransfers.amountMinor, fee: walletTransfers.maxFeeMinor, address: walletTransfers.address, requestId: walletTransfers.signingRequestId, createdAt: walletTransfers.createdAt })
+    .from(walletTransfers)
+    .where(and(eq(walletTransfers.orgId, deps.orgId), eq(walletTransfers.requestedBy, userId), eq(walletTransfers.route, 'staff_rule')));
+  const ids = rows.map((r) => r.requestId).filter((v): v is string => Boolean(v));
+  const requests = ids.length
+    ? await db
+        .select({ id: walletSigningRequests.id, status: walletSigningRequests.status, closedAt: walletSigningRequests.closedAt })
+        .from(walletSigningRequests)
+        .where(and(eq(walletSigningRequests.orgId, deps.orgId), inArray(walletSigningRequests.id, ids)))
+    : [];
+  const byId = new Map(requests.map((r) => [r.id, r]));
+  const nowMs = deps.now().getTime();
+  let spender = 0n;
+  let recipient = 0n;
+  for (const r of rows) {
+    const req = r.requestId ? byId.get(r.requestId) : undefined;
+    let counts = false;
+    if (!r.requestId) counts = nowMs - r.createdAt.getTime() < TRANSFER_CLAIM_TTL_MS;
+    else if (req && ['collecting', 'submitting', 'unknown'].includes(String(req.status))) counts = true;
+    else if (req && req.status === 'executed') counts = (req.closedAt?.getTime() ?? 0) > Number(readAtMs);
+    if (!counts) continue;
+    spender += r.amount + r.fee;
+    if (normalizeSuiAddress(r.address) === address) recipient += r.amount;
+  }
+  return { spenderMinor: spender, recipientMinor: recipient };
 }
 
 async function getByKey(deps: TransferDeps, clientKey: string): Promise<Row | null> {

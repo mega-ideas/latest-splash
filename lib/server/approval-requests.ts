@@ -454,6 +454,8 @@ export async function notifyOwnersOfAsk(input: {
   orgId: string;
   orgName: string;
   ownerUserIds: string[];
+  /** The Finance lead, where their role allows it: told, but the owners decide. */
+  financeLeadUserId?: string | null;
   amountMinor: string;
   recipient: string;
 }): Promise<{ delivered: string[]; unreachable: string[] }> {
@@ -465,18 +467,22 @@ export async function notifyOwnersOfAsk(input: {
     const usdc = `${(amount / 1_000_000n).toLocaleString('en-US')}.${(amount % 1_000_000n).toString().padStart(6, '0').slice(0, 2)}`;
     const payee = `${input.recipient.slice(0, 6)}…${input.recipient.slice(-4)}`;
     const body = `${businessName(input.orgName)}: a member of your team asks you to approve a payment of ${usdc} USDC to ${payee}.\n\nOpen Splash to review it. Nothing is paid until the owners sign.`;
-    for (const userId of input.ownerUserIds) {
+    const leadBody = `${businessName(input.orgName)}: a member of your team asked the owners to approve a payment of ${usdc} USDC to ${payee}.\n\nYou can see it in Splash. The owners decide; nothing is paid until they sign.`;
+    const targets: Array<[string, string]> = input.ownerUserIds.map((u): [string, string] => [u, body]);
+    if (input.financeLeadUserId && !input.ownerUserIds.includes(input.financeLeadUserId)) targets.push([input.financeLeadUserId, leadBody]);
+    for (const [userId, text] of targets) {
       const person = people.find((p) => p.userId === userId);
       if (!settings?.whatsappEnabled || !whatsappConfigured() || !person?.whatsappE164) {
         unreachable.push(userId);
         continue;
       }
-      const result = await sendWhatsApp(person.whatsappE164, body).catch(() => ({ sent: false as const }));
+      const result = await sendWhatsApp(person.whatsappE164, text).catch(() => ({ sent: false as const }));
       if (result.sent) delivered.push(userId);
       else unreachable.push(userId);
     }
   } catch {
-    return { delivered, unreachable: input.ownerUserIds.filter((u) => !delivered.includes(u)) };
+    const everyone = [...input.ownerUserIds, ...(input.financeLeadUserId ? [input.financeLeadUserId] : [])];
+    return { delivered, unreachable: everyone.filter((u) => !delivered.includes(u)) };
   }
   return { delivered, unreachable };
 }
