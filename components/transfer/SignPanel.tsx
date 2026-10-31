@@ -126,7 +126,7 @@ export default function SignPanel({ initial, expected = null, expectedBatch = nu
     if (seen) seen.times += 1;
     else counted.set(key, { item, times: 1 });
   }
-  const steps = [...counted.values()].map(({ item, times }) => (times > 1 ? { ...item, line: `${item.line} (${times} times, once for each payment)` } : item));
+  const steps = [...counted.values()].map(({ item, times }) => (times > 1 ? { ...item, line: `${item.line.replace(/\.$/, '')}, ${times} times, once for each payment.` } : item));
   // A command the page cannot word is never signed: the owner would be signing bytes whose meaning is not on the screen.
   const blocked = items.some((i) => i.unknown);
 
