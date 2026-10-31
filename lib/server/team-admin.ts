@@ -26,6 +26,17 @@
  * Finance lead fails each one. It grants nothing unless the person is still
  * an approver of the business right now: a role change or a removal ends it.
  *
+ * A business always keeps an owner. Nobody changes or removes themselves, and
+ * a change to or removal of an owner runs in a transaction that first locks
+ * the business's owner rows (`lockOwners`): of two owners acting on each other
+ * at the same moment, the second finds the first's change and is refused. The
+ * change and everything that follows from it (the Finance lead role, access
+ * grants, place in charge, the trail line) commit together or not at all.
+ *
+ * The Finance lead may not end what an owner granted by moving or removing
+ * the person who holds it: someone who is in charge, or who holds Add funds or
+ * Withdraw, is an owner's to move (`holdsGrantedAuthority`).
+ *
  * Every function takes the business and the actor from the caller (the
  * session, in the routes), reads and writes only that business, and writes a
  * line to the append-only trail (wallet_authority_events) for every change. A
@@ -40,7 +51,7 @@ import { GrantRefusedError, grantMembership } from '../auth/authority.ts';
 import { memberships, users, walletAuthorityEvents, walletFinanceLeads, walletMemberAccess, walletPersonsInCharge } from '../db/schema.ts';
 import { isMembershipRole, type MembershipRole } from '../membership-roles.ts';
 import { TEAM_ACTIONS, activitySummary, type FundsAccessKind, type Manager, type TeamActivityWire, type TeamMemberWire } from '../team/view.ts';
-import { endFinanceLead, memberRole, offboardMember, passkeyAddressesOf, recordAuthorityEvent } from './wallet-authority.ts';
+import { endFinanceLead, endMemberHolds, memberRole, offboardMember, passkeyAddressesOf, recordAuthorityEvent } from './wallet-authority.ts';
 import type { DrizzleDb } from './wallet-signing-store.ts';
 
 type Clock = () => Date;
@@ -59,6 +70,49 @@ function ownerOnly(manager: Manager, what: string): TeamFailure | null {
   if (manager === 'owner') return null;
   return manager === 'finance_lead' ? OWNER_ONLY(what) : fail(403, 'not_allowed', `Only an owner can ${what}.`);
 }
+
+/** Run `fn` in one transaction: the change and its clean-up are kept together or not at all. */
+function inTransaction<T>(db: DrizzleDb, fn: (tx: DrizzleDb) => Promise<T>): Promise<T> {
+  return db.transaction(async (tx) => fn(tx as unknown as DrizzleDb));
+}
+
+/**
+ * Lock this business's owner rows until the transaction ends and return who
+ * they are. Two owners acting on each other wait here in turn, and the second
+ * reads the first's result (a row that stopped being an owner's is skipped).
+ */
+async function lockOwners(tx: DrizzleDb, orgId: string): Promise<string[]> {
+  const rows = await tx
+    .select({ userId: memberships.userId })
+    .from(memberships)
+    .where(and(eq(memberships.orgId, orgId), eq(memberships.role, 'admin')))
+    .orderBy(memberships.id)
+    .for('update');
+  return rows.map((r: { userId: string }) => r.userId);
+}
+
+const LAST_OWNER = () => fail(409, 'last_owner', 'A business always keeps an owner. Make someone else an owner first.');
+
+/**
+ * Is this person in charge of sign-offs, or do they hold Add funds or
+ * Withdraw? An owner granted that, so only an owner moves or removes them.
+ */
+async function holdsGrantedAuthority(db: DrizzleDb, orgId: string, userId: string): Promise<boolean> {
+  const [charge] = await db
+    .select({ id: walletPersonsInCharge.id })
+    .from(walletPersonsInCharge)
+    .where(and(eq(walletPersonsInCharge.orgId, orgId), eq(walletPersonsInCharge.userId, userId), isNull(walletPersonsInCharge.revokedAt)))
+    .limit(1);
+  if (charge) return true;
+  const [grant] = await db
+    .select({ id: walletMemberAccess.id })
+    .from(walletMemberAccess)
+    .where(and(eq(walletMemberAccess.orgId, orgId), eq(walletMemberAccess.userId, userId), isNull(walletMemberAccess.revokedAt)))
+    .limit(1);
+  return Boolean(grant);
+}
+
+const GRANTED = (what: string) => OWNER_ONLY(`${what} someone who is in charge or who can add funds or withdraw`);
 
 // ─── Who holds what ─────────────────────────────────────────────────────────
 
@@ -104,104 +158,121 @@ export async function fundsAccessOf(db: DrizzleDb, orgId: string, userId: string
 // ─── Adding, changing, removing ─────────────────────────────────────────────
 
 /** Add a person to the business by email, with a role. They must already have a verified Splash account. */
-export async function addTeamMember(
+export function addTeamMember(
   db: DrizzleDb,
   input: { orgId: string; actorUserId: string; email: unknown; role: unknown; now?: Clock },
 ): Promise<{ ok: true; member: { userId: string; role: MembershipRole } } | TeamFailure> {
-  const manager = await teamManager(db, input.orgId, input.actorUserId);
-  if (!manager) return NOT_ALLOWED('add people');
-  if (!isMembershipRole(input.role)) return fail(400, 'bad_role', 'Choose viewer, staff, approver or owner.');
-  const role = input.role;
-  if (manager === 'finance_lead' && role === 'admin') return OWNER_ONLY('give someone the owner role');
-  const email = typeof input.email === 'string' ? input.email.trim().toLowerCase() : '';
-  // One answer for no account, an unverified one and a person already in another business: it does not say which.
-  const cannot = fail(409, 'cannot_add', 'That email could not be added. The person needs a verified Splash account, and it cannot belong to another business. Check the address, or ask them to sign up and verify their email.');
-  if (!email || email.length > 254 || !email.includes('@')) return cannot;
+  return inTransaction(db, async (tx) => {
+    const manager = await teamManager(tx, input.orgId, input.actorUserId);
+    if (!manager) return NOT_ALLOWED('add people');
+    if (!isMembershipRole(input.role)) return fail(400, 'bad_role', 'Choose viewer, staff, approver or owner.');
+    const role = input.role;
+    if (manager === 'finance_lead' && role === 'admin') return OWNER_ONLY('give someone the owner role');
+    const email = typeof input.email === 'string' ? input.email.trim().toLowerCase() : '';
+    // One answer for no account, an unverified one and a person already in another business: it does not say which.
+    const cannot = fail(409, 'cannot_add', 'That email could not be added. The person needs a verified Splash account, and it cannot belong to another business. Check the address, or ask them to sign up and verify their email.');
+    if (!email || email.length > 254 || !email.includes('@')) return cannot;
 
-  const [account] = await db.select({ id: users.id, verified: users.emailVerifiedAt }).from(users).where(eq(users.email, email)).limit(1);
-  if (!account || !account.verified) return cannot;
-  const held = await db.select({ orgId: memberships.orgId }).from(memberships).where(eq(memberships.userId, account.id));
-  if (held.some((m: { orgId: string }) => m.orgId === input.orgId)) return fail(409, 'already_on_team', 'That person is already on your team.');
-  if (held.length > 0) return cannot;
+    const [account] = await tx.select({ id: users.id, verified: users.emailVerifiedAt }).from(users).where(eq(users.email, email)).limit(1);
+    if (!account || !account.verified) return cannot;
+    const held = await tx.select({ orgId: memberships.orgId }).from(memberships).where(eq(memberships.userId, account.id));
+    if (held.some((m: { orgId: string }) => m.orgId === input.orgId)) return fail(409, 'already_on_team', 'That person is already on your team.');
+    if (held.length > 0) return cannot;
 
-  let created: boolean;
-  try {
-    ({ created } = await grantMembership(db, { email, orgId: input.orgId, role, grantedBy: input.actorUserId }));
-  } catch (error) {
-    if (error instanceof GrantRefusedError) return cannot;
-    throw error;
-  }
-  if (!created) return fail(409, 'already_on_team', 'That person is already on your team.');
-  // Two businesses adding the same person at once: the later one gives way and nothing is kept.
-  const now = await db.select({ orgId: memberships.orgId }).from(memberships).where(eq(memberships.userId, account.id));
-  if (now.some((m: { orgId: string }) => m.orgId !== input.orgId)) {
-    await db.delete(memberships).where(and(eq(memberships.userId, account.id), eq(memberships.orgId, input.orgId)));
-    return cannot;
-  }
-  await recordAuthorityEvent(db, { orgId: input.orgId, actorUserId: input.actorUserId, action: 'member_added', subjectUserId: account.id, detail: { role }, now: input.now });
-  return { ok: true, member: { userId: account.id, role } };
+    let created: boolean;
+    try {
+      ({ created } = await grantMembership(tx, { email, orgId: input.orgId, role, grantedBy: input.actorUserId }));
+    } catch (error) {
+      if (error instanceof GrantRefusedError) return cannot;
+      throw error;
+    }
+    if (!created) return fail(409, 'already_on_team', 'That person is already on your team.');
+    // Two businesses adding the same person at once: the later one gives way and nothing is kept.
+    const now = await tx.select({ orgId: memberships.orgId }).from(memberships).where(eq(memberships.userId, account.id));
+    if (now.some((m: { orgId: string }) => m.orgId !== input.orgId)) {
+      await tx.delete(memberships).where(and(eq(memberships.userId, account.id), eq(memberships.orgId, input.orgId)));
+      return cannot;
+    }
+    await recordAuthorityEvent(tx, { orgId: input.orgId, actorUserId: input.actorUserId, action: 'member_added', subjectUserId: account.id, detail: { role }, now: input.now });
+    return { ok: true as const, member: { userId: account.id, role } };
+  });
 }
 
-/** Change a member's role. A move to viewer or owner ends what only staff and approvers hold. */
-export async function changeTeamMemberRole(
+/**
+ * Change a member's role. A move to viewer or owner ends what only staff and
+ * approvers hold; a move to staff ends the Finance lead role. It is a role
+ * change on the trail, not an offboarding: the person is still on the team.
+ */
+export function changeTeamMemberRole(
   db: DrizzleDb,
   input: { orgId: string; actorUserId: string; userId: string; role: unknown; now?: Clock },
 ): Promise<{ ok: true; changed: boolean } | TeamFailure> {
-  const manager = await teamManager(db, input.orgId, input.actorUserId);
-  if (!manager) return NOT_ALLOWED('change a role');
-  if (!isMembershipRole(input.role)) return fail(400, 'bad_role', 'Choose viewer, staff, approver or owner.');
-  const role = input.role;
-  if (manager === 'finance_lead' && role === 'admin') return OWNER_ONLY('give someone the owner role');
-  const current = await memberRole(db, input.orgId, input.userId);
-  if (current === null) return fail(404, 'not_a_member', 'No such member of this business.');
-  if (input.userId === input.actorUserId) {
-    return manager === 'owner' ? fail(409, 'self_change', 'You cannot change your own role. Another owner can.') : OWNER_ONLY('change the Finance lead’s own role');
-  }
-  if (manager === 'finance_lead' && current === 'admin') return OWNER_ONLY('change an owner');
-  if (current === role) return { ok: true, changed: false };
+  return inTransaction(db, async (tx) => {
+    // Lock the owners first, then read: a concurrent change to an owner has finished and is seen.
+    const owners = await lockOwners(tx, input.orgId);
+    const manager = await teamManager(tx, input.orgId, input.actorUserId);
+    if (!manager) return NOT_ALLOWED('change a role');
+    if (!isMembershipRole(input.role)) return fail(400, 'bad_role', 'Choose viewer, staff, approver or owner.');
+    const role = input.role;
+    if (manager === 'finance_lead' && role === 'admin') return OWNER_ONLY('give someone the owner role');
+    const current = await memberRole(tx, input.orgId, input.userId);
+    if (current === null) return fail(404, 'not_a_member', 'No such member of this business.');
+    if (input.userId === input.actorUserId) {
+      return manager === 'owner' ? fail(409, 'self_change', 'You cannot change your own role. Another owner can.') : OWNER_ONLY('change the Finance lead’s own role');
+    }
+    if (manager === 'finance_lead' && current === 'admin') return OWNER_ONLY('change an owner');
+    if (current === role) return { ok: true as const, changed: false };
+    if (manager === 'finance_lead' && (await holdsGrantedAuthority(tx, input.orgId, input.userId))) return GRANTED('change the role of');
+    if (current === 'admin' && !owners.some((id) => id !== input.userId)) return LAST_OWNER();
 
-  const now = clock(input.now);
-  const updated = await db
-    .update(memberships)
-    .set({ role, updatedAt: now })
-    .where(and(eq(memberships.orgId, input.orgId), eq(memberships.userId, input.userId), eq(memberships.role, current as MembershipRole)))
-    .returning({ id: memberships.id });
-  // Changed under us by someone else at the same moment: nothing was done here.
-  if (updated.length === 0) return fail(409, 'changed_meanwhile', 'This person’s role changed while you were changing it. Reload and look again.');
-  await recordAuthorityEvent(db, { orgId: input.orgId, actorUserId: input.actorUserId, action: 'member_role_changed', subjectUserId: input.userId, detail: { from: current, to: role }, now: () => now });
-  if (role === 'viewer' || role === 'admin') {
-    // Neither can be in charge, hold a Finance lead role or use Add funds or Withdraw by grant: all of it ends, and any spending rule they hold is shown as orphaned until the owners take it back.
-    await offboardMember(db, { orgId: input.orgId, userId: input.userId, by: input.actorUserId, addresses: await passkeyAddressesOf(db, input.userId), now: () => now });
-  } else if (role !== 'checker') {
-    await endFinanceLead(db, { orgId: input.orgId, userId: input.userId, by: input.actorUserId, reason: 'role_changed', now: () => now });
-  }
-  return { ok: true, changed: true };
+    const now = clock(input.now);
+    const updated = await tx
+      .update(memberships)
+      .set({ role, updatedAt: now })
+      .where(and(eq(memberships.orgId, input.orgId), eq(memberships.userId, input.userId), eq(memberships.role, current as MembershipRole)))
+      .returning({ id: memberships.id });
+    // Changed under us by someone else at the same moment: nothing was done here.
+    if (updated.length === 0) return fail(409, 'changed_meanwhile', 'This person’s role changed while you were changing it. Reload and look again.');
+    await recordAuthorityEvent(tx, { orgId: input.orgId, actorUserId: input.actorUserId, action: 'member_role_changed', subjectUserId: input.userId, detail: { from: current, to: role }, now: () => now });
+    if (role === 'viewer' || role === 'admin') {
+      // Neither can be in charge, hold a Finance lead role or use Add funds or Withdraw by grant: all of it ends. A spending rule they hold stays on the chain and keeps reading as theirs (a viewer's, or an owner's) until the owners change it.
+      await endMemberHolds(tx, { orgId: input.orgId, userId: input.userId, by: input.actorUserId, reason: 'role_changed', now: () => now });
+    } else if (role !== 'checker') {
+      await endFinanceLead(tx, { orgId: input.orgId, userId: input.userId, by: input.actorUserId, reason: 'role_changed', now: () => now });
+    }
+    return { ok: true as const, changed: true };
+  });
 }
 
 /** Remove a member. Their place in charge, Finance lead role, access and sign-offs end with it; spending rules they hold are shown as orphaned. */
-export async function removeTeamMember(
+export function removeTeamMember(
   db: DrizzleDb,
   input: { orgId: string; actorUserId: string; userId: string; now?: Clock },
 ): Promise<{ ok: true } | TeamFailure> {
-  const manager = await teamManager(db, input.orgId, input.actorUserId);
-  if (!manager) return NOT_ALLOWED('remove people');
-  const current = await memberRole(db, input.orgId, input.userId);
-  if (current === null) return fail(404, 'not_a_member', 'No such member of this business.');
-  if (input.userId === input.actorUserId) {
-    return manager === 'owner' ? fail(409, 'self_change', 'You cannot remove yourself. Another owner can.') : OWNER_ONLY('remove the Finance lead');
-  }
-  if (manager === 'finance_lead' && current === 'admin') return OWNER_ONLY('remove an owner');
+  return inTransaction(db, async (tx) => {
+    const owners = await lockOwners(tx, input.orgId);
+    const manager = await teamManager(tx, input.orgId, input.actorUserId);
+    if (!manager) return NOT_ALLOWED('remove people');
+    const current = await memberRole(tx, input.orgId, input.userId);
+    if (current === null) return fail(404, 'not_a_member', 'No such member of this business.');
+    if (input.userId === input.actorUserId) {
+      return manager === 'owner' ? fail(409, 'self_change', 'You cannot remove yourself. Another owner can.') : OWNER_ONLY('remove the Finance lead');
+    }
+    if (manager === 'finance_lead' && current === 'admin') return OWNER_ONLY('remove an owner');
+    if (manager === 'finance_lead' && (await holdsGrantedAuthority(tx, input.orgId, input.userId))) return GRANTED('remove');
+    if (current === 'admin' && !owners.some((id) => id !== input.userId)) return LAST_OWNER();
 
-  const now = clock(input.now);
-  const addresses = await passkeyAddressesOf(db, input.userId);
-  const removed = await db
-    .delete(memberships)
-    .where(and(eq(memberships.orgId, input.orgId), eq(memberships.userId, input.userId)))
-    .returning({ id: memberships.id });
-  if (removed.length === 0) return fail(404, 'not_a_member', 'No such member of this business.');
-  await recordAuthorityEvent(db, { orgId: input.orgId, actorUserId: input.actorUserId, action: 'member_removed', subjectUserId: input.userId, detail: { role: current }, now: () => now });
-  await offboardMember(db, { orgId: input.orgId, userId: input.userId, by: input.actorUserId, addresses, now: () => now });
-  return { ok: true };
+    const now = clock(input.now);
+    const addresses = await passkeyAddressesOf(tx, input.userId);
+    const removed = await tx
+      .delete(memberships)
+      .where(and(eq(memberships.orgId, input.orgId), eq(memberships.userId, input.userId)))
+      .returning({ id: memberships.id });
+    if (removed.length === 0) return fail(404, 'not_a_member', 'No such member of this business.');
+    await recordAuthorityEvent(tx, { orgId: input.orgId, actorUserId: input.actorUserId, action: 'member_removed', subjectUserId: input.userId, detail: { role: current }, now: () => now });
+    await offboardMember(tx, { orgId: input.orgId, userId: input.userId, by: input.actorUserId, addresses, now: () => now });
+    return { ok: true as const };
+  });
 }
 
 // ─── The Finance lead ───────────────────────────────────────────────────────

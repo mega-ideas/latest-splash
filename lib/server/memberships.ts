@@ -1,4 +1,4 @@
-import { desc, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import type { PgDatabase } from 'drizzle-orm/pg-core';
 
 import { memberships, organizations, users } from '../db/schema.ts';
@@ -193,15 +193,35 @@ export async function revokeRole(
   const rows = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
   if (rows.length === 0) throw new MembershipAdminError(`no account exists for ${email}`, 'no_account');
   const userId = rows[0].id;
-
-  const held = await db.select({ orgId: memberships.orgId }).from(memberships).where(eq(memberships.userId, userId));
-  await db.delete(memberships).where(eq(memberships.userId, userId));
   const { offboardMember, passkeyAddressesOf } = await import('./wallet-authority.ts');
-  const addresses = await passkeyAddressesOf(db as never, userId);
-  const offboarded: Array<{ orgId: string; addresses: string[] }> = [];
-  for (const m of held) {
-    const done = await offboardMember(db as never, { orgId: m.orgId, userId, by: input.by ?? 'operator:unknown', addresses, now: input.now });
-    offboarded.push({ orgId: m.orgId, addresses: done.addresses });
-  }
-  return { offboarded };
+
+  // One transaction: the removal and the offboarding are kept together or not at all, and a business never loses its last owner.
+  return db.transaction(async (txn) => {
+    const tx = txn as unknown as DrizzleDb;
+    const held = await tx.select({ orgId: memberships.orgId, role: memberships.role }).from(memberships).where(eq(memberships.userId, userId));
+    for (const m of held) {
+      if (m.role !== 'admin') continue;
+      // Lock the business's owners, as the team change does, so a removal here and an owner's change there cannot both leave none.
+      const owners = await tx
+        .select({ userId: memberships.userId })
+        .from(memberships)
+        .where(and(eq(memberships.orgId, m.orgId), eq(memberships.role, 'admin')))
+        .orderBy(memberships.id)
+        .for('update');
+      if (!owners.some((o) => o.userId !== userId)) {
+        throw new MembershipAdminError(
+          `${email} is the only owner of ${m.orgId}. Make someone else an owner first, then remove this person.`,
+          'last_owner',
+        );
+      }
+    }
+    await tx.delete(memberships).where(eq(memberships.userId, userId));
+    const addresses = await passkeyAddressesOf(tx as never, userId);
+    const offboarded: Array<{ orgId: string; addresses: string[] }> = [];
+    for (const m of held) {
+      const done = await offboardMember(tx as never, { orgId: m.orgId, userId, by: input.by ?? 'operator:unknown', addresses, now: input.now });
+      offboarded.push({ orgId: m.orgId, addresses: done.addresses });
+    }
+    return { offboarded };
+  });
 }

@@ -230,30 +230,28 @@ export async function passkeyAddressesOf(db: DrizzleDb, userId: string): Promise
 }
 
 /**
- * A member leaves a business (their membership is removed; a role change is
- * a removal and a new grant). What Splash holds goes at once: an
- * appointment as person in charge is revoked, and every sign-off they gave
- * or were given that is still usable is voided. What the chain holds cannot
- * be taken back from here: each of their addresses is recorded, so the
- * spending-rule index shows any rule it still has as orphaned until the
- * owners' quorum revokes it (lib/server/spend-rules.ts revokeOrphanedRules).
- * `by` is the actor: an owner's user id, or `operator:<email>`.
+ * End what Splash holds for a member of a business that their role no longer
+ * carries: an appointment as person in charge is revoked, every sign-off they
+ * gave or were given that is still usable is voided, and the Finance lead role
+ * and Add funds / Withdraw access end. Used when a person leaves
+ * (`offboardMember`) and when their role moves somewhere that cannot hold it
+ * (a viewer, or an owner who has the highest authority already). It is NOT an
+ * offboarding: it writes no `member_offboarded` line and no orphaned-spender
+ * row, because the person is still on the team. `reason` goes on each line.
  */
-export async function offboardMember(
+export async function endMemberHolds(
   db: DrizzleDb,
-  input: { orgId: string; userId: string; by: string; addresses: string[]; now?: Clock },
-): Promise<{ revokedInCharge: boolean; voidedSignOffs: number; addresses: string[] }> {
+  input: { orgId: string; userId: string; by: string; reason: string; now?: Clock },
+): Promise<{ revokedInCharge: boolean; voidedSignOffs: number }> {
   const now = clock(input.now);
   const at = () => now;
-  const addresses = [...new Set(input.addresses.map((a) => normalizeSuiAddress(a)))];
-  await recordAuthorityEvent(db, { orgId: input.orgId, actorUserId: input.by, action: 'member_offboarded', subjectUserId: input.userId, detail: { addresses }, now: at });
   const revoked = await db
     .update(walletPersonsInCharge)
     .set({ revokedAt: now, revokedBy: input.by })
     .where(and(eq(walletPersonsInCharge.orgId, input.orgId), eq(walletPersonsInCharge.userId, input.userId), isNull(walletPersonsInCharge.revokedAt)))
     .returning({ id: walletPersonsInCharge.id });
   if (revoked.length > 0) {
-    await recordAuthorityEvent(db, { orgId: input.orgId, actorUserId: input.by, action: 'person_in_charge_revoked', subjectUserId: input.userId, detail: { reason: 'membership_removed' }, now: at });
+    await recordAuthorityEvent(db, { orgId: input.orgId, actorUserId: input.by, action: 'person_in_charge_revoked', subjectUserId: input.userId, detail: { reason: input.reason }, now: at });
   }
   const voided = await db
     .update(walletMigrationSignoffs)
@@ -268,13 +266,34 @@ export async function offboardMember(
     )
     .returning({ id: walletMigrationSignoffs.id });
   for (const v of voided) {
-    await recordAuthorityEvent(db, { orgId: input.orgId, actorUserId: input.by, action: 'migration_sign_off_voided', subjectUserId: input.userId, ref: v.id, detail: { reason: 'membership_removed' }, now: at });
+    await recordAuthorityEvent(db, { orgId: input.orgId, actorUserId: input.by, action: 'migration_sign_off_voided', subjectUserId: input.userId, ref: v.id, detail: { reason: input.reason }, now: at });
   }
-  await endTeamHolds(db, { orgId: input.orgId, userId: input.userId, by: input.by, reason: 'membership_removed', now: at });
+  await endTeamHolds(db, { orgId: input.orgId, userId: input.userId, by: input.by, reason: input.reason, now: at });
+  return { revokedInCharge: revoked.length > 0, voidedSignOffs: voided.length };
+}
+
+/**
+ * A member leaves a business (their membership is removed). What Splash holds
+ * goes at once (`endMemberHolds`). What the chain holds cannot be taken back
+ * from here: each of their addresses is recorded, so the spending-rule index
+ * shows any rule it still has as orphaned until the owners' quorum revokes it
+ * (lib/server/spend-rules.ts revokeOrphanedRules). A role change is not this:
+ * the person is still here, and a viewer's rule already reads as a viewer's.
+ * `by` is the actor: an owner's user id, or `operator:<email>`.
+ */
+export async function offboardMember(
+  db: DrizzleDb,
+  input: { orgId: string; userId: string; by: string; addresses: string[]; now?: Clock },
+): Promise<{ revokedInCharge: boolean; voidedSignOffs: number; addresses: string[] }> {
+  const now = clock(input.now);
+  const at = () => now;
+  const addresses = [...new Set(input.addresses.map((a) => normalizeSuiAddress(a)))];
+  await recordAuthorityEvent(db, { orgId: input.orgId, actorUserId: input.by, action: 'member_offboarded', subjectUserId: input.userId, detail: { addresses }, now: at });
+  const ended = await endMemberHolds(db, { orgId: input.orgId, userId: input.userId, by: input.by, reason: 'membership_removed', now: at });
   for (const address of addresses) {
     await db.insert(walletOffboardedSpenders).values({ id: `wofs_${randomUUID()}`, orgId: input.orgId, userId: input.userId, address, reason: 'removed', offboardedBy: input.by, offboardedAt: now });
   }
-  return { revokedInCharge: revoked.length > 0, voidedSignOffs: voided.length, addresses };
+  return { ...ended, addresses };
 }
 
 // ─── Migration sign-off ─────────────────────────────────────────────────────
