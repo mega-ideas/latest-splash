@@ -21,7 +21,9 @@ const flowSource = flowFiles.map((f) => read(`components/transfer/${f}`)).join('
 
 test('Transfer and Send USDC are one flow: the page is the five steps, and the old steps and the settlement-engine container are gone', () => {
   const page = read('app/dashboard/transfer/page.tsx');
-  assert.match(page, /<TransferFlow \/>/);
+  // The page is Transfer's two tabs (v2 Phase 3, scheduled batches): the five-step flow, and Scheduled beside it.
+  assert.match(page, /<TransferHome \/>/);
+  assert.match(read('components/transfer/TransferHome.tsx'), /<TransferFlow \/>/);
   assert.doesNotMatch(page + read('components/transfer/TransferFlow.tsx'), /SettlementEngineFlow/, 'the settlement-engine container is deleted from Transfer');
   for (const old of ['StepBeneficiary', 'StepDelivery', 'StepQuote', 'StepStatus']) {
     assert.equal(existsSync(new URL(`../components/transfer/${old}.tsx`, import.meta.url)), false, `${old} is replaced`);

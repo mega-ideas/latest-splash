@@ -199,7 +199,7 @@ test('no page or component imports the signer: only the server’s own wiring do
     }
   };
   for (const root of ['app', 'components', 'lib']) walk(root);
-  const allowed = new Set(['lib/env.ts', 'lib/server/scheduled-payer-signer.ts', 'lib/server/scheduled-payments.ts', 'lib/server/scheduled-payments-deps.ts', 'lib/server/scheduled-runner.ts', 'lib/server/spend-rules-deps.ts']);
+  const allowed = new Set(['lib/env.ts', 'lib/server/scheduled-payer-signer.ts', 'lib/server/scheduled-payments.ts', 'lib/server/scheduled-payments-deps.ts', 'lib/server/scheduled-runner.ts', 'lib/server/spend-rules-deps.ts', 'lib/server/spend-standing.ts']);
   assert.deepEqual(importers.filter((f) => !allowed.has(f)), []);
   assert.ok(!importers.some((f) => f.startsWith('components/') || f.startsWith('app/')), 'a client bundle never sees the signer');
 });
