@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 
+import { resolveAuthorityForSession } from '@/lib/auth/authority';
+import { toClientRecipient } from '@/lib/recipients-page/wire';
 import { requireCustomerRequest } from '@/lib/server/customer-auth';
 import {
   custodyPhaseResponse,
@@ -28,7 +30,16 @@ export async function GET(request: Request) {
   const accountCheck = await requireSessionAccount(auth.session);
   if (accountCheck.response) return accountCheck.response;
 
-  return NextResponse.json(await listRecipientsFor(accountCheck.account.orgId));
+  // The page is told whether the viewer saved a recipient, never who did, and
+  // never a whole account number or the supplier's email (lib/recipients-page/wire.ts).
+  let userId: string;
+  try {
+    userId = (await resolveAuthorityForSession(auth.session)).userId;
+  } catch {
+    return NextResponse.json({ error: 'no membership' }, { status: 403, headers: NO_STORE });
+  }
+  const records = await listRecipientsFor(accountCheck.account.orgId);
+  return NextResponse.json(records.map((record) => toClientRecipient(record, userId)), { headers: NO_STORE });
 }
 
 export async function POST(request: Request) {

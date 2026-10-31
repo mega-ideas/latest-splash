@@ -157,6 +157,10 @@ export type RecipientRecord = {
   payoutMethod?: 'BANK' | 'WALLET' | 'CROSS_CHAIN';
   /** How it is paid (v2 §4.7): the kind and that kind's own fields. */
   delivery?: import('./repository/recipients.ts').RecipientDelivery;
+  /** When an owner approved it for payment (v2 §4.7); null until then. */
+  approvedAt?: string | null;
+  /** The member who saved it; the route tells the page only whether it was the viewer. */
+  createdBy?: string | null;
   /** Lower-cased Sui address; set only for WALLET recipients. */
   walletAddress?: string;
   /** 'SLUSH' | 'METAMASK_SUI_SNAP'. */

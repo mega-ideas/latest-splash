@@ -81,6 +81,10 @@ export type RecipientRow = {
   screeningVerdict?: string | null;
   /** How it is paid (v2 §4.7): the kind and that kind's own fields. */
   delivery?: RecipientDelivery;
+  /** When an owner approved it for payment (v2 §4.7); null until then. */
+  approvedAt?: string | null;
+  /** The member who saved it. Never sent to a page: the route says only whether it was the viewer. */
+  createdBy?: string | null;
   createdAt: string;
 };
 
@@ -185,6 +189,8 @@ function toRow(row: SupplierSelect): RecipientRow {
       mintRecipient: row.mintRecipient,
       ownershipStatus: row.ownershipStatus as RecipientDelivery['ownershipStatus'],
     },
+    approvedAt: row.approvedAt ? row.approvedAt.toISOString() : null,
+    createdBy: row.createdBy ?? null,
     createdAt: row.createdAt.toISOString(),
   };
 }

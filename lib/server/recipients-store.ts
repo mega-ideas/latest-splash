@@ -54,6 +54,8 @@ function toRecord(row: repo.RecipientRow): RecipientRecord {
     walletProvider: row.walletProvider,
     screeningVerdict: row.screeningVerdict ?? null,
     delivery: row.delivery,
+    approvedAt: row.approvedAt ?? null,
+    createdBy: row.createdBy ?? null,
     createdAt: row.createdAt,
   };
 }

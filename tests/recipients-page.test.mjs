@@ -122,7 +122,7 @@ test('what a person may do depends on who they are and what is missing', () => {
   const waiting = entry(wallet({ approvedAt: null }));
   assert.deepEqual(actionsFor(waiting, 'OWNER'), ['approve', 'withdraw_proof', 'remove']);
   assert.deepEqual(actionsFor(entry(wallet({ approvedAt: null, savedByYou: true })), 'OWNER'), ['withdraw_proof', 'remove'], 'another owner approves what you saved');
-  assert.deepEqual(actionsFor(waiting, 'MAKER'), ['remove']);
+  assert.deepEqual(actionsFor(waiting, 'MAKER'), [], 'a wallet the supplier proved is the owners’ to remove, approved or not');
   const b = buildEntries({ saved: [], beneficiaries: [beneficiary], transfers: [] })[0];
   assert.deepEqual(actionsFor(b, 'OWNER'), ['remove']);
   assert.deepEqual(actionsFor(b, 'MAKER'), [], 'only an owner removes a supplier’s bank account');
@@ -230,6 +230,14 @@ test('the proof link is shown to an owner once, with a copy button, and a staff 
   assert.match(joined, /emailedTo/);
   assert.match(joined, /CopyButton/);
   assert.match(joined, /Withdraw the proof|withdraw_proof/);
+});
+
+test('an exchange is described by its role, never named: the page cannot know that its agreement is signed', () => {
+  const [e] = buildEntries({ saved: [exchange()], beneficiaries: [], transfers: [] });
+  assert.equal(e.subtitle, 'Our Philippines payout partner · Sui');
+  assert.doesNotMatch(JSON.stringify(e.subtitle), /PDAX/i);
+  const [unknown] = buildEntries({ saved: [exchange({ delivery: { deliveryKind: 'EXCHANGE', exchangeId: 'someone' } })], beneficiaries: [], transfers: [] });
+  assert.equal(unknown.subtitle, 'An exchange · Sui');
 });
 
 test('removing and withdrawing ask first, because a payment on Sui cannot be taken back', () => {
