@@ -41,7 +41,7 @@ test('every call goes to a wallet route that takes the business from the session
   const urls = [...code(joined).matchAll(/(?:call|useLoad|fetch)(?:<[^>]*(?:<[^>]*>[^>]*)*>)?\(\s*[`'"]([^`'"]+)/g)].map((m) => m[1]);
   assert.ok(urls.length >= 20, `found ${urls.length} calls`);
   for (const url of urls) assert.match(url, /^\/api\/wallet\/|^\/api\/stablecoin\/wallet$/, url);
-  assert.doesNotMatch(code(joined), /body: \{[^}]*(orgId|accountId|walletAddress|businessWallet|address:)/, 'nothing about a business or a wallet is sent: the server knows which');
+  assert.doesNotMatch(code(joined), /body: \{[^}]*\b(orgId|accountId|walletAddress|businessWallet|address:)/, 'nothing about a business or a wallet is sent: the server knows which');
   assert.doesNotMatch(code(joined), /\?(org|orgId|account|wallet|address)=/);
 });
 

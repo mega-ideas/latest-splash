@@ -119,7 +119,7 @@ export default function SetupWallet({ onChanged }: { onChanged: () => void }) {
               </span>
             </label>
           ) : (
-            <Note>{`Every payment needs ${b.owners.length} owners' passkeys: at least two of them. You can change who signs later.`}</Note>
+            <Note>{`Every payment needs at least two of your ${b.owners.length} owners to sign. You can change who signs later.`}</Note>
           )}
         </div>
         <aside className="space-y-3 rounded-xl bg-[#f4f8fa] p-4 text-sm text-[#1F4452]">

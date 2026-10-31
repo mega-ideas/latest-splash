@@ -43,7 +43,7 @@ export default function FundingSources({ funding, owner, onChanged }: { funding:
             return (
               <li key={s.id} className="flex flex-wrap items-center gap-3 rounded-xl border border-[#326273]/15 bg-white p-3">
                 <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#eef4f5] text-[#145d6a]"><Icon className="h-4 w-4" aria-hidden="true" /></span>
-                <span className="min-w-0 flex-1">
+                <span className="min-w-0 flex-1 basis-40">
                   <span className="block truncate text-sm font-bold text-[#0c3e48]">{line.name}</span>
                   <span className="block text-[13px] text-[#326273]">{line.kindLabel}{line.next ? `. ${line.next}` : ''}</span>
                 </span>

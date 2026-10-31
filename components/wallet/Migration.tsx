@@ -155,7 +155,7 @@ function PersonInCharge() {
       ) : null}
       {view.candidates.length > 0 ? (
         <div className="flex flex-wrap items-end gap-2">
-          <Field label="Put someone in charge" htmlFor="pic-pick" className="min-w-0 flex-1">
+          <Field label="Put someone in charge" htmlFor="pic-pick" className="w-full min-w-0 sm:w-auto sm:flex-1">
             <SelectInput id="pic-pick" value={pick} onChange={(e) => setPick(e.target.value)}>
               <option value="">Choose a team member</option>
               {view.candidates.map((m) => <option key={m.userId} value={m.userId}>{m.name} ({roleLabel(m.role)})</option>)}
