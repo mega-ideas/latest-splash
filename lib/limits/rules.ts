@@ -128,7 +128,7 @@ export function ceilingWords(kind: LimitKind): string {
 export function raiseProblems(kind: LimitKind, requested: bigint, current: bigint): string[] {
   const out = bounds(kind, requested);
   if (out.length > 0) return out;
-  if (requested <= current) return [`That is not higher than your limit of ${formatLimit(kind, current)}. To lower a limit, use Lower this limit.`];
+  if (requested <= current) return [`That is not higher than your limit of ${formatLimit(kind, current)}. To lower a limit, choose Lower.`];
   return [];
 }
 
@@ -221,7 +221,7 @@ export function requestSentence(kind: LimitKind, r: RequestFacts, current: bigin
   const asked = formatLimit(kind, r.requestedValue);
   switch (requestPhase(r, nowMs)) {
     case 'asked':
-      return `You asked for ${asked}. Splash is reviewing it. Your limit stays ${formatLimit(kind, current)} until then. ${WHAT_HAPPENS_NEXT}`;
+      return `You asked for ${asked}. Splash is reviewing it, and your limit stays ${formatLimit(kind, current)} until it answers. If approved it starts after a 24 hour notice.`;
     case 'waiting': {
       const granted = r.grantedValue ?? r.requestedValue;
       const smaller = granted < r.requestedValue ? ` Splash approved ${formatLimit(kind, granted)}, less than the ${asked} you asked for.` : ` Splash approved ${formatLimit(kind, granted)}.`;

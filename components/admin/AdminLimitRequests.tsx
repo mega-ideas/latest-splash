@@ -87,11 +87,13 @@ export default function AdminLimitRequests({ initial, allowed, problem }: { init
           <h2 id="recent-limits" className="text-sm font-black text-[#1F4452]">Decided lately</h2>
           <ul className="mt-2 space-y-2">
             {queue.recent.map((request) => (
-              <li key={request.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg bg-white px-4 py-3 text-[13px] text-[#1F4452]">
-                <Outcome request={request} />
-                <span className="font-bold">{request.org.name}</span>
-                <span>{request.label}: {request.requestedWords} asked{request.grantedWords ? `, ${request.grantedWords} approved` : ''}</span>
-                <span className="text-[#326273] sm:ml-auto">{request.decidedBy ? `${request.decidedBy.replace('operator:', '')}` : 'the owner'}</span>
+              <li key={request.id} className="space-y-1 rounded-lg bg-white px-4 py-3 text-[13px] text-[#1F4452]">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Outcome request={request} />
+                  <span className="font-bold">{request.org.name}</span>
+                </div>
+                <p>{request.label}: {request.requestedWords} asked{request.grantedWords ? `, ${request.grantedWords} approved` : ''}</p>
+                <p className="text-[#326273]">{request.decidedBy ? `Decided by ${request.decidedBy.replace('operator:', '')}` : 'Cancelled by the owner'}</p>
               </li>
             ))}
           </ul>

@@ -2661,3 +2661,32 @@ Design: `docs/v2/phase3-team-roles.md` ("Can pay exchange accounts alone") and
   live path (a real provider, a real passkey signing a sponsored kind-2 payment)
   has not been run, only simulated on the model chain. No Move change is needed
   or made.
+
+## v2 Phase 3 - Limits on automatic payments, and asking Splash for higher ones - 2026-11-02
+
+Spec: `docs/v2/phase3-limits.md`. No Move change.
+
+- **What it controls**: four per-business limits (one automatic payment, a day,
+  a month, how long an allowance lasts), standard 2,000 / 5,000 / 20,000 USDC and
+  90 days, with ceilings in code (10,000 USDC for one payment, which is the amount
+  an owner always approves; 50,000 a day; 500,000 a month; 366 days). A limit
+  above its ceiling is refused when asked, refused when staff decide, and clamped
+  if ever stored. The second-approval line is never changed by this path.
+- **Who**: only owners ask, cancel and lower; the Finance lead sees. Staff roles
+  compliance and operations decide; support is refused. The business and the
+  actor are the session's in every customer route.
+- **Timing**: an approval changes nothing for 24 hours (a table CHECK refuses a
+  shorter notice); a pending request changes nothing at all. The owners are told
+  when it is approved, declined and started, and can cancel until it starts.
+  Lowering is instant and cancels any open request for that limit.
+- **Replay**: one Idempotency-Key is one request; a decision made twice is one
+  decision; a cancel twice is one cancel; the change is applied by the single
+  statement that moves `approved` to `applied`.
+- **Audit**: every action is an append-only line with who did it (user id,
+  `operator:<email>`, or `system:limits`).
+- **Enforcement**: an allowance above a limit is refused; an automatic payment
+  above the per-payment limit hands the run back; the daily limit never exceeds
+  the business's. An allowance already signed keeps its terms until the owners
+  change it.
+- **Not covered**: the 50,000 / 500,000 ceilings need Sebastian and Sky's review;
+  a network-held daily cap still needs a `splash_spend` change.

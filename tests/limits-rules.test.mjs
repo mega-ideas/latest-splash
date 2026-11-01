@@ -161,7 +161,7 @@ test('a request is asked, then waiting out its notice, then in force; or decline
   assert.equal(requestPhase(facts({ status: 'applied', grantedValue: U(8_000), effectiveAtMs: effective }), effective + 1), 'in_force');
   assert.equal(requestPhase(facts({ status: 'declined' }), T), 'declined');
   assert.equal(requestPhase(facts({ status: 'cancelled' }), T), 'cancelled');
-  assert.match(requestSentence('daily', facts(), U(5_000), T), /Splash is reviewing it\. Your limit stays 5,000 USDC/);
+  assert.match(requestSentence('daily', facts(), U(5_000), T), /Splash is reviewing it, and your limit stays 5,000 USDC until it answers\. If approved it starts after a 24 hour notice/);
   assert.match(requestSentence('daily', approved, U(5_000), T), /starts 10:00 UTC on 3 Nov, after a 24 hour notice\. Until then your limit stays 5,000 USDC\. You can cancel before it starts/);
   assert.match(requestSentence('daily', facts({ status: 'approved', grantedValue: U(7_000), effectiveAtMs: effective }), U(5_000), T), /approved 7,000 USDC, less than the 8,000 USDC you asked for/);
   assert.match(requestSentence('daily', facts({ status: 'declined', declineReason: 'Your volume does not need it yet.' }), U(5_000), T), /declined the request for 8,000 USDC\. Your volume does not need it yet\./);

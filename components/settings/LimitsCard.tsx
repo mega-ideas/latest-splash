@@ -81,11 +81,26 @@ function LimitRow({ limit, canAsk, cancelling, onRaise, onLower, onCancel }: { l
   const atCeiling = BigInt(limit.current) >= BigInt(limit.ceiling);
   const atFloor = BigInt(limit.current) <= BigInt(limit.floor);
   return (
-    <li className="grid gap-3 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-6">
-      <div className="min-w-0 space-y-2">
-        <h3 className="text-[15px] font-extrabold text-[#0c3e48]">{limit.label}</h3>
+    <li className="grid gap-3 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-x-6">
+      {/* On a phone: the name, the figure and its buttons, then the words. From sm up: the words on the left, the figure on the right. */}
+      <h3 className="min-w-0 text-[15px] font-extrabold text-[#0c3e48] sm:col-start-1">{limit.label}</h3>
+      <div className="flex flex-col gap-3 sm:col-start-2 sm:row-span-3 sm:row-start-1 sm:items-end sm:text-right">
+        <div>
+          <p className="text-2xl font-extrabold tabular-nums leading-none text-[#0c3e48]">{limit.currentWords}</p>
+          <p className="mt-1.5 text-[13px] text-[#326273]">Most Splash offers: <span className="tabular-nums">{limit.ceilingWords}</span></p>
+        </div>
+        {canAsk ? (
+          <div className="flex flex-wrap gap-2 sm:justify-end">
+            <QuietButton type="button" onClick={onRaise} disabled={atCeiling || Boolean(open)} aria-label={`Ask for more: ${limit.label}`} title={atCeiling ? 'This is the most Splash offers.' : open ? 'A request is already open for this limit.' : undefined}>Ask for more</QuietButton>
+            <QuietButton type="button" onClick={onLower} disabled={atFloor} aria-label={`Lower: ${limit.label}`}>Lower</QuietButton>
+          </div>
+        ) : null}
+      </div>
+      <div className="min-w-0 space-y-2 sm:col-start-1">
         <p className="text-[13px] leading-5 text-[#1F4452]">{limit.says}</p>
         <p className="text-[13px] leading-5 text-[#326273]">{limit.why}</p>
+      </div>
+      <div className="min-w-0 empty:hidden sm:col-start-1">
         {open ? (
           <div className="space-y-2 rounded-xl bg-[var(--warn-bg)] p-3">
             <Pill tone="wait"><Clock3 className="mr-1.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />{open.phase === 'asked' ? 'Waiting for Splash' : 'Approved, starts after the notice'}</Pill>
@@ -101,18 +116,6 @@ function LimitRow({ limit, canAsk, cancelling, onRaise, onLower, onCancel }: { l
           <div className="space-y-1.5 rounded-xl bg-[#F6F0ED] p-3">
             <Pill tone={last.phase === 'declined' ? 'bad' : 'wait'}>{last.phase === 'declined' ? 'Splash declined' : 'You cancelled'}</Pill>
             <p className="text-[13px] leading-5 text-[#1F4452]">{last.says}</p>
-          </div>
-        ) : null}
-      </div>
-      <div className="flex flex-col gap-3 sm:items-end sm:text-right">
-        <div>
-          <p className="text-2xl font-extrabold tabular-nums leading-none text-[#0c3e48]">{limit.currentWords}</p>
-          <p className="mt-1.5 text-[13px] text-[#326273]">Most Splash offers: <span className="tabular-nums">{limit.ceilingWords}</span></p>
-        </div>
-        {canAsk ? (
-          <div className="flex flex-wrap gap-2 sm:justify-end">
-            <QuietButton type="button" onClick={onRaise} disabled={atCeiling || Boolean(open)} aria-label={`Ask for more: ${limit.label}`} title={atCeiling ? 'This is the most Splash offers.' : open ? 'A request is already open for this limit.' : undefined}>Ask for more</QuietButton>
-            <QuietButton type="button" onClick={onLower} disabled={atFloor} aria-label={`Lower: ${limit.label}`}>Lower</QuietButton>
           </div>
         ) : null}
       </div>

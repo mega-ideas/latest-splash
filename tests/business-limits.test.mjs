@@ -89,7 +89,7 @@ test('an owner asks for a higher limit: it is recorded as pending, and nothing a
   assert.equal(made.replayed, false);
   assert.equal(made.request.phase, 'asked');
   assert.equal(made.request.requestedWords, '8,000 USDC');
-  assert.match(made.request.says, /Splash is reviewing it\. Your limit stays 5,000 USDC/);
+  assert.match(made.request.says, /Splash is reviewing it, and your limit stays 5,000 USDC until it answers/);
   assert.deepEqual({ ...(await currentLimits(db, 'acme', at(T0.getTime()))) }, { ...DEFAULT_LIMITS }, 'a pending request changes nothing');
   const [event] = (await trail(db)).filter((e) => e.action === 'limit_raise_requested');
   assert.equal(event.actorUserId, 'u-owner', 'the trail names who asked');

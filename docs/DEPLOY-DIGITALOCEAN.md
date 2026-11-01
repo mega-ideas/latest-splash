@@ -182,6 +182,11 @@ new build refuses to install or start on the old runtime and environment.
    It answers 502 without a database or when any business's rules could not
    be read. Leave `https://<domain>/api/cron/billing` unscheduled while
    `FEATURE_SUBSCRIPTION_BILLING` is off (it answers 404).
+   Schedule `https://<domain>/api/cron/limit-changes` every 15 minutes (v2
+   Phase 3, limits): it starts every approved higher limit whose 24 hour notice
+   has passed and tells the owners (approved, declined, started), once each. A
+   limit never starts late if it does not run (every read starts what is due);
+   only the "started" notice does. It answers 503 without a database.
    Schedule `https://<domain>/api/cron/scheduled-payments` every five minutes
    (v2 Phase 3, scheduled batches): it makes each schedule's run, sends the
    automatic ones' day-before notice, starts a run at its due time ("ask me
