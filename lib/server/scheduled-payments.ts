@@ -51,10 +51,13 @@ import {
   RUN_STATE,
   SCHEDULE_MAX_ITEMS,
   SCHEDULE_MODES,
-  allowanceProblems,
+  allowanceRule,
   cadenceSummary,
   dueDateOf,
   nextDueAfter,
+  parseAllowanceInput,
+  parseGraceMinutes,
+  type AllowanceInput,
   type Cadence,
   type RunStatus,
   type ScheduleMode,
@@ -63,6 +66,7 @@ import {
 import { scheduledRunPath, SCHEDULED_PATH, type ScheduleNotice } from '../schedule/notice.ts';
 import type { AutomaticStatus, ItemView, RunView, ScheduleView } from '../schedule/views.ts';
 import { parseAmountMinor } from '../transfer/plan.ts';
+import { automaticSummary, paymentsOfSchedules, type AutomaticSummary } from '../schedule/summary.ts';
 import { recipientPayable, type WalletContext } from './business-wallet.ts';
 import { listOrgOwners } from './near-threshold-store.ts';
 import {
@@ -73,6 +77,7 @@ import {
   getSchedule,
   getScheduleByKey,
   getSettings,
+  graceMinutesOf,
   insertRunOnce,
   insertSchedule,
   itemsOf,
@@ -158,6 +163,7 @@ export function runView(run: RunRow, scheduleName: string, payments: Awaited<Ret
     totalMinor: (run.totalMinor > 0n ? run.totalMinor : (plan?.totalMinor ?? 0n)).toString(),
     feeMinor: (run.totalMinor > 0n ? run.feeMinor : (plan?.feeMinor ?? 0n)).toString(),
     batchId: run.batchId ?? null,
+    startsAt: run.startsAt ? run.startsAt.toISOString() : null,
     canSkip: (run.status === 'scheduled' || run.status === 'waiting_approval' || (run.status === 'approved' && run.ranAs === 'auto')) && !started,
     receiptPath: run.status === 'paid' ? (run.ranAs === 'auto' || !run.batchId ? `/dashboard/history/scheduled/${encodeURIComponent(run.id)}` : `/dashboard/history/batch/${encodeURIComponent(run.batchId)}`) : null,
     payments: payments
@@ -471,7 +477,7 @@ async function placeRun(
           deps.db,
           deps.orgId,
           run.id,
-          { status: 'scheduled', dueAt: new Date(candidate), reasonCode: null, reason: null, skippedBy: null, skippedAt: null, claimedAt: null, noticeDayBeforeAt: null, updatedAt: now },
+          { status: 'scheduled', dueAt: new Date(candidate), reasonCode: null, reason: null, skippedBy: null, skippedAt: null, claimedAt: null, noticeDayBeforeAt: null, startsAt: null, windowVersion: null, noticeRunningAt: null, updatedAt: now },
           [run.status as RunStatus],
         );
       }
@@ -766,6 +772,7 @@ export async function automaticStatus(deps: ScheduleDeps): Promise<AutomaticStat
   return {
     payer: payer.ok ? { ready: true, kind: payer.payer.kind, reason: null, address: maskAddress(payer.payer.address) } : { ready: false, kind: null, reason: payer.reason, address: null },
     paused: settings?.autoPaused ?? false,
+    graceMinutes: await graceMinutesOf(deps.db, deps.orgId),
     pausedBy: settings?.pausedBy ?? null,
     pausedAt: settings?.pausedAt ? settings.pausedAt.toISOString() : null,
     dailyCapMinor: (cap.capMinor ?? BigInt(ALLOWANCE_DEFAULTS.dailyUsdc) * 1_000_000n).toString(),
@@ -811,7 +818,24 @@ export async function resumeAutomatic(deps: ScheduleDeps, actor: Actor): Promise
   return { ok: true, paused: false };
 }
 
-export type AllowanceInput = { perPaymentUsdc: unknown; dailyUsdc: unknown; monthlyUsdc: unknown; expiresInDays: unknown };
+/**
+ * The warning window before the first automatic payment of a run, in whole
+ * minutes from 0 to 60 (10 unless an owner says otherwise): an owner's own
+ * change, in force at once with no cooldown, recorded on the owners' trail. A
+ * run's window is fixed when its notice goes out, so this never moves a start
+ * that was announced; it applies to the next run that starts.
+ */
+export async function setGraceWindow(deps: ScheduleDeps, actor: Actor, minutes: unknown): Promise<{ ok: true; graceMinutes: number } | Fail> {
+  if (!isOwner(actor)) return ownersOnly('set the warning window for automatic payments');
+  const m = parseGraceMinutes(minutes);
+  if (m === null) return fail(400, 'bad_grace', 'Choose a whole number of minutes from 0 to 60. 0 means no warning window.');
+  const now = deps.now();
+  await saveSettings(deps.db, deps.orgId, { graceMinutes: m }, now);
+  await recordAuthorityEvent(deps.db, { orgId: deps.orgId, actorUserId: actor.userId, action: 'automatic_grace_changed', ref: null, detail: { minutes: m }, now: deps.now });
+  return { ok: true, graceMinutes: m };
+}
+
+export type { AllowanceInput };
 
 /**
  * Ask the owners to sign an allowance to the scheduled payer (through the same
@@ -821,13 +845,10 @@ export type AllowanceInput = { perPaymentUsdc: unknown; dailyUsdc: unknown; mont
  * verified. The request goes to the owners' wallet; nothing is in force until
  * their passkeys sign it.
  */
-export async function requestAllowance(deps: ScheduleDeps, actor: Actor, input: AllowanceInput): Promise<{ ok: true; request: RequestView } | Fail> {
+export async function requestAllowance(deps: ScheduleDeps, actor: Actor, input: AllowanceInput): Promise<{ ok: true; request: RequestView; summary: AutomaticSummary } | Fail> {
   if (!isOwner(actor)) return ownersOnly('give Splash an allowance to pay automatically');
-  const perPayment = parseAmountMinor(String(input.perPaymentUsdc ?? ''));
-  const daily = parseAmountMinor(String(input.dailyUsdc ?? ''));
-  const monthly = parseAmountMinor(String(input.monthlyUsdc ?? ''));
-  const days = typeof input.expiresInDays === 'number' ? input.expiresInDays : Number(String(input.expiresInDays ?? ''));
-  const problems = allowanceProblems({ perPaymentMinor: perPayment ?? 0n, dailyMinor: daily ?? 0n, monthlyMinor: monthly ?? 0n, expiresInDays: days });
+  // What was typed is read one way, here and on the page; the request and the summary are both built from `form`.
+  const { form, problems } = parseAllowanceInput(input);
   if (problems.length > 0) return fail(400, 'bad_allowance', problems.join(' '), { problems });
   const payer = await deps.payer();
   if (!payer.ok) return fail(409, 'payer_unavailable', 'Automatic payments are not switched on for your business here yet, so there is nothing to give an allowance to.');
@@ -835,22 +856,26 @@ export async function requestAllowance(deps: ScheduleDeps, actor: Actor, input: 
   if (!sc) return fail(503, 'spending_rules_unavailable', 'Spending rules are not set up for your business here, so an allowance cannot be asked for.');
   const members = await deps.walletMembers();
   if (!members.ok) return fail(members.status, members.code, members.error);
-  const now = deps.now().getTime();
-  const rule = {
-    spender: payer.payer.address,
-    perPaymentMaxMinor: perPayment as bigint,
-    cap: { period: 'month' as const, limitMinor: monthly as bigint },
-    expiresAtMs: BigInt(now) + BigInt(days) * 86_400_000n,
-  };
+  const nowMs = deps.now().getTime();
+  const rule = allowanceRule(form, payer.payer.address, nowMs);
+
+  // The summary the owners read is built from the same form and the same clock as the rule, and checked against the rule itself.
+  const rows = await listSchedules(deps.db, deps.orgId);
+  const { payments, firstPaymentMs } = paymentsOfSchedules(rows.map((r) => ({ name: r.name, mode: r.mode as ScheduleMode, status: r.status as ScheduleStatus, nextDueAt: r.nextDueAt ? r.nextDueAt.toISOString() : null, items: itemsOf(r).map(itemView) })));
+  const summary = automaticSummary({ payments, form, graceMinutes: await graceMinutesOf(deps.db, deps.orgId), nowMs, firstPaymentMs });
+  if (summary.perPaymentMinor !== rule.perPaymentMaxMinor.toString() || summary.monthlyMinor !== rule.cap.limitMinor.toString() || BigInt(summary.endsAtMs) !== rule.expiresAtMs) {
+    return fail(500, 'summary_mismatch', 'The summary and the allowance did not agree, so nothing was asked. Try again.');
+  }
+
   const args = { orgId: deps.orgId, requestedBy: actor.userId, wallet: members.members, rule };
   let opened = await issueSpendingRule(sc, args);
   // An allowance already exists: change it (revoke and reissue in one signed request), keeping what was spent.
   if (!opened.ok && opened.code === 'rule_exists') opened = await changeSpendingRule(sc, args);
   if (!opened.ok) return fail(opened.status, opened.code, opened.error, 'details' in opened ? (opened.details as Record<string, unknown> | undefined) : undefined);
   // The daily limit asked for waits with this request: it applies when the owners have signed, and not before.
-  await saveSettings(deps.db, deps.orgId, { pendingDailyCapMinor: daily as bigint, pendingCapRequestId: opened.request.id }, deps.now());
-  await recordAuthorityEvent(deps.db, { orgId: deps.orgId, actorUserId: actor.userId, action: 'automatic_allowance_requested', ref: opened.request.id, detail: { perPaymentMinor: perPayment?.toString(), dailyMinor: daily?.toString(), monthlyMinor: monthly?.toString(), days }, now: deps.now });
-  return { ok: true, request: opened.request };
+  await saveSettings(deps.db, deps.orgId, { pendingDailyCapMinor: form.dailyMinor, pendingCapRequestId: opened.request.id }, deps.now());
+  await recordAuthorityEvent(deps.db, { orgId: deps.orgId, actorUserId: actor.userId, action: 'automatic_allowance_requested', ref: opened.request.id, detail: { perPaymentMinor: form.perPaymentMinor.toString(), dailyMinor: form.dailyMinor.toString(), monthlyMinor: form.monthlyMinor.toString(), days: form.expiresInDays }, now: deps.now });
+  return { ok: true, request: opened.request, summary };
 }
 
 /** Ask the owners to sign the allowance's end. Taking effect when the owners sign; the kill switch and "ask me first" take effect at once. */

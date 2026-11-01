@@ -15,7 +15,8 @@ export const dynamic = 'force-dynamic';
  *
  * POST    { perPaymentUsdc, dailyUsdc, monthlyUsdc, expiresInDays }: ask the
  *         owners to sign it (or to change the one in force). Nothing is in
- *         force until they do. Owners only.
+ *         force until they do. Owners only. The answer carries the summary
+ *         in plain words, built from the same values the request is.
  * DELETE  ask the owners to sign taking it back. Owners only. (The kill switch
  *         and “Ask me first” stop automatic payments at once, without waiting
  *         for signatures.)
@@ -29,7 +30,7 @@ export async function POST(request: Request) {
   if (limited) return limited;
   const body = await readJsonBody(request);
   const result = await requestAllowance(gate.deps, gate.actor, { perPaymentUsdc: body.perPaymentUsdc, dailyUsdc: body.dailyUsdc, monthlyUsdc: body.monthlyUsdc, expiresInDays: body.expiresInDays });
-  return result.ok ? NextResponse.json({ request: result.request }, { status: 201, headers: NO_STORE }) : asResponse(result);
+  return result.ok ? NextResponse.json({ request: result.request, summary: result.summary }, { status: 201, headers: NO_STORE }) : asResponse(result);
 }
 
 export async function DELETE(request: Request) {

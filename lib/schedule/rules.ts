@@ -17,7 +17,8 @@
  *          the owners are told why in plain words.
  */
 import { formatUsdc } from '../fees/copy.ts';
-import { timeLeftWords } from '../team-rules/words.ts';
+import { timeLeftWords, plural } from '../team-rules/words.ts';
+import { parseAmountMinor } from '../transfer/plan.ts';
 
 export const SCHEDULE_MODES = ['ask', 'auto'] as const;
 export type ScheduleMode = (typeof SCHEDULE_MODES)[number];
@@ -93,6 +94,17 @@ export function nextDueAfter(cadence: Cadence, firstDueMs: number, afterMs: numb
 /** The calendar day (UTC) a due time falls on: with the schedule's id, the key a run is made once under. */
 export function dueDateOf(ms: number): string {
   return new Date(ms).toISOString().slice(0, 10);
+}
+
+/** "12 Nov": a calendar day (UTC), the way the summary words it. */
+export function dayMonthWords(ms: number): string {
+  const d = new Date(ms);
+  return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`;
+}
+
+/** "10 Feb 2027". */
+export function dayMonthYearWords(ms: number): string {
+  return `${dayMonthWords(ms)} ${new Date(ms).getUTCFullYear()}`;
 }
 
 /** The key a run's batch and payments are made under: stable for one schedule and one due date, so doing it twice is doing it once. */
@@ -174,6 +186,7 @@ export const FALLBACK_CODES = [
   'fee_changed',
   'balance_short',
   'policy_unreadable',
+  'changed_in_window',
 ] as const;
 export type FallbackCode = (typeof FALLBACK_CODES)[number];
 
@@ -198,6 +211,7 @@ export const FALLBACK_TEXT: Record<FallbackCode, string> = {
   fee_changed: 'Splash’s fee for a payment is now higher than the fee you were shown, so this run needs your approval.',
   balance_short: 'Your wallet does not hold enough USDC for this run and its fees, so it needs your attention.',
   policy_unreadable: 'Splash could not read your spending policy, so this run needs your approval.',
+  changed_in_window: 'The schedule was changed after the notice that this run was starting, so what was announced is not what would be paid. This run needs your approval.',
 };
 
 /** The reason, with the payee it is about when it names one. */
@@ -233,6 +247,9 @@ export const ALLOWANCE_DEFAULTS = {
 /** An allowance outlives no more than a year (the spending rules' own limit). */
 export const ALLOWANCE_MAX_DAYS = 366;
 
+/** What an owner types to ask for an allowance: strings from the form, or numbers. The server and the page read it with `parseAllowanceInput`. */
+export type AllowanceInput = { perPaymentUsdc: unknown; dailyUsdc: unknown; monthlyUsdc: unknown; expiresInDays: unknown };
+
 /**
  * The most one automatic payment to a recipient, with what was paid it already,
  * may reach: 10,000 USDC, the amount an owner must approve. Whatever second-
@@ -265,6 +282,76 @@ export function allowanceProblems(form: AllowanceForm, policyPerPaymentMaxMinor?
 /** The allowance in a sentence, for the owners signing it. */
 export function allowanceSentence(form: AllowanceForm): string {
   return `Splash may pay verified recipients you have paid before: up to ${formatUsdc(form.perPaymentMinor)} USDC a payment, ${formatUsdc(form.dailyMinor)} USDC a day and ${formatUsdc(form.monthlyMinor)} USDC a month, for ${form.expiresInDays} days. You can take it back at any time.`;
+}
+
+/**
+ * What an owner typed, read the one way the page and the server both read it,
+ * with what is wrong with it. An allowance request is built from `form`, and so
+ * is the summary the owners read before they sign: the two cannot differ.
+ */
+export function parseAllowanceInput(input: AllowanceInput, policyPerPaymentMaxMinor?: bigint | null): { form: AllowanceForm; problems: string[] } {
+  const days = typeof input.expiresInDays === 'number' ? input.expiresInDays : Number(String(input.expiresInDays ?? ''));
+  const form: AllowanceForm = {
+    perPaymentMinor: parseAmountMinor(String(input.perPaymentUsdc ?? '')) ?? 0n,
+    dailyMinor: parseAmountMinor(String(input.dailyUsdc ?? '')) ?? 0n,
+    monthlyMinor: parseAmountMinor(String(input.monthlyUsdc ?? '')) ?? 0n,
+    expiresInDays: days,
+  };
+  return { form, problems: allowanceProblems(form, policyPerPaymentMaxMinor) };
+}
+
+/** The terms the signed allowance carries on the network: the most for one payment, a monthly cap and an end. The daily limit is Splash's own and is not in it. */
+export function allowanceTerms(form: AllowanceForm, nowMs: number) {
+  return {
+    perPaymentMaxMinor: form.perPaymentMinor,
+    cap: { period: 'month' as const, limitMinor: form.monthlyMinor },
+    expiresAtMs: BigInt(nowMs) + BigInt(form.expiresInDays) * BigInt(DAY_MS),
+  };
+}
+
+/** The spending rule the owners are asked to sign: the scheduled payer as a spender, with the terms above. */
+export function allowanceRule(form: AllowanceForm, spender: string, nowMs: number) {
+  return { spender, ...allowanceTerms(form, nowMs) };
+}
+
+// ─── The grace window ────────────────────────────────────────────────────────
+
+/** Minutes between telling the owners a run is starting and its first automatic payment, unless an owner says otherwise. */
+export const GRACE_DEFAULT_MINUTES = 10;
+/** The longest window an owner may set. 0 is no window. */
+export const GRACE_MAX_MINUTES = 60;
+
+/** A window in whole minutes from 0 to 60, or null when what was given is anything else. */
+export function parseGraceMinutes(value: unknown): number | null {
+  const n = typeof value === 'number' ? value : typeof value === 'string' && /^\d{1,2}$/.test(value.trim()) ? Number(value.trim()) : Number.NaN;
+  if (!Number.isInteger(n) || n < 0 || n > GRACE_MAX_MINUTES) return null;
+  return n === 0 ? 0 : n;
+}
+
+/** The window in a sentence, for the owners setting it and reading the summary. */
+export function graceWords(minutes: number): string {
+  return minutes <= 0
+    ? 'There is no warning window: automatic payments start at the due time.'
+    : `Splash tells you ${plural(minutes, 'minute', 'minutes')} before the first automatic payment of a run. You can Skip or Stop until then.`;
+}
+
+export const WINDOW_HEAD = 'Starts at ';
+export const WINDOW_TAIL = ', Skip or Stop until then';
+
+/** "14:10 UTC", the way a notice words a moment of the day. */
+export function clockWords(ms: number): string {
+  const d = new Date(ms);
+  return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')} UTC`;
+}
+
+/**
+ * "Starts at 14:10 UTC, Skip or Stop until then" while a run's window is open;
+ * null when it has no window or the window is over. The pages say the same words
+ * with the time in the viewer's own clock (WINDOW_HEAD and WINDOW_TAIL around it).
+ */
+export function windowWords(startsAtMs: number | null | undefined, nowMs: number): string | null {
+  if (startsAtMs === null || startsAtMs === undefined || !Number.isFinite(startsAtMs) || nowMs >= startsAtMs) return null;
+  return `${WINDOW_HEAD}${clockWords(startsAtMs)}${WINDOW_TAIL}`;
 }
 
 // ─── Words for a moment ahead ────────────────────────────────────────────────

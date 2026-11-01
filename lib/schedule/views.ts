@@ -31,6 +31,8 @@ export type RunView = {
   batchId: string | null;
   /** Skip is offered while nothing has been paid. */
   canSkip: boolean;
+  /** When this run's first automatic payment may go out, once its window has been announced; null when it has none. Skip or Stop work until then. */
+  startsAt: string | null;
   /** Where the receipt is, once it was paid. */
   receiptPath: string | null;
   payments: Array<{ position: number; payeeName: string; masked: string; amountMinor: string; feeMinor: string; status: string; digest: string | null; error: string | null }> | null;
@@ -64,6 +66,8 @@ export type AutomaticStatus = {
   /** Can the scheduled payer sign here at all? */
   payer: { ready: boolean; kind: 'kms' | 'sandbox' | null; reason: string | null; address: string | null };
   paused: boolean;
+  /** The warning window, in minutes, before the first automatic payment of a run: 0 to 60, 10 unless an owner set it. */
+  graceMinutes: number;
   pausedBy: string | null;
   pausedAt: string | null;
   dailyCapMinor: string;

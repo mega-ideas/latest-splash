@@ -533,6 +533,13 @@
       "when": 1795046400000,
       "tag": "0075_leave_follow_up_trail",
       "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1795132800000,
+      "tag": "0076_grace_window",
+      "breakpoints": true
     }
   ]
 }

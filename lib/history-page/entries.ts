@@ -25,7 +25,7 @@ export type TransferRow = { id: string; paymentRef: string; status: string; paye
 export type BatchRow = { id: string; label: string | null; status: string; rowCount: number; totalMinor: string; createdAt: string; declinedBy?: Decliners | null };
 export type WithdrawalRow = { id: string; status: string; destination: { label: string; last4: string } | null; amountMinor: string; currency: string; createdAt: string };
 /** A run of a scheduled batch, as GET /api/wallet/schedules/runs answers it (lib/schedule/views.ts). */
-export type ScheduledRunRow = { id: string; scheduleName: string; status: RunStatus; mode: ScheduleMode; ranAs: ScheduleMode | null; fallback: boolean; reason: string | null; itemCount: number; totalMinor: string; dueAt: string; receiptPath: string | null; batchId: string | null };
+export type ScheduledRunRow = { id: string; scheduleName: string; status: RunStatus; mode: ScheduleMode; ranAs: ScheduleMode | null; fallback: boolean; reason: string | null; itemCount: number; totalMinor: string; dueAt: string; receiptPath: string | null; batchId: string | null; /** When the run's first automatic payment may go out, while its warning window is open. */ startsAt?: string | null };
 export type EarlierRow = { id: string; recipientName: string; targetCurrency: string; targetAmount: string; sourceAmountUsd: string | number; state: string; createdAt: string };
 
 export type HistoryEntry = {
@@ -48,6 +48,8 @@ export type HistoryEntry = {
   explain: Explain | null;
   /** True while the row can still change by itself (in progress, or failed with a return on its way), so the page keeps asking. */
   mayChange: boolean;
+  /** For a scheduled run still in its warning window: when its first automatic payment may go out. The page says "Starts at 14:10, Skip or Stop until then" while that is ahead. */
+  startsAt?: string | null;
 };
 
 export type Explain = { why: string; next: string };
@@ -237,6 +239,7 @@ function scheduledEntry(r: ScheduledRunRow): HistoryEntry {
     noReceipt: r.status === 'paid' ? null : r.status === 'scheduled' || r.status === 'waiting_approval' || r.status === 'approved' ? 'Open the Scheduled tab in Transfer to approve it, skip it or see where it is.' : r.status === 'failed' ? 'The Scheduled tab in Transfer shows what was and was not paid.' : 'No payment was made, so there is no receipt.',
     explain: s.group === 'failed' ? { why: r.reason?.trim() || 'The scheduled payment could not be completed.', next: 'Open the Scheduled tab in Transfer to see what was and was not paid. Pay anything left from Transfer; nothing was paid twice.' } : null,
     mayChange: s.group === 'in_progress',
+    startsAt: r.status === 'scheduled' ? (r.startsAt ?? null) : null,
   };
 }
 

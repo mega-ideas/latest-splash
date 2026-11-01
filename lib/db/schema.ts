@@ -2823,6 +2823,13 @@ export const paymentScheduleRuns = pgTable('payment_schedule_runs', {
   noticeReceiptAt: timestamp('notice_receipt_at', { withTimezone: true }),
   skippedBy: text('skipped_by'),
   skippedAt: timestamp('skipped_at', { withTimezone: true }),
+  /**
+   * When this run's first automatic payment may be claimed (migration 0076). Null while no window has been announced; set
+   * once, when the "starting" notice goes out. The payment claim refuses to run before it.
+   */
+  startsAt: timestamp('starts_at', { withTimezone: true }),
+  /** The schedule's version when the window opened: a schedule changed inside the window hands the run back at its end. */
+  windowVersion: integer('window_version'),
   ...timestamps,
 }, (table) => [
   uniqueIndex('payment_schedule_runs_schedule_due_unique').on(table.scheduleId, table.dueDate),
@@ -2878,5 +2885,7 @@ export const scheduledPaymentSettings = pgTable('scheduled_payment_settings', {
   /** A daily limit asked for and waiting for the owners' signatures (migration 0070); it becomes the limit when that request executes. */
   pendingDailyCapMinor: bigint('pending_daily_cap_minor', { mode: 'bigint' }),
   pendingCapRequestId: text('pending_cap_request_id'),
+  /** Minutes between telling the owners a run is starting and its first automatic payment: 0 to 60, 10 by default (migration 0076). */
+  graceMinutes: integer('grace_minutes').notNull().default(10),
   ...timestamps,
 });

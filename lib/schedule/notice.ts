@@ -21,7 +21,7 @@
  * Pure and client-safe.
  */
 import { formatUsdc } from '../fees/copy.ts';
-import { FALLBACK_NOTICE_TAIL, stampWords, type ScheduleMode } from './rules.ts';
+import { FALLBACK_NOTICE_TAIL, clockWords, stampWords, windowWords, type ScheduleMode } from './rules.ts';
 
 export type NoticeKind = 'day_before' | 'running' | 'approval_ready' | 'paid' | 'failed' | 'lapsed' | 'skipped' | 'paused';
 
@@ -43,7 +43,21 @@ export type ScheduleNotice = {
   by: string | null;
   /** The signed-in page the notice opens (the Scheduled tab, or a receipt). */
   path: string;
+  /** For an automatic run whose window is open: when its first payment may go out. Absent or null when there is no window. */
+  startsAtMs?: number | null;
+  /** The business's window, in minutes, when the notice was made. */
+  graceMinutes?: number | null;
 };
+
+/**
+ * A button the notice points at. It is not a link that acts: `path` is the
+ * signed-in page that has the button, and the person must be signed in as an
+ * owner there to press it.
+ */
+export type NoticeAction = { kind: 'skip' | 'stop'; label: string; path: string };
+
+export const SKIP_LABEL = 'Skip this run';
+export const STOP_LABEL = 'Stop schedule';
 
 export const SCHEDULED_PATH = '/dashboard/transfer?view=scheduled';
 export const scheduledRunPath = (runId: string) => `/dashboard/transfer?view=scheduled&run=${encodeURIComponent(runId)}`;
@@ -51,21 +65,44 @@ export const scheduledRunPath = (runId: string) => `/dashboard/transfer?view=sch
 const payments = (n: number) => `${n} ${n === 1 ? 'payment' : 'payments'}`;
 const money = (minor: string) => `${formatUsdc(BigInt(minor || '0'))} USDC`;
 
-export function noticeText(n: ScheduleNotice): { subject: string; text: string } {
+const BUTTONS = 'Both are buttons in the app, and work only when you are signed in as an owner. Nothing in this message skips or stops anything by itself.';
+
+function noticeBody(n: ScheduleNotice): { subject: string; text: string; actions?: NoticeAction[] } {
   const what = `${n.scheduleName} (${payments(n.itemCount)}, ${money(n.totalMinor)})`;
   const when = n.dueAtMs ? stampWords(n.dueAtMs) : 'the due time';
   const reasonLine = n.reason ? `\n\n${n.reason}` : '';
+  const buttons: NoticeAction[] = [
+    { kind: 'skip', label: SKIP_LABEL, path: n.path },
+    { kind: 'stop', label: STOP_LABEL, path: n.path },
+  ];
   switch (n.kind) {
-    case 'day_before':
+    case 'day_before': {
+      const grace = n.graceMinutes ?? 0;
+      const windowLine =
+        grace > 0
+          ? `At ${when} Splash sends a second notice, and the first payment goes out ${grace} ${grace === 1 ? 'minute' : 'minutes'} after that. Nothing is paid before then.`
+          : `Nothing is paid before ${when}.`;
       return {
         subject: `Splash will pay ${n.scheduleName} automatically at ${when}`,
-        text: `${n.businessName}: ${what} will be paid automatically at ${when}, inside the allowance your owners signed. The fee for each payment is shown on the run.\n\nIf you do not want it paid, open the Scheduled tab and choose Skip this run, or Stop the schedule. Nothing is paid before ${when}.`,
+        text: `${n.businessName}: ${what} will be paid automatically from ${when}, inside the allowance your owners signed. The fee for each payment is shown on the run.\n\n${windowLine}\n\nIf you do not want it paid, open the Scheduled tab and choose ${SKIP_LABEL}, or ${STOP_LABEL}. ${BUTTONS}`,
+        actions: buttons,
       };
-    case 'running':
+    }
+    case 'running': {
+      if (n.startsAtMs) {
+        const starts = windowWords(n.startsAtMs, n.startsAtMs - 1) as string;
+        return {
+          subject: `Splash will start paying ${n.scheduleName} at ${clockWords(n.startsAtMs)}`,
+          text: `${n.businessName}: ${what} is about to be paid inside your allowance. ${starts}. Nothing has been paid yet.\n\nTo stop it, open the Scheduled tab and choose ${SKIP_LABEL}, or ${STOP_LABEL}. ${BUTTONS} A receipt follows once it is paid.${reasonLine}`,
+          actions: buttons,
+        };
+      }
       return {
         subject: `Splash is paying ${n.scheduleName} now`,
         text: `${n.businessName}: ${what} is being paid now, inside your allowance. It goes out within moments, so there is rarely time to skip it now. To stop automatic payments at once, pause them in the Scheduled tab. A receipt follows.${reasonLine}`,
+        actions: [],
       };
+    }
     case 'approval_ready':
       return {
         subject: `${n.scheduleName} is ready for your approval`,
@@ -99,4 +136,10 @@ export function noticeText(n: ScheduleNotice): { subject: string; text: string }
         text: `${n.businessName}: ${n.by ? `${n.by} paused` : 'An owner paused'} automatic payments for the business. Scheduled batches now come to you for approval until an owner turns them back on.`,
       };
   }
+}
+
+/** The subject, the words, and the buttons the notice points at in the signed-in app (empty for a notice that has none). */
+export function noticeText(n: ScheduleNotice): { subject: string; text: string; actions: NoticeAction[] } {
+  const body = noticeBody(n);
+  return { subject: body.subject, text: body.text, actions: body.actions ?? [] };
 }

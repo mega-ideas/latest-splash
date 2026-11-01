@@ -24,7 +24,7 @@ import {
   walletSigningRequests,
   walletTransfers,
 } from '../db/schema.ts';
-import type { Cadence, RunStatus, ScheduleMode, ScheduleStatus } from '../schedule/rules.ts';
+import { GRACE_DEFAULT_MINUTES, type Cadence, type RunStatus, type ScheduleMode, type ScheduleStatus } from '../schedule/rules.ts';
 import type { DrizzleDb } from './wallet-signing-store.ts';
 
 /** A recipient and amount as an owner saved them. The address is what the run checks against. */
@@ -202,6 +202,21 @@ export async function claimRun(db: DrizzleDb, orgId: string, id: string, now: Da
   return row ?? null;
 }
 
+/**
+ * Announce a run's grace window, once: set when its first automatic payment may
+ * be claimed and release the lease, only while the run is still waiting to start
+ * and has no window. A second caller finds one and gets null. Another business's
+ * run reads as absent.
+ */
+export async function openGraceWindow(db: DrizzleDb, orgId: string, id: string, input: { startsAt: Date; windowVersion: number; now: Date }): Promise<RunRow | null> {
+  const [row] = await db
+    .update(paymentScheduleRuns)
+    .set({ startsAt: input.startsAt, windowVersion: input.windowVersion, claimedAt: null, updatedAt: input.now })
+    .where(and(eq(paymentScheduleRuns.orgId, orgId), eq(paymentScheduleRuns.id, id), eq(paymentScheduleRuns.status, 'scheduled'), isNull(paymentScheduleRuns.startsAt)))
+    .returning();
+  return row ?? null;
+}
+
 /** Once only: stamp one of a run's notice columns. True when this call stamped it. */
 export async function stampNotice(db: DrizzleDb, orgId: string, id: string, column: 'noticeDayBeforeAt' | 'noticeRunningAt' | 'noticeReceiptAt', now: Date): Promise<boolean> {
   const col = paymentScheduleRuns[column];
@@ -271,7 +286,8 @@ async function claimPaymentIn(db: DrizzleDb, orgId: string, id: string, input: {
         eq(paymentScheduleRunPayments.orgId, orgId),
         eq(paymentScheduleRunPayments.id, id),
         eq(paymentScheduleRunPayments.status, 'pending'),
-        sql`exists (select 1 from ${paymentScheduleRuns} r where r.id = ${paymentScheduleRunPayments.runId} and r.org_id = ${orgId} and r.status = 'approved')`,
+        // No automatic payment is claimed inside the run's grace window: a run with a start waits for it, to the millisecond.
+        sql`exists (select 1 from ${paymentScheduleRuns} r where r.id = ${paymentScheduleRunPayments.runId} and r.org_id = ${orgId} and r.status = 'approved' and (r.starts_at is null or r.starts_at <= ${input.now.toISOString()}::timestamptz))`,
       ),
     )
     .returning();
@@ -334,10 +350,16 @@ export async function getSettings(db: DrizzleDb, orgId: string): Promise<Setting
   return row ?? null;
 }
 
+/** The business's grace window in minutes: what an owner set, or 10. */
+export async function graceMinutesOf(db: DrizzleDb, orgId: string): Promise<number> {
+  const s = await getSettings(db, orgId);
+  return s?.graceMinutes ?? GRACE_DEFAULT_MINUTES;
+}
+
 export async function saveSettings(
   db: DrizzleDb,
   orgId: string,
-  patch: { autoPaused?: boolean; pausedBy?: string | null; pausedAt?: Date | null; dailyCapMinor?: bigint | null; pendingDailyCapMinor?: bigint | null; pendingCapRequestId?: string | null },
+  patch: { autoPaused?: boolean; pausedBy?: string | null; pausedAt?: Date | null; dailyCapMinor?: bigint | null; pendingDailyCapMinor?: bigint | null; pendingCapRequestId?: string | null; graceMinutes?: number },
   now: Date,
 ): Promise<SettingsRow> {
   const values = { orgId, ...patch, createdAt: now, updatedAt: now };

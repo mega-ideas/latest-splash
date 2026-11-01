@@ -64,6 +64,7 @@ export type AuthorityAction =
   | 'automatic_payments_resumed'
   | 'automatic_allowance_requested'
   | 'automatic_allowance_revoke_requested'
+  | 'automatic_grace_changed'
   | 'team_invitation_sent'
   | 'team_invitation_accepted'
   | 'team_invitation_declined'

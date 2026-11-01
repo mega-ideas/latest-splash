@@ -487,6 +487,31 @@ test('running the cron twice, or twice at once, at the start and at the end tell
   assert.equal(t.kinds().filter((k) => k === 'paid').length, 1);
 });
 
+test('two runs of one business whose windows end together still cannot pass a daily limit that fits only one', async () => {
+  const t = await scheduleWorld();
+  await t.allowance({ cap: { period: 'month', limitMinor: U(50_000) } });
+  await t.payBefore(t.ids.a, 1);
+  await t.payBefore(t.ids.b, 1);
+  await saveSettings(t.w.db, 'acme', { dailyCapMinor: U(1_500) }, new Date());
+  const make = (clientKey, name, recipientId) => S.createSchedule(t.sdeps(), OWNER_ACTOR, sched(t.ids, { clientKey, name, mode: 'auto', cadence: 'once', firstDueAt: FIRST.toISOString(), items: [{ recipientId, amount: '900' }] }));
+  ok(await make('cap_one_0000001', 'One', t.ids.a));
+  ok(await make('cap_two_0000001', 'Two', t.ids.b));
+  await pass(t, FIRST.getTime() - 20 * HOUR);
+  await pass(t, FIRST.getTime());
+  const opened = await runs(t);
+  assert.equal(opened.length, 2);
+  assert.ok(opened.every((r) => r.status === 'scheduled' && r.startsAt), 'both fit the limit when looked at alone, so both announced a window');
+  await t.clock(at(START));
+  const both = await Promise.all([runScheduledPayments(runner(t)), runScheduledPayments(runner(t))]);
+  assert.ok(both.every((r) => r.errors.length === 0), JSON.stringify(both.map((r) => r.errors)));
+  const all = await runs(t);
+  assert.equal(all.filter((r) => r.status === 'paid').length, 1, 'one fits the limit and is paid');
+  const back = all.filter((r) => r.status === 'waiting_approval');
+  assert.equal(back.length, 1, 'the other is handed back to the owners');
+  assert.equal(back[0].reasonCode, 'daily_cap');
+  assert.equal(t.spent(), 1);
+});
+
 // ─── The clock ─────────────────────────────────────────────────────────────
 
 test('a run not started within a day of its time lapses, window or not, and nothing is paid', async () => {
