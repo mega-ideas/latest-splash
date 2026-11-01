@@ -61,7 +61,7 @@ cleaned to plain words (no link, markup, number or symbol; at most 30 characters
 cut once at a word and ending in the one ellipsis character) by
 `lib/team/declined-by.ts`. The name is the plain words up to the first word that
 is not plain: what follows a link or a symbol is never shown as the person.
-Brackets and commas inside a name are removed in place. A dash from another
+Brackets and commas inside a name become spaces. A dash from another
 keyboard is the hyphen of the name; "and", "declined", a word that mixes scripts
 and a stack of combining marks are not name words. It is read only through the
 business's own request (another business reads none of it), and said the same

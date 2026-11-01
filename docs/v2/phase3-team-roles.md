@@ -593,17 +593,19 @@ words, and only then put in the shape "Name (Title)", so a hostile name or title
 cannot add a bracket, a comma, a link or a second person.
 
 - Brackets (every kind) and commas (every keyboard) inside one field are
-  **removed in place**: the name "Aisha (CFO)" is "Aisha CFO" and "Tan, Aisha" is
-  "Tan Aisha". The earlier rule that turned "Aisha (CFO)" into "Aisha" and "Tan,
+  **turned into a space**: the name "Aisha (CFO)" is "Aisha CFO", "Tan, Aisha" and
+  "Tan,Aisha" are "Tan Aisha", so two words are never fused into a made-up one. The
+  earlier rule that turned "Aisha (CFO)" into "Aisha" and "Tan,
   Aisha" into "an owner" is replaced.
 - A field stops at its first word that is not a plain word (a link, markup, a
   number, a symbol, an emoji), and is at most 30 characters, cut once at a word
   with the one ellipsis character. Control, hidden and direction characters are
   removed and spaces are collapsed.
 - A name that is empty after cleaning is said by the title alone ("Finance
-  lead"); a title that is empty is left out; a person with neither is counted
-  as one of the people who declined ("and N more"), and when nobody is named the
-  sentence is "Declined by an owner".
+  lead"); a title that is empty is left out. A person with neither is "an owner"
+  in the signing panel, which names everyone ("Declined by Aisha (Owner) and an
+  owner"), and one of the "N more" in History, which names two; when nobody is
+  named the sentence is "Declined by an owner".
 - The same cleaning runs where the snapshot is written, where it is read and
   where it is said (the page cleans it again), and a second pass changes nothing.
 
@@ -615,7 +617,7 @@ email, no id beyond the row's own). Empty text means a snapshot was taken and
 nothing usable was left; null means the decline predates 0081.
 
 - **Old declines** (null) read the person's live name and title while they are
-  still a member of that business; if they are not, they are counted ("an owner").
+  still a member of that business; if they are not, they are "an owner" in the panel and counted in History.
   Nothing is rewritten.
 - **The account itself.** `wallet_signing_signers.user_id` used to delete the
   signer row with the account, which would have removed the decline and its

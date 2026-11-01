@@ -11,18 +11,18 @@
  *   History (capped)   Declined by Aisha (CFO) and Ben (Finance lead)
  *                      Declined by Aisha (CFO), Ben (Staff) and 1 more       (two, then the count)
  *   Signing panel      Declined by Aisha (CFO), Ben (Staff) and Chen (Owner) (all of them)
- *   nobody usable      Declined by an owner
+ *   nobody usable      Declined by an owner (the panel says "an owner" for each person with nothing to name)
  *
  * A name and a title are a person's own text, so each is only ever said as plain
  * words, cleaned SEPARATELY (where it is read from the record and again here; the
  * second pass changes nothing) and only then put in the shape "Name (Title)". So
  * neither can add a bracket, a comma, a link or a second person. Brackets and
- * commas inside one field are removed in place; a field stops at the first word
+ * commas inside one field become spaces; a field stops at the first word
  * that is not a plain word (a link, markup, a number, a symbol, an emoji). A name
- * left with nothing is said by the title alone, and a person with neither is
- * counted as one of the people who declined ("and N more", or "an owner" when
- * nobody is named). "Withdrawn" is not a decline and names nobody; the caller
- * only passes this a declined row.
+ * left with nothing is said by the title alone. A person with neither is "an
+ * owner" in the signing panel (which names everyone) and one of the "N more" in
+ * History (which names two). "Withdrawn" is not a decline and names nobody; the
+ * caller only passes this a declined row.
  */
 
 /** One person who declined: their name and title as they were when they declined. Each is plain words or null. */
@@ -44,6 +44,8 @@ const ADDRESS_LIKE = /[\p{L}\p{N}]\.\p{L}{2,}/u;
 const DASHES = /[‐-―−﹘﹣－]/gu;
 /** Brackets of every kind and the commas of every keyboard: removed in place inside one field, so they can never frame or separate a second person. */
 const BRACKETS_AND_COMMAS = /[\p{Ps}\p{Pe},،、﹐﹑]/gu;
+/** A dot in brackets, the way an address is written to get past a filter. */
+const DEFANGED_DOT = /[\p{Ps}]\.+[\p{Pe}]/gu;
 /** A cut name ends in the ellipsis character, which NFKC turns into three dots; reading that ending back is what makes cutting a cut name a no-op. */
 const CUT_MARK = /\.{3}\s*$/u;
 /** More combining marks in a row than any real letter carries would stack through the lines around the name. */
@@ -87,7 +89,10 @@ export function plainName(raw: unknown): string | null {
   const text = raw
     .normalize('NFKC')
     .replace(DASHES, '-')
-    .replace(BRACKETS_AND_COMMAS, '')
+    // A defanged address ("evil[.]example") is still an address: the bracketed dot goes back to a dot, so the word stops the name.
+    .replace(DEFANGED_DOT, '.')
+    // A bracket or comma visibly separates words, so it becomes a space (never fuses "Tan,Aisha" into "TanAisha"); the split below collapses runs of spaces.
+    .replace(BRACKETS_AND_COMMAS, ' ')
     // Control, format (zero-width, direction overrides) and unassigned characters are removed, not kept inside a word.
     .replace(/[\p{C}]/gu, (c) => (/\s/u.test(c) ? ' ' : ''))
     .trim();
@@ -151,12 +156,18 @@ export function declinedByLabel(declined: Decliners | null | undefined): string 
   return `Declined by ${shown.join(', ')} and ${more} more`;
 }
 
-/** The same facts for the signing panel, which names every person who declined; people with nothing to say are counted. */
+/** No wallet has this many owners; the cap only keeps a bad count from building a huge sentence. */
+const MAX_UNNAMED_SAID = 20;
+
+/**
+ * The same facts for the signing panel, which names every person who declined. A person with
+ * no usable name or title is said as "an owner" (never counted as "N more": the count is History's).
+ */
 export function declinedByAllLabel(declined: Decliners | null | undefined): string {
   const { names, unnamed } = cleanDecliners(declined);
-  if (names.length === 0) return FALLBACK;
   const parts = names.map(declinerLabel);
-  if (unnamed > 0) parts.push(`${unnamed} more`);
+  for (let i = 0; i < Math.min(unnamed, MAX_UNNAMED_SAID); i += 1) parts.push('an owner');
+  if (parts.length === 0) return FALLBACK;
   if (parts.length === 1) return `Declined by ${parts[0]}`;
   return `Declined by ${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
 }
