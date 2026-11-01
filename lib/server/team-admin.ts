@@ -48,9 +48,9 @@ import { randomUUID } from 'node:crypto';
 import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
 
 import { GrantRefusedError, grantMembership } from '../auth/authority.ts';
-import { memberships, users, walletAuthorityEvents, walletFinanceLeads, walletMemberAccess, walletPersonsInCharge } from '../db/schema.ts';
+import { memberships, teamInvitations, users, walletAuthorityEvents, walletFinanceLeads, walletMemberAccess, walletPersonsInCharge } from '../db/schema.ts';
 import { isMembershipRole, type MembershipRole } from '../membership-roles.ts';
-import { TEAM_ACTIONS, activitySummary, type FundsAccessKind, type Manager, type TeamActivityWire, type TeamMemberWire } from '../team/view.ts';
+import { TEAM_ACTIONS, activitySummary, maskEmail, type FundsAccessKind, type Manager, type TeamActivityWire, type TeamMemberWire } from '../team/view.ts';
 import { endFinanceLead, endMemberHolds, memberRole, offboardMember, passkeyAddressesOf, recordAuthorityEvent } from './wallet-authority.ts';
 import type { DrizzleDb } from './wallet-signing-store.ts';
 
@@ -213,6 +213,16 @@ export function addTeamMember(
       return cannot;
     }
     await recordAuthorityEvent(tx, { orgId: input.orgId, actorUserId: input.actorUserId, action: 'member_added', subjectUserId: account.id, detail: { role }, now: input.now });
+    // An open invitation to this same business would otherwise sit in "Open invitations" until it ended: close it, on the trail.
+    const at = clock(input.now);
+    const closed = await tx
+      .update(teamInvitations)
+      .set({ status: 'withdrawn', decidedAt: at, decidedBy: 'system:added_directly' })
+      .where(and(eq(teamInvitations.orgId, input.orgId), eq(teamInvitations.email, email), eq(teamInvitations.status, 'pending')))
+      .returning({ id: teamInvitations.id, role: teamInvitations.role });
+    for (const c of closed as Array<{ id: string; role: string }>) {
+      await recordAuthorityEvent(tx, { orgId: input.orgId, actorUserId: input.actorUserId, action: 'team_invitation_withdrawn', ref: c.id, detail: { role: c.role, emailMask: maskEmail(email), reason: 'added_directly' }, now: () => at });
+    }
     return { ok: true as const, member: { userId: account.id, role } };
   });
 }

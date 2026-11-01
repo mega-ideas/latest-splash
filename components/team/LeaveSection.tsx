@@ -32,6 +32,8 @@ export default function LeaveSection({ leave, onChanged }: { leave: LeaveStatusW
   return (
     <section aria-labelledby="team-leave" className="space-y-2 border-t border-[#326273]/12 pt-4">
       <h3 id="team-leave" className="text-[13px] font-extrabold text-[#0c3e48]">Leave this business</h3>
+      {/* Where the request stands changes under the person; a screen reader is told when it does. */}
+      <div role="status" className="space-y-2">
       {leave.state === 'pending' ? (
         <>
           <Note>{leave.message}</Note>
@@ -56,6 +58,7 @@ export default function LeaveSection({ leave, onChanged }: { leave: LeaveStatusW
           ) : null}
         </>
       )}
+      </div>
       {error ? <Note tone="error">{error}</Note> : null}
     </section>
   );

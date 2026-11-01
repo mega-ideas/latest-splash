@@ -106,6 +106,10 @@ const nameOfUser = async (tx: DrizzleDb, id: string): Promise<string> => {
   const [u] = await tx.select({ name: users.name }).from(users).where(eq(users.id, id)).limit(1);
   return u?.name ?? 'A former member';
 };
+const maskedEmailOfUser = async (tx: DrizzleDb, id: string): Promise<string> => {
+  const [u] = await tx.select({ email: users.email }).from(users).where(eq(users.id, id)).limit(1);
+  return u ? maskEmail(u.email) : '***';
+};
 
 // ─── Sending ────────────────────────────────────────────────────────────────
 
@@ -255,6 +259,7 @@ export function invitationsFor(db: DrizzleDb, input: { userId: string; now?: Clo
         businessName: org?.name ?? 'A business',
         role: r.role as MembershipRole,
         invitedByName: await nameOfUser(tx, r.invitedBy),
+        invitedByEmailMask: await maskedEmailOfUser(tx, r.invitedBy),
         expiresAt: r.expiresAt.toISOString(),
         canAccept: held.length === 0,
         blockedReason: held.length === 0 ? null : ON_A_BUSINESS,
@@ -312,6 +317,7 @@ export function acceptInvitation(
     }
 
     const held = (await tx.select({ orgId: memberships.orgId }).from(memberships).where(eq(memberships.userId, input.userId))) as Array<{ orgId: string }>;
+    if (held.some((h) => h.orgId === inv.orgId)) return fail(409, 'already_on_team', 'You are already on this team.');
     if (held.length > 0) return fail(409, 'already_on_a_business', ON_A_BUSINESS);
 
     const closed = await tx

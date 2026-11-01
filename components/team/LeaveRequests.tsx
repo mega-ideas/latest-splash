@@ -6,7 +6,7 @@ import LocalTime from '@/components/LocalTime';
 import { call, errorText } from '@/components/transfer/api';
 import { PrimaryButton, QuietButton } from '@/components/transfer/ui';
 import { Note, Pill } from '@/components/wallet/parts';
-import { ROLE_NAME, type LeaveRequestWire, type Manager } from '@/lib/team/view';
+import { PLAIN_DATE, ROLE_NAME, type LeaveRequestWire, type Manager } from '@/lib/team/view';
 
 /**
  * Requests to leave, for the owners and the Finance lead. Nothing has changed
@@ -35,7 +35,7 @@ export default function LeaveRequests({ requests, manager, onChanged }: { reques
     setDone(
       decision === 'approve'
         ? `${r.name} left the team and no longer has access. ${answer.body?.note ?? ''}`.trim()
-        : `You declined ${r.name}’s request. ${r.name} is still on the team and was told so.`,
+        : `You declined ${r.name}’s request. ${r.name} is still on the team and will see that when they open Settings.`,
     );
     onChanged();
   }
@@ -52,7 +52,7 @@ export default function LeaveRequests({ requests, manager, onChanged }: { reques
               <Pill tone="ok">{ROLE_NAME[r.role]}</Pill>
             </div>
             <p className="break-all text-[13px] leading-5 text-[#326273]">{r.email}</p>
-            <p className="text-[13px] leading-5 text-[#326273]">Asked <LocalTime value={r.createdAt} format="datetime" /></p>
+            <p className="text-[13px] leading-5 text-[#326273]">Asked <LocalTime value={r.createdAt} format="datetime" options={{ ...PLAIN_DATE, hour: 'numeric', minute: '2-digit' }} /></p>
             {r.canDecide ? (
               asking === r.id ? (
                 <div role="group" aria-label={`Approve ${r.name}’s request`} className="space-y-2">
@@ -60,10 +60,10 @@ export default function LeaveRequests({ requests, manager, onChanged }: { reques
                     Approve? {r.name} loses access to this business at once. Their place in charge, the Finance lead role and any Add funds or Withdraw access end, and a spending rule they hold is taken back (the wallet’s owners sign that). Leaving does not remove a signer: if {r.name} signs for the business wallet, they stay a signer until the owners change the signers.
                   </p>
                   <div className="flex flex-wrap gap-2">
-                    <PrimaryButton type="button" autoFocus disabled={busy !== null} onClick={() => void decide(r, 'approve')}>
+                    <PrimaryButton type="button" disabled={busy !== null} onClick={() => void decide(r, 'approve')}>
                       {busy === `approve:${r.id}` ? 'Approving…' : `Approve and remove ${r.name}`}
                     </PrimaryButton>
-                    <QuietButton type="button" disabled={busy !== null} onClick={() => setAsking(null)}>Not now</QuietButton>
+                    <QuietButton type="button" autoFocus disabled={busy !== null} onClick={() => setAsking(null)}>Not now</QuietButton>
                   </div>
                 </div>
               ) : (

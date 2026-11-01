@@ -74,7 +74,7 @@ test('adding a person directly closes their open invitation to the same business
   assert.equal(closed.length, 1);
   assert.equal(closed[0].detail.reason, 'added_directly');
   const feed = await listTeamActivity(db, 'acme');
-  assert.match(feed.find((e) => e.action === 'team_invitation_withdrawn').summary, /added directly/i);
+  assert.match(feed.find((e) => e.action === 'team_invitation_withdrawn').summary, /added them directly/i);
   await client.close();
 });
 
@@ -117,7 +117,7 @@ test('the copy and the markup of the new components: role said once, unambiguous
   const requests = readFileSync(new URL('../components/team/LeaveRequests.tsx', import.meta.url), 'utf8');
   const open = readFileSync(new URL('../components/team/OpenInvitations.tsx', import.meta.url), 'utf8');
   for (const [name, text] of [['banner', banner], ['requests', requests], ['open invitations', open]]) {
-    for (const m of text.matchAll(/<LocalTime [^>]*format="date"[^>]*\/>/g)) assert.match(m[0], /month: 'short'/, `${name}: a date names its month`);
+    for (const m of text.matchAll(/<LocalTime [^>]*format="date"[^>]*\/>/g)) assert.match(m[0], /options=\{PLAIN_DATE\}/, `${name}: a date names its month (PLAIN_DATE)`);
   }
   assert.doesNotMatch(requests, /<PrimaryButton[^>]*autoFocus/, 'the destructive button does not take focus');
   assert.match(requests, /<QuietButton[^>]*autoFocus/, 'the safe choice does');

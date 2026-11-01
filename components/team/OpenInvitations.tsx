@@ -6,7 +6,7 @@ import LocalTime from '@/components/LocalTime';
 import { call, errorText } from '@/components/transfer/api';
 import { QuietButton } from '@/components/transfer/ui';
 import { Note, Pill } from '@/components/wallet/parts';
-import { ROLE_NAME, type InvitationWire } from '@/lib/team/view';
+import { PLAIN_DATE, ROLE_NAME, type InvitationWire } from '@/lib/team/view';
 
 /**
  * The invitations that are still open: who they went to, the role, who sent
@@ -40,7 +40,7 @@ export default function OpenInvitations({ invitations, onChanged }: { invitation
             <span className="min-w-0 flex-1 basis-48">
               <span className="block break-all font-semibold">{i.email}</span>
               <span className="block text-[13px] text-[#326273]">
-                Invited by {i.invitedByName}. Ends <LocalTime value={i.expiresAt} format="date" />.
+                Invited by {i.invitedByName}. Ends <LocalTime value={i.expiresAt} format="date" options={PLAIN_DATE} />.
               </span>
             </span>
             <span className="ml-auto flex flex-wrap items-center justify-end gap-2">

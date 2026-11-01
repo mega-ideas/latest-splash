@@ -8,7 +8,7 @@ import LocalTime from '@/components/LocalTime';
 import { call, errorText } from '@/components/transfer/api';
 import { PrimaryButton, QuietButton } from '@/components/transfer/ui';
 import { Note } from '@/components/wallet/parts';
-import { ROLE_NAME, roleWithArticle, type MyInvitationWire } from '@/lib/team/view';
+import { PLAIN_DATE, roleWithArticle, type MyInvitationWire } from '@/lib/team/view';
 
 /**
  * Invitations to join a business, shown to the person they were sent to after
@@ -64,7 +64,7 @@ export default function InvitationBanner() {
         {invitations.map((i) => (
           <li key={i.id} className="space-y-2">
             <p className="text-[13px] leading-5 text-[#1F4452]">
-              <span className="font-semibold">{i.invitedByName}</span> invited you to join <span className="font-semibold">{i.businessName}</span> as {roleWithArticle(i.role)} ({ROLE_NAME[i.role]}). Ends <LocalTime value={i.expiresAt} format="date" />.
+              <span className="font-semibold">{i.invitedByName}</span> ({i.invitedByEmailMask}) invited you to join <span className="font-semibold">{i.businessName}</span> as {roleWithArticle(i.role)}. Ends <LocalTime value={i.expiresAt} format="date" options={PLAIN_DATE} />.
             </p>
             {i.blockedReason ? <p className="text-[13px] leading-5 text-[#326273]">{i.blockedReason}</p> : null}
             <div className="flex flex-wrap gap-2">

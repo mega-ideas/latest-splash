@@ -35,7 +35,7 @@ import { and, asc, desc, eq } from 'drizzle-orm';
 
 import { memberships, teamLeaveRequests, users } from '../db/schema.ts';
 import type { MembershipRole } from '../membership-roles.ts';
-import { LAST_OWNER_SENTENCE, LEAVE_WHY_NOT, leaveDecisionRefusal, leaveSentence, type LeaveDecisionRefusal, type LeaveRequestWire, type LeaveStatusWire, type Manager } from '../team/view.ts';
+import { LAST_OWNER_SENTENCE, LEAVE_DECLINED_SHOWN_DAYS, LEAVE_WHY_NOT, leaveDecisionRefusal, leaveSentence, type LeaveDecisionRefusal, type LeaveRequestWire, type LeaveStatusWire, type Manager } from '../team/view.ts';
 import { fail, inTransaction, lockOwners, teamManager, type TeamFailure } from './team-admin.ts';
 import { memberRole, offboardMember, passkeyAddressesOf, recordAuthorityEvent } from './wallet-authority.ts';
 import type { DrizzleDb } from './wallet-signing-store.ts';
@@ -113,14 +113,17 @@ export function withdrawLeaveRequest(
 }
 
 /** Where the person's own request stands, in words. */
-export async function leaveStatusOf(db: DrizzleDb, input: { orgId: string; userId: string }): Promise<LeaveStatusWire> {
+export async function leaveStatusOf(db: DrizzleDb, input: { orgId: string; userId: string; now?: Clock }): Promise<LeaveStatusWire> {
   // An open request always wins; otherwise the newest answered one (a withdrawn or closed one says nothing).
   const mine = (await db
     .select()
     .from(teamLeaveRequests)
     .where(and(eq(teamLeaveRequests.orgId, input.orgId), eq(teamLeaveRequests.userId, input.userId)))
     .orderBy(desc(teamLeaveRequests.createdAt), desc(teamLeaveRequests.id))) as Row[];
-  const latest = mine.find((r) => r.status === 'pending') ?? (mine[0]?.status === 'declined' ? mine[0] : undefined);
+  // A declined answer is said for LEAVE_DECLINED_SHOWN_DAYS and then stops being shown; they can ask again at any time.
+  const shownUntil = clock(input.now).getTime() - LEAVE_DECLINED_SHOWN_DAYS * 24 * 60 * 60 * 1000;
+  const recentlyDeclined = mine[0]?.status === 'declined' && (mine[0].decidedAt?.getTime() ?? 0) > shownUntil;
+  const latest = mine.find((r) => r.status === 'pending') ?? (recentlyDeclined ? mine[0] : undefined);
   const role = await memberRole(db, input.orgId, input.userId);
   let onlyOwner = false;
   if (role === 'admin') {

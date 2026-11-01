@@ -60,6 +60,8 @@ export type MyInvitationWire = {
   businessName: string;
   role: MembershipRole;
   invitedByName: string;
+  /** The sender's address, masked ("d***@acme.com"): enough to tell a real sender from a look-alike name, never the address. */
+  invitedByEmailMask: string;
   expiresAt: string;
   canAccept: boolean;
   blockedReason: string | null;
@@ -67,6 +69,12 @@ export type MyInvitationWire = {
 
 /** How long an invitation stays open, in days. The server's INVITATION_TTL_MS is this many days. */
 export const INVITATION_DAYS = 7;
+
+/** How long a person's own page keeps saying that a request to leave was declined. They can ask again at any time. */
+export const LEAVE_DECLINED_SHOWN_DAYS = 14;
+
+/** A date that cannot be read two ways ("8 Nov 2026"), for LocalTime. */
+export const PLAIN_DATE = { day: 'numeric', month: 'short', year: 'numeric' } as const;
 
 /** "a***@example.com": enough to recognise, never the address. The trail is append-only, so it keeps only this. */
 export function maskEmail(email: string): string {
@@ -331,7 +339,9 @@ export function activitySummary(e: { action: string; detail: unknown; actorName:
     case 'team_invitation_withdrawn':
       return d.reason === 'inviter_no_longer_manages'
         ? `The invitation to ${String(d.emailMask ?? 'a person')} was closed because the person who sent it no longer manages the team.`
-        : `${e.actorName} withdrew the invitation to ${String(d.emailMask ?? 'a person')}.`;
+        : d.reason === 'added_directly'
+          ? `The invitation to ${String(d.emailMask ?? 'a person')} was closed because ${e.actorName} added them directly.`
+          : `${e.actorName} withdrew the invitation to ${String(d.emailMask ?? 'a person')}.`;
     case 'team_invitation_expired':
       return `The invitation to ${String(d.emailMask ?? 'a person')} ended after ${INVITATION_DAYS} days without an answer.`;
     case 'leave_requested':
