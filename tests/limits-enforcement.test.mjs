@@ -45,7 +45,7 @@ const rule = () => ({ status: 'active', perPaymentMaxMinor: U(2_000).toString(),
 const facts = (over = {}) => ({
   nowMs: NOW, settleWindowMs: 15 * 60_000, paused: false, ownerCreated: true, payerReady: true, sponsorReady: true, ruleReadable: true,
   rule: rule(), policy: { secondApprovalThresholdMinor: U(10_000).toString(), recipients: [{ address: A, tag: 'wallet' }] },
-  runningTotals: {}, dailyCapMinor: U(5_000), dailyUsedMinor: 0n, walletBalanceMinor: U(50_000), ...over,
+  runningTotals: {}, dailyCapMinor: U(5_000), perPaymentLimitMinor: U(2_000), monthlyLimitMinor: U(20_000), dailyUsedMinor: 0n, monthlyUsedMinor: 0n, walletBalanceMinor: U(50_000), ...over,
 });
 const item = (usdc) => {
   const amountMinor = U(usdc);
@@ -54,7 +54,7 @@ const item = (usdc) => {
 
 test('a payment above the business’s limit for one automatic payment hands the run back, even when the allowance would take it', () => {
   const run = [item(1_200)];
-  assert.equal(evaluateAutoRun(facts(), run).ok, true, 'with no business limit given, the allowance alone decides');
+  assert.equal(evaluateAutoRun(facts({ perPaymentLimitMinor: U(2_000) }), run).ok, true, 'a payment inside the limit is paid');
   const lowered = evaluateAutoRun(facts({ perPaymentLimitMinor: U(1_000) }), run);
   assert.equal(lowered.ok, false);
   assert.equal(lowered.code, 'over_payment_limit');

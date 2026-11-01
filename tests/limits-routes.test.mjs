@@ -43,6 +43,7 @@ const CUSTOMER = {
   'app/api/limits/requests/route.ts': { POST: ['requestHigherLimit', true] },
   'app/api/limits/requests/[id]/route.ts': { DELETE: ['cancelLimitRequest', true] },
   'app/api/limits/lower/route.ts': { POST: ['lowerLimit', true] },
+  'app/api/limits/restore/route.ts': { POST: ['restoreLimit', true] },
 };
 
 test('the customer limit routes start at the session gate, take the business and the actor from it, and call one service function each', () => {
@@ -96,13 +97,14 @@ test('the decision route tells the owners, and the cron fails closed without its
 });
 
 test('only those routes change a limit: the writing functions are called nowhere else', () => {
-  const writers = ['requestHigherLimit', 'cancelLimitRequest', 'lowerLimit', 'decideLimitRequestForStaff', 'runLimitChangesForCron'];
+  const writers = ['requestHigherLimit', 'cancelLimitRequest', 'lowerLimit', 'restoreLimit', 'decideLimitRequestForStaff', 'runLimitChangesForCron'];
   const files = [...walk('app/'), ...walk('lib/'), ...walk('components/')].filter((f) => /\.(ts|tsx)$/.test(f));
   const allowed = new Set([
     'lib/server/business-limits.ts',
     'app/api/limits/requests/route.ts',
     'app/api/limits/requests/[id]/route.ts',
     'app/api/limits/lower/route.ts',
+    'app/api/limits/restore/route.ts',
     'app/api/admin/limits/[id]/route.ts',
     'app/api/cron/limit-changes/route.ts',
   ]);
