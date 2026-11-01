@@ -78,7 +78,8 @@ test('a name is plain words: no link, markup, number, symbol, control or directi
     assert.ok(clean === null || /^[\p{L}\p{M}][\p{L}\p{M}'’. -]*$/u.test(clean), `${hostile} -> ${clean}`);
     assert.doesNotMatch(clean ?? '', /https?|www|@|<|>|\[|\]|=|"|;|:|\/|evil/i, `${hostile} -> ${clean}`);
   }
-  assert.equal(plainName('https://evil.example/pay Aisha'), 'Aisha');
+  assert.equal(plainName('Aisha https://evil.example/pay'), 'Aisha', 'a name is kept up to the first word that is not plain, never from after it');
+  assert.equal(plainName('https://evil.example/pay Aisha'), null, 'a name that starts with a link is no name: the words after it are not the person');
   assert.equal(plainName('https://evil.example'), null, 'a name that is only a link is no name');
   assert.equal(plainName('<<>>'), null);
   assert.equal(plainName('1234'), null);
@@ -97,11 +98,12 @@ test('a very long name cannot take over the row', () => {
   assert.ok(words && words.length <= 31, `${words?.length}`);
   const label = declinedByLabel({ names: ['B'.repeat(500), 'C'.repeat(500)], unnamed: 4 });
   assert.ok(label.length < 100, `${label.length}`);
-  assert.match(label, /^Declined by B+…? and C+…?,? and 4 more$|^Declined by B+…?, C+…? and 4 more$/);
+  assert.match(label, /^Declined by B+… and C+…,? and 4 more$|^Declined by B+…, C+… and 4 more$/, 'a cut name always ends in the one ellipsis character');
 });
 
 test('the formatter cleans a name again, so a name that arrives hostile is said as plain words or not at all', () => {
-  assert.equal(declinedByLabel({ names: ['https://evil.example/pay Aisha'], unnamed: 0 }), 'Declined by Aisha');
+  assert.equal(declinedByLabel({ names: ['Aisha https://evil.example/pay'], unnamed: 0 }), 'Declined by Aisha');
+  assert.equal(declinedByLabel({ names: ['https://evil.example/pay Aisha'], unnamed: 0 }), 'Declined by an owner');
   assert.equal(declinedByLabel({ names: ['https://evil.example'], unnamed: 0 }), 'Declined by an owner');
   assert.equal(declinedByLabel({ names: ['https://evil.example', 'Ben'], unnamed: 0 }), 'Declined by Ben and 1 more', 'an unusable name still counts as a person who declined');
   assert.equal(declinedByLabel({ names: ['<b>Aisha</b>', 'Ben'], unnamed: 0 }), 'Declined by Ben and 1 more');

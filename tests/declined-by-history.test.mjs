@@ -171,10 +171,12 @@ test('a hostile name is said as plain words, a very long one is cut, and neither
   await rename(t, { 'u-two': '<img src=x onerror=alert(1)> https://evil.example/pay Aisha', 'u-three': `${'B'.repeat(400)} www.evil.example` });
   await declinedPayment(t, 'tx_key_declin05', ['u-two', 'u-three']);
   const [view] = await T.listTransfers(t.deps());
-  assert.equal(view.declinedBy.names[0], 'Aisha');
-  assert.ok(view.declinedBy.names[1].length <= 31, `${view.declinedBy.names[1].length}`);
+  // A name that starts with markup or a link is no name (the words after it are not the person); that person still counts.
+  assert.equal(view.declinedBy.names.length, 1);
+  assert.equal(view.declinedBy.unnamed, 1);
+  assert.match(view.declinedBy.names[0], /^B{30}…$/, 'a cut name ends in the one ellipsis character');
   const [entry] = await historyOf(t);
-  assert.match(entry.status.label, /^Declined by Aisha and B+…?$/);
+  assert.match(entry.status.label, /^Declined by B{30}… and 1 more$/);
   assert.doesNotMatch(JSON.stringify(view), /evil|<|>|https?|www/i, 'the view the page receives has none of it');
   // The user's own record is untouched: the name is cleaned where it is said, never rewritten.
   const [raw] = await t.w.db.select().from(schema.users).where(eq(schema.users.id, 'u-two'));
