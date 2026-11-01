@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft, Loader2, RefreshCw, TriangleAlert } from 'lucide-react';
 
+import RequestSummary from '@/components/approve/RequestSummary';
 import { call, errorText, type SigningView } from '@/components/transfer/api';
 import SignPanel, { type SignLabels } from '@/components/transfer/SignPanel';
 import { closeOutcomeText } from '@/lib/approve/facts';
@@ -105,6 +106,7 @@ export default function ApproveDetail({ id }: { id: string }) {
             <p role="status" className="rounded-xl border border-[#326273]/15 bg-white p-4 text-sm font-semibold text-[#1F4452]">{outcome}</p>
           ) : (
             <>
+              {request.summaryText ? <RequestSummary text={request.summaryText} /> : null}
               <SignPanel
                 initial={request}
                 labels={PAYMENT_PURPOSES.has(request.purpose) ? PAYMENT_LABELS : CHANGE_LABELS}

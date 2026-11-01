@@ -59,6 +59,8 @@ export type SigningView = {
   signers: Array<{ userId: string; address: string; weight: number; signed: boolean; declined: boolean }>;
   you: { mustSign: boolean; signed: boolean; declined: boolean; requested: boolean };
   executedDigest: string | null;
+  /** What the owner who asked said this is for, in plain words, shown to every owner who signs. Null when the request has none. */
+  summaryText?: { headline: string; lines: string[] } | null;
 };
 
 export type SavedRecipient = {

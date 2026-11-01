@@ -57,7 +57,7 @@ import { staffFactsFrom } from '../transfer/context.ts';
 import type { PolicyFacts, StaffRuleFacts } from '../transfer/plan.ts';
 import { buildSpendView, boundTo, DAY_MS, type HeldAllowance, type PolicyState, type SpendView } from './spend-rules-index.ts';
 import { V2_KIND } from './sui-v2-builders.ts';
-import { openSigningRequest, type RequestView, type SigningFailure } from './wallet-signing.ts';
+import { openSigningRequest, type RequestView, type SigningFailure, type SigningSummaryText } from './wallet-signing.ts';
 import { listSigningRequests, type DrizzleDb, type StoredRequest } from './wallet-signing-store.ts';
 import { resolveOffboardedSpenders, type StandingOf } from './spend-standing.ts';
 import { recordAuthorityEvent } from './wallet-authority.ts';
@@ -258,7 +258,7 @@ function sharedRef(p: { id: string; initialSharedVersion: string }) {
 async function openRule(
   sc: SpendContext,
   l: Loaded,
-  input: { orgId: string; requestedBy: string; wallet: WalletMembers; policy: PolicyState; ops: RuleOp[]; dedupeKey: string; walletTagAllowed: string[]; nextStep?: unknown },
+  input: { orgId: string; requestedBy: string; wallet: WalletMembers; policy: PolicyState; ops: RuleOp[]; dedupeKey: string; walletTagAllowed: string[]; nextStep?: unknown; summaryText?: SigningSummaryText },
 ): Promise<Result> {
   const g = await gas(sc);
   if (!g) return refuse(503, 'no_sponsor', 'business wallet transactions need a gas sponsor, and none is configured');
@@ -280,6 +280,7 @@ async function openRule(
     spend: spendScope(l),
     walletTagAllowed: input.walletTagAllowed,
     nextStep: input.nextStep,
+    ...(input.summaryText ? { summaryText: input.summaryText } : {}),
   });
 }
 
@@ -477,7 +478,7 @@ async function recipientOps(sc: SpendContext, orgId: string, policy: PolicyState
 /** Give a staff member a rule. Optionally verify recipients in the same transaction. */
 export async function issueSpendingRule(
   sc: SpendContext,
-  input: { orgId: string; requestedBy: string; wallet: WalletMembers; rule: RuleInput; recipients?: RecipientChange },
+  input: { orgId: string; requestedBy: string; wallet: WalletMembers; rule: RuleInput; recipients?: RecipientChange; summaryText?: SigningSummaryText },
 ): Promise<Result> {
   const l = await load(sc, { wallet: input.wallet });
   if (isFailure(l)) return l;
@@ -508,7 +509,7 @@ export async function issueSpendingRule(
  */
 export async function changeSpendingRule(
   sc: SpendContext,
-  input: { orgId: string; requestedBy: string; wallet: WalletMembers; rule: RuleInput },
+  input: { orgId: string; requestedBy: string; wallet: WalletMembers; rule: RuleInput; summaryText?: SigningSummaryText },
 ): Promise<(Result & { carried?: Carried }) | SpendFailure> {
   const l = await load(sc, { wallet: input.wallet });
   if (isFailure(l)) return l;

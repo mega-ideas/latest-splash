@@ -13,7 +13,7 @@ import { formatUsdc } from '@/lib/fees/copy';
 import { GRACE_DEFAULT_MINUTES, MODE_WORDS, RUN_STATE, dueInWords, runIsOpen } from '@/lib/schedule/rules';
 import type { AutomaticStatus, RunView, ScheduleView } from '@/lib/schedule/views';
 import AutomaticPanel from './AutomaticPanel';
-import RunWindow, { useNow, windowIsOpen } from './RunWindow';
+import RunWindow, { useNow, useSkew, windowIsOpen } from './RunWindow';
 import ScheduleForm from './ScheduleForm';
 
 type Loaded = { schedules: ScheduleView[]; automatic: AutomaticStatus | null; you: { role: string; owner: boolean; financeLead: boolean; canSchedule: boolean } };
@@ -311,7 +311,10 @@ function ScheduleCard({
 function RunLine({ run, canSkip, canStop, busy, stopping, onSkip, onStop, highlight }: { run: RunView; canSkip: boolean; canStop: boolean; busy: boolean; stopping: boolean; onSkip: () => void; onStop: () => void; highlight: boolean }) {
   const state = RUN_STATE[run.status];
   // While the warning window is open, Skip and Stop sit right on the run: this is where a notice's link lands.
-  const windowOpen = windowIsOpen(run.startsAt, useNow());
+  // By the server's clock, not the device's: a device whose clock runs fast must not take Stop away while the window is open.
+  const now = useNow();
+  const skew = useSkew(run.serverNowMs);
+  const windowOpen = windowIsOpen(run.startsAt, now, skew, run.windowOpen);
   return (
     <li className={`rounded-xl border p-3 ${highlight ? 'border-[#0d6370] bg-white' : 'border-[#326273]/12 bg-[#fffaf6]'}`}>
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
@@ -344,7 +347,7 @@ function RunLine({ run, canSkip, canStop, busy, stopping, onSkip, onStop, highli
           ) : null}
         </div>
       </div>
-      <RunWindow startsAt={run.startsAt} className="mt-1.5 text-[13px] font-bold text-[#0c3e48]" />
+      <RunWindow startsAt={run.startsAt} windowOpen={run.windowOpen} serverNowMs={run.serverNowMs} className="mt-1.5 text-[13px] font-bold text-[#0c3e48]" />
       <p className="mt-1.5 text-[13px] leading-5 text-[#326273]">{run.reason?.trim() ? run.reason : windowOpen ? 'It has fallen due. Nothing has been paid yet, and nothing is until the time above.' : state.says}</p>
       {run.payments && run.payments.length > 0 && run.status !== 'paid' ? (
         <ul className="mt-2 space-y-1 text-[13px] text-[#1F4452]">

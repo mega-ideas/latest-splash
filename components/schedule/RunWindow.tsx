@@ -1,9 +1,9 @@
 'use client';
 
-import { useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 
 import LocalTime from '@/components/LocalTime';
-import { WINDOW_HEAD, WINDOW_TAIL } from '@/lib/schedule/rules';
+import { WINDOW_HEAD, WINDOW_TAIL, windowOpenNow } from '@/lib/schedule/rules';
 
 const TICK_MS = 15_000;
 const subscribe = (notify: () => void) => {
@@ -21,11 +21,24 @@ export function useNow(): number {
   return tick * TICK_MS;
 }
 
-/** Is this run's warning window still open? */
-export function windowIsOpen(startsAt: string | null | undefined, nowMs: number): boolean {
-  if (!startsAt) return false;
-  const at = Date.parse(startsAt);
-  return Number.isFinite(at) && at > nowMs;
+/**
+ * How far the server's clock is ahead of this device's, read when the answer arrived. The window is open or over by the SERVER's time:
+ * a device whose clock runs fast must not hide the line, or the Stop button, while the window is still open.
+ */
+export function useSkew(serverNowMs: number | null | undefined): number {
+  const [skew, setSkew] = useState(0);
+  // A new answer carries a new server time, so the skew is read again with it (the device clock is read here, not while rendering).
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the skew is measured when an answer arrives
+    setSkew(typeof serverNowMs === 'number' && Number.isFinite(serverNowMs) ? serverNowMs - Date.now() : 0);
+  }, [serverNowMs]);
+  return skew;
+}
+
+/** Is this run's warning window still open? The server said so (when it did), and by its clock it has not ended. */
+export function windowIsOpen(startsAt: string | null | undefined, nowMs: number, skewMs = 0, serverSaysOpen: boolean | undefined = undefined): boolean {
+  if (serverSaysOpen === false) return false;
+  return windowOpenNow(startsAt, nowMs, skewMs);
 }
 
 /**
@@ -33,9 +46,10 @@ export function windowIsOpen(startsAt: string | null | undefined, nowMs: number)
  * run's warning window is open, and nothing once it is over. The Scheduled tab
  * and History say it in the same words.
  */
-export default function RunWindow({ startsAt, className = '' }: { startsAt: string | null | undefined; className?: string }) {
+export default function RunWindow({ startsAt, windowOpen, serverNowMs, className = '' }: { startsAt: string | null | undefined; windowOpen?: boolean; serverNowMs?: number | null; className?: string }) {
   const now = useNow();
-  if (!startsAt || !windowIsOpen(startsAt, now)) return null;
+  const skew = useSkew(serverNowMs);
+  if (!startsAt || !windowIsOpen(startsAt, now, skew, windowOpen)) return null;
   return (
     <p className={className}>
       {WINDOW_HEAD}

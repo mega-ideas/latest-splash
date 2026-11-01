@@ -6,7 +6,7 @@
 import type { Cadence, RunGroup, RunStatus, RunTone, ScheduleMode, ScheduleStatus } from './rules.ts';
 import type { ALLOWANCE_DEFAULTS } from './rules.ts';
 
-export type ItemView = { position: number; payeeKind: 'splash_business' | 'recipient'; payeeId: string; name: string; masked: string; country: string | null; amountMinor: string; reference: string; feeMinor: string };
+export type ItemView = { position: number; payeeKind: 'splash_business' | 'recipient'; payeeId: string; name: string; masked: string; country: string | null; amountMinor: string; reference: string; feeMinor: string; /** Has nothing ever been paid to this address from this business? A first payment is never automatic. */ firstPayment: boolean };
 
 export type RunView = {
   id: string;
@@ -33,6 +33,10 @@ export type RunView = {
   canSkip: boolean;
   /** When this run's first automatic payment may go out, once its window has been announced; null when it has none. Skip or Stop work until then. */
   startsAt: string | null;
+  /** Is the warning window open, by the SERVER's clock? A device whose clock runs fast must not hide Skip or Stop. */
+  windowOpen: boolean;
+  /** The server's time when this was built: the page reads the window by it, not by the device clock alone. */
+  serverNowMs: number;
   /** Where the receipt is, once it was paid. */
   receiptPath: string | null;
   payments: Array<{ position: number; payeeName: string; masked: string; amountMinor: string; feeMinor: string; status: string; digest: string | null; error: string | null }> | null;

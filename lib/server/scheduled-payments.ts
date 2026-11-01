@@ -66,7 +66,7 @@ import {
 import { scheduledRunPath, SCHEDULED_PATH, type ScheduleNotice } from '../schedule/notice.ts';
 import type { AutomaticStatus, ItemView, RunView, ScheduleView } from '../schedule/views.ts';
 import { parseAmountMinor } from '../transfer/plan.ts';
-import { automaticSummary, paymentsOfSchedules, type AutomaticSummary } from '../schedule/summary.ts';
+import { automaticSummary, paymentsOfSchedules, summaryDigest, type AutomaticSummary } from '../schedule/summary.ts';
 import { recipientPayable, type WalletContext } from './business-wallet.ts';
 import { listOrgOwners } from './near-threshold-store.ts';
 import {
@@ -86,6 +86,7 @@ import {
   listSchedules,
   moveRun,
   moveRunUnlessPaying,
+  paidBefore,
   saveSettings,
   autoPaidSince,
   updateSchedule,
@@ -129,7 +130,7 @@ const cannotManage = (mode: ScheduleMode) =>
 
 // ─── Views ──────────────────────────────────────────────────────────────────
 
-function itemView(i: ScheduleItem): ItemView {
+function itemView(i: ScheduleItem, firstPayment = false): ItemView {
   return {
     position: i.position,
     payeeKind: i.payee.kind,
@@ -140,11 +141,19 @@ function itemView(i: ScheduleItem): ItemView {
     amountMinor: i.amountMinor,
     reference: i.reference,
     feeMinor: i.feeMinor,
+    firstPayment,
   };
 }
 
+/** A schedule's payments as views, each with whether nothing has ever been paid to it from this business (a first payment is never automatic). */
+async function itemViewsOf(db: DrizzleDb, orgId: string, row: ScheduleRow): Promise<ItemView[]> {
+  const out: ItemView[] = [];
+  for (const i of itemsOf(row)) out.push(itemView(i, !(await paidBefore(db, orgId, i.address))));
+  return out;
+}
+
 /** `plan` is what an unstarted run will be: a run that has not started has no totals of its own yet, so it shows its schedule's. */
-export function runView(run: RunRow, scheduleName: string, payments: Awaited<ReturnType<typeof listRunPayments>> | null = null, plan: { itemCount: number; totalMinor: bigint; feeMinor: bigint } | null = null): RunView {
+export function runView(run: RunRow, scheduleName: string, payments: Awaited<ReturnType<typeof listRunPayments>> | null = null, plan: { itemCount: number; totalMinor: bigint; feeMinor: bigint } | null = null, nowMs: number = Date.now()): RunView {
   const state = RUN_STATE[run.status as RunStatus];
   const started = (payments ?? []).some((p) => p.status === 'submitting' || p.status === 'paid');
   return {
@@ -167,6 +176,8 @@ export function runView(run: RunRow, scheduleName: string, payments: Awaited<Ret
     feeMinor: (run.totalMinor > 0n ? run.feeMinor : (plan?.feeMinor ?? 0n)).toString(),
     batchId: run.batchId ?? null,
     startsAt: run.startsAt ? run.startsAt.toISOString() : null,
+    windowOpen: run.status === 'scheduled' && run.startsAt !== null && run.startsAt.getTime() > nowMs,
+    serverNowMs: nowMs,
     canSkip: (run.status === 'scheduled' || run.status === 'waiting_approval' || (run.status === 'approved' && run.ranAs === 'auto')) && !started,
     receiptPath: run.status === 'paid' ? (run.ranAs === 'auto' || !run.batchId ? `/dashboard/history/scheduled/${encodeURIComponent(run.id)}` : `/dashboard/history/batch/${encodeURIComponent(run.batchId)}`) : null,
     payments: payments
@@ -181,7 +192,7 @@ async function scheduleView(deps: ScheduleDeps, actor: Actor, row: ScheduleRow, 
   const runs = known ?? (await listRuns(deps.db, deps.orgId, 400));
   const mine = runs.filter((r) => r.scheduleId === row.id).slice(0, 8);
   const views: RunView[] = [];
-  for (const r of mine) views.push(runView(r, row.name, r.ranAs === 'auto' ? await listRunPayments(deps.db, deps.orgId, r.id) : null, { itemCount: row.itemCount, totalMinor: row.totalMinor, feeMinor: row.feeMinor }));
+  for (const r of mine) views.push(runView(r, row.name, r.ranAs === 'auto' ? await listRunPayments(deps.db, deps.orgId, r.id) : null, { itemCount: row.itemCount, totalMinor: row.totalMinor, feeMinor: row.feeMinor }, deps.now().getTime()));
   const manage = mayManage(actor, row.mode as ScheduleMode);
   return {
     id: row.id,
@@ -197,7 +208,7 @@ async function scheduleView(deps: ScheduleDeps, actor: Actor, row: ScheduleRow, 
     itemCount: row.itemCount,
     totalMinor: row.totalMinor.toString(),
     feeMinor: row.feeMinor.toString(),
-    items: itemsOf(row).map(itemView),
+    items: await itemViewsOf(deps.db, deps.orgId, row),
     version: row.version,
     can: { edit: manage, skip: manage, stop: manage, delete: manage },
     runs: views,
@@ -219,23 +230,23 @@ export async function getScheduleView(deps: ScheduleDeps, actor: Actor, id: stri
 }
 
 /** Every run of this business, newest first: what History lists. */
-export async function listRunViews(deps: Pick<ScheduleDeps, 'db' | 'orgId'>, limit = 100): Promise<RunView[]> {
+export async function listRunViews(deps: Pick<ScheduleDeps, 'db' | 'orgId' | 'now'>, limit = 100): Promise<RunView[]> {
   const rows = await listRuns(deps.db, deps.orgId, limit);
   const known = new Map((await listSchedules(deps.db, deps.orgId)).map((s) => [s.id, s]));
   const out: RunView[] = [];
   for (const r of rows) {
     // A deleted schedule's runs stay in History under the name it had.
     const sch = known.get(r.scheduleId) ?? (await getSchedule(deps.db, deps.orgId, r.scheduleId));
-    out.push(runView(r, sch?.name ?? 'Scheduled payment', r.ranAs === 'auto' ? await listRunPayments(deps.db, deps.orgId, r.id) : null, sch ? { itemCount: sch.itemCount, totalMinor: sch.totalMinor, feeMinor: sch.feeMinor } : null));
+    out.push(runView(r, sch?.name ?? 'Scheduled payment', r.ranAs === 'auto' ? await listRunPayments(deps.db, deps.orgId, r.id) : null, sch ? { itemCount: sch.itemCount, totalMinor: sch.totalMinor, feeMinor: sch.feeMinor } : null, deps.now().getTime()));
   }
   return out;
 }
 
-export async function getRunView(deps: Pick<ScheduleDeps, 'db' | 'orgId'>, id: string): Promise<RunView | null> {
+export async function getRunView(deps: Pick<ScheduleDeps, 'db' | 'orgId' | 'now'>, id: string): Promise<RunView | null> {
   const run = await getRun(deps.db, deps.orgId, id);
   if (!run) return null;
   const sch = await getSchedule(deps.db, deps.orgId, run.scheduleId);
-  return runView(run, sch?.name ?? 'Scheduled payment', run.ranAs === 'auto' ? await listRunPayments(deps.db, deps.orgId, run.id) : null, sch ? { itemCount: sch.itemCount, totalMinor: sch.totalMinor, feeMinor: sch.feeMinor } : null);
+  return runView(run, sch?.name ?? 'Scheduled payment', run.ranAs === 'auto' ? await listRunPayments(deps.db, deps.orgId, run.id) : null, sch ? { itemCount: sch.itemCount, totalMinor: sch.totalMinor, feeMinor: sch.feeMinor } : null, deps.now().getTime());
 }
 
 // ─── Making the items ───────────────────────────────────────────────────────
@@ -660,7 +671,7 @@ export async function skipRun(deps: ScheduleDeps, actor: Actor, scheduleId: stri
   }
   await recordAuthorityEvent(deps.db, { orgId: deps.orgId, actorUserId: actor.userId, action: 'schedule_run_skipped', ref: moved.id, detail: { schedule: sch.id, dueDate: moved.dueDate }, now: deps.now });
   void notifySkip(deps, sch, moved, actor).catch(() => undefined);
-  return { ok: true, run: runView(moved, sch.name) };
+  return { ok: true, run: runView(moved, sch.name, null, null, deps.now().getTime()) };
 }
 
 async function notifySkip(deps: ScheduleDeps, sch: ScheduleRow, run: RunRow, actor: Actor): Promise<void> {
@@ -862,15 +873,28 @@ export async function requestAllowance(deps: ScheduleDeps, actor: Actor, input: 
   const nowMs = deps.now().getTime();
   const rule = allowanceRule(form, payer.payer.address, nowMs);
 
-  // The summary the owners read is built from the same form and the same clock as the rule, and checked against the rule itself.
+  // The summary the owners read is built here from the schedules as they are NOW, the same form and the same clock as the rule, and
+  // checked against the rule itself. What the owner confirmed on the page is a digest of the summary the page showed: if the server's
+  // differs (a payee added, an amount changed, a limit retyped, the day turned), nothing is asked and the owner sees the new one.
   const rows = await listSchedules(deps.db, deps.orgId);
-  const { payments, firstPaymentMs } = paymentsOfSchedules(rows.map((r) => ({ name: r.name, mode: r.mode as ScheduleMode, status: r.status as ScheduleStatus, nextDueAt: r.nextDueAt ? r.nextDueAt.toISOString() : null, items: itemsOf(r).map(itemView) })));
-  const summary = automaticSummary({ payments, form, graceMinutes: await graceMinutesOf(deps.db, deps.orgId), nowMs, firstPaymentMs });
+  const views: Parameters<typeof paymentsOfSchedules>[0] = [];
+  for (const r of rows) {
+    const live = r.mode === 'auto' && r.status === 'active';
+    views.push({ name: r.name, mode: r.mode as ScheduleMode, status: r.status as ScheduleStatus, nextDueAt: r.nextDueAt ? r.nextDueAt.toISOString() : null, cadence: r.cadence as Cadence, cadenceText: cadenceSummary(r.cadence as Cadence, r.firstDueAt.getTime()), firstDueAt: r.firstDueAt.toISOString(), items: live ? await itemViewsOf(deps.db, deps.orgId, r) : [] });
+  }
+  const { payments, schedules, firstPaymentMs } = paymentsOfSchedules(views);
+  const summary = automaticSummary({ payments, schedules, form, graceMinutes: await graceMinutesOf(deps.db, deps.orgId), nowMs, firstPaymentMs });
   if (summary.perPaymentMinor !== rule.perPaymentMaxMinor.toString() || summary.monthlyMinor !== rule.cap.limitMinor.toString() || BigInt(summary.endsAtMs) !== rule.expiresAtMs) {
     return fail(500, 'summary_mismatch', 'The summary and the allowance did not agree, so nothing was asked. Try again.');
   }
+  const confirmed = typeof input.summaryDigest === 'string' && /^[0-9a-f]{64}$/.test(input.summaryDigest) ? input.summaryDigest : null;
+  if (!confirmed) return fail(400, 'summary_not_confirmed', 'Check the summary first: the request has to carry the summary you confirmed. Nothing was asked.');
+  const digest = await summaryDigest(summary);
+  if (confirmed !== digest) {
+    return fail(409, 'summary_changed', 'Something changed while you were reading the summary, so nothing was asked. Read the new summary and confirm it again.', { summary, digest });
+  }
 
-  const args = { orgId: deps.orgId, requestedBy: actor.userId, wallet: members.members, rule };
+  const args = { orgId: deps.orgId, requestedBy: actor.userId, wallet: members.members, rule, summaryText: { headline: summary.headline, lines: summary.lines } };
   let opened = await issueSpendingRule(sc, args);
   // An allowance already exists: change it (revoke and reissue in one signed request), keeping what was spent.
   if (!opened.ok && opened.code === 'rule_exists') opened = await changeSpendingRule(sc, args);

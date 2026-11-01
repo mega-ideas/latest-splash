@@ -250,7 +250,7 @@ export const ALLOWANCE_DEFAULTS = {
 export const ALLOWANCE_MAX_DAYS = 366;
 
 /** What an owner types to ask for an allowance: strings from the form, or numbers. The server and the page read it with `parseAllowanceInput`. */
-export type AllowanceInput = { perPaymentUsdc: unknown; dailyUsdc: unknown; monthlyUsdc: unknown; expiresInDays: unknown };
+export type AllowanceInput = { perPaymentUsdc: unknown; dailyUsdc: unknown; monthlyUsdc: unknown; expiresInDays: unknown; /** The digest of the summary the owner confirmed (lib/schedule/summary.ts). Not part of the allowance: the request carries it, the server checks it. */ summaryDigest?: unknown };
 
 /**
  * The most one automatic payment to a recipient, with what was paid it already,
@@ -302,12 +302,26 @@ export function parseAllowanceInput(input: AllowanceInput, policyPerPaymentMaxMi
   return { form, problems: allowanceProblems(form, policyPerPaymentMaxMinor) };
 }
 
+/**
+ * When an allowance asked for a number of days ends: at midnight UTC after the last of
+ * them, counting today as day 0. A whole day, not an instant, so the page and the
+ * server, whose clocks differ by seconds or hours, name the same end on the same
+ * UTC day. It is at least the days asked for and less than a day more, and never
+ * past a year from now (ALLOWANCE_MAX_DAYS asked for ends on the 365th day).
+ */
+export function allowanceEndsAtMs(nowMs: number, days: number): number {
+  const today = Math.floor(nowMs / DAY_MS);
+  // Whatever is typed in the field while the owner is still typing (nothing, letters, 2.5) reads as a whole number of days.
+  const whole = Number.isFinite(days) ? Math.max(0, Math.floor(days)) : 0;
+  return (today + Math.min(whole, 365) + 1) * DAY_MS;
+}
+
 /** The terms the signed allowance carries on the network: the most for one payment, a monthly cap and an end. The daily limit is Splash's own and is not in it. */
 export function allowanceTerms(form: AllowanceForm, nowMs: number) {
   return {
     perPaymentMaxMinor: form.perPaymentMinor,
     cap: { period: 'month' as const, limitMinor: form.monthlyMinor },
-    expiresAtMs: BigInt(nowMs) + BigInt(form.expiresInDays) * BigInt(DAY_MS),
+    expiresAtMs: BigInt(allowanceEndsAtMs(nowMs, form.expiresInDays)),
   };
 }
 
@@ -344,6 +358,17 @@ export const WINDOW_TAIL = ', Skip or Stop until then';
 export function clockWords(ms: number): string {
   const d = new Date(ms);
   return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')} UTC`;
+}
+
+/**
+ * Is a run's warning window still open? The skew is how far the server's clock is
+ * ahead of the device's (server time minus device time, taken when the answer
+ * arrived): the device's own clock must not decide whether a Stop is offered.
+ */
+export function windowOpenNow(startsAt: string | null | undefined, deviceNowMs: number, skewMs = 0): boolean {
+  if (!startsAt) return false;
+  const at = Date.parse(startsAt);
+  return Number.isFinite(at) && at > deviceNowMs + skewMs;
 }
 
 /**

@@ -25,7 +25,7 @@ export type TransferRow = { id: string; paymentRef: string; status: string; paye
 export type BatchRow = { id: string; label: string | null; status: string; rowCount: number; totalMinor: string; createdAt: string; declinedBy?: Decliners | null };
 export type WithdrawalRow = { id: string; status: string; destination: { label: string; last4: string } | null; amountMinor: string; currency: string; createdAt: string };
 /** A run of a scheduled batch, as GET /api/wallet/schedules/runs answers it (lib/schedule/views.ts). */
-export type ScheduledRunRow = { id: string; scheduleName: string; status: RunStatus; mode: ScheduleMode; ranAs: ScheduleMode | null; fallback: boolean; reason: string | null; itemCount: number; totalMinor: string; dueAt: string; receiptPath: string | null; batchId: string | null; /** When the run's first automatic payment may go out, while its warning window is open. */ startsAt?: string | null };
+export type ScheduledRunRow = { id: string; scheduleName: string; status: RunStatus; mode: ScheduleMode; ranAs: ScheduleMode | null; fallback: boolean; reason: string | null; itemCount: number; totalMinor: string; dueAt: string; receiptPath: string | null; batchId: string | null; /** When the run's first automatic payment may go out, while its warning window is open. */ startsAt?: string | null; /** Is that window open by the SERVER's clock, and what time it was there. */ windowOpen?: boolean; serverNowMs?: number };
 export type EarlierRow = { id: string; recipientName: string; targetCurrency: string; targetAmount: string; sourceAmountUsd: string | number; state: string; createdAt: string };
 
 export type HistoryEntry = {
@@ -50,6 +50,9 @@ export type HistoryEntry = {
   mayChange: boolean;
   /** For a scheduled run still in its warning window: when its first automatic payment may go out. The page says "Starts at 14:10, Skip or Stop until then" while that is ahead. */
   startsAt?: string | null;
+  /** Whether that window is open by the server's clock, and the server's time, so a device whose clock is off still offers Stop. */
+  windowOpen?: boolean;
+  serverNowMs?: number | null;
 };
 
 export type Explain = { why: string; next: string };
@@ -240,6 +243,8 @@ function scheduledEntry(r: ScheduledRunRow): HistoryEntry {
     explain: s.group === 'failed' ? { why: r.reason?.trim() || 'The scheduled payment could not be completed.', next: 'Open the Scheduled tab in Transfer to see what was and was not paid. Pay anything left from Transfer; nothing was paid twice.' } : null,
     mayChange: s.group === 'in_progress',
     startsAt: r.status === 'scheduled' ? (r.startsAt ?? null) : null,
+    windowOpen: r.status === 'scheduled' ? (r.windowOpen ?? false) : false,
+    serverNowMs: r.status === 'scheduled' ? (r.serverNowMs ?? null) : null,
   };
 }
 

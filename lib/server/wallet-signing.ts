@@ -475,6 +475,14 @@ export type WithdrawalSigningDetails = {
   relationship?: string;
 };
 
+/**
+ * What the person who asked said this request is for, in plain words (the
+ * allowance summary of a scheduled payment, say). It is the requester's text:
+ * a signer's device still decodes the bytes itself, and this is shown beside
+ * that, never in place of it.
+ */
+export type SigningSummaryText = { headline: string; lines: string[] };
+
 export type RequestView = {
   id: string;
   purpose: SigningPurpose;
@@ -505,6 +513,8 @@ export type RequestView = {
   simulatedBalanceChanges: BalanceChange[];
   /** A withdrawal: the bank account and amounts the bytes were built for. */
   withdrawal: WithdrawalSigningDetails | null;
+  /** The plain-words summary the requester confirmed, shown to every signer; null for a request that has none. */
+  summaryText: SigningSummaryText | null;
 };
 
 function signedWeight(request: StoredRequest): number {
@@ -558,6 +568,7 @@ function viewOf(request: StoredRequest, expect: WalletTxExpectations, userId: st
       amount: String(c.amount),
     })),
     withdrawal: ((request.summary as { withdrawal?: WithdrawalSigningDetails } | null)?.withdrawal ?? null),
+    summaryText: ((request.summary as { summaryText?: SigningSummaryText } | null)?.summaryText ?? null),
   };
 }
 
@@ -606,6 +617,8 @@ export async function openSigningRequest(
     billingTerms?: ShapeContext['billing'];
     /** Opened by `onExecuted` once this request executes. Keys and weights only. */
     nextStep?: unknown;
+    /** The plain-words summary the requester confirmed; stored with the request and shown to every signer. */
+    summaryText?: SigningSummaryText;
   },
 ): Promise<{ ok: true; request: RequestView } | SigningFailure> {
   const now = (deps.now ?? (() => new Date()))();
@@ -719,6 +732,7 @@ export async function openSigningRequest(
       ...(input.withdrawal ? { withdrawal: input.withdrawal } : {}),
       ...(input.billing ? { billing: input.billing } : {}),
       ...(input.staffPay ? { staffPay: input.staffPay } : {}),
+      ...(input.summaryText ? { summaryText: input.summaryText } : {}),
     },
     nextStep: input.nextStep ?? null,
     requestedBy: input.requestedBy,

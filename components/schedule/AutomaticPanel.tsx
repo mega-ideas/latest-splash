@@ -2,15 +2,14 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { CircleCheck, CircleAlert, Hand, PauseCircle, PlayCircle } from 'lucide-react';
+import { CircleCheck, CircleAlert, Hand, PauseCircle, PlayCircle, TriangleAlert } from 'lucide-react';
 
-import LocalTime from '@/components/LocalTime';
 import { call, errorText } from '@/components/transfer/api';
 import { Field, Modal, PrimaryButton, QuietButton, TextInput } from '@/components/transfer/ui';
 import { newKey, Note, Pill } from '@/components/wallet/parts';
 import { formatUsdc } from '@/lib/fees/copy';
-import { ALLOWANCE_DEFAULTS, GRACE_MAX_MINUTES, allowanceSentence, graceWords, parseAllowanceInput, parseGraceMinutes } from '@/lib/schedule/rules';
-import { automaticSummary, paymentsOfSchedules, type AutomaticSummary } from '@/lib/schedule/summary';
+import { ALLOWANCE_DEFAULTS, GRACE_MAX_MINUTES, allowanceSentence, dayMonthYearWords, graceWords, parseAllowanceInput, parseGraceMinutes } from '@/lib/schedule/rules';
+import { MONTHLY_CAVEAT, automaticSummary, paymentsOfSchedules, summaryDigest, type AutomaticSummary } from '@/lib/schedule/summary';
 import type { AutomaticStatus, ScheduleView } from '@/lib/schedule/views';
 
 const usdc = (minor: string) => `${formatUsdc(BigInt(minor))} USDC`;
@@ -92,7 +91,7 @@ export default function AutomaticPanel({ status, schedules, allowanceOpen, onAll
                 Up to {usdc(allowance.perPaymentMaxMinor)} a payment. {usdc(allowance.spendableNowMinor)} left this month.
                 {allowance.expiresAtMs ? (
                   <>
-                    {' '}Ends <LocalTime value={Number(allowance.expiresAtMs)} format="date" />.
+                    {' '}Ends {dayMonthYearWords(Number(allowance.expiresAtMs) - 1)} (UTC).
                   </>
                 ) : null}
               </>
@@ -202,15 +201,19 @@ function AllowanceModal({ open, onClose, onAsked, status, schedules }: { open: b
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [asked, setAsked] = useState<AutomaticSummary | null>(null);
+  // The summary the server built when what the owner was shown no longer matched it: it replaces the one built here until they go back.
+  const [fromServer, setFromServer] = useState<AutomaticSummary | null>(null);
 
   // What was typed is read the way the server reads it, and the summary is built from that same result.
   const { form, problems } = parseAllowanceInput({ perPaymentUsdc: perPayment, dailyUsdc: daily, monthlyUsdc: monthly, expiresInDays: days });
-  const { payments, firstPaymentMs } = paymentsOfSchedules(schedules);
-  const summary = automaticSummary({ payments, form, graceMinutes: status.graceMinutes, nowMs: now, firstPaymentMs });
+  const { payments, schedules: running, firstPaymentMs } = paymentsOfSchedules(schedules);
+  const built = automaticSummary({ payments, schedules: running, form, graceMinutes: status.graceMinutes, nowMs: now, firstPaymentMs });
+  const summary = fromServer ?? built;
 
   function close() {
     setStep('form');
     setAsked(null);
+    setFromServer(null);
     setError(null);
     onClose();
   }
@@ -218,12 +221,28 @@ function AllowanceModal({ open, onClose, onAsked, status, schedules }: { open: b
   async function ask() {
     setBusy(true);
     setError(null);
-    const answer = await call<{ summary?: AutomaticSummary }>('/api/wallet/schedules/automatic/allowance', {
+    // What goes with the request is the digest of the summary on this screen. The server builds its own from the schedules as they are
+    // now and asks nothing if the two differ.
+    let digest: string;
+    try {
+      digest = await summaryDigest(summary);
+    } catch {
+      setBusy(false);
+      setError('This browser could not check the summary, so nothing was asked. Try another browser.');
+      return;
+    }
+    const answer = await call<{ summary?: AutomaticSummary; code?: string; details?: { summary?: AutomaticSummary } }>('/api/wallet/schedules/automatic/allowance', {
       method: 'POST',
       key: newKey('allowance'),
-      body: { perPaymentUsdc: perPayment, dailyUsdc: daily, monthlyUsdc: monthly, expiresInDays: days },
+      body: { perPaymentUsdc: perPayment, dailyUsdc: daily, monthlyUsdc: monthly, expiresInDays: days, summaryDigest: digest },
     });
     setBusy(false);
+    if (answer.status === 409 && answer.body?.code === 'summary_changed' && answer.body.details?.summary) {
+      setFromServer(answer.body.details.summary);
+      setError(null);
+      onAsked();
+      return;
+    }
     if (!answer.ok) setError(errorText(answer, 'The request was not made. Nothing changed.'));
     else {
       setAsked(answer.body?.summary ?? summary);
@@ -241,13 +260,24 @@ function AllowanceModal({ open, onClose, onAsked, status, schedules }: { open: b
           <Link href="/dashboard/approve" className="inline-flex h-11 items-center rounded-xl bg-[#0d6370] px-5 text-sm font-bold text-white hover:bg-[#073d49]">Open approvals</Link>
         </div>
       ) : step === 'review' ? (
-        <Review summary={summary} error={error} busy={busy} onBack={() => setStep('form')} onAsk={() => void ask()} />
+        <Review
+          summary={summary}
+          changed={fromServer !== null}
+          error={error}
+          busy={busy}
+          onBack={() => {
+            setFromServer(null);
+            setStep('form');
+          }}
+          onAsk={() => void ask()}
+        />
       ) : (
         <form
           onSubmit={(e) => {
             e.preventDefault();
             if (problems.length === 0) {
               setNow(Date.now());
+              setFromServer(null);
               setStep('review');
             }
           }}
@@ -282,34 +312,67 @@ function AllowanceModal({ open, onClose, onAsked, status, schedules }: { open: b
 }
 
 /**
- * Check this before your owners sign: the summary in plain words, then the exact
- * payments, the limits, the recipients, the end date, the warning window and how
- * to stop. Every figure is read from the summary, which is built from the values
- * the request is made from.
+ * Check this before your owners sign: the summary in plain words, then how often
+ * each schedule runs, the exact payments with what the limits would refuse, the
+ * limits, the recipients, the end date, the warning window and how to stop. Every
+ * figure is read from the summary, which is built from the values the request is
+ * made from; the server checks the owner's confirmation against its own copy,
+ * and when it differs the owner is shown the new one here and asked again. Every
+ * date is a UTC date.
  */
-function Review({ summary, error, busy, onBack, onAsk }: { summary: AutomaticSummary; error: string | null; busy: boolean; onBack: () => void; onAsk: () => void }) {
+function Review({ summary, changed, error, busy, onBack, onAsk }: { summary: AutomaticSummary; changed: boolean; error: string | null; busy: boolean; onBack: () => void; onAsk: () => void }) {
   return (
     <div className="space-y-4">
+      {changed ? (
+        <div role="status">
+          <Note tone="warn">Something changed while you were reading, so nothing was asked. This is the summary as it is now. Read it, then ask your owners again.</Note>
+        </div>
+      ) : null}
       <div>
         <h3 className="font-mono text-[12px] font-bold uppercase tracking-[0.12em] text-[#145d6a]">Check this before your owners sign</h3>
         <p className="mt-2 text-base font-bold leading-7 text-[#0c3e48]">{summary.headline}</p>
       </div>
+
+      {summary.schedules.length > 0 ? (
+        <section aria-label="How often they run" className="space-y-2">
+          <h4 className="text-[13px] font-semibold text-[#1F4452]">How often they run</h4>
+          <ul className="divide-y divide-[#326273]/10 rounded-xl border border-[#326273]/12 bg-white">
+            {summary.schedules.map((x) => (
+              <li key={x.name} className="px-3 py-2.5">
+                <p className="text-sm font-semibold text-[#0c3e48]">{x.name}</p>
+                <p className="text-[13px] leading-5 text-[#326273]">
+                  {x.cadenceText}. {x.runs === 1 ? '1 run' : `${x.runs} runs`} before the allowance ends, {x.paymentCount === 1 ? '1 payment' : `${x.paymentCount} payments`} each run, {usdc(x.runTotalMinor)} a run with Splash&rsquo;s fee.
+                </p>
+                {x.notes.map((n) => (
+                  <Caution key={n}>{n}</Caution>
+                ))}
+              </li>
+            ))}
+          </ul>
+          <p className="text-[13px] leading-5 text-[#326273]">{MONTHLY_CAVEAT}</p>
+        </section>
+      ) : null}
 
       {summary.payments.length > 0 ? (
         <section aria-label="The payments" className="space-y-2">
           <h4 className="text-[13px] font-semibold text-[#1F4452]">The payments, exactly as you sent them</h4>
           <ul className="divide-y divide-[#326273]/10 rounded-xl border border-[#326273]/12 bg-white">
             {summary.payments.map((p) => (
-              <li key={`${p.schedule ?? ''}-${p.position}`} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-3 py-2.5">
-                <span className="min-w-0 text-sm font-semibold text-[#0c3e48]">
-                  {p.name}
-                  <span className="ml-2 font-mono text-[12px] font-normal text-[#326273]">{p.masked}</span>
-                  {p.schedule ? <span className="block text-[12px] font-normal text-[#326273]">{p.schedule}</span> : null}
-                </span>
-                <span className="text-sm font-bold tabular-nums text-[#0c3e48]">
-                  {usdc(p.amountMinor)}
-                  {p.reference ? <span className="ml-2 font-mono text-[12px] font-normal text-[#326273]">{p.reference}</span> : null}
-                </span>
+              <li key={`${p.schedule ?? ''}-${p.position}`} className="px-3 py-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+                  <span className="min-w-0 text-sm font-semibold text-[#0c3e48]">
+                    {p.name}
+                    <span className="ml-2 font-mono text-[12px] font-normal text-[#326273]">{p.masked}</span>
+                    {p.schedule ? <span className="block text-[12px] font-normal text-[#326273]">{p.schedule}</span> : null}
+                  </span>
+                  <span className="text-sm font-bold tabular-nums text-[#0c3e48]">
+                    {usdc(p.amountMinor)}
+                    {p.reference ? <span className="ml-2 font-mono text-[12px] font-normal text-[#326273]">{p.reference}</span> : null}
+                  </span>
+                </div>
+                {p.notes.map((n) => (
+                  <Caution key={n}>{n}</Caution>
+                ))}
               </li>
             ))}
           </ul>
@@ -322,7 +385,8 @@ function Review({ summary, error, busy, onBack, onAsk }: { summary: AutomaticSum
         <Figure label="Most in a month" value={usdc(summary.monthlyMinor)} note="Held by the network itself." />
         <div className="dash-block p-3">
           <dt className="font-mono text-[12px] font-bold uppercase tracking-[0.12em] text-[#145d6a]">The allowance ends</dt>
-          <dd className="mt-1 text-sm font-bold text-[#0c3e48]"><LocalTime value={summary.endsAtMs} format="date" /></dd>
+          <dd className="mt-1 text-sm font-bold text-[#0c3e48]">{summary.endsOnText}</dd>
+          <dd className="text-[13px] leading-5 text-[#326273]">At the end of that day.</dd>
         </div>
         <div className="dash-block p-3 sm:col-span-2">
           <dt className="font-mono text-[12px] font-bold uppercase tracking-[0.12em] text-[#145d6a]">Recipients</dt>
@@ -344,6 +408,16 @@ function Review({ summary, error, busy, onBack, onAsk }: { summary: AutomaticSum
         <PrimaryButton type="button" onClick={onAsk} disabled={busy}>{busy ? 'Asking…' : 'Ask my owners to sign'}</PrimaryButton>
       </div>
     </div>
+  );
+}
+
+/** What the limits would refuse, in words, with an icon: the meaning is never in a colour alone. */
+function Caution({ children }: { children: string }) {
+  return (
+    <p className="mt-1.5 flex items-start gap-1.5 text-[13px] font-medium leading-5 text-[#1F4452]">
+      <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--warn)]" aria-hidden="true" />
+      <span>{children}</span>
+    </p>
   );
 }
 

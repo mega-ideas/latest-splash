@@ -25,7 +25,6 @@ import { teamManager } from '@/lib/server/team-admin';
 import { batchDepsFor, type WalletRouteLike } from '@/lib/server/wallet-transfers-deps';
 import { liveWalletContext } from '@/lib/server/wallet-deps';
 import { walletRoute, type WalletRoute } from '@/lib/server/wallet-route';
-import type { DrizzleDb } from '@/lib/server/wallet-signing-store';
 
 export { ownersNotifier };
 
