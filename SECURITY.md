@@ -988,9 +988,9 @@ The business's owners run their team, not Splash support
   with several connections. A person who belongs to
   another business, has no account or has not verified their email cannot be
   added, and the answer is the same for all three, so the form tells no one who
-  has an account. There is no invitation for the person to accept: an owner adds
-  an account that has no business by email, as support always could (open
-  question for the product owner).
+  has an account. The owner chooses how to add someone: directly (no step on the
+  person's side, so the owner confirms they have the right person and the route
+  refuses without it) or by invitation, below.
 - **Add funds and Withdraw are granted.** Owners have both; a staff member or
   approver only with an owner's grant, kind by kind; a viewer never. Read from
   the database on each request for the session's person and business, and a
@@ -1018,6 +1018,38 @@ The business's owners run their team, not Splash support
   `wallet_authority_events` (seven new actions, migration 0066), with the actor,
   the person and the old and new role. Splash support's grant is a line under
   `operator:<email>`. A retry writes nothing; two at once make one change.
+- **Invitations (1 Nov).** An owner, or the Finance lead for a role below owner,
+  invites an email; the person sees it after signing in and accepts or
+  declines, it ends 7 days after it was sent (to the millisecond), and its
+  sender can withdraw it. **There is no token, link or code**: the signed-in
+  account's own verified email finds the invitation, so there is nothing to put
+  in a URL or log or to replay (`team_invitations` has no such column, and a
+  test fails if the invitation code reads a token or a query string). The id is
+  random and grants nothing: for anyone else it reads as "not found". An
+  unverified account is shown nothing. Any email may be invited and the sender
+  hears the same whatever the address is, so inviting reveals no account or
+  business; a person already on a business is told plainly, naming none, and
+  can only decline. Accepting twice, declining twice and sending twice change
+  nothing and write one line; two businesses accepting at once leave one
+  membership. An invitation whose sender no longer manages the team is closed
+  on the trail, not honoured. The trail keeps a masked address only, because a
+  line can never be deleted. Routes: the business and sender are the session's
+  (`teamRoute`), the answering routes use a gate that needs a signed-in account
+  and nothing else (`inviteeRoute`, refusing with no database), every change is
+  rate limited, and `tests/team-routes.test.mjs` fails if anything else calls
+  the new functions. Nothing is emailed.
+- **Leaving (1 Nov).** Any member can ask to leave; nothing changes until an
+  owner approves (or the Finance lead, for someone below owner who is not in
+  charge and holds neither Add funds nor Withdraw). Nobody decides their own
+  request, so an owner's leaving needs another owner, and the only owner cannot
+  ask. Approving ends access, clears every hold and records the person's
+  addresses in one transaction under the owner lock; then, when an owner
+  approved, the route opens the existing spending-rules revoke
+  (`revokeOrphanedRules`), which the wallet's owners sign on their own devices.
+  Until they sign, the rule still exists on the chain, as after any removal; if
+  it cannot be opened the rule shows as a former member's and the same button
+  takes it back. The code signs nothing. A declined request tells the person so
+  in words. Every step is a trail line (nine new actions, migration 0073).
 
 ## v2 Phase 3 — Staff payments inside a rule — 2026-11-01
 

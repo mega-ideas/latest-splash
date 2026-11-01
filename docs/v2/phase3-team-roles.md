@@ -20,7 +20,8 @@ Sky's decisions (31 Oct):
 | What each person is offered, and the words | `lib/team/view.ts` |
 | Settings → Team | `components/settings/TeamCard.tsx`, `components/team/*` |
 | Add funds and Withdraw checks | `requireFundsAccess` in `lib/server/wallet-route.ts` |
-| Tables | `wallet_finance_leads`, `wallet_member_access` (migration 0066) |
+| Invitations, and leaving | `lib/server/team-invitations.ts`, `lib/server/team-leave.ts`, `lib/server/team-leave-rules.ts` (migration 0073) |
+| Tables | `wallet_finance_leads`, `wallet_member_access` (migration 0066); `team_invitations`, `team_leave_requests` (migration 0073) |
 | Trail | `wallet_authority_events` (append-only) |
 
 ## Roles
@@ -42,7 +43,13 @@ refused for them without anyone remembering to say so.
 
 | | Owner | Finance lead | Everyone else |
 |---|---|---|---|
-| Add a person (viewer, staff, approver) | yes | yes | no |
+| Add a person directly (viewer, staff, approver) | yes | yes | no |
+| Send an invitation (viewer, staff, approver) | yes | yes | no |
+| Send an invitation for an owner | yes | no | no |
+| Withdraw an invitation | yes (any) | yes, below owner | no |
+| Decide a request to leave: a viewer, staff member or approver | yes | yes, unless that person is in charge of sign-offs or holds Add funds or Withdraw | no |
+| Decide a request to leave: an owner | yes, another owner's (never their own) | no | no |
+| Ask to leave | any member (the only owner cannot) | yes, and an owner decides it | any member |
 | Add an owner, or move someone to owner | yes | no | no |
 | Change or remove a viewer, staff or approver | yes | yes, unless that person is in charge of sign-offs or holds Add funds or Withdraw | no |
 | Change or remove an owner | yes (not themselves) | no | no |
@@ -72,14 +79,104 @@ someone who is in charge or holds Add funds or Withdraw (403 `owner_only`); an
 owner takes that back first, or does the change. Settings does not offer Manage
 on such a person to the lead and says an owner changes them.
 
-An owner must name a person who already has a **verified Splash account** and
-belongs to no business. A missing account, an unverified one and one that
-belongs to another business all get the same answer, so the form cannot be used
-to find out who has an account or where. There is **no invitation for that
-person to accept**: they are added, as Splash support always could add them,
-and until a product decision says otherwise the only way out is an owner
-removing them. An accept step, or a way for a member to leave, is open for the
-product owner.
+## Adding a person: invite, or add directly
+
+Sky's decision of 1 Nov: an added team member either accepts an invitation or
+is added directly, **at the owner's choice**. Settings, Team, Add a person
+offers the two in plain words, and invitation is the one selected first.
+
+**Add directly** keeps what it always was. The owner names a person who already
+has a **verified Splash account** and belongs to no business. A missing account,
+an unverified one and one that belongs to another business all get the same
+answer, so the form cannot be used to find out who has an account or where.
+There is no step on the person's side, so the owner ticks "I have checked that
+this is the right person" first, and `POST /api/team` refuses without
+`confirmed: true` (`confirm_person`, before anything is written).
+
+**Send an invitation** (`POST /api/team/invitations`):
+
+- Any email may be invited. An address with no account yet simply waits until
+  that email signs up and **verifies**; the sender hears the same thing whether
+  the address has an account, has none, is unverified or belongs to another
+  business (tested), so this tells nobody who has an account.
+- The person sees it after signing in, found by the signed-in account's own
+  **verified** email (`GET /api/team/invitations/mine`, a banner on every
+  dashboard page). An unverified account is shown nothing. They **accept**
+  (joins with the invited role; `grantedBy` is the sender) or **decline**
+  (final).
+- It **ends 7 days** after it was sent, to the millisecond. The first look after
+  that marks it ended and writes one trail line. The owner (or the Finance lead
+  for a role below owner) can **withdraw** it any time before an answer.
+- One open invitation per business and email. The same again is the same
+  invitation (no second line); a different role is refused until the first is
+  withdrawn. At most 25 open invitations per business.
+- It is honoured only while the person who sent it still manages the team and
+  the role is within their reach. If the sender was removed, or the Finance
+  lead role was taken back, the invitation is closed on the trail when it is
+  next touched (`inviter_no_longer_manages`) and cannot be accepted.
+- **A person already on another business is told plainly**: "You already belong
+  to a business, and a person can belong to one business at a time. You cannot
+  accept this invitation. You can decline it." Nothing about that business is in
+  the answer (tested), and nothing changes.
+- **No token.** There is no link, code or secret: the signed-in person's own
+  verified email finds the invitation. So there is nothing to put in a URL or a
+  log, to forward, or to replay, and `team_invitations` has no such column
+  (tested). The invitation id is random (`inv_` and a UUID) but grants nothing:
+  for anyone else it reads as "not found", exactly like an id that does not
+  exist. Accepting twice is "already joined" (one membership, one trail line),
+  and accepting or declining after any other outcome is refused
+  (`no_longer_open`, or `expired`).
+- Two businesses inviting the same person: whichever is accepted first wins and
+  the other is refused with the plain sentence above; a race between two
+  accepts rolls back the later one.
+
+Nothing is emailed: the invitation is waiting when the person signs in. If Sky
+wants a notification email as well, it goes through the Resend adapter (with a
+sandbox implementation, failing closed in production without a key), and the
+email would carry no link that grants anything.
+
+## Leaving the team
+
+A member **cannot leave without an owner's approval.** From Settings, Team,
+Leave this business, any member (every role) can **ask to leave**
+(`POST /api/team/leave`).
+
+- **Nothing changes when they ask.** They keep their access, their spending
+  rule and their place in charge until an owner approves. Asking twice is the
+  same request. They can withdraw it.
+- **The last owner cannot leave** (`last_owner`, in words, and the page says why
+  instead of offering the button). **An owner leaving needs another owner**:
+  nobody decides their own request (`own_request`).
+- **Who decides** (one rule, `leaveDecisionRefusal` in `lib/team/view.ts`, used
+  by the server and the page): an owner, for anyone but themselves; the **Finance
+  lead** only for a viewer, staff member or approver who is **not in charge of
+  sign-offs and holds neither Add funds nor Withdraw**. The lead cannot approve
+  (or decline) a leave request for anyone in charge, nor for an owner, and not
+  their own. A viewer, staff member or ordinary approver decides nothing.
+- **Approving** runs in one transaction under the owner lock: the membership
+  ends (access is gone at once), the place in charge, Finance lead role, Add
+  funds and Withdraw access and sign-offs end (`offboardMember`), and the
+  person's passkey addresses are recorded in `wallet_offboarded_spenders`.
+- **The rule is taken back through the spending-rules revoke path.** After the
+  transaction commits, when an **owner** approved, the route calls
+  `revokeOrphanedRules` (the same call as Settings, Spending rules, take back
+  the rules of former members): one transaction that revokes the person's
+  allowances and removes them from the policy, **signed by the wallet's owners
+  on their own devices**. The answer says which of three things happened: the
+  request is open, there was nothing to take back, or it could not be opened (no
+  wallet, the chain unreadable). In the last case nothing is lost: the rule shows
+  in Settings as belonging to a former member and the same button takes it back.
+  Until the owners sign, the rule still exists on the chain, as it does after
+  any removal. When the **Finance lead** approves, the rule is left for an owner
+  (the lead cannot take a rule back) and the answer says so.
+- **Declining** keeps the person on the team and says so in words on their own
+  page: "<name> declined your request to leave. You are still on the team, with
+  the same access as before. You can ask again."
+- If the person is removed another way while a request is open, it is closed
+  (`closed`) and cannot be approved later. A role change is not a removal; the
+  request stands.
+- A repeat of any step (ask, approve, decline, withdraw) changes nothing and
+  writes no second line. Another business's request reads as absent.
 
 ## Add funds and Withdraw
 
@@ -135,7 +232,16 @@ Every grant, change and removal is a line in `wallet_authority_events`, which a
 trigger keeps append-only: `member_added`, `member_role_changed` (with the old
 and new role), `member_removed`, `finance_lead_appointed`,
 `finance_lead_revoked`, `member_access_granted`, `member_access_revoked`, plus
-the person-in-charge and offboarding lines that already existed. A line names
+the person-in-charge and offboarding lines that already existed, and (migration
+0073) one line for every invitation and leave step: `team_invitation_sent`,
+`team_invitation_accepted` (by the person; `member_added` follows under the
+sender), `team_invitation_declined`, `team_invitation_withdrawn` (also when the
+sender stopped managing the team), `team_invitation_expired` (actor
+`system:invitation_expiry`), `leave_requested`, `leave_withdrawn`,
+`leave_approved` (followed by `member_removed` with reason `left`, which the
+page folds into the one sentence) and `leave_declined`. An invitation line keeps
+a **masked** address (`f***@example.com`), because a trail line can never be
+deleted; the full address lives only in `team_invitations`. A line names
 the actor, the person, and (for a role or access) what. Splash support's grant in
 the staff console is a line too, under `operator:<email>`. A retry writes none:
 adding a person twice, the same role again, granting what is granted and taking
@@ -170,14 +276,17 @@ chain has no concept of a Finance lead and **none was added**.
 
 Owners see everyone with their email, role, whether they are the Finance lead or
 in charge, what they may do with Add funds and Withdraw, and their spending
-rule. **Manage** opens one person: role (saved by its own button), Add funds and
+rule, then Add a person (the two choices), Open invitations (with Withdraw) and
+Requests to leave (Approve asks first and says what ends; Decline), and at the
+bottom Leave this business. **Manage** opens one person: role (saved by its own button), Add funds and
 Withdraw switches (owners only, saved as they are switched; they stay focusable
 while saving, and giving Withdraw asks first), Make or take back
 Finance lead (owners only), and Remove, which asks first and says what ends with
-it. **Add a person** takes an email and a role. The Finance lead sees the same
+it. **Add a person** takes the choice, an email and a role. The Finance lead sees the same
 list with only what they may do, and none of the owner-only controls. Someone
 who manages nothing sees who they are and whether they can add funds and
-withdraw, and that their owners manage the team.
+withdraw, that their owners manage the team, and Leave this business (ask to
+leave, where the request stands, or why they cannot ask).
 
 The team is managed without a business wallet (it needs only the database), so
 an owner can add people before the wallet exists. The person in charge, rules
@@ -189,11 +298,20 @@ and signers still need the wallet.
 refusal, cross-tenant, replay, concurrency, the trail),
 `tests/team-routes.test.mjs` (every route's gate and wiring, and that nothing
 else changes the team), `tests/team-view.test.mjs` (what is offered and the
-words), `tests/team-finance-lead-wallet.test.mjs` (the chain side).
+words), `tests/team-finance-lead-wallet.test.mjs` (the chain side),
+`tests/team-invitations.test.mjs` (send, replay, concurrency, the wait for an
+account, one answer for every address, another business named nowhere, accept,
+decline, withdraw, the 7 days, cross-tenant, no token, the trail),
+`tests/team-leave.test.mjs` (ask, last owner, another owner, every hold cleared,
+addresses recorded, the Finance lead's limits, decline in words, replay,
+concurrency, cross-tenant), `tests/team-invite-leave-view.test.mjs` (the one
+decision rule, the words, the copy rules).
 
 ## What needs Sebastian (Move)
 
-Nothing in this change touches `move/`. If Sky wants the **Finance lead to be
+Nothing in this change touches `move/`. Invitations and leave requests are
+Splash's database only, and taking a leaver's rule back uses the existing
+spending-rules revoke (a quorum request) with no new Move function. If Sky wants the **Finance lead to be
 known on chain** (for example a signer tier that can only add approvers, or a
 threshold rule that counts the Finance lead differently from an owner), that is
 a Move change and Sebastian approves every file under `move/`. Today the role is

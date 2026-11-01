@@ -34,7 +34,7 @@ export function ruleRevokeNote(outcome: RuleRevoke): string {
     case 'by_owner':
       return 'If they held a spending rule, an owner takes it back under Spending rules in Settings, where it shows as belonging to a former member.';
     default:
-      return 'If they held a spending rule, it could not be taken back just now. Take it back under Spending rules in Settings, where it shows as belonging to a former member.';
+      return 'If they held a spending rule, take it back under Spending rules in Settings, where it shows as belonging to a former member.';
   }
 }
 

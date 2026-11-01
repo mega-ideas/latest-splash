@@ -418,7 +418,9 @@ export async function listTeamActivity(db: DrizzleDb, orgId: string, limit = 50)
     for (const u of (await db.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, ids))) as Array<{ id: string; name: string }>) names.set(u.id, u.name);
   }
   const nameOf = (id: string | null): string | null => (id === null ? null : id.startsWith('operator:') ? 'Splash support' : id.startsWith('system:') ? 'Splash' : names.get(id) ?? 'A former member');
-  return rows
+  // A person who left has two lines (their request approved, and the removal it caused); the sentence for the first says both.
+  const shown = (rows as Array<{ action: string; detail: unknown }>).filter((r) => !(r.action === 'member_removed' && (r.detail as { reason?: unknown } | null)?.reason === 'left'));
+  return (shown as typeof rows)
     .map((r: { id: string; action: string; detail: unknown; createdAt: Date; actorUserId: string; subjectUserId: string | null }) => {
       const actorName = nameOf(r.actorUserId) ?? 'Someone';
       const subjectName = nameOf(r.subjectUserId);

@@ -6,7 +6,7 @@ import LocalTime from '@/components/LocalTime';
 import { call, errorText } from '@/components/transfer/api';
 import { PrimaryButton, QuietButton } from '@/components/transfer/ui';
 import { Note, Pill } from '@/components/wallet/parts';
-import { ROLE_NAME, type LeaveRequestWire } from '@/lib/team/view';
+import { ROLE_NAME, type LeaveRequestWire, type Manager } from '@/lib/team/view';
 
 /**
  * Requests to leave, for the owners and the Finance lead. Nothing has changed
@@ -14,7 +14,7 @@ import { ROLE_NAME, type LeaveRequestWire } from '@/lib/team/view';
  * buttons are offered only where the server would accept them (canDecide comes
  * from the same rule), and approving asks first because it ends their access at once.
  */
-export default function LeaveRequests({ requests, onChanged }: { requests: LeaveRequestWire[]; onChanged: () => void }) {
+export default function LeaveRequests({ requests, manager, onChanged }: { requests: LeaveRequestWire[]; manager: Manager; onChanged: () => void }) {
   const [asking, setAsking] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -47,18 +47,17 @@ export default function LeaveRequests({ requests, onChanged }: { requests: Leave
       <ul className="space-y-2" aria-label="Requests to leave">
         {requests.map((r) => (
           <li key={r.id} className="space-y-2 rounded-xl bg-[#F6F0ED] px-3 py-2.5 text-sm text-[#1F4452]">
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-              <span className="min-w-0 flex-1 basis-48">
-                <span className="block truncate font-semibold">{r.name}</span>
-                <span className="block break-all text-[13px] text-[#326273]">{r.email}. Asked <LocalTime value={r.createdAt} format="datetime" />.</span>
-              </span>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span className="min-w-0 flex-1 basis-40 truncate font-semibold">{r.name}</span>
               <Pill tone="ok">{ROLE_NAME[r.role]}</Pill>
             </div>
+            <p className="break-all text-[13px] leading-5 text-[#326273]">{r.email}</p>
+            <p className="text-[13px] leading-5 text-[#326273]">Asked <LocalTime value={r.createdAt} format="datetime" /></p>
             {r.canDecide ? (
               asking === r.id ? (
                 <div role="group" aria-label={`Approve ${r.name}’s request`} className="space-y-2">
                   <p className="text-[13px] leading-5 text-[#1F4452]">
-                    Approve? {r.name} loses access to this business at once. Their place in charge, the Finance lead role and any Add funds or Withdraw access end, and a spending rule they hold is taken back (the wallet’s owners sign that).
+                    Approve? {r.name} loses access to this business at once. Their place in charge, the Finance lead role and any Add funds or Withdraw access end, {manager === 'owner' ? 'and a spending rule they hold is taken back (the wallet’s owners sign that).' : 'and a spending rule they hold stays until an owner takes it back.'}
                   </p>
                   <div className="flex flex-wrap gap-2">
                     <PrimaryButton type="button" autoFocus disabled={busy !== null} onClick={() => void decide(r, 'approve')}>

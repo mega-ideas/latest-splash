@@ -134,7 +134,7 @@ export default function TeamCard({
 
         <OpenInvitations invitations={invitations} onChanged={refresh} />
 
-        <LeaveRequests requests={leaveRequests} onChanged={refresh} />
+        <LeaveRequests requests={leaveRequests} manager={manager} onChanged={refresh} />
 
         <FinanceLeadNote leadName={lead?.name ?? null} />
 
