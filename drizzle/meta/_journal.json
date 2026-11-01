@@ -519,6 +519,13 @@
       "when": 1794873600000,
       "tag": "0073_team_invitations_and_leaving",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1794960000000,
+      "tag": "0074_one_membership_per_person",
+      "breakpoints": true
     }
   ]
 }

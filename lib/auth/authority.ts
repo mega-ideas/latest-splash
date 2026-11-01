@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import type { PgDatabase } from 'drizzle-orm/pg-core';
 
 import { memberships, users } from '../db/schema.ts';
@@ -89,6 +89,8 @@ export async function resolveAuthorityFromDb(db: DrizzleDb, email: string): Prom
     .from(users)
     .innerJoin(memberships, eq(memberships.userId, users.id))
     .where(eq(users.email, normalized))
+    // A person belongs to one business (memberships_user_unique); the order keeps a legacy second row from ever choosing at random.
+    .orderBy(asc(memberships.createdAt), asc(memberships.id))
     .limit(1);
 
   if (rows.length === 0) {

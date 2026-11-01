@@ -39,7 +39,7 @@ import { and, asc, eq, lte, sql } from 'drizzle-orm';
 import { memberships, organizations, teamInvitations, users } from '../db/schema.ts';
 import { isMembershipRole, type MembershipRole } from '../membership-roles.ts';
 import { INVITATION_DAYS, ON_A_BUSINESS, maskEmail, type InvitationWire, type MyInvitationWire } from '../team/view.ts';
-import { fail, inTransaction, teamManager, type TeamFailure } from './team-admin.ts';
+import { fail, inTransaction, lockPerson, teamManager, type TeamFailure } from './team-admin.ts';
 import { memberRole, recordAuthorityEvent } from './wallet-authority.ts';
 import type { DrizzleDb } from './wallet-signing-store.ts';
 
@@ -282,6 +282,8 @@ export function acceptInvitation(
   input: { userId: string; invitationId: string; now?: Clock },
 ): Promise<{ ok: true; changed: boolean; orgId: string; role: MembershipRole } | TeamFailure> {
   return atomic(db, async (tx) => {
+    // One person, one accept at a time: a second accept (another invitation, another tab) waits here and then reads this one's row.
+    await lockPerson(tx, input.userId);
     const found = await mineOrFailure(tx, input.userId, input.invitationId);
     if (isFailure(found)) return found;
     const inv = found.row;
@@ -318,11 +320,14 @@ export function acceptInvitation(
       .where(and(eq(teamInvitations.id, inv.id), eq(teamInvitations.status, 'pending')))
       .returning({ id: teamInvitations.id });
     if (closed.length === 0) return NO_LONGER_OPEN();
-    await tx
+    const inserted = await tx
       .insert(memberships)
       .values({ id: `mem_${input.userId}_${inv.orgId}`, userId: input.userId, orgId: inv.orgId, role: inv.role as MembershipRole, grantedBy: inv.invitedBy })
-      .onConflictDoNothing();
-    // Two businesses' invitations accepted at the same moment: the later one gives way and nothing of it is kept.
+      .onConflictDoNothing()
+      .returning({ id: memberships.id });
+    // The unique index on memberships(user_id) turned the insert away: another business got there first. Nothing of this accept is kept.
+    if (inserted.length === 0) throw new Rollback(fail(409, 'already_on_a_business', ON_A_BUSINESS));
+    // And if a legacy second row somehow exists, the same answer.
     const now2 = (await tx.select({ orgId: memberships.orgId }).from(memberships).where(eq(memberships.userId, input.userId))) as Array<{ orgId: string }>;
     if (now2.some((m) => m.orgId !== inv.orgId)) throw new Rollback(fail(409, 'already_on_a_business', ON_A_BUSINESS));
 

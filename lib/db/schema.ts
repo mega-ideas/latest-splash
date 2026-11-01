@@ -216,7 +216,8 @@ export const memberships = pgTable('memberships', {
 }, (table) => [
   uniqueIndex('memberships_user_org_unique').on(table.userId, table.orgId),
   index('memberships_org_idx').on(table.orgId),
-  index('memberships_user_idx').on(table.userId),
+  // A person belongs to ONE business (migration 0074): the database refuses a second row.
+  uniqueIndex('memberships_user_unique').on(table.userId),
 ]);
 
 /**

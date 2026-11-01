@@ -88,7 +88,7 @@ test('the database refuses a second membership for the same person, whatever the
   const { client, db } = await seeded();
   await assert.rejects(
     db.insert(schema.memberships).values({ id: 'm-second', userId: 'u-n-maker', orgId: 'acme', role: 'viewer' }),
-    /unique|duplicate/i,
+    (error) => /memberships_user_unique|duplicate key/i.test(String(error?.cause?.message ?? error?.message)),
   );
   assert.equal((await db.select().from(schema.memberships).where(eq(schema.memberships.userId, 'u-n-maker'))).length, 1);
   // A different person in the same business is fine.

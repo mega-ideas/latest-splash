@@ -91,6 +91,21 @@ export async function lockOwners(tx: DrizzleDb, orgId: string): Promise<string[]
   return rows.map((r: { userId: string }) => r.userId);
 }
 
+/**
+ * Serialise everything that decides which business a person belongs to. Takes
+ * a row lock on the person (FOR NO KEY UPDATE: it blocks another such lock, not
+ * the foreign-key checks of ordinary inserts) until the transaction ends. Two
+ * requests that would put the same person on two businesses wait here in turn,
+ * and the second reads the first's committed row. Under READ COMMITTED a plain
+ * "check, then insert" cannot do that, and the unique index on
+ * memberships(user_id) is the backstop if a path forgets. False when there is
+ * no such person.
+ */
+export async function lockPerson(tx: DrizzleDb, userId: string): Promise<boolean> {
+  const rows = await tx.select({ id: users.id }).from(users).where(eq(users.id, userId)).for('no key update');
+  return rows.length > 0;
+}
+
 const LAST_OWNER = () => fail(409, 'last_owner', 'A business always keeps an owner. Make someone else an owner first.');
 
 /**
@@ -175,6 +190,7 @@ export function addTeamMember(
 
     const [account] = await tx.select({ id: users.id, verified: users.emailVerifiedAt }).from(users).where(eq(users.email, email)).limit(1);
     if (!account || !account.verified) return cannot;
+    await lockPerson(tx, account.id);
     const held = await tx.select({ orgId: memberships.orgId }).from(memberships).where(eq(memberships.userId, account.id));
     if (held.some((m: { orgId: string }) => m.orgId === input.orgId)) return fail(409, 'already_on_team', 'That person is already on your team.');
     if (held.length > 0) return cannot;
@@ -186,7 +202,10 @@ export function addTeamMember(
       if (error instanceof GrantRefusedError) return cannot;
       throw error;
     }
-    if (!created) return fail(409, 'already_on_team', 'That person is already on your team.');
+    if (!created) {
+      // The unique index (or a concurrent add of the same person here) turned the insert away: which of the two is it?
+      return (await memberRole(tx, input.orgId, account.id)) !== null ? fail(409, 'already_on_team', 'That person is already on your team.') : cannot;
+    }
     // Two businesses adding the same person at once: the later one gives way and nothing is kept.
     const now = await tx.select({ orgId: memberships.orgId }).from(memberships).where(eq(memberships.userId, account.id));
     if (now.some((m: { orgId: string }) => m.orgId !== input.orgId)) {
